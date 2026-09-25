@@ -1,0 +1,316 @@
+/* ref chips (components/RefChip). A standalone ref renders through the shared accent Chip (components.css). Here: the
+   inline citation, its states, the links toggle, the hover label that names the evidence, and a table's cited cell. */
+.refchip.refchip-value {
+  display: inline;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  font-variant-numeric: tabular-nums;
+  white-space: normal;
+  vertical-align: baseline;
+  text-decoration-line: underline;
+  text-decoration-style: solid;
+  text-decoration-thickness: 1px;
+  text-decoration-color: color-mix(in oklab, var(--accent) 45%, transparent);
+  text-underline-offset: 3px;
+  cursor: pointer;
+  transition: var(--transition-color), text-decoration-color var(--dur-fast) var(--ease-out);
+}
+.refchip.refchip-value:hover,
+.refchip.refchip-value:focus-visible {
+  color: var(--text-accent);
+  text-decoration-color: var(--accent);
+  outline: none;
+}
+/* the links toggle is off (lib/links): a citation chip goes, a cited number stays as plain text, and the space before
+   a bare chip (`refchip-gap`) goes with it */
+:root[data-links='off'] .refchip-citation:not(.refchip-value),
+:root[data-links='off'] .refchip-gap {
+  display: none;
+}
+:root[data-links='off'] .refchip-citation.refchip-value,
+:root[data-links='off'] .refchip-citation.refchip-value:hover {
+  color: inherit;
+  text-decoration-line: none;
+  cursor: text;
+}
+/* a ref as its target's glyph alone (a citation of a card, any citation inside a card), its name in the hover: a
+   square chip */
+.chip.refchip-icon {
+  justify-content: center;
+  min-width: var(--h-chip);
+  padding: 0 4px;
+}
+/* states: unable to verify, a dashed underline in the negative; not linked and unknown, dotted and quiet */
+.refchip.refchip-value.broken,
+.refchip.refchip-value.broken:hover {
+  color: inherit;
+  text-decoration-style: dashed;
+  text-decoration-color: var(--status-negative);
+}
+.refchip.refchip-value.refchip-quiet,
+.refchip.refchip-value.refchip-unresolved,
+.refchip.refchip-value.refchip-quiet:hover,
+.refchip.refchip-value.refchip-unresolved:hover {
+  color: inherit;
+  text-decoration-style: dotted;
+  text-decoration-color: var(--text-tertiary);
+}
+.refchip.refchip-value.refchip-unresolved {
+  cursor: default;
+}
+.refchip.refchip-quiet:not(.refchip-value),
+.refchip.refchip-quiet:not(.refchip-value):hover {
+  border: 1px dotted var(--text-tertiary);
+  color: var(--text-tertiary);
+  background: none;
+}
+.refchip.broken:not(.refchip-value),
+.refchip.broken:not(.refchip-value):hover {
+  border: 1px dashed var(--status-negative);
+  color: var(--status-negative);
+  background: none;
+}
+.refchip.refchip-unresolved:not(.refchip-value),
+.refchip.refchip-unresolved:not(.refchip-value):hover {
+  border-color: var(--border-hairline);
+  color: var(--text-tertiary);
+  background: none;
+  cursor: default;
+}
+/* a chip that arrived after its text fades in */
+.refchip-late {
+  animation: refchip-late-in var(--dur-base) var(--ease-out) both;
+}
+@keyframes refchip-late-in {
+  from {
+    opacity: 0.15;
+  }
+  to {
+    opacity: 1;
+  }
+}
+/* the preview: the chip that names the evidence, the value it stands behind, the excerpt or the cell's artifact
+   under a hairline. It arrives in 140 ms on opacity and transform. The .overlay material comes from base.css. */
+.refchip-pop {
+  z-index: var(--z-popover);
+  padding: 8px 10px 10px;
+  border-radius: var(--radius-card);
+  color: var(--text-primary);
+  font: var(--type-body-sm);
+  max-width: calc(100vw - 16px);
+  animation: refchip-pop-in var(--dur-fast) var(--ease-out);
+}
+/* a label already open when ⌘ goes live gives way to the pointer's highlight */
+body[data-cmd] .refchip-pop {
+  display: none;
+}
+@keyframes refchip-pop-in {
+  from {
+    opacity: 0;
+    transform: translateY(2px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.refchip-pop-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 20px;
+  min-width: 0;
+}
+/* the chip gives way before the value does: the number is what the reader hovered */
+.refchip-pop-chip {
+  flex: 0 1 auto;
+  min-width: 0;
+}
+.refchip-pop-value {
+  flex: none;
+  max-width: 50%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font: var(--type-mono);
+  color: var(--text-secondary);
+}
+.refchip-pop-body {
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid var(--border-hairline);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 220px;
+  overflow: auto;
+  font: var(--type-body-sm);
+  color: var(--text-secondary);
+}
+.refchip-pop-body.mono {
+  font: var(--type-mono);
+}
+/* with no head over it (a standalone chip's label) the body starts at the top */
+.refchip-pop > .refchip-pop-body:first-child,
+.refchip-pop > .refchip-cell:first-child > .refchip-cell-title {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: 0;
+}
+.refchip-pop-error {
+  color: var(--status-negative);
+}
+.refchip-pop-detail {
+  margin-top: 2px;
+  font: var(--type-mono-sm);
+  color: var(--text-tertiary);
+}
+.refchip-pop-note {
+  margin-top: 4px;
+  font: var(--type-body-sm);
+  color: var(--text-tertiary);
+}
+.refchip-pop-cell {
+  max-height: calc(100vh - 16px);
+  overflow: auto;
+}
+.refchip-cell-title {
+  margin-top: 6px;
+  font: var(--type-question);
+  color: var(--text-primary);
+  overflow-wrap: anywhere;
+}
+.refchip-cell-artifact {
+  position: relative;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border-hairline);
+}
+.refchip-cell-artifact .outputs-text {
+  max-height: none;
+  overflow: visible;
+  padding: 0 2px;
+  font-size: var(--text-mono);
+}
+.refchip-cell-artifact .outputs-html {
+  max-height: none;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+.refchip-cell-clip {
+  max-height: 220px;
+  overflow: hidden;
+}
+
+/* where a view read the place: the view and its label, or the lines a view ref stands for (RefChip whereOf) */
+.refchip-pop-where {
+  padding: 6px 10px 0;
+  font: var(--type-mono-sm);
+  color: var(--text-tertiary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* a record's facts over its words (canvas.css .rec-facts), under the head or the view's label */
+.refchip-pop-facts {
+  margin-top: 6px;
+}
+.refchip-pop > .refchip-pop-facts:first-child {
+  margin-top: 0;
+}
+
+/* a table's cited cell (lib/tableCell): the selection's wash under a 1.5px accent edge, in the label's table and in
+   the card's table while its citation is hovered; after a click it shows for a while, then fades */
+.cite-cell,
+.outputs-html tbody td.cite-cell {
+  background: var(--accent-wash);
+  box-shadow: inset 0 0 0 1.5px var(--accent);
+  color: var(--text-primary);
+}
+.outputs-html tbody td.cite-cell-flash {
+  animation: cite-cell-flash 2.4s var(--ease-out) forwards;
+}
+@keyframes cite-cell-flash {
+  0%,
+  60% {
+    background: var(--accent-wash);
+    box-shadow: inset 0 0 0 1.5px var(--accent);
+  }
+  100% {
+    background: transparent;
+    box-shadow: inset 0 0 0 1.5px transparent;
+  }
+}
+/* the label for a table's cell: the table around it at a size that reads, the rows cut at the top or the bottom
+   fading out where the table goes on */
+.refchip-pop-table {
+  width: max-content;
+  min-width: 240px;
+}
+.refchip-table {
+  margin-top: 8px;
+  max-width: 100%;
+}
+.refchip-table .outputs-html {
+  display: block;
+  max-height: none;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+.refchip-table .outputs-html table {
+  font-size: 12.5px;
+}
+.refchip-table .outputs-html th,
+.refchip-table .outputs-html td {
+  max-width: 180px;
+  padding: 6px 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  background: transparent;
+}
+.refchip-table .outputs-html thead th {
+  position: static;
+  background: transparent;
+  font-size: 10.5px;
+}
+.refchip-table .outputs-html thead th.refchip-table-num {
+  text-align: right;
+}
+.refchip-table .outputs-html tbody th {
+  background: transparent;
+}
+.refchip-table.has-above tbody tr:first-child,
+.refchip-table.has-below tbody tr:last-child {
+  opacity: 0.55;
+}
+/* the label for a cited line of a printed output: the lines around it at the table label's size, as the output
+   prints them, the value (or the line) marked as a table's cell is */
+.refchip-lines {
+  margin-top: 8px;
+  max-width: 100%;
+  overflow-x: auto;
+  font-size: 12.5px;
+  line-height: 1.7;
+  color: var(--text-primary);
+  white-space: pre;
+}
+.refchip-lines .cite-cell {
+  border-radius: 2px;
+}
+/* a record of a file in the hover label, as the example card reads it (canvas/Quote), faded at the bottom past its
+   height */
+.refchip-pop-quote {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  overflow: hidden;
+}
+.refchip-pop-quote.is-clipped {
+  -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 28px), transparent);
+  mask-image: linear-gradient(to bottom, #000 calc(100% - 28px), transparent);
+}

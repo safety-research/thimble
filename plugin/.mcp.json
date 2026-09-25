@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "thimble": {
+      "type": "stdio",
+      "command": "${CLAUDE_PLUGIN_ROOT}/bin/thimble-mcp",
+      "env": {
+        "THIMBLE_CWD": "${CLAUDE_PROJECT_DIR}"
+      }
+    }
+  }
+}

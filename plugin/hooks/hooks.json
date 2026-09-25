@@ -1,0 +1,21 @@
+{
+  "description": "thimble's delivery without a channel (plugin/bin/.thimble-watch): the watcher wakes the session with each browser event, and permission prompts are relayed to the browser. In a session whose channel delivers, or that is no thimble workspace, each exits at once. The SessionStart hook for clear and compact gives main its prompt again (bin/thimble prompt main), which /clear takes out of the conversation and /compact cuts short in a session the launcher did not start; it prints nothing in any other session.",
+  "hooks": {
+    "SessionStart": [
+      {"hooks": [{"type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/.thimble-watch\"", "asyncRewake": true, "timeout": 86400, "rewakeMessage": "thimble browser event:", "rewakeSummary": "thimble: browser event"}]},
+      {"matcher": "clear|compact", "hooks": [{"type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/thimble\" prompt main --unless-launched --if-main --cwd \"$CLAUDE_PROJECT_DIR\" --lead 'Your thimble prompt follows. /thimble gave it to you, and /clear or /compact has since taken it out of this conversation or cut it short. It is yours for the rest of this session, as if it were part of your system prompt. When Claude Code shows only the start of it and names a file that holds all of it, Read that file before you reply to anything.' 2>/dev/null || true", "timeout": 30}]}
+    ],
+    "Stop": [
+      {"hooks": [{"type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/.thimble-watch\"", "asyncRewake": true, "timeout": 86400, "rewakeMessage": "thimble browser event:", "rewakeSummary": "thimble: browser event"}]}
+    ],
+    "UserPromptSubmit": [
+      {"hooks": [{"type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/.thimble-watch\"", "asyncRewake": true, "timeout": 86400, "rewakeMessage": "thimble browser event:", "rewakeSummary": "thimble: browser event"}]}
+    ],
+    "PreToolUse": [
+      {"matcher": "*", "hooks": [{"type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/.thimble-watch\"", "asyncRewake": true, "timeout": 86400, "rewakeMessage": "thimble browser event:", "rewakeSummary": "thimble: browser event"}]}
+    ],
+    "PermissionRequest": [
+      {"matcher": "*", "hooks": [{"type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/.thimble-watch\" --permission", "timeout": 86400}]}
+    ]
+  }
+}

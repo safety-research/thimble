@@ -1,0 +1,286 @@
+/* base: resets, body, links, focus, default control looks at zero specificity, the label, the target flash. The
+   components' own styles are in components.css. */
+
+* {
+  box-sizing: border-box;
+  scrollbar-width: thin;
+  scrollbar-color: var(--ink-300) transparent;
+}
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+html {
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+body {
+  background: var(--bg-page);
+  color: var(--text-primary);
+  font: var(--type-body);
+  font-optical-sizing: auto;
+  font-variant-numeric: tabular-nums;
+}
+::selection {
+  background: var(--accent-wash);
+  color: var(--text-primary);
+}
+/* a span highlighted inside a longer text (--hl-bg): the words a quote card or a citation points at */
+.hl {
+  background: var(--hl-bg);
+  color: var(--text-primary);
+  border-radius: var(--radius-hl);
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+}
+/* glass: the composer's material (62%, the float), for the chrome that stays in place over the work, never a cell */
+.glass {
+  background: var(--glass-bg);
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
+  border: var(--glass-edge);
+  box-shadow: var(--shadow-composer);
+}
+/* the overlay: the material of what floats over content and goes away (tooltips, previews, toasts), opaque paper with
+   the popover's ring and the float, so no text reads through it */
+.overlay {
+  background: var(--overlay-bg);
+  border: var(--overlay-edge);
+  box-shadow: var(--shadow-popover);
+}
+a {
+  color: var(--text-link);
+  text-decoration: underline;
+  text-decoration-color: color-mix(in oklab, var(--text-link) 35%, transparent);
+  text-decoration-thickness: 1px;
+  text-underline-offset: 2px;
+}
+a:hover,
+a:focus-visible {
+  color: var(--text-link);
+  text-decoration-color: var(--text-link);
+}
+code,
+pre,
+.mono {
+  font-family: var(--font-mono);
+  font-size: var(--text-mono);
+}
+.dim {
+  color: var(--text-tertiary);
+}
+.label {
+  font: var(--type-label);
+  letter-spacing: var(--tracking-label);
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+}
+.icon {
+  display: inline-block;
+  flex: none;
+  vertical-align: -0.2em;
+}
+/* a clock (lib/time hhmm) wherever one shows: a card's foot, a reader record, the report's meta */
+.time {
+  font: var(--type-mono-sm);
+  color: var(--text-tertiary);
+  font-variant-numeric: tabular-nums;
+}
+/* prose the chat, the reader's markdown and the report share: h1 one step over the heading, one inline code */
+.chat-text h1,
+.reader-md h1 {
+  margin: 16px 0 6px;
+  font: var(--type-title);
+  letter-spacing: var(--tracking-title);
+  color: var(--text-primary);
+}
+.chat-text code,
+.reader-md code,
+.wu-root .wu-editor .bn-inline-content code {
+  padding: 0 4px;
+  border-radius: calc(var(--radius-ui) / 2);
+  background: var(--bg-sunken);
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: 0.9em;
+  overflow-wrap: anywhere;
+}
+.chat-text strong,
+.chat-text b,
+.reader-md strong,
+.reader-md b,
+.wu-root .wu-editor strong,
+.wu-root .wu-editor b {
+  font-weight: 500;
+}
+.chat-text pre code,
+.reader-md pre code {
+  padding: 0;
+  background: none;
+  font: inherit;
+}
+/* the one unread dot (the thread tree, the tabs, a cell) */
+.dot {
+  display: inline-block;
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+
+/* focus: paper elements lift; no rings */
+:focus-visible {
+  outline: none;
+}
+:where(button, [role='tab'], [role='button'], summary, [tabindex]:not([tabindex='-1'])):focus-visible {
+  box-shadow: var(--focus-paper);
+}
+:where(input, textarea, select):focus-visible {
+  box-shadow: none;
+}
+
+/* default controls, at zero specificity so any component class wins: a bare <button> looks like Button ghost,
+   button.primary like Button primary, a bare <input> like TextInput. */
+button,
+input,
+select,
+textarea {
+  font: inherit;
+  color: inherit;
+}
+:where(button) {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  min-height: var(--h-control);
+  padding: 0 8px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-ui);
+  color: var(--text-secondary);
+  font: 500 var(--text-sm) / 1.2 var(--font-body);
+  white-space: nowrap;
+  cursor: pointer;
+  user-select: none;
+  transition: var(--transition-color), transform var(--dur-fast) var(--ease-out);
+}
+:where(button:hover) {
+  background: var(--surface-hover);
+  color: var(--text-primary);
+}
+:where(button:active) {
+  background: var(--surface-pressed);
+}
+:where(button:disabled) {
+  opacity: 0.4;
+  cursor: default;
+  box-shadow: none;
+}
+:where(button:disabled:hover) {
+  background: transparent;
+  color: var(--text-secondary);
+}
+:where(button.primary) {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--text-on-accent);
+}
+:where(button.primary:hover) {
+  background: var(--accent-hover);
+  border-color: var(--accent-hover);
+  color: var(--text-on-accent);
+}
+:where(button.primary:active) {
+  background: var(--accent-pressed);
+  border-color: var(--accent-pressed);
+}
+:where(button.primary:disabled:hover) {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--text-on-accent);
+}
+:where(button.primary:focus-visible) {
+  box-shadow: var(--glow-accent);
+}
+:where(input, textarea, select) {
+  height: var(--h-control);
+  padding: 0 8px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-ui);
+  background: var(--surface-card);
+  color: var(--text-primary);
+  font-size: var(--text-sm);
+  line-height: 22px;
+  transition:
+    border-color var(--dur-fast) var(--ease-out),
+    box-shadow var(--dur-fast) var(--ease-out);
+}
+:where(textarea) {
+  height: auto;
+  padding: 5px 8px;
+  line-height: 1.45;
+}
+:where(input:focus, textarea:focus, select:focus) {
+  outline: none;
+  border-color: var(--border-strong);
+  box-shadow: none;
+}
+::placeholder {
+  color: var(--text-placeholder);
+  opacity: 1;
+}
+input[type='checkbox'] {
+  width: 13px;
+  height: 13px;
+  margin: 0;
+  padding: 0;
+  accent-color: var(--accent);
+}
+input[type='checkbox']:focus {
+  box-shadow: none;
+}
+
+/* the target flash after a followed ref or a teleport: an accent wash over the element that fades by opacity */
+.anchor-flash {
+  position: relative;
+}
+.anchor-flash::after {
+  content: '';
+  position: absolute;
+  inset: -1px;
+  border-radius: inherit;
+  background: var(--accent-soft);
+  box-shadow: 0 0 0 1px var(--accent);
+  pointer-events: none;
+  animation: anchor-flash 1.6s var(--ease-out) forwards;
+}
+@keyframes anchor-flash {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+
+/* a main column's readable minimum beside a sidebar (shell/dock.tsx): an empty line --read-min wide, measured and
+   never seen, clipped so it adds nothing to the column's scroll */
+.read-probe {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 0;
+  height: 0;
+  overflow: hidden;
+  visibility: hidden;
+  pointer-events: none;
+}
+.read-probe > span {
+  display: block;
+  width: var(--read-min, 60ch);
+  height: 0;
+}

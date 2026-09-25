@@ -1,0 +1,448 @@
+#!/usr/bin/env bash
+# thimble: the one command.
+#
+#   thimble [claude flags…]              start thimble: a new Claude Code session in this folder with the plugin as a
+#                                        channel and main's prompt appended, running /thimble (below); -c/--continue
+#                                        resumes the folder's last main session (with none it is claude's own),
+#                                        -r/--resume [value] is claude's own
+#   thimble server up [--cwd <p>] [--session <sid>] [--action <a>]
+#                                        start the server if needed, open this directory as a workspace, print the URL
+#   thimble server status | repair | stop [--yes] | restart [--keep-vite] [--yes]
+#   thimble update [--from <zip>]        bring the install up to date (the latest GitHub release via gh, or a zip)
+#   thimble feedback ["description"] [--no-logs]
+#                                        write a problem report (a zip) to send the developer, and say how to send it
+#                                        (bash, below: it needs no server and no working supervisor)
+#   thimble doctor | fix | revert | stop | restart | up
+#                                        the supervisor's subcommands (backend/app/cli.py)
+#   thimble list                         the workspaces by id: each registered folder's, and its archived runs, with when
+#                                        each was last used and the sessions open on it (backend/app/runs.py)
+#   thimble purge <id>… [-y] [--dry-run] delete workspaces or archived runs by id, printing what went; never the folder a
+#                                        workspace read or Claude Code's transcripts (backend/app/runs.py)
+#   thimble launch-args [--cwd <p>]      what a session starts with: the channel entry, the --allowedTools and --effort
+#                                        values, then main's prompt
+#   thimble prompt <name>… [--cwd <p>]   prompt files rendered for a session in <p> (the injected command of the
+#                                        /thimble and shared skills and of the SessionStart hook); in a session
+#                                        thimble started in its own work folder, the ones its server rendered
+#                                        (rendered_prompts, below)
+#   thimble uninstall [--yes] [--keep-home]
+#                                        remove the install: the plugin registration, ~/.local/bin/thimble, $THIMBLE_HOME
+#                                        (bash, below: it needs no venv; a clone folder is left in place)
+#
+#   thimble status                       one line: the server, the orientation, the queue (`server status`)
+#   thimble help | -h | --help           thimble's usage (usage, below)
+#
+# Dispatch: no arguments, or a first argument that starts with `-`, launches a session (the arguments go to `claude`);
+# a supervisor subcommand runs backend/app/cli.py with THIMBLE_CALLER_CWD set; any other word prints the usage and
+# exits 2. This file is reached through the ~/.local/bin/thimble symlink, so its directory comes from the resolved $0.
+set -euo pipefail
+resolve_link() {  # resolve_link PATH: the file a chain of symlinks ends at, as an absolute path (readlink -f is not on every macOS);
+  # exit 1 when the chain ends at nothing or runs past 40 hops (a cycle)
+  local p="$1" t n=0
+  while [ -L "$p" ]; do
+    n=$((n + 1)); [ "$n" -le 40 ] || return 1
+    t="$(readlink "$p")"; case "$t" in /*) p="$t";; *) p="$(dirname "$p")/$t";; esac
+  done
+  [ -e "$p" ] || return 1
+  printf '%s/%s\n' "$(cd "$(dirname "$p")" && pwd -P)" "$(basename "$p")"
+}
+self="$(resolve_link "${BASH_SOURCE[0]}")"
+here="$(dirname "$self")"
+plugin="$(cd "$here/.." && pwd -P)"
+
+# the supervisor's subcommands (backend/app/cli.py build_parser) plus the `server` group; `up` is an alias of `ensure`.
+# `uninstall` is the bash function below, so it works with backend/.venv missing or broken.
+SUPERVISOR_COMMANDS=" server up ensure stop restart doctor fix revert update list purge launch-args prompt "
+
+# usage: what `thimble help` prints; the header above has the details.
+usage() {
+  cat <<'EOF'
+usage: thimble [claude flags...]          start thimble in this folder: a new Claude Code session with the
+                                          thimble plugin (the cards, report and labels stay)
+       thimble -c, --continue             continue the most recent thimble session in the current directory
+       thimble -r, --resume [value]       resume a conversation by session ID, or open interactive picker with
+                                          optional search term
+       thimble status                     one line: the server, the orientation, the queue
+       thimble server up | status | stop | restart | repair
+       thimble doctor                     what is installed and running, and what is wrong
+       thimble fix                        repair a server that will not start
+       thimble revert                     undo the last change thimble's dev agent applied
+       thimble list                       the workspaces by id: each folder's, and its archived runs
+       thimble purge <id>... [-y] [--dry-run]
+                                          delete workspaces or archived runs by id, after asking
+       thimble feedback ["what went wrong"] [--no-logs]
+                                          write a problem report to send the developer
+       thimble update [--from <zip>]      bring the install up to date
+       thimble uninstall [--yes] [--keep-home]
+EOF
+}
+
+# rendered_prompts NAME… [--cwd P]: `prompt` in a session thimble started in a work folder of its own. The server has
+# rendered the prompts for the session's corpus into $THIMBLE_RENDERED_PROMPTS/<name>.md; print them from there.
+# Returns 1 with nothing printed (so the supervisor answers) when the variable is unset, a name has no file, or another
+# option is given.
+rendered_prompts() {
+  local dir="${THIMBLE_RENDERED_PROMPTS:-}" names="" n sep=""
+  [ -n "$dir" ] || return 1
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --cwd) [ "$#" -ge 2 ] || return 1; shift 2;;
+      --cwd=*) shift;;
+      "" | -* | *[!A-Za-z0-9_-]*) return 1;;
+      *) [ -r "$dir/$1.md" ] || return 1; names="$names $1"; shift;;
+    esac
+  done
+  [ -n "$names" ] || return 1
+  for n in $names; do printf '%s' "$sep"; cat "$dir/$n.md"; sep=$'\n'; done
+}
+
+# feedback [--skill] ARGS…: the problem report (backend/app/feedback.py), run as that module alone so it works when the
+# server or the backend is broken (it imports only the standard library). It runs with the tree's venv, else python3.
+# --skill is /thimble feedback's: every line starts `thimble:` and it exits 0, since a skill fails on a non-zero exit.
+feedback() {
+  local repo py skill=0 rc=1
+  [ "${1:-}" != --skill ] || skill=1
+  repo="$("$here/thimble-app-dir" 2>/dev/null)" || repo="$(cd "$plugin/.." && pwd -P)"
+  if [ ! -f "$repo/backend/app/feedback.py" ]; then
+    printf 'thimble: the problem report cannot be written: %s holds no backend/app/feedback.py\n' "$repo"
+    [ "$skill" = 1 ] && exit 0; exit 1
+  fi
+  export THIMBLE_CALLER_CWD="${THIMBLE_CALLER_CWD:-$PWD}" THIMBLE_APP_DIR="$repo"
+  cd "$repo/backend"
+  for py in "$repo/backend/.venv/bin/python" python3; do
+    command -v "$py" >/dev/null 2>&1 || continue
+    if "$py" -m app.feedback "$@"; then exit 0; else rc=$?; fi
+    printf 'thimble: %s could not write the report (exit %s)%s\n' "$py" "$rc" "$( [ "$py" = python3 ] || echo '; trying python3' )"
+  done
+  [ "$skill" = 1 ] && exit 0; exit "$rc"
+}
+
+# thimble uninstall [--yes] [--keep-home]: bash, so it works when the venv is missing or inside the tree being removed.
+# It touches only Claude Code's plugin registration, ~/.local/bin/thimble and $THIMBLE_HOME; a tree outside
+# $THIMBLE_HOME (a clone) is left in place with its workspaces. The `rm -rf` is guarded: $THIMBLE_HOME is canonicalized
+# once, `/`, $HOME and relative paths are refused, and it is removed only when it holds thimble state. The recorded
+# server is stopped only when its command line is a thimble server on the recorded port (argv[0] is not checked, since
+# macOS ps shows the venv's python as the framework binary) and the port confirms it (lsof, ss or /api/health); the
+# check is repeated before each signal. Stopping escalates from `thimble stop` to TERM to KILL, 5 s apart. A failing
+# step does not stop the others; the last block lists what is left (exit 1 only then).
+uninstall() {
+  local yes=0 keep_home=0 arg
+  for arg in "$@"; do
+    case "$arg" in
+      --yes | -y) yes=1;;
+      --keep-home) keep_home=1;;
+      -h | --help)
+        printf 'usage: thimble uninstall [--yes] [--keep-home]\n'
+        printf '  --yes        remove without asking\n'
+        printf '  --keep-home  keep ~/.thimble (server state; after a release install also the app copy and its workspaces); remove only the plugin registration and the link\n'
+        exit 0;;
+      *) printf 'thimble uninstall: unknown argument %s\n' "$arg" >&2; exit 2;;
+    esac
+  done
+  [ -n "${HOME:-}" ] || { printf 'thimble uninstall: HOME is not set\n' >&2; exit 2; }
+  local home_raw="${THIMBLE_HOME:-}" home home_note="" home_state=0 link="$HOME/.local/bin/thimble" tree="" kind="" name="" name_note=""
+  local inside=0 pid="" port="" pid_note="" conf="" planned="" pport="" link_ours=0 link_why="" stop_how="" have_claude=0 ans cwd rc
+  local nsteps=0 ndone=0 nleft=0 left="" id_ok=0 id_conf="" id_note="" changed=0
+  case "$home_raw" in *[![:space:]]*) ;; *) home_raw="$HOME/.thimble";; esac   # unset or blank: the default
+  home="${home_raw%/}"; [ -n "$home" ] || home=/
+  enable -n kill 2>/dev/null || true   # `kill` is the program on PATH, not the builtin: the `+ kill …` line names what ran, and a test can stand a failing one in for it
+  is_tree() { [ -n "$1" ] && [ -f "$1/backend/pyproject.toml" ] && [ -d "$1/plugin/bin" ]; }
+  alive() {  # alive PID: a live, non-zombie process (ps, so it needs no kill; a zombie stays until its parent reaps it)
+    local st; st="$(ps -o stat= -p "$1" 2>/dev/null || true)"; st="${st#"${st%%[![:space:]]*}"}"
+    case "$st" in "" | Z*) return 1;; *) return 0;; esac
+  }
+  wait_dead() {  # wait_dead PID TENTHS: up to TENTHS × 0.1 s for the pid to go
+    local _i=0; while alive "$1" && [ "$_i" -lt "$2" ]; do sleep 0.1; _i=$((_i + 1)); done
+  }
+  run() { printf '+'; printf ' %q' "$@"; printf '\n'; "$@"; }
+  step() { nsteps=$((nsteps + 1)); printf '  %d. %s\n' "$nsteps" "$1"; }   # a line of the plan that y runs
+  add_left() { nleft=$((nleft + 1)); left="$left  $1"$'\n'"    $2"$'\n'; }   # add_left WHAT-WAS-NOT-DONE COMMAND-TO-FINISH
+  json_get() {  # json_get FILE KEY — a top-level string value (python3 when present, else a sed for the flat case); 1 when unreadable
+    if command -v python3 >/dev/null 2>&1; then python3 -c 'import json,sys; v=json.load(open(sys.argv[1])).get(sys.argv[2], ""); print(v if isinstance(v, str) else "")' "$1" "$2" 2>/dev/null
+    else sed -n "s/.*\"$2\": *\"\([^\"]*\)\".*/\1/p" "$1" | head -n 1; fi
+  }
+  json_num() {  # json_num FILE KEY — a top-level integer value, else nothing
+    if command -v python3 >/dev/null 2>&1; then python3 -c 'import json,sys; v=json.load(open(sys.argv[1])).get(sys.argv[2]); print(v if isinstance(v, int) and not isinstance(v, bool) else "")' "$1" "$2" 2>/dev/null || true
+    else sed -n "s/.*\"$2\": *\([0-9][0-9]*\).*/\1/p" "$1" | head -n 1; fi
+  }
+  read_record() {  # read_record: pid and port from $home/server.json into pid and port — positive integers only (a pid of 0 would
+    # reach ps: on macOS `ps -p 0` shows kernel_task, and `kill 0` in the by-hand line would signal the user's own process group)
+    pid=""; port=""
+    [ -f "$home/server.json" ] || return 0
+    pid="$(json_num "$home/server.json" pid)"; port="$(json_num "$home/server.json" port)"
+    case "$pid" in '' | 0 | -*) pid="";; esac
+    case "$port" in '' | 0 | -*) port="";; esac
+  }
+  is_ours() {  # is_ours PID PORT: the command line of PID is a thimble server on PORT (uvicorn, app.main:app, `--port PORT` as a
+    # whole word; argv[0] is not checked, see above) — the test repeated before every signal
+    local args re; args="$(ps -ww -o args= -p "$1" 2>/dev/null || true)"; re="[[:space:]]--port(=|[[:space:]]+)$2[[:space:]]"
+    [[ "$args" == *uvicorn* && "$args" == *app.main:app* && " $args " =~ $re ]]
+  }
+  identify() {  # identify PID PORT (PID alive): this install's server on PORT? id_ok=1 and id_conf (what confirmed the port) when
+    # is_ours holds and the port agrees — the pid is listening on it (lsof; ss on a Linux without lsof) or /api/health answers
+    # on it while the pid lives; with neither lsof nor ss present the command line alone decides. Else id_ok=0 and id_note
+    # says what the record is instead: the by-hand `kill` is offered only for a pid whose command line IS a thimble server
+    local _pid="$1" _port="$2" args listen=""
+    id_ok=0; id_conf=""; id_note=""
+    if [ -z "$_port" ]; then
+      id_note="server.json names pid $_pid but records no port, so it cannot be checked; left alone. Look at it with ps -p $_pid -o command= and kill it only if it is a thimble server"
+      return 0
+    fi
+    args="$(ps -ww -o args= -p "$_pid" 2>/dev/null || true)"
+    if [[ "$args" != *uvicorn* || "$args" != *app.main:app* ]]; then
+      id_note="server.json's record is stale: pid $_pid is another program now, not a thimble server; nothing to stop (ps -p $_pid -o command= shows what it is)"
+      return 0
+    fi
+    if ! is_ours "$_pid" "$_port"; then
+      id_note="server.json's record is stale: pid $_pid is a thimble server, but not the one on port $_port (its command line names another port); left alone (ps -p $_pid -o command= shows it)"
+      return 0
+    fi
+    if command -v lsof >/dev/null 2>&1; then
+      listen=lsof; ! lsof -t -nP -iTCP:"$_port" -sTCP:LISTEN 2>/dev/null | grep -qx "$_pid" || id_conf="listening on port $_port"
+    elif command -v ss >/dev/null 2>&1; then
+      listen=ss; ! ss -ltnp "( sport = :$_port )" 2>/dev/null | grep -q "pid=$_pid," || id_conf="listening on port $_port"
+    fi
+    if [ -z "$id_conf" ] && command -v curl >/dev/null 2>&1 && curl -s -m 3 "http://127.0.0.1:$_port/api/health" 2>/dev/null | grep -q '"ok": *true' && alive "$_pid"; then id_conf="answering /api/health on port $_port"; fi
+    [ -n "$id_conf" ] || [ -n "$listen" ] || id_conf="port $_port by its command line; neither lsof nor ss is installed to confirm it listens"
+    if [ -n "$id_conf" ]; then id_ok=1
+    else id_note="server.json names pid $_pid and its command line is a thimble server on port $_port, but that pid is not listening on port $_port ($listen) and /api/health does not answer there; left alone"$'\n'"  to stop it by hand: check it with ps -p $_pid -o command=, then kill $_pid"; fi
+    return 0
+  }
+
+  # $THIMBLE_HOME, canonical: refused when relative, `/` or the home directory; a link is followed and the real directory named
+  case "$home" in /*) ;; *) printf 'thimble uninstall: THIMBLE_HOME=%s is not an absolute path; nothing removed\n' "$home_raw" >&2; exit 2;; esac
+  if [ -d "$home" ]; then home="$(cd "$home" && pwd -P)"; fi
+  if [ "$home" = / ] || [ "$home" = "$HOME" ] || [ "$home" = "$(cd "$HOME" 2>/dev/null && pwd -P || printf '%s' "$HOME")" ]; then
+    printf 'thimble uninstall: THIMBLE_HOME=%s is %s; refusing to remove it, nothing removed\n' "$home_raw" "$( [ "$home" = / ] && echo 'the root directory' || echo 'your home directory' )" >&2; exit 2
+  fi
+  [ "$home" = "${home_raw%/}" ] || home_note=" (THIMBLE_HOME=$home_raw resolves to it)"
+  if [ -f "$home/app-dir" ] || [ -f "$home/server.json" ] || [ -f "$home/server.lock" ] || [ -d "$home/workspaces" ] || [ -d "$home/data" ] || is_tree "$home/app"; then home_state=1; fi
+  # the tree: the install $THIMBLE_HOME/app-dir names, else the one this copy sits in
+  if [ -f "$home/app-dir" ] && is_tree "$(head -n 1 "$home/app-dir")"; then tree="$(cd "$(head -n 1 "$home/app-dir")" && pwd -P)"
+  elif is_tree "$plugin/.."; then tree="$(cd "$plugin/.." && pwd -P)"; fi
+  if [ -n "$tree" ]; then
+    if [ -e "$tree/.git" ]; then kind="git checkout"; else kind="release copy"; fi
+    case "$tree/" in "$home"/*) inside=1;; esac
+    if [ -f "$tree/.claude-plugin/marketplace.json" ]; then
+      if ! name="$(json_get "$tree/.claude-plugin/marketplace.json" name)"; then name=""; name_note="$tree/.claude-plugin/marketplace.json is unreadable; guessing the marketplace name"; fi
+    fi
+  fi
+  if [ -z "$name" ]; then if [ "$inside" = 1 ] || [ -z "$tree" ]; then name=thimble-local; else name=thimble; fi; fi
+  ! command -v claude >/dev/null 2>&1 || have_claude=1
+  # the link: ours when it ends at this tree's plugin/bin/thimble, or is a thimble link (…/plugin/bin/thimble) whose target
+  # is gone or lies inside $THIMBLE_HOME — it would dangle after the rm
+  if [ -L "$link" ]; then
+    local target ends; target="$(readlink "$link")"; ends="$(resolve_link "$link" 2>/dev/null || true)"
+    if [ -n "$tree" ] && [ "$ends" = "$tree/plugin/bin/thimble" ]; then link_ours=1; link_why="the link into this tree"
+    else
+      case "$target" in */plugin/bin/thimble)
+        if [ ! -e "$link" ]; then link_ours=1; link_why="a broken link into a removed thimble tree"
+        else case "$ends/" in "$home"/*) link_ours=1; link_why="a link into $home";; esac; fi;;
+      esac
+    fi
+  fi
+  read_record
+  # a running server: server.json's pid, alive, this install's server by identify; anything else is left alone, with what it is
+  if [ -n "$pid" ]; then
+    if alive "$pid"; then
+      identify "$pid" "$port"
+      if [ "$id_ok" = 1 ]; then
+        conf="$id_conf"; if [ -n "$tree" ] && [ -x "$tree/backend/.venv/bin/python" ]; then stop_how=supervisor; else stop_how=kill; fi
+      else pid_note="$id_note"; pid=""; fi
+    else pid=""; fi
+  fi
+
+  # the plan: the steps y runs, numbered, each as the command it runs or the file it removes; what is left alone or in
+  # place, unnumbered; then the count
+  printf 'thimble uninstall will:\n'
+  [ -n "$tree" ] || printf '  (no thimble tree found: %s/app-dir names none; the plugin is taken to be thimble@%s)\n' "$home" "$name"
+  [ -z "$name_note" ] || printf '  %s\n' "$name_note"
+  [ -z "$pid" ] || step "stop the thimble server this install recorded (pid $pid, $conf)"
+  [ -z "$pid_note" ] || printf '  %s\n' "$pid_note"
+  if [ "$have_claude" = 1 ]; then
+    step "claude plugin uninstall thimble@$name"
+    step "claude plugin marketplace remove $name"
+  else
+    printf '  claude is not on PATH; run these yourself when it is:\n    claude plugin uninstall thimble@%s\n    claude plugin marketplace remove %s\n' "$name" "$name"
+  fi
+  if [ "$link_ours" = 1 ]; then step "rm $link ($link_why)"
+  elif [ -e "$link" ] || [ -L "$link" ]; then printf '  %s is left alone: not a link into this tree\n' "$link"; fi
+  # what $THIMBLE_HOME holds: the registry of folders (data/) and server state; the app copy and its workspaces
+  # only when the tree is inside it
+  local holds="the registry of folders you opened with /thimble (data/) and server state (app-dir, server.json, server.log)"
+  [ "$inside" = 0 ] || holds="workspaces (your notebooks, labels and reports), the registry of folders you opened with /thimble (data/), server state and the release copy at $tree"
+  if [ "$keep_home" = 1 ]; then printf '  %s is kept (--keep-home): %s\n' "$home" "$holds"
+  elif [ "$home_state" = 1 ]; then step "rm -rf $home$home_note: $holds (--keep-home keeps it)"
+  elif [ -e "$home" ]; then printf '  %s holds no thimble state; left alone\n' "$home"; fi
+  if [ -n "$tree" ] && [ "$inside" = 0 ]; then
+    if [ "$kind" = "git checkout" ]; then printf '  the clone at %s is left in place, with your workspaces (notebooks, labels, reports) in %s/workspaces (delete the folder yourself if you want it gone)\n' "$tree" "$tree"
+    else printf '  the tree at %s is left in place, with your workspaces (notebooks, labels, reports) in %s/workspaces: it is outside %s (delete the folder yourself if you want it gone)\n' "$tree" "$tree" "$home"; fi
+  fi
+  if [ "$yes" = 1 ]; then printf '%d steps (--yes: running them)\n' "$nsteps"
+  else
+    printf '%d steps; y runs them.\nRemove? [y/N] ' "$nsteps"
+    read -r ans 2>/dev/null || ans=""
+    case "$ans" in y | Y | yes | YES | Yes) ;; *) printf 'nothing removed\n'; exit 0;; esac
+  fi
+
+  # the steps, in the plan's order; a failing one is noted and the rest runs; the last block says what is left
+  if [ -n "$pid" ]; then
+    # the identity again (see above): the server server.json names now, or the planned pid when it is still a thimble server on
+    # its port and the record no longer names it; a record that names nothing to stop leaves the planned pid unsignalled
+    planned="$pid"; pport="$port"; pid=""
+    read_record
+    if [ -n "$pid" ] && alive "$pid" && { identify "$pid" "$port"; [ "$id_ok" = 1 ]; }; then
+      [ "$pid" = "$planned" ] || printf '(server.json now names pid %s, not pid %s as when the plan was printed; stopping pid %s, the server it records, %s)\n' "$pid" "$planned" "$pid" "$id_conf"
+    elif alive "$planned" && { identify "$planned" "$pport"; [ "$id_ok" = 1 ]; }; then
+      pid="$planned"; port="$pport"
+      printf '(server.json no longer names pid %s, but it is still a thimble server, %s; stopping it as planned)\n' "$planned" "$id_conf"
+    else
+      if alive "$planned"; then
+        add_left "the thimble server was not stopped: server.json changed while the question was open, and pid $planned is no longer confirmed as a thimble server on port $pport (${id_note%%$'\n'*})" "ps -p $planned -o command=   # kill $planned only if it is a thimble server"
+      elif [ -n "$pid" ] && alive "$pid"; then
+        add_left "the thimble server was not stopped: server.json changed while the question was open; pid $planned is gone, and the pid it names now is not confirmed as a thimble server (${id_note%%$'\n'*})" "ps -p $pid -o command=   # kill $pid only if it is a thimble server"
+      else
+        printf '(pid %s is gone already: nothing to stop)\n' "$planned"; ndone=$((ndone + 1))
+      fi
+      pid=""
+    fi
+  fi
+  if [ -n "$pid" ]; then
+    if [ "$stop_how" = supervisor ]; then
+      run "$tree/plugin/bin/thimble" stop --yes || printf '(thimble stop failed (exit %s); stopping pid %s with kill)\n' "$?" "$pid"
+      wait_dead "$pid" 50
+    fi
+    # the command line once more before each signal: a pid that is no longer a thimble server on the port is not signalled
+    if alive "$pid"; then if is_ours "$pid" "$port"; then run kill -TERM "$pid" || true; wait_dead "$pid" 50; else changed=1; fi; fi
+    if [ "$changed" = 0 ] && alive "$pid"; then if is_ours "$pid" "$port"; then run kill -KILL "$pid" || true; wait_dead "$pid" 20; else changed=1; fi; fi
+    if [ "$changed" = 1 ]; then add_left "pid $pid was not signalled: its command line stopped being a thimble server on port $port before the signal" "ps -p $pid -o command=   # kill $pid only if it is a thimble server"
+    elif alive "$pid"; then add_left "the thimble server (pid $pid) is still running" "kill -KILL $pid"
+    else ndone=$((ndone + 1)); fi
+  fi
+  if [ "$have_claude" = 1 ]; then
+    if run claude plugin uninstall "thimble@$name"; then ndone=$((ndone + 1))
+    else rc=$?; printf '(exit %s)\n' "$rc"; add_left "claude plugin uninstall thimble@$name failed (exit $rc)" "claude plugin uninstall thimble@$name"; fi
+    if run claude plugin marketplace remove "$name"; then ndone=$((ndone + 1))
+    else rc=$?; printf '(exit %s)\n' "$rc"; add_left "claude plugin marketplace remove $name failed (exit $rc)" "claude plugin marketplace remove $name"; fi
+  else
+    add_left "claude is not on PATH, so the plugin is still registered" "claude plugin uninstall thimble@$name && claude plugin marketplace remove $name"
+  fi
+  if [ "$link_ours" = 1 ]; then
+    if run rm -f "$link"; then ndone=$((ndone + 1)); else add_left "$link was not removed" "rm -f $link"; fi
+  fi
+  if [ "$keep_home" != 1 ] && [ "$home_state" = 1 ]; then
+    cwd="$(pwd -P 2>/dev/null || printf '%s' "$PWD")"
+    if run rm -rf "$home"; then
+      ndone=$((ndone + 1))
+      case "$cwd/" in "$home"/*) printf "your shell's current directory was removed; cd somewhere else\\n";; esac
+    else add_left "$home was not removed" "rm -rf $home"; fi
+  fi
+  if [ "$nleft" = 0 ]; then printf 'thimble uninstall: done (%d steps)\n' "$ndone"; exit 0; fi
+  printf 'thimble uninstall: %d of %d steps done. Left for you to do:\n%s' "$ndone" "$nsteps" "$left"; exit 1
+}
+
+case "${1:-}" in
+  help | -h | --help)
+    usage; exit 0;;
+  "" | -*)
+    ;;  # a session: below
+  uninstall)
+    shift; uninstall "$@";;
+  feedback)
+    shift; feedback "$@";;
+  status)
+    shift; exec "$self" server status "$@";;
+  *)
+    if [[ "$SUPERVISOR_COMMANDS" == *" $1 "* ]]; then
+      if [ "$1" = prompt ] && rendered_prompts "${@:2}"; then exit 0; fi
+      # `server up` is run by the /thimble skill as a single command, so that one sandbox.excludedCommands entry covers
+      # it (Claude Code sandboxes a compound command unless every part is excluded); a skill fails on a non-zero exit,
+      # so it always exits 0, with a thimble: line when the tree cannot be found
+      up=0
+      case "$1 ${2:-}" in "server up"* | "server ensure"* | "up "* | "ensure "*) up=1;; esac
+      # /thimble feedback: the report, with the folder the skill names, and no server
+      if [ "$up" = 1 ]; then
+        fb=0 cwd_arg="" prev=""
+        for a in "$@"; do
+          case "$prev" in --action) [ "$a" != feedback ] || fb=1;; --cwd) cwd_arg="$a";; esac
+          case "$a" in --action=feedback) fb=1;; --cwd=*) cwd_arg="${a#--cwd=}";; esac
+          prev="$a"
+        done
+        if [ "$fb" = 1 ]; then
+          [ -z "$cwd_arg" ] || export THIMBLE_CALLER_CWD="$cwd_arg"
+          feedback --skill
+        fi
+      fi
+      # the tree (backend/ and its .venv) is found by bin/thimble-app-dir: `../..` in a checkout or an unzipped release,
+      # the installed tree named in $THIMBLE_HOME/app-dir when this copy sits in Claude Code's plugin cache.
+      # THIMBLE_PLUGIN_ROOT names this plugin copy, whose channel entry /thimble looks for (cli.plugin_root)
+      repo="$("$here/thimble-app-dir" 2>&1)" || {
+        [ "$up" = 1 ] || { printf '%s\n' "$repo" >&2; exit 1; }
+        printf '%s\n' "$repo"; exit 0; }
+      export THIMBLE_CALLER_CWD="${THIMBLE_CALLER_CWD:-$PWD}" THIMBLE_PLUGIN_ROOT="$plugin"
+      cd "$repo/backend"
+      if [ "$up" = 1 ]; then "$here/thimble-python" -m app.cli "$@" 2>&1 || true; exit 0; fi
+      exec "$here/thimble-python" -m app.cli "$@"
+    fi
+    printf 'thimble: unknown command %s\n' "$1" >&2
+    usage >&2
+    exit 2;;
+esac
+
+# The session: Claude Code in this folder with the plugin loaded as a development channel, which is how browser events
+# reach it (where channels are off, the plugin's watcher delivers instead). `launch-args` prints the channel entry of
+# the installed plugin copy, else plugin:thimble@inline for --plugin-dir. Main's prompt is appended to the system prompt,
+# since Claude Code cuts MCP server instructions at about 2 KB and an appended prompt reaches every fork whole.
+# --effort is passed only when neither the analyst's settings nor their flags name one. --allowedTools lets the thimble
+# tools and the plugin's skills run without a permission prompt, since a fork answering the browser must not wait on a
+# terminal nobody watches; nothing is denied. THIMBLE_CHANNEL tells the MCP shim to subscribe. The session opens with
+# /thimble, which starts the server and opens this folder as a workspace.
+command -v claude >/dev/null 2>&1 || {
+  printf 'thimble: the `claude` CLI is not on PATH. thimble runs inside Claude Code: install it (https://docs.anthropic.com/en/docs/claude-code), then run thimble again.\n' >&2
+  exit 1; }
+# Each launch starts a new session; the workspace stays. -c/--continue resumes the folder's last main session by
+# thimble's own record (cli.last_main), since Claude Code's --continue could pick a writer's session in the same
+# folder; with none, --continue goes to `claude` as it is. Other flags go to `claude` as they are; --new is dropped.
+cont=0 args=()
+for a in "$@"; do
+  case "$a" in
+    --new) ;;
+    -c | --continue) cont=1;;
+    *) args+=("$a");;
+  esac
+done
+set -- ${args[@]+"${args[@]}"}
+ask=()
+[ "$cont" = 0 ] || ask=(--resume)
+repo="$("$here/thimble-app-dir")"
+cwd="$PWD"
+out="$(cd "$repo/backend" && THIMBLE_CALLER_CWD="$cwd" \
+  "$here/thimble-python" -m app.cli launch-args ${ask[@]+"${ask[@]}"} --cwd "$cwd")" || {
+  printf 'thimble: could not render the session prompt (see the lines above); run `thimble doctor`\n' >&2; exit 1; }
+channel="${out%%$'\n'*}"
+rest="${out#*$'\n'}"
+allowed="${rest%%$'\n'*}"
+rest="${rest#*$'\n'}"
+effort="${rest%%$'\n'*}"
+rest="${rest#*$'\n'}"
+last=""
+if [ "$cont" = 1 ]; then last="${rest%%$'\n'*}"; rest="${rest#*$'\n'}"; fi
+prompt="$rest"
+tools=(--allowedTools "$allowed")
+# an --effort among the analyst's own flags is their choice, so thimble's default is left out
+for a in "$@"; do case "$a" in --effort | --effort=*) effort="";; esac; done
+[ -z "$effort" ] || tools+=(--effort "$effort")
+resume=()
+if [ -n "$last" ]; then
+  resume=(--resume "$last")
+  printf 'thimble: continuing the last thimble session in this folder (%s)\n' "$last" >&2
+elif [ "$cont" = 1 ]; then
+  resume=(--continue)
+fi
+load=()
+[ "$channel" != "plugin:thimble@inline" ] || load=(--plugin-dir "$plugin")
+export THIMBLE_CHANNEL="$channel"
+# Claude Code aborts an MCP call that sends neither a result nor progress for 30 min. The shim reports progress every
+# minute; the longer limit (4 h, in ms) covers a Claude Code that ignores it. A value the analyst set is kept.
+export CLAUDE_CODE_MCP_TOOL_IDLE_TIMEOUT="${CLAUDE_CODE_MCP_TOOL_IDLE_TIMEOUT:-14400000}"
+exec claude ${load[@]+"${load[@]}"} --dangerously-load-development-channels "$channel" "${tools[@]}" \
+  ${resume[@]+"${resume[@]}"} --append-system-prompt "$prompt" "$@" -- /thimble

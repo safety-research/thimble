@@ -1,0 +1,255 @@
+/* kernel outputs (components/Outputs): text, streams, errors, images, html tables, charts. Output is text on the paper;
+   an error or stderr is told by the tone of its text on the sunken inset, never by a tint. */
+.outputs {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.outputs-text {
+  margin: 0;
+  padding: 2px 6px;
+  max-height: 400px;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font: var(--text-sm) / 1.4 var(--font-mono);
+  color: var(--text-primary);
+}
+.outputs-stream {
+  color: var(--text-secondary);
+}
+.outputs-stderr {
+  padding: 6px 10px;
+  color: var(--status-warning);
+  background: var(--bg-sunken);
+  border-radius: var(--radius-ui);
+}
+.outputs-error {
+  padding: 6px 10px;
+  color: var(--status-negative);
+  background: var(--bg-sunken);
+  border: 0;
+  border-radius: var(--radius-ui);
+}
+.outputs-error-head {
+  font-weight: 500;
+}
+.outputs-json {
+  background: var(--bg-sunken);
+  border-radius: var(--radius-ui);
+}
+.outputs-unknown {
+  color: var(--text-tertiary);
+}
+.outputs-img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  border-radius: var(--radius-ui);
+}
+.outputs-iframe {
+  display: block;
+  width: 100%;
+  height: 300px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+/* the table's room: a table wider than it clips at the right, with a fade while there is more to scroll to */
+.outputs-html-wrap {
+  position: relative;
+  max-width: 100%;
+}
+.outputs-html-more::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 40px;
+  pointer-events: none;
+  background: linear-gradient(to right, transparent, var(--surface-card));
+}
+.outputs-html {
+  display: inline-block;
+  max-width: 100%;
+  max-height: 400px;
+  overflow: auto;
+  font-size: var(--text-sm);
+}
+/* tables read the same everywhere: a caps header over hairline rows, rows in mono, numbers right aligned. pandas'
+   border attribute and scoped style are neutralised. */
+.outputs-html table,
+.outputs-md table,
+.chat-text table {
+  border-collapse: collapse;
+  font: var(--type-body-sm);
+  font-variant-numeric: tabular-nums;
+}
+.outputs-html table[border] {
+  border: 0;
+}
+.outputs-html th,
+.outputs-html td,
+.outputs-md th,
+.outputs-md td,
+.chat-text th,
+.chat-text td {
+  padding: 5px 10px;
+  border: 0;
+  border-bottom: 1px solid var(--border-hairline);
+  text-align: left;
+  vertical-align: top;
+  white-space: nowrap;
+}
+.outputs-html thead th,
+.outputs-md thead th,
+.chat-text thead th,
+.outputs-html .dataframe thead th {
+  background: var(--bg-sunken);
+  border-bottom-color: var(--border-subtle);
+  color: var(--text-tertiary);
+  font: var(--type-label);
+  letter-spacing: var(--tracking-label);
+  text-transform: uppercase;
+  text-align: left;
+}
+.outputs-html tbody th {
+  background: var(--surface-card);
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-weight: 400;
+}
+.outputs-html tbody td {
+  font-family: var(--font-mono);
+}
+.outputs-html tbody td.outputs-num,
+.outputs-md tbody td.mono,
+.chat-text tbody td.mono {
+  font-family: var(--font-mono);
+  text-align: right;
+}
+.outputs-html thead th {
+  position: sticky;
+  top: 0;
+}
+.outputs-html tbody th {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+}
+.outputs-html thead th:first-child {
+  left: 0;
+  z-index: 2;
+}
+.outputs-html.outputs-html-table {
+  max-height: none;
+}
+/* a table reads in the room it has (lib/tables tidies it): pandas' default row numbers and an index-only header row
+   are hidden, headers wrap, prose cells wrap in the body face, ids and numbers stay on one line in mono. What still
+   does not fit scrolls sideways. */
+.outputs-html table.outputs-rangeindex tr > th:first-child,
+.outputs-html tr.outputs-namerow {
+  display: none;
+}
+.outputs-html thead th {
+  white-space: normal;
+  min-width: 6ch;
+}
+.outputs-html td.outputs-prose,
+.outputs-md td,
+.chat-text td {
+  white-space: normal;
+  overflow-wrap: break-word;
+}
+.outputs-html td.outputs-prose {
+  min-width: 24ch;
+  max-width: 64ch;
+  font-family: var(--font-body);
+  line-height: 1.45;
+}
+.outputs-md tbody td.mono,
+.chat-text tbody td.mono {
+  white-space: nowrap;
+}
+.outputs-html tbody th.outputs-prose {
+  min-width: 24ch;
+  max-width: 40ch;
+  white-space: normal;
+}
+.outputs-html thead th.outputs-numhead {
+  text-align: right;
+}
+.outputs-rows-more {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+  padding: 2px 6px 0;
+  font: var(--type-caption);
+}
+.outputs-rows-more .outputs-showall {
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: var(--type-mono-sm);
+  color: var(--text-secondary);
+  text-decoration: underline;
+  text-decoration-color: var(--border-strong);
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+.outputs-md {
+  font-family: var(--font-prose);
+  font-size: var(--text-md);
+  line-height: 1.5;
+}
+.outputs-vega {
+  overflow: auto;
+  width: 100%;
+}
+.outputs-vega [tabindex]:focus,
+.outputs-vega canvas:focus,
+.outputs-vega svg:focus,
+.outputs-vega .vega-embed:focus {
+  outline: none;
+}
+/* Vega's tooltip as the opaque overlay. vega-tooltip prepends its own sheet to the head, so these rules win by order;
+   its dark variant is covered too. */
+#vg-tooltip-element,
+#vg-tooltip-element.dark-theme {
+  padding: 6px 8px;
+  background: var(--overlay-bg);
+  border: var(--overlay-edge);
+  border-radius: var(--radius-card);
+  box-shadow: var(--overlay-ring);
+  font: var(--type-mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--text-primary);
+}
+/* while ⌘ is held the pointer's highlight and box name a chart's mark (pointer/parts.ts), so the chart's own tooltip is
+   hidden */
+body[data-cmd] #vg-tooltip-element {
+  visibility: hidden;
+}
+#vg-tooltip-element h2 {
+  margin-bottom: 4px;
+  font: var(--type-mono);
+  font-weight: 500;
+}
+#vg-tooltip-element table tr td.key,
+#vg-tooltip-element.dark-theme td.key {
+  color: var(--text-tertiary);
+}
+
+/* a matplotlib figure inlined (lib/svg): as wide as its room up to its own width, its text in the page's faces and its
+   colours the theme's; like every chart, never part of a text selection */
+.outputs-svg {
+  min-width: 0;
+  user-select: none;
+}
+.outputs-svg > svg {
+  display: block;
+  width: 100%;
+  height: auto;
+}

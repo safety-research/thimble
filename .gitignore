@@ -1,0 +1,16 @@
+data/*
+workspaces/
+/dev/
+frontend/dev/
+backend/.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+frontend/node_modules/
+frontend/dist/
+frontend/*.tsbuildinfo
+release/
+.claude/settings.local.json
+.claude/worktrees/
+.DS_Store
+*.log

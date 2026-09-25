@@ -1,0 +1,445 @@
+#!/bin/sh
+''''exec "$(dirname "$0")/thimble-python" "$0" "$@" # '''
+"""The thimble MCP shim: the stdio MCP server of the analyst's Claude Code session, and its channel.
+
+The first two lines make this file both a shell script and a Python program: `sh` runs the `exec` line, which re-runs
+the file under backend/.venv's Python through bin/thimble-python; Python reads that line as a string literal.
+
+Tools are listed from disk (app.tools.list, schemas from prompts/tools.md), so the list is the same whether the server
+is up or down. A call is POST {server}/api/tools/<name> with {args, actor, cwd, session, tool_use_id}; calls run
+concurrently and report MCP progress every PROGRESS_S, since Claude Code aborts a call that is silent for its idle
+timeout. The server address is read per call from $THIMBLE_HOME/server.json, else http://127.0.0.1:$THIMBLE_PORT.
+
+Channel: the shim declares Claude Code's experimental `claude/channel` capability and, in the analyst's session,
+subscribes to GET {server}/api/channel (server-sent events), which attaches the session to its workspace. The route
+is `channel` when `claude` was started with this plugin's channel entry (THIMBLE_CHANNEL says so explicitly), else
+`hook` or `monitor` (app.cc_channel.delivery). On the channel route each event is written to Claude Code as `notifications/claude/channel`, and
+permission prompts are relayed to the browser (`claude/channel/permission`); on the hook or monitor route the plugin's
+watcher delivers instead. The subscription is renewed when the session id changes (/clear, /resume). No event is
+written before the MCP handshake is done (_Handshake).
+
+Protocol: the shim serves only the initialize-handshake protocol (2025-11-25 and earlier). Claude Code skips channel
+registration on a 2026-07-28 `server/discover` connection, so that probe is refused and Claude Code falls back to the
+handshake, where the channel is registered.
+
+`thimble-mcp --list` prints the tool list as JSON and `thimble-mcp --instructions` the instructions, without MCP.
+"""
+import inspect
+import json
+import logging
+import os
+import sys
+import urllib.parse
+from pathlib import Path
+from typing import Annotated, Any
+
+import anyio
+import httpx
+
+HERE = Path(__file__).resolve()
+REPO = Path(os.environ.get("THIMBLE_APP_DIR") or HERE.parents[2])  # the tree bin/thimble-python resolved, else ../..
+sys.path.insert(0, str(REPO / "backend"))
+
+import mcp.types as mcp_types  # noqa: E402
+import mcp_types.jsonrpc as jsonrpc  # noqa: E402
+from mcp.server.mcpserver import Context, MCPServer  # noqa: E402
+from mcp.server.mcpserver.tools.base import Tool  # noqa: E402
+from mcp.server.runner import serve_loop  # noqa: E402
+from mcp.server.stdio import stdio_server  # noqa: E402
+from mcp.shared.message import SessionMessage  # noqa: E402
+from pydantic import Field  # noqa: E402
+
+from app import cc_channel, tools  # noqa: E402  (imports app.config, app.prompts and app.procs only)
+
+logging.basicConfig(level=logging.WARNING, stream=sys.stderr, format="thimble-mcp %(levelname)s: %(message)s")
+log = logging.getLogger("thimble-mcp")
+
+ROLE = tools.ANALYST
+DEFAULT_PORT = 8300
+# the model cannot run /thimble itself (the skill is the analyst's alone), so the text says who types it
+SERVER_DOWN = ("the thimble server is not running. Ask the analyst to type /thimble in this terminal, which starts it "
+               "again with the workspace as it was; you cannot run that skill yourself.")
+# a call whose connection dropped after it was sent, once a server answers again (call_server)
+RESTARTED = ("the thimble server restarted while `{name}` ran, so its answer was lost and the call may or may not have "
+             "taken effect. Check (list the cards, or read the document) before you make it again.")
+# a call whose connection dropped while the same server runs on
+DROPPED = ("the connection to the thimble server dropped while `{name}` ran, so its answer was lost and the call may "
+           "or may not have taken effect. Check before you make it again.")
+CALL_RETRY_S = 15.0  # how long a refused connection is tried again, and how long a dropped call waits for the server
+RETRY_ENV = "THIMBLE_MCP_RETRY_S"
+PROGRESS_S = 60.0  # how often a call in flight reports progress (with_progress)
+PROGRESS_ENV = "THIMBLE_MCP_PROGRESS_S"
+SESSION_ENV = "THIMBLE_SESSION"  # the session this shim serves: `orient`, `writer:<doc>` or `critique:<id>` for a session thimble started (agent_session.py)
+CHANNEL_CAPABILITY = "claude/channel"
+CHANNEL_METHOD = "notifications/claude/channel"
+PERMISSION_CAPABILITY = "claude/channel/permission"
+PERMISSION_REQUEST = "notifications/claude/channel/permission_request"  # Claude Code -> the shim, when a prompt opens
+PERMISSION_METHOD = "notifications/claude/channel/permission"  # the shim -> Claude Code, the analyst's answer
+PERMISSION_FIELDS = ("request_id", "tool_name", "description", "input_preview")
+RETRY_S = 2.0
+TOOL_USE_META = "claudecode/toolUseId"  # the key of Claude Code's id for a call in the request's `_meta`
+CTX_PARAM = "thimble_mcp_context"  # the generated handler's MCP context parameter (_tool), which no tool's schema lists
+_JSON_TYPES = {"string": str, "number": float, "integer": int, "boolean": bool, "array": list, "object": dict}
+
+
+def server_url() -> str:
+    """The server's API base URL from $THIMBLE_HOME/server.json (`api`, then `port`; never `url`, which in dev mode is
+    Vite's), else the default port. Read per call, so a server started after this shim is found."""
+    home = Path(os.environ.get("THIMBLE_HOME") or (Path.home() / ".thimble"))
+    try:
+        data = json.loads((home / "server.json").read_text("utf-8"))
+        if isinstance(data, dict):
+            if data.get("api"):
+                return str(data["api"]).rstrip("/")
+            if data.get("port"):
+                return f"http://127.0.0.1:{int(data['port'])}"
+    except (OSError, ValueError, TypeError):
+        pass
+    port = os.environ.get("THIMBLE_PORT") or DEFAULT_PORT
+    return f"http://127.0.0.1:{port}"
+
+
+def cwd() -> str:
+    return os.environ.get("THIMBLE_CWD") or os.getcwd()
+
+
+def _result(content: list[dict[str, Any]], is_error: bool) -> mcp_types.CallToolResult:
+    blocks: list[Any] = []
+    for b in content:
+        if b.get("type") == "image":
+            blocks.append(mcp_types.ImageContent(type="image", data=str(b.get("data", "")),
+                                                 mime_type=str(b.get("mimeType") or b.get("mime_type") or "image/png")))
+        else:
+            blocks.append(mcp_types.TextContent(type="text", text=str(b.get("text", ""))))
+    if not blocks:
+        blocks.append(mcp_types.TextContent(type="text", text=""))
+    return mcp_types.CallToolResult(content=blocks, is_error=is_error)
+
+
+def _error(text: str) -> mcp_types.CallToolResult:
+    return _result([{"type": "text", "text": text}], True)
+
+
+def _env_s(name: str, default: float) -> float:
+    """A number of seconds from the environment (tests shorten the clocks below), else `default`."""
+    try:
+        return max(0.0, float(os.environ.get(name) or default))
+    except ValueError:
+        return default
+
+
+def _answer(name: str, resp: httpx.Response) -> mcp_types.CallToolResult:
+    """The server's answer to a call, as the tool result the model reads."""
+    if resp.status_code >= 400:
+        detail = resp.text[:500]
+        try:
+            detail = str(json.loads(detail).get("detail") or detail)
+        except (ValueError, AttributeError):
+            pass
+        if resp.status_code == 404:
+            return _error(f"the thimble server does not know the tool `{name}` ({detail}); it may be older than this "
+                          "plugin — say /thimble to restart it")
+        return _error(f"{name} failed on the thimble server (HTTP {resp.status_code}): {detail}")
+    try:
+        payload = resp.json()
+    except ValueError as e:
+        return _error(f"{name}: the thimble server answered with something that is not JSON ({e})")
+    if not isinstance(payload, dict):
+        return _error(f"{name}: unexpected answer from the thimble server")
+    return _result([b for b in payload.get("content") or [] if isinstance(b, dict)], bool(payload.get("is_error")))
+
+
+async def _boot(client: httpx.AsyncClient) -> str | None:
+    """The `boot` token of the server answering now (new for every start), or None when none answers or names one."""
+    try:
+        resp = await client.get(f"{server_url()}/api/health", timeout=2.0)
+        boot = resp.json().get("boot") if resp.status_code == 200 else None
+    except (httpx.HTTPError, ValueError, AttributeError):
+        return None
+    return str(boot) if boot else ("" if resp.status_code == 200 else None)
+
+
+async def _boot_within(client: httpx.AsyncClient, until: float) -> str | None:
+    """_boot, asked every half second until a server answers or the clock reaches `until` (the address read fresh
+    each time, since a restart may record another port); None when none answered."""
+    while True:
+        boot = await _boot(client)
+        if boot is not None or anyio.current_time() >= until:
+            return boot
+        await anyio.sleep(0.5)
+
+
+async def call_server(name: str, args: dict[str, Any], tool_use_id: str | None = None) -> mcp_types.CallToolResult:
+    """POST the call and return the server's answer, with no read timeout.
+
+    A refused connection is retried for up to CALL_RETRY_S (a restart), then SERVER_DOWN. A call cut off mid-flight is
+    not resent, since it may have taken effect: when the server's `boot` token changed the answer is RESTARTED, else
+    DROPPED."""
+    body = {"args": args, "actor": ROLE, "cwd": cwd(), "session": os.environ.get(SESSION_ENV) or None,
+            "tool_use_id": tool_use_id}
+    retry = _env_s(RETRY_ENV, CALL_RETRY_S)
+    until = anyio.current_time() + retry
+    async with httpx.AsyncClient(timeout=httpx.Timeout(None, connect=3.0)) as client:
+        boot = await _boot(client)
+        while True:
+            try:
+                resp: httpx.Response | None = await client.post(f"{server_url()}/api/tools/{name}", json=body)
+            except (httpx.ConnectError, httpx.ConnectTimeout):
+                if anyio.current_time() >= until:
+                    return _error(SERVER_DOWN)
+                await anyio.sleep(0.5)
+                boot = boot or await _boot(client)
+                continue
+            except httpx.HTTPError:
+                resp = None  # the connection dropped after the request was sent
+            if resp is not None and resp.status_code < 500:
+                return _answer(name, resp)
+            after = await _boot_within(client, anyio.current_time() + retry)
+            if after is None:
+                return _error(SERVER_DOWN)
+            if not boot or not after or after != boot:
+                return _error(RESTARTED.format(name=name))
+            if resp is None:
+                return _error(DROPPED.format(name=name))
+            return _answer(name, resp)
+
+
+async def with_progress(ctx: Any, call: Any) -> mcp_types.CallToolResult:
+    """Await the call, reporting MCP progress every PROGRESS_S, since Claude Code aborts a call that sends neither a
+    result nor progress for its idle timeout."""
+    period = _env_s(PROGRESS_ENV, PROGRESS_S)
+    result: list[mcp_types.CallToolResult] = []
+
+    async def beat() -> None:
+        n = 0
+        while True:
+            await anyio.sleep(period)
+            n += 1
+            try:
+                await ctx.report_progress(n, message=f"still running after {round(n * period / 60, 1):g} min")
+            except Exception as e:  # noqa: BLE001 — progress is advisory; the call goes on without it
+                log.debug("progress not sent: %s", e)
+                return
+
+    async with anyio.create_task_group() as tg:
+        if ctx is not None and period > 0:
+            tg.start_soon(beat)
+        result.append(await call)
+        tg.cancel_scope.cancel()
+    return result[0]
+
+
+def _tool(entry: dict[str, Any]) -> Tool:
+    """An MCPServer tool whose wire schema is the tool's JSON schema. MCPServer validates from a Python signature, so
+    one is generated: an optional keyword-only parameter per property plus the tool's argument aliases
+    (tools.ARG_ALIASES); the listed schema is then replaced by the one from prompts/tools.md."""
+    name, schema = entry["name"], entry["input_schema"]
+    props: dict[str, Any] = schema.get("properties") or {}
+    params: list[inspect.Parameter] = []
+    annotations: dict[str, Any] = {}
+    for pname, p in props.items():
+        py = _JSON_TYPES.get(str(p.get("type")), Any)
+        desc = str(p.get("description") or "")
+        ann = Annotated[py | None, Field(description=desc)]  # type: ignore[operator]
+        params.append(inspect.Parameter(pname, inspect.Parameter.KEYWORD_ONLY, default=None, annotation=ann))
+        annotations[pname] = ann
+    for alias, target in tools.ARG_ALIASES.get(name, {}).items():
+        if alias in props:
+            continue
+        py = _JSON_TYPES.get(str((props.get(target) or {}).get("type")), Any)
+        ann = Annotated[py | None, Field(description=f"Alias of `{target}`.")]  # type: ignore[operator]
+        params.append(inspect.Parameter(alias, inspect.Parameter.KEYWORD_ONLY, default=None, annotation=ann))
+        annotations[alias] = ann
+
+    async def fn(**kwargs: Any) -> mcp_types.CallToolResult:
+        ctx = kwargs.pop(CTX_PARAM, None)
+        call = call_server(name, {k: v for k, v in kwargs.items() if v is not None}, tool_use_id(ctx))
+        return await with_progress(ctx, call)
+
+    params.append(inspect.Parameter(CTX_PARAM, inspect.Parameter.KEYWORD_ONLY, default=None, annotation=Context))
+    fn.__name__ = name
+    fn.__signature__ = inspect.Signature(params, return_annotation=mcp_types.CallToolResult)  # type: ignore[attr-defined]
+    fn.__annotations__ = {**annotations, CTX_PARAM: Context, "return": mcp_types.CallToolResult}
+    tool = Tool.from_function(fn, name=name, description=entry["description"])
+    tool.parameters = schema
+    return tool
+
+
+def tool_use_id(ctx: Any) -> str | None:
+    """Claude Code's id for the call this context serves, from the request's `_meta` (module note); None when absent."""
+    try:
+        meta = ctx.request_context.meta if ctx is not None else None
+    except ValueError:  # no request: a direct call
+        return None
+    value = meta.get(TOOL_USE_META) if isinstance(meta, dict) else None
+    return value if isinstance(value, str) and value else None
+
+
+def instructions() -> str:
+    """The MCP server instructions: the `## instructions` section of prompts/tools.md, read from disk."""
+    return tools.instructions()
+
+
+def session_id() -> str | None:
+    """The Claude Code session this process serves (module note)."""
+    home = Path(os.environ.get("CLAUDE_CONFIG_DIR") or (Path.home() / ".claude"))
+    try:
+        data = json.loads((home / "sessions" / f"{os.getppid()}.json").read_text("utf-8"))
+        sid = data.get("sessionId") if isinstance(data, dict) else None
+        if isinstance(sid, str) and sid:
+            return sid
+    except (OSError, ValueError):
+        pass
+    return os.environ.get("CLAUDE_CODE_SESSION_ID") or None
+
+
+class _Handshake:
+    """Server middleware whose `done` opens once Claude Code can take the shim's notifications: at the client's
+    `notifications/initialized`, or at its first other request."""
+
+    def __init__(self) -> None:
+        self.done = anyio.Event()
+
+    async def __call__(self, ctx: Any, call_next: Any) -> Any:
+        try:
+            return await call_next(ctx)
+        finally:
+            m = ctx.method
+            if m == "notifications/initialized" or not (m == "initialize" or m.startswith("notifications/")):
+                self.done.set()
+
+
+async def channel_loop(write_stream: Any, delivery: str = cc_channel.CHANNEL, handshake: Any = None) -> None:
+    """Hold the subscription for as long as the session lives and write each event to Claude Code. Never raises: a
+    failure waits RETRY_S and subscribes again; a new session id (checked at each keep-alive) resubscribes at once.
+    Events wait for `handshake`."""
+    while True:
+        sid = session_id()
+        moved = False  # the session id changed under a live subscription: renew it without waiting
+        query = urllib.parse.urlencode({**{k: v for k, v in (("cwd", cwd()), ("session", sid), ("pid", os.getppid()),
+                                                             ("delivery", delivery)) if v},
+                                        "config_dir": os.environ.get("CLAUDE_CONFIG_DIR") or ""})
+        url = f"{server_url()}/api/channel?{query}"
+        try:
+            async with httpx.AsyncClient(timeout=httpx.Timeout(None, connect=3.0)) as client:
+                async with client.stream("GET", url) as resp:
+                    if resp.status_code != 200:
+                        await resp.aread()
+                        raise ConnectionError(f"HTTP {resp.status_code}")
+                    event, data = "", []
+                    async for line in resp.aiter_lines():
+                        if line.startswith(":"):  # the server's keep-alive: a moment to notice a new session id
+                            if session_id() != sid:
+                                moved = True
+                                break
+                            continue
+                        if line.startswith("event:"):
+                            event = line[len("event:"):].strip()
+                        elif line.startswith("data:"):
+                            data.append(line[len("data:"):].lstrip())
+                        elif not line.strip():
+                            if delivery != cc_channel.CHANNEL:
+                                pass  # Claude Code would drop a channel notification here; the watcher delivers
+                            elif event in ("channel", "permission") and data:
+                                if handshake is not None:
+                                    await handshake.done.wait()
+                                if event == "channel":
+                                    await _notify(write_stream, "\n".join(data))
+                                else:
+                                    await _verdict(write_stream, "\n".join(data))
+                            event, data = "", []
+        except (httpx.HTTPError, ConnectionError, OSError) as e:
+            log.debug("channel: %s", e)
+        except Exception:  # noqa: BLE001 — the channel never takes the tools down with it
+            log.exception("channel failed")
+        if not moved:
+            await anyio.sleep(RETRY_S)
+
+
+async def _notify(write_stream: Any, data: str) -> None:
+    try:
+        note = json.loads(data)
+    except ValueError:
+        log.warning("channel: an event that is not JSON")
+        return
+    if not isinstance(note, dict) or not isinstance(note.get("content"), str):
+        return
+    meta = {str(k): str(v) for k, v in (note.get("meta") or {}).items()}
+    msg = jsonrpc.JSONRPCNotification(jsonrpc="2.0", method=CHANNEL_METHOD, params={"content": note["content"], "meta": meta})
+    await write_stream.send(SessionMessage(msg))
+
+
+async def _verdict(write_stream: Any, data: str) -> None:
+    """The analyst's answer to a relayed permission prompt, from the browser: `{request_id, behavior}` to Claude Code."""
+    try:
+        v = json.loads(data)
+    except ValueError:
+        return
+    if not isinstance(v, dict) or v.get("behavior") not in ("allow", "deny") or not v.get("request_id"):
+        return
+    msg = jsonrpc.JSONRPCNotification(jsonrpc="2.0", method=PERMISSION_METHOD,
+                                      params={"request_id": str(v["request_id"]), "behavior": v["behavior"]})
+    await write_stream.send(SessionMessage(msg))
+
+
+class _PermissionRequest(mcp_types.NotificationParams):
+    """Claude Code's permission request: request_id, tool_name, description and input_preview, read as sent."""
+
+    model_config = {"extra": "allow"}
+
+
+async def _relay_permission(ctx: Any, params: _PermissionRequest) -> None:
+    """Post a permission prompt to the server, which shows it in main's chat; the answer comes back on the channel
+    stream (_verdict). The terminal's dialog stays open, and the first answer wins."""
+    raw = {**(params.model_extra or {})}
+    body = {k: str(raw.get(k) or "") for k in PERMISSION_FIELDS}
+    body.update({"cwd": cwd(), "session": session_id()})
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            await client.post(f"{server_url()}/api/channel/permission", json=body)
+    except httpx.HTTPError as e:
+        log.warning("permission request %s not relayed: %s", body["request_id"], e)
+
+
+async def serve(server: MCPServer) -> None:
+    """MCPServer.run_stdio_async with the channel capability declared and, in the analyst's session, the subscription
+    held beside the MCP session on the same stdout."""
+    low = server._lowlevel_server
+    session_kind = os.environ.get(SESSION_ENV) or None
+    caps: dict[str, Any] = {CHANNEL_CAPABILITY: {}}
+    # the parent is the `claude` process; a session thimble starts itself hears no browser events (its main does)
+    route = None if session_kind else cc_channel.delivery(os.getppid(), HERE.parents[1], cwd()).mode
+    if route == cc_channel.CHANNEL:
+        caps[PERMISSION_CAPABILITY] = {}
+        low.add_notification_handler(PERMISSION_REQUEST, _PermissionRequest, _relay_permission)
+    options = low.create_initialization_options(experimental_capabilities=caps)
+    handshake = _Handshake()
+    low.middleware.append(handshake)
+    async with stdio_server() as (read_stream, write_stream):
+        async with anyio.create_task_group() as tg:
+            if route:
+                tg.start_soon(channel_loop, write_stream, route, handshake)
+            # not low.run, which also serves 2026-07-28, where Claude Code has no channel (module note, Protocol)
+            async with low.lifespan(low) as lifespan_context:
+                await serve_loop(low, read_stream, write_stream, lifespan_state=lifespan_context, init_options=options)
+            tg.cancel_scope.cancel()
+
+
+def tool_entries() -> list[dict[str, Any]]:
+    """The tools this shim lists (module note): its session kind's."""
+    return tools.list(ROLE, session=os.environ.get(SESSION_ENV) or None)
+
+
+def build_server() -> MCPServer:
+    return MCPServer(tools.SERVER_NAME, instructions=instructions() or None, tools=[_tool(e) for e in tool_entries()])
+
+
+if __name__ == "__main__":
+    if "--list" in sys.argv[1:]:  # a debugging aid: the tool list as JSON, no server involved
+        json.dump(tool_entries(), sys.stdout, indent=1)
+        sys.stdout.write("\n")
+        sys.exit(0)
+    if "--instructions" in sys.argv[1:]:  # a debugging aid: the instructions text, fetched as the server would be
+        sys.stdout.write(instructions() + "\n")
+        sys.exit(0)
+    anyio.run(serve, build_server())

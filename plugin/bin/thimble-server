@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+# thimble-server: an alias of the supervisor commands. `thimble-server <cmd> …` is `thimble <cmd> …`;
+# without a subcommand it prints the usage instead of starting a session, which is what a bare `thimble` does.
+set -euo pipefail
+here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+if [ $# -eq 0 ]; then
+  echo "usage: thimble-server <up|ensure|server …|stop|restart|doctor|fix|revert|update|uninstall> …  (an alias of \`thimble <cmd>\`)" >&2
+  exit 2
+fi
+exec "$here/thimble" "$@"

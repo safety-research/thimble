@@ -1,0 +1,2516 @@
+/* the canvas board (canvas/Canvas.tsx): an infinite plane on a 24px dot grid; frames with titles above the corner,
+   tinted so nesting reads slightly darker; cards on the cell's paper; the controls at the bottom right; a glass status
+   line. Only box-shadow, opacity and transform animate. */
+.board {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+/* the canvas filter, when one is on: the chip on the band the report head and the reader bar share */
+.board-band {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: var(--h-band);
+  padding: 0 12px;
+  background: var(--bg-sub);
+  border-bottom: 1px solid var(--border-hairline);
+}
+.board-stage {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  overflow: clip;
+  background: var(--bg-panel);
+  font: var(--type-body);
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+  user-select: none;
+}
+.board-state {
+  position: absolute;
+  top: 14px;
+  left: 16px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-secondary);
+}
+.board-error {
+  color: var(--status-negative);
+}
+/* its own stacking context, so a dragged or selected card stays under the controls, panel and focus mode. Clipped,
+   not hidden, so a focus or scrollIntoView inside the board can never scroll it away from the pointer's coordinates */
+.board-viewport {
+  position: absolute;
+  z-index: 0;
+  inset: 0 0 28px 0;
+  overflow: clip;
+  cursor: default;
+  touch-action: none;
+  background-image: radial-gradient(rgba(var(--ink-rgb), 0.09) 0.8px, transparent 1px);
+}
+.board-viewport.is-panning,
+.board-viewport.is-panning * {
+  cursor: grabbing !important;
+}
+.board-plane {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 0;
+  height: 0;
+  transform-origin: 0 0;
+}
+/* ⌘ held: the board's text selects like text, for a ⌘-drag over a span */
+body[data-cmd] .board-stage,
+body[data-cmd] .board-stage * {
+  user-select: text;
+}
+
+/* -------- frames: the faint ink at every level; the drop target's accent ring (and its tint when the card would move
+   there); a selected frame's ring at 60% -------- */
+.frame {
+  position: absolute;
+  border-radius: var(--radius-pane);
+  background: rgba(var(--ink-rgb), 0.03);
+}
+.frame.is-nested {
+  background: rgba(var(--ink-rgb), 0.035);
+}
+.frame.is-into {
+  background: color-mix(in oklab, var(--accent) 8%, transparent);
+}
+.frame.is-selected {
+  box-shadow: 0 0 0 1.5px color-mix(in oklab, var(--accent) 60%, transparent);
+}
+.frame.is-target {
+  box-shadow: 0 0 0 1.5px var(--accent);
+}
+.frame.is-moving {
+  z-index: 40;
+}
+/* the title above the top-left corner: the chevron, the name at 14/500, the count in mono; the handle that moves it */
+.frame-title {
+  position: absolute;
+  left: 2px;
+  top: -28px;
+  height: 26px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 4px;
+  box-sizing: border-box;
+  white-space: nowrap;
+  cursor: grab;
+}
+.frame-chev {
+  flex: none;
+  color: var(--text-tertiary);
+  stroke-width: 2.4;
+  transition: transform var(--dur-fast) var(--ease-out);
+}
+.frame-chev.is-open {
+  transform: rotate(90deg);
+}
+.frame-name {
+  font-size: var(--text-lg);
+  font-weight: 500;
+  letter-spacing: -0.005em;
+  color: var(--text-primary);
+}
+.frame-count {
+  font: var(--type-mono-sm);
+  color: var(--text-tertiary);
+}
+.frame-rename {
+  width: 180px;
+  height: 22px;
+  box-sizing: border-box;
+  margin-left: -6px;
+  padding: 0 6px;
+  border: 0;
+  border-radius: var(--radius-chip);
+  outline: none;
+  background: var(--surface-card);
+  box-shadow: 0 0 0 1.5px var(--accent);
+  font: 500 var(--text-xs) / 1 var(--font-body);
+  color: var(--text-primary);
+  user-select: text;
+}
+.frame-delete {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-seg);
+  background: transparent;
+  color: var(--text-tertiary);
+  cursor: pointer;
+  transition: var(--transition-color);
+}
+.frame-delete:hover {
+  background: rgba(var(--ink-rgb), 0.07);
+  color: var(--status-negative);
+}
+
+/* -------- cards: a 32px chrome row over the question, the body, the takeaway behind the 2px ink rule. A hairline
+   ring at rest, a darker ring and the float on hover, the accent ring when selected. The chrome shows on hover and
+   selection, and its row keeps its room at rest so nothing moves -------- */
+.bcell {
+  position: absolute;
+  cursor: default;
+}
+.canvas-card {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  box-sizing: border-box;
+  min-height: 72px;
+  padding: 32px 12px 16px 16px;
+  overflow: hidden;
+  border-radius: var(--radius-card);
+  background: var(--surface-card);
+  box-shadow: 0 0 0 1px rgba(var(--ink-rgb), 0.08);
+  transition: box-shadow var(--dur-fast) var(--ease-out);
+}
+.bcell.is-sized .canvas-card {
+  height: 100%;
+}
+.bcell:hover .canvas-card {
+  box-shadow: 0 0 0 1px rgba(var(--ink-rgb), 0.16), var(--shadow-float);
+}
+.bcell.is-selected .canvas-card {
+  box-shadow: 0 0 0 1.5px var(--accent);
+}
+.bcell.is-selected.is-collapsed .canvas-card {
+  box-shadow: 0 0 0 1px color-mix(in oklab, var(--accent) 55%, transparent), var(--shadow-float);
+}
+.bcell.is-dragging .canvas-card {
+  box-shadow: 0 0 0 1.5px var(--accent), var(--shadow-float);
+}
+.bcell.is-dimmed {
+  opacity: 0.35;
+}
+/* the chrome's row above the question: `thread · time` at the left, the icons at the right */
+.bcell-top {
+  position: absolute;
+  top: 4px;
+  left: 16px;
+  right: 8px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.bcell-head {
+  flex: none;
+  display: flex;
+  align-items: flex-start;
+  font: var(--type-question);
+  text-wrap: pretty;
+}
+.bcell-q {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+/* the labels the card uses, in a row under the question (CardFace CardLabels): a tag per label on a 14% tint of its
+   colour with the label glyph and name; a label with no colour takes the ink track */
+.bcell-labels {
+  flex: none;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 6px;
+  margin-top: -4px;
+}
+.bcell-labels-key {
+  color: var(--text-tertiary);
+  font: var(--type-body-sm);
+}
+.bcell-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  max-width: 100%;
+  height: var(--h-chip);
+  padding: 0 8px 0 6px;
+  border: 0;
+  border-radius: var(--radius-chip);
+  background: color-mix(in oklab, var(--c) 14%, var(--surface-card));
+  color: var(--text-primary);
+  font: var(--type-body-sm);
+  cursor: pointer;
+  transition: var(--transition-color);
+}
+.bcell-tag:hover,
+.bcell-tag[aria-expanded='true'] {
+  background: color-mix(in oklab, var(--c) 24%, var(--surface-card));
+}
+.bcell-tag.is-plain {
+  background: var(--track-bg);
+}
+.bcell-tag.is-plain:hover,
+.bcell-tag.is-plain[aria-expanded='true'] {
+  background: rgba(var(--ink-rgb), 0.1);
+}
+.bcell-tag-icon {
+  flex: none;
+  color: var(--c);
+}
+.bcell-tag.is-plain .bcell-tag-icon {
+  color: var(--text-tertiary);
+}
+.bcell-tag-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* a label with edits not run yet or changed since the card ran: the tag turns red on the negative's soft tint, and
+   the row ends in Regenerate Card */
+.bcell-tag.is-stale,
+.bcell-tag.is-stale.is-plain {
+  background: var(--status-negative-soft);
+  color: var(--status-negative);
+}
+.bcell-tag.is-stale:hover,
+.bcell-tag.is-stale[aria-expanded='true'] {
+  background: color-mix(in oklab, var(--status-negative) 20%, transparent);
+}
+.bcell-tag.is-stale .bcell-tag-icon {
+  color: var(--status-negative);
+}
+.bcell-regen.btn {
+  height: var(--h-chip);
+  padding: 0 6px;
+  color: var(--text-secondary);
+}
+.bcell.is-selected .bcell-q,
+.bcell.is-selected .bcell-take {
+  cursor: text;
+}
+/* the text of a card edited in place: the same type, a bare field */
+.bcell-edit.field {
+  min-height: 0;
+  margin: -1px -4px;
+  padding: 1px 4px;
+  border-radius: var(--radius-hl);
+  font: inherit;
+  color: inherit;
+  background: transparent;
+  box-shadow: none;
+  user-select: text;
+}
+/* a takeaway edited with its refs as tokens (canvas/RefEditor): the same type as it reads, a bare field. A token is
+   one piece the caret steps over; it keeps the look it has on the card */
+.refedit {
+  outline: none;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  user-select: text;
+  cursor: text;
+}
+.bcell-edit-take {
+  margin: -1px -4px;
+  padding: 1px 4px;
+  border-radius: var(--radius-hl);
+}
+.refedit-token,
+.refedit-token * {
+  user-select: all;
+  cursor: default;
+}
+.refedit-token.chip {
+  vertical-align: 1px;
+}
+/* hidden, the chrome is out of the tab order too (visibility goes once the fade has run) */
+.bcell-acts,
+.bcell-meta,
+.bcell-grip {
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition:
+    opacity var(--dur-fast) var(--ease-out) 0.3s,
+    visibility 0s linear calc(0.3s + var(--dur-fast));
+}
+.bcell-acts {
+  flex: none;
+  display: flex;
+  margin-left: auto;
+}
+.bcell:hover .bcell-acts,
+.bcell:hover .bcell-meta,
+.bcell:hover .bcell-grip,
+.bcell.is-selected .bcell-acts,
+.bcell.is-selected .bcell-meta,
+.bcell.is-selected .bcell-grip {
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
+  transition-delay: 0s;
+}
+.board.is-dragging .bcell-acts,
+.board.is-dragging .bcell-meta,
+.board.is-dragging .bcell-grip {
+  opacity: 0 !important;
+  pointer-events: none !important;
+}
+.bcell.is-collapsed .bcell-grip {
+  visibility: hidden;
+}
+.bcell-acts .btn {
+  border-radius: var(--radius-seg);
+}
+.bcell-delete:hover {
+  color: var(--status-negative);
+}
+.bcell-star.active {
+  color: var(--accent);
+  background: transparent;
+}
+.bcell-star.active path {
+  fill: currentColor;
+}
+/* the analyst's lock: in ink while it holds and shown at rest, so a locked card reads as locked at a glance */
+.bcell-lock.active {
+  color: var(--text-primary);
+  background: transparent;
+}
+.bcell.is-locked .bcell-acts {
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
+}
+.bcell.is-locked .bcell-acts > .btn:not(.bcell-lock) {
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition:
+    opacity var(--dur-fast) var(--ease-out) 0.3s,
+    visibility 0s linear calc(0.3s + var(--dur-fast));
+}
+.bcell.is-locked:hover .bcell-acts > .btn,
+.bcell.is-locked.is-selected .bcell-acts > .btn {
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
+  transition-delay: 0s;
+}
+/* the thread that made it and when, in mono; it opens the thread */
+.bcell-meta {
+  flex: 0 1 auto;
+  min-width: 0;
+  display: block;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: 400 10.5px / 1.4 var(--font-mono);
+  color: var(--text-tertiary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+.bcell-meta-new {
+  color: var(--text-accent);
+}
+.bcell-meta:hover:not(:disabled) {
+  color: var(--text-primary);
+}
+.bcell-meta:disabled {
+  cursor: default;
+}
+.bcell-grip {
+  position: absolute;
+  right: 3px;
+  bottom: 3px;
+  width: 14px;
+  height: 14px;
+  color: var(--ink-400);
+  cursor: nwse-resize;
+}
+.bcell-grip path {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.3;
+  stroke-linecap: round;
+}
+/* the edges and corners that resize a card: 8px bands astride its edge and 14px corner squares; nothing is drawn */
+.bcell-edge {
+  position: absolute;
+  z-index: 2;
+}
+.bcell-edge-n,
+.bcell-edge-s {
+  left: 10px;
+  right: 10px;
+  height: 8px;
+  cursor: ns-resize;
+}
+.bcell-edge-n {
+  top: -4px;
+}
+.bcell-edge-s {
+  bottom: -4px;
+}
+.bcell-edge-e,
+.bcell-edge-w {
+  top: 10px;
+  bottom: 10px;
+  width: 8px;
+  cursor: ew-resize;
+}
+.bcell-edge-e {
+  right: -4px;
+}
+.bcell-edge-w {
+  left: -4px;
+}
+.bcell-edge-ne,
+.bcell-edge-nw,
+.bcell-edge-se,
+.bcell-edge-sw {
+  width: 14px;
+  height: 14px;
+}
+.bcell-edge-ne {
+  top: -4px;
+  right: -4px;
+  cursor: nesw-resize;
+}
+.bcell-edge-sw {
+  bottom: -4px;
+  left: -4px;
+  cursor: nesw-resize;
+}
+.bcell-edge-nw {
+  top: -4px;
+  left: -4px;
+  cursor: nwse-resize;
+}
+.bcell-edge-se {
+  bottom: -4px;
+  right: -4px;
+  cursor: nwse-resize;
+}
+.board.is-dragging .bcell-edge {
+  pointer-events: none;
+}
+.bcell-dot {
+  position: absolute;
+  top: 13px;
+  right: 16px;
+  transition: opacity var(--dur-fast) var(--ease-out);
+}
+/* beside a locked card's lock rather than over it */
+.bcell.is-locked .bcell-dot {
+  right: 40px;
+}
+.bcell:hover .bcell-dot,
+.bcell.is-selected .bcell-dot {
+  opacity: 0;
+}
+/* the takeaway behind the 2px ink rule */
+.bcell-take {
+  flex: none;
+  display: flex;
+  gap: 10px;
+}
+.bcell-take::before {
+  content: '';
+  flex: none;
+  width: 2px;
+  border-radius: 1px;
+  background: var(--ink-900);
+}
+.bcell-take-text {
+  flex: 1;
+  min-width: 0;
+  color: var(--text-primary);
+  line-height: 1.55;
+  text-wrap: pretty;
+}
+.bcell-take-text p {
+  margin: 0;
+}
+.bcell-take-text p + p {
+  margin-top: 4px;
+}
+/* -------- the card check on the face (canvas/CardFace, lib/cardCheck) -------- */
+/* while a card is checked its body and citations shimmer faintly with an accent sweep (a static tint under reduced
+   motion) */
+.bcell-body {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.bcell-body:empty {
+  display: none;
+}
+.bcell.is-sized .bcell-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+}
+.canvas-card.is-checking .bcell-body::after {
+  content: '';
+  position: absolute;
+  inset: -4px;
+  z-index: 2;
+  pointer-events: none;
+  border-radius: var(--radius-ui);
+  background: linear-gradient(100deg, transparent 35%, color-mix(in oklab, var(--accent) 6%, transparent) 50%, transparent 65%);
+  background-size: 300% 100%;
+  animation: bcell-shimmer 1.8s linear infinite;
+}
+.canvas-card.is-checking .bcell-take .refchip,
+.canvas-card.is-checking .bcell-take .refchip.refchip-value {
+  background-image: linear-gradient(100deg, transparent 30%, color-mix(in oklab, var(--accent) 12%, transparent) 50%, transparent 70%);
+  background-size: 300% 100%;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+  animation: bcell-shimmer 1.8s linear infinite;
+}
+@keyframes bcell-shimmer {
+  from {
+    background-position: 100% 0;
+  }
+  to {
+    background-position: 0% 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .canvas-card.is-checking .bcell-body::after,
+  .canvas-card.is-checking .bcell-take .refchip,
+  .canvas-card.is-checking .bcell-take .refchip.refchip-value {
+    animation: none;
+    background-image: none;
+    background-color: color-mix(in oklab, var(--accent) 5%, transparent);
+  }
+}
+/* a confirmed fix fades in where the old content was */
+.canvas-card.is-swapped .bcell-body,
+.canvas-card.is-swapped .bcell-take-text {
+  animation: bcell-swap 320ms var(--ease-out);
+}
+@keyframes bcell-swap {
+  from {
+    opacity: 0.2;
+  }
+  to {
+    opacity: 1;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .canvas-card.is-swapped .bcell-body,
+  .canvas-card.is-swapped .bcell-take-text {
+    animation: none;
+  }
+}
+/* the card check's mark at the takeaway's bottom right (CardFace CheckMark): a spinner while it runs, then a check or
+   run-again glyph; a click runs the check again */
+.bcell-check {
+  flex: none;
+  align-self: flex-end;
+  display: inline-flex;
+  margin: 0 -4px -3px 0;
+}
+.bcell-check-mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-ui);
+  background: none;
+  color: var(--text-tertiary);
+  cursor: pointer;
+  outline-offset: 1px;
+}
+.bcell-check-mark:hover:not([aria-disabled]) {
+  color: var(--text-primary);
+  background: var(--surface-hover);
+}
+.bcell-check-mark[aria-disabled] {
+  cursor: default;
+}
+/* checked, with numbers its code types in (lib/cardCheck typedLine): a flag in the warning tone */
+.bcell-check-mark.is-flagged {
+  color: var(--status-warning);
+}
+.bcell-take-none::before {
+  visibility: hidden;
+}
+.bcell-check-pop {
+  z-index: var(--z-popover);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-width: 360px;
+  padding: 8px 10px 10px;
+  border-radius: var(--radius-card);
+  color: var(--text-primary);
+  font: var(--type-body-sm);
+  animation: refchip-pop-in var(--dur-fast) var(--ease-out);
+}
+.bcell-check-when {
+  color: var(--text-secondary);
+}
+.bcell-check-what {
+  color: var(--text-primary);
+}
+.bcell-check-before {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding-top: 6px;
+  border-top: 1px solid var(--border-hairline);
+  color: var(--text-secondary);
+}
+.bcell-check-label {
+  font: var(--type-label);
+  letter-spacing: var(--tracking-label);
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+}
+.bcell-check-before .chat-text {
+  font: inherit;
+}
+.bcell-check-before .chat-text p {
+  margin: 0;
+}
+/* the question before the check replaced it, above the takeaway before it */
+.bcell-check-q {
+  color: var(--text-primary);
+}
+.bcell-check-acts {
+  display: flex;
+  justify-content: flex-end;
+  gap: 4px;
+}
+/* a card never checked: a faint mark on hover, whose click checks it. It takes no room in the takeaway's row */
+.bcell-take:has(> .bcell-check-idle) {
+  position: relative;
+}
+.bcell-check-idle {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+}
+.bcell-check-mark.is-idle {
+  opacity: 0;
+  transition: opacity var(--dur-fast) var(--ease-out);
+}
+.canvas-card:hover .bcell-check-mark.is-idle,
+.bcell-check-mark.is-idle:focus-visible {
+  opacity: 0.6;
+}
+.bcell-check-mark.is-idle:hover {
+  opacity: 1;
+}
+/* a collapsed frame's first card: the edges of the others stacked under it */
+.bcell-deck {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 100%;
+  height: 12px;
+  pointer-events: none;
+}
+.bcell-deck span {
+  position: absolute;
+  top: 0;
+  left: 6px;
+  right: 6px;
+  height: 6px;
+  border-radius: 0 0 var(--radius-card) var(--radius-card);
+  background: var(--surface-card);
+  box-shadow: 0 0 0 1px rgba(var(--ink-rgb), 0.08);
+}
+.bcell-deck span + span {
+  top: 6px;
+  left: 12px;
+  right: 12px;
+  height: 5px;
+  box-shadow: 0 0 0 1px rgba(var(--ink-rgb), 0.07);
+}
+.bcell-run,
+.bcell-failed {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font: var(--type-mono-sm);
+}
+.bcell-run {
+  color: var(--text-accent);
+}
+.bcell-failed {
+  color: var(--status-negative);
+}
+.bcell-spacer {
+  flex: 1;
+}
+
+/* -------- bodies (canvas/bodies.tsx) -------- */
+.bcell.is-sized .bcell-output,
+.bcell.is-sized .bcell-label {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+}
+.bcell-output {
+  min-width: 0;
+}
+/* a table card's DataFrame (canvas/FrameTable): it scrolls inside the card with its header and its row labels held,
+   prose wrapping at a readable measure */
+.frame-table {
+  min-width: 0;
+}
+.frame-table .frame-table-box {
+  display: block;
+  max-height: 440px;
+  overflow: auto;
+}
+.bcell.is-sized .frame-table,
+.bcell.is-sized .frame-table .outputs-html-wrap {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.bcell.is-sized .frame-table .frame-table-box {
+  max-height: none;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+/* a table with a column of prose spans the card, and the prose takes the room the other columns leave, 20ch at least,
+   its words breaking anywhere to keep it (canvas/FrameTable) */
+.frame-table table.frame-table-prose {
+  width: 100%;
+}
+.frame-table td.outputs-prose {
+  width: auto;
+  min-width: 20ch;
+  max-width: none;
+  overflow-wrap: anywhere;
+}
+/* a table wider than the card (FrameTable sets data-fit): text and row names wrap, long tokens break down to 7ch, so
+   no column is lost past the edge; headers wrap between words and numbers keep their line */
+.frame-table[data-fit] table {
+  width: 100%;
+}
+.frame-table[data-fit] tbody th,
+.frame-table[data-fit] td:not(.outputs-num) {
+  min-width: 7ch;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.frame-table[data-fit] thead th {
+  white-space: normal;
+}
+/* the row names in the body face: in mono a person's or a measure's name reads as code */
+.frame-table tbody th {
+  font-family: var(--font-body);
+}
+/* the header and corner stay opaque over pinned row names while the table scrolls */
+.frame-table thead th {
+  z-index: 2;
+}
+.frame-table thead th:first-child {
+  z-index: 3;
+}
+.frame-table .frame-table-box table thead th {
+  background: var(--surface-card);
+}
+/* shell output: one inset block on the inset paper */
+.bcell-output .outputs-stream,
+.bcell-output .outputs-text {
+  margin: 0;
+  padding: 8px 10px;
+  max-height: none;
+  overflow: hidden;
+  border-radius: var(--radius-ui);
+  background: var(--bg-sunken);
+  box-shadow: inset 0 0 0 1px rgba(var(--ink-rgb), 0.07);
+  font: 400 var(--text-mono-sm) / 1.6 var(--font-mono);
+  color: var(--text-secondary);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.bcell-output .outputs-stderr {
+  color: var(--status-warning);
+}
+.bcell-output .outputs-error {
+  padding: 8px 10px;
+  box-shadow: inset 0 0 0 1px rgba(var(--ink-rgb), 0.07);
+  font: 400 var(--text-mono-sm) / 1.6 var(--font-mono);
+}
+.bcell-output .outputs-html {
+  max-height: none;
+  font-size: var(--text-mono);
+}
+.bcell-output .outputs-html thead th,
+.bcell-output .outputs-html .dataframe thead th {
+  background: transparent;
+  font-size: 10.5px;
+  letter-spacing: 0.06em;
+}
+.bcell-output .outputs-html th,
+.bcell-output .outputs-html td {
+  padding: 5px 12px 5px 0;
+}
+.bcell-output .outputs-html tbody th {
+  background: var(--surface-card);
+}
+.bcell-output .outputs-img {
+  border-radius: 0;
+}
+/* a vector chart fills the card's width; a raster image keeps its own size at most */
+.bcell-output .outputs-img[src^='data:image/svg'] {
+  width: 100%;
+}
+.bcell-output .outputs-svg {
+  width: 100%;
+}
+/* a chart never takes part in a text selection (e.g. a ⌘-drag across cards), since the selection's wash would paint
+   an image chart whole, as Safari also does for a selected inline svg */
+.outputs-img,
+.outputs-vega,
+.outputs-vega *,
+body[data-cmd] .board-stage .outputs-img,
+body[data-cmd] .board-stage .outputs-vega,
+body[data-cmd] .board-stage .outputs-vega * {
+  user-select: none;
+}
+.outputs-img::selection,
+.outputs-vega::selection,
+.outputs-vega ::selection {
+  background: transparent;
+}
+.bcell-plainerror {
+  font: var(--type-body-sm);
+  color: var(--status-negative);
+}
+/* a code card: its code in the code's own ink on the paper, what it printed or returned under it */
+.bcell-codecard {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+.bcell-code {
+  margin: 0;
+  font: 400 var(--text-mono-sm) / 1.6 var(--font-mono);
+  color: var(--code-text, var(--text-primary));
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+/* a note: prose, a step larger */
+.bcell-note {
+  font: 400 var(--text-md) / 1.55 var(--font-body);
+  color: var(--text-primary);
+}
+.bcell-note p {
+  margin: 0;
+}
+.bcell-note p + p {
+  margin-top: 6px;
+}
+/* an example: the accent chip with the record's address (which opens Files at the passage), the record behind a faint
+   rule, and in it the cited words highlighted (.hl) among the surrounding words in the tertiary. A record quoted
+   without a passage reads whole, in ink */
+.bcell-quote {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font: 400 var(--text-mono-sm) / 1.55 var(--font-mono);
+  color: var(--text-secondary);
+}
+.bcell-quote-rec {
+  min-width: 0;
+  padding: 2px 0 2px 10px;
+  border-left: 2px solid rgba(var(--ink-rgb), 0.18);
+}
+.bcell-quote-rec:empty {
+  display: none;
+}
+.bcell-address {
+  align-self: flex-start;
+}
+/* the address and under it the record's facts (.rec-facts), one line each, so every record of an example lines up */
+.bcell-address-row {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 3px;
+  min-width: 0;
+}
+/* a cited record's facts (canvas/Quote RecordFacts): time, author and location, each after its glyph, in mono; a fact
+   the cited words name wears the span highlight (.hl) */
+.rec-facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 12px;
+  min-width: 0;
+  font: 400 var(--text-mono-sm) / 1.55 var(--font-mono);
+  color: var(--text-secondary);
+}
+.rec-fact {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  max-width: 100%;
+}
+.rec-fact-ico {
+  flex: none;
+  color: var(--text-tertiary);
+}
+.rec-fact-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.rec-fact-text.hl {
+  padding: 0 2px;
+}
+.bcell-quote-text {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+/* a box that shows its content up to a height, faded at the bottom while there is more, with Show all under it
+   (bodies.tsx Clamp): a quoted record, a label's code */
+.bcell-clamp {
+  overflow: hidden;
+}
+.bcell-clamp.is-clipped {
+  -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 36px), transparent);
+  mask-image: linear-gradient(to bottom, #000 calc(100% - 36px), transparent);
+}
+.bcell-more {
+  align-self: flex-start;
+  min-height: 0;
+  margin-top: 2px;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: var(--type-mono-sm);
+  color: var(--text-secondary);
+  text-decoration: underline;
+  text-decoration-color: var(--border-strong);
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+.bcell-more:hover {
+  color: var(--text-primary);
+}
+/* a quoted record's parts (canvas/quotes): prose in the body face with its lines kept, code and tool output in mono,
+   short fields on one line with their names in the tertiary */
+.bcell-q-body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+.bcell-q-text {
+  font: 400 var(--text-sm) / 1.55 var(--font-body);
+  color: var(--text-primary);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.bcell-q-text.is-dim {
+  color: var(--text-tertiary);
+}
+.bcell-q-code {
+  margin: 0;
+  font: 400 var(--text-mono-sm) / 1.6 var(--font-mono);
+  color: var(--text-secondary);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.bcell-q-tool,
+.bcell-q-field {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+.bcell-q-key {
+  font: 400 10.5px / 1.5 var(--font-mono);
+  color: var(--text-tertiary);
+}
+.bcell-q-fields {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1px 14px;
+  font: 400 var(--text-mono-sm) / 1.6 var(--font-mono);
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+.bcell-q-pair .bcell-q-key {
+  margin-right: 1px;
+}
+/* a passage's words around it; the passage itself is the span highlight, .hl (base.css) */
+.bcell-q-ctx {
+  color: var(--text-tertiary);
+}
+/* an example's image, recording or video: the file itself at the card's width, on a hairline */
+.bcell-media {
+  display: block;
+  width: 100%;
+  max-height: 520px;
+  object-fit: contain;
+  margin-top: 4px;
+  border: 1px solid rgba(var(--ink-rgb), 0.12);
+  border-radius: 6px;
+  background: var(--paper-0);
+}
+audio.bcell-media {
+  border: 0;
+  background: none;
+}
+.bcell-quotes li > div:has(> .bcell-media) {
+  flex: 1;
+  min-width: 0;
+}
+.bcell-quotes {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.bcell-quotes li {
+  display: flex;
+  gap: 10px;
+}
+/* the record's number, on the line of its address chip */
+.bcell-quotes-n {
+  flex: none;
+  width: 12px;
+  font: var(--type-mono-sm);
+  line-height: var(--h-chip);
+  color: var(--text-tertiary);
+}
+.bcell-quotes-text {
+  font: var(--type-ui-sm);
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+/* a label: its head (the square and the name in mono, where it applies), the value table, one example per value, and
+   the line that opens how it is computed on the inset paper */
+.bcell-label-head {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+.bcell-label-name {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+  font: 500 var(--text-sm) / 1.4 var(--font-mono);
+  overflow-wrap: anywhere;
+}
+.bcell-label-square {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  background: var(--ink-900);
+  transform: translateY(-1px);
+}
+.bcell-label-tag {
+  flex: none;
+}
+.bcell-label-where {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font: 400 10.5px / 1.4 var(--font-mono);
+  color: var(--text-tertiary);
+}
+.bcell-label {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+.bcell-label-def {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 10px;
+  border-radius: var(--radius-ui);
+  background: var(--bg-sunken);
+}
+.bcell-label-kind {
+  font: 400 10.5px / 1.5 var(--font-mono);
+  color: var(--text-tertiary);
+}
+.bcell-label-prompt {
+  font: var(--type-body-sm);
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+.bcell-label-spec {
+  margin: 0;
+  font: var(--type-mono-sm);
+  color: var(--text-secondary);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.bcell-values {
+  width: 100%;
+  border-collapse: collapse;
+  font-variant-numeric: tabular-nums;
+}
+.bcell-values th {
+  padding: 4px 0;
+  border-bottom: 1px solid rgba(var(--ink-rgb), 0.14);
+  font: 400 10.5px / 1.4 var(--font-body);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+  text-align: left;
+}
+.bcell-values td {
+  padding: 5px 0;
+  border-bottom: 1px solid rgba(var(--ink-rgb), 0.07);
+  font: 400 var(--text-sm) / 1.4 var(--font-body);
+}
+/* a value: its words in the body's face, a button that sets the scope's filter, inverted to ink while it is on */
+.bcell-value {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin: -2px 0;
+  padding: 2px 6px;
+  border: 0;
+  border-radius: var(--radius-chip);
+  background: none;
+  color: var(--text-primary);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: var(--transition-color);
+}
+.bcell-value:hover:not(:disabled) {
+  background: rgba(var(--ink-rgb), 0.06);
+}
+.bcell-value.is-on,
+.bcell-value.is-on:hover:not(:disabled) {
+  background: var(--surface-inverse);
+  color: var(--text-on-inverse);
+}
+.bcell-value:disabled {
+  cursor: default;
+}
+.bcell-values .num {
+  text-align: right;
+}
+/* how many units matched, of all the label read: the base of the shares, which are among the matches */
+.bcell-values-total {
+  margin-top: -4px;
+  font: 400 var(--text-xs) / 1.5 var(--font-body);
+  color: var(--text-tertiary);
+  font-variant-numeric: tabular-nums;
+}
+/* a value of a label over files: a 7px square in its colour before the chip, filled when the Files reader highlights it */
+.bcell-value-square {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  margin-right: 8px;
+  border-radius: 2px;
+  box-shadow: inset 0 0 0 1.5px var(--c);
+  vertical-align: 1px;
+}
+.bcell-value-square.is-lit {
+  background: var(--c);
+}
+/* one example per value, one to a line across the card: the value in mono, then the record's own words */
+.bcell-label-examples {
+  display: grid;
+  grid-template-columns: fit-content(34%) minmax(0, 1fr);
+  gap: 6px 14px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.bcell-label-example {
+  display: contents;
+}
+.bcell-label-example-value {
+  font: 400 var(--text-xs) / 1.5 var(--font-body);
+  color: var(--text-tertiary);
+  overflow-wrap: anywhere;
+}
+.bcell-label-example-text {
+  min-width: 0;
+  font: 400 var(--text-xs) / 1.5 var(--font-body);
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+/* the files a label applies to, under a card whose head holds its question; the name is in the details */
+.bcell-label-glob {
+  margin-top: -4px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font: 400 10.5px / 1.4 var(--font-mono);
+  color: var(--text-tertiary);
+}
+/* how the label is computed: one quiet line that opens the rule */
+.bcell-label-how {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+.bcell-label-rule-toggle {
+  align-self: flex-start;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: 400 10.5px / 1.5 var(--font-mono);
+  color: var(--text-tertiary);
+  cursor: pointer;
+}
+.bcell-label-rule-toggle:hover {
+  color: var(--text-secondary);
+  text-decoration: underline;
+}
+.bcell-label-run {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font: var(--type-mono-sm);
+  color: var(--text-accent);
+}
+
+/* -------- while a card or a frame drags: the accent bar in the gap, the tag that says where it goes, the marquee -------- */
+.board-ins {
+  position: absolute;
+  z-index: 60;
+  border-radius: 2px;
+  background: var(--accent);
+  box-shadow: 0 0 0 2px color-mix(in oklab, var(--accent) 20%, transparent);
+  pointer-events: none;
+}
+.board-tag {
+  position: absolute;
+  z-index: 60;
+  display: inline-flex;
+  align-items: center;
+  height: 22px;
+  padding: 0 8px;
+  border-radius: var(--radius-seg);
+  background: var(--accent);
+  color: var(--accent-on);
+  font: 500 var(--text-mono) / 1 var(--font-body);
+  white-space: nowrap;
+  pointer-events: none;
+}
+.board-marquee {
+  position: absolute;
+  z-index: 60;
+  border: 1px solid var(--accent);
+  border-radius: 2px;
+  background: color-mix(in oklab, var(--accent) 8%, transparent);
+  pointer-events: none;
+}
+
+/* -------- the controls: Card · Group at the top right; at the bottom right, one 180-wide group of the search, the
+   zoom, Fit and the minimap -------- */
+/* the tonal step over the pane's paper, made solid so the cards the board slides under it do not show through */
+.bctl {
+  --bctl-bg: color-mix(in oklab, var(--bg-panel), rgb(var(--ink-rgb)) 4%);
+  position: absolute;
+  right: 14px;
+  bottom: 40px;
+  z-index: 4;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+}
+.bctl-top {
+  top: 14px;
+  bottom: auto;
+}
+.bctl-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 2px;
+  box-sizing: border-box;
+  min-width: 180px;
+  padding: 3px;
+  border-radius: var(--radius-card);
+  background: var(--bctl-bg);
+}
+/* the search, zoom and Fit bar sits on the minimap's own fill: the two read as one group */
+.bctl-nav {
+  display: flex;
+  flex-direction: column;
+  width: 180px;
+  border-radius: var(--radius-card);
+  background: var(--bctl-bg);
+}
+.bctl-nav .bctl-bar {
+  background: transparent;
+  border-bottom: 1px solid var(--border-hairline);
+  border-radius: var(--radius-card) var(--radius-card) 0 0;
+}
+.bctl-nav .bctl-map {
+  border-radius: 0 0 var(--radius-card) var(--radius-card);
+  background: transparent;
+}
+.bctl-btn {
+  flex: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: var(--radius-seg);
+  background: transparent;
+  font: 400 var(--text-ui-sm) / 1 var(--font-body);
+  color: var(--text-primary);
+  white-space: nowrap;
+  cursor: pointer;
+  transition: var(--transition-color);
+}
+.bctl-btn:hover {
+  background: var(--surface-tonal-hover);
+}
+.bctl-btn .icon,
+.bctl-btn svg {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.bctl-sq {
+  flex: none;
+  width: 28px;
+  padding: 0;
+  font: 400 var(--text-lg) / 1 var(--font-mono);
+  color: var(--text-secondary);
+}
+.bctl-pct {
+  min-width: 40px;
+  text-align: center;
+  font: 400 var(--text-xs) / 1 var(--font-mono);
+  color: var(--text-secondary);
+}
+.bctl-fit {
+  flex: none;
+  padding: 0 10px;
+}
+.bctl-sep {
+  flex: none;
+  width: 1px;
+  height: 16px;
+  margin: 0 2px;
+  background: rgba(var(--ink-rgb), 0.14);
+}
+.bctl-count {
+  padding: 0 6px;
+  font: var(--type-body-sm);
+  color: var(--text-tertiary);
+  white-space: nowrap;
+}
+.bctl-group .kbd {
+  height: auto;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  opacity: 0.8;
+}
+.bctl-map {
+  position: relative;
+  box-sizing: border-box;
+  overflow: hidden;
+  border-radius: var(--radius-card);
+  background: var(--bctl-bg);
+  cursor: pointer;
+}
+.bctl-map-frame,
+.bctl-map-card,
+.bctl-map-view {
+  position: absolute;
+  pointer-events: none;
+}
+.bctl-map-frame {
+  border-radius: 2px;
+  background: rgba(var(--ink-rgb), 0.06);
+}
+.bctl-map-card {
+  border-radius: 1px;
+  background: var(--surface-card);
+}
+/* a filter is set: the cards it keeps in ink, the rest faint */
+.bctl-map-card.is-kept {
+  background: var(--ink-700);
+}
+.bctl-map-card.is-left {
+  background: var(--surface-card);
+  opacity: 0.45;
+}
+.bctl-map-card.is-selected {
+  background: var(--accent);
+  opacity: 1;
+}
+/* the search button: in the accent while a filter is set, with the count of what is set on its corner */
+.bctl-btn.is-on {
+  color: var(--text-accent);
+}
+.bctl-filter {
+  position: relative;
+}
+.bctl-filter-count {
+  position: absolute;
+  top: -3px;
+  right: -4px;
+  min-width: 14px;
+  height: 14px;
+  padding: 0 3px;
+  box-sizing: border-box;
+  border-radius: 7px;
+  background: var(--accent);
+  color: var(--accent-on);
+  font: 500 var(--text-xs) / 14px var(--font-mono);
+  text-align: center;
+}
+/* the Filter menu: a heading per part and a row per choice with its count and a check while set; it stays open while
+   choices are made */
+.bfilter {
+  max-height: min(560px, calc(100vh - 120px));
+}
+.bfilter-part + .bfilter-part {
+  margin-top: 2px;
+}
+.bfilter-mono {
+  font-family: var(--font-mono);
+}
+.bfilter .menu-item-note {
+  margin-left: auto;
+}
+.bfilter-check.is-off {
+  visibility: hidden;
+}
+/* the card check's part of the search menu (CheckStatus): its automatic switch as a row, its name at the left and the
+   switch at the right, then while checks run their count with Stop */
+.bfilter-auto,
+.bfilter-running {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 28px;
+  padding: 0 8px;
+  font: var(--type-body-sm);
+  color: var(--text-primary);
+}
+.bfilter-auto {
+  cursor: pointer;
+}
+.bfilter-running {
+  color: var(--text-secondary);
+}
+/* the Filter menu's search field, the report sidebar's .wu-search at the menu's inset */
+.bfilter-search {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  box-sizing: border-box;
+  margin: 2px 4px 6px;
+  padding: 0 8px;
+  border-radius: var(--radius-ui);
+  background: var(--surface-card);
+  box-shadow: 0 0 0 1px rgba(var(--ink-rgb), 0.1);
+  color: var(--text-tertiary);
+}
+.bfilter-search:focus-within {
+  box-shadow: 0 0 0 1.5px var(--accent);
+}
+.bfilter-search input {
+  flex: 1;
+  min-width: 0;
+  height: auto;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  outline: none;
+  background: transparent;
+  box-shadow: none;
+  font: 400 var(--text-ui-sm) / 1.2 var(--font-body);
+  color: var(--text-primary);
+}
+.bfilter-search input::placeholder {
+  color: var(--text-tertiary);
+}
+.bctl-map-view {
+  box-sizing: border-box;
+  border: 1.5px solid var(--accent);
+  border-radius: 2px;
+}
+/* the way back when the content is out of view, on the edge toward it */
+.board-pill {
+  position: absolute;
+  z-index: 4;
+  transform: translate(-50%, -50%);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: rgba(var(--ink-rgb), 0.07);
+  font: var(--type-body-sm);
+  color: var(--text-secondary);
+  white-space: nowrap;
+  cursor: pointer;
+  transition: var(--transition-color);
+}
+.board-pill:hover {
+  background: rgba(var(--ink-rgb), 0.12);
+  color: var(--text-primary);
+}
+/* the status line: glass along the bottom, in mono */
+.board-status {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 8;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  height: 28px;
+  padding: 0 14px;
+  background: var(--glass-bg);
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
+  box-shadow: 0 -1px 0 rgba(var(--ink-rgb), 0.07);
+  font: var(--type-mono-sm);
+  color: var(--text-tertiary);
+}
+
+/* -------- the detail panel (canvas/DetailPanel.tsx): 420 wide at the right, over the board, and no wider than the
+   pane -------- */
+.bdetail {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 28px;
+  z-index: 6;
+  display: flex;
+  flex-direction: column;
+  width: 420px;
+  max-width: 100%;
+  background: var(--surface-card);
+  box-shadow: -1px 0 0 rgba(var(--ink-rgb), 0.1), var(--shadow-float);
+  user-select: text;
+}
+.bdetail-head {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 44px;
+  padding: 0 10px 0 16px;
+  border-bottom: 1px solid rgba(var(--ink-rgb), 0.1);
+}
+.bdetail-title {
+  font-weight: 500;
+}
+.bdetail-id {
+  font: var(--type-mono-sm);
+  color: var(--text-tertiary);
+}
+.bdetail-close {
+  margin-left: auto;
+}
+.bdetail-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  scrollbar-width: none;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  padding: 16px;
+}
+/* the panel scrolls; its sections keep their height rather than shrink to fit */
+.bdetail-body > * {
+  flex: none;
+}
+.bdetail-q.field {
+  min-height: 0;
+  margin: -4px -6px;
+  padding: 4px 6px;
+  font: 500 15px / 1.35 var(--font-body);
+  color: var(--text-primary);
+}
+.bdetail-facts {
+  display: grid;
+  grid-template-columns: 72px 1fr;
+  align-items: baseline;
+  gap: 6px 10px;
+  margin: 0;
+  font: var(--type-body-sm);
+}
+.bdetail-facts dt {
+  color: var(--text-tertiary);
+}
+.bdetail-facts dd {
+  min-width: 0;
+  margin: 0;
+}
+.bdetail-mono {
+  font: var(--type-mono);
+}
+.bdetail-thread {
+  padding: 0;
+  border: 0;
+  background: none;
+  font: var(--type-mono);
+  color: var(--text-accent);
+  cursor: pointer;
+}
+/* with no thread to open, the name is shown as a fact in the secondary ink at full strength, not the disabled .4 */
+.bdetail-thread:disabled {
+  opacity: 1;
+  color: var(--text-secondary);
+  cursor: default;
+}
+/* the files the run read: a row per folder and pattern with a chevron that opens it to its paths */
+.bdetail-inputs {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.bdetail-input {
+  min-width: 0;
+}
+.bdetail-input-group,
+.bdetail-input-path {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  max-width: 100%;
+  padding: 1px 0;
+  border: 0;
+  background: none;
+  font: var(--type-mono);
+  color: var(--text-primary);
+  text-align: left;
+  cursor: pointer;
+}
+.bdetail-input-path {
+  display: block;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.bdetail-input-path:hover,
+.bdetail-input-group:hover .bdetail-input-pattern {
+  color: var(--text-accent);
+}
+.bdetail-input-chev {
+  flex: none;
+  align-self: center;
+  color: var(--text-tertiary);
+  transition: transform var(--dur-fast) var(--ease-out);
+}
+.bdetail-input.is-open .bdetail-input-chev {
+  transform: rotate(90deg);
+}
+.bdetail-input-count {
+  flex: none;
+  color: var(--text-secondary);
+}
+.bdetail-input-pattern {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+/* a file read on its own lines up with the patterns, past the chevron */
+.bdetail-input > .bdetail-input-path {
+  padding-left: 16px;
+}
+.bdetail-input-paths {
+  display: flex;
+  flex-direction: column;
+  margin: 2px 0 4px 16px;
+  padding-left: 8px;
+  border-left: 1px solid var(--border-hairline);
+}
+.bdetail-input-paths .bdetail-input-path {
+  color: var(--text-secondary);
+}
+.bdetail-input-more {
+  padding: 1px 0 1px 16px;
+  font: var(--type-mono);
+  color: var(--text-tertiary);
+}
+/* the run's artifact itself, at the panel's width: a table scrolls sideways under its fade, a chart fills the room */
+.bdetail-artifact {
+  min-width: 0;
+}
+.bdetail-artifact .outputs-html {
+  max-height: none;
+  font-size: var(--text-mono);
+}
+.bdetail-artifact .outputs-html thead th {
+  background: transparent;
+}
+.bdetail-artifact .outputs-html tbody th {
+  background: var(--surface-card);
+}
+.bdetail-artifact .outputs-img[src^='data:image/svg'] {
+  width: 100%;
+}
+.bdetail-sec {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+.bdetail-sec-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.bdetail-label {
+  font: var(--type-label);
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--text-tertiary);
+}
+.bdetail-dirty {
+  font: var(--type-label);
+  color: var(--status-warning);
+}
+.bdetail-run {
+  margin-left: auto;
+}
+.bdetail-run.btn-secondary {
+  border-color: transparent;
+  background: rgba(var(--ink-rgb), 0.06);
+}
+/* Run's play glyph, filled */
+.bdetail-run .icon-run path {
+  fill: currentColor;
+}
+.bdetail-run .kbd {
+  height: auto;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  opacity: 0.8;
+}
+/* a long line scrolls sideways under a thin scrollbar, the edge fading while it is cut off */
+.bdetail-code-box {
+  position: relative;
+  min-width: 0;
+}
+.bdetail-code-box.has-more::after {
+  content: '';
+  position: absolute;
+  top: 1px;
+  right: 1px;
+  bottom: 1px;
+  width: 36px;
+  border-radius: 0 var(--radius-ui) var(--radius-ui) 0;
+  background: linear-gradient(to right, transparent, var(--bg-sunken));
+  pointer-events: none;
+}
+.bdetail-code.field {
+  box-sizing: border-box;
+  padding: 10px 14px;
+  border: 0;
+  border-radius: var(--radius-ui);
+  background: var(--bg-sunken);
+  box-shadow: inset 0 0 0 1px rgba(var(--ink-rgb), 0.08);
+  font: 400 var(--text-mono-sm) / 1.7 var(--font-mono);
+  color: var(--text-secondary);
+  tab-size: 4;
+  white-space: pre;
+  overflow-x: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--ink-300) transparent;
+}
+.bdetail-block {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  min-width: 0;
+}
+.bdetail-shell {
+  align-self: stretch;
+  margin: 0;
+  padding: 8px 10px;
+  max-height: 320px;
+  overflow: auto;
+  border-radius: var(--radius-ui);
+  background: var(--bg-sunken);
+  box-shadow: inset 0 0 0 1px rgba(var(--ink-rgb), 0.08);
+  font: 400 var(--text-mono-sm) / 1.6 var(--font-mono);
+  white-space: pre;
+  color: var(--text-secondary);
+}
+.bdetail-stderr {
+  color: var(--status-warning);
+}
+.bdetail-error {
+  color: var(--status-negative);
+}
+.bdetail-error-head {
+  font-weight: 500;
+}
+.bdetail-wait {
+  display: flex;
+  align-items: center;
+  min-height: 20px;
+}
+.bdetail-note.field {
+  min-height: 0;
+  padding: 0;
+  font: 400 var(--text-md) / 1.55 var(--font-body);
+}
+.bdetail-take {
+  display: flex;
+  gap: 10px;
+}
+.bdetail-take::before {
+  content: '';
+  flex: none;
+  width: 2px;
+  background: var(--ink-900);
+}
+.bdetail-take-text {
+  flex: 1;
+  min-width: 0;
+  min-height: 22px;
+  line-height: 1.55;
+  color: var(--text-primary);
+  overflow-wrap: anywhere;
+}
+.bdetail-take-text p {
+  margin: 0;
+}
+.bdetail-take-text p + p {
+  margin-top: 4px;
+}
+.bdetail-take-text.is-rest {
+  cursor: text;
+}
+.bdetail-take-text.is-rest:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 1.5px var(--accent);
+  border-radius: var(--radius-hl);
+}
+.bdetail-take-empty {
+  color: var(--text-placeholder);
+}
+.bdetail-hist {
+  display: flex;
+  gap: 10px;
+  font: var(--type-body-sm);
+  color: var(--text-secondary);
+}
+.bdetail-hist-t {
+  flex: none;
+  width: 40px;
+  font: var(--type-mono-sm);
+  color: var(--text-tertiary);
+}
+/* a label card's own details (LabelDetails) inside the panel: its sections without a drawer of their own */
+.bdetail .canvas-card-details {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  margin: 0;
+  padding: 0;
+}
+
+/* -------- focus mode (canvas/Focus.tsx): the frame's cards at the left, the card at 760 in the middle, the glass
+   composer under it; the card scrolls in the room above the composer (--bfocus-bar-h) -------- */
+.bfocus {
+  position: absolute;
+  inset: 0 0 28px 0;
+  z-index: 7;
+  display: grid;
+  grid-template-columns: 220px minmax(0, 1fr);
+  background: var(--bg-panel);
+  user-select: text;
+}
+.bfocus-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 16px 10px;
+  overflow: auto;
+  box-shadow: inset -1px 0 0 rgba(var(--ink-rgb), 0.08);
+}
+.bfocus-frame {
+  padding: 0 8px 8px;
+  font: var(--type-label);
+  color: var(--text-tertiary);
+}
+.bfocus-item {
+  flex: none;
+  display: block;
+  width: 100%;
+  white-space: normal;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: var(--radius-seg);
+  background: transparent;
+  font: 400 var(--text-ui-sm) / 1.35 var(--font-body);
+  color: var(--text-secondary);
+  text-align: left;
+  cursor: pointer;
+}
+.bfocus-item:hover {
+  background: rgba(var(--ink-rgb), 0.05);
+}
+.bfocus-item.is-current {
+  background: var(--raised-bg);
+  color: var(--text-primary);
+  font-weight: 500;
+}
+.bfocus-main {
+  position: absolute;
+  inset: 0 0 calc(var(--bfocus-bar-h, 44px) + 28px) 0;
+  overflow: auto;
+  padding: 28px 40px 16px;
+}
+.bfocus-col {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
+  max-width: 760px;
+  margin: 0 auto;
+}
+.bfocus-meta,
+.bfocus-pos {
+  font: var(--type-mono-sm);
+  color: var(--text-tertiary);
+}
+.bfocus-pos {
+  padding-top: 8px;
+  font: var(--type-body-sm);
+}
+.bfocus-card {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 24px 28px;
+  border-radius: var(--radius-pane);
+  background: var(--surface-card);
+  box-shadow: 0 0 0 1px rgba(var(--ink-rgb), 0.08), var(--shadow-float);
+}
+.bfocus-q {
+  font: 500 20px / 1.3 var(--font-body);
+  letter-spacing: var(--tracking-title);
+}
+.bfocus-card .bcell-note {
+  font-size: 15px;
+  line-height: 1.6;
+}
+.bfocus-take {
+  display: flex;
+  gap: 12px;
+  font-size: 15px;
+  line-height: 1.6;
+  color: var(--text-primary);
+}
+.bfocus-take::before {
+  content: '';
+  flex: none;
+  width: 2px;
+  background: var(--ink-900);
+}
+.bfocus-take p {
+  margin: 0;
+}
+.bfocus-stage {
+  position: relative;
+  min-height: 0;
+}
+.bfocus-composer {
+  position: absolute;
+  left: 40px;
+  right: 40px;
+  bottom: 16px;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-width: 760px;
+  margin: 0 auto;
+}
+.bfocus-asked {
+  font: var(--type-body-sm);
+  color: var(--text-tertiary);
+}
+.bfocus-asked-thread {
+  font: var(--type-mono-sm);
+  color: var(--text-secondary);
+}
+/* the composer as a one-row bar (the shared ComposerFrame): the text, the thread's name in mono, the accent
+   send square, 44 tall */
+.composer.bfocus-bar {
+  flex-direction: row;
+  align-items: center;
+  gap: 10px;
+  min-height: 44px;
+  padding: 8px 9px 8px 14px;
+}
+.composer.bfocus-bar .composer-text {
+  align-self: center;
+}
+.composer.bfocus-bar .composer-foot {
+  flex: none;
+  gap: 10px;
+  min-height: 0;
+}
+.composer.bfocus-bar .composer-spacer {
+  display: none;
+}
+.bfocus-thread {
+  font: 400 var(--text-mono-sm) / 1 var(--font-mono);
+  color: var(--text-tertiary);
+}
+.composer.bfocus-bar .composer-send.btn,
+.composer.bfocus-bar .composer-send.btn:disabled {
+  width: 26px;
+  height: 26px;
+  opacity: 1;
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--text-on-accent);
+}
+.bfocus-close {
+  position: absolute;
+  top: 12px;
+  right: 14px;
+}
+
+/* -------- the shared pieces the label card's details and the dataset cards use (LabelDetails, DataViz) -------- */
+.canvas-details-section {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  min-width: 0;
+}
+.canvas-details-section > .label {
+  line-height: 16px;
+}
+.canvas-details-section > .field,
+.canvas-details-section > .canvas-details-shell {
+  align-self: stretch;
+}
+.canvas-details-actions,
+.canvas-details-run {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 6px;
+}
+.canvas-details-shell {
+  margin: 0;
+  padding: 8px 10px;
+  max-height: 320px;
+  overflow: auto;
+  border-radius: var(--radius-ui);
+  background: var(--bg-sunken);
+  font: var(--type-mono-sm);
+  white-space: pre;
+  color: var(--text-secondary);
+}
+.canvas-details-wait {
+  display: flex;
+  align-items: center;
+  min-height: 20px;
+}
+.canvas-example-text {
+  font: var(--type-mono);
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+.canvas-label-details .canvas-details-section > .canvas-label-def,
+.canvas-label-details .canvas-details-section > .canvas-label-spec,
+.canvas-label-details .canvas-details-section > .canvas-label-rows,
+.canvas-label-details .canvas-details-section > .canvas-label-files {
+  align-self: stretch;
+}
+/* CLASSES: a row per value: the colour square, the name in mono, its count and the highlight switch */
+.canvas-label-details .canvas-details-section > .canvas-label-classes {
+  align-self: stretch;
+}
+.canvas-label-class {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 26px;
+}
+.canvas-label-colour {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-chip);
+  background: var(--c);
+  cursor: pointer;
+}
+.canvas-label-classname {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font: var(--type-mono);
+  color: var(--text-primary);
+}
+.canvas-label-classcount {
+  font: var(--type-mono-sm);
+  font-variant-numeric: tabular-nums;
+  color: var(--text-tertiary);
+}
+/* the label's name over its definition: the card's face leaves it out under a question of its own */
+.canvas-label-name {
+  font: 500 var(--text-sm) / 1.4 var(--font-body);
+  color: var(--text-primary);
+  overflow-wrap: anywhere;
+}
+.canvas-label-def {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  min-height: 24px;
+  cursor: text;
+}
+.canvas-label-def-text {
+  flex: 1 1 auto;
+  padding-top: 3px;
+  font: var(--type-body);
+  color: var(--text-primary);
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+.canvas-label-def-editor {
+  min-height: 0;
+  font: var(--type-body);
+}
+.canvas-label-spec {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 240px;
+}
+.canvas-label-code {
+  white-space: pre;
+}
+.canvas-label-sublabel {
+  margin-top: 4px;
+}
+.canvas-label-files {
+  margin: 0;
+  padding: 6px 10px;
+  list-style: none;
+  max-height: 160px;
+  overflow: auto;
+  border-radius: var(--radius-ui);
+  background: var(--bg-sunken);
+  font: var(--type-mono-sm);
+  color: var(--text-secondary);
+}
+.canvas-label-file {
+  line-height: 18px;
+  overflow-wrap: anywhere;
+}
+.canvas-label-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.canvas-label-row > .card-body {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 4px;
+}
+.canvas-label-rowhead {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 6px;
+  min-width: 0;
+}
+.canvas-label-row .canvas-example-text {
+  font: var(--type-mono-sm);
+  max-height: 140px;
+  overflow: auto;
+}
+.canvas-label-menu {
+  display: inline-flex;
+}
+.canvas-label-rationale {
+  padding-left: 10px;
+  font: var(--type-body-sm);
+  color: var(--text-tertiary);
+  overflow-wrap: anywhere;
+}
+.canvas-card-html {
+  display: block;
+  width: 100%;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+/* a custom card's frame: faded at the bottom while its page runs past the frame, Show all under it */
+.canvas-card-frame {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.canvas-card-frame.is-clipped .canvas-card-html {
+  -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 48px), transparent);
+  mask-image: linear-gradient(to bottom, #000 calc(100% - 48px), transparent);
+}
+.canvas-card-codeblock {
+  margin: 0;
+  padding: 8px 10px;
+  max-height: 320px;
+  overflow: auto;
+  border-radius: var(--radius-ui);
+  background: var(--bg-sunken);
+  font: var(--type-mono-sm);
+  white-space: pre;
+  color: var(--text-secondary);
+}
+/* a timeline (DataViz Timeline): the time at the left in mono, a dot on a hairline axis, the label at the right; the
+   gap under a row grows with the time until the next, and a much longer wait is a break */
+.canvas-timeline {
+  min-width: 0;
+}
+.canvas-tl {
+  position: relative;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  /* the time column is sized in this face's ch */
+  font: 400 var(--text-mono-sm) / 1.55 var(--font-mono);
+}
+/* the axis: a hairline from each dot down to the next one, through the gap under the row */
+.canvas-tl-row:not(:last-child)::after {
+  content: '';
+  position: absolute;
+  top: 10px;
+  bottom: -10px;
+  left: calc(var(--tl-time) + 14px + 3.5px);
+  width: 1px;
+  background: rgba(var(--ink-rgb), 0.18);
+}
+.canvas-tl-row {
+  position: relative;
+  display: grid;
+  grid-template-columns: var(--tl-time) 8px minmax(0, 1fr);
+  column-gap: 14px;
+  align-items: baseline;
+}
+.canvas-tl-time {
+  font: 400 var(--text-mono-sm) / 1.55 var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--text-tertiary);
+  white-space: nowrap;
+  text-align: right;
+}
+.canvas-tl-dot {
+  position: relative;
+  z-index: 1;
+  align-self: start;
+  width: 8px;
+  height: 8px;
+  margin-top: 6px;
+  border-radius: 50%;
+  background: var(--ink-900);
+  box-shadow: 0 0 0 2px var(--surface-card);
+}
+.canvas-tl-label {
+  font: 400 var(--text-xs) / 1.55 var(--font-body);
+  color: var(--text-primary);
+  overflow-wrap: anywhere;
+}
+.canvas-tl-lane {
+  margin-right: 8px;
+  font: 400 10.5px / 1.55 var(--font-mono);
+  color: var(--text-tertiary);
+}
+/* a break (DataViz timelineBreaks): a much longer wait drawn as a short dashed stretch of the axis with its length in
+   the time column */
+.canvas-tl-row.canvas-tl-before-break::after {
+  bottom: 0;
+}
+.canvas-tl-break {
+  position: relative;
+  display: grid;
+  grid-template-columns: var(--tl-time) 8px minmax(0, 1fr);
+  column-gap: 14px;
+  padding: 2px 0 6px;
+}
+.canvas-tl-break::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: -10px;
+  left: calc(var(--tl-time) + 14px + 3.5px);
+  width: 1px;
+  background: repeating-linear-gradient(to bottom, rgba(var(--ink-rgb), 0.4) 0 2px, transparent 2px 5px);
+}
+.canvas-tl-wait {
+  font: 400 10.5px / 1.5 var(--font-mono);
+  color: var(--text-tertiary);
+  white-space: nowrap;
+  text-align: right;
+}
+.canvas-viz-more {
+  padding-top: 4px;
+  font: var(--type-mono-sm);
+}
+/* a diagram, top to bottom (DataViz diagramLayout): hairline boxes with the name in mono and the detail under it,
+   lines at .3, short edge labels on a paper halo, long ones as a numbered ring with a note under the drawing */
+.canvas-diagram-wrap {
+  min-width: 0;
+}
+.canvas-diagram {
+  position: relative;
+  min-width: 0;
+  overflow-x: auto;
+}
+.canvas-diagram.canvas-diagram-overflow::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 40px;
+  pointer-events: none;
+  background: linear-gradient(to right, transparent, var(--surface-card));
+}
+.canvas-diagram-svg {
+  display: block;
+  margin: 0 auto;
+  overflow: visible;
+  font: 400 var(--text-mono-sm) var(--font-mono);
+}
+.canvas-diagram-node rect {
+  fill: var(--surface-card);
+  stroke: rgba(var(--ink-rgb), 0.3);
+}
+.canvas-diagram-name {
+  fill: var(--text-primary);
+  font: 500 11px var(--font-mono);
+}
+.canvas-diagram-detail {
+  fill: var(--text-tertiary);
+  font: 400 10px var(--font-mono);
+}
+/* the lines in ink .3 mixed into the paper rather than laid over it, so edges sharing a trunk draw it in one tone */
+.canvas-diagram-edge path {
+  fill: none;
+  stroke: color-mix(in srgb, rgb(var(--ink-rgb)) 30%, var(--surface-card));
+  stroke-width: 1.2;
+}
+/* the paper under a short edge label, so its own line and any other stops at the label rather than running through it */
+.canvas-diagram-label-bg {
+  fill: var(--surface-card);
+}
+.canvas-diagram-label {
+  fill: var(--text-secondary);
+  font: 400 10px var(--font-mono);
+  paint-order: stroke;
+  stroke: var(--surface-card);
+  stroke-width: 4px;
+  stroke-linejoin: round;
+}
+.canvas-diagram-mark circle {
+  fill: var(--surface-card);
+  stroke: rgba(var(--ink-rgb), 0.45);
+}
+.canvas-diagram-mark text {
+  fill: var(--text-secondary);
+  font: 500 9.5px var(--font-mono);
+}
+.canvas-diagram-svg marker path {
+  fill: color-mix(in srgb, rgb(var(--ink-rgb)) 30%, var(--surface-card));
+}
+.canvas-diagram-notes {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+  font: 400 var(--text-xs) / 1.5 var(--font-body);
+  color: var(--text-secondary);
+}
+.canvas-diagram-notes li {
+  display: flex;
+  gap: 8px;
+}
+.canvas-diagram-note-n {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  margin-top: 1px;
+  border: 1px solid rgba(var(--ink-rgb), 0.45);
+  border-radius: 50%;
+  font: 500 9.5px / 1 var(--font-mono);
+}
+.canvas-diagram-note-ends {
+  font: 400 var(--text-mono-sm) / 1.5 var(--font-mono);
+  color: var(--text-tertiary);
+}

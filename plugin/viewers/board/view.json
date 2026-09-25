@@ -1,0 +1,9 @@
+{
+  "name": "Threads",
+  "why": "The agents' message board read as threads: every post of a thread in time order, signed by its author, so a proposal and the replies it got read together.",
+  "claims": ["board.jsonl"],
+  "accepts": [{"form": "L<n>", "means": "the post on line <n>, shown in its thread"}],
+  "declares": [{"form": "<thread_id>", "means": "one thread, every post in time order"}],
+  "default": true,
+  "libs": []
+}

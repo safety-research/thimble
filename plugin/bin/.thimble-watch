@@ -1,0 +1,341 @@
+#!/bin/sh
+''''[ -n "${THIMBLE_SESSION:-}" ] && exit 0; exec "$(dirname "$0")/thimble-python" -S "$0" "$@" # '''
+"""thimble's watcher: how browser events reach a Claude Code session whose channel is off. The plugin's hooks
+(plugin/hooks/hooks.json) run it, and on the Monitor route main's Monitor does.
+
+The first two lines make this file both a shell script and a Python program, as in bin/thimble-mcp; the shell line
+exits at once in a session thimble starts itself (THIMBLE_SESSION set). Python runs with -S, since the file uses only
+the standard library and runs on every tool call.
+
+    .thimble-watch                      the asyncRewake hook (SessionStart, Stop, PreToolUse, UserPromptSubmit)
+    .thimble-watch --permission         the PermissionRequest hook
+    .thimble-watch --stream --cwd <folder> --session <id>
+                                        the Monitor route
+
+The hook long-polls the server for the session's next event (GET /api/channel/pull), writes it to stderr in the
+`<channel …>` form, acknowledges it and exits 2, which makes Claude Code wake the session. It exits 0 in a subagent, when
+another watcher holds the session's lock, when no server listens at first, on 404/409/410 (STOP), and when the
+`claude` process has moved to another session (/clear). A server that has answered once is waited for across restarts.
+
+The permission hook relays the prompt to the server, which shows it in main's chat and answers when the analyst does.
+
+The stream writes each event as one block of lines. Claude Code truncates Monitor output at 500 characters per line and
+about 3,000 per event, so lines are wrapped under LINE_CHARS and a longer event is cut and saved whole under
+<thimble home>/events/.
+"""
+import fcntl
+import http.client
+import json
+import os
+import re
+import sys
+import time
+import urllib.error
+import urllib.parse
+import urllib.request
+from pathlib import Path
+
+DEFAULT_PORT = 8300
+PULL_WAIT_S = 25  # app/channel.py PULL_WAIT_S: the server holds a pull this long
+LIFETIME_S = 23 * 3600  # the hook's own timeout is 86400 s (hooks.json)
+RETRY_S = 2.0
+LOCK_SWEEP_S = 2 * 86400  # a lock file untouched this long belongs to no running watcher (each takes it anew)
+MAX_HOPS = 8  # claude_pid's walk up the process tree
+STREAM_CHARS = 2_800  # below Claude Code's cut of a Monitor event
+LINE_CHARS = 480  # below Claude Code's cut of a Monitor line, 500, counted as it counts (UTF-16 code units)
+SPACE = re.compile(r" ")
+ATTR_BREAK = re.compile(r' (?=[A-Za-z_][A-Za-z0-9_]*=")')  # the space before an attribute (a value's " is escaped)
+WAKE = 2  # the exit code that wakes the session (asyncRewake)
+STOP = {404, 409, 410}  # the server's answers that end a watcher (module note)
+CUT_NOTE = "(cut here, since a Monitor event holds about 3,000 characters; the whole event is in {path})"
+DENIED = "The analyst denied this in thimble's browser."
+
+
+def home() -> Path:
+    return Path(os.environ.get("THIMBLE_HOME") or (Path.home() / ".thimble"))
+
+
+def server_url() -> str:
+    """The server's API base URL, read as bin/thimble-mcp's server_url reads it: $THIMBLE_HOME/server.json's `api`, then
+    its `port`, else THIMBLE_PORT or 8300."""
+    try:
+        data = json.loads((home() / "server.json").read_text("utf-8"))
+        if isinstance(data, dict):
+            if data.get("api"):
+                return str(data["api"]).rstrip("/")
+            if data.get("port"):
+                return f"http://127.0.0.1:{int(data['port'])}"
+    except (OSError, ValueError, TypeError):
+        pass
+    return f"http://127.0.0.1:{os.environ.get('THIMBLE_PORT') or DEFAULT_PORT}"
+
+
+def request(method: str, path: str, body: dict | None = None, timeout: float | None = 10.0) -> tuple[int, dict]:
+    """(status, JSON body) of one request to the server; an HTTP error is its status. A transport failure raises
+    urllib.error.URLError when no connection was made, else another OSError or an http.client.HTTPException."""
+    data = json.dumps(body).encode("utf-8") if body is not None else None
+    req = urllib.request.Request(server_url() + path, data=data, method=method,
+                                 headers={"Content-Type": "application/json"} if data else {})
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:  # noqa: S310 — loopback, thimble's own server
+            raw = resp.read()
+            status = resp.status
+    except urllib.error.HTTPError as e:
+        return e.code, {}
+    try:
+        parsed = json.loads(raw.decode("utf-8")) if raw else {}
+    except ValueError:
+        parsed = {}
+    return status, parsed if isinstance(parsed, dict) else {}
+
+
+def hook_input() -> dict:
+    try:
+        data = json.loads(sys.stdin.read() or "{}")
+    except (OSError, ValueError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def folder(inp: dict) -> str:
+    return os.environ.get("CLAUDE_PROJECT_DIR") or str(inp.get("cwd") or "") or os.getcwd()
+
+
+def lock(session: str):
+    """This session's watcher lock, held for the process's life; None when another watcher holds it."""
+    d = home() / "watch"
+    try:
+        d.mkdir(parents=True, exist_ok=True)
+        now = time.time()
+        for p in d.glob("*.lock"):  # old sessions' files, which no watcher can still hold
+            try:
+                if now - p.stat().st_mtime > LOCK_SWEEP_S:
+                    p.unlink()
+            except OSError:
+                pass
+        f = open(d / f"{''.join(ch for ch in session if ch.isalnum() or ch in '-_')}.lock", "a")  # noqa: SIM115
+        fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        return None
+    os.utime(f.name)
+    return f
+
+
+def sessions_dir() -> Path:
+    return Path(os.environ.get("CLAUDE_CONFIG_DIR") or (Path.home() / ".claude")) / "sessions"
+
+
+def parent(pid: int) -> int:
+    """The parent of `pid`, 0 when unknown: /proc where there is one, else ps (macOS)."""
+    try:
+        return int(Path(f"/proc/{pid}/stat").read_text().rsplit(")", 1)[1].split()[1])
+    except (OSError, ValueError, IndexError):
+        pass
+    import subprocess  # noqa: PLC0415 — only without CLAUDE_PID and /proc: the hot path (each tool call) never needs it
+    try:
+        out = subprocess.run(["ps", "-o", "ppid=", "-p", str(pid)], capture_output=True, text=True, timeout=2).stdout
+    except (OSError, subprocess.SubprocessError):
+        return 0
+    return int(out.strip()) if out.strip().isdigit() else 0
+
+
+def claude_pid() -> int | None:
+    """The `claude` process this watcher runs under: CLAUDE_PID, which Claude Code sets for its hooks and the commands
+    it runs, else the nearest ancestor that has a session record in Claude Code's config directory, as
+    app/cc_channel.py's claude_pid finds it; None when neither says."""
+    named = os.environ.get("CLAUDE_PID") or ""
+    if named.isdigit():
+        return int(named)
+    pid = os.getppid()
+    for _ in range(MAX_HOPS):
+        if pid <= 1:
+            return None
+        if (sessions_dir() / f"{pid}.json").is_file():
+            return pid
+        pid = parent(pid)
+    return None
+
+
+def process_session(pid: int | None) -> str | None:
+    """The session the `claude` process `pid` runs now, from Claude Code's record of it, which /clear rewrites (module
+    note); None when unknown."""
+    if not pid:
+        return None
+    try:
+        data = json.loads((sessions_dir() / f"{pid}.json").read_text("utf-8"))
+    except (OSError, ValueError):
+        return None
+    sid = data.get("sessionId") if isinstance(data, dict) else None
+    return sid if isinstance(sid, str) and sid else None
+
+
+def pull(cwd: str, session: str, until: float, pid: int | None = None, *,
+         follow: bool = False) -> tuple[str, str, str] | None:
+    """(id, text, session) of the next event, None when the watcher should stop (module note). A refused connection
+    before any answer is a stop; once a server has answered or taken a request, it is waited for until `until`. With the
+    process's `pid`, each poll first looks at the session the process runs now: the stream (`follow`) polls for that
+    one, and a hook's watcher whose session the process has left (/clear) stops."""
+    reached = False
+    while time.monotonic() < until:
+        now = process_session(pid)
+        if now and now != session:
+            if not follow:
+                return None
+            session = now
+        query = urllib.parse.urlencode({k: v for k, v in (("cwd", cwd), ("session", session), ("pid", pid),
+                                                          ("wait", PULL_WAIT_S)) if v})
+        try:
+            status, body = request("GET", f"/api/channel/pull?{query}", timeout=PULL_WAIT_S + 15)
+        except urllib.error.URLError:  # no connection was made (refused): an HTTP status returns from request()
+            if not reached:
+                return None
+            time.sleep(RETRY_S)
+            continue
+        except (OSError, http.client.HTTPException):  # a server took the poll and the connection dropped
+            reached = True
+            time.sleep(RETRY_S)
+            continue
+        reached = True
+        if status == 200 and body.get("text"):
+            return str(body.get("id") or ""), str(body["text"]), session
+        if status in STOP:
+            if follow and process_session(pid) not in (None, session):
+                continue  # main followed /clear while this poll for the session it left waited: poll for the new one
+            return None
+        if status != 204:
+            time.sleep(RETRY_S)
+    return None
+
+
+def ack(cwd: str, session: str, event_id: str) -> None:
+    try:
+        request("POST", "/api/channel/ack", {"cwd": cwd, "session": session, "id": event_id})
+    except (OSError, http.client.HTTPException):
+        pass
+
+
+def watch(inp: dict) -> int:
+    """The asyncRewake hook (module note)."""
+    session = str(inp.get("session_id") or "")
+    if inp.get("agent_id") or not session:
+        return 0
+    held = lock(session)
+    if held is None:
+        return 0
+    cwd = folder(inp)
+    pid = claude_pid()
+    got = pull(cwd, session, time.monotonic() + LIFETIME_S, pid)
+    if got is None:
+        return 0
+    if process_session(pid) not in (None, session):
+        return 0  # /clear while the event came: neither written nor acknowledged, so the new session gets it
+    sys.stderr.write(got[1] + "\n")
+    sys.stderr.flush()
+    ack(cwd, session, got[0])
+    return WAKE
+
+
+def permission(inp: dict) -> int:
+    """The PermissionRequest hook (module note)."""
+    body = {"cwd": folder(inp), "session": str(inp.get("session_id") or "") or None,
+            "tool_name": str(inp.get("tool_name") or ""), "tool_input": inp.get("tool_input"),
+            "agent_id": inp.get("agent_id") or None}
+    try:
+        status, answer = request("POST", "/api/channel/permission/hook", body, timeout=None)
+    except (OSError, http.client.HTTPException):
+        return 0
+    behavior = answer.get("behavior") if status == 200 else None
+    if behavior not in ("allow", "deny"):
+        return 0
+    decision: dict = {"behavior": behavior}
+    if behavior == "deny":
+        decision["message"] = DENIED
+    print(json.dumps({"hookSpecificOutput": {"hookEventName": "PermissionRequest", "decision": decision}}))
+    return 0
+
+
+def units(s: str) -> int:
+    """The length of `s` as Claude Code counts it (JavaScript): UTF-16 code units, two for a character beyond U+FFFF."""
+    return len(s.encode("utf-16-le")) // 2
+
+
+def wrap(line: str, at: re.Pattern = SPACE) -> list[str]:
+    """`line` as lines of at most LINE_CHARS units (module note), each broken at the last match of `at` that fits, else
+    inside a word."""
+    out: list[str] = []
+    while units(line) > LINE_CHARS:
+        n = LINE_CHARS
+        while units(line[:n]) > LINE_CHARS:
+            n -= 1
+        cuts = [m for m in at.finditer(line) if 0 < m.start() <= n]
+        if cuts:
+            out.append(line[: cuts[-1].start()])
+            line = line[cuts[-1].end():]
+        else:
+            out.append(line[:n])
+            line = line[n:]
+    return [*out, line]
+
+
+def fit(event_id: str, text: str) -> str:
+    """The event as one Monitor event (module note): every line wrapped under LINE_CHARS, and an event longer than
+    STREAM_CHARS cut inside its body with the whole saved."""
+    if len(text) > STREAM_CHARS:
+        text = cut(event_id, text)
+    head, _, rest = text.partition("\n")
+    return "\n".join([*wrap(head, ATTR_BREAK), *(part for line in rest.split("\n") for part in wrap(line))])
+
+
+def cut(event_id: str, text: str) -> str:
+    """The event cut inside its body before STREAM_CHARS, with a line saying where the whole of it is saved."""
+    head, _, rest = text.partition("\n")
+    body = rest[: -len("</channel>")].rstrip("\n") if rest.endswith("</channel>") else rest
+    path = home() / "events" / f"{''.join(ch for ch in event_id if ch.isalnum()) or int(time.time())}.txt"
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, "utf-8")
+    except OSError:
+        pass
+    note = CUT_NOTE.format(path=path)
+    keep = max(0, STREAM_CHARS - len(head) - len(note) - len("</channel>") - 8)
+    return f"{head}\n{body[:keep].rstrip()}\n…\n{note}\n</channel>"
+
+
+def stream(args: list[str]) -> int:
+    """The Monitor route (module note): every event of the session, one block of lines each, until the server says to
+    stop."""
+    def arg(name: str) -> str:
+        return args[args.index(name) + 1] if name in args and args.index(name) + 1 < len(args) else ""
+
+    cwd, session = arg("--cwd") or os.getcwd(), arg("--session")
+    pid = claude_pid()
+    while True:
+        got = pull(cwd, session, time.monotonic() + LIFETIME_S, pid, follow=True)
+        if got is None:
+            try:
+                request("GET", "/api/health", timeout=3.0)
+            except (OSError, http.client.HTTPException):
+                time.sleep(RETRY_S)  # the server is down: the Monitor waits for it rather than ending
+                continue
+            return 0
+        sys.stdout.write(fit(got[0], got[1]) + "\n")
+        sys.stdout.flush()
+        ack(cwd, got[2], got[0])
+
+
+def main() -> int:
+    args = sys.argv[1:]
+    try:
+        if "--stream" in args:
+            return stream(args)
+        if "--permission" in args:
+            return permission(hook_input())
+        return watch(hook_input())
+    except KeyboardInterrupt:
+        return 0
+    except Exception:  # noqa: BLE001 — a failure wakes nothing: an exit 2 would show its traceback to the model
+        return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

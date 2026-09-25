@@ -1,0 +1,2760 @@
+/* the report: the type bar, the page with the card sidebar at its left and the comment margin at its right, the
+   slides, the story and a page in its frame. BlockNote's variables are mapped to the tokens, so the editor follows the
+   paper without a second palette. */
+.wu-root {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-panel);
+  font: var(--type-body);
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+}
+.wu-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 40px 52px;
+  font: var(--type-body);
+  color: var(--text-tertiary);
+}
+.wu-error {
+  flex-direction: column;
+  align-items: flex-start;
+  color: var(--text-primary);
+}
+.wu-error-detail {
+  font: var(--type-caption);
+  color: var(--text-tertiary);
+  overflow-wrap: anywhere;
+}
+/* a small square icon button: the sidebar's toggle, a check's chevron, a card's ✓ */
+.wu-iconbtn {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text-tertiary);
+  cursor: pointer;
+  transition: var(--transition-color);
+}
+.wu-iconbtn:hover:not(:disabled) {
+  background: rgba(var(--ink-rgb), 0.06);
+  color: var(--text-primary);
+}
+.wu-iconbtn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.wu-chev {
+  flex: none;
+  transition: transform var(--dur-fast) var(--ease-out);
+}
+.wu-chev-open {
+  transform: rotate(90deg);
+}
+/* a block, a beat, a slide none of whose sentences the filter covers: .35, still readable */
+.wu-dim {
+  opacity: 0.35;
+  transition: opacity var(--t-fade);
+}
+.wu-dim:hover {
+  opacity: 0.85;
+}
+
+/* -------- the type bar: the types as the top bar's Tabs (text, the active one in ink at 500), + New, and at the right
+   the filter chip, Export and the one primary action -------- */
+.wu-bar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: 44px;
+  box-sizing: border-box;
+  padding: 0 10px;
+  border-bottom: 1px solid rgba(var(--ink-rgb), 0.1);
+}
+.wu-bar .wu-types {
+  flex: 0 1 auto;
+  align-self: stretch;
+  align-items: center;
+  height: auto;
+  min-width: 0;
+  padding: 0 6px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.wu-bar .wu-types .tab {
+  flex: none;
+  padding: 0;
+}
+.wu-bar .wu-types::-webkit-scrollbar {
+  display: none;
+}
+.wu-type {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+/* a type being written wears the tab's spinner after its name, 5px from it, in the flow here so the types that scroll
+   keep it in view */
+.wu-type .tab-spinner {
+  position: static;
+  flex: none;
+  margin-left: -2px;
+}
+.wu-bar-spacer {
+  flex: 1;
+}
+/* the menus' triggers (+ New, a type's ⋯) keep their width in a narrow pane, where the types scroll instead */
+.wu-bar > .menu-trigger {
+  flex: none;
+}
+.wu-new,
+.wu-export {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  height: 30px;
+  min-height: 0;
+  padding: 0 10px;
+  border: 0;
+  border-radius: var(--radius-ui);
+  background: transparent;
+  font: 400 var(--text-ui-sm) / 1 var(--font-body);
+  color: var(--text-tertiary);
+  white-space: nowrap;
+  cursor: pointer;
+  transition: var(--transition-color);
+}
+.wu-new:hover:not(:disabled),
+.wu-export:hover {
+  color: var(--text-primary);
+}
+/* ⋯ beside a type of the workspace's own, and the sheets + New and ⋯ open (DocMenus.tsx): a name, a brief, a question */
+.wu-type-more {
+  flex: none;
+}
+.wu-doc-form {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px;
+}
+.wu-doc-form .label + .field,
+.wu-doc-form .label + textarea,
+.wu-doc-form .label + input {
+  margin-bottom: 6px;
+}
+.wu-doc-warn {
+  margin: 0 0 6px;
+  font: 400 var(--text-ui-sm) / 1.45 var(--font-body);
+  color: var(--text-primary);
+}
+.wu-doc-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+}
+.wu-doc-delete {
+  color: var(--status-negative);
+}
+/* a write that failed (writeFailures.ts): ✕ and "Not written" in the negative tone, the writer's last words in the
+   tooltip, then the bug and × */
+/* a write that failed: the chat's API error card (chat/ApiError.tsx) under the bar, at most as wide as the page */
+.wu-failed {
+  flex: none;
+  padding: 10px 10px 0;
+}
+.wu-failed .chat-apierr {
+  max-width: 760px;
+  margin: 0 auto;
+}
+/* History in the type bar (History.tsx): its sheet lists the drafts newest first, each with its number, a Current or
+   Shown tag, a mono line of when, who and how long, and what changed */
+.wu-history-btn.active,
+.wu-history-btn[aria-expanded='true'] {
+  color: var(--text-primary);
+}
+.wu-history {
+  max-height: min(560px, calc(100vh - 16px));
+}
+.wu-history-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 8px;
+  color: var(--text-tertiary);
+}
+.wu-history-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.wu-history-row {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 3px;
+  width: 100%;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: var(--radius-seg);
+  background: transparent;
+  color: var(--text-primary);
+  font: var(--type-ui-sm);
+  text-align: left;
+  cursor: pointer;
+}
+.wu-history-row:hover:not(:disabled),
+.wu-history-row:focus-visible,
+.wu-history-row.shown {
+  background: var(--track-bg);
+}
+.wu-history-row:disabled {
+  cursor: default;
+}
+.wu-history-row:disabled > * {
+  opacity: 0.4;
+}
+.wu-history-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+.wu-history-n {
+  font-weight: 500;
+}
+.wu-history-tag {
+  font: var(--type-mono-sm);
+  color: var(--text-accent);
+}
+.wu-history-meta,
+.wu-past-meta {
+  font: var(--type-mono-sm);
+  color: var(--text-tertiary);
+}
+.wu-history-asked {
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+.wu-history-changes {
+  margin: 2px 0 0;
+  padding: 0 0 0 14px;
+  color: var(--text-secondary);
+  font: var(--type-ui-sm);
+}
+.wu-history-changes li + li {
+  margin-top: 2px;
+}
+/* under a row: Compare with previous, Compare with current and a run's earlier saves, which unfold indented */
+.wu-history-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 12px;
+  padding: 0 10px 6px;
+}
+.wu-history-act {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--text-tertiary);
+  font: var(--type-ui-sm);
+  cursor: pointer;
+}
+.wu-history-act:hover,
+.wu-history-act:focus-visible,
+.wu-history-fold[aria-expanded='true'] {
+  color: var(--text-primary);
+}
+.wu-history-revs {
+  margin: 0 0 4px 14px;
+  padding: 0 0 0 8px;
+  list-style: none;
+  border-left: 1px solid var(--border-subtle);
+}
+.wu-history-rev {
+  display: flex;
+  align-items: baseline;
+  justify-content: flex-start;
+  gap: 8px;
+  width: 100%;
+  padding: 5px 10px;
+  border: 0;
+  border-radius: var(--radius-seg);
+  background: transparent;
+  color: var(--text-primary);
+  font: var(--type-ui-sm);
+  text-align: left;
+  cursor: pointer;
+}
+.wu-history-rev:hover:not(:disabled),
+.wu-history-rev:focus-visible,
+.wu-history-rev.shown {
+  background: var(--track-bg);
+}
+.wu-history-rev:disabled {
+  cursor: default;
+  opacity: 0.4;
+}
+/* Compare (DraftDiff): additions in the positive ink on its soft tint, removals struck through in the negative ink; a
+   block added or removed whole carries a 2px bar in that ink, a changed one an ink bar; unchanged runs fold */
+.wu-diff-ins {
+  background: var(--status-positive-soft);
+  color: var(--code-added);
+  text-decoration: none;
+  border-radius: 2px;
+}
+.wu-diff-del {
+  color: var(--code-removed);
+  text-decoration: line-through;
+  text-decoration-thickness: 1px;
+}
+.wu-diff-b-ins,
+.wu-diff-b-del,
+.wu-diff-b-mod {
+  margin-left: -12px;
+  padding-left: 10px;
+  border-left: 2px solid;
+}
+.wu-diff-b-ins {
+  border-left-color: var(--code-added);
+}
+.wu-diff-b-del {
+  border-left-color: var(--code-removed);
+}
+.wu-diff-b-mod {
+  border-left-color: color-mix(in oklab, var(--text-primary) 18%, transparent);
+}
+.wu-past-list > li.wu-diff-b-ins,
+.wu-past-list > li.wu-diff-b-del,
+.wu-past-list > li.wu-diff-b-mod {
+  margin-left: -34px;
+  padding-left: 32px;
+}
+.wu-diff-legend {
+  display: flex;
+  gap: 12px;
+  margin: 0 0 16px;
+  font: var(--type-mono-sm);
+}
+.wu-diff-fold {
+  display: block;
+  width: 100%;
+  margin: 6px 0;
+  padding: 4px 0;
+  border: 0;
+  border-top: 1px dashed var(--border-subtle);
+  border-bottom: 1px dashed var(--border-subtle);
+  background: none;
+  color: var(--text-tertiary);
+  font: var(--type-ui-sm);
+  text-align: center;
+  cursor: pointer;
+}
+.wu-diff-fold:hover,
+.wu-diff-fold:focus-visible {
+  color: var(--text-primary);
+}
+/* a past draft shown in place of the editor: a band naming it with Back to current, over the draft as read-only prose
+   in the report's scale */
+.wu-past {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+}
+.wu-past-band {
+  flex: none;
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 10px 16px;
+  background: var(--bg-panel);
+  border-bottom: 1px solid var(--border-subtle);
+}
+.wu-past-band-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.wu-past-name {
+  font: var(--type-ui-sm);
+  font-weight: 500;
+  color: var(--text-primary);
+}
+.wu-past-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+.wu-past-page {
+  max-width: 680px;
+  margin: 0 auto;
+  padding: 32px 24px 96px;
+  font: var(--type-report-body);
+  font-family: var(--font-prose);
+  color: var(--text-primary);
+}
+.wu-past-page h1 {
+  margin: 0 0 14px;
+  font: var(--type-report-h1);
+  font-family: var(--font-prose);
+  letter-spacing: var(--tracking-report-h1);
+}
+.wu-past-page h2 {
+  margin: 22px 0 6px;
+  font: var(--type-report-h2);
+  font-family: var(--font-prose);
+  letter-spacing: -0.01em;
+}
+.wu-past-page h2.first {
+  margin-top: 0;
+}
+.wu-past-page h3 {
+  margin: 14px 0 4px;
+  font: var(--type-subheading);
+  font-family: var(--font-prose);
+}
+.wu-past-page .wu-prose {
+  margin: 4px 0;
+}
+.wu-past-list {
+  margin: 4px 0;
+  padding-left: 22px;
+}
+.wu-past-list .wu-prose {
+  margin: 1px 0;
+}
+.wu-past-fig {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 8px;
+  margin: 10px 0;
+  padding: 10px 12px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-card);
+  font: var(--type-ui-sm);
+  color: var(--text-secondary);
+}
+/* the card's chip keeps its whole name, the caption wraps beside it or, in a narrow pane, under it */
+.wu-past-fig > .chip {
+  flex: none;
+}
+.wu-past-fig figcaption {
+  flex: 1 1 16em;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+/* a locked block a model changed and the server put back (LockNote.tsx): the lock and a few words; a click scrolls to
+   the first */
+.wu-reverts {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 30px;
+  min-height: 0;
+  margin-left: 6px;
+  padding: 0 6px;
+  border: 0;
+  border-radius: var(--radius-ui);
+  background: transparent;
+  font: 400 var(--text-ui-sm) / 1 var(--font-body);
+  color: var(--text-secondary);
+  white-space: nowrap;
+  cursor: pointer;
+  transition: var(--transition-color);
+}
+.wu-reverts:hover {
+  color: var(--text-primary);
+}
+.wu-bar .btn-primary {
+  margin-left: 6px;
+}
+.wu-bar > .chip {
+  margin-right: 4px;
+}
+/* -------- the body under the bar; the slides and the story end in the glass status strip -------- */
+.wu-body {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+}
+.wu-strip {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  height: 28px;
+  box-sizing: border-box;
+  padding: 0 14px;
+  border: 0;
+  border-radius: 0 0 var(--radius-pane) var(--radius-pane);
+  box-shadow: 0 -1px 0 rgba(var(--ink-rgb), 0.07);
+  font: var(--type-mono-sm);
+  color: var(--text-tertiary);
+}
+.wu-strip-name {
+  color: var(--text-primary);
+}
+.wu-body-strip {
+  margin-bottom: 28px;
+}
+
+/* -------- the report: the sidebar (260) and the page on the cell's paper -------- */
+.wu-report {
+  position: absolute;
+  inset: 0;
+  display: flex;
+}
+.wu-side {
+  flex: none;
+  width: 260px;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: color-mix(in oklab, var(--bg-panel) 40%, var(--surface-card));
+  font: var(--type-body);
+}
+.wu-side-cards {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 10px;
+  box-sizing: border-box;
+}
+.wu-side-top {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.wu-search {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  box-sizing: border-box;
+  padding: 0 8px;
+  border-radius: var(--radius-ui);
+  background: var(--surface-card);
+  box-shadow: 0 0 0 1px rgba(var(--ink-rgb), 0.1);
+  color: var(--text-tertiary);
+  cursor: text;
+}
+.wu-search:focus-within {
+  box-shadow: 0 0 0 1.5px var(--accent);
+}
+.wu-search input {
+  flex: 1;
+  min-width: 0;
+  height: auto;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  outline: none;
+  background: transparent;
+  box-shadow: none;
+  font: 400 var(--text-ui-sm) / 1.2 var(--font-body);
+  color: var(--text-primary);
+}
+.wu-search input::placeholder {
+  color: var(--text-tertiary);
+}
+.wu-side-list {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: auto;
+  scrollbar-width: none;
+}
+.wu-side-list::-webkit-scrollbar {
+  display: none;
+}
+.wu-sec {
+  display: flex;
+  flex-direction: column;
+  padding-bottom: 6px;
+}
+/* a section's head (and the Checks pane's): its chevron, its name at 500, its count in mono at the right */
+.wu-sec-head {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 4px;
+  width: 100%;
+  height: 26px;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  font: 500 var(--text-sm) / 1 var(--font-body);
+  color: var(--text-primary);
+  text-align: left;
+  cursor: pointer;
+}
+.wu-sec-head:disabled {
+  cursor: default;
+}
+.wu-star {
+  flex: none;
+  color: var(--accent);
+}
+.wu-sec-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.wu-count {
+  margin-left: auto;
+  font: 400 10.5px / 1 var(--font-mono);
+  color: var(--text-tertiary);
+}
+.wu-count-inline {
+  margin-left: 4px;
+}
+/* a check with no result on the document shown */
+.wu-count-none {
+  color: var(--text-placeholder);
+}
+.wu-card-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 5px 6px 5px 20px;
+  border-radius: 5px;
+  cursor: grab;
+  transition: background var(--t-hover);
+}
+.wu-card-row:hover {
+  background: rgba(var(--ink-rgb), 0.05);
+}
+.wu-card-row:active {
+  cursor: grabbing;
+}
+.wu-card-row:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 1.5px var(--accent);
+}
+.wu-card-ico {
+  flex: none;
+  margin-top: 2px;
+  color: var(--text-tertiary);
+}
+.wu-card-q {
+  min-width: 0;
+  font: 400 var(--text-ui-sm) / 1.35 var(--font-body);
+  color: var(--text-secondary);
+}
+.wu-card-used {
+  flex: none;
+  margin-left: auto;
+  padding-top: 3px;
+  font-size: 10px;
+  color: var(--status-positive);
+}
+
+/* the Checks pane, pinned to the sidebar's foot on the pane's paper */
+.wu-checks {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  padding: 6px 10px 8px;
+  border-top: 1px solid rgba(var(--ink-rgb), 0.12);
+  background: var(--bg-panel);
+}
+.wu-checks-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 26px;
+}
+/* the sidebar of the slides, the story and a page: the Checks pane is all of it, with the hide toggle in its head */
+.wu-side-checks {
+  background: var(--bg-panel);
+  box-shadow: inset -1px 0 0 rgba(var(--ink-rgb), 0.1);
+}
+.wu-side-checks .wu-checks {
+  flex: 1;
+  min-height: 0;
+  border-top: 0;
+  background: transparent;
+}
+.wu-side-checks .wu-checks-list {
+  max-height: none;
+}
+.wu-checks-list {
+  display: flex;
+  flex-direction: column;
+  max-height: 45vh;
+  overflow: auto;
+  scrollbar-width: none;
+}
+.wu-check-row {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  height: 26px;
+  padding: 0 2px 0 6px;
+  border-radius: 4px;
+  transition: background var(--t-hover);
+}
+.wu-check-row:hover {
+  background: rgba(var(--ink-rgb), 0.05);
+}
+.wu-check-toggle {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 8px;
+  height: 100%;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  font: 400 var(--text-sm) / 1 var(--font-body);
+  color: var(--text-secondary);
+  text-align: left;
+  cursor: pointer;
+}
+.wu-check-row.on .wu-check-toggle {
+  color: var(--text-primary);
+}
+.wu-check-sq {
+  flex: none;
+  width: 12px;
+  height: 12px;
+  box-sizing: border-box;
+  border: 1.5px solid;
+  border-radius: 3px;
+}
+.wu-check-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.wu-check-more {
+  width: 22px;
+  height: 22px;
+  border-radius: 4px;
+}
+/* the head's + (a new check), and the row's spinner or ✕ that opens the run's chat: 22px squares, as the chevron is */
+.wu-checks-add,
+.wu-check-run {
+  flex: none;
+  width: 22px;
+  height: 22px;
+  border-radius: 4px;
+}
+.wu-checks-head .wu-sec-head {
+  flex: 1;
+  min-width: 0;
+}
+/* a check's card, and the new-check card, in a popover beside the pane, styled as a label's edit card in Files */
+.check-card.popover {
+  padding: 0;
+  font: var(--type-ui-sm);
+}
+.check-card-body {
+  display: flex;
+  flex-direction: column;
+}
+.wu-check-row.editing {
+  background: var(--track-bg);
+}
+/* with no run to show, the prompt stands under the head as the grid would */
+.check-card-body .label-card-head + .label-card-body {
+  padding-top: 10px;
+}
+/* the check's run on the document shown, the grid's Last run: what it does or how it ended, with Stop while it runs */
+.wu-check-runline {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  color: var(--text-secondary);
+}
+.wu-check-runline-text {
+  flex: 1;
+  min-width: 0;
+}
+.wu-check-runline[data-status='failed'] .wu-check-runline-text {
+  color: var(--text-primary);
+}
+
+/* the slides, the story and a page beside the sidebar: the view fills the rest */
+.wu-arranged-view {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+}
+.wu-side-hidden .wu-deck-rail {
+  padding-top: 48px;
+}
+.wu-side-hidden .wu-pagedoc-col {
+  padding-top: 48px;
+}
+
+/* the sidebar hidden: its toggle alone over the page's top left; on the report's page the text column's left gutter
+   grows to hold it, so the text scrolls past the toggle rather than under it */
+.wu-side-show ~ .wu-page .wu-page-col {
+  --wu-gutter-l: 48px;
+}
+.wu-side-show {
+  position: absolute;
+  left: 10px;
+  top: 10px;
+  z-index: 3;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-ui);
+}
+
+/* the sidebar docks while the pane fits it beside a column of 60-character lines plus gutters; in a narrower pane it
+   starts folded and opens over the document's left edge (Checks.tsx useSidebar). The document keeps its width and
+   gutter while the sidebar is folded */
+.wu-report > .read-probe {
+  --read-min: calc(60ch + 24px + 100px);
+  font: var(--type-report-body);
+  font-family: var(--font-prose);
+}
+.wu-side.is-over {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  z-index: 6;
+  box-shadow: 1px 0 0 rgba(var(--ink-rgb), 0.1), var(--shadow-float);
+}
+.wu-side.is-over ~ .wu-page,
+.wu-side.is-over ~ .wu-arranged-view {
+  isolation: isolate;
+}
+.wu-side.is-over ~ .wu-page .wu-page-col {
+  --wu-gutter-l: 48px;
+}
+
+/* the page: the cell's paper to the pane's edge, a column at most a card wide (--w-card, plus gutters of 24 at the
+   left and 76 at the right for the block actions) and the margin beside it */
+.wu-page {
+  flex: 1;
+  min-width: 0;
+  overflow: auto;
+  scrollbar-width: none;
+  background: var(--surface-card);
+  box-shadow: inset 1px 0 0 rgba(var(--ink-rgb), 0.1);
+}
+.wu-page::-webkit-scrollbar {
+  display: none;
+}
+.wu-page-row {
+  display: flex;
+  justify-content: center;
+  min-height: 100%;
+}
+.wu-page-col {
+  --wu-gutter-l: 24px;
+  --wu-gutter-r: 108px;
+  --wu-acts-gap: 12px;
+  position: relative;
+  flex: 1;
+  max-width: calc(var(--w-card) + var(--wu-gutter-l) + var(--wu-gutter-r));
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+/* the editor's zone fills the column, its padding included, so a card dropped anywhere in the column lands */
+.wu-zone {
+  position: relative;
+  flex: 1;
+  box-sizing: border-box;
+  padding: 48px var(--wu-gutter-r) 120px var(--wu-gutter-l);
+}
+/* where a card dragged from the sidebar goes: a 3px accent line centred on the seam */
+.wu-dropline {
+  position: absolute;
+  left: var(--wu-gutter-l);
+  right: var(--wu-gutter-r);
+  height: 3px;
+  margin-top: -2px;
+  border-radius: 2px;
+  background: var(--accent);
+  pointer-events: none;
+  z-index: 5;
+}
+/* where a block moved by its actions lands: the same accent line (Editor.tsx passes BlockNote no colour) */
+.wu-root .prosemirror-dropcursor-block,
+.wu-root .prosemirror-dropcursor-inline {
+  border-radius: 2px;
+  background: var(--accent);
+}
+/* -------- the editor: BlockNote's variables mapped to the tokens. Its menus and toolbar take the opaque overlay; the
+   editor itself draws nothing -------- */
+.wu-root .wu-editor.bn-root,
+.wu-root .wu-editor .bn-root {
+  --bn-colors-editor-text: var(--text-primary);
+  --bn-colors-editor-background: transparent;
+  --bn-colors-menu-text: var(--text-primary);
+  --bn-colors-menu-background: var(--overlay-bg);
+  --bn-colors-tooltip-text: var(--text-on-inverse);
+  --bn-colors-tooltip-background: var(--surface-inverse);
+  --bn-colors-hovered-text: var(--text-primary);
+  --bn-colors-hovered-background: var(--surface-hover);
+  --bn-colors-selected-text: var(--text-accent);
+  --bn-colors-selected-background: var(--surface-selected);
+  --bn-colors-disabled-text: var(--text-disabled);
+  --bn-colors-disabled-background: transparent;
+  --bn-colors-shadow: transparent;
+  --bn-colors-border: var(--border-hairline);
+  --bn-colors-highlights-red-text: var(--status-negative);
+  --bn-colors-highlights-red-background: var(--status-negative-soft);
+  --bn-font-family: var(--font-body);
+  --bn-border-radius-small: var(--radius-ui);
+  --bn-border-radius-medium: var(--radius-card);
+  --bn-border-radius-large: var(--radius-card);
+  --bn-border: var(--overlay-edge);
+  --bn-shadow-light: var(--overlay-ring);
+  --bn-shadow-medium: var(--overlay-ring);
+  font-family: var(--font-body);
+}
+.wu-root .wu-page-col .wu-editor.bn-container,
+.wu-root .wu-page-col .wu-editor .bn-container,
+.wu-root .wu-page-col .wu-editor .bn-editor {
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  background: transparent;
+}
+/* the body is the report's own step, --type-report-body (15/1.7), in the primary ink as the headings are */
+.wu-root .wu-page-col .wu-editor .bn-editor.bn-default-styles {
+  padding: 0;
+  background: transparent;
+  color: var(--text-primary);
+  font: var(--type-report-body);
+  font-family: var(--font-prose);
+}
+.wu-root .wu-editor strong,
+.wu-root .wu-editor b {
+  font-weight: 500;
+}
+/* a figure block is as wide as the column, not as wide as its content */
+.wu-root .wu-page-col .wu-editor .bn-editor .bn-block-content[data-content-type='figure'],
+.wu-root .wu-page-col .wu-editor .bn-editor .bn-block-content[data-content-type='figure'] > [data-node-view-wrapper] {
+  display: block;
+  width: 100%;
+  min-width: 0;
+}
+.wu-root .wu-editor .bn-block-outer {
+  line-height: 1.7;
+}
+/* --wu-first is the padding above a block's first line, which the lock at rest is placed from */
+.wu-root .wu-page-col .wu-editor .bn-editor .bn-block-content {
+  --wu-first: 4px;
+  padding: 4px 0;
+}
+.wu-root .wu-page-col .wu-editor .bn-editor .bn-block-content[data-content-type='bulletListItem'],
+.wu-root .wu-page-col .wu-editor .bn-editor .bn-block-content[data-content-type='numberedListItem'] {
+  --wu-first: 1px;
+  padding: 1px 0;
+}
+.wu-root .wu-page-col .wu-editor .bn-editor .bn-block-content[data-content-type='figure'] {
+  padding: 10px 0;
+}
+/* the scale: the title --type-report-h1 (28/600), a section --type-report-h2 (18/600), a subheading
+   --type-subheading; BlockNote's 700 gives way to 600 */
+.wu-root .wu-page-col .wu-editor .bn-editor .bn-block-content[data-content-type='heading'] {
+  --wu-first: 22px;
+  padding: 22px 0 6px;
+  font: var(--type-report-h2);
+  font-family: var(--font-prose);
+  letter-spacing: -0.01em;
+  color: var(--text-primary);
+}
+.wu-root .wu-page-col .wu-editor .bn-editor .bn-block-content[data-content-type='heading']:not([data-level]) {
+  --wu-first: 4px;
+  padding: 4px 0 14px;
+  font: var(--type-report-h1);
+  font-family: var(--font-prose);
+  letter-spacing: var(--tracking-report-h1);
+}
+.wu-root .wu-page-col .wu-editor .bn-editor .bn-block-content[data-content-type='heading'][data-level='3'],
+.wu-root .wu-page-col .wu-editor .bn-editor .bn-block-content[data-content-type='heading'][data-level='4'],
+.wu-root .wu-page-col .wu-editor .bn-editor .bn-block-content[data-content-type='heading'][data-level='5'],
+.wu-root .wu-page-col .wu-editor .bn-editor .bn-block-content[data-content-type='heading'][data-level='6'] {
+  --wu-first: 14px;
+  padding: 14px 0 4px;
+  font: var(--type-subheading);
+  font-family: var(--font-prose);
+  letter-spacing: 0;
+}
+.wu-root .wu-page-col .wu-editor .bn-editor .bn-block-content[data-content-type='heading'] .bn-inline-content {
+  font: inherit;
+  letter-spacing: inherit;
+  margin: 0;
+}
+.wu-root .wu-editor .bn-inline-content a {
+  color: var(--text-link);
+}
+.wu-root .wu-page-col .wu-editor .bn-editor .bn-block-content[data-content-type='bulletListItem']::before,
+.wu-root .wu-page-col .wu-editor .bn-editor .bn-block-content[data-content-type='numberedListItem']::before {
+  color: var(--text-primary);
+}
+/* a citation in the prose is the shared citation chip (RefChip cite), set on the line */
+.wu-root .wu-editor .bn-inline-content .chip {
+  vertical-align: 1px;
+  margin: 0 2px;
+}
+.wu-root .wu-editor .bn-inline-content .refchip.refchip-value {
+  font: inherit;
+  margin: 0;
+}
+.wu-root .wu-editor .bn-inline-content .ProseMirror-selectednode .chip {
+  box-shadow: 0 0 0 2px var(--surface-selected);
+}
+/* a citation chip followed by punctuation: the chip gives back its edge, so the period sits against it */
+.wu-root .wu-editor .wu-hug .chip {
+  margin-right: 0;
+}
+.wu-root .wu-editor ::selection {
+  background: var(--accent-wash);
+}
+/* the hovered block's actions (Editor.tsx BlockActions): the block's kind, chat, delete and the lock, small icon
+   buttons in the gutter at the right of the block's first line; a drag on them moves the block */
+.wu-root .wu-acts {
+  display: flex;
+  align-items: center;
+  cursor: grab;
+}
+.wu-root .wu-acts:active {
+  cursor: grabbing;
+}
+.wu-root .wu-acts .btn {
+  border-radius: var(--radius-seg);
+}
+.wu-root .wu-acts .wu-acts-delete:hover {
+  color: var(--status-negative);
+}
+.wu-root .wu-acts .wu-acts-lock.active,
+.wu-root .wu-acts .wu-acts-lock.active:hover {
+  color: var(--text-primary);
+  background: transparent;
+}
+/* a locked block shows its lock at rest where the actions' lock stands: past the block's right edge by the gap and the
+   buttons before the lock (--wu-acts-before), centred on the block's first line (--wu-first plus half a line height),
+   or for a figure on the card's head row */
+.wu-root .wu-editor .bn-block-outer.wu-locked > .bn-block > .bn-block-content,
+.wu-root .wu-editor .bn-block-outer.wu-locked > .bn-block > .react-renderer > .bn-block-content[data-content-type='figure'] {
+  position: relative;
+}
+.wu-root .wu-editor .bn-block-outer.wu-locked > .bn-block > .bn-block-content::after,
+.wu-root .wu-editor .bn-block-outer.wu-locked > .bn-block > .react-renderer > .bn-block-content[data-content-type='figure']::after {
+  content: '';
+  position: absolute;
+  top: calc(var(--wu-first, 0px) + 0.5lh - 7px);
+  left: calc(100% + var(--wu-acts-gap) + var(--wu-acts-before, 3) * var(--h-control) + 5px);
+  width: 14px;
+  height: 14px;
+  background: var(--text-primary);
+  -webkit-mask: var(--wu-lock-glyph) center / 14px 14px no-repeat;
+  mask: var(--wu-lock-glyph) center / 14px 14px no-repeat;
+  pointer-events: none;
+}
+.wu-root .wu-editor .bn-block-outer.wu-locked > .bn-block > .react-renderer > .bn-block-content[data-content-type='figure']::after {
+  --wu-acts-before: 2;
+  top: 28px;
+}
+.wu-root .wu-editor .bn-block-outer.wu-locked[data-id='title'] > .bn-block > .bn-block-content::after {
+  --wu-acts-before: 1;
+}
+.wu-root .wu-editor {
+  --wu-lock-glyph: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.75' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6.5 11h11a1.5 1.5 0 0 1 1.5 1.5v6a1.5 1.5 0 0 1-1.5 1.5h-11A1.5 1.5 0 0 1 5 18.5v-6A1.5 1.5 0 0 1 6.5 11zM8 11V8a4 4 0 0 1 8 0v3'/%3E%3C/svg%3E");
+}
+
+/* the slash menu is the overlay: it floats over the text and goes away. It sits inside the editor's root under
+   BlockNote's own .bn-mantine rules, so these carry .wu-root */
+.wu-root .bn-mantine .bn-suggestion-menu {
+  min-width: 180px;
+  padding: 4px;
+  border: var(--overlay-edge);
+  border-radius: var(--radius-card);
+  background: var(--overlay-bg);
+  box-shadow: var(--shadow-popover);
+  font: var(--type-ui-sm);
+}
+.wu-root .bn-mantine .bn-suggestion-menu-label {
+  padding: 6px 8px 2px;
+  font: var(--type-label);
+  letter-spacing: var(--tracking-label);
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+}
+.wu-root .bn-mantine .bn-suggestion-menu .bn-suggestion-menu-item,
+.wu-root .bn-mantine .bn-suggestion-menu .bn-suggestion-menu-item:not(.bn-suggestion-menu-item-small) {
+  min-height: 28px;
+  padding: 0 8px;
+  gap: 8px;
+  border-radius: var(--radius-seg);
+  background: transparent;
+  color: var(--text-primary);
+}
+.wu-root .bn-mantine .bn-suggestion-menu .bn-suggestion-menu-item[aria-selected='true'],
+.wu-root .bn-mantine .bn-suggestion-menu .bn-suggestion-menu-item:hover {
+  background: rgba(var(--ink-rgb), 0.06);
+}
+.bn-mantine .bn-mt-suggestion-menu-item-section[data-position='left'] {
+  padding: 0;
+  margin: 0;
+  background: transparent;
+  color: var(--text-tertiary);
+}
+.bn-mantine .bn-mt-suggestion-menu-item-section[data-position='left'] svg {
+  width: 14px;
+  height: 14px;
+}
+.bn-mantine .bn-mt-suggestion-menu-item-section[data-position='right'] {
+  display: none;
+}
+.bn-mantine .bn-mt-suggestion-menu-item-body {
+  padding-right: 0;
+}
+.wu-root .bn-mantine .bn-mt-suggestion-menu-item-title {
+  font: 400 var(--text-ui-sm) / 1.2 var(--font-body);
+  color: inherit;
+}
+.bn-mantine .bn-mt-suggestion-menu-item-subtitle {
+  display: none;
+}
+/* the formatting toolbar, the overlay too; it sits inside the editor's root under BlockNote's own .bn-mantine rules */
+.wu-root .bn-mantine .bn-toolbar {
+  padding: 2px;
+  gap: 1px;
+  border: var(--overlay-edge);
+  border-radius: var(--radius-card);
+  background: var(--overlay-bg);
+  box-shadow: var(--shadow-popover);
+  font-family: var(--font-body);
+}
+.wu-root .bn-mantine .bn-toolbar .mantine-ActionIcon-root,
+.wu-root .bn-mantine .bn-toolbar .mantine-Button-root {
+  width: var(--control-sm);
+  height: var(--control-sm);
+  min-height: 0;
+  border-radius: var(--radius-ui);
+  background: transparent;
+  color: var(--text-secondary);
+  font-family: var(--font-body);
+}
+.wu-root .bn-mantine .bn-toolbar .mantine-ActionIcon-root:hover,
+.wu-root .bn-mantine .bn-toolbar .mantine-Button-root:hover {
+  background: var(--surface-hover);
+  color: var(--text-primary);
+}
+.wu-root .bn-mantine .bn-toolbar .mantine-ActionIcon-root[data-selected],
+.wu-root .bn-mantine .bn-toolbar .mantine-Button-root[data-selected] {
+  background: var(--surface-selected);
+  color: var(--text-accent);
+}
+/* the toolbar's tooltips use the app's tooltip label (components.css .tip). BlockNote draws them inside the toolbar,
+   whose sideways scroll would clip them; five buttons never need the scroll, so it is turned off */
+.wu-root .bn-mantine .bn-toolbar {
+  overflow: visible;
+}
+.wu-root .bn-mantine .bn-toolbar .mantine-Tooltip-tooltip {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+}
+.wu-root .bn-mantine .bn-toolbar .bn-tooltip {
+  padding: 5px 8px;
+  border: var(--overlay-edge);
+  border-radius: var(--radius-ui);
+  background: var(--overlay-bg);
+  box-shadow: var(--shadow-popover);
+  color: var(--text-primary);
+}
+.wu-root .bn-mantine .bn-toolbar .bn-tooltip p {
+  font: var(--type-ui-sm);
+  line-height: 1.35;
+  color: inherit;
+}
+/* the link form opens in BlockNote's portal, outside .wu-root; `body` outranks the .bn-mantine rules that load after
+   this file */
+body .bn-mantine .bn-form-popover {
+  padding: 4px;
+  border: var(--overlay-edge);
+  border-radius: var(--radius-card);
+  background: var(--overlay-bg);
+  box-shadow: var(--shadow-popover);
+  color: var(--text-primary);
+}
+body .bn-mantine .bn-form-popover .mantine-TextInput-input {
+  background: transparent;
+  color: var(--text-primary);
+  font: var(--type-body);
+}
+
+/* -------- an empty cell: a block of an empty document is drawn as a dashed ink hairline around its line until it
+   has text -------- */
+.wu-root .wu-page-col .wu-zone-empty .bn-block-outer[data-id='title'] + .bn-block-outer > .bn-block > .bn-block-content,
+.wu-tpl.wu-tpl-empty {
+  border-radius: var(--radius-ui);
+  outline: 1px dashed rgba(var(--ink-rgb), 0.24);
+  outline-offset: 5px;
+}
+/* a field of the slides or the story: a field in the type of the block it stands for */
+.wu-tpl {
+  display: block;
+  width: 100%;
+  height: auto;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: inherit;
+  resize: none;
+  overflow: hidden;
+  box-shadow: none;
+  transition: none;
+}
+.wu-tpl:focus,
+.wu-tpl:focus-visible {
+  border: 0;
+  outline: none;
+  box-shadow: none;
+}
+.wu-tpl.wu-tpl-empty:focus {
+  outline: 1px dashed rgba(var(--ink-rgb), 0.24);
+}
+
+/* -------- the checks on the passages: a commented passage takes its check's colour (--flag) at 16%, at 30% with an
+   underline while its card is active, in the editor and in the other documents' prose -------- */
+.wu-s {
+  border-radius: var(--radius-hl);
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+}
+.wu-flag {
+  background: color-mix(in oklab, var(--flag) 16%, transparent);
+  border-radius: var(--radius-hl);
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease-out), box-shadow var(--dur-fast) var(--ease-out);
+}
+.wu-flag.wu-flag-active {
+  background: color-mix(in oklab, var(--flag) 30%, transparent);
+  box-shadow: 0 2px 0 var(--flag);
+}
+/* in the editor a tint is one element per text node and citation (decorations.ts tintEdges): the pieces meet square
+   and only a run's first and last piece round their outer corners */
+.wu-editor .wu-flag {
+  border-radius: 0;
+  box-decoration-break: slice;
+  -webkit-box-decoration-break: slice;
+}
+.wu-editor .wu-flag.wu-flag-start {
+  border-top-left-radius: var(--radius-hl);
+  border-bottom-left-radius: var(--radius-hl);
+}
+.wu-editor .wu-flag.wu-flag-end {
+  border-top-right-radius: var(--radius-hl);
+  border-bottom-right-radius: var(--radius-hl);
+}
+/* the editor's filtered-out block: the shared dim on BlockNote's block */
+.wu-root .wu-editor .bn-block-outer.wu-dim {
+  opacity: 0.35;
+}
+.wu-root .wu-editor .bn-block-outer.wu-dim:hover {
+  opacity: 0.85;
+}
+
+/* -------- the margin: 228 wide, a card per comment at its passage. While a check is on it stands, empty until a
+   comment comes, wherever the page fits it beside a 40-character text column, so the first comment does not narrow
+   the text (ReportPage.tsx, Margin.tsx RAIL_ROOM) -------- */
+.wu-page > .read-probe {
+  --read-min: calc(40ch + 24px + 100px);
+  font: var(--type-report-body);
+  font-family: var(--font-prose);
+}
+.wu-rail {
+  position: relative;
+  flex: none;
+  width: 228px;
+  margin-left: 12px;
+  margin-right: 16px;
+}
+.wu-cm {
+  position: absolute;
+  left: 0;
+  right: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  box-sizing: border-box;
+  padding: 10px 12px;
+  border-radius: var(--radius-card);
+  background: var(--surface-card);
+  box-shadow: 0 0 0 1px rgba(var(--ink-rgb), 0.08);
+  font: var(--type-ui-sm);
+  cursor: pointer;
+  transition:
+    top var(--dur-base) var(--ease-out),
+    left var(--dur-fast) var(--ease-out),
+    box-shadow var(--dur-fast) var(--ease-out);
+}
+.wu-cm.wu-cm-active {
+  left: -12px;
+  box-shadow: 0 0 0 1px rgba(var(--ink-rgb), 0.12), var(--shadow-float);
+  cursor: default;
+  z-index: 1;
+}
+.wu-cm-head {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 20px;
+}
+.wu-cm-sq {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+}
+.wu-cm-name {
+  font: 500 var(--text-xs) / 1.2 var(--font-body);
+  color: var(--text-primary);
+}
+.wu-cm-meta {
+  font: 400 10.5px / 1.2 var(--font-body);
+  color: var(--text-tertiary);
+}
+.wu-cm-resolve {
+  margin-left: auto;
+  width: 20px;
+  height: 20px;
+  border-radius: 4px;
+}
+.wu-cm-resolve:hover:not(:disabled) {
+  color: var(--status-positive);
+}
+.wu-cm-text {
+  color: var(--text-secondary);
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+/* a card at rest shows four lines of its comment, so the cards stay near their passages; the active one shows all */
+.wu-cm:not(.wu-cm-active) .wu-cm-text {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 4;
+  line-clamp: 4;
+  overflow: hidden;
+}
+.wu-cm-refs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.wu-cm-reply {
+  display: flex;
+  align-items: center;
+  min-height: 28px;
+  box-sizing: border-box;
+  padding: 0 8px;
+  border-radius: var(--radius-ui);
+  box-shadow: 0 0 0 1px rgba(var(--ink-rgb), 0.14);
+  cursor: text;
+}
+.wu-cm-reply:focus-within {
+  box-shadow: 0 0 0 1.5px var(--accent);
+}
+.wu-cm-reply .field {
+  min-height: 0;
+  padding: 5px 0;
+  border-width: 0;
+  font: 400 var(--text-xs) / 1.45 var(--font-body);
+  color: var(--text-primary);
+}
+.wu-cm-reply .field::placeholder {
+  color: var(--text-tertiary);
+}
+
+/* -------- the figure: a canvas card in the page, bordered: its question, `from canvas` and ×, its result, its
+   caption under the 2px ink rule -------- */
+.wu-fig {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: 100%;
+  margin: 0;
+  min-width: 0;
+  box-sizing: border-box;
+  padding: 14px 16px;
+  border-radius: 10px;
+  background: var(--surface-card);
+  box-shadow: 0 0 0 1px rgba(var(--ink-rgb), 0.1);
+  font: var(--type-body);
+  color: var(--text-primary);
+}
+.wu-fig-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 22px;
+}
+.wu-fig-q {
+  flex: 1;
+  min-width: 0;
+  font: var(--type-question);
+  color: var(--text-primary);
+}
+.wu-fig-from {
+  flex: none;
+  height: auto;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  font: 400 10.5px / 1.2 var(--font-mono);
+  color: var(--text-tertiary);
+  cursor: pointer;
+}
+.wu-fig-from:hover {
+  color: var(--text-primary);
+}
+.wu-fig .wu-fig-x {
+  width: 22px;
+  height: 22px;
+  border-radius: 4px;
+}
+.wu-fig-body:empty {
+  display: none;
+}
+.wu-fig-take {
+  display: flex;
+  gap: 10px;
+}
+.wu-fig-take::before {
+  content: '';
+  flex: none;
+  width: 2px;
+  background: var(--ink-900);
+}
+.wu-fig-take .wu-fig-caption {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  /* the bare field keeps a transparent 1px border that its grown height does not count */
+  border-width: 0;
+  padding: 0;
+  font: 400 var(--text-sm) / 1.55 var(--font-prose);
+  color: var(--text-secondary);
+}
+.wu-fig-take .wu-fig-caption:focus {
+  color: var(--text-primary);
+}
+.wu-fig-chart .outputs-vega {
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+.wu-fig-chart .outputs-img {
+  max-width: 100%;
+}
+.wu-fig-chart .outputs-img[src^='data:image/svg'] {
+  width: 100%;
+}
+.wu-fig-chart .outputs-svg {
+  width: 100%;
+}
+.wu-fig-chart.wu-fig-table {
+  width: 100%;
+  overflow-x: auto;
+  padding-bottom: 4px;
+}
+.wu-fig-table .outputs-html {
+  display: block;
+  width: auto;
+  max-width: none;
+  max-height: none;
+  overflow: visible;
+}
+/* a table wider than the card scrolls, and a fade at the right edge (set by the block when scrollWidth > clientWidth)
+   says it continues */
+.wu-fig-scroll {
+  position: relative;
+}
+.wu-fig-scroll.wu-fig-overflow::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 40px;
+  pointer-events: none;
+  background: linear-gradient(to right, transparent, var(--surface-card));
+}
+/* BlockNote sizes every table in the editor to the column (fixed layout, hidden overflow); a figure's table keeps its own */
+.wu-root .wu-editor .bn-editor .wu-fig-table table {
+  table-layout: auto;
+  width: auto;
+  overflow: visible;
+}
+.wu-fig-loading,
+.wu-fig-making {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 0;
+  font: var(--type-body-sm);
+  color: var(--text-tertiary);
+}
+.wu-fig.wu-fig-pick {
+  padding: 8px;
+}
+
+/* -------- the figure picker: one Card row per card -------- */
+.wu-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.wu-picker-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 2px 2px 4px;
+}
+.wu-picker-head .wu-head-spacer {
+  flex: 1;
+}
+.wu-picker-note {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px 8px;
+  font: var(--type-body-sm);
+  color: var(--text-tertiary);
+}
+.wu-picker .card.wu-picker-row {
+  cursor: pointer;
+  transition: background var(--t-hover);
+}
+.wu-picker .card.wu-picker-row:hover,
+.wu-picker .card.wu-picker-row:focus-visible {
+  background: var(--surface-hover);
+}
+
+/* -------- the prompt block: a hairline box in mono; Enter asks the writer, Escape on nothing removes it -------- */
+.wu-root .wu-page-col .wu-editor .bn-editor .bn-block-content[data-content-type='prompt'],
+.wu-root .wu-page-col .wu-editor .bn-editor .bn-block-content[data-content-type='prompt'] > [data-node-view-wrapper] {
+  display: block;
+  width: 100%;
+  min-width: 0;
+}
+.wu-prompt {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 4px 0;
+  padding: 4px 10px;
+  background: transparent;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-ui);
+  transition: border-color var(--t-hover);
+}
+.wu-prompt:focus-within {
+  border-color: var(--accent);
+}
+.wu-prompt .wu-prompt-field {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: var(--h-control);
+  border-width: 0;
+  padding-top: 3px;
+  padding-bottom: 3px;
+  font: var(--type-mono);
+  color: var(--text-primary);
+}
+.wu-prompt .spinner {
+  flex: none;
+  margin: 8px 0 0;
+}
+.wu-prompt.wu-prompt-busy .wu-prompt-field {
+  color: var(--text-tertiary);
+}
+/* a card prompt (/card) carries the card glyph in the accent, the mark of what main makes */
+.wu-prompt .wu-prompt-glyph {
+  flex: none;
+  margin: 7px 0 0;
+  color: var(--text-accent);
+}
+/* ⌘ held while typing (lib/agentKey): the text ⌘↵ would send to main wears the ⌘ pointer's region look
+   (pointer.css), the accent's soft fill and a 1px accent ring, 5px outside its text so nothing moves: a report block
+   (`wu-agent`, decorations.ts) or a field of a slide, the story or a card (`data-agent`, over a bare field's own
+   transparent fill) */
+.wu-root .wu-editor .bn-block-outer.wu-agent > .bn-block > .bn-block-content,
+[data-agent],
+[data-agent].field,
+[data-agent].field:focus {
+  border-radius: 1px;
+  background: var(--accent-soft);
+  box-shadow: 0 0 0 5px var(--accent-soft);
+  outline: 1px solid var(--accent);
+  outline-offset: 5px;
+}
+/* a block sent to main with ⌘↵ (Editor.sendBlock): its text in the tint it wore while ⌘ was held, working */
+.wu-prompt.wu-prompt-sent {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+.wu-prompt.wu-prompt-sent .wu-prompt-field {
+  color: var(--text-primary);
+  font: var(--type-report-body);
+}
+
+/* -------- prose: a document's sentences outside the editor (a slide's lines, a beat, a page's claims) -------- */
+.wu-prose {
+  margin: 0;
+  text-wrap: pretty;
+}
+.wu-prose .chip {
+  vertical-align: 1px;
+  margin: 0 2px;
+}
+.wu-prose .refchip.refchip-value {
+  font: inherit;
+  margin: 0;
+}
+
+/* -------- the evidence card of the slides, the story and a page: the overlay at the pane's top right -------- */
+.wu-evpop {
+  position: absolute;
+  right: 20px;
+  top: 20px;
+  z-index: 4;
+  width: 250px;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  border-radius: var(--radius-card);
+  font: var(--type-ui-sm);
+  pointer-events: none;
+}
+.wu-evpop-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+.wu-evpop-sq {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  margin-top: 5px;
+  border-radius: 2px;
+}
+.wu-evpop-body {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+.wu-evpop-text {
+  color: var(--text-primary);
+}
+.wu-evpop-src {
+  font: 400 10.5px / 1.4 var(--font-mono);
+  color: var(--text-tertiary);
+  overflow-wrap: anywhere;
+}
+
+/* the evidence card's ✓ resolves a stored comment; the card lets the pointer through and only its ✓ takes it */
+.wu-evpop-row .wu-cm-resolve {
+  margin-left: auto;
+  margin-top: -2px;
+  pointer-events: auto;
+}
+
+/* -------- a comment on a selection in the slides, the story and a page (SelectComment.tsx): a one-button bar over the
+   selection's first line, then the new-comment card in its place, both fixed to the viewport -------- */
+.wu-selbar,
+.wu-selcard {
+  position: fixed;
+  z-index: var(--z-popover);
+  transform: translateY(-100%);
+  border-radius: var(--radius-card);
+}
+.wu-selbar {
+  display: flex;
+  padding: 2px;
+}
+.wu-selbar .wu-iconbtn {
+  width: var(--control-sm);
+  height: var(--control-sm);
+  border-radius: var(--radius-ui);
+  color: var(--text-secondary);
+}
+.wu-selcard {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 228px;
+  box-sizing: border-box;
+  padding: 10px 12px;
+  font: var(--type-ui-sm);
+}
+
+/* -------- the slides (Deck.tsx): a rail of numbered thumbnails and the chosen slide at 16:9 with its notes. The slide
+   is laid out at 960×540 and scaled to the stage, so it keeps its proportions at any width -------- */
+.wu-deck {
+  position: absolute;
+  inset: 0;
+  outline: none;
+}
+.wu-deck-rail {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 168px;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px 12px;
+  overflow: auto;
+  scrollbar-width: none;
+}
+.wu-deck-rail::-webkit-scrollbar {
+  display: none;
+}
+.wu-thumb-row {
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  width: 100%;
+  cursor: pointer;
+}
+.wu-thumb-n {
+  flex: none;
+  width: 12px;
+  padding-top: 2px;
+  font: 400 10px / 1.2 var(--font-mono);
+  color: var(--text-tertiary);
+}
+.wu-thumb {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex: 1;
+  min-width: 0;
+  aspect-ratio: 16 / 9;
+  box-sizing: border-box;
+  padding: 6px;
+  overflow: hidden;
+  border-radius: 4px;
+  background: var(--surface-card);
+  box-shadow: 0 0 0 1px rgba(var(--ink-rgb), 0.1);
+  transition: box-shadow var(--dur-fast) var(--ease-out);
+}
+.wu-thumb.active {
+  box-shadow: 0 0 0 1.5px var(--accent);
+}
+.wu-thumb-target .wu-thumb {
+  box-shadow: 0 0 0 1.5px var(--accent);
+  background: var(--accent-soft);
+}
+.wu-thumb-h {
+  flex: none;
+  max-height: 2.6em;
+  overflow: hidden;
+  font: 500 7px / 1.3 var(--font-body);
+  color: var(--text-primary);
+}
+/* a layout drawn small (LayoutGlyph.tsx): the heading's bar, the lines, the card slots (darker once one holds a card) */
+.lg {
+  display: block;
+}
+.lg-h {
+  fill: rgba(var(--ink-rgb), 0.4);
+}
+.lg-t {
+  fill: rgba(var(--ink-rgb), 0.22);
+}
+.lg-f {
+  fill: rgba(var(--ink-rgb), 0.1);
+}
+.lg-f.on {
+  fill: rgba(var(--ink-rgb), 0.26);
+}
+.wu-sketch {
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+}
+.wu-thumb-over {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--status-warning);
+}
+/* a thumbnail's actions, over its top right while the pointer is on it */
+.wu-thumb-acts {
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  display: flex;
+  gap: 2px;
+  opacity: 0;
+  transition: opacity var(--dur-fast) var(--ease-out);
+}
+.wu-thumb-row:hover .wu-thumb-acts,
+.wu-thumb-acts:focus-within {
+  opacity: 1;
+}
+.wu-thumb-acts .btn {
+  background: var(--surface-card);
+  box-shadow: 0 0 0 1px rgba(var(--ink-rgb), 0.1);
+}
+.wu-thumb-add {
+  align-self: center;
+  flex: none;
+}
+.wu-deck-stage {
+  position: absolute;
+  left: 168px;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  box-sizing: border-box;
+  padding: 14px 28px 40px 8px;
+  overflow: auto;
+  scrollbar-width: none;
+}
+.wu-deck-stage > * {
+  width: 100%;
+  max-width: 960px;
+}
+.wu-deck-tools {
+  flex: none;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  min-height: 30px;
+  margin-bottom: 10px;
+}
+.wu-deck-tools-gap {
+  flex: 1;
+}
+/* a request sent to main from the slide's lines (⌘↵), out until its card lands or main's turn ends */
+.wu-deck-asking {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font: var(--type-ui-sm);
+  color: var(--text-accent);
+}
+/* the layout picker: each layout as a small slide, drawn as the rail's thumbnails are, the slide's own ringed in the
+   accent */
+.wu-layout-pick {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.wu-layout-opt {
+  flex: none;
+  display: block;
+  width: 42px;
+  height: 24px;
+  padding: 1px;
+  border: 0;
+  border-radius: 3px;
+  background: var(--surface-card);
+  box-shadow: 0 0 0 1px rgba(var(--ink-rgb), 0.1);
+  cursor: pointer;
+  transition: box-shadow var(--dur-fast) var(--ease-out);
+}
+.wu-layout-opt .lg {
+  width: 100%;
+  height: 100%;
+}
+.wu-layout-opt:hover {
+  box-shadow: 0 0 0 1px rgba(var(--ink-rgb), 0.28);
+}
+.wu-layout-opt.active {
+  box-shadow: 0 0 0 1.5px var(--accent);
+}
+.wu-layout-opt:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+/* a layout in the new-slide menu: its drawing, then its name */
+.wu-layout-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+.wu-layout-item .lg {
+  flex: none;
+  width: 32px;
+  height: 18px;
+  border-radius: 2px;
+  background: var(--surface-card);
+  box-shadow: 0 0 0 1px rgba(var(--ink-rgb), 0.1);
+}
+/* the card slots: − the count + */
+.wu-deck-slots {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+.wu-deck-slots-n {
+  padding: 0 4px;
+  font: var(--type-ui-sm);
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+.wu-slide-box {
+  position: relative;
+  flex: none;
+  aspect-ratio: 16 / 9;
+  border-radius: var(--radius-card);
+  background: var(--surface-card);
+  box-shadow: 0 0 0 1px rgba(var(--ink-rgb), 0.08), var(--shadow-float);
+}
+.wu-deck:focus-visible .wu-slide-box {
+  box-shadow: 0 0 0 1.5px var(--accent), var(--shadow-float);
+}
+.wu-slide-scaled {
+  position: absolute;
+  left: 0;
+  top: 0;
+  transform-origin: 0 0;
+}
+.wu-slide {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  padding: 52px 64px 56px;
+  overflow: hidden;
+  color: var(--text-primary);
+}
+/* the cells: the heading, the lines, a figure slot, the quote and its speaker */
+.wu-tpl.wu-sl-h {
+  flex: none;
+  font: 500 34px / 1.2 var(--font-body);
+  letter-spacing: -0.015em;
+  color: var(--text-primary);
+}
+.wu-sl-lines {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+  font: 400 calc(22px * var(--fit, 1)) / 1.55 var(--font-prose);
+  color: var(--text-primary);
+  border-radius: var(--radius-ui);
+  cursor: text;
+}
+.wu-sl-lines ul {
+  margin: 0;
+  padding-left: 1.1em;
+}
+.wu-sl-lines li + li {
+  margin-top: 8px;
+}
+.wu-sl-lines .wu-prose {
+  margin: 0;
+  font: inherit;
+}
+.wu-sl-title {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 18px;
+  text-align: center;
+}
+.wu-sl-title .wu-tpl.wu-sl-h {
+  font-size: 52px;
+  text-align: center;
+}
+.wu-sl-title .wu-sl-lines {
+  flex: none;
+  font-size: calc(24px * var(--fit, 1));
+  color: var(--text-secondary);
+}
+.wu-sl-title .wu-sl-lines ul {
+  padding: 0;
+  list-style: none;
+}
+.wu-sl-row {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  gap: 36px;
+}
+.wu-sl-row-left > .wu-cell-fig,
+.wu-sl-row-left > .wu-sl-stack {
+  order: -1;
+}
+/* cards side by side (their columns and rows set inline), four in a grid, two stacked beside the lines */
+.wu-sl-cards {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  gap: 28px;
+}
+.wu-sl-cards.wu-sl-grid {
+  gap: 18px 28px;
+}
+.wu-sl-stack {
+  min-width: 0;
+  min-height: 0;
+  display: grid;
+  gap: 18px;
+}
+/* a card across the slide: a small heading over it, the card in the rest */
+.wu-slide.wu-layout-card {
+  gap: 12px;
+  padding: 24px 32px 28px;
+}
+.wu-layout-card > .wu-cell-fig {
+  flex: 1;
+}
+/* several cards share the slide: their captions smaller and at most two lines while they read */
+.wu-sl-cards .wu-sl-cap,
+.wu-sl-stack .wu-sl-cap {
+  font-size: 13px;
+}
+.wu-sl-cards .wu-sl-cap:not(.wu-cell-editing),
+.wu-sl-stack .wu-sl-cap:not(.wu-cell-editing) {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+}
+.wu-cell-fig {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  border-radius: var(--radius-ui);
+}
+.wu-cell-fig.wu-cell-empty {
+  outline: 1px dashed rgba(var(--ink-rgb), 0.24);
+}
+.wu-cell-pick {
+  flex: 1;
+  width: 100%;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+}
+.wu-cell-pick::after {
+  content: '+';
+  font: 400 40px / 1 var(--font-body);
+  color: var(--text-placeholder);
+}
+.wu-cell-target {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  background: var(--accent-soft);
+}
+.wu-fit {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+.wu-fit-in {
+  width: 100%;
+  transform-origin: 0 0;
+}
+.wu-cell-fig-foot {
+  flex: none;
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+}
+.wu-sl-cap {
+  flex: 1;
+  min-width: 0;
+  font: 400 15px / 1.35 var(--font-body);
+  color: var(--text-secondary);
+  cursor: text;
+}
+.wu-sl-cap .wu-prose,
+.wu-slide-notes .wu-prose {
+  margin: 0;
+  font: inherit;
+  color: inherit;
+}
+.wu-cell-fig-foot .wu-slide-src-link {
+  flex: none;
+  font-size: 13px;
+}
+.wu-cell-x {
+  position: absolute;
+  top: 0;
+  right: 0;
+  opacity: 0;
+  background: var(--surface-card);
+  transition: opacity var(--dur-fast) var(--ease-out);
+}
+.wu-cell-fig:hover > .wu-cell-x,
+.wu-cell-x:focus-visible {
+  opacity: 1;
+}
+.wu-sl-quote {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 22px;
+  padding: 0 40px;
+}
+.wu-sl-kicker .wu-tpl.wu-sl-h {
+  font: 500 18px / 1.3 var(--font-body);
+  color: var(--text-secondary);
+}
+.wu-sl-q {
+  font: 400 38px / 1.35 var(--font-prose);
+  letter-spacing: -0.01em;
+  color: var(--text-primary);
+  border-radius: var(--radius-ui);
+  cursor: text;
+}
+.wu-sl-q.wu-sl-q-m {
+  font-size: 30px;
+}
+.wu-sl-q.wu-sl-q-l {
+  font-size: 24px;
+}
+.wu-sl-q .wu-prose {
+  margin: 0;
+  font: inherit;
+}
+/* inline code on a slide is set in proportion to the text around it, however large */
+.wu-slide code {
+  font-size: 0.82em;
+}
+.wu-sl-q .wu-prose::before {
+  content: '“';
+}
+.wu-sl-q .wu-prose::after {
+  content: '”';
+}
+.wu-tpl.wu-sl-who {
+  font: 400 20px / 1.3 var(--font-body);
+  color: var(--text-secondary);
+}
+.wu-sl-qfig {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.wu-sl-qfig > .wu-cell-fig {
+  flex: 1;
+}
+.wu-sl-quote .wu-sl-lines {
+  flex: none;
+  max-height: 120px;
+  font-size: calc(18px * var(--fit, 1));
+  color: var(--text-secondary);
+}
+/* an empty text cell, and a field while a cell is edited: the cell stays where it stood, in its own type */
+.wu-cell-empty:not(.wu-cell-fig) {
+  min-height: 1.6em;
+  outline: 1px dashed rgba(var(--ink-rgb), 0.24);
+  outline-offset: 5px;
+}
+.wu-sl-lines.wu-cell-empty {
+  min-height: 72px;
+}
+.wu-sl-q.wu-cell-empty {
+  min-height: 90px;
+}
+.wu-cell-editing {
+  outline: 1px solid rgba(var(--ink-rgb), 0.24);
+  outline-offset: 5px;
+}
+.wu-cell-field {
+  display: block;
+  width: 100%;
+  height: auto;
+  min-height: 1.5em;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  color: inherit;
+  resize: none;
+  overflow: hidden;
+  outline: none;
+}
+.wu-slide-src {
+  position: absolute;
+  left: 64px;
+  bottom: 20px;
+  font: 400 13px / 1.2 var(--font-mono);
+  color: var(--text-tertiary);
+}
+.wu-cell-fig-foot .wu-slide-src {
+  position: static;
+}
+.wu-slide-src-link {
+  height: auto;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+}
+.wu-slide-src-link:hover {
+  color: var(--text-primary);
+}
+.wu-slide-notes {
+  flex: none;
+  margin-top: 14px;
+  font: var(--type-ui-sm);
+  color: var(--text-secondary);
+  cursor: text;
+}
+.wu-slot-picker {
+  max-height: 360px;
+  overflow: auto;
+}
+/* a figure shown bare: the chart alone, at the width it is given */
+.wu-fig-bare {
+  width: 100%;
+  min-width: 0;
+}
+
+.wu-tpl.wu-se-heading {
+  font: 500 var(--text-xl) / 1.35 var(--font-body);
+  color: var(--text-primary);
+}
+.wu-tpl.wu-se-title {
+  font: 500 var(--text-2xl) / 1.25 var(--font-body);
+  color: var(--text-primary);
+}
+.wu-story-cap,
+.wu-tpl.wu-story-cap {
+  font: 500 var(--text-xs) / 1.35 var(--font-body);
+  color: var(--text-primary);
+}
+
+/* -------- a story's blocks: text and lists in the story's prose, a headline, a quote behind a 2px rule with its
+   speaker, a callout on the tonal surface, a rule, and a picture of a card with its caption -------- */
+.wu-sb-text,
+.wu-sb-list,
+.wu-sb-quote,
+.wu-se-field-text,
+.wu-se-field-bullets,
+.wu-se-field-callout,
+.wu-se-field-quote {
+  font: 400 var(--text-lg) / 1.65 var(--font-prose);
+  color: var(--text-primary);
+}
+.wu-sb-text .wu-prose,
+.wu-sb-list .wu-prose,
+.wu-sb-quote .wu-prose,
+.wu-sb-headline .wu-prose {
+  font: inherit;
+}
+.wu-sb-headline,
+.wu-se-field-headline {
+  font: 500 var(--text-lg) / 1.4 var(--font-body);
+  color: var(--text-primary);
+}
+.wu-sb-list {
+  margin: 0;
+  padding-left: 1.3em;
+}
+.wu-sb-list li + li {
+  margin-top: 2px;
+}
+.wu-sb-quote {
+  margin: 0;
+  padding: 2px 0 2px 14px;
+  border-left: 2px solid rgba(var(--ink-rgb), 0.24);
+}
+.wu-se-field-quote {
+  padding-left: 16px;
+}
+.wu-sb-who,
+.wu-tpl.wu-se-who {
+  display: block;
+  margin-top: 4px;
+  font: var(--type-ui-sm);
+  color: var(--text-secondary);
+}
+.wu-sb-who::before {
+  content: '— ';
+}
+.wu-tpl.wu-se-who {
+  padding-left: 16px;
+}
+.wu-sb-rule {
+  width: 100%;
+  height: 1px;
+  margin: 8px 0;
+  border: 0;
+  background: rgba(var(--ink-rgb), 0.14);
+}
+.wu-sb-image {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.wu-sb-image-art {
+  pointer-events: none;
+  user-select: none;
+}
+.wu-sb-image-cap,
+.wu-tpl.wu-sb-image-cap {
+  font: var(--type-caption);
+  color: var(--text-secondary);
+}
+
+/* -------- the story's editor (StoryEditor.tsx): the sections as pages at least the pane's height (100cqh) with the
+   scroll snapping to each, its text column with the block actions' gutter at its right (--wu-gutter-r) and its card
+   beside it, held in view while the section scrolls; in a narrow pane the card stands under the text -------- */
+.wu-story-ed {
+  position: absolute;
+  inset: 0;
+  overflow: auto;
+  scrollbar-width: none;
+  scroll-snap-type: y mandatory;
+  container: wu-story / size;
+  background: var(--surface-card);
+}
+.wu-story-ed::-webkit-scrollbar {
+  display: none;
+}
+.wu-se-col {
+  --wu-gutter-l: 0px;
+  --wu-gutter-r: 0px;
+  position: relative;
+  max-width: 1180px;
+  margin: 0 auto;
+  box-sizing: border-box;
+  padding: 0 28px;
+}
+.wu-side-hidden .wu-se-col {
+  padding-left: 48px;
+}
+.wu-se-sec {
+  position: relative;
+  box-sizing: border-box;
+  min-height: 100cqh;
+  scroll-snap-align: start;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr);
+  grid-template-areas: 'text card';
+  column-gap: 20px;
+  padding: 44px 0 32px;
+}
+.wu-se-left {
+  grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr);
+  grid-template-areas: 'card text';
+}
+.wu-se-full {
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: auto 1fr;
+  grid-template-areas: 'text' 'card';
+  row-gap: 16px;
+}
+.wu-se-none {
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-areas: 'text';
+}
+.wu-se-text {
+  --wu-gutter-l: 0px;
+  --wu-gutter-r: 84px;
+  grid-area: text;
+  position: relative;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  padding-bottom: 28px;
+}
+.wu-se-full > .wu-se-text,
+.wu-se-none > .wu-se-text {
+  width: 100%;
+  max-width: calc(var(--w-card) + var(--wu-gutter-r));
+}
+.wu-se-full > .wu-se-text {
+  justify-self: center;
+}
+/* a block, a headline or the title, and its actions in the gutter at its right, 12 from the text so they clear an
+   empty cell's dashed outline; a locked one shows its lock at rest */
+.wu-se-block,
+.wu-se-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+.wu-se-body {
+  flex: 1;
+  min-width: 0;
+}
+.wu-root .wu-se-acts {
+  flex: none;
+  width: calc(3 * var(--h-control));
+  padding-top: 1px;
+}
+.wu-se-block:not(:hover):not(:focus-within) > .wu-se-acts,
+.wu-se-head:not(:hover):not(:focus-within) > .wu-se-acts,
+.wu-se-card:not(:hover) > .wu-se-acts {
+  visibility: hidden;
+}
+.wu-se-block.wu-locked > .wu-se-acts .wu-acts-lock,
+.wu-se-head.wu-locked > .wu-se-acts .wu-acts-lock,
+.wu-se-card.wu-locked > .wu-se-acts .wu-acts-lock {
+  visibility: visible;
+}
+.wu-se-read {
+  cursor: text;
+  border-radius: var(--radius-ui);
+}
+.wu-se-read:focus-visible {
+  outline: 1px solid rgba(var(--ink-rgb), 0.24);
+  outline-offset: 5px;
+}
+.wu-se-read.wu-se-empty {
+  min-height: 1.65em;
+  outline: 1px dashed rgba(var(--ink-rgb), 0.24);
+  outline-offset: 5px;
+}
+.wu-se-field {
+  display: block;
+  width: 100%;
+  min-height: 1.4em;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  resize: none;
+  overflow: hidden;
+  box-shadow: none;
+}
+.wu-se-field:focus,
+.wu-se-field:focus-visible {
+  outline: none;
+  box-shadow: none;
+}
+.wu-se-b-divider {
+  align-items: center;
+}
+.wu-se-imageblock {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+/* the room between blocks, more under a headline for the empty cells' dashed outlines */
+.wu-se-text > .wu-se-block {
+  margin-top: 10px;
+}
+.wu-se-text > .wu-se-head + .wu-se-block {
+  margin-top: 16px;
+}
+.wu-se-text > .wu-se-head + .wu-se-head {
+  margin-top: 14px;
+}
+/* pages stand apart by a faint hairline */
+.wu-se-sec + .wu-se-sec::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  height: 1px;
+  background: rgba(var(--ink-rgb), 0.08);
+}
+.wu-se-secline {
+  left: 0;
+  right: 0;
+}
+/* a hovered section's bar at its top right: where its card stands, its delete; a drag on it moves the section */
+.wu-se-bar {
+  position: absolute;
+  top: 4px;
+  right: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  cursor: grab;
+}
+.wu-se-bar:active {
+  cursor: grabbing;
+}
+.wu-se-sec:not(:hover) > .wu-se-bar:not(:focus-within) {
+  visibility: hidden;
+}
+/* a section's card slot: its card with its caption edited in place and its actions at its top right; empty, a dashed
+   cell that takes a dropped card or opens the picker */
+.wu-se-card {
+  grid-area: card;
+  position: sticky;
+  top: 16px;
+  align-self: start;
+  min-width: 0;
+  border-radius: 10px;
+}
+.wu-se-card-in {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  box-sizing: border-box;
+  max-height: calc(100cqh - 76px);
+  overflow: auto;
+  scrollbar-width: none;
+  padding: 18px 20px;
+  border-radius: 10px;
+  box-shadow: 0 0 0 1px rgba(var(--ink-rgb), 0.08);
+}
+.wu-se-card-in > .wu-fig-from {
+  align-self: flex-end;
+}
+.wu-root .wu-se-card > .wu-se-acts {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  width: auto;
+  padding: 0;
+  border-radius: var(--radius-ui);
+  background: var(--surface-card);
+}
+.wu-se-card-empty {
+  display: flex;
+  min-height: 160px;
+  outline: 1px dashed rgba(var(--ink-rgb), 0.24);
+  transition: opacity var(--dur-fast) var(--ease-out);
+}
+/* an empty slot shows on its section's hover, in a new section, and while a card is dragged */
+.wu-story-ed:not(.wu-se-carrying) .wu-se-sec:not(:hover) > .wu-se-card-empty:not(.wu-se-card-new):not(:focus-within) {
+  opacity: 0;
+}
+.wu-se-slash-on {
+  background: var(--surface-hover);
+}
+@container wu-story (max-width: 760px) {
+  .wu-se-right,
+  .wu-se-left {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto 1fr;
+    grid-template-areas: 'text' 'card';
+    row-gap: 16px;
+  }
+  .wu-se-card {
+    position: relative;
+    top: 0;
+  }
+}
+/* a beat's step on the figure (Story.tsx StepFigure): the items it names highlighted, the rest faded, or its callout
+   above the figure */
+.wu-step {
+  position: relative;
+}
+.wu-step tbody tr,
+.wu-step .canvas-tl-row,
+.wu-step .canvas-diagram-node {
+  transition: opacity var(--t-fade);
+}
+.wu-step-lit tbody tr:not(.wu-step-on),
+.wu-step-lit .canvas-tl-row:not(.wu-step-on),
+.wu-step-lit .canvas-diagram-node:not(.wu-step-on) {
+  opacity: 0.3;
+}
+.wu-step tr.wu-step-on > td,
+.wu-step tr.wu-step-on > th,
+.wu-step .canvas-tl-row.wu-step-on {
+  background: var(--hl-bg);
+}
+.wu-step td,
+.wu-step th {
+  transition: opacity var(--t-fade), background-color var(--t-fade);
+}
+.wu-step .wu-step-col {
+  background: var(--hl-bg);
+}
+.wu-step-cols tr > :not(.wu-step-col):not(:first-child) {
+  opacity: 0.3;
+}
+.wu-step .canvas-diagram-node.wu-step-on rect {
+  stroke: var(--accent);
+  stroke-width: 2;
+}
+.wu-step-callout {
+  margin: 0 0 12px;
+  padding: 2px 0 2px 12px;
+  border-left: 2px solid var(--accent);
+  font: 500 var(--text-lg) / 1.3 var(--font-body);
+  color: var(--text-primary);
+  animation: wu-fade var(--dur-base) var(--ease-out);
+}
+@keyframes wu-fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+/* -------- a page: a sandboxed frame sized to its content on the cell's paper, its claims, the code drawer -------- */
+.wu-view {
+  position: absolute;
+  inset: 0;
+}
+.wu-pagedoc {
+  position: absolute;
+  inset: 0;
+  overflow: auto;
+  background: var(--surface-card);
+}
+/* the page takes the pane's whole width; its claims and the drawer keep a card's width */
+.wu-pagedoc-col {
+  margin: 0 auto;
+  padding: 24px 32px 80px;
+}
+.wu-pagedoc-col > .wu-page-claims,
+.wu-pagedoc-col > .wu-drawer {
+  max-width: var(--w-card);
+  margin-left: auto;
+  margin-right: auto;
+}
+.wu-page-frames {
+  position: relative;
+}
+/* a page wider than its frame scrolls sideways inside it: a fade at the right edge says there is more */
+.wu-page-wide::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 40px;
+  pointer-events: none;
+  background: linear-gradient(to right, transparent, var(--surface-card));
+}
+.wu-page-frame {
+  display: block;
+  width: 100%;
+  border: 0;
+  background: transparent;
+}
+.wu-page-measure {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 100%;
+  height: 10px;
+  border: 0;
+  visibility: hidden;
+  pointer-events: none;
+}
+.wu-page-claims {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 16px 0 24px;
+  font: var(--type-report-body);
+  color: var(--text-primary);
+}
+.wu-page-claims > .label {
+  line-height: 16px;
+}
+/* the drawer: under the page, its own scroll, sections each under a small uppercase label */
+.wu-drawer {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  margin-top: 4px;
+  padding: 12px 16px 16px;
+  max-height: 70vh;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  border: 1px solid var(--border-hairline);
+  border-radius: var(--radius-card);
+  background: var(--bg-sunken);
+}
+.wu-drawer-section {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  min-width: 0;
+}
+.wu-drawer-section > .label {
+  line-height: 16px;
+}
+.wu-drawer-section > .field {
+  align-self: stretch;
+}
+.wu-page-code {
+  min-height: 160px;
+  background: var(--bg-sunken);
+  tab-size: 2;
+}
+.wu-drawer-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}

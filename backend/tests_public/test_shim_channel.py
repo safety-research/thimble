@@ -1,0 +1,258 @@
+"""plugin/bin/thimble-mcp as a channel: it declares Claude Code's `claude/channel` capability, and in a session with the
+channel (THIMBLE_CHANNEL in its environment, which the launcher exports, or the channel flag naming this plugin copy on
+its parent's command line, app.cc_channel) it subscribes to the server's `GET /api/channel` with its folder,
+its session id and its parent's pid, and writes each `channel` event as a `notifications/claude/channel` on stdout, none
+before the MCP handshake is done. That session also relays its permission prompts: it declares
+`claude/channel/permission`, posts each `notifications/claude/channel/permission_request` to
+`POST /api/channel/permission`, and writes each `permission` event of the stream as
+`notifications/claude/channel/permission`. The server here is a stand-in that serves one event of each kind."""
+from __future__ import annotations
+
+import json
+import os
+import select
+import signal
+import subprocess
+import sys
+import threading
+import time
+import urllib.parse
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
+from typing import Any
+
+import pytest
+
+from app import config
+
+SHIM = config.REPO_ROOT / "plugin" / "bin" / "thimble-mcp"
+NOTE = {"content": "question: why?", "meta": {"kind": "thread", "event": "e1", "thread": "t1"}}
+VERDICT = {"request_id": "swagd", "behavior": "allow"}
+REQUEST = {"request_id": "abcde", "tool_name": "Bash", "description": "Create x", "input_preview": '{"command": "touch x"}'}
+
+
+class _Server:
+    """GET /api/channel: a `ready` event, one `channel` event, then held open; every query string is kept."""
+
+    def __init__(self) -> None:
+        self.queries: list[dict] = []
+        self.posts: list[dict] = []
+        self.calls: list[tuple[str, dict]] = []  # (tool, body) of each POST /api/tools/<tool>
+        outer = self
+
+        class H(BaseHTTPRequestHandler):
+            def do_POST(self):  # noqa: N802
+                body = self.rfile.read(int(self.headers.get("Content-Length") or 0))
+                path = urllib.parse.urlsplit(self.path).path
+                if path == "/api/channel/permission":
+                    outer.posts.append(json.loads(body))
+                answer = b"{}"
+                if path.startswith("/api/tools/"):
+                    outer.calls.append((path.rsplit("/", 1)[-1], json.loads(body)))
+                    answer = json.dumps({"content": [{"type": "text", "text": "ok"}], "is_error": False}).encode()
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(answer)
+
+            def do_GET(self):  # noqa: N802
+                u = urllib.parse.urlsplit(self.path)
+                if u.path != "/api/channel":
+                    self.send_response(404)
+                    self.end_headers()
+                    return
+                outer.queries.append(dict(urllib.parse.parse_qsl(u.query)))
+                self.send_response(200)
+                self.send_header("Content-Type", "text/event-stream")
+                self.end_headers()
+                self.wfile.write(b'event: ready\ndata: {"workspace": "mini"}\n\n')
+                self.wfile.write(b": ping\n\n")
+                self.wfile.write(b"event: channel\ndata: " + json.dumps(NOTE).encode() + b"\n\n")
+                self.wfile.write(b"event: permission\ndata: " + json.dumps(VERDICT).encode() + b"\n\n")
+                self.wfile.flush()
+                time.sleep(3)
+
+            def log_message(self, *a):
+                pass
+
+        self.httpd = ThreadingHTTPServer(("127.0.0.1", 0), H)
+        self.port = self.httpd.server_address[1]
+        threading.Thread(target=self.httpd.serve_forever, daemon=True).start()
+
+    def close(self) -> None:
+        self.httpd.shutdown()
+
+
+@pytest.fixture()
+def server():
+    s = _Server()
+    yield s
+    s.close()
+
+
+PARENT = "import subprocess, sys; sys.exit(subprocess.call([sys.argv[1]]))"  # a stand-in `claude`: the shim as its child
+
+
+INITIALIZE = {"jsonrpc": "2.0", "id": 0, "method": "initialize",
+              "params": {"protocolVersion": "2025-11-25", "capabilities": {}, "clientInfo": {"name": "t", "version": "1"}}}
+INITIALIZED = {"jsonrpc": "2.0", "method": "notifications/initialized"}
+
+
+def _run(tmp_path: Path, port: int, channel: bool, wait_s: float, until: Any = "notifications/claude/channel",
+         send: list[dict] | None = None, parent: list[str] | None = None, extra: dict | None = None) -> list[dict]:
+    """The shim's output until `until` (a method written, or a function that says when) or `wait_s`, after the MCP
+    handshake and the messages in `send`; with `parent`, the shim runs as the child of a stand-in `claude` process whose
+    command line carries those arguments; `extra` adds to its environment."""
+    p = _start(tmp_path, port, channel, parent=parent, extra=extra)
+    _send(p, [INITIALIZE, INITIALIZED, *(send or [])])
+    try:
+        return _read(p, until, wait_s)
+    finally:
+        _stop(p)
+
+
+def _start(tmp_path: Path, port: int, channel: bool, parent: list[str] | None = None,
+           extra: dict | None = None) -> subprocess.Popen:
+    """The shim as a child process (of a stand-in `claude` with `parent`), its server the stand-in on `port`."""
+    home = tmp_path / "home"
+    home.mkdir(exist_ok=True)
+    (home / "server.json").write_text(json.dumps({"port": port, "api": f"http://127.0.0.1:{port}"}))
+    login = tmp_path / "cc" / ".credentials.json"  # a claude.ai login, which channels need (cc_channel.claude_ai_login)
+    if not login.exists():
+        login.parent.mkdir(parents=True, exist_ok=True)
+        login.write_text(json.dumps({"claudeAiOauth": {"accessToken": "t", "scopes": ["user:inference"]}}))
+    env = {**os.environ, "THIMBLE_HOME": str(home), "THIMBLE_CWD": "/data/mini", "CLAUDE_CONFIG_DIR": str(tmp_path / "cc"),
+           "CLAUDE_CODE_SESSION_ID": "s-123"}
+    for k in ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_PROFILE", "CLAUDE_CODE_USE_BEDROCK",
+              "CLAUDE_CODE_USE_VERTEX", "CLAUDE_CODE_USE_FOUNDRY"):
+        env.pop(k, None)  # the runner's own login must not decide the route the test asserts
+    env.pop("THIMBLE_CHANNEL", None)
+    env.pop("THIMBLE_SESSION", None)
+    if channel:
+        env["THIMBLE_CHANNEL"] = "plugin:thimble@inline"
+    env.update(extra or {})
+    cmd = [str(SHIM)] if parent is None else [sys.executable, "-c", PARENT, str(SHIM), *parent]
+    p = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, env=env,
+                         start_new_session=True)
+    p.pending = b""  # type: ignore[attr-defined]  # a line of its stdout not yet whole
+    return p
+
+
+def _send(p: subprocess.Popen, messages: list[dict]) -> None:
+    p.stdin.write("".join(json.dumps(m) + "\n" for m in messages).encode())
+    p.stdin.flush()
+
+
+def _read(p: subprocess.Popen, until: Any, wait_s: float) -> list[dict]:
+    """The messages the shim writes until `until` (a method written, or a function that says when) or `wait_s`."""
+    out: list[dict] = []
+    end = time.monotonic() + wait_s
+    while time.monotonic() < end:
+        if callable(until) and until():
+            break
+        r, _, _ = select.select([p.stdout], [], [], 0.2)
+        if not r:
+            continue
+        chunk = os.read(p.stdout.fileno(), 65536)
+        if not chunk:
+            break
+        p.pending += chunk
+        while b"\n" in p.pending:
+            line, p.pending = p.pending.split(b"\n", 1)
+            if line.strip():
+                out.append(json.loads(line))
+        if any(m.get("method") == until for m in out):
+            break
+    return out
+
+
+def _stop(p: subprocess.Popen) -> None:
+    os.killpg(p.pid, signal.SIGKILL)  # the stand-in parent and the shim with it
+    p.wait()
+
+
+def test_the_shim_declares_the_channel_and_forwards_an_event(tmp_path, server):
+    out = _run(tmp_path, server.port, channel=True, wait_s=30)
+    init = next(m for m in out if m.get("id") == 0)
+    assert init["result"]["capabilities"]["experimental"] == {"claude/channel": {}, "claude/channel/permission": {}}
+    assert "`thimble`" in init["result"]["instructions"] and len(init["result"]["instructions"].encode()) < 2048
+    notes = [m for m in out if m.get("method") == "notifications/claude/channel"]
+    assert notes and notes[0]["params"] == NOTE
+    q = server.queries[0]
+    assert q["cwd"] == "/data/mini" and q["session"] == "s-123" and int(q["pid"]) == os.getpid()
+
+
+def test_an_event_the_server_sends_at_once_waits_for_the_handshake(tmp_path, server):
+    """The stand-in server sends its events the moment the shim subscribes, which the shim does at start. None is
+    written to Claude Code before the client says `notifications/initialized` after reading the initialize result, and
+    the one that came meanwhile is written then."""
+    p = _start(tmp_path, server.port, channel=True)
+    try:
+        _send(p, [INITIALIZE])
+        first: list[dict] = []
+        end = time.monotonic() + 30
+        while time.monotonic() < end and not (server.queries and any(m.get("id") == 0 for m in first)):
+            first += _read(p, "", 0.2)
+        first += _read(p, "notifications/claude/channel", 1.0)  # time for an event written early to arrive
+        assert server.queries, "the shim subscribes at start, before the handshake"
+        assert [m.get("id") for m in first] == [0] and "result" in first[0], first
+        _send(p, [INITIALIZED])
+        later = _read(p, "notifications/claude/channel", 30)
+        assert [m["params"] for m in later if m.get("method") == "notifications/claude/channel"] == [NOTE]
+    finally:
+        _stop(p)
+
+
+def test_the_launcher_s_session_relays_its_permission_prompts_both_ways(tmp_path, server):
+    """Claude Code's request reaches the server with the folder and the session; the browser's answer on the stream
+    reaches Claude Code as the verdict notification. The stand-in sends its verdict the moment the shim subscribes,
+    which can be before the shim has posted the request, so the shim runs until the post arrives."""
+    note = {"jsonrpc": "2.0", "method": "notifications/claude/channel/permission_request", "params": REQUEST}
+    p = _start(tmp_path, server.port, channel=True)
+    try:
+        _send(p, [INITIALIZE, INITIALIZED, note])
+        out = _read(p, "notifications/claude/channel/permission", 30)
+        _read(p, lambda: bool(server.posts), 30)
+    finally:
+        _stop(p)
+    verdicts = [m for m in out if m.get("method") == "notifications/claude/channel/permission"]
+    assert verdicts and verdicts[0]["params"] == VERDICT
+    assert server.posts == [{**REQUEST, "cwd": "/data/mini", "session": "s-123"}]
+
+
+def test_a_tool_call_carries_the_id_claude_code_gave_it(tmp_path, server):
+    """Claude Code sends each MCP tool call's id in the request's `_meta` as "claudecode/toolUseId"; the shim
+    passes it on as `tool_use_id`, so a record the server writes into main while the call runs (the follow-up the call
+    resumed) can name the call, and main's chat shows it after the call. The id is no argument of the tool."""
+    call = {"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+            "params": {"name": "message_orientation", "arguments": {"message": "more"},
+                       "_meta": {"claudecode/toolUseId": "toolu_01abc"}}}
+    bare = {"jsonrpc": "2.0", "id": 2, "method": "tools/call",
+            "params": {"name": "message_orientation", "arguments": {"message": "again"}}}
+    _run(tmp_path, server.port, channel=False, wait_s=15, send=[call, bare],
+           until=lambda: len(server.calls) >= 2)
+    assert [(name, body["args"], body["tool_use_id"]) for name, body in server.calls] == [  # noqa: E501
+        ("message_orientation", {"message": "more"}, "toolu_01abc"), ("message_orientation", {"message": "again"}, None)]
+
+
+DISCOVER = {"jsonrpc": "2.0", "id": 9, "method": "server/discover",
+            "params": {"_meta": {"io.modelcontextprotocol/protocolVersion": "2026-07-28",
+                                 "io.modelcontextprotocol/clientInfo": {"name": "t", "version": "1"},
+                                 "io.modelcontextprotocol/clientCapabilities": {}}}}
+
+
+def test_a_2026_07_28_probe_is_refused_and_the_handshake_after_it_gets_the_channel(tmp_path, server):
+    """Claude Code 2.1.28x has no channel on a 2026-07-28 connection, and opens with that protocol's `server/discover`
+    when it negotiates: the shim refuses it, so Claude Code falls back to the handshake, where the channel is declared."""
+    p = _start(tmp_path, server.port, channel=True)
+    try:
+        _send(p, [DISCOVER])
+        first = _read(p, lambda: False, 5)
+        probe = next((m for m in first if m.get("id") == 9), None)
+        assert probe is not None and "error" in probe, first
+        _send(p, [INITIALIZE, INITIALIZED])
+        out = _read(p, "notifications/claude/channel", 30)
+        init = next(m for m in out if m.get("id") == 0)
+        assert "claude/channel" in init["result"]["capabilities"]["experimental"]
+    finally:
+        _stop(p)

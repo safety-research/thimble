@@ -1,0 +1,392 @@
+/* thimble tokens. Three papers (Warm, the default; Neutral; Dark) set as `data-paper` on <html> by lib/theme.ts, and
+   one of seven accents set as `data-accent`. Layering is recessed: the window is lighter than the pane and the cell is
+   the lightest thing on screen. Every text colour reads at WCAG AA (4.5:1) or more on its grounds, per paper;
+   tests/public/contrast.test.ts measures the pairs. */
+
+/* -------- paper: Warm, the default. --paper-2 window · --paper-1 pane · --paper-0 inset · --white cell -------- */
+:root {
+  color-scheme: light;
+  --paper-0: #fbfaf7;
+  --paper-1: #f5f3ee;
+  --paper-2: #faf9f6;
+  --paper-3: #ddd9d0;
+  --white: #fffdf8;
+  /* ink: text, secondary, tertiary and meta, placeholder; then disabled text and faint lines. The text is pure black;
+     tints and hairlines use the warm ink in --ink-rgb. */
+  --ink-900: #000000;
+  --ink-700: #4a4844;
+  --ink-500: #64625b;
+  --ink-400: #726f69;
+  --ink-300: #c6c2b9;
+  --ink-200: #ddd9d0;
+  --ink-rgb: 27, 26, 24;
+  /* status: green and red for supports / contradicts and pass / fail; the flag for not checked */
+  --status-positive: #0b7c5f;
+  --status-negative: #c93a28;
+  --status-warning: #9a6512;
+  /* a cell's ring: none on Warm, where the paper steps carry it; a hairline on Neutral and Dark */
+  --ring-card: 0 0 0 1px transparent;
+  /* the float: one soft drop shadow, the same on the pane, the composer and every popover */
+  --shadow-float: 0 10px 28px -18px rgba(var(--ink-rgb), 0.28);
+  /* the glass's inner top highlight, the same on every paper */
+  --glass-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.5);
+  /* data: the ink ramp for ordered series, darkest first */
+  --viz-ink-1: #1b1a18;
+  --viz-ink-2: #6b675f;
+  --viz-ink-3: #a19d94;
+  --viz-ink-4: #cfcbc2;
+}
+
+:root[data-paper='neutral'] {
+  color-scheme: light;
+  --paper-0: #ffffff;
+  --paper-1: #f5f5f6;
+  --paper-2: #ffffff;
+  --paper-3: #e3e3e6;
+  --white: #ffffff;
+  --ink-900: #000000;
+  --ink-700: #47474c;
+  --ink-500: #636368;
+  --ink-400: #707074;
+  --ink-300: #c8c8cc;
+  --ink-200: #e3e3e6;
+  --ink-rgb: 24, 24, 27;
+  --status-positive: #0b7c5f;
+  --status-negative: #c93a28;
+  --status-warning: #9a6512;
+  --ring-card: 0 0 0 1px rgba(var(--ink-rgb), 0.08);
+  --shadow-float: 0 10px 28px -18px rgba(var(--ink-rgb), 0.28);
+  --viz-ink-1: #18181b;
+  --viz-ink-2: #636369;
+  --viz-ink-3: #9d9da3;
+  --viz-ink-4: #cdcdd1;
+}
+
+/* Dark: the same steps inverted, with more contrast in the text; the accent keeps its hex as a fill and is lightened
+   when it is text */
+:root[data-paper='dark'] {
+  color-scheme: dark;
+  --paper-0: #2f2f35;
+  --paper-1: #1c1c20;
+  --paper-2: #0b0b0d;
+  --paper-3: #3b3b42;
+  --white: #25252a;
+  /* the text is the near-white that matches Warm's and Neutral's black */
+  --ink-900: #fdfcfa;
+  --ink-700: #e2dfd8;
+  --ink-500: #b8b5ad;
+  --ink-400: #9b9891;
+  --ink-300: #5c5a55;
+  --ink-200: #3b3b42;
+  --ink-rgb: 248, 246, 242;
+  --status-positive: #4fd1a5;
+  --status-negative: #ff8a7a;
+  --status-warning: #e0b04a;
+  --ring-card: 0 0 0 1px rgba(var(--ink-rgb), 0.08);
+  --shadow-float: 0 10px 28px -14px rgba(0, 0, 0, 0.6);
+  --viz-ink-1: #f8f6f2;
+  --viz-ink-2: #b8b5ad;
+  --viz-ink-3: #85827a;
+  --viz-ink-4: #4d4b47;
+}
+
+/* -------- the accent: one of seven, iris by default. --accent is the fill, --accent-on the text on it (white or ink,
+   whichever reads at 4.5:1), --accent-ink the accent as text on a light paper (darkened where the fill would read
+   under 4.5:1). -------- */
+:root,
+:root[data-accent='iris'] {
+  --accent: #5135ff;
+  --accent-on: #ffffff;
+  --accent-ink: #5135ff;
+}
+:root[data-accent='pink'] {
+  --accent: #d6336c;
+  --accent-on: #ffffff;
+  --accent-ink: #b4295a;
+}
+:root[data-accent='orange'] {
+  --accent: #e0590c;
+  --accent-on: #1b1a18;
+  --accent-ink: #ac4207;
+}
+:root[data-accent='yellow'] {
+  --accent: #f2b705;
+  --accent-on: #1b1a18;
+  --accent-ink: #886300;
+}
+:root[data-accent='lime'] {
+  --accent: #74b816;
+  --accent-on: #1b1a18;
+  --accent-ink: #46730b;
+}
+:root[data-accent='blue'] {
+  --accent: #1876d1;
+  --accent-on: #ffffff;
+  --accent-ink: #1365b4;
+}
+:root[data-accent='graphite'] {
+  --accent: #3d3b37;
+  --accent-on: #ffffff;
+  --accent-ink: #3d3b37;
+}
+
+/* -------- the semantic tokens every surface uses; they follow the paper and the accent above -------- */
+:root {
+  /* surfaces: window, pane, inset, cell. Recessed: the window is lighter than the pane, the cell lightest of all */
+  --bg-page: var(--paper-2);
+  --bg-panel: var(--paper-1);
+  --bg-sunken: var(--paper-0);
+  --bg-inset: var(--paper-0);
+  --bg-sub: var(--paper-1);
+  --surface-card: var(--white);
+  --surface-hover: rgba(var(--ink-rgb), 0.05);
+  --surface-pressed: rgba(var(--ink-rgb), 0.08);
+  /* a selected row (the current thread, the open file): an ink step, never a colour */
+  --surface-selected: rgba(var(--ink-rgb), 0.07);
+  /* tonal fill: the tool-call card and the canvas controls, a step of ink instead of a white card */
+  --surface-tonal: rgba(var(--ink-rgb), 0.04);
+  --surface-tonal-hover: rgba(var(--ink-rgb), 0.06);
+  --surface-inverse: var(--ink-900);
+  /* the raised style: the one selected look of every segmented control, views bar and type bar */
+  --raised-bg: var(--surface-card);
+  --raised-ring: 0 0 0 1px rgba(var(--ink-rgb), 0.12);
+  --track-bg: rgba(var(--ink-rgb), 0.06);
+
+  /* glass: the composer and what rides with it, the canvas's controls and the status strips, at 62% of the cell with
+     a blur. Never used for what floats over content (the overlay below). */
+  --glass-bg: color-mix(in oklab, var(--surface-card) 62%, transparent);
+  --glass-blur: blur(18px) saturate(1.2);
+  --glass-blur-strong: blur(20px) saturate(1.3);
+  --glass-edge: 1px solid color-mix(in oklab, var(--surface-card) 80%, transparent);
+  --glass-edge-strong: 1px solid color-mix(in oklab, var(--surface-card) 85%, transparent);
+  --glass-ring: 0 0 0 1px rgba(var(--ink-rgb), 0.07);
+  /* the overlay: what floats over content and goes away (popovers, menus, tooltips, toasts, previews) is opaque, the
+     cell's paper with no blur, so the text under it never reads through. */
+  --overlay-bg: var(--surface-card);
+  --overlay-edge: 1px solid var(--surface-card);
+  --overlay-ring: 0 0 0 1px rgba(var(--ink-rgb), 0.09);
+  /* the scrim: the grey laid over the whole window under a card that blocks the page (no session attached) */
+  --scrim: rgba(var(--ink-rgb), 0.5);
+  /* the float as each part wears it: the pane with its faint ring, the composer, a popover */
+  --shadow-pane: 0 0 0 1px rgba(var(--ink-rgb), 0.05), var(--shadow-float);
+  --shadow-composer: var(--glass-ring), var(--shadow-float);
+  --shadow-popover: var(--overlay-ring), var(--shadow-float);
+
+  /* text */
+  --text-primary: var(--ink-900);
+  --text-secondary: var(--ink-700);
+  --text-tertiary: var(--ink-500);
+  --text-placeholder: var(--ink-400);
+  --text-disabled: var(--ink-300);
+  --text-on-accent: var(--accent-on);
+  --text-on-inverse: var(--paper-2);
+  --text-accent: var(--accent-ink);
+  --text-link: var(--text-accent);
+
+  /* code: the reader's syntax colours (styles/code.css), each an Okabe–Ito hue mixed toward the text ink until it reads
+     at 6:1 or more on every ground. */
+  --code-text: var(--ink-900);
+  --code-comment: var(--ink-500);
+  --code-keyword: color-mix(in oklab, var(--viz-5) 56%, var(--ink-900));
+  --code-string: color-mix(in oklab, var(--viz-3) 60%, var(--ink-900));
+  --code-number: color-mix(in oklab, #d55e00 65%, var(--ink-900));
+  --code-function: color-mix(in oklab, var(--viz-2) 47%, var(--ink-900));
+  --code-type: color-mix(in oklab, #56b4e9 48%, var(--ink-900));
+  --code-property: color-mix(in oklab, var(--viz-1) 80%, var(--ink-900));
+  --code-added: var(--status-positive);
+  --code-removed: var(--status-negative);
+
+  /* lines: rows .07–.08, dividers .12, controls .22, the takeaway rule 2px ink */
+  --border-hairline: rgba(var(--ink-rgb), 0.08);
+  --border-subtle: rgba(var(--ink-rgb), 0.12);
+  --border-strong: rgba(var(--ink-rgb), 0.22);
+  --rule-ink: 2px solid var(--ink-900);
+
+  /* the accent's derived fills */
+  --accent-hover: color-mix(in oklab, var(--accent) 88%, black);
+  --accent-pressed: color-mix(in oklab, var(--accent) 78%, black);
+  --accent-soft: color-mix(in oklab, var(--accent) 14%, transparent);
+  --accent-wash: color-mix(in oklab, var(--accent) 22%, transparent);
+  /* the word under the ⌘ pointer */
+  --accent-tint: color-mix(in oklab, var(--accent) 20%, transparent);
+  /* the one chip: the accent's edge at 28%, a 6% tint over the cell, the accent as text */
+  --chip-edge: color-mix(in oklab, var(--accent) 28%, transparent);
+  --chip-bg: color-mix(in oklab, var(--accent) 6%, var(--surface-card));
+  --chip-edge-hover: color-mix(in oklab, var(--accent) 45%, transparent);
+  --chip-bg-hover: color-mix(in oklab, var(--accent) 11%, var(--surface-card));
+  --ai-mark: var(--accent);
+
+  --status-positive-soft: color-mix(in oklab, var(--status-positive) 12%, transparent);
+  --status-warning-soft: color-mix(in oklab, var(--status-warning) 12%, transparent);
+  --status-negative-soft: color-mix(in oklab, var(--status-negative) 12%, transparent);
+  --status-info: var(--ink-700);
+  --status-info-soft: var(--paper-1);
+  --status-neutral: var(--ink-500);
+  --status-neutral-soft: var(--paper-1);
+  /* the highlight of a span inside a longer text (.hl in base.css), lighter than the selection's wash so the two read
+     apart */
+  --hl-bg: color-mix(in oklab, var(--accent) 16%, transparent);
+  --hl-unverified: var(--status-warning-soft);
+  --hl-unverified-ink: var(--status-warning);
+
+  /* data: the ink ramp for ordered series; for nominal groups and label colours Okabe–Ito with series 4 a red
+     (#d62728) and series 6 a violet (#8c65e8), since sky blue and vermillion are hard to tell from their neighbours.
+     #a09c93 is "no match". The accent is never a series. */
+  --viz-1: #0072b2;
+  --viz-2: #e69f00;
+  --viz-3: #009e73;
+  --viz-4: #d62728;
+  --viz-5: #cc79a7;
+  --viz-6: #8c65e8;
+  --viz-7: #8a6d3b;
+  --viz-8: var(--viz-ink-1);
+  --viz-9: var(--viz-ink-3);
+  /* a label's colour, in the order the analyst's labels take them, and the colour of "no match". 9 to 12 give a label
+     with more than eight values a distinct colour for each. */
+  --label-1: #0072b2;
+  --label-2: #e69f00;
+  --label-3: #009e73;
+  --label-4: #cc79a7;
+  --label-5: #d55e00;
+  --label-6: #56b4e9;
+  --label-7: #8a6d3b;
+  --label-8: #6a5acd;
+  --label-9: #aa3377;
+  --label-10: #999933;
+  --label-11: #6a3d9a;
+  --label-12: #d62728;
+  --label-none: #a09c93;
+  /* a multi-class label as a whole: the plain ink */
+  --label-multi: var(--text-secondary);
+  --viz-1-soft: color-mix(in oklab, var(--viz-1) 16%, transparent);
+  --viz-grid: rgba(var(--ink-rgb), 0.08);
+  --viz-axis: rgba(var(--ink-rgb), 0.28);
+  --viz-label: var(--ink-500);
+  --viz-annotation: var(--accent);
+
+  /* type: Hanken Grotesk for text, Geist Mono for anything the data named (a file, a thread, a label, a key, a time).
+     400 and 500; 600 only for the report's H1 and H2. Numbers tabular everywhere. */
+  --font-body: 'Hanken Grotesk', ui-sans-serif, system-ui, sans-serif;
+  --font-display: var(--font-body);
+  --font-mono: 'Geist Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+  --font-prose: var(--font-body);
+  --text-2xs: 11px;
+  --text-xs: 12px;
+  --text-ui-sm: 12.5px;
+  --text-sm: 13px;
+  --text-md: 13.5px;
+  --text-lg: 14px;
+  --text-xl: 16px;
+  --text-2xl: 22px;
+  --text-3xl: 28px;
+  --text-mono: 11.5px;
+  --text-mono-sm: 11px;
+  --text-eyebrow: 11px;
+  --leading-normal: 1.45;
+  --tracking-title: -0.01em;
+  --tracking-report-h1: -0.02em;
+  --tracking-label: 0.08em;
+  /* the report's own scale */
+  --type-report-h1: 600 var(--text-3xl) / 1.2 var(--font-body);
+  --type-report-h2: 600 18px / 1.3 var(--font-body);
+  --type-report-body: 400 15px / 1.7 var(--font-body);
+  /* the UI's scale */
+  --type-title: 500 var(--text-2xl) / 1.25 var(--font-body);
+  --type-heading: 500 var(--text-xl) / 1.3 var(--font-body);
+  --type-subheading: 500 var(--text-lg) / 1.4 var(--font-body);
+  --type-question: 500 var(--text-lg) / 1.35 var(--font-body);
+  --type-message: 400 var(--text-sm) / 1.45 var(--font-body);
+  --type-body-lg: 400 var(--text-lg) / 1.55 var(--font-body);
+  --type-body: 400 var(--text-sm) / 1.45 var(--font-body);
+  --type-body-sm: 400 var(--text-xs) / 1.45 var(--font-body);
+  --type-ui-sm: 400 var(--text-ui-sm) / 1.45 var(--font-body);
+  --type-caption: 400 var(--text-xs) / 1.4 var(--font-body);
+  --type-label: 400 var(--text-eyebrow) / 1.2 var(--font-body);
+  --type-mono: 400 var(--text-mono) / 1.5 var(--font-mono);
+  --type-mono-sm: 400 var(--text-mono-sm) / 1.5 var(--font-mono);
+  --sans: var(--font-body);
+  --mono: var(--font-mono);
+  --display: var(--font-body);
+
+  /* shape: pane 12 · cell, card and popover 8 · button and input 6 · chip and key 4 · highlight 3. No pills except the
+     switch. */
+  --radius-pane: 12px;
+  --radius-card: 8px;
+  --radius-ui: 6px;
+  --radius-seg: 5px;
+  --radius-chip: 4px;
+  --radius-hl: 3px;
+  --radius-pill: 999px;
+  --track-pad: 2px;
+
+  /* rings in place of elevation steps */
+  --shadow-1: 0 0 0 1px rgba(var(--ink-rgb), 0.07);
+  --shadow-2: 0 0 0 1px rgba(var(--ink-rgb), 0.09);
+  --shadow-3: 0 0 0 1px rgba(var(--ink-rgb), 0.09);
+  --focus-paper: 0 0 0 1px var(--border-strong);
+  --glow-accent: 0 0 0 1px var(--accent), 0 0 18px -6px color-mix(in oklab, var(--accent) 45%, transparent);
+  /* the ⌘ pointer's box: the accent's glow around its accent edge */
+  --glow-box: 0 0 16px color-mix(in oklab, var(--accent) 30%, transparent);
+  --glow-negative: 0 0 0 1px var(--status-negative);
+
+  /* motion: 140 hover, press, a chevron turning · 220 fade, dim, a dot, the box opening · 340 an unstack, the focus
+     list · 900 the spinner, the only loop */
+  --dur-fast: 140ms;
+  --dur-base: 220ms;
+  --dur-panel: 340ms;
+  --dur-slow: 340ms;
+  --dur-spin: 900ms;
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+  --transition-color: color var(--dur-fast) var(--ease-out), background-color var(--dur-fast) var(--ease-out), border-color var(--dur-fast) var(--ease-out), box-shadow var(--dur-fast) var(--ease-out);
+  --t-hover: var(--dur-fast) var(--ease-out);
+  --t-fade: var(--dur-base) var(--ease-out);
+
+  /* the tool's fixed dimensions: the reference frame is 1280 × 800 */
+  --h-topbar: 40px;
+  --h-band: 36px;
+  --h-chip: 20px;
+  --h-control: 24px;
+  --control-sm: 28px;
+  --h-row: 28px;
+  --gutter: 12px;
+  /* a card's default width on the canvas (matches canvas/layout.ts CARD_W) and the report's text column, so an
+     embedded card is as wide as on the canvas */
+  --w-card: 720px;
+  --z-sticky: 10;
+  --z-menu: 50;
+  --z-modal: 950;
+  --z-toast: 1000;
+  --z-popover: 1100;
+  --z-scrim: 1200;
+}
+
+/* Dark's accent as text: the accent mixed toward white, whichever accent is chosen (graphite further, since at 60% it
+   stays under 4.5:1 on a chip) */
+:root[data-paper='dark'] {
+  --text-accent: color-mix(in oklab, var(--accent) 60%, white);
+  --accent-hover: color-mix(in oklab, var(--accent) 86%, white);
+  --accent-pressed: color-mix(in oklab, var(--accent) 76%, white);
+  --text-on-inverse: var(--paper-2);
+  /* Dark's ink is light, so its scrim darkens with black instead */
+  --scrim: rgba(0, 0, 0, 0.6);
+  /* the code colours lightened toward Dark's text ink */
+  --code-keyword: color-mix(in oklab, var(--viz-5) 70%, var(--ink-900));
+  --code-string: color-mix(in oklab, var(--viz-3) 64%, var(--ink-900));
+  --code-number: color-mix(in oklab, #d55e00 59%, var(--ink-900));
+  --code-function: color-mix(in oklab, var(--viz-2) 95%, var(--ink-900));
+  --code-type: color-mix(in oklab, #56b4e9 93%, var(--ink-900));
+  --code-property: color-mix(in oklab, var(--viz-1) 49%, var(--ink-900));
+}
+:root[data-paper='dark'][data-accent='graphite'] {
+  --text-accent: color-mix(in oklab, var(--accent) 45%, white);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --dur-fast: 0ms;
+    --dur-base: 0ms;
+    --dur-panel: 0ms;
+    --dur-slow: 0ms;
+  }
+}

@@ -1,0 +1,618 @@
+{
+ "about": "Invented cards, one of each kind a card can be, drawn by the card harness and by the canvas; no corpus data.",
+ "cards": [
+  {
+   "notebook": "nb1",
+   "takeaway_author": "model",
+   "payload": null,
+   "width": null,
+   "status": "ok",
+   "created_by": "terminal",
+   "ts": "2026-09-24T00:00:00Z",
+   "id": "out00001",
+   "kind": "plot",
+   "title": "How did refunds per product move from week to week?",
+   "takeaway": "Refunds fell for every product; the Basic plan had the most, [[43|card:out00001#refunds/0]] in the second week.",
+   "code": "alt.Chart(df).mark_line(point=True).encode(x='week:T', y='refunds:Q', color='product:N')",
+   "outputs": [
+    {
+     "application/vnd.vegalite.v5+json": {
+      "$schema": "https://vega.github.io/schema/vega-lite/v5.17.0.json",
+      "config": {
+       "view": {
+        "continuousWidth": 300,
+        "continuousHeight": 300
+       }
+      },
+      "data": {
+       "name": "data-refunds"
+      },
+      "mark": {
+       "type": "line",
+       "point": true
+      },
+      "encoding": {
+       "x": {
+        "field": "week",
+        "type": "temporal",
+        "title": "week"
+       },
+       "y": {
+        "field": "refunds",
+        "type": "quantitative"
+       },
+       "color": {
+        "field": "product",
+        "type": "nominal"
+       }
+      },
+      "datasets": {
+       "data-refunds": [
+        {
+         "week": "2026-05-04",
+         "product": "Basic plan",
+         "refunds": 40
+        },
+        {
+         "week": "2026-05-11",
+         "product": "Basic plan",
+         "refunds": 43
+        },
+        {
+         "week": "2026-05-04",
+         "product": "Pro plan",
+         "refunds": 36
+        },
+        {
+         "week": "2026-05-11",
+         "product": "Pro plan",
+         "refunds": 39
+        },
+        {
+         "week": "2026-05-04",
+         "product": "Team plan",
+         "refunds": 32
+        },
+        {
+         "week": "2026-05-11",
+         "product": "Team plan",
+         "refunds": 35
+        },
+        {
+         "week": "2026-05-04",
+         "product": "Enterprise",
+         "refunds": 28
+        },
+        {
+         "week": "2026-05-11",
+         "product": "Enterprise",
+         "refunds": 31
+        },
+        {
+         "week": "2026-05-04",
+         "product": "Add-on seats",
+         "refunds": 24
+        },
+        {
+         "week": "2026-05-11",
+         "product": "Add-on seats",
+         "refunds": 27
+        },
+        {
+         "week": "2026-05-04",
+         "product": "Storage pack",
+         "refunds": 20
+        },
+        {
+         "week": "2026-05-11",
+         "product": "Storage pack",
+         "refunds": 23
+        },
+        {
+         "week": "2026-05-04",
+         "product": "Support tier",
+         "refunds": 16
+        },
+        {
+         "week": "2026-05-11",
+         "product": "Support tier",
+         "refunds": 19
+        },
+        {
+         "week": "2026-05-04",
+         "product": "Education",
+         "refunds": 12
+        },
+        {
+         "week": "2026-05-11",
+         "product": "Education",
+         "refunds": 15
+        },
+        {
+         "week": "2026-05-04",
+         "product": "Nonprofit",
+         "refunds": 8
+        },
+        {
+         "week": "2026-05-11",
+         "product": "Nonprofit",
+         "refunds": 11
+        }
+       ]
+      }
+     },
+     "text/plain": "alt.Chart(...)"
+    }
+   ]
+  },
+  {
+   "notebook": "nb1",
+   "takeaway_author": "model",
+   "payload": null,
+   "width": null,
+   "status": "ok",
+   "created_by": "terminal",
+   "ts": "2026-09-24T00:00:00Z",
+   "id": "out00002",
+   "kind": "plot",
+   "title": "Why do customers ask for refunds?",
+   "takeaway": "Most refunds follow a double charge after a plan change, [[41|card:out00002#refunds/0]] of 109.",
+   "code": "alt.Chart(df).mark_bar().encode(x=alt.X('reason:N', sort='-y'), y='refunds:Q')",
+   "outputs": [
+    {
+     "application/vnd.vegalite.v5+json": {
+      "$schema": "https://vega.github.io/schema/vega-lite/v5.17.0.json",
+      "config": {
+       "view": {
+        "continuousWidth": 300,
+        "continuousHeight": 300
+       }
+      },
+      "data": {
+       "name": "data-reasons"
+      },
+      "mark": {
+       "type": "bar"
+      },
+      "encoding": {
+       "x": {
+        "field": "reason",
+        "type": "nominal",
+        "sort": "-y"
+       },
+       "y": {
+        "field": "refunds",
+        "type": "quantitative"
+       }
+      },
+      "datasets": {
+       "data-reasons": [
+        {
+         "reason": "charged twice after a plan change",
+         "refunds": 41
+        },
+        {
+         "reason": "cancelled within the trial",
+         "refunds": 33
+        },
+        {
+         "reason": "feature missing on mobile",
+         "refunds": 18
+        },
+        {
+         "reason": "price increase",
+         "refunds": 12
+        },
+        {
+         "reason": "other",
+         "refunds": 5
+        }
+       ]
+      }
+     },
+     "text/plain": "alt.Chart(...)"
+    }
+   ]
+  },
+  {
+   "notebook": "nb1",
+   "takeaway_author": "model",
+   "payload": null,
+   "width": null,
+   "status": "ok",
+   "created_by": "terminal",
+   "ts": "2026-09-24T00:00:00Z",
+   "id": "out00003",
+   "kind": "table",
+   "title": "Which bus line runs late most often?",
+   "takeaway": "7 Crosstown runs late most often, on [[0.214|card:out00003#share%5Flate/7%20Crosstown]] of its trips.",
+   "code": "df.set_index('line')",
+   "outputs": [
+    {
+     "text/plain": "lines 6\n",
+     "_stream": "stdout"
+    },
+    {
+     "application/vnd.thimble.frame+json": {
+      "columns": [
+       "line",
+       "late",
+       "trips",
+       "share_late",
+       "note"
+      ],
+      "types": {
+       "line": "nominal",
+       "late": "quantitative",
+       "trips": "quantitative",
+       "share_late": "quantitative",
+       "note": "nominal"
+      },
+      "index": "line",
+      "rows": [
+       [
+        "7 Crosstown",
+        88,
+        412,
+        0.213592233,
+        "the longest route, through the three busiest stops of the city centre"
+       ],
+       [
+        "12 Harbour",
+        61,
+        390,
+        0.1564102564,
+        "harbour to the station"
+       ],
+       [
+        "3 Hillside",
+        40,
+        355,
+        0.1126760563,
+        "school run"
+       ],
+       [
+        "1 Main",
+        8,
+        300,
+        0.0266666667,
+        "the main line"
+       ],
+       [
+        "9 Airport",
+        30,
+        210,
+        0.1428571429,
+        "hourly to the airport"
+       ],
+       [
+        "5 Ring",
+        22,
+        280,
+        0.0785714286,
+        "the ring road"
+       ]
+      ],
+      "total": 6,
+      "label": "line",
+      "view": {
+       "columns": [
+        "late",
+        "trips",
+        "share_late",
+        "note"
+       ],
+       "formats": {
+        "late": ",d",
+        "trips": ",d",
+        "share_late": ",.3~f"
+       },
+       "more": 0
+      }
+     },
+     "text/plain": "line         late  trips  share_late  note\n7 Crosstown  88    412    0.214       the longest route, through the three busiest stops of the city centre\n12 Harbour   61    390    0.156       harbour to the station\n3 Hillside   40    355    0.113       school run\n1 Main       8     300    0.027       the main line\n9 Airport    30    210    0.143       hourly to the airport\n5 Ring       22    280    0.079       the ring road"
+    }
+   ]
+  },
+  {
+   "notebook": "nb1",
+   "takeaway_author": "model",
+   "payload": null,
+   "width": null,
+   "status": "ok",
+   "created_by": "terminal",
+   "ts": "2026-09-24T00:00:00Z",
+   "id": "out00004",
+   "kind": "timeline",
+   "title": "Who edited the page, and in what order?",
+   "takeaway": "Two accounts wrote over each other until an admin locked the page the next morning.",
+   "code": "thimble.timeline(events)",
+   "outputs": [
+    {
+     "application/vnd.thimble.timeline+json": {
+      "events": [
+       {
+        "time": "2026-05-24T11:56:00Z",
+        "label": "u1 writes the page",
+        "lane": "u1"
+       },
+       {
+        "time": "2026-05-24T12:10:00Z",
+        "label": "u2 reverts it",
+        "lane": "u2"
+       },
+       {
+        "time": "2026-05-24T14:42:00Z",
+        "label": "u1 writes it again",
+        "lane": "u1"
+       },
+       {
+        "time": "2026-05-25T09:03:00Z",
+        "label": "an admin locks the page",
+        "lane": "admin"
+       },
+       {
+        "time": "2026-05-25T09:30:00Z",
+        "label": "u2 asks on the talk page",
+        "lane": "u2"
+       }
+      ]
+     },
+     "text/plain": "timeline: 5 events"
+    }
+   ]
+  },
+  {
+   "notebook": "nb1",
+   "takeaway_author": "model",
+   "payload": null,
+   "width": null,
+   "status": "ok",
+   "created_by": "terminal",
+   "ts": "2026-09-24T00:00:00Z",
+   "id": "out00005",
+   "kind": "diagram",
+   "title": "How does a request reach its reply?",
+   "takeaway": "The router sends a request to the cache or the model, and both answer the reply.",
+   "code": "thimble.diagram(nodes, edges)",
+   "outputs": [
+    {
+     "application/vnd.thimble.diagram+json": {
+      "nodes": [
+       {
+        "id": "request"
+       },
+       {
+        "id": "router"
+       },
+       {
+        "id": "cache"
+       },
+       {
+        "id": "model"
+       },
+       {
+        "id": "reply"
+       }
+      ],
+      "edges": [
+       {
+        "source": "request",
+        "target": "router",
+        "label": "1"
+       },
+       {
+        "source": "router",
+        "target": "cache",
+        "label": "hit"
+       },
+       {
+        "source": "router",
+        "target": "model",
+        "label": "miss"
+       },
+       {
+        "source": "cache",
+        "target": "reply"
+       },
+       {
+        "source": "model",
+        "target": "reply"
+       }
+      ]
+     },
+     "text/plain": "diagram: 5 nodes, 5 edges"
+    }
+   ]
+  },
+  {
+   "notebook": "nb1",
+   "takeaway_author": "model",
+   "width": null,
+   "status": "ok",
+   "created_by": "terminal",
+   "ts": "2026-09-24T00:00:00Z",
+   "id": "note0001",
+   "kind": "note",
+   "title": "What have we found about refunds so far?",
+   "code": "",
+   "outputs": [],
+   "takeaway": "Refunds follow plan changes, and one product carries most of them.",
+   "payload": {
+    "text": "**The data.** tickets.jsonl holds one record per support ticket, with its text; refunds.csv one row per refund [[card:out00003]].\n\n**When.** [[83|card:out00001#refunds/1]] refunds came in the two weeks after the price change [[card:out00001]].\n\n**Why.** Most follow a double charge after a plan change, [[41|card:out00002#refunds/0]] of 109 [[card:out00002]].\n\n**Open questions**\n- Whether the Team plan had the same double charge.\n- Why refunds on the Education plan stayed flat."
+   }
+  },
+  {
+   "notebook": "nb1",
+   "takeaway_author": "model",
+   "width": null,
+   "status": "ok",
+   "created_by": "terminal",
+   "ts": "2026-09-24T00:00:00Z",
+   "id": "code0001",
+   "kind": "code",
+   "title": "How do I load each ticket with its product in pandas?",
+   "payload": null,
+   "code": "tickets = pd.read_json('tickets.jsonl', lines=True)\ntickets.merge(products, on='product_id').head()",
+   "takeaway": "This code gives one row per ticket, [[1,204|card:code0001@out0#L1]] of them, with the product in a column named `product`.",
+   "outputs": [
+    {
+     "text/plain": "1204 tickets; 9 products\nproduct\nBasic plan      412\nPro plan        390\nTeam plan       183\n",
+     "_stream": "stdout"
+    },
+    {
+     "text/plain": "   ticket  product     opened\n0  T-1001  Basic plan  2026-05-04\n1  T-1002  Pro plan    2026-05-04",
+     "text/html": "<div><table border=\"1\" class=\"dataframe\"><thead><tr style=\"text-align: right;\"><th></th><th>ticket</th><th>product</th><th>opened</th></tr></thead><tbody><tr><th>0</th><td>T-1001</td><td>Basic plan</td><td>2026-05-04</td></tr><tr><th>1</th><td>T-1002</td><td>Pro plan</td><td>2026-05-04</td></tr><tr><th>2</th><td>T-1003</td><td>Team plan</td><td>2026-05-05</td></tr></tbody></table></div>"
+    }
+   ]
+  },
+  {
+   "notebook": "nb1",
+   "takeaway_author": "model",
+   "width": null,
+   "status": "ok",
+   "created_by": "terminal",
+   "ts": "2026-09-24T00:00:00Z",
+   "id": "tabl0001",
+   "kind": "table",
+   "title": "How many tickets and refunds did each product have?",
+   "payload": null,
+   "code": "df.groupby('product')[['tickets', 'refunds']].sum().reset_index()",
+   "takeaway": "The Basic plan had the most tickets, [[412|card:tabl0001#tickets/0]], and the most refunds, [[83|card:tabl0001#refunds/0]].",
+   "outputs": [
+    {
+     "text/plain": "        product  tickets  refunds\n0    Basic plan      412       83\n1      Pro plan      390       75\n2     Team plan      183       67\n3    Enterprise      120       59\n4  Add-on seats       99       51",
+     "text/html": "<div><style scoped>.dataframe tbody tr th { vertical-align: top; } .dataframe thead th { text-align: right; }</style><table border=\"1\" class=\"dataframe\"><thead><tr style=\"text-align: right;\"><th></th><th>product</th><th>tickets</th><th>refunds</th></tr></thead><tbody><tr><th>0</th><td>Basic plan</td><td>412</td><td>83</td></tr><tr><th>1</th><td>Pro plan</td><td>390</td><td>75</td></tr><tr><th>2</th><td>Team plan</td><td>183</td><td>67</td></tr><tr><th>3</th><td>Enterprise</td><td>120</td><td>59</td></tr><tr><th>4</th><td>Add-on seats</td><td>99</td><td>51</td></tr></tbody></table></div>"
+    }
+   ]
+  },
+  {
+   "notebook": "nb1",
+   "takeaway_author": "model",
+   "width": null,
+   "status": "ok",
+   "created_by": "terminal",
+   "ts": "2026-09-24T00:00:00Z",
+   "id": "cust0001",
+   "kind": "custom",
+   "title": "What happened to one double-charged customer?",
+   "code": "",
+   "outputs": [],
+   "takeaway": "The customer was charged twice on the plan change and refunded two days later.",
+   "payload": {
+    "html": "<!doctype html><html><head><meta charset=\"utf-8\"><style>body{margin:0;padding:12px 14px;font:14px/1.45 system-ui,sans-serif}.bar{display:flex;gap:8px;align-items:center} .step{padding:6px 10px;border-left:3px solid #d4a72c;background:#fff4c2;margin:6px 0}</style></head><body><div class=\"bar\"><button id=\"prev\">Prev</button><span id=\"n\">1 of 3</span><button id=\"next\">Next</button></div><div class=\"step\" data-anchor=\"tickets.jsonl#L12\">T-1012: charged twice after moving to the Pro plan</div><div class=\"step\" data-anchor=\"tickets.jsonl#L40\">T-1040: refund asked the same day</div><div class=\"step\" data-anchor=\"tickets.jsonl#L77\">T-1077: refund granted</div></body></html>"
+   }
+  },
+  {
+   "notebook": "nb1",
+   "takeaway_author": "model",
+   "width": null,
+   "status": "ok",
+   "created_by": "terminal",
+   "ts": "2026-09-24T00:00:00Z",
+   "id": "plot0001",
+   "kind": "plot",
+   "title": "How did refund tickets grow against questions, week by week?",
+   "payload": null,
+   "code": "alt.Chart(weekly).mark_bar().encode(x='week:O', y='tickets:Q', color='kind:N')",
+   "takeaway": "Refund tickets grew every week, from [[13|card:plot0001#tickets/0]] to [[28|card:plot0001#tickets/10]].",
+   "outputs": [
+    {
+     "text/plain": "weeks 6\n",
+     "_stream": "stdout"
+    },
+    {
+     "application/vnd.vegalite.v6.json": {
+      "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+      "data": {
+       "name": "data-weekly"
+      },
+      "mark": {
+       "type": "bar"
+      },
+      "encoding": {
+       "x": {
+        "field": "week",
+        "type": "ordinal",
+        "title": "week"
+       },
+       "y": {
+        "field": "tickets",
+        "type": "quantitative"
+       },
+       "color": {
+        "field": "kind",
+        "type": "nominal"
+       }
+      },
+      "datasets": {
+       "data-weekly": [
+        {
+         "week": "W1",
+         "kind": "refund",
+         "tickets": 13
+        },
+        {
+         "week": "W1",
+         "kind": "question",
+         "tickets": 28
+        },
+        {
+         "week": "W2",
+         "kind": "refund",
+         "tickets": 16
+        },
+        {
+         "week": "W2",
+         "kind": "question",
+         "tickets": 26
+        },
+        {
+         "week": "W3",
+         "kind": "refund",
+         "tickets": 19
+        },
+        {
+         "week": "W3",
+         "kind": "question",
+         "tickets": 24
+        },
+        {
+         "week": "W4",
+         "kind": "refund",
+         "tickets": 22
+        },
+        {
+         "week": "W4",
+         "kind": "question",
+         "tickets": 22
+        },
+        {
+         "week": "W5",
+         "kind": "refund",
+         "tickets": 25
+        },
+        {
+         "week": "W5",
+         "kind": "question",
+         "tickets": 20
+        },
+        {
+         "week": "W6",
+         "kind": "refund",
+         "tickets": 28
+        },
+        {
+         "week": "W6",
+         "kind": "question",
+         "tickets": 18
+        }
+       ]
+      }
+     },
+     "text/plain": "alt.Chart(...)"
+    }
+   ]
+  }
+ ]
+}

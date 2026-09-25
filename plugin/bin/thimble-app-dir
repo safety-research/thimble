@@ -1,0 +1,33 @@
+#!/bin/sh
+# thimble-app-dir: print the absolute path of the thimble tree (the directory holding backend/, prompts/ and plugin/)
+# that this plugin copy belongs to, or exit 1 with one line on stderr.
+#
+# A plugin installed from a marketplace is copied into Claude Code's plugin cache, so `bin/../..` is not the tree
+# there. Resolution order, first hit wins:
+#   1. $THIMBLE_APP_DIR
+#   2. the tree this copy sits in (<plugin>/..): a checkout, a --plugin-dir session, an unzipped release
+#   3. $THIMBLE_HOME/app-dir (default ~/.thimble/app-dir): one line, the path scripts/install.sh installed into
+# A candidate counts as the tree when it holds backend/pyproject.toml and plugin/bin/.
+set -u
+here="$(cd "$(dirname "$0")" && pwd -P)"
+is_tree() { [ -n "$1" ] && [ -f "$1/backend/pyproject.toml" ] && [ -d "$1/plugin/bin" ]; }
+
+if is_tree "${THIMBLE_APP_DIR:-}"; then
+  cd "$THIMBLE_APP_DIR" && pwd -P
+  exit 0
+fi
+tree="$(cd "$here/../.." 2>/dev/null && pwd -P)" || tree=""
+if is_tree "$tree"; then
+  printf '%s\n' "$tree"
+  exit 0
+fi
+home="${THIMBLE_HOME:-$HOME/.thimble}"
+if [ -f "$home/app-dir" ]; then
+  p="$(head -n 1 "$home/app-dir")"
+  if is_tree "$p"; then
+    cd "$p" && pwd -P
+    exit 0
+  fi
+fi
+echo "thimble: the thimble tree was not found for the plugin at $here (no $home/app-dir pointing at an install, no THIMBLE_APP_DIR) — run scripts/install.sh from the thimble release or checkout" >&2
+exit 1

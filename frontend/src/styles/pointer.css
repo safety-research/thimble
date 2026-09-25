@@ -1,0 +1,103 @@
+/* the pointing gesture, ⌘ (pointer/CmdPointer.tsx): one highlight follows the pointer and morphs between elements, the
+   cursor is recoloured in the accent, and one box opens beside the highlight. */
+
+/* -------- the highlight: fixed on the body, moved by transform. A region gets a soft fill and a 1px accent ring; one
+   word is the box itself in --accent-tint; several lines draw a piece per line in --accent-wash. -------- */
+.pointer-hl {
+  position: fixed;
+  left: 0;
+  top: 0;
+  z-index: calc(var(--z-popover) + 1);
+  box-sizing: border-box;
+  width: 0;
+  height: 0;
+  pointer-events: none;
+  background: var(--accent-soft);
+  box-shadow: 0 0 0 1px var(--accent);
+  border-radius: var(--radius-hl);
+  opacity: 0;
+  transform: translate3d(-100px, -100px, 0);
+  transition:
+    transform var(--dur-fast) var(--ease-out),
+    width var(--dur-fast) var(--ease-out),
+    height var(--dur-fast) var(--ease-out),
+    border-radius var(--dur-fast) var(--ease-out),
+    background-color var(--dur-fast) var(--ease-out),
+    box-shadow var(--dur-fast) var(--ease-out),
+    opacity var(--dur-fast) var(--ease-out);
+}
+.pointer-hl[data-on] {
+  opacity: 1;
+}
+/* a first placement, or a re-fit after a scroll, lands at once: nothing morphs from where it was last */
+.pointer-hl.pointer-hl-jump,
+.pointer-hl.pointer-hl-jump .pointer-hl-line {
+  transition: none;
+}
+.pointer-hl[data-kind='word'] {
+  background: var(--accent-tint);
+  box-shadow: 0 0 0 0 transparent;
+}
+.pointer-hl[data-kind='text'] {
+  background: transparent;
+  box-shadow: 0 0 0 0 transparent;
+}
+.pointer-hl-line {
+  position: absolute;
+  background: var(--accent-wash);
+  border-radius: 2px;
+  animation: pointer-hl-line-in var(--dur-fast) var(--ease-out);
+}
+@keyframes pointer-hl-line-in {
+  from {
+    opacity: 0;
+  }
+}
+
+/* -------- the pointer: while ⌘ is held, the system cursor recoloured in the accent (images set on the body as
+   --cmd-cursor and --cmd-cursor-text), so exactly one pointer shows and it keeps up with the mouse. -------- */
+body[data-cmd],
+body[data-cmd] * {
+  cursor: var(--cmd-cursor, default) !important;
+}
+body[data-cmd][data-pointer-text],
+body[data-cmd][data-pointer-text] *,
+body[data-cmd-drag],
+body[data-cmd-drag] * {
+  cursor: var(--cmd-cursor-text, text) !important;
+}
+/* the range of a ⌘-drag is the native selection, in the wash */
+body[data-cmd-drag] ::selection {
+  background: var(--accent-wash);
+}
+
+/* -------- the box: the opaque overlay beside the highlight, with an accent edge and glow, holding only the input.
+   -------- */
+.pointer-box {
+  position: fixed;
+  z-index: calc(var(--z-popover) + 2);
+  box-sizing: border-box;
+  padding: 8px 10px;
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-ui);
+  background: var(--overlay-bg);
+  box-shadow: var(--glow-box), var(--shadow-float);
+  color: var(--text-primary);
+  animation: dialog-in var(--dur-base) var(--ease-out);
+}
+.pointer-box .field-area {
+  min-height: 18px;
+  padding: 0;
+  font: var(--type-ui-sm);
+}
+.pointer-box-busy {
+  position: absolute;
+  right: 10px;
+  top: 50%;
+  margin-top: -5px;
+}
+/* while the box is open it is the only thing over the text: a ⌘-drag in the report editor selects text, and the
+   editor's own formatting toolbar would otherwise open over the same selection */
+body:has(.pointer-box) .bn-formatting-toolbar {
+  display: none;
+}

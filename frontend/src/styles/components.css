@@ -1,0 +1,1309 @@
+/* the shared parts (components/*): one rendering per type. Chip, Button, Segmented, Tabs, Card, Popover and Menu, Field,
+   the glass composer, Switch, marks and keys, the tool-call card, the analyst's message tile, the thread tree. */
+
+@keyframes dialog-in {
+  from {
+    opacity: 0;
+    transform: scale(0.97) translateY(4px);
+  }
+}
+
+/* -------- Chip: 20px, the 10px icon and the name in mono 11px, radius 4. What points somewhere is the accent chip; a
+   value or a word is the neutral chip, ink on the cell with a hairline. An active filter chip is inverted to ink.
+   -------- */
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  box-sizing: border-box;
+  height: var(--h-chip);
+  min-height: var(--h-chip);
+  max-width: 100%;
+  min-width: 0;
+  margin: 0;
+  padding: 0 7px 0 6px;
+  border: 1px solid var(--chip-edge);
+  border-radius: var(--radius-chip);
+  background: var(--chip-bg);
+  color: var(--text-accent);
+  font: 400 var(--text-mono-sm) / 1 var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0;
+  text-transform: none;
+  white-space: nowrap;
+  vertical-align: 1px;
+  cursor: default;
+  user-select: none;
+  transition: var(--transition-color);
+}
+/* a name in words (a label, a canvas group, a thread, a document) in the body face at a view tab's measure */
+.chip-sans {
+  height: 22px;
+  min-height: 22px;
+  padding: 0 8px;
+  border-radius: var(--radius-ui);
+  font: 400 var(--text-ui-sm) / 1 var(--font-body);
+}
+.chip-sans .chip-ico {
+  width: 12px;
+  height: 12px;
+}
+/* the name, cut with an ellipsis; its line is taller than the chip's so the cut leaves underscores and descenders
+   whole at high zoom */
+.chip-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  line-height: 14px;
+}
+.chip-ico {
+  flex: none;
+  width: 10px;
+  height: 10px;
+}
+.chip-ico-trail {
+  margin-left: -1px;
+  margin-right: -2px;
+  opacity: 0.75;
+}
+.chip-count {
+  flex: none;
+  padding: 0 0 0 5px;
+  margin-right: -1px;
+  border-left: 1px solid currentColor;
+  border-left-color: color-mix(in oklab, currentColor 25%, transparent);
+  font: 400 var(--text-mono-sm) / 12px var(--font-mono);
+  opacity: 0.8;
+}
+/* the neutral chip: a value, a count, a status word */
+.chip-tone-neutral,
+.chip-tone-info {
+  border-color: rgba(var(--ink-rgb), 0.18);
+  background: var(--surface-card);
+  color: var(--text-primary);
+}
+.chip-tone-positive {
+  border-color: var(--status-positive);
+  background: var(--surface-card);
+  color: var(--status-positive);
+}
+.chip-tone-warning {
+  border-color: var(--status-warning);
+  background: var(--surface-card);
+  color: var(--status-warning);
+}
+.chip-tone-negative {
+  border-color: var(--status-negative);
+  background: var(--surface-card);
+  color: var(--status-negative);
+}
+.chip-plain,
+.chip-plain.chip-tone-neutral {
+  border-color: transparent;
+  background: transparent;
+  color: var(--text-tertiary);
+}
+.chip-act {
+  cursor: pointer;
+}
+.chip-act:hover {
+  border-color: var(--chip-edge-hover);
+  background: var(--chip-bg-hover);
+}
+.chip-tone-neutral.chip-act:hover,
+.chip-tone-info.chip-act:hover {
+  border-color: rgba(var(--ink-rgb), 0.3);
+  background: var(--surface-card);
+}
+.chip-tone-positive.chip-act:hover,
+.chip-tone-warning.chip-act:hover,
+.chip-tone-negative.chip-act:hover {
+  background: var(--surface-card);
+}
+.chip-act:active {
+  transform: translateY(0.5px);
+}
+.chip-act:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.chip.active,
+.chip[aria-pressed='true'] {
+  background: var(--surface-inverse);
+  border-color: var(--surface-inverse);
+  color: var(--text-on-inverse);
+}
+.chip.active.chip-act:hover,
+.chip[aria-pressed='true'].chip-act:hover {
+  background: var(--surface-inverse);
+  border-color: var(--surface-inverse);
+  color: var(--text-on-inverse);
+}
+.chip:focus-visible {
+  box-shadow: 0 0 0 1.5px var(--accent);
+}
+
+/* -------- Button: primary (the accent, one per surface), secondary (a hairline), ghost (quiet text); md 28px, sm
+   24px; an icon alone is a square -------- */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  gap: 6px;
+  box-sizing: border-box;
+  height: var(--control-sm);
+  min-height: 0;
+  padding: 0 12px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-ui);
+  background: transparent;
+  color: var(--text-tertiary);
+  font: 500 var(--text-ui-sm) / 1 var(--font-body);
+  white-space: nowrap;
+  cursor: pointer;
+  user-select: none;
+  transition: var(--transition-color), transform var(--dur-fast) var(--ease-out);
+}
+.btn-sm {
+  height: var(--h-control);
+  padding: 0 9px;
+  font-size: var(--text-mono);
+}
+.btn-ghost:not(.btn-square) {
+  padding: 0 6px;
+}
+.btn-square {
+  width: var(--control-sm);
+  padding: 0;
+}
+.btn-sm.btn-square {
+  width: var(--h-control);
+}
+.btn-ico {
+  flex: none;
+}
+.btn-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.btn-ghost:hover {
+  background: var(--track-bg);
+  color: var(--text-primary);
+}
+.btn-ghost:active {
+  background: var(--surface-pressed);
+}
+.btn-ghost.active,
+.btn-ghost[aria-haspopup][aria-expanded='true'] {
+  background: var(--track-bg);
+  color: var(--text-primary);
+}
+.btn-ghost:focus-visible {
+  box-shadow: none;
+  background: var(--track-bg);
+  color: var(--text-primary);
+}
+.btn-secondary {
+  border-color: var(--border-strong);
+  color: var(--text-primary);
+}
+.btn-secondary:hover {
+  background: var(--surface-hover);
+}
+.btn-secondary:active {
+  background: var(--surface-pressed);
+}
+.btn-primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--text-on-accent);
+}
+.btn-primary:hover {
+  background: var(--accent-hover);
+  border-color: var(--accent-hover);
+  color: var(--text-on-accent);
+}
+.btn-primary:active {
+  background: var(--accent-pressed);
+  border-color: var(--accent-pressed);
+}
+.btn-primary:focus-visible {
+  box-shadow: 0 0 0 1px var(--surface-card), 0 0 0 2px var(--accent);
+}
+.btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.btn-ghost:disabled:hover {
+  background: transparent;
+  color: var(--text-tertiary);
+}
+.btn-secondary:disabled:hover {
+  background: transparent;
+}
+.btn-primary:disabled:hover {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+/* busy: the ring turns before the label; a primary button keeps its fill */
+.btn-busy,
+.btn-busy:disabled {
+  opacity: 1;
+  cursor: progress;
+}
+.btn-busy::before {
+  content: '';
+  flex: none;
+  box-sizing: border-box;
+  width: 10px;
+  height: 10px;
+  border: 1.5px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  animation: spinner-turn var(--dur-spin) linear infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .btn-busy::before {
+    animation: none;
+  }
+}
+
+/* -------- Segmented: the chosen option is raised (the cell's paper, a hairline ring, ink at 500); the others are
+   secondary text that washes on hover. In a track (a setting in a popover or a card) the options sit on a tint. -------- */
+.seg {
+  display: inline-flex;
+  align-items: center;
+  flex: none;
+  gap: 2px;
+  min-width: 0;
+}
+.seg-track {
+  padding: 2px;
+  border-radius: calc(var(--radius-ui) + 1px);
+  background: var(--track-bg);
+}
+.seg-block {
+  display: flex;
+  width: 100%;
+}
+.seg-block .seg-opt {
+  flex: 1 1 0;
+}
+.seg-opt {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  box-sizing: border-box;
+  height: 24px;
+  min-height: 0;
+  min-width: 0;
+  padding: 0 9px;
+  border: 0;
+  border-radius: var(--radius-seg);
+  background: transparent;
+  color: var(--text-secondary);
+  font: 400 var(--text-xs) / 1 var(--font-body);
+  white-space: nowrap;
+  cursor: pointer;
+  transition: var(--transition-color);
+}
+.seg-track .seg-opt {
+  font-size: var(--text-ui-sm);
+}
+.seg-sm .seg-opt {
+  height: 22px;
+  padding: 0 9px;
+}
+.seg-lg {
+  gap: 4px;
+}
+.seg-lg .seg-opt {
+  gap: 7px;
+  height: 30px;
+  padding: 0 11px;
+  border-radius: var(--radius-ui);
+  font-size: var(--text-ui-sm);
+}
+/* an option that is a glyph alone, named in the tooltip: a square, as an icon button is */
+.seg-opt.seg-glyph {
+  padding: 0;
+  aspect-ratio: 1;
+}
+/* names the data gave (open files, documents): mono */
+.seg-names .seg-opt {
+  font: var(--type-mono);
+  line-height: 1;
+}
+.seg-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.seg-opt:hover {
+  background: var(--surface-hover);
+  color: var(--text-primary);
+}
+.seg-opt.active,
+.seg-opt.active:hover {
+  background: var(--raised-bg);
+  box-shadow: var(--raised-ring);
+  color: var(--text-primary);
+  font-weight: 500;
+}
+.seg-opt:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.seg-opt:focus-visible {
+  box-shadow: 0 0 0 1.5px var(--accent);
+}
+.seg-ico {
+  flex: none;
+}
+
+/* -------- Tabs: the surfaces, text only, outside the pane. The active one in ink at 500, the others tertiary. The
+   unread dot hangs outside the tab's box, so it takes no width. -------- */
+.tabs {
+  display: flex;
+  align-items: flex-end;
+  gap: 20px;
+  height: var(--h-topbar);
+}
+.tab {
+  position: relative;
+  display: inline-flex;
+  align-items: flex-start;
+  height: auto;
+  min-height: 0;
+  padding: 0 0 11px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--text-tertiary);
+  font: 400 var(--text-sm) / 1.45 var(--font-body);
+  cursor: pointer;
+  transition: color var(--dur-fast) var(--ease-out);
+}
+.tab:hover {
+  background: transparent;
+  color: var(--text-primary);
+}
+.tab.active {
+  color: var(--text-primary);
+  font-weight: 500;
+}
+/* a surface another pane shows than the focused one */
+.tab.shown {
+  color: var(--text-primary);
+}
+.tab:focus-visible {
+  box-shadow: none;
+  color: var(--text-primary);
+}
+.tab-dot {
+  position: absolute;
+  top: 3px;
+  right: -11px;
+}
+/* the spinner in the dot's slot while a writer writes (the Report tab, a type in the report's type bar): 10px, its left
+   edge 5px after the name as the dot's is, and centred on the name's line box (1.45em tall at the tab's top) */
+.tab-spinner {
+  top: calc((1.45em - 10px) / 2);
+  right: -15px;
+}
+
+/* -------- Card: the frame. Opaque paper, radius 8; the cell is the lightest thing on screen, ringed on Neutral and
+   Dark -------- */
+.card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  border-radius: var(--radius-card);
+  background: var(--surface-card);
+  box-shadow: var(--ring-card);
+  color: var(--text-primary);
+  text-decoration: none;
+  transition: box-shadow var(--dur-base) var(--ease-out), opacity var(--dur-base) var(--ease-out);
+}
+a.card:hover {
+  color: var(--text-primary);
+  box-shadow: 0 0 0 1px rgba(var(--ink-rgb), 0.16);
+}
+.card-flat {
+  box-shadow: none;
+  border: 1px solid var(--border-hairline);
+}
+.card.selected {
+  box-shadow: 0 0 0 1.5px var(--accent);
+}
+.card.dim {
+  opacity: 0.35;
+}
+.card-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  min-height: 24px;
+  padding: 8px 10px 0 12px;
+  font: var(--type-question);
+  color: var(--text-primary);
+}
+.card-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.card-meta {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+  color: var(--text-tertiary);
+  font: var(--type-mono-sm);
+  white-space: nowrap;
+}
+.card-body {
+  min-width: 0;
+  padding: 8px 12px 10px;
+}
+.card-tight .card-body {
+  padding: 0;
+}
+.card-head + .card-body {
+  padding-top: 6px;
+}
+.card-foot {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 6px;
+  min-height: 30px;
+  padding: 3px 8px 5px 12px;
+  border-top: 1px solid var(--border-hairline);
+  color: var(--text-tertiary);
+  font: var(--type-caption);
+}
+.card-foot-spacer {
+  flex: 1 1 auto;
+  min-width: 4px;
+}
+
+/* -------- Popover and Menu: the overlay, the cell's opaque paper with the ring and the float -------- */
+.popover {
+  z-index: var(--z-popover);
+  box-sizing: border-box;
+  min-width: 150px;
+  max-width: min(480px, calc(100vw - 16px));
+  max-height: calc(100vh - 16px);
+  overflow: auto;
+  padding: 4px;
+  border-radius: var(--radius-card);
+  background: var(--overlay-bg);
+  border: var(--overlay-edge);
+  box-shadow: var(--shadow-popover);
+  color: var(--text-primary);
+  font: var(--type-ui-sm);
+  animation: dialog-in var(--dur-base) var(--ease-out);
+}
+.menu-trigger {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+  max-width: 100%;
+}
+.menu {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  min-width: 140px;
+}
+.menu-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  min-height: var(--h-row);
+  padding: 0 8px;
+  border: 0;
+  border-radius: var(--radius-seg);
+  background: transparent;
+  color: var(--text-primary);
+  font: var(--type-ui-sm);
+  line-height: 1.2;
+  text-align: left;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.menu-item:hover,
+.menu-item:focus-visible {
+  background: var(--track-bg);
+  color: var(--text-primary);
+  border-color: transparent;
+  box-shadow: none;
+}
+.menu-item.checked {
+  font-weight: 500;
+}
+.menu-item.danger {
+  color: var(--status-negative);
+}
+.menu-item.danger:hover {
+  color: var(--status-negative);
+}
+.menu-item:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+/* a disabled item with a tip dims its content, not itself, so its focus highlight below keeps full strength */
+.menu-item[aria-disabled='true'] {
+  cursor: default;
+}
+.menu-item[aria-disabled='true'] > * {
+  opacity: 0.4;
+}
+.menu-item:disabled:hover,
+.menu-item[aria-disabled='true']:hover {
+  background: transparent;
+}
+/* a disabled item with a tip takes keyboard focus, so it shows where the focus is */
+.menu-item[aria-disabled='true']:focus-visible {
+  background: var(--track-bg);
+}
+/* the one tooltip (components/Tooltip): the overlay under an icon-only control, or beside a menu for a disabled
+   item's reason, above the popover, never in the pointer's way */
+.tip {
+  z-index: calc(var(--z-popover) + 1);
+  box-sizing: border-box;
+  width: max-content;
+  max-width: calc(100vw - 16px);
+  padding: 5px 8px;
+  border-radius: var(--radius-ui);
+  color: var(--text-primary);
+  font: var(--type-ui-sm);
+  line-height: 1.35;
+  pointer-events: none;
+}
+/* a tooltip of several lines, one per line of its text */
+.tip.tip-lines {
+  max-width: min(360px, calc(100vw - 16px));
+  white-space: pre-line;
+}
+/* the box a library's icon control sits in to take the tooltip (Tooltip.tsx Tipped): it lays out as the control did */
+.tipped {
+  display: inline-flex;
+  flex: none;
+}
+.menu-ico {
+  flex: none;
+  color: var(--text-tertiary);
+}
+.menu-item.checked .menu-ico {
+  color: inherit;
+}
+.menu-item-label {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.menu-item-note {
+  flex: none;
+  color: var(--text-tertiary);
+  font-size: var(--text-xs);
+}
+.menu-check {
+  flex: none;
+  margin-left: 8px;
+  color: var(--text-accent);
+}
+.menu-heading {
+  padding: 6px 8px 3px;
+  font: var(--type-label);
+  letter-spacing: var(--tracking-label);
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+}
+.menu-heading:not(:first-child) {
+  margin-top: 4px;
+}
+.menu-sep {
+  height: 1px;
+  margin: 4px 2px;
+  background: var(--border-hairline);
+}
+
+/* -------- Field: TextInput and TextArea. A field that stands alone sits on the cell with a hairline ring; focused,
+   the ring is the accent's -------- */
+.field {
+  box-sizing: border-box;
+  height: var(--h-control);
+  min-width: 0;
+  margin: 0;
+  padding: 0 8px;
+  border: 1px solid rgba(var(--ink-rgb), 0.14);
+  border-radius: var(--radius-ui);
+  background: var(--surface-card);
+  color: var(--text-primary);
+  font: 400 var(--text-ui-sm) / 22px var(--font-body);
+  transition: border-color var(--dur-fast) var(--ease-out), box-shadow var(--dur-fast) var(--ease-out);
+}
+.field:focus {
+  outline: none;
+  border-color: transparent;
+  box-shadow: 0 0 0 1.5px var(--accent);
+}
+.field::placeholder {
+  color: var(--text-placeholder);
+  opacity: 1;
+}
+.field:disabled {
+  opacity: 0.5;
+}
+.field-area {
+  height: auto;
+  min-height: 32px;
+  padding: 5px 8px;
+  line-height: 1.45;
+  resize: none;
+  overflow: auto;
+}
+/* a growing text area wraps its text and never scrolls sideways, so no sideways scrollbar takes room under its text */
+.field-grow {
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+.field-mono {
+  font-family: var(--font-mono);
+  font-size: var(--text-mono);
+}
+.field-block {
+  display: block;
+  width: 100%;
+}
+.field-bare,
+.field-bare:focus {
+  padding-left: 0;
+  padding-right: 0;
+  border-color: transparent;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+/* -------- the glass composer (components/Composer): glass at 62% over the work, the float, radius 8; the text on
+   top, the model at the left of the foot, the send square at the right -------- */
+.composer {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  box-sizing: border-box;
+  min-height: 88px;
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: var(--radius-card);
+  background: var(--glass-bg);
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
+  border: var(--glass-edge);
+  box-shadow: var(--shadow-composer);
+  color: var(--text-primary);
+}
+.composer .composer-text,
+.composer .field-area {
+  flex: 1 1 auto;
+  min-height: 20px;
+  padding-top: 0;
+  padding-bottom: 0;
+  font: var(--type-message);
+}
+.composer .composer-text::placeholder {
+  color: var(--text-tertiary);
+  font-size: var(--text-ui-sm);
+}
+.composer .field-mono {
+  font: var(--type-mono);
+}
+.composer-foot {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 22px;
+}
+.composer-spacer {
+  flex: 1 1 auto;
+}
+.composer-model {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  max-width: 100%;
+  color: var(--text-tertiary);
+  font: 400 var(--text-mono) / 1.2 var(--font-body);
+}
+.composer-send.btn {
+  width: 22px;
+  height: 22px;
+}
+.composer-send.btn-secondary:disabled {
+  opacity: 1;
+  color: var(--text-tertiary);
+}
+.chat-composer {
+  flex: 0 0 auto;
+}
+
+/* fast mode's lightning bolt (chat/ModelLine's FastBolt): an outline in the quiet ink while off, filled in the accent
+   while on. One that cannot be switched here gets no hover wash. */
+.btn.fast-bolt.active,
+.btn.fast-bolt.active:hover {
+  background: transparent;
+  color: var(--accent);
+}
+.fast-bolt.active path {
+  fill: currentColor;
+}
+.fast-bolt-locked {
+  cursor: default;
+}
+.btn.fast-bolt-locked:hover {
+  background: transparent;
+}
+
+/* -------- Switch: the one pill, 28 × 16. Accent when on, an ink step when off; the knob slides -------- */
+.switch {
+  position: relative;
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  width: 28px;
+  height: 16px;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: rgba(var(--ink-rgb), 0.18);
+  cursor: pointer;
+  transition: var(--transition-color);
+}
+.switch-knob {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--surface-card);
+  transition: transform var(--dur-fast) var(--ease-out), background-color var(--dur-fast) var(--ease-out);
+}
+.switch.on {
+  background: var(--accent);
+}
+.switch.on .switch-knob {
+  transform: translateX(12px);
+  background: #fff;
+}
+.switch:hover {
+  background: rgba(var(--ink-rgb), 0.24);
+}
+.switch.on:hover {
+  background: var(--accent-hover);
+}
+.switch:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.switch:focus-visible {
+  box-shadow: 0 0 0 1px var(--surface-card), 0 0 0 2px var(--accent);
+}
+
+/* -------- marks and keys: • unread in the accent, ✓ verified, ⚑ not checked, ✕ failed; a key in mono in a hairline
+   box -------- */
+.mark {
+  display: inline-block;
+  flex: none;
+  font: 400 var(--text-2xs) / 1 var(--font-body);
+  vertical-align: baseline;
+}
+.mark-verified {
+  color: var(--status-positive);
+}
+.mark-unchecked {
+  color: var(--status-warning);
+}
+.mark-failed {
+  color: var(--status-negative);
+}
+.kbd {
+  display: inline-flex;
+  align-items: center;
+  box-sizing: border-box;
+  height: 18px;
+  padding: 0 6px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-chip);
+  background: var(--surface-card);
+  color: var(--text-secondary);
+  font: 400 10.5px / 1 var(--font-mono);
+  white-space: nowrap;
+  vertical-align: 1px;
+}
+
+/* -------- the tool-call card: a tonal card whose head is chevron, name, mono meta and state; open, the steps; always,
+   the chips of what it made -------- */
+.toolcard {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  padding: 2px 0;
+  border-radius: var(--radius-card);
+  background: var(--surface-tonal);
+  color: var(--text-primary);
+  font: var(--type-ui-sm);
+}
+.toolcard-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 5px 10px;
+  border-radius: var(--radius-ui);
+}
+.toolcard-head-act {
+  cursor: pointer;
+}
+.toolcard-head-act:hover {
+  background: var(--surface-hover);
+}
+.toolcard-head:focus-visible {
+  box-shadow: none;
+  background: var(--surface-hover);
+}
+.toolcard-caret {
+  display: inline-flex;
+  flex: none;
+  width: 10px;
+  color: var(--text-tertiary);
+  transition: transform var(--dur-fast) var(--ease-out);
+}
+.toolcard.open .toolcard-caret {
+  transform: rotate(90deg);
+}
+.toolcard-ico {
+  flex: none;
+  color: var(--text-tertiary);
+}
+.toolcard-title {
+  flex: none;
+  max-width: 60%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 500;
+}
+.toolcard-meta {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-tertiary);
+  font: 400 10.5px / 1.4 var(--font-mono);
+}
+.toolcard-end {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+  margin-left: auto;
+}
+/* the right edge's Stop while a run goes on: a small primary button with the spinner in the button's text colour
+   (the accent ring would vanish on the accent fill); negative margins keep the head at one line */
+.toolcard-stop {
+  margin: -3px -4px -3px 0;
+}
+.toolcard-stop .btn-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.toolcard-stop .spinner {
+  border-color: currentColor;
+  border-right-color: transparent;
+}
+.toolcard-lead {
+  max-height: 120px;
+  overflow: auto;
+  padding: 0 10px 6px 28px;
+  color: var(--text-secondary);
+  font: var(--type-body-sm);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  scrollbar-width: none;
+}
+.toolcard-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin: 0;
+  padding: 0 10px 8px 28px;
+  list-style: none;
+  color: var(--text-secondary);
+  font: var(--type-body-sm);
+}
+.toolcard-step {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+.toolcard-glyph {
+  flex: none;
+  width: 10px;
+  font-size: 10px;
+}
+.toolcard-step-done .toolcard-glyph {
+  color: var(--status-positive);
+}
+.toolcard-step-running .toolcard-glyph {
+  color: var(--text-accent);
+}
+.toolcard-step-running {
+  color: var(--text-primary);
+}
+.toolcard-step-pending .toolcard-glyph {
+  color: var(--text-placeholder);
+}
+.toolcard-step-failed .toolcard-glyph {
+  color: var(--status-negative);
+}
+.toolcard-step-skipped {
+  color: var(--text-tertiary);
+}
+.toolcard-step-skipped .toolcard-glyph {
+  color: var(--text-placeholder);
+}
+.toolcard-step-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.toolcard-body {
+  min-width: 0;
+  padding: 0 10px 8px 28px;
+}
+.toolcard-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 2px 10px 6px 28px;
+}
+.toolcard-section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  padding: 4px 10px 6px 28px;
+}
+.toolcard-section-head {
+  display: inline-flex;
+  align-items: baseline;
+  align-self: flex-start;
+  gap: 6px;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--text-tertiary);
+  font: 400 11.5px / 1.4 var(--font-body);
+}
+.toolcard-section-act {
+  cursor: pointer;
+}
+.toolcard-section-act:hover {
+  background: none;
+  color: var(--text-primary);
+}
+.toolcard-section-ico {
+  align-self: center;
+  color: inherit;
+}
+.toolcard-section-count {
+  color: var(--text-tertiary);
+  font: var(--type-mono-sm);
+}
+.toolcard-section-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  min-width: 0;
+}
+
+/* -------- the analyst's message: a solid accent tile; a chip inside it takes the tile's text colour -------- */
+.msg-user {
+  margin: 6px 0 0;
+  padding: 8px 10px;
+  border-radius: var(--radius-card);
+  background: var(--accent);
+  color: var(--text-on-accent);
+  font: var(--type-message);
+  text-wrap: pretty;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+.msg-user .chip,
+.msg-user .chip.chip-act:hover {
+  border-color: color-mix(in oklab, var(--text-on-accent) 40%, transparent);
+  background: color-mix(in oklab, var(--text-on-accent) 14%, transparent);
+  color: var(--text-on-accent);
+}
+.msg-user ::selection {
+  background: color-mix(in oklab, var(--text-on-accent) 30%, transparent);
+  color: var(--text-on-accent);
+}
+
+/* -------- the thread tree: one card at the top of the chat column. Its rows are the Files tree's (files.css
+   .files-row): 24px, 14px further in per level, guide lines shown on hover; the right edge is the state -------- */
+.tt {
+  position: relative;
+  z-index: 2;
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  padding: 8px 6px;
+  border-radius: var(--radius-card);
+  background: var(--bg-panel);
+  box-shadow: 0 0 0 1px rgba(var(--ink-rgb), 0.05), var(--shadow-float);
+  font: var(--type-body);
+}
+.tt-list {
+  display: flex;
+  flex-direction: column;
+  max-height: 50vh;
+  overflow-y: auto;
+  scrollbar-width: none;
+}
+.tt-row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex: none;
+  min-width: 0;
+  height: 24px;
+  padding: 0 4px 0 calc(4px + var(--depth, 0) * 14px);
+  border-radius: var(--radius-chip);
+  color: var(--text-secondary);
+  cursor: pointer;
+  user-select: none;
+}
+.tt-row:hover {
+  background: rgba(var(--ink-rgb), 0.04);
+}
+.tt-row.current,
+.tt-row.current:hover {
+  background: var(--surface-selected);
+  color: var(--text-primary);
+  font-weight: 500;
+}
+.tt-row:focus-visible {
+  box-shadow: none;
+  background: var(--surface-hover);
+}
+/* the folded card: the same row as main's in the open list, so the column's control stays in place */
+.tt-summary {
+  color: var(--text-primary);
+  font-weight: 500;
+}
+.tt-summary:hover {
+  background: transparent;
+}
+/* a row's ancestors' guide lines, one per level under each ancestor's chevron (files.css .files-guide) */
+.tt-guide {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  border-left: 1px solid rgba(var(--ink-rgb), 0.14);
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.1s linear;
+}
+.tt-list:hover .tt-guide {
+  opacity: 1;
+}
+/* the first column: a chevron, turned down while the rows under it show, or blank on a row with none under it */
+.tt-caret {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 13px;
+  height: 24px;
+  color: var(--text-tertiary);
+}
+.tt-caret-on .icon {
+  transition: transform var(--dur-fast) var(--ease-out);
+}
+.tt-caret-open .icon {
+  transform: rotate(90deg);
+}
+.tt-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tt-rename {
+  flex: 1;
+  min-width: 0;
+  height: 22px;
+  margin-left: -6px;
+  padding: 0 6px;
+  border: 0;
+  border-radius: var(--radius-chip);
+  outline: none;
+  background: var(--surface-card);
+  box-shadow: 0 0 0 1.5px var(--accent);
+  color: var(--text-primary);
+  font: var(--type-body);
+}
+.tt-end {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: none;
+  margin-left: auto;
+  padding-left: 6px;
+  font-weight: 400;
+}
+.tt-active {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--text-tertiary);
+  font: var(--type-mono-sm);
+}
+.tt-aside {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-right: -2px;
+}
+.tt-meta {
+  color: var(--text-tertiary);
+  font: var(--type-mono-sm);
+}
+.tt-more {
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-chip);
+  background: transparent;
+  color: var(--text-tertiary);
+  visibility: hidden;
+}
+.tt-row:hover .tt-more,
+.tt-row:focus-within .tt-more,
+.tt-row.tt-menu-open .tt-more {
+  visibility: visible;
+}
+.tt-more:hover {
+  background: rgba(var(--ink-rgb), 0.08);
+  color: var(--text-primary);
+}
+/* how a finished agent ended, after the time it ended: ✓ in the positive colour, ✕ in the negative */
+.tt-mark {
+  flex: none;
+  width: 12px;
+  text-align: center;
+  font-size: 11px;
+  line-height: 1;
+}
+.tt-menu {
+  min-width: 150px;
+}
+/* a prompt that waits for the analyst: the dot in the warning colour, on its row and, with the word, on the folded card */
+.tt-waiting {
+  background: var(--status-warning);
+}
+.tt-attn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--text-tertiary);
+  font: var(--type-mono-sm);
+}
+.tt-attn-waiting {
+  color: var(--status-warning);
+}
+/* the search field at the open card's foot, shown once the tree holds many threads; it stays in view as the list
+   scrolls. Its fill is the current row's, laid over the card's paper so no row shows through it */
+.tt-filter {
+  position: sticky;
+  bottom: -8px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+  height: var(--h-row);
+  margin-top: 4px;
+  padding: 0 6px;
+  border-radius: var(--radius-seg);
+  background: linear-gradient(var(--surface-selected), var(--surface-selected)), var(--bg-panel);
+  color: var(--text-secondary);
+}
+.tt-filter-input {
+  flex: 1;
+  min-width: 0;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  outline: none;
+  background: transparent;
+  color: var(--text-primary);
+  font: var(--type-body);
+}
+
+/* -------- PaneStatus: the pane's status strip, glass along its bottom edge -------- */
+.pane-status {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  height: 28px;
+  padding: 0 14px;
+  border-radius: 0 0 var(--radius-pane) var(--radius-pane);
+  background: var(--glass-bg);
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
+  box-shadow: 0 -1px 0 rgba(var(--ink-rgb), 0.07);
+  font: var(--type-mono-sm);
+  color: var(--text-tertiary);
+  white-space: nowrap;
+}
+.pane-status-name {
+  flex: none;
+  color: var(--text-primary);
+}
+.pane-status-meta {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.pane-status-totals {
+  flex: none;
+  margin-left: auto;
+}

@@ -1,0 +1,14 @@
+#!/bin/sh
+# thimble-python: run the thimble tree's own interpreter (backend/.venv/bin/python) with the given arguments, wherever
+# this plugin copy lives (bin/thimble-app-dir finds the tree). THIMBLE_APP_DIR is exported so Python code
+# (bin/thimble-mcp) finds the same tree. One line on stderr and exit 1 when the tree or its venv is missing: the fix is
+# scripts/install.sh, never an install run from here.
+set -u
+here="$(cd "$(dirname "$0")" && pwd -P)"
+app="$("$here/thimble-app-dir")" || exit 1
+py="$app/backend/.venv/bin/python"
+if [ ! -x "$py" ]; then
+  echo "thimble: $app/backend/.venv is missing — run $app/scripts/install.sh" >&2
+  exit 1
+fi
+THIMBLE_APP_DIR="$app" exec "$py" "$@"

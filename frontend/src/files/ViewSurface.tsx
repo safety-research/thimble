@@ -1,0 +1,44 @@
+// A view on its own in a pane (shell/PaneArea), on the file a ref named or the first file the view claims. While a pane
+// shows it, refs Files would open in this view open here instead (bus `openInView`).
+import { useCallback, useEffect, useState } from 'react'
+import { bus, type Events } from '../lib/bus'
+import { inferKind } from './params'
+import { kindIn, parentOf, useFolderStore } from './Tree'
+import { useFilesLabels } from './useLabels'
+import { ViewPane } from './ViewPane'
+import type { BuiltView } from './ViewsBar'
+
+type Place = Omit<Events['openInView'], 'slug'>
+/** Each view's place, by workspace and slug. */
+const places = new Map<string, Place>()
+
+export function ViewSurface({ ws, view, active }: { ws: string; view: BuiltView; active: boolean }) {
+  const labels = useFilesLabels(ws)
+  const folders = useFolderStore(ws)
+  const key = `${ws}\n${view.slug}`
+  const [at, setAt] = useState<Place | null>(() => places.get(key) ?? null)
+  useEffect(
+    () =>
+      bus.on('openInView', ({ slug, ...place }) => {
+        if (slug !== view.slug) return
+        places.set(key, place)
+        setAt(place)
+      }),
+    [view.slug, key],
+  )
+  // a quoted span the page did not show opens in the File browser, which highlights it
+  const quoteMissing = useCallback(() => {
+    if (at?.quote) bus.emit('openRef', { ref: at.quote.span, browser: true })
+  }, [at])
+  const path = at?.path ?? view.first_file ?? null
+  const { ensure } = folders
+  useEffect(() => {
+    if (path && active) ensure(parentOf(path))
+  }, [path, active, ensure])
+  const kind = path ? kindIn(folders.store, path) ?? inferKind(path) : 'text'
+  return (
+    <div className="view-surface">
+      <ViewPane ws={ws} view={view} path={path} kind={kind} targetRef={at?.ref} quote={at?.quote} onQuoteMissing={quoteMissing} labels={labels} />
+    </div>
+  )
+}

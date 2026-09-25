@@ -1,0 +1,2217 @@
+"""Views: viewers written for how a corpus arranges its records, and the proposals they start as.
+
+A view is three files in `workspaces/<c>/views/<slug>/`, written by the dev agent's session (dev.run_view):
+view.json {name, why, claims, accepts, declares, default, libs, built}, reader.py (the contract in view_host.py), and
+view.html, drawn in a sandboxed frame that reaches no host but the view's media route. `claims` are globs of the
+files
+the view opens, `accepts` the fragment forms it understands (`L<n>`), `declares` its own `view:<slug>/<key>` units.
+thimble also ships file-type viewers under the same contract (BUILTIN_VIEWERS). Readers run on the workspace's
+`views`
+kernel with a cached index; refs.resolve hands file refs with a fragment to enrich_file_ref, and resolve_sync bridges
+synchronous callers to the kernel on the server's loop.
+
+A proposal is a view ticket in `views/proposals.json` that starts building as soon as it is proposed. Until the
+server
+stamps `built` into view.json the view is a draft that nothing lists or opens. After each session turn the server
+runs
+`gate` (the files' validation, then `check`); a pass stamps `built`, a failure goes back to the session up to
+dev.MAX_ATTEMPTS times. A change to a built view (revise) copies its files aside and restores them if the change
+fails.
+Progress is `view {slug, status, chat?}` on the workspace stream."""
+from __future__ import annotations
+
+import asyncio
+import contextlib
+import fnmatch
+import functools
+import hashlib
+import itertools
+import json
+import logging
+import os
+import re
+import shutil
+import subprocess
+import threading
+import time
+from collections import OrderedDict
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any
+
+from fastapi import APIRouter, HTTPException, Request
+from fastapi.responses import FileResponse, HTMLResponse
+from pydantic import BaseModel
+
+from . import config, investigation, prompts, refs
+from .ledger import atomic_write_text, read_json, write_json
+
+log = logging.getLogger("thimble.views")
+
+KERNEL = "views"  # the workspace's dedicated kernel for readers
+VIEWS_SUBDIR = "views"
+CACHE_SUBDIR = "cache"
+PROPOSALS_FILE = "proposals.json"
+KEY_REFS_FILE = "key-refs.json"  # view:<slug>/<key> -> {refs, excerpt, label, name}, kept past the view's deletion
+VIEW_JSON, READER_PY, VIEW_HTML = "view.json", "reader.py", "view.html"
+TOOLS_PROMPT = "tools"  # prompts/tools.md, whose lowercase sections are the lines the view tools' results carry
+# a view ticket's status on its proposal row; `dropped` is an orientation proposal that could not be built through its
+# repairs. A proposal of the orientation's first run carries `held: true` until that run ends (release_held): it builds
+# at once but is neither listed nor announced until then.
+STATUSES = ("queued", "building", "built", "failed", "dropped")
+PENDING = ("queued", "building")  # the statuses a restart queues again (dev.recover_views)
+SHOTS_KEPT = 5  # the check pictures kept per view, newest first (the session Reads the latest)
+SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,39}$")
+# the route names under /views/ and the Reader's built-in file views, which its switcher keys by
+RESERVED_SLUGS = {"proposals", "forge", "raw", "records", "table", "text", "transcript", "lib", "frame", "resolve"}
+BUILD_TIMEOUT_S = 180.0  # a call that may build the index over the claimed files
+CALL_TIMEOUT_S = 15.0  # a call once the index for the fingerprint is known to be built
+LABEL_MAX = 40  # chars of a chip label a reader supplies (chips stay short)
+EXCERPT_MAX = refs.EXCERPT_MAX
+REFS_MAX = 200  # file refs a resolved locator carries
+MEMO_MAX = 5000  # resolved locators kept in memory
+ERROR_MAX = 2000
+SOURCE_MAX = 400_000  # chars of reader.py or view.html a view may hold
+# the checks: sample lines per claimed file, files sampled, keys followed, cited records read per key
+CHECK_LINES, CHECK_FILES, CHECK_KEYS, CHECK_KEY_REFS = 3, 3, 3, 30
+SHOT_TIMEOUT_S = 60.0
+# a page anchoring fewer than one in ANCHORED_SHARE of the record refs its fetches returned is noted by the gate
+# (unmarked); the strings of each answer read for them, FETCHED_SCAN_MAX at most
+ANCHORED_SHARE = 10
+FETCHED_SCAN_MAX = 200_000
+_RECORD_REF = re.compile(r"^[^\s#][^#\n]*#L[1-9]\d*$")  # a record ref, `<path>#L<n>` (frontend files/labels recordRef)
+FOLDER_CACHE_S = 5.0
+_NODE_MODULES = config.REPO_ROOT / "frontend" / "node_modules"
+# The libraries a view page may use, served by thimble and inlined into the page. vega-embed needs vega and vega-lite
+# before it, so a view that names it gets all three in this order.
+LIBS: dict[str, Path] = {
+    "vega": _NODE_MODULES / "vega" / "build" / "vega.min.js",
+    "vega-lite": _NODE_MODULES / "vega-lite" / "build" / "vega-lite.min.js",
+    "vega-embed": _NODE_MODULES / "vega-embed" / "build" / "vega-embed.min.js",
+}
+LIB_NEEDS = {"vega-lite": ("vega",), "vega-embed": ("vega", "vega-lite")}
+BRIDGE_JS = Path(__file__).with_name("viewer_bridge.js")
+HOST_PY = Path(__file__).with_name("view_host.py")
+SHOT_SCRIPT = config.REPO_ROOT / "scripts" / "view_shot.mjs"
+NODE_MIN = 20  # the Node major the checks need, as scripts/install.sh asks for it
+# plugin/viewers holds the worked examples a view ticket's session reads and the file-type viewers thimble ships
+VIEWERS_DIR = config.REPO_ROOT / "plugin" / "viewers"
+EXAMPLES_DIR = VIEWERS_DIR
+BUILTIN_VIEWERS = ("spreadsheet", "pdf")
+BUILTIN_CACHE = ".builtin"  # under the workspace's views folder: a built-in viewer's index cache and check shots
+# Scripts and styles inline (the bridge, the vendored libraries, the view's own), images as data or blob URLs, workers
+# from blobs (pdf.js), and eval for vega's expression parser. `{media}` is the view's own media route (frame_document),
+# the one URL an image, audio or video element may load; no script can fetch or send anything (connect-src 'none').
+FRAME_CSP = ("default-src 'none'; script-src 'unsafe-inline' 'unsafe-eval'; style-src 'unsafe-inline'; "
+             "img-src data: blob:{media}; font-src data:; media-src data: blob:{media}; worker-src blob:; "
+             "connect-src 'none'; form-action 'none'; base-uri 'none'")
+# The files the media route serves, by suffix: images, audio and video, which an element shows without the page reading
+# their bytes. No SVG (its scripts would run if opened on its own) and no other type.
+MEDIA_TYPES = {
+    ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".gif": "image/gif", ".webp": "image/webp",
+    ".avif": "image/avif", ".bmp": "image/bmp",
+    ".mp3": "audio/mpeg", ".wav": "audio/wav", ".m4a": "audio/mp4", ".aac": "audio/aac", ".oga": "audio/ogg",
+    ".ogg": "audio/ogg", ".opus": "audio/ogg", ".flac": "audio/flac", ".weba": "audio/webm",
+    ".mp4": "video/mp4", ".m4v": "video/mp4", ".mov": "video/quicktime", ".webm": "video/webm", ".ogv": "video/ogg",
+}
+# the type is the one MEDIA_TYPES names, never sniffed, and the file opened on its own runs nothing
+MEDIA_HEADERS = {"X-Content-Type-Options": "nosniff", "Content-Security-Policy": "default-src 'none'; sandbox"}
+# the origin the browser reaches this server at (location.origin, through Vite's proxy in development)
+ORIGIN_RE = re.compile(r"https?://(\[[0-9A-Fa-f:.]+\]|[A-Za-z0-9.-]+)(:\d{1,5})?")  # used with fullmatch
+# the media route's origin in the headless page of the checks, which view_shot.mjs answers from the files media_file
+# names, since that page has no server to reach
+SHOT_MEDIA_ORIGIN = "http://thimble.invalid"
+
+
+class ReaderError(Exception):
+    """A reader call that did not answer: reader.py raised, timed out, or the kernel did not start."""
+
+    def __init__(self, message: str, detail: str = "") -> None:
+        super().__init__(message)
+        self.message = message
+        self.detail = detail
+
+
+def _now() -> str:
+    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+def _emit(c: str, slug: str, status: str, **extra: Any) -> None:
+    """The `view` event on the workspace stream. investigation.emit runs on the event loop only, so a caller in a
+    worker thread (a route's blocking part) hands it to the bound loop. A held proposal's build sends none: the analyst
+    hears of it at release_held."""
+    if slug in held_slugs(c):
+        return
+    event = {"type": "view", "slug": slug, "status": status, **extra}
+
+    def send() -> None:
+        try:
+            investigation.emit(c, investigation.MAIN, event)
+        except Exception:  # noqa: BLE001
+            log.exception("view event (%s %s %s) not emitted", c, slug, status)
+
+    if _thread_loop() is not None:
+        send()
+    elif _loop is not None and _loop.is_running() and not _loop.is_closed():
+        _loop.call_soon_threadsafe(send)
+    else:
+        log.info("view event (%s %s %s) not emitted: no event loop", c, slug, status)
+
+
+# ----------------------------------------------------------------------------------------------------------
+# the event loop the views kernel runs on (resolve_sync)
+# ----------------------------------------------------------------------------------------------------------
+
+_loop: asyncio.AbstractEventLoop | None = None
+
+
+def _bind_loop() -> None:
+    """Remember the running loop, the one whose kernel client resolve_sync must use from other threads."""
+    global _loop
+    with contextlib.suppress(RuntimeError):
+        _loop = asyncio.get_running_loop()
+
+
+@contextlib.asynccontextmanager
+async def _lifespan(app: Any):
+    """The router's lifespan (FastAPI merges it into the app's): the server's loop is bound before the first request,
+    so the first hover over a cited record can reach the views kernel from the /ref route's thread."""
+    _bind_loop()
+    yield
+
+
+router = APIRouter(lifespan=_lifespan)
+
+
+# ----------------------------------------------------------------------------------------------------------
+# views on disk
+# ----------------------------------------------------------------------------------------------------------
+
+
+def views_dir(c: str) -> Path:
+    return config.workspace_dir(c) / VIEWS_SUBDIR
+
+
+def _view_dirs(c: str) -> dict[str, Path]:
+    """slug -> the view's directory, for every directory under the workspace's views that holds a view.json."""
+    base = views_dir(c)
+    if not base.is_dir():
+        return {}
+    return {d.name: d for d in sorted(base.iterdir())
+            if d.is_dir() and SLUG_RE.match(d.name) and (d / VIEW_JSON).is_file()}
+
+
+def _str_list(v: Any) -> list[str]:
+    if isinstance(v, str):
+        v = [v]
+    return [s for s in (" ".join(str(x).split()) for x in v) if s] if isinstance(v, list) else []
+
+
+def _forms(v: Any) -> list[dict[str, str]]:
+    """[{form, means}] from a list of forms, each a string or {form, means}."""
+    out: list[dict[str, str]] = []
+    for x in v if isinstance(v, list) else ([v] if v else []):
+        if isinstance(x, dict):
+            form, means = str(x.get("form") or "").strip(), " ".join(str(x.get("means") or "").split())
+        else:
+            form, means = str(x).strip(), ""
+        if form:
+            out.append({"form": form, "means": means})
+    return out
+
+
+def _libs(v: Any) -> list[str]:
+    """The named libraries with what each needs ahead of it, in LIBS order."""
+    wanted = set(_str_list(v)) & set(LIBS)
+    for name in list(wanted):
+        wanted.update(LIB_NEEDS.get(name, ()))
+    return [n for n in LIBS if n in wanted]
+
+
+def _normalize_view(slug: str, raw: Any, *, where: Path | None = None, origin: str = "workspace") -> dict[str, Any]:
+    raw = raw if isinstance(raw, dict) else {}
+    d = where
+    return {
+        "origin": origin,  # workspace (written for this corpus) or builtin (a file-type viewer thimble ships)
+        "slug": slug,
+        "name": " ".join(str(raw.get("name") or slug).split()),
+        "why": " ".join(str(raw.get("why") or raw.get("description") or "").split()),
+        "claims": _str_list(raw.get("claims")),
+        "accepts": _forms(raw.get("accepts")),
+        "declares": _forms(raw.get("declares")),
+        "default": bool(raw.get("default")),
+        "libs": _libs(raw.get("libs")),
+        "built": str(raw.get("built") or ""),
+        # a workspace view the server has not stamped `built` is a view ticket's work in progress, which only its
+        # checks read (module note); a file-type viewer thimble ships is never one
+        "draft": origin == "workspace" and not raw.get("built"),
+        # a view whose reader or page is missing is listed so it can be deleted, and never opens a citation
+        "ok": bool(d is not None and (d / READER_PY).is_file() and (d / VIEW_HTML).is_file() and _str_list(raw.get("claims"))),
+        "dir": str(d) if d else None,
+    }
+
+
+def _builtin_dir(slug: str) -> Path | None:
+    d = VIEWERS_DIR / slug
+    return d if slug in BUILTIN_VIEWERS and (d / VIEW_JSON).is_file() else None
+
+
+def read_view(c: str, slug: str) -> dict[str, Any] | None:
+    """The view record (view.json normalised, plus `origin`, `ok` and `dir`): the workspace's view of that slug, else
+    the built-in viewer of that slug; None when there is neither."""
+    d = _view_dirs(c).get(slug)
+    if d is None:
+        return read_builtin(slug)
+    return _normalize_view(slug, _view_json(d), where=d)
+
+
+def _view_json(d: Path) -> dict[str, Any]:
+    """A view folder's view.json, {} when it cannot be read or is no object."""
+    try:
+        raw = json.loads((d / VIEW_JSON).read_text("utf-8"))
+    except (OSError, ValueError) as e:
+        log.warning("view %s: view.json unreadable (%s)", d.name, e)
+        return {}
+    return raw if isinstance(raw, dict) else {}
+
+
+def read_built(c: str, slug: str) -> dict[str, Any] | None:
+    """read_view, None for a draft: what every reader of a view but its own checks uses, since a draft never opens a
+    citation."""
+    v = read_view(c, slug)
+    return None if v is None or v["draft"] else v
+
+
+def list_views(c: str) -> list[dict[str, Any]]:
+    """The workspace's views, drafts and the views of held proposals left out (held_slugs), then the built-in viewers
+    it does not override. A draft does not override a built-in viewer of its slug."""
+    held = held_slugs(c)
+    mine = [v for v in _own_views(c) if v["slug"] not in held]
+    have = {v["slug"] for v in mine}
+    return [*mine, *(v for s in BUILTIN_VIEWERS if s not in have and (v := read_builtin(s)) is not None)]
+
+
+def _own_views(c: str) -> list[dict[str, Any]]:
+    """The workspace's own views, drafts left out, held ones kept (list_proposals settles its rows against them)."""
+    return [v for s in _view_dirs(c) if (v := read_view(c, s)) is not None and not v["draft"]]
+
+
+def held_slugs(c: str) -> set[str]:
+    """The slugs of the proposals the orientation's first run holds, read from the stored rows (list_proposals reads
+    list_views)."""
+    try:
+        p = proposals_path(c)
+        raw = read_json(p, []) if p.is_file() else []
+    except (OSError, ValueError, HTTPException):
+        return set()
+    if not isinstance(raw, list):
+        return set()
+    return {str(x["slug"]) for x in raw
+            if isinstance(x, dict) and x.get("slug") and (x.get("held") or x.get("status") == "held")}
+
+
+def read_builtin(slug: str) -> dict[str, Any] | None:
+    """The built-in viewer of that slug, normalised, or None."""
+    d = _builtin_dir(slug)
+    return None if d is None else _normalize_view(slug, _view_json(d), where=d, origin="builtin")
+
+
+def cache_dir(c: str, view: dict[str, Any]) -> Path:
+    """Where a view's index and check pictures go: beside a workspace view, under the workspace's views folder for a
+    built-in one (whose own folder is part of thimble)."""
+    if view.get("origin") == "builtin":
+        return views_dir(c) / BUILTIN_CACHE / view["slug"]
+    return Path(view["dir"]) / CACHE_SUBDIR
+
+
+def _check_slug(slug: str) -> str:
+    slug = str(slug or "").strip()
+    if not SLUG_RE.match(slug):
+        raise HTTPException(400, f"invalid view slug: {slug!r} (lower-case letters, digits and hyphens)")
+    if slug in RESERVED_SLUGS:
+        raise HTTPException(400, f"the slug {slug!r} is taken (a route or a file view's name); choose another")
+    return slug
+
+
+def source_problems(claims: Any, reader: str, html: str, libs: Any) -> list[str]:
+    """What makes a view's files unable to run, as lines for whoever wrote them: no claims, an empty or oversized reader
+    or page, a reader that does not parse or lacks one of its three functions, a library thimble does not have."""
+    out: list[str] = []
+    if not _str_list(claims):
+        out.append("a view claims at least one file: give `claims` in view.json as corpus-relative globs")
+    for label, text in ((READER_PY, reader), (VIEW_HTML, html)):
+        if not text.strip():
+            out.append(f"{label} is empty")
+        elif len(text) > SOURCE_MAX:
+            out.append(f"{label} is {len(text):,} characters; the most a view holds is {SOURCE_MAX:,}")
+    if reader.strip():
+        try:
+            compile(reader, READER_PY, "exec")
+        except SyntaxError as e:
+            out.append(f"{READER_PY} does not parse: line {e.lineno}: {e.msg}")
+        else:
+            missing = [fn for fn in ("build_index", "records", "resolve") if not re.search(rf"^def {fn}\s*\(", reader, re.M)]
+            if missing:
+                out.append(f"{READER_PY} defines no {', '.join(f'{m}()' for m in missing)} at its top level")
+    unknown = sorted(set(_str_list(libs)) - set(LIBS))
+    if unknown:
+        out.append(f"no library {', '.join(unknown)}; a view may use {', '.join(LIBS)}")
+    return out
+
+
+def write_view(c: str, slug: str, *, name: str, why: str, claims: Any, accepts: Any = None, declares: Any = None,
+               default: bool = False, libs: Any = None, reader: str, html: str) -> dict[str, Any]:
+    """Write or replace a view's three files, validated (source_problems), and register it built (mark_built): a view
+    of thimble's own making, as the tests make theirs; a view ticket's session writes the files itself."""
+    slug = _check_slug(slug)
+    reader_src = str(reader or "").replace("\r\n", "\n")
+    html_src = str(html or "").replace("\r\n", "\n")
+    problems = source_problems(claims, reader_src, html_src, libs)
+    if problems:
+        raise HTTPException(400, problems[0])
+    stored = {"name": " ".join(str(name or slug).split()) or slug, "why": " ".join(str(why or "").split()),
+              "claims": _str_list(claims), "accepts": _forms(accepts), "declares": _forms(declares), "default": bool(default),
+              "libs": _libs(libs)}
+    d = views_dir(c) / slug
+    d.mkdir(parents=True, exist_ok=True)
+    atomic_write_text(d / READER_PY, reader_src.rstrip("\n") + "\n")
+    atomic_write_text(d / VIEW_HTML, html_src.rstrip("\n") + "\n")
+    write_json(d / VIEW_JSON, stored)
+    return mark_built(c, slug)
+
+
+def mark_built(c: str, slug: str) -> dict[str, Any]:
+    """Register the view in the slug's folder: `built` stamped into its view.json (the only writer of that field), its
+    memo
+    dropped, and a proposal under the slug marked built. Emits `view {slug, status: built}`, with `asked` when
+    relevant."""
+    d = views_dir(c) / slug
+    raw = _view_json(d)
+    write_json(d / VIEW_JSON, {**raw, "built": _now()})
+    _forget(c, slug)
+    prop = read_proposal(c, slug)
+    if prop is not None:
+        update_proposal(c, slug, status="built", error=None)
+    _emit(c, slug, "built", **({"asked": True} if prop is not None and prop.get("asked") else {}))
+    return read_view(c, slug) or _normalize_view(slug, raw, where=d)
+
+
+def delete_view(c: str, slug: str) -> None:
+    """Remove the view and the proposal it was built from. Its `view:` refs keep resolving through key-refs.json. A
+    built-in
+    viewer is not deleted."""
+    d = _view_dirs(c).get(slug)
+    if d is None:
+        if _builtin_dir(slug) is not None:
+            raise HTTPException(400, f"{slug} is a viewer thimble ships; a workspace view of the same slug overrides it")
+        raise HTTPException(404, f"no such view: {slug}")
+    shutil.rmtree(d, ignore_errors=True)
+    _forget(c, slug)
+    items = list_proposals(c)
+    if any(p.get("slug") == slug for p in items):
+        _save_proposals(c, [p for p in items if p.get("slug") != slug])
+    _emit(c, slug, "deleted")
+
+
+# ----------------------------------------------------------------------------------------------------------
+# the files a view claims, and which views open a file
+# ----------------------------------------------------------------------------------------------------------
+
+
+_folder_cache: dict[tuple[Path, str], dict[str, Any]] = {}  # (corpus, folder) -> {ts, files}
+_folder_lock = threading.Lock()
+
+
+def folder_path(corpus: Path, rel: str) -> Path:
+    """The folder `rel` (corpus-relative; '' or '.' is the corpus root) as an absolute path; 404 when it is not a
+    directory under the corpus."""
+    rel = (rel or "").strip().strip("/")
+    try:
+        p = config.safe_corpus_path(corpus, rel or ".")
+    except ValueError:
+        raise HTTPException(404, f"no such folder: {rel!r}") from None
+    if not p.is_dir():
+        raise HTTPException(404, f"no such folder: {rel!r}")
+    return p
+
+
+def _walk_folder(corpus: Path, rel: str) -> list[tuple[str, int, int]]:
+    """Every regular file under the folder, recursively, as (corpus-relative path, size, mtime_ns), sorted by path.
+    Dot-files
+    and sqlite side files are left out; symlinks are followed. Uses scandir and string joins for speed on large
+    corpora."""
+    root = folder_path(corpus, rel)
+    base = root.relative_to(corpus).as_posix()
+    prefix = "" if base in ("", ".") else base + "/"
+    out: list[tuple[str, int, int]] = []
+    stack: list[tuple[str, str]] = [(str(root), prefix)]
+    while stack:
+        d, pre = stack.pop()
+        try:
+            entries = list(os.scandir(d))
+        except OSError:
+            continue
+        for e in entries:
+            name = e.name
+            if name.startswith("."):
+                continue
+            try:
+                if e.is_dir():
+                    stack.append((e.path, f"{pre}{name}/"))
+                    continue
+                if name.endswith(("-wal", "-shm", "-journal")) or not e.is_file():
+                    continue
+                st = e.stat()
+            except OSError:
+                continue
+            out.append((f"{pre}{name}", st.st_size, st.st_mtime_ns))
+    out.sort()
+    return out
+
+
+def folder_files(corpus: Path, rel: str) -> list[tuple[str, int, int]]:
+    """_walk_folder, cached FOLDER_CACHE_S per (corpus, folder): the list is shared, so callers never mutate it. A
+    404 for a missing folder is raised on every call (the walk is not cached for it)."""
+    key = (corpus, (rel or "").strip("/"))
+    now = time.monotonic()
+    with _folder_lock:
+        hit = _folder_cache.get(key)
+        if hit is not None and now - hit["ts"] < FOLDER_CACHE_S:
+            return hit["files"]
+    files = _walk_folder(corpus, rel)
+    with _folder_lock:
+        _folder_cache[key] = {"ts": time.monotonic(), "files": files}
+    return files
+
+
+def glob_matches(rel_file: str, pattern: str | None) -> bool:
+    """`pattern` against the file's corpus-relative path and its basename, so a claim may name a file type anywhere
+    (`*.jsonl`) or a path from the corpus root (`boards/*.jsonl`); '' or '*' matches everything."""
+    if not pattern or pattern == "*":
+        return True
+    return fnmatch.fnmatch(rel_file, pattern) or fnmatch.fnmatch(rel_file.rsplit("/", 1)[-1], pattern)
+
+
+def claims_path(view: dict[str, Any], rel: str) -> bool:
+    return any(glob_matches(rel, g) for g in view.get("claims") or [])
+
+
+_GLOB_CHARS = re.compile(r"[*?\[]")
+
+
+def claimed_files(c: str, view: dict[str, Any]) -> list[tuple[str, int, int]]:
+    """(path, size, mtime_ns) of every corpus file the view claims, in path order. Claims that name files outright
+    are stat'ed; a glob walks the corpus (folder_files, cached)."""
+    corpus = config.corpus_dir(c)
+    claims = view.get("claims") or []
+    if claims and not any(_GLOB_CHARS.search(g) for g in claims):
+        out = []
+        for g in sorted(set(claims)):
+            try:
+                p = config.safe_corpus_path(corpus, g)
+                st = p.stat()
+            except (ValueError, OSError):
+                continue
+            if p.is_file():
+                out.append((g, st.st_size, st.st_mtime_ns))
+        return out
+    return [f for f in folder_files(corpus, "") if claims_path(view, f[0])]
+
+
+def unmatched_claims(c: str, claims: Any, near: int = 3) -> dict[str, list[str]]:
+    """Each claim that matches no file of the corpus, mapped to up to `near` real paths near it (_paths_near); {} when
+    every
+    claim matches. propose_view refuses a proposal with an unmatched claim, since its view could open nothing."""
+    corpus = config.corpus_dir(c)
+    claims_l = list(dict.fromkeys(_str_list(claims)))
+    literal = not any(_GLOB_CHARS.search(g) for g in claims_l)
+    files: list[str] | None = None
+
+    def walk() -> list[str]:
+        nonlocal files
+        if files is None:
+            files = [f for f, _, _ in folder_files(corpus, "")]
+        return files
+
+    out: dict[str, list[str]] = {}
+    for g in claims_l:
+        if literal:
+            try:
+                hit = config.safe_corpus_path(corpus, g).is_file()
+            except (ValueError, OSError):
+                hit = False
+        else:
+            hit = any(glob_matches(f, g) for f in walk())
+        if not hit:
+            out[g] = _paths_near(walk(), g, near)
+    return out
+
+
+def _paths_near(files: list[str], claim: str, n: int) -> list[str]:
+    """Up to n corpus files near a claim that matches none, for the model to correct it from: same-named files in other
+    folders, then files under the deepest existing folder of the claim, one of each file type first."""
+    tail = claim.rsplit("/", 1)[-1]
+    out = list(itertools.islice((f for f in files if fnmatch.fnmatch(f.rsplit("/", 1)[-1], tail)), n))
+    head = _GLOB_CHARS.split(claim, 1)[0]
+    folder = head.rsplit("/", 1)[0] if "/" in head else ""
+    while True:
+        under = [f for f in files if f.startswith(folder + "/")] if folder else files
+        if under or not folder:
+            break
+        folder = folder.rsplit("/", 1)[0] if "/" in folder else ""
+    first_of_type: dict[str, str] = {}
+    for f in under:
+        first_of_type.setdefault(os.path.splitext(f)[1], f)
+    for f in itertools.chain(first_of_type.values(), under):
+        if len(out) >= n:
+            break
+        if f not in out:
+            out.append(f)
+    return out
+
+
+def media_file(c: str, slug: str, rel: str) -> tuple[Path, str]:
+    """(the absolute path, its media type) of a file the view's page loads by URL: a clean corpus-relative path, claimed
+    by the
+    view, of a MEDIA_TYPES type, and a regular file inside the corpus. Raises HTTPException 404, 409, 400, 403 or
+    415."""
+    view = read_view(c, slug)
+    if view is None:
+        raise HTTPException(404, f"no such view: {slug}")
+    if not view["ok"]:
+        raise HTTPException(409, f"the view {slug!r} has no reader.py, view.html or claims")
+    rel = str(rel or "")
+    parts = rel.split("/")
+    if not rel or "\\" in rel or "\0" in rel or any(not x or x.startswith(".") for x in parts):
+        raise HTTPException(400, f"not a corpus-relative path: {rel!r}")
+    if not claims_path(view, rel):
+        raise HTTPException(403, f"the view {slug!r} does not claim {rel} (view.json claims: {', '.join(view['claims'])})")
+    media_type = MEDIA_TYPES.get(Path(rel).suffix.lower())
+    if media_type is None:
+        raise HTTPException(415, f"{rel} is not an image, audio or video file")
+    try:
+        p = config.safe_corpus_path(config.corpus_dir(c), rel)
+    except ValueError:
+        raise HTTPException(404, f"no such file: {rel}") from None
+    if not p.is_file():
+        raise HTTPException(404, f"no such file: {rel}")
+    return p, media_type
+
+
+def corpus_media_file(c: str, rel: str) -> tuple[Path, str]:
+    """(the absolute path, its media type) of a corpus media file a card shows: media_file's path and type checks
+    without a
+    view's claim. Raises HTTPException 400, 415 or 404."""
+    rel = str(rel or "")
+    parts = rel.split("/")
+    if not rel or "\\" in rel or "\0" in rel or any(not x or x.startswith(".") for x in parts):
+        raise HTTPException(400, f"not a corpus-relative path: {rel!r}")
+    media_type = MEDIA_TYPES.get(Path(rel).suffix.lower())
+    if media_type is None:
+        raise HTTPException(415, f"{rel} is not an image, audio or video file")
+    try:
+        p = config.safe_corpus_path(config.corpus_dir(c), rel)
+    except ValueError:
+        raise HTTPException(404, f"no such file: {rel}") from None
+    if not p.is_file():
+        raise HTTPException(404, f"no such file: {rel}")
+    return p, media_type
+
+
+def fingerprint(files: list[tuple[str, int, int]], reader_src: str = "") -> str:
+    """sha1 over the (path, size, mtime) list plus reader.py's source."""
+    h = hashlib.sha1()
+    h.update(json.dumps(files, separators=(",", ":")).encode("utf-8"))
+    h.update(b"\0")
+    h.update(reader_src.encode("utf-8"))
+    return h.hexdigest()[:20]
+
+
+_PLACEHOLDER = re.compile(r"<([^<>]+)>")
+_NUMERIC_NAMES = {"n", "m", "k", "i", "j", "line", "page", "p", "row", "rev", "seq"}
+
+
+def form_regex(form: str) -> re.Pattern[str]:
+    """A form such as `L<n>` or `<Sheet>!<A1>` as a regex over a fragment: a placeholder named like a number (`<n>`)
+    matches digits, any other one a run of characters, the rest literally."""
+    out, pos = [], 0
+    for m in _PLACEHOLDER.finditer(form):
+        out.append(re.escape(form[pos:m.start()]))
+        out.append(r"\d+" if m.group(1).strip().lower() in _NUMERIC_NAMES else r".+?")
+        pos = m.end()
+    out.append(re.escape(form[pos:]))
+    return re.compile("^" + "".join(out) + "$")
+
+
+def accepts(view: dict[str, Any], fragment: str) -> bool:
+    return any(form_regex(f["form"]).match(fragment) for f in view.get("accepts") or [])
+
+
+def views_for(c: str, path: str, fragment: str | None = None) -> list[dict[str, Any]]:
+    """The working views that claim the file (and accept the fragment, when one is given), in the order a citation
+    opens them: the default view first, then the view built last."""
+    try:
+        listed = list_views(c)
+    except (ValueError, OSError):
+        return []
+    hit = [v for v in listed if v["ok"] and claims_path(v, path) and (fragment is None or accepts(v, fragment))]
+    hit.sort(key=lambda v: v["built"], reverse=True)
+    hit.sort(key=lambda v: not v["default"])
+    hit.sort(key=lambda v: v["origin"] == "builtin")  # a view written for this corpus before a file-type viewer
+    return hit
+
+
+# ----------------------------------------------------------------------------------------------------------
+# reader calls on the views kernel
+# ----------------------------------------------------------------------------------------------------------
+
+_ready: set[tuple[str, str, str]] = set()  # (workspace, slug, fingerprint) whose index a call has built or loaded
+_memo: OrderedDict[tuple[str, str, str, str], dict[str, Any] | None] = OrderedDict()  # (c, slug, fp, locator) -> answer
+_memo_lock = threading.Lock()
+
+
+def _forget(c: str, slug: str) -> None:
+    with _memo_lock:
+        for k in [k for k in _memo if k[0] == c and k[1] == slug]:
+            del _memo[k]
+    for k in [k for k in _ready if k[0] == c and k[1] == slug]:
+        _ready.discard(k)
+
+
+def _host_src() -> str:
+    return HOST_PY.read_text("utf-8")
+
+
+_SNIPPET = """import sys as _s
+if getattr(_s.modules.get('_thimble_views'), 'VERSION', None) != {version!r}:
+    import types as _t
+    _m = _t.ModuleType('_thimble_views')
+    exec({src!r}, _m.__dict__)
+    _m.VERSION = {version!r}
+    _s.modules['_thimble_views'] = _m
+_s.modules['_thimble_views'].call({req!r})
+"""
+
+
+def snippet(req: dict[str, Any]) -> str:
+    """The code one reader call runs on the kernel: view_host installed when it is missing or changed, then call()."""
+    src = _host_src()
+    version = hashlib.sha1(src.encode("utf-8")).hexdigest()[:12]
+    return _SNIPPET.format(version=version, src=src, req=json.dumps(req, ensure_ascii=False))
+
+
+async def _kernel_run(c: str, code: str, timeout: float) -> tuple[list[dict], str]:
+    """(outputs, status) of the code on the workspace's views kernel. Tests replace it (views._runner)."""
+    from . import notebook  # lazy: the notebook module loads the kernel machinery
+
+    outputs, _, status = await notebook.execute_on(c, KERNEL, code, timeout_s=timeout)
+    return outputs, status
+
+
+_runner = _kernel_run
+
+
+def _answer_from(outputs: list[dict]) -> dict[str, Any] | None:
+    """The host's answer: the last stdout line after the sentinel."""
+    from .view_host import SENTINEL
+
+    text = "".join(b.get("text/plain", "") for b in outputs if b.get("_stream") == "stdout")
+    for line in reversed(text.split("\n")):  # not splitlines, which also breaks at the sentinel's \x1e
+        if line.startswith(SENTINEL):
+            try:
+                return json.loads(line[len(SENTINEL):])
+            except ValueError:
+                return None
+    return None
+
+
+def _kernel_error(outputs: list[dict]) -> str:
+    for b in outputs:
+        err = b.get("application/vnd.thimble.error+json")
+        if isinstance(err, dict):
+            return f"{err.get('ename', 'Error')}: {err.get('evalue', '')}".strip()
+    stderr = "".join(b.get("text/plain", "") for b in outputs if b.get("_stream") == "stderr").strip()
+    return stderr[-ERROR_MAX:] or "the kernel printed no answer"
+
+
+def _prepare(c: str, slug: str) -> tuple[dict[str, Any], dict[str, Any]]:
+    """(the view, the request without op and arg): the claimed files, their fingerprint and the index cache path.
+    Blocking (the claimed files are stat'ed or the corpus walked); ReaderError for a view that cannot run."""
+    view = read_view(c, slug)
+    if view is None:
+        raise ReaderError(f"no view {slug!r}")
+    if not view["ok"]:
+        raise ReaderError(f"the view {slug!r} has no reader.py, view.html or claims")
+    reader_path = Path(view["dir"]) / READER_PY
+    files = claimed_files(c, view)
+    fp = fingerprint(files, reader_path.read_text("utf-8"))
+    req = {"slug": slug, "reader": str(reader_path.resolve()), "fp": fp, "paths": [f[0] for f in files],
+           "cache": str((cache_dir(c, view) / f"{fp}.index.pickle").resolve())}
+    return view, req
+
+
+async def _call(c: str, req: dict[str, Any], op: str, arg: Any = None) -> Any:
+    """One reader operation; ReaderError when it raised, timed out or the kernel did not answer."""
+    _bind_loop()
+    key = (c, req["slug"], req["fp"])
+    timeout = CALL_TIMEOUT_S if key in _ready else BUILD_TIMEOUT_S
+    try:
+        outputs, status = await _runner(c, snippet({**req, "op": op, "arg": arg}), timeout)
+    except Exception as e:  # noqa: BLE001 — the kernel did not start
+        raise ReaderError(f"the views kernel did not start: {type(e).__name__}: {e}") from e
+    ans = _answer_from(outputs)
+    if ans is None:
+        raise ReaderError(_kernel_error(outputs))
+    if not ans.get("ok"):
+        raise ReaderError(str(ans.get("error") or "the reader failed"), str(ans.get("traceback") or ""))
+    _ready.add(key)
+    return ans.get("result")
+
+
+async def reader_call(c: str, slug: str, op: str, arg: Any = None) -> Any:
+    """reader.<op>(index, arg) for the view, op being index, records or resolve (resolve goes through resolve_locator,
+    which cleans and memoises the answer)."""
+    _, req = await asyncio.to_thread(_prepare, c, slug)
+    return await _call(c, req, op, arg)
+
+
+def _label(v: Any) -> str:
+    s = " ".join(str(v or "").split())
+    return s if len(s) <= LABEL_MAX else s[: LABEL_MAX - 1] + "…"
+
+
+def _file_ref_ok(r: str) -> bool:
+    try:
+        return "path" in refs.parse_ref(r)
+    except ValueError:
+        return False
+
+
+def clean_resolved(raw: Any) -> dict[str, Any] | None:
+    """A reader's resolve() answer as thimble keeps it: {excerpt, label, refs, key, target}, the excerpt cut to
+    EXCERPT_MAX, the label to LABEL_MAX, the refs to parseable file refs; None for None. ReaderError for another type."""
+    if raw is None:
+        return None
+    if not isinstance(raw, dict):
+        raise ReaderError(f"resolve() returned a {type(raw).__name__}; it returns a dict or None")
+    rs = raw.get("refs")
+    rs = [rs] if isinstance(rs, str) else rs if isinstance(rs, list) else []
+    return {
+        "excerpt": str(raw.get("excerpt") or "")[:EXCERPT_MAX],
+        "label": _label(raw.get("label")),
+        "refs": [str(r) for r in rs if _file_ref_ok(str(r))][:REFS_MAX],
+        "key": None if raw.get("key") in (None, "") else str(raw["key"]),
+        "target": raw.get("target"),
+    }
+
+
+def _locator_key(locator: dict[str, Any]) -> str:
+    return json.dumps(locator, sort_keys=True, ensure_ascii=False)
+
+
+def _memo_get(k: tuple[str, str, str, str]) -> tuple[bool, dict[str, Any] | None]:
+    with _memo_lock:
+        if k in _memo:
+            _memo.move_to_end(k)
+            return True, _memo[k]
+    return False, None
+
+
+def _memo_put(k: tuple[str, str, str, str], v: dict[str, Any] | None) -> None:
+    with _memo_lock:
+        _memo[k] = v
+        _memo.move_to_end(k)
+        while len(_memo) > MEMO_MAX:
+            _memo.popitem(last=False)
+
+
+async def resolve_locator(c: str, slug: str, locator: dict[str, Any]) -> dict[str, Any] | None:
+    """reader.resolve for {path, fragment} (a file ref) or {key} (a view ref), cleaned (clean_resolved) and memoised
+    per fingerprint. A built view's answer for a key is also kept in key-refs.json; a draft's, which only its checks
+    ask, is not, since nothing may cite a draft."""
+    view, req = await asyncio.to_thread(_prepare, c, slug)
+    mk = (c, slug, req["fp"], _locator_key(locator))
+    hit, value = _memo_get(mk)
+    if hit:
+        return value
+    out = clean_resolved(await _call(c, req, "resolve", locator))
+    _memo_put(mk, out)
+    if out is not None and "key" in locator and not view["draft"]:
+        _keep_key_refs(c, slug, str(locator["key"]), out)
+    return out
+
+
+def _thread_loop() -> asyncio.AbstractEventLoop | None:
+    with contextlib.suppress(RuntimeError):
+        return asyncio.get_running_loop()
+    return None
+
+
+def resolve_sync(c: str, slug: str, locator: dict[str, Any]) -> tuple[str, dict[str, Any] | None]:
+    """resolve_locator for synchronous callers (refs.resolve): (status, answer), status `ok`, `unknown` (on the event
+    loop
+    with no memoised answer: the call starts in the background) or `error`."""
+    running = _thread_loop()
+    if running is not None:
+        try:
+            _, req = _prepare(c, slug)
+        except ReaderError:
+            return "error", None
+        hit, value = _memo_get((c, slug, req["fp"], _locator_key(locator)))
+        if hit:
+            return "ok", value
+        task = running.create_task(resolve_locator(c, slug, locator))
+        task.add_done_callback(lambda t: t.cancelled() or t.exception())  # never "exception was never retrieved"
+        return "unknown", None
+    loop = _loop
+    if loop is None or loop.is_closed() or not loop.is_running():
+        return "unknown", None
+    fut = asyncio.run_coroutine_threadsafe(resolve_locator(c, slug, locator), loop)
+    try:
+        return "ok", fut.result(BUILD_TIMEOUT_S + 5)
+    except ReaderError as e:
+        log.info("view %s/%s could not resolve %s: %s", c, slug, locator, e.message)
+        return "error", None
+    except Exception as e:  # noqa: BLE001 — a timeout or a closed loop leaves the file's own resolution standing
+        fut.cancel()
+        log.info("view %s/%s did not resolve %s: %s", c, slug, locator, e)
+        return "error", None
+
+
+# ----------------------------------------------------------------------------------------------------------
+# refs: file refs a view accepts, and view:<slug>/<key>
+# ----------------------------------------------------------------------------------------------------------
+
+
+def _key_refs_path(c: str) -> Path:
+    return views_dir(c) / KEY_REFS_FILE
+
+
+_key_lock = threading.Lock()
+
+
+def key_refs(c: str) -> dict[str, dict[str, Any]]:
+    p = _key_refs_path(c)
+    raw = read_json(p, {}) if p.is_file() else {}
+    return raw if isinstance(raw, dict) else {}
+
+
+def _keep_key_refs(c: str, slug: str, key: str, out: dict[str, Any]) -> None:
+    """A view key's answer, kept so the ref keeps naming its file lines after the view is gone."""
+    view = read_view(c, slug)
+    rec = {"refs": out["refs"][:REFS_MAX], "excerpt": out["excerpt"], "label": out["label"],
+           "name": view["name"] if view else slug, "ts": _now()}
+    with _key_lock:
+        allk = key_refs(c)
+        ref = f"view:{slug}/{key}"
+        if allk.get(ref, {}).get("refs") == rec["refs"] and allk.get(ref, {}).get("excerpt") == rec["excerpt"]:
+            return
+        allk[ref] = rec
+        p = _key_refs_path(c)
+        p.parent.mkdir(parents=True, exist_ok=True)
+        write_json(p, allk)
+
+
+def _fragment_of(ref: str) -> str | None:
+    return ref.split("#", 1)[1] if "#" in ref else None
+
+
+def enrich_file_ref(corpus_dir: Path, ref: str, out: dict[str, Any]) -> None:
+    """refs.resolve's last step for a file ref with a fragment: the first view that claims the file, accepts the
+    fragment and knows the locator gives the excerpt, and the answer names the view. Never raises; a view that fails
+    leaves the file's own resolution as it was."""
+    fragment = _fragment_of(ref)
+    path = out.get("path")
+    if not fragment or not path:
+        return
+    try:
+        c = config.workspace_for_corpus_dir(corpus_dir)
+        candidates = views_for(c, str(path), fragment)
+    except Exception:  # noqa: BLE001
+        return
+    for v in candidates:
+        try:
+            status, res = resolve_sync(c, v["slug"], {"path": str(path), "fragment": fragment})
+        except Exception:  # noqa: BLE001
+            log.exception("view %s: resolving %s failed", v["slug"], ref)
+            continue
+        if status == "ok" and res is not None:
+            out["excerpt"] = res["excerpt"]
+            out["view"] = {"slug": v["slug"], "name": v["name"], "label": res["label"], "key": res["key"]}
+            meta = out.setdefault("meta", {})
+            if isinstance(meta, dict):
+                meta["view"] = v["slug"]
+            return
+        if status == "unknown":
+            return  # asked on the loop: the answer lands in the memo for the next reader of this ref
+
+
+def resolve_view_ref(corpus_dir: Path, p: dict[str, Any], ref: str) -> dict[str, Any]:
+    """`view:<slug>` (the view itself: its name and what it is for) or `view:<slug>/<key>` (the unit the key names:
+    its excerpt, label and the file refs it stands for). A key whose view is gone answers from key-refs.json with
+    meta.deleted. Raises refs.RefError 404 for what no view, proposal or kept answer knows."""
+    c = config.workspace_for_corpus_dir(corpus_dir)
+    slug, key = p["slug"], p.get("key")
+    view = read_built(c, slug)
+    if not key:
+        if view is not None:
+            return {"ref": ref, "kind": "view", "slug": slug, "key": None, "record": None, "label": view["name"],
+                    "excerpt": view["why"] or view["name"], "refs": [], "meta": {"slug": slug, "name": view["name"]}}
+        prop = read_proposal(c, slug)
+        if prop is not None:
+            return {"ref": ref, "kind": "view", "slug": slug, "key": None, "record": None, "label": prop["name"],
+                    "excerpt": prop.get("why") or prop["name"], "refs": [],
+                    "meta": {"slug": slug, "name": prop["name"], "proposal": True, "status": prop.get("status")}}
+        raise refs.RefError(f"no view {slug!r}", 404)
+    if view is not None and view["ok"]:
+        status, res = resolve_sync(c, slug, {"key": key})
+        if status == "ok" and res is None:
+            raise refs.RefError(f"the view {view['name']!r} has no {key!r}", 404)
+        if status == "ok" and res is not None:
+            return {"ref": ref, "kind": "view", "slug": slug, "key": key, "record": None, "label": res["label"],
+                    "excerpt": res["excerpt"], "refs": res["refs"], "target": res["target"],
+                    "meta": {"slug": slug, "name": view["name"], "refs": res["refs"]}}
+    kept = key_refs(c).get(ref)
+    if kept:
+        return {"ref": ref, "kind": "view", "slug": slug, "key": key, "record": None, "label": kept.get("label") or "",
+                "excerpt": kept.get("excerpt") or "", "refs": list(kept.get("refs") or []),
+                "meta": {"slug": slug, "name": kept.get("name") or slug, "refs": list(kept.get("refs") or []),
+                         "deleted": view is None, "stale": True}}
+    if view is None:
+        raise refs.RefError(f"no view {slug!r}", 404)
+    raise refs.RefError(f"the view {view['name']!r} could not resolve {key!r} now", 404)
+
+
+# ----------------------------------------------------------------------------------------------------------
+# the forms the model learns ({{forms}} in prompts/shared.md, and the view tools' results)
+# ----------------------------------------------------------------------------------------------------------
+
+FORM_PAD = 44  # the width of the description column in shared.md's table of forms
+
+
+def view_forms(view: dict[str, Any]) -> list[tuple[str, str]]:
+    """(the form as written in a citation, what it means) for every form the view accepts or declares. A view over one
+    named file writes it in the form; a view over a glob or several files writes `<file>#<form>`, and its meaning says
+    which files (a file-type viewer's meaning names the type)."""
+    out: list[tuple[str, str]] = []
+    claims = view.get("claims") or []
+    one = claims[0] if len(claims) == 1 and not _GLOB_CHARS.search(claims[0]) else None
+    for f in view.get("accepts") or []:
+        out.append((f"{one or '<file>'}#{f['form']}", f["means"] or f"a place in {', '.join(claims)}"))
+    for f in view.get("declares") or []:
+        out.append((f"view:{view['slug']}/{f['form']}", f["means"] or f"a unit of {view['name']}"))
+    return out
+
+
+def forms_text(c: str | None) -> str:
+    """The rows of shared.md's table of forms that the workspace's views add, one per form ('' for none). A built-in
+    viewer's
+    forms are listed only where the corpus holds a file it claims."""
+    rows: list[str] = []
+    try:
+        listed = [v for v in list_views(c) if v["ok"]] if c else []
+        listed = [v for v in listed if v["origin"] != "builtin" or claimed_files(c, v)]
+    except (ValueError, OSError, HTTPException):
+        listed = []
+    for v in listed:
+        for form, means in view_forms(v):
+            desc = f"{means} ({v['name']})"
+            rows.append(f"    {desc.ljust(FORM_PAD - 1)} {form}")
+    return "\n".join(rows) if rows else ""
+
+
+def forms_sentence(view: dict[str, Any]) -> str:
+    """The forms as one sentence for a tool result: "`posts.jsonl#L<n>` cites the post … and `view:…` cites …"."""
+    parts = [f"`{form}` cites {means}" for form, means in view_forms(view)]
+    if not parts:
+        return ""
+    return parts[0] if len(parts) == 1 else ", ".join(parts[:-1]) + " and " + parts[-1]
+
+
+# ----------------------------------------------------------------------------------------------------------
+# proposals
+# ----------------------------------------------------------------------------------------------------------
+
+
+def proposals_path(c: str) -> Path:
+    return views_dir(c) / PROPOSALS_FILE
+
+
+def _normalize_proposal(p: dict[str, Any]) -> dict[str, Any]:
+    """A stored row as the routes give it, with legacy fields normalised: a glob reads as its claim, and a `proposed`
+    status
+    reads as queued."""
+    out = {k: v for k, v in p.items() if k not in ("renderer", "data_md", "glob", "view", "path")}
+    out["claims"] = _str_list(p.get("claims")) or _str_list(p.get("glob"))
+    out.setdefault("arrangement", "")
+    if out.get("status") == "held":  # a row stored when a held proposal waited unbuilt
+        out.update(status="queued", held=True)
+    if out.get("status") not in STATUSES:
+        out["status"] = "queued"
+    return out
+
+
+def _settle_status(c: str, p: dict[str, Any], built: set[str]) -> dict[str, Any]:
+    """A proposal marked built whose view has no reader or was never stamped built is queued to be built again."""
+    if p.get("status") == "built" and p["slug"] not in built:
+        p = {**p, "status": "queued"}
+    return p
+
+
+def list_proposals(c: str) -> list[dict[str, Any]]:
+    p = proposals_path(c)
+    raw = read_json(p, []) if p.is_file() else []
+    if not isinstance(raw, list):
+        return []
+    built = {v["slug"] for v in _own_views(c) if v["ok"]}
+    return [_settle_status(c, _normalize_proposal(x), built) for x in raw if isinstance(x, dict) and x.get("slug")]
+
+
+def _save_proposals(c: str, items: list[dict[str, Any]]) -> None:
+    p = proposals_path(c)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    write_json(p, items)
+
+
+# proposals.json is read, changed and written again by the tool, the routes and every view ticket's run; the lock keeps
+# one writer from dropping another's change when a route runs in a worker thread
+_proposals_lock = threading.RLock()
+
+
+def read_proposal(c: str, slug: str) -> dict[str, Any] | None:
+    return next((p for p in list_proposals(c) if p.get("slug") == slug), None)
+
+
+def update_proposal(c: str, slug: str, **fields: Any) -> dict[str, Any] | None:
+    """Set fields on the proposal (a None value removes the field); None when there is no such proposal."""
+    with _proposals_lock:
+        items = list_proposals(c)
+        for p in items:
+            if p.get("slug") == slug:
+                for k, v in fields.items():
+                    if v is None:
+                        p.pop(k, None)
+                    else:
+                        p[k] = v
+                _save_proposals(c, items)
+                return p
+    return None
+
+
+
+def _slug_for(name: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "-", (name or "").lower()).strip("-")[:40]
+
+
+def _unique_slug(c: str, name: str) -> str:
+    """A slug from the name that no proposal, view or route holds; a taken one gets a numeric suffix."""
+    base = _slug_for(name) or "view"
+    taken = set(_view_dirs(c)) | {str(p["slug"]) for p in list_proposals(c)} | RESERVED_SLUGS | set(BUILTIN_VIEWERS)
+    slug, n = base, 2
+    while slug in taken or not SLUG_RE.match(slug):
+        slug = f"{base[:36]}-{n}"
+        n += 1
+    return slug
+
+
+def title_case(name: Any) -> str:
+    """A view's display name in Title Case, whitespace collapsed, capitals already there kept ("API logs" -> "API
+    Logs")."""
+    words = " ".join(str(name or "").split()).split(" ")
+    return " ".join("-".join(p[:1].upper() + p[1:] for p in w.split("-")) for w in words)
+
+
+def propose(c: str, name: str, why: str, claims: Any, arrangement: str, proposed_by: str = "analyst",
+            hold: bool = False, asked: bool = False) -> dict[str, Any]:
+    """Store a proposal, announce it and queue it for the dev agent at once (dev.queue_view). A proposal of the same
+    name not
+    yet built is replaced under its slug, its build stopped. With `hold` (the orientation's first run) it is stored
+    `held: true` and queued unannounced until release_held; a held proposal proposed again unchanged is left as it
+    is.
+    `asked` says the analyst asked for it."""
+    name = title_case(name)
+    if not name:
+        raise HTTPException(400, "a proposal needs a name")
+    claims_l = _str_list(claims)
+    if not claims_l:
+        raise HTTPException(400, "a proposal claims at least one file: give `claims` as corpus-relative globs")
+    arrangement = " ".join(str(arrangement or "").split())
+    if not arrangement:
+        raise HTTPException(400, "a proposal says which records a unit gathers and how the page lays it out (`arrangement`)")
+    # a view already built under this name is changed in place, as the analyst still uses it, rather than built again
+    # beside it under a new slug
+    if (built := built_slug(c, name)) is not None:
+        return revise(c, built, "", why=why, claims=claims_l, arrangement=arrangement, proposed_by=proposed_by,
+                      asked=asked)
+    with _proposals_lock:
+        items = list_proposals(c)
+        old = next((p for p in items if str(p.get("name", "")).casefold() == name.casefold()
+                    and (p.get("status") != "built" or p.get("held"))), None)
+        why = " ".join(str(why or "").split())
+        if (old is not None and old.get("held") and hold and old.get("status") != "dropped"
+                and (old.get("why"), old.get("claims"), old.get("arrangement")) == (why, claims_l, arrangement)):
+            return old  # the same proposal again: its build goes on, or its view stays built
+        if old is not None:
+            _stop_build(c, old["slug"], "replaced", force=bool(old.get("held")))
+            items = [p for p in list_proposals(c) if p.get("slug") != old["slug"]]
+        slug = old["slug"] if old is not None else _unique_slug(c, name)
+        prop = {"slug": slug, "name": name, "why": why, "claims": claims_l,
+                "arrangement": arrangement, "proposed_by": str(proposed_by or "analyst"), "status": "queued", "ts": _now()}
+        if hold:
+            prop["held"] = True
+        if asked:
+            prop["asked"] = True
+        items.append(prop)
+        _save_proposals(c, items)
+    _emit(c, slug, "queued")
+    _queue(c, slug)
+    return prop
+
+
+def release_held(c: str) -> list[dict[str, Any]]:
+    """Release the proposals held during the orientation's first run: each is listed and announced with the status its
+    build
+    reached, a dropped one stays hidden. Returns the released proposals less the dropped."""
+    from . import session  # noqa: PLC0415
+
+    with _proposals_lock:
+        items = list_proposals(c)
+        out = [p for p in items if p.get("held")]
+        for p in out:
+            p.pop("held", None)
+        if out:
+            _save_proposals(c, items)
+    shown = [p for p in out if p.get("status") != "dropped"]
+    for p in shown:
+        slug, status = str(p["slug"]), str(p.get("status") or "queued")
+        _emit(c, slug, status, **({"chat": p["chat"]} if p.get("chat") else {}))
+        if status in PENDING:
+            _queue(c, slug)  # a no-op for a build going or queued already
+        elif status == "built" and (view := read_view(c, slug)) is not None:
+            try:
+                session.push_event(c, "view", built_line(view), view=slug)
+            except Exception:  # noqa: BLE001 — main learns the view's forms at its next prompt render
+                log.exception("the view event for %s/%s was not sent", c, slug)
+    return shown
+
+
+def _queue(c: str, slug: str) -> None:
+    from . import dev  # noqa: PLC0415 — the dev agent's runner imports this module
+
+    dev.queue_view(c, slug)
+
+
+def _stop_build(c: str, slug: str, why: str, force: bool = False) -> None:
+    """Stop the proposal's build, if one runs, and empty its folder: a dismissed or replaced ticket leaves no draft.
+    With `force` (a held proposal replaced) a view built under it goes too, since nobody has seen it."""
+    from . import dev  # noqa: PLC0415
+
+    dev.stop_view(c, slug, why)
+    d = views_dir(c) / slug
+    if d.is_dir() and (force or not _view_json(d).get("built")):
+        shutil.rmtree(d, ignore_errors=True)
+    _forget(c, slug)
+
+
+# ----------------------------------------------------------------------------------------------------------
+# a change to a view (revise): a view ticket on the view's own proposal
+# ----------------------------------------------------------------------------------------------------------
+
+REVISIONS_SUBDIR = ".revisions"  # views/.revisions/<slug>/: the built view's files while a change to it is made
+
+
+def built_slug(c: str, name_or_ref: str) -> str | None:
+    """The slug of the workspace's built view named `name_or_ref` (a name, any case, a slug or a `view:<slug>` ref),
+    or None."""
+    key = " ".join(str(name_or_ref or "").split())
+    if key.startswith("view:"):
+        key = key[len("view:"):].split("/", 1)[0].split("#", 1)[0]
+    mine = [v for v in list_views(c) if v.get("origin") == "workspace"]
+    hit = next((v for v in mine if v["slug"] == key), None) or next(
+        (v for v in mine if v["name"].casefold() == key.casefold()), None)
+    return str(hit["slug"]) if hit else None
+
+
+def _revision_dir(c: str, slug: str) -> Path:
+    return views_dir(c) / REVISIONS_SUBDIR / slug
+
+
+def _keep_built(c: str, slug: str) -> None:
+    """Copy the built view's files (its cache left out) aside before a change to them, unless a copy is there already
+    (a second change while the first is made keeps the copy of the built view)."""
+    src, dst = views_dir(c) / slug, _revision_dir(c, slug)
+    if dst.is_dir() or not src.is_dir():
+        return
+    dst.mkdir(parents=True, exist_ok=True)
+    for p in src.iterdir():
+        if p.name == CACHE_SUBDIR:
+            continue
+        if p.is_dir():
+            shutil.copytree(p, dst / p.name)
+        else:
+            shutil.copy2(p, dst / p.name)
+
+
+def restore_built(c: str, slug: str) -> bool:
+    """Put the view back as it was before the change (_keep_built), its answers memo dropped; False when there was no
+    copy. The copy's view.json carries its `built` stamp, so the view opens citations again at once."""
+    src, dst = _revision_dir(c, slug), views_dir(c) / slug
+    if not src.is_dir():
+        return False
+    dst.mkdir(parents=True, exist_ok=True)
+    for p in dst.iterdir():
+        if p.name == CACHE_SUBDIR:
+            continue
+        shutil.rmtree(p, ignore_errors=True) if p.is_dir() else p.unlink(missing_ok=True)
+    for p in src.iterdir():
+        shutil.copytree(p, dst / p.name) if p.is_dir() else shutil.copy2(p, dst / p.name)
+    shutil.rmtree(src, ignore_errors=True)
+    _forget(c, slug)
+    return True
+
+
+def drop_built_copy(c: str, slug: str) -> None:
+    shutil.rmtree(_revision_dir(c, slug), ignore_errors=True)
+
+
+def view_digest(d: Path) -> str:
+    """A digest of the view's files in `d`: the files at the folder's top level, view.json read without the `built`
+    stamp; subfolders (the cache, Python's bytecode) are left out."""
+    h = hashlib.sha256()
+    try:
+        files = sorted(p for p in d.iterdir() if p.is_file())
+    except OSError:
+        return ""
+    for p in files:
+        data = p.read_bytes()
+        if p.name == VIEW_JSON:
+            with contextlib.suppress(ValueError):
+                raw = json.loads(data)
+                if isinstance(raw, dict):
+                    raw.pop("built", None)
+                data = json.dumps(raw, sort_keys=True).encode()
+        h.update(p.name.encode() + b"\0" + hashlib.sha256(data).digest())
+    return h.hexdigest()
+
+
+def unchanged_since_built(c: str, slug: str) -> bool:
+    """Whether a change to the built view `slug` has left its files as they were built (the copy _keep_built made);
+    False when there is no copy."""
+    kept = _revision_dir(c, slug)
+    return kept.is_dir() and view_digest(kept) == view_digest(views_dir(c) / slug)
+
+
+def end_revision(c: str, slug: str, error: str | None = None, *, failed_change: str | None = None) -> None:
+    """A change to a built view that failed (`error`) or was dismissed: the view as it was, its proposal built again
+    with the error kept, and `view {built}` on the stream. `failed_change`, the request of a change that failed, stays
+    on the proposal for retry."""
+    restore_built(c, slug)
+    update_proposal(c, slug, status="built", change=None, changed=None, revision=None, error=error,
+                    failed_change=failed_change)
+    _emit(c, slug, "built")
+
+
+def revise(c: str, slug: str, request: str, *, why: str | None = None, claims: Any = None,
+           arrangement: str | None = None, proposed_by: str = "analyst", asked: bool = False) -> dict[str, Any]:
+    """A change to the view `slug`, as a view ticket on its proposal (made from the view when it has none): `request` is
+    the
+    analyst's words, and given fields replace the proposal's. A built view's files are copied aside first
+    (restore_built),
+    and the proposal is marked `revision` and `changed`. A running build stops, its draft kept. Queued at once. 404
+    for
+    no such view or proposal."""
+    from . import dev  # noqa: PLC0415
+
+    request = str(request or "").strip()
+    with _proposals_lock:
+        prop = read_proposal(c, slug)
+        view = read_built(c, slug)
+        if prop is None and view is None:
+            raise HTTPException(404, f"no such view: {slug}")
+        if prop is None:
+            items = list_proposals(c)
+            prop = {"slug": slug, "name": view["name"], "why": view["why"], "claims": view["claims"], "arrangement": "",
+                    "proposed_by": str(proposed_by or "analyst"), "status": "built", "ts": _now()}
+            _save_proposals(c, [*items, prop])
+        revision = view is not None or bool(prop.get("revision"))
+        pending = prop.get("status") in PENDING
+        if pending:
+            # the build stops and its draft stays: the session goes on from it with the change
+            dev.stop_view(c, slug, "revised")
+        change = "\n\n".join(x for x in (str(prop.get("change") or "") if pending else "", request) if x)
+        fields: dict[str, Any] = {"status": "queued", "error": None, "change": change or None, "changed": True,
+                                  "revision": revision or None, "asked": True if asked else None,
+                                  "failed_change": None, "ts": _now()}
+        for k, v in (("why", " ".join(str(why or "").split())), ("claims", _str_list(claims)),
+                     ("arrangement", " ".join(str(arrangement or "").split()))):
+            if v:
+                fields[k] = v
+        if revision:
+            _keep_built(c, slug)
+        prop = update_proposal(c, slug, **fields) or prop
+    _emit(c, slug, "queued", chat=prop.get("chat"))
+    _queue(c, slug)
+    return {**prop, "revised": True}
+
+
+def message(c: str, slug: str, text: str) -> dict[str, Any]:
+    """What the analyst typed in the thread of the view's build: logged there, then applied as a change to the view
+    (revise,
+    `asked`) in the same session. 400 for an empty message, 404 for no such view or proposal."""
+    from . import agents  # noqa: PLC0415
+
+    text = str(text or "").strip()
+    if not text:
+        raise HTTPException(400, "empty message")
+    prop = read_proposal(c, slug)
+    if prop is None and read_built(c, slug) is None:
+        raise HTTPException(404, f"no such view: {slug}")
+    chat = str((prop or {}).get("chat") or "")
+    if chat and agents.meta_or_none(c, chat) is not None:
+        agents.Recorder(c, chat).record("user", text=text, by=agents.BROWSER)
+    return revise(c, slug, text, asked=True)
+
+
+def retry(c: str, slug: str) -> dict[str, Any]:
+    """Queue a failed proposal again (the Retry of its chip); its run resumes the same session when it has one. A built
+    view whose last change failed (`failed_change`) is changed again with the same request. 404 for no such proposal,
+    409 for one that is built with no failed change, queued or building."""
+    prop = read_proposal(c, slug)
+    if prop is None:
+        raise HTTPException(404, f"no such proposal: {slug}")
+    if prop.get("status") == "built" and prop.get("failed_change") is not None:
+        return revise(c, slug, str(prop["failed_change"]), asked=True)
+    if prop.get("status") != "failed":
+        raise HTTPException(409, f"the view {prop['name']!r} is {prop.get('status')}, not failed")
+    prop = update_proposal(c, slug, status="queued", error=None) or prop
+    _emit(c, slug, "queued", chat=prop.get("chat"))
+    _queue(c, slug)
+    return prop
+
+
+def drop(c: str, slug: str, why: str) -> dict[str, Any] | None:
+    """Leave an orientation's proposal out once its build failed through its repairs (dev._view_dropped): the row stays
+    as `dropped` with the reason, so every chip that names it knows to hide, its draft folder is removed, and
+    `view {dropped}` goes on the stream. None when there is no such proposal."""
+    prop = update_proposal(c, slug, status="dropped", error=" ".join(str(why or "").split())[:ERROR_MAX] or None)
+    if prop is None:
+        return None
+    d = views_dir(c) / slug
+    if d.is_dir() and not _view_json(d).get("built"):
+        shutil.rmtree(d, ignore_errors=True)
+    _forget(c, slug)
+    _emit(c, slug, "dropped", chat=prop.get("chat"))
+    return prop
+
+
+def delete_proposal(c: str, slug: str) -> None:
+    """Dismiss the proposal: its build is stopped, its folder removed, and its view with it when it was built. A change
+    to a built view that is dismissed while it is made stops, and the view is put back as it was."""
+    from . import dev  # noqa: PLC0415
+
+    with _proposals_lock:
+        items = list_proposals(c)
+        hit = next((p for p in items if p.get("slug") == slug), None)
+        if hit is None:
+            raise HTTPException(404, f"no such proposal: {slug}")
+        if hit.get("revision") and hit.get("status") in PENDING:
+            # a running build puts the view back itself once its session has stopped (dev.run_view)
+            if not dev.stop_view(c, slug, "dismissed"):
+                end_revision(c, slug)
+            return
+        _stop_build(c, slug, "dismissed")
+        _save_proposals(c, [p for p in list_proposals(c) if p.get("slug") != slug])
+    if slug in _view_dirs(c):
+        delete_view(c, slug)
+    else:
+        _emit(c, slug, "deleted")
+
+
+# ----------------------------------------------------------------------------------------------------------
+# the gate: a view ticket's checks, which the session runs through the check route and the server after each turn
+# ----------------------------------------------------------------------------------------------------------
+
+
+async def gate(c: str, slug: str, locators: list[str] | None = None, *, shot_dir: Path | None = None) -> dict[str, Any]:
+    """Whether the view in the slug's folder may be registered: its files' own problems (source_problems; view.json
+    written by thimble alone once it names `built`), then, when there are none, check() with `locators` beside the
+    sampled lines. The report check() returns, with the files' problems among its `problems`."""
+    d = views_dir(c) / slug
+    if not (d / VIEW_JSON).is_file():
+        return {"ok": False, "view": None, "problems": [f"{d / VIEW_JSON} does not exist yet"], "checks": [], "page": None}
+    raw = _view_json(d)
+    text = {n: (d / n).read_text("utf-8", errors="replace") if (d / n).is_file() else "" for n in (READER_PY, VIEW_HTML)}
+    problems = source_problems(raw.get("claims"), text[READER_PY], text[VIEW_HTML], raw.get("libs"))
+    # a change to a built view starts from files that carry thimble's own stamp, so it is no sign of a session's
+    # writing there (a session that removes it is fine too; mark_built stamps the view again)
+    if raw.get("built") and (prop := read_proposal(c, slug)) is not None and prop.get("status") != "built" \
+            and not prop.get("revision"):
+        problems.append("view.json names `built`, which thimble adds when the view passes; remove it")
+    if problems:
+        return {"ok": False, "view": read_view(c, slug), "problems": problems, "checks": [], "page": None}
+    report = await check(c, slug, locators, shot_dir=shot_dir)
+    _prune_shots(shot_dir or (d / CACHE_SUBDIR / "shots"))
+    return report
+
+
+def _prune_shots(d: Path) -> None:
+    """Keep the newest SHOTS_KEPT check pictures (each with its page and open message) of a view."""
+    try:
+        shots = sorted(d.glob("check-*.png"), key=lambda p: p.stat().st_mtime, reverse=True)
+    except OSError:
+        return
+    for old in shots[SHOTS_KEPT:]:
+        for p in (old, old.with_suffix(".html"), old.with_suffix(".open.json")):
+            with contextlib.suppress(OSError):
+                p.unlink()
+
+
+def gate_lines(report: dict[str, Any]) -> list[str]:
+    """The report as lines for the session: the index, each problem, the reader's traceback, each check and the page."""
+    lines: list[str] = []
+    if report.get("index"):
+        lines.append(f"index: {report['index']['files']} file(s) in {report['index']['seconds']} s")
+    for p in report.get("problems") or []:
+        lines.append(f"problem: {p}")
+    if report.get("traceback"):
+        lines.append(report["traceback"].strip()[-1500:])
+    for r in report.get("checks") or []:
+        if r["ok"]:
+            note = f" ({r['unchecked']})" if r.get("unchecked") else ""
+            lines.append(f"ok  {r['locator']} -> {r.get('label') or '(no label)'}: {' '.join(str(r.get('excerpt') or '').split())[:120]}{note}")
+        else:
+            lines.append(f"bad {r['locator']}: {r.get('why')}")
+    page = report.get("page") or {}
+    if page:
+        if page.get("ok"):
+            lines.append(f"page: loaded, {page.get('fetches', 0)} fetch(es), no errors")
+            if unmarked(page):
+                lines.append("note: " + _hint("view-no-record-anchors", fetched=page.get("fetched_records") or 0,
+                                              records=page.get("records") or 0))
+        else:
+            lines.append("page: " + "; ".join(page.get("errors") or ["did not load"]))
+    return [ln for ln in lines if ln]
+
+
+def unmarked(page: dict[str, Any]) -> bool:
+    """Whether a page anchors few of the records it fetched: fewer than one in ANCHORED_SHARE of the record refs in its
+    reader's answers carry a data-anchor, so labels would show on almost nothing. The gate notes it and still passes."""
+    fetched = int(page.get("fetched_records") or 0)
+    return fetched > 0 and int(page.get("records") or 0) < max(1, fetched // ANCHORED_SHARE)
+
+
+def first_failure(report: dict[str, Any]) -> str:
+    """The first line of the report that failed: a problem, a bad check or a page that did not load ('' for none)."""
+    for ln in gate_lines(report):
+        if ln.startswith(("problem: ", "bad ")) or (ln.startswith("page: ") and not ln.startswith("page: loaded")):
+            return ln
+    return ""
+
+
+def built_line(view: dict[str, Any]) -> str:
+    """What main hears when a view is built (the `view` event, dev.run_view): the files that open in it now and the
+    citation forms it adds, since main's prompt, with its table of forms, was rendered before the view existed."""
+    return _hint("view-built", view=view.get("name", ""), claims=", ".join(view.get("claims") or []),
+                 forms=forms_sentence(view) or _hint("view-no-forms"))
+
+
+# ----------------------------------------------------------------------------------------------------------
+# the page: the frame document every host of a view loads
+# ----------------------------------------------------------------------------------------------------------
+
+
+def media_url(origin: str, c: str, slug: str) -> str:
+    """The view's media route as the frame's browser reaches it: the origin, then the route's path under /api, where
+    main.create_app mounts every router. Workspace names (config.NAME_RE) and slugs (SLUG_RE) need no escaping in a URL
+    or a policy. ValueError for an origin that is not scheme, host and port."""
+    if not ORIGIN_RE.fullmatch(origin or ""):
+        raise ValueError(f"not an origin: {origin!r}")
+    return f"{origin}/api/ws/{c}/views/{slug}/media"
+
+
+def _script_text(js: str) -> str:
+    """Script text safe inside an inline <script>: a `</script` in a library's source would end the element."""
+    return js.replace("</script", "<\\/script").replace("</SCRIPT", "<\\/SCRIPT")
+
+
+def frame_document(view: dict[str, Any], media: str | None = None) -> str:
+    """The view's page as a frame loads it: the policy that blocks every host but the view's media route, the bridge
+    (viewer_bridge.js), the vendored libraries the view names, then view.html. The browser adds the theme's tokens
+    (ViewerFrame.tsx). `media` is the media route's absolute URL (media_url), which the policy allows for images, audio
+    and video and thimble.mediaUrl builds on; without it the page loads no URL at all."""
+    html = (Path(view["dir"]) / VIEW_HTML).read_text("utf-8")
+    who = json.dumps({"slug": view["slug"], "name": view["name"], "media": media}, ensure_ascii=False)
+    csp = FRAME_CSP.format(media=f" {media}" if media else "")
+    head = [f'<meta http-equiv="Content-Security-Policy" content="{csp}">',
+            '<meta charset="utf-8">',
+            f"<script>window.__thimbleView = {_script_text(who)}</script>",
+            f"<script>{_script_text(BRIDGE_JS.read_text('utf-8'))}</script>"]
+    for name in view.get("libs") or []:
+        p = LIBS.get(name)
+        if p is not None and p.is_file():
+            head.append(f"<script>{_script_text(p.read_text('utf-8'))}</script>")
+        else:
+            head.append(f"<script>console.error({json.dumps(f'the library {name} is not installed here')})</script>")
+    inject = "".join(head)
+    # the policy comes first, before any script of the view: a meta policy only governs what is parsed after it
+    m = re.search(r"<head[^>]*>", html, re.I)
+    if m:
+        doc = html[: m.end()] + inject + html[m.end():]
+    else:
+        doc = "<head>" + inject + "</head>" + html
+    return doc if re.match(r"\s*<!doctype", doc, re.I) else "<!doctype html>" + doc
+
+
+# ----------------------------------------------------------------------------------------------------------
+# the checks and the screenshot: the page loaded headless, fed by the reader
+# ----------------------------------------------------------------------------------------------------------
+
+
+@functools.lru_cache(maxsize=4)
+def _node_version(node: str, mtime_ns: int) -> str:
+    """`node -v` of the binary at `node`, '' when it does not answer. Keyed by its mtime, so an upgrade is seen."""
+    try:
+        return subprocess.run([node, "-v"], capture_output=True, text=True, timeout=10).stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+        return ""
+
+
+def build_problem() -> str:
+    """Why a view cannot be built and checked on this machine, '' when it can: the checks need Node 20+ and the
+    frontend's
+    Playwright (scripts/install.sh). The line is written for the analyst."""
+    install = f"bash {config.REPO_ROOT / 'scripts' / 'install.sh'}"
+    version = ""
+    if node := shutil.which("node"):  # the one shoot runs
+        with contextlib.suppress(OSError):
+            version = _node_version(node, os.stat(node).st_mtime_ns)
+    m = re.match(r"v(\d+)", version)
+    if not m or int(m.group(1)) < NODE_MIN:
+        found = f"Node {version.lstrip('v')}" if m else "no Node"
+        return (f"Custom views need Node {NODE_MIN}+, and this machine has {found}. Install Node {NODE_MIN} or newer "
+                f"(https://nodejs.org), run `{install}` again, then Retry the view.")
+    if not SHOT_SCRIPT.is_file():
+        return f"Custom views need {SHOT_SCRIPT}, which this install lacks. Install thimble again from a release or a clone."
+    if not (_NODE_MODULES / "playwright").is_dir() or not all(p.is_file() for p in LIBS.values()):
+        return (f"Custom views need the frontend's packages, which are not installed here. Run `{install}` again, "
+                "which installs them with Node, then Retry the view.")
+    return ""
+
+
+async def shoot(c: str, slug: str, open_place: dict[str, Any] | None, out_png: Path, *, width: int = 1100,
+                height: int = 760) -> dict[str, Any]:
+    """Load the view's page headless (scripts/view_shot.mjs, in the frontend's Playwright Chromium), send it
+    `open_place`, answer its fetches from the reader and its media requests with the file media_file names, and write a
+    picture of it. Returns {ok, errors, fetches, png?}; without Node or the frontend's packages the one error is
+    build_problem's line."""
+    view = read_view(c, slug)
+    if view is None:
+        return {"ok": False, "errors": [f"no view {slug!r}"], "fetches": 0}
+    if why := await asyncio.to_thread(build_problem):
+        return {"ok": False, "errors": [why], "fetches": 0}
+    media = media_url(SHOT_MEDIA_ORIGIN, c, slug)
+    doc = frame_document(view, media)
+    out_png.parent.mkdir(parents=True, exist_ok=True)
+    frame_file = out_png.with_suffix(".html")
+    frame_file.write_text(doc, "utf-8")
+    open_file = out_png.with_suffix(".open.json")
+    open_file.write_text(json.dumps(open_place or {}), "utf-8")
+    cmd = ["node", str(SHOT_SCRIPT), "--frame", str(frame_file), "--open", str(open_file), "--out", str(out_png),
+           "--viewport", f"{width}x{height}", "--media", media]
+    try:
+        proc = await asyncio.create_subprocess_exec(*cmd, cwd=str(config.REPO_ROOT), stdin=asyncio.subprocess.PIPE,
+                                                    stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+    except OSError as e:
+        return {"ok": False, "errors": [f"the headless browser could not start: {e}"], "fetches": 0}
+    fetches = 0
+    fetched: set[str] = set()  # the record refs the reader's answers handed the page (unmarked)
+    result: dict[str, Any] = {"ok": False, "errors": ["the headless page did not finish"], "fetches": 0}
+
+    async def converse() -> None:
+        nonlocal fetches, result
+        assert proc.stdout is not None and proc.stdin is not None
+        while True:
+            line = await proc.stdout.readline()
+            if not line:
+                return
+            try:
+                msg = json.loads(line)
+            except ValueError:
+                continue
+            if "fetch" in msg:
+                fetches += 1
+                try:
+                    data = await reader_call(c, slug, "records", msg.get("query"))
+                    strings: list[str] = []
+                    _strings(data, strings)
+                    fetched.update(s for s in strings[:FETCHED_SCAN_MAX] if _RECORD_REF.match(s))
+                    reply = {"id": msg["fetch"], "data": data}
+                except ReaderError as e:
+                    reply = {"id": msg["fetch"], "error": e.message}
+                proc.stdin.write((json.dumps(reply, ensure_ascii=False, default=str) + "\n").encode("utf-8"))
+                await proc.stdin.drain()
+            elif "media" in msg:
+                # the script reads the bytes itself, a range at a time; here the path passes the route's checks
+                try:
+                    f, media_type = await asyncio.to_thread(media_file, c, slug, str(msg.get("path") or ""))
+                    reply = {"id": msg["media"], "file": str(f), "type": media_type, "size": f.stat().st_size}
+                except (HTTPException, OSError) as e:
+                    reply = {"id": msg["media"], "error": str(getattr(e, "detail", e))}
+                proc.stdin.write((json.dumps(reply, ensure_ascii=False) + "\n").encode("utf-8"))
+                await proc.stdin.drain()
+            elif msg.get("done"):
+                result = {"ok": bool(msg.get("ok")), "errors": list(msg.get("errors") or []), "fetches": fetches,
+                          "height": msg.get("height"), "refs": msg.get("refs"), "records": msg.get("records"),
+                          "fetched_records": len(fetched)}
+                return
+
+    try:
+        await asyncio.wait_for(converse(), SHOT_TIMEOUT_S)
+    except asyncio.TimeoutError:
+        result = {"ok": False, "errors": [f"the headless page did not finish in {SHOT_TIMEOUT_S:g} s"], "fetches": fetches}
+    finally:
+        with contextlib.suppress(Exception):
+            proc.stdin.close()  # type: ignore[union-attr]
+        try:
+            await asyncio.wait_for(proc.wait(), 10)
+        except asyncio.TimeoutError:
+            proc.kill()
+            await proc.wait()
+    if proc.returncode not in (0, None) and not result.get("errors"):
+        err = (await proc.stderr.read()).decode("utf-8", "replace") if proc.stderr else ""
+        result["errors"] = [f"the headless browser exited {proc.returncode}: {err[-400:]}"]
+    if out_png.is_file():
+        result["png"] = str(out_png)
+    return result
+
+
+def _strings(v: Any, out: list[str]) -> None:
+    if isinstance(v, str):
+        out.append(v)
+    elif isinstance(v, dict):
+        for x in v.values():
+            _strings(x, out)
+    elif isinstance(v, list):
+        for x in v:
+            _strings(x, out)
+    elif v is not None:
+        out.append(json.dumps(v))
+
+
+def _squeeze(s: str) -> str:
+    return " ".join(s.split())
+
+
+# files whose bytes are not their text even when no NUL shows in their first block (a small PDF, an uncompressed
+# workbook part): a view's excerpt of them is not compared with their bytes
+BINARY_SUFFIXES = {".pdf", ".xlsx", ".xlsm", ".xls", ".docx", ".pptx", ".odt", ".ods", ".zip", ".gz", ".png", ".jpg",
+                   ".jpeg", ".gif", ".webp", ".psd", ".db", ".sqlite", ".sqlite3"}
+
+
+JSON_DECODE_MAX = 20_000_000  # bytes of a .json document the checks decode to read its string values
+
+
+@functools.lru_cache(maxsize=8)
+def _json_strings(path: str, mtime_ns: int, size: int) -> str:
+    """Every string value of a JSON document, joined; '' when it does not parse. Keyed by the file's mtime and size, so
+    the refs one check cites into the same document decode it once."""
+    parts: list[str] = []
+    try:
+        _strings(json.loads(Path(path).read_text("utf-8", errors="replace")), parts)
+    except ValueError:
+        return ""
+    return "\n".join(parts)
+
+
+def source_text(c: str, file_ref: str) -> str | None:
+    """Every string of the records a file ref cites, joined: what an excerpt's lines must appear in to count as literal
+    source. A .json document's decoded string values count too. '' when the ref does not resolve, None for a binary
+    file."""
+    try:
+        res = refs.resolve_base(config.corpus_dir(c), file_ref)
+    except refs.RefError:
+        return ""
+    suffix = Path(str(res.get("path") or "")).suffix.lower()
+    if (res.get("meta") or {}).get("binary") or suffix in BINARY_SUFFIXES:
+        return None
+    parts: list[str] = []
+    for r in res.get("records") or ([{"record": res.get("record")}] if res.get("record") is not None else []):
+        _strings(r.get("record"), parts)
+    if suffix == ".json":
+        try:
+            path = config.safe_corpus_path(config.corpus_dir(c), str(res["path"]))
+            st = path.stat()
+            if st.st_size <= JSON_DECODE_MAX:
+                parts.append(_json_strings(str(path), st.st_mtime_ns, st.st_size))
+        except (OSError, ValueError, KeyError):
+            pass
+    return "\n".join(parts)
+
+
+def missing_lines(excerpt: str, source: str) -> list[str]:
+    """The excerpt's non-blank lines that are not in the source text (whitespace runs compared as one space)."""
+    src = _squeeze(source)
+    return [ln.strip() for ln in excerpt.splitlines() if ln.strip() and _squeeze(ln) not in src]
+
+
+def _covers(ref_list: list[str], path: str, line: int) -> bool:
+    for r in ref_list:
+        try:
+            p = refs.parse_ref(r)
+        except ValueError:
+            continue
+        if p.get("path") != path or "line" not in p:
+            continue
+        if p["line"] <= line <= p.get("end_line", p["line"]):
+            return True
+    return False
+
+
+def _sample_lines(c: str, rel: str, n: int = CHECK_LINES) -> list[int]:
+    """Up to n line numbers spread over the file: the first, the middle and the one two thirds in."""
+    from . import corpus  # noqa: PLC0415
+
+    try:
+        total = len(corpus.line_offsets(config.safe_corpus_path(config.corpus_dir(c), rel)))
+    except (ValueError, OSError):
+        return []
+    picks = sorted({1, max(1, total // 2), max(1, (2 * total) // 3)})
+    return [x for x in picks if 1 <= x <= total][:n]
+
+
+def _sample_files(files: list[tuple[str, int, int]], n: int = CHECK_FILES) -> list[str]:
+    """Up to n claimed files spread over the claims: the largest, then the first and the middle in path order, since the
+    first
+    files alone can be unrepresentative."""
+    if not files:
+        return []
+    picks = [max(files, key=lambda f: f[1])[0], files[0][0], files[len(files) // 2][0]]
+    return list(dict.fromkeys(picks))[:n]
+
+
+def _is_line_form(form: str) -> bool:
+    return bool(re.fullmatch(r"L<[^<>]+>", form.strip()))
+
+
+async def check(c: str, slug: str, locators: list[str] | None = None, *, shot_dir: Path | None = None) -> dict[str, Any]:
+    """A view's checks: the index builds, locators and sampled lines round-trip (the answer cites the line back and its
+    excerpt is literal source), declared keys resolve, and the page loads headless without errors. Returns {ok, view,
+    index, checks, page}."""
+    view = read_view(c, slug)
+    if view is None:
+        return {"ok": False, "view": None, "problems": [f"no view {slug!r}"], "checks": [], "page": None}
+    report: dict[str, Any] = {"ok": False, "view": view, "problems": [], "checks": [], "page": None}
+    if not view["ok"]:
+        report["problems"].append("the view has no reader.py, no view.html or no claims")
+        return report
+    files = await asyncio.to_thread(claimed_files, c, view)
+    if not files:
+        report["problems"].append(f"no file of the corpus matches the claims {', '.join(view['claims'])}")
+        return report
+    t0 = time.monotonic()
+    try:
+        await reader_call(c, slug, "index")
+    except ReaderError as e:
+        report["problems"].append(f"build_index failed: {e.message}")
+        report["traceback"] = e.detail
+        return report
+    report["index"] = {"files": len(files), "seconds": round(time.monotonic() - t0, 2)}
+
+    wanted: list[str] = list(dict.fromkeys(str(x).strip() for x in (locators or []) if str(x).strip()))
+    # sampled lines beside the locators, so a view is never checked only on the refs its author chose; a binary file
+    # (a workbook) has no lines to sample, its rows are cited in its own notation
+    if any(_is_line_form(f["form"]) for f in view["accepts"]):
+        for rel in _sample_files([f for f in files if Path(f[0]).suffix.lower() not in BINARY_SUFFIXES]):
+            wanted += [loc for n in await asyncio.to_thread(_sample_lines, c, rel) if (loc := f"{rel}#L{n}") not in wanted]
+    keys: list[str] = []
+
+    async def check_one(loc: str) -> dict[str, Any]:
+        row: dict[str, Any] = {"locator": loc, "ok": False}
+        try:
+            p = refs.parse_ref(loc)
+        except ValueError as e:
+            row["why"] = str(e)
+            return row
+        try:
+            if p["kind"] == "view":
+                if p["slug"] != slug or not p.get("key"):
+                    row["why"] = f"not a key of this view (view:{slug}/<key>)"
+                    return row
+                res = await resolve_locator(c, slug, {"key": p["key"]})
+            else:
+                frag = _fragment_of(loc)
+                if not frag or not claims_path(view, p["path"]) or not accepts(view, frag):
+                    row["why"] = "the view does not claim this file or accept this fragment (view.json claims, accepts)"
+                    return row
+                res = await resolve_locator(c, slug, {"path": p["path"], "fragment": frag})
+        except ReaderError as e:
+            row["why"] = f"resolve() failed: {e.message}"
+            return row
+        if res is None:
+            row["why"] = "resolve() answered None"
+            return row
+        row.update(label=res["label"], excerpt=res["excerpt"][:300], refs=len(res["refs"]))
+        if not res["excerpt"].strip():
+            row["why"] = "the excerpt is empty"
+            return row
+        if not res["refs"]:
+            row["why"] = "the answer cites no file ref (`refs`)"
+            return row
+        if p["kind"] != "view" and "line" in p and not _covers(res["refs"], p["path"], p["line"]):
+            row["why"] = f"the answer does not cite {loc} back (its refs: {', '.join(res['refs'][:3])})"
+            return row
+        texts = await asyncio.to_thread(lambda: [source_text(c, r) for r in res["refs"][:CHECK_KEY_REFS]])
+        if all(t is None for t in texts):
+            row["unchecked"] = "the cited file is binary, so the excerpt was not compared with it"
+        else:
+            gone = missing_lines(res["excerpt"], "\n".join(t for t in texts if t))
+            if gone:
+                row["why"] = f"the excerpt is not literal text of the records it cites: {gone[0][:160]!r}"
+                return row
+        if res["key"] and res["key"] not in keys and p["kind"] != "view":
+            keys.append(res["key"])
+        row["ok"] = True
+        return row
+
+    for loc in wanted:
+        report["checks"].append(await check_one(loc))
+    if view["declares"]:
+        for key in keys[:CHECK_KEYS]:
+            report["checks"].append(await check_one(f"view:{slug}/{key}"))
+    if not report["checks"]:
+        report["problems"].append("no locator was checked: pass `locators` with refs the view should open")
+
+    first_ok = next((r for r in report["checks"] if r["ok"]), None)
+    place = None
+    if first_ok is not None:
+        loc = first_ok["locator"]
+        p = refs.parse_ref(loc)
+        loc_d = {"key": p["key"]} if p["kind"] == "view" else {"path": p["path"], "fragment": _fragment_of(loc)}
+        place = await open_place(c, slug, loc, loc_d)
+    base = shot_dir or (cache_dir(c, view) / "shots")
+    report["page"] = await shoot(c, slug, place, base / f"check-{int(time.time())}.png")
+    report["ok"] = (not report["problems"] and all(r["ok"] for r in report["checks"]) and bool(report["page"].get("ok")))
+    return report
+
+
+async def open_place(c: str, slug: str, ref: str | None, locator: dict[str, Any] | None) -> dict[str, Any]:
+    """The `open` message a view's page gets: the ref, its parsed locator and the reader's answer for it."""
+    if not ref or locator is None:
+        return {"ref": None}
+    out: dict[str, Any] = {"ref": ref, **locator}
+    try:
+        res = await resolve_locator(c, slug, locator)
+    except ReaderError as e:
+        out["error"] = e.message
+        return out
+    if res is None:
+        out["error"] = "the view does not know this place"
+    else:
+        out.update(target=res["target"], key=res["key"], label=res["label"], excerpt=res["excerpt"], refs=res["refs"])
+    return out
+
+
+def locator_of(ref: str) -> dict[str, Any] | None:
+    """{key} for view:<slug>/<key>, {path, fragment} for a file ref with a fragment, None otherwise."""
+    try:
+        p = refs.parse_ref(ref)
+    except ValueError:
+        return None
+    if p["kind"] == "view":
+        return {"key": p["key"]} if p.get("key") else None
+    frag = _fragment_of(ref)
+    return {"path": p["path"], "fragment": frag} if "path" in p and frag else None
+
+
+# ----------------------------------------------------------------------------------------------------------
+# the tool cases this module owns (tools.REGISTRY and tools._h_read_ref / _h_screenshot call them)
+# ----------------------------------------------------------------------------------------------------------
+
+
+def _hint(section: str, **values: Any) -> str:
+    from . import tools  # noqa: PLC0415
+
+    return tools.hint(section, **values)
+
+
+def _fold(v: Any) -> Any:
+    """A tool argument a client sent as a JSON string where the schema has a list or an object."""
+    if isinstance(v, str) and v.strip()[:1] in ("[", "{"):
+        with contextlib.suppress(ValueError):
+            return json.loads(v)
+    return v
+
+
+async def tool_read_ref(ctx: Any, args: dict[str, Any]) -> Any:
+    """`read_ref` on a view ref: `view:<slug>` names the view, its files and its forms (or a proposal's fields), and
+    `view:<slug>/<key>` gives the unit the key names, its excerpt and the file refs it stands for."""
+    from . import tools  # noqa: PLC0415
+
+    _bind_loop()
+    ref = str(args.get("ref") or "").strip()
+    try:
+        p = refs.parse_ref(ref)
+    except ValueError as e:
+        return tools.err(f"read_ref: {e}")
+    view = read_built(ctx.c, p["slug"])
+    if not p.get("key"):
+        if view is not None:
+            lines = [f"{ref} ({view['name']})", view["why"], f"claims: {', '.join(view['claims'])}"]
+            # the arrangement lives on the proposal it was built from, and a change to the view restates it
+            arrangement = str((read_proposal(ctx.c, p["slug"]) or {}).get("arrangement") or "")
+            if arrangement:
+                lines.append(f"arrangement: {arrangement}")
+            forms = view_forms(view)
+            lines += [f"form: {f}  {m}" for f, m in forms] or ["forms: none"]
+            return tools.ok("\n".join(ln for ln in lines if ln))
+        prop = read_proposal(ctx.c, p["slug"])
+        if prop is not None:
+            return tools.ok("\n".join([f"{ref} (a proposal, {prop.get('status')})", f"name: {prop['name']}",
+                                       f"why: {prop.get('why', '')}", f"claims: {', '.join(prop.get('claims') or [])}",
+                                       f"arrangement: {prop.get('arrangement', '')}"]))
+        return tools.err(f"read_ref: no view {p['slug']!r}")
+    try:
+        res = await asyncio.to_thread(resolve_view_ref, config.corpus_dir(ctx.c), p, ref)
+    except refs.RefError as e:
+        return tools.err(f"read_ref: {ref} does not resolve: {e.detail}")
+    rs = res.get("refs") or []
+    lines = [f"{ref} ({res.get('label') or ''})".rstrip(), str(res.get("excerpt") or "").strip() or "(empty)"]
+    if rs:
+        lines.append("cites: " + ", ".join(rs[:20]) + (f" … {len(rs) - 20} more" if len(rs) > 20 else ""))
+    if (res.get("meta") or {}).get("deleted"):
+        lines.append("(the view is deleted; this is the answer it gave last)")
+    return tools.ok("\n".join(lines))
+
+
+def opening_view(c: str, ref: str) -> str | None:
+    """The slug of the view a citation of this file ref opens in (views_for's first), None when no view claims the file
+    and accepts the fragment, or the ref is not a file ref with a fragment."""
+    loc = locator_of(ref)
+    if loc is None or "path" not in loc:
+        return None
+    hit = views_for(c, loc["path"], loc["fragment"])
+    return str(hit[0]["slug"]) if hit else None
+
+
+async def tool_screenshot(ctx: Any, args: dict[str, Any]) -> Any:
+    """`screenshot` of `view:<slug>` or `view:<slug>/<key>`, or of a place in a file a view opens (such as lines of a
+    file the view claims): the view's page loaded headless at that place."""
+    from . import tools  # noqa: PLC0415
+
+    _bind_loop()
+    ref = str(args.get("ref") or "").strip()
+    try:
+        p = refs.parse_ref(ref)
+    except ValueError as e:
+        return tools.err(f"screenshot: {e}")
+    if p["kind"] == "view":
+        slug, at = p["slug"], ref if p.get("key") else None
+    else:
+        slug, at = await asyncio.to_thread(opening_view, ctx.c, ref), ref
+        if slug is None:
+            return tools.err("screenshot: " + tools.hint("screenshot-none", what=f"No view opens {ref}"))
+    if read_built(ctx.c, slug) is None:
+        return tools.err(f"screenshot: no view {slug!r}")
+    import base64  # noqa: PLC0415
+    import tempfile  # noqa: PLC0415
+
+    with tempfile.TemporaryDirectory(prefix="thimble-view-shot-") as d:
+        place = await open_place(ctx.c, slug, at, locator_of(ref))
+        res = await shoot(ctx.c, slug, place, Path(d) / "view.png")
+        png = res.get("png")
+        if not png or not Path(png).is_file():
+            return tools.err("screenshot: " + "; ".join(res.get("errors") or ["no picture was taken"]))
+        data = base64.b64encode(Path(png).read_bytes()).decode("ascii")
+    note = "" if res.get("ok") else " (the page reported: " + "; ".join(res.get("errors") or []) + ")"
+    return tools.ToolResult([{"type": "text", "text": f"screenshot of {ref}{note}"},
+                             {"type": "image", "data": data, "mimeType": "image/png"}])
+
+
+# ----------------------------------------------------------------------------------------------------------
+# routes
+# ----------------------------------------------------------------------------------------------------------
+
+
+def _view_or_404(c: str, slug: str) -> dict[str, Any]:
+    config.workspace_dir(c)
+    v = read_built(c, slug)
+    if v is None:
+        raise HTTPException(404, f"no such view: {slug}")
+    return v
+
+
+def _public(v: dict[str, Any], c: str | None = None) -> dict[str, Any]:
+    """A view record for a route's answer: everything but the on-disk directory, with its forms, and with `c` the first
+    file it claims (what a view opened on its own shows). Blocking when a claim is a glob (the corpus walk)."""
+    out = {k: x for k, x in v.items() if k != "dir"}
+    out["forms"] = [{"form": f, "means": m} for f, m in view_forms(v)]
+    if c is not None:
+        try:
+            files = claimed_files(c, v) if v["ok"] else []
+        except (ValueError, OSError, HTTPException):
+            files = []
+        out["first_file"] = files[0][0] if files else None
+    return out
+
+
+def _recover(c: str) -> None:
+    """Each time a workspace's views or proposals are listed, view tickets queued or building with no run in this
+    process are
+    queued again (dev.recover_views)."""
+    from . import dev  # noqa: PLC0415
+
+    dev.recover_views(c)
+
+
+@router.get("/ws/{c}/views/proposals")
+async def list_proposals_route(c: str) -> list[dict[str, Any]]:
+    """The proposals, less those the orientation's first run still holds; held ones whose run is gone are released here.
+    """
+    from . import orientation  # noqa: PLC0415
+
+    config.workspace_dir(c)
+    _bind_loop()
+    _recover(c)
+    items = list_proposals(c)
+    if any(p.get("held") for p in items) and not orientation.holding(c):
+        orientation.release_views(c, ((orientation.read_run(c) or {}).get("chats") or {}).get(orientation.ROLE))
+        items = list_proposals(c)
+    return [p for p in items if not p.get("held")]
+
+
+@router.post("/ws/{c}/views/proposals/{slug}/retry")
+async def retry_route(c: str, slug: str) -> dict[str, Any]:
+    """Queue a failed proposal, or a built view's failed change, again; it comes back `queued` (404 for none, 409 for
+    one with nothing failed)."""
+    config.workspace_dir(c)
+    _bind_loop()
+    return retry(c, slug)
+
+
+class ViewMessage(BaseModel):
+    text: str
+
+
+@router.post("/ws/{c}/views/proposals/{slug}/message")
+async def message_route(c: str, slug: str, body: ViewMessage) -> dict[str, Any]:
+    """A message typed in the view's build thread: logged there and queued as a change to the view (message); answers
+    the proposal."""
+    config.workspace_dir(c)
+    _bind_loop()
+    return message(c, slug, body.text)
+
+
+@router.delete("/ws/{c}/views/proposals/{slug}")
+async def delete_proposal_route(c: str, slug: str) -> dict[str, Any]:
+    config.workspace_dir(c)
+    delete_proposal(c, slug)
+    return {"ok": True}
+
+
+@router.get("/ws/{c}/views")
+async def list_views_route(c: str, path: str | None = None) -> list[dict[str, Any]]:
+    """Every view; with `path` (a corpus-relative file) the working views that claim it, in the order a citation into
+    it opens them (views_for)."""
+    config.workspace_dir(c)
+    _bind_loop()
+    _recover(c)
+    if path is None:
+        return await asyncio.to_thread(lambda: [_public(v, c) for v in list_views(c)])
+    return [_public(v) for v in views_for(c, path.strip().strip("/"))]
+
+
+@router.get("/ws/{c}/views/{slug}")
+async def get_view_route(c: str, slug: str) -> dict[str, Any]:
+    return _public(_view_or_404(c, slug))
+
+
+@router.delete("/ws/{c}/views/{slug}")
+async def delete_view_route(c: str, slug: str) -> dict[str, Any]:
+    config.workspace_dir(c)
+    delete_view(c, slug)
+    return {"ok": True}
+
+
+@router.get("/ws/{c}/views/{slug}/frame")
+async def frame_route(c: str, slug: str, request: Request, origin: str | None = None) -> HTMLResponse:
+    """The page as a frame loads it (frame_document), as srcdoc text. `origin` is the page's location.origin, since
+    through
+    Vite's proxy the request's host may not be one the browser can reach; without it, the request's host."""
+    v = _view_or_404(c, slug)
+    if not v["ok"]:
+        raise HTTPException(409, f"the view {slug!r} has no reader.py, view.html or claims")
+    try:
+        media = media_url(origin or f"{request.url.scheme}://{request.url.netloc}", c, slug)
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from None
+    return HTMLResponse(await asyncio.to_thread(frame_document, v, media))
+
+
+@router.get("/ws/{c}/views/{slug}/media")
+async def media_route(c: str, slug: str, path: str) -> FileResponse:
+    """An image, audio or video file the view claims, after media_file's checks. FileResponse answers Range requests, so
+    a
+    player seeks without loading the file whole."""
+    _view_or_404(c, slug)  # a draft's page loads its media only in the checks' headless page (shoot)
+    f, media_type = await asyncio.to_thread(media_file, c, slug, path)
+    return FileResponse(f, media_type=media_type, headers=MEDIA_HEADERS)
+
+
+@router.get("/ws/{c}/media")
+async def card_media_route(c: str, path: str) -> FileResponse:
+    """A corpus media file for a card, after corpus_media_file's checks; ranges answered as media_route's are."""
+    config.workspace_dir(c)
+    f, media_type = await asyncio.to_thread(corpus_media_file, c, path)
+    return FileResponse(f, media_type=media_type, headers=MEDIA_HEADERS)
+
+
+class RecordsBody(BaseModel):
+    query: Any = None
+
+
+@router.post("/ws/{c}/views/{slug}/records")
+async def records_route(c: str, slug: str, body: RecordsBody) -> dict[str, Any]:
+    """reader.records(index, query): what the view's page asked for with thimble.fetch. 502 with the reader's error."""
+    _view_or_404(c, slug)
+    try:
+        return {"data": await reader_call(c, slug, "records", body.query)}
+    except ReaderError as e:
+        raise HTTPException(502, {"message": e.message, "traceback": e.detail[-ERROR_MAX:]}) from None
+
+
+@router.get("/ws/{c}/views/{slug}/resolve")
+async def resolve_route(c: str, slug: str, ref: str) -> dict[str, Any]:
+    """The `open` message for a ref in this view: {ref, path?, fragment?, key?, target, label, excerpt, refs} or with
+    `error` when the reader does not know it; `{ref: null}` for a ref with no locator."""
+    _view_or_404(c, slug)
+    return await open_place(c, slug, ref, locator_of(ref))
+
+
+class CheckBody(BaseModel):
+    locators: list[str] | None = None
+
+
+@router.post("/ws/{c}/views/{slug}/check")
+async def check_route(c: str, slug: str, request: Request, body: CheckBody | None = None) -> dict[str, Any]:
+    """A view ticket's session checking its draft: the gate with `locators` beside the sampled lines, {ok, lines, png}.
+    The
+    locators are kept on the proposal for the server's gate after the turn. Loopback only."""
+    from . import dev  # noqa: PLC0415
+
+    if not dev._is_loopback(request):
+        raise HTTPException(403, "a view's checks run from localhost only")
+    config.workspace_dir(c)
+    _check_slug(slug)
+    _bind_loop()
+    locators = [str(x).strip() for x in (body.locators if body and body.locators else []) if str(x).strip()]
+    if locators and read_proposal(c, slug) is not None:
+        update_proposal(c, slug, locators=locators)
+    report = await gate(c, slug, locators or _kept_locators(c, slug))
+    return {"ok": bool(report.get("ok")), "lines": gate_lines(report), "png": (report.get("page") or {}).get("png")}
+
+
+def _kept_locators(c: str, slug: str) -> list[str] | None:
+    """The locators the session last checked, which the server's gate checks again (None for none)."""
+    prop = read_proposal(c, slug) or {}
+    kept = prop.get("locators")
+    return [str(x) for x in kept] if isinstance(kept, list) and kept else None

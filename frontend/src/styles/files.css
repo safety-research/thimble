@@ -1,0 +1,2174 @@
+/* The Files pane: the views bar, the sidebar (tree and Labels pane), the reader with tabs and the overview ruler, the
+   status strip. Label colours are the data palette (--label-1..12, --label-none), set per element as --c; a mark is
+   the colour at 24% behind the text. */
+.files-tab {
+  --files-side-bg: color-mix(in oklab, var(--bg-panel) 40%, var(--surface-card));
+  --files-rule: rgba(var(--ink-rgb), 0.1);
+  --files-row-hover: rgba(var(--ink-rgb), 0.04);
+  --files-row-on: var(--surface-selected);
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  background: var(--bg-panel);
+}
+.files-body {
+  position: relative;
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+/* -------- the views bar: File browser and the views as one exclusive choice, then the proposals (files/ViewsBar.tsx):
+   a row across Files' top, or, while Files shows beside another pane, in its pane head (.is-compact, shell.css
+   .pane-head-views) with the ⋯ menu of what does not fit and New view's + -------- */
+.files-views {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: 44px;
+  padding: 0 16px 0 10px;
+  border-bottom: 1px solid var(--files-rule);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.files-views.is-compact {
+  flex: 1 1 0;
+  min-width: calc(2 * var(--control-sm) + 4px);
+  height: var(--control-sm);
+  padding: 0;
+  border-bottom: 0;
+  overflow: hidden;
+}
+.files-views.is-compact > .seg {
+  flex: 0 1 auto;
+  min-width: 0;
+}
+/* the row as it would be with every item, out of sight beside the bar, where ViewsBar measures what fits: each item
+   drawn as a view's option (components.css .seg-opt) */
+.files-views-measure {
+  position: absolute;
+  top: 0;
+  left: 0;
+  visibility: hidden;
+  pointer-events: none;
+  white-space: nowrap;
+}
+.files-views-measure .seg-opt-m {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 0 9px;
+  font: 400 var(--text-xs) / 1 var(--font-body);
+}
+.files-views-measure .seg-opt-m.active {
+  font-weight: 500;
+}
+.files-views-more {
+  position: relative;
+  flex: none;
+  display: inline-flex;
+}
+.files-views-more-dot {
+  position: absolute;
+  top: 3px;
+  right: 3px;
+}
+.files-views .seg-opt {
+  color: var(--text-secondary);
+}
+.files-views .seg-opt.active {
+  color: var(--text-primary);
+}
+/* a view not picked, and a proposal, wear the view chip's accent text, tint and edge; the picked view keeps the bar's
+   raised look */
+.files-views .seg-opt[data-anchor^='view:']:not(.active) {
+  color: var(--text-accent);
+  background: var(--chip-bg);
+  box-shadow: inset 0 0 0 1px var(--chip-edge);
+}
+.files-views .seg-opt[data-anchor^='view:']:not(.active):not(:disabled):hover {
+  background: var(--chip-bg-hover);
+  box-shadow: inset 0 0 0 1px var(--chip-edge-hover);
+}
+.files-views .seg-opt[data-anchor^='view:']:focus-visible {
+  box-shadow: 0 0 0 1.5px var(--accent);
+}
+/* a proposal: its button, then Retry for a failed build, with × on its top right corner on hover */
+.files-proposal {
+  position: relative;
+  gap: 4px;
+}
+/* a proposal still building has no thread to open until its build starts; it keeps its colours while it waits */
+.files-proposal-opt.seg-opt:disabled {
+  opacity: 1;
+}
+.files-proposal-mark {
+  flex: none;
+}
+.files-proposal-retry.btn {
+  flex: none;
+  height: 20px;
+  min-height: 0;
+  padding: 0 6px;
+}
+.files-proposal-x.btn {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  width: 16px;
+  height: 16px;
+  min-height: 0;
+  padding: 0;
+  border-radius: 50%;
+  background: var(--surface-card);
+  box-shadow: 0 0 0 1px var(--chip-edge);
+  color: var(--text-tertiary);
+  opacity: 0;
+  transition: opacity var(--dur-fast) var(--ease-out);
+}
+.files-proposal:hover .files-proposal-x.btn,
+.files-proposal-x.btn:focus-visible {
+  opacity: 1;
+}
+.files-views-new.btn {
+  flex: none;
+  font-weight: 400;
+}
+.files-views-ask.popover {
+  width: 300px;
+  padding: 6px 6px 6px 10px;
+}
+/* the field and, at its right, the send square the chat's composer has */
+.files-views-ask-form {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.files-views-ask-form .field {
+  flex: 1;
+  min-width: 0;
+}
+.files-views-ask-send.btn {
+  flex: none;
+}
+
+/* -------- the sidebar: the tree above, the Labels pane pinned below on the pane's own tint -------- */
+.files-side {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  background: var(--files-side-bg);
+  font: var(--type-body);
+}
+.files-side-tree {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  padding: 8px 10px;
+}
+.files-side-head {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: 24px;
+}
+.files-labels .files-side-head {
+  height: 26px;
+}
+.files-side-title {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--text-primary);
+  font: 500 var(--text-sm) / 1 var(--font-body);
+  text-align: left;
+  cursor: pointer;
+}
+.files-side-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.files-caret {
+  flex: none;
+  transition: transform var(--dur-fast) var(--ease-out);
+}
+.files-side-title[aria-expanded='true'] .files-caret {
+  transform: rotate(90deg);
+}
+.files-side-head .btn {
+  flex: none;
+  width: 22px;
+  height: 22px;
+  color: var(--text-tertiary);
+}
+
+/* the sidebar's seam: the grab strip lies over the hairline between the sidebar and the reader and takes no room */
+.files-body > .shell-resizer {
+  margin: 0 -6px;
+}
+
+/* a sidebar docks while the body holds it beside the reader or view at a readable width of 60 characters plus
+   gutters (shell/dock.tsx). A sidebar that cannot dock overlays the left edge of the reader or view. */
+.files-body > .read-probe {
+  --read-min: calc(60ch + 72px);
+  font: var(--type-ui-sm);
+}
+.files-body.is-view > .read-probe {
+  --read-min: calc(60ch + 48px);
+  font: var(--type-body);
+}
+.files-side.is-over {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  z-index: 4;
+  max-width: 100%;
+  box-shadow: 1px 0 0 var(--files-rule), var(--shadow-float);
+}
+.files-side.is-over ~ .files-main,
+.files-side.is-over ~ .view-pane {
+  isolation: isolate;
+}
+
+/* the tree, as VS Code's explorer: 24px rows on guide lines, shown while the pointer is over the tree (VS Code's
+   `onHover`, with its 100ms fade), a folder's chevron or a file's glyph, the name in the primary ink (a dot entry in the
+   tertiary, as VS Code mutes what it ignores), the dots of the labels that are on (a collapsed folder's for what is under it) */
+.files-tree {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  scrollbar-width: none;
+}
+.files-rows {
+  display: flex;
+  flex-direction: column;
+}
+.files-row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex: none;
+  height: 24px;
+  padding: 0 6px 0 calc(20px + var(--depth, 0) * 14px);
+  border-radius: var(--radius-chip);
+  color: var(--text-primary);
+  white-space: nowrap;
+  cursor: pointer;
+  outline: none;
+}
+.files-row:hover {
+  background: var(--files-row-hover);
+}
+.files-row:focus-visible {
+  box-shadow: inset 0 0 0 1.5px var(--accent);
+}
+.files-row.active,
+.files-row.active:hover {
+  background: var(--files-row-on);
+}
+.files-row.files-hidden {
+  color: var(--text-tertiary);
+}
+.files-guide {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  border-left: 1px solid rgba(var(--ink-rgb), 0.14);
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.1s linear;
+}
+.files-tree:hover .files-guide {
+  opacity: 1;
+}
+.files-stripe {
+  position: absolute;
+  top: 5px;
+  width: 3px;
+  height: 14px;
+  border-radius: 1.5px;
+}
+.files-glyph {
+  flex: none;
+  color: var(--text-tertiary);
+}
+.files-chevron {
+  transition: transform var(--dur-fast) var(--ease-out);
+}
+.files-dir[aria-expanded='true'] .files-chevron {
+  transform: rotate(90deg);
+}
+.files-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* the row is 24px tall and a mark 7, so centring alone puts the marks on a half pixel, which the browser paints a pixel
+   off; the pixel of margin above puts them at 9 to 16, on the name's x-height */
+.files-dots {
+  margin: 1px 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  flex: none;
+}
+.files-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+}
+/* a multi-class label's mark: the label glyph in its ink, apart from its classes' colours. Its box is a dot's, with the
+   glyph's outline filling it and the svg's empty edge hanging outside, so the marks share a size, a centre and their gaps */
+.files-dot-tag {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 7px;
+  height: 7px;
+}
+.files-dot-tag .icon {
+  flex: none;
+}
+.files-row-spinner {
+  margin-left: auto;
+}
+.files-empty {
+  padding: 6px 4px 6px 20px;
+  color: var(--text-tertiary);
+  font: var(--type-body-sm);
+}
+
+/* the search by name under the tree's head: the search field, then the files found as tree rows with the matched
+   words in the accent's ink */
+.files-search {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  margin: 6px 0 4px;
+  padding: 0 6px 0 8px;
+  box-sizing: border-box;
+  border-radius: var(--radius-ui);
+  background: var(--surface-card);
+  box-shadow: 0 0 0 1px rgba(var(--ink-rgb), 0.1);
+  color: var(--text-tertiary);
+  cursor: text;
+}
+.files-search:focus-within {
+  box-shadow: 0 0 0 1.5px var(--accent);
+}
+.files-search input {
+  flex: 1;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  outline: none;
+  background: transparent;
+  font: 400 var(--text-ui-sm) / 1.2 var(--font-body);
+  color: var(--text-primary);
+}
+.files-search input::placeholder {
+  color: var(--text-tertiary);
+}
+.files-search-clear {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-hl);
+  background: none;
+  color: var(--text-tertiary);
+  cursor: pointer;
+}
+.files-search-clear:hover {
+  background: var(--surface-pressed);
+  color: var(--text-primary);
+}
+.files-found-row {
+  padding-left: 8px;
+}
+.files-found-row mark {
+  background: none;
+  color: var(--accent-ink);
+  font-weight: 500;
+}
+.files-found-row .files-name {
+  flex: none;
+  max-width: 70%;
+}
+.files-found-dir {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--text-tertiary);
+  font: var(--type-ui-sm);
+}
+.files-found-count {
+  padding: 6px 8px;
+  color: var(--text-tertiary);
+  font: var(--type-body-sm);
+  font-variant-numeric: tabular-nums;
+}
+/* a part of the results: its name and, at the right, its count in the tertiary */
+.files-found-head {
+  flex: none;
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 10px 8px 4px;
+  font: var(--type-label);
+  color: var(--text-secondary);
+}
+.files-found-head:first-child {
+  padding-top: 4px;
+}
+.files-found-note {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font: var(--type-ui-sm);
+  color: var(--text-tertiary);
+  font-variant-numeric: tabular-nums;
+}
+/* a file whose text matched: its count at the right and its matching lines under it, the match marked */
+.files-found-n {
+  margin-left: auto;
+  flex: none;
+  padding-left: 6px;
+  font: var(--type-ui-sm);
+  color: var(--text-tertiary);
+  font-variant-numeric: tabular-nums;
+}
+.files-found-line {
+  gap: 8px;
+  padding-left: 28px;
+}
+.files-found-lno {
+  flex: none;
+  min-width: 28px;
+  text-align: right;
+  font: 400 var(--text-xs) / 1 var(--font-mono);
+  color: var(--text-tertiary);
+  font-variant-numeric: tabular-nums;
+}
+.files-found-snip {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font: 400 var(--text-xs) / 1.4 var(--font-mono);
+  color: var(--text-secondary);
+}
+.files-found-more {
+  padding-left: 28px;
+  font: var(--type-ui-sm);
+  color: var(--text-secondary);
+}
+
+/* the Labels pane: a row per label with its colour, a filled square when on; an on label with more than two values
+   lists them, each with its own square */
+.files-labels {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  max-height: 300px;
+  padding: 6px 10px 8px;
+  border-top: 1px solid var(--border-subtle);
+  background: var(--bg-panel);
+}
+/* beside a view the sidebar is the Labels pane alone, from the top, on the sidebar's own paper */
+.files-side-labels .files-labels {
+  flex: 1;
+  max-height: none;
+  padding-top: 8px;
+  border-top: 0;
+  background: none;
+}
+.files-labels-list {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: auto;
+  scrollbar-width: none;
+}
+.files-label {
+  display: flex;
+  flex-direction: column;
+}
+.files-label-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: 26px;
+  padding: 0 2px 0 6px;
+  border-radius: var(--radius-chip);
+}
+.files-label-row:hover {
+  background: var(--surface-hover);
+}
+.files-label-row.editing {
+  background: var(--track-bg);
+}
+.files-label-toggle {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--text-secondary);
+  font: var(--type-body);
+  text-align: left;
+  cursor: pointer;
+}
+.files-label-toggle.on {
+  color: var(--text-primary);
+}
+.files-label-box,
+.files-class-box {
+  flex: none;
+  box-sizing: border-box;
+  border: 1.5px solid var(--c);
+  background: transparent;
+  transition: background-color var(--dur-fast) var(--ease-out);
+}
+.files-label-box {
+  width: 12px;
+  height: 12px;
+  border-radius: 3px;
+}
+.files-label-box.on,
+.files-class-toggle.on .files-class-box {
+  background: var(--c);
+}
+/* the square or tag before a label's name, which turns it on or off */
+.files-label-mark {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 100%;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  cursor: pointer;
+}
+.files-label-mark:hover,
+.files-label-mark:active {
+  background: none;
+}
+/* the focused label, while more than one is on: the selected step behind its rows and the accent's 2px bar at its left
+   edge */
+.files-label.is-focus {
+  position: relative;
+  border-radius: var(--radius-chip);
+  background: var(--surface-selected);
+}
+.files-label.is-focus::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 7px;
+  width: 2px;
+  height: 12px;
+  border-radius: 1px;
+  background: var(--accent);
+}
+/* a multi-class label's mark: the label glyph in the icon ink; darker and tinted while on */
+.files-label-tag {
+  flex: none;
+  color: var(--text-tertiary);
+}
+.files-label-tag.on {
+  color: var(--text-secondary);
+  fill: rgba(var(--ink-rgb), 0.12);
+}
+/* a multi-class label's number, at the glyph's upper right and taking no width; offset 2px for the glyph's inset */
+.label-mark {
+  position: relative;
+  display: inline-flex;
+  flex: none;
+}
+.label-mark-n {
+  position: absolute;
+  bottom: calc(100% - 2px);
+  left: calc(100% - 2px);
+  font: 500 9.5px / 1 var(--font-body);
+  font-variant-numeric: tabular-nums;
+  color: var(--text-secondary);
+  pointer-events: none;
+  user-select: none;
+}
+/* a label over cards or report sentences: the canvas or report glyph in the label's colour, where a label over files
+   has its square */
+.files-label-over {
+  flex: none;
+  color: var(--c);
+}
+.files-label-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.files-label-edit.btn {
+  flex: none;
+  width: 22px;
+  height: 22px;
+  color: var(--text-tertiary);
+}
+/* a label's status under its name: the run's progress, the last run's outcome and time, or a failure with Retry */
+.files-label-status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 18px;
+  margin-top: -3px;
+  padding: 0 2px 2px 26px;
+  color: var(--text-tertiary);
+  font: var(--type-body-sm);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.files-label-count {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.files-label-status.is-running {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 3px;
+  padding-bottom: 5px;
+}
+.files-label-bar {
+  position: relative;
+  height: 2px;
+  overflow: hidden;
+  border-radius: 1px;
+  background: var(--track-bg);
+}
+.files-label-fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 0;
+  background: var(--accent);
+  transition: width var(--dur-fast) linear;
+}
+.files-label-bar.is-unknown .files-label-fill {
+  width: 30%;
+  animation: files-label-sweep 1.2s ease-in-out infinite;
+}
+@keyframes files-label-sweep {
+  from {
+    left: -30%;
+  }
+  to {
+    left: 100%;
+  }
+}
+.files-label-status.is-error {
+  align-items: flex-start;
+  color: var(--status-negative);
+}
+/* the message wraps to three lines at most, so the reason reads without opening anything */
+.files-label-error {
+  flex: 1;
+  min-width: 0;
+  display: -webkit-box;
+  overflow: hidden;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+}
+.files-label-retry.btn {
+  flex: none;
+  height: 20px;
+  min-height: 0;
+  padding: 0 6px;
+}
+.files-label-classes {
+  display: flex;
+  flex-direction: column;
+  padding-left: 26px;
+}
+.files-class-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--text-secondary);
+  font: var(--type-body-sm);
+  text-align: left;
+  cursor: pointer;
+}
+.files-class-box {
+  width: 9px;
+  height: 9px;
+  border-radius: 2px;
+}
+
+/* -------- a label's edit card: the overlay beside the Labels pane, kept inside the pane when there is no room
+   -------- */
+.label-card-slot {
+  display: contents;
+}
+.label-card {
+  position: absolute;
+  left: max(12px, min(calc(var(--side-w, 250px) - 10px), calc(100% - 352px)));
+  bottom: 12px;
+  z-index: 5;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  width: min(340px, calc(100% - 24px));
+  max-height: calc(100% - 24px);
+  overflow: auto;
+  border-radius: var(--radius-card);
+  color: var(--text-primary);
+  font: var(--type-ui-sm);
+}
+/* beside a view the Labels pane starts at the sidebar's top, so its card opens from the top too */
+.files-body.is-view .label-card {
+  top: 12px;
+  bottom: auto;
+}
+/* a new label's top row, Label from prompt: the New view field's form with the send arrow, then the card's × */
+.label-card-lead {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px 6px 12px;
+  border-bottom: 1px solid var(--border-hairline);
+}
+.label-card-lead > .btn {
+  flex: none;
+  width: 22px;
+  height: 22px;
+  color: var(--text-tertiary);
+}
+.label-prompt {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.label-prompt .field {
+  flex: 1;
+  min-width: 0;
+}
+.label-prompt-send.btn {
+  flex: none;
+}
+.label-prompt .label-prompt-send.btn-secondary,
+.label-prompt .label-prompt-send.btn-secondary:disabled {
+  color: var(--text-accent);
+}
+.label-card-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 8px 8px 12px;
+  border-bottom: 1px solid var(--border-hairline);
+}
+.label-card-swatch {
+  flex: none;
+  width: 12px;
+  height: 12px;
+  border-radius: 3px;
+  background: var(--c);
+}
+.label-card-tag {
+  flex: none;
+}
+.label-card-name.field {
+  flex: 1;
+  min-width: 0;
+  font: 500 var(--text-sm) / 1.45 var(--font-body);
+}
+.label-card-head .btn {
+  width: 22px;
+  height: 22px;
+  color: var(--text-tertiary);
+}
+.label-card-grid {
+  display: grid;
+  grid-template-columns: 72px 1fr;
+  gap: 10px;
+  align-items: center;
+  padding: 10px 12px;
+}
+.label-card-key {
+  color: var(--text-tertiary);
+}
+.label-card-grid .seg {
+  width: max-content;
+}
+.label-card-scope {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.label-card-glob.field {
+  flex: 0 1 170px;
+  min-width: 0;
+  height: 24px;
+  padding: 0 8px;
+  font-size: var(--text-mono);
+}
+.label-card-files,
+.label-card-model {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: none;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--text-tertiary);
+  font: var(--type-body-sm);
+  cursor: pointer;
+  transition: var(--transition-color);
+}
+.label-card-files:hover {
+  color: var(--text-primary);
+}
+.label-card-model {
+  gap: 6px;
+  width: max-content;
+  height: 24px;
+  padding: 0 8px;
+  border-radius: var(--radius-ui);
+  background: var(--surface-card);
+  box-shadow: 0 0 0 1px rgba(var(--ink-rgb), 0.14);
+  color: var(--text-primary);
+  font: var(--type-ui-sm);
+}
+.label-card-model .icon {
+  color: var(--text-tertiary);
+}
+.label-card-filelist {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  font: var(--type-mono-sm);
+  color: var(--text-secondary);
+}
+.label-card-file {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.label-card-filedot {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--c, rgba(var(--ink-rgb), 0.18));
+}
+.label-card-body {
+  padding: 0 12px 10px;
+}
+.label-card-text.field {
+  padding: 8px 10px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+  font-size: var(--text-ui-sm);
+}
+.label-card-text.field-mono {
+  font-size: var(--text-mono-sm);
+}
+.label-card-classes {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 0 12px 10px;
+}
+.label-card-classes-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.label-card-hl {
+  color: var(--text-tertiary);
+  font-size: var(--text-2xs);
+}
+.label-card-class {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 26px;
+}
+.label-card-colour {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-chip);
+  background: var(--c);
+  cursor: pointer;
+}
+.label-card-classname.field {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--text-mono);
+}
+.label-card-drop.btn {
+  width: 20px;
+  height: 20px;
+  color: var(--text-tertiary);
+  opacity: 0;
+}
+.label-card-class:hover .label-card-drop.btn,
+.label-card-drop.btn:focus-visible {
+  opacity: 1;
+}
+.label-card-add.btn {
+  align-self: flex-start;
+  margin-left: -8px;
+  font-weight: 400;
+}
+.label-card-foot {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 10px 12px;
+  border-top: 1px solid var(--border-hairline);
+}
+
+/* the edit card in a popover on a card (LabelCard LabelSheet): the card's head, the same fields, and each class's
+   count before its switch */
+.label-sheet-popover.popover {
+  padding: 0;
+}
+.label-sheet-name {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font: 500 var(--text-sm) / 1.45 var(--font-body);
+}
+.label-sheet-count {
+  flex: none;
+  color: var(--text-secondary);
+  font: var(--type-mono-sm);
+  font-variant-numeric: tabular-nums;
+}
+/* the links to Files and to the review, at the foot's left when Regenerate Card follows them */
+.label-sheet-links {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.label-sheet-links:not(:last-child) {
+  margin-right: auto;
+}
+
+/* -------- the reader: the cell's paper behind a hairline, square tabs on the sidebar's step -------- */
+.files-main {
+  position: relative;
+  flex: 1 1 0;
+  min-width: 260px;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--surface-card);
+  overflow: hidden;
+}
+/* the hairline between a docked sidebar and the reader, a border so that the reader's paper cannot cover it; the open
+   tab, when it is the first, leaves its own left rule to it */
+.files-body > .shell-resizer + .files-main {
+  border-left: 1px solid var(--files-rule);
+}
+.files-body > .shell-resizer + .files-main .reader-tab.active:first-child {
+  box-shadow: inset -1px 0 0 var(--files-rule);
+}
+.reader {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  background: var(--surface-card);
+  container-type: inline-size;
+}
+.reader-bar {
+  flex: none;
+  display: flex;
+  align-items: stretch;
+  height: 34px;
+  background: var(--files-side-bg);
+  box-shadow: inset 0 -1px 0 var(--files-rule);
+  color: var(--text-tertiary);
+}
+/* with the File browser's sidebar hidden, the button that shows it is the tree head's icon button, at the bar's left
+   on the views bar's gutter */
+.reader-side-show.btn {
+  flex: none;
+  align-self: center;
+  width: 22px;
+  height: 22px;
+  margin: 0 6px 0 10px;
+  color: var(--text-tertiary);
+}
+.reader-tabs {
+  display: flex;
+  align-items: stretch;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.reader-tab {
+  display: inline-flex;
+  align-items: center;
+  flex: none;
+  gap: 2px;
+  padding: 0 10px 0 12px;
+  box-shadow: inset -1px 0 0 var(--border-hairline);
+  color: var(--text-tertiary);
+}
+.reader-tab.active {
+  background: var(--surface-card);
+  box-shadow: inset 1px 0 0 var(--files-rule), inset -1px 0 0 var(--files-rule);
+  color: var(--text-primary);
+}
+.reader-tab-pick {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: var(--type-ui-sm);
+  white-space: nowrap;
+  cursor: pointer;
+}
+.reader-tab-glyph {
+  color: var(--text-tertiary);
+}
+.reader-tab-x {
+  display: grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  margin-left: 6px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-hl);
+  background: none;
+  color: var(--text-tertiary);
+  opacity: 0;
+  cursor: pointer;
+}
+.reader-tab.active .reader-tab-x,
+.reader-tab:hover .reader-tab-x,
+.reader-tab-x:focus-visible {
+  opacity: 1;
+}
+.reader-tab-x:hover {
+  background: var(--surface-pressed);
+}
+.reader-spacer {
+  flex: 1;
+}
+.reader-modes {
+  align-self: center;
+  padding: 0 8px;
+}
+.reader-find-open.btn {
+  align-self: center;
+  margin: 0 2px 0 6px;
+  color: var(--text-tertiary);
+}
+/* the find bar: a strip under the tab bar with the field, the match count and the previous, next and × buttons */
+.reader-find {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 34px;
+  padding: 0 8px 0 14px;
+  border-bottom: 1px solid rgba(var(--ink-rgb), 0.07);
+  color: var(--text-tertiary);
+}
+.reader-find input {
+  flex: 0 1 420px;
+  min-width: 0;
+  height: 24px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: var(--radius-ui);
+  outline: none;
+  background: var(--surface-card);
+  box-shadow: 0 0 0 1px rgba(var(--ink-rgb), 0.1);
+  font: 400 var(--text-ui-sm) / 1.2 var(--font-body);
+  color: var(--text-primary);
+}
+.reader-find input:focus {
+  box-shadow: 0 0 0 1.5px var(--accent);
+}
+.reader-find input::placeholder {
+  color: var(--text-tertiary);
+}
+.reader-find-glyph {
+  flex: none;
+}
+.reader-find-count {
+  flex: none;
+  margin-right: auto;
+  font: var(--type-ui-sm);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.reader-find .spinner {
+  margin-right: auto;
+}
+.reader-find .btn {
+  flex: none;
+  color: var(--text-tertiary);
+}
+/* the find's matches in the records shown (find.ts markMatches): the span highlight's wash, and a stronger one in the
+   record the find moved to */
+::highlight(reader-find) {
+  background-color: var(--hl-bg);
+}
+::highlight(reader-find-current) {
+  background-color: color-mix(in oklab, var(--accent) 38%, transparent);
+}
+.reader-fragment {
+  align-self: center;
+  max-width: 24ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font: var(--type-mono-sm);
+}
+/* the file labels that are on and highlight this file */
+.reader-filelabels {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 30px;
+  padding: 0 14px;
+  border-bottom: 1px solid rgba(var(--ink-rgb), 0.07);
+}
+.reader-filelabel {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 20px;
+  padding: 0 8px;
+  border-radius: var(--radius-chip);
+  background: color-mix(in oklab, var(--c) 14%, var(--surface-card));
+  color: var(--text-primary);
+  font: var(--type-body-sm);
+  white-space: nowrap;
+}
+.reader-filelabel-bar {
+  width: 3px;
+  height: 11px;
+  border-radius: 1.5px;
+  background: var(--c);
+}
+.reader-main {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+.reader-scroll {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+}
+.reader-body {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  scrollbar-width: none;
+}
+/* columns past the right edge of the body: the paper fades in over the last 32px */
+.reader-edge {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 32px;
+  background: linear-gradient(to right, transparent, var(--surface-card));
+  pointer-events: none;
+}
+.reader-body::-webkit-scrollbar {
+  display: none;
+}
+.reader-body-fill {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+/* the overview ruler and scrollbar beside the reader and the report (Ruler.tsx ReaderRuler): one rail while its track
+   resolves every mark (needsDetail), the lanes drawn in the track under a thumb that frames what is on screen; past
+   that two, the lanes over the whole file with a band over what is on screen, then the scrollbar, whose thumb holds
+   the lanes of what is on screen */
+.reader-ruler {
+  flex: none;
+  box-sizing: border-box;
+  display: flex;
+  gap: 10px;
+  padding: 6px;
+  background: var(--bg-sunken);
+  box-shadow: inset 1px 0 0 var(--border-hairline);
+  user-select: none;
+  touch-action: none;
+}
+.reader-ruler-lanes {
+  position: relative;
+  flex: none;
+  display: flex;
+  gap: 1px;
+  cursor: pointer;
+}
+/* the lanes' stripes and marks, on one canvas whose box Marks sizes to its pixels */
+.reader-ruler-marks {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+.reader-ruler-band {
+  position: absolute;
+  top: 0;
+  left: -2px;
+  right: -2px;
+  border-radius: 1px;
+  background: rgba(var(--ink-rgb), 0.14);
+  box-shadow: 0 0 0 1px rgba(var(--ink-rgb), 0.55);
+  pointer-events: none;
+}
+.reader-ruler-bar {
+  position: relative;
+  flex: none;
+  border-radius: var(--radius-hl);
+  background: rgba(var(--ink-rgb), 0.05);
+  cursor: pointer;
+}
+.reader-ruler-thumb {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  box-sizing: border-box;
+  border: 1px solid rgba(var(--ink-rgb), 0.5);
+  border-radius: var(--radius-chip);
+  background: var(--surface-card);
+  cursor: grab;
+}
+.reader-ruler[data-drag] .reader-ruler-thumb {
+  border-color: rgba(var(--ink-rgb), 0.75);
+  cursor: grabbing;
+}
+/* one rail: the thumb frames the span on screen over the lanes in the track */
+.reader-ruler-thumb.finder {
+  background: rgba(var(--ink-rgb), 0.08);
+}
+.reader-ruler-thumb.plain {
+  border: 0;
+  border-radius: var(--radius-hl);
+  background: rgba(var(--ink-rgb), 0.22);
+}
+.reader-ruler-zoom {
+  position: absolute;
+  inset: 2px;
+  display: flex;
+  gap: 2px;
+  overflow: hidden;
+  border-radius: 2px;
+}
+.reader-ruler-zl {
+  position: relative;
+  flex: 1;
+  background: rgba(var(--ink-rgb), 0.04);
+}
+.reader-ruler-zl i {
+  position: absolute;
+  left: 0;
+  right: 0;
+}
+/* a find's match in a record on screen: a 3px mark at its place, ringed in the paper */
+.reader-ruler-zl i.hit {
+  left: -1px;
+  right: -1px;
+  height: 3px;
+  margin-top: -1.5px;
+  border-radius: 1px;
+  box-shadow: 0 0 0 1px var(--surface-card);
+}
+/* a 1px line of the paper between the records on screen */
+.reader-ruler-seps {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+.reader-ruler-seps i {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 1px;
+  margin-top: -1px;
+  background: var(--surface-card);
+}
+.reader-more {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-height: 36px;
+  padding: 6px;
+}
+.reader-error-text {
+  padding: 8px 14px;
+  color: var(--status-negative);
+  font: var(--type-body);
+}
+.reader-error-detail {
+  color: var(--text-tertiary);
+  font: var(--type-mono);
+  overflow-wrap: anywhere;
+}
+.viewer-frame {
+  flex: 1;
+  display: block;
+  width: 100%;
+  min-height: 0;
+  border: 0;
+  background: transparent;
+}
+.reader-fail {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 10px 14px;
+}
+.reader-noview {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  width: min(440px, 100%);
+  margin: 48px auto 24px;
+  padding: 0 20px;
+  text-align: center;
+}
+.reader-noview-reason {
+  font: var(--type-body);
+  overflow-wrap: anywhere;
+}
+/* an image, a recording or a video of the corpus, centred in the reader at its own size, never past the reader's */
+.reader-media {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  overflow: auto;
+}
+.reader-media img,
+.reader-media video {
+  max-width: 100%;
+  max-height: 100%;
+  border-radius: var(--radius-ui);
+}
+.reader-media audio {
+  width: min(560px, 100%);
+}
+.reader-viewbar {
+  position: sticky;
+  top: 0;
+  z-index: var(--z-sticky);
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 14px;
+  background: var(--surface-card);
+}
+/* a run of hidden system records in a transcript: one line in the tertiary where the run stands, with Show */
+.reader-hidden-run {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 20px 6px 52px;
+  border-bottom: 1px solid rgba(var(--ink-rgb), 0.07);
+  color: var(--text-tertiary);
+  font: var(--type-ui-sm);
+  font-variant-numeric: tabular-nums;
+}
+
+/* -------- records: a row each, the label gutter, the line number, the head in mono, the text; a highlighted value
+   with nothing to mark as a tint behind the text -------- */
+.reader-record {
+  position: relative;
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr);
+  gap: 0 12px;
+  padding: 10px 20px 10px 12px;
+  border-bottom: 1px solid rgba(var(--ink-rgb), 0.07);
+}
+/* records out of sight are neither laid out nor painted, so a resize or scroll reflows only those near the view */
+.reader-record {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 160px;
+}
+.reader-line {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 24px;
+}
+/* the label gutter (views/common.tsx LaneGutter): a --lane-w column per label that is on, filled in the record's class
+   colour; the line number moves right past it */
+.reader {
+  --lane-w: 4px;
+  --lane-pitch: 13px;
+}
+.reader-gutter {
+  position: absolute;
+  left: 4px;
+  top: 8px;
+  bottom: 8px;
+  display: flex;
+  gap: calc(var(--lane-pitch) - var(--lane-w));
+  pointer-events: none;
+}
+.reader-gutter-cell {
+  width: var(--lane-w);
+  border-radius: 1px;
+  background: rgba(var(--ink-rgb), 0.05);
+  pointer-events: auto;
+}
+.reader-record.has-gutter {
+  padding-left: calc(8px + var(--lanes, 0) * var(--lane-pitch));
+}
+.reader-line.has-gutter {
+  padding-left: calc(4px + var(--lanes, 0) * var(--lane-pitch));
+}
+.reader-line > .reader-gutter {
+  top: 0;
+  bottom: 0;
+}
+.reader-line > .reader-gutter > .reader-gutter-cell {
+  border-radius: 0;
+}
+/* the gutter's head: the labels' marks (LabelMark) over their columns, on the paper with a hairline ring, held at
+   the top of the body as it scrolls, taking no height */
+.reader-lanehead {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  height: 0;
+}
+.reader-lanehead-tags {
+  position: absolute;
+  top: 2px;
+  left: calc(4px + var(--lane-w) / 2 - var(--lane-pitch) / 2 - 2px);
+  display: flex;
+  padding: 2px;
+  border-radius: var(--radius-chip);
+  background: var(--surface-card);
+  box-shadow: 0 0 0 1px var(--border-hairline);
+}
+/* room above and after the marks for a multi-class label's number */
+.reader-lanehead-tags:has(.label-mark-n) {
+  padding-top: 8px;
+}
+.reader-lanehead-tags:has(> .reader-lanehead-tag:last-child .label-mark-n) {
+  padding-right: 6px;
+}
+.reader-table thead th.reader-table-gutter:has(.label-mark-n) {
+  padding-top: 10px;
+}
+.reader-lanehead-tag,
+.reader-table-tag {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--lane-pitch);
+  height: 15px;
+}
+/* over a column a single-class label's square is 9px, the size of a multi-class label's glyph outline beside it */
+.reader-lanehead-tag .files-label-box,
+.reader-table-tag .files-label-box {
+  width: 9px;
+  height: 9px;
+  border-radius: 2px;
+}
+.reader-lineno {
+  font: 400 10.5px / 1.5 var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--text-tertiary);
+  text-align: right;
+  user-select: none;
+}
+.reader-record > .reader-lineno {
+  padding-top: 2px;
+}
+.reader-record-main {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+.reader-record-head {
+  font: var(--type-mono-sm);
+  color: var(--text-tertiary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.reader-record-body {
+  min-width: 0;
+  border-radius: var(--radius-hl);
+  color: var(--text-secondary);
+  font: 400 var(--text-ui-sm) / 1.6 var(--font-body);
+  overflow-wrap: anywhere;
+}
+/* a post whose body is empty says so in place of the text */
+.reader-msg-empty {
+  color: var(--text-tertiary);
+}
+.reader-record.has-tint .reader-record-body,
+.reader-line.has-tint {
+  background: color-mix(in oklab, var(--tint) 16%, transparent);
+}
+/* a text the focused label marks: its colour at 24% behind it, no underline; a text another label marks: a 2px
+   underline in its colour, the text as it is */
+.reader-span {
+  border-radius: 2px;
+  background: color-mix(in oklab, var(--c) 24%, transparent);
+  color: var(--text-primary);
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
+  transition: background-color var(--dur-base) var(--ease-out);
+}
+.reader-span.is-under {
+  background: none;
+  color: inherit;
+  text-decoration: underline 2px var(--c);
+  text-underline-offset: 3px;
+  text-decoration-skip-ink: none;
+}
+/* a line: the number in a gutter, the text beside it */
+.reader-line {
+  position: relative;
+  display: grid;
+  grid-template-columns: 32px minmax(0, 1fr);
+  gap: 0 12px;
+  padding: 1px 16px 1px 8px;
+}
+.reader-line > .reader-lineno {
+  color: var(--text-placeholder);
+  line-height: 1.75;
+}
+.reader-card-body {
+  min-width: 0;
+}
+.reader-block {
+  position: relative;
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.reader-block + .reader-block {
+  margin-top: 4px;
+}
+/* a tool call, its result, a raw record, an event: inset paper, one step down, in mono */
+.reader-tool_use,
+.reader-tool_result,
+.reader-raw,
+.reader-event {
+  padding: 4px 8px;
+  border-radius: var(--radius-ui);
+  background: var(--bg-sunken);
+  font: var(--type-mono);
+  color: var(--text-secondary);
+}
+.reader-tool-name {
+  font-weight: 500;
+  color: var(--text-primary);
+}
+/* the error is the output: the negative colour on the same inset paper, nothing else changes */
+.reader-tool_result.reader-error {
+  color: var(--status-negative);
+}
+.reader-thinking {
+  color: var(--text-tertiary);
+}
+.reader-collapse {
+  position: relative;
+}
+.reader-collapsed > .reader-block {
+  max-height: calc(6 * 1.5em + 8px);
+  overflow: hidden;
+}
+.reader-collapsed::after {
+  content: '';
+  position: absolute;
+  left: 2px;
+  right: 0;
+  bottom: 26px;
+  height: 20px;
+  background: linear-gradient(transparent, var(--bg-sunken));
+  pointer-events: none;
+}
+.reader-expand {
+  margin: 2px 0;
+  color: var(--text-tertiary);
+}
+.reader-expand .dim {
+  margin-left: 4px;
+  font-size: var(--text-mono-sm);
+}
+.reader-sys-summary {
+  max-width: 100%;
+  margin-left: -8px;
+  color: var(--text-tertiary);
+}
+.reader-sys-summary .btn-label {
+  font: var(--type-mono-sm);
+}
+.reader-session {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 12px 14px 6px;
+  font: var(--type-label);
+  letter-spacing: var(--tracking-label);
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+}
+.reader-session::before,
+.reader-session::after {
+  content: '';
+  flex: 1;
+  border-top: 1px solid var(--border-hairline);
+}
+/* the record a followed ref points at: a wash that fades out by 1.5 s (views/common.tsx HIT_MS), leaving no edge */
+.reader-card.reader-hit::after,
+.reader-block.reader-hit::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: var(--accent-soft);
+  pointer-events: none;
+  animation: hit-fade 1.5s var(--ease-out) forwards;
+}
+@keyframes hit-fade {
+  0%,
+  30% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+/* -------- markdown files -------- */
+.reader-md {
+  font: var(--type-body);
+  color: var(--text-primary);
+}
+.reader-md-file {
+  max-width: 820px;
+  padding: 8px 8px 24px;
+}
+.reader-md > :first-child {
+  margin-top: 0;
+}
+.reader-md p,
+.reader-md ul,
+.reader-md ol,
+.reader-md pre,
+.reader-md table,
+.reader-md blockquote {
+  margin: 0 0 8px;
+}
+.reader-md ul,
+.reader-md ol {
+  padding-left: 22px;
+}
+/* h1 takes the shared step in base.css */
+.reader-md h2 {
+  margin: 16px 0 6px;
+  font: var(--type-heading);
+}
+.reader-md h3 {
+  margin: 16px 0 6px;
+  font: var(--type-subheading);
+}
+.reader-md pre {
+  padding: 10px 12px;
+  background: var(--bg-sunken);
+  border-radius: var(--radius-ui);
+  font: var(--type-mono);
+  color: var(--code-text);
+  overflow: auto;
+}
+/* inline code takes the shared rule in base.css */
+.reader-md table {
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+  border-collapse: collapse;
+  font: var(--type-body);
+}
+.reader-md th,
+.reader-md td {
+  padding: 5px 10px;
+  border: 0;
+  border-bottom: 1px solid var(--border-hairline);
+  text-align: left;
+  vertical-align: top;
+  font-variant-numeric: tabular-nums;
+}
+.reader-md thead th {
+  border-bottom-color: var(--border-subtle);
+  color: var(--text-tertiary);
+  font: var(--type-label);
+  letter-spacing: var(--tracking-label);
+  text-transform: uppercase;
+}
+/* a numeric cell reads as it does in a kernel table (outputs.css): mono, right aligned */
+.reader-md tbody td.mono {
+  font-family: var(--font-mono);
+  text-align: right;
+}
+.reader-md blockquote {
+  padding-left: 12px;
+  border-left: 2px solid var(--border-subtle);
+  color: var(--text-secondary);
+}
+
+/* -------- text lines, raw lines: the code's own ink (the primary), syntax colours from styles/code.css -------- */
+.reader-lines {
+  padding: 8px 0;
+}
+.reader-textline .reader-block {
+  min-height: 1.5em;
+  font: 400 var(--text-mono-sm) / 1.75 var(--font-mono);
+  color: var(--code-text);
+}
+.reader-textline .reader-block + .reader-block {
+  margin-top: 0;
+}
+.reader-rawview {
+  padding: 10px 0;
+}
+.reader-rawview-pre {
+  margin: 0;
+  padding: 0;
+  font: 400 var(--text-mono-sm) / 1.75 var(--font-mono);
+  color: var(--code-text);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+/* -------- table view: caps header, mono rows of one line each, long values cut with an ellipsis. Rows a label
+   highlights take a light tint and a dot per label in the pinned line-number column. The header and line numbers
+   stay put as the body scrolls both ways -------- */
+.reader-table-view {
+  box-sizing: border-box;
+  width: max-content;
+  min-width: 100%;
+  padding: 4px 16px 8px 0;
+}
+/* a markdown table in the Rendered view scrolls sideways on its own */
+.reader-table-wrap {
+  padding: 4px 16px 8px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.reader-table {
+  border-collapse: collapse;
+  width: 100%;
+  font: var(--type-mono-sm);
+  color: var(--text-primary);
+}
+.reader-table th,
+.reader-table td {
+  border: 0;
+  border-bottom: 1px solid rgba(var(--ink-rgb), 0.07);
+  padding: 5px 12px 5px 0;
+  text-align: left;
+  vertical-align: middle;
+  white-space: nowrap;
+}
+.reader-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: var(--z-sticky);
+  padding-top: 6px;
+  padding-bottom: 6px;
+  background: var(--surface-card);
+  border-bottom-color: rgba(var(--ink-rgb), 0.14);
+  color: var(--text-tertiary);
+  font: 400 10.5px / 1.2 var(--font-body);
+  letter-spacing: var(--tracking-label);
+  text-transform: uppercase;
+}
+/* a cell's one line: a short value up to 20ch, a long text up to 44ch, cut with an ellipsis */
+.reader-table-clip {
+  display: block;
+  max-width: 20ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.reader-table .reader-table-cell.text .reader-table-clip {
+  max-width: 44ch;
+  color: var(--text-secondary);
+}
+.reader-table .reader-table-gutter {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  width: 1%;
+  padding-left: 12px;
+  background: var(--surface-card);
+  color: var(--text-tertiary);
+}
+.reader-table thead th.reader-table-gutter {
+  z-index: calc(var(--z-sticky) + 1);
+}
+/* a row's label slots before its line number, one per label that is on (--dots) in the order they were turned on and
+   --lane-pitch wide, under the labels' marks in its head: a 6px dot in the row's class colour, split where it has two,
+   nothing where it has none */
+.reader-table-dots {
+  display: inline-flex;
+  align-items: center;
+  width: calc(var(--dots, 0) * var(--lane-pitch));
+  margin-right: 4px;
+  vertical-align: middle;
+}
+.reader-table-dot {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  margin: 0 calc((var(--lane-pitch) - 6px) / 2);
+  border-radius: 50%;
+}
+.reader-table-dot.is-empty {
+  visibility: hidden;
+}
+/* a highlighted row's tint is lighter than a mark's 24%, so the texts marked in it still stand out */
+.reader-table-row.has-tint td {
+  background: color-mix(in oklab, var(--tint) 10%, transparent);
+}
+.reader-table-row:hover td {
+  background: var(--surface-hover);
+}
+/* a followed ref's row takes the same brief wash as a record, drawn as an inset shadow so it fades over the pinned
+   cells' own fill too */
+.reader-table-row.reader-hit td {
+  animation: hit-cell-fade 1.5s var(--ease-out) forwards;
+}
+@keyframes hit-cell-fade {
+  0%,
+  30% {
+    box-shadow: inset 0 0 0 100vmax var(--accent-soft);
+  }
+  100% {
+    box-shadow: inset 0 0 0 100vmax transparent;
+  }
+}
+/* the pinned line-number cell mixes the row's tint or hover into the paper, so the columns under it do not show
+   through */
+.reader-table-row.has-tint td.reader-table-gutter {
+  background: color-mix(in oklab, var(--tint) 10%, var(--surface-card));
+}
+.reader-table-row:hover td.reader-table-gutter {
+  background: linear-gradient(var(--surface-hover), var(--surface-hover)), var(--surface-card);
+}
+/* the empty rows that stand for the rows not drawn above and below the view; each keeps its rule, so the row after it
+   is as tall as it is among the others */
+.reader-table .reader-table-pad td {
+  padding: 0;
+}
+/* in a header cell, the width of its column's widest text among the records loaded, in the cells' fonts, with no
+   height */
+.reader-table-size {
+  display: block;
+  height: 0;
+  font: var(--type-mono-sm);
+  line-height: 0;
+}
+.reader-table-size.mono {
+  font-size: var(--text-mono);
+}
+.reader-table-digits {
+  display: inline-block;
+}
+
+/* -------- a view picked in the views bar: its name, the file it shows, its page on the cell's paper -------- */
+.view-pane {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  padding: 20px 24px;
+}
+/* beside the Labels sidebar the mode switch wraps under the name, which keeps at least 180px */
+.view-pane-head {
+  flex: none;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px 16px;
+  padding-bottom: 14px;
+}
+.view-pane-title {
+  flex: 1 1 180px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+/* with the Labels sidebar hidden, the button that shows it stands before the view's name */
+.view-pane-side-show.btn {
+  flex: none;
+  margin: -1px -4px 0 -8px;
+  color: var(--text-tertiary);
+}
+/* a name longer than that keeps one line and ends in an ellipsis, and a path breaks inside a word where it must, so
+   neither runs past the head */
+.view-pane-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font: 500 15px / 1.35 var(--font-body);
+  color: var(--text-primary);
+}
+.view-pane-file {
+  overflow-wrap: break-word;
+  font: var(--type-mono-sm);
+  color: var(--text-tertiary);
+}
+.view-pane-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border-radius: var(--radius-card);
+  background: var(--surface-card);
+  box-shadow: var(--ring-card), 0 0 0 1px var(--border-hairline);
+}
+.view-pane-raw {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* -------- database -------- */
+.reader-forge {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.reader-forge-bar {
+  flex-wrap: wrap;
+}
+.reader-forge-main {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+.reader-forge-rows {
+  flex: 1;
+  min-width: 0;
+  overflow: auto;
+  padding: 8px 10px;
+}
+.reader-forge-detail {
+  flex: 0 0 min(45%, 420px);
+  padding: 8px 10px;
+  border-left: 1px solid var(--border-hairline);
+  overflow: auto;
+  font: var(--type-body);
+}
+.reader-forge-detail-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 6px;
+  font: var(--type-mono);
+}
+.reader-pager {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+  font: var(--type-body);
+  color: var(--text-tertiary);
+}
+.reader-grid {
+  border-collapse: collapse;
+  font: var(--type-mono);
+}
+.reader-grid th,
+.reader-grid td {
+  max-width: 320px;
+  padding: 4px 10px;
+  border: 0;
+  border-bottom: 1px solid var(--border-hairline);
+  text-align: left;
+  vertical-align: top;
+  overflow: hidden;
+  text-overflow: clip;
+  white-space: nowrap;
+  mask-image: linear-gradient(to right, #000 calc(100% - 22px), transparent);
+}
+.reader-grid th {
+  position: sticky;
+  top: 0;
+  z-index: var(--z-sticky);
+  background: var(--surface-card);
+  font: var(--type-label);
+  letter-spacing: var(--tracking-label);
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+.reader-grid tbody tr {
+  cursor: pointer;
+}
+.reader-grid td.reader-grid-key {
+  font-weight: 500;
+  color: var(--text-primary);
+}
+.reader-grid tbody tr:hover td {
+  background: var(--surface-hover);
+}
+.reader-grid tbody tr.reader-row-selected td {
+  background: var(--surface-selected);
+}
+.reader-kv {
+  width: 100%;
+  border-collapse: collapse;
+}
+.reader-kv th {
+  padding: 2px 8px 2px 0;
+  text-align: left;
+  vertical-align: top;
+  white-space: nowrap;
+  font: var(--type-mono-sm);
+  color: var(--text-tertiary);
+}
+.reader-kv td.reader-kv-val {
+  padding: 2px 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font: var(--type-mono);
+}
+.reader-sql {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 45%;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border-hairline);
+}
+.reader-sql .field-area {
+  resize: vertical;
+}
+.reader-forge-tables .reader-count {
+  margin-left: 5px;
+}
+.reader-forge-tables .seg-label {
+  display: inline-flex;
+  align-items: center;
+}
+.reader-sql-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font: var(--type-body);
+  color: var(--text-tertiary);
+}
+.reader-sql-result {
+  min-height: 0;
+  overflow: auto;
+}
+
+/* the pane's own buttons draw as the rows and heads they are, not as the ghost button a bare <button> gets */
+.files-side-title,
+.files-label-toggle,
+.files-class-toggle,
+.reader-tab-pick,
+.reader-tab-x,
+.label-card-files,
+.label-card-model {
+  justify-content: flex-start;
+  min-height: 0;
+}
+.files-side-title:hover,
+.files-label-toggle:hover,
+.files-class-toggle:hover,
+.reader-tab-pick:hover,
+.label-card-files:hover {
+  background: none;
+}
+.files-label-toggle,
+.files-class-toggle,
+.reader-tab-pick,
+.label-card-files {
+  font-weight: 400;
+}
+.reader-md-file {
+  padding: 16px 20px 24px;
+}

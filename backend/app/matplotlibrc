@@ -1,0 +1,44 @@
+# thimble's defaults for a matplotlib figure on a card. notebook._launch points a kernel's MATPLOTLIBRC here (unless
+# the environment names one); a matplotlibrc in the corpus's root folder still wins.
+#
+# Figures follow the Vega chart theme (frontend/src/lib/vizTheme.ts): no figure or axes fill, the nominal palette in
+# order, label-grey chrome with hairline axes and a faint y grid. 7.2 in fills a card body at the default card width.
+# Text is written as SVG text in the page's faces (page_fonts.py), with matplotlib's defaults after them.
+
+axes.prop_cycle: cycler('color', ['0072b2', 'e69f00', '009e73', 'd62728', 'cc79a7', '8c65e8', '8a6d3b'])
+image.cmap: cividis
+
+figure.figsize: 7.2, 4.0
+figure.facecolor: none
+axes.facecolor: none
+savefig.facecolor: none
+savefig.transparent: True
+
+font.size: 10
+axes.titlesize: 11
+axes.titleweight: normal
+axes.titlelocation: left
+axes.labelsize: 10
+xtick.labelsize: 9
+ytick.labelsize: 9
+legend.fontsize: 9
+legend.frameon: False
+
+text.color: 64625b
+axes.labelcolor: 64625b
+xtick.color: 64625b
+ytick.color: 64625b
+axes.edgecolor: a19d94
+axes.linewidth: 0.8
+axes.spines.top: False
+axes.spines.right: False
+axes.grid: True
+axes.grid.axis: y
+grid.color: cfcbc2
+grid.linewidth: 0.6
+lines.linewidth: 1.5
+
+svg.fonttype: none
+font.family: sans-serif
+font.sans-serif: Hanken Grotesk, DejaVu Sans, Bitstream Vera Sans, Computer Modern Sans Serif, Lucida Grande, Verdana, Geneva, Lucid, Arial, Helvetica, Avant Garde, sans-serif
+font.monospace: Geist Mono, DejaVu Sans Mono, Bitstream Vera Sans Mono, Computer Modern Typewriter, Andale Mono, Nimbus Mono L, Courier New, Courier, Fixed, Terminal, monospace
