@@ -190,10 +190,10 @@ class _Resp(io.BytesIO):
 
 
 async def test_auto_is_claude_code_s_auto_mode_and_a_call_it_refuses_waits_for_the_analyst(fake, monkeypatch):
-    """Auto pings intermittently: Claude Code's auto mode decides each call, and a call it refuses, as risky or with no
-    verdict, comes to the card through the PermissionDenied hook with the reason and waits like a request. An allow is
-    remembered for the call made again, which the hook before each call allows once, and a deny denies that call once.
-    The allowed call shows as not run."""
+    """Auto pings intermittently: Claude Code's auto mode decides each call, and a call it refuses as risky comes to
+    the card through the PermissionDenied hook with the reason and waits like a request. An allow is remembered for the
+    call made again, which the hook before each call allows once, and a deny denies that call once. The allowed call
+    shows as not run."""
     monkeypatch.setenv("FAKE_MODE", "sleep")
     _listen()
     channel.post(CORPUS, "start", {"text": "", "permissions": "auto"})
@@ -204,10 +204,11 @@ async def test_auto_is_claude_code_s_auto_mode_and_a_call_it_refuses_waits_for_t
     assert settings["hooks"]["PermissionDenied"] == agent_session.permission_hooks(CORPUS)["PermissionDenied"]
     inp = {"command": "python3 -c 'print(6*7)'", "description": "Multiply"}
     body = dict(session=KEY, event="PermissionDenied", tool_name="Bash", tool_input=inp, agent_id="a2",
-                tool_use_id="toolu_r1", reason="Classifier unavailable")
+                tool_use_id="toolu_r1", reason="Runs code the analyst did not ask for")
     call = asyncio.ensure_future(agent_session.permission_request_route(CORPUS, agent_session.PermissionRequestBody(**body)))
     [p] = await _pending(run.chat)
-    assert p["refused"] == "Classifier unavailable" and p["agent_id"] == "a2"
+    assert p["refused"] == "Runs code the analyst did not ask for" and p["agent_id"] == "a2"
+    assert "rechecked" not in p and "deny_after_s" not in p, "a refusal waits for the analyst for good"
     await asyncio.sleep(0.2)
     assert not call.done(), "it waits for the analyst"
     agent_session.answer(CORPUS, run.chat, p["id"], True)
@@ -232,6 +233,56 @@ async def test_auto_is_claude_code_s_auto_mode_and_a_call_it_refuses_waits_for_t
     assert "toolu_r2" not in session._not_run, "a denied call stays refused"
     assert await agent_session.permission_request_route(CORPUS, pre(inp)) == {"behavior": "deny",
                                                                              "message": agent_session.DENIED_LINE}
+    await orient_session.stop(CORPUS)
+    await _done()
+
+
+async def test_a_call_auto_mode_gave_no_verdict_on_goes_back_to_it_before_the_card_asks_and_is_denied_unanswered(
+        fake, monkeypatch):
+    """"Classifier unavailable" is no verdict, so thimble judges nothing itself: after each short wait the hook answers
+    `retry` with nothing remembered, the refused call shows as not run, and the call made again is auto mode's to judge.
+    Once the waits for that call are spent the card asks, saying so, and in the orientation's mode an unanswered card
+    denies the call after CLASSIFIER_ASK_S rather than holding the orientation. A switch of mode during a wait answers
+    the call as it answers one on the card."""
+    monkeypatch.setattr(agent_session, "CLASSIFIER_WAITS_S", (0.05, 0.05))
+    monkeypatch.setattr(agent_session, "CLASSIFIER_ASK_S", 0.4)
+    monkeypatch.setenv("FAKE_MODE", "sleep")
+    _listen()
+    channel.post(CORPUS, "start", {"text": "", "permissions": "auto"})
+    run = await orient_session.start(CORPUS, "")
+    inp = {"command": "python3 count.py", "description": "Count"}
+
+    def refused(n: int, i: dict = inp) -> "asyncio.Future":
+        body = agent_session.PermissionRequestBody(session=KEY, event="PermissionDenied", tool_name="Bash", tool_input=i,
+                                                   agent_id="w1", tool_use_id=f"toolu_c{n}", reason="Classifier unavailable")
+        return asyncio.ensure_future(agent_session.permission_request_route(CORPUS, body))
+
+    pre = agent_session.PermissionRequestBody(session=KEY, event="PreToolUse", tool_name="Bash", tool_input=inp, agent_id="w1")
+    for n in (1, 2):
+        call = refused(n)
+        await asyncio.sleep(0.01)
+        assert not call.done() and not agents.read_meta(CORPUS, run.chat).get("permissions"), "no card while it waits"
+        assert await asyncio.wait_for(call, 2) == {"behavior": "allow"}
+        assert permission_hook.decision({"behavior": "allow"}, permission_hook.DENIED) == \
+            {"hookSpecificOutput": {"hookEventName": "PermissionDenied", "retry": True}}
+        assert f"toolu_c{n}" in session._not_run
+        assert await agent_session.permission_request_route(CORPUS, pre) == {}, "the call made again is auto mode's"
+    call = refused(3)
+    [p] = await _pending(run.chat)
+    assert (p["refused"], p["rechecked"], p["deny_after_s"]) == ("Classifier unavailable", 2, 0.4)
+    answer = await asyncio.wait_for(call, 2)
+    assert answer["behavior"] == "deny" and permission_hook.decision(answer, permission_hook.DENIED) is None
+    assert not agents.read_meta(CORPUS, run.chat).get("permissions")
+    assert await agent_session.permission_request_route(CORPUS, pre) == {}, "an unanswered call is not remembered"
+    log = [json.loads(line) for line in (config.workspace_dir(CORPUS) / agents.PERMISSIONS_LOG).read_text().splitlines()]
+    assert [e["event"] for e in log] == ["rechecked", "rechecked", "asked", "answered"]
+    assert log[-1]["answer"] == "deny: nobody answered in time"
+
+    monkeypatch.setattr(agent_session, "CLASSIFIER_WAITS_S", (5.0,))
+    call = refused(4, {"command": "python3 other.py"})
+    await asyncio.sleep(0.01)
+    assert agent_session.set_mode(CORPUS, run.chat, "bypass") == {"mode": "auto", "switching": "bypass"}
+    assert await asyncio.wait_for(call, 2) == {"behavior": "deny", "message": tools.hint(agent_session.MODE_SWITCHING)}
     await orient_session.stop(CORPUS)
     await _done()
 

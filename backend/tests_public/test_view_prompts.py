@@ -37,6 +37,14 @@ def test_a_view_ticket_makes_labels_first_class_and_leaves_their_controls_to_the
         assert words in labels, words
 
 
+def test_a_view_ticket_keeps_a_unit_by_a_kept_record_of_any_of_its_files():
+    """A filter on a label that marks one file's records, such as deletions in an events file beside the revisions of
+    the same pages, keeps the units whose records of that file it keeps, rather than emptying a view that keeps its
+    units by another file's records."""
+    labels = prompts.section("dev-view", "Labels")
+    assert "A unit stays when `thimble.kept_unit(refs)` holds for the refs of all the records it gathers" in labels
+
+
 def _orient_views() -> str:
     return prompts.load("orient").split("#### Views", 1)[1].split("#### The report", 1)[0]
 

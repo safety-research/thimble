@@ -283,6 +283,25 @@ async def test_once_its_resumes_are_spent_the_orientation_waits_for_the_analyst_
     assert orientation.read_run(CORPUS)["permissions"] == "manual", "a follow-up runs in Manual too"
 
 
+async def test_an_orientation_nobody_switches_retries_auto_by_itself_after_its_wait(fake, monkeypatch):
+    """The wait for the analyst after auto mode ended the orientation too often is bounded: its alert says when Auto is
+    retried, and once AUTO_HOLD_S passes unanswered the orientation resumes in Auto with its work and can finish."""
+    monkeypatch.setenv("FAKE_MODE", "auto_off")
+    monkeypatch.setenv("FAKE_TIMES", "3")
+    monkeypatch.setattr(agent_session, "AUTO_RESUMES", 1)
+    monkeypatch.setattr(agent_session, "AUTO_HOLD_S", 0.5)
+    q = _listen()
+    run = await _auto_orientation(q)
+    alert = lambda: agents.read_meta(CORPUS, run.chat).get("alert") or {}  # noqa: E731
+    await _until(lambda: alert().get("cause") == agent_session.AUTO_OFF_KIND, "no alert")
+    assert alert()["reason"] == agent_session.AUTO_OFF_REASON and alert()["until"]
+    await _done(run)
+    argvs = _argvs(fake)
+    assert len(argvs) == 4 and all(_flag(a, "--permission-mode") == "auto" for a in argvs)
+    meta = agents.read_meta(CORPUS, run.chat)
+    assert meta["status"] == "done" and not meta.get("alert")
+
+
 async def test_a_session_in_the_analyst_s_own_auto_mode_fails_with_claude_code_s_words(fake, monkeypatch):
     """A session with no mode of thimble's has no switch to wait for: once its resumes are spent it fails, and its
     summary is Claude Code's own line, never a bare exit code."""

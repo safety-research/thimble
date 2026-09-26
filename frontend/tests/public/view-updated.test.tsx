@@ -1,13 +1,14 @@
 // @vitest-environment jsdom
 // A newer version of a view while the analyst browses it (files/viewVersion.tsx, backend views.VERSIONS_SUBDIR): the
 // pane keeps the page of the version it opened and says Updated with Reload in its head; Reload asks the page what the
-// analyst is looking at and loads the newer version, which gets it back; the analyst's own Undo loads at once. A newer
-// version no pane shows waits as updated, with the views bar's dot, until opened. The server is a fake fetch.
+// analyst is looking at and loads the newer version, which gets it back; the analyst's own Undo loads at once. While
+// the newer version builds, the view stays in the bar, its name shimmering, and open at its version. A newer version no
+// pane shows waits as updated, with the views bar's dot, until opened. The server is a fake fetch.
 import { act, useState } from 'react'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 import { ViewPane } from '../../src/files/ViewPane.tsx'
 import { holdShown, isShown, markOpened, onBuilt, useOpenAskedViews, useUpdatedViews } from '../../src/files/viewReady.ts'
-import { ViewsBar, type BuiltView } from '../../src/files/ViewsBar.tsx'
+import { useViews, ViewsBar, type BuiltView } from '../../src/files/ViewsBar.tsx'
 import type { FilesLabels } from '../../src/files/useLabels.ts'
 import { dispatch } from '../../src/lib/events.ts'
 import { mount, settle, unmountAll } from './mount.tsx'
@@ -82,6 +83,67 @@ describe('a newer version of a view the analyst has open', () => {
     expect(el.querySelector('iframe')).not.toBeNull()
     unmountAll()
     expect(isShown('w', 'threads')).toBe(false)
+  })
+})
+
+describe('a view the orientation, a change or a dev ticket improves while the analyst has it open', () => {
+  test('stays in the bar and open on its version while the new one builds, then says Updated', async () => {
+    type Row = { status: string; revision?: boolean; version: string }
+    let row: Row = { status: 'built', version: 'aaaaaaaaaaaa' }
+    vi.stubGlobal('fetch', async (url: string, init?: RequestInit) => {
+      const u = String(url)
+      calls.push({ url: u, method: init?.method ?? 'GET' })
+      if (u.includes('/frame')) return new Response('<html><head></head><body></body></html>', { status: 200 })
+      const proposal = { slug: 'threads', name: 'Threads', why: '', claims: ['board.jsonl'], arrangement: '', proposed_by: 'orient', ts: 't', status: row.status, ...(row.revision ? { revision: true } : {}) }
+      const view = { slug: 'threads', name: 'Threads', origin: 'workspace', ok: true, claims: ['board.jsonl'], version: row.version, first_file: 'board.jsonl' }
+      const body = u.endsWith('/views/proposals') ? [proposal] : u.endsWith('/views') ? [view] : {}
+      return new Response(JSON.stringify(body), { status: 200, headers: { 'content-type': 'application/json' } })
+    })
+    function Files() {
+      const { views, proposals } = useViews('improve')
+      const shown = views.find((v) => v.slug === 'threads')
+      return (
+        <>
+          <ViewsBar ws="improve" value="v:threads" onChange={() => undefined} views={views} proposals={proposals} />
+          {shown ? <ViewPane ws="improve" view={shown} path="board.jsonl" kind="board" labels={labels} /> : <span className="browser">File browser</span>}
+        </>
+      )
+    }
+    const el = await mount(<Files />)
+    await settle()
+    const frame = el.querySelector('iframe')
+    expect(frame).not.toBeNull()
+    const step = async (next: Row) => {
+      row = next
+      dispatch({ type: 'view', slug: 'threads', status: next.status, ...(next.status === 'built' ? { version: next.version } : {}) } as never)
+      await act(async () => new Promise((r) => setTimeout(r, 250)))
+      await settle()
+    }
+    const option = () => el.querySelector('.files-views .seg-opt[data-anchor="view:threads"]')
+    for (const status of ['queued', 'building']) {
+      await step({ status, revision: true, version: 'aaaaaaaaaaaa' })
+      expect(el.querySelector('.browser'), `${status}: the pane stays on the view`).toBeNull()
+      expect(el.querySelector('iframe'), `${status}: the page is not reloaded`).toBe(frame)
+      expect(option()?.classList.contains('is-updating'), `${status}: its name shimmers in the bar`).toBe(true)
+      expect(el.querySelector('.files-proposal'), 'not a proposal with a spinner').toBeNull()
+      expect(el.querySelector('.view-updated')).toBeNull()
+    }
+    await step({ status: 'built', version: 'bbbbbbbbbbbb' })
+    expect(el.querySelector('iframe')).toBe(frame)
+    expect(option()?.classList.contains('is-updating')).toBe(false)
+    expect(frames()).toEqual(['aaaaaaaaaaaa'])
+    await act(async () => el.querySelector<HTMLButtonElement>('.view-pane-head .view-updated button')!.click())
+    await settle()
+    expect(frames()).toEqual(['aaaaaaaaaaaa', 'bbbbbbbbbbbb'])
+  })
+
+  test('a change that fails leaves the pane as it was, with nothing to reload', async () => {
+    const { el, next } = await paneAt({ slug: 'threads', name: 'Threads', version: 'aaaaaaaaaaaa', updating: true })
+    const frame = el.querySelector('iframe')
+    await next({ slug: 'threads', name: 'Threads', version: 'aaaaaaaaaaaa' })
+    expect(el.querySelector('iframe')).toBe(frame)
+    expect(el.querySelector('.view-updated')).toBeNull()
+    expect(frames()).toEqual(['aaaaaaaaaaaa'])
   })
 })
 

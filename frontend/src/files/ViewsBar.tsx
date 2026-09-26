@@ -1,5 +1,6 @@
-// Files' views: File browser, then every view written for this corpus, one exclusive choice (Segmented); then proposals
-// not built yet (spinner while building, ✕ and Retry on failure); then New view, a field that asks main for one. A row
+// Files' views: File browser, then every view written for this corpus, one exclusive choice (Segmented), a view whose
+// newer version builds or is reviewed with its name shimmering; then proposals not built yet (spinner while building, ✕
+// and Retry on failure); then New view, a field that asks main for one. A row
 // across the top of Files, or, while Files shows in a pane beside another, in that pane's head (`compact`, portalled by
 // FilesTab), where what does not fit goes in a ⋯ menu (viewsFit.ts). Refetches on bus `view`.
 import { useEffect, useLayoutEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
@@ -40,6 +41,14 @@ export interface BuiltView {
   version?: string
   /** the review of its pictures, from its proposal */
   review?: ViewReview
+  /** a newer version of it builds (a change, the orientation's improvement or a dev ticket) */
+  updating?: boolean
+}
+
+/** Whether a proposal is a view the bar lists: built, or built before and being changed now. Pure. */
+export function listedAsView(p: Proposal, known: ReadonlySet<string>): boolean {
+  if (p.status === 'built') return true
+  return (p.status === 'queued' || p.status === 'building') && !p.held && (!!p.revision || known.has(p.slug))
 }
 
 /** The views the bar lists and the proposals not yet built, read and kept fresh. */
@@ -65,13 +74,19 @@ export function useViews(ws: string): { views: BuiltView[]; proposals: Proposal[
     }
   }, [ws])
   const known = new Map(views.map((v) => [v.slug, v]))
+  const slugs = new Set(known.keys())
+  const listed = proposals.filter((p) => listedAsView(p, slugs))
+  // a view being changed keeps the version it last passed its checks at, which the views list gives
   const built: BuiltView[] = [
-    ...proposals.filter((p) => p.status === 'built').map((p) => ({ slug: p.slug, name: p.name, first_file: known.get(p.slug)?.first_file, claims: known.get(p.slug)?.claims, built: known.get(p.slug)?.built, version: known.get(p.slug)?.version, review: p.review })),
+    ...listed.map((p) => {
+      const v = known.get(p.slug)
+      return { slug: p.slug, name: p.name, first_file: v?.first_file, claims: v?.claims, built: v?.built, version: v?.version, review: p.review, ...(p.status !== 'built' ? { updating: true } : {}) }
+    }),
     ...views.filter((v) => !proposals.some((p) => p.slug === v.slug)).map((v) => ({ slug: v.slug, name: v.name, first_file: v.first_file, claims: v.claims, built: v.built, version: v.version })),
   ]
   // a viewer the File browser suggests for a file type shows there alone until it is accepted, and an orientation's
   // view appears once it is built
-  return { views: built, proposals: proposals.filter((p) => p.status !== 'built' && p.status !== 'dropped' && p.status !== 'suggested' && !p.held) }
+  return { views: built, proposals: proposals.filter((p) => !listed.includes(p) && p.status !== 'built' && p.status !== 'dropped' && p.status !== 'suggested' && !p.held) }
 }
 
 /** A proposal in the bar: the view's button as the bar draws a view, its state after the name, a click that opens the
@@ -202,7 +217,7 @@ export function ViewsBar({ ws, value, onChange, views, proposals, compact = fals
 
   const options: { value: string; label: string; icon: IconName; anchor?: string; dot?: boolean; note?: string; className?: string }[] = [
     { value: BROWSER, label: 'File browser', icon: 'folder-open' },
-    ...views.map((v) => ({ value: viewKey(v.slug), label: v.name, icon: 'view' as const, anchor: `view:${v.slug}`, dot: ready.includes(v.slug) || updated.includes(v.slug), note: ready.includes(v.slug) ? 'new' : updated.includes(v.slug) ? 'updated' : undefined, className: v.review?.state === 'running' ? 'is-reviewing' : undefined })),
+    ...views.map((v) => ({ value: viewKey(v.slug), label: v.name, icon: 'view' as const, anchor: `view:${v.slug}`, dot: ready.includes(v.slug) || updated.includes(v.slug), note: ready.includes(v.slug) ? 'new' : updated.includes(v.slug) ? 'updated' : undefined, className: v.updating || v.review?.state === 'running' ? 'is-updating' : undefined })),
   ]
   const pending = proposals.filter((p) => !gone.has(p.slug))
   const active = options.findIndex((o) => o.value === value)

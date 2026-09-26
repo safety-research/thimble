@@ -32,7 +32,7 @@ A label marks records, such as the posts that ask for help. The analyst turns la
 
 - Marks on records and units. thimble draws each label that is on as a bar in its colour over every element whose `data-anchor` names a record, `<path>#L<n>`, or one of your units, `view:{{slug}}/<key>`. Give each record's element its file ref, even inside a unit, and each unit's element its key.
 - Marks in charts. thimble cannot see inside a chart, so the reader counts what each label marks with `thimble.marked(ref)`, and the page draws the marked part in the label's colour, such as part of each bar.
-- The filter. The reader keeps only the records for which `thimble.kept(ref)` holds, in every list and count, and the page fetches again in `thimble.onLabels(fn)`, which runs when the labels or the filter change.
+- The filter. The reader keeps only the records for which `thimble.kept(ref)` holds, in every list and count, and the page fetches again in `thimble.onLabels(fn)`, which runs when the labels or the filter change. A unit stays when `thimble.kept_unit(refs)` holds for the refs of all the records it gathers, from every file it reads, so a label that marks the records of one file keeps the units that hold them.
 - Colour. Label colours repeat the theme's viz colours, so while a label is on, it alone colours records and marks. Draw your own categories in the viz inks (`--viz-ink-*`), or tell them apart by position or text, and give them their viz colours back when no label is on.
 - No label controls. The Labels pane is the only place labels are turned on or filtered, so the page has no label toggle, checkbox, menu or clickable legend of its own.
 

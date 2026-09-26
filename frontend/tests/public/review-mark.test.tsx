@@ -47,7 +47,7 @@ describe("the review of a view's pictures", () => {
       <ViewsBar ws="w" value="view:threads" onChange={() => undefined} proposals={[]} views={[{ slug: 'threads', name: 'Threads', review: { state: 'running' } }, { slug: 'links', name: 'Links', review: { state: 'done' } }]} />,
     )
     const opts = [...el.querySelectorAll<HTMLElement>('.files-views .seg-opt[data-anchor^="view:"]')]
-    expect(opts.filter((o) => o.classList.contains('is-reviewing')).map((o) => o.dataset.anchor)).toEqual(['view:threads'])
+    expect(opts.filter((o) => o.classList.contains('is-updating')).map((o) => o.dataset.anchor)).toEqual(['view:threads'])
   })
 
   test('a click on a running review stops it, and a failed one runs again', async () => {
