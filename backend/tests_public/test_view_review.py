@@ -254,7 +254,8 @@ async def test_a_new_build_is_what_undo_goes_back_to(view, monkeypatch, tmp_path
     assert "review" not in views.read_proposal(CORPUS, "posts")
 
 
-async def test_a_held_view_proposed_again_changed_stops_its_review_and_is_changed_in_place(view, monkeypatch, tmp_path):
+async def test_an_orientation_s_view_proposed_again_changed_stops_its_review_and_is_changed_in_place(view, monkeypatch,
+                                                                                                    tmp_path):
     from app import dev
 
     Stubs(monkeypatch, tmp_path, [ok("x")])
@@ -262,15 +263,15 @@ async def test_a_held_view_proposed_again_changed_stops_its_review_and_is_change
     started = await _slow_revision(monkeypatch, view)
     monkeypatch.setattr(dev, "queue_view", lambda c, slug: None)
     monkeypatch.setattr(dev, "stop_view", lambda c, slug, why: False)
-    views.update_proposal(CORPUS, "posts", held=True, status="built")
+    views.update_proposal(CORPUS, "posts", orientation=True, status="built")
     views._bind_loop()
     run = view_review.start(CORPUS, "posts")
     await started.wait()
     views.propose(CORPUS, "Posts", "the posts", ["board.jsonl"], "one post a row, newest first", proposed_by="orient",
-                  hold=True)
+                  orientation=True)
     await asyncio.gather(run.task, return_exceptions=True)
     prop = views.read_proposal(CORPUS, "posts")
-    assert prop["status"] == "queued" and prop["held"] and prop["changed"] and prop["revision"]
+    assert prop["status"] == "queued" and not prop.get("held") and prop["changed"] and prop["revision"]
     assert prop["review"]["state"] == "stopped" and prop["review"]["note"] == view_review.CHANGED_NOTE
     assert not view_review.running(CORPUS, "posts")
     assert (view / "view.html").read_text() == built, "the half-written revision is undone and the view stays"

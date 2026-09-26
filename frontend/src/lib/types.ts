@@ -398,6 +398,8 @@ export interface Proposal {
   proposed_by: string
   /** the analyst asked for it (backend views.propose): it opens by itself once built (files/viewReady.ts) */
   asked?: boolean
+  /** an orientation's proposal whose view has not passed its checks yet: its card shows the build, the views bar not */
+  held?: boolean
   status: ProposalStatus
   ts: string
   error?: string

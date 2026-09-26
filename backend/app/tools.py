@@ -2257,13 +2257,14 @@ async def _h_show_label(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
 
 async def _h_propose_view(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
     """A proposal for a view written for how the corpus arranges its records, a ticket the dev agent builds at once
-    (views.propose, dev.run_view) from its fields (views.SPEC_FIELDS). The orientation's first run holds its proposals
-    until it ends (orientation.holding). A viewer of unusual file types the orientation proposes
+    (views.propose, dev.run_view) from its fields (views.SPEC_FIELDS). The orientation's proposals are held until their
+    views pass their checks, so each reaches the analyst as soon as it works. A viewer of unusual file types the
+    orientation proposes
     (views.offered_type_viewer) is stored `suggested`, offered in the File browser and built once the analyst accepts
     it. A claim that matches no corpus file is refused, naming real paths near it; where views cannot be built the
     proposal fails at once. A proposal from main's shim is one the analyst asked for, so the browser opens the view once
     built."""
-    from . import orientation, views
+    from . import views
 
     claims = args.get("claims")
     if isinstance(claims, str):
@@ -2279,10 +2280,9 @@ async def _h_propose_view(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
         near = " ".join(hint("propose_view-near", claim=g, paths=", ".join(p)) for g, p in unmatched.items() if p)
         return err(" ".join(hint("propose_view-unmatched", claims=", ".join(unmatched), near=near).split()))
     orient = session_kind(ctx.session) == ORIENT_SESSION
-    hold = orient and orientation.holding(ctx.c)
     prop = await _maybe_await(views.propose(ctx.c, name=str(args["name"]).strip(), why=str(args["why"]).strip(),
-                                            claims=claims, arrangement="", proposed_by=ctx.created_by, hold=hold,
-                                            asked=ctx.session is None,
+                                            claims=claims, arrangement="", proposed_by=ctx.created_by,
+                                            orientation=orient, asked=ctx.session is None,
                                             suggested=orient and views.offered_type_viewer(claims), spec=spec))
     status = str(prop.get("status") or "queued")
     if not prop.get("held"):

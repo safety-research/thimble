@@ -2303,8 +2303,6 @@ async def run_view(c: str, slug: str, run: Run) -> None:
         if chat:
             _close_chat({"workspace": c, "chat": chat}, "done", result_text[:400] or None)
         view_review.after_built(c, slug)
-        if slug in views.held_slugs(c):
-            return  # the orientation's first run still holds it: views.release_held tells main
         try:
             session.push_event(c, "view", views.built_line(view), view=slug)
         except Exception:  # noqa: BLE001 — the view is built; main learns its forms at its next prompt render

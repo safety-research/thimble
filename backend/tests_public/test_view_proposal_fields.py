@@ -9,7 +9,7 @@ import json
 
 import pytest
 
-from app import config, dev, investigation, orientation, prompts, session, tools, views
+from app import config, dev, investigation, prompts, session, tools, views
 
 CORPUS = "desk"
 FIELDS = {"unit": "one ticket, keyed by ticket_id, 40 of them",
@@ -74,7 +74,6 @@ CAPTIONS = {"name": "Call Captions", "why": "A call's captions as a transcript."
 async def test_the_orientation_s_file_type_viewer_is_offered_and_main_s_is_built(desk, monkeypatch):
     queued: list[str] = []
     monkeypatch.setattr(views, "_queue", lambda c, slug: queued.append(slug))
-    monkeypatch.setattr(orientation, "holding", lambda c: False)
     res = await tools.call(CORPUS, "propose_view", CAPTIONS, session=tools.ORIENT_SESSION)
     assert not res.is_error and "offers it beside Raw" in res.text
     prop = views.read_proposal(CORPUS, "call-captions")
@@ -88,9 +87,9 @@ async def test_the_orientation_s_file_type_viewer_is_offered_and_main_s_is_built
 async def test_the_orientation_s_view_over_a_type_the_files_view_reads_is_built_at_once(desk, monkeypatch):
     queued: list[str] = []
     monkeypatch.setattr(views, "_queue", lambda c, slug: queued.append(slug))
-    monkeypatch.setattr(orientation, "holding", lambda c: False)
     res = await tools.call(CORPUS, "propose_view", {**INBOX, "claims": ["*.jsonl"]}, session=tools.ORIENT_SESSION)
-    assert not res.is_error and views.read_proposal(CORPUS, "inbox")["status"] == "queued" and queued == ["inbox"]
+    prop = views.read_proposal(CORPUS, "inbox")
+    assert not res.is_error and prop["status"] == "queued" and prop["held"] and queued == ["inbox"]
 
 
 def test_the_tool_s_schema_asks_for_the_form_in_free_text_and_the_fields_the_build_needs():

@@ -56,8 +56,8 @@ KEY_REFS_FILE = "key-refs.json"  # view:<slug>/<key> -> {refs, excerpt, label, n
 VIEW_JSON, READER_PY, VIEW_HTML = "view.json", "reader.py", "view.html"
 TOOLS_PROMPT = "tools"  # prompts/tools.md, whose lowercase sections are the lines the view tools' results carry
 # a view ticket's status on its proposal row; `dropped` is an orientation proposal that could not be built through its
-# repairs. A proposal of the orientation's first run carries `held: true` until that run ends (release_held): it builds
-# at once but is neither listed nor announced until then.
+# repairs. An orientation's proposal carries `held: true` until its view first passes its checks (mark_built): it builds
+# at once, and the analyst hears of it only then.
 # `suggested` is a viewer for a file type the File browser proposed (suggest), which builds only once the analyst
 # accepts it.
 STATUSES = ("queued", "building", "built", "failed", "dropped", "suggested")
@@ -149,7 +149,7 @@ def _now() -> str:
 def _emit(c: str, slug: str, status: str, **extra: Any) -> None:
     """The `view` event on the workspace stream. investigation.emit runs on the event loop only, so a caller in a
     worker thread (a route's blocking part) hands it to the bound loop. A held proposal's build sends none: the analyst
-    hears of it at release_held."""
+    hears of it once its view is built (mark_built)."""
     if slug in held_slugs(c):
         return
     event = {"type": "view", "slug": slug, "status": status, **extra}
@@ -307,8 +307,8 @@ def _own_views(c: str) -> list[dict[str, Any]]:
 
 
 def held_slugs(c: str) -> set[str]:
-    """The slugs of the proposals the orientation's first run holds, read from the stored rows (list_proposals reads
-    list_views)."""
+    """The slugs of the orientation's proposals whose views have not passed their checks yet, read from the stored rows
+    (list_proposals reads list_views)."""
     try:
         p = proposals_path(c)
         raw = read_json(p, []) if p.is_file() else []
@@ -392,16 +392,17 @@ def write_view(c: str, slug: str, *, name: str, why: str, claims: Any, accepts: 
 
 def mark_built(c: str, slug: str) -> dict[str, Any]:
     """Register the view in the slug's folder: `built` stamped into its view.json (the only writer of that field), its
-    memo dropped, and a proposal under the slug marked built. Emits `view {slug, status: built}`, with `asked` for a
-    view the analyst asked for, which the browser then opens; a viewer accepted in the File browser (accept) shows
-    there as the file's mode instead."""
+    memo dropped, and a proposal under the slug marked built, and no longer held, so an orientation's view reaches the
+    analyst as soon as it passes its checks. Emits `view {slug, status: built}`, with `asked` for a view the analyst
+    asked for, which the browser then opens; a viewer accepted in the File browser (accept) shows there as the file's
+    mode instead."""
     d = views_dir(c) / slug
     raw = _view_json(d)
     write_json(d / VIEW_JSON, {**raw, "built": _now()})
     _forget(c, slug)
     prop = read_proposal(c, slug)
     if prop is not None:
-        update_proposal(c, slug, status="built", error=None)
+        update_proposal(c, slug, status="built", error=None, held=None)
     opens = prop is not None and bool(prop.get("asked")) and not prop.get("accepted")
     _emit(c, slug, "built", **({"asked": True} if opens else {}))
     return read_view(c, slug) or _normalize_view(slug, raw, where=d)
@@ -1325,13 +1326,13 @@ def title_case(name: Any) -> str:
 
 
 def propose(c: str, name: str, why: str, claims: Any, arrangement: str, proposed_by: str = "analyst",
-            hold: bool = False, asked: bool = False, suggested: bool = False,
+            orientation: bool = False, asked: bool = False, suggested: bool = False,
             spec: dict[str, Any] | None = None) -> dict[str, Any]:
     """Store a proposal, announce it and queue it for the dev agent at once (dev.queue_view). A proposal of the same
-    name not
-    yet built is replaced under its slug, its build stopped. With `hold` (the orientation's first run) it is stored
-    `held: true` and queued unannounced until release_held; a held proposal proposed again unchanged is left as it
-    is, and changed it is revised (revise), still held.
+    name not yet built is replaced under its slug, its build stopped. An `orientation` proposal is stored
+    `orientation: true` and, unless `suggested`, `held: true`, queued unannounced until its view passes its checks
+    (mark_built); a held proposal proposed again unchanged is left as it is, and changed it is revised (revise), still
+    held.
     `asked` says the analyst asked for it. With `suggested` (a viewer for a file type the File browser proposes) it is
     stored `suggested` and not queued until the analyst accepts it (accept). A `spec` (propose_view's fields) is stored
     with the proposal and written out as its `arrangement`."""
@@ -1342,6 +1343,7 @@ def propose(c: str, name: str, why: str, claims: Any, arrangement: str, proposed
     if not claims_l:
         raise HTTPException(400, "a proposal claims at least one file: give `claims` as corpus-relative globs")
     spec = clean_spec(spec)
+    hold = orientation and not suggested
     arrangement = spec_arrangement(spec) if spec else _lines(arrangement)
     if not arrangement:
         raise HTTPException(400, "a proposal says which records a unit gathers and how the page lays it out (`arrangement`)")
@@ -1370,6 +1372,8 @@ def propose(c: str, name: str, why: str, claims: Any, arrangement: str, proposed
                 "proposed_by": str(proposed_by or "analyst"), "status": "suggested" if suggested else "queued", "ts": _now()}
         if spec:
             prop["spec"] = spec
+        if orientation:
+            prop["orientation"] = True
         if hold:
             prop["held"] = True
         if asked:
@@ -1380,33 +1384,6 @@ def propose(c: str, name: str, why: str, claims: Any, arrangement: str, proposed
     if not suggested:
         _queue(c, slug)
     return prop
-
-
-def release_held(c: str) -> list[dict[str, Any]]:
-    """Release the proposals held during the orientation's first run: each is listed and announced with the status its
-    build
-    reached, a dropped one stays hidden. Returns the released proposals less the dropped."""
-    from . import session  # noqa: PLC0415
-
-    with _proposals_lock:
-        items = list_proposals(c)
-        out = [p for p in items if p.get("held")]
-        for p in out:
-            p.pop("held", None)
-        if out:
-            _save_proposals(c, items)
-    shown = [p for p in out if p.get("status") != "dropped"]
-    for p in shown:
-        slug, status = str(p["slug"]), str(p.get("status") or "queued")
-        _emit(c, slug, status, **({"chat": p["chat"]} if p.get("chat") else {}))
-        if status in PENDING:
-            _queue(c, slug)  # a no-op for a build going or queued already
-        elif status == "built" and (view := read_view(c, slug)) is not None:
-            try:
-                session.push_event(c, "view", built_line(view), view=slug)
-            except Exception:  # noqa: BLE001 — main learns the view's forms at its next prompt render
-                log.exception("the view event for %s/%s was not sent", c, slug)
-    return shown
 
 
 def _stop_review(c: str, slug: str, forget: bool = False) -> None:
@@ -2627,18 +2604,12 @@ def _recover(c: str) -> None:
 
 @router.get("/ws/{c}/views/proposals")
 async def list_proposals_route(c: str) -> list[dict[str, Any]]:
-    """The proposals, less those the orientation's first run still holds; held ones whose run is gone are released here.
-    """
-    from . import orientation  # noqa: PLC0415
-
+    """The proposals. A held one, an orientation's proposal whose view has not passed its checks yet, is listed with
+    `held` for the orientation's card, and the views bar leaves it out."""
     config.workspace_dir(c)
     _bind_loop()
     _recover(c)
-    items = list_proposals(c)
-    if any(p.get("held") for p in items) and not orientation.holding(c):
-        orientation.release_views(c, ((orientation.read_run(c) or {}).get("chats") or {}).get(orientation.ROLE))
-        items = list_proposals(c)
-    return [p for p in items if not p.get("held")]
+    return list_proposals(c)
 
 
 @router.get("/ws/{c}/views/suggestions")

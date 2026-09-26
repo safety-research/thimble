@@ -28,8 +28,8 @@ settings come from the `orient` and `subagents` roles (config.models_for).
 Calls. Each call the session, its agents, its critique and its follow-ups make is numbered in its chat's sequence and
 citable as `call:<chat>/<n>` (calls.py).
 
-End of the first run. orientation.finished closes the record, reveals the deck and releases held view proposals; the
-report is asked for once no follow-up waits. Main hears an `orient` event with one line counting what was made.
+End of the first run. orientation.finished closes the record and reveals the deck (each view proposal reached the
+analyst when its build passed its checks); the report is asked for once no follow-up waits. Main hears an `orient` event with one line counting what was made.
 
 Restarts. A run a server stop cut short is resumed by the next server with `--resume` in the same chat. A failed first
 run is resumed as run 0 when start_orientation asks for the same orientation again, rather than redoing its work.

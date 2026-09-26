@@ -1,8 +1,8 @@
-"""The orientation's first run holds its view proposals (views.propose `hold`): each builds at once, but neither it nor
-its build is announced or listed until the run ends, and at release_held a view built by then appears ready at once. A
-held proposal proposed again unchanged keeps its build; changed (after the critique) it is revised in place, so its
-build goes on from its draft or its built view. The view build itself is not run: a proposal's view is written into
-its folder and marked built as a build that passed its gate would be. The board is invented."""
+"""An orientation's view proposal (views.propose `orientation`) is held until its view passes its checks: it builds at
+once, and the analyst hears of it, in the views bar and in main, as soon as it is built, while the orientation still
+runs. A held proposal proposed again unchanged keeps its build; changed it is revised in place, so its build goes on
+from its draft or its built view. The view build itself is not run: a proposal's view is written into its folder and
+marked built as a build that passed its gate would be. The board is invented."""
 from __future__ import annotations
 
 import json
@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from app import agents, config, critique_session, dev, investigation, orientation, session, views
+from app import config, critique_session, dev, investigation, orientation, session, views
 
 CORPUS = "boards"
 ARGS = {"name": "Posts", "why": "one post at a time", "claims": ["board.jsonl"], "arrangement": "one post per page"}
@@ -55,70 +55,50 @@ def _build(slug: str = "posts") -> None:
     views.mark_built(CORPUS, slug)
 
 
-def _listed() -> list[str]:
+def _in_bar() -> list[str]:
     return [p["slug"] for p in views.list_proposals(CORPUS) if not p.get("held")]
 
 
-def test_a_held_proposal_builds_at_once_unseen_and_appears_built_at_release(board, monkeypatch):
-    prop = views.propose(CORPUS, **ARGS, proposed_by="orient", hold=True)
-    assert prop["held"] and prop["status"] == "queued"
-    assert (CORPUS, "posts") in dev._view_queue, "its build is queued while the run goes"
-    assert board == [], "nothing is announced for a held proposal"
+def test_an_orientation_s_view_builds_unseen_and_appears_as_soon_as_it_is_built(board, monkeypatch):
+    monkeypatch.setattr(orientation, "drafting", lambda c: True)
+    prop = views.propose(CORPUS, **ARGS, proposed_by="orient", orientation=True)
+    assert prop["held"] and prop["orientation"] and prop["status"] == "queued"
+    assert (CORPUS, "posts") in dev._view_queue, "its build is queued at once"
+    assert board == [], "nothing is announced while it builds"
+    assert _in_bar() == []
 
     _build()
-    assert views.read_proposal(CORPUS, "posts")["status"] == "built"
-    assert board == [], "nor for its build"
-    assert "posts" not in [v["slug"] for v in views.list_views(CORPUS)], "its view is not listed while held"
-    assert _listed() == []
-
-    chips: list[dict] = []
-    monkeypatch.setattr(agents, "chip", lambda c, kind, text, **k: chips.append({"kind": kind, **k}))
-    released = orientation.release_views(CORPUS, "orient-chat")
-    assert [p["slug"] for p in released] == ["posts"]
-    assert {"type": "view", "slug": "posts", "status": "built"} in board, "a built one appears ready at once"
-    assert any(e.get("main") == "view" and e.get("view") == "posts" for e in board), "main hears of the view now"
-    assert chips == [{"kind": "view", "ref": "view:posts", "status": "built", "chat": "orient-chat"}]
+    prop = views.read_proposal(CORPUS, "posts")
+    assert prop["status"] == "built" and not prop.get("held"), "built, it is held no longer"
+    assert {"type": "view", "slug": "posts", "status": "built"} in board, "it appears while the orientation runs"
     assert "posts" in [v["slug"] for v in views.list_views(CORPUS)]
-    assert _listed() == ["posts"]
+    assert _in_bar() == ["posts"]
 
 
-def test_a_held_proposal_still_building_at_release_goes_on(board, monkeypatch):
-    views.propose(CORPUS, **ARGS, proposed_by="orient", hold=True)
-    views.update_proposal(CORPUS, "posts", status="building")
-    monkeypatch.setattr(agents, "chip", lambda *a, **k: None)
-    assert [p["status"] for p in views.release_held(CORPUS)] == ["building"]
-    assert board == [{"type": "view", "slug": "posts", "status": "building"}]
+def test_the_proposals_route_lists_a_held_proposal_marked_held(board):
+    views.propose(CORPUS, **ARGS, proposed_by="orient", orientation=True)
+    from fastapi.testclient import TestClient
+
+    from app.main import app
+
+    with TestClient(app) as client:
+        rows = client.get(f"/api/ws/{CORPUS}/views/proposals").json()
+    assert [(r["slug"], r.get("held")) for r in rows] == [("posts", True)]
 
 
-def test_a_held_proposal_proposed_again_keeps_its_build_and_changed_is_revised_in_place(board, monkeypatch):
+def test_a_held_proposal_proposed_again_keeps_its_build_and_changed_goes_on_from_its_draft(board, monkeypatch):
     stopped: list[str] = []
     monkeypatch.setattr(dev, "stop_view", lambda c, slug, why: stopped.append(why) or True)
-    first = views.propose(CORPUS, **ARGS, proposed_by="orient", hold=True)
-    _build()
-
-    same = views.propose(CORPUS, **ARGS, proposed_by="orient", hold=True)
-    assert same["ts"] == first["ts"] and same["status"] == "built" and stopped == [], "unchanged: the build stands"
-
-    changed = views.propose(CORPUS, **{**ARGS, "arrangement": "one thread per page"}, proposed_by="orient", hold=True)
-    assert changed["slug"] == "posts" and changed["held"] and changed["status"] == "queued"
-    assert changed["changed"] and changed["revision"], "the built view is changed, not built again"
-    assert (views.views_dir(CORPUS) / "posts" / "reader.py").is_file(), "the view built so far stays"
-    assert views._revision_dir(CORPUS, "posts").is_dir(), "with a copy to go back to"
-    assert views.read_proposal(CORPUS, "posts")["arrangement"] == "one thread per page"
-    assert (CORPUS, "posts") in dev._view_queue
-    assert board == [], "still nothing announced"
-
-
-def test_a_held_proposal_changed_while_building_goes_on_from_its_draft(board, monkeypatch):
-    stopped: list[str] = []
-    monkeypatch.setattr(dev, "stop_view", lambda c, slug, why: stopped.append(why) or True)
-    views.propose(CORPUS, **ARGS, proposed_by="orient", hold=True)
+    views.propose(CORPUS, **ARGS, proposed_by="orient", orientation=True)
     views.update_proposal(CORPUS, "posts", status="building", session_id="s1")
+
+    same = views.propose(CORPUS, **ARGS, proposed_by="orient", orientation=True)
+    assert same["status"] == "building" and stopped == [], "unchanged: the build goes on"
+
     draft = views.views_dir(CORPUS) / "posts"
     draft.mkdir(parents=True, exist_ok=True)
     (draft / "view.html").write_text("<!doctype html>")
-
-    views.propose(CORPUS, **{**ARGS, "why": "whole threads"}, proposed_by="orient", hold=True)
+    views.propose(CORPUS, **{**ARGS, "why": "whole threads"}, proposed_by="orient", orientation=True)
     prop = views.read_proposal(CORPUS, "posts")
     assert stopped == ["revised"] and (draft / "view.html").is_file(), "the build stops with its draft kept"
     assert prop["status"] == "queued" and prop["changed"] and prop["held"] and prop["session_id"] == "s1"
@@ -126,27 +106,52 @@ def test_a_held_proposal_changed_while_building_goes_on_from_its_draft(board, mo
     assert board == []
 
 
-def test_a_dropped_held_proposal_is_not_released(board, monkeypatch):
-    views.propose(CORPUS, **ARGS, proposed_by="orient", hold=True)
+def test_a_built_orientation_view_proposed_again_changed_is_changed_in_place(board, monkeypatch):
+    monkeypatch.setattr(dev, "stop_view", lambda c, slug, why: True)
+    views.propose(CORPUS, **ARGS, proposed_by="orient", orientation=True)
+    _build()
+    board.clear()
+
+    changed = views.propose(CORPUS, **{**ARGS, "arrangement": "one thread per page"}, proposed_by="orient",
+                            orientation=True)
+    assert changed["slug"] == "posts" and changed["revised"] and changed["revision"] and not changed.get("held")
+    assert (views.views_dir(CORPUS) / "posts" / "reader.py").is_file(), "the view the analyst sees stays"
+    assert views._revision_dir(CORPUS, "posts").is_dir(), "with a copy to go back to"
+    assert "posts" in [v["slug"] for v in views.list_views(CORPUS)]
+    assert [(e["slug"], e["status"]) for e in board] == [("posts", "queued")]
+
+
+def test_a_dropped_held_proposal_never_appears(board):
+    views.propose(CORPUS, **ARGS, proposed_by="orient", orientation=True)
     views.drop(CORPUS, "posts", "its checks did not pass")
-    assert board == []
-    monkeypatch.setattr(agents, "chip", lambda *a, **k: pytest.fail("no chip for a dropped proposal"))
-    assert views.release_held(CORPUS) == []
-    assert not views.read_proposal(CORPUS, "posts").get("held")
+    assert board == [] and _in_bar() == []
 
 
-def test_the_critique_reviews_held_proposals_and_an_older_held_row_reads_as_held(board, monkeypatch):
+def test_the_critique_reviews_every_view_the_orientation_proposed_and_an_older_held_row_reads_as_held(board,
+                                                                                                    monkeypatch):
     p = views.proposals_path(CORPUS)
     p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(json.dumps([{"slug": "posts", **ARGS, "proposed_by": "orient", "status": "held", "ts": "t"}]))
+    p.write_text(json.dumps([{"slug": "posts", **ARGS, "proposed_by": "orient", "status": "held", "ts": "t"},
+                             {"slug": "later", **ARGS, "name": "Later", "proposed_by": "orient", "orientation": True,
+                              "status": "built", "ts": "t"},
+                             {"slug": "asked", **ARGS, "name": "Asked", "proposed_by": "terminal", "asked": True,
+                              "status": "built", "ts": "t"}]))
     prop = views.read_proposal(CORPUS, "posts")
     assert prop["status"] == "queued" and prop["held"]
     monkeypatch.setattr(orientation, "read_run", lambda c: {})
-    assert any("Posts: one post at a time" in part for part in critique_session.drafts(CORPUS))
+    text = "\n".join(critique_session.drafts(CORPUS))
+    assert "Posts: one post at a time" in text and "Later: one post at a time" in text and "Asked:" not in text
 
 
-def test_a_proposal_not_held_is_announced_and_listed_as_before(board):
-    views.propose(CORPUS, **ARGS, proposed_by="analyst")
+def test_a_file_type_viewer_the_orientation_suggests_is_offered_at_once(board):
+    prop = views.propose(CORPUS, "Captions", "a call's captions", ["board.jsonl"], "one cue a row",
+                         proposed_by="orient", orientation=True, suggested=True)
+    assert prop["status"] == "suggested" and not prop.get("held")
+    assert board == [{"type": "view", "slug": "captions", "status": "suggested"}]
+
+
+def test_a_proposal_the_analyst_asked_for_is_announced_and_listed_at_once(board):
+    views.propose(CORPUS, **ARGS, proposed_by="analyst", asked=True)
     assert board == [{"type": "view", "slug": "posts", "status": "queued"}]
-    assert _listed() == ["posts"]
+    assert _in_bar() == ["posts"]
     assert Path(views.proposals_path(CORPUS)).is_file()
