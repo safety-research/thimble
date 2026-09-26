@@ -1010,13 +1010,13 @@ Claude Code no longer keeps this orientation's session, so it cannot continue. I
 
 ## message_thread-event
 
-The browser shows the message in the thread {thread}. Handle the thread's event now, as its bullet in your prompt says:
+The browser shows the message in the thread {thread}. Handle the thread's event now, as its bullet in your prompt says, and end the turn on that call, with no text after it: the terminal shows the call, and the thread shows the answer.
 
 {event}
 
 ## message_thread-again
 
-The analyst asks the thread {thread} its questions again. Handle the thread's event now, as its bullet in your prompt says:
+The analyst asks the thread {thread} its questions again. Handle the thread's event now, as its bullet in your prompt says, and end the turn on that call, with no text after it: the terminal shows the call, and the thread shows the answer.
 
 {event}
 
@@ -1038,7 +1038,7 @@ The change is queued for the view's build in {thread}, which the browser shows, 
 
 ## message_orientation-subagent
 
-The orientation runs as your subagent, agent `{agent_id}`, so send it the analyst's message yourself with SendMessage, in their words. It takes the message up whether it is still working or has finished.
+The orientation runs as your subagent, agent `{agent_id}`, so send it the analyst's message yourself with SendMessage, in their words, and end the turn on that call, with no text after it. It takes the message up whether it is still working or has finished.
 
 ## orient-relay
 
