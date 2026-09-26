@@ -19,6 +19,8 @@ it with `WS` (the workspace directory) set and registers it as `thimble`.
     thimble.marked(ref)       in a view's reader: the marks of the labels that are on for one record, each
                               {label, value, colour}, [] outside a view's call
     thimble.kept(ref)         in a view's reader: whether the record passes the analyst's label filter (True with none)
+    thimble.kept_unit(refs)   in a view's reader: whether a unit that gathers the records `refs` passes that filter,
+                              judged by its records in the files the filter's label ran over (True when there are none)
     thimble.view_labels()     in a view's reader: {labels, filter}, the labels that are on with their highlighted values,
                               and the filter {label, value, colour} or None
     thimble.timeline(events, spacing="time")
@@ -458,6 +460,13 @@ def kept(ref):
     return _kept(_view_ctx, ref)
 
 
+def kept_unit(refs):
+    """Whether a unit that gathers the records `refs` passes the analyst's label filter: True with no filter or when the
+    filter's label left no value in any of their files, else whether the label takes the filter's value on one of its
+    records in a file it ran over. Records of other files never keep a unit, since kept holds for all of them."""
+    return _kept_unit(_view_ctx, refs)
+
+
 def view_labels():
     """{labels, filter}: the labels that are on, each {name, colour, values: [{name, colour}]} with its highlighted
     values, and the filter {label, value, colour}, or None."""
@@ -494,6 +503,21 @@ def _kept(ctx, ref) -> bool:
     if path is not None and path not in _label_members(k)[2]:
         return True
     return _value_of(k, ref) == f.get("value")
+
+
+def _kept_unit(ctx, refs) -> bool:
+    f = ctx.get("filter") if ctx else None
+    if not f:
+        return True
+    refs = [str(r) for r in refs]
+    if ctx.get("probe"):
+        return any(_probed(r, ctx["probe"]) for r in refs)
+    k = next((x for x in ctx.get("labels") or [] if x.get("id") == f.get("id")), None)
+    if k is None:
+        return False
+    paths = _label_members(k)[2]
+    ran = [r for r in refs if _ref_parts(r)[0] in paths]
+    return not ran or any(_value_of(k, r) == f.get("value") for r in ran)
 
 
 def _view_labels(ctx) -> dict:

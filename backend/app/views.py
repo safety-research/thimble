@@ -953,7 +953,7 @@ def _record_mark(ctx: dict[str, Any], ref: str) -> dict[str, Any] | None:
 
 def _unit_mark(ctx: dict[str, Any], rs: list[str]) -> dict[str, Any] | None:
     """A unit's mark from the records it stands for: marked by each label that marks any of them, its bar the colour most
-    of its marked records take, and with a filter kept when any record is kept."""
+    of its marked records take, and with a filter kept as kernel_thimble.kept_unit keeps it."""
     from . import kernel_thimble  # noqa: PLC0415
 
     names: dict[str, None] = {}
@@ -966,7 +966,7 @@ def _unit_mark(ctx: dict[str, Any], rs: list[str]) -> dict[str, Any] | None:
     if names:
         out = {"bar": max(colours, key=lambda k: colours[k]), "names": list(names), "spans": []}
     if ctx.get("filter"):
-        keep = any(kernel_thimble._kept(ctx, r) for r in rs)
+        keep = kernel_thimble._kept_unit(ctx, rs)
         if not keep and not out:
             return None
         out["keep"] = keep

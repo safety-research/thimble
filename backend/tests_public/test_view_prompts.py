@@ -42,7 +42,7 @@ def test_a_view_ticket_keeps_a_unit_by_a_kept_record_of_any_of_its_files():
     the same pages, keeps the units whose records of that file it keeps, rather than emptying a view that keeps its
     units by another file's records."""
     labels = prompts.section("dev-view", "Labels")
-    assert "A unit stays when any record it gathers is kept, from whichever of its files" in labels
+    assert "A unit stays when `thimble.kept_unit(refs)` holds for the refs of all the records it gathers" in labels
 
 
 def _orient_views() -> str:
