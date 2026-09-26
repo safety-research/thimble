@@ -270,8 +270,8 @@ async def test_a_call_auto_mode_gave_no_verdict_on_goes_back_to_it_before_the_ca
     call = refused(3)
     [p] = await _pending(run.chat)
     assert (p["refused"], p["rechecked"], p["deny_after_s"]) == ("Classifier unavailable", 2, 0.4)
-    assert await asyncio.wait_for(call, 2) == {"behavior": "deny", "message": tools.hint(
-        agent_session.CLASSIFIER_UNANSWERED, minutes=0)}
+    answer = await asyncio.wait_for(call, 2)
+    assert answer["behavior"] == "deny" and permission_hook.decision(answer, permission_hook.DENIED) is None
     assert not agents.read_meta(CORPUS, run.chat).get("permissions")
     assert await agent_session.permission_request_route(CORPUS, pre) == {}, "an unanswered call is not remembered"
     log = [json.loads(line) for line in (config.workspace_dir(CORPUS) / agents.PERMISSIONS_LOG).read_text().splitlines()]

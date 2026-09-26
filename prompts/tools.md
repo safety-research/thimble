@@ -1059,10 +1059,6 @@ Your own scratch folder is {folder}. Put the files you make for your own work th
 
 This call did not run, because the analyst is switching your permission mode, which pauses your session. Once it has resumed, make this call again if you still need it.
 
-## session-classifier-unanswered
-
-This call did not run: auto mode could not judge it, since its classifier was unavailable each time, and nobody answered in thimble's browser within {minutes} minutes. Carry on without it, or find a way that needs no permission.
-
 ## call-ref
 
 This call's ref is `{ref}`.

@@ -137,12 +137,11 @@ REQUEST, DENIED, PRE = permission_hook.REQUEST, permission_hook.DENIED, permissi
 # auto mode)
 GRANT_TTL_S = 600.0
 # auto mode's reason when its classifier gave no verdict on a call, the waits before each time the call goes back to
-# auto mode, how long the card that then asks waits in a mode of thimble's, and the deny it answers with after that
-# (prompts/tools.md) (module note, auto mode)
+# auto mode, and how long the card that then asks waits in a mode of thimble's before it denies the call (module note,
+# auto mode). Claude Code reads only `retry` from a PermissionDenied hook, so a deny carries no message to the model.
 CLASSIFIER_DOWN = re.compile(r"\bclassifier\b.*\bunavailable\b", re.I)
 CLASSIFIER_WAITS_S = (10.0, 30.0, 90.0)
 CLASSIFIER_ASK_S = 600.0
-CLASSIFIER_UNANSWERED = "session-classifier-unanswered"
 # the modes a session in a mode of thimble's runs in (orient_session), by Start's names (cc_settings.ORIENT_MODES)
 MODES = tuple(cc_settings.ORIENT_MODES)
 BYPASS = "bypass"
@@ -1820,9 +1819,8 @@ async def ask(c: str, key: str | None, tool_name: str, inp: Any, agent_id: str |
     if unjudged and (again := await _recheck(run, agent_id, tool_name, inp, reason, tool_use_id)) is not None:
         return again
     wait_s = None if run.patient else PERMISSION_WAIT_S
-    late = TIMED_OUT_LINE
     if unjudged and run.patient:
-        wait_s, late = CLASSIFIER_ASK_S, tools.hint(CLASSIFIER_UNANSWERED, minutes=round(CLASSIFIER_ASK_S / 60))
+        wait_s = CLASSIFIER_ASK_S
     rid = uuid.uuid4().hex[:10]
     preview = json.dumps(inp, ensure_ascii=False, default=str)[:PERMISSION_INPUT_CHARS] if inp is not None else ""
     updates = offer(suggestions) if event == REQUEST else []
@@ -1845,7 +1843,7 @@ async def ask(c: str, key: str | None, tool_name: str, inp: Any, agent_id: str |
         allow = await asyncio.wait_for(fut, wait_s)
         message = {None: GONE_LINE, SWITCHING: tools.hint(MODE_SWITCHING)}.get(allow, DENIED_LINE)
     except asyncio.TimeoutError:
-        allow, message, timed_out = False, late, True
+        allow, message, timed_out = False, TIMED_OUT_LINE, True
     finally:
         run.waits.pop(rid, None)
         run.asking.pop(rid, None)
