@@ -112,8 +112,10 @@ def test_a_thread_s_first_event_carries_its_anchor_and_a_follow_up_its_fork(clie
     assert body[:6] == ["question: what is this?", "ref: events.jsonl#L1", "surface: files", "element: files-row",
                         'selector: [data-anchor="events.jsonl#L1"]', "text: the first event"]
     assert "content:" in body and any(ln.startswith("events.jsonl#L1 (") for ln in body)
-    # the group is the thread itself; its canvas group is made with its first card (test_threads.py)
-    assert note["meta"] == {"kind": "thread", "event": r.json()["id"], "thread": tid, "group": f"thread:{tid}"}
+    # the group is the thread itself; its canvas group is made with its first card (test_threads.py); the name is what
+    # main describes the fork with, the thread's title as a slug (test_fork_names.py)
+    assert note["meta"] == {"kind": "thread", "event": r.json()["id"], "thread": tid, "group": f"thread:{tid}",
+                            "name": threads.slug(meta["title"])}
     assert agents.read_meta(CORPUS, tid)["group"] is None
     assert _log(tid)[-1] == {**_log(tid)[-1], "type": "user", "text": "what is this?", "by": "browser"}
     assert agents._running(CORPUS, tid)
