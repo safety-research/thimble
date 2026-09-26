@@ -521,6 +521,29 @@ async def test_a_killed_session_that_claude_code_restarts_keeps_its_run(fake, mo
     assert agents.read_meta(CORPUS, run.chat)["status"] == "done"
 
 
+async def test_a_run_whose_turn_ended_with_a_background_shell_left_running_ends_once_its_transcript_is_quiet(fake, monkeypatch):
+    monkeypatch.setattr(bg_session, "LINGER_S", 0.3)
+    monkeypatch.setenv("FAKE_BUSY", "1")
+    run = await write_session.start(CORPUS, "report")
+    e = bg_session.entry(CORPUS, "writer:report")
+    await asyncio.sleep(0.5)
+    assert not run.task.done(), "its turn has not ended"
+    # the turn ends while a shell it started in the background runs on: Claude Code still lists the session as busy
+    with _transcript(e.sid).open("a") as f:
+        f.write(json.dumps({"type": "assistant", "message": {"content": [{"type": "text", "text": "Done."}]}}) + "\n")
+        f.write(json.dumps({"type": "system", "subtype": "turn_duration"}) + "\n")
+    await asyncio.wait_for(run.task, 10)
+    assert agents.read_meta(CORPUS, run.chat)["status"] == "done"
+    await asyncio.sleep(0.5)
+    assert agent_session.current(CORPUS, "writer:report") is None, "no new run while the session only runs its shell"
+    assert _state(fake)[e.short]["status"] == "busy" and e.status == "idle"
+    # the shell ends and its notification starts a turn: that turn is the chat's next run
+    with _transcript(e.sid).open("a") as f:
+        f.write(json.dumps({"type": "user", "origin": {"kind": "task-notification"}, "message": {"role": "user", "content":
+            "<task-notification>\n<task-id>b1x2y3z4w</task-id>\n<status>completed</status>\n</task-notification>"}}) + "\n")
+    await _until(lambda: agent_session.current(CORPUS, "writer:report") is not None)
+
+
 def test_the_statusline_lists_every_agent_on_as_many_lines_as_it_needs():
     rows = [{"name": f"thimble:agent-{i}", "state": "working" if i % 2 else "waiting for a permission"} for i in range(7)]
     text = bg_session.status_line(rows)

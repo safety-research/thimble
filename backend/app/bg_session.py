@@ -11,7 +11,9 @@ Start. agent_session builds the `claude -p` command as for any session and hands
 --settings `env`, since the background service starts the session with its own environment. `claude --bg` refuses a
 folder Claude Code does not trust, so a work folder under thimble's workspaces gets that folder trusted first
 (trust_workspaces). BgProc stands in for the process agent_session follows: a run ends when the session is idle, its
-transcript's last turn has ended and it has no background work, while the session itself goes on for the analyst.
+transcript's last turn has ended and it has no background work, while the session itself goes on for the analyst. A
+session whose turn ended while a background shell of its own runs on counts as idle once its transcript has been quiet
+for LINGER_S (_lingering), since Claude Code lists it as busy for as long as the shell runs.
 
 Messages in place. A session that runs is never resumed with `--resume`, which would copy it under a new id: a message
 for it (a follow-up from the browser, a retry after a capacity failure) waits in its outbox (deliver) and is sent with
@@ -81,6 +83,9 @@ START_GRACE_S = 20.0  # a session this young is never taken for ended
 ENDED_STATES = {"stopped", "done", "failed", "crashed", "error"}
 RESTART_WAIT_S = 90.0
 DELIVERY_WAIT_S = 300.0  # how long a run attached with a message waits for the session to take it up
+# a session Claude Code lists as busy whose last turn ended this long ago, with no transcript line since, runs only
+# background shells, which a --print session would end with its process: it counts as idle (_lingering)
+LINGER_S = 30.0
 TAIL_BYTES = 524_288  # of a transcript's end, read for its last turn (turn_state)
 BG_ID_RE = re.compile(r"backgrounded\W+([0-9a-f]{8})\b")
 DROP_FLAGS = {"-p", "--print", "--verbose"}
@@ -327,6 +332,9 @@ class Entry:
     missing_since: float = 0.0  # time.monotonic() since when the listings show no process for it
     proxy_starting: float = 0.0  # time.monotonic() when main's Agent call that starts its proxy was let through
     last_said: str = ""  # its last reply as its news gave it, which the news of its run's end does not repeat
+    tx_seen: int = -1  # the transcript offset _lingering last saw
+    tx_grew: float = 0.0  # time.monotonic() when that offset last changed
+    tx_ended: bool | None = None  # whether the transcript's last turn had ended at that offset, once read
 
     KEEP = ("c", "key", "name", "short", "sid", "chat", "role", "folder", "started", "status", "run_open", "result",
             "ended_at", "proxy_agents", "relayed")
@@ -505,13 +513,15 @@ async def _tick(rows: list[dict[str, Any]]) -> None:
         e.misses, e.missing_since = 0, 0.0
         e.pid = int(hit["pid"])
         e.status = _status(hit)
+        _read_news(e)
+        if e.status == "working" and _lingering(e):
+            e.status = "idle"
         e.waiting_for = str(hit.get("waitingFor") or "") if e.status == "waiting" else ""
         if (e.status, e.waiting_for) != before:
             if e.status == "waiting":
                 _news(e, f"{e.name} waits for a {e.waiting_for or 'reply'}; answer it in the browser or with "
                          f"`claude attach {e.short}`.")
             _changed.set()
-        _read_news(e)
         if not proxy_alive(e) and time.monotonic() - e.proxy_asked > PROXY_ASK_S:
             unshown.setdefault(e.c, []).append(e.key)
         if e.status != "idle" and not e.run_open and agent_session.current(e.c, e.key) is None:
@@ -524,6 +534,20 @@ async def _tick(rows: list[dict[str, Any]]) -> None:
     for c, keys in unshown.items():
         if ask_main_for_proxy(c, *keys):
             log.info("%s: main is asked to show %s in the agent tray", c, ", ".join(name_of(k) for k in keys))
+
+
+def _lingering(e: Entry) -> bool:
+    """Whether a session listed as busy has ended its turn with only background shells left running: its transcript's
+    last turn has ended and no line was added for LINGER_S. The offset is the one _read_news keeps."""
+    now = time.monotonic()
+    if e.offset != e.tx_seen:
+        e.tx_seen, e.tx_grew, e.tx_ended = e.offset, now, None
+        return False
+    if now - e.tx_grew < LINGER_S:
+        return False
+    if e.tx_ended is None:
+        e.tx_ended = turn_state(e.sid)[0]
+    return e.tx_ended
 
 
 def _gone(e: Entry, hit: dict[str, Any] | None) -> bool:
