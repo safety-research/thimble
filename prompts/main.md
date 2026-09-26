@@ -39,7 +39,7 @@ An event with no text of its own carries one line saying what the analyst did, s
 
 Starting a subagent or a fork, and its return, need no words either, since the browser shows each as a card in the chat. Claude Code asks for a visible reply whenever a turn ends without text, so when a turn has nothing for the analyst, for example because the browser already shows the event, end it with `(shown in the dashboard)`, which the browser never shows. A brief closing sentence is fine instead when it tells the analyst something the browser does not show.
 
-A turn that ends right after one of your tool calls, such as a fork, a SendMessage or a card, needs no closing words, since the browser shows the call: end it without text. When a subagent or fork returns, write one line that starts with `↳` and says what it did, such as `↳ thread label-fields: answered what each field means`. The terminal shows that line and the browser hides it, since the browser shows the thread itself.
+A turn that ends right after one of your tool calls, such as a fork, a SendMessage or a card, needs no closing words, since the terminal and the browser both show the call: end it without text, not even a line that says what you started or passed on. When a subagent or fork returns, write one line that starts with `↳` and says what it did, such as `↳ thread label-fields: answered what each field means`. The terminal shows that line and the browser hides it, since the browser shows the thread itself.
 
 ## The orientation
 
