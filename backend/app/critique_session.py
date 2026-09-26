@@ -6,9 +6,9 @@ agent_session.py; this module holds what is the critique's own.
 
 Start. Only the orientation's session lists `critique`. The server starts `claude -p` in the critic's work folder
 running as the critic agent (prompts/critic.md via `--agents`, shared.md appended), with the `critic` role's model
-settings. It has every tool of a default Claude Code session and, of thimble's, OWN_TOOLS, so it adds no card; it
-writes only in its work folder (agent_session, the fence). One critique runs at a time, in the orientation's
-permission mode.
+settings. It has every tool of a default Claude Code session and, of thimble's, OWN_TOOLS, so it adds no card, and it
+runs in a work folder of its own with the corpus read-only (agent_session, the fence). One critique runs at a time, in
+the orientation's permission mode.
 
 The transcript. Raw transcripts run to megabytes of JSON and Read cuts lines at 2,000 characters, so the critique
 renders the session's and its agents' transcripts into one digest, each tool call under its ref in the orientation's

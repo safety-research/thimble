@@ -7,9 +7,9 @@ the corpus folder (command) and writes the first message on stdin, since Linux r
 agent is defined for that session alone with `--agents`. Its file names no tools, so it has every tool of a default
 Claude Code session less the session's --disallowedTools: LATER_TOOLS and the thimble tools that are not its own
 (not_own). shared.md is appended with --append-system-prompt, since Claude Code applies an agent's `skills` to
-subagents only. The session inherits the analyst's settings; thimble layers
-on the role's model, effort (also as CLAUDE_CODE_EFFORT_LEVEL) and fast mode. THIMBLE_SESSION names the session for
-its shim (`orient`, `writer:<doc>`, `critique:orient`, `check:<id>:<doc>`).
+subagents only. The session inherits the analyst's settings; thimble layers on the role's model, effort (also as
+CLAUDE_CODE_EFFORT_LEVEL) and fast mode. THIMBLE_SESSION names the session for its shim (`orient`, `writer:<doc>`,
+`critique:orient`, `check:<id>:<doc>`).
 
 Permissions. A --print session has no terminal, so a PermissionRequest hook (permission_hook.py) hands each request of
 the session, its subagents and workflow agents to ask, which shows it on the chat's card with Allow and Deny. A hook is

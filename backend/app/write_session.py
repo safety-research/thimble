@@ -2,12 +2,12 @@
 
 The writer agent is defined for that session alone with `--agents` from prompts/writer.md and chosen with `--agent`,
 so main's list of agents never shows it. It has every tool of a default Claude Code session and, of thimble's,
-OWN_TOOLS, and writes only in its work folder (agent_session, the fence). Its first message holds the whole context
-(context.render, CONTEXT_CHARS) followed by the task. One writer runs per document, with the `writer` role's model
-settings and THIMBLE_SESSION `writer:<doc>`; the report checks run once it has ended. Main starts it with `start_writing` and hears a `written`
-channel event when it ends. A writer cut short by a server stop is resumed by the next server (_resume_left). A
-writer
-answering the orientation's report pass carries `orient` and `orient_run` on its meta."""
+OWN_TOOLS, and runs in a work folder of its own with the corpus read-only (agent_session, the fence). Its first message
+holds the whole context (context.render, CONTEXT_CHARS) followed by the task. One writer runs per document, with the
+`writer` role's model settings and THIMBLE_SESSION `writer:<doc>`; the report checks run once it has ended. Main starts
+it with `start_writing` and hears a `written` channel event when it ends. A writer cut short by a server stop is resumed
+by the next server (_resume_left). A writer answering the orientation's report pass carries `orient` and `orient_run` on
+its meta."""
 from __future__ import annotations
 
 import asyncio
