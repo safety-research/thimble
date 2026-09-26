@@ -119,8 +119,9 @@ async def test_the_subagent_is_the_orientation_chat_its_calls_act_as_the_orienta
     assert not [e for e in _log(chat) if e["type"] == "user"], "its first prompt only names the prompt file"
     assert [e["name"] for e in _log(chat) if e["type"] == "tool_use"][:1] == ["Read"]
     # its add_card comes through main's shim with no session: the mirror's transcript says it is the orientation's
-    assert session.call_session(CORPUS, "k2") == tools.ORIENT_SESSION
-    assert session.call_session(CORPUS, "toolu_main_own") is None
+    assert await session.call_session(CORPUS, "k2") == tools.ORIENT_SESSION
+    _append(p, lv, [_assistant(_use("toolu_main_own", terminal_tools.tool_name("list_cards"), {}))])
+    assert await session.call_session(CORPUS, "toolu_main_own") is None
     seen: list = []
 
     async def fake_call(c, name, args, **kw):
@@ -159,6 +160,51 @@ async def test_the_subagent_is_the_orientation_chat_its_calls_act_as_the_orienta
     _append(p, lv, [_note("completed"), END])
     run = orientation.read_run(CORPUS)
     assert run["status"] == "done" and run["followups"][-1]["status"] == "done"
+
+
+async def test_a_call_that_arrives_before_its_line_waits_for_the_transcript_that_holds_it(tmp_path, monkeypatch):
+    p = tmp_path / f"{SID}.jsonl"
+    p.write_text("")
+    lv = session.attach(CORPUS, SID, str(config.corpus_dir(CORPUS)), str(p))
+    sub_path = tmp_path / SID / "subagents" / f"agent-{AGENT_ID}.jsonl"
+    sub_path.parent.mkdir(parents=True)
+    sub_path.write_text("")
+    orient = session.Sub(CORPUS, "c0ffee01", USE, AGENT_ID, role=orientation.ROLE)
+    orient.path = sub_path
+    lv.subs.append(orient)
+    helper = session.Sub(CORPUS, "c0ffee02", "k_agent", "a_helper")  # a subagent the orientation started
+    helper.path = sub_path.with_name("agent-a_helper.jsonl")
+    helper.path.write_text("")
+    lv.subs.append(helper)
+
+    async def later(path: Path, tool_use_id: str) -> None:
+        await asyncio.sleep(0.15)  # Claude Code writes the line on a timer, after the call reached the server
+        _add(path, [_assistant(_use(tool_use_id, terminal_tools.tool_name("add_card"), {}))])
+
+    for path, tool_use_id, want in ((sub_path, "k_late", tools.ORIENT_SESSION), (p, "m_late", None)):
+        task = asyncio.ensure_future(later(path, tool_use_id))
+        assert await session.call_session(CORPUS, tool_use_id) == want, tool_use_id
+        await task
+    _add(sub_path, [_assistant(_use("k_agent", "Agent", {"description": "count", "prompt": "Count."}))])
+    session.tail_once(lv)
+    task = asyncio.ensure_future(later(helper.path, "h_late"))
+    assert await session.call_session(CORPUS, "h_late") == tools.ORIENT_SESSION, "its own subagent works for it too"
+    await task
+    monkeypatch.setattr(session, "CALL_WAIT_S", 0.1)
+    assert await session.call_session(CORPUS, "nowhere") is None, "a call in no transcript is main's once the wait ends"
+    orient.done = True
+    assert await session.call_session(CORPUS, "k_late") is None, "no wait while no orientation works"
+
+
+async def test_a_follow_up_of_the_subagent_is_one_undo_batch():
+    orientation.request(CORPUS, "", ["final"], route=orientation.SUBAGENT_ROUTE)
+    chat = agents.new_agent(CORPUS, orientation.ROLE, orientation.TITLE, session=SID, agent_id=AGENT_ID)["id"]
+    orientation.started(CORPUS, chat, agent_id=AGENT_ID)
+    assert orient_session.undo_batch(CORPUS) is None, "the first run's cards are each a step"
+    orientation.record(CORPUS, run=2, status="running")
+    assert orient_session.undo_batch(CORPUS) == (f"{chat}/2", orientation.FOLLOWUP_LABEL)
+    orientation.record(CORPUS, status="done")
+    assert orient_session.undo_batch(CORPUS) is None
 
 
 async def test_a_message_or_a_stop_from_the_browser_goes_through_main(tmp_path):

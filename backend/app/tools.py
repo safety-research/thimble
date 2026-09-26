@@ -2380,7 +2380,7 @@ async def call_route(name: str, body: CallBody, request: Request) -> dict[str, A
     if sess is None and body.tool_use_id:
         from . import session  # noqa: PLC0415 — session imports orientation, which imports this module's callers
 
-        sess = session.call_session(c, body.tool_use_id)  # the orientation's subagent calls through main's shim
+        sess = await session.call_session(c, body.tool_use_id)  # the orientation's subagent calls through main's shim
     work = call(c, name, body.args, actor=body.actor, notebook=body.notebook, session=sess,
                 tool_use_id=body.tool_use_id or None)
     if REGISTRY[canonical(name)].drop_stops:

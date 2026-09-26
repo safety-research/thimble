@@ -309,12 +309,17 @@ def _moved(run: agent_session.Run) -> None:
 
 
 def undo_batch(c: str) -> tuple[str, str] | None:
-    """(id, label) of the undo batch a call of the orientation's session belongs to: its follow-up's, `<chat>/<run>`,
-    while one runs; None during the first run, whose cards appear whole when it ends and are each a step."""
+    """(id, label) of the undo batch a call of the orientation's session or subagent belongs to: its follow-up's,
+    `<chat>/<run>`, while one runs; None during the first run, whose cards appear whole when it ends and are each a
+    step."""
     run = current(c)
-    if run is None or run.k <= 0:
+    if run is not None:
+        return (f"{run.chat}/{run.k}", orientation.FOLLOWUP_LABEL) if run.k > 0 else None
+    sub = orientation.subagent_run(c) or {}  # terminal-first mode: the follow-up the mirror recorded (session._revive)
+    k, chat = int(sub.get("run") or 0), (sub.get("chats") or {}).get(orientation.ROLE)
+    if k <= 0 or not chat or sub.get("status") != "running":
         return None
-    return f"{run.chat}/{run.k}", orientation.FOLLOWUP_LABEL
+    return f"{chat}/{k}", orientation.FOLLOWUP_LABEL
 
 
 def _lead(messages: "list[dict[str, Any]]") -> str:

@@ -95,6 +95,9 @@ TASK_FIELD_RE = re.compile(r"<(task-id|tool-use-id|status|result)>(.*?)</\1>", r
 ASYNC_RESULT_RE = re.compile(r"^\s*Async agent launched")
 AGENT_ID_RE = re.compile(r"agentId:\s*([A-Za-z0-9_-]+)")
 TASK_DONE = ("completed", "done", "success")
+CALL_WAIT_S = 2.0  # call_session's longest wait for a call's line in a transcript
+CALL_POLL_S = 0.02
+CALL_TAIL = 262_144  # bytes at a transcript's end that call_session reads first
 # Stops and waits (module note): the notes main gets, and how the transcript and the session's state file say so
 SAFETY_RE = re.compile(r"safeguards stopped the response")
 INTERRUPT_RE = re.compile(r"^\[Request interrupted by user[^\]]*\]$")
@@ -1293,34 +1296,76 @@ def _revive(lv: Live, sub: Sub, messages: list[dict]) -> None:
         _orientation(orientation.run_started, lv.c, sub.chat, k + 1, messages)
 
 
-def call_session(c: str, tool_use_id: str | None) -> str | None:
+async def call_session(c: str, tool_use_id: str | None) -> str | None:
     """The session a call through main's shim acts for: the orientation's (tools.ORIENT_SESSION) when the call is one
-    of the orientation subagent's in terminal-first mode, found in its transcript, else None (main's own)."""
+    of the orientation subagent's in terminal-first mode, or of a subagent it started, else None (main's own). Claude
+    Code writes a call's line to its transcript on a timer, so the call can arrive before its line does: the session's
+    transcripts are read until one holds the call's id, for CALL_WAIT_S at most."""
     from . import tools  # noqa: PLC0415 — tools imports far more than the mirror needs
 
     lv = _live.get(c)
-    if lv is None or not tool_use_id:
+    if lv is None or not tool_use_id or not any(_orient_working(s) for s in lv.subs if s.role == orientation.ROLE):
         return None
-    orients = [s for s in lv.subs if s.role == orientation.ROLE and not s.done]
-    if not orients:
-        return None
-    if any(s.path is None for s in orients):
-        _scan_subs(lv)
     needle = tool_use_id.encode()
-    for sub in orients:
-        if tool_use_id in sub.names or (sub.path is not None and needle in _tail_bytes(sub.path)):
-            return tools.ORIENT_SESSION
+    read: dict[str, int] = {}
+    deadline = time.monotonic() + CALL_WAIT_S
+    scanned = False
+    while True:
+        holder = _call_holder(lv, tool_use_id, needle, read)
+        if holder is not None:
+            return tools.ORIENT_SESSION if holder in _orient_family(lv) else None
+        if time.monotonic() >= deadline:
+            log.info("%s: call %s is in no transcript after %.1f s; it is main's", c, tool_use_id, CALL_WAIT_S)
+            return None
+        if not scanned or any(s.path is None for s in lv.subs if s.role == orientation.ROLE):
+            _scan_subs(lv)  # the call may come from a subagent whose transcript is not followed yet
+            scanned = True
+        await asyncio.sleep(CALL_POLL_S)
+
+
+def _orient_working(sub: Sub) -> bool:
+    """Whether an orientation subagent works: its chat runs, or its transcript grew since the tail last read it (a
+    resume the tail has not seen yet)."""
+    return not sub.done or (sub.path is not None and _size(sub.path) > sub.offset)
+
+
+def _orient_family(lv: Live) -> set[Sub]:
+    """The orientation subagents of the session and the subagents they started, by the Agent calls in their
+    transcripts."""
+    family = {s for s in lv.subs if s.role == orientation.ROLE}
+    while True:
+        calls = {u for s in family for u in s.names}
+        more = {s for s in lv.subs if s not in family and s.tool_use_id in calls}
+        if not more:
+            return family
+        family |= more
+
+
+def _call_holder(lv: Live, tool_use_id: str, needle: bytes, read: dict[str, int]) -> Sub | Live | None:
+    """The subagent, or main (`lv`), whose transcript holds the call `tool_use_id`, else None. `read` keeps where each
+    file was read to, so a later look reads only what was added."""
+    for sub in lv.subs:
+        if tool_use_id in sub.names:
+            return sub
+    files: list[tuple[Sub | Live, Path]] = [(s, s.path) for s in lv.subs if s.path is not None]
+    if lv.transcript_path:
+        files.append((lv, Path(lv.transcript_path)))
+    for holder, path in files:
+        key = str(path)
+        size = _size(path)
+        start = read.get(key, max(0, size - CALL_TAIL))
+        if size <= start:
+            continue
+        try:
+            with path.open("rb") as f:
+                f.seek(start)
+                data = f.read(size - start)
+        except OSError:
+            continue
+        read[key] = max(start, size - len(needle))
+        if needle in data:
+            return holder
     return None
-
-
-def _tail_bytes(path: Path, n: int = 1_000_000) -> bytes:
-    """The last `n` bytes of a file, where a call just made is written."""
-    try:
-        with path.open("rb") as f:
-            f.seek(max(0, _size(path) - n))
-            return f.read()
-    except OSError:
-        return b""
 
 
 def _channel_module() -> Any:
