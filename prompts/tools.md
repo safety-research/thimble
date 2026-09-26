@@ -285,13 +285,13 @@ Post the reply the analyst reads in a thread.
 
 ## message_thread
 
-Send a message the analyst typed in this terminal to a thread, as that thread's composer in the browser sends it: a side thread's follow-up, which reaches you as its `thread` event with the thread's anchor, or with no message its unanswered questions asked again; a follow-up for the orientation; or a change to a view for the view's build thread. The browser shows the message in that thread. Call it for /thimble:ask.
+Send a message the analyst typed in this terminal to a thread, as that thread's composer in the browser sends it: a side thread's follow-up, or with no message its unanswered questions asked again, whose `thread` event, with the thread's anchor, comes back in the result for you to handle at once; a follow-up for the orientation; or a change to a view for the view's build thread. The browser shows the message in that thread. Call it for /thimble:ask.
 
 ```json
 {
   "type": "object",
   "properties": {
-    "thread": {"type": "string", "description": "The thread's name or id as the thread list shows it, such as main/why-the-spike, orientation or dev/board."},
+    "thread": {"type": "string", "description": "The thread's name or id as the thread list shows it, such as main/why-the-spike, orient or dev/board."},
     "message": {"type": "string", "description": "The analyst's message, word for word. Leave it out to ask a side thread's unanswered questions again."}
   },
   "required": ["thread"]
@@ -1008,13 +1008,21 @@ No orientation has run in this workspace. Call `start_orientation` to start one.
 
 Claude Code no longer keeps this orientation's session, so it cannot continue. Its outputs and call refs still open. Call `start_orientation` for a new orientation that takes up the message.
 
-## message_thread-sent
+## message_thread-event
 
-The message is in the thread {thread}, and its `thread` event reaches you next, so this turn needs no words from you.
+The browser shows the message in the thread {thread}. Handle the thread's event now, as its bullet in your prompt says:
+
+{event}
 
 ## message_thread-again
 
-The thread {thread}'s unanswered questions are asked again, and its `thread` event reaches you next, so this turn needs no words from you.
+The analyst asks the thread {thread} its questions again. Handle the thread's event now, as its bullet in your prompt says:
+
+{event}
+
+## message_thread-queued
+
+The message is in the thread {thread}, which waits for the fork you started for it and gets the message once that fork is known, so this turn needs no words from you.
 
 ## message_thread-view
 

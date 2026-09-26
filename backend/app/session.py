@@ -175,6 +175,7 @@ class Live:
         self.turn_open = False
         self.fresh = False  # the turn has had no assistant record yet: another opening record still counts
         self.turn_threads: list[str] = []  # the threads whose events reached the turn (_release_threads)
+        self.handed: list[str] = []  # the threads whose events main got in a tool's result (handed)
         self.forked: set[str] = set()  # the threads the turn forked or sent a follow-up to
         self.sends: dict[str, str] = {}  # tool_use id of main's SendMessage to a thread's fork -> the thread
         self.wrote = False  # the turn wrote something to main
@@ -689,6 +690,16 @@ def expect(c: str, event_id: str, *, thread: str | None = None) -> None:
         lv.wake.set()
 
 
+def handed(c: str, event_id: str, thread: str) -> None:
+    """A thread's event main got in a tool's result (channel.hand): main's turn counts it as an event that reached it
+    (_channel), and until the turn ends a turn the tail opens late keeps it."""
+    _event_threads[event_id] = thread
+    lv = _live.get(c)
+    if lv is not None:
+        lv.turn_threads.append(thread)
+        lv.handed.append(thread)
+
+
 def push_event(c: str, kind: str, text: str, **meta: Any) -> bool:
     """Server code's way to send the session an event (a built view's `view`, dev.run_view): channel.post with `text`
     as the body and `meta` as its attributes; False when no session listens."""
@@ -756,7 +767,7 @@ def _open_turn(lv: Live) -> None:
     """A record that starts main's turn: the analyst's line, an event, a task notification. Several before the first
     assistant record open the same turn."""
     if not lv.turn_open or not lv.fresh:
-        lv.turn_open, lv.fresh, lv.wrote, lv.turn_threads, lv.forked = True, True, False, [], set()
+        lv.turn_open, lv.fresh, lv.wrote, lv.turn_threads, lv.forked = True, True, False, list(lv.handed), set()
         lv.flagged, lv.answered, lv.held_by_check, lv.stop_noted = False, True, False, False
     agents.set_running(lv.c, agents.MAIN_ID, True)
 
@@ -768,7 +779,7 @@ def _release_threads(lv: Live) -> None:
     for tid in dict.fromkeys(lv.turn_threads):
         if tid not in lv.forked:
             threads.released(lv.c, tid)
-    lv.turn_threads, lv.forked = [], set()
+    lv.turn_threads, lv.forked, lv.handed = [], set(), []
 
 
 def _end_turn(lv: Live) -> None:
