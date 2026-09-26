@@ -24,6 +24,7 @@ import { fmtSize } from './Tree'
 import { useFilesFilter, type FilesLabels } from './useLabels'
 import { accepts, slugOf, viewValue } from './viewChoice'
 import { ViewerFrame } from './ViewerFrame'
+import { usePinnedView, ViewUpdated } from './viewVersion'
 import { ProposalOption } from './ViewsBar'
 import { useTypeViewers } from './typeViewers'
 import { errMsg, LaneHead, targetOf, type ViewDef, type ViewProps } from './views/common'
@@ -128,15 +129,21 @@ export function ViewFailed({ name, detail, onRaw }: { name: string; detail: stri
   )
 }
 
-/** A viewer for the file's type as its mode: the view's page in the reader, and what failed with Raw beside it. */
+/** A viewer for the file's type as its mode: the view's page in the reader, and what failed with Raw beside it. It keeps
+ * the version it opened at, with Updated and Reload over its top right corner once a newer one is there. */
 function ReaderViewer({ ws, view, path, targetRef, labels, onRaw }: { ws: string; view: View; path: string; targetRef?: string; labels: FilesLabels; onRaw: () => void }) {
   const [failure, setFailure] = useState<string | null>(null)
   const filter = useFilesFilter(ws)
+  const pin = usePinnedView(ws, view.slug, view.version || undefined)
   return (
     <div className="reader-main reader-viewer">
       {failure && <ViewFailed name={view.name} detail={failure} onRaw={onRaw} />}
+      {pin.stale && <ViewUpdated onReload={() => (setFailure(null), void pin.reload())} className="reader-viewer-updated" />}
       <ViewerFrame
-        key={view.built}
+        key={`${view.slug}:${pin.pinned ?? ''}`}
+        version={pin.pinned || undefined}
+        restore={pin.restore}
+        handle={pin.frame}
         ws={ws}
         slug={view.slug}
         targetRef={targetRef}

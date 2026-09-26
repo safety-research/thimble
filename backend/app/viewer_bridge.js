@@ -20,6 +20,9 @@
 //                          last; window.thimble.onLabels hears on and filter
 //   cmd {on, cursor}       page to frame: ⌘ went down or up, and the page's ⌘ arrow as a CSS cursor value, which this
 //                          page shows while ⌘ is held so the pointer over the frame is the same one pointer
+//   state {id}             page to frame, answered by state {id, state}: what the analyst is looking at, before a newer
+//                          version of the view is loaded in its place: {ref, scroll, fields, segs} (pageState)
+//   restore {state}        page to frame: that state put back in the newer version's page, as far as it fits (restore)
 // plus ready (the frame can take `open`), error (an uncaught error or a blocked request, shown with a Raw button) and
 // point {rect} (the element under the pointer while ⌘ is held, so the page's one highlight follows the pointer into the
 // frame).
@@ -35,6 +38,7 @@
   var openers = []
   var last = null
   var pointed = null
+  var picked = null // the data-anchor of the element the analyst last clicked since the last `open`
   function post(msg) {
     try {
       parent.postMessage(msg, '*')
@@ -114,6 +118,7 @@
     var d = e.data || {}
     if (d.type === P + 'open') {
       last = d.open || {}
+      picked = null
       for (var i = 0; i < openers.length; i++) {
         try {
           openers[i](last)
@@ -149,6 +154,10 @@
     } else if (d.type === P + 'cmd') {
       setCmdCursor(d.cursor)
       cmdHeld(d.on)
+    } else if (d.type === P + 'state') {
+      post({ type: P + 'state', id: d.id, state: pageState() })
+    } else if (d.type === P + 'restore') {
+      startRestore(d.state)
     }
   })
   addEventListener('error', function (e) {
@@ -239,6 +248,8 @@
         post({ type: P + 'cite', ref: hit.ref, text: textOf(hit.el), element: nameOf(hit.el), rect: rectOf(hit.el) })
         return
       }
+      var own = e.target && e.target.closest ? e.target.closest('[data-anchor]') : null
+      if (own) picked = own.getAttribute('data-anchor')
       // a link never takes the frame anywhere: the frame has no network, and a view moves with thimble.navigate
       var a = e.target && e.target.closest ? e.target.closest('a[href]') : null
       if (a) e.preventDefault()
@@ -604,6 +615,7 @@
   new MutationObserver(function (records) {
     var changed = false
     if (quote) quote.changed = Date.now()
+    if (restoring) restoring.changed = Date.now()
     for (var i = 0; i < records.length; i++) {
       var r = records[i]
       if (sheet && (r.target === sheet || (r.addedNodes.length === 1 && r.addedNodes[0] === sheet))) continue
@@ -623,6 +635,118 @@
     if (unsent.length && sendTimer == null) sendTimer = setTimeout(sendAnchors, 30)
     if (changed && (hasMarks() || dropping()) && paintTimer == null) paintTimer = setTimeout(paint, 30)
   }).observe(document.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: ['data-anchor', 'class'] })
+
+  // What the analyst is looking at, for a newer version of the view loaded in this page's place: `ref` the element they
+  // last clicked since the last `open`, `scroll` the scroll positions of the page and of each box scrolled, `fields`
+  // the values typed or picked in its inputs, and `segs` the chosen option of each segmented control, by its text. An
+  // element is named by its id, else by its path of child positions from the body.
+  var SCAN_MAX = 5000
+  function pathOf(el) {
+    if (el === document.scrollingElement || el === document.documentElement || el === document.body) return ''
+    if (el.id) return '#' + el.id
+    var parts = []
+    for (var e = el; e && e !== document.body; e = e.parentElement) {
+      if (e.id) {
+        parts.unshift('#' + e.id)
+        break
+      }
+      parts.unshift(String(Array.prototype.indexOf.call(e.parentElement ? e.parentElement.children : [], e)))
+    }
+    return parts.join('/')
+  }
+  function atPath(path) {
+    if (!path) return document.scrollingElement || document.documentElement
+    var parts = path.split('/')
+    var el = document.body
+    for (var i = 0; i < parts.length && el; i++) el = parts[i].charAt(0) === '#' ? document.getElementById(parts[i].slice(1)) : el.children[Number(parts[i])]
+    return el || null
+  }
+  function pageState() {
+    var scroll = []
+    var root = document.scrollingElement || document.documentElement
+    if (root.scrollTop || root.scrollLeft) scroll.push({ path: '', top: root.scrollTop, left: root.scrollLeft })
+    var all = document.body ? document.body.getElementsByTagName('*') : []
+    for (var i = 0; i < all.length && i < SCAN_MAX; i++) {
+      var el = all[i]
+      if (el.scrollTop || el.scrollLeft) scroll.push({ path: pathOf(el), top: el.scrollTop, left: el.scrollLeft })
+    }
+    var fields = []
+    var inputs = document.querySelectorAll('input, select, textarea')
+    for (var j = 0; j < inputs.length; j++) {
+      var f = inputs[j]
+      var box = f.type === 'checkbox' || f.type === 'radio'
+      if (box ? f.checked !== f.defaultChecked : f.tagName === 'SELECT' ? f.selectedIndex > 0 : f.value !== f.defaultValue)
+        fields.push(box ? { path: pathOf(f), checked: f.checked } : { path: pathOf(f), value: f.value })
+    }
+    var segs = []
+    var chosen = document.querySelectorAll('.seg .seg-opt.active')
+    for (var k = 0; k < chosen.length; k++) segs.push({ path: pathOf(chosen[k].closest('.seg')), text: chosen[k].textContent.trim() })
+    return { ref: picked || (last && last.ref) || null, scroll: scroll, fields: fields, segs: segs }
+  }
+  // The state put back, again after each change of the page, until it has been quiet for QUOTE_QUIET ms with no fetch
+  // pending or RESTORE_MAX ms pass, or the analyst scrolls, clicks or types: each field and segmented control once it is
+  // there, the change told to the page as the analyst's own would be, and the scroll positions.
+  var RESTORE_MAX = 5000
+  var restoring = null
+  function startRestore(st) {
+    if (!st || typeof st !== 'object') return
+    var now = Date.now()
+    restoring = {
+      fields: Array.isArray(st.fields) ? st.fields.slice() : [],
+      segs: Array.isArray(st.segs) ? st.segs.slice() : [],
+      scroll: Array.isArray(st.scroll) ? st.scroll : [],
+      changed: now,
+      max: now + RESTORE_MAX,
+    }
+    setTimeout(restoreStep, 0)
+  }
+  function restoreField(want) {
+    var f = atPath(String(want.path || ''))
+    if (!f || !('value' in f)) return false
+    if (typeof want.checked === 'boolean') {
+      if (f.checked === want.checked) return true
+      f.checked = want.checked
+    } else if (typeof want.value === 'string' && f.value !== want.value) f.value = want.value
+    else return true
+    f.dispatchEvent(new Event('input', { bubbles: true }))
+    f.dispatchEvent(new Event('change', { bubbles: true }))
+    return true
+  }
+  function restoreSeg(want) {
+    var seg = atPath(String(want.path || ''))
+    var opts = seg ? seg.querySelectorAll('.seg-opt') : []
+    for (var o = 0; o < opts.length; o++) {
+      if (opts[o].textContent.trim() !== want.text) continue
+      if (!opts[o].classList.contains('active')) opts[o].click()
+      return true
+    }
+    return false
+  }
+  function restoreStep() {
+    var r = restoring
+    if (!r) return
+    r.fields = r.fields.filter(function (f) {
+      return !restoreField(f)
+    })
+    r.segs = r.segs.filter(function (g) {
+      return !restoreSeg(g)
+    })
+    for (var i = 0; i < r.scroll.length; i++) {
+      var el = atPath(String(r.scroll[i].path || ''))
+      if (!el) continue
+      if (el.scrollTop !== r.scroll[i].top) el.scrollTop = r.scroll[i].top
+      if (el.scrollLeft !== r.scroll[i].left) el.scrollLeft = r.scroll[i].left
+    }
+    var now = Date.now()
+    if (now >= r.max || (now - r.changed >= QUOTE_QUIET && !hasPending())) restoring = null
+    else setTimeout(restoreStep, 100)
+  }
+  function stopRestore() {
+    restoring = null
+  }
+  addEventListener('wheel', stopRestore, { passive: true, capture: true })
+  addEventListener('pointerdown', stopRestore, true)
+  addEventListener('keydown', stopRestore, true)
 
   function size() {
     var b = document.body

@@ -16,8 +16,8 @@ export type Events = {
   cell: { notebook: string; cell: string; kind: string }
   orient: { status: string; [k: string]: unknown }
   report: { slug: string; status: string; span?: string }
-  /** `asked`: a view the analyst asked for is built (files/viewReady.ts) */
-  view: { slug: string; status: string; path?: string; chat?: string; asked?: boolean }
+  /** `asked`: a view the analyst asked for is built (files/viewReady.ts); `version`: a new version of it passed its checks */
+  view: { slug: string; status: string; path?: string; chat?: string; asked?: boolean; version?: string }
   ticket: { id: string; n: number; status: string }
   concepts: { concept: string; what: string }
   filter: { scope: FilterScope; concept?: string; value?: string }

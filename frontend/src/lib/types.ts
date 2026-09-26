@@ -106,7 +106,7 @@ export type WsEvent = { ts?: string; seq?: number } & (
   | { type: 'cell'; notebook: string; cell: string; kind: 'ran' | 'note' | 'verified' | string }
   | { type: 'orient'; status: 'started' | 'done' | 'failed' | 'stopped' | string; [k: string]: unknown }
   | { type: 'report'; slug: string; status: 'generating' | 'generated' | 'failed' | 'verified' | 'figures' | 'rewritten' | string; span?: string; run?: string }
-  | { type: 'view'; slug: string; status: 'queued' | 'building' | 'built' | 'failed' | 'deleted' | string; path?: string; chat?: string }
+  | { type: 'view'; slug: string; status: 'queued' | 'building' | 'built' | 'failed' | 'deleted' | string; path?: string; chat?: string; version?: string }
   | { type: 'ticket'; id: string; n: number; status: string }
   | { type: 'concepts'; concept: string; what: 'defined' | 'applied' | 'deleted' | string }
   | { type: 'filter'; scope: FilterScope; concept?: string; value?: string }
@@ -453,6 +453,8 @@ export interface View {
   default: boolean
   libs: string[]
   built: string
+  /** the digest of its files when it last passed its checks: a page loaded at it keeps it until reloaded */
+  version?: string
   /** reader.py, view.html and claims are all there */
   ok: boolean
   /** the forms as written in a citation */

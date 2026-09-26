@@ -17,7 +17,7 @@ import { refreshProposals, useProposals } from '../lib/proposals'
 import { startSurfaceDrag } from '../lib/surfaces'
 import { track } from '../lib/telemetry'
 import type { Proposal, View, ViewReview } from '../lib/types'
-import { useReadyViews } from './viewReady'
+import { useReadyViews, useUpdatedViews } from './viewReady'
 import { fitViews } from './viewsFit'
 
 export const BROWSER = 'browser'
@@ -34,8 +34,10 @@ export interface BuiltView {
   first_file?: string | null
   /** the files it claims, as globs: what a label made beside it applies to */
   claims?: string[]
-  /** when it last passed its checks: a new stamp is a new version of its page */
+  /** when it last passed its checks */
   built?: string
+  /** the version it last passed its checks at, which a pane that opened an older one offers to reload */
+  version?: string
   /** the review of its pictures, from its proposal */
   review?: ViewReview
 }
@@ -64,8 +66,8 @@ export function useViews(ws: string): { views: BuiltView[]; proposals: Proposal[
   }, [ws])
   const known = new Map(views.map((v) => [v.slug, v]))
   const built: BuiltView[] = [
-    ...proposals.filter((p) => p.status === 'built').map((p) => ({ slug: p.slug, name: p.name, first_file: known.get(p.slug)?.first_file, claims: known.get(p.slug)?.claims, built: known.get(p.slug)?.built, review: p.review })),
-    ...views.filter((v) => !proposals.some((p) => p.slug === v.slug)).map((v) => ({ slug: v.slug, name: v.name, first_file: v.first_file, claims: v.claims, built: v.built })),
+    ...proposals.filter((p) => p.status === 'built').map((p) => ({ slug: p.slug, name: p.name, first_file: known.get(p.slug)?.first_file, claims: known.get(p.slug)?.claims, built: known.get(p.slug)?.built, version: known.get(p.slug)?.version, review: p.review })),
+    ...views.filter((v) => !proposals.some((p) => p.slug === v.slug)).map((v) => ({ slug: v.slug, name: v.name, first_file: v.first_file, claims: v.claims, built: v.built, version: v.version })),
   ]
   // a viewer the File browser suggests for a file type shows there alone until it is accepted, and an orientation's
   // view appears once it is built
@@ -155,6 +157,7 @@ export function ViewsBar({ ws, value, onChange, views, proposals, compact = fals
   const [ask, setAsk] = useState('')
   const askInput = useRef<HTMLInputElement>(null)
   const ready = useReadyViews(ws)
+  const updated = useUpdatedViews(ws)
   const barRef = useRef<HTMLDivElement>(null)
   const measureRef = useRef<HTMLDivElement>(null)
   // the indices of the items that fit (the options, then the proposals), or null until measured: all of them
@@ -197,9 +200,9 @@ export function ViewsBar({ ws, value, onChange, views, proposals, compact = fals
     openThread(p.chat, 'view')
   }
 
-  const options: { value: string; label: string; icon: IconName; anchor?: string; dot?: boolean; className?: string }[] = [
+  const options: { value: string; label: string; icon: IconName; anchor?: string; dot?: boolean; note?: string; className?: string }[] = [
     { value: BROWSER, label: 'File browser', icon: 'folder-open' },
-    ...views.map((v) => ({ value: viewKey(v.slug), label: v.name, icon: 'view' as const, anchor: `view:${v.slug}`, dot: ready.includes(v.slug), className: v.review?.state === 'running' ? 'is-reviewing' : undefined })),
+    ...views.map((v) => ({ value: viewKey(v.slug), label: v.name, icon: 'view' as const, anchor: `view:${v.slug}`, dot: ready.includes(v.slug) || updated.includes(v.slug), note: ready.includes(v.slug) ? 'new' : updated.includes(v.slug) ? 'updated' : undefined, className: v.review?.state === 'running' ? 'is-reviewing' : undefined })),
   ]
   const pending = proposals.filter((p) => !gone.has(p.slug))
   const active = options.findIndex((o) => o.value === value)
@@ -232,7 +235,7 @@ export function ViewsBar({ ws, value, onChange, views, proposals, compact = fals
   const hiddenOptions = options.filter((_, i) => !shows(i))
   const hiddenProposals = pending.filter((_, i) => !shows(options.length + i))
   const overflow = [
-    ...hiddenOptions.map((o) => ({ id: o.value, label: o.label, icon: o.icon, checked: o.value === value, note: o.dot ? 'new' : undefined, onSelect: () => onChange(o.value) })),
+    ...hiddenOptions.map((o) => ({ id: o.value, label: o.label, icon: o.icon, checked: o.value === value, note: o.note, onSelect: () => onChange(o.value) })),
     ...hiddenProposals.map((p) => ({ id: `p:${p.slug}`, label: p.name, icon: 'view' as const, note: STATE_NOTE[p.status], disabled: !p.chat, onSelect: () => openBuild(p) })),
   ]
 

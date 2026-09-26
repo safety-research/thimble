@@ -9,8 +9,12 @@
 //   anchors   the data-anchor refs the page shows, answered with `labels`: the marks of its records (labels.ts
 //             viewMarks, with the filter's keep) and of its units (the view's marks route), the labels that are on and
 //             the Files label filter, which the page hears through thimble.onLabels
+//   state     what the analyst is looking at (the element they picked, scroll positions, fields), asked for through
+//             `handle` before a newer version replaces the page, and sent back as `restore` once that version is ready
 // plus ready, error, point and cmd (for the ⌘ pointer). A new ref is sent as a new `open` without reloading the page.
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+// The page and every call it makes are of the view's `version`, so the page stays as it was loaded while the view
+// changes (backend views.VERSIONS_SUBDIR).
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject } from 'react'
 import { api } from '../lib/api'
 import { bus } from '../lib/bus'
 import { viewFonts, viewStyle, withFrameStyle } from '../lib/frame'
@@ -26,6 +30,22 @@ import { wantLabels, watchPathLabels } from './marks'
 const P = 'thimble:'
 const FIT_MIN = 80
 const FIT_MAX = 1600
+const STATE_WAIT_MS = 400 // how long a page has to say what the analyst is looking at
+
+/** What the analyst is looking at in a view's page (backend/app/viewer_bridge.js pageState), put back in a newer version
+ * of the page: `ref` is opened there, the rest restored as far as it fits. */
+export interface ViewState {
+  ref: string | null
+  scroll: { path: string; top: number; left: number }[]
+  fields: { path: string; value?: string; checked?: boolean }[]
+  segs: { path: string; text: string }[]
+}
+
+/** What a frame's owner can ask of it. */
+export interface ViewerFrameHandle {
+  /** what the analyst is looking at, or null when the page does not answer */
+  state: () => Promise<ViewState | null>
+}
 
 export interface ViewerFrameProps {
   ws: string
@@ -50,6 +70,12 @@ export interface ViewerFrameProps {
   quote?: ViewQuote
   /** the page did not show `quote` */
   onQuoteMissing?: () => void
+  /** the view's version the page is loaded at; none for its current files */
+  version?: string
+  /** what the analyst was looking at in the version before, put back once this one is ready */
+  restore?: ViewState | null
+  /** filled with what the frame's owner can ask of it */
+  handle?: RefObject<ViewerFrameHandle | null>
 }
 
 /** A quoted passage: the record ref it sits in and its text. */
@@ -75,6 +101,7 @@ const UNIT_BATCH = 500 // unit refs one marks request asks about
 function useViewLabels(
   ws: string,
   slug: string,
+  version: string | undefined,
   on: readonly Concept[],
   filter: LabelFilter | null,
   filterFiles: Readonly<Record<string, unknown>> | undefined,
@@ -114,7 +141,7 @@ function useViewLabels(
         let got: Record<string, ViewMark | Keep> = {}
         if (live.current) {
           try {
-            got = (await api.viewMarks(ws, slug, batch)) as Record<string, ViewMark | Keep>
+            got = (await api.viewMarks(ws, slug, batch, version)) as Record<string, ViewMark | Keep>
           } catch {
             continue // the units keep the marks they had until the next ask
           }
@@ -126,7 +153,7 @@ function useViewLabels(
         setTick((t) => t + 1)
       }
     },
-    [ws, slug],
+    [ws, slug, version],
   )
   const add = useCallback(
     (list: unknown) => {
@@ -208,7 +235,7 @@ function useViewLabels(
   return useMemo(() => ({ add, reset, ready }), [add, reset, ready])
 }
 
-export function ViewerFrame({ ws, slug, targetRef, path, title, fit, labels = NO_LABELS, filter = null, filterFiles, byId = NO_CONCEPTS, onError, className, quote, onQuoteMissing }: ViewerFrameProps) {
+export function ViewerFrame({ ws, slug, targetRef, path, title, fit, labels = NO_LABELS, filter = null, filterFiles, byId = NO_CONCEPTS, onError, className, quote, onQuoteMissing, version, restore, handle }: ViewerFrameProps) {
   const ref = useRef<HTMLIFrameElement>(null)
   const [page, setPage] = useState<string | null>(null)
   const [height, setHeight] = useState<number | null>(null)
@@ -222,25 +249,44 @@ export function ViewerFrame({ ws, slug, targetRef, path, title, fit, labels = NO
   quoted.current = quote
   const missing = useRef(onQuoteMissing)
   missing.current = onQuoteMissing
+  const restoring = useRef(restore ?? null)
+  const asked = useRef(new Map<number, (s: ViewState | null) => void>())
+  const seq = useRef(0)
 
   const [fonts, setFonts] = useState<string | null>(null)
   useEffect(() => {
     let alive = true
     ready.current = false
     api
-      .viewFrame(ws, slug)
+      .viewFrame(ws, slug, version)
       .then((doc) => alive && setPage(doc))
       .catch((e: Error) => alive && report.current?.(`the view's page did not load: ${e.message}`))
     void viewFonts().then((f) => alive && setFonts(f))
     return () => {
       alive = false
     }
-  }, [ws, slug])
+  }, [ws, slug, version])
   // the theme's tokens are read when the page is built, so a theme change reloads the page with the new colours; the
   // page waits for the app's faces so it is drawn once, in them
   const doc = useMemo(() => (page == null || fonts == null ? null : withFrameStyle(page, viewStyle(resolved) + fonts)), [page, fonts, resolved, key]) // key: the tokens are read again when the paper or the accent changes
   const post = (msg: unknown) => ref.current?.contentWindow?.postMessage(msg, '*')
-  const marks = useViewLabels(ws, slug, labels, filter, filterFiles, byId, post)
+  const marks = useViewLabels(ws, slug, version, labels, filter, filterFiles, byId, post)
+  useEffect(() => {
+    if (!handle) return
+    handle.current = {
+      state: () =>
+        new Promise<ViewState | null>((resolve) => {
+          if (!ready.current) return resolve(null)
+          const id = ++seq.current
+          const timer = window.setTimeout(() => (asked.current.delete(id), resolve(null)), STATE_WAIT_MS)
+          asked.current.set(id, (st) => (window.clearTimeout(timer), resolve(st)))
+          post({ type: P + 'state', id })
+        }),
+    }
+    return () => {
+      handle.current = null
+    }
+  })
   // a new document is a new page, which says ready again and reports its anchors afresh; set before any message of the
   // new page can be handled
   useLayoutEffect(() => {
@@ -251,7 +297,7 @@ export function ViewerFrame({ ws, slug, targetRef, path, title, fit, labels = NO
     let open: ViewOpen = path ? { ref: null, path } : { ref: null }
     if (r) {
       try {
-        open = await api.viewOpen(ws, slug, r)
+        open = await api.viewOpen(ws, slug, r, version)
       } catch (e) {
         open = { ref: r, error: (e as Error).message }
       }
@@ -259,6 +305,14 @@ export function ViewerFrame({ ws, slug, targetRef, path, title, fit, labels = NO
     }
     const q = quoted.current
     if (target.current === r) post({ type: P + 'open', open, quote: q && q.record === r ? q : undefined })
+  }
+  // A newer version's page opens where the analyst was, when this version knows that place, else where the ref it was
+  // given names; then the rest of what they were looking at is put back.
+  const reopen = async (st: ViewState) => {
+    const at = st.ref && st.ref !== target.current ? await api.viewOpen(ws, slug, st.ref, version).catch(() => null) : null
+    if (at && !at.error) post({ type: P + 'open', open: at })
+    else await sendOpen(target.current)
+    post({ type: P + 'restore', state: st })
   }
 
   // a new ref (or a new passage in the same record) for a page that is already up: a new `open`, no reload
@@ -273,16 +327,26 @@ export function ViewerFrame({ ws, slug, targetRef, path, title, fit, labels = NO
       if (!frame || e.source !== frame.contentWindow) return
       const d = (e.data ?? {}) as Record<string, any>
       switch (d.type) {
-        case P + 'ready':
+        case P + 'ready': {
           ready.current = true
           marks.ready()
-          void sendOpen(target.current)
+          const st = restoring.current
+          restoring.current = null
+          if (st) void reopen(st)
+          else void sendOpen(target.current)
           // the ⌘ arrow up front, so a ⌘ pressed while the frame has the focus shows it too
           post({ type: P + 'cmd', on: document.body.hasAttribute('data-cmd'), cursor: cmdCursors(token('--accent')).arrow })
           return
+        }
+        case P + 'state': {
+          const answer = asked.current.get(Number(d.id))
+          asked.current.delete(Number(d.id))
+          answer?.(d.state && typeof d.state === 'object' ? (d.state as ViewState) : null)
+          return
+        }
         case P + 'fetch': {
           try {
-            const res = await api.viewRecords(ws, slug, d.query)
+            const res = await api.viewRecords(ws, slug, d.query, version)
             post({ type: P + 'result', id: d.id, data: res.data })
           } catch (err) {
             post({ type: P + 'result', id: d.id, error: (err as Error).message })
@@ -326,7 +390,7 @@ export function ViewerFrame({ ws, slug, targetRef, path, title, fit, labels = NO
       offCmd()
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ws, slug, marks])
+  }, [ws, slug, marks, version])
 
   if (doc == null) return <div className={'viewer-frame viewer-frame-loading' + (className ? ` ${className}` : '')} />
   return (
