@@ -159,6 +159,31 @@ async def test_the_filter_keeps_the_records_of_a_file_its_label_never_ran_over(a
     assert marks == {"notes.jsonl#L1": {"keep": True}}
 
 
+async def test_a_label_that_ran_over_two_files_keeps_the_units_its_value_is_on_in_either(app, corpus):
+    """A label run over both of a view's files that takes its value only in one, as deletions in an events file beside
+    the revisions of the same pages: the filter drops every record of the other file, since the label ran over it and
+    gave them its other value, so the view keeps a unit by a kept record of either file (prompts/dev-view.md) and shows
+    the units whose records of the one file the label marks, where keeping units by the other file's records alone
+    would show none."""
+    (corpus / "notes.jsonl").write_text("".join(json.dumps({"thread": t, "body": b}) + "\n"
+                                                for t, b in (("t3", "deleted: the lunch post"), ("t1", "moved"))))
+    r = await app.post(f"/api/ws/{CORPUS}/concepts", json={"name": "deleted", "kind": "regex", "spec": r"\bdeleted\b",
+                                                         "labels": ["deleted", "no"]})
+    k = r.json()
+    r = await app.post(f"/api/ws/{CORPUS}/concepts/{k['id']}/apply",
+                       json={"wait": True, "paths": ["board.jsonl", "notes.jsonl"]})
+    assert r.status_code == 200, r.text
+    views.write_view(CORPUS, "threads", reader=READER, html=HTML, **{**VIEW, "claims": ["board.jsonl", "notes.jsonl"]})
+    concepts.set_filter(CORPUS, "files", k["id"], "deleted")
+    ctx = views.labels_context(CORPUS)
+    assert not any(kernel_thimble._kept(ctx, f"board.jsonl#L{n}") for n in range(1, 13)), "the label ran over board.jsonl"
+    assert kernel_thimble._kept(ctx, "notes.jsonl#L1") and not kernel_thimble._kept(ctx, "notes.jsonl#L2")
+    got = await views.reader_call(CORPUS, "threads", "records", {})
+    assert [(t["key"], t["posts"]) for t in got["threads"]] == [("t3", ["notes.jsonl#L1"])]
+    marks = await views.marks_for(CORPUS, "threads", ["view:threads/t1", "view:threads/t3"])
+    assert {r: m.get("keep") for r, m in marks.items()} == {"view:threads/t3": True}
+
+
 def test_the_test_label_marks_every_seventh_record_and_its_filter_keeps_just_those():
     ctx = views.probe_context()
     assert [n for n in range(1, 30) if kernel_thimble._marked(ctx, f"a.jsonl#L{n}")] == [7, 14, 21, 28]
