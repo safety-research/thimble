@@ -326,6 +326,7 @@ class Entry:
     misses: int = 0  # listings in a row that showed no process for it
     missing_since: float = 0.0  # time.monotonic() since when the listings show no process for it
     proxy_starting: float = 0.0  # time.monotonic() when main's Agent call that starts its proxy was let through
+    last_said: str = ""  # its last reply as its news gave it, which the news of its run's end does not repeat
 
     KEEP = ("c", "key", "name", "short", "sid", "chat", "role", "folder", "started", "status", "run_open", "result",
             "ended_at", "proxy_agents", "relayed")
@@ -440,7 +441,8 @@ def run_ended(c: str, key: str, summary: str) -> None:
     e.run_open = False
     e.result = " ".join(str(summary or "").split())[:400]
     e.ended_at = time.time()
-    _news(e, f"{e.name} finished its task" + (f": {cite.to_links(e.result)}" if e.result else "."))
+    said = cite.to_links(e.result)
+    _news(e, f"{e.name} finished its task" + (f": {said}" if said and not e.last_said.startswith(said[:200]) else "."))
     _save(c)
 
 
@@ -592,6 +594,7 @@ def _read_news(e: Entry) -> None:
             if isinstance(b, dict) and b.get("type") == "text":
                 text = cite.to_links(session.visible(str(b.get("text") or ""))).strip()
                 if text:
+                    e.last_said = " ".join(text.split())
                     _news(e, f"{e.name}: {text[:NEWS_CHARS]}{'…' if len(text) > NEWS_CHARS else ''}")
 
 
@@ -800,8 +803,9 @@ def _fresh(e: Entry, path: Path | None) -> bool:
 
 async def wait(c: str, name: str, agent_id: str | None = None, path: Path | None = None) -> str:
     """The `wait_session` tool of the proxy `agent_id` (its transcript at `path`): the session's news and the outbox's
-    messages, waiting up to WAIT_S for some. The messages the proxy got for the session go to the outbox first
-    (_capture). A second proxy of a session whose proxy is alive is told to stop."""
+    messages, waiting up to WAIT_S for some. The messages this proxy, or an earlier one of the session that ended, got
+    for the session go to the outbox first (_capture). A second proxy of a session whose proxy is alive is told to
+    stop."""
     from . import tools  # noqa: PLC0415
 
     e = by_name(c, name)
@@ -809,7 +813,8 @@ async def wait(c: str, name: str, agent_id: str | None = None, path: Path | None
         return tools.hint("wait_session-none", session=name)
     if agent_id:
         proxy_agent(c, e.key, agent_id)
-    _capture(e, path)
+    for p in {path, *session.agent_paths(c, e.proxy_agents)} - {None}:
+        _capture(e, p)
     if agent_id and e.owner and e.owner != agent_id and proxy_alive(e):
         log.info("%s: a second tray entry of %s (%s) is told to stop", c, e.name, agent_id)
         return tools.hint("wait_session-duplicate", session=e.name)
@@ -827,6 +832,8 @@ async def wait(c: str, name: str, agent_id: str | None = None, path: Path | None
             await asyncio.wait_for(_changed.wait(), min(left, POLL_S))
         e.proxy_seen = time.monotonic()
     out, e.news = list(e.news), []
+    if out:
+        out.append(tools.hint("wait_session-copy"))
     for item in _pending_out(e):
         out.append(tools.hint("wait_session-send", session=e.name, token=item["token"]))
     if not alive(e):

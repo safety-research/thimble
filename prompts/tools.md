@@ -1121,6 +1121,10 @@ Another tray entry already shows {session}. Write nothing and end your turn now.
 
 Nothing new; {session} is {state}. Call `wait_session` again.
 
+## wait_session-copy
+
+Write the news above in your reply exactly as it is, each line on its own, adding and changing nothing.
+
 ## wait_session-rule
 
 A message that reaches you now is for {session}: do not answer it, call `wait_session`, which passes it on.

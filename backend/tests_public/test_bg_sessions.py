@@ -674,3 +674,18 @@ async def test_main_s_own_wait_session_call_is_refused_and_stays_out_of_main_s_c
 
     got = await bg_session.tool_wait_session(Ctx(), {"session": "thimble:writer"})
     assert tools.hint("wait_session-main") in got.text
+
+
+async def test_a_message_that_reached_a_tray_entry_that_ended_is_passed_on_by_the_next(fake, tmp_path, monkeypatch):
+    run = await write_session.start(CORPUS, "report")
+    await asyncio.wait_for(run.task, 10)
+    e = bg_session.entry(CORPUS, "writer:report")
+    typed = {"type": "attachment", "attachment": {"type": "queued_command", "prompt": "Shorten the second section.",
+                                                  "source_uuid": "u-9", "origin": {"kind": "human"}}}
+    dead = _proxy_transcript(tmp_path, "a0000000000000011", typed)  # it ended on an API error before passing it on
+    bg_session.proxy_agent(CORPUS, e.key, "a0000000000000011")
+    monkeypatch.setattr(session, "agent_paths", lambda c, ids: [dead] if "a0000000000000011" in ids else [])
+    fresh = _proxy_transcript(tmp_path, "a0000000000000012")
+    text = await bg_session.wait(CORPUS, "thimble:writer", "a0000000000000012", fresh)
+    [item] = [i for i in e.outbox if not i["sent"]]
+    assert item["text"] == "Shorten the second section." and item["token"] in text

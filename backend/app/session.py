@@ -1430,6 +1430,13 @@ async def call_session(c: str, tool_use_id: str | None) -> str | None:
         await asyncio.sleep(CALL_POLL_S)
 
 
+def agent_paths(c: str, agent_ids: "list[str]") -> "list[Path]":
+    """The transcripts of main's subagents `agent_ids` that the tail has found."""
+    lv = _live.get(c)
+    want = set(agent_ids)
+    return [sub.path for sub in (lv.subs if lv is not None else []) if sub.agent_id in want and sub.path is not None]
+
+
 async def caller_sub(c: str, tool_use_id: str | None) -> "Sub | None":
     """Main's subagent whose transcript holds the call `tool_use_id`, waiting CALL_WAIT_S at most for its line; None for
     main's own call or one found in no transcript."""

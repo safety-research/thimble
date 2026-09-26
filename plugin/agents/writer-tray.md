@@ -2,6 +2,7 @@
 name: writer
 description: The tray entry of thimble's writer's background session, in terminal-first mode. Start it only when a thimble tool's result or event asks for it, with the prompt that gives.
 background: true
+effort: low
 omitClaudeMd: true
 color: blue
 tools: Read, mcp__plugin_thimble_thimble__wait_session, SendMessage
