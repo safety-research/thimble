@@ -4,8 +4,10 @@ session of its own with its own system prompt rather than a fork of main.
 
 Start. The server runs `claude -p --agents <json> --agent <name> --session-id <uuid> --output-format stream-json …` in
 the corpus folder (command) and writes the first message on stdin, since Linux refuses an argument over 128 KiB. The
-agent is defined for that session alone with `--agents`. shared.md is appended with --append-system-prompt, since
-Claude Code applies an agent's `skills` to subagents only. The session inherits the analyst's settings; thimble layers
+agent is defined for that session alone with `--agents`. Its file names no tools, so it has every tool of a default
+Claude Code session less the session's --disallowedTools: LATER_TOOLS and the thimble tools that are not its own
+(not_own). shared.md is appended with --append-system-prompt, since Claude Code applies an agent's `skills` to
+subagents only. The session inherits the analyst's settings; thimble layers
 on the role's model, effort (also as CLAUDE_CODE_EFFORT_LEVEL) and fast mode. THIMBLE_SESSION names the session for
 its shim (`orient`, `writer:<doc>`, `critique:orient`, `check:<id>:<doc>`).
 
@@ -13,7 +15,7 @@ Permissions. A --print session has no terminal, so a PermissionRequest hook (per
 the session, its subagents and workflow agents to ask, which shows it on the chat's card with Allow and Deny. A hook is
 used rather than --permission-prompt-tool because the prompt tool never hears background or workflow agents' requests.
 In Bypass ask allows at once; a session in thimble's mode waits for the analyst (`patient`); one in the analyst's own
-mode is denied after PERMISSION_WAIT_S. thimble's own tools and skills are always allowed (own_rules).
+mode is denied after PERMISSION_WAIT_S. thimble's own tools and skills, and WebSearch, are always allowed (own_rules).
 
 Don't ask again. The request's `permission_suggestions` become the card's third choice (offer); chosen, they are sent
 as `updatedPermissions` with destination session, kept on the chat's meta (RULES_KEY), and put in each later process's
@@ -34,7 +36,7 @@ The process runs in the work folder with the corpus added via `--add-dir`, since
 over dangerous names in the process's own folder, which a write deny of that folder would break. Its --settings deny
 Edit in the corpus and exclude the CLAUDE.md files of the work folder's ancestry (memory_excludes). Where the sandbox
 can run it has no network. A SubagentStart hook gives each subagent its own scratch folder, since the sandbox gives all
-agents one $TMPDIR. A caller that passes `unasked` (a check's run, which nobody watches) also auto-allows Bash in the
+agents one $TMPDIR. A caller that passes `unasked` (a writer, a critique, a check's run) also auto-allows Bash in the
 sandbox and edits in the work folder (sandbox_allow.py).
 
 Calls. A caller that passes `calls` numbers every call in an orientation chat's sequence (calls.py), and the call-ref
@@ -177,10 +179,13 @@ RETRY_BUDGET_ENV = "THIMBLE_SESSION_RETRY_BUDGET_S"
 RETRY_PROMPT = "session-retry"  # prompts/tools.md: the stdin prompt of a session started again after the wait
 RETRY_REASONS = {"overloaded": "Anthropic's API is overloaded", "rate_limited": "Anthropic's API rate limit was reached"}
 FAILURE_CHARS = 400  # of a failure's text in the one line that says why (failure_line)
-# A session never ends while its own background work runs: the tools that schedule a later turn are taken away, --print
-# waits for background agents and workflows however long they run (BG_WAIT_ENV), and a session that still exits with some
-# running is resumed with UNFINISHED_PROMPT, at most UNFINISHED_RESUMES times in a run.
+# A session never ends while its own background work runs: the tools that schedule a later turn are taken away, since a
+# --print session exits before that turn comes, --print waits for background agents and workflows however long they run
+# (BG_WAIT_ENV), and a session that still exits with some running is resumed with UNFINISHED_PROMPT, at most
+# UNFINISHED_RESUMES times in a run.
 LATER_TOOLS = ("ScheduleWakeup", "CronCreate", "CronDelete", "CronList")
+# Allowed in every session without a permission request, beside thimble's own tools (own_rules).
+UNASKED_TOOLS = ("WebSearch",)
 BG_WAIT_ENV = "CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS"
 BG_WAIT_MS = "0"  # no ceiling
 # Claude Code aborts an MCP call that sends neither a result nor progress for this long (30 min by default). The shim
@@ -253,7 +258,8 @@ class Run:
     k: int = 0  # the run's number in its chat: 0 for the session's start, then one per resume
     lead: str = ""  # a resume's stdin prompt, whose copy in the transcript the follower leaves out (module note, resume)
     kept: int = -1  # the transcript offset last kept on the chat's meta
-    # (the analyst's excluded commands, their Bash ask rules) of a check's run whose Bash runs in the sandbox, for ask
+    # (the analyst's excluded commands, their Bash ask rules) of an `unasked` session whose Bash runs in the sandbox,
+    # for ask
     sandbox_rule: tuple[list[str], list[str]] | None = None
     # the mode of thimble's the session runs in (MODES: the orientation's), None for the analyst's own, and `mode_owner`
     # the key of the run whose mode it follows at each request, a critique its orientation's (module note, permissions)
@@ -356,11 +362,22 @@ def shared_prompt(cwd: Path) -> str:
 
 def own_rules() -> list[str]:
     """The --allowedTools of every session thimble starts (module note, permissions): every tool of the plugin's thimble
-    server, by the server's rule main's launcher passes too (cli.MCP_TOOLS_RULE), and each of the plugin's own skills by
-    its exact name, for the plugin copy the session loads (cli.skill_rules)."""
+    server, by the server's rule main's launcher passes too (cli.MCP_TOOLS_RULE), each of the plugin's own skills by
+    its exact name, for the plugin copy the session loads (cli.skill_rules), and UNASKED_TOOLS."""
     from . import cli  # noqa: PLC0415 — cli is large, and the rules are the launcher's
 
-    return [cli.MCP_TOOLS_RULE, *cli.skill_rules(PLUGIN_DIR)]
+    return [cli.MCP_TOOLS_RULE, *cli.skill_rules(PLUGIN_DIR), *UNASKED_TOOLS]
+
+
+def thimble_tool(name: str) -> str:
+    """A thimble tool's name as a session sees it, from the plugin's server."""
+    return f"mcp__plugin_{orientation.PLUGIN}_{tools.SERVER_NAME}__{name}"
+
+
+def not_own(own: "list[str] | tuple[str, ...]") -> list[str]:
+    """The thimble tools of the registry not in `own`, as the session sees them: its --disallowedTools, which leave a
+    session with its own thimble tools beside Claude Code's."""
+    return [thimble_tool(n) for n in tools.REGISTRY if n not in own]
 
 
 def command(agent_args: list[str], sid: str, effort: str, settings: str, cwd: Path,
@@ -420,8 +437,8 @@ def memory_excludes(corpus: Path, work: Path, home: Path | None = None) -> list[
 def fence(corpus: Path, work: Path, sandbox: bool | None = None, unasked: bool = False) -> dict[str, Any]:
     """The --settings keys that keep the corpus folder read-only to a session whose process runs in its work folder `work`:
     the permissions and memory excludes always, and the sandbox with no network where it can run (`sandbox` None asks
-    cc_settings.sandbox_ok). `unasked` adds the allows of a session nobody watches: edits in the work folder and Bash in the
-    sandbox."""
+    cc_settings.sandbox_ok). `unasked` adds the allows of the session's work in its own folder: edits in the work folder
+    and Bash in the sandbox."""
     perms: dict[str, Any] = {"additionalDirectories": [str(corpus)], "deny": [f"Edit(/{corpus}/**)"]}
     if unasked:
         perms["allow"] = [f"Edit(/{work}/**)"]
@@ -547,7 +564,7 @@ async def start(c: str, key: str, *, role: str, title: str, agent_args: list[str
             rule = sandbox_rule(cwd)
             hooks.update(sandbox_hooks(rule))
     for event, entries in permission_hooks(c, runs_auto(permission_mode, cwd)).items():
-        # the permission hook alone answers a request, since ask applies a check's sandbox rule itself; before a call
+        # the permission hook alone answers a request, since ask applies the sandbox rule itself; before a call
         # both hooks run
         hooks[event] = [*hooks.get(event, []), *entries] if event == PRE else entries
     if calls:
@@ -1778,7 +1795,7 @@ async def ask(c: str, key: str | None, tool_name: str, inp: Any, agent_id: str |
               tool_use_id: str | None = None, suggestions: Any = None) -> dict[str, Any]:
     """One permission request of the session `key` or of its subagent or workflow agent `agent_id`, or with `event` DENIED a
     call auto mode refused for `reason`; the answer as Claude Code reads it. In Bypass it is allowed at once, as is a
-    check's Bash call the sandbox rule allows; during a switch pause it is denied at once; otherwise it waits on the chat
+    Bash call the sandbox rule allows; during a switch pause it is denied at once; otherwise it waits on the chat
     until the analyst answers (or PERMISSION_WAIT_S for a session in the analyst's own mode). `suggestions` become the
     card's "don't ask again" choice."""
     run = current(c, key)

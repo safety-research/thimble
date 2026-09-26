@@ -1,7 +1,6 @@
 ---
 name: writer
 description: Writes or revises one of thimble's documents, such as the report. A writer's own Claude Code session runs as this agent, which main starts with the start_writing tool.
-tools: Read, Grep, Glob, Agent, Workflow, mcp__plugin_thimble_thimble__read_ref, mcp__plugin_thimble_thimble__list_cards, mcp__plugin_thimble_thimble__add_card, mcp__plugin_thimble_thimble__edit_card, mcp__plugin_thimble_thimble__delete_card, mcp__plugin_thimble_thimble__screenshot, mcp__plugin_thimble_thimble__write_document, mcp__plugin_thimble_thimble__edit_document
 model: claude-opus-5-5
 effort: xhigh
 color: blue

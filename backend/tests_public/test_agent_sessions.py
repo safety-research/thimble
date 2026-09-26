@@ -223,15 +223,16 @@ async def test_start_orientation_starts_the_session_with_start_s_choices_and_mir
     # get are disallowed: the thimble tools that are not the orientation's, and the critique Start turned off
     assert "tools" not in front and "tools" not in agent
     denied = _disallowed(fake)
-    assert {orient_session.tool_name("critique"), orient_session.tool_name("start_orientation"),
-            orient_session.tool_name("message_orientation"), orient_session.tool_name("write_document")} <= set(denied)
-    assert orient_session.tool_name("propose_view") not in denied, "the views are on, so propose_view stays"
-    assert not any(t in denied for t in ("Bash", "Skill", "Read", "WebFetch", "WebSearch", orient_session.tool_name("add_card")))
+    assert {agent_session.thimble_tool("critique"), agent_session.thimble_tool("start_orientation"),
+            agent_session.thimble_tool("message_orientation"), agent_session.thimble_tool("write_document")} <= set(denied)
+    assert agent_session.thimble_tool("propose_view") not in denied, "the views are on, so propose_view stays"
+    assert not any(t in denied for t in ("Bash", "Skill", "Read", "WebFetch", "WebSearch", agent_session.thimble_tool("add_card")))
     i = argv.index("--allowedTools") + 1
     given = argv[i:argv.index("--disallowedTools")]
     assert given == agent_session.own_rules(), \
-        "thimble's tools, as main's launcher allows main's, and the plugin's skills, each without a prompt, and nothing else"
-    assert agent_session.own_rules() == ["mcp__plugin_thimble_thimble", *cli.skill_rules(agent_session.PLUGIN_DIR)]
+        "thimble's tools, as main's launcher allows main's, the plugin's skills and WebSearch, each without a prompt"
+    assert agent_session.own_rules() == ["mcp__plugin_thimble_thimble", *cli.skill_rules(agent_session.PLUGIN_DIR),
+                                         "WebSearch"]
     assert "model" not in agent and "skills" not in agent
     assert agent["prompt"] == orient_session.system_prompt(CORPUS, "the runs", ["final", "views"])
     assert argv[argv.index("--effort") + 1] == "high"
@@ -416,7 +417,7 @@ async def test_manual_lets_the_orientation_load_the_plugin_s_own_skills_without_
     """In Manual the orientation's Skill call for `thimble:shared` must not wait on the browser. Each of the plugin's
     skills is allowed by its exact name, and no other skill is: a prefix rule such as `Skill(thimble:*)` would also match any skill whose
     name starts with "thimble"."""
-    rules = agent_session.own_rules()[1:]
+    rules = [r for r in agent_session.own_rules() if r.startswith("Skill")]
     assert "Skill(thimble:shared)" in rules
     skills = sorted(d.name for d in (agent_session.PLUGIN_DIR / "skills").iterdir() if (d / "SKILL.md").is_file())
     assert rules == [f"Skill(thimble:{n})" for n in skills]
@@ -741,14 +742,25 @@ def allowed(argv: list[str]) -> list[str]:
     return argv[argv.index("--allowedTools") + 1:argv.index("--disallowedTools")]  # every session has both
 
 
-def assert_own_tools_ask_nothing(argv: list[str], plugin: Path) -> None:
-    """Every thimble tool the session's agent has, and every skill of the plugin, is allowed, and the agent names its
-    thimble tools as the plugin copy the session loads names them."""
-    rules = allowed(argv)
+def own_tools(argv: list[str], plugin: Path) -> list[str]:
+    """The thimble tools a session has: its agent names no tools, so every tool of the plugin copy it loads that its
+    --disallowedTools leave, which name them as that copy does."""
     agent = next(iter(json.loads(argv[argv.index("--agents") + 1]).values()))
+    assert "tools" not in agent, "the agent inherits every tool of the session"
+    i, denied = argv.index("--disallowedTools") + 1, set()
+    while i < len(argv) and not argv[i].startswith("--"):
+        denied.add(argv[i])
+        i += 1
     names = set(model_names(plugin).values())
-    own = [t for t in agent["tools"] if t.startswith("mcp__")]
-    assert own and set(own) <= names, "the agent's thimble tools are the plugin copy's"
+    assert {t for t in denied if t.startswith("mcp__")} <= names, "the tools taken away are the plugin copy's"
+    return sorted(names - denied)
+
+
+def assert_own_tools_ask_nothing(argv: list[str], plugin: Path) -> None:
+    """Every thimble tool the session has, and every skill of the plugin, is allowed."""
+    rules = allowed(argv)
+    own = own_tools(argv, plugin)
+    assert own, "the session keeps thimble tools of its own"
     assert [t for t in own if not permits(rules, t)] == [], "no thimble tool of the session asks"
     assert [s for s in skill_names(plugin) if s not in rules] == [], "no skill of the plugin asks"
 
@@ -761,7 +773,38 @@ async def test_a_writer_calls_its_thimble_tools_without_a_permission_request(ins
     assert argv[argv.index("--plugin-dir") + 1] == str(install.session)
     assert_own_tools_ask_nothing(argv, install.session)
     assert {"mcp__plugin_thimble_thimble__write_document", "mcp__plugin_thimble_thimble__add_card"} <= \
-        set(json.loads(argv[argv.index("--agents") + 1])["writer"]["tools"]), "a writer's calls ask nothing"
+        set(own_tools(argv, install.session)), "a writer's calls ask nothing"
+
+
+def _assert_works_in_its_own_folder(fake: Path, work: Path) -> None:
+    """The session's process runs in `work` with the corpus folder added and denied to every file tool, and its edits in
+    `work` and its Bash in the sandbox, off the network, ask nothing (agent_session, the fence)."""
+    corpus = config.corpus_dir(CORPUS)
+    argv = json.loads((fake / "argv.json").read_text())
+    settings = json.loads(argv[argv.index("--settings") + 1])
+    assert json.loads((fake / "env.json").read_text())["cwd"] == str(work)
+    assert argv[argv.index("--add-dir") + 1] == str(corpus)
+    assert settings["permissions"]["deny"] == [f"Edit(/{corpus}/**)"]
+    assert settings["permissions"]["allow"] == [f"Edit(/{work}/**)"]
+    assert settings["sandbox"]["autoAllowBashIfSandboxed"] and settings["sandbox"]["network"] == {"deniedDomains": ["*"]}
+    assert [h["matcher"] for h in settings["hooks"]["PreToolUse"]] == ["Bash"], "the sandbox hook allows sandboxed Bash"
+
+
+async def test_a_writer_and_a_critique_have_bash_and_the_file_tools_so_they_work_in_a_folder_of_their_own(fake, monkeypatch):
+    from app import critique_session, write_session
+
+    monkeypatch.setenv("THIMBLE_SANDBOX", "1")
+    res = await tools.call(CORPUS, "start_writing", {"doc": "report"})
+    assert not res.is_error, res.text
+    await _done("writer:report")
+    _assert_works_in_its_own_folder(fake, write_session.work_dir(CORPUS, "report"))
+    chat = agents.new_agent(CORPUS, orientation.ROLE, orientation.TITLE)["id"]
+    agent_session._runs[(CORPUS, KEY)] = agent_session.Run(CORPUS, KEY, chat, "5f0c2a6e-1b7d-4c1e-9a52-6f3d8e2b7c10",
+                                                           Path("/corpus"), orientation.ROLE)
+    res = await tools.call(CORPUS, "critique", {"context": "Twelve runs."}, session=KEY)
+    assert not res.is_error, res.text
+    work = config.workspace_dir(CORPUS) / critique_session.DIGEST_DIR / chat / critique_session.WORK_DIR
+    _assert_works_in_its_own_folder(fake, work)
 
 
 async def test_the_writer_of_the_orientations_report_pass_carries_the_orientation(install, fake):

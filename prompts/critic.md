@@ -1,7 +1,6 @@
 ---
 name: critic
 description: Reviews an orientation's analysis and drafted outputs before the analyst sees them, and returns a thorough report of what to follow up. The orientation's critique tool starts a session running as this agent.
-tools: Read, Grep, Glob, mcp__plugin_thimble_thimble__read_ref, mcp__plugin_thimble_thimble__list_cards
 model: claude-opus-5-5
 effort: xhigh
 color: orange

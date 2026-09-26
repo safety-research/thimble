@@ -1,7 +1,6 @@
 ---
 name: check
 description: Runs one of the analyst's report checks over a document and comments on the passages it applies to. thimble starts a session running as this agent whenever a check runs.
-tools: Read, Grep, Glob, Bash, mcp__plugin_thimble_thimble__read_ref, mcp__plugin_thimble_thimble__list_cards, mcp__plugin_thimble_thimble__add_comment
 model: claude-opus-5-5
 effort: high
 color: green
