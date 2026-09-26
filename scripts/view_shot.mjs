@@ -49,7 +49,7 @@ const FACES = [
 ]
 
 function args(argv) {
-  const out = { frame: null, states: null, media: null, viewport: { width: 1100, height: 760 } }
+  const out = { frame: null, states: null, media: null, viewport: { width: 800, height: 700 } }
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i]
     const next = () => argv[++i]

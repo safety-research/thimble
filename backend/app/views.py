@@ -78,6 +78,7 @@ SOURCE_MAX = 400_000  # chars of reader.py or view.html a view may hold
 # the checks: sample lines per claimed file, files sampled, keys followed, cited records read per key
 CHECK_LINES, CHECK_FILES, CHECK_KEYS, CHECK_KEY_REFS = 3, 3, 3, 30
 SHOT_TIMEOUT_S, SHOT_STATE_S = 30.0, 30.0  # a headless run's time: the browser's start, then each state's
+SHOT_SIZE = (800, 700)  # the view's pane in a 1440×900 window, beside the chat and the Labels sidebar
 # a page anchoring fewer than one in ANCHORED_SHARE of the record refs its fetches returned is noted by the gate
 # (unmarked); the strings of each answer read for them, FETCHED_SCAN_MAX at most
 ANCHORED_SHARE = 10
@@ -1796,8 +1797,8 @@ def build_problem() -> str:
     return ""
 
 
-async def shoot(c: str, slug: str, open_place: dict[str, Any] | None, out_png: Path, *, width: int = 1100,
-                height: int = 760, labels: dict[str, Any] | None = None) -> dict[str, Any]:
+async def shoot(c: str, slug: str, open_place: dict[str, Any] | None, out_png: Path, *, width: int = SHOT_SIZE[0],
+                height: int = SHOT_SIZE[1], labels: dict[str, Any] | None = None) -> dict[str, Any]:
     """One state of shoot_states: the page at `open_place` with the labels context `labels` (the workspace's by
     default), written to `out_png`."""
     ctx = labels if labels is not None else await asyncio.to_thread(labels_context, c)
@@ -1805,8 +1806,8 @@ async def shoot(c: str, slug: str, open_place: dict[str, Any] | None, out_png: P
     return res[0]
 
 
-async def shoot_states(c: str, slug: str, states: list[dict[str, Any]], *, width: int = 1100,
-                       height: int = 760, answers: int = 0) -> list[dict[str, Any]]:
+async def shoot_states(c: str, slug: str, states: list[dict[str, Any]], *, width: int = SHOT_SIZE[0],
+                       height: int = SHOT_SIZE[1], answers: int = 0) -> list[dict[str, Any]]:
     """Load the view's page headless once per state (scripts/view_shot.mjs, in the frontend's Playwright Chromium), each
     state {out, open, labels}: send it `open`, answer its fetches from the reader and its marks requests under the state's
     labels context (NO_LABELS, a probe_context or labels_context), serve its media requests with the file media_file

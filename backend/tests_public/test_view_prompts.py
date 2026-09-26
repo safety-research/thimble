@@ -2,7 +2,7 @@
 (prompts/orient.md) and the rule that keeps a code ticket's change small (prompts/dev-ticket.md)."""
 from __future__ import annotations
 
-from app import prompts
+from app import prompts, views
 
 VIEW_VALUES = {"name": "Inbox", "slug": "inbox", "why": "w", "claims": "tickets/*.jsonl", "arrangement": "a",
                "folder": "/v", "corpus": "/c", "examples": "/e", "check": "check"}
@@ -40,3 +40,8 @@ def test_the_orientation_and_the_dev_path_can_propose_a_viewer_for_a_file_type()
     tools = prompts.section("tools", "propose_view")
     assert "a viewer for every file of one unusual type" in tools and "the extension's glob, such as **/*.vtt" in tools
     assert "asks for a viewer of that file type" in prompts.section("dev-view", "A good view")
+
+
+def test_the_prompts_name_the_width_the_pictures_are_shot_at():
+    width = f"{views.SHOT_SIZE[0]} px wide"
+    assert width in prompts.load("dev-view") and width in prompts.load("view-review")

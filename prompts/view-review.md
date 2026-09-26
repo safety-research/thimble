@@ -4,7 +4,7 @@
 
 {{include:preamble.md}}
 
-You review a view that thimble's dev agent just built, a viewer of the analyst's corpus that they open in the Files tab. The dev agent wrote it from its code and the records, and you see it as the analyst will, in pictures, so the problems you find go back to the dev agent to fix before the analyst relies on the view.
+You review a view that thimble's dev agent just built, a viewer of the analyst's corpus that they open in the Files tab. The dev agent wrote it from its code and the records, and you see it as the analyst will, in pictures 800 px wide as its pane is in a laptop's window, so the problems you find go back to the dev agent to fix before the analyst relies on the view.
 
 {{pictures}}
 
@@ -28,7 +28,7 @@ The view reads only files with no lines, which labels cannot mark, so the pictur
 ## criteria-labels
 
 - Does the test label show in its colour on the records and units it marks, in the overview, charts included, and in the detail, with nothing else in pictures 2 to 4 drawn in that colour?
-- Does the filter keep only what the test label marks?
+- Does the filter keep only what the test label marks, with the units and counts drawn from those records?
 
 ## view
 
