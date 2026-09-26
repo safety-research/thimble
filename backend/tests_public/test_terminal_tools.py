@@ -168,3 +168,28 @@ async def test_held_events_outlive_a_restart_and_reach_main_with_its_next_prompt
     assert out == {"text": 'meanwhile:\n[kind="written"] The report is written.'}
     assert channel.held(CORPUS) == [] and not (config.workspace_dir(CORPUS) / channel.HELD_FILE).exists()
     assert await channel.held_route(channel.HeldBody(cwd=cwd, session="s1")) == {"text": ""}
+
+
+def test_a_nudge_after_a_refused_call_refutes_nothing(tmp_path, monkeypatch):
+    exe = _claude(tmp_path, True)
+    env = {terminal_tools.BIN_ENV: str(exe), terminal_tools.ENV: terminal_tools.value()}
+    from app import procs
+
+    monkeypatch.setattr(procs, "environ", lambda pid: env)
+    p = tmp_path / f"{SID}.jsonl"
+    p.write_text("")
+    lv = session.attach(CORPUS, SID, str(config.corpus_dir(CORPUS)), str(p), pid=4242)
+    assert lv is not None
+    session.tail_once(lv)
+    records = [
+        {"type": "assistant", "message": {"role": "assistant", "content": [
+            {"type": "tool_use", "id": "toolu_2", "name": "Agent", "input": {"subagent_type": "general-purpose"}}]}},
+        {"type": "user", "message": {"role": "user", "content": [
+            {"type": "tool_result", "tool_use_id": "toolu_2", "content": "PreToolUse:Agent hook error: refused",
+             "is_error": True}]}},
+        {"type": "user", "isMeta": True, "message": {"content": terminal_tools.NUDGE + ". Please continue.]"}},
+    ]
+    with p.open("a") as f:
+        f.write("".join(json.dumps(r) + "\n" for r in records))
+    session.tail_once(lv)
+    assert terminal_tools.supported(exe), "Claude Code asks for a reply after a refused call whatever the list says"

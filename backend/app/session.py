@@ -186,6 +186,7 @@ class Live:
         self.sends: dict[str, str] = {}  # tool_use id of main's SendMessage to a thread's fork -> the thread
         self.wrote = False  # the turn wrote something to main
         self.last_tool: str | None = None  # the name of main's last tool call (_nudged)
+        self.last_failed = False  # that call's result was an error, such as a hook's refusal (_nudged)
         # the promptId of the local command whose caveat was read last ('' when the record has none), whose command
         # line is not the analyst's line to main (module note, the table); None once another line was read
         self.local_prompt: str | None = None
@@ -863,9 +864,11 @@ def _channel(lv: Live, raw: str, *, mid_turn: bool) -> None:
 
 def _nudged(lv: Live) -> None:
     """Claude Code asked main for a visible reply after a turn with no text: when the turn's last call was a tool the
-    session's terminal_tools.ENV names, Claude Code does not act on it (terminal_tools.nudged)."""
+    session's terminal_tools.ENV names, and it did not fail, Claude Code does not act on it (terminal_tools.nudged)."""
     from . import procs  # noqa: PLC0415
 
+    if lv.last_failed:
+        return  # Claude Code asks for a reply after a failed or refused call whatever ENV names
     with contextlib.suppress(Exception):
         if terminal_tools.nudged(procs.environ(lv.pid), lv.last_tool):
             log.warning("%s: session %s was asked for a reply after %s", lv.c, lv.sid, lv.last_tool)
@@ -952,7 +955,7 @@ def _text(lv: Live, text: str) -> None:
 
 def _tool_use(lv: Live, tool_use_id: str, name: str, tool_input: Any) -> None:
     lv.tool_names[tool_use_id] = name
-    lv.last_tool = name
+    lv.last_tool, lv.last_failed = name, False
     if f"use:{tool_use_id}" in lv.seen:
         return
     lv.seen.add(f"use:{tool_use_id}")
@@ -1017,6 +1020,8 @@ def _tool_result(lv: Live, tool_use_id: str, content: Any, is_error: bool = Fals
         return
     lv.seen.add(f"result:{tool_use_id}")
     name = lv.tool_names.get(tool_use_id, "")
+    if is_error and name == lv.last_tool:
+        lv.last_failed = True
     if tool_use_id in lv.watch_calls:
         m = MONITOR_TASK_RE.search(response_text(content))
         if m:
