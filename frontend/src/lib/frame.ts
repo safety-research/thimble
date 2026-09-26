@@ -57,6 +57,7 @@ export const VIEW_TOKENS = [
   '--text-xs',
   '--text-ui-sm',
   '--text-sm',
+  '--text-lg',
   '--text-mono',
   '--text-mono-sm',
   '--h-chip',

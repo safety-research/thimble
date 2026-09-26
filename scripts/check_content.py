@@ -69,6 +69,8 @@ EXEMPT = re.compile(r"^(LICENSE|backend/app/fonts/OFL-[\w-]+\.txt|backend/uv\.lo
                     r"frontend/package-lock\.json)$")
 NEVER = re.compile(r"(^|/)(__pycache__|node_modules|\.venv)(/|$)|^(data|dev|notes|context|experiments|"
                    r"workspaces[^/]*|\.claude|docs/archive|docs/proposals)/|\.(db|sqlite3?|jsonl|pyc)$")
+# the worked examples' invented sample files, which are data on purpose
+SAMPLES = re.compile(r"^plugin/viewers/[\w-]+/sample/[^/]+$")
 MAX_BYTES = 2_000_000
 # the extension a module import leaves out, with TypeScript's declaration suffix (types.d.ts is the module ./types)
 EXTENSION = re.compile(r"(?<=.)(\.d)?\.[^.]+$")
@@ -102,7 +104,7 @@ def scan(root: Path, rels: list[str]) -> list[tuple[str, int, str, str]]:
     hits = []
     for rel in rels:
         p = root / rel
-        if NEVER.search(rel):
+        if NEVER.search(rel) and not SAMPLES.match(rel):
             hits.append((rel, 0, "path", "a file of a kind that never belongs in the tree"))
         if p.stat().st_size > MAX_BYTES:
             hits.append((rel, 0, "path", f"{p.stat().st_size} bytes, over {MAX_BYTES}"))

@@ -1,37 +1,39 @@
-# Threads: a message board read as threads. Each line of board.jsonl is one post, with its `thread_id`, the thread's
-# `thread_title`, its `author`, its `created_at` and its `body`.
+# Forum: a community garden's message board read as topics.
 #
-# What the view is for: the file holds the posts in the order they were written, so a proposal and the replies it got
-# lie far apart between other threads' posts. Read as threads, the analyst sees every conversation of the board at
-# once, how big each one is and when it ran, and reads one conversation from start to end.
+# The data (sample/forum.jsonl): one line is one post, and the file holds the posts in the order they were written.
+#   id        the post's id
+#   topic     the id of the topic the post belongs to
+#   title     the topic's title, on its first post only
+#   author    the member who wrote it
+#   posted    when, ISO 8601
+#   reply_to  the id of the post it answers, on replies only
+#   text      the post's body, with its own line breaks
+# Posts with the same `topic` are one thread, read in `posted` order; `reply_to` points at an earlier post of it.
 #
-# How the reader works: the index keeps, per thread, its posts in time order with each one's line, and the file's byte
-# offsets, so a post is read back by seeking to its line instead of holding every body in memory.
+# The method: the posts of a thread lie far apart in the file, between other threads' posts, so the reader gathers
+# them: the index keeps, per topic, its posts in time order with each one's line, and the byte offset of every line,
+# so a post is read back by seeking to its line rather than holding every body in memory.
 #
-# Labels: labels apply when records are served, never in the index. With a label filter on, the list keeps only the
-# threads with a post the filter keeps (thimble.kept) and counts only those posts, and a thread shows only its kept
-# posts. While a label is on, each thread counts the posts it marks (thimble.marked), so the overview shows where the
-# marked posts are before any thread is opened.
+# Labels: they apply when records are served, never in the index. The list keeps only the topics with a post the
+# filter keeps (thimble.kept) and counts only those posts, and a topic shows only its kept posts. Each topic counts the
+# posts the first label that is on marks (thimble.marked), so the list shows where they are before a topic is opened.
 import json
 import re
 
 import thimble
 
 EXCERPT_CHARS = 1500  # of a post, cut at a line boundary
-PAGE_POSTS = 60  # posts one fetch of a thread returns
-# The overview lists every thread, largest first, since the biggest conversations are where most happened. A board
-# of thousands of threads is narrowed by the search box rather than scrolled, so the list stops at LIST_THREADS and
-# says how many there are in all.
-LIST_THREADS = 300
+PAGE_POSTS = 60  # posts one fetch of a topic returns
+LIST_TOPICS = 300  # topics the list shows; a larger board is narrowed by the search
 
 
 def build_index(paths):
-    """{path: {"offsets": [byte offset of line n at n-1], "threads": {thread: [post, ...]}, "titles": {thread: title},
-    "line": {n: [thread, i]}}} where a post is [line, created_at, author]. A thread's key is its thread_id as text; a
-    line that is not a post of a thread (no thread_id, or not JSON) is left out."""
+    """{path: {"offsets": [byte offset of line n at n-1], "topics": {topic: [post, ...]}, "titles": {topic: title},
+    "line": {n: [topic, i]}, "ids": {post id: line}}}, a post being [line, posted, author]. A line that is not a post of
+    a topic (no topic, or not JSON) is left out."""
     index = {}
     for path in paths:
-        offsets, threads, titles, where = [], {}, {}, {}
+        offsets, topics, titles, where, ids = [], {}, {}, {}, {}
         with open(path, "rb") as f:
             pos = 0
             for n, raw in enumerate(f, 1):
@@ -41,22 +43,23 @@ def build_index(paths):
                     r = json.loads(raw)
                 except ValueError:
                     continue
-                if not isinstance(r, dict) or r.get("thread_id") in (None, ""):
+                if not isinstance(r, dict) or r.get("topic") in (None, ""):
                     continue
-                key = str(r["thread_id"])
-                threads.setdefault(key, []).append([n, r.get("created_at") or "", r.get("author") or ""])
-                if r.get("thread_title") and key not in titles:
-                    titles[key] = r["thread_title"]
-        for key, posts in threads.items():
+                key = str(r["topic"])
+                topics.setdefault(key, []).append([n, str(r.get("posted") or ""), str(r.get("author") or "")])
+                if r.get("title") and key not in titles:
+                    titles[key] = str(r["title"])
+                if r.get("id") not in (None, ""):
+                    ids[str(r["id"])] = n
+        for key, posts in topics.items():
             posts.sort(key=lambda p: (p[1], p[0]))
             for i, post in enumerate(posts):
                 where[post[0]] = [key, i]
-        index[path] = {"offsets": offsets, "threads": threads, "titles": titles, "line": where}
+        index[path] = {"offsets": offsets, "topics": topics, "titles": titles, "line": where, "ids": ids}
     return index
 
 
 def _record(path, data, line):
-    """Line `line` of the file, parsed, read at its byte offset (data is the file's entry of the index)."""
     with open(path, "rb") as f:
         f.seek(data["offsets"][line - 1])
         return json.loads(f.readline())
@@ -76,90 +79,88 @@ def _cut(text, limit=EXCERPT_CHARS):
 
 
 def _when(t):
-    """An ISO 8601 time as day, month and minute, such as 30 Aug 14:06."""
+    """An ISO 8601 time as day, month and minute, such as 3 Apr 17:40."""
     months = "Jan Feb Mar Apr May Jun Jul Aug Sep Oct Nov Dec".split()
     m = re.match(r"(\d{4})-(\d\d)-(\d\d)T(\d\d):(\d\d)", t or "")
     return f"{int(m.group(3))} {months[int(m.group(2)) - 1]} {m.group(4)}:{m.group(5)}" if m else (t or "")
 
 
 def _title(data, key):
-    return data["titles"].get(key) or f"thread {key}"
+    return data["titles"].get(key) or f"topic {key}"
 
 
 def _post(path, data, post):
-    line, time, author = post
-    body = (_record(path, data, line).get("body") or "").strip("\n")
-    return {"ref": f"{path}#L{line}", "line": line, "time": time, "when": _when(time), "author": author, "text": body}
+    """A post as the page shows it; `reply` names the post it answers when that post is in the file."""
+    line, posted, author = post
+    r = _record(path, data, line)
+    parent = data["ids"].get(str(r.get("reply_to") or ""))
+    reply = None
+    if parent is not None and parent in data["line"]:
+        key, i = data["line"][parent]
+        reply = {"ref": f"{path}#L{parent}", "author": data["topics"][key][i][2]}
+    return {"ref": f"{path}#L{line}", "line": line, "when": _when(posted), "author": author,
+            "text": str(r.get("text") or "").strip("\n"), "reply": reply}
 
 
-def _kept_posts(path, posts, cited=None):
+def _kept(path, posts, cited=None):
     """The posts the label filter keeps, and the cited line's post whatever the filter, since a citation asked for it."""
     return [p for p in posts if p[0] == cited or thimble.kept(f"{path}#L{p[0]}")]
 
 
-def _thread_summary(path, data, key, posts=None):
-    posts = data["threads"][key] if posts is None else posts
+def _summary(path, data, key, posts):
     marked = sum(1 for p in posts if thimble.marked(f"{path}#L{p[0]}"))
-    return {"key": key, "title": _title(data, key), "posts": len(posts), "marked": marked, "first": posts[0][1],
-            "last": posts[-1][1], "path": path}
+    return {"key": key, "title": _title(data, key), "posts": len(posts), "marked": marked,
+            "first": posts[0][1] if posts else "", "last": posts[-1][1] if posts else ""}
 
 
 def records(index, query):
-    """{op: threads, q?, limit?} lists the threads with a kept post, most posts first, filtered by `q` in the title;
-    {op: thread, key, around?, before?} gives one thread's kept posts, PAGE_POSTS at a time: the ones ending a little
-    after line `around` (or the latest), or the ones before the post at index `before`. Counts are of kept posts."""
+    """{op: topics, q?, sort?, limit?}: the topics with a kept post whose title holds `q`, most posts first, or latest
+    first with sort "latest". {op: topic, key, start?, around?}: one topic's kept posts in time order, PAGE_POSTS from
+    index `start`, or from a little before the post on line `around`."""
     query = query or {}
-    if query.get("op") == "thread":
+    if query.get("op") == "topic":
         key = str(query.get("key"))
         around = int(query["around"]) if query.get("around") is not None else None
         for path, data in index.items():
-            posts = data["threads"].get(key)
+            posts = data["topics"].get(key)
             if posts is None:
                 continue
-            posts = _kept_posts(path, posts, around) or posts[:0]
-            end = len(posts)
-            if query.get("before") is not None:
-                end = max(0, int(query["before"]))
-            elif around is not None:
-                at = next((i for i, p in enumerate(posts) if p[0] == around), None)
-                if at is not None:
-                    end = min(len(posts), at + 1 + PAGE_POSTS // 4)
-            start = max(0, end - PAGE_POSTS)
-            if posts:
-                summary = _thread_summary(path, data, key, posts)
-            else:
-                summary = {"key": key, "title": _title(data, key), "posts": 0, "marked": 0, "first": "", "last": "",
-                           "path": path}
-            return {**summary, "start": start, "items": [_post(path, data, p) for p in posts[start:end]]}
+            posts = _kept(path, posts, around)
+            start = max(0, int(query.get("start") or 0))
+            if around is not None:
+                at = next((i for i, p in enumerate(posts) if p[0] == around), 0)
+                start = max(0, at - PAGE_POSTS // 4) if at >= PAGE_POSTS else 0
+            page = posts[start:start + PAGE_POSTS]
+            return {**_summary(path, data, key, posts), "start": start,
+                    "items": [_post(path, data, p) for p in page]}
         return None
     q = str(query.get("q") or "").lower()
     rows = []
     for path, data in index.items():
-        for key, posts in data["threads"].items():
-            if q not in _title(data, key).lower():
-                continue
-            kept = _kept_posts(path, posts)
-            if kept:
-                rows.append(_thread_summary(path, data, key, kept))
-    rows.sort(key=lambda t: (-t["posts"], t["first"]))
-    limit = int(query.get("limit") or LIST_THREADS)
-    return {"total": len(rows), "threads": rows[:limit]}
+        for key, posts in data["topics"].items():
+            if q in _title(data, key).lower() and (kept := _kept(path, posts)):
+                rows.append(_summary(path, data, key, kept))
+    if query.get("sort") == "latest":
+        rows.sort(key=lambda t: t["last"], reverse=True)
+    else:
+        rows.sort(key=lambda t: (-t["posts"], t["first"]))
+    return {"total": len(rows), "topics": rows[:int(query.get("limit") or LIST_TOPICS)]}
 
 
 def resolve(index, locator):
-    """board.jsonl#L<n>: the post on that line. view:<slug>/<thread_id>: the thread, its excerpt the title and the
-    opening post, citing every post of the thread in time order."""
+    """forum.jsonl#L<n>: the post on that line, in its topic. view:<slug>/<topic>: the topic, its excerpt the title
+    and the first post, citing every post in time order."""
     if "key" in locator:
         key = str(locator["key"])
         for path, data in index.items():
-            posts = data["threads"].get(key)
+            posts = data["topics"].get(key)
             if not posts:
                 continue
             first = _post(path, data, posts[0])
             title = _title(data, key)
             excerpt = "\n".join(x for x in (data["titles"].get(key), first["text"]) if x)
             return {"excerpt": _cut(excerpt), "label": f"{title[:24]} · {len(posts)} posts",
-                    "refs": [f"{path}#L{p[0]}" for p in posts], "key": key, "target": {"thread": key}}
+                    "refs": [f"{path}#L{p[0]}" for p in posts], "key": key, "target": {"topic": key}}
         return None
     path, fragment = locator.get("path"), str(locator.get("fragment") or "")
     data = index.get(path)
@@ -168,8 +169,8 @@ def resolve(index, locator):
         return None
     line = int(m.group(1))
     key, i = data["line"][line]
-    post = _post(path, data, data["threads"][key][i])
-    # a post with no body still has its thread, so the thread's title stands in as its text
+    post = _post(path, data, data["topics"][key][i])
+    # a post with no text still belongs to its topic, whose title stands in as its text
     text = post["text"] or data["titles"].get(key) or ""
     return {"excerpt": _cut(text), "label": f"{(post['author'] or 'no author')[:24]} · {post['when']}",
-            "refs": [f"{path}#L{line}"], "key": key, "target": {"thread": key, "line": line}}
+            "refs": [f"{path}#L{line}"], "key": key, "target": {"topic": key, "line": line}}
