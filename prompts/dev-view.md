@@ -38,14 +38,10 @@ A label marks records, such as the posts that ask for help. The analyst turns la
 
 ## Worked examples
 
-The views in {{examples}} show methods to copy, not layouts. Read the one whose method your ticket needs, then design the page for your own records.
+Two views in {{examples}} show methods on invented data, each described in its `view.json` under `data`. Take the method, not their domain, fields or layout.
 
-- `board` gathers records spread over a file into threads, and lists each thread with its size and its marked posts.
-- `timeline` picks the bin and the axis from the span, and draws the marked part of each bar in the label's colour.
-- `network` links actors, each edge opening the records behind it.
-- `spreadsheet` shows a grid with sheet tabs, cited in each file type's own notation.
-
-thimble also ships `pdf` for PDF files, and a view you write that claims them opens instead.
+- `timeline` counts records per time bin, the bin chosen from the span, and draws each bar's marked part in the label's colour.
+- `board` gathers each thread's posts from across a file, and counts each thread's marked posts.
 
 ## The three files
 

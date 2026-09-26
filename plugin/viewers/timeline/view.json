@@ -1,9 +1,10 @@
 {
-  "name": "Activity",
-  "why": "The agents' calls to the shared server counted per time bin and by kind (pull requests, git, the board) over the whole log, so bursts and quiet stretches stand out; a bar opens its bin's calls.",
-  "claims": ["events.jsonl"],
-  "accepts": [{"form": "L<n>", "means": "the call on line <n>"}],
-  "declares": [{"form": "<bin>", "means": "one bar's calls, written as the bar's start: YYYY-MM-DD for bars of a day or longer, else YYYY-MM-DDTHH:MM"}],
+  "name": "Deliveries",
+  "why": "A bakery's deliveries counted per time bin and route over the whole log, so each morning's rounds and a late one stand out; a bar lists its deliveries.",
+  "data": "deliveries.jsonl: one line per delivery, the drop-off at one stop of a van's round, with `at` (when the van reached the stop, ISO 8601), `route` (the van's round: north, river or old town), `stop` (the customer), `order` (what was dropped off), `status` (delivered, left at door, late or refused) and, on some, `note`. Deliveries relate only through time and route; the lines are not in time order.",
+  "claims": ["deliveries.jsonl"],
+  "accepts": [{"form": "L<n>", "means": "the delivery on line <n>, listed in its bar"}],
+  "declares": [{"form": "<bin>", "means": "one bar's deliveries, written as the bar's start: YYYY-MM-DD for bars of a day or longer, else YYYY-MM-DDTHH:MM"}],
   "default": true,
   "libs": ["vega-embed"]
 }

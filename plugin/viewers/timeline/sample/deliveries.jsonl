@@ -1,0 +1,105 @@
+{"at": "2026-03-02T05:06:00", "route": "north", "stop": "Hill Street Grocer", "order": "24 croissants", "status": "left at door", "note": "left with the neighbour at number 6"}
+{"at": "2026-03-02T05:16:00", "route": "north", "stop": "Riverside School", "order": "6 sourdough loaves, 6 seeded loaves", "status": "delivered"}
+{"at": "2026-03-02T05:26:00", "route": "north", "stop": "Northgate Surgery canteen", "order": "18 rye loaves", "status": "delivered"}
+{"at": "2026-03-02T05:44:00", "route": "north", "stop": "Pine Road Deli", "order": "24 seeded loaves", "status": "delivered"}
+{"at": "2026-03-02T05:53:00", "route": "north", "stop": "Allotment Cafe", "order": "6 croissants, 18 sourdough loaves, 30 rye loaves", "status": "delivered"}
+{"at": "2026-03-02T06:08:00", "route": "north", "stop": "Bus Depot kiosk", "order": "6 cinnamon buns", "status": "delivered"}
+{"at": "2026-03-02T06:25:00", "route": "north", "stop": "Chapel Row B&B", "order": "18 white tins, 24 rye loaves, 8 baguettes", "status": "delivered"}
+{"at": "2026-03-03T05:01:00", "route": "north", "stop": "Hill Street Grocer", "order": "18 croissants", "status": "delivered"}
+{"at": "2026-03-03T05:19:00", "route": "north", "stop": "Riverside School", "order": "12 white tins, 30 sourdough loaves", "status": "delivered"}
+{"at": "2026-03-03T05:38:00", "route": "north", "stop": "Northgate Surgery canteen", "order": "12 croissants, 6 cinnamon buns, 12 seeded loaves", "status": "delivered"}
+{"at": "2026-03-03T05:47:00", "route": "north", "stop": "Pine Road Deli", "order": "8 rye loaves", "status": "delivered"}
+{"at": "2026-03-03T05:57:00", "route": "north", "stop": "Allotment Cafe", "order": "6 sourdough loaves, 18 rye loaves", "status": "delivered"}
+{"at": "2026-03-03T06:07:00", "route": "north", "stop": "Bus Depot kiosk", "order": "30 sourdough loaves, 8 rye loaves", "status": "delivered"}
+{"at": "2026-03-03T06:18:00", "route": "north", "stop": "Chapel Row B&B", "order": "10 baguettes, 12 baps, 6 cinnamon buns", "status": "delivered"}
+{"at": "2026-03-04T05:03:00", "route": "north", "stop": "Hill Street Grocer", "order": "18 white tins", "status": "delivered"}
+{"at": "2026-03-04T05:22:00", "route": "north", "stop": "Riverside School", "order": "24 pains au chocolat", "status": "delivered"}
+{"at": "2026-03-04T05:33:00", "route": "north", "stop": "Northgate Surgery canteen", "order": "6 cinnamon buns, 30 white tins, 24 sourdough loaves", "status": "delivered"}
+{"at": "2026-03-04T05:50:00", "route": "north", "stop": "Pine Road Deli", "order": "8 white tins, 30 croissants, 30 pains au chocolat", "status": "delivered"}
+{"at": "2026-03-04T06:03:00", "route": "north", "stop": "Allotment Cafe", "order": "18 baguettes", "status": "delivered"}
+{"at": "2026-03-04T06:21:00", "route": "north", "stop": "Bus Depot kiosk", "order": "30 baguettes, 8 croissants", "status": "left at door", "note": "left with the neighbour at number 6"}
+{"at": "2026-03-04T06:35:00", "route": "north", "stop": "Chapel Row B&B", "order": "30 cinnamon buns, 18 croissants", "status": "delivered"}
+{"at": "2026-03-05T05:06:00", "route": "north", "stop": "Hill Street Grocer", "order": "18 baps", "status": "delivered"}
+{"at": "2026-03-05T05:15:00", "route": "north", "stop": "Riverside School", "order": "18 baps, 6 baguettes", "status": "delivered"}
+{"at": "2026-03-05T05:27:00", "route": "north", "stop": "Northgate Surgery canteen", "order": "10 rye loaves", "status": "delivered"}
+{"at": "2026-03-05T05:38:00", "route": "north", "stop": "Pine Road Deli", "order": "30 white tins, 24 croissants", "status": "late", "note": "roadworks on the bridge"}
+{"at": "2026-03-05T05:51:00", "route": "north", "stop": "Allotment Cafe", "order": "24 white tins, 10 pains au chocolat", "status": "late", "note": "roadworks on the bridge"}
+{"at": "2026-03-05T06:01:00", "route": "north", "stop": "Bus Depot kiosk", "order": "12 sourdough loaves, 6 white tins", "status": "delivered"}
+{"at": "2026-03-05T06:10:00", "route": "north", "stop": "Chapel Row B&B", "order": "18 rye loaves, 30 baguettes, 8 sourdough loaves", "status": "left at door", "note": "back door locked, left in the crate by the bins"}
+{"at": "2026-03-06T05:04:00", "route": "north", "stop": "Hill Street Grocer", "order": "30 cinnamon buns", "status": "left at door", "note": "no answer, left in the porch"}
+{"at": "2026-03-06T05:14:00", "route": "north", "stop": "Riverside School", "order": "18 croissants", "status": "left at door", "note": "back door locked, left in the crate by the bins"}
+{"at": "2026-03-06T05:27:00", "route": "north", "stop": "Northgate Surgery canteen", "order": "18 seeded loaves, 18 rye loaves", "status": "delivered"}
+{"at": "2026-03-06T05:38:00", "route": "north", "stop": "Pine Road Deli", "order": "12 croissants, 8 baps, 10 pains au chocolat", "status": "delivered"}
+{"at": "2026-03-06T05:57:00", "route": "north", "stop": "Allotment Cafe", "order": "30 sourdough loaves", "status": "delivered"}
+{"at": "2026-03-06T06:14:00", "route": "north", "stop": "Bus Depot kiosk", "order": "30 croissants, 18 white tins, 18 baguettes", "status": "delivered"}
+{"at": "2026-03-06T06:23:00", "route": "north", "stop": "Chapel Row B&B", "order": "6 seeded loaves, 8 rye loaves, 24 sourdough loaves", "status": "delivered"}
+{"at": "2026-03-02T05:29:00", "route": "river", "stop": "Harbour Cafe", "order": "8 rye loaves, 12 sourdough loaves, 24 baguettes", "status": "delivered"}
+{"at": "2026-03-02T05:43:00", "route": "river", "stop": "Boatyard Canteen", "order": "10 pains au chocolat, 8 baps", "status": "delivered"}
+{"at": "2026-03-02T05:55:00", "route": "river", "stop": "Quay Hotel", "order": "18 baguettes", "status": "delivered"}
+{"at": "2026-03-02T06:09:00", "route": "river", "stop": "Ferry Kiosk", "order": "6 pains au chocolat, 6 baguettes, 18 cinnamon buns", "status": "delivered"}
+{"at": "2026-03-02T06:23:00", "route": "river", "stop": "Wharf Street Market", "order": "12 pains au chocolat", "status": "left at door", "note": "left with the neighbour at number 6"}
+{"at": "2026-03-02T06:33:00", "route": "river", "stop": "Lock Keeper's Tearoom", "order": "10 baps, 18 cinnamon buns, 12 pains au chocolat", "status": "delivered"}
+{"at": "2026-03-02T06:49:00", "route": "river", "stop": "Rowing Club", "order": "10 rye loaves", "status": "delivered"}
+{"at": "2026-03-03T05:28:00", "route": "river", "stop": "Harbour Cafe", "order": "10 pains au chocolat, 6 cinnamon buns", "status": "delivered"}
+{"at": "2026-03-03T05:42:00", "route": "river", "stop": "Boatyard Canteen", "order": "24 baguettes, 8 pains au chocolat, 18 croissants", "status": "left at door", "note": "left with the neighbour at number 6"}
+{"at": "2026-03-03T05:56:00", "route": "river", "stop": "Quay Hotel", "order": "6 cinnamon buns", "status": "delivered"}
+{"at": "2026-03-03T06:09:00", "route": "river", "stop": "Ferry Kiosk", "order": "10 rye loaves, 8 baguettes, 10 pains au chocolat", "status": "delivered"}
+{"at": "2026-03-03T06:26:00", "route": "river", "stop": "Wharf Street Market", "order": "8 cinnamon buns, 18 baps, 30 pains au chocolat", "status": "delivered"}
+{"at": "2026-03-03T06:38:00", "route": "river", "stop": "Lock Keeper's Tearoom", "order": "24 croissants", "status": "delivered"}
+{"at": "2026-03-03T06:50:00", "route": "river", "stop": "Rowing Club", "order": "6 pains au chocolat, 6 baps, 30 cinnamon buns", "status": "delivered"}
+{"at": "2026-03-04T06:33:00", "route": "river", "stop": "Harbour Cafe", "order": "12 cinnamon buns, 30 sourdough loaves, 8 croissants", "status": "late", "note": "van battery flat, left the bakery 70 min late"}
+{"at": "2026-03-04T06:51:00", "route": "river", "stop": "Boatyard Canteen", "order": "8 white tins", "status": "late"}
+{"at": "2026-03-04T07:02:00", "route": "river", "stop": "Quay Hotel", "order": "10 rye loaves, 24 sourdough loaves", "status": "late"}
+{"at": "2026-03-04T07:19:00", "route": "river", "stop": "Ferry Kiosk", "order": "30 cinnamon buns, 6 pains au chocolat, 18 croissants", "status": "late"}
+{"at": "2026-03-04T07:28:00", "route": "river", "stop": "Wharf Street Market", "order": "10 seeded loaves", "status": "late"}
+{"at": "2026-03-04T07:37:00", "route": "river", "stop": "Lock Keeper's Tearoom", "order": "12 cinnamon buns", "status": "late"}
+{"at": "2026-03-04T07:54:00", "route": "river", "stop": "Rowing Club", "order": "12 rye loaves", "status": "late"}
+{"at": "2026-03-05T05:28:00", "route": "river", "stop": "Harbour Cafe", "order": "18 baps", "status": "delivered"}
+{"at": "2026-03-05T05:41:00", "route": "river", "stop": "Boatyard Canteen", "order": "24 white tins, 8 sourdough loaves, 6 baguettes", "status": "delivered"}
+{"at": "2026-03-05T05:54:00", "route": "river", "stop": "Quay Hotel", "order": "8 white tins", "status": "delivered"}
+{"at": "2026-03-05T06:13:00", "route": "river", "stop": "Ferry Kiosk", "order": "10 cinnamon buns, 12 seeded loaves", "status": "delivered"}
+{"at": "2026-03-05T06:24:00", "route": "river", "stop": "Wharf Street Market", "order": "10 baps, 6 sourdough loaves", "status": "left at door", "note": "left with the neighbour at number 6"}
+{"at": "2026-03-05T06:41:00", "route": "river", "stop": "Lock Keeper's Tearoom", "order": "12 seeded loaves, 6 pains au chocolat, 24 rye loaves", "status": "delivered"}
+{"at": "2026-03-05T06:56:00", "route": "river", "stop": "Rowing Club", "order": "10 pains au chocolat, 24 croissants, 8 baguettes", "status": "delivered"}
+{"at": "2026-03-06T05:22:00", "route": "river", "stop": "Harbour Cafe", "order": "24 pains au chocolat, 6 sourdough loaves", "status": "delivered"}
+{"at": "2026-03-06T05:41:00", "route": "river", "stop": "Boatyard Canteen", "order": "10 pains au chocolat", "status": "left at door", "note": "back door locked, left in the crate by the bins"}
+{"at": "2026-03-06T05:58:00", "route": "river", "stop": "Quay Hotel", "order": "24 rye loaves, 12 cinnamon buns, 10 baps", "status": "delivered"}
+{"at": "2026-03-06T06:11:00", "route": "river", "stop": "Ferry Kiosk", "order": "8 seeded loaves", "status": "delivered"}
+{"at": "2026-03-06T06:27:00", "route": "river", "stop": "Wharf Street Market", "order": "12 croissants, 24 rye loaves", "status": "delivered"}
+{"at": "2026-03-06T06:36:00", "route": "river", "stop": "Lock Keeper's Tearoom", "order": "8 seeded loaves, 10 rye loaves, 10 baguettes", "status": "refused", "note": "shop closed for a funeral, brought back"}
+{"at": "2026-03-06T06:49:00", "route": "river", "stop": "Rowing Club", "order": "6 white tins, 12 sourdough loaves, 10 seeded loaves", "status": "delivered"}
+{"at": "2026-03-02T05:51:00", "route": "old town", "stop": "Old Town Hotel", "order": "24 sourdough loaves", "status": "delivered"}
+{"at": "2026-03-02T06:10:00", "route": "old town", "stop": "Library Cafe", "order": "12 pains au chocolat, 24 baguettes, 10 baps", "status": "left at door", "note": "no answer, left in the porch"}
+{"at": "2026-03-02T06:24:00", "route": "old town", "stop": "Green Door Deli", "order": "12 rye loaves", "status": "left at door", "note": "no answer, left in the porch"}
+{"at": "2026-03-02T06:35:00", "route": "old town", "stop": "Market Stall 4", "order": "30 seeded loaves, 12 croissants, 6 cinnamon buns", "status": "delivered"}
+{"at": "2026-03-02T06:50:00", "route": "old town", "stop": "Clock Tower Bistro", "order": "12 baguettes, 30 white tins, 18 croissants", "status": "delivered"}
+{"at": "2026-03-02T07:05:00", "route": "old town", "stop": "Cathedral Close Guesthouse", "order": "8 croissants, 6 seeded loaves", "status": "delivered"}
+{"at": "2026-03-02T07:17:00", "route": "old town", "stop": "Castle Lane Nursery", "order": "30 seeded loaves, 18 sourdough loaves, 8 cinnamon buns", "status": "delivered"}
+{"at": "2026-03-03T05:45:00", "route": "old town", "stop": "Old Town Hotel", "order": "12 baps", "status": "delivered"}
+{"at": "2026-03-03T05:59:00", "route": "old town", "stop": "Library Cafe", "order": "6 rye loaves, 8 seeded loaves", "status": "delivered"}
+{"at": "2026-03-03T06:13:00", "route": "old town", "stop": "Green Door Deli", "order": "18 pains au chocolat", "status": "delivered"}
+{"at": "2026-03-03T06:31:00", "route": "old town", "stop": "Market Stall 4", "order": "24 pains au chocolat", "status": "refused", "note": "wrong order: they asked for rye, not sourdough"}
+{"at": "2026-03-03T06:50:00", "route": "old town", "stop": "Clock Tower Bistro", "order": "12 rye loaves", "status": "delivered"}
+{"at": "2026-03-03T07:02:00", "route": "old town", "stop": "Cathedral Close Guesthouse", "order": "30 white tins, 24 croissants", "status": "delivered"}
+{"at": "2026-03-03T07:17:00", "route": "old town", "stop": "Castle Lane Nursery", "order": "24 croissants, 8 rye loaves", "status": "delivered"}
+{"at": "2026-03-04T05:46:00", "route": "old town", "stop": "Old Town Hotel", "order": "10 cinnamon buns, 12 seeded loaves, 18 baps", "status": "delivered"}
+{"at": "2026-03-04T06:02:00", "route": "old town", "stop": "Library Cafe", "order": "8 seeded loaves, 30 baguettes, 12 pains au chocolat", "status": "delivered"}
+{"at": "2026-03-04T06:12:00", "route": "old town", "stop": "Green Door Deli", "order": "6 pains au chocolat, 24 baps", "status": "delivered"}
+{"at": "2026-03-04T06:22:00", "route": "old town", "stop": "Market Stall 4", "order": "30 baguettes", "status": "delivered"}
+{"at": "2026-03-04T06:33:00", "route": "old town", "stop": "Clock Tower Bistro", "order": "8 baps, 12 white tins, 8 pains au chocolat", "status": "delivered"}
+{"at": "2026-03-04T06:43:00", "route": "old town", "stop": "Cathedral Close Guesthouse", "order": "24 pains au chocolat, 30 white tins", "status": "delivered"}
+{"at": "2026-03-04T06:58:00", "route": "old town", "stop": "Castle Lane Nursery", "order": "8 croissants, 10 baps, 10 seeded loaves", "status": "delivered"}
+{"at": "2026-03-05T05:46:00", "route": "old town", "stop": "Old Town Hotel", "order": "12 white tins", "status": "delivered"}
+{"at": "2026-03-05T05:55:00", "route": "old town", "stop": "Library Cafe", "order": "6 sourdough loaves", "status": "delivered"}
+{"at": "2026-03-05T06:08:00", "route": "old town", "stop": "Green Door Deli", "order": "6 white tins, 24 sourdough loaves", "status": "delivered"}
+{"at": "2026-03-05T06:25:00", "route": "old town", "stop": "Market Stall 4", "order": "10 baguettes, 6 seeded loaves, 12 baps", "status": "delivered"}
+{"at": "2026-03-05T06:38:00", "route": "old town", "stop": "Clock Tower Bistro", "order": "10 sourdough loaves, 10 baguettes", "status": "delivered"}
+{"at": "2026-03-05T06:55:00", "route": "old town", "stop": "Cathedral Close Guesthouse", "order": "10 seeded loaves, 8 sourdough loaves", "status": "delivered"}
+{"at": "2026-03-05T07:04:00", "route": "old town", "stop": "Castle Lane Nursery", "order": "12 croissants, 10 rye loaves", "status": "delivered"}
+{"at": "2026-03-06T05:42:00", "route": "old town", "stop": "Old Town Hotel", "order": "24 seeded loaves, 18 pains au chocolat, 10 white tins", "status": "delivered"}
+{"at": "2026-03-06T05:58:00", "route": "old town", "stop": "Library Cafe", "order": "8 cinnamon buns", "status": "delivered"}
+{"at": "2026-03-06T06:08:00", "route": "old town", "stop": "Green Door Deli", "order": "12 sourdough loaves, 6 baguettes", "status": "delivered"}
+{"at": "2026-03-06T06:24:00", "route": "old town", "stop": "Market Stall 4", "order": "8 croissants, 6 seeded loaves", "status": "delivered"}
+{"at": "2026-03-06T06:35:00", "route": "old town", "stop": "Clock Tower Bistro", "order": "8 cinnamon buns, 18 baguettes, 30 white tins", "status": "delivered"}
+{"at": "2026-03-06T06:48:00", "route": "old town", "stop": "Cathedral Close Guesthouse", "order": "8 baps", "status": "delivered"}
+{"at": "2026-03-06T07:04:00", "route": "old town", "stop": "Castle Lane Nursery", "order": "6 sourdough loaves, 12 white tins", "status": "delivered"}

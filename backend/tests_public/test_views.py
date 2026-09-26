@@ -1,7 +1,7 @@
 """app.views: viewers written for how a corpus arranges its records. The reader resolves lines and keys, view refs
 resolve and outlive their view, the frame document blocks every host, the media route serves only the media files a view
-claims inside the corpus, the built-in viewers open workbooks and PDFs, and the worked examples a view ticket starts
-from pass the view checks over the synthetic toy corpus they are written for.
+claims inside the corpus, the built-in viewers open workbooks and PDFs, and the worked examples a view ticket reads pass
+the view checks over their own samples.
 
 A temp DATA_DIR holds the corpus `boards`: `board.jsonl`, one post per line, each {thread, author, time, body}, and
 `notes.md`. The `ws` fixture saves the view `threads`, whose reader (THREADS_READER) groups the posts by thread: it
@@ -17,7 +17,6 @@ import json
 import os
 import re
 import shutil
-import subprocess
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -610,45 +609,39 @@ async def test_a_corpus_view_over_the_same_files_opens_before_the_built_in_one(d
 
 # ------------------------------------------------------------------------------------------------- worked examples
 #
-# plugin/viewers/board, network and timeline are the worked examples a view ticket's session starts from
-# (prompts/dev-view.md). Each is written for the layout of toy-incident, the synthetic corpus that
-# scripts/dev/make_toy_corpus.py writes, and passes over it the checks a view a session writes must pass.
+# plugin/viewers/board and timeline are the worked examples a view ticket's session reads (prompts/dev-view.md). Each
+# ships an invented sample of the files it claims under sample/, and passes over it the checks a view a session writes
+# must pass. Each sample is copied into the temp DATA_DIR as a corpus named after its example.
 
-TOY = "toy-incident"
 # the example, the slug it is saved under, and a key of each kind it declares
 EXAMPLES = {
-    "board": ("threads", ["view:threads/2"]),
-    "network": ("hand-offs", ["view:hand-offs/agent-01"]),
-    "timeline": ("activity", ["view:activity/2026-08-30T14:10"]),
+    "board": ("forum", ["view:forum/t2"]),
+    "timeline": ("deliveries", ["view:deliveries/2026-03-04T06:00"]),
 }
 
 
-@pytest.fixture(scope="module")
-def toy_data(tmp_path_factory) -> Path:
-    d = tmp_path_factory.mktemp("toy") / "data"
-    script = config.REPO_ROOT / "scripts" / "dev" / "make_toy_corpus.py"
-    subprocess.run([sys.executable, str(script), "--out", str(d / TOY)], check=True, capture_output=True, timeout=120)
+@pytest.fixture()
+def samples(workspaces_tmp, tmp_path, monkeypatch) -> Path:
+    d = tmp_path / "data"
+    for name in EXAMPLES:
+        shutil.copytree(views.EXAMPLES_DIR / name / "sample", d / name)
+        (d / name / "manifest.json").write_text(json.dumps({"name": name, "description": "an example's sample"}))
+    monkeypatch.setattr(config, "DATA_DIR", d.resolve())
     return d.resolve()
 
 
-@pytest.fixture()
-def toy(toy_data, workspaces_tmp, monkeypatch) -> Path:
-    monkeypatch.setattr(config, "DATA_DIR", toy_data)
-    return toy_data / TOY
-
-
 def _save_example(name: str) -> str:
-    """Save the worked example `name` as a view of the toy corpus, as a session writes one; returns its slug."""
+    """Save the worked example `name` as a view of its sample, as a session writes one; returns its slug."""
     d = views.EXAMPLES_DIR / name
     raw = json.loads((d / "view.json").read_text("utf-8"))
     slug = EXAMPLES[name][0]
-    views.write_view(TOY, slug, reader=(d / "reader.py").read_text("utf-8"), html=(d / "view.html").read_text("utf-8"),
+    views.write_view(name, slug, reader=(d / "reader.py").read_text("utf-8"), html=(d / "view.html").read_text("utf-8"),
                      **{k: raw[k] for k in ("name", "why", "claims", "accepts", "declares", "default", "libs")})
     return slug
 
 
 @pytest.mark.parametrize("name", sorted(EXAMPLES))
-async def test_every_worked_example_answers_the_checks_over_the_toy_corpus(name, toy, inproc, bound, tmp_path, monkeypatch):
+async def test_every_worked_example_answers_the_checks_over_its_sample(name, samples, inproc, bound, tmp_path, monkeypatch):
     """The reader's half of the checks: the index builds, the sampled lines and the declared keys resolve, each answer
     cites its place back, and every excerpt is literal text of the records it cites. The page's half is a test below."""
     async def no_page(c, slug, states, **k):
@@ -656,101 +649,124 @@ async def test_every_worked_example_answers_the_checks_over_the_toy_corpus(name,
 
     monkeypatch.setattr(views, "shoot_states", no_page)
     slug = _save_example(name)
-    rep = await views.check(TOY, slug, EXAMPLES[name][1], shot_dir=tmp_path)
+    rep = await views.check(name, slug, EXAMPLES[name][1], shot_dir=tmp_path)
     assert rep["ok"], views.gate_lines(rep)
     checked = [r["locator"] for r in rep["checks"]]
     assert set(EXAMPLES[name][1]) <= set(checked)
     assert any(re.search(r"#L\d+$", c) for c in checked), "sampled lines were checked beside the keys"
 
 
-async def test_the_worked_examples_resolve_the_toy_corpus_s_units(toy, inproc, bound):
-    """What each example makes of the toy corpus: a board post in its thread, a hand-off between two agents on a pull
-    request, and a call in its time bin, each citing its own line."""
+def test_each_worked_example_describes_its_files():
+    """A builder maps an example onto other data by what its files hold: view.json's `data` and the reader's opening
+    comment name the claimed file and each field of a record, and the sample holds that file."""
     for name in EXAMPLES:
-        _save_example(name)
-    post = await views.resolve_locator(TOY, "threads", {"path": "board.jsonl", "fragment": "L1"})
-    assert post["key"] == "1" and post["label"].startswith("agent-03 · 30 Aug 14:06")
-    assert post["excerpt"].startswith("agent-03 here. Proposal for the 35-PR backlog")
-    thread = await views.resolve_locator(TOY, "threads", {"key": "2"})
-    assert thread["label"].startswith("Review requests · ") and thread["refs"][0] == "board.jsonl#L2"
+        d = views.EXAMPLES_DIR / name
+        raw = json.loads((d / "view.json").read_text("utf-8"))
+        comment = (d / "reader.py").read_text("utf-8").split("\nimport ", 1)[0]
+        (claim,) = raw["claims"]
+        assert (d / "sample" / claim).is_file(), name
+        fields = set().union(*(json.loads(ln) for ln in (d / "sample" / claim).read_text("utf-8").splitlines()))
+        assert claim in raw["data"] and claim in comment, name
+        for field in fields:
+            assert f"`{field}`" in raw["data"] and re.search(rf"^#   {field} ", comment, re.M), (name, field)
 
-    events = [json.loads(ln) for ln in (toy / "events.jsonl").read_text("utf-8").splitlines()]
-    review = next(n for n, e in enumerate(events, 1) if e["action"] == "pr.review")
-    hop = await views.resolve_locator(TOY, "hand-offs", {"path": "events.jsonl", "fragment": f"L{review}"})
-    assert hop["refs"] == [f"events.jsonl#L{review}"] and " → " in hop["label"]
-    assert hop["key"] == events[review - 1]["agent"] and hop["excerpt"] == f"{hop['key']}\npr.review"
-    assert hop["target"]["ref"] == f"events.jsonl#L{review}"
-    graph = await views.reader_call(TOY, "hand-offs", "records", {"op": "graph"})
-    assert graph["edges"] and all(e["source"] < e["target"] for e in graph["edges"])
 
-    call = await views.resolve_locator(TOY, "activity", {"path": "events.jsonl", "fragment": "L1"})
-    assert call["key"] == "2026-08-30T14:00" and call["excerpt"].split("\n")[:2] == ["admin.agents", "admin"]
-    counts = await views.reader_call(TOY, "activity", "records", {"op": "counts"})
-    assert sum(c["n"] for c in counts["rows"]) == len(events)
-    # three hours in five-minute bins: 36 bars at most, each keyed by its start
-    assert counts["bin"]["seconds"] == 300 and len({c["key"] for c in counts["rows"]}) <= 36
-    assert counts["busiest"] in {c["key"] for c in counts["rows"]}
-    first = await views.reader_call(TOY, "activity", "records", {"op": "bin", "key": "2026-08-30T14:00"})
-    assert first["items"][0]["ref"] == "events.jsonl#L1"
-    assert first["total"] == sum(c["n"] for c in counts["rows"] if c["key"] == "2026-08-30T14:00")
+async def test_the_forum_example_gathers_posts_into_topics_with_their_replies(samples, inproc, bound):
+    """A post opens in its topic, a topic cites every post in time order, the list sorts by size or by the latest post,
+    and a reply names the post it answers."""
+    slug = _save_example("board")
+    posts = [json.loads(ln) for ln in (samples / "board" / "forum.jsonl").read_text("utf-8").splitlines()]
+    post = await views.resolve_locator("board", slug, {"path": "forum.jsonl", "fragment": "L1"})
+    assert post["key"] == "t1" and post["label"] == "Ruth · 1 Apr 09:12"
+    assert post["excerpt"] == posts[0]["text"] and post["target"] == {"topic": "t1", "line": 1}
+    topic = await views.resolve_locator("board", slug, {"key": "t2"})
+    lines = [n for n, p in enumerate(posts, 1) if p["topic"] == "t2"]
+    assert topic["refs"] == [f"forum.jsonl#L{n}" for n in lines] and topic["label"].endswith(f" · {len(lines)} posts")
+    by_size = await views.reader_call("board", slug, "records", {"op": "topics"})
+    assert by_size["total"] == len({p["topic"] for p in posts}) and by_size["topics"][0]["key"] == "t2"
+    latest = await views.reader_call("board", slug, "records", {"op": "topics", "sort": "latest"})
+    assert latest["topics"][0]["last"] == max(p["posted"] for p in posts)
+    shown = await views.reader_call("board", slug, "records", {"op": "topic", "key": "t2"})
+    assert [i["ref"] for i in shown["items"]] == topic["refs"]
+    reply = next(i for i in shown["items"] if i["reply"])
+    parent = posts[reply["line"] - 1]["reply_to"]
+    assert reply["reply"] == {"ref": f"forum.jsonl#L{next(n for n, p in enumerate(posts, 1) if p['id'] == parent)}",
+                              "author": next(p["author"] for p in posts if p["id"] == parent)}
+
+
+async def test_the_deliveries_example_counts_every_record_in_bins_scaled_to_the_span(samples, inproc, bound):
+    """Four mornings and a bit are counted per hour and route, each bar keyed by its start; a line opens in its bar,
+    and a bar lists its records in time order."""
+    slug = _save_example("timeline")
+    rows = [json.loads(ln) for ln in (samples / "timeline" / "deliveries.jsonl").read_text("utf-8").splitlines()]
+    one = await views.resolve_locator("timeline", slug, {"path": "deliveries.jsonl", "fragment": "L1"})
+    assert one["key"] == rows[0]["at"][:13] + ":00" and one["excerpt"].split("\n")[:2] == [rows[0]["stop"], rows[0]["order"]]
+    counts = await views.reader_call("timeline", slug, "records", {"op": "counts"})
+    assert sum(c["n"] for c in counts["rows"]) == len(rows)
+    assert counts["bin"]["seconds"] == 3600 and {c["kind"] for c in counts["rows"]} == {r["route"] for r in rows}
+    assert counts["busiest"] == "2026-03-04T06:00"
+    listed = await views.reader_call("timeline", slug, "records", {"op": "bin", "key": counts["busiest"]})
+    times = [i["time"] for i in listed["items"]]
+    assert times == sorted(times) and listed["total"] == sum(c["n"] for c in counts["rows"] if c["key"] == counts["busiest"])
 
 
 @pytest.mark.parametrize("name", sorted(EXAMPLES))
-async def test_every_worked_example_s_page_loads_headless_at_its_first_place(name, toy, inproc, bound, tmp_path):
+async def test_every_worked_example_s_page_loads_headless_at_its_first_place(name, samples, inproc, bound, tmp_path):
     """The whole check a view ticket's session runs, the headless page included, where this machine has Node and the
     frontend's packages with their Chromium (scripts/check.sh install)."""
     if why := views.build_problem():
         pytest.skip(why)
     slug = _save_example(name)
-    rep = await views.check(TOY, slug, EXAMPLES[name][1], shot_dir=tmp_path)
+    rep = await views.check(name, slug, EXAMPLES[name][1], shot_dir=tmp_path)
     assert rep["ok"], views.gate_lines(rep)
     assert rep["page"]["fetches"] >= 1 and Path(rep["page"]["png"]).is_file()
     assert not views.unmarked(rep["page"]), "the records a worked example shows carry their file refs, for the labels"
 
 
-async def test_the_timeline_example_bins_a_long_log_by_days(toy, inproc, bound, tmp_path, monkeypatch):
-    """The timeline's bin comes from the span: the toy corpus's events spread over sixty days are counted per day, keyed
+async def test_the_timeline_example_bins_a_long_log_by_days(samples, inproc, bound):
+    """The timeline's bin comes from the span: the sample's records spread over sixty days are counted per day, keyed
     YYYY-MM-DD, and a line still opens in its day."""
-    data = tmp_path / "data"
-    shutil.copytree(toy, data / TOY)
-    monkeypatch.setattr(config, "DATA_DIR", data.resolve())
-    path = data / TOY / "events.jsonl"
+    path = samples / "timeline" / "deliveries.jsonl"
     lines = path.read_text("utf-8").splitlines()
-    t0 = views_time(json.loads(lines[0])["ts"])
+    t0 = views_time(json.loads(lines[0])["at"])
     step = 60 * 86400 / max(1, len(lines) - 1)
     out = []
     for i, ln in enumerate(lines):
         r = json.loads(ln)
-        r["ts"] = datetime.fromtimestamp(t0 + i * step, timezone.utc).isoformat()
+        r["at"] = datetime.fromtimestamp(t0 + i * step, timezone.utc).isoformat()
         out.append(json.dumps(r))
     path.write_text("\n".join(out) + "\n", "utf-8")
     slug = _save_example("timeline")
-    counts = await views.reader_call(TOY, slug, "records", {"op": "counts"})
+    counts = await views.reader_call("timeline", slug, "records", {"op": "counts"})
     assert counts["bin"]["seconds"] == 86400
     keys = {c["key"] for c in counts["rows"]}
-    assert 55 <= len(keys) <= 61 and all(re.fullmatch(r"\d{4}-\d\d-\d\d", k) for k in keys)
-    call = await views.resolve_locator(TOY, slug, {"path": "events.jsonl", "fragment": "L200"})
-    assert call["key"] in keys and call["target"]["bin"] == call["key"]
-    day = await views.resolve_locator(TOY, slug, {"key": call["key"]})
-    assert "events.jsonl#L200" in day["refs"]
+    assert 50 <= len(keys) <= 61 and all(re.fullmatch(r"\d{4}-\d\d-\d\d", k) for k in keys)
+    one = await views.resolve_locator("timeline", slug, {"path": "deliveries.jsonl", "fragment": "L50"})
+    assert one["key"] in keys and one["target"]["bin"] == one["key"]
+    day = await views.resolve_locator("timeline", slug, {"key": one["key"]})
+    assert "deliveries.jsonl#L50" in day["refs"]
 
 
 def views_time(ts: str) -> float:
-    return datetime.fromisoformat(ts.replace("Z", "+00:00")).timestamp()
+    t = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+    return (t if t.tzinfo else t.replace(tzinfo=timezone.utc)).timestamp()
 
 
-async def test_the_review_shoots_four_states_in_thimble_s_fonts_with_the_test_label(toy, inproc, bound):
+@pytest.mark.parametrize("name", sorted(EXAMPLES))
+async def test_the_review_shoots_four_states_in_thimble_s_fonts_with_the_test_label(name, samples, inproc, bound):
     """The review's pictures of a worked example: no label, the test label on, filtered to it, and the detail, each in
-    Hanken Grotesk, the test label marking records in the second and the filter keeping fewer in the third."""
+    Hanken Grotesk, the test label marking records in the second and the filter keeping fewer in the third, with no
+    label control and no pill the page drew itself."""
     if why := views.build_problem():
         pytest.skip(why)
     from app import view_review
 
-    slug = _save_example("board")
-    view = views.read_view(TOY, slug)
-    files = views.claimed_files(TOY, view)
-    shots = await view_review.shoot(TOY, slug, view, files, {}, True, 0)
+    slug = _save_example(name)
+    view = views.read_view(name, slug)
+    files = views.claimed_files(name, view)
+    shots = await view_review.shoot(name, slug, view, files, {}, True, 0)
     assert [s["state"] for s in shots] == list(view_review.LINED_STATES)
     assert all(s["ok"] and s["fonts"] and Path(s["png"]).is_file() for s in shots), [s.get("errors") for s in shots]
-    assert shots[0]["marked"] == 0 and shots[1]["marked"] > 0 and shots[3]["marked"] > 0
+    assert shots[0]["marked"] == 0 and shots[1]["marked"] > 0
     assert shots[2]["records"] < shots[1]["records"] and shots[0]["answers"]
+    assert not any(s["controls"] or s["pills"] for s in shots)

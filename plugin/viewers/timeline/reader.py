@@ -1,16 +1,21 @@
-# Activity: a server's call log as a timeline. Each line of events.jsonl is one call an agent made, with its `ts`, the
-# `agent`, the `action` (such as pr.claim or git.push, whose part before the dot is the call's kind) and its `params`.
+# Deliveries: a bakery's delivery log as a timeline.
 #
-# What the view is for: the analyst sees at a glance when the agents were busy and with what, over the whole log, and
-# opens any stretch of it down to the single call. So the chart counts every call per time bin and kind, and one bin's
-# calls are listed below it.
+# The data (sample/deliveries.jsonl): one line is one delivery, the drop-off at one stop of a van's morning round.
+#   at      when the van reached the stop, ISO 8601; a time with no zone is read as UTC
+#   route   the van's round, one of a few names (north, river, old town): the category each bar is split by
+#   stop    the customer
+#   order   what was dropped off, as text
+#   status  delivered, left at door, late or refused, as the driver recorded it
+#   note    the driver's note, on some deliveries only
+# Deliveries relate only through time and route: one van's round on one morning is that route's deliveries that day.
+# The lines are in the order the vans synced, not in time order.
 #
-# How the reader works: the index keeps each call's line, epoch, bin and kind, so the chart's counts come from the
-# index alone and a bin's calls are read back by seeking to their lines.
+# The method: every record is counted per time bin and category, the bin chosen from the span, and one bin's records
+# are listed below the chart. The index keeps each record's line, time, bin and category, so the counts come from the
+# index alone and a bin's records are read back by seeking to their lines.
 #
-# Labels: the analyst's labels mark calls, and a label filter keeps only the calls that take a value. The index is
-# built once, whatever the labels, and labels apply when records are served: every count and list keeps only the calls
-# thimble.kept(ref) holds for, and each bar counts the calls the first label that is on marks (thimble.marked), which
+# Labels: they apply when records are served, never in the index. Every count and list keeps only the records
+# thimble.kept(ref) holds for, and each bar counts the records the first label that is on marks (thimble.marked), which
 # the page draws in the label's colour, since thimble cannot see inside a chart.
 import json
 import re
@@ -18,14 +23,15 @@ from datetime import datetime, timedelta, timezone
 
 import thimble
 
-# The chart shows the whole span in at most MAX_BARS bars, so the bin comes from the data, never from a constant: a log
-# of one afternoon is binned by minutes, a log of two months by days, and one of several years by weeks. A bin copied
-# from another corpus gives thousands of slivers, or a handful of bars with the same tick label under each.
+TIME = "at"  # the field that places a record in time
+KIND = "route"  # the field whose value splits each bar
+
+# The chart shows the whole span in at most MAX_BARS bars, so the bin comes from the data: a morning is binned by
+# minutes, a week by hours, a year by weeks.
 BINS = [60, 300, 600, 1800, 3600, 3 * 3600, 6 * 3600, 86400, 7 * 86400]  # seconds
 MAX_BARS = 120
 DAY = 86400
-BIN_CALLS = 200  # calls one bin query returns; the page asks for the next ones when the analyst wants more
-TEXT_PARAMS = ("status", "title", "reason")  # params whose text says what a call was about
+BIN_ROWS = 200  # records one bin query returns; the page asks for the next ones
 
 
 def _bin_seconds(first, last):
@@ -34,7 +40,7 @@ def _bin_seconds(first, last):
 
 
 def _epoch(t):
-    """The time as seconds since 1970 (a time with no zone taken as UTC), or None when it does not parse."""
+    """The time as seconds since 1970, or None when it does not parse."""
     try:
         dt = datetime.fromisoformat(str(t).replace("Z", "+00:00"))
     except ValueError:
@@ -43,8 +49,8 @@ def _epoch(t):
 
 
 def _bin_start(epoch, seconds):
-    """The start of the bin holding `epoch`, in UTC: a bin of under a week starts at a multiple of its length from
-    midnight, and a week on its Monday, so bins line up with the ticks a reader expects."""
+    """The start of the bin holding `epoch`: a bin under a week starts at a multiple of its length from midnight, a
+    week on its Monday, so bars line up with the ticks a reader expects."""
     if seconds < 7 * DAY:
         return epoch - epoch % seconds
     day = datetime.fromtimestamp(epoch - epoch % DAY, timezone.utc)
@@ -52,18 +58,16 @@ def _bin_start(epoch, seconds):
 
 
 def _bin_key(start, seconds):
-    """A bin's key, which is also how a citation names it: its start as YYYY-MM-DDTHH:MM for bins under a day, and as
-    YYYY-MM-DD for a day or a week, since a longer bin has no time of day."""
+    """A bin's key, which is also how a citation names it: YYYY-MM-DDTHH:MM under a day, YYYY-MM-DD for longer bins."""
     fmt = "%Y-%m-%dT%H:%M" if seconds < DAY else "%Y-%m-%d"
     return datetime.fromtimestamp(start, timezone.utc).strftime(fmt)
 
 
 def build_index(paths):
-    """{"calls": [[path, line, bin key, kind, epoch], ...] in time order, "bins": {key: [first, last+1] into calls},
-    "starts": {key: start epoch}, "bin": seconds, "first", "last": epochs, "line": {"path#Ln": index into calls},
-    "offsets": {path: [byte offset of line n at n-1]}}. A line with no time that parses is in `offsets` but not in
-    `calls`, so it resolves without a bin."""
-    rows, offsets = [], {}
+    """{"rows": [[path, line, bin key, kind, epoch], ...] in time order, "bins": {key: [first, last+1] into rows},
+    "starts": {key: start epoch}, "bin": seconds, "first", "last": epochs, "line": {"path#Ln": index into rows},
+    "offsets": {path: [byte offset of line n at n-1]}}. A line with no time is in `offsets` only."""
+    found, offsets = [], {}
     for path in paths:
         offs = offsets.setdefault(path, [])
         with open(path, "rb") as f:
@@ -75,21 +79,21 @@ def build_index(paths):
                     r = json.loads(raw)
                 except ValueError:
                     continue
-                if not isinstance(r, dict) or (epoch := _epoch(r.get("ts"))) is None:
+                if not isinstance(r, dict) or (epoch := _epoch(r.get(TIME))) is None:
                     continue
-                rows.append((path, n, str(r.get("action") or "other").split(".")[0], epoch))
-    rows.sort(key=lambda c: (c[3], c[0], c[1]))
-    first, last = (rows[0][3], rows[-1][3]) if rows else (0.0, 0.0)
+                found.append((path, n, str(r.get(KIND) or "other"), epoch))
+    found.sort(key=lambda x: (x[3], x[0], x[1]))
+    first, last = (found[0][3], found[-1][3]) if found else (0.0, 0.0)
     seconds = _bin_seconds(first, last)
-    calls, bins, starts = [], {}, {}
-    for i, (path, n, kind, epoch) in enumerate(rows):
+    rows, bins, starts = [], {}, {}
+    for i, (path, n, kind, epoch) in enumerate(found):
         start = _bin_start(epoch, seconds)
         key = _bin_key(start, seconds)
         starts[key] = start
-        calls.append([path, n, key, kind, epoch])
+        rows.append([path, n, key, kind, epoch])
         bins.setdefault(key, [i, i + 1])[1] = i + 1
-    line = {f"{c[0]}#L{c[1]}": i for i, c in enumerate(calls)}
-    return {"calls": calls, "bins": bins, "starts": starts, "bin": seconds, "first": first, "last": last,
+    line = {f"{r[0]}#L{r[1]}": i for i, r in enumerate(rows)}
+    return {"rows": rows, "bins": bins, "starts": starts, "bin": seconds, "first": first, "last": last,
             "line": line, "offsets": offsets}
 
 
@@ -106,47 +110,35 @@ def _lines(index, path, wanted):
     return out
 
 
-def _params(r):
-    return r.get("params") if isinstance(r.get("params"), dict) else {}
-
-
-def _detail(r):
-    """What the call was about, for its row: the pull request or thread it names, else the first text param."""
-    p = _params(r)
-    if p.get("pr") is not None:
-        return f"#{p['pr']}"
-    if p.get("thread") is not None:
-        return f"thread {p['thread']}"
-    return next((str(p[k]) for k in TEXT_PARAMS if isinstance(p.get(k), str) and p[k]), "")
+def _text(r, field):
+    v = r.get(field)
+    return v if isinstance(v, str) else ""
 
 
 def _excerpt(r):
-    """The call's text as the record holds it: the action, the agent and the text params, one per line."""
-    p = _params(r)
-    return "\n".join([x for x in (r.get("action"), r.get("agent")) if isinstance(x, str) and x]
-                     + [p[k] for k in TEXT_PARAMS if isinstance(p.get(k), str) and p[k]])
+    """The delivery's text as the record holds it, one field per line."""
+    return "\n".join(x for x in (_text(r, f) for f in ("stop", "order", "status", "note")) if x)
 
 
 def _counts(index):
-    """The chart's rows, one per bin and kind, of the calls the filter keeps: {start (ms), key, kind, n, marked}, with
-    `marked` the calls among them the first label that is on marks."""
+    """The chart's rows, one per bin and kind, of the records the filter keeps: {start (ms), key, kind, n, marked},
+    `marked` those the first label that is on marks."""
     on = thimble.view_labels()["labels"]
     first = on[0]["name"] if on else None
     counts = {}
-    for path, n, key, kind, _ in index["calls"]:
+    for path, n, key, kind, _ in index["rows"]:
         ref = f"{path}#L{n}"
         if not thimble.kept(ref):
             continue
-        row = counts.setdefault((key, kind), [0, 0])
-        row[0] += 1
+        c = counts.setdefault((key, kind), [0, 0])
+        c[0] += 1
         if first is not None and any(m["label"] == first for m in thimble.marked(ref)):
-            row[1] += 1
+            c[1] += 1
     return [{"start": index["starts"][key] * 1000, "key": key, "kind": kind, "n": n, "marked": m}
             for (key, kind), (n, m) in sorted(counts.items())]
 
 
 def _busiest(rows):
-    """The bin with the most calls, which the page lists below the chart when it opens."""
     per = {}
     for r in rows:
         per[r["key"]] = per.get(r["key"], 0) + r["n"]
@@ -154,30 +146,29 @@ def _busiest(rows):
 
 
 def records(index, query):
-    """{op: counts} gives the chart: {bin: {seconds, first, last}, busiest, rows: [{start, key, kind, n, marked}]}, times
-    in milliseconds. {op: bin, key, offset?, ref?} gives one bin's calls the filter keeps, in time order, BIN_CALLS from
-    `offset`; the call `ref` names is listed even when the filter drops it, since a citation asked for it."""
+    """{op: counts}: the chart, {bin: {seconds, first, last}, busiest, rows: [{start, key, kind, n, marked}]}, times in
+    ms. {op: bin, key, offset?, ref?}: one bin's kept records in time order, BIN_ROWS from `offset`; the record `ref`
+    names is listed even when the filter drops it, since a citation asked for it."""
     query = query or {}
     if query.get("op") == "bin":
         first, end = index["bins"].get(query.get("key"), [0, 0])
         cited = query.get("ref")
-        kept = [c for c in index["calls"][first:end] if f"{c[0]}#L{c[1]}" == cited or thimble.kept(f"{c[0]}#L{c[1]}")]
+        kept = [r for r in index["rows"][first:end] if f"{r[0]}#L{r[1]}" == cited or thimble.kept(f"{r[0]}#L{r[1]}")]
         if query.get("offset") is None and cited:
-            # the page of the bin's calls that holds the cited one, so it is listed even in a bin of thousands
-            at = next((i for i, c in enumerate(kept) if f"{c[0]}#L{c[1]}" == cited), 0)
-            offset = at - at % BIN_CALLS
+            at = next((i for i, r in enumerate(kept) if f"{r[0]}#L{r[1]}" == cited), 0)
+            offset = at - at % BIN_ROWS
         else:
             offset = max(0, int(query.get("offset") or 0))
-        rows = kept[offset:offset + BIN_CALLS]
+        page = kept[offset:offset + BIN_ROWS]
         by_file = {}
-        for c in rows:
-            by_file.setdefault(c[0], []).append(c[1])
-        recs = {p: _lines(index, p, ns) for p, ns in by_file.items()}
+        for r in page:
+            by_file.setdefault(r[0], []).append(r[1])
+        read = {p: _lines(index, p, ns) for p, ns in by_file.items()}
         items = []
-        for p, n, _, kind, _ in rows:
-            r = recs[p].get(n, {})
-            items.append({"ref": f"{p}#L{n}", "time": str(r.get("ts") or ""), "kind": kind,
-                          "action": r.get("action") or "", "agent": r.get("agent") or "", "detail": _detail(r)})
+        for p, n, _, kind, _ in page:
+            r = read[p].get(n, {})
+            items.append({"ref": f"{p}#L{n}", "time": _text(r, TIME), "kind": kind, "stop": _text(r, "stop"),
+                          "order": _text(r, "order"), "status": _text(r, "status"), "note": _text(r, "note")})
         return {"key": query.get("key"), "total": len(kept), "offset": offset, "items": items}
     rows = _counts(index)
     return {"bin": {"seconds": index["bin"], "first": index["first"] * 1000, "last": index["last"] * 1000},
@@ -185,21 +176,21 @@ def records(index, query):
 
 
 def resolve(index, locator):
-    """events.jsonl#L<n>: the call, its excerpt the action, the agent and the text params as the record holds them.
-    view:<slug>/<bin>: the bin, its excerpt the actions called in it, citing its calls in time order."""
+    """deliveries.jsonl#L<n>: the delivery. view:<slug>/<bin>: the bin, its excerpt the stops in it."""
     if "key" in locator:
         span = index["bins"].get(locator["key"])
         if not span:
             return None
-        rows = index["calls"][span[0]:span[1]]
-        recs = {}
-        for c in rows[:20]:
-            recs.setdefault(c[0], []).append(c[1])
-        read = {(p, n): r for p, ns in recs.items() for n, r in _lines(index, p, ns).items()}
-        actions = [read[(c[0], c[1])].get("action") for c in rows[:20] if (c[0], c[1]) in read]
-        excerpt = "\n".join(dict.fromkeys(a for a in actions if isinstance(a, str) and a))
-        return {"excerpt": excerpt, "label": f"{locator['key'].replace('T', ' ')} · {len(rows)} calls",
-                "refs": [f"{c[0]}#L{c[1]}" for c in rows][:200], "key": locator["key"],
+        rows = index["rows"][span[0]:span[1]]
+        wanted = {}
+        for r in rows[:20]:
+            wanted.setdefault(r[0], []).append(r[1])
+        read = {(p, n): rec for p, ns in wanted.items() for n, rec in _lines(index, p, ns).items()}
+        stops = [_text(read[(r[0], r[1])], "stop") for r in rows[:20] if (r[0], r[1]) in read]
+        n = len(rows)
+        return {"excerpt": "\n".join(dict.fromkeys(s for s in stops if s)),
+                "label": f"{locator['key'].replace('T', ' ')} · {n} {'delivery' if n == 1 else 'deliveries'}",
+                "refs": [f"{r[0]}#L{r[1]}" for r in rows][:200], "key": locator["key"],
                 "target": {"bin": locator["key"]}}
     path, fragment = locator.get("path"), str(locator.get("fragment") or "")
     m = re.fullmatch(r"L(\d+)", fragment)
@@ -209,9 +200,8 @@ def resolve(index, locator):
     r = _lines(index, path, [n]).get(n)
     if not isinstance(r, dict) or not _excerpt(r):
         return None
-    label = f"{r.get('action') or 'call'} · {str(r.get('ts') or '').replace('T', ' ')[:16]}".strip(" ·")
+    label = f"{_text(r, 'stop') or 'delivery'} · {_text(r, TIME).replace('T', ' ')[:16]}".strip(" ·")
     if ref not in index["line"]:
-        # a call with no time that parses has no bin, so the page shows the chart alone
         return {"excerpt": _excerpt(r), "label": label, "refs": [ref], "key": None, "target": {}}
-    c = index["calls"][index["line"][ref]]
-    return {"excerpt": _excerpt(r), "label": label, "refs": [ref], "key": c[2], "target": {"bin": c[2], "ref": ref}}
+    row = index["rows"][index["line"][ref]]
+    return {"excerpt": _excerpt(r), "label": label, "refs": [ref], "key": row[2], "target": {"bin": row[2], "ref": ref}}

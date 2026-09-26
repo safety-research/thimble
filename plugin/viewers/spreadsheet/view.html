@@ -2,38 +2,24 @@
 <html>
 <head>
 <style>
-  :root {
-    --ink: var(--text-primary, #23211d);
-    --ink-2: var(--text-secondary, #5f5a52);
-    --ink-3: var(--text-tertiary, #8b857b);
-    --card: var(--surface-card, #ffffff);
-    --inset: var(--bg-sunken, #f3f1ec);
-    --line: var(--border-hairline, rgba(35, 33, 29, 0.08));
-    --line-2: var(--border-subtle, rgba(35, 33, 29, 0.12));
-    --live: var(--accent, #5b5bd6);
-    --live-soft: var(--accent-soft, rgba(91, 91, 214, 0.14));
-    --sans: var(--font-body, ui-sans-serif, system-ui, sans-serif);
-    --mono: var(--font-mono, ui-monospace, monospace);
-  }
-  * { box-sizing: border-box; }
+  /* thimble's parts (.field, .seg, .btn) and the theme's tokens come with the frame */
   html, body { margin: 0; height: 100%; }
-  body { font: 12px/1.4 var(--sans); color: var(--ink); display: flex; flex-direction: column; }
-  nav { flex: none; display: flex; gap: 14px; align-items: center; padding: 8px 12px; border-bottom: 1px solid var(--line-2); }
-  .tab { font: 12px var(--sans); color: var(--ink-2); cursor: pointer; padding: 2px 0; border-bottom: 2px solid transparent; }
-  .tab.on { color: var(--live); border-bottom-color: var(--live); }
+  body { display: flex; flex-direction: column; }
+  nav { flex: none; display: flex; gap: 10px; align-items: center; overflow-x: auto; padding: 8px 12px; border-bottom: 1px solid var(--border-hairline); }
+  nav .path { font: 400 var(--text-mono-sm) / 1.4 var(--font-mono); color: var(--text-tertiary); }
   #grid { flex: 1; min-height: 0; overflow: auto; }
-  table { border-collapse: separate; border-spacing: 0; font-variant-numeric: tabular-nums; }
-  th, td { border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); padding: 3px 8px; white-space: nowrap; max-width: 320px; overflow: hidden; text-overflow: ellipsis; }
-  thead th { position: sticky; top: 0; background: var(--inset); font: 500 11px var(--mono); color: var(--ink-3); z-index: 2; }
-  th.n { position: sticky; left: 0; background: var(--inset); font: 11px var(--mono); color: var(--ink-3); text-align: right; z-index: 1; }
+  table { border-collapse: separate; border-spacing: 0; font: 400 var(--text-xs) / 1.4 var(--font-body); font-variant-numeric: tabular-nums; }
+  th, td { max-width: 320px; overflow: hidden; padding: 3px 8px; border-right: 1px solid var(--border-hairline); border-bottom: 1px solid var(--border-hairline); text-overflow: ellipsis; white-space: nowrap; }
+  th { background: var(--bg-sub); color: var(--text-tertiary); font: 400 var(--text-mono-sm) / 1.4 var(--font-mono); }
+  thead th { position: sticky; top: 0; z-index: 2; }
+  th.n { position: sticky; left: 0; z-index: 1; text-align: right; }
   thead th.n { z-index: 3; }
-  td { background: var(--card); }
-  td.num { text-align: right; font-family: var(--mono); }
-  tr.target td, td.target { background: var(--live-soft); }
-  td.target { outline: 1px solid var(--live); outline-offset: -1px; }
-  /* the file menu is thimble's field (.field) and the next rows its button (.btn), which every view's page has */
+  td { background: var(--surface-card); }
+  td.num { text-align: right; font-family: var(--font-mono); font-size: var(--text-mono-sm); }
+  tr.target td, td.target { background: var(--accent-soft); }
+  td.target { outline: 1px solid var(--accent); outline-offset: -1px; }
   .more { margin: 10px 12px; }
-  .error { padding: 16px; color: var(--status-negative, #b3261e); }
+  .error { padding: 16px; color: var(--status-negative); }
 </style>
 </head>
 <body>
@@ -66,7 +52,7 @@
     const nav = $('#nav')
     nav.replaceChildren()
     if (files.length > 1) {
-      const pick = el('select', 'field mono')
+      const pick = el('select', 'field')
       for (const f of files) {
         const o = el('option', null, f.path)
         o.value = f.path
@@ -75,13 +61,18 @@
       }
       pick.onchange = () => thimble.navigate(pick.value)
       nav.append(pick)
-    } else if (view) nav.append(el('span', 'mono', view.path))
-    for (const s of (view && view.sheets) || []) {
-      const tab = el('span', 'tab' + (s === view.sheet ? ' on' : ''), s)
-      tab.dataset.anchor = `${view.path}#${sheetRef(s)}`
-      tab.dataset.anchorName = `the sheet ${s} of ${view.path}`
-      tab.onclick = () => thimble.navigate(`${view.path}#${sheetRef(s)}`)
-      nav.append(tab)
+    } else if (view) nav.append(el('span', 'path', view.path))
+    const sheets = (view && view.sheets) || []
+    if (sheets.length) {
+      const tabs = el('div', 'seg seg-track')
+      for (const s of sheets) {
+        const tab = el('button', 'seg-opt' + (s === view.sheet ? ' active' : ''), s)
+        tab.dataset.anchor = `${view.path}#${sheetRef(s)}`
+        tab.dataset.anchorName = `the sheet ${s} of ${view.path}`
+        tab.onclick = () => thimble.navigate(`${view.path}#${sheetRef(s)}`)
+        tabs.append(tab)
+      }
+      nav.append(tabs)
     }
   }
 

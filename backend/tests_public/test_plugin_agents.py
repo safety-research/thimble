@@ -129,9 +129,9 @@ def test_orient_skill_calls_the_start_orientation_tool_with_the_focus_as_its_bri
 
 def test_every_worked_example_a_view_ticket_names_is_a_complete_viewer():
     """A view ticket (prompts/dev-view.md) tells the dev agent to read the worked example closest to its task, by
-    folder name under plugin/viewers. Each one it names must be there with its three files: view.json, which normalizes
-    to a view that accepts citations, a reader.py that compiles, and a view.html that marks anchors. The prompt states
-    the contract of each file."""
+    folder name under plugin/viewers. Each one it names must be there with its three files and a sample of the files it
+    claims: view.json, which normalizes to a view that accepts citations, a reader.py that compiles, and a view.html
+    that marks anchors. The prompt states the contract of each file."""
     from app import views
 
     body = prompts.load("dev-view")
@@ -145,9 +145,11 @@ def test_every_worked_example_a_view_ticket_names_is_a_complete_viewer():
     for shape in named:
         d = viewers / shape
         assert d.is_dir(), f"prompts/dev-view.md names the example `{shape}`, which plugin/viewers does not hold"
-        assert sorted(x.name for x in d.iterdir() if not x.name.startswith("__")) == ["reader.py", "view.html", "view.json"]
+        have = sorted(x.name for x in d.iterdir() if not x.name.startswith("__"))
+        assert have == ["reader.py", "sample", "view.html", "view.json"], shape
         compile((d / "reader.py").read_text("utf-8"), str(d / "reader.py"), "exec")
         v = views._normalize_view(shape, json.loads((d / "view.json").read_text("utf-8")), where=d)
         assert v["ok"] and v["accepts"] and v["name"], shape
+        assert all((d / "sample" / claim).is_file() for claim in v["claims"]), shape
         page = (d / "view.html").read_text("utf-8")
         assert "thimble.onOpen" in page and "data-anchor" in page, shape

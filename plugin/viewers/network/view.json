@@ -1,9 +1,0 @@
-{
-  "name": "Hand-offs",
-  "why": "Agents linked when one acted on a pull request right after the other, weighted by how often, so the pairs that passed work between them stand out; an edge opens the events that link them.",
-  "claims": ["events.jsonl"],
-  "accepts": [{"form": "L<n>", "means": "the event on line <n>, and the hand-off it made"}],
-  "declares": [{"form": "<agent>", "means": "one agent and everyone they handed a pull request to or took one from"}],
-  "default": false,
-  "libs": []
-}
