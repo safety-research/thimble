@@ -80,9 +80,9 @@ GATE_TIMEOUT_S = 900
 # every tool of a default Claude Code session less the ones _flags takes away.
 ALLOWED_TOOLS = ["Read", "Edit", "Write", "NotebookEdit", "Bash", "Grep", "Glob", "WebSearch", "WebFetch", "Skill",
                  "Workflow"]
-# EnterWorktree writes a git worktree into the session's own folder, which the fence's denies do not stop, and a view
-# build's folder is the corpus.
-WORKTREE_TOOLS = ("EnterWorktree", "ExitWorktree")
+# Not given to a fenced session, a view build in the corpus folder: EnterWorktree writes a git worktree into the
+# session's own folder, which the fence's denies do not stop, and nobody answers AskUserQuestion or plan mode's approval.
+FENCED_OFF_TOOLS = ("EnterWorktree", "ExitWorktree", "AskUserQuestion", "EnterPlanMode", "ExitPlanMode")
 CLAUDE_BIN = os.environ.get("THIMBLE_CLAUDE_BIN", "claude")
 VIEW_CHECK = Path(__file__).with_name("view_check.py")  # the command a view build checks its draft with (view_fence)
 CLI_TIMEOUT_S = 60
@@ -1191,13 +1191,13 @@ class Sessions:
         """The session's flags: the dev role's model settings, the allowed tools, `--add-dir` folders and the `fence`
         settings. It gets no MCP server, since an MCP tool's permission request would stop it with nobody to answer,
         not the tools that schedule a later turn (agent_session.LATER_TOOLS), since the session is stopped once its turn
-        ends, and, when fenced, not WORKTREE_TOOLS. The permission mode is `default`, since under auto mode a Bash call
+        ends, and, when fenced, not FENCED_OFF_TOOLS. The permission mode is `default`, since under auto mode a Bash call
         still goes to the classifier despite `--allowedTools`."""
         from . import agent_session  # noqa: PLC0415 — agent_session is large and this module otherwise needs none of it
 
         conf = config.models_for(workspace)["dev"]
         model = config.resolve_model(conf["model"])[0] or conf["model"]
-        denied = [*agent_session.LATER_TOOLS, *(WORKTREE_TOOLS if fence else ())]
+        denied = [*agent_session.LATER_TOOLS, *(FENCED_OFF_TOOLS if fence else ())]
         flags = ["-n", name, "--model", str(model), "--allowedTools", ",".join(ALLOWED_TOOLS),
                  "--disallowedTools", ",".join(denied), "--strict-mcp-config", "--permission-mode", "default"]
         for d in add_dirs:

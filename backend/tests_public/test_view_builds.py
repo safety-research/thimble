@@ -414,7 +414,8 @@ def test_a_dev_session_has_the_default_tools_less_mcp_servers_and_the_later_turn
     session. Nobody answers its permission requests, so what it does in its folders, the web, skills and workflows are
     allowed; it gets no MCP server, whose tools would ask, and not the tools that schedule a later turn, since the
     session is stopped once its turn ends. A fenced session, a view build in the corpus folder, also gets no
-    EnterWorktree, which would write a worktree into that folder past the fence's denies."""
+    EnterWorktree, which would write a worktree into that folder past the fence's denies, and none of the tools that
+    wait for an answer nobody gives there."""
     from app import agent_session
 
     monkeypatch.setattr(config, "models_for", lambda c=None, settings=None: {"dev": {"model": "claude-opus-4-8", "fast": False}})
@@ -426,7 +427,7 @@ def test_a_dev_session_has_the_default_tools_less_mcp_servers_and_the_later_turn
     assert "--strict-mcp-config" in flags and flags[flags.index("--permission-mode") + 1] == "default"
     fenced = dev.Sessions()._flags(CORPUS, "thimble view: x", fence=dev.read_only_fence([Path("/corpus")]))
     assert fenced[fenced.index("--disallowedTools") + 1].split(",") == \
-        [*agent_session.LATER_TOOLS, "EnterWorktree", "ExitWorktree"]
+        [*agent_session.LATER_TOOLS, "EnterWorktree", "ExitWorktree", "AskUserQuestion", "EnterPlanMode", "ExitPlanMode"]
 
 
 def test_the_view_check_posts_its_locators_to_a_view_s_check_route_on_localhost_only(capsys):
