@@ -80,4 +80,15 @@ describe("the review of a view's pictures", () => {
     await settle()
     expect(flagged.querySelector('.view-pane-review .bcell-check-mark')!.classList.contains('is-flagged')).toBe(true)
   })
+
+  test('a review that ended early after a revision still offers Undo beside Review again', async () => {
+    const el = await pane({ state: 'failed', note: "The review did not finish: Anthropic's API is overloaded", revised: ['picture 1: the ticks overlap'] })
+    await settle()
+    await act(async () => el.querySelector<HTMLElement>('.view-pane-review')!.dispatchEvent(new MouseEvent('mouseover', { bubbles: true })))
+    await act(async () => el.querySelector<HTMLButtonElement>('.view-pane-review .bcell-check-mark')!.focus())
+    const pop = document.querySelector<HTMLElement>('.bcell-check-pop')!
+    expect([...pop.querySelectorAll('button')].map((b) => b.textContent)).toEqual(['Undo', 'Review again'])
+    await act(async () => [...pop.querySelectorAll('button')].find((b) => b.textContent === 'Undo')!.click())
+    expect(calls.some((c) => c.method === 'POST' && c.url.endsWith('/views/threads/review/undo'))).toBe(true)
+  })
 })

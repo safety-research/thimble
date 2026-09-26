@@ -101,8 +101,8 @@ export function reviewLine(r: ViewReview): string {
 }
 
 /** The review of a view's pictures as the card check's mark: a spinner while it runs (a click stops it), a check glyph
- * when it is done, with what it revised and Undo, a flag when problems are left, and a run-again glyph when it failed
- * or was stopped. */
+ * when it is done, a flag when problems are left, and a run-again glyph when it failed or was stopped. Whenever it
+ * revised the view and is not running, its hover offers Undo. */
 function ReviewMark({ ws, slug, review: r }: { ws: string; slug: string; review: ViewReview }) {
   const running = r.state === 'running'
   const ended = r.state === 'failed' || r.state === 'stopped'
@@ -137,14 +137,14 @@ function ReviewMark({ ws, slug, review: r }: { ws: string; slug: string; review:
           )}
           {r.state === 'done' && r.note && <span className="bcell-check-what">{r.note}</span>}
           {r.state === 'done' && !revised.length && !left.length && !r.undo && <span className="bcell-check-what">Nothing to fix.</span>}
-          {(running || ended || (r.state === 'done' && revised.length > 0)) && (
+          {(running || ended || revised.length > 0) && (
             <span className="bcell-check-acts">
               {running && (
                 <Button variant="ghost" size="sm" icon="stop" onClick={() => (close(), stop())}>
                   Stop
                 </Button>
               )}
-              {r.state === 'done' && revised.length > 0 && (
+              {!running && revised.length > 0 && (
                 <Button variant="ghost" size="sm" icon="undo" onClick={() => (close(), undo())}>
                   Undo
                 </Button>
