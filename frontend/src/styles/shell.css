@@ -60,6 +60,11 @@
 .shell[data-chat='closed'] .shell-corpus-name {
   display: none;
 }
+/* with the chat off no column sets the brand's width, so the brand takes the folder's name whole, up to a limit */
+.shell[data-chat='off'] .shell-brand {
+  width: auto;
+  max-width: 360px;
+}
 .shell-tabs {
   align-self: stretch;
 }
