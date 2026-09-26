@@ -106,7 +106,7 @@
   }
 
   // A post is shown the way the board showed it: its author, its time and its body with its own line breaks. A record
-  // whose body is markup, such as a wiki page, would be rendered as the page it describes rather than shown as source.
+  // whose body is markup, such as HTML or Markdown, would be rendered as the page it describes rather than shown as source.
   function postEl(p, title) {
     const card = el('article', 'post' + (p.line === focusLine ? ' target' : ''))
     card.dataset.line = p.line
