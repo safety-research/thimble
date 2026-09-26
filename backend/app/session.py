@@ -147,6 +147,7 @@ class Sub:
         self.prompted = False  # its first prompt was read
         self.of_main = False  # a subagent main started with the Agent tool (_spawn)
         self.relay_by: str | None = None  # who sent the message main passed on last, when not main (relay)
+        self.call_keys: dict[str, tuple[str, str]] = {}  # tool_use id -> its channel.call_key (_results)
         self.quiet_since = time.monotonic()
         self.done = False
         self.workflow = False  # a Workflow call of main's, whose members are its agents (module note, workflows)
@@ -1282,9 +1283,33 @@ def _tail_sub(lv: Live, sub: Sub) -> int:
         log.warning("%s: subagent %s transcript unreadable (%s)", lv.c, sub.chat, e)
         sub.rec.error(UNREADABLE_TEXT, detail=str(e)[:200], by=TERMINAL)
         sub.path = None
-    if sub.agent_id and sub.agent_id in _channel_module().asking(lv.c):
-        _channel_module().agent_moved(lv.c, sub.agent_id, max((_stamp(ln) for ln in lines if ln.strip()), default=0.0))
+    done = _results(sub, lines)
+    if done and sub.agent_id and sub.agent_id in _channel_module().asking(lv.c):
+        _channel_module().calls_done(lv.c, sub.agent_id, done)
     return n
+
+
+def _results(sub: Sub, lines: list[bytes]) -> list[tuple[tuple[str, str], float]]:
+    """The calls whose results lines of a subagent's transcript hold, each as channel.call_key names it, with the
+    result's time; the calls themselves are kept on the Sub as they appear, since a result may come in a later read."""
+    out: list[tuple[tuple[str, str], float]] = []
+    for line in lines:
+        if b'"tool_use"' not in line and b'"tool_result"' not in line:
+            continue
+        try:
+            rec = json.loads(line)
+        except ValueError:
+            continue
+        msg = rec.get("message") if isinstance(rec, dict) else None
+        content = msg.get("content") if isinstance(msg, dict) else None
+        for b in content if isinstance(content, list) else []:
+            if not isinstance(b, dict):
+                continue
+            if b.get("type") == "tool_use" and isinstance(b.get("id"), str):
+                sub.call_keys[b["id"]] = _channel_module().call_key(str(b.get("name") or ""), b.get("input"))
+            elif b.get("type") == "tool_result" and b.get("tool_use_id") in sub.call_keys:
+                out.append((sub.call_keys[b["tool_use_id"]], _stamp(line) or time.time()))
+    return out
 
 
 def _resumed(lines: list[bytes], relayed_by: str | None = None) -> list[dict] | None:

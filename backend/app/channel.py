@@ -779,8 +779,9 @@ class Ask(NamedTuple):
     loop: asyncio.AbstractEventLoop
     fut: asyncio.Future
     since: float  # time.monotonic() when it opened, for release_asks
-    at: float = 0.0  # time.time() when it opened, compared with the agent's transcript timestamps (agent_moved)
+    at: float = 0.0  # time.time() when it opened, compared with the agent's transcript timestamps (calls_done)
     agent: str | None = None  # the subagent or fork that asked; None for main
+    call: tuple[str, str] = ("", "")  # the call it asks about (call_key), which calls_done matches to its result
 
 
 @router.post("/channel/permission/hook")
@@ -801,7 +802,8 @@ async def hook_permission_route(request: Request, body: HookPermission) -> dict[
     request_id = HOOK_ASK_PREFIX + secrets.token_hex(4)
     loop = asyncio.get_running_loop()
     fut: asyncio.Future = loop.create_future()
-    _asks[request_id] = Ask(c, loop, fut, time.monotonic(), time.time(), body.agent_id or None)
+    _asks[request_id] = Ask(c, loop, fut, time.monotonic(), time.time(), body.agent_id or None,
+                            call_key(body.tool_name, body.tool_input))
     _hold(c, request_id, body.tool_name, what, preview, body.agent_id or None)
     try:
         while not fut.done():
@@ -874,11 +876,48 @@ def asking(c: str) -> set[str]:
     return {a.agent for a in _asks.values() if a.c == c and a.agent}
 
 
+# the input field that names a call of each tool, compared when a prompt is matched to its call's result (call_key)
+CALL_FIELDS = {"Bash": "command", "Monitor": "command", "WebFetch": "url", "WebSearch": "query", "Read": "file_path",
+               "Write": "file_path", "Edit": "file_path", "NotebookEdit": "notebook_path", "Glob": "pattern",
+               "Grep": "pattern"}
+
+
+def call_key(tool: str, tool_input: Any) -> tuple[str, str]:
+    """A call as a prompt and its transcript line both name it: the tool and the field that names the call
+    (CALL_FIELDS), or the whole input, with runs of white space made one."""
+    inp = tool_input if isinstance(tool_input, dict) else {}
+    field = CALL_FIELDS.get(tool)
+    value = inp.get(field) if field else None
+    text = value if isinstance(value, str) else json.dumps(inp, sort_keys=True, ensure_ascii=False)
+    return str(tool or ""), " ".join(text.split())
+
+
 def agent_moved(c: str, agent: str, after: float) -> None:
-    """The transcript of the subagent or fork `agent` gained a record written at `after`, or the agent stopped (`after`
-    infinite): the prompts it opened before then are gone, so their hooks' waits end. An agent writes nothing while its
-    prompt is open."""
+    """The subagent or fork `agent` stopped (`after` infinite), or wrote a record at `after`: the prompts it opened
+    before then are gone, so their hooks' waits end. The mirror calls it when an agent stops; a prompt of a working
+    agent ends with its call's result (calls_done), since an agent with several calls open goes on writing while
+    their prompts wait."""
     gone = {i for i, a in _asks.items() if a.c == c and a.agent == agent and a.at < after}
+    for request_id in gone:
+        _answer_ask(request_id, None)
+    if gone:
+        _drop(c, gone)
+
+
+def calls_done(c: str, agent: str, done: "list[tuple[tuple[str, str], float]]") -> None:
+    """Calls of the subagent or fork `agent` got their results (each call_key with the result's time): the prompt each
+    one waited on was answered, in the terminal or here, so its hook's wait ends and the browser drops its card. A call
+    is matched to the prompt with its call_key, else to the one prompt of its tool that agent has open; any other
+    prompt stays."""
+    gone: set[str] = set()
+    for key, at in done:
+        open_ = sorted(((i, a) for i, a in _asks.items() if a.c == c and a.agent == agent and i not in gone
+                        and a.call[0] == key[0] and a.at <= at), key=lambda x: x[1].at)
+        hit = next((i for i, a in open_ if a.call == key), None)
+        if hit is None and len(open_) == 1:
+            hit = open_[0][0]
+        if hit is not None:
+            gone.add(hit)
     for request_id in gone:
         _answer_ask(request_id, None)
     if gone:

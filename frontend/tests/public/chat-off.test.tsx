@@ -65,6 +65,18 @@ describe('the dock', () => {
     expect(dock!.querySelector('.chat-composer, .chat-list, .chat-head')).toBeNull()
   })
 
+  test('keeps every request that waits, stacked, and drops one once the server does', async () => {
+    const ask = (id: string, url: string) => ({ id, tool: 'WebFetch', what: 'WebFetch', input: JSON.stringify({ url }), since: '2026-09-26T07:00:00Z' })
+    mainMeta = { ...mainMeta, permissions: [ask('h1', 'https://a.example/1'), ask('h2', 'https://a.example/2'), ask('h3', 'https://a.example/3')] }
+    const el = await mount(<ChatPanel ws="mini" dock />)
+    await settle()
+    await settle()
+    const card = el.querySelector<HTMLElement>('.chat-dock .chat-perm')!
+    expect(card.dataset.count).toBe('3')
+    expect(card.classList.contains('chat-perm-stack')).toBe(true)
+    expect(card.querySelector('.chat-perm-count')?.textContent).toBe('1 of 3')
+  })
+
   test('holds the Start gate while no orientation was asked for', async () => {
     mainMeta = { id: 'main', kind: 'main', orientation: null, attached: { session: 's1' } }
     const el = await mount(<ChatPanel ws="mini" dock />)

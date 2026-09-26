@@ -1309,6 +1309,15 @@ button.model-line-part[aria-expanded='true'] {
   color: var(--text-primary);
   font: var(--type-body-sm);
 }
+/* several requests wait: the edges of the cards behind this one show below it */
+.chat-perm-stack {
+  margin-bottom: 12px;
+  overflow: visible;
+  box-shadow:
+    0 4px 0 -1px color-mix(in oklab, var(--status-warning) 10%, var(--surface-card)),
+    0 4px 0 0.5px var(--status-warning),
+    var(--shadow-composer);
+}
 .chat-perm-head {
   display: flex;
   flex-wrap: wrap;

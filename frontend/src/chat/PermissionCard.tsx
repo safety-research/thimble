@@ -74,7 +74,7 @@ export function PermissionCard({ ws, asks, metas, labels }: {
       .finally(() => setBusy(false))
   }
   return (
-    <div className="chat-perm" role="alertdialog" aria-label="Permission needed" data-chat={ask.chat} data-request={p.id} data-count={shown.length}>
+    <div className={`chat-perm${shown.length > 1 ? ' chat-perm-stack' : ''}`} role="alertdialog" aria-label="Permission needed" data-chat={ask.chat} data-request={p.id} data-count={shown.length}>
       <div className="chat-perm-head">
         <Icon name="warning" size={13} className="chat-perm-ico" />
         <span className="chat-perm-title">Permission needed</span>
