@@ -42,7 +42,6 @@ The views in {{examples}} show methods to copy, not layouts. Read the one whose 
 
 - `board` gathers records spread over a file into threads, and lists each thread with its size and its marked posts.
 - `timeline` picks the bin and the axis from the span, and draws the marked part of each bar in the label's colour.
-- `network` links actors, each edge opening the records behind it.
 - `spreadsheet` shows a grid with sheet tabs, cited in each file type's own notation.
 
 thimble also ships `pdf` for PDF files, and a view you write that claims them opens instead.

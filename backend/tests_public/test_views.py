@@ -610,7 +610,7 @@ async def test_a_corpus_view_over_the_same_files_opens_before_the_built_in_one(d
 
 # ------------------------------------------------------------------------------------------------- worked examples
 #
-# plugin/viewers/board, network and timeline are the worked examples a view ticket's session starts from
+# plugin/viewers/board and timeline are the worked examples a view ticket's session starts from
 # (prompts/dev-view.md). Each is written for the layout of toy-incident, the synthetic corpus that
 # scripts/dev/make_toy_corpus.py writes, and passes over it the checks a view a session writes must pass.
 
@@ -618,7 +618,6 @@ TOY = "toy-incident"
 # the example, the slug it is saved under, and a key of each kind it declares
 EXAMPLES = {
     "board": ("threads", ["view:threads/2"]),
-    "network": ("hand-offs", ["view:hand-offs/agent-01"]),
     "timeline": ("activity", ["view:activity/2026-08-30T14:10"]),
 }
 
@@ -664,8 +663,8 @@ async def test_every_worked_example_answers_the_checks_over_the_toy_corpus(name,
 
 
 async def test_the_worked_examples_resolve_the_toy_corpus_s_units(toy, inproc, bound):
-    """What each example makes of the toy corpus: a board post in its thread, a hand-off between two agents on a pull
-    request, and a call in its time bin, each citing its own line."""
+    """What each example makes of the toy corpus: a board post in its thread and a call in its time bin, each citing its
+    own line."""
     for name in EXAMPLES:
         _save_example(name)
     post = await views.resolve_locator(TOY, "threads", {"path": "board.jsonl", "fragment": "L1"})
@@ -675,14 +674,6 @@ async def test_the_worked_examples_resolve_the_toy_corpus_s_units(toy, inproc, b
     assert thread["label"].startswith("Review requests · ") and thread["refs"][0] == "board.jsonl#L2"
 
     events = [json.loads(ln) for ln in (toy / "events.jsonl").read_text("utf-8").splitlines()]
-    review = next(n for n, e in enumerate(events, 1) if e["action"] == "pr.review")
-    hop = await views.resolve_locator(TOY, "hand-offs", {"path": "events.jsonl", "fragment": f"L{review}"})
-    assert hop["refs"] == [f"events.jsonl#L{review}"] and " → " in hop["label"]
-    assert hop["key"] == events[review - 1]["agent"] and hop["excerpt"] == f"{hop['key']}\npr.review"
-    assert hop["target"]["ref"] == f"events.jsonl#L{review}"
-    graph = await views.reader_call(TOY, "hand-offs", "records", {"op": "graph"})
-    assert graph["edges"] and all(e["source"] < e["target"] for e in graph["edges"])
-
     call = await views.resolve_locator(TOY, "activity", {"path": "events.jsonl", "fragment": "L1"})
     assert call["key"] == "2026-08-30T14:00" and call["excerpt"].split("\n")[:2] == ["admin.agents", "admin"]
     counts = await views.reader_call(TOY, "activity", "records", {"op": "counts"})
