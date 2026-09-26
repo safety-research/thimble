@@ -1087,6 +1087,12 @@ button.label-chip:hover {
   flex: none;
   margin-top: 2px;
 }
+/* terminal-first mode: what the orientation gives up, in place of the permission switcher */
+.chat-gate-note {
+  margin: 0;
+  color: var(--text-secondary);
+  font: var(--type-body-sm);
+}
 .chat-gate-field {
   display: flex;
   flex: none;
@@ -1303,6 +1309,15 @@ button.model-line-part[aria-expanded='true'] {
   color: var(--text-primary);
   font: var(--type-body-sm);
 }
+/* several requests wait: the edges of the cards behind this one show below it */
+.chat-perm-stack {
+  margin-bottom: 12px;
+  overflow: visible;
+  box-shadow:
+    0 4px 0 -1px color-mix(in oklab, var(--status-warning) 10%, var(--surface-card)),
+    0 4px 0 0.5px var(--status-warning),
+    var(--shadow-composer);
+}
 .chat-perm-head {
   display: flex;
   flex-wrap: wrap;
@@ -1489,6 +1504,13 @@ button.model-line-part[aria-expanded='true'] {
   color: var(--text-primary);
 }
 /* the rules the analyst's "don't ask again" added to a session, in mono, wrapping when long */
+/* a background session whose process stopped: what happened, then Resume */
+.chat-hold-stopped {
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
 .chat-hold-rule {
   font: 400 var(--text-mono) / 1.35 var(--font-mono);
   overflow-wrap: anywhere;
@@ -1654,4 +1676,34 @@ button.model-line-part[aria-expanded='true'] {
 }
 .chat-apierr-retry {
   flex: none;
+}
+
+/* -------- the dock (ChatPanel `dock`, the chat off): main's foot without its composer, at the bottom left of the
+   panes, inset as the canvas's controls are at the right and clear of a pane's status line. It holds only what waits
+   or runs: the alert, the permission card, the orientation's strip and the Start gate. -------- */
+.chat.chat-dock {
+  position: fixed;
+  left: 26px;
+  bottom: 54px;
+  z-index: var(--z-menu);
+  width: min(360px, calc(100vw - 24px));
+  height: auto;
+  max-height: calc(100vh - var(--h-topbar) - 72px);
+  pointer-events: none;
+}
+.chat-dock .chat-foot {
+  position: relative;
+  gap: 6px;
+  pointer-events: auto;
+}
+.chat-dock .chat-perm {
+  margin-bottom: 0;
+}
+/* with no composer under it the strip is a card of its own */
+.chat-dock .chat-strip {
+  margin-bottom: 0;
+  padding-bottom: 0;
+  border-radius: var(--radius-card);
+  border-bottom: var(--glass-edge);
+  box-shadow: 0 0 0 1px rgba(var(--ink-rgb), 0.07), var(--shadow-composer);
 }

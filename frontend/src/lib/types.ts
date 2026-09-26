@@ -849,6 +849,12 @@ export interface ModelConf {
 /** `GET /ws/{c}/settings` layers the effective `models` in; a PUT merges what it is given. */
 export interface Settings {
   models: Record<string, ModelConf>
+  /** the orientation runs as a subagent of the analyst's Claude Code session (backend orientation.terminal_first) */
+  terminal_first?: boolean
+  /** in terminal-first mode, how the orientation runs: a subagent of main, or a background session (backend bg_session) */
+  orient_route?: 'subagent' | 'session'
+  /** the chat column is hidden and main's foot shows in a dock (shell/Shell, chat off) */
+  hide_chat?: boolean
   [k: string]: unknown
 }
 

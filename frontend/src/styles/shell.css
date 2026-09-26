@@ -60,6 +60,11 @@
 .shell[data-chat='closed'] .shell-corpus-name {
   display: none;
 }
+/* with the chat off no column sets the brand's width, so the brand takes the folder's name whole, up to a limit */
+.shell[data-chat='off'] .shell-brand {
+  width: auto;
+  max-width: 360px;
+}
 .shell-tabs {
   align-self: stretch;
 }
@@ -442,6 +447,67 @@
 /* fast mode's lightning bolt in the table (ModelLine's FastBolt; its accent while on is components.css .fast-bolt) */
 .settings-fast {
   justify-self: start;
+}
+/* the workspace's switches under the table (SettingsPopover's SWITCHES): the switch, then its name and what it does */
+.settings-switches {
+  display: flex;
+  flex-direction: column;
+  border-top: 1px solid var(--border-subtle);
+}
+.settings-switch {
+  display: grid;
+  grid-template-columns: 32px minmax(0, 1fr);
+  gap: 8px;
+  align-items: start;
+  padding: 8px 6px;
+  border-bottom: 1px solid var(--border-hairline);
+}
+.settings-switch:last-child {
+  border-bottom: 0;
+}
+.settings-switch .switch {
+  margin-top: 1px;
+}
+.settings-switch-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.settings-switch-label {
+  color: var(--text-primary);
+  font: var(--type-ui-sm);
+}
+.settings-switch-note {
+  color: var(--text-secondary);
+  font: var(--type-body-sm);
+}
+/* terminal-first's choice of how the orientation runs, under its switch: `Orientation runs as: subagent / background session` */
+.settings-route {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 6px;
+  margin-top: 4px;
+  color: var(--text-secondary);
+  font: var(--type-body-sm);
+}
+.settings-route-choice {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+}
+.settings-route-opt {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--text-secondary);
+  font: inherit;
+  cursor: pointer;
+}
+.settings-route-opt.on {
+  color: var(--accent);
+  font-weight: 500;
 }
 .settings-error {
   color: var(--status-negative);

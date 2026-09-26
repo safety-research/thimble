@@ -41,14 +41,15 @@ def _body(result) -> str:
 # The tool set, pinned on purpose: a new tool, or a tool renamed or removed, updates this list and its tests.
 MERGED = ["read_ref", "list_cards", "add_card", "edit_card", "delete_card", "apply_label", "show_label", "set_filter",
           "clear_filter", "set_layout", "propose_view", "write_document", "edit_document", "add_comment", "resolve_comment",
-          "reply_in_thread", "rename_thread", "delete_thread", "screenshot", "start_orientation", "start_writing", "critique", "message_orientation",
-          "run_check", "stop_check", "file_dev_ticket"]
+          "reply_in_thread", "message_thread", "wait_session", "list_agents", "rename_thread", "delete_thread", "screenshot",
+          "start_orientation", "start_writing", "critique", "message_orientation", "run_check", "stop_check", "file_dev_ticket"]
 # what main lists: the merged set less critique, the orientation's check of its own analysis, which its session alone
 # lists (critique_session.py)
 MAIN = [n for n in MERGED if n != "critique"]
-# message_orientation, run_check, stop_check, resolve_comment, rename_thread, delete_thread and set_layout are main's
-# alone, add_comment main's and a check's run's (comments.py), critique the orientation's alone
-MAIN_ONLY = ("message_orientation", "run_check", "stop_check", "resolve_comment", "rename_thread", "delete_thread", "set_layout")
+# message_orientation, run_check, stop_check, resolve_comment, message_thread, rename_thread, delete_thread and
+# set_layout are main's alone, add_comment main's and a check's run's (comments.py), critique the orientation's alone
+MAIN_ONLY = ("message_orientation", "run_check", "stop_check", "resolve_comment", "message_thread", "rename_thread", "delete_thread",
+             "set_layout", "wait_session", "list_agents")
 OTHERS = [n for n in MAIN if n not in (*MAIN_ONLY, "add_comment")]
 # the retired names of the card tools and start_orientation: a call by one still reaches the tool, no listing shows it
 RENAMED = {"add_cell": "add_card", "edit_cell": "edit_card", "delete_cell": "delete_card", "list_cells": "list_cards",

@@ -24,6 +24,9 @@ from typing import Any, Mapping, NamedTuple
 from . import procs
 
 ENV = "THIMBLE_CHANNEL"  # the explicit signal: the launcher exports it (plugin/bin/thimble)
+# how Claude Code marks the environment of a background session it runs from its daemon, such as the copy of a session
+# its agent view makes on ←; the daemon's environment, and so the copy's, can hold ENV from the session that started it
+BG_KIND_ENV, BG_KIND = "CLAUDE_CODE_SESSION_KIND", "bg"
 PLUGIN = "thimble"
 SOURCE = "plugin:thimble:thimble"  # the `source` of the plugin server's channel events, as Claude Code shows them
 INLINE = "inline"  # the marketplace Claude Code gives a plugin loaded with --plugin-dir
@@ -120,9 +123,11 @@ def claude_pid(environ: Mapping[str, str] | None = None) -> int | None:
 
 def flags(pid: int | None, root: Path, environ: Mapping[str, str] | None = None) -> set[str]:
     """The flags that name the channel of the plugin copy at `root` on the command line of the `claude` process `pid`
-    (module note); THIMBLE_CHANNEL counts as the development flag, which the launcher passes."""
+    (module note); THIMBLE_CHANNEL counts as the development flag, which the launcher passes, except in a background
+    session of Claude Code's (BG_KIND_ENV), which inherits it without the flag: there the command line alone counts, so
+    such a copy of main never claims main's place on the channel."""
     env = os.environ if environ is None else environ
-    if env.get(ENV):
+    if env.get(ENV) and env.get(BG_KIND_ENV) != BG_KIND:
         return {DEV_FLAG}
     if pid is None:
         return set()

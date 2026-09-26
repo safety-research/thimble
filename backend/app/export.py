@@ -345,9 +345,11 @@ def _sessions(w: Writer, ws: Path, chats: list[dict[str, Any]], tickets: list[di
                     entry["agent_id"] = m.group(1)
                     meta = _read_json(p.with_name(f"agent-{m.group(1)}.meta.json"))
                     fork = threads.FORK_DESCRIPTION_RE.match(str(meta.get("description") or "")) if isinstance(meta, dict) else None
-                    # A thread's fork is described `thread:<id>` (threads.FORK_DESCRIPTION), which names its thread even
-                    # when the thread's meta no longer lists it.
-                    entry["chat"] = agents.get(m.group(1)) or (fork.group(1) if fork else None)
+                    # A thread's fork is described `thread:<fork name>` or `thread:<id>` (threads.FORK_DESCRIPTION_RE),
+                    # which names its thread even when the thread's meta no longer lists it.
+                    named = fork.group(1) if fork else None
+                    by_name = {str(c.get(threads.FORK_NAME_KEY)): str(c["id"]) for c in chats if c.get(threads.FORK_NAME_KEY)}
+                    entry["chat"] = agents.get(m.group(1)) or (by_name.get(named, named) if named else None)
                     if isinstance(meta, dict):
                         entry["meta"] = meta
                 if "/workflows/" in f"/{rel}":

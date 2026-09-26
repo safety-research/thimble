@@ -27,7 +27,11 @@ router = APIRouter()
 
 # GET /settings layers these under what the file stores (tools.RESULT_LINES_KEY: lines of each output a card's result
 # shows).
-SETTINGS_DEFAULTS: dict[str, Any] = {"run_cell_result_lines": 40}
+# terminal_first: the orientation runs as a subagent of the analyst's session (orientation.terminal_first); hide_chat:
+# the browser shows no chat column, only a dock (frontend shell/Shell)
+# orient_route: in terminal-first mode the orientation runs as a subagent or as a background session (bg_session)
+SETTINGS_DEFAULTS: dict[str, Any] = {"run_cell_result_lines": 40, "terminal_first": False, "hide_chat": False,
+                                     "orient_route": "subagent"}
 
 
 # --------------------------------------------------------------------------- plain-file helpers
@@ -240,6 +244,10 @@ def put_settings(c: str, settings: dict[str, Any] = Body(...)) -> dict[str, Any]
             role: {**held[role], **conf} if isinstance(conf, dict) and isinstance(held.get(role), dict) else conf
             for role, conf in settings[config.MODELS_KEY].items()}}
     write_json(path, merged)
+    if "terminal_first" in settings:
+        from . import bg_session  # noqa: PLC0415 — bg_session imports this module
+
+        bg_session.sync_statusline(c)
     return with_features(merged, c)
 
 

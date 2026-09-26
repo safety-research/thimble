@@ -62,6 +62,19 @@ describe('the requests and their words', () => {
     expect(askThread({ chat: 'main', request: req('x', { chat: 't1' }) })).toBe('t1')
   })
 
+  test("a subagent of main, which the tree does not list, asks as main's agent, and the orientation's as its agent", () => {
+    const helper = chat('s1', { role: 'subagent', title: 'owner lookup' })
+    const orientHelper = chat('s2', { role: 'subagent', title: 'rdap lookups', parent: 'or1' })
+    const metas = new Map([...METAS, [helper.id, helper], [orientHelper.id, orientHelper]])
+    const labels = new Map([['main', 'main'], ['or1', 'orient']])
+    const ask = (id: string): PendingAsk => ({ chat: 'main', request: req('x', { chat: id }) })
+    expect(askedBy(ask('s1'), metas, labels)).toBe('Main\'s agent “owner lookup”')
+    expect(askThread(ask('s1'), metas, labels)).toBe('main')
+    expect(askedBy(ask('s2'), metas, labels)).toBe("The orientation's agent “rdap lookups”")
+    expect(askThread(ask('s2'), metas, labels)).toBe('or1')
+    expect(askedBy(ask('or1'), metas, labels)).toBe('The orientation')
+  })
+
   test('what it asks to do, by the tool; the agent that asked when a subagent did', () => {
     expect(asksTo('Bash')).toBe('run a command')
     expect(asksTo('Write')).toBe('write a file')

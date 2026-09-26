@@ -28,8 +28,14 @@ export function pendingRequests(main: Pick<ChatMeta, 'permissions'> | null | und
 
 /** The thread a request comes from, which the card's head names: the thread of main whose agent asked (main's
  * request that names it), else the chat of the session that asked, main for main's own. Pure. */
-export function askThread(ask: PendingAsk): string {
-  return ask.chat === 'main' ? ask.request.chat || 'main' : ask.chat
+export function askThread(ask: PendingAsk, metas?: ReadonlyMap<string, ChatMeta>, labels?: ReadonlyMap<string, string>): string {
+  if (ask.chat !== 'main') return ask.chat
+  const id = ask.request.chat
+  const m = id ? metas?.get(id) : undefined
+  if (!id || !m || labels?.has(id) || threadKind(m) != null) return id || 'main'
+  // a subagent of main, which the thread tree does not list: the orientation it works for, else main
+  const parent = m.parent ? metas?.get(m.parent) : undefined
+  return parent && threadKind(parent) === 'orient' ? parent.id : 'main'
 }
 
 /** What a call of each tool asks to do, as the card's head says it (asks to run a command). */
@@ -58,8 +64,15 @@ export function asksTo(tool: string): string {
  * orientation, its critique, the report writer, a report check. `labels` names each chat as the thread tree does. Pure. */
 export function askedBy(ask: PendingAsk, metas: ReadonlyMap<string, ChatMeta>, labels: ReadonlyMap<string, string> = new Map()): string {
   if (ask.chat === 'main') {
-    const from = ask.request.chat ? labels.get(ask.request.chat) : null
-    return from && from !== 'main' ? `The thread ${from}` : 'Your Claude Code session'
+    const id = ask.request.chat
+    const from = id ? labels.get(id) : null
+    if (from && from !== 'main') return from === 'orient' || from.startsWith('orient-') ? 'The orientation' : `The thread ${from}`
+    // a subagent of main, or one the orientation subagent started, which the tree does not list
+    const m = id ? metas.get(id) : undefined
+    if (!m || from === 'main') return 'Your Claude Code session'
+    const parent = m.parent ? metas.get(m.parent) : undefined
+    const title = (m.title || 'agent').trim()
+    return parent && threadKind(parent) === 'orient' ? `The orientation's agent “${title}”` : `Main's agent “${title}”`
   }
   const m = metas.get(ask.chat)
   const kind = m ? threadKind(m) : null

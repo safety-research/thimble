@@ -243,6 +243,82 @@ def _clear_env_key(cwd: Path, key: str, overrides_file: str) -> bool:
     return True
 
 
+STATUSLINE_FILE = "statusline-overrides.json"  # in thimble's home: {folder: {ours, previous}} (set_statusline)
+STATUSLINE_REFRESH_S = 2
+
+
+def own_statusline(cwd: Path) -> str:
+    """The statusline command the analyst's own settings give for a session in `cwd`, thimble's aside: the most specific
+    settings file's; '' for none."""
+    ours = _statuslines().get(_key(cwd), {})
+    for path in reversed(sources(cwd)):
+        line = _read(path).get("statusLine")
+        cmd = line.get("command") if isinstance(line, dict) else None
+        if path == cwd / LOCAL_SETTINGS and ours:
+            cmd = (ours.get("previous") or {}).get("command") if isinstance(ours.get("previous"), dict) else None
+        if isinstance(cmd, str) and cmd.strip():
+            return cmd
+    return ""
+
+
+def _statuslines() -> dict[str, Any]:
+    try:
+        d = json.loads((_thimble_home() / STATUSLINE_FILE).read_text("utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return d if isinstance(d, dict) else {}
+
+
+def _write_statuslines(d: dict[str, Any]) -> None:
+    path = _thimble_home() / STATUSLINE_FILE
+    path.parent.mkdir(parents=True, exist_ok=True)
+    atomic_write_text(path, json.dumps(d, indent=1))
+
+
+def set_statusline(cwd: Path, command: str) -> None:
+    """Make `command` the statusline of sessions in `cwd`, by `statusLine` in the folder's local settings, and remember
+    what that key held before, which clear_statusline puts back."""
+    path = cwd / LOCAL_SETTINGS
+    d = _read(path)
+    line = {"type": "command", "command": command, "refreshInterval": STATUSLINE_REFRESH_S}
+    if d.get("statusLine") == line:
+        return
+    kept = _statuslines()
+    prev = kept.get(_key(cwd), {}).get("previous") if _key(cwd) in kept else d.get("statusLine")
+    d["statusLine"] = line
+    path.parent.mkdir(parents=True, exist_ok=True)
+    atomic_write_text(path, json.dumps(d, indent=2) + "\n")
+    kept[_key(cwd)] = {"ours": command, "previous": prev}
+    _write_statuslines(kept)
+
+
+def clear_statusline(cwd: Path) -> bool:
+    """Put back the folder's own `statusLine` in place of thimble's, when thimble's is still there; True when it did."""
+    kept = _statuslines()
+    rec = kept.pop(_key(cwd), None)
+    if rec is None:
+        return False
+    _write_statuslines(kept)
+    path = cwd / LOCAL_SETTINGS
+    d = _read(path)
+    line = d.get("statusLine")
+    if not isinstance(line, dict) or line.get("command") != rec.get("ours"):
+        return False
+    if rec.get("previous"):
+        d["statusLine"] = rec["previous"]
+    else:
+        d.pop("statusLine", None)
+    try:
+        if d:
+            atomic_write_text(path, json.dumps(d, indent=2) + "\n")
+        else:
+            path.unlink()
+    except OSError as e:
+        log.warning("could not put back the statusline in %s: %s", path, e)
+        return False
+    return True
+
+
 def clear_override(cwd: Path) -> bool:
     """Remove the effort and fast-mode keys thimble wrote into the folder's local settings (_clear_env_key), before a
     new session starts; True when either was removed."""

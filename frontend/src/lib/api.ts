@@ -174,6 +174,8 @@ export const api = {
   /** Start a session that is waiting to retry after the API was at capacity (agent_session.retry_route); 404 when it is
      * not waiting. */
   retrySession: (c: string, chat: string) => j<{ retrying: string }>(`${ws(c)}/chats/${enc(chat)}/retry`, { method: 'POST' }),
+  /** a stopped background session's Resume (backend agent_session.resume_chat) */
+  resumeSession: (c: string, chat: string) => j<{ resumed: string; run: number }>(`${ws(c)}/chats/${enc(chat)}/resume`, { method: 'POST' }),
   /** Change the permission mode of the running session whose chat is `chat` (the orientation's card): Manual and
    * Bypass at once, Auto and out of it once the session has paused and resumed (agent_session.mode_route); 404 when
    * no session runs for it, 409 when it has no mode of its own. */

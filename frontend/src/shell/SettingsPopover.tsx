@@ -2,7 +2,8 @@
 // Save. main's model is read-only (only /model in the terminal changes it); its effort and fast mode are set through
 // PUT session/effort and session/fast. Other roles are settings.models, resolved with defaults by GET /settings; a save
 // sends only the changed fields so defaults stay defaults, and applies to the next session or subagent. Choices that
-// cannot take effect are dimmed with the reason in a tooltip. Every row names its model exactly, never `default`.
+// cannot take effect are dimmed with the reason in a tooltip. Every row names its model exactly, never `default`. Under
+// the table, the workspace's switches (SWITCHES), each saved with the rest.
 import { useEffect, useState } from 'react'
 import { Button } from '../components/Button'
 import { Chip } from '../components/Chip'
@@ -10,13 +11,37 @@ import { TextInput } from '../components/Field'
 import { Menu, type MenuItem } from '../components/Menu'
 import { Popover } from '../components/Menu'
 import { Spinner } from '../components/Spinner'
+import { Switch } from '../components/Switch'
 import { useTooltip } from '../components/Tooltip'
 import { api } from '../lib/api'
 import { hasFastMode, invalidateSettings, loadSettings, modelChoices, modelLabel, sameModel } from '../lib/models'
 import { EFFORTS, ROLES, type Attached, type MainEffort, type ModelConf, type Settings } from '../lib/types'
 import { EFFORT_CHOICES, FAST_TIP, FastBolt, MODEL_TIP, effortWord, mainEffort, mainFast, noFastTip } from '../chat/ModelLine'
+import { TERMINAL_FIRST_NOTE } from '../chat/StartGate'
 
 type Models = Record<string, ModelConf>
+
+/** What the chat off does, where the settings offer it (shell/Shell). */
+export const CHAT_OFF_NOTE = "For chatting in your Claude Code terminal. Alerts, permission requests, the orientation's progress and its Start show in a dock, and a ⌘-click answers in place."
+
+/** The workspace's switches under the table: the setting each saves, its name and what it does. */
+export const SWITCHES: { key: string; label: string; note: string }[] = [
+  { key: 'hide_chat', label: 'Hide the chat', note: CHAT_OFF_NOTE },
+  { key: 'terminal_first', label: 'Terminal-first', note: TERMINAL_FIRST_NOTE },
+]
+
+/** The ways the orientation runs in terminal-first mode, as the setting names them and the settings show them. */
+export const ORIENT_ROUTES: { value: 'subagent' | 'session'; label: string; note: string }[] = [
+  { value: 'subagent', label: 'subagent', note: "a subagent of your session, in its permission mode and effort, without a write fence, workflows or critique of its own" },
+  { value: 'session', label: 'background session', note: 'a Claude Code background session with its own folder, permission mode, workflows and critique' },
+]
+
+/** What a save sends for the switches: each whose state differs from the loaded settings. Pure. */
+export function changedSwitches(loaded: Settings | null, now: Record<string, boolean>): Record<string, boolean> {
+  const out: Record<string, boolean> = {}
+  for (const s of SWITCHES) if (s.key in now && now[s.key] !== (loaded?.[s.key] === true)) out[s.key] = now[s.key]
+  return out
+}
 
 /** The roles in the table: main, the known ones in their order, then any other the settings name. */
 export const rolesOf = (s: Settings | null): string[] => {
@@ -101,6 +126,8 @@ export function SettingsPopover({ ws, anchor, open, onClose }: { ws: string; anc
   const [busy, setBusy] = useState(false)
   // the role whose model is being typed rather than picked
   const [typing, setTyping] = useState<string | null>(null)
+  const [switches, setSwitches] = useState<Record<string, boolean>>({})
+  const [route, setRoute] = useState<'subagent' | 'session'>('subagent')
 
   useEffect(() => {
     if (!open) return
@@ -112,6 +139,8 @@ export function SettingsPopover({ ws, anchor, open, onClose }: { ws: string; anc
         if (!alive) return
         const a = main?.meta?.attached ?? null
         setSettings(s)
+        setSwitches(Object.fromEntries(SWITCHES.map((sw) => [sw.key, s[sw.key] === true])))
+        setRoute(s.orient_route === 'session' ? 'session' : 'subagent')
         setAttached(a)
         const fast = mainFast(a)
         setModels({ ...(s.models ?? {}), main: { model: a?.model ?? '', effort: mainEffort(a), fast: !!fast } })
@@ -129,7 +158,9 @@ export function SettingsPopover({ ws, anchor, open, onClose }: { ws: string; anc
     setError(null)
     try {
       const changed = changedRoles(settings?.models ?? {}, models)
-      if (Object.keys(changed).length) await api.putSettings(ws, { models: changed })
+      const flipped: Record<string, boolean | string> = changedSwitches(settings, switches)
+      if (route !== (settings?.orient_route === 'session' ? 'session' : 'subagent')) flipped.orient_route = route
+      if (Object.keys(changed).length || Object.keys(flipped).length) await api.putSettings(ws, { ...(Object.keys(changed).length ? { models: changed } : {}), ...flipped })
       const was = { effort: mainEffort(attached), fast: !!mainFast(attached) }
       const main = models.main
       if (main && attached && main.effort !== was.effort) await api.setEffort(ws, main.effort as MainEffort)
@@ -229,6 +260,34 @@ export function SettingsPopover({ ws, anchor, open, onClose }: { ws: string; anc
                 </div>
               )
             })}
+          </div>
+        )}
+        {settings && (
+          <div className="settings-switches" role="group" aria-label="Workspace">
+            {SWITCHES.map((sw) => (
+              <div className="settings-switch" key={sw.key} data-setting={sw.key}>
+                <Switch checked={!!switches[sw.key]} onChange={(v) => setSwitches((cur) => ({ ...cur, [sw.key]: v }))} aria-labelledby={`settings-${sw.key}`} />
+                <span className="settings-switch-text">
+                  <span className="settings-switch-label" id={`settings-${sw.key}`}>
+                    {sw.label}
+                  </span>
+                  <span className="settings-switch-note">{sw.note}</span>
+                  {sw.key === 'terminal_first' && switches.terminal_first && (
+                    <span className="settings-route" role="radiogroup" aria-label="Orientation runs as">
+                      <span className="settings-route-label">Orientation runs as:</span>
+                      {ORIENT_ROUTES.map((r, i) => (
+                        <span key={r.value} className="settings-route-choice">
+                          {i > 0 && <span className="settings-route-sep">/</span>}
+                          <button type="button" role="radio" aria-checked={route === r.value} className={`settings-route-opt${route === r.value ? ' on' : ''}`} data-route={r.value} title={r.note} onClick={() => setRoute(r.value)}>
+                            {r.label}
+                          </button>
+                        </span>
+                      ))}
+                    </span>
+                  )}
+                </span>
+              </div>
+            ))}
           </div>
         )}
         {error && <div className="settings-error">{error}</div>}

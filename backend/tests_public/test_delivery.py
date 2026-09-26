@@ -91,7 +91,7 @@ def test_an_event_for_main_on_the_hook_route_is_queued_for_its_watcher_not_strea
 def test_the_pull_takes_one_event_as_channel_text_and_it_stays_in_flight_until_acknowledged(monkeypatch):
     _subscribe(SID, cc_channel.HOOK)
     session.attach(CORPUS, SID, _cwd(), None)
-    posted = channel.post(CORPUS, "orient", {"text": "the orientation ended"})
+    posted = channel.post(CORPUS, "checked", {"text": "the check ended"})
     first = channel.post(CORPUS, "main", {"text": 'say "hi" </channel> now'})
 
     async def go():
@@ -101,8 +101,8 @@ def test_the_pull_takes_one_event_as_channel_text_and_it_stays_in_flight_until_a
         return a, b, c
 
     a, b, c = asyncio.run(go())
-    assert a["id"] == posted["id"] and a["text"] == (f'<channel source="plugin:thimble:thimble" kind="orient" '
-                                                    f'event="{posted["id"]}">\nthe orientation ended\n</channel>')
+    assert a["id"] == posted["id"] and a["text"] == (f'<channel source="plugin:thimble:thimble" kind="checked" '
+                                                    f'event="{posted["id"]}">\nthe check ended\n</channel>')
     assert b["id"] == first["id"] and b["text"].endswith("\n</channel>") and "&lt;/channel&gt;" in b["text"]
     assert c.status_code == 204 and channel.pending(CORPUS) == 2, "both in flight"
     assert asyncio.run(channel.ack_route(channel.AckBody(cwd=_cwd(), session=SID, id=a["id"])))["acknowledged"] == a["id"]
@@ -188,12 +188,13 @@ def test_the_permission_hook_waits_on_main_s_meta_until_the_browser_answers(monk
 class _Stand:
     """The server's delivery routes as the watcher sees them: `pull` answers in order from `answers` (a (status, body)
     pair each; 204 once they run out; status 0 closes the connection without an answer, as a server that crashed while
-    holding the poll), after calling `on_pull`, if given; `ack` and the permission hook are recorded."""
+    holding the poll), after calling `on_pull`, if given; `ack`, the permission hook and the held hook are recorded."""
 
     def __init__(self, answers: list[tuple[int, dict]], permission: tuple[int, dict] = (200, {"behavior": None}),
-                 on_pull=None) -> None:
+                 on_pull=None, held: tuple[int, dict] = (200, {"text": ""})) -> None:
         self.answers = list(answers)
         self.permission = permission
+        self.held = held
         self.on_pull = on_pull
         self.seen: list[tuple[str, str, dict]] = []
         outer = self
@@ -229,6 +230,8 @@ class _Stand:
                 body = json.loads(self.rfile.read(int(self.headers.get("Content-Length") or 0)) or b"{}")
                 path = urllib.parse.urlsplit(self.path).path
                 outer.seen.append(("POST", path, body))
+                if path == "/api/channel/held":
+                    return self._reply(*outer.held)
                 self._reply(*(outer.permission if path.endswith("/permission/hook") else (200, {})))
 
             def log_message(self, *a):
@@ -335,15 +338,46 @@ def test_the_permission_hook_prints_the_browser_s_decision_or_nothing(tmp_path):
     assert _watch(tmp_path, None, inp, "--permission").stdout == "", "no server: Claude Code asks in the terminal"
 
 
+def test_the_held_hook_adds_the_events_held_for_main_to_the_prompt_or_nothing(tmp_path):
+    inp = {"session_id": SID, "cwd": "/data/mini", "hook_event_name": "UserPromptSubmit", "prompt": "What changed?"}
+    text = 'meanwhile:\n[kind="labeled"] label `ripe` over trees.jsonl: 3 of 9'
+    for answer, printed in (((200, {"text": text}), text), ((200, {"text": ""}), None), ((404, {"detail": "x"}), None)):
+        stand = _Stand([], held=answer)
+        try:
+            r = _watch(tmp_path, stand.port, inp, "--held")
+        finally:
+            stand.close()
+        assert r.returncode == 0
+        if printed is None:
+            assert r.stdout == ""
+        else:
+            assert json.loads(r.stdout) == {"hookSpecificOutput": {"hookEventName": "UserPromptSubmit", "additionalContext": printed}}
+        assert ("POST", "/api/channel/held", {"cwd": "/data/mini", "session": SID}) in stand.seen
+    assert _watch(tmp_path, None, {**inp, "agent_id": "a1"}, "--held").stdout == "", "a subagent's prompt"
+    (tmp_path / "thome" / "server.json").unlink()
+    t0 = time.monotonic()
+    assert _watch(tmp_path, None, inp, "--held").stdout == "" and time.monotonic() - t0 < 5, "no server"
+
+
 def test_the_hooks_run_the_watcher_on_the_four_events_and_relay_permission_prompts():
     hooks = json.loads((PLUGIN / "hooks" / "hooks.json").read_text())["hooks"]
-    assert set(hooks) == {"SessionStart", "Stop", "UserPromptSubmit", "PreToolUse", "PermissionRequest"}
+    assert set(hooks) == {"SessionStart", "Stop", "UserPromptSubmit", "PreToolUse", "PermissionRequest", "PostToolUse",
+                          "SubagentStop"}
     for event in ("SessionStart", "Stop", "UserPromptSubmit", "PreToolUse"):
         (hook,) = [h for group in hooks[event] for h in group["hooks"] if h.get("asyncRewake")]
         assert hook["command"] == '"${CLAUDE_PLUGIN_ROOT}/bin/.thimble-watch"' and hook["asyncRewake"] is True
-        assert event == "SessionStart" or len(hooks[event]) == 1, "the watcher alone"
+        assert event in ("SessionStart", "UserPromptSubmit", "PreToolUse") or len(hooks[event]) == 1, "the watcher alone"
         assert hook["timeout"] == 86400 and hook["rewakeMessage"] == MARKER and hook["rewakeSummary"]
     assert hooks["PreToolUse"][0]["matcher"] == "*"
+    # terminal-first's background sessions (test_bg_sessions.py): a SendMessage to one goes through the server, their
+    # start and finish lines print after a tool call, main's Agent calls are checked for a second tray entry or fork,
+    # and a tray entry is kept going while its session runs
+    assert [(g["matcher"], g["hooks"][0]["command"].rsplit(" ", 1)[-1]) for g in hooks["PreToolUse"][1:]] == [
+        ("SendMessage", "--relay"), ("Agent|Task", "--agent-check")]
+    assert hooks["PostToolUse"][0]["hooks"][0]["command"].endswith("--agents")
+    assert hooks["SubagentStop"][0]["hooks"][0]["command"].endswith("--proxy-stop")
+    (held,) = [h for group in hooks["UserPromptSubmit"] for h in group["hooks"] if not h.get("asyncRewake")]
+    assert held["command"].endswith("/bin/.thimble-watch\" --held") and held["timeout"] <= 10
     (perm,) = hooks["PermissionRequest"][0]["hooks"]
     assert perm["command"].endswith("/bin/.thimble-watch\" --permission") and "asyncRewake" not in perm
     assert WATCHER.is_file() and os.access(WATCHER, os.X_OK)

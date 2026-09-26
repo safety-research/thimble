@@ -205,8 +205,9 @@ def test_a_foreground_subagent_is_a_task_row_that_ends_with_the_report_it_handed
 def test_a_fork_s_tool_calls_land_in_its_thread_and_its_agent_id_on_the_thread(cwd, tmp_path):
     """A thread's event reaches main as a channel record, and main forks with the Agent tool and the description
     `thread:<id>`, which is no row in main. The fork's transcript is matched to the thread by that description: its tool
-    calls go into the thread's chat (never its text, the ToolSearch that loaded a tool or its reply_in_thread call), the
-    thread's meta keeps its agent id and session, and the run ends at the fork's task notification."""
+    calls and its text go into the thread's chat (never the ToolSearch that loaded a tool or its reply_in_thread call,
+    whose text the tool writes), the thread's meta keeps its agent id and session, and the run ends at the fork's task
+    notification."""
     tid, event, use, agent = "2b99eda7", "e7", "toolu_fork1", "a1f2e3d4c5b6a7980"
     reply = "mcp__plugin_thimble_thimble__reply_in_thread"
     _thread(tid)
@@ -241,7 +242,7 @@ def test_a_fork_s_tool_calls_land_in_its_thread_and_its_agent_id_on_the_thread(c
     assert meta["fork"]["agent_id"] == agent and meta["fork"]["session"] == SID
     ev = _log(tid)
     assert [e["name"] for e in ev if e["type"] == "tool_use"] == ["mcp__plugin_thimble_thimble__read_ref"]
-    assert [e["delta"] for e in ev if e["type"] == "text"] == ["agent-01 claimed #7160."], "the fork's own text is not the thread's"
+    assert [e["delta"] for e in ev if e["type"] == "text"] == ["Looking at the event.", "agent-01 claimed #7160."]
     assert not agents._running(CORPUS, tid) and all(s.done for s in lv.subs)
 
 
@@ -867,13 +868,15 @@ def test_nothing_is_detached_while_the_server_is_stopping(cwd, tmp_path):
 
 
 def test_push_event_sends_when_a_session_listens_and_says_so_when_none_does(cwd):
-    assert session.push_event(CORPUS, "view", "Build the Page boards view.", view="page-boards") is False
+    assert session.push_event(CORPUS, "checked", "Unverified: 2 comments.", check="unverified") is False
     q: asyncio.Queue = asyncio.Queue()
     channel._subs[CORPUS] = {q}
-    assert session.push_event(CORPUS, "view", "Build the Page boards view.", view="page-boards") is True
+    assert session.push_event(CORPUS, "checked", "Unverified: 2 comments.", check="unverified") is True
     note = q.get_nowait()
-    assert note["content"] == "Build the Page boards view." and note["meta"]["kind"] == "view" and note["meta"]["view"] == "page-boards"
+    assert note["content"] == "Unverified: 2 comments." and note["meta"]["kind"] == "checked" and note["meta"]["check"] == "unverified"
     assert agents._running(CORPUS, agents.MAIN_ID), "main runs until the turn the event opens ends"
+    assert session.push_event(CORPUS, "view", "Build the Page boards view.", view="page-boards") is True
+    assert q.empty(), "a built view waits for the next event (test_terminal_tools.py)"
 
 
 def test_an_event_that_reaches_a_busy_turn_between_tool_calls_is_handled_in_that_turn(cwd, tmp_path):

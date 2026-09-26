@@ -66,8 +66,15 @@ Safeguards. When a safety classifier stopped a response (`stop_reason: refusal`)
 it, the session runs again once on FALLBACK_MODEL with `## session-model-fallback`; the earlier result is kept
 (with_earlier).
 
+Background sessions. In terminal-first mode a caller may pass `background`: the session then runs as a Claude Code
+background session (bg_session.py), which the analyst can attach to and message. Its process outlives a run, so a run
+ends when the session is idle, and a later turn of the session is a new run of its chat (bg_session.on_wake). A resume
+reaches a running session in place rather than with `--resume`, and a retry sends its prompt the same way. A permission
+prompt answered in the session's own terminal ends the card's wait once the call's result shows in its transcript.
+
 Restart. The server's stop ends every process; a session whose caller can resume it is left running in its chat for
-the next server (_suspend), any other fails. At start, recover ends processes a dead server left, then resumes each run
+the next server (_suspend), any other fails. A background session is left running, and the next server follows it again
+(bg_session.recover). At start, recover ends processes a dead server left, then resumes each run
 through its caller (on_resume) with `## session-restarted`, or closes it (on_left). Ends main did not hear are kept
 (UNHEARD_FILE) and posted once a session listens (tell_main, deliver_unheard).
 """
@@ -93,8 +100,8 @@ from typing import Any, Awaitable, Callable
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-from . import (agents, calls as calls_store, cc_settings, config, orientation, permission_hook, procs, retry,
-               sandbox_allow, session, tools)
+from . import (agents, bg_session, calls as calls_store, cc_settings, config, orientation, permission_hook, procs,
+               retry, sandbox_allow, session, tools)
 
 log = logging.getLogger("thimble.agent_session")
 router = APIRouter()
@@ -144,6 +151,10 @@ MODE_PROMPT = "session-mode-changed"
 MODE_STOPPED = "session-mode-stopped"
 MODE_SWITCHING = "session-mode-switching"  # the deny of a request answered so the session can pause for a switch
 SWITCHING = "switching"  # the answer a waiting request gets when a switch pauses the session (_release)
+ELSEWHERE = "elsewhere"  # the answer of a background session's request the analyst answered in its terminal
+ELSEWHERE_LINE = "Answered in the session's own terminal."
+# the alert of a background session's chat whose process stopped (a crash, a kill, `claude stop`), which offers Resume
+STOPPED_ALERT = {"kind": "stopped", "text": "The background session stopped. Resume starts it again with its conversation."}
 # the answers that allow a request with the "don't ask again" updates Claude Code suggested for it, and a waiting one
 # those updates cover (module note, don't ask again)
 ALWAYS, COVERED = "always", "covered"
@@ -223,6 +234,7 @@ LAUNCHED_AGENT_RE = re.compile(r"\bagentId:\s*(\w+)")  # in a background Agent c
 LAUNCHED_TASK_RE = re.compile(r"\bTask ID:\s*(\S+)")  # in a Workflow call's result
 RESUMED_AGENT_RE = re.compile(r'"resumedAgentId"\s*:\s*"(\w+)"')  # in a SendMessage's result that continued an agent
 TASK_ID_RE = re.compile(r"<task-id>\s*(.*?)\s*</task-id>", re.S)  # a notification may name several tasks
+MOVED_TASK_RE = re.compile(r"\bmoved to the background as task (\w+)")  # a long call Claude Code let run on
 
 
 def _now() -> str:
@@ -314,9 +326,30 @@ class Run:
     suspended: bool = False  # the server's stop left it for the next server to resume (module note, restart)
     # by transcript path: [bytes read, the partial line, the models its replies came from, in order] (_note_models)
     models: dict[str, list] = field(default_factory=dict)
+    bg: bool = False  # a Claude Code background session (module note, background sessions)
+    # request id -> the call it asks about (channel.call_key), which its result in the transcript answers
+    ask_keys: dict[str, tuple[str, str]] = field(default_factory=dict)
 
 
 _runs: dict[tuple[str, str], Run] = {}  # by (workspace, key): the sessions that run
+# by (workspace, key): the start arguments of a background session's last run, for a turn it starts on its own
+# (bg_session.on_wake, revive)
+_launches: dict[tuple[str, str], dict[str, Any]] = {}
+# by the kind of a background session's key: its caller's rebuild of those arguments from its chat's meta, for a
+# session this server did not start (on_relaunch)
+_relaunchers: dict[str, Callable[[str, dict[str, Any]], dict[str, Any]]] = {}
+
+
+def on_relaunch(kind: str, fn: Callable[[str, dict[str, Any]], dict[str, Any]]) -> None:
+    """Have `fn(c, meta)` rebuild the start arguments of a background session of `kind` whose chat's meta is `meta`,
+    for a turn it starts after a server restart and for its Resume."""
+    _relaunchers[kind] = fn
+
+
+def _launch_kw(c: str, key: str, meta: dict[str, Any]) -> dict[str, Any] | None:
+    kw = _launches.get((c, key))
+    fn = _relaunchers.get(bg_session.kind_of(key)) if kw is None else None
+    return fn(c, meta) if fn is not None else kw
 
 
 def current(c: str, key: str | None) -> Run | None:
@@ -536,15 +569,19 @@ async def start(c: str, key: str, *, role: str, title: str, agent_args: list[str
                 on_mode: Callable[[Run], None] | None = None, unasked: bool = False, call: str | None = None,
                 resume: str | None = None, chat: str | None = None, run_k: int = 0,
                 leads: "list[dict[str, Any]] | None" = None, announce: bool = True,
-                on_pid: Callable[[Run], None] | None = None, restarted: bool = False, **fields: Any) -> Run:
+                on_pid: Callable[[Run], None] | None = None, restarted: bool = False, background: bool = False,
+                **fields: Any) -> Run:
     """Start the session `key` for workspace `c` with its first message and follow it into an agent chat of `role` under
     `parent`; RuntimeError when it runs already or claude cannot be started. `on_start`/`on_end` hear the run's start and
     end; `mode`, `mode_owner`, `patient` and `on_mode` govern permissions; `work` and `unasked` fence it; `calls` numbers its
     calls; `resume`, `chat`, `run_k` and `leads` continue an earlier session; `restarted` marks a resume after a server
     restart; `call` is main's tool call that started it; `announce` False writes no row into the parent chat; `on_pid` hears
-    each process change; `fields` land on the chat's meta."""
+    each process change; `background` runs it as a Claude Code background session (module note); `fields` land on the
+    chat's meta."""
     if running(c, key):
         raise RuntimeError(f"the session {key} is running")
+    if resume and chat and (agents.meta_or_none(c, chat) or {}).get("background"):
+        background = True  # a chat that ran as a background session keeps its session
     cwd = config.corpus_dir(c)
     folder = work if work is not None else cwd  # where the process runs (module note, the fence)
     sid = resume or str(uuid.uuid4())
@@ -577,22 +614,46 @@ async def start(c: str, key: str, *, role: str, title: str, agent_args: list[str
     rules = kept_rules(c, chat) if resume else []  # module note, don't ask again
     argv = with_rules(argv, rules, cwd)
     env = environ(key, extra_env)
-    proc = await _exec(argv, folder, env)
+    if background:
+        _launches[(c, key)] = {"role": role, "title": title, "agent_args": agent_args, "effort": effort,
+                               "settings": settings, "agent_type": agent_type, "on_end": on_end, "append_shared": append_shared,
+                               "parent": parent, "model": model, "work": work, "calls": calls, "permission_mode": permission_mode,
+                               "disallowed": disallowed, "mode": mode, "mode_owner": mode_owner, "patient": patient,
+                               "on_mode": on_mode, "unasked": unasked, "on_pid": on_pid, "background": True, **fields}
+        old = bg_session.entry(c, key)
+        if old is not None and bg_session.alive(old) and old.sid != (resume or ""):
+            await asyncio.to_thread(bg_session.replace, c, key)  # a new session of the key replaces the old one
+        try:
+            proc = await bg_session.start(c, key, argv, folder, env, prompt, resume, chat or "", role)
+        finally:
+            if old is not None and old.replacing and bg_session.entry(c, key) is old:
+                old.replacing = False  # no new session took its place
+        sid = proc.session_id
+    else:
+        proc = await _exec(argv, folder, env)
     # `server`: this server's pid, the process's parent while this server follows it (_followed_elsewhere); and the
     # workspace's folder, which a copy of the workspace does not share (module note, restart)
     extra: dict[str, Any] = {"server": os.getpid(), "workspace_dir": str(config.workspace_dir(c).resolve()),
                              **({"model": model} if model else {})}
+    if background:
+        extra.update(background=True, bg=proc.short, bg_name=bg_session.name_of(key))
     if mode:
         extra.update(permission_mode=mode, mode_switch=None)  # what the orientation's card switcher shows
     if resume and chat and agents.meta_or_none(c, chat) is not None:
         extra["restarted"] = {"run": run_k, "ts": _now()} if restarted else None
         meta = _reopen(c, chat, parent, run_k, pid=proc.pid, effort=effort, leads=leads or [], call=call,
-                       announce=not restarted, **extra, **fields)
+                       announce=announce and not restarted, **({"session": sid} if background else {}), **extra, **fields)
     else:
         meta = agents.new_agent(c, role, title, parent=parent, by=agents.TERMINAL, announce=announce, call=call,
                                 session=sid, pid=proc.pid, agent_type=agent_type, effort=effort, **extra, **fields)
     run = Run(c, key, str(meta["id"]), sid, cwd, role, proc=proc, pid=proc.pid, prompt=prompt, on_end=on_end, k=run_k,
-              argv=argv, env=env, folder=folder, spawned=time.monotonic(), on_pid=on_pid)
+              argv=argv, env=env, folder=folder, spawned=time.monotonic(), on_pid=on_pid, bg=background)
+    if background:
+        proc.busy = lambda: bool(run.background)
+        e = bg_session.entry(c, key)
+        if e is not None and e.chat != run.chat:
+            e.chat = run.chat
+            bg_session._save(c)
     run.calls = (run.chat if calls is True else str(calls)) if calls else None
     run.sandbox_rule, run.mode, run.mode_owner, run.patient, run.on_mode = rule, mode, mode_owner, patient, on_mode
     run.rules = rules
@@ -745,8 +806,9 @@ async def _watch(run: Run) -> None:
     """One process of the session, from its start to its exit: stdin fed, stdout and stderr read, and transcripts copied into
     the chats until the last pass after it exited. A switch into or out of Auto pauses it when quiet. A permission request
     still waiting is answered as gone."""
-    readers = [asyncio.ensure_future(_feed(run)), asyncio.ensure_future(_read_stdout(run)),
-               asyncio.ensure_future(_read_stderr(run))]
+    bg = isinstance(run.proc, bg_session.BgProc)
+    readers = [] if bg else [asyncio.ensure_future(_feed(run)), asyncio.ensure_future(_read_stdout(run)),
+                             asyncio.ensure_future(_read_stderr(run))]
     try:
         while run.proc is not None and run.proc.returncode is None:
             try:
@@ -767,6 +829,9 @@ async def _watch(run: Run) -> None:
                 await asyncio.wait_for(asyncio.shield(run.proc.wait()), POLL_S)
         with contextlib.suppress(asyncio.TimeoutError):
             await asyncio.wait_for(asyncio.gather(*readers, return_exceptions=True), 5.0)
+        if bg and isinstance(run.proc, bg_session.BgProc):
+            run.result = run.proc.result or run.result
+            run.result_error, run.api_status = run.proc.result_error, run.proc.api_status
         try:
             follow_once(run)
         except Exception:  # noqa: BLE001
@@ -1002,7 +1067,7 @@ async def _fall_back(run: Run) -> bool:
     run the session again, once, on FALLBACK_MODEL with `--resume` and `## session-model-fallback`, and say so in its thread
     and main. True when a new process runs."""
     refused = run.refused
-    if not refused or run.stopping or run.fell_back or not FALLBACK_MODEL or refused.startswith(FALLBACK_MODEL):
+    if not refused or run.stopping or run.fell_back or not FALLBACK_MODEL or refused.startswith(FALLBACK_MODEL) or run.bg:
         return False
     run.refused, run.fell_back = "", True
     run.before_fallback = "" if run.result_error else (run.result or "").strip()
@@ -1048,7 +1113,15 @@ async def _respawn(run: Run, hint: str = RETRY_PROMPT, **values: Any) -> None:
     if "--resume" in argv:
         prompt = run.nudge = tools.hint(hint, **values)
     assert run.folder is not None
-    proc = await _exec(argv, run.folder, run.env)
+    if run.bg:
+        proc = await bg_session.start(run.c, run.key, argv, run.folder, run.env, prompt, run.sid, run.chat, run.role)
+        proc.busy = lambda: bool(run.background)
+        if proc.session_id != run.sid:  # a copy under a new id
+            run.sid = proc.session_id
+            with contextlib.suppress(Exception):
+                agents.update_agent(run.c, run.chat, session=run.sid, bg=proc.short)
+    else:
+        proc = await _exec(argv, run.folder, run.env)
     run.argv, run.proc, run.prompt = argv, proc, prompt
     run.result, run.result_error, run.api_status, run.stderr = None, False, None, ""
     run.auto_off = run.refused = ""  # what ended the last process is its own
@@ -1200,6 +1273,21 @@ def _tail_main(run: Run) -> None:
             session.translate_sub(run.lv, sub, line)
         except session.Unreadable as e:
             log.warning("%s: a transcript line of session %s was skipped (%s)", run.c, run.key, e)
+    if run.bg:
+        _answered_in_terminal(run, None, session._results(sub, lines))
+
+
+def _answered_in_terminal(run: Run, agent_id: str | None, done: "list[tuple[tuple[str, str], float]]") -> None:
+    """Calls of a background session, or of its agent `agent_id`, got their results: a permission request that still
+    waits on one of them was answered in the session's own terminal, so its card's wait ends (module note, background
+    sessions). A call is matched to its request by channel.call_key, else to the one request of its tool open."""
+    for key, _at in done:
+        mine = [rid for rid, (who, tool) in run.asking.items() if who == agent_id and tool == key[0] and rid in run.waits]
+        hit = next((rid for rid in mine if run.ask_keys.get(rid) == key), mine[0] if len(mine) == 1 else None)
+        fut = run.waits.get(hit) if hit else None
+        if fut is not None and not fut.done():
+            log.info("%s: session %s: request %s was answered in its terminal", run.c, run.key, hit)
+            fut.set_result(ELSEWHERE)
 
 
 def _auto_off_of(run: Run, rec: dict) -> None:
@@ -1249,7 +1337,8 @@ def bookkeeping(rec: dict) -> bool:
 def _steps_of(run: Run, rec: dict) -> None:
     """What a line of the session's own transcript says about its steps: an Agent result ends a foreground step, a Workflow
     result names the run directory whose agents become steps, a task notification ends a background step. Launched
-    background agents and workflows are kept in run.background until a notification names them."""
+    background agents and workflows, and tool calls moved to the background, are kept in run.background until a
+    notification names them."""
     if rec.get("type") == "assistant":
         for b in session._content_list(rec):
             if isinstance(b, dict) and b.get("type") == "tool_use" and isinstance(b.get("id"), str):
@@ -1289,6 +1378,9 @@ def _steps_of(run: Run, rec: dict) -> None:
             launched = LAUNCHED_AGENT_RE.search(content)
         if launched and not b.get("is_error"):
             run.background.add(launched.group(1))
+        moved = MOVED_TASK_RE.search(content) if not launched else None
+        if moved and not b.get("is_error"):
+            run.background.add(moved.group(1))
         if name in AGENT_TOOLS and not ASYNC_RESULT_RE.match(content):
             _scan_subagents(run)
             step = _step_by(run, tool_use_id=tid)
@@ -1311,6 +1403,8 @@ def _new_step(run: Run, agent_id: str, title: str, path: Path, **fields: Any) ->
     if run.calls:
         sub.calls = calls_store.Numbering(run.c, run.calls, agent_id, at=sub.chat)
     run.steps[agent_id] = sub
+    if run.bg:
+        sub.on_results = lambda done, a=agent_id: _answered_in_terminal(run, a, done)
     assert run.lv is not None
     run.lv.subs.append(sub)  # so a subagent this step starts finds its caller (session._child_finished)
     return sub
@@ -1422,6 +1516,11 @@ def _end(run: Run) -> None:
     _runs.pop((run.c, run.key), None)
     agents.finish_agent(run.c, run.chat, status, (summary or "")[: session.RESULT_LIMIT] or None)
     log.info("%s: session %s (%s) ended %s (exit %s)", run.c, run.key, run.sid, status, code)
+    if run.bg:
+        bg_session.run_ended(run.c, run.key, summary)
+        if code in (-1, -2) and not run.interrupted:
+            with contextlib.suppress(Exception):
+                agents.update_agent(run.c, run.chat, alert={**STOPPED_ALERT, "since": _now()})
     if run.on_end is not None:
         try:
             run.on_end(run, status, summary)
@@ -1442,8 +1541,8 @@ def _suspend(run: Run) -> None:
 
 
 def _signal(run: Run, sig: int) -> None:
-    if run.pid is None:
-        return
+    if run.pid is None or run.bg:
+        return  # a background session outlives the follower; Stop uses `claude stop`
     with contextlib.suppress(ProcessLookupError, PermissionError):
         os.killpg(run.pid, sig)
 
@@ -1479,6 +1578,9 @@ async def _halt(run: Run) -> None:
     note, mode switch) both end it this way."""
     if run.proc is None:
         return
+    if isinstance(run.proc, bg_session.BgProc):
+        await run.proc.stop()
+        return
     # read before any signal: a process whose parent has died is re-parented and no longer found under the session
     tree = await asyncio.to_thread(procs.descendants, run.pid) if run.pid is not None else []
     for sig in (signal.SIGINT, signal.SIGTERM, signal.SIGKILL):
@@ -1511,6 +1613,63 @@ async def stop_chat(c: str, chat: str) -> bool:
     await asyncio.to_thread(_kill_left, meta)
     _close_left(c, meta, "stopped", "")
     return True
+
+
+async def resume_chat(c: str, chat: str) -> Run:
+    """The Resume of a background session's chat whose process stopped: its session starts again under its id with
+    its conversation, as the chat's next run. RuntimeError when the chat is no such chat or runs."""
+    from . import orient_session, write_session  # noqa: PLC0415 — both import this module
+
+    meta = agents.meta_or_none(c, chat)
+    if meta is None or not meta.get("background"):
+        raise RuntimeError("this chat is no background session of thimble's")
+    if by_chat(c, chat) is not None:
+        raise RuntimeError("it runs")
+    agents.update_agent(c, chat, alert=None)
+    role, k = str(meta.get("role") or ""), int(meta.get("run") or 0)
+    carry_on = tools.hint(RESUMED_PROMPT, stopped="")
+    if role == orientation.ROLE:
+        return await orient_session.resume(c, [{"text": tools.hint("bg-carry-on"), "by": agents.BROWSER}])
+    if role == write_session.ROLE:
+        doc = str(meta.get("doc") or "")
+        return await _start_writer(c, doc, meta, carry_on, k + 1)
+    key = next((e.key for e in bg_session.entries(c) if e.chat == chat), None)
+    kw = _launch_kw(c, key, meta) if key else None
+    if key is None or kw is None:
+        raise RuntimeError("thimble no longer knows how to start this session")
+    return await start(c, key, **kw, prompt=carry_on, resume=str(meta.get("session") or ""), chat=chat, run_k=k + 1)
+
+
+async def _start_writer(c: str, doc: str, meta: dict[str, Any], prompt: str, run_k: int) -> Run:
+    from . import write_session  # noqa: PLC0415
+
+    return await start(c, write_session.session_key(doc), prompt=prompt, resume=str(meta.get("session") or ""),
+                       chat=str(meta["id"]), run_k=run_k, **write_session._launch(c, doc))
+
+
+async def revive(c: str, e: "bg_session.Entry") -> Run | None:
+    """Follow again a background session that runs with no run of this server's (bg_session.on_wake): as its chat's run
+    that was left running, when a server restart cut its follower off (its caller's resumer, with no prompt, attaches to
+    the session), else as its chat's next run, a turn the session started on its own. None when its chat is gone."""
+    meta = agents.meta_or_none(c, e.chat)
+    if meta is None:
+        return None
+    k = int(meta.get("run") or 0)
+    if meta.get("status") == "running":
+        fn = _resumers.get(str(meta.get("role") or ""))
+        if fn is not None:
+            return await fn(c, meta, "")
+        kw = _launch_kw(c, e.key, meta)
+        if kw is None:
+            return None
+        return await start(c, e.key, **kw, prompt="", resume=e.sid, chat=e.chat, run_k=k, restarted=True)
+    kw = _launch_kw(c, e.key, meta)
+    if kw is None:
+        fn = _resumers.get(str(meta.get("role") or ""))
+        if fn is None:
+            return None
+        return await fn(c, {**meta, "run": k + 1}, "")
+    return await start(c, e.key, **kw, prompt="", resume=e.sid, chat=e.chat, run_k=k + 1, announce=False)
 
 
 # --------------------------------------------------------------------------- what a previous server left (restart)
@@ -1551,7 +1710,7 @@ def resumable(run: Run) -> bool:
 def _left_running(c: str, meta: dict[str, Any]) -> bool:
     """Whether an agent chat is a session thimble started (its meta keeps a `pid`, None while a retry waits) that says
     it runs, with no run of this server's behind it, and no other live server's either (_followed_elsewhere)."""
-    return (meta.get("status") == "running" and "pid" in meta and bool(meta.get("session"))
+    return (meta.get("status") == "running" and "pid" in meta and bool(meta.get("session")) and not meta.get("background")
             and by_chat(c, str(meta.get("id"))) is None and not _followed_elsewhere(meta))
 
 
@@ -1824,6 +1983,10 @@ async def ask(c: str, key: str | None, tool_name: str, inp: Any, agent_id: str |
     fut: asyncio.Future = asyncio.get_running_loop().create_future()
     run.waits[rid] = fut
     run.asking[rid] = (agent_id or None, tool_name)
+    if run.bg:
+        from . import channel  # noqa: PLC0415 — channel imports the views module, which this module does not need
+
+        run.ask_keys[rid] = channel.call_key(tool_name, inp)
     if updates:
         run.offers[rid] = updates
     agents.update_agent(c, run.chat, permissions=[*_pending(c, run.chat), entry])
@@ -1831,12 +1994,13 @@ async def ask(c: str, key: str | None, tool_name: str, inp: Any, agent_id: str |
     chosen: list[dict[str, Any]] | None = None
     try:
         allow = await asyncio.wait_for(fut, None if run.patient else PERMISSION_WAIT_S)
-        message = {None: GONE_LINE, SWITCHING: tools.hint(MODE_SWITCHING)}.get(allow, DENIED_LINE)
+        message = {None: GONE_LINE, SWITCHING: tools.hint(MODE_SWITCHING), ELSEWHERE: ELSEWHERE_LINE}.get(allow, DENIED_LINE)
     except asyncio.TimeoutError:
         allow, message = False, TIMED_OUT_LINE
     finally:
         run.waits.pop(rid, None)
         run.asking.pop(rid, None)
+        run.ask_keys.pop(rid, None)
         chosen = run.offers.pop(rid, None)
         with contextlib.suppress(Exception):
             agents.update_agent(c, run.chat, permissions=[p for p in _pending(c, run.chat) if p.get("id") != rid])
@@ -1969,6 +2133,8 @@ def _answer_word(allow: Any, message: str) -> str:
         return "deny: nobody answered in time"
     if allow is None:
         return "none: the session ended"
+    if allow == ELSEWHERE:
+        return "none: answered in the session's own terminal"
     if allow == SWITCHING:
         return "deny: answered for a mode switch"
     return "deny"
@@ -2307,6 +2473,16 @@ class PermissionAnswer(BaseModel):
     always: bool = False  # the card's "don't ask again"
 
 
+@router.post("/ws/{c}/chats/{chat}/resume")
+async def resume_route(c: str, chat: str) -> dict[str, Any]:
+    """A stopped background session's Resume (resume_chat); 409 when it cannot resume."""
+    try:
+        run = await resume_chat(c, chat)
+    except Exception as e:  # noqa: BLE001 — the analyst reads why
+        raise HTTPException(409, str(e) or type(e).__name__) from e
+    return {"resumed": chat, "run": run.k}
+
+
 @router.post("/ws/{c}/chats/{chat}/retry")
 async def retry_route(c: str, chat: str) -> dict[str, Any]:
     """The retry alert's Retry now: the session starts again at once; 404 when it is not waiting to retry."""
@@ -2367,8 +2543,8 @@ async def shutdown() -> None:
     (_suspend), any other recorded as failed with `## session-server-stopped`. SIGTERM then SIGKILL, with short waits. Ends
     main does not hear now are kept (tell_main)."""
     for run in list(_runs.values()):
-        # one the analyst's Stop is ending ends stopped, as they asked
-        run.suspended = not run.stopping and resumable(run)
+        # one the analyst's Stop is ending ends stopped, as they asked; a background session is left to run
+        run.suspended = not run.stopping and (resumable(run) or run.bg)
         run.stopping = True
         if not run.suspended:
             run.interrupted = tools.hint(SERVER_STOPPED)
@@ -2408,8 +2584,12 @@ async def _recover_logged() -> None:
             log.info("sessions left running by the previous server, closed as failed: %s", ", ".join(closed))
         if resumed:
             log.info("sessions left running by the previous server, resumed: %s", ", ".join(resumed))
+        found = await bg_session.recover()
+        if found:
+            log.info("background sessions followed again: %s", ", ".join(found))
     except Exception:  # noqa: BLE001 — never fails the start
         log.exception("resuming or closing the sessions left running by the previous server failed")
 
 
 router.lifespan_context = _lifespan
+bg_session.on_wake(tools.CRITIQUE_SESSION, revive)

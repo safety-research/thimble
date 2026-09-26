@@ -1,7 +1,7 @@
 """The plugin's contract with Claude Code: the agent definitions thimble passes with --agents (prompts/writer.md,
 orient.md, critic.md and check.md) and any in plugin/agents parse with the frontmatter fields Claude Code reads
-(https://code.claude.com/docs/en/sub-agents, "Supported frontmatter fields"); no agent names tools, and each session
-keeps the thimble tools of its own; the shared skill prints the rules every thimble agent
+(https://code.claude.com/docs/en/sub-agents, "Supported frontmatter fields"); no agent but the tray entries names tools,
+and each session keeps the thimble tools of its own; the shared skill prints the rules every thimble agent
 shares; the orient skill starts the orientation through its tool; and every worked example a view ticket's prompt
 names is a complete viewer in plugin/viewers."""
 from __future__ import annotations
@@ -23,7 +23,12 @@ CORPUS = "mini"
 PREFIX = "mcp__plugin_thimble_thimble__"  # how Claude Code names the plugin's MCP server's tools (tools.SERVER_NAME)
 # the session each definition runs as the agent of (agent_session.py), whose tool list its own thimble tools come from
 SESSION_OF = {"orient": "orient", "writer": "writer:report", "critic": "critique:orient", "check": "check:unverified:report"}
-NAMES = {"writer": "writer", "critic": "critic", "check": "check"}  # the others are thimble-<stem>
+# the others are thimble-<stem>; the plugin's own agents are named for the tray, where Claude Code shows `thimble:<name>`
+NAMES = {"writer": "writer", "critic": "critic", "check": "check", "orient-subagent": "orient", "writer-tray": "writer",
+         "critic-tray": "critic"}
+# the plugin's tray entries, thin relays of a background session (bg_session.py), which name their few tools
+TRAY = ("writer-tray", "critic-tray")
+TRAY_BUILTIN = {"Read", "SendMessage"}
 # the fields Claude Code reads in an agent's frontmatter; hooks, mcpServers and permissionMode are ignored for plugin
 # subagents, so an agent here must not lean on them
 FIELDS = {"name", "description", "tools", "disallowedTools", "model", "permissionMode", "maxTurns", "skills", "mcpServers",
@@ -39,6 +44,13 @@ def split(text: str) -> tuple[dict, str]:
     front = yaml.safe_load(head)
     assert isinstance(front, dict), head
     return front, body
+
+
+def tool_list(front: dict) -> list[str]:
+    raw = front.get("tools")
+    if isinstance(raw, str):
+        return [t.strip() for t in raw.split(",") if t.strip()]
+    return [str(t) for t in raw or []]
 
 
 def agents() -> dict[str, tuple[dict, str]]:
@@ -64,13 +76,19 @@ def test_agent_files_parse_with_the_fields_claude_code_reads():
 
 
 def test_no_agent_names_tools_and_each_session_keeps_only_its_own_thimble_tools():
-    """No agent names tools, so each session has every tool of a default Claude Code session. Its --disallowedTools take
-    only the thimble tools that are not its own, each of which its session's shim lists, and never a built-in or the
-    web."""
+    """No agent but the tray entries names tools, so each session has every tool of a default Claude Code session. Its
+    --disallowedTools take only the thimble tools that are not its own, each of which its session's shim lists, and never
+    a built-in or the web. A tray entry names its few tools, built-ins or thimble tools of main's list."""
     from app import agent_session, checks, critique_session, orient_session, write_session
 
     assert agent_session.thimble_tool("read_ref") == f"{PREFIX}read_ref" == f"mcp__plugin_thimble_{tools.SERVER_NAME}__read_ref"
     for stem, (front, _) in agents().items():
+        if stem in TRAY:
+            listed = tool_list(front)
+            names = {x["name"] for x in tools.list(tools.ANALYST, None)}
+            assert listed and all(t in TRAY_BUILTIN or (t.startswith(PREFIX) and t[len(PREFIX):] in names)
+                                  for t in listed), (stem, listed)
+            continue
         assert "tools" not in front, (stem, "the agent inherits every tool of its session")
     own = {"orient": orient_session.ORIENT_TOOLS, "writer": write_session.OWN_TOOLS, "critic": critique_session.OWN_TOOLS,
            "check": checks.OWN_TOOLS}

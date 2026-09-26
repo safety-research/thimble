@@ -8,7 +8,9 @@ which the model sees as `<channel source="plugin:thimble:thimble" kind="…" …
 The browser posts `POST /api/ws/{c}/events {kind, payload}`; server code calls post(). A kind is a bullet of main.md's
 `## Events from the browser`, and other kinds are refused. A post with no subscriber is refused with 409. Claude Code
 picks up a changed settings file only once it has been still for about a second, so an event within SETTINGS_SETTLE_S of
-a chip change waits out the rest.
+a chip change waits out the rest. An event of QUIET_KINDS asks main for nothing, so it wakes no turn: it waits in the
+workspace's HELD_FILE and rides along, under MEANWHILE, with the next event or the analyst's next prompt in the terminal
+(the plugin's UserPromptSubmit hook takes it with held_route).
 
 Without channels, events are queued per workspace and session (_pending) and the plugin's watcher takes them with a long
 poll (pull_route) as the text a channel would have shown (render); unacknowledged events return to the queue after
@@ -34,7 +36,7 @@ from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel
 from sse_starlette import EventSourceResponse
 
-from . import cc_channel, config, procs, prompts
+from . import cc_channel, config, ledger, procs, prompts
 
 log = logging.getLogger("thimble.channel")
 
@@ -90,23 +92,30 @@ def kinds() -> list[str]:
     return _KIND_RE.findall(prompts.section(PROMPT, EVENTS_SECTION))
 
 
-def session_prompt(workdir: str) -> str:
+def session_prompt(workdir: str, terminal: bool | None = None) -> str:
     """Main's system-prompt append, as the launcher passes it with --append-system-prompt. Claude Code cuts MCP server
     instructions at 2 KB, so this text cannot travel as the shim's instructions, while an append reaches main and every
-    fork of it whole."""
-    return render_prompts(SESSION_PROMPTS, workdir)
+    fork of it whole. `terminal` picks the ending of a turn (render_prompts)."""
+    return render_prompts(SESSION_PROMPTS, workdir, terminal)
 
 
-def render_prompts(names: tuple[str, ...] | list[str], workdir: str) -> str:
+def render_prompts(names: tuple[str, ...] | list[str], workdir: str, terminal: bool | None = None) -> str:
     """Prompt files for a session in `workdir`, rendered and joined by a blank line, with the corpus root and the citation
-    forms of the folder's views filled in. Main's append and the shared skill's command both come from here."""
-    from . import views  # noqa: PLC0415 — views imports refs, which a launcher does not otherwise need
+    forms of the folder's views filled in. Main's append and the shared skill's command both come from here. Main's
+    prompt keeps one ending of a turn with nothing for the analyst (terminal_tools.main_prompt): without closing words
+    when `terminal`, or when it is None and this process's environment says so (terminal_tools.on)."""
+    from . import terminal_tools, views  # noqa: PLC0415 — views imports refs, which a launcher does not otherwise need
 
     c = config.workspace_for_cwd(workdir)
     forms = views.forms_text(c) if c else ""
     values = {"workdir": str(workdir), "forms": forms}
-    text = "\n\n".join(prompts.render(name, values).strip() for name in names)
-    return re.sub(r"\n{3,}", "\n\n", text)  # an empty {{forms}} leaves a blank line of its own
+    parts = []
+    for name in names:
+        part = prompts.render(name, values).strip()
+        if name == PROMPT:
+            part = terminal_tools.main_prompt(part, terminal_tools.on() if terminal is None else terminal)
+        parts.append(part)
+    return re.sub(r"\n{3,}", "\n\n", "\n\n".join(parts))  # an empty {{forms}} leaves a blank line of its own
 
 
 # --------------------------------------------------------------------------- posting
@@ -168,6 +177,12 @@ def notification(kind: str, event_id: str, text: str, fields: dict[str, Any]) ->
 
 
 START_OUTPUTS = {"final": "final notebook", "views": "views", "report": "report"}  # orientation.start_passes, in words
+# the kinds that say something ended and ask main for nothing: each waits and rides along with the next event, under
+# MEANWHILE (prompts/main.md)
+QUIET_KINDS = frozenset({"orient", "written", "labeled", "view"})
+MEANWHILE = "meanwhile:"
+HELD_FILE = "held-events.json"  # in the workspace: the quiet events waiting, as notifications, across restarts
+_held: dict[str, list[dict[str, Any]]] = {}  # workspace -> HELD_FILE's notifications, once read
 
 
 def describe(kind: str, payload: dict[str, Any]) -> str:
@@ -184,9 +199,11 @@ def describe(kind: str, payload: dict[str, Any]) -> str:
     return f"The analyst sent `{kind}` from the browser"
 
 
-def post(c: str, kind: str, payload: dict[str, Any] | None = None, *, check_kind: bool = True) -> dict[str, Any]:
-    """Send one event to the workspace's session: {id, kind, delivered, thread?}. 409 when no session listens, 400 for a
-    kind main.md names no bullet for (when `check_kind`), or for a message with no text."""
+def post(c: str, kind: str, payload: dict[str, Any] | None = None, *, check_kind: bool = True,
+         mirror: bool = True) -> dict[str, Any]:
+    """Send one event to the workspace's session: {id, kind, delivered, thread?}. A `main` event shows in main's chat
+    as the analyst's line unless `mirror` is False, for a request server code writes to main. 409 when no session
+    listens, 400 for a kind main.md names no bullet for (when `check_kind`), or for a message with no text."""
     from . import agents, session, threads  # noqa: PLC0415
 
     kind = str(kind or "").strip()
@@ -202,7 +219,8 @@ def post(c: str, kind: str, payload: dict[str, Any] | None = None, *, check_kind
         text = str(payload.pop("text", "") or "").strip()
         if not text:
             raise HTTPException(400, "empty message")
-        agents.mirror(c, "user", by=agents.BROWSER, text=text, event=event_id)
+        if mirror:
+            agents.mirror(c, "user", by=agents.BROWSER, text=text, event=event_id)
         session.expect(c, event_id)
         note = notification(kind, event_id, text, {**payload, **_ultracode(c), **_filters(c)})
     elif kind == THREAD:
@@ -215,15 +233,68 @@ def post(c: str, kind: str, payload: dict[str, Any] | None = None, *, check_kind
         out["thread"] = thread_id
     else:
         text = str(payload.pop("text", "") or "").strip() or describe(kind, payload)
-        session.expect(c, event_id)
         note = notification(kind, event_id, text, payload)
+        if kind in QUIET_KINDS:
+            _keep_held(c, [*held(c), note])
+            out.update(delivered=0, held=True)
+            log.info("%s: event %s kind=%s held for the next event", c, event_id, kind)
+            _observe(c, kind, seen, out)
+            return out
+        session.expect(c, event_id)
     out["delivered"] = _publish(c, note)
+    _observe(c, kind, seen, out)
+    return out
+
+
+def held_line(note: dict[str, Any]) -> str:
+    """A held event as one line under MEANWHILE: its attributes but the id in brackets, then its text on one line."""
+    attrs = " ".join(f'{k}="{v}"' for k, v in (note.get("meta") or {}).items() if k != "event")
+    return f"[{attrs}] {' '.join(str(note.get('content') or '').split())}"
+
+
+def held(c: str) -> list[dict[str, Any]]:
+    """The quiet events waiting for the workspace's next event, as notifications."""
+    if c not in _held:
+        try:
+            notes = json.loads((config.workspace_dir(c) / HELD_FILE).read_text("utf-8"))
+        except (OSError, ValueError):
+            notes = []
+        _held[c] = [n for n in notes if isinstance(n, dict)] if isinstance(notes, list) else []
+    return list(_held[c])
+
+
+def _keep_held(c: str, notes: list[dict[str, Any]]) -> None:
+    _held[c] = list(notes)
+    path = config.workspace_dir(c) / HELD_FILE
+    try:
+        if notes:
+            ledger.atomic_write_text(path, json.dumps(notes, ensure_ascii=False))
+        else:
+            path.unlink(missing_ok=True)
+    except OSError:
+        log.warning("%s: the held events were not saved to %s", c, path, exc_info=True)
+
+
+def pop_held(c: str) -> list[dict[str, Any]]:
+    """The quiet events waiting, as notifications, and no longer waiting."""
+    notes = held(c)
+    if notes:
+        _keep_held(c, [])
+    return notes
+
+
+def take_held(c: str) -> str:
+    """The quiet events waiting, as MEANWHILE and one line each, and no longer waiting; '' when none wait."""
+    notes = pop_held(c)
+    return "\n".join([MEANWHILE, *(held_line(h) for h in notes)]) if notes else ""
+
+
+def _observe(c: str, kind: str, seen: dict[str, Any], out: dict[str, Any]) -> None:
     for fn in list(_observers.get(kind, ())):
         try:
             fn(c, seen, out)
         except Exception:  # noqa: BLE001 — the event is posted; an observer's state is secondary
             log.exception("%s: the %s observer %s failed", c, kind, getattr(fn, "__name__", fn))
-    return out
 
 
 def send(c: str, kind: str, text: str, fields: dict[str, Any], *, thread: str | None = None) -> dict[str, Any]:
@@ -234,6 +305,15 @@ def send(c: str, kind: str, text: str, fields: dict[str, Any], *, thread: str | 
     event_id = secrets.token_hex(4)
     session.expect(c, event_id, thread=thread)
     return {"id": event_id, "kind": kind, "delivered": _publish(c, notification(kind, event_id, text, fields))}
+
+
+def hand(c: str, event_id: str, text: str, fields: dict[str, Any], *, thread: str) -> str:
+    """A thread's event that main gets in a tool's result instead of on a turn of its own (the /thimble:ask command):
+    the event as rendered, with the filters. The mirror counts it as an event of main's turn (session.handed)."""
+    from . import session  # noqa: PLC0415
+
+    session.handed(c, event_id, thread)
+    return render(notification(THREAD, event_id, text, {**fields, **_filters(c)}))
 
 
 def _ultracode(c: str) -> dict[str, Any]:
@@ -276,6 +356,8 @@ def _publish(c: str, note: dict[str, Any]) -> int:
     subs = list(_subs.get(c, ()))
     main = _main_sid(c)
     mine = [q for q in subs if main and _route(q)[0] == main]
+    if held(c) and (mine or any(_route(q)[1] == cc_channel.CHANNEL for q in subs)):
+        note = {**note, "content": f"{note.get('content') or ''}\n\n{take_held(c)}"}
     n = 0
     queued: set[str] = set()
     for q in mine or [q for q in subs if _route(q)[1] == cc_channel.CHANNEL]:
@@ -573,6 +655,23 @@ async def ack_route(body: AckBody) -> dict[str, Any]:
     return {"acknowledged": body.id}
 
 
+class HeldBody(BaseModel):
+    cwd: str
+    session: str | None = None
+
+
+@router.post("/channel/held")
+async def held_route(body: HeldBody) -> dict[str, Any]:
+    """The UserPromptSubmit hook, as the analyst sends main a prompt in the terminal: `{text}`, the quiet events waiting
+    (take_held), which the hook adds to the prompt; '' when none wait or `session` is not main. 404 when the folder is no
+    workspace."""
+    c = config.workspace_for_cwd(body.cwd)
+    if not c:
+        raise HTTPException(404, f"{body.cwd} is not a thimble workspace")
+    main = _main_sid(c)
+    return {"text": take_held(c) if main and body.session == main else ""}
+
+
 @router.get("/channel/main")
 async def main_route(cwd: str, pid: int | None = None) -> dict[str, Any]:
     """`{workspace, main}`: whether `pid`, a `claude` process, runs the session that is main in the folder's workspace. The
@@ -680,8 +779,9 @@ class Ask(NamedTuple):
     loop: asyncio.AbstractEventLoop
     fut: asyncio.Future
     since: float  # time.monotonic() when it opened, for release_asks
-    at: float = 0.0  # time.time() when it opened, compared with the agent's transcript timestamps (agent_moved)
+    at: float = 0.0  # time.time() when it opened, compared with the agent's transcript timestamps (calls_done)
     agent: str | None = None  # the subagent or fork that asked; None for main
+    call: tuple[str, str] = ("", "")  # the call it asks about (call_key), which calls_done matches to its result
 
 
 @router.post("/channel/permission/hook")
@@ -702,7 +802,8 @@ async def hook_permission_route(request: Request, body: HookPermission) -> dict[
     request_id = HOOK_ASK_PREFIX + secrets.token_hex(4)
     loop = asyncio.get_running_loop()
     fut: asyncio.Future = loop.create_future()
-    _asks[request_id] = Ask(c, loop, fut, time.monotonic(), time.time(), body.agent_id or None)
+    _asks[request_id] = Ask(c, loop, fut, time.monotonic(), time.time(), body.agent_id or None,
+                            call_key(body.tool_name, body.tool_input))
     _hold(c, request_id, body.tool_name, what, preview, body.agent_id or None)
     try:
         while not fut.done():
@@ -719,10 +820,13 @@ async def hook_permission_route(request: Request, body: HookPermission) -> dict[
 
 
 def _answer_ask(request_id: str, behavior: str | None) -> bool:
-    """End a hook's wait with the analyst's answer, or with none; False when no hook waits on that request."""
+    """End a hook's wait with the analyst's answer, or with none; False when no hook waits on that request. An agent's
+    prompt the analyst answered here is remembered (_answered), so its call's result ends no other prompt."""
     held = _asks.pop(request_id, None)
     if held is None:
         return False
+    if behavior is not None:
+        _answered.setdefault((held.c, held.agent or ""), []).append(held.call)
     fut = held.fut
     held.loop.call_soon_threadsafe(lambda: fut.done() or fut.set_result(behavior))
     return True
@@ -775,11 +879,55 @@ def asking(c: str) -> set[str]:
     return {a.agent for a in _asks.values() if a.c == c and a.agent}
 
 
+# (workspace, agent, '' for main) -> the call_keys of its prompts the analyst answered here whose results have not come
+# yet
+_answered: dict[tuple[str, str], list[tuple[str, str]]] = {}
+# the input field that names a call of each tool, compared when a prompt is matched to its call's result (call_key)
+CALL_FIELDS = {"Bash": "command", "Monitor": "command", "WebFetch": "url", "WebSearch": "query", "Read": "file_path",
+               "Write": "file_path", "Edit": "file_path", "NotebookEdit": "notebook_path", "Glob": "pattern",
+               "Grep": "pattern"}
+
+
+def call_key(tool: str, tool_input: Any) -> tuple[str, str]:
+    """A call as a prompt and its transcript line both name it: the tool and the field that names the call
+    (CALL_FIELDS), or the whole input, with runs of white space made one."""
+    inp = tool_input if isinstance(tool_input, dict) else {}
+    field = CALL_FIELDS.get(tool)
+    value = inp.get(field) if field else None
+    text = value if isinstance(value, str) else json.dumps(inp, sort_keys=True, ensure_ascii=False)
+    return str(tool or ""), " ".join(text.split())
+
+
 def agent_moved(c: str, agent: str, after: float) -> None:
-    """The transcript of the subagent or fork `agent` gained a record written at `after`, or the agent stopped (`after`
-    infinite): the prompts it opened before then are gone, so their hooks' waits end. An agent writes nothing while its
-    prompt is open."""
+    """The subagent or fork `agent` stopped (`after` infinite), or wrote a record at `after`: the prompts it opened
+    before then are gone, so their hooks' waits end. The mirror calls it when an agent stops; a prompt of a working
+    agent ends with its call's result (calls_done), since an agent with several calls open goes on writing while
+    their prompts wait."""
     gone = {i for i, a in _asks.items() if a.c == c and a.agent == agent and a.at < after}
+    for request_id in gone:
+        _answer_ask(request_id, None)
+    if gone:
+        _drop(c, gone)
+
+
+def calls_done(c: str, agent: str | None, done: "list[tuple[tuple[str, str], float]]") -> None:
+    """Calls of the subagent or fork `agent`, or of main when it is None, got their results (each call_key with the
+    result's time): the prompt each one waited on was answered, in the terminal or here, so its hook's wait ends and
+    the browser drops its card. A call is matched to the prompt with its call_key, else, for a subagent, to the one
+    prompt of its tool that agent has open; any other prompt stays."""
+    gone: set[str] = set()
+    answered = _answered.get((c, agent or ""), [])
+    for key, at in done:
+        if key in answered:
+            answered.remove(key)  # the prompt the analyst answered in the browser, gone already
+            continue
+        open_ = sorted(((i, a) for i, a in _asks.items() if a.c == c and a.agent == agent and i not in gone
+                        and a.call[0] == key[0] and a.at <= at), key=lambda x: x[1].at)
+        hit = next((i for i, a in open_ if a.call == key), None)
+        if hit is None and len(open_) == 1 and agent is not None:  # main's prompts and calls carry the same input
+            hit = open_[0][0]
+        if hit is not None:
+            gone.add(hit)
     for request_id in gone:
         _answer_ask(request_id, None)
     if gone:
@@ -799,3 +947,4 @@ async def shutdown() -> None:
     _taken.clear()
     for request_id in list(_asks):
         _answer_ask(request_id, None)
+    _answered.clear()

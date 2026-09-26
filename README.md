@@ -35,6 +35,7 @@ For a development build, clone the repo and run `bash scripts/install.sh` (requi
 - Run `thimble` in a directory, just as you would run `claude` 
 - It starts a Claude Code session there with the thimble plugin loaded and prints the dashboard URL. 
 - Each run starts a new conversation on the same workspace (cards, report, labels). `thimble --continue` picks up your last conversation in this folder instead.
+- To chat only in the terminal, with the browser as a dashboard, see [docs/terminal-first.md](docs/terminal-first.md).
 
 ### From a running Claude Code session
 
@@ -54,6 +55,8 @@ Type `/thimble` to start the thimble server and print the dashboard URL. If `/th
 | `/thimble status` | one line: server, orientation, queue |
 | `/thimble fix` | repair a server that will not start |
 | `/thimble feedback` | write a problem report (a zip), even with the server down |
+| `/thimble:ask <thread> [message]` | send a message to a thread, as its composer in the browser would |
+| `/thimble:orient [focus] [flags]` | start an orientation, with Start's switches as flags |
 
 **From a shell**
 

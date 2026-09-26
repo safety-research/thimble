@@ -79,6 +79,21 @@ def test_the_session_is_on_when_its_claude_process_names_this_copy_s_channel(tmp
     assert cc_channel.on(with_flag, PLUGIN, no_env) and not cc_channel.on(plain, PLUGIN, no_env)
 
 
+def test_a_background_copy_of_main_is_not_on_the_channel_by_the_inherited_signal(tmp_path, claude):
+    """Claude Code's agent view copies a session into a background session its daemon runs (← in the agent tray). The
+    daemon's environment, and so the copy's, can hold the launcher's THIMBLE_CHANNEL, while the copy's command line has
+    no channel flag, so Claude Code loads no channel there: only the command line counts, and the copy never claims
+    main's place on the channel."""
+    signal = {"THIMBLE_CHANNEL": "plugin:thimble@inline"}
+    copy = {**signal, cc_channel.BG_KIND_ENV: cc_channel.BG_KIND}
+    plain = claude("--plugin-dir", str(PLUGIN))
+    with_flag = claude(*LAUNCHER_ARGS[1:])
+    assert cc_channel.on(plain, PLUGIN, signal)
+    assert not cc_channel.on(plain, PLUGIN, copy) and not cc_channel.on(None, PLUGIN, copy)
+    assert cc_channel.on(with_flag, PLUGIN, copy), "a background session started with the flag is on"
+    assert cc_channel.delivery(plain, PLUGIN, tmp_path, copy).mode != cc_channel.CHANNEL
+
+
 def test_claude_pid_walks_up_to_claude_pid_or_to_a_process_with_a_session_file(tmp_path):
     """A skill's command runs in a shell under `claude`, which names itself in CLAUDE_PID; without it, the nearest
     ancestor with a sessions/<pid>.json in Claude Code's config dir is the one. A CLAUDE_PID that is no ancestor (one

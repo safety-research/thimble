@@ -510,6 +510,29 @@ def _running() -> bool:
     return _current is not None and _current.status == "running"
 
 
+DEV_SESSION_NAME = "thimble:dev"  # the name `claude agents` shows a code ticket's background session under
+
+
+def view_session_name(slug: str) -> str:
+    """The name `claude agents` shows a view build's background session under: thimble:view-<slug>."""
+    return f"thimble:view-{slug}"
+
+
+def running_builds(c: str) -> list[dict[str, Any]]:
+    """The code ticket and view builds that run for workspace `c`, for the terminal's list of thimble's agents
+    (bg_session.agent_rows): {name, state, attach?, kind}."""
+    rows: list[dict[str, Any]] = []
+    t = _get(_current.ticket_id) if _running() and _current is not None and not _current.ticket_id.startswith("view:") else None
+    if t is not None and t.get("workspace") in (None, c):
+        rows.append({"name": DEV_SESSION_NAME, "state": "working", "kind": "build",
+                     **({"attach": f"claude attach {_current.session}"} if _current and _current.session else {})})
+    for (cc, slug), run in list(_view_runs.items()):
+        if cc == c and run.status == "running":
+            rows.append({"name": view_session_name(slug), "state": "working", "kind": "build",
+                         **({"attach": f"claude attach {run.session}"} if run.session else {})})
+    return rows
+
+
 # ----------------------------------------------------------------------------- git helpers (blocking; run in threads)
 
 
@@ -1675,7 +1698,7 @@ async def run_ticket(t: dict[str, Any], run: Run, *, doctor: str | None = None) 
         ok = False
         for attempt in range(1, MAX_ATTEMPTS + 1):
             run_log.stage(f"worker, attempt {attempt}")
-            result_text = await _worker_turn(run, run_log, wt, prompt, resume, name=f"thimble {_label(t)}: {t['title']}",
+            result_text = await _worker_turn(run, run_log, wt, prompt, resume, name=DEV_SESSION_NAME,
                                              workspace=t.get("workspace"),
                                              on_session=lambda short, sid: _update(tid, session=short, session_id=sid))
             resume = run.session_id
@@ -2247,7 +2270,7 @@ async def run_view(c: str, slug: str, run: Run) -> None:
             try:
                 # the view's folder is its one extra working directory; the worked examples are only read, since as a
                 # working directory they would receive the sandbox's `.claude/.cc-writes/`
-                result_text = await _worker_turn(run, run_log, corpus, prompt, resume, name=f"thimble view: {prop.get('name')}",
+                result_text = await _worker_turn(run, run_log, corpus, prompt, resume, name=view_session_name(slug),
                                                  workspace=c, on_session=on_session, add_dirs=(folder,),
                                                  env=env, answered=False, fence=view_fence(c, slug, corpus, folder))
             except RuntimeError as e:

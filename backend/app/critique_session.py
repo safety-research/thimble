@@ -295,6 +295,11 @@ def resolve_chat(c: str, p: dict[str, Any], ref: str) -> dict[str, Any]:
             "meta": {"chat": chat, "line": a, "end_line": b, "lines": len(lines)}}
 
 
+def work_dir(c: str, chat: str) -> Path:
+    """The critic's own folder for the orientation chat `chat`, where it may write."""
+    return config.workspace_dir(c) / DIGEST_DIR / chat / WORK_DIR
+
+
 def write_digest(c: str, run: agent_session.Run) -> Path | None:
     """The digest of the session `run`, written to its folder in workspace `c`; None when the transcript is not found or
     the file cannot be written."""
@@ -391,10 +396,27 @@ async def start(c: str, caller: agent_session.Run, context: str = "") -> tuple[a
         # the orientation's permission mode, followed at each request
         permission_mode=cc_settings.orient_permission_flag(caller.mode) if caller.mode else "",
         mode_owner=caller.key if caller.mode else None, patient=caller.patient,
-        work=config.workspace_dir(c) / DIGEST_DIR / caller.chat / WORK_DIR, unasked=True,
-        disallowed=agent_session.not_own(OWN_TOOLS),
-        brief=prompt.split("\n\n", 1)[0], **fields)  # the critique-task line that opens the first message
+        work=work_dir(c, caller.chat), unasked=True, disallowed=agent_session.not_own(OWN_TOOLS),
+        brief=prompt.split("\n\n", 1)[0], background=caller.bg, **fields)  # the critique-task line that opens the first message
     return run, done
+
+
+def _relaunch(c: str, meta: dict[str, Any]) -> dict[str, Any]:
+    """The start arguments of a critic's background session that this server did not start, from its chat's meta
+    (agent_session.on_relaunch): a later turn of it is followed, and its Resume starts it again, with no critique
+    waiting on it."""
+    agent_name, agent, conf, effort = _critic(c)
+    transcript = str(meta.get("transcript") or "")
+    readable = ["--add-dir", str(Path(transcript).parent)] if transcript else []
+    parent = str(meta.get("parent") or agents.MAIN_ID)
+    return dict(role=agent_session.STEP_ROLE, title=TITLE,
+                agent_args=["--agents", json.dumps({agent_name: agent}, ensure_ascii=False), "--agent", agent_name, *readable],
+                effort=effort, settings=agent_session.settings_json(effort, fastMode=bool(conf["fast"])),
+                agent_type=agent_name, parent=parent, model=str(agent.get("model") or ""), work=work_dir(c, parent),
+                unasked=True, disallowed=agent_session.not_own(OWN_TOOLS), background=True)
+
+
+agent_session.on_relaunch(tools.CRITIQUE_SESSION, _relaunch)
 
 
 def _critic(c: str) -> tuple[str, dict[str, Any], dict[str, Any], str]:

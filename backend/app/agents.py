@@ -838,8 +838,17 @@ async def interrupt_route(c: str, chat_id: str) -> dict:
     from . import agent_session  # noqa: PLC0415 — agent_session imports this module
 
     meta = read_meta(c, chat_id)
-    if meta.get("kind") == KIND_AGENT:
-        return {"stopped": await agent_session.stop_chat(c, chat_id) or await stop_agent(c, chat_id)}
+    if meta.get("kind") != KIND_AGENT:
+        return {"stopped": False}
+    if await agent_session.stop_chat(c, chat_id) or await stop_agent(c, chat_id):
+        return {"stopped": True}
+    if meta.get("agent_id") and meta.get("parent") == MAIN_ID and not meta.get("pid") and meta.get("status") == "running":
+        # a subagent of the analyst's session (the orientation in terminal-first mode): only main can stop it
+        from . import channel, tools  # noqa: PLC0415
+
+        text = tools.hint("stop-subagent", title=str(meta.get("title") or "a subagent"), agent_id=str(meta["agent_id"]))
+        channel.post(c, channel.MAIN, {"text": text}, mirror=False)
+        return {"stopped": False, "asked": "main"}
     return {"stopped": False}
 
 

@@ -19,7 +19,7 @@
 #   thimble purge <id>… [-y] [--dry-run] delete workspaces or archived runs by id, printing what went; never the folder a
 #                                        workspace read or Claude Code's transcripts (backend/app/runs.py)
 #   thimble launch-args [--cwd <p>]      what a session starts with: the channel entry, the --allowedTools and --effort
-#                                        values, then main's prompt
+#                                        values, the tools that end a turn without text, then main's prompt
 #   thimble prompt <name>… [--cwd <p>]   prompt files rendered for a session in <p> (the injected command of the
 #                                        /thimble and shared skills and of the SessionStart hook); in a session
 #                                        thimble started in its own work folder, the ones its server rendered
@@ -424,6 +424,8 @@ allowed="${rest%%$'\n'*}"
 rest="${rest#*$'\n'}"
 effort="${rest%%$'\n'*}"
 rest="${rest#*$'\n'}"
+turn_tools="${rest%%$'\n'*}"
+rest="${rest#*$'\n'}"
 last=""
 if [ "$cont" = 1 ]; then last="${rest%%$'\n'*}"; rest="${rest#*$'\n'}"; fi
 prompt="$rest"
@@ -444,5 +446,8 @@ export THIMBLE_CHANNEL="$channel"
 # Claude Code aborts an MCP call that sends neither a result nor progress for 30 min. The shim reports progress every
 # minute; the longer limit (4 h, in ms) covers a Claude Code that ignores it. A value the analyst set is kept.
 export CLAUDE_CODE_MCP_TOOL_IDLE_TIMEOUT="${CLAUDE_CODE_MCP_TOOL_IDLE_TIMEOUT:-14400000}"
+# A turn that ends right after one of these tools needs no closing text, and main's prompt says so; empty when this
+# `claude` does not read the variable, and main's prompt then ends such turns with the end token (backend/app/terminal_tools.py).
+[ -z "$turn_tools" ] || export CLAUDE_CODE_TERMINAL_MCP_TOOLS="$turn_tools"
 exec claude ${load[@]+"${load[@]}"} --dangerously-load-development-channels "$channel" "${tools[@]}" \
   ${resume[@]+"${resume[@]}"} --append-system-prompt "$prompt" "$@" -- /thimble

@@ -185,7 +185,7 @@ async def test_main_hears_which_cards_an_edit_in_the_browser_left_stale(api):
     channel._subs.setdefault(CORPUS, set()).add(q)
     await api.put(f"/api/ws/{CORPUS}/concepts/{k['id']}", json={"spec": r"(?i)review wanted"})
     assert (await api.post(f"/api/ws/{CORPUS}/concepts/{k['id']}/apply", json={"wait": True})).status_code == 200
-    notes = []
+    notes = channel.pop_held(CORPUS)  # a `labeled` event waits for main's next event (channel.QUIET_KINDS)
     while not q.empty():
         notes.append(q.get_nowait())
     [note] = [n for n in notes if n.get("meta", {}).get("kind") == "labeled"]

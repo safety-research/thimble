@@ -676,10 +676,56 @@ def quote_refs(cell: dict | None, text: str) -> str:
     return pattern.sub(lambda m: f"{m[1]}{quoted[m[2]]}{m[3]}" if m[2] in quoted else m[0], text)
 
 
+# A Markdown link, `[text](target)`, which the terminal shows as its text: a citation written for the terminal
+# (from_links). The target may hold one level of balanced parentheses, or be wrapped in <…>; a link inside [[…]] or an
+# image is not one.
+_LINK_RE = re.compile(r"(?<![\[!])\[([^\[\]\n]*)\]\(\s*(?:<([^<>\n]+)>|((?:[^()\s<>]|\([^()\s]*\))+))\s*\)")
+_WEB_SCHEME_RE = re.compile(r"^(?:[a-z][a-z0-9+.-]*://|mailto:|tel:)", re.I)
+BARE_LINK_TEXTS = ("", "↗")  # the link texts of a citation without a value, `[↗](card:<id>)`
+
+
+def from_links(text: str) -> str:
+    """`text` with each Markdown link whose target is a ref of the grammar written as the citation it stands for:
+    `[31](card:<id>#a/b)` becomes `[[31|card:<id>#a/b]]` and `[↗](card:<id>)` becomes `[[card:<id>]]`. Web links and
+    targets that are no ref are left as written. Idempotent."""
+    if "](" not in text:
+        return text
+    from . import refs  # noqa: PLC0415 — refs imports this module
+
+    def one(m: "re.Match[str]") -> str:
+        shown, target = m.group(1).strip(), (m.group(2) or m.group(3) or "").strip()
+        if not target or _WEB_SCHEME_RE.match(target) or "|" in shown:
+            return m.group()
+        try:
+            refs.parse_ref(target)
+        except ValueError:
+            return m.group()
+        return f"[[{target}]]" if shown in BARE_LINK_TEXTS else f"[[{shown}|{target}]]"
+
+    return _LINK_RE.sub(one, text)
+
+
+def to_links(text: str) -> str:
+    """`text` with each citation written as the Markdown link the terminal shows as its text, the inverse of
+    from_links: `[[31|card:<id>#a/b]]` becomes `[31](card:<id>#a/b)` and `[[card:<id>]]` becomes `[↗](card:<id>)`, with
+    each space in the ref written %20."""
+    def one(m: "re.Match[str]") -> str:
+        shown, bar, ref = m.group(1).rpartition("|") if "|" in m.group(1) else ("", "", m.group(1))
+        target = ref.strip().replace(" ", "%20")
+        return f"[{shown.strip() if bar else BARE_LINK_TEXTS[1]}]({target})"
+
+    return _SPAN_RE.sub(one, text)
+
+
+def prose(text: str) -> str:
+    """`text` with its citations read as prose: a value-ref as its display, a bare ref as nothing."""
+    return _prose(text)
+
+
 def normalise_markup(text: str) -> str:
     """`text` with the value-ref forms the grammar does not know put right: `[[v]](ref)` and `[v|ref]` become `[[v|ref]]`, a
-    number alone in brackets becomes the plain number, and a file's line cited through a card becomes the file's line.
-    Idempotent; every other token is untouched."""
+    Markdown link to a ref becomes its citation (from_links), a number alone in brackets becomes the plain number, and a
+    file's line cited through a card becomes the file's line. Idempotent; every other token is untouched."""
 
     def hybrid(m: "re.Match[str]") -> str:
         display, ref = m.group(1).strip(), m.group(2)
@@ -695,6 +741,7 @@ def normalise_markup(text: str) -> str:
 
     text = _CARD_FILE_LINE_RE.sub(lambda m: m.group(1), text)
     text = _HYBRID_RE.sub(hybrid, text)
+    text = from_links(text)
     text = _SINGLE_RE.sub(single, text)
     return _BARE_NUMBER_RE.sub(lambda m: m.group(1), text)
 

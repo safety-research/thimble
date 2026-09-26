@@ -68,6 +68,16 @@ def _dev_dir_off_the_checkout(tmp_path, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _statusline_left_alone(monkeypatch):
+    """Terminal-first mode writes the corpus folder's statusline (bg_session.sync_statusline), and the suite's corpora are
+    shared by every test, so the tests that turn the mode on leave the folder alone. test_bg_sessions.py tests the
+    statusline on a copy."""
+    from app import bg_session
+
+    monkeypatch.setattr(bg_session, "sync_statusline", lambda c: None)
+
+
+@pytest.fixture(autouse=True)
 def _view_tickets_held(monkeypatch):
     """A view proposal queues a ticket at once, and a ticket that starts runs a real `claude --bg`. Every test holds
     them queued with an empty pool."""
@@ -78,6 +88,19 @@ def _view_tickets_held(monkeypatch):
     monkeypatch.setattr(dev, "_view_queue", [])
     monkeypatch.setattr(dev, "_view_stopping", {})
     monkeypatch.setattr(dev, "_closing", False)
+
+
+@pytest.fixture(autouse=True)
+def _no_held_events():
+    """The quiet events channel.post holds for the next event, and the messages session.relay waits to see main pass
+    on, are module state: none carries over from another test."""
+    from app import channel, session
+
+    channel._held.clear()
+    session._relays.clear()
+    yield
+    channel._held.clear()
+    session._relays.clear()
 
 
 @pytest.fixture(autouse=True)
