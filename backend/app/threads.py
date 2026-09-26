@@ -5,8 +5,9 @@ text, surface, selector, and a PNG under `anchors/`). Each message typed in it i
 (`event`) naming the thread and its card group `thread:<id>`; the first one carries the anchor and what its refs
 hold.
 Main answers by forking with description `thread:<id>`; the mirror (session.py) matches the fork's transcript, copies
-its tool calls into the thread's chat, and calls fork_finished when it stops. The fork replies with
-`reply_in_thread`.
+its tool calls and its text into the thread's chat, with the messages the analyst typed to it in Claude Code's agent
+view and those main sent it for a question typed in the terminal, and calls fork_finished when it stops. The fork
+replies with `reply_in_thread` or its text.
 
 A fork lives only as long as its session: after that, the next event forks anew and carries the earlier turns. A
 message typed while the first event waits for its fork is queued (`queued`) and sent once the fork is known (flush)."""

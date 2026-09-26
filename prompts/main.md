@@ -62,7 +62,7 @@ A report check is a question asked of every passage of the written documents, su
 
 ## Threads
 
-A ⌘-click on anything in the browser opens a side thread about it, which a fork of you answers. If you are a thread's fork, you work only on the thread. The analyst reads only what you post with `reply_in_thread`, and your last message is one line to main. Cards you add go in the event's `group`. Open the event's `image`, a picture of what the analyst pointed at, only when its look matters.
+A ⌘-click on anything in the browser opens a side thread about it, which a fork of you answers. If you are a thread's fork, you work only on the thread. The thread shows the analyst what you post with `reply_in_thread` and any other text you write, so restate no task, and make your last message one line to main that starts with `↳`, which the thread hides. The analyst can also message a running fork or subagent from Claude Code's agent view, so a message one of them got that main did not send came from the analyst. Cards you add go in the event's `group`. Open the event's `image`, a picture of what the analyst pointed at, only when its look matters.
 
     "why is Agent 3 so high?" on a bar chart       reply_in_thread, one or two sentences
     "sort it" on the same chart                    edit_card, no reply

@@ -82,6 +82,9 @@ MONITOR_EVENT_RE = re.compile(r"</summary>\s*<event>(.*?)</event>", re.S)
 MONITOR_TOOL = "Monitor"
 WATCHER = ".thimble-watch"  # the plugin's hidden watcher (plugin/bin), which main's Monitor runs on the Monitor route
 MONITOR_TASK_RE = re.compile(r"\btask\s+([A-Za-z0-9_-]+)")  # "Monitor started (task b0yz9yjck, expires in 30m …"
+# a message the analyst typed to a working subagent in Claude Code's agent view, as the subagent's meta prompt carries it
+TYPED_RE = re.compile(r"^[^\n]*while you were working:\n(.*?)(?:\n\nThis is how Claude Code surfaces.*)?\Z", re.S)
+RELAYED_BY = agents.MAIN_ID  # `by` of a message main sent a thread's fork or a subagent, which its chat shows as from main
 COMMAND_RE = re.compile(r"<command-name>(.*?)</command-name>", re.S)
 COMMAND_ARGS_RE = re.compile(r"<command-args>(.*?)</command-args>", re.S)
 LOCAL_CAVEAT = "<local-command-caveat>"  # the meta record before a local command's line (module note, the table)
@@ -134,6 +137,7 @@ class Sub:
         self.names: dict[str, str] = {}  # tool_use id -> name, for the results
         self.finish: tuple[str, str | None] | None = None  # a foreground agent's (status, result) until its file is quiet
         self.report: str | None = None  # the message it handed back, its result
+        self.typed: str | None = None  # the last message the analyst typed to it in the agent view (_typed)
         self.quiet_since = time.monotonic()
         self.done = False
         self.workflow = False  # a Workflow call of main's, whose members are its agents (module note, workflows)
@@ -925,12 +929,24 @@ def _tool_use(lv: Live, tool_use_id: str, name: str, tool_input: Any) -> None:
             lv.sends[tool_use_id] = sub.chat
             sub.done = False
             agents.set_running(lv.c, sub.chat, True)
+            if sub.chat not in lv.turn_threads:  # not the relay of a message the browser logged in the thread
+                _relayed(sub, inp)
             return
+        if sub is not None and sub.owner is None:
+            _relayed(sub, inp)
     _rec(lv, "tool_use", id=tool_use_id, name=name, input=tool_input)
     if name in AGENT_TOOLS:
         _spawn(lv, tool_use_id, None, str(inp.get("description") or ""), inp.get("subagent_type"))
     elif name == WORKFLOW_TOOL:
         _spawn_workflow(lv, tool_use_id, inp)
+
+
+def _relayed(sub: Sub, inp: dict) -> None:
+    """Main's SendMessage to a thread's fork or a subagent: its chat shows the message as from main, so the browser
+    holds the same conversation as the terminal's agent view."""
+    text = str(inp.get("message") or inp.get("content") or "").strip()
+    if text:
+        sub.rec.record("user", text=text, by=RELAYED_BY)
 
 
 def _tool_result(lv: Live, tool_use_id: str, content: Any, is_error: bool = False) -> None:
@@ -1256,15 +1272,40 @@ def _began_since(path: str | None, since: str | None) -> bool:
     return True
 
 
+def _typed(rec: dict) -> str | None:
+    """A message the analyst typed to the subagent in Claude Code's agent view: a queued command or a meta prompt whose
+    origin is human, the prompt's wrapper taken off (TYPED_RE). None for any other record."""
+    if rec.get("type") == "attachment":
+        att = rec.get("attachment") if isinstance(rec.get("attachment"), dict) else {}
+        origin = att.get("origin") if isinstance(att.get("origin"), dict) else {}
+        if att.get("type") == "queued_command" and origin.get("kind") == "human":
+            return str(att.get("prompt") or "").strip() or None
+        return None
+    origin = rec.get("origin") if isinstance(rec.get("origin"), dict) else {}
+    if rec.get("type") != "user" or not rec.get("isMeta") or origin.get("kind") != "human":
+        return None
+    text = _user_text(rec) or ""
+    m = TYPED_RE.match(text)
+    return (m.group(1) if m else text).strip() or None
+
+
 def translate_sub(lv: Live, sub: Sub, line: bytes | str) -> int:
-    """One line of a subagent's transcript into its chat: tool calls and results, and for an agent chat its text and the
-    messages it was sent. A thread's fork writes no text (its reply is reply_in_thread)."""
+    """One line of a subagent's transcript into its chat: tool calls and results, its text (a thread's fork's as its
+    reply, without the lines only the terminal shows), the messages the analyst typed to it in the agent view, and for
+    an agent chat the prompts it was sent."""
     rec = _load(line)
     n = 0
     att = rec.get("attachment") if rec.get("type") == "attachment" and isinstance(rec.get("attachment"), dict) else None
     if att is not None and "<task-notification>" in str(att.get("prompt") or ""):
         _child_finished(lv, str(att["prompt"]))  # a subagent this one started has stopped
         return 0
+    typed = _typed(rec)
+    if typed is not None:
+        if typed == sub.typed:
+            return 0  # the same message in its other shape
+        sub.typed = typed
+        sub.rec.record("user", text=typed, by=TERMINAL)
+        return 1
     origin = rec.get("origin") if isinstance(rec.get("origin"), dict) else {}
     if rec.get("type") == "user" and origin.get("kind") in ("peer", "task-notification"):
         return 0  # a hand-back or a notice from a subagent this one started, which is no line of this chat
@@ -1297,8 +1338,8 @@ def translate_sub(lv: Live, sub: Sub, line: bytes | str) -> int:
             if not isinstance(b.get("text"), str):
                 raise Unreadable("a text block without text")
             text = visible(b["text"])
-            if not sub.thread and text.strip():
-                sub.rec.text(text, by=TERMINAL)
+            if text.strip():
+                sub.rec.text(text, by=TERMINAL, **({"reply": True} if sub.thread else {}))
                 n += 1
         elif b["type"] == "tool_use":
             if not isinstance(b.get("id"), str) or not isinstance(b.get("name"), str):
