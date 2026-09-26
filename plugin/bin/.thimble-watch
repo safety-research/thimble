@@ -9,6 +9,7 @@ the standard library and runs on every tool call.
 
     .thimble-watch                      the asyncRewake hook (SessionStart, Stop, PreToolUse, UserPromptSubmit)
     .thimble-watch --permission         the PermissionRequest hook
+    .thimble-watch --held               the UserPromptSubmit hook that adds the events held for main to the prompt
     .thimble-watch --stream --cwd <folder> --session <id>
                                         the Monitor route
 
@@ -18,6 +19,10 @@ another watcher holds the session's lock, when no server listens at first, on 40
 `claude` process has moved to another session (/clear). A server that has answered once is waited for across restarts.
 
 The permission hook relays the prompt to the server, which shows it in main's chat and answers when the analyst does.
+
+The held hook runs on each prompt the analyst sends main in the terminal: it takes the events the server holds for main
+(app/channel.py QUIET_KINDS) and prints them as the prompt's added context. It prints nothing in a subagent, when none
+wait or when no server answers within HELD_WAIT_S.
 
 The stream writes each event as one block of lines. Claude Code truncates Monitor output at 500 characters per line and
 about 3,000 per event, so lines are wrapped under LINE_CHARS and a longer event is cut and saved whole under
@@ -49,6 +54,7 @@ WAKE = 2  # the exit code that wakes the session (asyncRewake)
 STOP = {404, 409, 410}  # the server's answers that end a watcher (module note)
 CUT_NOTE = "(cut here, since a Monitor event holds about 3,000 characters; the whole event is in {path})"
 DENIED = "The analyst denied this in thimble's browser."
+HELD_WAIT_S = 3.0
 
 
 def home() -> Path:
@@ -254,6 +260,21 @@ def permission(inp: dict) -> int:
     return 0
 
 
+def held(inp: dict) -> int:
+    """The held hook (module note)."""
+    if inp.get("agent_id"):
+        return 0
+    body = {"cwd": folder(inp), "session": str(inp.get("session_id") or "") or None}
+    try:
+        status, answer = request("POST", "/api/channel/held", body, timeout=HELD_WAIT_S)
+    except (OSError, http.client.HTTPException):
+        return 0
+    text = str(answer.get("text") or "") if status == 200 else ""
+    if text:
+        print(json.dumps({"hookSpecificOutput": {"hookEventName": "UserPromptSubmit", "additionalContext": text}}))
+    return 0
+
+
 def units(s: str) -> int:
     """The length of `s` as Claude Code counts it (JavaScript): UTF-16 code units, two for a character beyond U+FFFF."""
     return len(s.encode("utf-16-le")) // 2
@@ -330,6 +351,8 @@ def main() -> int:
             return stream(args)
         if "--permission" in args:
             return permission(hook_input())
+        if "--held" in args:
+            return held(hook_input())
         return watch(hook_input())
     except KeyboardInterrupt:
         return 0

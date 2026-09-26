@@ -292,7 +292,7 @@ async def test_start_orientation_starts_the_session_with_start_s_choices_and_mir
     run = orientation.read_run(CORPUS)
     assert run["status"] == "done" and run["chats"] == {"orient": chat["id"]} and run["session"] == chat["session"]
     assert orientation.summary(CORPUS).strip() == SUMMARY, "the last message is kept as the record"
-    [heard] = channel._held.pop(CORPUS)  # an end waits for main's next event (channel.QUIET_KINDS)
+    [heard] = channel.held(CORPUS)  # an end waits for main's next event (channel.QUIET_KINDS)
     # the orientation's outputs are in the canvas: main hears a line counting what the orientation made, never its last
     # message
     made = ", ".join([tools.hint("orient-made-views", views="no views"), "no cards"])
@@ -342,7 +342,7 @@ async def test_a_second_orient_while_one_runs_is_refused_and_the_browser_can_sto
         os.killpg(pid, 0)  # the process group is gone, and the agents in it with it
     chat = agents.read_meta(CORPUS, run.chat)
     assert chat["status"] == "stopped" and orientation.read_run(CORPUS)["status"] == "stopped"
-    [heard] = channel._held.pop(CORPUS)  # an end waits for main's next event (channel.QUIET_KINDS)
+    [heard] = channel.held(CORPUS)  # an end waits for main's next event (channel.QUIET_KINDS)
     made = ", ".join([tools.hint("orient-made-views", views="no views"), "no cards"])
     assert heard["meta"]["status"] == "stopped" and heard["content"] == tools.hint("orient-stopped", made=made), "no exit code for main"
     assert not await orient_session.stop(CORPUS), "nothing runs any more"

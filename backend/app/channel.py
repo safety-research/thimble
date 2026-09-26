@@ -8,8 +8,9 @@ which the model sees as `<channel source="plugin:thimble:thimble" kind="…" …
 The browser posts `POST /api/ws/{c}/events {kind, payload}`; server code calls post(). A kind is a bullet of main.md's
 `## Events from the browser`, and other kinds are refused. A post with no subscriber is refused with 409. Claude Code
 picks up a changed settings file only once it has been still for about a second, so an event within SETTINGS_SETTLE_S of
-a chip change waits out the rest. An event of QUIET_KINDS asks main for nothing, so it wakes no turn: it waits and
-rides along with the next event, under MEANWHILE.
+a chip change waits out the rest. An event of QUIET_KINDS asks main for nothing, so it wakes no turn: it waits in the
+workspace's HELD_FILE and rides along, under MEANWHILE, with the next event or the analyst's next prompt in the terminal
+(the plugin's UserPromptSubmit hook takes it with held_route).
 
 Without channels, events are queued per workspace and session (_pending) and the plugin's watcher takes them with a long
 poll (pull_route) as the text a channel would have shown (render); unacknowledged events return to the queue after
@@ -35,7 +36,7 @@ from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel
 from sse_starlette import EventSourceResponse
 
-from . import cc_channel, config, procs, prompts
+from . import cc_channel, config, ledger, procs, prompts
 
 log = logging.getLogger("thimble.channel")
 
@@ -180,7 +181,8 @@ START_OUTPUTS = {"final": "final notebook", "views": "views", "report": "report"
 # MEANWHILE (prompts/main.md)
 QUIET_KINDS = frozenset({"orient", "written", "labeled", "view"})
 MEANWHILE = "meanwhile:"
-_held: dict[str, list[dict[str, Any]]] = {}  # workspace -> the quiet events waiting, as notifications
+HELD_FILE = "held-events.json"  # in the workspace: the quiet events waiting, as notifications, across restarts
+_held: dict[str, list[dict[str, Any]]] = {}  # workspace -> HELD_FILE's notifications, once read
 
 
 def describe(kind: str, payload: dict[str, Any]) -> str:
@@ -230,7 +232,7 @@ def post(c: str, kind: str, payload: dict[str, Any] | None = None, *, check_kind
         text = str(payload.pop("text", "") or "").strip() or describe(kind, payload)
         note = notification(kind, event_id, text, payload)
         if kind in QUIET_KINDS:
-            _held.setdefault(c, []).append(note)
+            _keep_held(c, [*held(c), note])
             out.update(delivered=0, held=True)
             log.info("%s: event %s kind=%s held for the next event", c, event_id, kind)
             _observe(c, kind, seen, out)
@@ -249,7 +251,39 @@ def held_line(note: dict[str, Any]) -> str:
 
 def held(c: str) -> list[dict[str, Any]]:
     """The quiet events waiting for the workspace's next event, as notifications."""
-    return list(_held.get(c) or [])
+    if c not in _held:
+        try:
+            notes = json.loads((config.workspace_dir(c) / HELD_FILE).read_text("utf-8"))
+        except (OSError, ValueError):
+            notes = []
+        _held[c] = [n for n in notes if isinstance(n, dict)] if isinstance(notes, list) else []
+    return list(_held[c])
+
+
+def _keep_held(c: str, notes: list[dict[str, Any]]) -> None:
+    _held[c] = list(notes)
+    path = config.workspace_dir(c) / HELD_FILE
+    try:
+        if notes:
+            ledger.atomic_write_text(path, json.dumps(notes, ensure_ascii=False))
+        else:
+            path.unlink(missing_ok=True)
+    except OSError:
+        log.warning("%s: the held events were not saved to %s", c, path, exc_info=True)
+
+
+def pop_held(c: str) -> list[dict[str, Any]]:
+    """The quiet events waiting, as notifications, and no longer waiting."""
+    notes = held(c)
+    if notes:
+        _keep_held(c, [])
+    return notes
+
+
+def take_held(c: str) -> str:
+    """The quiet events waiting, as MEANWHILE and one line each, and no longer waiting; '' when none wait."""
+    notes = pop_held(c)
+    return "\n".join([MEANWHILE, *(held_line(h) for h in notes)]) if notes else ""
 
 
 def _observe(c: str, kind: str, seen: dict[str, Any], out: dict[str, Any]) -> None:
@@ -310,9 +344,8 @@ def _publish(c: str, note: dict[str, Any]) -> int:
     subs = list(_subs.get(c, ()))
     main = _main_sid(c)
     mine = [q for q in subs if main and _route(q)[0] == main]
-    if _held.get(c) and (mine or any(_route(q)[1] == cc_channel.CHANNEL for q in subs)):
-        lines = "\n".join(held_line(h) for h in _held.pop(c))
-        note = {**note, "content": f"{note.get('content') or ''}\n\n{MEANWHILE}\n{lines}"}
+    if held(c) and (mine or any(_route(q)[1] == cc_channel.CHANNEL for q in subs)):
+        note = {**note, "content": f"{note.get('content') or ''}\n\n{take_held(c)}"}
     n = 0
     queued: set[str] = set()
     for q in mine or [q for q in subs if _route(q)[1] == cc_channel.CHANNEL]:
@@ -608,6 +641,23 @@ async def ack_route(body: AckBody) -> dict[str, Any]:
     if _taken.pop(body.id, None) is None:
         raise HTTPException(404, "no such event is in flight")
     return {"acknowledged": body.id}
+
+
+class HeldBody(BaseModel):
+    cwd: str
+    session: str | None = None
+
+
+@router.post("/channel/held")
+async def held_route(body: HeldBody) -> dict[str, Any]:
+    """The UserPromptSubmit hook, as the analyst sends main a prompt in the terminal: `{text}`, the quiet events waiting
+    (take_held), which the hook adds to the prompt; '' when none wait or `session` is not main. 404 when the folder is no
+    workspace."""
+    c = config.workspace_for_cwd(body.cwd)
+    if not c:
+        raise HTTPException(404, f"{body.cwd} is not a thimble workspace")
+    main = _main_sid(c)
+    return {"text": take_held(c) if main and body.session == main else ""}
 
 
 @router.get("/channel/main")

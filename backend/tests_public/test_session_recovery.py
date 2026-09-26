@@ -162,7 +162,7 @@ def _listen() -> asyncio.Queue:
 
 def _heard(q: asyncio.Queue, kind: str) -> list[dict]:
     """The events of `kind` main was sent, or that wait for its next event (channel.QUIET_KINDS)."""
-    sent = [q.get_nowait() for _ in range(q.qsize())] + channel._held.pop(CORPUS, [])
+    sent = [q.get_nowait() for _ in range(q.qsize())] + channel.pop_held(CORPUS)
     return [h for h in sent if h["meta"]["kind"] == kind]
 
 

@@ -35,7 +35,7 @@ An event with no text of its own carries one line saying what the analyst did, s
 - `labeled` says the analyst defined or changed a label in the browser, with its definition as the text. It needs no words from you until the analyst asks about it.
 - `view` says the dev agent built a view that you or the orientation proposed, with the files it opens and the citation forms it adds as the text. Note the forms, since the table of forms above was written before the view existed.
 
-`orient`, `written`, `labeled` and `view` do not start a turn of their own: they arrive after the text of the next event, under `meanwhile:`.
+`orient`, `written`, `labeled` and `view` do not start a turn of their own: they arrive under `meanwhile:`, after the text of the next event or with the analyst's next message in the terminal.
 
 Starting a subagent or a fork, and its return, need no words either, since the browser shows each as a card in the chat. Claude Code asks for a visible reply whenever a turn ends without text, so when a turn has nothing for the analyst, for example because the browser already shows the event, end it with `(shown in the dashboard)`, which the browser never shows. A brief closing sentence is fine instead when it tells the analyst something the browser does not show.
 

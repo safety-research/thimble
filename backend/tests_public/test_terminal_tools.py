@@ -138,7 +138,7 @@ def _listen() -> asyncio.Queue:
 
 def test_a_quiet_event_wakes_no_turn_and_rides_along_with_the_next_one():
     q = _listen()
-    out = channel.post(CORPUS, "labeled", {"text": "label `asks` over pages.jsonl: 12 of 40"})
+    out = channel.post(CORPUS, "labeled", {"text": "label `asks` over trees.jsonl: 12 of 40"})
     assert out["held"] and out["delivered"] == 0 and q.empty()
     assert not agents.running(CORPUS, agents.MAIN_ID), "main is not woken"
     session.push_event(CORPUS, "view", "view `board` opens posts.jsonl", view="board")
@@ -147,8 +147,24 @@ def test_a_quiet_event_wakes_no_turn_and_rides_along_with_the_next_one():
     note = q.get_nowait()
     text, meanwhile = note["content"].split("\n\nmeanwhile:\n")
     assert text == "What changed?" and note["meta"]["kind"] == "main"
-    assert meanwhile.splitlines() == ['[kind="labeled"] label `asks` over pages.jsonl: 12 of 40',
+    assert meanwhile.splitlines() == ['[kind="labeled"] label `asks` over trees.jsonl: 12 of 40',
                                       '[kind="view" view="board"] view `board` opens posts.jsonl']
     assert channel.held(CORPUS) == [] and q.empty()
     channel.post(CORPUS, "main", {"text": "And now?"})
     assert "meanwhile" not in q.get_nowait()["content"]
+
+
+async def test_held_events_outlive_a_restart_and_reach_main_with_its_next_prompt_in_the_terminal(tmp_path):
+    _listen()
+    channel.post(CORPUS, "written", {"text": "The report is written."})
+    channel._held.clear()  # a server restart: the events wait in the workspace's file
+    assert [h["content"] for h in channel.held(CORPUS)] == ["The report is written."]
+    p = tmp_path / "s1.jsonl"
+    p.write_text("")
+    session.attach(CORPUS, "s1", str(config.corpus_dir(CORPUS)), str(p))
+    cwd = str(config.corpus_dir(CORPUS))
+    assert await channel.held_route(channel.HeldBody(cwd=cwd, session="s2")) == {"text": ""}, "another session's prompt"
+    out = await channel.held_route(channel.HeldBody(cwd=cwd, session="s1"))
+    assert out == {"text": 'meanwhile:\n[kind="written"] The report is written.'}
+    assert channel.held(CORPUS) == [] and not (config.workspace_dir(CORPUS) / channel.HELD_FILE).exists()
+    assert await channel.held_route(channel.HeldBody(cwd=cwd, session="s1")) == {"text": ""}

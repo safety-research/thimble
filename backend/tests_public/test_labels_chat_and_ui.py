@@ -74,7 +74,7 @@ def _listen() -> asyncio.Queue:
 
 def _events(q: asyncio.Queue) -> list[dict]:
     """What main was sent, and what waits for its next event (channel.QUIET_KINDS)."""
-    out = channel._held.pop(CORPUS, [])
+    out = channel.pop_held(CORPUS)
     while not q.empty():
         out.append(q.get_nowait())
     return out
