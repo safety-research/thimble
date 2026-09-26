@@ -3,7 +3,9 @@
 // Propose views, Critique and revise, Generate report) and its permission mode (manual, auto, bypass; Claude Code's own
 // warning shows under Bypass). The field's text is the orientation's instructions and may stay empty; its model line
 // (ModelLine) edits the orientation role's settings. Start sends the analyst's session the `start` event with the
-// instructions as its text and the choices as attributes (prompts/main.md); Skip leaves main to the analyst.
+// instructions as its text and the choices as attributes (prompts/main.md); Skip leaves main to the analyst. In
+// terminal-first mode (`subagent`) the orientation runs as a subagent of the analyst's session, so the critique, the
+// permission mode and the role's model and effort do not apply: the options say so in their place.
 import { useEffect, useRef, useState } from 'react'
 import { Button, Segmented, type SegmentedOption } from '../components/Button'
 import { TextArea } from '../components/Field'
@@ -21,6 +23,12 @@ export const PASSES: { id: OrientPass; label: string }[] = [
   { id: 'critique', label: 'Critique and revise' },
   { id: 'report', label: 'Generate report' },
 ]
+
+/** What terminal-first mode gives up, where the gate and the settings offer it (backend orientation, module note). */
+export const TERMINAL_FIRST_NOTE =
+  "Runs as a subagent of your Claude Code session, so you can steer it from the terminal. It then works in your session's permission mode and effort, without a write fence, workflows or critique of its own."
+/** The model line's tooltip in terminal-first mode. */
+export const SUBAGENT_MODEL_TIP = "The orientation runs on your Claude Code session's model and effort"
 
 /** The level Ultracode runs at, sent as the `start` event's `effort` beside `ultracode` (cc_settings.ULTRACODE_EFFORT). */
 export const ULTRACODE_LEVEL = 'xhigh'
@@ -89,8 +97,12 @@ export const BYPASS_WARNING =
   'In Bypass Permissions mode, Claude Code will not ask for your approval before running potentially dangerous commands. ' +
   'This mode should only be used in a sandboxed container/VM that has restricted internet access and can easily be restored if damaged.'
 
-export function StartGate({ ws, model, defaultEffort = ORIENT_DEFAULT_EFFORT, fast = null, onEffort, onFast, permissionMode = null, onStarted, onSkip }: {
+export function StartGate({ ws, model, defaultEffort = ORIENT_DEFAULT_EFFORT, fast = null, onEffort, onFast, permissionMode = null, subagent = false, sessionModel = null, onStarted, onSkip }: {
   ws: string
+  /** terminal-first mode: the orientation runs as a subagent of the analyst's session */
+  subagent?: boolean
+  /** the analyst's session's model, which a subagent runs on */
+  sessionModel?: string | null
   /** the orientation role's model (settings.models.orient); nothing while it is not read yet */
   model?: string | null
   /** the orientation role's effort, where the menu opens (ModelLine.ORIENT_DEFAULT_EFFORT while it is not read yet) */
@@ -134,7 +146,7 @@ export function StartGate({ ws, model, defaultEffort = ORIENT_DEFAULT_EFFORT, fa
     setBusy(true)
     setError(null)
     try {
-      await api.start(ws, startBody(on, text, effort, mode))
+      await api.start(ws, subagent ? { ...startBody({ ...on, critique: false }, text, effort), critique: false } : startBody(on, text, effort, mode))
       onStarted?.()
     } catch (e) {
       const msg = (e as Error).message
@@ -164,7 +176,7 @@ export function StartGate({ ws, model, defaultEffort = ORIENT_DEFAULT_EFFORT, fa
         {optionsOpen && (
           <div className="chat-gate-options" id="chat-gate-options">
             <div className="chat-gate-rows" role="group" aria-label="Passes">
-              {PASSES.map((p) => {
+              {PASSES.filter((p) => !(subagent && p.id === 'critique')).map((p) => {
                 const labelId = `chat-gate-${p.id}`
                 return (
                   <div key={p.id} className={`chat-gate-row${on[p.id] ? ' on' : ''}`} data-pass={p.id}>
@@ -176,6 +188,11 @@ export function StartGate({ ws, model, defaultEffort = ORIENT_DEFAULT_EFFORT, fa
                 )
               })}
             </div>
+            {subagent ? (
+              <p className="chat-gate-note" data-mode="subagent">
+                {TERMINAL_FIRST_NOTE}
+              </p>
+            ) : (
             <div className="chat-gate-perms" data-choice={mode}>
               <span className="chat-gate-perms-label" id="chat-gate-perms">
                 Permissions
@@ -193,9 +210,10 @@ export function StartGate({ ws, model, defaultEffort = ORIENT_DEFAULT_EFFORT, fa
                 }}
               />
             </div>
+            )}
           </div>
         )}
-        {mode === 'bypass' && (
+        {mode === 'bypass' && !subagent && (
           <p className="chat-gate-warn" role="alert">
             <Icon name="warning" size={13} className="chat-gate-warn-ico" />
             <span>{BYPASS_WARNING}</span>
@@ -223,7 +241,11 @@ export function StartGate({ ws, model, defaultEffort = ORIENT_DEFAULT_EFFORT, fa
         />
         <div className="chat-gate-meta">
           <span className="composer-model">
-            <ModelLine model={model} modelTip={ORIENT_MODEL_TIP} effort={effort} efforts={EFFORT_CHOICES} onEffort={(e) => pickEffort(e as MainEffort)} fast={fast} onFast={onFast} label="the orientation" className="chat-gate-line" />
+            {subagent ? (
+              <ModelLine model={sessionModel} modelTip={SUBAGENT_MODEL_TIP} label="the orientation" className="chat-gate-line" />
+            ) : (
+              <ModelLine model={model} modelTip={ORIENT_MODEL_TIP} effort={effort} efforts={EFFORT_CHOICES} onEffort={(e) => pickEffort(e as MainEffort)} fast={fast} onFast={onFast} label="the orientation" className="chat-gate-line" />
+            )}
           </span>
         </div>
       </div>

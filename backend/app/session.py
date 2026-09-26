@@ -138,6 +138,8 @@ class Sub:
         self.finish: tuple[str, str | None] | None = None  # a foreground agent's (status, result) until its file is quiet
         self.report: str | None = None  # the message it handed back, its result
         self.typed: str | None = None  # the last message the analyst typed to it in the agent view (_typed)
+        self.prompted = False  # its first prompt was read
+        self.of_main = False  # a subagent main started with the Agent tool (_spawn)
         self.quiet_since = time.monotonic()
         self.done = False
         self.workflow = False  # a Workflow call of main's, whose members are its agents (module note, workflows)
@@ -450,6 +452,7 @@ def _restore_subs(lv: Live, places: Any = None, *, revive: bool = True) -> None:
             lv.subs.append(sub)
         elif meta.get("role") in (SUBAGENT_ROLE, orientation.ROLE) and meta.get("session") == lv.sid:
             sub = Sub(lv.c, str(meta["id"]), meta.get("tool_use_id"), meta.get("agent_id"), role=str(meta["role"]))
+            sub.of_main = True
             sub.done = meta.get("status") != "running"
             if meta.get("workflow_dir"):
                 sub.workflow, sub.workflow_dir = True, Path(str(meta["workflow_dir"]))
@@ -487,13 +490,13 @@ def _take_place(sub: Sub, path: Path, place: Any, at_end: bool) -> None:
     file, with the calls and the report it needs; else at the file's end when `at_end`, else at its start."""
     at = place.get("offset") if isinstance(place, dict) else None
     if isinstance(at, int) and not isinstance(at, bool) and 0 < at <= _size(path):
-        sub.offset = at
+        sub.offset, sub.prompted = at, True
         sub.names.update({str(k): str(v) for k, v in (place.get("names") or {}).items()})
         sub.seen.update(str(k) for k in place.get("seen") or [])
         if place.get("report") and not sub.report:
             sub.report = str(place["report"])
     elif at_end:
-        sub.offset = _size(path)
+        sub.offset, sub.prompted = _size(path), True
 
 
 def detach(c: str, sid: str, reason: str | None = None) -> bool:
@@ -1011,6 +1014,7 @@ def _spawn(lv: Live, tool_use_id: str | None, agent_id: str | None, title: str, 
         meta = agents.new_agent(lv.c, role, title, by=TERMINAL, session=lv.sid, tool_use_id=tool_use_id, agent_id=agent_id,
                                 agent_type=agent_type if isinstance(agent_type, str) else None)
         sub = Sub(lv.c, str(meta["id"]), tool_use_id, agent_id, role=role)
+        sub.of_main = True
         lv.subs.append(sub)
         if role == orientation.ROLE:
             _orientation(orientation.started, lv.c, sub.chat, agent_id=agent_id)
@@ -1222,6 +1226,8 @@ def _tail_sub(lv: Live, sub: Sub) -> int:
         agents.set_running(lv.c, sub.chat, True)
     lines = (sub.buf + data).split(b"\n")
     sub.buf = lines.pop()
+    if sub.done and not sub.thread and sub.owner is None and not sub.workflow and _resumed(lines):
+        _revive(lv, sub)
     n = 0
     try:
         for line in lines:
@@ -1234,6 +1240,67 @@ def _tail_sub(lv: Live, sub: Sub) -> int:
     if sub.agent_id and sub.agent_id in _channel_module().asking(lv.c):
         _channel_module().agent_moved(lv.c, sub.agent_id, max((_stamp(ln) for ln in lines if ln.strip()), default=0.0))
     return n
+
+
+def _resumed(lines: list[bytes]) -> bool:
+    """Whether lines a finished subagent's transcript gained show it working again: a reply of its own, or a message
+    the analyst or main sent it, which resumes it."""
+    for line in lines:
+        try:
+            rec = json.loads(line)
+        except ValueError:
+            continue
+        if not isinstance(rec, dict):
+            continue
+        origin = rec.get("origin") if isinstance(rec.get("origin"), dict) else {}
+        if rec.get("type") == "assistant" or _typed(rec) is not None or origin.get("kind") == "coordinator":
+            return True
+    return False
+
+
+def _revive(lv: Live, sub: Sub) -> None:
+    """A finished subagent was resumed (a message from the analyst's agent view or from main): its chat runs again,
+    and an orientation's record with it, so its next end closes them anew."""
+    sub.done = False
+    sub.finish = None
+    try:
+        agents.update_agent(lv.c, sub.chat, status="running", ts_end=None, result=None)
+    except Exception:  # noqa: BLE001 — a chat deleted under the mirror
+        log.debug("%s: subagent chat %s could not run again", lv.c, sub.chat, exc_info=True)
+        return
+    log.info("%s: subagent %s (%s) was resumed", lv.c, sub.agent_id, sub.chat)
+    if sub.role == orientation.ROLE:
+        _orientation(orientation.restarted, lv.c, sub.chat)
+
+
+def call_session(c: str, tool_use_id: str | None) -> str | None:
+    """The session a call through main's shim acts for: the orientation's (tools.ORIENT_SESSION) when the call is one
+    of the orientation subagent's in terminal-first mode, found in its transcript, else None (main's own)."""
+    from . import tools  # noqa: PLC0415 — tools imports far more than the mirror needs
+
+    lv = _live.get(c)
+    if lv is None or not tool_use_id:
+        return None
+    orients = [s for s in lv.subs if s.role == orientation.ROLE and not s.done]
+    if not orients:
+        return None
+    if any(s.path is None for s in orients):
+        _scan_subs(lv)
+    needle = tool_use_id.encode()
+    for sub in orients:
+        if tool_use_id in sub.names or (sub.path is not None and needle in _tail_bytes(sub.path)):
+            return tools.ORIENT_SESSION
+    return None
+
+
+def _tail_bytes(path: Path, n: int = 1_000_000) -> bytes:
+    """The last `n` bytes of a file, where a call just made is written."""
+    try:
+        with path.open("rb") as f:
+            f.seek(max(0, _size(path) - n))
+            return f.read()
+    except OSError:
+        return b""
 
 
 def _channel_module() -> Any:
@@ -1312,6 +1379,9 @@ def translate_sub(lv: Live, sub: Sub, line: bytes | str) -> int:
     if rec.get("type") == "user" and not sub.thread and not rec.get("isMeta"):
         prompt = _user_text(rec)
         if prompt and prompt.strip() and not prompt.lstrip().startswith("<"):
+            first, sub.prompted = not sub.prompted, True
+            if first and sub.of_main and sub.role == orientation.ROLE:
+                return 0  # the orientation subagent's prompt names its prompt file, which its card stands for
             sub.rec.record("user", text=prompt.strip(), by=TERMINAL)
             return 1
     if rec.get("type") == "user":

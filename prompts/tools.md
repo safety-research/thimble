@@ -687,6 +687,10 @@ The orientation has started in its own session, and the browser shows it, so thi
 
 An orientation is running already. Tell the analyst so in one line.
 
+## start_orientation-subagent
+
+This workspace runs the orientation as your subagent, so the analyst can steer it from this terminal. Start it now with the Agent tool: `subagent_type` "{agent}", `run_in_background` true, `description` "orientation", and `{prompt}` as the whole prompt. The browser shows it as the Orientation thread, and its task notification tells you when it ends.
+
 ## start_writing-started
 
 The writer of {doc} has started in its own session, and the browser shows it, so this turn needs no words from you unless it has something else for the analyst. Its last message reaches you as a `written` event.
@@ -986,6 +990,18 @@ No orientation has run in this workspace. Call `start_orientation` to start one.
 ## message_orientation-gone
 
 Claude Code no longer keeps this orientation's session, so it cannot continue. Its outputs and call refs still open. Call `start_orientation` for a new orientation that takes up the message.
+
+## message_orientation-subagent
+
+The orientation runs as your subagent, agent `{agent_id}`, so send it the analyst's message yourself with SendMessage, in their words. It takes the message up whether it is still working or has finished.
+
+## orient-relay
+
+For the orientation, from the browser: {text}
+
+## stop-subagent
+
+The analyst pressed Stop on {title}, your subagent `{agent_id}`, in the browser. Stop it with TaskStop.
 
 ## message_orientation-empty
 

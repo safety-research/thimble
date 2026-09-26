@@ -443,6 +443,40 @@
 .settings-fast {
   justify-self: start;
 }
+/* the workspace's switches under the table (SettingsPopover's SWITCHES): the switch, then its name and what it does */
+.settings-switches {
+  display: flex;
+  flex-direction: column;
+  border-top: 1px solid var(--border-subtle);
+}
+.settings-switch {
+  display: grid;
+  grid-template-columns: 32px minmax(0, 1fr);
+  gap: 8px;
+  align-items: start;
+  padding: 8px 6px;
+  border-bottom: 1px solid var(--border-hairline);
+}
+.settings-switch:last-child {
+  border-bottom: 0;
+}
+.settings-switch .switch {
+  margin-top: 1px;
+}
+.settings-switch-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.settings-switch-label {
+  color: var(--text-primary);
+  font: var(--type-ui-sm);
+}
+.settings-switch-note {
+  color: var(--text-secondary);
+  font: var(--type-body-sm);
+}
 .settings-error {
   color: var(--status-negative);
   font: var(--type-body-sm);

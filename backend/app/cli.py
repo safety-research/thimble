@@ -1393,10 +1393,13 @@ def launch_args(cwd: Path, resume: bool = False) -> str:
 
     installed = installed_copy(cwd)
     root = installed.root if installed else plugin_root()
-    anchors = Path(resolve_env()["workspaces_dir"]).resolve() / "*" / ANCHORS_DIR
+    workspaces = Path(resolve_env()["workspaces_dir"]).resolve()
+    anchors = workspaces / "*" / ANCHORS_DIR
+    # the prompt the orientation's subagent reads first in terminal-first mode (orientation.subagent_prompt_file)
+    orient_prompt = workspaces / "*" / "orient" / "subagent-prompt.md"
     # on the Monitor route main arms its Monitor on the watcher again every 30 minutes, which must not wait on a prompt
     watcher = f"Bash({root / WATCHER} *)"
-    tools_line = ",".join([MCP_TOOLS_RULE, f"Read(/{anchors}/**)", watcher, *skill_rules(root)])
+    tools_line = ",".join([MCP_TOOLS_RULE, f"Read(/{anchors}/**)", f"Read(/{orient_prompt})", watcher, *skill_rules(root)])
     cc_settings.clear_override(cwd)
     last = [last_main(cwd)] if resume else []
     turn_tools = terminal_tools.launch_value()

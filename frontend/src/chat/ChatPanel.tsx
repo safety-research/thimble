@@ -229,12 +229,18 @@ export function ChatPanel({ ws, onCollapse }: { ws: string; onCollapse?: () => v
   // the orientation's role settings (backend config.models_for), which the Start gate's model line shows and saves to;
   // a read that fails is tried again
   const [orientConf, setOrientConf] = useState<ModelConf | null>(null)
+  // terminal-first mode: the orientation runs as a subagent of the analyst's session (StartGate `subagent`)
+  const [terminalFirst, setTerminalFirst] = useState(false)
   useEffect(() => {
     let alive = true
     let retry: number | undefined
     const read = () =>
       loadSettings(ws)
-        .then((s) => alive && setOrientConf(s.models?.orient ?? null))
+        .then((s) => {
+          if (!alive) return
+          setOrientConf(s.models?.orient ?? null)
+          setTerminalFirst(s.terminal_first === true)
+        })
         .catch(() => {
           if (alive) retry = window.setTimeout(read, SETTINGS_RETRY_MS)
         })
@@ -676,6 +682,8 @@ export function ChatPanel({ ws, onCollapse }: { ws: string; onCollapse?: () => v
               onEffort={(effort) => saveOrient({ effort })}
               onFast={orientConf ? (fast) => (track('start-toggle', { target: 'orient:fast', detail: { fast } }), saveOrient({ fast })) : undefined}
               permissionMode={attached?.permission_mode ?? null}
+              subagent={terminalFirst}
+              sessionModel={mainModel}
               onStarted={() => setStarted(true)}
               onSkip={() => {
                 writeStorage(skipKey, true)

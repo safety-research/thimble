@@ -21,6 +21,14 @@ the same session, and its changes land in place, one Undo reverting them all.
 `query` is only ever the analyst's own words typed with Start. A run with a `final` group uses it as its deck. `status`
 is the latest run's, so start_orientation refuses while any run goes.
 
+Terminal-first mode (the workspace's `terminal_first` setting): the orientation runs as a background subagent of the
+analyst's own session instead, the plugin agent SUBAGENT (plugin/agents/orient-subagent.md), so the analyst can watch
+and message it in Claude Code's agent view. start_orientation writes its prompt to subagent_prompt_file and asks main to
+start it; the mirror finds it as a subagent of main (session.py) and calls started and finished as for a session. It
+gives up what its own session has: a write fence (the work folder is the only place it writes), its own permission
+mode, Ultracode's workflows and effort, and the critique, since main's shim does not list `critique`. Its record has
+`route: subagent`.
+
 When run 0 ends, the deck and the held proposals appear, and the orientation's chat gets chips for them. A failed run 0
 runs again in its session when a start asks for the same orientation. When the report was asked for, orient_session
 sends the `write` channel event once no follow-up waits.
@@ -42,6 +50,10 @@ from .ledger import read_json, write_json
 log = logging.getLogger("thimble.orientation")
 
 AGENT = "thimble-orient"  # prompts/orient.md's name, the agent its session runs as
+SUBAGENT = "thimble-orient-subagent"  # plugin/agents/orient-subagent.md's name, the agent of terminal-first mode
+TERMINAL_FIRST_KEY = "terminal_first"  # settings.json: the orientation runs as a subagent of main (module note)
+SUBAGENT_ROUTE = "subagent"  # the record's `route` in terminal-first mode
+SUBAGENT_PROMPT = "subagent-prompt.md"  # under orient/: the prompt the subagent reads first
 PLUGIN = "thimble"  # the plugin's name (plugin/.claude-plugin/plugin.json), the scope of its agents and skills
 AGENT_FILE = config.REPO_ROOT / "prompts" / "orient.md"
 EFFORTS = ("low", "medium", "high", "xhigh", "max")  # Start's effort menu below Ultracode, its highest choice
@@ -120,9 +132,30 @@ def _emit(c: str, status: str, **fields: Any) -> None:
 
 
 def is_orient(agent_type: Any) -> bool:
-    """Whether an Agent call's subagent_type, or a subagent's recorded agentType, is the orientation's agent, bare or
-    scoped as `thimble:thimble-orient`."""
-    return isinstance(agent_type, str) and agent_type.strip().rsplit(":", 1)[-1] == AGENT
+    """Whether an Agent call's subagent_type, or a subagent's recorded agentType, is an orientation's agent, bare or
+    scoped as `thimble:thimble-orient`: the session's agent or terminal-first mode's SUBAGENT."""
+    return isinstance(agent_type, str) and agent_type.strip().rsplit(":", 1)[-1] in (AGENT, SUBAGENT)
+
+
+def terminal_first(c: str) -> bool:
+    """Whether the workspace runs the orientation as a subagent of main (TERMINAL_FIRST_KEY)."""
+    from .ledger import stored_settings  # noqa: PLC0415
+
+    try:
+        return stored_settings(c).get(TERMINAL_FIRST_KEY) is True
+    except Exception:  # noqa: BLE001 — a workspace whose settings cannot be read runs the default route
+        return False
+
+
+def subagent_prompt_file(c: str) -> Path:
+    """The file the orientation's subagent reads its prompt from (terminal-first mode)."""
+    return orient_dir(c) / SUBAGENT_PROMPT
+
+
+def subagent_run(c: str) -> dict[str, Any] | None:
+    """The latest run's record when it ran or runs as a subagent of main, else None."""
+    run = read_run(c)
+    return run if run and run.get("route") == SUBAGENT_ROUTE else None
 
 
 def effort(value: Any) -> str:
@@ -285,6 +318,15 @@ def start_requested(c: str, payload: dict[str, Any], posted: dict[str, Any]) -> 
                    "permissions": permissions(payload.get("permissions")),
                    "event": posted.get("id"), "requested": _now(), "started": None, "ended": None,
                    "groups": ensure_groups(c, deck=True) if "final" in passes else {}, "chats": {}, "error": None})
+
+
+def request(c: str, brief: str, passes: "list[str]", **fields: Any) -> dict[str, Any]:
+    """Record an orientation main asked for with no Start waiting, as a Start records one (start_requested): requested,
+    with its passes and brief, and the deck made when on. `fields` go on the record too."""
+    return _write_run(c, {"status": "requested", "passes": list(passes), "query": brief.strip() or None,
+                          "requested": _now(), "started": None, "ended": None,
+                          "groups": ensure_groups(c, deck=True) if "final" in passes else {}, "chats": {}, "error": None,
+                          **fields})
 
 
 def start_passes(payload: dict[str, Any]) -> list[str]:

@@ -27,6 +27,9 @@ SESSION_OF = {"orient": "orient", "writer": "writer:report", "critic": "critique
 # their own; Bash: a check's session, fenced to a work folder of its own, counts and searches the corpus
 BUILTIN = {"Read", "Grep", "Glob", "Skill", "Agent", "Workflow", "Bash"}
 NAMES = {"writer": "writer", "critic": "critic", "check": "check"}  # the others are thimble-<stem>
+# the agents that inherit every tool less their disallowed ones: the orientation's session's, and its subagent of
+# terminal-first mode (test_orient_subagent.py)
+INHERITING = ("orient", "orient-subagent")
 # the fields Claude Code reads in an agent's frontmatter; hooks, mcpServers and permissionMode are ignored for plugin
 # subagents, so an agent here must not lean on them
 FIELDS = {"name", "description", "tools", "disallowedTools", "model", "permissionMode", "maxTurns", "skills", "mcpServers",
@@ -81,7 +84,7 @@ def test_agent_tools_are_builtins_or_registry_tools_under_the_plugin_prefix():
     assert PREFIX == f"mcp__plugin_thimble_{tools.SERVER_NAME}__"
     for stem, (front, _) in agents().items():
         listed = tool_list(front)
-        if stem == "orient":
+        if stem in INHERITING:
             assert not listed and "tools" not in front
             continue
         assert listed, (stem, "tools must be listed, the agent is not meant to inherit Bash or Write")

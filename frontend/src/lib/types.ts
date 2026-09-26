@@ -849,6 +849,8 @@ export interface ModelConf {
 /** `GET /ws/{c}/settings` layers the effective `models` in; a PUT merges what it is given. */
 export interface Settings {
   models: Record<string, ModelConf>
+  /** the orientation runs as a subagent of the analyst's Claude Code session (backend orientation.terminal_first) */
+  terminal_first?: boolean
   [k: string]: unknown
 }
 

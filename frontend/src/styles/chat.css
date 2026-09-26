@@ -1087,6 +1087,12 @@ button.label-chip:hover {
   flex: none;
   margin-top: 2px;
 }
+/* terminal-first mode: what the orientation gives up, in place of the permission switcher */
+.chat-gate-note {
+  margin: 0;
+  color: var(--text-secondary);
+  font: var(--type-body-sm);
+}
 .chat-gate-field {
   display: flex;
   flex: none;

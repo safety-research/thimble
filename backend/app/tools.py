@@ -2374,7 +2374,12 @@ async def call_route(name: str, body: CallBody, request: Request) -> dict[str, A
     c = body.workspace or workspace_for_cwd(body.cwd) or (config.workspace_for_folder(body.cwd) if body.session else None)
     if not c:
         raise HTTPException(400, f"{body.cwd or '(no cwd)'} is not inside a corpus thimble knows; say /thimble to register it")
-    work = call(c, name, body.args, actor=body.actor, notebook=body.notebook, session=body.session or None,
+    sess = body.session or None
+    if sess is None and body.tool_use_id:
+        from . import session  # noqa: PLC0415 — session imports orientation, which imports this module's callers
+
+        sess = session.call_session(c, body.tool_use_id)  # the orientation's subagent calls through main's shim
+    work = call(c, name, body.args, actor=body.actor, notebook=body.notebook, session=sess,
                 tool_use_id=body.tool_use_id or None)
     if REGISTRY[canonical(name)].drop_stops:
         res = await until_dropped(request.receive, work, name)
