@@ -32,7 +32,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from . import agents, cc_channel, cc_settings, config, orientation, terminal_tools, threads
+from . import agents, cc_channel, cc_settings, cite, config, orientation, terminal_tools, threads
 from .ledger import atomic_write_text
 
 log = logging.getLogger("thimble.session")
@@ -919,9 +919,10 @@ def _peer(lv: Live, *, mid_turn: bool) -> None:
 
 def visible(text: str) -> str:
     """A text as a chat shows it (module note, the end token): empty when it is only END_TOKEN, the words before the
-    token when it ends with it (END_RE), and any other text as it is, without its lines that open with TERMINAL_ONLY."""
+    token when it ends with it (END_RE), and any other text as it is, without its lines that open with TERMINAL_ONLY,
+    and with the citations written as Markdown links for the terminal in their chat form (cite.from_links)."""
     m = END_RE.search(text)
-    text = text[: m.start()].rstrip() if m else text
+    text = cite.from_links(text[: m.start()].rstrip() if m else text)
     if TERMINAL_ONLY not in text:
         return text
     return "\n".join(ln for ln in text.split("\n") if not ln.lstrip().startswith(TERMINAL_ONLY)).strip()

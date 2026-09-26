@@ -524,7 +524,7 @@ def reply(c: str, thread_id: str, text: str, *, by: str) -> None:
     """The thread's visible reply: a `text` record marked `reply`, so the fold shows it as the model's message and
     fork_finished knows the run answered."""
     _, log_path = agents.paths(c, thread_id)
-    agents.append(log_path, {"type": "text", "delta": text, "reply": True, "by": by})
+    agents.append(log_path, {"type": "text", "delta": cite.from_links(text), "reply": True, "by": by})
     agents.notify(c, thread_id)
 
 
