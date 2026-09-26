@@ -70,4 +70,4 @@ Check the view with `{{check}} '<ref>'`, each locator one argument, as a command
 
 When the checks pass, look at both pictures as the analyst will. The first should show the whole of the data, readable, with the test label's colour on what it marks, charts included. The second should match records you read, including a unit whose state changed more than once and a record of something that failed, since a page can show a failure as a success, or a first state as the last, and still pass every check.
 
-When your turn ends, the server runs the same checks with the locators you passed last. The view reaches the analyst when they pass, and when they fail you get their lines.
+When your turn ends, the server runs the same checks with the locators you passed last. The view reaches the analyst when they pass, and when they fail you get their lines. Once it reaches them, a reviewer looks at pictures of it and may send you problems to fix in this session.

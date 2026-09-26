@@ -268,6 +268,10 @@ export const api = {
   /** the `open` message for a ref in the view */
   /** the marks of the labels that are on for refs a view's page shows, its units' above all: {ref: {bar, names, spans, keep?}} */
   viewMarks: (c: string, slug: string, refs: string[]) => j<Record<string, { bar?: string; names?: string[]; spans?: { text: string; colour: string }[]; keep?: boolean }>>(`${ws(c)}/views/${enc(slug)}/marks`, { method: 'POST', body: JSON.stringify({ refs }) }),
+  /** review the built view's pictures again; stop a review; put the view back as it was built before its review */
+  viewReviewAgain: (c: string, slug: string) => j<{ ok: boolean }>(`${ws(c)}/views/${enc(slug)}/review`, { method: 'POST' }),
+  viewReviewStop: (c: string, slug: string) => j<{ ok: boolean }>(`${ws(c)}/views/${enc(slug)}/review`, { method: 'DELETE' }),
+  viewReviewUndo: (c: string, slug: string) => j<{ ok: boolean }>(`${ws(c)}/views/${enc(slug)}/review/undo`, { method: 'POST' }),
   viewOpen: (c: string, slug: string, ref: string) => j<ViewOpen>(`${ws(c)}/views/${enc(slug)}/resolve${q({ ref })}`),
   // ---- orientation ----
   /** Ask the analyst's session for the orientation (`POST /ws/{c}/events {kind: start}`): main calls start_orientation

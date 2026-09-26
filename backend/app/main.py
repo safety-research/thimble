@@ -84,6 +84,8 @@ ROUTER_MODULES = [
     # the card harness (a headless Chromium that draws every card offscreen) and the card check that reads it, and
     # where the check's records and fixes are kept (the Undo of a fix)
     "render", "card_check", "checkstore",
+    # the review of a built view's pictures, which sends what it finds back to the view's build session
+    "view_review",
 ]
 
 # The backend binds to 127.0.0.1, but a DNS-rebinding page can still reach it as same-origin unless the Host

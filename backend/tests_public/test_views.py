@@ -729,3 +729,20 @@ async def test_the_timeline_example_bins_a_long_log_by_days(toy, inproc, bound, 
 
 def views_time(ts: str) -> float:
     return datetime.fromisoformat(ts.replace("Z", "+00:00")).timestamp()
+
+
+async def test_the_review_shoots_four_states_in_thimble_s_fonts_with_the_test_label(toy, inproc, bound):
+    """The review's pictures of a worked example: no label, the test label on, filtered to it, and the detail, each in
+    Hanken Grotesk, the test label marking records in the second and the filter keeping fewer in the third."""
+    if why := views.build_problem():
+        pytest.skip(why)
+    from app import view_review
+
+    slug = _save_example("board")
+    view = views.read_view(TOY, slug)
+    files = views.claimed_files(TOY, view)
+    shots = await view_review.shoot(TOY, slug, view, files, {}, True, 0)
+    assert [s["state"] for s in shots] == list(view_review.LINED_STATES)
+    assert all(s["ok"] and s["fonts"] and Path(s["png"]).is_file() for s in shots), [s.get("errors") for s in shots]
+    assert shots[0]["marked"] == 0 and shots[1]["marked"] > 0 and shots[3]["marked"] > 0
+    assert shots[2]["records"] < shots[1]["records"] and shots[0]["answers"]

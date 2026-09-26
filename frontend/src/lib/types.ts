@@ -404,6 +404,20 @@ export interface Proposal {
   failed_change?: string
   chat?: string | null
   attempts?: number
+  /** the review of the built view's pictures (backend view_review) */
+  review?: ViewReview
+}
+
+/** The review of a built view's pictures: running, done (with what it revised and what problems are left), failed
+ * or stopped, with a note that says why; `undo` once the analyst put the view back as it was built. */
+export interface ViewReview {
+  state: 'running' | 'done' | 'failed' | 'stopped'
+  round?: number
+  ts?: string
+  revised?: string[]
+  left?: string[]
+  note?: string
+  undo?: boolean
 }
 
 /** One form a view adds to the citation grammar: a fragment of a file it claims, or view:<slug>/<key>. */

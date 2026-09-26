@@ -17,9 +17,11 @@ from mini_corpus import write_mini  # noqa: E402
 
 # Nothing reads a credential: model calls and Claude Code sessions are faked wherever a test reaches them.
 os.environ.setdefault("THIMBLE_SKIP_KEY", "1")
-# No headless Chromium per test app and no card check after every add_card; the tests of the renderer turn it on.
+# No headless Chromium per test app, no card check after every add_card and no review after every view build; the
+# tests of the renderer, the check and the review turn them on.
 os.environ.setdefault("THIMBLE_RENDER", "off")
 os.environ.setdefault("THIMBLE_CARD_CHECK", "off")
+os.environ.setdefault("THIMBLE_VIEW_REVIEW", "off")
 # The suite's corpora are the synthetic ones, always: an inherited THIMBLE_DATA_DIR would point config.DATA_DIR at
 # real corpora. conftest is imported before any app module, so config reads this value.
 DATA = Path(tempfile.mkdtemp(prefix="thimble-tests-data-")).resolve()

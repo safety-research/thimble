@@ -1,0 +1,94 @@
+// The mark of a check thimble runs on something it made, shared by the card check (canvas/CardFace) and the review of a
+// view's pictures (files/ViewPane): a spinner while the check runs, a check glyph when it is done, a flag when it left
+// problems, a run-again glyph when it failed or was stopped. Its hover card, on the page rather than inside the thing
+// checked (which may clip it), explains the state; a click stops a running check or runs a finished one again.
+import { useEffect, useLayoutEffect, useRef, useState, type MouseEvent, type ReactNode } from 'react'
+import { createPortal } from 'react-dom'
+import { Icon } from './Icon'
+import { Spinner } from './Spinner'
+import { placeTip } from './Tooltip'
+
+export type CheckState = 'running' | 'done' | 'checked' | 'failed' | 'stopped'
+
+export interface CheckMarkProps {
+  state: CheckState
+  /** a finer state for the mark's class, such as a check waiting for capacity */
+  phase?: string
+  /** the check left problems: the flag glyph */
+  flagged?: boolean
+  /** the mark's accessible name */
+  label: string
+  /** the hover card's accessible name */
+  popLabel: string
+  /** stop a running check, or run a finished one again */
+  onClick?: () => void
+  /** the hover card's content; `close` hides it, as an action in it does */
+  children: (close: () => void) => ReactNode
+  className?: string
+}
+
+export function CheckMark({ state, phase, flagged, label, popLabel, onClick, children, className }: CheckMarkProps) {
+  const [open, setOpen] = useState(false)
+  const at = useRef<HTMLButtonElement>(null)
+  const hide = useRef<ReturnType<typeof setTimeout> | null>(null)
+  useEffect(() => () => void (hide.current && clearTimeout(hide.current)), [])
+  const enter = () => {
+    if (hide.current) clearTimeout(hide.current)
+    setOpen(true)
+  }
+  const leave = () => {
+    hide.current = setTimeout(() => setOpen(false), 180)
+  }
+  const stop = (e: MouseEvent) => e.stopPropagation()
+  const running = state === 'running'
+  const ended = state === 'failed' || state === 'stopped'
+  return (
+    <span className={'bcell-check' + (className ? ` ${className}` : '')} onMouseEnter={enter} onMouseLeave={leave} onMouseDown={stop} onClick={stop}>
+      <button
+        ref={at}
+        type="button"
+        className={`bcell-check-mark is-${state}${phase ? ` is-${phase}` : ''}${flagged ? ' is-flagged' : ''}`}
+        aria-label={label}
+        aria-disabled={!onClick || undefined}
+        onFocus={enter}
+        onBlur={leave}
+        onClick={() => {
+          setOpen(false)
+          onClick?.()
+        }}
+      >
+        {running ? <Spinner size={10} /> : <Icon name={ended ? 'refresh' : flagged ? 'flag' : 'check'} size={12} />}
+      </button>
+      {open && at.current && (
+        <CheckPop anchor={at.current} onEnter={enter} onLeave={leave} label={popLabel}>
+          {children(() => setOpen(false))}
+        </CheckPop>
+      )}
+    </span>
+  )
+}
+
+/** The mark's hover card, on the page, under the mark or over it where there is no room below. */
+export function CheckPop({ anchor, onEnter, onLeave, label, children }: { anchor: HTMLElement; onEnter: () => void; onLeave: () => void; label: string; children: ReactNode }) {
+  const el = useRef<HTMLDivElement>(null)
+  const [pos, setPos] = useState<{ left: number; top: number } | null>(null)
+  useLayoutEffect(() => {
+    const pop = el.current
+    if (pop) setPos(placeTip(anchor.getBoundingClientRect(), pop.offsetWidth, pop.offsetHeight, window.innerWidth, window.innerHeight))
+  }, [anchor])
+  return createPortal(
+    <div
+      ref={el}
+      className="bcell-check-pop overlay"
+      role="dialog"
+      aria-label={label}
+      style={{ position: 'fixed', left: pos?.left ?? 0, top: pos?.top ?? 0, visibility: pos ? 'visible' : 'hidden' }}
+      onMouseEnter={onEnter}
+      onMouseLeave={onLeave}
+      onMouseDown={(e) => e.stopPropagation()}
+    >
+      {children}
+    </div>,
+    document.body,
+  )
+}

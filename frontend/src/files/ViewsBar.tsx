@@ -16,7 +16,7 @@ import { bus } from '../lib/bus'
 import { refreshProposals, useProposals } from '../lib/proposals'
 import { startSurfaceDrag } from '../lib/surfaces'
 import { track } from '../lib/telemetry'
-import type { Proposal, View } from '../lib/types'
+import type { Proposal, View, ViewReview } from '../lib/types'
 import { useReadyViews } from './viewReady'
 import { fitViews } from './viewsFit'
 
@@ -36,6 +36,8 @@ export interface BuiltView {
   claims?: string[]
   /** when it last passed its checks: a new stamp is a new version of its page */
   built?: string
+  /** the review of its pictures, from its proposal */
+  review?: ViewReview
 }
 
 /** The views the bar lists and the proposals not yet built, read and kept fresh. */
@@ -62,7 +64,7 @@ export function useViews(ws: string): { views: BuiltView[]; proposals: Proposal[
   }, [ws])
   const known = new Map(views.map((v) => [v.slug, v]))
   const built: BuiltView[] = [
-    ...proposals.filter((p) => p.status === 'built').map((p) => ({ slug: p.slug, name: p.name, first_file: known.get(p.slug)?.first_file, claims: known.get(p.slug)?.claims, built: known.get(p.slug)?.built })),
+    ...proposals.filter((p) => p.status === 'built').map((p) => ({ slug: p.slug, name: p.name, first_file: known.get(p.slug)?.first_file, claims: known.get(p.slug)?.claims, built: known.get(p.slug)?.built, review: p.review })),
     ...views.filter((v) => !proposals.some((p) => p.slug === v.slug)).map((v) => ({ slug: v.slug, name: v.name, first_file: v.first_file, claims: v.claims, built: v.built })),
   ]
   return { views: built, proposals: proposals.filter((p) => p.status !== 'built' && p.status !== 'dropped') }
@@ -175,9 +177,9 @@ export function ViewsBar({ ws, value, onChange, views, proposals, compact = fals
     openThread(p.chat, 'view')
   }
 
-  const options: { value: string; label: string; icon: IconName; anchor?: string; dot?: boolean }[] = [
+  const options: { value: string; label: string; icon: IconName; anchor?: string; dot?: boolean; className?: string }[] = [
     { value: BROWSER, label: 'File browser', icon: 'folder-open' },
-    ...views.map((v) => ({ value: viewKey(v.slug), label: v.name, icon: 'view' as const, anchor: `view:${v.slug}`, dot: ready.includes(v.slug) })),
+    ...views.map((v) => ({ value: viewKey(v.slug), label: v.name, icon: 'view' as const, anchor: `view:${v.slug}`, dot: ready.includes(v.slug), className: v.review?.state === 'running' ? 'is-reviewing' : undefined })),
   ]
   const pending = proposals.filter((p) => !gone.has(p.slug))
   const active = options.findIndex((o) => o.value === value)

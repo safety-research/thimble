@@ -2196,3 +2196,21 @@
   flex: none;
   align-self: center;
 }
+/* the mark of the review of the view's pictures, at the head's right end after the mode switch (ViewPane ReviewMark) */
+.view-pane-head .view-pane-review {
+  align-self: center;
+  margin: 0;
+}
+/* while the review of a view's pictures runs, its name in the views bar shimmers, as a card does while it is checked */
+.files-views .seg-opt.is-reviewing .seg-label {
+  background-image: linear-gradient(100deg, transparent 30%, color-mix(in oklab, var(--accent) 16%, transparent) 50%, transparent 70%);
+  background-size: 300% 100%;
+  animation: bcell-shimmer 1.8s linear infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .files-views .seg-opt.is-reviewing .seg-label {
+    animation: none;
+    background-image: none;
+    background-color: color-mix(in oklab, var(--accent) 8%, transparent);
+  }
+}

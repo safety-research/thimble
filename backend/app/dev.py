@@ -1409,7 +1409,8 @@ def _size(p: Path | None) -> int:
 async def _worker_turn(run: Run, run_log: Log, cwd: Path, prompt: str, resume: str | None, *, name: str,
                        workspace: str | None, on_session: Callable[[str, str], Any],
                        add_dirs: "tuple[Path, ...] | list[Path]" = (), env: dict[str, str] | None = None,
-                       answered: bool = True, fence: dict[str, Any] | None = None) -> str:
+                       answered: bool = True, fence: dict[str, Any] | None = None,
+                       turn_timeout_s: float | None = None) -> str:
     """One turn of a ticket's background session, started with `prompt` or woken with it when `resume` names the
     session, then watched until the turn ends, its transcript copied into the chat. `on_session(short id, full id)`
     records the session. Returns the session's report; SessionError when it ended any way but done, ran past
@@ -1436,11 +1437,12 @@ async def _worker_turn(run: Run, run_log: Log, cwd: Path, prompt: str, resume: s
                       f"background session {run.session} (`claude attach {run.session}` opens it)")
     waiting, unlisted, early, idle = False, 0, 0, 0
     started = time.monotonic()
+    limit = TURN_TIMEOUT_S if turn_timeout_s is None else turn_timeout_s
     asked_at = 0.0
     while True:
         await asyncio.sleep(POLL_S)
         tail.read(run_log)
-        if time.monotonic() - started > TURN_TIMEOUT_S:
+        if time.monotonic() - started > limit:
             state = "timed out"
             break
         if waiting and time.monotonic() - asked_at > ASK_TIMEOUT_S:
@@ -1482,7 +1484,7 @@ async def _worker_turn(run: Run, run_log: Log, cwd: Path, prompt: str, resume: s
     # would start a copy).
     await asyncio.to_thread(SESSIONS.stop, run.session)
     if state == "timed out":
-        raise SessionError(f"the session had not finished after {_minutes(TURN_TIMEOUT_S)}, so it was stopped; Retry "
+        raise SessionError(f"the session had not finished after {_minutes(limit)}, so it was stopped; Retry "
                            "wakes it again")
     if state == "unanswered":
         raise SessionError(f"the session waited {_minutes(ASK_TIMEOUT_S)} for an answer nobody gave, so it was "
@@ -2157,7 +2159,7 @@ async def run_view(c: str, slug: str, run: Run) -> None:
     that has a session runs the gate first, since an interrupted build may have finished. A change (`changed`) wakes the
     session with what changed; a change to a built view (`revision`) is built only when its files differ, and on failure
     or dismissal the view goes back to how it was."""
-    from . import agent_session, session, tools, views  # noqa: PLC0415
+    from . import agent_session, session, tools, view_review, views  # noqa: PLC0415
 
     prop = views.read_proposal(c, slug)
     if prop is None:
@@ -2297,6 +2299,7 @@ async def run_view(c: str, slug: str, run: Run) -> None:
         log.info("view ticket %s/%s built%s", c, slug, " (a change)" if revision else "")
         if chat:
             _close_chat({"workspace": c, "chat": chat}, "done", result_text[:400] or None)
+        view_review.after_built(c, slug)
         if slug in views.held_slugs(c):
             return  # the orientation's first run still holds it: views.release_held tells main
         try:
@@ -2324,6 +2327,82 @@ async def run_view(c: str, slug: str, run: Run) -> None:
         _change_failed_chip(c, prop, why)
         return
     _view_failed(c, slug, why, chat, drop_why=drop_why)
+
+
+# a turn of a revision the view review asked for, and the stage line its thread gets
+REVIEW_TURN_TIMEOUT_S = float(os.environ.get("THIMBLE_VIEW_REVIEW_TURN_S", "") or 12 * 60)
+REVIEW_LINE = "a review of the view's pictures found problems, so the session fixes them"
+_review_runs: dict[tuple[str, str], Run] = {}  # (workspace, slug) -> the revision the view review is running
+
+
+def stop_review_session(c: str, slug: str) -> None:
+    """Stop the background session of the view review's revision, if one runs (view_review.stop)."""
+    run = _review_runs.get((c, slug))
+    if run is not None:
+        SESSIONS.stop(run.session)
+
+
+async def review_revision(c: str, slug: str, message: str) -> tuple[bool, str]:
+    """A revision the view review asks for: the view's build session woken with `message` (prompts/dev-view-review.md)
+    in the view's thread, the view's checks run after each turn and fed back up to MAX_ATTEMPTS times. (passed, the
+    session's report or why it did not pass). A view with no build session gets a new one, started with its ticket."""
+    from . import views  # noqa: PLC0415
+
+    prop = views.read_proposal(c, slug)
+    if prop is None:
+        return False, "the view has no proposal"
+    folder = views.views_dir(c) / slug
+    corpus = config.corpus_dir(c)
+    chat = _view_chat(c, prop)
+    run_log = Log(agents.Recorder(c, chat)) if chat else Log(None)
+    run = Run(ticket_id=f"view-review:{slug}", title=str(prop.get("name") or slug), ts_start=_now())
+    _review_runs[(c, slug)] = run
+    resume = prop.get("session_id")
+    prompt = message if resume else f"{build_view_prompt(c, prop, folder, corpus)}\n\n{message}"
+    run_log.stage(REVIEW_LINE)
+    why, result_text = "", ""
+
+    def on_session(short: str, sid: str) -> None:
+        views.update_proposal(c, slug, session=short, session_id=sid)
+
+    try:
+        for attempt in range(1, MAX_ATTEMPTS + 1):
+            if attempt > 1:
+                run_log.stage(f"the session fixes what the checks found (attempt {attempt} of {MAX_ATTEMPTS})")
+            try:
+                result_text = await _worker_turn(run, run_log, corpus, prompt, resume, name=f"thimble view: {prop.get('name')}",
+                                                 workspace=c, on_session=on_session, add_dirs=(folder,),
+                                                 env={SESSION_ENV: f"view:{slug}"}, answered=False,
+                                                 fence=view_fence(c, slug, corpus, folder),
+                                                 turn_timeout_s=REVIEW_TURN_TIMEOUT_S)
+            except RuntimeError as e:
+                why = str(e)
+                run_log.error(why)
+                break
+            if capacity := capacity_failure(result_text):
+                why = capacity
+                break
+            resume = run.session_id or resume
+            rep = await views.gate(c, slug, views._kept_locators(c, slug))
+            if rep.get("ok"):
+                run_log.stage(f"checks passed: {len(rep.get('checks') or [])} ref(s), the page loaded")
+                if chat:
+                    _close_chat({"workspace": c, "chat": chat}, "done", result_text[:400] or None)
+                return True, result_text
+            why = views.first_failure(rep) or "the checks did not pass"
+            run_log.stage(f"checks failed: {why}")
+            prompt = build_gates_prompt("\n".join(views.gate_lines(rep)))
+    except asyncio.CancelledError:
+        await asyncio.to_thread(SESSIONS.stop, run.session)
+        if chat:
+            _close_chat({"workspace": c, "chat": chat}, "stopped", "the review was stopped")
+        raise
+    finally:
+        if _review_runs.get((c, slug)) is run:
+            del _review_runs[(c, slug)]
+    if chat:
+        _close_chat({"workspace": c, "chat": chat}, "failed", why[:ERROR_CHARS] or None)
+    return False, why
 
 
 CAPACITY_WORDS = {"overloaded": "Anthropic's API was overloaded", "rate_limited": "Anthropic's API rate limit was reached",

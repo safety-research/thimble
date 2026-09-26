@@ -693,3 +693,52 @@ def test_a_build_that_is_winding_down_is_not_queued_again(board, monkeypatch):
     del dev._view_stopping[(CORPUS, "posts")]
     dev.recover_views(CORPUS)
     assert dev._view_queue == [(CORPUS, "posts")]
+
+
+async def test_a_review_revision_wakes_the_build_session_and_passes_once_the_view_passes_its_checks(board, monkeypatch):
+    """The view review's revision (dev.review_revision): the build's session is woken with the review's message, the
+    view's checks run after its turn, and what they find goes back to it; a view that still fails after MAX_ATTEMPTS
+    turns is a failed revision with the checks' first failure. A built view is reviewed after its build."""
+    _stand_ins(monkeypatch)
+    _queued()
+    _write({"reader.py": READER, "view.html": HTML, "view.json": VIEW_JSON})
+    views.mark_built(CORPUS, "posts")
+    views.update_proposal(CORPUS, "posts", session="s1", session_id="session-1")
+    prompts_seen: list[tuple[str | None, str]] = []
+
+    async def turn(run, run_log, corpus, prompt, resume, **kw):
+        prompts_seen.append((resume, prompt))
+        run.session, run.session_id = "s1", "session-1"
+        assert kw["turn_timeout_s"] == dev.REVIEW_TURN_TIMEOUT_S
+        # the first turn breaks the page, the second fixes it
+        _write({"view.html": "" if len(prompts_seen) == 1 else HTML.replace("out", "posts")})
+        return "fixed"
+
+    monkeypatch.setattr(dev, "_worker_turn", turn)
+    ok, text = await dev.review_revision(CORPUS, "posts", "## A review of the view\n\n- picture 1: cut off")
+    assert ok and text == "fixed"
+    assert prompts_seen[0] == ("session-1", "## A review of the view\n\n- picture 1: cut off")
+    assert prompts_seen[1][0] == "session-1" and "view.html is empty" in prompts_seen[1][1]
+
+    async def broken(run, run_log, corpus, prompt, resume, **kw):
+        _write({"view.html": ""})
+        return "done"
+
+    monkeypatch.setattr(dev, "_worker_turn", broken)
+    ok, why = await dev.review_revision(CORPUS, "posts", "fix it")
+    assert not ok and why == "problem: view.html is empty"
+
+    reviewed: list[str] = []
+    from app import view_review
+
+    monkeypatch.setattr(view_review, "after_built", lambda c, slug: reviewed.append(slug))
+
+    async def builds(run, run_log, corpus, prompt, resume, **kw):
+        run.session, run.session_id = "s1", "session-1"
+        _write({"reader.py": READER, "view.html": HTML, "view.json": VIEW_JSON})
+        return "built"
+
+    monkeypatch.setattr(dev, "_worker_turn", builds)
+    views.update_proposal(CORPUS, "posts", status="queued", session_id=None)
+    await dev.run_view(CORPUS, "posts", dev.Run(ticket_id="view:posts", title="Posts", ts_start=dev._now()))
+    assert reviewed == ["posts"]

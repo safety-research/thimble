@@ -406,6 +406,8 @@ def delete_view(c: str, slug: str) -> None:
     built-in
     viewer is not deleted."""
     d = _view_dirs(c).get(slug)
+    if d is not None:
+        _stop_review(c, slug)
     if d is None:
         if _builtin_dir(slug) is not None:
             raise HTTPException(400, f"{slug} is a viewer thimble ships; a workspace view of the same slug overrides it")
@@ -1351,6 +1353,13 @@ def release_held(c: str) -> list[dict[str, Any]]:
     return shown
 
 
+def _stop_review(c: str, slug: str) -> None:
+    """A change to the view, or its deletion, stops its review (view_review)."""
+    from . import view_review  # noqa: PLC0415
+
+    view_review.stop(c, slug, view_review.CHANGED_NOTE)
+
+
 def _queue(c: str, slug: str) -> None:
     from . import dev  # noqa: PLC0415 — the dev agent's runner imports this module
 
@@ -1479,6 +1488,7 @@ def revise(c: str, slug: str, request: str, *, why: str | None = None, claims: A
     from . import dev  # noqa: PLC0415
 
     request = str(request or "").strip()
+    _stop_review(c, slug)
     with _proposals_lock:
         prop = read_proposal(c, slug)
         view = read_built(c, slug)
@@ -1778,13 +1788,13 @@ async def shoot(c: str, slug: str, open_place: dict[str, Any] | None, out_png: P
 
 
 async def shoot_states(c: str, slug: str, states: list[dict[str, Any]], *, width: int = 1100,
-                       height: int = 760) -> list[dict[str, Any]]:
+                       height: int = 760, answers: int = 0) -> list[dict[str, Any]]:
     """Load the view's page headless once per state (scripts/view_shot.mjs, in the frontend's Playwright Chromium), each
     state {out, open, labels}: send it `open`, answer its fetches from the reader and its marks requests under the state's
     labels context (NO_LABELS, a probe_context or labels_context), serve its media requests with the file media_file
     names, and write a picture of it to `out`. Returns one result per state, {ok, errors, fetches, height, refs, records,
-    units, marked, hidden, fonts, fetched_records, png?}; without Node or the frontend's packages each has
-    build_problem's line as its one error."""
+    units, marked, hidden, fonts, fetched_records, png?}, and with `answers` the first that many reader answers each
+    state's page got; without Node or the frontend's packages each has build_problem's line as its one error."""
     def failed(why: str) -> list[dict[str, Any]]:
         return [{"ok": False, "errors": [why], "fetches": 0} for _ in states]
 
@@ -1814,6 +1824,7 @@ async def shoot_states(c: str, slug: str, states: list[dict[str, Any]], *, width
     except OSError as e:
         return failed(f"the headless browser could not start: {e}")
     fetched: list[set[str]] = [set() for _ in states]  # the record refs each state's reader answers handed its page
+    kept: list[list[Any]] = [[] for _ in states]  # the first `answers` reader answers of each state
     results: list[dict[str, Any]] | None = None
 
     async def reply(obj: dict[str, Any]) -> None:
@@ -1846,6 +1857,8 @@ async def shoot_states(c: str, slug: str, states: list[dict[str, Any]], *, width
                     strings: list[str] = []
                     _strings(data, strings)
                     fetched[i].update(s for s in strings[:FETCHED_SCAN_MAX] if _RECORD_REF.match(s))
+                    if len(kept[i]) < answers:
+                        kept[i].append(data)
                     await reply({"id": msg["fetch"], "data": data})
                 except ReaderError as e:
                     await reply({"id": msg["fetch"], "error": e.message})
@@ -1897,6 +1910,8 @@ async def shoot_states(c: str, slug: str, states: list[dict[str, Any]], *, width
         r.setdefault("errors", [])
         r.setdefault("fetches", 0)
         r["fetched_records"] = len(fetched[i])
+        if answers:
+            r["answers"] = kept[i]
         if Path(s["out"]).is_file():
             r["png"] = str(s["out"])
         out.append(r)
