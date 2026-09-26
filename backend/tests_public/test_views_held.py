@@ -155,3 +155,40 @@ def test_a_proposal_the_analyst_asked_for_is_announced_and_listed_at_once(board)
     assert board == [{"type": "view", "slug": "posts", "status": "queued"}]
     assert _in_bar() == ["posts"]
     assert Path(views.proposals_path(CORPUS)).is_file()
+
+
+def test_an_orientation_proposes_at_most_three_views_and_improves_one_under_its_name(board, monkeypatch):
+    from fastapi import HTTPException
+
+    monkeypatch.setattr(dev, "stop_view", lambda c, slug, why: True)
+    for name in ("Posts", "Threads", "Replies"):
+        views.propose(CORPUS, **{**ARGS, "name": name}, proposed_by="orient", orientation=True)
+    with pytest.raises(HTTPException) as e:
+        views.propose(CORPUS, **{**ARGS, "name": "Codebook"}, proposed_by="orient", orientation=True)
+    assert e.value.status_code == 409
+    assert e.value.detail == ("Codebook was not proposed: an orientation proposes at most 3 views, and yours are Posts, "
+                              "Threads, Replies. To improve one, propose it again under its name.")
+    assert [p["slug"] for p in views.list_proposals(CORPUS)] == ["posts", "threads", "replies"]
+
+    better = views.propose(CORPUS, **{**ARGS, "name": "threads", "why": "each thread whole"}, proposed_by="orient",
+                           orientation=True)
+    assert better["slug"] == "threads" and views.read_proposal(CORPUS, "threads")["why"] == "each thread whole"
+
+    views.propose(CORPUS, "Captions", "a call's captions", ["board.jsonl"], "one cue a row", proposed_by="orient",
+                  orientation=True, suggested=True)
+    views.propose(CORPUS, **{**ARGS, "name": "Asked"}, proposed_by="analyst", asked=True)
+    views.drop(CORPUS, "replies", "its checks did not pass")
+    views.propose(CORPUS, **{**ARGS, "name": "Codebook"}, proposed_by="orient", orientation=True)
+    assert [p["name"] for p in views.orientation_views(CORPUS)] == ["Posts", "Threads", "Codebook"]
+
+
+async def test_the_tool_tells_the_orientation_it_has_proposed_three_views(board, monkeypatch):
+    from app import tools
+
+    monkeypatch.setattr(views, "_queue", lambda c, slug: None)
+    fields = {"unit": "one post", "overview": "every post", "zoom": "a thread", "filter": "labels", "details": "a post"}
+    for name in ("Posts", "Threads", "Replies"):
+        res = await tools.call(CORPUS, "propose_view", {**ARGS, **fields, "name": name}, session=tools.ORIENT_SESSION)
+        assert not res.is_error
+    res = await tools.call(CORPUS, "propose_view", {**ARGS, **fields, "name": "Codebook"}, session=tools.ORIENT_SESSION)
+    assert res.is_error and "at most 3 views" in res.text and "propose it again under its name" in res.text

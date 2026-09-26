@@ -1325,6 +1325,16 @@ def title_case(name: Any) -> str:
     return " ".join("-".join(p[:1].upper() + p[1:] for p in w.split("-")) for w in words)
 
 
+# the views an orientation may propose; a viewer it suggests for a file type is not counted, nor a view dropped
+ORIENTATION_VIEWS_MAX = 3
+
+
+def orientation_views(c: str) -> list[dict[str, Any]]:
+    """The views the orientation proposed that count toward ORIENTATION_VIEWS_MAX."""
+    return [p for p in list_proposals(c) if (p.get("orientation") or p.get("held")) and p.get("status") != "dropped"
+            and p.get("status") != "suggested" and not offered_type_viewer(p.get("claims"))]
+
+
 def propose(c: str, name: str, why: str, claims: Any, arrangement: str, proposed_by: str = "analyst",
             orientation: bool = False, asked: bool = False, suggested: bool = False,
             spec: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -1332,7 +1342,8 @@ def propose(c: str, name: str, why: str, claims: Any, arrangement: str, proposed
     name not yet built is replaced under its slug, its build stopped. An `orientation` proposal is stored
     `orientation: true` and, unless `suggested`, `held: true`, queued unannounced until its view passes its checks
     (mark_built); a held proposal proposed again unchanged is left as it is, and changed it is revised (revise), still
-    held.
+    held. An orientation proposes at most ORIENTATION_VIEWS_MAX views: one more under a new name is refused (409), and
+    one under a name it proposed before improves that view in place.
     `asked` says the analyst asked for it. With `suggested` (a viewer for a file type the File browser proposes) it is
     stored `suggested` and not queued until the analyst accepts it (accept). A `spec` (propose_view's fields) is stored
     with the proposal and written out as its `arrangement`."""
@@ -1344,6 +1355,11 @@ def propose(c: str, name: str, why: str, claims: Any, arrangement: str, proposed
         raise HTTPException(400, "a proposal claims at least one file: give `claims` as corpus-relative globs")
     spec = clean_spec(spec)
     hold = orientation and not suggested
+    if hold:
+        mine = orientation_views(c)
+        if len(mine) >= ORIENTATION_VIEWS_MAX and not any(str(p["name"]).casefold() == name.casefold() for p in mine):
+            raise HTTPException(409, _hint("propose_view-cap", view=name, n=ORIENTATION_VIEWS_MAX,
+                                           views=", ".join(str(p["name"]) for p in mine)))
     arrangement = spec_arrangement(spec) if spec else _lines(arrangement)
     if not arrangement:
         raise HTTPException(400, "a proposal says which records a unit gathers and how the page lays it out (`arrangement`)")

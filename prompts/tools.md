@@ -639,6 +639,10 @@ Proposed the viewer {view} (view:{slug}) for {claims}. The File browser offers i
 
 No file of the corpus matches {claims}, so the view was not proposed and the dev agent has nothing to build. {near} Propose it again with claims that match files the corpus holds.
 
+## propose_view-cap
+
+{view} was not proposed: an orientation proposes at most {n} views, and yours are {views}. To improve one, propose it again under its name.
+
 ## propose_view-near
 
 The files nearest {claim} are {paths}.
