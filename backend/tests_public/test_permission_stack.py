@@ -25,10 +25,12 @@ def _fresh(workspaces_tmp, tmp_path, monkeypatch):
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "claude-config"))
     session._live.clear()
     channel._asks.clear()
+    channel._answered.clear()
     agents._busy.clear()
     yield
     session._live.clear()
     channel._asks.clear()
+    channel._answered.clear()
 
 
 def _line(rec: dict) -> str:
@@ -105,6 +107,21 @@ async def test_each_prompt_leaves_with_its_own_call_s_result(tmp_path):
         f.write(_line(_result(0)) + _line(_result(2)))
     session.tail_once(lv)
     assert _waiting() == [] and not channel._asks
+
+
+async def test_a_prompt_answered_in_the_browser_ends_no_other_prompt_with_its_result(tmp_path):
+    lv, sub = _setup(tmp_path)
+    with sub.open("a") as f:
+        f.write(_line(_use(0)) + _line(_use(1)))
+    session.tail_once(lv)
+    _ask(0)
+    _ask(1)
+    assert channel._answer_ask("h0", "allow")
+    channel._drop(CORPUS, {"h0"}, answer="allow")
+    with sub.open("a") as f:
+        f.write(_line(_result(0)))
+    session.tail_once(lv)
+    assert _waiting() == ["h1"], "the answered call's result is not the other prompt's"
 
 
 async def test_a_stopped_agent_takes_its_prompts_with_it(tmp_path):

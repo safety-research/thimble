@@ -820,10 +820,13 @@ async def hook_permission_route(request: Request, body: HookPermission) -> dict[
 
 
 def _answer_ask(request_id: str, behavior: str | None) -> bool:
-    """End a hook's wait with the analyst's answer, or with none; False when no hook waits on that request."""
+    """End a hook's wait with the analyst's answer, or with none; False when no hook waits on that request. An agent's
+    prompt the analyst answered here is remembered (_answered), so its call's result ends no other prompt."""
     held = _asks.pop(request_id, None)
     if held is None:
         return False
+    if behavior is not None and held.agent:
+        _answered.setdefault((held.c, held.agent), []).append(held.call)
     fut = held.fut
     held.loop.call_soon_threadsafe(lambda: fut.done() or fut.set_result(behavior))
     return True
@@ -876,6 +879,8 @@ def asking(c: str) -> set[str]:
     return {a.agent for a in _asks.values() if a.c == c and a.agent}
 
 
+# (workspace, agent) -> the call_keys of the agent's prompts the analyst answered here whose results have not come yet
+_answered: dict[tuple[str, str], list[tuple[str, str]]] = {}
 # the input field that names a call of each tool, compared when a prompt is matched to its call's result (call_key)
 CALL_FIELDS = {"Bash": "command", "Monitor": "command", "WebFetch": "url", "WebSearch": "query", "Read": "file_path",
                "Write": "file_path", "Edit": "file_path", "NotebookEdit": "notebook_path", "Glob": "pattern",
@@ -910,7 +915,11 @@ def calls_done(c: str, agent: str, done: "list[tuple[tuple[str, str], float]]") 
     is matched to the prompt with its call_key, else to the one prompt of its tool that agent has open; any other
     prompt stays."""
     gone: set[str] = set()
+    answered = _answered.get((c, agent), [])
     for key, at in done:
+        if key in answered:
+            answered.remove(key)  # the prompt the analyst answered in the browser, gone already
+            continue
         open_ = sorted(((i, a) for i, a in _asks.items() if a.c == c and a.agent == agent and i not in gone
                         and a.call[0] == key[0] and a.at <= at), key=lambda x: x[1].at)
         hit = next((i for i, a in open_ if a.call == key), None)
@@ -937,3 +946,4 @@ async def shutdown() -> None:
     _taken.clear()
     for request_id in list(_asks):
         _answer_ask(request_id, None)
+    _answered.clear()

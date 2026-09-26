@@ -80,7 +80,7 @@ export function PermissionCard({ ws, asks, metas, labels }: {
         <span className="chat-perm-title">Permission needed</span>
         <span className="chat-perm-from">
           <span className="chat-perm-from-word">from</span>
-          <ThreadChip id={askThread(ask)} />
+          <ThreadChip id={askThread(ask, metas, labels)} />
         </span>
         {shown.length > 1 && (
           <span className="chat-perm-pager">
