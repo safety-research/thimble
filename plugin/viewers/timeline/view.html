@@ -5,12 +5,8 @@
   /* the theme's tokens arrive as CSS variables; the fallbacks are the light theme's, for a page loaded on its own */
   :root {
     --ink: var(--text-primary, #23211d);
-    --ink-2: var(--text-secondary, #5f5a52);
     --ink-3: var(--text-tertiary, #8b857b);
-    --card: var(--surface-card, #ffffff);
-    --inset: var(--bg-sunken, #f3f1ec);
     --line-2: var(--border-subtle, rgba(35, 33, 29, 0.12));
-    --live: var(--accent, #5b5bd6);
     --sans: var(--font-body, ui-sans-serif, system-ui, sans-serif);
     --mono: var(--font-mono, ui-monospace, monospace);
   }
@@ -22,17 +18,16 @@
   #bin { flex: 1; min-height: 0; overflow: auto; padding: 8px 16px 32px; border-top: 1px solid var(--line-2); }
   h2 { font-size: 14px; font-weight: 500; margin: 8px 0 2px; }
   .meta { font-size: 11px; color: var(--ink-3); margin-bottom: 10px; }
-  table { border-collapse: collapse; width: 100%; max-width: 980px; }
-  td { padding: 4px 10px 4px 0; border-top: 1px solid var(--line-2); font-size: 12px; vertical-align: top; }
-  /* room at the left for the bar thimble draws on a row or a heading a label marks, so it never touches the text */
-  td:first-child, #bin > div:first-child { padding-left: 8px; }
-  td.t, td.k { font-family: var(--mono); font-size: 11px; color: var(--ink-3); white-space: nowrap; }
-  td.a { white-space: nowrap; }
-  td:last-child { width: 100%; }
-  tr { cursor: pointer; }
-  tr:hover td { background: var(--inset); }
-  tr.target td { color: var(--live); }
-  button.page { font: 12px var(--sans); color: var(--ink-2); background: none; border: 1px solid var(--line-2); border-radius: 6px; padding: 3px 10px; margin: 8px 8px 0 0; cursor: pointer; }
+  /* the calls are thimble's table (.table) and the pages its buttons (.btn), which every view's page has; the table's
+     first cell leaves room at the left for the bar thimble draws on a row a label marks */
+  #bin > div:first-child { padding-left: 8px; }
+  .table { max-width: 980px; }
+  .table td { vertical-align: top; }
+  .table td.t, .table td.k { color: var(--ink-3); white-space: nowrap; }
+  .table td.a { white-space: nowrap; }
+  .table td:last-child { width: 100%; font-family: var(--sans); }
+  .table tr { cursor: pointer; }
+  .pages { display: flex; gap: 8px; margin-top: 8px; }
 </style>
 </head>
 <body>
@@ -168,29 +163,31 @@
     const range = res.total > res.items.length ? `, ${res.offset + 1} to ${res.offset + res.items.length} shown` : ''
     head.append(el('h2', null, binName(key, chart.bin.seconds)), el('div', 'meta mono', `${res.total} ${res.total === 1 ? 'call' : 'calls'}${range}`))
     if (chartView) await chartView.signal('open', key).runAsync()
-    const table = el('table')
+    const table = el('table', 'table')
+    const rows = el('tbody')
+    table.append(rows)
     for (const call of res.items) {
-      const tr = el('tr', call.ref === targetRef ? 'target' : '')
+      const tr = el('tr', call.ref === targetRef ? 'active' : '')
       tr.dataset.anchor = call.ref
       tr.dataset.anchorName = `the ${call.action} call at ${call.time}`
       tr.dataset.anchorText = [call.action, call.agent, call.detail].filter(Boolean).join(' ')
       tr.append(el('td', 't', call.time.slice(11, 19)), el('td', 'k', call.action), el('td', 'a', call.agent), el('td', null, call.detail))
       tr.onclick = () => thimble.navigate(call.ref)
-      table.append(tr)
+      rows.append(tr)
     }
-    const pages = el('div')
+    const pages = el('div', 'pages')
     if (res.offset > 0) {
-      const prev = el('button', 'page', 'Earlier calls')
+      const prev = el('button', 'btn btn-secondary btn-sm', 'Earlier calls')
       prev.onclick = () => openBin(key, Math.max(0, res.offset - PAGE))
       pages.append(prev)
     }
     if (res.offset + res.items.length < res.total) {
-      const next = el('button', 'page', 'Later calls')
+      const next = el('button', 'btn btn-secondary btn-sm', 'Later calls')
       next.onclick = () => openBin(key, res.offset + res.items.length)
       pages.append(next)
     }
     box.replaceChildren(head, table, pages)
-    const hit = box.querySelector('tr.target')
+    const hit = box.querySelector('tr.active')
     if (hit) hit.scrollIntoView({ block: 'center' })
     else box.scrollTop = 0
   }

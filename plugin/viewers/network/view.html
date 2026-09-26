@@ -7,11 +7,8 @@
     --ink-2: var(--text-secondary, #5f5a52);
     --ink-3: var(--text-tertiary, #8b857b);
     --card: var(--surface-card, #ffffff);
-    --inset: var(--bg-sunken, #f3f1ec);
-    --line: var(--border-hairline, rgba(35, 33, 29, 0.08));
     --line-2: var(--border-subtle, rgba(35, 33, 29, 0.12));
     --live: var(--accent, #5b5bd6);
-    --live-soft: var(--accent-soft, rgba(91, 91, 214, 0.14));
     --node: var(--viz-ink-2, #6b665e);
     --sans: var(--font-body, ui-sans-serif, system-ui, sans-serif);
     --mono: var(--font-mono, ui-monospace, monospace);
@@ -29,9 +26,8 @@
   aside { border-left: 1px solid var(--line-2); overflow: auto; padding: 16px; }
   aside h2 { font-size: 14px; font-weight: 500; margin: 0 0 2px; }
   aside .meta { font-size: 11px; color: var(--ink-3); margin-bottom: 12px; }
-  .hop { background: var(--card); border-radius: 8px; padding: 8px 10px; margin-bottom: 6px; cursor: pointer; border: 1px solid transparent; }
-  .hop:hover { background: var(--inset); }
-  .hop.target { border-color: var(--live); }
+  /* each hand-off is a row of thimble's list (.list-row), which every view's page has, with the cited one .active */
+  .hop { flex-direction: column; align-items: flex-start; gap: 0; }
   .hop .who { font-size: 12px; font-weight: 500; }
   .hop .where { font-size: 11px; color: var(--ink-3); }
 </style>
@@ -146,7 +142,7 @@
     const [a, b] = pair.split('|')
     side.replaceChildren(el('h2', null, `${a} and ${b}`), el('div', 'meta mono', `${res.total} hand-offs, newest first`))
     for (const hop of res.items) {
-      const row = el('div', 'hop' + (hop.ref === targetRef ? ' target' : ''))
+      const row = el('div', 'list-row hop' + (hop.ref === targetRef ? ' active' : ''))
       row.dataset.anchor = hop.ref
       row.dataset.anchorName = `the hand-off of #${hop.pr} from ${hop.from} to ${hop.to}`
       row.dataset.anchorText = `${hop.from} → ${hop.to}, ${hop.action} #${hop.pr}, ${hop.time}`

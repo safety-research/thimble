@@ -392,6 +392,14 @@ def test_the_frame_document_blocks_every_host_before_any_script(ws):
     assert views._libs(["vega-embed"]) == ["vega", "vega-lite", "vega-embed"]
 
 
+def test_the_frame_document_gives_the_view_thimble_s_parts_before_its_own_styles(ws):
+    doc = views.frame_document(views.read_view(CORPUS, "threads"))
+    kit = doc.index(".seg-opt.active")
+    assert doc.index("window.thimble") < kit < doc.index("body{font:13px sans-serif}")
+    for part in (".chip", ".btn", ".seg", ".field", ".table", ".list-row"):
+        assert f"\n{part} {{" in doc, part
+
+
 needs_browser = pytest.mark.skipif(shutil.which("node") is None or not (config.REPO_ROOT / "frontend" / "node_modules" / "playwright").is_dir(),
                                    reason="the headless page load needs node and frontend/node_modules/playwright")
 

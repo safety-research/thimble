@@ -10,7 +10,8 @@ dev.run_view calls after_built() when a build or a change to a view passes. Each
 2. Reading: the `verify` role's model reads the pictures, the proposal, what the shots measured and a sample of the
    records the pages fetched, and names what fails each criterion. A refused reading runs again on the fallback model,
    and the review's note says so (FALLBACK_NOTE). A picture in which the page has controls of its own that name the
-   test label adds a problem to the last criterion (label_controls).
+   test label adds a problem to the last criterion (label_controls), and one with chips or buttons drawn as rounded
+   pills of the page's own a problem to the formatting criterion (own_pills).
 3. Revision: with problems left and rounds to go, the build session gets prompts/dev-view-review.md and the view's
    checks run after its turns (dev.review_revision). A revision that passes is the view (views.mark_built), and the
    review runs again; one that does not leaves the view at its last version that passed.
@@ -329,6 +330,7 @@ async def _review(run: _Run) -> None:
         if isinstance(got, str):
             _set(c, slug, run, state="failed", note=got, revised=run.revised)
             return
+        got[2] += [p for p in own_pills(shots) if p not in got[2]]
         if lined:
             got[-1] += [p for p in label_controls(shots) if p not in got[-1]]
         problems = [p for crit in got for p in crit]
@@ -407,6 +409,8 @@ def measured(shots: list[dict[str, Any]]) -> str:
             line += f", {hidden} hidden by thimble" + ("" if hidden else " (the page filters in its reader)")
         if int(s.get("controls") or 0):
             line += f", {int(s['controls'])} controls of the page's own naming the test label"
+        if int(s.get("pills") or 0):
+            line += f", {int(s['pills'])} chips or buttons drawn as rounded pills of the page's own"
         lines.append(line)
     return "\n".join(lines)
 
@@ -417,6 +421,15 @@ def label_controls(shots: list[dict[str, Any]]) -> list[str]:
     for i, s in enumerate(shots, 1):
         if n := int(s.get("controls") or 0):
             return [_fill(_sections()["label-controls"], {"picture": str(i), "count": str(n)})]
+    return []
+
+
+def own_pills(shots: list[dict[str, Any]]) -> list[str]:
+    """A problem for the first picture in which the page drew chips or buttons as rounded pills of its own rather than
+    with thimble's parts (the shot's `pills`); [] when no picture has any."""
+    for i, s in enumerate(shots, 1):
+        if n := int(s.get("pills") or 0):
+            return [_fill(_sections()["own-pills"], {"picture": str(i), "count": str(n)})]
     return []
 
 

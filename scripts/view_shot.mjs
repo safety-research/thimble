@@ -17,11 +17,12 @@
 // Every other request the page makes is refused, so a view that reaches for the network fails here as it would in the
 // browser. A state is shot when its page has been quiet (no fetch or marks request in flight) for QUIET_MS after
 // `open`, or HARD_MS has passed. One line ends the run: {"done": true, "states": [{ok, errors, fetches, height, refs,
-// records, units, marked, hidden, controls, fonts}]}: `refs` the distinct data-anchor refs the page reported, `records`
+// records, units, marked, hidden, controls, pills, fonts}]}: `refs` the distinct data-anchor refs the page reported, `records`
 // those naming a record (`<path>#L<n>`), `units` those naming one of the view's units (`view:<slug>/<key>`), `marked`
 // the elements carrying a label's mark in the shot, `hidden` those the bridge hid or dimmed for the filter, `controls`
-// the page's own controls whose short text names a label that is on (labelControls), and `fonts` whether Hanken
-// Grotesk was loaded in the frame.
+// the page's own controls whose short text names a label that is on (labelControls), `pills` the chips and buttons it
+// drew as rounded pills of its own rather than with thimble's parts (ownPills), and `fonts` whether Hanken Grotesk was
+// loaded in the frame.
 import { createRequire } from 'node:module'
 import { readFileSync } from 'node:fs'
 import { open } from 'node:fs/promises'
@@ -54,9 +55,34 @@ function labelControls({ names, sel, max }) {
   }
   return n
 }
+// thimble's parts that draw as boxes (backend/app/viewer_kit.css): the chips, buttons and controls in the app's style.
+const KIT = '.chip, .btn, .seg, .field'
+// A pill's text longer than this is a card or a row, not a chip or a button.
+const PILL_TEXT_MAX = 40
+
+// The elements with a short text drawn as a rounded pill, a filled or edged box whose corners are at least half its
+// height, outside thimble's parts: a chip or a button the page styled itself. Runs in the frame.
+function ownPills({ kit, max }) {
+  let n = 0
+  for (const el of document.body ? document.body.querySelectorAll('*') : []) {
+    if (el instanceof SVGElement || el.closest(kit)) continue
+    const r = el.getBoundingClientRect()
+    if (r.height < 12 || r.height > 36 || r.width < r.height * 1.2) continue
+    const text = (el.textContent || '').trim()
+    if (!text || text.length > max) continue
+    const cs = getComputedStyle(el)
+    if ((parseFloat(cs.borderTopLeftRadius) || 0) < r.height / 2 - 1) continue
+    const filled = !/^(transparent|rgba\(0, 0, 0, 0\))$/.test(cs.backgroundColor)
+    const edged = parseFloat(cs.borderTopWidth) > 0 && cs.borderTopStyle !== 'none'
+    if (filled || edged) n++
+  }
+  return n
+}
 // The tokens a view's page reads: frontend/src/lib/frame.ts VIEW_TOKENS, which this list follows.
 const VIEW_TOKENS = [
   '--text-primary', '--text-secondary', '--text-tertiary', '--surface-card', '--bg-sub', '--bg-sunken', '--border-subtle', '--accent', '--font-body', '--font-mono',
+  '--ink-rgb', '--accent-hover', '--text-accent', '--text-on-accent', '--text-on-inverse', '--text-placeholder', '--surface-hover', '--surface-selected', '--surface-inverse', '--raised-bg', '--raised-ring', '--track-bg', '--chip-edge', '--chip-bg', '--chip-edge-hover',
+  '--chip-bg-hover', '--text-xs', '--text-ui-sm', '--text-sm', '--text-mono', '--text-mono-sm', '--h-chip', '--h-control', '--control-sm', '--h-row', '--radius-chip', '--radius-seg', '--radius-ui', '--transition-color',
   '--accent-soft', '--border-hairline', '--border-strong', '--bg-panel', '--status-positive', '--status-negative', '--status-warning',
   '--viz-1', '--viz-2', '--viz-3', '--viz-4', '--viz-5', '--viz-ink-1', '--viz-ink-2', '--viz-ink-3', '--viz-ink-4',
   '--label-1', '--label-2', '--label-3', '--label-4', '--label-5', '--label-6', '--label-7', '--label-8', '--label-9', '--label-10', '--label-11', '--label-12', '--label-none',
@@ -289,6 +315,7 @@ async function shootState(browser, opt, doc, state, i) {
       marked: await count('[data-thimble-label]'),
       hidden: await count('[data-thimble-drop]'),
       controls: await frame.evaluate(labelControls, { names: state.labels || [], sel: CONTROLS, max: CONTROL_TEXT_MAX }).catch(() => 0),
+      pills: await frame.evaluate(ownPills, { kit: KIT, max: PILL_TEXT_MAX }).catch(() => 0),
       fonts,
     }
   } finally {

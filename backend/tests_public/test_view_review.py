@@ -58,9 +58,10 @@ class Stubs:
     """The review's pictures, readings and revisions, each call recorded."""
 
     def __init__(self, monkeypatch, tmp_path: Path, readings: list, revisions: list | None = None, fonts: bool = True,
-                 controls: list[int] | None = None):
+                 controls: list[int] | None = None, pills: list[int] | None = None):
         self.readings, self.revisions, self.fonts = list(readings), list(revisions or []), fonts
         self.controls = list(controls or [])  # the label controls each round's pictures 2 to 4 find
+        self.pills = list(pills or [])  # the rounded pills of the page's own each round's pictures find
         self.shots, self.calls, self.revised = 0, [], []
         self.tmp = tmp_path
         monkeypatch.setattr(view_review, "shoot", self.shoot)
@@ -70,12 +71,14 @@ class Stubs:
     async def shoot(self, c, slug, view, files, prop, lined, rnd):
         self.shots += 1
         controls = self.controls.pop(0) if self.controls else 0
+        pills = self.pills.pop(0) if self.pills else 0
         out = []
         for i, name in enumerate(view_review.LINED_STATES if lined else view_review.PLAIN_STATES):
             png = self.tmp / f"shot-{self.shots}-{i}.png"
             png.write_bytes(PNG)
             out.append({"ok": True, "errors": [], "state": name, "png": str(png), "records": 3, "units": 0,
-                        "marked": 1, "hidden": 0, "controls": controls if i else 0, "fonts": self.fonts,
+                        "marked": 1, "hidden": 0, "controls": controls if i else 0, "pills": pills,
+                        "fonts": self.fonts,
                         "answers": [[{"ref": "board.jsonl#L1"}]]})
         return out
 
@@ -306,3 +309,13 @@ async def test_label_controls_in_the_page_are_a_problem_the_revision_gets(view, 
     assert review["state"] == "done" and review["left"] == [] and len(review["revised"]) == 1
     schema = s.calls[0]["tool"].input_schema["properties"]["assessment"]
     assert schema["minItems"] == schema["maxItems"] == 6
+
+
+async def test_chips_drawn_as_rounded_pills_of_the_page_s_own_are_a_formatting_problem(view, monkeypatch, tmp_path):
+    s = Stubs(monkeypatch, tmp_path, [ok(), ok()], pills=[3, 0])
+    review = await _review()
+    assert s.revised[0][2] == ["Picture 1: the page draws 3 chips or buttons as rounded pills of its own. Draw them with "
+                               "thimble's parts, `chip`, `btn` and `seg` with `seg-opt`, which every view's page has."]
+    assert "3 chips or buttons drawn as rounded pills of the page's own" in s.calls[0]["user"]
+    assert "rather than thimble's small hairline chips, buttons and segmented controls" in s.calls[0]["system"]
+    assert review["state"] == "done" and len(review["revised"]) == 1

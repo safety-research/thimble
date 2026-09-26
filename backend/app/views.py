@@ -95,6 +95,7 @@ LIBS: dict[str, Path] = {
 }
 LIB_NEEDS = {"vega-lite": ("vega",), "vega-embed": ("vega", "vega-lite")}
 BRIDGE_JS = Path(__file__).with_name("viewer_bridge.js")
+KIT_CSS = Path(__file__).with_name("viewer_kit.css")  # thimble's chips, buttons, segmented controls, tables and list rows
 HOST_PY = Path(__file__).with_name("view_host.py")
 KERNEL_THIMBLE = Path(__file__).with_name("kernel_thimble.py")  # the `thimble` module a reader imports (view_host)
 # The test label of the checks and the review: it marks every record whose line is a multiple of PROBE_EVERY, about one
@@ -1779,16 +1780,18 @@ def _script_text(js: str) -> str:
 
 def frame_document(view: dict[str, Any], media: str | None = None) -> str:
     """The view's page as a frame loads it: the policy that blocks every host but the view's media route, the bridge
-    (viewer_bridge.js), the vendored libraries the view names, then view.html. The browser adds the theme's tokens
-    (ViewerFrame.tsx). `media` is the media route's absolute URL (media_url), which the policy allows for images, audio
-    and video and thimble.mediaUrl builds on; without it the page loads no URL at all."""
+    (viewer_bridge.js), thimble's parts (viewer_kit.css), the vendored libraries the view names, then view.html, whose
+    own styles come after the parts. The browser adds the theme's tokens (ViewerFrame.tsx). `media` is the media
+    route's absolute URL (media_url), which the policy allows for images, audio and video and thimble.mediaUrl builds
+    on; without it the page loads no URL at all."""
     html = (Path(view["dir"]) / VIEW_HTML).read_text("utf-8")
     who = json.dumps({"slug": view["slug"], "name": view["name"], "media": media}, ensure_ascii=False)
     csp = FRAME_CSP.format(media=f" {media}" if media else "")
     head = [f'<meta http-equiv="Content-Security-Policy" content="{csp}">',
             '<meta charset="utf-8">',
             f"<script>window.__thimbleView = {_script_text(who)}</script>",
-            f"<script>{_script_text(BRIDGE_JS.read_text('utf-8'))}</script>"]
+            f"<script>{_script_text(BRIDGE_JS.read_text('utf-8'))}</script>",
+            f"<style>{KIT_CSS.read_text('utf-8')}</style>"]
     for name in view.get("libs") or []:
         p = LIBS.get(name)
         if p is not None and p.is_file():

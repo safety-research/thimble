@@ -19,7 +19,6 @@
   html, body { margin: 0; height: 100%; }
   body { font: 12px/1.4 var(--sans); color: var(--ink); display: flex; flex-direction: column; }
   nav { flex: none; display: flex; gap: 14px; align-items: center; padding: 8px 12px; border-bottom: 1px solid var(--line-2); }
-  nav select { font: 11.5px var(--mono); color: var(--ink); background: var(--card); border: 1px solid var(--line-2); border-radius: 6px; padding: 2px 6px; }
   .tab { font: 12px var(--sans); color: var(--ink-2); cursor: pointer; padding: 2px 0; border-bottom: 2px solid transparent; }
   .tab.on { color: var(--live); border-bottom-color: var(--live); }
   #grid { flex: 1; min-height: 0; overflow: auto; }
@@ -32,7 +31,8 @@
   td.num { text-align: right; font-family: var(--mono); }
   tr.target td, td.target { background: var(--live-soft); }
   td.target { outline: 1px solid var(--live); outline-offset: -1px; }
-  button.more { margin: 10px 12px; font: 12px var(--sans); color: var(--ink-2); background: none; border: 1px solid var(--line-2); border-radius: 6px; padding: 3px 10px; cursor: pointer; }
+  /* the file menu is thimble's field (.field) and the next rows its button (.btn), which every view's page has */
+  .more { margin: 10px 12px; }
   .error { padding: 16px; color: var(--status-negative, #b3261e); }
 </style>
 </head>
@@ -66,7 +66,7 @@
     const nav = $('#nav')
     nav.replaceChildren()
     if (files.length > 1) {
-      const pick = el('select')
+      const pick = el('select', 'field mono')
       for (const f of files) {
         const o = el('option', null, f.path)
         o.value = f.path
@@ -133,7 +133,7 @@
     box.append(table)
     const last = view.start + view.rows.length - 1
     if (last < view.total) {
-      const more = el('button', 'more', `Rows ${last + 1} to ${Math.min(view.total, last + 200)}`)
+      const more = el('button', 'btn btn-secondary btn-sm more', `Rows ${last + 1} to ${Math.min(view.total, last + 200)}`)
       more.onclick = () => show(view.path, view.sheet, last + 1)
       box.append(more)
     }
