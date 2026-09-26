@@ -705,6 +705,23 @@ def from_links(text: str) -> str:
     return _LINK_RE.sub(one, text)
 
 
+def to_links(text: str) -> str:
+    """`text` with each citation written as the Markdown link the terminal shows as its text, the inverse of
+    from_links: `[[31|card:<id>#a/b]]` becomes `[31](card:<id>#a/b)` and `[[card:<id>]]` becomes `[↗](card:<id>)`, with
+    each space in the ref written %20."""
+    def one(m: "re.Match[str]") -> str:
+        shown, bar, ref = m.group(1).rpartition("|") if "|" in m.group(1) else ("", "", m.group(1))
+        target = ref.strip().replace(" ", "%20")
+        return f"[{shown.strip() if bar else BARE_LINK_TEXTS[1]}]({target})"
+
+    return _SPAN_RE.sub(one, text)
+
+
+def prose(text: str) -> str:
+    """`text` with its citations read as prose: a value-ref as its display, a bare ref as nothing."""
+    return _prose(text)
+
+
 def normalise_markup(text: str) -> str:
     """`text` with the value-ref forms the grammar does not know put right: `[[v]](ref)` and `[v|ref]` become `[[v|ref]]`, a
     Markdown link to a ref becomes its citation (from_links), a number alone in brackets becomes the plain number, and a

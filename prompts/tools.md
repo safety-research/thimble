@@ -1091,7 +1091,7 @@ Stop only when `wait_session` says the session has ended: then write one line sa
 
 ## bg-proxy-start
 
-A background session of thimble's, {session}, runs for this workspace (`claude attach {short}`). Show it in the agent tray now: call the Agent tool with `subagent_type` "{type}", `run_in_background` true, `description` "{label}" and `{prompt}` as the whole prompt, then end the turn on that call, with no text after it.
+A background session of thimble's, {session}, runs for this workspace (`claude attach {short}`). Show it in the agent tray now: call the Agent tool with `subagent_type` "{type}", `run_in_background` true, `description` "{label}" and `{prompt}` as the whole prompt, then end the turn on that call, with no text after it. The tray entry follows the session by itself, so call nothing else for it.
 
 ## bg-proxy-keep
 

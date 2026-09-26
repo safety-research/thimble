@@ -48,6 +48,7 @@ CELL_TOOLS = ("add_card", "edit_card", "add_cell", "edit_cell")  # the card tool
 LABEL_TOOL = "apply_label"
 LABEL_CARD_RE = re.compile(r"\[\[card:([A-Za-z0-9_-]+)\]\]")
 AGENT_TOOLS = ("Agent", "Task")  # the CLI's subagent tool, by either of its names
+WAIT_SESSION = "wait_session"  # the thimble tool of a background session's tray entry
 WORKFLOW_TOOL = "Workflow"  # Claude Code's dynamic workflows (module note, workflows)
 WORKFLOW_TITLE = "workflow"  # when the script's meta names nothing
 WORKFLOW_DIR_RE = re.compile(r"^Transcript dir:[ \t]*(\S.*?)[ \t]*$", re.M)  # in the Workflow call's result
@@ -924,7 +925,7 @@ def _peer(lv: Live, *, mid_turn: bool, origin: Any = None) -> None:
     if not mid_turn:
         _open_turn(lv)
     o = origin if isinstance(origin, dict) else {}
-    name, body = str(o.get("name") or ""), " ".join(str(o.get("body") or "").split())
+    name, body = str(o.get("name") or ""), " ".join(cite.prose(str(o.get("body") or "")).split())
     e = _bg().by_name(lv.c, name) or _bg().by_name(lv.c, name.replace("-", ":", 1)) if name.startswith("thimble") else None
     if e is not None and body:
         with contextlib.suppress(Exception):
@@ -959,6 +960,9 @@ def _tool_use(lv: Live, tool_use_id: str, name: str, tool_input: Any) -> None:
         lv.hidden.add(tool_use_id)
         return
     inp = tool_input if isinstance(tool_input, dict) else {}
+    if name.startswith("mcp__") and _short(name) == WAIT_SESSION:
+        lv.hidden.add(tool_use_id)  # a tray entry's tool, which main's call only gets refused (bg_session)
+        return
     if name == MONITOR_TOOL and WATCHER in str(inp.get("command") or ""):
         lv.hidden.add(tool_use_id)  # thimble's own plumbing on the Monitor route (module note)
         lv.watch_calls.add(tool_use_id)

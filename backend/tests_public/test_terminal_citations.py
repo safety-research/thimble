@@ -39,3 +39,10 @@ def test_a_takeaway_and_a_thread_reply_take_the_link_form(workspaces_tmp):
     threads.reply(CORPUS, "0c17e001", "Three picks [↗](card:ab12).", by="terminal")
     [rec] = [e for e in agents.read_events(agents.paths(CORPUS, "0c17e001")[1]) if e["type"] == "text"]
     assert rec["delta"] == "Three picks [[card:ab12]]."
+
+
+def test_a_citation_becomes_a_link_for_the_terminal_and_prose_for_a_chip():
+    text = "It cites [[card:2aa9f42f]] for its [[5,217|card:2aa9f42f#records/deletions]] deletions of [[3|card:ab#pages/all wikis]]."
+    assert cite.to_links(text) == ("It cites [↗](card:2aa9f42f) for its [5,217](card:2aa9f42f#records/deletions) deletions "
+                                   "of [3](card:ab#pages/all%20wikis).")
+    assert cite.prose(text) == "It cites  for its 5,217 deletions of 3."

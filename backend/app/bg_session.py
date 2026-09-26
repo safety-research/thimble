@@ -51,7 +51,7 @@ from typing import Any, Awaitable, Callable
 from fastapi import APIRouter
 from pydantic import BaseModel
 
-from . import agents, config, ledger, session
+from . import agents, cite, config, ledger, session
 
 log = logging.getLogger("thimble.bg_session")
 router = APIRouter()
@@ -440,7 +440,7 @@ def run_ended(c: str, key: str, summary: str) -> None:
     e.run_open = False
     e.result = " ".join(str(summary or "").split())[:400]
     e.ended_at = time.time()
-    _news(e, f"{e.name} finished its task" + (f": {e.result}" if e.result else "."))
+    _news(e, f"{e.name} finished its task" + (f": {cite.to_links(e.result)}" if e.result else "."))
     _save(c)
 
 
@@ -590,7 +590,7 @@ def _read_news(e: Entry) -> None:
         msg = rec.get("message") if isinstance(rec, dict) and rec.get("type") == "assistant" else None
         for b in (msg or {}).get("content") or [] if isinstance(msg, dict) else []:
             if isinstance(b, dict) and b.get("type") == "text":
-                text = session.visible(str(b.get("text") or "")).strip()
+                text = cite.to_links(session.visible(str(b.get("text") or ""))).strip()
                 if text:
                     _news(e, f"{e.name}: {text[:NEWS_CHARS]}{'…' if len(text) > NEWS_CHARS else ''}")
 
@@ -1315,7 +1315,7 @@ async def agents_route(body: AgentsQuery) -> dict[str, Any]:
                              f"{e.short}` opens it in another terminal")
             elif e.short in started and e.ended_at and finished.get(e.short) != e.ended_at and not e.run_open:
                 finished[e.short] = e.ended_at
-                lines.append(f"{e.name} finished" + (f": {e.result[:200]}" if e.result else "") +
+                lines.append(f"{e.name} finished" + (f": {cite.prose(e.result)[:200]}" if e.result else "") +
                              ("" if alive(e) else " (its session has ended)"))
         if lines:
             _save_announced(c)

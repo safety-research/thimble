@@ -653,3 +653,24 @@ async def test_a_tray_entry_is_known_by_its_prompt_or_kind_whatever_main_calls_i
     assert bg_session.is_proxy(CORPUS, "thimble:writer", "the writer", None), "the one live writer"
     assert not bg_session.is_proxy(CORPUS, "thimble:orient", "orientation", None), "the orientation's own subagent"
     assert not bg_session.is_proxy(CORPUS, "general-purpose", "writing report", prompt)
+
+
+async def test_main_s_own_wait_session_call_is_refused_and_stays_out_of_main_s_chat(fake, tmp_path, monkeypatch):
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "claude-config"))
+    sid = "e7b0a1f2-0000-4000-8000-00000000abce"
+    main = tmp_path / f"{sid}.jsonl"
+    main.write_text("")
+    lv = session.attach(CORPUS, sid, str(config.corpus_dir(CORPUS)), str(main))
+    session.tail_once(lv)
+    before = len(_log(agents.MAIN_ID))
+    with main.open("a") as f:
+        f.write(json.dumps({"type": "assistant", "message": {"content": [{"type": "tool_use", "id": "w1", "name":
+                "mcp__plugin_thimble_thimble__wait_session", "input": {"session": "thimble:writer"}}]}}) + "\n")
+    session.tail_once(lv)
+    assert not [x for x in _log(agents.MAIN_ID)[before:] if x["type"] == "tool_use"]
+
+    class Ctx:
+        c, tool_use_id = CORPUS, "w1"
+
+    got = await bg_session.tool_wait_session(Ctx(), {"session": "thimble:writer"})
+    assert tools.hint("wait_session-main") in got.text
