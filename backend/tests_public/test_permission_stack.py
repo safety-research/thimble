@@ -1,7 +1,8 @@
 """Several permission prompts of one agent at once: a subagent that makes three calls in parallel has three prompts
 relayed to the browser, which keeps all three while the agent goes on writing its calls into its transcript. Each prompt
 leaves the browser when its own call has a result, which is how an answer given in the terminal shows, and the rest
-stay. An agent that stops takes its prompts with it."""
+stay. An agent that stops takes its prompts with it. Main's own parallel prompts leave the same way, each with its own
+call's result, and a result never ends another prompt of main's."""
 from __future__ import annotations
 
 import asyncio
@@ -71,13 +72,14 @@ def _setup(tmp_path: Path) -> tuple[session.Live, Path]:
     return lv, sub
 
 
-def _ask(i: int) -> str:
-    """A prompt of the helper's i-th call, relayed as main's PermissionRequest hook relays it."""
+def _ask(i: int, agent: str | None = AGENT) -> str:
+    """A prompt of the helper's (or with `agent` None, main's) i-th call, relayed as main's PermissionRequest hook
+    relays it."""
     loop = asyncio.get_event_loop()
     request_id = f"h{i}"
-    channel._asks[request_id] = channel.Ask(CORPUS, loop, loop.create_future(), time.monotonic(), time.time(), AGENT,
+    channel._asks[request_id] = channel.Ask(CORPUS, loop, loop.create_future(), time.monotonic(), time.time(), agent,
                                             channel.call_key("WebFetch", {"url": URLS[i], "prompt": "Who owns it?"}))
-    channel._hold(CORPUS, request_id, "WebFetch", "WebFetch", json.dumps({"url": URLS[i]}), AGENT)
+    channel._hold(CORPUS, request_id, "WebFetch", "WebFetch", json.dumps({"url": URLS[i]}), agent)
     return request_id
 
 
@@ -138,3 +140,29 @@ async def test_a_stopped_agent_takes_its_prompts_with_it(tmp_path):
 def test_a_call_key_names_the_call_by_its_field():
     assert channel.call_key("Bash", {"command": "wc  -l\n a.txt", "description": "count"}) == ("Bash", "wc -l a.txt")
     assert channel.call_key("Skill", {"skill": "x"}) == ("Skill", '{"skill": "x"}')
+
+
+async def test_main_s_own_parallel_prompts_leave_each_with_its_own_call_s_result(tmp_path):
+    lv, _sub = _setup(tmp_path)
+    main = Path(lv.transcript_path)
+    with main.open("a") as f:
+        f.write(_line({"type": "user", "origin": {"kind": "human"}, "message": {"content": "Fetch all three."}}))
+        f.write(_line(_use(0)) + _line(_use(1)) + _line(_use(2)))
+    session.tail_once(lv)
+    for i in range(3):
+        _ask(i, None)
+    assert _waiting() == ["h0", "h1", "h2"]
+    with main.open("a") as f:  # the second is answered in the terminal and runs
+        f.write(_line(_result(1)))
+    session.tail_once(lv)
+    assert _waiting() == ["h0", "h2"]
+    assert channel._answer_ask("h0", "allow")  # the first is answered in the browser
+    channel._drop(CORPUS, {"h0"}, answer="allow")
+    with main.open("a") as f:
+        f.write(_line(_result(0)))
+    session.tail_once(lv)
+    assert _waiting() == ["h2"], "the browser's answer's result ends no other prompt"
+    with main.open("a") as f:
+        f.write(_line(_result(2)))
+    session.tail_once(lv)
+    assert _waiting() == [] and not channel._asks

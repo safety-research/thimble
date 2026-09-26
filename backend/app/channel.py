@@ -825,8 +825,8 @@ def _answer_ask(request_id: str, behavior: str | None) -> bool:
     held = _asks.pop(request_id, None)
     if held is None:
         return False
-    if behavior is not None and held.agent:
-        _answered.setdefault((held.c, held.agent), []).append(held.call)
+    if behavior is not None:
+        _answered.setdefault((held.c, held.agent or ""), []).append(held.call)
     fut = held.fut
     held.loop.call_soon_threadsafe(lambda: fut.done() or fut.set_result(behavior))
     return True
@@ -879,7 +879,8 @@ def asking(c: str) -> set[str]:
     return {a.agent for a in _asks.values() if a.c == c and a.agent}
 
 
-# (workspace, agent) -> the call_keys of the agent's prompts the analyst answered here whose results have not come yet
+# (workspace, agent, '' for main) -> the call_keys of its prompts the analyst answered here whose results have not come
+# yet
 _answered: dict[tuple[str, str], list[tuple[str, str]]] = {}
 # the input field that names a call of each tool, compared when a prompt is matched to its call's result (call_key)
 CALL_FIELDS = {"Bash": "command", "Monitor": "command", "WebFetch": "url", "WebSearch": "query", "Read": "file_path",
@@ -909,13 +910,13 @@ def agent_moved(c: str, agent: str, after: float) -> None:
         _drop(c, gone)
 
 
-def calls_done(c: str, agent: str, done: "list[tuple[tuple[str, str], float]]") -> None:
-    """Calls of the subagent or fork `agent` got their results (each call_key with the result's time): the prompt each
-    one waited on was answered, in the terminal or here, so its hook's wait ends and the browser drops its card. A call
-    is matched to the prompt with its call_key, else to the one prompt of its tool that agent has open; any other
-    prompt stays."""
+def calls_done(c: str, agent: str | None, done: "list[tuple[tuple[str, str], float]]") -> None:
+    """Calls of the subagent or fork `agent`, or of main when it is None, got their results (each call_key with the
+    result's time): the prompt each one waited on was answered, in the terminal or here, so its hook's wait ends and
+    the browser drops its card. A call is matched to the prompt with its call_key, else, for a subagent, to the one
+    prompt of its tool that agent has open; any other prompt stays."""
     gone: set[str] = set()
-    answered = _answered.get((c, agent), [])
+    answered = _answered.get((c, agent or ""), [])
     for key, at in done:
         if key in answered:
             answered.remove(key)  # the prompt the analyst answered in the browser, gone already
@@ -923,7 +924,7 @@ def calls_done(c: str, agent: str, done: "list[tuple[tuple[str, str], float]]") 
         open_ = sorted(((i, a) for i, a in _asks.items() if a.c == c and a.agent == agent and i not in gone
                         and a.call[0] == key[0] and a.at <= at), key=lambda x: x[1].at)
         hit = next((i for i, a in open_ if a.call == key), None)
-        if hit is None and len(open_) == 1:
+        if hit is None and len(open_) == 1 and agent is not None:  # main's prompts and calls carry the same input
             hit = open_[0][0]
         if hit is not None:
             gone.add(hit)

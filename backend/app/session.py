@@ -198,6 +198,7 @@ class Live:
         self.stop_noted = False  # the turn's stop or interrupt has its note
         self.wait: tuple[str, float, bool] | None = None  # the wait in progress: what holds it, since when, noted
         self.watch_calls: set[str] = set()  # tool_use ids of main's Monitor calls on thimble's watcher
+        self.call_keys: dict[str, tuple[str, str]] = {}  # tool_use id -> channel.call_key of main's own calls (_results_in)
         self.watch_tasks: set[str] = set()  # the task ids those Monitors run as
         self.subs: list[Sub] = []
         self.sub_paths: set[str] = set()
@@ -1326,8 +1327,13 @@ def _tail_sub(lv: Live, sub: Sub) -> int:
 
 
 def _results(sub: Sub, lines: list[bytes]) -> list[tuple[tuple[str, str], float]]:
-    """The calls whose results lines of a subagent's transcript hold, each as channel.call_key names it, with the
-    result's time; the calls themselves are kept on the Sub as they appear, since a result may come in a later read."""
+    """The calls whose results lines of a subagent's transcript hold (_results_in)."""
+    return _results_in(sub.call_keys, lines)
+
+
+def _results_in(call_keys: dict[str, tuple[str, str]], lines: list[bytes]) -> list[tuple[tuple[str, str], float]]:
+    """The calls whose results lines of a transcript hold, each as channel.call_key names it, with the result's time;
+    the calls themselves are kept in `call_keys` as they appear, since a result may come in a later read."""
     out: list[tuple[tuple[str, str], float]] = []
     for line in lines:
         if b'"tool_use"' not in line and b'"tool_result"' not in line:
@@ -1342,9 +1348,9 @@ def _results(sub: Sub, lines: list[bytes]) -> list[tuple[tuple[str, str], float]
             if not isinstance(b, dict):
                 continue
             if b.get("type") == "tool_use" and isinstance(b.get("id"), str):
-                sub.call_keys[b["id"]] = _channel_module().call_key(str(b.get("name") or ""), b.get("input"))
-            elif b.get("type") == "tool_result" and b.get("tool_use_id") in sub.call_keys:
-                out.append((sub.call_keys[b["tool_use_id"]], _stamp(line) or time.time()))
+                call_keys[b["id"]] = _channel_module().call_key(str(b.get("name") or ""), b.get("input"))
+            elif b.get("type") == "tool_result" and b.get("tool_use_id") in call_keys:
+                out.append((call_keys.pop(b["tool_use_id"]), _stamp(line) or time.time()))
     return out
 
 
@@ -1971,6 +1977,9 @@ def _tail_main(lv: Live) -> None:
     except Unreadable as e:
         _degrade(lv, e)
     _save_cursor(lv)
+    done = _results_in(lv.call_keys, lines)
+    if done:
+        _channel_module().calls_done(lv.c, None, done)  # main's own prompts answered in the terminal
 
 
 def _degrade(lv: Live, err: Exception) -> None:
