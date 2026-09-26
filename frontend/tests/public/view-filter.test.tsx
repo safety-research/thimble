@@ -41,6 +41,12 @@ describe('what a view page hears of the labels', () => {
       'a.jsonl#L3': { keep: true },
     })
   })
+
+  test("the filter leaves alone the records of a file its label left no value on", () => {
+    const rows = new Map<string, Map<string, LabelRow>>([['a.jsonl#L1', new Map([['k1', { label: 'other' } as LabelRow]])]])
+    const covered = { 'a.jsonl': { other: 1 } }
+    expect(withKeeps({}, { concept: 'k1', value: 'asks' }, rows, ['a.jsonl#L1', 'a.jsonl#L2', 'b.jsonl#L1'], covered)).toEqual({ 'b.jsonl#L1': { keep: true } })
+  })
 })
 
 describe("a view's own pane", () => {

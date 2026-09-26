@@ -437,20 +437,24 @@ export function pageLabels(
 }
 
 /** The record marks with the filter's verdict on each record ref: `keep` when the filter's label takes its value on the
- * record, and a keep-only mark for a kept record no label draws on. A record the filter drops and no label marks is
- * left out, which the bridge reads as dropped. Pure. */
+ * record, or when the record's file is not among `covered`, the files the label left a value on (its presence), since
+ * the label says nothing of the others; without `covered` every file counts. A kept record no label draws on gets a
+ * keep-only mark, and a record the filter drops and no label marks is left out, which the bridge reads as dropped.
+ * Pure. */
 export function withKeeps(
   marks: Record<string, ViewMark>,
   filter: LabelFilter | null,
   rows: { get(ref: string): ReadonlyMap<string, LabelRow> | undefined },
   refs: Iterable<string>,
+  covered?: Readonly<Record<string, unknown>>,
 ): Record<string, ViewMark | Keep> {
   if (!filter) return marks
   const out: Record<string, ViewMark | Keep> = {}
   for (const ref of refs) {
-    if (!recordRef(ref)) continue
+    const at = recordRef(ref)
+    if (!at) continue
     const row = rows.get(ref)?.get(filter.concept)
-    const keep = !!row && valueOf(row) === filter.value
+    const keep = (!!covered && !(at.path in covered)) || (!!row && valueOf(row) === filter.value)
     if (marks[ref]) out[ref] = { ...marks[ref], keep }
     else if (keep) out[ref] = { keep }
   }

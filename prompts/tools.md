@@ -561,7 +561,7 @@ It keeps {kept} of the canvas's {total} cards, and the analyst sees the rest dim
 
 ## set_filter-files
 
-Files shows the label turned on with that value highlighted, and its views keep only the records that take the value.
+Files shows the label turned on with that value highlighted, and its views keep only the records that take the value, leaving whole the files the label never ran over.
 
 ## set_layout-set
 

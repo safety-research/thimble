@@ -83,7 +83,7 @@ export function ViewPane({ ws, view, path, kind, targetRef, quote, onQuoteMissin
         ) : (
           <>
             {failure && <ViewFailed name={view.name} detail={failure} onRaw={path ? () => pick('raw') : undefined} />}
-            <ViewerFrame key={`${view.slug}:${view.built ?? ''}`} ws={ws} slug={view.slug} targetRef={targetRef} path={path ?? undefined} title={view.name} labels={labels.on} filter={filter} byId={labels.byId} onError={setFailure} quote={quote} onQuoteMissing={onQuoteMissing} className="view-pane-frame" />
+            <ViewerFrame key={`${view.slug}:${view.built ?? ''}`} ws={ws} slug={view.slug} targetRef={targetRef} path={path ?? undefined} title={view.name} labels={labels.on} filter={filter} filterFiles={filter ? labels.presence.get(filter.concept) : undefined} byId={labels.byId} onError={setFailure} quote={quote} onQuoteMissing={onQuoteMissing} className="view-pane-frame" />
           </>
         )}
       </div>

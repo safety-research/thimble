@@ -1,6 +1,7 @@
 """Labels in every view: the labels context a view's reader gets (views.labels_context), thimble.marked, thimble.kept
 and thimble.view_labels over a label whose records a cover holds, the test label the checks use, the marks of a view's
-units (views.marks_for and the marks route), and a reader that filters its records by the Files label filter.
+units (views.marks_for and the marks route), and a reader that filters its records by the Files label filter, which
+leaves alone the files its label never ran over.
 
 The corpus is invented: board.jsonl has twelve posts in three threads, and the posts that ask for help say "help". A
 regex label `asks` marks them ("asks" on a match, "other" from the covers over the rest)."""
@@ -143,6 +144,19 @@ async def test_the_labels_context_holds_the_labels_that_are_on_and_the_filter(ap
     st = kernel_thimble._view_labels(ctx)
     assert st["filter"] == {"label": "asks", "value": "other", "colour": lab["values"][1]["colour"]}
     assert st["labels"][0]["values"] == [{"name": "other", "colour": lab["values"][1]["colour"]}], "set_filter highlights the value"
+
+
+async def test_the_filter_keeps_the_records_of_a_file_its_label_never_ran_over(app, corpus):
+    """A view of other files stays whole under a filter on a label of board.jsonl, since the label says nothing of
+    them."""
+    (corpus / "notes.jsonl").write_text("".join(json.dumps({"thread": "n", "body": b}) + "\n" for b in ("a", "b")))
+    k = await _asks(app)
+    concepts.set_filter(CORPUS, "files", k["id"], "asks")
+    ctx = views.labels_context(CORPUS)
+    assert [n for n in range(1, 13) if kernel_thimble._kept(ctx, f"board.jsonl#L{n}")] == ASKS
+    assert kernel_thimble._kept(ctx, "notes.jsonl#L1") and kernel_thimble._kept(ctx, "notes.jsonl#L2")
+    marks = await views.marks_for(CORPUS, "threads", ["notes.jsonl#L1", "board.jsonl#L2"])
+    assert marks == {"notes.jsonl#L1": {"keep": True}}
 
 
 def test_the_test_label_marks_every_seventh_record_and_its_filter_keeps_just_those():

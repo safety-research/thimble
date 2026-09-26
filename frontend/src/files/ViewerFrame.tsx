@@ -41,6 +41,8 @@ export interface ViewerFrameProps {
   labels?: readonly Concept[]
   /** the Files label filter, which the view keeps its records by, with every label by id to name it */
   filter?: LabelFilter | null
+  /** the files the filter's label left a value on (its presence); the filter leaves the records of other files alone */
+  filterFiles?: Readonly<Record<string, unknown>>
   byId?: ReadonlyMap<string, Concept>
   onError?: (message: string) => void
   className?: string
@@ -75,6 +77,7 @@ function useViewLabels(
   slug: string,
   on: readonly Concept[],
   filter: LabelFilter | null,
+  filterFiles: Readonly<Record<string, unknown>> | undefined,
   byId: ReadonlyMap<string, Concept>,
   post: (msg: unknown) => void,
 ): { add: (refs: unknown) => void; reset: () => void; ready: () => void } {
@@ -195,17 +198,17 @@ function useViewLabels(
       }
     }
     const rowsOf = { get: (ref: string) => rows.current.get(recordRef(ref)?.path ?? '')?.get(ref) }
-    const marks = { ...withKeeps(viewMarks(on, rowsOf, refs.current), filter, rowsOf, refs.current), ...(labelled ? unitMarks.current : {}) }
+    const marks = { ...withKeeps(viewMarks(on, rowsOf, refs.current), filter, rowsOf, refs.current, filterFiles), ...(labelled ? unitMarks.current : {}) }
     const state = pageLabels(on, filter, filterLabel ? new Map([[filterLabel.id, filterLabel]]) : byId, (name) => token(name) || `var(${name})`)
     const text = JSON.stringify([marks, state])
     if (text === sent.current) return
     sent.current = text
     send.current({ type: P + 'labels', marks, on: state.on, filter: state.filter })
-  }, [ws, on, filter, filterLabel, byId, labelled, tick])
+  }, [ws, on, filter, filterFiles, filterLabel, byId, labelled, tick])
   return useMemo(() => ({ add, reset, ready }), [add, reset, ready])
 }
 
-export function ViewerFrame({ ws, slug, targetRef, path, title, fit, labels = NO_LABELS, filter = null, byId = NO_CONCEPTS, onError, className, quote, onQuoteMissing }: ViewerFrameProps) {
+export function ViewerFrame({ ws, slug, targetRef, path, title, fit, labels = NO_LABELS, filter = null, filterFiles, byId = NO_CONCEPTS, onError, className, quote, onQuoteMissing }: ViewerFrameProps) {
   const ref = useRef<HTMLIFrameElement>(null)
   const [page, setPage] = useState<string | null>(null)
   const [height, setHeight] = useState<number | null>(null)
@@ -237,7 +240,7 @@ export function ViewerFrame({ ws, slug, targetRef, path, title, fit, labels = NO
   // page waits for the app's faces so it is drawn once, in them
   const doc = useMemo(() => (page == null || fonts == null ? null : withFrameStyle(page, viewStyle(resolved) + fonts)), [page, fonts, resolved, key]) // key: the tokens are read again when the paper or the accent changes
   const post = (msg: unknown) => ref.current?.contentWindow?.postMessage(msg, '*')
-  const marks = useViewLabels(ws, slug, labels, filter, byId, post)
+  const marks = useViewLabels(ws, slug, labels, filter, filterFiles, byId, post)
   // a new document is a new page, which says ready again and reports its anchors afresh; set before any message of the
   // new page can be handled
   useLayoutEffect(() => {

@@ -376,7 +376,7 @@ def colours(name, values=None):
 _view_ctx = None
 PROBE_NAME = "test label"
 PROBE_COLOUR = LABEL_COLOURS[7]  # a label colour no viz colour repeats, so the test label never reads as a view's own
-_MEMBERS: dict = {}  # labels file -> (the files' signature, ({ref: effective value}, {path: [(first, last, value)]}))
+_MEMBERS: dict = {}  # labels file -> (the files' signature, ({ref: value}, {path: [(first, last, value)]}, {path}))
 
 
 def _signature(*paths: Path) -> tuple:
@@ -391,8 +391,9 @@ def _signature(*paths: Path) -> tuple:
 
 
 def _members(jsonl) -> tuple:
-    """({ref: effective value}, {path: [(first, last, value)]}) of one label, from its store when that is fresh, else
-    its labels file; kept until either file changes, so a reader's lookups cost a dict access each."""
+    """({ref: effective value}, {path: [(first, last, value)]}, {path}) of one label: its rows' values, its covers, and
+    the files it left a value on. Read from its store when that is fresh, else its labels file, and kept until either
+    file changes, so a reader's lookups cost a dict access each."""
     jsonl = Path(jsonl)
     db = jsonl.with_suffix(".sqlite")
     sig = _signature(jsonl, db)
@@ -401,26 +402,34 @@ def _members(jsonl) -> tuple:
         return hit[1]
     rows, covers = _store_parts(db) if _store_fresh(jsonl, db) else _jsonl_parts(jsonl)
     values = {}
-    for _path, _line, label, _source, verdict, _confidence, ref in rows:
+    paths = set()
+    for path, _line, label, _source, verdict, _confidence, ref in rows:
         v = verdict if verdict is not None else label
         if v is not None:
             values[str(ref)] = str(v)
+            if path is not None:
+                paths.add(str(path))
     spans: dict = {}
     for c in covers:
         if c[3] is not None:
             spans.setdefault(c[0], []).append((int(c[1]), int(c[2]), str(c[3])))
-    _MEMBERS[str(jsonl)] = (sig, (values, spans))
-    return values, spans
+            paths.add(str(c[0]))
+    _MEMBERS[str(jsonl)] = (sig, (values, spans, paths))
+    return values, spans, paths
+
+
+def _label_members(label: dict) -> tuple:
+    """The label's members (_members), looked up once per labels context: each reader call gets a fresh context, so a
+    reader that asks about every record reads no file state per record."""
+    members = label.get("_members")
+    if members is None:
+        members = label["_members"] = _members(label["jsonl"]) if label.get("jsonl") else ({}, {}, set())
+    return members
 
 
 def _value_of(label: dict, ref: str):
-    """The label's effective value on the record `ref`: its row's, else the value of the cover that holds its line. The
-    label's members are looked up once per labels context (each reader call gets a fresh one), so a reader that asks
-    about every record reads no file state per record."""
-    members = label.get("_members")
-    if members is None:
-        members = label["_members"] = _members(label["jsonl"]) if label.get("jsonl") else ({}, {})
-    values, spans = members
+    """The label's effective value on the record `ref`: its row's, else the value of the cover that holds its line."""
+    values, spans, _paths = _label_members(label)
     v = values.get(ref)
     if v is not None:
         return v
@@ -442,8 +451,8 @@ def marked(ref):
 
 
 def kept(ref):
-    """Whether the record `ref` passes the analyst's label filter: True with no filter, else whether the filter's label
-    takes the filter's value on it."""
+    """Whether the record `ref` passes the analyst's label filter: True with no filter or when the filter's label left
+    no value in the record's file, else whether the label takes the filter's value on it."""
     return _kept(_view_ctx, ref)
 
 
@@ -476,7 +485,13 @@ def _kept(ctx, ref) -> bool:
     if ctx.get("probe"):
         return _probed(ref, ctx["probe"])
     k = next((x for x in ctx.get("labels") or [] if x.get("id") == f.get("id")), None)
-    return k is not None and _value_of(k, ref) == f.get("value")
+    if k is None:
+        return False
+    path, _line = _ref_parts(ref)
+    # a file the label never ran over is outside the filter, so a view of other files keeps its records
+    if path is not None and path not in _label_members(k)[2]:
+        return True
+    return _value_of(k, ref) == f.get("value")
 
 
 def _view_labels(ctx) -> dict:
