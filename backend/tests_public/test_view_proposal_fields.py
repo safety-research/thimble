@@ -14,8 +14,9 @@ from app import config, dev, investigation, orientation, prompts, session, tools
 CORPUS = "desk"
 FIELDS = {"unit": "one ticket, keyed by ticket_id, 40 of them",
           "overview": "every conversation listed down the side, newest first",
-          "label_marks": "each ticket's row and message carry its line, tickets.jsonl#L<n>",
-          "sizes": "40 tickets in 12 conversations, subjects up to 80 characters"}
+          "zoom": "picking a conversation opens it as one thread",
+          "filter": "labels keep the tickets they mark, and a search narrows by subject",
+          "details": "a ticket's whole body and its status history"}
 INBOX = {"name": "Inbox", "why": "Each customer's tickets read as one email thread.", "claims": ["tickets.jsonl"],
          **FIELDS}
 
@@ -48,17 +49,18 @@ async def test_a_proposal_stores_its_fields_and_the_ticket_lists_them(desk):
     ticket = dev.build_view_prompt(CORPUS, prop, views.views_dir(CORPUS) / "inbox", config.corpus_dir(CORPUS))
     assert "- What the analyst sees in it and why that helps: Each customer's tickets read as one email thread." in ticket
     assert "- Unit: one ticket, keyed by ticket_id, 40 of them\n- Overview: every conversation" in ticket
-    assert "- Label marks: each ticket's row" in ticket and "- Sizes: 40 tickets" in ticket
+    assert "- Zoom: picking a conversation" in ticket and "- Filter: labels keep the tickets" in ticket
+    assert "- Details: a ticket's whole body" in ticket
     change = dev.build_view_change_prompt({**prop, "change": "newest first"}, views.views_dir(CORPUS) / "inbox")
     assert "- Overview: every conversation listed down the side" in change
 
 
 def test_a_proposal_without_fields_lists_its_arrangement_as_one_line():
     assert views.spec_lines({"arrangement": "one post per page"}) == "- The unit and the layout: one post per page"
-    assert views.spec_lines({"spec": {"unit": " a day \n", "sizes": "61 days"}}) == "- Unit: a day\n- Sizes: 61 days"
+    assert views.spec_lines({"spec": {"unit": " a day \n", "filter": "labels"}}) == "- Unit: a day\n- Filter: labels"
 
 
-@pytest.mark.parametrize("missing", ["why", "unit", "overview", "label_marks", "sizes"])
+@pytest.mark.parametrize("missing", ["why", "unit", "overview", "zoom", "filter", "details"])
 async def test_a_field_left_out_is_refused(desk, missing):
     res = await tools.call(CORPUS, "propose_view", {k: v for k, v in INBOX.items() if k != missing})
     assert res.is_error and f"`{missing}` is required" in res.text
@@ -66,7 +68,7 @@ async def test_a_field_left_out_is_refused(desk, missing):
 
 
 CAPTIONS = {"name": "Call Captions", "why": "A call's captions as a transcript.", "claims": ["**/*.vtt"],
-            **FIELDS, "unit": "one cue", "label_marks": "each cue's line"}
+            **FIELDS, "unit": "one cue", "filter": "labels keep the cues they mark"}
 
 
 async def test_the_orientation_s_file_type_viewer_is_offered_and_main_s_is_built(desk, monkeypatch):
@@ -97,3 +99,7 @@ def test_the_tool_s_schema_asks_for_the_form_in_free_text_and_the_fields_the_bui
     assert schema["required"] == list(schema["properties"])
     assert all(p.get("type") == "string" and "enum" not in p for k, p in schema["properties"].items() if k != "claims")
     assert "whatever form fits the records" in schema["properties"]["why"]["description"]
+    asks = {k: schema["properties"][k]["description"] for k in ("overview", "zoom", "filter", "details")}
+    assert asks == {"overview": "What does the overview look like?", "zoom": "How do you zoom?",
+                    "filter": "How do you filter? Labels are the main filter.",
+                    "details": "What details might you want on demand?"}

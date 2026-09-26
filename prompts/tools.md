@@ -198,11 +198,12 @@ Propose a view, a page that shows records in a form their files hide, or a viewe
     "why": {"type": "string", "description": "What the analyst sees and why that helps, in whatever form fits the records, such as a wiki page with its edit history or a graph of who replies to whom."},
     "claims": {"type": "array", "items": {"type": "string"}, "description": "Globs of the files it reads. For a viewer of one file type, the extension's glob, such as **/*.vtt."},
     "unit": {"type": "string", "description": "What one row, mark or card stands for, the field that keys it, and how many there are."},
-    "overview": {"type": "string", "description": "What the first screen shows before any click."},
-    "label_marks": {"type": "string", "description": "Which elements carry the marks of the labels that are on, and which lines of the files each stands for."},
-    "sizes": {"type": "string", "description": "The counts the layout must fit, such as the time span and the longest name, and what is grouped, paged or shortened."}
+    "overview": {"type": "string", "description": "What does the overview look like?"},
+    "zoom": {"type": "string", "description": "How do you zoom?"},
+    "filter": {"type": "string", "description": "How do you filter? Labels are the main filter."},
+    "details": {"type": "string", "description": "What details might you want on demand?"}
   },
-  "required": ["name", "why", "claims", "unit", "overview", "label_marks", "sizes"]
+  "required": ["name", "why", "claims", "unit", "overview", "zoom", "filter", "details"]
 }
 ```
 

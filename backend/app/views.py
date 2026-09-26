@@ -1210,7 +1210,7 @@ def proposals_path(c: str) -> Path:
 
 # a proposal's `spec`, the fields propose_view requires beside its free-text `why`, in the order a ticket lists them,
 # each with the words it is named by
-SPEC_FIELDS = (("unit", "Unit"), ("overview", "Overview"), ("label_marks", "Label marks"), ("sizes", "Sizes"))
+SPEC_FIELDS = (("unit", "Unit"), ("overview", "Overview"), ("zoom", "Zoom"), ("filter", "Filter"), ("details", "Details"))
 
 
 def clean_spec(raw: Any) -> dict[str, str]:
