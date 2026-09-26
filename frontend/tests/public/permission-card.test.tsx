@@ -75,7 +75,9 @@ describe('the requests and their words', () => {
   test("why it asks: auto mode's reason, Manual, the analyst's own mode for a writer or a check, the terminal's prompt", () => {
     const ask = (chat: string, extra: Partial<PermissionRequest> = {}): PendingAsk => ({ chat, request: req('x', extra) })
     expect(askWhy(ask('or1', { refused: 'Writes outside the working folder' }), METAS)).toBe('Auto mode did not allow it on its own: Writes outside the working folder.')
-    expect(askWhy(ask('or1', { refused: 'Classifier unavailable' }), METAS)).toBe("Auto mode cannot decide in this session (Claude Code's classifier is unavailable), so it asks you about each call.")
+    expect(askWhy(ask('or1', { refused: 'Classifier unavailable' }), METAS)).toBe("Auto mode could not judge this call: Claude Code's classifier was unavailable.")
+    expect(askWhy(ask('or1', { refused: 'Classifier unavailable', rechecked: 3, deny_after_s: 600 }), METAS)).toBe("Auto mode could not judge this call: Claude Code's classifier was unavailable, all 4 times it was asked. Unanswered, it is denied after 10 minutes.")
+    expect(askWhy(ask('w1', { refused: 'Classifier unavailable', rechecked: 3, deny_after_s: 60 }), METAS)).toBe("Auto mode could not judge this call: Claude Code's classifier was unavailable, all 4 times it was asked. Unanswered, it is denied after a minute.")
     expect(askWhy(ask('or1'), METAS)).toBe('It runs in Manual, which asks before each call.')
     expect(askWhy(ask('cr1'), METAS)).toBe('The orientation runs in Manual, which asks before each call.')
     expect(askWhy(ask('w1'), METAS)).toMatch(/your Claude Code permission mode.*denied after a minute/)
@@ -157,7 +159,7 @@ describe('the card', () => {
     off()
   })
 
-  test('auto mode that cannot decide in the session: the orientation offers Manual and Bypass, a writer only says why', async () => {
+  test('auto mode that could not judge a call: the orientation offers Manual and Bypass, a writer only says why', async () => {
     const auto = new Map([...METAS, ['or1', { ...ORIENT, permission_mode: 'auto' } as ChatMeta]])
     const down = (chat: string, id: string): PendingAsk => ({ chat, request: req(id, { command: 'ls runs', refused: 'Classifier unavailable' }) })
     expect(classifierDown({ refused: 'Classifier unavailable' })).toBe(true)
@@ -165,14 +167,14 @@ describe('the card', () => {
     expect(modeChat(down('or1', 'x'), auto)).toBe('or1')
     expect(modeChat(down('w1', 'x'), auto)).toBeNull()
     const el = await mount(<PermissionCard ws="mini" asks={[down('or1', 'o9'), down('w1', 'w9')]} metas={auto} labels={new Map()} />)
-    expect(el.querySelector('.chat-perm-why')?.textContent).toMatch(/^Auto mode cannot decide in this session/)
+    expect(el.querySelector('.chat-perm-why')?.textContent).toMatch(/^Auto mode could not judge this call/)
     expect([...el.querySelectorAll('.chat-perm-switch button')].map((b) => b.textContent)).toEqual(['Switch to Manual', 'Switch to Bypass'])
     await act(async () => (el.querySelector('.chat-perm-bypass') as HTMLButtonElement).click())
     await settle()
     expect(posted).toEqual([['/api/ws/mini/chats/or1/permission-mode', { mode: 'bypass' }]])
     expect(el.querySelector('.chat-perm-switch')).toBeNull()
     await act(async () => (el.querySelector('[aria-label="Next request"]') as HTMLButtonElement).click())
-    expect(el.querySelector('.chat-perm-why')?.textContent).toMatch(/^Auto mode cannot decide in this session/)
+    expect(el.querySelector('.chat-perm-why')?.textContent).toMatch(/^Auto mode could not judge this call/)
     expect(el.querySelector('.chat-perm-switch')).toBeNull()
   })
 })

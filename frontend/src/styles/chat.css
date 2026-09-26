@@ -1419,7 +1419,7 @@ button.model-line-part[aria-expanded='true'] {
   color: var(--text-secondary);
   overflow-wrap: anywhere;
 }
-/* auto mode that cannot decide in the session: the orientation's switch to Manual or Bypass, under the reason */
+/* a call auto mode's classifier could not judge: the orientation's switch to Manual or Bypass, under the reason */
 .chat-perm-switch {
   display: flex;
   flex-wrap: wrap;

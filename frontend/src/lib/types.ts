@@ -529,6 +529,10 @@ export interface PermissionRequest {
   /** why auto mode refused the call, when the request is one it refused and the analyst may allow (backend
    * agent_session, auto mode) */
   refused?: string
+  /** how many times thimble sent the call back to auto mode after its classifier gave no verdict, before asking */
+  rechecked?: number
+  /** how long the request waits unanswered before the call is denied, in seconds; absent when it waits for good */
+  deny_after_s?: number
 }
 
 /** A session held where the browser cannot answer: the model-switch dialog after a safety stop (session.py). */

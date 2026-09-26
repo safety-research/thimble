@@ -22,7 +22,10 @@ argv (with_rules), since Claude Code holds session rules in memory only.
 Auto mode. A call auto mode's classifier refuses never reaches the PermissionRequest hook, so the hook also runs on
 PermissionDenied: the card asks the analyst, and an allow answers `retry` and is remembered (`grants`, `passes`, for
 GRANT_TTL_S) so a PreToolUse hook (before_call) lets the call made again run. The model may reword the call, so an allow
-also covers the same agent's next call of that tool within GRANT_TTL_S.
+also covers the same agent's next call of that tool within GRANT_TTL_S. A refusal only because the classifier was
+unavailable (CLASSIFIER_DOWN) is no verdict: after each of CLASSIFIER_WAITS_S the hook answers `retry` with nothing
+remembered, so auto mode judges the call made again, and only then does the card ask; in a mode of thimble's that card
+denies the call after CLASSIFIER_ASK_S unanswered, so the session never waits on it for good.
 
 Mode switch. Between Manual and Bypass the switch is instant (both run Claude Code's manual mode). Into or out of Auto,
 the process's --permission-mode must change, so the follower pauses the process when it is quiet (no call without its
@@ -58,7 +61,7 @@ are disallowed (LATER_TOOLS). A process that exits with background work unreport
 
 Auto mode unavailable. When auto mode's classifier gives no verdict too many times, Claude Code ends the turn
 (AUTO_OFF_KIND) and a --print session exits; the session is resumed in Auto up to AUTO_RESUMES times, then waits for
-the analyst (_hold) or, in the analyst's own mode, fails.
+the analyst for up to AUTO_HOLD_S before it resumes in Auto again (_hold), or, in the analyst's own mode, fails.
 
 Safeguards. When a safety classifier stopped a response (`stop_reason: refusal`) and the session made no call after
 it, the session runs again once on FALLBACK_MODEL with `## session-model-fallback`; the earlier result is kept
@@ -133,6 +136,13 @@ REQUEST, DENIED, PRE = permission_hook.REQUEST, permission_hook.DENIED, permissi
 # how long the analyst's answer to a call auto mode refused waits for the model to make that call again (module note,
 # auto mode)
 GRANT_TTL_S = 600.0
+# auto mode's reason when its classifier gave no verdict on a call, the waits before each time the call goes back to
+# auto mode, how long the card that then asks waits in a mode of thimble's, and the deny it answers with after that
+# (prompts/tools.md) (module note, auto mode)
+CLASSIFIER_DOWN = re.compile(r"\bclassifier\b.*\bunavailable\b", re.I)
+CLASSIFIER_WAITS_S = (10.0, 30.0, 90.0)
+CLASSIFIER_ASK_S = 600.0
+CLASSIFIER_UNANSWERED = "session-classifier-unanswered"
 # the modes a session in a mode of thimble's runs in (orient_session), by Start's names (cc_settings.ORIENT_MODES)
 MODES = tuple(cc_settings.ORIENT_MODES)
 BYPASS = "bypass"
@@ -193,9 +203,12 @@ UNFINISHED_RESUMES = 3
 # row and Claude Code ended the turn (CLI 2.1.282), which ends a --print session (module note, auto mode unavailable).
 AUTO_OFF_KIND = "automode-unavailable"
 AUTO_RESUMES = 3  # resumes in Auto in a row, after which the session waits for the analyst to switch its mode
+AUTO_HOLD_S = 900.0  # how long it waits for them before it is resumed in Auto again
+AUTO_OFF_REASON = "Auto mode's safety check gave no verdict"
 RESUMED_PROMPT = "session-resumed"  # prompts/tools.md: the stdin prompt of a session resumed after it ended early
 AUTO_OFF_ALERT = ("Auto mode's safety check gave no verdict, so Claude Code ended this session {times}. Switch it to "
-                  "Manual or Bypass to carry on with its work kept, or retry Auto.")
+                  "Manual or Bypass to carry on with its work kept, or retry Auto, which thimble also does in "
+                  f"{round(AUTO_HOLD_S / 60)} minutes.")
 # The model a session runs on again, once, when a safety classifier stopped its model's response and the session made
 # no call after it (module note, safeguards).
 FALLBACK_MODEL = config.FALLBACK_MODEL
@@ -267,6 +280,8 @@ class Run:
     # the allows among them by (agent, tool), each by its key in `grants`, which that agent's next call of the tool uses
     # up whatever its input (module note, auto mode)
     passes: dict[tuple[str | None, str], list[tuple[str | None, str, str]]] = field(default_factory=dict)
+    # the calls sent back to auto mode after its classifier gave no verdict, by (agent, tool, input): (times, when)
+    rechecks: dict[tuple[str | None, str, str], tuple[int, float]] = field(default_factory=dict)
     # the "don't ask again" updates the card offers for each waiting request, by its id, and those the analyst chose,
     # which each process of the run starts with (module note, don't ask again)
     offers: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
@@ -953,17 +968,20 @@ async def _resume_auto(run: Run) -> bool:
 
 async def _hold(run: Run) -> bool:
     """Wait, with no process, for the analyst after auto mode ended the session AUTO_RESUMES times in a row: the alert
-    on its chat says why, a switch of its mode on the card (set_mode) or the alert's retry ends the wait (True), and
-    Stop ends the run (False)."""
+    on its chat says why and when it retries Auto; a switch of its mode on the card (set_mode), the alert's retry or
+    AUTO_HOLD_S passing ends the wait (True), and Stop ends the run (False)."""
     run.held = True
     _set_pid(run, None)
     times = f"{AUTO_RESUMES + 1} times in a row"
+    until = datetime.now(timezone.utc) + timedelta(seconds=AUTO_HOLD_S)
     with contextlib.suppress(Exception):
         agents.update_agent(run.c, run.chat, permissions=[], alert={
-            "kind": "retry", "text": AUTO_OFF_ALERT.format(times=times), "since": _now(), "cause": AUTO_OFF_KIND})
+            "kind": "retry", "text": AUTO_OFF_ALERT.format(times=times), "reason": AUTO_OFF_REASON,
+            "until": until.isoformat(timespec="seconds"), "since": _now(), "cause": AUTO_OFF_KIND})
     log.info("%s: session %s (%s) waits for the analyst after auto mode ended it %s", run.c, run.key, run.sid, times)
     run.wake.clear()
-    await run.wake.wait()
+    with contextlib.suppress(asyncio.TimeoutError):
+        await asyncio.wait_for(run.wake.wait(), AUTO_HOLD_S)
     run.held = False
     with contextlib.suppress(Exception):
         agents.update_agent(run.c, run.chat, alert=None)
@@ -1778,9 +1796,10 @@ async def ask(c: str, key: str | None, tool_name: str, inp: Any, agent_id: str |
               tool_use_id: str | None = None, suggestions: Any = None) -> dict[str, Any]:
     """One permission request of the session `key` or of its subagent or workflow agent `agent_id`, or with `event` DENIED a
     call auto mode refused for `reason`; the answer as Claude Code reads it. In Bypass it is allowed at once, as is a
-    check's Bash call the sandbox rule allows; during a switch pause it is denied at once; otherwise it waits on the chat
-    until the analyst answers (or PERMISSION_WAIT_S for a session in the analyst's own mode). `suggestions` become the
-    card's "don't ask again" choice."""
+    check's Bash call the sandbox rule allows; during a switch pause it is denied at once; a call auto mode gave no
+    verdict on goes back to it first (_recheck); otherwise it waits on the chat until the analyst answers (or
+    PERMISSION_WAIT_S for a session in the analyst's own mode, CLASSIFIER_ASK_S for a call auto mode never judged).
+    `suggestions` become the card's "don't ask again" choice."""
     run = current(c, key)
     if run is None:
         return {"behavior": "deny", "message": GONE_LINE}
@@ -1797,12 +1816,21 @@ async def ask(c: str, key: str | None, tool_name: str, inp: Any, agent_id: str |
         agents.log_permission(c, "answered", chat=run.chat, session=key, tool=tool_name, what=_what(tool_name, inp),
                               agent_id=agent_id, answer="deny: answered for a mode switch")
         return {"behavior": "deny", "message": tools.hint(MODE_SWITCHING)}
+    unjudged = event == DENIED and bool(CLASSIFIER_DOWN.search(reason or ""))
+    if unjudged and (again := await _recheck(run, agent_id, tool_name, inp, reason, tool_use_id)) is not None:
+        return again
+    wait_s = None if run.patient else PERMISSION_WAIT_S
+    late = TIMED_OUT_LINE
+    if unjudged and run.patient:
+        wait_s, late = CLASSIFIER_ASK_S, tools.hint(CLASSIFIER_UNANSWERED, minutes=round(CLASSIFIER_ASK_S / 60))
     rid = uuid.uuid4().hex[:10]
     preview = json.dumps(inp, ensure_ascii=False, default=str)[:PERMISSION_INPUT_CHARS] if inp is not None else ""
     updates = offer(suggestions) if event == REQUEST else []
     entry = {"id": rid, "tool": tool_name, "what": _what(tool_name, inp), "input": preview, "since": _now(),
              **_command(tool_name, inp), **(_asker(run, agent_id, agent_type) if agent_id else {}),
              **({"refused": " ".join(reason.split())[:200] or "no reason given"} if event == DENIED else {}),
+             **({"rechecked": len(CLASSIFIER_WAITS_S)} if unjudged else {}),
+             **({"deny_after_s": wait_s} if unjudged and wait_s is not None else {}),
              **({"always": offer_text(updates)} if updates else {})}
     fut: asyncio.Future = asyncio.get_running_loop().create_future()
     run.waits[rid] = fut
@@ -1812,11 +1840,12 @@ async def ask(c: str, key: str | None, tool_name: str, inp: Any, agent_id: str |
     agents.update_agent(c, run.chat, permissions=[*_pending(c, run.chat), entry])
     agents.log_permission(c, "asked", chat=run.chat, session=key, mode=mode_of(run), **entry)
     chosen: list[dict[str, Any]] | None = None
+    timed_out = False
     try:
-        allow = await asyncio.wait_for(fut, None if run.patient else PERMISSION_WAIT_S)
+        allow = await asyncio.wait_for(fut, wait_s)
         message = {None: GONE_LINE, SWITCHING: tools.hint(MODE_SWITCHING)}.get(allow, DENIED_LINE)
     except asyncio.TimeoutError:
-        allow, message = False, TIMED_OUT_LINE
+        allow, message, timed_out = False, late, True
     finally:
         run.waits.pop(rid, None)
         run.asking.pop(rid, None)
@@ -1828,10 +1857,50 @@ async def ask(c: str, key: str | None, tool_name: str, inp: Any, agent_id: str |
         agents.log_permission(c, "answered", id=rid, chat=run.chat,
                               answer=f"allow, don't ask again: {offer_text(chosen)}")
         return {**granted, "updatedPermissions": chosen}
-    agents.log_permission(c, "answered", id=rid, chat=run.chat, answer=_answer_word(allow, message))
-    if event == DENIED and isinstance(allow, bool) and message != TIMED_OUT_LINE:
+    agents.log_permission(c, "answered", id=rid, chat=run.chat, answer=_answer_word(allow, timed_out))
+    if event == DENIED and isinstance(allow, bool) and not timed_out:
         _remember(run, agent_id, tool_name, inp, allow, tool_use_id)
     return granted if allow in (True, ALWAYS, COVERED) else {"behavior": "deny", "message": message}
+
+
+async def _recheck(run: Run, agent_id: str | None, tool_name: str, inp: Any, reason: str,
+                   tool_use_id: str | None) -> dict[str, Any] | None:
+    """A call auto mode refused because its classifier gave no verdict, sent back to auto mode: after the next of
+    CLASSIFIER_WAITS_S for this call, a `retry` with nothing remembered, so before_call leaves the call made again to auto
+    mode's classifier and the refused call shows as not run. None once this call's waits are spent, when the analyst is
+    asked. A switch of mode or the session's end during the wait answers it as it answers a request on the card."""
+    k = grant_key(agent_id, tool_name, inp)
+    now = time.monotonic()
+    for old in [x for x, (_, when) in run.rechecks.items() if now - when > GRANT_TTL_S]:
+        run.rechecks.pop(old, None)
+    n = run.rechecks.get(k, (0, now))[0]
+    if n >= len(CLASSIFIER_WAITS_S):
+        run.rechecks.pop(k, None)
+        return None
+    run.rechecks[k] = (n + 1, now)
+    what = _what(tool_name, inp)
+    agents.log_permission(run.c, "rechecked", chat=run.chat, session=run.key, tool=tool_name, what=what,
+                          agent_id=agent_id, refused=" ".join(reason.split())[:200], attempt=n + 1,
+                          wait_s=CLASSIFIER_WAITS_S[n])
+    rid = uuid.uuid4().hex[:10]
+    fut: asyncio.Future = asyncio.get_running_loop().create_future()
+    run.waits[rid] = fut
+    run.asking[rid] = (agent_id or None, tool_name)
+    try:
+        got = await asyncio.wait_for(fut, CLASSIFIER_WAITS_S[n])
+    except asyncio.TimeoutError:
+        got = "again"
+    finally:
+        run.waits.pop(rid, None)
+        run.asking.pop(rid, None)
+    if got == "again":
+        if tool_use_id:
+            session.not_run(tool_use_id)
+        return {"behavior": "allow"}
+    if got is True:  # a switch to Bypass allowed what waited
+        _remember(run, agent_id, tool_name, inp, True, tool_use_id)
+        return {"behavior": "allow", "updatedInput": inp if isinstance(inp, dict) else {}}
+    return {"behavior": "deny", "message": tools.hint(MODE_SWITCHING) if got == SWITCHING else GONE_LINE}
 
 
 def _command(tool_name: str, inp: Any) -> dict[str, str]:
@@ -1942,13 +2011,13 @@ def kept_rules(c: str, chat: str | None) -> list[dict[str, Any]]:
     return [r["update"] for r in kept if isinstance(r, dict) and isinstance(r.get("update"), dict)]
 
 
-def _answer_word(allow: Any, message: str) -> str:
+def _answer_word(allow: Any, timed_out: bool = False) -> str:
     """How a request ended, for the permission log (agents.log_permission)."""
     if allow is True:
         return "allow"
     if allow == COVERED:
         return "allow: covered by a rule added for this session"
-    if message == TIMED_OUT_LINE:
+    if timed_out:
         return "deny: nobody answered in time"
     if allow is None:
         return "none: the session ended"

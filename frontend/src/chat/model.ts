@@ -26,8 +26,8 @@ export interface ToolResult {
   /** when the result came back */
   ts?: string
   is_error?: boolean
-  /** the call did not run and is made again: auto mode refused it and the analyst allowed it, or a mode switch
-   * answered it (backend session.not_run) */
+  /** the call did not run and is made again: auto mode refused it and the analyst allowed it, auto mode could not
+   * judge it and thimble sent it back, or a mode switch answered it (backend session.not_run) */
   not_run?: boolean
   cell_id?: string
   /** the card an apply_label call left, which its result names (backend session.LABEL_TOOL) */

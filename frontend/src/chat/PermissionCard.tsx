@@ -1,9 +1,9 @@
 // The permission requests waiting for the analyst, as one card pinned above the chat's composer in every chat. It holds
 // every session's requests (chat/permissions.ts pendingRequests), oldest first, one at a time with `1 of 3` paging. Its
 // head names the requesting thread (askThread); the body says who asks, what the call does and why it asks, then Allow,
-// Allow and don't ask again (where Claude Code offers a rule) and Deny. When auto mode cannot decide in a session, an
-// orientation's request offers the switch to Manual or Bypass. An answer hides the request at once. A long command
-// wraps and scrolls past 96px.
+// Allow and don't ask again (where Claude Code offers a rule) and Deny. When auto mode's classifier could not judge a
+// call, an orientation's request offers the switch to Manual or Bypass. An answer hides the request at once. A long
+// command wraps and scrolls past 96px.
 import { useEffect, useMemo, useState } from 'react'
 import { Button } from '../components/Button'
 import { CodeText } from '../components/Code'
@@ -52,7 +52,7 @@ export function PermissionCard({ ws, asks, metas, labels }: {
   const agent = askingAgent(p)
   const what = askWhat(p)
   const fields = askFields(p)
-  // auto mode that cannot decide in this session asks about every call: the orientation's mode can switch from here
+  // while auto mode's classifier gives no verdict, the orientation's mode can switch from here
   const switchChat = classifierDown(p) ? modeChat(ask, metas) : null
   const switchTo = (mode: 'manual' | 'bypass') => {
     if (!switchChat) return

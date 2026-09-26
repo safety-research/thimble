@@ -82,13 +82,18 @@ export function askingAgent(p: Pick<PermissionRequest, 'agent_id' | 'agent_type'
   return { title: p.agent_title || '', type, chat: p.agent_chat || null }
 }
 
-/** Claude Code's reason when auto mode's classifier cannot run in the session: auto mode then leaves every call it
- * would have judged to the analyst, for the whole session. */
+/** Claude Code's reason when auto mode's classifier gave no verdict on a call (backend agent_session.CLASSIFIER_DOWN). */
 const CLASSIFIER_DOWN = /\bclassifier\b.*\bunavailable\b/i
 
-/** Whether auto mode left the call to the analyst only because its classifier cannot run in this session. Pure. */
+/** Whether auto mode left the call to the analyst only because its classifier gave no verdict. Pure. */
 export function classifierDown(p: Pick<PermissionRequest, 'refused'>): boolean {
   return !!p.refused && CLASSIFIER_DOWN.test(p.refused)
+}
+
+/** When an unanswered request is denied, as the card says it: "after a minute", "after 10 minutes". Pure. */
+function denyAfter(s: number): string {
+  const min = Math.round(s / 60)
+  return min <= 1 ? 'after a minute' : `after ${min} minutes`
 }
 
 /** The chat whose permission mode the card can switch for this request: the asking session's own, when it has a mode
@@ -101,12 +106,16 @@ export function modeChat(ask: PendingAsk, metas: ReadonlyMap<string, ChatMeta>):
 /** The modes an orientation runs in, as its switcher names them. */
 const MODE_NAMES: Readonly<Record<string, string>> = { manual: 'Manual', auto: 'Auto', bypass: 'Bypass' }
 
-/** Why the session asks, in one line: auto mode cannot decide or left the call to the analyst, the orientation runs in
- * Manual, a writer or check runs in the analyst's mode (denied after a minute unanswered), or main's prompt also waits
- * in the terminal, where the first answer counts. Pure. */
+/** Why the session asks, in one line: auto mode could not judge the call (and when it is denied unanswered) or left it
+ * to the analyst, the orientation runs in Manual, a writer or check runs in the analyst's mode (denied after a minute
+ * unanswered), or main's prompt also waits in the terminal, where the first answer counts. Pure. */
 export function askWhy(ask: PendingAsk, metas: ReadonlyMap<string, ChatMeta>): string {
   const p = ask.request
-  if (classifierDown(p)) return "Auto mode cannot decide in this session (Claude Code's classifier is unavailable), so it asks you about each call."
+  if (classifierDown(p)) {
+    const tries = p.rechecked ? `, all ${p.rechecked + 1} times it was asked` : ''
+    const late = p.deny_after_s ? ` Unanswered, it is denied ${denyAfter(p.deny_after_s)}.` : ''
+    return `Auto mode could not judge this call: Claude Code's classifier was unavailable${tries}.${late}`
+  }
   if (p.refused) return `Auto mode did not allow it on its own: ${p.refused.replace(/[.\s]+$/, '')}.`
   if (ask.chat === 'main') return 'Claude Code asks in your terminal too; the first answer counts.'
   const m = metas.get(ask.chat)
