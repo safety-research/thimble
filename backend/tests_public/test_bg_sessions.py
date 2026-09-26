@@ -613,6 +613,43 @@ def test_a_tool_call_claude_code_moves_to_the_background_keeps_the_run_busy_unti
     assert run.background == set()
 
 
+def test_a_notification_queued_into_a_running_turn_ends_the_background_task():
+    run = agent_session.Run(CORPUS, "orient", "c1", "s1", config.corpus_dir(CORPUS), "orientation")
+    run.main = session.Sub(CORPUS, "c1", None, None)
+    run.main.names = {}
+    agent_session._steps_of(run, {"type": "assistant", "message": {"content": [
+        {"type": "tool_use", "id": "t2", "name": "mcp__plugin_thimble_thimble__critique", "input": {}}]}})
+    moved = ('MCP tool "plugin:thimble:thimble/critique" is still running after 120s. It was moved to the background as '
+             'task ku66wej7h and keeps running; you\'ll receive a notification with the result when it completes.')
+    agent_session._steps_of(run, {"type": "user", "message": {"content": [
+        {"type": "tool_result", "tool_use_id": "t2", "content": [{"type": "text", "text": moved}]}]}})
+    assert run.background == {"ku66wej7h"}
+    # the session was mid-turn when the task ended, so the notification came as a queued command
+    agent_session._steps_of(run, {"type": "attachment", "attachment": {
+        "type": "queued_command", "commandMode": "task-notification",
+        "prompt": "<task-notification>\n<task-id>ku66wej7h</task-id>\n<tool-use-id>t2</tool-use-id>\n"
+                  "<status>completed</status>"}})
+    assert run.background == set()
+    agent_session._steps_of(run, {"type": "attachment", "attachment": {"type": "queued_command", "prompt": "hello"}})
+    assert run.background == set()
+
+
+def test_a_task_the_session_stops_leaves_the_background():
+    run = agent_session.Run(CORPUS, "orient", "c1", "s1", config.corpus_dir(CORPUS), "orientation")
+    run.main = session.Sub(CORPUS, "c1", None, None)
+    run.main.names = {}
+    agent_session._steps_of(run, {"type": "assistant", "message": {"content": [
+        {"type": "tool_use", "id": "w1", "name": "Workflow", "input": {"script": "export const meta = {}"}}]}})
+    agent_session._steps_of(run, {"type": "user", "message": {"content": [{"type": "tool_result", "tool_use_id": "w1",
+        "content": "Workflow launched in background. Task ID: wq7r2k9d1\nTranscript dir: /tmp/wf_1"}]}})
+    assert run.background == {"wq7r2k9d1"}
+    agent_session._steps_of(run, {"type": "assistant", "message": {"content": [
+        {"type": "tool_use", "id": "k1", "name": "TaskStop", "input": {"task_id": "wq7r2k9d1"}}]}})
+    agent_session._steps_of(run, {"type": "user", "message": {"content": [{"type": "tool_result", "tool_use_id": "k1",
+        "content": '{"message":"Successfully stopped task: wq7r2k9d1","task_id":"wq7r2k9d1","task_type":"local_workflow"}'}]}})
+    assert run.background == set()
+
+
 def test_the_list_holds_view_builds_with_the_command_that_attaches_each(monkeypatch):
     from app import dev
 

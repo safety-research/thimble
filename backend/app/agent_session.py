@@ -235,6 +235,8 @@ LAUNCHED_TASK_RE = re.compile(r"\bTask ID:\s*(\S+)")  # in a Workflow call's res
 RESUMED_AGENT_RE = re.compile(r'"resumedAgentId"\s*:\s*"(\w+)"')  # in a SendMessage's result that continued an agent
 TASK_ID_RE = re.compile(r"<task-id>\s*(.*?)\s*</task-id>", re.S)  # a notification may name several tasks
 MOVED_TASK_RE = re.compile(r"\bmoved to the background as task (\w+)")  # a long call Claude Code let run on
+STOP_TOOL = "TaskStop"
+STOPPED_TASK_RE = re.compile(r'"task_id"\s*:\s*"([^"]+)"')  # in a TaskStop's result, which no notification follows
 
 
 def _now() -> str:
@@ -1338,27 +1340,25 @@ def _steps_of(run: Run, rec: dict) -> None:
     """What a line of the session's own transcript says about its steps: an Agent result ends a foreground step, a Workflow
     result names the run directory whose agents become steps, a task notification ends a background step. Launched
     background agents and workflows, and tool calls moved to the background, are kept in run.background until a
-    notification names them."""
+    notification names them or TaskStop stops them. A notification comes as a prompt of its own while the session is
+    idle, and as a `queued_command` attachment when it arrives during a turn."""
     if rec.get("type") == "assistant":
         for b in session._content_list(rec):
             if isinstance(b, dict) and b.get("type") == "tool_use" and isinstance(b.get("id"), str):
                 run.main.names[b["id"]] = str(b.get("name") or "")  # type: ignore[union-attr]
+        return
+    if rec.get("type") == "attachment":
+        att = rec.get("attachment") if isinstance(rec.get("attachment"), dict) else {}
+        att_origin = att.get("origin") if isinstance(att.get("origin"), dict) else {}
+        if att.get("type") == "queued_command" and "task-notification" in (att_origin.get("kind"), att.get("commandMode")):
+            _task_notice(run, str(att.get("prompt") or ""))
         return
     if rec.get("type") != "user":
         return
     origin = rec.get("origin") if isinstance(rec.get("origin"), dict) else {}
     text = session._user_text(rec)
     if origin.get("kind") == "task-notification" and text:
-        run.background.difference_update(TASK_ID_RE.findall(text))
-        fields = dict(session.TASK_FIELD_RE.findall(text))
-        step = _step_by(run, tool_use_id=fields.get("tool-use-id"), agent_id=fields.get("task-id"))
-        done = str(fields.get("status") or "").strip() in session.TASK_DONE
-        if step is not None and step.done and done and step.agent_id in run.halted:
-            run.halted.discard(step.agent_id)  # an agent that stopped with a process was continued, and has finished
-            with contextlib.suppress(Exception):
-                agents.finish_agent(run.c, step.chat, "done")
-        elif step is not None:
-            _finish_step(run, step, "done" if done else "failed")
+        _task_notice(run, text)
         return
     for b in session._content_list(rec):
         if not isinstance(b, dict) or b.get("type") != "tool_result" or not isinstance(b.get("tool_use_id"), str):
@@ -1381,6 +1381,9 @@ def _steps_of(run: Run, rec: dict) -> None:
         moved = MOVED_TASK_RE.search(content) if not launched else None
         if moved and not b.get("is_error"):
             run.background.add(moved.group(1))
+        stopped = STOPPED_TASK_RE.search(content) if name == STOP_TOOL and not b.get("is_error") else None
+        if stopped:
+            run.background.discard(stopped.group(1))
         if name in AGENT_TOOLS and not ASYNC_RESULT_RE.match(content):
             _scan_subagents(run)
             step = _step_by(run, tool_use_id=tid)
@@ -1408,6 +1411,20 @@ def _new_step(run: Run, agent_id: str, title: str, path: Path, **fields: Any) ->
     assert run.lv is not None
     run.lv.subs.append(sub)  # so a subagent this step starts finds its caller (session._child_finished)
     return sub
+
+
+def _task_notice(run: Run, text: str) -> None:
+    """A task notification: the tasks it names leave run.background, and the step it names ends."""
+    run.background.difference_update(TASK_ID_RE.findall(text))
+    fields = dict(session.TASK_FIELD_RE.findall(text))
+    step = _step_by(run, tool_use_id=fields.get("tool-use-id"), agent_id=fields.get("task-id"))
+    done = str(fields.get("status") or "").strip() in session.TASK_DONE
+    if step is not None and step.done and done and step.agent_id in run.halted:
+        run.halted.discard(step.agent_id)  # an agent that stopped with a process was continued, and has finished
+        with contextlib.suppress(Exception):
+            agents.finish_agent(run.c, step.chat, "done")
+    elif step is not None:
+        _finish_step(run, step, "done" if done else "failed")
 
 
 def _finish_step(run: Run, sub: session.Sub, status: str) -> None:
