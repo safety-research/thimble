@@ -2,7 +2,8 @@
 session's revision stubbed: a view with nothing to fix ends done; problems go to a revision that passes and are read
 again; a revision that fails its checks leaves the view as it was before it; problems left after the last round flag
 the view; pictures drawn without thimble's fonts, a refused reading and a stop show plainly; Undo puts back the view as
-it was built. The prompt the reading gets names four pictures and five criteria for a view over files with lines, and
+it was built, also after a review that ended early and one run again; a view proposed again or deleted stops its
+review with no trace on the proposal that takes its slug. The prompt the reading gets names four pictures and five criteria for a view over files with lines, and
 two and three for one over binary files.
 
 The corpus is invented: board.jsonl, three posts, and a view `posts` of it with a proposal, as the dev agent builds one."""
@@ -190,13 +191,95 @@ async def test_a_view_over_binary_files_is_read_with_two_pictures_and_three_crit
 
 async def test_the_review_starts_after_a_build_and_not_when_turned_off(view, monkeypatch, tmp_path):
     started: list[str] = []
-    monkeypatch.setattr(view_review, "start", lambda c, slug: started.append(slug))
+    monkeypatch.setattr(view_review, "start", lambda c, slug, again=False: started.append(slug))
     view_review.after_built(CORPUS, "posts")
     monkeypatch.setenv("THIMBLE_VIEW_REVIEW", "off")
     view_review.after_built(CORPUS, "posts")
     monkeypatch.setenv("THIMBLE_VIEW_REVIEW", "on")
     view_review.after_built(CORPUS, "spreadsheet")
     assert started == ["posts"]
+
+
+async def _slow_revision(monkeypatch, view) -> asyncio.Event:
+    """A revision that writes half a page and then hangs, until the test stops the review."""
+    started = asyncio.Event()
+
+    async def slow(c, slug, prop, problems, shots):
+        (view / "view.html").write_text("<html>half written</html>")
+        started.set()
+        await asyncio.sleep(30)
+        return True, ""
+
+    monkeypatch.setattr(view_review, "revise", slow)
+    return started
+
+
+async def test_undo_stays_after_a_review_that_ended_early_and_one_run_again(view, monkeypatch, tmp_path):
+    s = Stubs(monkeypatch, tmp_path, [ok("picture 1: the ticks overlap"), "capacity"])
+    built = (view / "view.html").read_text()
+    overloaded = SimpleNamespace(status="overloaded", output=None, refused_by=None, model_requested="m",
+                                 detail="overloaded_error")
+    s.readings[1] = overloaded
+    monkeypatch.setattr(view_review, "CAPACITY_WAITS_S", ())
+    review = await _review()
+    assert review["state"] == "failed" and review["revised"] == ["picture 1: the ticks overlap"]
+    assert "revision 1" in (view / "view.html").read_text()
+    s.readings = [ok("picture 2: the label does not show"), ok()]
+    views._bind_loop()
+    run = view_review.start(CORPUS, "posts", again=True)
+    await run.task
+    review = views.read_proposal(CORPUS, "posts")["review"]
+    assert review["state"] == "done"
+    assert review["revised"] == ["picture 1: the ticks overlap", "picture 2: the label does not show"]
+    view_review.undo(CORPUS, "posts")
+    assert (view / "view.html").read_text() == built
+
+
+async def test_a_new_build_is_what_undo_goes_back_to(view, monkeypatch, tmp_path):
+    Stubs(monkeypatch, tmp_path, [ok("picture 1: the ticks overlap"), ok()])
+    await _review()
+    assert view_review._reviewed_dir(CORPUS, "posts").is_dir()
+    monkeypatch.setattr(view_review, "auto", lambda c: False)
+    (view / "view.html").write_text(PAGE.replace("first", "changed by the analyst"))
+    view_review.after_built(CORPUS, "posts")
+    assert not view_review._reviewed_dir(CORPUS, "posts").exists()
+    assert "review" not in views.read_proposal(CORPUS, "posts")
+
+
+async def test_a_view_proposed_again_stops_its_review_and_leaves_nothing_on_the_new_proposal(view, monkeypatch, tmp_path):
+    from app import dev
+
+    Stubs(monkeypatch, tmp_path, [ok("x")])
+    started = await _slow_revision(monkeypatch, view)
+    monkeypatch.setattr(dev, "queue_view", lambda c, slug: None)
+    monkeypatch.setattr(dev, "stop_view", lambda c, slug, why: False)
+    views.update_proposal(CORPUS, "posts", held=True, status="built")
+    views._bind_loop()
+    run = view_review.start(CORPUS, "posts")
+    await started.wait()
+    views.propose(CORPUS, "Posts", "the posts", ["board.jsonl"], "one post a row, newest first", proposed_by="orient",
+                  hold=True)
+    await asyncio.gather(run.task, return_exceptions=True)
+    prop = views.read_proposal(CORPUS, "posts")
+    assert prop["status"] == "queued" and "review" not in prop and not view_review.running(CORPUS, "posts")
+    assert not (views.views_dir(CORPUS) / "posts").exists()
+    assert not view_review._reviewed_dir(CORPUS, "posts").exists()
+    assert not view_review._reviewed_dir(CORPUS, "posts", last=True).exists()
+
+
+async def test_a_build_that_passes_while_its_review_is_stopping_gets_a_review_of_its_own(view, monkeypatch, tmp_path):
+    Stubs(monkeypatch, tmp_path, [ok("x")])
+    started = await _slow_revision(monkeypatch, view)
+    views._bind_loop()
+    run = view_review.start(CORPUS, "posts")
+    await started.wait()
+    fresh: list[str] = []
+    monkeypatch.setattr(view_review, "start", lambda c, slug, again=False: fresh.append(slug))
+    view_review.stop(CORPUS, "posts", view_review.CHANGED_NOTE)
+    view_review.after_built(CORPUS, "posts")
+    assert fresh == []
+    await asyncio.gather(run.task, return_exceptions=True)
+    assert fresh == ["posts"]
 
 
 def test_the_revision_message_names_the_pictures_and_lists_the_problems(view):

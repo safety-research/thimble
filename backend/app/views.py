@@ -410,7 +410,7 @@ def delete_view(c: str, slug: str) -> None:
     viewer is not deleted."""
     d = _view_dirs(c).get(slug)
     if d is not None:
-        _stop_review(c, slug)
+        _stop_review(c, slug, forget=True)
     if d is None:
         if _builtin_dir(slug) is not None:
             raise HTTPException(400, f"{slug} is a viewer thimble ships; a workspace view of the same slug overrides it")
@@ -1322,6 +1322,7 @@ def propose(c: str, name: str, why: str, claims: Any, arrangement: str, proposed
                 and (old.get("why"), old.get("claims"), old.get("arrangement")) == (why, claims_l, arrangement)):
             return old  # the same proposal again: its build goes on, or its view stays built
         if old is not None:
+            _stop_review(c, old["slug"], forget=True)
             _stop_build(c, old["slug"], "replaced", force=bool(old.get("held")))
             items = [p for p in list_proposals(c) if p.get("slug") != old["slug"]]
         slug = old["slug"] if old is not None else _unique_slug(c, name)
@@ -1366,11 +1367,12 @@ def release_held(c: str) -> list[dict[str, Any]]:
     return shown
 
 
-def _stop_review(c: str, slug: str) -> None:
-    """A change to the view, or its deletion, stops its review (view_review)."""
+def _stop_review(c: str, slug: str, forget: bool = False) -> None:
+    """A change to the view stops its review (view_review); a view replaced or deleted stops it with `forget`, so the
+    review leaves nothing on the proposal that takes its slug."""
     from . import view_review  # noqa: PLC0415
 
-    view_review.stop(c, slug, view_review.CHANGED_NOTE)
+    view_review.stop(c, slug, view_review.CHANGED_NOTE, forget=forget)
 
 
 def _queue(c: str, slug: str) -> None:

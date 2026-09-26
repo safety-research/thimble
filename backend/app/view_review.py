@@ -15,8 +15,10 @@ dev.run_view calls after_built() when a build or a change to a view passes. Each
    review runs again; one that does not leaves the view at its last version that passed.
 
 The state rides on the proposal as `review {state, round, ts, revised, left, note, undo}` and goes out with the `view`
-event. views/.reviewed/<slug>/ keeps the view as it was built for Undo, and <slug>.last the last version that passed,
-restored when a revision fails or the review stops mid-revision. A new change to the view stops its review."""
+event. views/.reviewed/<slug>/ keeps the view as it was built for Undo until the next build or change passes, and
+<slug>.last the last version that passed, restored when a revision fails or the review stops mid-revision. A review run
+again keeps what the review before it revised, so Undo still reaches the view as it was built. A new change to the view
+stops its review; a view replaced or deleted stops it with no trace (forget)."""
 from __future__ import annotations
 
 import asyncio
@@ -79,6 +81,8 @@ class _Run:
     reason: str = ""  # why the review was cancelled: STOPPED_NOTE or CHANGED_NOTE
     revising: bool = False  # a revision's session may be writing the view's files
     note: str = ""
+    forget: bool = False  # the view was replaced or deleted: the review writes nothing more and keeps no copies
+    restart: bool = False  # a build passed while the review was being stopped: a fresh review starts once it ends
 
 
 def enabled() -> bool:
@@ -105,9 +109,14 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
-def _set(c: str, slug: str, **fields: Any) -> dict[str, Any]:
-    """Merge fields into the proposal's `review` and send `view {slug, status: built, review}`."""
-    prop = views.read_proposal(c, slug) or {}
+def _set(c: str, slug: str, run: "_Run | None" = None, **fields: Any) -> dict[str, Any]:
+    """Merge fields into the proposal's `review` and send `view {slug, status: built, review}`; nothing for a run whose
+    view was replaced or deleted, or once the proposal is gone."""
+    if run is not None and run.forget:
+        return {}
+    prop = views.read_proposal(c, slug)
+    if prop is None:
+        return {}
     review = {**(prop.get("review") if isinstance(prop.get("review"), dict) else {}), **fields, "ts": _now()}
     views.update_proposal(c, slug, review=review)
     views._emit(c, slug, str(prop.get("status") or "built"), review=review)
@@ -123,18 +132,29 @@ def _phrase(problem: str) -> str:
 
 
 def after_built(c: str, slug: str) -> None:
-    """Start the review of a view that just passed its checks: a first build or a change. A review of that view that is
-    running goes on, since it drives its own revisions; a view thimble ships is never reviewed."""
-    if not enabled() or not auto(c) or running(c, slug):
+    """Start the review of a view that just passed its checks: a first build or a change, which is the new version Undo
+    goes back to. A review of that view that is running goes on, since it drives its own revisions; a view thimble
+    ships is never reviewed."""
+    run = _runs.get((c, slug))
+    if running(c, slug):
+        if run is not None and run.reason:
+            run.restart = True
         return
     view = views.read_view(c, slug)
-    if view is None or view.get("origin") != "workspace" or views.read_proposal(c, slug) is None:
+    prop = views.read_proposal(c, slug)
+    if view is None or view.get("origin") != "workspace" or prop is None:
+        return
+    _drop_copies(c, slug)
+    if not enabled() or not auto(c):
+        if prop.get("review"):
+            views.update_proposal(c, slug, review=None)
         return
     start(c, slug)
 
 
-def start(c: str, slug: str) -> _Run | None:
-    """Start a review on the running loop (the server's loop from a worker thread); None when one is running."""
+def start(c: str, slug: str, again: bool = False) -> _Run | None:
+    """Start a review on the running loop (the server's loop from a worker thread); None when one is running. `again`
+    (the analyst's Review again) keeps what the review before it revised, and its copy of the view as built."""
     if running(c, slug):
         return None
     try:
@@ -143,28 +163,47 @@ def start(c: str, slug: str) -> _Run | None:
         loop = views._loop
         if loop is None or not loop.is_running() or loop.is_closed():
             return None
-        loop.call_soon_threadsafe(start, c, slug)
+        loop.call_soon_threadsafe(start, c, slug, again)
         return None
     run = _Run(c, slug)
+    if again and _reviewed_dir(c, slug).is_dir():
+        before = (views.read_proposal(c, slug) or {}).get("review")
+        run.revised = [str(x) for x in (before.get("revised") or [])] if isinstance(before, dict) else []
     _runs[(c, slug)] = run
-    _set(c, slug, state="running", round=0, revised=[], left=[], note="", undo=False)
+    _set(c, slug, state="running", round=0, revised=run.revised, left=[], note="", undo=False)
     run.task = loop.create_task(_guarded(run), name=f"view-review:{c}:{slug}")
     return run
 
 
-def stop(c: str, slug: str, reason: str = STOPPED_NOTE) -> bool:
-    """Stop the view's review, if one runs; a revision in progress is put back to the last version that passed."""
+def stop(c: str, slug: str, reason: str = STOPPED_NOTE, forget: bool = False) -> bool:
+    """Stop the view's review, if one runs. A revision in progress is put back to the last version that passed, unless
+    `forget` (the view is replaced or deleted), which leaves no state and no copies behind."""
     from . import dev  # noqa: PLC0415
 
     run = _runs.get((c, slug))
     if run is None or run.task is None or run.task.done():
+        if forget:
+            _drop_copies(c, slug)
         return False
     run.reason = reason
+    run.forget = run.forget or forget
     if run.revising:
         # the revision's session stops and the view is put back now, before a change that stops the review copies it
         dev.stop_review_session(c, slug)
-        _settle(run)
-    run.task.cancel()
+        if not run.forget:
+            _settle(run)
+        run.revising = False
+    if forget:
+        _drop_copies(c, slug)
+    loop = run.task.get_loop()
+    try:
+        on_loop = asyncio.get_running_loop() is loop
+    except RuntimeError:
+        on_loop = False
+    if on_loop:
+        run.task.cancel()
+    elif not loop.is_closed():
+        loop.call_soon_threadsafe(run.task.cancel)
     return True
 
 
@@ -192,6 +231,11 @@ def _copy_view(src: Path, dst: Path) -> None:
     for p in src.iterdir():
         if p.is_file():
             shutil.copy2(p, dst / p.name)
+
+
+def _drop_copies(c: str, slug: str) -> None:
+    shutil.rmtree(_reviewed_dir(c, slug), ignore_errors=True)
+    shutil.rmtree(_reviewed_dir(c, slug, last=True), ignore_errors=True)
 
 
 def _restore(c: str, slug: str, src: Path) -> bool:
@@ -222,9 +266,8 @@ def undo(c: str, slug: str) -> dict[str, Any]:
         raise HTTPException(409, "the review revised nothing to undo")
     _restore(c, slug, src)
     views.mark_built(c, slug)
-    shutil.rmtree(src, ignore_errors=True)
-    shutil.rmtree(_reviewed_dir(c, slug, last=True), ignore_errors=True)
-    return _set(c, slug, revised=[], undo=True, note="")
+    _drop_copies(c, slug)
+    return _set(c, slug, revised=[], left=[], undo=True, note="")
 
 
 # --------------------------------------------------------------------------- the review
@@ -236,23 +279,28 @@ async def _guarded(run: _Run) -> None:
         await asyncio.wait_for(_review(run), REVIEW_TOTAL_S)
     except asyncio.TimeoutError:
         _settle(run)
-        _set(c, slug, state="failed", note=PAST_TIME_NOTE.format(minutes=round(REVIEW_TOTAL_S / 60)),
+        _set(c, slug, run, state="failed", note=PAST_TIME_NOTE.format(minutes=round(REVIEW_TOTAL_S / 60)),
              revised=run.revised)
     except asyncio.CancelledError:
         _settle(run)
-        _set(c, slug, state="stopped", note=run.reason or STOPPED_NOTE, revised=run.revised)
+        _set(c, slug, run, state="stopped", note=run.reason or STOPPED_NOTE, revised=run.revised)
     except Exception as e:  # noqa: BLE001
         log.exception("view review %s/%s failed", c, slug)
         _settle(run)
-        _set(c, slug, state="failed", note=f"The review did not finish: {type(e).__name__}: {e}", revised=run.revised)
+        _set(c, slug, run, state="failed", note=f"The review did not finish: {type(e).__name__}: {e}",
+             revised=run.revised)
     finally:
         if _runs.get((c, slug)) is run:
             _runs.pop((c, slug), None)
+        if run.forget:
+            _drop_copies(c, slug)
+        if run.restart:
+            after_built(c, slug)
 
 
 def _settle(run: _Run) -> None:
     """A review cut short mid-revision puts the view back to the last version that passed its checks."""
-    if run.revising and _restore(run.c, run.slug, _reviewed_dir(run.c, run.slug, last=True)):
+    if run.revising and not run.forget and _restore(run.c, run.slug, _reviewed_dir(run.c, run.slug, last=True)):
         views.mark_built(run.c, run.slug)
     run.revising = False
 
@@ -270,32 +318,32 @@ async def _review(run: _Run) -> None:
         bad = [s for s in shots if not s.get("ok")]
         if bad:
             why = "; ".join(dict.fromkeys(e for s in bad for e in s.get("errors") or [])) or "the page did not load"
-            _set(c, slug, state="failed", note=SHOTS_NOTE.format(why=why[:400]), revised=run.revised)
+            _set(c, slug, run, state="failed", note=SHOTS_NOTE.format(why=why[:400]), revised=run.revised)
             return
         if not all(s.get("fonts") for s in shots):
-            _set(c, slug, state="failed", note=FONTS_NOTE, revised=run.revised)
+            _set(c, slug, run, state="failed", note=FONTS_NOTE, revised=run.revised)
             return
         got = await read(c, run, prop, view, shots, lined)
         if isinstance(got, str):
-            _set(c, slug, state="failed", note=got, revised=run.revised)
+            _set(c, slug, run, state="failed", note=got, revised=run.revised)
             return
         problems = [p for crit in got for p in crit]
         if not problems:
-            _set(c, slug, state="done", left=[], revised=run.revised, note=run.note)
+            _set(c, slug, run, state="done", left=[], revised=run.revised, note=run.note)
             return
         if run.round >= ROUNDS:
-            _set(c, slug, state="done", left=[_phrase(p) for p in problems], revised=run.revised, note=run.note)
+            _set(c, slug, run, state="done", left=[_phrase(p) for p in problems], revised=run.revised, note=run.note)
             return
         d = views.views_dir(c) / slug
-        if run.round == 0:
+        if not _reviewed_dir(c, slug).is_dir():
             await asyncio.to_thread(_copy_view, d, _reviewed_dir(c, slug))
         await asyncio.to_thread(_copy_view, d, _reviewed_dir(c, slug, last=True))
-        _set(c, slug, state="running", round=run.round + 1, revised=run.revised)
+        _set(c, slug, run, state="running", round=run.round + 1, revised=run.revised)
         run.revising = True
         ok, why = await revise(c, slug, prop, got, shots)
         if not ok:
             _settle(run)
-            _set(c, slug, state="done", left=[_phrase(p) for p in problems], revised=run.revised,
+            _set(c, slug, run, state="done", left=[_phrase(p) for p in problems], revised=run.revised,
                  note=REVISION_FAILED_NOTE)
             return
         run.revising = False
@@ -486,7 +534,7 @@ async def again_route(c: str, slug: str) -> dict[str, Any]:
     """Review the view again (the refresh glyph of a review that failed or was stopped); 409 while one runs."""
     _review_view(c, slug)
     views._bind_loop()
-    if start(c, slug) is None:
+    if start(c, slug, again=True) is None:
         raise HTTPException(409, "the view's review is already running")
     return {"ok": True}
 
