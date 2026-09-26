@@ -5,8 +5,9 @@
 // workspace's setting (src/shell/SettingsPopover.tsx). Every request is recorded and answered by a stand-in fetch.
 import { act } from 'react'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
-import { StartGate, SUBAGENT_MODEL_TIP, TERMINAL_FIRST_NOTE } from '../../src/chat/StartGate.tsx'
-import { changedSwitches, SWITCHES } from '../../src/shell/SettingsPopover.tsx'
+import { StartGate, SUBAGENT_MODEL_TIP, SUBAGENT_NOTE, TERMINAL_FIRST_NOTE } from '../../src/chat/StartGate.tsx'
+import { changedSwitches, ORIENT_ROUTES, SettingsPopover, SWITCHES } from '../../src/shell/SettingsPopover.tsx'
+import { StoppedHold } from '../../src/chat/AgentCard.tsx'
 import { mount, settle, unmountAll } from './mount.tsx'
 
 const posted: [string, unknown][] = []
@@ -34,9 +35,10 @@ describe('the Start card in terminal-first mode', () => {
     await click(el.querySelector<HTMLButtonElement>('.chat-gate-options-toggle')!)
     expect([...el.querySelectorAll('.chat-gate-row')].map((r) => r.getAttribute('data-pass'))).toEqual(['final', 'views', 'report'])
     expect(el.querySelector('.chat-gate-perms')).toBeNull()
-    expect(el.querySelector('.chat-gate-note')?.textContent).toBe(TERMINAL_FIRST_NOTE)
-    expect(TERMINAL_FIRST_NOTE).toMatch(/permission mode/)
-    expect(TERMINAL_FIRST_NOTE).toMatch(/write fence/)
+    expect(el.querySelector('.chat-gate-note')?.textContent).toBe(SUBAGENT_NOTE)
+    expect(SUBAGENT_NOTE).toMatch(/permission mode/)
+    expect(SUBAGENT_NOTE).toMatch(/write fence/)
+    expect(TERMINAL_FIRST_NOTE).toMatch(/background sessions/)
     const line = el.querySelector('.chat-gate-line')!
     expect(line.getAttribute('data-model')).toBe('claude-fable-5-1')
     expect(line.querySelector('.model-line-effort')).toBeNull()
@@ -62,5 +64,49 @@ describe('the settings switch', () => {
     expect(changedSwitches({ models: {}, terminal_first: false }, { terminal_first: false })).toEqual({})
     expect(changedSwitches({ models: {} }, { terminal_first: true })).toEqual({ terminal_first: true })
     expect(changedSwitches({ models: {}, terminal_first: true }, { terminal_first: false })).toEqual({ terminal_first: false })
+  })
+})
+
+describe("the orientation's route", () => {
+  test('shows under the switch while it is on, as subagent / background session, and saves orient_route', async () => {
+    vi.stubGlobal('ResizeObserver', class {
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    })
+    let settings: Record<string, unknown> = { models: {}, terminal_first: true, orient_route: 'subagent' }
+    const put: unknown[] = []
+    vi.stubGlobal('fetch', async (url: unknown, init?: RequestInit) => {
+      const u = String(url)
+      if (init?.method === 'PUT' && u.endsWith('/settings')) {
+        put.push(JSON.parse(String(init.body ?? '{}')))
+        settings = { ...settings, ...(put.at(-1) as object) }
+      }
+      const body = u.endsWith('/settings') ? settings : u.endsWith('/chats/main') ? { meta: { id: 'main', kind: 'main' }, events: [] } : {}
+      return new Response(JSON.stringify(body), { status: 200, headers: { 'content-type': 'application/json' } })
+    })
+    const anchor = document.createElement('button')
+    document.body.appendChild(anchor)
+    await mount(<SettingsPopover ws="mini" anchor={anchor} open onClose={() => undefined} />)
+    await settle()
+    await settle()
+    const group = document.querySelector('[role="radiogroup"][aria-label="Orientation runs as"]')!
+    expect(group.textContent).toBe('Orientation runs as:subagent/background session')
+    expect(ORIENT_ROUTES.map((r) => r.value)).toEqual(['subagent', 'session'])
+    await click(group.querySelector<HTMLButtonElement>('[data-route="session"]')!)
+    expect(group.querySelector('[data-route="session"]')?.getAttribute('aria-checked')).toBe('true')
+    const save = [...document.querySelectorAll<HTMLButtonElement>('button')].find((b) => b.textContent === 'Save')!
+    await click(save)
+    expect(put).toContainEqual({ orient_route: 'session' })
+  })
+})
+
+describe("a stopped background session's card", () => {
+  test('says it stopped and Resume asks the server to start it again', async () => {
+    const el = await mount(<StoppedHold ws="mini" chat="w1" text="The background session stopped. Resume starts it again with its conversation." />)
+    expect(el.querySelector('.chat-hold-stopped')?.textContent).toContain('The background session stopped.')
+    const btn = [...el.querySelectorAll<HTMLButtonElement>('button')].find((b) => b.textContent === 'Resume')!
+    await click(btn)
+    expect(posted.map(([u]) => u)).toContain('/api/ws/mini/chats/w1/resume')
   })
 })

@@ -26,6 +26,9 @@ export const PASSES: { id: OrientPass; label: string }[] = [
 
 /** What terminal-first mode gives up, where the gate and the settings offer it (backend orientation, module note). */
 export const TERMINAL_FIRST_NOTE =
+  "Runs the orientation, the writers and the critic where you can steer them from your Claude Code terminal: each shows at the bottom of it and takes your messages. Writers and the critic run as background sessions."
+/** The Start gate's note when the orientation runs as a subagent of main. */
+export const SUBAGENT_NOTE =
   "Runs as a subagent of your Claude Code session, so you can steer it from the terminal. It then works in your session's permission mode and effort, without a write fence, workflows or critique of its own."
 /** The model line's tooltip in terminal-first mode. */
 export const SUBAGENT_MODEL_TIP = "The orientation runs on your Claude Code session's model and effort"
@@ -190,7 +193,7 @@ export function StartGate({ ws, model, defaultEffort = ORIENT_DEFAULT_EFFORT, fa
             </div>
             {subagent ? (
               <p className="chat-gate-note" data-mode="subagent">
-                {TERMINAL_FIRST_NOTE}
+                {SUBAGENT_NOTE}
               </p>
             ) : (
             <div className="chat-gate-perms" data-choice={mode}>

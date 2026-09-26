@@ -242,7 +242,8 @@ export function ChatPanel({ ws, onCollapse, dock = false }: { ws: string; onColl
         .then((s) => {
           if (!alive) return
           setOrientConf(s.models?.orient ?? null)
-          setTerminalFirst(s.terminal_first === true)
+          // the orientation runs as main's subagent, whose Start has no permission mode of its own
+          setTerminalFirst(s.terminal_first === true && s.orient_route !== 'session')
         })
         .catch(() => {
           if (alive) retry = window.setTimeout(read, SETTINGS_RETRY_MS)

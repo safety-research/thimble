@@ -1504,6 +1504,13 @@ button.model-line-part[aria-expanded='true'] {
   color: var(--text-primary);
 }
 /* the rules the analyst's "don't ask again" added to a session, in mono, wrapping when long */
+/* a background session whose process stopped: what happened, then Resume */
+.chat-hold-stopped {
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
 .chat-hold-rule {
   font: 400 var(--text-mono) / 1.35 var(--font-mono);
   overflow-wrap: anywhere;

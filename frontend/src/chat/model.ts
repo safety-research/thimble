@@ -316,6 +316,8 @@ export function toolSummary(name: string, input: unknown, ws = ''): string {
       return oneLine(str(inp.text))
     case 'message_thread':
       return [str(inp.thread), inp.message ? oneLine(str(inp.message)) : ''].filter(Boolean).join(': ')
+    case 'wait_session':
+      return str(inp.session)
     case 'rename_thread':
       return `${str(inp.thread)} → ${str(inp.name)}`
     case 'delete_thread':
@@ -386,6 +388,8 @@ export const TOOL_WORDS: Record<string, string> = {
   resolve_comment: 'Resolve comment',
   reply_in_thread: 'Reply',
   message_thread: 'Message thread',
+  wait_session: 'Wait for session',
+  list_agents: 'List agents',
   rename_thread: 'Rename thread',
   delete_thread: 'Delete thread',
   screenshot: 'Screenshot',
@@ -431,6 +435,8 @@ export const TOOL_GROUPS: Record<string, string> = {
   screenshot: 'Screenshot',
   reply_in_thread: 'Reply',
   message_thread: 'Threads',
+  wait_session: 'Sessions',
+  list_agents: 'Sessions',
   rename_thread: 'Threads',
   delete_thread: 'Threads',
 }
@@ -657,6 +663,10 @@ export function plainStep(t: ToolRow, questions: ReadonlyMap<string, string> = n
       return 'Replied'
     case 'message_thread':
       return with_(inp.message ? 'Sent to thread' : 'Asked again in thread', str(inp.thread))
+    case 'wait_session':
+      return with_('Waited for', str(inp.session))
+    case 'list_agents':
+      return 'Listed agents'
     case 'rename_thread':
       return with_('Renamed thread', `${str(inp.thread)} to ${str(inp.name)}`)
     case 'delete_thread':

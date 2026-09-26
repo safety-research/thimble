@@ -482,6 +482,33 @@
   color: var(--text-secondary);
   font: var(--type-body-sm);
 }
+/* terminal-first's choice of how the orientation runs, under its switch: `Orientation runs as: subagent / background session` */
+.settings-route {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 6px;
+  margin-top: 4px;
+  color: var(--text-secondary);
+  font: var(--type-body-sm);
+}
+.settings-route-choice {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+}
+.settings-route-opt {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--text-secondary);
+  font: inherit;
+  cursor: pointer;
+}
+.settings-route-opt.on {
+  color: var(--accent);
+  font-weight: 500;
+}
 .settings-error {
   color: var(--status-negative);
   font: var(--type-body-sm);
