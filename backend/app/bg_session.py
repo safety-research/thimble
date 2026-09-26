@@ -690,13 +690,20 @@ def is_proxy(c: str, agent_type: Any, description: Any) -> bool:
     return _by_tray(c, agent_type, description) is not None
 
 
-def proxy_started(c: str, agent_type: str, description: str, agent_id: str | None) -> None:
-    """Main started (or the mirror found) the proxy described as a session's tray entry."""
+def proxy_started(c: str, agent_type: str, description: str, agent_id: str | None) -> str | None:
+    """Main started (or the mirror found) the proxy described as a session's tray entry: the session's key."""
     e = _by_tray(c, agent_type, description)
     if e is None:
-        return
+        return None
     e.proxy_seen = time.monotonic()
-    if agent_id and agent_id not in e.proxy_agents:
+    proxy_agent(c, e.key, agent_id)
+    return e.key
+
+
+def proxy_agent(c: str, key: str, agent_id: str | None) -> None:
+    """The agent id of a proxy of the session `key`, once the mirror knows it."""
+    e = entry(c, key)
+    if e is not None and agent_id and agent_id not in e.proxy_agents:
         e.proxy_agents.append(agent_id)
         _save(c)
 
@@ -1070,7 +1077,7 @@ def statusline_command(cwd: Path) -> str:
     return f"{cmd} --chain {shlex.quote(own)}" if own else cmd
 
 
-def sync_statusline(c: str) -> None:
+def apply_statusline(c: str) -> None:
     """The corpus folder's statusline lists thimble's agents while the workspace is in terminal-first mode, and is the
     analyst's own again once it is not (cc_settings.set_statusline)."""
     from . import cc_settings  # noqa: PLC0415
@@ -1083,6 +1090,9 @@ def sync_statusline(c: str) -> None:
             cc_settings.clear_statusline(cwd)
     except Exception:  # noqa: BLE001 — the statusline is a convenience; a folder that cannot be written keeps its own
         log.warning("%s: the statusline was not updated", c, exc_info=True)
+
+
+sync_statusline = apply_statusline  # what the settings route and the launcher call
 
 
 def agent_rows(c: str) -> list[dict[str, Any]]:

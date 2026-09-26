@@ -68,6 +68,16 @@ def _dev_dir_off_the_checkout(tmp_path, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _statusline_left_alone(monkeypatch):
+    """Terminal-first mode writes the corpus folder's statusline (bg_session.sync_statusline), and the suite's corpora are
+    shared by every test, so the tests that turn the mode on leave the folder alone. test_bg_sessions.py tests the
+    statusline on a copy."""
+    from app import bg_session
+
+    monkeypatch.setattr(bg_session, "sync_statusline", lambda c: None)
+
+
+@pytest.fixture(autouse=True)
 def _view_tickets_held(monkeypatch):
     """A view proposal queues a ticket at once, and a ticket that starts runs a real `claude --bg`. Every test holds
     them queued with an empty pool."""

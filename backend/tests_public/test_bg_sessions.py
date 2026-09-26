@@ -354,8 +354,11 @@ async def test_the_terminal_lists_the_agents_and_the_hooks_print_a_start_and_a_f
 def test_the_statusline_is_set_for_terminal_first_and_put_back_after(workspaces_tmp, tmp_path, monkeypatch):
     from app import cc_settings
 
+    monkeypatch.setattr(bg_session, "sync_statusline", bg_session.apply_statusline)  # the suite's stand-in aside
     monkeypatch.setenv("THIMBLE_HOME", str(tmp_path / "home"))
-    corpus = config.corpus_dir(CORPUS)
+    corpus = tmp_path / "corpus-copy"
+    corpus.mkdir()
+    monkeypatch.setattr(config, "corpus_dir", lambda c: corpus)
     local = corpus / ".claude" / "settings.local.json"
     local.parent.mkdir(parents=True, exist_ok=True)
     local.write_text(json.dumps({"statusLine": {"type": "command", "command": "my-line"}, "env": {"A": "1"}}))
@@ -430,3 +433,34 @@ async def test_a_turn_that_ended_at_capacity_is_retried_in_place_with_its_prompt
     (fake / "sessions.json").write_text(json.dumps(st))
     await asyncio.wait_for(run.task, 15)
     assert agents.read_meta(CORPUS, run.chat)["status"] == "done" and run.sid == e.sid
+
+
+async def test_the_tray_entry_is_no_chat_of_main_s_and_main_s_message_to_it_stays_out_of_main_s_chat(fake, tmp_path, monkeypatch):
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "claude-config"))
+    run = await write_session.start(CORPUS, "report")
+    await asyncio.wait_for(run.task, 10)
+    sid, agent, use = "e7b0a1f2-0000-4000-8000-00000000abcd", "a00000000000000a9", "toolu_tray"
+    main = tmp_path / f"{sid}.jsonl"
+    main.write_text("")
+    lv = session.attach(CORPUS, sid, str(config.corpus_dir(CORPUS)), str(main))
+    session.tail_once(lv)
+    before = len(_log(agents.MAIN_ID))
+
+    def put(*recs: dict) -> None:
+        with main.open("a") as f:
+            f.write("".join(json.dumps(r) + "\n" for r in recs))
+        session.tail_once(lv)
+
+    prompt = str(bg_session.proxy_file(CORPUS, "writer:report"))
+    put({"type": "user", "origin": {"kind": "human"}, "message": {"content": "Show the writer."}},
+        {"type": "assistant", "message": {"content": [{"type": "tool_use", "id": use, "name": "Agent", "input": {
+            "subagent_type": "thimble:writer", "description": "writing report", "prompt": prompt, "run_in_background": True}}]}},
+        {"type": "user", "message": {"content": [{"type": "tool_result", "tool_use_id": use, "content": [
+            {"type": "text", "text": f"Async agent launched successfully.\nagentId: {agent} (internal ID)"}]}]}},
+        {"type": "assistant", "message": {"content": [{"type": "tool_use", "id": "s1", "name": "SendMessage",
+                                                       "input": {"to": agent, "message": "Which card first?"}}]}})
+    assert not [m for m in agents.list_chats(CORPUS) if m.get("role") == "subagent"], "no agent chat for the tray entry"
+    assert agent in bg_session.entry(CORPUS, "writer:report").proxy_agents
+    added = _log(agents.MAIN_ID)[before:]
+    assert [x["text"] for x in added if x["type"] == "user"] == ["Show the writer."], \
+        "main's message to the tray entry is logged by the session's chat, not main's"

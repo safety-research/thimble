@@ -980,7 +980,7 @@ def _tool_use(lv: Live, tool_use_id: str, name: str, tool_input: Any) -> None:
             if sub.chat not in lv.turn_threads:  # not the relay of a message the browser logged in the thread
                 _relayed(sub, inp)
             return
-        if sub is not None and sub.owner is None:
+        if sub is not None and sub.owner is None and not sub.proxy:  # a proxy's session's chat logs it (bg_session)
             _relayed(sub, inp)
     _rec(lv, "tool_use", id=tool_use_id, name=name, input=tool_input)
     if name in AGENT_TOOLS:
@@ -1057,8 +1057,8 @@ def _spawn(lv: Live, tool_use_id: str | None, agent_id: str | None, title: str, 
     if sub is None and _bg().is_proxy(lv.c, agent_type, title):
         sub = Sub(lv.c, agents.MAIN_ID, tool_use_id, agent_id)  # it records nothing (proxy)
         sub.proxy = sub.of_main = True
+        sub.report = _bg().proxy_started(lv.c, str(agent_type), str(title), agent_id)  # the session it shows
         lv.subs.append(sub)
-        _bg().proxy_started(lv.c, str(agent_type), str(title), agent_id)
         return sub
     if sub is None:
         tid = thread_for(lv.c, title)
@@ -1083,8 +1083,8 @@ def _spawn(lv: Live, tool_use_id: str | None, agent_id: str | None, title: str, 
     if agent_id and not sub.agent_id:
         sub.agent_id = fields["agent_id"] = agent_id
     if sub.proxy:
-        if fields.get("agent_id"):
-            _bg().proxy_started(lv.c, str(agent_type), str(title), sub.agent_id)
+        if fields.get("agent_id") and sub.report:
+            _bg().proxy_agent(lv.c, sub.report, sub.agent_id)
         return sub
     if sub.thread:
         if not sub.done:  # a finished fork's file found again (a restart) is not a fork starting; a follow-up wakes it
