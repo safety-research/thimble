@@ -188,7 +188,7 @@ Lay out the browser's main area, right of the chat, as panes that each show one 
 
 ## propose_view
 
-Propose a view of files you have read, a viewer for how their records group, such as a log's lines grouped into conversations. thimble's dev agent starts building it at once, in the background, and it opens in the Files tab when it passes its checks.
+Propose a view: a viewer written for how the records of files you have read are best read, such as a log's lines grouped into conversations. thimble's dev agent starts building it at once, in the background, and it opens in the Files tab when it passes its checks.
 
 ```json
 {
@@ -197,7 +197,7 @@ Propose a view of files you have read, a viewer for how their records group, suc
     "name": {"type": "string", "description": "A short name in Title Case, as its tab shows it, such as Timeline or Tool Call Timeline."},
     "why": {"type": "string", "description": "What the analyst sees in it and why that helps."},
     "claims": {"type": "array", "items": {"type": "string"}, "description": "Globs of the files it reads."},
-    "arrangement": {"type": "string", "description": "The unit, which records it gathers, grouped by which field and in what order, and how the page lays it out, with the definition the cards and labels use for any outcome it marks, such as worked or failed."}
+    "arrangement": {"type": "string", "description": "The unit, which records it gathers, grouped by which field and in what order, the sizes it must fit, such as how many units and what time span, and how the page lays it out, from the overview it opens on to one record's details, with the definition the cards and labels use for any outcome it marks, such as worked or failed."}
   },
   "required": ["name", "why", "claims", "arrangement"]
 }

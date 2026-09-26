@@ -76,18 +76,31 @@ After a follow-up, edit each card its answer changes and add a card only for wha
 
 #### Views
 
-A good view shows an arrangement of the records that the files' own layout hides, such as records that belong together across lines or files, the events of several actors on one timeline, or images, audio or video beside the records they match, so the analyst sees what neither the files view nor a spreadsheet can show. Its arrangement names the fields that group the records and says how the page lays them out, so the dev agent, which builds each view you propose, need not guess. Propose each with `propose_view`, usually one to three. To replace a proposal, such as after a follow-up, propose it again under the same name.
+A view is a viewer of the corpus that thimble's dev agent writes from your proposal, in the background, while you work. The analyst opens it beside the files, every citation into its files opens in it, and the labels they turn on mark its records. Propose each with `propose_view`, usually one to three, once your analysis shows how the records are best read. The dev agent knows only what the proposal says, so its arrangement names the fields that group the records, the sizes the page must fit, such as how many units and what time span, and how the page lays them out.
 
-    Corpus    tickets/march.jsonl and tickets/april.jsonl, one message per line, a customer's ticket or support's reply, each
-              with a customer_id, a created_at, a request type such as refund or failure report, a status and the text. A
-              customer often writes several times over days. Each ticket names an order, and orders.csv gives the order's
-              product, shipment batch and ship date.
-    Good      propose_view({"name": "Inbox", "why": "Each customer's tickets and the replies to them, in order, as one conversation.",
-                            "claims": ["tickets/*.jsonl"], "arrangement": "Tickets with the same customer_id are one conversation, ordered by created_at. The customers are listed down the side, and the chosen customer's conversation is shown beside them."})
+A good view shows the records in a form their files hide. Look for it in three places.
+
+- What the records are. A kind of document has a layout its readers already know: a mailbox reads as threads, a chat log as a conversation, and a document's drafts as the document with its changes marked.
+- How the records are structured. A time field suggests a timeline, coordinates a map, links between actors a network, and a hierarchy a tree or a nested browser.
+- What your analysis found. A pattern you found while exploring can suggest a form no single field names, such as a browser over the units you compared beside a codebook of the categories you sorted them into, where a category lists its instances across units.
+
+Every view opens on an overview of all it covers, every unit or the whole time span, since a single record makes sense only against the whole. From there the analyst narrows it by zooming, searching or filtering, and opens a record's details by picking it.
+
+To replace a proposal, such as after a follow-up, propose it again under the same name.
+
+    Corpus    tickets/march.jsonl and tickets/april.jsonl, 4,120 messages over 61 days, one per line, a customer's
+              ticket or support's reply, each with a customer_id, a created_at, a request type, a status and the text.
+              A customer often writes several times over days. Each ticket names an order, and orders.csv gives the
+              order's product, shipment batch and ship date. The analysis sorted the refund tickets into kinds of
+              complaint with the label `complaint`.
+    Good      propose_view({"name": "Inbox", "why": "Each customer's tickets and the replies to them, read as one email thread.",
+                            "claims": ["tickets/*.jsonl"], "arrangement": "Tickets with the same customer_id are one conversation, ordered by created_at, about 1,300 conversations. The page lists every conversation down the side with its customer, its number of messages and its last status, most recent first, and shows the chosen one as a thread of messages beside the list."})
     Good      propose_view({"name": "Timeline", "why": "Tickets and shipments on one time axis, so a rise in failure reports lines up with the batch shipped before it.",
-                            "claims": ["tickets/*.jsonl", "orders.csv"], "arrangement": "Each ticket at its created_at in a lane for its product, found through its order, with each batch's ship date marked in the same lane."})
+                            "claims": ["tickets/*.jsonl", "orders.csv"], "arrangement": "Tickets over their 61 days, counted per day in a lane for each product, found through its order, with each batch's ship date marked in its lane. A day opens its tickets below the chart."})
     Good      propose_view({"name": "Request outcomes", "why": "How each kind of request ended, as a flow from request type to final status whose paths open their conversations.",
                             "claims": ["tickets/*.jsonl"], "arrangement": "Tickets with the same customer_id are one conversation, grouped by the request type of its first ticket and then by the status of its last message. The page draws the groups as a flow from request types on the left to final statuses on the right."})
+    Good      propose_view({"name": "Complaint codebook", "why": "The kinds of complaint beside the tickets they come from, so each kind's definition is read against its instances.",
+                            "claims": ["tickets/*.jsonl"], "arrangement": "The complaint label's kinds, each with its definition and its number of tickets. A kind lists its tickets across customers, and a ticket opens in its conversation."})
 
 #### The report
 
