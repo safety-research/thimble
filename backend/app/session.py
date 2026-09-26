@@ -1019,10 +1019,11 @@ def _tool_result(lv: Live, tool_use_id: str, content: Any, is_error: bool = Fals
 
 
 def thread_for(c: str, description: Any) -> str | None:
-    """The thread an Agent call's description names: `thread:<thread id>`, or the id of a thread's event in its place."""
+    """The thread an Agent call's description names: `thread:<fork name>` (threads.fork_name), `thread:<thread id>`, or
+    the id of a thread's event in its place."""
     tid = threads.thread_of(description)
     if tid and not threads.is_thread(c, tid):
-        tid = _event_threads.get(tid)
+        tid = _event_threads.get(tid) or threads.by_fork_name(c, tid)
     return tid if tid and threads.is_thread(c, tid) else None
 
 

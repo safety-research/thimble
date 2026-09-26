@@ -26,7 +26,8 @@ SESSION_OF = {"orient": "orient", "writer": "writer:report", "critic": "critique
 # Agent: the orientation starts its subagents; Workflow: the orientation's and a writer's sessions run workflows of
 # their own; Bash: a check's session, fenced to a work folder of its own, counts and searches the corpus
 BUILTIN = {"Read", "Grep", "Glob", "Skill", "Agent", "Workflow", "Bash"}
-NAMES = {"writer": "writer", "critic": "critic", "check": "check"}  # the others are thimble-<stem>
+# the others are thimble-<stem>; the plugin's own agents are named for the tray, where Claude Code shows `thimble:<name>`
+NAMES = {"writer": "writer", "critic": "critic", "check": "check", "orient-subagent": "orient"}
 # the agents that inherit every tool less their disallowed ones: the orientation's session's, and its subagent of
 # terminal-first mode (test_orient_subagent.py)
 INHERITING = ("orient", "orient-subagent")

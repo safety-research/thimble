@@ -1,5 +1,5 @@
 ---
-name: thimble-orient-subagent
+name: orient
 description: thimble's orientation as a background subagent, for a workspace in terminal-first mode. Start it only when start_orientation's result asks for it, with the prompt that result gives.
 background: true
 color: purple

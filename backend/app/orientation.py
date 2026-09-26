@@ -50,7 +50,7 @@ from .ledger import read_json, write_json
 log = logging.getLogger("thimble.orientation")
 
 AGENT = "thimble-orient"  # prompts/orient.md's name, the agent its session runs as
-SUBAGENT = "thimble-orient-subagent"  # plugin/agents/orient-subagent.md's name, the agent of terminal-first mode
+SUBAGENT = "orient"  # plugin/agents/orient-subagent.md's name, the agent of terminal-first mode (`thimble:orient`)
 TERMINAL_FIRST_KEY = "terminal_first"  # settings.json: the orientation runs as a subagent of main (module note)
 SUBAGENT_ROUTE = "subagent"  # the record's `route` in terminal-first mode
 SUBAGENT_PROMPT = "subagent-prompt.md"  # under orient/: the prompt the subagent reads first
@@ -133,7 +133,7 @@ def _emit(c: str, status: str, **fields: Any) -> None:
 
 def is_orient(agent_type: Any) -> bool:
     """Whether an Agent call's subagent_type, or a subagent's recorded agentType, is an orientation's agent, bare or
-    scoped as `thimble:thimble-orient`: the session's agent or terminal-first mode's SUBAGENT."""
+    scoped as `thimble:orient`: the session's agent or terminal-first mode's SUBAGENT."""
     return isinstance(agent_type, str) and agent_type.strip().rsplit(":", 1)[-1] in (AGENT, SUBAGENT)
 
 

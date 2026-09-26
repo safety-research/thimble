@@ -4,7 +4,8 @@ A thread starts in the browser from a ⌘-click or ⌘-drag (agents.new_thread);
 text, surface, selector, and a PNG under `anchors/`). Each message typed in it is a channel event of kind `thread`
 (`event`) naming the thread and its card group `thread:<id>`; the first one carries the anchor and what its refs
 hold.
-Main answers by forking with description `thread:<id>`; the mirror (session.py) matches the fork's transcript, copies
+Main answers by forking with description `thread:<name>`, the thread's fork name (fork_name: its title as a slug, which
+the terminal shows); the mirror (session.py) matches the fork's transcript, copies
 its tool calls and its text into the thread's chat, with the messages the analyst typed to it in Claude Code's agent
 view and those main sent it for a question typed in the terminal, and calls fork_finished when it stops. The fork
 replies with `reply_in_thread` or its text.
@@ -37,6 +38,9 @@ FORK_DESCRIPTION_RE = re.compile(r"^\s*thread:([A-Za-z0-9_-]{1,64})\s*$")
 THREAD_REF_RE = re.compile(r"^thread:([A-Za-z0-9_-]{1,64})$")
 CHIP_KIND = "thread"
 CHIP_CHARS = 120
+FORK_NAME_KEY = "fork_name"  # on a thread's meta: the name its forks run under (fork_name)
+FORK_NAME_CHARS = 48
+FORK_NAME_FALLBACK = "thread"
 WARM_S = 20.0  # the longest wait for the anchor's view refs to resolve before a thread's first event (warm)
 WARM_MAX = 8  # the anchor's refs resolved that way
 EARLIER_CHARS = 3_000  # of the thread's earlier turns, the newest kept, on the event that forks it anew
@@ -63,6 +67,43 @@ def thread_of(description: Any) -> str | None:
     """The thread id an Agent call's description names (`thread:<id>`), else None."""
     m = FORK_DESCRIPTION_RE.match(str(description or ""))
     return m.group(1) if m else None
+
+
+def slug(title: str) -> str:
+    """A title as a fork name: its words in lower case joined by '-', cut at FORK_NAME_CHARS."""
+    words = re.findall(r"[^\W_]+", str(title or "").lower())
+    out = ""
+    for w in words:
+        nxt = f"{out}-{w}" if out else w
+        if len(nxt) > FORK_NAME_CHARS:
+            break
+        out = nxt
+    return out or FORK_NAME_FALLBACK
+
+
+def fork_name(c: str, meta: dict) -> str:
+    """The name the thread's next fork runs under: its title as a slug, with -2, -3 … when another thread's forks run
+    under that name, kept on the meta (FORK_NAME_KEY)."""
+    base = slug(str(meta.get("title") or ""))
+    taken = {str(m.get(FORK_NAME_KEY)) for m in agents.list_chats(c)
+             if m.get("kind") == agents.KIND_THREAD and m.get("id") != meta.get("id") and m.get(FORK_NAME_KEY)}
+    name, n = base, 2
+    while name in taken:
+        name, n = f"{base}-{n}", n + 1
+    if meta.get(FORK_NAME_KEY) != name:
+        agents.update_agent(c, str(meta["id"]), **{FORK_NAME_KEY: name})
+    return name
+
+
+def by_fork_name(c: str, name: str) -> str | None:
+    """The thread whose forks run under `name`, else None."""
+    low = str(name or "").strip().lower()
+    if not low:
+        return None
+    for m in agents.list_chats(c):
+        if m.get("kind") == agents.KIND_THREAD and str(m.get(FORK_NAME_KEY) or "").lower() == low:
+            return str(m["id"])
+    return None
 
 
 def is_thread(c: str, chat_id: str | None) -> bool:
@@ -249,7 +290,8 @@ def build(c: str, thread_id: str, questions: list[str]) -> tuple[str, dict[str, 
             _line("earlier", earlier(c, thread_id, len(questions))),
         ]
         _awaiting[(c, thread_id)] = _session_id(c)
-    fields: dict[str, Any] = {"thread": thread_id, "group": group}
+    fields: dict[str, Any] = {"thread": thread_id, "group": group,
+                              "name": (fork.get("agent_id") and meta.get(FORK_NAME_KEY)) or fork_name(c, meta)}
     if fork.get("agent_id"):
         fields["agent"] = fork["agent_id"]
     log.info("%s: thread %s asks %s (%d question%s)", c, thread_id, f"its fork {fork['agent_id']}" if fork.get("agent_id")
@@ -500,6 +542,8 @@ async def tool_reply_in_thread(ctx: Any, args: dict[str, Any]) -> Any:
     if not text:
         return tools.err("reply_in_thread: `text` is empty")
     if not is_thread(ctx.c, thread_id):
+        thread_id = by_fork_name(ctx.c, thread_id) or thread_id
+    if not is_thread(ctx.c, thread_id):
         threads = [m["id"] for m in agents.list_chats(ctx.c) if m.get("kind") == agents.KIND_THREAD]
         return tools.err(f"reply_in_thread: no thread {thread_id!r}; the threads are {', '.join(threads) or '(none)'}")
     reply(ctx.c, thread_id, text, by=ctx.cell_author)
@@ -513,11 +557,12 @@ _TICKET_PREFIX_RE = re.compile(r"^ticket #\d+:\s*", re.I)
 
 def _names(meta: dict) -> set[str]:
     """What names a chat in the thread tree, lower case: its title, the analyst's name for it, a ticket's slug as
-    the tree shows it (group-board-by-round), and a view build's view."""
+    the tree shows it (group-board-by-round), a view build's view, and a thread's fork name."""
     title = str(meta.get("title") or "")
     words = re.findall(r"[^\W_]+", _TICKET_PREFIX_RE.sub("", title))
     view = str(meta.get("view") or "") if meta.get("role") == "dev" else ""
-    return {n.lower() for n in (title, str(meta.get("name") or ""), "-".join(words[:4]), view) if n.strip()}
+    return {n.lower() for n in (title, str(meta.get("name") or ""), "-".join(words[:4]), view,
+                                str(meta.get(FORK_NAME_KEY) or "")) if n.strip()}
 
 
 def find_threads(c: str, name: str) -> list[dict]:
