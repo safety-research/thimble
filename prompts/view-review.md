@@ -12,7 +12,7 @@ Assess the view against these criteria.
 
 - Does it open on an overview, the whole of what it covers at a glance, before any single record?
 - Does it show what the proposal asks for, with values that match the records below?
-- Is anything poorly formatted, such as text or marks that overlap or are cut off, text too small to read, an axis whose labels or scale do not fit the data, a legend naming values the data lacks, space left empty where content belongs, or chips, buttons and controls drawn in a style of the page's own, such as rounded pills or card chips, rather than thimble's small hairline chips, buttons and segmented controls?
+- Is anything poorly formatted, such as text or marks that overlap or are cut off, text too small to read, an axis whose labels or scale do not fit the data, a legend naming values the data lacks, space left empty where content belongs, helper text such as a line that explains the page, even where the proposal asks for one, or chips, buttons and controls drawn in a style of the page's own, such as rounded pills or card chips, rather than thimble's small hairline chips, buttons and segmented controls?
 {{label_criteria}}
 
 Name each problem by the picture it shows in, where on the page, and what the analyst would need instead, as in "picture 1: every x-axis tick reads 00:00 though the records span nine weeks, so the ticks should name days". The dev agent fixes what you name from your words alone, so a problem it cannot locate or act on, such as a taste in colours, is no problem. A view carries no helper text, since the analyst learns a page by using it, so what the analyst needs is never an instruction written on the page.

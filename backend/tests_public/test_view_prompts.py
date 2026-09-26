@@ -84,3 +84,12 @@ def test_the_orientation_proposes_two_views_early_keeps_one_for_later_and_improv
 def test_the_prompts_name_the_width_the_pictures_are_shot_at():
     width = f"{views.SHOT_SIZE[0]} px wide"
     assert width in prompts.load("dev-view") and width in prompts.load("view-review")
+
+
+def test_a_view_shows_a_document_as_its_readers_know_it_and_carries_no_helper_text_even_when_asked():
+    good = prompts.section("dev-view", "A good view")
+    assert "markup is rendered as the page it describes, not as source, and a thread reads as a thread" in good
+    assert "no helper text" in good and "even where the ticket asks for one" in good
+    assert "`chip`, `btn`" in good and "never rounded pills or cards of its own" in good
+    review = prompts.load("view-review")
+    assert "helper text such as a line that explains the page, even where the proposal asks for one" in review

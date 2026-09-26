@@ -22,8 +22,9 @@ First read the claimed files, a jsonl file a few lines at a time since a line ca
 - Its scales come from the data. Choose bins, axis ticks and page sizes from what you counted: a span of hours ticks in minutes, a span of weeks in days, and thousands of units are grouped or paged.
 - It fits its pane, which is 800 px wide. No text or mark overlaps another, is cut off or is too small to read, and no column wraps one word per line. A long name is shortened, with the whole name on hover.
 - It takes the form the ticket describes, and shows each record's state as the records hold it. An outcome, such as worked or failed, is marked only as the records or the ticket define it, never from an exit code alone.
+- A kind of document is shown the way its readers know it: markup is rendered as the page it describes, not as source, and a thread reads as a thread.
 - Its chips, buttons and controls are thimble's parts, which every page has: `chip`, `btn` (`btn-secondary`, `btn-ghost`, `btn-sm`), `seg` with `seg-opt` (`active` on the chosen one), `field`, `table` and `list-row`, never rounded pills or cards of its own.
-- It has no helper text.
+- It has no helper text, such as a line that explains the page, even where the ticket asks for one.
 
 ## Labels
 
