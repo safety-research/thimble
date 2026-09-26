@@ -78,13 +78,13 @@ describe("the ⌘-click box's answer", () => {
   test('is wider, shows the thread above the field, and the field takes a reply', async () => {
     const rect = { left: 100, top: 100, right: 300, bottom: 140, width: 200, height: 40 }
     await mount(
-      <PointerBox rect={rect} place={{ under: false }} label="Ask about this" draft="" onDraft={() => undefined} onSubmit={() => undefined} onClose={() => undefined} replyTo="pages-per-wiki">
+      <PointerBox rect={rect} place={{ under: false }} label="Ask about this" draft="" onDraft={() => undefined} onSubmit={() => undefined} onClose={() => undefined} replyTo="trees-per-orchard">
         <p className="answer-probe">June 16.</p>
       </PointerBox>,
     )
     const box = document.querySelector<HTMLElement>('.pointer-box')!
     expect(box.querySelector('.pointer-box-answer .answer-probe')?.textContent).toBe('June 16.')
-    expect(box.querySelector('textarea')?.getAttribute('placeholder')).toBe('Reply in pages-per-wiki…')
+    expect(box.querySelector('textarea')?.getAttribute('placeholder')).toBe('Reply in trees-per-orchard…')
     expect(ANSWER_WIDTH).toBeGreaterThan(BOX_WIDTH)
   })
 })

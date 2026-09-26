@@ -33,7 +33,7 @@ def _fresh(workspaces_tmp, tmp_path, monkeypatch):
 
 def _thread(tid: str) -> None:
     meta = agents._defaults({"id": tid, "kind": agents.KIND_THREAD, "role": "thread", "title": tid, "created_at": "t",
-                             "parent": agents.MAIN_ID, "anchor": "card:68e99674"})
+                             "parent": agents.MAIN_ID, "anchor": "card:0a1b2c3d"})
     agents.write_meta(CORPUS, meta)
     agents.paths(CORPUS, tid)[1].touch()
 
@@ -123,14 +123,14 @@ def test_a_fork_s_text_is_its_reply_in_the_thread_without_the_line_to_main(tmp_p
     _thread(tid)
     p, lv = _main(tmp_path)
     _fork(p, lv, tmp_path, tid, agent, [
-        _assistant(_use("k1", REPLY, {"thread": tid, "text": "Each record is one wiki page."})),
+        _assistant(_use("k1", REPLY, {"thread": tid, "text": "Each record is one tree."})),
         _result("k1", "replied"),
-        _assistant(_say("dse has the most pages.\n↳ thread 5c0de001: said what a record is")),
+        _assistant(_say("The hill orchard has the most trees.\n↳ thread 5c0de001: said what a record is")),
         _assistant(_say("↳ thread 5c0de001: answered")),
     ])
     session.tail_once(lv)
     texts = [(e["delta"], e.get("reply")) for e in _log(tid) if e["type"] == "text"]
-    assert texts == [("dse has the most pages.", True)], "reply_in_thread writes its own text; the ↳ lines stay in the terminal"
+    assert texts == [("The hill orchard has the most trees.", True)], "reply_in_thread writes its own text; the ↳ lines stay in the terminal"
     assert threads.replied_since_question(CORPUS, tid), "the fork's text counts as the thread's reply"
 
 
@@ -138,16 +138,16 @@ def test_a_message_typed_to_a_running_fork_in_the_agent_view_shows_in_its_thread
     tid, agent = "5c0de002", "a0000000000000002"
     _thread(tid)
     p, lv = _main(tmp_path)
-    path = _fork(p, lv, tmp_path, tid, agent, [_assistant(_use("k1", "Bash", {"command": "wc -l pages.jsonl"}))])
+    path = _fork(p, lv, tmp_path, tid, agent, [_assistant(_use("k1", "Bash", {"command": "wc -l trees.jsonl"}))])
     session.tail_once(lv)
-    _add(path, [_typed_queued("Which wiki has the highest median?"),
-                _typed_meta("Which wiki has the highest median?"),
-                _result("k1", "4579 pages.jsonl"),
-                _assistant(_say("dorfwiki, with 3 revisions per page."))])
+    _add(path, [_typed_queued("Which orchard has the highest median?"),
+                _typed_meta("Which orchard has the highest median?"),
+                _result("k1", "812 trees.jsonl"),
+                _assistant(_say("The river orchard, with 3 picks per tree."))])
     session.tail_once(lv)
     rows = [(e["type"], e.get("text") or e.get("delta"), e.get("by")) for e in _log(tid) if e["type"] in ("user", "text")]
-    assert rows == [("user", "Which wiki has the highest median?", "terminal"),
-                    ("text", "dorfwiki, with 3 revisions per page.", "terminal")]
+    assert rows == [("user", "Which orchard has the highest median?", "terminal"),
+                    ("text", "The river orchard, with 3 picks per tree.", "terminal")]
     _add(path, [_typed_meta("And the lowest?")])
     session.tail_once(lv)
     assert [e["text"] for e in _log(tid) if e["type"] == "user"][-1] == "And the lowest?", "the wrapper is taken off"
@@ -181,17 +181,17 @@ def test_main_s_message_to_a_fork_shows_in_the_thread_unless_it_relays_the_brows
 def test_main_s_message_and_a_typed_one_reach_a_subagent_s_chat(tmp_path):
     agent, use = "a0000000000000004", "toolu_sub4"
     p, lv = _main(tmp_path)
-    path = _agent_file(tmp_path, agent, {"agentType": "general-purpose", "description": "count pages", "toolUseId": use},
-                       [{"type": "user", "message": {"role": "user", "content": "Count the pages."}}])
-    _append(p, lv, [{"type": "user", "origin": {"kind": "human"}, "message": {"content": "Count the pages in the background."}},
-                    _assistant(_use(use, "Agent", {"subagent_type": "general-purpose", "description": "count pages", "prompt": "Count the pages.", "run_in_background": True})),
+    path = _agent_file(tmp_path, agent, {"agentType": "general-purpose", "description": "count trees", "toolUseId": use},
+                       [{"type": "user", "message": {"role": "user", "content": "Count the trees."}}])
+    _append(p, lv, [{"type": "user", "origin": {"kind": "human"}, "message": {"content": "Count the trees in the background."}},
+                    _assistant(_use(use, "Agent", {"subagent_type": "general-purpose", "description": "count trees", "prompt": "Count the trees.", "run_in_background": True})),
                     _result(use, [{"type": "text", "text": f"Async agent launched successfully.\nagentId: {agent} (internal ID)"}]),
                     END])
-    _append(p, lv, [{"type": "user", "origin": {"kind": "human"}, "message": {"content": "Tell it dse only."}},
-                    _assistant(_use("s1", "SendMessage", {"to": agent, "message": "Count only dse's."})),
+    _append(p, lv, [{"type": "user", "origin": {"kind": "human"}, "message": {"content": "Tell it the hill orchard only."}},
+                    _assistant(_use("s1", "SendMessage", {"to": agent, "message": "Count only the hill orchard's."})),
                     _result("s1", "sent"), END])
     _add(path, [_typed_queued("Also say how many are empty.")])
     session.tail_once(lv)
     [chat] = [m["id"] for m in agents.list_chats(CORPUS) if m.get("agent_id") == agent]
     users = [(e["text"], e["by"]) for e in _log(chat) if e["type"] == "user"]
-    assert users == [("Count the pages.", "terminal"), ("Count only dse's.", "main"), ("Also say how many are empty.", "terminal")]
+    assert users == [("Count the trees.", "terminal"), ("Count only the hill orchard's.", "main"), ("Also say how many are empty.", "terminal")]
