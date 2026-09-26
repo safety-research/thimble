@@ -1219,25 +1219,38 @@ sync_statusline = apply_statusline  # what the settings route and the launcher c
 
 
 def agent_rows(c: str) -> list[dict[str, Any]]:
-    """Every thimble agent running in the workspace, for the statusline and /thimble:agents: background sessions and
-    the subagents and threads of main (session.py), each {name, state, attach?}."""
+    """Every thimble agent running in the workspace, for the statusline and /thimble:agents: background sessions, the
+    code ticket and view builds (dev.py), and the subagents and threads of main (session.py), each {name, state,
+    attach?, kind}."""
+    from . import dev  # noqa: PLC0415 — dev imports the views module, which imports this one's callers
+
     rows: list[dict[str, Any]] = []
     for e in entries(c):
         if not alive(e):
             continue
         rows.append({"name": e.name, "state": state_words(e), "attach": f"claude attach {e.short}", "kind": "session"})
+    with contextlib.suppress(Exception):
+        rows.extend(dev.running_builds(c))
     rows.extend(session.running_agents(c))
     return rows
 
 
-def status_line(rows: list[dict[str, Any]], width: int = 3) -> str:
-    """One line for Claude Code's statusline: `thimble · ● thimble:writer working · ◐ thimble:orient waiting …`."""
+def status_line(rows: list[dict[str, Any]], chars: int = STATUS_CHARS) -> str:
+    """Claude Code's statusline: every agent with its state, `thimble · ● thimble:writer working · ◐ thimble:critic
+    waiting for a permission …`, going on to a further line once a line holds about `chars` characters."""
     if not rows:
         return ""
-    mark = {"working": "●", "waiting": "◐"}
-    parts = [f"{mark.get(r['state'].split()[0], '○')} {r['name']} {r['state']}" for r in rows[:width]]
-    more = f" · +{len(rows) - width}" if len(rows) > width else ""
-    return "thimble · " + " · ".join(parts) + more
+    mark = {"working": "●", "waiting": "◐", "restarting": "◐"}
+    parts = [f"{mark.get(r['state'].split()[0], '○')} {r['name']} {r['state']}" for r in rows]
+    lead, pad = "thimble · ", " " * len("thimble")  # a further line starts under the first line's first separator
+    lines, cur = [], lead + parts[0]
+    for part in parts[1:]:
+        if len(cur) + 3 + len(part) > chars:
+            lines.append(cur)
+            cur = pad + " · " + part
+        else:
+            cur += " · " + part
+    return "\n".join([*lines, cur])
 
 
 def listing_text(rows: list[dict[str, Any]]) -> str:
@@ -1256,8 +1269,30 @@ class AgentsQuery(BaseModel):
     announce: bool = False  # the plugin's hooks ask for the lines to print, which are then taken as shown
 
 
-# main session -> ({session short ids whose start it was told}, {short id: the run end it was told of})
-_announced: dict[str, tuple[set[str], dict[str, float]]] = {}
+# (workspace, main session) -> ({session short ids whose start it was told}, {short id: the run end it was told of}),
+# kept in ANNOUNCED_FILE so a server restart prints no line twice
+_announced: dict[tuple[str, str], tuple[set[str], dict[str, float]]] = {}
+_announced_loaded: set[str] = set()
+
+
+def _announced_of(c: str, main_sid: str) -> tuple[set[str], dict[str, float]]:
+    if c not in _announced_loaded:
+        _announced_loaded.add(c)
+        try:
+            data = json.loads((config.workspace_dir(c) / ANNOUNCED_FILE).read_text("utf-8"))
+        except (OSError, ValueError):
+            data = {}
+        for sid, row in (data.items() if isinstance(data, dict) else []):
+            if isinstance(row, dict):
+                _announced[(c, sid)] = ({str(x) for x in row.get("started") or []},
+                                        {str(k): float(v) for k, v in (row.get("finished") or {}).items()})
+    return _announced.setdefault((c, main_sid), (set(), {}))
+
+
+def _save_announced(c: str) -> None:
+    rows = {sid: {"started": sorted(st), "finished": fin} for (cc, sid), (st, fin) in _announced.items() if cc == c}
+    with contextlib.suppress(Exception):
+        ledger.atomic_write_text(config.workspace_dir(c) / ANNOUNCED_FILE, json.dumps(rows, indent=1))
 
 
 @router.post("/agents")
@@ -1269,18 +1304,21 @@ async def agents_route(body: AgentsQuery) -> dict[str, Any]:
     if not c:
         return {"rows": [], "line": "", "text": "", "announce": ""}
     rows = agent_rows(c)
-    started, finished = _announced.setdefault(body.session or "", (set(), {}))
     lines: list[str] = []
-    for e in entries(c) if body.announce else []:
-        if alive(e) and e.short not in started:
-            started.add(e.short)
-            finished.setdefault(e.short, e.ended_at if not e.run_open else 0.0)
-            lines.append(f"{e.name} runs as a background session: `claude attach {e.short}`, ← at the prompt, or ↓ "
-                         "for its tray entry")
-        elif e.short in started and e.ended_at and finished.get(e.short) != e.ended_at and not e.run_open:
-            finished[e.short] = e.ended_at
-            lines.append(f"{e.name} finished" + (f": {e.result[:200]}" if e.result else "") +
-                         ("" if alive(e) else " (its session has ended)"))
+    if body.announce:
+        started, finished = _announced_of(c, body.session or "")
+        for e in entries(c):
+            if alive(e) and e.short not in started:
+                started.add(e.short)
+                finished.setdefault(e.short, e.ended_at if not e.run_open else 0.0)
+                lines.append(f"{e.name} runs as a background session: ↓ at the prompt shows it, and `claude attach "
+                             f"{e.short}` opens it in another terminal")
+            elif e.short in started and e.ended_at and finished.get(e.short) != e.ended_at and not e.run_open:
+                finished[e.short] = e.ended_at
+                lines.append(f"{e.name} finished" + (f": {e.result[:200]}" if e.result else "") +
+                             ("" if alive(e) else " (its session has ended)"))
+        if lines:
+            _save_announced(c)
     return {"rows": rows, "line": status_line(rows), "text": listing_text(rows), "announce": "\n".join(lines)}
 
 

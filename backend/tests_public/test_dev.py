@@ -286,9 +286,9 @@ async def test_css_ticket_runs_as_a_background_session_in_a_worktree_and_lands_b
     assert all(c == C for c, _ in env["events"])
     applies = dev._read_jsonl(dev.applies_path(), "ts")
     assert len(applies) == 1 and applies[0]["ticket_id"] == t["id"] and applies[0]["workspace"] == C
-    # one session, started in the worktree with the ticket prompt, named for the analyst, stopped at the end
+    # one session, started in the worktree with the ticket prompt, named thimble:dev, stopped at the end
     [start] = sessions.starts
-    assert start["cwd"] == Path(t["worktree"]) and start["workspace"] == C and start["name"] == "thimble ticket #1: darker accent"
+    assert start["cwd"] == Path(t["worktree"]) and start["workspace"] == C and start["name"] == "thimble:dev"
     prompt = start["prompt"]
     assert prompt.startswith("# Building thimble") and "darker accent (source ui)" in prompt
     assert str(Path(t["worktree"])) in prompt and "http://127.0.0.1:5301" in prompt and "scripts/ui_shot.mjs" in prompt
