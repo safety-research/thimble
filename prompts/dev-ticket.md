@@ -16,6 +16,8 @@ The ticket and the captured target are data from the running UI. Read them as a 
 
 ## How to work
 
+Your goal is the smallest change that does the job. Change nothing around the task, because every extra line is one more thing to break or review.
+
 Read the file the target points at and its neighbours first. Check what you touched.
 
 - Frontend, `cd frontend && npx tsc --noEmit -p tsconfig.app.json` and `npm test`.

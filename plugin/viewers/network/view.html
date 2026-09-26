@@ -7,11 +7,8 @@
     --ink-2: var(--text-secondary, #5f5a52);
     --ink-3: var(--text-tertiary, #8b857b);
     --card: var(--surface-card, #ffffff);
-    --inset: var(--bg-sunken, #f3f1ec);
-    --line: var(--border-hairline, rgba(35, 33, 29, 0.08));
     --line-2: var(--border-subtle, rgba(35, 33, 29, 0.12));
     --live: var(--accent, #5b5bd6);
-    --live-soft: var(--accent-soft, rgba(91, 91, 214, 0.14));
     --node: var(--viz-ink-2, #6b665e);
     --sans: var(--font-body, ui-sans-serif, system-ui, sans-serif);
     --mono: var(--font-mono, ui-monospace, monospace);
@@ -25,13 +22,12 @@
   .edge:hover, .edge.on { stroke: var(--live); stroke-opacity: 1; }
   .node circle { fill: var(--node); stroke: var(--card); stroke-width: 1.5; cursor: pointer; }
   .node.on circle { fill: var(--live); }
-  .node text { font: 11px var(--mono); fill: var(--ink-2); pointer-events: none; }
+  .node text { font-family: var(--mono); fill: var(--ink-2); pointer-events: none; }
   aside { border-left: 1px solid var(--line-2); overflow: auto; padding: 16px; }
   aside h2 { font-size: 14px; font-weight: 500; margin: 0 0 2px; }
   aside .meta { font-size: 11px; color: var(--ink-3); margin-bottom: 12px; }
-  .hop { background: var(--card); border-radius: 8px; padding: 8px 10px; margin-bottom: 6px; cursor: pointer; border: 1px solid transparent; }
-  .hop:hover { background: var(--inset); }
-  .hop.target { border-color: var(--live); }
+  /* each hand-off is a row of thimble's list (.list-row), which every view's page has, with the cited one .active */
+  .hop { flex-direction: column; align-items: flex-start; gap: 0; }
   .hop .who { font-size: 12px; font-weight: 500; }
   .hop .where { font-size: 11px; color: var(--ink-3); }
 </style>
@@ -40,9 +36,12 @@
   <svg id="graph" role="img" aria-label="Agents linked by hand-offs"></svg>
   <aside id="side"></aside>
 <script>
-  // Hand-offs: the heaviest hand-off edges as a force layout, and the records behind the edge the analyst picks. A
-  // node focuses its agent's own links; an edge lists its events, each a data-anchor with its line, and a click on one
-  // opens that event wherever thimble opens it.
+  // Hand-offs: the overview is the whole network, every agent and the heaviest links between them, drawn as a force
+  // layout; beside it the records behind the edge the analyst picks. A node focuses its agent's own links; an edge lists
+  // its events, each a data-anchor with its line, so the labels the analyst turns on mark them, and a click on one opens
+  // that event wherever thimble opens it. Each node carries view:<slug>/<agent>, so a label marks the agents whose calls
+  // it marks. A label filter keeps only the hand-offs it keeps, which the reader applies, so the page fetches again
+  // when the labels change (thimble.onLabels).
   const slug = (thimble.view && thimble.view.slug) || 'hand-offs'
   const NS = 'http://www.w3.org/2000/svg'
   const svg = document.getElementById('graph')
@@ -50,6 +49,7 @@
   let focus = null
   let chosenPair = null
   let targetRef = null
+  let heaviest = null // the pair of the heaviest edge drawn, whose records the page lists when nothing is picked
 
   function node(tag, attrs, parent) {
     const e = document.createElementNS(NS, tag)
@@ -91,17 +91,32 @@
         p.y = Math.min(h - 20, Math.max(20, p.y + (v.y / len) * Math.min(len, t)))
       }
     }
+    // the settled layout is scaled to fill the box, so the whole network uses the page rather than a corner of it
+    const xs = [...pos.values()].map((p) => p.x), ys = [...pos.values()].map((p) => p.y)
+    const [x0, x1, y0, y1] = [Math.min(...xs), Math.max(...xs), Math.min(...ys), Math.max(...ys)]
+    const sx = (w - 120) / Math.max(1, x1 - x0), sy = (h - 60) / Math.max(1, y1 - y0)
+    for (const p of pos.values()) {
+      p.x = 30 + (p.x - x0) * sx
+      p.y = 30 + (p.y - y0) * sy
+    }
     return pos
   }
 
   async function drawGraph() {
+    drawn = true
     const g = await thimble.fetch({ op: 'graph', around: focus || undefined })
     const w = svg.clientWidth || 700, h = svg.clientHeight || 500
     svg.replaceChildren()
     svg.setAttribute('viewBox', `0 0 ${w} ${h}`)
     const pos = layout(g.nodes, g.edges, w, h)
+    heaviest = g.edges.length ? g.edges[0].pair : null
     const maxW = Math.max(1, ...g.edges.map((e) => e.weight))
     const maxN = Math.max(1, ...g.nodes.map((d) => d.weight))
+    // Labels are sized and thinned by the number of nodes: a small network names every agent in a readable size, and
+    // a crowded one names only its busier agents, a little smaller, since names drawn over each other name nobody.
+    const n = g.nodes.length
+    const font = n <= 15 ? 12 : n <= 40 ? 11 : 10
+    const named = n <= 15 ? 0 : n <= 40 ? 0.15 : 0.35
     for (const e of g.edges) {
       const a = pos.get(e.source), b = pos.get(e.target)
       const line = node('line', { x1: a.x, y1: a.y, x2: b.x, y2: b.y, class: 'edge' + (e.pair === chosenPair ? ' on' : ''), 'stroke-width': 1 + 5 * (e.weight / maxW) }, svg)
@@ -115,7 +130,7 @@
       grp.dataset.anchorName = `the agent ${d.id}`
       grp.dataset.anchorText = `${d.id}, ${d.weight} hand-offs`
       node('circle', { r: 3 + 9 * Math.sqrt(d.weight / maxN) }, grp)
-      if (d.weight / maxN > 0.25 || d.id === focus) node('text', { x: 12, y: 4 }, grp).textContent = d.id
+      if (d.weight / maxN > named || d.id === focus) node('text', { x: 12, y: 4, 'font-size': font }, grp).textContent = d.id
       grp.onclick = () => thimble.navigate(`view:${slug}/${d.id}`)
     }
   }
@@ -123,11 +138,11 @@
   async function openEdge(pair) {
     chosenPair = pair
     for (const e of svg.querySelectorAll('.edge')) e.classList.toggle('on', false)
-    const res = await thimble.fetch({ op: 'edge', pair })
+    const res = await thimble.fetch({ op: 'edge', pair, ref: targetRef || undefined })
     const [a, b] = pair.split('|')
     side.replaceChildren(el('h2', null, `${a} and ${b}`), el('div', 'meta mono', `${res.total} hand-offs, newest first`))
     for (const hop of res.items) {
-      const row = el('div', 'hop' + (hop.ref === targetRef ? ' target' : ''))
+      const row = el('div', 'list-row hop' + (hop.ref === targetRef ? ' active' : ''))
       row.dataset.anchor = hop.ref
       row.dataset.anchorName = `the hand-off of #${hop.pr} from ${hop.from} to ${hop.to}`
       row.dataset.anchorText = `${hop.from} → ${hop.to}, ${hop.action} #${hop.pr}, ${hop.time}`
@@ -144,8 +159,17 @@
     const t = (place && place.target) || {}
     focus = t.around || null
     targetRef = t.ref || null
-    if (t.pair) await openEdge(t.pair)
-    else await drawGraph()
+    if (t.pair) return openEdge(t.pair)
+    await drawGraph()
+    // the side lists the heaviest link's records rather than waiting for a click, so there are records in view
+    if (!chosenPair && heaviest) await openEdge(heaviest)
+  })
+  let drawn = false
+  thimble.onLabels(async () => {
+    if (!drawn) return // the first fetch reads them
+    chosenPair = null
+    await drawGraph()
+    if (heaviest) await openEdge(heaviest)
   })
 </script>
 </body>

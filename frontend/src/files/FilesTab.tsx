@@ -4,13 +4,13 @@
 // its largest data file beside the README (Tree.defaultTabs). A ref opens where it belongs: in the view that claims its
 // file, else in the File browser. Tree folders are fetched one at a time (Tree.useFolderStore). While the pane has the
 // focus, ⌘P focuses the search, ⌘F opens the find bar and Ctrl+G go to line (find.ts findKey).
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { Button } from '../components/Button'
 import { Icon } from '../components/Icon'
 import { PaneStatus } from '../components/PaneStatus'
 import { TipButton } from '../components/Tooltip'
-import { api, labelApi } from '../lib/api'
+import { api } from '../lib/api'
 import { bus } from '../lib/bus'
 import { mediaOf } from '../lib/media'
 import { fragmentIn, parseRef, refPath } from '../lib/refs'
@@ -20,20 +20,17 @@ import type { ConceptRun, LabelDraft, SourceKind } from '../lib/types'
 import { readSession, readStorage, storageKey, writeSession, writeStorage } from '../lib/workspace'
 import { ReadProbe, useDock, useFoldingSide } from '../shell/dock'
 import { viewSurface } from '../shell/panes'
-import { Resizer } from '../shell/Resizer'
 import { typingIn } from '../shell/undo'
 import { findKey } from './find'
 import { FileSearch } from './FileSearch'
-import { LabelCard } from './LabelCard'
-import { LabelPrompt } from './LabelPrompt'
 import { folderPresence, presenceOf, viewDefaults, viewLabels, type Presence } from './labels'
-import { LabelsPane } from './LabelsPane'
 import { inferKind, TREE } from './params'
 import { Reader, type FindAsk } from './Reader'
 import { baseName, defaultTabs, fmtSize, glyphOf, kindIn, parentOf, Tree, useFolderStore } from './Tree'
 import { useFilesLabels, type FilesLabels } from './useLabels'
 import { chooseView, slugOf, viewPlace } from './viewChoice'
 import { ViewPane } from './ViewPane'
+import { useLabelRuns, useLabelSide } from './ViewSide'
 import type { ViewQuote } from './ViewerFrame'
 import { BROWSER, slugOfKey, useViews, viewKey, ViewsBar, type BuiltView } from './ViewsBar'
 import { markOpened, useOpenAskedViews } from './viewReady'
@@ -59,8 +56,6 @@ function readTabs(key: string): KeptTabs {
   return { tabs, current }
 }
 
-/** How often the pane re-reads a label whose apply runs, until the run ends. */
-const RUN_POLL_MS = 1000
 const NO_DOTS: readonly Presence[] = []
 
 interface TabsProps {
@@ -174,7 +169,7 @@ export function FilesTab({ ws, active, focused = active }: { ws: string; active:
   const [drafted, setDrafted] = useState<LabelDraft | null>(null)
   // per label, the run the pane has seen: one running, polled until it ends, then its last record, which the label row
   // shows until the concepts list is read again
-  const [runs, setRuns] = useState<Map<string, ConceptRun>>(new Map())
+  const labelRuns = useLabelRuns(ws, labels)
   const [mode, setMode] = useState('')
   const widthKey = storageKey(ws, 'sideWidth')
   const [sideWidth, setSideWidth] = useState(() => {
@@ -392,62 +387,9 @@ export function FilesTab({ ws, active, focused = active }: { ws: string; active:
   const parentState = open ? folders.store.get(parentOf(open.path)) : undefined
   const ready = !!open && parentState !== undefined && parentState.state !== 'loading'
 
-  const setRun = useCallback((id: string, run: ConceptRun | null) => {
-    setRuns((cur) => {
-      const next = new Map(cur)
-      if (run) next.set(id, run)
-      else next.delete(id)
-      return next
-    })
-  }, [])
-  // a run the concepts list says is running (one started elsewhere, or before a reload) is polled too
-  useEffect(() => {
-    for (const k of labels.all) {
-      if (k.run?.status !== 'running') continue
-      const seen = runs.get(k.id)
-      if (!seen || (seen.run_id !== k.run.run_id && seen.status !== 'running')) setRun(k.id, k.run)
-    }
-  }, [labels.all, runs, setRun])
-  // a label whose apply runs is read every second until the run ends; its record carries the progress, then the
-  // outcome or the failure the label row shows
-  const polled = useMemo(
-    () =>
-      [...runs]
-        .filter(([, r]) => r.status === 'running')
-        .map(([id]) => id)
-        .sort()
-        .join(' '),
-    [runs],
-  )
-  useEffect(() => {
-    if (!polled) return
-    const ids = polled.split(' ')
-    const t = window.setInterval(() => {
-      for (const id of ids)
-        labelApi
-          .detail(ws, id)
-          .then((k) => setRun(id, k.run ?? null))
-          .catch(() => undefined)
-    }, RUN_POLL_MS)
-    return () => window.clearInterval(t)
-  }, [polled, ws, setRun])
-  // Retry on a failed run applies the label again over its glob; the run it starts is polled from the record the server
-  // answers, and a refusal shows on the row as the failure did
-  const retry = useCallback(
-    (id: string) => {
-      track('label-apply', { target: `concept:${id}`, detail: { retry: true } })
-      return labelApi
-        .apply(ws, id, {})
-        .then((run) => setRun(id, run))
-        .catch((e: Error) => setRun(id, { status: 'error', message: e.message, started: new Date().toISOString() }))
-    },
-    [ws, setRun],
-  )
-
   const marksOf = useCallback((path: string) => presenceOf(labels.on, labels.presence, path), [labels.on, labels.presence])
   const folderDots = useMemo(() => folderPresence(labels.on, labels.presence), [labels.on, labels.presence])
   const folderDotsOf = useCallback((path: string) => folderDots.get(path) ?? NO_DOTS, [folderDots])
-  const editLabel = editing && editing !== 'new' ? labels.byId.get(editing) ?? null : null
   // Open in Files on a label's popover outside Files: the Labels pane open, in the sidebar that holds it (a view's
   // Labels sidebar, else the File browser's), and the label's edit card
   useEffect(
@@ -490,53 +432,31 @@ export function FilesTab({ ws, active, focused = active }: { ws: string; active:
     setDrafted(draft)
   }, [])
 
-  // the one Labels pane, the edit card and the sidebar's seam, which the File browser and a view both show
-  const labelsPane = (
-    <LabelsPane
-      labels={labels}
-      open={labelsOpen}
-      onToggleOpen={() => setLabelsOpen(!labelsOpen)}
-      editing={editing}
-      onEdit={edit}
-      runs={runs}
-      onRetry={retry}
-      onHide={shownView ? () => setViewSideChoice(false) : undefined}
-      first={marking ?? undefined}
-    />
-  )
-  // the card stands at the sidebar's edge (--side-w, files.css); the width is set on the card's slot alone, since a
-  // custom property on the body would restyle every element in it on each drag move
-  const labelCard =
-    editing && labelsOpen ? (
-      <div className="label-card-slot" style={{ '--side-w': `${sideWidth}px` } as CSSProperties}>
-        <LabelCard
-          ws={ws}
-          label={editLabel}
-          labels={labels}
-          appliesTo={appliesTo}
-          draft={drafted}
-          onClose={() => edit(null)}
-          onRun={setRun}
-          lead={editing === 'new' ? <LabelPrompt ws={ws} labels={labels} appliesTo={appliesTo} onRun={setRun} onManual={fillNew} onEdit={edit} onDone={() => edit(null)} /> : undefined}
-        />
-      </div>
-    ) : null
-  // a docked sidebar is dragged no wider than the body leaves room for beside the view or the reader, in whole px, as
-  // the width is kept
-  const resizer = (
-    <Resizer
-      side="left"
-      width={sideWidth}
-      min={TREE.min}
-      max={Math.max(TREE.min, Math.min(TREE.max, Math.floor(dock.room)))}
-      defaultWidth={TREE.def}
-      onResize={setSideWidth}
-      onEnd={(w) => {
-        setSideWidth(Math.round(w))
-        writeStorage(widthKey, Math.round(w))
-      }}
-    />
-  )
+  // the one Labels pane, the edit card and the sidebar's seam, which the File browser and a view both show; a docked
+  // sidebar is dragged no wider than the body leaves room for beside the view or the reader, in whole px, as the width
+  // is kept
+  const { pane: labelsPane, card: labelCard, resizer } = useLabelSide({
+    ws,
+    labels,
+    runs: labelRuns,
+    open: labelsOpen,
+    onToggleOpen: () => setLabelsOpen(!labelsOpen),
+    editing,
+    onEdit: edit,
+    drafted,
+    onDraft: fillNew,
+    appliesTo,
+    width: sideWidth,
+    onWidth: setSideWidth,
+    onWidthEnd: (w) => {
+      setSideWidth(Math.round(w))
+      writeStorage(widthKey, Math.round(w))
+    },
+    maxWidth: dock.room,
+    onHide: shownView ? () => setViewSideChoice(false) : undefined,
+    first: marking ?? undefined,
+    filterable: !!shownView,
+  })
   // the bar's lead keeps its identity while the sidebar is dragged, so the reader (a memo) is not rendered again on
   // each move of the drag
   const sideShown = side.shown

@@ -106,7 +106,7 @@ export type WsEvent = { ts?: string; seq?: number } & (
   | { type: 'cell'; notebook: string; cell: string; kind: 'ran' | 'note' | 'verified' | string }
   | { type: 'orient'; status: 'started' | 'done' | 'failed' | 'stopped' | string; [k: string]: unknown }
   | { type: 'report'; slug: string; status: 'generating' | 'generated' | 'failed' | 'verified' | 'figures' | 'rewritten' | string; span?: string; run?: string }
-  | { type: 'view'; slug: string; status: 'queued' | 'building' | 'built' | 'failed' | 'deleted' | string; path?: string; chat?: string }
+  | { type: 'view'; slug: string; status: 'queued' | 'building' | 'built' | 'failed' | 'deleted' | string; path?: string; chat?: string; version?: string }
   | { type: 'ticket'; id: string; n: number; status: string }
   | { type: 'concepts'; concept: string; what: 'defined' | 'applied' | 'deleted' | string }
   | { type: 'filter'; scope: FilterScope; concept?: string; value?: string }
@@ -383,8 +383,9 @@ export interface Filters {
 // ---- views and proposals ----
 
 /** A view ticket's build: `dropped` is an orientation proposal that could not be built, shown nowhere (backend
- * views.drop). */
-export type ProposalStatus = 'queued' | 'building' | 'built' | 'failed' | 'dropped'
+ * views.drop); `suggested` a viewer for a file type, such as one the orientation proposes, shown only in the File
+ * browser until the analyst accepts it (backend views.accept). */
+export type ProposalStatus = 'queued' | 'building' | 'built' | 'failed' | 'dropped' | 'suggested'
 
 /** A view ticket (the propose_view tool): what the analyst sees in the view and why, the files it reads, the unit and
  * the layout, and the state of the dev agent's build, whose agent chat is `chat`. */
@@ -397,6 +398,8 @@ export interface Proposal {
   proposed_by: string
   /** the analyst asked for it (backend views.propose): it opens by itself once built (files/viewReady.ts) */
   asked?: boolean
+  /** an orientation's proposal whose view has not passed its checks yet: its card shows the build, the views bar not */
+  held?: boolean
   status: ProposalStatus
   ts: string
   error?: string
@@ -404,6 +407,31 @@ export interface Proposal {
   failed_change?: string
   chat?: string | null
   attempts?: number
+  /** the review of the built view's pictures (backend view_review) */
+  review?: ViewReview
+}
+
+/** The review of a built view's pictures: running, done (with what it revised and what problems are left), failed
+ * or stopped, with a note that says why; `undo` once the analyst put the view back as it was built. */
+export interface ViewReview {
+  state: 'running' | 'done' | 'failed' | 'stopped'
+  round?: number
+  ts?: string
+  revised?: string[]
+  left?: string[]
+  note?: string
+  undo?: boolean
+}
+
+/** `GET /ws/{c}/views/suggestions?path=`: whether a viewer may be proposed for the type of a file opened in the File
+ * browser, why not, the workspace's answer for the type and its proposal (backend views.suggestion_for). */
+export interface ViewSuggestion {
+  path: string
+  suffix: string
+  eligible: boolean
+  reason: string
+  answer: 'suggested' | 'none' | 'dismissed' | null
+  proposal: Proposal | null
 }
 
 /** One form a view adds to the citation grammar: a fragment of a file it claims, or view:<slug>/<key>. */
@@ -425,12 +453,16 @@ export interface View {
   default: boolean
   libs: string[]
   built: string
+  /** the digest of its files when it last passed its checks: a page loaded at it keeps it until reloaded */
+  version?: string
   /** reader.py, view.html and claims are all there */
   ok: boolean
   /** the forms as written in a citation */
   forms: ViewForm[]
   /** the first file it claims, which a view opened on its own shows */
   first_file?: string | null
+  /** every claim is one extension's glob: a viewer for a file type, a mode of the File browser for the files it claims */
+  file_type?: boolean
 }
 
 /** A diagram card's dataset (canvas/DataViz.tsx). */

@@ -10,14 +10,14 @@ import { Icon, type IconName } from '../components/Icon'
 import { Mark } from '../components/Marks'
 import { Menu, Popover } from '../components/Menu'
 import { Spinner } from '../components/Spinner'
-import { Tipped } from '../components/Tooltip'
+import { Tipped, useTooltip } from '../components/Tooltip'
 import { api } from '../lib/api'
 import { bus } from '../lib/bus'
 import { refreshProposals, useProposals } from '../lib/proposals'
 import { startSurfaceDrag } from '../lib/surfaces'
 import { track } from '../lib/telemetry'
-import type { Proposal, View } from '../lib/types'
-import { useReadyViews } from './viewReady'
+import type { Proposal, View, ViewReview } from '../lib/types'
+import { useReadyViews, useUpdatedViews } from './viewReady'
 import { fitViews } from './viewsFit'
 
 export const BROWSER = 'browser'
@@ -34,6 +34,12 @@ export interface BuiltView {
   first_file?: string | null
   /** the files it claims, as globs: what a label made beside it applies to */
   claims?: string[]
+  /** when it last passed its checks */
+  built?: string
+  /** the version it last passed its checks at, which a pane that opened an older one offers to reload */
+  version?: string
+  /** the review of its pictures, from its proposal */
+  review?: ViewReview
 }
 
 /** The views the bar lists and the proposals not yet built, read and kept fresh. */
@@ -60,18 +66,25 @@ export function useViews(ws: string): { views: BuiltView[]; proposals: Proposal[
   }, [ws])
   const known = new Map(views.map((v) => [v.slug, v]))
   const built: BuiltView[] = [
-    ...proposals.filter((p) => p.status === 'built').map((p) => ({ slug: p.slug, name: p.name, first_file: known.get(p.slug)?.first_file, claims: known.get(p.slug)?.claims })),
-    ...views.filter((v) => !proposals.some((p) => p.slug === v.slug)).map((v) => ({ slug: v.slug, name: v.name, first_file: v.first_file, claims: v.claims })),
+    ...proposals.filter((p) => p.status === 'built').map((p) => ({ slug: p.slug, name: p.name, first_file: known.get(p.slug)?.first_file, claims: known.get(p.slug)?.claims, built: known.get(p.slug)?.built, version: known.get(p.slug)?.version, review: p.review })),
+    ...views.filter((v) => !proposals.some((p) => p.slug === v.slug)).map((v) => ({ slug: v.slug, name: v.name, first_file: v.first_file, claims: v.claims, built: v.built, version: v.version })),
   ]
-  return { views: built, proposals: proposals.filter((p) => p.status !== 'built' && p.status !== 'dropped') }
+  // a viewer the File browser suggests for a file type shows there alone until it is accepted, and an orientation's
+  // view appears once it is built
+  return { views: built, proposals: proposals.filter((p) => p.status !== 'built' && p.status !== 'dropped' && p.status !== 'suggested' && !p.held) }
 }
 
 /** A proposal in the bar: the view's button as the bar draws a view, its state after the name, a click that opens the
- * build's thread; for a failed build (a view the analyst asked for) Retry beside it; × on hover to dismiss it. */
-function ProposalOption({ ws, p, onDismiss, size }: { ws: string; p: Proposal; onDismiss: () => void; size: 'md' | 'lg' }) {
+ * build's thread; for a failed build (a view the analyst asked for) Retry beside it; × on hover to dismiss it. A viewer
+ * suggested for a file type (in the File browser's mode row) wears the sparkle, shows its `why` on hover, and a click
+ * builds it (`onAccept` runs then). */
+export function ProposalOption({ ws, p, onDismiss, onAccept, size }: { ws: string; p: Proposal; onDismiss: () => void; onAccept?: () => void; size: 'md' | 'lg' }) {
   const [retrying, setRetrying] = useState(false)
-  const pending = p.status === 'queued' || p.status === 'building'
+  const [accepting, setAccepting] = useState(false)
+  const suggested = p.status === 'suggested' && !accepting
+  const pending = p.status === 'queued' || p.status === 'building' || accepting
   const failed = p.status === 'failed'
+  const { props: tipProps, tip } = useTooltip(suggested ? p.why : null, 'files-proposal-tip')
   const retry = () => {
     track('view-build', { target: `view:${p.slug}`, detail: { again: true } })
     setRetrying(true)
@@ -81,26 +94,39 @@ function ProposalOption({ ws, p, onDismiss, size }: { ws: string; p: Proposal; o
       .catch((e: Error) => bus.emit('toast', { text: `Could not retry ${p.name}. ${e.message}`, kind: 'error' }))
       .finally(() => setRetrying(false))
   }
+  const accept = () => {
+    track('view-build', { target: `view:${p.slug}`, detail: { suggested: true } })
+    setAccepting(true)
+    onAccept?.()
+    api
+      .acceptProposal(ws, p.slug)
+      .then(() => refreshProposals(ws))
+      .catch((e: Error) => bus.emit('toast', { text: `Could not build ${p.name}. ${e.message}`, kind: 'error' }))
+      .finally(() => setAccepting(false))
+  }
   const mark = <Mark kind="failed" className="files-proposal-mark" />
   return (
-    <span className={`seg seg-${size} files-proposal`} data-status={p.status}>
+    <span className={`seg seg-${size} files-proposal`} data-status={accepting ? 'queued' : p.status}>
       <button
         type="button"
         className="seg-opt files-proposal-opt"
         data-anchor={`view:${p.slug}`}
         data-anchor-text={p.name}
-        disabled={!p.chat}
+        disabled={!suggested && !p.chat}
         onClick={() => {
+          if (suggested) return accept()
           if (!p.chat) return
           track('chip-teleport', { target: `chat:${p.chat}`, detail: { kind: 'view-build' } })
           openThread(p.chat, 'view')
         }}
+        {...tipProps}
       >
-        <Icon name="view" size={14} className="seg-ico" />
+        <Icon name={suggested ? 'sparkle' : 'view'} size={14} className="seg-ico" />
         <span className="seg-label">{p.name}</span>
-        {pending && <Spinner size={10} label={p.status === 'queued' ? 'Queued' : 'Building'} />}
+        {pending && <Spinner size={10} label={p.status === 'queued' || accepting ? 'Queued' : 'Building'} />}
         {failed && (p.error ? <Tipped text={p.error}>{mark}</Tipped> : mark)}
       </button>
+      {tip}
       {failed && (
         <Button size="sm" className="files-proposal-retry" busy={retrying} aria-label={`Retry ${p.name}`} onClick={retry}>
           Retry
@@ -131,6 +157,7 @@ export function ViewsBar({ ws, value, onChange, views, proposals, compact = fals
   const [ask, setAsk] = useState('')
   const askInput = useRef<HTMLInputElement>(null)
   const ready = useReadyViews(ws)
+  const updated = useUpdatedViews(ws)
   const barRef = useRef<HTMLDivElement>(null)
   const measureRef = useRef<HTMLDivElement>(null)
   // the indices of the items that fit (the options, then the proposals), or null until measured: all of them
@@ -173,9 +200,9 @@ export function ViewsBar({ ws, value, onChange, views, proposals, compact = fals
     openThread(p.chat, 'view')
   }
 
-  const options: { value: string; label: string; icon: IconName; anchor?: string; dot?: boolean }[] = [
+  const options: { value: string; label: string; icon: IconName; anchor?: string; dot?: boolean; note?: string; className?: string }[] = [
     { value: BROWSER, label: 'File browser', icon: 'folder-open' },
-    ...views.map((v) => ({ value: viewKey(v.slug), label: v.name, icon: 'view' as const, anchor: `view:${v.slug}`, dot: ready.includes(v.slug) })),
+    ...views.map((v) => ({ value: viewKey(v.slug), label: v.name, icon: 'view' as const, anchor: `view:${v.slug}`, dot: ready.includes(v.slug) || updated.includes(v.slug), note: ready.includes(v.slug) ? 'new' : updated.includes(v.slug) ? 'updated' : undefined, className: v.review?.state === 'running' ? 'is-reviewing' : undefined })),
   ]
   const pending = proposals.filter((p) => !gone.has(p.slug))
   const active = options.findIndex((o) => o.value === value)
@@ -208,7 +235,7 @@ export function ViewsBar({ ws, value, onChange, views, proposals, compact = fals
   const hiddenOptions = options.filter((_, i) => !shows(i))
   const hiddenProposals = pending.filter((_, i) => !shows(options.length + i))
   const overflow = [
-    ...hiddenOptions.map((o) => ({ id: o.value, label: o.label, icon: o.icon, checked: o.value === value, note: o.dot ? 'new' : undefined, onSelect: () => onChange(o.value) })),
+    ...hiddenOptions.map((o) => ({ id: o.value, label: o.label, icon: o.icon, checked: o.value === value, note: o.note, onSelect: () => onChange(o.value) })),
     ...hiddenProposals.map((p) => ({ id: `p:${p.slug}`, label: p.name, icon: 'view' as const, note: STATE_NOTE[p.status], disabled: !p.chat, onSelect: () => openBuild(p) })),
   ]
 

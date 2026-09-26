@@ -188,18 +188,22 @@ Lay out the browser's main area, right of the chat, as panes that each show one 
 
 ## propose_view
 
-Propose a view of files you have read, a viewer for how their records group, such as a log's lines grouped into conversations. thimble's dev agent starts building it at once, in the background, and it opens in the Files tab when it passes its checks.
+Propose a view, a page that shows records in a form their files hide, or a viewer for one unusual file type. thimble's dev agent builds it from these fields alone, so name the fields, keys and counts it needs.
 
 ```json
 {
   "type": "object",
   "properties": {
-    "name": {"type": "string", "description": "A short name in Title Case, as its tab shows it, such as Timeline or Tool Call Timeline."},
-    "why": {"type": "string", "description": "What the analyst sees in it and why that helps."},
-    "claims": {"type": "array", "items": {"type": "string"}, "description": "Globs of the files it reads."},
-    "arrangement": {"type": "string", "description": "The unit, which records it gathers, grouped by which field and in what order, and how the page lays it out, with the definition the cards and labels use for any outcome it marks, such as worked or failed."}
+    "name": {"type": "string", "description": "A short name in Title Case, as its tab shows it, such as Message Board."},
+    "why": {"type": "string", "description": "What the analyst sees and why that helps, in whatever form fits the records, such as a wiki page with its edit history or a graph of who replies to whom."},
+    "claims": {"type": "array", "items": {"type": "string"}, "description": "Globs of the files it reads. For a viewer of one file type, the extension's glob, such as **/*.vtt."},
+    "unit": {"type": "string", "description": "What one row, mark or card stands for, the field that keys it, and how many there are."},
+    "overview": {"type": "string", "description": "What does the overview look like?"},
+    "zoom": {"type": "string", "description": "How do you zoom?"},
+    "filter": {"type": "string", "description": "How do you filter? Labels are the main filter."},
+    "details": {"type": "string", "description": "What details might you want on demand?"}
   },
-  "required": ["name", "why", "claims", "arrangement"]
+  "required": ["name", "why", "claims", "unit", "overview", "zoom", "filter", "details"]
 }
 ```
 
@@ -603,7 +607,7 @@ It keeps {kept} of the canvas's {total} cards, and the analyst sees the rest dim
 
 ## set_filter-files
 
-Files shows the label turned on with that value highlighted, and hides no file or record.
+Files shows the label turned on with that value highlighted, and its views keep only the records that take the value, leaving whole the files the label never ran over.
 
 ## set_layout-set
 
@@ -669,9 +673,17 @@ The analyst laid out no frame, so the shape is yours.
 
 Proposed the view {view} (view:{slug}) over {claims}. The dev agent is building it now, and it opens in Files when its checks pass.
 
+## propose_view-suggested
+
+Proposed the viewer {view} (view:{slug}) for {claims}. The File browser offers it beside Raw on those files, and it is built when the analyst picks it.
+
 ## propose_view-unmatched
 
 No file of the corpus matches {claims}, so the view was not proposed and the dev agent has nothing to build. {near} Propose it again with claims that match files the corpus holds.
+
+## propose_view-cap
+
+{view} was not proposed: an orientation proposes at most {n} views, and yours are {views}. To improve one, propose it again under its name.
 
 ## propose_view-near
 
@@ -684,6 +696,10 @@ Proposed the view {view} (view:{slug}), but views cannot be built on this machin
 ## view-changing
 
 The dev agent is changing the view {view} (view:{slug}) now. When its checks pass the view has the change, and when they fail it stays as it was.
+
+## view-no-anchors
+
+The page shows no element whose `data-anchor` names a record (`<path>#L<n>`) or one of its units (`view:{slug}/<key>`), so no label the analyst turns on can show in it. Give each element that shows a record its file ref, and each unit's element its key.
 
 ## file_dev_ticket-no-view
 
@@ -700,6 +716,10 @@ The dev agent built the view {view}, so {claims} now open in it. In it {forms}.
 ## view-no-forms
 
 no citation resolves, because its `accepts` and `declares` are empty
+
+## view-label-controls
+
+The page has {count} controls of its own that name the test label, such as a toggle, a checkbox or a menu item. Remove them, since the Labels pane beside the view is the only place labels are turned on or filtered.
 
 ## view-no-record-anchors
 
@@ -852,7 +872,7 @@ Its drafted deck is the group `{deck}`, which `list_cards` lists.
 
 ## critique-proposals
 
-The views it drafted, which are not built yet, each with what it is for, the files it reads and its arrangement.
+The views it proposed, each with what it is for, the files it reads and its layout.
 
 {proposals}
 
@@ -971,6 +991,10 @@ The orientation failed: {made}. Its error: {error}
 ## orient-views-building
 
 {views} building
+
+## orient-views-suggested
+
+{views} suggested for file types
 
 ## orient-made-nothing
 

@@ -1,9 +1,9 @@
 {
-  "name": "Activity by ten minutes",
-  "why": "The agents' calls to the shared server counted per ten minutes and by kind (pull requests, git, the board), so bursts and quiet stretches stand out; a bar opens its window's calls.",
+  "name": "Activity",
+  "why": "The agents' calls to the shared server counted per time bin and by kind (pull requests, git, the board) over the whole log, so bursts and quiet stretches stand out; a bar opens its bin's calls.",
   "claims": ["events.jsonl"],
   "accepts": [{"form": "L<n>", "means": "the call on line <n>"}],
-  "declares": [{"form": "<window>", "means": "every call of one ten-minute window, written YYYY-MM-DDTHH:MM for its start"}],
+  "declares": [{"form": "<bin>", "means": "one bar's calls, written as the bar's start: YYYY-MM-DD for bars of a day or longer, else YYYY-MM-DDTHH:MM"}],
   "default": true,
   "libs": ["vega-embed"]
 }

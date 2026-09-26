@@ -2,7 +2,8 @@
 // every label over files with its colour, then the labels over canvas cards and report sentences. A label over files
 // shows its mark (LabelMark), filled while it is on; a click on the mark turns it on or off. A click on the name turns
 // it on, focuses it, or turns the focused label off. An on label with more than two values lists them, and a click on
-// one toggles its highlight. Under each name, the status of its last or running apply.
+// one toggles its highlight. Under each name, the status of its last or running apply. Beside a view, a label's row
+// (and each value's) has a funnel on hover that sets the Files label filter, which the view keeps its records by.
 import { useMemo, useState, type CSSProperties } from 'react'
 import { Button } from '../components/Button'
 import { Icon } from '../components/Icon'
@@ -30,9 +31,11 @@ interface Props {
   onHide?: () => void
   /** beside a view: the labels that mark its files, listed first */
   first?: ReadonlySet<string>
+  /** beside a view: keep only the records that take a label's value */
+  onFilter?: (id: string, value: string) => void
 }
 
-export function LabelsPane({ labels, open, onToggleOpen, editing, onEdit, runs, onRetry, onHide, first }: Props) {
+export function LabelsPane({ labels, open, onToggleOpen, editing, onEdit, runs, onRetry, onHide, first, onFilter }: Props) {
   const files = labels.all.filter(isFilesLabel)
   const ordered = first ? [...files.filter((k) => first.has(k.id)), ...files.filter((k) => !first.has(k.id))] : files
   const nums = useMemo(() => new Map(laneTags(labels.on).map((t) => [t.id, t.n])), [labels.on])
@@ -61,6 +64,7 @@ export function LabelsPane({ labels, open, onToggleOpen, editing, onEdit, runs, 
               labels={labels}
               onEdit={onEdit}
               onRetry={onRetry}
+              onFilter={isFilesLabel(k) ? onFilter : undefined}
             />
           ))}
         </div>
@@ -83,9 +87,10 @@ interface RowProps {
   labels: FilesLabels
   onEdit: Props['onEdit']
   onRetry: Props['onRetry']
+  onFilter?: Props['onFilter']
 }
 
-function LabelRow({ label: k, on, n, focused, marked, editing, status, labels, onEdit, onRetry }: RowProps) {
+function LabelRow({ label: k, on, n, focused, marked, editing, status, labels, onEdit, onRetry, onFilter }: RowProps) {
   const classes = classesOf(k)
   const running = status?.state === 'running'
   const files = isFilesLabel(k)
@@ -123,14 +128,17 @@ function LabelRow({ label: k, on, n, focused, marked, editing, status, labels, o
           </button>
         )}
         {running && <Spinner size={10} label="Running" />}
+        {onFilter && (classes.length <= 2 || !on) && (
+          <Button variant="icon" size="sm" icon="filter" title="Show only these records" aria-label={`Show only the records ${k.name} marks`} className="files-label-filter" onClick={() => onFilter(k.id, (classes.find((c) => c.highlight) ?? classes[0])?.name ?? 'yes')} />
+        )}
         <Button variant="icon" size="sm" icon="more-horizontal" title="Edit label" aria-label={`Edit ${k.name}`} className="files-label-edit" active={editing} onClick={() => onEdit(editing ? null : k.id)} />
       </div>
       {status && <LabelStatusLine status={status} name={k.name} onRetry={() => onRetry(k.id)} />}
       {files && on && classes.length > 2 && (
         <div className="files-label-classes">
           {classes.map((c, i) => (
+            <span key={c.name} className="files-class-row">
             <button
-              key={c.name}
               type="button"
               className={'files-class-toggle' + (c.highlight ? ' on' : '')}
               aria-pressed={c.highlight}
@@ -143,6 +151,8 @@ function LabelRow({ label: k, on, n, focused, marked, editing, status, labels, o
               <span className="files-class-box" />
               {c.name}
             </button>
+            {onFilter && <Button variant="icon" size="sm" icon="filter" title="Show only these records" aria-label={`Show only the records ${k.name} marks ${c.name}`} className="files-label-filter" onClick={() => onFilter(k.id, c.name)} />}
+            </span>
           ))}
         </div>
       )}

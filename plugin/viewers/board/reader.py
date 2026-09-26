@@ -1,12 +1,28 @@
 # Threads: a message board read as threads. Each line of board.jsonl is one post, with its `thread_id`, the thread's
-# `thread_title`, its `author`, its `created_at` and its `body`. The posts of a thread are spread over the file between
-# other threads' posts, so the index keeps, per thread, its posts in time order with each one's line, and the file's
-# byte offsets, so that a post is read back by seeking to its line instead of holding every body in memory.
+# `thread_title`, its `author`, its `created_at` and its `body`.
+#
+# What the view is for: the file holds the posts in the order they were written, so a proposal and the replies it got
+# lie far apart between other threads' posts. Read as threads, the analyst sees every conversation of the board at
+# once, how big each one is and when it ran, and reads one conversation from start to end.
+#
+# How the reader works: the index keeps, per thread, its posts in time order with each one's line, and the file's byte
+# offsets, so a post is read back by seeking to its line instead of holding every body in memory.
+#
+# Labels: labels apply when records are served, never in the index. With a label filter on, the list keeps only the
+# threads with a post the filter keeps (thimble.kept) and counts only those posts, and a thread shows only its kept
+# posts. While a label is on, each thread counts the posts it marks (thimble.marked), so the overview shows where the
+# marked posts are before any thread is opened.
 import json
 import re
 
+import thimble
+
 EXCERPT_CHARS = 1500  # of a post, cut at a line boundary
 PAGE_POSTS = 60  # posts one fetch of a thread returns
+# The overview lists every thread, largest first, since the biggest conversations are where most happened. A board
+# of thousands of threads is narrowed by the search box rather than scrolled, so the list stops at LIST_THREADS and
+# says how many there are in all.
+LIST_THREADS = 300
 
 
 def build_index(paths):
@@ -76,37 +92,57 @@ def _post(path, data, post):
     return {"ref": f"{path}#L{line}", "line": line, "time": time, "when": _when(time), "author": author, "text": body}
 
 
-def _thread_summary(path, data, key):
-    posts = data["threads"][key]
-    return {"key": key, "title": _title(data, key), "posts": len(posts), "first": posts[0][1], "last": posts[-1][1],
-            "path": path}
+def _kept_posts(path, posts, cited=None):
+    """The posts the label filter keeps, and the cited line's post whatever the filter, since a citation asked for it."""
+    return [p for p in posts if p[0] == cited or thimble.kept(f"{path}#L{p[0]}")]
+
+
+def _thread_summary(path, data, key, posts=None):
+    posts = data["threads"][key] if posts is None else posts
+    marked = sum(1 for p in posts if thimble.marked(f"{path}#L{p[0]}"))
+    return {"key": key, "title": _title(data, key), "posts": len(posts), "marked": marked, "first": posts[0][1],
+            "last": posts[-1][1], "path": path}
 
 
 def records(index, query):
-    """{op: threads, q?, limit?} lists the threads, most posts first, filtered by `q` in the title; {op: thread, key,
-    around?, before?} gives one thread's posts, PAGE_POSTS at a time: the ones ending a little after line `around` (or
-    the latest), or the ones before the post at index `before`."""
+    """{op: threads, q?, limit?} lists the threads with a kept post, most posts first, filtered by `q` in the title;
+    {op: thread, key, around?, before?} gives one thread's kept posts, PAGE_POSTS at a time: the ones ending a little
+    after line `around` (or the latest), or the ones before the post at index `before`. Counts are of kept posts."""
     query = query or {}
     if query.get("op") == "thread":
         key = str(query.get("key"))
+        around = int(query["around"]) if query.get("around") is not None else None
         for path, data in index.items():
             posts = data["threads"].get(key)
             if posts is None:
                 continue
+            posts = _kept_posts(path, posts, around) or posts[:0]
             end = len(posts)
             if query.get("before") is not None:
                 end = max(0, int(query["before"]))
-            elif query.get("around") is not None and int(query["around"]) in data["line"]:
-                end = min(len(posts), data["line"][int(query["around"])][1] + 1 + PAGE_POSTS // 4)
+            elif around is not None:
+                at = next((i for i, p in enumerate(posts) if p[0] == around), None)
+                if at is not None:
+                    end = min(len(posts), at + 1 + PAGE_POSTS // 4)
             start = max(0, end - PAGE_POSTS)
-            return {**_thread_summary(path, data, key), "start": start,
-                    "items": [_post(path, data, p) for p in posts[start:end]]}
+            if posts:
+                summary = _thread_summary(path, data, key, posts)
+            else:
+                summary = {"key": key, "title": _title(data, key), "posts": 0, "marked": 0, "first": "", "last": "",
+                           "path": path}
+            return {**summary, "start": start, "items": [_post(path, data, p) for p in posts[start:end]]}
         return None
     q = str(query.get("q") or "").lower()
-    rows = [_thread_summary(path, data, key) for path, data in index.items() for key in data["threads"]
-            if q in _title(data, key).lower()]
+    rows = []
+    for path, data in index.items():
+        for key, posts in data["threads"].items():
+            if q not in _title(data, key).lower():
+                continue
+            kept = _kept_posts(path, posts)
+            if kept:
+                rows.append(_thread_summary(path, data, key, kept))
     rows.sort(key=lambda t: (-t["posts"], t["first"]))
-    limit = int(query.get("limit") or 300)
+    limit = int(query.get("limit") or LIST_THREADS)
     return {"total": len(rows), "threads": rows[:limit]}
 
 

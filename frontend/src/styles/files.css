@@ -1110,9 +1110,32 @@
 .reader-spacer {
   flex: 1;
 }
+/* the File browser's mode row: the built-in modes and the file-type viewers, then a viewer proposed for the file's
+   type, drawn as the views bar draws a proposal in the view chip's accent text, tint and edge */
 .reader-modes {
   align-self: center;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   padding: 0 8px;
+}
+.reader-modes .files-proposal-opt.seg-opt {
+  color: var(--text-accent);
+  background: var(--chip-bg);
+  box-shadow: inset 0 0 0 1px var(--chip-edge);
+}
+.reader-modes .files-proposal-opt.seg-opt:not(:disabled):hover {
+  background: var(--chip-bg-hover);
+  box-shadow: inset 0 0 0 1px var(--chip-edge-hover);
+}
+.reader-modes .files-proposal-opt.seg-opt:focus-visible {
+  box-shadow: 0 0 0 1.5px var(--accent);
+}
+.reader-modes .files-proposal-opt .seg-ico {
+  color: var(--accent);
+}
+.files-proposal-tip.tip {
+  max-width: min(460px, calc(100vw - 16px));
 }
 .reader-find-open.btn {
   align-self: center;
@@ -1384,6 +1407,11 @@
   min-height: 0;
   border: 0;
   background: transparent;
+}
+/* a file-type viewer as the file's mode: its page fills the reader under the bar */
+.reader-viewer {
+  flex-direction: column;
+  min-width: 0;
 }
 .reader-fail {
   display: flex;
@@ -2171,4 +2199,76 @@
 }
 .reader-md-file {
   padding: 16px 20px 24px;
+}
+
+/* beside a view, the funnel that keeps the view to a label's records shows on the row's hover, as the value rows' do */
+.files-label-filter.btn {
+  flex: none;
+  width: 22px;
+  height: 22px;
+  color: var(--text-tertiary);
+  opacity: 0;
+}
+.files-label-row:hover .files-label-filter.btn,
+.files-class-row:hover .files-label-filter.btn,
+.files-label-filter.btn:focus-visible {
+  opacity: 1;
+}
+.files-class-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+/* the Files label filter beside a view's mode switch, which clears it */
+.view-pane-filter {
+  flex: none;
+  align-self: center;
+}
+/* a newer version of the view than the one shown (files/viewVersion.tsx): the accent dot, Updated and Reload, quiet,
+   in the head beside the mode switch */
+.view-updated {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font: var(--type-ui-sm);
+  color: var(--text-secondary);
+}
+.view-updated-reload.btn {
+  margin-left: -2px;
+}
+.view-pane-head .view-pane-updated {
+  align-self: center;
+}
+/* over a file-type viewer's top right corner, which has no head of its own */
+.reader-viewer {
+  position: relative;
+}
+.reader-viewer-updated {
+  position: absolute;
+  top: 6px;
+  right: 10px;
+  z-index: 2;
+  padding: 2px 2px 2px 10px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-ui);
+  background: var(--surface-card);
+}
+/* the mark of the review of the view's pictures, at the head's right end after the mode switch (ViewPane ReviewMark) */
+.view-pane-head .view-pane-review {
+  align-self: center;
+  margin: 0;
+}
+/* while the review of a view's pictures runs, its name in the views bar shimmers, as a card does while it is checked */
+.files-views .seg-opt.is-reviewing .seg-label {
+  background-image: linear-gradient(100deg, transparent 30%, color-mix(in oklab, var(--accent) 16%, transparent) 50%, transparent 70%);
+  background-size: 300% 100%;
+  animation: bcell-shimmer 1.8s linear infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .files-views .seg-opt.is-reviewing .seg-label {
+    animation: none;
+    background-image: none;
+    background-color: color-mix(in oklab, var(--accent) 8%, transparent);
+  }
 }

@@ -34,6 +34,7 @@ import type {
   CallIndex,
   Ticket,
   View,
+  ViewSuggestion,
   ViewOpen,
   Writeup,
 } from './types'
@@ -248,6 +249,13 @@ export const api = {
 
   // ---- views and proposals ----
   proposals: (c: string) => j<Proposal[]>(`${ws(c)}/views/proposals`),
+  /** what thimble proposes for a file opened in the File browser: whether a viewer may be proposed for its type, and
+   * the proposal for the type when there is one (backend views.suggestion_for) */
+  viewSuggestions: (c: string, path: string) => j<ViewSuggestion>(`${ws(c)}/views/suggestions${q({ path })}`),
+  /** ask for a viewer for the type of a file the analyst opened: the suggested proposal's slug, or null */
+  suggestView: (c: string, path: string) => j<{ slug: string | null }>(`${ws(c)}/views/suggest`, { method: 'POST', body: JSON.stringify({ path }) }),
+  /** build a suggested viewer */
+  acceptProposal: (c: string, slug: string) => j<Proposal>(`${ws(c)}/views/proposals/${enc(slug)}/accept`, { method: 'POST' }),
   retryProposal: (c: string, slug: string) => j<Proposal>(`${ws(c)}/views/proposals/${enc(slug)}/retry`, { method: 'POST' }),
   /** A message typed in a view build's thread: logged there and queued as a change to the view, whose run goes on in
    * that thread (views.message); answers the proposal. */
@@ -258,17 +266,24 @@ export const api = {
   /** the working views that claim a file, in the order a citation into it opens them */
   viewsForFile: (c: string, path: string) => j<View[]>(`${ws(c)}/views${q({ path })}`),
   deleteView: (c: string, slug: string) => j<{ ok: boolean }>(`${ws(c)}/views/${enc(slug)}`, { method: 'DELETE' }),
-  /** the view's page as a sandboxed frame loads it: the policy, the bridge, the libraries and view.html. The page's
-     * origin is sent so the frame's media URLs name the host this browser reaches. */
-  viewFrame: async (c: string, slug: string): Promise<string> => {
-    const res = await fetch(`${ws(c)}/views/${enc(slug)}/frame${q({ origin: location.origin })}`)
+  /** the view's page as a sandboxed frame loads it: the policy, the bridge, the libraries and view.html, at `version`
+     * when given (the calls below then answer for the same version). The page's origin is sent so the frame's media URLs
+     * name the host this browser reaches. */
+  viewFrame: async (c: string, slug: string, version?: string): Promise<string> => {
+    const res = await fetch(`${ws(c)}/views/${enc(slug)}/frame${q({ origin: location.origin, v: version })}`)
     if (!res.ok) throw new Error(`${res.status} ${res.statusText}`)
     return res.text()
   },
   /** reader.records(index, query), for the page's thimble.fetch */
-  viewRecords: (c: string, slug: string, query: unknown) => j<{ data: unknown }>(`${ws(c)}/views/${enc(slug)}/records`, { method: 'POST', body: JSON.stringify({ query }) }),
+  viewRecords: (c: string, slug: string, query: unknown, version?: string) => j<{ data: unknown }>(`${ws(c)}/views/${enc(slug)}/records${q({ v: version })}`, { method: 'POST', body: JSON.stringify({ query }) }),
   /** the `open` message for a ref in the view */
-  viewOpen: (c: string, slug: string, ref: string) => j<ViewOpen>(`${ws(c)}/views/${enc(slug)}/resolve${q({ ref })}`),
+  /** the marks of the labels that are on for refs a view's page shows, its units' above all: {ref: {bar, names, spans, keep?}} */
+  viewMarks: (c: string, slug: string, refs: string[], version?: string) => j<Record<string, { bar?: string; names?: string[]; spans?: { text: string; colour: string }[]; keep?: boolean }>>(`${ws(c)}/views/${enc(slug)}/marks${q({ v: version })}`, { method: 'POST', body: JSON.stringify({ refs }) }),
+  /** review the built view's pictures again; stop a review; put the view back as it was built before its review */
+  viewReviewAgain: (c: string, slug: string) => j<{ ok: boolean }>(`${ws(c)}/views/${enc(slug)}/review`, { method: 'POST' }),
+  viewReviewStop: (c: string, slug: string) => j<{ ok: boolean }>(`${ws(c)}/views/${enc(slug)}/review`, { method: 'DELETE' }),
+  viewReviewUndo: (c: string, slug: string) => j<{ ok: boolean }>(`${ws(c)}/views/${enc(slug)}/review/undo`, { method: 'POST' }),
+  viewOpen: (c: string, slug: string, ref: string, version?: string) => j<ViewOpen>(`${ws(c)}/views/${enc(slug)}/resolve${q({ ref, v: version })}`),
   // ---- orientation ----
   /** Ask the analyst's session for the orientation (`POST /ws/{c}/events {kind: start}`): main calls start_orientation
      * with `text` as the brief and the switches `final_notebook`, `propose_views` and `generate_report`; `effort`,

@@ -105,6 +105,7 @@ export type IconName =
   | 'table'
   | 'pulse'
   | 'sparkle'
+  | 'filter'
   | 'regex'
   | 'span'
   | 'lines'
@@ -227,6 +228,7 @@ const PATHS: Record<IconName, string> = {
   doc: 'M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8zM14 3v5h5M9 13h6M9 17h6',
   table: 'M4 5h16v14H4zM4 10h16M4 15h16M10 5v14',
   pulse: 'M3 12h4l3-7 4 14 3-7h4',
+  filter: 'M4 5h16l-6.2 7.4V18l-3.6 1.8v-7.4z',
   sparkle: 'M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8zM19 16l.7 1.8 1.8.7-1.8.7L19 21l-.7-1.8-1.8-.7 1.8-.7z',
   regex: 'M16 3v8M12.5 5l7 4M19.5 5l-7 4M6 18a1.5 1.5 0 1 0 0 .01',
   span: 'M5 7V5h14v2M9 19h6M12 5v14',

@@ -4,13 +4,14 @@
 // dropped (backend views.drop) is shown nowhere, in the bar, in what a run made or as a chip. New view's popover holds a
 // field that says what to type and where it goes, and a send square beside it, off while the field is empty. Enter or
 // the square asks main for the view as a browser message, and the popover closes. A chip that names a view in the chat
-// wears the colours the bar gives a view that is not picked. The server is a fake fetch.
+// wears the colours the bar gives a view that is not picked. An orientation's view still building (held) shows only on
+// its chip. The server is a fake fetch.
 import { readFileSync } from 'node:fs'
 import path from 'node:path'
 import { act } from 'react'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 import { ViewChip } from '../../src/chat/ViewChip.tsx'
-import { NEW_VIEW_PLACEHOLDER, ViewsBar } from '../../src/files/ViewsBar.tsx'
+import { NEW_VIEW_PLACEHOLDER, useViews, ViewsBar } from '../../src/files/ViewsBar.tsx'
 import { isDropped, withoutDropped } from '../../src/lib/proposals.ts'
 import type { Proposal } from '../../src/lib/types.ts'
 import { mount, settle, unmountAll } from './mount.tsx'
@@ -86,6 +87,36 @@ describe('the views and the proposals', () => {
     )
     await settle()
     expect([...el.querySelectorAll('.view-chip')].map((c) => c.getAttribute('data-anchor'))).toEqual(['view:board'])
+  })
+
+  test("an orientation's view still building is left out of the bar and shows its build on the orientation's chip", async () => {
+    const held = proposal('flow', 'Hand-off flow', 'building', { held: true, chat: 'c3' })
+    const asked = proposal('mine', 'Page timeline', 'queued', { asked: true, chat: 'c2' })
+    vi.stubGlobal('fetch', async (url: string) => new Response(JSON.stringify(String(url).endsWith('/views/proposals') ? [held, asked] : []), { status: 200, headers: { 'content-type': 'application/json' } }))
+    function Bar() {
+      const { proposals } = useViews('holds')
+      return <span className="probe">{proposals.map((p) => p.slug).join(' ')}</span>
+    }
+    const el = await mount(
+      <span>
+        <Bar />
+        <ViewChip ws="holds" slug="flow" name="Hand-off flow" />
+      </span>,
+    )
+    await settle()
+    expect(el.querySelector('.probe')?.textContent).toBe('mine')
+    expect(el.querySelector('.view-chip[data-status="building"] .spinner')?.getAttribute('aria-label')).toBe('Building')
+  })
+
+  test('a suggested viewer for a file type is a plain name as a chip, since it opens nowhere until it is built', async () => {
+    const offered = proposal('replay', 'Session Replay', 'suggested', { claims: ['**/*.rec'] })
+    vi.stubGlobal('fetch', async () => new Response(JSON.stringify([offered]), { status: 200, headers: { 'content-type': 'application/json' } }))
+    const el = await mount(<ViewChip ws="offers" slug="replay" name="Session Replay" />)
+    await settle()
+    const chip = el.querySelector('.view-chip[data-status="suggested"]')!
+    expect(chip.querySelector('.view-tab-name')?.textContent).toBe('Session Replay')
+    expect(chip.querySelector('button'), 'nothing to click').toBeNull()
+    expect(chip.querySelector('.spinner, .view-chip-retry')).toBeNull()
   })
 
   test('a built view whose change failed shows the failure with Retry on its chip, and Retry makes the change again', async () => {

@@ -33,10 +33,40 @@ export function frameTokens(): Record<string, string> {
   return Object.fromEntries(FRAME_TOKENS.map((k) => [k, token(k)]))
 }
 
-/** The tokens a view's page reads (views.frame_document; plugin/viewers use them with light fallbacks), and the label
- * palette the marks of the labels that are on are drawn in (viewer_bridge.js), so they match the Labels pane's. */
+/** The tokens a view's page reads (views.frame_document; plugin/viewers use them with light fallbacks), those the parts
+ * of backend/app/viewer_kit.css are drawn in, and the label palette the marks of the labels that are on are drawn in
+ * (viewer_bridge.js), so they match the Labels pane's. */
 export const VIEW_TOKENS = [
   ...FRAME_TOKENS,
+  '--ink-rgb',
+  '--accent-hover',
+  '--text-accent',
+  '--text-on-accent',
+  '--text-on-inverse',
+  '--text-placeholder',
+  '--surface-hover',
+  '--surface-selected',
+  '--surface-inverse',
+  '--raised-bg',
+  '--raised-ring',
+  '--track-bg',
+  '--chip-edge',
+  '--chip-bg',
+  '--chip-edge-hover',
+  '--chip-bg-hover',
+  '--text-xs',
+  '--text-ui-sm',
+  '--text-sm',
+  '--text-mono',
+  '--text-mono-sm',
+  '--h-chip',
+  '--h-control',
+  '--control-sm',
+  '--h-row',
+  '--radius-chip',
+  '--radius-seg',
+  '--radius-ui',
+  '--transition-color',
   '--accent-soft',
   '--border-hairline',
   '--border-strong',

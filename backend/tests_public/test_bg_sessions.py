@@ -621,6 +621,11 @@ def test_the_list_holds_view_builds_with_the_command_that_attaches_each(monkeypa
     rows = bg_session.agent_rows(CORPUS)
     assert {"name": "thimble:view-wiki-board", "state": "working", "kind": "build", "attach": "claude attach 5e55b0a1"} in rows
     assert "thimble:view-wiki-board working" in bg_session.status_line(rows)
+    # a revision the view review asked for runs under the view's name too
+    review = dev.Run(ticket_id="view-review:timeline", title="Timeline", ts_start="2026-01-01T00:00:00Z", session="7a1c0d2e")
+    monkeypatch.setitem(dev._review_runs, (CORPUS, "timeline"), review)
+    assert {"name": "thimble:view-timeline", "state": "working", "kind": "build",
+            "attach": "claude attach 7a1c0d2e"} in bg_session.agent_rows(CORPUS)
 
 
 async def test_a_critic_s_later_turn_is_followed_after_a_server_restart(fake):

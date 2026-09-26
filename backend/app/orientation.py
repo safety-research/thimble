@@ -233,12 +233,6 @@ def drafting(c: str) -> bool:
     return bool(run and run.get("status") == "running" and int(run.get("run") or 0) == 0 and running(c))
 
 
-def holding(c: str) -> bool:
-    """Whether a view proposal the orientation makes now stays unlisted and unannounced, building meanwhile, until its
-    first run ends."""
-    return drafting(c)
-
-
 def held(c: str) -> set[str]:
     """The ids of the cards the orientation's running first run has put in its deck since it started: the canvas leaves
     them out until it ends, so the deck appears whole. Earlier deck cards stay shown and follow-up changes are never
@@ -371,7 +365,7 @@ def started(c: str, chat_id: str, *, agent_id: str | None = None, session: str |
 
 def finished(c: str, chat_id: str, status: str, result: str | None, report: bool = True) -> dict[str, Any] | None:
     """The first run stopped: its last message is kept as summary.md, the run ends with the session's status (ending
-    held), the held view proposals are released, and the orientation's chat gets chips for the deck and each proposal.
+    held), and the orientation's chat gets a chip for the deck.
     With `report`, a done run that asked for the report asks for it. A notification for another session, or for a run
     already ended, changes nothing."""
     run = read_run(c)
@@ -386,7 +380,6 @@ def finished(c: str, chat_id: str, status: str, result: str | None, report: bool
     deck = deck_of(run)
     if deck and _has_cards(c, deck):
         agents.chip(c, "artifact", CARDS_CHIP, ref=f"group:{deck}", chat=chat_id)
-    release_views(c, chat_id)
     _emit(c, run["status"], **({"error": run["error"]} if run.get("error") else {}))
     if report and status == "done" and "report" in (run.get("passes") or []):
         request_report(c)
@@ -399,25 +392,9 @@ def _has_cards(c: str, group: str) -> bool:
     return bool((notebook.read_notebook(config.workspace_dir(c), group) or {}).get("cells"))
 
 
-def release_views(c: str, chat_id: str | None = None) -> list[dict[str, Any]]:
-    """The view proposals held while the first run drafted, listed and announced now with the status their builds
-    reached (views.release_held), each with a chip on the orientation's chat `chat_id`; [] when none was held."""
-    from . import views  # noqa: PLC0415 — views imports refs and the dev runner
-
-    try:
-        released = views.release_held(c)
-    except Exception:  # noqa: BLE001 — the orientation has ended either way
-        log.exception("%s: the orientation's view proposals were not released", c)
-        return []
-    for prop in released:
-        agents.chip(c, "view", str(prop.get("name") or prop.get("slug")), ref=f"view:{prop.get('slug')}",
-                    status=str(prop.get("status") or "queued"), chat=chat_id)
-    return released
-
-
 def restarted(c: str, chat_id: str, *, pid: int | None = None) -> dict[str, Any] | None:
-    """The failed first run runs again in its own session: the record runs again as run 0, so its deck and proposals are
-    drafts again until it ends. None when the record is not that orientation's."""
+    """The failed first run runs again in its own session: the record runs again as run 0, so its deck is a draft again
+    until it ends. None when the record is not that orientation's."""
     run = read_run(c)
     if not run or (run.get("chats") or {}).get(ROLE) != chat_id:
         return None

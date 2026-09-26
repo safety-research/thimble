@@ -28,8 +28,8 @@ settings come from the `orient` and `subagents` roles (config.models_for).
 Calls. Each call the session, its agents, its critique and its follow-ups make is numbered in its chat's sequence and
 citable as `call:<chat>/<n>` (calls.py).
 
-End of the first run. orientation.finished closes the record, reveals the deck and releases held view proposals; the
-report is asked for once no follow-up waits. Main hears an `orient` event with one line counting what was made.
+End of the first run. orientation.finished closes the record and reveals the deck (each view proposal reached the
+analyst when its build passed its checks); the report is asked for once no follow-up waits. Main hears an `orient` event with one line counting what was made.
 
 Restarts. A run a server stop cut short is resumed by the next server with `--resume` in the same chat. A failed first
 run is resumed as run 0 when start_orientation asks for the same orientation again, rather than redoing its work.
@@ -70,6 +70,9 @@ PARTS = {"final": "The deck", "views": "Views", "report": "The report"}
 LINES = {"critique": "`critique`"}
 # The lines of orient.md about the outputs as a whole, kept only while at least one output is on.
 OUTPUT_LINES = ("Draft the outputs described below", "Then revise the outputs described above")
+# The lines of orient.md's order of work that propose views, early and while it analyzes, kept only while the views are
+# on.
+VIEWS_LINES = ("propose the views whose form the survey", "propose a view when the categories or leads")
 # The thimble tools the orientation gets; every other registry tool is taken away.
 ORIENT_TOOLS = ("read_ref", "list_cards", "add_card", "edit_card", "delete_card", "apply_label", "propose_view",
                 "screenshot", "critique")
@@ -149,11 +152,12 @@ def instructions_of(c: str, own: "str | None" = None) -> str:
 def system_prompt(c: str, brief: str, parts: "list[str] | tuple[str, ...]", instructions: "str | None" = None) -> str:
     """orient.md's body rendered for workspace `c`: the prefix with shared.md (with the workspace's view citation forms)
     and the request, the instructions, and the suffix with each part not in `parts` left out (and OUTPUT_LINES when no
-    output is on)."""
+    output is on, VIEWS_LINES when the views are off)."""
     from . import views  # noqa: PLC0415 — views imports refs, which the rest of this module does not need
 
     values = {"workdir": str(config.corpus_dir(c)), "workfolder": str(work_dir(c)), "forms": views.forms_text(c), **_MARKS}
     lines = [s for p, s in LINES.items() if p not in parts] + ([] if any(p in parts for p in PARTS) else list(OUTPUT_LINES))
+    lines += [] if "views" in parts else list(VIEWS_LINES)
     text = prompts.without(prompts.agent_prompt(PROMPT, values), [h for p, h in PARTS.items() if p not in parts], lines)
     # The request and the instructions go in after the parts are left out, so a heading in either cannot cut the
     # analyst's own text or a part of the suffix.
@@ -564,19 +568,21 @@ def _writer_finished(c: str, meta: dict[str, Any]) -> None:
 agents.on_agent_finished(_writer_finished)
 
 
-VIEW_LINES = {"built": "orient-views-built", "failed": "orient-views-failed", "building": "orient-views-building"}
+VIEW_LINES = {"built": "orient-views-built", "failed": "orient-views-failed", "building": "orient-views-building",
+              "suggested": "orient-views-suggested"}
 
 
 def view_counts(c: str, since: datetime | None) -> dict[str, int]:
     """The views the orientation proposed since `since`, by where their builds stand (built, failed, building; queued or
-    held count as building). Proposals main made at the analyst's request, and dropped ones, are not counted."""
+    held count as building), and the viewers for file types it suggested. Proposals main made at the analyst's request,
+    and dropped ones, are not counted."""
     from . import views  # noqa: PLC0415
 
     counts = dict.fromkeys(VIEW_LINES, 0)
     for p in views.list_proposals(c):
         if p.get("asked") or p.get("status") == "dropped" or (since is not None and ((t := _at(p.get("ts"))) is None or t < since)):
             continue
-        counts[p["status"] if p.get("status") in ("built", "failed") else "building"] += 1
+        counts[p["status"] if p.get("status") in ("built", "failed", "suggested") else "building"] += 1
     return counts
 
 

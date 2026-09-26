@@ -138,7 +138,7 @@ def test_every_worked_example_a_view_ticket_names_is_a_complete_viewer():
     for word in ("`data-anchor`", "`build_index(paths)`", "`records(index, query)`", "`resolve(index, locator)`",
                  "`thimble.fetch(query)`", "`thimble.onOpen(fn)`", "`thimble.navigate(ref)`", "`accepts`", "`declares`"):
         assert word in body, word
-    examples = prompts.section("dev-view", "Start from an example")
+    examples = prompts.section("dev-view", "Worked examples")
     named = re.findall(r"^- `([a-z-]+)` ", examples, re.M) + re.findall(r"thimble also ships `([a-z-]+)`", examples)
     assert named, "the prompt names its worked examples"
     viewers = Path(views.EXAMPLES_DIR)

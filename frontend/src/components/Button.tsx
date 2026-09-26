@@ -76,6 +76,8 @@ export interface SegmentedOption<V extends string> {
   anchor?: string
   /** something new waits there (a view built for the analyst's ask, not opened yet): the accent dot after the label */
   dot?: boolean
+  /** a class of the option's own, such as the state of the work on it */
+  className?: string
 }
 
 /** sm 22px (a setting inside a card), md 24px (a mode switch), lg 30px (a views bar, a type bar) */
@@ -130,7 +132,7 @@ function SegOption<V extends string>({ option: o, size, active, onPick }: { opti
         role="radio"
         aria-checked={active}
         aria-label={glyphOnly ? o.title : undefined}
-        className={`seg-opt${glyphOnly ? ' seg-glyph' : ''}${active ? ' active' : ''}`}
+        className={`seg-opt${glyphOnly ? ' seg-glyph' : ''}${active ? ' active' : ''}${o.className ? ` ${o.className}` : ''}`}
         title={glyphOnly ? undefined : o.title}
         disabled={o.disabled}
         data-anchor={o.anchor}

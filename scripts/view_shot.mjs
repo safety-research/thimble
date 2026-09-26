@@ -1,26 +1,28 @@
 #!/usr/bin/env node
-// A view's page loaded headless, for a view's checks and the screenshot tool (backend/app/views.py shoot), in the
-// headless Chromium of the frontend's Playwright (frontend/node_modules, which scripts/install.sh installs).
-//   node scripts/view_shot.mjs --frame <html> --open <json> --out <png> [--viewport <w>x<h>] [--media <url>]
-//                              [--marks <json> [--after <png>]]
-// The page plays the part frontend/src/files/ViewerFrame.tsx plays in the browser: it puts the frame document (the
-// view page with the bridge, views.frame_document) in a sandboxed iframe, sends `open` with the place in the --open
-// file once the frame is ready, and answers each `fetch` by asking the server over stdin and stdout, one JSON line each
-// way: {"fetch": <id>, "query": ...} out, {"id": <id>, "data": ...} or {"id": <id>, "error": "..."} back. A request to
-// the --media URL (the view's media route, thimble.mediaUrl) asks the server which file it names the same way,
-// {"media": <id>, "path": ...} out, {"id": <id>, "file", "type", "size"} or {"id": <id>, "error"} back, and is answered
-// from that file here, a Range request with the bytes it asks for (at most MEDIA_CHUNK). Every other request the page
-// makes is refused, so a view that reaches for the network fails here as it would in the browser.
-// --marks names a file of label marks, {ref: {bar, names, spans}} as ViewerFrame sends them (labels.ts viewMarks):
-// each `anchors` report is answered with them as `labels`, so the shot shows the labels drawn over the page's records,
-// in the label palette ViewerFrame gives the page (--label-1..8 and --label-none, read from the app's tokens.css).
-// With --after, the page is then sent an empty `labels`, as when every label is turned off, and shot again there.
-// When the page has been quiet (no fetch in flight) for QUIET_MS after `open`, or HARD_MS has passed, the frame is
-// shot to --out and one line ends the run: {"done": true, "ok", "errors": [...], "fetches", "height", "refs",
-// "records"}, `refs` the distinct data-anchor refs the page reported and `records` those naming a record
-// (`<path>#L<n>`), which the labels are drawn over; plus, with --marks, "anchors" (the refs the page reported) and
-// "marked" (its elements carrying a mark in the shot, then after the empty `labels` when there is --after: [before,
-// after]).
+// A view's page loaded headless, for a view's checks, its review and the screenshot tool (backend/app/views.py
+// shoot_states), in the headless Chromium of the frontend's Playwright (frontend/node_modules, which scripts/install.sh
+// installs).
+//   node scripts/view_shot.mjs --frame <html> --states <json> [--viewport <w>x<h>] [--media <url>]
+// --states names a JSON list of states, [{out, open, labels}], each shot on a fresh page of one browser: `open` is the
+// place the page is sent once the frame is ready, `out` the PNG written, `labels` the names of the labels that are on.
+// The page plays the part frontend/src/files/ViewerFrame.tsx plays in the browser: it puts the frame document (the view
+// page with the bridge, views.frame_document) in a sandboxed iframe with the theme's tokens and the app's two faces, and
+// asks the server over stdin and stdout, one JSON line each way, for what the page needs:
+//   {"fetch": id, "state": i, "query": ...}   answered {"id", "data"} or {"id", "error"}: reader.records for the state
+//   {"marks": id, "state": i, "refs": [...]}  answered {"id", "marks", "on", "filter"}: the marks of those refs and the
+//                                             labels that are on in the state, sent to the page as `labels`
+//   {"media": id, "path": ...}                answered {"id", "file", "type", "size"} or {"id", "error"}: the file a
+//                                             request to the --media URL (thimble.mediaUrl) names, served from here,
+//                                             a Range request with the bytes it asks for (at most MEDIA_CHUNK)
+// Every other request the page makes is refused, so a view that reaches for the network fails here as it would in the
+// browser. A state is shot when its page has been quiet (no fetch or marks request in flight) for QUIET_MS after
+// `open`, or HARD_MS has passed. One line ends the run: {"done": true, "states": [{ok, errors, fetches, height, refs,
+// records, units, marked, hidden, controls, pills, fonts}]}: `refs` the distinct data-anchor refs the page reported, `records`
+// those naming a record (`<path>#L<n>`), `units` those naming one of the view's units (`view:<slug>/<key>`), `marked`
+// the elements carrying a label's mark in the shot, `hidden` those the bridge hid or dimmed for the filter, `controls`
+// the page's own controls whose short text names a label that is on (labelControls), `pills` the chips and buttons it
+// drew as rounded pills of its own rather than with thimble's parts (ownPills), and `fonts` whether Hanken Grotesk was
+// loaded in the frame.
 import { createRequire } from 'node:module'
 import { readFileSync } from 'node:fs'
 import { open } from 'node:fs/promises'
@@ -35,36 +37,95 @@ const HARD_MS = 25_000
 const READY_MS = 10_000
 const MEDIA_CHUNK = 4 * 1024 * 1024 // bytes of one Range answer
 const MEDIA_WHOLE_MAX = 32 * 1024 * 1024 // a request without Range (an <img>) gets a file up to this size whole
+// A control's text longer than this is a row or a card that shows a label's mark, not a control for the label.
+const CONTROL_TEXT_MAX = 60
+const CONTROLS = 'button, select, option, input, label, summary, [role=button], [role=checkbox], [role=switch], [role=menuitemcheckbox], [role=option], [role=tab]'
+
+// The page's own controls whose short text names one of `names`, such as a toggle, a checkbox or a menu item for a
+// label; a <label> counts only when it labels a form control. Runs in the frame.
+function labelControls({ names, sel, max }) {
+  const want = names.map((n) => String(n).toLowerCase()).filter(Boolean)
+  if (!want.length) return 0
+  let n = 0
+  for (const el of document.querySelectorAll(sel)) {
+    if (el.tagName === 'LABEL' && !el.control) continue
+    const own = [el.getAttribute('aria-label'), el.getAttribute('title'), el.tagName === 'INPUT' ? el.value : el.textContent]
+    const text = own.filter(Boolean).join(' ').replace(/\s+/g, ' ').trim().toLowerCase()
+    if (text && text.length <= max && want.some((w) => text.includes(w))) n++
+  }
+  return n
+}
+// thimble's parts that draw as boxes (backend/app/viewer_kit.css): the chips, buttons and controls in the app's style.
+const KIT = '.chip, .btn, .seg, .field'
+// A pill's text longer than this is a card or a row, not a chip or a button.
+const PILL_TEXT_MAX = 40
+
+// The elements with a short text drawn as a rounded pill, a filled or edged box whose corners are at least half its
+// height, outside thimble's parts: a chip or a button the page styled itself. Runs in the frame.
+function ownPills({ kit, max }) {
+  let n = 0
+  for (const el of document.body ? document.body.querySelectorAll('*') : []) {
+    if (el instanceof SVGElement || el.closest(kit)) continue
+    const r = el.getBoundingClientRect()
+    if (r.height < 12 || r.height > 36 || r.width < r.height * 1.2) continue
+    const text = (el.textContent || '').trim()
+    if (!text || text.length > max) continue
+    const cs = getComputedStyle(el)
+    if ((parseFloat(cs.borderTopLeftRadius) || 0) < r.height / 2 - 1) continue
+    const filled = !/^(transparent|rgba\(0, 0, 0, 0\))$/.test(cs.backgroundColor)
+    const edged = parseFloat(cs.borderTopWidth) > 0 && cs.borderTopStyle !== 'none'
+    if (filled || edged) n++
+  }
+  return n
+}
+// The tokens a view's page reads: frontend/src/lib/frame.ts VIEW_TOKENS, which this list follows.
+const VIEW_TOKENS = [
+  '--text-primary', '--text-secondary', '--text-tertiary', '--surface-card', '--bg-sub', '--bg-sunken', '--border-subtle', '--accent', '--font-body', '--font-mono',
+  '--ink-rgb', '--accent-hover', '--text-accent', '--text-on-accent', '--text-on-inverse', '--text-placeholder', '--surface-hover', '--surface-selected', '--surface-inverse', '--raised-bg', '--raised-ring', '--track-bg', '--chip-edge', '--chip-bg', '--chip-edge-hover',
+  '--chip-bg-hover', '--text-xs', '--text-ui-sm', '--text-sm', '--text-mono', '--text-mono-sm', '--h-chip', '--h-control', '--control-sm', '--h-row', '--radius-chip', '--radius-seg', '--radius-ui', '--transition-color',
+  '--accent-soft', '--border-hairline', '--border-strong', '--bg-panel', '--status-positive', '--status-negative', '--status-warning',
+  '--viz-1', '--viz-2', '--viz-3', '--viz-4', '--viz-5', '--viz-ink-1', '--viz-ink-2', '--viz-ink-3', '--viz-ink-4',
+  '--label-1', '--label-2', '--label-3', '--label-4', '--label-5', '--label-6', '--label-7', '--label-8', '--label-9', '--label-10', '--label-11', '--label-12', '--label-none',
+]
+// The app's faces (frontend/src/styles/fonts.css), latin subset, inlined as data URLs as ViewerFrame inlines them.
+const FACES = [
+  ['Hanken Grotesk', 'hanken-grotesk', [400, 500, 600]],
+  ['Geist Mono', 'geist-mono', [400, 500]],
+]
 
 function args(argv) {
-  const out = { frame: null, open: null, out: null, media: null, marks: null, after: null, viewport: { width: 1100, height: 760 } }
+  const out = { frame: null, states: null, media: null, viewport: { width: 800, height: 700 } }
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i]
     const next = () => argv[++i]
     if (a === '--frame') out.frame = next()
-    else if (a === '--open') out.open = next()
-    else if (a === '--out') out.out = next()
+    else if (a === '--states') out.states = next()
     else if (a === '--media') out.media = next()
-    else if (a === '--marks') out.marks = next()
-    else if (a === '--after') out.after = next()
     else if (a === '--viewport') {
       const m = /^(\d+)x(\d+)$/.exec(next() || '')
       if (m) out.viewport = { width: Number(m[1]), height: Number(m[2]) }
     }
   }
-  if (!out.frame || !out.out) throw new Error('usage: view_shot.mjs --frame <html> --open <json> --out <png> [--viewport WxH]')
+  if (!out.frame || !out.states) throw new Error('usage: view_shot.mjs --frame <html> --states <json> [--viewport WxH] [--media <url>]')
   return out
 }
 
 const say = (obj) => process.stdout.write(JSON.stringify(obj) + '\n')
 
-/** The label palette as a style element for the frame document, from the first value of each --label-* token in the
- * app's tokens.css, as ViewerFrame's viewStyle puts the theme's tokens into the page. */
-function labelStyle() {
-  const css = readFileSync(new URL('../frontend/src/styles/tokens.css', import.meta.url), 'utf8')
-  const seen = new Map()
-  for (const m of css.matchAll(/(--label-(?:\d|none))\s*:\s*([^;]+);/g)) if (!seen.has(m[1])) seen.set(m[1], m[2].trim())
-  return `<style>:root{${[...seen].map(([k, v]) => `${k}:${v}`).join(';')}}</style>`
+function faces() {
+  const rules = []
+  for (const [family, pkg, weights] of FACES) {
+    for (const w of weights) {
+      try {
+        const file = new URL(`../frontend/node_modules/@fontsource/${pkg}/files/${pkg}-latin-${w}-normal.woff2`, import.meta.url)
+        const data = readFileSync(file).toString('base64')
+        rules.push(`@font-face{font-family:'${family}';font-style:normal;font-weight:${w};font-display:block;src:url(data:font/woff2;base64,${data}) format('woff2')}`)
+      } catch {
+        // a missing face leaves the fallback, which the state's `fonts` reports
+      }
+    }
+  }
+  return rules.join('')
 }
 
 /** The bytes of `file` a media request asks for: {status, headers, body}, a 206 with Content-Range for a Range request
@@ -97,45 +158,43 @@ async function mediaAnswer(file, type, size, rangeHeader) {
   }
 }
 
-async function main() {
-  const opt = args(process.argv.slice(2))
-  const page0 = readFileSync(opt.frame, 'utf8')
-  const frame = opt.marks ? page0.replace(/<head[^>]*>/i, (h) => h + labelStyle()) : page0
-  const place = opt.open ? JSON.parse(readFileSync(opt.open, 'utf8') || '{}') : {}
-  const marks = opt.marks ? JSON.parse(readFileSync(opt.marks, 'utf8') || '{}') : null
+const answers = new Map()
+let seq = 0
+createInterface({ input: process.stdin }).on('line', (line) => {
+  let msg
+  try {
+    msg = JSON.parse(line)
+  } catch {
+    return
+  }
+  const fn = answers.get(msg.id)
+  if (fn) {
+    answers.delete(msg.id)
+    fn(msg)
+  }
+})
+/** One request to the server and its answer. */
+function ask(kind, body) {
+  const id = `${kind[0]}${++seq}`
+  return new Promise((resolve) => {
+    answers.set(id, resolve)
+    say({ [kind]: id, ...body })
+  })
+}
+
+async function shootState(browser, opt, doc, state, i) {
   const errors = []
-  const answers = new Map()
-  let seq = 0
-  let mediaSeq = 0
+  let fetches = 0
   let inflight = 0
   let lastActivity = Date.now()
-  createInterface({ input: process.stdin }).on('line', (line) => {
-    let msg
-    try {
-      msg = JSON.parse(line)
-    } catch {
-      return
-    }
-    const fn = answers.get(msg.id)
-    if (fn) {
-      answers.delete(msg.id)
-      fn(msg)
-    }
-  })
-
-  const browser = await chromium.launch()
+  const page = await browser.newPage({ viewport: opt.viewport })
   try {
-    const page = await browser.newPage({ viewport: opt.viewport })
     const isMedia = (url) => !!opt.media && (url === opt.media || url.startsWith(opt.media + '?'))
     await page.route('**/*', async (route) => {
       const req = route.request()
       if (!isMedia(req.url())) return route.abort()
       const path = new URL(req.url()).searchParams.get('path') || ''
-      const id = `m${++mediaSeq}`
-      const msg = await new Promise((resolve) => {
-        answers.set(id, resolve)
-        say({ media: id, path })
-      })
+      const msg = await ask('media', { path })
       if (msg.error) {
         errors.push(`media ${path}: ${msg.error}`.slice(0, 400))
         return route.fulfill({ status: 404, body: '' })
@@ -152,55 +211,74 @@ async function main() {
       if (m.type() === 'error' && !isMedia(m.location()?.url || '')) errors.push(`console: ${m.text()}`.slice(0, 400))
     })
     page.on('pageerror', (e) => errors.push(`page: ${e.message}`.slice(0, 400)))
-    await page.exposeFunction('thimbleFetch', (query) => {
-      const id = ++seq
+    // a fetch or a marks request keeps the page from being shot until it is answered
+    const tracked = async (kind, body) => {
       inflight++
       lastActivity = Date.now()
-      return new Promise((resolve) => {
-        answers.set(id, (msg) => {
-          inflight--
-          lastActivity = Date.now()
-          resolve(msg)
-        })
-        say({ fetch: id, query })
-      })
+      try {
+        return await ask(kind, { state: i, ...body })
+      } finally {
+        inflight--
+        lastActivity = Date.now()
+      }
+    }
+    await page.exposeFunction('thimbleFetch', (query) => {
+      fetches++
+      return tracked('fetch', { query })
     })
+    await page.exposeFunction('thimbleMarks', (refs) => tracked('marks', { refs }))
     await page.exposeFunction('thimbleNote', (kind, text) => {
       lastActivity = Date.now()
       if (kind === 'error') errors.push(String(text).slice(0, 400))
     })
+    const tokens = readFileSync(new URL('../frontend/src/styles/tokens.css', import.meta.url), 'utf8')
     await page.setContent(
-      `<!doctype html><html><body style="margin:0;background:#fbfaf7"><iframe id="f" sandbox="allow-scripts" style="border:0;width:100%;height:100vh;display:block"></iframe></body></html>`,
+      `<!doctype html><html><head><style>${tokens}</style></head><body style="margin:0;background:var(--paper-0,#fbfaf7)"><iframe id="f" sandbox="allow-scripts" style="border:0;width:100%;height:100vh;display:block"></iframe></body></html>`,
     )
     await page.evaluate(
-      ({ doc, place, marks }) => {
+      ({ doc, place, names, fonts }) => {
         const f = document.getElementById('f')
+        const css = getComputedStyle(document.documentElement)
+        const vars = names.map((k) => [k, css.getPropertyValue(k).trim()]).filter(([, v]) => v).map(([k, v]) => `${k}:${v}`).join(';')
+        const style = `<style>${fonts}:root{color-scheme:light;${vars}}</style>`
+        const at = doc.search(/<head[^>]*>/i)
+        const framed = at >= 0 ? doc.slice(0, doc.indexOf('>', at) + 1) + style + doc.slice(doc.indexOf('>', at) + 1) : style + doc
         window.__ready = false
         window.__height = null
-        window.__anchors = 0
         window.__refs = new Set()
+        let marks = {}
+        let state = { on: [], filter: null }
+        const post = (msg) => f.contentWindow.postMessage(msg, '*')
+        const labels = () => post({ type: 'thimble:labels', marks, on: state.on, filter: state.filter })
+        const ask = async (refs) => {
+          const got = await window.thimbleMarks(refs)
+          marks = { ...marks, ...(got.marks || {}) }
+          state = { on: got.on || [], filter: got.filter || null }
+          labels()
+        }
         addEventListener('message', async (e) => {
           if (e.source !== f.contentWindow) return
           const d = e.data || {}
           if (d.type === 'thimble:anchors') {
-            window.__anchors += (d.refs || []).length
-            for (const r of d.refs || []) window.__refs.add(String(r))
-            if (marks) f.contentWindow.postMessage({ type: 'thimble:labels', marks }, '*')
+            const fresh = (d.refs || []).map(String).filter((r) => !window.__refs.has(r))
+            for (const r of fresh) window.__refs.add(r)
+            if (fresh.length) await ask(fresh)
           } else if (d.type === 'thimble:ready') {
             window.__ready = true
-            f.contentWindow.postMessage({ type: 'thimble:open', open: place }, '*')
+            await ask([])
+            post({ type: 'thimble:open', open: place })
           } else if (d.type === 'thimble:fetch') {
             const msg = await window.thimbleFetch(d.query)
-            f.contentWindow.postMessage({ type: 'thimble:result', id: d.id, data: msg.data, error: msg.error }, '*')
+            post({ type: 'thimble:result', id: d.id, data: msg.data, error: msg.error })
           } else if (d.type === 'thimble:error') {
             window.thimbleNote('error', d.message)
           } else if (d.type === 'thimble:size') {
             window.__height = d.height
           }
         })
-        f.srcdoc = doc
+        f.srcdoc = framed
       },
-      { doc: frame, place, marks },
+      { doc, place: state.open || {}, names: VIEW_TOKENS, fonts: faces() },
     )
     const t0 = Date.now()
     while (!(await page.evaluate(() => window.__ready)) && Date.now() - t0 < READY_MS) await page.waitForTimeout(50)
@@ -212,32 +290,60 @@ async function main() {
       await page.waitForTimeout(100)
       if (inflight === 0 && Date.now() - lastActivity > QUIET_MS && Date.now() - opened > MIN_MS) break
     }
-    if (inflight > 0) errors.push(`${inflight} fetch(es) still unanswered after ${HARD_MS / 1000} s`)
+    if (inflight > 0) errors.push(`${inflight} request(s) still unanswered after ${HARD_MS / 1000} s`)
     const el = await page.$('#f')
-    await el.screenshot({ path: opt.out })
+    const frame = await el.contentFrame()
+    const fonts = await frame
+      .evaluate(async () => {
+        await document.fonts.ready
+        await document.fonts.load('13px "Hanken Grotesk"').catch(() => [])
+        return document.fonts.check('13px "Hanken Grotesk"')
+      })
+      .catch(() => false)
+    await el.screenshot({ path: state.out })
     const height = await page.evaluate(() => window.__height)
-    // the page's data-anchor refs, and those that name a record (`<path>#L<n>`), the ones labels are drawn over
     const refs = await page.evaluate(() => [...window.__refs])
-    const extra = { refs: refs.length, records: refs.filter((r) => /^.+#L[1-9]\d*$/.test(r)).length }
-    if (marks) {
-      const frameDoc = await el.contentFrame()
-      const count = () => frameDoc.evaluate(() => document.querySelectorAll('[data-thimble-label]').length)
-      extra.anchors = await page.evaluate(() => window.__anchors)
-      extra.marked = await count()
-      if (opt.after) {
-        await page.evaluate(() => document.getElementById('f').contentWindow.postMessage({ type: 'thimble:labels', marks: {} }, '*'))
-        await page.waitForTimeout(200)
-        await el.screenshot({ path: opt.after })
-        extra.marked = [extra.marked, await count()]
-      }
+    const count = (sel) => frame.evaluate((s) => document.querySelectorAll(s).length, sel).catch(() => 0)
+    return {
+      ok: ready && errors.length === 0,
+      errors,
+      fetches,
+      height,
+      refs: refs.length,
+      records: refs.filter((r) => /^.+#L[1-9]\d*$/.test(r)).length,
+      units: refs.filter((r) => /^view:[^/]+\/.+/.test(r)).length,
+      marked: await count('[data-thimble-label]'),
+      hidden: await count('[data-thimble-drop]'),
+      controls: await frame.evaluate(labelControls, { names: state.labels || [], sel: CONTROLS, max: CONTROL_TEXT_MAX }).catch(() => 0),
+      pills: await frame.evaluate(ownPills, { kit: KIT, max: PILL_TEXT_MAX }).catch(() => 0),
+      fonts,
     }
-    say({ done: true, ok: ready && errors.length === 0, errors, fetches: seq, height, ...extra })
   } finally {
-    await browser.close()
+    await page.close()
   }
 }
 
+async function main() {
+  const opt = args(process.argv.slice(2))
+  const doc = readFileSync(opt.frame, 'utf8')
+  const states = JSON.parse(readFileSync(opt.states, 'utf8') || '[]')
+  const browser = await chromium.launch()
+  const out = []
+  try {
+    for (let i = 0; i < states.length; i++) {
+      try {
+        out.push(await shootState(browser, opt, doc, states[i], i))
+      } catch (e) {
+        out.push({ ok: false, errors: [String(e && e.message ? e.message : e)] })
+      }
+    }
+  } finally {
+    await browser.close()
+  }
+  say({ done: true, states: out })
+}
+
 main().catch((e) => {
-  say({ done: true, ok: false, errors: [String(e && e.message ? e.message : e)] })
+  say({ done: true, states: [], error: String(e && e.message ? e.message : e) })
   process.exit(1)
 })

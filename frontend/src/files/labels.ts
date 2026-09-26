@@ -392,6 +392,73 @@ export interface ViewMark {
   names: string[]
   /** the texts to highlight in the record's element, each span cut into the pieces `needles` looks for */
   spans: { text: string; colour: string }[]
+  /** with a label filter on, whether the record or unit passes it */
+  keep?: boolean
+}
+
+/** A mark that only says whether a ref passes the filter: no label draws on it. */
+export type Keep = Partial<ViewMark> & { keep: boolean }
+
+/** The Files label filter, which a view keeps its records by. */
+export interface LabelFilter {
+  concept: string
+  value: string
+}
+
+/** A label that is on as a view's page hears it (thimble.onLabels): its name, its colour and its highlighted values'. */
+export interface PageLabel {
+  name: string
+  colour: string
+  values: { name: string; colour: string }[]
+}
+
+/** What a view's page hears of the labels (thimble.onLabels): those that are on, the filter's label with them, and the
+ * filter with its value's colour. `resolve` turns a token (--label-3) into the colour a chart can use. Pure. */
+export function pageLabels(
+  on: readonly Concept[],
+  filter: LabelFilter | null,
+  byId: ReadonlyMap<string, Concept>,
+  resolve: (token: string) => string,
+): { on: PageLabel[]; filter: { label: string; value: string; colour: string } | null } {
+  const fk = filter ? byId.get(filter.concept) : undefined
+  const shown = fk && !on.some((k) => k.id === fk.id) ? [...on, fk] : on
+  const page = shown.filter(isFilesLabel).map((k) => {
+    const cls = classesOf(k)
+    const lit = cls.filter((c) => c.highlight)
+    return {
+      name: k.name,
+      colour: resolve(colourToken((lit[0] ?? cls[0])?.color ?? 1)),
+      values: lit.map((c) => ({ name: c.name, colour: resolve(colourToken(c.color)) })),
+    }
+  })
+  if (!filter || !fk) return { on: page, filter: null }
+  const c = classesOf(fk).find((x) => x.name === filter.value)
+  return { on: page, filter: { label: fk.name, value: filter.value, colour: resolve(colourToken(c?.color ?? classesOf(fk)[0]?.color ?? 1)) } }
+}
+
+/** The record marks with the filter's verdict on each record ref: `keep` when the filter's label takes its value on the
+ * record, or when the record's file is not among `covered`, the files the label left a value on (its presence), since
+ * the label says nothing of the others; without `covered` every file counts. A kept record no label draws on gets a
+ * keep-only mark, and a record the filter drops and no label marks is left out, which the bridge reads as dropped.
+ * Pure. */
+export function withKeeps(
+  marks: Record<string, ViewMark>,
+  filter: LabelFilter | null,
+  rows: { get(ref: string): ReadonlyMap<string, LabelRow> | undefined },
+  refs: Iterable<string>,
+  covered?: Readonly<Record<string, unknown>>,
+): Record<string, ViewMark | Keep> {
+  if (!filter) return marks
+  const out: Record<string, ViewMark | Keep> = {}
+  for (const ref of refs) {
+    const at = recordRef(ref)
+    if (!at) continue
+    const row = rows.get(ref)?.get(filter.concept)
+    const keep = (!!covered && !(at.path in covered)) || (!!row && valueOf(row) === filter.value)
+    if (marks[ref]) out[ref] = { ...marks[ref], keep }
+    else if (keep) out[ref] = { keep }
+  }
+  return out
 }
 
 /** The marks a custom view's page draws (viewer_bridge.js `labels` message), keyed by record ref: for each ref, the

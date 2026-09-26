@@ -1,10 +1,20 @@
 # Hand-offs: agents linked by the pull requests they passed between them. Each line of events.jsonl is one call an
 # agent made to the shared server, with the `agent`, the `action`, its `ts` and its `params`; the calls on a pull
-# request carry its number as params.pr. Taken in time order per pull request, a call whose agent differs from the
-# previous call's agent is a hand-off from that agent to this one, and the pair is an edge of the network. The edge
-# keeps the lines of its hand-offs, so the page can open the records behind every link.
+# request carry its number as params.pr.
+#
+# What the view is for: who worked with whom is spread over hundreds of calls, one line each. Drawn as a network, the
+# analyst sees at once which agents passed work between them and how often, and opens the calls behind any link.
+#
+# How the reader works: taken in time order per pull request, a call whose agent differs from the previous call's
+# agent is a hand-off from that agent to this one, and the pair is an edge of the network. The edge keeps the lines of
+# its hand-offs, so the page can open the records behind every link.
+#
+# Labels: with a label filter on, an edge counts only the hand-offs the filter keeps (thimble.kept), and an edge with
+# none is left out, so the network narrows to the label's records. The index is built once, whatever the labels.
 import json
 import re
+
+import thimble
 
 TOP_EDGES = 120  # edges the graph query returns, heaviest first
 EDGE_RECORDS = 50  # records one edge query returns
@@ -43,9 +53,19 @@ def build_index(paths):
     return {"edges": edges, "line": line, "calls": calls}
 
 
-def _degree(index):
-    deg = {}
+def _kept_edges(index):
+    """{pair: hops} of the hand-offs the label filter keeps, the edges with none left out."""
+    out = {}
     for pair, hops in index["edges"].items():
+        kept = [h for h in hops if thimble.kept(f"{h[0]}#L{h[1]}")]
+        if kept:
+            out[pair] = kept
+    return out
+
+
+def _degree(edges):
+    deg = {}
+    for pair, hops in edges.items():
         for agent in pair.split("|"):
             deg[agent] = deg.get(agent, 0) + len(hops)
     return deg
@@ -53,19 +73,23 @@ def _degree(index):
 
 def records(index, query):
     """{op: graph, around?} gives the heaviest edges (those of one agent with `around`) and their nodes; {op: edge,
-    pair} the hand-offs behind one edge, newest first."""
+    pair, ref?} the hand-offs behind one edge, newest first. Both count only the hand-offs the label filter keeps, and
+    the edge lists the one `ref` names whatever the filter, since a citation asked for it."""
     query = query or {}
     if query.get("op") == "edge":
-        hops = index["edges"].get(query.get("pair"), [])
+        cited = query.get("ref")
+        hops = [h for h in index["edges"].get(query.get("pair"), []) if f"{h[0]}#L{h[1]}" == cited
+                or thimble.kept(f"{h[0]}#L{h[1]}")]
         rows = sorted(hops, key=lambda h: h[3], reverse=True)[:EDGE_RECORDS]
         return {"pair": query.get("pair"), "total": len(hops),
                 "items": [{"ref": f"{p}#L{n}", "pr": pr, "time": t, "from": a, "to": b, "action": act}
                           for p, n, pr, t, a, b, act in rows]}
     around = query.get("around")
-    pairs = [(pair, len(h)) for pair, h in index["edges"].items() if not around or around in pair.split("|")]
+    edges = _kept_edges(index)
+    pairs = [(pair, len(h)) for pair, h in edges.items() if not around or around in pair.split("|")]
     pairs.sort(key=lambda x: (-x[1], x[0]))
     pairs = pairs[:TOP_EDGES]
-    deg = _degree(index)
+    deg = _degree(edges)
     names = sorted({agent for pair, _ in pairs for agent in pair.split("|")})
     return {"nodes": [{"id": n, "weight": deg.get(n, 0)} for n in names],
             "edges": [{"pair": pair, "source": pair.split("|")[0], "target": pair.split("|")[1], "weight": w}
@@ -75,7 +99,7 @@ def records(index, query):
 def resolve(index, locator):
     """events.jsonl#L<n>: the call on that line, with the hand-off it made when it made one; its excerpt the agent and
     the action as the record holds them. view:<slug>/<agent>: the agent, citing their calls in time order."""
-    deg = _degree(index)
+    deg = _degree(index["edges"])
     if "key" in locator:
         agent = locator["key"]
         mine = sorted((call[2], ref) for ref, call in index["calls"].items() if call[0] == agent)

@@ -28,6 +28,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import textwrap
 from pathlib import Path
 from typing import Any
 
@@ -322,17 +323,17 @@ def write_digest(c: str, run: agent_session.Run) -> Path | None:
 
 def drafts(c: str) -> list[str]:
     """The parts of the first message that name the orientation's drafts: `## critique-deck` when its deck is on, and
-    `## critique-proposals` with each view proposal it holds, since no tool lists a held proposal."""
+    `## critique-proposals` with each view it proposed, since no tool lists proposals."""
     from . import views  # noqa: PLC0415
 
     out: list[str] = []
     run = orientation.read_run(c) or {}
     if orientation.deck_of(run):
         out.append(tools.hint("critique-deck", deck=orientation.GROUP_PATHS["deck"]))
-    held = [p for p in views.list_proposals(c) if p.get("held") and p.get("status") != "dropped"]
-    if held:
-        rows = "\n".join(f"- {p.get('name')}: {p.get('why')} Claims {', '.join(p.get('claims') or [])}. {p.get('arrangement')}"
-                         for p in held)
+    mine = [p for p in views.list_proposals(c) if (p.get("orientation") or p.get("held")) and p.get("status") != "dropped"]
+    if mine:
+        rows = "\n".join(f"- {p.get('name')}: {p.get('why')} Claims {', '.join(p.get('claims') or [])}.\n"
+                         + textwrap.indent(views.spec_lines(p), "  ") for p in mine)
         out.append(tools.hint("critique-proposals", proposals=rows))
     return out
 
