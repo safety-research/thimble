@@ -41,8 +41,7 @@ def _orient_views() -> str:
 
 def test_the_orientation_s_views_section_is_short_examples_of_three_kinds():
     section = _orient_views()
-    for words in ("Semantic, the data's own genre:", "Structural, a shape in the data:", "Clustered, grouped by labels:",
-                  "opens on an overview, then lets the analyst zoom, filter and open details"):
+    for words in ("Semantic, the data's own genre:", "Structural, a shape in the data:", "Clustered, grouped by labels:"):
         assert words in section, words
     assert "ideas, not a menu" in section and "any form" in section
     assert section.count(" → ") >= 9, "short examples, data → view"
@@ -60,17 +59,26 @@ def test_the_orientation_makes_labels_first_class_and_proposes_viewers_for_file_
     assert "asks for a viewer of that file type" in prompts.section("dev-view", "The ticket")
 
 
-def test_the_orientation_proposes_views_once_it_sees_how_the_records_read_while_views_are_on(tmp_path, monkeypatch):
+def test_the_orientation_proposes_views_after_its_survey_and_as_its_analysis_finds_them_while_views_are_on(tmp_path,
+                                                                                                          monkeypatch):
     monkeypatch.setattr(config, "corpus_dir", lambda c: tmp_path)
     monkeypatch.setattr(orient_session, "work_dir", lambda c: tmp_path)
     monkeypatch.setattr(views, "forms_text", lambda c: "")
     on = orient_session.system_prompt("c", "", ["final", "views"], instructions="x")
     off = orient_session.system_prompt("c", "", ["final"], instructions="x")
-    assert orient_session.VIEWS_LINE in on and "\n#### Views\n" in on
+    early, later = orient_session.VIEWS_LINES
+    assert early in on and later in on and "\n#### Views\n" in on
     order = on.split("Work in this order.", 1)[1]
-    assert order.index(orient_session.VIEWS_LINE) < order.index("Analyze until your main hypothesis is ready")
-    assert orient_session.VIEWS_LINE not in off and "\n#### Views\n" not in off
+    assert order.index(early) < order.index("Analyze until your main hypothesis is ready") < order.index(later)
+    assert early not in off and later not in off and "\n#### Views\n" not in off
     assert "Analyze until your main hypothesis is ready" in off
+
+
+def test_the_orientation_proposes_two_views_early_keeps_one_for_later_and_improves_rather_than_replaces():
+    section = _orient_views()
+    assert "Propose up to three with `propose_view`: up to two early" in section and views.ORIENTATION_VIEWS_MAX == 3
+    assert "one that emerges from the analysis" in section
+    assert "change only that: a view is improved, never replaced" in section
 
 
 def test_the_prompts_name_the_width_the_pictures_are_shot_at():
