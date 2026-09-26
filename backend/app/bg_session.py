@@ -74,15 +74,26 @@ NEWS_CHARS = 1_500  # of one reply of the session, as the proxy shows it
 BLOCKS_MAX = 12  # stops of a proxy refused in a row with no wait_session between them, after which it may stop
 GONE_AFTER = 3  # listings in a row without its process after which a session counts as ended
 START_GRACE_S = 20.0  # a session this young is never taken for ended
+# the states `claude agents` lists for a session whose process will not come back; one listed in any other state with
+# no process is being restarted by Claude Code under the same id, which may take RESTART_WAIT_S
+ENDED_STATES = {"stopped", "done", "failed", "crashed", "error"}
+RESTART_WAIT_S = 90.0
 DELIVERY_WAIT_S = 300.0  # how long a run attached with a message waits for the session to take it up
 TAIL_BYTES = 524_288  # of a transcript's end, read for its last turn (turn_state)
 BG_ID_RE = re.compile(r"backgrounded\W+([0-9a-f]{8})\b")
 DROP_FLAGS = {"-p", "--print", "--verbose"}
 DROP_WITH_VALUE = {"--output-format", "--session-id", "--input-format"}
 PASSED_ENV = {"PATH"}  # what the background service takes from the caller's environment
+# a long call of thimble's tools, such as the critique, stays a foreground call, as under `claude -p`, so the session
+# never looks idle while one runs
+FOREGROUND_ENV = {"CLAUDE_CODE_MCP_AUTO_BACKGROUND_MS": "0"}
 # the plugin agent that shows each kind of session in the agent tray (plugin/agents)
 PROXY_TYPES = {"orient": "orient", "writer": "writer", "critique": "critic"}
 TYPED_PREFIX = "From the analyst, typed in Claude Code's agent tray:"
+TOKEN_PREFIX = "thimble-message-"
+ANNOUNCED_FILE = "bg-announced.json"  # in the workspace: the start and finish lines main's terminal has shown
+FORK_DEDUPE_S = 600.0  # how long a thread's fork counts as starting, until the mirror sees it finish
+STATUS_CHARS = 110  # of one statusline line; more agents go on further lines
 
 
 def _plugin() -> str:
@@ -250,8 +261,8 @@ def bg_argv(argv: list[str], env: dict[str, str], base_env: dict[str, str], name
     """The `claude --bg` argv for the `claude -p` argv `argv`, named `name`, with `prompt` as the first message and the
     variables `env` adds to `base_env` in its --settings `env` (module note, start)."""
     out: list[str] = [argv[0], "--bg", "-n", name]
-    extra_env = {k: v for k, v in env.items() if k not in PASSED_ENV | {config.CONFIG_DIR_ENV}
-                 and (k.startswith("THIMBLE_") or base_env.get(k) != v)}
+    extra_env = {**{k: v for k, v in env.items() if k not in PASSED_ENV | {config.CONFIG_DIR_ENV}
+                    and (k.startswith("THIMBLE_") or base_env.get(k) != v)}, **FOREGROUND_ENV}
     i = 1
     while i < len(argv):
         a = argv[i]
@@ -311,6 +322,8 @@ class Entry:
     owner: str | None = None  # the agent id of the proxy that shows it; another one is told to stop (wait)
     replacing: bool = False  # a new session of its key is starting in its place, which its proxy goes on to show
     misses: int = 0  # listings in a row that showed no process for it
+    missing_since: float = 0.0  # time.monotonic() since when the listings show no process for it
+    proxy_starting: float = 0.0  # time.monotonic() when main's Agent call that starts its proxy was let through
 
     KEEP = ("c", "key", "name", "short", "sid", "chat", "role", "folder", "started", "status", "run_open", "result",
             "ended_at", "proxy_agents", "relayed")
@@ -476,15 +489,16 @@ async def _tick(rows: list[dict[str, Any]]) -> None:
             continue
         if hit is None or not hit.get("pid"):
             e.misses += 1
-            if e.misses < GONE_AFTER or time.time() - e.started < START_GRACE_S:
-                continue  # a session just started, or restarted, may be listed without its process for a moment
-            e.status, e.waiting_for, e.pid = "stopped", "", None
+            e.missing_since = e.missing_since or time.monotonic()
+            if not _gone(e, hit):
+                continue
+            e.status, e.waiting_for, e.pid, e.missing_since = "stopped", "", None, 0.0
             _news(e, f"{e.name} has ended.")
             _save(e.c)
             if agent_session.current(e.c, e.key) is None:
                 _stopped_while_idle(e)
             continue
-        e.misses = 0
+        e.misses, e.missing_since = 0, 0.0
         e.pid = int(hit["pid"])
         e.status = _status(hit)
         e.waiting_for = str(hit.get("waitingFor") or "") if e.status == "waiting" else ""
@@ -506,6 +520,17 @@ async def _tick(rows: list[dict[str, Any]]) -> None:
     for c, keys in unshown.items():
         if ask_main_for_proxy(c, *keys):
             log.info("%s: main is asked to show %s in the agent tray", c, ", ".join(name_of(k) for k in keys))
+
+
+def _gone(e: Entry, hit: dict[str, Any] | None) -> bool:
+    """Whether a session the listing shows with no process has ended: one listed in an ended state (claude stop), or
+    missing from the listing, after GONE_AFTER listings; one listed in any other state only after RESTART_WAIT_S, since
+    Claude Code restarts a session whose process died."""
+    if time.time() - e.started < START_GRACE_S or e.misses < GONE_AFTER:
+        return False
+    if hit is None or str(hit.get("state") or "") in ENDED_STATES:
+        return True
+    return time.monotonic() - e.missing_since >= RESTART_WAIT_S
 
 
 async def _woken(fn: Callable[[str, Entry], Awaitable[Any]], e: Entry) -> None:
@@ -766,6 +791,8 @@ def _pending_out(e: Entry) -> list[dict[str, Any]]:
 def state_words(e: Entry) -> str:
     if e.status == "stopped":
         return "ended"
+    if e.missing_since:
+        return "restarting"
     if e.status == "waiting":
         return f"waiting for a {e.waiting_for or 'reply'}"
     if e.status == "idle":
@@ -1231,10 +1258,13 @@ async def recover() -> list[str]:
         if e.status == "stopped":
             continue
         hit = by_id.get(e.short)
-        if hit is None or not hit.get("pid"):
+        if hit is None or (not hit.get("pid") and str(hit.get("state") or "") in ENDED_STATES):
             e.status = "stopped"
             _save(e.c)
             _stopped_while_idle(e)
+            continue
+        if not hit.get("pid"):
+            e.missing_since = time.monotonic()  # being restarted: the watcher follows it once its process is back
             continue
         fn = _wake.get(kind_of(e.key))
         if fn is None or agent_session.current(e.c, e.key) is not None:

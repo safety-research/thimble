@@ -229,6 +229,7 @@ LAUNCHED_AGENT_RE = re.compile(r"\bagentId:\s*(\w+)")  # in a background Agent c
 LAUNCHED_TASK_RE = re.compile(r"\bTask ID:\s*(\S+)")  # in a Workflow call's result
 RESUMED_AGENT_RE = re.compile(r'"resumedAgentId"\s*:\s*"(\w+)"')  # in a SendMessage's result that continued an agent
 TASK_ID_RE = re.compile(r"<task-id>\s*(.*?)\s*</task-id>", re.S)  # a notification may name several tasks
+MOVED_TASK_RE = re.compile(r"\bmoved to the background as task (\w+)")  # a long call Claude Code let run on
 
 
 def _now() -> str:
@@ -1313,7 +1314,8 @@ def bookkeeping(rec: dict) -> bool:
 def _steps_of(run: Run, rec: dict) -> None:
     """What a line of the session's own transcript says about its steps: an Agent result ends a foreground step, a Workflow
     result names the run directory whose agents become steps, a task notification ends a background step. Launched
-    background agents and workflows are kept in run.background until a notification names them."""
+    background agents and workflows, and tool calls moved to the background, are kept in run.background until a
+    notification names them."""
     if rec.get("type") == "assistant":
         for b in session._content_list(rec):
             if isinstance(b, dict) and b.get("type") == "tool_use" and isinstance(b.get("id"), str):
@@ -1353,6 +1355,9 @@ def _steps_of(run: Run, rec: dict) -> None:
             launched = LAUNCHED_AGENT_RE.search(content)
         if launched and not b.get("is_error"):
             run.background.add(launched.group(1))
+        moved = MOVED_TASK_RE.search(content) if not launched else None
+        if moved and not b.get("is_error"):
+            run.background.add(moved.group(1))
         if name in AGENT_TOOLS and not ASYNC_RESULT_RE.match(content):
             _scan_subagents(run)
             step = _step_by(run, tool_use_id=tid)

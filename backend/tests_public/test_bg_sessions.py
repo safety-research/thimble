@@ -44,10 +44,11 @@ def turn(sid, prompt, reply, end=True):
         *([{"type": "system", "subtype": "turn_duration"}] if end else []))
 if argv[:1] == ["agents"]:
     print(json.dumps([{"id": s["sid"][:8], "sessionId": s["sid"], "kind": "background", "name": s["name"],
-                       "status": s["status"], "pid": s["pid"], "cwd": s["cwd"]} for s in state.values()]))
+                       "status": s["status"], "pid": s["pid"], "cwd": s["cwd"], "state": s.get("state", "working")}
+                      for s in state.values()]))
     sys.exit(0)
 if argv[:1] == ["stop"]:
-    state[argv[1]]["pid"] = None
+    state[argv[1]]["pid"], state[argv[1]]["state"] = None, "stopped"
     state_path.write_text(json.dumps(state))
     print("stopped " + argv[1])
     sys.exit(0)
@@ -56,7 +57,7 @@ if "--bg" in argv:
     if "--resume" in argv:
         sid = argv[argv.index("--resume") + 1]
         s = state[sid[:8]]
-        s["pid"], s["status"] = 4242, "idle"
+        s["pid"], s["status"], s["state"] = 4242, "idle", "working"
         turn(sid, prompt, "carried on")
     else:
         if (Path.cwd() / ".thimble-first-message.md").exists() and "first message is in" in prompt:
@@ -165,7 +166,8 @@ def test_the_bg_command_drops_print_flags_and_carries_the_environment_in_setting
     assert out[:4] == ["claude", "--bg", "-n", "thimble:writer"] and out[-2:] == ["--", "Write it."]
     assert "-p" not in out and "--session-id" not in out and "--output-format" not in out and "--verbose" not in out
     settings = json.loads(out[out.index("--settings") + 1])
-    assert settings["env"] == {"THIMBLE_SESSION": "writer:report", "CLAUDE_CODE_EFFORT_LEVEL": "high"}
+    assert settings["env"] == {"THIMBLE_SESSION": "writer:report", "CLAUDE_CODE_EFFORT_LEVEL": "high",
+                               **bg_session.FOREGROUND_ENV}, "thimble's long calls stay foreground calls"
     long = bg_session.bg_argv(argv, {}, {}, "thimble:writer", "x" * (bg_session.MAX_ARG + 1), tmp_path)
     assert (tmp_path / bg_session.FIRST_MESSAGE_FILE).read_text() == "x" * (bg_session.MAX_ARG + 1)
     assert str(tmp_path / bg_session.FIRST_MESSAGE_FILE) in long[-1]
@@ -287,7 +289,7 @@ async def test_a_session_whose_process_went_away_leaves_its_chat_stopped(fake):
     e = bg_session.entry(CORPUS, "writer:report")
     agents.update_agent(CORPUS, run.chat, status="running")
     st = _state(fake)
-    st[e.short]["pid"] = None
+    st[e.short]["pid"], st[e.short]["state"] = None, "stopped"  # claude stop in the analyst's terminal
     (fake / "sessions.json").write_text(json.dumps(st))
     bg_session._ensure_watcher()
     await _until(lambda: e.status == "stopped")
@@ -375,6 +377,7 @@ def test_the_statusline_is_set_for_terminal_first_and_put_back_after(workspaces_
 
 
 async def test_a_run_whose_session_was_killed_ends_with_resume_which_starts_it_again_under_its_id(fake, monkeypatch):
+    monkeypatch.setattr(bg_session, "RESTART_WAIT_S", 0.3)  # Claude Code does not restart it in time
     monkeypatch.setenv("FAKE_BUSY", "1")
     run = await write_session.start(CORPUS, "report")
     e = bg_session.entry(CORPUS, "writer:report")
