@@ -2354,6 +2354,8 @@ async def review_revision(c: str, slug: str, message: str) -> tuple[bool, str]:
     folder = views.views_dir(c) / slug
     corpus = config.corpus_dir(c)
     chat = _view_chat(c, prop)
+    if chat and chat != prop.get("chat"):
+        views.update_proposal(c, slug, chat=chat)
     run_log = Log(agents.Recorder(c, chat)) if chat else Log(None)
     run = Run(ticket_id=f"view-review:{slug}", title=str(prop.get("name") or slug), ts_start=_now())
     _review_runs[(c, slug)] = run
