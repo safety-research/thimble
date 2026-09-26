@@ -58,12 +58,15 @@ TOOLS_PROMPT = "tools"  # prompts/tools.md, whose lowercase sections are the lin
 # a view ticket's status on its proposal row; `dropped` is an orientation proposal that could not be built through its
 # repairs. A proposal of the orientation's first run carries `held: true` until that run ends (release_held): it builds
 # at once but is neither listed nor announced until then.
-STATUSES = ("queued", "building", "built", "failed", "dropped")
+# `suggested` is a viewer for a file type the File browser proposed (suggest), which builds only once the analyst
+# accepts it.
+STATUSES = ("queued", "building", "built", "failed", "dropped", "suggested")
 PENDING = ("queued", "building")  # the statuses a restart queues again (dev.recover_views)
 SHOTS_KEPT = 5  # the check pictures kept per view, newest first (the session Reads the latest)
 SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,39}$")
 # the route names under /views/ and the Reader's built-in file views, which its switcher keys by
-RESERVED_SLUGS = {"proposals", "forge", "raw", "records", "table", "text", "transcript", "lib", "frame", "resolve"}
+RESERVED_SLUGS = {"proposals", "forge", "raw", "records", "table", "text", "transcript", "lib", "frame", "resolve",
+                  "suggestions", "suggest"}
 BUILD_TIMEOUT_S = 180.0  # a call that may build the index over the claimed files
 CALL_TIMEOUT_S = 15.0  # a call once the index for the fingerprint is known to be built
 LABEL_MAX = 40  # chars of a chip label a reader supplies (chips stay short)
@@ -1280,13 +1283,14 @@ def title_case(name: Any) -> str:
 
 
 def propose(c: str, name: str, why: str, claims: Any, arrangement: str, proposed_by: str = "analyst",
-            hold: bool = False, asked: bool = False) -> dict[str, Any]:
+            hold: bool = False, asked: bool = False, suggested: bool = False) -> dict[str, Any]:
     """Store a proposal, announce it and queue it for the dev agent at once (dev.queue_view). A proposal of the same
     name not
     yet built is replaced under its slug, its build stopped. With `hold` (the orientation's first run) it is stored
     `held: true` and queued unannounced until release_held; a held proposal proposed again unchanged is left as it
     is.
-    `asked` says the analyst asked for it."""
+    `asked` says the analyst asked for it. With `suggested` (a viewer for a file type the File browser proposes) it is
+    stored `suggested` and not queued until the analyst accepts it (accept)."""
     name = title_case(name)
     if not name:
         raise HTTPException(400, "a proposal needs a name")
@@ -1313,16 +1317,17 @@ def propose(c: str, name: str, why: str, claims: Any, arrangement: str, proposed
             _stop_build(c, old["slug"], "replaced", force=bool(old.get("held")))
             items = [p for p in list_proposals(c) if p.get("slug") != old["slug"]]
         slug = old["slug"] if old is not None else _unique_slug(c, name)
-        prop = {"slug": slug, "name": name, "why": why, "claims": claims_l,
-                "arrangement": arrangement, "proposed_by": str(proposed_by or "analyst"), "status": "queued", "ts": _now()}
+        prop = {"slug": slug, "name": name, "why": why, "claims": claims_l, "arrangement": arrangement,
+                "proposed_by": str(proposed_by or "analyst"), "status": "suggested" if suggested else "queued", "ts": _now()}
         if hold:
             prop["held"] = True
         if asked:
             prop["asked"] = True
         items.append(prop)
         _save_proposals(c, items)
-    _emit(c, slug, "queued")
-    _queue(c, slug)
+    _emit(c, slug, prop["status"])
+    if not suggested:
+        _queue(c, slug)
     return prop
 
 
@@ -1587,6 +1592,9 @@ def delete_proposal(c: str, slug: str) -> None:
             return
         _stop_build(c, slug, "dismissed")
         _save_proposals(c, [p for p in list_proposals(c) if p.get("slug") != slug])
+        if hit.get("status") == "suggested":
+            for suffix in {s for g in hit.get("claims") or [] if (s := type_suffix(g))}:
+                _answer_suffix(c, suffix, "dismissed")
     if slug in _view_dirs(c):
         delete_view(c, slug)
     else:
@@ -2322,6 +2330,196 @@ async def tool_screenshot(ctx: Any, args: dict[str, Any]) -> Any:
 
 
 # ----------------------------------------------------------------------------------------------------------
+# viewers for a file type: a view whose claims are all one extension's glob, proposed by the File browser (suggest)
+# ----------------------------------------------------------------------------------------------------------
+
+SUGGESTIONS_FILE = "suggestions.json"  # {suffix: {answer: suggested | none | dismissed, slug?, ts}}, one per suffix
+# the suffixes the files view reads well, and those a built-in viewer or mode reads: no viewer is proposed for them
+ORDINARY_SUFFIXES = frozenset(
+    ".txt .md .markdown .rst .log .out .err .json .jsonl .ndjson .csv .tsv .yaml .yml .toml .ini .cfg .conf .env .xml "
+    ".html .htm .css .js .mjs .cjs .ts .tsx .jsx .py .sh .bash .zsh .rb .go .rs .java .kt .c .h .cc .cpp .hpp .cs .php "
+    ".sql .r .jl .lua .pl .swift .scala .diff .patch .lock .pdf .xlsx .xls .db .sqlite .sqlite3".split())
+_TYPE_GLOB = re.compile(r"^(?:\*\*/)?\*(\.[A-Za-z0-9_+-]{1,16})$")
+SUGGEST_HEAD_LINES, SUGGEST_LINE_CHARS = 40, 300  # of a text file's start the proposal is written from
+SUGGEST_HEX_BYTES, SUGGEST_SCAN_BYTES, SUGGEST_RUN_MIN = 512, 65536, 6  # of a binary file's start
+SUGGEST_TIMEOUT_S = 30.0
+SUGGEST_PROMPT = "file-viewer"
+
+
+def type_suffix(glob: str) -> str | None:
+    """The suffix a claim names when it is one extension's glob (`**/*.vtt`, `*.vtt`), lower-cased; None otherwise."""
+    m = _TYPE_GLOB.match(str(glob or "").strip())
+    return m.group(1).lower() if m else None
+
+
+def file_type_viewer(view: dict[str, Any]) -> bool:
+    """Whether the view is a viewer for file types: every claim one extension's glob."""
+    claims = view.get("claims") or []
+    return bool(claims) and all(type_suffix(g) for g in claims)
+
+
+def _suggestions_path(c: str) -> Path:
+    return views_dir(c) / SUGGESTIONS_FILE
+
+
+def suggestions(c: str) -> dict[str, dict[str, Any]]:
+    p = _suggestions_path(c)
+    raw = read_json(p, {}) if p.is_file() else {}
+    return raw if isinstance(raw, dict) else {}
+
+
+def _answer_suffix(c: str, suffix: str, answer: str, slug: str | None = None) -> None:
+    with _proposals_lock:
+        allk = suggestions(c)
+        allk[suffix] = {"answer": answer, **({"slug": slug} if slug else {}), "ts": _now()}
+        p = _suggestions_path(c)
+        p.parent.mkdir(parents=True, exist_ok=True)
+        write_json(p, allk)
+
+
+def suffix_of(rel: str) -> str:
+    return Path(rel).suffix.lower()
+
+
+def suggestion_for(c: str, rel: str) -> dict[str, Any]:
+    """What thimble proposes for opening the file `rel` in the File browser: {path, suffix, eligible, reason, answer,
+    proposal}. `eligible` holds when a viewer may be proposed for its type: no view claims it, it is no media, its
+    suffix is not one the files view reads well, a file with no suffix is binary, and the workspace has no proposal or
+    answer for the suffix yet. `proposal` is the proposal for its type, when there is one."""
+    from . import corpus as corpus_mod  # noqa: PLC0415
+
+    rel = str(rel or "").strip().strip("/")
+    suffix = suffix_of(rel)
+    out: dict[str, Any] = {"path": rel, "suffix": suffix, "eligible": False, "reason": "", "answer": None, "proposal": None}
+    try:
+        p = config.safe_corpus_path(config.corpus_dir(c), rel)
+    except ValueError:
+        out["reason"] = "not a corpus file"
+        return out
+    if not p.is_file():
+        out["reason"] = "not a corpus file"
+        return out
+    kept = suggestions(c).get(suffix) if suffix else None
+    out["answer"] = kept.get("answer") if isinstance(kept, dict) else None
+    out["proposal"] = next((x for x in list_proposals(c) if x.get("status") != "dropped"
+                            and any(type_suffix(g) == suffix for g in x.get("claims") or [])), None) if suffix else None
+    if views_for(c, rel):
+        out["reason"] = "a view opens it"
+    elif suffix in MEDIA_TYPES:
+        out["reason"] = "a media file"
+    elif suffix in ORDINARY_SUFFIXES:
+        out["reason"] = "the files view reads it"
+    elif not suffix and not corpus_mod.sniff_binary(p):
+        out["reason"] = "a text file with no suffix"
+    elif out["proposal"] is not None or any(claims_path(x, rel) for x in list_proposals(c) if x.get("status") != "dropped"):
+        out["reason"] = "a proposal claims it"
+    elif out["answer"]:
+        out["reason"] = f"already answered ({out['answer']})"
+    else:
+        out["eligible"] = bool(suffix)
+        out["reason"] = "" if suffix else "a file with no suffix"
+    return out
+
+
+def file_head(p: Path) -> tuple[str, str]:
+    """(what the start is, the start) of a file for the proposal: the first lines of a text file, each cut, or for a
+    binary file its first bytes as hex and the printable runs of its first 64 KB."""
+    from . import corpus as corpus_mod  # noqa: PLC0415
+
+    if not corpus_mod.sniff_binary(p):
+        lines = []
+        with open(p, "r", encoding="utf-8", errors="replace") as f:
+            for i, ln in enumerate(f):
+                if i >= SUGGEST_HEAD_LINES:
+                    break
+                ln = ln.rstrip("\n")
+                lines.append(ln if len(ln) <= SUGGEST_LINE_CHARS else ln[:SUGGEST_LINE_CHARS] + "…")
+        return f"its first {len(lines)} lines", "\n".join(lines)
+    with open(p, "rb") as f:
+        data = f.read(SUGGEST_SCAN_BYTES)
+    hexed = data[:SUGGEST_HEX_BYTES].hex(" ")
+    runs = re.findall(rb"[\x20-\x7e]{%d,}" % SUGGEST_RUN_MIN, data)
+    text = "\n".join(r.decode("ascii") for r in runs[:200])
+    return (f"its first {min(len(data), SUGGEST_HEX_BYTES)} bytes as hex, then the printable runs of its first "
+            f"{len(data):,} bytes"), f"{hexed}\n\n{text}"
+
+
+def _fmt_size(n: int) -> str:
+    for unit in ("bytes", "KB", "MB", "GB"):
+        if n < 1024 or unit == "GB":
+            return f"{n:,} {unit}" if unit == "bytes" else f"{n:.1f} {unit}"
+        n /= 1024  # type: ignore[assignment]
+    return f"{n} bytes"
+
+
+async def _suggest_call(c: str, system: str, user: str, tool: Any) -> Any:
+    """The proposal's one model call: the `dev` role's model at low effort (the fallback model after a refusal, as
+    model.structured runs it). Tests replace it."""
+    from . import agents, model  # noqa: PLC0415
+
+    role = config.models_for(c).get("dev") or dict(config.ROLE_MODELS_DEFAULT["dev"])
+    return await model.structured(user, tool=tool, model=role.get("model") or config.ROLE_MODELS_DEFAULT["dev"]["model"],
+                                  effort="low", system_append=system, cwd=config.corpus_dir(c),
+                                  config_env=agents.call_env(c), cache_prompt=False)
+
+
+async def suggest(c: str, rel: str) -> str | None:
+    """Propose a viewer for the type of the file `rel` the analyst opened, when suggestion_for says one may be: one
+    model call reads the file's start (prompts/file-viewer.md) and says whether a viewer would help; a yes is stored as
+    a `suggested` proposal claiming the suffix's glob, a no as the suffix's answer, so it is never asked again. The
+    proposal's slug, or None. A call that fails caches nothing, so the next file of the type asks again."""
+    from . import model, prompts, tools  # noqa: PLC0415
+
+    got = await asyncio.to_thread(suggestion_for, c, rel)
+    if not got["eligible"]:
+        return None
+    suffix = got["suffix"]
+    p = config.safe_corpus_path(config.corpus_dir(c), got["path"])
+    what, head = await asyncio.to_thread(file_head, p)
+    count = sum(1 for f, _, _ in await asyncio.to_thread(folder_files, config.corpus_dir(c), "") if suffix_of(f) == suffix)
+    secs = {name: prompts.section(SUGGEST_PROMPT, name).strip() for name in ("suggest", "file", "proposal")}
+    system = prompts._fill(secs["suggest"], {}, f"{SUGGEST_PROMPT}.md")
+    user = prompts._fill(secs["file"], {"path": got["path"], "size": _fmt_size(p.stat().st_size), "count": str(count),
+                                        "suffix": suffix, "what": what, "head": head}, f"{SUGGEST_PROMPT}.md")
+    desc, schema = tools.split_section(secs["proposal"])
+    tool = model.ToolSpec(name="proposal", description=desc, input_schema=schema)
+    try:
+        res = await asyncio.wait_for(_suggest_call(c, system, user, tool), SUGGEST_TIMEOUT_S)
+    except (asyncio.TimeoutError, Exception) as e:  # noqa: BLE001 — a failed call asks again next time
+        log.info("no viewer suggestion for %s/%s: %s", c, rel, e)
+        return None
+    out = res.output if getattr(res, "status", "") == "ok" and isinstance(res.output, dict) else None
+    if out is None:
+        log.info("no viewer suggestion for %s/%s: the call ended %s", c, rel, getattr(res, "status", "?"))
+        return None
+    name = " ".join(str(out.get("name") or "").split())
+    if not out.get("help") or not name or not str(out.get("arrangement") or "").strip():
+        await asyncio.to_thread(_answer_suffix, c, suffix, "none")
+        return None
+    # the checks ran off the loop: a proposal made meanwhile for the suffix stands
+    if (await asyncio.to_thread(suggestion_for, c, rel))["proposal"] is not None:
+        return None
+    prop = await asyncio.to_thread(propose, c, name, str(out.get("why") or ""), [f"**/*{suffix}"],
+                                   str(out.get("arrangement") or ""), "files", False, False, True)
+    await asyncio.to_thread(_answer_suffix, c, suffix, "suggested", prop["slug"])
+    return str(prop["slug"])
+
+
+def accept(c: str, slug: str) -> dict[str, Any]:
+    """Build a suggested viewer: its proposal queued as one the analyst asked for, on the build path every view takes.
+    404 for no such proposal, 409 for one that is not suggested."""
+    prop = read_proposal(c, slug)
+    if prop is None:
+        raise HTTPException(404, f"no such proposal: {slug}")
+    if prop.get("status") != "suggested":
+        raise HTTPException(409, f"the view {prop['name']!r} is {prop.get('status')}, not suggested")
+    prop = update_proposal(c, slug, status="queued", asked=True, ts=_now()) or prop
+    _emit(c, slug, "queued", asked=True)
+    _queue(c, slug)
+    return prop
+
+
+# ----------------------------------------------------------------------------------------------------------
 # routes
 # ----------------------------------------------------------------------------------------------------------
 
@@ -2339,6 +2537,7 @@ def _public(v: dict[str, Any], c: str | None = None) -> dict[str, Any]:
     file it claims (what a view opened on its own shows). Blocking when a claim is a glob (the corpus walk)."""
     out = {k: x for k, x in v.items() if k != "dir"}
     out["forms"] = [{"form": f, "means": m} for f, m in view_forms(v)]
+    out["file_type"] = file_type_viewer(v)
     if c is not None:
         try:
             files = claimed_files(c, v) if v["ok"] else []
@@ -2371,6 +2570,39 @@ async def list_proposals_route(c: str) -> list[dict[str, Any]]:
         orientation.release_views(c, ((orientation.read_run(c) or {}).get("chats") or {}).get(orientation.ROLE))
         items = list_proposals(c)
     return [p for p in items if not p.get("held")]
+
+
+@router.get("/ws/{c}/views/suggestions")
+async def suggestions_route(c: str, path: str) -> dict[str, Any]:
+    """What thimble proposes for a file opened in the File browser (suggestion_for): whether a viewer may be proposed
+    for its type, why not, the workspace's answer for the type, and the proposal for it when there is one."""
+    config.workspace_dir(c)
+    return await asyncio.to_thread(suggestion_for, c, path)
+
+
+class SuggestBody(BaseModel):
+    path: str
+
+
+@router.post("/ws/{c}/views/suggest")
+async def suggest_route(c: str, body: SuggestBody) -> dict[str, Any]:
+    """Propose a viewer for the type of a file the analyst opened (suggest): {slug} of the suggested proposal, or null.
+    It never fails for the analyst."""
+    config.workspace_dir(c)
+    _bind_loop()
+    try:
+        return {"slug": await suggest(c, body.path)}
+    except Exception:  # noqa: BLE001 — a proposal thimble could not write is no proposal
+        log.exception("the viewer suggestion for %s/%s failed", c, body.path)
+        return {"slug": None}
+
+
+@router.post("/ws/{c}/views/proposals/{slug}/accept")
+async def accept_route(c: str, slug: str) -> dict[str, Any]:
+    """Build a suggested viewer (accept); it comes back queued."""
+    config.workspace_dir(c)
+    _bind_loop()
+    return accept(c, slug)
 
 
 @router.post("/ws/{c}/views/proposals/{slug}/retry")

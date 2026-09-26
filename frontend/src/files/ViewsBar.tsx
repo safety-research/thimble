@@ -67,7 +67,8 @@ export function useViews(ws: string): { views: BuiltView[]; proposals: Proposal[
     ...proposals.filter((p) => p.status === 'built').map((p) => ({ slug: p.slug, name: p.name, first_file: known.get(p.slug)?.first_file, claims: known.get(p.slug)?.claims, built: known.get(p.slug)?.built, review: p.review })),
     ...views.filter((v) => !proposals.some((p) => p.slug === v.slug)).map((v) => ({ slug: v.slug, name: v.name, first_file: v.first_file, claims: v.claims, built: v.built })),
   ]
-  return { views: built, proposals: proposals.filter((p) => p.status !== 'built' && p.status !== 'dropped') }
+  // a viewer the File browser suggests for a file type shows there alone until it is accepted
+  return { views: built, proposals: proposals.filter((p) => p.status !== 'built' && p.status !== 'dropped' && p.status !== 'suggested') }
 }
 
 /** A proposal in the bar: the view's button as the bar draws a view, its state after the name, a click that opens the

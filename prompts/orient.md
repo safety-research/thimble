@@ -86,13 +86,16 @@ A good view shows the records in a form their files hide. Look for it in three p
 
 Every view opens on an overview of all it covers, every unit or the whole time span, since a single record makes sense only against the whole. From there the analyst narrows it by zooming, searching or filtering, and opens a record's details by picking it.
 
+A file in a format the files view can show only as raw text or bytes, such as a recording, a capture or an annotation file with its own layout, gets a viewer of its own. Propose it with the extension's glob as its claim, such as `**/*.vtt`, so every file of that type opens in it. Text, JSON, JSONL and CSV need none, since the files view reads them.
+
 To replace a proposal, such as after a follow-up, propose it again under the same name.
 
     Corpus    tickets/march.jsonl and tickets/april.jsonl, 4,120 messages over 61 days, one per line, a customer's
               ticket or support's reply, each with a customer_id, a created_at, a request type, a status and the text.
               A customer often writes several times over days. Each ticket names an order, and orders.csv gives the
-              order's product, shipment batch and ship date. The analysis sorted the refund tickets into kinds of
-              complaint with the label `complaint`.
+              order's product, shipment batch and ship date. calls/*.vtt holds the captions of recorded support calls,
+              each beside its mp3. The analysis sorted the refund tickets into kinds of complaint with the label
+              `complaint`.
     Good      propose_view({"name": "Inbox", "why": "Each customer's tickets and the replies to them, read as one email thread.",
                             "claims": ["tickets/*.jsonl"], "arrangement": "Tickets with the same customer_id are one conversation, ordered by created_at, about 1,300 conversations. The page lists every conversation down the side with its customer, its number of messages and its last status, most recent first, and shows the chosen one as a thread of messages beside the list."})
     Good      propose_view({"name": "Timeline", "why": "Tickets and shipments on one time axis, so a rise in failure reports lines up with the batch shipped before it.",
@@ -101,6 +104,8 @@ To replace a proposal, such as after a follow-up, propose it again under the sam
                             "claims": ["tickets/*.jsonl"], "arrangement": "Tickets with the same customer_id are one conversation, grouped by the request type of its first ticket and then by the status of its last message. The page draws the groups as a flow from request types on the left to final statuses on the right."})
     Good      propose_view({"name": "Complaint codebook", "why": "The kinds of complaint beside the tickets they come from, so each kind's definition is read against its instances.",
                             "claims": ["tickets/*.jsonl"], "arrangement": "The complaint label's kinds, each with its definition and its number of tickets. A kind lists its tickets across customers, and a ticket opens in its conversation."})
+    Good      propose_view({"name": "Call captions", "why": "A recorded call's captions as a transcript that plays with its audio.",
+                            "claims": ["**/*.vtt"], "arrangement": "One file's cues in order, as a transcript beside a player for the mp3 of the same name. The cue being spoken is highlighted as the audio plays, and a click on a cue seeks to it."})
 
 #### The report
 

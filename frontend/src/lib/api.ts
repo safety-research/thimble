@@ -34,6 +34,7 @@ import type {
   CallIndex,
   Ticket,
   View,
+  ViewSuggestion,
   ViewOpen,
   Writeup,
 } from './types'
@@ -246,6 +247,13 @@ export const api = {
 
   // ---- views and proposals ----
   proposals: (c: string) => j<Proposal[]>(`${ws(c)}/views/proposals`),
+  /** what thimble proposes for a file opened in the File browser: whether a viewer may be proposed for its type, and
+   * the proposal for the type when there is one (backend views.suggestion_for) */
+  viewSuggestions: (c: string, path: string) => j<ViewSuggestion>(`${ws(c)}/views/suggestions${q({ path })}`),
+  /** ask for a viewer for the type of a file the analyst opened: the suggested proposal's slug, or null */
+  suggestView: (c: string, path: string) => j<{ slug: string | null }>(`${ws(c)}/views/suggest`, { method: 'POST', body: JSON.stringify({ path }) }),
+  /** build a suggested viewer */
+  acceptProposal: (c: string, slug: string) => j<Proposal>(`${ws(c)}/views/proposals/${enc(slug)}/accept`, { method: 'POST' }),
   retryProposal: (c: string, slug: string) => j<Proposal>(`${ws(c)}/views/proposals/${enc(slug)}/retry`, { method: 'POST' }),
   /** A message typed in a view build's thread: logged there and queued as a change to the view, whose run goes on in
    * that thread (views.message); answers the proposal. */

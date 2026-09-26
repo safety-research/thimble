@@ -14,6 +14,8 @@ The view {{name}}, whose slug is `{{slug}}`.
 
 ## A good view
 
+A ticket whose files are one extension's glob, such as `**/*.vtt`, asks for a viewer of that file type, which opens every file of the type, so its page lays out one file, from its overview to one record.
+
 Read the claimed files before you design the page, a jsonl file a few lines at a time, since one line can be very long. Count what the page must fit: the units, the time span, the longest names and texts, and the records that lack a field. Every choice below depends on those numbers.
 
 - It opens on an overview. The first screen shows the whole of what the view covers, every unit or the whole time span, with records in view, so the analyst sees the data's shape and the labels on it. From there they narrow it by zooming, searching or filtering, and they open a record's details by picking it. A page that opens on one record, or on an empty pane that waits for a click, hides the shape of the data.

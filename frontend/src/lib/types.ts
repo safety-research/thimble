@@ -383,8 +383,9 @@ export interface Filters {
 // ---- views and proposals ----
 
 /** A view ticket's build: `dropped` is an orientation proposal that could not be built, shown nowhere (backend
- * views.drop). */
-export type ProposalStatus = 'queued' | 'building' | 'built' | 'failed' | 'dropped'
+ * views.drop); `suggested` a viewer for a file type the File browser proposes (backend views.suggest), shown only in the
+ * File browser until the analyst accepts it. */
+export type ProposalStatus = 'queued' | 'building' | 'built' | 'failed' | 'dropped' | 'suggested'
 
 /** A view ticket (the propose_view tool): what the analyst sees in the view and why, the files it reads, the unit and
  * the layout, and the state of the dev agent's build, whose agent chat is `chat`. */
@@ -418,6 +419,17 @@ export interface ViewReview {
   left?: string[]
   note?: string
   undo?: boolean
+}
+
+/** `GET /ws/{c}/views/suggestions?path=`: whether a viewer may be proposed for the type of a file opened in the File
+ * browser, why not, the workspace's answer for the type and its proposal (backend views.suggestion_for). */
+export interface ViewSuggestion {
+  path: string
+  suffix: string
+  eligible: boolean
+  reason: string
+  answer: 'suggested' | 'none' | 'dismissed' | null
+  proposal: Proposal | null
 }
 
 /** One form a view adds to the citation grammar: a fragment of a file it claims, or view:<slug>/<key>. */

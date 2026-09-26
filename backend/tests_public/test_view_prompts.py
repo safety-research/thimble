@@ -32,3 +32,11 @@ def test_the_orientation_looks_for_a_views_form_in_meaning_structure_and_finding
                   "opens on an overview", "the sizes the page must fit"):
         assert words in views, words
     assert views.count("propose_view({") >= 4
+
+
+def test_the_orientation_and_the_dev_path_can_propose_a_viewer_for_a_file_type():
+    views = prompts.load("orient").split("#### Views", 1)[1].split("#### The report", 1)[0]
+    assert "gets a viewer of its own" in views and '"claims": ["**/*.vtt"]' in views
+    tools = prompts.section("tools", "propose_view")
+    assert "a viewer for every file of one unusual type" in tools and "the extension's glob, such as **/*.vtt" in tools
+    assert "asks for a viewer of that file type" in prompts.section("dev-view", "A good view")
