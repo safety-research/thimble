@@ -4,8 +4,12 @@
 // anchors it touches. Report blocks (`data-anchor-cell`) are taken whole (anchors.ts cellOf); inside a card
 // (`data-anchor-parts`) the innermost part is taken (parts.ts). The click also captures a picture (capture.ts), and
 // Enter posts a thread to the analyst's Claude Code session. A view's frame sends its own hover and click through the bus
-// (pointHover, pointAt, cmdHeld). Off a Mac, Ctrl does what ⌘ does (lib/platform).
+// (pointHover, pointAt, cmdHeld). Off a Mac, Ctrl does what ⌘ does (lib/platform). With `inline` (the chat off, Shell)
+// the box stays open after the send and answers in place: the thread's rows show in it as the fork writes them, and a
+// reply typed there goes to the same thread.
 import { useEffect, useRef, useState } from 'react'
+import { Rows } from '../chat/Rows'
+import { useChat } from '../chat/useChat'
 import { api } from '../lib/api'
 import { bus } from '../lib/bus'
 import { isMacPlatform, isPointKey, pointKeyHeld } from '../lib/platform'
@@ -55,10 +59,13 @@ const BESIDE: Place = { under: false }
 
 const cmdOn = () => document.body.hasAttribute('data-cmd')
 
-export function CmdPointer({ ws }: { ws: string }) {
+export function CmdPointer({ ws, inline = false }: { ws: string; inline?: boolean }) {
   const [box, setBox] = useState<Ask | null>(null)
   const [draft, setDraft] = useState('')
   const [busy, setBusy] = useState(false)
+  // the thread the box's send opened, answered in place (`inline`)
+  const [answer, setAnswer] = useState<string | null>(null)
+  const thread = useChat(ws, answer)
   const boxEl = useRef<HTMLElement>(null)
   // a ⌘-press in flight: where it started, the panel it started in, `dragged` once it moved far enough
   const press = useRef<{ x: number; y: number; root: ParentNode; dragged: boolean } | null>(null)
@@ -85,6 +92,7 @@ export function CmdPointer({ ws }: { ws: string }) {
     }
     const openBox = (b: Ask) => {
       setDraft('')
+      setAnswer(null)
       setBox(b)
     }
     const inBox = (t: EventTarget | null) => !!boxEl.current?.contains(t as Node)
@@ -259,18 +267,28 @@ export function CmdPointer({ ws }: { ws: string }) {
 
   const close = () => {
     setBox(null)
+    setAnswer(null)
     highlight.release()
   }
   const submit = async () => {
     const text = draft.trim()
     if (!box || !text || busy) return
     setBusy(true)
-    track('pointer-send', { target: box.anchor, detail: { text, range: box.anchors.length } })
+    track('pointer-send', { target: box.anchor, detail: { text, range: box.anchors.length, inline, followUp: !!answer } })
     try {
+      if (answer) {
+        // a follow-up in the box: the same thread, as its composer would send it
+        if (await thread.send(text)) setDraft('')
+        return
+      }
       const image = await box.image
       const meta = await api.createThread(ws, { anchor: box.anchor, anchor_text: box.text || null, ...box.info, image, parent: box.parent ?? null, text })
-      bus.emit('openChat', { chatId: meta.id })
       setDraft('')
+      if (inline) {
+        setAnswer(meta.id)
+        return
+      }
+      bus.emit('openChat', { chatId: meta.id })
       close()
     } catch (e) {
       bus.emit('toast', { text: `Could not open a thread: ${(e as Error).message}`, kind: 'error' })
@@ -292,8 +310,11 @@ export function CmdPointer({ ws }: { ws: string }) {
           busy={busy}
           onSubmit={() => void submit()}
           onClose={close}
-          attrs={{ 'data-anchors': box.anchors.length }}
-        />
+          attrs={{ 'data-anchors': box.anchors.length, 'data-thread': answer ?? undefined }}
+          replyTo={thread.meta?.name || thread.meta?.title || undefined}
+        >
+          {answer ? <Rows rows={thread.rows} ws={ws} chat={answer} streaming={thread.running || thread.streaming} /> : undefined}
+        </PointerBox>
       )}
     </>
   )

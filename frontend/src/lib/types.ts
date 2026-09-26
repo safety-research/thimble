@@ -851,6 +851,8 @@ export interface Settings {
   models: Record<string, ModelConf>
   /** the orientation runs as a subagent of the analyst's Claude Code session (backend orientation.terminal_first) */
   terminal_first?: boolean
+  /** the chat column is hidden and main's foot shows in a dock (shell/Shell, chat off) */
+  hide_chat?: boolean
   [k: string]: unknown
 }
 

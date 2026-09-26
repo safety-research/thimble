@@ -4,7 +4,8 @@
 // card, then their whole session; a dev ticket shows its request and run; a view build its proposal and runs. While a
 // thread works, a strip of its steps rides behind the composer, and every permission request waits on one card above
 // it (PermissionCard). The composer sends where threads.composerTarget says. A thread whose run ended without a reply
-// offers Ask again.
+// offers Ask again. With `dock` (the chat column hidden, Shell) only main's foot shows, with no composer: its alert, the
+// permission card, the orientation's strip and the Start gate, and nothing at all while none of them has anything.
 import { Fragment, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Button } from '../components/Button'
 import { Chip } from '../components/Chip'
@@ -200,12 +201,14 @@ export function taskStrip(kind: ThreadKind | null, running: boolean, rows: reado
   return { title: 'Working', steps: [], count: '' }
 }
 
-export function ChatPanel({ ws, onCollapse }: { ws: string; onCollapse?: () => void }) {
+export function ChatPanel({ ws, onCollapse, dock = false }: { ws: string; onCollapse?: () => void; dock?: boolean }) {
   const [chats, setChats] = useState<ChatMeta[]>([])
-  // the thread shown, kept per workspace so a reload opens the same one
+  // the thread shown, kept per workspace so a reload opens the same one; the dock shows main's foot alone
   const currentKey = storageKey(ws, 'thread-current')
-  const [current, setCurrent] = useState(() => readStorage<string>(currentKey, 'main') || 'main')
-  useEffect(() => writeStorage(currentKey, current), [currentKey, current])
+  const [current, setCurrent] = useState(() => (dock ? 'main' : readStorage<string>(currentKey, 'main') || 'main'))
+  useEffect(() => {
+    if (!dock) writeStorage(currentKey, current)
+  }, [currentKey, current, dock])
   const [seen, setSeen] = useState<SeenMap>(() => readSeen(ws))
   const main = useChat(ws, 'main')
   const other = useChat(ws, current === 'main' ? null : current)
@@ -289,11 +292,12 @@ export function ChatPanel({ ws, onCollapse }: { ws: string; onCollapse?: () => v
   useEffect(
     () =>
       bus.on('openChat', (e) => {
+        if (dock) return
         if (e.send) setPendingSend({ chatId: e.chatId, text: e.send, n: ++sendSeq.current })
         setCurrent(e.chatId)
         void loadList()
       }),
-    [loadList],
+    [loadList, dock],
   )
 
   // the handed-over message goes once that chat's own meta is loaded, through the normal streaming path
@@ -331,7 +335,9 @@ export function ChatPanel({ ws, onCollapse }: { ws: string; onCollapse?: () => v
   )
 
   // what asked for the chat while its column was folded (chat/pending.ts), once the listeners above are subscribed
-  useEffect(() => replayHeld(), [])
+  useEffect(() => {
+    if (!dock) replayHeld()
+  }, [dock])
 
   // the shown chat's records are seen
   const nMessages = countMessages(chat.records)
@@ -586,6 +592,51 @@ export function ChatPanel({ ws, onCollapse }: { ws: string; onCollapse?: () => v
       <RoleChip ws={ws} role="dev" label="the view build" />
     ) : undefined
   const mainChip = !!attached && !roleChip
+
+  if (dock) {
+    const holds = !!main.meta?.alert
+    if (!holds && asks.length === 0 && !(strip && !showGate) && !showGate) return null
+    return (
+      <ThreadsContext.Provider value={{ labels, metas }}>
+        <section ref={rootRef} className="chat chat-dock" data-panel="chat-dock" aria-label="Chat dock">
+          <div ref={footRef} className="chat-foot chat-dock-foot">
+            <Holds className="chat-main-holds" alert={main.meta?.alert} />
+            {asks.length > 0 && <PermissionCard ws={ws} asks={asks} metas={metaMap} labels={labels} />}
+            {strip && !showGate && (
+              <TaskStrip
+                title={strip.title}
+                steps={strip.steps}
+                count={strip.count}
+                open={stripOpen}
+                onToggle={() => setStripOpen((o) => !o)}
+                waiting={waiting}
+                retry={retryAlert}
+                onRetry={retryMeta ? () => api.retrySession(ws, retryMeta.id) : undefined}
+              />
+            )}
+            {showGate && (
+              <StartGate
+                ws={ws}
+                model={orientConf?.model ?? null}
+                defaultEffort={orientEffortOf(orientConf) ?? ORIENT_DEFAULT_EFFORT}
+                fast={orientConf ? !!orientConf.fast : null}
+                onEffort={(effort) => saveOrient({ effort })}
+                onFast={orientConf ? (fast) => (track('start-toggle', { target: 'orient:fast', detail: { fast } }), saveOrient({ fast })) : undefined}
+                permissionMode={attached?.permission_mode ?? null}
+                subagent={terminalFirst}
+                sessionModel={mainModel}
+                onStarted={() => setStarted(true)}
+                onSkip={() => {
+                  writeStorage(skipKey, true)
+                  setSkipped(true)
+                }}
+              />
+            )}
+          </div>
+        </section>
+      </ThreadsContext.Provider>
+    )
+  }
 
   return (
     <ThreadsContext.Provider value={{ labels, metas }}>

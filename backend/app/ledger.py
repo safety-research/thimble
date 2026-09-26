@@ -27,8 +27,9 @@ router = APIRouter()
 
 # GET /settings layers these under what the file stores (tools.RESULT_LINES_KEY: lines of each output a card's result
 # shows).
-# terminal_first: the orientation runs as a subagent of the analyst's session (orientation.terminal_first)
-SETTINGS_DEFAULTS: dict[str, Any] = {"run_cell_result_lines": 40, "terminal_first": False}
+# terminal_first: the orientation runs as a subagent of the analyst's session (orientation.terminal_first); hide_chat:
+# the browser shows no chat column, only a dock (frontend shell/Shell)
+SETTINGS_DEFAULTS: dict[str, Any] = {"run_cell_result_lines": 40, "terminal_first": False, "hide_chat": False}
 
 
 # --------------------------------------------------------------------------- plain-file helpers

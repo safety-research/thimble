@@ -21,8 +21,12 @@ import { TERMINAL_FIRST_NOTE } from '../chat/StartGate'
 
 type Models = Record<string, ModelConf>
 
+/** What the chat off does, where the settings offer it (shell/Shell). */
+export const CHAT_OFF_NOTE = "For chatting in your Claude Code terminal. Alerts, permission requests, the orientation's progress and its Start show in a dock, and a ⌘-click answers in place."
+
 /** The workspace's switches under the table: the setting each saves, its name and what it does. */
 export const SWITCHES: { key: string; label: string; note: string }[] = [
+  { key: 'hide_chat', label: 'Hide the chat', note: CHAT_OFF_NOTE },
   { key: 'terminal_first', label: 'Terminal-first orientation', note: TERMINAL_FIRST_NOTE },
 ]
 
