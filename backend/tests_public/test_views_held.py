@@ -70,7 +70,7 @@ def test_an_orientation_s_view_builds_unseen_and_appears_as_soon_as_it_is_built(
     _build()
     prop = views.read_proposal(CORPUS, "posts")
     assert prop["status"] == "built" and not prop.get("held"), "built, it is held no longer"
-    assert {"type": "view", "slug": "posts", "status": "built"} in board, "it appears while the orientation runs"
+    assert ("posts", "built") in [(e.get("slug"), e.get("status")) for e in board], "it appears while the orientation runs"
     assert "posts" in [v["slug"] for v in views.list_views(CORPUS)]
     assert _in_bar() == ["posts"]
 

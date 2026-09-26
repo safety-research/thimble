@@ -24,6 +24,8 @@ TRACEBACK_MAX = 3000
 
 _readers: dict[str, tuple[tuple[int, int], object]] = {}  # reader.py's path -> ((mtime_ns, size), module)
 _indexes: dict[tuple[str, str], object] = {}  # (slug, fingerprint) -> index
+# a page still on a view's version before a change reads its index beside the new version's
+INDEXES_PER_VIEW = 2
 
 
 def _reader(slug: str, path: str) -> object:
@@ -72,7 +74,8 @@ def _index(slug: str, mod: object, fp: str, paths: list[str], cache: str | None)
                 os.replace(tmp, cache)
             except Exception:  # noqa: BLE001 — an index that does not pickle stays in memory only
                 pass
-    for k in [k for k in _indexes if k[0] == slug]:
+    mine = [k for k in _indexes if k[0] == slug]
+    for k in mine[: max(0, len(mine) - INDEXES_PER_VIEW + 1)]:
         del _indexes[k]
     _indexes[key] = idx
     return idx, built

@@ -63,6 +63,11 @@ TOOLS_PROMPT = "tools"  # prompts/tools.md, whose lowercase sections are the lin
 STATUSES = ("queued", "building", "built", "failed", "dropped", "suggested")
 PENDING = ("queued", "building")  # the statuses a restart queues again (dev.recover_views)
 SHOTS_KEPT = 5  # the check pictures kept per view, newest first (the session Reads the latest)
+# views/.versions/<slug>/<version>/: the view's files at each version that passed its checks, named by their digest,
+# which a page loaded at that version keeps reading while the view changes (the routes' `v`); the newest are kept
+VERSIONS_SUBDIR = ".versions"
+VERSIONS_KEPT = 5
+VERSION_RE = re.compile(r"^[0-9a-f]{12}$")
 SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,39}$")
 # the route names under /views/ and the Reader's built-in file views, which its switcher keys by
 RESERVED_SLUGS = {"proposals", "forge", "raw", "records", "table", "text", "transcript", "lib", "frame", "resolve",
@@ -252,6 +257,7 @@ def _normalize_view(slug: str, raw: Any, *, where: Path | None = None, origin: s
         "default": bool(raw.get("default")),
         "libs": _libs(raw.get("libs")),
         "built": str(raw.get("built") or ""),
+        "version": str(raw.get("version") or ""),
         # a workspace view the server has not stamped `built` is a view ticket's work in progress, which only its
         # checks read (module note); a file-type viewer thimble ships is never one
         "draft": origin == "workspace" and not raw.get("built"),
@@ -327,11 +333,11 @@ def read_builtin(slug: str) -> dict[str, Any] | None:
 
 
 def cache_dir(c: str, view: dict[str, Any]) -> Path:
-    """Where a view's index and check pictures go: beside a workspace view, under the workspace's views folder for a
-    built-in one (whose own folder is part of thimble)."""
+    """Where a view's index and check pictures go: beside a workspace view, for each of its versions, and under the
+    workspace's views folder for a built-in one (whose own folder is part of thimble)."""
     if view.get("origin") == "builtin":
         return views_dir(c) / BUILTIN_CACHE / view["slug"]
-    return Path(view["dir"]) / CACHE_SUBDIR
+    return views_dir(c) / view["slug"] / CACHE_SUBDIR
 
 
 def _check_slug(slug: str) -> str:
@@ -398,14 +404,49 @@ def mark_built(c: str, slug: str) -> dict[str, Any]:
     mode instead."""
     d = views_dir(c) / slug
     raw = _view_json(d)
-    write_json(d / VIEW_JSON, {**raw, "built": _now()})
+    version = view_digest(d)[:12]
+    write_json(d / VIEW_JSON, {**raw, "built": _now(), "version": version})
+    _publish(c, slug, version)
     _forget(c, slug)
     prop = read_proposal(c, slug)
     if prop is not None:
         update_proposal(c, slug, status="built", error=None, held=None)
     opens = prop is not None and bool(prop.get("asked")) and not prop.get("accepted")
-    _emit(c, slug, "built", **({"asked": True} if opens else {}))
+    _emit(c, slug, "built", version=version, **({"asked": True} if opens else {}))
     return read_view(c, slug) or _normalize_view(slug, raw, where=d)
+
+
+def _versions_dir(c: str, slug: str) -> Path:
+    return views_dir(c) / VERSIONS_SUBDIR / slug
+
+
+def _publish(c: str, slug: str, version: str) -> None:
+    """Keep the view's files as they passed their checks at `version` (VERSIONS_SUBDIR), the newest VERSIONS_KEPT."""
+    root = _versions_dir(c, slug)
+    dst = root / version
+    if not dst.is_dir():
+        tmp = root / f".{version}.tmp"
+        shutil.rmtree(tmp, ignore_errors=True)
+        tmp.mkdir(parents=True)
+        for f in (views_dir(c) / slug).iterdir():
+            if f.is_file():
+                shutil.copy2(f, tmp / f.name)
+        os.replace(tmp, dst)
+    os.utime(dst)
+    kept = sorted((x for x in root.iterdir() if x.is_dir() and VERSION_RE.match(x.name)),
+                  key=lambda x: x.stat().st_mtime_ns, reverse=True)
+    for old in kept[VERSIONS_KEPT:]:
+        shutil.rmtree(old, ignore_errors=True)
+
+
+def read_version(c: str, slug: str, version: str) -> dict[str, Any] | None:
+    """The view as it was at `version` (_publish), else the built view when that is its version; None when neither."""
+    if VERSION_RE.match(str(version or "")):
+        d = _versions_dir(c, slug) / version
+        if (d / VIEW_JSON).is_file():
+            return _normalize_view(slug, _view_json(d), where=d)
+    live = read_built(c, slug)
+    return live if live is not None and live["version"] == version else None
 
 
 def delete_view(c: str, slug: str) -> None:
@@ -420,6 +461,7 @@ def delete_view(c: str, slug: str) -> None:
             raise HTTPException(400, f"{slug} is a viewer thimble ships; a workspace view of the same slug overrides it")
         raise HTTPException(404, f"no such view: {slug}")
     shutil.rmtree(d, ignore_errors=True)
+    shutil.rmtree(_versions_dir(c, slug), ignore_errors=True)
     _forget(c, slug)
     items = list_proposals(c)
     if any(p.get("slug") == slug for p in items):
@@ -748,12 +790,13 @@ def _kernel_error(outputs: list[dict]) -> str:
     return stderr[-ERROR_MAX:] or "the kernel printed no answer"
 
 
-def _prepare(c: str, slug: str) -> tuple[dict[str, Any], dict[str, Any]]:
-    """(the view, the request without op and arg): the claimed files, their fingerprint and the index cache path.
-    Blocking (the claimed files are stat'ed or the corpus walked); ReaderError for a view that cannot run."""
-    view = read_view(c, slug)
+def _prepare(c: str, slug: str, version: str | None = None) -> tuple[dict[str, Any], dict[str, Any]]:
+    """(the view, the request without op and arg): the claimed files, their fingerprint and the index cache path; with
+    `version`, the view at that version (read_version). Blocking (the claimed files are stat'ed or the corpus walked);
+    ReaderError for a view that cannot run."""
+    view = read_version(c, slug, version) if version else read_view(c, slug)
     if view is None:
-        raise ReaderError(f"no view {slug!r}")
+        raise ReaderError(f"no view {slug!r}" + (f" at version {version}; reload it" if version else ""))
     if not view["ok"]:
         raise ReaderError(f"the view {slug!r} has no reader.py, view.html or claims")
     reader_path = Path(view["dir"]) / READER_PY
@@ -782,12 +825,13 @@ async def _call(c: str, req: dict[str, Any], op: str, arg: Any = None) -> Any:
     return ans.get("result")
 
 
-async def reader_call(c: str, slug: str, op: str, arg: Any = None, *, labels: dict[str, Any] | None = None) -> Any:
+async def reader_call(c: str, slug: str, op: str, arg: Any = None, *, labels: dict[str, Any] | None = None,
+                      version: str | None = None) -> Any:
     """reader.<op>(index, arg) for the view, op being index, records or resolve (resolve goes through resolve_locator,
     which cleans and memoises the answer). A records call runs with `labels` as the labels context thimble.marked and
     thimble.kept read, by default the workspace's (labels_context); labels apply when records are served, so they are no
-    part of the index's fingerprint."""
-    _, req = await asyncio.to_thread(_prepare, c, slug)
+    part of the index's fingerprint. `version` is the version a page was loaded at (read_version)."""
+    _, req = await asyncio.to_thread(_prepare, c, slug, version)
     if op == "records":
         ctx = labels if labels is not None else await asyncio.to_thread(labels_context, c)
         req = {**req, "labels": _wire(ctx)}
@@ -897,10 +941,12 @@ def _unit_mark(ctx: dict[str, Any], rs: list[str]) -> dict[str, Any] | None:
     return out or None
 
 
-async def marks_for(c: str, slug: str, ref_list: list[str], ctx: dict[str, Any] | None = None) -> dict[str, dict[str, Any]]:
+async def marks_for(c: str, slug: str, ref_list: list[str], ctx: dict[str, Any] | None = None,
+                    version: str | None = None) -> dict[str, dict[str, Any]]:
     """{ref: mark} for the bridge: the marks of record refs (`<path>#L<n>`) and of the view's unit refs
-    (`view:<slug>/<key>`, resolved in one kernel round trip and marked from their first REFS_MAX records) under the
-    labels context `ctx` (default the workspace's). A ref no label marks and no filter keeps is left out."""
+    (`view:<slug>/<key>`, resolved in one kernel round trip by the view at `version` and marked from their first
+    REFS_MAX records) under the labels context `ctx` (default the workspace's). A ref no label marks and no filter keeps
+    is left out."""
     ctx = ctx if ctx is not None else await asyncio.to_thread(labels_context, c)
     if not ctx.get("probe") and not ctx.get("labels"):
         return {}
@@ -912,7 +958,7 @@ async def marks_for(c: str, slug: str, ref_list: list[str], ctx: dict[str, Any] 
         if (m := _record_mark(ctx, r)) is not None:
             out[r] = m
     if units:
-        answers = await resolve_many(c, slug, [{"key": r[len(prefix):]} for r in units])
+        answers = await resolve_many(c, slug, [{"key": r[len(prefix):]} for r in units], version)
         for r, res in zip(units, answers):
             if res is not None and (m := _unit_mark(ctx, res["refs"][:REFS_MAX])) is not None:
                 out[r] = m
@@ -969,11 +1015,11 @@ def _memo_put(k: tuple[str, str, str, str], v: dict[str, Any] | None) -> None:
             _memo.popitem(last=False)
 
 
-async def resolve_locator(c: str, slug: str, locator: dict[str, Any]) -> dict[str, Any] | None:
-    """reader.resolve for {path, fragment} (a file ref) or {key} (a view ref), cleaned (clean_resolved) and memoised
-    per fingerprint. A built view's answer for a key is also kept in key-refs.json; a draft's, which only its checks
-    ask, is not, since nothing may cite a draft."""
-    view, req = await asyncio.to_thread(_prepare, c, slug)
+async def resolve_locator(c: str, slug: str, locator: dict[str, Any], version: str | None = None) -> dict[str, Any] | None:
+    """reader.resolve for {path, fragment} (a file ref) or {key} (a view ref), by the view at `version` when given,
+    cleaned (clean_resolved) and memoised per fingerprint. A built view's answer for a key is also kept in
+    key-refs.json; a draft's, which only its checks ask, is not, since nothing may cite a draft."""
+    view, req = await asyncio.to_thread(_prepare, c, slug, version)
     mk = (c, slug, req["fp"], _locator_key(locator))
     hit, value = _memo_get(mk)
     if hit:
@@ -985,10 +1031,11 @@ async def resolve_locator(c: str, slug: str, locator: dict[str, Any]) -> dict[st
     return out
 
 
-async def resolve_many(c: str, slug: str, locators: list[dict[str, Any]]) -> list[dict[str, Any] | None]:
+async def resolve_many(c: str, slug: str, locators: list[dict[str, Any]],
+                       version: str | None = None) -> list[dict[str, Any] | None]:
     """resolve_locator for many locators, in one kernel round trip for those not memoised; a locator whose resolve
     raised answers None."""
-    view, req = await asyncio.to_thread(_prepare, c, slug)
+    view, req = await asyncio.to_thread(_prepare, c, slug, version)
     out: list[dict[str, Any] | None] = [None] * len(locators)
     todo: list[int] = []
     for i, loc in enumerate(locators):
@@ -1491,7 +1538,7 @@ def drop_built_copy(c: str, slug: str) -> None:
 
 def view_digest(d: Path) -> str:
     """A digest of the view's files in `d`: the files at the folder's top level, view.json read without the `built`
-    stamp; subfolders (the cache, Python's bytecode) are left out."""
+    and `version` stamps; subfolders (the cache, Python's bytecode) are left out."""
     h = hashlib.sha256()
     try:
         files = sorted(p for p in d.iterdir() if p.is_file())
@@ -1504,6 +1551,7 @@ def view_digest(d: Path) -> str:
                 raw = json.loads(data)
                 if isinstance(raw, dict):
                     raw.pop("built", None)
+                    raw.pop("version", None)
                 data = json.dumps(raw, sort_keys=True).encode()
         h.update(p.name.encode() + b"\0" + hashlib.sha256(data).digest())
     return h.hexdigest()
@@ -2250,13 +2298,14 @@ def anchorless(view: dict[str, Any], files: list[tuple[str, int, int]], shots: l
                                                             for s in loaded)
 
 
-async def open_place(c: str, slug: str, ref: str | None, locator: dict[str, Any] | None) -> dict[str, Any]:
-    """The `open` message a view's page gets: the ref, its parsed locator and the reader's answer for it."""
+async def open_place(c: str, slug: str, ref: str | None, locator: dict[str, Any] | None,
+                     version: str | None = None) -> dict[str, Any]:
+    """The `open` message a view's page gets: the ref, its parsed locator and the answer of the reader at `version`."""
     if not ref or locator is None:
         return {"ref": None}
     out: dict[str, Any] = {"ref": ref, **locator}
     try:
-        res = await resolve_locator(c, slug, locator)
+        res = await resolve_locator(c, slug, locator, version)
     except ReaderError as e:
         out["error"] = e.message
         return out
@@ -2586,11 +2635,12 @@ def accept(c: str, slug: str) -> dict[str, Any]:
 # ----------------------------------------------------------------------------------------------------------
 
 
-def _view_or_404(c: str, slug: str) -> dict[str, Any]:
+def _view_or_404(c: str, slug: str, version: str | None = None) -> dict[str, Any]:
+    """The built view, or with `version` the view at the version a page was loaded at (read_version); 404 for none."""
     config.workspace_dir(c)
-    v = read_built(c, slug)
+    v = read_version(c, slug, version) if version else read_built(c, slug)
     if v is None:
-        raise HTTPException(404, f"no such view: {slug}")
+        raise HTTPException(404, f"no such view: {slug}" + (f" at version {version}; reload it" if version else ""))
     return v
 
 
@@ -2715,18 +2765,20 @@ async def delete_view_route(c: str, slug: str) -> dict[str, Any]:
 
 
 @router.get("/ws/{c}/views/{slug}/frame")
-async def frame_route(c: str, slug: str, request: Request, origin: str | None = None) -> HTMLResponse:
-    """The page as a frame loads it (frame_document), as srcdoc text. `origin` is the page's location.origin, since
-    through
-    Vite's proxy the request's host may not be one the browser can reach; without it, the request's host."""
-    v = _view_or_404(c, slug)
-    if not v["ok"]:
+async def frame_route(c: str, slug: str, request: Request, origin: str | None = None,
+                      v: str | None = None) -> HTMLResponse:
+    """The page as a frame loads it (frame_document), as srcdoc text, at version `v` when given (VERSIONS_SUBDIR): the
+    records, marks and resolve routes then answer for the same version, so the page stays as loaded while the view
+    changes. `origin` is the page's location.origin, since through Vite's proxy the request's host may not be one the
+    browser can reach; without it, the request's host."""
+    view = _view_or_404(c, slug, v)
+    if not view["ok"]:
         raise HTTPException(409, f"the view {slug!r} has no reader.py, view.html or claims")
     try:
         media = media_url(origin or f"{request.url.scheme}://{request.url.netloc}", c, slug)
     except ValueError as e:
         raise HTTPException(400, str(e)) from None
-    return HTMLResponse(await asyncio.to_thread(frame_document, v, media))
+    return HTMLResponse(await asyncio.to_thread(frame_document, view, media))
 
 
 @router.get("/ws/{c}/views/{slug}/media")
@@ -2752,11 +2804,12 @@ class RecordsBody(BaseModel):
 
 
 @router.post("/ws/{c}/views/{slug}/records")
-async def records_route(c: str, slug: str, body: RecordsBody) -> dict[str, Any]:
-    """reader.records(index, query): what the view's page asked for with thimble.fetch. 502 with the reader's error."""
-    _view_or_404(c, slug)
+async def records_route(c: str, slug: str, body: RecordsBody, v: str | None = None) -> dict[str, Any]:
+    """reader.records(index, query): what the view's page, loaded at version `v`, asked for with thimble.fetch. 502 with
+    the reader's error."""
+    _view_or_404(c, slug, v)
     try:
-        return {"data": await reader_call(c, slug, "records", body.query)}
+        return {"data": await reader_call(c, slug, "records", body.query, version=v)}
     except ReaderError as e:
         raise HTTPException(502, {"message": e.message, "traceback": e.detail[-ERROR_MAX:]}) from None
 
@@ -2769,22 +2822,22 @@ MARKS_MAX = 2000  # refs one marks request answers
 
 
 @router.post("/ws/{c}/views/{slug}/marks")
-async def marks_route(c: str, slug: str, body: MarksBody) -> dict[str, Any]:
+async def marks_route(c: str, slug: str, body: MarksBody, v: str | None = None) -> dict[str, Any]:
     """The marks of the labels that are on for refs the view's page shows, {ref: {bar, names, spans, keep?}} (marks_for):
     its units' refs above all, which the browser cannot mark from the label rows it reads. 502 with the reader's error."""
-    _view_or_404(c, slug)
+    _view_or_404(c, slug, v)
     try:
-        return await marks_for(c, slug, [str(r) for r in body.refs][:MARKS_MAX])
+        return await marks_for(c, slug, [str(r) for r in body.refs][:MARKS_MAX], version=v)
     except ReaderError as e:
         raise HTTPException(502, {"message": e.message, "traceback": e.detail[-ERROR_MAX:]}) from None
 
 
 @router.get("/ws/{c}/views/{slug}/resolve")
-async def resolve_route(c: str, slug: str, ref: str) -> dict[str, Any]:
-    """The `open` message for a ref in this view: {ref, path?, fragment?, key?, target, label, excerpt, refs} or with
-    `error` when the reader does not know it; `{ref: null}` for a ref with no locator."""
-    _view_or_404(c, slug)
-    return await open_place(c, slug, ref, locator_of(ref))
+async def resolve_route(c: str, slug: str, ref: str, v: str | None = None) -> dict[str, Any]:
+    """The `open` message for a ref in this view, at version `v` when given: {ref, path?, fragment?, key?, target,
+    label, excerpt, refs} or with `error` when the reader does not know it; `{ref: null}` for a ref with no locator."""
+    _view_or_404(c, slug, v)
+    return await open_place(c, slug, ref, locator_of(ref), v)
 
 
 class CheckBody(BaseModel):

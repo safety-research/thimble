@@ -145,7 +145,8 @@ async def test_a_viewer_accepted_in_the_file_browser_is_built_without_opening_th
     for s, claims in ((slug, ["**/*.cast"]), (asked, ["log.jsonl"])):
         views.write_view(CORPUS, s, name=s, why="w", claims=claims, accepts=[{"form": "L<n>", "means": "a line"}],
                          reader=reader, html="<html></html>")
-    assert emitted == [(slug, "built", {}), (asked, "built", {"asked": True})]
+    assert [(s, status, {k: v for k, v in extra.items() if k != "version"}) for s, status, extra in emitted] == [
+        (slug, "built", {}), (asked, "built", {"asked": True})]
     assert views.read_proposal(CORPUS, slug)["status"] == "built"
 
 
