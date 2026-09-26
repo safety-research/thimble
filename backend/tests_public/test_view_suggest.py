@@ -3,7 +3,8 @@
 and a text file with no suffix get no proposal and no model call; a terminal recording (.cast) gets one model call,
 whose yes is stored as a `suggested` proposal claiming every .cast file, not built until accepted, and whose no is
 remembered, as a dismissal is. Accepting queues it as a view the analyst asked for; the built view is a file-type
-viewer that opens every file of its type.
+viewer that opens every file of its type, and its build does not open the view, since the File browser shows it as
+the file's mode. Only a claim of an unusual type's glob makes a viewer the File browser offers before it is built.
 
 The corpus is invented: an asciinema-style recording casts/one.cast (and a second, two.cast), a jsonl log, notes, a
 picture, a video, a small binary blob with no suffix and a README with none."""
@@ -130,3 +131,26 @@ async def test_a_viewer_whose_claims_are_one_type_s_glob_opens_every_file_of_the
     got = (await api.get(f"/api/ws/{CORPUS}/views/suggestions", params={"path": "casts/one.cast"})).json()
     assert not got["eligible"] and got["reason"] == "a view opens it"
     assert views.type_suffix("*.VTT") == ".vtt" and views.type_suffix("calls/*.vtt") is None
+
+
+async def test_a_viewer_accepted_in_the_file_browser_is_built_without_opening_the_view(api, monkeypatch):
+    Model(monkeypatch, YES)
+    monkeypatch.setattr(views, "_queue", lambda c, slug: None)
+    emitted: list[tuple[str, str, dict]] = []
+    slug = (await api.post(f"/api/ws/{CORPUS}/views/suggest", json={"path": "casts/one.cast"})).json()["slug"]
+    await api.post(f"/api/ws/{CORPUS}/views/proposals/{slug}/accept")
+    asked = views.propose(CORPUS, "Log board", "w", ["log.jsonl"], "one line per row", "analyst", asked=True)["slug"]
+    monkeypatch.setattr(views, "_emit", lambda c, s, status, **extra: emitted.append((s, status, extra)))
+    reader = "def build_index(p):\n    return {}\n\ndef records(i, q):\n    return []\n\ndef resolve(i, l):\n    return None\n"
+    for s, claims in ((slug, ["**/*.cast"]), (asked, ["log.jsonl"])):
+        views.write_view(CORPUS, s, name=s, why="w", claims=claims, accepts=[{"form": "L<n>", "means": "a line"}],
+                         reader=reader, html="<html></html>")
+    assert emitted == [(slug, "built", {}), (asked, "built", {"asked": True})]
+    assert views.read_proposal(CORPUS, slug)["status"] == "built"
+
+
+def test_only_an_unusual_file_type_s_glob_is_a_viewer_the_file_browser_offers():
+    assert views.offered_type_viewer(["**/*.vtt"]) and views.offered_type_viewer(["*.VTT", "**/*.srt"])
+    assert not views.offered_type_viewer(["**/*.jsonl"])  # the files view reads it
+    assert not views.offered_type_viewer(["**/*.mp3"])  # a media player plays it
+    assert not views.offered_type_viewer(["calls/*.vtt"]) and not views.offered_type_viewer(["**/*.vtt", "tickets.jsonl"])

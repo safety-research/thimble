@@ -10,7 +10,7 @@ import { Icon, type IconName } from '../components/Icon'
 import { Mark } from '../components/Marks'
 import { Menu, Popover } from '../components/Menu'
 import { Spinner } from '../components/Spinner'
-import { Tipped } from '../components/Tooltip'
+import { Tipped, useTooltip } from '../components/Tooltip'
 import { api } from '../lib/api'
 import { bus } from '../lib/bus'
 import { refreshProposals, useProposals } from '../lib/proposals'
@@ -72,11 +72,16 @@ export function useViews(ws: string): { views: BuiltView[]; proposals: Proposal[
 }
 
 /** A proposal in the bar: the view's button as the bar draws a view, its state after the name, a click that opens the
- * build's thread; for a failed build (a view the analyst asked for) Retry beside it; × on hover to dismiss it. */
-function ProposalOption({ ws, p, onDismiss, size }: { ws: string; p: Proposal; onDismiss: () => void; size: 'md' | 'lg' }) {
+ * build's thread; for a failed build (a view the analyst asked for) Retry beside it; × on hover to dismiss it. A viewer
+ * suggested for a file type (in the File browser's mode row) wears the sparkle, shows its `why` on hover, and a click
+ * builds it (`onAccept` runs then). */
+export function ProposalOption({ ws, p, onDismiss, onAccept, size }: { ws: string; p: Proposal; onDismiss: () => void; onAccept?: () => void; size: 'md' | 'lg' }) {
   const [retrying, setRetrying] = useState(false)
-  const pending = p.status === 'queued' || p.status === 'building'
+  const [accepting, setAccepting] = useState(false)
+  const suggested = p.status === 'suggested' && !accepting
+  const pending = p.status === 'queued' || p.status === 'building' || accepting
   const failed = p.status === 'failed'
+  const { props: tipProps, tip } = useTooltip(suggested ? p.why : null, 'files-proposal-tip')
   const retry = () => {
     track('view-build', { target: `view:${p.slug}`, detail: { again: true } })
     setRetrying(true)
@@ -86,26 +91,39 @@ function ProposalOption({ ws, p, onDismiss, size }: { ws: string; p: Proposal; o
       .catch((e: Error) => bus.emit('toast', { text: `Could not retry ${p.name}. ${e.message}`, kind: 'error' }))
       .finally(() => setRetrying(false))
   }
+  const accept = () => {
+    track('view-build', { target: `view:${p.slug}`, detail: { suggested: true } })
+    setAccepting(true)
+    onAccept?.()
+    api
+      .acceptProposal(ws, p.slug)
+      .then(() => refreshProposals(ws))
+      .catch((e: Error) => bus.emit('toast', { text: `Could not build ${p.name}. ${e.message}`, kind: 'error' }))
+      .finally(() => setAccepting(false))
+  }
   const mark = <Mark kind="failed" className="files-proposal-mark" />
   return (
-    <span className={`seg seg-${size} files-proposal`} data-status={p.status}>
+    <span className={`seg seg-${size} files-proposal`} data-status={accepting ? 'queued' : p.status}>
       <button
         type="button"
         className="seg-opt files-proposal-opt"
         data-anchor={`view:${p.slug}`}
         data-anchor-text={p.name}
-        disabled={!p.chat}
+        disabled={!suggested && !p.chat}
         onClick={() => {
+          if (suggested) return accept()
           if (!p.chat) return
           track('chip-teleport', { target: `chat:${p.chat}`, detail: { kind: 'view-build' } })
           openThread(p.chat, 'view')
         }}
+        {...tipProps}
       >
-        <Icon name="view" size={14} className="seg-ico" />
+        <Icon name={suggested ? 'sparkle' : 'view'} size={14} className="seg-ico" />
         <span className="seg-label">{p.name}</span>
-        {pending && <Spinner size={10} label={p.status === 'queued' ? 'Queued' : 'Building'} />}
+        {pending && <Spinner size={10} label={p.status === 'queued' || accepting ? 'Queued' : 'Building'} />}
         {failed && (p.error ? <Tipped text={p.error}>{mark}</Tipped> : mark)}
       </button>
+      {tip}
       {failed && (
         <Button size="sm" className="files-proposal-retry" busy={retrying} aria-label={`Retry ${p.name}`} onClick={retry}>
           Retry

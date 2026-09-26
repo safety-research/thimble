@@ -1110,9 +1110,32 @@
 .reader-spacer {
   flex: 1;
 }
+/* the File browser's mode row: the built-in modes and the file-type viewers, then a viewer proposed for the file's
+   type, drawn as the views bar draws a proposal in the view chip's accent text, tint and edge */
 .reader-modes {
   align-self: center;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   padding: 0 8px;
+}
+.reader-modes .files-proposal-opt.seg-opt {
+  color: var(--text-accent);
+  background: var(--chip-bg);
+  box-shadow: inset 0 0 0 1px var(--chip-edge);
+}
+.reader-modes .files-proposal-opt.seg-opt:not(:disabled):hover {
+  background: var(--chip-bg-hover);
+  box-shadow: inset 0 0 0 1px var(--chip-edge-hover);
+}
+.reader-modes .files-proposal-opt.seg-opt:focus-visible {
+  box-shadow: 0 0 0 1.5px var(--accent);
+}
+.reader-modes .files-proposal-opt .seg-ico {
+  color: var(--accent);
+}
+.files-proposal-tip.tip {
+  max-width: min(460px, calc(100vw - 16px));
 }
 .reader-find-open.btn {
   align-self: center;
@@ -1384,6 +1407,11 @@
   min-height: 0;
   border: 0;
   background: transparent;
+}
+/* a file-type viewer as the file's mode: its page fills the reader under the bar */
+.reader-viewer {
+  flex-direction: column;
+  min-width: 0;
 }
 .reader-fail {
   display: flex;

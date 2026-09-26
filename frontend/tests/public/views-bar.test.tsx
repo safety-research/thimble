@@ -88,6 +88,17 @@ describe('the views and the proposals', () => {
     expect([...el.querySelectorAll('.view-chip')].map((c) => c.getAttribute('data-anchor'))).toEqual(['view:board'])
   })
 
+  test('a suggested viewer for a file type is a plain name as a chip, since it opens nowhere until it is built', async () => {
+    const offered = proposal('replay', 'Session Replay', 'suggested', { claims: ['**/*.rec'] })
+    vi.stubGlobal('fetch', async () => new Response(JSON.stringify([offered]), { status: 200, headers: { 'content-type': 'application/json' } }))
+    const el = await mount(<ViewChip ws="offers" slug="replay" name="Session Replay" />)
+    await settle()
+    const chip = el.querySelector('.view-chip[data-status="suggested"]')!
+    expect(chip.querySelector('.view-tab-name')?.textContent).toBe('Session Replay')
+    expect(chip.querySelector('button'), 'nothing to click').toBeNull()
+    expect(chip.querySelector('.spinner, .view-chip-retry')).toBeNull()
+  })
+
   test('a built view whose change failed shows the failure with Retry on its chip, and Retry makes the change again', async () => {
     const changed = proposal('board', 'Thread board', 'built', { asked: true, chat: 'c3', failed_change: 'Newest thread first', error: "Anthropic's API was overloaded each time the build tried over 28 min" })
     const plain = proposal('life', 'Topic map', 'built')

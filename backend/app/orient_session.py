@@ -530,19 +530,21 @@ def _writer_finished(c: str, meta: dict[str, Any]) -> None:
 agents.on_agent_finished(_writer_finished)
 
 
-VIEW_LINES = {"built": "orient-views-built", "failed": "orient-views-failed", "building": "orient-views-building"}
+VIEW_LINES = {"built": "orient-views-built", "failed": "orient-views-failed", "building": "orient-views-building",
+              "suggested": "orient-views-suggested"}
 
 
 def view_counts(c: str, since: datetime | None) -> dict[str, int]:
     """The views the orientation proposed since `since`, by where their builds stand (built, failed, building; queued or
-    held count as building). Proposals main made at the analyst's request, and dropped ones, are not counted."""
+    held count as building), and the viewers for file types it suggested. Proposals main made at the analyst's request,
+    and dropped ones, are not counted."""
     from . import views  # noqa: PLC0415
 
     counts = dict.fromkeys(VIEW_LINES, 0)
     for p in views.list_proposals(c):
         if p.get("asked") or p.get("status") == "dropped" or (since is not None and ((t := _at(p.get("ts"))) is None or t < since)):
             continue
-        counts[p["status"] if p.get("status") in ("built", "failed") else "building"] += 1
+        counts[p["status"] if p.get("status") in ("built", "failed", "suggested") else "building"] += 1
     return counts
 
 

@@ -383,8 +383,8 @@ export interface Filters {
 // ---- views and proposals ----
 
 /** A view ticket's build: `dropped` is an orientation proposal that could not be built, shown nowhere (backend
- * views.drop); `suggested` a viewer for a file type the File browser proposes (backend views.suggest), shown only in the
- * File browser until the analyst accepts it. */
+ * views.drop); `suggested` a viewer for a file type, such as one the orientation proposes, shown only in the File
+ * browser until the analyst accepts it (backend views.accept). */
 export type ProposalStatus = 'queued' | 'building' | 'built' | 'failed' | 'dropped' | 'suggested'
 
 /** A view ticket (the propose_view tool): what the analyst sees in the view and why, the files it reads, the unit and
@@ -457,6 +457,8 @@ export interface View {
   forms: ViewForm[]
   /** the first file it claims, which a view opened on its own shows */
   first_file?: string | null
+  /** every claim is one extension's glob: a viewer for a file type, a mode of the File browser for the files it claims */
+  file_type?: boolean
 }
 
 /** A diagram card's dataset (canvas/DataViz.tsx). */

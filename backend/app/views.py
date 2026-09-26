@@ -391,9 +391,9 @@ def write_view(c: str, slug: str, *, name: str, why: str, claims: Any, accepts: 
 
 def mark_built(c: str, slug: str) -> dict[str, Any]:
     """Register the view in the slug's folder: `built` stamped into its view.json (the only writer of that field), its
-    memo
-    dropped, and a proposal under the slug marked built. Emits `view {slug, status: built}`, with `asked` when
-    relevant."""
+    memo dropped, and a proposal under the slug marked built. Emits `view {slug, status: built}`, with `asked` for a
+    view the analyst asked for, which the browser then opens; a viewer accepted in the File browser (accept) shows
+    there as the file's mode instead."""
     d = views_dir(c) / slug
     raw = _view_json(d)
     write_json(d / VIEW_JSON, {**raw, "built": _now()})
@@ -401,7 +401,8 @@ def mark_built(c: str, slug: str) -> dict[str, Any]:
     prop = read_proposal(c, slug)
     if prop is not None:
         update_proposal(c, slug, status="built", error=None)
-    _emit(c, slug, "built", **({"asked": True} if prop is not None and prop.get("asked") else {}))
+    opens = prop is not None and bool(prop.get("asked")) and not prop.get("accepted")
+    _emit(c, slug, "built", **({"asked": True} if opens else {}))
     return read_view(c, slug) or _normalize_view(slug, raw, where=d)
 
 
@@ -2369,6 +2370,14 @@ def file_type_viewer(view: dict[str, Any]) -> bool:
     return bool(claims) and all(type_suffix(g) for g in claims)
 
 
+def offered_type_viewer(claims: Any) -> bool:
+    """Whether a proposal claiming `claims` is a viewer of unusual file types, which the File browser offers beside Raw
+    before it is built: every claim one extension's glob, of a suffix that neither the files view nor a media player
+    reads."""
+    suffixes = [type_suffix(g) for g in _str_list(claims)]
+    return bool(suffixes) and all(s and s not in ORDINARY_SUFFIXES and s not in MEDIA_TYPES for s in suffixes)
+
+
 def _suggestions_path(c: str) -> Path:
     return views_dir(c) / SUGGESTIONS_FILE
 
@@ -2524,7 +2533,7 @@ def accept(c: str, slug: str) -> dict[str, Any]:
         raise HTTPException(404, f"no such proposal: {slug}")
     if prop.get("status") != "suggested":
         raise HTTPException(409, f"the view {prop['name']!r} is {prop.get('status')}, not suggested")
-    prop = update_proposal(c, slug, status="queued", asked=True, ts=_now()) or prop
+    prop = update_proposal(c, slug, status="queued", asked=True, accepted=True, ts=_now()) or prop
     _emit(c, slug, "queued", asked=True)
     _queue(c, slug)
     return prop

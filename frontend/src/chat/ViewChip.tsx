@@ -2,7 +2,8 @@
 // keyed by slug, followed by its build state. Queued or building: a spinner, and a click opens the build's thread.
 // Built: a click opens the view (with Open after it while the analyst has not opened it yet, files/viewReady.ts).
 // Failed: ✕ with the error in its tooltip, Retry, and Report a problem (shell/ProblemReport). A dropped proposal's chip
-// is not drawn (lib/proposals isDropped). A built view whose last change failed (`failed_change`) shows the same.
+// is not drawn (lib/proposals isDropped). A built view whose last change failed (`failed_change`) shows the same. A
+// suggested viewer for a file type, which the File browser offers beside Raw, is a plain name until it is accepted.
 import { useState } from 'react'
 import type { MouseEvent } from 'react'
 import { Button } from '../components/Button'
@@ -76,7 +77,7 @@ export function ViewChip({ ws, slug, name, className }: Props) {
       .catch((e: Error) => bus.emit('toast', { text: `Could not retry ${p.name}. ${e.message}`, kind: 'error' }))
       .finally(() => setRetrying(false))
   }
-  const clickable = (pending || failed) ? !!p?.chat : !!key
+  const clickable = status === 'suggested' ? false : pending || failed ? !!p?.chat : !!key
   return (
     <span
       className={['view-chip', status ? `view-chip-${status}` : '', className ?? ''].filter(Boolean).join(' ')}

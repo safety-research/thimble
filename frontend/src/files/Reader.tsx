@@ -7,10 +7,12 @@ import { flushSync } from 'react-dom'
 import { Button, Segmented } from '../components/Button'
 import { Spinner } from '../components/Spinner'
 import { api, scaleApi } from '../lib/api'
+import { bus } from '../lib/bus'
 import { mediaOf, mediaUrl, type MediaRef } from '../lib/media'
+import { refreshProposals } from '../lib/proposals'
 import { fragmentIn, nearestLine } from '../lib/refs'
 import { track } from '../lib/telemetry'
-import type { SourceKind, SourcePage, SourceRecord } from '../lib/types'
+import type { Proposal, SourceKind, SourcePage, SourceRecord, View } from '../lib/types'
 import { readStorage, storageKey, writeStorage } from '../lib/workspace'
 import { failureText, ReportProblemButton } from '../shell/ProblemReport'
 import { clearMatches, firstMatchFrom, lineAsked, markMatches, markSpots, matchCount, matchNumber, stepInLine, stepMatch, unfoldAt, type MatchAt } from './find'
@@ -19,7 +21,11 @@ import { classesOf, colourVar, laneTags, litClass, marksOf, valueOf } from './la
 import { ReaderLabelsContext, useReaderLabels } from './marks'
 import { findColumn, ReaderRuler, rulerColumns, useRuler, type LensTick, type RulerTick, type Seen, type Shown } from './Ruler'
 import { fmtSize } from './Tree'
-import type { FilesLabels } from './useLabels'
+import { useFilesFilter, type FilesLabels } from './useLabels'
+import { accepts, slugOf, viewValue } from './viewChoice'
+import { ViewerFrame } from './ViewerFrame'
+import { ProposalOption } from './ViewsBar'
+import { useTypeViewers } from './typeViewers'
 import { errMsg, LaneHead, targetOf, type ViewDef, type ViewProps } from './views/common'
 import { withoutEscapes } from './views/raw'
 import { pickView, scoreViews, viewByType } from './views/registry'
@@ -118,6 +124,30 @@ export function ViewFailed({ name, detail, onRaw }: { name: string; detail: stri
         </Button>
       )}
       <ReportProblemButton description={failureText(`The ${name} view could not show a file.`, detail)} />
+    </div>
+  )
+}
+
+/** A viewer for the file's type as its mode: the view's page in the reader, and what failed with Raw beside it. */
+function ReaderViewer({ ws, view, path, targetRef, labels, onRaw }: { ws: string; view: View; path: string; targetRef?: string; labels: FilesLabels; onRaw: () => void }) {
+  const [failure, setFailure] = useState<string | null>(null)
+  const filter = useFilesFilter(ws)
+  return (
+    <div className="reader-main reader-viewer">
+      {failure && <ViewFailed name={view.name} detail={failure} onRaw={onRaw} />}
+      <ViewerFrame
+        key={view.built}
+        ws={ws}
+        slug={view.slug}
+        targetRef={targetRef}
+        path={path}
+        title={view.name}
+        labels={labels.on}
+        filter={filter}
+        filterFiles={filter ? labels.presence.get(filter.concept) : undefined}
+        byId={labels.byId}
+        onError={setFailure}
+      />
     </div>
   )
 }
@@ -408,7 +438,8 @@ function FileReader({ workspace, path, kind, targetRef, lead, labels, only, onMo
     measure()
   }, [records, measure])
 
-  // the body or the view in it changed size (the reader resized, a label's column came in): measure again
+  // the body or the view in it changed size (the reader resized, a label's column came in): measure again. A pick
+  // (a file-type viewer's page in place of the body, and back) can mount a new body.
   const viewType = viewByType(only ?? pick)?.type ?? builtins.auto.type
   useEffect(() => {
     const el = bodyRef.current
@@ -417,7 +448,7 @@ function FileReader({ workspace, path, kind, targetRef, lead, labels, only, onMo
     ro.observe(el)
     for (const c of Array.from(el.children)) ro.observe(c)
     return () => ro.disconnect()
-  }, [measure, records, viewType])
+  }, [measure, records, viewType, pick])
 
   // a jump lands once its records are in: the record scrolls to the top of the reader
   useLayoutEffect(() => {
@@ -742,13 +773,39 @@ function FileReader({ workspace, path, kind, targetRef, lead, labels, only, onMo
 
   const picked = viewByType(only ?? pick)
   const view: ViewDef | undefined = picked && (only || builtins.listed.includes(picked)) ? picked : builtins.auto
+  // a viewer for the file's type shows in its place: the one picked for this file, else, while no built-in mode is
+  // picked and the best one is Raw, the first that reads the ref's fragment
+  const rawBest = builtins.loaded && (builtins.auto.type === 'raw' || binary)
+  const types = useTypeViewers(workspace, path, !only && !isDatabase, rawBest)
+  const autoViewer = rawBest ? types.viewers.find((v) => fragment == null || accepts(v, fragment)) : undefined
+  const pickedSlug = slugOf(pick)
+  const viewer = only ? undefined : pickedSlug ? types.viewers.find((v) => v.slug === pickedSlug) ?? autoViewer : pick ? undefined : autoViewer
+  const modeTitle = viewer?.name ?? view?.title
   useEffect(() => {
-    if (view && builtins.loaded) onMode?.(view.title)
-  }, [view, builtins.loaded, onMode])
+    if (modeTitle && builtins.loaded) onMode?.(modeTitle)
+  }, [modeTitle, builtins.loaded, onMode])
   const onPick = (v: string) => {
     track('view-open', { target: path, detail: { from: 'switcher', to: v } })
     setPick(v)
     writeStorage(memoryKey, v)
+  }
+  // a viewer built from the chip opens as the file's mode, even after a pick of Raw
+  const forgetPick = () => {
+    setPick(null)
+    writeStorage(memoryKey, null)
+  }
+  const [dismissed, setDismissed] = useState<string | null>(null)
+  const offered = !only && !viewer && types.proposal && types.proposal.slug !== dismissed ? types.proposal : null
+  const dismiss = (p: Proposal) => {
+    track('view-dismiss', { target: `view:${p.slug}` })
+    setDismissed(p.slug)
+    api
+      .deleteProposal(workspace, p.slug)
+      .then(() => refreshProposals(workspace))
+      .catch((e: Error) => {
+        setDismissed(null)
+        bus.emit('toast', { text: `Could not remove ${p.name}. ${e.message}`, kind: 'error' })
+      })
   }
   // a file that could not be read says so, and so does a binary one (an archive, a file of a type no view reads), whose
   // bytes read as text would be noise
@@ -766,7 +823,13 @@ function FileReader({ workspace, path, kind, targetRef, lead, labels, only, onMo
     const viewProps: ViewProps = { workspace, path, kind, page, loadMore: loadPage, targetRef: viewTarget }
     return <ViewComponent {...viewProps} />
   }, [ViewComponent, workspace, path, kind, page, loadPage, viewTarget])
-  const options = builtins.listed.map((v) => ({ value: v.type, label: v.title }))
+  // the built-in modes, then the file-type viewers, then Raw
+  const builtinOptions = builtins.listed.map((v) => ({ value: v.type, label: v.title }))
+  const options = [
+    ...builtinOptions.filter((o) => o.value !== 'raw'),
+    ...(only ? [] : types.viewers.map((v) => ({ value: viewValue(v.slug), label: v.name }))),
+    ...builtinOptions.filter((o) => o.value === 'raw'),
+  ]
   return (
     <ReaderLabelsContext.Provider value={readerLabels}>
       <div className="reader">
@@ -775,11 +838,16 @@ function FileReader({ workspace, path, kind, targetRef, lead, labels, only, onMo
             {lead}
             <span className="reader-spacer" />
             {unread && <span className="reader-fragment mono">#{unread}</span>}
-            {!isDatabase && !binary && loaded && <Button variant="icon" size="sm" icon="search" title="Find in the file" className="reader-find-open" active={!!finder} onClick={() => (finder ? closeFinder() : openFinder('find'))} />}
-            {!only && builtins.loaded && options.length > 1 && view && <Segmented label="Mode" className="reader-modes" size="md" value={view.type} onChange={onPick} options={options} />}
+            {!isDatabase && !binary && loaded && !viewer && <Button variant="icon" size="sm" icon="search" title="Find in the file" className="reader-find-open" active={!!finder} onClick={() => (finder ? closeFinder() : openFinder('find'))} />}
+            {!only && builtins.loaded && view && (options.length > 1 || offered) && (
+              <span className="reader-modes">
+                <Segmented label="Mode" size="md" value={viewer ? viewValue(viewer.slug) : view.type} onChange={onPick} options={options} />
+                {offered && <ProposalOption ws={workspace} p={offered} size="md" onDismiss={() => dismiss(offered)} onAccept={forgetPick} />}
+              </span>
+            )}
           </div>
         )}
-        {finder && !isDatabase && !binary && (
+        {finder && !isDatabase && !binary && !viewer && (
           <FindBar
             text={finder.text}
             onText={(text) => setFinder((f) => (f ? { ...f, text } : f))}
@@ -802,33 +870,37 @@ function FileReader({ workspace, path, kind, targetRef, lead, labels, only, onMo
             ))}
           </div>
         )}
-        <div className="reader-main">
-          <div className="reader-scroll" data-more-right={moreRight || undefined}>
-            <div className={'reader-body' + (isDatabase ? ' reader-body-fill' : '')} ref={bodyRef} onScroll={onScroll} style={tags.length ? ({ '--lanes': tags.length } as CSSProperties) : undefined}>
-              {tags.length > 0 && view && GUTTERED.has(view.type) && loaded && !noViewReason && <LaneHead tags={tags} />}
-              {error && !noViewReason && <div className="reader-error-text">{error}</div>}
-              {noViewReason && (
-                <div className="reader-noview">
-                  <div className="reader-noview-reason dim">{noViewReason}</div>
-                </div>
-              )}
-              {ViewComponent && loaded && !noViewReason && (
-                <ViewBoundary key={`${view!.type}|${path}`} viewType={view!.type} onFallback={() => onPick('raw')}>
-                  {viewEl}
-                </ViewBoundary>
-              )}
-              {loading && (
-                <div className="reader-more">
-                  <Spinner size={14} label="Loading" />
-                </div>
-              )}
+        {viewer ? (
+          <ReaderViewer key={viewer.slug} ws={workspace} view={viewer} path={path} targetRef={fragment != null && accepts(viewer, fragment) ? targetRef : undefined} labels={labels} onRaw={() => onPick('raw')} />
+        ) : (
+          <div className="reader-main">
+            <div className="reader-scroll" data-more-right={moreRight || undefined}>
+              <div className={'reader-body' + (isDatabase ? ' reader-body-fill' : '')} ref={bodyRef} onScroll={onScroll} style={tags.length ? ({ '--lanes': tags.length } as CSSProperties) : undefined}>
+                {tags.length > 0 && view && GUTTERED.has(view.type) && loaded && !noViewReason && <LaneHead tags={tags} />}
+                {error && !noViewReason && <div className="reader-error-text">{error}</div>}
+                {noViewReason && (
+                  <div className="reader-noview">
+                    <div className="reader-noview-reason dim">{noViewReason}</div>
+                  </div>
+                )}
+                {ViewComponent && loaded && !noViewReason && (
+                  <ViewBoundary key={`${view!.type}|${path}`} viewType={view!.type} onFallback={() => onPick('raw')}>
+                    {viewEl}
+                  </ViewBoundary>
+                )}
+                {loading && (
+                  <div className="reader-more">
+                    <Spinner size={14} label="Loading" />
+                  </div>
+                )}
+              </div>
+              {moreRight && <div className="reader-edge" aria-hidden />}
             </div>
-            {moreRight && <div className="reader-edge" aria-hidden />}
+            {!isDatabase && !binary && (
+              <ReaderRuler columns={rulerCols} view={shown} lens={lens} onJump={jump} onMark={onMark} lineOf={markLine} onLine={(line) => goTo(line, 'ruler')} onSeek={seek} onWheel={wheel} />
+            )}
           </div>
-          {!isDatabase && !binary && (
-            <ReaderRuler columns={rulerCols} view={shown} lens={lens} onJump={jump} onMark={onMark} lineOf={markLine} onLine={(line) => goTo(line, 'ruler')} onSeek={seek} onWheel={wheel} />
-          )}
-        </div>
+        )}
       </div>
     </ReaderLabelsContext.Provider>
   )

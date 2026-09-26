@@ -627,6 +627,10 @@ The analyst laid out no frame, so the shape is yours.
 
 Proposed the view {view} (view:{slug}) over {claims}. The dev agent is building it now, and it opens in Files when its checks pass.
 
+## propose_view-suggested
+
+Proposed the viewer {view} (view:{slug}) for {claims}. The File browser offers it beside Raw on those files, and it is built when the analyst picks it.
+
 ## propose_view-unmatched
 
 No file of the corpus matches {claims}, so the view was not proposed and the dev agent has nothing to build. {near} Propose it again with claims that match files the corpus holds.
@@ -920,6 +924,10 @@ The orientation failed: {made}. Its error: {error}
 ## orient-views-building
 
 {views} building
+
+## orient-views-suggested
+
+{views} suggested for file types
 
 ## orient-made-nothing
 

@@ -302,8 +302,9 @@ async def test_start_orientation_starts_the_session_with_start_s_choices_and_mir
 
 
 def test_the_end_line_counts_the_orientation_s_own_views_by_where_their_builds_stand(monkeypatch):
-    """The end line counts the orientation's own proposals since it started, built, failed or still building; one it
-    dropped because it could not be built (views.drop) is not counted, and neither is one the analyst asked main for."""
+    """The end line counts the orientation's own proposals since it started, built, failed or still building, and the
+    viewers it suggested for file types; one it dropped because it could not be built (views.drop) is not counted, and
+    neither is one the analyst asked main for."""
     from app import views
 
     rows = [
@@ -313,13 +314,15 @@ def test_the_end_line_counts_the_orientation_s_own_views_by_where_their_builds_s
         {"slug": "map", "name": "Map", "status": "queued", "ts": "2026-09-25T10:03:00+00:00"},
         {"slug": "list", "name": "List", "status": "building", "ts": "2026-09-25T10:04:00+00:00"},
         {"slug": "mine", "name": "Mine", "status": "failed", "asked": True, "ts": "2026-09-25T10:05:00+00:00"},
-        {"slug": "gone", "name": "Gone", "status": "dropped", "ts": "2026-09-25T10:06:00+00:00"}]
+        {"slug": "gone", "name": "Gone", "status": "dropped", "ts": "2026-09-25T10:06:00+00:00"},
+        {"slug": "cues", "name": "Cues", "status": "suggested", "ts": "2026-09-25T10:07:00+00:00"}]
     monkeypatch.setattr(views, "list_proposals", lambda c: rows)  # each row as its build left it
     run = {"started": "2026-09-25T10:00:00+00:00", "passes": ["views"]}
-    assert orient_session.view_counts(CORPUS, orient_session._at(run["started"])) == {"built": 1, "failed": 1, "building": 2}
+    assert orient_session.view_counts(CORPUS, orient_session._at(run["started"])) == {
+        "built": 1, "failed": 1, "building": 2, "suggested": 1}
     assert orient_session.made_text(CORPUS, run) == ", ".join(
         [tools.hint("orient-views-built", views="1 view"), tools.hint("orient-views-failed", views="1 view"),
-         tools.hint("orient-views-building", views="2 views")])
+         tools.hint("orient-views-building", views="2 views"), tools.hint("orient-views-suggested", views="1 view")])
     counts = orient_session.view_counts(CORPUS, orient_session._at("2026-09-26T00:00:00+00:00"))
     assert orient_session.views_text(counts) == tools.hint("orient-made-views", views="no views")
     line = orient_session.status_text(CORPUS, "done", k=1, made={"views": 2, "view_states": {"built": 2}})

@@ -2258,10 +2258,10 @@ async def _h_show_label(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
 async def _h_propose_view(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
     """A proposal for a view written for how the corpus arranges its records, a ticket the dev agent builds at once
     (views.propose, dev.run_view). The orientation's first run holds its proposals until it ends
-    (orientation.holding). A
-    claim that matches no corpus file is refused, naming real paths near it; where views cannot be built the proposal
-    fails
-    at once. A proposal from main's shim is one the analyst asked for, so the browser opens the view once built."""
+    (orientation.holding). A viewer of unusual file types the orientation proposes (views.offered_type_viewer) is stored
+    `suggested`, offered in the File browser and built once the analyst accepts it. A claim that matches no corpus file
+    is refused, naming real paths near it; where views cannot be built the proposal fails at once. A proposal from
+    main's shim is one the analyst asked for, so the browser opens the view once built."""
     from . import orientation, views
 
     claims = args.get("claims")
@@ -2274,18 +2274,24 @@ async def _h_propose_view(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
     if unmatched:
         near = " ".join(hint("propose_view-near", claim=g, paths=", ".join(p)) for g, p in unmatched.items() if p)
         return err(" ".join(hint("propose_view-unmatched", claims=", ".join(unmatched), near=near).split()))
-    hold = session_kind(ctx.session) == ORIENT_SESSION and orientation.holding(ctx.c)
+    orient = session_kind(ctx.session) == ORIENT_SESSION
+    hold = orient and orientation.holding(ctx.c)
     prop = await _maybe_await(views.propose(ctx.c, name=str(args["name"]).strip(), why=str(args["why"]).strip(),
                                             claims=claims, arrangement=str(args["arrangement"]).strip(),
-                                            proposed_by=ctx.created_by, hold=hold, asked=ctx.session is None))
+                                            proposed_by=ctx.created_by, hold=hold, asked=ctx.session is None,
+                                            suggested=orient and views.offered_type_viewer(claims)))
+    status = str(prop.get("status") or "queued")
     if not hold or prop.get("revised"):
-        _chip(ctx.c, "view", str(prop.get("name") or prop.get("slug")), ref=f"view:{prop.get('slug')}", status="queued")
+        _chip(ctx.c, "view", str(prop.get("name") or prop.get("slug")), ref=f"view:{prop.get('slug')}", status=status)
+    claimed = ", ".join(prop.get("claims") or [])
+    if status == "suggested":
+        return ok(hint("propose_view-suggested", view=prop.get("name"), slug=prop.get("slug"), claims=claimed))
     # without Node 20+ or the frontend's packages the build fails at once (dev.run_view), and main is told why
     if why := await asyncio.to_thread(views.build_problem):
         return ok(hint("propose_view-cannot-build", view=prop.get("name"), slug=prop.get("slug"), why=why))
     if prop.get("revised"):  # a view built under this name is changed in place (views.revise)
         return ok(hint("view-changing", view=prop.get("name"), slug=prop.get("slug")))
-    return ok(hint("propose_view-proposed", view=prop.get("name"), slug=prop.get("slug"), claims=", ".join(prop.get("claims") or [])))
+    return ok(hint("propose_view-proposed", view=prop.get("name"), slug=prop.get("slug"), claims=claimed))
 
 
 async def _h_file_dev_ticket(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
