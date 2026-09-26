@@ -414,10 +414,13 @@ def _members(jsonl) -> tuple:
 
 
 def _value_of(label: dict, ref: str):
-    """The label's effective value on the record `ref`: its row's, else the value of the cover that holds its line."""
-    if not label.get("jsonl"):
-        return None
-    values, spans = _members(label["jsonl"])
+    """The label's effective value on the record `ref`: its row's, else the value of the cover that holds its line. The
+    label's members are looked up once per labels context (each reader call gets a fresh one), so a reader that asks
+    about every record reads no file state per record."""
+    members = label.get("_members")
+    if members is None:
+        members = label["_members"] = _members(label["jsonl"]) if label.get("jsonl") else ({}, {})
+    values, spans = members
     v = values.get(ref)
     if v is not None:
         return v

@@ -192,3 +192,11 @@ async def test_a_unit_is_marked_by_its_records_and_kept_when_one_of_them_is(app)
     concepts.clear_filter(CORPUS, "files")
     concepts.show_concept(CORPUS, k["id"], False)
     assert await views.marks_for(CORPUS, "threads", refs) == {}
+
+
+def test_the_context_a_reader_gets_leaves_out_what_the_server_looked_up_for_it():
+    """kernel_thimble keeps a label's members on its context while marking; the kernel's copy never carries them."""
+    ctx = {"labels": [{"id": "k", "name": "asks", "jsonl": "/nowhere.jsonl", "values": []}], "filter": None}
+    assert kernel_thimble._marked(ctx, "a.jsonl#L1") == [] and "_members" in ctx["labels"][0]
+    assert views._wire(ctx)["labels"][0] == {"id": "k", "name": "asks", "jsonl": "/nowhere.jsonl", "values": []}
+    assert views._wire(views.probe_context()) == views.probe_context()

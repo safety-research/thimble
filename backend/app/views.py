@@ -786,7 +786,7 @@ async def reader_call(c: str, slug: str, op: str, arg: Any = None, *, labels: di
     _, req = await asyncio.to_thread(_prepare, c, slug)
     if op == "records":
         ctx = labels if labels is not None else await asyncio.to_thread(labels_context, c)
-        req = {**req, "labels": ctx}
+        req = {**req, "labels": _wire(ctx)}
     return await _call(c, req, op, arg)
 
 
@@ -831,6 +831,14 @@ def labels_context(c: str) -> dict[str, Any]:
         v = next((x for x in k["values"] if x["name"] == f.get("value")), None)
         filt = {"id": k["id"], "label": k["name"], "value": str(f.get("value")), "colour": v["colour"] if v else k["colour"]}
     return {"labels": out, "filter": filt}
+
+
+def _wire(ctx: dict[str, Any]) -> dict[str, Any]:
+    """The labels context as the kernel gets it: without what this process looked up for it (kernel_thimble keeps a
+    label's members on it as `_members`)."""
+    if not ctx.get("labels"):
+        return ctx
+    return {**ctx, "labels": [{k: v for k, v in lab.items() if not k.startswith("_")} for lab in ctx["labels"]]}
 
 
 def probe_context(filtered: bool = False) -> dict[str, Any]:
