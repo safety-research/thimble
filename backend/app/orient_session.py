@@ -230,10 +230,10 @@ def _launch(c: str, brief: str, passes: "list[str]", choices: dict[str, Any]) ->
 
 
 async def start(c: str, brief: str, passes: "list[str] | tuple[str, ...]" = ("final", "views"),
-                call: str | None = None) -> agent_session.Run:
+                call: str | None = None, chosen: "dict[str, Any] | None" = None) -> agent_session.Run:
     """Start the orientation session for workspace `c` with the parts `passes` names (PASSES) and follow it, `call`
-    being main's start_orientation call (agent_session.start); RuntimeError when one runs or claude cannot be
-    started."""
+    being main's start_orientation call (agent_session.start); `chosen` holds the critique and permission choices the
+    call made, over Start's. RuntimeError when one runs or claude cannot be started."""
     if running(c):
         raise RuntimeError("an orientation is running")
     choices = orientation.choices(c)
@@ -242,6 +242,7 @@ async def start(c: str, brief: str, passes: "list[str] | tuple[str, ...]" = ("fi
         # no Start gate chose: the settings popover's effort for the orientation
         on = own["effort"] == cc_settings.ULTRACODE
         choices = {**choices, "ultracode": on, "effort": choices.get("effort") if on else own["effort"]}
+    choices = {**choices, **(chosen or {})}
     passes = [p for p in PASSES if p in passes]
     failed = _failed_first_run(c, brief, passes)
     if failed is not None:
@@ -691,13 +692,19 @@ async def tool_start_orientation(ctx: Any, args: dict[str, Any]) -> Any:
     final = switch("final_notebook" if args.get("final_notebook") is not None else "analyze_data", "final", True)
     views = switch("propose_views", "views", True)
     report = switch("generate_report", "report", False)
+    # Start's other choices, from the call (/thimble:orient's flags); left out, Start's or the defaults hold
+    chosen: dict[str, Any] = {}
+    if args.get("critique") is not None:
+        chosen["critique"] = orientation.flag(args["critique"], True)
+    if orientation.permissions(args.get("permissions")):
+        chosen["permissions"] = orientation.permissions(args.get("permissions"))
     if running(ctx.c) or orientation.active(ctx.c):
         return tools.err(tools.hint("start_orientation-running"))
     passes = [p for p, on in (("final", final), ("views", views), ("report", report)) if on]
     if orientation.terminal_first(ctx.c):
         return tools.ok(subagent_start(ctx.c, brief, passes))
     try:
-        await start(ctx.c, brief, passes, call=ctx.tool_use_id)
+        await start(ctx.c, brief, passes, call=ctx.tool_use_id, chosen=chosen)
     except RuntimeError as e:
         return tools.err(f"start_orientation: {e}")
     return tools.ok(tools.hint("start_orientation-started"))

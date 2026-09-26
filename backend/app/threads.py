@@ -217,7 +217,8 @@ def event(c: str, payload: dict[str, Any], event_id: str) -> tuple[str, dict[str
     if meta.get("kind") != agents.KIND_THREAD:
         raise HTTPException(400, f"{thread_id} is not a thread")
     _, log_path = agents.paths(c, thread_id)
-    agents.append(log_path, {"type": "user", "ts": _now(), "text": text, "by": agents.BROWSER, "event": event_id})
+    by = agents.TERMINAL if payload.get("by") == agents.TERMINAL else agents.BROWSER  # message_thread's, from the terminal
+    agents.append(log_path, {"type": "user", "ts": _now(), "text": text, "by": by, "event": event_id})
     waits = awaiting_fork(c, thread_id)
     agents.set_running(c, thread_id, True)
     if waits:
@@ -563,6 +564,46 @@ async def tool_delete_thread(ctx: Any, args: dict[str, Any]) -> Any:
     ids = await agents.delete_chat(ctx.c, meta["id"])
     steps = f" and its {len(ids) - 1} steps" if len(ids) > 1 else ""
     return tools.ok(f"deleted thread {meta['id']} ({meta.get('name') or meta.get('title')}){steps}")
+
+
+async def tool_message_thread(ctx: Any, args: dict[str, Any]) -> Any:
+    """The `message_thread` tool (the /thimble:ask command): a message typed in the terminal goes where the thread's
+    composer in the browser would send it (the frontend's threads.composerTarget). A side thread takes it as its next
+    `thread` event, with its anchor when the event forks anew, and with no message asks its unanswered questions again
+    (ask_again); the latest orientation takes it as a follow-up (orient_session.message); a view's build thread takes
+    it as a change to the view (views.message). Any other chat's messages go to main."""
+    from . import channel, orient_session, orientation, tools, views  # noqa: PLC0415
+
+    text = str(args.get("message") or "").strip()
+    meta, why = _one_thread(ctx.c, "message_thread", str(args.get("thread") or ""))
+    if meta is None:
+        return tools.err(why)
+    tid, name = str(meta["id"]), str(meta.get("name") or meta.get("title") or meta["id"])
+    try:
+        if meta.get("kind") == agents.KIND_THREAD:
+            if not text:
+                ask_again(ctx.c, tid)
+                return tools.ok(tools.hint("message_thread-again", thread=name))
+            channel.post(ctx.c, channel.THREAD, {"thread": tid, "text": text, "by": agents.TERMINAL})
+            return tools.ok(tools.hint("message_thread-sent", thread=name))
+        if not text:
+            return tools.err(tools.hint("message_thread-empty", thread=name))
+        latest = (((orientation.read_run(ctx.c) or {}).get("chats") or {}).get(orientation.ROLE))
+        if meta.get("role") == orientation.ROLE and tid == latest:
+            try:
+                res = await orient_session.message(ctx.c, text, orient_session.BROWSER)
+            except orient_session.Subagent as e:
+                return tools.ok(tools.hint("message_orientation-subagent", agent_id=str(e)))
+            return tools.ok(tools.hint("message_orientation-queued" if res["status"] == "queued" else "message_orientation-started"))
+        if meta.get("role") == "dev" and meta.get("view"):
+            views._bind_loop()
+            views.message(ctx.c, str(meta["view"]), text)
+            return tools.ok(tools.hint("message_thread-view", thread=name))
+    except HTTPException as e:
+        return tools.err(f"message_thread: {e.detail}")
+    except (orient_session.NoOrientation, orient_session.Gone, RuntimeError) as e:
+        return tools.err(f"message_thread: {e}")
+    return tools.err(tools.hint("message_thread-main", thread=name))
 
 
 def _file_ref(ref: str) -> bool:

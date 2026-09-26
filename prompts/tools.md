@@ -283,6 +283,21 @@ Post the reply the analyst reads in a thread.
 }
 ```
 
+## message_thread
+
+Send a message the analyst typed in this terminal to a thread, as that thread's composer in the browser sends it: a side thread's follow-up, which reaches you as its `thread` event with the thread's anchor, or with no message its unanswered questions asked again; a follow-up for the orientation; or a change to a view for the view's build thread. The browser shows the message in that thread. Call it for /thimble:ask.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "thread": {"type": "string", "description": "The thread's name or id as the thread list shows it, such as main/why-the-spike, orientation or dev/board."},
+    "message": {"type": "string", "description": "The analyst's message, word for word. Leave it out to ask a side thread's unanswered questions again."}
+  },
+  "required": ["thread"]
+}
+```
+
 ## rename_thread
 
 Rename a thread in the browser's thread list, when the analyst asks you to.
@@ -338,7 +353,9 @@ Start an orientation, a broad analysis of the corpus that helps the analyst unde
     "brief": {"type": "string", "description": "The analyst's request in their words, such as a focus, or empty for the whole corpus."},
     "final_notebook": {"type": "boolean", "description": "Leave a deck of cards for the analyst, the group `Orientation`, which appears when the orientation ends. Default true."},
     "propose_views": {"type": "boolean", "description": "Propose views of the files. Default true."},
-    "generate_report": {"type": "boolean", "description": "Write the report when the orientation ends. Default false."}
+    "generate_report": {"type": "boolean", "description": "Write the report when the orientation ends. Default false."},
+    "critique": {"type": "boolean", "description": "Have a critic review the analysis before the outputs are written. Default true."},
+    "permissions": {"type": "string", "enum": ["manual", "auto", "bypass"], "description": "The orientation's permission mode, as Start's switcher sets it. Default the workspace's."}
   }
 }
 ```
@@ -990,6 +1007,26 @@ No orientation has run in this workspace. Call `start_orientation` to start one.
 ## message_orientation-gone
 
 Claude Code no longer keeps this orientation's session, so it cannot continue. Its outputs and call refs still open. Call `start_orientation` for a new orientation that takes up the message.
+
+## message_thread-sent
+
+The message is in the thread {thread}, and its `thread` event reaches you next, so this turn needs no words from you.
+
+## message_thread-again
+
+The thread {thread}'s unanswered questions are asked again, and its `thread` event reaches you next, so this turn needs no words from you.
+
+## message_thread-view
+
+The change is queued for the view's build in {thread}, which the browser shows, so this turn needs no words from you.
+
+## message_thread-empty
+
+{thread} takes no empty message. Pass what the analyst wrote as `message`.
+
+## message_thread-main
+
+{thread} takes no messages of its own: its composer sends them to you. Do what the message asks yourself.
 
 ## message_orientation-subagent
 

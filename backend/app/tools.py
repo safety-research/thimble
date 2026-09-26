@@ -177,6 +177,8 @@ REGISTRY: dict[str, Spec] = {
         # a comment resolved or opened again, as the margin's ✓ does; main's, since a check's run only adds comments
         Spec("resolve_comment", (ANALYST,), "app.comments:tool_resolve_comment", sessions=MAIN_ONLY),
         Spec("reply_in_thread", (ANALYST,), "app.threads:tool_reply_in_thread"),
+        # a message typed in the terminal to a thread, sent as that thread's composer would (/thimble:ask); main's
+        Spec("message_thread", (ANALYST,), "app.threads:tool_message_thread", sessions=MAIN_ONLY),
         # a thread renamed or deleted from the chat, as its row's menu does; main's, as the analyst asks it
         Spec("rename_thread", (ANALYST,), "app.threads:tool_rename_thread", sessions=MAIN_ONLY),
         Spec("delete_thread", (ANALYST,), "app.threads:tool_delete_thread", sessions=MAIN_ONLY),
