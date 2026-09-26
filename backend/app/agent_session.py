@@ -329,6 +329,21 @@ _runs: dict[tuple[str, str], Run] = {}  # by (workspace, key): the sessions that
 # by (workspace, key): the start arguments of a background session's last run, for a turn it starts on its own
 # (bg_session.on_wake, revive)
 _launches: dict[tuple[str, str], dict[str, Any]] = {}
+# by the kind of a background session's key: its caller's rebuild of those arguments from its chat's meta, for a
+# session this server did not start (on_relaunch)
+_relaunchers: dict[str, Callable[[str, dict[str, Any]], dict[str, Any]]] = {}
+
+
+def on_relaunch(kind: str, fn: Callable[[str, dict[str, Any]], dict[str, Any]]) -> None:
+    """Have `fn(c, meta)` rebuild the start arguments of a background session of `kind` whose chat's meta is `meta`,
+    for a turn it starts after a server restart and for its Resume."""
+    _relaunchers[kind] = fn
+
+
+def _launch_kw(c: str, key: str, meta: dict[str, Any]) -> dict[str, Any] | None:
+    kw = _launches.get((c, key))
+    fn = _relaunchers.get(bg_session.kind_of(key)) if kw is None else None
+    return fn(c, meta) if fn is not None else kw
 
 
 def current(c: str, key: str | None) -> Run | None:
@@ -1610,12 +1625,11 @@ async def resume_chat(c: str, chat: str) -> Run:
     if role == write_session.ROLE:
         doc = str(meta.get("doc") or "")
         return await _start_writer(c, doc, meta, carry_on, k + 1)
-    key = next((key for (cc, key), kw in _launches.items() if cc == c and bg_session.entry(c, key) is not None
-                and bg_session.entry(c, key).chat == chat), None)  # type: ignore[union-attr]
-    if key is None:
+    key = next((e.key for e in bg_session.entries(c) if e.chat == chat), None)
+    kw = _launch_kw(c, key, meta) if key else None
+    if key is None or kw is None:
         raise RuntimeError("thimble no longer knows how to start this session")
-    return await start(c, key, **_launches[(c, key)], prompt=carry_on, resume=str(meta.get("session") or ""), chat=chat,
-                       run_k=k + 1)
+    return await start(c, key, **kw, prompt=carry_on, resume=str(meta.get("session") or ""), chat=chat, run_k=k + 1)
 
 
 async def _start_writer(c: str, doc: str, meta: dict[str, Any], prompt: str, run_k: int) -> Run:
@@ -1637,11 +1651,11 @@ async def revive(c: str, e: "bg_session.Entry") -> Run | None:
         fn = _resumers.get(str(meta.get("role") or ""))
         if fn is not None:
             return await fn(c, meta, "")
-        kw = _launches.get((c, e.key))
+        kw = _launch_kw(c, e.key, meta)
         if kw is None:
             return None
         return await start(c, e.key, **kw, prompt="", resume=e.sid, chat=e.chat, run_k=k, restarted=True)
-    kw = _launches.get((c, e.key))
+    kw = _launch_kw(c, e.key, meta)
     if kw is None:
         fn = _resumers.get(str(meta.get("role") or ""))
         if fn is None:

@@ -393,6 +393,24 @@ async def start(c: str, caller: agent_session.Run, context: str = "") -> tuple[a
     return run, done
 
 
+def _relaunch(c: str, meta: dict[str, Any]) -> dict[str, Any]:
+    """The start arguments of a critic's background session that this server did not start, from its chat's meta
+    (agent_session.on_relaunch): a later turn of it is followed, and its Resume starts it again, with no critique
+    waiting on it."""
+    agent_name, agent, conf, effort = _critic(c)
+    agent = agent_session.talking(agent, True)
+    transcript = str(meta.get("transcript") or "")
+    readable = ["--add-dir", str(Path(transcript).parent)] if transcript else []
+    return dict(role=agent_session.STEP_ROLE, title=TITLE,
+                agent_args=["--agents", json.dumps({agent_name: agent}, ensure_ascii=False), "--agent", agent_name, *readable],
+                effort=effort, settings=agent_session.settings_json(effort, fastMode=bool(conf["fast"])),
+                agent_type=agent_name, parent=str(meta.get("parent") or agents.MAIN_ID), model=str(agent.get("model") or ""),
+                background=True)
+
+
+agent_session.on_relaunch(tools.CRITIQUE_SESSION, _relaunch)
+
+
 def _critic(c: str) -> tuple[str, dict[str, Any], dict[str, Any], str]:
     """(name, definition, role settings, effort) of the critic for workspace `c`: critic.md's agent with the `critic`
     role's model, effort and fast mode (config.models_for)."""
