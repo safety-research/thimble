@@ -1328,13 +1328,16 @@ def name_session(url: str, name: str, session: str, cwd: Path) -> str | None:
 
 def agent_definition(name: str) -> tuple[str, dict[str, Any]]:
     """(its name, the definition `--agents` takes) for an agent file among prompts.AGENT_FILES: its description, AGENT_FIELDS,
-    its body as prompt, its tools, and its skills prefixed with the plugin's name."""
+    its body as prompt, its tools when it names any (with none it has every tool of the session), and its skills
+    prefixed with the plugin's name."""
     from . import prompts  # noqa: PLC0415
 
     front, body = prompts.agent_file(name)
     raw = front.get("tools") or []
     names = [x.strip() for x in (raw.split(",") if isinstance(raw, str) else raw) if str(x).strip()]
-    agent: dict[str, Any] = {"description": str(front.get("description") or ""), "prompt": body, "tools": names}
+    agent: dict[str, Any] = {"description": str(front.get("description") or ""), "prompt": body}
+    if names:
+        agent["tools"] = names
     for key in AGENT_FIELDS:
         if key in front:
             agent[key] = front[key]

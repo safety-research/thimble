@@ -1,7 +1,7 @@
 """The plugin's contract with Claude Code: the agent definitions thimble passes with --agents (prompts/writer.md,
 orient.md, critic.md and check.md) and any in plugin/agents parse with the frontmatter fields Claude Code reads
-(https://code.claude.com/docs/en/sub-agents, "Supported frontmatter fields"); every tool an agent names is a built-in
-or a thimble MCP tool of its session under the plugin prefix; the shared skill prints the rules every thimble agent
+(https://code.claude.com/docs/en/sub-agents, "Supported frontmatter fields"); no agent names tools, and each session
+keeps the thimble tools of its own; the shared skill prints the rules every thimble agent
 shares; the orient skill starts the orientation through its tool; and every worked example a view ticket's prompt
 names is a complete viewer in plugin/viewers."""
 from __future__ import annotations
@@ -21,11 +21,8 @@ SHARED = PLUGIN / "skills" / "shared" / "SKILL.md"
 DEFINITIONS = {name: config.REPO_ROOT / "prompts" / f"{name}.md" for name in ("orient", "writer", "critic", "check")}
 CORPUS = "mini"
 PREFIX = "mcp__plugin_thimble_thimble__"  # how Claude Code names the plugin's MCP server's tools (tools.SERVER_NAME)
-# the session each definition runs as the agent of (agent_session.py), whose tool list its tools must come from
+# the session each definition runs as the agent of (agent_session.py), whose tool list its own thimble tools come from
 SESSION_OF = {"orient": "orient", "writer": "writer:report", "critic": "critique:orient", "check": "check:unverified:report"}
-# Agent: the orientation starts its subagents; Workflow: the orientation's and a writer's sessions run workflows of
-# their own; Bash: a check's session, fenced to a work folder of its own, counts and searches the corpus
-BUILTIN = {"Read", "Grep", "Glob", "Skill", "Agent", "Workflow", "Bash"}
 NAMES = {"writer": "writer", "critic": "critic", "check": "check"}  # the others are thimble-<stem>
 # the fields Claude Code reads in an agent's frontmatter; hooks, mcpServers and permissionMode are ignored for plugin
 # subagents, so an agent here must not lean on them
@@ -42,13 +39,6 @@ def split(text: str) -> tuple[dict, str]:
     front = yaml.safe_load(head)
     assert isinstance(front, dict), head
     return front, body
-
-
-def tool_list(front: dict) -> list[str]:
-    raw = front.get("tools")
-    if isinstance(raw, str):
-        return [t.strip() for t in raw.split(",") if t.strip()]
-    return [str(t) for t in raw or []]
 
 
 def agents() -> dict[str, tuple[dict, str]]:
@@ -73,27 +63,25 @@ def test_agent_files_parse_with_the_fields_claude_code_reads():
     assert "`start_orientation` tool" in seen["orient"][0]["description"], "main orients with the tool, not the agent"
 
 
-def test_agent_tools_are_builtins_or_registry_tools_under_the_plugin_prefix():
-    """Each tool an agent names is a built-in or a tool its session's shim lists. The orientation names none: it
-    inherits every tool, less its session's --disallowedTools, which never take the built-ins or the web."""
-    from app import orient_session
+def test_no_agent_names_tools_and_each_session_keeps_only_its_own_thimble_tools():
+    """No agent names tools, so each session has every tool of a default Claude Code session. Its --disallowedTools take
+    only the thimble tools that are not its own, each of which its session's shim lists, and never a built-in or the
+    web."""
+    from app import agent_session, checks, critique_session, orient_session, write_session
 
-    assert PREFIX == f"mcp__plugin_thimble_{tools.SERVER_NAME}__"
+    assert agent_session.thimble_tool("read_ref") == f"{PREFIX}read_ref" == f"mcp__plugin_thimble_{tools.SERVER_NAME}__read_ref"
     for stem, (front, _) in agents().items():
-        listed = tool_list(front)
-        if stem == "orient":
-            assert not listed and "tools" not in front
-            continue
-        assert listed, (stem, "tools must be listed, the agent is not meant to inherit Bash or Write")
-        names = {x["name"] for x in tools.list(tools.ANALYST, SESSION_OF.get(stem))}
-        for t in listed:
-            if t not in BUILTIN:
-                assert t.startswith(PREFIX) and t[len(PREFIX):] in names, (stem, t, "not a tool of the session's role")
+        assert "tools" not in front, (stem, "the agent inherits every tool of its session")
+    own = {"orient": orient_session.ORIENT_TOOLS, "writer": write_session.OWN_TOOLS, "critic": critique_session.OWN_TOOLS,
+           "check": checks.OWN_TOOLS}
+    for stem, names in own.items():
+        listed = {x["name"] for x in tools.list(tools.ANALYST, SESSION_OF[stem])}
+        assert set(names) <= listed, (stem, set(names) - listed, "not a tool of the session's role")
+        assert {t[len(PREFIX):] for t in agent_session.not_own(names)} == set(tools.REGISTRY) - set(names)
+    assert "add_card" not in critique_session.OWN_TOOLS and "add_comment" in checks.OWN_TOOLS
     denied = set(orient_session.disallowed([*orient_session.PARTS, *orient_session.LINES]))
-    assert not {"Read", "Grep", "Glob", "Bash", "Skill", "Agent", "Workflow", "WebFetch", "WebSearch"} & denied
-    kept = set(orient_session.ORIENT_TOOLS)
-    assert kept <= set(tools.REGISTRY)
-    assert {t[len(PREFIX):] for t in denied if t.startswith(PREFIX)} == set(tools.REGISTRY) - kept
+    assert not {"Read", "Grep", "Glob", "Bash", "Write", "Edit", "Skill", "Agent", "Workflow", "WebFetch", "WebSearch"} & denied
+    assert {t[len(PREFIX):] for t in denied} == set(tools.REGISTRY) - set(orient_session.ORIENT_TOOLS)
 
 
 def test_the_shared_skill_renders_the_prompt_file_every_thimble_agent_shares(capsys):

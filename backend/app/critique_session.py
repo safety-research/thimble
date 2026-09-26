@@ -4,10 +4,11 @@ The critic reviews the orientation's whole transcript and cards for coverage and
 drafted deck's claims against the calls that should support them. The machinery shared with other agent sessions is
 agent_session.py; this module holds what is the critique's own.
 
-Start. Only the orientation's session lists `critique`. The server starts `claude -p` in the corpus folder running as
-the critic agent (prompts/critic.md via `--agents`, shared.md appended), with the `critic` role's model settings. Its
-tools are Read, Grep, Glob, read_ref and list_cards, so it writes nothing. One critique runs at a time, in the
-orientation's permission mode.
+Start. Only the orientation's session lists `critique`. The server starts `claude -p` in the critic's work folder
+running as the critic agent (prompts/critic.md via `--agents`, shared.md appended), with the `critic` role's model
+settings. It has every tool of a default Claude Code session and, of thimble's, OWN_TOOLS, so it adds no card, and it
+runs in a work folder of its own with the corpus read-only (agent_session, the fence). One critique runs at a time, in
+the orientation's permission mode.
 
 The transcript. Raw transcripts run to megabytes of JSON and Read cuts lines at 2,000 characters, so the critique
 renders the session's and its agents' transcripts into one digest, each tool call under its ref in the orientation's
@@ -41,6 +42,8 @@ DEFAULT_EFFORT = "high"  # when critic.md names none
 # is stopped past the limit and the orientation hears `## critique-ended`.
 CRITIQUE_LIMIT_S = {"low": 1200.0, "medium": 1200.0, "high": 1800.0, "xhigh": 2700.0, "max": 3600.0}
 DIGEST_DIR = "critique"  # the one folder outside the corpus the critic may read
+WORK_DIR = "work"  # critique/<chat>/work, the critic's own folder, where it may write
+OWN_TOOLS = ("read_ref", "list_cards")  # the critic's thimble tools
 DIGEST_FILE = "transcript.md"
 RESULT_LINES = 8  # lines of a tool result the digest shows; a card reads whole with read_ref, a file with Read
 # lines of a Read's result: the critic reads the file itself, and the call's input says which part the agent saw
@@ -388,6 +391,8 @@ async def start(c: str, caller: agent_session.Run, context: str = "") -> tuple[a
         # the orientation's permission mode, followed at each request
         permission_mode=cc_settings.orient_permission_flag(caller.mode) if caller.mode else "",
         mode_owner=caller.key if caller.mode else None, patient=caller.patient,
+        work=config.workspace_dir(c) / DIGEST_DIR / caller.chat / WORK_DIR, unasked=True,
+        disallowed=agent_session.not_own(OWN_TOOLS),
         brief=prompt.split("\n\n", 1)[0], **fields)  # the critique-task line that opens the first message
     return run, done
 

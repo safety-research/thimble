@@ -1,17 +1,19 @@
 """A writer's own Claude Code session, run beside main for one document.
 
 The writer agent is defined for that session alone with `--agents` from prompts/writer.md and chosen with `--agent`,
-so main's list of agents never shows it. Its first message holds the whole context (context.render, CONTEXT_CHARS)
-followed by the task. One writer runs per document, with the `writer` role's model settings and THIMBLE_SESSION
-`writer:<doc>`; the report checks run once it has ended. Main starts it with `start_writing` and hears a `written`
-channel event when it ends. A writer cut short by a server stop is resumed by the next server (_resume_left). A
-writer
-answering the orientation's report pass carries `orient` and `orient_run` on its meta."""
+so main's list of agents never shows it. It has every tool of a default Claude Code session and, of thimble's,
+OWN_TOOLS, and runs in a work folder of its own with the corpus read-only (agent_session, the fence). Its first message
+holds the whole context (context.render, CONTEXT_CHARS) followed by the task. One writer runs per document, with the
+`writer` role's model settings and THIMBLE_SESSION `writer:<doc>`; the report checks run once it has ended. Main starts
+it with `start_writing` and hears a `written` channel event when it ends. A writer cut short by a server stop is resumed
+by the next server (_resume_left). A writer answering the orientation's report pass carries `orient` and `orient_run` on
+its meta."""
 from __future__ import annotations
 
 import asyncio
 import json
 import logging
+from pathlib import Path
 from typing import Any
 
 from fastapi import HTTPException
@@ -25,11 +27,18 @@ ROLE = "writer"  # the agent chat's role
 WRITTEN_KIND = "written"  # the channel kind that tells main a writer ended (prompts/main.md)
 DEFAULT_EFFORT = "high"  # when writer.md names none
 CONTEXT_CHARS = 600_000  # of the first message, about 150k tokens
+WORK_DIR = "writers"  # workspaces/<c>/writers/<doc>, a writer's own folder, where it may write
+OWN_TOOLS = ("read_ref", "list_cards", "add_card", "edit_card", "delete_card", "screenshot", "write_document",
+             "edit_document")  # a writer's thimble tools
 
 
 def session_key(doc: str) -> str:
     """The THIMBLE_SESSION of the session writing `doc` (tools.session_kind reads its kind)."""
     return f"{tools.WRITER_SESSION}:{doc}"
+
+
+def work_dir(c: str, doc: str) -> Path:
+    return config.workspace_dir(c) / WORK_DIR / doc
 
 
 def agent_definition() -> tuple[str, dict[str, Any]]:
@@ -93,7 +102,8 @@ def _launch(c: str, doc: str) -> dict[str, Any]:
     return dict(role=ROLE, title=f"Write {doc}", agent_args=["--agents", json.dumps({name: agent}, ensure_ascii=False),
                                                               "--agent", name],
                 effort=effort, settings=agent_session.settings_json(effort, fastMode=bool(models["writer"]["fast"])),
-                agent_type=name, on_end=_ended, model=str(agent.get("model") or ""), doc=doc)
+                agent_type=name, on_end=_ended, model=str(agent.get("model") or ""), work=work_dir(c, doc), unasked=True,
+                disallowed=agent_session.not_own(OWN_TOOLS), doc=doc)
 
 
 async def _resume_left(c: str, meta: dict[str, Any], prompt: str) -> agent_session.Run:

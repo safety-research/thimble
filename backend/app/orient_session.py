@@ -158,20 +158,14 @@ def agent_definition(c: str, brief: str, parts: "list[str] | tuple[str, ...]") -
     from . import cli  # noqa: PLC0415 — cli is large, and the definition's shape is the launcher's
 
     name, agent = cli.agent_definition(PROMPT)
-    agent = {k: v for k, v in agent.items() if k != "tools" or v}  # an empty list would mean no tools at all
     return name, {**agent, "prompt": system_prompt(c, brief, parts)}
-
-
-def tool_name(name: str) -> str:
-    """A thimble tool's name as the orientation's session sees it, from the plugin's server."""
-    return f"mcp__plugin_{orientation.PLUGIN}_{tools.SERVER_NAME}__{name}"
 
 
 def disallowed(parts: "list[str] | tuple[str, ...]") -> list[str]:
     """The session's --disallowedTools: the thimble tools that are not the orientation's, and those of each part that is
     off."""
     off = {t for part, names in PART_TOOLS.items() if part not in parts for t in names}
-    return [tool_name(n) for n in tools.REGISTRY if n not in ORIENT_TOOLS or n in off]
+    return agent_session.not_own([n for n in ORIENT_TOOLS if n not in off])
 
 
 def mode_of(c: str, choice: str | None) -> str:
