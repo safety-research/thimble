@@ -97,8 +97,8 @@
     const width = Math.max(200, box.clientWidth)
     // While a label is on, colour shows the label instead of the kind: each bar splits into the calls the label marks,
     // in the label's colour, and the rest in a quiet ink, so the overview shows where the marked calls fall in time.
-    // The label's colours are thimble's, never the view's own categories, and the kind legend returns once no label is
-    // on.
+    // The label colours repeat the viz colours, so a kind left in its viz colour would read as the label; the kind
+    // legend returns once no label is on.
     const label = labels.labels[0]
     const rows = label ? byBin(chart.rows, label.name) : chart.rows
     // the legend names only the parts the bars have: under a filter that keeps just the label's calls, no other calls

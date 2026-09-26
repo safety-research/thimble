@@ -19,7 +19,7 @@ Name each problem by the picture it shows in, where on the page, and what the an
 
 ## pictures-labels
 
-The pictures are, in order: 1, the view as it opens, with no label on; 2, the same with a test label on, which marks about one record in seven in its colour; 3, the same filtered to the test label, which should keep only what it marks; 4, the place the first citation opens, with the test label on.
+The pictures are, in order: 1, the view as it opens, with no label on; 2, the same with a test label on, which marks about one record in seven in the colour the analyst's first label takes; 3, the same filtered to the test label, which should keep only what it marks; 4, the place the first citation opens, with the test label on.
 
 ## pictures-plain
 
@@ -27,7 +27,7 @@ The view reads only files with no lines, which labels cannot mark, so the pictur
 
 ## criteria-labels
 
-- Does the test label show in its colour on the records and units it marks, in the overview, charts included, and in the detail, apart from the other colours of the same picture?
+- Does the test label show in its colour on the records and units it marks, in the overview, charts included, and in the detail, with nothing else in pictures 2 to 4 drawn in that colour?
 - Does the filter keep only what the test label marks?
 
 ## view

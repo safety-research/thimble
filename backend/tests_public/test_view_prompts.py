@@ -20,7 +20,7 @@ def test_the_smallest_change_rule_binds_code_tickets_and_not_views():
 def test_a_view_ticket_asks_for_an_overview_scales_from_the_data_and_readable_marks():
     good = prompts.section("dev-view", "A good view")
     for words in ("It opens on an overview", "Its form fits the records", "Its scales fit the data",
-                  "Everything on it is readable", "never the label colours"):
+                  "Everything on it is readable", "while a label is on, it alone gives records and marks a colour"):
         assert words in good, words
     examples = prompts.section("dev-view", "Start from an example")
     assert "not their sizes, bins and field names" in examples

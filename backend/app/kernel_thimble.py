@@ -375,7 +375,9 @@ def colours(name, values=None):
 # view's call it is None, and marked() and kept() answer as if no label were on.
 _view_ctx = None
 PROBE_NAME = "test label"
-PROBE_COLOUR = LABEL_COLOURS[7]  # a label colour no viz colour repeats, so the test label never reads as a view's own
+# the colour the analyst's first label takes (--label-1), so the pictures show a view's own colour that clashes with a
+# label where the analyst would see it
+PROBE_COLOUR = LABEL_COLOURS[1]
 _MEMBERS: dict = {}  # labels file -> (the files' signature, ({ref: value}, {path: [(first, last, value)]}, {path}))
 
 
