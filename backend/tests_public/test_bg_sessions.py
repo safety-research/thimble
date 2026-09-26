@@ -38,8 +38,9 @@ def put(sid, *recs):
         for r in recs:
             f.write(json.dumps(r) + "\n")
 def turn(sid, prompt, reply, end=True):
+    error = reply.startswith("API Error")
     put(sid, {"type": "user", "message": {"role": "user", "content": prompt}},
-        {"type": "assistant", "message": {"content": [{"type": "text", "text": reply}]}},
+        {"type": "assistant", "message": {"content": [{"type": "text", "text": reply}]}, **({"isApiErrorMessage": True} if error else {})},
         *([{"type": "system", "subtype": "turn_duration"}] if end else []))
 if argv[:1] == ["agents"]:
     print(json.dumps([{"id": s["sid"][:8], "sessionId": s["sid"], "kind": "background", "name": s["name"],
@@ -390,3 +391,42 @@ async def test_a_run_whose_session_was_killed_ends_with_resume_which_starts_it_a
     assert agents.read_meta(CORPUS, run.chat)["status"] == "done"
     with pytest.raises(RuntimeError):
         await agent_session.resume_chat(CORPUS, agents.MAIN_ID)
+
+
+async def test_main_s_message_to_the_session_s_name_reaches_the_proxy_which_passes_it_on(fake, tmp_path):
+    run = await write_session.start(CORPUS, "report")
+    await asyncio.wait_for(run.task, 10)
+    proxy = tmp_path / "agent-a0000000000000005.jsonl"
+    from_main = {"type": "attachment", "attachment": {"type": "queued_command", "prompt": "Which card do you cite first?",
+                                                      "source_uuid": "u-2", "origin": {"kind": "coordinator"}}}
+    proxy.write_text(json.dumps(from_main) + "\n")
+    got = bg_session.relay_check(CORPUS, proxy, "thimble:writer", "Which card do you cite first?")
+    assert got["allow"] and got["message"] == tools.hint("bg-from-main", text="Which card do you cite first?")
+    assert not bg_session.relay_check(CORPUS, proxy, "thimble:writer", "Which card do you cite first?")["allow"]
+    assert [(x["text"], x["by"]) for x in _log(run.chat) if x["type"] == "user"][-1] == ("Which card do you cite first?", "main")
+
+
+async def test_a_turn_that_ended_at_capacity_is_retried_in_place_with_its_prompt(fake, monkeypatch):
+    monkeypatch.setenv("FAKE_REPLY", 'API Error: 529 {"type":"error","error":{"type":"overloaded_error","message":"Overloaded"}}')
+    monkeypatch.setenv(agent_session.RETRY_BASE_ENV, "0.1")
+    run = await write_session.start(CORPUS, "report")
+    e = bg_session.entry(CORPUS, "writer:report")
+    await _until(lambda: any(not i["sent"] for i in e.outbox), 15)
+    [item] = [i for i in e.outbox if not i["sent"]]
+    assert item["text"] == tools.hint(agent_session.RETRY_PROMPT), "the retry's prompt waits for the proxy to send it"
+    assert len(_bg_calls(fake)) == 1, "no second session, no copy"
+    got = bg_session.relay_check(CORPUS, Path("/nonexistent"), "thimble:writer", item["token"])
+    assert got["allow"] and got["message"] == item["text"]
+    st = _state(fake)
+    st[e.short]["status"] = "busy"
+    (fake / "sessions.json").write_text(json.dumps(st))
+    await asyncio.sleep(0.3)
+    with _transcript(e.sid).open("a") as f:
+        for rec in ({"type": "user", "message": {"role": "user", "content": item["text"]}},
+                    {"type": "assistant", "message": {"content": [{"type": "text", "text": "Wrote the report."}]}},
+                    {"type": "system", "subtype": "turn_duration"}):
+            f.write(json.dumps(rec) + "\n")
+    st[e.short]["status"] = "idle"
+    (fake / "sessions.json").write_text(json.dumps(st))
+    await asyncio.wait_for(run.task, 15)
+    assert agents.read_meta(CORPUS, run.chat)["status"] == "done" and run.sid == e.sid

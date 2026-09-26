@@ -375,7 +375,8 @@ def _show_queue(c: str, chat: str, queue: "list[dict[str, Any]]") -> None:
         pass
 
 
-async def resume(c: str, messages: "list[dict[str, Any]]", call: str | None = None) -> agent_session.Run:
+async def resume(c: str, messages: "list[dict[str, Any]]", call: str | None = None,
+                 announce: bool = True) -> agent_session.Run:
     """Resume the orientation's session with `messages` as run k+1; Gone when Claude Code no longer keeps its
     transcript, NoOrientation when there is none, RuntimeError when it cannot start. A background session that started
     a turn on its own takes no messages: the run follows it (_woken)."""
@@ -401,7 +402,7 @@ async def resume(c: str, messages: "list[dict[str, Any]]", call: str | None = No
 
     return await agent_session.start(c, KEY, prompt=lead, on_start=started, on_end=_ended, on_pid=_moved, resume=sid,
                                      chat=chat, run_k=k, leads=[{"text": m.get("text"), "by": m.get("by")} for m in messages],
-                                     call=call, **args)
+                                     call=call, announce=announce, **args)
 
 
 def _now() -> str:
@@ -690,7 +691,7 @@ async def _woken(c: str, e: bg_session.Entry) -> agent_session.Run | None:
         return None
     if meta.get("status") == "running":
         return await _resume_left(c, meta, "")
-    return await resume(c, [])
+    return await resume(c, [], announce=False)
 
 
 bg_session.on_wake(tools.ORIENT_SESSION, _woken)

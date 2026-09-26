@@ -364,6 +364,15 @@ def role_agent(agent: dict[str, Any], conf: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
+def talking(agent: dict[str, Any], background: bool) -> dict[str, Any]:
+    """An agent definition whose tools include SendMessage when it runs as a background session, which main messages and
+    which answers main that way (bg_session.py)."""
+    tools_ = agent.get("tools")
+    if not background or not isinstance(tools_, list) or "SendMessage" in tools_:
+        return agent
+    return {**agent, "tools": [*tools_, "SendMessage"]}
+
+
 def shared_prompt(cwd: Path) -> str:
     """shared.md rendered for the corpus folder, as main's append and the shared skill render it."""
     from . import channel  # noqa: PLC0415 — channel imports the views module, which this module does not otherwise need
@@ -609,7 +618,7 @@ async def start(c: str, key: str, *, role: str, title: str, agent_args: list[str
     if resume and chat and agents.meta_or_none(c, chat) is not None:
         extra["restarted"] = {"run": run_k, "ts": _now()} if restarted else None
         meta = _reopen(c, chat, parent, run_k, pid=proc.pid, effort=effort, leads=leads or [], call=call,
-                       announce=not restarted, **({"session": sid} if background else {}), **extra, **fields)
+                       announce=announce and not restarted, **({"session": sid} if background else {}), **extra, **fields)
     else:
         meta = agents.new_agent(c, role, title, parent=parent, by=agents.TERMINAL, announce=announce, call=call,
                                 session=sid, pid=proc.pid, agent_type=agent_type, effort=effort, **extra, **fields)
@@ -1633,7 +1642,7 @@ async def revive(c: str, e: "bg_session.Entry") -> Run | None:
         if fn is None:
             return None
         return await fn(c, {**meta, "run": k + 1}, "")
-    return await start(c, e.key, **kw, prompt="", resume=e.sid, chat=e.chat, run_k=k + 1)
+    return await start(c, e.key, **kw, prompt="", resume=e.sid, chat=e.chat, run_k=k + 1, announce=False)
 
 
 # --------------------------------------------------------------------------- what a previous server left (restart)

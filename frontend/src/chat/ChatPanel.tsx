@@ -36,7 +36,7 @@ import { RefText } from './markdown'
 import { CallFocusContext, MAIN_RETRY_NOTE, Rows, THREAD_RETRY_NOTE, type CallFocus, type ErrorRetry } from './Rows'
 import { countMessages, isUnread, markSeen, readSeen, type SeenMap } from './seen'
 import { SKIPPED_NOTE, StartGate, startGateShown } from './StartGate'
-import { AgentCard, useAgentRows } from './AgentCard'
+import { AgentCard, StoppedHold, useAgentRows } from './AgentCard'
 import { ViewChip } from './ViewChip'
 import { replayHeld } from './pending'
 import { composerTarget, pickItems, threadKind, threadLabels, threadNodes, type ThreadKind } from './threads'
@@ -914,8 +914,9 @@ function SessionView({ ws, id, chat, role, title, running, outbox = [], fromMain
   return (
     <>
       {fromMain && <Note className="chat-origin" text="Started from main" chips={<ThreadChip id="main" />} />}
-      <AgentCard ws={ws} chat={id} role={role} title={title} log={log} openWhileRunning />
+      <AgentCard ws={ws} chat={id} role={role} title={title} log={log} openWhileRunning resumeHere={false} />
       <Rows rows={rows} ws={ws} chat={id} calls={orient ? id : undefined} live={running} />
+      {!running && chat.meta?.id === id && chat.meta?.alert?.kind === 'stopped' && <StoppedHold ws={ws} chat={id} text={chat.meta.alert.text} />}
       {queued.map((q, i) => (
         <PendingMessage key={`q:${i}:${q.text}`} text={q.text} ws={ws} queued />
       ))}

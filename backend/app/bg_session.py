@@ -350,6 +350,7 @@ def _load(c: str) -> None:
             e.run_open = False  # a run is followed again only once a server attaches to it
             path = session.find_transcript(e.sid)
             e.offset = session._size(Path(path)) if path else 0  # the proxy's news start now
+            e.proxy_asked = time.monotonic()  # a proxy that ran before a restart gets PROXY_ASK_S to call again
             _entries[(c, e.key)] = e
 
 
@@ -465,6 +466,7 @@ async def _tick(rows: list[dict[str, Any]]) -> None:
     from . import agent_session  # noqa: PLC0415
 
     by_id = {str(r.get("id") or ""): r for r in rows if _names_itself(r)}
+    unshown: dict[str, list[str]] = {}
     for e in entries():
         if not alive(e):
             continue
@@ -493,8 +495,7 @@ async def _tick(rows: list[dict[str, Any]]) -> None:
             _changed.set()
         _read_news(e)
         if not proxy_alive(e) and time.monotonic() - e.proxy_asked > PROXY_ASK_S:
-            if ask_main_for_proxy(e.c, e.key):
-                log.info("%s: main is asked to show %s in the agent tray", e.c, e.name)
+            unshown.setdefault(e.c, []).append(e.key)
         if e.status != "idle" and not e.run_open and agent_session.current(e.c, e.key) is None:
             fn = _wake.get(kind_of(e.key))
             if fn is not None:
@@ -502,6 +503,9 @@ async def _tick(rows: list[dict[str, Any]]) -> None:
                 log.info("%s: background session %s (%s) started a turn; following it again", e.c, e.name, e.short)
                 asyncio.get_running_loop().create_task(_woken(fn, e), name=f"bg-wake:{e.c}:{e.key}")
         _flush_outbox(e)
+    for c, keys in unshown.items():
+        if ask_main_for_proxy(c, *keys):
+            log.info("%s: main is asked to show %s in the agent tray", c, ", ".join(name_of(k) for k in keys))
 
 
 async def _woken(fn: Callable[[str, Entry], Awaitable[Any]], e: Entry) -> None:
@@ -648,17 +652,18 @@ def proxy_start_hint(c: str, key: str) -> str:
                       short=e.short if e is not None else "")
 
 
-def ask_main_for_proxy(c: str, key: str) -> bool:
-    """Ask main, with an `agent` event, to start the session's proxy; False when no session listens."""
+def ask_main_for_proxy(c: str, *keys: str) -> bool:
+    """Ask main, with one `agent` event, to start the proxies of the sessions `keys`; False when no session listens."""
     from . import channel  # noqa: PLC0415
 
-    e = entry(c, key)
-    if e is None or not channel.reachable(c):
+    found = [e for e in (entry(c, k) for k in keys) if e is not None]
+    if not found or not channel.reachable(c):
         return False
     try:
-        channel.post(c, "agent", {"text": proxy_start_hint(c, key), "name": e.name})
+        channel.post(c, "agent", {"text": "\n\n".join(proxy_start_hint(c, e.key) for e in found),
+                                  "name": ", ".join(e.name for e in found)})
     except Exception:  # noqa: BLE001
-        log.info("%s: main was not asked to start %s's proxy", c, e.name, exc_info=True)
+        log.info("%s: main was not asked to start the proxies of %s", c, keys, exc_info=True)
         return False
     return True
 
@@ -694,6 +699,12 @@ def proxy_started(c: str, agent_type: str, description: str, agent_id: str | Non
     if agent_id and agent_id not in e.proxy_agents:
         e.proxy_agents.append(agent_id)
         _save(c)
+
+
+def new_main(c: str) -> None:
+    """Another session became main: the proxies ran in the one before, so each session is shown anew."""
+    for e in entries(c):
+        e.proxy_seen, e.proxy_asked, e.owner = 0.0, 0.0, None
 
 
 def proxy_ended(c: str, agent_id: str | None) -> None:
@@ -772,24 +783,34 @@ async def tool_list_agents(ctx: Any, args: dict[str, Any]) -> Any:
 # --------------------------------------------------------------------------- the hooks
 
 
-def _typed_messages(path: Path) -> list[tuple[str, str]]:
-    """(uuid, text) of each message the analyst typed in a subagent's view, from its transcript."""
-    out: list[tuple[str, str]] = []
+def _typed_messages(path: Path) -> list[tuple[str, str, str]]:
+    """(uuid, text, sender) of each message a proxy got for its session, from its transcript: those the analyst typed
+    in its view (terminal) and those main sent it, since main's SendMessage to the session's name reaches the proxy
+    (main)."""
+    out: list[tuple[str, str, str]] = []
     try:
         lines = path.read_bytes().splitlines()
     except OSError:
         return out
     for line in lines:
-        if b"queued_command" not in line and b'"human"' not in line:
+        if b"queued_command" not in line and b'"human"' not in line and b'"coordinator"' not in line:
             continue
         try:
             rec = json.loads(line)
         except ValueError:
             continue
-        typed = session._typed(rec) if isinstance(rec, dict) else None
+        if not isinstance(rec, dict):
+            continue
+        att = rec.get("attachment") if isinstance(rec.get("attachment"), dict) else {}
+        origin = att.get("origin") if isinstance(att.get("origin"), dict) else {}
+        if att.get("type") == "queued_command" and origin.get("kind") == "coordinator":
+            text = str(att.get("prompt") or "").strip()
+            if text:
+                out.append((str(att.get("source_uuid") or rec.get("uuid") or text), text, agents.MAIN_ID))
+            continue
+        typed = session._typed(rec)
         if typed:
-            att = rec.get("attachment") if isinstance(rec.get("attachment"), dict) else {}
-            out.append((str(att.get("source_uuid") or rec.get("uuid") or typed), typed))
+            out.append((str(att.get("source_uuid") or rec.get("uuid") or typed), typed, agents.TERMINAL))
     return out
 
 
@@ -815,10 +836,10 @@ def relay_check(c: str, agent_path: Path | None, to: str, message: str) -> dict[
     if message.strip().startswith("thimble-message-"):
         return {"allow": False, "reason": "no such message waits; call wait_session"}
     typed = _typed_messages(agent_path) if agent_path is not None else []
-    fresh = [(u, t) for u, t in typed if u not in e.relayed]
+    fresh = [(u, t, b) for u, t, b in typed if u not in e.relayed]
     want = _norm(message.removeprefix(TYPED_PREFIX))
-    hit = next(((u, t) for u, t in fresh if _norm(t) == want or _norm(t) in want), None)
-    if hit is None and fresh and not any(_norm(t) == want for u, t in typed if u in e.relayed):
+    hit = next(((u, t, b) for u, t, b in fresh if _norm(t) == want or _norm(t) in want), None)
+    if hit is None and fresh and not any(_norm(t) == want for u, t, b in typed if u in e.relayed):
         hit = fresh[0]
     if hit is None:
         if agent_path is None:  # main's own message
@@ -827,10 +848,11 @@ def relay_check(c: str, agent_path: Path | None, to: str, message: str) -> dict[
         return {"allow": False, "reason": "sent already"}
     e.relayed.append(hit[0])
     _save(c)
-    _chat_line(e, hit[1], agents.TERMINAL)
+    _chat_line(e, hit[1], hit[2])
     from . import tools  # noqa: PLC0415
 
-    return {"allow": True, "message": tools.hint("bg-from-terminal", text=hit[1])}
+    hint = "bg-from-terminal" if hit[2] == agents.TERMINAL else "bg-from-main"
+    return {"allow": True, "message": tools.hint(hint, text=hit[1])}
 
 
 def _chat_line(e: Entry, text: str, by: str | None) -> None:
@@ -1101,29 +1123,29 @@ class AgentsQuery(BaseModel):
     announce: bool = False  # the plugin's hooks ask for the lines to print, which are then taken as shown
 
 
-_announced: dict[str, dict[str, str]] = {}  # main session -> {key: what it was last told: started | ended}
+# main session -> ({session short ids whose start it was told}, {short id: the run end it was told of})
+_announced: dict[str, tuple[set[str], dict[str, float]]] = {}
 
 
 @router.post("/agents")
 async def agents_route(body: AgentsQuery) -> dict[str, Any]:
-    """thimble's agents for the folder's workspace: `{rows, line, text}` for the statusline and /thimble:agents, and
-    `announce`, the start and finish lines main's terminal has not shown yet (the plugin's hook prints them)."""
+    """thimble's agents for the folder's workspace: `{rows, line, text}` for the statusline and /thimble:agents, and with
+    `announce` the lines main's terminal has not shown yet (the plugin's hooks print them): each session's start once,
+    with the command that attaches it, and each run's finish."""
     c = config.workspace_for_cwd(body.cwd)
     if not c:
         return {"rows": [], "line": "", "text": "", "announce": ""}
     rows = agent_rows(c)
-    told = _announced.setdefault(body.session or "", {})
+    started, finished = _announced.setdefault(body.session or "", (set(), {}))
     lines: list[str] = []
     for e in entries(c) if body.announce else []:
-        state = "started" if alive(e) and e.run_open else "ended" if e.ended_at or not alive(e) else "started"
-        if told.get(e.key) == state or (state == "ended" and e.key not in told and not alive(e)):
-            told.setdefault(e.key, state)
-            continue
-        told[e.key] = state
-        if state == "started":
+        if alive(e) and e.short not in started:
+            started.add(e.short)
+            finished.setdefault(e.short, e.ended_at if not e.run_open else 0.0)
             lines.append(f"{e.name} runs as a background session: `claude attach {e.short}`, ← at the prompt, or ↓ "
                          "for its tray entry")
-        else:
+        elif e.short in started and e.ended_at and finished.get(e.short) != e.ended_at and not e.run_open:
+            finished[e.short] = e.ended_at
             lines.append(f"{e.name} finished" + (f": {e.result[:200]}" if e.result else "") +
                          ("" if alive(e) else " (its session has ended)"))
     return {"rows": rows, "line": status_line(rows), "text": listing_text(rows), "announce": "\n".join(lines)}

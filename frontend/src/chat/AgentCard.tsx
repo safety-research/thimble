@@ -217,6 +217,8 @@ export interface AgentCardProps {
   report?: string | null
   /** the orientation's run the card stands for: 0 its first, then each follow-up; unset, its whole session */
   run?: number
+  /** a stopped background session's Resume shows on the card; its own thread shows it at the end instead */
+  resumeHere?: boolean
 }
 
 /** The card of a session thimble started (the orientation, a writer, a check's run), or a subagent's chip. */
@@ -364,7 +366,7 @@ function useUndoRun(ws: string, chat: string, run: number | undefined, want: boo
   return want && top === `${chat}/${run}`
 }
 
-function AgentCardView({ ws, chat, role, title, ts, log, openWhileRunning = false, report, run }: AgentCardProps & { log: NonNullable<AgentCardProps['log']> }) {
+function AgentCardView({ ws, chat, role, title, ts, log, openWhileRunning = false, report, run, resumeHere = true }: AgentCardProps & { log: NonNullable<AgentCardProps['log']> }) {
   const { meta, records, error } = log
   const all = useMemo(() => foldRecords(records), [records])
   // the run the card stands for, and whether a later one followed it (an earlier run has ended, whatever the chat's
@@ -402,7 +404,7 @@ function AgentCardView({ ws, chat, role, title, ts, log, openWhileRunning = fals
   // what holds its session besides its permission requests, which wait on the permission card above the composer
   const holds = running && own ? (
     <Holds alert={meta?.alert} rules={meta?.session_rules} restarted={restartedNow(meta, run, running)} onRetry={() => api.retrySession(ws, chat)} />
-  ) : !running && own && meta?.alert?.kind === 'stopped' ? (
+  ) : !running && own && resumeHere && meta?.alert?.kind === 'stopped' ? (
     <StoppedHold ws={ws} chat={chat} text={meta.alert.text} />
   ) : null
   // waiting for the analyst: on its own prompt, or on its critique's (chat/waiting.ts)

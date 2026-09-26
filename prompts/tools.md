@@ -1066,6 +1066,12 @@ From the analyst, typed in Claude Code's agent tray: {text}
 
 Answer it in your own reply, which the analyst reads in your session, not with SendMessage.
 
+## bg-from-main
+
+From main: {text}
+
+Answer main with SendMessage.
+
 ## bg-relay
 
 {session}'s tray entry is not running, so send {session} a message for thimble: call SendMessage with `to` "{session}" and `{token}` as the whole message, word for word; thimble puts the real message in its place. End the turn on that call, with no text after it.
@@ -1079,7 +1085,7 @@ Loop until the session ends:
 1. Call `wait_session` with `session` "{session}". It returns within about 15 seconds.
 2. Write the news lines it returns as they are, each on its own line, or nothing when it says nothing is new. Never add words of your own.
 3. When it asks you to send the session a message, call SendMessage with `to` "{session}" and the token it gives as the whole message, once.
-4. When a message from the analyst reaches you, call SendMessage with `to` "{session}" and their message word for word, once, then go back to step 1.
+4. When a message from the analyst or from main reaches you, call SendMessage with `to` "{session}" and the message word for word, once, then go back to step 1. A message sent to {session} in this session reaches you, and you pass it on.
 
 Stop only when `wait_session` says the session has ended: then write one line saying so and end your turn. The analyst can also open the session itself with `claude attach {short}`.
 

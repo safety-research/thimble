@@ -88,13 +88,13 @@ def _launch(c: str, doc: str) -> dict[str, Any]:
     role's model, effort and fast mode, and its document."""
     name, agent = agent_definition()
     models = config.models_for(c)
-    agent = agent_session.role_agent(agent, models["writer"])
+    background = bg_session.wanted(c, "writer")
+    agent = agent_session.talking(agent_session.role_agent(agent, models["writer"]), background)
     effort = str(agent.get("effort") or DEFAULT_EFFORT)
     return dict(role=ROLE, title=f"Write {doc}", agent_args=["--agents", json.dumps({name: agent}, ensure_ascii=False),
                                                               "--agent", name],
                 effort=effort, settings=agent_session.settings_json(effort, fastMode=bool(models["writer"]["fast"])),
-                agent_type=name, on_end=_ended, model=str(agent.get("model") or ""), doc=doc,
-                background=bg_session.wanted(c, "writer"))
+                agent_type=name, on_end=_ended, model=str(agent.get("model") or ""), doc=doc, background=background)
 
 
 async def _resume_left(c: str, meta: dict[str, Any], prompt: str) -> agent_session.Run:
@@ -137,7 +137,7 @@ async def _woken(c: str, e: bg_session.Entry) -> agent_session.Run | None:
     if meta.get("status") == "running":
         return await _resume_left(c, meta, "")
     return await agent_session.start(c, e.key, prompt="", resume=e.sid, chat=e.chat, run_k=int(meta.get("run") or 0) + 1,
-                                     **_launch(c, doc))
+                                     announce=False, **_launch(c, doc))
 
 
 agent_session.on_left(ROLE, _left)

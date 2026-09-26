@@ -370,6 +370,7 @@ async def start(c: str, caller: agent_session.Run, context: str = "") -> tuple[a
     if agent_session.running(c, key):  # a second call that started while this one rendered
         raise RuntimeError(tools.hint("critique-running"))
     agent_name, agent, conf, effort = _critic(c)
+    agent = agent_session.talking(agent, caller.bg)
     done: asyncio.Future = asyncio.get_running_loop().create_future()
 
     def ended(run: agent_session.Run, status: str, summary: str) -> None:

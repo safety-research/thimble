@@ -433,6 +433,9 @@ def attach(c: str, sid: Any, cwd: Any, transcript_path: str | None = None, pid: 
     _persist(lv, keep_subs=restored or bool(lv.subs))
     _cancel_grace(c)
     _ensure_tail(lv)
+    if not restored:
+        with contextlib.suppress(Exception):
+            _bg().new_main(c)
     log.info("%s: session %s attached (%s)", c, sid, "restored" if restored else "new")
     return lv
 
