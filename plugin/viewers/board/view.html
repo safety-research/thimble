@@ -18,17 +18,19 @@
   }
   * { box-sizing: border-box; }
   html, body { margin: 0; height: 100%; }
-  body { font: 13px/1.5 var(--sans); color: var(--ink); background: transparent; display: grid; grid-template-columns: 260px 1fr; }
+  body { font: 13px/1.5 var(--sans); color: var(--ink); background: transparent; display: grid; grid-template-columns: 280px 1fr; }
   .mono { font-family: var(--mono); font-variant-numeric: tabular-nums; }
   aside { border-right: 1px solid var(--line-2); display: flex; flex-direction: column; min-height: 0; }
   aside input { margin: 12px; padding: 5px 8px; border: 1px solid var(--line-2); border-radius: 6px; background: var(--card); color: var(--ink); font: 12px var(--sans); }
   aside input:focus { outline: none; border-color: var(--live); }
+  #count { font-size: 11px; color: var(--ink-3); padding: 0 12px 6px; }
   #threads { overflow: auto; flex: 1; }
-  .thread { display: flex; gap: 8px; align-items: baseline; padding: 5px 12px; cursor: pointer; border-top: 1px solid var(--line); }
+  .thread { display: grid; grid-template-columns: 1fr auto; column-gap: 8px; align-items: baseline; padding: 5px 12px; cursor: pointer; border-top: 1px solid var(--line); }
   .thread:hover { background: var(--inset); }
   .thread.on { color: var(--live); }
-  .thread .name { flex: 1; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .thread .name { font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .thread .n { font-size: 11px; color: var(--ink-3); }
+  .thread .span { grid-column: 1 / -1; font-size: 10px; color: var(--ink-3); }
   main { overflow: auto; min-height: 0; padding: 16px 24px 48px; }
   header h1 { font-size: 16px; font-weight: 500; margin: 0 0 2px; }
   header .meta { font-size: 11px; color: var(--ink-3); margin-bottom: 16px; }
@@ -44,12 +46,16 @@
 <body>
   <aside>
     <input id="q" type="search" placeholder="Threads" aria-label="Find a thread">
+    <div id="count" class="mono"></div>
     <div id="threads" role="list"></div>
   </aside>
   <main id="main"></main>
 <script>
-  // Threads: a list of the board's threads, and one thread's posts in time order. Every post carries its line as its
-  // data-anchor, so a ⌘-click asks about that post; the thread's head carries view:<slug>/<thread_id>.
+  // Threads: the overview is the list of every thread, largest first, with its size and when it ran, so the analyst
+  // sees the whole board before reading any of it. Beside it the chosen thread's posts, in time order. The page opens on
+  // the largest thread rather than an empty pane, so there are records, and the labels on them, in view at once.
+  // Every post carries its line as its data-anchor, so a ⌘-click asks about that post and the labels the analyst turns
+  // on mark it; each thread's row and head carry view:<slug>/<thread_id>.
   const slug = (thimble.view && thimble.view.slug) || 'threads'
   const $ = (s) => document.querySelector(s)
   const el = (tag, cls, text) => {
@@ -61,22 +67,33 @@
   let current = null // {key, title, posts, first, last, start, items}
   let focusLine = null
 
+  // a span of days names its days, and one within a day only its times
+  function spanText(first, last) {
+    const a = first.slice(0, 16).replace('T', ' '), b = last.slice(0, 16).replace('T', ' ')
+    return a.slice(0, 10) === b.slice(0, 10) ? `${a} to ${b.slice(11)}` : `${a.slice(0, 10)} to ${b.slice(0, 10)}`
+  }
+
   async function listThreads(q) {
     const res = await thimble.fetch({ op: 'threads', q: q || '' })
     const box = $('#threads')
     box.replaceChildren()
+    $('#count').textContent = res.total > res.threads.length ? `${res.threads.length} of ${res.total} threads` : `${res.total} threads`
     for (const t of res.threads) {
       const row = el('div', 'thread' + (current && current.key === t.key ? ' on' : ''))
       row.setAttribute('role', 'listitem')
       row.dataset.key = t.key
       row.dataset.anchor = `view:${slug}/${t.key}`
       row.dataset.anchorName = `the thread ${t.title}`
-      row.append(el('span', 'name', t.title), el('span', 'n mono', String(t.posts)))
+      const name = el('span', 'name', t.title)
+      name.title = t.title // a long title is cut to the row, and shown whole on hover
+      row.append(name, el('span', 'n mono', String(t.posts)), el('span', 'span mono', spanText(t.first, t.last)))
       row.onclick = () => thimble.navigate(`view:${slug}/${t.key}`)
       box.append(row)
     }
   }
 
+  // A post is shown the way the board showed it: its author, its time and its body with its own line breaks. A record
+  // whose body is markup, such as a wiki page, would be rendered as the page it describes rather than shown as source.
   function postEl(p, title) {
     const card = el('article', 'post' + (p.line === focusLine ? ' target' : ''))
     card.dataset.line = p.line

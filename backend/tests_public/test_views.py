@@ -19,6 +19,7 @@ import re
 import shutil
 import subprocess
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 import httpx
@@ -598,7 +599,7 @@ TOY = "toy-incident"
 EXAMPLES = {
     "board": ("threads", ["view:threads/2"]),
     "network": ("hand-offs", ["view:hand-offs/agent-01"]),
-    "timeline": ("activity-by-ten-minutes", ["view:activity-by-ten-minutes/2026-08-30T14:10"]),
+    "timeline": ("activity", ["view:activity/2026-08-30T14:10"]),
 }
 
 
@@ -644,7 +645,7 @@ async def test_every_worked_example_answers_the_checks_over_the_toy_corpus(name,
 
 async def test_the_worked_examples_resolve_the_toy_corpus_s_units(toy, inproc, bound):
     """What each example makes of the toy corpus: a board post in its thread, a hand-off between two agents on a pull
-    request, and a call in its ten-minute window, each citing its own line."""
+    request, and a call in its time bin, each citing its own line."""
     for name in EXAMPLES:
         _save_example(name)
     post = await views.resolve_locator(TOY, "threads", {"path": "board.jsonl", "fragment": "L1"})
@@ -662,13 +663,16 @@ async def test_the_worked_examples_resolve_the_toy_corpus_s_units(toy, inproc, b
     graph = await views.reader_call(TOY, "hand-offs", "records", {"op": "graph"})
     assert graph["edges"] and all(e["source"] < e["target"] for e in graph["edges"])
 
-    call = await views.resolve_locator(TOY, "activity-by-ten-minutes", {"path": "events.jsonl", "fragment": "L1"})
+    call = await views.resolve_locator(TOY, "activity", {"path": "events.jsonl", "fragment": "L1"})
     assert call["key"] == "2026-08-30T14:00" and call["excerpt"].split("\n")[:2] == ["admin.agents", "admin"]
-    counts = await views.reader_call(TOY, "activity-by-ten-minutes", "records", {"op": "counts"})
-    assert sum(c["n"] for c in counts) == len(events)
-    first = await views.reader_call(TOY, "activity-by-ten-minutes", "records", {"op": "window", "window": "2026-08-30T14:00"})
+    counts = await views.reader_call(TOY, "activity", "records", {"op": "counts"})
+    assert sum(c["n"] for c in counts["rows"]) == len(events)
+    # three hours in five-minute bins: 36 bars at most, each keyed by its start
+    assert counts["bin"]["seconds"] == 300 and len({c["key"] for c in counts["rows"]}) <= 36
+    assert counts["busiest"] in {c["key"] for c in counts["rows"]}
+    first = await views.reader_call(TOY, "activity", "records", {"op": "bin", "key": "2026-08-30T14:00"})
     assert first["items"][0]["ref"] == "events.jsonl#L1"
-    assert first["total"] == sum(c["n"] for c in counts if c["window"] == "2026-08-30T14:00")
+    assert first["total"] == sum(c["n"] for c in counts["rows"] if c["key"] == "2026-08-30T14:00")
 
 
 @pytest.mark.parametrize("name", sorted(EXAMPLES))
@@ -682,3 +686,34 @@ async def test_every_worked_example_s_page_loads_headless_at_its_first_place(nam
     assert rep["ok"], views.gate_lines(rep)
     assert rep["page"]["fetches"] >= 1 and Path(rep["page"]["png"]).is_file()
     assert not views.unmarked(rep["page"]), "the records a worked example shows carry their file refs, for the labels"
+
+
+async def test_the_timeline_example_bins_a_long_log_by_days(toy, inproc, bound, tmp_path, monkeypatch):
+    """The timeline's bin comes from the span: the toy corpus's events spread over sixty days are counted per day, keyed
+    YYYY-MM-DD, and a line still opens in its day."""
+    data = tmp_path / "data"
+    shutil.copytree(toy, data / TOY)
+    monkeypatch.setattr(config, "DATA_DIR", data.resolve())
+    path = data / TOY / "events.jsonl"
+    lines = path.read_text("utf-8").splitlines()
+    t0 = views_time(json.loads(lines[0])["ts"])
+    step = 60 * 86400 / max(1, len(lines) - 1)
+    out = []
+    for i, ln in enumerate(lines):
+        r = json.loads(ln)
+        r["ts"] = datetime.fromtimestamp(t0 + i * step, timezone.utc).isoformat()
+        out.append(json.dumps(r))
+    path.write_text("\n".join(out) + "\n", "utf-8")
+    slug = _save_example("timeline")
+    counts = await views.reader_call(TOY, slug, "records", {"op": "counts"})
+    assert counts["bin"]["seconds"] == 86400
+    keys = {c["key"] for c in counts["rows"]}
+    assert 55 <= len(keys) <= 61 and all(re.fullmatch(r"\d{4}-\d\d-\d\d", k) for k in keys)
+    call = await views.resolve_locator(TOY, slug, {"path": "events.jsonl", "fragment": "L200"})
+    assert call["key"] in keys and call["target"]["bin"] == call["key"]
+    day = await views.resolve_locator(TOY, slug, {"key": call["key"]})
+    assert "events.jsonl#L200" in day["refs"]
+
+
+def views_time(ts: str) -> float:
+    return datetime.fromisoformat(ts.replace("Z", "+00:00")).timestamp()

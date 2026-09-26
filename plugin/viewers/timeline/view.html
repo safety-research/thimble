@@ -2,6 +2,7 @@
 <html>
 <head>
 <style>
+  /* the theme's tokens arrive as CSS variables; the fallbacks are the light theme's, for a page loaded on its own */
   :root {
     --ink: var(--text-primary, #23211d);
     --ink-2: var(--text-secondary, #5f5a52);
@@ -17,29 +18,36 @@
   html, body { margin: 0; height: 100%; }
   body { font: 13px/1.5 var(--sans); color: var(--ink); display: flex; flex-direction: column; }
   .mono { font-family: var(--mono); font-variant-numeric: tabular-nums; }
-  #chart { flex: none; padding: 12px 16px 0; }
-  #window { flex: 1; min-height: 0; overflow: auto; padding: 8px 16px 32px; border-top: 1px solid var(--line-2); }
+  #top { flex: none; padding: 12px 16px 0; }
+  #bin { flex: 1; min-height: 0; overflow: auto; padding: 8px 16px 32px; border-top: 1px solid var(--line-2); }
   h2 { font-size: 14px; font-weight: 500; margin: 8px 0 2px; }
   .meta { font-size: 11px; color: var(--ink-3); margin-bottom: 10px; }
   table { border-collapse: collapse; width: 100%; max-width: 980px; }
   td { padding: 4px 10px 4px 0; border-top: 1px solid var(--line-2); font-size: 12px; vertical-align: top; }
   td.t, td.k { font-family: var(--mono); font-size: 11px; color: var(--ink-3); white-space: nowrap; }
+  td.a { white-space: nowrap; }
+  td:last-child { width: 100%; }
   tr { cursor: pointer; }
   tr:hover td { background: var(--inset); }
   tr.target td { color: var(--live); }
+  button.page { font: 12px var(--sans); color: var(--ink-2); background: none; border: 1px solid var(--line-2); border-radius: 6px; padding: 3px 10px; margin: 8px 8px 0 0; cursor: pointer; }
 </style>
 </head>
 <body>
-  <div id="chart"></div>
-  <div id="window"></div>
+  <div id="top"><div id="chart"></div></div>
+  <div id="bin"></div>
 <script>
-  // Activity by ten minutes: a stacked bar per window and kind of call (vega-lite, one of the libraries thimble
-  // inlines), and below it the calls of the window the analyst clicks or the ref names, each row a data-anchor with its
-  // line. The windows are UTC, so the axis is too.
-  const slug = (thimble.view && thimble.view.slug) || 'activity-by-ten-minutes'
+  // Activity: every call of the log as a stacked bar per time bin and kind (vega-lite, one of the libraries thimble
+  // inlines), with one bin's calls listed below. The page opens on the whole span, the overview, with the busiest bin
+  // listed, so the analyst sees the log's shape and real records before any click. A bar opens its bin, and a row opens
+  // its call wherever thimble shows it. Each row is a data-anchor with its line, so the labels the analyst turns on
+  // mark it; the bin's head carries view:<slug>/<bin>.
+  const slug = (thimble.view && thimble.view.slug) || 'activity'
   const css = (name, fallback) => getComputedStyle(document.documentElement).getPropertyValue(name).trim() || fallback
+  const DAY = 86400
+  let chart = null // the counts answer: {bin: {seconds, first, last}, busiest, rows}
+  let shown = null // {key, offset} of the bin listed below the chart
   let targetRef = null
-  let chartDrawn = false
 
   function el(tag, cls, text) {
     const e = document.createElement(tag)
@@ -48,58 +56,110 @@
     return e
   }
 
+  // The axis names the unit a reader needs for this span: times of day when the bins are shorter than a day and the
+  // whole log falls within one, the day beside the time when it runs longer, days for day bins and the year for week
+  // bins. The format comes from the reader's bin, so the same page reads right over an afternoon and over a year.
+  function axisFormat(bin) {
+    const spanDays = (bin.last - bin.first) / 1000 / DAY
+    if (bin.seconds < DAY) return spanDays < 1 && new Date(bin.first).getUTCDate() === new Date(bin.last).getUTCDate() ? '%H:%M' : '%d %b %H:%M'
+    return bin.seconds < 7 * DAY ? '%d %b' : '%d %b %Y'
+  }
+
+  // A bin's name for its heading, in the same units as the axis.
+  const MONTHS = 'Jan Feb Mar Apr May Jun Jul Aug Sep Oct Nov Dec'.split(' ')
+  function binName(key, seconds) {
+    const start = new Date(key.length > 10 ? key + ':00Z' : key + 'T00:00:00Z')
+    const day = `${start.getUTCDate()} ${MONTHS[start.getUTCMonth()]} ${start.getUTCFullYear()}`
+    const hm = (d) => d.toISOString().slice(11, 16)
+    if (seconds < DAY) return `${day}, ${hm(start)} to ${hm(new Date(start.getTime() + seconds * 1000))} UTC`
+    return seconds < 7 * DAY ? day : `the week of ${day}`
+  }
+
+  // The time unit vega-lite sizes each bar with, from the reader's bin: whole days, hours or minutes and how many.
+  function timeUnit(seconds) {
+    if (seconds % DAY === 0) return { unit: 'utcyearmonthdate', step: seconds / DAY, binned: true }
+    if (seconds % 3600 === 0) return { unit: 'utcyearmonthdatehours', step: seconds / 3600, binned: true }
+    return { unit: 'utcyearmonthdatehoursminutes', step: Math.max(1, Math.round(seconds / 60)), binned: true }
+  }
+
   async function drawChart() {
-    const values = await thimble.fetch({ op: 'counts' })
+    chart = await thimble.fetch({ op: 'counts' })
+    const box = document.getElementById('chart')
     const ink = css('--text-tertiary', '#8b857b')
     const palette = [['--viz-1', '#0072b2'], ['--viz-2', '#e69f00'], ['--viz-3', '#009e73'], ['--viz-4', '#d62728'], ['--viz-5', '#cc79a7'], ['--viz-6', '#8c65e8']]
+    const width = Math.max(200, box.clientWidth)
+    // the axis runs from the first bin's start to the last bin's end, so the last bar lies inside it
+    const starts = chart.rows.map((r) => r.start)
+    const domain = starts.length ? [Math.min(...starts), Math.max(...starts) + chart.bin.seconds * 1000] : undefined
     const spec = {
-      width: 'container', height: 180, background: 'transparent',
-      data: { values },
+      // the axes and the legend fit inside the page's width, so the last bar is never cut off at the edge
+      width: 'container', height: 180, background: 'transparent', autosize: { type: 'fit-x', contains: 'padding' },
+      data: { values: chart.rows },
       mark: { type: 'bar', cursor: 'pointer' },
       encoding: {
-        // the reader has already counted each window, so the time unit only sizes the bars to ten minutes and formats the axis
-        x: { field: 'start', type: 'temporal', timeUnit: { unit: 'utcyearmonthdatehoursminutes', step: 10, binned: true }, title: null, axis: { labelColor: ink, tickColor: ink, domainColor: ink, format: '%H:%M' } },
-        y: { field: 'n', type: 'quantitative', title: null, axis: { labelColor: ink, gridColor: css('--border-hairline', '#eee'), domain: false, ticks: false } },
+        // the reader has counted each bin, so the time unit only sizes the bars to the bin; the bins are UTC, and so
+        // is the axis
+        x: {
+          field: 'start', type: 'temporal', timeUnit: timeUnit(chart.bin.seconds), title: null, scale: domain ? { domain } : {},
+          // a tick label that would collide is dropped rather than drawn over its neighbour, the last one is kept
+          // inside the chart, and there are about as many ticks as fit the chart's width
+          axis: { format: axisFormat(chart.bin), labelOverlap: 'greedy', labelFlush: true, tickCount: Math.max(2, Math.floor(width / 90)), labelColor: ink, tickColor: ink, domainColor: ink },
+        },
+        y: { field: 'n', type: 'quantitative', title: null, axis: { labelColor: ink, gridColor: css('--border-hairline', '#eee'), domain: false, ticks: false, tickMinStep: 1 } },
         color: { field: 'kind', type: 'nominal', title: null, scale: { range: palette.map(([name, fallback]) => css(name, fallback)) }, legend: { orient: 'top', labelColor: ink, labelFont: css('--font-mono', 'monospace') } },
-        tooltip: [{ field: 'window', title: 'window (UTC)' }, { field: 'kind' }, { field: 'n', title: 'calls' }],
+        tooltip: [{ field: 'key', title: 'from (UTC)' }, { field: 'kind' }, { field: 'n', title: 'calls' }],
       },
       config: { view: { stroke: null }, font: css('--font-body', 'sans-serif') },
     }
     const res = await vegaEmbed('#chart', spec, { actions: false, renderer: 'svg' })
     res.view.addEventListener('click', (_, item) => {
-      const w = item && item.datum && item.datum.window
-      if (w) thimble.navigate(`view:${slug}/${w}`)
+      const key = item && item.datum && item.datum.key
+      if (key) thimble.navigate(`view:${slug}/${key}`)
     })
-    chartDrawn = true
   }
 
-  async function openWindow(key) {
-    const res = await thimble.fetch({ op: 'window', window: key })
-    const box = document.getElementById('window')
+  async function openBin(key, offset) {
+    shown = { key, offset: offset || 0 }
+    const res = await thimble.fetch({ op: 'bin', key, offset: shown.offset })
+    const box = document.getElementById('bin')
     const head = el('div')
     head.dataset.anchor = `view:${slug}/${key}`
-    head.dataset.anchorName = `the calls of the ten minutes from ${key}`
-    head.append(el('h2', null, `${key.replace('T', ' ')} UTC`), el('div', 'meta mono', `${res.total} calls${res.total > res.items.length ? `, the first ${res.items.length} shown` : ''}`))
+    head.dataset.anchorName = `the calls from ${key}`
+    const range = res.total > res.items.length ? `, ${res.offset + 1} to ${res.offset + res.items.length} shown` : ''
+    head.append(el('h2', null, binName(key, chart.bin.seconds)), el('div', 'meta mono', `${res.total} calls${range}`))
     const table = el('table')
     for (const call of res.items) {
       const tr = el('tr', call.ref === targetRef ? 'target' : '')
       tr.dataset.anchor = call.ref
       tr.dataset.anchorName = `the ${call.action} call at ${call.time}`
       tr.dataset.anchorText = [call.action, call.agent, call.detail].filter(Boolean).join(' ')
-      tr.append(el('td', 't', call.time.slice(11, 19)), el('td', 'k', call.action), el('td', null, call.agent), el('td', null, call.detail))
+      tr.append(el('td', 't', call.time.slice(11, 19)), el('td', 'k', call.action), el('td', 'a', call.agent), el('td', null, call.detail))
       tr.onclick = () => thimble.navigate(call.ref)
       table.append(tr)
     }
-    box.replaceChildren(head, table)
+    const pages = el('div')
+    if (res.offset > 0) {
+      const prev = el('button', 'page', 'Earlier calls')
+      prev.onclick = () => openBin(key, Math.max(0, res.offset - res.items.length))
+      pages.append(prev)
+    }
+    if (res.offset + res.items.length < res.total) {
+      const next = el('button', 'page', 'Later calls')
+      next.onclick = () => openBin(key, res.offset + res.items.length)
+      pages.append(next)
+    }
+    box.replaceChildren(head, table, pages)
     const hit = box.querySelector('tr.target')
     if (hit) hit.scrollIntoView({ block: 'center' })
+    else box.scrollTop = 0
   }
 
   thimble.onOpen(async (place) => {
     const t = (place && place.target) || {}
     targetRef = t.ref || null
-    if (!chartDrawn) await drawChart()
-    if (t.window) await openWindow(t.window)
+    if (!chart) await drawChart()
+    if (t.bin) await openBin(t.bin, t.offset)
+    else if (!shown && chart.busiest) await openBin(chart.busiest, 0)
   })
 </script>
 </body>

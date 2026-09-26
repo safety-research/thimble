@@ -1,8 +1,13 @@
 # Hand-offs: agents linked by the pull requests they passed between them. Each line of events.jsonl is one call an
 # agent made to the shared server, with the `agent`, the `action`, its `ts` and its `params`; the calls on a pull
-# request carry its number as params.pr. Taken in time order per pull request, a call whose agent differs from the
-# previous call's agent is a hand-off from that agent to this one, and the pair is an edge of the network. The edge
-# keeps the lines of its hand-offs, so the page can open the records behind every link.
+# request carry its number as params.pr.
+#
+# What the view is for: who worked with whom is spread over hundreds of calls, one line each. Drawn as a network, the
+# analyst sees at once which agents passed work between them and how often, and opens the calls behind any link.
+#
+# How the reader works: taken in time order per pull request, a call whose agent differs from the previous call's
+# agent is a hand-off from that agent to this one, and the pair is an edge of the network. The edge keeps the lines of
+# its hand-offs, so the page can open the records behind every link.
 import json
 import re
 

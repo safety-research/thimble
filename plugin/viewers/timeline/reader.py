@@ -1,14 +1,29 @@
-# Activity by ten minutes: a server's call log as a timeline. Each line of events.jsonl is one call an agent made, with
-# its `ts`, the `agent`, the `action` (such as pr.claim or git.push, whose part before the dot is the call's kind) and
-# its `params`. The index keeps each call's line, window and kind, so the chart's counts come from the index and a
-# window's calls are read back by line.
+# Activity: a server's call log as a timeline. Each line of events.jsonl is one call an agent made, with its `ts`, the
+# `agent`, the `action` (such as pr.claim or git.push, whose part before the dot is the call's kind) and its `params`.
+#
+# What the view is for: the analyst sees at a glance when the agents were busy and with what, over the whole log, and
+# opens any stretch of it down to the single call. So the chart counts every call per time bin and kind, and one bin's
+# calls are listed below it.
+#
+# How the reader works: the index keeps each call's line, epoch, bin and kind, so the chart's counts come from the
+# index alone and a bin's calls are read back by seeking to their lines.
 import json
 import re
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
-WINDOW_MINUTES = 10  # one bar of the chart; a log that spans days reads better per hour or per day
-WINDOW_CALLS = 200  # calls one window query returns
+# The chart shows the whole span in at most MAX_BARS bars, so the bin comes from the data, never from a constant: a log
+# of one afternoon is binned by minutes, a log of two months by days, and one of several years by weeks. A bin copied
+# from another corpus gives thousands of slivers, or a handful of bars with the same tick label under each.
+BINS = [60, 300, 600, 1800, 3600, 3 * 3600, 6 * 3600, 86400, 7 * 86400]  # seconds
+MAX_BARS = 120
+DAY = 86400
+BIN_CALLS = 200  # calls one bin query returns; the page asks for the next ones when the analyst wants more
 TEXT_PARAMS = ("status", "title", "reason")  # params whose text says what a call was about
+
+
+def _bin_seconds(first, last):
+    span = max(1, last - first)
+    return next((b for b in BINS if span / b <= MAX_BARS), BINS[-1])
 
 
 def _epoch(t):
@@ -20,17 +35,28 @@ def _epoch(t):
     return (dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)).timestamp()
 
 
-def _window(epoch):
-    """The window's key: its start in UTC, written YYYY-MM-DDTHH:MM."""
-    start = epoch - epoch % (WINDOW_MINUTES * 60)
-    return datetime.fromtimestamp(start, timezone.utc).strftime("%Y-%m-%dT%H:%M")
+def _bin_start(epoch, seconds):
+    """The start of the bin holding `epoch`, in UTC: a bin of under a week starts at a multiple of its length from
+    midnight, and a week on its Monday, so bins line up with the ticks a reader expects."""
+    if seconds < 7 * DAY:
+        return epoch - epoch % seconds
+    day = datetime.fromtimestamp(epoch - epoch % DAY, timezone.utc)
+    return (day - timedelta(days=day.weekday())).timestamp()
+
+
+def _bin_key(start, seconds):
+    """A bin's key, which is also how a citation names it: its start as YYYY-MM-DDTHH:MM for bins under a day, and as
+    YYYY-MM-DD for a day or a week, since a longer bin has no time of day."""
+    fmt = "%Y-%m-%dT%H:%M" if seconds < DAY else "%Y-%m-%d"
+    return datetime.fromtimestamp(start, timezone.utc).strftime(fmt)
 
 
 def build_index(paths):
-    """{"calls": [[path, line, window, kind, epoch], ...] in time order, "windows": {window: [first, last+1] into calls},
-    "line": {"path#Ln": index into calls}, "offsets": {path: [byte offset of line n at n-1]}}. A line with no time that
-    parses is in `offsets` but not in `calls`, so it resolves without a window."""
-    calls, offsets = [], {}
+    """{"calls": [[path, line, bin key, kind, epoch], ...] in time order, "bins": {key: [first, last+1] into calls},
+    "starts": {key: start epoch}, "bin": seconds, "first", "last": epochs, "line": {"path#Ln": index into calls},
+    "offsets": {path: [byte offset of line n at n-1]}}. A line with no time that parses is in `offsets` but not in
+    `calls`, so it resolves without a bin."""
+    rows, offsets = [], {}
     for path in paths:
         offs = offsets.setdefault(path, [])
         with open(path, "rb") as f:
@@ -44,15 +70,20 @@ def build_index(paths):
                     continue
                 if not isinstance(r, dict) or (epoch := _epoch(r.get("ts"))) is None:
                     continue
-                kind = str(r.get("action") or "other").split(".")[0]
-                calls.append([path, n, _window(epoch), kind, epoch])
-    calls.sort(key=lambda c: (c[4], c[0], c[1]))
-    windows = {}
-    for i, c in enumerate(calls):
-        span = windows.setdefault(c[2], [i, i + 1])
-        span[1] = i + 1
+                rows.append((path, n, str(r.get("action") or "other").split(".")[0], epoch))
+    rows.sort(key=lambda c: (c[3], c[0], c[1]))
+    first, last = (rows[0][3], rows[-1][3]) if rows else (0.0, 0.0)
+    seconds = _bin_seconds(first, last)
+    calls, bins, starts = [], {}, {}
+    for i, (path, n, kind, epoch) in enumerate(rows):
+        start = _bin_start(epoch, seconds)
+        key = _bin_key(start, seconds)
+        starts[key] = start
+        calls.append([path, n, key, kind, epoch])
+        bins.setdefault(key, [i, i + 1])[1] = i + 1
     line = {f"{c[0]}#L{c[1]}": i for i, c in enumerate(calls)}
-    return {"calls": calls, "windows": windows, "line": line, "offsets": offsets}
+    return {"calls": calls, "bins": bins, "starts": starts, "bin": seconds, "first": first, "last": last,
+            "line": line, "offsets": offsets}
 
 
 def _lines(index, path, wanted):
@@ -89,13 +120,28 @@ def _excerpt(r):
                      + [p[k] for k in TEXT_PARAMS if isinstance(p.get(k), str) and p[k]])
 
 
+def _counts(index):
+    """The chart's rows, one per bin and kind: {start (ms), key, kind, n}."""
+    counts = {}
+    for _, _, key, kind, _ in index["calls"]:
+        counts[(key, kind)] = counts.get((key, kind), 0) + 1
+    return [{"start": index["starts"][key] * 1000, "key": key, "kind": kind, "n": n}
+            for (key, kind), n in sorted(counts.items())]
+
+
+def _busiest(index):
+    """The bin with the most calls, which the page lists below the chart when it opens."""
+    return max(index["bins"], key=lambda k: index["bins"][k][1] - index["bins"][k][0], default=None)
+
+
 def records(index, query):
-    """{op: counts} gives [{window, start, kind, n}] for the chart, with start in milliseconds; {op: window, window} the
-    window's calls in time order."""
+    """{op: counts} gives the chart: {bin: {seconds, first, last}, busiest, rows: [{start, key, kind, n}]}, times in
+    milliseconds. {op: bin, key, offset?} gives one bin's calls in time order, BIN_CALLS from `offset`."""
     query = query or {}
-    if query.get("op") == "window":
-        first, end = index["windows"].get(query.get("window"), [0, 0])
-        rows = index["calls"][first:end][:WINDOW_CALLS]
+    if query.get("op") == "bin":
+        first, end = index["bins"].get(query.get("key"), [0, 0])
+        offset = max(0, int(query.get("offset") or 0))
+        rows = index["calls"][first + offset:end][:BIN_CALLS]
         by_file = {}
         for c in rows:
             by_file.setdefault(c[0], []).append(c[1])
@@ -105,22 +151,16 @@ def records(index, query):
             r = recs[p].get(n, {})
             items.append({"ref": f"{p}#L{n}", "time": str(r.get("ts") or ""), "kind": kind,
                           "action": r.get("action") or "", "agent": r.get("agent") or "", "detail": _detail(r)})
-        return {"window": query.get("window"), "total": end - first, "items": items}
-    counts = {}
-    for _, _, window, kind, _ in index["calls"]:
-        counts[(window, kind)] = counts.get((window, kind), 0) + 1
-    out = []
-    for (window, kind), n in sorted(counts.items()):
-        start = datetime.strptime(window, "%Y-%m-%dT%H:%M").replace(tzinfo=timezone.utc).timestamp()
-        out.append({"window": window, "start": start * 1000, "kind": kind, "n": n})
-    return out
+        return {"key": query.get("key"), "total": end - first, "offset": offset, "items": items}
+    return {"bin": {"seconds": index["bin"], "first": index["first"] * 1000, "last": index["last"] * 1000},
+            "busiest": _busiest(index), "rows": _counts(index)}
 
 
 def resolve(index, locator):
     """events.jsonl#L<n>: the call, its excerpt the action, the agent and the text params as the record holds them.
-    view:<slug>/<window>: the window, its excerpt the actions called in it, citing its calls in time order."""
+    view:<slug>/<bin>: the bin, its excerpt the actions called in it, citing its calls in time order."""
     if "key" in locator:
-        span = index["windows"].get(locator["key"])
+        span = index["bins"].get(locator["key"])
         if not span:
             return None
         rows = index["calls"][span[0]:span[1]]
@@ -132,7 +172,7 @@ def resolve(index, locator):
         excerpt = "\n".join(dict.fromkeys(a for a in actions if isinstance(a, str) and a))
         return {"excerpt": excerpt, "label": f"{locator['key'].replace('T', ' ')} · {len(rows)} calls",
                 "refs": [f"{c[0]}#L{c[1]}" for c in rows][:200], "key": locator["key"],
-                "target": {"window": locator["key"]}}
+                "target": {"bin": locator["key"]}}
     path, fragment = locator.get("path"), str(locator.get("fragment") or "")
     m = re.fullmatch(r"L(\d+)", fragment)
     if not m or path not in index["offsets"] or not 1 <= int(m.group(1)) <= len(index["offsets"][path]):
@@ -143,7 +183,11 @@ def resolve(index, locator):
         return None
     label = f"{r.get('action') or 'call'} · {str(r.get('ts') or '').replace('T', ' ')[:16]}".strip(" ·")
     if ref not in index["line"]:
-        # a call with no time that parses has no window, so the page shows the chart alone
+        # a call with no time that parses has no bin, so the page shows the chart alone
         return {"excerpt": _excerpt(r), "label": label, "refs": [ref], "key": None, "target": {}}
-    c = index["calls"][index["line"][ref]]
-    return {"excerpt": _excerpt(r), "label": label, "refs": [ref], "key": c[2], "target": {"window": c[2], "ref": ref}}
+    i = index["line"][ref]
+    c = index["calls"][i]
+    # the page of the bin's calls that holds this one, so a cited call is listed even in a bin of thousands
+    at = i - index["bins"][c[2]][0]
+    return {"excerpt": _excerpt(r), "label": label, "refs": [ref], "key": c[2],
+            "target": {"bin": c[2], "ref": ref, "offset": at - at % BIN_CALLS}}

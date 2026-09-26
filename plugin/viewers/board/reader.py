@@ -1,12 +1,21 @@
 # Threads: a message board read as threads. Each line of board.jsonl is one post, with its `thread_id`, the thread's
-# `thread_title`, its `author`, its `created_at` and its `body`. The posts of a thread are spread over the file between
-# other threads' posts, so the index keeps, per thread, its posts in time order with each one's line, and the file's
-# byte offsets, so that a post is read back by seeking to its line instead of holding every body in memory.
+# `thread_title`, its `author`, its `created_at` and its `body`.
+#
+# What the view is for: the file holds the posts in the order they were written, so a proposal and the replies it got
+# lie far apart between other threads' posts. Read as threads, the analyst sees every conversation of the board at
+# once, how big each one is and when it ran, and reads one conversation from start to end.
+#
+# How the reader works: the index keeps, per thread, its posts in time order with each one's line, and the file's byte
+# offsets, so a post is read back by seeking to its line instead of holding every body in memory.
 import json
 import re
 
 EXCERPT_CHARS = 1500  # of a post, cut at a line boundary
 PAGE_POSTS = 60  # posts one fetch of a thread returns
+# The overview lists every thread, largest first, since the biggest conversations are where most happened. A board
+# of thousands of threads is narrowed by the search box rather than scrolled, so the list stops at LIST_THREADS and
+# says how many there are in all.
+LIST_THREADS = 300
 
 
 def build_index(paths):
@@ -106,7 +115,7 @@ def records(index, query):
     rows = [_thread_summary(path, data, key) for path, data in index.items() for key in data["threads"]
             if q in _title(data, key).lower()]
     rows.sort(key=lambda t: (-t["posts"], t["first"]))
-    limit = int(query.get("limit") or 300)
+    limit = int(query.get("limit") or LIST_THREADS)
     return {"total": len(rows), "threads": rows[:limit]}
 
 
