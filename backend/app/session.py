@@ -85,6 +85,8 @@ MONITOR_TASK_RE = re.compile(r"\btask\s+([A-Za-z0-9_-]+)")  # "Monitor started (
 # a message the analyst typed to a working subagent in Claude Code's agent view, as the subagent's meta prompt carries it
 TYPED_RE = re.compile(r"^[^\n]*while you were working:\n(.*?)(?:\n\nThis is how Claude Code surfaces.*)?\Z", re.S)
 RELAYED_BY = agents.MAIN_ID  # `by` of a message main sent a thread's fork or a subagent, which its chat shows as from main
+# main's SendMessage to a working subagent, as the subagent's meta prompt carries it
+COORDINATOR_RE = re.compile(r"^[^\n]*sent a message while you were working:\n(.*?)(?:\n\nAddress this.*)?\Z", re.S)
 COMMAND_RE = re.compile(r"<command-name>(.*?)</command-name>", re.S)
 COMMAND_ARGS_RE = re.compile(r"<command-args>(.*?)</command-args>", re.S)
 LOCAL_CAVEAT = "<local-command-caveat>"  # the meta record before a local command's line (module note, the table)
@@ -1085,7 +1087,11 @@ def _finish_sub(lv: Live, sub: Sub, status: str, result: str | None, *, kind: st
     except Exception:  # noqa: BLE001 — a chat deleted under the mirror
         log.debug("%s: subagent chat %s could not be finished", lv.c, sub.chat, exc_info=True)
     if sub.role == orientation.ROLE:
-        _orientation(orientation.finished, lv.c, sub.chat, status, sub.report or result)
+        k = int((orientation.read_run(lv.c) or {}).get("run") or 0)
+        if k > 0:  # a follow-up of the orientation's subagent (_revive)
+            _orientation(orientation.run_finished, lv.c, sub.chat, k, status, {})
+        else:
+            _orientation(orientation.finished, lv.c, sub.chat, status, sub.report or result)
 
 
 def _agent_dir(lv: Live) -> Path | None:
@@ -1226,8 +1232,9 @@ def _tail_sub(lv: Live, sub: Sub) -> int:
         agents.set_running(lv.c, sub.chat, True)
     lines = (sub.buf + data).split(b"\n")
     sub.buf = lines.pop()
-    if sub.done and not sub.thread and sub.owner is None and not sub.workflow and _resumed(lines):
-        _revive(lv, sub)
+    resumed = _resumed(lines) if sub.done and not sub.thread and sub.owner is None and not sub.workflow else None
+    if resumed is not None:
+        _revive(lv, sub, resumed)
     n = 0
     try:
         for line in lines:
@@ -1242,9 +1249,10 @@ def _tail_sub(lv: Live, sub: Sub) -> int:
     return n
 
 
-def _resumed(lines: list[bytes]) -> bool:
-    """Whether lines a finished subagent's transcript gained show it working again: a reply of its own, or a message
-    the analyst or main sent it, which resumes it."""
+def _resumed(lines: list[bytes]) -> list[dict] | None:
+    """Whether lines a finished subagent's transcript gained show it working again, a reply of its own or a message
+    the analyst or main sent it, which resumes it: the messages ({text, by}), else None when it did not resume."""
+    resumed, messages = False, []
     for line in lines:
         try:
             rec = json.loads(line)
@@ -1253,14 +1261,20 @@ def _resumed(lines: list[bytes]) -> bool:
         if not isinstance(rec, dict):
             continue
         origin = rec.get("origin") if isinstance(rec.get("origin"), dict) else {}
-        if rec.get("type") == "assistant" or _typed(rec) is not None or origin.get("kind") == "coordinator":
-            return True
-    return False
+        typed = _typed(rec)
+        if typed is not None:
+            messages.append({"text": typed, "by": TERMINAL})
+        elif origin.get("kind") == "coordinator":
+            m = COORDINATOR_RE.match(_user_text(rec) or "")
+            messages.append({"text": (m.group(1) if m else _user_text(rec) or "").strip(), "by": RELAYED_BY})
+        resumed = resumed or rec.get("type") == "assistant" or typed is not None or origin.get("kind") == "coordinator"
+    return messages if resumed else None
 
 
-def _revive(lv: Live, sub: Sub) -> None:
+def _revive(lv: Live, sub: Sub, messages: list[dict]) -> None:
     """A finished subagent was resumed (a message from the analyst's agent view or from main): its chat runs again,
-    and an orientation's record with it, so its next end closes them anew."""
+    and an orientation's record with it, so its next end closes them anew. An orientation whose first run failed runs
+    that run again (its drafts stay held); one that had finished takes the messages as a follow-up, run k+1."""
     sub.done = False
     sub.finish = None
     try:
@@ -1269,8 +1283,14 @@ def _revive(lv: Live, sub: Sub) -> None:
         log.debug("%s: subagent chat %s could not run again", lv.c, sub.chat, exc_info=True)
         return
     log.info("%s: subagent %s (%s) was resumed", lv.c, sub.agent_id, sub.chat)
-    if sub.role == orientation.ROLE:
+    if sub.role != orientation.ROLE:
+        return
+    rec = orientation.read_run(lv.c) or {}
+    k = int(rec.get("run") or 0)
+    if k == 0 and rec.get("status") == "failed":
         _orientation(orientation.restarted, lv.c, sub.chat)
+    else:
+        _orientation(orientation.run_started, lv.c, sub.chat, k + 1, messages)
 
 
 def call_session(c: str, tool_use_id: str | None) -> str | None:

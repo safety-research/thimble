@@ -148,6 +148,17 @@ async def test_the_subagent_is_the_orientation_chat_its_calls_act_as_the_orienta
     assert [e["text"] for e in _log(chat) if e["type"] == "user"] == ["Go on where you stopped."]
     _append(p, lv, [_note("completed"), END])
     assert orientation.read_run(CORPUS)["status"] == "done" and agents.read_meta(CORPUS, chat)["status"] == "done"
+    # main resumes the finished orientation with a follow-up: run 1, whose changes land in place, so nothing is held
+    _add(sub, [{"type": "user", "isMeta": True, "origin": {"kind": "coordinator"}, "message": {
+        "content": "The coordinator sent a message while you were working:\nAdd a card on edits per day.\n\nAddress this before completing your current task."}},
+        _assistant({"type": "text", "text": "Adding it."})])
+    session.tail_once(lv)
+    run = orientation.read_run(CORPUS)
+    assert run["status"] == "running" and run["run"] == 1 and not orientation.drafting(CORPUS)
+    assert run["followups"][-1]["messages"] == [{"text": "Add a card on edits per day.", "by": "main"}]
+    _append(p, lv, [_note("completed"), END])
+    run = orientation.read_run(CORPUS)
+    assert run["status"] == "done" and run["followups"][-1]["status"] == "done"
 
 
 async def test_a_message_or_a_stop_from_the_browser_goes_through_main(tmp_path):
