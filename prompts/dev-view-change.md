@@ -4,7 +4,7 @@ The analyst asked for a change to the view {{name}}. The ticket now reads:
 
 - What the analyst sees in it and why that helps: {{why}}
 - The files it reads: {{claims}}
-- The unit and the layout: {{arrangement}}
+{{spec}}
 
 {{request}}
 

@@ -27,6 +27,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import textwrap
 from pathlib import Path
 from typing import Any
 
@@ -323,8 +324,8 @@ def drafts(c: str) -> list[str]:
         out.append(tools.hint("critique-deck", deck=orientation.GROUP_PATHS["deck"]))
     held = [p for p in views.list_proposals(c) if p.get("held") and p.get("status") != "dropped"]
     if held:
-        rows = "\n".join(f"- {p.get('name')}: {p.get('why')} Claims {', '.join(p.get('claims') or [])}. {p.get('arrangement')}"
-                         for p in held)
+        rows = "\n".join(f"- {p.get('name')}: {p.get('why')} Claims {', '.join(p.get('claims') or [])}.\n"
+                         + textwrap.indent(views.spec_lines(p), "  ") for p in held)
         out.append(tools.hint("critique-proposals", proposals=rows))
     return out
 

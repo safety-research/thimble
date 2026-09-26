@@ -452,7 +452,7 @@ async def read(c: str, run: _Run, prop: dict[str, Any], view: dict[str, Any], sh
                                     "label_criteria": secs["criteria-labels"] if lined else ""})
     user = _fill(secs["view"], {"name": str(prop.get("name") or view["name"]), "why": str(prop.get("why") or view["why"]),
                                 "claims": ", ".join(prop.get("claims") or view["claims"]),
-                                "arrangement": str(prop.get("arrangement") or "-"), "measured": measured(shots),
+                                "spec": views.spec_lines(prop), "measured": measured(shots),
                                 "records": records_text(shots) or "-"})
     desc, schema = tools.split_section(secs["findings"])
     schema["properties"]["assessment"]["minItems"] = schema["properties"]["assessment"]["maxItems"] = n

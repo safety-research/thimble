@@ -36,7 +36,7 @@ The view is {{name}}.
 
 - What the analyst sees in it and why that helps: {{why}}
 - The files it reads: {{claims}}
-- The unit and the layout: {{arrangement}}
+{{spec}}
 
 What the checks measured, per picture
 {{measured}}

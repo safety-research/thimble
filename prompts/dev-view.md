@@ -10,7 +10,7 @@ The view {{name}}, whose slug is `{{slug}}`.
 
 - What the analyst sees in it and why that helps: {{why}}
 - The files it reads: {{claims}}
-- The unit and the layout: {{arrangement}}
+{{spec}}
 
 ## A good view
 

@@ -1208,6 +1208,37 @@ def proposals_path(c: str) -> Path:
     return views_dir(c) / PROPOSALS_FILE
 
 
+# a proposal's `spec`, the fields propose_view requires beside its free-text `why`, in the order a ticket lists them,
+# each with the words it is named by
+SPEC_FIELDS = (("unit", "Unit"), ("overview", "Overview"), ("label_marks", "Label marks"), ("sizes", "Sizes"))
+
+
+def clean_spec(raw: Any) -> dict[str, str]:
+    """The spec fields `raw` holds, each with its whitespace collapsed; empty ones are left out."""
+    if not isinstance(raw, dict):
+        return {}
+    return {k: v for k, _ in SPEC_FIELDS if (v := " ".join(str(raw.get(k) or "").split()))}
+
+
+def spec_arrangement(spec: dict[str, str]) -> str:
+    """A spec as the proposal's `arrangement`: one `<Field>: <text>` line per field."""
+    return "\n".join(f"{label}: {spec[k]}" for k, label in SPEC_FIELDS if spec.get(k))
+
+
+def spec_lines(prop: dict[str, Any]) -> str:
+    """A proposal's layout as a ticket's bullets: one per spec field, or one holding the free-text arrangement of a
+    proposal without a spec."""
+    spec = clean_spec(prop.get("spec"))
+    if spec:
+        return "\n".join(f"- {label}: {spec[k]}" for k, label in SPEC_FIELDS if spec.get(k))
+    return f"- The unit and the layout: {' '.join(str(prop.get('arrangement') or '').split()) or '-'}"
+
+
+def _lines(text: Any) -> str:
+    """`text` with each line's whitespace collapsed and blank lines dropped."""
+    return "\n".join(t for ln in str(text or "").splitlines() if (t := " ".join(ln.split())))
+
+
 def _normalize_proposal(p: dict[str, Any]) -> dict[str, Any]:
     """A stored row as the routes give it, with legacy fields normalised: a glob reads as its claim, and a `proposed`
     status
@@ -1293,28 +1324,31 @@ def title_case(name: Any) -> str:
 
 
 def propose(c: str, name: str, why: str, claims: Any, arrangement: str, proposed_by: str = "analyst",
-            hold: bool = False, asked: bool = False, suggested: bool = False) -> dict[str, Any]:
+            hold: bool = False, asked: bool = False, suggested: bool = False,
+            spec: dict[str, Any] | None = None) -> dict[str, Any]:
     """Store a proposal, announce it and queue it for the dev agent at once (dev.queue_view). A proposal of the same
     name not
     yet built is replaced under its slug, its build stopped. With `hold` (the orientation's first run) it is stored
     `held: true` and queued unannounced until release_held; a held proposal proposed again unchanged is left as it
     is.
     `asked` says the analyst asked for it. With `suggested` (a viewer for a file type the File browser proposes) it is
-    stored `suggested` and not queued until the analyst accepts it (accept)."""
+    stored `suggested` and not queued until the analyst accepts it (accept). A `spec` (propose_view's fields) is stored
+    with the proposal and written out as its `arrangement`."""
     name = title_case(name)
     if not name:
         raise HTTPException(400, "a proposal needs a name")
     claims_l = _str_list(claims)
     if not claims_l:
         raise HTTPException(400, "a proposal claims at least one file: give `claims` as corpus-relative globs")
-    arrangement = " ".join(str(arrangement or "").split())
+    spec = clean_spec(spec)
+    arrangement = spec_arrangement(spec) if spec else _lines(arrangement)
     if not arrangement:
         raise HTTPException(400, "a proposal says which records a unit gathers and how the page lays it out (`arrangement`)")
     # a view already built under this name is changed in place, as the analyst still uses it, rather than built again
     # beside it under a new slug
     if (built := built_slug(c, name)) is not None:
         return revise(c, built, "", why=why, claims=claims_l, arrangement=arrangement, proposed_by=proposed_by,
-                      asked=asked)
+                      asked=asked, spec=spec or None)
     with _proposals_lock:
         items = list_proposals(c)
         old = next((p for p in items if str(p.get("name", "")).casefold() == name.casefold()
@@ -1330,6 +1364,8 @@ def propose(c: str, name: str, why: str, claims: Any, arrangement: str, proposed
         slug = old["slug"] if old is not None else _unique_slug(c, name)
         prop = {"slug": slug, "name": name, "why": why, "claims": claims_l, "arrangement": arrangement,
                 "proposed_by": str(proposed_by or "analyst"), "status": "suggested" if suggested else "queued", "ts": _now()}
+        if spec:
+            prop["spec"] = spec
         if hold:
             prop["held"] = True
         if asked:
@@ -1494,7 +1530,8 @@ def end_revision(c: str, slug: str, error: str | None = None, *, failed_change: 
 
 
 def revise(c: str, slug: str, request: str, *, why: str | None = None, claims: Any = None,
-           arrangement: str | None = None, proposed_by: str = "analyst", asked: bool = False) -> dict[str, Any]:
+           arrangement: str | None = None, proposed_by: str = "analyst", asked: bool = False,
+           spec: dict[str, Any] | None = None) -> dict[str, Any]:
     """A change to the view `slug`, as a view ticket on its proposal (made from the view when it has none): `request` is
     the
     analyst's words, and given fields replace the proposal's. A built view's files are copied aside first
@@ -1525,8 +1562,9 @@ def revise(c: str, slug: str, request: str, *, why: str | None = None, claims: A
         fields: dict[str, Any] = {"status": "queued", "error": None, "change": change or None, "changed": True,
                                   "revision": revision or None, "asked": True if asked else None,
                                   "failed_change": None, "ts": _now()}
+        spec = clean_spec(spec)
         for k, v in (("why", " ".join(str(why or "").split())), ("claims", _str_list(claims)),
-                     ("arrangement", " ".join(str(arrangement or "").split()))):
+                     ("arrangement", spec_arrangement(spec) if spec else _lines(arrangement)), ("spec", spec)):
             if v:
                 fields[k] = v
         if revision:

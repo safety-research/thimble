@@ -2007,8 +2007,9 @@ def _view_chat(c: str, prop: dict[str, Any]) -> str | None:
 
 
 def build_view_prompt(c: str, prop: dict[str, Any], folder: Path, corpus: Path) -> str:
-    """The view ticket's first message: prompts/dev.md with prompts/dev-view.md as its task, the proposal's four fields,
-    the slug, the view's folder, the corpus, the worked examples and the check command's URL."""
+    """The view ticket's first message: prompts/dev.md with prompts/dev-view.md as its task, the proposal's fields (its
+    spec as bullets, views.spec_lines), the slug, the view's folder, the corpus, the worked examples and the check
+    command's URL."""
     from . import views  # noqa: PLC0415
 
     return prompts.render_dev("dev-view", {
@@ -2016,7 +2017,7 @@ def build_view_prompt(c: str, prop: dict[str, Any], folder: Path, corpus: Path) 
         "slug": str(prop["slug"]),
         "why": str(prop.get("why") or ""),
         "claims": ", ".join(prop.get("claims") or []),
-        "arrangement": str(prop.get("arrangement") or ""),
+        "spec": views.spec_lines(prop),
         "folder": str(folder),
         "corpus": str(corpus),
         "examples": str(views.EXAMPLES_DIR),
@@ -2034,12 +2035,14 @@ def view_check_command(c: str, slug: str) -> str:
 def build_view_change_prompt(prop: dict[str, Any], folder: Path) -> str:
     """The message of a change to a view (views.revise): prompts/dev-view-change.md with the proposal's fields and the
     analyst's request fenced as data."""
+    from . import views  # noqa: PLC0415
+
     request = str(prop.get("change") or "").strip()
     return prompts.render("dev-view-change", {
         "name": str(prop.get("name") or prop["slug"]),
         "why": str(prop.get("why") or ""),
         "claims": ", ".join(prop.get("claims") or []),
-        "arrangement": str(prop.get("arrangement") or "") or "-",
+        "spec": views.spec_lines(prop),
         "request": fenced("the analyst's request", request) if request else "",
         "folder": str(folder),
     })

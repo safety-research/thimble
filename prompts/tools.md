@@ -188,18 +188,21 @@ Lay out the browser's main area, right of the chat, as panes that each show one 
 
 ## propose_view
 
-Propose a view: a viewer written for how the records of files you have read are best read, such as a log's lines grouped into conversations, or a viewer for every file of one unusual type. thimble's dev agent starts building it at once, in the background, and it opens in the Files tab when it passes its checks.
+Propose a view, a page that shows records in a form their files hide, or a viewer for one unusual file type. thimble's dev agent builds it from these fields alone, so name the fields, keys and counts it needs.
 
 ```json
 {
   "type": "object",
   "properties": {
-    "name": {"type": "string", "description": "A short name in Title Case, as its tab shows it, such as Timeline or Tool Call Timeline."},
-    "why": {"type": "string", "description": "What the analyst sees in it and why that helps."},
+    "name": {"type": "string", "description": "A short name in Title Case, as its tab shows it, such as Message Board."},
+    "why": {"type": "string", "description": "What the analyst sees and why that helps, in whatever form fits the records, such as a wiki page with its edit history or a graph of who replies to whom."},
     "claims": {"type": "array", "items": {"type": "string"}, "description": "Globs of the files it reads. For a viewer of one file type, the extension's glob, such as **/*.vtt."},
-    "arrangement": {"type": "string", "description": "The unit, which records it gathers, grouped by which field and in what order, the sizes it must fit, such as how many units and what time span, and how the page lays it out, from the overview it opens on to one record's details, with the definition the cards and labels use for any outcome it marks, such as worked or failed."}
+    "unit": {"type": "string", "description": "What one row, mark or card stands for, the field that keys it, and how many there are."},
+    "overview": {"type": "string", "description": "What the first screen shows before any click."},
+    "label_marks": {"type": "string", "description": "Which elements carry the marks of the labels that are on, and which lines of the files each stands for."},
+    "sizes": {"type": "string", "description": "The counts the layout must fit, such as the time span and the longest name, and what is grouped, paged or shortened."}
   },
-  "required": ["name", "why", "claims", "arrangement"]
+  "required": ["name", "why", "claims", "unit", "overview", "label_marks", "sizes"]
 }
 ```
 
@@ -805,7 +808,7 @@ Its drafted deck is the group `{deck}`, which `list_cards` lists.
 
 ## critique-proposals
 
-The views it drafted, which are not built yet, each with what it is for, the files it reads and its arrangement.
+The views it proposed, each with what it is for, the files it reads and its layout.
 
 {proposals}
 
