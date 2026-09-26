@@ -67,6 +67,7 @@ export const VIEW_TOKENS = [
   '--radius-chip',
   '--radius-seg',
   '--radius-ui',
+  '--radius-card',
   '--transition-color',
   '--accent-soft',
   '--border-hairline',

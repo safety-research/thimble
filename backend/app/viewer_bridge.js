@@ -276,6 +276,9 @@
   var BARS =
     '[data-thimble-edge]{--thimble-own:0 0 transparent}' +
     '[data-thimble-edge="in"]{box-shadow:inset ' + BAR + 'px 0 0 var(--thimble-label),var(--thimble-own)!important}' +
+    // a row's cells paint over the row's own shadow when they have a background, so a row's bar is drawn on its first
+    // cell as well
+    'tr[data-thimble-edge="in"]>:first-child{box-shadow:inset ' + BAR + 'px 0 0 var(--thimble-label)!important}' +
     '[data-thimble-edge="out"]{box-shadow:-' + 2 * BAR + 'px 0 0 -' + BAR + 'px var(--thimble-label),var(--thimble-own)!important}' +
     // an SVG element draws no box-shadow, so a mark there is a halo in the label's colour around the shape; a group's
     // text keeps no halo, so its label stays sharp

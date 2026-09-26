@@ -169,6 +169,25 @@ test("a marked element keeps the view's own box-shadow, and only the outermost e
   assert.deepEqual(off, ['rgb(1, 2, 3) 0px 0px 0px 1px inset', 'rgb(1, 2, 3) 0px 0px 0px 1px inset'], 'turned off, the view looks as it did')
 })
 
+test('a marked row whose cells paint a background, such as a sheet with a pinned row number, shows its bar on its first cell', async () => {
+  await frame().evaluate(() => {
+    const css = document.createElement('style')
+    css.textContent = '.grid th{position:sticky;left:0;padding:2px 8px;background:rgb(240, 240, 240)} .grid td{background:rgb(255, 255, 255)}'
+    document.head.append(css)
+    const table = document.createElement('table')
+    table.className = 'grid'
+    table.innerHTML = '<tr id="eight" data-anchor="a.jsonl#L8"><th id="eight-n">8</th><td>a cell</td></tr>'
+    document.querySelector('section')!.append(table)
+  })
+  await send({ 'a.jsonl#L8': { bar: 'var(--label-2)', names: ['coord'], spans: [] } })
+  await frame().waitForFunction(() => document.getElementById('eight')!.hasAttribute('data-thimble-label'))
+  const first = await frame().evaluate(() => getComputedStyle(document.getElementById('eight-n')!).boxShadow)
+  assert.match(first, /rgb\(230, 159, 0\) 3px 0px 0px 0px inset/, 'drawn over the cell\'s own background')
+  await send({})
+  await frame().waitForFunction(() => !document.querySelector('[data-thimble-label]'))
+  assert.equal(await frame().evaluate(() => getComputedStyle(document.getElementById('eight-n')!).boxShadow), 'none')
+})
+
 test('cmd: while ⌘ is held the frame shows the page\'s ⌘ arrow as its cursor, and its own events keep it right', async () => {
   const CURSOR = 'url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2228%22%20height%3D%2228%22%2F%3E") 3 2, default'
   const post = (msg: object) => page.evaluate((m) => (document.getElementById('f') as HTMLIFrameElement).contentWindow!.postMessage(m, '*'), msg)
