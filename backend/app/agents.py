@@ -847,7 +847,7 @@ async def interrupt_route(c: str, chat_id: str) -> dict:
         from . import channel, tools  # noqa: PLC0415
 
         text = tools.hint("stop-subagent", title=str(meta.get("title") or "a subagent"), agent_id=str(meta["agent_id"]))
-        channel.post(c, channel.MAIN, {"text": text})
+        channel.post(c, channel.MAIN, {"text": text}, mirror=False)
         return {"stopped": False, "asked": "main"}
     return {"stopped": False}
 

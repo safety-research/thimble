@@ -107,6 +107,9 @@ async def test_ask_reaches_the_orientation_a_view_s_build_and_else_main(monkeypa
     for name in ("orient", "orientation"):
         res = await tools.call(CORPUS, "message_thread", {"thread": name, "message": "Check April too."})
         assert not res.is_error and tools.hint("message_orientation-subagent", agent_id="a9") in res.text
+    users = [(e["text"], e["by"]) for e in _log(orient["id"]) if e["type"] == "user"]
+    assert users == [("Check April too.", agents.TERMINAL)] * 2
+    assert session._relays[orient["id"]] == [agents.TERMINAL] * 2
     # a view's build threads: the view's name reaches its latest build, as a change to the view
     changes: list = []
     monkeypatch.setattr(views, "message", lambda c, slug, text: changes.append((slug, text)) or {})

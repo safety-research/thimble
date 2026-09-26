@@ -629,6 +629,7 @@ async def tool_message_thread(ctx: Any, args: dict[str, Any]) -> Any:
             try:
                 res = await orient_session.message(ctx.c, text, orient_session.BROWSER)
             except orient_session.Subagent as e:
+                session.relay(ctx.c, tid, text, agents.TERMINAL)
                 return tools.ok(tools.hint("message_orientation-subagent", agent_id=str(e)))
             return tools.ok(tools.hint("message_orientation-queued" if res["status"] == "queued" else "message_orientation-started"))
         if meta.get("role") == "dev" and meta.get("view"):

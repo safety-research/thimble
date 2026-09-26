@@ -82,12 +82,15 @@ def _view_tickets_held(monkeypatch):
 
 @pytest.fixture(autouse=True)
 def _no_held_events():
-    """The quiet events channel.post holds for the next event are module state: none carries over from another test."""
-    from app import channel
+    """The quiet events channel.post holds for the next event, and the messages session.relay waits to see main pass
+    on, are module state: none carries over from another test."""
+    from app import channel, session
 
     channel._held.clear()
+    session._relays.clear()
     yield
     channel._held.clear()
+    session._relays.clear()
 
 
 @pytest.fixture(autouse=True)

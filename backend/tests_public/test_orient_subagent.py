@@ -219,10 +219,60 @@ async def test_a_message_or_a_stop_from_the_browser_goes_through_main(tmp_path):
     assert out["status"] == "relayed"
     note = q.get_nowait()
     assert note["meta"]["kind"] == "main" and note["content"] == tools.hint("orient-relay", text="Check April too.")
+    # the Orientation chat shows the message as the analyst's; main's chat shows no line of the analyst's for it
+    assert [(e["text"], e["by"]) for e in _log(meta["id"]) if e["type"] == "user"] == [("Check April too.", agents.BROWSER)]
+    assert not [e for e in _log(agents.MAIN_ID) if e["type"] == "user"]
     stopped = await agents.interrupt_route(CORPUS, meta["id"])
     assert stopped == {"stopped": False, "asked": "main"}
     note = q.get_nowait()
     assert note["content"] == tools.hint("stop-subagent", title=orientation.TITLE, agent_id=AGENT_ID) and "TaskStop" in note["content"]
+    assert not [e for e in _log(agents.MAIN_ID) if e["type"] == "user"]
+
+
+async def test_main_s_relay_of_the_analyst_s_message_is_theirs_and_a_stop_is_no_failure(tmp_path):
+    _listen()
+    await tools.call(CORPUS, "start_orientation", {"brief": ""})
+    p = tmp_path / f"{SID}.jsonl"
+    p.write_text("")
+    lv = session.attach(CORPUS, SID, str(config.corpus_dir(CORPUS)), str(p))
+    session.tail_once(lv)
+    sub = tmp_path / SID / "subagents" / f"agent-{AGENT_ID}.jsonl"
+    sub.parent.mkdir(parents=True)
+    sub.with_name(f"agent-{AGENT_ID}.meta.json").write_text(json.dumps(
+        {"agentType": f"thimble:{orientation.SUBAGENT}", "description": "orientation", "toolUseId": USE}))
+    _add(sub, [{"type": "user", "message": {"role": "user", "content": "Read the file."}},
+               _assistant({"type": "text", "text": "Done."})])
+    _append(p, lv, [{"type": "user", "origin": {"kind": "human"}, "message": {"content": "Orient."}},
+                    _assistant(_use(USE, "Agent", {"subagent_type": f"thimble:{orientation.SUBAGENT}", "description": "orientation",
+                                                   "prompt": "Read the file.", "run_in_background": True})),
+                    _result(USE, [{"type": "text", "text": f"Async agent launched successfully.\nagentId: {AGENT_ID} (internal ID)"}]),
+                    END, _note("completed"), END])
+    chat = orientation.read_run(CORPUS)["chats"][orientation.ROLE]
+    assert orientation.read_run(CORPUS)["status"] == "done"
+    # the analyst writes in the Orientation chat; main passes it on in its own words, which resumes the orientation
+    await orient_session.message_route(CORPUS, orient_session.MessageBody(text="Add the pear trees."))
+    _append(p, lv, [{"type": "user", "origin": {"kind": "human"}, "message": {"content": "Pass it on."}},
+                    _assistant(_use("s1", session.SEND_TOOL, {"to": AGENT_ID, "message": "The analyst asks: add the pear trees."})),
+                    END])
+    assert [(e["text"], e["by"]) for e in _log(chat) if e["type"] == "user"] == [("Add the pear trees.", agents.BROWSER)]
+    _add(sub, [{"type": "user", "isMeta": True, "origin": {"kind": "coordinator"}, "message": {
+        "content": "The coordinator sent a message while you were working:\nThe analyst asks: add the pear trees.\n\nAddress this before completing your current task."}},
+        _assistant({"type": "text", "text": "Adding them."})])
+    session.tail_once(lv)
+    run = orientation.read_run(CORPUS)
+    assert run["run"] == 1 and run["followups"][-1]["messages"][0]["by"] == agents.BROWSER
+    # main stops it with TaskStop, as the browser's Stop asked, and the notice comes while main's turn goes on: the
+    # run is stopped, not failed
+    _add(sub, [{"type": "user", "message": {"role": "user", "content": "[Request interrupted by user]"}}])
+    _append(p, lv, [{"type": "user", "origin": {"kind": "human"}, "message": {"content": "Stop it."}},
+                    _assistant(_use("s2", "TaskStop", {"task_id": AGENT_ID})),
+                    {"type": "attachment", "attachment": {"type": "queued_command", "prompt": _note("killed")["message"]["content"],
+                                                          "commandMode": "task-notification"}},
+                    _result("s2", "stopped"), END])
+    run = orientation.read_run(CORPUS)
+    assert run["status"] == "stopped" and agents.read_meta(CORPUS, chat)["status"] == "stopped"
+    assert run["followups"][-1]["status"] == "stopped"
+    assert [e["text"] for e in _log(chat) if e["type"] == "user"] == ["Add the pear trees."], "the stop's own line is no message"
 
 
 def test_the_plugin_agent_denies_the_tools_that_are_not_the_orientation_s_and_the_launcher_allows_its_prompt(home, data,

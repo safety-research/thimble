@@ -199,9 +199,11 @@ def describe(kind: str, payload: dict[str, Any]) -> str:
     return f"The analyst sent `{kind}` from the browser"
 
 
-def post(c: str, kind: str, payload: dict[str, Any] | None = None, *, check_kind: bool = True) -> dict[str, Any]:
-    """Send one event to the workspace's session: {id, kind, delivered, thread?}. 409 when no session listens, 400 for a
-    kind main.md names no bullet for (when `check_kind`), or for a message with no text."""
+def post(c: str, kind: str, payload: dict[str, Any] | None = None, *, check_kind: bool = True,
+         mirror: bool = True) -> dict[str, Any]:
+    """Send one event to the workspace's session: {id, kind, delivered, thread?}. A `main` event shows in main's chat
+    as the analyst's line unless `mirror` is False, for a request server code writes to main. 409 when no session
+    listens, 400 for a kind main.md names no bullet for (when `check_kind`), or for a message with no text."""
     from . import agents, session, threads  # noqa: PLC0415
 
     kind = str(kind or "").strip()
@@ -217,7 +219,8 @@ def post(c: str, kind: str, payload: dict[str, Any] | None = None, *, check_kind
         text = str(payload.pop("text", "") or "").strip()
         if not text:
             raise HTTPException(400, "empty message")
-        agents.mirror(c, "user", by=agents.BROWSER, text=text, event=event_id)
+        if mirror:
+            agents.mirror(c, "user", by=agents.BROWSER, text=text, event=event_id)
         session.expect(c, event_id)
         note = notification(kind, event_id, text, {**payload, **_ultracode(c), **_filters(c)})
     elif kind == THREAD:

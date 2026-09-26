@@ -96,7 +96,12 @@ class Gone(RuntimeError):
 
 
 class Subagent(RuntimeError):
-    """The orientation runs as a subagent of main (terminal-first mode), which only main can message; the agent id."""
+    """The orientation runs as a subagent of main (terminal-first mode), which only main can message; the agent id,
+    with its chat."""
+
+    def __init__(self, agent_id: str, chat: str) -> None:
+        super().__init__(agent_id)
+        self.chat = chat
 
 
 def current(c: str) -> agent_session.Run | None:
@@ -351,7 +356,7 @@ async def message(c: str, text: str, by: str = MAIN, call: str | None = None) ->
         raise ValueError("the message is empty")
     sub = orientation.subagent_run(c)
     if sub is not None:
-        raise Subagent(str(sub.get("agent_id") or ""))
+        raise Subagent(str(sub.get("agent_id") or ""), str((sub.get("chats") or {}).get(orientation.ROLE) or ""))
     rec, chat, sid = _chat_of(c)
     entry = {"text": text, "by": by if by in (MAIN, BROWSER) else MAIN, "ts": _now()}
     if running(c) or orientation.running(c):
@@ -745,11 +750,13 @@ async def message_route(c: str, body: MessageBody) -> dict[str, Any]:
     config.workspace_dir(c)
     try:
         return await message(c, body.text, BROWSER)
-    except Subagent:
+    except Subagent as e:
         # terminal-first mode: only main can message its subagent, so main is asked to pass the message on
-        from . import channel  # noqa: PLC0415
+        from . import channel, session  # noqa: PLC0415
 
-        posted = channel.post(c, channel.MAIN, {"text": tools.hint("orient-relay", text=body.text.strip())})
+        posted = channel.post(c, channel.MAIN, {"text": tools.hint("orient-relay", text=body.text.strip())}, mirror=False)
+        if e.chat:
+            session.relay(c, e.chat, body.text.strip(), BROWSER)
         return {"status": "relayed", "event": posted["id"]}
     except ValueError as e:
         raise HTTPException(400, str(e)) from e

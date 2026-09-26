@@ -95,6 +95,7 @@ TASK_FIELD_RE = re.compile(r"<(task-id|tool-use-id|status|result)>(.*?)</\1>", r
 ASYNC_RESULT_RE = re.compile(r"^\s*Async agent launched")
 AGENT_ID_RE = re.compile(r"agentId:\s*([A-Za-z0-9_-]+)")
 TASK_DONE = ("completed", "done", "success")
+TASK_STOPPED = ("killed", "stopped", "cancelled")  # a task stopped with TaskStop, or Esc in the agent view
 CALL_WAIT_S = 2.0  # call_session's longest wait for a call's line in a transcript
 CALL_POLL_S = 0.02
 CALL_TAIL = 262_144  # bytes at a transcript's end that call_session reads first
@@ -145,6 +146,7 @@ class Sub:
         self.typed: str | None = None  # the last message the analyst typed to it in the agent view (_typed)
         self.prompted = False  # its first prompt was read
         self.of_main = False  # a subagent main started with the Agent tool (_spawn)
+        self.relay_by: str | None = None  # who sent the message main passed on last, when not main (relay)
         self.quiet_since = time.monotonic()
         self.done = False
         self.workflow = False  # a Workflow call of main's, whose members are its agents (module note, workflows)
@@ -215,6 +217,8 @@ class Live:
 _live: dict[str, Live] = {}  # by workspace: the one session that is main
 _expected: set[str] = set()  # ids of channel events the channel logged when it posted them
 _event_threads: dict[str, str] = {}  # a thread event's id -> its thread
+_relays: dict[str, list[str]] = {}  # a subagent's chat -> who sent each message main is to pass on (relay)
+RELAY_EVENT = "orient-follow-up"  # the `event` of a relayed message's record, which the browser takes as a follow-up's
 _grace: dict[str, asyncio.TimerHandle] = {}  # workspace -> the pending detach after its last subscriber left
 _sweep_task: asyncio.Task | None = None
 _came_back: set[str] = set()  # workspaces where main's own shim subscribed since this server started (sweep skips them)
@@ -700,6 +704,13 @@ def handed(c: str, event_id: str, thread: str) -> None:
         lv.handed.append(thread)
 
 
+def relay(c: str, chat: str, text: str, by: str) -> None:
+    """A message the analyst sent a subagent of main's through main (the orientation in terminal-first mode): its chat
+    shows it as theirs now, and main's SendMessage that passes it on is not logged again (_relayed)."""
+    agents.Recorder(c, chat).record("user", text=text, by=by, event=RELAY_EVENT)
+    _relays.setdefault(chat, []).append(by)
+
+
 def push_event(c: str, kind: str, text: str, **meta: Any) -> bool:
     """Server code's way to send the session an event (a built view's `view`, dev.run_view): channel.post with `text`
     as the body and `meta` as its attributes; False when no session listens."""
@@ -879,8 +890,13 @@ def _task_notification(lv: Live, text: str) -> None:
     if sub is None:
         return
     _tail_sub(lv, sub)
-    status = str(fields.get("status") or "").strip()
-    _finish_sub(lv, sub, "done" if status in TASK_DONE else "failed", str(fields.get("result") or "").strip() or None)
+    _finish_sub(lv, sub, _task_status(fields.get("status")), str(fields.get("result") or "").strip() or None)
+
+
+def _task_status(status: Any) -> str:
+    """A task notification's status as a chat's: done, stopped or failed."""
+    status = str(status or "").strip()
+    return "done" if status in TASK_DONE else "stopped" if status in TASK_STOPPED else "failed"
 
 
 def _child_finished(lv: Live, text: str) -> None:
@@ -891,8 +907,7 @@ def _child_finished(lv: Live, text: str) -> None:
     if sub is None or sub.done:
         return
     _tail_sub(lv, sub)
-    status = str(fields.get("status") or "").strip()
-    _finish_sub(lv, sub, "done" if status in TASK_DONE else "failed", str(fields.get("result") or "").strip() or None)
+    _finish_sub(lv, sub, _task_status(fields.get("status")), str(fields.get("result") or "").strip() or None)
 
 
 def _peer(lv: Live, *, mid_turn: bool) -> None:
@@ -962,7 +977,13 @@ def _tool_use(lv: Live, tool_use_id: str, name: str, tool_input: Any) -> None:
 
 def _relayed(sub: Sub, inp: dict) -> None:
     """Main's SendMessage to a thread's fork or a subagent: its chat shows the message as from main, so the browser
-    holds the same conversation as the terminal's agent view."""
+    holds the same conversation as the terminal's agent view; a message the analyst sent through main is shown already
+    (relay), as theirs."""
+    waiting = _relays.get(sub.chat)
+    if waiting:
+        by = waiting.pop(0)
+        sub.relay_by = by if sub.done else None  # the message resumes a finished subagent (_resumed)
+        return
     text = str(inp.get("message") or inp.get("content") or "").strip()
     if text:
         sub.rec.record("user", text=text, by=RELAYED_BY)
@@ -1246,8 +1267,9 @@ def _tail_sub(lv: Live, sub: Sub) -> int:
         agents.set_running(lv.c, sub.chat, True)
     lines = (sub.buf + data).split(b"\n")
     sub.buf = lines.pop()
-    resumed = _resumed(lines) if sub.done and not sub.thread and sub.owner is None and not sub.workflow else None
+    resumed = _resumed(lines, sub.relay_by) if sub.done and not sub.thread and sub.owner is None and not sub.workflow else None
     if resumed is not None:
+        sub.relay_by = None
         _revive(lv, sub, resumed)
     n = 0
     try:
@@ -1263,9 +1285,10 @@ def _tail_sub(lv: Live, sub: Sub) -> int:
     return n
 
 
-def _resumed(lines: list[bytes]) -> list[dict] | None:
+def _resumed(lines: list[bytes], relayed_by: str | None = None) -> list[dict] | None:
     """Whether lines a finished subagent's transcript gained show it working again, a reply of its own or a message
-    the analyst or main sent it, which resumes it: the messages ({text, by}), else None when it did not resume."""
+    the analyst or main sent it, which resumes it: the messages ({text, by}), else None when it did not resume. Main's
+    message is `relayed_by`'s when main passed it on for them (relay)."""
     resumed, messages = False, []
     for line in lines:
         try:
@@ -1280,7 +1303,7 @@ def _resumed(lines: list[bytes]) -> list[dict] | None:
             messages.append({"text": typed, "by": TERMINAL})
         elif origin.get("kind") == "coordinator":
             m = COORDINATOR_RE.match(_user_text(rec) or "")
-            messages.append({"text": (m.group(1) if m else _user_text(rec) or "").strip(), "by": RELAYED_BY})
+            messages.append({"text": (m.group(1) if m else _user_text(rec) or "").strip(), "by": relayed_by or RELAYED_BY})
         resumed = resumed or rec.get("type") == "assistant" or typed is not None or origin.get("kind") == "coordinator"
     return messages if resumed else None
 
@@ -1455,6 +1478,8 @@ def translate_sub(lv: Live, sub: Sub, line: bytes | str) -> int:
     if rec.get("type") == "user" and not sub.thread and not rec.get("isMeta"):
         prompt = _user_text(rec)
         if prompt and prompt.strip() and not prompt.lstrip().startswith("<"):
+            if INTERRUPT_RE.match(prompt.strip()):
+                return 0  # the stop's own line: the chat's end says it was stopped
             first, sub.prompted = not sub.prompted, True
             if first and sub.of_main and sub.role == orientation.ROLE:
                 return 0  # the orientation subagent's prompt names its prompt file, which its card stands for
@@ -1613,11 +1638,13 @@ def translate(lv: Live, line: bytes | str) -> None:
             elif tags:
                 for tag in tags:
                     _channel(lv, tag, mid_turn=True)
-            elif aorigin == "task-notification":
+            elif aorigin == "task-notification" or att.get("commandMode") == "task-notification":
+                # a subagent that ended while main's turn went on
                 fields = dict(TASK_FIELD_RE.findall(prompt))
-                sub = _sub_by(lv, agent_id=fields.get("task-id"))
+                sub = _sub_by(lv, agent_id=fields.get("task-id")) or _sub_by(lv, tool_use_id=fields.get("tool-use-id"))
                 if sub is not None:
-                    _finish_sub(lv, sub, "done" if fields.get("status") in TASK_DONE else "failed", fields.get("result"))
+                    _tail_sub(lv, sub)
+                    _finish_sub(lv, sub, _task_status(fields.get("status")), str(fields.get("result") or "").strip() or None)
             elif aorigin == "peer":
                 _peer(lv, mid_turn=True)
             elif prompt.strip() and not prompt.lstrip().startswith("<"):
