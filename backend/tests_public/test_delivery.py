@@ -361,13 +361,19 @@ def test_the_held_hook_adds_the_events_held_for_main_to_the_prompt_or_nothing(tm
 
 def test_the_hooks_run_the_watcher_on_the_four_events_and_relay_permission_prompts():
     hooks = json.loads((PLUGIN / "hooks" / "hooks.json").read_text())["hooks"]
-    assert set(hooks) == {"SessionStart", "Stop", "UserPromptSubmit", "PreToolUse", "PermissionRequest"}
+    assert set(hooks) == {"SessionStart", "Stop", "UserPromptSubmit", "PreToolUse", "PermissionRequest", "PostToolUse",
+                          "SubagentStop"}
     for event in ("SessionStart", "Stop", "UserPromptSubmit", "PreToolUse"):
         (hook,) = [h for group in hooks[event] for h in group["hooks"] if h.get("asyncRewake")]
         assert hook["command"] == '"${CLAUDE_PLUGIN_ROOT}/bin/.thimble-watch"' and hook["asyncRewake"] is True
-        assert event in ("SessionStart", "UserPromptSubmit") or len(hooks[event]) == 1, "the watcher alone"
+        assert event in ("SessionStart", "UserPromptSubmit", "PreToolUse") or len(hooks[event]) == 1, "the watcher alone"
         assert hook["timeout"] == 86400 and hook["rewakeMessage"] == MARKER and hook["rewakeSummary"]
     assert hooks["PreToolUse"][0]["matcher"] == "*"
+    # terminal-first's background sessions (test_bg_sessions.py): a SendMessage to one goes through the server, their
+    # start and finish lines print after a tool call, and a tray entry is kept going while its session runs
+    assert [(g["matcher"], g["hooks"][0]["command"].rsplit(" ", 1)[-1]) for g in hooks["PreToolUse"][1:]] == [("SendMessage", "--relay")]
+    assert hooks["PostToolUse"][0]["hooks"][0]["command"].endswith("--agents")
+    assert hooks["SubagentStop"][0]["hooks"][0]["command"].endswith("--proxy-stop")
     (held,) = [h for group in hooks["UserPromptSubmit"] for h in group["hooks"] if not h.get("asyncRewake")]
     assert held["command"].endswith("/bin/.thimble-watch\" --held") and held["timeout"] <= 10
     (perm,) = hooks["PermissionRequest"][0]["hooks"]

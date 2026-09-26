@@ -1395,16 +1395,29 @@ def launch_args(cwd: Path, resume: bool = False) -> str:
     root = installed.root if installed else plugin_root()
     workspaces = Path(resolve_env()["workspaces_dir"]).resolve()
     anchors = workspaces / "*" / ANCHORS_DIR
-    # the prompt the orientation's subagent reads first in terminal-first mode (orientation.subagent_prompt_file)
+    # the prompt the orientation's subagent reads first in terminal-first mode (orientation.subagent_prompt_file), and
+    # the instructions of a background session's tray entry (bg_session.proxy_file)
     orient_prompt = workspaces / "*" / "orient" / "subagent-prompt.md"
+    tray_prompts = workspaces / "*" / "bg" / "*.md"
     # on the Monitor route main arms its Monitor on the watcher again every 30 minutes, which must not wait on a prompt
     watcher = f"Bash({root / WATCHER} *)"
-    tools_line = ",".join([MCP_TOOLS_RULE, f"Read(/{anchors}/**)", f"Read(/{orient_prompt})", watcher, *skill_rules(root)])
+    tools_line = ",".join([MCP_TOOLS_RULE, f"Read(/{anchors}/**)", f"Read(/{orient_prompt})", f"Read(/{tray_prompts})",
+                           watcher, *skill_rules(root)])
     cc_settings.clear_override(cwd)
+    _sync_statusline(cwd)
     last = [last_main(cwd)] if resume else []
     turn_tools = terminal_tools.launch_value()
     return "\n".join([installed.channel if installed else cc_channel.channel(root), tools_line, cc_settings.main_effort_flag(cwd),
                       turn_tools, *last, channel.session_prompt(str(cwd.resolve()), bool(turn_tools))])
+
+
+def _sync_statusline(cwd: Path) -> None:
+    """The folder's statusline, set for terminal-first mode or put back (bg_session.sync_statusline)."""
+    from . import bg_session  # noqa: PLC0415
+
+    c = config.workspace_for_cwd(str(cwd))
+    if c:
+        bg_session.sync_statusline(c)
 
 
 def cmd_launch_args(args: argparse.Namespace) -> int:

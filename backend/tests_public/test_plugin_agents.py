@@ -22,12 +22,14 @@ DEFINITIONS = {name: config.REPO_ROOT / "prompts" / f"{name}.md" for name in ("o
 CORPUS = "mini"
 PREFIX = "mcp__plugin_thimble_thimble__"  # how Claude Code names the plugin's MCP server's tools (tools.SERVER_NAME)
 # the session each definition runs as the agent of (agent_session.py), whose tool list its tools must come from
-SESSION_OF = {"orient": "orient", "writer": "writer:report", "critic": "critique:orient", "check": "check:unverified:report"}
-# Agent: the orientation starts its subagents; Workflow: the orientation's and a writer's sessions run workflows of
+SESSION_OF = {"orient": "orient", "writer": "writer:report", "critic": "critique:orient", "check": "check:unverified:report",
+              "writer-tray": None, "critic-tray": None}
+# Agent: the orientation starts its subagents; SendMessage: a tray entry relays messages; Workflow: the orientation's and a writer's sessions run workflows of
 # their own; Bash: a check's session, fenced to a work folder of its own, counts and searches the corpus
-BUILTIN = {"Read", "Grep", "Glob", "Skill", "Agent", "Workflow", "Bash"}
+BUILTIN = {"Read", "Grep", "Glob", "Skill", "Agent", "Workflow", "Bash", "SendMessage"}
 # the others are thimble-<stem>; the plugin's own agents are named for the tray, where Claude Code shows `thimble:<name>`
-NAMES = {"writer": "writer", "critic": "critic", "check": "check", "orient-subagent": "orient"}
+NAMES = {"writer": "writer", "critic": "critic", "check": "check", "orient-subagent": "orient", "writer-tray": "writer",
+         "critic-tray": "critic"}
 # the agents that inherit every tool less their disallowed ones: the orientation's session's, and its subagent of
 # terminal-first mode (test_orient_subagent.py)
 INHERITING = ("orient", "orient-subagent")

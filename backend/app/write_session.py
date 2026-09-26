@@ -16,7 +16,7 @@ from typing import Any
 
 from fastapi import HTTPException
 
-from . import agent_session, config, context, report_types, tools
+from . import agent_session, agents, bg_session, config, context, report_types, tools
 
 log = logging.getLogger("thimble.write_session")
 
@@ -93,7 +93,8 @@ def _launch(c: str, doc: str) -> dict[str, Any]:
     return dict(role=ROLE, title=f"Write {doc}", agent_args=["--agents", json.dumps({name: agent}, ensure_ascii=False),
                                                               "--agent", name],
                 effort=effort, settings=agent_session.settings_json(effort, fastMode=bool(models["writer"]["fast"])),
-                agent_type=name, on_end=_ended, model=str(agent.get("model") or ""), doc=doc)
+                agent_type=name, on_end=_ended, model=str(agent.get("model") or ""), doc=doc,
+                background=bg_session.wanted(c, "writer"))
 
 
 async def _resume_left(c: str, meta: dict[str, Any], prompt: str) -> agent_session.Run:
@@ -126,8 +127,22 @@ def _left(c: str, meta: dict[str, Any], status: str, summary: str) -> None:
     agent_session.tell_main(c, WRITTEN_KIND, {"text": summary or "", "status": status, "doc": doc})
 
 
+async def _woken(c: str, e: bg_session.Entry) -> agent_session.Run | None:
+    """A writer's background session started a turn with no run of this server's (bg_session.on_wake): the run a
+    restart cut off is followed again as it was, and any other turn is the chat's next run."""
+    meta = agents.meta_or_none(c, e.chat)
+    doc = e.key.split(":", 1)[-1]
+    if meta is None or report_types.read_type(c, doc) is None:
+        return None
+    if meta.get("status") == "running":
+        return await _resume_left(c, meta, "")
+    return await agent_session.start(c, e.key, prompt="", resume=e.sid, chat=e.chat, run_k=int(meta.get("run") or 0) + 1,
+                                     **_launch(c, doc))
+
+
 agent_session.on_left(ROLE, _left)
 agent_session.on_resume(ROLE, _resume_left)
+bg_session.on_wake(tools.WRITER_SESSION, _woken)
 
 
 async def tool_start_writing(ctx: Any, args: dict[str, Any]) -> Any:

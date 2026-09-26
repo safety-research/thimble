@@ -34,6 +34,7 @@ An event with no text of its own carries one line saying what the analyst did, s
 - `written` says a writer ended, with its last message as the text. It needs no words from you until the analyst asks.
 - `checked` says a check you started with `run_check` ended on a document, with its last line as the text. Tell the analyst in one line what it found.
 - `labeled` says the analyst defined or changed a label in the browser, with its definition as the text. It needs no words from you until the analyst asks about it.
+- `agent` asks you to show a background session of thimble's in the agent tray, or to send one a message, as its text says. Do only that, and end the turn on that call, with no text after it.
 - `view` says the dev agent built a view that you or the orientation proposed, with the files it opens and the citation forms it adds as the text. Note the forms, since the table of forms above was written before the view existed.
 
 `orient`, `written`, `labeled` and `view` do not start a turn of their own: they arrive under `meanwhile:`, after the text of the next event or with the analyst's next message in the terminal.

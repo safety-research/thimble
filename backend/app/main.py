@@ -81,6 +81,8 @@ ROUTER_MODULES = [
     # the Claude Code sessions thimble starts beside main, the orientation's and each writer's: their permission
     # requests (shut down with the server), and the orientation's calls, stored whole and citable
     "agent_session", "calls", "orient_session",
+    # those of them that run as Claude Code background sessions in terminal-first mode, and their tray entries
+    "bg_session",
     # the card harness (a headless Chromium that draws every card offscreen) and the card check that reads it, and
     # where the check's records and fixes are kept (the Undo of a fix)
     "render", "card_check", "checkstore",

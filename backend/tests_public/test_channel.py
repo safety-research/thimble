@@ -51,7 +51,8 @@ def _log(chat: str) -> list[dict]:
 def test_the_kinds_are_the_bullets_of_main_s_events_section():
     """A kind is a bullet of main.md's `## Events from the browser` that opens with the kind in backticks."""
     section = prompts.section("main", channel.EVENTS_SECTION)
-    assert channel.kinds() == ["main", "thread", "start", "orient", "write", "card", "written", "checked", "labeled", "view"]
+    assert channel.kinds() == ["main", "thread", "start", "orient", "write", "card", "written", "checked", "labeled", "agent",
+                               "view"]
     for kind in channel.kinds():
         assert f"- `{kind}` " in section, kind
 

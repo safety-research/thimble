@@ -56,7 +56,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-from . import agent_session, agents, cc_settings, config, ledger, orientation, prompts, tools
+from . import agent_session, agents, bg_session, cc_settings, config, ledger, orientation, prompts, tools
 
 log = logging.getLogger("thimble.orient_session")
 router = APIRouter()
@@ -205,7 +205,7 @@ def subagent_start(c: str, brief: str, passes: "list[str]") -> str:
     parts = parts_of({**orientation.choices(c), "critique": False}, passes)
     work_dir(c).mkdir(parents=True, exist_ok=True)
     path = orientation.subagent_prompt_file(c)
-    ledger.atomic_write_text(path, system_prompt(c, brief, parts) + "\n")
+    ledger.atomic_write_text(path, system_prompt(c, brief, parts) + "\n\n" + tools.hint("orient-subagent-notes") + "\n")
     fields = {"route": orientation.SUBAGENT_ROUTE, "critique": False}
     run = orientation.read_run(c)
     if run and run.get("status") == "requested":
@@ -231,7 +231,7 @@ def _launch(c: str, brief: str, passes: "list[str]", choices: dict[str, Any]) ->
                 settings=agent_session.settings_json(effort, env, ultracode=ultracode, fastMode=bool(own["fast"])),
                 agent_type=name, append_shared=False, model=own["model"], work=work_dir(c), calls=True,
                 permission_mode=cc_settings.orient_permission_flag(mode), mode=mode, patient=True, on_mode=_mode_changed,
-                disallowed=disallowed(parts))
+                disallowed=disallowed(parts), background=bg_session.wanted(c, "orient"))
 
 
 async def start(c: str, brief: str, passes: "list[str] | tuple[str, ...]" = ("final", "views"),
@@ -377,7 +377,8 @@ def _show_queue(c: str, chat: str, queue: "list[dict[str, Any]]") -> None:
 
 async def resume(c: str, messages: "list[dict[str, Any]]", call: str | None = None) -> agent_session.Run:
     """Resume the orientation's session with `messages` as run k+1; Gone when Claude Code no longer keeps its
-    transcript, NoOrientation when there is none, RuntimeError when it cannot start."""
+    transcript, NoOrientation when there is none, RuntimeError when it cannot start. A background session that started
+    a turn on its own takes no messages: the run follows it (_woken)."""
     from . import session  # noqa: PLC0415
 
     rec, chat, sid = _chat_of(c)
@@ -393,7 +394,7 @@ async def resume(c: str, messages: "list[dict[str, Any]]", call: str | None = No
         choices["effort"] = meta.get("effort") or orientation.DEFAULT_EFFORT
     passes = [p for p in PASSES if p in (rec.get("passes") or [])]
     args = _launch(c, str(meta.get("brief") or ""), passes, choices)
-    lead = _lead(messages)
+    lead = _lead(messages) if messages else ""
 
     def started(run: agent_session.Run) -> None:
         orientation.run_started(c, chat, k, messages, pid=run.pid)
@@ -681,6 +682,20 @@ async def _resume_left(c: str, meta: dict[str, Any], prompt: str) -> agent_sessi
 agent_session.on_resume(orientation.ROLE, _resume_left)
 
 
+async def _woken(c: str, e: bg_session.Entry) -> agent_session.Run | None:
+    """The orientation's background session started a turn with no run of this server's (bg_session.on_wake): the run a
+    restart cut off is followed again as it was, and any other turn is a follow-up, run k+1."""
+    meta = agents.meta_or_none(c, e.chat)
+    if meta is None:
+        return None
+    if meta.get("status") == "running":
+        return await _resume_left(c, meta, "")
+    return await resume(c, [])
+
+
+bg_session.on_wake(tools.ORIENT_SESSION, _woken)
+
+
 # --------------------------------------------------------------------------- tools and routes
 
 
@@ -711,7 +726,7 @@ async def tool_start_orientation(ctx: Any, args: dict[str, Any]) -> Any:
     if running(ctx.c) or orientation.active(ctx.c):
         return tools.err(tools.hint("start_orientation-running"))
     passes = [p for p, on in (("final", final), ("views", views), ("report", report)) if on]
-    if orientation.terminal_first(ctx.c):
+    if orientation.terminal_first(ctx.c) and not bg_session.wanted(ctx.c, tools.ORIENT_SESSION):
         return tools.ok(subagent_start(ctx.c, brief, passes))
     try:
         await start(ctx.c, brief, passes, call=ctx.tool_use_id, chosen=chosen)

@@ -654,9 +654,11 @@ def test_launch_args_are_the_channel_the_allowed_tools_main_s_effort_then_main_s
     assert channel == "plugin:thimble@inline" and effort == "high"
     assert tools_line == (f"mcp__plugin_thimble_thimble,Read(/{(tmp_path / 'ws').resolve()}/*/anchors/**),"
                           f"Read(/{(tmp_path / 'ws').resolve()}/*/orient/subagent-prompt.md),"
+                          f"Read(/{(tmp_path / 'ws').resolve()}/*/bg/*.md),"
                           f"Bash({cli.PLUGIN_DIR.resolve()}/bin/.thimble-watch *),"
                           + ",".join(cli.skill_rules())), \
-        "the orientation subagent's prompt file, the Monitor route's re-arming, then the plugin's own skills"
+        "the orientation subagent's prompt file, the tray entries' instructions, the Monitor route's re-arming, then the " \
+        "plugin's own skills"
     assert prompt.startswith("# thimble") and str((data / "mini").resolve()) in prompt
     assert "## Events from the browser" in prompt and "## Threads" in prompt and "## Citations" in prompt and "{{" not in prompt
     for settings in ({"ultracode": True}, {"modelSettings": {"claude-opus-5-5": {"effortLevel": "low"}}, "model": "opus"}):

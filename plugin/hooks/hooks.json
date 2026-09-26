@@ -1,5 +1,5 @@
 {
-  "description": "thimble's delivery without a channel (plugin/bin/.thimble-watch): the watcher wakes the session with each browser event, and permission prompts are relayed to the browser. On each prompt typed in the terminal, the events held for main (an ended orientation, writer or view build, a label) are added to it. In a session whose channel delivers, or that is no thimble workspace, each exits at once. The SessionStart hook for clear and compact gives main its prompt again (bin/thimble prompt main), which /clear takes out of the conversation and /compact cuts short in a session the launcher did not start; it prints nothing in any other session.",
+  "description": "thimble's delivery without a channel (plugin/bin/.thimble-watch): the watcher wakes the session with each browser event, and permission prompts are relayed to the browser. On each prompt typed in the terminal, the events held for main (an ended orientation, writer or view build, a label) are added to it. In terminal-first mode, the start and finish of thimble's background sessions print a line after a tool call or a prompt, a SendMessage to one of them goes through the server, and a session's tray entry is kept going while the session runs. In a session whose channel delivers, or that is no thimble workspace, each exits at once. The SessionStart hook for clear and compact gives main its prompt again (bin/thimble prompt main), which /clear takes out of the conversation and /compact cuts short in a session the launcher did not start; it prints nothing in any other session.",
   "hooks": {
     "SessionStart": [
       {"hooks": [{"type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/.thimble-watch\"", "asyncRewake": true, "timeout": 86400, "rewakeMessage": "thimble browser event:", "rewakeSummary": "thimble: browser event"}]},
@@ -13,7 +13,14 @@
       {"hooks": [{"type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/.thimble-watch\" --held", "timeout": 10}]}
     ],
     "PreToolUse": [
-      {"matcher": "*", "hooks": [{"type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/.thimble-watch\"", "asyncRewake": true, "timeout": 86400, "rewakeMessage": "thimble browser event:", "rewakeSummary": "thimble: browser event"}]}
+      {"matcher": "*", "hooks": [{"type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/.thimble-watch\"", "asyncRewake": true, "timeout": 86400, "rewakeMessage": "thimble browser event:", "rewakeSummary": "thimble: browser event"}]},
+      {"matcher": "SendMessage", "hooks": [{"type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/.thimble-watch\" --relay", "timeout": 10}]}
+    ],
+    "PostToolUse": [
+      {"matcher": "*", "hooks": [{"type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/.thimble-watch\" --agents", "timeout": 10}]}
+    ],
+    "SubagentStop": [
+      {"hooks": [{"type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/.thimble-watch\" --proxy-stop", "timeout": 10}]}
     ],
     "PermissionRequest": [
       {"matcher": "*", "hooks": [{"type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/.thimble-watch\" --permission", "timeout": 86400}]}

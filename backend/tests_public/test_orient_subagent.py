@@ -82,7 +82,8 @@ async def test_start_orientation_writes_the_prompt_file_and_asks_main_to_start_t
     assert "`run_in_background` true" in res.text
     text = path.read_text()
     assert text.startswith("# Orientation") and "the edits" in text and "{{" not in text
-    assert text.strip() == orient_session.system_prompt(CORPUS, "the edits", ["final", "views", "report"]).strip()
+    assert text.strip() == (orient_session.system_prompt(CORPUS, "the edits", ["final", "views", "report"]).strip() + "\n\n"
+                            + tools.hint("orient-subagent-notes").strip())
     assert orient_session.LINES["critique"] not in text, "main's shim lists no `critique`, so the prompt names none"
     run = orientation.read_run(CORPUS)
     assert run["status"] == "requested" and run["route"] == orientation.SUBAGENT_ROUTE and run["query"] == "the edits"
@@ -281,7 +282,9 @@ def test_the_plugin_agent_denies_the_tools_that_are_not_the_orientation_s_and_th
     front = yaml.safe_load(head)
     assert front["name"] == orientation.SUBAGENT and front["background"] is True and "tools" not in front
     denied = {t.strip() for t in front["disallowedTools"].split(",")}
-    assert denied == {terminal_tools.tool_name(n) for n in tools.REGISTRY if n not in orient_session.ORIENT_TOOLS}
+    # wait_session stays: the same agent is the tray entry of the orientation's background session (bg_session.py)
+    assert denied == {terminal_tools.tool_name(n) for n in tools.REGISTRY
+                      if n not in orient_session.ORIENT_TOOLS and n != "wait_session"}
     assert orientation.is_orient(f"thimble:{orientation.SUBAGENT}") and orientation.is_orient(orientation.AGENT)
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "claude"))
     ws = tmp_path / "ws"

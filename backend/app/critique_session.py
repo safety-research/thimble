@@ -388,7 +388,7 @@ async def start(c: str, caller: agent_session.Run, context: str = "") -> tuple[a
         # the orientation's permission mode, followed at each request
         permission_mode=cc_settings.orient_permission_flag(caller.mode) if caller.mode else "",
         mode_owner=caller.key if caller.mode else None, patient=caller.patient,
-        brief=prompt.split("\n\n", 1)[0], **fields)  # the critique-task line that opens the first message
+        brief=prompt.split("\n\n", 1)[0], background=caller.bg, **fields)  # the critique-task line that opens the first message
     return run, done
 
 

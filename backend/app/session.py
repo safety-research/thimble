@@ -148,6 +148,8 @@ class Sub:
         self.of_main = False  # a subagent main started with the Agent tool (_spawn)
         self.relay_by: str | None = None  # who sent the message main passed on last, when not main (relay)
         self.call_keys: dict[str, tuple[str, str]] = {}  # tool_use id -> its channel.call_key (_results)
+        self.on_results: Any = None  # told the calls whose results each read found, when set (_results)
+        self.proxy = False  # the tray entry of a background session of thimble's, whose transcript no chat shows
         self.quiet_since = time.monotonic()
         self.done = False
         self.workflow = False  # a Workflow call of main's, whose members are its agents (module note, workflows)
@@ -911,11 +913,18 @@ def _child_finished(lv: Live, text: str) -> None:
     _finish_sub(lv, sub, _task_status(fields.get("status")), str(fields.get("result") or "").strip() or None)
 
 
-def _peer(lv: Live, *, mid_turn: bool) -> None:
+def _peer(lv: Live, *, mid_turn: bool, origin: Any = None) -> None:
     """A message another session sent main (module note), a subagent's hand-back among them: no row of its own, since
-    it is neither the analyst's line nor main's. On its own record it opens main's turn."""
+    it is neither the analyst's line nor main's, except one from a background session of thimble's, which main's chat
+    shows as a chip naming it. On its own record it opens main's turn."""
     if not mid_turn:
         _open_turn(lv)
+    o = origin if isinstance(origin, dict) else {}
+    name, body = str(o.get("name") or ""), " ".join(str(o.get("body") or "").split())
+    e = _bg().by_name(lv.c, name) or _bg().by_name(lv.c, name.replace("-", ":", 1)) if name.startswith("thimble") else None
+    if e is not None and body:
+        with contextlib.suppress(Exception):
+            agents.chip(lv.c, CHIP_KIND, f"{e.name} to main: {body[:RESULT_LIMIT]}", chat=e.chat)
 
 
 def visible(text: str) -> str:
@@ -1042,6 +1051,12 @@ def _spawn(lv: Live, tool_use_id: str | None, agent_id: str | None, title: str, 
     """The Sub for an Agent call, made on its first sighting (the tool_use, or the file's meta json) and completed by
     the later one. A `thread:<id>` description joins the thread's chat; any other is a new agent chat in main."""
     sub = _sub_by(lv, tool_use_id=tool_use_id) or _sub_by(lv, agent_id=agent_id)
+    if sub is None and _bg().is_proxy(lv.c, agent_type, title):
+        sub = Sub(lv.c, agents.MAIN_ID, tool_use_id, agent_id)  # it records nothing (proxy)
+        sub.proxy = sub.of_main = True
+        lv.subs.append(sub)
+        _bg().proxy_started(lv.c, str(agent_type), str(title), agent_id)
+        return sub
     if sub is None:
         tid = thread_for(lv.c, title)
         if tid:
@@ -1064,6 +1079,10 @@ def _spawn(lv: Live, tool_use_id: str | None, agent_id: str | None, title: str, 
         sub.tool_use_id = fields["tool_use_id"] = tool_use_id
     if agent_id and not sub.agent_id:
         sub.agent_id = fields["agent_id"] = agent_id
+    if sub.proxy:
+        if fields.get("agent_id"):
+            _bg().proxy_started(lv.c, str(agent_type), str(title), sub.agent_id)
+        return sub
     if sub.thread:
         if not sub.done:  # a finished fork's file found again (a restart) is not a fork starting; a follow-up wakes it
             threads.fork_started(lv.c, sub.chat, agent_id=sub.agent_id, tool_use_id=sub.tool_use_id, session=lv.sid)
@@ -1103,6 +1122,10 @@ def _agent_result(lv: Live, sub: Sub, content: Any, is_error: bool) -> None:
 def _finish_sub(lv: Live, sub: Sub, status: str, result: str | None, *, kind: str | None = None) -> None:
     """End a subagent's chat, or a thread's run; `kind` says why a thread's fork did not finish (threads.STOP_TEXT)."""
     if sub.done:
+        return
+    if sub.proxy:
+        sub.done = True
+        _bg().proxy_ended(lv.c, sub.agent_id)
         return
     if sub.agent_id and sub.agent_id in _channel_module().asking(lv.c):
         _channel_module().agent_moved(lv.c, sub.agent_id, float("inf"))  # a stopped agent's prompt is gone
@@ -1256,6 +1279,9 @@ def _tail_sub(lv: Live, sub: Sub) -> int:
     if sub.path is None:
         return 0
     size = _size(sub.path)
+    if sub.proxy:
+        sub.offset = size  # a proxy's lines are the background session's own, which that session's chat shows
+        return 0
     if size < sub.offset:
         sub.offset, sub.buf = 0, b""
     if size == sub.offset:
@@ -1284,6 +1310,8 @@ def _tail_sub(lv: Live, sub: Sub) -> int:
         sub.rec.error(UNREADABLE_TEXT, detail=str(e)[:200], by=TERMINAL)
         sub.path = None
     done = _results(sub, lines)
+    if done and sub.on_results is not None:
+        sub.on_results(done)
     if done and sub.agent_id and sub.agent_id in _channel_module().asking(lv.c):
         _channel_module().calls_done(lv.c, sub.agent_id, done)
     return n
@@ -1384,6 +1412,27 @@ async def call_session(c: str, tool_use_id: str | None) -> str | None:
         await asyncio.sleep(CALL_POLL_S)
 
 
+async def caller_agent(c: str, tool_use_id: str | None) -> str | None:
+    """The agent id of main's subagent whose transcript holds the call `tool_use_id`, waiting CALL_WAIT_S at most for
+    its line; None for main's own call or one found in no transcript."""
+    lv = _live.get(c)
+    if lv is None or not tool_use_id:
+        return None
+    needle, read = tool_use_id.encode(), {}
+    deadline = time.monotonic() + CALL_WAIT_S
+    scanned = False
+    while True:
+        holder = _call_holder(lv, tool_use_id, needle, read)
+        if holder is not None:
+            return holder.agent_id if isinstance(holder, Sub) else None
+        if time.monotonic() >= deadline:
+            return None
+        if not scanned:
+            _scan_subs(lv)
+            scanned = True
+        await asyncio.sleep(CALL_POLL_S)
+
+
 def _orient_working(sub: Sub) -> bool:
     """Whether an orientation subagent works: its chat runs, or its transcript grew since the tail last read it (a
     resume the tail has not seen yet)."""
@@ -1427,6 +1476,34 @@ def _call_holder(lv: Live, tool_use_id: str, needle: bytes, read: dict[str, int]
         if needle in data:
             return holder
     return None
+
+
+def _bg() -> Any:
+    from . import bg_session  # noqa: PLC0415 — bg_session imports this module
+
+    return bg_session
+
+
+def running_agents(c: str) -> list[dict[str, Any]]:
+    """The agents of main's session that run now, for the terminal's list of thimble's agents (bg_session.agent_rows):
+    each thread's fork by its fork name, the orientation subagent, and main's other subagents, {name, state, kind}."""
+    lv = _live.get(c)
+    out: list[dict[str, Any]] = []
+    for sub in list(lv.subs) if lv is not None else []:
+        if sub.done or sub.proxy or sub.owner is not None:
+            continue
+        meta = agents.meta_or_none(c, sub.chat) or {}
+        if sub.thread:
+            name = f"fork {meta.get(threads.FORK_NAME_KEY) or meta.get('title') or sub.chat}"
+        elif sub.role == orientation.ROLE:
+            name = f"{orientation.PLUGIN}:{orientation.SUBAGENT}"
+        elif sub.of_main:
+            name = str(meta.get("title") or "subagent")
+        else:
+            continue
+        waiting = sub.agent_id is not None and sub.agent_id in _channel_module().asking(c)
+        out.append({"name": name, "state": "waiting for a permission prompt" if waiting else "working", "kind": "subagent"})
+    return out
 
 
 def _channel_module() -> Any:
@@ -1625,7 +1702,7 @@ def translate(lv: Live, line: bytes | str) -> None:
         elif origin == "task-notification":
             _task_notification(lv, text)
         elif origin == "peer":
-            _peer(lv, mid_turn=False)
+            _peer(lv, mid_turn=False, origin=rec.get("origin"))
         elif rec.get("isMeta"):
             if LOCAL_CAVEAT in text:
                 lv.local_prompt = str(rec.get("promptId") or "")
@@ -1673,7 +1750,7 @@ def translate(lv: Live, line: bytes | str) -> None:
                     _tail_sub(lv, sub)
                     _finish_sub(lv, sub, _task_status(fields.get("status")), str(fields.get("result") or "").strip() or None)
             elif aorigin == "peer":
-                _peer(lv, mid_turn=True)
+                _peer(lv, mid_turn=True, origin=att.get("origin"))
             elif prompt.strip() and not prompt.lstrip().startswith("<"):
                 _rec(lv, "user", text=prompt.strip(), by=TERMINAL)
         return
