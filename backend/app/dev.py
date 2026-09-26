@@ -75,9 +75,10 @@ SHOT_TIMEOUT_S = 90
 BROWSER_MISSING_RE = re.compile(r"download new browsers|Executable doesn't exist at", re.IGNORECASE)
 BROWSER_MISSING_LINE = "Playwright's Chromium is not installed for this user: run `npx playwright install chromium` in frontend/"
 GATE_TIMEOUT_S = 900
-# The background session's tool set, each allowed without a prompt; a tool outside the set does not exist in the session
-# rather than blocking it on a permission question.
-ALLOWED_TOOLS = ["Read", "Edit", "Write", "Bash", "Grep", "Glob"]
+# The tools the background session uses without a permission request, since nobody answers one there: its file tools,
+# which the fence's denies still keep out of its read-only folders, Bash, the web and skills. The session has every tool
+# of a default Claude Code session less the ones _flags takes away.
+ALLOWED_TOOLS = ["Read", "Edit", "Write", "NotebookEdit", "Bash", "Grep", "Glob", "WebSearch", "WebFetch", "Skill"]
 CLAUDE_BIN = os.environ.get("THIMBLE_CLAUDE_BIN", "claude")
 VIEW_CHECK = Path(__file__).with_name("view_check.py")  # the command a view build checks its draft with (view_fence)
 CLI_TIMEOUT_S = 60
@@ -1183,14 +1184,17 @@ class Sessions:
 
     def _flags(self, workspace: str | None, name: str, add_dirs: "tuple[Path, ...] | list[Path]" = (),
                fence: dict[str, Any] | None = None) -> list[str]:
-        """The session's flags: the dev role's model settings, the tool set, `--add-dir` folders, the `fence` settings,
-        and no MCP server, since a plugin's tools would only stop it at a permission question. The permission mode is
-        `default`, since under auto mode a Bash call still goes to the classifier despite `--allowedTools`."""
+        """The session's flags: the dev role's model settings, the allowed tools, `--add-dir` folders and the `fence`
+        settings. It gets no MCP server, since an MCP tool's permission request would stop it with nobody to answer, and
+        not the tools that schedule a later turn (agent_session.LATER_TOOLS), since the session is stopped once its turn
+        ends. The permission mode is `default`, since under auto mode a Bash call still goes to the classifier despite
+        `--allowedTools`."""
+        from . import agent_session  # noqa: PLC0415 — agent_session is large and this module otherwise needs none of it
+
         conf = config.models_for(workspace)["dev"]
         model = config.resolve_model(conf["model"])[0] or conf["model"]
-        tools_arg = ",".join(ALLOWED_TOOLS)
-        flags = ["-n", name, "--model", str(model), "--tools", tools_arg, "--allowedTools", tools_arg, "--strict-mcp-config",
-                 "--permission-mode", "default"]
+        flags = ["-n", name, "--model", str(model), "--allowedTools", ",".join(ALLOWED_TOOLS),
+                 "--disallowedTools", ",".join(agent_session.LATER_TOOLS), "--strict-mcp-config", "--permission-mode", "default"]
         for d in add_dirs:
             flags += ["--add-dir", str(d)]
         if conf.get("effort"):

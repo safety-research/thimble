@@ -409,6 +409,22 @@ def test_a_view_build_s_session_may_read_the_corpus_but_not_change_it(board, mon
     assert dev.view_read_only(corpus, inside) == (views.EXAMPLES_DIR,), "a corpus that holds the view's folder is left out"
 
 
+def test_a_dev_session_has_the_default_tools_less_mcp_servers_and_the_later_turn_tools(monkeypatch):
+    """A view build's or a code ticket's session names no tool set, so it has every tool of a default Claude Code
+    session. Nobody answers its permission requests, so what it does in its folders, the web and skills are allowed;
+    it gets no MCP server, whose tools would ask, and not the tools that schedule a later turn, since the session is
+    stopped once its turn ends."""
+    from app import agent_session
+
+    monkeypatch.setattr(config, "models_for", lambda c=None, settings=None: {"dev": {"model": "claude-opus-4-8", "fast": False}})
+    flags = dev.Sessions()._flags(CORPUS, "thimble ticket 1: x")
+    assert "--tools" not in flags
+    assert {"Read", "Edit", "Write", "NotebookEdit", "Bash", "WebSearch", "WebFetch", "Skill"} <= \
+        set(flags[flags.index("--allowedTools") + 1].split(","))
+    assert flags[flags.index("--disallowedTools") + 1].split(",") == list(agent_session.LATER_TOOLS)
+    assert "--strict-mcp-config" in flags and flags[flags.index("--permission-mode") + 1] == "default"
+
+
 def test_the_view_check_posts_its_locators_to_a_view_s_check_route_on_localhost_only(capsys):
     """view_check.py, the one command a fenced view build runs outside the sandbox: it posts its arguments as the
     locators and prints the answer, and refuses any URL that is not a view's check route on 127.0.0.1."""
