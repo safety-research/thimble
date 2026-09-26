@@ -405,6 +405,8 @@ export interface Proposal {
   error?: string
   /** the request of a change to the built view that failed, which Retry makes again (backend views.end_revision) */
   failed_change?: string
+  /** a change to a built view is being made (backend views.revise); the view stays open at the version it last passed */
+  revision?: boolean
   chat?: string | null
   attempts?: number
   /** the review of the built view's pictures (backend view_review) */

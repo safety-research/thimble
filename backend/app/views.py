@@ -292,15 +292,46 @@ def _view_json(d: Path) -> dict[str, Any]:
 
 
 def read_built(c: str, slug: str) -> dict[str, Any] | None:
-    """read_view, None for a draft: what every reader of a view but its own checks uses, since a draft never opens a
-    citation."""
+    """The view as it last passed its checks: what every reader of a view but its own checks uses, since a draft never
+    opens a citation. While a session may be writing the view's folder (_changing), or has left it a draft, that is the
+    version kept when it last passed (_as_built); otherwise read_view. None for a view that never passed."""
     v = read_view(c, slug)
+    if v is not None and v["origin"] == "workspace" and (v["draft"] or _changing(c, slug)):
+        kept = _as_built(c, slug, v)
+        if kept is not None:
+            return kept
     return None if v is None or v["draft"] else v
 
 
+def _changing(c: str, slug: str) -> bool:
+    """Whether a session may be writing the view's folder: a change to it (revise, whose copy aside stays until the
+    change ends) or a revision its review asked for."""
+    from . import view_review  # noqa: PLC0415 — the review imports this module
+
+    return _revision_dir(c, slug).is_dir() or view_review.revising(c, slug)
+
+
+def _as_built(c: str, slug: str, live: dict[str, Any]) -> dict[str, Any] | None:
+    """The view at the version it last passed its checks at: the kept version its folder's stamp names, else the one its
+    copy aside (_keep_built) names, else the newest kept, else that copy itself; None when there is none."""
+    root, aside = _versions_dir(c, slug), _revision_dir(c, slug)
+    stamps = [live["version"], str(_view_json(aside).get("version") or "") if (aside / VIEW_JSON).is_file() else ""]
+    d = next((root / s for s in stamps if VERSION_RE.match(s) and (root / s / VIEW_JSON).is_file()), None)
+    if d is None:
+        try:
+            kept = [x for x in root.iterdir() if VERSION_RE.match(x.name) and (x / VIEW_JSON).is_file()]
+        except OSError:
+            kept = []
+        d = max(kept, key=lambda x: x.stat().st_mtime_ns) if kept else aside if (aside / VIEW_JSON).is_file() else None
+    if d is None:
+        return None
+    v = _normalize_view(slug, _view_json(d), where=d)
+    return None if v["draft"] else v
+
+
 def list_views(c: str) -> list[dict[str, Any]]:
-    """The workspace's views, drafts and the views of held proposals left out (held_slugs), then the built-in viewers
-    it does not override. A draft does not override a built-in viewer of its slug."""
+    """The workspace's views as read_built reads them, the views of held proposals left out (held_slugs), then the
+    built-in viewers they do not override. A draft does not override a built-in viewer of its slug."""
     held = held_slugs(c)
     mine = [v for v in _own_views(c) if v["slug"] not in held]
     have = {v["slug"] for v in mine}
@@ -308,8 +339,9 @@ def list_views(c: str) -> list[dict[str, Any]]:
 
 
 def _own_views(c: str) -> list[dict[str, Any]]:
-    """The workspace's own views, drafts left out, held ones kept (list_proposals settles its rows against them)."""
-    return [v for s in _view_dirs(c) if (v := read_view(c, s)) is not None and not v["draft"]]
+    """The workspace's own views as read_built reads them, held ones kept (list_proposals settles its rows against
+    them)."""
+    return [v for s in _view_dirs(c) if (v := read_built(c, s)) is not None]
 
 
 def held_slugs(c: str) -> set[str]:

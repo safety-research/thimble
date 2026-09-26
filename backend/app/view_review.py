@@ -108,6 +108,12 @@ def running(c: str, slug: str) -> bool:
     return run is not None and run.task is not None and not run.task.done()
 
 
+def revising(c: str, slug: str) -> bool:
+    """Whether a revision the review asked for may be writing the view's files."""
+    run = _runs.get((c, slug))
+    return run is not None and run.revising
+
+
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 

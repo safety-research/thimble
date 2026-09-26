@@ -11,7 +11,7 @@ import path from 'node:path'
 import { act } from 'react'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 import { ViewChip } from '../../src/chat/ViewChip.tsx'
-import { NEW_VIEW_PLACEHOLDER, useViews, ViewsBar } from '../../src/files/ViewsBar.tsx'
+import { listedAsView, NEW_VIEW_PLACEHOLDER, useViews, ViewsBar } from '../../src/files/ViewsBar.tsx'
 import { isDropped, withoutDropped } from '../../src/lib/proposals.ts'
 import type { Proposal } from '../../src/lib/types.ts'
 import { mount, settle, unmountAll } from './mount.tsx'
@@ -106,6 +106,16 @@ describe('the views and the proposals', () => {
     await settle()
     expect(el.querySelector('.probe')?.textContent).toBe('mine')
     expect(el.querySelector('.view-chip[data-status="building"] .spinner')?.getAttribute('aria-label')).toBe('Building')
+  })
+
+  test('a view being changed is listed as a view; a first build, a held one or a failed one is not', () => {
+    const known = new Set(['board'])
+    expect(listedAsView(proposal('board', 'Thread board', 'building', { revision: true }), known)).toBe(true)
+    expect(listedAsView(proposal('board', 'Thread board', 'queued'), known), 'its version is listed').toBe(true)
+    expect(listedAsView(proposal('life', 'Topic map', 'queued', { revision: true }), known), 'the views list not read yet').toBe(true)
+    expect(listedAsView(proposal('life', 'Topic map', 'building'), known)).toBe(false)
+    expect(listedAsView(proposal('flow', 'Hand-off flow', 'building', { held: true }), known)).toBe(false)
+    expect(listedAsView(proposal('mine', 'Page timeline', 'failed'), new Set(['mine']))).toBe(false)
   })
 
   test('a suggested viewer for a file type is a plain name as a chip, since it opens nowhere until it is built', async () => {

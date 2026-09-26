@@ -2058,12 +2058,19 @@ def _change_failed_chip(c: str, prop: dict[str, Any], why: str) -> None:
 
 
 def _view_failed(c: str, slug: str, error: str, chat: str | None = None, *, drop_why: str | None = None) -> None:
-    """A build that ended without its view: a view the analyst asked for fails, its chip showing why with Retry, and an
-    orientation's proposal is dropped (_view_dropped), with `drop_why` as its line's reason when given."""
+    """A build that ended without its view: a change to a built view leaves the view as it was (views.end_revision), a
+    view the analyst asked for fails, its chip showing why with Retry, and an orientation's proposal is dropped
+    (_view_dropped), with `drop_why` as its line's reason when given."""
     from . import views  # noqa: PLC0415
 
     current = views.read_proposal(c, slug) or {}
     chat = chat or current.get("chat")
+    if current.get("revision"):
+        views.end_revision(c, slug, error, failed_change=str(current.get("change") or ""))
+        if chat:
+            _close_chat({"workspace": c, "chat": chat}, "failed", error)
+        _change_failed_chip(c, current, error)
+        return
     if not current.get("asked"):
         _view_dropped(c, slug, drop_why or error, chat)
         return

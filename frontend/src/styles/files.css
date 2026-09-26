@@ -2259,14 +2259,15 @@
   align-self: center;
   margin: 0;
 }
-/* while the review of a view's pictures runs, its name in the views bar shimmers, as a card does while it is checked */
-.files-views .seg-opt.is-reviewing .seg-label {
+/* while a newer version of a view builds or its review runs, its name in the views bar shimmers, as a card does while it
+   is checked */
+.files-views .seg-opt.is-updating .seg-label {
   background-image: linear-gradient(100deg, transparent 30%, color-mix(in oklab, var(--accent) 16%, transparent) 50%, transparent 70%);
   background-size: 300% 100%;
   animation: bcell-shimmer 1.8s linear infinite;
 }
 @media (prefers-reduced-motion: reduce) {
-  .files-views .seg-opt.is-reviewing .seg-label {
+  .files-views .seg-opt.is-updating .seg-label {
     animation: none;
     background-image: none;
     background-color: color-mix(in oklab, var(--accent) 8%, transparent);
