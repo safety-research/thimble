@@ -81,12 +81,13 @@ describe("the review of a view's pictures", () => {
     expect(flagged.querySelector('.view-pane-review .bcell-check-mark')!.classList.contains('is-flagged')).toBe(true)
   })
 
-  test('a review that ended early after a revision still offers Undo beside Review again', async () => {
-    const el = await pane({ state: 'failed', note: "The review did not finish: Anthropic's API is overloaded", revised: ['picture 1: the ticks overlap'] })
+  test('a review that ended early after a revision still offers Undo beside Review again, and lists the first three revisions', async () => {
+    const el = await pane({ state: 'failed', note: "The review did not finish: Anthropic's API is overloaded", revised: ['a', 'b', 'c', 'd', 'e'] })
     await settle()
     await act(async () => el.querySelector<HTMLElement>('.view-pane-review')!.dispatchEvent(new MouseEvent('mouseover', { bubbles: true })))
     await act(async () => el.querySelector<HTMLButtonElement>('.view-pane-review .bcell-check-mark')!.focus())
     const pop = document.querySelector<HTMLElement>('.bcell-check-pop')!
+    expect(pop.textContent).toContain('Revised: a; b; c and 2 more')
     expect([...pop.querySelectorAll('button')].map((b) => b.textContent)).toEqual(['Undo', 'Review again'])
     await act(async () => [...pop.querySelectorAll('button')].find((b) => b.textContent === 'Undo')!.click())
     expect(calls.some((c) => c.method === 'POST' && c.url.endsWith('/views/threads/review/undo'))).toBe(true)

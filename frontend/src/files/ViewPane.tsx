@@ -128,7 +128,12 @@ function ReviewMark({ ws, slug, review: r }: { ws: string; slug: string; review:
       {(close) => (
         <>
           <span className="bcell-check-when">{line}</span>
-          {revised.length > 0 && <span className="bcell-check-what">Revised: {revised.join('; ')}</span>}
+          {revised.length > 0 && (
+            <span className="bcell-check-what">
+              Revised: {revised.slice(0, 3).join('; ')}
+              {revised.length > 3 ? ` and ${revised.length - 3} more` : ''}
+            </span>
+          )}
           {r.state === 'done' && left.length > 0 && (
             <span className="bcell-check-what">
               Left: {left.slice(0, 3).join('; ')}
