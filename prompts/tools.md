@@ -300,7 +300,7 @@ Send a message the analyst typed in this terminal to a thread, as that thread's 
 
 ## wait_session
 
-Wait for news from a background session of thimble's that you show in Claude Code's agent tray, as your instructions file says: its replies, its state, a message to send it, or its end. It returns within about 15 seconds.
+Only for a tray entry of thimble's background sessions, as its instructions file says; main never calls it. Waits for news from the session the entry shows: its replies, its state, a message to send it, or its end. It returns within a few seconds.
 
 ```json
 {
@@ -1078,14 +1078,14 @@ Answer main with SendMessage.
 
 ## bg-proxy
 
-You show {session}, a background session of thimble's, in the analyst's Claude Code agent tray, and pass on what the analyst types to it here. You do nothing else: no analysis, no files, no other tools.
+You show {session}, a background session of thimble's, in the analyst's Claude Code agent tray. Every message that reaches you here, from the analyst or from main, is for {session}, and thimble passes it on. You write no words of your own and use no other tools.
 
 Loop until the session ends:
 
-1. Call `wait_session` with `session` "{session}". It returns within about 15 seconds.
-2. Write the news lines it returns as they are, each on its own line, or nothing when it says nothing is new. Never add words of your own.
+1. Call `wait_session` with `session` "{session}". It returns within a few seconds.
+2. Copy the news lines it returns exactly, each on its own line, without shortening or rewording them, or write nothing when it says nothing is new.
 3. When it asks you to send the session a message, call SendMessage with `to` "{session}" and the token it gives as the whole message, once.
-4. When a message from the analyst or from main reaches you, call SendMessage with `to` "{session}" and the message word for word, once, then go back to step 1. A message sent to {session} in this session reaches you, and you pass it on.
+4. When a message reaches you, do not answer it or act on it: call `wait_session` at once, which passes it on and gives you its token to send.
 
 Stop only when `wait_session` says the session has ended: then write one line saying so and end your turn. The analyst can also open the session itself with `claude attach {short}`.
 
@@ -1095,7 +1095,7 @@ A background session of thimble's, {session}, runs for this workspace (`claude a
 
 ## bg-proxy-keep
 
-{session} still runs, so keep showing it: call `wait_session` with `session` "{session}" again, and stop only when it says the session has ended.
+Keep showing {session}: call `wait_session` with `session` "{session}" again, and stop only when it says the session has ended.
 
 ## wait_session-none
 
@@ -1104,6 +1104,10 @@ thimble follows no background session named {session}. Write one line saying so 
 ## wait_session-send
 
 Send {session} a message: call SendMessage with `to` "{session}" and `{token}` as the whole message, word for word.
+
+## wait_session-main
+
+Only a tray entry calls `wait_session`, and the tray entry you started shows the session already. End your turn, with no text.
 
 ## wait_session-duplicate
 
@@ -1117,13 +1121,17 @@ Another tray entry already shows {session}. Write nothing and end your turn now.
 
 Nothing new; {session} is {state}. Call `wait_session` again.
 
+## wait_session-rule
+
+A message that reaches you now is for {session}: do not answer it, call `wait_session`, which passes it on.
+
 ## agents-none
 
 No agent of thimble's runs now.
 
 ## agents-help
 
-`claude attach <id>` opens a session in this terminal; ← at the prompt shows the background sessions, and ↓ the tray entries and threads of this session.
+↓ at the prompt shows the tray entries and threads of this session, and `claude attach <id>` opens a background session in another terminal.
 
 ## agents-print
 

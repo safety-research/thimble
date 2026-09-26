@@ -140,6 +140,14 @@ def _log(chat: str) -> list[dict]:
     return agents.read_events(agents.paths(CORPUS, chat)[1])
 
 
+def _proxy_transcript(tmp_path: Path, agent_id: str, *recs: dict, key: str = "writer:report") -> Path:
+    """A tray entry's transcript: its first prompt names its instructions file, as main's Agent call gives it."""
+    path = tmp_path / f"agent-{agent_id}.jsonl"
+    first = {"type": "user", "message": {"role": "user", "content": str(bg_session.proxy_file(CORPUS, key))}}
+    path.write_text("".join(json.dumps(r) + "\n" for r in (first, *recs)))
+    return path
+
+
 def test_names_labels_and_the_route():
     assert [bg_session.name_of(k) for k in ("orient", "writer:report", "writer:slides", "critique:orient")] == [
         "thimble:orient", "thimble:writer", "thimble:writer-slides", "thimble:critic"]
@@ -248,19 +256,23 @@ async def test_a_message_waits_for_the_proxy_which_sends_it_once_through_the_rel
 async def test_a_message_typed_in_the_proxy_s_view_goes_once_prefixed(fake, tmp_path):
     run = await write_session.start(CORPUS, "report")
     await asyncio.wait_for(run.task, 10)
-    proxy = tmp_path / "agent-a0000000000000002.jsonl"
-    typed = {"type": "attachment", "attachment": {"type": "queued_command", "prompt": "Quote the first sentence.",
-                                                  "source_uuid": "u-1", "origin": {"kind": "human"}}}
-    proxy.write_text(json.dumps(typed) + "\n")
+    proxy = _proxy_transcript(tmp_path, "a0000000000000002", {
+        "type": "attachment", "attachment": {"type": "queued_command", "prompt": "Quote the first sentence.",
+                                             "source_uuid": "u-1", "origin": {"kind": "human"}}})
     got = bg_session.relay_check(CORPUS, proxy, "thimble:writer", "Quote the first sentence.")
     assert got["allow"] and got["message"] == tools.hint("bg-from-terminal", text="Quote the first sentence.")
     again = bg_session.relay_check(CORPUS, proxy, "thimble:writer", "Quote the first sentence.")
-    assert not again["allow"] and again["reason"] == "sent already"
+    assert not again["allow"], "sent once"
     assert [(x["text"], x["by"]) for x in _log(run.chat) if x["type"] == "user"][-1] == ("Quote the first sentence.", "terminal")
-    # main's own message to the session goes as it is, and shows in the session's chat as main's
+    # main's own message, with no tray entry to pass it on, goes straight to the session with its sender named
     mine = bg_session.relay_check(CORPUS, None, "thimble:writer", "Which sources did you use?")
-    assert mine == {"allow": True, "message": "Which sources did you use?"}
+    assert mine == {"allow": True, "message": tools.hint("bg-from-main", text="Which sources did you use?")}
     assert _log(run.chat)[-1]["by"] == agents.MAIN_ID
+    # with a tray entry alive, main's message goes to it as it is, and is logged when the entry passes it on
+    await bg_session.wait(CORPUS, "thimble:writer", "a0000000000000002")
+    n = len(_log(run.chat))
+    assert bg_session.relay_check(CORPUS, None, "thimble:writer", "And the second?") == {"allow": True, "message": "And the second?"}
+    assert len(_log(run.chat)) == n
 
 
 async def test_the_proxy_waits_for_news_is_kept_going_and_a_second_one_is_told_to_stop(fake, tmp_path):
@@ -270,7 +282,8 @@ async def test_the_proxy_waits_for_news_is_kept_going_and_a_second_one_is_told_t
     first = await bg_session.wait(CORPUS, "thimble:writer", "a0000000000000003")
     assert "finished its task" in first
     quiet = await bg_session.wait(CORPUS, "thimble:writer", "a0000000000000003")
-    assert quiet == tools.hint("wait_session-quiet", session="thimble:writer", state="done, idle")
+    assert quiet == tools.hint("wait_session-quiet", session="thimble:writer", state="done, idle") + "\n\n" + \
+        tools.hint("wait_session-rule", session="thimble:writer"), "each answer reminds the entry to pass messages on"
     second = await bg_session.wait(CORPUS, "thimble:writer", "a0000000000000004")
     assert second == tools.hint("wait_session-duplicate", session="thimble:writer")
     path = tmp_path / "agent-a0000000000000003.jsonl"
@@ -402,14 +415,117 @@ async def test_a_run_whose_session_was_killed_ends_with_resume_which_starts_it_a
 async def test_main_s_message_to_the_session_s_name_reaches_the_proxy_which_passes_it_on(fake, tmp_path):
     run = await write_session.start(CORPUS, "report")
     await asyncio.wait_for(run.task, 10)
-    proxy = tmp_path / "agent-a0000000000000005.jsonl"
-    from_main = {"type": "attachment", "attachment": {"type": "queued_command", "prompt": "Which card do you cite first?",
-                                                      "source_uuid": "u-2", "origin": {"kind": "coordinator"}}}
-    proxy.write_text(json.dumps(from_main) + "\n")
+    proxy = _proxy_transcript(tmp_path, "a0000000000000005", {
+        "type": "attachment", "attachment": {"type": "queued_command", "prompt": "Which card do you cite first?",
+                                             "source_uuid": "u-2", "origin": {"kind": "coordinator"}}})
     got = bg_session.relay_check(CORPUS, proxy, "thimble:writer", "Which card do you cite first?")
     assert got["allow"] and got["message"] == tools.hint("bg-from-main", text="Which card do you cite first?")
     assert not bg_session.relay_check(CORPUS, proxy, "thimble:writer", "Which card do you cite first?")["allow"]
     assert [(x["text"], x["by"]) for x in _log(run.chat) if x["type"] == "user"][-1] == ("Which card do you cite first?", "main")
+
+
+async def test_wait_passes_on_what_reached_the_tray_entry_once_even_when_the_entry_answers_it_itself(fake, tmp_path):
+    run = await write_session.start(CORPUS, "report")
+    await asyncio.wait_for(run.task, 10)
+    e = bg_session.entry(CORPUS, "writer:report")
+    await bg_session.wait(CORPUS, "thimble:writer", "a0000000000000006")  # its news so far
+    typed = {"type": "attachment", "attachment": {"type": "queued_command", "prompt": "What is the report's title?",
+                                                  "source_uuid": "u-3", "origin": {"kind": "human"}}}
+    as_prompt = {"type": "user", "isMeta": True, "origin": {"kind": "human"}, "uuid": "u-3b",
+                 "message": {"role": "user", "content": "What is the report's title?"}}
+    own_answer = {"type": "assistant", "message": {"content": [{"type": "text", "text": "The title is report."}]}}
+    from_main = {"type": "user", "isMeta": True, "origin": {"kind": "coordinator"}, "uuid": "u-4",
+                 "message": {"role": "user", "content": f"{bg_session.COORDINATOR_LEAD}\nAsk thimble:orient for the dates."}}
+    proxy = _proxy_transcript(tmp_path, "a0000000000000006", typed, as_prompt, own_answer, from_main)
+    text = await bg_session.wait(CORPUS, "thimble:writer", "a0000000000000006", proxy)
+    tokens = [i["token"] for i in e.outbox if not i["sent"]]
+    assert len(tokens) == 2 and all(t in text for t in tokens), "one token each, the typed message taken once"
+    assert [(i["text"], i["by"]) for i in e.outbox if not i["sent"]] == [
+        ("What is the report's title?", agents.TERMINAL), ("Ask thimble:orient for the dates.", agents.MAIN_ID)]
+    again = await bg_session.wait(CORPUS, "thimble:writer", "a0000000000000006", proxy)
+    assert len([i for i in e.outbox if not i["sent"]]) == 2, "nothing queued twice"
+    assert all(t in again for t in tokens), "a token not sent yet is given again"
+    sent = [bg_session.relay_check(CORPUS, proxy, "thimble:writer", t, "a0000000000000006") for t in tokens]
+    assert [x["message"] for x in sent] == [tools.hint("bg-from-terminal", text="What is the report's title?"),
+                                            tools.hint("bg-from-main", text="Ask thimble:orient for the dates.")]
+    raw = bg_session.relay_check(CORPUS, proxy, "thimble:writer", "What is the report's title?", "a0000000000000006")
+    assert not raw["allow"], "a message passed on by its token does not go again in words"
+
+
+async def test_a_tray_entry_sends_only_to_its_own_session(fake, tmp_path, monkeypatch):
+    run = await write_session.start(CORPUS, "report")
+    await asyncio.wait_for(run.task, 10)
+    ledger.put_settings(CORPUS, {bg_session.ORIENT_ROUTE_KEY: bg_session.ROUTE_SESSION})
+    orient = bg_session.record(CORPUS, "orient", short="0123abcd", sid="0123abcd-0000-4000-8000-000000000000",
+                               chat=agents.MAIN_ID, role="orientation", folder=tmp_path)
+    from_main = {"type": "attachment", "attachment": {"type": "queued_command", "prompt": "Ask thimble:orient for the dates.",
+                                                      "source_uuid": "u-5", "origin": {"kind": "coordinator"}}}
+    writer_proxy = _proxy_transcript(tmp_path, "a0000000000000007", from_main)
+    n = len(_log(agents.MAIN_ID))
+    got = bg_session.relay_check(CORPUS, writer_proxy, "thimble:orient", "Which dates did you find?", "a0000000000000007")
+    assert not got["allow"] and "thimble:writer" in got["reason"], "the writer's entry acts for no other session"
+    assert len(_log(agents.MAIN_ID)) == n and not orient.relayed
+    words = bg_session.relay_check(CORPUS, writer_proxy, "thimble:writer", "Here is my own answer.", "a0000000000000007")
+    assert not words["allow"], "words of its own do not go"
+
+
+async def test_a_second_tray_entry_or_fork_is_refused_before_it_starts(fake):
+    run = await write_session.start(CORPUS, "report")
+    await asyncio.wait_for(run.task, 10)
+    call = {"subagent_type": "thimble:writer", "description": "writing report", "prompt": "x", "run_in_background": True}
+    assert bg_session.agent_check(CORPUS, call) is None
+    assert "already shows" in bg_session.agent_check(CORPUS, call), "a second one while the first is starting"
+    assert bg_session.agent_check(CORPUS, {"subagent_type": "general-purpose", "description": "look"}) is None
+    thread = agents.new_agent(CORPUS, agents.KIND_THREAD, "probier pages", kind=agents.KIND_THREAD)
+    agents.update_agent(CORPUS, thread["id"], fork_name="probier-601")
+    fork = {"subagent_type": "fork", "name": "probier-601", "description": "thread:probier-601", "prompt": "thread:probier-601"}
+    assert bg_session.agent_check(CORPUS, fork) is None
+    assert "running already" in bg_session.agent_check(CORPUS, fork)
+    from app import threads
+
+    threads.fork_finished(CORPUS, thread["id"])
+    assert bg_session.agent_check(CORPUS, fork) is None, "a finished fork's thread may fork again"
+
+
+async def test_a_killed_session_that_claude_code_restarts_keeps_its_run(fake, monkeypatch):
+    monkeypatch.setenv("FAKE_BUSY", "1")
+    run = await write_session.start(CORPUS, "report")
+    e = bg_session.entry(CORPUS, "writer:report")
+    st = _state(fake)
+    st[e.short]["pid"] = None  # killed: listed as working with no process until Claude Code restarts it
+    (fake / "sessions.json").write_text(json.dumps(st))
+    await _until(lambda: e.missing_since > 0)
+    await asyncio.sleep(0.5)
+    assert bg_session.alive(e) and not run.task.done() and bg_session.state_words(e) == "restarting"
+    st[e.short]["pid"] = 5151
+    (fake / "sessions.json").write_text(json.dumps(st))
+    await _until(lambda: e.missing_since == 0)
+    assert e.pid == 5151 and not run.task.done()
+    st[e.short]["status"] = "idle"
+    (fake / "sessions.json").write_text(json.dumps(st))
+    with _transcript(e.sid).open("a") as f:
+        f.write(json.dumps({"type": "assistant", "message": {"content": [{"type": "text", "text": "Done."}]}}) + "\n")
+        f.write(json.dumps({"type": "system", "subtype": "turn_duration"}) + "\n")
+    await asyncio.wait_for(run.task, 10)
+    assert agents.read_meta(CORPUS, run.chat)["status"] == "done"
+
+
+def test_the_statusline_lists_every_agent_on_as_many_lines_as_it_needs():
+    rows = [{"name": f"thimble:agent-{i}", "state": "working" if i % 2 else "waiting for a permission"} for i in range(7)]
+    text = bg_session.status_line(rows)
+    lines = text.split("\n")
+    assert len(lines) > 1 and lines[0].startswith("thimble · ") and all(len(ln) <= bg_session.STATUS_CHARS for ln in lines)
+    assert all(f"thimble:agent-{i}" in text for i in range(7)) and "+" not in text
+
+
+async def test_start_lines_are_not_printed_again_after_a_server_restart(fake):
+    run = await write_session.start(CORPUS, "report")
+    cwd = str(config.corpus_dir(CORPUS))
+    assert (await bg_session.agents_route(bg_session.AgentsQuery(cwd=cwd, session="s1", announce=True)))["announce"]
+    bg_session._announced.clear()
+    bg_session._announced_loaded.clear()
+    assert (await bg_session.agents_route(bg_session.AgentsQuery(cwd=cwd, session="s1", announce=True)))["announce"] == ""
+    await asyncio.wait_for(run.task, 10)
 
 
 async def test_a_turn_that_ended_at_capacity_is_retried_in_place_with_its_prompt(fake, monkeypatch):

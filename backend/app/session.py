@@ -969,6 +969,10 @@ def _tool_use(lv: Live, tool_use_id: str, name: str, tool_input: Any) -> None:
             lv.forked.add(tid)
             _spawn(lv, tool_use_id, None, str(inp.get("description") or ""), inp.get("subagent_type"))
             return
+        if _bg().is_proxy(lv.c, inp.get("subagent_type"), inp.get("description"), inp.get("prompt")):
+            lv.hidden.add(tool_use_id)  # a background session's tray entry, which that session's chat stands for
+            _spawn(lv, tool_use_id, None, str(inp.get("description") or ""), inp.get("subagent_type"), inp.get("prompt"))
+            return
     if name == SEND_TOOL:
         sub = _sub_by(lv, agent_id=str(inp.get("to") or inp.get("recipient") or ""))
         if sub is not None and sub.thread:
@@ -984,7 +988,7 @@ def _tool_use(lv: Live, tool_use_id: str, name: str, tool_input: Any) -> None:
             _relayed(sub, inp)
     _rec(lv, "tool_use", id=tool_use_id, name=name, input=tool_input)
     if name in AGENT_TOOLS:
-        _spawn(lv, tool_use_id, None, str(inp.get("description") or ""), inp.get("subagent_type"))
+        _spawn(lv, tool_use_id, None, str(inp.get("description") or ""), inp.get("subagent_type"), inp.get("prompt"))
     elif name == WORKFLOW_TOOL:
         _spawn_workflow(lv, tool_use_id, inp)
 
@@ -1050,14 +1054,15 @@ def _sub_by(lv: Live, *, tool_use_id: str | None = None, agent_id: str | None = 
     return None
 
 
-def _spawn(lv: Live, tool_use_id: str | None, agent_id: str | None, title: str, agent_type: Any) -> Sub:
+def _spawn(lv: Live, tool_use_id: str | None, agent_id: str | None, title: str, agent_type: Any,
+           prompt: Any = None) -> Sub:
     """The Sub for an Agent call, made on its first sighting (the tool_use, or the file's meta json) and completed by
     the later one. A `thread:<id>` description joins the thread's chat; any other is a new agent chat in main."""
     sub = _sub_by(lv, tool_use_id=tool_use_id) or _sub_by(lv, agent_id=agent_id)
-    if sub is None and _bg().is_proxy(lv.c, agent_type, title):
+    if sub is None and _bg().is_proxy(lv.c, agent_type, title, prompt):
         sub = Sub(lv.c, agents.MAIN_ID, tool_use_id, agent_id)  # it records nothing (proxy)
         sub.proxy = sub.of_main = True
-        sub.report = _bg().proxy_started(lv.c, str(agent_type), str(title), agent_id)  # the session it shows
+        sub.report = _bg().proxy_started(lv.c, str(agent_type), str(title), agent_id, prompt)  # the session it shows
         lv.subs.append(sub)
         return sub
     if sub is None:
@@ -1415,9 +1420,9 @@ async def call_session(c: str, tool_use_id: str | None) -> str | None:
         await asyncio.sleep(CALL_POLL_S)
 
 
-async def caller_agent(c: str, tool_use_id: str | None) -> str | None:
-    """The agent id of main's subagent whose transcript holds the call `tool_use_id`, waiting CALL_WAIT_S at most for
-    its line; None for main's own call or one found in no transcript."""
+async def caller_sub(c: str, tool_use_id: str | None) -> "Sub | None":
+    """Main's subagent whose transcript holds the call `tool_use_id`, waiting CALL_WAIT_S at most for its line; None for
+    main's own call or one found in no transcript."""
     lv = _live.get(c)
     if lv is None or not tool_use_id:
         return None
@@ -1427,7 +1432,7 @@ async def caller_agent(c: str, tool_use_id: str | None) -> str | None:
     while True:
         holder = _call_holder(lv, tool_use_id, needle, read)
         if holder is not None:
-            return holder.agent_id if isinstance(holder, Sub) else None
+            return holder if isinstance(holder, Sub) else None
         if time.monotonic() >= deadline:
             return None
         if not scanned:

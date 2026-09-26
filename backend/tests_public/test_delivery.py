@@ -370,8 +370,10 @@ def test_the_hooks_run_the_watcher_on_the_four_events_and_relay_permission_promp
         assert hook["timeout"] == 86400 and hook["rewakeMessage"] == MARKER and hook["rewakeSummary"]
     assert hooks["PreToolUse"][0]["matcher"] == "*"
     # terminal-first's background sessions (test_bg_sessions.py): a SendMessage to one goes through the server, their
-    # start and finish lines print after a tool call, and a tray entry is kept going while its session runs
-    assert [(g["matcher"], g["hooks"][0]["command"].rsplit(" ", 1)[-1]) for g in hooks["PreToolUse"][1:]] == [("SendMessage", "--relay")]
+    # start and finish lines print after a tool call, main's Agent calls are checked for a second tray entry or fork,
+    # and a tray entry is kept going while its session runs
+    assert [(g["matcher"], g["hooks"][0]["command"].rsplit(" ", 1)[-1]) for g in hooks["PreToolUse"][1:]] == [
+        ("SendMessage", "--relay"), ("Agent|Task", "--agent-check")]
     assert hooks["PostToolUse"][0]["hooks"][0]["command"].endswith("--agents")
     assert hooks["SubagentStop"][0]["hooks"][0]["command"].endswith("--proxy-stop")
     (held,) = [h for group in hooks["UserPromptSubmit"] for h in group["hooks"] if not h.get("asyncRewake")]

@@ -62,7 +62,9 @@ ROUTE_SUBAGENT, ROUTE_SESSION = "subagent", "session"
 REGISTRY_FILE = "bg-sessions.json"  # in the workspace: the background sessions thimble started
 PROXY_DIR = "bg"  # in the workspace: each proxy's instructions (proxy_file)
 POLL_S = 1.5
-WAIT_S = 15.0  # the longest a wait_session call waits for news
+# the longest a wait_session call waits for news; a message typed in the tray entry's view reaches it only after that
+# call returns, so this bounds how long such a message waits
+WAIT_S = 6.0
 PROXY_WAIT_S = 20.0  # how long a message waits for the proxy before main is asked to send it
 PROXY_ALIVE_S = 90.0  # a proxy that has not called wait_session for this long is taken for gone
 PROXY_ASK_S = 120.0  # how long main's start of a proxy is waited for before main is asked again
@@ -617,6 +619,8 @@ def _outgoing(item: dict[str, Any]) -> str:
         return tools.hint("bg-from-browser", text=item["text"])
     if item["by"] == agents.TERMINAL:
         return tools.hint("bg-from-terminal", text=item["text"])
+    if item["by"] == agents.MAIN_ID:
+        return tools.hint("bg-from-main", text=item["text"])
     return str(item["text"])
 
 
@@ -700,24 +704,31 @@ def _proxy_key(c: str, prompt_path: str) -> str | None:
     return None
 
 
-def _by_tray(c: str, agent_type: Any, description: Any) -> Entry | None:
+def _by_tray(c: str, agent_type: Any, description: Any, prompt: Any = None) -> Entry | None:
+    """The session an Agent call of a plugin agent of PROXY_TYPES shows: the one whose proxy_file its prompt names, or
+    whose tray_label or name its description is, else the one live session of its kind. None for the orientation's own
+    subagent, which is the same plugin agent, when the orientation runs as a subagent."""
     kind = str(agent_type or "").strip().rsplit(":", 1)[-1]
-    desc = str(description or "").strip()
-    if kind not in PROXY_TYPES.values() or not desc:
+    if kind not in PROXY_TYPES.values():
         return None
-    return next((e for e in entries(c) if PROXY_TYPES.get(kind_of(e.key)) == kind
-                 and desc in (tray_label(e.key), e.name)), None)
+    cands = [e for e in entries(c) if PROXY_TYPES.get(kind_of(e.key)) == kind]
+    text, desc = str(prompt or ""), str(description or "").strip()
+    hit = next((e for e in cands if text and str(proxy_file(c, e.key)) in text), None) or \
+        next((e for e in cands if desc and desc in (tray_label(e.key), e.name)), None)
+    if hit is not None or (kind == PROXY_TYPES["orient"] and orient_route(c) != ROUTE_SESSION):
+        return hit
+    live = [e for e in cands if alive(e)]
+    return live[0] if len(live) == 1 else None
 
 
-def is_proxy(c: str, agent_type: Any, description: Any) -> bool:
-    """Whether an Agent call starts a proxy: a plugin agent of PROXY_TYPES described as a session's tray entry
-    (tray_label)."""
-    return _by_tray(c, agent_type, description) is not None
+def is_proxy(c: str, agent_type: Any, description: Any, prompt: Any = None) -> bool:
+    """Whether an Agent call starts a proxy (_by_tray)."""
+    return _by_tray(c, agent_type, description, prompt) is not None
 
 
-def proxy_started(c: str, agent_type: str, description: str, agent_id: str | None) -> str | None:
-    """Main started (or the mirror found) the proxy described as a session's tray entry: the session's key."""
-    e = _by_tray(c, agent_type, description)
+def proxy_started(c: str, agent_type: str, description: str, agent_id: str | None, prompt: Any = None) -> str | None:
+    """Main started (or the mirror found) the proxy of a session (_by_tray): the session's key."""
+    e = _by_tray(c, agent_type, description, prompt)
     if e is None:
         return None
     e.proxy_seen = time.monotonic()
@@ -736,27 +747,69 @@ def proxy_agent(c: str, key: str, agent_id: str | None) -> None:
 def new_main(c: str) -> None:
     """Another session became main: the proxies ran in the one before, so each session is shown anew."""
     for e in entries(c):
-        e.proxy_seen, e.proxy_asked, e.owner = 0.0, 0.0, None
+        e.proxy_seen, e.proxy_asked, e.proxy_starting, e.owner = 0.0, 0.0, 0.0, None
 
 
 def proxy_ended(c: str, agent_id: str | None) -> None:
     """A proxy's task ended: while its session runs, main is asked for a new one."""
     for e in entries(c):
         if agent_id and agent_id in e.proxy_agents and e.owner in (None, agent_id):
-            e.proxy_seen, e.owner = 0.0, None
+            e.proxy_seen, e.proxy_starting, e.owner = 0.0, 0.0, None
             if alive(e):
                 log.info("%s: %s's proxy %s ended while its session runs; main is asked for another", c, e.name, agent_id)
                 ask_main_for_proxy(c, e.key)
 
 
-async def wait(c: str, name: str, agent_id: str | None = None) -> str:
-    """The `wait_session` tool of the proxy `agent_id`: the session's news and the outbox's messages, waiting up to
-    WAIT_S for some. A second proxy of a session whose proxy is alive is told to stop."""
+def _head(path: Path | None) -> str:
+    try:
+        with path.open("rb") as f:  # type: ignore[union-attr]
+            return f.read(8_192).decode("utf-8", errors="replace")
+    except (OSError, AttributeError):
+        return ""
+
+
+def proxy_of(c: str, agent_id: str | None, path: Path | None) -> Entry | None:
+    """The session whose tray entry the subagent `agent_id` is, with its transcript at `path`: one of the session's
+    proxies, or a subagent whose first prompt names the session's proxy_file. None for any other agent."""
+    if agent_id:
+        hit = next((e for e in entries(c) if agent_id in e.proxy_agents), None)
+        if hit is not None:
+            return hit
+    head = _head(path)
+    return next((e for e in entries(c) if str(proxy_file(c, e.key)) in head), None) if head else None
+
+
+def _capture(e: Entry, path: Path | None) -> None:
+    """The messages that reached a tray entry of the session, typed in its view or sent by main, which no call passed on
+    yet: each goes to the outbox once, so the entry's next wait_session hands it the message's token."""
+    got = False
+    for uid, text, by in _typed_messages(path) if path is not None else []:
+        if uid in e.relayed:
+            continue
+        e.relayed.append(uid)
+        deliver(e.c, e.key, text, by)
+        got = True
+    if got:
+        _save(e.c)
+
+
+def _fresh(e: Entry, path: Path | None) -> bool:
+    """Whether a tray entry's transcript holds a message for the session that is neither passed on nor queued."""
+    return any(uid not in e.relayed for uid, _t, _b in (_typed_messages(path) if path is not None else []))
+
+
+async def wait(c: str, name: str, agent_id: str | None = None, path: Path | None = None) -> str:
+    """The `wait_session` tool of the proxy `agent_id` (its transcript at `path`): the session's news and the outbox's
+    messages, waiting up to WAIT_S for some. The messages the proxy got for the session go to the outbox first
+    (_capture). A second proxy of a session whose proxy is alive is told to stop."""
     from . import tools  # noqa: PLC0415
 
     e = by_name(c, name)
     if e is None:
         return tools.hint("wait_session-none", session=name)
+    if agent_id:
+        proxy_agent(c, e.key, agent_id)
+    _capture(e, path)
     if agent_id and e.owner and e.owner != agent_id and proxy_alive(e):
         log.info("%s: a second tray entry of %s (%s) is told to stop", c, e.name, agent_id)
         return tools.hint("wait_session-duplicate", session=e.name)
@@ -773,15 +826,15 @@ async def wait(c: str, name: str, agent_id: str | None = None) -> str:
         with contextlib.suppress(asyncio.TimeoutError):
             await asyncio.wait_for(_changed.wait(), min(left, POLL_S))
         e.proxy_seen = time.monotonic()
-    lines, e.news = list(e.news), []
-    out = [ln for ln in lines]
+    out, e.news = list(e.news), []
     for item in _pending_out(e):
         out.append(tools.hint("wait_session-send", session=e.name, token=item["token"]))
     if not alive(e):
         out.append(tools.hint("wait_session-ended", session=e.name))
-    elif not out:
+        return "\n\n".join(out)
+    if not out:
         out.append(tools.hint("wait_session-quiet", session=e.name, state=state_words(e)))
-    return "\n\n".join(out)
+    return "\n\n".join([*out, tools.hint("wait_session-rule", session=e.name)])
 
 
 def _pending_out(e: Entry) -> list[dict[str, Any]]:
@@ -803,8 +856,10 @@ def state_words(e: Entry) -> str:
 async def tool_wait_session(ctx: Any, args: dict[str, Any]) -> Any:
     from . import tools  # noqa: PLC0415
 
-    agent_id = await session.caller_agent(ctx.c, ctx.tool_use_id)
-    return tools.ok(await wait(ctx.c, str(args.get("session") or ""), agent_id))
+    sub = await session.caller_sub(ctx.c, ctx.tool_use_id)
+    if sub is None:
+        return tools.err(tools.hint("wait_session-main"))
+    return tools.ok(await wait(ctx.c, str(args.get("session") or ""), sub.agent_id, sub.path))
 
 
 async def tool_list_agents(ctx: Any, args: dict[str, Any]) -> Any:
@@ -816,16 +871,19 @@ async def tool_list_agents(ctx: Any, args: dict[str, Any]) -> Any:
 
 # --------------------------------------------------------------------------- the hooks
 
+COORDINATOR_LEAD = "The coordinator sent a message while you were working:"  # how a meta prompt from main opens
+
 
 def _typed_messages(path: Path) -> list[tuple[str, str, str]]:
     """(uuid, text, sender) of each message a proxy got for its session, from its transcript: those the analyst typed
     in its view (terminal) and those main sent it, since main's SendMessage to the session's name reaches the proxy
-    (main)."""
+    (main). A message Claude Code writes in two shapes, a queued command and a meta prompt, is taken once."""
     out: list[tuple[str, str, str]] = []
     try:
         lines = path.read_bytes().splitlines()
     except OSError:
         return out
+    last: tuple[str, str] = ("", "")  # the shape and text of the message before, for the second shape of one message
     for line in lines:
         if b"queued_command" not in line and b'"human"' not in line and b'"coordinator"' not in line:
             continue
@@ -836,15 +894,23 @@ def _typed_messages(path: Path) -> list[tuple[str, str, str]]:
         if not isinstance(rec, dict):
             continue
         att = rec.get("attachment") if isinstance(rec.get("attachment"), dict) else {}
-        origin = att.get("origin") if isinstance(att.get("origin"), dict) else {}
-        if att.get("type") == "queued_command" and origin.get("kind") == "coordinator":
-            text = str(att.get("prompt") or "").strip()
-            if text:
-                out.append((str(att.get("source_uuid") or rec.get("uuid") or text), text, agents.MAIN_ID))
+        att_origin = att.get("origin") if isinstance(att.get("origin"), dict) else {}
+        origin = rec.get("origin") if isinstance(rec.get("origin"), dict) else {}
+        shape = "queued" if att else "prompt"
+        if att.get("type") == "queued_command" and att_origin.get("kind") == "coordinator":
+            text, by = str(att.get("prompt") or "").strip(), agents.MAIN_ID
+        elif rec.get("type") == "user" and rec.get("isMeta") and origin.get("kind") == "coordinator":
+            text = (session._user_text(rec) or "").strip().removeprefix(COORDINATOR_LEAD).strip()
+            by = agents.MAIN_ID
+        else:
+            text, by = session._typed(rec) or "", agents.TERMINAL
+        if not text:
             continue
-        typed = session._typed(rec)
-        if typed:
-            out.append((str(att.get("source_uuid") or rec.get("uuid") or typed), typed, agents.TERMINAL))
+        if last[0] and last[0] != shape and last[1] == _norm(text):
+            last = ("", "")
+            continue
+        last = (shape, _norm(text))
+        out.append((str(att.get("source_uuid") or rec.get("uuid") or text), text, by))
     return out
 
 
@@ -852,10 +918,11 @@ def _norm(text: str) -> str:
     return " ".join(str(text or "").split()).lower()
 
 
-def relay_check(c: str, agent_path: Path | None, to: str, message: str) -> dict[str, Any] | None:
+def relay_check(c: str, agent_path: Path | None, to: str, message: str, agent_id: str | None = None) -> dict[str, Any] | None:
     """A SendMessage about to go to a background session of thimble's (module note, the proxy): the hook's answer,
-    {allow, message?, reason?}, or None for a message to anything else. A token becomes the queued message; a message
-    the analyst typed in the proxy's view goes once, prefixed; any other message is refused as sent already."""
+    {allow, message?, reason?}, or None for a message to anything else. A token becomes its queued message, once. A
+    message of main's goes as it is, to the proxy, which passes it on, or straight to the session with its sender
+    named. A proxy sends only tokens, to its own session; a message it got and passes on in its own words goes once."""
     e = by_name(c, to)
     if e is None:
         return None
@@ -867,26 +934,26 @@ def relay_check(c: str, agent_path: Path | None, to: str, message: str) -> dict[
         _chat_line(e, item["text"], item["by"] or None)
         _changed.set()
         return {"allow": True, "message": _outgoing(item)}
-    if message.strip().startswith("thimble-message-"):
+    if message.strip().startswith(TOKEN_PREFIX):
         return {"allow": False, "reason": "no such message waits; call wait_session"}
-    typed = _typed_messages(agent_path) if agent_path is not None else []
-    fresh = [(u, t, b) for u, t, b in typed if u not in e.relayed]
-    want = _norm(message.removeprefix(TYPED_PREFIX))
-    hit = next(((u, t, b) for u, t, b in fresh if _norm(t) == want or _norm(t) in want), None)
-    if hit is None and fresh and not any(_norm(t) == want for u, t, b in typed if u in e.relayed):
-        hit = fresh[0]
-    if hit is None:
-        if agent_path is None:  # main's own message
-            _chat_line(e, message, agents.MAIN_ID)
-            return {"allow": True, "message": message}
-        return {"allow": False, "reason": "sent already"}
-    e.relayed.append(hit[0])
-    _save(c)
-    _chat_line(e, hit[1], hit[2])
-    from . import tools  # noqa: PLC0415
+    mine = proxy_of(c, agent_id, agent_path) if agent_id or agent_path is not None else None
+    if mine is None:
+        if proxy_alive(e):
+            return {"allow": True, "message": message}  # the proxy passes it on, and the session's chat logs it then
+        _chat_line(e, message, agents.MAIN_ID)
+        from . import tools  # noqa: PLC0415
 
-    hint = "bg-from-terminal" if hit[2] == agents.TERMINAL else "bg-from-main"
-    return {"allow": True, "message": tools.hint(hint, text=hit[1])}
+        return {"allow": True, "message": tools.hint("bg-from-main", text=message)}
+    if mine is not e:
+        return {"allow": False, "reason": f"you show {mine.name}; send only the tokens wait_session gives you"}
+    want = _norm(message.removeprefix(TYPED_PREFIX))
+    for uid, text, by in _typed_messages(agent_path) if agent_path is not None else []:
+        if uid not in e.relayed and want and (_norm(text) == want or _norm(text) in want):
+            e.relayed.append(uid)
+            _save(c)
+            _chat_line(e, text, by)
+            return {"allow": True, "message": _outgoing({"text": text, "by": by})}
+    return {"allow": False, "reason": "send only the tokens wait_session gives you; call wait_session"}
 
 
 def _chat_line(e: Entry, text: str, by: str | None) -> None:
@@ -898,24 +965,53 @@ def _chat_line(e: Entry, text: str, by: str | None) -> None:
 
 
 def proxy_stop(c: str, agent_type: str, agent_path: Path | None, active: bool, agent_id: str | None = None) -> str | None:
-    """The SubagentStop hook of a proxy: the reason to keep it going while its session runs, or None to let it stop."""
+    """The SubagentStop hook of a proxy: the reason to keep it going while its session runs or a message it got waits
+    to be passed on, or None to let it stop."""
     from . import tools  # noqa: PLC0415
 
     if not agent_type.startswith(f"{_plugin()}:") or agent_path is None:
         return None
-    try:
-        head = agent_path.read_text("utf-8", errors="replace")[:20_000]
-    except OSError:
+    e = proxy_of(c, agent_id, agent_path)
+    if e is None or (agent_id and e.owner and agent_id != e.owner and proxy_alive(e)):
         return None
-    key = next((e.key for e in entries(c) if str(proxy_file(c, e.key)) in head), None)
-    e = entry(c, key) if key else None
-    if e is None or not alive(e) or (agent_id and e.owner and agent_id != e.owner):
+    if not alive(e) and not _fresh(e, agent_path):
         return None
     e.blocks += 1
     if e.blocks > BLOCKS_MAX:
         log.warning("%s: %s's proxy stopped %d times in a row; it may stop", c, e.name, e.blocks)
         return None
     return tools.hint("bg-proxy-keep", session=e.name)
+
+
+def agent_check(c: str, tool_input: dict[str, Any]) -> str | None:
+    """Main's Agent call, before it runs: why it must not start (a second proxy of a session whose proxy runs or is
+    starting, a second fork of a thread whose fork runs or is starting), or None to let it start."""
+    agent_type, description = tool_input.get("subagent_type"), tool_input.get("description")
+    e = _by_tray(c, agent_type, description, tool_input.get("prompt"))
+    if e is not None:
+        now = time.monotonic()
+        if proxy_alive(e) or (e.proxy_starting and now - e.proxy_starting < PROXY_ASK_S):
+            return f"{e.name} already shows in the agent tray."
+        e.proxy_starting = now
+        return None
+    if str(agent_type or "") != "fork":
+        return None
+    tid = session.thread_for(c, description)
+    if not tid:
+        return None
+    started = _forking.get((c, tid))
+    if started is not None and time.monotonic() - started < FORK_DEDUPE_S:
+        return f"The fork of thread {str(description).removeprefix('thread:')} is running already; it answers in the thread."
+    _forking[(c, tid)] = time.monotonic()
+    return None
+
+
+_forking: dict[tuple[str, str], float] = {}  # (workspace, thread) -> time.monotonic() when its fork's Agent call ran
+
+
+def fork_ended(c: str, thread_id: str) -> None:
+    """A thread's fork stopped, so a new Agent call may fork it again (agent_check)."""
+    _forking.pop((c, thread_id), None)
 
 
 # --------------------------------------------------------------------------- start and the process
@@ -1212,10 +1308,26 @@ async def relay_route(body: RelayBody) -> dict[str, Any]:
     c = config.workspace_for_cwd(body.cwd)
     if not c:
         return {"decision": None}
-    got = relay_check(c, _agent_file(body.transcript_path, body.agent_id), body.to, body.message)
+    got = relay_check(c, _agent_file(body.transcript_path, body.agent_id), body.to, body.message, body.agent_id)
     if got is None:
         return {"decision": None}
     return {"decision": "allow" if got["allow"] else "deny", "message": got.get("message"), "reason": got.get("reason")}
+
+
+class AgentCheckBody(BaseModel):
+    cwd: str
+    agent_id: str | None = None
+    tool_input: dict[str, Any] = {}
+
+
+@router.post("/bg/agent-check")
+async def agent_check_route(body: AgentCheckBody) -> dict[str, Any]:
+    """The PreToolUse hook before main's Agent call (agent_check): `{deny, reason}`."""
+    c = config.workspace_for_cwd(body.cwd)
+    reason = agent_check(c, body.tool_input) if c and not body.agent_id else None
+    if reason:
+        log.info("%s: an Agent call is refused: %s", c, reason)
+    return {"deny": bool(reason), "reason": reason or ""}
 
 
 class StopBody(BaseModel):
