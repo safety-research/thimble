@@ -321,7 +321,7 @@ export function ChatPanel({ ws, onCollapse, dock = false }: { ws: string; onColl
     () =>
       bus.on('openRef', (e) => {
         const p = parseRef(e.ref)
-        if (p?.kind !== 'call') return
+        if (dock || p?.kind !== 'call') return
         track('chip-teleport', { target: e.ref, detail: { kind: 'call' } })
         void fetchCall(ws, p.chat, p.n)
           .then((c) => c.chat || p.chat)
@@ -331,7 +331,7 @@ export function ChatPanel({ ws, onCollapse, dock = false }: { ws: string; onColl
             setFocus((f) => ({ ref: callRef(p.chat, p.n), line: p.line, endLine: p.endLine, seq: (f?.seq ?? 0) + 1 }))
           })
       }),
-    [ws],
+    [ws, dock],
   )
 
   // what asked for the chat while its column was folded (chat/pending.ts), once the listeners above are subscribed
@@ -339,12 +339,12 @@ export function ChatPanel({ ws, onCollapse, dock = false }: { ws: string; onColl
     if (!dock) replayHeld()
   }, [dock])
 
-  // the shown chat's records are seen
+  // the shown chat's records are seen; the dock shows none
   const nMessages = countMessages(chat.records)
   useEffect(() => {
-    if (chat.loading) return
+    if (chat.loading || dock) return
     setSeen(markSeen(ws, current, nMessages))
-  }, [ws, current, nMessages, chat.loading])
+  }, [ws, current, nMessages, chat.loading, dock])
 
   // follow the newest record while the list is near its end; a thread opens at its end
   const nearEnd = useRef(true)
