@@ -24,6 +24,8 @@
   .meta { font-size: 11px; color: var(--ink-3); margin-bottom: 10px; }
   table { border-collapse: collapse; width: 100%; max-width: 980px; }
   td { padding: 4px 10px 4px 0; border-top: 1px solid var(--line-2); font-size: 12px; vertical-align: top; }
+  /* room at the left for the bar thimble draws on a row or a heading a label marks, so it never touches the text */
+  td:first-child, #bin > div:first-child { padding-left: 8px; }
   td.t, td.k { font-family: var(--mono); font-size: 11px; color: var(--ink-3); white-space: nowrap; }
   td.a { white-space: nowrap; }
   td:last-child { width: 100%; }
@@ -49,6 +51,7 @@
   const DAY = 86400
   const PAGE = 200 // calls the reader lists per page of a bin (reader.py BIN_CALLS)
   let chart = null // the counts answer: {bin: {seconds, first, last}, busiest, rows}
+  let chartView = null // the drawn chart, whose `open` signal names the bin listed below it
   let shown = null // {key, offset} of the bin listed below the chart
   let targetRef = null
   let labels = { labels: [], filter: null } // what thimble.onLabels last said
@@ -124,9 +127,14 @@
         color: colour,
         tooltip: [{ field: 'key', title: 'from (UTC)' }, { field: label ? 'part' : 'kind' }, { field: 'n', title: 'calls' }],
       },
+      // the bin listed below the chart stands out, so the list reads as that bar's calls
+      params: [{ name: 'open', value: shown ? shown.key : '' }],
       config: { view: { stroke: null }, font: css('--font-body', 'sans-serif') },
     }
+    spec.encoding.stroke = { condition: { test: 'datum.key === open', value: css('--text-primary', '#23211d') }, value: null }
+    spec.encoding.strokeWidth = { condition: { test: 'datum.key === open', value: 1.5 }, value: 0 }
     const res = await vegaEmbed('#chart', spec, { actions: false, renderer: 'svg' })
+    chartView = res.view
     res.view.addEventListener('click', (_, item) => {
       const key = item && item.datum && item.datum.key
       if (key) thimble.navigate(`view:${slug}/${key}`)
@@ -158,7 +166,8 @@
     head.dataset.anchor = `view:${slug}/${key}`
     head.dataset.anchorName = `the calls from ${key}`
     const range = res.total > res.items.length ? `, ${res.offset + 1} to ${res.offset + res.items.length} shown` : ''
-    head.append(el('h2', null, binName(key, chart.bin.seconds)), el('div', 'meta mono', `${res.total} calls${range}`))
+    head.append(el('h2', null, binName(key, chart.bin.seconds)), el('div', 'meta mono', `${res.total} ${res.total === 1 ? 'call' : 'calls'}${range}`))
+    if (chartView) await chartView.signal('open', key).runAsync()
     const table = el('table')
     for (const call of res.items) {
       const tr = el('tr', call.ref === targetRef ? 'target' : '')

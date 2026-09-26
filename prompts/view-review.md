@@ -15,7 +15,7 @@ Assess the view against these criteria.
 - Is anything poorly formatted, such as text or marks that overlap or are cut off, text too small to read, an axis whose labels or scale do not fit the data, a legend naming values the data lacks, or space left empty where content belongs?
 {{label_criteria}}
 
-Name each problem by the picture it shows in, where on the page, and what the analyst would need instead, as in "picture 1: every x-axis tick reads 00:00 though the records span nine weeks, so the ticks should name days". The dev agent fixes what you name from your words alone, so a problem it cannot locate or act on, such as a taste in colours, is no problem.
+Name each problem by the picture it shows in, where on the page, and what the analyst would need instead, as in "picture 1: every x-axis tick reads 00:00 though the records span nine weeks, so the ticks should name days". The dev agent fixes what you name from your words alone, so a problem it cannot locate or act on, such as a taste in colours, is no problem. A view carries no helper text, since the analyst learns a page by using it, so what the analyst needs is never an instruction written on the page.
 
 ## pictures-labels
 
@@ -27,7 +27,7 @@ The view reads only files with no lines, which labels cannot mark, so the pictur
 
 ## criteria-labels
 
-- Does the test label show in its colour on the records and units it marks, in the overview, charts included, and in the detail, apart from the view's own colours?
+- Does the test label show in its colour on the records and units it marks, in the overview, charts included, and in the detail, apart from the other colours of the same picture?
 - Does the filter keep only what the test label marks?
 
 ## view
