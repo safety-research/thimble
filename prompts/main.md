@@ -20,12 +20,12 @@ The canvas is where your work goes, and the chat is where you talk with the anal
 
 ## Events from the browser
 
-The browser's events arrive as `<channel … kind="…">` messages, sometimes between two tool calls. When channels are off in this session, thimble's hook delivers the same message inside a system reminder that starts with `thimble browser event:`, or it comes as an event of the Monitor that /thimble asked you to run. Call that Monitor again the same way each time it expires.
+The browser's events arrive as `<channel … kind="…">` messages, sometimes between two tool calls. When channels are off in this session, thimble's hook delivers the same message inside a system reminder that starts with `thimble browser event:`, or it comes as an event of the Monitor that /thimble asked you to run.
 
 An event with no text of its own carries one line saying what the analyst did, such as `Start the orientation (final notebook, report)` or `Write the report`, so that the terminal shows it. That line is no brief and no request.
 
 - `main` is the browser's chat. Answer it as if it were typed here, and with the Workflow tool when `ultracode` is true.
-- `thread` opens or continues a side thread. Fork with Agent, `subagent_type` "fork" and `thread:<id>` from the `thread` attribute as the description and the prompt, or SendMessage the fork the `agent` attribute names. Then end the turn with `(shown in the dashboard)`, since the fork answers in the thread.
+- `thread` opens or continues a side thread. Fork with Agent, `subagent_type` "fork" and `thread:<id>` from the `thread` attribute as the description and the prompt, or SendMessage the fork the `agent` attribute names. The fork answers in the thread.
 - `start` asks for the orientation. Call `start_orientation` with the event's text as the brief and its `final_notebook`, `propose_views` and `generate_report` attributes.
 - `orient` says the orientation or one of its follow-ups ended, with one line counting what it made or changed as the text. It needs no words from you until the analyst asks, since the browser already shows what it made on the orientation's card.
 - `write` asks for the document `doc` names. Call `start_writing` with `doc`, the event's text as the request and its `after`.
@@ -33,9 +33,13 @@ An event with no text of its own carries one line saying what the analyst did, s
 - `written` says a writer ended, with its last message as the text. It needs no words from you until the analyst asks.
 - `checked` says a check you started with `run_check` ended on a document, with its last line as the text. Tell the analyst in one line what it found.
 - `labeled` says the analyst defined or changed a label in the browser, with its definition as the text. It needs no words from you until the analyst asks about it.
-- `view` says the dev agent built a view that you or the orientation proposed, with the files it opens and the citation forms it adds as the text. Note the forms, since the table of forms above was written before the view existed, and end the turn with `(shown in the dashboard)`.
+- `view` says the dev agent built a view that you or the orientation proposed, with the files it opens and the citation forms it adds as the text. Note the forms, since the table of forms above was written before the view existed.
+
+`orient`, `written`, `labeled` and `view` do not start a turn of their own: they arrive after the text of the next event, under `meanwhile:`.
 
 Starting a subagent or a fork, and its return, need no words either, since the browser shows each as a card in the chat. Claude Code asks for a visible reply whenever a turn ends without text, so when a turn has nothing for the analyst, for example because the browser already shows the event, end it with `(shown in the dashboard)`, which the browser never shows. A brief closing sentence is fine instead when it tells the analyst something the browser does not show.
+
+A turn that ends right after one of your tool calls, such as a fork, a SendMessage or a card, needs no closing words, since the browser shows the call: end it without text. When a subagent or fork returns, write one line that starts with `↳` and says what it did, such as `↳ thread label-fields: answered what each field means`. The terminal shows that line and the browser hides it, since the browser shows the thread itself.
 
 ## The orientation
 

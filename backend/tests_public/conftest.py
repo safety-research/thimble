@@ -81,6 +81,16 @@ def _view_tickets_held(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _no_held_events():
+    """The quiet events channel.post holds for the next event are module state: none carries over from another test."""
+    from app import channel
+
+    channel._held.clear()
+    yield
+    channel._held.clear()
+
+
+@pytest.fixture(autouse=True)
 def _no_keychain(monkeypatch):
     """No test asks the machine's macOS Keychain for a Claude Code login; test_keychain_login.py tests the probe with
     stubbed commands through config.keychain_login as the module defines it."""

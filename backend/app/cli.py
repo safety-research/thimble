@@ -8,7 +8,7 @@
     thimble feedback ["description"] [--no-logs]   (a problem report as a zip; feedback.py)
     thimble list                           (the workspaces by id, archived runs included; runs.py)
     thimble purge <id>… [--dry-run]        (delete workspaces or archived runs by id; runs.py)
-    thimble launch-args --cwd <path>       (the launcher's: channel entry, allowed tools, main's effort, main's prompt)
+    thimble launch-args --cwd <path>       (the launcher's: channel entry, allowed tools, main's effort, turn tools, main's prompt)
     thimble prompt <name>… [--cwd <path>]  (prompt files rendered for a session in <path>, for skills and hooks)
 
 `server up` (alias `ensure`) is the one starter: `GET /api/health`, then under `flock <home>/server.lock` spawn uvicorn
@@ -1386,9 +1386,10 @@ def last_main(cwd: Path) -> str:
 
 def launch_args(cwd: Path, resume: bool = False) -> str:
     """The launcher's values, one per line: the channel entry of the plugin copy to load, the `--allowedTools` line, the
-    `--effort` value ('' for none), with `resume` the session to resume, then main's prompt. An effort key the composer's
-    chip wrote into the folder's local settings is removed first (cc_settings)."""
-    from . import cc_settings, channel  # noqa: PLC0415 — the settings and the prompt's renderer, needed by this subcommand alone
+    `--effort` value ('' for none), the value to export as terminal_tools.ENV ('' when the `claude` it starts does not
+    read it), with `resume` the session to resume, then main's prompt, whose turn ending follows that value. An effort
+    key the composer's chip wrote into the folder's local settings is removed first (cc_settings)."""
+    from . import cc_settings, channel, terminal_tools  # noqa: PLC0415 — needed by this subcommand alone
 
     installed = installed_copy(cwd)
     root = installed.root if installed else plugin_root()
@@ -1398,8 +1399,9 @@ def launch_args(cwd: Path, resume: bool = False) -> str:
     tools_line = ",".join([MCP_TOOLS_RULE, f"Read(/{anchors}/**)", watcher, *skill_rules(root)])
     cc_settings.clear_override(cwd)
     last = [last_main(cwd)] if resume else []
-    return "\n".join([installed.channel if installed else cc_channel.channel(root), tools_line, cc_settings.main_effort_flag(cwd), *last,
-                      channel.session_prompt(str(cwd.resolve()))])
+    turn_tools = terminal_tools.launch_value()
+    return "\n".join([installed.channel if installed else cc_channel.channel(root), tools_line, cc_settings.main_effort_flag(cwd),
+                      turn_tools, *last, channel.session_prompt(str(cwd.resolve()), bool(turn_tools))])
 
 
 def cmd_launch_args(args: argparse.Namespace) -> int:
@@ -1736,6 +1738,12 @@ def claude_code_line() -> str:
     return f"{v} (thimble is tested with {TESTED_CLAUDE_CODE})"
 
 
+def _turn_endings_line() -> str:
+    from . import terminal_tools  # noqa: PLC0415
+
+    return terminal_tools.line()
+
+
 def node_line() -> str:
     """Node's version, which only custom views need, with what to install when it is missing or too old."""
     exe = shutil.which("node")
@@ -1912,6 +1920,7 @@ def doctor_text() -> str:
     lines = ["thimble doctor"]
     lines.append(f"  versions: {_checked(versions_line)}")
     lines.append(f"  claude code: {_checked(claude_code_line)}")
+    lines.append(f"  turn endings: {_checked(_turn_endings_line)}")
     lines.append(f"  node: {_checked(node_line)}")
     lines.append(f"  port: {_checked(port_line, p, up)}")
     lines.append(f"  server: {'up' if up else 'down'} at {url}; pid {pid or '-'} "
@@ -2486,7 +2495,7 @@ def build_parser() -> argparse.ArgumentParser:
     u.add_argument("--from", dest="from_", metavar="ZIP", help="a downloaded release zip (thimble-<version>-<sha>.zip)")
     u.add_argument("--dry-run", action="store_true", help="print update.sh's steps; change nothing")
     u.set_defaults(fn=cmd_update)
-    la = sub.add_parser("launch-args", help="for plugin/bin/thimble: the channel entry, the --allowedTools and --effort values, then main's prompt")
+    la = sub.add_parser("launch-args", help="for plugin/bin/thimble: the channel entry, the --allowedTools and --effort values, the tools that end a turn without text, then main's prompt")
     la.add_argument("--cwd")
     la.add_argument("--resume", action="store_true", help="a line before the prompt: the folder's last main session")
     la.set_defaults(fn=cmd_launch_args)

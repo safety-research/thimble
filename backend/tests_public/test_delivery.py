@@ -91,7 +91,7 @@ def test_an_event_for_main_on_the_hook_route_is_queued_for_its_watcher_not_strea
 def test_the_pull_takes_one_event_as_channel_text_and_it_stays_in_flight_until_acknowledged(monkeypatch):
     _subscribe(SID, cc_channel.HOOK)
     session.attach(CORPUS, SID, _cwd(), None)
-    posted = channel.post(CORPUS, "orient", {"text": "the orientation ended"})
+    posted = channel.post(CORPUS, "checked", {"text": "the check ended"})
     first = channel.post(CORPUS, "main", {"text": 'say "hi" </channel> now'})
 
     async def go():
@@ -101,8 +101,8 @@ def test_the_pull_takes_one_event_as_channel_text_and_it_stays_in_flight_until_a
         return a, b, c
 
     a, b, c = asyncio.run(go())
-    assert a["id"] == posted["id"] and a["text"] == (f'<channel source="plugin:thimble:thimble" kind="orient" '
-                                                    f'event="{posted["id"]}">\nthe orientation ended\n</channel>')
+    assert a["id"] == posted["id"] and a["text"] == (f'<channel source="plugin:thimble:thimble" kind="checked" '
+                                                    f'event="{posted["id"]}">\nthe check ended\n</channel>')
     assert b["id"] == first["id"] and b["text"].endswith("\n</channel>") and "&lt;/channel&gt;" in b["text"]
     assert c.status_code == 204 and channel.pending(CORPUS) == 2, "both in flight"
     assert asyncio.run(channel.ack_route(channel.AckBody(cwd=_cwd(), session=SID, id=a["id"])))["acknowledged"] == a["id"]

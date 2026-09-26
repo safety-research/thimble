@@ -16,7 +16,8 @@ fallbacks, interrupts and long waits (read from `<claude config>/sessions/<pid>.
 
 Each subagent transcript becomes an agent chat, except `thread:<id>` subagents, which are that thread's fork
 (threads.py). A Workflow call is one agent chat whose members are the run's agent transcripts. Main ends a turn with
-nothing for the analyst with END_TOKEN, which no chat shows."""
+nothing for the analyst without text, or with END_TOKEN where Claude Code asks for text (terminal_tools.py); no chat
+shows END_TOKEN, nor a line that opens with TERMINAL_ONLY."""
 from __future__ import annotations
 
 import asyncio
@@ -31,7 +32,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from . import agents, cc_channel, cc_settings, config, orientation, threads
+from . import agents, cc_channel, cc_settings, config, orientation, terminal_tools, threads
 from .ledger import atomic_write_text
 
 log = logging.getLogger("thimble.session")
@@ -57,6 +58,7 @@ SEND_TOOL = "SendMessage"
 REPLY_TOOL = "reply_in_thread"
 # what main ends a turn with when it has nothing for the analyst, which no chat shows (module note, the end token)
 END_TOKEN = "(shown in the dashboard)"
+TERMINAL_ONLY = "↳"  # opens a line of main's or a fork's that only the terminal shows (prompts/main.md)
 # the token at the end of a text, with the variants the model writes: any case, a trailing period, `*` or `_` emphasis
 END_RE = re.compile(r"[ \t]*[*_]*" + re.escape(END_TOKEN) + r"\.?[*_]*\.?\s*\Z", re.I)
 # Claude Code loading a deferred tool's schema before its first call: nothing the analyst reads, so no row in any chat
@@ -165,6 +167,7 @@ class Live:
         self.forked: set[str] = set()  # the threads the turn forked or sent a follow-up to
         self.sends: dict[str, str] = {}  # tool_use id of main's SendMessage to a thread's fork -> the thread
         self.wrote = False  # the turn wrote something to main
+        self.last_tool: str | None = None  # the name of main's last tool call (_nudged)
         # the promptId of the local command whose caveat was read last ('' when the record has none), whose command
         # line is not the analyst's line to main (module note, the table); None once another line was read
         self.local_prompt: str | None = None
@@ -816,6 +819,16 @@ def _channel(lv: Live, raw: str, *, mid_turn: bool) -> None:
         agents.mirror(lv.c, "user", by=BROWSER, text=body.strip(), event=event_id or None)
 
 
+def _nudged(lv: Live) -> None:
+    """Claude Code asked main for a visible reply after a turn with no text: when the turn's last call was a tool the
+    session's terminal_tools.ENV names, Claude Code does not act on it (terminal_tools.nudged)."""
+    from . import procs  # noqa: PLC0415
+
+    with contextlib.suppress(Exception):
+        if terminal_tools.nudged(procs.environ(lv.pid), lv.last_tool):
+            log.warning("%s: session %s was asked for a reply after %s", lv.c, lv.sid, lv.last_tool)
+
+
 def _command_line(text: str) -> str | None:
     m = COMMAND_RE.search(text)
     if not m:
@@ -868,9 +881,12 @@ def _peer(lv: Live, *, mid_turn: bool) -> None:
 
 def visible(text: str) -> str:
     """A text as a chat shows it (module note, the end token): empty when it is only END_TOKEN, the words before the
-    token when it ends with it (END_RE), and any other text as it is."""
+    token when it ends with it (END_RE), and any other text as it is, without its lines that open with TERMINAL_ONLY."""
     m = END_RE.search(text)
-    return text[: m.start()].rstrip() if m else text
+    text = text[: m.start()].rstrip() if m else text
+    if TERMINAL_ONLY not in text:
+        return text
+    return "\n".join(ln for ln in text.split("\n") if not ln.lstrip().startswith(TERMINAL_ONLY)).strip()
 
 
 def _text(lv: Live, text: str) -> None:
@@ -882,6 +898,7 @@ def _text(lv: Live, text: str) -> None:
 
 def _tool_use(lv: Live, tool_use_id: str, name: str, tool_input: Any) -> None:
     lv.tool_names[tool_use_id] = name
+    lv.last_tool = name
     if f"use:{tool_use_id}" in lv.seen:
         return
     lv.seen.add(f"use:{tool_use_id}")
@@ -1373,6 +1390,8 @@ def translate(lv: Live, line: bytes | str) -> None:
         elif rec.get("isMeta"):
             if LOCAL_CAVEAT in text:
                 lv.local_prompt = str(rec.get("promptId") or "")
+            elif text.startswith(terminal_tools.NUDGE):
+                _nudged(lv)
             return
         elif origin == "human" or origin is None:
             command = _command_line(text)

@@ -8,7 +8,8 @@ which the model sees as `<channel source="plugin:thimble:thimble" kind="…" …
 The browser posts `POST /api/ws/{c}/events {kind, payload}`; server code calls post(). A kind is a bullet of main.md's
 `## Events from the browser`, and other kinds are refused. A post with no subscriber is refused with 409. Claude Code
 picks up a changed settings file only once it has been still for about a second, so an event within SETTINGS_SETTLE_S of
-a chip change waits out the rest.
+a chip change waits out the rest. An event of QUIET_KINDS asks main for nothing, so it wakes no turn: it waits and
+rides along with the next event, under MEANWHILE.
 
 Without channels, events are queued per workspace and session (_pending) and the plugin's watcher takes them with a long
 poll (pull_route) as the text a channel would have shown (render); unacknowledged events return to the queue after
@@ -90,23 +91,30 @@ def kinds() -> list[str]:
     return _KIND_RE.findall(prompts.section(PROMPT, EVENTS_SECTION))
 
 
-def session_prompt(workdir: str) -> str:
+def session_prompt(workdir: str, terminal: bool | None = None) -> str:
     """Main's system-prompt append, as the launcher passes it with --append-system-prompt. Claude Code cuts MCP server
     instructions at 2 KB, so this text cannot travel as the shim's instructions, while an append reaches main and every
-    fork of it whole."""
-    return render_prompts(SESSION_PROMPTS, workdir)
+    fork of it whole. `terminal` picks the ending of a turn (render_prompts)."""
+    return render_prompts(SESSION_PROMPTS, workdir, terminal)
 
 
-def render_prompts(names: tuple[str, ...] | list[str], workdir: str) -> str:
+def render_prompts(names: tuple[str, ...] | list[str], workdir: str, terminal: bool | None = None) -> str:
     """Prompt files for a session in `workdir`, rendered and joined by a blank line, with the corpus root and the citation
-    forms of the folder's views filled in. Main's append and the shared skill's command both come from here."""
-    from . import views  # noqa: PLC0415 — views imports refs, which a launcher does not otherwise need
+    forms of the folder's views filled in. Main's append and the shared skill's command both come from here. Main's
+    prompt keeps one ending of a turn with nothing for the analyst (terminal_tools.main_prompt): without closing words
+    when `terminal`, or when it is None and this process's environment says so (terminal_tools.on)."""
+    from . import terminal_tools, views  # noqa: PLC0415 — views imports refs, which a launcher does not otherwise need
 
     c = config.workspace_for_cwd(workdir)
     forms = views.forms_text(c) if c else ""
     values = {"workdir": str(workdir), "forms": forms}
-    text = "\n\n".join(prompts.render(name, values).strip() for name in names)
-    return re.sub(r"\n{3,}", "\n\n", text)  # an empty {{forms}} leaves a blank line of its own
+    parts = []
+    for name in names:
+        part = prompts.render(name, values).strip()
+        if name == PROMPT:
+            part = terminal_tools.main_prompt(part, terminal_tools.on() if terminal is None else terminal)
+        parts.append(part)
+    return re.sub(r"\n{3,}", "\n\n", "\n\n".join(parts))  # an empty {{forms}} leaves a blank line of its own
 
 
 # --------------------------------------------------------------------------- posting
@@ -168,6 +176,11 @@ def notification(kind: str, event_id: str, text: str, fields: dict[str, Any]) ->
 
 
 START_OUTPUTS = {"final": "final notebook", "views": "views", "report": "report"}  # orientation.start_passes, in words
+# the kinds that say something ended and ask main for nothing: each waits and rides along with the next event, under
+# MEANWHILE (prompts/main.md)
+QUIET_KINDS = frozenset({"orient", "written", "labeled", "view"})
+MEANWHILE = "meanwhile:"
+_held: dict[str, list[dict[str, Any]]] = {}  # workspace -> the quiet events waiting, as notifications
 
 
 def describe(kind: str, payload: dict[str, Any]) -> str:
@@ -215,15 +228,36 @@ def post(c: str, kind: str, payload: dict[str, Any] | None = None, *, check_kind
         out["thread"] = thread_id
     else:
         text = str(payload.pop("text", "") or "").strip() or describe(kind, payload)
-        session.expect(c, event_id)
         note = notification(kind, event_id, text, payload)
+        if kind in QUIET_KINDS:
+            _held.setdefault(c, []).append(note)
+            out.update(delivered=0, held=True)
+            log.info("%s: event %s kind=%s held for the next event", c, event_id, kind)
+            _observe(c, kind, seen, out)
+            return out
+        session.expect(c, event_id)
     out["delivered"] = _publish(c, note)
+    _observe(c, kind, seen, out)
+    return out
+
+
+def held_line(note: dict[str, Any]) -> str:
+    """A held event as one line under MEANWHILE: its attributes but the id in brackets, then its text on one line."""
+    attrs = " ".join(f'{k}="{v}"' for k, v in (note.get("meta") or {}).items() if k != "event")
+    return f"[{attrs}] {' '.join(str(note.get('content') or '').split())}"
+
+
+def held(c: str) -> list[dict[str, Any]]:
+    """The quiet events waiting for the workspace's next event, as notifications."""
+    return list(_held.get(c) or [])
+
+
+def _observe(c: str, kind: str, seen: dict[str, Any], out: dict[str, Any]) -> None:
     for fn in list(_observers.get(kind, ())):
         try:
             fn(c, seen, out)
         except Exception:  # noqa: BLE001 — the event is posted; an observer's state is secondary
             log.exception("%s: the %s observer %s failed", c, kind, getattr(fn, "__name__", fn))
-    return out
 
 
 def send(c: str, kind: str, text: str, fields: dict[str, Any], *, thread: str | None = None) -> dict[str, Any]:
@@ -276,6 +310,9 @@ def _publish(c: str, note: dict[str, Any]) -> int:
     subs = list(_subs.get(c, ()))
     main = _main_sid(c)
     mine = [q for q in subs if main and _route(q)[0] == main]
+    if _held.get(c) and (mine or any(_route(q)[1] == cc_channel.CHANNEL for q in subs)):
+        lines = "\n".join(held_line(h) for h in _held.pop(c))
+        note = {**note, "content": f"{note.get('content') or ''}\n\n{MEANWHILE}\n{lines}"}
     n = 0
     queued: set[str] = set()
     for q in mine or [q for q in subs if _route(q)[1] == cc_channel.CHANNEL]:

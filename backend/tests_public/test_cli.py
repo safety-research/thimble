@@ -643,14 +643,14 @@ def test_launch_args_are_the_channel_the_allowed_tools_main_s_effort_then_main_s
     """One value per line, as plugin/bin/thimble splits them. With no installed copy the channel is plugin/'s, which the
     launcher loads with --plugin-dir. The effort is thimble's default for main, high, only when the analyst's own
     settings name no effort (cc_settings.main_effort_flag), and nothing else of theirs is overridden: no --settings.
-    The rest is main's prompt."""
+    Then the tools that end a turn without text (test_terminal_tools.py), and the rest is main's prompt."""
     cfg = tmp_path / "claude"
     cfg.mkdir()
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(cfg))
     monkeypatch.delenv("CLAUDE_CODE_EFFORT_LEVEL", raising=False)
     monkeypatch.setenv("THIMBLE_WORKSPACES_DIR", str(tmp_path / "ws"))
     out = cli.launch_args(data / "mini")
-    channel, tools_line, effort, prompt = out.split("\n", 3)
+    channel, tools_line, effort, _turn_tools, prompt = out.split("\n", 4)
     assert channel == "plugin:thimble@inline" and effort == "high"
     assert tools_line == (f"mcp__plugin_thimble_thimble,Read(/{(tmp_path / 'ws').resolve()}/*/anchors/**),"
                           f"Bash({cli.PLUGIN_DIR.resolve()}/bin/.thimble-watch *),"
@@ -670,7 +670,7 @@ def test_main_s_launch_denies_no_read_of_thimble_s_own_tree(home, data, monkeypa
     decide what the session reads."""
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "claude"))
     monkeypatch.setenv("THIMBLE_WORKSPACES_DIR", str(tmp_path / "ws"))
-    _channel, tools_line, effort, prompt = cli.launch_args(data / "mini").split("\n", 3)
+    _channel, tools_line, effort, _turn_tools, prompt = cli.launch_args(data / "mini").split("\n", 4)
     tree = str(config.REPO_ROOT.resolve())
     assert effort in ("", "high") and prompt.startswith("# thimble")
     assert not any(r.startswith("Read(") and tree in r and "/anchors/" not in r for r in tools_line.split(","))

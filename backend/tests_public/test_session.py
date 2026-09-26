@@ -867,13 +867,15 @@ def test_nothing_is_detached_while_the_server_is_stopping(cwd, tmp_path):
 
 
 def test_push_event_sends_when_a_session_listens_and_says_so_when_none_does(cwd):
-    assert session.push_event(CORPUS, "view", "Build the Page boards view.", view="page-boards") is False
+    assert session.push_event(CORPUS, "checked", "Unverified: 2 comments.", check="unverified") is False
     q: asyncio.Queue = asyncio.Queue()
     channel._subs[CORPUS] = {q}
-    assert session.push_event(CORPUS, "view", "Build the Page boards view.", view="page-boards") is True
+    assert session.push_event(CORPUS, "checked", "Unverified: 2 comments.", check="unverified") is True
     note = q.get_nowait()
-    assert note["content"] == "Build the Page boards view." and note["meta"]["kind"] == "view" and note["meta"]["view"] == "page-boards"
+    assert note["content"] == "Unverified: 2 comments." and note["meta"]["kind"] == "checked" and note["meta"]["check"] == "unverified"
     assert agents._running(CORPUS, agents.MAIN_ID), "main runs until the turn the event opens ends"
+    assert session.push_event(CORPUS, "view", "Build the Page boards view.", view="page-boards") is True
+    assert q.empty(), "a built view waits for the next event (test_terminal_tools.py)"
 
 
 def test_an_event_that_reaches_a_busy_turn_between_tool_calls_is_handled_in_that_turn(cwd, tmp_path):
