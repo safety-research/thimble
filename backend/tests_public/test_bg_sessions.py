@@ -83,6 +83,8 @@ def _fresh(workspaces_tmp, tmp_path, monkeypatch):
     bg_session._entries.clear()
     bg_session._loaded.clear()
     bg_session._announced.clear()
+    bg_session._announced_loaded.clear()
+    bg_session._forking.clear()
     monkeypatch.setattr(bg_session, "_closing", False)
     monkeypatch.setattr(bg_session, "POLL_S", 0.05)
     monkeypatch.setattr(bg_session, "START_GRACE_S", 0.0)
@@ -583,3 +585,71 @@ async def test_the_tray_entry_is_no_chat_of_main_s_and_main_s_message_to_it_stay
     added = _log(agents.MAIN_ID)[before:]
     assert [x["text"] for x in added if x["type"] == "user"] == ["Show the writer."], \
         "main's message to the tray entry is logged by the session's chat, not main's"
+    assert not [x for x in added if x["type"] == "tool_use" and x.get("name") == "Agent"], "no chip for the tray entry"
+
+
+def test_a_tool_call_claude_code_moves_to_the_background_keeps_the_run_busy_until_its_notification():
+    run = agent_session.Run(CORPUS, "orient", "c1", "s1", config.corpus_dir(CORPUS), "orientation")
+    run.main = session.Sub(CORPUS, "c1", None, None)
+    run.main.names = {}
+    agent_session._steps_of(run, {"type": "assistant", "message": {"content": [
+        {"type": "tool_use", "id": "t1", "name": "mcp__plugin_thimble_thimble__critique", "input": {}}]}})
+    moved = ('MCP tool "plugin:thimble:thimble/critique" is still running after 120s. It was moved to the background as '
+             'task ku66wej7h and keeps running; you\'ll receive a notification with the result when it completes.')
+    agent_session._steps_of(run, {"type": "user", "message": {"content": [
+        {"type": "tool_result", "tool_use_id": "t1", "content": [{"type": "text", "text": moved}]}]}})
+    assert run.background == {"ku66wej7h"}, "the session is busy while the call runs"
+    agent_session._steps_of(run, {"type": "user", "origin": {"kind": "task-notification"}, "message": {"content":
+        "<task-notification>\n<task-id>ku66wej7h</task-id>\n<status>completed</status>\n</task-notification>"}})
+    assert run.background == set()
+
+
+def test_the_list_holds_view_builds_with_the_command_that_attaches_each(monkeypatch):
+    from app import dev
+
+    run = dev.Run(ticket_id="view:wiki-board", title="Wiki board", ts_start="2026-01-01T00:00:00Z", session="5e55b0a1")
+    monkeypatch.setitem(dev._view_runs, (CORPUS, "wiki-board"), run)
+    rows = bg_session.agent_rows(CORPUS)
+    assert {"name": "thimble:view-wiki-board", "state": "working", "kind": "build", "attach": "claude attach 5e55b0a1"} in rows
+    assert "thimble:view-wiki-board working" in bg_session.status_line(rows)
+
+
+async def test_a_critic_s_later_turn_is_followed_after_a_server_restart(fake):
+    from app import critique_session
+
+    # a critic session a previous server started and finished: this server has no start arguments of its own for it
+    run = await write_session.start(CORPUS, "report")  # a session the fake CLI runs, standing in for the critic's
+    await asyncio.wait_for(run.task, 10)
+    w = bg_session.entry(CORPUS, "writer:report")
+    meta = agents.new_agent(CORPUS, agent_session.STEP_ROLE, critique_session.TITLE, background=True, session=w.sid,
+                            bg=w.short, bg_name="thimble:critic", status="done")
+    agents.finish_agent(CORPUS, meta["id"], "done")
+    bg_session.forget(CORPUS, "writer:report")
+    e = bg_session.record(CORPUS, "critique:orient", short=w.short, sid=w.sid, chat=meta["id"], role=agent_session.STEP_ROLE,
+                          folder=config.corpus_dir(CORPUS), status="idle")
+    bg_session.run_ended(CORPUS, "critique:orient", "")
+    agent_session._launches.clear()
+    st = _state(fake)
+    st[e.short]["status"] = "busy"
+    (fake / "sessions.json").write_text(json.dumps(st))
+    with _transcript(e.sid).open("a") as f:
+        f.write(json.dumps({"type": "user", "message": {"role": "user", "content": "Which card is weakest?"}}) + "\n")
+    followed = await agent_session.revive(CORPUS, e)
+    assert followed is not None and followed.chat == meta["id"] and followed.sid == e.sid
+    with _transcript(e.sid).open("a") as f:
+        f.write(json.dumps({"type": "assistant", "message": {"content": [{"type": "text", "text": "The admin card."}]}}) + "\n")
+        f.write(json.dumps({"type": "system", "subtype": "turn_duration"}) + "\n")
+    st[e.short]["status"] = "idle"
+    (fake / "sessions.json").write_text(json.dumps(st))
+    await asyncio.wait_for(followed.task, 10)
+    assert [x.get("delta") for x in _log(meta["id"]) if x["type"] == "text"][-1] == "The admin card."
+
+
+async def test_a_tray_entry_is_known_by_its_prompt_or_kind_whatever_main_calls_it(fake):
+    run = await write_session.start(CORPUS, "report")
+    await asyncio.wait_for(run.task, 10)
+    prompt = str(bg_session.proxy_file(CORPUS, "writer:report"))
+    assert bg_session.is_proxy(CORPUS, "thimble:writer", "writer session", prompt), "main reworded the description"
+    assert bg_session.is_proxy(CORPUS, "thimble:writer", "the writer", None), "the one live writer"
+    assert not bg_session.is_proxy(CORPUS, "thimble:orient", "orientation", None), "the orientation's own subagent"
+    assert not bg_session.is_proxy(CORPUS, "general-purpose", "writing report", prompt)
