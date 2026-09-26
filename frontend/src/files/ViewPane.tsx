@@ -1,11 +1,14 @@
 // A view picked in the views bar: the corpus's view drawing a file in its sandboxed frame (ViewerFrame) at the place a
-// ref names, with Raw one click away. A view that fails says so with Raw beside it.
+// ref names, with Raw one click away. A view that fails says so with Raw beside it. While a Files label filter is set,
+// the head shows it as a chip that clears it, since the view keeps only the records the filter keeps.
 import { useEffect, useState, type ReactNode } from 'react'
 import { Segmented } from '../components/Button'
+import { FilterChip } from '../components/FilterChip'
+import { api } from '../lib/api'
 import { track } from '../lib/telemetry'
 import type { SourceKind } from '../lib/types'
 import { Reader, ViewFailed } from './Reader'
-import type { FilesLabels } from './useLabels'
+import { useFilesFilter, type FilesLabels } from './useLabels'
 import { ViewerFrame, type ViewQuote } from './ViewerFrame'
 import type { BuiltView } from './ViewsBar'
 
@@ -30,6 +33,8 @@ interface Props {
 export function ViewPane({ ws, view, path, kind, targetRef, quote, onQuoteMissing, labels, onMode, lead }: Props) {
   const [mode, setMode] = useState<'view' | 'raw'>('view')
   const [failure, setFailure] = useState<string | null>(null)
+  const filter = useFilesFilter(ws)
+  const filterLabel = filter ? labels.byId.get(filter.concept) : undefined
   useEffect(() => {
     setMode('view')
     setFailure(null)
@@ -49,6 +54,7 @@ export function ViewPane({ ws, view, path, kind, targetRef, quote, onQuoteMissin
           <span className="view-pane-name">{view.name}</span>
           {path && <span className="view-pane-file mono">{path}</span>}
         </div>
+        {filter && filterLabel && <FilterChip concept={filter.concept} name={filterLabel.name} value={filter.value} className="view-pane-filter" onClear={() => void api.deleteFilter(ws, 'files').catch(() => undefined)} />}
         {path && (
           <Segmented
             label="Mode"
@@ -70,7 +76,7 @@ export function ViewPane({ ws, view, path, kind, targetRef, quote, onQuoteMissin
         ) : (
           <>
             {failure && <ViewFailed name={view.name} detail={failure} onRaw={path ? () => pick('raw') : undefined} />}
-            <ViewerFrame key={view.slug} ws={ws} slug={view.slug} targetRef={targetRef} path={path ?? undefined} title={view.name} labels={labels.on} onError={setFailure} quote={quote} onQuoteMissing={onQuoteMissing} className="view-pane-frame" />
+            <ViewerFrame key={`${view.slug}:${view.built ?? ''}`} ws={ws} slug={view.slug} targetRef={targetRef} path={path ?? undefined} title={view.name} labels={labels.on} filter={filter} byId={labels.byId} onError={setFailure} quote={quote} onQuoteMissing={onQuoteMissing} className="view-pane-frame" />
           </>
         )}
       </div>

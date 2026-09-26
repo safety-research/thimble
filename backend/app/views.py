@@ -74,7 +74,7 @@ ERROR_MAX = 2000
 SOURCE_MAX = 400_000  # chars of reader.py or view.html a view may hold
 # the checks: sample lines per claimed file, files sampled, keys followed, cited records read per key
 CHECK_LINES, CHECK_FILES, CHECK_KEYS, CHECK_KEY_REFS = 3, 3, 3, 30
-SHOT_TIMEOUT_S = 60.0
+SHOT_TIMEOUT_S, SHOT_STATE_S = 30.0, 30.0  # a headless run's time: the browser's start, then each state's
 # a page anchoring fewer than one in ANCHORED_SHARE of the record refs its fetches returned is noted by the gate
 # (unmarked); the strings of each answer read for them, FETCHED_SCAN_MAX at most
 ANCHORED_SHARE = 10
@@ -92,6 +92,11 @@ LIBS: dict[str, Path] = {
 LIB_NEEDS = {"vega-lite": ("vega",), "vega-embed": ("vega", "vega-lite")}
 BRIDGE_JS = Path(__file__).with_name("viewer_bridge.js")
 HOST_PY = Path(__file__).with_name("view_host.py")
+KERNEL_THIMBLE = Path(__file__).with_name("kernel_thimble.py")  # the `thimble` module a reader imports (view_host)
+# The test label of the checks and the review: it marks every record whose line is a multiple of PROBE_EVERY, about one
+# in seven, so a picture shows whether labels reach the page without any label being defined (kernel_thimble._probed).
+PROBE_EVERY = 7
+NO_LABELS: dict[str, Any] = {"labels": [], "filter": None}
 SHOT_SCRIPT = config.REPO_ROOT / "scripts" / "view_shot.mjs"
 NODE_MIN = 20  # the Node major the checks need, as scripts/install.sh asks for it
 # plugin/viewers holds the worked examples a view ticket's session reads and the file-type viewers thimble ships
@@ -746,7 +751,7 @@ def _prepare(c: str, slug: str) -> tuple[dict[str, Any], dict[str, Any]]:
     files = claimed_files(c, view)
     fp = fingerprint(files, reader_path.read_text("utf-8"))
     req = {"slug": slug, "reader": str(reader_path.resolve()), "fp": fp, "paths": [f[0] for f in files],
-           "cache": str((cache_dir(c, view) / f"{fp}.index.pickle").resolve())}
+           "cache": str((cache_dir(c, view) / f"{fp}.index.pickle").resolve()), "thimble": str(KERNEL_THIMBLE)}
     return view, req
 
 
@@ -768,11 +773,133 @@ async def _call(c: str, req: dict[str, Any], op: str, arg: Any = None) -> Any:
     return ans.get("result")
 
 
-async def reader_call(c: str, slug: str, op: str, arg: Any = None) -> Any:
+async def reader_call(c: str, slug: str, op: str, arg: Any = None, *, labels: dict[str, Any] | None = None) -> Any:
     """reader.<op>(index, arg) for the view, op being index, records or resolve (resolve goes through resolve_locator,
-    which cleans and memoises the answer)."""
+    which cleans and memoises the answer). A records call runs with `labels` as the labels context thimble.marked and
+    thimble.kept read, by default the workspace's (labels_context); labels apply when records are served, so they are no
+    part of the index's fingerprint."""
     _, req = await asyncio.to_thread(_prepare, c, slug)
+    if op == "records":
+        ctx = labels if labels is not None else await asyncio.to_thread(labels_context, c)
+        req = {**req, "labels": ctx}
     return await _call(c, req, op, arg)
+
+
+# ----------------------------------------------------------------------------------------------------------
+# labels in views: what is on and the filter, and the marks of records and units
+# ----------------------------------------------------------------------------------------------------------
+
+
+def _label_colour(n: Any) -> str:
+    from .kernel_thimble import LABEL_COLOURS  # noqa: PLC0415
+
+    return LABEL_COLOURS[n] if isinstance(n, int) and 0 <= n < len(LABEL_COLOURS) else LABEL_COLOURS[1]
+
+
+def labels_context(c: str) -> dict[str, Any]:
+    """The labels a view's reader sees: {labels: [{id, name, colour, values: [{name, colour, highlight}], jsonl}],
+    filter: {id, label, value, colour} | None}. The labels are those over records the analyst turned on in Files, and
+    the Files filter's label, which counts as on while it filters; colours are the palette's hex values."""
+    from . import concepts  # noqa: PLC0415
+
+    try:
+        ws = config.workspace_dir(c)
+        ks = concepts.list_concepts(ws)
+        f = concepts.read_filters(ws).get("files")
+    except (HTTPException, OSError, ValueError):
+        return dict(NO_LABELS)
+    out: list[dict[str, Any]] = []
+    for k in ks:
+        if k["unit"] not in concepts.FILE_UNITS or k.get("marks") == "file":
+            continue
+        if not (k["shown"] or (f and f.get("concept") == k["id"])):
+            continue
+        classes = k.get("classes") or []
+        lit = [cl for cl in classes if cl.get("highlight")] or classes
+        out.append({"id": k["id"], "name": k["name"], "colour": _label_colour(lit[0].get("color") if lit else 1),
+                    "values": [{"name": cl["name"], "colour": _label_colour(cl.get("color")), "highlight": bool(cl.get("highlight"))}
+                               for cl in classes],
+                    "jsonl": str(concepts.labels_file(ws, k["id"]))})
+    filt = None
+    k = next((x for x in out if f and x["id"] == f.get("concept")), None)
+    if k is not None:
+        v = next((x for x in k["values"] if x["name"] == f.get("value")), None)
+        filt = {"id": k["id"], "label": k["name"], "value": str(f.get("value")), "colour": v["colour"] if v else k["colour"]}
+    return {"labels": out, "filter": filt}
+
+
+def probe_context(filtered: bool = False) -> dict[str, Any]:
+    """The test label's context (kernel_thimble's probe): it marks about one record in seven, and with `filtered` the
+    filter keeps just those."""
+    return {"probe": PROBE_EVERY, "filter": bool(filtered)}
+
+
+def labels_state(ctx: dict[str, Any] | None) -> dict[str, Any]:
+    """{labels, filter} of a context as the page's thimble.onLabels hands them (kernel_thimble.view_labels)."""
+    from . import kernel_thimble  # noqa: PLC0415
+
+    return kernel_thimble._view_labels(ctx or NO_LABELS)
+
+
+def _record_mark(ctx: dict[str, Any], ref: str) -> dict[str, Any] | None:
+    """A record's mark for the bridge, {bar, names, spans, keep?}: the first label's colour as its bar, and with a filter
+    whether it is kept; None for a record no label marks and no filter keeps."""
+    from . import kernel_thimble  # noqa: PLC0415
+
+    marks = kernel_thimble._marked(ctx, ref)
+    out: dict[str, Any] = {}
+    if marks:
+        out = {"bar": marks[0]["colour"], "names": list(dict.fromkeys(m["label"] for m in marks)), "spans": []}
+    if ctx.get("filter"):
+        keep = kernel_thimble._kept(ctx, ref)
+        if not keep and not out:
+            return None
+        out["keep"] = keep
+    return out or None
+
+
+def _unit_mark(ctx: dict[str, Any], rs: list[str]) -> dict[str, Any] | None:
+    """A unit's mark from the records it stands for: marked by each label that marks any of them, its bar the colour most
+    of its marked records take, and with a filter kept when any record is kept."""
+    from . import kernel_thimble  # noqa: PLC0415
+
+    names: dict[str, None] = {}
+    colours: dict[str, int] = {}
+    for r in rs:
+        for m in kernel_thimble._marked(ctx, r):
+            names.setdefault(m["label"], None)
+            colours[m["colour"]] = colours.get(m["colour"], 0) + 1
+    out: dict[str, Any] = {}
+    if names:
+        out = {"bar": max(colours, key=lambda k: colours[k]), "names": list(names), "spans": []}
+    if ctx.get("filter"):
+        keep = any(kernel_thimble._kept(ctx, r) for r in rs)
+        if not keep and not out:
+            return None
+        out["keep"] = keep
+    return out or None
+
+
+async def marks_for(c: str, slug: str, ref_list: list[str], ctx: dict[str, Any] | None = None) -> dict[str, dict[str, Any]]:
+    """{ref: mark} for the bridge: the marks of record refs (`<path>#L<n>`) and of the view's unit refs
+    (`view:<slug>/<key>`, resolved in one kernel round trip and marked from their first REFS_MAX records) under the
+    labels context `ctx` (default the workspace's). A ref no label marks and no filter keeps is left out."""
+    ctx = ctx if ctx is not None else await asyncio.to_thread(labels_context, c)
+    if not ctx.get("probe") and not ctx.get("labels"):
+        return {}
+    records = [r for r in ref_list if _RECORD_REF.match(r)]
+    prefix = f"view:{slug}/"
+    units = [r for r in ref_list if r.startswith(prefix) and len(r) > len(prefix)]
+    out: dict[str, dict[str, Any]] = {}
+    for r in records:
+        if (m := _record_mark(ctx, r)) is not None:
+            out[r] = m
+    if units:
+        answers = await resolve_many(c, slug, [{"key": r[len(prefix):]} for r in units])
+        for r, res in zip(units, answers):
+            if res is not None and (m := _unit_mark(ctx, res["refs"][:REFS_MAX])) is not None:
+                out[r] = m
+    return out
 
 
 def _label(v: Any) -> str:
@@ -838,6 +965,35 @@ async def resolve_locator(c: str, slug: str, locator: dict[str, Any]) -> dict[st
     _memo_put(mk, out)
     if out is not None and "key" in locator and not view["draft"]:
         _keep_key_refs(c, slug, str(locator["key"]), out)
+    return out
+
+
+async def resolve_many(c: str, slug: str, locators: list[dict[str, Any]]) -> list[dict[str, Any] | None]:
+    """resolve_locator for many locators, in one kernel round trip for those not memoised; a locator whose resolve
+    raised answers None."""
+    view, req = await asyncio.to_thread(_prepare, c, slug)
+    out: list[dict[str, Any] | None] = [None] * len(locators)
+    todo: list[int] = []
+    for i, loc in enumerate(locators):
+        hit, value = _memo_get((c, slug, req["fp"], _locator_key(loc)))
+        if hit:
+            out[i] = value
+        else:
+            todo.append(i)
+    if not todo:
+        return out
+    answers = await _call(c, req, "resolve_many", [locators[i] for i in todo])
+    for i, ans in zip(todo, answers if isinstance(answers, list) else []):
+        if not isinstance(ans, dict) or not ans.get("ok"):
+            continue
+        try:
+            value = clean_resolved(ans.get("result"))
+        except ReaderError:
+            continue
+        _memo_put((c, slug, req["fp"], _locator_key(locators[i])), value)
+        out[i] = value
+        if value is not None and "key" in locators[i] and not view["draft"]:
+            _keep_key_refs(c, slug, str(locators[i]["key"]), value)
     return out
 
 
@@ -1455,15 +1611,17 @@ async def gate(c: str, slug: str, locators: list[str] | None = None, *, shot_dir
 
 
 def _prune_shots(d: Path) -> None:
-    """Keep the newest SHOTS_KEPT check pictures (each with its page and open message) of a view."""
+    """Keep the check pictures of a view's newest SHOTS_KEPT runs, each run's pictures with its page and states file."""
     try:
-        shots = sorted(d.glob("check-*.png"), key=lambda p: p.stat().st_mtime, reverse=True)
+        files = list(d.glob("check-*"))
+        runs = sorted({m.group(1) for p in files if (m := re.match(r"(check-\d+)", p.name))}, reverse=True)
     except OSError:
         return
-    for old in shots[SHOTS_KEPT:]:
-        for p in (old, old.with_suffix(".html"), old.with_suffix(".open.json")):
-            with contextlib.suppress(OSError):
-                p.unlink()
+    for run in runs[SHOTS_KEPT:]:
+        for p in files:
+            if p.name.startswith(run + "-") or p.name.startswith(run + "."):
+                with contextlib.suppress(OSError):
+                    p.unlink()
 
 
 def gate_lines(report: dict[str, Any]) -> list[str]:
@@ -1482,14 +1640,23 @@ def gate_lines(report: dict[str, Any]) -> list[str]:
         else:
             lines.append(f"bad {r['locator']}: {r.get('why')}")
     page = report.get("page") or {}
-    if page:
+    shots = report.get("shots") or []
+    for s in shots:
+        if s.get("ok"):
+            lines.append(f"page: {s.get('state')}, {int(s.get('records') or 0)} records and {int(s.get('units') or 0)} units "
+                         f"anchored, {int(s.get('marked') or 0)} marked by the test label")
+        else:
+            lines.append(f"page: {s.get('state')}: " + "; ".join(s.get("errors") or ["did not load"]))
+        if s.get("png"):
+            lines.append(f"png: {s['png']}")
+    if page and not shots:
         if page.get("ok"):
             lines.append(f"page: loaded, {page.get('fetches', 0)} fetch(es), no errors")
-            if unmarked(page):
-                lines.append("note: " + _hint("view-no-record-anchors", fetched=page.get("fetched_records") or 0,
-                                              records=page.get("records") or 0))
         else:
             lines.append("page: " + "; ".join(page.get("errors") or ["did not load"]))
+    if page.get("ok") and unmarked(page):
+        lines.append("note: " + _hint("view-no-record-anchors", fetched=page.get("fetched_records") or 0,
+                                      records=page.get("records") or 0))
     return [ln for ln in lines if ln]
 
 
@@ -1503,9 +1670,12 @@ def unmarked(page: dict[str, Any]) -> bool:
 def first_failure(report: dict[str, Any]) -> str:
     """The first line of the report that failed: a problem, a bad check or a page that did not load ('' for none)."""
     for ln in gate_lines(report):
-        if ln.startswith(("problem: ", "bad ")) or (ln.startswith("page: ") and not ln.startswith("page: loaded")):
+        if ln.startswith(("problem: ", "bad ")) or (ln.startswith("page: ") and not _PAGE_LOADED.match(ln)):
             return ln
     return ""
+
+
+_PAGE_LOADED = re.compile(r"^page: [a-z]+, ")  # a page line of a page that loaded (gate_lines)
 
 
 def built_line(view: dict[str, Any]) -> str:
@@ -1599,37 +1769,68 @@ def build_problem() -> str:
 
 
 async def shoot(c: str, slug: str, open_place: dict[str, Any] | None, out_png: Path, *, width: int = 1100,
-                height: int = 760) -> dict[str, Any]:
-    """Load the view's page headless (scripts/view_shot.mjs, in the frontend's Playwright Chromium), send it
-    `open_place`, answer its fetches from the reader and its media requests with the file media_file names, and write a
-    picture of it. Returns {ok, errors, fetches, png?}; without Node or the frontend's packages the one error is
-    build_problem's line."""
+                height: int = 760, labels: dict[str, Any] | None = None) -> dict[str, Any]:
+    """One state of shoot_states: the page at `open_place` with the labels context `labels` (the workspace's by
+    default), written to `out_png`."""
+    ctx = labels if labels is not None else await asyncio.to_thread(labels_context, c)
+    res = await shoot_states(c, slug, [{"out": out_png, "open": open_place, "labels": ctx}], width=width, height=height)
+    return res[0]
+
+
+async def shoot_states(c: str, slug: str, states: list[dict[str, Any]], *, width: int = 1100,
+                       height: int = 760) -> list[dict[str, Any]]:
+    """Load the view's page headless once per state (scripts/view_shot.mjs, in the frontend's Playwright Chromium), each
+    state {out, open, labels}: send it `open`, answer its fetches from the reader and its marks requests under the state's
+    labels context (NO_LABELS, a probe_context or labels_context), serve its media requests with the file media_file
+    names, and write a picture of it to `out`. Returns one result per state, {ok, errors, fetches, height, refs, records,
+    units, marked, hidden, fonts, fetched_records, png?}; without Node or the frontend's packages each has
+    build_problem's line as its one error."""
+    def failed(why: str) -> list[dict[str, Any]]:
+        return [{"ok": False, "errors": [why], "fetches": 0} for _ in states]
+
     view = read_view(c, slug)
     if view is None:
-        return {"ok": False, "errors": [f"no view {slug!r}"], "fetches": 0}
+        return failed(f"no view {slug!r}")
     if why := await asyncio.to_thread(build_problem):
-        return {"ok": False, "errors": [why], "fetches": 0}
+        return failed(why)
+    if not states:
+        return []
     media = media_url(SHOT_MEDIA_ORIGIN, c, slug)
     doc = frame_document(view, media)
-    out_png.parent.mkdir(parents=True, exist_ok=True)
-    frame_file = out_png.with_suffix(".html")
+    first = Path(states[0]["out"])
+    first.parent.mkdir(parents=True, exist_ok=True)
+    frame_file = first.with_suffix(".html")
     frame_file.write_text(doc, "utf-8")
-    open_file = out_png.with_suffix(".open.json")
-    open_file.write_text(json.dumps(open_place or {}), "utf-8")
-    cmd = ["node", str(SHOT_SCRIPT), "--frame", str(frame_file), "--open", str(open_file), "--out", str(out_png),
-           "--viewport", f"{width}x{height}", "--media", media]
+    states_file = first.with_suffix(".states.json")
+    for s in states:
+        Path(s["out"]).parent.mkdir(parents=True, exist_ok=True)
+    states_file.write_text(json.dumps([{"out": str(s["out"]), "open": s.get("open") or {}} for s in states]), "utf-8")
+    ctxs = [s.get("labels") if s.get("labels") is not None else dict(NO_LABELS) for s in states]
+    cmd = ["node", str(SHOT_SCRIPT), "--frame", str(frame_file), "--states", str(states_file), "--viewport",
+           f"{width}x{height}", "--media", media]
     try:
         proc = await asyncio.create_subprocess_exec(*cmd, cwd=str(config.REPO_ROOT), stdin=asyncio.subprocess.PIPE,
                                                     stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
     except OSError as e:
-        return {"ok": False, "errors": [f"the headless browser could not start: {e}"], "fetches": 0}
-    fetches = 0
-    fetched: set[str] = set()  # the record refs the reader's answers handed the page (unmarked)
-    result: dict[str, Any] = {"ok": False, "errors": ["the headless page did not finish"], "fetches": 0}
+        return failed(f"the headless browser could not start: {e}")
+    fetched: list[set[str]] = [set() for _ in states]  # the record refs each state's reader answers handed its page
+    results: list[dict[str, Any]] | None = None
+
+    async def reply(obj: dict[str, Any]) -> None:
+        assert proc.stdin is not None
+        proc.stdin.write((json.dumps(obj, ensure_ascii=False, default=str) + "\n").encode("utf-8"))
+        await proc.stdin.drain()
+
+    def state_of(msg: dict[str, Any]) -> int:
+        try:
+            i = int(msg.get("state") or 0)
+        except (TypeError, ValueError):
+            i = 0
+        return i if 0 <= i < len(states) else 0
 
     async def converse() -> None:
-        nonlocal fetches, result
-        assert proc.stdout is not None and proc.stdin is not None
+        nonlocal results
+        assert proc.stdout is not None
         while True:
             line = await proc.stdout.readline()
             if not line:
@@ -1639,36 +1840,44 @@ async def shoot(c: str, slug: str, open_place: dict[str, Any] | None, out_png: P
             except ValueError:
                 continue
             if "fetch" in msg:
-                fetches += 1
+                i = state_of(msg)
                 try:
-                    data = await reader_call(c, slug, "records", msg.get("query"))
+                    data = await reader_call(c, slug, "records", msg.get("query"), labels=ctxs[i])
                     strings: list[str] = []
                     _strings(data, strings)
-                    fetched.update(s for s in strings[:FETCHED_SCAN_MAX] if _RECORD_REF.match(s))
-                    reply = {"id": msg["fetch"], "data": data}
+                    fetched[i].update(s for s in strings[:FETCHED_SCAN_MAX] if _RECORD_REF.match(s))
+                    await reply({"id": msg["fetch"], "data": data})
                 except ReaderError as e:
-                    reply = {"id": msg["fetch"], "error": e.message}
-                proc.stdin.write((json.dumps(reply, ensure_ascii=False, default=str) + "\n").encode("utf-8"))
-                await proc.stdin.drain()
+                    await reply({"id": msg["fetch"], "error": e.message})
+            elif "marks" in msg:
+                i = state_of(msg)
+                refs_in = [str(r) for r in msg.get("refs") or []][:5000]
+                try:
+                    marks = await marks_for(c, slug, refs_in, ctxs[i]) if refs_in else {}
+                except ReaderError:
+                    marks = {}
+                await reply({"id": msg["marks"], "marks": marks, **_state_labels(ctxs[i])})
             elif "media" in msg:
                 # the script reads the bytes itself, a range at a time; here the path passes the route's checks
                 try:
                     f, media_type = await asyncio.to_thread(media_file, c, slug, str(msg.get("path") or ""))
-                    reply = {"id": msg["media"], "file": str(f), "type": media_type, "size": f.stat().st_size}
+                    await reply({"id": msg["media"], "file": str(f), "type": media_type, "size": f.stat().st_size})
                 except (HTTPException, OSError) as e:
-                    reply = {"id": msg["media"], "error": str(getattr(e, "detail", e))}
-                proc.stdin.write((json.dumps(reply, ensure_ascii=False) + "\n").encode("utf-8"))
-                await proc.stdin.drain()
+                    await reply({"id": msg["media"], "error": str(getattr(e, "detail", e))})
             elif msg.get("done"):
-                result = {"ok": bool(msg.get("ok")), "errors": list(msg.get("errors") or []), "fetches": fetches,
-                          "height": msg.get("height"), "refs": msg.get("refs"), "records": msg.get("records"),
-                          "fetched_records": len(fetched)}
+                results = list(msg.get("states") or [])
+                if msg.get("error") and not results:
+                    results = [{"ok": False, "errors": [str(msg["error"])]} for _ in states]
                 return
 
+    limit = SHOT_TIMEOUT_S + SHOT_STATE_S * len(states)
     try:
-        await asyncio.wait_for(converse(), SHOT_TIMEOUT_S)
+        await asyncio.wait_for(converse(), limit)
     except asyncio.TimeoutError:
-        result = {"ok": False, "errors": [f"the headless page did not finish in {SHOT_TIMEOUT_S:g} s"], "fetches": fetches}
+        results = None
+        timed_out = f"the headless page did not finish in {limit:g} s"
+    else:
+        timed_out = ""
     finally:
         with contextlib.suppress(Exception):
             proc.stdin.close()  # type: ignore[union-attr]
@@ -1677,12 +1886,28 @@ async def shoot(c: str, slug: str, open_place: dict[str, Any] | None, out_png: P
         except asyncio.TimeoutError:
             proc.kill()
             await proc.wait()
-    if proc.returncode not in (0, None) and not result.get("errors"):
+    if results is None:
         err = (await proc.stderr.read()).decode("utf-8", "replace") if proc.stderr else ""
-        result["errors"] = [f"the headless browser exited {proc.returncode}: {err[-400:]}"]
-    if out_png.is_file():
-        result["png"] = str(out_png)
-    return result
+        why = timed_out or (f"the headless browser exited {proc.returncode}: {err[-400:]}" if proc.returncode else
+                            "the headless page did not finish")
+        results = [{"ok": False, "errors": [why], "fetches": 0} for _ in states]
+    out: list[dict[str, Any]] = []
+    for i, s in enumerate(states):
+        r = dict(results[i]) if i < len(results) and isinstance(results[i], dict) else {"ok": False, "errors": ["the state was not shot"]}
+        r.setdefault("errors", [])
+        r.setdefault("fetches", 0)
+        r["fetched_records"] = len(fetched[i])
+        if Path(s["out"]).is_file():
+            r["png"] = str(s["out"])
+        out.append(r)
+    return out
+
+
+def _state_labels(ctx: dict[str, Any]) -> dict[str, Any]:
+    """The `on` and `filter` of a labels message, as ViewerFrame sends them: the labels that are on, each {name,
+    colour, values}, and the filter {label, value, colour} or None."""
+    st = labels_state(ctx)
+    return {"on": st["labels"], "filter": st["filter"]}
 
 
 def _strings(v: Any, out: list[str]) -> None:
@@ -1881,17 +2106,71 @@ async def check(c: str, slug: str, locators: list[str] | None = None, *, shot_di
     if not report["checks"]:
         report["problems"].append("no locator was checked: pass `locators` with refs the view should open")
 
-    first_ok = next((r for r in report["checks"] if r["ok"]), None)
-    place = None
-    if first_ok is not None:
-        loc = first_ok["locator"]
-        p = refs.parse_ref(loc)
-        loc_d = {"key": p["key"]} if p["kind"] == "view" else {"path": p["path"], "fragment": _fragment_of(loc)}
-        place = await open_place(c, slug, loc, loc_d)
     base = shot_dir or (cache_dir(c, view) / "shots")
-    report["page"] = await shoot(c, slug, place, base / f"check-{int(time.time())}.png")
+    shots = await shoot_checks(c, slug, view, files, report["checks"], base, f"check-{int(time.time())}")
+    report["shots"] = shots
+    report["page"] = _page_of(shots)
+    if anchorless(view, files, shots):
+        report["problems"].append(_hint("view-no-anchors", slug=slug))
     report["ok"] = (not report["problems"] and all(r["ok"] for r in report["checks"]) and bool(report["page"].get("ok")))
     return report
+
+
+# the states the checks shoot, both with the test label on: the page as the Views bar opens it, and at the first place
+# that resolved
+CHECK_STATES = ("overview", "detail")
+
+
+async def first_place(c: str, slug: str, checks: list[dict[str, Any]]) -> dict[str, Any] | None:
+    """The `open` message for the first check that passed, None when none did."""
+    first_ok = next((r for r in checks if r["ok"]), None)
+    if first_ok is None:
+        return None
+    loc = first_ok["locator"]
+    p = refs.parse_ref(loc)
+    loc_d = {"key": p["key"]} if p["kind"] == "view" else {"path": p["path"], "fragment": _fragment_of(loc)}
+    return await open_place(c, slug, loc, loc_d)
+
+
+async def shoot_checks(c: str, slug: str, view: dict[str, Any], files: list[tuple[str, int, int]],
+                       checks: list[dict[str, Any]], base: Path, stem: str) -> list[dict[str, Any]]:
+    """The checks' two pictures, each with the test label on: the overview, the page opened on its first claimed file
+    as the Views bar opens it, and the detail, the first place that resolved. Each result carries its `state` name."""
+    overview = {"ref": None, "path": files[0][0]} if files else {"ref": None}
+    detail = await first_place(c, slug, checks) or overview
+    states = [{"out": base / f"{stem}-overview.png", "open": overview, "labels": probe_context()},
+              {"out": base / f"{stem}-detail.png", "open": detail, "labels": probe_context()}]
+    shots = await shoot_states(c, slug, states)
+    return [{**s, "state": name} for s, name in zip(shots, CHECK_STATES)]
+
+
+def _page_of(shots: list[dict[str, Any]]) -> dict[str, Any]:
+    """The shots as one page result: ok when every shot loaded without errors, their errors and fetches together, and
+    the detail shot's picture (the one a session looked at before there were two)."""
+    if not shots:
+        return {"ok": False, "errors": ["no picture was taken"], "fetches": 0}
+    errors = list(dict.fromkeys(e for s in shots for e in s.get("errors") or []))
+    page = {"ok": all(s.get("ok") for s in shots), "errors": errors, "fetches": sum(int(s.get("fetches") or 0) for s in shots),
+            "refs": max(int(s.get("refs") or 0) for s in shots), "records": max(int(s.get("records") or 0) for s in shots),
+            "units": max(int(s.get("units") or 0) for s in shots),
+            "fetched_records": max(int(s.get("fetched_records") or 0) for s in shots)}
+    png = shots[-1].get("png") or shots[0].get("png")
+    if png:
+        page["png"] = png
+    return page
+
+
+def lined(view: dict[str, Any], files: list[tuple[str, int, int]]) -> bool:
+    """Whether the view claims a file with lines, whose records labels can mark (not only binary files)."""
+    return any(Path(f[0]).suffix.lower() not in BINARY_SUFFIXES for f in files)
+
+
+def anchorless(view: dict[str, Any], files: list[tuple[str, int, int]], shots: list[dict[str, Any]]) -> bool:
+    """Whether no label could show in the page: it claims files with lines, its shots loaded, and neither anchored a
+    record or a unit."""
+    loaded = [s for s in shots if s.get("ok")]
+    return bool(loaded) and lined(view, files) and not any(int(s.get("records") or 0) + int(s.get("units") or 0)
+                                                            for s in loaded)
 
 
 async def open_place(c: str, slug: str, ref: str | None, locator: dict[str, Any] | None) -> dict[str, Any]:
@@ -2179,6 +2458,24 @@ async def records_route(c: str, slug: str, body: RecordsBody) -> dict[str, Any]:
         raise HTTPException(502, {"message": e.message, "traceback": e.detail[-ERROR_MAX:]}) from None
 
 
+class MarksBody(BaseModel):
+    refs: list[str] = []
+
+
+MARKS_MAX = 2000  # refs one marks request answers
+
+
+@router.post("/ws/{c}/views/{slug}/marks")
+async def marks_route(c: str, slug: str, body: MarksBody) -> dict[str, Any]:
+    """The marks of the labels that are on for refs the view's page shows, {ref: {bar, names, spans, keep?}} (marks_for):
+    its units' refs above all, which the browser cannot mark from the label rows it reads. 502 with the reader's error."""
+    _view_or_404(c, slug)
+    try:
+        return await marks_for(c, slug, [str(r) for r in body.refs][:MARKS_MAX])
+    except ReaderError as e:
+        raise HTTPException(502, {"message": e.message, "traceback": e.detail[-ERROR_MAX:]}) from None
+
+
 @router.get("/ws/{c}/views/{slug}/resolve")
 async def resolve_route(c: str, slug: str, ref: str) -> dict[str, Any]:
     """The `open` message for a ref in this view: {ref, path?, fragment?, key?, target, label, excerpt, refs} or with
@@ -2207,7 +2504,8 @@ async def check_route(c: str, slug: str, request: Request, body: CheckBody | Non
     if locators and read_proposal(c, slug) is not None:
         update_proposal(c, slug, locators=locators)
     report = await gate(c, slug, locators or _kept_locators(c, slug))
-    return {"ok": bool(report.get("ok")), "lines": gate_lines(report), "png": (report.get("page") or {}).get("png")}
+    return {"ok": bool(report.get("ok")), "lines": gate_lines(report), "png": (report.get("page") or {}).get("png"),
+            "pngs": [s["png"] for s in report.get("shots") or [] if s.get("png")]}
 
 
 def _kept_locators(c: str, slug: str) -> list[str] | None:

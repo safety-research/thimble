@@ -17,6 +17,7 @@ import pickle
 import sys
 import time
 import traceback
+import types
 
 SENTINEL = "\x1ethimble-view\x1e"
 TRACEBACK_MAX = 3000
@@ -77,25 +78,55 @@ def _index(slug: str, mod: object, fp: str, paths: list[str], cache: str | None)
     return idx, built
 
 
+def _thimble(req: dict) -> object | None:
+    """The `thimble` module a reader imports: the kernel's own, else one built from kernel_thimble.py (`req["thimble"]`)
+    for a kernel started without it."""
+    mod = sys.modules.get("thimble")
+    if mod is None and req.get("thimble"):
+        mod = types.ModuleType("thimble")
+        mod.WS = None  # type: ignore[attr-defined]
+        with open(req["thimble"], encoding="utf-8") as f:
+            exec(f.read(), mod.__dict__)  # noqa: S102 — thimble's own module source
+        sys.modules["thimble"] = mod
+    return mod
+
+
 def answer(req: dict) -> dict:
-    """The answer to one request {slug, reader, fp, paths, cache, op, arg}; op is index, records or resolve."""
+    """The answer to one request {slug, reader, fp, paths, cache, op, arg, labels?}; op is index, records, resolve or
+    resolve_many (a list of locators, answered with a list). A records call runs with `labels`, the labels context,
+    as thimble's _view_ctx, which thimble.marked and thimble.kept read."""
     t0 = time.monotonic()
+    th = None
     try:
+        _thimble(req)  # before reader.py loads, since it may import thimble at its top
         mod = _reader(req["slug"], req["reader"])
         idx, built = _index(req["slug"], mod, req["fp"], req.get("paths") or [], req.get("cache"))
         op = req.get("op")
         if op == "index":
             result = None
         elif op == "records":
+            th = _thimble(req)
+            if th is not None:
+                th._view_ctx = req.get("labels")  # type: ignore[attr-defined]
             result = mod.records(idx, req.get("arg"))  # type: ignore[attr-defined]
         elif op == "resolve":
             result = mod.resolve(idx, req.get("arg"))  # type: ignore[attr-defined]
+        elif op == "resolve_many":
+            result = []
+            for loc in req.get("arg") or []:
+                try:
+                    result.append({"ok": True, "result": mod.resolve(idx, loc)})  # type: ignore[attr-defined]
+                except Exception as e:  # noqa: BLE001 — one locator's failure is its own answer
+                    result.append({"ok": False, "error": f"{type(e).__name__}: {e}"})
         else:
             raise ValueError(f"unknown operation {op!r}")
         return {"ok": True, "result": result, "built": built, "ms": round((time.monotonic() - t0) * 1000)}
     except Exception as e:  # noqa: BLE001 — a reader's failure is the answer
         return {"ok": False, "error": f"{type(e).__name__}: {e}", "traceback": traceback.format_exc()[-TRACEBACK_MAX:],
                 "ms": round((time.monotonic() - t0) * 1000)}
+    finally:
+        if th is not None:
+            th._view_ctx = None  # type: ignore[attr-defined]
 
 
 def call(req_json: str) -> None:

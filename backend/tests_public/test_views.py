@@ -357,13 +357,25 @@ def test_the_gate_notes_a_page_that_anchors_few_of_the_records_it_fetched():
     assert not any(ln.startswith("note: ") for ln in idle), "a page that fetched no records needs no record anchors"
 
 
-async def test_a_toy_view_with_no_anchors_gets_the_note_from_its_headless_page(ws, inproc, bound, tmp_path):
+async def test_a_page_no_label_can_show_in_fails_the_gate_and_unit_anchors_pass_it(ws, inproc, bound, tmp_path):
+    """The gate shoots the overview and the first place with the test label on. A page over files with lines that
+    anchors no record and no unit fails with view-no-anchors; the same page anchoring its thread as a unit passes, with
+    the note that it anchors few of the records it fetched."""
     if why := views.build_problem():
         pytest.skip(why)
     rep = await views.check(CORPUS, "threads", ["view:threads/t1"], shot_dir=tmp_path)
+    assert not rep["ok"] and views._hint("view-no-anchors", slug="threads") in rep["problems"]
+    assert [s["state"] for s in rep["shots"]] == ["overview", "detail"] and all(Path(s["png"]).is_file() for s in rep["shots"])
+    assert views.first_failure(rep).startswith("problem: The page shows no element")
+    unit = THREADS_HTML.replace("document.getElementById('out').textContent =",
+                                "document.getElementById('out').dataset.anchor = 'view:threads/' + t\n  document.getElementById('out').textContent =")
+    views.write_view(CORPUS, "threads", reader=THREADS_READER, html=unit, **VIEW)
+    rep = await views.check(CORPUS, "threads", ["view:threads/t1"], shot_dir=tmp_path)
     assert rep["ok"], views.gate_lines(rep)
-    assert rep["page"]["fetches"] >= 1 and rep["page"]["records"] == 0
-    assert any(ln.startswith("note: ") for ln in views.gate_lines(rep))
+    assert all(s["units"] == 1 and s["records"] == 0 and s["fonts"] for s in rep["shots"])
+    lines = views.gate_lines(rep)
+    assert "page: overview, 0 records and 1 units anchored, 0 marked by the test label" in lines
+    assert sum(ln.startswith("png: ") for ln in lines) == 2 and any(ln.startswith("note: ") for ln in lines)
 
 
 def test_the_frame_document_blocks_every_host_before_any_script(ws):
@@ -631,10 +643,10 @@ def _save_example(name: str) -> str:
 async def test_every_worked_example_answers_the_checks_over_the_toy_corpus(name, toy, inproc, bound, tmp_path, monkeypatch):
     """The reader's half of the checks: the index builds, the sampled lines and the declared keys resolve, each answer
     cites its place back, and every excerpt is literal text of the records it cites. The page's half is a test below."""
-    async def no_page(*a, **k):
-        return {"ok": True, "errors": [], "fetches": 0}
+    async def no_page(c, slug, states, **k):
+        return [{"ok": True, "errors": [], "fetches": 0, "records": 1} for _ in states]
 
-    monkeypatch.setattr(views, "shoot", no_page)
+    monkeypatch.setattr(views, "shoot_states", no_page)
     slug = _save_example(name)
     rep = await views.check(TOY, slug, EXAMPLES[name][1], shot_dir=tmp_path)
     assert rep["ok"], views.gate_lines(rep)

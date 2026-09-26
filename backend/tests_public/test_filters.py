@@ -280,7 +280,7 @@ async def test_set_filter_in_files_and_the_report(ws):
     k = concepts.define_concept(CORPUS, "claims a PR", "", "regex", PATTERN, "record")
     r = await main_call("set_filter", scope="files", label="claims a PR")
     assert not r.is_error and "The files filter is now claims a PR = yes." in r.text and "keeps" not in r.text
-    assert "hides no file or record" in r.text
+    assert "its views keep only the records that take the value" in r.text
     assert concepts.read_concept(ws, k["id"])["shown"] is True
     r = await main_call("clear_filter", scope="files")
     assert not r.is_error and concepts.read_filters(ws) == {} and concepts.read_concept(ws, k["id"])["shown"] is False

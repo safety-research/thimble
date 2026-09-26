@@ -76,7 +76,7 @@ After a follow-up, edit each card its answer changes and add a card only for wha
 
 #### Views
 
-A view is a viewer of the corpus that thimble's dev agent writes from your proposal, in the background, while you work. The analyst opens it beside the files, every citation into its files opens in it, and the labels they turn on mark its records. Propose each with `propose_view`, usually one to three, once your analysis shows how the records are best read. The dev agent knows only what the proposal says, so its arrangement names the fields that group the records, the sizes the page must fit, such as how many units and what time span, and how the page lays them out.
+A view is a viewer of the corpus that thimble's dev agent writes from your proposal, in the background, while you work. The analyst opens it beside the files, every citation into its files opens in it, and the labels they turn on mark and filter its records. Propose each with `propose_view`, usually one to three, once your analysis shows how the records are best read. The dev agent knows only what the proposal says, so its arrangement names the fields that group the records, the sizes the page must fit, such as how many units and what time span, and how the page lays them out.
 
 A good view shows the records in a form their files hide. Look for it in three places.
 

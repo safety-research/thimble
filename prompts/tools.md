@@ -561,7 +561,7 @@ It keeps {kept} of the canvas's {total} cards, and the analyst sees the rest dim
 
 ## set_filter-files
 
-Files shows the label turned on with that value highlighted, and hides no file or record.
+Files shows the label turned on with that value highlighted, and its views keep only the records that take the value.
 
 ## set_layout-set
 
@@ -642,6 +642,10 @@ Proposed the view {view} (view:{slug}), but views cannot be built on this machin
 ## view-changing
 
 The dev agent is changing the view {view} (view:{slug}) now. When its checks pass the view has the change, and when they fail it stays as it was.
+
+## view-no-anchors
+
+The page shows no element whose `data-anchor` names a record (`<path>#L<n>`) or one of its units (`view:{slug}/<key>`), so no label the analyst turns on can show in it. Give each element that shows a record its file ref, and each unit's element its key.
 
 ## file_dev_ticket-no-view
 

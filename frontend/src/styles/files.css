@@ -2172,3 +2172,27 @@
 .reader-md-file {
   padding: 16px 20px 24px;
 }
+
+/* beside a view, the funnel that keeps the view to a label's records shows on the row's hover, as the value rows' do */
+.files-label-filter.btn {
+  flex: none;
+  width: 22px;
+  height: 22px;
+  color: var(--text-tertiary);
+  opacity: 0;
+}
+.files-label-row:hover .files-label-filter.btn,
+.files-class-row:hover .files-label-filter.btn,
+.files-label-filter.btn:focus-visible {
+  opacity: 1;
+}
+.files-class-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+/* the Files label filter beside a view's mode switch, which clears it */
+.view-pane-filter {
+  flex: none;
+  align-self: center;
+}

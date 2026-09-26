@@ -34,6 +34,8 @@ export interface BuiltView {
   first_file?: string | null
   /** the files it claims, as globs: what a label made beside it applies to */
   claims?: string[]
+  /** when it last passed its checks: a new stamp is a new version of its page */
+  built?: string
 }
 
 /** The views the bar lists and the proposals not yet built, read and kept fresh. */
@@ -60,8 +62,8 @@ export function useViews(ws: string): { views: BuiltView[]; proposals: Proposal[
   }, [ws])
   const known = new Map(views.map((v) => [v.slug, v]))
   const built: BuiltView[] = [
-    ...proposals.filter((p) => p.status === 'built').map((p) => ({ slug: p.slug, name: p.name, first_file: known.get(p.slug)?.first_file, claims: known.get(p.slug)?.claims })),
-    ...views.filter((v) => !proposals.some((p) => p.slug === v.slug)).map((v) => ({ slug: v.slug, name: v.name, first_file: v.first_file, claims: v.claims })),
+    ...proposals.filter((p) => p.status === 'built').map((p) => ({ slug: p.slug, name: p.name, first_file: known.get(p.slug)?.first_file, claims: known.get(p.slug)?.claims, built: known.get(p.slug)?.built })),
+    ...views.filter((v) => !proposals.some((p) => p.slug === v.slug)).map((v) => ({ slug: v.slug, name: v.name, first_file: v.first_file, claims: v.claims, built: v.built })),
   ]
   return { views: built, proposals: proposals.filter((p) => p.status !== 'built' && p.status !== 'dropped') }
 }

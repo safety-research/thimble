@@ -189,3 +189,15 @@ test('cmd: while ⌘ is held the frame shows the page\'s ⌘ arrow as its cursor
   await move(false)
   assert.equal((await cursorOf()).on, false)
 })
+
+test('with a label filter on, what the filter drops leaves the page and what holds a kept record stays', async () => {
+  const filtered = (marks: object, filter: object | null) =>
+    page.evaluate(([m, f]) => (document.getElementById('f') as HTMLIFrameElement).contentWindow!.postMessage({ type: 'thimble:labels', marks: m, on: [], filter: f }, '*'), [marks, filter] as const)
+  await filtered({ 'a.jsonl#L2': { bar: 'var(--label-6)', names: ['lang'], spans: [], keep: true } }, { label: 'lang', value: 'yes', colour: '#56b4e9' })
+  await frame().waitForFunction(() => getComputedStyle(document.getElementById('five')!).display === 'none')
+  const shown = await frame().evaluate(() => ['one', 'two', 'five'].map((id) => getComputedStyle(document.getElementById(id)!).display))
+  assert.deepEqual(shown, ['none', 'table-row', 'none'], 'the kept row stays, the others leave the layout')
+  assert.notEqual(await frame().evaluate(() => getComputedStyle(document.querySelector('section')!).display), 'none', 'the unit holding it stays')
+  await filtered({}, null)
+  await frame().waitForFunction(() => !document.querySelector('[data-thimble-drop]'))
+})

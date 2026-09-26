@@ -5,12 +5,12 @@
 // the concepts are read again.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useConcepts } from '../canvas/concepts'
-import { labelApi } from '../lib/api'
+import { api, labelApi } from '../lib/api'
 import { bus } from '../lib/bus'
 import { track } from '../lib/telemetry'
 import type { Concept, ConceptPatch, LabelClass } from '../lib/types'
 import { readStorage, storageKey, writeStorage } from '../lib/workspace'
-import { classesOf, focusOf, isFilesLabel, listedInFiles, turnedOnOrder } from './labels'
+import { classesOf, focusOf, isFilesLabel, listedInFiles, turnedOnOrder, type LabelFilter } from './labels'
 
 export interface FilesLabels {
   /** the labels the Labels list holds, oldest first: the labels over files but a trial that is off, and the labels over
@@ -169,4 +169,28 @@ export function useFilesLabels(ws: string): FilesLabels {
   )
 
   return useMemo(() => ({ all, on, focus, setFocus, byId, presence, toggle, setClasses, save }), [all, on, focus, setFocus, byId, presence, toggle, setClasses, save])
+}
+
+/** The Files label filter, {concept, value} or null: read once, then kept from the `filter` events of the Files scope. A
+ * view keeps its records by it. */
+export function useFilesFilter(ws: string): LabelFilter | null {
+  const [filter, setFilter] = useState<LabelFilter | null>(null)
+  useEffect(() => {
+    let alive = true
+    api
+      .filters(ws)
+      .then((all) => {
+        const f = all?.files
+        if (alive) setFilter(f && f.concept && f.value != null ? { concept: f.concept, value: f.value } : null)
+      })
+      .catch(() => undefined)
+    const off = bus.on('filter', (e) => {
+      if (e.scope === 'files') setFilter(e.concept && e.value != null ? { concept: e.concept, value: e.value } : null)
+    })
+    return () => {
+      alive = false
+      off()
+    }
+  }, [ws])
+  return filter
 }

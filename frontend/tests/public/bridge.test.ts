@@ -169,4 +169,53 @@ describe('the view bridge', () => {
     dom.window.document.getElementById('legend')!.dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true, ctrlKey: true }))
     expect(of('cite')).toEqual([])
   })
+
+  test('onLabels hears the labels that are on and the filter, at once and on each change, and not when only marks change', async () => {
+    const heard: unknown[] = []
+    const on = [{ name: 'asks', colour: '#e69f00', values: [{ name: 'yes', colour: '#e69f00' }] }]
+    fromPage({ type: 'thimble:labels', marks: {}, on, filter: null })
+    win().thimble.onLabels((s: unknown) => heard.push(s))
+    expect(heard).toEqual([{ labels: on, filter: null }])
+    fromPage({ type: 'thimble:labels', marks: { 'board.jsonl#L1': { bar: '#e69f00', names: ['asks'], spans: [] } }, on, filter: null })
+    expect(heard).toHaveLength(1)
+    const filter = { label: 'asks', value: 'yes', colour: '#e69f00' }
+    fromPage({ type: 'thimble:labels', marks: {}, on, filter })
+    expect(heard.at(-1)).toEqual({ labels: on, filter })
+  })
+
+  test('with a filter on, a page that does not filter hides what the filter drops, and keeps what holds a kept record', async () => {
+    const doc = dom.window.document
+    fromPage({ type: 'thimble:open', open: { ref: null } })
+    const marks = { 'board.jsonl#L2': { keep: true }, 'board.jsonl#L1': { bar: '#e69f00', names: ['asks'], spans: [], keep: false } }
+    fromPage({ type: 'thimble:labels', marks, on: [], filter: { label: 'asks', value: 'yes', colour: '#e69f00' } })
+    await wait()
+    expect(doc.getElementById('one')!.getAttribute('data-thimble-drop')).toBe('hide')
+    expect(doc.getElementById('two')!.hasAttribute('data-thimble-drop')).toBe(false)
+    expect(doc.querySelector('section')!.hasAttribute('data-thimble-drop')).toBe(false)
+    // the place the page was opened at stays, since the analyst asked for it
+    fromPage({ type: 'thimble:open', open: { ref: 'board.jsonl#L1' } })
+    await wait()
+    expect(doc.getElementById('one')!.hasAttribute('data-thimble-drop')).toBe(false)
+    // no filter, nothing hidden
+    fromPage({ type: 'thimble:labels', marks: {}, on: [], filter: null })
+    await wait()
+    expect(doc.querySelectorAll('[data-thimble-drop]')).toHaveLength(0)
+  })
+
+  test('a page with an onLabels handler filters in its reader, so the bridge hides nothing', async () => {
+    win().thimble.onLabels(() => undefined)
+    fromPage({ type: 'thimble:labels', marks: {}, on: [], filter: { label: 'asks', value: 'yes', colour: '#e69f00' } })
+    await wait()
+    expect(dom.window.document.querySelectorAll('[data-thimble-drop]')).toHaveLength(0)
+  })
+
+  test('a marked SVG shape takes a halo, since it draws no box-shadow, and a dropped one is dimmed', async () => {
+    dom.window.close()
+    await load(undefined, VIEW.replace('</section>', '</section><svg><g id="node" data-anchor="view:review-threads/pr-13"><circle r="4"></circle></g><g id="other" data-anchor="view:review-threads/pr-14"></g></svg>'))
+    const doc = dom.window.document
+    fromPage({ type: 'thimble:labels', marks: { 'view:review-threads/pr-13': { bar: '#e69f00', names: ['asks'], spans: [], keep: true } }, on: [], filter: { label: 'asks', value: 'yes', colour: '#e69f00' } })
+    await wait()
+    expect(doc.getElementById('node')!.getAttribute('data-thimble-edge')).toBe('svg')
+    expect(doc.getElementById('other')!.getAttribute('data-thimble-drop')).toBe('dim')
+  })
 })

@@ -43,7 +43,9 @@
   // Hand-offs: the overview is the whole network, every agent and the heaviest links between them, drawn as a force
   // layout; beside it the records behind the edge the analyst picks. A node focuses its agent's own links; an edge lists
   // its events, each a data-anchor with its line, so the labels the analyst turns on mark them, and a click on one opens
-  // that event wherever thimble opens it. Each node carries view:<slug>/<agent>.
+  // that event wherever thimble opens it. Each node carries view:<slug>/<agent>, so a label marks the agents whose calls
+  // it marks. A label filter keeps only the hand-offs it keeps, which the reader applies, so the page fetches again
+  // when the labels change (thimble.onLabels).
   const slug = (thimble.view && thimble.view.slug) || 'hand-offs'
   const NS = 'http://www.w3.org/2000/svg'
   const svg = document.getElementById('graph')
@@ -105,6 +107,7 @@
   }
 
   async function drawGraph() {
+    drawn = true
     const g = await thimble.fetch({ op: 'graph', around: focus || undefined })
     const w = svg.clientWidth || 700, h = svg.clientHeight || 500
     svg.replaceChildren()
@@ -139,7 +142,7 @@
   async function openEdge(pair) {
     chosenPair = pair
     for (const e of svg.querySelectorAll('.edge')) e.classList.toggle('on', false)
-    const res = await thimble.fetch({ op: 'edge', pair })
+    const res = await thimble.fetch({ op: 'edge', pair, ref: targetRef || undefined })
     const [a, b] = pair.split('|')
     side.replaceChildren(el('h2', null, `${a} and ${b}`), el('div', 'meta mono', `${res.total} hand-offs, newest first`))
     for (const hop of res.items) {
@@ -164,6 +167,13 @@
     await drawGraph()
     // the side lists the heaviest link's records rather than waiting for a click, so there are records in view
     if (!chosenPair && heaviest) await openEdge(heaviest)
+  })
+  let drawn = false
+  thimble.onLabels(async () => {
+    if (!drawn) return // the first fetch reads them
+    chosenPair = null
+    await drawGraph()
+    if (heaviest) await openEdge(heaviest)
   })
 </script>
 </body>

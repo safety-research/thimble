@@ -30,6 +30,7 @@
   .thread.on { color: var(--live); }
   .thread .name { font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .thread .n { font-size: 11px; color: var(--ink-3); }
+  .thread .n .m { color: var(--mark, var(--ink-2)); font-weight: 600; margin-right: 6px; }
   .thread .span { grid-column: 1 / -1; font-size: 10px; color: var(--ink-3); }
   main { overflow: auto; min-height: 0; padding: 16px 24px 48px; }
   header h1 { font-size: 16px; font-weight: 500; margin: 0 0 2px; }
@@ -55,7 +56,9 @@
   // sees the whole board before reading any of it. Beside it the chosen thread's posts, in time order. The page opens on
   // the largest thread rather than an empty pane, so there are records, and the labels on them, in view at once.
   // Every post carries its line as its data-anchor, so a ⌘-click asks about that post and the labels the analyst turns
-  // on mark it; each thread's row and head carry view:<slug>/<thread_id>.
+  // on mark it; each thread's row and head carry view:<slug>/<thread_id>. While a label is on, each row counts the
+  // posts it marks in the label's colour, and a label filter keeps only the threads and posts it keeps, which the
+  // reader applies, so the page fetches again when either changes (thimble.onLabels).
   const slug = (thimble.view && thimble.view.slug) || 'threads'
   const $ = (s) => document.querySelector(s)
   const el = (tag, cls, text) => {
@@ -66,6 +69,8 @@
   }
   let current = null // {key, title, posts, first, last, start, items}
   let focusLine = null
+  let label = null // the first label that is on, whose marked posts each thread counts
+  let listed = false
 
   // a span of days names its days, and one within a day only its times
   function spanText(first, last) {
@@ -74,6 +79,7 @@
   }
 
   async function listThreads(q) {
+    listed = true
     const res = await thimble.fetch({ op: 'threads', q: q || '' })
     const box = $('#threads')
     box.replaceChildren()
@@ -86,7 +92,14 @@
       row.dataset.anchorName = `the thread ${t.title}`
       const name = el('span', 'name', t.title)
       name.title = t.title // a long title is cut to the row, and shown whole on hover
-      row.append(name, el('span', 'n mono', String(t.posts)), el('span', 'span mono', spanText(t.first, t.last)))
+      const n = el('span', 'n mono')
+      if (label && t.marked) {
+        const m = el('span', 'm', String(t.marked))
+        m.title = `${t.marked} marked ${label.name}`
+        n.append(m)
+      }
+      n.append(String(t.posts))
+      row.append(name, n, el('span', 'span mono', spanText(t.first, t.last)))
       row.onclick = () => thimble.navigate(`view:${slug}/${t.key}`)
       box.append(row)
     }
@@ -145,6 +158,13 @@
       const res = await thimble.fetch({ op: 'threads', limit: 1 })
       if (res.threads.length) await openThread(res.threads[0].key, null)
     }
+  })
+  thimble.onLabels(async (state) => {
+    label = state.labels[0] || null
+    if (label) document.documentElement.style.setProperty('--mark', label.colour)
+    if (!listed) return // the first fetches read them
+    await listThreads($('#q').value)
+    if (current) await openThread(current.key, focusLine)
   })
   let typing = null
   $('#q').addEventListener('input', (e) => {

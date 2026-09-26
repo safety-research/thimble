@@ -41,13 +41,17 @@
   // inlines), with one bin's calls listed below. The page opens on the whole span, the overview, with the busiest bin
   // listed, so the analyst sees the log's shape and real records before any click. A bar opens its bin, and a row opens
   // its call wherever thimble shows it. Each row is a data-anchor with its line, so the labels the analyst turns on
-  // mark it; the bin's head carries view:<slug>/<bin>.
+  // mark it; the bin's head carries view:<slug>/<bin>. While a label is on, the chart shows where its calls fall in
+  // time, and a label filter keeps only its calls, which the reader applies, so the page fetches again when either
+  // changes (thimble.onLabels).
   const slug = (thimble.view && thimble.view.slug) || 'activity'
   const css = (name, fallback) => getComputedStyle(document.documentElement).getPropertyValue(name).trim() || fallback
   const DAY = 86400
+  const PAGE = 200 // calls the reader lists per page of a bin (reader.py BIN_CALLS)
   let chart = null // the counts answer: {bin: {seconds, first, last}, busiest, rows}
   let shown = null // {key, offset} of the bin listed below the chart
   let targetRef = null
+  let labels = { labels: [], filter: null } // what thimble.onLabels last said
 
   function el(tag, cls, text) {
     const e = document.createElement(tag)
@@ -88,13 +92,24 @@
     const ink = css('--text-tertiary', '#8b857b')
     const palette = [['--viz-1', '#0072b2'], ['--viz-2', '#e69f00'], ['--viz-3', '#009e73'], ['--viz-4', '#d62728'], ['--viz-5', '#cc79a7'], ['--viz-6', '#8c65e8']]
     const width = Math.max(200, box.clientWidth)
+    // While a label is on, colour shows the label instead of the kind: each bar splits into the calls the label marks,
+    // in the label's colour, and the rest in a quiet ink, so the overview shows where the marked calls fall in time.
+    // The label's colours are thimble's, never the view's own categories, and the kind legend returns once no label is
+    // on.
+    const label = labels.labels[0]
+    const rows = label ? byBin(chart.rows, label.name) : chart.rows
+    // the legend names only the parts the bars have: under a filter that keeps just the label's calls, no other calls
+    const parts = label ? [label.name, ...(rows.some((r) => r.part !== label.name && r.n > 0) ? ['other calls'] : [])] : []
+    const colour = label
+      ? { field: 'part', type: 'nominal', title: null, scale: { domain: parts, range: [label.colour, css('--viz-ink-4', '#cfcbc2')] }, legend: { orient: 'top', labelColor: ink } }
+      : { field: 'kind', type: 'nominal', title: null, scale: { range: palette.map(([name, fallback]) => css(name, fallback)) }, legend: { orient: 'top', labelColor: ink, labelFont: css('--font-mono', 'monospace') } }
     // the axis runs from the first bin's start to the last bin's end, so the last bar lies inside it
     const starts = chart.rows.map((r) => r.start)
     const domain = starts.length ? [Math.min(...starts), Math.max(...starts) + chart.bin.seconds * 1000] : undefined
     const spec = {
       // the axes and the legend fit inside the page's width, so the last bar is never cut off at the edge
       width: 'container', height: 180, background: 'transparent', autosize: { type: 'fit-x', contains: 'padding' },
-      data: { values: chart.rows },
+      data: { values: rows },
       mark: { type: 'bar', cursor: 'pointer' },
       encoding: {
         // the reader has counted each bin, so the time unit only sizes the bars to the bin; the bins are UTC, and so
@@ -106,8 +121,8 @@
           axis: { format: axisFormat(chart.bin), labelOverlap: 'greedy', labelFlush: true, tickCount: Math.max(2, Math.floor(width / 90)), labelColor: ink, tickColor: ink, domainColor: ink },
         },
         y: { field: 'n', type: 'quantitative', title: null, axis: { labelColor: ink, gridColor: css('--border-hairline', '#eee'), domain: false, ticks: false, tickMinStep: 1 } },
-        color: { field: 'kind', type: 'nominal', title: null, scale: { range: palette.map(([name, fallback]) => css(name, fallback)) }, legend: { orient: 'top', labelColor: ink, labelFont: css('--font-mono', 'monospace') } },
-        tooltip: [{ field: 'key', title: 'from (UTC)' }, { field: 'kind' }, { field: 'n', title: 'calls' }],
+        color: colour,
+        tooltip: [{ field: 'key', title: 'from (UTC)' }, { field: label ? 'part' : 'kind' }, { field: 'n', title: 'calls' }],
       },
       config: { view: { stroke: null }, font: css('--font-body', 'sans-serif') },
     }
@@ -118,9 +133,26 @@
     })
   }
 
+  // one row per bin and part, the label's calls and the rest, from the reader's counts per bin and kind
+  function byBin(rows, name) {
+    const bins = new Map()
+    for (const r of rows) {
+      const b = bins.get(r.key) || { start: r.start, key: r.key, n: 0, marked: 0 }
+      b.n += r.n
+      b.marked += r.marked
+      bins.set(r.key, b)
+    }
+    return [...bins.values()].flatMap((b) => [
+      { start: b.start, key: b.key, part: name, n: b.marked },
+      { start: b.start, key: b.key, part: 'other calls', n: b.n - b.marked },
+    ]).filter((r) => r.n > 0)
+  }
+
   async function openBin(key, offset) {
     shown = { key, offset: offset || 0 }
-    const res = await thimble.fetch({ op: 'bin', key, offset: shown.offset })
+    // the cited call is asked for by its ref, so it is listed even when the filter would leave it out
+    const res = await thimble.fetch(offset == null && targetRef ? { op: 'bin', key, ref: targetRef } : { op: 'bin', key, offset: shown.offset, ref: targetRef })
+    shown.offset = res.offset
     const box = document.getElementById('bin')
     const head = el('div')
     head.dataset.anchor = `view:${slug}/${key}`
@@ -140,7 +172,7 @@
     const pages = el('div')
     if (res.offset > 0) {
       const prev = el('button', 'page', 'Earlier calls')
-      prev.onclick = () => openBin(key, Math.max(0, res.offset - res.items.length))
+      prev.onclick = () => openBin(key, Math.max(0, res.offset - PAGE))
       pages.append(prev)
     }
     if (res.offset + res.items.length < res.total) {
@@ -158,8 +190,15 @@
     const t = (place && place.target) || {}
     targetRef = t.ref || null
     if (!chart) await drawChart()
-    if (t.bin) await openBin(t.bin, t.offset)
+    if (t.bin) await openBin(t.bin)
     else if (!shown && chart.busiest) await openBin(chart.busiest, 0)
+  })
+  thimble.onLabels(async (state) => {
+    labels = state
+    if (!chart) return // the first fetch reads them
+    await drawChart()
+    if (shown) await openBin(shown.key, 0)
+    else if (chart.busiest) await openBin(chart.busiest, 0)
   })
 </script>
 </body>

@@ -7,9 +7,16 @@
 #
 # How the reader works: the index keeps each call's line, epoch, bin and kind, so the chart's counts come from the
 # index alone and a bin's calls are read back by seeking to their lines.
+#
+# Labels: the analyst's labels mark calls, and a label filter keeps only the calls that take a value. The index is
+# built once, whatever the labels, and labels apply when records are served: every count and list keeps only the calls
+# thimble.kept(ref) holds for, and each bar counts the calls the first label that is on marks (thimble.marked), which
+# the page draws in the label's colour, since thimble cannot see inside a chart.
 import json
 import re
 from datetime import datetime, timedelta, timezone
+
+import thimble
 
 # The chart shows the whole span in at most MAX_BARS bars, so the bin comes from the data, never from a constant: a log
 # of one afternoon is binned by minutes, a log of two months by days, and one of several years by weeks. A bin copied
@@ -121,27 +128,47 @@ def _excerpt(r):
 
 
 def _counts(index):
-    """The chart's rows, one per bin and kind: {start (ms), key, kind, n}."""
+    """The chart's rows, one per bin and kind, of the calls the filter keeps: {start (ms), key, kind, n, marked}, with
+    `marked` the calls among them the first label that is on marks."""
+    on = thimble.view_labels()["labels"]
+    first = on[0]["name"] if on else None
     counts = {}
-    for _, _, key, kind, _ in index["calls"]:
-        counts[(key, kind)] = counts.get((key, kind), 0) + 1
-    return [{"start": index["starts"][key] * 1000, "key": key, "kind": kind, "n": n}
-            for (key, kind), n in sorted(counts.items())]
+    for path, n, key, kind, _ in index["calls"]:
+        ref = f"{path}#L{n}"
+        if not thimble.kept(ref):
+            continue
+        row = counts.setdefault((key, kind), [0, 0])
+        row[0] += 1
+        if first is not None and any(m["label"] == first for m in thimble.marked(ref)):
+            row[1] += 1
+    return [{"start": index["starts"][key] * 1000, "key": key, "kind": kind, "n": n, "marked": m}
+            for (key, kind), (n, m) in sorted(counts.items())]
 
 
-def _busiest(index):
+def _busiest(rows):
     """The bin with the most calls, which the page lists below the chart when it opens."""
-    return max(index["bins"], key=lambda k: index["bins"][k][1] - index["bins"][k][0], default=None)
+    per = {}
+    for r in rows:
+        per[r["key"]] = per.get(r["key"], 0) + r["n"]
+    return max(per, key=lambda k: per[k], default=None)
 
 
 def records(index, query):
-    """{op: counts} gives the chart: {bin: {seconds, first, last}, busiest, rows: [{start, key, kind, n}]}, times in
-    milliseconds. {op: bin, key, offset?} gives one bin's calls in time order, BIN_CALLS from `offset`."""
+    """{op: counts} gives the chart: {bin: {seconds, first, last}, busiest, rows: [{start, key, kind, n, marked}]}, times
+    in milliseconds. {op: bin, key, offset?, ref?} gives one bin's calls the filter keeps, in time order, BIN_CALLS from
+    `offset`; the call `ref` names is listed even when the filter drops it, since a citation asked for it."""
     query = query or {}
     if query.get("op") == "bin":
         first, end = index["bins"].get(query.get("key"), [0, 0])
-        offset = max(0, int(query.get("offset") or 0))
-        rows = index["calls"][first + offset:end][:BIN_CALLS]
+        cited = query.get("ref")
+        kept = [c for c in index["calls"][first:end] if f"{c[0]}#L{c[1]}" == cited or thimble.kept(f"{c[0]}#L{c[1]}")]
+        if query.get("offset") is None and cited:
+            # the page of the bin's calls that holds the cited one, so it is listed even in a bin of thousands
+            at = next((i for i, c in enumerate(kept) if f"{c[0]}#L{c[1]}" == cited), 0)
+            offset = at - at % BIN_CALLS
+        else:
+            offset = max(0, int(query.get("offset") or 0))
+        rows = kept[offset:offset + BIN_CALLS]
         by_file = {}
         for c in rows:
             by_file.setdefault(c[0], []).append(c[1])
@@ -151,9 +178,10 @@ def records(index, query):
             r = recs[p].get(n, {})
             items.append({"ref": f"{p}#L{n}", "time": str(r.get("ts") or ""), "kind": kind,
                           "action": r.get("action") or "", "agent": r.get("agent") or "", "detail": _detail(r)})
-        return {"key": query.get("key"), "total": end - first, "offset": offset, "items": items}
+        return {"key": query.get("key"), "total": len(kept), "offset": offset, "items": items}
+    rows = _counts(index)
     return {"bin": {"seconds": index["bin"], "first": index["first"] * 1000, "last": index["last"] * 1000},
-            "busiest": _busiest(index), "rows": _counts(index)}
+            "busiest": _busiest(rows), "rows": rows}
 
 
 def resolve(index, locator):
@@ -185,9 +213,5 @@ def resolve(index, locator):
     if ref not in index["line"]:
         # a call with no time that parses has no bin, so the page shows the chart alone
         return {"excerpt": _excerpt(r), "label": label, "refs": [ref], "key": None, "target": {}}
-    i = index["line"][ref]
-    c = index["calls"][i]
-    # the page of the bin's calls that holds this one, so a cited call is listed even in a bin of thousands
-    at = i - index["bins"][c[2]][0]
-    return {"excerpt": _excerpt(r), "label": label, "refs": [ref], "key": c[2],
-            "target": {"bin": c[2], "ref": ref, "offset": at - at % BIN_CALLS}}
+    c = index["calls"][index["line"][ref]]
+    return {"excerpt": _excerpt(r), "label": label, "refs": [ref], "key": c[2], "target": {"bin": c[2], "ref": ref}}

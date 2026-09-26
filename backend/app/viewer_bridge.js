@@ -12,9 +12,12 @@
 //   navigate {ref}         frame to page: open another place, in this view or anywhere in thimble (window.thimble.navigate)
 //   size {height}          frame to page: the document's height, for a frame that sizes to its content
 //   anchors {refs}         frame to page: the data-anchor values that appeared since the last report
-//   labels {marks}         page to frame: {ref: {bar, names, spans: [{text, colour}]}}, the marks of the labels that are
-//                          on for the records among those refs, drawn over every element with that data-anchor; each
-//                          replaces the last
+//   labels {marks, on, filter}
+//                          page to frame: marks {ref: {bar, names, spans: [{text, colour}], keep?}}, the marks of the
+//                          labels that are on for the records and units among those refs, drawn over every element with
+//                          that data-anchor, with `keep` whether the ref passes the label filter; on [{name, colour,
+//                          values}], the labels that are on; filter {label, value, colour} or null. Each replaces the
+//                          last; window.thimble.onLabels hears on and filter
 //   cmd {on, cursor}       page to frame: ⌘ went down or up, and the page's ⌘ arrow as a CSS cursor value, which this
 //                          page shows while ⌘ is held so the pointer over the frame is the same one pointer
 // plus ready (the frame can take `open`), error (an uncaught error or a blocked request, shown with a Raw button) and
@@ -23,6 +26,10 @@
 ;(function () {
   'use strict'
   var P = 'thimble:'
+  var labelFns = []
+  var labelState = null
+  var labelKey = ''
+  var filter = null
   var seq = 0
   var pending = {}
   var openers = []
@@ -64,6 +71,20 @@
         }
       }
     },
+    /** fn({labels, filter}) runs with the labels that are on and the label filter, at once with the current ones when
+     *  they have arrived, and again whenever they change; a page that registers it filters its records itself (its
+     *  reader's thimble.kept), so the bridge hides nothing for the filter */
+    onLabels: function (fn) {
+      labelFns.push(fn)
+      if (labelState) {
+        try {
+          fn(labelState)
+        } catch (e) {
+          report(e)
+        }
+      }
+      if (dropped.length) paint()
+    },
     /** the answer of reader.records(index, query), as a promise */
     fetch: function (query) {
       return new Promise(function (resolve, reject) {
@@ -101,6 +122,7 @@
         }
       }
       startQuote(d.quote)
+      if (dropping()) paint()
     } else if (d.type === P + 'result') {
       var p = pending[d.id]
       if (!p) return
@@ -109,6 +131,20 @@
       else p.resolve(d.data)
     } else if (d.type === P + 'labels') {
       marks = d.marks && typeof d.marks === 'object' ? d.marks : {}
+      filter = d.filter && typeof d.filter === 'object' ? d.filter : null
+      var state = { labels: Array.isArray(d.on) ? d.on : [], filter: filter }
+      var key = JSON.stringify(state)
+      if (key !== labelKey) {
+        labelKey = key
+        labelState = state
+        for (var f = 0; f < labelFns.length; f++) {
+          try {
+            labelFns[f](state)
+          } catch (err) {
+            report(err)
+          }
+        }
+      }
       paint()
     } else if (d.type === P + 'cmd') {
       setCmdCursor(d.cursor)
@@ -229,12 +265,45 @@
   var BARS =
     '[data-thimble-edge]{--thimble-own:0 0 transparent}' +
     '[data-thimble-edge="in"]{box-shadow:inset ' + BAR + 'px 0 0 var(--thimble-label),var(--thimble-own)!important}' +
-    '[data-thimble-edge="out"]{box-shadow:-' + 2 * BAR + 'px 0 0 -' + BAR + 'px var(--thimble-label),var(--thimble-own)!important}'
+    '[data-thimble-edge="out"]{box-shadow:-' + 2 * BAR + 'px 0 0 -' + BAR + 'px var(--thimble-label),var(--thimble-own)!important}' +
+    // an SVG element draws no box-shadow, so a mark there is a halo in the label's colour around the shape; a group's
+    // text keeps no halo, so its label stays sharp
+    '[data-thimble-edge="svg"]:not(g),g[data-thimble-edge="svg"]>:not(text):not(title){filter:drop-shadow(0 0 1.5px var(--thimble-label)) drop-shadow(0 0 1.5px var(--thimble-label))}'
+  var DROP = '[data-thimble-drop="hide"]{display:none!important}[data-thimble-drop="dim"]{opacity:.25!important}'
   var COLOUR = /^[\w\s(),.#%-]+$/
   var SHADOW = /^[\w\s(),.#%\/-]+$/ // a computed box-shadow: colours, lengths, inset, commas between shadows
   function hasMarks() {
     for (var k in marks) return true
     return false
+  }
+  // With a label filter on, a page that does not filter its own records (it registered no onLabels) has every
+  // anchored element hidden whose ref the filter does not keep and that holds no kept element: an HTML element leaves
+  // the layout, and an SVG shape is dimmed, since removing it would break the drawing. The place the page was opened at
+  // stays, since the analyst asked for it. Whether anything is dropped.
+  var dropped = []
+  function dropping() {
+    return !!filter && !labelFns.length
+  }
+  function drop() {
+    for (var i = 0; i < dropped.length; i++) dropped[i].removeAttribute('data-thimble-drop')
+    dropped = []
+    if (!dropping()) return false
+    var opened = last && last.ref ? String(last.ref) : null
+    var els = document.querySelectorAll('[data-anchor]')
+    var held = []
+    for (var j = 0; j < els.length; j++) {
+      var ref = els[j].getAttribute('data-anchor')
+      var m = marks[ref]
+      if ((m && m.keep) || ref === opened) held.push(els[j])
+    }
+    var keep = new Set(held)
+    for (var h = 0; h < held.length; h++) for (var a = held[h].parentElement; a; a = a.parentElement) keep.add(a)
+    for (var k = 0; k < els.length; k++) {
+      if (keep.has(els[k])) continue
+      els[k].setAttribute('data-thimble-drop', els[k] instanceof SVGElement ? 'dim' : 'hide')
+      dropped.push(els[k])
+    }
+    return true
   }
   function note(el) {
     var ref = el.getAttribute('data-anchor')
@@ -333,15 +402,19 @@
         var inner = false
         for (var a = el.parentElement; a && !inner; a = a.parentElement) inner = a.getAttribute('data-anchor') === ref
         if (inner) continue
+        if (el instanceof SVGElement) {
+          todo.push([el, m, 'svg', null])
+          continue
+        }
         var own = getComputedStyle(el).boxShadow
-        todo.push([el, m, room(el), own && own !== 'none' && SHADOW.test(own) ? own : null])
+        todo.push([el, m, room(el) ? 'in' : 'out', own && own !== 'none' && SHADOW.test(own) ? own : null])
       }
       for (var d = 0; d < todo.length; d++) {
         var el2 = todo[d][0]
         var m2 = todo[d][1]
         el2.setAttribute('data-thimble-label', (m2.names || []).join(', '))
         el2.setAttribute('data-thimble-bar', String(slot(m2.bar)))
-        el2.setAttribute('data-thimble-edge', todo[d][2] ? 'in' : 'out')
+        el2.setAttribute('data-thimble-edge', todo[d][2])
         if (todo[d][3]) {
           var o = owns.indexOf(todo[d][3])
           if (o < 0) o = owns.push(todo[d][3]) - 1
@@ -356,7 +429,7 @@
         }
       }
     }
-    var css = colours.length ? BARS : ''
+    var css = (colours.length ? BARS : '') + (drop() ? DROP : '')
     for (var k = 0; k < colours.length; k++) {
       css += '[data-thimble-bar="' + k + '"]{--thimble-label:' + colours[k] + '}'
       css += '::highlight(thimble-label-' + k + '){background-color:color-mix(in oklab,' + colours[k] + ' 24%,transparent)}'
@@ -548,7 +621,7 @@
       if (!changed && r.target.closest && r.target.closest('[data-thimble-label]')) changed = true
     }
     if (unsent.length && sendTimer == null) sendTimer = setTimeout(sendAnchors, 30)
-    if (changed && hasMarks() && paintTimer == null) paintTimer = setTimeout(paint, 30)
+    if (changed && (hasMarks() || dropping()) && paintTimer == null) paintTimer = setTimeout(paint, 30)
   }).observe(document.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: ['data-anchor', 'class'] })
 
   function size() {

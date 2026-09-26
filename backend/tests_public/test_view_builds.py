@@ -75,10 +75,10 @@ async def test_a_view_build_at_capacity_waits_and_goes_on_without_a_retry(board,
     monkeypatch.setattr(views, "build_problem", lambda: "")
     monkeypatch.setattr(dev, "_view_chat", lambda c, prop: None)
 
-    async def page(c, slug, place, out_png, **k):
-        return {"ok": True, "errors": [], "fetches": 1, "refs": 2, "records": 2, "fetched_records": 2}
+    async def page(c, slug, states, **k):
+        return [{"ok": True, "errors": [], "fetches": 1, "refs": 2, "records": 2, "fetched_records": 2} for _ in states]
 
-    monkeypatch.setattr(views, "shoot", page)
+    monkeypatch.setattr(views, "shoot_states", page)
     waits: list[float] = []
 
     async def no_wait(s: float) -> None:
@@ -120,10 +120,10 @@ def _stand_ins(monkeypatch) -> list[float]:
     monkeypatch.setattr(views, "build_problem", lambda: "")
     monkeypatch.setattr(dev, "_view_chat", lambda c, prop: None)
 
-    async def page(c, slug, place, out_png, **k):
-        return {"ok": True, "errors": [], "fetches": 1, "refs": 2, "records": 2, "fetched_records": 2}
+    async def page(c, slug, states, **k):
+        return [{"ok": True, "errors": [], "fetches": 1, "refs": 2, "records": 2, "fetched_records": 2} for _ in states]
 
-    monkeypatch.setattr(views, "shoot", page)
+    monkeypatch.setattr(views, "shoot_states", page)
     waits: list[float] = []
 
     async def no_wait(s: float) -> None:
