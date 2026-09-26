@@ -1,10 +1,10 @@
-"""The prompts that shape views: the dev agent's view ticket (prompts/dev-view.md), the orientation's Views section
-(prompts/orient.md) and the rule that keeps a code ticket's change small (prompts/dev-ticket.md)."""
+"""The prompts that shape views: the dev agent's view ticket (prompts/dev-view.md), the orientation's Views section and
+its order of work (prompts/orient.md), and the rule that keeps a code ticket's change small (prompts/dev-ticket.md)."""
 from __future__ import annotations
 
 import re
 
-from app import prompts, views
+from app import config, orient_session, prompts, views
 
 VIEW_VALUES = {"name": "Inbox", "slug": "inbox", "why": "w", "claims": "tickets/*.jsonl", "spec": "- Unit: a",
                "folder": "/v", "corpus": "/c", "examples": "/e", "check": "check"}
@@ -58,6 +58,19 @@ def test_the_orientation_makes_labels_first_class_and_proposes_viewers_for_file_
     tools = prompts.section("tools", "propose_view")
     assert "a viewer for one unusual file type" in tools and "the extension's glob, such as **/*.vtt" in tools
     assert "asks for a viewer of that file type" in prompts.section("dev-view", "The ticket")
+
+
+def test_the_orientation_proposes_views_once_it_sees_how_the_records_read_while_views_are_on(tmp_path, monkeypatch):
+    monkeypatch.setattr(config, "corpus_dir", lambda c: tmp_path)
+    monkeypatch.setattr(orient_session, "work_dir", lambda c: tmp_path)
+    monkeypatch.setattr(views, "forms_text", lambda c: "")
+    on = orient_session.system_prompt("c", "", ["final", "views"], instructions="x")
+    off = orient_session.system_prompt("c", "", ["final"], instructions="x")
+    assert orient_session.VIEWS_LINE in on and "\n#### Views\n" in on
+    order = on.split("Work in this order.", 1)[1]
+    assert order.index(orient_session.VIEWS_LINE) < order.index("Analyze until your main hypothesis is ready")
+    assert orient_session.VIEWS_LINE not in off and "\n#### Views\n" not in off
+    assert "Analyze until your main hypothesis is ready" in off
 
 
 def test_the_prompts_name_the_width_the_pictures_are_shot_at():

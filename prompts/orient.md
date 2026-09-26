@@ -40,6 +40,7 @@ The bad finding makes the same claim, but the analyst cannot see how far the sea
 
 Work in this order.
 
+- Survey the files, and as soon as you see how the records read, propose the views described below, so they are built and checked while you work.
 - Analyze until your main hypothesis is ready, as described above, and nothing you planned to check is left.
 - Draft the outputs described below. The analyst sees none of them until you finish, so draft and revise freely.
 - Then call `critique` with your account of the corpus, the hypothesis and findings your drafts present, once every output is drafted. A reviewer who did not do the analysis notices gaps that are easy to miss in your own work, and it can check what your drafts claim against your calls only once they exist. Follow up each problem its report raises, and revise the drafts.

@@ -1,8 +1,8 @@
 """The orientation's first run holds its view proposals (views.propose `hold`): each builds at once, but neither it nor
 its build is announced or listed until the run ends, and at release_held a view built by then appears ready at once. A
-held proposal proposed again unchanged keeps its build; revised (after the critique) it is built again, a built view's
-folder emptied first. The view build itself is not run: a proposal's view is written into its folder and marked built
-as a build that passed its gate would be. The board is invented."""
+held proposal proposed again unchanged keeps its build; changed (after the critique) it is revised in place, so its
+build goes on from its draft or its built view. The view build itself is not run: a proposal's view is written into
+its folder and marked built as a build that passed its gate would be. The board is invented."""
 from __future__ import annotations
 
 import json
@@ -90,7 +90,7 @@ def test_a_held_proposal_still_building_at_release_goes_on(board, monkeypatch):
     assert board == [{"type": "view", "slug": "posts", "status": "building"}]
 
 
-def test_a_held_proposal_proposed_again_keeps_its_build_unless_revised(board, monkeypatch):
+def test_a_held_proposal_proposed_again_keeps_its_build_and_changed_is_revised_in_place(board, monkeypatch):
     stopped: list[str] = []
     monkeypatch.setattr(dev, "stop_view", lambda c, slug, why: stopped.append(why) or True)
     first = views.propose(CORPUS, **ARGS, proposed_by="orient", hold=True)
@@ -99,12 +99,31 @@ def test_a_held_proposal_proposed_again_keeps_its_build_unless_revised(board, mo
     same = views.propose(CORPUS, **ARGS, proposed_by="orient", hold=True)
     assert same["ts"] == first["ts"] and same["status"] == "built" and stopped == [], "unchanged: the build stands"
 
-    revised = views.propose(CORPUS, **{**ARGS, "arrangement": "one thread per page"}, proposed_by="orient", hold=True)
-    assert stopped == ["replaced"]
-    assert revised["slug"] == "posts" and revised["held"] and revised["status"] == "queued"
-    assert not (views.views_dir(CORPUS) / "posts").exists(), "the view built from the old proposal is gone"
+    changed = views.propose(CORPUS, **{**ARGS, "arrangement": "one thread per page"}, proposed_by="orient", hold=True)
+    assert changed["slug"] == "posts" and changed["held"] and changed["status"] == "queued"
+    assert changed["changed"] and changed["revision"], "the built view is changed, not built again"
+    assert (views.views_dir(CORPUS) / "posts" / "reader.py").is_file(), "the view built so far stays"
+    assert views._revision_dir(CORPUS, "posts").is_dir(), "with a copy to go back to"
     assert views.read_proposal(CORPUS, "posts")["arrangement"] == "one thread per page"
+    assert (CORPUS, "posts") in dev._view_queue
     assert board == [], "still nothing announced"
+
+
+def test_a_held_proposal_changed_while_building_goes_on_from_its_draft(board, monkeypatch):
+    stopped: list[str] = []
+    monkeypatch.setattr(dev, "stop_view", lambda c, slug, why: stopped.append(why) or True)
+    views.propose(CORPUS, **ARGS, proposed_by="orient", hold=True)
+    views.update_proposal(CORPUS, "posts", status="building", session_id="s1")
+    draft = views.views_dir(CORPUS) / "posts"
+    draft.mkdir(parents=True, exist_ok=True)
+    (draft / "view.html").write_text("<!doctype html>")
+
+    views.propose(CORPUS, **{**ARGS, "why": "whole threads"}, proposed_by="orient", hold=True)
+    prop = views.read_proposal(CORPUS, "posts")
+    assert stopped == ["revised"] and (draft / "view.html").is_file(), "the build stops with its draft kept"
+    assert prop["status"] == "queued" and prop["changed"] and prop["held"] and prop["session_id"] == "s1"
+    assert prop["why"] == "whole threads" and not prop.get("revision")
+    assert board == []
 
 
 def test_a_dropped_held_proposal_is_not_released(board, monkeypatch):

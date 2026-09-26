@@ -2285,7 +2285,7 @@ async def _h_propose_view(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
                                             asked=ctx.session is None,
                                             suggested=orient and views.offered_type_viewer(claims), spec=spec))
     status = str(prop.get("status") or "queued")
-    if not hold or prop.get("revised"):
+    if not prop.get("held"):
         _chip(ctx.c, "view", str(prop.get("name") or prop.get("slug")), ref=f"view:{prop.get('slug')}", status=status)
     claimed = ", ".join(prop.get("claims") or [])
     if status == "suggested":
@@ -2293,7 +2293,7 @@ async def _h_propose_view(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
     # without Node 20+ or the frontend's packages the build fails at once (dev.run_view), and main is told why
     if why := await asyncio.to_thread(views.build_problem):
         return ok(hint("propose_view-cannot-build", view=prop.get("name"), slug=prop.get("slug"), why=why))
-    if prop.get("revised"):  # a view built under this name is changed in place (views.revise)
+    if prop.get("revised") and not prop.get("held"):  # a view built under this name is changed in place (views.revise)
         return ok(hint("view-changing", view=prop.get("name"), slug=prop.get("slug")))
     return ok(hint("propose_view-proposed", view=prop.get("name"), slug=prop.get("slug"), claims=claimed))
 

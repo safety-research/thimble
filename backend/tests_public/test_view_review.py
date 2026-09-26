@@ -3,9 +3,9 @@ session's revision stubbed: a view with nothing to fix ends done; problems go to
 again; a revision that fails its checks leaves the view as it was before it; problems left after the last round flag
 the view; pictures drawn without thimble's fonts, a refused reading and a stop show plainly; Undo puts back the view as
 it was built, also after a review that ended early and one run again; a view proposed again or deleted stops its
-review with no trace on the proposal that takes its slug. The prompt the reading gets names four pictures and six
-criteria for a view over files with lines, and two and three for one over binary files. A page with label controls of
-its own gets a problem under the last criterion whatever the reading says.
+review, and a held view proposed again changed is changed in place, its unfinished revision undone. The prompt the
+reading gets names four pictures and six criteria for a view over files with lines, and two and three for one over
+binary files. A page with label controls of its own gets a problem under the last criterion whatever the reading says.
 
 The corpus is invented: board.jsonl, three posts, and a view `posts` of it with a proposal, as the dev agent builds one."""
 from __future__ import annotations
@@ -251,10 +251,11 @@ async def test_a_new_build_is_what_undo_goes_back_to(view, monkeypatch, tmp_path
     assert "review" not in views.read_proposal(CORPUS, "posts")
 
 
-async def test_a_view_proposed_again_stops_its_review_and_leaves_nothing_on_the_new_proposal(view, monkeypatch, tmp_path):
+async def test_a_held_view_proposed_again_changed_stops_its_review_and_is_changed_in_place(view, monkeypatch, tmp_path):
     from app import dev
 
     Stubs(monkeypatch, tmp_path, [ok("x")])
+    built = (view / "view.html").read_text()
     started = await _slow_revision(monkeypatch, view)
     monkeypatch.setattr(dev, "queue_view", lambda c, slug: None)
     monkeypatch.setattr(dev, "stop_view", lambda c, slug, why: False)
@@ -266,10 +267,10 @@ async def test_a_view_proposed_again_stops_its_review_and_leaves_nothing_on_the_
                   hold=True)
     await asyncio.gather(run.task, return_exceptions=True)
     prop = views.read_proposal(CORPUS, "posts")
-    assert prop["status"] == "queued" and "review" not in prop and not view_review.running(CORPUS, "posts")
-    assert not (views.views_dir(CORPUS) / "posts").exists()
-    assert not view_review._reviewed_dir(CORPUS, "posts").exists()
-    assert not view_review._reviewed_dir(CORPUS, "posts", last=True).exists()
+    assert prop["status"] == "queued" and prop["held"] and prop["changed"] and prop["revision"]
+    assert prop["review"]["state"] == "stopped" and prop["review"]["note"] == view_review.CHANGED_NOTE
+    assert not view_review.running(CORPUS, "posts")
+    assert (view / "view.html").read_text() == built, "the half-written revision is undone and the view stays"
 
 
 async def test_a_build_that_passes_while_its_review_is_stopping_gets_a_review_of_its_own(view, monkeypatch, tmp_path):

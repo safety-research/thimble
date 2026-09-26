@@ -67,6 +67,8 @@ PARTS = {"final": "The deck", "views": "Views", "report": "The report"}
 LINES = {"critique": "`critique`"}
 # The lines of orient.md about the outputs as a whole, kept only while at least one output is on.
 OUTPUT_LINES = ("Draft the outputs described below", "Then revise the outputs described above")
+# The line of orient.md's order of work that proposes the views early, kept only while the views are on.
+VIEWS_LINE = "propose the views described below"
 # The thimble tools the orientation gets; every other registry tool is taken away.
 ORIENT_TOOLS = ("read_ref", "list_cards", "add_card", "edit_card", "delete_card", "apply_label", "propose_view",
                 "screenshot", "critique")
@@ -137,11 +139,12 @@ def instructions_of(c: str, own: "str | None" = None) -> str:
 def system_prompt(c: str, brief: str, parts: "list[str] | tuple[str, ...]", instructions: "str | None" = None) -> str:
     """orient.md's body rendered for workspace `c`: the prefix with shared.md (with the workspace's view citation forms)
     and the request, the instructions, and the suffix with each part not in `parts` left out (and OUTPUT_LINES when no
-    output is on)."""
+    output is on, VIEWS_LINE when the views are off)."""
     from . import views  # noqa: PLC0415 — views imports refs, which the rest of this module does not need
 
     values = {"workdir": str(config.corpus_dir(c)), "workfolder": str(work_dir(c)), "forms": views.forms_text(c), **_MARKS}
     lines = [s for p, s in LINES.items() if p not in parts] + ([] if any(p in parts for p in PARTS) else list(OUTPUT_LINES))
+    lines += [] if "views" in parts else [VIEWS_LINE]
     text = prompts.without(prompts.agent_prompt(PROMPT, values), [h for p, h in PARTS.items() if p not in parts], lines)
     # The request and the instructions go in after the parts are left out, so a heading in either cannot cut the
     # analyst's own text or a part of the suffix.

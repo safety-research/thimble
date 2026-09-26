@@ -1330,7 +1330,7 @@ def propose(c: str, name: str, why: str, claims: Any, arrangement: str, proposed
     name not
     yet built is replaced under its slug, its build stopped. With `hold` (the orientation's first run) it is stored
     `held: true` and queued unannounced until release_held; a held proposal proposed again unchanged is left as it
-    is.
+    is, and changed it is revised (revise), still held.
     `asked` says the analyst asked for it. With `suggested` (a viewer for a file type the File browser proposes) it is
     stored `suggested` and not queued until the analyst accepts it (accept). A `spec` (propose_view's fields) is stored
     with the proposal and written out as its `arrangement`."""
@@ -1354,9 +1354,12 @@ def propose(c: str, name: str, why: str, claims: Any, arrangement: str, proposed
         old = next((p for p in items if str(p.get("name", "")).casefold() == name.casefold()
                     and (p.get("status") != "built" or p.get("held"))), None)
         why = " ".join(str(why or "").split())
-        if (old is not None and old.get("held") and hold and old.get("status") != "dropped"
-                and (old.get("why"), old.get("claims"), old.get("arrangement")) == (why, claims_l, arrangement)):
-            return old  # the same proposal again: its build goes on, or its view stays built
+        if old is not None and old.get("held") and hold and old.get("status") not in ("dropped", "suggested"):
+            if (old.get("why"), old.get("claims"), old.get("arrangement")) == (why, claims_l, arrangement):
+                return old  # the same proposal again: its build goes on, or its view stays built
+            # changed, such as after the critique: its build goes on from its draft, or its view is changed
+            return revise(c, old["slug"], "", why=why, claims=claims_l, arrangement=arrangement,
+                          proposed_by=proposed_by, spec=spec or None)
         if old is not None:
             _stop_review(c, old["slug"], forget=True)
             _stop_build(c, old["slug"], "replaced", force=bool(old.get("held")))
