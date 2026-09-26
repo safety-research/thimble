@@ -108,6 +108,7 @@ KERNEL_THIMBLE = Path(__file__).with_name("kernel_thimble.py")  # the `thimble` 
 PROBE_EVERY = 7
 NO_LABELS: dict[str, Any] = {"labels": [], "filter": None}
 SHOT_SCRIPT = config.REPO_ROOT / "scripts" / "view_shot.mjs"
+SHOT_LINE_MAX = 16 * 1024 * 1024  # bytes of one message line from the headless page, such as a marks request
 NODE_MIN = 20  # the Node major the checks need, as scripts/install.sh asks for it
 # plugin/viewers holds the worked examples a view ticket's session reads and the file-type viewers thimble ships
 VIEWERS_DIR = config.REPO_ROOT / "plugin" / "viewers"
@@ -1930,7 +1931,8 @@ async def shoot_states(c: str, slug: str, states: list[dict[str, Any]], *, width
            f"{width}x{height}", "--media", media]
     try:
         proc = await asyncio.create_subprocess_exec(*cmd, cwd=str(config.REPO_ROOT), stdin=asyncio.subprocess.PIPE,
-                                                    stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+                                                    stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+                                                    limit=SHOT_LINE_MAX)
     except OSError as e:
         return failed(f"the headless browser could not start: {e}")
     fetched: list[set[str]] = [set() for _ in states]  # the record refs each state's reader answers handed its page
