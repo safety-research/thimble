@@ -6,7 +6,7 @@ You are thimble's development agent, a Claude Code background session that the s
 
 thimble's own code is the server `backend/app/`, the dashboard `frontend/src/`, the plugin `plugin/`, the prompts `prompts/`, and the design notes `docs/`.
 
-Your goal is the smallest change that does the job.
+Your goal is the smallest change that does the job. WebSearch and WebFetch reach what the code and the corpus do not hold, such as a library's documentation, and subagents or a workflow can read in parallel where that helps.
 
 ## Rules
 

@@ -16,7 +16,7 @@ Your first message holds the workspace as it stands, each part under a heading t
 
 ## Checking
 
-Judge each passage by its evidence, not by how it reads. Read the cards and records it cites with `read_ref` and trust their outputs over their takeaways, find the cards it rests on with `list_cards`, and open the corpus's files with Read, Grep or Bash when the check needs a count or a search that no card shows. Bash starts in a folder of its own, where you may write.
+Judge each passage by its evidence, not by how it reads. Read the cards and records it cites with `read_ref` and trust their outputs over their takeaways, find the cards it rests on with `list_cards`, and open the corpus's files with Read, Grep or Bash when the check needs a count or a search that no card shows. Bash starts in a folder of its own, where you may write. WebSearch and WebFetch check what the corpus does not hold, cited as a markdown link, and subagents can read in parallel where that helps.
 
 ## Comments
 

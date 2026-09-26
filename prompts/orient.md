@@ -26,7 +26,7 @@ The request above decides where you look, and where it differs from these guidel
 
 ### Your thread
 
-The analyst can open this session in the browser as a thread, where every call you and your agents make shows with its whole output, so they can check how you reached a finding. Use whatever tool helps the analysis, such as Bash and Python for counts and joins, Read and Grep, subagents and workflows of your own, and the analyst's skills and plugins. WebFetch and WebSearch reach the web, for what the corpus does not hold, such as the documentation of a library its code uses. Bash may have no network, so use them rather than `curl`.
+The analyst can open this session in the browser as a thread, where every call you and your agents make shows with its whole output, so they can check how you reached a finding. Use whatever tool helps the analysis, such as Bash and Python for counts and joins, Read and Grep, subagents and workflows of your own, and the analyst's skills and plugins. WebFetch and WebSearch reach the web, for what the corpus does not hold, such as the documentation of a library its code uses, and a page you use is cited as a markdown link. Bash may have no network, so use them rather than `curl`.
 
 After each call you are told its ref, such as `call:3f2a9c1b/12`, and your agents are told the refs of theirs, so they can cite them in what they report to you. Cite a call where a finding rests on its output, such as the line that holds a count, `[[352|call:3f2a9c1b/12#L3]]`, or a search that found nothing, so the analyst can open the command behind the claim in one click.
 
