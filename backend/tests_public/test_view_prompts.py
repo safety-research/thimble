@@ -20,13 +20,19 @@ def test_the_smallest_change_rule_binds_code_tickets_and_not_views():
     assert "smallest change" not in view and "Change nothing around the task" not in view
 
 
-def test_a_view_ticket_asks_for_an_overview_scales_from_the_data_and_readable_marks():
+def test_a_view_ticket_asks_for_an_overview_scales_from_the_data_and_a_fit_to_the_pane():
     good = prompts.section("dev-view", "A good view")
-    for words in ("It opens on an overview", "Its form fits the records", "Its scales fit the data",
-                  "Everything on it is readable", "while a label is on, it alone gives records and marks a colour"):
+    for words in ("It opens on an overview", "Its scales come from the data", "It fits its pane"):
         assert words in good, words
-    examples = prompts.section("dev-view", "Start from an example")
-    assert "not their sizes, bins and field names" in examples
+    assert "methods to copy, not layouts" in prompts.section("dev-view", "Worked examples")
+
+
+def test_a_view_ticket_makes_labels_first_class_and_leaves_their_controls_to_the_labels_pane():
+    labels = prompts.section("dev-view", "Labels")
+    for words in ("the Labels pane beside the view, outside its frame", "`data-anchor`", "`thimble.marked(ref)`",
+                  "`thimble.kept(ref)`", "`thimble.onLabels(fn)`", "while a label is on, it alone colours records",
+                  "No label controls", "no label toggle, checkbox, menu or clickable legend"):
+        assert words in labels, words
 
 
 def _orient_views() -> str:
@@ -51,7 +57,7 @@ def test_the_orientation_makes_labels_first_class_and_proposes_viewers_for_file_
     assert "offers it beside Raw" in section
     tools = prompts.section("tools", "propose_view")
     assert "a viewer for one unusual file type" in tools and "the extension's glob, such as **/*.vtt" in tools
-    assert "asks for a viewer of that file type" in prompts.section("dev-view", "A good view")
+    assert "asks for a viewer of that file type" in prompts.section("dev-view", "The ticket")
 
 
 def test_the_prompts_name_the_width_the_pictures_are_shot_at():

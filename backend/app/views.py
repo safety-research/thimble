@@ -1725,6 +1725,8 @@ def gate_lines(report: dict[str, Any]) -> list[str]:
     if page.get("ok") and unmarked(page):
         lines.append("note: " + _hint("view-no-record-anchors", fetched=page.get("fetched_records") or 0,
                                       records=page.get("records") or 0))
+    if controls := max([int(s.get("controls") or 0) for s in shots] or [0]):
+        lines.append("note: " + _hint("view-label-controls", count=controls))
     return [ln for ln in lines if ln]
 
 
@@ -1851,8 +1853,9 @@ async def shoot_states(c: str, slug: str, states: list[dict[str, Any]], *, width
     state {out, open, labels}: send it `open`, answer its fetches from the reader and its marks requests under the state's
     labels context (NO_LABELS, a probe_context or labels_context), serve its media requests with the file media_file
     names, and write a picture of it to `out`. Returns one result per state, {ok, errors, fetches, height, refs, records,
-    units, marked, hidden, fonts, fetched_records, png?}, and with `answers` the first that many reader answers each
-    state's page got; without Node or the frontend's packages each has build_problem's line as its one error."""
+    units, marked, hidden, controls, fonts, fetched_records, png?}, and with `answers` the first that many reader
+    answers each state's page got; without Node or the frontend's packages each has build_problem's line as its one
+    error."""
     def failed(why: str) -> list[dict[str, Any]]:
         return [{"ok": False, "errors": [why], "fetches": 0} for _ in states]
 
@@ -1872,8 +1875,10 @@ async def shoot_states(c: str, slug: str, states: list[dict[str, Any]], *, width
     states_file = first.with_suffix(".states.json")
     for s in states:
         Path(s["out"]).parent.mkdir(parents=True, exist_ok=True)
-    states_file.write_text(json.dumps([{"out": str(s["out"]), "open": s.get("open") or {}} for s in states]), "utf-8")
     ctxs = [s.get("labels") if s.get("labels") is not None else dict(NO_LABELS) for s in states]
+    states_file.write_text(json.dumps([{"out": str(s["out"]), "open": s.get("open") or {},
+                                        "labels": [str(lab.get("name") or "") for lab in labels_state(ctx)["labels"]]}
+                                       for s, ctx in zip(states, ctxs)]), "utf-8")
     cmd = ["node", str(SHOT_SCRIPT), "--frame", str(frame_file), "--states", str(states_file), "--viewport",
            f"{width}x{height}", "--media", media]
     try:

@@ -1,5 +1,5 @@
 """The view review: once a view the dev agent built passes its checks, its page is shot headless in four states, one
-model reading of the pictures assesses it against five criteria (prompts/view-review.md), and the problems it finds go
+model reading of the pictures assesses it against six criteria (prompts/view-review.md), and the problems it finds go
 back to the view's build session to fix, up to ROUNDS times. The view reaches the analyst at once and the review runs
 beside it; each revision that passes the view's checks replaces it, with Undo back to the view as it was built.
 
@@ -9,7 +9,8 @@ dev.run_view calls after_built() when a build or a change to a view passes. Each
    mark). Pictures drawn without thimble's fonts end the review `failed`.
 2. Reading: the `verify` role's model reads the pictures, the proposal, what the shots measured and a sample of the
    records the pages fetched, and names what fails each criterion. A refused reading runs again on the fallback model,
-   and the review's note says so (FALLBACK_NOTE).
+   and the review's note says so (FALLBACK_NOTE). A picture in which the page has controls of its own that name the
+   test label adds a problem to the last criterion (label_controls).
 3. Revision: with problems left and rounds to go, the build session gets prompts/dev-view-review.md and the view's
    checks run after its turns (dev.review_revision). A revision that passes is the view (views.mark_built), and the
    review runs again; one that does not leaves the view at its last version that passed.
@@ -25,6 +26,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 import shutil
 import time
 from dataclasses import dataclass, field
@@ -327,6 +329,8 @@ async def _review(run: _Run) -> None:
         if isinstance(got, str):
             _set(c, slug, run, state="failed", note=got, revised=run.revised)
             return
+        if lined:
+            got[-1] += [p for p in label_controls(shots) if p not in got[-1]]
         problems = [p for crit in got for p in crit]
         if not problems:
             _set(c, slug, run, state="done", left=[], revised=run.revised, note=run.note)
@@ -378,8 +382,6 @@ async def shoot(c: str, slug: str, view: dict[str, Any], files: list[tuple[str, 
 
 
 def _sections() -> dict[str, str]:
-    import re  # noqa: PLC0415
-
     from . import prompts  # noqa: PLC0415
 
     text = prompts.load(PROMPT)
@@ -403,8 +405,19 @@ def measured(shots: list[dict[str, Any]]) -> str:
         if s.get("state") == "filtered":
             hidden = int(s.get("hidden") or 0)
             line += f", {hidden} hidden by thimble" + ("" if hidden else " (the page filters in its reader)")
+        if int(s.get("controls") or 0):
+            line += f", {int(s['controls'])} controls of the page's own naming the test label"
         lines.append(line)
     return "\n".join(lines)
+
+
+def label_controls(shots: list[dict[str, Any]]) -> list[str]:
+    """A problem for the first picture in which the page has controls of its own naming the test label (the shot's
+    `controls`); [] when no picture has any."""
+    for i, s in enumerate(shots, 1):
+        if n := int(s.get("controls") or 0):
+            return [_fill(_sections()["label-controls"], {"picture": str(i), "count": str(n)})]
+    return []
 
 
 def records_text(shots: list[dict[str, Any]]) -> str:
@@ -447,7 +460,7 @@ async def read(c: str, run: _Run, prop: dict[str, Any], view: dict[str, Any], sh
     from . import card_check, model, tools  # noqa: PLC0415
 
     secs = _sections()
-    n = 5 if lined else 3
+    n = 3 + (len(re.findall(r"^- ", secs["criteria-labels"], re.M)) if lined else 0)
     system = _fill(secs["review"], {"pictures": secs["pictures-labels" if lined else "pictures-plain"],
                                     "label_criteria": secs["criteria-labels"] if lined else ""})
     user = _fill(secs["view"], {"name": str(prop.get("name") or view["name"]), "why": str(prop.get("why") or view["why"]),

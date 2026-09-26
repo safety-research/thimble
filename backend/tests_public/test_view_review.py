@@ -3,8 +3,9 @@ session's revision stubbed: a view with nothing to fix ends done; problems go to
 again; a revision that fails its checks leaves the view as it was before it; problems left after the last round flag
 the view; pictures drawn without thimble's fonts, a refused reading and a stop show plainly; Undo puts back the view as
 it was built, also after a review that ended early and one run again; a view proposed again or deleted stops its
-review with no trace on the proposal that takes its slug. The prompt the reading gets names four pictures and five criteria for a view over files with lines, and
-two and three for one over binary files.
+review with no trace on the proposal that takes its slug. The prompt the reading gets names four pictures and six
+criteria for a view over files with lines, and two and three for one over binary files. A page with label controls of
+its own gets a problem under the last criterion whatever the reading says.
 
 The corpus is invented: board.jsonl, three posts, and a view `posts` of it with a proposal, as the dev agent builds one."""
 from __future__ import annotations
@@ -56,8 +57,10 @@ def view(tmp_path, monkeypatch, workspaces_tmp):
 class Stubs:
     """The review's pictures, readings and revisions, each call recorded."""
 
-    def __init__(self, monkeypatch, tmp_path: Path, readings: list, revisions: list | None = None, fonts: bool = True):
+    def __init__(self, monkeypatch, tmp_path: Path, readings: list, revisions: list | None = None, fonts: bool = True,
+                 controls: list[int] | None = None):
         self.readings, self.revisions, self.fonts = list(readings), list(revisions or []), fonts
+        self.controls = list(controls or [])  # the label controls each round's pictures 2 to 4 find
         self.shots, self.calls, self.revised = 0, [], []
         self.tmp = tmp_path
         monkeypatch.setattr(view_review, "shoot", self.shoot)
@@ -66,12 +69,14 @@ class Stubs:
 
     async def shoot(self, c, slug, view, files, prop, lined, rnd):
         self.shots += 1
+        controls = self.controls.pop(0) if self.controls else 0
         out = []
         for i, name in enumerate(view_review.LINED_STATES if lined else view_review.PLAIN_STATES):
             png = self.tmp / f"shot-{self.shots}-{i}.png"
             png.write_bytes(PNG)
             out.append({"ok": True, "errors": [], "state": name, "png": str(png), "records": 3, "units": 0,
-                        "marked": 1, "hidden": 0, "fonts": self.fonts, "answers": [[{"ref": "board.jsonl#L1"}]]})
+                        "marked": 1, "hidden": 0, "controls": controls if i else 0, "fonts": self.fonts,
+                        "answers": [[{"ref": "board.jsonl#L1"}]]})
         return out
 
     async def call(self, c, system, user, tool, images, effort):
@@ -92,7 +97,7 @@ class Stubs:
 
 def ok(*problems: str) -> list[dict]:
     """A reading's assessment: the given problems under the third criterion, the rest met."""
-    return [{"problems": []}, {"problems": []}, {"problems": list(problems)}, {"problems": []}, {"problems": []}]
+    return [{"problems": []}, {"problems": []}, {"problems": list(problems)}, *[{"problems": []}] * 3]
 
 
 async def _review() -> dict:
@@ -116,7 +121,7 @@ async def test_problems_go_to_a_revision_that_passes_and_undo_puts_the_view_back
     built = (view / "view.html").read_text()
     review = await _review()
     assert review["state"] == "done" and review["revised"] == ["picture 1: the ticks overlap"] and review["left"] == []
-    assert s.revised == [[[], [], ["picture 1: the ticks overlap"], [], []]] and s.shots == 2
+    assert s.revised == [[[], [], ["picture 1: the ticks overlap"], [], [], []]] and s.shots == 2
     assert "revision 1" in (view / "view.html").read_text() and views.read_built(CORPUS, "posts") is not None
     got = view_review.undo(CORPUS, "posts")
     assert got["undo"] is True and got["revised"] == [] and (view / "view.html").read_text() == built
@@ -287,3 +292,16 @@ def test_the_revision_message_names_the_pictures_and_lists_the_problems(view):
     text = view_review.revision_prompt(CORPUS, "posts", [["picture 1: cut off"], [], ["picture 2: overlap"]], shots)
     assert "overview /tmp/a.png, detail /tmp/b.png" in text
     assert "- picture 1: cut off\n- picture 2: overlap" in text and str(views.views_dir(CORPUS) / "posts") in text
+
+
+async def test_label_controls_in_the_page_are_a_problem_the_revision_gets(view, monkeypatch, tmp_path):
+    s = Stubs(monkeypatch, tmp_path, [ok(), ok()], controls=[2, 0])
+    review = await _review()
+    problem = s.revised[0][-1][0]
+    assert problem.startswith("Picture 2: the page has 2 controls of its own that name the test label")
+    assert "Labels pane" in problem and s.revised[0][:-1] == [[]] * 5
+    assert "2 controls of the page's own naming the test label" in s.calls[0]["user"]
+    assert "no label toggle, checkbox, menu or clickable legend" in s.calls[0]["system"]
+    assert review["state"] == "done" and review["left"] == [] and len(review["revised"]) == 1
+    schema = s.calls[0]["tool"].input_schema["properties"]["assessment"]
+    assert schema["minItems"] == schema["maxItems"] == 6

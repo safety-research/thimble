@@ -670,6 +670,10 @@ The dev agent built the view {view}, so {claims} now open in it. In it {forms}.
 
 no citation resolves, because its `accepts` and `declares` are empty
 
+## view-label-controls
+
+The page has {count} controls of its own that name the test label, such as a toggle, a checkbox or a menu item. Remove them, since the Labels pane beside the view is the only place labels are turned on or filtered.
+
 ## view-no-record-anchors
 
 The page fetched {fetched} records, but only {records} of its elements carry a record's `<path>#L<n>` as their `data-anchor`, so the labels the analyst turns on show on almost nothing in it. Give each element that shows a record its file ref.

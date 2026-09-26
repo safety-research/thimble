@@ -3,11 +3,11 @@
 // shoot_states), in the headless Chromium of the frontend's Playwright (frontend/node_modules, which scripts/install.sh
 // installs).
 //   node scripts/view_shot.mjs --frame <html> --states <json> [--viewport <w>x<h>] [--media <url>]
-// --states names a JSON list of states, [{out, open}], each shot on a fresh page of one browser: `open` is the place the
-// page is sent once the frame is ready, `out` the PNG written. The page plays the part frontend/src/files/ViewerFrame.tsx
-// plays in the browser: it puts the frame document (the view page with the bridge, views.frame_document) in a sandboxed
-// iframe with the theme's tokens and the app's two faces, and asks the server over stdin and stdout, one JSON line each
-// way, for what the page needs:
+// --states names a JSON list of states, [{out, open, labels}], each shot on a fresh page of one browser: `open` is the
+// place the page is sent once the frame is ready, `out` the PNG written, `labels` the names of the labels that are on.
+// The page plays the part frontend/src/files/ViewerFrame.tsx plays in the browser: it puts the frame document (the view
+// page with the bridge, views.frame_document) in a sandboxed iframe with the theme's tokens and the app's two faces, and
+// asks the server over stdin and stdout, one JSON line each way, for what the page needs:
 //   {"fetch": id, "state": i, "query": ...}   answered {"id", "data"} or {"id", "error"}: reader.records for the state
 //   {"marks": id, "state": i, "refs": [...]}  answered {"id", "marks", "on", "filter"}: the marks of those refs and the
 //                                             labels that are on in the state, sent to the page as `labels`
@@ -17,10 +17,11 @@
 // Every other request the page makes is refused, so a view that reaches for the network fails here as it would in the
 // browser. A state is shot when its page has been quiet (no fetch or marks request in flight) for QUIET_MS after
 // `open`, or HARD_MS has passed. One line ends the run: {"done": true, "states": [{ok, errors, fetches, height, refs,
-// records, units, marked, hidden, fonts}]}: `refs` the distinct data-anchor refs the page reported, `records` those
-// naming a record (`<path>#L<n>`), `units` those naming one of the view's units (`view:<slug>/<key>`), `marked` the
-// elements carrying a label's mark in the shot, `hidden` those the bridge hid or dimmed for the filter, and `fonts`
-// whether Hanken Grotesk was loaded in the frame.
+// records, units, marked, hidden, controls, fonts}]}: `refs` the distinct data-anchor refs the page reported, `records`
+// those naming a record (`<path>#L<n>`), `units` those naming one of the view's units (`view:<slug>/<key>`), `marked`
+// the elements carrying a label's mark in the shot, `hidden` those the bridge hid or dimmed for the filter, `controls`
+// the page's own controls whose short text names a label that is on (labelControls), and `fonts` whether Hanken
+// Grotesk was loaded in the frame.
 import { createRequire } from 'node:module'
 import { readFileSync } from 'node:fs'
 import { open } from 'node:fs/promises'
@@ -35,6 +36,24 @@ const HARD_MS = 25_000
 const READY_MS = 10_000
 const MEDIA_CHUNK = 4 * 1024 * 1024 // bytes of one Range answer
 const MEDIA_WHOLE_MAX = 32 * 1024 * 1024 // a request without Range (an <img>) gets a file up to this size whole
+// A control's text longer than this is a row or a card that shows a label's mark, not a control for the label.
+const CONTROL_TEXT_MAX = 60
+const CONTROLS = 'button, select, option, input, label, summary, [role=button], [role=checkbox], [role=switch], [role=menuitemcheckbox], [role=option], [role=tab]'
+
+// The page's own controls whose short text names one of `names`, such as a toggle, a checkbox or a menu item for a
+// label; a <label> counts only when it labels a form control. Runs in the frame.
+function labelControls({ names, sel, max }) {
+  const want = names.map((n) => String(n).toLowerCase()).filter(Boolean)
+  if (!want.length) return 0
+  let n = 0
+  for (const el of document.querySelectorAll(sel)) {
+    if (el.tagName === 'LABEL' && !el.control) continue
+    const own = [el.getAttribute('aria-label'), el.getAttribute('title'), el.tagName === 'INPUT' ? el.value : el.textContent]
+    const text = own.filter(Boolean).join(' ').replace(/\s+/g, ' ').trim().toLowerCase()
+    if (text && text.length <= max && want.some((w) => text.includes(w))) n++
+  }
+  return n
+}
 // The tokens a view's page reads: frontend/src/lib/frame.ts VIEW_TOKENS, which this list follows.
 const VIEW_TOKENS = [
   '--text-primary', '--text-secondary', '--text-tertiary', '--surface-card', '--bg-sub', '--bg-sunken', '--border-subtle', '--accent', '--font-body', '--font-mono',
@@ -269,6 +288,7 @@ async function shootState(browser, opt, doc, state, i) {
       units: refs.filter((r) => /^view:[^/]+\/.+/.test(r)).length,
       marked: await count('[data-thimble-label]'),
       hidden: await count('[data-thimble-drop]'),
+      controls: await frame.evaluate(labelControls, { names: state.labels || [], sel: CONTROLS, max: CONTROL_TEXT_MAX }).catch(() => 0),
       fonts,
     }
   } finally {
