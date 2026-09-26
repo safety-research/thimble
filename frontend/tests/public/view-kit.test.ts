@@ -29,3 +29,9 @@ test('the headless shot passes the frame the same tokens as the app', () => {
   const shot = [...list.matchAll(/'(--[a-z0-9-]+)'/g)].map((m) => m[1])
   expect([...shot].sort()).toEqual([...VIEW_TOKENS].sort())
 })
+
+test('a select field draws its own chevron in place of the browser arrow', () => {
+  const rule = /select\.field\s*\{([^}]*)\}/.exec(KIT)?.[1] ?? ''
+  expect(rule).toMatch(/appearance:\s*none/)
+  expect(rule).toMatch(/background-image:[^;]*var\(--text-tertiary\)/)
+})
