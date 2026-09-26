@@ -46,6 +46,7 @@ def test_a_fork_name_is_the_title_as_a_slug_and_unique_in_the_workspace():
     assert threads.fork_name(CORPUS, agents.read_meta(CORPUS, "0f0f0001")) == "orchard-trees-812", "a name is stable"
     assert threads.by_fork_name(CORPUS, "orchard-trees-812-2") == "0f0f0002"
     assert threads.slug("") == threads.FORK_NAME_FALLBACK
+    assert threads.slug("Main") == "main-thread", "a name the Agent tool refuses"
     assert len(threads.slug("word " * 40)) <= threads.FORK_NAME_CHARS
 
 

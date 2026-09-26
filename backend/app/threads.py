@@ -41,6 +41,7 @@ CHIP_CHARS = 120
 FORK_NAME_KEY = "fork_name"  # on a thread's meta: the name its forks run under (fork_name)
 FORK_NAME_CHARS = 48
 FORK_NAME_FALLBACK = "thread"
+RESERVED_NAMES = ("main", "team-lead", "user", "system")  # names Claude Code's Agent tool refuses for an agent
 WARM_S = 20.0  # the longest wait for the anchor's view refs to resolve before a thread's first event (warm)
 WARM_MAX = 8  # the anchor's refs resolved that way
 EARLIER_CHARS = 3_000  # of the thread's earlier turns, the newest kept, on the event that forks it anew
@@ -78,7 +79,8 @@ def slug(title: str) -> str:
         if len(nxt) > FORK_NAME_CHARS:
             break
         out = nxt
-    return out or FORK_NAME_FALLBACK
+    out = out or FORK_NAME_FALLBACK
+    return f"{out}-{FORK_NAME_FALLBACK}" if out in RESERVED_NAMES or re.fullmatch(r"a[0-9a-f]{16}", out) else out
 
 
 def fork_name(c: str, meta: dict) -> str:
