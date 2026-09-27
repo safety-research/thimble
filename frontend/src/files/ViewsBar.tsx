@@ -1,5 +1,6 @@
 // Files' views: File browser, then every view written for this corpus, one exclusive choice (Segmented); then proposals
-// not built yet (spinner while building, which says so while its session waits for permission, ✕ and Retry on failure); then New view, a field that asks main for one. A row
+// not built yet (spinner while building, a still warning dot while its session waits for permission, ✕ and Retry on
+// failure); then New view, a field that asks main for one. A row
 // across the top of Files, or, while Files shows in a pane beside another, in that pane's head (`compact`, portalled by
 // FilesTab), where what does not fit goes in a ⋯ menu (viewsFit.ts). Refetches on bus `view`.
 import { useEffect, useLayoutEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
@@ -106,7 +107,14 @@ function ProposalOption({ ws, p, onDismiss, size, asking = false }: { ws: string
       >
         <Icon name="view" size={14} className="seg-ico" />
         <span className="seg-label">{p.name}</span>
-        {pending && <Spinner size={10} label={buildLabel(p.status, asking)} />}
+        {pending &&
+          (asking ? (
+            <Tipped text={buildLabel(p.status, asking)}>
+              <span className="dot tt-waiting files-proposal-wait" role="status" aria-label={buildLabel(p.status, asking)} />
+            </Tipped>
+          ) : (
+            <Spinner size={10} label={buildLabel(p.status, asking)} />
+          ))}
         {failed && (p.error ? <Tipped text={p.error}>{mark}</Tipped> : mark)}
       </button>
       {failed && (

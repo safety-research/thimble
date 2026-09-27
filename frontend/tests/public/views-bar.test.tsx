@@ -68,7 +68,7 @@ describe('the views and the proposals', () => {
     expect(posted.map((p) => p.url)).toContain('/api/ws/toy/views/proposals/mine/retry')
   })
 
-  test("a build's spinner says it waits for permission while a request of its session is on the card", async () => {
+  test("a build shows a still warning dot in place of its spinner while a request of its session is on the card", async () => {
     expect(buildLabel('queued', false)).toBe('Queued')
     expect(buildLabel('building', false)).toBe('Building')
     expect(buildLabel('building', true)).toBe('Waiting for permission')
@@ -80,9 +80,11 @@ describe('the views and the proposals', () => {
     const proposals = [proposal('life', 'Topic map', 'building', { chat: 'c1' }), proposal('mine', 'Page timeline', 'building', { chat: 'c2' })]
     const el = await mount(<ViewsBar ws="asks" value="browser" onChange={() => undefined} views={[]} proposals={proposals} />)
     await settle()
-    const spin = (slug: string) => el.querySelector(`.files-proposal:has([data-anchor="view:${slug}"]) .spinner`)?.getAttribute('aria-label')
-    expect(spin('life')).toBe('Waiting for permission')
-    expect(spin('mine')).toBe('Building')
+    const state = (slug: string) => el.querySelector(`.files-proposal:has([data-anchor="view:${slug}"]) [role="status"]`)
+    expect(state('life')?.getAttribute('aria-label')).toBe('Waiting for permission')
+    expect(state('life')?.classList.contains('tt-waiting')).toBe(true)
+    expect(state('mine')?.getAttribute('aria-label')).toBe('Building')
+    expect(state('mine')?.classList.contains('spinner')).toBe(true)
   })
 
   test('a proposal the orientation dropped is shown nowhere: not in what a run made, not as a chip', async () => {
