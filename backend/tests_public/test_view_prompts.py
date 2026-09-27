@@ -26,7 +26,7 @@ def test_a_view_ticket_asks_for_an_overview_scales_from_the_data_and_a_fit_to_th
         assert words in good, words
     examples = prompts.section("dev-view", "Worked examples")
     assert "Take the method, not their domain, fields or layout" in examples
-    assert re.findall(r"^- `([a-z-]+)` ", examples, re.M) == ["incident-timeline", "repository"]
+    assert re.findall(r"^- `([a-z-]+)` ", examples, re.M) == ["linked-sessions", "incident-timeline", "repository"]
 
 
 def test_a_view_ticket_and_its_review_ask_for_every_field_to_be_selectable_and_runs_to_compare():
