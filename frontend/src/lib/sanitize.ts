@@ -1,25 +1,37 @@
 // HTML and SVG that a model or a corpus wrote, made safe to put in the page itself (DOMPurify). The API is
 // unauthenticated and answers the page's own origin, so injected script could call any route, and remote resources
-// could leak what the page shows. Kept: markup, classes, inline style, links, and local or data: images. Removed:
-// script and event attributes, <style>, forms, and every URL to another host. HTML that carries script runs in a
-// sandboxed frame instead (components/Outputs HtmlFrame). This also applies under Vite, which serves no CSP.
+// could leak what the page shows. Kept: markup, classes, inline style, links, and data:, blob: or media-route images.
+// Removed: script and event attributes, <style>, forms, every URL to another host, and every URL to the app's own
+// routes but the two that serve media, since even a GET to some routes changes state. HTML that carries script runs in
+// a sandboxed frame instead (components/Outputs HtmlFrame). This also applies under Vite, which serves no CSP.
 import DOMPurify, { type Config, type DOMPurify as Purifier } from 'dompurify'
 
-/** Whether `url` stays on the machine: a data: URL, a fragment, or a URL (relative or absolute) whose origin is
- * `origin`, the page's own by default. Pure given `origin`. */
+/** The paths of the routes that serve media: the corpus's (`/api/ws/<c>/media`) and a view's
+ * (`/api/ws/<c>/views/<slug>/media`), as lib/media and the views build them. */
+const MEDIA_ROUTE = /^\/api\/ws\/[^/]+\/(?:views\/[^/]+\/)?media$/
+
+/** Whether markup may load `url`: a data: URL, a fragment, a blob: URL the page made, or one of the media routes on
+ * `origin` (the page's own by default) named by an absolute path or a full URL. A relative path is refused, since the
+ * browser resolves it against the document, not the root. Pure given `origin`. */
 export function isLocalUrl(url: string, origin: string = typeof location === 'undefined' ? '' : location.origin): boolean {
   const u = url.trim()
   if (!u) return false
   if (/^data:/i.test(u) || u.startsWith('#')) return true
   if (!origin) return false
+  let parsed: URL
   try {
-    return new URL(u, origin + '/').origin === origin
+    parsed = new URL(u, origin + '/')
   } catch {
     return false
   }
+  if (parsed.protocol === 'blob:') return parsed.origin === origin
+  if (parsed.origin !== origin) return false
+  if (!(/^\/(?![/\\])/.test(u) || u.toLowerCase().startsWith(origin.toLowerCase() + '/'))) return false
+  if (/%2f|%5c/i.test(parsed.pathname)) return false
+  return MEDIA_ROUTE.test(parsed.pathname)
 }
 
-/** Whether a style attribute's value loads anything from another host (a url() or an image-set() that is not local). */
+/** Whether a style attribute's value loads anything markup may not (a url() that is not isLocalUrl, or an image-set()). */
 export function styleReachesOut(style: string, origin?: string): boolean {
   if (/image-set\(|@import|expression\(/i.test(style)) return true
   for (const m of style.matchAll(/url\(\s*(['"]?)([^'")]*)\1\s*\)/gi)) if (!isLocalUrl(m[2], origin)) return true
@@ -28,7 +40,7 @@ export function styleReachesOut(style: string, origin?: string): boolean {
 
 const URL_ATTRS = ['src', 'href', 'xlink:href', 'poster', 'background', 'action', 'data']
 
-/** The attributes of `el` that would load from, or send to, another host, removed; a link that stays opens in a new tab. */
+/** The attributes of `el` that would load or send what isLocalUrl refuses, removed; a link stays and opens in a new tab. */
 function keepLocal(el: Element): void {
   for (const name of URL_ATTRS) {
     const v = el.getAttribute(name)
