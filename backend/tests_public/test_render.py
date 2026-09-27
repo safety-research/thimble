@@ -93,6 +93,38 @@ def test_only_files_inside_the_page_folder_are_served(page_dir):
     assert render._serve_path(page_dir, f"{render.RENDER_ORIGIN}/missing.js") is None
 
 
+def test_the_page_reaches_only_this_machine_by_its_exact_host_and_is_served_under_the_app_s_policy(page_dir):
+    for url in ("http://127.0.0.1:8300/api/x", "http://localhost:5300/src/x.ts", f"{render.RENDER_ORIGIN}/assets/a.js",
+                "http://[::1]:8300/"):
+        assert render.stays_local(url), url
+    for url in ("http://localhost.evil.example/x", "http://127.0.0.1.nip.io/x", "https://thimble.render.evil.example/",
+                "http://localhost@evil.example/", "https://fonts.googleapis.com/css2", "http://[bad/"):
+        assert not render.stays_local(url), url
+
+    class Route:
+        def __init__(self, url: str) -> None:
+            self.request = type("R", (), {"url": url})()
+            self.done: tuple = ()
+
+        async def fulfill(self, **kw):
+            self.done = ("fulfill", kw)
+
+        async def abort(self):
+            self.done = ("abort",)
+
+        async def fallback(self):
+            self.done = ("fallback",)
+
+    served = Route(f"{render.RENDER_ORIGIN}/render.html")
+    asyncio.run(render._fulfil(served, page_dir))
+    assert served.done[1]["headers"]["content-security-policy"] == render.APP_CSP
+    for url, want in (("http://localhost.evil.example/x", "abort"), (f"{render.RENDER_ORIGIN}/render.html", "fallback"),
+                      ("data:text/plain,x", "fallback")):
+        r = Route(url)
+        asyncio.run(render._keep_local(r))
+        assert r.done == (want,), url
+
+
 def test_a_clip_is_snapped_outward_to_whole_pixels():
     assert render._clip({"x": 16.4, "y": 10.6, "width": 720.2, "height": 99.1}) == {"x": 16, "y": 10, "width": 721, "height": 100}
 
