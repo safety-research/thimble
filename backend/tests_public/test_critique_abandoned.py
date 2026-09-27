@@ -99,7 +99,7 @@ async def test_a_call_whose_caller_waits_returns_its_result():
     assert res is not None and res.text == "the report"
 
 
-async def test_the_route_cancels_a_critique_whose_shim_drops_the_request(monkeypatch):
+async def test_the_route_cancels_a_critique_whose_shim_drops_the_request(monkeypatch, plugin_headers):
     """Through the whole app, as the shim posts it: the request's body arrives, then the connection closes, and the
     critique's handler is cancelled rather than left to run for nobody."""
     state: dict[str, bool] = {}
@@ -133,7 +133,8 @@ async def test_the_route_cancels_a_critique_whose_shim_drops_the_request(monkeyp
     scope = {"type": "http", "asgi": {"version": "3.0"}, "http_version": "1.1", "method": "POST", "scheme": "http",
              "path": "/api/tools/critique", "raw_path": b"/api/tools/critique", "query_string": b"", "root_path": "",
              "headers": [(b"host", b"test"), (b"content-type", b"application/json"),
-                         (b"content-length", str(len(body)).encode())],
+                         (b"content-length", str(len(body)).encode()),
+                         *((k.encode(), v.encode()) for k, v in plugin_headers().items())],
              "client": ("127.0.0.1", 5000), "server": ("127.0.0.1", 80)}
     await asyncio.wait_for(create_app()(scope, receive, send), 10)
     assert state == {"started": True, "cancelled": True}

@@ -178,10 +178,10 @@ def test_render_prompts_is_main_s_append_and_the_agents_skill_from_one_renderer(
 # ----------------------------------------------------------------------------- the subscription
 
 
-def test_the_subscription_waits_for_the_workspace_then_attaches_and_streams_events(client):
+def test_the_subscription_waits_for_the_workspace_then_attaches_and_streams_events(client, plugin_headers):
     """404 for a folder that is no workspace yet (the shim retries); a subscription names the session, which is then
     main, and gets a `ready` event and then each event as {content, meta}."""
-    r = client.get("/api/channel", params={"cwd": "/nowhere/at/all"})
+    r = client.get("/api/channel", params={"cwd": "/nowhere/at/all"}, headers=plugin_headers())
     assert r.status_code == 404
     cwd = str(config.corpus_dir(CORPUS))
 

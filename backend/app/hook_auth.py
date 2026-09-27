@@ -1,11 +1,13 @@
-"""The routes only thimble's plugin hooks call (plugin/bin/.thimble-watch, and bin/thimble-agents for /api/agents).
+"""The routes only thimble's plugin calls: its hooks' (plugin/bin/.thimble-watch, and bin/thimble-agents for
+/api/agents) and its MCP shim's (bin/thimble-mcp: the channel subscription, relayed permission prompts, tool calls).
 
-Any process on the machine can reach a loopback port, and the hooks run in every Claude Code session with the plugin,
+Any process on the machine can reach a loopback port, and the plugin runs in every Claude Code session that has it,
 so each side proves it holds the token the supervisor writes into <home>/server.json (readable by its owner alone,
 cli.write_state) without sending it: a request carries a fresh nonce and HMAC-SHA256(token, "hook:" + nonce), and the
-answer carries HMAC-SHA256(token, "server:" + nonce). HookAuth answers a request on HOOK_PATHS without a valid proof
-with 401. A hook that finds no server.json, no token in it, or no valid proof on the answer does nothing, so a process
-that holds the recorded port learns nothing from a hook and cannot answer one.
+answer carries HMAC-SHA256(token, "server:" + nonce). HookAuth answers a request on a guarded route without a valid
+proof with 401. A hook or shim that finds no server.json, no token in it, or no valid proof on the answer sends
+nothing or believes nothing, so a process that holds the recorded port learns nothing from the plugin and cannot answer
+it.
 """
 from __future__ import annotations
 
@@ -21,6 +23,8 @@ HOOK_PATHS = frozenset({
     "/api/channel/pull", "/api/channel/ack", "/api/channel/held", "/api/channel/permission/hook",
     "/api/agents", "/api/bg/relay", "/api/bg/agent-check", "/api/bg/proxy-stop",
 })
+SHIM_PATHS = frozenset({"/api/channel", "/api/channel/permission"})
+TOOL_PREFIX = "/api/tools/"  # POST /api/tools/<name>; GET /api/tools/holdings is the CLI's and stays open
 NONCE_HEADER = "x-thimble-nonce"
 AUTH_HEADER = "x-thimble-auth"
 PROOF_HEADER = "x-thimble-proof"
@@ -37,6 +41,11 @@ def sign(token: str, role: str, nonce: str) -> str:
 def headers(token: str, nonce: str) -> dict[str, str]:
     """A hook's request headers for `nonce`."""
     return {NONCE_HEADER: nonce, AUTH_HEADER: sign(token, "hook", nonce)}
+
+
+def guarded(method: str, path: str) -> bool:
+    """Whether a request needs the proof: a hook's or shim route's, or a tool call."""
+    return path in HOOK_PATHS or path in SHIM_PATHS or (method == "POST" and path.startswith(TOOL_PREFIX))
 
 
 def token() -> str:
@@ -61,13 +70,13 @@ def token() -> str:
 
 
 class HookAuth:
-    """401 for a request on HOOK_PATHS without a valid proof; the proof of this server on every answer to one."""
+    """401 for a request on a guarded route without a valid proof; the proof of this server on every answer to one."""
 
     def __init__(self, app) -> None:
         self.app = app
 
     async def __call__(self, scope, receive, send) -> None:
-        if scope["type"] != "http" or scope.get("path") not in HOOK_PATHS:
+        if scope["type"] != "http" or not guarded(scope.get("method", ""), scope.get("path", "")):
             await self.app(scope, receive, send)
             return
         h = Headers(scope=scope)
@@ -75,7 +84,7 @@ class HookAuth:
         tok = token()
         if not tok or not nonce or len(nonce) > NONCE_MAX or not hmac.compare_digest(
                 h.get(AUTH_HEADER, ""), sign(tok, "hook", nonce)):
-            body = json.dumps({"detail": "only thimble's plugin hooks may call this route"}).encode()
+            body = json.dumps({"detail": "only thimble's plugin may call this route"}).encode()
             await send({"type": "http.response.start", "status": 401,
                         "headers": [(b"content-type", b"application/json"), (b"content-length", str(len(body)).encode())]})
             await send({"type": "http.response.body", "body": body})

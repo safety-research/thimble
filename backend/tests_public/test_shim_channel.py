@@ -5,7 +5,8 @@ its session id and its parent's pid, and writes each `channel` event as a `notif
 before the MCP handshake is done. That session also relays its permission prompts: it declares
 `claude/channel/permission`, posts each `notifications/claude/channel/permission_request` to
 `POST /api/channel/permission`, and writes each `permission` event of the stream as
-`notifications/claude/channel/permission`. The server here is a stand-in that serves one event of each kind."""
+`notifications/claude/channel/permission`. Every request proves the token in server.json and the shim believes only an
+answer that proves it too (app/hook_auth.py). The server here is a stand-in that serves one event of each kind."""
 from __future__ import annotations
 
 import json
@@ -23,18 +24,32 @@ from typing import Any
 
 import pytest
 
-from app import config
+from app import config, hook_auth
 
 SHIM = config.REPO_ROOT / "plugin" / "bin" / "thimble-mcp"
 NOTE = {"content": "question: why?", "meta": {"kind": "thread", "event": "e1", "thread": "t1"}}
 VERDICT = {"request_id": "swagd", "behavior": "allow"}
 REQUEST = {"request_id": "abcde", "tool_name": "Bash", "description": "Create x", "input_preview": '{"command": "touch x"}'}
+TOKEN = "t0ken-of-this-install"  # the one _start records in server.json
+
+
+def proof(handler: BaseHTTPRequestHandler, token: str | None = TOKEN) -> str | None:
+    """The proof header a server holding `token` puts on its answer to the request `handler` reads, as
+    app/hook_auth.py does; None when the request does not prove `token` (thimble's server would answer 401), or with
+    `token` None (a process that is not thimble's)."""
+    nonce = handler.headers.get(hook_auth.NONCE_HEADER) or ""
+    if not token or not nonce or handler.headers.get(hook_auth.AUTH_HEADER) != hook_auth.sign(token, "hook", nonce):
+        return None
+    return hook_auth.sign(token, "server", nonce)
 
 
 class _Server:
-    """GET /api/channel: a `ready` event, one `channel` event, then held open; every query string is kept."""
+    """GET /api/channel: a `ready` event, one `channel` event, then held open; every query string is kept. Each answer
+    proves `token` (none with None); a request that does not prove it is kept in `refused` and answered 401."""
 
-    def __init__(self) -> None:
+    def __init__(self, token: str | None = TOKEN) -> None:
+        self.token = token
+        self.refused: list[str] = []
         self.queries: list[dict] = []
         self.posts: list[dict] = []
         self.calls: list[tuple[str, dict]] = []  # (tool, body) of each POST /api/tools/<tool>
@@ -44,6 +59,8 @@ class _Server:
             def do_POST(self):  # noqa: N802
                 body = self.rfile.read(int(self.headers.get("Content-Length") or 0))
                 path = urllib.parse.urlsplit(self.path).path
+                if self._refused():
+                    return
                 if path == "/api/channel/permission":
                     outer.posts.append(json.loads(body))
                 answer = b"{}"
@@ -51,6 +68,7 @@ class _Server:
                     outer.calls.append((path.rsplit("/", 1)[-1], json.loads(body)))
                     answer = json.dumps({"content": [{"type": "text", "text": "ok"}], "is_error": False}).encode()
                 self.send_response(200)
+                self._proof()
                 self.send_header("Content-Type", "application/json")
                 self.end_headers()
                 self.wfile.write(answer)
@@ -61,8 +79,11 @@ class _Server:
                     self.send_response(404)
                     self.end_headers()
                     return
+                if self._refused():
+                    return
                 outer.queries.append(dict(urllib.parse.parse_qsl(u.query)))
                 self.send_response(200)
+                self._proof()
                 self.send_header("Content-Type", "text/event-stream")
                 self.end_headers()
                 self.wfile.write(b'event: ready\ndata: {"workspace": "mini"}\n\n')
@@ -71,6 +92,19 @@ class _Server:
                 self.wfile.write(b"event: permission\ndata: " + json.dumps(VERDICT).encode() + b"\n\n")
                 self.wfile.flush()
                 time.sleep(3)
+
+            def _refused(self) -> bool:
+                if outer.token and proof(self, outer.token) is None:
+                    outer.refused.append(self.path)
+                    self.send_response(401)
+                    self.send_header("Content-Length", "0")
+                    self.end_headers()
+                    return True
+                return False
+
+            def _proof(self) -> None:
+                if outer.token:
+                    self.send_header(hook_auth.PROOF_HEADER, proof(self, outer.token) or "")
 
             def log_message(self, *a):
                 pass
@@ -111,12 +145,14 @@ def _run(tmp_path: Path, port: int, channel: bool, wait_s: float, until: Any = "
         _stop(p)
 
 
-def _start(tmp_path: Path, port: int, channel: bool, parent: list[str] | None = None,
+def _start(tmp_path: Path, port: int | None, channel: bool, parent: list[str] | None = None,
            extra: dict | None = None) -> subprocess.Popen:
-    """The shim as a child process (of a stand-in `claude` with `parent`), its server the stand-in on `port`."""
+    """The shim as a child process (of a stand-in `claude` with `parent`), its server the stand-in on `port`, recorded
+    in server.json with TOKEN; with `port` None there is no server.json."""
     home = tmp_path / "home"
     home.mkdir(exist_ok=True)
-    (home / "server.json").write_text(json.dumps({"port": port, "api": f"http://127.0.0.1:{port}"}))
+    if port is not None:
+        (home / "server.json").write_text(json.dumps({"port": port, "api": f"http://127.0.0.1:{port}", "token": TOKEN}))
     login = tmp_path / "cc" / ".credentials.json"  # a claude.ai login, which channels need (cc_channel.claude_ai_login)
     if not login.exists():
         login.parent.mkdir(parents=True, exist_ok=True)

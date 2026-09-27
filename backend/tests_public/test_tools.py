@@ -156,27 +156,29 @@ async def test_a_refused_call_carries_the_line_too(workspaces_tmp):
 # ----------------------------------------------------------------------------- read_ref
 
 
-async def test_read_ref_runs_over_the_route_with_the_cwd_mapped_to_the_workspace(client):
+async def test_read_ref_runs_over_the_route_with_the_cwd_mapped_to_the_workspace(client, plugin_headers):
     """The shim's call: the cwd maps to the workspace. A chat is no ref (a thread is a fork of main, so nothing
     reads a chat's log), and read_chat is no tool."""
     body = {"args": {"ref": "events.jsonl#L1"}, "actor": "analyst", "cwd": str(config.corpus_dir(CORPUS) / "agents")}
-    r = client.post("/api/tools/read_ref", json=body)
+    r = client.post("/api/tools/read_ref", json=body, headers=plugin_headers())
     assert r.status_code == 200 and not r.json()["is_error"]
     assert r.json()["content"][0]["text"].splitlines()[1].startswith("events.jsonl#L1 (")
-    assert client.post("/api/tools/read_chat", json=body).status_code == 404, "a retired name is no tool"
+    assert client.post("/api/tools/read_chat", json=body, headers=plugin_headers()).status_code == 404, \
+        "a retired name is no tool"
     assert not hasattr(tools, "chat_lines") and not hasattr(tools, "_read_chat")
 
 
-async def test_a_session_thimble_started_in_its_work_folder_reaches_its_workspace_over_the_route(client):
+async def test_a_session_thimble_started_in_its_work_folder_reaches_its_workspace_over_the_route(client, plugin_headers):
     """The orientation's process runs in its work folder, workspaces/<c>/orient/work (agent_session, the fence), and
     its shim sends that folder as its cwd, which lies in no corpus; the route maps it to the workspace whose folder
     holds it, for a session thimble started (THIMBLE_SESSION) alone."""
     work = config.workspace_dir(CORPUS) / "orient" / "work"
     work.mkdir(parents=True, exist_ok=True)
     body = {"args": {"ref": "events.jsonl#L1"}, "actor": "analyst", "cwd": str(work), "session": "orient"}
-    r = client.post("/api/tools/read_ref", json=body)
+    r = client.post("/api/tools/read_ref", json=body, headers=plugin_headers())
     assert r.status_code == 200 and not r.json()["is_error"], r.text
-    assert client.post("/api/tools/read_ref", json={**body, "session": None}).status_code == 400, "main's shim is not in it"
+    assert client.post("/api/tools/read_ref", json={**body, "session": None},
+                       headers=plugin_headers()).status_code == 400, "main's shim is not in it"
     assert config.workspace_for_folder(config.WORKSPACES_DIR / "no-such-corpus" / "orient") is None
     assert config.workspace_for_folder(config.corpus_dir(CORPUS)) is None
 

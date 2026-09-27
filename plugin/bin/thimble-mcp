@@ -8,7 +8,10 @@ the file under backend/.venv's Python through bin/thimble-python; Python reads t
 Tools are listed from disk (app.tools.list, schemas from prompts/tools.md), so the list is the same whether the server
 is up or down. A call is POST {server}/api/tools/<name> with {args, actor, cwd, session, tool_use_id}; calls run
 concurrently and report MCP progress every PROGRESS_S, since Claude Code aborts a call that is silent for its idle
-timeout. The server address is read per call from $THIMBLE_HOME/server.json, else http://127.0.0.1:$THIMBLE_PORT.
+timeout. The server's address and token are read per call from $THIMBLE_HOME/server.json. Every request to a tool or
+channel route proves the shim holds the token, and an answer is believed only when it proves the server does, as the
+plugin's hooks do (app/hook_auth.py). Without server.json or a token the shim reaches no port: a call reports that no
+server is recorded, and the channel waits.
 
 Channel: the shim declares Claude Code's experimental `claude/channel` capability and, in the analyst's session,
 subscribes to GET {server}/api/channel (server-sent events), which attaches the session to its workspace. The route
@@ -24,10 +27,12 @@ handshake, where the channel is registered.
 
 `thimble-mcp --list` prints the tool list as JSON and `thimble-mcp --instructions` the instructions, without MCP.
 """
+import hmac
 import inspect
 import json
 import logging
 import os
+import secrets
 import sys
 import urllib.parse
 from pathlib import Path
@@ -49,16 +54,20 @@ from mcp.server.stdio import stdio_server  # noqa: E402
 from mcp.shared.message import SessionMessage  # noqa: E402
 from pydantic import Field  # noqa: E402
 
-from app import cc_channel, tools  # noqa: E402  (imports app.config, app.prompts and app.procs only)
+from app import cc_channel, hook_auth, tools  # noqa: E402  (imports app.config, app.prompts, app.procs and starlette only)
 
 logging.basicConfig(level=logging.WARNING, stream=sys.stderr, format="thimble-mcp %(levelname)s: %(message)s")
 log = logging.getLogger("thimble-mcp")
 
 ROLE = tools.ANALYST
-DEFAULT_PORT = 8300
 # the model cannot run /thimble itself (the skill is the analyst's alone), so the text says who types it
 SERVER_DOWN = ("the thimble server is not running. Ask the analyst to type /thimble in this terminal, which starts it "
                "again with the workspace as it was; you cannot run that skill yourself.")
+NO_RECORD = ("no thimble server is recorded: {path} is missing or holds no token, so `{name}` was sent nowhere. Ask the "
+             "analyst to type /thimble in this terminal, which starts the server; you cannot run that skill yourself.")
+# an answer without the server's proof of the token (module note): not thimble's server, or not this install's
+UNPROVEN = ("`{name}` was not run: what answers at {base} did not prove it is the thimble server recorded in "
+            "server.json. Ask the analyst to type /thimble in this terminal, which restarts it.")
 # a call whose connection dropped after it was sent, once a server answers again (call_server)
 RESTARTED = ("the thimble server restarted while `{name}` ran, so its answer was lost and the call may or may not have "
              "taken effect. Check (list the cards, or read the document) before you make it again.")
@@ -82,21 +91,38 @@ CTX_PARAM = "thimble_mcp_context"  # the generated handler's MCP context paramet
 _JSON_TYPES = {"string": str, "number": float, "integer": int, "boolean": bool, "array": list, "object": dict}
 
 
-def server_url() -> str:
-    """The server's API base URL from $THIMBLE_HOME/server.json (`api`, then `port`; never `url`, which in dev mode is
-    Vite's), else the default port. Read per call, so a server started after this shim is found."""
-    home = Path(os.environ.get("THIMBLE_HOME") or (Path.home() / ".thimble"))
+def server_json() -> Path:
+    return Path(os.environ.get("THIMBLE_HOME") or (Path.home() / ".thimble")) / "server.json"
+
+
+def server() -> tuple[str, str] | None:
+    """(the server's API base URL, its token) from server.json (`api`, then `port`; never `url`, which in dev mode is
+    Vite's); None without the file, a token or an address. Read per call, so a server started after this shim is found."""
     try:
-        data = json.loads((home / "server.json").read_text("utf-8"))
-        if isinstance(data, dict):
-            if data.get("api"):
-                return str(data["api"]).rstrip("/")
-            if data.get("port"):
-                return f"http://127.0.0.1:{int(data['port'])}"
-    except (OSError, ValueError, TypeError):
+        data = json.loads(server_json().read_text("utf-8"))
+    except (OSError, ValueError):
+        return None
+    token = data.get("token") if isinstance(data, dict) else None
+    if not isinstance(token, str) or not token:
+        return None
+    try:
+        if data.get("api"):
+            return str(data["api"]).rstrip("/"), token
+        if data.get("port"):
+            return f"http://127.0.0.1:{int(data['port'])}", token
+    except (TypeError, ValueError):
         pass
-    port = os.environ.get("THIMBLE_PORT") or DEFAULT_PORT
-    return f"http://127.0.0.1:{port}"
+    return None
+
+
+def signed(token: str) -> tuple[dict[str, str], str]:
+    """A request's headers proving `token` for a fresh nonce, and the proof the server's answer must carry."""
+    nonce = secrets.token_hex(16)
+    return hook_auth.headers(token, nonce), hook_auth.sign(token, "server", nonce)
+
+
+def proven(resp: httpx.Response, proof: str) -> bool:
+    return hmac.compare_digest(resp.headers.get(hook_auth.PROOF_HEADER) or "", proof)
 
 
 def cwd() -> str:
@@ -128,8 +154,13 @@ def _env_s(name: str, default: float) -> float:
         return default
 
 
-def _answer(name: str, resp: httpx.Response) -> mcp_types.CallToolResult:
-    """The server's answer to a call, as the tool result the model reads."""
+def _answer(name: str, resp: httpx.Response, proof: str, base: str) -> mcp_types.CallToolResult:
+    """The server's answer to a call, as the tool result the model reads; UNPROVEN, or the status alone for an error of
+    the server's own stack, when the answer lacks the server's proof."""
+    if not proven(resp, proof):
+        if resp.status_code >= 500:
+            return _error(f"{name} failed on the thimble server (HTTP {resp.status_code})")
+        return _error(UNPROVEN.format(name=name, base=base))
     if resp.status_code >= 400:
         detail = resp.text[:500]
         try:
@@ -151,8 +182,11 @@ def _answer(name: str, resp: httpx.Response) -> mcp_types.CallToolResult:
 
 async def _boot(client: httpx.AsyncClient) -> str | None:
     """The `boot` token of the server answering now (new for every start), or None when none answers or names one."""
+    found = server()
+    if found is None:
+        return None
     try:
-        resp = await client.get(f"{server_url()}/api/health", timeout=2.0)
+        resp = await client.get(f"{found[0]}/api/health", timeout=2.0)
         boot = resp.json().get("boot") if resp.status_code == 200 else None
     except (httpx.HTTPError, ValueError, AttributeError):
         return None
@@ -172,9 +206,9 @@ async def _boot_within(client: httpx.AsyncClient, until: float) -> str | None:
 async def call_server(name: str, args: dict[str, Any], tool_use_id: str | None = None) -> mcp_types.CallToolResult:
     """POST the call and return the server's answer, with no read timeout.
 
-    A refused connection is retried for up to CALL_RETRY_S (a restart), then SERVER_DOWN. A call cut off mid-flight is
-    not resent, since it may have taken effect: when the server's `boot` token changed the answer is RESTARTED, else
-    DROPPED."""
+    A refused connection, a missing server.json or a refused proof (a restart writes a new token) is retried for up
+    to CALL_RETRY_S, then SERVER_DOWN, NO_RECORD or UNPROVEN. A call cut off mid-flight is not resent, since it may
+    have taken effect: when the server's `boot` token changed the answer is RESTARTED, else DROPPED."""
     body = {"args": args, "actor": ROLE, "cwd": cwd(), "session": os.environ.get(SESSION_ENV) or None,
             "tool_use_id": tool_use_id}
     retry = _env_s(RETRY_ENV, CALL_RETRY_S)
@@ -182,8 +216,16 @@ async def call_server(name: str, args: dict[str, Any], tool_use_id: str | None =
     async with httpx.AsyncClient(timeout=httpx.Timeout(None, connect=3.0)) as client:
         boot = await _boot(client)
         while True:
+            found = server()
+            if found is None:
+                if anyio.current_time() >= until:
+                    return _error(NO_RECORD.format(path=server_json(), name=name))
+                await anyio.sleep(0.5)
+                continue
+            base, token = found
+            headers, proof = signed(token)
             try:
-                resp: httpx.Response | None = await client.post(f"{server_url()}/api/tools/{name}", json=body)
+                resp: httpx.Response | None = await client.post(f"{base}/api/tools/{name}", json=body, headers=headers)
             except (httpx.ConnectError, httpx.ConnectTimeout):
                 if anyio.current_time() >= until:
                     return _error(SERVER_DOWN)
@@ -192,8 +234,12 @@ async def call_server(name: str, args: dict[str, Any], tool_use_id: str | None =
                 continue
             except httpx.HTTPError:
                 resp = None  # the connection dropped after the request was sent
+            if resp is not None and resp.status_code == 401 and not proven(resp, proof) \
+                    and anyio.current_time() < until:
+                await anyio.sleep(0.5)  # refused before it ran, so it is safe to send again
+                continue
             if resp is not None and resp.status_code < 500:
-                return _answer(name, resp)
+                return _answer(name, resp, proof, base)
             after = await _boot_within(client, anyio.current_time() + retry)
             if after is None:
                 return _error(SERVER_DOWN)
@@ -201,7 +247,7 @@ async def call_server(name: str, args: dict[str, Any], tool_use_id: str | None =
                 return _error(RESTARTED.format(name=name))
             if resp is None:
                 return _error(DROPPED.format(name=name))
-            return _answer(name, resp)
+            return _answer(name, resp, proof, base)
 
 
 async def with_progress(ctx: Any, call: Any) -> mcp_types.CallToolResult:
@@ -311,20 +357,23 @@ class _Handshake:
 
 async def channel_loop(write_stream: Any, delivery: str = cc_channel.CHANNEL, handshake: Any = None) -> None:
     """Hold the subscription for as long as the session lives and write each event to Claude Code. Never raises: a
-    failure waits RETRY_S and subscribes again; a new session id (checked at each keep-alive) resubscribes at once.
-    Events wait for `handshake`."""
+    failure, a missing server.json or an answer without the server's proof waits RETRY_S and subscribes again; a new
+    session id (checked at each keep-alive) resubscribes at once. Events wait for `handshake`."""
     while True:
         sid = session_id()
         moved = False  # the session id changed under a live subscription: renew it without waiting
         query = urllib.parse.urlencode({k: v for k, v in (("cwd", cwd()), ("session", sid), ("pid", os.getppid()),
                                                           ("delivery", delivery)) if v})
-        url = f"{server_url()}/api/channel?{query}"
         try:
+            found = server()
+            if found is None:
+                raise ConnectionError(f"no token in {server_json()}")
+            headers, proof = signed(found[1])
             async with httpx.AsyncClient(timeout=httpx.Timeout(None, connect=3.0)) as client:
-                async with client.stream("GET", url) as resp:
-                    if resp.status_code != 200:
+                async with client.stream("GET", f"{found[0]}/api/channel?{query}", headers=headers) as resp:
+                    if resp.status_code != 200 or not proven(resp, proof):
                         await resp.aread()
-                        raise ConnectionError(f"HTTP {resp.status_code}")
+                        raise ConnectionError(f"HTTP {resp.status_code}" + ("" if proven(resp, proof) else ", unproven"))
                     event, data = "", []
                     async for line in resp.aiter_lines():
                         if line.startswith(":"):  # the server's keep-alive: a moment to notice a new session id
@@ -393,9 +442,13 @@ async def _relay_permission(ctx: Any, params: _PermissionRequest) -> None:
     raw = {**(params.model_extra or {})}
     body = {k: str(raw.get(k) or "") for k in PERMISSION_FIELDS}
     body.update({"cwd": cwd(), "session": session_id()})
+    found = server()
+    if found is None:
+        log.warning("permission request %s not relayed: no token in %s", body["request_id"], server_json())
+        return
     try:
         async with httpx.AsyncClient(timeout=5.0) as client:
-            await client.post(f"{server_url()}/api/channel/permission", json=body)
+            await client.post(f"{found[0]}/api/channel/permission", json=body, headers=signed(found[1])[0])
     except httpx.HTTPError as e:
         log.warning("permission request %s not relayed: %s", body["request_id"], e)
 

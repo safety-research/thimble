@@ -44,7 +44,7 @@ def claude_like(tmp_path):
         p.stdout.close()
 
 
-def _subscribe_once(query: str, monkeypatch) -> int:
+def _subscribe_once(query: str, monkeypatch, headers: dict[str, str]) -> int:
     """GET /api/channel through the app, with the stream cut off right after the subscription attached its session."""
     real = session.connected
 
@@ -53,24 +53,25 @@ def _subscribe_once(query: str, monkeypatch) -> int:
         raise HTTPException(418, "stop before the stream")
 
     monkeypatch.setattr(session, "connected", connected_then_stop)
-    return TestClient(main.create_app()).get(f"/api/channel?{query}").status_code
+    return TestClient(main.create_app()).get(f"/api/channel?{query}", headers=headers).status_code
 
 
-def test_a_config_dir_in_the_subscription_query_is_ignored(served, monkeypatch, tmp_path):
+def test_a_config_dir_in_the_subscription_query_is_ignored(served, monkeypatch, tmp_path, plugin_headers):
     before = config.claude_config_dir()
     planted = tmp_path / "planted"
     q = f"cwd={_cwd()}&session={FIRST}&delivery=channel&config_dir={planted}"
-    assert _subscribe_once(q, monkeypatch) == 418
+    assert _subscribe_once(q, monkeypatch, plugin_headers()) == 418
     assert session.current(CORPUS).sid == FIRST
     assert config.claude_config_dir() == before != planted
     assert config.settings_files()[-1] == before / "settings.json"
 
 
 @needs_proc
-def test_the_subscription_serves_the_config_dir_of_the_claude_process_it_names(served, claude_like, monkeypatch, tmp_path):
+def test_the_subscription_serves_the_config_dir_of_the_claude_process_it_names(served, claude_like, monkeypatch, tmp_path,
+                                                                             plugin_headers):
     pid, real = claude_like
     q = f"cwd={_cwd()}&session={FIRST}&pid={pid}&delivery=channel&config_dir={tmp_path / 'planted'}"
-    assert _subscribe_once(q, monkeypatch) == 418
+    assert _subscribe_once(q, monkeypatch, plugin_headers()) == 418
     assert config.claude_config_dir() == real
 
 

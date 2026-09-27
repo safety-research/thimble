@@ -12,14 +12,17 @@ import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import pytest
-from test_shim_channel import INITIALIZE, INITIALIZED, _read, _send, _start, _stop
+from test_shim_channel import INITIALIZE, INITIALIZED, _read, _send, _start, _stop, proof
+
+from app import hook_auth
 
 NOTE = {"content": "question: why?", "meta": {"kind": "thread", "event": "e1", "thread": "t1"}}
 
 
 class _Slow:
     """POST /api/tools/<tool> answers after `delay` seconds (`drop`: closes the connection instead, once); GET
-    /api/channel sends one `channel` event once a call is under way; GET /api/health answers ok."""
+    /api/channel sends one `channel` event once a call is under way; GET /api/health answers ok. The tool and channel
+    answers prove the token as thimble's server does."""
 
     def __init__(self, delay: float, port: int = 0, drop: bool = False, fail: bool = False) -> None:
         self.delay, self.drop, self.fail = delay, drop, fail
@@ -59,6 +62,7 @@ class _Slow:
                     self.end_headers()
                     return
                 self.send_response(200)
+                self.send_header(hook_auth.PROOF_HEADER, proof(self) or "")
                 self.send_header("Content-Type", "text/event-stream")
                 self.end_headers()
                 outer.started.wait(30)
@@ -69,6 +73,8 @@ class _Slow:
             def _json(self, data: dict, code: int = 200) -> None:
                 body = json.dumps(data).encode()
                 self.send_response(code)
+                if self.command == "POST" and code < 500:  # a 500 comes from outside thimble's auth middleware
+                    self.send_header(hook_auth.PROOF_HEADER, proof(self) or "")
                 self.send_header("Content-Type", "application/json")
                 self.send_header("Content-Length", str(len(body)))
                 self.end_headers()

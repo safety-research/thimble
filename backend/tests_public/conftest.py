@@ -67,6 +67,23 @@ def _thimble_home_off_the_user(tmp_path, monkeypatch):
     monkeypatch.setenv("THIMBLE_HOME", str(tmp_path / "thimble-home"))
 
 
+PLUGIN_TOKEN = "t0ken-of-the-test-server"
+
+
+@pytest.fixture()
+def plugin_headers():
+    """A function giving the headers thimble's plugin sends to the routes only it may call (app/hook_auth.py), for a
+    fresh nonce each time, proving the token this fixture records in the test's server.json."""
+    import json
+
+    from app import hook_auth
+
+    home = Path(os.environ["THIMBLE_HOME"])
+    home.mkdir(parents=True, exist_ok=True)
+    (home / "server.json").write_text(json.dumps({"token": PLUGIN_TOKEN}))
+    return lambda: hook_auth.headers(PLUGIN_TOKEN, os.urandom(8).hex())
+
+
 @pytest.fixture()
 def consented():
     """The analyst agreed to terminal-first's changes to Claude Code's files (claude_changes.consent)."""
