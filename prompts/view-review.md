@@ -29,11 +29,11 @@ The view reads only files with no lines, which labels cannot mark, so the pictur
 
 - Does the test label show in its colour on the records and units it marks, in the overview, charts included, and in the detail, with nothing else in pictures 2 to 4 drawn in that colour?
 - Does the filter keep only what the test label marks, with the units and counts drawn from those records?
-- Does the view leave labels to the Labels pane beside it, with no label toggle, checkbox, menu or clickable legend of its own?
+- Does the view leave labels to thimble, with no label toggle, checkbox, menu or clickable legend of its own beyond controls that turn thimble's labels on or change their colours?
 
 ## label-controls
 
-Picture {{picture}}: the page has {{count}} controls of its own that name the test label, such as a toggle, a checkbox or a menu item. Remove them, since the Labels pane beside the view is the only place labels are turned on or filtered.
+Picture {{picture}}: the page has {{count}} controls of its own that name the test label, such as a toggle, a checkbox or a menu item. Remove them, or make each one thimble's: it calls `thimble.setLabel` or `thimble.setLabelColour` and carries `data-label` with the label's id.
 
 ## own-pills
 

@@ -29,11 +29,12 @@ def test_a_view_ticket_asks_for_an_overview_scales_from_the_data_and_a_fit_to_th
     assert re.findall(r"^- `([a-z]+)` ", examples, re.M) == ["timeline", "board"]
 
 
-def test_a_view_ticket_makes_labels_first_class_and_leaves_their_controls_to_the_labels_pane():
+def test_a_view_ticket_makes_labels_first_class_and_its_label_controls_thimble_s():
     labels = prompts.section("dev-view", "Labels")
     for words in ("the Labels pane beside the view, outside its frame", "`data-anchor`", "`thimble.marked(ref)`",
                   "`thimble.kept(ref)`", "`thimble.onLabels(fn)`", "while a label is on, it alone colours records",
-                  "No label controls", "no label toggle, checkbox, menu or clickable legend"):
+                  "Label controls are thimble's", "no label state of its own", "`thimble.setLabel(id, on)`",
+                  "`thimble.setLabelColour(id, value, colour)`", "`thimble.newLabel()`", "`data-label`"):
         assert words in labels, words
 
 
