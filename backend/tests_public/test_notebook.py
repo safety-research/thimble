@@ -277,7 +277,7 @@ async def test_oversized_stream_is_bounded_with_marker_and_side_file(client, cor
     code = f"for i in range({n}): print(f'line {{i}} value {{100000 + i}}')"
     expected = "".join(f"line {i} value {100000 + i}\n" for i in range(n))
     full_cell = await notebook.run_code(corpus, code, "chat:c1", title="q")
-    # in-process callers (concepts.py parses the printed stdout; chat.py formats it) get the complete outputs
+    # in-process callers (concepts.py parses the printed stdout) get the complete outputs
     assert full_cell["outputs"] == [{"text/plain": expected, "_stream": "stdout"}]
     # the notebook stores head + marker + tail and names the side file
     stored = notebook.get_cell(corpus, full_cell["id"])

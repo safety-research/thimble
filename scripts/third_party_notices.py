@@ -9,8 +9,9 @@
 The repository ships source only and needs no such file. The zip ships the built UI, which bundles code and fonts from
 npm packages whose licenses (MIT, BSD, ISC, MPL-2.0, and the OFL of the fonts) ask for their notices to travel with
 it. This lists every production entry of frontend/package-lock.json (the bundle holds code from a subset of them) with
-its license and the license text it ships, read from frontend/node_modules. The Python packages are not in the zip
-(install.sh installs them with uv), so they are not listed.
+its license and the license text it ships, read from frontend/node_modules, and then the notice of the UI's glyphs
+that follow published icon sets (the /*! comment of frontend/src/components/Icon.tsx). The Python packages are not in
+the zip (install.sh installs them with uv), so they are not listed.
 """
 from __future__ import annotations
 
@@ -23,6 +24,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 LICENSE_FILE = re.compile(r"(?i)^(licen[sc]e|copying|ofl)([-._][\w.-]*)?$")  # LICENSE, license-mit, LICENSE-MIT.txt, OFL.txt
+ICONS = Path("frontend") / "src" / "components" / "Icon.tsx"
+KEPT_COMMENT = re.compile(r"^/\*!(.*?)\*/", re.S | re.M)  # one that opens a line
 
 
 def npm_packages(root: Path) -> list[dict]:
@@ -66,7 +69,16 @@ def npm_details(pkg: dict) -> None:
     pkg["text"] = "\n\n".join(f.read_text(errors="replace").strip() for f in files)
 
 
-def render(npm: list[dict]) -> str:
+def icon_notices(root: Path) -> list[str]:
+    """The text of each /*! comment of Icon.tsx under `root`, without the comment's markers."""
+    path = root / ICONS
+    if not path.is_file():
+        return []
+    return ["\n".join(re.sub(r"^\s*\* ?", "", ln) for ln in m.group(1).strip().splitlines())
+            for m in KEPT_COMMENT.finditer(path.read_text())]
+
+
+def render(npm: list[dict], icons: list[str] | None = None) -> str:
     out = ["THIRD-PARTY NOTICES for the built UI of thimble (frontend/dist)", "",
            "Vite builds frontend/dist from thimble's own source and the npm packages below: the production dependencies",
            "recorded in frontend/package-lock.json (the bundle holds code from a subset of them). Each line gives the",
@@ -102,6 +114,10 @@ def render(npm: list[dict]) -> str:
     for key, members in sorted(groups.items(), key=lambda kv: kv[1][0]["name"].lower()):
         out += ["", "-" * 100, "Applies to: " + ", ".join(f"{p['name']} {p['version']}" for p in members), "",
                 members[0]["text"]]
+    if icons:
+        out += ["", "Icons", "-----", "Some of the UI's glyphs follow published icon sets (frontend/src/components/Icon.tsx):"]
+        for text in icons:
+            out += ["", text]
     return "\n".join(out) + "\n"
 
 
@@ -114,7 +130,7 @@ def main() -> int:
     npm = npm_packages(root)
     for p in npm:
         npm_details(p)
-    a.out.write_text(render(npm))
+    a.out.write_text(render(npm, icon_notices(root)))
     print(f"{a.out}: {len(npm)} npm packages ({sum(1 for p in npm if p['text'])} with a license text)")
     return 0
 

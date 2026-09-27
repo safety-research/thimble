@@ -387,6 +387,14 @@ def test_unknown_extension_pages_as_text_with_replacement(odd_files_data):
     assert [rec["record"] for rec in csv["records"]] == [{"text": "a,b"}, {"text": "1,2"}]
 
 
+def test_a_file_is_listed_whatever_its_name(odd_files_data):
+    """No file name is left out of the listing; only a database's sqlite side files are."""
+    (odd_files_data / "odd" / "GROUND_TRUTH.md").write_text("# notes\n")
+    (odd_files_data / "odd" / "other.db-wal").write_bytes(b"")
+    paths = {s["path"] for s in client.get("/api/corpora/odd/sources").json()}
+    assert "GROUND_TRUTH.md" in paths and "other.db-wal" not in paths
+
+
 def test_db_file_sqlite_cannot_read_is_a_clear_400(odd_files_data):
     """`other.db` is a database by name (kind 'forge') but its bytes are not a database sqlite can open: every route
     that would open it answers 400 with a message naming the file, never a traceback (a 500)."""

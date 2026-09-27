@@ -75,6 +75,15 @@ Type `/thimble` to start the thimble server and print the dashboard URL. If `/th
 
 Claude Code (tested with 2.1.281), macOS or Linux, and Python 3.12+ ([uv](https://docs.astral.sh/uv/) recommended). Node 20+ is needed for custom views (the viewers the dev agent builds for your data) and for a development build. [INSTALL.md](INSTALL.md) has the details.
 
+## Security
+
+- The server listens on 127.0.0.1 with no login and keeps running after the session.
+- thimble's tools are pre-approved, and Claude's Python runs in a notebook kernel with no sandbox: treat a corpus like code you are about to run.
+- The plugin's hooks run in every Claude Code session.
+- The dev agent edits and restarts the installed program.
+- Usage is billed to your own account; telemetry stays local.
+- Report security problems privately to [@mjoerke](https://github.com/mjoerke).
+
 ## License
 
 Apache-2.0; see [LICENSE](LICENSE).

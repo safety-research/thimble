@@ -191,10 +191,10 @@ def test_qualify_bare_spans_prefixes_the_citing_cell():
     """A span written without its card id (a value-ref or a bare ref, an output line or a td) is a span of the
     takeaway's own card, and is stored with the id in front. Everything that carries an id, a file
     line or a db row is untouched; the rewrite is idempotent."""
-    text = ("Lisa opened [[5|@out0#L3]] PRs; [[@out0#L4]]; [[12|#count/total]] and [[#count/alpha]]; "
+    text = ("user-b opened [[5|@out0#L3]] PRs; [[@out0#L4]]; [[12|#count/total]] and [[#count/alpha]]; "
             "[[7|card:zz@out0#L1]] [[board.jsonl#L2]] [[forge.db#prs/1]] [[#items|card:zz#p/q]].")
     out = cite.qualify_bare_spans("c1", text)
-    assert out == ("Lisa opened [[5|card:c1@out0#L3]] PRs; [[card:c1@out0#L4]]; [[12|card:c1#count/total]] and "
+    assert out == ("user-b opened [[5|card:c1@out0#L3]] PRs; [[card:c1@out0#L4]]; [[12|card:c1#count/total]] and "
                    "[[card:c1#count/alpha]]; [[7|card:zz@out0#L1]] [[board.jsonl#L2]] [[forge.db#prs/1]] [[#items|card:zz#p/q]].")
     assert cite.qualify_bare_spans("c1", out) == out
     # the prompts' placeholder id, copied into a takeaway given with add_card, is the takeaway's own card too
@@ -206,29 +206,29 @@ def test_qualify_bare_spans_prefixes_the_citing_cell():
 def test_resolve_reads_a_bare_span_as_this_cells_and_verifies_it():
     """Through resolve: the bare span gets the cell's id and is then checked like any self-span — kept when its line
     holds the value, re-pointed at the unique line that does when it does not; a bare [[@out0#L3]] is prefixed as is."""
-    out = [{"text/plain": "author n\nagent-11 312\ngh:lisa 5\n", "_stream": "stdout"}]
-    r = cite.resolve("c1", "Lisa opened [[5|@out0#L3]] PRs ([[@out0#L3]]); agent-11 [[312|@out0#L9]].", out)
-    assert r.annotated == "Lisa opened [[5|card:c1@out0#L3]] PRs ([[card:c1@out0#L3]]); agent-11 [[312|card:c1@out0#L2]]."
+    out = [{"text/plain": "author n\nagent-11 312\ngh:user-b 5\n", "_stream": "stdout"}]
+    r = cite.resolve("c1", "user-b opened [[5|@out0#L3]] PRs ([[@out0#L3]]); agent-11 [[312|@out0#L9]].", out)
+    assert r.annotated == "user-b opened [[5|card:c1@out0#L3]] PRs ([[card:c1@out0#L3]]); agent-11 [[312|card:c1@out0#L2]]."
     assert [(l.token, l.ref) for l in r.links] == [("5", "card:c1@out0#L3"), ("312", "card:c1@out0#L2")]
     assert "@out0#L" not in r.annotated.replace("card:c1@out0#L", "")
 
 
 # --- stable output indices; a table's values cited by column and row; a re-run's stale refs kept ---
 
-_G57_HTML = ("<table><thead><tr><th></th><th>deletions</th><th>reviews</th></tr><tr><th>account</th><th></th><th></th></tr></thead>"
+_ACCOUNTS_HTML = ("<table><thead><tr><th></th><th>deletions</th><th>reviews</th></tr><tr><th>account</th><th></th><th></th></tr></thead>"
              "<tbody><tr><th>alpha</th><td>127</td><td>4</td></tr><tr><th>beta</th><td>3</td><td>1250</td></tr>"
              "<tr><th>gamma</th><td>44</td><td>3</td></tr></tbody></table>")
-_G57_TEXT = "         deletions  reviews\naccount                    \nalpha          127        4\nbeta             3     1250\ngamma           44        3\n"
-_G57_TABLE = {"text/html": _G57_HTML, "text/plain": _G57_TEXT}
-_G57_PLOT = {"image/svg+xml": "<svg/>", "text/plain": "<Figure size 500x300 with 1 Axes>"}
+_ACCOUNTS_TEXT = "         deletions  reviews\naccount                    \nalpha          127        4\nbeta             3     1250\ngamma           44        3\n"
+_ACCOUNTS_TABLE = {"text/html": _ACCOUNTS_HTML, "text/plain": _ACCOUNTS_TEXT}
+_ACCOUNTS_PLOT = {"image/svg+xml": "<svg/>", "text/plain": "<Figure size 500x300 with 1 Axes>"}
 
 
 def test_output_index_is_the_stored_out_field_else_the_position():
-    plain = [{"text/plain": "a\nb\n", "_stream": "stdout"}, _G57_TABLE]
+    plain = [{"text/plain": "a\nb\n", "_stream": "stdout"}, _ACCOUNTS_TABLE]
     assert [i for i, _ in cite.iter_outputs(plain)] == [0, 1]
     assert cite.output_at(plain, 1) is plain[1] and cite.output_at(plain, 2) is None
     # a revision drew a plot before the table: the table keeps @out0 (notebook.number_outputs wrote `_out`)
-    revised = [{**_G57_PLOT, "_out": 1}, {**_G57_TABLE, "_out": 0}]
+    revised = [{**_ACCOUNTS_PLOT, "_out": 1}, {**_ACCOUNTS_TABLE, "_out": 0}]
     assert [i for i, _ in cite.iter_outputs(revised)] == [1, 0]
     assert cite.output_at(revised, 0) is revised[1]
     assert cite.output_line(revised, 0, 3) == "alpha          127        4" and cite.output_line(revised, 1, 1) == "<Figure size 500x300 with 1 Axes>"
@@ -240,21 +240,21 @@ def test_output_index_is_the_stored_out_field_else_the_position():
 
 
 def test_a_line_span_into_a_table_is_written_by_column_and_row():
-    r = cite.resolve("c1", "alpha made [[127|card:c1@out0#L3]] deletions and beta [[1,250|card:c1@out0#L4]] reviews.", [_G57_TABLE])
+    r = cite.resolve("c1", "alpha made [[127|card:c1@out0#L3]] deletions and beta [[1,250|card:c1@out0#L4]] reviews.", [_ACCOUNTS_TABLE])
     assert r.annotated == "alpha made [[127|card:c1#deletions/alpha]] deletions and beta [[1,250|card:c1#reviews/beta]] reviews."
     assert [(l.token, l.ref) for l in r.links] == [("127", "card:c1#deletions/alpha"), ("1,250", "card:c1#reviews/beta")]
     # the same value twice in the row: the line span stays (no one td to name); a line no row's label starts too
-    twice = {"text/html": _G57_HTML.replace("<td>4</td>", "<td>127</td>"), "text/plain": _G57_TEXT.replace("127        4", "127      127")}
+    twice = {"text/html": _ACCOUNTS_HTML.replace("<td>4</td>", "<td>127</td>"), "text/plain": _ACCOUNTS_TEXT.replace("127        4", "127      127")}
     r = cite.resolve("c1", "alpha: [[127|card:c1@out0#L3]].", [twice])
     assert "[[127|card:c1@out0#L3]]" in r.annotated
-    r = cite.resolve("c1", "the header [[deletions|card:c1@out0#L1]].", [_G57_TABLE])
+    r = cite.resolve("c1", "the header [[deletions|card:c1@out0#L1]].", [_ACCOUNTS_TABLE])
     assert "[[deletions|card:c1@out0#L1]]" in r.annotated
     # a line of a text output stays a line span
     r = cite.resolve("c1", "[[127|card:c1@out0#L2]] rows", [{"text/plain": "account deletions\nalpha 127\n", "_stream": "stdout"}])
     assert r.annotated == "[[127|card:c1@out0#L2]] rows"
-    assert cite.line_td("c1", _G57_TABLE, "gamma           44        3", "44") == "card:c1#deletions/gamma"
-    assert cite.line_td("c1", _G57_TABLE, "gamma           44        3", "3") == "card:c1#reviews/gamma"
-    assert cite.line_td("c1", _G57_TABLE, "nobody 44", "44") is None and cite.line_td("c1", _G57_PLOT, "x 44", "44") is None
+    assert cite.line_td("c1", _ACCOUNTS_TABLE, "gamma           44        3", "44") == "card:c1#deletions/gamma"
+    assert cite.line_td("c1", _ACCOUNTS_TABLE, "gamma           44        3", "3") == "card:c1#reviews/gamma"
+    assert cite.line_td("c1", _ACCOUNTS_TABLE, "nobody 44", "44") is None and cite.line_td("c1", _ACCOUNTS_PLOT, "x 44", "44") is None
     # two columns of the same header: `#n/a` reads back as the FIRST n, so a line span on the
     # second column's value stays a line span; one on the first column's value converts, since the td shows it
     dup = {"text/html": "<table><tr><th></th><th>n</th><th>n</th></tr><tr><th>a</th><td>1</td><td>2</td></tr></table>", "text/plain": "   n  n\na  1  2\n"}
@@ -267,8 +267,8 @@ def test_a_line_span_into_a_table_is_written_by_column_and_row():
 
 
 def test_resolve_keeps_a_stale_ref_when_asked_and_moves_one_whose_value_still_has_one_home():
-    after = [{**_G57_PLOT, "_out": 1}, {"text/html": _G57_HTML.replace("<tr><th>gamma</th><td>44</td><td>3</td></tr>", ""),
-                                        "text/plain": _G57_TEXT.replace("gamma           44        3\n", ""), "_out": 0}]
+    after = [{**_ACCOUNTS_PLOT, "_out": 1}, {"text/html": _ACCOUNTS_HTML.replace("<tr><th>gamma</th><td>44</td><td>3</td></tr>", ""),
+                                        "text/plain": _ACCOUNTS_TEXT.replace("gamma           44        3\n", ""), "_out": 0}]
     text = "alpha [[127|card:c1@out0#L3]], beta [[1250|card:c1#reviews/beta]], gamma [[44|card:c1#deletions/gamma]]."
     r = cite.resolve("c1", text, after, keep_stale=True)
     assert r.annotated == "alpha [[127|card:c1#deletions/alpha]], beta [[1250|card:c1#reviews/beta]], gamma [[44|card:c1#deletions/gamma]]."
@@ -280,25 +280,25 @@ def test_resolve_keeps_a_stale_ref_when_asked_and_moves_one_whose_value_still_ha
 
 # --- the markdown-link hybrid `[[56]](card:…)` and a number alone in brackets ---
 
-_G70_HTML = ("<table><thead><tr><th></th><th>tickets</th><th>never_closed</th><th>median_min_to_first_reply</th></tr></thead><tbody>"
+_DESKS_HTML = ("<table><thead><tr><th></th><th>tickets</th><th>never_closed</th><th>median_min_to_first_reply</th></tr></thead><tbody>"
              "<tr><th>north-desk_q1</th><td>57</td><td>56</td><td>18.4</td></tr>"
              "<tr><th>south-desk_q1</th><td>56</td><td>0</td><td>41.2</td></tr>"
              "<tr><th>east-desk_q1</th><td>57</td><td>3</td><td>122.9</td></tr></tbody></table>")
 
 
 def test_normalise_markup_reads_the_hybrid_as_a_value_ref_and_a_bracketed_number_as_the_number():
-    """A takeaway written `[[56]](card:227f3dc3#never_closed/…)` would read as a bare ref to a file named 56 and never
+    """A takeaway written `[[56]](card:ab12cd34#never_closed/…)` would read as a bare ref to a file named 56 and never
     resolve. Such a hybrid becomes the value-ref it means; a number alone in brackets is the number; a bare ref followed by a parenthesised word, a
     value-ref that is already right and a markdown link on prose are untouched; the rewrite is idempotent."""
-    text = ("North never closed [[56]](card:227f3dc3#never_closed/north-desk_q1) of its "
-            "[[57]](card:227f3dc3#tickets/north-desk_q1) tickets, a median of "
-            "[[41.2]](card:227f3dc3#median_min_to_first_reply/south-desk_q1) min; east [[3]] never closed, "
-            "[[29]](card:a57a0f74@out0#L2) in the other card and [[0]]( card:227f3dc3#never_closed/south-desk_q2 ).")
+    text = ("North never closed [[56]](card:ab12cd34#never_closed/north-desk_q1) of its "
+            "[[57]](card:ab12cd34#tickets/north-desk_q1) tickets, a median of "
+            "[[41.2]](card:ab12cd34#median_min_to_first_reply/south-desk_q1) min; east [[3]] never closed, "
+            "[[29]](card:cd34ef56@out0#L2) in the other card and [[0]]( card:ab12cd34#never_closed/south-desk_q2 ).")
     out = cite.normalise_markup(text)
-    assert out == ("North never closed [[56|card:227f3dc3#never_closed/north-desk_q1]] of its "
-                   "[[57|card:227f3dc3#tickets/north-desk_q1]] tickets, a median of "
-                   "[[41.2|card:227f3dc3#median_min_to_first_reply/south-desk_q1]] min; east 3 never closed, "
-                   "[[29|card:a57a0f74@out0#L2]] in the other card and [[0|card:227f3dc3#never_closed/south-desk_q2]].")
+    assert out == ("North never closed [[56|card:ab12cd34#never_closed/north-desk_q1]] of its "
+                   "[[57|card:ab12cd34#tickets/north-desk_q1]] tickets, a median of "
+                   "[[41.2|card:ab12cd34#median_min_to_first_reply/south-desk_q1]] min; east 3 never closed, "
+                   "[[29|card:cd34ef56@out0#L2]] in the other card and [[0|card:ab12cd34#never_closed/south-desk_q2]].")
     assert cite.normalise_markup(out) == out
     same = "see [[card:c1]](above) and [[5|card:c1#a/b]] (ok), [a link](https://example.org), [[1,250]](README.md#L3)"
     assert cite.normalise_markup(same) == "see [[card:c1]](above) and [[5|card:c1#a/b]] (ok), [a link](https://example.org), [[1,250|README.md#L3]]"
@@ -309,7 +309,7 @@ def test_normalise_markup_reads_the_hybrid_as_a_value_ref_and_a_bracketed_number
     assert cite.normalise_markup("[[56]](card:x#col/row label) [[56]](card:x#a/b(1)) [[12]](README.md) [[3.5]](card:x#a/b)") == (
         "[[56|card:x#col/row label]] [[56|card:x#a/b(1)]] [[12|README.md]] [[3.5|card:x#a/b]]")
     assert cite.normalise_markup("[[56]](nonsense here) and [[56]] alone") == "[[56]](nonsense here) and 56 alone"
-    spaced = _G70_HTML.replace("never_closed", "never closed").replace("north-desk_q1", "north desk")
+    spaced = _DESKS_HTML.replace("never_closed", "never closed").replace("north-desk_q1", "north desk")
     r = cite.resolve("c1", "North never closed [[56]](card:c1#never closed/north desk) tickets.", [{"text/html": spaced, "text/plain": "t"}])
     assert r.annotated == f"North never closed [[56|{cite.td_ref('c1', 'never closed', 'north desk')}]] tickets." and r.unresolved == []
 
@@ -331,7 +331,7 @@ def test_normalise_markup_reads_a_single_bracketed_value_ref_as_the_value_ref():
 
 
 def test_resolve_links_the_hybrid_tokens_where_they_point_and_reads_the_bracketed_number_like_any_other():
-    table = [{"text/html": _G70_HTML, "text/plain": "table"}]
+    table = [{"text/html": _DESKS_HTML, "text/plain": "table"}]
     text = ("North never closed [[56]](card:c1#never_closed/north-desk_q1) of its "
             "[[57]](card:c1#tickets/north-desk_q1) tickets; east [[3]] never closed; "
             "[[122.9]](card:c1#median_min_to_first_reply/east-desk_q1) min to the first reply.")
@@ -352,7 +352,7 @@ def test_resolve_links_the_hybrid_tokens_where_they_point_and_reads_the_brackete
 
 # --- numbers compare by value; a decrease may cite a negative td ---
 
-_G70_DELTA_HTML = ("<table><thead><tr><th></th><th>closed_staffed</th><th>delta_closed</th><th>delta_pp</th></tr></thead><tbody>"
+_DESKS_DELTA_HTML = ("<table><thead><tr><th></th><th>closed_staffed</th><th>delta_closed</th><th>delta_pp</th></tr></thead><tbody>"
                    "<tr><th>north | weekday | wk1</th><td>27.0</td><td>-14.0</td><td>8.30</td></tr>"
                    "<tr><th>south | weekend | wk3</th><td>1234.0</td><td>-33.0</td><td>-10.7</td></tr></tbody></table>")
 
@@ -431,7 +431,7 @@ def test_a_number_cites_the_td_holding_it_as_a_float_and_a_decrease_cites_a_nega
     thousands-separated number finds the td `1234.0`; "12 fewer" written as a value-ref to the td `-12.0` is kept and
     "1,234 fewer" finds `-1234`-shaped values by itself — while the same numbers without a decrease word are not
     matched to a negative td, and a signed `-12` never matches a positive one."""
-    table = [{"text/html": _G70_DELTA_HTML, "text/plain": "table"}]
+    table = [{"text/html": _DESKS_DELTA_HTML, "text/plain": "table"}]
     closed, delta, s_closed, s_delta = (cite.td_ref("c1", "closed_staffed", "north | weekday | wk1"), cite.td_ref("c1", "delta_closed", "north | weekday | wk1"),
                                         cite.td_ref("c1", "closed_staffed", "south | weekend | wk3"), cite.td_ref("c1", "delta_closed", "south | weekend | wk3"))
     r = cite.resolve("c1", f"North closed [[27|{closed}]] tickets, [[14|{delta}]] fewer than unstaffed; south closed 1,234, 33 fewer.", table)
@@ -672,13 +672,13 @@ def test_a_number_cited_to_the_whole_card_stays_on_the_card_as_a_word_does():
 def test_normalise_markup_writes_a_file_line_cited_through_a_card_as_the_line():
     """`[[refused|card:<id>#<path>#L<n>…]]`, a model's citation of an example card's excerpt, is stored as the file's line
     it names; a td span, a card's output line and a bare card are untouched, and the rewrite is idempotent."""
-    text = ("One agent [[refused a user install|card:3d10aa2b#runs/one/agent-39.jsonl#L103.b0:c12-109]], reporting "
-            "[[0+untagged.12|card:3d10aa2b#runs/one/agent-39.jsonl#L118.b0:c0-25]] [[card:3d10aa2b#a b/c.jsonl#L4-L6]]; "
-            "[[31|card:3d10aa2b#outcome/merged]] [[8|card:3d10aa2b@out0#L2]] [[card:3d10aa2b]]")
+    text = ("One agent [[refused a user install|card:ef56ab12#runs/one/agent-39.jsonl#L103.b0:c12-109]], reporting "
+            "[[0+untagged.12|card:ef56ab12#runs/one/agent-39.jsonl#L118.b0:c0-25]] [[card:ef56ab12#a b/c.jsonl#L4-L6]]; "
+            "[[31|card:ef56ab12#outcome/merged]] [[8|card:ef56ab12@out0#L2]] [[card:ef56ab12]]")
     out = cite.normalise_markup(text)
     assert out == ("One agent [[refused a user install|runs/one/agent-39.jsonl#L103.b0:c12-109]], reporting "
                    "[[0+untagged.12|runs/one/agent-39.jsonl#L118.b0:c0-25]] [[a b/c.jsonl#L4-L6]]; "
-                   "[[31|card:3d10aa2b#outcome/merged]] [[8|card:3d10aa2b@out0#L2]] [[card:3d10aa2b]]")
+                   "[[31|card:ef56ab12#outcome/merged]] [[8|card:ef56ab12@out0#L2]] [[card:ef56ab12]]")
     assert cite.normalise_markup(out) == out
 
 

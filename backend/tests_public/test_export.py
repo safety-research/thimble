@@ -18,9 +18,9 @@ from fastapi.testclient import TestClient
 from app import canvas_history, config, dev, export, notebook
 
 C = "mini"
-MAIN_SID = "5f0c1d2e-3a4b-4c5d-8e6f-7a8b9c0d1e2f"
+MAIN_SID = "5f5f5f5f-0000-4000-8000-000000000002"
 ORIENT_SID = "11111111-2222-4333-8444-555555555555"
-FORK = "a1f2e3d4c5b6a7980"  # the fork of thread 2b99eda7
+FORK = "a1f2e3d4c5b6a7980"  # the fork of thread ef56ab12
 OTHER_FORK = "a0b1c2d3e4f5a6b7c"  # the fork of a thread whose chat is gone, named by its description alone
 T = [f"2026-03-12T10:{m:02d}:00+00:00" for m in range(60)]
 
@@ -52,7 +52,7 @@ def write_main_session(proj: Path) -> None:
         _record("user", "2026-03-12T10:03:00.000Z", "how many posts are there?"),
         _record("assistant", "2026-03-12T10:03:09.000Z", [{"type": "text", "text": "There are 8 posts."}]),
     ])
-    for agent, thread in ((FORK, "2b99eda7"), (OTHER_FORK, "e1820b23")):
+    for agent, thread in ((FORK, "ef56ab12"), (OTHER_FORK, "e1820b23")):
         sub = proj / MAIN_SID / "subagents"
         _jsonl(sub / f"agent-{agent}.jsonl", [
             {**_record("user", "2026-03-12T10:07:00.000Z", f"thread:{thread} what is this?"), "isSidechain": True,
@@ -105,9 +105,9 @@ def ws(workspaces_tmp, tmp_path, monkeypatch):
     _json(chats / "main.meta.json", {"id": "main", "kind": "main", "role": "main", "title": "main", "created_at": T[0], "parent": None})
     _jsonl(chats / "main.jsonl", [{"type": "user", "ts": T[3], "text": "how many?", "by": "browser", "event": "e1"},
                                   {"type": "text", "delta": "27."}, {"type": "done", "ts": T[4]}])
-    _json(chats / "2b99eda7.meta.json", {"id": "2b99eda7", "kind": "thread", "role": "thread", "title": "t", "created_at": T[7],
+    _json(chats / "ef56ab12.meta.json", {"id": "ef56ab12", "kind": "thread", "role": "thread", "title": "t", "created_at": T[7],
                                          "parent": "main", "anchor": "events.jsonl#L1", "fork": {"agent_id": FORK, "session": MAIN_SID}})
-    _jsonl(chats / "2b99eda7.jsonl", [{"type": "user", "ts": T[7], "text": "what is this?", "by": "browser", "event": "e2"},
+    _jsonl(chats / "ef56ab12.jsonl", [{"type": "user", "ts": T[7], "text": "what is this?", "by": "browser", "event": "e2"},
                                       {"type": "text", "delta": "A save.", "reply": True}, {"type": "done", "ts": T[8]}])
     _json(chats / "or1.meta.json", {"id": "or1", "kind": "agent", "role": "orient", "title": "Orientation", "created_at": T[1],
                                     "parent": "main", "status": "done", "session": ORIENT_SID, "ts_end": T[9]})
@@ -164,7 +164,7 @@ def test_the_zip_holds_every_stream_and_the_manifest_names_each_file(ws):
     z = _zip()
     names = set(z.namelist())
     for need in ("manifest.json", "README.md", "telemetry/ui.jsonl", "telemetry/files-opened.jsonl", "telemetry/events.jsonl",
-                 "chats/index.jsonl", "chats/main.jsonl", "chats/2b99eda7.jsonl", "sessions/index.jsonl",
+                 "chats/index.jsonl", "chats/main.jsonl", "chats/ef56ab12.jsonl", "sessions/index.jsonl",
                  f"sessions/{MAIN_SID}.jsonl", f"sessions/{MAIN_SID}/subagents/agent-{FORK}.jsonl",
                  f"sessions/{ORIENT_SID}.jsonl", f"sessions/{ORIENT_SID}/subagents/workflows/wf_1/journal.jsonl",
                  f"sessions/{ORIENT_SID}/workflows/scripts/orient-wf_1.js", "canvas/groups.jsonl", "canvas/cards.jsonl",
@@ -208,7 +208,7 @@ def test_sessions_index_joins_each_transcript_to_its_chat(ws):
     main = next(r for r in idx if r["session"] == MAIN_SID and r["file"] == "session")
     assert main["role"] == "main" and main["chat"] == "main" and main["ended"] == T[50] and main["rows"] > 0
     fork = next(r for r in idx if r.get("agent_id") == FORK)
-    assert fork["file"] == "subagent" and fork["chat"] == "2b99eda7" and fork["meta"]["description"] == "thread:2b99eda7"
+    assert fork["file"] == "subagent" and fork["chat"] == "ef56ab12" and fork["meta"]["description"] == "thread:ef56ab12"
     # a fork that no thread's meta names still names its thread through its description
     other = next(r for r in idx if r.get("agent_id") == OTHER_FORK)
     assert other["chat"] == "e1820b23"
@@ -232,7 +232,7 @@ def test_chats_come_as_the_browser_showed_them_with_an_index(ws):
     z = _zip()
     assert z.read("chats/main.jsonl") == (ws / "chats" / "main.jsonl").read_bytes()
     idx = {r["id"]: r for r in _rows(z, "chats/index.jsonl")}
-    assert idx["2b99eda7"]["fork"]["agent_id"] == FORK and idx["2b99eda7"]["records"] == 3
+    assert idx["ef56ab12"]["fork"]["agent_id"] == FORK and idx["ef56ab12"]["records"] == 3
     assert idx["or1"]["log"] is None and idx["or1"]["session"] == ORIENT_SID
 
 
@@ -286,12 +286,12 @@ def test_a_deleted_thread_moves_to_the_trash_and_stays_in_the_export(ws):
 
     api = FastAPI()
     api.include_router(agents.router, prefix="/api")
-    assert TestClient(api).delete(f"/api/ws/{C}/chats/2b99eda7").status_code == 200
-    assert not (ws / "chats" / "2b99eda7.jsonl").exists() and (ws / "chats" / "trash" / "2b99eda7.jsonl").is_file()
-    assert "2b99eda7" not in [m["id"] for m in agents.list_chats(C)]
+    assert TestClient(api).delete(f"/api/ws/{C}/chats/ef56ab12").status_code == 200
+    assert not (ws / "chats" / "ef56ab12.jsonl").exists() and (ws / "chats" / "trash" / "ef56ab12.jsonl").is_file()
+    assert "ef56ab12" not in [m["id"] for m in agents.list_chats(C)]
     z = _zip()
-    row = next(r for r in _rows(z, "chats/index.jsonl") if r["id"] == "2b99eda7")
-    assert row["trashed"] is True and row["log"] == "chats/trash/2b99eda7.jsonl" and row["records"] == 3
+    row = next(r for r in _rows(z, "chats/index.jsonl") if r["id"] == "ef56ab12")
+    assert row["trashed"] is True and row["log"] == "chats/trash/ef56ab12.jsonl" and row["records"] == 3
 
 
 def test_a_transcript_path_outside_claude_code_s_transcript_roots_is_never_copied(ws, tmp_path):

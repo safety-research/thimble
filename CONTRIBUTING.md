@@ -32,9 +32,9 @@ corpus to try it on.
 
 ## Run the tests
 
-`bash scripts/check.sh` runs everything CI runs: the content check, the backend's tests, the frontend's type check,
-tests and build, and the browser tests. Make it pass before you open a pull request. While you work, run the tests of
-what you changed:
+`bash scripts/check.sh` runs everything CI runs: the content check, the commit messages check, the backend's tests, the
+frontend's type check, tests and build, and the browser tests. Make it pass before you open a pull request. While you
+work, run the tests of what you changed:
 
 ```
 cd backend && THIMBLE_SKIP_KEY=1 .venv/bin/python -m pytest tests_public/test_<module>.py -q

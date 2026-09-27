@@ -1,7 +1,7 @@
-"""scripts/check_content.py, the content step of scripts/check.sh: a listed word is found in any spelling, the
-maintainer's name only outside the files that carry it on purpose, files of kinds that never belong in the tree are
-refused, and so are names a case-insensitive disk cannot tell apart. The real list is digests, so these tests list words
-of their own."""
+"""scripts/check_content.py, the content and commits steps of scripts/check.sh: a listed word is found in any spelling,
+the maintainer's name only outside the files that carry it on purpose, files of kinds that never belong in the tree are
+refused, and so are names a case-insensitive disk cannot tell apart and commit messages that link a Claude Code session.
+The real list is digests, so these tests list words of their own."""
 import importlib.util
 import re
 import subprocess
@@ -90,6 +90,46 @@ def test_no_two_names_in_this_tree_differ_only_by_case(cc):
     root = SCRIPT.parents[1]
     rels = [rel for rel in cc.files_of(root) if not cc.NEVER.search(rel)]
     assert cc.case_clashes(rels) == []
+
+
+def test_this_tree_names_private_material_and_the_maintainer_only_where_it_may():
+    root = SCRIPT.parents[1]
+    if not (root / ".git").exists():
+        pytest.skip("not a git checkout")
+    spec = importlib.util.spec_from_file_location("check_content_tree", SCRIPT)
+    real = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(real)
+    tracked = subprocess.run(["git", "-C", str(root), "ls-files", "-z"], capture_output=True, check=True).stdout
+    rels = sorted(p for p in tracked.decode().split("\0") if p and (root / p).is_file())
+    assert [h for h in real.scan(root, rels) if h[2] in ("private", "maintainer")] == []
+
+
+GIT = ["git", "-c", "core.hooksPath=/dev/null", "-c", "user.name=Test", "-c", "user.email=test@example.org",
+       "-c", "commit.gpgsign=false"]
+
+
+def commit(root: Path, message: str) -> str:
+    subprocess.run([*GIT, "-C", str(root), "commit", "-q", "--allow-empty", "-m", message], check=True)
+    return subprocess.run(["git", "-C", str(root), "rev-parse", "HEAD"], capture_output=True, text=True,
+                          check=True).stdout.strip()
+
+
+def test_commit_messages_with_a_session_line_or_link_are_refused(cc, tmp_path):
+    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
+    first = commit(tmp_path, "First\n\nClaude-Session: https://claude.ai/code/session_0000")
+    old = commit(tmp_path, "Before the rule\n\nclaude-session: https://claude.ai/code/session_0001")
+    commit(tmp_path, "Clean\n\nCo-Authored-By: Someone <someone@example.org>")
+    linked = commit(tmp_path, "Linked\n\nSee https://claude.ai/code/session_0002 for the run.")
+    trailer = commit(tmp_path, "Trailer\n\nBody.\nClaude-Session: https://claude.ai/code/session_0003")
+    found = cc.commit_hits(tmp_path, f"{first}..HEAD", until=old)
+    assert [(h[0], h[1], h[2]) for h in found] == [(trailer[:12], 4, "session"), (linked[:12], 3, "session")]
+    assert len(cc.commit_hits(tmp_path, f"{first}..HEAD", until=None)) == 3
+    assert cc.commit_hits(tmp_path, f"{first}..HEAD", until="0" * 40) == cc.commit_hits(tmp_path, f"{first}..HEAD", None)
+    run = [sys.executable, str(SCRIPT), "--commits"]
+    r = subprocess.run([*run, f"{first}..HEAD", str(tmp_path)], capture_output=True, text=True)
+    assert r.returncode == 1 and f"{trailer[:12]}:4: [session] Claude-Session:" in r.stdout
+    assert subprocess.run([*run, f"{first}..{first}", str(tmp_path)], capture_output=True).returncode == 0
+    assert subprocess.run([*run, "nope..HEAD", str(tmp_path)], capture_output=True).returncode == 2
 
 
 def test_the_real_list_is_digests_of_known_kinds():

@@ -1,6 +1,8 @@
 # Installing thimble
 
-thimble uses the credentials of the Claude Code session that starts it; it never reads or stores an API key.
+thimble uses the credentials of the Claude Code session that starts it. For its direct API calls it reads
+`ANTHROPIC_API_KEY` or `ANTHROPIC_AUTH_TOKEN`, or runs your `apiKeyHelper`, and keeps the key in memory. Without a key,
+it links Claude Code's login file into its workspaces. It never writes an API key to disk and never logs one.
 
 ## Requirements
 
@@ -53,5 +55,5 @@ that one and prints each path it deleted. The folder it read and your Claude Cod
 
 - `thimble doctor` shows the server, the versions, the auth path and the log's recent errors.
 - `/thimble` is not recognised right after an install: run `/reload-plugins`, or start a new session.
-- To report a problem, run `thimble feedback "<what went wrong>"`. It writes a zip of the logs with keys removed and
-  says where to send it.
+- To report a problem, run `thimble feedback "<what went wrong>"`. It writes a zip of the logs, chats and Claude
+  Code transcripts, with keys removed, and says where to send it. The chats and transcripts quote your corpus.

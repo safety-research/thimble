@@ -105,9 +105,9 @@ def test_a_file_is_named_by_whole_components_and_a_folder_at_the_start_of_a_path
 
 @pytest.mark.parametrize(("one", "other"), [
     ("run-7/log.jsonl", "run-12/log.jsonl"),
-    ("a/session-data/8c85a272-ab44-40b4-a770-55c2a33015eb/subagents/agent-a5fed5eb29b604d26.jsonl",
-     "a/session-data/1b2e3f40-aeef-4c1e-9a52-6f3d8e2b7c10/subagents/agent-0b1c2d3e4f5a6b7c8.jsonl"),
-    ("a/subagents/workflows/wf_d14c34b0-33a/journal.jsonl", "a/subagents/workflows/wf_9e0f1a2b-7f2/journal.jsonl"),
+    ("a/session-data/8c8c8c8c-0000-4000-8000-000000000001/subagents/agent-a1111111111111111.jsonl",
+     "a/session-data/1b1b1b1b-0000-4000-8000-000000000002/subagents/agent-0b1c2d3e4f5a6b7c8.jsonl"),
+    ("a/subagents/workflows/wf_d1d1d1d1-33a/journal.jsonl", "a/subagents/workflows/wf_9e0f1a2b-7f2/journal.jsonl"),
     ("eval/step10_S.jsonl", "eval/step250_S.jsonl"),
 ])
 def test_a_kind_of_file_masks_the_ids_in_its_path(one, other):

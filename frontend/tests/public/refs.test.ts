@@ -160,14 +160,14 @@ describe('card refs', () => {
   })
 
   test('a bare ref into part of a card is named by the cell or the lines, with the card only from outside it', () => {
-    const td = parseRef('card:0c9200c9#All%20open%20PRs/Reviews') as ParsedRef & { kind: 'cell' }
+    const td = parseRef('card:cd34ef56#All%20open%20PRs/Reviews') as ParsedRef & { kind: 'cell' }
     expect(cardPartLabel(td, 'review-load', true)).toBe('All open PRs · Reviews')
     expect(cardPartLabel(td, 'review-load', false)).toBe('review-load · All open PRs · Reviews')
-    const long = parseRef('card:0c9200c9#All%20open%20PRs/First%20review%20came%20after%20the%20merge') as ParsedRef & { kind: 'cell' }
+    const long = parseRef('card:cd34ef56#All%20open%20PRs/First%20review%20came%20after%20the%20merge') as ParsedRef & { kind: 'cell' }
     expect(cardPartLabel(long, 'x', true)).toBe('All open PRs · First review came a…')
-    expect(cardPartLabel(parseRef('card:322d3030@out0#L8') as ParsedRef & { kind: 'cell' }, 'first-hour', true)).toBe('line 8')
-    expect(cardPartLabel(parseRef('card:322d3030@out0#L8-L11') as ParsedRef & { kind: 'cell' }, 'first-hour', true)).toBe('lines 8–11')
-    expect(cardPartLabel(parseRef('card:322d3030') as ParsedRef & { kind: 'cell' }, 'first-hour', true)).toBeNull()
+    expect(cardPartLabel(parseRef('card:ef56ab12@out0#L8') as ParsedRef & { kind: 'cell' }, 'first-hour', true)).toBe('line 8')
+    expect(cardPartLabel(parseRef('card:ef56ab12@out0#L8-L11') as ParsedRef & { kind: 'cell' }, 'first-hour', true)).toBe('lines 8–11')
+    expect(cardPartLabel(parseRef('card:ef56ab12') as ParsedRef & { kind: 'cell' }, 'first-hour', true)).toBeNull()
   })
 
   test("a table cell's span encodes its labels as the backend does (cite.encode_label), and a blank label names no cell", () => {
