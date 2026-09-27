@@ -1282,7 +1282,7 @@ async function openPlace(target) {
     for (const k of KEYS) if (F[k].size && !F[k].has(C[k][i])) F[k].clear()
     if (searchSet && !searchSet.has(target.r)) { searchSet = null; searchQ = ''; document.getElementById('q').value = '' }
     if (Number.isNaN(X[i])) { mode = 'clock'; win = null; place() }
-    if (X[i] < win[0] || X[i] >= win[1]) setAround(i)
+    setAround(i)
     refresh()
     await select(target.r)
   } else if (target.incident) {
@@ -1290,6 +1290,9 @@ async function openPlace(target) {
     if (v < 0) return
     for (const k of KEYS) F[k].clear()
     F.incident = new Set([v])
+    searchSet = null
+    searchQ = ''
+    document.getElementById('q').value = ''
     const own = [...ORDER].filter((i) => C.incident[i] === v)
     if (own.length) {
       const a = X[own[0]], b = X[own[own.length - 1]], pad = Math.max(300, (b - a) * 0.05)
