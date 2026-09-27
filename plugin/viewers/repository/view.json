@@ -1,0 +1,16 @@
+{
+  "name": "Repository",
+  "why": "Several agent runs on one small library, read as a code forge shows them: pull requests with their commits and reviews, issues, discussions and agents, each run's measures side by side, so the runs' setups can be compared issue by issue and a pull request's whole story is one click away.",
+  "data": "repo.jsonl: one line per record of one run, with `kind` (run, agent, issue, pr, commit, review, comment, merge, close or post), `run` (the run it belongs to), `at` (ISO 8601), `author` (an agent of the run, or for a backlog issue its reporter) and, by kind, `number` (the issue or pull request it belongs to; issues and pull requests share one numbering per run), `title` (of an issue, a pull request, or a discussion's first post), `area` (the part of the library), `closes` (the issue a pull request fixes), `sha` (a commit's id), `verdict` (a review's: approved, changes requested or commented), `reason` (why a close ended its unit without a merge), `thread` (a post's discussion), `team` and `approvals` (a run's size and the approvals a merge needs) and `text` (the body, message, review, comment, post, brief or sign-off note). Records relate through `run` and then `number`, `thread` or `author`; every run works the same backlog, so an issue's number and title match across runs.",
+  "claims": ["repo.jsonl"],
+  "accepts": [{"form": "L<n>", "means": "the record on line <n>, shown in its pull request, issue, discussion or agent, or a run's brief as that run"}],
+  "declares": [
+    {"form": "<run>", "means": "one run: its measures, with the view narrowed to it"},
+    {"form": "<run>/pull/<n>", "means": "one pull request with its commits, reviews, comments and merge or close"},
+    {"form": "<run>/issues/<n>", "means": "one issue with its comments and the pull requests that close it"},
+    {"form": "<run>/discussions/<n>", "means": "one discussion, every post in time order"},
+    {"form": "<run>/agents/<name>", "means": "one agent: its note, its activity and its review partners"}
+  ],
+  "default": true,
+  "libs": []
+}
