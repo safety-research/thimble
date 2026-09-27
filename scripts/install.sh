@@ -23,7 +23,7 @@ die()    { printf 'install.sh: %s\n' "$*" >&2; exit 1; }
 run()    { printf '+'; printf ' %q' "$@"; printf '\n'; [ "$dry" = 1 ] || "$@"; }
 run_in() { local d="$1"; shift; printf '+ cd %q &&' "$d"; printf ' %q' "$@"; printf '\n'; [ "$dry" = 1 ] || ( cd "$d" && "$@" ); }
 json_get() {  # json_get FILE KEY — a top-level string value (python3 when present, else a sed for the flat case)
-  if command -v python3 >/dev/null 2>&1; then python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get(sys.argv[2], ""))' "$1" "$2"
+  if command -v python3 >/dev/null 2>&1; then python3 -I -c 'import json,sys; print(json.load(open(sys.argv[1])).get(sys.argv[2], ""))' "$1" "$2"
   else sed -n "s/.*\"$2\": *\"\([^\"]*\)\".*/\1/p" "$1" | head -n 1; fi
 }
 
@@ -77,12 +77,12 @@ check_prerequisites() {  # uv or python >= pyproject's requires-python; node >= 
   else
     for cand in python3 python3.14 python3.13 python3.12; do
       command -v "$cand" >/dev/null 2>&1 || continue
-      if "$cand" -c "import sys; sys.exit(0 if sys.version_info >= tuple(int(x) for x in '$req_py'.split('.')) else 1)" 2>/dev/null; then
+      if "$cand" -I -c "import sys; sys.exit(0 if sys.version_info >= tuple(int(x) for x in '$req_py'.split('.')) else 1)" 2>/dev/null; then
         py="$(command -v "$cand")"; break
       fi
     done
     [ -n "$py" ] || die "neither uv nor a python >= $req_py was found. Install uv (https://docs.astral.sh/uv/getting-started/installation/) or Python $req_py+"
-    say "no uv; python $($py -c 'import sys; print("%d.%d.%d" % sys.version_info[:3])') at $py (>= $req_py) — venv + pip, unpinned (uv is preferred: it installs the exact versions in backend/uv.lock — https://docs.astral.sh/uv/getting-started/installation/)"
+    say "no uv; python $($py -I -c 'import sys; print("%d.%d.%d" % sys.version_info[:3])') at $py (>= $req_py) — venv + pip, unpinned (uv is preferred: it installs the exact versions in backend/uv.lock — https://docs.astral.sh/uv/getting-started/installation/)"
   fi
   has_dist=0; [ -f "$src/frontend/dist/index.html" ] && has_dist=1
   stale=""; if [ "$has_dist" = 1 ] && [ "$checkout" = 1 ] && [ "$in_place" = 1 ]; then stale="$(dist_stale "$src/frontend")"; fi
@@ -141,10 +141,10 @@ make_venv() {  # uv sync from uv.lock when uv is present, else python -m venv + 
     say "backend/uv.lock is missing: resolving fresh (not the pinned versions)"
     run_in "$dir/backend" uv sync --no-dev --no-install-project ${extra[@]+"${extra[@]}"}
   else
-    [ -x "$venv/bin/python" ] || run "$py" -m venv "$venv"
+    [ -x "$venv/bin/python" ] || run "$py" -I -m venv "$venv"
     say "pip from pyproject.toml (the minimum versions, not the pinned ones in uv.lock)"
-    run "$venv/bin/python" -m pip install --quiet --upgrade pip
-    if [ "$dev" = 1 ]; then run "$venv/bin/python" -m pip install --quiet -e "$dir/backend[dev]"; else run "$venv/bin/python" -m pip install --quiet -e "$dir/backend"; fi
+    run "$venv/bin/python" -I -m pip install --quiet --upgrade pip
+    if [ "$dev" = 1 ]; then run "$venv/bin/python" -I -m pip install --quiet -e "$dir/backend[dev]"; else run "$venv/bin/python" -I -m pip install --quiet -e "$dir/backend"; fi
   fi
 }
 
@@ -154,16 +154,16 @@ fetch_browser() {  # the headless Chromium the card harness draws every card in 
   # and without a picture, and `thimble doctor` names the fix.
   step "4/11 the card harness's browser (headless Chromium)"
   local venv="$dir/backend/.venv" why
-  if [ "$dry" != 1 ] && ! "$venv/bin/python" -c 'import playwright' 2>/dev/null; then
+  if [ "$dry" != 1 ] && ! "$venv/bin/python" -I -c 'import playwright' 2>/dev/null; then
     say "backend/.venv has no playwright; cards will be checked without a picture of them"
     return 0
   fi
-  if ! run "$venv/bin/python" -m playwright install chromium-headless-shell; then
+  if ! run "$venv/bin/python" -I -m playwright install chromium-headless-shell; then
     say "(the browser download failed; cards will be checked without a picture of them until this step is run again)"
     return 0
   fi
   [ "$dry" = 1 ] && return 0
-  why="$("$venv/bin/python" - 2>&1 <<'PY'
+  why="$("$venv/bin/python" -I - 2>&1 <<'PY'
 import asyncio
 from playwright.async_api import async_playwright
 
@@ -272,7 +272,7 @@ register_plugin() {  # marketplace add + plugin install, then update both so a r
       mp_name="$file_name"
     else
       say "+ set .name = \"$mp_name\" in $mp_file"
-      [ "$dry" = 1 ] || python3 -c 'import json,sys; p,n=sys.argv[1:]; d=json.load(open(p)); d["name"]=n; json.dump(d, open(p,"w"), indent=2); open(p,"a").write("\n")' "$mp_file" "$mp_name"
+      [ "$dry" = 1 ] || python3 -I -c 'import json,sys; p,n=sys.argv[1:]; d=json.load(open(p)); d["name"]=n; json.dump(d, open(p,"w"), indent=2); open(p,"a").write("\n")' "$mp_file" "$mp_name"
     fi
   fi
   mp_name="${mp_name:-$file_name}"

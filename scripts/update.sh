@@ -36,7 +36,7 @@ die() { printf 'update.sh: %s\n' "$*" >&2; exit 1; }
 run() { printf '+'; printf ' %q' "$@"; printf '\n'; [ "$dry" = 1 ] || "$@"; }
 json_get() {
   if command -v python3 >/dev/null 2>&1; then
-    python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get(sys.argv[2], ""))' "$1" "$2"
+    python3 -I -c 'import json,sys; print(json.load(open(sys.argv[1])).get(sys.argv[2], ""))' "$1" "$2"
   else
     sed -n "s/.*\"$2\": *\"\([^\"]*\)\".*/\1/p" "$1" | head -n 1
   fi

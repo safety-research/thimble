@@ -157,11 +157,11 @@ uninstall() {
   step() { nsteps=$((nsteps + 1)); printf '  %d. %s\n' "$nsteps" "$1"; }   # a line of the plan that y runs
   add_left() { nleft=$((nleft + 1)); left="$left  $1"$'\n'"    $2"$'\n'; }   # add_left WHAT-WAS-NOT-DONE COMMAND-TO-FINISH
   json_get() {  # json_get FILE KEY — a top-level string value (python3 when present, else a sed for the flat case); 1 when unreadable
-    if command -v python3 >/dev/null 2>&1; then python3 -c 'import json,sys; v=json.load(open(sys.argv[1])).get(sys.argv[2], ""); print(v if isinstance(v, str) else "")' "$1" "$2" 2>/dev/null
+    if command -v python3 >/dev/null 2>&1; then python3 -I -c 'import json,sys; v=json.load(open(sys.argv[1])).get(sys.argv[2], ""); print(v if isinstance(v, str) else "")' "$1" "$2" 2>/dev/null
     else sed -n "s/.*\"$2\": *\"\([^\"]*\)\".*/\1/p" "$1" | head -n 1; fi
   }
   json_num() {  # json_num FILE KEY — a top-level integer value, else nothing
-    if command -v python3 >/dev/null 2>&1; then python3 -c 'import json,sys; v=json.load(open(sys.argv[1])).get(sys.argv[2]); print(v if isinstance(v, int) and not isinstance(v, bool) else "")' "$1" "$2" 2>/dev/null || true
+    if command -v python3 >/dev/null 2>&1; then python3 -I -c 'import json,sys; v=json.load(open(sys.argv[1])).get(sys.argv[2]); print(v if isinstance(v, int) and not isinstance(v, bool) else "")' "$1" "$2" 2>/dev/null || true
     else sed -n "s/.*\"$2\": *\([0-9][0-9]*\).*/\1/p" "$1" | head -n 1; fi
   }
   read_record() {  # read_record: pid and port from $home/server.json into pid and port — positive integers only (a pid of 0 would
