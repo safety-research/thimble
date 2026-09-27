@@ -200,10 +200,10 @@ HAS_API_KEY = has_env_key()
 
 
 # Claude Code's config dir: CLAUDE_CONFIG_DIR, else ~/.claude (transcripts, sessions/<pid>.json, settings.json, the
-# login). The one that counts is the one the served `claude` process runs with, which need not be this server's, so a
-# session that attaches tells this server its value (serve_claude_config) and claude_config_dir() answers with it from
-# then on, while this server's own CLAUDE_CONFIG_DIR is unchanged. Sessions this server starts get the same value
-# (claude_env).
+# login). The one that counts is the one the served `claude` process runs with, which need not be this server's, so
+# when a session attaches this server reads the value from that process's environment (process_claude_config), never
+# from a request, and claude_config_dir() answers with it from then on (serve_claude_config), while this server's own
+# CLAUDE_CONFIG_DIR is unchanged. Sessions this server starts get the same value (claude_env).
 CONFIG_DIR_ENV = "CLAUDE_CONFIG_DIR"
 _served_config: tuple[str | None, str | None] | None = None  # (our own value when learned, the served process's value)
 

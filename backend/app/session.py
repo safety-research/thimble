@@ -353,12 +353,11 @@ def find_transcript(sid: str, config_dir: Path | None = None) -> str | None:
     return None
 
 
-def _config_of(reported: str | None, pid: int | None, stored: dict) -> tuple[bool, str | None]:
-    """(known, CLAUDE_CONFIG_DIR) of a session's `claude` process: as reported ("" for unset), else read from the
-    process's
-    environment, else from sessions.json; (False, None) when none says."""
-    if reported is not None:
-        return True, reported or None
+def _config_of(known_value: str | None, pid: int | None, stored: dict) -> tuple[bool, str | None]:
+    """(known, CLAUDE_CONFIG_DIR) of a session's `claude` process: `known_value` when the caller read it from a process
+    ("" for unset), else read from the process's environment, else from sessions.json; (False, None) when none says."""
+    if known_value is not None:
+        return True, known_value or None
     known, value = config.process_claude_config(pid)
     if known:
         return True, value
@@ -385,9 +384,8 @@ def current(c: str) -> Live | None:
 
 def attach(c: str, sid: Any, cwd: Any, transcript_path: str | None = None, pid: int | None = None,
            config_dir: str | None = None, *, follow: bool = False, after: str | None = None) -> Live | None:
-    """Make the session main; the Live, or None for a malformed id. `config_dir` is the reported CLAUDE_CONFIG_DIR (""
-    for
-    unset, None when unknown); `follow` says the session runs in the process of the one it replaces (_follow);
+    """Make the session main; the Live, or None for a malformed id. `config_dir` is the session's CLAUDE_CONFIG_DIR as
+    read from a process's environment ("" for unset, None when unknown), never a value a request carried; `follow` says the session runs in the process of the one it replaces (_follow);
     `attached.after` names the previous main when it still runs in another process."""
     sid, cwd = str(sid or ""), str(cwd or "")
     if not SID_RE.match(sid):
@@ -550,8 +548,7 @@ def detach(c: str, sid: str, reason: str | None = None) -> bool:
     return True
 
 
-def connected(c: str, sid: str | None, cwd: str, pid: int | None, *, claim: bool = True,
-              config_dir: str | None = None) -> None:
+def connected(c: str, sid: str | None, cwd: str, pid: int | None, *, claim: bool = True) -> None:
     """A shim subscribed. On the channel (`claim`) the session it names is main. On the hook and Monitor routes only
     /thimble makes a session main, so a subscription attaches only the current (or last) main, or a new session in
     main's
@@ -578,9 +575,9 @@ def connected(c: str, sid: str | None, cwd: str, pid: int | None, *, claim: bool
     _cancel_grace(c)
     _came_back.add(c)
     if old:
-        _follow(c, str(old), str(sid), cwd, pid, config_dir)
+        _follow(c, str(old), str(sid), cwd, pid)
     elif sid:
-        attach(c, sid, cwd, None, pid, config_dir)
+        attach(c, sid, cwd, None, pid)
 
 
 def main_pid(c: str) -> int | None:

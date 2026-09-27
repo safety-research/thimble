@@ -474,7 +474,7 @@ async def events_route(c: str, body: EventBody) -> dict[str, Any]:
 class SessionBody(BaseModel):
     session: str
     cwd: str | None = None
-    config_dir: str | None = None  # the session's CLAUDE_CONFIG_DIR, "" for unset (session.attach)
+    env_pid: int | None = None  # the process sending this, whose environment has the session's CLAUDE_CONFIG_DIR
 
 
 @router.post("/ws/{c}/session")
@@ -490,7 +490,8 @@ async def session_route(c: str, body: SessionBody) -> dict[str, Any]:
     before = session.current(c)
     # a session another terminal runs, whose shim is still subscribed, stops hearing the browser: /thimble says so
     replaced = before.sid if before is not None and before.sid != body.session and listening(c, before.sid) else None
-    lv = session.attach(c, body.session, body.cwd or str(corpus), config_dir=body.config_dir)
+    known, value = config.process_claude_config(body.env_pid)
+    lv = session.attach(c, body.session, body.cwd or str(corpus), config_dir=(value or "") if known else None)
     return {"attached": bool(lv), "session": body.session, "listening": listening(c), "replaced": replaced}
 
 
@@ -552,9 +553,10 @@ async def fast_route(c: str, body: FastBody) -> dict[str, Any]:
 
 @router.get("/channel")
 async def subscribe(request: Request, cwd: str, session: str | None = None, pid: int | None = None,
-                    delivery: str = cc_channel.CHANNEL, config_dir: str | None = None) -> EventSourceResponse:
-    """The shim's subscription, with the route its session hears events by (`delivery`) and the session's CLAUDE_CONFIG_DIR.
-    404 while the folder is not a workspace yet: the shim retries, and `/thimble` registers the folder."""
+                    delivery: str = cc_channel.CHANNEL) -> EventSourceResponse:
+    """The shim's subscription, with the route its session hears events by (`delivery`) and the pid of its `claude`, whose
+    environment gives the session's CLAUDE_CONFIG_DIR (session.attach). 404 while the folder is not a workspace yet: the
+    shim retries, and `/thimble` registers the folder."""
     from . import session as session_mod  # noqa: PLC0415
 
     c = config.workspace_for_cwd(cwd)
@@ -565,7 +567,7 @@ async def subscribe(request: Request, cwd: str, session: str | None = None, pid:
     q: asyncio.Queue = asyncio.Queue()
     _subs.setdefault(c, set()).add(q)
     _routes[q] = (session or None, delivery)
-    session_mod.connected(c, session, cwd, pid, claim=delivery == cc_channel.CHANNEL, config_dir=config_dir)
+    session_mod.connected(c, session, cwd, pid, claim=delivery == cc_channel.CHANNEL)
     _wake(c)  # a watcher of this session's that waits learns it delivers by channel now
     log.info("%s: channel subscribed (session %s, pid %s, Claude Code %s, %s)", c, session, pid,
              procs.version_of(pid) or "version unknown", delivery)

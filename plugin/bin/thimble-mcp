@@ -316,9 +316,8 @@ async def channel_loop(write_stream: Any, delivery: str = cc_channel.CHANNEL, ha
     while True:
         sid = session_id()
         moved = False  # the session id changed under a live subscription: renew it without waiting
-        query = urllib.parse.urlencode({**{k: v for k, v in (("cwd", cwd()), ("session", sid), ("pid", os.getppid()),
-                                                             ("delivery", delivery)) if v},
-                                        "config_dir": os.environ.get("CLAUDE_CONFIG_DIR") or ""})
+        query = urllib.parse.urlencode({k: v for k, v in (("cwd", cwd()), ("session", sid), ("pid", os.getppid()),
+                                                          ("delivery", delivery)) if v})
         url = f"{server_url()}/api/channel?{query}"
         try:
             async with httpx.AsyncClient(timeout=httpx.Timeout(None, connect=3.0)) as client:
