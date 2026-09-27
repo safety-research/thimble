@@ -7,8 +7,12 @@
 //   navigate  another place, opened the way a chip opens it (lib/teleport)
 //   size      the document's height, used when the frame sizes to its content (`fit`)
 //   anchors   the data-anchor refs the page shows, answered with `labels`: the marks of its records (labels.ts
-//             viewMarks, with the filter's keep) and of its units (the view's marks route), the labels that are on and
-//             the Files label filter, which the page hears through thimble.onLabels
+//             viewMarks, with the filter's keep) and of its units (the view's marks route), the labels that are on,
+//             the Files label filter, every label over files and the palette, which the page hears through
+//             thimble.onLabels
+//   label, labelColour, newLabel
+//             the page's label controls, done here as the Labels pane does them (`labelActions`): a label turned on or
+//             off, a value given a palette colour, the new-label prompt opened
 //   state     what the analyst is looking at (the element they picked, scroll positions, fields), asked for through
 //             `handle` before a newer version replaces the page, and sent back as `restore` once that version is ready
 // plus ready, error, point and cmd (for the ⌘ pointer). A new ref is sent as a new `open` without reloading the page.
@@ -24,7 +28,7 @@ import { useTheme } from '../lib/theme'
 import { token } from '../lib/vizTheme'
 import { cmdCursors } from '../pointer/cursor'
 import type { Concept, LabelRow, ViewOpen } from '../lib/types'
-import { pageLabels, recordRef, viewMarks, withKeeps, type Keep, type LabelFilter, type ViewMark } from './labels'
+import { PALETTE, pageLabelList, pageLabels, pagePalette, recordRef, viewMarks, withKeeps, type Keep, type LabelFilter, type PageLabelItem, type ViewMark } from './labels'
 import { wantLabels, watchPathLabels } from './marks'
 
 const P = 'thimble:'
@@ -39,6 +43,16 @@ export interface ViewState {
   scroll: { path: string; top: number; left: number }[]
   fields: { path: string; value?: string; checked?: boolean }[]
   segs: { path: string; text: string }[]
+}
+
+/** What the page's label controls do, as the Labels pane does it. */
+export interface ViewLabelActions {
+  /** turn a label over files on or off */
+  setOn: (id: string, on: boolean) => void
+  /** give a label's value a palette colour (labels.ts PALETTE) */
+  setColour: (id: string, value: string, colour: number) => void
+  /** open the new-label prompt beside the view */
+  create?: () => void
 }
 
 /** What a frame's owner can ask of it. */
@@ -64,6 +78,10 @@ export interface ViewerFrameProps {
   /** the files the filter's label left a value on (its presence); the filter leaves the records of other files alone */
   filterFiles?: Readonly<Record<string, unknown>>
   byId?: ReadonlyMap<string, Concept>
+  /** the labels that mark the view's files, listed first to the page */
+  first?: ReadonlySet<string>
+  /** what the page's label controls do; without it they do nothing */
+  labelActions?: ViewLabelActions
   onError?: (message: string) => void
   className?: string
   /** a passage inside the record `targetRef` names, for a view that shows the record but not the span */
@@ -106,6 +124,8 @@ function useViewLabels(
   filter: LabelFilter | null,
   filterFiles: Readonly<Record<string, unknown>> | undefined,
   byId: ReadonlyMap<string, Concept>,
+  all: PageLabelItem[],
+  palette: string[],
   post: (msg: unknown) => void,
 ): { add: (refs: unknown) => void; reset: () => void; ready: () => void } {
   const refs = useRef(new Set<string>())
@@ -227,15 +247,15 @@ function useViewLabels(
     const rowsOf = { get: (ref: string) => rows.current.get(recordRef(ref)?.path ?? '')?.get(ref) }
     const marks = { ...withKeeps(viewMarks(on, rowsOf, refs.current), filter, rowsOf, refs.current, filterFiles), ...(labelled ? unitMarks.current : {}) }
     const state = pageLabels(on, filter, filterLabel ? new Map([[filterLabel.id, filterLabel]]) : byId, (name) => token(name) || `var(${name})`)
-    const text = JSON.stringify([marks, state])
+    const text = JSON.stringify([marks, state, all, palette])
     if (text === sent.current) return
     sent.current = text
-    send.current({ type: P + 'labels', marks, on: state.on, filter: state.filter })
-  }, [ws, on, filter, filterFiles, filterLabel, byId, labelled, tick])
+    send.current({ type: P + 'labels', marks, on: state.on, filter: state.filter, all, palette })
+  }, [ws, on, filter, filterFiles, filterLabel, byId, all, palette, labelled, tick])
   return useMemo(() => ({ add, reset, ready }), [add, reset, ready])
 }
 
-export function ViewerFrame({ ws, slug, targetRef, path, title, fit, labels = NO_LABELS, filter = null, filterFiles, byId = NO_CONCEPTS, onError, className, quote, onQuoteMissing, version, restore, handle }: ViewerFrameProps) {
+export function ViewerFrame({ ws, slug, targetRef, path, title, fit, labels = NO_LABELS, filter = null, filterFiles, byId = NO_CONCEPTS, first, labelActions, onError, className, quote, onQuoteMissing, version, restore, handle }: ViewerFrameProps) {
   const ref = useRef<HTMLIFrameElement>(null)
   const [page, setPage] = useState<string | null>(null)
   const [height, setHeight] = useState<number | null>(null)
@@ -270,7 +290,18 @@ export function ViewerFrame({ ws, slug, targetRef, path, title, fit, labels = NO
   // page waits for the app's faces so it is drawn once, in them
   const doc = useMemo(() => (page == null || fonts == null ? null : withFrameStyle(page, viewStyle(resolved) + fonts)), [page, fonts, resolved, key]) // key: the tokens are read again when the paper or the accent changes
   const post = (msg: unknown) => ref.current?.contentWindow?.postMessage(msg, '*')
-  const marks = useViewLabels(ws, slug, version, labels, filter, filterFiles, byId, post)
+  const resolveToken = (name: string) => token(name) || `var(${name})`
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const all = useMemo(() => pageLabelList(byId.values(), resolveToken, first), [byId, first, resolved, key])
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const palette = useMemo(() => pagePalette(resolveToken), [resolved, key])
+  const marks = useViewLabels(ws, slug, version, labels, filter, filterFiles, byId, all, palette, post)
+  const actions = useRef(labelActions)
+  actions.current = labelActions
+  const known = useRef(byId)
+  known.current = byId
+  const colours = useRef(palette)
+  colours.current = palette
   useEffect(() => {
     if (!handle) return
     handle.current = {
@@ -380,6 +411,24 @@ export function ViewerFrame({ ws, slug, targetRef, path, title, fit, labels = NO
           return
         case P + 'quoted':
           if (d.found === false) missing.current?.()
+          return
+        case P + 'label':
+        case P + 'labelColour': {
+          // the page names a label by the id it heard in `all`; anything else is ignored
+          const act = actions.current
+          const id = typeof d.id === 'string' ? d.id : ''
+          if (!act || !known.current.has(id)) return
+          notePress(frame)
+          if (d.type === P + 'label') act.setOn(id, !!d.on)
+          else {
+            const at = colours.current.findIndex((c) => c.toLowerCase() === String(d.colour ?? '').toLowerCase())
+            if (at >= 0 && typeof d.value === 'string') act.setColour(id, d.value, PALETTE[at])
+          }
+          return
+        }
+        case P + 'newLabel':
+          notePress(frame)
+          actions.current?.create?.()
           return
       }
     }

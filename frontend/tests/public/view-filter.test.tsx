@@ -20,7 +20,7 @@ const resolve = (t: string) => `#${t.slice(2)}`
 describe('what a view page hears of the labels', () => {
   test('the labels that are on with their highlighted values, and the filter with its label and value colour', () => {
     const byId = new Map([ASKS, TONE].map((k) => [k.id, k]))
-    expect(pageLabels([ASKS], null, byId, resolve)).toEqual({ on: [{ name: 'asks', colour: '#label-3', values: [{ name: 'asks', colour: '#label-3' }] }], filter: null })
+    expect(pageLabels([ASKS], null, byId, resolve)).toEqual({ on: [{ id: 'k1', name: 'asks', colour: '#label-3', values: [{ name: 'asks', colour: '#label-3' }] }], filter: null })
     // the filter's label counts as on while it filters
     const got = pageLabels([ASKS], { concept: 'k2', value: 'curt' }, byId, resolve)
     expect(got.on.map((l) => l.name)).toEqual(['asks', 'tone'])

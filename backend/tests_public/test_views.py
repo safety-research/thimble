@@ -609,10 +609,10 @@ async def test_a_corpus_view_over_the_same_files_opens_before_the_built_in_one(d
 
 # ------------------------------------------------------------------------------------------------- worked examples
 #
-# plugin/viewers/incident-timeline and repository are the worked examples a view ticket's session reads
-# (prompts/dev-view.md). Each ships an invented sample of the files it claims under sample/, and passes over it the
-# checks a view a session writes must pass. Each sample is copied into the temp DATA_DIR as a corpus named after its
-# example.
+# plugin/viewers/linked-sessions, incident-timeline and repository are the worked examples a view ticket's session
+# reads (prompts/dev-view.md). Each ships an invented sample of the files it claims under sample/, and passes over it
+# the checks a view a session writes must pass. Each sample is copied into the temp DATA_DIR as a corpus named after
+# its example.
 
 # the example, the slug it is saved under, and a key of each kind it declares
 EXAMPLES = {
@@ -620,6 +620,7 @@ EXAMPLES = {
                                                 "view:incident-timeline/2026-05-16T08:00..2026-05-16T09:00"]),
     "repository": ("repository", ["view:repository/r1/pull/11", "view:repository/r3", "view:repository/r2/issues/6",
                                   "view:repository/r3/discussions/2", "view:repository/r4/agents/moss"]),
+    "linked-sessions": ("linked-sessions", ["view:linked-sessions/r1", "view:linked-sessions/r1-client-port"]),
 }
 
 
@@ -661,17 +662,17 @@ async def test_every_worked_example_answers_the_checks_over_its_sample(name, sam
 
 def test_each_worked_example_describes_its_files():
     """A builder maps an example onto other data by what its files hold: view.json's `data` and the reader's opening
-    comment name the claimed file and each field of a record, and the sample holds that file."""
+    comment name each claimed file and each field of its records, and the sample holds those files."""
     for name in EXAMPLES:
         d = views.EXAMPLES_DIR / name
         raw = json.loads((d / "view.json").read_text("utf-8"))
         comment = (d / "reader.py").read_text("utf-8").split("\nimport ", 1)[0]
-        (claim,) = raw["claims"]
-        assert (d / "sample" / claim).is_file(), name
-        fields = set().union(*(json.loads(ln) for ln in (d / "sample" / claim).read_text("utf-8").splitlines()))
-        assert claim in raw["data"] and claim in comment, name
-        for field in fields:
-            assert f"`{field}`" in raw["data"] and re.search(rf"^#   {field} ", comment, re.M), (name, field)
+        for claim in raw["claims"]:
+            assert (d / "sample" / claim).is_file(), (name, claim)
+            fields = set().union(*(json.loads(ln) for ln in (d / "sample" / claim).read_text("utf-8").splitlines()))
+            assert claim in raw["data"] and claim in comment, (name, claim)
+            for field in fields:
+                assert f"`{field}`" in raw["data"] and re.search(rf"^#   {field} ", comment, re.M), (name, claim, field)
 
 
 async def test_the_incident_timeline_example_puts_every_source_on_one_axis_and_gathers_its_units(samples, inproc,
@@ -721,6 +722,36 @@ async def test_the_repository_example_compares_any_runs_and_filters_by_who_did_w
     assert {(i["run"], i["number"]) for i in approved["items"]} == {
         (r["run"], r["number"]) for r in rows if r["kind"] == "review" and r["author"] == "moss"
         and r["verdict"] == "approved"} != set()
+
+
+async def test_the_linked_sessions_example_lays_each_run_out_as_a_tree_and_compares_sessions(samples, inproc, bound):
+    """Each run's sessions come in tree order, a subagent after the session that spawned it, and every call is counted
+    once; a field filter's counts hold every other filter; a session's transcript holds its messages, its calls and its
+    subagents' returns; and a comparison counts each group's calls, a session's subagents included."""
+    slug = _save_example("linked-sessions")
+    d = samples / "linked-sessions"
+    sessions = [json.loads(ln) for ln in (d / "sessions.jsonl").read_text("utf-8").splitlines()]
+    calls = [json.loads(ln) for ln in (d / "calls.jsonl").read_text("utf-8").splitlines()]
+    ov = await views.reader_call("linked-sessions", slug, "records", {"op": "overview"})
+    assert len(ov["calls"]) == ov["total"] == len(calls) and len(ov["sessions"]) == len(sessions)
+    seen = set()
+    for s in ov["sessions"]:
+        assert s["parent"] is None or s["parent"] in seen, "a subagent comes after the session that spawned it"
+        seen.add(s["id"])
+    errors = await views.reader_call("linked-sessions", slug, "records", {"op": "overview", "filters": {"outcome": ["ok", "denied"]}})
+    assert {c["out"] for c in errors["calls"]} == {"error"}
+    assert sum(x["n"] for x in errors["fields"]["outcome"]) == len(calls), "the outcome's own counts leave its filter out"
+    assert sum(x["n"] for x in errors["fields"]["tool"]) == len(errors["calls"])
+    lead = next(s for s in sessions if s["run"] == "r1" and s["parent"] is None)
+    t = await views.reader_call("linked-sessions", slug, "records", {"op": "session", "id": lead["id"]})
+    kids = {s["id"] for s in sessions if s["parent"] == lead["id"]}
+    assert {i["child"] for i in t["items"] if i["kind"] == "return"} == kids
+    assert t["items"][0]["kind"] == "prompt" and sum(i["kind"] == "call" for i in t["items"]) == t["n"]
+    port = next(s for s in sessions if s["run"] == "r1" and s["agent"] == "client-port")
+    both = await views.reader_call("linked-sessions", slug, "records", {"op": "compare", "ids": [port["id"], "r2"], "subs": True})
+    mine = {port["id"]} | {s["id"] for s in sessions if s["parent"] == port["id"]}
+    assert both["groups"][0]["n"] == sum(1 for c in calls if c["session"] in mine)
+    assert both["groups"][1]["n"] == sum(1 for c in calls if next(s for s in sessions if s["id"] == c["session"])["run"] == "r2")
 
 
 @pytest.mark.parametrize("name", sorted(EXAMPLES))

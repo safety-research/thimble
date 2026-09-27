@@ -427,6 +427,12 @@ export function FilesTab({ ws, active, focused = active }: { ws: string; active:
   useViewDefaults(ws, shownView, labels)
   // beside a view: the labels that mark its files come first
   const marking = useMemo(() => (shownView?.claims ? viewLabels(labels.all, labels.presence, shownView.claims) : null), [shownView, labels.all, labels.presence])
+  // a view's New label… opens the prompt in the Labels sidebar beside it
+  const newLabel = useCallback(() => {
+    setViewSideChoice(true)
+    setLabelsOpen(true)
+    edit('new')
+  }, [setViewSideChoice, setLabelsOpen, edit])
   const fillNew = useCallback((draft: LabelDraft) => {
     setEditing('new')
     setDrafted(draft)
@@ -495,6 +501,8 @@ export function FilesTab({ ws, active, focused = active }: { ws: string; active:
             onQuoteMissing={quoteMissing}
             labels={labels}
             onMode={setMode}
+            first={marking ?? undefined}
+            onNewLabel={newLabel}
             lead={
               !viewSideOpen && <Button variant="icon" size="sm" icon="sidebar" title="Show labels" aria-label="Show labels" className="view-pane-side-show" onClick={() => setViewSideChoice(true)} />
             }

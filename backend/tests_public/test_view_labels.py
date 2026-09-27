@@ -146,6 +146,27 @@ async def test_the_labels_context_holds_the_labels_that_are_on_and_the_filter(ap
     assert st["labels"][0]["values"] == [{"name": "other", "colour": lab["values"][1]["colour"]}], "set_filter highlights the value"
 
 
+async def test_a_colour_changed_from_a_view_is_saved_without_a_run_and_every_view_hears_it(app):
+    """A view's thimble.setLabelColour saves the class colours as the label card does (PUT /concepts/{id}): the colour
+    stays across reads of the label, the label's definition and rows are untouched, and the labels context every view's
+    reader and page get carries the new colour."""
+    k = await _asks(app)
+    concepts.show_concept(CORPUS, k["id"], True)
+    labels_file = concepts.labels_file(config.workspace_dir(CORPUS), k["id"])
+    rows_before = labels_file.read_text("utf-8")
+    before = (await app.get(f"/api/ws/{CORPUS}/concepts/{k['id']}")).json()
+    classes = [{**c, "color": 7} if c["name"] == "asks" else c for c in before["classes"]]
+    r = await app.put(f"/api/ws/{CORPUS}/concepts/{k['id']}", json={"classes": classes})
+    assert r.status_code == 200, r.text
+    after = (await app.get(f"/api/ws/{CORPUS}/concepts/{k['id']}")).json()
+    assert [c["color"] for c in after["classes"]] == [7, 0] and after["version"] == before["version"]
+    assert after.get("last_run") == before.get("last_run") and labels_file.read_text("utf-8") == rows_before
+    (lab,) = views.labels_context(CORPUS)["labels"]
+    assert lab["colour"] == kernel_thimble.LABEL_COLOURS[7] == lab["values"][0]["colour"]
+    assert kernel_thimble._marked(views.labels_context(CORPUS), "board.jsonl#L1")[0]["colour"] == kernel_thimble.LABEL_COLOURS[7]
+    assert kernel_thimble._view_labels(views.labels_context(CORPUS))["labels"][0]["id"] == k["id"]
+
+
 async def test_the_filter_keeps_the_records_of_a_file_its_label_never_ran_over(app, corpus):
     """A view of other files stays whole under a filter on a label of board.jsonl, since the label says nothing of
     them."""

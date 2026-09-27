@@ -155,7 +155,7 @@ export function useLabelSide(p: LabelSideProps): { pane: ReactNode; card: ReactN
 
 /** A view in a pane of its own with its Labels sidebar: shown while labels are on or the analyst opened it, with the
  * Labels pane, the edit card and the seam as Files has them beside a view. */
-export function useViewSide(ws: string, view: BuiltView, labels: FilesLabels): { side: ReactNode; card: ReactNode; lead: ReactNode } {
+export function useViewSide(ws: string, view: BuiltView, labels: FilesLabels): { side: ReactNode; card: ReactNode; lead: ReactNode; first?: ReadonlySet<string>; newLabel: () => void } {
   const runs = useLabelRuns(ws, labels)
   const [choice, setChoice] = useState<boolean | null>(null)
   const [open, setOpen] = useState(true)
@@ -206,5 +206,10 @@ export function useViewSide(ws: string, view: BuiltView, labels: FilesLabels): {
     </>
   ) : null
   const lead = shown ? null : <Button variant="icon" size="sm" icon="sidebar" title="Show labels" aria-label="Show labels" className="view-pane-side-show" onClick={() => setChoice(true)} />
-  return { side, card: shown ? parts.card : null, lead }
+  const newLabel = useCallback(() => {
+    setChoice(true)
+    setOpen(true)
+    edit('new')
+  }, [edit])
+  return { side, card: shown ? parts.card : null, lead, first, newLabel }
 }

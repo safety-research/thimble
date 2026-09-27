@@ -1,0 +1,13 @@
+{
+  "name": "Linked sessions",
+  "why": "Runs of agent teams read as their sessions on one clock: one lane per session with each subagent under the session that spawned it, every tool call a mark coloured by any field or by the analyst's labels, filters on every field and on time, a session's transcript with the other sessions at the same moment, and sessions or runs compared side by side.",
+  "data": "Three files, one JSON record per line, related by session. sessions.jsonl: one line per session, with `id` (unique across runs), `run`, `team` (how the run's team was set up), `agent` (its name), `parent` (the session that spawned it, or null for the lead), `started` and `ended` (ISO 8601). calls.jsonl: one line per tool call, with `session`, `at` (ISO 8601), `seconds` (how long it ran; a Task call runs until its subagent returns), `tool`, `input` (a path, command, pattern, query or a Task's description), `outcome` (ok, error or denied), `result` (a line of what came back) and, where they apply, `exit` (a failed command's exit code), `files` (the paths it read, edited or ran against), `matches` (the files a Grep matched), `old` and `new` (the text an Edit replaced and put in its place), `output` (a command's whole output) and `spawned` (the session a Task call started). messages.jsonl: one line per message, with `session`, `at`, `kind` (prompt, the task a session was given; text, what the agent said between calls; result, what it handed back) and `text`. A run's sessions share one clock that starts with its first session.",
+  "claims": ["sessions.jsonl", "calls.jsonl", "messages.jsonl"],
+  "accepts": [{"form": "L<n>", "means": "the record on line <n>: a call or a message shown in its session's transcript, or a session opened as its lane"}],
+  "declares": [
+    {"form": "<run>", "means": "one run: its sessions, with the view narrowed to it"},
+    {"form": "<session>", "means": "one session: its lane and its whole transcript"}
+  ],
+  "default": true,
+  "libs": []
+}

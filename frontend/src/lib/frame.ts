@@ -81,6 +81,8 @@ export const VIEW_TOKENS = [
   '--viz-3',
   '--viz-4',
   '--viz-5',
+  '--viz-6',
+  '--viz-7',
   '--viz-ink-1',
   '--viz-ink-2',
   '--viz-ink-3',
