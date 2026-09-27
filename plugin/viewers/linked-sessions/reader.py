@@ -91,7 +91,8 @@ def build_index(paths):
     """{"offsets": {path: [byte offset of line n at n-1]}, "runs": {run: facts}, "sessions": {id: facts}, "calls": [facts],
     "messages": [facts], "values": {field: [values in their order]}}. Times are seconds on the run's clock. A session's
     `order` is its run's sessions in tree order, each after the session that spawned it; a call's `words` is the
-    lowercased text a search looks in. A line that is not JSON, or that no kind of record fits, is in `offsets` only."""
+    lowercased text a search looks in. A line that is not JSON, that no kind of record fits, or a session without a
+    start and an end, is in `offsets` only."""
     offsets, sessions, raw_calls, raw_msgs = {}, {}, [], []
     for path in paths:
         offs = offsets.setdefault(path, [])
@@ -112,9 +113,10 @@ def build_index(paths):
                 elif r.get("kind") and r.get("session") and "text" in r:
                     raw_msgs.append((ref, r))
                 elif r.get("id") and r.get("run") and r.get("agent"):
-                    sessions[str(r["id"])] = {"id": str(r["id"]), "ref": ref, "run": str(r["run"]), "team": str(r.get("team") or ""),
-                                              "agent": str(r["agent"]), "parent": r.get("parent"), "t0": _epoch(r.get("started")),
-                                              "t1": _epoch(r.get("ended"))}
+                    t0, t1 = _epoch(r.get("started")), _epoch(r.get("ended"))
+                    if t0 is not None and t1 is not None:
+                        sessions[str(r["id"])] = {"id": str(r["id"]), "ref": ref, "run": str(r["run"]), "team": str(r.get("team") or ""),
+                                                  "agent": str(r["agent"]), "parent": r.get("parent"), "t0": t0, "t1": t1}
 
     runs = {}
     for s in sessions.values():
