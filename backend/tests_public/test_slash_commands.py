@@ -6,12 +6,13 @@ Claude Code puts typed arguments into one unescaped."""
 from __future__ import annotations
 
 import asyncio
+import json
 from pathlib import Path
 
 import pytest
 import yaml
 
-from app import agents, channel, config, ledger, orient_session, orientation, session, threads, tools, views
+from app import agents, cc_settings, channel, config, ledger, orient_session, orientation, session, threads, tools, views
 
 CORPUS = "mini"
 SKILLS = config.REPO_ROOT / "plugin" / "skills"
@@ -125,19 +126,50 @@ async def test_ask_reaches_the_orientation_a_view_s_build_and_else_main(monkeypa
     assert res.is_error and tools.hint("message_thread-main", thread="Write report") in res.text
 
 
-async def test_orient_passes_the_critique_and_the_permission_mode_to_the_session(monkeypatch):
+def _analyst_mode(monkeypatch, tmp_path, mode: str) -> None:
+    user = tmp_path / "cc" / "settings.json"
+    user.parent.mkdir(parents=True, exist_ok=True)
+    user.write_text(json.dumps({"permissions": {"defaultMode": mode}}))
+    monkeypatch.setattr(cc_settings, "config_dir", lambda: user.parent)
+
+
+async def test_orient_passes_the_critique_and_the_permission_mode_to_the_session(monkeypatch, tmp_path):
     seen: dict = {}
 
     async def fake_start(c, brief, passes, call=None, chosen=None):
         seen.update(brief=brief, passes=passes, chosen=chosen)
 
     monkeypatch.setattr(orient_session, "start", fake_start)
+    _analyst_mode(monkeypatch, tmp_path, "bypassPermissions")
     res = await tools.call(CORPUS, "start_orientation", {"brief": "the edits", "generate_report": True, "critique": False,
                                                          "permissions": "auto"})
     assert not res.is_error
     assert seen == {"brief": "the edits", "passes": ["final", "views", "report"], "chosen": {"critique": False, "permissions": "auto"}}
     await tools.call(CORPUS, "start_orientation", {"brief": ""})
     assert seen["chosen"] == {}, "a switch the call leaves out keeps Start's or the default"
+
+
+async def test_a_start_orientation_call_may_lower_the_mode_but_never_raise_it(monkeypatch, tmp_path):
+    """The mode is the analyst's (Start's switcher, the stored choice, their own mode); a model's call can only ask for
+    less."""
+    seen: dict = {}
+
+    async def fake_start(c, brief, passes, call=None, chosen=None):
+        seen.update(chosen=chosen)
+
+    monkeypatch.setattr(orient_session, "start", fake_start)
+    _analyst_mode(monkeypatch, tmp_path, "default")
+    for asked in ("auto", "bypass", "run"):
+        await tools.call(CORPUS, "start_orientation", {"brief": "", "permissions": asked})
+        assert seen["chosen"] == {}, asked
+    await tools.call(CORPUS, "start_orientation", {"brief": "", "permissions": "manual"})
+    assert seen["chosen"] == {"permissions": "manual"}
+    _analyst_mode(monkeypatch, tmp_path, "auto")
+    await tools.call(CORPUS, "start_orientation", {"brief": "", "permissions": "bypass"})
+    assert seen["chosen"] == {}
+    orientation.request(CORPUS, "", ["views"], permissions="bypass")  # the analyst's Start, with Bypass on its switcher
+    await tools.call(CORPUS, "start_orientation", {"brief": "", "permissions": "auto"})
+    assert seen["chosen"] == {"permissions": "auto"}, "below the Bypass Start chose"
 
 
 def test_the_skills_name_their_tool_and_run_no_shell_command():
@@ -151,4 +183,4 @@ def test_the_skills_name_their_tool_and_run_no_shell_command():
                       ("--no-critique", "critique"), ("--auto", "permissions")):
         assert f"`{flag}`" in body and f"`{arg}`" in body, flag
     section = tools.tool_sections(["start_orientation"])["start_orientation"][1]
-    assert section["properties"]["permissions"]["enum"] == list(orientation.PERMISSIONS)
+    assert section["properties"]["permissions"]["enum"] == ["manual", "auto"], "a call can only lower the mode"
