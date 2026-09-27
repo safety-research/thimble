@@ -14,8 +14,9 @@ timeout in the session's settings is a day). In auto mode a refused call never r
 PermissionDenied with `retry` plus a PreToolUse `allow`.
 
 It posts the event to POST {server}/api/ws/{ws}/sessions/permission, waits for the answer and prints Claude Code's hook
-output. Standard library only, run with `python -S`. Anything unexpected prints nothing: a request is then denied, a
-refusal stays refused, and before a call auto mode decides.
+output. The session is `--session` when given, else THIMBLE_SESSION, and the server `--url` when given, else
+call_ref.server_url's. Standard library only, run with `python -S`. Anything unexpected prints nothing: a request is then
+denied, a refusal stays refused, and before a call auto mode decides.
 """
 from __future__ import annotations
 
@@ -64,9 +65,14 @@ def decision(answer: object, event: str = REQUEST) -> dict | None:
     return {"hookSpecificOutput": {"hookEventName": REQUEST, "decision": out}}
 
 
+def arg(argv: list[str], flag: str) -> str:
+    """The value after `flag` in `argv`, '' when it is missing."""
+    return argv[argv.index(flag) + 1] if flag in argv and argv.index(flag) + 1 < len(argv) else ""
+
+
 def main(argv: list[str]) -> int:
-    ws = argv[argv.index("--ws") + 1] if "--ws" in argv and argv.index("--ws") + 1 < len(argv) else ""
-    session = os.environ.get("THIMBLE_SESSION", "").strip()
+    ws = arg(argv, "--ws")
+    session = (arg(argv, "--session") or os.environ.get("THIMBLE_SESSION", "")).strip()
     try:
         hook = json.load(sys.stdin)
     except (OSError, ValueError):
@@ -85,7 +91,7 @@ def main(argv: list[str]) -> int:
         fields["suggestions"] = hook["permission_suggestions"]
     body = json.dumps(fields).encode("utf-8")
     try:
-        url = f"{server_url()}/api/ws/{urllib.parse.quote(ws, safe='')}/sessions/permission"
+        url = f"{(arg(argv, '--url') or server_url()).rstrip('/')}/api/ws/{urllib.parse.quote(ws, safe='')}/sessions/permission"
         req = urllib.request.Request(url, data=body, method="POST", headers={"Content-Type": "application/json"})
         with urllib.request.urlopen(req, timeout=PRE_TIMEOUT - 2 if event == PRE else TIMEOUT) as resp:
             out = decision(json.loads(resp.read().decode("utf-8") or "{}"), event)

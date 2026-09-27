@@ -409,23 +409,23 @@ def test_a_view_build_s_session_may_read_the_corpus_but_not_change_it(board, mon
     assert dev.view_read_only(corpus, inside) == (views.EXAMPLES_DIR,), "a corpus that holds the view's folder is left out"
 
 
-def test_a_dev_session_has_the_default_tools_less_mcp_servers_and_the_later_turn_tools(monkeypatch):
+def test_a_dev_session_has_the_default_tools_less_mcp_servers_and_the_later_turn_tools(board, monkeypatch):
     """A view build's or a code ticket's session names no tool set, so it has every tool of a default Claude Code
-    session. Nobody answers its permission requests, so what it does in its folders, the web, skills and workflows are
-    allowed; it gets no MCP server, whose tools would ask, and not the tools that schedule a later turn, since the
-    session is stopped once its turn ends. A fenced session, a view build in the corpus folder, also gets no
-    EnterWorktree, which would write a worktree into that folder past the fence's denies, and none of the tools that
-    wait for an answer nobody gives there."""
+    session. It gets no MCP server, since its task needs none of the analyst's, and not the tools that schedule a later
+    turn, since the session is stopped once its turn ends. A fenced session, a view build in the corpus folder, also gets
+    no EnterWorktree, which would write a worktree into that folder past the fence's denies, and none of the tools that
+    wait for an answer nobody gives there. A session with no workspace has nobody to ask, so what it does in its
+    folders, skills and workflows are allowed and it has no web tools (test_web_permissions has a hosted session's)."""
     from app import agent_session
 
     monkeypatch.setattr(config, "models_for", lambda c=None, settings=None: {"dev": {"model": "claude-opus-4-8", "fast": False}})
-    flags = dev.Sessions()._flags(CORPUS, "thimble ticket 1: x")
+    flags = dev.Sessions()._flags(None, "thimble ticket 1: x")
     assert "--tools" not in flags
-    assert {"Read", "Edit", "Write", "NotebookEdit", "Bash", "WebSearch", "WebFetch", "Skill", "Workflow"} <= \
-        set(flags[flags.index("--allowedTools") + 1].split(","))
-    assert flags[flags.index("--disallowedTools") + 1].split(",") == list(agent_session.LATER_TOOLS)
+    assert flags[flags.index("--allowedTools") + 1].split(",") == dev.UNHOSTED_TOOLS
+    assert flags[flags.index("--disallowedTools") + 1].split(",") == [*agent_session.LATER_TOOLS, *agent_session.WEB_TOOLS]
     assert "--strict-mcp-config" in flags and flags[flags.index("--permission-mode") + 1] == "default"
-    fenced = dev.Sessions()._flags(CORPUS, "thimble view: x", fence=dev.read_only_fence([Path("/corpus")]))
+    fenced = dev.Sessions()._flags(CORPUS, "thimble view: x", fence=dev.read_only_fence([Path("/corpus")]),
+                                   asking={"key": "view:x", "allow": []})
     assert fenced[fenced.index("--disallowedTools") + 1].split(",") == \
         [*agent_session.LATER_TOOLS, "EnterWorktree", "ExitWorktree", "AskUserQuestion", "EnterPlanMode", "ExitPlanMode"]
 

@@ -272,7 +272,8 @@ async def test_a_call_auto_mode_gave_no_verdict_on_goes_back_to_it_before_the_ca
     assert (p["refused"], p["rechecked"], p["deny_after_s"]) == ("Classifier unavailable", 2, 0.4)
     answer = await asyncio.wait_for(call, 2)
     assert answer["behavior"] == "deny" and permission_hook.decision(answer, permission_hook.DENIED) is None
-    assert not agents.read_meta(CORPUS, run.chat).get("permissions")
+    [left] = agents.read_meta(CORPUS, run.chat).get("permissions")
+    assert left["id"] == p["id"] and left.get("expired"), "denied unanswered, it stays on the card marked expired"
     assert await agent_session.permission_request_route(CORPUS, pre) == {}, "an unanswered call is not remembered"
     log = [json.loads(line) for line in (config.workspace_dir(CORPUS) / agents.PERMISSIONS_LOG).read_text().splitlines()]
     assert [e["event"] for e in log] == ["rechecked", "rechecked", "asked", "answered"]
@@ -497,8 +498,8 @@ def test_the_hook_sends_a_refusal_s_reason_and_call_id_and_asks_briefly_before_a
 
 async def test_the_orientation_s_fence_adds_no_allow_of_thimble_s_own_while_a_check_s_run_keeps_its_own(fake, monkeypatch):
     """Manual is Claude Code's own asking: the orientation's fence keeps the corpus read-only and Bash in the sandbox,
-    off the network, and allows nothing itself, neither sandboxed Bash nor edits in the work folder. WebSearch is
-    allowed in every session and WebFetch asks. A check's run, a writer and a critique keep the allows of their work in
+    off the network, and allows nothing itself, neither sandboxed Bash nor edits in the work folder. WebFetch and
+    WebSearch ask, whatever else allows them. A check's run, a writer and a critique keep the allows of their work in
     their own folder."""
     monkeypatch.setenv("THIMBLE_SANDBOX", "1")
     run = await orient_session.start(CORPUS, "")
@@ -514,7 +515,8 @@ async def test_the_orientation_s_fence_adds_no_allow_of_thimble_s_own_while_a_ch
         "no sandbox hook, and none before each call in Manual; each subagent's scratch folder"
     assert run.sandbox_rule is None
     allowed = argv[argv.index("--allowedTools") + 1:argv.index("--disallowedTools")]
-    assert "WebFetch" not in allowed and "WebSearch" in allowed
+    assert "WebFetch" not in allowed and "WebSearch" not in allowed
+    assert settings["permissions"]["ask"] == ["WebFetch", "WebSearch"]
     checked = agent_session.fence(Path("/c"), Path("/w"), sandbox=True, unasked=True)
     assert checked["sandbox"]["autoAllowBashIfSandboxed"] is True and checked["permissions"]["allow"] == ["Edit(//w/**)"]
 

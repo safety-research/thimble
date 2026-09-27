@@ -1,6 +1,7 @@
 // Files' views: File browser, then every view written for this corpus, one exclusive choice (Segmented), a view whose
-// newer version builds or is reviewed with its name shimmering; then proposals not built yet (spinner while building, ✕
-// and Retry on failure); then New view, a field that asks main for one. A row
+// newer version builds or is reviewed with its name shimmering; then proposals not built yet (spinner while building, a
+// still warning dot while its session waits for permission, ✕ and Retry on failure); then New view, a field that asks
+// main for one. A row
 // across the top of Files, or, while Files shows in a pane beside another, in that pane's head (`compact`, portalled by
 // FilesTab), where what does not fit goes in a ⋯ menu (viewsFit.ts). Refetches on bus `view`.
 import { useEffect, useLayoutEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
@@ -12,6 +13,7 @@ import { Mark } from '../components/Marks'
 import { Menu, Popover } from '../components/Menu'
 import { Spinner } from '../components/Spinner'
 import { Tipped, useTooltip } from '../components/Tooltip'
+import { pendingAsks, useChatMetas } from '../chat/waiting'
 import { api } from '../lib/api'
 import { bus } from '../lib/bus'
 import { refreshProposals, useProposals } from '../lib/proposals'
@@ -89,11 +91,18 @@ export function useViews(ws: string): { views: BuiltView[]; proposals: Proposal[
   return { views: built, proposals: proposals.filter((p) => !listed.includes(p) && p.status !== 'built' && p.status !== 'dropped' && p.status !== 'suggested' && !p.held) }
 }
 
+/** The spinner's words for a proposal's build: queued, building, or waiting for permission while a request of its
+ * session is on the card. Pure. */
+export function buildLabel(status: Proposal['status'], asking: boolean): string {
+  if (status === 'queued') return 'Queued'
+  return asking ? 'Waiting for permission' : 'Building'
+}
+
 /** A proposal in the bar: the view's button as the bar draws a view, its state after the name, a click that opens the
  * build's thread; for a failed build (a view the analyst asked for) Retry beside it; × on hover to dismiss it. A viewer
  * suggested for a file type (in the File browser's mode row) wears the sparkle, shows its `why` on hover, and a click
  * builds it (`onAccept` runs then). */
-export function ProposalOption({ ws, p, onDismiss, onAccept, size }: { ws: string; p: Proposal; onDismiss: () => void; onAccept?: () => void; size: 'md' | 'lg' }) {
+export function ProposalOption({ ws, p, onDismiss, onAccept, size, asking = false }: { ws: string; p: Proposal; onDismiss: () => void; onAccept?: () => void; size: 'md' | 'lg'; asking?: boolean }) {
   const [retrying, setRetrying] = useState(false)
   const [accepting, setAccepting] = useState(false)
   const suggested = p.status === 'suggested' && !accepting
@@ -138,7 +147,14 @@ export function ProposalOption({ ws, p, onDismiss, onAccept, size }: { ws: strin
       >
         <Icon name={suggested ? 'sparkle' : 'view'} size={14} className="seg-ico" />
         <span className="seg-label">{p.name}</span>
-        {pending && <Spinner size={10} label={p.status === 'queued' || accepting ? 'Queued' : 'Building'} />}
+        {pending &&
+          (asking ? (
+            <Tipped text={buildLabel(p.status, asking)}>
+              <span className="dot tt-waiting files-proposal-wait" role="status" aria-label={buildLabel(p.status, asking)} />
+            </Tipped>
+          ) : (
+            <Spinner size={10} label={accepting ? 'Queued' : buildLabel(p.status, asking)} />
+          ))}
         {failed && (p.error ? <Tipped text={p.error}>{mark}</Tipped> : mark)}
       </button>
       {tip}
@@ -220,6 +236,10 @@ export function ViewsBar({ ws, value, onChange, views, proposals, compact = fals
     ...views.map((v) => ({ value: viewKey(v.slug), label: v.name, icon: 'view' as const, anchor: `view:${v.slug}`, dot: ready.includes(v.slug) || updated.includes(v.slug), note: ready.includes(v.slug) ? 'new' : updated.includes(v.slug) ? 'updated' : undefined, className: v.updating || v.review?.state === 'running' ? 'is-updating' : undefined })),
   ]
   const pending = proposals.filter((p) => !gone.has(p.slug))
+  // the builds whose session waits for permission, read from their chats only while a build runs
+  const metas = useChatMetas(ws, pending.some((p) => p.status === 'building' && !!p.chat))
+  const askingChats = new Set(metas.filter((m) => pendingAsks(m).length > 0).map((m) => m.id))
+  const askingFor = (p: Proposal) => p.status === 'building' && !!p.chat && askingChats.has(p.chat)
   const active = options.findIndex((o) => o.value === value)
   const names = [...options.map((o) => o.label), ...pending.map((p) => p.name)].join('\u0000')
 
@@ -251,7 +271,7 @@ export function ViewsBar({ ws, value, onChange, views, proposals, compact = fals
   const hiddenProposals = pending.filter((_, i) => !shows(options.length + i))
   const overflow = [
     ...hiddenOptions.map((o) => ({ id: o.value, label: o.label, icon: o.icon, checked: o.value === value, note: o.note, onSelect: () => onChange(o.value) })),
-    ...hiddenProposals.map((p) => ({ id: `p:${p.slug}`, label: p.name, icon: 'view' as const, note: STATE_NOTE[p.status], disabled: !p.chat, onSelect: () => openBuild(p) })),
+    ...hiddenProposals.map((p) => ({ id: `p:${p.slug}`, label: p.name, icon: 'view' as const, note: askingFor(p) ? 'waiting for permission' : STATE_NOTE[p.status], disabled: !p.chat, onSelect: () => openBuild(p) })),
   ]
 
   const newView = (
@@ -279,7 +299,7 @@ export function ViewsBar({ ws, value, onChange, views, proposals, compact = fals
       <div className="files-views" aria-label="Views" onPointerDown={dragOut}>
         <Segmented label="Views" size="lg" value={value} onChange={onChange} options={options} />
         {pending.map((p) => (
-          <ProposalOption key={p.slug} ws={ws} p={p} size="lg" onDismiss={() => void dismiss(p)} />
+          <ProposalOption key={p.slug} ws={ws} p={p} size="lg" asking={askingFor(p)} onDismiss={() => void dismiss(p)} />
         ))}
         <Button ref={setAskAt} icon="plus" className="files-views-new" active={asking} onClick={() => setAsking((o) => !o)}>
           New view
@@ -319,7 +339,7 @@ export function ViewsBar({ ws, value, onChange, views, proposals, compact = fals
         {pending
           .filter((_, i) => shows(options.length + i))
           .map((p) => (
-            <ProposalOption key={p.slug} ws={ws} p={p} size="md" onDismiss={() => void dismiss(p)} />
+            <ProposalOption key={p.slug} ws={ws} p={p} size="md" asking={askingFor(p)} onDismiss={() => void dismiss(p)} />
           ))}
         {overflow.length > 0 && (
           <span className="files-views-more">

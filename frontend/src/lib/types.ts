@@ -533,6 +533,17 @@ export interface PermissionRequest {
   rechecked?: number
   /** how long the request waits unanswered before the call is denied, in seconds; absent when it waits for good */
   deny_after_s?: number
+  /** when nobody answered it in time and it was denied: it stays on the card until dismissed (backend agent_session,
+   * permissions) */
+  expired?: string
+  /** the seconds it waits before it is denied unanswered, when it does not wait for the analyst however long */
+  wait_s?: number
+  /** a dev session's: the mode it is answered by (Start's names) */
+  mode?: string
+  /** the later calls for the same site, or later searches, that wait on this request's answer */
+  also?: string[]
+  /** a web call's "don't ask again", kept for the workspace: its site, or `web search` */
+  keep?: string
 }
 
 /** A session held where the browser cannot answer: the model-switch dialog after a safety stop (session.py). */

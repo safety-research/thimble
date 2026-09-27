@@ -11,7 +11,7 @@ import path from 'node:path'
 import { act } from 'react'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 import { ViewChip } from '../../src/chat/ViewChip.tsx'
-import { listedAsView, NEW_VIEW_PLACEHOLDER, useViews, ViewsBar } from '../../src/files/ViewsBar.tsx'
+import { buildLabel, listedAsView, NEW_VIEW_PLACEHOLDER, useViews, ViewsBar } from '../../src/files/ViewsBar.tsx'
 import { isDropped, withoutDropped } from '../../src/lib/proposals.ts'
 import type { Proposal } from '../../src/lib/types.ts'
 import { mount, settle, unmountAll } from './mount.tsx'
@@ -67,6 +67,25 @@ describe('the views and the proposals', () => {
     await act(async () => failed.querySelector<HTMLButtonElement>('.files-proposal-retry')!.click())
     await settle()
     expect(posted.map((p) => p.url)).toContain('/api/ws/toy/views/proposals/mine/retry')
+  })
+
+  test("a build shows a still warning dot in place of its spinner while a request of its session is on the card", async () => {
+    expect(buildLabel('queued', false)).toBe('Queued')
+    expect(buildLabel('building', false)).toBe('Building')
+    expect(buildLabel('building', true)).toBe('Waiting for permission')
+    const ask = { id: 'p1', tool: 'WebFetch', what: 'https://vega.github.io/vega-lite/docs/bar.html' }
+    vi.stubGlobal('fetch', async (url: string) => {
+      const body = String(url).endsWith('/chats') ? [{ id: 'c1', kind: 'agent', role: 'dev', status: 'running', permissions: [ask] }, { id: 'c2', kind: 'agent', role: 'dev', status: 'running', permissions: [{ ...ask, expired: 'x' }] }] : {}
+      return new Response(JSON.stringify(body), { status: 200, headers: { 'content-type': 'application/json' } })
+    })
+    const proposals = [proposal('life', 'Topic map', 'building', { chat: 'c1' }), proposal('mine', 'Page timeline', 'building', { chat: 'c2' })]
+    const el = await mount(<ViewsBar ws="asks" value="browser" onChange={() => undefined} views={[]} proposals={proposals} />)
+    await settle()
+    const state = (slug: string) => el.querySelector(`.files-proposal:has([data-anchor="view:${slug}"]) [role="status"]`)
+    expect(state('life')?.getAttribute('aria-label')).toBe('Waiting for permission')
+    expect(state('life')?.classList.contains('tt-waiting')).toBe(true)
+    expect(state('mine')?.getAttribute('aria-label')).toBe('Building')
+    expect(state('mine')?.classList.contains('spinner')).toBe(true)
   })
 
   test('a proposal the orientation dropped is shown nowhere: not in what a run made, not as a chip', async () => {

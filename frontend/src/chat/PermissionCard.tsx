@@ -1,22 +1,34 @@
 // The permission requests waiting for the analyst, as one card pinned above the chat's composer in every chat. It holds
-// every session's requests (chat/permissions.ts pendingRequests), oldest first, one at a time with `1 of 3` paging. Its
-// head names the requesting thread (askThread); the body says who asks, what the call does and why it asks, then Allow,
-// Allow and don't ask again (where Claude Code offers a rule) and Deny. When auto mode's classifier could not judge a
-// call, an orientation's request offers the switch to Manual or Bypass. An answer hides the request at once. A long
+// every session's requests (chat/permissions.ts pendingRequests), oldest first and those denied unanswered last, one at
+// a time with `1 of 3` paging. Its head names the requesting thread (askThread); the body says who asks, what the call
+// does, the later calls that wait on the same answer, and why it asks, then Allow, Always allow (where Claude Code
+// offers a rule for the session, or for a web call its site or web search in the workspace; the scope in its tooltip)
+// and Deny, in one row. A request denied unanswered says so, with Dismiss. When auto mode's classifier could not judge
+// a call, an orientation's request offers the switch to Manual or Bypass. An answer hides the request at once. A long
 // command wraps and scrolls past 96px.
 import { useEffect, useMemo, useState } from 'react'
 import { Button } from '../components/Button'
 import { CodeText } from '../components/Code'
 import { Icon } from '../components/Icon'
-import { TipButton } from '../components/Tooltip'
+import { TipButton, Tipped } from '../components/Tooltip'
 import { api } from '../lib/api'
 import { bus } from '../lib/bus'
 import { track } from '../lib/telemetry'
-import type { ChatMeta } from '../lib/types'
+import type { ChatMeta, PermissionRequest } from '../lib/types'
 import { askFields, askWhat, CODE_LANGS } from './Holds'
 import { BYPASS_LINE } from './ModeSwitch'
 import { ThreadChip } from './Notes'
 import { askedBy, askingAgent, asksTo, askThread, askWhy, classifierDown, modeChat, type PendingAsk } from './permissions'
+
+/** How many of a request's later calls the card lists before it counts the rest. */
+const ALSO_SHOWN = 5
+
+/** A request's "don't ask again" choice: the button's label, and its tooltip saying what it keeps and where. */
+function alwaysChoice(p: PermissionRequest): { label: string; tip: string } | null {
+  if (p.keep) return { label: `Always allow ${p.keep}`, tip: `Allow, and don't ask again for ${p.keep === 'web search' ? 'web searches' : p.keep} in this workspace` }
+  if (p.always) return { label: `Always allow ${p.always}`, tip: `Allow, and don't ask again for ${p.always} for the rest of this session` }
+  return null
+}
 
 /** Send the analyst's answer to the session that asked: main's prompt through the shim, any other session's through
  * its chat (backend agent_session.permission_route). */
@@ -52,6 +64,9 @@ export function PermissionCard({ ws, asks, metas, labels }: {
   const agent = askingAgent(p)
   const what = askWhat(p)
   const fields = askFields(p)
+  const expired = !!p.expired
+  const also = p.also ?? []
+  const always = alwaysChoice(p)
   // while auto mode's classifier gives no verdict, the orientation's mode can switch from here
   const switchChat = classifierDown(p) ? modeChat(ask, metas) : null
   const switchTo = (mode: 'manual' | 'bypass') => {
@@ -74,10 +89,10 @@ export function PermissionCard({ ws, asks, metas, labels }: {
       .finally(() => setBusy(false))
   }
   return (
-    <div className={`chat-perm${shown.length > 1 ? ' chat-perm-stack' : ''}`} role="alertdialog" aria-label="Permission needed" data-chat={ask.chat} data-request={p.id} data-count={shown.length}>
+    <div className={`chat-perm${shown.length > 1 ? ' chat-perm-stack' : ''}`} role="alertdialog" aria-label={expired ? 'Denied unanswered' : 'Permission needed'} data-chat={ask.chat} data-request={p.id} data-count={shown.length} data-expired={expired || undefined}>
       <div className="chat-perm-head">
         <Icon name="warning" size={13} className="chat-perm-ico" />
-        <span className="chat-perm-title">Permission needed</span>
+        <span className="chat-perm-title">{expired ? 'Denied unanswered' : 'Permission needed'}</span>
         <span className="chat-perm-from">
           <span className="chat-perm-from-word">from</span>
           <ThreadChip id={askThread(ask, metas, labels)} />
@@ -98,7 +113,7 @@ export function PermissionCard({ ws, asks, metas, labels }: {
         <span className="chat-perm-session">{agent ? `${who}'s ${agent.type && !agent.title ? `${agent.type} ` : ''}agent` : who}</span>
         {agent?.title && (agent.chat ? <ThreadChip id={agent.chat} label={agent.title} /> : <span className="chat-perm-agent">{agent.title}</span>)}
         {agent?.title && agent.type && <span className="chat-perm-type">({agent.type})</span>}
-        <span>{`asks to ${asksTo(p.tool)}`}</span>
+        <span>{`${expired ? 'asked' : 'asks'} to ${asksTo(p.tool)}`}</span>
       </p>
       {what && <p className="chat-perm-what">{what}</p>}
       {fields.map((f, k) =>
@@ -113,6 +128,17 @@ export function PermissionCard({ ws, asks, metas, labels }: {
           </p>
         ),
       )}
+      {also.length > 0 && (
+        <div className="chat-perm-also" data-count={also.length}>
+          <span className="chat-perm-key label">{p.tool === 'WebSearch' ? 'and the searches' : 'and from this site'}</span>
+          <ul className="chat-perm-also-list">
+            {also.slice(0, ALSO_SHOWN).map((a, k) => (
+              <li key={k}>{a}</li>
+            ))}
+            {also.length > ALSO_SHOWN && <li className="chat-perm-also-more">{`${also.length - ALSO_SHOWN} more`}</li>}
+          </ul>
+        </div>
+      )}
       <p className="chat-perm-why">{askWhy(ask, metas)}</p>
       {switchChat && !switched.has(switchChat) && (
         <div className="chat-perm-switch" data-chat={switchChat}>
@@ -124,19 +150,29 @@ export function PermissionCard({ ws, asks, metas, labels }: {
           </Button>
         </div>
       )}
-      <div className="chat-perm-acts">
-        <Button variant="primary" size="sm" className="chat-perm-allow" disabled={busy} onClick={() => reply(true)}>
-          Allow
-        </Button>
-        {p.always && (
-          <Button variant="secondary" size="sm" className="chat-perm-always" disabled={busy} onClick={() => reply(true, true)}>
-            Allow and don't ask again for <span className="chat-perm-rule">{p.always}</span>
+      {expired ? (
+        <div className="chat-perm-acts">
+          <Button variant="secondary" size="sm" className="chat-perm-dismiss" disabled={busy} onClick={() => reply(false)}>
+            Dismiss
           </Button>
-        )}
-        <Button variant="ghost" size="sm" className="chat-perm-deny" disabled={busy} onClick={() => reply(false)}>
-          Deny
-        </Button>
-      </div>
+        </div>
+      ) : (
+        <div className="chat-perm-acts">
+          <Button variant="primary" size="sm" className="chat-perm-allow" disabled={busy} onClick={() => reply(true)}>
+            Allow
+          </Button>
+          {always && (
+            <Tipped text={always.tip} className="chat-perm-always-tip">
+              <Button variant="secondary" size="sm" className="chat-perm-always" data-keep={p.keep} disabled={busy} onClick={() => reply(true, true)}>
+                {always.label}
+              </Button>
+            </Tipped>
+          )}
+          <Button variant="ghost" size="sm" className="chat-perm-deny" disabled={busy} onClick={() => reply(false)}>
+            Deny
+          </Button>
+        </div>
+      )}
     </div>
   )
 }

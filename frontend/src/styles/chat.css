@@ -1289,8 +1289,8 @@ button.model-line-part[aria-expanded='true'] {
 
 /* -------- the permission card (chat/PermissionCard): every request that waits for the analyst, pinned above the
    composer, opaque and bold: a warning tint under a 1.5px warning edge, 6px clear of what is under it. One request at a
-   time with `1 of 3` and arrows; the call's description, its input as code, why it asks, then Allow, Allow and don't
-   ask again, and Deny. -------- */
+   time with `1 of 3` and arrows; the call's description, its input as code, why it asks, then Allow, Always allow and
+   Deny in one row. -------- */
 .chat-perm {
   position: relative;
   display: flex;
@@ -1434,6 +1434,37 @@ button.model-line-part[aria-expanded='true'] {
   color: var(--text-secondary);
   overflow-wrap: anywhere;
 }
+/* the later calls for the same site, or later searches, that wait on this request's answer */
+.chat-perm-also {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+  color: var(--text-secondary);
+}
+.chat-perm-also-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  max-height: 72px;
+  margin: 0;
+  padding: 0;
+  overflow: auto;
+  list-style: none;
+  overflow-wrap: anywhere;
+}
+.chat-perm-also-more {
+  color: var(--text-tertiary);
+}
+/* denied unanswered: the card says so in a neutral edge, with Dismiss */
+.chat-perm[data-expired] {
+  border-color: var(--border-strong);
+  background: var(--surface-card);
+}
+.chat-perm[data-expired] .chat-perm-head {
+  color: var(--text-secondary);
+}
 /* a call auto mode's classifier could not judge: the orientation's switch to Manual or Bypass, under the reason */
 .chat-perm-switch {
   display: flex;
@@ -1442,21 +1473,23 @@ button.model-line-part[aria-expanded='true'] {
 }
 .chat-perm-acts {
   display: flex;
-  flex-wrap: wrap;
   align-items: center;
   gap: 6px;
   min-width: 0;
 }
-.chat-perm-always.btn {
-  max-width: 100%;
-  height: auto;
-  min-height: var(--h-control);
-  white-space: normal;
-  text-align: left;
+/* a long Always allow ends in an ellipsis rather than wrap; its tooltip says the whole of it */
+.tipped.chat-perm-always-tip {
+  flex: 0 1 auto;
+  min-width: 0;
 }
-.chat-perm-rule {
-  font: 400 var(--text-mono) / 1.35 var(--font-mono);
-  overflow-wrap: anywhere;
+.chat-perm-always.btn {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 100%;
+}
+/* room for descenders, which the label's ellipsis overflow clips at line-height 1 */
+.chat-perm-always .btn-label {
+  line-height: 1.3;
 }
 .chat-perm-deny.btn {
   margin-left: auto;
