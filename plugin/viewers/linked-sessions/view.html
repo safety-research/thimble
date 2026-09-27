@@ -61,8 +61,8 @@
   .mi .nm { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .mi .n { margin-left: auto; color: var(--text-tertiary); font-variant-numeric: tabular-nums; font-size: var(--text-xs); flex: none; }
   .mi .swb { display: inline-grid; place-items: center; width: 18px; height: 18px; margin: 0 -2px; border-radius: 3px; flex: none; }
-  .box { display: inline-block; flex: none; width: 12px; height: 12px; border-radius: 3px; border: 1.5px solid var(--c); background: transparent; }
-  .box.on { background: var(--c); }
+  .box { display: inline-block; flex: none; width: 12px; height: 12px; border-radius: 3px; border: 1.5px solid var(--mark); background: transparent; }
+  .box.on { background: var(--mark); }
   .msep { height: 1px; margin: 4px 0; background: var(--border-hairline); }
   .cbx { width: 13px; height: 13px; border-radius: 3px; border: 1px solid var(--border-strong); display: inline-grid; place-items: center; background: var(--surface-card); flex: none; }
   .cbx.on { background: var(--surface-inverse); border-color: var(--surface-inverse); color: var(--text-on-inverse); }
@@ -230,7 +230,7 @@ const MAX_TICKED = 4
 const root = getComputedStyle(document.documentElement)
 const tok = (name, fallback) => root.getPropertyValue(name).trim() || fallback
 // the page's own categories in the theme's viz colours, handed back to the labels while one is on
-const CAT = [tok('--viz-1', '#0072b2'), tok('--viz-2', '#e69f00'), tok('--viz-3', '#009e73'), tok('--viz-6', '#8c65e8'), tok('--viz-7', '#8a6d3b'),
+const CAT = [tok('--viz-1', '#0072b2'), tok('--viz-2', '#e69f00'), tok('--viz-3', '#009e73'), '#8c65e8', '#8a6d3b',
   tok('--viz-5', '#cc79a7'), '#56b4e9', tok('--viz-ink-2', '#6b675f')]
 const INK = tok('--viz-ink-1', '#1b1a18'), QUIET = tok('--viz-ink-3', '#a19d94')
 const NEG = tok('--status-negative', '#c93a28'), WARN = tok('--status-warning', '#9a6512')
@@ -459,7 +459,7 @@ function menus() {
     const all = labels.all || labels.labels.map((l) => ({ ...l, on: true }))
     const rows = all.map((l) => {
       const lit = (l.values || []).filter((v) => v.highlight !== false)
-      const box = `<span class="box ${l.on ? 'on' : ''}" style="--c:${l.colour}"></span>`
+      const box = `<span class="box ${l.on ? 'on' : ''}" style="--mark:${l.colour}"></span>`
       const main = `<button class="mi" data-act="label" data-id="${esc(l.id || '')}" data-label="${esc(l.id || '')}" ${l.id ? '' : 'disabled'}><span class="ck">${box}</span><span class="nm">${esc(l.name)}</span>
         <span class="n">${l.count == null ? '' : l.count}</span>${lit.length === 1 ? swatchButton(l.name, lit[0].name, lit[0].colour) : ''}</button>`
       const subs = l.on && lit.length > 1 ? lit.map((v) => `<div class="mi sub" data-label="${esc(l.id || '')}"><span class="nm">${esc(v.name)}</span><span class="n"></span>${swatchButton(l.name, v.name, v.colour)}</div>`).join('') : ''
@@ -659,7 +659,7 @@ function callDetails(c, s) {
   const cls = classes()
   const chip = c.out === 'error' ? `<span class="chip chip-sans chip-tone-negative">error${c.exit != null ? ' · exit ' + esc(c.exit) : ''}</span>` : c.out === 'denied' ? '<span class="chip chip-sans chip-tone-warning">denied</span>' : '<span class="chip chip-sans chip-tone-positive">ok</span>'
   const output = c.output ? esc(c.output) : c.new != null ? `${c.old ? `<span class="e">− ${esc(c.old)}</span>\n` : ''}<span class="a">+ ${esc(c.new)}</span>` : c.out === 'ok' ? esc(c.result || 'done') : `<span class="e">${esc(c.result)}</span>`
-  const labs = c.m.map((i) => `<span class="labrow"><span class="box on" style="--c:${classColour(i)}"></span>${esc(cls[i].label)}${labelBy(cls[i].label) && (labelBy(cls[i].label).values || []).filter((v) => v.highlight !== false).length > 1 ? `: ${esc(cls[i].value)}` : ''}</span>`).join('')
+  const labs = c.m.map((i) => `<span class="labrow"><span class="box on" style="--mark:${classColour(i)}"></span>${esc(cls[i].label)}${labelBy(cls[i].label) && (labelBy(cls[i].label).values || []).filter((v) => v.highlight !== false).length > 1 ? `: ${esc(cls[i].value)}` : ''}</span>`).join('')
   const cols = coloursOf({ ...c, s: s.id })
   const conc = (moment || []).map((o) => {
     let what
@@ -732,7 +732,7 @@ function compare() {
   const maxN = Math.max(1, ...groups.map((g) => g.n))
   if (cls.length) {
     sec('Labels')
-    cls.forEach((c, i) => barRow(esc(c.label) + (labelBy(c.label) && (labelBy(c.label).values || []).filter((v) => v.highlight !== false).length > 1 ? `: ${esc(c.value)}` : ''), groups.map((g) => g.classes[i]), maxN, classColour(i), (v) => v, `<span class="box on" style="--c:${classColour(i)};width:10px;height:10px"></span>`))
+    cls.forEach((c, i) => barRow(esc(c.label) + (labelBy(c.label) && (labelBy(c.label).values || []).filter((v) => v.highlight !== false).length > 1 ? `: ${esc(c.value)}` : ''), groups.map((g) => g.classes[i]), maxN, classColour(i), (v) => v, `<span class="box on" style="--mark:${classColour(i)};width:10px;height:10px"></span>`))
     line()
   }
   sec('Calls by tool')
