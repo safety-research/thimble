@@ -677,9 +677,9 @@ def test_each_worked_example_describes_its_files():
 
 async def test_the_incident_timeline_example_puts_every_source_on_one_axis_and_gathers_its_units(samples, inproc,
                                                                                                     bound):
-    """The overview sends every record of the five sources in time order, with each field's values named; a line opens
-    in its incident, a record's details name the record it answers, an incident cites its records in time order, and a
-    window cites the records inside it."""
+    """The overview sends every record of the five sources in time order, with each field's values named, and while a
+    label is on its values with each record's marks; a line opens in its incident, a record's details name the record
+    it answers, an incident cites its records in time order, and a window cites the records inside it."""
     name = "incident-timeline"
     slug = _save_example(name)
     rows = [json.loads(ln) for ln in (samples / name / "events.jsonl").read_text("utf-8").splitlines()]
@@ -687,6 +687,10 @@ async def test_the_incident_timeline_example_puts_every_source_on_one_axis_and_g
     cols, names = over["cols"], over["names"]
     assert len(cols["r"]) == len(rows) and cols["t"] == sorted(cols["t"])
     assert {names["source"][v] for v in cols["source"]} == {r["source"] for r in rows}
+    assert over["marks"] == [] and set(cols["m"]) == {-1}
+    probed = await views.reader_call(name, slug, "records", {"op": "overview"}, labels=views.probe_context())
+    assert len(probed["marks"]) == 1, "the label that is on lists its value, the colour the page draws it in"
+    assert set(probed["cols"]["m"]) == {-1, 0} and probed["cols"]["mb"] == [m + 1 for m in probed["cols"]["m"]]
     one = await views.resolve_locator(name, slug, {"path": "events.jsonl", "fragment": "L1"})
     assert one["excerpt"] == rows[0]["text"] and one["key"] == rows[0]["incident"]
     child = next(n for n, r in enumerate(rows, 1) if r.get("re"))

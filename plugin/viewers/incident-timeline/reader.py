@@ -25,8 +25,9 @@
 # again; text, search and a record's details are read back from the file by seeking to its line.
 #
 # Labels: they apply when records are served, never in the index. Every answer keeps only the records thimble.kept(ref)
-# holds for, and each row carries the marks thimble.marked(ref) gives it (the first as `m`, all of them as bits in
-# `mb`), which the page draws in the labels' colours in its charts and lanes, since thimble cannot see inside them.
+# holds for. `marks` lists the values of the labels that are on, in thimble's order, and each row carries the ones
+# thimble.marked(ref) gives it (the first as `m`, all of them as bits in `mb`), which the page draws in the labels'
+# colours in its charts and lanes, since thimble cannot see inside them.
 import bisect
 import json
 import re
@@ -149,23 +150,21 @@ def _overview(index, keep):
     """Every row the filter keeps, and the rows in `keep` (a citation asked for them), as columns: `r` the row, `t`
     seconds since `t0`, `f` and `ln` its file and line, a column per field, `re` the row it answers and `tk` the seconds
     since that row (-1 for none), `m` the index in `marks` of its first mark (-1 for none) and `mb` all its marks as
-    bits."""
+    bits. `marks` holds every value of the labels that are on, each {label, value, colour}, marking records or not."""
     on = thimble.view_labels()
     rows = index["rows"]
     t0 = rows[0][T] if rows else 0
     cols = {k: [] for k in ("r", "t", "f", "ln", *FIELDS, "re", "tk", "m", "mb")}
-    marks, mark_at = [], {}
+    marks = [{"label": lab["name"], "value": v["name"], "colour": v["colour"]}
+             for lab in on["labels"] for v in lab["values"]][:MARKS_MAX]
+    mark_at = {(x["label"], x["value"]): m for m, x in enumerate(marks)}
     for i, row in enumerate(rows):
         ref = _ref(index, i)
         if on["filter"] and i not in keep and not thimble.kept(ref):
             continue
         first, bits = -1, 0
-        for x in thimble.marked(ref) if on["labels"] else ():
-            key = (x["label"], x["value"])
-            m = mark_at.get(key)
-            if m is None and len(marks) < MARKS_MAX:
-                m = mark_at[key] = len(marks)
-                marks.append({"label": x["label"], "value": x["value"], "colour": x["colour"]})
+        for x in thimble.marked(ref) if marks else ():
+            m = mark_at.get((x["label"], x["value"]))
             if m is not None:
                 first = m if first < 0 else first
                 bits |= 1 << m

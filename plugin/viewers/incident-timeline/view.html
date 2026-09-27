@@ -35,11 +35,42 @@
   svg .lane-off { opacity: 0.35; }
   svg .tick { cursor: pointer; }
   #focusbox { position: relative; }
-  #legend { position: absolute; left: 0; display: flex; flex-direction: column; gap: 3px; min-width: 0; }
-  #legend .cap { margin-bottom: 4px; }
-  #legend select { width: 100%; margin-bottom: 4px; }
-  #legend .item { display: flex; align-items: center; gap: 6px; min-width: 0; font: 400 var(--text-xs) / 1.25 var(--font-body); color: var(--text-secondary); }
-  #legend .item span:last-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #legend { position: absolute; left: 0; display: flex; flex-direction: column; align-items: stretch; gap: 1px; min-width: 0; }
+  #legend .cap { margin-bottom: 6px; }
+  #legend > .btn { align-self: flex-start; margin-top: 4px; }
+  .ico { width: 12px; height: 12px; flex: none; stroke: currentColor; fill: none; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+  .sw { display: inline-block; width: 8px; height: 8px; border-radius: 2px; flex: none; }
+  .cbtn { gap: 6px; max-width: 100%; margin-bottom: 6px; padding: 0 7px 0 9px; }
+  .cbtn .k { color: var(--text-tertiary); font-weight: 400; }
+  .cbtn .ico { color: var(--text-tertiary); }
+  .cbtn .sws { display: inline-flex; gap: 2px; }
+  .cbtn .cnm { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .lg { display: flex; align-items: center; gap: 6px; min-width: 0; height: 22px; padding: 0 6px 0 4px; margin-left: -4px; border-radius: var(--radius-chip); font: 400 var(--text-xs) / 1 var(--font-body); color: var(--text-secondary); cursor: pointer; }
+  .lg:hover { background: var(--surface-hover); color: var(--text-primary); }
+  .lg.st { cursor: default; }
+  .lg.st:hover { background: none; color: var(--text-secondary); }
+  .lg .nm { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .lg .n { margin-left: auto; color: var(--text-tertiary); font-variant-numeric: tabular-nums; }
+  .lg.off { opacity: .38; }
+  .lg.off .sw { background: transparent !important; box-shadow: inset 0 0 0 1.3px var(--text-tertiary); }
+  .swb { display: inline-grid; place-items: center; width: 16px; height: 16px; margin: 0 -4px 0 -4px; border-radius: 3px; flex: none; cursor: pointer; }
+  .swb:hover { background: var(--track-bg); }
+  .menu { position: fixed; z-index: 50; min-width: 250px; max-width: 320px; padding: 4px; border-radius: var(--radius-card); background: var(--raised-bg); box-shadow: var(--raised-ring), 0 10px 28px rgba(var(--ink-rgb), .14); font-size: var(--text-ui-sm); }
+  .mh { padding: 8px 8px 4px; color: var(--text-tertiary); font: 400 10.5px / 1.2 var(--font-body); letter-spacing: .08em; text-transform: uppercase; }
+  .mi { display: flex; align-items: center; gap: 8px; width: 100%; height: 28px; padding: 0 8px; border: 0; border-radius: var(--radius-chip); background: none; color: var(--text-primary); font: 400 var(--text-ui-sm) / 1 var(--font-body); text-align: left; cursor: pointer; }
+  .mi:hover { background: var(--surface-hover); }
+  .mi.sub { padding-left: 30px; color: var(--text-secondary); cursor: default; }
+  .mi .ck { width: 14px; display: inline-grid; place-items: center; flex: none; }
+  .mi .nm { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .mi .n { margin-left: auto; display: inline-flex; gap: 1px; color: var(--text-tertiary); font-variant-numeric: tabular-nums; font-size: var(--text-xs); flex: none; }
+  .mi .swb { width: 18px; height: 18px; margin: 0 -2px; }
+  .box { display: inline-block; flex: none; width: 12px; height: 12px; border-radius: 3px; border: 1.5px solid var(--mark); background: transparent; }
+  .box.on { background: var(--mark); }
+  .msep { height: 1px; margin: 4px 0; background: var(--border-hairline); }
+  .pal { position: fixed; z-index: 60; display: grid; grid-template-columns: repeat(7, 20px); gap: 6px; padding: 10px; border-radius: var(--radius-card); background: var(--raised-bg); box-shadow: var(--raised-ring), 0 10px 28px rgba(var(--ink-rgb), .14); }
+  .pal button { width: 20px; height: 20px; padding: 0; border: 0; border-radius: 4px; cursor: pointer; }
+  .pal button:hover { transform: scale(1.12); }
+  .pal button.cur { box-shadow: 0 0 0 2px var(--surface-card), 0 0 0 3.5px var(--text-primary); }
   #overview, #focus { cursor: crosshair; }
   #more { margin: 2px 0 0 -6px; }
   #records { min-width: 0; border-top: 1px solid var(--border-hairline); }
@@ -137,18 +168,21 @@
   </section>
 </main>
 <div id="tip"></div>
+<div id="pop"></div>
 <script>
 'use strict'
 // Incident timeline: every record of every source on one time axis. The toolbar narrows by search, source (chips) and
 // every other field (selects); the overview shows the whole span with a brush, the focus counts the window's records
-// per bin in the Colour by field's colours, and the lanes lay out each value of the Group by field side by side, as
-// small multiples of the same window. The Time control puts each incident's records at their time since the
-// incident's first record, so incidents compare on one axis. The list holds every record in the window and filters,
-// sortable by the time since the record before (Gap) or since the record it answers (Took), and a record's details
-// show the record it answers, those that answer it and its neighbours in time across every source.
-// Labels: the reader keeps only what the label filter keeps and hands each record its marks, which colour the bars,
-// the lane ticks and one lane per label value while a label is on; list rows and details carry their file ref as
-// data-anchor, incident lanes their view key, so thimble marks them.
+// per bin in the colours of the Colour menu's field or labels, and the lanes lay out each value of the Group by field
+// side by side, as small multiples of the same window. The legend beside the focus shows a value alone on a click and
+// hides it on a shift-click. The Time control puts each incident's records at their time since the incident's first
+// record, so incidents compare on one axis. The list holds every record in the window and filters, sortable by the
+// time since the record before (Gap) or since the record it answers (Took), and a record's details show the record it
+// answers, those that answer it and its neighbours in time across every source.
+// Labels: the reader keeps only what the label filter keeps and hands each record its marks. While a label is on it is
+// the colouring: its values colour the bars and the lane ticks and get a lane each, and a value's swatch opens thimble's
+// palette. List rows and details carry their file ref as data-anchor, incident lanes their view key, so thimble marks
+// them.
 const slug = (thimble.view && thimble.view.slug) || 'incident-timeline'
 const NS = 'http://www.w3.org/2000/svg'
 // the reader's fields: [key, name, plural, the name of a record without it]; the first is narrowed by chips
@@ -168,11 +202,11 @@ const RED = 3 // the index of --viz-4, the red a failure is drawn in
 const MON = 'Jan Feb Mar Apr May Jun Jul Aug Sep Oct Nov Dec'.split(' ')
 const STEPS = [1, 2, 5, 10, 15, 30, 60, 120, 300, 600, 900, 1800, 3600, 7200, 10800, 21600, 43200, 86400, 172800, 604800]
 const TICKS = [5, 10, 15, 30, 60, 120, 300, 600, 900, 1800, 3600, 7200, 10800, 21600, 43200, 86400, 172800, 604800, 1209600]
-const COLOURED = 5 // values of the Colour by field drawn in their own viz colour; the rest share one ink
+const COLOURED = 5 // values of the colour field drawn in their own viz colour; the rest share one ink
 const LANES = 12 // lanes shown before the rest are folded
 const ROWS = 400 // list rows shown before the next ones are asked for
 const RIGHT = 10
-let GUTTER = 150 // the name column left of every chart
+const GUTTER = 176 // the name column left of every chart, which holds the focus's legend
 
 const token = (n) => getComputedStyle(document.documentElement).getPropertyValue(n).trim()
 const fmt = (n) => Number(n).toLocaleString('en-US')
@@ -190,6 +224,10 @@ function s(tag, attrs, text) {
   return e
 }
 function clip(str, n) { return str.length > n ? str.slice(0, n - 1) + '…' : str }
+const esc = (x) => String(x == null ? '' : x).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c])
+const CARET = '<svg class="ico" viewBox="0 0 12 12"><path d="M3.5 4.75 6 7.25l2.5-2.5"/></svg>'
+const CHECK = '<svg class="ico" viewBox="0 0 12 12"><path d="M2.5 6.2 5 8.5l4.5-5"/></svg>'
+const PLUS = '<svg class="ico" viewBox="0 0 12 12"><path d="M6 2.5v7M2.5 6h7"/></svg>'
 function plural(n, one, many) { return `${fmt(n)} ${n === 1 ? one : many}` }
 function lowerBound(arr, x) {
   let lo = 0, hi = arr.length
@@ -230,13 +268,17 @@ let XS = new Float64Array(0) // X in ORDER's order, for the window's bounds
 let SPAN = [0, 1]
 let starts = [] // incident value -> its start, seconds since T0
 let rankOf = {} // field -> value -> rank by records overall
+let totals = {} // field -> the values that have records overall
 let loadSeq = 0
-let labelState = { labels: [], filter: null }
+let labelState = { labels: [], filter: null, all: null, palette: null } // what thimble.onLabels last said
 const texts = new Map() // reader row -> its text
 
 let mode = 'clock' // 'clock' or 'start'
 let group = 'source'
 let colourBy = 'source'
+let hide = new Set() // the label values the legend hides, as markKey gives them, and 'none' for the records none marks
+let menu = null // 'colour' while the Colour menu is open
+let pal = null // {id, value, from} while a label value's palette is open
 let win = null // [a, b) on the time axis
 const F = Object.fromEntries(KEYS.map((k) => [k, new Set()])) // field -> the value indices it is narrowed to
 let searchQ = ''
@@ -269,7 +311,10 @@ async function load() {
     // a value with no records overall ranks last, and "none" after every named value
     const order = n.map((_, v) => v).sort((a, b) => (a === 0) - (b === 0) || n[b] - n[a] || a - b)
     rankOf[k] = new Map(order.map((v, r) => [v, r]))
+    totals[k] = order.filter((v) => n[v] > 0)
   }
+  const keys = D.marks.map((_, j) => markKey(j))
+  hide = new Set([...hide].filter((x) => (x === 'none' && keys.length) || keys.includes(x)))
   place()
   return true
 }
@@ -294,6 +339,20 @@ function place() {
 const nameOf = (k, v) => (D.names[k] && D.names[k][v]) || FIELD[k][3]
 const labelsOn = () => !!(D && D.marks.length) || labelState.labels.length > 0
 const ref = (i) => `${D.files[C.f[i]]}#L${C.ln[i]}`
+
+// the label values the reader sends as `marks`, with the colour and the id thimble last gave their label
+const labelBy = (name) => (labelState.all || labelState.labels || []).find((l) => l.name === name)
+const markKey = (j) => `${D.marks[j].label}\n${D.marks[j].value}`
+function markColour(j) {
+  const m = D.marks[j], l = labelBy(m.label), v = l && (l.values || []).find((x) => x.name === m.value)
+  return (v && v.colour) || m.colour
+}
+function markName(j) {
+  const m = D.marks[j], l = labelBy(m.label)
+  const multi = l ? (l.values || []).filter((v) => v.highlight !== false).length > 1 : m.value !== m.label
+  return multi ? `${m.label}: ${m.value}` : m.label
+}
+const firstBit = (x) => (x ? 31 - Math.clz32(x & -x) : -1)
 const whole = () => win[0] <= SPAN[0] && win[1] >= SPAN[1]
 
 // ---------------------------------------------------------------- filters
@@ -302,9 +361,12 @@ let laneRecs = new Map() // Group by value -> the window's records passing every
 let counts = {} // field -> value -> the window's records passing every filter but that field's own
 let passAll = [] // the placed records that pass every filter, the window aside, by X
 let laneOrder = [] // the Group by field's values as the lanes list them
-let colourOrder = [] // the Colour by field's values, in the order they take the colours
-let colourRank = new Map() // Colour by value -> its place among the coloured values
-const anyFilter = () => !!searchSet || KEYS.some((k) => F[k].size)
+let colourOrder = [] // the colour field's values, in the order they take the colours
+let colourRank = new Map() // colour field value -> its place among the coloured values
+let M = new Int32Array(0) // each record's first mark the legend does not hide, -1 for none
+let markN = [] // mark -> the window's records it marks that pass every filter, the legend's hiding aside
+let noneN = 0 // the same for the records no mark marks
+const anyFilter = () => !!searchSet || hide.size > 0 || KEYS.some((k) => F[k].size)
 
 // which filter drops record i: '' for none, the field when exactly one does, '*' for more
 function failing(i) {
@@ -321,12 +383,23 @@ function compute() {
   counts = Object.fromEntries(KEYS.map((k) => [k, new Map()]))
   laneRecs = new Map()
   passAll = []
+  let hidden = 0
+  D.marks.forEach((_, j) => { if (hide.has(markKey(j))) hidden |= 1 << j })
+  M = new Int32Array(N)
+  for (let i = 0; i < N; i++) M[i] = firstBit(C.mb[i] & ~hidden)
+  markN = D.marks.map(() => 0)
+  noneN = 0
   const out = []
   const lo = lowerBound(XS, win[0]), hi = lowerBound(XS, win[1])
   for (let p = 0; p < ORDER.length; p++) {
     const i = ORDER[p]
     const bad = failing(i)
     if (bad === '*') continue
+    if (!bad && p >= lo && p < hi) {
+      for (let j = 0; j < markN.length; j++) if (C.mb[i] & (1 << j)) markN[j]++
+      if (!C.mb[i]) noneN++
+    }
+    if (hide.size && (C.mb[i] ? M[i] < 0 : hide.has('none'))) continue
     if (!bad) passAll.push(i)
     if (p < lo || p >= hi) continue
     if (bad) {
@@ -348,22 +421,26 @@ function compute() {
 
 // The lanes' and the colours' values in order: a field with few values keeps its order by records overall, so lanes
 // and colours stay put while zooming; one with more is ranked by records in view. The first COLOURED named values of
-// the Colour by field get the viz colours and the rest share one ink, as do records without the field.
+// the colour field get the viz colours and the rest share one ink, as do records without the field.
 function rank(k, n) {
   const all = [...rankOf[k].keys()].filter((v) => v !== 0 || n(0) > 0 || F[k].has(0))
   if (all.length <= LANES) return all
   return all.filter((v) => n(v) > 0 || F[k].has(v)).sort((p, q) => n(q) - n(p) || rankOf[k].get(p) - rankOf[k].get(q))
 }
+// the viz colour each of a field's first named values takes: a failure (BAD) the red, --viz-4, the others the rest
+function slots(k, named) {
+  const out = new Map()
+  const top = named.slice(0, COLOURED)
+  const bad = top.find((v) => BAD.has(nameOf(k, v)))
+  const free = [0, 1, 2, 3, 4].filter((r) => bad == null || r !== RED)
+  if (bad != null) out.set(bad, RED)
+  for (const v of top) if (v !== bad) out.set(v, free.shift())
+  return out
+}
 function order() {
   laneOrder = rank(group, (v) => (laneRecs.get(v) || []).length)
   colourOrder = rank(colourBy, (v) => counts[colourBy].get(v) || 0)
-  // a failure (BAD) takes the red of the viz colours, --viz-4, and the other values the rest in order
-  colourRank = new Map()
-  const named = colourOrder.filter((v) => v !== 0).slice(0, COLOURED)
-  const bad = named.find((v) => BAD.has(nameOf(colourBy, v)))
-  const free = [0, 1, 2, 3, 4].filter((r) => bad == null || r !== RED)
-  if (bad != null) colourRank.set(bad, RED)
-  for (const v of named) if (v !== bad) colourRank.set(v, free.shift())
+  colourRank = slots(colourBy, colourOrder.filter((v) => v !== 0))
   for (const v of colourOrder) if (v !== 0 && !colourRank.has(v)) colourRank.set(v, COLOURED + colourRank.size)
 }
 // while a label is on every record is ink but for the label's colour (recColour)
@@ -374,7 +451,7 @@ function colourOf(v) {
 const rankIn = (v) => { const p = colourOrder.indexOf(v); return v === 0 || p < 0 ? 1e9 : p }
 const coloured = (v) => colourRank.has(v) && colourRank.get(v) < COLOURED
 function recColour(i) {
-  if (labelsOn()) return C.m[i] >= 0 ? D.marks[C.m[i]].colour : token('--viz-ink-3')
+  if (labelsOn()) return M[i] >= 0 ? markColour(M[i]) : token('--viz-ink-3')
   return colourOf(C[colourBy][i])
 }
 
@@ -515,7 +592,7 @@ function drawAxis(g, x, a, b, y, px, gridTop, gridBottom) {
   }
 }
 
-// per bin of `step` seconds from a round time: its records' count per Colour by value and per mark
+// per bin of `step` seconds from a round time: its records' count per colour field value and per mark
 function bins(a, b, step, idxs) {
   const base = mode === 'clock' ? Math.floor((T0 + a) / step) * step - T0 : Math.floor(a / step) * step
   const nb = Math.max(1, Math.ceil((b - base) / step))
@@ -528,7 +605,7 @@ function bins(a, b, step, idxs) {
     bn.n++
     const v = C[colourBy][i]
     bn.by.set(v, (bn.by.get(v) || 0) + 1)
-    const m = C.m[i]
+    const m = M[i]
     bn.marks.set(m, (bn.marks.get(m) || 0) + 1)
   }
   return out
@@ -537,7 +614,7 @@ function bins(a, b, step, idxs) {
 function stack(bn) {
   if (labelsOn()) {
     const out = []
-    for (const [m, n] of [...bn.marks.entries()].sort((p, q) => p[0] - q[0])) if (m >= 0) out.push([D.marks[m].colour, n])
+    for (const [m, n] of [...bn.marks.entries()].sort((p, q) => p[0] - q[0])) if (m >= 0) out.push([markColour(m), n])
     if (bn.marks.get(-1)) out.push([token('--viz-ink-4'), bn.marks.get(-1)])
     return out
   }
@@ -626,14 +703,16 @@ function renderFocus() {
   const svg = document.getElementById('focus')
   const W = svg.parentElement.clientWidth
   const top = 8, axis = 30
-  let H = 150
+  // at least as tall as the legend beside it
+  const rows = labelsOn() ? D.marks.length + 1 : Math.min(COLOURED + 1, colourOrder.length)
+  let H = Math.max(150, 64 + 23 * (rows + 1))
   if (document.body.clientWidth >= 1100) {
     // where the charts have a column of their own, the focus takes the height the lanes leave
     const n = laneValues().shown.length
-    const lanes = n * laneHeight(n) + (labelsOn() ? D.marks.length * LANE : 0) + 40
+    const lanes = n * laneHeight(n) + markLanes().length * LANE + 40
     const box = document.getElementById('charts')
     const rest = document.getElementById('chartbar').offsetHeight + Number(document.getElementById('overview').getAttribute('height')) + lanes + 48
-    H = Math.max(170, Math.min(360, box.clientHeight - rest - top - axis))
+    H = Math.max(H, 170, Math.min(360, box.clientHeight - rest - top - axis))
   }
   svg.setAttribute('width', W)
   svg.setAttribute('height', top + H + axis)
@@ -674,43 +753,190 @@ function renderFocus() {
   drawChosen()
 }
 
-// the focus's gutter: what a bar counts, the Colour by control and the colours' legend
+// the focus's gutter: what a bar counts, the Colour menu's button and the legend of its colours
 function renderLegend(caption, top) {
   const box = document.getElementById('legend')
   box.style.top = top + 'px'
   box.style.width = GUTTER - 22 + 'px'
-  const pick = h('select', 'field')
-  pick.setAttribute('aria-label', 'Colour by')
-  for (const [k, name] of FIELDS) {
-    const o = h('option', null, name)
-    o.value = k
-    pick.append(o)
-  }
-  pick.value = colourBy
-  pick.onchange = () => { colourBy = pick.value; refresh() }
-  const item = (colour, text) => {
-    const it = h('div', 'item')
-    const sq = h('span', 'sq')
-    sq.style.background = colour
-    it.append(sq, h('span', null, text))
-    it.title = text
-    return it
-  }
   const items = []
+  let hiding = false
   if (labelsOn()) {
-    for (const m of D.marks) items.push(item(m.colour, m.value === m.label ? m.label : `${m.label}: ${m.value}`))
-    if ([...vis].some((i) => C.m[i] < 0)) items.push(item(token('--viz-ink-4'), 'unmarked'))
+    D.marks.forEach((m, j) => items.push(legendItem(markColour(j), markName(j), markN[j], markKey(j), hide.has(markKey(j)), labelBy(m.label), m.value)))
+    items.push(legendItem(token('--viz-ink-4'), 'no label', noneN, 'none', hide.has('none')))
+    hiding = hide.size > 0
   } else {
-    const named = colourOrder.filter((v) => v !== 0 && (counts[colourBy].get(v) || 0) > 0)
-    for (const v of named.slice(0, COLOURED)) items.push(item(colourOf(v), nameOf(colourBy, v)))
-    const rest = named.length - COLOURED
-    if (rest > 0) items.push(item(token('--viz-ink-4'), `${rest} more`))
-    else if ((counts[colourBy].get(0) || 0) > 0) items.push(item(token('--viz-ink-4'), FIELD[colourBy][3]))
+    const k = colourBy, off = (v) => F[k].size > 0 && !F[k].has(v)
+    const named = colourOrder.filter((v) => v !== 0 && (counts[k].get(v) || 0) > 0)
+    for (const v of named.slice(0, COLOURED)) items.push(legendItem(colourOf(v), nameOf(k, v), counts[k].get(v), v, off(v)))
+    const rest = named.slice(COLOURED)
+    if (rest.length) {
+      const more = h('span', 'lg st')
+      const sw = h('i', 'sw')
+      sw.style.background = token('--viz-ink-4')
+      const n = rest.reduce((sum, v) => sum + counts[k].get(v), 0) + (counts[k].get(0) || 0)
+      more.append(sw, h('span', 'nm', `${rest.length} more`), h('span', 'n', fmt(n)))
+      items.push(more)
+    } else if ((counts[k].get(0) || 0) > 0) items.push(legendItem(token('--viz-ink-4'), FIELD[k][3], counts[k].get(0), 0, off(0)))
+    hiding = F[k].size > 0
   }
-  const cap = h('div', 'cap', caption)
-  const by = h('div', 'cap', 'Colour by')
-  box.replaceChildren(cap, by, pick, ...items)
+  if (hiding) {
+    const all = h('button', 'btn btn-ghost btn-sm', 'Show all')
+    all.onclick = () => { if (labelsOn()) hide = new Set(); else F[colourBy].clear(); refresh() }
+    items.push(all)
+  }
+  box.replaceChildren(h('div', 'cap', caption), colourButton(), ...items)
+  renderPop()
 }
+function colourButton() {
+  const b = h('button', 'btn btn-secondary btn-sm cbtn')
+  b.id = 'cbtn'
+  let what = `<span class="cnm">${esc(FIELD[colourBy][1])}</span>`
+  if (labelsOn()) {
+    const names = [...new Set(D.marks.length ? D.marks.map((m) => m.label) : labelState.labels.map((l) => l.name))]
+    const sws = D.marks.slice(0, 6).map((_, j) => `<i class="sw" style="background:${markColour(j)}"></i>`).join('')
+    what = `<span class="sws">${sws}</span><span class="cnm">${esc(names.length === 1 ? names[0] : `${names.length} labels`)}</span>`
+    const ids = labelState.labels.map((l) => l.id).filter(Boolean).join(' ')
+    if (ids) b.dataset.label = ids
+  }
+  b.innerHTML = `<span class="k">Colour</span>${what}${CARET}`
+  b.onclick = (e) => { e.stopPropagation(); menu = menu ? null : 'colour'; pal = null; renderPop() }
+  return b
+}
+function legendItem(colour, text, n, v, off, label, value) {
+  const it = h('span', 'lg' + (off ? ' off' : ''))
+  it.setAttribute('role', 'button')
+  it.title = `${text}\nClick: only this · Shift-click: hide`
+  if (label && label.id) it.dataset.label = label.id
+  it.append(swatch(colour, label, value), h('span', 'nm', text), h('span', 'n', fmt(n || 0)))
+  it.onclick = (e) => legendClick(v, e.shiftKey)
+  return it
+}
+// a label value's swatch opens the palette of thimble's label colours, where thimble takes a colour change
+function swatch(colour, label, value) {
+  const sw = h('i', 'sw')
+  sw.style.background = colour
+  if (!label || !label.id || !(labelState.palette || []).length || !thimble.setLabelColour) return sw
+  const b = h('span', 'swb')
+  b.setAttribute('role', 'button')
+  b.title = 'Change colour'
+  b.dataset.act = 'palette'
+  b.dataset.id = label.id
+  b.dataset.value = value
+  b.append(sw)
+  b.onclick = (e) => { e.stopPropagation(); openPalette(label.id, value, 'legend') }
+  return b
+}
+// a click shows only that value, or every value again when it was alone; a shift-click hides it or shows it again
+function legendClick(v, shift) {
+  if (labelsOn()) {
+    const keys = [...D.marks.map((_, j) => markKey(j)), 'none']
+    if (shift) {
+      const next = new Set(hide)
+      next.has(v) ? next.delete(v) : next.add(v)
+      if (next.size < keys.length) hide = next
+    } else hide = hide.size === keys.length - 1 && !hide.has(v) ? new Set() : new Set(keys.filter((x) => x !== v))
+  } else {
+    const all = totals[colourBy]
+    let shown = new Set(F[colourBy].size ? F[colourBy] : all)
+    if (shift) {
+      shown.has(v) ? shown.delete(v) : shown.add(v)
+      if (!shown.size) return
+    } else shown = shown.size === 1 && shown.has(v) ? new Set() : new Set([v])
+    F[colourBy] = all.every((x) => shown.has(x)) ? new Set() : shown
+  }
+  refresh()
+}
+
+// ---------------------------------------------------------------- the Colour menu and the palette
+function openPalette(id, value, from) {
+  pal = pal && pal.id === id && pal.value === value ? null : { id, value, from }
+  renderPop()
+}
+function menuHtml() {
+  const fields = FIELDS.map(([k, name]) => {
+    const on = !labelsOn() && colourBy === k
+    const named = totals[k].filter((v) => v !== 0)
+    const sl = slots(k, named)
+    const sws = named.slice(0, 4).map((v) => `<i class="sw" style="width:5px;border-radius:1px;background:${token(sl.has(v) ? `--viz-${sl.get(v) + 1}` : '--viz-ink-4')}"></i>`).join('')
+    return `<button class="mi" data-act="field" data-f="${k}"><span class="ck">${on ? CHECK : ''}</span>${esc(name)}<span class="n">${sws}</span></button>`
+  }).join('')
+  // every label over files, as thimble lists them; a click turns one on or off in thimble's Labels pane
+  const all = labelState.all || labelState.labels.map((l) => ({ ...l, on: true }))
+  const sw = (l, v) => {
+    const i = `<i class="sw" style="background:${esc(v.colour)}"></i>`
+    return l.id && (labelState.palette || []).length && thimble.setLabelColour
+      ? `<span class="swb" role="button" title="Change colour" data-act="palette" data-id="${esc(l.id)}" data-value="${esc(v.name)}">${i}</span>` : i
+  }
+  const rows = all.map((l) => {
+    const lit = (l.values || []).filter((v) => v.highlight !== false)
+    const box = `<span class="box ${l.on ? 'on' : ''}" style="--mark:${esc(l.colour)}"></span>`
+    const main = `<button class="mi" data-act="label" data-id="${esc(l.id || '')}" data-label="${esc(l.id || '')}" ${l.id && thimble.setLabel ? '' : 'disabled'}><span class="ck">${box}</span><span class="nm">${esc(l.name)}</span>
+      <span class="n">${l.count == null ? '' : fmt(l.count)}</span>${lit.length === 1 ? sw(l, lit[0]) : ''}</button>`
+    const subs = l.on && lit.length > 1 ? lit.map((v) => `<div class="mi sub" data-label="${esc(l.id || '')}"><span class="nm">${esc(v.name)}</span><span class="n"></span>${sw(l, v)}</div>`).join('') : ''
+    return main + subs
+  }).join('')
+  const make = thimble.newLabel ? `<div class="msep"></div><button class="mi" data-act="newlabel"><span class="ck">${PLUS}</span>New label…</button>` : ''
+  return `<div class="menu" id="menu" data-anchor-name="Colour menu"><div class="mh">Fields</div>${fields}${rows ? `<div class="msep"></div><div class="mh">Labels</div>${rows}` : ''}${make}</div>`
+}
+function palHtml() {
+  const l = (labelState.all || labelState.labels || []).find((x) => x.id === pal.id)
+  const cur = String((l && ((l.values || []).find((v) => v.name === pal.value) || {}).colour) || '').toLowerCase()
+  return `<div class="pal" id="pal" data-label="${esc(pal.id)}">${labelState.palette.map((c) => `<button data-act="colour" data-colour="${esc(c)}" class="${c.toLowerCase() === cur ? 'cur' : ''}" style="background:${esc(c)}" aria-label="Colour ${esc(c)}"></button>`).join('')}</div>`
+}
+// the menu opens under the Colour button; the palette beside the swatch that opened it, in the menu or the legend
+function renderPop() {
+  const pop = document.getElementById('pop')
+  const btn = document.getElementById('cbtn')
+  if (menu && !btn) menu = null
+  if (pal && !(labelState.palette || []).length) pal = null
+  pop.innerHTML = (menu ? menuHtml() : '') + (pal ? palHtml() : '')
+  const m = document.getElementById('menu')
+  if (m) {
+    const r = btn.getBoundingClientRect()
+    m.style.left = `${Math.max(8, Math.min(r.left, innerWidth - m.offsetWidth - 8))}px`
+    m.style.top = `${Math.max(8, Math.min(r.bottom + 4, innerHeight - m.offsetHeight - 8))}px`
+  }
+  const p = document.getElementById('pal')
+  if (p) {
+    const sel = `[data-act="palette"][data-id="${CSS.escape(pal.id)}"][data-value="${CSS.escape(pal.value)}"]`
+    const a = document.querySelector(`${pal.from === 'menu' ? '#menu' : '#legend'} ${sel}`)
+    if (!a) { pal = null; p.remove(); return }
+    const r = a.getBoundingClientRect()
+    const x = pal.from === 'menu' ? r.right + 6 : r.left, y = pal.from === 'menu' ? r.top - 10 : r.bottom + 4
+    p.style.left = `${Math.max(8, Math.min(x, innerWidth - p.offsetWidth - 8))}px`
+    p.style.top = `${Math.max(8, Math.min(y, innerHeight - p.offsetHeight - 8))}px`
+  }
+}
+document.getElementById('pop').addEventListener('click', (e) => {
+  const el = e.target.closest('[data-act]')
+  if (!el) return
+  const act = el.dataset.act
+  if (act === 'field') {
+    colourBy = el.dataset.f
+    hide = new Set()
+    menu = null
+    // a field colours the records only while no label is on, so choosing one turns the labels off in thimble
+    if (thimble.setLabel) for (const l of labelState.all || labelState.labels.map((x) => ({ ...x, on: true }))) if (l.on && l.id) thimble.setLabel(l.id, false)
+    refresh()
+  } else if (act === 'label') {
+    const l = (labelState.all || labelState.labels.map((x) => ({ ...x, on: true }))).find((x) => x.id === el.dataset.id)
+    if (l && thimble.setLabel) thimble.setLabel(l.id, !l.on)
+  } else if (act === 'newlabel') {
+    menu = null
+    renderPop()
+    if (thimble.newLabel) thimble.newLabel()
+  } else if (act === 'palette') openPalette(el.dataset.id, el.dataset.value, 'menu')
+  else if (act === 'colour') {
+    if (pal && thimble.setLabelColour) thimble.setLabelColour(pal.id, pal.value, el.dataset.colour)
+    pal = null
+    renderPop()
+  }
+})
+// a click anywhere else closes the menu and the palette, before the page's own handlers see it
+document.addEventListener('click', (e) => {
+  if ((menu || pal) && !e.target.closest('#pop, #cbtn, .swb')) { menu = null; pal = null; renderPop() }
+}, true)
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && (menu || pal)) { menu = null; pal = null; renderPop() } })
 
 // ---------------------------------------------------------------- lanes
 let ln = null
@@ -723,11 +949,13 @@ function laneValues() {
   return { shown, total: vals.length }
 }
 const LANE = 20 // a lane's height
-const SUB = 8 // a row's height where a lane splits by the Colour by field
-// With a few lanes and a Colour by field other than the Group by one, each lane splits into a row per colour value,
-// so the lanes compare by position as well as colour: the Colour by values in legend order, the rest in one row.
+// while a label is on, a lane for each of its values the legend does not hide
+const markLanes = () => (labelsOn() ? D.marks.map((m, j) => ({ j, m })).filter(({ j }) => !hide.has(markKey(j))) : [])
+const SUB = 8 // a row's height where a lane splits by the colour field
+// With a few lanes and a colour field other than the Group by one, each lane splits into a row per colour value, so
+// the lanes compare by position as well as colour: the colour field's values in legend order, the rest in one row.
 function subRows(nLanes) {
-  if (group === colourBy || nLanes > 6) return null
+  if (group === colourBy || nLanes > 6 || labelsOn()) return null
   const vals = colourOrder.filter((v) => (counts[colourBy].get(v) || 0) > 0)
   const rows = vals.slice(0, COLOURED)
   if (vals.length > COLOURED) rows.push('rest')
@@ -751,9 +979,9 @@ function renderLanes() {
     const r = sub.indexOf(C[colourBy][i])
     return r >= 0 ? r : sub.length - 1
   }
-  const markLanes = labelsOn() ? D.marks.map((m, j) => ({ j, m })) : []
-  const gap = markLanes.length ? 8 : 0
-  const Ht = markLanes.length * LANE + shown.length * LH + gap + 4
+  const marked = markLanes()
+  const gap = marked.length ? 8 : 0
+  const Ht = marked.length * LANE + shown.length * LH + gap + 4
   svg.setAttribute('width', W)
   svg.setAttribute('height', Ht)
   svg.replaceChildren()
@@ -787,15 +1015,15 @@ function renderLanes() {
     }
   }
   let y = 2
-  for (const { j, m } of markLanes) {
+  for (const { j } of marked) {
     const idxs = []
     for (const i of vis) if (C.mb[i] & (1 << j)) idxs.push(i)
     const g = s('g')
-    g.append(s('rect', { x: 0, y: y + 6, width: 8, height: 8, rx: 2, fill: m.colour }))
-    g.append(laneName(m.value === m.label ? m.label : `${m.label}: ${m.value}`, y))
+    g.append(s('rect', { x: 0, y: y + 6, width: 8, height: 8, rx: 2, fill: markColour(j) }))
+    g.append(laneName(markName(j), y))
     g.append(s('text', { x: GUTTER - 8, y: y + 14, 'text-anchor': 'end' }, fmt(idxs.length)))
     g.append(s('line', { x1: GUTTER, x2: GUTTER + px, y1: y + LANE / 2, y2: y + LANE / 2, stroke: token('--border-hairline') }))
-    drawTicks(g, idxs, y, LANE, () => m.colour, null)
+    drawTicks(g, idxs, y, LANE, () => markColour(j), null)
     svg.append(g)
     y += LANE
   }
@@ -1061,7 +1289,6 @@ function renderDetail() {
 // ---------------------------------------------------------------- refresh
 function refresh() {
   if (!D) return
-  GUTTER = document.body.clientWidth >= 1100 ? 176 : 150
   compute()
   renderSources()
   renderSelects()
@@ -1134,7 +1361,7 @@ async function recordTip(e, i) {
   })
 }
 
-// a lane's records in the window: how many, from when to when, and how they split by the Colour by field or the marks
+// a lane's records in the window: how many, from when to when, and how they split by the colour field or the marks
 function laneTip(e, { name, idxs }) {
   showTip(e, (el) => {
     el.append(h('div', 'h', `${name} · ${plural(idxs.length, 'record', 'records')}`))
@@ -1143,14 +1370,14 @@ function laneTip(e, { name, idxs }) {
     el.append(h('div', 'r', `${at(a, false)}–${at(b, false)} · ${dur(b - a)}`))
     const by = new Map()
     for (const i of idxs) {
-      const key = labelsOn() ? C.m[i] : C[colourBy][i]
+      const key = labelsOn() ? M[i] : C[colourBy][i]
       by.set(key, (by.get(key) || 0) + 1)
     }
     const top = [...by.entries()].sort((p, q) => q[1] - p[1])
     for (const [v, n] of top.slice(0, 6)) {
       if (!labelsOn()) tipRow(el, colourOf(v), nameOf(colourBy, v), fmt(n))
-      else if (v >= 0) tipRow(el, D.marks[v].colour, D.marks[v].value, fmt(n))
-      else tipRow(el, token('--viz-ink-4'), 'unmarked', fmt(n))
+      else if (v >= 0) tipRow(el, markColour(v), markName(v), fmt(n))
+      else tipRow(el, token('--viz-ink-4'), 'no label', fmt(n))
     }
     if (top.length > 6) tipRow(el, null, `${top.length - 6} more`, fmt(top.slice(6).reduce((sum, p) => sum + p[1], 0)))
   })
@@ -1239,8 +1466,8 @@ fcSvg.addEventListener('mousemove', (e) => {
   showTip(e, (el) => {
     el.append(h('div', 'h', `${at(bn.t, false)}–${at(bn.t + fc.step, false)} · ${plural(bn.n, 'record', 'records')}`))
     if (labelsOn()) {
-      for (const [m, n] of bn.marks) if (m >= 0) tipRow(el, D.marks[m].colour, D.marks[m].value, fmt(n))
-      if (bn.marks.get(-1)) tipRow(el, token('--viz-ink-4'), 'unmarked', fmt(bn.marks.get(-1)))
+      for (const [m, n] of bn.marks) if (m >= 0) tipRow(el, markColour(m), markName(m), fmt(n))
+      if (bn.marks.get(-1)) tipRow(el, token('--viz-ink-4'), 'no label', fmt(bn.marks.get(-1)))
       return
     }
     const top = [...bn.by.entries()].sort((p, q) => q[1] - p[1])
@@ -1272,6 +1499,7 @@ document.getElementById('zoomout').onclick = () => {
 }
 document.getElementById('clear').onclick = () => {
   for (const k of KEYS) F[k].clear()
+  hide = new Set()
   searchQ = ''
   searchSet = null
   document.getElementById('q').value = ''
@@ -1312,6 +1540,7 @@ async function openPlace(target) {
     const i = rowAt.get(target.r)
     if (i == null) return
     for (const k of KEYS) if (F[k].size && !F[k].has(C[k][i])) F[k].clear()
+    if (C.mb[i] ? D.marks.every((_, j) => !(C.mb[i] & (1 << j)) || hide.has(markKey(j))) : hide.has('none')) hide = new Set()
     if (searchSet && !searchSet.has(target.r)) { searchSet = null; searchQ = ''; document.getElementById('q').value = '' }
     if (Number.isNaN(X[i])) { mode = 'clock'; win = null; place() }
     setAround(i)
@@ -1322,6 +1551,7 @@ async function openPlace(target) {
     if (v < 0) return
     for (const k of KEYS) F[k].clear()
     F.incident = new Set([v])
+    hide = new Set()
     searchSet = null
     searchQ = ''
     document.getElementById('q').value = ''
@@ -1333,6 +1563,7 @@ async function openPlace(target) {
     refresh()
   } else if (target.from && target.to) {
     for (const k of KEYS) F[k].clear()
+    hide = new Set()
     searchSet = null
     searchQ = ''
     document.getElementById('q').value = ''
@@ -1363,8 +1594,11 @@ thimble.onOpen(async (place_) => {
   await openPlace(t)
 })
 thimble.onLabels(async (state) => {
-  labelState = state
+  const was = JSON.stringify([labelState.labels, labelState.filter])
+  labelState = { labels: state.labels || [], filter: state.filter || null, all: state.all || null, palette: state.palette || null }
   if (!D) return // the first fetch reads them
+  // the reader applies the labels that are on and the filter; the list of labels and the palette only redraw
+  if (JSON.stringify([labelState.labels, labelState.filter]) === was) return renderFocus()
   if (!(await load())) return
   if (sel != null && !rowAt.has(sel)) { sel = null; detail = null; renderDetail() }
   refresh()
