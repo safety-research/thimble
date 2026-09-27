@@ -1208,7 +1208,8 @@ def _host(c: str | None, asking: dict[str, Any], chat: str | None, run_log: "Log
         return
 
     def expired(_run: Any, entry: dict[str, Any]) -> None:
-        run_log.stage(EXPIRED_LINE.format(tool=entry.get("tool"), what=entry.get("what"), wait=_minutes(PERMISSION_WAIT_S)))
+        run_log.stage(EXPIRED_LINE.format(tool=entry.get("tool"), what=entry.get("what"),
+                                          wait=agent_session.wait_words(PERMISSION_WAIT_S)))
 
     box = asking.get("sandbox")
     agent_session.host(c, str(asking["key"]), chat, mode=permission_mode(c), wait_s=PERMISSION_WAIT_S, on_expired=expired,

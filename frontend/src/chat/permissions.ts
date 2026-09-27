@@ -85,11 +85,10 @@ function devTask(title: string, view: boolean): string {
   return m ? m[1] : t || 'ticket'
 }
 
-/** A wait in words: `a minute`, `10 minutes`, `30 seconds`. Pure. */
+/** A wait in words: `a minute`, `10 minutes`, or `90 seconds` for one that is no whole number of minutes. Pure. */
 export function waitWords(seconds: number): string {
-  if (seconds < 60) return `${Math.round(seconds)} seconds`
-  const minutes = Math.round(seconds / 60)
-  return minutes === 1 ? 'a minute' : `${minutes} minutes`
+  if (seconds < 60 || seconds % 60) return `${Math.round(seconds)} seconds`
+  return seconds === 60 ? 'a minute' : `${seconds / 60} minutes`
 }
 
 /** The agent of the session that made the call, when a subagent or a workflow agent did: its step's title and type,

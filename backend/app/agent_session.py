@@ -1912,11 +1912,16 @@ def keep_web_rule(c: str, rule: str) -> None:
         atomic_write_text(config.workspace_dir(c) / WEB_RULES_FILE, json.dumps({"allow": [*rules, rule]}, indent=1) + "\n")
 
 
+def wait_words(seconds: float) -> str:
+    """A wait in words: `a minute`, `10 minutes`, or `90 seconds` for one that is no whole number of minutes."""
+    if seconds < 60 or seconds % 60:
+        return f"{seconds:g} seconds"
+    return "a minute" if seconds == 60 else f"{seconds / 60:g} minutes"
+
+
 def timed_out_line(seconds: float) -> str:
     """TIMED_OUT_LINE for a wait of `seconds`."""
-    minutes = round(seconds / 60)
-    wait = ("a minute" if minutes == 1 else f"{minutes} minutes") if seconds >= 60 else f"{seconds:g} seconds"
-    return TIMED_OUT_LINE.format(wait=wait)
+    return TIMED_OUT_LINE.format(wait=wait_words(seconds))
 
 
 async def ask(c: str, key: str | None, tool_name: str, inp: Any, agent_id: str | None = None,

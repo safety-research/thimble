@@ -190,6 +190,7 @@ describe("the dev agent's requests and the web", () => {
     expect(askWhy({ chat: 'd1', request: fetch1 }, DEV)).toBe('It runs in Manual, which asks before each call. Unanswered, it is denied after 10 minutes and the work goes on without it.')
     expect(waitWords(60)).toBe('a minute')
     expect(waitWords(30)).toBe('30 seconds')
+    expect(waitWords(90)).toBe('90 seconds')
   })
 
   test("a fetch shows its URL and the site's later fetches, and don't ask again keeps the site for the workspace", async () => {
