@@ -813,6 +813,7 @@ function renderLanes() {
     t.append(s('title', null, name))
     head.append(t, s('text', { x: GUTTER - 8, y: y + 14, 'text-anchor': 'end' }, fmt(idxs.length)))
     head.addEventListener('click', () => toggle(group, v))
+    head.lane = { name, idxs }
     if (group === 'incident' && v) {
       head.dataset.anchor = `view:${slug}/${name}`
       head.dataset.anchorName = `the incident ${name}`
@@ -1116,17 +1117,42 @@ function tipRow(el, colour, label, n) {
   r.append(sq, h('span', 'l', label), h('span', null, n))
   el.append(r)
 }
+let tipFor = null // the record whose tooltip is wanted, so a text that arrives after the pointer left is not shown
 async function recordTip(e, i) {
   const r = C.r[i]
+  tipFor = i
   if (!texts.has(r)) {
     const res = await thimble.fetch({ op: 'texts', rows: [r] })
     for (const [row, t] of res.texts) texts.set(row, t)
+    if (tipFor !== i) return
   }
   showTip(e, (el) => {
     el.append(h('div', 'h', `${at(X[i])} · ${nameOf('source', C.source[i])} ${nameOf('kind', C.kind[i])}`))
     const who = [nameOf('actor', C.actor[i]), C.service[i] ? nameOf('service', C.service[i]) : '',
       C.incident[i] ? nameOf('incident', C.incident[i]) : ''].filter(Boolean).join(' · ')
     el.append(h('div', 'r', who), h('div', 'body', clip(texts.get(r) || '', 220)))
+  })
+}
+
+// a lane's records in the window: how many, from when to when, and how they split by the Colour by field or the marks
+function laneTip(e, { name, idxs }) {
+  showTip(e, (el) => {
+    el.append(h('div', 'h', `${name} · ${plural(idxs.length, 'record', 'records')}`))
+    if (!idxs.length) return
+    const a = X[idxs[0]], b = X[idxs[idxs.length - 1]]
+    el.append(h('div', 'r', `${at(a, false)}–${at(b, false)} · ${dur(b - a)}`))
+    const by = new Map()
+    for (const i of idxs) {
+      const key = labelsOn() ? C.m[i] : C[colourBy][i]
+      by.set(key, (by.get(key) || 0) + 1)
+    }
+    const top = [...by.entries()].sort((p, q) => q[1] - p[1])
+    for (const [v, n] of top.slice(0, 6)) {
+      if (!labelsOn()) tipRow(el, colourOf(v), nameOf(colourBy, v), fmt(n))
+      else if (v >= 0) tipRow(el, D.marks[v].colour, D.marks[v].value, fmt(n))
+      else tipRow(el, token('--viz-ink-4'), 'unmarked', fmt(n))
+    }
+    if (top.length > 6) tipRow(el, null, `${top.length - 6} more`, fmt(top.slice(6).reduce((sum, p) => sum + p[1], 0)))
   })
 }
 
@@ -1227,10 +1253,12 @@ fcSvg.addEventListener('mouseleave', hideTip)
 const lnSvg = document.getElementById('lanes')
 lnSvg.addEventListener('mousemove', (e) => {
   const t = e.target
+  const head = t && t.closest ? t.closest('.lanehead') : null
   if (t && t.classList && t.classList.contains('tick')) recordTip(e, Number(t.dataset.i))
-  else hideTip()
+  else if (head && head.lane) { tipFor = null; laneTip(e, head.lane) }
+  else { tipFor = null; hideTip() }
 })
-lnSvg.addEventListener('mouseleave', hideTip)
+lnSvg.addEventListener('mouseleave', () => { tipFor = null; hideTip() })
 lnSvg.addEventListener('click', (e) => {
   const t = e.target
   if (t && t.classList && t.classList.contains('tick')) select(C.r[Number(t.dataset.i)])
