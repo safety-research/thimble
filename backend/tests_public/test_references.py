@@ -8,6 +8,7 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
 SCANNED = ("backend/app", "plugin", "prompts", "docs", "README.md", "INSTALL.md", "CONTRIBUTING.md", "CLAUDE.md")
+SAMPLE = re.compile(r"^plugin/viewers/[\w-]+/sample/")  # the worked examples' invented data, which names its own files
 MODULE = re.compile(r"(?<![\w/.-])[a-z_][a-z0-9_]*\.py\b")  # a bare module name, not the end of a longer path
 BIN = re.compile(r"\bplugin/bin/[\w.-]*\w")
 
@@ -22,6 +23,8 @@ def tracked(*paths: str) -> list[str]:
 def texts() -> list[tuple[str, str]]:
     out = []
     for rel in tracked(*SCANNED):
+        if SAMPLE.match(rel):
+            continue
         data = (ROOT / rel).read_bytes()
         if b"\0" not in data[:8192]:
             out.append((rel, data.decode(errors="replace")))
