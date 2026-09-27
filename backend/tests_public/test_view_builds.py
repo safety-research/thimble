@@ -719,8 +719,11 @@ def test_a_build_that_is_winding_down_is_not_queued_again(board, monkeypatch):
 async def test_a_review_revision_wakes_the_build_session_and_passes_once_the_view_passes_its_checks(board, monkeypatch):
     """The view review's revision (dev.review_revision): the build's session is woken with the review's message, the
     view's checks run after its turn, and what they find goes back to it; a view that still fails after MAX_ATTEMPTS
-    turns is a failed revision with the checks' first failure. A built view is reviewed after its build."""
+    turns is a failed revision with the checks' first failure. Its session asks on the view's chat as a build's does. A
+    built view is reviewed after its build."""
     _stand_ins(monkeypatch)
+    chat = str(agents.new_agent(CORPUS, "dev", "view: Posts", view="posts", announce=False)["id"])
+    monkeypatch.setattr(dev, "_view_chat", lambda c, prop: chat)
     _queued()
     _write({"reader.py": READER, "view.html": HTML, "view.json": VIEW_JSON})
     views.mark_built(CORPUS, "posts")
@@ -731,6 +734,7 @@ async def test_a_review_revision_wakes_the_build_session_and_passes_once_the_vie
         prompts_seen.append((resume, prompt))
         run.session, run.session_id = "s1", "session-1"
         assert kw["turn_timeout_s"] == dev.REVIEW_TURN_TIMEOUT_S
+        assert kw["asking"]["key"] == dev.view_key("posts") and agent_session.asker(CORPUS, dev.view_key("posts"))
         # the first turn breaks the page, the second fixes it
         _write({"view.html": "" if len(prompts_seen) == 1 else HTML.replace("out", "posts")})
         return "fixed"
@@ -740,6 +744,7 @@ async def test_a_review_revision_wakes_the_build_session_and_passes_once_the_vie
     assert ok and text == "fixed"
     assert prompts_seen[0] == ("session-1", "## A review of the view\n\n- picture 1: cut off")
     assert prompts_seen[1][0] == "session-1" and "view.html is empty" in prompts_seen[1][1]
+    assert agent_session.asker(CORPUS, dev.view_key("posts")) is None, "its requests are answered only while it runs"
 
     async def broken(run, run_log, corpus, prompt, resume, **kw):
         _write({"view.html": ""})

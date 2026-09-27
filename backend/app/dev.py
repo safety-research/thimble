@@ -2518,7 +2518,8 @@ def stop_review_session(c: str, slug: str) -> None:
 async def review_revision(c: str, slug: str, message: str) -> tuple[bool, str]:
     """A revision the view review asks for: the view's build session woken with `message` (prompts/dev-view-review.md)
     in the view's thread, the view's checks run after each turn and fed back up to MAX_ATTEMPTS times. (passed, the
-    session's report or why it did not pass). A view with no build session gets a new one, started with its ticket."""
+    session's report or why it did not pass). A view with no build session gets a new one, started with its ticket. Its
+    session asks as a build's does (view_asking)."""
     from . import views  # noqa: PLC0415
 
     prop = views.read_proposal(c, slug)
@@ -2532,6 +2533,8 @@ async def review_revision(c: str, slug: str, message: str) -> tuple[bool, str]:
     run_log = Log(agents.Recorder(c, chat)) if chat else Log(None)
     run = Run(ticket_id=f"view-review:{slug}", title=str(prop.get("name") or slug), ts_start=_now())
     _review_runs[(c, slug)] = run
+    asking = view_asking(c, slug, folder)
+    _host(c, asking, chat, run_log)
     resume = prop.get("session_id")
     prompt = message if resume else f"{build_view_prompt(c, prop, folder, corpus)}\n\n{message}"
     run_log.stage(REVIEW_LINE)
@@ -2547,9 +2550,9 @@ async def review_revision(c: str, slug: str, message: str) -> tuple[bool, str]:
             try:
                 result_text = await _worker_turn(run, run_log, corpus, prompt, resume, name=view_session_name(slug),
                                                  workspace=c, on_session=on_session, add_dirs=(folder,),
-                                                 env={SESSION_ENV: f"view:{slug}"}, answered=False,
+                                                 env={SESSION_ENV: view_key(slug)}, answered=False,
                                                  fence=view_fence(c, slug, corpus, folder),
-                                                 turn_timeout_s=REVIEW_TURN_TIMEOUT_S)
+                                                 turn_timeout_s=REVIEW_TURN_TIMEOUT_S, asking=asking)
             except RuntimeError as e:
                 why = str(e)
                 run_log.error(why)
@@ -2573,6 +2576,7 @@ async def review_revision(c: str, slug: str, message: str) -> tuple[bool, str]:
             _close_chat({"workspace": c, "chat": chat}, "stopped", "the review was stopped")
         raise
     finally:
+        _unhost(c, view_key(slug))
         if _review_runs.get((c, slug)) is run:
             del _review_runs[(c, slug)]
     if chat:
