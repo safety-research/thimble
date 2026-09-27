@@ -229,10 +229,11 @@ const AX = 28, LH = 30, RH = 30, BAND = [7, 21], MID = 14
 const MAX_TICKED = 4
 const root = getComputedStyle(document.documentElement)
 const tok = (name, fallback) => root.getPropertyValue(name).trim() || fallback
-// the page's own categories in the theme's viz colours, handed back to the labels while one is on
-const CAT = [tok('--viz-1', '#0072b2'), tok('--viz-2', '#e69f00'), tok('--viz-3', '#009e73'), '#8c65e8', '#8a6d3b',
-  tok('--viz-5', '#cc79a7'), '#56b4e9', tok('--viz-ink-2', '#6b675f')]
-const INK = tok('--viz-ink-1', '#1b1a18'), QUIET = tok('--viz-ink-3', '#a19d94')
+// the page's own categories in the theme's viz colours, all but the red, which errors take; while a label is on, the
+// labels colour the calls instead
+const CAT = [tok('--viz-1', '#0072b2'), tok('--viz-2', '#e69f00'), tok('--viz-3', '#009e73'), tok('--viz-6', '#8c65e8'), tok('--viz-7', '#8a6d3b'),
+  tok('--viz-5', '#cc79a7'), tok('--viz-ink-2', '#6b675f'), tok('--viz-ink-1', '#1b1a18')]
+const QUIET = tok('--viz-ink-3', '#a19d94')
 const NEG = tok('--status-negative', '#c93a28'), WARN = tok('--status-warning', '#9a6512')
 const PAPER = tok('--surface-card', '#ffffff')
 const inkRgb = tok('--ink-rgb', '27,26,24')
