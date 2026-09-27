@@ -1,19 +1,29 @@
-// Inline SVG icons: every glyph is hand-drawn in a 24x24 box, stroke 1.75, round caps and joins, no fill, except the
-// filled silhouettes (FILLED). Dots are zero-length round-capped segments so they scale with the stroke.
-// Three glyphs are copied, and their license needs the notice below in every copy, the built UI included; a comment
-// that opens with /*! is one the production build keeps.
-/*! The gear and branch glyphs follow the settings and git-branch icons of Feather, Copyright (c) 2013-2023 Cole
- * Bemis; the edit glyph follows the pencil icon of Tabler Icons, Copyright (c) 2020-2026 Paweł Kuna. Both under the
- * MIT License: Permission is hereby granted, free of charge, to any person obtaining a copy of this software and
- * associated documentation files (the "Software"), to deal in the Software without restriction, including without
- * limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the
+// Inline SVG icons: glyphs in a 24x24 box, stroke 1.75, round caps and joins, no fill, except the filled silhouettes
+// (FILLED). Dots are zero-length round-capped segments so they scale with the stroke. Most glyphs are drawn for
+// thimble; seven follow published icon sets, whose licenses need the notice below in every copy, the built UI included.
+// A comment that opens with /*! is one the production build keeps, and scripts/third_party_notices.py copies it into a
+// release's THIRD_PARTY_NOTICES.
+/*! The gear, branch and reader glyphs follow the settings, git-branch and book-open icons of Feather, Copyright (c)
+ * 2013-2023 Cole Bemis; the edit glyph follows the pencil icon of Tabler Icons, Copyright (c) 2020-2026 Paweł Kuna.
+ * Both under the MIT License: Permission is hereby granted, free of charge, to any person obtaining a copy of this
+ * software and associated documentation files (the "Software"), to deal in the Software without restriction, including
+ * without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the
  * Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions: The
  * above copyright notice and this permission notice shall be included in all copies or substantial portions of the
  * Software. THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT
  * LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
  * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF
  * CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- * THE SOFTWARE. */
+ * THE SOFTWARE.
+ *
+ * The undo, redo and braces glyphs follow the undo-2, redo-2 and braces icons of Lucide, Copyright (c) 2026 Lucide
+ * Icons and Contributors, under the ISC License: Permission to use, copy, modify, and/or distribute this software for
+ * any purpose with or without fee is hereby granted, provided that the above copyright notice and this permission
+ * notice appear in all copies. THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES WITH REGARD TO
+ * THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE
+ * FOR ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES WHATSOEVER RESULTING FROM LOSS OF USE,
+ * DATA OR PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF OR IN
+ * CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE. */
 import type { SVGProps } from 'react'
 
 export type IconName =
