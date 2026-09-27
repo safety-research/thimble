@@ -34,7 +34,8 @@ RESULT_CHARS = 2_000_000  # of one call's output kept
 LINE_CHARS = 300  # of a call's one-line summary (chip_line)
 EXCERPT_LINES = 40  # of a whole call's output in its excerpt
 READ_CHARS = 40_000  # of a call's output read_ref shows at once; a line range reads the rest
-PERSISTED_RE = re.compile(r"(?:saved to|written to):\s*(\S+)", re.I)  # Claude Code's `<persisted-output>` preview
+TOOL_RESULTS = "tool-results"  # Claude Code saves a long output as <projects>/<slug>/<session>/tool-results/<file>
+SESSION_ID_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
 REF_RE = re.compile(r"^call:([A-Za-z0-9_-]+)/(\d+)(?:#L(\d+)(?:-L(\d+))?)?$")
 # the prefixes of thimble's own tools, whose calls the hook skips
 THIMBLE_PREFIXES = ("mcp__plugin_thimble_thimble__", "mcp__thimble__")
@@ -243,27 +244,41 @@ def lines_of(text: Any) -> list[str]:
     return out
 
 
+def persisted_path(rec: dict[str, Any] | None) -> Path | None:
+    """The file Claude Code saved the record's long tool output to (`toolUseResult.persistedOutputPath`) when it is a
+    regular file in the tool-results folder of the record's own session, beside that session's transcript; else None.
+    The text of a result never names the file: a tool's output can say anything."""
+    rec = rec or {}
+    tur = rec.get("toolUseResult")
+    saved = tur.get("persistedOutputPath") if isinstance(tur, dict) else None
+    sid = rec.get("sessionId")
+    if not isinstance(saved, str) or not isinstance(sid, str) or not SESSION_ID_RE.match(sid):
+        return None
+    f = Path(saved)
+    folder = f.parent
+    if not f.is_absolute() or folder.name != TOOL_RESULTS or folder.parent.name != sid:
+        return None
+    try:
+        if not (folder.parent.parent / f"{sid}.jsonl").is_file() or f.is_symlink() or not f.is_file():
+            return None
+        return f if f.resolve().parent == folder.resolve() else None
+    except OSError:
+        return None
+
+
 def result_text(block: dict[str, Any], rec: dict[str, Any] | None = None) -> str:
     """The whole output of a transcript's tool_result `block` (the user record `rec` carries it): the file Claude Code
-    saved a long output to, read up to RESULT_CHARS, when it saved one (`toolUseResult.persistedOutputPath`, else the
-    path its preview names); else the result's text."""
+    saved a long output to (persisted_path), read up to RESULT_CHARS, when it saved one; else the result's text."""
     from . import session  # noqa: PLC0415 — session imports agents, which imports tools
 
-    text = session.response_text(block.get("content"))
-    saved = None
-    tur = (rec or {}).get("toolUseResult")
-    if isinstance(tur, dict) and isinstance(tur.get("persistedOutputPath"), str):
-        saved = tur["persistedOutputPath"]
-    elif text.lstrip().startswith("<persisted-output>"):
-        m = PERSISTED_RE.search(text)
-        saved = m.group(1) if m else None
-    if saved:
+    saved = persisted_path(rec)
+    if saved is not None:
         try:
             with open(saved, "r", encoding="utf-8", errors="replace") as f:
                 return f.read(RESULT_CHARS)
         except OSError:
             pass
-    return text
+    return session.response_text(block.get("content"))
 
 
 def listing(c: str, chat: str) -> list[dict[str, Any]]:
