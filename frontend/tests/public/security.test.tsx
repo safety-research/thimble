@@ -12,6 +12,7 @@ import { ChatMarkdown } from '../../src/chat/markdown.tsx'
 import { isLocalUrl, purifyHtml, purifySvg, styleReachesOut } from '../../src/lib/sanitize.ts'
 import { inlineSvg, rootDecls } from '../../src/lib/svg.ts'
 import { dataOnly, withoutEmbedOptions } from '../../src/lib/vegaLoader.ts'
+import { parseInline } from '../../src/report/inlineParse.ts'
 import { mount, settle, unmountAll } from './mount.tsx'
 
 const SRC = path.resolve(__dirname, '../../src')
@@ -169,6 +170,15 @@ describe('the pure checks', () => {
     expect(withoutEmbedOptions({ mark: 'bar', usermeta: { embedOptions: { loader: {} }, note: 1 } })).toEqual({ mark: 'bar', usermeta: { note: 1 } })
     const plain = { mark: 'bar' }
     expect(withoutEmbedOptions(plain)).toBe(plain)
+  })
+
+  test("a report sentence's link keeps http:, https: and mailto: only; any other scheme stays text", () => {
+    const links = (t: string) => parseInline(t).filter((n) => n.kind === 'link')
+    for (const href of ['https://example.org/a', 'http://example.org/', 'mailto:someone@example.org']) expect(links(`see [x](${href})`), href).toEqual([{ kind: 'link', href, children: [{ kind: 'text', text: 'x' }] }])
+    for (const href of ['javascript:alert(1)', 'JavaScript:alert(1)', 'data:text/html,x', 'vbscript:x', 'file:///etc/passwd', '/api/x']) {
+      expect(links(`see [x](${href})`), href).toEqual([])
+      expect(parseInline(`see [x](${href})`), href).toEqual([{ kind: 'text', text: `see [x](${href})` }])
+    }
   })
 })
 
