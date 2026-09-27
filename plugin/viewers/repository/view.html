@@ -98,7 +98,7 @@
   .s-merged, .s-fixed { color: var(--viz-5); }
   .s-closed { color: var(--status-negative); }
   .s-thread { color: var(--text-secondary); }
-  .labelled .s-open, .labelled .s-merged, .labelled .s-fixed, .labelled .s-closed { color: var(--text-secondary); }
+  .labelled .s-open, .labelled .s-merged, .labelled .s-fixed, .labelled .s-closed, .labelled .matrix td .cr { color: var(--text-secondary); }
 
   /* the compare grid: one row per issue, one column per chosen run */
   .grid { width: 100%; border-collapse: collapse; }
@@ -279,6 +279,8 @@
   }
   const setup = (r) => `${r.team} agents · ${r.approvals} approval${r.approvals === 1 ? '' : 's'}`
   const colourOf = (action) => `var(${ACTIONS[action] || '--viz-ink-3'})`
+  // a flag chip's tone, neutral while a label is on
+  const flagTone = () => (label ? 'chip-tone-neutral' : 'chip-tone-warning')
   const unitRef = (key) => `view:${slug}/${key}`
 
   // ------------------------------------------------------------------------------------------------ icons
@@ -356,6 +358,7 @@
       b.onclick = () => {
         if (S.tab === key) return
         Object.assign(S, { tab: key, filters: {}, sort: '', q: '' })
+        $('#main').scrollTop = 0
         load()
       }
       return b
@@ -877,12 +880,12 @@
     meta.append(' · ', who(p.area, 'area'))
     main.append(t, meta)
     if (p.why && p.why.text) main.append(whyLine(p.why))
-    // the self-merge flag stays a filter; a row shows it by its two names
+    // a row names who opened and who merged it, so its chips leave out the self-merge flag
     const loud = p.flags.filter((f) => f !== 'merged by its author')
     if (loud.length) {
       const f = el('div', 'flags')
       for (const x of loud) {
-        const c = el('button', 'chip chip-sans chip-tone-warning chip-act', x)
+        const c = el('button', `chip chip-sans chip-act ${flagTone()}`, x)
         c.onclick = (e) => {
           e.stopPropagation()
           setFilter('flag', x)
@@ -1201,7 +1204,6 @@
     when.title = clock(x.at)
     head.append(when)
     body.append(head)
-    // an agent's opening record shows its title in the head, and its description as any other text
     if (x.text) {
       const text = el('div', 'text')
       text.append(x.kind === 'commit' ? x.text : linkText(x.text, links))
@@ -1335,7 +1337,7 @@
       if (u.flags.length) {
         const f = el('div', 'flags')
         f.style.cssText = 'display:flex;flex-wrap:wrap;gap:4px'
-        for (const x of u.flags) f.append(el('span', 'chip chip-sans chip-tone-warning', x))
+        for (const x of u.flags) f.append(el('span', `chip chip-sans ${flagTone()}`, x))
         facts.append(factsSection('Flags', f))
       }
     }
