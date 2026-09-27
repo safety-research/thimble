@@ -320,8 +320,9 @@ ORIENT_MODES = {"manual": "default", "auto": "auto", "bypass": "bypassPermission
 
 
 def permission_mode(cwd: Path) -> str:
-    """The analyst's own permission mode: the highest of analyst_sources' `permissions.defaultMode`, else `default`.
-    The settings of the corpus folder `cwd` are not read, so a corpus cannot pre-select Bypass."""
+    """The analyst's own permission mode: the `permissions.defaultMode` of the last of analyst_sources that sets one
+    (the managed file over the user's settings.json), else `default`. The settings of the corpus folder `cwd` are not
+    read, so a corpus cannot pre-select Bypass."""
     mode = "default"
     for path in analyst_sources():
         d = _read(path)

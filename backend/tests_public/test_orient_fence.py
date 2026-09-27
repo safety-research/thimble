@@ -186,6 +186,20 @@ def test_the_corpus_folder_s_settings_never_choose_the_mode_and_the_settings_rou
     assert cc_settings.permission_mode(cwd) == "auto"
 
 
+def test_the_managed_file_s_mode_wins_over_the_user_s_whichever_is_more_permissive(tmp_path, monkeypatch):
+    """permission_mode takes the defaultMode of the last of analyst_sources that sets one: the managed file."""
+    managed = tmp_path / "managed-settings.json"
+    monkeypatch.setitem(cc_settings.MANAGED, sys.platform, managed)
+    cwd = config.corpus_dir(CORPUS)
+    user = tmp_path / "cc" / "settings.json"
+    for mine, theirs in (("bypassPermissions", "default"), ("default", "auto"), ("auto", "plan")):
+        user.write_text(json.dumps({"permissions": {"defaultMode": mine}}))
+        managed.write_text(json.dumps({"permissions": {"defaultMode": theirs}}))
+        assert cc_settings.permission_mode(cwd) == theirs
+    managed.write_text(json.dumps({"permissions": {}}))
+    assert cc_settings.permission_mode(cwd) == "auto", "a managed file that sets none leaves the user's"
+
+
 def _hook(argv: list[str], event: dict, capsys) -> str:
     import io
 
