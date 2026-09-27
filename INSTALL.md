@@ -43,7 +43,8 @@ until `thimble server restart`.
 ## Uninstall
 
 `thimble uninstall` asks, then removes the plugin registration, `~/.local/bin/thimble` and `~/.thimble`, which holds a
-Global install's workspaces. `--keep-home` keeps `~/.thimble`. A clone stays where it is.
+Global install's workspaces, and takes out the settings thimble wrote into folders' `.claude/settings.local.json`.
+`--keep-home` keeps `~/.thimble`. A clone stays where it is.
 
 To delete one workspace and keep the install, `thimble list` shows the workspaces by id and `thimble purge <id>` deletes
 that one and prints each path it deleted. The folder it read and your Claude Code transcripts stay.
