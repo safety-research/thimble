@@ -61,7 +61,7 @@ PING_S = 15  # the stream's keep-alive, so a proxy or the shim's read timeout ne
 NOT_LISTENING = ("no Claude Code session is listening in {cwd}. Start thimble with `thimble` in that folder, or say "
                  "/thimble in a Claude Code session there.")
 PERMISSION_EVENT = "permission"  # the stream's event carrying the analyst's answer to a relayed permission prompt
-PERMISSION_INPUT_CHARS = 2_000  # of a relayed request's input preview kept for the browser
+PERMISSION_INPUT_CHARS = 50_000  # of a relayed request's input shown in the browser; past it the entry's `cut` says so
 SETTINGS_SETTLE_S = 1.8  # Claude Code's settings watcher: 1 s still, 0.5 s polls, and a margin (module note)
 SOURCE = cc_channel.SOURCE  # the `source` Claude Code gives the plugin server's channel events; render uses it too
 PULL_WAIT_S = 25.0  # a pull's longest wait (module note); the watcher asks again
@@ -735,7 +735,8 @@ def _hold(c: str, request_id: str, tool: str, what: str, preview: str, agent: st
     pending = [p for p in meta.get("permissions") or [] if isinstance(p, dict) and p.get("id") != request_id]
     chat = _asking_chat(c, agent)
     entry = {"id": request_id, "tool": tool, "what": what or tool, "input": preview[:PERMISSION_INPUT_CHARS],
-             "since": _now(), **({"chat": chat} if chat else {})}
+             "since": _now(), **({"cut": len(preview)} if len(preview) > PERMISSION_INPUT_CHARS else {}),
+             **({"chat": chat} if chat else {})}
     pending.append(entry)
     meta["permissions"] = pending
     agents.write_meta(c, meta)

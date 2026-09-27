@@ -587,6 +587,32 @@ def test_the_card_offers_claude_code_s_own_don_t_ask_again_for_the_session_alone
     assert agent_session.offer(None) == agent_session.offer([{"type": "setMode", "mode": "plan"}]) == []
 
 
+async def test_the_card_shows_a_request_s_input_whole_and_marks_one_too_long_to_show_with_no_don_t_ask_again(fake, monkeypatch):
+    """A request's input reaches the card whole up to PERMISSION_INPUT_CHARS; past it the entry carries `cut`, the
+    length of what it shows the start of, and offers no "don't ask again", which would allow what nobody saw."""
+    monkeypatch.setenv("FAKE_MODE", "sleep")
+    run = await orient_session.start(CORPUS, "")
+    n = agent_session.PERMISSION_INPUT_CHARS
+    body = "y" * 5_000
+    whole = asyncio.ensure_future(agent_session.ask(CORPUS, KEY, "Write", {"file_path": "a.md", "content": body},
+                                                    suggestions=[EDITS]))
+    long_cmd = "echo " + "z" * n
+    cut = asyncio.ensure_future(agent_session.ask(CORPUS, KEY, "Bash", {"command": long_cmd}, suggestions=[RULE]))
+    big = {"file_path": "b.md", "content": "w" * (n + 10)}
+    cut_input = asyncio.ensure_future(agent_session.ask(CORPUS, KEY, "Write", big, suggestions=[EDITS]))
+    first, second, third = await _pending(run.chat, 3)
+    assert json.loads(first["input"])["content"] == body and "cut" not in first and first["always"] == "all edits"
+    assert second["cut"] == len(long_cmd) and len(second["command"]) == n and "always" not in second
+    assert third["cut"] == len(json.dumps(big)) and len(third["input"]) == n and "always" not in third
+    agent_session.answer(CORPUS, run.chat, second["id"], True, always=True)
+    assert await cut == {"behavior": "allow", "updatedInput": {"command": long_cmd}}, "a plain allow: no rule is added"
+    for p in (first, third):
+        agent_session.answer(CORPUS, run.chat, p["id"], False)
+    await asyncio.gather(whole, cut_input)
+    await orient_session.stop(CORPUS)
+    await _done()
+
+
 async def test_don_t_ask_again_allows_the_request_with_its_rules_and_every_later_process_keeps_them(fake, monkeypatch):
     """The card's third choice allows the request with the updates Claude Code suggested for it (as
     `updatedPermissions`, which the session applies to itself and its agents), allows each other waiting request it

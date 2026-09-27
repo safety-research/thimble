@@ -185,6 +185,15 @@ def test_the_permission_hook_waits_on_main_s_meta_until_the_browser_answers(monk
         assert client.post("/api/channel/permission/hook", json={**body, "session": "not-main"}).status_code == 409
 
 
+def test_a_relayed_request_reaches_the_card_whole_or_marked_as_cut():
+    n = channel.PERMISSION_INPUT_CHARS
+    channel._hold(CORPUS, "r1", "Write", "Save a.md", json.dumps({"content": "a" * 5_000}))
+    channel._hold(CORPUS, "r2", "Write", "Save b.md", "b" * (n + 7))
+    one, two = agents.meta_or_none(CORPUS, agents.MAIN_ID)["permissions"]
+    assert len(one["input"]) > 5_000 and "cut" not in one
+    assert len(two["input"]) == n and two["cut"] == n + 7
+
+
 class _Stand:
     """The server's delivery routes as the watcher sees them: `pull` answers in order from `answers` (a (status, body)
     pair each; 204 once they run out; status 0 closes the connection without an answer, as a server that crashed while

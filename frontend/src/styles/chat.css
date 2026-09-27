@@ -1410,6 +1410,11 @@ button.model-line-part[aria-expanded='true'] {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
+.chat-perm-cut {
+  margin: 0;
+  color: var(--status-warning);
+  font-size: var(--text-xs);
+}
 .chat-perm-field {
   display: flex;
   align-items: baseline;

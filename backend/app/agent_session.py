@@ -136,7 +136,9 @@ STOP_WAIT_S = 4.0  # after SIGINT, then again after SIGTERM, before the next sig
 # orientation's, in a mode of thimble's, waits; a hosted session's has its own wait (module note, permissions)
 PERMISSION_WAIT_S = 60.0
 STDERR_TAIL = 800  # chars of the session's stderr kept as a failed run's error
-PERMISSION_INPUT_CHARS = 2_000  # of a request's input shown to the analyst
+# of a request's input the card shows, scrolled; past it the entry's `cut` is the input's length and the card offers
+# no "don't ask again"
+PERMISSION_INPUT_CHARS = 50_000
 WORKFLOW_DIR_RE = session.WORKFLOW_DIR_RE
 ASYNC_RESULT_RE = session.ASYNC_RESULT_RE
 AGENT_TOOLS = session.AGENT_TOOLS
@@ -2152,11 +2154,14 @@ async def ask(c: str, key: str | None, tool_name: str, inp: Any, agent_id: str |
     if first is not None and first in run.waits and not run.waits[first].done():
         return await _join(run, first, tool_name, inp, agent_id, event, tool_use_id, granted)
     rid = uuid.uuid4().hex[:10]
-    preview = json.dumps(inp, ensure_ascii=False, default=str)[:PERMISSION_INPUT_CHARS] if inp is not None else ""
-    updates = web_offer(web) if web else offer(suggestions) if event == REQUEST else []
+    whole = json.dumps(inp, ensure_ascii=False, default=str) if inp is not None else ""
+    command = _command(tool_name, inp)
+    cut = _cut(tool_name, inp, whole)
+    updates = [] if cut else web_offer(web) if web else offer(suggestions) if event == REQUEST else []
     limit = CLASSIFIER_ASK_S if unjudged and run.patient else None if run.patient else run.wait_s or PERMISSION_WAIT_S
-    entry = {"id": rid, "tool": tool_name, "what": _what(tool_name, inp), "input": preview, "since": _now(),
-             **_command(tool_name, inp), **(_asker(run, agent_id, agent_type) if agent_id else {}),
+    entry = {"id": rid, "tool": tool_name, "what": _what(tool_name, inp), "input": whole[:PERMISSION_INPUT_CHARS],
+             "since": _now(), **command, **({"cut": cut} if cut else {}),
+             **(_asker(run, agent_id, agent_type) if agent_id else {}),
              **({"refused": " ".join(reason.split())[:200] or "no reason given"} if event == DENIED else {}),
              **({"rechecked": len(CLASSIFIER_WAITS_S)} if unjudged else {}),
              **({"deny_after_s": limit} if unjudged and limit is not None else {}),
@@ -2291,6 +2296,13 @@ def _command(tool_name: str, inp: Any) -> dict[str, str]:
     input's JSON; {} for any other call."""
     cmd = inp.get("command") if tool_name == "Bash" and isinstance(inp, dict) else None
     return {"command": cmd[:PERMISSION_INPUT_CHARS]} if isinstance(cmd, str) and cmd.strip() else {}
+
+
+def _cut(tool_name: str, inp: Any, whole: str) -> int:
+    """The length of what the card shows of a request when PERMISSION_INPUT_CHARS cuts it (a Bash request's command,
+    else the input's JSON `whole`), 0 when it shows all of it."""
+    shown = (inp.get("command") if _command(tool_name, inp) else None) or whole
+    return len(shown) if len(shown) > PERMISSION_INPUT_CHARS else 0
 
 
 def _asker(run: Run, agent_id: str, agent_type: str | None) -> dict[str, Any]:

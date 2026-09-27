@@ -156,6 +156,18 @@ describe('the card', () => {
     expect([...el.querySelectorAll('.chat-perm-acts button')].map((b) => b.textContent)).toEqual(['Allow', 'Deny'])
   })
 
+  test('a request the card shows only the start of says how much shows and offers no Always allow', async () => {
+    const long = 'x'.repeat(50_000)
+    const cut = req('c1', { command: long, what: 'Run a long script', always: 'Bash(python3 *)', cut: 61_234 })
+    const el = await mount(<PermissionCard ws="mini" asks={[{ chat: 'or1', request: cut }]} metas={METAS} labels={new Map()} />)
+    expect(el.querySelector('.chat-perm-cut')?.textContent).toBe('Only the first 50,000 of 61,234 characters are shown. Allow approves all of it.')
+    expect(el.querySelector('.chat-perm-code[data-field="command"]')?.textContent).toBe(long)
+    expect([...el.querySelectorAll('.chat-perm-acts button')].map((b) => b.textContent)).toEqual(['Allow', 'Deny'])
+    const whole = await mount(<PermissionCard ws="mini" asks={[{ chat: 'or1', request: { ...cut, cut: undefined } }]} metas={METAS} labels={new Map()} />)
+    expect(whole.querySelector('.chat-perm-cut')).toBeNull()
+    expect(whole.querySelector('.chat-perm-always')).not.toBeNull()
+  })
+
   test("each answer goes to the session that asked, and the next request takes the card's place", async () => {
     const el = await card()
     await click(el.querySelector('.chat-perm-always'))

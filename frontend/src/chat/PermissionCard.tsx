@@ -5,7 +5,8 @@
 // offers a rule for the session, or for a web call its site or web search in the workspace; the scope in its tooltip)
 // and Deny, in one row. A request denied unanswered says so, with Dismiss. When auto mode's classifier could not judge
 // a call, an orientation's request offers the switch to Manual or Bypass. An answer hides the request at once. A long
-// command wraps and scrolls past 96px.
+// command wraps and scrolls past 96px. A request too long to show whole says how much of it shows and offers no
+// "don't ask again".
 import { useEffect, useMemo, useState } from 'react'
 import { Button } from '../components/Button'
 import { CodeText } from '../components/Code'
@@ -28,6 +29,13 @@ function alwaysChoice(p: PermissionRequest): { label: string; tip: string } | nu
   if (p.keep) return { label: `Always allow ${p.keep}`, tip: `Allow, and don't ask again for ${p.keep === 'web search' ? 'web searches' : p.keep} in this workspace` }
   if (p.always) return { label: `Always allow ${p.always}`, tip: `Allow, and don't ask again for ${p.always} for the rest of this session` }
   return null
+}
+
+/** The line a request the card shows only the start of carries: how much shows, and that Allow approves all of it. */
+export function cutLine(p: Pick<PermissionRequest, 'cut' | 'command' | 'input'>): string | null {
+  if (!p.cut) return null
+  const shown = (p.command || p.input || '').length
+  return `Only the first ${shown.toLocaleString('en-US')} of ${p.cut.toLocaleString('en-US')} characters are shown. Allow approves all of it.`
 }
 
 /** Send the analyst's answer to the session that asked: main's prompt through the shim, any other session's through
@@ -66,7 +74,8 @@ export function PermissionCard({ ws, asks, metas, labels }: {
   const fields = askFields(p)
   const expired = !!p.expired
   const also = p.also ?? []
-  const always = alwaysChoice(p)
+  const cut = cutLine(p)
+  const always = cut ? null : alwaysChoice(p)
   // while auto mode's classifier gives no verdict, the orientation's mode can switch from here
   const switchChat = classifierDown(p) ? modeChat(ask, metas) : null
   const switchTo = (mode: 'manual' | 'bypass') => {
@@ -127,6 +136,11 @@ export function PermissionCard({ ws, asks, metas, labels }: {
             <span className="chat-perm-value">{f.value}</span>
           </p>
         ),
+      )}
+      {cut && (
+        <p className="chat-perm-cut" role="note">
+          {cut}
+        </p>
       )}
       {also.length > 0 && (
         <div className="chat-perm-also" data-count={also.length}>

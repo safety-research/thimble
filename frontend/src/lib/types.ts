@@ -544,6 +544,9 @@ export interface PermissionRequest {
   also?: string[]
   /** a web call's "don't ask again", kept for the workspace: its site, or `web search` */
   keep?: string
+  /** the length of the command or input when the card shows only its start (backend PERMISSION_INPUT_CHARS); such a
+   * request offers no "don't ask again" */
+  cut?: number
 }
 
 /** A session held where the browser cannot answer: the model-switch dialog after a safety stop (session.py). */
