@@ -38,10 +38,10 @@ A label marks records, such as the posts that ask for help. The analyst turns la
 
 ## Worked examples
 
-Two views in {{examples}} show methods on invented data, each described in its `view.json` under `data`. Take the method, not their domain, fields or layout.
+Two views in {{examples}} show methods on invented data, each described in its `view.json` under `data`. Read the one closest to your task. Take the method, not their domain, fields or layout.
 
-- `timeline` counts records per time bin, the bin chosen from the span, and draws each bar's marked part in the label's colour.
-- `board` gathers each thread's posts from across a file, and counts each thread's marked posts.
+- `incident-timeline` puts records from several sources on one time axis, for records read in time: an overview of the whole span to zoom into, a select for every field, and sources or incidents compared side by side as lanes.
+- `repository` gathers each run's records into units such as pull requests and issues, for units that span records: the runs' measures side by side, any runs chosen and compared unit by unit, and filters on each unit's facts and on who did what.
 
 ## The three files
 

@@ -609,14 +609,17 @@ async def test_a_corpus_view_over_the_same_files_opens_before_the_built_in_one(d
 
 # ------------------------------------------------------------------------------------------------- worked examples
 #
-# plugin/viewers/board and timeline are the worked examples a view ticket's session reads (prompts/dev-view.md). Each
-# ships an invented sample of the files it claims under sample/, and passes over it the checks a view a session writes
-# must pass. Each sample is copied into the temp DATA_DIR as a corpus named after its example.
+# plugin/viewers/incident-timeline and repository are the worked examples a view ticket's session reads
+# (prompts/dev-view.md). Each ships an invented sample of the files it claims under sample/, and passes over it the
+# checks a view a session writes must pass. Each sample is copied into the temp DATA_DIR as a corpus named after its
+# example.
 
 # the example, the slug it is saved under, and a key of each kind it declares
 EXAMPLES = {
-    "board": ("forum", ["view:forum/t2"]),
-    "timeline": ("deliveries", ["view:deliveries/2026-03-04T06:00"]),
+    "incident-timeline": ("incident-timeline", ["view:incident-timeline/INC-312",
+                                                "view:incident-timeline/2026-05-16T08:00..2026-05-16T09:00"]),
+    "repository": ("repository", ["view:repository/r1/pull/11", "view:repository/r3", "view:repository/r2/issues/6",
+                                  "view:repository/r3/discussions/2", "view:repository/r4/agents/moss"]),
 }
 
 
@@ -671,43 +674,53 @@ def test_each_worked_example_describes_its_files():
             assert f"`{field}`" in raw["data"] and re.search(rf"^#   {field} ", comment, re.M), (name, field)
 
 
-async def test_the_forum_example_gathers_posts_into_topics_with_their_replies(samples, inproc, bound):
-    """A post opens in its topic, a topic cites every post in time order, the list sorts by size or by the latest post,
-    and a reply names the post it answers."""
-    slug = _save_example("board")
-    posts = [json.loads(ln) for ln in (samples / "board" / "forum.jsonl").read_text("utf-8").splitlines()]
-    post = await views.resolve_locator("board", slug, {"path": "forum.jsonl", "fragment": "L1"})
-    assert post["key"] == "t1" and post["label"] == "Ruth · 1 Apr 09:12"
-    assert post["excerpt"] == posts[0]["text"] and post["target"] == {"topic": "t1", "line": 1}
-    topic = await views.resolve_locator("board", slug, {"key": "t2"})
-    lines = [n for n, p in enumerate(posts, 1) if p["topic"] == "t2"]
-    assert topic["refs"] == [f"forum.jsonl#L{n}" for n in lines] and topic["label"].endswith(f" · {len(lines)} posts")
-    by_size = await views.reader_call("board", slug, "records", {"op": "topics"})
-    assert by_size["total"] == len({p["topic"] for p in posts}) and by_size["topics"][0]["key"] == "t2"
-    latest = await views.reader_call("board", slug, "records", {"op": "topics", "sort": "latest"})
-    assert latest["topics"][0]["last"] == max(p["posted"] for p in posts)
-    shown = await views.reader_call("board", slug, "records", {"op": "topic", "key": "t2"})
-    assert [i["ref"] for i in shown["items"]] == topic["refs"]
-    reply = next(i for i in shown["items"] if i["reply"])
-    parent = posts[reply["line"] - 1]["reply_to"]
-    assert reply["reply"] == {"ref": f"forum.jsonl#L{next(n for n, p in enumerate(posts, 1) if p['id'] == parent)}",
-                              "author": next(p["author"] for p in posts if p["id"] == parent)}
+async def test_the_incident_timeline_example_puts_every_source_on_one_axis_and_gathers_its_units(samples, inproc,
+                                                                                                    bound):
+    """The overview sends every record of the five sources in time order, with each field's values named; a line opens
+    in its incident, a record's details name the record it answers, an incident cites its records in time order, and a
+    window cites the records inside it."""
+    name = "incident-timeline"
+    slug = _save_example(name)
+    rows = [json.loads(ln) for ln in (samples / name / "events.jsonl").read_text("utf-8").splitlines()]
+    over = await views.reader_call(name, slug, "records", {"op": "overview"})
+    cols, names = over["cols"], over["names"]
+    assert len(cols["r"]) == len(rows) and cols["t"] == sorted(cols["t"])
+    assert {names["source"][v] for v in cols["source"]} == {r["source"] for r in rows}
+    one = await views.resolve_locator(name, slug, {"path": "events.jsonl", "fragment": "L1"})
+    assert one["excerpt"] == rows[0]["text"] and one["key"] == rows[0]["incident"]
+    child = next(n for n, r in enumerate(rows, 1) if r.get("re"))
+    parent = next(n for n, r in enumerate(rows, 1) if r["id"] == rows[child - 1]["re"])
+    rec = await views.reader_call(name, slug, "records", {"op": "record", "r": cols["r"][cols["ln"].index(child)]})
+    assert rec["answers"]["ref"] == f"events.jsonl#L{parent}"
+    order = sorted(range(1, len(rows) + 1), key=lambda n: (views_time(rows[n - 1]["at"]), n))
+    incident = await views.resolve_locator(name, slug, {"key": "INC-312"})
+    assert incident["refs"] == [f"events.jsonl#L{n}" for n in order if rows[n - 1].get("incident") == "INC-312"]
+    window = await views.resolve_locator(name, slug, {"key": "2026-05-16T08:00..2026-05-16T09:00"})
+    a, b = views_time("2026-05-16T08:00:00Z"), views_time("2026-05-16T09:00:00Z")
+    assert len(window["refs"]) == sum(a <= views_time(r["at"]) < b for r in rows) > 0
 
 
-async def test_the_deliveries_example_counts_every_record_in_bins_scaled_to_the_span(samples, inproc, bound):
-    """Four mornings and a bit are counted per hour and route, each bar keyed by its start; a line opens in its bar,
-    and a bar lists its records in time order."""
-    slug = _save_example("timeline")
-    rows = [json.loads(ln) for ln in (samples / "timeline" / "deliveries.jsonl").read_text("utf-8").splitlines()]
-    one = await views.resolve_locator("timeline", slug, {"path": "deliveries.jsonl", "fragment": "L1"})
-    assert one["key"] == rows[0]["at"][:13] + ":00" and one["excerpt"].split("\n")[:2] == [rows[0]["stop"], rows[0]["order"]]
-    counts = await views.reader_call("timeline", slug, "records", {"op": "counts"})
-    assert sum(c["n"] for c in counts["rows"]) == len(rows)
-    assert counts["bin"]["seconds"] == 3600 and {c["kind"] for c in counts["rows"]} == {r["route"] for r in rows}
-    assert counts["busiest"] == "2026-03-04T06:00"
-    listed = await views.reader_call("timeline", slug, "records", {"op": "bin", "key": counts["busiest"]})
-    times = [i["time"] for i in listed["items"]]
-    assert times == sorted(times) and listed["total"] == sum(c["n"] for c in counts["rows"] if c["key"] == counts["busiest"])
+async def test_the_repository_example_compares_any_runs_and_filters_by_who_did_what(samples, inproc, bound):
+    """Every run has a row of measures with its setup; choosing runs narrows the list to them and keeps every run's row,
+    the compare grid lines the runs up issue by issue, and a record filter keeps the units with a record it picks."""
+    name = "repository"
+    slug = _save_example(name)
+    rows = [json.loads(ln) for ln in (samples / name / "repo.jsonl").read_text("utf-8").splitlines()]
+    setups = {r["run"]: (r["team"], r["approvals"]) for r in rows if r["kind"] == "run"}
+    pulls = await views.reader_call(name, slug, "records", {"op": "view", "tab": "pulls"})
+    assert {r["run"]: (r["team"], r["approvals"]) for r in pulls["runs"]} == setups
+    assert pulls["total"] == len({(r["run"], r["number"]) for r in rows if r["kind"] == "pr"})
+    two = await views.reader_call(name, slug, "records", {"op": "view", "tab": "pulls", "runs": ["r2", "r4"]})
+    assert {i["run"] for i in two["items"]} == {"r2", "r4"}
+    assert {r["run"]: r["chosen"] for r in two["runs"]} == {"r1": False, "r2": True, "r3": False, "r4": True}
+    grid = (await views.reader_call(name, slug, "records", {"op": "view", "tab": "issues", "compare": True}))["grid"]
+    backlog = {r["number"] for r in rows if r["kind"] == "issue" and r["run"] == "r1" and r["at"] == rows[0]["at"]}
+    assert backlog and all(set(g["cells"]) == set(setups) for g in grid if g["number"] in backlog)
+    query = {"op": "view", "tab": "pulls", "filters": {"actor": "moss", "action": "approved"}}
+    approved = await views.reader_call(name, slug, "records", query)
+    assert {(i["run"], i["number"]) for i in approved["items"]} == {
+        (r["run"], r["number"]) for r in rows if r["kind"] == "review" and r["author"] == "moss"
+        and r["verdict"] == "approved"} != set()
 
 
 @pytest.mark.parametrize("name", sorted(EXAMPLES))
@@ -721,30 +734,6 @@ async def test_every_worked_example_s_page_loads_headless_at_its_first_place(nam
     assert rep["ok"], views.gate_lines(rep)
     assert rep["page"]["fetches"] >= 1 and Path(rep["page"]["png"]).is_file()
     assert not views.unmarked(rep["page"]), "the records a worked example shows carry their file refs, for the labels"
-
-
-async def test_the_timeline_example_bins_a_long_log_by_days(samples, inproc, bound):
-    """The timeline's bin comes from the span: the sample's records spread over sixty days are counted per day, keyed
-    YYYY-MM-DD, and a line still opens in its day."""
-    path = samples / "timeline" / "deliveries.jsonl"
-    lines = path.read_text("utf-8").splitlines()
-    t0 = views_time(json.loads(lines[0])["at"])
-    step = 60 * 86400 / max(1, len(lines) - 1)
-    out = []
-    for i, ln in enumerate(lines):
-        r = json.loads(ln)
-        r["at"] = datetime.fromtimestamp(t0 + i * step, timezone.utc).isoformat()
-        out.append(json.dumps(r))
-    path.write_text("\n".join(out) + "\n", "utf-8")
-    slug = _save_example("timeline")
-    counts = await views.reader_call("timeline", slug, "records", {"op": "counts"})
-    assert counts["bin"]["seconds"] == 86400
-    keys = {c["key"] for c in counts["rows"]}
-    assert 50 <= len(keys) <= 61 and all(re.fullmatch(r"\d{4}-\d\d-\d\d", k) for k in keys)
-    one = await views.resolve_locator("timeline", slug, {"path": "deliveries.jsonl", "fragment": "L50"})
-    assert one["key"] in keys and one["target"]["bin"] == one["key"]
-    day = await views.resolve_locator("timeline", slug, {"key": one["key"]})
-    assert "deliveries.jsonl#L50" in day["refs"]
 
 
 def views_time(ts: str) -> float:

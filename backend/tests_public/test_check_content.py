@@ -47,9 +47,9 @@ def test_the_maintainer_is_named_only_in_the_files_that_carry_the_name(cc, tmp_p
 def test_files_of_kinds_that_never_belong_are_refused(cc, tmp_path, monkeypatch):
     monkeypatch.setattr(cc, "MAX_BYTES", 100)
     write(tmp_path, {"data/c/x.txt": "", "a/b.db": b"\0", "run.jsonl": "{}\n", "big.txt": "x" * 101, "ok.txt": "ok\n",
-                     "plugin/viewers/board/sample/forum.jsonl": "{}\n", "plugin/viewers/board/sample/x/run.jsonl": "{}\n"})
+                     "plugin/viewers/repository/sample/repo.jsonl": "{}\n", "plugin/viewers/repository/sample/x/run.jsonl": "{}\n"})
     assert sorted(h[0] for h in hits(cc, tmp_path)) == ["a/b.db", "big.txt", "data/c/x.txt",
-                                                        "plugin/viewers/board/sample/x/run.jsonl", "run.jsonl"], \
+                                                        "plugin/viewers/repository/sample/x/run.jsonl", "run.jsonl"], \
         "a worked example's sample file is data on purpose"
 
 
