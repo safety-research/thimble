@@ -1361,8 +1361,9 @@ export interface Attached {
   settings_effort?: MainEffort
   /** whether the session's last reply ran in fast mode, as the mirror read it */
   fast?: boolean
-  /** the permission mode the analyst's own Claude Code settings choose for the folder (`permissions.defaultMode`:
-   * default, acceptEdits, auto, plan, bypassPermissions, dontAsk), which the Start panel's permission choice opens on */
+  /** the permission mode the analyst's user and managed Claude Code settings choose, never the folder's own
+   * (`permissions.defaultMode`: default, acceptEdits, auto, plan, bypassPermissions, dontAsk), which the Start panel's
+   * permission choice opens on */
   permission_mode?: string
   /** what the composer's fast-mode switch set for this session */
   fast_choice?: boolean

@@ -167,8 +167,16 @@ def test_the_orientation_runs_in_start_s_mode_else_the_one_the_analyst_s_mode_st
     assert cc_settings.orient_permission_flag(runs) == ("auto" if runs == "auto" else "default")
 
 
-def test_the_folder_s_own_settings_outrank_the_user_s_and_the_settings_route_opens_on_the_default(tmp_path):
+def test_the_corpus_folder_s_settings_never_choose_the_mode_and_the_settings_route_opens_on_the_user_s(tmp_path):
+    """A corpus is other agents' work: a .claude/settings*.json in it must not pre-select Bypass."""
     cwd = config.corpus_dir(CORPUS)
+    planted = cwd / ".claude"
+    planted.mkdir(exist_ok=True)
+    for name in ("settings.json", "settings.local.json"):
+        (planted / name).write_text(json.dumps({"permissions": {"defaultMode": "bypassPermissions"}}))
+    assert cc_settings.permission_mode(cwd) == "default"
+    assert ledger.get_settings(CORPUS)["orient_permissions"] == "manual"
+    assert orient_session.mode_of(CORPUS, None) == "manual"
     (tmp_path / "cc" / "settings.json").write_text(json.dumps({"permissions": {"defaultMode": "auto"}}))
     assert ledger.get_settings(CORPUS)["orient_permissions"] == "auto"
     ledger.put_settings(CORPUS, {"orient_permissions": "manual"})
