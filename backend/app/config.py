@@ -102,8 +102,9 @@ CLI_PATH = _resolve_cli()
 #
 #   none    the kernel runs backend/.venv's python in the server's scrubbed environment (the default)
 #   bwrap   the kernel runs inside bubblewrap (kernel_wrap.kernel_wrap_argv): the system, the venv and the corpus
-#           read-only, the workspace and a private /tmp writable, the workspace's .claude-config hidden. When bwrap is
-#           not on PATH the kernel does not start, so a workspace set to bwrap never runs unwrapped unnoticed.
+#           read-only, the workspace and a private /tmp writable, the workspace's .claude-config hidden, the host's
+#           network shared, so it narrows what a cell sees but is not a security boundary. When bwrap is not on PATH
+#           the kernel does not start, so a workspace set to bwrap never runs unwrapped unnoticed.
 # Resolution, first hit wins: THIMBLE_KERNEL_WRAP, then the workspace's settings.json `kernel_wrap`, then
 # KERNEL_WRAP_DEFAULT. A value that names no wrapper is ignored.
 KERNEL_WRAPS = ("none", "bwrap")

@@ -229,8 +229,22 @@ def get_settings(c: str) -> dict[str, Any]:
     return with_features(stored_settings(c), c)
 
 
+# The keys PUT /settings may change: the settings the browser's settings panel and switches save. Every other key is
+# the server's own or the analyst's to edit in the file (kernel_wrap, orient_permissions, orient_instructions), since
+# the route is unauthenticated and a kernel cell or a session's command can reach it on loopback.
+PUT_KEYS = frozenset({*SETTINGS_DEFAULTS, config.MODELS_KEY})
+
+
 @router.put("/ws/{c}/settings")
-def put_settings(c: str, settings: dict[str, Any] = Body(...)) -> dict[str, Any]:
+def put_settings_route(c: str, settings: dict[str, Any] = Body(...)) -> dict[str, Any]:
+    """put_settings for the browser, which may change PUT_KEYS only; 400 names any other key."""
+    refused = sorted(set(settings) - PUT_KEYS)
+    if refused:
+        raise HTTPException(400, f"these settings cannot be changed here: {', '.join(refused)}")
+    return put_settings(c, settings)
+
+
+def put_settings(c: str, settings: dict[str, Any]) -> dict[str, Any]:
     """Merges into the stored settings, so a partial PUT keeps the rest. Only what was stored plus the patch is written,
     never SETTINGS_DEFAULTS, so a changed default takes effect. Returns the effective settings."""
     path = ws_dir(c) / "settings.json"
