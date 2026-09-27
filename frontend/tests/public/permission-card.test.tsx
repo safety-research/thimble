@@ -2,8 +2,8 @@
 // The permission card above the chat's composer (src/chat/PermissionCard.tsx, src/chat/permissions.ts): every request
 // that waits for the analyst, from main's session and from every session thimble started, on one card, the one asked
 // first first, paged; each names the thread it comes from, says which session or agent asks, what it asks to do, its
-// input and why it asks, with Allow, Allow and don't ask again where Claude Code offers a rule, and Deny, each sent to
-// the session that asked. Every request is recorded and answered by a stand-in fetch.
+// input and why it asks, with Allow, Always allow where Claude Code offers a rule (its scope in the tooltip), and Deny,
+// each sent to the session that asked. Every request is recorded and answered by a stand-in fetch.
 import { act } from 'react'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 import { askFields, askWhat } from '../../src/chat/Holds.tsx'
@@ -35,6 +35,19 @@ const WRITER = chat('w1', { role: 'writer', title: 'Write report' })
 const CHECK = chat('ck1', { role: 'check', title: 'Unverified' })
 const CRITIQUE = chat('cr1', { role: 'step', title: 'critique', parent: 'or1' })
 const METAS = new Map([ORIENT, WRITER, CHECK, CRITIQUE].map((m) => [m.id, m]))
+/** The text of the tooltip a hover on `el` shows. */
+async function hoverTip(el: Element): Promise<string | null | undefined> {
+  vi.useFakeTimers()
+  try {
+    await act(async () => void el.dispatchEvent(new PointerEvent('pointerover', { bubbles: true, pointerType: 'mouse' })))
+    await act(async () => void el.dispatchEvent(new PointerEvent('pointerenter', { bubbles: false, pointerType: 'mouse' })))
+    await act(async () => void vi.advanceTimersByTime(1000))
+  } finally {
+    vi.useRealTimers()
+  }
+  return document.querySelector('.tip')?.textContent
+}
+
 const req = (id: string, extra: Partial<PermissionRequest> = {}): PermissionRequest => ({ id, tool: 'Bash', what: 'Count the runs', ...extra }) as PermissionRequest
 
 describe('the requests and their words', () => {
@@ -108,7 +121,7 @@ describe('the card', () => {
     await settle()
   }
 
-  test('one request at a time, paged: who asks and what, its input as code, why, then Allow, Allow and don\'t ask again, Deny', async () => {
+  test('one request at a time, paged: who asks and what, its input as code, why, then Allow, Always allow, Deny', async () => {
     const el = await card()
     const c = el.querySelector('.chat-perm')!
     expect(c.getAttribute('role')).toBe('alertdialog')
@@ -119,7 +132,8 @@ describe('the card', () => {
     expect(c.querySelector('.chat-perm-what')?.textContent).toBe('Count refunds')
     expect(c.querySelector('.chat-perm-code[data-field="command"]')?.textContent).toBe('grep -c refund tickets/*.jsonl')
     expect(c.querySelector('.chat-perm-why')?.textContent).toBe('It runs in Manual, which asks before each call.')
-    expect([...c.querySelectorAll('.chat-perm-acts button')].map((b) => b.textContent)).toEqual(['Allow', "Allow and don't ask again for Bash(grep *)", 'Deny'])
+    expect([...c.querySelectorAll('.chat-perm-acts button')].map((b) => b.textContent)).toEqual(['Allow', 'Always allow Bash(grep *)', 'Deny'])
+    expect(await hoverTip(c.querySelector('.chat-perm-always-tip')!)).toBe("Allow, and don't ask again for Bash(grep *) for the rest of this session")
     await click(c.querySelector('[aria-label="Next request"]'))
     expect(el.querySelector('.chat-perm-count')?.textContent).toBe('2 of 2')
     expect(el.querySelector('.chat-perm-who')?.textContent).toBe('Your Claude Code sessionasks to write a file')
@@ -193,18 +207,20 @@ describe("the dev agent's requests and the web", () => {
     expect(waitWords(90)).toBe('90 seconds')
   })
 
-  test("a fetch shows its URL and the site's later fetches, and don't ask again keeps the site for the workspace", async () => {
+  test("a fetch shows its URL and the site's later fetches, and Always allow keeps the site for the workspace", async () => {
     const el = await mount(<PermissionCard ws="mini" asks={[{ chat: 'd1', request: fetch1 }]} metas={DEV} labels={new Map()} />)
     expect(el.querySelector('.chat-perm-who')?.textContent).toBe('dev · view Postsasks to fetch a web page')
     expect(el.querySelector('.chat-perm-what')?.textContent).toBe('https://vega.github.io/vega-lite/docs/bar.html')
     expect(el.querySelector('.chat-perm-also')?.textContent).toBe('and from this sitehttps://vega.github.io/vega-lite/docs/line.html')
-    expect([...el.querySelectorAll('.chat-perm-acts button')].map((b) => b.textContent)).toEqual(['Allow', "Allow and don't ask again for vega.github.io in this workspace", 'Deny'])
+    expect([...el.querySelectorAll('.chat-perm-acts button')].map((b) => b.textContent)).toEqual(['Allow', 'Always allow vega.github.io', 'Deny'])
+    expect(await hoverTip(el.querySelector('.chat-perm-always-tip')!)).toBe("Allow, and don't ask again for vega.github.io in this workspace")
     await act(async () => (el.querySelector('.chat-perm-always') as HTMLButtonElement).click())
     await settle()
     expect(posted).toEqual([['/api/ws/mini/chats/d1/permission', { id: 'f1', allow: true, always: true }]])
     const search = req('s1', { tool: 'WebSearch', what: 'vega-lite bar', keep: 'web search' })
     const other = await mount(<PermissionCard ws="mini" asks={[{ chat: 'or1', request: search }]} metas={DEV} labels={new Map()} />)
-    expect(other.querySelector('.chat-perm-always')?.textContent).toBe("Allow and don't ask again for web search in this workspace")
+    expect(other.querySelector('.chat-perm-always')?.textContent).toBe('Always allow web search')
+    expect(await hoverTip(other.querySelector('.chat-perm-always-tip')!)).toBe("Allow, and don't ask again for web searches in this workspace")
   })
 
   test('a request denied unanswered stays on the card after those that wait, saying so, waits on nobody, and Dismiss takes it off', async () => {
