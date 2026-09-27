@@ -1,13 +1,17 @@
 #!/usr/bin/env python3
 """Check the repo's files for content that must not be committed: secrets, private names, and files of kinds that
-never belong in the tree. scripts/check.sh and CI run it.
+never belong in the tree; or, with --commits, the messages of a range of commits. scripts/check.sh and CI run it.
 
     python3 scripts/check_content.py [DIR] [--no-gitleaks]
+    python3 scripts/check_content.py --commits RANGE [DIR]
     python3 scripts/check_content.py --digest TERM
 
     DIR            the tree to check (default: this repo, its tracked files plus untracked ones git does not ignore);
                    a folder that is not a git checkout is checked whole
     --no-gitleaks  skip the secret scan (CI always runs it)
+    --commits RANGE
+                   check the messages of the commits in RANGE (a git revision range, such as origin/main..HEAD) instead
+                   of the files; the commits SESSION_LINES_UNTIL reaches are left out
     --digest TERM  print the line that adds TERM to TERMS, and exit
 
 Kinds of hit:
@@ -18,6 +22,8 @@ Kinds of hit:
                 a folder whose path differs from another's only by case: on a case-insensitive disk (macOS, Windows)
                 an import of ./Checks can load checks.ts in place of Checks.tsx, and the two folders are one
     secret      a gitleaks finding
+    session     a commit message line that is a Claude-Session: trailer or holds a link to a Claude Code session, which
+                is private (--commits)
 
 TERMS holds SHA-256 digests rather than the words, so the list does not publish the names it keeps out. A word of a
 line, or two neighbouring words joined with "-", matches when its digest is listed, in its own spelling or in lower
@@ -72,6 +78,10 @@ NEVER = re.compile(r"(^|/)(__pycache__|node_modules|\.venv)(/|$)|^(data|dev|note
 # the worked examples' invented sample files, which are data on purpose
 SAMPLES = re.compile(r"^plugin/viewers/[\w-]+/sample/[^/]+$")
 MAX_BYTES = 2_000_000
+SESSION_LINE = re.compile(r"^\s*claude-session:|claude\.ai/code/session_", re.I)
+# The newest commit made before messages were checked. It and the commits it reaches keep their messages, since the
+# history is not rewritten.
+SESSION_LINES_UNTIL = "bab9a2fece178f9208ecc719f27fbc3af805bc70"
 # the extension a module import leaves out, with TypeScript's declaration suffix (types.d.ts is the module ./types)
 EXTENSION = re.compile(r"(?<=.)(\.d)?\.[^.]+$")
 WORD = re.compile(r"[^\W_]+")
@@ -172,10 +182,41 @@ def gitleaks(root: Path, rels: list[str]) -> list[tuple[str, int, str, str]]:
         return out
 
 
+def commit_hits(root: Path, rev_range: str, until: str | None = SESSION_LINES_UNTIL) -> list[tuple[str, int, str, str]]:
+    """Every session line in the messages of the commits in `rev_range`, as (commit, line, "session", text). The
+    commits `until` reaches are left out when the checkout has it. CalledProcessError when git refuses the range."""
+    git = ["git", "-C", str(root)]
+    revs = [rev_range]
+    if until and subprocess.run([*git, "cat-file", "-e", f"{until}^{{commit}}"], capture_output=True).returncode == 0:
+        revs.append(f"^{until}")
+    out = subprocess.run([*git, "log", "--format=%H%x00%B%x1e", *revs, "--"], capture_output=True, text=True,
+                         check=True).stdout
+    hits = []
+    for entry in out.split("\x1e"):
+        sha, _, body = entry.strip("\n").partition("\0")
+        for n, line in enumerate(body.splitlines(), 1):
+            if SESSION_LINE.search(line):
+                hits.append((sha[:12], n, "session", line.strip()))
+    return hits
+
+
+def check_commits(root: Path, rev_range: str) -> int:
+    try:
+        hits = commit_hits(root, rev_range)
+    except subprocess.CalledProcessError as e:
+        print(f"check_content: git cannot list the commits {rev_range}: {e.stderr.strip()[:300]}", file=sys.stderr)
+        return 2
+    for sha, n, kind, text in hits:
+        print(f"{sha}:{n}: [{kind}] {text}")
+    print(f"check_content: the commits {rev_range}: " + (f"{len(hits)} hits (session {len(hits)})" if hits else "no hits"))
+    return 1 if hits else 0
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("dir", type=Path, nargs="?", default=Path(__file__).resolve().parent.parent)
     ap.add_argument("--no-gitleaks", action="store_true")
+    ap.add_argument("--commits", metavar="RANGE")
     ap.add_argument("--digest", metavar="TERM")
     a = ap.parse_args()
     if a.digest:
@@ -185,6 +226,8 @@ def main() -> int:
     if not root.is_dir():
         print(f"check_content: {root} is not a directory", file=sys.stderr)
         return 2
+    if a.commits:
+        return check_commits(root, a.commits)
     rels = files_of(root)
     hits = scan(root, rels) + case_clashes(rels) + ([] if a.no_gitleaks else gitleaks(root, rels))
     for rel, n, kind, text in sorted(hits):
