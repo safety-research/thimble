@@ -37,9 +37,10 @@ class _Proc:
 
 
 def _fake_gh(monkeypatch, *, rc: int = 0, stderr: str = "HTTP 502: Bad Gateway", logged_in: bool = True,
-             sees_repo: bool = True) -> list[list[str]]:
-    """gh on PATH; `subprocess.run` records the command and, on success, leaves a zip in the --dir it was given. A
-    failing download prints `stderr`; `gh auth status` and `gh repo view` answer by `logged_in` and `sees_repo`."""
+             sees_repo: bool = True, sums: bool = True) -> list[list[str]]:
+    """gh on PATH; `subprocess.run` records the command and, on success, leaves a zip in the --dir it was given, and
+    the release's SHA256SUMS when `sums`. A failing download prints `stderr`; `gh auth status` and `gh repo view` answer
+    by `logged_in` and `sees_repo`."""
     calls: list[list[str]] = []
     monkeypatch.setattr(cli.shutil, "which", lambda name: "/usr/bin/gh" if name == "gh" else None)
 
@@ -51,6 +52,8 @@ def _fake_gh(monkeypatch, *, rc: int = 0, stderr: str = "HTTP 502: Bad Gateway",
             return _Proc(0 if sees_repo else 1)
         if rc == 0:
             (Path(cmd[cmd.index("--dir") + 1]) / "thimble-0.9.0-abc1234.zip").write_bytes(b"PK")
+            if sums:
+                (Path(cmd[cmd.index("--dir") + 1]) / "SHA256SUMS").write_text("0" * 64 + "  thimble-0.9.0-abc1234.zip\n")
         return _Proc(rc, stderr if rc else "")
 
     monkeypatch.setattr(cli.subprocess, "run", run)
@@ -147,13 +150,25 @@ def test_no_argument_downloads_with_gh_then_runs_update_sh_from_that_zip(home, r
     gh = _fake_gh(monkeypatch)
     calls = _record_update_sh(monkeypatch)
     assert cli.main(["update"]) == 0
-    assert gh[0][:7] == ["/usr/bin/gh", "release", "download", "--repo", "example/thimble", "--pattern", "thimble-*.zip"]
-    assert gh[0][7] == "--dir"
+    assert gh[0][:9] == ["/usr/bin/gh", "release", "download", "--repo", "example/thimble", "--pattern", "thimble-*.zip",
+                         "--pattern", "SHA256SUMS"]
+    assert gh[0][9] == "--dir"
     assert len(calls) == 1 and calls[0][:3] == ["bash", str(release_install / "scripts" / "update.sh"), "--from"]
-    assert calls[0][3].endswith("/thimble-0.9.0-abc1234.zip") and calls[0][3].startswith(gh[0][8])
+    assert calls[0][3].endswith("/thimble-0.9.0-abc1234.zip") and calls[0][3].startswith(gh[0][10])
+    assert calls[0][4:] == ["--sums", f"{gh[0][10]}/SHA256SUMS"], "update.sh checks the zip against the release's digests"
     assert capsys.readouterr().out.strip() == "thimble update: downloaded thimble-0.9.0-abc1234.zip"
     cli.main(["update", "--dry-run"])
     assert calls[-1][-1] == "--dry-run"
+
+
+def test_a_release_without_sha256sums_is_not_installed(home, release_install, monkeypatch, capsys):
+    _fake_gh(monkeypatch, sums=False)
+    calls = _record_update_sh(monkeypatch)
+    assert cli.main(["update"]) == 1
+    lines = capsys.readouterr().out.splitlines()
+    assert calls == [] and len(lines) == 2, lines
+    assert "has no SHA256SUMS" in lines[0] and "nothing was installed" in lines[0]
+    assert "thimble update --from" in lines[1]
 
 
 def test_the_repo_slug_comes_from_release_json_when_present(home, release_install, monkeypatch, capsys):

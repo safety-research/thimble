@@ -117,8 +117,9 @@ feedback() {
 }
 
 # thimble uninstall [--yes] [--keep-home]: bash, so it works when the venv is missing or inside the tree being removed.
-# It touches only Claude Code's plugin registration, ~/.local/bin/thimble and $THIMBLE_HOME; a tree outside
-# $THIMBLE_HOME (a clone) is left in place with its workspaces. The `rm -rf` is guarded: $THIMBLE_HOME is canonicalized
+# It touches only Claude Code's plugin registration, ~/.local/bin/thimble, $THIMBLE_HOME and the keys thimble wrote into
+# folders' .claude/settings.local.json (undo_settings); a tree outside $THIMBLE_HOME (a clone) is left in place with its
+# workspaces. The `rm -rf` is guarded: $THIMBLE_HOME is canonicalized
 # once, `/`, $HOME and relative paths are refused, and it is removed only when it holds thimble state. The recorded
 # server is stopped only when its command line is a thimble server on the recorded port (argv[0] is not checked, since
 # macOS ps shows the venv's python as the framework binary) and the port confirms it (lsof, ss or /api/health); the
@@ -126,6 +127,81 @@ feedback() {
 # terminal-first changed in Claude Code's files (a corpus folder's statusline, the trust of thimble's work folders),
 # recorded in $THIMBLE_HOME, is put back before anything is removed (backend/app/claude_changes.py, run with the tree's
 # venv, else python3). A failing step does not stop the others; the last block lists what is left (exit 1 only then).
+# undo_settings PYTHON HOME list|undo: the keys backend/app/cc_settings.py wrote into folders'
+# .claude/settings.local.json, by its records in HOME (the effort and fast-mode `env` keys, the statusline). `list` prints
+# each file that holds one; `undo` removes each key that still holds thimble's value (a statusline gets back the one it
+# replaced), removes a file left empty, prints each file it changed, then removes the records; exit 1 when a file could
+# not be written.
+UNDO_SETTINGS_PY='
+import json, os, sys
+
+home, mode = sys.argv[1], sys.argv[2]
+
+
+def read(path):
+    try:
+        with open(path, encoding="utf-8") as f:
+            d = json.load(f)
+    except (OSError, ValueError):
+        return {}
+    return d if isinstance(d, dict) else {}
+
+
+RECORDS = {"effort-overrides.json": "CLAUDE_CODE_EFFORT_LEVEL", "fast-overrides.json": "CLAUDE_CODE_DISABLE_FAST_MODE",
+           "statusline-overrides.json": None}
+edits = {}
+for record, key in RECORDS.items():
+    for folder, value in read(os.path.join(home, record)).items():
+        if key and isinstance(value, str):
+            edits.setdefault(folder, []).append((key, value))
+        elif not key and isinstance(value, dict):
+            edits.setdefault(folder, []).append((None, value))
+files = {os.path.join(folder, ".claude", "settings.local.json"): e for folder, e in sorted(edits.items())}
+if mode == "list":
+    for path in files:
+        if os.path.isfile(path):
+            print(path)
+    sys.exit(0)
+failed = False
+for path, todo in files.items():
+    d = read(path)
+    changed = False
+    for key, value in todo:
+        env = d.get("env")
+        line = d.get("statusLine")
+        if key and isinstance(env, dict) and str(env.get(key)) == value:
+            del env[key]
+            if not env:
+                del d["env"]
+            changed = True
+        elif not key and isinstance(line, dict) and line.get("command") == value.get("ours"):
+            if value.get("previous"):
+                d["statusLine"] = value["previous"]
+            else:
+                del d["statusLine"]
+            changed = True
+    if not changed:
+        continue
+    try:
+        if d:
+            with open(path + ".thimble-tmp", "w", encoding="utf-8") as f:
+                f.write(json.dumps(d, indent=2) + "\n")
+            os.replace(path + ".thimble-tmp", path)
+        else:
+            os.unlink(path)
+        print(path)
+    except OSError as e:
+        print(f"could not write {path}: {e}", file=sys.stderr)
+        failed = True
+if failed:
+    sys.exit(1)
+for record in RECORDS:
+    try:
+        os.unlink(os.path.join(home, record))
+    except FileNotFoundError:
+        pass
+'
+
 uninstall() {
   local yes=0 keep_home=0 arg
   for arg in "$@"; do
@@ -143,7 +219,7 @@ uninstall() {
   [ -n "${HOME:-}" ] || { printf 'thimble uninstall: HOME is not set\n' >&2; exit 2; }
   local home_raw="${THIMBLE_HOME:-}" home home_note="" home_state=0 link="$HOME/.local/bin/thimble" tree="" kind="" name="" name_note=""
   local inside=0 pid="" port="" pid_note="" conf="" planned="" pport="" link_ours=0 link_why="" stop_how="" have_claude=0 ans cwd rc
-  local nsteps=0 ndone=0 nleft=0 left="" id_ok=0 id_conf="" id_note="" changed=0 undo=0 undo_py="" undo_cmd=""
+  local nsteps=0 ndone=0 nleft=0 left="" id_ok=0 id_conf="" id_note="" changed=0 undo=0 undo_py="" undo_cmd="" py="" settings=""
   case "$home_raw" in *[![:space:]]*) ;; *) home_raw="$HOME/.thimble";; esac   # unset or blank: the default
   home="${home_raw%/}"; [ -n "$home" ] || home=/
   enable -n kill 2>/dev/null || true   # `kill` is the program on PATH, not the builtin: the `+ kill …` line names what ran, and a test can stand a failing one in for it
@@ -159,11 +235,11 @@ uninstall() {
   step() { nsteps=$((nsteps + 1)); printf '  %d. %s\n' "$nsteps" "$1"; }   # a line of the plan that y runs
   add_left() { nleft=$((nleft + 1)); left="$left  $1"$'\n'"    $2"$'\n'; }   # add_left WHAT-WAS-NOT-DONE COMMAND-TO-FINISH
   json_get() {  # json_get FILE KEY — a top-level string value (python3 when present, else a sed for the flat case); 1 when unreadable
-    if command -v python3 >/dev/null 2>&1; then python3 -c 'import json,sys; v=json.load(open(sys.argv[1])).get(sys.argv[2], ""); print(v if isinstance(v, str) else "")' "$1" "$2" 2>/dev/null
+    if command -v python3 >/dev/null 2>&1; then python3 -I -c 'import json,sys; v=json.load(open(sys.argv[1])).get(sys.argv[2], ""); print(v if isinstance(v, str) else "")' "$1" "$2" 2>/dev/null
     else sed -n "s/.*\"$2\": *\"\([^\"]*\)\".*/\1/p" "$1" | head -n 1; fi
   }
   json_num() {  # json_num FILE KEY — a top-level integer value, else nothing
-    if command -v python3 >/dev/null 2>&1; then python3 -c 'import json,sys; v=json.load(open(sys.argv[1])).get(sys.argv[2]); print(v if isinstance(v, int) and not isinstance(v, bool) else "")' "$1" "$2" 2>/dev/null || true
+    if command -v python3 >/dev/null 2>&1; then python3 -I -c 'import json,sys; v=json.load(open(sys.argv[1])).get(sys.argv[2]); print(v if isinstance(v, int) and not isinstance(v, bool) else "")' "$1" "$2" 2>/dev/null || true
     else sed -n "s/.*\"$2\": *\([0-9][0-9]*\).*/\1/p" "$1" | head -n 1; fi
   }
   read_record() {  # read_record: pid and port from $home/server.json into pid and port — positive integers only (a pid of 0 would
@@ -242,6 +318,9 @@ uninstall() {
       esac
     fi
   fi
+  # the Claude Code settings thimble changed in folders it opened, read with python3, else the tree's own Python
+  if command -v python3 >/dev/null 2>&1; then py=python3; elif [ -n "$tree" ] && [ -x "$tree/backend/.venv/bin/python" ]; then py="$tree/backend/.venv/bin/python"; fi
+  if [ -n "$py" ] && [ -d "$home" ]; then settings="$("$py" -I -c "$UNDO_SETTINGS_PY" "$home" list 2>/dev/null || true)"; fi
   read_record
   # a running server: server.json's pid, alive, this install's server by identify; anything else is left alone, with what it is
   if [ -n "$pid" ]; then
@@ -278,6 +357,12 @@ uninstall() {
   fi
   if [ "$link_ours" = 1 ]; then step "rm $link ($link_why)"
   elif [ -e "$link" ] || [ -L "$link" ]; then printf '  %s is left alone: not a link into this tree\n' "$link"; fi
+  if [ -n "$settings" ]; then
+    step "put back the Claude Code settings thimble changed (effort, fast mode, statusline) in:"
+    printf '%s\n' "$settings" | sed 's/^/       /'
+  elif [ -z "$py" ] && { [ -f "$home/effort-overrides.json" ] || [ -f "$home/fast-overrides.json" ] || [ -f "$home/statusline-overrides.json" ]; }; then
+    printf "  without python3 the settings thimble wrote into .claude/settings.local.json files stay; %s/*-overrides.json name the folders\n" "$home"
+  fi
   # what $THIMBLE_HOME holds: the registry of folders (data/) and server state; the app copy and its workspaces
   # only when the tree is inside it
   local holds="the registry of folders you opened with /thimble (data/) and server state (app-dir, server.json, server.log)"
@@ -344,6 +429,16 @@ uninstall() {
   fi
   if [ "$link_ours" = 1 ]; then
     if run rm -f "$link"; then ndone=$((ndone + 1)); else add_left "$link was not removed" "rm -f $link"; fi
+  fi
+  if [ -n "$settings" ]; then
+    printf '+ put back the settings thimble wrote\n'
+    if "$py" -I -c "$UNDO_SETTINGS_PY" "$home" undo; then ndone=$((ndone + 1))
+    else
+      add_left "a .claude/settings.local.json could not be written (above), so the keys thimble wrote stay there" "remove CLAUDE_CODE_EFFORT_LEVEL and CLAUDE_CODE_DISABLE_FAST_MODE from its env block, and thimble's statusLine"
+      if [ "$keep_home" != 1 ] && [ "$home_state" = 1 ]; then
+        keep_home=1; add_left "$home was kept: it records what thimble wrote into those files" "rm -rf $home"
+      fi
+    fi
   fi
   if [ "$keep_home" != 1 ] && [ "$home_state" = 1 ]; then
     cwd="$(pwd -P 2>/dev/null || printf '%s' "$PWD")"

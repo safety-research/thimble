@@ -64,9 +64,10 @@ TERMS: dict[str, str] = {
 }
 # The files that name the maintainer on purpose: the marketplace owner and the contact address.
 MAINTAINER_FILES = {".claude-plugin/marketplace.json", "README.md", "backend/app/feedback.py"}
-# Third-party texts and lockfiles: other people's names and generated hashes, checked for secrets and file kinds only.
-EXEMPT = re.compile(r"^(LICENSE|backend/app/fonts/OFL-[\w-]+\.txt|backend/uv\.lock|"
-                    r"frontend/package-lock\.json)$")
+# Third-party texts, lockfiles and the built UI (a release's): other people's names, generated hashes and minified
+# names, checked for secrets and file kinds only.
+EXEMPT = re.compile(r"^(LICENSE|THIRD_PARTY_NOTICES|backend/app/fonts/OFL-[\w-]+\.txt|backend/uv\.lock|"
+                    r"frontend/package-lock\.json|frontend/dist/.+)$")
 NEVER = re.compile(r"(^|/)(__pycache__|node_modules|\.venv)(/|$)|^(data|dev|notes|context|experiments|"
                    r"workspaces[^/]*|\.claude|docs/archive|docs/proposals)/|\.(db|sqlite3?|jsonl|pyc)$")
 # the worked examples' invented sample files, which are data on purpose
