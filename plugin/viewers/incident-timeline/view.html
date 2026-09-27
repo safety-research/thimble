@@ -402,35 +402,36 @@ function renderSources() {
     return c
   }))
 }
+// A select adds the value picked to its field's values, or removes one already chosen (ticked); its closed face names
+// the chosen values, and "Any" clears them.
 function renderSelects() {
   const box = document.getElementById('selects')
-  box.replaceChildren(...FIELDS.slice(1).map(([k, name, many, none]) => {
+  box.replaceChildren(...FIELDS.slice(1).map(([k, name, many]) => {
     const pick = h('select', 'field')
     pick.setAttribute('aria-label', name)
-    const chosen = [...F[k]]
+    const chosen = [...F[k]].sort((a, b) => rankOf[k].get(a) - rankOf[k].get(b))
     const vals = [...rankOf[k].keys()].filter((v) => v !== 0 || (counts[k].get(0) || 0) > 0 || F[k].has(0))
     vals.sort((a, b) => (counts[k].get(b) || 0) - (counts[k].get(a) || 0) || rankOf[k].get(a) - rankOf[k].get(b))
     const any = h('option', null, `Any ${name.toLowerCase()}`)
     any.value = ''
     pick.append(any)
-    if (chosen.length > 1) {
-      const many_ = h('option', null, `${name}: ${chosen.length} ${many}`)
-      many_.value = 'many'
-      many_.disabled = true
-      pick.append(many_)
+    if (chosen.length) {
+      const names = chosen.map((v) => nameOf(k, v)).join(', ')
+      const face = h('option', null, `${name}: ${chosen.length > 2 || names.length > 28 ? `${chosen.length} ${many}` : names}`)
+      face.value = 'chosen'
+      face.hidden = true
+      pick.append(face)
     }
     for (const v of vals) {
       const n = counts[k].get(v) || 0
-      const o = h('option', null, chosen.length === 1 && chosen[0] === v ? `${name}: ${nameOf(k, v)}` : `${nameOf(k, v)} ${fmt(n)}`)
+      const o = h('option', null, `${F[k].has(v) ? '✓ ' : ''}${nameOf(k, v)} ${fmt(n)}`)
       o.value = String(v)
       if (n === 0 && !F[k].has(v)) o.disabled = true
       pick.append(o)
     }
-    pick.value = chosen.length > 1 ? 'many' : chosen.length === 1 ? String(chosen[0]) : ''
+    pick.value = chosen.length ? 'chosen' : ''
     pick.onchange = () => {
-      if (pick.value === '') F[k].clear()
-      else F[k] = new Set([Number(pick.value)])
-      refresh()
+      if (pick.value === '') { F[k].clear(); refresh() } else toggle(k, Number(pick.value))
     }
     return pick
   }))
