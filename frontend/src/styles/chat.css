@@ -1419,6 +1419,37 @@ button.model-line-part[aria-expanded='true'] {
   color: var(--text-secondary);
   overflow-wrap: anywhere;
 }
+/* the later calls for the same site, or later searches, that wait on this request's answer */
+.chat-perm-also {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+  color: var(--text-secondary);
+}
+.chat-perm-also-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  max-height: 72px;
+  margin: 0;
+  padding: 0;
+  overflow: auto;
+  list-style: none;
+  overflow-wrap: anywhere;
+}
+.chat-perm-also-more {
+  color: var(--text-tertiary);
+}
+/* denied unanswered: the card says so in a neutral edge, with Dismiss */
+.chat-perm[data-expired] {
+  border-color: var(--border-strong);
+  background: var(--surface-card);
+}
+.chat-perm[data-expired] .chat-perm-head {
+  color: var(--text-secondary);
+}
 /* auto mode that cannot decide in the session: the orientation's switch to Manual or Bypass, under the reason */
 .chat-perm-switch {
   display: flex;
@@ -1436,6 +1467,7 @@ button.model-line-part[aria-expanded='true'] {
   max-width: 100%;
   height: auto;
   min-height: var(--h-control);
+  padding-block: 3px;
   white-space: normal;
   text-align: left;
 }

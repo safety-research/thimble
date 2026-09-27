@@ -41,7 +41,7 @@ import { replayHeld } from './pending'
 import { composerTarget, pickItems, threadKind, threadLabels, threadNodes, type ThreadKind } from './threads'
 import { RoleChip } from './RoleChip'
 import { useChat, type ChatState } from './useChat'
-import { waitingAt, waitingChats } from './waiting'
+import { pendingAsks, waitingAt, waitingChats } from './waiting'
 import { PermissionCard } from './PermissionCard'
 import { pendingRequests } from './permissions'
 
@@ -447,7 +447,7 @@ export function ChatPanel({ ws, onCollapse }: { ws: string; onCollapse?: () => v
   const strip = orienting ? taskStrip('orient', true, agentRows.get(orienting.id) ?? [], metaMap) : taskStrip(kind, running, chat.rows, metaMap, !!curMeta?.view)
   // the orientation the strip follows in main (its retry below), and the session whose strip it is in its own thread
   const stripMeta = orienting ?? (kind === 'orient' ? curMeta : null)
-  const stripSession = orienting ?? (kind === 'orient' || kind === 'writer' || kind === 'check' || kind === 'step' ? curMeta : null)
+  const stripSession = orienting ?? (kind === 'orient' || kind === 'writer' || kind === 'check' || kind === 'step' || kind === 'dev' ? curMeta : null)
   // the session the strip follows is waiting for the analyst while one of its permission prompts, or its critique's, is
   // open (chat/waiting.ts)
   const stripped = !!strip && !showGate
@@ -1008,7 +1008,7 @@ function TicketView({ ws, id, chat, mainRecords }: { ws: string; id: string; cha
       )}
       <Rows rows={rows} ws={ws} chat={id} />
       {/* the state of the ticket this chat runs; an older chat of a retried ticket shows none */}
-      {ticket && ticket.chat === id && <TicketStatus ticket={ticket} onChange={(t) => setTicket(t as TicketWithShots)} />}
+      {ticket && ticket.chat === id && <TicketStatus ticket={ticket} waiting={pendingAsks(chat.meta).length > 0} onChange={(t) => setTicket(t as TicketWithShots)} />}
     </>
   )
 }

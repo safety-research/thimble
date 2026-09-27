@@ -1,5 +1,6 @@
-// A dev ticket's state at the foot of its thread: Stop while it runs, Discard while it waits, and after a failure or a
-// stop the reason with Retry and Discard. An applied ticket shows nothing. The ticket is re-fetched on each `ticket`
+// A dev ticket's state at the foot of its thread: Stop while it runs (saying so while a permission request of its
+// session waits on the card), Discard while it waits, and after a failure or a stop the reason with Retry and Discard.
+// An applied ticket shows nothing. The ticket is re-fetched on each `ticket`
 // stream event.
 import { useEffect, useState } from 'react'
 import { Button } from '../components/Button'
@@ -59,7 +60,10 @@ export function useTicket<T extends Ticket>(id: string | null): [T | null, (t: T
   return [ticket, setTicket]
 }
 
-export function TicketStatus({ ticket, onChange }: { ticket: Ticket; onChange: (t: Ticket) => void }) {
+/** The running ticket's line while a permission request of its session waits on the card. */
+export const WAITING_LINE = 'Waiting for permission'
+
+export function TicketStatus({ ticket, waiting = false, onChange }: { ticket: Ticket; waiting?: boolean; onChange: (t: Ticket) => void }) {
   const [busy, setBusy] = useState<string | null>(null)
   // the request itself is the telemetry record (lib/telemetry's wrapped fetch)
   const act = (what: 'stop' | 'retry' | 'dismiss') => {
@@ -82,6 +86,8 @@ export function TicketStatus({ ticket, onChange }: { ticket: Ticket; onChange: (
       <Note
         className="chat-ticket-status"
         data-status="running"
+        data-waiting={waiting ? '' : undefined}
+        text={waiting ? WAITING_LINE : undefined}
         chips={
           <Button size="sm" className="chat-ticket-act" busy={busy === 'stop'} onClick={() => act('stop')}>
             Stop

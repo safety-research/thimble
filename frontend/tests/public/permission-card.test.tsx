@@ -9,7 +9,8 @@ import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 import { askFields, askWhat } from '../../src/chat/Holds.tsx'
 import { ThreadsContext } from '../../src/chat/Notes.tsx'
 import { PermissionCard } from '../../src/chat/PermissionCard.tsx'
-import { askedBy, askingAgent, asksTo, askThread, askWhy, classifierDown, modeChat, pendingRequests, type PendingAsk } from '../../src/chat/permissions.ts'
+import { askedBy, askingAgent, asksTo, askThread, askWhy, classifierDown, modeChat, pendingRequests, waitWords, type PendingAsk } from '../../src/chat/permissions.ts'
+import { pendingAsks, waitingChats } from '../../src/chat/waiting.ts'
 import { bus } from '../../src/lib/bus.ts'
 import type { ChatMeta, PermissionRequest } from '../../src/lib/types.ts'
 import { mount, settle, unmountAll } from './mount.tsx'
@@ -174,5 +175,51 @@ describe('the card', () => {
     await act(async () => (el.querySelector('[aria-label="Next request"]') as HTMLButtonElement).click())
     expect(el.querySelector('.chat-perm-why')?.textContent).toMatch(/^Auto mode cannot decide in this session/)
     expect(el.querySelector('.chat-perm-switch')).toBeNull()
+  })
+})
+
+describe("the dev agent's requests and the web", () => {
+  const VIEW = chat('d1', { role: 'dev', title: 'view: Posts', view: 'posts' } as Partial<ChatMeta>)
+  const TICKET = chat('d2', { role: 'dev', title: 'ticket #3: Darker header', ticket: 't3' } as Partial<ChatMeta>)
+  const DEV = new Map([...METAS, [VIEW.id, VIEW], [TICKET.id, TICKET]])
+  const fetch1 = req('f1', { tool: 'WebFetch', what: 'https://vega.github.io/vega-lite/docs/bar.html', keep: 'vega.github.io', mode: 'manual', wait_s: 600, also: ['https://vega.github.io/vega-lite/docs/line.html'] })
+
+  test('the card names the dev agent and its task, its mode and the wait before an unanswered request is denied', () => {
+    expect(askedBy({ chat: 'd1', request: fetch1 }, DEV)).toBe('dev · view Posts')
+    expect(askedBy({ chat: 'd2', request: fetch1 }, DEV)).toBe('dev · ticket #3')
+    expect(askWhy({ chat: 'd1', request: fetch1 }, DEV)).toBe('It runs in Manual, which asks before each call. Unanswered, it is denied after 10 minutes and the work goes on without it.')
+    expect(waitWords(60)).toBe('a minute')
+    expect(waitWords(30)).toBe('30 seconds')
+  })
+
+  test("a fetch shows its URL and the site's later fetches, and don't ask again keeps the site for the workspace", async () => {
+    const el = await mount(<PermissionCard ws="mini" asks={[{ chat: 'd1', request: fetch1 }]} metas={DEV} labels={new Map()} />)
+    expect(el.querySelector('.chat-perm-who')?.textContent).toBe('dev · view Postsasks to fetch a web page')
+    expect(el.querySelector('.chat-perm-what')?.textContent).toBe('https://vega.github.io/vega-lite/docs/bar.html')
+    expect(el.querySelector('.chat-perm-also')?.textContent).toBe('and from this sitehttps://vega.github.io/vega-lite/docs/line.html')
+    expect([...el.querySelectorAll('.chat-perm-acts button')].map((b) => b.textContent)).toEqual(['Allow', "Allow and don't ask again for vega.github.io in this workspace", 'Deny'])
+    await act(async () => (el.querySelector('.chat-perm-always') as HTMLButtonElement).click())
+    await settle()
+    expect(posted).toEqual([['/api/ws/mini/chats/d1/permission', { id: 'f1', allow: true, always: true }]])
+    const search = req('s1', { tool: 'WebSearch', what: 'vega-lite bar', keep: 'web search' })
+    const other = await mount(<PermissionCard ws="mini" asks={[{ chat: 'or1', request: search }]} metas={DEV} labels={new Map()} />)
+    expect(other.querySelector('.chat-perm-always')?.textContent).toBe("Allow and don't ask again for web search in this workspace")
+  })
+
+  test('a request denied unanswered stays on the card saying so, waits on nobody, and Dismiss takes it off', async () => {
+    const expired = { ...fetch1, expired: T(9), also: [] }
+    const metas: ChatMeta[] = [{ ...VIEW, permissions: [expired] }]
+    expect(pendingRequests(null, metas).map((a) => a.request.id)).toEqual(['f1'])
+    expect(pendingAsks(metas[0])).toEqual([])
+    expect(waitingChats(metas)).toEqual([])
+    const el = await mount(<PermissionCard ws="mini" asks={pendingRequests(null, metas)} metas={DEV} labels={new Map()} />)
+    expect(el.querySelector('.chat-perm')?.getAttribute('data-expired')).toBe('true')
+    expect(el.querySelector('.chat-perm-title')?.textContent).toBe('Denied unanswered')
+    expect(el.querySelector('.chat-perm-who')?.textContent).toBe('dev · view Postsasked to fetch a web page')
+    expect(el.querySelector('.chat-perm-why')?.textContent).toBe('Nobody answered within 10 minutes, so it was denied and the session went on without it.')
+    expect([...el.querySelectorAll('.chat-perm-acts button')].map((b) => b.textContent)).toEqual(['Dismiss'])
+    await act(async () => (el.querySelector('.chat-perm-dismiss') as HTMLButtonElement).click())
+    await settle()
+    expect(posted).toEqual([['/api/ws/mini/chats/d1/permission', { id: 'f1', allow: false }]])
   })
 })
