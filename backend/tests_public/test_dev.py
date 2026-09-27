@@ -94,11 +94,12 @@ class FakeSessions:
         with (self.root / f"{sid}.jsonl").open("a") as f:
             f.writelines(transcript_turn(prompt, self.report))
 
-    async def start(self, cwd: Path, prompt: str, *, name: str, workspace: str | None, add_dirs=(), env=None) -> dict:
+    async def start(self, cwd: Path, prompt: str, *, name: str, workspace: str | None, add_dirs=(), env=None,
+                    asking=None) -> dict:
         n = len(self.starts) + 1
         sid = f"{n:08x}-0000-4000-8000-000000000000"
         self.starts.append({"cwd": cwd, "prompt": prompt, "name": name, "workspace": workspace, "session_id": sid,
-                            "add_dirs": list(add_dirs), "env": env})
+                            "add_dirs": list(add_dirs), "env": env, "asking": asking})
         if self.before_turn is not None:
             await self.before_turn()
         self._turn(cwd, prompt, sid)
