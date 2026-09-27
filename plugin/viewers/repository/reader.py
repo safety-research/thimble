@@ -24,9 +24,10 @@
 # and a run itself (<run>). The index keeps each unit's facts (state, who merged it, each reviewer's verdicts, flags)
 # and its records' lines and times; a record's text is read back from its byte offset when a page shows it. One fetch
 # answers a whole tab under the page's selection: the tab counts, one row of measures per run, the activity per time
-# bin, the values of every filter with their counts, and a page of units. Each filter's counts hold every other
-# filter, and the runs' rows hold every filter but the run, so a run that is not chosen still shows what choosing it
-# would give.
+# bin, the values of every filter with their counts, and a page of units. Most filters pick units by their facts; the
+# time range, `actor` (who wrote a record) and `action` (what it did) pick records, and a unit stays when one of its
+# records meets all three. Each filter's counts hold every other filter, and the runs' rows hold every filter but the
+# run, so a run that is not chosen still shows what choosing it would give.
 #
 # Labels: they apply when records are served, never in the index. A unit stays when thimble.kept_unit holds for its
 # records, and a record counts in the activity and on a unit's strip when thimble.kept holds for it. The records the
@@ -64,9 +65,9 @@ def _action(r):
 def build_index(paths):
     """{"offsets": {path: [byte offset of line n at n-1]}, "runs": {run: facts}, "units": {key: unit}, "line": {ref:
     key of its unit}}. A unit holds its tab, run, facts, `refs` (the records it gathers) and `events` ([ref, hours since
-    its run started, action] in time order, its strip and its part of the activity). An agent's refs start with its
-    own record, then every record it wrote; an issue's events include the merge that fixed it. The agents of a run are
-    the authors of its `agent` records. A line that is not JSON, or has no run or no time, is in `offsets` only."""
+    its run started, action, author] in time order, its strip and its part of the activity). An agent's refs start with
+    its own record, then every record it wrote; an issue's events include the merge that fixed it. The agents of a run
+    are the authors of its `agent` records. A line that is not JSON, or has no run or no time, is in `offsets` only."""
     offsets, recs = {}, []
     for path in paths:
         offs = offsets.setdefault(path, [])
@@ -113,12 +114,12 @@ def build_index(paths):
         u = units.get(key) or units.setdefault(key, _unit(key, run, r, h))
         _add(u, kind, r, who, h, act)
         u["refs"].insert(0, ref) if kind == "agent" else u["refs"].append(ref)
-        u["events"].append([ref, h, act])
+        u["events"].append([ref, h, act, who])
         u["words"].append(" ".join(str(r.get(f) or "") for f in ("title", "text", "reason", "sha")))
         if (run, who) in agents and kind != "agent":
             a = units.setdefault(f"{run}/agents/{who}", _unit(f"{run}/agents/{who}", run, {"author": who}, h))
             a["refs"].append(ref)
-            a["events"].append([ref, h, act])
+            a["events"].append([ref, h, act, who])
 
     for u in units.values():
         numbers = [f"#{n}" for n in (u.get("number"), u.get("closes")) if n is not None and u["tab"] != "discussions"]
@@ -132,7 +133,8 @@ def build_index(paths):
         issue["prs"].append(u["number"])
         if u["state"] == "merged" and issue["state"] == "open":
             issue.update(state="fixed", fixed_by=u["number"], ended=u["ended"])
-            issue["events"].append([next(e[0] for e in u["events"] if e[2] == "merged"), u["ended"], "fixed"])
+            merge = next(e for e in u["events"] if e[2] == "merged")
+            issue["events"].append([merge[0], u["ended"], "fixed", merge[3]])
     _agent_facts(units)
     return {"offsets": offsets, "runs": runs, "units": units, "line": line}
 
@@ -325,7 +327,7 @@ def _measures(tab, us, index, run):
 def _item(tab, u, index, labels):
     """A unit as a row of the list, with its kept records as strip ticks: [ref, hours, action, marked], and for a
     closed one the closer's words (`why`, read from its close record)."""
-    ticks = [[ref, h, act, labels.mark(ref)] for ref, h, act in u["events"] if labels.keep(ref)]
+    ticks = [[ref, h, act, labels.mark(ref)] for ref, h, act, _ in u["events"] if labels.keep(ref)]
     base = {"key": u["key"], "run": u["run"], "at": u["at"], "ticks": ticks}
     if u.get("state") == "closed":
         ref = next(e[0] for e in reversed(u["events"]) if e[2] == "closed")
@@ -355,6 +357,8 @@ SORTS = {
     "most posts": (lambda u: -(u.get("posts") or 0)),
     "latest": (lambda u: -u["events"][-1][1] if u["events"] else 0),
 }
+# the filters that pick records rather than units, and each one's place in an event
+PICKS = {"actor": 3, "action": 2}
 AGENT_SORTS = ("merges", "opened", "merged", "reviews", "approved", "changes", "comments", "posts")
 
 
@@ -367,16 +371,17 @@ def _order(tab, units, sort):
     return sorted(units, key=lambda u: (key(u), u["run"], u.get("number") or 0))
 
 
-def _activity(units, index, labels, runs):
-    """The kept records of the units per run, time bin and action: {bin: minutes, hours: the longest run, rows: [run,
-    bin, action, n, marked]}."""
+def _activity(units, index, labels, runs, picked):
+    """The kept records of the units that `picked(event)` holds for, per run, time bin and action: {bin: minutes, hours:
+    the longest run, rows: [run, bin, action, n, marked]}."""
     span = max((index["runs"][r]["end"] - index["runs"][r]["start"]) / 3600 for r in runs) if runs else 1
     minutes = next((b for b in BINS if span * 60 / b <= MAX_BARS), BINS[-1])
     counts = {}
     for u in units:
-        for ref, h, act in u["events"]:
+        for e in u["events"]:
+            ref, h, act, _ = e
             # a backlog issue was imported as its run began, which is no activity of the run
-            if h < 0 or (h == 0 and act == "opened") or not labels.keep(ref):
+            if h < 0 or (h == 0 and act == "opened") or not picked(e) or not labels.keep(ref):
                 continue
             c = counts.setdefault((u["run"], int(h * 60 // minutes), act), [0, 0])
             c[0] += 1
@@ -413,6 +418,7 @@ def _view(index, query):
     q = str(query.get("q") or "").strip().lower()
     rng = query.get("range") if isinstance(query.get("range"), list) and len(query["range"]) == 2 else None
     wanted = {k: v for k, v in (query.get("filters") or {}).items() if v not in (None, "")}
+    picks = {f: wanted.pop(f) for f in list(wanted) if f in PICKS}
 
     kept = [u for u in index["units"].values() if labels.unit(u)]
     tabs = {t: sum(u["tab"] == t and u["run"] in chosen for u in kept) for t in TABS}
@@ -422,10 +428,14 @@ def _view(index, query):
     def ok(u, skip=None):
         return all(v in facts[u["key"]].get(f, []) for f, v in wanted.items() if f != skip)
 
-    def in_range(u):
-        return not rng or any(rng[0] <= h < rng[1] for _, h, _ in u["events"])
+    def picked(e, skip=None):
+        return all(e[PICKS[f]] == v for f, v in picks.items() if f != skip)
 
-    live = [u for u in found if in_range(u)]
+    def hits(u, skip=None):
+        """The unit's events in the time range that every record filter but `skip` picks."""
+        return [e for e in u["events"] if (not rng or rng[0] <= e[1] < rng[1]) and picked(e, skip)]
+
+    live = [u for u in found if not (rng or picks) or hits(u)]
     facets = {}
     for f in {f for u in live for f in facts[u["key"]]}:
         counts = {}
@@ -435,6 +445,15 @@ def _view(index, query):
                     counts[v] = counts.get(v, 0) + 1
         if f in wanted:
             counts.setdefault(wanted[f], 0)
+        facets[f] = sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))
+    for f in PICKS if tab in ("pulls", "issues") else ():
+        counts = {}
+        for u in found:
+            if u["run"] in chosen and ok(u):
+                for v in {e[PICKS[f]] for e in hits(u, f)}:
+                    counts[v] = counts.get(v, 0) + 1
+        if f in picks:
+            counts.setdefault(picks[f], 0)
         facets[f] = sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))
 
     runs = []
@@ -451,7 +470,7 @@ def _view(index, query):
     out = {"tab": tab, "tabs": tabs, "runs": runs, "chosen": chosen, "facets": facets, "total": len(shown),
            "offset": offset, "items": [_item(tab, u, index, labels) for u in shown[offset:offset + PAGE]],
            # the activity leaves out the time range, so the chart shows the range among the rest
-           "activity": _activity([u for u in found if u["run"] in chosen and ok(u)], index, labels, chosen)}
+           "activity": _activity([u for u in found if u["run"] in chosen and ok(u)], index, labels, chosen, picked)}
     if query.get("compare") and tab in ("pulls", "issues"):
         out["grid"] = _grid(tab, shown, index)
     if tab == "agents":
@@ -504,17 +523,18 @@ def _detail(index, key):
     labels = _Labels()
     run = index["runs"][u["run"]]
     out = {k: v for k, v in u.items() if k not in ("refs", "events", "search")}
-    out["setup"] = {"team": run["team"], "approvals": run["approvals"], "hours": round((run["end"] - run["start"]) / 3600, 3)}
+    out["setup"] = {"team": run["team"], "approvals": run["approvals"],
+                    "hours": round((run["end"] - run["start"]) / 3600, 3)}
     refs = [e[0] for e in u["events"]] if u["tab"] != "agents" else u["refs"]
     out["records"] = [dict(x, marked=labels.mark(x["ref"])) for x in _texts(index, refs)
                       if labels.keep(x["ref"]) or x["ref"] == refs[0]]
     if u["tab"] in ("pulls", "issues"):
         out["elsewhere"] = _elsewhere(index, u)
     if u["tab"] == "pulls" and (issue := index["units"].get(f"{u['run']}/issues/{u.get('closes')}")):
-        out["issue"] = {"key": issue["key"], "number": issue["number"], "title": issue["title"], "state": issue["state"]}
+        out["issue"] = {k: issue[k] for k in ("key", "number", "title", "state")}
     if u["tab"] == "issues":
-        out["pulls"] = [{k: index["units"][f"{u['run']}/pull/{n}"][k] for k in ("key", "number", "title", "state", "author")}
-                        for n in u["prs"]]
+        out["pulls"] = [{k: index["units"][f"{u['run']}/pull/{n}"][k]
+                         for k in ("key", "number", "title", "state", "author")} for n in u["prs"]]
     # the #n a text mentions or a record is on, as the pull request or issue of the run it names
     mentioned = {m for x in out["records"] for m in MENTION.findall(str(x.get("text") or ""))}
     mentioned |= {str(x["number"]) for x in out["records"] if x.get("number") is not None}

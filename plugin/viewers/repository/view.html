@@ -202,9 +202,11 @@
   // run with its setup and measures, which also chooses the runs (a row or its chip adds or removes the run, All takes
   // every run), beside the chosen runs' activity per time bin. Every panel below follows the chosen runs. The tabs
   // switch between pull requests, issues, discussions and agents; the filters narrow the tab by any field, with the
-  // count each value would give, and a drag across the activity narrows it to a time range. Compare puts the chosen
-  // runs side by side: each run's activity in its row, and below it the pull requests or issues issue by issue, or the
-  // discussions and agents run by run. A row opens its unit's page beside the list (or in its place in a narrow pane).
+  // count each value would give, and a drag across the activity narrows it to a time range. Any participant and Any
+  // activity pick records, so with a time range they keep the units where that agent did that in that range. Compare
+  // puts the chosen runs side by side: each run's activity in its row, and below it the pull requests or issues issue
+  // by issue, or the discussions and agents run by run. A row opens its unit's page beside the list (or in its place in
+  // a narrow pane).
   //
   // Labels: each unit's element carries view:<slug>/<key>, each record on a strip or a page its file ref, and each
   // run's row view:<slug>/<run>, so thimble marks them. While a label is on, the page draws the records it marks in the
@@ -218,10 +220,10 @@
 
   const TABS = {
     pulls: { name: 'Pull requests', noun: ['pull request', 'pull requests'], states: ['open', 'merged', 'closed'],
-      selects: [['author', 'Any author'], ['reviewer', 'Any reviewer'], ['verdict', 'Any review'], ['area', 'Any area'], ['reason', 'Any close reason'], ['flag', 'Any flag']],
+      selects: [['author', 'Any author'], ['reviewer', 'Any reviewer'], ['verdict', 'Any review'], ['actor', 'Any participant'], ['action', 'Any activity'], ['area', 'Any area'], ['reason', 'Any close reason'], ['flag', 'Any flag']],
       sorts: [['newest', 'Newest'], ['oldest', 'Oldest'], ['longest to merge', 'Longest to merge'], ['quickest first review', 'Quickest first review'], ['most reviews', 'Most reviews'], ['most commits', 'Most commits']] },
     issues: { name: 'Issues', noun: ['issue', 'issues'], states: ['open', 'fixed', 'closed'],
-      selects: [['author', 'Any author'], ['origin', 'Any origin'], ['area', 'Any area'], ['reason', 'Any close reason']],
+      selects: [['author', 'Any author'], ['actor', 'Any participant'], ['action', 'Any activity'], ['origin', 'Any origin'], ['area', 'Any area'], ['reason', 'Any close reason']],
       sorts: [['newest', 'Newest'], ['oldest', 'Oldest'], ['longest to fix', 'Longest to fix'], ['most comments', 'Most comments']] },
     discussions: { name: 'Discussions', noun: ['discussion', 'discussions'], states: null,
       selects: [['author', 'Anyone posting']],
