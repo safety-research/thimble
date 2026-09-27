@@ -82,7 +82,7 @@ Claude Code (tested with 2.1.281), macOS or Linux, and Python 3.12+ ([uv](https:
 - The plugin's hooks run in every Claude Code session.
 - The dev agent edits and restarts the installed program.
 - Usage is billed to your own account; telemetry stays local.
-- Report security problems privately to [@mjoerke](https://github.com/mjoerke).
+- Report security problems privately to the contact above.
 
 ## License
 

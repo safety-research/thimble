@@ -1,5 +1,5 @@
 """What the documents say about thimble's behaviour matches the code: the README's security section stays short and
-names the contact the README already gives, INSTALL.md says which credentials thimble reads and what a problem
+points to the contact the README gives above it, INSTALL.md says which credentials thimble reads and what a problem
 report holds, and docs/terminal-first.md describes the Claude Code variables thimble sets by what they do."""
 import re
 from pathlib import Path
@@ -16,7 +16,7 @@ def section(text: str, heading: str) -> str:
     return m.group(1).strip()
 
 
-def test_the_readme_has_a_short_security_section_with_the_existing_contact():
+def test_the_readme_has_a_short_security_section_that_points_to_the_contact_above():
     readme = (ROOT / "README.md").read_text()
     body = section(readme, "Security")
     bullets = [ln for ln in body.splitlines() if ln.startswith("- ")]
@@ -25,8 +25,9 @@ def test_the_readme_has_a_short_security_section_with_the_existing_contact():
     for fact in ("127.0.0.1", "no login", "pre-approved", "no sandbox", "hooks run in every Claude Code session",
                  "dev agent edits and restarts", "billed to your own account", "telemetry stays local"):
         assert fact in body, fact
-    contacts = set(re.findall(r"\[@(\w+)\]\((https://github\.com/\w+)\)", readme))
-    assert len(contacts) == 1 and "@" + next(iter(contacts))[0] in body
+    links = re.findall(r"\[@\w+\]\(https://github\.com/\w+\)", readme)
+    assert len(links) == 1 and readme.index(links[0]) < readme.index("## Security"), "the contact is linked once, above"
+    assert "contact above" in body and "](" not in body
 
 
 def test_install_says_which_credentials_thimble_reads_and_that_it_never_writes_or_logs_them():
