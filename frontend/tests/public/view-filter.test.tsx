@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
 // Labels in every view, the page half: what a view's page hears of the labels (files/labels.ts pageLabels), the Files
 // label filter's verdict on each record the page shows (withKeeps), and the view's own pane, which shows its Labels
-// sidebar beside it (ViewSurface), a funnel on each label's row that sets the Files filter, and the filter as a chip
-// that clears it. The server is a fake fetch.
+// sidebar beside it (ViewSurface), a funnel on each label's row that sets the Files filter and, pressed, clears it,
+// and the filter as a chip that clears it. The server is a fake fetch.
 import { act } from 'react'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 import { pageLabels, withKeeps, type ViewMark } from '../../src/files/labels.ts'
@@ -93,6 +93,7 @@ describe("a view's own pane", () => {
     expect([...side!.querySelectorAll('.files-label-name')].map((n) => n.textContent)).toEqual(['asks', 'tone'])
     const funnel = side!.querySelector<HTMLButtonElement>('button[aria-label="Show only the records asks marks"]')!
     expect(funnel).not.toBeNull()
+    expect(funnel.getAttribute('aria-pressed')).toBe('false')
     await act(async () => funnel.click())
     const put = calls.find((c) => c.method === 'PUT' && c.url.endsWith('/filters'))
     expect(put?.body).toEqual({ scope: 'files', concept: 'k1', value: 'asks' })
@@ -107,5 +108,18 @@ describe("a view's own pane", () => {
     expect(chip?.textContent).toContain('asks · asks')
     await act(async () => chip!.click())
     expect(calls.some((c) => c.method === 'DELETE' && c.url.includes('/filters/files'))).toBe(true)
+  })
+
+  test("the funnel of the filter set shows pressed, and a click on it clears the filter", async () => {
+    filters = { files: { concept: 'k1', value: 'asks' } }
+    const el = await mount(<ViewSurface ws="w3" view={{ slug: 'threads', name: 'Threads', claims: ['board.jsonl'], first_file: 'board.jsonl' }} active />)
+    await settle()
+    await settle()
+    const funnel = el.querySelector<HTMLButtonElement>('aside.files-side-labels button[aria-label="Show only the records asks marks"]')!
+    expect(funnel.getAttribute('aria-pressed')).toBe('true')
+    expect(funnel.classList.contains('active')).toBe(true)
+    await act(async () => funnel.click())
+    expect(calls.some((c) => c.method === 'DELETE' && c.url.includes('/filters/files'))).toBe(true)
+    expect(calls.some((c) => c.method === 'PUT' && c.url.endsWith('/filters'))).toBe(false)
   })
 })

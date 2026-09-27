@@ -4,7 +4,8 @@
 // it on, focuses it, or turns the focused label off. An on label with more than two values lists them, and a click on
 // one toggles its highlight. Under each name, the status of its last or running apply. A label over files has a palette
 // on hover that changes its colours (LabelPalette). Beside a view, a label's row (and each value's) has a funnel on
-// hover that sets the Files label filter, which the view keeps its records by.
+// hover that sets the Files label filter, which the view keeps its records by; the funnel of the filter set stays
+// pressed, and a click on it clears the filter.
 import { useMemo, useRef, useState, type CSSProperties } from 'react'
 import { Button } from '../components/Button'
 import { Icon } from '../components/Icon'
@@ -13,7 +14,7 @@ import { TipButton } from '../components/Tooltip'
 import { teleport } from '../lib/teleport'
 import { hhmm } from '../lib/time'
 import type { Concept, ConceptRun } from '../lib/types'
-import { classesOf, colourVar, isFilesLabel, isMultiClass, labelStatus, laneTags, mainColour, outcomeText, progressText, type LabelStatus } from './labels'
+import { classesOf, colourVar, isFilesLabel, isMultiClass, labelStatus, laneTags, mainColour, outcomeText, progressText, type LabelFilter, type LabelStatus } from './labels'
 import { LabelMark } from './LabelMark'
 import { LabelPalette } from './LabelPalette'
 import type { FilesLabels } from './useLabels'
@@ -33,11 +34,13 @@ interface Props {
   onHide?: () => void
   /** beside a view: the labels that mark its files, listed first */
   first?: ReadonlySet<string>
-  /** beside a view: keep only the records that take a label's value */
-  onFilter?: (id: string, value: string) => void
+  /** beside a view: keep only the records that take a label's value, or with null keep every record again */
+  onFilter?: (id: string, value: string | null) => void
+  /** the Files label filter, whose funnel shows pressed */
+  filter?: LabelFilter | null
 }
 
-export function LabelsPane({ labels, open, onToggleOpen, editing, onEdit, runs, onRetry, onHide, first, onFilter }: Props) {
+export function LabelsPane({ labels, open, onToggleOpen, editing, onEdit, runs, onRetry, onHide, first, onFilter, filter = null }: Props) {
   const files = labels.all.filter(isFilesLabel)
   const ordered = first ? [...files.filter((k) => first.has(k.id)), ...files.filter((k) => !first.has(k.id))] : files
   const nums = useMemo(() => new Map(laneTags(labels.on).map((t) => [t.id, t.n])), [labels.on])
@@ -67,6 +70,7 @@ export function LabelsPane({ labels, open, onToggleOpen, editing, onEdit, runs, 
               onEdit={onEdit}
               onRetry={onRetry}
               onFilter={isFilesLabel(k) ? onFilter : undefined}
+              filter={filter?.concept === k.id ? filter.value : null}
             />
           ))}
         </div>
@@ -90,9 +94,11 @@ interface RowProps {
   onEdit: Props['onEdit']
   onRetry: Props['onRetry']
   onFilter?: Props['onFilter']
+  /** the value the Files label filter keeps of this label, null when the filter is not this label's */
+  filter: string | null
 }
 
-function LabelRow({ label: k, on, n, focused, marked, editing, status, labels, onEdit, onRetry, onFilter }: RowProps) {
+function LabelRow({ label: k, on, n, focused, marked, editing, status, labels, onEdit, onRetry, onFilter, filter }: RowProps) {
   const classes = classesOf(k)
   const running = status?.state === 'running'
   const files = isFilesLabel(k)
@@ -136,7 +142,7 @@ function LabelRow({ label: k, on, n, focused, marked, editing, status, labels, o
           <Button ref={paletteAt} variant="icon" size="sm" icon="palette" title="Change colour" aria-label={`Change the colours of ${k.name}`} className="files-label-colour" active={picking} onClick={() => setPicking(!picking)} />
         )}
         {onFilter && (classes.length <= 2 || !on) && (
-          <Button variant="icon" size="sm" icon="filter" title="Show only these records" aria-label={`Show only the records ${k.name} marks`} className="files-label-filter" onClick={() => onFilter(k.id, (classes.find((c) => c.highlight) ?? classes[0])?.name ?? 'yes')} />
+          <FilterButton pressed={filter != null} label={`Show only the records ${k.name} marks`} onClick={() => onFilter(k.id, filter != null ? null : ((classes.find((c) => c.highlight) ?? classes[0])?.name ?? 'yes'))} />
         )}
         <Button variant="icon" size="sm" icon="more-horizontal" title="Edit label" aria-label={`Edit ${k.name}`} className="files-label-edit" active={editing} onClick={() => onEdit(editing ? null : k.id)} />
       </div>
@@ -159,13 +165,18 @@ function LabelRow({ label: k, on, n, focused, marked, editing, status, labels, o
               <span className="files-class-box" />
               {c.name}
             </button>
-            {onFilter && <Button variant="icon" size="sm" icon="filter" title="Show only these records" aria-label={`Show only the records ${k.name} marks ${c.name}`} className="files-label-filter" onClick={() => onFilter(k.id, c.name)} />}
+            {onFilter && <FilterButton pressed={filter === c.name} label={`Show only the records ${k.name} marks ${c.name}`} onClick={() => onFilter(k.id, filter === c.name ? null : c.name)} />}
             </span>
           ))}
         </div>
       )}
     </div>
   )
+}
+
+/** The funnel that keeps a view to a label's records: pressed while the filter is its own, when a click clears it. */
+function FilterButton({ pressed, label, onClick }: { pressed: boolean; label: string; onClick: () => void }) {
+  return <Button variant="icon" size="sm" icon="filter" title={pressed ? 'Show all records' : 'Show only these records'} aria-label={label} active={pressed} className="files-label-filter" onClick={onClick} />
 }
 
 /** The line under a label's name: the run's progress, its outcome, or its failure with Retry. */

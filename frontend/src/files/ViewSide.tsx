@@ -1,7 +1,7 @@
 // The Labels sidebar beside a view, shared by Files (a view picked in its views bar) and a view in a pane of its own
 // (ViewSurface): the Labels pane, the label's edit card at the sidebar's edge and the seam that resizes it. Beside a
-// view a label's row sets the Files label filter, which the view keeps its records by. useLabelRuns keeps the runs of
-// the labels' applies, polled while they run, and Retry.
+// view a label's row sets or clears the Files label filter, which the view keeps its records by. useLabelRuns keeps the
+// runs of the labels' applies, polled while they run, and Retry.
 import { useCallback, useEffect, useMemo, useState, type CSSProperties, type ReactNode } from 'react'
 import { Button } from '../components/Button'
 import { api, labelApi } from '../lib/api'
@@ -14,7 +14,7 @@ import { LabelPrompt } from './LabelPrompt'
 import { viewLabels } from './labels'
 import { LabelsPane } from './LabelsPane'
 import { TREE } from './params'
-import type { FilesLabels } from './useLabels'
+import { useFilesFilter, type FilesLabels } from './useLabels'
 import type { BuiltView } from './ViewsBar'
 
 /** How often a label whose apply runs is read again, until the run ends. */
@@ -114,8 +114,9 @@ export interface LabelSideProps {
 export function useLabelSide(p: LabelSideProps): { pane: ReactNode; card: ReactNode; resizer: ReactNode } {
   const { ws, labels, runs, editing, onEdit, drafted, onDraft, appliesTo, width } = p
   const editLabel = editing && editing !== 'new' ? labels.byId.get(editing) ?? null : null
+  const filter = useFilesFilter(ws)
   const onFilter = useCallback(
-    (id: string, value: string) => void api.putFilter(ws, 'files', id, value).catch(() => undefined),
+    (id: string, value: string | null) => void (value == null ? api.deleteFilter(ws, 'files') : api.putFilter(ws, 'files', id, value)).catch(() => undefined),
     [ws],
   )
   const pane = (
@@ -130,6 +131,7 @@ export function useLabelSide(p: LabelSideProps): { pane: ReactNode; card: ReactN
       onHide={p.onHide}
       first={p.first}
       onFilter={p.filterable ? onFilter : undefined}
+      filter={filter}
     />
   )
   // the card stands at the sidebar's edge (--side-w, files.css); the width is set on the card's slot alone, since a
