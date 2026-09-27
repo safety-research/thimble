@@ -591,7 +591,7 @@ function labelCol(rows, { w, compareCol = true, badges = null, cols }) {
   return `<div class="lcol" style="width:${w}px">${out.join('')}</div>`
 }
 const viewWidth = () => Math.max(560, (document.getElementById('view').clientWidth || window.innerWidth) - 32)
-const labelWidth = () => (st.narrow ? 250 : 300)
+const labelWidth = () => (st.narrow ? 250 : 320)
 const COLS = () => [{ name: 'Calls', r: st.narrow ? 58 : 66, v: (s) => s.n }, { name: 'Errors', r: 6, v: (s) => s.err || '–', cls: (s) => (s.err ? 'err' : 'zero') }]
 function overview() {
   const rows = []
@@ -687,11 +687,11 @@ function details() {
   const c = selCall()
   const parent = s.parent && S[s.parent]
   const task = parent ? parent.tasks.find((x) => x.child === s.id) : null
-  const kids = s.tasks.map((x) => S[x.child]).filter(Boolean)
+  const kids = Object.values(S).filter((k) => k.parent === s.id).sort((a, b) => a.start - b.start)
   const run = RUN[s.run]
   return `<section id="det"><div class="dhead" data-anchor="${esc(unitRef(s.key))}">
       <h2>${esc(agentName(s))}<span class="run">${runName(s.run)} · ${esc(run.team)}</span></h2>
-      ${parent ? `<span class="grp"><span class="lab">Spawned by</span><button class="chip chip-sans chip-act" data-act="open" data-id="${esc(parent.id)}" ${task ? `data-call="${esc(task.ref)}"` : ''}>${ico.parent}${esc(agentName(parent))}${task ? ` · Task <span class="v">${fmt(task.t)}</span>` : ''}</button></span>` : ''}
+      ${parent ? `<span class="grp"><span class="lab">Spawned by</span><button class="chip chip-sans chip-act" data-act="open" data-id="${esc(parent.id)}" ${task ? `data-call="${esc(task.ref)}"` : ''}>${ico.parent}${esc(agentName(parent))}${s.spawn != null ? ` · Task <span class="v">${fmt(s.spawn)}</span>` : ''}</button></span>` : ''}
       ${kids.length ? `<span class="grp"><span class="lab">Subagents</span>${kids.map((k) => `<button class="chip chip-sans chip-act" data-act="open" data-id="${esc(k.id)}">${esc(agentName(k))}${ico.child}</button>`).join('')}</span>` : ''}
       <span class="dstats"><span><b>${s.n}</b> calls</span><span>ran <b>${fmtd(s.end - s.start)}</b></span><span class="err"><b>${s.err}</b> errors</span></span>
       <div class="grow"></div>
@@ -717,7 +717,7 @@ function compare() {
   const svg = rows.length ? laneSvg({ rows, dom, width: pw, compare: true }) : ''
   const head = `<div class="chead"><button class="btn btn-secondary btn-sm" data-act="overview">${ico.back}Overview</button><div class="vsep"></div>
       ${groups.map((g) => `<span class="chip chip-sans chip-tone-neutral chip-x"><span class="badge">${letters[g.root]}</span>${tag(g.id)}<span class="x" data-act="tick" data-id="${esc(g.id)}">${ico.x}</span></span>`).join('')}
-      ${groups.length < MAX_TICKED ? `<button class="chip chip-sans chip-tone-neutral chip-act" data-act="overview">${ico.plusS}Add session</button>` : ''}<div class="grow"></div>
+      ${groups.length < MAX_TICKED ? `<button class="chip chip-sans chip-tone-neutral chip-act" data-act="overview">${ico.plusS}Add ${groups.every((g) => RUN[g.id]) ? 'run' : 'session'}</button>` : ''}<div class="grow"></div>
       <span class="tick" data-act="subs"><span class="cb ${st.includeSubs ? 'on' : ''}">${st.includeSubs ? ico.check : ''}</span>Include subagents</span><div class="vsep"></div>
       <span class="lab">Align</span><div class="seg seg-track"><button class="seg-opt ${st.align === 'clock' ? 'active' : ''}" data-act="align" data-v="clock">Run clock</button><button class="seg-opt ${st.align === 'start' ? 'active' : ''}" data-act="align" data-v="start">Session start</button></div></div>`
   const lanes = `<div class="cmp-lanes"><div class="lanes">${labelCol(rows, { w: lw, compareCol: false, badges: letters, cols: COLS() })}${svg}</div></div>`
@@ -820,6 +820,10 @@ async function openSession(id, call) {
   if (call) st.sel = call
   await loadMoment()
   render()
+  // the session opens below the lanes, so it is brought into sight when its head is out of it
+  const head = document.querySelector('#det .dhead')
+  const top = head ? head.getBoundingClientRect().top : 0
+  if (head && (top < 0 || top > window.innerHeight - 160)) head.scrollIntoView({ block: 'start' })
 }
 function setWin(a, b) {
   const span = ov.span
