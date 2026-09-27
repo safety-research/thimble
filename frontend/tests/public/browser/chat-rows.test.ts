@@ -38,7 +38,7 @@ const AGENT = {
 }
 
 // a finished orientation: its cards in its deck, where a call that names no group puts them, one added naming the deck
-// and one moved there by an edit that names it; a view proposed, a label applied
+// and one moved there by an edit that names it; a view proposed, a label applied (with no card, as the orientation's are)
 // an orientation whose session failed before it did anything
 const ORIENT_FAILED = {
   meta: { id: 'orf', kind: 'agent', role: 'orient', title: 'Orientation', created_at: '2026-09-22T11:00:00Z', parent: 'main', anchor: null, anchor_text: null, model: null, effort: null, group: null, status: 'failed', result: 'Not logged in · Please run /login', ts_end: '2026-09-22T11:00:02Z', session: '11111111-1111-4111-8111-111111111111' },
@@ -260,17 +260,17 @@ test('the rows: the analyst\'s message as an accent tile, markdown with a value 
   const landing = root.locator('.chat-landing[data-chat="or1"]')
   await landing.locator('.chat-task[data-status="done"]').waitFor({ timeout: 5000 })
   await landing.locator('.chat-landing-count').first().waitFor({ timeout: 5000 })
-  // the cards for review are the deck's, the label's card among them, as the canvas counts it
-  assert.equal(await landing.locator('.chat-landing-line').innerText(), 'Orientation has finished. Thimble has 1 view, 4 cards and 1 label for you to review.')
-  assert.deepEqual(await landing.locator('.chat-landing-count').allInnerTexts(), ['1 view', '4 cards', '1 label'], 'the counts in ink')
+  // the cards for review are the deck's, as the canvas counts them: the orientation's label has no card
+  assert.equal(await landing.locator('.chat-landing-line').innerText(), 'Orientation has finished. Thimble has 1 view, 3 cards and 1 label for you to review.')
+  assert.deepEqual(await landing.locator('.chat-landing-count').allInnerTexts(), ['1 view', '3 cards', '1 label'], 'the counts in ink')
   const card = landing.locator('.chat-task')
   assert.equal(await card.locator('.chat-task-title').innerText(), 'Orientation')
   assert.equal(await card.locator('.toolcard-meta').innerText(), '6 min', 'how long it took; its steps are its subagents, and it ran none')
   assert.deepEqual(await card.locator('.toolcard-section-label').allInnerTexts(), ['Views', 'Canvas', 'Labels'], 'a section per surface the work landed on')
-  // a card whose call names no group is in the deck, where the server put it, and the label's card with it
+  // a card whose call names no group is in the deck, where the server put it
   // the group's chip names it, with the count's unit
   const group = card.locator('.toolcard-section[data-section="canvas"] .group-chip')
-  assert.equal(await group.innerText(), 'Orientation · 4 cards', 'the cards by the group they landed in, the unit named')
+  assert.equal(await group.innerText(), 'Orientation · 3 cards', 'the cards by the group they landed in, the unit named')
   // a label is its row in the Labels pane: the colour's square and the name
   const label = card.locator('.toolcard-section[data-section="labels"] .label-chip')
   assert.equal(await label.innerText(), 'questions')

@@ -32,6 +32,8 @@ import {
   groupTools,
   MCP_PREFIXES,
   madeBy,
+  deckCards,
+  orientMade,
   toolDisplayName,
   withApiErrors,
   toolGroupName,
@@ -128,6 +130,24 @@ describe('the fold', () => {
     const groups = (groupTools(rows) as any[]).filter((r) => r.kind === 'tools')
     expect(groups).toHaveLength(1)
     expect(madeBy(groups[0].tools).cells.map((c: { id: string }) => c.id)).toEqual(['8fbcdc54', 'fd93e1a6'])
+  })
+
+  test("a label counts a card only when its result names one, so an orientation's labels add none to its deck", () => {
+    const rows = foldRecords(records([
+      { type: 'tool_use', id: 'l1', name: `${P}apply_label`, input: { name: 'refund asked' } },
+      { type: 'tool_result', id: 'l1', summary: 'applied label refund asked [[concept:k1]] over 40 record(s)' },
+      { type: 'tool_use', id: 'l2', name: `${P}apply_label`, input: { name: 'refund asked' } },
+      { type: 'tool_result', id: 'l2', summary: 'applied label refund asked [[concept:k1]] over 40 record(s)' },
+      { type: 'tool_use', id: 'a', name: `${P}add_card`, input: { kind: 'table', question: 'Refunds per week', group: 'Orientation' } },
+      { type: 'tool_result', id: 'a', summary: '$ add_card kind="table"', cell_id: '8fbcdc54' },
+      { type: 'tool_use', id: 'l3', name: `${P}apply_label`, input: { name: 'escalated' } },
+      { type: 'tool_result', id: 'l3', summary: "applied label escalated [[concept:k2]]. The label's card is [[card:c0ffee12]].", label_card: 'c0ffee12' },
+    ]))
+    const tools = (groupTools(rows) as any[]).filter((r) => r.kind === 'tools').flatMap((r) => r.tools)
+    const made = orientMade(madeBy(tools))
+    expect(made.labels).toEqual(['refund asked', 'escalated'])
+    expect(made.labelCards.map((l) => l.id)).toEqual(['c0ffee12'])
+    expect(deckCards(made)).toBe(2)
   })
 })
 

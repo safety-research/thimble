@@ -43,10 +43,10 @@ UNREADABLE_TEXT = "intermediate text unavailable"
 SUMMARY_LIMIT = agents.SUMMARY_LIMIT
 RESULT_LIMIT = 400  # chars of an agent's result kept on its meta
 CELL_TOOLS = ("add_card", "edit_card", "add_cell", "edit_cell")  # the card tools, by their names and aliases
-# apply_label's result names the label's card as a citation; its record carries that card's id as `label_card` (not
-# `cell_id`) so the browser counts the card once.
+# apply_label's result names the label's card, when it has one, as a citation; its record carries that card's id as
+# `label_card` (not `cell_id`) so the browser counts the card once. The cards the result names as stale are not it.
 LABEL_TOOL = "apply_label"
-LABEL_CARD_RE = re.compile(r"\[\[card:([A-Za-z0-9_-]+)\]\]")
+LABEL_CARD_RE = re.compile(r"The label's card is \[\[card:([A-Za-z0-9_-]+)\]\]")
 AGENT_TOOLS = ("Agent", "Task")  # the CLI's subagent tool, by either of its names
 WAIT_SESSION = "wait_session"  # the thimble tool of a background session's tray entry
 WORKFLOW_TOOL = "Workflow"  # Claude Code's dynamic workflows (module note, workflows)

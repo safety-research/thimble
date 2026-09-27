@@ -770,9 +770,9 @@ export interface Made {
   docs: string[]
   /** each group's name as the call wrote it (Orientation), by its key in `cells` and `labelCards` */
   groupNames?: Record<string, string>
-  /** the card each applied label has on the canvas, one per label name, in the group its call named ('' for none), with
-   * its id when the result named it. The canvas counts these among a group's cards, so the chat's counts do too. */
-  labelCards: { name: string; group: string; id?: string }[]
+  /** the card of each applied label whose result named one (the orientation's labels get none), one per label name, in
+   * the group its call named ('' for none). The canvas counts these among a group's cards, so the chat's counts do too. */
+  labelCards: { name: string; group: string; id: string }[]
 }
 
 /** Every card a log left on the canvas: the cards it made or edited and its labels' cards. Pure. */
@@ -880,11 +880,10 @@ export function madeBy(rows: readonly Row[]): Made {
           if (inp.limit == null || inp.limit === '') add(out.labels, inp.name)
           const name = str(inp.name).trim()
           const id = r.result?.label_card
-          const had = out.labelCards.find((c) => c.name === name)
-          if (name && !had) out.labelCards.push({ name, group: groupPart(inp.group), ...(id ? { id } : {}) })
-          else if (had && id && !had.id) had.id = id
+          if (!id) break
+          if (name && !out.labelCards.some((c) => c.name === name)) out.labelCards.push({ name, group: groupPart(inp.group), id })
           // a label applied again after edit_card changed its card: the card is the label's, not one more
-          if (id) out.cells = out.cells.filter((c) => c.id !== id)
+          out.cells = out.cells.filter((c) => c.id !== id)
           break
         }
         case 'write_document':

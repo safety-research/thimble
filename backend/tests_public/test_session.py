@@ -959,3 +959,13 @@ def test_a_subagent_s_card_is_credited_to_its_chat_and_main_s_stays_main_s(cwd, 
     session.translate(lv, json.dumps({"type": "user", "message": {"role": "user", "content": [
         {"type": "tool_result", "tool_use_id": "toolu_m", "content": f"card:{ours['id']}"}]}}))
     assert notebook.get_cell(CORPUS, ours["id"])["created_by"] == "terminal"
+
+
+def test_an_apply_label_result_names_the_label_s_card_only_when_it_has_one():
+    label = "mcp__plugin_thimble_thimble__apply_label"
+    with_card = "applied label refunds [[concept:k1]] over 40 record(s): yes 3. The label's card is [[card:ab12cd34]]."
+    assert session._result_data("t1", label, with_card)["label_card"] == "ab12cd34"
+    # the orientation's labels get no card; a card the result names as stale is not the label's
+    stale = ("applied label refunds [[concept:k1]] over 40 record(s): yes 3. [[card:ef56ab78]] read this label before it "
+             "changed, so each shows its older result.")
+    assert "label_card" not in session._result_data("t2", label, stale)
