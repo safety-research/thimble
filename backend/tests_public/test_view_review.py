@@ -306,7 +306,7 @@ async def test_label_controls_in_the_page_are_a_problem_the_revision_gets(view, 
     assert problem.startswith("Picture 2: the page has 2 controls of its own that name the test label")
     assert "`thimble.setLabel`" in problem and s.revised[0][:-1] == [[]] * 5
     assert "2 controls of the page's own naming the test label" in s.calls[0]["user"]
-    assert "no label toggle, checkbox, menu or clickable legend" in s.calls[0]["system"]
+    assert "no label toggle, checkbox or menu of its own" in s.calls[0]["system"]
     assert review["state"] == "done" and review["left"] == [] and len(review["revised"]) == 1
     schema = s.calls[0]["tool"].input_schema["properties"]["assessment"]
     assert schema["minItems"] == schema["maxItems"] == 6

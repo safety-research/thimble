@@ -33,7 +33,7 @@ def test_a_view_ticket_makes_labels_first_class_and_its_label_controls_thimble_s
     labels = prompts.section("dev-view", "Labels")
     for words in ("the Labels pane beside the view, outside its frame", "`data-anchor`", "`thimble.marked(ref)`",
                   "`thimble.kept(ref)`", "`thimble.onLabels(fn)`", "while a label is on, it alone colours records",
-                  "Label controls are thimble's", "no label state of its own", "`thimble.setLabel(id, on)`",
+                  "Label controls are thimble's", "leaves which labels are on to thimble", "`thimble.setLabel(id, on)`",
                   "`thimble.setLabelColour(id, value, colour)`", "`thimble.newLabel()`", "`data-label`"):
         assert words in labels, words
 

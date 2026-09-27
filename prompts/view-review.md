@@ -29,7 +29,7 @@ The view reads only files with no lines, which labels cannot mark, so the pictur
 
 - Does the test label show in its colour on the records and units it marks, in the overview, charts included, and in the detail, with nothing else in pictures 2 to 4 drawn in that colour?
 - Does the filter keep only what the test label marks, with the units and counts drawn from those records?
-- Does the view leave labels to thimble, with no label toggle, checkbox, menu or clickable legend of its own beyond controls that turn thimble's labels on or change their colours?
+- Does the view leave labels to thimble, with no label toggle, checkbox or menu of its own beyond controls that turn thimble's labels on or change their colours, and a legend that at most isolates or hides label values in the view?
 
 ## label-controls
 
