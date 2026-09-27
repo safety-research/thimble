@@ -1310,12 +1310,12 @@ def installed_copy(cwd: Path) -> Installed | None:
 
 
 def name_session(url: str, name: str, session: str, cwd: Path) -> str | None:
-    """Tell the server which Claude Code session asked (`POST /api/ws/{c}/session`), with the CLAUDE_CONFIG_DIR it runs under.
-    Returns the session this one took main over from while it still runs in another terminal, else None."""
+    """Tell the server which Claude Code session asked (`POST /api/ws/{c}/session`), with this process's pid, whose
+    environment the server reads for the CLAUDE_CONFIG_DIR the session runs under. Returns the session this one took main
+    over from while it still runs in another terminal, else None."""
     try:
         status, body = _request("POST", f"{url}/api/ws/{urllib.parse.quote(name)}/session",
-                                {"session": session, "cwd": str(cwd),
-                                 "config_dir": os.environ.get(config.CONFIG_DIR_ENV) or ""}, timeout=3.0)
+                                {"session": session, "cwd": str(cwd), "env_pid": os.getpid()}, timeout=3.0)
         if status != 200:
             _log(f"session {session} for {name}: {status} {str(body)[:200]}")
             return None

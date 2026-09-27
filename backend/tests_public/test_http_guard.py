@@ -55,9 +55,9 @@ def test_a_request_with_no_origin_or_thimbles_own_origin_is_served(app_prod):
 
 
 def test_the_channel_refuses_a_web_page_on_a_get_too(app_prod, monkeypatch):
-    """The shim's subscription is a GET that makes the session it names main (channel.subscribe): a page on another
-    origin, or an <img> on another port of the same host (same-site, no Origin), must not reach it. The shim and the
-    hooks send neither header and pass."""
+    """The shim's subscription is a GET that makes the session it names main (channel.subscribe): no browser request
+    may reach it, not even the app's own page (an <img> in markdown a model wrote sends Sec-Fetch-Site: same-origin and
+    no Origin). The shim and the hooks send no Origin and no Sec-Fetch-* header, and pass."""
     from app import channel, session
 
     attached = []
@@ -67,7 +67,9 @@ def test_the_channel_refuses_a_web_page_on_a_get_too(app_prod, monkeypatch):
     c = TestClient(app_prod)
     q = "cwd=/corpus&session=evil&pid=1&delivery=channel"
     for headers in ({"Origin": "https://evil.example"}, {"Origin": "null"}, {"Origin": "http://127.0.0.1:1"},
-                    {"Sec-Fetch-Site": "cross-site"}, {"Sec-Fetch-Site": "same-site"}, {"Sec-Fetch-Site": "none"}):
+                    {"Origin": "http://testserver"}, {"Sec-Fetch-Site": "cross-site"}, {"Sec-Fetch-Site": "same-site"},
+                    {"Sec-Fetch-Site": "none"}, {"Sec-Fetch-Site": "same-origin"}, {"Sec-Fetch-Dest": "image"},
+                    {"Sec-Fetch-Mode": "no-cors"}):
         # the subscription last: were it served, its stream would not end
         for path in ("/api/channel/main?cwd=/corpus&pid=4242", f"/api/channel/pull?{q}&wait=0", f"/api/channel?{q}"):
             r = c.get(path, headers=headers)
@@ -75,7 +77,8 @@ def test_the_channel_refuses_a_web_page_on_a_get_too(app_prod, monkeypatch):
     assert not attached and not channel._subs.get("mini")
     # the hooks' curl: no Origin, no Sec-Fetch-Site
     assert c.get("/api/channel/main?cwd=/corpus&pid=4242").json() == {"workspace": "mini", "main": True}
-    assert c.get("/api/channel/main?cwd=/corpus&pid=4242", headers={"Sec-Fetch-Site": "same-origin"}).status_code == 200
+    assert c.post("/api/channel/ack", json={"cwd": "/corpus", "id": "x"},
+                  headers={"Origin": "http://testserver", "Sec-Fetch-Site": "same-origin"}).status_code == 403
     # a read elsewhere is still never refused
     assert c.get("/api/health", headers={"Sec-Fetch-Site": "same-site"}).status_code == 200
 

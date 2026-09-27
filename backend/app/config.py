@@ -102,8 +102,9 @@ CLI_PATH = _resolve_cli()
 #
 #   none    the kernel runs backend/.venv's python in the server's scrubbed environment (the default)
 #   bwrap   the kernel runs inside bubblewrap (kernel_wrap.kernel_wrap_argv): the system, the venv and the corpus
-#           read-only, the workspace and a private /tmp writable, the workspace's .claude-config hidden. When bwrap is
-#           not on PATH the kernel does not start, so a workspace set to bwrap never runs unwrapped unnoticed.
+#           read-only, the workspace and a private /tmp writable, the workspace's .claude-config hidden, the host's
+#           network shared, so it narrows what a cell sees but is not a security boundary. When bwrap is not on PATH
+#           the kernel does not start, so a workspace set to bwrap never runs unwrapped unnoticed.
 # Resolution, first hit wins: THIMBLE_KERNEL_WRAP, then the workspace's settings.json `kernel_wrap`, then
 # KERNEL_WRAP_DEFAULT. A value that names no wrapper is ignored.
 KERNEL_WRAPS = ("none", "bwrap")
@@ -200,10 +201,10 @@ HAS_API_KEY = has_env_key()
 
 
 # Claude Code's config dir: CLAUDE_CONFIG_DIR, else ~/.claude (transcripts, sessions/<pid>.json, settings.json, the
-# login). The one that counts is the one the served `claude` process runs with, which need not be this server's, so a
-# session that attaches tells this server its value (serve_claude_config) and claude_config_dir() answers with it from
-# then on, while this server's own CLAUDE_CONFIG_DIR is unchanged. Sessions this server starts get the same value
-# (claude_env).
+# login). The one that counts is the one the served `claude` process runs with, which need not be this server's, so
+# when a session attaches this server reads the value from that process's environment (process_claude_config), never
+# from a request, and claude_config_dir() answers with it from then on (serve_claude_config), while this server's own
+# CLAUDE_CONFIG_DIR is unchanged. Sessions this server starts get the same value (claude_env).
 CONFIG_DIR_ENV = "CLAUDE_CONFIG_DIR"
 _served_config: tuple[str | None, str | None] | None = None  # (our own value when learned, the served process's value)
 

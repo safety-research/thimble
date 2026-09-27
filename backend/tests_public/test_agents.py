@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import json
 
 import pytest
 from fastapi import HTTPException
@@ -193,6 +194,21 @@ def test_settings_carry_the_effective_models(client):
     orient = r.json()["models"]["orient"]
     assert (orient["model"], orient["effort"], orient["fast"]) == ("claude-sonnet-5[1m]", "max", False)
     assert r.json()["models"]["labels"]["model"] == "claude-sonnet-5", "the other roles stay"
+
+
+def test_the_settings_route_changes_only_the_browser_s_settings(client, workspaces_tmp):
+    """The route is unauthenticated and a kernel cell or a session's command can reach it on loopback, so the wrapper's
+    switch, the orientation's stored mode and its instructions are not among the keys it takes."""
+    path = workspaces_tmp / CORPUS / "settings.json"
+    for key, value in (("kernel_wrap", "none"), ("orient_permissions", "bypass"), ("orient_instructions", "x"),
+                       ("card_check", False), ("anything", 1)):
+        r = client.put(f"/api/ws/{CORPUS}/settings", json={"hide_chat": True, key: value})
+        assert r.status_code == 400 and key in r.json()["detail"], key
+    assert not path.exists() or "hide_chat" not in json.loads(path.read_text()), "a refused PUT changes nothing"
+    r = client.put(f"/api/ws/{CORPUS}/settings", json={"hide_chat": True, "terminal_first": False, "orient_route": "subagent",
+                                                       "run_cell_result_lines": 20})
+    assert r.status_code == 200 and r.json()["hide_chat"] is True
+    assert set(json.loads(path.read_text())) == {"hide_chat", "terminal_first", "orient_route", "run_cell_result_lines"}
 
 
 def test_archive_moves_the_workspace_aside_whole_and_detaches_its_session(client, workspaces_tmp):

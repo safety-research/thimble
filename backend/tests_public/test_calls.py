@@ -64,14 +64,40 @@ def test_the_hook_s_number_comes_first_and_the_follower_adds_the_chat_that_holds
 
 
 def test_a_long_output_claude_code_saved_to_a_file_is_stored_whole(tmp_path):
-    saved = tmp_path / "tool-results" / "b1.txt"
-    saved.parent.mkdir()
+    sid = "5e505c4b-742a-4361-9a19-808f80f408cc"
+    slug = tmp_path / "projects" / "-corpus"
+    (slug / sid / "tool-results").mkdir(parents=True)
+    (slug / f"{sid}.jsonl").write_text("")
+    saved = slug / sid / "tool-results" / "b1.txt"
     saved.write_text("\n".join(str(i) for i in range(1, 50001)))
-    block = {"type": "tool_result", "tool_use_id": "t1",
-             "content": f"<persisted-output>\nOutput too large (1.9MB). Full output saved to: {saved}\n\nPreview (first 2KB):\n1\n2"}
-    assert calls.result_text(block, {}).endswith("50000"), "the path the preview names"
-    assert calls.result_text({"type": "tool_result", "content": "short"}, {"toolUseResult": {"persistedOutputPath": str(saved)}}).startswith("1\n2\n3")
+    rec = {"sessionId": sid, "toolUseResult": {"persistedOutputPath": str(saved)}}
+    assert calls.result_text({"type": "tool_result", "content": "short"}, rec).startswith("1\n2\n3")
     assert calls.result_text({"type": "tool_result", "content": [{"type": "text", "text": "plain"}]}, {}) == "plain"
+
+
+def test_only_a_file_in_the_session_s_own_tool_results_folder_is_read(tmp_path):
+    """A result's text can say anything (a tool printed a file that starts with <persisted-output>), and a record's path
+    is read only inside the tool-results folder of that record's session."""
+    sid, other = "5e505c4b-742a-4361-9a19-808f80f408cc", "9c0a1d2e-3f40-4a5b-8c6d-7e8f90a1b2c3"
+    slug = tmp_path / "projects" / "-corpus"
+    for s in (sid, other):
+        (slug / s / "tool-results").mkdir(parents=True)
+        (slug / f"{s}.jsonl").write_text("")
+    secret = tmp_path / "secret.txt"
+    secret.write_text("SECRET")
+    (slug / other / "tool-results" / "o.txt").write_text("SECRET")
+    (slug / sid / "tool-results" / "link.txt").symlink_to(secret)
+    (tmp_path / "loose" / sid / "tool-results").mkdir(parents=True)
+    (tmp_path / "loose" / sid / "tool-results" / "x.txt").write_text("SECRET")
+    preview = f"<persisted-output>\nOutput too large (1.9MB). Full output saved to: {secret}\n\nPreview (first 2KB):\n1"
+    assert calls.result_text({"type": "tool_result", "content": preview}, {"sessionId": sid}) == preview
+    for path in (secret, slug / other / "tool-results" / "o.txt", slug / sid / "tool-results" / "link.txt",
+                 slug / sid / "tool-results" / ".." / ".." / other / "tool-results" / "o.txt",
+                 tmp_path / "loose" / sid / "tool-results" / "x.txt", "tool-results/o.txt"):
+        rec = {"sessionId": sid, "toolUseResult": {"persistedOutputPath": str(path)}}
+        assert calls.result_text({"type": "tool_result", "content": "preview"}, rec) == "preview", path
+    rec = {"sessionId": "../x", "toolUseResult": {"persistedOutputPath": str(secret)}}
+    assert calls.result_text({"type": "tool_result", "content": "preview"}, rec) == "preview"
 
 
 def test_output_lines_split_at_newlines_only_as_the_browser_numbers_them():

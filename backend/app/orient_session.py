@@ -20,7 +20,8 @@ The fence. The session writes only into `workspaces/<c>/orient/work/`; where Cla
 there with no network and no write into the corpus. When a run ends (unless it failed) its `tmp_*` files are deleted.
 
 Permissions. Start's switcher offers Manual, Auto or Bypass for the orientation alone; a tool-started orientation takes
-the stored `orient_permissions`, else the mode the analyst's own mode stands for. Manual and Bypass pass `--permission-
+the stored `orient_permissions`, else the mode the analyst's own mode stands for. The start_orientation call may lower
+that mode, never raise it (lowered). Manual and Bypass pass `--permission-
 mode default` (requests wait on the card, or are granted at once); Auto passes `auto`, and a refused call waits on the
 card. Effort, Ultracode and the critique come from Start's choices, kept on the run's record for follow-ups; the model
 settings come from the `orient` and `subagents` roles (config.models_for).
@@ -188,6 +189,19 @@ def mode_of(c: str, choice: str | None) -> str:
     """The mode the session runs in: Start's choice, else the workspace's stored one, else the analyst's own mode's."""
     chosen = orientation.permissions(choice) or orientation.permissions(ledger.stored_settings(c).get(PERMISSIONS_SETTING))
     return cc_settings.orient_mode(config.corpus_dir(c), chosen)
+
+
+MODE_RANK = {m: i for i, m in enumerate(cc_settings.ORIENT_MODES)}  # manual < auto < bypass
+
+
+def lowered(c: str, asked: Any) -> str | None:
+    """The mode a start_orientation call asked for when it is no higher than the one the session would run in without it
+    (mode_of with Start's choice); None otherwise, which keeps that one. A model's call may lower the mode, never raise
+    it."""
+    mode = orientation.permissions(asked)
+    if mode is None:
+        return None
+    return mode if MODE_RANK[mode] <= MODE_RANK[mode_of(c, orientation.choices(c).get("permissions"))] else None
 
 
 def _mode_changed(run: agent_session.Run) -> None:
@@ -722,8 +736,8 @@ async def tool_start_orientation(ctx: Any, args: dict[str, Any]) -> Any:
     chosen: dict[str, Any] = {}
     if args.get("critique") is not None:
         chosen["critique"] = orientation.flag(args["critique"], True)
-    if orientation.permissions(args.get("permissions")):
-        chosen["permissions"] = orientation.permissions(args.get("permissions"))
+    if lowered(ctx.c, args.get("permissions")):
+        chosen["permissions"] = lowered(ctx.c, args.get("permissions"))
     if running(ctx.c) or orientation.active(ctx.c):
         return tools.err(tools.hint("start_orientation-running"))
     passes = [p for p, on in (("final", final), ("views", views), ("report", report)) if on]

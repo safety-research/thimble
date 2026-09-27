@@ -1219,14 +1219,14 @@ def _nudge() -> str:
 # --------------------------------------------------------------------------- what the terminal lists
 
 
-def statusline_command(cwd: Path) -> str:
+def statusline_command() -> str:
     """The statusline command of a terminal-first workspace: plugin/bin/thimble-agents, chained to the analyst's own
     statusline when their settings name one."""
     import shlex  # noqa: PLC0415
 
     from . import agent_session, cc_settings  # noqa: PLC0415
 
-    own = cc_settings.own_statusline(cwd)
+    own = cc_settings.own_statusline()
     cmd = f"{shlex.quote(str(agent_session.PLUGIN_DIR / 'bin' / 'thimble-agents'))} --statusline"
     return f"{cmd} --chain {shlex.quote(own)}" if own else cmd
 
@@ -1239,7 +1239,7 @@ def apply_statusline(c: str) -> None:
     try:
         cwd = config.corpus_dir(c)
         if terminal_first(c):
-            cc_settings.set_statusline(cwd, statusline_command(cwd))
+            cc_settings.set_statusline(cwd, statusline_command())
         else:
             cc_settings.clear_statusline(cwd)
     except Exception:  # noqa: BLE001 — the statusline is a convenience; a folder that cannot be written keeps its own

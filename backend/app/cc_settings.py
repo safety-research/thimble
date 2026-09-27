@@ -71,6 +71,14 @@ def sources(cwd: Path) -> list[Path]:
     return [config_dir() / "settings.json", cwd / PROJECT_SETTINGS, cwd / LOCAL_SETTINGS, *([managed] if managed else [])]
 
 
+def analyst_sources() -> list[Path]:
+    """The settings files that are the analyst's own wherever a session runs, lowest precedence first: the user's
+    settings.json and the managed file. A corpus folder's .claude/ is left out, since a file planted there must not
+    choose a permission mode or a command thimble runs (config.settings_files does the same for apiKeyHelper)."""
+    managed = MANAGED.get(sys.platform)
+    return [config_dir() / "settings.json", *([managed] if managed else [])]
+
+
 def _thimble_home() -> Path:
     return Path(os.environ.get("THIMBLE_HOME") or "~/.thimble").expanduser()
 
@@ -247,15 +255,12 @@ STATUSLINE_FILE = "statusline-overrides.json"  # in thimble's home: {folder: {ou
 STATUSLINE_REFRESH_S = 2
 
 
-def own_statusline(cwd: Path) -> str:
-    """The statusline command the analyst's own settings give for a session in `cwd`, thimble's aside: the most specific
-    settings file's; '' for none."""
-    ours = _statuslines().get(_key(cwd), {})
-    for path in reversed(sources(cwd)):
+def own_statusline() -> str:
+    """The statusline command of the analyst's own settings (analyst_sources), the most specific file's; '' for none.
+    thimble-agents runs it with a shell, so a corpus folder's settings never supply it."""
+    for path in reversed(analyst_sources()):
         line = _read(path).get("statusLine")
         cmd = line.get("command") if isinstance(line, dict) else None
-        if path == cwd / LOCAL_SETTINGS and ours:
-            cmd = (ours.get("previous") or {}).get("command") if isinstance(ours.get("previous"), dict) else None
         if isinstance(cmd, str) and cmd.strip():
             return cmd
     return ""
@@ -328,8 +333,8 @@ def clear_override(cwd: Path) -> bool:
 
 
 # --------------------------------------------------------------------------- the orientation's permissions and sandbox
-# Start's mode switcher for the orientation: Manual, Auto and Bypass. It opens on the analyst's own mode (the highest
-# settings file's `permissions.defaultMode`; a mode it does not offer opens it on Manual). The orientation runs with
+# Start's mode switcher for the orientation: Manual, Auto and Bypass. It opens on the analyst's own mode (the highest of
+# analyst_sources' `permissions.defaultMode`; a mode it does not offer opens it on Manual). The orientation runs with
 # `--permission-mode` `auto` for Auto and `default` for Manual and Bypass alike: in Bypass thimble grants every request
 # itself (agent_session), so the analyst can switch between Manual and Bypass without restarting the session.
 # Start's names, and the Claude Code mode each is named after
@@ -337,10 +342,10 @@ ORIENT_MODES = {"manual": "default", "auto": "auto", "bypass": "bypassPermission
 
 
 def permission_mode(cwd: Path) -> str:
-    """The analyst's own permission mode for a session in `cwd`: the highest settings file's `permissions.defaultMode`,
-    else `default`."""
+    """The analyst's own permission mode: the highest of analyst_sources' `permissions.defaultMode`, else `default`.
+    The settings of the corpus folder `cwd` are not read, so a corpus cannot pre-select Bypass."""
     mode = "default"
-    for path in sources(cwd):
+    for path in analyst_sources():
         d = _read(path)
         perms = d.get("permissions") if isinstance(d.get("permissions"), dict) else {}
         if isinstance(perms.get("defaultMode"), str) and perms["defaultMode"].strip():
