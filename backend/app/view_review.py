@@ -1,5 +1,5 @@
 """The view review: once a view the dev agent built passes its checks, its page is shot headless in four states, one
-model reading of the pictures assesses it against six criteria (prompts/view-review.md), and the problems it finds go
+model reading of the pictures assesses it against seven criteria (prompts/view-review.md), and the problems it finds go
 back to the view's build session to fix, up to ROUNDS times. The view reaches the analyst at once and the review runs
 beside it; each revision that passes the view's checks replaces it, with Undo back to the view as it was built.
 
@@ -479,7 +479,7 @@ async def read(c: str, run: _Run, prop: dict[str, Any], view: dict[str, Any], sh
     from . import card_check, model, tools  # noqa: PLC0415
 
     secs = _sections()
-    n = 3 + (len(re.findall(r"^- ", secs["criteria-labels"], re.M)) if lined else 0)
+    n = len(re.findall(r"^- ", secs["review"] + ("\n" + secs["criteria-labels"] if lined else ""), re.M))
     system = _fill(secs["review"], {"pictures": secs["pictures-labels" if lined else "pictures-plain"],
                                     "label_criteria": secs["criteria-labels"] if lined else ""})
     user = _fill(secs["view"], {"name": str(prop.get("name") or view["name"]), "why": str(prop.get("why") or view["why"]),
