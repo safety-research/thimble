@@ -409,7 +409,7 @@ function renderSelects() {
   box.replaceChildren(...FIELDS.slice(1).map(([k, name, many]) => {
     const pick = h('select', 'field')
     pick.setAttribute('aria-label', name)
-    const chosen = [...F[k]].sort((a, b) => rankOf[k].get(a) - rankOf[k].get(b))
+    const chosen = [...F[k]].sort((a, b) => nameOf(k, a).localeCompare(nameOf(k, b), 'en', { numeric: true }))
     const vals = [...rankOf[k].keys()].filter((v) => v !== 0 || (counts[k].get(0) || 0) > 0 || F[k].has(0))
     vals.sort((a, b) => (counts[k].get(b) || 0) - (counts[k].get(a) || 0) || rankOf[k].get(a) - rankOf[k].get(b))
     const any = h('option', null, `Any ${name.toLowerCase()}`)
