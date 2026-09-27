@@ -2289,6 +2289,7 @@ def cmd_revert(_: argparse.Namespace) -> int:
 # ----------------------------------------------------------------------------- update (INSTALL.md "Update")
 
 RELEASE_ZIP_PATTERN = "thimble-*.zip"
+RELEASE_SUMS = "SHA256SUMS"  # the release's digests, which update.sh checks the zip against
 DOWNLOAD_TIMEOUT_S = 600.0
 UPDATE_NO_GH_LINE = ("thimble update: could not download the latest release of {repo}: the GitHub CLI (gh) is not installed "
                      "(https://cli.github.com).")
@@ -2307,6 +2308,8 @@ UPDATE_FAILED_LINES = {
                   "Or, with a release zip: thimble update --from <path to thimble-*.zip>"),
     "failed": ("thimble update: could not download the latest release of {repo} with gh ({detail}).",
                UPDATE_FROM_LINE),
+    "no-sums": ("thimble update: the latest release of {repo} has no SHA256SUMS, so the downloaded zip cannot be "
+                "checked; nothing was installed.", UPDATE_FROM_LINE),
 }
 
 
@@ -2335,13 +2338,14 @@ def _gh_ok(gh: str, *args: str) -> bool:
 
 
 def download_release(repo: str, into: Path) -> tuple[Path | None, str, str]:
-    """`gh release download` of the latest release's zip into `into`: (the file, "", "") on success, else (None, the
-    cause, a detail). The cause is a key of UPDATE_FAILED_LINES; the detail is gh's first error line, for the "failed"
-    line."""
+    """`gh release download` of the latest release's zip and its SHA256SUMS into `into`: (the zip, "", "") on success,
+    else (None, the cause, a detail). The cause is a key of UPDATE_FAILED_LINES; the detail is gh's first error line, for
+    the "failed" line."""
     gh = shutil.which("gh")
     if not gh:
         return None, "no-gh", ""
-    cmd = [gh, "release", "download", "--repo", repo, "--pattern", RELEASE_ZIP_PATTERN, "--dir", str(into)]
+    cmd = [gh, "release", "download", "--repo", repo, "--pattern", RELEASE_ZIP_PATTERN, "--pattern", RELEASE_SUMS,
+           "--dir", str(into)]
     try:
         r = subprocess.run(cmd, capture_output=True, text=True, timeout=DOWNLOAD_TIMEOUT_S)
     except (OSError, subprocess.TimeoutExpired) as e:
@@ -2362,6 +2366,8 @@ def download_release(repo: str, into: Path) -> tuple[Path | None, str, str]:
     zips = sorted(into.glob(RELEASE_ZIP_PATTERN))
     if not zips:
         return None, "failed", f"no {RELEASE_ZIP_PATTERN} in the release"
+    if not (into / RELEASE_SUMS).is_file():
+        return None, "no-sums", ""
     return zips[-1], "", ""
 
 
@@ -2372,8 +2378,8 @@ def run_update_script(*args: str) -> int:
 
 def cmd_update(args: argparse.Namespace) -> int:
     """`thimble update [--from <zip>] [--dry-run]`: --from hands the zip to update.sh; no argument downloads the latest
-    release with gh; a checkout skips the download (update.sh pulls). When the download fails: two lines naming the
-    cause and the --from form, and exit 1."""
+    release and its SHA256SUMS with gh, and update.sh checks the zip against it; a checkout skips the download
+    (update.sh pulls). When the download fails: two lines naming the cause and the --from form, and exit 1."""
     extra = ["--dry-run"] if getattr(args, "dry_run", False) else []
     if getattr(args, "from_", None):
         return run_update_script("--from", args.from_, *extra)
@@ -2388,7 +2394,7 @@ def cmd_update(args: argparse.Namespace) -> int:
             print(second.format(url=releases_url(repo)))
             return 1
         print(f"thimble update: downloaded {zip_path.name}")
-        return run_update_script("--from", str(zip_path), *extra)
+        return run_update_script("--from", str(zip_path), "--sums", str(Path(tmp) / RELEASE_SUMS), *extra)
 
 
 # ----------------------------------------------------------------------------- the `server` group

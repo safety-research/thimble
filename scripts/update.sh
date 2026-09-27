@@ -1,11 +1,13 @@
 #!/usr/bin/env bash
 # scripts/update.sh — bring a thimble install up to date, then run its scripts/install.sh over it.
 #
-#   scripts/update.sh [--dir DIR] [--from ZIP|URL] [--marketplace-name NAME] [--dry-run]
+#   scripts/update.sh [--dir DIR] [--from ZIP|URL] [--sums FILE] [--marketplace-name NAME] [--dry-run]
 #
 # The install: --dir, else the one $THIMBLE_HOME/app-dir names, else the tree this script is in. A git checkout gets
 # `git pull --ff-only` + install.sh in place; a release install needs --from (a release zip, path or https URL), which is
 # unpacked and installed over it with ITS install.sh (backend/.venv, frontend/node_modules, workspaces/ and data/ kept).
+# Before that the zip's SHA-256 is checked against the release's SHA256SUMS: for a URL the one beside it, which must
+# exist; for a path --sums FILE, else a SHA256SUMS in the zip's folder when there is one. A mismatch refuses the update.
 # Either way install.sh runs npm ci again when package-lock.json changed and Node 20+ is present, since custom views need
 # the frontend's packages; in a checkout it also rebuilds frontend/dist when the pull changed a file it is built from (a
 # release brings its own build). Claude Code takes the new plugin copy only when plugin.json's version changed; a running
@@ -18,12 +20,14 @@ here_tree="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 home="${THIMBLE_HOME:-$HOME/.thimble}"
 dir=""
 from=""
+sums=""
 mp_name=""
 dry=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --dir) dir="$2"; shift 2;;
     --from) from="$2"; shift 2;;
+    --sums) sums="$2"; shift 2;;
     --marketplace-name) mp_name="$2"; shift 2;;
     --dry-run) dry=1; shift;;
     -h|--help) usage; exit 0;;
@@ -42,6 +46,19 @@ json_get() {
   fi
 }
 is_tree() { [ -f "$1/backend/pyproject.toml" ] && [ -d "$1/plugin/bin" ]; }
+sha256_of() {  # sha256_of FILE: its SHA-256 in lowercase hex
+  if command -v sha256sum >/dev/null 2>&1; then sha256sum < "$1" | cut -d' ' -f1
+  elif command -v shasum >/dev/null 2>&1; then shasum -a 256 < "$1" | cut -d' ' -f1
+  else python3 -I -c 'import hashlib,sys; print(hashlib.sha256(open(sys.argv[1], "rb").read()).hexdigest())' "$1"; fi
+}
+check_digest() {  # check_digest ZIP SUMS NAME: exit unless the zip's SHA-256 is the one SUMS lists for NAME
+  local want got
+  want="$(tr -d '\r' < "$2" | awk -v n="$3" '$2 == n || $2 == "*" n { print tolower($1); exit }')"
+  [ -n "$want" ] || die "$2 lists no SHA-256 for $3 (it may be another release's); refusing to install it"
+  got="$(sha256_of "$1")"
+  [ "$got" = "$want" ] || die "the SHA-256 of $3 is $got, not $want as $2 lists; refusing to install it"
+  say "the SHA-256 of $3 matches $2"
+}
 
 if [ -z "$dir" ]; then
   if [ -f "$home/app-dir" ] && is_tree "$(head -n 1 "$home/app-dir")"; then
@@ -71,19 +88,36 @@ else
   tmp="$(mktemp -d)"
   trap 'rm -rf "$tmp"' EXIT
   zip_path="$from"
+  zip_name="$(basename "$from")"
   case "$from" in
     http://*) die "refusing a plain http URL; use https";;
     https://*)
-      zip_path="$tmp/release.zip"
-      run curl -fsSL -o "$zip_path" "$from";;
+      url="${from%%[?#]*}"
+      zip_name="${url##*/}"
+      [ -n "$zip_name" ] || die "the URL names no file: $from"
+      zip_path="$tmp/$zip_name"
+      [ -z "$sums" ] || die "--sums goes with a zip on disk; a URL is checked against the SHA256SUMS beside it"
+      sums="$tmp/SHA256SUMS"
+      run curl -fsSL --proto =https --proto-redir =https -o "$zip_path" "$from"
+      run curl -fsSL --proto =https --proto-redir =https -o "$sums" "${url%/*}/SHA256SUMS" \
+        || die "no SHA256SUMS beside the zip (${url%/*}/SHA256SUMS), so the download cannot be checked; refusing to install it";;
+    *)
+      if [ -z "$sums" ] && [ -f "$(dirname "$zip_path")/SHA256SUMS" ]; then sums="$(dirname "$zip_path")/SHA256SUMS"; fi;;
   esac
   if [ "$dry" = 1 ] && [ ! -f "$zip_path" ]; then
+    [ -z "$sums" ] || say "+ check the SHA-256 of $zip_name against $sums"
     say "+ unzip -q $zip_path -d $tmp"
     say "+ bash <unpacked>/scripts/install.sh --dir $dir ${installed_args[*]+"${installed_args[*]}"}"
     say "(dry run: the zip was not fetched or opened)"
     exit 0
   fi
   [ -f "$zip_path" ] || die "no such file: $zip_path"
+  if [ -n "$sums" ]; then
+    [ -f "$sums" ] || die "no such file: $sums"
+    check_digest "$zip_path" "$sums" "$zip_name"
+  else
+    say "no SHA256SUMS beside $zip_path and no --sums: its SHA-256 is not checked"
+  fi
   run unzip -q "$zip_path" -d "$tmp/unpacked"
   if [ "$dry" = 1 ]; then
     say "+ bash <unpacked>/scripts/install.sh --dir $dir ${installed_args[*]+"${installed_args[*]}"}"

@@ -36,7 +36,8 @@ line to add to your shell startup file when that folder is not on your PATH), an
 
 `thimble update` installs the latest release; in a Dev install it runs `git pull --ff-only` and the install steps,
 which reinstall the frontend's packages when `package-lock.json` changed and rebuild the UI when its sources did.
-`thimble update --from <zip>` installs a zip you downloaded. Workspaces are kept. A running server keeps the old code
+`thimble update --from <zip>` installs a zip you downloaded, checked against the release's `SHA256SUMS` when that
+file is beside it. A zip whose digest does not match is refused. Workspaces are kept. A running server keeps the old code
 until `thimble server restart`.
 
 ## Uninstall

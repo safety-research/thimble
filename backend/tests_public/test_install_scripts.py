@@ -135,3 +135,74 @@ def test_install_sh_copies_only_into_an_empty_folder_or_an_earlier_install(tmp_p
     r = install(tree, empty, tmp_path)
     assert r.returncode == 0, "an earlier install is installed over: " + r.stdout + r.stderr
     assert (empty / "workspaces").is_dir()
+
+
+def release_zip(tmp_path: Path, name: str = "thimble-0.0.2-abc1234") -> Path:
+    """A release zip whose install.sh only says that it ran, beside a SHA256SUMS that lists it."""
+    import hashlib
+    import zipfile
+
+    tree = fake_tree(tmp_path / "build" / name)
+    (tree / "scripts" / "install.sh").write_text('#!/bin/bash\necho "the release install.sh ran: $*"\n')
+    out = tmp_path / "dl"
+    out.mkdir()
+    zp = out / f"{name}.zip"
+    with zipfile.ZipFile(zp, "w") as z:
+        for p in sorted(tree.rglob("*")):
+            z.write(p, p.relative_to(tree.parent).as_posix())
+    (out / "SHA256SUMS").write_text(f"{hashlib.sha256(zp.read_bytes()).hexdigest()}  {zp.name}\n")
+    return zp
+
+
+def update(tmp_path: Path, *args: str, path: str = "/usr/bin:/bin", **extra: str) -> subprocess.CompletedProcess:
+    inst = tmp_path / "inst"
+    if not inst.exists():
+        fake_tree(inst)
+    return subprocess.run(["bash", str(inst / "scripts" / "update.sh"), "--dir", str(inst), *args], capture_output=True,
+                          text=True, env=env_for(tmp_path, PATH=path, **extra), timeout=60)
+
+
+@pytest.mark.skipif(not shutil.which("unzip"), reason="update.sh unpacks with unzip")
+def test_update_from_a_zip_checks_it_against_sha256sums_before_running_its_installer(tmp_path):
+    zp = release_zip(tmp_path)
+    sums = zp.parent / "SHA256SUMS"
+    r = update(tmp_path, "--from", str(zp))
+    assert r.returncode == 0 and f"the SHA-256 of {zp.name} matches" in r.stdout, r.stdout + r.stderr
+    assert "the release install.sh ran: --dir" in r.stdout
+    listed = sums.read_text()
+    sums.write_text("0" * 64 + f"  {zp.name}\n")
+    r = update(tmp_path, "--from", str(zp))
+    assert r.returncode == 1 and "refusing to install it" in r.stderr and "install.sh ran" not in r.stdout
+    other = tmp_path / "other-SHA256SUMS"
+    other.write_text(listed.replace(zp.name, "thimble-0.0.1-0000000.zip"))
+    r = update(tmp_path, "--from", str(zp), "--sums", str(other))
+    assert r.returncode == 1 and f"lists no SHA-256 for {zp.name}" in r.stderr and "install.sh ran" not in r.stdout
+    sums.unlink()
+    r = update(tmp_path, "--from", str(zp))
+    assert r.returncode == 0 and "its SHA-256 is not checked" in r.stdout, "a zip on disk with no SHA256SUMS"
+
+
+@pytest.mark.skipif(not shutil.which("unzip"), reason="update.sh unpacks with unzip")
+def test_update_from_a_url_needs_the_sha256sums_beside_it_and_https_redirects(tmp_path):
+    zp = release_zip(tmp_path)
+    bin_ = tmp_path / "bin"
+    bin_.mkdir()
+    (bin_ / "curl").write_text("""#!/bin/bash
+echo "curl $*" >> "$STUB_LOG"
+out=""; while [ $# -gt 1 ]; do [ "$1" = -o ] && out="$2"; shift; done
+case "$1" in
+  */SHA256SUMS) [ -f "$STUB_DIR/SHA256SUMS" ] || exit 22; cp "$STUB_DIR/SHA256SUMS" "$out";;
+  *) cp "$STUB_DIR/$(basename "$1")" "$out";;
+esac
+""")
+    (bin_ / "curl").chmod(0o755)
+    log = tmp_path / "curl.log"
+    url = f"https://example.com/releases/download/v0.0.2/{zp.name}"
+    r = update(tmp_path, "--from", url, path=f"{bin_}:/usr/bin:/bin", STUB_LOG=str(log), STUB_DIR=str(zp.parent))
+    assert r.returncode == 0 and "the release install.sh ran" in r.stdout, r.stdout + r.stderr
+    calls = log.read_text().splitlines()
+    assert len(calls) == 2 and calls[1].endswith("https://example.com/releases/download/v0.0.2/SHA256SUMS")
+    assert all("--proto =https --proto-redir =https" in c for c in calls), calls
+    (zp.parent / "SHA256SUMS").unlink()
+    r = update(tmp_path, "--from", url, path=f"{bin_}:/usr/bin:/bin", STUB_LOG=str(log), STUB_DIR=str(zp.parent))
+    assert r.returncode == 1 and "no SHA256SUMS beside the zip" in r.stderr and "install.sh ran" not in r.stdout
