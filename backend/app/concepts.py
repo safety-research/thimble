@@ -3044,13 +3044,18 @@ def _live_counts(ws: Path, concept_id: str) -> dict:
 
 def _follow(c: str, concept: dict) -> Callable[[Any], Any]:
     """The body of the agent chat that follows an apply: waits for the summary and reports it; stopping the agent
-    cancels the apply."""
+    cancels that apply, never a later run of the label that took its place."""
+    key = (c, concept["id"])
+    task = _tasks.get(key)
 
     async def run(rec: Any) -> str:
         try:
             s = await wait_apply(c, concept["id"], float("inf"))
         except asyncio.CancelledError:
-            _cancel_event(c, concept["id"]).set()
+            # also raised when the run itself was stopped, as a redefinition stops it before it starts the next run,
+            # whose cancel flag this is too
+            if task is not None and not task.done() and _tasks.get(key) is task:
+                _cancel_event(*key).set()
             raise
         counts = ", ".join(f"{k} {v}" for k, v in sorted((s.get("counts") or {}).items()))
         line = f"labeled {s.get('labeled', 0)} of {s.get('total', 0)} {concept['unit']}(s): {counts or 'no values'}"

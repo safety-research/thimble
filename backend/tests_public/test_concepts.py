@@ -469,6 +469,40 @@ async def test_apply_scoped_defines_applies_cards_and_filters(workspaces_tmp, fa
     assert [x for x in notebook.read_notebook(ws, nb["id"])["cells"] if x.get("kind") == "label"] == [_label]
 
 
+async def test_a_redefinition_while_a_run_goes_on_counts_every_unit_in_the_run_it_starts(workspaces_tmp, monkeypatch):
+    """The chat that followed the stopped run does not stop the run the redefinition starts, so that run counts every
+    record of its files and is not marked stopped."""
+    monkeypatch.setattr(concepts, "_loop", asyncio.get_running_loop())
+
+    async def slow(c, concept, units, out, cancel, **kw):
+        try:
+            await asyncio.Event().wait()
+        finally:
+            await asyncio.sleep(0.01)  # the prompt kind closes its writer once stopped
+        return 0, 0, None
+
+    monkeypatch.setattr(concepts, "_apply_prompt", slow)
+    monkeypatch.setattr(concepts, "APPLY_WAIT_S", 0.2)
+    args = dict(scope="files", name="claims a PR", values=["claim", "other"], paths=["board.jsonl"], limit=None, comment=False,
+                filter=False, created_by="terminal", chat=None, group=None, card=False)
+    first = await concepts.apply_scoped(CORPUS, kind="prompt", text="a post that claims a PR", **args)
+    assert first["partial"] is True
+    monkeypatch.setattr(concepts, "APPLY_WAIT_S", 30.0)
+    again = await concepts.apply_scoped(CORPUS, kind="regex", text=PATTERN, **args)
+    assert again["partial"] is False and again["total"] == 8
+    assert concepts.read_concept(workspaces_tmp / CORPUS, again["concept"])["applications"][-1]["stopped"] is False
+    # stopping the chat that follows a run still stops that run
+    from app import agents
+
+    monkeypatch.setattr(concepts, "APPLY_WAIT_S", 0.2)
+    await concepts.apply_scoped(CORPUS, kind="prompt", text="a post that asks for a review", **args)
+    chat = next(m for m in agents.list_chats(CORPUS) if m.get("role") == "labels" and m.get("status") == "running")
+    assert await agents.stop_agent(CORPUS, chat["id"])
+    await asyncio.sleep(0.05)
+    assert concepts._cancel_event(CORPUS, again["concept"]).is_set()
+    concepts._stop_apply((CORPUS, again["concept"]))
+
+
 async def test_apply_scoped_refused_leaves_no_label(workspaces_tmp):
     """An apply the run would refuse (paths that match only a database, paths that match nothing, a regex that does not
     compile) is refused before the label is defined, so no empty label is left in Files and no card on the canvas."""
