@@ -1,10 +1,10 @@
 // The permission requests waiting for the analyst, as one card pinned above the chat's composer in every chat. It holds
-// every session's requests (chat/permissions.ts pendingRequests), oldest first, one at a time with `1 of 3` paging. Its
-// head names the requesting thread (askThread); the body says who asks, what the call does, the later calls that wait on
-// the same answer, and why it asks, then Allow, Allow and don't ask again (where Claude Code offers a rule, or for a
-// web call its site or web search in the workspace) and Deny. A request denied unanswered says so, with Dismiss. When
-// auto mode cannot decide in a session, an orientation's request offers the switch to Manual or Bypass. An answer
-// hides the request at once. A long command wraps and scrolls past 96px.
+// every session's requests (chat/permissions.ts pendingRequests), oldest first and those denied unanswered last, one at
+// a time with `1 of 3` paging. Its head names the requesting thread (askThread); the body says who asks, what the call
+// does, the later calls that wait on the same answer, and why it asks, then Allow, Allow and don't ask again (where
+// Claude Code offers a rule, or for a web call its site or web search in the workspace) and Deny. A request denied
+// unanswered says so, with Dismiss. When auto mode cannot decide in a session, an orientation's request offers the
+// switch to Manual or Bypass. An answer hides the request at once. A long command wraps and scrolls past 96px.
 import { useEffect, useMemo, useState } from 'react'
 import { Button } from '../components/Button'
 import { CodeText } from '../components/Code'

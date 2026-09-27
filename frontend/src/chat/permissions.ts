@@ -14,8 +14,8 @@ export interface PendingAsk {
   request: PermissionRequest
 }
 
-/** Every request on the card: main's, then those of every session thimble started while it runs (those denied
- * unanswered among them), the one asked first first. Pure. */
+/** Every request on the card: main's, then those of every session thimble started while it runs, the one asked first
+ * first, and after them those denied unanswered. Pure. */
 export function pendingRequests(main: Pick<ChatMeta, 'permissions'> | null | undefined, metas: Iterable<ChatMeta>): PendingAsk[] {
   const out: PendingAsk[] = (main?.permissions ?? []).map((request) => ({ chat: 'main', request }))
   for (const m of metas) {
@@ -23,7 +23,11 @@ export function pendingRequests(main: Pick<ChatMeta, 'permissions'> | null | und
     for (const request of cardAsks(m)) out.push({ chat: m.id, request })
   }
   // a stable order: by when each asked, and in the order read where a time is missing
-  return out.map((a, i) => ({ a, i })).sort((x, y) => (x.a.request.since ?? '').localeCompare(y.a.request.since ?? '') || x.i - y.i).map((x) => x.a)
+  const done = (a: PendingAsk) => (a.request.expired ? 1 : 0)
+  return out
+    .map((a, i) => ({ a, i }))
+    .sort((x, y) => done(x.a) - done(y.a) || (x.a.request.since ?? '').localeCompare(y.a.request.since ?? '') || x.i - y.i)
+    .map((x) => x.a)
 }
 
 /** The thread a request comes from, which the card's head names: the thread of main whose agent asked (main's

@@ -207,10 +207,12 @@ describe("the dev agent's requests and the web", () => {
     expect(other.querySelector('.chat-perm-always')?.textContent).toBe("Allow and don't ask again for web search in this workspace")
   })
 
-  test('a request denied unanswered stays on the card saying so, waits on nobody, and Dismiss takes it off', async () => {
+  test('a request denied unanswered stays on the card after those that wait, saying so, waits on nobody, and Dismiss takes it off', async () => {
     const expired = { ...fetch1, expired: T(9), also: [] }
     const metas: ChatMeta[] = [{ ...VIEW, permissions: [expired] }]
     expect(pendingRequests(null, metas).map((a) => a.request.id)).toEqual(['f1'])
+    const later = [{ ...VIEW, permissions: [expired, req('f2', { tool: 'WebFetch', since: T(20) })] }]
+    expect(pendingRequests(null, later).map((a) => a.request.id)).toEqual(['f2', 'f1'])
     expect(pendingAsks(metas[0])).toEqual([])
     expect(waitingChats(metas)).toEqual([])
     const el = await mount(<PermissionCard ws="mini" asks={pendingRequests(null, metas)} metas={DEV} labels={new Map()} />)
