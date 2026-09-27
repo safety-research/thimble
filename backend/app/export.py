@@ -223,11 +223,13 @@ def _chats(w: Writer, ws: Path) -> list[dict[str, Any]]:
 
 
 def _projects_roots(ws: Path) -> list[Path]:
-    """Where Claude Code writes transcripts: the config dir each of main's sessions ran with (from sessions.json), the
-    analyst's, this server's own, and the workspace's own."""
-    stored = _read_json(ws / "sessions.json")
-    dirs = [config.config_dir_of(str(r.get("config_dir") or "") or None)
-            for r in (stored.values() if isinstance(stored, dict) else []) if isinstance(r, dict) and "config_dir" in r]
+    """Where Claude Code writes transcripts: the config dir of the workspace's attached session and the one this server
+    serves, both read from the attaching process (config.process_claude_config), this server's own, and the
+    workspace's own. sessions.json's `config_dir` is not read, since a cell can write that file."""
+    from . import session  # noqa: PLC0415 — session imports most of the app
+
+    live = session.current(ws.name)
+    dirs = [live.config_dir] if live is not None and live.config_known else []
     dirs += [config.claude_config_dir(), config.config_dir_of(config.own_claude_config())]
     return list(dict.fromkeys([d / "projects" for d in dirs] + [ws / ".claude-config" / "projects"]))
 

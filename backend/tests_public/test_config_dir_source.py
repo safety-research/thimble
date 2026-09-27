@@ -1,19 +1,22 @@
 """The Claude Code config dir this server serves (config.serve_claude_config) decides which settings.json it reads for
 apiKeyHelper and which CLAUDE_CONFIG_DIR its sessions get, so it comes from the environment of the attaching process
-(config.process_claude_config), never from a value a request carries."""
+(config.process_claude_config), never from a value a request carries or from sessions.json, which a notebook cell
+can write."""
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import subprocess
 import sys
+from pathlib import Path
 
 import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
 from test_delivery import CORPUS, _cwd, _fresh  # noqa: F401 — the fixture, used by name
 
-from app import channel, config, main, procs, session
+from app import channel, config, export, feedback, main, procs, session
 
 FIRST = "11111111-aaaa-4aaa-8aaa-000000000001"
 needs_proc = pytest.mark.skipif(not procs.HAVE_PROC, reason="another process's environment is read from /proc")
@@ -99,3 +102,45 @@ def test_the_session_route_serves_the_config_dir_of_the_process_that_asks(served
 
     assert asyncio.run(name())["attached"] is True
     assert config.claude_config_dir() == real
+
+
+def _plant_config_dir(planted: Path, sid: str = FIRST, pid: int | None = None) -> None:
+    """A sessions.json whose record names `planted` as the session's config dir (and `pid` as its process), as a
+    notebook cell could write it."""
+    (config.workspace_dir(CORPUS) / "sessions.json").write_text(json.dumps(
+        {sid: {"session": sid, "cwd": _cwd(), "config_dir": str(planted), "pid": pid, "since": "2026-01-01T00:00:00Z"}}))
+
+
+def test_a_config_dir_in_sessions_json_is_never_served(served, tmp_path):
+    before = config.claude_config_dir()
+    _plant_config_dir(tmp_path / "planted")
+    try:
+        lv = session.attach(CORPUS, FIRST, _cwd())
+        assert lv is not None and not lv.config_known
+        assert config.claude_config_dir() == before
+    finally:
+        session.detach(CORPUS, FIRST)
+
+
+@needs_proc
+def test_a_pid_in_sessions_json_does_not_choose_the_served_config_dir(served, claude_like, tmp_path):
+    pid, real = claude_like
+    before = config.claude_config_dir()
+    _plant_config_dir(tmp_path / "planted", pid=pid)
+    try:
+        session.attach(CORPUS, FIRST, _cwd())
+        assert config.claude_config_dir() == before != real
+    finally:
+        session.detach(CORPUS, FIRST)
+
+
+def test_the_export_and_the_problem_report_look_for_transcripts_outside_a_config_dir_in_sessions_json(served, tmp_path):
+    planted = tmp_path / "planted"
+    other = "22222222-bbbb-4bbb-8bbb-000000000002"
+    (planted / "projects" / "-x").mkdir(parents=True)
+    (planted / "projects" / "-x" / f"{other}.jsonl").write_text('{"type": "user", "message": {"content": "private"}}\n')
+    _plant_config_dir(planted, other)
+    ws = config.workspace_dir(CORPUS)
+    for roots in (export._projects_roots(ws), feedback.transcript_roots(ws)):
+        assert planted / "projects" not in roots and config.claude_config_dir() / "projects" in roots
+    assert export._find_transcript(other, export._projects_roots(ws)) is None

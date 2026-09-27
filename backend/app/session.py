@@ -353,17 +353,13 @@ def find_transcript(sid: str, config_dir: Path | None = None) -> str | None:
     return None
 
 
-def _config_of(known_value: str | None, pid: int | None, stored: dict) -> tuple[bool, str | None]:
+def _config_of(known_value: str | None, pid: int | None) -> tuple[bool, str | None]:
     """(known, CLAUDE_CONFIG_DIR) of a session's `claude` process: `known_value` when the caller read it from a process
-    ("" for unset), else read from the process's environment, else from sessions.json; (False, None) when none says."""
+    ("" for unset), else read from the process's environment; (False, None) when neither says. sessions.json's
+    `config_dir` is not read, since a cell can write that file."""
     if known_value is not None:
         return True, known_value or None
-    known, value = config.process_claude_config(pid)
-    if known:
-        return True, value
-    if "config_dir" in stored:
-        return True, str(stored.get("config_dir") or "") or None
-    return False, None
+    return config.process_claude_config(pid)
 
 
 def _learn_config(lv: Live, known: bool, value: str | None) -> bool:
@@ -395,7 +391,7 @@ def attach(c: str, sid: Any, cwd: Any, transcript_path: str | None = None, pid: 
     if cur is not None and cur.sid == sid:
         if pid:
             cur.pid = pid
-        if _learn_config(cur, *_config_of(config_dir, pid, {})):
+        if _learn_config(cur, *_config_of(config_dir, pid)):
             if not cur.transcript_path:
                 cur.transcript_path = find_transcript(sid, cur.config_dir)
             _persist(cur)
@@ -414,7 +410,7 @@ def attach(c: str, sid: Any, cwd: Any, transcript_path: str | None = None, pid: 
     restored = held.get("session") == sid and not stored.get("ended")  # this server restarted under the session
     lv = Live(c, sid, cwd or str(stored.get("cwd") or ""), transcript_path or stored.get("transcript_path"),
               pid or stored.get("pid"))
-    _learn_config(lv, *_config_of(config_dir, lv.pid, stored))
+    _learn_config(lv, *_config_of(config_dir, pid))  # never sessions.json's pid, which a cell can write
     lv.transcript_path = lv.transcript_path or find_transcript(sid, lv.config_dir)
     if restored:
         lv.since = str(stored.get("since") or lv.since)

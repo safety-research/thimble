@@ -616,12 +616,9 @@ def dev_tickets(c: str) -> list[dict[str, Any]]:
 
 
 def transcript_roots(ws: Path) -> list[Path]:
-    """The Claude Code projects folders a background session's transcript may be in."""
+    """The Claude Code projects folders a background session's transcript may be in. sessions.json's `config_dir` is
+    not read, since a cell can write that file."""
     dirs: list[Path] = []
-    stored = _read_json(ws / "sessions.json")
-    for r in stored.values() if isinstance(stored, dict) else []:
-        if isinstance(r, dict) and "config_dir" in r:
-            dirs.append(Path(str(r["config_dir"])) if r.get("config_dir") else Path.home() / ".claude")
     cfg = _lazy("config")
     if cfg is not None:
         try:
