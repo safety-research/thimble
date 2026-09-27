@@ -934,7 +934,10 @@ def _write(entries: list[tuple[str, bytes]], dirs: list[Path], now: datetime) ->
             path = _target(out, now)
             tmp = path.with_name(f".{path.name}.tmp")
             try:
-                with zipfile.ZipFile(tmp, "w", zipfile.ZIP_DEFLATED) as z:
+                # readable by its owner alone: it holds logs, transcripts and chats, and may land in a shared temp folder
+                fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+                os.fchmod(fd, 0o600)
+                with os.fdopen(fd, "wb") as raw, zipfile.ZipFile(raw, "w", zipfile.ZIP_DEFLATED) as z:
                     for name, data in entries:
                         # a PNG or JPEG is compressed already
                         kind = zipfile.ZIP_STORED if name.startswith("screenshot.") else zipfile.ZIP_DEFLATED

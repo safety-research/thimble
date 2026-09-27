@@ -214,6 +214,17 @@ async def _lifespan(app: FastAPI):
                  cli.home(), cli.versions_line(), cli.claude_code_version() or "not found on PATH")
     except Exception:
         log.exception("reading the versions for the log failed")
+    # thimble's state is its owner's alone: <home>, the log and state in it, and the workspaces (config.private_dir)
+    try:
+        from . import cli
+
+        cli.ensure_home()
+        for f in (cli.server_json(), cli.log_path(), cli.log_path().with_name(cli.log_path().name + ".1"),
+                  cli.vite_log_path()):
+            config.private_file(f)
+        config.private_dir(config.WORKSPACES_DIR)
+    except Exception:
+        log.exception("making thimble's home and workspaces private failed")
     # the records an install tree's data/ holds are brought into the registry once (config.migrate_registry)
     try:
         config.migrate_registry()
