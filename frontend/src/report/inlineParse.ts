@@ -19,6 +19,8 @@ const INLINE_RE = new RegExp(
   'g',
 )
 const REF_RE = new RegExp(REF_SRC, 'g')
+/** The schemes a link may use; a link with any other (javascript:, data:) stays its own text. */
+const LINK_SCHEME = /^(https?|mailto):/i
 
 export type InlineNode =
   | { kind: 'text'; text: string }
@@ -64,7 +66,10 @@ export function parseInline(text: string): InlineNode[] {
     else if (m[2] != null) out.push({ kind: 'ref', ...splitValueRef(m[2].trim()) })
     else if (m[3] != null) out.push({ kind: 'ref', ref: m[3], bare: true })
     else if (m[5] != null) out.push(...codeNodes(m[5]))
-    else if (m[6] != null) out.push({ kind: 'link', href: m[7], children: parseInline(m[6]) })
+    else if (m[6] != null) {
+      if (LINK_SCHEME.test(m[7])) out.push({ kind: 'link', href: m[7], children: parseInline(m[6]) })
+      else push(m[0])
+    }
     else if (m[8] != null) out.push({ kind: 'strong', children: parseInline(m[8]) })
     else if (m[9] != null) out.push({ kind: 'strong', children: parseInline(m[9]) })
     else if (m[10] != null) out.push({ kind: 'em', children: parseInline(m[10]) })

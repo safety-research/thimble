@@ -21,6 +21,7 @@ from starlette.staticfiles import StaticFiles
 
 from . import config
 from .errors import ErrorLog
+from .hook_auth import HookAuth
 from .http_guard import OriginCheck, SecurityHeaders, dev_origins
 
 # every line of thimble's own loggers carries a wall-clock stamp, so the server log can be read against the other logs
@@ -214,6 +215,20 @@ async def _lifespan(app: FastAPI):
                  cli.home(), cli.versions_line(), cli.claude_code_version() or "not found on PATH")
     except Exception:
         log.exception("reading the versions for the log failed")
+    # thimble's state is its owner's alone: <home>, the log and state in it, and the workspaces (config.private_dir)
+    try:
+        from . import cli
+
+        cli.ensure_home()
+        for f in (cli.server_json(), cli.log_path(), cli.log_path().with_name(cli.log_path().name + ".1"),
+                  cli.vite_log_path()):
+            config.private_file(f)
+        st = cli.read_state()
+        if st and not st.get("token"):  # a record an older supervisor wrote: the hooks' token (hook_auth.py)
+            cli.write_state(st)
+        config.private_dir(config.WORKSPACES_DIR)
+    except Exception:
+        log.exception("making thimble's home and workspaces private failed")
     # the records an install tree's data/ holds are brought into the registry once (config.migrate_registry)
     try:
         config.migrate_registry()
@@ -278,6 +293,7 @@ def create_app() -> FastAPI:
     vite = dev_origins(dev_mode())
     if vite:
         app.add_middleware(CORSMiddleware, allow_origins=vite, allow_methods=["*"], allow_headers=["*"])
+    app.add_middleware(HookAuth)  # inside OriginCheck: a page's request is refused as a page's first
     app.add_middleware(OriginCheck, extra_origins=vite)  # after TrustedHost: the Host it compares with is an allowed one
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=ALLOWED_HOSTS)
     app.add_middleware(SecurityHeaders)  # outside the two checks, so their refusals carry the headers too

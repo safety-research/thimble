@@ -258,6 +258,7 @@ build_ui() {  # with node >= 20 the frontend's packages, which custom views need
 write_pointer() {  # $THIMBLE_HOME/app-dir: how the plugin copy in Claude Code's plugin cache finds this tree (plugin/bin/thimble-app-dir)
   step "7/11 $home/app-dir → $dir"
   run mkdir -p "$home"
+  run chmod 700 "$home"
   say "+ printf '%s\\n' $dir > $home/app-dir"
   [ "$dry" = 1 ] || printf '%s\n' "$dir" > "$home/app-dir"
 }
@@ -336,7 +337,7 @@ finish() {  # doctor, then the one next step (and the PATH line the link needs)
 
 keep_log() {  # the run's output also goes to $home/install.log (the last run only), which `thimble feedback` carries
   [ "$dry" = 1 ] && return 0
-  { mkdir -p "$home" && : > "$home/install.log"; } 2>/dev/null || return 0
+  { mkdir -p "$home" && chmod 700 "$home" && (umask 077 && : > "$home/install.log"); } 2>/dev/null || return 0
   exec > >(tee -a "$home/install.log") 2> >(tee -a "$home/install.log" >&2)
 }
 

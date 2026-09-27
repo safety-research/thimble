@@ -483,6 +483,15 @@
   font: var(--type-body-sm);
 }
 /* terminal-first's choice of how the orientation runs, under its switch: `Orientation runs as: subagent / background session` */
+.settings-consent {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  margin-top: 6px;
+  color: var(--text-primary);
+  font: var(--type-body-sm);
+}
 .settings-route {
   display: flex;
   flex-wrap: wrap;

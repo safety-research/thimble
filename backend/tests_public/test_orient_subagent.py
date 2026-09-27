@@ -23,7 +23,7 @@ END = {"type": "system", "subtype": "turn_duration"}
 
 
 @pytest.fixture(autouse=True)
-def _fresh(workspaces_tmp, tmp_path, monkeypatch):
+def _fresh(workspaces_tmp, tmp_path, monkeypatch, consented):
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "claude-config"))
     session._live.clear()
     session._expected.clear()

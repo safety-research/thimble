@@ -114,7 +114,7 @@ def fake(tmp_path, monkeypatch) -> Path:
     monkeypatch.setenv("FAKE_DIR", str(out))
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(cfg))
     monkeypatch.setenv("THIMBLE_SANDBOX", "0")
-    ledger.put_settings(CORPUS, {"terminal_first": True})
+    ledger.put_settings(CORPUS, {"terminal_first": True, ledger.TERMINAL_FIRST_CONSENT: True})
     return out
 
 
@@ -158,7 +158,7 @@ def test_names_labels_and_the_route():
     assert bg_session.proxy_type("writer:report") == "thimble:writer" and bg_session.proxy_type("orient") == "thimble:orient"
 
 
-def test_the_route_follows_the_settings(workspaces_tmp):
+def test_the_route_follows_the_settings(workspaces_tmp, consented):
     assert not bg_session.wanted(CORPUS, "writer"), "the default route runs every session as claude -p"
     ledger.put_settings(CORPUS, {"terminal_first": True})
     assert bg_session.wanted(CORPUS, "writer") and bg_session.wanted(CORPUS, "critique")
@@ -183,21 +183,96 @@ def test_the_bg_command_drops_print_flags_and_carries_the_environment_in_setting
     assert str(tmp_path / bg_session.FIRST_MESSAGE_FILE) in long[-1]
 
 
-def test_a_work_folder_under_the_workspaces_is_trusted_and_another_folder_is_left_alone(tmp_path, monkeypatch):
+def test_turning_terminal_first_on_the_first_time_takes_the_analyst_s_agreement(workspaces_tmp):
+    """Terminal-first changes Claude Code's own files, so the first PUT that turns it on on this install carries the
+    analyst's agreement (409 without it), which is recorded, never stored in the workspace's settings; later ones need
+    none, and the settings say whether it was given."""
+    from fastapi import HTTPException
+
+    from app import claude_changes
+
+    assert ledger.get_settings(CORPUS)["terminal_first_consented"] is False
+    with pytest.raises(HTTPException) as e:
+        ledger.put_settings(CORPUS, {"terminal_first": True})
+    assert e.value.status_code == 409 and "agreement" in e.value.detail
+    assert ledger.get_settings(CORPUS)["terminal_first"] is False and not claude_changes.consented()
+    out = ledger.put_settings(CORPUS, {"terminal_first": True, ledger.TERMINAL_FIRST_CONSENT: True})
+    assert out["terminal_first"] is True and out["terminal_first_consented"] is True
+    stored = json.loads((config.workspace_dir(CORPUS) / "settings.json").read_text())
+    assert ledger.TERMINAL_FIRST_CONSENT not in stored and "terminal_first_consented" not in stored
+    ledger.put_settings(CORPUS, {"terminal_first": False})
+    assert ledger.put_settings(CORPUS, {"terminal_first": True})["terminal_first"] is True, "asked once per install"
+
+
+def test_a_work_folder_alone_is_trusted_once_agreed_and_turning_terminal_first_off_takes_it_back(tmp_path, monkeypatch):
+    """`claude --bg` needs a trusted folder: each work folder under the workspaces is marked trusted by itself, never the
+    workspaces folder, and only after the analyst agreed. Turning terminal-first off puts back what each entry held,
+    the rest of Claude Code's config untouched; a folder outside the workspaces is left alone."""
+    from app import claude_changes
+
     cfg = tmp_path / "cfg"
     cfg.mkdir()
-    (cfg / ".claude.json").write_text(json.dumps({"projects": {}, "numStartups": 3}))
+    work = (config.WORKSPACES_DIR / CORPUS / "writers" / "report").resolve()
+    other = (config.WORKSPACES_DIR / CORPUS / "critic").resolve()
+    (cfg / ".claude.json").write_text(json.dumps({"numStartups": 3, "projects": {
+        str(other): {"allowedTools": ["Read"], "hasTrustDialogAccepted": False}}}))
+    (cfg / ".claude.json").chmod(0o600)
     env = {config.CONFIG_DIR_ENV: str(cfg)}
-    work = config.WORKSPACES_DIR / CORPUS / "orient" / "work"
-    work.mkdir(parents=True)
-    assert bg_session.trust_workspaces(work, env)
+    for f in (work, other):
+        f.mkdir(parents=True)
+    assert not bg_session.trust_workspaces(work, env), "not before the analyst agreed"
+    assert str(work) not in json.loads((cfg / ".claude.json").read_text())["projects"]
+    claude_changes.consent()
+    assert bg_session.trust_workspaces(work, env) and bg_session.trust_workspaces(other, env)
     data = json.loads((cfg / ".claude.json").read_text())
-    assert data["projects"][str(config.WORKSPACES_DIR.resolve())]["hasTrustDialogAccepted"] is True
-    assert data["numStartups"] == 3, "the rest of the file is kept"
-    outside = tmp_path.parent / f"{tmp_path.name}-elsewhere"  # the workspaces are the test's tmp folder
+    assert data["projects"][str(work)] == {"hasTrustDialogAccepted": True}
+    assert data["projects"][str(other)] == {"allowedTools": ["Read"], "hasTrustDialogAccepted": True}
+    assert str(config.WORKSPACES_DIR.resolve()) not in data["projects"], "never the workspaces folder"
+    assert data["numStartups"] == 3 and oct((cfg / ".claude.json").stat().st_mode & 0o777) == "0o600"
+    outside = tmp_path.parent / f"{tmp_path.name}-elsewhere"
     outside.mkdir()
     assert not bg_session.trust_workspaces(outside, env)
     assert str(outside) not in json.loads((cfg / ".claude.json").read_text())["projects"]
+
+    ledger.put_settings(CORPUS, {"terminal_first": True})
+    ledger.put_settings(CORPUS, {"terminal_first": False})
+    data = json.loads((cfg / ".claude.json").read_text())
+    assert str(work) not in data["projects"], "the entry thimble made is gone"
+    assert data["projects"][str(other)] == {"allowedTools": ["Read"], "hasTrustDialogAccepted": False}
+    assert data["numStartups"] == 3 and claude_changes.untrust() == []
+
+
+def test_uninstall_puts_back_the_statusline_and_the_trust_before_it_removes_anything(tmp_path, monkeypatch):
+    """`thimble uninstall` runs `python -m app.claude_changes undo` with the tree's Python, before any removal: every
+    corpus folder's statusline is the analyst's own again and every work folder's trust is taken back."""
+    import subprocess
+
+    from app import cc_settings, claude_changes
+
+    home = tmp_path / "home"
+    monkeypatch.setenv("THIMBLE_HOME", str(home))
+    cfg = tmp_path / "cfg"
+    cfg.mkdir()
+    (cfg / ".claude.json").write_text(json.dumps({"projects": {}}))
+    corpus = tmp_path / "corpus-copy"
+    local = corpus / ".claude" / "settings.local.json"
+    local.parent.mkdir(parents=True)
+    local.write_text(json.dumps({"statusLine": {"type": "command", "command": "my-line"}}))
+    cc_settings.set_statusline(corpus, "thimble-agents --statusline --chain my-line")
+    claude_changes.consent()
+    work = (config.WORKSPACES_DIR / CORPUS / "writers" / "report").resolve()
+    work.mkdir(parents=True)
+    assert bg_session.trust_workspaces(work, {config.CONFIG_DIR_ENV: str(cfg)})
+    user = tmp_path / "user"
+    user.mkdir()
+    env = {"HOME": str(user), "THIMBLE_HOME": str(home), "PATH": "/usr/bin:/bin"}
+    r = subprocess.run(["bash", str(config.REPO_ROOT / "plugin" / "bin" / "thimble"), "uninstall", "--yes", "--keep-home"],
+                       capture_output=True, text=True, env=env, timeout=60)
+    assert "put back what terminal-first changed in Claude Code's files" in r.stdout, r.stdout + r.stderr
+    assert json.loads(local.read_text())["statusLine"] == {"type": "command", "command": "my-line"}
+    assert str(work) not in json.loads((cfg / ".claude.json").read_text())["projects"]
+    assert claude_changes.statuslines() == {} and json.loads((home / claude_changes.TRUST_FILE).read_text()) == {}
+    assert r.stdout.index("put back what terminal-first") < r.stdout.index("is kept (--keep-home)")
 
 
 async def test_a_writer_runs_as_a_background_session_whose_run_ends_while_the_session_goes_on(fake):
@@ -395,7 +470,7 @@ def test_the_statusline_is_set_for_terminal_first_and_put_back_after(workspaces_
     local.write_text(json.dumps(folders))
     (corpus / ".claude" / "settings.json").write_text(json.dumps({"statusLine": {"type": "command", "command": "planted"}}))
     try:
-        ledger.put_settings(CORPUS, {"terminal_first": True})
+        ledger.put_settings(CORPUS, {"terminal_first": True, ledger.TERMINAL_FIRST_CONSENT: True})
         line = json.loads(local.read_text())["statusLine"]
         assert line["command"].endswith("thimble-agents --statusline --chain my-line"), "chained to the user's own"
         assert "planted" not in line["command"], "thimble-agents runs the chained command in a shell: never the corpus's"

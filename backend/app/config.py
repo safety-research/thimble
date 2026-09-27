@@ -873,10 +873,34 @@ def workspace_path(name: str) -> Path:
     return WORKSPACES_DIR / name
 
 
+def private_dir(p: Path) -> Path:
+    """`p`, made if missing, readable by its owner alone (0700), since it holds what thimble read and wrote; the folders
+    above it are made as usual."""
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.mkdir(mode=0o700, exist_ok=True)
+    try:
+        if p.stat().st_mode & 0o077:
+            os.chmod(p, 0o700)
+    except OSError:  # a folder of another owner keeps its mode
+        pass
+    return p
+
+
+def private_file(p: Path) -> None:
+    """A file of thimble's state made readable by its owner alone (0600), when it is not already."""
+    try:
+        if p.stat().st_mode & 0o077:
+            os.chmod(p, 0o600)
+    except OSError:
+        pass
+
+
 def workspace_dir(name: str) -> Path:
-    """workspace_path, created on demand: for the writers."""
+    """workspace_path, created on demand, private (private_dir): for the writers."""
     p = workspace_path(name)
-    p.mkdir(parents=True, exist_ok=True)
+    if not p.is_dir():
+        private_dir(WORKSPACES_DIR)
+        p.mkdir(mode=0o700, exist_ok=True)
     return p
 
 

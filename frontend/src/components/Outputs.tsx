@@ -20,7 +20,7 @@ import { FrameTable } from '../canvas/FrameTable'
 import { FRAME_MIME, asFrame } from '../lib/dataFrame'
 import { inlineSvg } from '../lib/svg'
 import { purifyHtml } from '../lib/sanitize'
-import { dataOnly, withoutEmbedOptions } from '../lib/vegaLoader'
+import { dataOnly, specObject, withoutEmbedOptions } from '../lib/vegaLoader'
 import { failureText, loadChunk } from '../lib/chunkRecovery'
 import { MdImage } from './MdImage'
 
@@ -847,9 +847,11 @@ function Vega({ spec, fitWidth, card, labels }: { spec: unknown; fitWidth?: numb
   const { width } = useVisibleSize(ref)
   const { key: theme } = useTheme()
   const live = useRef<Embedded | null>(null)
+  // a spec that is no plain object is refused before vega-embed sees it (lib/vegaLoader specObject)
+  const plain = useMemo(() => specObject(spec), [spec])
   useEffect(() => {
     const el = ref.current
-    if (!el || width <= 0) return
+    if (!el || width <= 0 || !plain) return
     const cur = live.current
     if (cur && cur.spec === spec && cur.fitWidth === fitWidth && cur.theme === theme && cur.colours === colours) {
       refitChart(cur.view, el, cur.container)
@@ -863,7 +865,7 @@ function Vega({ spec, fitWidth, card, labels }: { spec: unknown; fitWidth?: numb
     const embed = async (w: number | undefined, fit: Refit, tries: number, step?: { w: number; over: number }): Promise<void> => {
       // the palette is read per theme, so a folded group's grey and the kept groups' colours are the theme's
       const classes = (JSON.parse(colours) as [string, number][][]).map((k): LabelClassColour[] => k.map(([name, n]) => ({ name, colour: token(colourToken(n)), none: !n })))
-      const shown = chartDefaults(spec, { width: fitWidth ?? el.clientWidth, card, palette: VIZ_SERIES.map(token), other: token('--viz-ink-3'), labels: classes, neutral: VIZ_NEUTRAL.map(token) })
+      const shown = chartDefaults(plain, { width: fitWidth ?? el.clientWidth, card, palette: VIZ_SERIES.map(token), other: token('--viz-ink-3'), labels: classes, neutral: VIZ_NEUTRAL.map(token) })
       const sized = onPaper(applyRefit(inkSmallNominal(responsive(shown, w, w === fitWidth ? undefined : MIN_VIEW_REFIT), inkPair()), fit))
       const m = await loadChunk(() => import('vega-embed'))
       if (!alive) return
@@ -917,7 +919,7 @@ function Vega({ spec, fitWidth, card, labels }: { spec: unknown; fitWidth?: numb
     return () => {
       alive = false
     }
-  }, [spec, fitWidth, width, theme, card, colours])
+  }, [spec, plain, fitWidth, width, theme, card, colours])
   useEffect(
     () => () => {
       live.current?.finalize()
@@ -926,9 +928,10 @@ function Vega({ spec, fitWidth, card, labels }: { spec: unknown; fitWidth?: numb
     [],
   )
   return (
-    <div className="outputs-vega-wrap" data-body="" data-settled={drawn ? 'true' : 'false'}>
+    <div className="outputs-vega-wrap" data-body="" data-settled={drawn || !plain ? 'true' : 'false'}>
       <div className="outputs-vega" ref={ref} />
-      {error && <pre className="outputs-text outputs-error">Chart failed: {error}</pre>}
+      {!plain && <pre className="outputs-text outputs-error">Chart failed: the chart spec is not a JSON object</pre>}
+      {plain && error && <pre className="outputs-text outputs-error">Chart failed: {error}</pre>}
     </div>
   )
 }

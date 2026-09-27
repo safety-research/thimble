@@ -391,6 +391,20 @@ def test_the_frame_document_blocks_every_host_before_any_script(ws):
     assert views._libs(["vega-embed"]) == ["vega", "vega-lite", "vega-embed"]
 
 
+def test_the_frame_document_s_policy_comes_before_the_view_s_markup_whatever_it_starts_with(ws):
+    """A view whose markup opens with <header> (which a search for `<head` also finds), with a script before its
+    <head>, or with a doctype of its own: thimble's head, policy first, always leads the document."""
+    base = views.read_view(CORPUS, "threads")
+    for html in ("<header><script>window.early = 1</script></header><head><title>t</title></head><body>x</body>",
+                 "<script>window.early = 1</script><head></head>",
+                 "<!DOCTYPE html>\n<html><head><title>t</title></head><body><header>h</header></body></html>"):
+        (Path(base["dir"]) / views.VIEW_HTML).write_text(html)
+        doc = views.frame_document(base)
+        assert doc.startswith("<!doctype html><head><meta http-equiv=\"Content-Security-Policy\""), html
+        assert doc.lower().count("<!doctype") == 1, html
+        assert doc.endswith("</head>" + (html[len("<!DOCTYPE html>"):] if html.startswith("<!") else html)), html
+
+
 def test_the_frame_document_gives_the_view_thimble_s_parts_before_its_own_styles(ws):
     doc = views.frame_document(views.read_view(CORPUS, "threads"))
     kit = doc.index(".seg-opt.active")

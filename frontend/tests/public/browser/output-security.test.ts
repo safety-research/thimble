@@ -92,16 +92,18 @@ test('an inlined html output runs no script, keeps no style or form, and loads n
   await settle()
   const seen = await page.evaluate((id) => {
     const el = document.getElementById(id)!
-    el.querySelector<HTMLElement>('#js')?.click()
+    // an output's ids are prefixed, so none is the app's
+    const q = (name: string) => el.querySelector<HTMLElement>(`#user-content-${name}`)
+    q('js')?.click()
     return {
       table: !!el.querySelector('table td'),
       styles: document.querySelectorAll('style').length,
       form: !!el.querySelector('form, button'),
-      leak: !!el.querySelector('#leak')?.getAttribute('src'),
-      bgStyle: el.querySelector('#bg')?.getAttribute('style') ?? null,
-      jsHref: el.querySelector('#js')?.getAttribute('href') ?? null,
-      ext: [el.querySelector('#ext')?.getAttribute('target'), el.querySelector('#ext')?.getAttribute('rel')],
-      local: !!el.querySelector('#local')?.getAttribute('src'),
+      leak: !!q('leak')?.getAttribute('src'),
+      bgStyle: q('bg')?.getAttribute('style') ?? null,
+      jsHref: q('js')?.getAttribute('href') ?? null,
+      ext: [q('ext')?.getAttribute('target'), q('ext')?.getAttribute('rel')],
+      local: !!q('local')?.getAttribute('src'),
       iframe: !!el.querySelector('iframe'),
     }
   }, id)
@@ -109,6 +111,18 @@ test('an inlined html output runs no script, keeps no style or form, and loads n
   assert.equal(await pwned(), null)
   assert.deepEqual(seen, { table: true, styles: 0, form: false, leak: false, bgStyle: null, jsHref: null, ext: ['_blank', 'noreferrer noopener'], local: true, iframe: false })
   assert.deepEqual(leaks(), [])
+})
+
+test('an inlined html output cannot draw over the page', async () => {
+  const id = await output({ 'text/html': '<div class="chat-perm" style="position: fixed; inset: 0; z-index: 2147483647; background: red; transform: translate(0, 0)">cover</div>' })
+  await settle()
+  const got = await page.evaluate((id) => {
+    const el = document.getElementById(id)!
+    const top = document.elementFromPoint(innerWidth - 2, innerHeight - 2)
+    const div = el.querySelector('.outputs-html > div')
+    return { covered: !!top && el.contains(top), cls: div ? div.getAttribute('class') : 'missing', style: div?.getAttribute('style') ?? null }
+  }, id)
+  assert.deepEqual(got, { covered: false, cls: null, style: 'background-color: red;' })
 })
 
 test('an svg figure keeps its drawing, runs nothing and loads nothing from another host', async () => {

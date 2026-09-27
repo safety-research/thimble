@@ -364,7 +364,7 @@ Get a picture of what the analyst sees in the browser, such as a card as the can
 {
   "type": "object",
   "properties": {
-    "ref": {"type": "string", "description": "card:<id>, view:<slug>, a file ref a view opens, report:<slug>#<id> of a figure, thread:<id>, or an http address on this machine."},
+    "ref": {"type": "string", "description": "card:<id>, view:<slug>, a file ref a view opens, report:<slug>#<id> of a figure, thread:<id>, or an http address of thimble's own interface on this machine."},
     "selector": {"type": "string", "description": "With an http address, the CSS selector of the one element to shoot."}
   },
   "required": ["ref"]
@@ -1072,7 +1072,7 @@ Your first message is in {path}. Read it whole and follow it.
 
 ## bg-untrusted
 
-Claude Code does not trust {folder}, so the background session could not start there. Run `claude` in {folder} once and accept its trust prompt, then start it again.
+Claude Code does not trust {folder}, so the background session could not start there. The analyst can agree to thimble marking its work folders trusted by turning Terminal-first off and on again in Settings, or run `claude` in {folder} once and accept its trust prompt; then start it again.
 
 ## bg-carry-on
 

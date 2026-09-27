@@ -11,7 +11,8 @@ import { Output } from '../../src/components/Outputs.tsx'
 import { ChatMarkdown } from '../../src/chat/markdown.tsx'
 import { isLocalUrl, purifyHtml, purifySvg, styleReachesOut } from '../../src/lib/sanitize.ts'
 import { inlineSvg, rootDecls } from '../../src/lib/svg.ts'
-import { dataOnly, withoutEmbedOptions } from '../../src/lib/vegaLoader.ts'
+import { dataOnly, specObject, withoutEmbedOptions } from '../../src/lib/vegaLoader.ts'
+import { parseInline } from '../../src/report/inlineParse.ts'
 import { mount, settle, unmountAll } from './mount.tsx'
 
 const SRC = path.resolve(__dirname, '../../src')
@@ -65,14 +66,44 @@ describe('html output', () => {
     const out = html(el)
     expect(el.querySelector('table td')?.textContent).toBe('1')
     expect(out).not.toMatch(/onerror|<style|<link|<form|<button|<input|<iframe|javascript:|evil\.example/i)
-    expect(el.querySelector('#leak')?.getAttribute('src')).toBeNull()
-    expect(el.querySelector('#srcset')?.hasAttribute('srcset')).toBe(false)
-    expect(el.querySelector('#bg')?.getAttribute('style')).toBeNull()
-    expect(el.querySelector('#kept-style')?.getAttribute('style')).toBe('color: red')
-    expect(el.querySelector('#local')?.getAttribute('src')).toMatch(/^data:image\/png/)
-    const ext = el.querySelector('#ext')
+    // an output's ids are its own, prefixed so none is the app's
+    const byId = (id: string) => el.querySelector(`#user-content-${id}`)
+    expect(el.querySelector('#leak')).toBeNull()
+    expect(byId('leak')?.getAttribute('src')).toBeNull()
+    expect(byId('srcset')?.hasAttribute('srcset')).toBe(false)
+    expect(byId('bg')?.getAttribute('style')).toBeNull()
+    expect(byId('kept-style')?.getAttribute('style')).toBe('color: red')
+    expect(byId('local')?.getAttribute('src')).toMatch(/^data:image\/png/)
+    const ext = byId('ext')
     expect([ext?.getAttribute('target'), ext?.getAttribute('rel')]).toEqual(['_blank', 'noreferrer noopener'])
     expect((window as { __pwned?: unknown }).__pwned).toBeUndefined()
+  })
+
+  test('inlined html keeps its own look but cannot draw over the app or dress up as its parts', async () => {
+    const markup = [
+      '<div id="over" class="chat-perm dataframe" data-request="x" style="position: fixed; inset: 0; z-index: 9999; transform: translateY(-100px); color: red; padding: 4px">covers the card</div>',
+      '<table class="dataframe"><tbody><tr><td style="text-align: right; font-weight: 600; background-color: #eee; border-bottom: 1px solid #ccc">1</td></tr></tbody></table>',
+      '<span class="btn chat-perm-allow" style="position: absolute; top: 0">Allow</span>',
+    ].join('')
+    const el = await mount(<Output bundle={{ 'text/html': markup }} />)
+    const over = el.querySelector('#user-content-over') as HTMLElement
+    expect([over.style.position, over.style.zIndex, over.style.transform, over.style.inset, over.style.top]).toEqual(['', '', '', '', ''])
+    expect([over.style.color, over.style.padding]).toEqual(['red', '4px'])
+    expect(over.getAttribute('class')).toBe('dataframe')
+    expect(over.hasAttribute('data-request')).toBe(false)
+    const td = el.querySelector('td') as HTMLElement
+    expect([td.style.textAlign, td.style.fontWeight, td.style.backgroundColor]).toEqual(['right', '600', 'rgb(238, 238, 238)'])
+    expect(td.style.borderBottom).toMatch(/1px solid/)
+    const fake = el.querySelector('span')!
+    expect([fake.hasAttribute('class'), fake.hasAttribute('style')]).toEqual([false, false])
+    expect(el.querySelector('.chat-perm, .chat-perm-allow, .btn, [data-request]')).toBeNull()
+    expect(readFileSync(path.join(SRC, 'styles/outputs.css'), 'utf8')).toMatch(/\.outputs-html \{[^}]*contain: paint/)
+  })
+
+  test('an svg figure keeps its own classes and style', () => {
+    const out = purifySvg('<svg xmlns="http://www.w3.org/2000/svg"><g class="axis" style="stroke: #000"><path d="M0 0"/></g></svg>')
+    expect(out).toContain('class="axis"')
+    expect(out).toContain('style="stroke: #000"')
   })
 
   test('purifyHtml drops what would leave the page or reach another route, and keeps the media routes', () => {
@@ -123,6 +154,15 @@ describe('svg output', () => {
     const out = purifySvg('<svg xmlns="http://www.w3.org/2000/svg"><circle r="4"/><foreignObject><p>x</p></foreignObject><a href="https://evil.example/"><text>t</text></a></svg>')
     expect(out).toContain('<circle')
     expect(out).not.toMatch(/foreignObject|<p>|<a |evil\.example/)
+  })
+})
+
+describe('vega output', () => {
+  test('a spec that arrives as a string naming a URL is refused, never loaded', async () => {
+    const el = await mount(<Output bundle={{ 'application/vnd.vegalite.v5+json': 'data:application/json,{"mark":"bar","usermeta":{"embedOptions":{}}}' }} />)
+    await settle()
+    expect(el.querySelector('.outputs-error')?.textContent).toMatch(/not a JSON object/)
+    expect(el.querySelector('svg, canvas')).toBeNull()
   })
 })
 
@@ -185,6 +225,22 @@ describe('the pure checks', () => {
     expect(withoutEmbedOptions({ mark: 'bar', usermeta: { embedOptions: { loader: {} }, note: 1 } })).toEqual({ mark: 'bar', usermeta: { note: 1 } })
     const plain = { mark: 'bar' }
     expect(withoutEmbedOptions(plain)).toBe(plain)
+  })
+
+  test('a chart spec is a plain object: a JSON string is parsed, a URL or anything else is refused', () => {
+    const spec = { mark: 'bar', usermeta: { embedOptions: { loader: {} } } }
+    expect(specObject(spec)).toBe(spec)
+    expect(specObject(JSON.stringify(spec))).toEqual(spec)
+    for (const bad of ['data:application/json,{"mark":"bar"}', 'https://evil.example/spec.json', '[1]', 'null', [spec], null, 3, new Date()]) expect(specObject(bad), String(bad)).toBeNull()
+  })
+
+  test("a report sentence's link keeps http:, https: and mailto: only; any other scheme stays text", () => {
+    const links = (t: string) => parseInline(t).filter((n) => n.kind === 'link')
+    for (const href of ['https://example.org/a', 'http://example.org/', 'mailto:someone@example.org']) expect(links(`see [x](${href})`), href).toEqual([{ kind: 'link', href, children: [{ kind: 'text', text: 'x' }] }])
+    for (const href of ['javascript:alert(1)', 'JavaScript:alert(1)', 'data:text/html,x', 'vbscript:x', 'file:///etc/passwd', '/api/x']) {
+      expect(links(`see [x](${href})`), href).toEqual([])
+      expect(parseInline(`see [x](${href})`), href).toEqual([{ kind: 'text', text: `see [x](${href})` }])
+    }
   })
 })
 

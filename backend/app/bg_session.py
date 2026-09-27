@@ -9,8 +9,8 @@ report's; another document's is thimble:writer-<doc>) and thimble:critic.
 Start. agent_session builds the `claude -p` command as for any session and hands it to start(), which turns it into a
 `claude --bg` command: the first message goes on the command line, and the session's own environment goes in the
 --settings `env`, since the background service starts the session with its own environment. `claude --bg` refuses a
-folder Claude Code does not trust, so a work folder under thimble's workspaces gets that folder trusted first
-(trust_workspaces). BgProc stands in for the process agent_session follows: a run ends when the session is idle, its
+folder Claude Code does not trust, so a work folder under thimble's workspaces is marked trusted first, that folder
+alone and once the analyst agreed to it (trust_workspaces, claude_changes). BgProc stands in for the process agent_session follows: a run ends when the session is idle, its
 transcript's last turn has ended and it has no background work, while the session itself goes on for the analyst. A
 session whose turn ended while a background shell of its own runs on counts as idle once its transcript has been quiet
 for LINGER_S (_lingering), since Claude Code lists it as busy for as long as the shell runs.
@@ -53,7 +53,7 @@ from typing import Any, Awaitable, Callable
 from fastapi import APIRouter
 from pydantic import BaseModel
 
-from . import agents, cite, config, ledger, session
+from . import agents, cite, claude_changes, config, ledger, session
 
 log = logging.getLogger("thimble.bg_session")
 router = APIRouter()
@@ -220,44 +220,31 @@ def global_config_path(env: dict[str, str] | None = None) -> Path:
     return Path(value) / ".claude.json" if value else Path.home() / ".claude.json"
 
 
-def trusted(folder: Path, data: dict[str, Any]) -> bool:
-    projects = data.get("projects") if isinstance(data.get("projects"), dict) else {}
-    for f in (folder, *folder.parents):
-        entry = projects.get(str(f))
-        if isinstance(entry, dict) and entry.get("hasTrustDialogAccepted") is True:
-            return True
-    return False
-
-
 def trust_workspaces(folder: Path, env: dict[str, str] | None = None) -> bool:
     """Have Claude Code trust `folder`, a work folder under thimble's workspaces, so `claude --bg` starts there: the
-    workspaces folder is marked trusted in the global config unless a folder above `folder` is. True when it is
-    trusted; False for a folder outside the workspaces, which stays the analyst's to trust."""
+    folder alone is marked trusted in the global config (claude_changes.trust), once the analyst agreed to
+    terminal-first's changes, unless it or a folder above it is trusted already. True when it is trusted; False for a
+    folder outside the workspaces, which stays the analyst's to trust, or before the analyst agreed."""
     folder = folder.resolve()
-    root = config.WORKSPACES_DIR.resolve()
     path = global_config_path(env)
     try:
         data = json.loads(path.read_text("utf-8")) if path.is_file() else {}
     except (OSError, ValueError):
         return False
-    if not isinstance(data, dict):
-        return False
-    if trusted(folder, data):
+    if isinstance(data, dict) and claude_changes.trusted(folder, data):
         return True
-    if not folder.is_relative_to(root):
+    if not folder.is_relative_to(config.WORKSPACES_DIR.resolve()) or not claude_changes.consented():
         return False
-    projects = data.setdefault("projects", {})
-    entry = projects.setdefault(str(root), {})
-    if not isinstance(entry, dict):
+    if not claude_changes.trust(folder, path):
+        log.warning("could not mark %s trusted in %s", folder, path)
         return False
-    entry["hasTrustDialogAccepted"] = True
-    try:
-        ledger.atomic_write_text(path, json.dumps(data, indent=2, ensure_ascii=False))
-    except OSError:
-        log.warning("could not mark %s trusted in %s", root, path, exc_info=True)
-        return False
-    log.info("marked thimble's workspaces folder %s trusted in %s", root, path)
+    log.info("marked the work folder %s trusted in %s", folder, path)
     return True
+
+
+def untrust(c: str) -> list[str]:
+    """The trust terminal-first gave the work folders of workspace `c`, taken back (claude_changes.untrust)."""
+    return claude_changes.untrust(config.WORKSPACES_DIR.resolve() / c)
 
 
 # --------------------------------------------------------------------------- the command
@@ -1238,7 +1225,7 @@ def apply_statusline(c: str) -> None:
 
     try:
         cwd = config.corpus_dir(c)
-        if terminal_first(c):
+        if terminal_first(c) and claude_changes.consented():
             cc_settings.set_statusline(cwd, statusline_command())
         else:
             cc_settings.clear_statusline(cwd)

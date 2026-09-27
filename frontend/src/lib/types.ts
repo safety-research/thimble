@@ -544,6 +544,9 @@ export interface PermissionRequest {
   also?: string[]
   /** a web call's "don't ask again", kept for the workspace: its site, or `web search` */
   keep?: string
+  /** the length of the command or input when the card shows only its start (backend PERMISSION_INPUT_CHARS); such a
+   * request offers no "don't ask again" */
+  cut?: number
 }
 
 /** A session held where the browser cannot answer: the model-switch dialog after a safety stop (session.py). */
@@ -900,6 +903,8 @@ export interface Settings {
   models: Record<string, ModelConf>
   /** the orientation runs as a subagent of the analyst's Claude Code session (backend orientation.terminal_first) */
   terminal_first?: boolean
+  /** the analyst agreed on this install to terminal-first's changes to Claude Code's files (backend claude_changes) */
+  terminal_first_consented?: boolean
   /** in terminal-first mode, how the orientation runs: a subagent of main, or a background session (backend bg_session) */
   orient_route?: 'subagent' | 'session'
   /** the chat column is hidden and main's foot shows in a dock (shell/Shell, chat off) */

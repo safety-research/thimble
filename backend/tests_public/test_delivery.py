@@ -20,7 +20,7 @@ import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
-from app import agents, cc_channel, channel, config, prompts, session
+from app import agents, cc_channel, channel, config, hook_auth, prompts, session
 
 CORPUS = "mini"
 SID = "5e505c4b-742a-4361-9a19-808f80f408cc"
@@ -29,6 +29,18 @@ PID = 4242  # that process
 PLUGIN = config.REPO_ROOT / "plugin"
 WATCHER = PLUGIN / "bin" / ".thimble-watch"
 MARKER = "thimble browser event:"  # hooks.json's rewakeMessage, which main.md names
+TOKEN = "t0ken-of-this-install"  # server.json's, which the hooks prove they hold (app/hook_auth.py)
+
+
+def _signed(token: str = TOKEN) -> tuple[dict[str, str], str]:
+    """A hook's headers for a fresh nonce, and the proof the server's answer must carry."""
+    nonce = os.urandom(8).hex()
+    return hook_auth.headers(token, nonce), hook_auth.sign(token, "server", nonce)
+
+
+def _record_token(home: Path, token: str = TOKEN, **extra) -> None:
+    home.mkdir(parents=True, exist_ok=True)
+    (home / "server.json").write_text(json.dumps({"token": token, **extra}))
 
 
 @pytest.fixture(autouse=True)
@@ -144,8 +156,11 @@ def test_render_is_what_the_mirror_reads_as_a_channel_event():
 # ----------------------------------------------------------------------------- the server: the permission hook
 
 
-def test_the_permission_hook_waits_on_main_s_meta_until_the_browser_answers(monkeypatch):
-    client = TestClient(__import__("app.main", fromlist=["app"]).app, base_url="http://127.0.0.1")
+def test_the_permission_hook_waits_on_main_s_meta_until_the_browser_answers(monkeypatch, tmp_path):
+    monkeypatch.setenv("THIMBLE_HOME", str(tmp_path / "thome"))
+    _record_token(tmp_path / "thome")
+    client = TestClient(__import__("app.main", fromlist=["app"]).app, base_url="http://127.0.0.1",
+                        headers=_signed()[0])
     session.attach(CORPUS, SID, _cwd(), None)
     body = {"cwd": _cwd(), "session": SID, "tool_name": "Bash",
             "tool_input": {"command": "touch x", "description": "Create x"}}
@@ -185,24 +200,49 @@ def test_the_permission_hook_waits_on_main_s_meta_until_the_browser_answers(monk
         assert client.post("/api/channel/permission/hook", json={**body, "session": "not-main"}).status_code == 409
 
 
+def test_a_relayed_request_reaches_the_card_whole_or_marked_as_cut():
+    n = channel.PERMISSION_INPUT_CHARS
+    channel._hold(CORPUS, "r1", "Write", "Save a.md", json.dumps({"content": "a" * 5_000}))
+    channel._hold(CORPUS, "r2", "Write", "Save b.md", "b" * (n + 7))
+    one, two = agents.meta_or_none(CORPUS, agents.MAIN_ID)["permissions"]
+    assert len(one["input"]) > 5_000 and "cut" not in one
+    assert len(two["input"]) == n and two["cut"] == n + 7
+
+
 class _Stand:
     """The server's delivery routes as the watcher sees them: `pull` answers in order from `answers` (a (status, body)
     pair each; 204 once they run out; status 0 closes the connection without an answer, as a server that crashed while
-    holding the poll), after calling `on_pull`, if given; `ack`, the permission hook and the held hook are recorded."""
+    holding the poll), after calling `on_pull`, if given; `ack`, the permission hook and the held hook are recorded.
+    Each answer proves `token` as thimble's server does (app/hook_auth.py), none with `token` None, as a process that
+    took the port; `unproven` counts the requests that did not prove the token."""
 
     def __init__(self, answers: list[tuple[int, dict]], permission: tuple[int, dict] = (200, {"behavior": None}),
-                 on_pull=None, held: tuple[int, dict] = (200, {"text": ""})) -> None:
+                 on_pull=None, held: tuple[int, dict] = (200, {"text": ""}), token: str | None = TOKEN,
+                 agents: tuple[int, dict] = (200, {})) -> None:
         self.answers = list(answers)
         self.permission = permission
         self.held = held
+        self.agents = agents
+        self.sent: list[str] = []  # every request's header values
         self.on_pull = on_pull
+        self.token = token
+        self.unproven = 0
         self.seen: list[tuple[str, str, dict]] = []
         outer = self
 
         class H(BaseHTTPRequestHandler):
+            def _prove(self) -> None:
+                outer.sent.extend(self.headers.values())
+                nonce = self.headers.get(hook_auth.NONCE_HEADER) or ""
+                if outer.token and self.headers.get(hook_auth.AUTH_HEADER) != hook_auth.sign(outer.token, "hook", nonce):
+                    outer.unproven += 1
+                if outer.token:
+                    self.send_header(hook_auth.PROOF_HEADER, hook_auth.sign(outer.token, "server", nonce))
+
             def _reply(self, status: int, body: dict) -> None:
                 data = json.dumps(body).encode()
                 self.send_response(status)
+                self._prove()
                 self.send_header("Content-Type", "application/json")
                 self.send_header("Content-Length", str(len(data)))
                 self.end_headers()
@@ -222,6 +262,7 @@ class _Stand:
                 if status == 204:
                     time.sleep(0.05)
                     self.send_response(204)
+                    self._prove()
                     self.end_headers()
                     return
                 self._reply(status, body)
@@ -232,6 +273,8 @@ class _Stand:
                 outer.seen.append(("POST", path, body))
                 if path == "/api/channel/held":
                     return self._reply(*outer.held)
+                if path == "/api/agents":
+                    return self._reply(*outer.agents)
                 self._reply(*(outer.permission if path.endswith("/permission/hook") else (200, {})))
 
             def log_message(self, *a):
@@ -251,7 +294,7 @@ def _watch(tmp_path: Path, port: int | None, stdin: dict, *args: str, extra: dic
     home = tmp_path / "thome"
     home.mkdir(exist_ok=True)
     if port:
-        (home / "server.json").write_text(json.dumps({"api": f"http://127.0.0.1:{port}"}))
+        _record_token(home, api=f"http://127.0.0.1:{port}")
     # CLAUDE_PID too: a test run from a Claude Code session inherits that session's; a test names one when it wants it
     env = {k: v for k, v in os.environ.items() if k not in ("THIMBLE_SESSION", "CLAUDE_PROJECT_DIR", "CLAUDE_PID")}
     env.update({"THIMBLE_HOME": str(home), "THIMBLE_PORT": "1", **(extra or {})})
@@ -293,8 +336,7 @@ def test_the_watcher_exits_at_once_where_it_has_nothing_to_watch(tmp_path):
         assert r.returncode == 0 and r.stderr == "", status
     stand = _Stand([])  # 204 for ever: the first watcher holds its lock
     home = tmp_path / "thome"
-    home.mkdir(exist_ok=True)
-    (home / "server.json").write_text(json.dumps({"api": f"http://127.0.0.1:{stand.port}"}))
+    _record_token(home, api=f"http://127.0.0.1:{stand.port}")
     env = {k: v for k, v in os.environ.items() if k not in ("THIMBLE_SESSION", "CLAUDE_PID")}
     env["THIMBLE_HOME"] = str(home)
     first = subprocess.Popen([str(WATCHER)], stdin=subprocess.PIPE, env=env, text=True)
@@ -336,6 +378,79 @@ def test_the_permission_hook_prints_the_browser_s_decision_or_nothing(tmp_path):
                           "agent_id": None}
     (tmp_path / "thome" / "server.json").unlink()
     assert _watch(tmp_path, None, inp, "--permission").stdout == "", "no server: Claude Code asks in the terminal"
+
+
+def test_the_server_answers_a_hook_route_only_to_a_request_that_proves_the_token(monkeypatch, tmp_path):
+    """Any process on the machine can reach the port: a hook route answers 401 unless the request proves it holds the
+    token in server.json, and every answer to one proves the server holds it too. Other routes are untouched."""
+    home = tmp_path / "thome"
+    monkeypatch.setenv("THIMBLE_HOME", str(home))
+    app = __import__("app.main", fromlist=["app"]).app
+    body = {"cwd": _cwd(), "session": SID}
+    with TestClient(app, base_url="http://127.0.0.1") as client:
+        assert client.post("/api/channel/held", json=body).status_code == 401, "no server.json: no token to prove"
+        _record_token(home)
+        assert client.post("/api/channel/held", json=body).status_code == 401, "no proof"
+        wrong, _ = _signed("another-token")
+        for path in hook_auth.HOOK_PATHS:
+            assert client.post(path, json=body, headers=wrong).status_code == 401, path
+        good, proof = _signed()
+        r = client.post("/api/channel/held", json=body, headers=good)
+        assert r.status_code == 200 and r.headers[hook_auth.PROOF_HEADER] == proof
+        assert client.get("/api/health").status_code == 200, "no other route asks for it"
+        _record_token(home, token="rotated")  # a new start writes a new token, which the server reads at once
+        assert client.post("/api/channel/held", json=body, headers=_signed()[0]).status_code == 401
+        assert client.post("/api/channel/held", json=body, headers=_signed("rotated")[0]).status_code == 200
+
+
+def test_the_hooks_do_nothing_without_server_json_or_with_a_server_that_cannot_prove_the_token(tmp_path):
+    """The hooks run in every Claude Code session with the plugin: with no server.json, or one without a token, they
+    reach no port at all (not THIMBLE_PORT, not 8300); a process that answers on the recorded port without the
+    server's proof is not believed, so its allow is never printed."""
+    inp = {"session_id": SID, "cwd": "/data/mini", "tool_name": "Bash", "tool_input": {"command": "rm -rf x"},
+           "hook_event_name": "PermissionRequest"}
+    rogue = _Stand([(200, {"id": "e1", "text": EVENT_TEXT})], permission=(200, {"id": "h1", "behavior": "allow"}),
+                   held=(200, {"text": "injected"}), token=None)
+    try:
+        r = _watch(tmp_path, None, inp, "--permission", extra={"THIMBLE_PORT": str(rogue.port)})
+        assert r.returncode == 0 and r.stdout == "" and rogue.seen == [], "no server.json: the port is not tried"
+        _record_token(tmp_path / "thome", token="", api=f"http://127.0.0.1:{rogue.port}")
+        assert _watch(tmp_path, None, inp, "--permission").stdout == "" and rogue.seen == [], "no token"
+        for args in (("--permission",), ("--held",), ()):
+            r = _watch(tmp_path, rogue.port, {**inp, "hook_event_name": "Stop"} if not args else inp, *args)
+            assert r.returncode == 0 and r.stdout == "" and r.stderr == "", args
+        assert [p for _, p, _ in rogue.seen] == ["/api/channel/permission/hook", "/api/channel/held",
+                                                 "/api/channel/pull"], "each asked once and not believed"
+        assert rogue.sent and not any(TOKEN in v for v in rogue.sent), "the token itself is never sent"
+    finally:
+        rogue.close()
+    stand = _Stand([], permission=(200, {"id": "h1", "behavior": "allow"}))
+    try:
+        r = _watch(tmp_path, stand.port, inp, "--permission")
+    finally:
+        stand.close()
+    assert json.loads(r.stdout)["hookSpecificOutput"]["decision"] == {"behavior": "allow"} and stand.unproven == 0
+
+
+def test_the_agents_list_trusts_only_a_server_that_proves_the_token(tmp_path):
+    script = PLUGIN / "bin" / "thimble-agents"
+    home = tmp_path / "thome"
+    env = {k: v for k, v in os.environ.items() if k != "THIMBLE_SESSION"}
+    env["THIMBLE_HOME"] = str(home)
+
+    def statusline(port: int) -> str:
+        _record_token(home, api=f"http://127.0.0.1:{port}")
+        return subprocess.run([str(script), "--statusline"], input=json.dumps({"cwd": "/data/mini"}), capture_output=True,
+                              text=True, env=env, timeout=30).stdout
+
+    for token, want in ((None, ""), (TOKEN, "thimble · ● thimble:writer working\n")):
+        stand = _Stand([], token=token, agents=(200, {"line": "thimble · ● thimble:writer working"}))
+        try:
+            got = statusline(stand.port)
+        finally:
+            stand.close()
+        assert got == want, token
+        assert stand.unproven == 0 and [p for _, p, _ in stand.seen] == ["/api/agents"]
 
 
 def test_the_held_hook_adds_the_events_held_for_main_to_the_prompt_or_nothing(tmp_path):

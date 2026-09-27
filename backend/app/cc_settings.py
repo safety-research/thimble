@@ -27,7 +27,7 @@ import sys
 from pathlib import Path
 from typing import Any, Mapping
 
-from . import cc_channel, config
+from . import cc_channel, claude_changes, config
 from .ledger import atomic_write_text
 
 log = logging.getLogger("thimble.cc_settings")
@@ -251,7 +251,7 @@ def _clear_env_key(cwd: Path, key: str, overrides_file: str) -> bool:
     return True
 
 
-STATUSLINE_FILE = "statusline-overrides.json"  # in thimble's home: {folder: {ours, previous}} (set_statusline)
+STATUSLINE_FILE = claude_changes.STATUSLINE_FILE  # in thimble's home: {folder: {ours, previous}} (set_statusline)
 STATUSLINE_REFRESH_S = 2
 
 
@@ -299,29 +299,7 @@ def set_statusline(cwd: Path, command: str) -> None:
 
 def clear_statusline(cwd: Path) -> bool:
     """Put back the folder's own `statusLine` in place of thimble's, when thimble's is still there; True when it did."""
-    kept = _statuslines()
-    rec = kept.pop(_key(cwd), None)
-    if rec is None:
-        return False
-    _write_statuslines(kept)
-    path = cwd / LOCAL_SETTINGS
-    d = _read(path)
-    line = d.get("statusLine")
-    if not isinstance(line, dict) or line.get("command") != rec.get("ours"):
-        return False
-    if rec.get("previous"):
-        d["statusLine"] = rec["previous"]
-    else:
-        d.pop("statusLine", None)
-    try:
-        if d:
-            atomic_write_text(path, json.dumps(d, indent=2) + "\n")
-        else:
-            path.unlink()
-    except OSError as e:
-        log.warning("could not put back the statusline in %s: %s", path, e)
-        return False
-    return True
+    return claude_changes.restore_statusline(cwd)
 
 
 def clear_override(cwd: Path) -> bool:
