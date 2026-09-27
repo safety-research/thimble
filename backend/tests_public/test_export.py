@@ -316,3 +316,30 @@ def test_a_transcript_path_outside_claude_code_s_transcript_roots_is_never_copie
     assert main["found"] is True and main["rows"] == 4, "found under the roots by its id"
     assert next(r for r in idx if r["session"] == stray)["found"] is False
     assert next(r for r in idx if r["session"] == borrowed)["found"] is False, "another session's transcript is not its own"
+
+
+def test_a_symlink_among_the_transcripts_is_never_followed(ws, tmp_path):
+    """A cell can write the workspace's own transcript root (.claude-config/projects) and plant a symlink there: neither
+    the lookup by id nor a session's side folder follows one, so a file outside the transcripts never reaches the zip."""
+    secret = tmp_path / "private" / "secret.jsonl"
+    _jsonl(secret, [{"type": "user", "message": {"content": "a private file"}}])
+    (tmp_path / "private" / "agent-a1.meta.json").write_text(json.dumps({"description": "a private meta"}))
+    planted = "44444444-5555-4666-8777-888888888888"
+    own = ws / ".claude-config" / "projects" / "-x"
+    own.mkdir(parents=True)
+    (own / f"{planted}.jsonl").symlink_to(secret)
+    _json(ws / "sessions.json", {**json.loads((ws / "sessions.json").read_text()),
+                                 planted: {"session": planted, "transcript_path": str(own / f"{planted}.jsonl")}})
+    linked = "55555555-6666-4777-8888-999999999999"
+    _jsonl(own / f"{linked}.jsonl", [{"type": "user", "message": {"content": "its own transcript"}}])
+    (own / linked).symlink_to(secret.parent)  # the side folder itself
+    main_side = next((tmp_path / "claude" / "projects").glob(f"*/{MAIN_SID}"))
+    (main_side / "subagents" / "agent-a2.jsonl").symlink_to(secret)
+    (main_side / "subagents" / f"agent-{FORK}.meta.json").unlink()
+    (main_side / "subagents" / f"agent-{FORK}.meta.json").symlink_to(tmp_path / "private" / "agent-a1.meta.json")
+    z = _zip()
+    assert not [n for n in z.namelist() if b"a private" in z.read(n)]
+    idx = _rows(z, "sessions/index.jsonl")
+    assert next(r for r in idx if r["session"] == planted)["found"] is False
+    assert next(r for r in idx if r["session"] == linked and r["file"] == "session")["found"] is True
+    assert not [r for r in idx if r["session"] == linked and r["file"] != "session"]

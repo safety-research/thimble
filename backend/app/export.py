@@ -232,25 +232,26 @@ def _projects_roots(ws: Path) -> list[Path]:
     return list(dict.fromkeys([d / "projects" for d in dirs] + [ws / ".claude-config" / "projects"]))
 
 
-def _under_roots(path: Path, roots: list[Path]) -> bool:
+def _own_file(p: Path, root: Path) -> bool:
+    """A regular file that is no symlink and resolves inside `root` (as feedback._own_file)."""
     try:
-        resolved = path.resolve()
-        return any(resolved.is_relative_to(root.resolve()) for root in roots)
-    except OSError:
+        return p.is_file() and not p.is_symlink() and p.resolve().is_relative_to(root.resolve())
+    except (OSError, ValueError):
         return False
 
 
 def _find_transcript(sid: str, roots: list[Path], hint: Any = None) -> Path | None:
-    """Session `sid`'s transcript: the path sessions.json recorded when it lies under one of Claude Code's transcript
-    roots, else the newest `<root>/*/<sid>.jsonl`. Any other recorded path is ignored, since a cell can write
-    sessions.json and the zip is meant to be shared."""
+    """Session `sid`'s transcript: the path sessions.json recorded when it is an own file (_own_file) of one of Claude
+    Code's transcript roots, else the newest `<root>/*/<sid>.jsonl` that is one. Any other path is ignored, since a cell
+    can write sessions.json and plant a symlink, and the zip is meant to be shared."""
     if isinstance(hint, str) and hint:
         p = Path(hint)
-        if p.name == f"{sid}.jsonl" and p.is_file() and _under_roots(p, roots):
+        if p.name == f"{sid}.jsonl" and any(_own_file(p, root) for root in roots):
             return p
     for root in roots:
         try:
-            hits = sorted(root.glob(f"*/{sid}.jsonl"), key=lambda p: p.stat().st_mtime, reverse=True)
+            hits = sorted((h for h in root.glob(f"*/{sid}.jsonl") if _own_file(h, root)),
+                          key=lambda p: p.stat().st_mtime, reverse=True)
         except OSError:
             hits = []
         if hits:
@@ -326,10 +327,10 @@ def _sessions(w: Writer, ws: Path, chats: list[dict[str, Any]], tickets: list[di
         stats = w.copy_jsonl(f"sessions/{sid}.jsonl", path)
         index.append({**row, "file": "session", "path": f"sessions/{sid}.jsonl", "found": True, **stats})
         side = path.with_suffix("")  # <projects>/<slug>/<sid>/
-        if not side.is_dir():
+        if side.is_symlink() or not side.is_dir():
             continue
         for p in sorted(side.rglob("*")):
-            if not p.is_file() or p.is_symlink():
+            if not _own_file(p, side):
                 continue
             rel = p.relative_to(side).as_posix()
             arc = f"sessions/{sid}/{rel}"
@@ -343,7 +344,8 @@ def _sessions(w: Writer, ws: Path, chats: list[dict[str, Any]], tickets: list[di
                 entry: dict[str, Any] = {"session": sid, "parent_role": info.get("role"), "file": kind, "path": arc, "found": True, **stats}
                 if m:
                     entry["agent_id"] = m.group(1)
-                    meta = _read_json(p.with_name(f"agent-{m.group(1)}.meta.json"))
+                    meta_path = p.with_name(f"agent-{m.group(1)}.meta.json")
+                    meta = _read_json(meta_path) if _own_file(meta_path, side) else None
                     fork = threads.FORK_DESCRIPTION_RE.match(str(meta.get("description") or "")) if isinstance(meta, dict) else None
                     # A thread's fork is described `thread:<fork name>` or `thread:<id>` (threads.FORK_DESCRIPTION_RE),
                     # which names its thread even when the thread's meta no longer lists it.
