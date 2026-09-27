@@ -2,9 +2,10 @@
 // every label over files with its colour, then the labels over canvas cards and report sentences. A label over files
 // shows its mark (LabelMark), filled while it is on; a click on the mark turns it on or off. A click on the name turns
 // it on, focuses it, or turns the focused label off. An on label with more than two values lists them, and a click on
-// one toggles its highlight. Under each name, the status of its last or running apply. Beside a view, a label's row
-// (and each value's) has a funnel on hover that sets the Files label filter, which the view keeps its records by.
-import { useMemo, useState, type CSSProperties } from 'react'
+// one toggles its highlight. Under each name, the status of its last or running apply. A label over files has a palette
+// on hover that changes its colours (LabelPalette). Beside a view, a label's row (and each value's) has a funnel on
+// hover that sets the Files label filter, which the view keeps its records by.
+import { useMemo, useRef, useState, type CSSProperties } from 'react'
 import { Button } from '../components/Button'
 import { Icon } from '../components/Icon'
 import { Spinner } from '../components/Spinner'
@@ -14,6 +15,7 @@ import { hhmm } from '../lib/time'
 import type { Concept, ConceptRun } from '../lib/types'
 import { classesOf, colourVar, isFilesLabel, isMultiClass, labelStatus, laneTags, mainColour, outcomeText, progressText, type LabelStatus } from './labels'
 import { LabelMark } from './LabelMark'
+import { LabelPalette } from './LabelPalette'
 import type { FilesLabels } from './useLabels'
 
 interface Props {
@@ -95,6 +97,8 @@ function LabelRow({ label: k, on, n, focused, marked, editing, status, labels, o
   const running = status?.state === 'running'
   const files = isFilesLabel(k)
   const colour = mainColour(k)
+  const paletteAt = useRef<HTMLButtonElement>(null)
+  const [picking, setPicking] = useState(false)
   const turn = () => {
     if (!on) labels.setFocus(k.id)
     labels.toggle(k.id)
@@ -128,11 +132,15 @@ function LabelRow({ label: k, on, n, focused, marked, editing, status, labels, o
           </button>
         )}
         {running && <Spinner size={10} label="Running" />}
+        {files && (
+          <Button ref={paletteAt} variant="icon" size="sm" icon="palette" title="Change colour" aria-label={`Change the colours of ${k.name}`} className="files-label-colour" active={picking} onClick={() => setPicking(!picking)} />
+        )}
         {onFilter && (classes.length <= 2 || !on) && (
           <Button variant="icon" size="sm" icon="filter" title="Show only these records" aria-label={`Show only the records ${k.name} marks`} className="files-label-filter" onClick={() => onFilter(k.id, (classes.find((c) => c.highlight) ?? classes[0])?.name ?? 'yes')} />
         )}
         <Button variant="icon" size="sm" icon="more-horizontal" title="Edit label" aria-label={`Edit ${k.name}`} className="files-label-edit" active={editing} onClick={() => onEdit(editing ? null : k.id)} />
       </div>
+      {files && <LabelPalette label={k} anchor={paletteAt} open={picking} onClose={() => setPicking(false)} onPick={(value, n) => labels.setColour(k.id, value, n)} />}
       {status && <LabelStatusLine status={status} name={k.name} onRetry={() => onRetry(k.id)} />}
       {files && on && classes.length > 2 && (
         <div className="files-label-classes">

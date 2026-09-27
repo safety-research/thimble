@@ -42,7 +42,7 @@ export function ViewSurface({ ws, view, active }: { ws: string; view: BuiltView;
   return (
     <div className="view-surface files-body is-view">
       {side.side}
-      <ViewPane ws={ws} view={view} path={path} kind={kind} targetRef={at?.ref} quote={at?.quote} onQuoteMissing={quoteMissing} labels={labels} lead={side.lead} />
+      <ViewPane ws={ws} view={view} path={path} kind={kind} targetRef={at?.ref} quote={at?.quote} onQuoteMissing={quoteMissing} labels={labels} lead={side.lead} first={side.first} onNewLabel={side.newLabel} />
       {side.card}
     </div>
   )

@@ -35,14 +35,15 @@ A label marks records, such as the posts that ask for help. The analyst turns la
 - Marks in charts. thimble cannot see inside a chart, so the reader counts what each label marks with `thimble.marked(ref)`, and the page draws the marked part in the label's colour, such as part of each bar.
 - The filter. The reader keeps only the records for which `thimble.kept(ref)` holds, in every list and count, and the page fetches again in `thimble.onLabels(fn)`, which runs when the labels or the filter change. A unit stays when `thimble.kept_unit(refs)` holds for the refs of all the records it gathers, from every file it reads, so a label that marks the records of one file keeps the units that hold them.
 - Colour. Label colours repeat the theme's viz colours, so while a label is on, it alone colours records and marks. Draw your own categories in the viz inks (`--viz-ink-*`), or tell them apart by position or text, and give them their viz colours back when no label is on.
-- No label controls. The Labels pane is the only place labels are turned on or filtered, so the page has no label toggle, checkbox, menu or clickable legend of its own.
+- Label controls are thimble's. The page never hardcodes a label's name or colour, and it leaves which labels are on to thimble. A colour control may list the labels over files that `thimble.onLabels` sends in `all`, each with its id, colour and values, and turn one on or off in the Labels pane with `thimble.setLabel(id, on)`; `thimble.newLabel()` opens the pane's prompt for a new one. Where the page shows a label value's swatch, a click may open the `palette` it sends and save the value's colour with `thimble.setLabelColour(id, value, colour)`, which every view and the pane then show. Give each such control `data-label` with the label's id. A legend may isolate or hide a label's values in the view, as it does the view's own values; thimble's label filter stays the pane's.
 
 ## Worked examples
 
-Two views in {{examples}} show methods on invented data, each described in its `view.json` under `data`. Read the one closest to your task. Take the method, not their domain, fields or layout.
+Three views in {{examples}} show methods on invented data, each described in its `view.json` under `data`. Read the one closest to your task. Take the method, not their domain, fields or layout.
 
-- `incident-timeline` puts records from several sources on one time axis, for records read in time: an overview of the whole span to zoom into, a select for every field, and sources or incidents compared side by side as lanes.
-- `repository` gathers each run's records into units such as pull requests and issues, for units that span records: the runs' measures side by side, any runs chosen and compared unit by unit, and filters on each unit's facts and on who did what.
+- `linked-sessions` is for agent transcripts, sessions and subagents: one lane per session with each subagent under the session that spawned it, a session's transcript, and sessions or runs compared side by side.
+- `incident-timeline` is for events over time from several sources: an overview of the whole span to zoom into, a select for every field, and sources or incidents compared side by side as lanes.
+- `repository` is for work items across runs, such as pull requests and issues: the runs' measures side by side, any runs chosen and compared unit by unit, and filters on each unit's facts and on who did what.
 
 ## The three files
 

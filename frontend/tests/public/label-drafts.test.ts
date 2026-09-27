@@ -4,7 +4,8 @@
 // labels.
 import { describe, expect, test } from 'vitest'
 import { promptDraft } from '../../src/files/LabelPrompt.tsx'
-import { claimMatches, draftBody, draftClasses, freeName, isMultiClass, mainColour, MULTI_COLOUR, nextColour, ownColour, presenceOf, viewDefaults, viewLabels } from '../../src/files/labels.ts'
+import { nextFreeColour } from '../../src/files/LabelCard.tsx'
+import { claimMatches, draftBody, draftClasses, freeColour, freeName, isMultiClass, mainColour, MULTI_COLOUR, nextColour, ownColour, presenceOf, usedColours, viewDefaults, viewLabels } from '../../src/files/labels.ts'
 import type { Concept, LabelDraft } from '../../src/lib/types.ts'
 
 const draft = (extra: Partial<LabelDraft> = {}): LabelDraft => ({ name: 'links out', over: 'files', marks: 'span', glob: 'posts/*.jsonl', kind: 'regex', text: '(?i)https?://', values: ['link', 'no match'], ...extra })
@@ -21,6 +22,19 @@ describe('a drafted label', () => {
       { name: 'revert', color: 1, highlight: true },
       { name: 'other', color: 0, highlight: false },
     ])
+  })
+
+  test('a new label and its values take colours no class of another label has, while one is free', () => {
+    const kind = { id: 'k1', name: 'edit kind', labels: ['fix', 'feature', 'other'], classes: [{ name: 'fix', color: 1, highlight: true }, { name: 'feature', color: 2, highlight: true }, { name: 'other', color: 0, highlight: false }] }
+    const tone = { id: 'k2', name: 'tone', labels: ['angry', 'calm'], classes: [{ name: 'angry', color: 4, highlight: true }, { name: 'calm', color: 0, highlight: false }] }
+    const labels = [kind, tone] as never[]
+    expect(usedColours(labels)).toEqual([1, 2, 4])
+    expect(nextFreeColour(labels)).toBe(3)
+    expect(draftClasses(['save', 'delete', 'revert', 'other'], 3, [1, 2, 4]).map((c) => c.color)).toEqual([3, 5, 6, 0])
+    expect(draftBody(draft({ values: ['link', 'mailto', 'no match'] }), 3, [1, 2, 4]).classes!.map((c) => c.color)).toEqual([3, 5, 0])
+    const every = Array.from({ length: 12 }, (_, i) => i + 1)
+    expect([freeColour(11, [11, 12, 1]), freeColour(3, every)]).toEqual([2, null])
+    expect(draftClasses(['a', 'b', 'c'], 5, every).map((c) => c.color)).toEqual([5, 6, 7])
   })
 
   test("a class's colour square steps past the colours the label's other classes have, and a new class takes a free one", () => {

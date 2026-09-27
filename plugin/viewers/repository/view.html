@@ -51,9 +51,42 @@
   /* the columns a narrow pane leaves out; a narrow pane stacks the runs over the activity, so they have the width */
   .w-s .wide2, .w-m .wide2, .compare .w-s .wide1 { display: none; }
 
-  .legend { display: flex; flex-wrap: wrap; gap: 2px 10px; margin: 2px 0 4px; font: 400 var(--text-mono-sm) / 1.4 var(--font-mono); color: var(--text-secondary); }
-  .legend i { display: inline-block; width: 8px; height: 8px; margin-right: 4px; border-radius: 1px; vertical-align: 0; }
-  .legend .per { color: var(--text-tertiary); }
+  .legend { display: flex; flex-wrap: wrap; align-items: center; gap: 2px; margin: 0 0 6px; font: 400 var(--text-xs) / 1 var(--font-body); color: var(--text-secondary); }
+  .legend .per { margin-left: 6px; color: var(--text-tertiary); white-space: nowrap; }
+  .legend .btn { margin-left: 4px; }
+  .sw { display: inline-block; width: 8px; height: 8px; border-radius: 2px; flex: none; }
+  .ico.s12 { width: 12px; height: 12px; }
+  .cbtn { gap: 7px; margin-right: 6px; padding: 0 8px 0 10px; }
+  .cbtn .k { color: var(--text-tertiary); font-weight: 400; }
+  .cbtn .ico { color: var(--text-tertiary); }
+  .cbtn .sws { display: inline-flex; gap: 2px; }
+  .cbtn .cnm { max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .lg { display: inline-flex; align-items: center; gap: 5px; height: 22px; padding: 0 6px 0 4px; border-radius: var(--radius-chip); white-space: nowrap; cursor: pointer; }
+  .lg:hover { background: var(--surface-hover); color: var(--text-primary); }
+  .lg.st { cursor: default; }
+  .lg.st:hover { background: none; color: var(--text-secondary); }
+  .lg .n { color: var(--text-tertiary); font-variant-numeric: tabular-nums; }
+  .lg.off { opacity: .38; }
+  .lg.off .sw { background: transparent !important; box-shadow: inset 0 0 0 1.3px var(--text-tertiary); }
+  .swb { display: inline-grid; place-items: center; width: 16px; height: 16px; margin-right: -3px; border-radius: 3px; flex: none; cursor: pointer; }
+  .swb:hover { background: var(--track-bg); }
+  .menu { position: fixed; z-index: 50; min-width: 250px; max-width: 320px; padding: 4px; border-radius: var(--radius-card); background: var(--raised-bg); box-shadow: var(--raised-ring), 0 10px 28px rgba(var(--ink-rgb), .14); font-size: var(--text-ui-sm); }
+  .mh { padding: 8px 8px 4px; color: var(--text-tertiary); font: 400 10.5px / 1.2 var(--font-body); letter-spacing: .08em; text-transform: uppercase; }
+  .mi { display: flex; align-items: center; gap: 8px; width: 100%; height: 28px; padding: 0 8px; border: 0; border-radius: var(--radius-chip); background: none; color: var(--text-primary); font: 400 var(--text-ui-sm) / 1 var(--font-body); text-align: left; cursor: pointer; }
+  .mi:hover { background: var(--surface-hover); }
+  .mi.sub { padding-left: 30px; color: var(--text-secondary); cursor: default; }
+  .mi .ck { width: 14px; display: inline-grid; place-items: center; flex: none; }
+  .mi .nm { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .mi .n { margin-left: auto; display: inline-flex; gap: 1px; color: var(--text-tertiary); font-variant-numeric: tabular-nums; font-size: var(--text-xs); flex: none; }
+  .mi .swb { width: 18px; height: 18px; margin: 0 -2px; }
+  .box { display: inline-block; flex: none; width: 12px; height: 12px; border-radius: 3px; border: 1.5px solid var(--mark); background: transparent; }
+  .box.on { background: var(--mark); }
+  .msep { height: 1px; margin: 4px 0; background: var(--border-hairline); }
+  .pal { position: fixed; z-index: 60; display: grid; grid-template-columns: repeat(7, 20px); gap: 6px; padding: 10px; border-radius: var(--radius-card); background: var(--raised-bg); box-shadow: var(--raised-ring), 0 10px 28px rgba(var(--ink-rgb), .14); }
+  .pal button { width: 20px; height: 20px; padding: 0; border: 0; border-radius: 4px; cursor: pointer; }
+  .pal button:hover { transform: scale(1.12); }
+  .pal button.cur { box-shadow: 0 0 0 2px var(--surface-card), 0 0 0 3.5px var(--text-primary); }
+  .chip .sw { margin-right: 2px; }
   svg.chart { display: block; overflow: visible; cursor: crosshair; user-select: none; }
   svg.chart text { font: 400 10.5px var(--font-mono); fill: var(--text-tertiary); }
   svg.chart .base { stroke: var(--border-hairline); }
@@ -62,8 +95,9 @@
   #filters { position: sticky; top: 0; z-index: 2; display: flex; flex-direction: column; gap: 6px; padding: 8px 16px; background: var(--surface-card); border-top: 1px solid var(--border-hairline); border-bottom: 1px solid var(--border-hairline); }
   #filters .frow { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; }
   #filters .field[type=search] { flex: 1 1 160px; max-width: 320px; }
-  #filters select.field { flex: 0 1 auto; min-width: 0; max-width: 136px; }
-  #filters select.set { max-width: 220px; border-color: var(--text-secondary); }
+  /* a select as wide as its chosen option, not its longest one */
+  #filters select.field { flex: 0 1 auto; min-width: 0; max-width: 220px; field-sizing: content; }
+  #filters select.set { border-color: var(--text-secondary); }
   #filters .total { margin-left: auto; font: 400 var(--text-mono-sm) / 1 var(--font-mono); color: var(--text-tertiary); white-space: nowrap; }
   .seg .n { font: 400 var(--text-mono-sm) / 1 var(--font-mono); color: var(--text-tertiary); }
 
@@ -92,13 +126,13 @@
   .more { margin: 12px 16px; }
   .empty { padding: 24px 16px; color: var(--text-tertiary); }
 
-  /* icons, drawn in a state's or an action's colour until a label is on, then in ink */
+  /* icons, drawn in a state's or an action's colour while the records are coloured by activity or state, else in ink */
   .ico { width: 16px; height: 16px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
   .s-open { color: var(--status-positive); }
   .s-merged, .s-fixed { color: var(--viz-5); }
   .s-closed { color: var(--status-negative); }
   .s-thread { color: var(--text-secondary); }
-  .labelled .s-open, .labelled .s-merged, .labelled .s-fixed, .labelled .s-closed, .labelled .matrix td .cr { color: var(--text-secondary); }
+  .inked .s-open, .inked .s-merged, .inked .s-fixed, .inked .s-closed, .inked .matrix td .cr { color: var(--text-secondary); }
 
   /* the compare grid: one row per issue, one column per chosen run */
   .grid { width: 100%; border-collapse: collapse; }
@@ -197,21 +231,26 @@
     </main>
     <aside id="detail"></aside>
   </div>
+  <div id="pop"></div>
 <script>
   // Repository: several agent runs on one library, as a forge's pages show them. It opens on the overview: one row per
   // run with its setup and measures, which also chooses the runs (a row or its chip adds or removes the run, All takes
   // every run), beside the chosen runs' activity per time bin. Every panel below follows the chosen runs. The tabs
-  // switch between pull requests, issues, discussions and agents; the filters narrow the tab by any field, with the
-  // count each value would give, and a drag across the activity narrows it to a time range. Any participant and Any
-  // activity pick records, so with a time range they keep the units where that agent did that in that range. Compare
+  // switch between pull requests, issues, discussions and agents; the filters narrow the tab by any field, each to one
+  // value or several, with the count each value would give, and a drag across the activity narrows it to a time range.
+  // Participant and Activity pick records, so with a time range they keep the units where that agent did that in that
+  // range. The Colour menu colours the records in the activity, on the strips and on a page by their activity, who did
+  // it, their run, or their unit's state or area, and its legend shows a value alone on a click and hides it on a
+  // shift-click. Compare
   // puts the chosen runs side by side: each run's activity in its row, and below it the pull requests or issues issue
   // by issue, or the discussions and agents run by run. A row opens its unit's page beside the list (or in its place in
   // a narrow pane).
   //
   // Labels: each unit's element carries view:<slug>/<key>, each record on a strip or a page its file ref, and each
-  // run's row view:<slug>/<run>, so thimble marks them. While a label is on, the page draws the records it marks in the
-  // label's colour in the activity, the strips and the runs' bars, and the other categories in ink; the filter is
-  // applied by the reader, so the page fetches again in thimble.onLabels.
+  // run's row view:<slug>/<run>, so thimble marks them. While a label is on it is the colouring: the page draws the
+  // records each of its values marks in that value's colour in the activity, the strips and the runs' bars, and the
+  // other categories in ink, and a value's swatch opens thimble's palette. The filter is applied by the reader, so the
+  // page fetches again in thimble.onLabels.
   const slug = (thimble.view && thimble.view.slug) || 'repository'
   const $ = (s, root) => (root || document).querySelector(s)
   const NS = 'http://www.w3.org/2000/svg'
@@ -220,31 +259,44 @@
 
   const TABS = {
     pulls: { name: 'Pull requests', noun: ['pull request', 'pull requests'], states: ['open', 'merged', 'closed'],
-      selects: [['author', 'Any author'], ['reviewer', 'Any reviewer'], ['verdict', 'Any review'], ['actor', 'Any participant'], ['action', 'Any activity'], ['area', 'Any area'], ['reason', 'Any close reason'], ['flag', 'Any flag']],
+      selects: [['author', 'Author', 'authors'], ['reviewer', 'Reviewer', 'reviewers'], ['verdict', 'Review', 'reviews'], ['actor', 'Participant', 'participants'], ['action', 'Activity', 'activities'], ['area', 'Area', 'areas'], ['reason', 'Close reason', 'close reasons'], ['flag', 'Flag', 'flags']],
       sorts: [['newest', 'Newest'], ['oldest', 'Oldest'], ['longest to merge', 'Longest to merge'], ['quickest first review', 'Quickest first review'], ['most reviews', 'Most reviews'], ['most commits', 'Most commits']] },
     issues: { name: 'Issues', noun: ['issue', 'issues'], states: ['open', 'fixed', 'closed'],
-      selects: [['author', 'Any author'], ['actor', 'Any participant'], ['action', 'Any activity'], ['origin', 'Any origin'], ['area', 'Any area'], ['reason', 'Any close reason']],
+      selects: [['author', 'Author', 'authors'], ['actor', 'Participant', 'participants'], ['action', 'Activity', 'activities'], ['origin', 'Origin', 'origins'], ['area', 'Area', 'areas'], ['reason', 'Close reason', 'close reasons']],
       sorts: [['newest', 'Newest'], ['oldest', 'Oldest'], ['longest to fix', 'Longest to fix'], ['most comments', 'Most comments']] },
     discussions: { name: 'Discussions', noun: ['discussion', 'discussions'], states: null,
-      selects: [['author', 'Anyone posting']],
+      selects: [['actor', 'Posted by', 'posters', 'Anyone posting']],
       sorts: [['most posts', 'Most posts'], ['latest', 'Latest post'], ['oldest', 'Oldest']] },
-    agents: { name: 'Agents', noun: ['agent', 'agents'], states: null, selects: [], sorts: [] },
+    agents: { name: 'Agents', noun: ['agent', 'agents'], states: null,
+      selects: [['agent', 'Agent', 'agents'], ['action', 'Activity', 'activities'], ['reviewed', 'Reviewed', 'agents', 'Reviewed anyone']], sorts: [] },
   }
   // what each action is drawn in, in the activity, on the strips and on a page's timeline (reader.py ACTION)
   const ACTIONS = {
     opened: '--viz-ink-2', pushed: '--viz-ink-3', approved: '--viz-3', 'changes requested': '--viz-2', commented: '--viz-1',
-    posted: '--viz-1', merged: '--viz-5', fixed: '--viz-5', closed: '--viz-4', 'signed off': '--viz-ink-4',
+    posted: '--viz-6', merged: '--viz-5', fixed: '--viz-5', closed: '--viz-4', 'signed off': '--viz-ink-4',
   }
   const STATE_COLOURS = { open: '--status-positive', merged: '--viz-5', fixed: '--viz-5', closed: '--status-negative' }
+  // the states in ink, while the records are coloured by a field whose colours they would repeat
+  const STATE_INKS = { open: '--viz-ink-2', merged: '--viz-ink-3', fixed: '--viz-ink-3', closed: '--viz-ink-4' }
+  // the fields the Colour menu offers on each tab (reader.py COLOURS), and the viz colours their values take in order
+  const COLOURS = { pulls: ['action', 'actor', 'run', 'state', 'area'], issues: ['action', 'actor', 'run', 'state', 'area'],
+    discussions: ['action', 'actor', 'run'], agents: ['action', 'actor', 'run'] }
+  const FIELD_NAMES = { action: 'Activity', actor: 'Participant', run: 'Run', state: 'State', area: 'Area' }
+  const CAT = ['--viz-1', '--viz-2', '--viz-3', '--viz-6', '--viz-5', '--viz-7']
   const COUNT_ACTION = { approved: 'approved', changes: 'changes requested', commit: 'pushed', comment: 'commented', pr: 'opened' }
   const AGENT_COLS = [['opened', 'Opened'], ['merged', 'Merged'], ['merges', 'Merges done'], ['approved', 'Approvals'], ['changes', 'Changes req.'], ['comments', 'Comments'], ['posts', 'Posts']]
 
-  // what the analyst chose; every change refetches the tab
-  const S = { tab: 'pulls', runs: [], compare: false, q: '', filters: {}, sort: '', range: null, agentView: 'table', agentSort: 'merges' }
+  // what the analyst chose; every change refetches the tab. `filters` holds each filter's chosen values, `colour` the
+  // field that colours the records, and `hide` the label values whose records the legend hides ('none' for the records
+  // none marks)
+  const S = { tab: 'pulls', runs: [], compare: false, q: '', filters: {}, sort: '', range: null, agentView: 'table', agentSort: 'merges',
+    colour: 'action', hide: [] }
   let data = null // the reader's answer for the tab (reader.py _view)
   let unit = null // the open unit's page (reader.py _detail)
   let focusRef = null // the record a citation opened
-  let label = null // the first label that is on
+  let labelState = { labels: [], filter: null, all: null, palette: null } // what thimble.onLabels last said
+  let menu = null // 'colour' while the Colour menu is open
+  let pal = null // {id, value, from} while a label value's palette is open
   let loading = 0
 
   function el(tag, cls, text) {
@@ -279,9 +331,43 @@
   }
   const setup = (r) => `${r.team} agents · ${r.approvals} approval${r.approvals === 1 ? '' : 's'}`
   const colourOf = (action) => `var(${ACTIONS[action] || '--viz-ink-3'})`
-  // a flag chip's tone, neutral while a label is on
-  const flagTone = () => (label ? 'chip-tone-neutral' : 'chip-tone-warning')
   const unitRef = (key) => `view:${slug}/${key}`
+  const esc = (x) => String(x == null ? '' : x).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c])
+
+  // ------------------------------------------------------------------------------------------------ colours
+  // The records take the colours of the labels' values while a label is on (the reader's `classes`), else those of the
+  // colour field's values: an action's or a state's own colour, and for the other fields the viz colours in the
+  // reader's `order`, the values past them in ink.
+  const labelOn = () => !!(data && data.classes.length)
+  const field = () => (data ? data.colour.field : S.colour)
+  const labelBy = (name) => (labelState.all || labelState.labels || []).find((l) => l.name === name)
+  const classKey = (c) => `${c.label}\n${c.value}`
+  function classColour(i) {
+    const c = data.classes[i], l = labelBy(c.label), v = l && (l.values || []).find((x) => x.name === c.value)
+    return (v && v.colour) || c.colour
+  }
+  function className(i) {
+    const c = data.classes[i], l = labelBy(c.label)
+    return l && (l.values || []).filter((v) => v.highlight !== false).length > 1 ? `${c.label}: ${c.value}` : c.label
+  }
+  const catIndex = (v) => data.colour.order.indexOf(v)
+  function valueColour(f, v) {
+    if (f === 'action') return colourOf(v)
+    if (f === 'state') return `var(${STATE_COLOURS[v] || '--viz-ink-3'})`
+    const i = catIndex(v)
+    return i >= 0 && i < CAT.length ? `var(${CAT[i]})` : 'var(--viz-ink-4)'
+  }
+  const valueName = (f, v) => (v === '' ? `no ${FIELD_NAMES[f].toLowerCase()}` : String(v))
+  // a record's part (reader.py _part) as a colour and a name
+  const partColour = (p) => (labelOn() ? (p >= 0 ? classColour(p) : 'var(--viz-ink-4)') : valueColour(field(), p))
+  const partName = (p) => (labelOn() ? (p >= 0 ? className(p) : 'no label') : valueName(field(), p))
+  // the actions' own colours stand on the icons only while the records are coloured by activity; the states' while
+  // they are coloured by activity or state
+  const actionInk = () => labelOn() || field() !== 'action'
+  const inked = () => labelOn() || (field() !== 'action' && field() !== 'state')
+  const stateColour = (st) => `var(${(inked() ? STATE_INKS : STATE_COLOURS)[st] || '--viz-ink-3'})`
+  // a flag chip's tone, neutral while a label is on
+  const flagTone = () => (labelOn() ? 'chip-tone-neutral' : 'chip-tone-warning')
 
   // ------------------------------------------------------------------------------------------------ icons
   const ICONS = {
@@ -322,13 +408,14 @@
   // ------------------------------------------------------------------------------------------------ fetching
   function query(extra) {
     return { op: 'view', tab: S.tab, runs: S.runs, compare: S.compare, q: S.q, filters: S.filters, range: S.range,
-             sort: S.tab === 'agents' ? S.agentSort : S.sort, offset: 0, ...extra }
+             sort: S.tab === 'agents' ? S.agentSort : S.sort, colour: S.colour, hide: S.hide, offset: 0, ...extra }
   }
   async function load() {
     const mine = ++loading
     const res = await thimble.fetch(query())
     if (mine !== loading) return
     data = res
+    S.hide = data.hide
     draw()
   }
   async function more() {
@@ -340,13 +427,14 @@
   const allChosen = () => data && data.chosen.length === data.runs.length
 
   function draw() {
-    document.body.classList.toggle('labelled', !!label)
+    document.body.classList.toggle('inked', inked())
     document.body.classList.toggle('compare', S.compare)
     drawTabs()
     drawRuns()
     drawActivity()
     drawFilters()
     drawList()
+    drawPop()
   }
 
   // ------------------------------------------------------------------------------------------------ tabs and runs
@@ -383,33 +471,39 @@
     load()
   }
 
-  // a run's units as a bar of their states in words, or while a label is on the part it marks
+  // the colour of the number of a run's units a label marks: its value's, while one value alone is on
+  const markedColour = () => (data.classes.length === 1 ? classColour(0) : 'var(--text-primary)')
+  // a run's units as a bar of their states in words, or while a label is on the part each of its values marks
   function stateBar(parts) {
     return (r, max) => {
       const box = el('div')
       const bars = el('div', 'bars')
       bars.style.width = `${Math.max(8, Math.round((r.n / Math.max(1, max)) * 100))}%`
       const words = el('div', 'words')
-      if (label) {
-        const m = el('span')
-        m.style.cssText = `width:${r.n ? (r.marked / r.n) * 100 : 0}%;background:${label.colour}`
+      if (labelOn()) {
+        r.classes.forEach((n, i) => {
+          if (!n) return
+          const m = el('span')
+          m.style.cssText = `flex:${n};background:${classColour(i)}`
+          bars.append(m)
+        })
         const rest = el('span')
-        rest.style.cssText = `flex:1;background:var(--viz-ink-4)`
-        bars.append(m, rest)
+        rest.style.cssText = `flex:${Math.max(0, r.n - r.marked)};background:var(--viz-ink-4)`
+        bars.append(rest)
         const b = el('b', null, String(r.marked))
-        b.style.color = label.colour
+        b.style.color = markedColour()
         words.append(b, ` of ${r.n}`)
       } else {
         for (const p of parts) {
           if (!r[p]) continue
           const s = el('span')
-          s.style.cssText = `flex:${r[p]};background:var(${STATE_COLOURS[p]})`
+          s.style.cssText = `flex:${r[p]};background:${stateColour(p)}`
           bars.append(s)
         }
         const shown = parts.filter((p) => r[p])
         shown.forEach((p, i) => {
           const b = el('b', null, String(r[p]))
-          b.style.color = `var(${STATE_COLOURS[p]})`
+          b.style.color = stateColour(p)
           words.append(b, ` ${p}${i < shown.length - 1 ? ' · ' : ''}`)
         })
         if (!shown.length) words.append('none')
@@ -451,9 +545,9 @@
   }
   function countWords(n, marked) {
     const box = el('div', 'words')
-    if (label) {
+    if (labelOn()) {
       const b = el('b', null, String(marked))
-      b.style.color = label.colour
+      b.style.color = markedColour()
       box.append(b, ` of ${n}`)
     } else box.append(el('b', null, String(n)))
     return box
@@ -496,6 +590,11 @@
       tr.dataset.anchorName = `the run ${r.run}, ${setup(r)}`
       const chipTd = el('td')
       const chip = el('button', 'chip chip-sans chip-tone-neutral chip-act' + (on.has(r.run) && !allChosen() ? ' active' : ''), r.run)
+      if (field() === 'run' && !labelOn()) {
+        const sw = el('i', 'sw')
+        sw.style.background = valueColour('run', r.run)
+        chip.prepend(sw)
+      }
       chipTd.append(chip)
       tr.append(chipTd, el('td', 'setup', setup(r)))
       for (const c of cols) {
@@ -506,7 +605,7 @@
             const b = el('button', 'btn btn-ghost btn-sm', String(n))
             b.onclick = (e) => {
               e.stopPropagation()
-              onlyRun(r.run, c.flag ? { flag: c.flag } : { [c.filter[0]]: c.filter[1] })
+              onlyRun(r.run, c.flag ? { flag: [c.flag] } : { [c.filter[0]]: [c.filter[1]] })
             }
             td.append(b)
           } else td.append(el('span', 'dim', '0'))
@@ -541,17 +640,15 @@
   }
 
   // ------------------------------------------------------------------------------------------------ activity
-  // The chosen runs' kept records per time bin since each run started, stacked by action, or while a label is on by
-  // the part it marks. A drag across it narrows every panel to that time range; a click takes one bin.
+  // The chosen runs' kept records per time bin since each run started, stacked by their part: the colour field's value,
+  // or while a label is on the first of its values that marks them. A drag across it narrows every panel to that time
+  // range; a click takes one bin.
   const RUN_ACTIVITY_WIDTH = 400 // the viewBox width of a run's activity in compare mode, drawn at its cell's width
   function binsOf(rows) {
     const bins = new Map()
-    for (const [, b, act, n, m] of rows) {
-      const parts = bins.get(b) || {}
-      if (label) {
-        parts.marked = (parts.marked || 0) + m
-        parts.other = (parts.other || 0) + n - m
-      } else parts[act] = (parts[act] || 0) + n
+    for (const [, b, part, n] of rows) {
+      const parts = bins.get(b) || new Map()
+      parts.set(part, (parts.get(part) || 0) + n)
       bins.set(b, parts)
     }
     return bins
@@ -561,11 +658,11 @@
     for (const [run, b, , n] of rows) per.set(run + '/' + b, (per.get(run + '/' + b) || 0) + n)
     return Math.max(1, ...per.values())
   }
-  function partsOrder() {
-    return label ? ['marked', 'other'] : Object.keys(ACTIONS)
-  }
-  function partColour(p) {
-    return label ? (p === 'marked' ? label.colour : 'var(--viz-ink-4)') : colourOf(p)
+  // the parts bottom first: the labels' values in thimble's order, the actions or states in their own, the rest by order
+  function partsOrder(present) {
+    const f = field()
+    const order = labelOn() ? [...data.classes.map((_, i) => i), -1] : f === 'action' ? Object.keys(ACTIONS) : f === 'state' ? Object.keys(STATE_COLOURS) : data.colour.order
+    return [...order.filter((p) => present.has(p)), ...[...present].filter((p) => !order.includes(p))]
   }
   function chart(rows, { width, height, ymax, axis, fill }) {
     const a = data.activity
@@ -576,7 +673,7 @@
     const bw = w / nb
     const h = height - bottom
     const bins = binsOf(rows)
-    const max = ymax || Math.max(1, ...[...bins.values()].map((p) => Object.values(p).reduce((s, v) => s + v, 0)))
+    const max = ymax || Math.max(1, ...[...bins.values()].map((p) => [...p.values()].reduce((s, v) => s + v, 0)))
     const s = fill
       ? svg('svg', { class: 'chart', width: '100%', height, viewBox: `0 0 ${width} ${height}`, preserveAspectRatio: 'none' })
       : svg('svg', { class: 'chart', width, height, viewBox: `0 0 ${width} ${height}` })
@@ -590,16 +687,16 @@
         svg('text', { x, y: height - 3, 'text-anchor': t === 0 ? 'start' : 'middle' }, s).textContent = `${t}h`
       }
     }
-    const order = partsOrder()
+    const order = partsOrder(new Set(rows.map((r) => r[2])))
     for (const [b, parts] of bins) {
       let y = h
       for (const p of order) {
-        const n = parts[p]
+        const n = parts.get(p)
         if (!n) continue
         const bh = (n / max) * (h - 2)
         y -= bh
         const r = svg('rect', { x: left + b * bw + 0.5, y, width: Math.max(1, bw - 1), height: bh, style: `fill:${partColour(p)}` }, s)
-        svg('title', {}, r).textContent = `${since((b * a.bin) / 60)} to ${since(((b + 1) * a.bin) / 60)}: ${n} ${label ? (p === 'marked' ? label.name : 'other') : p}`
+        svg('title', {}, r).textContent = `${since((b * a.bin) / 60)} to ${since(((b + 1) * a.bin) / 60)}: ${n} ${partName(p)}`
       }
     }
     brush(s, { left, h, nb, bw })
@@ -646,19 +743,193 @@
       load()
     })
   }
+  // the Colour menu's button and the legend of its colours: a click shows one value alone, or every value again when it
+  // was alone, and a shift-click hides it or shows it again
   function legend() {
     const box = el('div', 'legend')
-    const present = new Set(data.activity.rows.map((r) => r[2]))
-    const parts = label ? ['marked', 'other'] : Object.keys(ACTIONS).filter((a) => present.has(a))
-    for (const p of parts) {
-      const item = el('span')
-      const sw = el('i')
-      sw.style.background = partColour(p)
-      item.append(sw, label ? (p === 'marked' ? label.name : 'other records') : p)
-      box.append(item)
+    box.append(colourButton())
+    let hiding = false
+    if (labelOn()) {
+      data.classes.forEach((c, i) => box.append(legendItem(classColour(i), className(i), c.n, classKey(c), S.hide.includes(classKey(c)), labelBy(c.label), c.value)))
+      box.append(legendItem('var(--viz-ink-4)', 'no label', data.none, 'none', S.hide.includes('none')))
+      hiding = S.hide.length > 0
+    } else {
+      const f = field(), own = data.colour.filter, chose = own ? S.filters[own] || [] : []
+      const off = (v) => (f === 'run' ? !allChosen() && !chosen().has(v) : chose.length > 0 && !chose.includes(v))
+      const can = f === 'run' || !!own
+      const ownColours = f === 'action' || f === 'state'
+      const rest = []
+      for (const [v, n] of data.colour.values) {
+        if (!ownColours && (catIndex(v) < 0 || catIndex(v) >= CAT.length)) rest.push(n)
+        else box.append(legendItem(valueColour(f, v), valueName(f, v), n, v, off(v), null, null, can))
+      }
+      if (rest.length) {
+        const more = el('span', 'lg st')
+        const sw = el('i', 'sw')
+        sw.style.background = 'var(--viz-ink-4)'
+        more.append(sw, `${rest.length} more`, el('span', 'n', String(rest.reduce((a, b) => a + b, 0))))
+        box.append(more)
+      }
+      hiding = f === 'run' ? !allChosen() : chose.length > 0
+    }
+    if (hiding) {
+      const all = el('button', 'btn btn-ghost btn-sm', 'Show all')
+      all.onclick = (e) => {
+        e.stopPropagation()
+        if (labelOn()) S.hide = []
+        else if (field() === 'run') S.runs = []
+        else delete S.filters[data.colour.filter]
+        load()
+      }
+      box.append(all)
     }
     box.append(el('span', 'per', `per ${data.activity.bin} min`))
     return box
+  }
+  function colourButton() {
+    const b = el('button', 'btn btn-secondary btn-sm cbtn')
+    b.id = 'cbtn'
+    let what = `<span class="cnm">${esc(FIELD_NAMES[field()])}</span>`
+    if (labelOn()) {
+      const names = [...new Set(data.classes.map((c) => c.label))]
+      const sws = data.classes.slice(0, 6).map((_, i) => `<i class="sw" style="background:${classColour(i)}"></i>`).join('')
+      what = `<span class="sws">${sws}</span><span class="cnm">${esc(names.length === 1 ? names[0] : `${names.length} labels`)}</span>`
+      const ids = labelState.labels.map((l) => l.id).filter(Boolean).join(' ')
+      if (ids) b.dataset.label = ids
+    }
+    b.innerHTML = `<span class="k">Colour</span>${what}<svg class="ico s12" viewBox="0 0 12 12"><path d="M3.5 4.75 6 7.25l2.5-2.5"/></svg>`
+    b.onclick = (e) => {
+      e.stopPropagation()
+      menu = menu ? null : 'colour'
+      pal = null
+      drawPop()
+    }
+    return b
+  }
+  function legendItem(colour, text, n, v, off, label, value, can = true) {
+    const it = el('span', 'lg' + (off ? ' off' : '') + (can ? '' : ' st'))
+    if (label && label.id) it.dataset.label = label.id
+    it.append(swatch(colour, label, value), text, el('span', 'n', String(n || 0)))
+    if (!can) return it
+    it.setAttribute('role', 'button')
+    it.title = 'Click: only this · Shift-click: hide'
+    it.onclick = (e) => {
+      e.stopPropagation()
+      legendClick(v, e.shiftKey)
+    }
+    return it
+  }
+  // a label value's swatch opens the palette of thimble's label colours, where thimble takes a colour change
+  function swatch(colour, label, value) {
+    const sw = el('i', 'sw')
+    sw.style.background = colour
+    if (!label || !label.id || !(labelState.palette || []).length || !thimble.setLabelColour) return sw
+    const b = el('span', 'swb')
+    b.setAttribute('role', 'button')
+    b.title = 'Change colour'
+    Object.assign(b.dataset, { act: 'palette', id: label.id, value })
+    b.append(sw)
+    b.onclick = (e) => {
+      e.stopPropagation()
+      openPalette(label.id, value, 'legend')
+    }
+    return b
+  }
+  function legendClick(v, shift) {
+    const pick = (all, now) => {
+      let shown = new Set(now.length ? now : all)
+      if (shift) {
+        shown.has(v) ? shown.delete(v) : shown.add(v)
+        if (!shown.size) return null
+      } else shown = shown.size === 1 && shown.has(v) ? new Set(all) : new Set([v])
+      return all.every((x) => shown.has(x)) ? [] : all.filter((x) => shown.has(x))
+    }
+    if (labelOn()) {
+      const keys = [...data.classes.map(classKey), 'none']
+      const shown = pick(keys, keys.filter((k) => !S.hide.includes(k)))
+      if (!shown) return
+      S.hide = shown.length ? keys.filter((k) => !shown.includes(k)) : []
+    } else if (field() === 'run') {
+      const shown = pick(data.runs.map((r) => r.run), allChosen() ? [] : data.chosen)
+      if (!shown) return
+      S.runs = shown
+    } else {
+      const own = data.colour.filter
+      const shown = pick(data.colour.values.map(([x]) => x), S.filters[own] || [])
+      if (!shown) return
+      if (shown.length) S.filters[own] = shown
+      else delete S.filters[own]
+    }
+    load()
+  }
+
+  // ------------------------------------------------------------------------------------------------ the Colour menu and the palette
+  function openPalette(id, value, from) {
+    pal = pal && pal.id === id && pal.value === value ? null : { id, value, from }
+    drawPop()
+  }
+  function previewColours(f) {
+    if (f === 'action') return ['opened', 'approved', 'changes requested', 'merged'].map(colourOf)
+    if (f === 'state') return ['open', 'merged', 'closed'].map((st) => `var(${STATE_COLOURS[st]})`)
+    return CAT.slice(0, 4).map((c) => `var(${c})`)
+  }
+  function menuHtml() {
+    const fields = COLOURS[S.tab].map((f) => {
+      const on = !labelOn() && field() === f
+      const sws = previewColours(f).map((c) => `<i class="sw" style="width:5px;border-radius:1px;background:${c}"></i>`).join('')
+      return `<button class="mi" data-act="field" data-f="${f}"><span class="ck">${on ? '<svg class="ico s12" viewBox="0 0 12 12"><path d="M2.5 6.2 5 8.5l4.5-5"/></svg>' : ''}</span>${FIELD_NAMES[f]}<span class="n">${sws}</span></button>`
+    }).join('')
+    // every label over files, as thimble lists them; a click turns one on or off in thimble's Labels pane
+    const all = labelState.all || labelState.labels.map((l) => ({ ...l, on: true }))
+    const sw = (l, v) => {
+      const i = `<i class="sw" style="background:${esc(v.colour)}"></i>`
+      return l.id && (labelState.palette || []).length && thimble.setLabelColour
+        ? `<span class="swb" role="button" title="Change colour" data-act="palette" data-id="${esc(l.id)}" data-value="${esc(v.name)}">${i}</span>` : i
+    }
+    const rows = all.map((l) => {
+      const lit = (l.values || []).filter((v) => v.highlight !== false)
+      const box = `<span class="box ${l.on ? 'on' : ''}" style="--mark:${esc(l.colour)}"></span>`
+      const main = `<button class="mi" data-act="label" data-id="${esc(l.id || '')}" data-label="${esc(l.id || '')}" ${l.id && thimble.setLabel ? '' : 'disabled'}><span class="ck">${box}</span><span class="nm">${esc(l.name)}</span>
+        <span class="n">${l.count == null ? '' : l.count}</span>${lit.length === 1 ? sw(l, lit[0]) : ''}</button>`
+      const subs = l.on && lit.length > 1 ? lit.map((v) => `<div class="mi sub" data-label="${esc(l.id || '')}"><span class="nm">${esc(v.name)}</span><span class="n"></span>${sw(l, v)}</div>`).join('') : ''
+      return main + subs
+    }).join('')
+    const make = thimble.newLabel ? '<div class="msep"></div><button class="mi" data-act="newlabel"><span class="ck"><svg class="ico s12" viewBox="0 0 12 12"><path d="M6 2.5v7M2.5 6h7"/></svg></span>New label…</button>' : ''
+    return `<div class="menu" id="menu" data-anchor-name="Colour menu"><div class="mh">Fields</div>${fields}${rows ? `<div class="msep"></div><div class="mh">Labels</div>${rows}` : ''}${make}</div>`
+  }
+  function palHtml() {
+    const l = (labelState.all || labelState.labels || []).find((x) => x.id === pal.id)
+    const cur = String((l && ((l.values || []).find((v) => v.name === pal.value) || {}).colour) || '').toLowerCase()
+    return `<div class="pal" id="pal" data-label="${esc(pal.id)}">${labelState.palette.map((c) => `<button data-act="colour" data-colour="${esc(c)}" class="${c.toLowerCase() === cur ? 'cur' : ''}" style="background:${esc(c)}" aria-label="Colour ${esc(c)}"></button>`).join('')}</div>`
+  }
+  // the menu opens under the Colour button; the palette beside the swatch that opened it, in the menu or the legend
+  function drawPop() {
+    const pop = $('#pop')
+    const btn = $('#cbtn')
+    if (menu && !btn) menu = null
+    if (pal && !(labelState.palette || []).length) pal = null
+    pop.innerHTML = (menu ? menuHtml() : '') + (pal ? palHtml() : '')
+    const m = $('#menu')
+    if (m) {
+      const r = btn.getBoundingClientRect()
+      m.style.left = `${Math.max(8, Math.min(r.left, innerWidth - m.offsetWidth - 8))}px`
+      m.style.top = `${Math.max(8, Math.min(r.bottom + 4, innerHeight - m.offsetHeight - 8))}px`
+    }
+    const p = $('#pal')
+    if (p) {
+      const sel = `[data-act="palette"][data-id="${CSS.escape(pal.id)}"][data-value="${CSS.escape(pal.value)}"]`
+      const a = $(`${pal.from === 'menu' ? '#menu' : '.legend'} ${sel}`)
+      if (!a) {
+        pal = null
+        p.remove()
+        return
+      }
+      const r = a.getBoundingClientRect()
+      const x = pal.from === 'menu' ? r.right + 6 : r.left
+      const y = pal.from === 'menu' ? r.top - 10 : r.bottom + 4
+      p.style.left = `${Math.max(8, Math.min(x, innerWidth - p.offsetWidth - 8))}px`
+      p.style.top = `${Math.max(8, Math.min(y, innerHeight - p.offsetHeight - 8))}px`
+    }
   }
   // the hours under the runs' activity in compare mode, placed as a share of the column's width
   function axisRow() {
@@ -708,9 +979,10 @@
       const seg = el('div', 'seg seg-track')
       const counts = Object.fromEntries(facet('state'))
       const total = Object.values(counts).reduce((s, v) => s + v, 0)
+      const states = S.filters.state || []
       for (const st of [null, ...t.states]) {
-        if (st && !counts[st] && S.filters.state !== st) continue
-        const b = el('button', 'seg-opt' + ((S.filters.state || null) === st ? ' active' : ''), st ? st[0].toUpperCase() + st.slice(1) + ' ' : 'All ')
+        if (st && !counts[st] && !states.includes(st)) continue
+        const b = el('button', 'seg-opt' + ((st ? states.includes(st) : !states.length) ? ' active' : ''), st ? st[0].toUpperCase() + st.slice(1) + ' ' : 'All ')
         b.append(el('span', 'n', String(st ? counts[st] || 0 : total)))
         b.onclick = () => setFilter('state', st)
         seg.append(b)
@@ -741,14 +1013,28 @@
       top.append(seg)
     }
     top.append(el('span', 'total', plural(data.total, t.noun)))
-    for (const [name, any] of t.selects) {
+    // A select adds the value picked to its filter's values, or removes one already chosen (ticked); its closed face
+    // names the field and the chosen values, and Any clears them.
+    for (const [name, what, many, any] of t.selects) {
       const values = facet(name)
       if (!values.length) continue
-      const sel = el('select', 'field' + (S.filters[name] ? ' set' : ''))
-      sel.setAttribute('aria-label', any)
-      sel.append(new Option(any, ''))
-      for (const [v, n] of values) sel.append(new Option(`${v} (${n})`, v, false, S.filters[name] === v))
-      sel.onchange = () => setFilter(name, sel.value || null)
+      const picked = S.filters[name] || []
+      const sel = el('select', 'field' + (picked.length ? ' set' : ''))
+      sel.setAttribute('aria-label', what)
+      sel.append(new Option(any || `Any ${what.toLowerCase()}`, ''))
+      if (picked.length) {
+        const names = picked.join(', ')
+        const face = new Option(`${what}: ${picked.length > 2 || names.length > 28 ? `${picked.length} ${many}` : names}`, 'chosen')
+        face.hidden = true
+        sel.append(face)
+      }
+      for (const [v, n] of values) {
+        const o = new Option(`${picked.includes(v) ? '✓ ' : ''}${v} ${n}`, v)
+        if (!n && !picked.includes(v)) o.disabled = true
+        sel.append(o)
+      }
+      sel.value = picked.length ? 'chosen' : ''
+      sel.onchange = () => (sel.value ? toggleFilter(name, sel.value) : setFilter(name, null))
       fields.append(sel)
     }
     if (S.range) {
@@ -760,10 +1046,10 @@
       }
       fields.append(c)
     }
-    if (Object.keys(S.filters).length || S.q || S.range) {
+    if (Object.keys(S.filters).length || S.q || S.range || S.hide.length) {
       const clear = el('button', 'btn btn-ghost btn-sm', 'Clear')
       clear.onclick = () => {
-        Object.assign(S, { filters: {}, q: '', range: null })
+        Object.assign(S, { filters: {}, q: '', range: null, hide: [] })
         load()
       }
       fields.append(clear)
@@ -776,22 +1062,30 @@
     }
     document.documentElement.style.setProperty('--filters-h', `${box.offsetHeight}px`)
   }
+  // a filter narrowed to one value, or cleared with none
   function setFilter(name, value) {
-    if (value) S.filters[name] = value
+    if (value) S.filters[name] = [value]
+    else delete S.filters[name]
+    load()
+  }
+  function toggleFilter(name, value) {
+    const now = S.filters[name] || []
+    const next = now.includes(value) ? now.filter((v) => v !== value) : [...now, value]
+    if (next.length) S.filters[name] = next
     else delete S.filters[name]
     load()
   }
 
   // ------------------------------------------------------------------------------------------------ lists
-  // A unit's records on the shared time axis of the run, one tick per record in its action's colour, or while a label
-  // is on in the label's colour for the records it marks and in ink for the rest.
+  // A unit's records on the shared time axis of the run, one tick per record in its part's colour (partColour), those
+  // no label marks in ink while a label is on, and those the time range or the record filters leave out faint.
   function strip(ticks, width, height) {
     const a = data.activity
     const s = svg('svg', { class: 'strip', width, height, viewBox: `0 0 ${width} ${height}` })
     svg('line', { x1: 0, x2: width, y1: height / 2, y2: height / 2, style: 'stroke:var(--border-subtle)' }, s)
     const span = Math.max(0.5, a.hours)
-    for (const [ref, h, act, marked] of ticks) {
-      const colour = label ? (marked ? label.colour : 'var(--viz-ink-3)') : colourOf(act)
+    for (const [ref, h, act, part, on] of ticks) {
+      const colour = on === 0 ? 'var(--viz-ink-4)' : labelOn() && part < 0 ? 'var(--viz-ink-3)' : partColour(part)
       const r = svg('rect', { x: Math.min(width - 2, (Math.max(0, h) / span) * width), y: 1, width: 2, height: height - 2, style: `fill:${colour}` }, s)
       r.dataset.anchor = ref
       svg('title', {}, r).textContent = `${act} ${since(h)}`
@@ -834,7 +1128,7 @@
       s.title = tip
       if (n) {
         const i = icon(ic)
-        i.style.color = label ? 'var(--text-tertiary)' : colourOf(COUNT_ACTION[ic])
+        i.style.color = actionInk() ? 'var(--text-tertiary)' : colourOf(COUNT_ACTION[ic])
         s.append(i, String(n))
       }
       box.append(s)
@@ -860,7 +1154,7 @@
     for (const [name, verdict] of Object.entries(latest || {})) {
       const s = el('span')
       const ic = icon(ACTION_ICON[verdict] || 'comment')
-      ic.style.color = label ? 'var(--text-tertiary)' : colourOf(verdict)
+      ic.style.color = actionInk() ? 'var(--text-tertiary)' : colourOf(verdict)
       s.append(ic, name)
       s.title = `${name}: ${verdict}`
       box.append(s)
@@ -925,7 +1219,7 @@
     const main = el('div')
     const t = titleLine(d.title || `Discussion ${d.number}`, null, d.run)
     const meta = el('div', 'meta')
-    meta.append('started by ', who(d.author, 'author'), ` · ${d.posters.length} posting`)
+    meta.append('started by ', who(d.author, 'actor'), ` · ${d.posters.length} posting`)
     if (d.mentions.length) meta.append(` · mentions ${[...d.mentions].sort((a, b) => a - b).map((n) => '#' + n).join(', ')}`)
     main.append(t, meta)
     row.append(stateIcon('discussions'), main, el('div'), strip(d.ticks, stripWidth(), 14), countsBox([['comment', d.posts, 'posts']]))
@@ -997,13 +1291,13 @@
             const back = (pairs[auth] && pairs[auth][rev]) || [0, 0]
             if (ok) {
               td.append(String(ok))
-              td.style.background = label ? '' : `color-mix(in oklab, var(--viz-3) ${Math.round(18 + (ok / max) * 50)}%, transparent)`
+              td.style.background = `color-mix(in oklab, var(${actionInk() ? '--viz-ink-2' : '--viz-3'}) ${Math.round((actionInk() ? 8 : 18) + (ok / max) * (actionInk() ? 30 : 50))}%, transparent)`
             }
             if (cr) td.append(el('span', 'cr', `✗${cr}`))
             if (ok && back[0]) td.classList.add('mutual')
             td.title = `${rev} reviewed ${auth}: ${ok} approved, ${cr} changes requested`
             td.onclick = () => {
-              Object.assign(S, { tab: 'pulls', runs: [run], filters: { reviewer: rev, author: auth }, sort: '', q: '' })
+              Object.assign(S, { tab: 'pulls', runs: [run], filters: { reviewer: [rev], author: [auth] }, sort: '', q: '' })
               load()
             }
           }
@@ -1149,7 +1443,7 @@
   }
   async function openUnit(key, ref) {
     focusRef = ref || null
-    unit = await thimble.fetch({ op: 'unit', key })
+    unit = await thimble.fetch({ op: 'unit', key, colour: S.colour, hide: S.hide })
     document.body.classList.toggle('open', !!unit)
     drawDetail()
     for (const r of document.querySelectorAll('.row, .agents tbody tr, .cols .list-row')) r.classList.toggle('active', r.dataset.anchor === unitRef(key))
@@ -1189,7 +1483,7 @@
     const fixes = unit.tab === 'issues' && x.kind === 'merge'
     const dot = el('span', 'dot')
     const ic = icon(x.kind === 'issue' ? 'issue' : fixes ? 'fixed' : ACTION_ICON[x.action] || 'comment')
-    ic.style.color = label ? 'var(--text-secondary)' : colourOf(fixes ? 'fixed' : x.action)
+    ic.style.color = labelOn() && x.part < 0 ? 'var(--text-secondary)' : partColour(x.part)
     dot.append(ic)
     const body = el('div')
     const head = el('div', 'head')
@@ -1308,7 +1602,7 @@
         n.append(note.text)
         main.append(n)
       }
-      main.append(strip(u.records.filter((x) => x.kind !== 'agent').map((x) => [x.ref, x.hours, x.action, x.marked]), 420, 18))
+      main.append(strip(u.records.filter((x) => x.kind !== 'agent').map((x) => [x.ref, x.hours, x.action, x.part]), 420, 18))
       main.lastChild.classList.add('dstrip')
     }
     const tl = el('div', 'timeline')
@@ -1320,7 +1614,7 @@
       for (const [name, verdict] of Object.entries(u.latest)) {
         const line = el('div', 'line')
         const ic = icon(ACTION_ICON[verdict] || 'comment')
-        ic.style.color = label ? 'var(--text-secondary)' : colourOf(verdict)
+        ic.style.color = actionInk() ? 'var(--text-secondary)' : colourOf(verdict)
         line.append(ic, el('span', 'grow', name), el('span', 'dim', verdict))
         revs.append(line)
       }
@@ -1408,6 +1702,7 @@
       lastWidth = w
       drawRuns()
       drawActivity()
+      drawPop()
     }
   }).observe(document.body)
   for (const b of document.querySelectorAll('#mode .seg-opt')) {
@@ -1430,10 +1725,53 @@
     layout()
   })
   thimble.onLabels(async (state) => {
-    label = state.labels[0] || null
+    const was = JSON.stringify([labelState.labels, labelState.filter])
+    labelState = { labels: state.labels || [], filter: state.filter || null, all: state.all || null, palette: state.palette || null }
     if (!data) return // the first fetch reads them
+    // the reader applies the labels that are on and the filter; the list of labels and the palette only redraw
+    if (JSON.stringify([labelState.labels, labelState.filter]) === was) return draw()
     await load()
     if (unit) await openUnit(unit.key, focusRef)
+  })
+  $('#pop').addEventListener('click', (e) => {
+    const b = e.target.closest('[data-act]')
+    if (!b) return
+    const act = b.dataset.act
+    if (act === 'field') {
+      Object.assign(S, { colour: b.dataset.f, hide: [] })
+      menu = null
+      // a field colours the records only while no label is on, so choosing one turns the labels off in thimble
+      if (thimble.setLabel) for (const l of labelState.all || labelState.labels.map((x) => ({ ...x, on: true }))) if (l.on && l.id) thimble.setLabel(l.id, false)
+      load()
+      if (unit) openUnit(unit.key, focusRef)
+    } else if (act === 'label') {
+      const l = (labelState.all || labelState.labels.map((x) => ({ ...x, on: true }))).find((x) => x.id === b.dataset.id)
+      if (l && thimble.setLabel) thimble.setLabel(l.id, !l.on)
+    } else if (act === 'newlabel') {
+      menu = null
+      drawPop()
+      if (thimble.newLabel) thimble.newLabel()
+    } else if (act === 'palette') openPalette(b.dataset.id, b.dataset.value, 'menu')
+    else if (act === 'colour') {
+      if (pal && thimble.setLabelColour) thimble.setLabelColour(pal.id, pal.value, b.dataset.colour)
+      pal = null
+      drawPop()
+    }
+  })
+  // a click anywhere else closes the menu and the palette, before the page's own handlers see it
+  document.addEventListener('click', (e) => {
+    if ((menu || pal) && !e.target.closest('#pop, #cbtn, .swb')) {
+      menu = null
+      pal = null
+      drawPop()
+    }
+  }, true)
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && (menu || pal)) {
+      menu = null
+      pal = null
+      drawPop()
+    }
   })
 </script>
 </body>

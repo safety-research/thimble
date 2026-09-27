@@ -2219,6 +2219,75 @@
   align-items: center;
   justify-content: space-between;
 }
+/* a label's palette shows on the row's hover, as the funnel does, and stays while its popover is open */
+.files-label-colour.btn {
+  flex: none;
+  width: 22px;
+  height: 22px;
+  color: var(--text-tertiary);
+  opacity: 0;
+}
+.files-label-row:hover .files-label-colour.btn,
+.files-label-colour.btn:focus-visible,
+.files-label-colour.btn.active {
+  opacity: 1;
+}
+/* the palette of a label's colours (LabelPalette): the values to pick from when several are coloured, then one swatch
+   per palette colour, the value's own ringed */
+.label-palette.popover {
+  min-width: 0;
+  padding: 10px;
+}
+.label-palette-values {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  max-width: 188px;
+  margin-bottom: 8px;
+}
+.label-palette-value {
+  justify-content: flex-start;
+  gap: 5px;
+  min-height: 0;
+  height: 22px;
+  padding: 0 7px;
+  color: var(--text-secondary);
+  font: var(--type-ui-sm);
+}
+.label-palette-value:hover {
+  background: var(--surface-hover);
+}
+.label-palette-value.active {
+  border-color: var(--border-strong);
+  color: var(--text-primary);
+}
+.label-palette-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  background: var(--c);
+}
+.label-palette-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 20px);
+  gap: 6px;
+}
+.label-palette-colour {
+  min-height: 0;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: var(--c);
+}
+.label-palette-colour:hover {
+  background: var(--c);
+  transform: scale(1.12);
+}
+.label-palette-colour.is-current {
+  box-shadow: 0 0 0 2px var(--overlay-bg), 0 0 0 3.5px var(--text-primary);
+}
 /* the Files label filter beside a view's mode switch, which clears it */
 .view-pane-filter {
   flex: none;

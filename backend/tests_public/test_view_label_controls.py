@@ -1,7 +1,8 @@
 """A view's page loaded headless (views.shoot_states, scripts/view_shot.mjs) counts the controls of its own that name a
 label that is on: a checkbox the page builds for each label counts, while a row that shows a record's label mark among
-its text does not, and with no label on there is nothing to count. The build's check notes such controls. The corpus
-is invented: a board of three posts."""
+its text does not, nor does a control bound to one of thimble's labels by its id (`data-label`, as a colour menu that
+calls thimble.setLabel has), and with no label on there is nothing to count. The build's check notes such controls.
+The corpus is invented: a board of three posts."""
 from __future__ import annotations
 
 import json
@@ -45,6 +46,8 @@ thimble.fetch({}).then((recs) => {
   }
 })
 </script></body></html>'''
+# the same menu with each checkbox bound to the label it names, by the id thimble sent
+BOUND = TOGGLES.replace("const row = document.createElement('label')", "const row = document.createElement('label')\n    row.dataset.label = l.id")
 # the page shows each record as a row button whose text carries the names of the labels that mark it
 ROWS = '''<!doctype html><html><body><div id="rows"></div><script>
 let names = []
@@ -75,7 +78,7 @@ def board(tmp_path, monkeypatch, workspaces_tmp):
     (corpus / "manifest.json").write_text(json.dumps({"name": CORPUS}))
     (corpus / "board.jsonl").write_text("".join(json.dumps({"body": f"post {n}"}) + "\n" for n in (1, 2, 3)))
     monkeypatch.setattr(config, "DATA_DIR", d.resolve())
-    for slug, html in (("toggles", TOGGLES), ("rows", ROWS)):
+    for slug, html in (("toggles", TOGGLES), ("rows", ROWS), ("bound", BOUND)):
         views.write_view(CORPUS, slug, name=slug.title(), why="w", claims=["board.jsonl"],
                          accepts=[{"form": "L<n>", "means": "a post"}], reader=READER, html=html)
     return tmp_path
@@ -88,10 +91,11 @@ async def _shoot(slug: str, tmp_path, labels) -> dict:
     return shot
 
 
-async def test_a_label_menu_the_page_builds_is_counted_and_a_row_showing_a_mark_is_not(board):
+async def test_a_label_menu_the_page_builds_is_counted_and_a_row_or_a_bound_control_is_not(board):
     toggles = await _shoot("toggles", board, views.probe_context())
     assert toggles["controls"] == 1 and toggles["records"] == 3
     assert (await _shoot("rows", board, views.probe_context()))["controls"] == 0
+    assert (await _shoot("bound", board, views.probe_context()))["controls"] == 0, "controls bound to thimble's label are its own"
     assert (await _shoot("toggles", board, views.NO_LABELS))["controls"] == 0, "no label is on to name"
 
 

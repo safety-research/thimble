@@ -719,7 +719,7 @@ no citation resolves, because its `accepts` and `declares` are empty
 
 ## view-label-controls
 
-The page has {count} controls of its own that name the test label, such as a toggle, a checkbox or a menu item. Remove them, since the Labels pane beside the view is the only place labels are turned on or filtered.
+The page has {count} controls of its own that name the test label, such as a toggle, a checkbox or a menu item. Remove them, or make each one thimble's: it calls `thimble.setLabel` or `thimble.setLabelColour` and carries `data-label` with the label's id.
 
 ## view-no-record-anchors
 

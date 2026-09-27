@@ -5,7 +5,7 @@
 // The pane keeps the version of the view it opened (usePinnedView): a newer one, from a change, the review or the
 // orientation, never reloads under the analyst. The head says Updated with Reload, which loads it where they were: the
 // element they picked, the scroll positions, the fields and the label filter. Undo in the review's mark loads at once.
-import { useEffect, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { Button, Segmented } from '../components/Button'
 import { CheckMark } from '../components/CheckMark'
 import { FilterChip } from '../components/FilterChip'
@@ -18,7 +18,7 @@ import type { ViewReview } from '../lib/types'
 import type { SourceKind } from '../lib/types'
 import { Reader, ViewFailed } from './Reader'
 import { useFilesFilter, type FilesLabels } from './useLabels'
-import { ViewerFrame, type ViewQuote } from './ViewerFrame'
+import { ViewerFrame, type ViewLabelActions, type ViewQuote } from './ViewerFrame'
 import { usePinnedView, ViewUpdated } from './viewVersion'
 import type { BuiltView } from './ViewsBar'
 
@@ -38,14 +38,32 @@ interface Props {
   onMode?: (title: string) => void
   /** before the name: the button that shows the hidden Labels sidebar */
   lead?: ReactNode
+  /** the labels that mark the view's files, which its page lists first */
+  first?: ReadonlySet<string>
+  /** open the new-label prompt in the Labels sidebar beside the view */
+  onNewLabel?: () => void
 }
 
-export function ViewPane({ ws, view, path, kind, targetRef, quote, onQuoteMissing, labels, onMode, lead }: Props) {
+export function ViewPane({ ws, view, path, kind, targetRef, quote, onQuoteMissing, labels, onMode, lead, first, onNewLabel }: Props) {
   const [mode, setMode] = useState<'view' | 'raw'>('view')
   const [failure, setFailure] = useState<string | null>(null)
   const filter = useFilesFilter(ws)
   const filterLabel = filter ? labels.byId.get(filter.concept) : undefined
   const pin = usePinnedView(ws, view.slug, view.version)
+  const { byId, toggle, setFocus, setColour } = labels
+  const labelActions = useMemo<ViewLabelActions>(
+    () => ({
+      setOn: (id, on) => {
+        const k = byId.get(id)
+        if (!k || !!k.shown === on) return
+        if (on) setFocus(id)
+        toggle(id)
+      },
+      setColour,
+      create: onNewLabel,
+    }),
+    [byId, toggle, setFocus, setColour, onNewLabel],
+  )
   useEffect(() => {
     setMode('view')
     setFailure(null)
@@ -94,7 +112,7 @@ export function ViewPane({ ws, view, path, kind, targetRef, quote, onQuoteMissin
         ) : (
           <>
             {failure && <ViewFailed name={view.name} detail={failure} onRaw={path ? () => pick('raw') : undefined} />}
-            <ViewerFrame key={`${view.slug}:${pin.pinned ?? ''}`} ws={ws} slug={view.slug} version={pin.pinned || undefined} restore={pin.restore} handle={pin.frame} targetRef={targetRef} path={path ?? undefined} title={view.name} labels={labels.on} filter={filter} filterFiles={filter ? labels.presence.get(filter.concept) : undefined} byId={labels.byId} onError={setFailure} quote={quote} onQuoteMissing={onQuoteMissing} className="view-pane-frame" />
+            <ViewerFrame key={`${view.slug}:${pin.pinned ?? ''}`} ws={ws} slug={view.slug} version={pin.pinned || undefined} restore={pin.restore} handle={pin.frame} targetRef={targetRef} path={path ?? undefined} title={view.name} labels={labels.on} filter={filter} filterFiles={filter ? labels.presence.get(filter.concept) : undefined} byId={labels.byId} first={first} labelActions={labelActions} onError={setFailure} quote={quote} onQuoteMissing={onQuoteMissing} className="view-pane-frame" />
           </>
         )}
       </div>

@@ -34,7 +34,7 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
-const labels: FilesLabels = { all: [], on: [], focus: null, setFocus: () => undefined, byId: new Map(), presence: new Map(), toggle: () => undefined, setClasses: () => undefined, save: async () => ({}) as never }
+const labels: FilesLabels = { all: [], on: [], focus: null, setFocus: () => undefined, byId: new Map(), presence: new Map(), toggle: () => undefined, setClasses: () => undefined, setColour: () => undefined, save: async () => ({}) as never }
 const frames = () => calls.filter((c) => c.url.includes('/views/threads/frame')).map((c) => new URL(c.url, 'http://t').searchParams.get('v'))
 
 async function paneAt(first: BuiltView) {

@@ -26,7 +26,7 @@ def test_a_view_ticket_asks_for_an_overview_scales_from_the_data_and_a_fit_to_th
         assert words in good, words
     examples = prompts.section("dev-view", "Worked examples")
     assert "Take the method, not their domain, fields or layout" in examples
-    assert re.findall(r"^- `([a-z-]+)` ", examples, re.M) == ["incident-timeline", "repository"]
+    assert re.findall(r"^- `([a-z-]+)` ", examples, re.M) == ["linked-sessions", "incident-timeline", "repository"]
 
 
 def test_a_view_ticket_and_its_review_ask_for_every_field_to_be_selectable_and_runs_to_compare():
@@ -37,11 +37,12 @@ def test_a_view_ticket_and_its_review_ask_for_every_field_to_be_selectable_and_r
     assert "pick any of them and compare them side by side" in review
 
 
-def test_a_view_ticket_makes_labels_first_class_and_leaves_their_controls_to_the_labels_pane():
+def test_a_view_ticket_makes_labels_first_class_and_its_label_controls_thimble_s():
     labels = prompts.section("dev-view", "Labels")
     for words in ("the Labels pane beside the view, outside its frame", "`data-anchor`", "`thimble.marked(ref)`",
                   "`thimble.kept(ref)`", "`thimble.onLabels(fn)`", "while a label is on, it alone colours records",
-                  "No label controls", "no label toggle, checkbox, menu or clickable legend"):
+                  "Label controls are thimble's", "leaves which labels are on to thimble", "`thimble.setLabel(id, on)`",
+                  "`thimble.setLabelColour(id, value, colour)`", "`thimble.newLabel()`", "`data-label`"):
         assert words in labels, words
 
 

@@ -4,7 +4,8 @@
 // query and resolves with the page's answer to that id; an `open` reaches every opener, and one registered late gets
 // the last; a quoted passage an open brings is found in the page, or said missing; navigate and cite post their refs; and a message from anywhere but the parent page is ignored. A click
 // with the pointer's key on an anchored element cites it: ⌘ on a Mac, Ctrl (or the Super key) elsewhere; on a part of
-// the view no anchor names (its legend, the bare page) it cites the view itself.
+// the view no anchor names (its legend, the bare page) it cites the view itself. The page's label controls post the
+// label's id to thimble, and onLabels hears every label over files and the palette with the labels that are on.
 import { readFileSync } from 'node:fs'
 import path from 'node:path'
 import { JSDOM } from 'jsdom'
@@ -181,6 +182,26 @@ describe('the view bridge', () => {
     const filter = { label: 'asks', value: 'yes', colour: '#e69f00' }
     fromPage({ type: 'thimble:labels', marks: {}, on, filter })
     expect(heard.at(-1)).toEqual({ labels: on, filter })
+  })
+
+  test('onLabels hears every label over files and the palette when thimble sends them, and a list change alone reaches it', async () => {
+    const heard: any[] = []
+    const on = [{ id: 'k1', name: 'asks', colour: '#e69f00', values: [{ name: 'yes', colour: '#e69f00' }] }]
+    const all = [{ id: 'k1', name: 'asks', on: true, colour: '#e69f00', values: [{ name: 'yes', colour: '#e69f00', highlight: true }], count: 3 }]
+    win().thimble.onLabels((s: unknown) => heard.push(s))
+    fromPage({ type: 'thimble:labels', marks: {}, on, filter: null, all, palette: ['#0072b2', '#e69f00'] })
+    expect(heard.at(-1)).toEqual({ labels: on, filter: null, all, palette: ['#0072b2', '#e69f00'] })
+    fromPage({ type: 'thimble:labels', marks: {}, on, filter: null, all: [{ ...all[0], count: 4 }], palette: ['#0072b2', '#e69f00'] })
+    expect(heard).toHaveLength(2)
+  })
+
+  test("the page's label controls post the label's id to thimble: on or off, a value's colour, a new label", () => {
+    win().thimble.setLabel('k1', true)
+    win().thimble.setLabelColour('k1', 'yes', '#009e73')
+    win().thimble.newLabel()
+    expect(of('label')).toEqual([{ type: 'thimble:label', id: 'k1', on: true }])
+    expect(of('labelColour')).toEqual([{ type: 'thimble:labelColour', id: 'k1', value: 'yes', colour: '#009e73' }])
+    expect(of('newLabel')).toEqual([{ type: 'thimble:newLabel' }])
   })
 
   test('with a filter on, a page that does not filter hides what the filter drops, and keeps what holds a kept record', async () => {

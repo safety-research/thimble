@@ -405,11 +405,23 @@ export interface LabelFilter {
   value: string
 }
 
-/** A label that is on as a view's page hears it (thimble.onLabels): its name, its colour and its highlighted values'. */
+/** A label that is on as a view's page hears it (thimble.onLabels): its id, name, colour and its highlighted values'. */
 export interface PageLabel {
+  id: string
   name: string
   colour: string
   values: { name: string; colour: string }[]
+}
+
+/** A label over files as a view's page lists it (thimble.onLabels `all`): whether it is on, every value with its colour
+ * and highlight, and how many records it marks once a run is done. */
+export interface PageLabelItem {
+  id: string
+  name: string
+  on: boolean
+  colour: string
+  values: { name: string; colour: string; highlight: boolean }[]
+  count: number | null
 }
 
 /** What a view's page hears of the labels (thimble.onLabels): those that are on, the filter's label with them, and the
@@ -426,6 +438,7 @@ export function pageLabels(
     const cls = classesOf(k)
     const lit = cls.filter((c) => c.highlight)
     return {
+      id: k.id,
       name: k.name,
       colour: resolve(colourToken((lit[0] ?? cls[0])?.color ?? 1)),
       values: lit.map((c) => ({ name: c.name, colour: resolve(colourToken(c.color)) })),
@@ -434,6 +447,42 @@ export function pageLabels(
   if (!filter || !fk) return { on: page, filter: null }
   const c = classesOf(fk).find((x) => x.name === filter.value)
   return { on: page, filter: { label: fk.name, value: filter.value, colour: resolve(colourToken(c?.color ?? classesOf(fk)[0]?.color ?? 1)) } }
+}
+
+/** Every label over files as a view's page lists it, in the Labels pane's order, with those that mark the view's files
+ * (`first`) ahead. Pure. */
+export function pageLabelList(all: Iterable<Concept>, resolve: (token: string) => string, first?: ReadonlySet<string>): PageLabelItem[] {
+  const files = [...all].filter(isFilesLabel)
+  const ordered = first ? [...files.filter((k) => first.has(k.id)), ...files.filter((k) => !first.has(k.id))] : files
+  return ordered.map((k) => {
+    const cls = classesOf(k)
+    const lit = cls.filter((c) => c.highlight)
+    const status = labelStatus(k)
+    return {
+      id: k.id,
+      name: k.name,
+      on: !!k.shown,
+      colour: resolve(colourToken((lit[0] ?? cls[0])?.color ?? 1)),
+      values: cls.map((c) => ({ name: c.name, colour: resolve(colourToken(c.color)), highlight: c.highlight })),
+      count: status?.state === 'done' ? status.matches : null,
+    }
+  })
+}
+
+/** The colours a label's value can take, in the palette's order: --label-1..LABEL_COLOURS, then the grey. */
+export const PALETTE: readonly number[] = [...Array.from({ length: LABEL_COLOURS }, (_, i) => i + 1), 0]
+
+/** The palette as a view's page hears it (thimble.onLabels `palette`): each colour resolved. Pure. */
+export const pagePalette = (resolve: (token: string) => string): string[] => PALETTE.map((n) => resolve(colourToken(n)))
+
+/** A label's classes with the value `value` in the palette colour `colour`; a value of the label that had that colour
+ * takes the value's old one, so no two values share a colour. Null when the label has no such value or the colour is
+ * not the palette's. Pure. */
+export function withClassColour(classes: readonly LabelClass[], value: string, colour: number): LabelClass[] | null {
+  const at = classes.findIndex((c) => c.name === value)
+  if (at < 0 || !PALETTE.includes(colour)) return null
+  const old = classes[at].color
+  return classes.map((c, i) => (i === at ? { ...c, color: colour } : colour && c.color === colour ? { ...c, color: old } : c))
 }
 
 /** The record marks with the filter's verdict on each record ref: `keep` when the filter's label takes its value on the
@@ -505,18 +554,40 @@ export function ownColour(want: number, taken: readonly number[]): number {
   return want
 }
 
+/** Every palette colour a class of the labels has (the grey aside). Pure. */
+export function usedColours(labels: readonly Pick<Concept, 'labels' | 'classes'>[]): number[] {
+  return [...new Set(labels.flatMap((k) => classesOf(k).map((c) => c.color)).filter((c) => !!c))]
+}
+
+/** The first palette colour from `at` on, round the palette, that `used` does not hold; null when it holds every one
+ * (the server's free_colour). Pure. */
+export function freeColour(at: number, used: readonly number[]): number | null {
+  for (let j = 0; j < LABEL_COLOURS; j++) {
+    const m = ((at - 1 + j) % LABEL_COLOURS) + 1
+    if (!used.includes(m)) return m
+  }
+  return null
+}
+
 /** The classes a drafted label is created with: the first value highlighted in `colour`, a negative value (isNegative)
- * in the grey and not highlighted, any other in the colours after `colour`, highlighted. Pure. */
-export function draftClasses(values: readonly string[], colour: number): LabelClass[] {
-  return values.map((name, i) =>
-    isNegative(name, i, values.length) && i > 0 ? { name, color: 0, highlight: false } : { name, color: ((colour - 1 + i) % LABEL_COLOURS) + 1, highlight: true },
-  )
+ * in the grey and not highlighted, any other highlighted in the first colour after `colour` that neither `used` (the
+ * other labels' colours) nor an earlier value has, while one is free, else the colour at its place after `colour`. Pure. */
+export function draftClasses(values: readonly string[], colour: number, used: readonly number[] = []): LabelClass[] {
+  const taken = [...used, colour]
+  return values.map((name, i) => {
+    if (i === 0) return { name, color: colour, highlight: true }
+    if (isNegative(name, i, values.length)) return { name, color: 0, highlight: false }
+    const at = ((colour - 1 + i) % LABEL_COLOURS) + 1
+    const color = freeColour(at, taken) ?? at
+    taken.push(color)
+    return { name, color, highlight: true }
+  })
 }
 
 /** The body POST /concepts takes for a drafted label, as the edit card's Run sends it for a new one: a label over files
  * marks and applies to what the draft says and is created on in Files; a prompt's text is its description, a regex's
- * or code's its spec. Pure. */
-export function draftBody(d: LabelDraft, colour: number): ConceptPatch & { name: string; unit: ConceptUnit } {
+ * or code's its spec; its classes take draftClasses' colours, away from `used`. Pure. */
+export function draftBody(d: LabelDraft, colour: number, used: readonly number[] = []): ConceptPatch & { name: string; unit: ConceptUnit } {
   const files = d.over === 'files'
   const marks = d.marks ?? 'span'
   return {
@@ -525,7 +596,7 @@ export function draftBody(d: LabelDraft, colour: number): ConceptPatch & { name:
     ...(files ? { marks, glob: d.glob } : {}),
     kind: d.kind,
     model: '',
-    classes: draftClasses(d.values, colour),
+    classes: draftClasses(d.values, colour, used),
     ...(d.kind === 'prompt' ? { description: d.text, spec: '' } : { spec: d.text }),
     shown: files,
   }

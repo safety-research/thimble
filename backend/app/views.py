@@ -1957,7 +1957,8 @@ async def shoot_states(c: str, slug: str, states: list[dict[str, Any]], *, width
         Path(s["out"]).parent.mkdir(parents=True, exist_ok=True)
     ctxs = [s.get("labels") if s.get("labels") is not None else dict(NO_LABELS) for s in states]
     states_file.write_text(json.dumps([{"out": str(s["out"]), "open": s.get("open") or {},
-                                        "labels": [str(lab.get("name") or "") for lab in labels_state(ctx)["labels"]]}
+                                        "labels": [str(lab.get("name") or "") for lab in labels_state(ctx)["labels"]],
+                                        "ids": [str(lab.get("id") or "") for lab in labels_state(ctx)["labels"] if lab.get("id")]}
                                        for s, ctx in zip(states, ctxs)]), "utf-8")
     cmd = ["node", str(SHOT_SCRIPT), "--frame", str(frame_file), "--states", str(states_file), "--viewport",
            f"{width}x{height}", "--media", media]
