@@ -30,7 +30,7 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
-const labels: FilesLabels = { all: [], on: [], focus: null, setFocus: () => undefined, byId: new Map(), presence: new Map(), toggle: () => undefined, setClasses: () => undefined, save: async () => ({}) as never }
+const labels: FilesLabels = { all: [], on: [], focus: null, setFocus: () => undefined, byId: new Map(), presence: new Map(), toggle: () => undefined, setClasses: () => undefined, setColour: () => undefined, save: async () => ({}) as never }
 
 const pane = (review: ViewReview) => mount(<ViewPane ws="w" view={{ slug: 'threads', name: 'Threads', built: '1', review }} path="board.jsonl" kind="board" labels={labels} />)
 

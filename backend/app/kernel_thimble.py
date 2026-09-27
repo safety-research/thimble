@@ -377,6 +377,7 @@ def colours(name, values=None):
 # view's call it is None, and marked() and kept() answer as if no label were on.
 _view_ctx = None
 PROBE_NAME = "test label"
+PROBE_ID = "test-label"
 # the colour the analyst's first label takes (--label-1), so the pictures show a view's own colour that clashes with a
 # label where the analyst would see it
 PROBE_COLOUR = LABEL_COLOURS[1]
@@ -468,7 +469,7 @@ def kept_unit(refs):
 
 
 def view_labels():
-    """{labels, filter}: the labels that are on, each {name, colour, values: [{name, colour}]} with its highlighted
+    """{labels, filter}: the labels that are on, each {id, name, colour, values: [{name, colour}]} with its highlighted
     values, and the filter {label, value, colour}, or None."""
     return _view_labels(_view_ctx)
 
@@ -523,10 +524,10 @@ def _kept_unit(ctx, refs) -> bool:
 def _view_labels(ctx) -> dict:
     ctx = ctx or {}
     if ctx.get("probe"):
-        probe = {"name": PROBE_NAME, "colour": PROBE_COLOUR, "values": [{"name": PROBE_NAME, "colour": PROBE_COLOUR}]}
+        probe = {"id": PROBE_ID, "name": PROBE_NAME, "colour": PROBE_COLOUR, "values": [{"name": PROBE_NAME, "colour": PROBE_COLOUR}]}
         f = {"label": PROBE_NAME, "value": PROBE_NAME, "colour": PROBE_COLOUR} if ctx.get("filter") else None
         return {"labels": [probe], "filter": f}
-    labels = [{"name": k.get("name"), "colour": k.get("colour"),
+    labels = [{"id": k.get("id"), "name": k.get("name"), "colour": k.get("colour"),
                "values": [{"name": v.get("name"), "colour": v.get("colour")} for v in k.get("values") or [] if v.get("highlight")]}
               for k in ctx.get("labels") or []]
     f = ctx.get("filter")

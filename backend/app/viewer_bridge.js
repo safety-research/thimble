@@ -12,12 +12,17 @@
 //   navigate {ref}         frame to page: open another place, in this view or anywhere in thimble (window.thimble.navigate)
 //   size {height}          frame to page: the document's height, for a frame that sizes to its content
 //   anchors {refs}         frame to page: the data-anchor values that appeared since the last report
-//   labels {marks, on, filter}
+//   labels {marks, on, filter, all, palette}
 //                          page to frame: marks {ref: {bar, names, spans: [{text, colour}], keep?}}, the marks of the
 //                          labels that are on for the records and units among those refs, drawn over every element with
-//                          that data-anchor, with `keep` whether the ref passes the label filter; on [{name, colour,
-//                          values}], the labels that are on; filter {label, value, colour} or null. Each replaces the
-//                          last; window.thimble.onLabels hears on and filter
+//                          that data-anchor, with `keep` whether the ref passes the label filter; on [{id, name, colour,
+//                          values}], the labels that are on; filter {label, value, colour} or null; all [{id, name, on,
+//                          colour, values: [{name, colour, highlight}], count}], every label over files; palette, the
+//                          colours a label's value can take. Each replaces the last; window.thimble.onLabels hears all
+//                          but the marks
+//   label {id, on}, labelColour {id, value, colour}, newLabel
+//                          frame to page: the page's label controls (window.thimble.setLabel, setLabelColour and
+//                          newLabel), which thimble does as its Labels pane does them
 //   cmd {on, cursor}       page to frame: ⌘ went down or up, and the page's ⌘ arrow as a CSS cursor value, which this
 //                          page shows while ⌘ is held so the pointer over the frame is the same one pointer
 //   state {id}             page to frame, answered by state {id, state}: what the analyst is looking at, before a newer
@@ -75,9 +80,10 @@
         }
       }
     },
-    /** fn({labels, filter}) runs with the labels that are on and the label filter, at once with the current ones when
-     *  they have arrived, and again whenever they change; a page that registers it filters its records itself (its
-     *  reader's thimble.kept), so the bridge hides nothing for the filter */
+    /** fn({labels, filter, all, palette}) runs with the labels that are on, the label filter, every label over files
+     *  and the palette of label colours, at once with the current ones when they have arrived, and again whenever they
+     *  change; a page that registers it filters its records itself (its reader's thimble.kept), so the bridge hides
+     *  nothing for the filter */
     onLabels: function (fn) {
       labelFns.push(fn)
       if (labelState) {
@@ -88,6 +94,19 @@
         }
       }
       if (dropped.length) paint()
+    },
+    /** turn a label on or off in thimble's Labels pane, by the id onLabels gives it */
+    setLabel: function (id, on) {
+      post({ type: P + 'label', id: String(id), on: !!on })
+    },
+    /** give a label's value one of the colours onLabels' palette holds; thimble saves it as its Labels pane does, and
+     *  every view hears the new colour through onLabels */
+    setLabelColour: function (id, value, colour) {
+      post({ type: P + 'labelColour', id: String(id), value: String(value), colour: String(colour) })
+    },
+    /** open thimble's prompt for a new label */
+    newLabel: function () {
+      post({ type: P + 'newLabel' })
     },
     /** the answer of reader.records(index, query), as a promise */
     fetch: function (query) {
@@ -138,6 +157,8 @@
       marks = d.marks && typeof d.marks === 'object' ? d.marks : {}
       filter = d.filter && typeof d.filter === 'object' ? d.filter : null
       var state = { labels: Array.isArray(d.on) ? d.on : [], filter: filter }
+      if (Array.isArray(d.all)) state.all = d.all
+      if (Array.isArray(d.palette)) state.palette = d.palette
       var key = JSON.stringify(state)
       if (key !== labelKey) {
         labelKey = key

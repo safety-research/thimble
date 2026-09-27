@@ -3,8 +3,9 @@
 // shoot_states), in the headless Chromium of the frontend's Playwright (frontend/node_modules, which scripts/install.sh
 // installs).
 //   node scripts/view_shot.mjs --frame <html> --states <json> [--viewport <w>x<h>] [--media <url>]
-// --states names a JSON list of states, [{out, open, labels}], each shot on a fresh page of one browser: `open` is the
-// place the page is sent once the frame is ready, `out` the PNG written, `labels` the names of the labels that are on.
+// --states names a JSON list of states, [{out, open, labels, ids}], each shot on a fresh page of one browser: `open` is
+// the place the page is sent once the frame is ready, `out` the PNG written, `labels` the names of the labels that are
+// on and `ids` their ids.
 // The page plays the part frontend/src/files/ViewerFrame.tsx plays in the browser: it puts the frame document (the view
 // page with the bridge, views.frame_document) in a sandboxed iframe with the theme's tokens and the app's two faces, and
 // asks the server over stdin and stdout, one JSON line each way, for what the page needs:
@@ -42,13 +43,19 @@ const CONTROL_TEXT_MAX = 60
 const CONTROLS = 'button, select, option, input, label, summary, [role=button], [role=checkbox], [role=switch], [role=menuitemcheckbox], [role=option], [role=tab]'
 
 // The page's own controls whose short text names one of `names`, such as a toggle, a checkbox or a menu item for a
-// label; a <label> counts only when it labels a form control. Runs in the frame.
-function labelControls({ names, sel, max }) {
+// label; a <label> counts only when it labels a form control. A control inside an element whose data-label names one of
+// `ids`, a label thimble sent, is thimble's: it calls thimble.setLabel or setLabelColour. Runs in the frame.
+function labelControls({ names, ids, sel, max }) {
   const want = names.map((n) => String(n).toLowerCase()).filter(Boolean)
   if (!want.length) return 0
+  const bound = (el) => {
+    const at = el.closest('[data-label]')
+    return !!at && String(at.getAttribute('data-label')).split(/\s+/).some((id) => id && ids.includes(id))
+  }
   let n = 0
   for (const el of document.querySelectorAll(sel)) {
     if (el.tagName === 'LABEL' && !el.control) continue
+    if (bound(el)) continue
     const own = [el.getAttribute('aria-label'), el.getAttribute('title'), el.tagName === 'INPUT' ? el.value : el.textContent]
     const text = own.filter(Boolean).join(' ').replace(/\s+/g, ' ').trim().toLowerCase()
     if (text && text.length <= max && want.some((w) => text.includes(w))) n++
@@ -314,7 +321,7 @@ async function shootState(browser, opt, doc, state, i) {
       units: refs.filter((r) => /^view:[^/]+\/.+/.test(r)).length,
       marked: await count('[data-thimble-label]'),
       hidden: await count('[data-thimble-drop]'),
-      controls: await frame.evaluate(labelControls, { names: state.labels || [], sel: CONTROLS, max: CONTROL_TEXT_MAX }).catch(() => 0),
+      controls: await frame.evaluate(labelControls, { names: state.labels || [], ids: state.ids || [], sel: CONTROLS, max: CONTROL_TEXT_MAX }).catch(() => 0),
       pills: await frame.evaluate(ownPills, { kit: KIT, max: PILL_TEXT_MAX }).catch(() => 0),
       fonts,
     }
