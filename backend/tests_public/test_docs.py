@@ -1,10 +1,10 @@
 """What the documents say about thimble's behaviour matches the code: the README's security section stays short and
-names the contact the README already gives, and INSTALL.md says which credentials thimble reads and what a problem
-report holds."""
+names the contact the README already gives, INSTALL.md says which credentials thimble reads and what a problem
+report holds, and docs/terminal-first.md describes the Claude Code variables thimble sets by what they do."""
 import re
 from pathlib import Path
 
-from app import config
+from app import bg_session, config, terminal_tools
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -41,3 +41,10 @@ def test_install_says_a_problem_report_holds_chats_and_transcripts_that_quote_th
     text = " ".join((ROOT / "INSTALL.md").read_text().split())
     line = next(s for s in text.split("- ") if s.startswith("To report a problem"))
     assert "chats" in line and "Claude Code transcripts" in line and "quote your corpus" in line
+
+
+def test_terminal_first_describes_the_claude_code_variables_by_what_they_do():
+    text = (ROOT / "docs" / "terminal-first.md").read_text()
+    assert "undocumented" not in text.lower() and "does not document" not in text
+    for name in (terminal_tools.ENV, *bg_session.FOREGROUND_ENV):
+        assert f"`{name}" in text, name
