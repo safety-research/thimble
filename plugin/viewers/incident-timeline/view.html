@@ -859,6 +859,7 @@ const COLS = [['t', 'Time', 84], ['gap', 'Gap', 70], ['tk', 'Took', 66], ['s', '
   ['a', 'Actor', 94], ['sv', 'Service', 90], ['x', 'Text', null]]
 const WIDE = 900
 let tableSeq = 0
+let listed = [] // the list's records in the order it shows them, which Earlier, Later and the arrow keys step through
 async function renderTable() {
   const my = ++tableSeq
   const cols = document.getElementById('cols')
@@ -879,6 +880,7 @@ async function renderTable() {
   const rows = [...vis]
   if (sortBy === 'tk') rows.sort((p, q) => C.tk[q] - C.tk[p] || X[p] - X[q])
   else if (sortBy === 'gap') rows.sort((p, q) => gapOf.get(q) - gapOf.get(p) || X[p] - X[q])
+  listed = rows
   const shown = rows.slice(0, tableLimit)
   const missing = [...shown].map((i) => C.r[i]).filter((r) => !texts.has(r))
   for (let p = 0; p < missing.length; p += 1000) {
@@ -971,9 +973,11 @@ function reveal() {
   window.scrollTo({ top: document.getElementById('records').getBoundingClientRect().top + window.scrollY - bar })
 }
 function step(by) {
-  const p = [...vis].findIndex((i) => C.r[i] === sel)
+  const p = listed.findIndex((i) => C.r[i] === sel)
   const q = p < 0 ? 0 : p + by
-  if (q >= 0 && q < vis.length) select(C.r[vis[q]])
+  if (q < 0 || q >= listed.length) return
+  if (q >= tableLimit) { tableLimit += ROWS; renderTable() }
+  select(C.r[listed[q]])
 }
 function recRow(b, chosen) {
   const row = h('div', 'list-row rec' + (chosen ? ' active' : ''))
