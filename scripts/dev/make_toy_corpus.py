@@ -723,12 +723,12 @@ class Transcript:
                  "server_tool_use": {"web_search_requests": 0, "web_fetch_requests": 0}, "service_tier": "standard",
                  "cache_creation": {"ephemeral_1h_input_tokens": 0, "ephemeral_5m_input_tokens": IDS.num(20000, 90000)}, "inference_geo": "global",
                  "iterations": [], "speed": "standard"}
-        cost = round(0.0000105 * usage["cache_read_input_tokens"] + 0.00006 * out_tokens, 6)
+        cost = round(0.01 * self.turns, 2)  # an invented figure, no model's price
         rec = {"is_error": api_error, "duration_api_ms": dur - IDS.num(3000, 40000), "num_turns": self.turns,
                "stop_reason": "stop_sequence" if api_error else "end_turn", "session_id": self.session, "total_cost_usd": cost, "usage": usage,
                "modelUsage": {MODEL: {"inputTokens": usage["input_tokens"], "outputTokens": out_tokens, "cacheReadInputTokens": usage["cache_read_input_tokens"],
                                       "cacheCreationInputTokens": usage["cache_creation_input_tokens"], "webSearchRequests": 0, "costUSD": cost,
-                                      "contextWindow": 200000, "maxOutputTokens": 64000, "canonicalModel": MODEL, "provider": "firstParty"}},
+                                      "canonicalModel": MODEL, "provider": "firstParty"}},
                "permission_denials": [], "terminal_reason": "api_error" if api_error else "completed", "fast_mode_state": "off",
                "fast_mode_disabled_reason": "sdk_opt_in_required",
                "subagent_stats": {"spawned": 0, "requested": {"background": 0, "foreground": 0, "unset": 0}, "started_in_background": 0, "max_depth": 0,
