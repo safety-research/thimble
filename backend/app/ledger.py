@@ -215,7 +215,10 @@ def with_features(stored: dict[str, Any], c: str | None = None) -> dict[str, Any
     `orient_permissions`, the stored mode or the one the analyst's own permission mode stands for."""
     from . import cc_settings  # noqa: PLC0415 — cc_settings imports this module
 
-    out = {**SETTINGS_DEFAULTS, **stored, config.MODELS_KEY: config.models_for(c, stored)}
+    from . import claude_changes  # noqa: PLC0415
+
+    out = {**SETTINGS_DEFAULTS, **stored, config.MODELS_KEY: config.models_for(c, stored),
+           "terminal_first_consented": claude_changes.consented()}
     if out.get(ORIENT_PERMISSIONS_KEY) not in cc_settings.ORIENT_MODES:
         try:
             out[ORIENT_PERMISSIONS_KEY] = cc_settings.orient_mode_default(config.corpus_dir(c)) if c else "manual"
@@ -229,10 +232,25 @@ def get_settings(c: str) -> dict[str, Any]:
     return with_features(stored_settings(c), c)
 
 
+TERMINAL_FIRST_CONSENT = "terminal_first_consent"  # a PUT's word that the analyst agreed to terminal-first's changes
+CONSENT_NEEDED = ("Terminal-first marks thimble's work folders trusted in Claude Code's config and sets this folder's "
+                  "statusline, which needs your agreement the first time: turn it on in Settings.")
+
+
 @router.put("/ws/{c}/settings")
 def put_settings(c: str, settings: dict[str, Any] = Body(...)) -> dict[str, Any]:
     """Merges into the stored settings, so a partial PUT keeps the rest. Only what was stored plus the patch is written,
-    never SETTINGS_DEFAULTS, so a changed default takes effect. Returns the effective settings."""
+    never SETTINGS_DEFAULTS, so a changed default takes effect. Returns the effective settings. Turning terminal-first
+    on the first time on this install takes TERMINAL_FIRST_CONSENT with it (409 without), since it changes Claude Code's
+    own files (claude_changes); turning it off puts back what it changed for the workspace."""
+    from . import claude_changes  # noqa: PLC0415
+
+    settings = {k: v for k, v in settings.items() if k != "terminal_first_consented"}
+    agreed = settings.pop(TERMINAL_FIRST_CONSENT, None) is True
+    if settings.get("terminal_first") is True and not claude_changes.consented():
+        if not agreed:
+            raise HTTPException(409, CONSENT_NEEDED)
+        claude_changes.consent()
     path = ws_dir(c) / "settings.json"
     stored = read_json(path, {})
     stored = stored if isinstance(stored, dict) else {}
@@ -248,6 +266,8 @@ def put_settings(c: str, settings: dict[str, Any] = Body(...)) -> dict[str, Any]
         from . import bg_session  # noqa: PLC0415 — bg_session imports this module
 
         bg_session.sync_statusline(c)
+        if not merged.get("terminal_first"):
+            bg_session.untrust(c)
     return with_features(merged, c)
 
 

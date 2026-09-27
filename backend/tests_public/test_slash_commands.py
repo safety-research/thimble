@@ -95,7 +95,7 @@ async def test_a_handed_event_counts_as_the_turn_s_so_main_s_send_is_not_logged_
     assert lv.handed == [] and lv.turn_threads == []
 
 
-async def test_ask_reaches_the_orientation_a_view_s_build_and_else_main(monkeypatch):
+async def test_ask_reaches_the_orientation_a_view_s_build_and_else_main(monkeypatch, consented):
     res = await tools.call(CORPUS, "message_thread", {"thread": "nothing-like-this", "message": "hi"})
     assert res.is_error and "no thread" in res.text
     # the orientation, by the tree's name for it: in terminal-first mode main's SendMessage to its subagent, and the

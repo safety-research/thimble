@@ -3,7 +3,8 @@
 // PUT session/effort and session/fast. Other roles are settings.models, resolved with defaults by GET /settings; a save
 // sends only the changed fields so defaults stay defaults, and applies to the next session or subagent. Choices that
 // cannot take effect are dimmed with the reason in a tooltip. Every row names its model exactly, never `default`. Under
-// the table, the workspace's switches (SWITCHES), each saved with the rest.
+// the table, the workspace's switches (SWITCHES), each saved with the rest. Turning terminal-first on the first time on
+// this install says what it changes in Claude Code's files and saves only once the analyst allows it (CONSENT_LINE).
 import { useEffect, useState } from 'react'
 import { Button } from '../components/Button'
 import { Chip } from '../components/Chip'
@@ -29,6 +30,11 @@ export const SWITCHES: { key: string; label: string; note: string }[] = [
   { key: 'hide_chat', label: 'Hide the chat', note: CHAT_OFF_NOTE },
   { key: 'terminal_first', label: 'Terminal-first', note: TERMINAL_FIRST_NOTE },
 ]
+
+/** What terminal-first changes in Claude Code's own files, which the analyst allows before the first save that turns it
+ * on (backend claude_changes). */
+export const CONSENT_LINE =
+  "Terminal-first changes two of Claude Code's files: it marks each of thimble's work folders trusted in Claude Code's config, so its background sessions can start there, and sets this folder's statusline in .claude/settings.local.json. Turning it off, or thimble uninstall, puts both back."
 
 /** The ways the orientation runs in terminal-first mode, as the setting names them and the settings show them. */
 export const ORIENT_ROUTES: { value: 'subagent' | 'session'; label: string; note: string }[] = [
@@ -128,12 +134,15 @@ export function SettingsPopover({ ws, anchor, open, onClose }: { ws: string; anc
   const [typing, setTyping] = useState<string | null>(null)
   const [switches, setSwitches] = useState<Record<string, boolean>>({})
   const [route, setRoute] = useState<'subagent' | 'session'>('subagent')
+  // the analyst allowed terminal-first's changes here, before its first save
+  const [allowed, setAllowed] = useState(false)
 
   useEffect(() => {
     if (!open) return
     let alive = true
     setSettings(null)
     setError(null)
+    setAllowed(false)
     Promise.all([loadSettings(ws, true), api.chat(ws, 'main').catch(() => null)])
       .then(([s, main]) => {
         if (!alive) return
@@ -151,6 +160,8 @@ export function SettingsPopover({ ws, anchor, open, onClose }: { ws: string; anc
     }
   }, [ws, open])
 
+  // terminal-first turned on here on an install where the analyst has not yet allowed its changes
+  const asking = !!switches.terminal_first && settings?.terminal_first !== true && settings?.terminal_first_consented !== true
   const mainState = { attached: !!attached, fastSwitch: mainFast(attached) != null }
   const set = (role: string, patch: Partial<ModelConf>) => setModels((m) => ({ ...m, [role]: { ...(m[role] ?? EMPTY), ...patch } }))
   const save = async () => {
@@ -160,6 +171,7 @@ export function SettingsPopover({ ws, anchor, open, onClose }: { ws: string; anc
       const changed = changedRoles(settings?.models ?? {}, models)
       const flipped: Record<string, boolean | string> = changedSwitches(settings, switches)
       if (route !== (settings?.orient_route === 'session' ? 'session' : 'subagent')) flipped.orient_route = route
+      if (asking && flipped.terminal_first === true) flipped.terminal_first_consent = true
       if (Object.keys(changed).length || Object.keys(flipped).length) await api.putSettings(ws, { ...(Object.keys(changed).length ? { models: changed } : {}), ...flipped })
       const was = { effort: mainEffort(attached), fast: !!mainFast(attached) }
       const main = models.main
@@ -272,6 +284,14 @@ export function SettingsPopover({ ws, anchor, open, onClose }: { ws: string; anc
                     {sw.label}
                   </span>
                   <span className="settings-switch-note">{sw.note}</span>
+                  {sw.key === 'terminal_first' && asking && (
+                    <span className="settings-consent" role="note">
+                      <span className="settings-consent-text">{CONSENT_LINE}</span>
+                      <Button variant={allowed ? 'ghost' : 'secondary'} size="sm" className="settings-consent-allow" aria-pressed={allowed} onClick={() => setAllowed((v) => !v)}>
+                        {allowed ? 'Allowed' : 'Allow these changes'}
+                      </Button>
+                    </span>
+                  )}
                   {sw.key === 'terminal_first' && switches.terminal_first && (
                     <span className="settings-route" role="radiogroup" aria-label="Orientation runs as">
                       <span className="settings-route-label">Orientation runs as:</span>
@@ -295,7 +315,7 @@ export function SettingsPopover({ ws, anchor, open, onClose }: { ws: string; anc
           <Button variant="ghost" onClick={onClose} disabled={busy}>
             Cancel
           </Button>
-          <Button variant="primary" busy={busy} onClick={() => void save()} disabled={!settings}>
+          <Button variant="primary" busy={busy} onClick={() => void save()} disabled={!settings || (asking && !allowed)}>
             Save
           </Button>
         </div>

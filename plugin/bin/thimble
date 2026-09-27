@@ -122,8 +122,10 @@ feedback() {
 # once, `/`, $HOME and relative paths are refused, and it is removed only when it holds thimble state. The recorded
 # server is stopped only when its command line is a thimble server on the recorded port (argv[0] is not checked, since
 # macOS ps shows the venv's python as the framework binary) and the port confirms it (lsof, ss or /api/health); the
-# check is repeated before each signal. Stopping escalates from `thimble stop` to TERM to KILL, 5 s apart. A failing
-# step does not stop the others; the last block lists what is left (exit 1 only then).
+# check is repeated before each signal. Stopping escalates from `thimble stop` to TERM to KILL, 5 s apart. What
+# terminal-first changed in Claude Code's files (a corpus folder's statusline, the trust of thimble's work folders),
+# recorded in $THIMBLE_HOME, is put back before anything is removed (backend/app/claude_changes.py, run with the tree's
+# venv, else python3). A failing step does not stop the others; the last block lists what is left (exit 1 only then).
 uninstall() {
   local yes=0 keep_home=0 arg
   for arg in "$@"; do
@@ -141,7 +143,7 @@ uninstall() {
   [ -n "${HOME:-}" ] || { printf 'thimble uninstall: HOME is not set\n' >&2; exit 2; }
   local home_raw="${THIMBLE_HOME:-}" home home_note="" home_state=0 link="$HOME/.local/bin/thimble" tree="" kind="" name="" name_note=""
   local inside=0 pid="" port="" pid_note="" conf="" planned="" pport="" link_ours=0 link_why="" stop_how="" have_claude=0 ans cwd rc
-  local nsteps=0 ndone=0 nleft=0 left="" id_ok=0 id_conf="" id_note="" changed=0
+  local nsteps=0 ndone=0 nleft=0 left="" id_ok=0 id_conf="" id_note="" changed=0 undo=0 undo_py="" undo_cmd=""
   case "$home_raw" in *[![:space:]]*) ;; *) home_raw="$HOME/.thimble";; esac   # unset or blank: the default
   home="${home_raw%/}"; [ -n "$home" ] || home=/
   enable -n kill 2>/dev/null || true   # `kill` is the program on PATH, not the builtin: the `+ kill …` line names what ran, and a test can stand a failing one in for it
@@ -258,6 +260,16 @@ uninstall() {
   [ -z "$name_note" ] || printf '  %s\n' "$name_note"
   [ -z "$pid" ] || step "stop the thimble server this install recorded (pid $pid, $conf)"
   [ -z "$pid_note" ] || printf '  %s\n' "$pid_note"
+  # what terminal-first changed in Claude Code's files, recorded in $home: put back with the tree's venv, else python3
+  if [ -f "$home/trusted-folders.json" ] || [ -f "$home/statusline-overrides.json" ]; then
+    undo=1 undo_cmd="cd <a thimble tree>/backend && THIMBLE_HOME=$home python3 -m app.claude_changes undo"
+    if [ -n "$tree" ] && [ -f "$tree/backend/app/claude_changes.py" ]; then
+      if [ -x "$tree/backend/.venv/bin/python" ]; then undo_py="$tree/backend/.venv/bin/python"
+      elif command -v python3 >/dev/null 2>&1; then undo_py=python3; fi
+    fi
+    if [ -n "$undo_py" ]; then step "put back what terminal-first changed in Claude Code's files: the statusline it set in corpus folders and the trust it gave thimble's work folders"
+    else printf "  what terminal-first changed in Claude Code's files cannot be put back here (no thimble tree with a Python to run it); run this yourself:\n    %s\n" "$undo_cmd"; fi
+  fi
   if [ "$have_claude" = 1 ]; then
     step "claude plugin uninstall thimble@$name"
     step "claude plugin marketplace remove $name"
@@ -317,6 +329,10 @@ uninstall() {
     if [ "$changed" = 1 ]; then add_left "pid $pid was not signalled: its command line stopped being a thimble server on port $port before the signal" "ps -p $pid -o command=   # kill $pid only if it is a thimble server"
     elif alive "$pid"; then add_left "the thimble server (pid $pid) is still running" "kill -KILL $pid"
     else ndone=$((ndone + 1)); fi
+  fi
+  if [ "$undo" = 1 ]; then
+    if [ -n "$undo_py" ] && (cd "$tree/backend" && THIMBLE_HOME="$home" "$undo_py" -m app.claude_changes undo); then ndone=$((ndone + 1))
+    else add_left "what terminal-first changed in Claude Code's files was not put back" "$undo_cmd"; fi
   fi
   if [ "$have_claude" = 1 ]; then
     if run claude plugin uninstall "thimble@$name"; then ndone=$((ndone + 1))

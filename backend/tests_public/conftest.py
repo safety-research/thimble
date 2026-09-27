@@ -61,6 +61,21 @@ def _workspaces_off_the_checkout(tmp_path, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _thimble_home_off_the_user(tmp_path, monkeypatch):
+    """Every test's thimble home is its own tmp dir, so what the server records there (terminal-first's consent and the
+    changes it made, claude_changes) never reaches the user's. A test's own THIMBLE_HOME still wins."""
+    monkeypatch.setenv("THIMBLE_HOME", str(tmp_path / "thimble-home"))
+
+
+@pytest.fixture()
+def consented():
+    """The analyst agreed to terminal-first's changes to Claude Code's files (claude_changes.consent)."""
+    from app import claude_changes
+
+    claude_changes.consent()
+
+
+@pytest.fixture(autouse=True)
 def _dev_dir_off_the_checkout(tmp_path, monkeypatch):
     """The dev panel's tickets and feedback live under the test's tmp dir, never the checkout's dev/. A test's own
     monkeypatch of dev.DEV_DIR still wins, since it runs after this one."""
