@@ -448,7 +448,7 @@ export function LabelSheet({ ws, label, draft, onDraft, onClose, onOpen, onRevie
     onDraft(definitionOf(next) === definitionOf(draftOf(label, [])) ? null : next)
   }
   const status = labelStatus(k)
-  const counted = status?.state === 'done' ? `${status.total.toLocaleString()} ${unitWord(status.unit, status.total)}` : status?.state === 'running' ? progressText(status) : ''
+  const counted = status?.state === 'done' ? (status.total == null ? '' : `${status.total.toLocaleString()} ${unitWord(status.unit, status.total)}`) : status?.state === 'running' ? progressText(status) : ''
   return (
     <div className="label-sheet">
       <div className="label-card-head">

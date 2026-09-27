@@ -1,5 +1,6 @@
 // What a label's row in the Labels pane counts (src/files/labels.ts labelStatus): the units that matched, as the label's
-// card states them (canvas/details labelShares), so the pane and the card never give two counts for one label.
+// card states them (canvas/details labelShares), so the pane and the card never give two counts for one label, and out
+// of the run's total only when the run kept one that covers them.
 import { describe, expect, test } from 'vitest'
 import { labelShares } from '../../src/canvas/details.ts'
 import { labelStatus, outcomeText } from '../../src/files/labels.ts'
@@ -30,5 +31,20 @@ describe('a label row after its run', () => {
     expect(yes?.state === 'done' && yes.matches).toBe(12)
     const unknown = labelStatus({ unit: 'record', labels: ['flagged', 'clean'], counts: undefined, last_run: kept(12) })
     expect(unknown?.state === 'done' && unknown.matches).toBe(12)
+  })
+})
+
+describe('a label row whose run kept no total it can state', () => {
+  test('says how many units matched, never "of 0"', () => {
+    const labels = ['talks to other runs', 'other']
+    const counts = { 'talks to other runs': 4_123, other: 10_468 }
+    const uncounted: ConceptApplication = { ...kept(4_123), total: 0, matched_total: 0, labeled: 4_123 }
+    const s = labelStatus({ unit: 'record', labels, counts, last_run: uncounted })
+    expect(s?.state === 'done' && outcomeText(s)).toBe('4,123 records')
+    const done: ConceptRun = { status: 'done', started: '2026-03-02T11:00:00+00:00', total: 0, matches: 4_123 }
+    const live = labelStatus({ unit: 'record', labels, counts, last_run: kept(12) }, done)
+    expect(live?.state === 'done' && outcomeText(live)).toBe('4,123 records')
+    const counted = labelStatus({ unit: 'record', labels, counts, last_run: { ...kept(4_123), total: 14_591 } })
+    expect(counted?.state === 'done' && outcomeText(counted)).toBe('4,123 of 14,591 records')
   })
 })

@@ -233,11 +233,17 @@ const UNIT_WORDS: Record<string, [string, string]> = { record: ['record', 'recor
 export const unitWord = (unit: string, n: number): string => (UNIT_WORDS[unit] ?? [unit, `${unit}s`])[n === 1 ? 0 : 1]
 
 /** Where a label over files stands, for its row in the Labels pane: an apply running (done of total units, or of the
- * files while they are indexed and the total is not known), the last run's outcome, or a failed run with its message. */
+ * files while they are indexed and the total is not known), the last run's outcome (its total null when the run kept
+ * none it can state), or a failed run with its message. */
 export type LabelStatus =
   | { state: 'running'; done: number; total: number | null; unit: string }
-  | { state: 'done'; matches: number; total: number; failed: number; ts: string; unit: string }
+  | { state: 'done'; matches: number; total: number | null; failed: number; ts: string; unit: string }
   | { state: 'error'; message: string }
+
+/** A run's total as its outcome can state it: none when the run kept none, or kept one below the units that matched
+ * (0 for a run whose files were never counted). Pure. */
+const statedTotal = (total: number | null | undefined, matches: number): number | null =>
+  total != null && total > 0 && total >= matches ? total : null
 
 const later = (a: string | null | undefined, b: string | null | undefined): boolean => {
   const ta = a ? Date.parse(a) : NaN
@@ -259,20 +265,20 @@ export function labelStatus(k: Pick<Concept, 'unit' | 'labels' | 'counts' | 'las
   const last = k.last_run ?? null
   if (run && (run.status === 'error' || run.status === 'done') && (!last || later(run.started, last.ts))) {
     if (run.status === 'error') return { state: 'error', message: run.message || 'the run failed' }
-    const total = run.total ?? 0
-    return { state: 'done', matches: run.matches ?? 0, total, failed: run.failed ?? 0, ts: run.started ?? '', unit: k.unit }
+    const matches = run.matches ?? 0
+    return { state: 'done', matches, total: statedTotal(run.total, matches), failed: run.failed ?? 0, ts: run.started ?? '', unit: k.unit }
   }
   if (!last) return null
   if (last.status === 'error') return { state: 'error', message: last.message || 'the run failed' }
   const total = last.total ?? last.matched_total ?? last.labeled
   const matches = k.counts ? matchedCount(k.labels, k.counts, total) : last.matches ?? 0
-  return { state: 'done', matches, total, failed: last.failed ?? 0, ts: last.ts, unit: k.unit }
+  return { state: 'done', matches, total: statedTotal(total, matches), failed: last.failed ?? 0, ts: last.ts, unit: k.unit }
 }
 
-/** An outcome as the label row says it: "468 of 2,392,002 records", with "· 3 failed" when units failed; the time
- * follows it on the row. */
+/** An outcome as the label row says it: "468 of 2,392,002 records", or "468 records" without a total, with "· 3 failed"
+ * when units failed; the time follows it on the row. */
 export function outcomeText(s: Extract<LabelStatus, { state: 'done' }>): string {
-  const text = `${s.matches.toLocaleString()} of ${s.total.toLocaleString()} ${unitWord(s.unit, s.total)}`
+  const text = s.total == null ? `${s.matches.toLocaleString()} ${unitWord(s.unit, s.matches)}` : `${s.matches.toLocaleString()} of ${s.total.toLocaleString()} ${unitWord(s.unit, s.total)}`
   return s.failed > 0 ? `${text} · ${s.failed.toLocaleString()} failed` : text
 }
 
