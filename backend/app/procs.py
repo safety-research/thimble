@@ -1,14 +1,16 @@
 """Facts about processes, portably: the command line, the parent, the working directory, liveness, this user's pids.
 
-Linux answers from /proc; macOS has none, so every reader falls back to `ps` (POSIX options only) and `lsof -d cwd`.
-Imports nothing heavy, since cli.py runs per hook call. Every reader returns "unknown" (an empty list, None, False)
-rather than raising.
+Linux answers from /proc; macOS has none, so every reader falls back to `ps` (POSIX options only) and `lsof -d cwd`,
+and environ to sysctl's KERN_PROCARGS2. Imports nothing heavy, since cli.py runs per hook call. Every reader returns
+"unknown" (an empty list, None, False) rather than raising.
 """
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 HAVE_PROC = Path("/proc/self/stat").is_file()  # Linux; tests set it False to exercise the ps/lsof path
@@ -78,20 +80,91 @@ def cmdline(pid: object) -> str:
 
 
 def environ(pid: object) -> dict[str, str] | None:
-    """The environment the process was started with (/proc/<pid>/environ); None when it cannot be read (gone, another
-    user's, or no /proc)."""
-    if not _valid(pid) or not HAVE_PROC:
+    """The environment the process was started with: /proc/<pid>/environ on Linux; on macOS sysctl's KERN_PROCARGS2,
+    else `ps eww`. None when it cannot be read (gone, another user's)."""
+    if not _valid(pid):
         return None
+    if not HAVE_PROC:
+        parsed = parse_procargs2(_procargs2(pid)) if sys.platform == "darwin" else None  # type: ignore[arg-type]
+        return parsed[1] if parsed is not None else _ps_environ(pid)  # type: ignore[arg-type]
     try:
         raw = Path(f"/proc/{pid}/environ").read_bytes()
     except OSError:
         return None
+    return _env_entries(raw.split(b"\0"))
+
+
+def _env_entries(entries: list[bytes]) -> dict[str, str]:
     out: dict[str, str] = {}
-    for entry in raw.split(b"\0"):
+    for entry in entries:
         name, eq, value = entry.partition(b"=")
         if eq and name:
             out[name.decode("utf-8", "replace")] = value.decode("utf-8", "replace")
     return out
+
+
+CTL_KERN, KERN_ARGMAX, KERN_PROCARGS2 = 1, 8, 49  # <sys/sysctl.h>
+
+
+def _procargs2(pid: int) -> bytes | None:
+    """macOS: the process's KERN_PROCARGS2 buffer; None when sysctl refuses (gone, another user's) or cannot be called."""
+    import ctypes  # noqa: PLC0415 — only macOS needs it
+    import ctypes.util  # noqa: PLC0415
+
+    try:
+        libc = ctypes.CDLL(ctypes.util.find_library("c"), use_errno=True)
+        sysctl = libc.sysctl
+        sysctl.argtypes = [ctypes.POINTER(ctypes.c_int), ctypes.c_uint, ctypes.c_void_p,
+                           ctypes.POINTER(ctypes.c_size_t), ctypes.c_void_p, ctypes.c_size_t]
+        argmax = ctypes.c_int(0)
+        size = ctypes.c_size_t(ctypes.sizeof(argmax))
+        if sysctl((ctypes.c_int * 2)(CTL_KERN, KERN_ARGMAX), 2, ctypes.byref(argmax), ctypes.byref(size), None, 0):
+            return None
+        buf = ctypes.create_string_buffer(argmax.value)
+        size = ctypes.c_size_t(argmax.value)
+        if sysctl((ctypes.c_int * 3)(CTL_KERN, KERN_PROCARGS2, pid), 3, buf, ctypes.byref(size), None, 0):
+            return None
+        return buf.raw[:size.value]
+    except (OSError, AttributeError, TypeError, ValueError):
+        return None
+
+
+def parse_procargs2(buf: bytes | None) -> tuple[list[str], dict[str, str]] | None:
+    """(argv, environment) from a KERN_PROCARGS2 buffer: argc as a native int, the executable's path, NUL padding, the
+    argc arguments, then the environment up to an empty string (the loader's strings follow it). None when malformed."""
+    if not buf or len(buf) < 4:
+        return None
+    argc = int.from_bytes(buf[:4], sys.byteorder, signed=True)
+    i = buf.find(b"\0", 4)
+    if argc < 0 or i < 0:
+        return None
+    while i < len(buf) and buf[i] == 0:
+        i += 1
+    parts = buf[i:].split(b"\0")
+    if len(parts) <= argc:
+        return None
+    env = parts[argc:]
+    end = env.index(b"") if b"" in env else len(env)
+    return [a.decode("utf-8", "replace") for a in parts[:argc]], _env_entries(env[:end])
+
+
+_ENV_START = re.compile(r"(?:^|\s)(?=[A-Za-z_][A-Za-z0-9_]*=)")
+
+
+def _ps_environ(pid: int) -> dict[str, str] | None:
+    """The environment from `ps eww` (on macOS `ps -Eww` when that lists more than the process): the text after the
+    process's command line, split before each NAME=, so a value holding " NAME=" is cut there. None when ps shows no
+    environment, as for another user's process."""
+    command = _run(["ps", "-ww", "-o", "command=", "-p", str(pid)])
+    if not command or not command.strip():
+        return None
+    command = command.rstrip("\n")
+    for flags in ("eww", "-Eww"):
+        full = (_run(["ps", flags, "-o", "command=", "-p", str(pid)]) or "").rstrip("\n")
+        if "\n" not in full and full.startswith(command):
+            rest = full[len(command):].strip()
+            return {k: v for k, _, v in (e.strip().partition("=") for e in _ENV_START.split(rest) if e.strip())} or None
+    return None
 
 
 def ppid(pid: object) -> int | None:

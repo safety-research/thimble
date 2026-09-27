@@ -128,3 +128,63 @@ def test_descendants_finds_a_grandchild_in_a_session_of_its_own_with_one_read_of
             os.kill(int(marker.read_text()), 9)
         child.kill()
         child.wait()
+
+
+# A KERN_PROCARGS2 buffer laid out as sysctl returns it on macOS (arm64, little-endian): argc, the executable's path
+# padded with NULs, argv (one argument empty), the environment, an empty string, the loader's strings, NUL padding.
+PROCARGS2 = (
+    b"\x03\x00\x00\x00"
+    b"/Users/analyst/.local/share/claude/versions/2.1.281\x00\x00\x00\x00\x00"
+    b"claude\x00--append-system-prompt\x00\x00"
+    b"PATH=/usr/bin:/bin:/usr/sbin:/sbin\x00HOME=/Users/analyst\x00TERM_PROGRAM=Apple_Terminal\x00"
+    b"CLAUDE_CONFIG_DIR=/Users/analyst/Library/Claude Work\x00EMPTY=\x00LANG=en_US.UTF-8\x00"
+    b"\x00"
+    b"executable_path=/Users/analyst/.local/share/claude/versions/2.1.281\x00ptr_munge=\x00main_stack=\x00"
+    b"executable_file=0x1a01000012,0x2f3b1c\x00dyld_file=0x1a01000012,0xfffffff0005f6b6\x00arm64e_abi=os\x00"
+    b"th_port=0x103\x00"
+    b"\x00\x00\x00\x00\x00\x00\x00\x00"
+)
+
+
+def test_the_procargs2_parser_reads_argv_and_the_environment_and_stops_before_the_loader_s_strings():
+    parsed = procs.parse_procargs2(PROCARGS2)
+    assert parsed is not None
+    argv, env = parsed
+    assert argv == ["claude", "--append-system-prompt", ""], "an empty argument is still an argument"
+    assert env == {"PATH": "/usr/bin:/bin:/usr/sbin:/sbin", "HOME": "/Users/analyst", "TERM_PROGRAM": "Apple_Terminal",
+                   "CLAUDE_CONFIG_DIR": "/Users/analyst/Library/Claude Work", "EMPTY": "", "LANG": "en_US.UTF-8"}
+    for bad in (None, b"", b"\x03\x00", b"\x03\x00\x00\x00/no/terminator", b"\x05\x00\x00\x00/x\x00a\x00b\x00"):
+        assert procs.parse_procargs2(bad) is None, bad
+
+
+@pytest.fixture()
+def mac(monkeypatch):
+    monkeypatch.setattr(procs, "HAVE_PROC", False)
+    monkeypatch.setattr(procs.sys, "platform", "darwin")
+
+
+def test_on_macos_environ_reads_kern_procargs2(mac, monkeypatch):
+    asked: list[int] = []
+    monkeypatch.setattr(procs, "_procargs2", lambda pid: asked.append(pid) or PROCARGS2)
+    env = procs.environ(4242)
+    assert asked == [4242] and env is not None and env["CLAUDE_CONFIG_DIR"] == "/Users/analyst/Library/Claude Work"
+    assert procs.environ(None) is None and procs.environ(0) is None and asked == [4242]
+
+
+def test_on_macos_environ_falls_back_to_ps_when_sysctl_refuses(mac, monkeypatch):
+    """`ps eww -o command= -p <pid>` prints the command line and then the environment; procps prints it the same way,
+    so the parsing runs here against a real process."""
+    monkeypatch.setattr(procs, "_procargs2", lambda pid: None)
+    p = subprocess.Popen([sys.executable, "-c", "import time; print('up', flush=True); time.sleep(30)"],
+                         env={"PATH": os.environ.get("PATH", ""), "CLAUDE_CONFIG_DIR": "/tmp/a b/cc", "EMPTY": ""},
+                         stdout=subprocess.PIPE, text=True)
+    try:
+        assert p.stdout is not None and p.stdout.readline() == "up\n"
+        env = procs.environ(p.pid)
+        assert env is not None and env["CLAUDE_CONFIG_DIR"] == "/tmp/a b/cc" and env["EMPTY"] == ""
+    finally:
+        p.kill()
+        p.wait()
+        if p.stdout is not None:
+            p.stdout.close()
+    assert procs.environ(p.pid) is None, "gone"
