@@ -58,9 +58,8 @@ TERMINAL = "terminal"  # created_by of the terminal session's cells and notebook
 # holding a root notebook stamped `created_by: terminal` keeps writing into it (find_terminal_notebook). Groups the
 # session's add_card makes are not stamped `terminal` (_group_author).
 BROWSER_AUTHOR = "user"  # a browser chat's comments, labels and report requests: the analyst asking through their chat
-# created_by of a cell a browser chat's model writes (chat.py re-stamps it chat:<id> once the turn knows the chat);
-# never
-# `user` or `terminal`.
+# created_by of a cell the analyst's caller outside the terminal writes when the call names no chat (one that does
+# stamps `chat:<id>`, cell_author); never `user` or `terminal`.
 BROWSER_CELL_AUTHOR = "chat"
 # The add_card result shows the first RESULT_LINES lines of each output (settings.json `run_cell_result_lines`, read
 # fresh per call), at most RESULT_CHARS_PER_LINE chars per allowed line, and at most RESULT_OUTPUTS outputs' worth of

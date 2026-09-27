@@ -7,7 +7,7 @@
       "name": "thimble",
       "source": "./plugin",
       "license": "Apache-2.0",
-      "description": "Turns a Claude Code session into an analyst workbench over the agent transcripts in the working directory: the thimble MCP tools, seven hooks, the /thimble skill and the channel launcher. Needs the thimble server installed beside it (scripts/install.sh)."
+      "description": "Turns a Claude Code session into an analyst workbench over the agent transcripts in the working directory: the thimble MCP tools, its hooks, the /thimble skill and the channel launcher. Needs the thimble server installed beside it (scripts/install.sh)."
     }
   ]
 }

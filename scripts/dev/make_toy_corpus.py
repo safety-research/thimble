@@ -1790,7 +1790,7 @@ def verify(out: Path) -> list[str]:
         if snippet not in text:
             problems.append(f"{ref}: does not contain `{snippet}`")
     if n_refs < 40:
-        problems.append(f"GROUND_TRUTH.md has only {n_refs} refs")
+        problems.append(f"{ground_truth_path(out).name} has only {n_refs} refs")
     db.close()
     return problems
 

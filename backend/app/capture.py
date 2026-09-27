@@ -459,7 +459,6 @@ def begin(name: str, *, model: str | None = None, effort: str | None = None, pat
                 "thimble passes (options, append, tool definitions, the messages it sends) and the transcript the CLI "
                 "streamed back — not the exact request bytes."),
         "api": "api — one Messages API request (anthropic.AsyncAnthropic, streaming); the request below is exact.",
-        "hook": "hook — a Claude Code hook round trip (plugin/bin/thimble-hook → POST /api/hooks); the payload and the answer are exact.",
         "message": "message — text the server hands a terminal Claude Code session (channel, inbox or the next prompt's status block); exact.",
         "note": "note — rendered outside a live call.",
     }

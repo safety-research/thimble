@@ -116,7 +116,7 @@ EXAMPLES_DIR = VIEWERS_DIR
 BUILTIN_VIEWERS = ("spreadsheet", "pdf")
 BUILTIN_CACHE = ".builtin"  # under the workspace's views folder: a built-in viewer's index cache and check shots
 # Scripts and styles inline (the bridge, the vendored libraries, the view's own), images as data or blob URLs, workers
-# from blobs (pdf.js), and eval for vega's expression parser. `{media}` is the view's own media route (frame_document),
+# from blob URLs, and eval for vega's expression parser. `{media}` is the view's own media route (frame_document),
 # the one URL an image, audio or video element may load; no script can fetch or send anything (connect-src 'none').
 FRAME_CSP = ("default-src 'none'; script-src 'unsafe-inline' 'unsafe-eval'; style-src 'unsafe-inline'; "
              "img-src data: blob:{media}; font-src data:; media-src data: blob:{media}; worker-src blob:; "

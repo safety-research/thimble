@@ -1,7 +1,6 @@
 data/*
 workspaces/
 /dev/
-frontend/dev/
 backend/.venv/
 __pycache__/
 *.pyc
