@@ -255,15 +255,12 @@ STATUSLINE_FILE = "statusline-overrides.json"  # in thimble's home: {folder: {ou
 STATUSLINE_REFRESH_S = 2
 
 
-def own_statusline(cwd: Path) -> str:
-    """The statusline command the analyst's own settings give for a session in `cwd`, thimble's aside: the most specific
-    settings file's; '' for none."""
-    ours = _statuslines().get(_key(cwd), {})
-    for path in reversed(sources(cwd)):
+def own_statusline() -> str:
+    """The statusline command of the analyst's own settings (analyst_sources), the most specific file's; '' for none.
+    thimble-agents runs it with a shell, so a corpus folder's settings never supply it."""
+    for path in reversed(analyst_sources()):
         line = _read(path).get("statusLine")
         cmd = line.get("command") if isinstance(line, dict) else None
-        if path == cwd / LOCAL_SETTINGS and ours:
-            cmd = (ours.get("previous") or {}).get("command") if isinstance(ours.get("previous"), dict) else None
         if isinstance(cmd, str) and cmd.strip():
             return cmd
     return ""

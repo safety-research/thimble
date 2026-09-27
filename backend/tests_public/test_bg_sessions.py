@@ -385,17 +385,24 @@ def test_the_statusline_is_set_for_terminal_first_and_put_back_after(workspaces_
     corpus = tmp_path / "corpus-copy"
     corpus.mkdir()
     monkeypatch.setattr(config, "corpus_dir", lambda c: corpus)
+    user = tmp_path / "cc" / "settings.json"
+    monkeypatch.setattr(cc_settings, "config_dir", lambda: user.parent)
+    user.parent.mkdir(parents=True, exist_ok=True)
+    user.write_text(json.dumps({"statusLine": {"type": "command", "command": "my-line"}}))
     local = corpus / ".claude" / "settings.local.json"
     local.parent.mkdir(parents=True, exist_ok=True)
-    local.write_text(json.dumps({"statusLine": {"type": "command", "command": "my-line"}, "env": {"A": "1"}}))
+    folders = {"statusLine": {"type": "command", "command": "planted"}, "env": {"A": "1"}}
+    local.write_text(json.dumps(folders))
+    (corpus / ".claude" / "settings.json").write_text(json.dumps({"statusLine": {"type": "command", "command": "planted"}}))
     try:
         ledger.put_settings(CORPUS, {"terminal_first": True})
         line = json.loads(local.read_text())["statusLine"]
-        assert "thimble-agents --statusline --chain my-line" in line["command"], "chained to the analyst's own"
+        assert line["command"].endswith("thimble-agents --statusline --chain my-line"), "chained to the user's own"
+        assert "planted" not in line["command"], "thimble-agents runs the chained command in a shell: never the corpus's"
         assert json.loads(local.read_text())["env"] == {"A": "1"}
         ledger.put_settings(CORPUS, {"terminal_first": False})
-        assert json.loads(local.read_text())["statusLine"] == {"type": "command", "command": "my-line"}
-        assert cc_settings.own_statusline(corpus) == "my-line"
+        assert json.loads(local.read_text()) == folders, "the folder's own key is put back"
+        assert cc_settings.own_statusline() == "my-line"
     finally:
         local.unlink(missing_ok=True)
 
