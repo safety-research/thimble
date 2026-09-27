@@ -1,7 +1,10 @@
 """What the documents say about thimble's behaviour matches the code: the README's security section stays short and
-names the contact the README already gives."""
+names the contact the README already gives, and INSTALL.md says which credentials thimble reads and what a problem
+report holds."""
 import re
 from pathlib import Path
+
+from app import config
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -24,3 +27,17 @@ def test_the_readme_has_a_short_security_section_with_the_existing_contact():
         assert fact in body, fact
     contacts = set(re.findall(r"\[@(\w+)\]\((https://github\.com/\w+)\)", readme))
     assert len(contacts) == 1 and "@" + next(iter(contacts))[0] in body
+
+
+def test_install_says_which_credentials_thimble_reads_and_that_it_never_writes_or_logs_them():
+    intro = (ROOT / "INSTALL.md").read_text().split("\n## ", 1)[0]
+    assert "never reads" not in intro
+    for name in (*config.ENV_CREDENTIALS, "apiKeyHelper", "login file"):
+        assert name in intro, name
+    assert "never writes an API key to disk" in intro and "never logs one" in intro
+
+
+def test_install_says_a_problem_report_holds_chats_and_transcripts_that_quote_the_corpus():
+    text = " ".join((ROOT / "INSTALL.md").read_text().split())
+    line = next(s for s in text.split("- ") if s.startswith("To report a problem"))
+    assert "chats" in line and "Claude Code transcripts" in line and "quote your corpus" in line
