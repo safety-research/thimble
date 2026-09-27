@@ -524,7 +524,7 @@ async def test_the_orientation_s_fence_adds_no_allow_of_thimble_s_own_while_a_ch
 async def test_a_critique_calls_its_thimble_tools_without_a_permission_request(install, fake):
     chat = agents.new_agent(CORPUS, orientation.ROLE, orientation.TITLE)["id"]
     agent_session._runs[(CORPUS, tools.ORIENT_SESSION)] = agent_session.Run(
-        CORPUS, tools.ORIENT_SESSION, chat, "5f0c2a6e-1b7d-4c1e-9a52-6f3d8e2b7c10", Path("/corpus"), orientation.ROLE)
+        CORPUS, tools.ORIENT_SESSION, chat, "5f5f5f5f-0000-4000-8000-000000000001", Path("/corpus"), orientation.ROLE)
     res = await tools.call(CORPUS, "critique", {"context": "Twelve runs."}, session=tools.ORIENT_SESSION)
     assert not res.is_error, res.text
     argv = json.loads((fake / "argv.json").read_text())

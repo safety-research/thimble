@@ -636,11 +636,11 @@ def test_a_file_line_cited_through_its_card_reads_and_resolves_as_the_line(mini)
     """A model cites an example card's excerpt as `card:<id>#<path>#L<n>…`. That is no td of the card (a td reader would
     take the path's first folder for a column), so it parses, formats and resolves as the file's line it names, and
     opens there."""
-    ref = "card:3d10aa2b#agents/agent-01.jsonl#L10.b0:c4-9"
+    ref = "card:ef56ab12#agents/agent-01.jsonl#L10.b0:c4-9"
     assert refs.parse_ref(ref) == refs.parse_ref("agents/agent-01.jsonl#L10.b0:c4-9")
     assert refs.format_ref(refs.parse_ref(ref)) == "agents/agent-01.jsonl#L10.b0:c4-9"
-    assert refs.parse_ref("card:3d10aa2b#agents/agent-01.jsonl#L10")["kind"] == "record"
+    assert refs.parse_ref("card:ef56ab12#agents/agent-01.jsonl#L10")["kind"] == "record"
     span = refs.resolve(mini, ref)
     assert span["kind"] == "span" and span["excerpt"] == "build"
     # a td whose labels hold no line form is still the card's td
-    assert refs.parse_ref("card:3d10aa2b#runs/agent-01")["col"] == "runs"
+    assert refs.parse_ref("card:ef56ab12#runs/agent-01")["col"] == "runs"

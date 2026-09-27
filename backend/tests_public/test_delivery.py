@@ -23,8 +23,8 @@ from fastapi.testclient import TestClient
 from app import agents, cc_channel, channel, config, prompts, session
 
 CORPUS = "mini"
-SID = "5e505c4b-742a-4361-9a19-808f80f408cc"
-NEW = "9c0a1d2e-3f40-4a5b-8c6d-7e8f90a1b2c3"  # the session /clear starts in the same `claude` process
+SID = "5e55a000-0000-4000-8000-000000000001"
+NEW = "5e55a000-0000-4000-8000-000000000002"  # the session /clear starts in the same `claude` process
 PID = 4242  # that process
 PLUGIN = config.REPO_ROOT / "plugin"
 WATCHER = PLUGIN / "bin" / ".thimble-watch"

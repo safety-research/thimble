@@ -810,7 +810,7 @@ async def test_a_writer_and_a_critique_have_bash_and_the_file_tools_so_they_work
     await _done("writer:report")
     _assert_works_in_its_own_folder(fake, write_session.work_dir(CORPUS, "report"))
     chat = agents.new_agent(CORPUS, orientation.ROLE, orientation.TITLE)["id"]
-    agent_session._runs[(CORPUS, KEY)] = agent_session.Run(CORPUS, KEY, chat, "5f0c2a6e-1b7d-4c1e-9a52-6f3d8e2b7c10",
+    agent_session._runs[(CORPUS, KEY)] = agent_session.Run(CORPUS, KEY, chat, "5f5f5f5f-0000-4000-8000-000000000001",
                                                            Path("/corpus"), orientation.ROLE)
     res = await tools.call(CORPUS, "critique", {"context": "Twelve runs."}, session=KEY)
     assert not res.is_error, res.text
