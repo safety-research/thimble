@@ -17,7 +17,8 @@ cwd to a workspace, print `thimble: <url>`, and name the session to the server. 
 whole when its command exits non-zero. `--action fresh` moves the workspace aside into <workspaces>/.archive/;
 `--action restore` restores an archive. /thimble also reports the route browser events take (cc_channel.delivery).
 
-<home> is `~/.thimble` or THIMBLE_HOME. <home>/server.json records {port, pid, url, repo, env}; its `pid` is trusted
+<home> is `~/.thimble` or THIMBLE_HOME. <home>/server.json records {port, pid, url, repo, env, token}, readable by its
+owner alone; `token` is new at each start and is what the plugin's hooks prove they hold (hook_auth.py). Its `pid` is trusted
 only while it is a thimble server on its port (is_server checks the command line and working folder, since a pid
 recorded inside a sandbox's pid namespace can name an unrelated host process). reconcile makes the record true before
 `up` acts on it. A server whose /api/health names another THIMBLE_HOME belongs to another install and is refused.
@@ -39,6 +40,7 @@ import json
 import os
 import platform
 import re
+import secrets
 import shlex
 import shutil
 import signal
@@ -225,9 +227,16 @@ def read_state() -> dict[str, Any]:
         return {}
 
 
+def new_token() -> str:
+    return secrets.token_urlsafe(32)
+
+
 def write_state(state: dict[str, Any]) -> None:
-    """server.json, written whole and private (0600)."""
+    """server.json, written whole and private (0600), with the token the file held when `state` names none, else a
+    new one."""
     ensure_home()
+    if not state.get("token"):
+        state = {**state, "token": read_state().get("token") or new_token()}
     p = server_json()
     tmp = p.with_suffix(".json.tmp")
     fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
@@ -537,7 +546,7 @@ def start(p: int | None = None) -> dict[str, Any]:
         "api": api_url(p), "ui_port": ui, "vite_pid": vite_pid, "dev": env["dev"], "repo": str(config.REPO_ROOT),
         "branch": git_branch(), "started": _now(), "stopped": None,
         "source_fingerprint": source_fingerprint(),
-        "env": {k: env[k] for k in STATE_ENV_KEYS},
+        "env": {k: env[k] for k in STATE_ENV_KEYS}, "token": new_token(),
     }
     write_state(state)
     return state

@@ -10,42 +10,62 @@ with their state, and the threads and subagents of main's session.
         the list /thimble:agents prints
 
 The first two lines make this file both a shell script and a Python program, as in thimble-mcp. It uses only the
-standard library and prints nothing of thimble's when no server answers within WAIT_S.
+standard library and prints nothing of thimble's when no server answers within WAIT_S, or when the answer does not
+prove it is thimble's (the token in server.json, as bin/.thimble-watch proves it; app/hook_auth.py).
 """
+import hashlib
+import hmac
 import json
 import os
+import secrets
 import subprocess
 import sys
 import urllib.error
 import urllib.request
 from pathlib import Path
 
-DEFAULT_PORT = 8300
 WAIT_S = 1.5
 CHAIN_WAIT_S = 5.0
 
 
-def server_url() -> str:
-    """The server's API base URL, as bin/.thimble-watch reads it."""
+def server() -> tuple[str, str] | None:
+    """(the server's API base URL, its token), as bin/.thimble-watch reads them; None without server.json or a token."""
     home = Path(os.environ.get("THIMBLE_HOME") or (Path.home() / ".thimble"))
     try:
         data = json.loads((home / "server.json").read_text("utf-8"))
-        if isinstance(data, dict):
-            if data.get("api"):
-                return str(data["api"]).rstrip("/")
-            if data.get("port"):
-                return f"http://127.0.0.1:{int(data['port'])}"
-    except (OSError, ValueError, TypeError):
+    except (OSError, ValueError):
+        return None
+    token = data.get("token") if isinstance(data, dict) else None
+    if not isinstance(token, str) or not token:
+        return None
+    try:
+        if data.get("api"):
+            return str(data["api"]).rstrip("/"), token
+        if data.get("port"):
+            return f"http://127.0.0.1:{int(data['port'])}", token
+    except (TypeError, ValueError):
         pass
-    return f"http://127.0.0.1:{os.environ.get('THIMBLE_PORT') or DEFAULT_PORT}"
+    return None
+
+
+def sign(token: str, role: str, nonce: str) -> str:
+    return hmac.new(token.encode("utf-8"), f"{role}:{nonce}".encode("utf-8"), hashlib.sha256).hexdigest()
 
 
 def agents(cwd: str, session: str | None) -> dict:
+    found = server()
+    if found is None:
+        return {}
+    base, token = found
+    nonce = secrets.token_hex(16)
     body = json.dumps({"cwd": cwd, "session": session}).encode("utf-8")
-    req = urllib.request.Request(server_url() + "/api/agents", data=body, method="POST",
-                                 headers={"Content-Type": "application/json"})
+    req = urllib.request.Request(base + "/api/agents", data=body, method="POST",
+                                 headers={"Content-Type": "application/json", "X-Thimble-Nonce": nonce,
+                                          "X-Thimble-Auth": sign(token, "hook", nonce)})
     try:
         with urllib.request.urlopen(req, timeout=WAIT_S) as resp:  # noqa: S310 — loopback, thimble's own server
+            if not hmac.compare_digest(resp.headers.get("X-Thimble-Proof") or "", sign(token, "server", nonce)):
+                return {}
             data = json.loads(resp.read().decode("utf-8") or "{}")
     except (OSError, ValueError, urllib.error.URLError):
         return {}

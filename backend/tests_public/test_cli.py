@@ -153,6 +153,21 @@ def test_server_json_carries_names_never_the_key(fake, home, monkeypatch, tmp_pa
     assert fake.calls[0]["cwd"] == str(config.REPO_ROOT / "backend")
 
 
+def test_server_json_holds_a_token_new_at_each_start_that_later_writes_keep(fake, home):
+    """The token the plugin's hooks prove they hold (hook_auth.py): a start writes a new one, a later write of the
+    record keeps it, and a record without one gets one."""
+    cli.start(8398)
+    first = cli.read_state()["token"]
+    assert len(first) >= 32
+    cli.write_state({**cli.read_state(), "stopped": "now"})
+    assert cli.read_state()["token"] == first
+    cli.start(8398)
+    assert cli.read_state()["token"] not in ("", first)
+    (home / "server.json").write_text(json.dumps({"port": 8398}))
+    cli.write_state(cli.read_state())
+    assert cli.read_state()["token"]
+
+
 def test_resolve_env_reuses_server_json_names_and_records_nothing_about_auth(home, monkeypatch):
     assert sorted(cli.resolve_env()) == ["data_dir", "dev", "home", "plugin_dir", "workspaces_dir"]
     cli.write_state({"port": 8300, "env": {"data_dir": "/d", "workspaces_dir": "/w", "key_ref_name": "old-ref"}})

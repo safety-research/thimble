@@ -18,6 +18,10 @@ the standard library and runs on every tool call.
     .thimble-watch --stream --cwd <folder> --session <id>
                                         the Monitor route
 
+Every hook but the stream does nothing without $THIMBLE_HOME/server.json and the token in it. Each request proves it
+holds the token and each answer must prove the server does (app/hook_auth.py); an answer without that proof counts as
+no server, so a process on the recorded port is neither told anything nor believed.
+
 The hook long-polls the server for the session's next event (GET /api/channel/pull), writes it to stderr in the
 `<channel …>` form, acknowledges it and exits 2, which makes Claude Code wake the session. It exits 0 in a subagent, when
 another watcher holds the session's lock, when no server listens at first, on 404/409/410 (STOP), and when the
@@ -43,10 +47,13 @@ about 3,000 per event, so lines are wrapped under LINE_CHARS and a longer event 
 <thimble home>/events/.
 """
 import fcntl
+import hashlib
+import hmac
 import http.client
 import json
 import os
 import re
+import secrets
 import sys
 import time
 import urllib.error
@@ -54,7 +61,6 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 
-DEFAULT_PORT = 8300
 PULL_WAIT_S = 25  # app/channel.py PULL_WAIT_S: the server holds a pull this long
 LIFETIME_S = 23 * 3600  # the hook's own timeout is 86400 s (hooks.json)
 RETRY_S = 2.0
@@ -76,33 +82,59 @@ def home() -> Path:
     return Path(os.environ.get("THIMBLE_HOME") or (Path.home() / ".thimble"))
 
 
-def server_url() -> str:
-    """The server's API base URL, read as bin/thimble-mcp's server_url reads it: $THIMBLE_HOME/server.json's `api`, then
-    its `port`, else THIMBLE_PORT or 8300."""
+def server() -> tuple[str, str] | None:
+    """(the server's API base URL, its token) from $THIMBLE_HOME/server.json (`api`, then `port`, as bin/thimble-mcp
+    reads it); None without the file or a token."""
     try:
         data = json.loads((home() / "server.json").read_text("utf-8"))
-        if isinstance(data, dict):
-            if data.get("api"):
-                return str(data["api"]).rstrip("/")
-            if data.get("port"):
-                return f"http://127.0.0.1:{int(data['port'])}"
-    except (OSError, ValueError, TypeError):
+    except (OSError, ValueError):
+        return None
+    token = data.get("token") if isinstance(data, dict) else None
+    if not isinstance(token, str) or not token:
+        return None
+    try:
+        if data.get("api"):
+            return str(data["api"]).rstrip("/"), token
+        if data.get("port"):
+            return f"http://127.0.0.1:{int(data['port'])}", token
+    except (TypeError, ValueError):
         pass
-    return f"http://127.0.0.1:{os.environ.get('THIMBLE_PORT') or DEFAULT_PORT}"
+    return None
 
 
-def request(method: str, path: str, body: dict | None = None, timeout: float | None = 10.0) -> tuple[int, dict]:
-    """(status, JSON body) of one request to the server; an HTTP error is its status. A transport failure raises
-    urllib.error.URLError when no connection was made, else another OSError or an http.client.HTTPException."""
+class NoServer(urllib.error.URLError):
+    """No thimble server to ask: no server.json or token, or an answer without the server's proof (module note)."""
+
+
+def sign(token: str, role: str, nonce: str) -> str:
+    """app/hook_auth.py's sign: the proof `role` gives for `nonce`."""
+    return hmac.new(token.encode("utf-8"), f"{role}:{nonce}".encode("utf-8"), hashlib.sha256).hexdigest()
+
+
+def request(method: str, path: str, body: dict | None = None, timeout: float | None = 10.0,
+            proven: bool = True) -> tuple[int, dict]:
+    """(status, JSON body) of one request to the server, with this hook's proof; an HTTP error is its status. NoServer,
+    a urllib.error.URLError, when there is no server to ask or, unless not `proven`, its answer lacks the server's proof.
+    A transport failure raises urllib.error.URLError when no connection was made, else another OSError or an
+    http.client.HTTPException."""
+    found = server()
+    if found is None:
+        raise NoServer("no server.json with a token")
+    base, token = found
+    nonce = secrets.token_hex(16)
     data = json.dumps(body).encode("utf-8") if body is not None else None
-    req = urllib.request.Request(server_url() + path, data=data, method=method,
-                                 headers={"Content-Type": "application/json"} if data else {})
+    headers = {"X-Thimble-Nonce": nonce, "X-Thimble-Auth": sign(token, "hook", nonce),
+               **({"Content-Type": "application/json"} if data else {})}
+    req = urllib.request.Request(base + path, data=data, method=method, headers=headers)
     try:
         with urllib.request.urlopen(req, timeout=timeout) as resp:  # noqa: S310 — loopback, thimble's own server
             raw = resp.read()
             status = resp.status
+            proof = resp.headers.get("X-Thimble-Proof") or ""
     except urllib.error.HTTPError as e:
-        return e.code, {}
+        raw, status, proof = b"", e.code, (e.headers.get("X-Thimble-Proof") if e.headers else None) or ""
+    if proven and not hmac.compare_digest(proof, sign(token, "server", nonce)):
+        raise NoServer("the answer does not carry thimble's proof")
     try:
         parsed = json.loads(raw.decode("utf-8")) if raw else {}
     except ValueError:
@@ -429,7 +461,7 @@ def stream(args: list[str]) -> int:
         got = pull(cwd, session, time.monotonic() + LIFETIME_S, pid, follow=True)
         if got is None:
             try:
-                request("GET", "/api/health", timeout=3.0)
+                request("GET", "/api/health", timeout=3.0, proven=False)
             except (OSError, http.client.HTTPException):
                 time.sleep(RETRY_S)  # the server is down: the Monitor waits for it rather than ending
                 continue
@@ -444,6 +476,8 @@ def main() -> int:
     try:
         if "--stream" in args:
             return stream(args)
+        if server() is None:  # no thimble server recorded: every hook does nothing (module note)
+            return 0
         if "--permission" in args:
             return permission(hook_input())
         if "--held" in args:
