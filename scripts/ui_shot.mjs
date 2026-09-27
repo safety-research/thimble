@@ -3,7 +3,7 @@
 //   node scripts/ui_shot.mjs --url <url> --out <png> [--selector <css>] [--wait <ms>]
 //                            [--click <css>]... [--scroll-to <css>] [--viewport <w>x<h>] [--highlight]
 //                            [--element-out <png>] [--info <json path>] [--scale <n>] [--storage <key>=<json>]...
-//                            [--press <key>]...
+//                            [--press <key>]... [--offline]
 // Loads the URL at 1440x900 (or --viewport), at device scale 1 (or --scale: 2 draws every CSS pixel as four, as a
 // high-density screen does), with each --storage key set in the page's localStorage before any of its scripts run, and waits for the page's own requests to go quiet (no request in flight
 // for 500 ms, the SSE streams ignored, hard cap 15 s). Then the actions, in command-line order, each followed by the
@@ -11,7 +11,8 @@
 // into view; --press presses a key on the page (repeatable, such as Escape to clear a selection). Then --wait ms (default 500) to settle, then the png: the element's bounding box padded by 24 px when
 // --selector is given and found, else the full viewport. --highlight outlines the --selector match; --element-out
 // writes the padded element crop to a second png, and --out is then the full viewport; --info writes the result JSON
-// to a file as well as stdout.
+// to a file as well as stdout. --offline refuses every request but the page's own, as for a figure's page whose
+// content a model or a kernel wrote.
 // Read-only: PUT/POST/DELETE/PATCH to /api/** are answered 204 and never reach the backend, and every request carries
 // `X-Thimble-Peek: 1`, so the files a shot loads are not logged as opened by the analyst.
 // Exit 0 on success, 2 if --selector or an action target was not found (the shot is still written), 1 on error.
@@ -37,7 +38,7 @@ const MUTATING = new Set(['PUT', 'POST', 'DELETE', 'PATCH'])
 const USAGE =
   'usage: node scripts/ui_shot.mjs --url <url> --out <png> [--selector <css>] [--wait <ms>] ' +
   '[--click <css>]... [--scroll-to <css>] [--press <key>]... [--viewport <w>x<h>] [--highlight] [--element-out <png>] ' +
-  '[--info <json path>] [--scale <n>] [--storage <key>=<json>]...'
+  '[--info <json path>] [--scale <n>] [--storage <key>=<json>]... [--offline]'
 
 function parseViewport(v) {
   const m = /^(\d{3,5})x(\d{3,5})$/.exec(String(v).trim())
@@ -46,7 +47,7 @@ function parseViewport(v) {
 }
 
 function parseArgs(argv) {
-  const out = { url: null, out: null, selector: null, wait: 500, actions: [], viewport: null, highlight: false, elementOut: null, info: null, scale: 1, storage: [] }
+  const out = { url: null, out: null, selector: null, wait: 500, actions: [], viewport: null, highlight: false, elementOut: null, info: null, scale: 1, storage: [], offline: false }
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i]
     const next = () => {
@@ -69,6 +70,7 @@ function parseArgs(argv) {
     }
     else if (a === '--viewport') out.viewport = parseViewport(next())
     else if (a === '--highlight') out.highlight = true
+    else if (a === '--offline') out.offline = true
     else if (a === '--element-out') out.elementOut = next()
     else if (a === '--info') out.info = next()
     else if (a === '-h' || a === '--help') {
@@ -172,6 +174,10 @@ try {
       for (const [k, v] of pairs) window.localStorage.setItem(k, v)
     }, args.storage)
   await page.setExtraHTTPHeaders({ 'X-Thimble-Peek': '1' })
+  if (args.offline) {
+    const own = new URL(args.url).href
+    await page.route('**/*', (route) => (route.request().url() === own ? route.continue() : route.abort()))
+  }
   await page.route('**/api/**', (route) =>
     MUTATING.has(route.request().method()) ? route.fulfill({ status: 204, body: '' }) : route.continue(),
   )

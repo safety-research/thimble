@@ -364,7 +364,7 @@ Get a picture of what the analyst sees in the browser, such as a card as the can
 {
   "type": "object",
   "properties": {
-    "ref": {"type": "string", "description": "card:<id>, view:<slug>, a file ref a view opens, report:<slug>#<id> of a figure, thread:<id>, or an http address on this machine."},
+    "ref": {"type": "string", "description": "card:<id>, view:<slug>, a file ref a view opens, report:<slug>#<id> of a figure, thread:<id>, or an http address of thimble's own interface on this machine."},
     "selector": {"type": "string", "description": "With an http address, the CSS selector of the one element to shoot."}
   },
   "required": ["ref"]

@@ -1045,10 +1045,10 @@ def shot_script() -> Path:
 
 async def run_shot(url: str, out: Path, selector: str | None = None, *, info_out: Path | None = None,
                    viewport: str | None = None, scale: float | None = None, storage: dict[str, str] | None = None,
-                   press: list[str] | None = None, wait_ms: int | None = None) -> int:
+                   press: list[str] | None = None, wait_ms: int | None = None, offline: bool = False) -> int:
     """`node scripts/ui_shot.mjs`: 0 ok, 2 selector not found (the viewport is written instead), 1 error, -1 timeout.
     Options map to the script's options of the same names."""
-    cmd = ["node", str(shot_script()), "--url", url, "--out", str(out)]
+    cmd = ["node", str(shot_script()), "--url", url, "--out", str(out), *(["--offline"] if offline else [])]
     if selector:
         cmd += ["--selector", selector]
     if info_out is not None:

@@ -91,6 +91,10 @@ EDIT_CELL_KINDS = ADD_CELL_KINDS
 RUN_KINDS = ("plot", "table", "code", "timeline", "diagram")  # notebook.RUNNABLE_KINDS: the kinds that run `code`
 INSTRUCTIONS_HINT = "instructions"  # prompts/tools.md `## instructions`: the shim's MCP server instructions (instructions)
 SCREENSHOT_HOSTS = ("127.0.0.1", "localhost", "::1")  # a page screenshot is of thimble's own interface on this machine
+# a figure's own page (_shot_page_file): no network, inline script and style only, images from data: URLs; the figure
+# runs in a frame sandboxed to scripts alone, which reports its size to the page
+SHOT_PAGE_CSP = ("default-src 'none'; script-src 'unsafe-inline' 'unsafe-eval'; style-src 'unsafe-inline'; "
+                 "img-src data: blob:; font-src data:; connect-src data:")
 # the browser builds a card's chart is drawn with for its screenshot (the frontend's vega, vega-lite and vega-embed)
 VEGA_BUILDS = tuple(config.REPO_ROOT / "frontend" / "node_modules" / p for p in
                     ("vega/build/vega.min.js", "vega-lite/build/vega-lite.min.js", "vega-embed/build/vega-embed.min.js"))
@@ -1998,12 +2002,32 @@ async def _h_screenshot(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
     return await _delegate("app.threads:tool_screenshot", ctx, {**args, "ref": ref})
 
 
+def shot_ports() -> set[int]:
+    """The ports a page screenshot may reach: this server's (THIMBLE_PORT, else 8300) and, in dev mode, the Vite
+    server's that serves its interface (ui_base)."""
+    import os
+
+    port = os.environ.get("THIMBLE_PORT", "").strip()
+    ports = {int(port) if port.isdigit() else 8300}
+    ui = ui_base()
+    with contextlib.suppress(ValueError):
+        if ui and urlsplit(ui).port:
+            ports.add(int(urlsplit(ui).port))  # type: ignore[arg-type]
+    return ports
+
+
 async def _shot_page(url: str, selector: str | None) -> ToolResult:
-    """A page of the thimble interface, headless (dev.run_shot), only on this machine (SCREENSHOT_HOSTS): the analyst's
-    own server, or a ticket's validation stack."""
+    """A page of the thimble interface, headless (dev.run_shot), only on this machine (SCREENSHOT_HOSTS) and on this
+    server's own port or its interface's (shot_ports)."""
     parts = urlsplit(url)
-    if (parts.hostname or "") not in SCREENSHOT_HOSTS:
-        return err(f"screenshot: an http address must be on this machine ({', '.join(SCREENSHOT_HOSTS)})")
+    try:
+        port = parts.port
+    except ValueError:
+        port = None
+    allowed = shot_ports()
+    if (parts.hostname or "") not in SCREENSHOT_HOSTS or port not in allowed:
+        return err(f"screenshot: an http address must be thimble's own interface on this machine (port "
+                   f"{', '.join(str(p) for p in sorted(allowed))})")
     run_shot = _optional("dev", "run_shot")
     if run_shot is None:
         return _not_available("screenshot", "dev", "run_shot")
@@ -2063,11 +2087,7 @@ async def _shot_card(ctx: Ctx, ref: str) -> ToolResult:
     missing = [p for p in VEGA_BUILDS if not p.is_file()]
     if missing:
         return err(f"screenshot: {missing[0].relative_to(config.REPO_ROOT)} is missing (no npm install here), so the chart cannot be drawn")
-    scripts = "".join(f"<script src='{p.as_uri()}'></script>" for p in VEGA_BUILDS)
-    body = (f"<div id='vis'></div><script>vegaEmbed('#vis', {json.dumps(spec)}, "
-            "{renderer: 'svg', actions: false}).catch(e => document.body.append(String(e)))</script>")
-    return await _shot_page_file(cid, f"<!doctype html><html><head>{scripts}</head>"
-                                      f"<body style='margin:0;background:#fff'>{body}</body></html>", "#vis")
+    return await _shot_page_file(cid, chart_page(spec))
 
 
 # The page a card is shot in: 1280 px wide at device scale 2, tall enough for the tallest cards, with the chat closed
@@ -2118,21 +2138,70 @@ async def _shot_card_in_ui(c: str, cid: str, ui: str) -> ToolResult | None:
     return _image(data, "image/png", f"screenshot of card:{cid}")
 
 
+def _inline_script(js: str) -> str:
+    """Script text that cannot end its <script> element early."""
+    return js.replace("</script", "<\\/script").replace("</SCRIPT", "<\\/SCRIPT")
+
+
+def figure_page(inner: str) -> str:
+    """The page a card's figure is shot on: `inner`, a document of its own, in a frame sandboxed to scripts alone under
+    SHOT_PAGE_CSP, which takes the size the figure reports (`{w, h}` posted to its parent)."""
+    import html as html_mod  # noqa: PLC0415
+
+    size = ("addEventListener('message', (e) => { const f = document.getElementById('fig'); const d = e.data || {}; "
+            "if (e.source === f.contentWindow && d.w > 0 && d.h > 0) { f.style.width = d.w + 'px'; "
+            "f.style.height = d.h + 'px' } })")
+    return (f"<!doctype html><html><head><meta http-equiv='Content-Security-Policy' content=\"{SHOT_PAGE_CSP}\">"
+            f"<script>{size}</script></head><body style='margin:0;background:#fff'>"
+            f"<iframe id='fig' sandbox='allow-scripts' style='border:0;display:block;width:1200px;height:900px' "
+            f"srcdoc=\"{html_mod.escape(inner, quote=True)}\"></iframe></body></html>")
+
+
+# the figure's frame reports the size of what it drew, so the shot is of the figure alone
+_REPORT_SIZE = ("const r = document.getElementById('vis').getBoundingClientRect(); "
+                "parent.postMessage({w: Math.ceil(r.right), h: Math.ceil(r.bottom)}, '*')")
+
+
+def chart_page(spec: dict[str, Any]) -> str:
+    """A Vega or Vega-Lite chart's page (figure_page): the spec as data, never as markup, without the embed options
+    it may carry, drawn by the frontend's vega, vega-lite and vega-embed builds inlined."""
+    meta = spec.get("usermeta")
+    if isinstance(meta, dict) and "embedOptions" in meta:
+        spec = {**spec, "usermeta": {k: v for k, v in meta.items() if k != "embedOptions"}}
+    data = json.dumps(spec).replace("<", "\\u003c")
+    scripts = "".join(f"<script>{_inline_script(p.read_text('utf-8'))}</script>" for p in VEGA_BUILDS)
+    body = (f"<div id='vis' style='display:inline-block'></div><script>vegaEmbed('#vis', {data}, "
+            f"{{renderer: 'svg', actions: false}}).then(() => {{ {_REPORT_SIZE} }})"
+            ".catch(e => document.body.append(String(e)))</script>")
+    return figure_page(f"<!doctype html><html><head>{scripts}</head><body style='margin:0;background:#fff'>{body}"
+                       "</body></html>")
+
+
+def svg_page(svg: str) -> str:
+    """An SVG figure's page (figure_page): the figure as an image, which runs no script and loads nothing."""
+    src = "data:image/svg+xml;base64," + base64.b64encode(svg.encode("utf-8")).decode("ascii")
+    return figure_page(f"<!doctype html><html><body style='margin:0;background:#fff'><img id='vis' src='{src}' "
+                       f"style='display:block' onload=\"{_REPORT_SIZE}\"></body></html>")
+
+
 async def _shot_svg(cid: str, svg: str) -> ToolResult:
     """An SVG figure as a PNG, since a model reads raster images only: the figure alone on a white page."""
-    return await _shot_page_file(cid, f"<!doctype html><html><body style='margin:0;background:#fff'>{svg}</body></html>", "svg")
+    return await _shot_page_file(cid, svg_page(svg))
 
 
-async def _shot_page_file(cid: str, page_html: str, selector: str) -> ToolResult:
-    """A card's figure drawn on a page of its own in a temporary file and shot by its element (dev.run_shot, the headless
-    Chromium the ticket runner's page shots use)."""
+FIGURE_SHOT_WAIT_MS = 800  # after the page is quiet: the frame draws the figure and takes its size
+
+
+async def _shot_page_file(cid: str, page_html: str) -> ToolResult:
+    """A card's figure drawn on a page of its own (figure_page) in a temporary file and shot by its frame
+    (dev.run_shot, the headless Chromium the ticket runner's page shots use), with every request refused."""
     run_shot = _optional("dev", "run_shot")
     if run_shot is None:
         return _not_available("screenshot", "dev", "run_shot")
     with tempfile.TemporaryDirectory(prefix="thimble-shot-") as d:
         page, png = Path(d) / "card.html", Path(d) / "card.png"
         page.write_text(page_html, "utf-8")
-        code = await _maybe_await(run_shot(page.as_uri(), png, selector))
+        code = await _maybe_await(run_shot(page.as_uri(), png, "#fig", offline=True, wait_ms=FIGURE_SHOT_WAIT_MS))
         if not png.is_file() or code not in (0, None):
             return err(f"screenshot: card:{cid}'s figure did not render (exit {code})")
         data = base64.b64encode(png.read_bytes()).decode("ascii")
