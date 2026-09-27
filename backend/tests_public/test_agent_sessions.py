@@ -164,6 +164,7 @@ def _fenced(**settings) -> dict:
     subagents' scratch folders, the permission hook and the call-ref hooks."""
     work = orient_session.work_dir(CORPUS)
     fence = agent_session.fence(config.corpus_dir(CORPUS), work, sandbox=False)
+    fence["permissions"]["ask"] = ["WebFetch", "WebSearch"]  # Manual: the web asks (agent_session, the web)
     return {**settings, **fence, "hooks": {**agent_session.scratch_hooks(work), **agent_session.permission_hooks(CORPUS),
                                            **agent_session.call_hooks(CORPUS)}}
 
@@ -230,9 +231,8 @@ async def test_start_orientation_starts_the_session_with_start_s_choices_and_mir
     i = argv.index("--allowedTools") + 1
     given = argv[i:argv.index("--disallowedTools")]
     assert given == agent_session.own_rules(), \
-        "thimble's tools, as main's launcher allows main's, the plugin's skills and WebSearch, each without a prompt"
-    assert agent_session.own_rules() == ["mcp__plugin_thimble_thimble", *cli.skill_rules(agent_session.PLUGIN_DIR),
-                                         "WebSearch"]
+        "thimble's tools, as main's launcher allows main's, and the plugin's skills, each without a prompt"
+    assert agent_session.own_rules() == ["mcp__plugin_thimble_thimble", *cli.skill_rules(agent_session.PLUGIN_DIR)]
     assert "model" not in agent and "skills" not in agent
     assert agent["prompt"] == orient_session.system_prompt(CORPUS, "the runs", ["final", "views"])
     assert argv[argv.index("--effort") + 1] == "high"
@@ -506,9 +506,16 @@ async def test_manual_waits_for_the_analyst_however_long_while_a_writer_s_reques
     try:
         run.chat = str(agents.new_agent(CORPUS, "writer", "Write report")["id"])
         assert not run.patient
-        assert await agent_session.ask(CORPUS, run.key, "Bash", inp) == {"behavior": "deny", "message": agent_session.TIMED_OUT_LINE}
+        assert await agent_session.ask(CORPUS, run.key, "Bash", inp) == {
+            "behavior": "deny", "message": agent_session.timed_out_line(0.05)}
         last = json.loads((config.workspace_dir(CORPUS) / agents.PERMISSIONS_LOG).read_text().splitlines()[-1])
         assert last["answer"] == "deny: nobody answered in time" and last["chat"] == run.chat
+        [expired] = agents.read_meta(CORPUS, run.chat)["permissions"]
+        assert expired["expired"] and expired["tool"] == "Bash", "it stays on the card, marked denied unanswered"
+        assert agent_session.answer(CORPUS, run.chat, expired["id"], False), "Dismiss takes it off"
+        assert agents.read_meta(CORPUS, run.chat)["permissions"] == []
+        assert agent_session.timed_out_line(60).startswith("Nobody answered in thimble's browser within a minute,")
+        assert "within 10 minutes," in agent_session.timed_out_line(600)
     finally:
         agent_session._runs.pop((CORPUS, run.key), None)
 
