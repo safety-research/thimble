@@ -119,6 +119,17 @@ def test_the_shared_skill_renders_the_prompt_file_every_thimble_agent_shares(cap
     assert capsys.readouterr().out.startswith("thimble: ")
 
 
+def test_the_thimble_skill_pre_approves_only_the_commands_it_injects():
+    """/thimble's allowed-tools let its two injected commands run without a prompt, and no other thimble subcommand
+    (`update --from`, `uninstall --yes`)."""
+    front, body = split((PLUGIN / "skills" / "thimble" / "SKILL.md").read_text("utf-8"))
+    rules = re.findall(r"Bash\(([^)]*)\)", front["allowed-tools"])
+    cli = "${CLAUDE_PLUGIN_ROOT}/bin/thimble"
+    assert [r for r in rules if r.startswith(cli + " ")] == [f"{cli} prompt *", f"{cli} server up *"]
+    injected = [ln[2:].split("`")[0] for ln in body.splitlines() if ln.startswith("!`")]
+    assert injected and all(any(c.startswith(r[:-1]) for r in rules if r.endswith(" *")) for c in injected), injected
+
+
 def test_orient_skill_calls_the_start_orientation_tool_with_the_focus_as_its_brief():
     front, body = split(SKILL.read_text("utf-8"))
     assert front["name"] == "orient" and front["disable-model-invocation"] is True
