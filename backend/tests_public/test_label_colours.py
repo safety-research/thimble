@@ -41,9 +41,24 @@ def test_each_value_takes_the_colour_the_server_gives_its_class(ws):
         want = {c["name"]: kernel_thimble.LABEL_COLOURS[c["color"]] for c in k["classes"]}
         assert kernel_thimble.colours(k["name"]) == want, k["name"]
     assert kernel_thimble.colours("kind of edit") == {"fix": "#009e73", "feature": "#d55e00", "other": "#a09c93"}
-    # the labels without classes take the first colours no stored label holds, and a negative takes the grey
+    # the labels without classes take the first colours no other class holds, and a negative takes the grey
     assert kernel_thimble.colours("flaky test") == {"flaky": "#0072b2", "no": "#a09c93"}
-    assert list(kernel_thimble.colours("tone").values()) == ["#e69f00", "#009e73", "#a09c93"]
+    assert list(kernel_thimble.colours("tone").values()) == ["#e69f00", "#cc79a7", "#a09c93"]
+
+
+def test_a_new_label_takes_colours_no_other_label_has_while_one_is_free(ws):
+    """A new label's values take colours no value of another label has, the values after a label's first included; once
+    every colour is taken, a new label's first value takes the colours in turn."""
+    def new(cid: str, values: list[str]) -> list[int]:
+        _write(ws, cid, {"name": cid, "labels": values, "ts": f"2026-02-0{cid[-1]}T00:00:00+00:00"})
+        k = concepts.coloured(ws, concepts.read_concept(ws, cid))
+        concepts.write_concept(ws, k)
+        return [c["color"] for c in k["classes"]]
+
+    assert {c["color"] for k in concepts.list_concepts(ws) for c in k["classes"]} == {0, 1, 2, 3, 4, 5}
+    assert new("k6", ["bug", "chore", "none"]) == [6, 7, 0]
+    assert new("k7", ["a", "b", "c", "d", "e"]) == [8, 9, 10, 11, 12]
+    assert new("k8", ["late", "no"]) == [1, 0]
 
 
 def test_a_value_the_label_does_not_define_takes_a_neutral_ink(ws):

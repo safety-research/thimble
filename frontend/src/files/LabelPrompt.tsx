@@ -8,7 +8,7 @@ import { labelApi } from '../lib/api'
 import { bus } from '../lib/bus'
 import { track } from '../lib/telemetry'
 import type { ConceptRun, LabelDraft } from '../lib/types'
-import { draftBody, freeName } from './labels'
+import { draftBody, freeName, usedColours } from './labels'
 import { nextFreeColour } from './LabelCard'
 import type { FilesLabels } from './useLabels'
 
@@ -52,7 +52,7 @@ export function useDescribe({ ws, labels, appliesTo, onRun, onManual, onEdit }: 
         const named = { ...draft, name: freeName(draft.name, labels.all.map((k) => k.name)) }
         let id: string | null = null
         try {
-          const k = await labelApi.create(ws, draftBody(named, nextFreeColour(labels.all)))
+          const k = await labelApi.create(ws, draftBody(named, nextFreeColour(labels.all), usedColours(labels.all)))
           id = k.id
           track('label-apply', { target: `concept:${k.id}`, detail: { over: named.over, marks: named.marks, kind: named.kind, created: true, described: true } })
           onRun(k.id, await labelApi.apply(ws, k.id, {}))

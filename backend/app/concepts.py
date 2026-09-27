@@ -268,12 +268,19 @@ def own_colour(want: int, taken: set[int]) -> int:
     return next((m for m in ((want - 1 + j) % PALETTE + 1 for j in range(1, PALETTE)) if m not in taken), want)
 
 
+def free_colour(start: int, used: set[int]) -> int | None:
+    """The first palette colour from `start` on, round the palette, that `used` does not hold; None when it holds every
+    one."""
+    return next((m for m in ((start - 1 + j) % PALETTE + 1 for j in range(PALETTE)) if m not in used), None)
+
+
 def fill_colours(concepts: list[dict]) -> list[dict]:
-    """Give every class without a colour one, in place, and return the list. A label's first class takes the first palette
-    colour no other label has taken yet, a negative class the grey, and a further class the colours after its label's,
-    avoiding repeats within a label while a colour is free (own_colour)."""
-    used = {c["classes"][0]["color"] for c in concepts if c.get("classes") and c["classes"][0]["color"]}
-    free = [n for n in range(1, PALETTE + 1) if n not in used]
+    """Give every class without a colour one, in place, and return the list. While a palette colour is free, one no class
+    of any label has, a label's first class takes the first free one and a further class the first free one from its
+    place after its label's first colour; when none is free, a first class takes the colours in turn and a further class
+    the one at its place. A negative class takes the grey, and a label's classes do not repeat a colour while one is
+    free (own_colour)."""
+    used = {c["color"] for x in concepts for c in x.get("classes") or [] if c["color"]}
     k = 0
     for concept in concepts:
         classes = concept.get("classes") or []
@@ -281,19 +288,21 @@ def fill_colours(concepts: list[dict]) -> list[dict]:
             continue
         n = len(classes)
         if classes[0]["color"] is None:
-            if free:
-                classes[0]["color"] = free.pop(0)
-            else:
+            classes[0]["color"] = free_colour(1, used)
+            if classes[0]["color"] is None:
                 classes[0]["color"] = k % PALETTE + 1
                 k += 1
+            used.add(classes[0]["color"])
         base = classes[0]["color"] or 1
         taken = {base} if classes[0]["color"] else set()
         for i, c in enumerate(classes[1:], 1):
             if c["color"] is None:
-                c["color"] = 0 if is_negative(c["name"], i, n) else (base - 1 + i) % PALETTE + 1
+                at = (base - 1 + i) % PALETTE + 1
+                c["color"] = 0 if is_negative(c["name"], i, n) else free_colour(at, used) or at
             c["color"] = own_colour(c["color"], taken)
             if c["color"]:
                 taken.add(c["color"])
+                used.add(c["color"])
     return concepts
 
 

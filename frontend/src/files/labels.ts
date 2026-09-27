@@ -554,18 +554,40 @@ export function ownColour(want: number, taken: readonly number[]): number {
   return want
 }
 
+/** Every palette colour a class of the labels has (the grey aside). Pure. */
+export function usedColours(labels: readonly Pick<Concept, 'labels' | 'classes'>[]): number[] {
+  return [...new Set(labels.flatMap((k) => classesOf(k).map((c) => c.color)).filter((c) => !!c))]
+}
+
+/** The first palette colour from `at` on, round the palette, that `used` does not hold; null when it holds every one
+ * (the server's free_colour). Pure. */
+export function freeColour(at: number, used: readonly number[]): number | null {
+  for (let j = 0; j < LABEL_COLOURS; j++) {
+    const m = ((at - 1 + j) % LABEL_COLOURS) + 1
+    if (!used.includes(m)) return m
+  }
+  return null
+}
+
 /** The classes a drafted label is created with: the first value highlighted in `colour`, a negative value (isNegative)
- * in the grey and not highlighted, any other in the colours after `colour`, highlighted. Pure. */
-export function draftClasses(values: readonly string[], colour: number): LabelClass[] {
-  return values.map((name, i) =>
-    isNegative(name, i, values.length) && i > 0 ? { name, color: 0, highlight: false } : { name, color: ((colour - 1 + i) % LABEL_COLOURS) + 1, highlight: true },
-  )
+ * in the grey and not highlighted, any other highlighted in the first colour after `colour` that neither `used` (the
+ * other labels' colours) nor an earlier value has, while one is free, else the colour at its place after `colour`. Pure. */
+export function draftClasses(values: readonly string[], colour: number, used: readonly number[] = []): LabelClass[] {
+  const taken = [...used, colour]
+  return values.map((name, i) => {
+    if (i === 0) return { name, color: colour, highlight: true }
+    if (isNegative(name, i, values.length)) return { name, color: 0, highlight: false }
+    const at = ((colour - 1 + i) % LABEL_COLOURS) + 1
+    const color = freeColour(at, taken) ?? at
+    taken.push(color)
+    return { name, color, highlight: true }
+  })
 }
 
 /** The body POST /concepts takes for a drafted label, as the edit card's Run sends it for a new one: a label over files
  * marks and applies to what the draft says and is created on in Files; a prompt's text is its description, a regex's
- * or code's its spec. Pure. */
-export function draftBody(d: LabelDraft, colour: number): ConceptPatch & { name: string; unit: ConceptUnit } {
+ * or code's its spec; its classes take draftClasses' colours, away from `used`. Pure. */
+export function draftBody(d: LabelDraft, colour: number, used: readonly number[] = []): ConceptPatch & { name: string; unit: ConceptUnit } {
   const files = d.over === 'files'
   const marks = d.marks ?? 'span'
   return {
@@ -574,7 +596,7 @@ export function draftBody(d: LabelDraft, colour: number): ConceptPatch & { name:
     ...(files ? { marks, glob: d.glob } : {}),
     kind: d.kind,
     model: '',
-    classes: draftClasses(d.values, colour),
+    classes: draftClasses(d.values, colour, used),
     ...(d.kind === 'prompt' ? { description: d.text, spec: '' } : { spec: d.text }),
     shown: files,
   }

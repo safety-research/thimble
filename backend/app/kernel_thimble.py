@@ -116,33 +116,39 @@ def _classes(k: dict) -> list:
 
 
 def _fill_colours(ks: list) -> list:
-    """Give every class without a colour the one concepts.fill_colours gives it, in place: a label's first class takes
-    the first colour no label's first class has, a negative class the grey, further classes the following colours,
-    avoiding repeats within a label while colours remain."""
+    """Give every class without a colour the one concepts.fill_colours gives it, in place: while a colour is free, one no
+    class of any label has, a label's first class takes the first free one and a further class the first free one from
+    its place after its label's first colour; else a first class takes the colours in turn and a further class the one
+    at its place. A negative class takes the grey, and a label's classes do not repeat a colour while one remains."""
     n_colours = len(LABEL_COLOURS) - 1
-    used = {k["classes"][0][1] for k in ks if k["classes"] and k["classes"][0][1]}
-    free = [n for n in range(1, n_colours + 1) if n not in used]
+    used = {c[1] for k in ks for c in k["classes"] if c[1]}
+
+    def free(start: int):
+        return next((m for m in ((start - 1 + i) % n_colours + 1 for i in range(n_colours)) if m not in used), None)
+
     j = 0
     for k in ks:
         cs = k["classes"]
         if not cs:
             continue
         if cs[0][1] is None:
-            if free:
-                cs[0][1] = free.pop(0)
-            else:
+            cs[0][1] = free(1)
+            if cs[0][1] is None:
                 cs[0][1] = j % n_colours + 1
                 j += 1
+            used.add(cs[0][1])
         base = cs[0][1] or 1
         taken = {base} if cs[0][1] else set()
         for i, c in enumerate(cs[1:], 1):
             if c[1] is None:
                 negative = c[0].lower() in _QUIET or (len(cs) == 2 and i == 1)
-                c[1] = 0 if negative else (base - 1 + i) % n_colours + 1
+                at = (base - 1 + i) % n_colours + 1
+                c[1] = 0 if negative else free(at) or at
             if c[1] and c[1] in taken:
                 c[1] = next((m for m in ((c[1] - 1 + j) % n_colours + 1 for j in range(1, n_colours)) if m not in taken), c[1])
             if c[1]:
                 taken.add(c[1])
+                used.add(c[1])
     return ks
 
 
