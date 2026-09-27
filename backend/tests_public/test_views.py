@@ -726,6 +726,26 @@ async def test_the_repository_example_compares_any_runs_and_filters_by_who_did_w
     assert {(i["run"], i["number"]) for i in approved["items"]} == {
         (r["run"], r["number"]) for r in rows if r["kind"] == "review" and r["author"] == "moss"
         and r["verdict"] == "approved"} != set()
+    # a filter takes several values, and a unit meets it with any of them
+    verdicts = ["approved", "changes requested"]
+    query = {"op": "view", "tab": "pulls", "filters": {"actor": ["moss"], "action": verdicts}}
+    either = await views.reader_call(name, slug, "records", query)
+    assert {(i["run"], i["number"]) for i in either["items"]} == {
+        (r["run"], r["number"]) for r in rows if r["kind"] == "review" and r["author"] == "moss"
+        and r["verdict"] in verdicts} > {(i["run"], i["number"]) for i in approved["items"]}
+    # the colour field keys the activity, and its own counts leave its filter out, as a legend's do
+    query = {"op": "view", "tab": "pulls", "colour": "actor", "filters": {"actor": ["moss"]}}
+    by = await views.reader_call(name, slug, "records", query)
+    assert {row[2] for row in by["activity"]["rows"]} == {"moss"} and by["colour"]["filter"] == "actor"
+    assert len(by["colour"]["values"]) > 1 and "moss" in by["colour"]["order"]
+    # the agents tab filters by what its agents did
+    merged = await views.reader_call(name, slug, "records", {"op": "view", "tab": "agents", "filters": {"action": ["merged"]}})
+    assert {(i["run"], i["name"]) for i in merged["items"]} == {(r["run"], r["author"]) for r in rows if r["kind"] == "merge"}
+    # while a label is on its values key the records, and the page may hide the records none marks
+    probe = views.probe_context()
+    marked = await views.reader_call(name, slug, "records", {"op": "view", "tab": "pulls", "hide": ["none"]}, labels=probe)
+    assert len(marked["classes"]) == 1 and marked["hide"] == ["none"]
+    assert {row[2] for row in marked["activity"]["rows"]} == {0} and 0 < marked["total"] < pulls["total"]
 
 
 async def test_the_linked_sessions_example_lays_each_run_out_as_a_tree_and_compares_sessions(samples, inproc, bound):

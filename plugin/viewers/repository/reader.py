@@ -24,15 +24,19 @@
 # and a run itself (<run>). The index keeps each unit's facts (state, who merged it, each reviewer's verdicts, flags)
 # and its records' lines and times; a record's text is read back from its byte offset when a page shows it. One fetch
 # answers a whole tab under the page's selection: the tab counts, one row of measures per run, the activity per time
-# bin, the values of every filter with their counts, and a page of units. Most filters pick units by their facts; the
-# time range, `actor` (who wrote a record) and `action` (what it did) pick records, and a unit stays when one of its
-# records meets all three. Each filter's counts hold every other filter, and the runs' rows hold every filter but the
-# run, so a run that is not chosen still shows what choosing it would give.
+# bin, the values of every filter with their counts, and a page of units. A filter takes one value or several, and a
+# unit meets it when it has any of them. Most filters pick units by their facts; the time range, `actor` (who wrote a
+# record) and `action` (what it did) pick records, and a unit stays when one of its records meets all three. Each
+# filter's counts hold every other filter, and the runs' rows hold every filter but the run, so a run that is not chosen
+# still shows what choosing it would give. The activity and the strips key each record by the colour field the page
+# chose (its action, who wrote it, its run, or its unit's state or area), and the colour field's own counts hold every
+# filter but its own, as a legend's do.
 #
 # Labels: they apply when records are served, never in the index. A unit stays when thimble.kept_unit holds for its
-# records, and a record counts in the activity and on a unit's strip when thimble.kept holds for it. The records the
-# first label that is on marks (thimble.marked) are counted apart in the activity and in each run's row, since thimble
-# cannot see inside a chart; the page draws them in the label's colour.
+# records, and a record counts in the activity and on a unit's strip when thimble.kept holds for it. While a label is
+# on, the values of the labels that are on key the records in place of the colour field: each record by the first of
+# them that marks it (thimble.marked), since thimble cannot see inside a chart, and the page draws them in the labels'
+# colours. The page may hide the records of some of those values, or the records none marks.
 import json
 import re
 import statistics
@@ -48,6 +52,9 @@ MAX_BARS = 40
 ACTION = {"pr": "opened", "issue": "opened", "commit": "pushed", "comment": "commented", "merge": "merged",
           "close": "closed", "post": "posted", "agent": "signed off"}
 MENTION = re.compile(r"#(\d+)\b")
+# the fields that can colour the records on each tab: a record's action or author, or its unit's run, state or area
+COLOURS = {"pulls": ("action", "actor", "run", "state", "area"), "issues": ("action", "actor", "run", "state", "area"),
+           "discussions": ("action", "actor", "run"), "agents": ("action", "actor", "run")}
 
 
 def _epoch(t):
@@ -253,26 +260,46 @@ def _read(index, refs):
     return out
 
 
-class _Labels:
-    """The label calls of one fetch, each ref asked once: `keep(ref)`, `mark(ref)` (whether the first label that is on
-    marks it) and `unit(u)` (whether the filter keeps the unit)."""
+def _key(label, value):
+    return f"{label}\n{value}"
 
-    def __init__(self):
-        on = thimble.view_labels()["labels"]
-        self.first = on[0]["name"] if on else None
-        self._keep, self._mark, self._unit = {}, {}, {}
+
+class _Labels:
+    """The label calls of one fetch, each ref asked once. `classes` are the values of the labels that are on, each
+    {label, value, colour}, in thimble's order, and `hide` those whose records the page hides (`label\\nvalue`, or
+    "none" for the records none marks). `keep(ref)`, `marks(ref)` (the classes that mark it), `first(ref)` (the first
+    of them the page does not hide, or -1), `hidden(ref)` and `unit(u)` (whether the filter keeps the unit)."""
+
+    def __init__(self, hide=()):
+        self.classes = [{"label": lab["name"], "value": v["name"], "colour": v["colour"]}
+                        for lab in thimble.view_labels()["labels"] for v in lab["values"]]
+        at = {_key(c["label"], c["value"]): i for i, c in enumerate(self.classes)}
+        self._at = at
+        self.hide = {h for h in hide or () if h == "none" or h in at} if self.classes else set()
+        self._off = {at[h] for h in self.hide if h != "none"}
+        self._keep, self._marks, self._unit = {}, {}, {}
 
     def keep(self, ref):
         if ref not in self._keep:
             self._keep[ref] = thimble.kept(ref)
         return self._keep[ref]
 
-    def mark(self, ref):
-        if self.first is None:
+    def marks(self, ref):
+        if not self.classes:
+            return []
+        if ref not in self._marks:
+            self._marks[ref] = sorted({i for m in thimble.marked(ref)
+                                       if (i := self._at.get(_key(m["label"], m["value"]))) is not None})
+        return self._marks[ref]
+
+    def first(self, ref):
+        return next((i for i in self.marks(ref) if i not in self._off), -1)
+
+    def hidden(self, ref):
+        if not self.hide:
             return False
-        if ref not in self._mark:
-            self._mark[ref] = any(m["label"] == self.first for m in thimble.marked(ref))
-        return self._mark[ref]
+        got = self.marks(ref)
+        return all(i in self._off for i in got) if got else "none" in self.hide
 
     def unit(self, u):
         if u["key"] not in self._unit:
@@ -295,8 +322,8 @@ def _facets(tab, u):
         return {"state": [u["state"]], "author": [u["author"]], "area": [u["area"]], "origin": [u["origin"]],
                 "reason": [u["reason"]] if u["reason"] else []}
     if tab == "discussions":
-        return {"author": list(u["posters"])}
-    return {}
+        return {}
+    return {"agent": [u["name"]], "reviewed": sorted(u["partners"])}
 
 
 def _measures(tab, us, index, run):
@@ -324,10 +351,28 @@ def _measures(tab, us, index, run):
             "mutual": len(mutual), "merges": sum(u["merges"] for u in us)}
 
 
-def _item(tab, u, index, labels):
-    """A unit as a row of the list, with its kept records as strip ticks: [ref, hours, action, marked], and for a
-    closed one the closer's words (`why`, read from its close record)."""
-    ticks = [[ref, h, act, labels.mark(ref)] for ref, h, act, _ in u["events"] if labels.keep(ref)]
+def _colour(field, u, e):
+    """What an event of the unit `u` is under the colour field."""
+    if field == "actor":
+        return e[3]
+    if field == "run":
+        return u["run"]
+    if field in ("state", "area"):
+        return str(u.get(field) or "")
+    return e[2]
+
+
+def _part(field, u, e, labels):
+    """An event's part of the activity and colour on a strip: the first class that marks it while a label is on
+    (-1 for none), else its value under the colour field."""
+    return labels.first(e[0]) if labels.classes else _colour(field, u, e)
+
+
+def _item(tab, u, index, labels, field, on):
+    """A unit as a row of the list, with its kept records as strip ticks: [ref, hours, action, part (_part), 1 when
+    `on(event)` holds, the time range and the record filters picking it, else 0], and for a closed one the closer's
+    words (`why`, read from its close record)."""
+    ticks = [[e[0], e[1], e[2], _part(field, u, e, labels), int(on(e))] for e in u["events"] if labels.keep(e[0])]
     base = {"key": u["key"], "run": u["run"], "at": u["at"], "ticks": ticks}
     if u.get("state") == "closed":
         ref = next(e[0] for e in reversed(u["events"]) if e[2] == "closed")
@@ -357,8 +402,10 @@ SORTS = {
     "most posts": (lambda u: -(u.get("posts") or 0)),
     "latest": (lambda u: -u["events"][-1][1] if u["events"] else 0),
 }
-# the filters that pick records rather than units, and each one's place in an event
+# the filters that pick records rather than units, and each one's place in an event, and the tabs that offer each
 PICKS = {"actor": 3, "action": 2}
+TAB_PICKS = {"pulls": ("actor", "action"), "issues": ("actor", "action"), "discussions": ("actor",),
+             "agents": ("action",)}
 AGENT_SORTS = ("merges", "opened", "merged", "reviews", "approved", "changes", "comments", "posts")
 
 
@@ -371,23 +418,25 @@ def _order(tab, units, sort):
     return sorted(units, key=lambda u: (key(u), u["run"], u.get("number") or 0))
 
 
-def _activity(units, index, labels, runs, picked):
-    """The kept records of the units that `picked(event)` holds for, per run, time bin and action: {bin: minutes, hours:
-    the longest run, rows: [run, bin, action, n, marked]}."""
+def _active(e):
+    """Whether an event is activity of its run: a backlog issue was imported as its run began, which is not."""
+    return not (e[1] < 0 or (e[1] == 0 and e[2] == "opened"))
+
+
+def _activity(units, index, labels, runs, picked, field):
+    """The kept records of the units that `picked(event)` holds for, per run, time bin and part (_part): {bin: minutes,
+    hours: the longest run, rows: [run, bin, part, n]}."""
     span = max((index["runs"][r]["end"] - index["runs"][r]["start"]) / 3600 for r in runs) if runs else 1
     minutes = next((b for b in BINS if span * 60 / b <= MAX_BARS), BINS[-1])
     counts = {}
     for u in units:
         for e in u["events"]:
-            ref, h, act, _ = e
-            # a backlog issue was imported as its run began, which is no activity of the run
-            if h < 0 or (h == 0 and act == "opened") or not picked(e) or not labels.keep(ref):
+            if not _active(e) or not picked(e) or not labels.keep(e[0]):
                 continue
-            c = counts.setdefault((u["run"], int(h * 60 // minutes), act), [0, 0])
-            c[0] += 1
-            c[1] += labels.mark(ref)
+            key = (u["run"], int(e[1] * 60 // minutes), _part(field, u, e, labels))
+            counts[key] = counts.get(key, 0) + 1
     return {"bin": minutes, "hours": round(span, 3),
-            "rows": [[r, b, a, n, m] for (r, b, a), (n, m) in sorted(counts.items())]}
+            "rows": [[*k, n] for k, n in sorted(counts.items(), key=lambda kv: (kv[0][0], kv[0][1], str(kv[0][2])))]}
 
 
 def _grid(tab, units, index):
@@ -410,14 +459,29 @@ def _grid(tab, units, index):
              "cells": {r: sorted(cs, key=lambda c: c["number"]) for r, cs in rows[k].items()}} for k in order]
 
 
+def _values(v):
+    """A filter's chosen values: a list of them, or one alone."""
+    return [str(x) for x in (v if isinstance(v, list) else [v]) if x not in (None, "")]
+
+
+def _colour_filter(tab, field):
+    """The filter that narrows the tab by the colour field's values, whose own choice the field's counts leave out."""
+    if field == "actor":
+        return "agent" if tab == "agents" else "actor"
+    if field == "action":
+        return "action" if "action" in TAB_PICKS.get(tab, ()) else None
+    return field if field in ("state", "area") else None
+
+
 def _view(index, query):
     tab = query.get("tab") if query.get("tab") in TABS else "pulls"
-    labels = _Labels()
+    field = query.get("colour") if query.get("colour") in COLOURS[tab] else "action"
+    labels = _Labels(query.get("hide") or ())
     all_runs = sorted(index["runs"])
     chosen = [r for r in (query.get("runs") or []) if r in index["runs"]] or all_runs
     q = str(query.get("q") or "").strip().lower()
     rng = query.get("range") if isinstance(query.get("range"), list) and len(query["range"]) == 2 else None
-    wanted = {k: v for k, v in (query.get("filters") or {}).items() if v not in (None, "")}
+    wanted = {k: vs for k, v in (query.get("filters") or {}).items() if (vs := _values(v))}
     picks = {f: wanted.pop(f) for f in list(wanted) if f in PICKS}
 
     kept = [u for u in index["units"].values() if labels.unit(u)]
@@ -426,16 +490,19 @@ def _view(index, query):
     facts = {u["key"]: _facets(tab, u) for u in found}
 
     def ok(u, skip=None):
-        return all(v in facts[u["key"]].get(f, []) for f, v in wanted.items() if f != skip)
+        return all(any(v in facts[u["key"]].get(f, []) for v in vs) for f, vs in wanted.items() if f != skip)
 
-    def picked(e, skip=None):
-        return all(e[PICKS[f]] == v for f, v in picks.items() if f != skip)
+    def picked(e, skip=None, hiding=True):
+        return all(e[PICKS[f]] in vs for f, vs in picks.items() if f != skip) and not (hiding and labels.hidden(e[0]))
+
+    def on(e, skip=None):
+        """Whether the time range and every record filter but `skip` pick the event."""
+        return (not rng or rng[0] <= e[1] < rng[1]) and picked(e, skip)
 
     def hits(u, skip=None):
-        """The unit's events in the time range that every record filter but `skip` picks."""
-        return [e for e in u["events"] if (not rng or rng[0] <= e[1] < rng[1]) and picked(e, skip)]
+        return [e for e in u["events"] if on(e, skip)]
 
-    live = [u for u in found if not (rng or picks) or hits(u)]
+    live = [u for u in found if not (rng or picks or labels.hide) or hits(u)]
     facets = {}
     for f in {f for u in live for f in facts[u["key"]]}:
         counts = {}
@@ -443,39 +510,88 @@ def _view(index, query):
             if u["run"] in chosen and ok(u, f):
                 for v in facts[u["key"]].get(f, []):
                     counts[v] = counts.get(v, 0) + 1
-        if f in wanted:
-            counts.setdefault(wanted[f], 0)
+        for v in wanted.get(f, ()):
+            counts.setdefault(v, 0)
         facets[f] = sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))
-    for f in PICKS if tab in ("pulls", "issues") else ():
+    for f in TAB_PICKS.get(tab, ()):
         counts = {}
         for u in found:
             if u["run"] in chosen and ok(u):
                 for v in {e[PICKS[f]] for e in hits(u, f)}:
                     counts[v] = counts.get(v, 0) + 1
-        if f in picks:
-            counts.setdefault(picks[f], 0)
+        for v in picks.get(f, ()):
+            counts.setdefault(v, 0)
         facets[f] = sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))
+
+    def unit_class(u):
+        """The first class that marks a record of the unit and is not hidden, or -1."""
+        got = [i for ref in u["refs"] if (i := labels.first(ref)) >= 0]
+        return min(got) if got else -1
 
     runs = []
     for r in all_runs:
         us = [u for u in live if u["run"] == r and ok(u)]
         info = index["runs"][r]
+        cls = [unit_class(u) for u in us] if labels.classes else []
         runs.append({"run": r, "team": info["team"], "approvals": info["approvals"],
                      "hours": round((info["end"] - info["start"]) / 3600, 3), "chosen": r in chosen,
-                     "marked": sum(any(labels.mark(ref) for ref in u["refs"]) for u in us),
+                     "marked": sum(c >= 0 for c in cls), "classes": [cls.count(i) for i in range(len(labels.classes))],
                      **_measures(tab, us, index, r)})
 
     shown = _order(tab, [u for u in live if u["run"] in chosen and ok(u)], query.get("sort"))
     offset = max(0, int(query.get("offset") or 0))
+    active = [u for u in found if u["run"] in chosen and ok(u)]
     out = {"tab": tab, "tabs": tabs, "runs": runs, "chosen": chosen, "facets": facets, "total": len(shown),
-           "offset": offset, "items": [_item(tab, u, index, labels) for u in shown[offset:offset + PAGE]],
+           "offset": offset, "items": [_item(tab, u, index, labels, field, on) for u in shown[offset:offset + PAGE]],
            # the activity leaves out the time range, so the chart shows the range among the rest
-           "activity": _activity([u for u in found if u["run"] in chosen and ok(u)], index, labels, chosen, picked)}
+           "activity": _activity(active, index, labels, chosen, picked, field),
+           "colour": _colours(tab, field, index, found, chosen, all_runs, ok, picked, labels),
+           **_classes(active, labels, picked), "hide": sorted(labels.hide)}
     if query.get("compare") and tab in ("pulls", "issues"):
         out["grid"] = _grid(tab, shown, index)
     if tab == "agents":
         out["pairs"] = {r: {u["name"]: u["partners"] for u in shown if u["run"] == r} for r in chosen}
     return out
+
+
+def _colours(tab, field, index, found, chosen, all_runs, ok, picked, labels):
+    """The colour field's values: `order`, the order they take their colours in, by records of the chosen runs on the
+    tab whatever else is chosen, so a value keeps its colour while the filters change; `values`, [value, records] of the
+    activity with every filter but the field's own, the run's too for the run."""
+    tally = {}
+    for u in index["units"].values():
+        if u["tab"] == tab and u["run"] in chosen:
+            for e in u["events"]:
+                if _active(e):
+                    v = _colour(field, u, e)
+                    tally[v] = tally.get(v, 0) + 1
+    order = all_runs if field == "run" else sorted(tally, key=lambda v: (-tally[v], v))
+    own = _colour_filter(tab, field)
+    counts = {}
+    for u in found:
+        if (field != "run" and u["run"] not in chosen) or not ok(u, None if own in PICKS else own):
+            continue
+        for e in u["events"]:
+            if _active(e) and picked(e, own if own in PICKS else None) and labels.keep(e[0]):
+                v = _colour(field, u, e)
+                counts[v] = counts.get(v, 0) + 1
+    rest = sorted(v for v in counts if v not in order)
+    return {"field": field, "filter": own, "order": order,
+            "values": [[v, counts[v]] for v in [*order, *rest] if counts.get(v)]}
+
+
+def _classes(units, labels, picked):
+    """The classes with the activity's records each marks, the page's hiding aside, and `none`, those none marks."""
+    n, none = [0] * len(labels.classes), 0
+    if labels.classes:
+        for u in units:
+            for e in u["events"]:
+                if _active(e) and picked(e, hiding=False) and labels.keep(e[0]):
+                    got = labels.marks(e[0])
+                    for i in got:
+                        n[i] += 1
+                    none += not got
+    return {"classes": [{**c, "n": n[i]} for i, c in enumerate(labels.classes)], "none": none}
 
 
 def _texts(index, refs):
@@ -515,19 +631,22 @@ def _elsewhere(index, u):
     return out
 
 
-def _detail(index, key):
-    """One unit's page: its facts and its records with their text, in time order."""
+def _detail(index, key, field="action", hide=()):
+    """One unit's page: its facts and its records with their text, in time order, each with its part (_part) under the
+    colour field `field`."""
     u = index["units"].get(key)
     if u is None:
         return None
-    labels = _Labels()
+    labels = _Labels(hide)
     run = index["runs"][u["run"]]
     out = {k: v for k, v in u.items() if k not in ("refs", "events", "search")}
     out["setup"] = {"team": run["team"], "approvals": run["approvals"],
                     "hours": round((run["end"] - run["start"]) / 3600, 3)}
     refs = [e[0] for e in u["events"]] if u["tab"] != "agents" else u["refs"]
-    out["records"] = [dict(x, marked=labels.mark(x["ref"])) for x in _texts(index, refs)
-                      if labels.keep(x["ref"]) or x["ref"] == refs[0]]
+    events = {e[0]: e for e in u["events"]}
+    out["records"] = [dict(x, part=_part(field, u, events.get(x["ref"]) or [x["ref"], x["hours"], x["action"], x["author"]],
+                                         labels))
+                      for x in _texts(index, refs) if labels.keep(x["ref"]) or x["ref"] == refs[0]]
     if u["tab"] in ("pulls", "issues"):
         out["elsewhere"] = _elsewhere(index, u)
     if u["tab"] == "pulls" and (issue := index["units"].get(f"{u['run']}/issues/{u.get('closes')}")):
@@ -550,12 +669,14 @@ def _detail(index, key):
 
 
 def records(index, query):
-    """{op: view, tab, runs?, compare?, q?, range?: [h0, h1], filters?: {filter: value}, sort?, offset?}: one tab under
-    that selection, as _view describes. {op: unit, key}: one unit's page (_detail). Times are hours since the run's
-    start."""
+    """{op: view, tab, runs?, compare?, q?, range?: [h0, h1], filters?: {filter: value or [values]}, colour?, hide?,
+    sort?, offset?}: one tab under that selection, as _view describes. {op: unit, key, colour?, hide?}: one unit's page
+    (_detail). Times are hours since the run's start."""
     query = query or {}
     if query.get("op") == "unit":
-        return _detail(index, str(query.get("key") or ""))
+        u = index["units"].get(str(query.get("key") or ""))
+        field = query.get("colour") if u and query.get("colour") in COLOURS[u["tab"]] else "action"
+        return _detail(index, str(query.get("key") or ""), field, query.get("hide") or ())
     return _view(index, query)
 
 
