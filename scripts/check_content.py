@@ -63,7 +63,7 @@ TERMS: dict[str, str] = {
     "1db75045812446d78b988690eee79ba892125fd58edb1554b6d54dc6de2f148e": "private",
 }
 # The files that name the maintainer on purpose: the marketplace owner and the contact address.
-MAINTAINER_FILES = {".claude-plugin/marketplace.json", "README.md", "backend/app/feedback.py"}
+MAINTAINER_FILES = {".claude-plugin/marketplace.json", "CLAUDE.md", "README.md", "backend/app/feedback.py"}
 # Third-party texts and lockfiles: other people's names and generated hashes, checked for secrets and file kinds only.
 EXEMPT = re.compile(r"^(LICENSE|backend/app/fonts/OFL-[\w-]+\.txt|backend/uv\.lock|"
                     r"frontend/package-lock\.json)$")

@@ -92,6 +92,18 @@ def test_no_two_names_in_this_tree_differ_only_by_case(cc):
     assert cc.case_clashes(rels) == []
 
 
+def test_this_tree_names_private_material_and_the_maintainer_only_where_it_may():
+    root = SCRIPT.parents[1]
+    if not (root / ".git").exists():
+        pytest.skip("not a git checkout")
+    spec = importlib.util.spec_from_file_location("check_content_tree", SCRIPT)
+    real = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(real)
+    tracked = subprocess.run(["git", "-C", str(root), "ls-files", "-z"], capture_output=True, check=True).stdout
+    rels = sorted(p for p in tracked.decode().split("\0") if p and (root / p).is_file())
+    assert [h for h in real.scan(root, rels) if h[2] in ("private", "maintainer")] == []
+
+
 def test_the_real_list_is_digests_of_known_kinds():
     spec = importlib.util.spec_from_file_location("check_content_real", SCRIPT)
     real = importlib.util.module_from_spec(spec)
