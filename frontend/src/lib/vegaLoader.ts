@@ -1,6 +1,7 @@
 // What Vega may fetch for a chart. A spec is written by a model or a kernel, and Vega loads the URLs it names, so a spec
-// could leak corpus data to another host. The loader lets through only data: URLs, and any `usermeta.embedOptions`
-// (a loader, config or patch URL) are dropped.
+// could leak corpus data to another host. The loader lets through only data: URLs, any `usermeta.embedOptions`
+// (a loader, config or patch URL) are dropped, and a spec that is not a plain object is refused, since vega-embed
+// loads a string spec as a URL and would keep that spec's embed options.
 
 type Sanitizing = { sanitize: (uri: string, options?: any) => Promise<{ href: string }> }
 
@@ -22,4 +23,20 @@ export function withoutEmbedOptions(spec: unknown): unknown {
   if (!meta || typeof meta !== 'object' || !('embedOptions' in meta)) return spec
   const { embedOptions: _drop, ...rest } = meta as Record<string, unknown>
   return { ...(spec as Record<string, unknown>), usermeta: rest }
+}
+
+/** A chart's spec as a plain object: an object as it is, a string only when it parses as JSON to one; null for anything
+ * else, which is refused rather than handed to vega-embed. Pure. */
+export function specObject(data: unknown): Record<string, unknown> | null {
+  let v = data
+  if (typeof v === 'string') {
+    try {
+      v = JSON.parse(v)
+    } catch {
+      return null
+    }
+  }
+  if (!v || typeof v !== 'object' || Array.isArray(v)) return null
+  const proto = Object.getPrototypeOf(v)
+  return proto === Object.prototype || proto === null ? (v as Record<string, unknown>) : null
 }
