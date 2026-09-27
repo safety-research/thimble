@@ -30,10 +30,12 @@
 # The zip is the only place the built UI is published: an install without Node uses the zip; a checkout builds the UI
 # with Node >= 20 (scripts/install.sh).
 # Never: data/, workspaces/, notes/, experiments/, context/, node_modules, .venv, .git, __pycache__ — a denylist check
-# runs over the staged tree before zipping.
+# runs over the staged tree before zipping, then scripts/check_content.py (with gitleaks when it is installed).
+# Beside the zip, <out>/SHA256SUMS lists its digest; upload both to the release, since `thimble update` checks one
+# against the other.
 #
-# Files come from `git ls-files --cached --others --exclude-standard` over the allowlist, i.e. the WORKING TREE minus
-# ignored files: an uncommitted edit ships, a new file ships once it is not ignored, .venv and caches never do.
+# Files come from `git ls-files --cached` over the allowlist: the files in git's index, as the working tree holds them.
+# An untracked file never ships; an uncommitted edit to a tracked file does, and RELEASE.json then says dirty.
 # The version is plugin/.claude-plugin/plugin.json's — the one source; bump it for every release, or installed copies
 # stay on their cached version (Claude Code updates a plugin only when its version string changes).
 # Nothing here reads, asks for or stores a key: the release carries no credential of any kind.
@@ -63,19 +65,23 @@ die() { echo "release.sh: $*" >&2; exit 1; }
 need() { command -v "$1" >/dev/null 2>&1 || die "$1 is required"; }
 need git; need zip; need python3
 
-version="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["version"])' "$repo/plugin/.claude-plugin/plugin.json")"
+version="$(python3 -I -c 'import json,sys; print(json.load(open(sys.argv[1]))["version"])' "$repo/plugin/.claude-plugin/plugin.json")"
 [ -n "$version" ] || die "plugin/.claude-plugin/plugin.json has no version"
 sha="$(git -C "$repo" rev-parse --short HEAD)"
 full_sha="$(git -C "$repo" rev-parse HEAD)"
+allow=(plugin backend prompts .claude-plugin README.md INSTALL.md docs/assets/thimble-banner.svg LICENSE
+       scripts/install.sh scripts/update.sh scripts/rebuild_ui.sh scripts/view_shot.mjs scripts/ui_shot.mjs
+       frontend/src frontend/public frontend/index.html frontend/package.json
+       frontend/package-lock.json frontend/vite.config.ts frontend/tsconfig.json frontend/tsconfig.app.json frontend/tsconfig.node.json)
 dirty=false
-if [ -n "$(git -C "$repo" status --porcelain --untracked-files=no)" ]; then
+if [ -n "$(git -C "$repo" status --porcelain --untracked-files=no -- "${allow[@]}" ':(exclude)backend/tests')" ]; then
   dirty=true
-  echo "release.sh: the working tree has uncommitted changes; the zip carries the working tree (RELEASE.json says dirty)" >&2
+  echo "release.sh: tracked files the zip carries have uncommitted changes, which ship (RELEASE.json says dirty)" >&2
 fi
 date="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 name="thimble-$version-$sha"
 if [ -z "$gh_repo" ]; then  # plugin.json's `repository` (https://github.com/o/r), the one place that names the repo
-  gh_repo="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("repository", ""))' \
+  gh_repo="$(python3 -I -c 'import json,sys; print(json.load(open(sys.argv[1])).get("repository", ""))' \
     "$repo/plugin/.claude-plugin/plugin.json" | sed -e 's#^https\{0,1\}://github\.com/##' -e 's#\.git$##' -e 's#/$##')"
 fi
 [ -n "$gh_repo" ] || die "plugin/.claude-plugin/plugin.json has no repository; pass --repo OWNER/NAME"
@@ -105,12 +111,8 @@ stage_root="$(mktemp -d)"
 trap 'rm -rf "$stage_root"' EXIT
 stage="$stage_root/$name"
 mkdir -p "$stage"
-allow=(plugin backend prompts .claude-plugin README.md INSTALL.md docs/assets/thimble-banner.svg LICENSE
-       scripts/install.sh scripts/update.sh scripts/rebuild_ui.sh scripts/view_shot.mjs scripts/ui_shot.mjs
-       frontend/src frontend/public frontend/index.html frontend/package.json
-       frontend/package-lock.json frontend/vite.config.ts frontend/tsconfig.json frontend/tsconfig.app.json frontend/tsconfig.node.json)
 # backend/tests, where present, is not part of an install
-git -C "$repo" ls-files -z --cached --others --exclude-standard -- "${allow[@]}" ':(exclude)backend/tests' |
+git -C "$repo" ls-files -z --cached -- "${allow[@]}" ':(exclude)backend/tests' |
 while IFS= read -r -d '' f; do
   [ -f "$repo/$f" ] || continue  # tracked but deleted in the working tree
   mkdir -p "$stage/$(dirname "$f")"
@@ -121,9 +123,9 @@ if [ -n "$src_dist" ]; then
   cp -R "$src_dist" "$stage/frontend/dist"
   # the notices need the license texts the packages ship, which only node_modules holds
   [ -d "$repo/frontend/node_modules" ] || die "frontend/node_modules is missing, and THIRD_PARTY_NOTICES needs the license texts it holds: run npm ci in frontend/"
-  python3 "$repo/scripts/third_party_notices.py" --root "$repo" --out "$stage/THIRD_PARTY_NOTICES" >&2
+  python3 -I "$repo/scripts/third_party_notices.py" --root "$repo" --out "$stage/THIRD_PARTY_NOTICES" >&2
 fi
-python3 - "$stage/.claude-plugin/marketplace.json" "$mp_name" <<'PY'
+python3 -I - "$stage/.claude-plugin/marketplace.json" "$mp_name" <<'PY'
 import json, sys
 p, name = sys.argv[1], sys.argv[2]
 d = json.load(open(p))
@@ -132,7 +134,7 @@ json.dump(d, open(p, "w"), indent=2)
 open(p, "a").write("\n")
 PY
 # the readme's links to files the zip does not carry (CLAUDE.md, docs/) go to GitHub, so none is broken in an install
-python3 - "$stage" "$gh_repo" "$full_sha" <<'PY'
+python3 -I - "$stage" "$gh_repo" "$full_sha" <<'PY'
 import os, re, sys
 stage, repo, sha = sys.argv[1:]
 p = os.path.join(stage, "README.md")
@@ -146,7 +148,7 @@ if os.path.isfile(p):
         return f"{m.group(1)}https://github.com/{repo}/blob/{sha}/{target})"
     open(p, "w", encoding="utf-8").write(re.sub(r"(\]\()([^)\s]+)\)", fix, text))
 PY
-python3 - "$stage/RELEASE.json" "$version" "$sha" "$full_sha" "$date" "$dirty" "$([ -n "$src_dist" ] && echo true || echo false)" "$gh_repo" <<'PY'
+python3 -I - "$stage/RELEASE.json" "$version" "$sha" "$full_sha" "$date" "$dirty" "$([ -n "$src_dist" ] && echo true || echo false)" "$gh_repo" <<'PY'
 import json, sys
 p, version, sha, full, date, dirty, fd, gh_repo = sys.argv[1:]
 json.dump({"version": version, "commit": sha, "commit_full": full, "date": date,
@@ -168,6 +170,13 @@ for top in "$stage"/* "$stage"/.[!.]*; do
     *) die "unexpected top-level entry in the staged tree: $(basename "$top")";;
   esac
 done
+content_args=()
+if ! command -v gitleaks >/dev/null 2>&1; then
+  content_args=(--no-gitleaks)
+  echo "release.sh: gitleaks is not installed, so the staged tree is checked without the secret scan" >&2
+fi
+python3 -I "$repo/scripts/check_content.py" "$stage" ${content_args[@]+"${content_args[@]}"} >&2 \
+  || die "scripts/check_content.py found content that must not ship (above)"
 
 # ---------------------------------------------------------------------------- zip
 mkdir -p "$out"
@@ -175,7 +184,10 @@ out="$(cd "$out" && pwd -P)"
 zip_path="$out/$name.zip"
 rm -f "$zip_path"
 ( cd "$stage_root" && zip -q -r -X "$zip_path" "$name" )
+if command -v sha256sum >/dev/null 2>&1; then digest="$(sha256sum < "$zip_path" | cut -d' ' -f1)"
+else digest="$(shasum -a 256 < "$zip_path" | cut -d' ' -f1)"; fi
+printf '%s  %s\n' "$digest" "$name.zip" > "$out/SHA256SUMS"
 files="$(unzip -Z1 "$zip_path" | grep -v '/$' | wc -l | tr -d ' ')"
 size="$(du -h "$zip_path" | cut -f1 | tr -d ' ')"
-echo "release: $zip_path ($size, $files files)"
+echo "release: $zip_path ($size, $files files), its digest in $out/SHA256SUMS"
 echo "version $version, commit $sha${dirty:+}$( [ "$dirty" = true ] && echo ' (dirty)' ), frontend/dist $( [ -n "$src_dist" ] && echo included || echo absent ), marketplace name $mp_name, repo $gh_repo"
