@@ -10,7 +10,7 @@ import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 import { Output } from '../../src/components/Outputs.tsx'
 import { ChatMarkdown } from '../../src/chat/markdown.tsx'
 import { isLocalUrl, purifyHtml, purifySvg, styleReachesOut } from '../../src/lib/sanitize.ts'
-import { inlineSvg, rootDecls } from '../../src/lib/svg.ts'
+import { inlineSvg, ownRootStyle, rootDecls } from '../../src/lib/svg.ts'
 import { dataOnly, specObject, withoutEmbedOptions } from '../../src/lib/vegaLoader.ts'
 import { parseInline } from '../../src/report/inlineParse.ts'
 import { mount, settle, unmountAll } from './mount.tsx'
@@ -148,6 +148,14 @@ describe('svg output', () => {
     expect(fig!.markup).not.toMatch(/display: none/)
     expect(rootDecls('*{stroke-linejoin: round; stroke-linecap: butt}')).toBe('stroke-linejoin: round; stroke-linecap: butt')
     expect(rootDecls('* { position: fixed; stroke: url(https://e/x); fill: #fff } svg { stroke: red }')).toBe('fill: #fff')
+  })
+
+  test("the figure's root keeps no style that would place it over the page, and its box clips what it draws", () => {
+    const fig = inlineSvg('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10" style="position: fixed; inset: 0; z-index: 9; transform: none; overflow: visible; fill: #000; width: 10px"><path d="M0 0"/></svg>', 'f2-')
+    expect(fig!.markup).not.toMatch(/position|inset|z-index|transform|overflow/)
+    expect(ownRootStyle('position: fixed; stroke-linecap: butt; top: 0; color: red')).toBe('stroke-linecap: butt; color: red')
+    expect(ownRootStyle('position: absolute')).toBe('')
+    expect(readFileSync(path.join(SRC, 'styles/outputs.css'), 'utf8')).toMatch(/\.outputs-svg \{[^}]*contain: paint/)
   })
 
   test('purifySvg keeps SVG elements only', () => {

@@ -249,6 +249,8 @@ body[data-cmd] #vg-tooltip-element {
 .outputs-svg {
   min-width: 0;
   user-select: none;
+  /* what the figure draws stays in its box */
+  contain: paint;
 }
 .outputs-svg > svg {
   display: block;

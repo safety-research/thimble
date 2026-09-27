@@ -4,11 +4,12 @@
 //   - nothing that runs or reaches out survives (scripts, foreignObject, event attributes, external hrefs), then
 //     DOMPurify's SVG profile (lib/sanitize) over the whole;
 //   - no <style>, which would restyle every svg on the page; a `*` rule's stroke and fill move to the root;
+//   - the root's own style keeps only what cannot move it over the page (ownRootStyle);
 //   - ids are prefixed per figure, so figures never share clip paths or glyphs;
 //   - fonts and thimble's matplotlibrc colours become the page's tokens; a white background is dropped;
 //   - it keeps its aspect and never grows past its natural width.
-// The DOM half needs a browser (DOMParser); restyle and rootDecls are pure.
-import { purifySvg } from './sanitize'
+// The DOM half needs a browser (DOMParser); restyle, rootDecls and ownRootStyle are pure.
+import { purifySvg, STYLE_KEPT } from './sanitize'
 
 /** matplotlib's default families, and the ones thimble's matplotlibrc names, as the page's own faces */
 const SANS_FIRST = /^\s*['"]?(?:DejaVu Sans|Bitstream Vera Sans|Hanken Grotesk|Arial|Helvetica|sans-serif)['"]?\s*(?:,|$)/i
@@ -71,6 +72,23 @@ export function rootDecls(css: string): string {
   return out.join('; ')
 }
 
+const STROKE_FILL = /^(?:stroke|fill)(?:-[a-z]+)?$/
+
+/** The root <svg>'s own style cut to the properties HTML output keeps (STYLE_KEPT) and the stroke and fill ones, so
+ * position, z-index, transform, overflow and the like never place the figure elsewhere in the page. Pure. */
+export function ownRootStyle(style: string): string {
+  return style
+    .split(';')
+    .map((decl) => decl.trim())
+    .filter((decl) => {
+      const at = decl.indexOf(':')
+      if (at < 0) return false
+      const prop = decl.slice(0, at).trim().toLowerCase()
+      return STYLE_KEPT.test(prop) || STROKE_FILL.test(prop)
+    })
+    .join('; ')
+}
+
 const SVG_NS = 'http://www.w3.org/2000/svg'
 const DANGEROUS = ['script', 'foreignObject', 'iframe', 'object', 'embed', 'audio', 'video', 'animate', 'set', 'animateTransform', 'animateMotion']
 const LENGTH = /^\s*([\d.]+)\s*(pt|px)?\s*$/
@@ -100,7 +118,9 @@ export function inlineSvg(text: string, prefix: string): { markup: string; width
   const styles = Array.from(svg.getElementsByTagName('style'))
   const inherited = styles.map((st) => rootDecls(st.textContent ?? '')).filter(Boolean).join('; ')
   for (const st of styles) st.remove()
-  if (inherited) svg.setAttribute('style', [svg.getAttribute('style'), inherited].filter(Boolean).join('; '))
+  const rootStyle = [ownRootStyle(svg.getAttribute('style') ?? ''), inherited].filter(Boolean).join('; ')
+  if (rootStyle) svg.setAttribute('style', rootStyle)
+  else svg.removeAttribute('style')
   // links keep their content, not their target
   for (const a of Array.from(svg.getElementsByTagName('a'))) {
     while (a.firstChild) a.parentNode?.insertBefore(a.firstChild, a)

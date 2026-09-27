@@ -7,7 +7,8 @@
 import assert from 'node:assert/strict'
 import { afterAll, beforeAll, test } from 'vitest'
 import type { Browser, Page } from 'playwright'
-import { bundle, cleanup, launch, ORIGIN, src } from './page.ts'
+import { readFileSync } from 'node:fs'
+import { bundle, cleanup, FRONTEND, launch, ORIGIN, src } from './page.ts'
 
 let browser: Browser
 let page: Page
@@ -153,6 +154,32 @@ test('an svg figure keeps its drawing, runs nothing and loads nothing from anoth
   // the remote image keeps its element with no address; the embedded one keeps its data: URL
   assert.deepEqual({ ...seen, rootStyle: /stroke-linejoin: round; stroke-linecap: butt/.test(seen.rootStyle), images: seen.images.filter(Boolean) }, { path: true, styles: 0, html: false, rootStyle: true, images: ['data:image'] })
   assert.deepEqual(leaks(), [])
+})
+
+test('an svg figure cannot draw over the page', async () => {
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="100pt" height="50pt" viewBox="0 0 100 50" overflow="visible" style="position: fixed; inset: 0; z-index: 2147483647; transform: translate(0, 0); stroke-linecap: butt">
+ <rect x="-5000" y="-5000" width="10000" height="10000" fill="red"/>
+</svg>`
+  const id = await output({ 'image/svg+xml': svg })
+  // the outputs' stylesheet, for the figure's box; removed after, since other checks count the page's style elements
+  const sheet = await page.addStyleTag({ content: readFileSync(`${FRONTEND}/src/styles/outputs.css`, 'utf8') })
+  await settle()
+  const got = await page.evaluate((id) => {
+    const fig = document.getElementById(id)!.querySelector('svg')!
+    const box = fig.parentElement!.getBoundingClientRect()
+    const mine = (x: number, y: number) => {
+      const top = document.elementFromPoint(x, y)
+      return !!top && fig.contains(top)
+    }
+    return {
+      corner: mine(innerWidth - 2, innerHeight - 2),
+      beside: mine(box.right + 20, box.top + 10),
+      inside: mine(box.left + 10, box.top + 10),
+      style: fig.getAttribute('style'),
+    }
+  }, id)
+  await sheet.evaluate((node) => node.parentNode?.removeChild(node))
+  assert.deepEqual(got, { corner: false, beside: false, inside: true, style: 'stroke-linecap: butt' })
 })
 
 test('a markdown image from another host is its alt text, in an output and in the chat', async () => {
