@@ -1,0 +1,13 @@
+{
+  "name": "Incident timeline",
+  "why": "A ferry operator's alerts, deploys, chat, support tickets and automated agents' actions on one time axis: the whole day first, then any window, source, incident, service, actor, kind, severity or outcome, with sources or incidents compared side by side as lanes, and each record's details beside the record it answers and its neighbours in time.",
+  "data": "events.jsonl: one line per record from one of five sources, exported one after another (alerts, deploys, chat, tickets, agent actions), each in time order, with `id` (its id in its source), `at` (ISO 8601), `source` (alert, deploy, chat, ticket or agent), `kind` (what happened in that source, such as fired, rollback, message, opened or restart), `actor` (a person, a customer, the monitor or an automated agent), `text`, and on some records `service`, `severity` (an alert's warning or critical, a ticket's normal, high or urgent), `outcome` (a deploy's or an agent action's ok, failed or held), `incident` (such as INC-312) and `re` (the id of the record it answers). Records relate through time, through `re` and through the fields they share; an incident is every record that names it.",
+  "claims": ["events.jsonl"],
+  "accepts": [{"form": "L<n>", "means": "the record on line <n>, chosen in its incident's span or the hour around it"}],
+  "declares": [
+    {"form": "<incident>", "means": "one incident's records, such as INC-312, filtered to it"},
+    {"form": "<from>..<to>", "means": "the records between two UTC times written YYYY-MM-DDTHH:MM, zoomed to that window"}
+  ],
+  "default": true,
+  "libs": []
+}
