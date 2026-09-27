@@ -125,6 +125,8 @@ def test_commit_messages_with_a_session_line_or_link_are_refused(cc, tmp_path):
     assert [(h[0], h[1], h[2]) for h in found] == [(trailer[:12], 4, "session"), (linked[:12], 3, "session")]
     assert len(cc.commit_hits(tmp_path, f"{first}..HEAD", until=None)) == 3
     assert cc.commit_hits(tmp_path, f"{first}..HEAD", until="0" * 40) == cc.commit_hits(tmp_path, f"{first}..HEAD", None)
+    assert cc.commit_hits(tmp_path, f"{first}..HEAD", until=("0" * 40, old)) == found
+    assert cc.commit_hits(tmp_path, f"{first}..HEAD", until=(old, linked)) == found[:1]
     run = [sys.executable, str(SCRIPT), "--commits"]
     r = subprocess.run([*run, f"{first}..HEAD", str(tmp_path)], capture_output=True, text=True)
     assert r.returncode == 1 and f"{trailer[:12]}:4: [session] Claude-Session:" in r.stdout

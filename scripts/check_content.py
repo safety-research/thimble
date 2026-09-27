@@ -11,7 +11,7 @@ never belong in the tree; or, with --commits, the messages of a range of commits
     --no-gitleaks  skip the secret scan (CI always runs it)
     --commits RANGE
                    check the messages of the commits in RANGE (a git revision range, such as origin/main..HEAD) instead
-                   of the files; the commits SESSION_LINES_UNTIL reaches are left out
+                   of the files; the commits that SESSION_LINES_UNTIL's commits reach are left out
     --digest TERM  print the line that adds TERM to TERMS, and exit
 
 Kinds of hit:
@@ -68,7 +68,7 @@ TERMS: dict[str, str] = {
     "2b61e117ac894f8ac9a777f7298b4952212712f9f3b76a77c54c16cab7d891a8": "private",
     "1db75045812446d78b988690eee79ba892125fd58edb1554b6d54dc6de2f148e": "private",
 }
-# The files that name the maintainer on purpose: the marketplace owner and the contact address.
+# The files that name the maintainer on purpose: the marketplace owner, the contact address and the maintainer notes.
 MAINTAINER_FILES = {".claude-plugin/marketplace.json", "CLAUDE.md", "README.md", "backend/app/feedback.py"}
 # Third-party texts, lockfiles and the built UI (a release's): other people's names, generated hashes and minified
 # names, checked for secrets and file kinds only.
@@ -80,9 +80,9 @@ NEVER = re.compile(r"(^|/)(__pycache__|node_modules|\.venv)(/|$)|^(data|dev|note
 SAMPLES = re.compile(r"^plugin/viewers/[\w-]+/sample/[^/]+$")
 MAX_BYTES = 2_000_000
 SESSION_LINE = re.compile(r"^\s*claude-session:|claude\.ai/code/session_", re.I)
-# The newest commit made before messages were checked. It and the commits it reaches keep their messages, since the
-# history is not rewritten.
-SESSION_LINES_UNTIL = "bab9a2fece178f9208ecc719f27fbc3af805bc70"
+# The newest commits, one per branch, made before messages were checked. They and the commits they reach keep their
+# messages, since the history is not rewritten.
+SESSION_LINES_UNTIL = ("bab9a2fece178f9208ecc719f27fbc3af805bc70", "566afdf63861c8d30fef3c132d8f679d263037d6")
 # the extension a module import leaves out, with TypeScript's declaration suffix (types.d.ts is the module ./types)
 EXTENSION = re.compile(r"(?<=.)(\.d)?\.[^.]+$")
 WORD = re.compile(r"[^\W_]+")
@@ -183,13 +183,16 @@ def gitleaks(root: Path, rels: list[str]) -> list[tuple[str, int, str, str]]:
         return out
 
 
-def commit_hits(root: Path, rev_range: str, until: str | None = SESSION_LINES_UNTIL) -> list[tuple[str, int, str, str]]:
+def commit_hits(root: Path, rev_range: str, until: str | tuple[str, ...] | None = SESSION_LINES_UNTIL,
+                ) -> list[tuple[str, int, str, str]]:
     """Every session line in the messages of the commits in `rev_range`, as (commit, line, "session", text). The
-    commits `until` reaches are left out when the checkout has it. CalledProcessError when git refuses the range."""
+    commits that `until` (a commit or several) reaches are left out, each when the checkout has it. CalledProcessError
+    when git refuses the range."""
     git = ["git", "-C", str(root)]
     revs = [rev_range]
-    if until and subprocess.run([*git, "cat-file", "-e", f"{until}^{{commit}}"], capture_output=True).returncode == 0:
-        revs.append(f"^{until}")
+    for old in (until,) if isinstance(until, str) else until or ():
+        if subprocess.run([*git, "cat-file", "-e", f"{old}^{{commit}}"], capture_output=True).returncode == 0:
+            revs.append(f"^{old}")
     out = subprocess.run([*git, "log", "--format=%H%x00%B%x1e", *revs, "--"], capture_output=True, text=True,
                          check=True).stdout
     hits = []
