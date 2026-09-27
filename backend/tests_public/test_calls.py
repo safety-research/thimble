@@ -64,7 +64,7 @@ def test_the_hook_s_number_comes_first_and_the_follower_adds_the_chat_that_holds
 
 
 def test_a_long_output_claude_code_saved_to_a_file_is_stored_whole(tmp_path):
-    sid = "5e505c4b-742a-4361-9a19-808f80f408cc"
+    sid = "5e55a000-0000-4000-8000-000000000001"
     slug = tmp_path / "projects" / "-corpus"
     (slug / sid / "tool-results").mkdir(parents=True)
     (slug / f"{sid}.jsonl").write_text("")
@@ -78,7 +78,7 @@ def test_a_long_output_claude_code_saved_to_a_file_is_stored_whole(tmp_path):
 def test_only_a_file_in_the_session_s_own_tool_results_folder_is_read(tmp_path):
     """A result's text can say anything (a tool printed a file that starts with <persisted-output>), and a record's path
     is read only inside the tool-results folder of that record's session."""
-    sid, other = "5e505c4b-742a-4361-9a19-808f80f408cc", "9c0a1d2e-3f40-4a5b-8c6d-7e8f90a1b2c3"
+    sid, other = "5e55a000-0000-4000-8000-000000000001", "5e55a000-0000-4000-8000-000000000002"
     slug = tmp_path / "projects" / "-corpus"
     for s in (sid, other):
         (slug / s / "tool-results").mkdir(parents=True)
