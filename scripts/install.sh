@@ -55,6 +55,16 @@ locate_tree() {  # checkout or release, in place or copied, and the version
   if [ "$in_place" = 0 ] && [ -e "$dir/.git" ]; then
     die "$dir is a git checkout (a dev install), and install.sh copies no tree over one. Update it with git pull (thimble update does it), or install the release elsewhere with THIMBLE_HOME=<dir> or --dir <dir>"
   fi
+  # copying replaces entries of $dir with `rm -rf`, so it goes only into an empty folder or an earlier install
+  if [ "$in_place" = 0 ]; then
+    if [ "$dir" -ef / ] || [ "$dir" -ef "$HOME" ]; then
+      die "the install folder $dir is $( [ "$dir" -ef / ] && echo 'the root directory' || echo 'your home directory' ); install into a folder of its own, such as $home/app"
+    fi
+    if [ -e "$dir" ] && [ ! -d "$dir" ]; then die "the install folder $dir is not a directory"; fi
+    if [ -d "$dir" ] && [ -n "$(ls -A "$dir")" ] && [ ! -f "$dir/plugin/.claude-plugin/plugin.json" ]; then
+      die "the install folder $dir is neither empty nor a thimble install (no plugin/.claude-plugin/plugin.json), and installing would replace entries in it; install into an empty folder or an earlier install"
+    fi
+  fi
   version="$(json_get "$src/plugin/.claude-plugin/plugin.json" version)"
   if [ "$dry" = 1 ]; then say "install.sh --dry-run: printing the steps; nothing is created, installed or registered"; fi
   say "thimble $version from $src ($( [ "$checkout" = 1 ] && echo 'git checkout' || echo 'unpacked release' )) → $dir$( [ "$in_place" = 1 ] && echo ' (in place)' )"

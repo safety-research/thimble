@@ -94,9 +94,9 @@ def stub_bin(tmp_path: Path) -> Path:
     return bin_
 
 
-def install(tree: Path, dest: Path, tmp_path: Path) -> subprocess.CompletedProcess:
+def install(tree: Path, dest: Path, tmp_path: Path, *flags: str) -> subprocess.CompletedProcess:
     env = env_for(tmp_path, PATH=f"{stub_bin(tmp_path)}:/usr/bin:/bin")
-    return subprocess.run(["bash", str(tree / "scripts" / "install.sh"), "--dir", str(dest), "--deps-only"],
+    return subprocess.run(["bash", str(tree / "scripts" / "install.sh"), "--dir", str(dest), "--deps-only", *flags],
                           capture_output=True, text=True, env=env, timeout=60)
 
 
@@ -111,3 +111,27 @@ def test_a_release_install_carries_the_files_the_readme_links(tmp_path):
     assert r.returncode == 0, r.stdout + r.stderr
     for rel in ("README.md", "INSTALL.md", "docs/assets/thimble-banner.svg"):
         assert (dest / rel).read_text() == (tree / rel).read_text(), rel
+
+
+def test_install_sh_copies_only_into_an_empty_folder_or_an_earlier_install(tmp_path):
+    tree = fake_tree(tmp_path / "release")
+    home = tmp_path / "home"
+    home.mkdir()
+    (home / "notes.txt").write_text("keep\n")
+    (home / "scripts").mkdir()
+    (home / "scripts" / "mine.sh").write_text("keep\n")
+    for dest, why in ((home, "your home directory"), (home / "scripts", "neither empty nor a thimble install")):
+        r = install(tree, dest, tmp_path)
+        assert r.returncode == 1 and why in r.stderr, (dest, r.stdout + r.stderr)
+    r = install(tree, Path("/"), tmp_path, "--dry-run")  # a dry run, so a script without the check removes nothing
+    assert r.returncode == 1 and "the root directory" in r.stderr, r.stdout + r.stderr
+    assert (home / "scripts" / "mine.sh").read_text() == "keep\n" and (home / "notes.txt").is_file()
+    (tmp_path / "file").write_text("")
+    assert "is not a directory" in install(tree, tmp_path / "file", tmp_path).stderr
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    assert install(tree, empty, tmp_path).returncode == 0
+    (empty / "workspaces").mkdir()
+    r = install(tree, empty, tmp_path)
+    assert r.returncode == 0, "an earlier install is installed over: " + r.stdout + r.stderr
+    assert (empty / "workspaces").is_dir()
