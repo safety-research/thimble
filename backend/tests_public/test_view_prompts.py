@@ -26,7 +26,15 @@ def test_a_view_ticket_asks_for_an_overview_scales_from_the_data_and_a_fit_to_th
         assert words in good, words
     examples = prompts.section("dev-view", "Worked examples")
     assert "Take the method, not their domain, fields or layout" in examples
-    assert re.findall(r"^- `([a-z]+)` ", examples, re.M) == ["timeline", "board"]
+    assert re.findall(r"^- `([a-z-]+)` ", examples, re.M) == ["incident-timeline", "repository"]
+
+
+def test_a_view_ticket_and_its_review_ask_for_every_field_to_be_selectable_and_runs_to_compare():
+    rule = "every field the records carry can be selected and filtered, and where they hold several runs or sources"
+    assert rule in prompts.section("dev-view", "A good view").lower()
+    review = prompts.load("view-review")
+    assert "Can every field the records carry be selected and filtered" in review
+    assert "pick any of them and compare them side by side" in review
 
 
 def test_a_view_ticket_makes_labels_first_class_and_leaves_their_controls_to_the_labels_pane():

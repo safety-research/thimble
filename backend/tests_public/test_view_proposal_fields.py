@@ -100,5 +100,6 @@ def test_the_tool_s_schema_asks_for_the_form_in_free_text_and_the_fields_the_bui
     assert "whatever form fits the records" in schema["properties"]["why"]["description"]
     asks = {k: schema["properties"][k]["description"] for k in ("overview", "zoom", "filter", "details")}
     assert asks == {"overview": "What does the overview look like?", "zoom": "How do you zoom?",
-                    "filter": "How do you filter? Labels are the main filter.",
+                    "filter": "How do you filter? Labels are the main filter, every field the records carry can be "
+                              "selected, and several runs or sources can be compared side by side.",
                     "details": "What details might you want on demand?"}

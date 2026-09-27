@@ -19,6 +19,7 @@ A ticket whose claim is one extension's glob, such as `**/*.vtt`, asks for a vie
 First read the claimed files, a jsonl file a few lines at a time since a line can be long, and count what the page must fit: the units, the time span, the longest names and the records that lack a field.
 
 - It opens on an overview of everything it covers, with records in view. From there the analyst zooms, searches or filters, and picks a record to see its details.
+- Every field the records carry can be selected and filtered, and where they hold several runs or sources, the analyst can pick any of them and compare them side by side.
 - Its scales come from the data. Choose bins, axis ticks and page sizes from what you counted: a span of hours ticks in minutes, a span of weeks in days, and thousands of units are grouped or paged.
 - It fits its pane, which is 800 px wide. No text or mark overlaps another, is cut off or is too small to read, and no column wraps one word per line. A long name is shortened, with the whole name on hover.
 - It takes the form the ticket describes, and shows each record's state as the records hold it. An outcome, such as worked or failed, is marked only as the records or the ticket define it, never from an exit code alone.
@@ -38,10 +39,10 @@ A label marks records, such as the posts that ask for help. The analyst turns la
 
 ## Worked examples
 
-Two views in {{examples}} show methods on invented data, each described in its `view.json` under `data`. Take the method, not their domain, fields or layout.
+Two views in {{examples}} show methods on invented data, each described in its `view.json` under `data`. Read the one closest to your task. Take the method, not their domain, fields or layout.
 
-- `timeline` counts records per time bin, the bin chosen from the span, and draws each bar's marked part in the label's colour.
-- `board` gathers each thread's posts from across a file, and counts each thread's marked posts.
+- `incident-timeline` puts records from several sources on one time axis, for records read in time: an overview of the whole span to zoom into, a select for every field, and sources or incidents compared side by side as lanes.
+- `repository` gathers each run's records into units such as pull requests and issues, for units that span records: the runs' measures side by side, any runs chosen and compared unit by unit, and filters on each unit's facts and on who did what.
 
 ## The three files
 

@@ -200,7 +200,7 @@ Propose a view, a page that shows records in a form their files hide, or a viewe
     "unit": {"type": "string", "description": "What one row, mark or card stands for, the field that keys it, and how many there are."},
     "overview": {"type": "string", "description": "What does the overview look like?"},
     "zoom": {"type": "string", "description": "How do you zoom?"},
-    "filter": {"type": "string", "description": "How do you filter? Labels are the main filter."},
+    "filter": {"type": "string", "description": "How do you filter? Labels are the main filter, every field the records carry can be selected, and several runs or sources can be compared side by side."},
     "details": {"type": "string", "description": "What details might you want on demand?"}
   },
   "required": ["name", "why", "claims", "unit", "overview", "zoom", "filter", "details"]

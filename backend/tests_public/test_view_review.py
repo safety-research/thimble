@@ -4,7 +4,7 @@ again; a revision that fails its checks leaves the view as it was before it; pro
 the view; pictures drawn without thimble's fonts, a refused reading and a stop show plainly; Undo puts back the view as
 it was built, also after a review that ended early and one run again; a view proposed again or deleted stops its
 review, and a held view proposed again changed is changed in place, its unfinished revision undone. The prompt the
-reading gets names four pictures and six criteria for a view over files with lines, and two and three for one over
+reading gets names four pictures and seven criteria for a view over files with lines, and two and four for one over
 binary files. A page with label controls of its own gets a problem under the last criterion whatever the reading says.
 
 The corpus is invented: board.jsonl, three posts, and a view `posts` of it with a proposal, as the dev agent builds one."""
@@ -100,7 +100,7 @@ class Stubs:
 
 def ok(*problems: str) -> list[dict]:
     """A reading's assessment: the given problems under the third criterion, the rest met."""
-    return [{"problems": []}, {"problems": []}, {"problems": list(problems)}, *[{"problems": []}] * 3]
+    return [{"problems": []}, {"problems": []}, {"problems": list(problems)}, *[{"problems": []}] * 4]
 
 
 async def _review() -> dict:
@@ -124,7 +124,7 @@ async def test_problems_go_to_a_revision_that_passes_and_undo_puts_the_view_back
     built = (view / "view.html").read_text()
     review = await _review()
     assert review["state"] == "done" and review["revised"] == ["picture 1: the ticks overlap"] and review["left"] == []
-    assert s.revised == [[[], [], ["picture 1: the ticks overlap"], [], [], []]] and s.shots == 2
+    assert s.revised == [[[], [], ["picture 1: the ticks overlap"], [], [], [], []]] and s.shots == 2
     assert "revision 1" in (view / "view.html").read_text() and views.read_built(CORPUS, "posts") is not None
     got = view_review.undo(CORPUS, "posts")
     assert got["undo"] is True and got["revised"] == [] and (view / "view.html").read_text() == built
@@ -188,13 +188,13 @@ async def test_a_stop_mid_revision_puts_the_view_back_and_says_stopped(view, mon
     assert review["state"] == "stopped" and (view / "view.html").read_text() == built and s.calls
 
 
-async def test_a_view_over_binary_files_is_read_with_two_pictures_and_three_criteria(view, monkeypatch, tmp_path):
-    s = Stubs(monkeypatch, tmp_path, [[{"problems": []}] * 3])
+async def test_a_view_over_binary_files_is_read_with_two_pictures_and_four_criteria(view, monkeypatch, tmp_path):
+    s = Stubs(monkeypatch, tmp_path, [[{"problems": []}] * 4])
     monkeypatch.setattr(views, "lined", lambda v, files: False)
     review = await _review()
     assert review["state"] == "done" and s.calls[0]["images"] == 2
     schema = s.calls[0]["tool"].input_schema["properties"]["assessment"]
-    assert schema["minItems"] == schema["maxItems"] == 3 and "test label" not in s.calls[0]["system"]
+    assert schema["minItems"] == schema["maxItems"] == 4 and "test label" not in s.calls[0]["system"]
 
 
 async def test_the_review_starts_after_a_build_and_not_when_turned_off(view, monkeypatch, tmp_path):
@@ -304,12 +304,12 @@ async def test_label_controls_in_the_page_are_a_problem_the_revision_gets(view, 
     review = await _review()
     problem = s.revised[0][-1][0]
     assert problem.startswith("Picture 2: the page has 2 controls of its own that name the test label")
-    assert "Labels pane" in problem and s.revised[0][:-1] == [[]] * 5
+    assert "Labels pane" in problem and s.revised[0][:-1] == [[]] * 6
     assert "2 controls of the page's own naming the test label" in s.calls[0]["user"]
     assert "no label toggle, checkbox, menu or clickable legend" in s.calls[0]["system"]
     assert review["state"] == "done" and review["left"] == [] and len(review["revised"]) == 1
     schema = s.calls[0]["tool"].input_schema["properties"]["assessment"]
-    assert schema["minItems"] == schema["maxItems"] == 6
+    assert schema["minItems"] == schema["maxItems"] == 7
 
 
 async def test_chips_drawn_as_rounded_pills_of_the_page_s_own_are_a_formatting_problem(view, monkeypatch, tmp_path):

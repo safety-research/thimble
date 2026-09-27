@@ -152,4 +152,4 @@ def test_every_worked_example_a_view_ticket_names_is_a_complete_viewer():
         assert v["ok"] and v["accepts"] and v["name"], shape
         assert all((d / "sample" / claim).is_file() for claim in v["claims"]), shape
         page = (d / "view.html").read_text("utf-8")
-        assert "thimble.onOpen" in page and "data-anchor" in page, shape
+        assert "thimble.onOpen" in page and re.search(r"data-anchor|dataset\.anchor", page), shape
