@@ -98,3 +98,12 @@ def test_the_real_list_is_digests_of_known_kinds():
     spec.loader.exec_module(real)
     assert real.TERMS and all(re.fullmatch(r"[0-9a-f]{64}", d) for d in real.TERMS)
     assert set(real.TERMS.values()) <= {"private", "maintainer"}
+
+
+def test_a_release_s_built_ui_and_notices_are_checked_for_file_kinds_but_not_words(cc, tmp_path):
+    """A release's staged tree carries frontend/dist, whose minified names can spell a listed word, and the npm
+    packages' notices, which are other people's texts."""
+    write(tmp_path, {"frontend/dist/assets/a.js": "var Alice=1;// red kite\n", "THIRD_PARTY_NOTICES": "Alice\n",
+                     "frontend/dist/x.db": b"\0", "frontend/src/a.ts": "// red kite\n"})
+    assert sorted((h[0], h[2]) for h in hits(cc, tmp_path)) == [("frontend/dist/x.db", "path"),
+                                                                 ("frontend/src/a.ts", "private")]
