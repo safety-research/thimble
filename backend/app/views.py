@@ -1872,14 +1872,10 @@ def frame_document(view: dict[str, Any], media: str | None = None) -> str:
             head.append(f"<script>{_script_text(p.read_text('utf-8'))}</script>")
         else:
             head.append(f"<script>console.error({json.dumps(f'the library {name} is not installed here')})</script>")
-    inject = "".join(head)
-    # the policy comes first, before any script of the view: a meta policy only governs what is parsed after it
-    m = re.search(r"<head[^>]*>", html, re.I)
-    if m:
-        doc = html[: m.end()] + inject + html[m.end():]
-    else:
-        doc = "<head>" + inject + "</head>" + html
-    return doc if re.match(r"\s*<!doctype", doc, re.I) else "<!doctype html>" + doc
+    # the policy comes first, before any markup of the view: a meta policy only governs what is parsed after it. The
+    # view's own <head> content, parsed after this head, still lands in the document's head.
+    body = re.sub(r"^\s*<!doctype[^>]*>", "", html, count=1, flags=re.I)
+    return "<!doctype html><head>" + "".join(head) + "</head>" + body
 
 
 # ----------------------------------------------------------------------------------------------------------
