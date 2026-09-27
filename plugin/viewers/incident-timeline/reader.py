@@ -185,12 +185,13 @@ def _search(index, q):
     q = str(q or "").strip().lower()
     if not q:
         return {"q": q, "rows": []}
-    needle = json.dumps(q)[1:-1].encode()
+    needles = {json.dumps(q)[1:-1], json.dumps(q, ensure_ascii=False)[1:-1]}  # as a line holds it, escaped or not
     hits = []
     for path in index["files"]:
         with open(path, "rb") as fh:
             for n, raw in enumerate(fh, 1):
-                if needle in raw.lower() and (i := index["row_of"].get(f"{path}#{n}")) is not None:
+                line = raw.decode("utf-8", "replace").lower()
+                if any(x in line for x in needles) and (i := index["row_of"].get(f"{path}#{n}")) is not None:
                     hits.append(i)
     got = _read(index, hits)
     return {"q": q, "rows": sorted(i for i in hits if i in got and q in _strings(got[i]) and _kept(index, i))}
