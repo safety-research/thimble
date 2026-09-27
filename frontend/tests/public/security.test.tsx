@@ -66,14 +66,44 @@ describe('html output', () => {
     const out = html(el)
     expect(el.querySelector('table td')?.textContent).toBe('1')
     expect(out).not.toMatch(/onerror|<style|<link|<form|<button|<input|<iframe|javascript:|evil\.example/i)
-    expect(el.querySelector('#leak')?.getAttribute('src')).toBeNull()
-    expect(el.querySelector('#srcset')?.hasAttribute('srcset')).toBe(false)
-    expect(el.querySelector('#bg')?.getAttribute('style')).toBeNull()
-    expect(el.querySelector('#kept-style')?.getAttribute('style')).toBe('color: red')
-    expect(el.querySelector('#local')?.getAttribute('src')).toMatch(/^data:image\/png/)
-    const ext = el.querySelector('#ext')
+    // an output's ids are its own, prefixed so none is the app's
+    const byId = (id: string) => el.querySelector(`#user-content-${id}`)
+    expect(el.querySelector('#leak')).toBeNull()
+    expect(byId('leak')?.getAttribute('src')).toBeNull()
+    expect(byId('srcset')?.hasAttribute('srcset')).toBe(false)
+    expect(byId('bg')?.getAttribute('style')).toBeNull()
+    expect(byId('kept-style')?.getAttribute('style')).toBe('color: red')
+    expect(byId('local')?.getAttribute('src')).toMatch(/^data:image\/png/)
+    const ext = byId('ext')
     expect([ext?.getAttribute('target'), ext?.getAttribute('rel')]).toEqual(['_blank', 'noreferrer noopener'])
     expect((window as { __pwned?: unknown }).__pwned).toBeUndefined()
+  })
+
+  test('inlined html keeps its own look but cannot draw over the app or dress up as its parts', async () => {
+    const markup = [
+      '<div id="over" class="chat-perm dataframe" data-request="x" style="position: fixed; inset: 0; z-index: 9999; transform: translateY(-100px); color: red; padding: 4px">covers the card</div>',
+      '<table class="dataframe"><tbody><tr><td style="text-align: right; font-weight: 600; background-color: #eee; border-bottom: 1px solid #ccc">1</td></tr></tbody></table>',
+      '<span class="btn chat-perm-allow" style="position: absolute; top: 0">Allow</span>',
+    ].join('')
+    const el = await mount(<Output bundle={{ 'text/html': markup }} />)
+    const over = el.querySelector('#user-content-over') as HTMLElement
+    expect([over.style.position, over.style.zIndex, over.style.transform, over.style.inset, over.style.top]).toEqual(['', '', '', '', ''])
+    expect([over.style.color, over.style.padding]).toEqual(['red', '4px'])
+    expect(over.getAttribute('class')).toBe('dataframe')
+    expect(over.hasAttribute('data-request')).toBe(false)
+    const td = el.querySelector('td') as HTMLElement
+    expect([td.style.textAlign, td.style.fontWeight, td.style.backgroundColor]).toEqual(['right', '600', 'rgb(238, 238, 238)'])
+    expect(td.style.borderBottom).toMatch(/1px solid/)
+    const fake = el.querySelector('span')!
+    expect([fake.hasAttribute('class'), fake.hasAttribute('style')]).toEqual([false, false])
+    expect(el.querySelector('.chat-perm, .chat-perm-allow, .btn, [data-request]')).toBeNull()
+    expect(readFileSync(path.join(SRC, 'styles/outputs.css'), 'utf8')).toMatch(/\.outputs-html \{[^}]*contain: paint/)
+  })
+
+  test('an svg figure keeps its own classes and style', () => {
+    const out = purifySvg('<svg xmlns="http://www.w3.org/2000/svg"><g class="axis" style="stroke: #000"><path d="M0 0"/></g></svg>')
+    expect(out).toContain('class="axis"')
+    expect(out).toContain('style="stroke: #000"')
   })
 
   test('purifyHtml drops what would leave the page and keeps what stays on the machine', () => {
