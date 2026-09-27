@@ -81,3 +81,33 @@ def test_install_sh_does_not_import_from_the_folder_it_runs_in(tmp_path):
     assert r.returncode == 0, r.stdout + r.stderr
     assert "thimble 0.0.1 from" in r.stdout
     assert not marker.exists(), "install.sh's Python imported json.py from the working directory"
+
+
+def stub_bin(tmp_path: Path) -> Path:
+    """uv that does nothing but name itself, so install.sh runs its steps without creating a venv, and a node too old
+    for the frontend step."""
+    bin_ = tmp_path / "bin"
+    bin_.mkdir(exist_ok=True)
+    for name, body in {"uv": 'case "$1" in --version) echo "uv 0.0.0";; esac', "node": "echo v18.0.0"}.items():
+        (bin_ / name).write_text(f"#!/bin/sh\n{body}\n")
+        (bin_ / name).chmod(0o755)
+    return bin_
+
+
+def install(tree: Path, dest: Path, tmp_path: Path) -> subprocess.CompletedProcess:
+    env = env_for(tmp_path, PATH=f"{stub_bin(tmp_path)}:/usr/bin:/bin")
+    return subprocess.run(["bash", str(tree / "scripts" / "install.sh"), "--dir", str(dest), "--deps-only"],
+                          capture_output=True, text=True, env=env, timeout=60)
+
+
+def test_a_release_install_carries_the_files_the_readme_links(tmp_path):
+    tree = fake_tree(tmp_path / "release")
+    (tree / "README.md").write_text("[Install](INSTALL.md) ![banner](docs/assets/thimble-banner.svg)\n")
+    (tree / "INSTALL.md").write_text("# Install\n")
+    (tree / "docs" / "assets").mkdir(parents=True)
+    (tree / "docs" / "assets" / "thimble-banner.svg").write_text("<svg/>\n")
+    dest = tmp_path / "home" / ".thimble" / "app"
+    r = install(tree, dest, tmp_path)
+    assert r.returncode == 0, r.stdout + r.stderr
+    for rel in ("README.md", "INSTALL.md", "docs/assets/thimble-banner.svg"):
+        assert (dest / rel).read_text() == (tree / rel).read_text(), rel

@@ -115,7 +115,7 @@ copy_tree() {  # a release install: the release's entries replace the install's;
   if [ "$in_place" = 1 ]; then say "in place: nothing to copy"; return 0; fi
   say "copying the release into $dir (kept there if present: backend/.venv, frontend/node_modules, workspaces/, data/, dev/)"
   run mkdir -p "$dir"
-  for entry in plugin backend prompts frontend .claude-plugin scripts README.md LICENSE THIRD_PARTY_NOTICES RELEASE.json; do
+  for entry in plugin backend prompts frontend .claude-plugin scripts README.md INSTALL.md docs LICENSE THIRD_PARTY_NOTICES RELEASE.json; do
     [ -e "$src/$entry" ] || continue
     keep=""; case "$entry" in backend) keep=.venv;; frontend) keep=node_modules;; esac
     say "+ replace $dir/$entry${keep:+/* except $keep}"
