@@ -92,7 +92,7 @@ function ModelName({ model, tip }: { model: string; tip?: string }) {
   )
 }
 
-export function ModelLine({ model, modelTip, models, onModel, effort, efforts = EFFORT_CHOICES, onEffort, fast, onFast, fastTip, label, className = '' }: {
+export function ModelLine({ model, modelTip, models, onModel, effort, efforts = EFFORT_CHOICES, onEffort, fast, onFast, label, className = '' }: {
   /** the model the session runs; nothing while it is unknown */
   model?: string | null
   /** where the model changes, in its tooltip, when it cannot change here */
@@ -106,15 +106,14 @@ export function ModelLine({ model, modelTip, models, onModel, effort, efforts = 
   onEffort?: (effort: string) => void
   /** fast mode's state; null while it is unknown, shown off */
   fast?: boolean | null
-  /** switches fast mode; without it the bolt shows the state and `fastTip` says where it changes */
+  /** switches fast mode; without it the bolt shows the state */
   onFast?: (on: boolean) => void
-  fastTip?: string
   /** the session the line names, in its controls' accessible names: "main", "the orientation" */
   label: string
   className?: string
 }) {
   const withFast = !model || hasFastMode(model)
-  const why = !withFast ? noFastTip(model!) : onFast ? null : (fastTip ?? null)
+  const why = withFast ? null : noFastTip(model!)
   const modelItems: MenuItem[] = (models ?? []).map((m) => ({
     id: `model:${m}`,
     label: modelLabel(m),

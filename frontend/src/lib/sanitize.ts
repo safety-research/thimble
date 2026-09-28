@@ -2,9 +2,9 @@
 // unauthenticated and answers the page's own origin, so injected script could call any route, and remote resources
 // could leak what the page shows. Kept: markup, classes, inline style, links, and data:, blob: or media-route images.
 // Removed: script and event attributes, <style>, forms, every URL to another host, every URL to the app's own routes but
-// the two that serve media (even a GET to some routes changes state), and in HTML data-* attributes, which the app's
-// click handlers read; ids are prefixed. The output's box contains its paint (styles/outputs.css), so nothing it draws
-// reaches outside it. HTML that carries script runs in a sandboxed frame instead (components/Outputs HtmlFrame). This
+// the two that serve media (even a GET to some routes changes state), the attributes that open a popover or a dialog in
+// the top layer, and in HTML data-* attributes, which the app's click handlers read; ids are prefixed. The output's box
+// contains its paint (styles/outputs.css), so nothing it draws reaches outside it. HTML that carries script runs in a sandboxed frame instead (components/Outputs HtmlFrame). This
 // also applies under Vite, which serves no CSP.
 import DOMPurify, { type Config, type DOMPurify as Purifier } from 'dompurify'
 
@@ -76,10 +76,12 @@ function purifier(): Purifier | null {
 }
 
 const FORMS = ['form', 'input', 'button', 'textarea', 'select', 'option', 'optgroup', 'datalist']
+// the top layer ignores the box's paint containment
+const TOP_LAYER = ['popover', 'popovertarget', 'popovertargetaction', 'command', 'commandfor']
 
 const HTML: Config = {
   FORBID_TAGS: ['style', 'link', 'meta', 'base', ...FORMS],
-  FORBID_ATTR: ['srcset', 'formaction', 'form', 'ping'],
+  FORBID_ATTR: ['srcset', 'formaction', 'form', 'ping', ...TOP_LAYER],
   ALLOW_DATA_ATTR: false,
   SANITIZE_NAMED_PROPS: true,
 }
@@ -87,7 +89,7 @@ const HTML: Config = {
 const SVG: Config = {
   USE_PROFILES: { svg: true, svgFilters: true },
   FORBID_TAGS: ['style', 'foreignObject', 'a', 'script'],
-  FORBID_ATTR: ['srcset'],
+  FORBID_ATTR: ['srcset', ...TOP_LAYER],
   ADD_ATTR: ['role'],
 }
 

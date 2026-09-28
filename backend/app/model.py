@@ -292,9 +292,9 @@ def _out_server(spec: ToolSpec, state: CallState) -> Any:
 
 
 def _options(spec: ToolSpec, state: CallState, *, model: str | None, effort: str | None, system_append: str,
-             cwd: str | Path, config_env: dict[str, str] | None, speed: str = "standard") -> ClaudeAgentOptions:
-    """The SDK options for one structured call (sdk.build): the output tool's server under `out` and the caller's config
-    env. No transcript is kept."""
+             cwd: str | Path, speed: str = "standard") -> ClaudeAgentOptions:
+    """The SDK options for one structured call (sdk.build): the output tool's server under `out`, in the served config
+    dir (config.claude_env). No transcript is kept."""
     instruction = _instruction(spec)
     append = f"{system_append}\n\n{instruction}" if system_append else instruction
     return sdk.build(
@@ -304,7 +304,7 @@ def _options(spec: ToolSpec, state: CallState, *, model: str | None, effort: str
         system_append=append,
         model=model,
         effort=effort,
-        env=config_env,
+        env=config.claude_env({}),
         speed=speed,
         persist=False,
     )
@@ -540,7 +540,6 @@ async def structured(
     effort: str | None = None,
     system_append: str = "",
     cwd: str | Path,
-    config_env: dict[str, str] | None = None,
     idle_timeout_s: float = DEFAULT_IDLE_TIMEOUT_S,
     corrective_retries: int = 1,
     speed: str | None = None,
@@ -561,7 +560,7 @@ async def structured(
     errors are never retried here.
     """
     await _bind_sdk_off_loop()
-    kw: dict[str, Any] = dict(tool=tool, effort=effort, system_append=system_append, cwd=cwd, config_env=config_env,
+    kw: dict[str, Any] = dict(tool=tool, effort=effort, system_append=system_append, cwd=cwd,
                               idle_timeout_s=idle_timeout_s, corrective_retries=corrective_retries, speed=speed,
                               images=images, on_retry=on_retry)
     res = await _structured(prompt, model=model, **kw)
@@ -591,7 +590,6 @@ async def _structured(
     effort: str | None = None,
     system_append: str = "",
     cwd: str | Path,
-    config_env: dict[str, str] | None = None,
     idle_timeout_s: float = DEFAULT_IDLE_TIMEOUT_S,
     corrective_retries: int = 1,
     speed: str | None = None,
@@ -643,7 +641,7 @@ async def _structured(
         while True:  # each flag is set at most once, so at most three sessions run per with_backoff attempt
             state = CallState(tool)
             opts = _options(tool, state, model=requested, effort=effort, system_append=system_append, cwd=cwd,
-                            config_env=config.claude_env(config_env or {}), speed="fast" if fast else "standard")
+                            speed="fast" if fast else "standard")
             retry_note, retry_sleep = "", 0.0
             if attempts:
                 cap.note("a fresh session (a stall or a rate-limit retry); the options below are the new session's")

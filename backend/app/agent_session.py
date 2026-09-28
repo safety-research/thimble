@@ -1073,9 +1073,6 @@ async def _resume_auto(run: Run) -> bool:
     run.auto_off = ""
     stopped = _stop_steps(run)
     if run.auto_resumes >= AUTO_RESUMES:
-        if run.mode is None:
-            run.result, run.result_error = cause, True
-            return False
         if not await _hold(run):
             return False
         run.auto_resumes = 0
@@ -2164,7 +2161,7 @@ async def ask(c: str, key: str | None, tool_name: str, inp: Any, agent_id: str |
              **({"rechecked": len(CLASSIFIER_WAITS_S)} if unjudged else {}),
              **({"deny_after_s": limit} if unjudged and limit is not None else {}),
              **_offered(updates), **({"wait_s": limit} if limit else {}),
-             **({"mode": run.mode} if run.mode else {})}
+             "mode": run.mode}
     fut: asyncio.Future = asyncio.get_running_loop().create_future()
     run.waits[rid] = fut
     run.asking[rid] = (agent_id or None, tool_name)
@@ -2747,8 +2744,8 @@ async def _switch_mode(run: Run) -> bool:
     if not run.paused:
         return False
     run.paused = False
-    mode = run.switching or run.mode or ""
-    if run.stopping or not mode:
+    mode = run.switching or run.mode
+    if run.stopping:
         return False
     stopped = run.paused_steps or _running_steps(run)
     run.paused_steps = []
