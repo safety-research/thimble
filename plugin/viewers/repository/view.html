@@ -44,7 +44,8 @@
 
   /* the overview: the runs, which also choose the runs, beside the activity */
   #overview { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(260px, 1fr); gap: 16px; margin-bottom: 16px; }
-  .compare #overview { grid-template-columns: minmax(0, 1fr); }
+  .compare #overview, .w-xs #overview { grid-template-columns: minmax(0, 1fr); }
+  #runs { overflow-x: auto; }
   .compare #activity { display: none; }
   .runs { margin: 0; }
   .runs td, .runs th { padding: 5px 10px 5px 12px; white-space: nowrap; }
@@ -149,6 +150,8 @@
   .row .flags { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
   .row .side { display: flex; align-items: center; gap: 10px; margin-top: 2px; }
   .row svg.strip { margin-top: 5px; }
+  .w-xs .row { grid-template-columns: 16px minmax(0, 1fr) auto auto; }
+  .w-xs .row .rstrip { display: none; }
   .counts { display: flex; gap: 10px; margin-top: 3px; font: 400 var(--text-mono-sm) / 1.4 var(--font-mono); color: var(--text-tertiary); white-space: nowrap; }
   .counts span { display: inline-flex; align-items: center; gap: 4px; min-width: 26px; }
   .counts .ico { width: 14px; height: 14px; }
@@ -1659,7 +1662,9 @@
     unit = await thimble.fetch({ op: 'unit', key, colour: S.colour, hide: S.hide })
     // a cited commit opens on the commits
     if (unit && ref && unit.records.some((x) => x.ref === ref && x.kind === 'commit')) S.page = 'commits'
+    const was = document.body.classList.contains('open')
     document.body.classList.toggle('open', !!unit)
+    if (!was) relayout()
     drawDetail()
     for (const r of document.querySelectorAll('.row, .agents tbody tr, .cols .list-row')) r.classList.toggle('active', r.dataset.anchor === unitRef(key))
   }
@@ -1669,7 +1674,7 @@
     document.body.classList.remove('open')
     $('#detail').replaceChildren()
     for (const r of document.querySelectorAll('.row.active, tr.active, .list-row.active')) r.classList.remove('active')
-    layout()
+    relayout()
   }
   function linkText(text, links) {
     const frag = document.createDocumentFragment()
@@ -1735,13 +1740,6 @@
       ch.append(el('b', null, x.author), said(x, links), when)
       const m = markOf(x)
       if (m) ch.append(el('span', 'grow'), m)
-      if (x.kind === 'review') {
-        const v = el('span', 'grow')
-        ch.append(v)
-        const ic = icon(ACTION_ICON[x.action] || 'comment')
-        ic.style.color = labelOn() ? 'var(--text-secondary)' : partColour(x.part)
-        ch.append(ic)
-      }
       const body = el('div', 'cb')
       body.append(linkText(x.text, links))
       box.append(ch, body)
@@ -2090,21 +2088,25 @@
     document.body.classList.toggle('narrow', w < WIDE)
     const m = $('#main').clientWidth || w
     const main = $('#main')
+    main.classList.toggle('w-xs', m < 720)
     main.classList.toggle('w-s', m < 900)
     main.classList.toggle('w-m', m >= 900 && m < 1300)
     if ($('#detail').clientWidth) $('#detail').classList.toggle('dnarrow', $('#detail').clientWidth < 620)
   }
+  // the list's panels are drawn to its width, so they are drawn again when it changes
   let lastWidth = 0
-  new ResizeObserver(() => {
+  function relayout() {
     layout()
     const w = $('#main').clientWidth
     if (data && Math.abs(w - lastWidth) > 4) {
       lastWidth = w
       drawRuns()
       drawActivity()
+      drawList()
       drawPop()
     }
-  }).observe(document.body)
+  }
+  new ResizeObserver(relayout).observe(document.body)
   for (const b of document.querySelectorAll('#mode .seg-opt')) {
     b.onclick = () => {
       S.compare = b.dataset.mode === 'compare'
