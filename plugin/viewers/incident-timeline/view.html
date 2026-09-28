@@ -169,9 +169,10 @@
 // time since the record before (Gap) or since the record it answers (Took), and a record's details show the record it
 // answers, those that answer it and its neighbours in time across every source.
 // Labels: the reader keeps only what the label filter keeps and hands each record its marks. Colour lists every label
-// over files beside the fields, and turns one on or off in thimble. While a label is on it is the colouring: its values
-// colour the bars and the lane ticks, get a lane each and a swatch on the list's rows and in the details, and a value's
-// swatch in the legend opens thimble's palette. List rows and details carry their file ref as data-anchor, incident
+// over files beside the fields, and turns one on or off in thimble. While a label is on it is the colouring, unless a
+// field is chosen under Colour, which colours this page alone and leaves the labels on: its values colour the bars and
+// the lane ticks, get a lane each and a swatch on the list's rows and in the details, and a value's swatch in the
+// legend opens thimble's palette. List rows and details carry their file ref as data-anchor, incident
 // lanes their view key, so thimble marks them.
 const slug = (thimble.view && thimble.view.slug) || 'incident-timeline'
 const NS = 'http://www.w3.org/2000/svg'
@@ -197,6 +198,7 @@ const LANES = 12 // lanes shown before the rest are folded
 const ROWS = 400 // list rows shown before the next ones are asked for
 const RIGHT = 10
 const GUTTER = 176 // the name column left of every chart, which holds the focus's legend
+const LIST_PEEK = 130 // the list's head and first rows, which a page too short for everything keeps in view
 
 const token = (n) => getComputedStyle(document.documentElement).getPropertyValue(n).trim()
 const fmt = (n) => Number(n).toLocaleString('en-US')
@@ -264,6 +266,7 @@ const texts = new Map() // reader row -> its text
 let mode = 'clock' // 'clock' or 'start'
 let group = 'source'
 let colourBy = 'source'
+let byField = false // a field chosen under Colour colours the page while labels are on
 let hide = new Set() // the label values the legend hides, as markKey gives them, and 'none' for the records none marks
 let pal = null // {id, value, from} while a label value's palette is open
 let win = null // [a, b) on the time axis
@@ -324,7 +327,7 @@ function place() {
 }
 
 const nameOf = (k, v) => (D.names[k] && D.names[k][v]) || FIELD[k][3]
-const labelsOn = () => !!(D && D.marks.length) || labelState.labels.length > 0
+const labelsOn = () => !byField && (!!(D && D.marks.length) || labelState.labels.length > 0)
 const ref = (i) => `${D.files[C.f[i]]}#L${C.ln[i]}`
 
 // the label values the reader sends as `marks`, with the colour and the id thimble last gave their label
@@ -707,13 +710,16 @@ function renderFocus() {
   // at least as tall as the legend beside it
   const rows = labelsOn() ? D.marks.length + 1 : Math.min(COLOURED + 1, colourOrder.length)
   let H = Math.max(150, 64 + 23 * (rows + 1))
+  const n = laneValues().shown.length
+  const lanes = n * laneHeight(n) + markLanes().length * LANE + 40
+  const rest = document.getElementById('chartbar').offsetHeight + Number(document.getElementById('overview').getAttribute('height')) + lanes + 48
   if (document.body.clientWidth >= 1100) {
     // where the charts have a column of their own, the focus takes the height the lanes leave
-    const n = laneValues().shown.length
-    const lanes = n * laneHeight(n) + markLanes().length * LANE + 40
-    const box = document.getElementById('charts')
-    const rest = document.getElementById('chartbar').offsetHeight + Number(document.getElementById('overview').getAttribute('height')) + lanes + 48
-    H = Math.max(H, 170, Math.min(360, box.clientHeight - rest - top - axis))
+    H = Math.max(H, 170, Math.min(360, document.getElementById('charts').clientHeight - rest - top - axis))
+  } else {
+    // where the list is below the charts, the focus gives up height, down to its legend's, so the list's first rows
+    // show as the page opens
+    H = Math.max(24 * rows + 24, Math.min(H, innerHeight - document.getElementById('bar').offsetHeight - rest - top - axis - LIST_PEEK))
   }
   svg.setAttribute('width', W)
   svg.setAttribute('height', top + H + axis)
@@ -835,7 +841,7 @@ function legendClick(v, shift) {
 
 // ---------------------------------------------------------------- Colour and the palette
 // Colour: a field, or the labels over files as thimble lists them, each turned on or off in thimble's Labels pane. A
-// field colours the records only while no label is on, so choosing one turns the labels off.
+// field chosen while labels are on colours this page alone; a click on a label that is on colours by the labels again.
 const allLabels = () => labelState.all || labelState.labels.map((l) => ({ ...l, on: true }))
 function renderColour() {
   const box = document.getElementById('colour')
@@ -844,8 +850,8 @@ function renderColour() {
     const b = h('button', 'seg-opt' + (!labelsOn() && colourBy === k ? ' active' : ''), name)
     b.onclick = () => {
       colourBy = k
+      byField = true
       hide = new Set()
-      if (thimble.setLabel) for (const l of allLabels()) if (l.on && l.id) thimble.setLabel(l.id, false)
       refresh()
     }
     return b
@@ -859,10 +865,15 @@ function renderColour() {
     const b = h('span', 'box' + (l.on ? ' on' : ''))
     b.style.setProperty('--mark', l.colour)
     c.append(b, l.name)
-    c.title = l.on ? 'Turn this label off' : 'Colour by this label'
+    c.title = l.on && !byField ? 'Turn this label off' : 'Colour by this label'
     if (l.id) c.dataset.label = l.id
     c.disabled = !(l.id && thimble.setLabel)
-    c.onclick = () => thimble.setLabel(l.id, !l.on)
+    c.onclick = () => {
+      const was = byField
+      byField = false
+      if (l.on && was) return refresh()
+      thimble.setLabel(l.id, !l.on)
+    }
     labs.append(c)
   }
   if (thimble.newLabel) {
@@ -1585,6 +1596,9 @@ thimble.onOpen(async (place_) => {
 })
 thimble.onLabels(async (state) => {
   const was = JSON.stringify([labelState.labels, labelState.filter])
+  const before = new Set(labelState.labels.map((l) => l.name))
+  // a label turned on in thimble colours the page again
+  if ((state.labels || []).some((l) => !before.has(l.name))) byField = false
   labelState = { labels: state.labels || [], filter: state.filter || null, all: state.all || null, palette: state.palette || null }
   if (!D) return // the first fetch reads them
   // the reader applies the labels that are on and the filter; the list of labels and the palette only redraw

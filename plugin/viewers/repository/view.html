@@ -180,14 +180,14 @@
   .chip.state { height: 28px; padding: 0 12px 0 10px; border-color: var(--c); background: var(--c); color: var(--surface-card); font-size: var(--text-sm); font-weight: 500; }
   .chip.state .ico { width: 15px; height: 15px; }
 
-  /* icons, in a state's or an action's colour while the records are coloured by activity or state, else in ink */
+  /* icons: a state's in its colour, an action's in its colour while the records are coloured by activity, else in ink */
   .ico { width: 16px; height: 16px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
   .ico.s12 { width: 12px; height: 12px; }
   .s-open { color: var(--status-positive); }
   .s-merged, .s-fixed { color: var(--viz-6); }
   .s-closed { color: var(--status-negative); }
   .s-thread { color: var(--text-secondary); }
-  .inked .s-open, .inked .s-merged, .inked .s-fixed, .inked .s-closed, .inked .matrix td .cr { color: var(--text-secondary); }
+  .inked .matrix td .cr { color: var(--text-secondary); }
 
   /* a diff's size as its added and removed lines, and five blocks in those shares */
   .dstat { display: inline-flex; align-items: center; gap: 6px; font: 500 var(--text-mono-sm) / 1 var(--font-mono); white-space: nowrap; }
@@ -294,6 +294,9 @@
   .diff tr.del td.ln { background: color-mix(in oklab, var(--status-negative) 18%, var(--surface-card)); }
   .diff tr.hunk td { background: color-mix(in oklab, var(--accent) 7%, var(--surface-card)); color: var(--text-tertiary); }
   .diff tr:last-child td { padding-bottom: 2px; }
+  .diff + .diff { border-top: 1px solid var(--border-hairline); }
+  .diff tr.by td { font-family: var(--font-body); color: var(--text-secondary); }
+  .diff tr.by .sha { margin-right: 4px; }
 
   /* the facts beside a unit's page */
   .facts h4 { margin: 0 0 8px; font: 600 var(--text-xs) / 1.2 var(--font-body); color: var(--text-secondary); }
@@ -346,10 +349,11 @@
   // changed, as diffs.
   //
   // Labels: each unit's element carries view:<slug>/<key>, each record on a strip or a page its file ref, and each
-  // run's row view:<slug>/<run>, so thimble marks them. While a label is on it is the colouring: the page draws the
-  // records each of its values marks in that value's colour in the activity, the strips, the runs' bars and a page's
-  // badges, a unit whose records it marks carries its pill, as the forge's labels, and the other categories are drawn
-  // in ink. A value's swatch opens thimble's palette. The filter is applied by the reader, so the page fetches again in
+  // run's row view:<slug>/<run>, so thimble marks them. A unit whose records a label marks carries its pill, as the
+  // forge's labels. While a label is on it is the colouring, unless a field is chosen in the Colour menu, which colours
+  // this page alone and leaves the labels on: the page draws the records each of its values marks in that value's
+  // colour in the activity, the strips, the runs' bars and a page's badges, and the other categories in ink, all but
+  // the states' icons, which keep the forge's colours. A value's swatch opens thimble's palette. The filter is applied by the reader, so the page fetches again in
   // thimble.onLabels.
   const slug = (thimble.view && thimble.view.slug) || 'repository'
   const $ = (s, root) => (root || document).querySelector(s)
@@ -376,7 +380,7 @@
     posted: '--viz-5', merged: '--viz-6', fixed: '--viz-6', closed: '--viz-4', reopened: '--viz-ink-1', 'signed off': '--viz-ink-4',
   }
   const STATE_COLOURS = { open: '--status-positive', merged: '--viz-6', fixed: '--viz-6', closed: '--status-negative' }
-  // the states in ink, while the records are coloured by a field whose colours they would repeat
+  // the states in ink on the runs' bars, while the records are coloured by a field whose colours they would repeat
   const STATE_INKS = { open: '--viz-ink-2', merged: '--viz-ink-3', fixed: '--viz-ink-3', closed: '--viz-ink-4' }
   // the fields the Colour menu offers on each tab (reader.py COLOURS), and the viz colours their values take in order
   const COLOURS = { pulls: ['action', 'actor', 'run', 'state', 'area'], issues: ['action', 'actor', 'run', 'state', 'area'],
@@ -386,10 +390,10 @@
   const AGENT_COLS = [['opened', 'Opened'], ['merged', 'Merged'], ['merges', 'Merges done'], ['approved', 'Approvals'], ['changes', 'Changes req.'], ['comments', 'Comments'], ['posts', 'Posts']]
 
   // what the analyst chose; every change refetches the tab. `filters` holds each filter's chosen values, `colour` the
-  // field that colours the records, `hide` the label values whose records the legend hides ('none' for the records none
+  // field that colours the records, `byField` whether it does while labels are on, `hide` the label values whose records the legend hides ('none' for the records none
   // marks), and `page` the open unit's tab
   const S = { tab: 'pulls', runs: [], compare: false, q: '', filters: {}, sort: '', range: null, agentView: 'table', agentSort: 'merges',
-    colour: 'action', hide: [], page: 'conversation' }
+    colour: 'action', byField: false, hide: [], page: 'conversation' }
   let data = null // the reader's answer for the tab (reader.py _view)
   let unit = null // the open unit's page (reader.py _detail)
   let focusRef = null // the record a citation opened
@@ -437,7 +441,7 @@
   // The records take the colours of the labels' values while a label is on (the reader's `classes`), else those of the
   // colour field's values: an action's or a state's own colour, and for the other fields the viz colours in the
   // reader's `order`, the values past them in ink.
-  const labelOn = () => !!(data && data.classes.length)
+  const labelOn = () => !S.byField && !!(data && data.classes.length)
   const field = () => (data ? data.colour.field : S.colour)
   const labelBy = (name) => (labelState.all || labelState.labels || []).find((l) => l.name === name)
   const classKey = (c) => `${c.label}\n${c.value}`
@@ -527,7 +531,7 @@
   // a state as the forge's pill: its icon and name on the state's colour
   function statePill(tab, state) {
     const p = el('span', 'chip chip-sans state')
-    p.style.setProperty('--c', stateColour(state))
+    p.style.setProperty('--c', `var(${STATE_COLOURS[state]})`)
     const ic = stateIcon(tab, state)
     ic.setAttribute('class', 'ico')
     p.append(ic, tab === 'issues' && state === 'fixed' ? 'Fixed' : STATE_NAMES[state] || state)
@@ -567,7 +571,7 @@
   // ------------------------------------------------------------------------------------------------ fetching
   function query(extra) {
     return { op: 'view', tab: S.tab, runs: S.runs, compare: S.compare, q: S.q, filters: S.filters, range: S.range,
-             sort: S.tab === 'agents' ? S.agentSort : S.sort, colour: S.colour, hide: S.hide, offset: 0, ...extra }
+             sort: S.tab === 'agents' ? S.agentSort : S.sort, colour: S.colour, labels: !S.byField, hide: S.hide, offset: 0, ...extra }
   }
   async function load() {
     const mine = ++loading
@@ -822,6 +826,13 @@
       bh.append(el('span', 'grow'), legend())
     }
     box.replaceChildren(bh, table)
+    // the columns a narrow pane may leave out go one by one, the last of the wider ones first, while the table is
+    // wider than its box
+    const optional = [...cols.keys()].filter((i) => cols[i].cls).sort((a, b) => cols[b].cls.localeCompare(cols[a].cls) || b - a)
+    for (const i of optional) {
+      if (table.offsetWidth <= box.clientWidth) break
+      for (const row of table.rows) if (row.cells[i + 2]) row.cells[i + 2].style.display = 'none'
+    }
   }
 
   // ------------------------------------------------------------------------------------------------ activity
@@ -1659,7 +1670,7 @@
   async function openUnit(key, ref) {
     focusRef = ref || null
     if (!unit || unit.key !== key) S.page = 'conversation'
-    unit = await thimble.fetch({ op: 'unit', key, colour: S.colour, hide: S.hide })
+    unit = await thimble.fetch({ op: 'unit', key, colour: S.colour, labels: !S.byField, hide: S.hide })
     // a cited commit opens on the commits
     if (unit && ref && unit.records.some((x) => x.ref === ref && x.kind === 'commit')) S.page = 'commits'
     const was = document.body.classList.contains('open')
@@ -1834,12 +1845,21 @@
     }
     return files
   }
-  function diffTable(f) {
+  // a file's lines from one commit, under a line naming the commit when `commit` is given
+  function diffTable(rows, commit) {
     const t = el('table', 'diff')
     const cols = el('colgroup')
     cols.append(el('col', 'ln'), el('col', 'ln'), el('col'))
     t.append(cols)
-    for (const r of f.rows) {
+    if (commit) {
+      const td = el('td', 'code')
+      td.colSpan = 3
+      td.append(el('span', 'sha', commit.sha || ''), ` ${commit.author} · ${commit.text || ''}`)
+      const tr = el('tr', 'hunk by')
+      tr.append(td)
+      t.append(tr)
+    }
+    for (const r of rows) {
       const tr = el('tr', r.kind)
       if (r.kind === 'hunk') {
         const td = el('td', 'code', r.text)
@@ -1884,23 +1904,40 @@
     if (!cs.length) box.append(el('div', 'empty', 'No commits.'))
     return box
   }
-  // the files each commit changed, as diffs, in the order they were pushed
-  function filesChanged(u) {
-    const wrap = el('div')
-    let any = false
+  // the files the commits changed, each once: its lines from each commit that changed it, in the order they were pushed
+  function filesOf(u) {
+    const byPath = new Map()
     for (const x of commitsOf(u)) {
       for (const f of parseDiff(x.diff)) {
-        any = true
-        const box = el('div', 'box file')
-        box.dataset.anchor = x.ref
-        box.dataset.anchorName = `${f.path} in ${x.sha}`
-        const head = el('div', 'box-head')
-        head.append(icon('file'), el('span', 'path', f.path), diffstat(f.plus, f.minus), el('span', 'grow'), el('span', 'sha', x.sha || ''), el('span', 'dim', x.author))
-        box.append(head, diffTable(f))
-        wrap.append(box)
+        let g = byPath.get(f.path)
+        if (!g) byPath.set(f.path, (g = { path: f.path, plus: 0, minus: 0, parts: [] }))
+        g.plus += f.plus
+        g.minus += f.minus
+        g.parts.push({ x, rows: f.rows })
       }
     }
-    if (!any) wrap.append(el('div', 'empty', 'No files changed.'))
+    return [...byPath.values()]
+  }
+  function filesChanged(u) {
+    const wrap = el('div')
+    const files = filesOf(u)
+    for (const g of files) {
+      const box = el('div', 'box file')
+      const head = el('div', 'box-head')
+      const one = g.parts.length === 1 ? g.parts[0].x : null
+      head.append(icon('file'), el('span', 'path', g.path), diffstat(g.plus, g.minus), el('span', 'grow'))
+      if (one) head.append(el('span', 'sha', one.sha || ''), el('span', 'dim', one.author))
+      else head.append(el('span', 'dim', plural(g.parts.length, ['commit', 'commits'])))
+      box.append(head)
+      for (const { x, rows } of g.parts) {
+        const t = diffTable(rows, one ? null : x)
+        t.dataset.anchor = x.ref
+        t.dataset.anchorName = `${g.path} in ${x.sha}`
+        box.append(t)
+      }
+      wrap.append(box)
+    }
+    if (!files.length) wrap.append(el('div', 'empty', 'No files changed.'))
     return wrap
   }
   function drawDetail() {
@@ -1962,7 +1999,7 @@
     if (u.tab === 'pulls') {
       const tabs = el('nav', 'nav')
       const conv = u.records.filter((x) => x.kind !== 'commit').length
-      const files = cs.reduce((n, x) => n + parseDiff(x.diff).length, 0)
+      const files = filesOf(u).length
       for (const [key, name, ic, n] of [['conversation', 'Conversation', 'comment', conv], ['commits', 'Commits', 'commit', cs.length], ['files', 'Files changed', 'file', files]]) {
         const b = el('button', S.page === key ? 'on' : '')
         const inner = el('span')
@@ -2078,7 +2115,7 @@
     box.classList.toggle('dnarrow', box.clientWidth < 620)
     const hit = box.querySelector('.it.focus, .crow.focus')
     if (hit) hit.scrollIntoView({ block: 'center' })
-    else if (page === 'files' && focusRef) box.querySelector(`.file[data-anchor="${CSS.escape(focusRef)}"]`)?.scrollIntoView({ block: 'start' })
+    else if (page === 'files' && focusRef) box.querySelector(`.file [data-anchor="${CSS.escape(focusRef)}"]`)?.closest('.file').scrollIntoView({ block: 'start' })
     else box.scrollTop = 0
   }
 
@@ -2128,6 +2165,9 @@
   })
   thimble.onLabels(async (state) => {
     const was = JSON.stringify([labelState.labels, labelState.filter])
+    const before = new Set(labelState.labels.map((l) => l.name))
+    // a label turned on in thimble colours the page again
+    if ((state.labels || []).some((l) => !before.has(l.name))) S.byField = false
     labelState = { labels: state.labels || [], filter: state.filter || null, all: state.all || null, palette: state.palette || null }
     if (!data) return // the first fetch reads them
     // the reader applies the labels that are on and the filter; the list of labels and the palette only redraw
@@ -2140,15 +2180,19 @@
     if (!b) return
     const act = b.dataset.act
     if (act === 'field') {
-      Object.assign(S, { colour: b.dataset.f, hide: [] })
+      Object.assign(S, { colour: b.dataset.f, byField: true, hide: [] })
       menu = null
-      // a field colours the records only while no label is on, so choosing one turns the labels off in thimble
-      if (thimble.setLabel) for (const l of labelState.all || labelState.labels.map((x) => ({ ...x, on: true }))) if (l.on && l.id) thimble.setLabel(l.id, false)
       load()
       if (unit) openUnit(unit.key, focusRef)
     } else if (act === 'label') {
+      // a label that is on colours the page again while a field does, and is turned off otherwise
       const l = (labelState.all || labelState.labels.map((x) => ({ ...x, on: true }))).find((x) => x.id === b.dataset.id)
-      if (l && thimble.setLabel) thimble.setLabel(l.id, !l.on)
+      const was = S.byField
+      S.byField = false
+      if (l && l.on && was) {
+        load()
+        if (unit) openUnit(unit.key, focusRef)
+      } else if (l && thimble.setLabel) thimble.setLabel(l.id, !l.on)
     } else if (act === 'newlabel') {
       menu = null
       drawPop()

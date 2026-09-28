@@ -270,12 +270,12 @@ const durT = (d) => Math.max(0, Math.min(1, (Math.log10(Math.max(d, 0.05)) + 1) 
 
 // ------------------------------------------------------------------------------------------------------------ state
 const st = {
-  field: 'tool', filters: {}, search: '', hide: new Set(), win: null, ticked: [], view: 'overview', collapsed: new Set(),
+  field: 'tool', byField: false, filters: {}, search: '', hide: new Set(), win: null, ticked: [], view: 'overview', collapsed: new Set(),
   open: null, sel: null, menu: null, pal: null, includeSubs: true, align: 'start', narrow: false,
   side: false, compact: false, panelW: 0, leftW: 0, // the open session beside the lanes, and the widths render worked out
 }
 const SIDE_MIN = 760 // the page width from which an open session sits in a panel beside the lanes rather than below them
-const PANEL_MIN = 340, LANES_MIN = 420
+const PANEL_MIN = 300, LANES_MIN = 360
 let labels = { labels: [], filter: null, all: null, palette: null } // what thimble.onLabels last said
 let ov = null, sess = null, moment = null, cmp = null
 let S = {}, RUN = {}, CALL = {}
@@ -323,10 +323,11 @@ function colourOf(f, v) {
   return CAT[i % CAT.length]
 }
 
-// the labels: the values that are on colour the calls (the reader's `classes`, in thimble's order), and every label
-// over files is listed with its colour, the way thimble's Labels pane lists it
+// the labels: the values that are on colour the calls (the reader's `classes`, in thimble's order) unless a field is
+// chosen in the Colour menu, which colours this page alone, and every label over files is listed with its colour, the
+// way thimble's Labels pane lists it
 const classes = () => (ov ? ov.classes : [])
-const labelOn = () => classes().length > 0
+const labelOn = () => !st.byField && classes().length > 0
 const labelBy = (name) => (labels.all || labels.labels || []).find((l) => l.name === name)
 const classKey = (c) => `${c.label}\n${c.value}`
 const classColour = (i) => { const c = classes()[i], l = c && labelBy(c.label), v = l && (l.values || []).find((x) => x.name === c.value); return (v && v.colour) || (c && c.colour) || UNMARKED }
@@ -414,7 +415,7 @@ function chipText(f) {
   return `${FIELD_NAME[f]}: ${vis.length} of ${vs.length}`
 }
 function colourButton() {
-  const cls = classes()
+  const cls = labelOn() ? classes() : []
   let what
   if (cls.length === 1) what = `<span class="sws"><i class="sw" style="background:${classColour(0)}"></i></span><span class="cnm">${esc(cls[0].label)}</span>`
   else if (cls.length > 1) what = `<span class="sws">${cls.map((c, i) => `<i class="sw" style="background:${classColour(i)}"></i>`).join('')}</span>${new Set(cls.map((c) => c.label)).size} labels`
@@ -616,7 +617,7 @@ function labelCol(rows, { w, compareCol = true, badges = null, cols }) {
 }
 // the lanes' width, left of an open session's panel; beside a narrow panel the session column drops its counts
 const viewWidth = () => Math.max(st.side ? 300 : 560, st.leftW - 44)
-const labelWidth = () => (st.compact ? 180 : st.narrow ? 250 : 320)
+const labelWidth = () => (st.compact ? 170 : st.narrow ? 250 : 320)
 const COLS = () => (st.compact ? [] : [{ name: 'Calls', r: st.narrow ? 58 : 66, v: (s) => s.n }, { name: 'Errors', r: 6, v: (s) => s.err || '–', cls: (s) => (s.err ? 'err' : 'zero') }])
 function overview() {
   const rows = []
@@ -808,7 +809,7 @@ function render() {
   if (!ov) { view.innerHTML = ''; return }
   const W = view.clientWidth || window.innerWidth
   st.side = st.view === 'overview' && !!st.open && !!S[st.open] && !!sess && W >= SIDE_MIN
-  if (st.side) st.panelW = Math.round(Math.max(PANEL_MIN, Math.min(st.panelW || W * 0.42, 640, W - LANES_MIN)))
+  if (st.side) st.panelW = Math.round(Math.max(PANEL_MIN, Math.min(st.panelW || W * 0.38, 640, W - LANES_MIN)))
   st.leftW = st.side ? W - st.panelW : W
   st.narrow = st.leftW < 980
   st.compact = st.side && st.leftW < 640
@@ -868,9 +869,13 @@ function setWin(a, b) {
   st.win = b - a < 120 ? [Math.max(0, a - 600), Math.min(span, a + 600)] : [Math.max(0, a), Math.min(span, b)]
   if (st.win[0] <= 0 && st.win[1] >= span) st.win = null
 }
-// the label controls change thimble's labels, whose answer comes back through onLabels
+// the label controls change thimble's labels, whose answer comes back through onLabels; a label that is on colours
+// the page again while a field does
 function toggleLabel(id) {
   const l = (labels.all || []).find((x) => x.id === id)
+  const was = st.byField
+  st.byField = false
+  if (l && l.on && was) return render()
   if (l && thimble.setLabel) thimble.setLabel(id, !l.on)
 }
 
@@ -883,11 +888,7 @@ document.addEventListener('click', async (e) => {
   if (act !== 'palette' && act !== 'colour') st.pal = null
   switch (act) {
     case 'menu': st.menu = st.menu === el.dataset.menu ? null : el.dataset.menu; break
-    case 'field':
-      st.field = el.dataset.f; st.menu = null; st.hide = new Set()
-      // a field colours the calls only while no label is on, so choosing one turns the labels off in thimble
-      if (thimble.setLabel) for (const l of labels.all || []) if (l.on) thimble.setLabel(l.id, false)
-      break
+    case 'field': st.field = el.dataset.f; st.byField = true; st.menu = null; st.hide = new Set(); refetch = true; break
     case 'label': e.stopPropagation(); toggleLabel(id); return
     case 'newlabel': st.menu = null; render(); if (thimble.newLabel) thimble.newLabel(); return
     case 'palette': e.stopPropagation(); st.pal = st.pal && st.pal.id === id && st.pal.value === el.dataset.value ? null : { id, value: el.dataset.value, from: el.closest('#menu') ? 'menu' : 'bar' }; break
@@ -1013,6 +1014,9 @@ thimble.onOpen(async (place) => {
 })
 thimble.onLabels(async (state) => {
   const was = JSON.stringify([labels.labels, labels.filter])
+  const before = new Set(labels.labels.map((l) => l.name))
+  // a label turned on in thimble colours the page again
+  if ((state.labels || []).some((l) => !before.has(l.name))) st.byField = false
   labels = { labels: state.labels || [], filter: state.filter || null, all: state.all || null, palette: state.palette || null }
   if (!ov) return // the first fetch reads them
   // the reader applies the labels that are on and the filter; the list of labels and the palette only redraw the menu
