@@ -113,7 +113,7 @@ NODE_MIN = 20  # the Node major the checks need, as scripts/install.sh asks for 
 # plugin/viewers holds the worked examples a view ticket's session reads and the file-type viewers thimble ships
 VIEWERS_DIR = config.REPO_ROOT / "plugin" / "viewers"
 EXAMPLES_DIR = VIEWERS_DIR
-BUILTIN_VIEWERS = ("spreadsheet", "pdf")
+BUILTIN_VIEWERS = ("pdf",)
 BUILTIN_CACHE = ".builtin"  # under the workspace's views folder: a built-in viewer's index cache and check shots
 # Scripts and styles inline (the bridge, the vendored libraries, the view's own), images as data or blob URLs, workers
 # from blob URLs, and eval for vega's expression parser. `{media}` is the view's own media route (frame_document),
@@ -2486,7 +2486,7 @@ SUGGESTIONS_FILE = "suggestions.json"  # {suffix: {answer: suggested | none | di
 ORDINARY_SUFFIXES = frozenset(
     ".txt .md .markdown .rst .log .out .err .json .jsonl .ndjson .csv .tsv .yaml .yml .toml .ini .cfg .conf .env .xml "
     ".html .htm .css .js .mjs .cjs .ts .tsx .jsx .py .sh .bash .zsh .rb .go .rs .java .kt .c .h .cc .cpp .hpp .cs .php "
-    ".sql .r .jl .lua .pl .swift .scala .diff .patch .lock .pdf .xlsx .xls .db .sqlite .sqlite3".split())
+    ".sql .r .jl .lua .pl .swift .scala .diff .patch .lock .pdf .db .sqlite .sqlite3".split())
 _TYPE_GLOB = re.compile(r"^(?:\*\*/)?\*(\.[A-Za-z0-9_+-]{1,16})$")
 SUGGEST_HEAD_LINES, SUGGEST_LINE_CHARS = 40, 300  # of a text file's start the proposal is written from
 SUGGEST_HEX_BYTES, SUGGEST_SCAN_BYTES, SUGGEST_RUN_MIN = 512, 65536, 6  # of a binary file's start
