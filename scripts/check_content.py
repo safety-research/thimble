@@ -77,7 +77,7 @@ EXEMPT = re.compile(r"^(LICENSE|THIRD_PARTY_NOTICES|backend/app/fonts/OFL-[\w-]+
 NEVER = re.compile(r"(^|/)(__pycache__|node_modules|\.venv)(/|$)|^(data|dev|notes|context|experiments|"
                    r"workspaces[^/]*|\.claude|docs/archive|docs/proposals)/|\.(db|sqlite3?|jsonl|pyc)$")
 # the worked examples' invented sample files, which are data on purpose
-SAMPLES = re.compile(r"^plugin/viewers/[\w-]+/sample/[^/]+$")
+SAMPLES = re.compile(r"^plugin/viewers/[\w-]+/sample/")
 MAX_BYTES = 2_000_000
 SESSION_LINE = re.compile(r"^\s*claude-session:|claude\.ai/code/session_", re.I)
 # The newest commits, one per branch, made before messages were checked. They and the commits they reach keep their

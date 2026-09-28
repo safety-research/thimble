@@ -48,9 +48,8 @@ def test_files_of_kinds_that_never_belong_are_refused(cc, tmp_path, monkeypatch)
     monkeypatch.setattr(cc, "MAX_BYTES", 100)
     write(tmp_path, {"data/c/x.txt": "", "a/b.db": b"\0", "run.jsonl": "{}\n", "big.txt": "x" * 101, "ok.txt": "ok\n",
                      "plugin/viewers/repository/sample/repo.jsonl": "{}\n", "plugin/viewers/repository/sample/x/run.jsonl": "{}\n"})
-    assert sorted(h[0] for h in hits(cc, tmp_path)) == ["a/b.db", "big.txt", "data/c/x.txt",
-                                                        "plugin/viewers/repository/sample/x/run.jsonl", "run.jsonl"], \
-        "a worked example's sample file is data on purpose"
+    assert sorted(h[0] for h in hits(cc, tmp_path)) == ["a/b.db", "big.txt", "data/c/x.txt", "run.jsonl"], \
+        "a worked example's sample files, in its folders too, are data on purpose"
 
 
 def test_a_checkout_is_checked_by_its_tracked_and_unignored_files(cc, tmp_path):
