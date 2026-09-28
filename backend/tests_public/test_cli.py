@@ -120,7 +120,7 @@ def test_doctor_says_what_claude_reports_about_its_login_and_never_a_value(home,
     fake_claude.write_text(json.dumps({"loggedIn": True, "authMethod": "api_key", "apiProvider": "firstParty"}))
     text = cli.doctor_text()
     assert SECRET not in text and "down" in line(text, "server:")
-    assert "logged in (api_key, firstParty)" in line(text, "auth:")
+    assert all(word in line(text, "auth:") for word in ("api_key", "firstParty"))
     fake_claude.write_text(json.dumps({"loggedIn": False, "authMethod": "none"}))
     assert "not logged in" in line(cli.doctor_text(), "auth:")
 

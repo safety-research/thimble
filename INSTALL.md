@@ -1,7 +1,8 @@
 # Installing thimble
 
 thimble uses whichever auth path you have configured for `claude`: every model call runs through your own `claude`, in
-your config dir with your settings. thimble tells you when `claude` is missing or not logged in.
+your config dir with your user settings (thimble's sessions run in folders of their own, so auth set only in a
+project's `.claude/` settings does not reach them). thimble tells you when `claude` is missing or not logged in.
 
 ## Requirements
 

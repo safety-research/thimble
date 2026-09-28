@@ -195,7 +195,7 @@ def home(tmp_path, monkeypatch):
     monkeypatch.setenv("THIMBLE_FRONTEND_DIST", str(tmp_path / "ui-dist"))
     monkeypatch.setattr(config, "FRONTEND_DIST", tmp_path / "ui-dist")
     monkeypatch.setenv(cli.CHANNEL_ENV, "plugin:thimble@inline")
-    monkeypatch.setattr(cc_channel, "login", lambda environ=None: {"loggedIn": True, "authMethod": "claude.ai"})
+    monkeypatch.setattr(cc_channel, "login", lambda environ=None, cwd=None: {"loggedIn": True, "authMethod": "claude.ai"})
     monkeypatch.setattr(cli, "health_leader", lambda url=None: None)
     monkeypatch.setattr(cli, "foreign_home", lambda url=None: None)  # nor refuses one: another test covers that
     monkeypatch.delenv(cli.SANDBOX_ENV, raising=False)

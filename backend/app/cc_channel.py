@@ -7,10 +7,10 @@ and wins. An entry counts when it names this plugin copy: `plugin:thimble@inline
 `plugin:thimble@<marketplace>` for an installed one.
 
 Claude Code still refuses the channel after the flag for a third-party provider (Bedrock, Vertex, Foundry), for a
-login that is not a claude.ai one (an API key, auth token, apiKeyHelper or ANTHROPIC_PROFILE in any settings tier, or a
-login `claude auth status` names otherwise), and by the org's managed settings (`channelsEnabled`; `--channels` also
-needs `allowedChannelPlugins`). Without channels, browser events go through the plugin's hooks, unless hooks are
-disabled too; then the model arms a Monitor. `delivery` names the route and the reason.
+login that is not a claude.ai one as `claude auth status`, run in the session's folder with its environment, reports
+it, and by the org's managed settings (`channelsEnabled`; `--channels` also needs `allowedChannelPlugins`). Without
+channels, browser events go through the plugin's hooks, unless hooks are disabled too; then the model arms a Monitor.
+`delivery` names the route and the reason.
 """
 from __future__ import annotations
 
@@ -40,10 +40,7 @@ MANAGED_DROPINS = "managed-settings.d"
 TEAM_SUBSCRIPTIONS = ("team", "enterprise")  # `claude auth status`'s subscriptionType of a claude.ai Team or Enterprise seat
 USER_SETTINGS = "settings.json"
 PROJECT_SETTINGS = (Path(".claude") / "settings.json", Path(".claude") / "settings.local.json")
-# The login sources that make a session's login not a claude.ai one (module note), by environment variable
-KEY_ENVS = ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "CLAUDE_CODE_API_KEY_FILE_DESCRIPTOR", "ANTHROPIC_PROFILE")
 CLAUDE_AI_METHODS = ("claude.ai", "oauth_token")  # `claude auth status`'s authMethod of a login channels work with
-SETTINGS_FLAG = "--settings"  # a settings file or inline JSON on Claude Code's command line (its "flag" tier)
 # the routes (module note) and why channels are off
 CHANNEL, HOOK, MONITOR = "channel", "hook", "monitor"
 MODES = (CHANNEL, HOOK, MONITOR)
@@ -157,7 +154,7 @@ def _read(path: Path) -> dict[str, Any] | None:
 
 def managed(environ: Mapping[str, str] | None = None) -> dict[str, Any] | None:
     """The org's managed tier (module note): the first source that exists, None when none does. The drop-ins merge over
-    managed-settings.json key by key, which is all the top-level keys read here need."""
+    managed-settings.json key by key, and within an object such as `permissions` key by key too."""
     remote = config_dir(environ) / REMOTE_SETTINGS
     if remote.is_file():
         return _read(remote) or {}
@@ -170,68 +167,33 @@ def managed(environ: Mapping[str, str] | None = None) -> dict[str, Any] | None:
     except OSError:
         dropins = []
     for p in dropins:
-        tier = {**(tier or {}), **(_read(p) or {})}
+        tier = tier or {}
+        for k, v in (_read(p) or {}).items():
+            tier[k] = {**tier[k], **v} if isinstance(v, dict) and isinstance(tier.get(k), dict) else v
     return tier
 
 
-def login(environ: Mapping[str, str] | None = None) -> dict[str, Any]:
-    """What `claude auth status` reports for a session with the environment `environ` (config.auth_status); {} when it
-    cannot tell."""
+def login(environ: Mapping[str, str] | None = None, cwd: Path | str | None = None) -> dict[str, Any]:
+    """What `claude auth status` reports for a session in `cwd` with the environment `environ` (config.auth_status); {}
+    when it cannot tell."""
     env = os.environ if environ is None else environ
-    return config.auth_status(config.passed_environ(env)) or {}
+    return config.auth_status(config.passed_environ(env), cwd) or {}
 
 
 def _truthy(value: str | None) -> bool:
     return str(value or "").strip().lower() not in ("", "0", "false", "no", "off")
 
 
-def _flag_settings(argv: list[str], cwd: Path) -> list[dict[str, Any]]:
-    """The settings a `--settings` on Claude Code's command line gives: inline JSON, or a file relative to `cwd`."""
-    out: list[dict[str, Any]] = []
-    for i, arg in enumerate(argv):
-        if arg == "--":
-            break
-        flag, eq, value = arg.partition("=")
-        if flag != SETTINGS_FLAG:
-            continue
-        value = value if eq else (argv[i + 1] if i + 1 < len(argv) else "")
-        if value.lstrip().startswith("{"):
-            try:
-                d = json.loads(value)
-            except ValueError:
-                d = None
-            out.append(d if isinstance(d, dict) else {})
-        elif value:
-            out.append(_read(Path(cwd) / Path(value).expanduser()) or {})
-    return out
-
-
-def claude_ai_login(cwd: Path | str, environ: Mapping[str, str] | None = None, argv: list[str] | None = None,
-                    status: dict[str, Any] | None = None) -> bool:
-    """Whether the session in `cwd`, with the environment `environ` and the command line `argv`, runs on a claude.ai
-    login, the only one channels work with (module note): no API key, auth token or apiKeyHelper in any tier, no
-    Anthropic profile, and a claude.ai login or OAuth token as `claude auth status` reports it (`status`, else asked
-    now)."""
-    env = os.environ if environ is None else environ
-    tiers = [_read(config_dir(env) / USER_SETTINGS), *(_read(Path(cwd) / p) for p in PROJECT_SETTINGS), managed(env),
-             *_flag_settings(argv or [], Path(cwd))]
-    blocks = [t.get("env") for t in tiers if t and isinstance(t.get("env"), dict)]
-    if any(env.get(k) or any(b.get(k) for b in blocks) for k in KEY_ENVS):
-        return False
-    if any(isinstance(t.get("apiKeyHelper"), str) and t["apiKeyHelper"].strip() for t in tiers if t):
-        return False
-    return (login(env) if status is None else status).get("authMethod") in CLAUDE_AI_METHODS
-
-
 def channels_blocked(root: Path, named: set[str], environ: Mapping[str, str] | None = None,
-                     cwd: Path | str | None = None, argv: list[str] | None = None) -> str:
+                     cwd: Path | str | None = None, status: dict[str, Any] | None = None) -> str:
     """Why Claude Code would not load the channel of the plugin copy at `root` in a session in `cwd` whose command line
-    `argv` names it with the flags `named` (module note): PROVIDER, ACCOUNT, ORG, or "" when nothing stops it."""
+    names it with the flags `named` (module note): PROVIDER, ACCOUNT, ORG, or "" when nothing stops it. `status` is what
+    `claude auth status` reports for the session, asked now when it is None."""
     env = os.environ if environ is None else environ
     if any(_truthy(env.get(k)) for k in PROVIDER_ENVS):
         return PROVIDER
-    status = login(env)
-    if not claude_ai_login(Path(cwd) if cwd is not None else Path(os.devnull), env, argv, status):
+    status = login(env, cwd) if status is None else status
+    if status.get("authMethod") not in CLAUDE_AI_METHODS or status.get("apiKeySource"):
         return ACCOUNT
     tier = managed(env)
     allowed = (tier or {}).get("channelsEnabled")
@@ -268,12 +230,13 @@ def hooks_blocked(cwd: Path, root: Path, environ: Mapping[str, str] | None = Non
 
 
 def delivery(pid: int | None, root: Path, cwd: Path | str, environ: Mapping[str, str] | None = None,
-             explain: bool = False) -> Delivery:
+             explain: bool = False, status: dict[str, Any] | None = None) -> Delivery:
     """How browser events reach the session of the `claude` process `pid` in `cwd` (module note): the channel when the
     flag names this copy's and nothing refuses it, else the hooks, else the Monitor, with why channels are off. For a
-    session started without the flag the reason is SESSION, unless `explain` asks what else would refuse the channel."""
+    session started without the flag the reason is SESSION, unless `explain` asks what else would refuse the channel.
+    `status` as channels_blocked takes it."""
     named = flags(pid, root, environ)
-    blocked = channels_blocked(root, named, environ, cwd, procs.argv(pid) if pid else []) if named or explain else ""
+    blocked = channels_blocked(root, named, environ, cwd, status) if named or explain else ""
     if named and not blocked:
         return Delivery(CHANNEL)
     reason = blocked or SESSION

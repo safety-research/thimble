@@ -1749,10 +1749,8 @@ def claude_code_version() -> str | None:
 
 
 def claude_code_warning(version: str | None) -> str | None:
-    """A line for the analyst when Claude Code is missing or older than the version thimble is tested with; None when
-    it is that version or newer."""
-    if version is None:
-        return "thimble: WARNING - the `claude` CLI was not found on PATH; thimble runs inside Claude Code, so install it first."
+    """A line for the analyst when Claude Code is older than the version thimble is tested with; None when it is that
+    version or newer, or its version is not known (config.auth_problem says when `claude` is missing)."""
     have, tested = version_tuple(version), version_tuple(TESTED_CLAUDE_CODE)
     if have and tested and have < tested:
         return (f"thimble: WARNING - Claude Code {version} is older than {TESTED_CLAUDE_CODE}, the version thimble is tested "
@@ -1762,6 +1760,8 @@ def claude_code_warning(version: str | None) -> str | None:
 
 def claude_code_line() -> str:
     v = claude_code_version()
+    if v is None:
+        return config.NO_CLAUDE if not config.CLI_PATH else "`claude --version` printed no version"
     warning = claude_code_warning(v)
     if warning:
         return warning.removeprefix("thimble: WARNING - ")
@@ -2189,8 +2189,9 @@ def cmd_ensure(args: argparse.Namespace) -> int:
         print(f"thimble: {ui_url(name)}")
         for line in second:
             print(line)
+        status = config.auth_status(cwd=cwd)
         if args.session:
-            route = cc_channel.delivery(cc_channel.claude_pid(), plugin_root(), cwd, explain=True)
+            route = cc_channel.delivery(cc_channel.claude_pid(), plugin_root(), cwd, explain=True, status=status)
             lines = delivery_lines(route, cwd, str(args.session))
             mark = [ln for ln in lines if ln.startswith(MONITOR_MARK)]
             for line in lines:
@@ -2203,7 +2204,7 @@ def cmd_ensure(args: argparse.Namespace) -> int:
         if not env["dev"] and not has_ui_build():
             _log(config.NO_UI_BUILD_HINT)
             print(NO_UI_LINE)
-        problem = config.auth_problem()
+        problem = config.auth_problem(status)
         if problem:
             print(NO_AUTH_LINE.format(problem=problem))
         if args.session:

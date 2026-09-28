@@ -154,7 +154,7 @@ def _start(tmp_path: Path, port: int | None, channel: bool, parent: list[str] | 
     home.mkdir(exist_ok=True)
     if port is not None:
         (home / "server.json").write_text(json.dumps({"port": port, "api": f"http://127.0.0.1:{port}", "token": TOKEN}))
-    # a claude.ai login, which channels need (cc_channel.claude_ai_login)
+    # a claude.ai login, which channels need (cc_channel.channels_blocked)
     claude = fake_claude_bin(home, {"loggedIn": True, "authMethod": "claude.ai"})
     (tmp_path / "cc").mkdir(exist_ok=True)
     env = {**os.environ, "THIMBLE_HOME": str(home), "THIMBLE_CWD": "/data/mini", "CLAUDE_CONFIG_DIR": str(tmp_path / "cc"),

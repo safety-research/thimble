@@ -172,16 +172,17 @@ def passed_environ(environ: Mapping[str, str] | None = None) -> dict[str, str]:
 AUTH_STATUS_TIMEOUT_S = 20.0
 
 
-def auth_status(env: Mapping[str, str] | None = None) -> dict[str, Any] | None:
+def auth_status(env: Mapping[str, str] | None = None, cwd: str | Path | None = None) -> dict[str, Any] | None:
     """What `claude auth status --json` reports for the login a `claude` thimble starts would use (`env`, default
-    claude_env(passed_environ())): loggedIn, authMethod, apiProvider and the like. None when `claude` is missing, the
-    command fails to print an object, or under THIMBLE_SKIP_KEY. loggedIn means a login is configured, not that it
-    works."""
+    claude_env(passed_environ())), in the folder `cwd` (a temporary one when it is none): loggedIn, authMethod,
+    apiKeySource, apiProvider and the like. None when `claude` is missing, the command fails to print an object, or
+    under THIMBLE_SKIP_KEY. loggedIn means a login is configured, not that it works."""
     if _skip() or not CLI_PATH:
         return None
     try:
         r = subprocess.run([CLI_PATH, "auth", "status", "--json"], capture_output=True, text=True,
-                           env=dict(env) if env is not None else claude_env(passed_environ()), cwd=tempfile.gettempdir(),
+                           env=dict(env) if env is not None else claude_env(passed_environ()),
+                           cwd=str(cwd) if cwd and Path(cwd).is_dir() else tempfile.gettempdir(),
                            stdin=subprocess.DEVNULL, timeout=AUTH_STATUS_TIMEOUT_S)
         d = json.loads(r.stdout)
     except (OSError, subprocess.SubprocessError, ValueError):

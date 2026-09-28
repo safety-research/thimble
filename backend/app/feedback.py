@@ -382,9 +382,11 @@ def plural(n: int, word: str) -> str:
 
 
 def claude_version() -> str:
-    exe = shutil.which(os.environ.get("THIMBLE_CLAUDE_BIN") or "claude")
+    """`claude --version` of the `claude` thimble runs (config.CLI_PATH; PATH's when config cannot be imported)."""
+    cfg = _lazy("config")
+    exe = cfg.CLI_PATH if cfg is not None else shutil.which("claude")
     if not exe:
-        return "not found on PATH"
+        return "not found"
     try:
         out = subprocess.run([exe, "--version"], capture_output=True, text=True, timeout=CLAUDE_TIMEOUT_S)
     except (OSError, subprocess.SubprocessError) as e:
