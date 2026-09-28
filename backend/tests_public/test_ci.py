@@ -11,5 +11,5 @@ def test_ci_runs_every_default_step_of_check_sh():
     default = re.search(r'^\[ -n "\$steps" \] \|\| steps="([^"]+)"', check, re.M).group(1).split()
     ci = (ROOT / ".github" / "workflows" / "ci.yml").read_text()
     ran = re.findall(r"^\s+run: scripts/check\.sh (\w+)\s*$", ci, re.M)
-    assert [s for s in ran if s in default] == default
+    assert sorted(s for s in ran if s in default) == sorted(default), "each default step once, in whichever job"
     assert re.search(r"^\s+fetch-depth: 0\b", ci, re.M)

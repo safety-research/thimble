@@ -5,7 +5,8 @@
 #   scripts/check.sh [STEP...]
 #
 #   install   backend/.venv with the test extras (uv), frontend/node_modules (npm ci), and the headless Chromium that
-#             the renderer's, the views' and the browser checks drive (with its system libraries when CI is set)
+#             the renderer's, the views' and the browser checks drive (its system libraries are the machine's; GitHub's
+#             Ubuntu runners have them)
 #   content   no secrets, private names, files that never belong in the tree, or file names that only case tells apart
 #             (Checks.tsx beside checks.ts, which a case-insensitive disk resolves as one module) (scripts/check_content.py,
 #             with gitleaks when it is installed)
@@ -40,14 +41,12 @@ install() {
   step "install"
   command -v uv >/dev/null || die "uv is required: https://docs.astral.sh/uv/getting-started/installation/"
   command -v npm >/dev/null || die "Node 20+ with npm is required"
-  local deps=""
-  if [ "${CI:-}" = true ]; then deps=--with-deps; fi  # the browser's system libraries, which need root
   # the same sync install.sh --dev runs: the runtime closure of uv.lock plus the test extras
   (cd "$repo/backend" && uv sync --frozen --no-dev --no-install-project --extra dev)
   (cd "$repo/frontend" && npm ci --no-audit --no-fund)
   # the backend's and the frontend's Playwright pin different builds of the browser: the card harness (app/render.py)
   # drives the first, a view's check page (scripts/view_shot.mjs) the second
-  (cd "$repo/backend" && .venv/bin/python -m playwright install $deps chromium-headless-shell)
+  (cd "$repo/backend" && .venv/bin/python -m playwright install chromium-headless-shell)
   (cd "$repo/frontend" && npx playwright install chromium-headless-shell)
 }
 
