@@ -26,7 +26,7 @@ The browser's events arrive as `<channel … kind="…">` messages, sometimes be
 An event with no text of its own carries one line saying what the analyst did, such as `Start the orientation (final notebook, report)` or `Write the report`, so that the terminal shows it. That line is no brief and no request.
 
 - `main` is the browser's chat. Answer it as if it were typed here, and with the Workflow tool when `ultracode` is true.
-- `thread` opens or continues a side thread. Fork with Agent, `subagent_type` "fork", the `name` attribute as `name`, and `thread:<name>` with that attribute as the description and the prompt, or SendMessage the fork the `agent` attribute names. The fork answers in the thread.
+- `thread` opens or continues a side thread. Fork with Agent, `subagent_type` "fork", the `name` attribute as `name`, and `thread:<name>` with that attribute as the description and the prompt, or SendMessage the fork the `agent` attribute names. The fork answers in the thread. Claude Code defers SendMessage, so load it with ToolSearch before you first call it.
 - `start` asks for the orientation. Call `start_orientation` with the event's text as the brief and its `final_notebook`, `propose_views` and `generate_report` attributes.
 - `orient` says the orientation or one of its follow-ups ended, with one line counting what it made or changed as the text. It needs no words from you until the analyst asks, since the browser already shows what it made on the orientation's card.
 - `write` asks for the document `doc` names. Call `start_writing` with `doc`, the event's text as the request and its `after`.
