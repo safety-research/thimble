@@ -14,3 +14,4 @@ release/
 .claude/worktrees/
 .DS_Store
 *.log
+!plugin/viewers/*/sample/**/*.log
