@@ -25,6 +25,7 @@ interface Run {
 const EARLY_S = 0.05
 // how long past its window a voice may run before playback goes on without its end, which a voice can fail to report
 const STALL_S = 8
+const SILENT_MS = 250
 const EMPTY: VideoTiming = { duration: 0, lines: [] }
 
 export function speech(): SpeechSynthesis | null {
@@ -138,11 +139,17 @@ export class VideoPlayer {
       u.lang = this.voice.lang
     }
     u.rate = this.rate
-    const done = () => {
-      if (token === this.token) this.spoken(i)
+    const said = performance.now()
+    // a voice that fails, or ends before it could have said anything, leaves the line to the clock
+    const unvoiced = () => {
+      if (token === this.token && this.run?.line === i) this.run.voiced = false
     }
-    u.onend = done
-    u.onerror = done
+    u.onend = () => {
+      if (token !== this.token) return
+      if (performance.now() - said < SILENT_MS) unvoiced()
+      else this.spoken(i)
+    }
+    u.onerror = unvoiced
     this.utterance = u
     synth.speak(u)
     return true
