@@ -15,7 +15,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "backend"))
 
-from app import concepts, config, views  # noqa: E402
+from app import concepts, config, views
 
 VIEW_KEYS = ("name", "why", "claims", "accepts", "declares", "default", "libs")
 
@@ -30,11 +30,12 @@ def save_view(name: str, src: Path) -> None:
 async def apply_labels(name: str, src: Path) -> None:
     ws = config.workspace_dir(name)
     for spec in json.loads((src / "labels.json").read_text("utf-8")) if (src / "labels.json").is_file() else []:
+        fields = {"kind": spec["kind"], "spec": spec["spec"], "labels": spec["labels"], "shown": True}
         k = concepts.find_concept(ws, spec["name"])
         if k is None:
-            k = concepts.new_concept(spec["name"], kind=spec["kind"], spec=spec["spec"], labels=spec["labels"], shown=True)
+            k = concepts.new_concept(spec["name"], **fields)
         else:
-            k.update(kind=spec["kind"], spec=spec["spec"], labels=spec["labels"], shown=True)
+            k.update(fields)
         concepts.write_concept(ws, concepts.coloured(ws, k))
         await concepts.start_apply(name, k["id"], spec["paths"])
         done = await concepts.wait_apply(name, k["id"], float("inf"))
