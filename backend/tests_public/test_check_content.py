@@ -3,6 +3,7 @@ files of kinds that never belong in the tree are refused, gitleaks' findings are
 and commit messages that link a Claude Code session are refused. The real list is digests, so these tests list words of
 their own."""
 import importlib.util
+import os
 import random
 import shutil
 import string
@@ -59,7 +60,8 @@ def test_the_command_fails_on_a_hit_and_passes_a_clean_tree(tmp_path):
     assert r.returncode == 1 and "a.db:0: [path]" in r.stdout
 
 
-@pytest.mark.skipif(shutil.which("gitleaks") is None, reason="gitleaks is not installed (CI installs it)")
+# under CI, which installs gitleaks, the test runs and fails without it rather than skipping
+@pytest.mark.skipif(shutil.which("gitleaks") is None and os.environ.get("CI") != "true", reason="gitleaks is not installed")
 def test_a_secret_gitleaks_finds_fails_the_command(tmp_path):
     # a GitHub token made at run time, so the tree itself holds none
     token = "ghp_" + "".join(random.choices(string.ascii_letters + string.digits, k=36))
