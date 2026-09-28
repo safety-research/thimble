@@ -254,9 +254,11 @@ function useDrawnRows(rootRef: RefObject<HTMLElement | null>, bodyRef: RefObject
 
 const DELIMITED = /\.(csv|tsv)$/i
 
-/** The lines of a CSV or TSV file as its records' cells. A quoted cell may hold the delimiter, doubled quotes and line
- * breaks, so a line that ends inside one goes on in the next line; a record is keyed by its first line. Pure. */
+/** The lines of a CSV or TSV file as its records' cells. In CSV a quoted cell may hold the delimiter, doubled quotes and
+ * line breaks, so a line that ends inside one goes on in the next line; a record is keyed by its first line. A TSV line
+ * is one record, its cells split at tabs with no quoting. Pure. */
 export function splitDelimited(lines: { line: number; text: string }[], sep: string): { line: number; cells: string[] }[] {
+  if (sep === '\t') return lines.map(({ line, text }) => ({ line, cells: text.split('\t') }))
   const out: { line: number; cells: string[] }[] = []
   let first = 0
   let last = -1
