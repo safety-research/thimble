@@ -2273,7 +2273,7 @@ async def _h_apply_label(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
     s = await concepts.apply_scoped(ctx.c, scope=scope, name=name, kind=kind, text=text, values=values, paths=paths, limit=limit,
                                     comment=bool(args.get("comment")), filter=bool(args.get("filter")),
                                     created_by=ctx.created_by, chat=ctx.chat, group=target, question=question,
-                                    card=not orienting, within=within)
+                                    card=not orienting, within=within, show=bool(args.get("show")))
     counts = ", ".join(f"{k} {v}" for k, v in sorted((s.get("counts") or {}).items()))
     unit = UNIT_WORDS.get(str(s.get("unit") or ""), s.get("unit") or "unit")
     line = (f"applied label {s.get('name', name)} [[concept:{s.get('concept')}]] over {s.get('total', 0)} {unit}(s)"
@@ -2291,6 +2291,8 @@ async def _h_apply_label(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
         line += " " + hint("apply_label-stale", cards=", ".join(f"[[card:{x}]]" for x in s["stale"]))
     if s.get("filter"):
         line += f" It is the {scope} filter now."
+    elif args.get("show") and scope == "files":
+        line += " It is on in Files and the views."
     if scope == "files" and s.get("labels_path"):
         # the rows a card reads: thimble.labels(name) holds only the first value's units (kernel_thimble.labels), not
         # one row per labeled unit, and the hint says so

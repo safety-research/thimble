@@ -154,14 +154,15 @@ async def test_prompt_apply_batches_rows(api, workspaces_tmp, fake_classify, mon
 
 async def test_a_prompt_label_within_another_reads_only_the_records_it_kept(workspaces_tmp, fake_classify):
     """A regex label narrows the board to the posts that claim a PR, and a prompt label run `within` it sends the model
-    those posts alone; its rows and counts cover them, and its concept keeps the narrowing for a run from the browser."""
+    those posts alone; its rows and counts cover them, its concept keeps the narrowing for a run from the browser, and
+    `show` turns it on in Files and the views."""
     kw = dict(scope="files", values=None, paths=["board.jsonl"], limit=None, comment=False, filter=False,
               created_by="test", chat=None, group=None, card=False)
     await concepts.apply_scoped(CORPUS, name="claims a PR", kind="regex", text=PATTERN, **kw)
     await concepts.wait_apply(CORPUS, concepts.find_concept(workspaces_tmp / CORPUS, "claims a PR")["id"], 60)
     kept = {ref for ref, v in _board_expected().items() if v == "yes"}
     s = await concepts.apply_scoped(CORPUS, name="asks for review", kind="prompt", text="The post asks for a review.",
-                                    within={"label": "claims a PR"}, **kw)
+                                    within={"label": "claims a PR"}, show=True, **kw)
     s = await concepts.wait_apply(CORPUS, s["concept"], 60) if s["partial"] else s
     sent = {ref for call in fake_classify.calls for ref, _t in call["items"]}
     assert sent == kept and s["total"] == len(kept)
@@ -169,6 +170,7 @@ async def test_a_prompt_label_within_another_reads_only_the_records_it_kept(work
     assert {r["ref"] for r in rows} == kept
     k = concepts.find_concept(workspaces_tmp / CORPUS, "asks for review")
     assert k["within"] == {"label": concepts.find_concept(workspaces_tmp / CORPUS, "claims a PR")["id"], "value": "yes"}
+    assert k["shown"] and not concepts.find_concept(workspaces_tmp / CORPUS, "claims a PR")["shown"]
 
 
 def test_a_prompt_label_reads_a_save_of_a_whole_page_as_what_it_changed(tmp_path):

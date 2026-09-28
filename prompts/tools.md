@@ -120,6 +120,7 @@ Define a category, apply it to every unit of a scope, and get the counts per val
       "description": "For files: label only the records another label gave this value, such as the few a regex or code label kept before a prompt label reads them."
     },
     "comment": {"type": "boolean", "description": "A one-line reason per unit."},
+    "show": {"type": "boolean", "description": "For files: turn it on in Files and the views as it runs, as show_label does."},
     "filter": {"type": "boolean", "description": "Make it the scope's filter."},
     "group": {"type": "string"}
   },
@@ -588,7 +589,7 @@ card:{cid} has no takeaway. Write it with `edit_card` and `takeaway`, one or two
 
 ## apply_label-rows
 
-Count and cite from the rows in a card's code, the one place thimble's Python module is. thimble.labels("{label}") is a DataFrame (path, line, effective, label, source, verdict, confidence, ref) of the units that got the first value, and thimble.labels("{label}", negatives=True) of every labeled unit.
+Count and cite from the rows in a card's code, since thimble's Python module is there and not in Bash. thimble.labels("{label}") is a DataFrame (path, line, effective, label, source, verdict, confidence, ref) of the units that got the first value, and thimble.labels("{label}", negatives=True) of every labeled unit.
 
 ## apply_label-unchanged
 

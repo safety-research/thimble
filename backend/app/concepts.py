@@ -3181,11 +3181,12 @@ def _follow(c: str, concept: dict) -> Callable[[Any], Any]:
 
 async def apply_scoped(c: str, *, scope: str, name: str, kind: str, text: str, values: list[str] | None, paths: list[str] | None,
                        limit: int | None, comment: bool, filter: bool, created_by: str, chat: str | None, group: str | None,
-                       question: str | None = None, card: bool = True, within: Any = None) -> dict:
+                       question: str | None = None, card: bool = True, within: Any = None, show: bool = False) -> dict:
     """Define a label from a predicate and apply it over one scope: the concept, its card in `group` asking `question` unless
     `card` is False or the label ran before without one, the run in the background followed by an agent chat of role
     `labels`, and with `filter` the scope's filter set to the positive value. `within` {label, value?} runs a label over
-    records only over the records that label gave that value (its first by default). A `limit` makes a new label a trial. The same
+    records only over the records that label gave that value (its first by default), and `show` turns a label over files on in
+    Files and the views before it runs, so they draw it as it runs. A `limit` makes a new label a trial. The same
     predicate under the same name starts no run when its rows already cover the call (`unchanged: true`). Returns after
     APPLY_WAIT_S at the latest, with `stale`, the ids of cards that read the label at an older revision."""
     if scope not in SCOPES:
@@ -3222,6 +3223,8 @@ async def apply_scoped(c: str, *, scope: str, name: str, kind: str, text: str, v
     made = await asyncio.to_thread(label_card, c, concept, group, author, question) if card and not cardless else None
     joined = same and running_apply(c, concept["id"]) is not None
     unchanged = same and not joined and await asyncio.to_thread(covered, c, concept, paths or [], limit)
+    if show and unit in FILE_UNITS:
+        show_concept(c, concept["id"], True)
     if not joined and not unchanged:
         await start_apply(c, concept["id"], paths or [], limit, author, comment=comment, sources=sources)
         try:
