@@ -349,9 +349,10 @@ def send(c: str, kind: str, text: str, fields: dict[str, Any], *, thread: str | 
 
 def show(c: str, line: str) -> None:
     """A line for main's terminal about something the analyst did in the browser that sends main no event (a follow-up
-    to the orientation), printed as main's next turn begins (held_route)."""
+    to the orientation), printed as main's next turn begins (held_route); kept only on the hook route, whose held hook
+    runs on every turn."""
     main = _main_sid(c)
-    if main and line:
+    if main and line and (main, cc_channel.HOOK) in [_route(q) for q in _subs.get(c, ())]:
         _lines.setdefault((c, main), []).append(line)
 
 
