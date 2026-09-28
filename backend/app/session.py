@@ -663,8 +663,7 @@ def may_return(c: str, sid: str) -> bool:
 
 def _hand_back(c: str, gone: str) -> None:
     """Main's session `gone` ended while a session it replaced still runs: the most recently replaced one is main again,
-    and
-    its dormant watcher takes the next event."""
+    by the pid its shim reported, and its dormant watcher takes the next event."""
     from . import channel  # noqa: PLC0415
 
     recs = sessions(c)
@@ -673,7 +672,8 @@ def _hand_back(c: str, gone: str) -> None:
         return
     back = max(live, key=lambda s: str(recs[s].get("ended") or ""))
     rec = recs[back]
-    if attach(c, back, str(rec.get("cwd") or ""), rec.get("transcript_path"), rec.get("pid"), after=gone) is not None:
+    pid = _shim_pids.get((c, back))
+    if attach(c, back, str(rec.get("cwd") or ""), rec.get("transcript_path"), pid, after=gone) is not None:
         log.info("%s: session %s ended; main is session %s again, which it had replaced", c, gone, back)
 
 
