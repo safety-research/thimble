@@ -22,7 +22,9 @@
   #readout { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 2px 0 2px 2px; font: 400 var(--text-mono-sm) / 1.3 var(--font-mono); color: var(--text-secondary); font-variant-numeric: tabular-nums; }
   #status .btn { flex: none; }
   #charts { padding: 8px 16px 8px; min-width: 0; }
-  #chartbar { margin: 2px 0 8px; row-gap: 6px; }
+  #chartbar { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 6px 10px; margin: 2px 0 10px; }
+  #chartbar .row + .row { margin-top: 0; }
+  .lchip .box { width: 10px; height: 10px; }
   svg { display: block; overflow: visible; user-select: none; -webkit-user-select: none; }
   svg text { font-family: var(--font-mono); font-size: 10.5px; fill: var(--text-tertiary); font-variant-numeric: tabular-nums; }
   svg text.cap { font-family: var(--font-body); font-size: 11px; fill: var(--text-secondary); }
@@ -40,11 +42,6 @@
   #legend > .btn { align-self: flex-start; margin-top: 4px; }
   .ico { width: 12px; height: 12px; flex: none; stroke: currentColor; fill: none; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
   .sw { display: inline-block; width: 8px; height: 8px; border-radius: 2px; flex: none; }
-  .cbtn { gap: 6px; max-width: 100%; margin-bottom: 6px; padding: 0 7px 0 9px; }
-  .cbtn .k { color: var(--text-tertiary); font-weight: 400; }
-  .cbtn .ico { color: var(--text-tertiary); }
-  .cbtn .sws { display: inline-flex; gap: 2px; }
-  .cbtn .cnm { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .lg { display: flex; align-items: center; gap: 6px; min-width: 0; height: 22px; padding: 0 6px 0 4px; margin-left: -4px; border-radius: var(--radius-chip); font: 400 var(--text-xs) / 1 var(--font-body); color: var(--text-secondary); cursor: pointer; }
   .lg:hover { background: var(--surface-hover); color: var(--text-primary); }
   .lg.st { cursor: default; }
@@ -55,18 +52,10 @@
   .lg.off .sw { background: transparent !important; box-shadow: inset 0 0 0 1.3px var(--text-tertiary); }
   .swb { display: inline-grid; place-items: center; width: 16px; height: 16px; margin: 0 -4px 0 -4px; border-radius: 3px; flex: none; cursor: pointer; }
   .swb:hover { background: var(--track-bg); }
-  .menu { position: fixed; z-index: 50; min-width: 250px; max-width: 320px; padding: 4px; border-radius: var(--radius-card); background: var(--raised-bg); box-shadow: var(--raised-ring), 0 10px 28px rgba(var(--ink-rgb), .14); font-size: var(--text-ui-sm); }
-  .mh { padding: 8px 8px 4px; color: var(--text-tertiary); font: 400 10.5px / 1.2 var(--font-body); letter-spacing: .08em; text-transform: uppercase; }
-  .mi { display: flex; align-items: center; gap: 8px; width: 100%; height: 28px; padding: 0 8px; border: 0; border-radius: var(--radius-chip); background: none; color: var(--text-primary); font: 400 var(--text-ui-sm) / 1 var(--font-body); text-align: left; cursor: pointer; }
-  .mi:hover { background: var(--surface-hover); }
-  .mi.sub { padding-left: 30px; color: var(--text-secondary); cursor: default; }
-  .mi .ck { width: 14px; display: inline-grid; place-items: center; flex: none; }
-  .mi .nm { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .mi .n { margin-left: auto; display: inline-flex; gap: 1px; color: var(--text-tertiary); font-variant-numeric: tabular-nums; font-size: var(--text-xs); flex: none; }
-  .mi .swb { width: 18px; height: 18px; margin: 0 -2px; }
   .box { display: inline-block; flex: none; width: 12px; height: 12px; border-radius: 3px; border: 1.5px solid var(--mark); background: transparent; }
   .box.on { background: var(--mark); }
-  .msep { height: 1px; margin: 4px 0; background: var(--border-hairline); }
+  #colour { column-gap: 14px; }
+  #tbl td.s .mk { display: inline-flex; gap: 2px; margin-right: 6px; vertical-align: 0; }
   .pal { position: fixed; z-index: 60; display: grid; grid-template-columns: repeat(7, 20px); gap: 6px; padding: 10px; border-radius: var(--radius-card); background: var(--raised-bg); box-shadow: var(--raised-ring), 0 10px 28px rgba(var(--ink-rgb), .14); }
   .pal button { width: 20px; height: 20px; padding: 0; border: 0; border-radius: 4px; cursor: pointer; }
   .pal button:hover { transform: scale(1.12); }
@@ -97,6 +86,7 @@
   .d-text { margin: 10px 0 0; font: 500 var(--text-lg) / 1.35 var(--font-body); color: var(--text-primary); overflow-wrap: anywhere; white-space: pre-wrap; }
   .d-text.long { font: 400 var(--text-sm) / 1.5 var(--font-body); }
   .facts { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 6px 18px; margin: 12px 0 0; }
+  .facts + .facts { margin-top: 6px; }
   .fact { display: flex; align-items: center; gap: 10px; min-width: 0; min-height: 22px; }
   .fact dt { flex: none; width: 60px; font: 400 var(--text-xs) / 1.3 var(--font-body); color: var(--text-tertiary); }
   .fact dd { margin: 0; min-width: 0; font: 400 var(--text-mono-sm) / 1.4 var(--font-mono); color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -143,12 +133,11 @@
 </div>
 <main>
   <section id="charts">
-    <div class="row" id="chartbar">
+    <div id="chartbar">
       <span class="cap">Group by</span>
-      <div id="group" class="seg seg-track"></div>
-      <span class="grow"></span>
-      <span class="cap">Time</span>
-      <div id="align" class="seg seg-track"></div>
+      <div class="row"><div id="group" class="seg seg-track"></div><span class="grow"></span><span class="cap">Time</span><div id="align" class="seg seg-track"></div></div>
+      <span class="cap">Colour</span>
+      <div class="row" id="colour"></div>
     </div>
     <svg id="overview"></svg>
     <div id="focusbox"><svg id="focus"></svg><div id="legend"></div></div>
@@ -173,16 +162,17 @@
 'use strict'
 // Incident timeline: every record of every source on one time axis. The toolbar narrows by search, source (chips) and
 // every other field (selects); the overview shows the whole span with a brush, the focus counts the window's records
-// per bin in the colours of the Colour menu's field or labels, and the lanes lay out each value of the Group by field
-// side by side, as small multiples of the same window. The legend beside the focus shows a value alone on a click and
+// per bin in the colours of the field or the labels chosen under Colour, and the lanes lay out each value of the Group
+// by field side by side, as small multiples of the same window. The legend beside the focus shows a value alone on a click and
 // hides it on a shift-click. The Time control puts each incident's records at their time since the incident's first
 // record, so incidents compare on one axis. The list holds every record in the window and filters, sortable by the
 // time since the record before (Gap) or since the record it answers (Took), and a record's details show the record it
 // answers, those that answer it and its neighbours in time across every source.
-// Labels: the reader keeps only what the label filter keeps and hands each record its marks. While a label is on it is
-// the colouring: its values colour the bars and the lane ticks and get a lane each, and a value's swatch opens thimble's
-// palette. List rows and details carry their file ref as data-anchor, incident lanes their view key, so thimble marks
-// them.
+// Labels: the reader keeps only what the label filter keeps and hands each record its marks. Colour lists every label
+// over files beside the fields, and turns one on or off in thimble. While a label is on it is the colouring: its values
+// colour the bars and the lane ticks, get a lane each and a swatch on the list's rows and in the details, and a value's
+// swatch in the legend opens thimble's palette. List rows and details carry their file ref as data-anchor, incident
+// lanes their view key, so thimble marks them.
 const slug = (thimble.view && thimble.view.slug) || 'incident-timeline'
 const NS = 'http://www.w3.org/2000/svg'
 // the reader's fields: [key, name, plural, the name of a record without it]; the first is narrowed by chips
@@ -225,8 +215,6 @@ function s(tag, attrs, text) {
 }
 function clip(str, n) { return str.length > n ? str.slice(0, n - 1) + '…' : str }
 const esc = (x) => String(x == null ? '' : x).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c])
-const CARET = '<svg class="ico" viewBox="0 0 12 12"><path d="M3.5 4.75 6 7.25l2.5-2.5"/></svg>'
-const CHECK = '<svg class="ico" viewBox="0 0 12 12"><path d="M2.5 6.2 5 8.5l4.5-5"/></svg>'
 const PLUS = '<svg class="ico" viewBox="0 0 12 12"><path d="M6 2.5v7M2.5 6h7"/></svg>'
 function plural(n, one, many) { return `${fmt(n)} ${n === 1 ? one : many}` }
 function lowerBound(arr, x) {
@@ -277,7 +265,6 @@ let mode = 'clock' // 'clock' or 'start'
 let group = 'source'
 let colourBy = 'source'
 let hide = new Set() // the label values the legend hides, as markKey gives them, and 'none' for the records none marks
-let menu = null // 'colour' while the Colour menu is open
 let pal = null // {id, value, from} while a label value's palette is open
 let win = null // [a, b) on the time axis
 const F = Object.fromEntries(KEYS.map((k) => [k, new Set()])) // field -> the value indices it is narrowed to
@@ -353,6 +340,19 @@ function markName(j) {
   return multi ? `${m.label}: ${m.value}` : m.label
 }
 const firstBit = (x) => (x ? 31 - Math.clz32(x & -x) : -1)
+// the marks of record i, as indices into D.marks
+const marksOf = (i) => D.marks.map((_, j) => j).filter((j) => C.mb[i] & (1 << j))
+// a swatch per label value that marks record i, for a list row
+function markSwatches(i) {
+  const box = h('span', 'mk')
+  for (const j of marksOf(i).slice(0, 3)) {
+    const sq = h('span', 'sq')
+    sq.style.background = markColour(j)
+    sq.title = markName(j)
+    box.append(sq)
+  }
+  return box
+}
 const whole = () => win[0] <= SPAN[0] && win[1] >= SPAN[1]
 
 // ---------------------------------------------------------------- filters
@@ -526,6 +526,7 @@ function renderSegs() {
     b.onclick = () => setMode(m)
     return b
   }))
+  renderColour()
 }
 function setMode(m) {
   if (m === mode) return
@@ -753,7 +754,7 @@ function renderFocus() {
   drawChosen()
 }
 
-// the focus's gutter: what a bar counts, the Colour menu's button and the legend of its colours
+// the focus's gutter: what a bar counts and the legend of its colours
 function renderLegend(caption, top) {
   const box = document.getElementById('legend')
   box.style.top = top + 'px'
@@ -784,23 +785,8 @@ function renderLegend(caption, top) {
     all.onclick = () => { if (labelsOn()) hide = new Set(); else F[colourBy].clear(); refresh() }
     items.push(all)
   }
-  box.replaceChildren(h('div', 'cap', caption), colourButton(), ...items)
+  box.replaceChildren(h('div', 'cap', caption), ...items)
   renderPop()
-}
-function colourButton() {
-  const b = h('button', 'btn btn-secondary btn-sm cbtn')
-  b.id = 'cbtn'
-  let what = `<span class="cnm">${esc(FIELD[colourBy][1])}</span>`
-  if (labelsOn()) {
-    const names = [...new Set(D.marks.length ? D.marks.map((m) => m.label) : labelState.labels.map((l) => l.name))]
-    const sws = D.marks.slice(0, 6).map((_, j) => `<i class="sw" style="background:${markColour(j)}"></i>`).join('')
-    what = `<span class="sws">${sws}</span><span class="cnm">${esc(names.length === 1 ? names[0] : `${names.length} labels`)}</span>`
-    const ids = labelState.labels.map((l) => l.id).filter(Boolean).join(' ')
-    if (ids) b.dataset.label = ids
-  }
-  b.innerHTML = `<span class="k">Colour</span>${what}${CARET}`
-  b.onclick = (e) => { e.stopPropagation(); menu = menu ? null : 'colour'; pal = null; renderPop() }
-  return b
 }
 function legendItem(colour, text, n, v, off, label, value) {
   const it = h('span', 'lg' + (off ? ' off' : ''))
@@ -823,7 +809,7 @@ function swatch(colour, label, value) {
   b.dataset.id = label.id
   b.dataset.value = value
   b.append(sw)
-  b.onclick = (e) => { e.stopPropagation(); openPalette(label.id, value, 'legend') }
+  b.onclick = (e) => { e.stopPropagation(); openPalette(label.id, value) }
   return b
 }
 // a click shows only that value, or every value again when it was alone; a shift-click hides it or shows it again
@@ -847,96 +833,81 @@ function legendClick(v, shift) {
   refresh()
 }
 
-// ---------------------------------------------------------------- the Colour menu and the palette
-function openPalette(id, value, from) {
-  pal = pal && pal.id === id && pal.value === value ? null : { id, value, from }
-  renderPop()
-}
-function menuHtml() {
-  const fields = FIELDS.map(([k, name]) => {
-    const on = !labelsOn() && colourBy === k
-    const named = totals[k].filter((v) => v !== 0)
-    const sl = slots(k, named)
-    const sws = named.slice(0, 4).map((v) => `<i class="sw" style="width:5px;border-radius:1px;background:${token(sl.has(v) ? `--viz-${sl.get(v) + 1}` : '--viz-ink-4')}"></i>`).join('')
-    return `<button class="mi" data-act="field" data-f="${k}"><span class="ck">${on ? CHECK : ''}</span>${esc(name)}<span class="n">${sws}</span></button>`
-  }).join('')
-  // every label over files, as thimble lists them; a click turns one on or off in thimble's Labels pane
-  const all = labelState.all || labelState.labels.map((l) => ({ ...l, on: true }))
-  const sw = (l, v) => {
-    const i = `<i class="sw" style="background:${esc(v.colour)}"></i>`
-    return l.id && (labelState.palette || []).length && thimble.setLabelColour
-      ? `<span class="swb" role="button" title="Change colour" data-act="palette" data-id="${esc(l.id)}" data-value="${esc(v.name)}">${i}</span>` : i
+// ---------------------------------------------------------------- Colour and the palette
+// Colour: a field, or the labels over files as thimble lists them, each turned on or off in thimble's Labels pane. A
+// field colours the records only while no label is on, so choosing one turns the labels off.
+const allLabels = () => labelState.all || labelState.labels.map((l) => ({ ...l, on: true }))
+function renderColour() {
+  const box = document.getElementById('colour')
+  const seg = h('div', 'seg seg-track')
+  seg.append(...FIELDS.map(([k, name]) => {
+    const b = h('button', 'seg-opt' + (!labelsOn() && colourBy === k ? ' active' : ''), name)
+    b.onclick = () => {
+      colourBy = k
+      hide = new Set()
+      if (thimble.setLabel) for (const l of allLabels()) if (l.on && l.id) thimble.setLabel(l.id, false)
+      refresh()
+    }
+    return b
+  }))
+  // the labels move to the next line together when they do not fit beside the fields
+  const labs = h('div', 'row labs')
+  const labels = allLabels()
+  if (labels.length) labs.append(h('span', 'cap', 'Labels'))
+  for (const l of labels) {
+    const c = h('button', 'chip chip-sans chip-tone-neutral chip-act lchip')
+    const b = h('span', 'box' + (l.on ? ' on' : ''))
+    b.style.setProperty('--mark', l.colour)
+    c.append(b, l.name)
+    c.title = l.on ? 'Turn this label off' : 'Colour by this label'
+    if (l.id) c.dataset.label = l.id
+    c.disabled = !(l.id && thimble.setLabel)
+    c.onclick = () => thimble.setLabel(l.id, !l.on)
+    labs.append(c)
   }
-  const rows = all.map((l) => {
-    const lit = (l.values || []).filter((v) => v.highlight !== false)
-    const box = `<span class="box ${l.on ? 'on' : ''}" style="--mark:${esc(l.colour)}"></span>`
-    const main = `<button class="mi" data-act="label" data-id="${esc(l.id || '')}" data-label="${esc(l.id || '')}" ${l.id && thimble.setLabel ? '' : 'disabled'}><span class="ck">${box}</span><span class="nm">${esc(l.name)}</span>
-      <span class="n">${l.count == null ? '' : fmt(l.count)}</span>${lit.length === 1 ? sw(l, lit[0]) : ''}</button>`
-    const subs = l.on && lit.length > 1 ? lit.map((v) => `<div class="mi sub" data-label="${esc(l.id || '')}"><span class="nm">${esc(v.name)}</span><span class="n"></span>${sw(l, v)}</div>`).join('') : ''
-    return main + subs
-  }).join('')
-  const make = thimble.newLabel ? `<div class="msep"></div><button class="mi" data-act="newlabel"><span class="ck">${PLUS}</span>New label…</button>` : ''
-  return `<div class="menu" id="menu" data-anchor-name="Colour menu"><div class="mh">Fields</div>${fields}${rows ? `<div class="msep"></div><div class="mh">Labels</div>${rows}` : ''}${make}</div>`
+  if (thimble.newLabel) {
+    const n = h('button', 'btn btn-ghost btn-sm')
+    n.innerHTML = `${PLUS}New label`
+    n.onclick = () => thimble.newLabel()
+    labs.append(n)
+  }
+  box.replaceChildren(seg, labs)
+}
+function openPalette(id, value) {
+  pal = pal && pal.id === id && pal.value === value ? null : { id, value }
+  renderPop()
 }
 function palHtml() {
   const l = (labelState.all || labelState.labels || []).find((x) => x.id === pal.id)
   const cur = String((l && ((l.values || []).find((v) => v.name === pal.value) || {}).colour) || '').toLowerCase()
   return `<div class="pal" id="pal" data-label="${esc(pal.id)}">${labelState.palette.map((c) => `<button data-act="colour" data-colour="${esc(c)}" class="${c.toLowerCase() === cur ? 'cur' : ''}" style="background:${esc(c)}" aria-label="Colour ${esc(c)}"></button>`).join('')}</div>`
 }
-// the menu opens under the Colour button; the palette beside the swatch that opened it, in the menu or the legend
+// the palette opens under the legend swatch that opened it
 function renderPop() {
   const pop = document.getElementById('pop')
-  const btn = document.getElementById('cbtn')
-  if (menu && !btn) menu = null
   if (pal && !(labelState.palette || []).length) pal = null
-  pop.innerHTML = (menu ? menuHtml() : '') + (pal ? palHtml() : '')
-  const m = document.getElementById('menu')
-  if (m) {
-    const r = btn.getBoundingClientRect()
-    m.style.left = `${Math.max(8, Math.min(r.left, innerWidth - m.offsetWidth - 8))}px`
-    m.style.top = `${Math.max(8, Math.min(r.bottom + 4, innerHeight - m.offsetHeight - 8))}px`
-  }
+  pop.innerHTML = pal ? palHtml() : ''
   const p = document.getElementById('pal')
   if (p) {
-    const sel = `[data-act="palette"][data-id="${CSS.escape(pal.id)}"][data-value="${CSS.escape(pal.value)}"]`
-    const a = document.querySelector(`${pal.from === 'menu' ? '#menu' : '#legend'} ${sel}`)
+    const a = document.querySelector(`#legend [data-act="palette"][data-id="${CSS.escape(pal.id)}"][data-value="${CSS.escape(pal.value)}"]`)
     if (!a) { pal = null; p.remove(); return }
     const r = a.getBoundingClientRect()
-    const x = pal.from === 'menu' ? r.right + 6 : r.left, y = pal.from === 'menu' ? r.top - 10 : r.bottom + 4
-    p.style.left = `${Math.max(8, Math.min(x, innerWidth - p.offsetWidth - 8))}px`
-    p.style.top = `${Math.max(8, Math.min(y, innerHeight - p.offsetHeight - 8))}px`
+    p.style.left = `${Math.max(8, Math.min(r.left, innerWidth - p.offsetWidth - 8))}px`
+    p.style.top = `${Math.max(8, Math.min(r.bottom + 4, innerHeight - p.offsetHeight - 8))}px`
   }
 }
 document.getElementById('pop').addEventListener('click', (e) => {
-  const el = e.target.closest('[data-act]')
+  const el = e.target.closest('[data-act="colour"]')
   if (!el) return
-  const act = el.dataset.act
-  if (act === 'field') {
-    colourBy = el.dataset.f
-    hide = new Set()
-    menu = null
-    // a field colours the records only while no label is on, so choosing one turns the labels off in thimble
-    if (thimble.setLabel) for (const l of labelState.all || labelState.labels.map((x) => ({ ...x, on: true }))) if (l.on && l.id) thimble.setLabel(l.id, false)
-    refresh()
-  } else if (act === 'label') {
-    const l = (labelState.all || labelState.labels.map((x) => ({ ...x, on: true }))).find((x) => x.id === el.dataset.id)
-    if (l && thimble.setLabel) thimble.setLabel(l.id, !l.on)
-  } else if (act === 'newlabel') {
-    menu = null
-    renderPop()
-    if (thimble.newLabel) thimble.newLabel()
-  } else if (act === 'palette') openPalette(el.dataset.id, el.dataset.value, 'menu')
-  else if (act === 'colour') {
-    if (pal && thimble.setLabelColour) thimble.setLabelColour(pal.id, pal.value, el.dataset.colour)
-    pal = null
-    renderPop()
-  }
+  if (pal && thimble.setLabelColour) thimble.setLabelColour(pal.id, pal.value, el.dataset.colour)
+  pal = null
+  renderPop()
 })
-// a click anywhere else closes the menu and the palette, before the page's own handlers see it
+// a click anywhere else closes the palette, before the page's own handlers see it
 document.addEventListener('click', (e) => {
-  if ((menu || pal) && !e.target.closest('#pop, #cbtn, .swb')) { menu = null; pal = null; renderPop() }
+  if (pal && !e.target.closest('#pop, .swb')) { pal = null; renderPop() }
 }, true)
-document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && (menu || pal)) { menu = null; pal = null; renderPop() } })
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && pal) { pal = null; renderPop() } })
 
 // ---------------------------------------------------------------- lanes
 let ln = null
@@ -1128,7 +1099,8 @@ async function renderTable() {
     tr.dataset.anchorText = text
     tr.dataset.anchorName = `the ${nameOf('source', C.source[i])} ${nameOf('kind', C.kind[i])} at ${hms(C.t[i])}`
     const src = h('td', 's')
-    if (!labelsOn()) {
+    if (labelsOn()) src.append(markSwatches(i))
+    else {
       const sq = h('span', 'sq')
       sq.style.background = recColour(i)
       src.append(sq)
@@ -1264,6 +1236,24 @@ function renderDetail() {
     fact(name, chip)
   }
   if (r.id) fact('Id', String(r.id))
+  // the labels that mark it, outside the record's element so that thimble's highlight of the marked words stays on the
+  // record's own text
+  const labs = h('dl', 'facts')
+  if (i != null && C.mb[i]) {
+    const f = h('div', 'fact')
+    const dd = h('dd', 'row')
+    for (const j of marksOf(i)) {
+      const c = h('span', 'chip chip-sans chip-tone-neutral lchip')
+      const b = h('span', 'box on')
+      b.style.setProperty('--mark', markColour(j))
+      c.append(b, markName(j))
+      const l = labelBy(D.marks[j].label)
+      if (l && l.id) c.dataset.label = l.id
+      dd.append(c)
+    }
+    f.append(h('dt', null, 'Labels'), dd)
+    labs.append(f)
+  }
   const parts = [top, text, facts]
   if (detail.answers) {
     const sec = h('div', 'd-sec')
@@ -1283,7 +1273,7 @@ function renderDetail() {
   card.dataset.anchorText = r.text || ''
   card.dataset.anchorName = `the ${r.source || 'record'} ${r.kind || ''} at ${hms(t)}`
   card.append(top, text, facts)
-  box.replaceChildren(card, ...parts.slice(3))
+  box.replaceChildren(card, ...(labs.childNodes.length ? [labs] : []), ...parts.slice(3))
 }
 
 // ---------------------------------------------------------------- refresh
@@ -1598,7 +1588,7 @@ thimble.onLabels(async (state) => {
   labelState = { labels: state.labels || [], filter: state.filter || null, all: state.all || null, palette: state.palette || null }
   if (!D) return // the first fetch reads them
   // the reader applies the labels that are on and the filter; the list of labels and the palette only redraw
-  if (JSON.stringify([labelState.labels, labelState.filter]) === was) return renderFocus()
+  if (JSON.stringify([labelState.labels, labelState.filter]) === was) { renderColour(); return renderFocus() }
   if (!(await load())) return
   if (sel != null && !rowAt.has(sel)) { sel = null; detail = null; renderDetail() }
   refresh()
