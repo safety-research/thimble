@@ -161,6 +161,7 @@ def test_every_worked_example_a_view_ticket_names_is_a_complete_viewer():
         compile((d / "reader.py").read_text("utf-8"), str(d / "reader.py"), "exec")
         v = views._normalize_view(shape, json.loads((d / "view.json").read_text("utf-8")), where=d)
         assert v["ok"] and v["accepts"] and v["name"], shape
-        assert all((d / "sample" / claim).is_file() for claim in v["claims"]), shape
+        sample = [p.relative_to(d / "sample").as_posix() for p in (d / "sample").rglob("*") if p.is_file()]
+        assert all(any(views.glob_matches(f, claim) for f in sample) for claim in v["claims"]), shape
         page = (d / "view.html").read_text("utf-8")
         assert "thimble.onOpen" in page and re.search(r"data-anchor|dataset\.anchor", page), shape
