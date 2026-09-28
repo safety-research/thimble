@@ -9,6 +9,7 @@ in this process (the `inproc` fixture replaces views._runner with an exec of the
 from __future__ import annotations
 
 import contextlib
+import fnmatch
 import io
 import json
 import os
@@ -247,11 +248,18 @@ BROKEN = {
 async def test_every_worked_example_answers_the_checks_over_its_sample(name, samples, inproc, bound, tmp_path, monkeypatch):
     """The reader's half of the checks: the index builds, the sampled lines and the declared keys resolve, each answer
     cites its place back, and every excerpt is literal text of the records it cites. The page's half is a test below.
-    Lines that do not parse, a CSV cell over two lines among them, are reported (reader_problems) rather than failing."""
+    Lines that do not parse, a CSV cell over two lines among them, are reported (reader_problems) rather than failing.
+    Each sample label the example ships (labels.json) marks some line of the files it runs over."""
     async def no_page(c, slug, states, **k):
         return [{"ok": True, "errors": [], "fetches": 0, "records": 1} for _ in states]
 
     monkeypatch.setattr(views, "shoot_states", no_page)
+    root = samples / name
+    files = [p for p in root.rglob("*") if p.is_file()]
+    for label in json.loads((views.EXAMPLES_DIR / name / "labels.json").read_text("utf-8")):
+        pattern = re.compile(label["spec"])
+        over = [p for p in files if any(fnmatch.fnmatchcase(p.relative_to(root).as_posix(), g) for g in label["paths"])]
+        assert any(pattern.search(line) for p in over for line in p.read_text("utf-8").splitlines()), label["name"]
     slug = _save_example(name)
     before = (await views.reader_problems(name, slug))["count"]
     for rel, text, _ in BROKEN[name]:
