@@ -334,10 +334,10 @@
 }
 .seg-remove.btn {
   position: absolute;
-  top: -6px;
-  right: -6px;
-  width: 16px;
-  height: 16px;
+  top: -5px;
+  right: -5px;
+  width: 13px;
+  height: 13px;
   min-height: 0;
   padding: 0;
   border-radius: 50%;
@@ -346,6 +346,10 @@
   color: var(--text-tertiary);
   opacity: 0;
   transition: opacity var(--dur-fast) var(--ease-out);
+}
+.seg-remove.btn svg {
+  width: 8px;
+  height: 8px;
 }
 .seg-removable:hover .seg-remove.btn,
 .seg-remove.btn:focus-visible {
