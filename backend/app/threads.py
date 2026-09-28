@@ -20,6 +20,7 @@ import binascii
 import logging
 import re
 import secrets
+import unicodedata
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -71,8 +72,10 @@ def thread_of(description: Any) -> str | None:
 
 
 def slug(title: str) -> str:
-    """A title as a fork name: its words in lower case joined by '-', cut at FORK_NAME_CHARS."""
-    words = re.findall(r"[^\W_]+", str(title or "").lower())
+    """A title as a fork name: its words in lower case joined by '-', cut at FORK_NAME_CHARS. Claude Code's Agent takes
+    a name only in ASCII, so accents are dropped and words in other scripts left out."""
+    plain = unicodedata.normalize("NFKD", str(title or "")).encode("ascii", "ignore").decode()
+    words = re.findall(r"[a-z0-9]+", plain.lower())
     out = ""
     for w in words:
         nxt = f"{out}-{w}" if out else w

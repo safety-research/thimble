@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 
 import pytest
 from fastapi.testclient import TestClient
@@ -58,6 +59,14 @@ def test_a_browser_message_is_logged_on_main_and_published_to_the_session(client
     rec = _log(agents.MAIN_ID)[-1]
     assert rec == {**rec, "type": "user", "by": "browser", "text": "which agent stalled?", "event": out["id"]}
     assert out["id"] in session._expected and agents._running(CORPUS, agents.MAIN_ID)
+
+
+def test_a_thread_named_in_any_script_asks_main_to_fork_under_a_name_claude_code_accepts(client):
+    """Claude Code's Agent refuses a `name` other than ASCII letters, digits, '_' and '-', and then no fork starts."""
+    q = _listen()
+    r = client.post(f"/api/ws/{CORPUS}/chats", json={"title": "Café マージ担当", "text": "which did agent-04 merge?"})
+    assert r.status_code == 201
+    assert re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,63}", q.get_nowait()["meta"]["name"])
 
 
 # ----------------------------------------------------------------------------- the subscription
