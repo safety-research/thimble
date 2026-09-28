@@ -9,8 +9,9 @@ report's; another document's is thimble:writer-<doc>) and thimble:critic.
 Start. agent_session builds the `claude -p` command as for any session and hands it to start(), which turns it into a
 `claude --bg` command: the first message goes on the command line, and the session's own environment goes in the
 --settings `env`, since the background service starts the session with its own environment. `claude --bg` refuses a
-folder Claude Code does not trust, so a work folder under thimble's workspaces is marked trusted first, that folder
-alone and once the analyst agreed to it (trust_workspaces, claude_changes). BgProc stands in for the process agent_session follows: a run ends when the session is idle, its
+folder Claude Code does not trust; install.sh asks once to trust thimble's workspaces folder (claude_changes), and a
+refusal is reported with the flag that does it (the bg-untrusted hint). BgProc stands in for the process agent_session
+follows: a run ends when the session is idle, its
 transcript's last turn has ended and it has no background work, while the session itself goes on for the analyst. A
 session whose turn ended while a background shell of its own runs on counts as idle once its transcript has been quiet
 for LINGER_S (_lingering), since Claude Code lists it as busy for as long as the shell runs.
@@ -53,7 +54,7 @@ from typing import Any, Awaitable, Callable
 from fastapi import APIRouter
 from pydantic import BaseModel
 
-from . import agents, cite, claude_changes, config, ledger, session
+from . import agents, cite, config, ledger, session
 
 log = logging.getLogger("thimble.bg_session")
 router = APIRouter()
@@ -88,6 +89,7 @@ DELIVERY_WAIT_S = 300.0  # how long a run attached with a message waits for the 
 LINGER_S = 30.0
 TAIL_BYTES = 524_288  # of a transcript's end, read for its last turn (turn_state)
 BG_ID_RE = re.compile(r"backgrounded\W+([0-9a-f]{8})\b")
+UNTRUSTED_RE = re.compile(r"not trusted", re.IGNORECASE)  # `claude --bg`'s refusal of a folder it does not trust
 DROP_FLAGS = {"-p", "--print", "--verbose"}
 DROP_WITH_VALUE = {"--output-format", "--session-id", "--input-format"}
 PASSED_ENV = {"PATH"}  # what the background service takes from the caller's environment
@@ -212,43 +214,6 @@ def _names_itself(e: dict[str, Any]) -> bool:
 def stop_cli(short: str) -> None:
     if short:
         _cli(_bin(), ["stop", short], _env(), timeout=20)
-
-
-# --------------------------------------------------------------------------- trust
-
-
-def global_config_path(env: dict[str, str] | None = None) -> Path:
-    """Claude Code's global config file, which holds each folder's trust: `$CLAUDE_CONFIG_DIR/.claude.json`, else
-    ~/.claude.json."""
-    value = (env or os.environ).get(config.CONFIG_DIR_ENV) or config.claude_config_env()
-    return Path(value) / ".claude.json" if value else Path.home() / ".claude.json"
-
-
-def trust_workspaces(folder: Path, env: dict[str, str] | None = None) -> bool:
-    """Have Claude Code trust `folder`, a work folder under thimble's workspaces, so `claude --bg` starts there: the
-    folder alone is marked trusted in the global config (claude_changes.trust), once the analyst agreed to
-    terminal-first's changes, unless it or a folder above it is trusted already. True when it is trusted; False for a
-    folder outside the workspaces, which stays the analyst's to trust, or before the analyst agreed."""
-    folder = folder.resolve()
-    path = global_config_path(env)
-    try:
-        data = json.loads(path.read_text("utf-8")) if path.is_file() else {}
-    except (OSError, ValueError):
-        return False
-    if isinstance(data, dict) and claude_changes.trusted(folder, data):
-        return True
-    if not folder.is_relative_to(config.WORKSPACES_DIR.resolve()) or not claude_changes.consented():
-        return False
-    if not claude_changes.trust(folder, path):
-        log.warning("could not mark %s trusted in %s", folder, path)
-        return False
-    log.info("marked the work folder %s trusted in %s", folder, path)
-    return True
-
-
-def untrust(c: str) -> list[str]:
-    """The trust terminal-first gave the work folders of workspace `c`, taken back (claude_changes.untrust)."""
-    return claude_changes.untrust(config.WORKSPACES_DIR.resolve() / c)
 
 
 # --------------------------------------------------------------------------- the command
@@ -1166,10 +1131,6 @@ async def start(c: str, key: str, argv: list[str], folder: Path, env: dict[str, 
     bin_ = argv[0]
     if shutil.which(bin_, path=env.get("PATH")) is None:
         raise RuntimeError(f"could not start `{bin_}`")
-    if not trust_workspaces(folder, env):
-        from . import tools  # noqa: PLC0415
-
-        raise RuntimeError(tools.hint("bg-untrusted", folder=str(folder)))
     rows = await asyncio.to_thread(listing, bin_, env)
     if resume:
         running = next((r for r in rows if str(r.get("sessionId") or "") == resume and r.get("pid")), None)
@@ -1185,6 +1146,11 @@ async def start(c: str, key: str, argv: list[str], folder: Path, env: dict[str, 
     else:
         code, out = await asyncio.to_thread(_cli, bin_, bg_argv(argv, env, dict(os.environ), name_of(key), prompt,
                                                                 folder)[1:], env, folder, CLI_TIMEOUT_S)
+    if code != 0 and UNTRUSTED_RE.search(out):
+        from . import tools  # noqa: PLC0415
+
+        raise RuntimeError(tools.hint("bg-untrusted", folder=str(folder), workspaces=str(config.WORKSPACES_DIR),
+                                      install=str(config.REPO_ROOT / "scripts" / "install.sh")))
     if code != 0:
         raise RuntimeError(f"`claude --bg` failed (exit {code}): {out.strip()[-400:]}")
     m = BG_ID_RE.search(out)
@@ -1212,34 +1178,17 @@ def _nudge() -> str:
 # --------------------------------------------------------------------------- what the terminal lists
 
 
-def statusline_command() -> str:
-    """The statusline command of a terminal-first workspace: plugin/bin/thimble-agents, chained to the analyst's own
+def statusline_command(own: str | None = None) -> str:
+    """The statusline command the launcher passes to main: plugin/bin/thimble-agents, which lists thimble's agents
+    while the workspace is in terminal-first mode (agents_route), chained to `own`, else to the analyst's own
     statusline when their settings name one."""
     import shlex  # noqa: PLC0415
 
     from . import agent_session, cc_settings  # noqa: PLC0415
 
-    own = cc_settings.own_statusline()
+    own = cc_settings.own_statusline() if own is None else own
     cmd = f"{shlex.quote(str(agent_session.PLUGIN_DIR / 'bin' / 'thimble-agents'))} --statusline"
     return f"{cmd} --chain {shlex.quote(own)}" if own else cmd
-
-
-def apply_statusline(c: str) -> None:
-    """The corpus folder's statusline lists thimble's agents while the workspace is in terminal-first mode, and is the
-    analyst's own again once it is not (cc_settings.set_statusline)."""
-    from . import cc_settings  # noqa: PLC0415
-
-    try:
-        cwd = config.corpus_dir(c)
-        if terminal_first(c) and claude_changes.consented():
-            cc_settings.set_statusline(cwd, statusline_command())
-        else:
-            cc_settings.clear_statusline(cwd)
-    except Exception:  # noqa: BLE001 — the statusline is a convenience; a folder that cannot be written keeps its own
-        log.warning("%s: the statusline was not updated", c, exc_info=True)
-
-
-sync_statusline = apply_statusline  # what the settings route and the launcher call
 
 
 def agent_rows(c: str) -> list[dict[str, Any]]:
@@ -1321,9 +1270,9 @@ def _save_announced(c: str) -> None:
 
 @router.post("/agents")
 async def agents_route(body: AgentsQuery) -> dict[str, Any]:
-    """thimble's agents for the folder's workspace: `{rows, line, text}` for the statusline and /thimble:agents, and with
-    `announce` the lines main's terminal has not shown yet (the plugin's hooks print them): each session's start once,
-    with the command that attaches it, and each run's finish."""
+    """thimble's agents for the folder's workspace: `{rows, line, text}` for the statusline (in terminal-first mode only)
+    and /thimble:agents, and with `announce` the lines main's terminal has not shown yet (the plugin's hooks print them):
+    each session's start once, with the command that attaches it, and each run's finish."""
     c = config.workspace_for_cwd(body.cwd)
     if not c:
         return {"rows": [], "line": "", "text": "", "announce": ""}
@@ -1343,7 +1292,8 @@ async def agents_route(body: AgentsQuery) -> dict[str, Any]:
                              ("" if alive(e) else " (its session has ended)"))
         if lines:
             _save_announced(c)
-    return {"rows": rows, "line": status_line(rows), "text": listing_text(rows), "announce": "\n".join(lines)}
+    line = status_line(rows) if terminal_first(c) else ""
+    return {"rows": rows, "line": line, "text": listing_text(rows), "announce": "\n".join(lines)}
 
 
 class RelayBody(BaseModel):

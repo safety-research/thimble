@@ -27,7 +27,7 @@ import { invalidateSettings, loadSettings, onSettingsChange, saveRole } from '..
 import { findProposal, useProposals } from '../lib/proposals'
 import { readStorage, storageKey, writeStorage } from '../lib/workspace'
 import { Composer } from './Composer'
-import { EFFORT_CHOICES, mainEffort, mainFast, ORIENT_DEFAULT_EFFORT } from './ModelLine'
+import { EFFORT_CHOICES, mainEffort, mainFast, NEXT_LAUNCH, ORIENT_DEFAULT_EFFORT } from './ModelLine'
 import { API_ERROR_KIND, apiRetry, branchIndex, capacityNote, foldRecords, isFollowUpRow, madeBy, mainSkips, orientRuns, orientSummaries, orientWriters, sessionSteps, stepEnded, toolSteps, withApiErrors, withBranches, withCallNumbers, type MainContext, type Row, type ShotRow } from './model'
 import { Holds, useRetryText } from './Holds'
 import { TicketStatus, useTicket } from './TicketStatus'
@@ -503,7 +503,10 @@ export function ChatPanel({ ws, onCollapse, dock = false }: { ws: string; onColl
       track('chat-settings', { target: 'chat:main', detail: { effort: e } })
       api
         .setEffort(ws, e)
-        .then(() => main.reload())
+        .then(() => {
+          main.reload()
+          bus.emit('toast', { text: `Effort ${e}: ${NEXT_LAUNCH}.`, kind: 'info' })
+        })
         .catch((err: Error) => bus.emit('toast', { text: `Could not set the effort: ${err.message}`, kind: 'error' }))
     },
     [ws, main.reload],
@@ -513,7 +516,10 @@ export function ChatPanel({ ws, onCollapse, dock = false }: { ws: string; onColl
       track('chat-settings', { target: 'chat:main', detail: { fast: on } })
       api
         .setFast(ws, on)
-        .then(() => main.reload())
+        .then(() => {
+          main.reload()
+          bus.emit('toast', { text: `Fast mode ${on ? 'on' : 'off'}: ${NEXT_LAUNCH}.`, kind: 'info' })
+        })
         .catch((err: Error) => bus.emit('toast', { text: `Could not set fast mode: ${err.message}`, kind: 'error' }))
     },
     [ws, main.reload],

@@ -1,8 +1,8 @@
 // A session's model line at a composer's foot: the model, the effort as a menu and fast mode as a lightning bolt
 // (Opus 5.5 · medium ▾ ⚡). The model is a menu where the UI can change it (a role's), else text whose tooltip says
 // where it changes (main's through /model in its terminal). The effort menu lists low to max, then ultracode where the
-// session takes it. The bolt switches fast mode where the UI can; otherwise it shows the state and its tooltip says why
-// (backend/app/cc_settings.py). A menu names each model once, without an id's `[1m]` tag (lib/models).
+// session takes it. The bolt switches fast mode where the UI can; otherwise it shows the state and its tooltip says
+// why. A menu names each model once, without an id's `[1m]` tag (lib/models).
 import { Button } from '../components/Button'
 import { Icon } from '../components/Icon'
 import { Menu, type MenuItem } from '../components/Menu'
@@ -27,9 +27,8 @@ export const MODEL_TIP = 'Run /model in the Claude Code terminal to change the m
 /** The orientation's model's tip on the Start card: it is the orientation's role in the settings popover. */
 export const ORIENT_MODEL_TIP = "Change the orientation's model in Settings"
 
-/** Main's fast mode's tip where the line cannot switch it: only /fast in the terminal turns it on in a session launched
- * without it. */
-export const FAST_TIP = 'Run /fast in the Claude Code terminal to turn on fast mode'
+/** What a change to main's effort or fast mode does: it is kept for main's next launch (backend channel.effort_route). */
+export const NEXT_LAUNCH = 'Main runs with it from your next `thimble` launch'
 
 /** Why a model's bolt cannot switch: it has no fast mode. */
 export const noFastTip = (model: string): string => `${modelLabel(model)} has no fast mode`
@@ -51,14 +50,10 @@ export function mainEffort(a: Attached | null | undefined): MainEffort {
   return ran ?? own ?? MAIN_DEFAULT_EFFORT
 }
 
-/**
- * Main's fast mode for the line: on or off where the line can switch it, else null. Claude Code cannot turn fast mode
- * on in a session that started without it (cc_settings), so the switch shows only once replies run fast or the line has
- * switched it. Pure.
- */
-export function mainFast(a: Attached | null | undefined): boolean | null {
+/** Main's fast mode for the line: the line's choice for this session, else whether its replies ran fast. Pure. */
+export function mainFast(a: Attached | null | undefined): boolean {
   if (typeof a?.fast_choice === 'boolean') return a.fast_choice
-  return a?.fast === true ? true : null
+  return a?.fast === true
 }
 
 /** Fast mode as a lightning bolt, filled while on. Where it cannot be switched (`why`, or no `onChange`)

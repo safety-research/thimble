@@ -1,12 +1,11 @@
 // The chat's composer: the shared composer (components/Composer) with main's model line at its foot (ModelLine). Main
-// runs in the analyst's Claude Code session, so its model is chosen in the terminal with /model. A channel message
-// cannot change effort, so the server writes it where the session reads it (channel.effort_route); fast mode likewise
-// (channel.fast_route). A thread whose message goes to a session thimble starts shows that role's line instead
+// runs in the analyst's Claude Code session, so its model is chosen in the terminal with /model. Its effort and fast mode
+// are kept for its next launch (channel.effort_route, channel.fast_route). A thread whose message goes to a session thimble starts shows that role's line instead
 // (`chip`, RoleChip). The browser cannot stop a turn, so there is no Stop. Each thread keeps its own draft.
 import { useRef, useState, type ReactNode } from 'react'
 import { ComposerFrame } from '../components/Composer'
 import type { MainEffort } from '../lib/types'
-import { FAST_TIP, MODEL_TIP, ModelLine } from './ModelLine'
+import { MODEL_TIP, ModelLine } from './ModelLine'
 
 export interface ComposerProps {
   /** the model main runs, as the mirror read it from the session's transcript; nothing while it is unknown */
@@ -15,7 +14,7 @@ export interface ComposerProps {
   effort?: MainEffort | null
   /** picks main's effort; without it the foot only names the model */
   onEffort?: (e: MainEffort) => void
-  /** main's fast mode where the line can switch it (ModelLine.mainFast), else null: the bolt shows it off, with FAST_TIP */
+  /** main's fast mode (ModelLine.mainFast); null while no session is attached */
   fast?: boolean | null
   onFast?: (on: boolean) => void
   /** the foot's line in place of main's, for a message that goes to another session (RoleChip) */
@@ -66,7 +65,6 @@ export function Composer({ model, effort, onEffort, fast = null, onFast, chip: o
       onEffort={(e) => onEffort?.(e as MainEffort)}
       fast={fast ?? false}
       onFast={fast != null ? onFast : undefined}
-      fastTip={FAST_TIP}
       label="main and its threads"
     />
   ) : undefined

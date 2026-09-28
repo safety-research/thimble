@@ -211,11 +211,10 @@ def with_features(stored: dict[str, Any], c: str | None = None) -> dict[str, Any
     """The effective settings: SETTINGS_DEFAULTS under `stored`, `models` as config.models_for resolves it, the rows of
     the permission modes the analyst set (modes.chosen), and `disabled_modes`, those the analyst's Claude Code settings
     turn off."""
-    from . import claude_changes, modes  # noqa: PLC0415 — both import this module
+    from . import modes  # noqa: PLC0415 — modes imports this module
 
     return {**SETTINGS_DEFAULTS, **stored, config.MODELS_KEY: config.models_for(c, stored),
-            "terminal_first_consented": claude_changes.consented(), modes.SETTING: modes.chosen(stored),
-            "disabled_modes": sorted(modes.disabled())}
+            modes.SETTING: modes.chosen(stored), "disabled_modes": sorted(modes.disabled())}
 
 
 @router.get("/ws/{c}/settings")
@@ -223,15 +222,11 @@ def get_settings(c: str) -> dict[str, Any]:
     return with_features(stored_settings(c), c)
 
 
-TERMINAL_FIRST_CONSENT = "terminal_first_consent"  # a PUT's word that the analyst agreed to terminal-first's changes
-CONSENT_NEEDED = ("Terminal-first marks thimble's work folders trusted in Claude Code's config and sets this folder's "
-                  "statusline, which needs your agreement the first time: turn it on in Settings.")
-
-# The keys PUT /settings may change: the settings the browser's settings panel and switches save, the rows of the
-# permission modes, and the consent word. Every other key is the server's own or the analyst's to edit in the file
-# (kernel_wrap, orient_instructions), since the route is unauthenticated and a kernel cell or a session's command can
-# reach it on loopback.
-PUT_KEYS = frozenset({*SETTINGS_DEFAULTS, config.MODELS_KEY, "permission_modes", TERMINAL_FIRST_CONSENT})
+# The keys PUT /settings may change: the settings the browser's settings panel and switches save, and the rows of the
+# permission modes. Every other key is the server's own or the analyst's to edit in the file (kernel_wrap,
+# orient_instructions), since the route is unauthenticated and a kernel cell or a session's command can reach it on
+# loopback.
+PUT_KEYS = frozenset({*SETTINGS_DEFAULTS, config.MODELS_KEY, "permission_modes"})
 
 
 @router.put("/ws/{c}/settings")
@@ -250,17 +245,7 @@ def put_settings_route(c: str, settings: dict[str, Any] = Body(...)) -> dict[str
 
 def put_settings(c: str, settings: dict[str, Any]) -> dict[str, Any]:
     """Merges into the stored settings, so a partial PUT keeps the rest. Only what was stored plus the patch is written,
-    never SETTINGS_DEFAULTS, so a changed default takes effect. Returns the effective settings. Turning terminal-first
-    on the first time on this install takes TERMINAL_FIRST_CONSENT with it (409 without), since it changes Claude Code's
-    own files (claude_changes); turning it off puts back what it changed for the workspace."""
-    from . import claude_changes  # noqa: PLC0415
-
-    settings = {k: v for k, v in settings.items() if k != "terminal_first_consented"}
-    agreed = settings.pop(TERMINAL_FIRST_CONSENT, None) is True
-    if settings.get("terminal_first") is True and not claude_changes.consented():
-        if not agreed:
-            raise HTTPException(409, CONSENT_NEEDED)
-        claude_changes.consent()
+    never SETTINGS_DEFAULTS, so a changed default takes effect. Returns the effective settings."""
     path = ws_dir(c) / "settings.json"
     stored = read_json(path, {})
     stored = stored if isinstance(stored, dict) else {}
@@ -276,12 +261,6 @@ def put_settings(c: str, settings: dict[str, Any]) -> dict[str, Any]:
             role: {**held[role], **conf} if isinstance(conf, dict) and isinstance(held.get(role), dict) else conf
             for role, conf in settings[config.MODELS_KEY].items()}}
     write_json(path, merged)
-    if "terminal_first" in settings:
-        from . import bg_session  # noqa: PLC0415 — bg_session imports this module
-
-        bg_session.sync_statusline(c)
-        if not merged.get("terminal_first"):
-            bg_session.untrust(c)
     return with_features(merged, c)
 
 

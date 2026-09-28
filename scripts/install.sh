@@ -1,18 +1,22 @@
 #!/usr/bin/env bash
 # scripts/install.sh — install thimble: a git checkout in place, or an unzipped release copied to ~/.thimble/app.
 # Steps: prerequisites · copy the release into --dir · backend/.venv · the card harness's browser · the Bash sandbox's root commands (printed) · the frontend's packages and frontend/dist · the app-dir pointer ·
-# the Claude Code plugin · `thimble` on PATH (~/.local/bin/thimble → the tree's plugin/bin/thimble) · doctor · what to do next. Re-running it (after `git pull`, or over a newer release) is safe.
+# the Claude Code plugin · `thimble` on PATH (~/.local/bin/thimble → the tree's plugin/bin/thimble) · the trust of thimble's workspaces folder, asked once · doctor · what to do next. Re-running it (after `git pull`, or over a newer release) is safe.
 # In a checkout it runs npm ci when package-lock.json changed since the packages were installed, and rebuilds frontend/dist when it is older than the
 # frontend's sources or the lockfile, so a pulled clone ends with the current UI; a release's prebuilt frontend/dist is kept as it is.
 # Needs: uv (or python3 >= 3.12); node >= 20 for custom views, and to build frontend/dist when it is missing or out of date; the claude CLI to register the plugin.
 # The marketplace name is thimble-local from a release zip and thimble from a checkout (.claude-plugin/marketplace.json).
 #
-#   scripts/install.sh [--dir DIR] [--marketplace-name NAME] [--dev] [--deps-only] [--no-plugin] [--dry-run]
+#   scripts/install.sh [--dir DIR] [--marketplace-name NAME] [--dev] [--deps-only] [--no-plugin]
+#                      [--trust-workspaces | --no-trust-workspaces] [--dry-run]
 #   --dir DIR                where the tree lives (default: this checkout; $THIMBLE_HOME/app for a release)
 #   --marketplace-name NAME  the name Claude Code registers the tree under (default: the one in marketplace.json)
 #   --dev                    also install the backend's test extras (pytest, pytest-asyncio)
 #   --deps-only              stop after the frontend step: no pointer, no plugin, no doctor
 #   --no-plugin              print the two `claude plugin` commands instead of running them
+#   --trust-workspaces       mark thimble's workspaces folder trusted in Claude Code's config without asking, which
+#                            Terminal-first's background sessions need; --no-trust-workspaces answers no. Without
+#                            either the question is asked once, on a terminal, and the answer kept in $THIMBLE_HOME
 #   --dry-run                print every step and command; change nothing
 set -euo pipefail
 
@@ -30,7 +34,7 @@ json_get() {  # json_get FILE KEY — a top-level string value (python3 when pre
 parse_args() {
   src="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
   home="${THIMBLE_HOME:-$HOME/.thimble}"
-  dir="" mp_name="" dev=0 deps_only=0 no_plugin=0 dry=0
+  dir="" mp_name="" dev=0 deps_only=0 no_plugin=0 dry=0 trust=""
   while [ $# -gt 0 ]; do
     case "$1" in
       --dir) dir="$2"; shift 2;;
@@ -38,6 +42,8 @@ parse_args() {
       --dev) dev=1; shift;;
       --deps-only) deps_only=1; shift;;
       --no-plugin) no_plugin=1; shift;;
+      --trust-workspaces) trust=--yes; shift;;
+      --no-trust-workspaces) trust=--no; shift;;
       --dry-run) dry=1; shift;;
       -h|--help) usage; exit 0;;
       *) echo "install.sh: unknown argument $1" >&2; usage >&2; exit 2;;
@@ -78,7 +84,7 @@ locate_tree() {  # checkout or release, in place or copied, and the version
 }
 
 check_prerequisites() {  # uv or python >= pyproject's requires-python; node >= 20 unless frontend/dist is built; the claude CLI
-  step "1/11 prerequisites"
+  step "1/12 prerequisites"
   req_py="$(sed -n 's/^requires-python *= *">=\([0-9][0-9.]*\)".*/\1/p' "$src/backend/pyproject.toml")"; req_py="${req_py:-3.12}"
   have_uv=0 py=""
   if command -v uv >/dev/null 2>&1; then
@@ -140,7 +146,7 @@ copy_tree() {  # a release install: the release's entries replace the install's;
 }
 
 make_venv() {  # uv sync from uv.lock when uv is present, else python -m venv + pip from pyproject; a symlinked venv is left alone
-  step "3/11 backend/.venv (the server's Python and dependencies)"
+  step "3/12 backend/.venv (the server's Python and dependencies)"
   local venv="$dir/backend/.venv"
   extra=(); if [ "$dev" = 1 ]; then extra=(--extra dev); fi
   if [ -L "$venv" ]; then
@@ -162,7 +168,7 @@ fetch_browser() {  # the headless Chromium the card harness draws every card in 
   # version backend/.venv holds, into Playwright's own cache (no root needed); then one launch, since a bare Linux server
   # may lack the system libraries it links, which only root can add. Without it cards are still checked, from their data
   # and without a picture, and `thimble doctor` names the fix.
-  step "4/11 the card harness's browser (headless Chromium)"
+  step "4/12 the card harness's browser (headless Chromium)"
   local venv="$dir/backend/.venv" why
   if [ "$dry" != 1 ] && ! "$venv/bin/python" -I -c 'import playwright' 2>/dev/null; then
     say "backend/.venv has no playwright; cards will be checked without a picture of them"
@@ -202,7 +208,7 @@ check_sandbox() {  # Claude Code's Bash sandbox, which keeps the orientation's B
   # namespaces. Installing them needs root, so this prints the commands (the backend's cc_settings.sandbox_setup, the
   # same lines `thimble doctor` prints) and runs none; without them the orientation's Bash asks under the analyst's
   # permission mode.
-  step "5/11 the orientation's Bash sandbox"
+  step "5/12 the orientation's Bash sandbox"
   local venv="$dir/backend/.venv"
   if [ "$dry" = 1 ]; then say "(checked by the backend's sandbox_lines once backend/.venv exists; prints root commands, runs none)"; return 0; fi
   ( cd "$dir/backend" && "$venv/bin/python" -c 'from app import cli; print("\n".join(l[2:] for l in cli.sandbox_lines()))' ) \
@@ -243,7 +249,7 @@ install_packages() {  # npm ci from package-lock.json, and again whenever the lo
 build_ui() {  # with node >= 20 the frontend's packages, which custom views need; a checkout's frontend/dist older than
   # its sources is rebuilt (scripts/rebuild_ui.sh, which swaps the build in under a running server), any other existing
   # frontend/dist is kept, and without one the typecheck and vite build make it
-  step "6/11 frontend"
+  step "6/12 frontend"
   if [ "$node_ok" = 1 ] && ! install_packages; then
     [ "$has_dist" = 1 ] || die "npm ci failed in $dir/frontend (above), so the UI cannot be built; fix that and run this script again"
     say "(npm ci failed, above: custom views need the frontend's packages, so run this script again)"
@@ -266,7 +272,7 @@ build_ui() {  # with node >= 20 the frontend's packages, which custom views need
 }
 
 write_pointer() {  # $THIMBLE_HOME/app-dir: how the plugin copy in Claude Code's plugin cache finds this tree (plugin/bin/thimble-app-dir)
-  step "7/11 $home/app-dir → $dir"
+  step "7/12 $home/app-dir → $dir"
   run mkdir -p "$home"
   run chmod 700 "$home"
   say "+ printf '%s\\n' $dir > $home/app-dir"
@@ -274,7 +280,7 @@ write_pointer() {  # $THIMBLE_HOME/app-dir: how the plugin copy in Claude Code's
 }
 
 register_plugin() {  # marketplace add + plugin install, then update both so a re-run refreshes the cached copy
-  step "8/11 the Claude Code plugin"
+  step "8/12 the Claude Code plugin"
   local mp_file="$dir/.claude-plugin/marketplace.json" file_name
   file_name="$(json_get "$src/.claude-plugin/marketplace.json" name)"
   if [ -n "$mp_name" ] && [ "$mp_name" != "$file_name" ]; then
@@ -301,7 +307,7 @@ register_plugin() {  # marketplace add + plugin install, then update both so a r
 
 link_cli() {  # ~/.local/bin/thimble → <tree>/plugin/bin/thimble, so `thimble` is a command once that folder is on PATH (finish
   # says whether it is); a `thimble` there that is not a symlink into a thimble tree (another program) is left alone
-  step "9/11 thimble on PATH"
+  step "9/12 thimble on PATH"
   local bin="$HOME/.local/bin" target="$dir/plugin/bin/thimble" existing=""
   cli_link="$bin/thimble"; cli_linked=0
   if [ -L "$cli_link" ]; then existing="$(readlink "$cli_link")"; fi
@@ -318,14 +324,21 @@ link_cli() {  # ~/.local/bin/thimble → <tree>/plugin/bin/thimble, so `thimble`
   cli_linked=1
 }
 
+trust_workspaces() {  # the one entry thimble writes into Claude Code's global config, asked once (backend/app/claude_changes.py)
+  step "10/12 Claude Code's trust of thimble's workspaces folder"
+  if [ "$dry" = 1 ]; then say "(asks once whether to mark the workspaces folder trusted in Claude Code's config; --trust-workspaces or --no-trust-workspaces answer it)"; return 0; fi
+  THIMBLE_HOME="$home" "$dir/backend/.venv/bin/python" -I "$dir/backend/app/claude_changes.py" trust "$dir" $trust \
+    || say "(the trust step failed; install.sh --trust-workspaces runs it again)"
+}
+
 path_has_local_bin() {  # $HOME/.local/bin (or ~/.local/bin) as a PATH entry, a trailing slash on the entry allowed
   case ":$(printf '%s' "$PATH" | sed 's#/*:#:#g; s#/*$##'):" in *":$HOME/.local/bin:"* | *":~/.local/bin:"*) return 0;; esac; return 1
 }
 
 finish() {  # doctor, then the one next step (and the PATH line the link needs)
-  step "10/11 thimble doctor"
+  step "11/12 thimble doctor"
   run "$dir/plugin/bin/thimble" doctor || say "(doctor exited non-zero; see above)"
-  step "11/11 next"
+  step "12/12 next"
   local cmd="$dir/plugin/bin/thimble" rc
   if [ "$cli_linked" = 1 ]; then
     if path_has_local_bin; then
@@ -365,6 +378,7 @@ main() {
   write_pointer
   register_plugin
   link_cli
+  trust_workspaces
   finish
 }
 main "$@"

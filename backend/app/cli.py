@@ -8,7 +8,7 @@
     thimble feedback ["description"] [--no-logs]   (a problem report as a zip; feedback.py)
     thimble list                           (the workspaces by id, archived runs included; runs.py)
     thimble purge <id>… [--dry-run]        (delete workspaces or archived runs by id; runs.py)
-    thimble launch-args --cwd <path>       (the launcher's: channel entry, allowed tools, main's effort, turn tools, main's prompt)
+    thimble launch-args --cwd <path>       (the launcher's: channel entry, allowed tools, main's effort and settings, turn tools, main's prompt)
     thimble prompt <name>… [--cwd <path>]  (prompt files rendered for a session in <path>, for skills and hooks)
 
 `server up` (alias `ensure`) is the one starter: `GET /api/health`, then under `flock <home>/server.lock` spawn uvicorn
@@ -1411,11 +1411,51 @@ def last_main(cwd: Path) -> str:
     return best[1] if best else ""
 
 
-def launch_args(cwd: Path, resume: bool = False) -> str:
+def main_choice(cwd: Path) -> dict[str, Any]:
+    """The composer's effort and fast-mode choice for main in the folder's workspace (channel.effort_route), kept in the
+    workspace's settings.json as models.main; {} for none."""
+    c = config.workspace_for_cwd(str(cwd))
+    try:
+        stored = json.loads((config.workspace_path(c) / "settings.json").read_text("utf-8")) if c else {}
+        main = stored.get(config.MODELS_KEY, {}).get("main")
+    except (OSError, ValueError, AttributeError):
+        return {}
+    return main if isinstance(main, dict) else {}
+
+
+def launch_settings(cwd: Path, given: str = "") -> str:
+    """The one `--settings` value the launcher passes main, since Claude Code reads only the last one: the analyst's own
+    `given` (inline JSON, or a file relative to `cwd`) with thimble's statusline, chained to theirs, and the composer's
+    fast mode and ultracode where they name none. `given` as it is when it cannot be read."""
+    from . import bg_session, cc_settings  # noqa: PLC0415
+
+    own: Any = {}
+    if given:
+        try:
+            own = json.loads(given if given.lstrip().startswith("{") else (cwd / Path(given).expanduser()).read_text("utf-8"))
+        except (OSError, ValueError):
+            own = None
+        if not isinstance(own, dict):
+            print(f"thimble: WARNING - --settings {given} could not be read, so thimble's statusline is left out",
+                  file=sys.stderr)
+            return given.replace("\n", " ")
+    line = own.get("statusLine")
+    chained = line.get("command") if isinstance(line, dict) and isinstance(line.get("command"), str) else None
+    out = {**own, "statusLine": {"type": "command", "command": bg_session.statusline_command(chained),
+                                 "refreshInterval": cc_settings.STATUSLINE_REFRESH_S}}
+    choice = main_choice(cwd)
+    if isinstance(choice.get("fast"), bool):
+        out.setdefault("fastMode", choice["fast"])
+    if choice.get("effort") == cc_settings.ULTRACODE:
+        out.setdefault("ultracode", True)
+    return json.dumps(out)
+
+
+def launch_args(cwd: Path, resume: bool = False, settings: str = "") -> str:
     """The launcher's values, one per line: the channel entry of the plugin copy to load, the `--allowedTools` line, the
-    `--effort` value ('' for none), the value to export as terminal_tools.ENV ('' when the `claude` it starts does not
-    read it), with `resume` the session to resume, then main's prompt, whose turn ending follows that value. An effort
-    key the composer's chip wrote into the folder's local settings is removed first (cc_settings)."""
+    `--effort` value ('' for none), the `--settings` value (launch_settings, over the analyst's own `settings`), the
+    value to export as terminal_tools.ENV ('' when the `claude` it starts does not read it), with `resume` the session
+    to resume, then main's prompt, whose turn ending follows that value."""
     from . import cc_settings, channel, terminal_tools  # noqa: PLC0415 — needed by this subcommand alone
 
     installed = installed_copy(cwd)
@@ -1430,25 +1470,18 @@ def launch_args(cwd: Path, resume: bool = False) -> str:
     watcher = f"Bash({root / WATCHER} *)"
     tools_line = ",".join([MCP_TOOLS_RULE, f"Read(/{anchors}/**)", f"Read(/{orient_prompt})", f"Read(/{tray_prompts})",
                            watcher, *skill_rules(root)])
-    cc_settings.clear_override(cwd)
-    _sync_statusline(cwd)
     last = [last_main(cwd)] if resume else []
     turn_tools = terminal_tools.launch_value()
-    return "\n".join([installed.channel if installed else cc_channel.channel(root), tools_line, cc_settings.main_effort_flag(cwd),
-                      turn_tools, *last, channel.session_prompt(str(cwd.resolve()), bool(turn_tools))])
-
-
-def _sync_statusline(cwd: Path) -> None:
-    """The folder's statusline, set for terminal-first mode or put back (bg_session.sync_statusline)."""
-    from . import bg_session  # noqa: PLC0415
-
-    c = config.workspace_for_cwd(str(cwd))
-    if c:
-        bg_session.sync_statusline(c)
+    chosen = main_choice(cwd).get("effort")
+    effort = cc_settings.level_of(chosen) if chosen in (*cc_settings.EFFORTS, cc_settings.ULTRACODE) else ""
+    return "\n".join([installed.channel if installed else cc_channel.channel(root), tools_line,
+                      effort or cc_settings.main_effort_flag(cwd), launch_settings(cwd, settings), turn_tools, *last,
+                      channel.session_prompt(str(cwd.resolve()), bool(turn_tools))])
 
 
 def cmd_launch_args(args: argparse.Namespace) -> int:
-    print(launch_args(Path(args.cwd or os.environ.get("THIMBLE_CALLER_CWD") or os.getcwd()), bool(args.resume)))
+    print(launch_args(Path(args.cwd or os.environ.get("THIMBLE_CALLER_CWD") or os.getcwd()), bool(args.resume),
+                      args.settings or ""))
     # on stderr, which the launcher leaves on the terminal, before Claude Code starts
     warning = claude_code_warning(claude_code_version())
     if warning:
@@ -2516,9 +2549,10 @@ def build_parser() -> argparse.ArgumentParser:
     u.add_argument("--from", dest="from_", metavar="ZIP", help="a downloaded release zip (thimble-<version>-<sha>.zip)")
     u.add_argument("--dry-run", action="store_true", help="print update.sh's steps; change nothing")
     u.set_defaults(fn=cmd_update)
-    la = sub.add_parser("launch-args", help="for plugin/bin/thimble: the channel entry, the --allowedTools and --effort values, the tools that end a turn without text, then main's prompt")
+    la = sub.add_parser("launch-args", help="for plugin/bin/thimble: the channel entry, the --allowedTools, --effort and --settings values, the tools that end a turn without text, then main's prompt")
     la.add_argument("--cwd")
     la.add_argument("--resume", action="store_true", help="a line before the prompt: the folder's last main session")
+    la.add_argument("--settings", help="the analyst's own --settings, which thimble's are merged into")
     la.set_defaults(fn=cmd_launch_args)
     pr = sub.add_parser("prompt", help="for a plugin skill's injected command: prompt files rendered for a session in --cwd")
     pr.add_argument("names", nargs="+", help="prompt names under prompts/, such as shared")

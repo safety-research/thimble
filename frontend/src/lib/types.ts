@@ -904,8 +904,6 @@ export interface Settings {
   models: Record<string, ModelConf>
   /** the orientation runs as a subagent of the analyst's Claude Code session (backend orientation.terminal_first) */
   terminal_first?: boolean
-  /** the analyst agreed on this install to terminal-first's changes to Claude Code's files (backend claude_changes) */
-  terminal_first_consented?: boolean
   /** in terminal-first mode, how the orientation runs: a subagent of main, or a background session (backend bg_session) */
   orient_route?: 'subagent' | 'session'
   /** the chat column is hidden and main's foot shows in a dock (shell/Shell, chat off) */
@@ -1367,7 +1365,7 @@ export interface Attached {
   model?: string
   /** the effort they ran at, as the mirror last read it */
   effort?: string
-  /** what the composer's chip set for this session */
+  /** what the composer's chip chose for main's next launch, while this session runs */
   effort_choice?: MainEffort
   /** the effort the analyst's own Claude Code settings choose (cc_settings.analyst_effort), where main's effort menu opens */
   settings_effort?: MainEffort
@@ -1376,7 +1374,7 @@ export interface Attached {
   /** the permission mode Claude Code last reported to the session's hooks (default, acceptEdits, auto, plan,
    * bypassPermissions, dontAsk), which each agent's permission mode follows until the analyst sets it (backend modes.py) */
   permission_mode?: string
-  /** what the composer's fast-mode switch set for this session */
+  /** what the composer's fast-mode switch chose for main's next launch, while this session runs */
   fast_choice?: boolean
   /** the session that was main until this one took its place while it runs on in another terminal */
   after?: string

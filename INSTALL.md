@@ -29,8 +29,10 @@ bash scripts/install.sh
 ```
 
 Either install registers the plugin with Claude Code, links the `thimble` command into `~/.local/bin` (and prints the
-line to add to your shell startup file when that folder is not on your PATH), and runs `thimble doctor`.
-`install.sh --dry-run` prints every step and changes nothing.
+line to add to your shell startup file when that folder is not on your PATH), and runs `thimble doctor`. It asks once
+whether to mark thimble's workspaces folder trusted in Claude Code's config, which Terminal-first's background sessions
+need; `--trust-workspaces` or `--no-trust-workspaces` answers without asking. `install.sh --dry-run` prints every step
+and changes nothing.
 
 ## Update
 
@@ -42,9 +44,9 @@ until `thimble server restart`.
 
 ## Uninstall
 
-`thimble uninstall` asks, then removes the plugin registration, `~/.local/bin/thimble` and `~/.thimble`, which holds a
-Global install's workspaces, and takes out the settings thimble wrote into folders' `.claude/settings.local.json`.
-`--keep-home` keeps `~/.thimble`. A clone stays where it is.
+`thimble uninstall` asks, then removes the plugin registration, `~/.local/bin/thimble`, the trust entry the install
+added, and `~/.thimble`, which holds a Global install's workspaces. `--keep-home` keeps `~/.thimble`. A clone stays where
+it is.
 
 To delete one workspace and keep the install, `thimble list` shows the workspaces by id and `thimble purge <id>` deletes
 that one and prints each path it deleted. The folder it read and your Claude Code transcripts stay.

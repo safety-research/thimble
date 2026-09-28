@@ -1071,7 +1071,7 @@ Your first message is in {path}. Read it whole and follow it.
 
 ## bg-untrusted
 
-Claude Code does not trust {folder}, so the background session could not start there. The analyst can agree to thimble marking its work folders trusted by turning Terminal-first off and on again in Settings, or run `claude` in {folder} once and accept its trust prompt; then start it again.
+Claude Code does not trust {folder}, so the background session could not start there. The analyst can have thimble's workspaces folder ({workspaces}) trusted by running `bash {install} --trust-workspaces`, or run `claude` in {folder} once and accept its trust prompt; then start it again.
 
 ## bg-carry-on
 

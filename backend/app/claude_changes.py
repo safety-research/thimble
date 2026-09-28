@@ -1,15 +1,15 @@
-"""What terminal-first changes in Claude Code's own files, recorded in thimble's home so that it can be put back.
+"""The two places thimble changes Claude Code's files, which are the user's.
 
-- Trust. `claude --bg` starts only in a folder Claude Code trusts, so a background session's work folder under thimble's
-  workspaces is marked trusted (`hasTrustDialogAccepted` in the `projects` of Claude Code's global config), one folder
-  at a time, and only once the analyst has agreed to it (consented), which Settings asks the first time terminal-first
-  is turned on. TRUST_FILE records each folder marked, in which config file, and what its entry held before.
-- The statusline. cc_settings.set_statusline sets `statusLine` in a corpus folder's .claude/settings.local.json and
-  records what it held before in STATUSLINE_FILE; restore_statusline puts that back.
+- Trust. `claude --bg` starts only in a folder Claude Code trusts, and trust is kept in Claude Code's global config
+  (`$CLAUDE_CONFIG_DIR/.claude.json`, else `~/.claude.json`). install.sh asks once whether to trust thimble's
+  workspaces folder, whose entry covers every work folder below it (install_trust), and records the answer in thimble's
+  home (TRUST_FILE), so that an update does not ask again. `thimble uninstall` takes back an entry thimble added
+  (untrust).
+- Older versions wrote statusLine, CLAUDE_CODE_EFFORT_LEVEL and CLAUDE_CODE_DISABLE_FAST_MODE into folders'
+  .claude/settings.local.json and recorded them in thimble's home. cleanup removes each key that still holds thimble's
+  value, and the records with it, so it runs once.
 
-untrust and restore_statusline undo both: for a workspace when terminal-first is turned off (ledger.put_settings), and
-for every folder on `thimble uninstall`, which runs `python -m app.claude_changes undo` before it removes thimble's home.
-The module imports only the standard library, so the uninstall can run it with any Python 3.
+Standard library only, so install.sh and `thimble uninstall` run this file with any Python 3.
 """
 from __future__ import annotations
 
@@ -17,15 +17,19 @@ import json
 import os
 import sys
 import tempfile
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-CONSENT_FILE = "terminal-first-consent.json"  # in thimble's home: {at}, when the analyst agreed to the changes
-TRUST_FILE = "trusted-folders.json"  # in thimble's home: {folder: {config, created, had?}} (trust)
-STATUSLINE_FILE = "statusline-overrides.json"  # in thimble's home: {folder: {ours, previous}} (cc_settings.set_statusline)
-LOCAL_SETTINGS = Path(".claude") / "settings.local.json"
+TRUST_FILE = "trust.json"  # in thimble's home: {folder, config, answer: yes | no, added}
 TRUST_KEY = "hasTrustDialogAccepted"
+QUESTION = ("Claude Code starts thimble's background sessions (Terminal-first) only in folders it trusts. Mark thimble's "
+            "workspaces folder\n  {folder}\ntrusted in {config}? It covers every work folder thimble makes there. [y/N] ")
+# the records of the keys older versions wrote: file in thimble's home -> the key in a folder's settings.local.json
+# (None: statusLine, recorded as {ours, previous})
+OLD_RECORDS = {"effort-overrides.json": "CLAUDE_CODE_EFFORT_LEVEL", "fast-overrides.json": "CLAUDE_CODE_DISABLE_FAST_MODE",
+               "statusline-overrides.json": None}
+OLD_FILES = ("terminal-first-consent.json", "trusted-folders.json")
+LOCAL_SETTINGS = Path(".claude") / "settings.local.json"
 
 
 def home() -> Path:
@@ -40,7 +44,7 @@ def _read(path: Path) -> dict[str, Any]:
     return d if isinstance(d, dict) else {}
 
 
-def _write(path: Path, data: dict[str, Any], indent: int = 2) -> None:
+def _write(path: Path, data: dict[str, Any]) -> None:
     """`data` as `path`'s JSON, written to a temp file and moved into place, keeping the file's mode (0600 for a new
     one)."""
     try:
@@ -52,26 +56,27 @@ def _write(path: Path, data: dict[str, Any], indent: int = 2) -> None:
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as f:
             os.fchmod(f.fileno(), mode)
-            f.write(json.dumps(data, indent=indent, ensure_ascii=False) + "\n")
+            f.write(json.dumps(data, indent=2, ensure_ascii=False) + "\n")
         os.replace(tmp, path)
     except BaseException:
         Path(tmp).unlink(missing_ok=True)
         raise
 
 
-# --------------------------------------------------------------------------- consent
-
-
-def consented() -> bool:
-    """Whether the analyst agreed to terminal-first's changes to Claude Code's files on this install."""
-    return bool(_read(home() / CONSENT_FILE).get("at"))
-
-
-def consent() -> None:
-    _write(home() / CONSENT_FILE, {"at": datetime.now(timezone.utc).isoformat(timespec="seconds")})
-
-
 # --------------------------------------------------------------------------- trust
+
+
+def global_config() -> Path:
+    value = os.environ.get("CLAUDE_CONFIG_DIR")
+    return Path(value).expanduser() / ".claude.json" if value else Path.home() / ".claude.json"
+
+
+def workspaces_dir(tree: Path) -> Path:
+    """The workspaces folder the server of the install at `tree` uses, as cli.resolve_env finds it:
+    THIMBLE_WORKSPACES_DIR, else the one server.json recorded, else <tree>/workspaces."""
+    recorded = (_read(home() / "server.json").get("env") or {}).get("workspaces_dir")
+    raw = os.environ.get("THIMBLE_WORKSPACES_DIR") or (recorded if isinstance(recorded, str) else "") or str(tree / "workspaces")
+    return Path(raw).expanduser().resolve()
 
 
 def trusted(folder: Path, data: dict[str, Any]) -> bool:
@@ -84,116 +89,122 @@ def trusted(folder: Path, data: dict[str, Any]) -> bool:
     return False
 
 
-def trust(folder: Path, config_path: Path) -> bool:
-    """Mark `folder` alone trusted in the Claude Code config at `config_path` and record it (TRUST_FILE). True when it is
-    trusted; False when the config cannot be read or written."""
-    try:
-        data = json.loads(config_path.read_text("utf-8")) if config_path.is_file() else {}
-    except (OSError, ValueError):
-        return False
-    if not isinstance(data, dict):
-        return False
-    if trusted(folder, data):
-        return True
-    projects = data.setdefault("projects", {})
-    if not isinstance(projects, dict):
-        return False
-    entry = projects.get(str(folder))
-    created = not isinstance(entry, dict)
-    record: dict[str, Any] = {"config": str(config_path), "created": created}
-    if not created and TRUST_KEY in entry:
-        record["had"] = entry[TRUST_KEY]
-    grants = _read(home() / TRUST_FILE)
-    grants[str(folder)] = grants.get(str(folder)) or record  # the first record keeps what the entry held before thimble
-    _write(home() / TRUST_FILE, grants)
-    projects[str(folder)] = {**(entry if isinstance(entry, dict) else {}), TRUST_KEY: True}
-    try:
-        _write(config_path, data)
-    except OSError:
-        return False
-    return True
+def _set_trust(folder: Path, config: Path, on: bool) -> None:
+    """Set (or take back) `folder`'s trust in `config`, read again right before the write so that what Claude Code
+    saved meanwhile is kept. A taken-back entry that holds nothing else goes."""
+    data = json.loads(config.read_text("utf-8")) if config.is_file() else {}
+    if not isinstance(data, dict) or not isinstance(data.setdefault("projects", {}), dict):
+        raise ValueError(f"{config} does not hold Claude Code's config")
+    projects = data["projects"]
+    entry = projects.get(str(folder)) if isinstance(projects.get(str(folder)), dict) else {}
+    if on:
+        projects[str(folder)] = {**entry, TRUST_KEY: True}
+    else:
+        entry.pop(TRUST_KEY, None)
+        if entry:
+            projects[str(folder)] = entry
+        else:
+            projects.pop(str(folder), None)
+    _write(config, data)
 
 
-def untrust(under: Path | None = None) -> list[str]:
-    """Put back the trust of each folder marked (TRUST_FILE) inside `under`, or every one: its entry's key as it was, the
-    entry gone when thimble made it and nothing else was added to it. The folders put back."""
-    grants = _read(home() / TRUST_FILE)
-    mine = [f for f in grants if under is None or Path(f) == under or under in Path(f).parents]
-    if not mine:
+def install_trust(tree: Path, answer: str | None = None) -> str:
+    """install.sh's trust step for the install at `tree` (module note): `answer` is yes or no from its flags, else the
+    recorded one, else asked on a terminal. The line to print."""
+    folder, config = workspaces_dir(tree), global_config()
+    rec = _read(home() / TRUST_FILE)
+    same = rec.get("folder") == str(folder) and rec.get("config") == str(config)
+    if answer is None and same and rec.get("answer") in ("yes", "no"):
+        return (f"answered {rec['answer']} at an earlier install; install.sh --trust-workspaces or --no-trust-workspaces "
+                "changes it")
+    record = {"folder": str(folder), "config": str(config), "answer": "yes", "added": bool(same and rec.get("added"))}
+    if trusted(folder, _read(config)):
+        _write(home() / TRUST_FILE, record)
+        return f"{folder} is trusted in {config}"
+    if answer is None:
+        if not sys.stdin.isatty():
+            return (f"not asked (no terminal), so nothing was written. Terminal-first's background sessions need {folder} "
+                    "trusted, which install.sh --trust-workspaces does")
+        try:
+            answer = "yes" if input(QUESTION.format(folder=folder, config=config)).strip().lower() in ("y", "yes") else "no"
+        except EOFError:
+            answer = "no"
+    if answer == "yes":
+        folder.mkdir(parents=True, exist_ok=True)
+        try:
+            _set_trust(folder, config, True)
+        except (OSError, ValueError) as e:
+            return f"could not write {config} ({e}); nothing recorded"
+    _write(home() / TRUST_FILE, {**record, "answer": answer, "added": answer == "yes"})
+    if answer == "yes":
+        return f"marked {folder} trusted in {config}"
+    return "not trusted. Terminal-first's background sessions need it, which install.sh --trust-workspaces does"
+
+
+def untrust() -> list[str]:
+    """Take back the trust entry install_trust added, if it did; a line for what was done."""
+    rec = _read(home() / TRUST_FILE)
+    if not rec.get("added") or not rec.get("folder") or not rec.get("config"):
         return []
+    try:
+        _set_trust(Path(rec["folder"]), Path(rec["config"]), False)
+    except (OSError, ValueError):
+        return []
+    (home() / TRUST_FILE).unlink(missing_ok=True)
+    return [f"trust of {rec['folder']} taken back in {rec['config']}"]
+
+
+# --------------------------------------------------------------------------- the keys older versions wrote
+
+
+def cleanup() -> list[str]:
+    """Remove from each recorded folder's settings.local.json the keys older versions wrote that still hold thimble's
+    value (a statusLine gets back the one it replaced), then the records (module note). A file left empty goes. A line
+    for each file changed."""
+    edits: dict[str, list[tuple[str | None, Any]]] = {}
+    for record, key in OLD_RECORDS.items():
+        for folder, value in _read(home() / record).items():
+            edits.setdefault(folder, []).append((key, value))
     done: list[str] = []
-    by_config: dict[str, list[str]] = {}
-    for f in mine:
-        rec = grants[f] if isinstance(grants[f], dict) else {}
-        by_config.setdefault(str(rec.get("config") or ""), []).append(f)
-    for cfg, folders in by_config.items():
-        path = Path(cfg) if cfg else None
-        data = _read(path) if path is not None else {}
-        projects = data.get("projects") if isinstance(data.get("projects"), dict) else None
-        if path is not None and projects is not None:
-            for f in folders:
-                rec = grants[f] if isinstance(grants[f], dict) else {}
-                entry = projects.get(f)
-                if isinstance(entry, dict):
-                    if "had" in rec:
-                        entry[TRUST_KEY] = rec["had"]
-                    else:
-                        entry.pop(TRUST_KEY, None)
-                    if rec.get("created") and not entry:
-                        projects.pop(f, None)
-            try:
-                _write(path, data)
-            except OSError:
-                continue
-        for f in folders:
-            grants.pop(f, None)
-            done.append(f)
-    _write(home() / TRUST_FILE, grants)
+    for folder, todo in edits.items():
+        path = Path(folder) / LOCAL_SETTINGS
+        d = _read(path)
+        changed = False
+        for key, value in todo:
+            env, line = d.get("env"), d.get("statusLine")
+            if key and isinstance(env, dict) and isinstance(value, str) and str(env.get(key)) == value:
+                del env[key]
+                if not env:
+                    del d["env"]
+                changed = True
+            elif not key and isinstance(value, dict) and isinstance(line, dict) and line.get("command") == value.get("ours"):
+                if value.get("previous"):
+                    d["statusLine"] = value["previous"]
+                else:
+                    del d["statusLine"]
+                changed = True
+        if not changed:
+            continue
+        try:
+            if d:
+                _write(path, d)
+            else:
+                path.unlink()
+        except OSError:
+            continue
+        done.append(f"removed the keys an older thimble wrote into {path}")
+    for name in (*OLD_RECORDS, *OLD_FILES):
+        (home() / name).unlink(missing_ok=True)
     return done
 
 
-# --------------------------------------------------------------------------- the statusline
-
-
-def statuslines() -> dict[str, Any]:
-    return _read(home() / STATUSLINE_FILE)
-
-
-def restore_statusline(cwd: Path) -> bool:
-    """Put back the folder's own `statusLine` in place of thimble's, when thimble's is still there; True when it did."""
-    kept = statuslines()
-    rec = kept.pop(str(cwd.resolve()), None)
-    if rec is None:
-        return False
-    _write(home() / STATUSLINE_FILE, kept, indent=1)
-    path = cwd / LOCAL_SETTINGS
-    d = _read(path)
-    line = d.get("statusLine")
-    if not isinstance(line, dict) or not isinstance(rec, dict) or line.get("command") != rec.get("ours"):
-        return False
-    if rec.get("previous"):
-        d["statusLine"] = rec["previous"]
-    else:
-        d.pop("statusLine", None)
-    try:
-        if d:
-            _write(path, d)
-        else:
-            path.unlink()
-    except OSError:
-        return False
-    return True
-
-
-def undo() -> list[str]:
-    """Every change recorded here put back: each corpus folder's statusline and each work folder's trust. A line each."""
-    lines = [f"statusline of {f} put back" for f in list(statuslines()) if restore_statusline(Path(f))]
-    return lines + [f"trust of {f} taken back" for f in untrust()]
-
-
 if __name__ == "__main__":
-    if sys.argv[1:] != ["undo"]:
-        print("usage: python -m app.claude_changes undo", file=sys.stderr)
+    args = sys.argv[1:]
+    if args[:1] == ["trust"] and len(args) in (2, 3):
+        print(install_trust(Path(args[1]), {"--yes": "yes", "--no": "no"}.get(args[2]) if len(args) == 3 else None))
+    elif args == ["undo"]:
+        for ln in [*cleanup(), *untrust()]:
+            print(f"  {ln}")
+    else:
+        print("usage: claude_changes.py trust <tree> [--yes | --no] | undo", file=sys.stderr)
         sys.exit(2)
-    for ln in undo():
-        print(f"  {ln}")

@@ -7,6 +7,7 @@ import contextlib
 import importlib
 import logging
 import os
+import shutil
 import sys
 import time
 from contextlib import asynccontextmanager
@@ -232,6 +233,17 @@ async def _lifespan(app: FastAPI):
         config.migrate_registry()
     except Exception:
         log.exception("bringing the install tree's registry records into %s failed", config.DATA_DIR)
+    # what older versions left in Claude Code's files and in the workspaces, taken out once: the keys they wrote into
+    # folders' settings.local.json (claude_changes.cleanup) and each workspace's own Claude Code config dir
+    try:
+        from . import claude_changes
+
+        for line in claude_changes.cleanup():
+            log.info("%s", line)
+        for old in config.WORKSPACES_DIR.glob("*/.claude-config"):
+            shutil.rmtree(old, ignore_errors=True)
+    except Exception:
+        log.exception("removing what an older thimble left failed")
     await _startup()
     yield
     # shutdown: modules that own subprocesses expose `shutdown()`, so a restart never leaves an orphan running
