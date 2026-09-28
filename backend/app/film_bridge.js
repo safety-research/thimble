@@ -7,13 +7,16 @@
 //   error {message}    frame to page: a script error, or a film without window.ready or window.seek
 ;(() => {
   const READY_WAIT_MS = 8000
+  const FONTS_WAIT_MS = 2000
   const up = (msg) => parent.postMessage(msg, '*')
   const text = (x) => String(x && x.message ? x.message : x).slice(0, 400)
   const fail = (x) => up({ type: 'thimble:error', message: text(x) })
   addEventListener('error', (e) => fail(e.error || e.message))
   addEventListener('unhandledrejection', (e) => fail(e.reason))
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
+  const within = (p, ms) => Promise.race([p, sleep(Math.max(0, ms)).then(() => 'late')])
   let settled = null
+  let latest = null
   const whenReady = () =>
     settled ||
     (settled = (async () => {
@@ -21,11 +24,10 @@
       while (!window.ready && Date.now() - t0 < READY_WAIT_MS) await sleep(50)
       if (!window.ready) fail('the film sets no window.ready')
       else {
-        const late = sleep(READY_WAIT_MS - (Date.now() - t0)).then(() => 'late')
-        const got = await Promise.race([Promise.resolve(window.ready).then(() => 'ok', (e) => (fail(e), 'failed')), late])
+        const got = await within(Promise.resolve(window.ready).then(() => 'ok', (e) => (fail(e), 'failed')), READY_WAIT_MS - (Date.now() - t0))
         if (got === 'late') fail(`window.ready did not settle within ${READY_WAIT_MS / 1000} s`)
       }
-      await document.fonts.ready
+      await within(document.fonts.ready, FONTS_WAIT_MS)
       if (typeof window.seek !== 'function') fail('the film sets no window.seek function')
     })())
   const draw = (t) => {
@@ -42,8 +44,11 @@
     const d = e.data || {}
     const t = d.type === 'thimble:seek' ? d.t : d.type === 'thimble:open' && d.open ? d.open.t : undefined
     if (t === undefined) return
+    // the film draws the latest time it was sent, once it is ready or has had its time to be
+    latest = t
     await whenReady()
-    draw(t)
+    if (latest !== null) draw(latest)
+    latest = null
   })
   addEventListener('load', async () => {
     await whenReady()

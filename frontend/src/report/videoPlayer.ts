@@ -9,6 +9,32 @@ export interface PlayerOut {
   draw: (t: number) => void
   /** playback started or stopped */
   playing: (on: boolean) => void
+  /** the voice reached the word at `char` of line `line`'s text; null when a line starts afresh */
+  word: (line: number, char: number | null) => void
+}
+
+// macOS's novelty voices, left out of the list
+const NOVELTY = new Set(['albert', 'bad news', 'bahh', 'bells', 'boing', 'bubbles', 'cellos', 'deranged', 'good news', 'hysterical', 'jester', 'organ', 'pipe organ', 'princess', 'superstar', 'trinoids', 'whisper', 'wobble', 'zarvox'])
+// older synthesized voices, kept in the list but ranked after the natural ones
+const DATED = new Set(['agnes', 'bruce', 'fred', 'junior', 'kathy', 'ralph', 'vicki', 'victoria'])
+const baseName = (v: SpeechSynthesisVoice) => v.name.replace(/\s*\(.*\)\s*$/, '').trim().toLowerCase()
+
+/** The voices worth offering, best first: in the page's language, then Premium or Enhanced, then natural or neural,
+ * then the system's own local voices, the system default before the rest; no novelty voice. */
+export function rankVoices(voices: readonly SpeechSynthesisVoice[], lang: string): SpeechSynthesisVoice[] {
+  const want = lang.toLowerCase().replace('_', '-')
+  const wantBase = want.split('-')[0]
+  const key = (v: SpeechSynthesisVoice): (number | string)[] => {
+    const l = v.lang.toLowerCase().replace('_', '-')
+    const n = v.name.toLowerCase()
+    const tier = /premium|enhanced/.test(n) ? 0 : /natural|neural/.test(n) ? 1 : v.localService && !DATED.has(baseName(v)) ? 2 : 3
+    return [l.split('-')[0] === wantBase ? 0 : 1, tier, l === want ? 0 : 1, v.default ? 0 : 1, v.name]
+  }
+  const order = (a: (number | string)[], b: (number | string)[]) => {
+    for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return a[i] < b[i] ? -1 : 1
+    return 0
+  }
+  return voices.filter((v) => !NOVELTY.has(baseName(v))).sort((a, b) => order(key(a), key(b)))
 }
 
 interface Run {
@@ -55,7 +81,8 @@ export class VideoPlayer {
 
   /** A new script: playback stops and the film is drawn at t, kept when it is still inside the film. */
   load(timing: VideoTiming | null, texts: string[]): void {
-    this.halt()
+    if (this.run) this.pause()
+    else this.halt()
     this.timing = timing ?? EMPTY
     this.texts = texts
     this.draw(this.t <= this.timing.duration ? this.t : 0)
@@ -93,7 +120,10 @@ export class VideoPlayer {
     if (!lines.length) return
     const k = Math.max(0, Math.min(lines.length - 1, i))
     if (this.run) this.startLine(k)
-    else this.draw(lines[k].start)
+    else {
+      this.out.word(k, null)
+      this.draw(lines[k].start)
+    }
   }
 
   /** The rate for what is spoken next; the clock goes on from the frame drawn now. */
@@ -125,6 +155,7 @@ export class VideoPlayer {
     speech()?.cancel()
     const start = this.timing.lines[i].start
     this.run = { line: i, phase: 'line', from: start, at: performance.now(), voiced: false }
+    this.out.word(i, null)
     this.draw(start)
     this.run.voiced = this.speak(i, token)
   }
@@ -150,6 +181,9 @@ export class VideoPlayer {
       else this.spoken(i)
     }
     u.onerror = unvoiced
+    u.onboundary = (e) => {
+      if (token === this.token && (e.name ?? 'word') === 'word') this.out.word(i, e.charIndex)
+    }
     this.utterance = u
     synth.speak(u)
     return true
