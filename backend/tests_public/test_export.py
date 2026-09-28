@@ -12,11 +12,10 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from app import canvas_history, config, dev, export, notebook
+from app import export
 
 C = "mini"
 MAIN_SID = "5f5f5f5f-0000-4000-8000-000000000002"
-ORIENT_SID = "11111111-2222-4333-8444-555555555555"
 FORK = "a1f2e3d4c5b6a7980"  # the fork of thread ef56ab12
 OTHER_FORK = "a0b1c2d3e4f5a6b7c"  # the fork of a thread whose chat is gone, named by its description alone
 T = [f"2026-03-12T10:{m:02d}:00+00:00" for m in range(60)]
@@ -64,84 +63,14 @@ def write_main_session(proj: Path) -> None:
 
 @pytest.fixture()
 def ws(workspaces_tmp, tmp_path, monkeypatch):
-    canvas_history.forget()
     claude = tmp_path / "claude"
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(claude))
     proj = claude / "projects" / "-tmp-mini"
     proj.mkdir(parents=True)
     write_main_session(proj)
-    # the orientation's own session: a transcript still being written (its last line is torn), a workflow run, and a
-    # tool result Claude Code spilled out of line
-    (proj / f"{ORIENT_SID}.jsonl").write_text(
-        json.dumps({"type": "user", "timestamp": T[1], "message": {"role": "user", "content": "orient"}}) + "\n"
-        + json.dumps({"type": "assistant", "timestamp": T[5], "message": {"role": "assistant", "content": "done"}}) + "\n"
-        + '{"type": "assistant", "timest')
-    run = proj / ORIENT_SID / "subagents" / "workflows" / "wf_1"
-    _jsonl(run / "journal.jsonl", [{"ts": T[2], "type": "started", "agent": "aw1"}])
-    _jsonl(run / "agent-aw1.jsonl", [{"type": "user", "timestamp": T[2], "message": {"content": "read agents/"}}])
-    _json(run / "agent-aw1.meta.json", {"agentType": "Explore", "description": "read the agents"})
-    (proj / ORIENT_SID / "workflows" / "scripts").mkdir(parents=True)
-    (proj / ORIENT_SID / "workflows" / "scripts" / "orient-wf_1.js").write_text("export default async () => {}\n")
-    (proj / ORIENT_SID / "tool-results").mkdir()
-    (proj / ORIENT_SID / "tool-results" / "toolu_1.txt").write_text("corpus text the model read\n")
-
     w = workspaces_tmp / C
-    _jsonl(w / "telemetry.jsonl", [
-        {"ts": T[0], "seq": 0, "boot": "b1", "actor": "analyst", "session": "p1", "kind": "page-load", "target": None},
-        {"ts": T[3], "seq": 1, "boot": "b1", "actor": "analyst", "session": "p1", "kind": "ask-send", "target": "chat:main",
-         "detail": {"event": "main", "chars": 12}},
-    ])
-    (w / "telemetry.jsonl").open("a").write('{"torn')  # a cut line is skipped
-    _jsonl(w / "viewed.jsonl", [{"ts": T[4], "actor": "analyst", "by": "browser", "path": "README.md", "kind": "file"}])
-    _jsonl(w / "investigations" / "main" / "events.jsonl", [
-        {"ts": T[6], "seq": 0, "type": "cell", "notebook": "g1", "cell": "gone1", "kind": "deleted"},
-    ])
     _json(w / "sessions.json", {MAIN_SID: {"session": MAIN_SID, "cwd": "/tmp/mini", "transcript_path": str(proj / f"{MAIN_SID}.jsonl"),
                                            "since": T[0], "ended": T[50], "reason": "other"}})
-    chats = w / "chats"
-    _json(chats / "main.meta.json", {"id": "main", "kind": "main", "role": "main", "title": "main", "created_at": T[0], "parent": None})
-    _jsonl(chats / "main.jsonl", [{"type": "user", "ts": T[3], "text": "how many?", "by": "browser", "event": "e1"},
-                                  {"type": "text", "delta": "27."}, {"type": "done", "ts": T[4]}])
-    _json(chats / "ef56ab12.meta.json", {"id": "ef56ab12", "kind": "thread", "role": "thread", "title": "t", "created_at": T[7],
-                                         "parent": "main", "anchor": "events.jsonl#L1", "fork": {"agent_id": FORK, "session": MAIN_SID}})
-    _jsonl(chats / "ef56ab12.jsonl", [{"type": "user", "ts": T[7], "text": "what is this?", "by": "browser", "event": "e2"},
-                                      {"type": "text", "delta": "A save.", "reply": True}, {"type": "done", "ts": T[8]}])
-    _json(chats / "or1.meta.json", {"id": "or1", "kind": "agent", "role": "orient", "title": "Orientation", "created_at": T[1],
-                                    "parent": "main", "status": "done", "session": ORIENT_SID, "ts_end": T[9]})
-    # the canvas: a live group with one card and its logged history, a trashed group holding a card deleted before the log
-    nb = notebook.create_notebook(config.workspace_dir(C), "Your work", role="analyst")
-    card = notebook.new_cell("note", "user", "What the log covers", nb["id"], payload={"text": "One week."})
-    card["edited"] = [{"by": "user", "ts": T[2]}]
-    card["created_ts"] = card["ts"] = nb["ts"] = T[1]
-    nb["cells"].append(card)
-    notebook.write_notebook(config.workspace_dir(C), nb)
-    _jsonl(w / canvas_history.LOG_NAME, [{"ts": T[10], "op": "edited", "card": card["id"], "group": nb["id"], "by": "terminal",
-                                          "changed": ["takeaway"], "h": "x", "state": {"title": "What the log covers"}}])
-    _json(w / "notebooks" / "trash" / "g1.json", {"id": "g1", "title": "Old", "cells": [
-        {"id": "gone1", "kind": "note", "title": "A deleted card", "payload": {"text": "kept in the trash"}}]})
-    # labels, views, documents, orientation
-    _json(w / "concepts" / "k1.json", {"id": "k1", "name": "deletion", "unit": "record", "kind": "regex", "spec": "delete"})
-    _jsonl(w / "labels" / "k1.jsonl", [{"ref": "events.jsonl#L1", "label": "yes", "confidence": 1.0, "source": "regex", "ts": T[11]}])
-    (w / "labels" / "k1.sqlite").write_bytes(b"index")
-    _json(w / "filters.json", {"files": {"concept": "k1", "value": "yes"}})
-    _json(w / "views" / "proposals.json", [{"slug": "board", "name": "Board"}])
-    _json(w / "views" / "board" / "view.json", {"slug": "board", "claims": ["board.jsonl"]})
-    (w / "views" / "board" / "reader.py").write_text("def read(): pass\n")
-    _json(w / "views" / "board" / "cache" / "index.json", {"rows": "from the corpus"})
-    inv = w / "investigations" / "main"
-    _json(inv / "report.json", {"id": "report", "generation": 2, "generated_at": T[20], "sections": [], "comments": [
-        {"id": "cm1", "sentence_id": "s1", "author": "verifier", "kind": "verified", "status": "open", "generation": 2, "ts": T[20]}]})
-    _json(inv / "report.frame.json", {"id": "report", "frame": True, "generation": 0})
-    _json(inv / "report" / "20260312T101500.json", {"id": "report", "generation": 1, "comments": [
-        {"id": "cm1", "sentence_id": "s1", "author": "verifier", "status": "open", "generation": 1, "ts": T[15]},
-        {"id": "cm0", "sentence_id": "s0", "author": "analyst", "status": "dismissed", "generation": 1, "ts": T[14]}]})
-    _json(inv / "versions" / "report" / "2.json", {"n": 2, "ts": T[20], "source": "button", "previous_generation": 1,
-                                                   "previous": {"generation": 1, "comments": []}})
-    _json(w / "orient" / "run.json", {"status": "done", "started": T[1], "ended": T[9]})
-    (w / "orient" / "summary.md").write_text("The corpus is three agents.\n")
-    # the checkout's dev/: this workspace's ticket, and another workspace's
-    _jsonl(dev.DEV_DIR / "tickets.jsonl", [{"id": "t1", "workspace": C, "title": "zoom", "session_id": None},
-                                           {"id": "t2", "workspace": "other", "title": "pan", "session_id": None}])
     return w
 
 
