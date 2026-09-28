@@ -376,7 +376,7 @@ function showProblems(p) {
 // what the chart shows, sent with a question as the thread's text, so the answer can be about these records
 function context() {
   if (!D) return ''
-  const on = labelState.labels.map((l) => l.name)
+  const on = labelState.labels.map((l) => (l.id ? `${l.name} (concept:${l.id})` : l.name))
   const shown = D.source === 'labels' ? 'the records the labels that are on give a highlighted value'
     : D.source === 'map' ? 'the actions of the swarm map, since no label is on' : 'the records of the places the most accounts acted on, since no label is on'
   const lines = [
