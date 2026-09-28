@@ -174,6 +174,22 @@ def _no_plugin_list(monkeypatch):
     monkeypatch.setattr(cli, "installed_copy", lambda cwd: None)
 
 
+@pytest.fixture(autouse=True)
+def _claude_stand_in(tmp_path_factory, monkeypatch):
+    """A stand-in `claude` first on PATH, for the test and the processes it starts, which prints the version thimble is
+    tested with for `--version` and nothing otherwise. `up` warns when claude is missing or older than that version, and
+    the tests must pass the same on a machine without Claude Code. A test that sets PATH itself still wins."""
+    from app import cli
+
+    bin_dir = tmp_path_factory.getbasetemp() / "claude-stand-in"
+    exe = bin_dir / "claude"
+    if not exe.exists():
+        bin_dir.mkdir(exist_ok=True)
+        exe.write_text(f'#!/bin/sh\n[ "$1" = --version ] && echo "{cli.TESTED_CLAUDE_CODE} (Claude Code)"\nexit 0\n')
+        exe.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ.get('PATH', '')}")
+
+
 @pytest.fixture()
 def nested_data(tmp_path, monkeypatch):
     """A DATA_DIR holding the flat `mini` corpus plus `nested`, whose runs `run-a/` and `run-b/` are copies of mini.
