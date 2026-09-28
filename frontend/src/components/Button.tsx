@@ -78,6 +78,9 @@ export interface SegmentedOption<V extends string> {
   dot?: boolean
   /** a class of the option's own, such as the state of the work on it */
   className?: string
+  /** an × on hover that removes the option, named `removeLabel`; it gets the option's box, which a confirm sits by */
+  onRemove?: (at: HTMLElement) => void
+  removeLabel?: string
 }
 
 /** sm 22px (a setting inside a card), md 24px (a mode switch), lg 30px (a views bar, a type bar) */
@@ -125,7 +128,7 @@ export function Segmented<V extends string>({ options, value, onChange, size = '
 function SegOption<V extends string>({ option: o, size, active, onPick }: { option: SegmentedOption<V>; size: SegmentedSize; active: boolean; onPick: () => void }) {
   const glyphOnly = o.icon != null && o.label == null
   const { props: tipProps, tip } = useTooltip(glyphOnly ? o.title : null)
-  return (
+  const option = (
     <>
       <button
         type="button"
@@ -146,6 +149,14 @@ function SegOption<V extends string>({ option: o, size, active, onPick }: { opti
       </button>
       {tip}
     </>
+  )
+  if (!o.onRemove) return option
+  const remove = o.onRemove
+  return (
+    <span className="seg-removable">
+      {option}
+      <Button variant="icon" size="sm" icon="x" title={o.removeLabel} aria-label={o.removeLabel} className="seg-remove" onClick={(e) => remove(e.currentTarget.parentElement ?? e.currentTarget)} />
+    </span>
   )
 }
 

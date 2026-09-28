@@ -1,5 +1,7 @@
-// A view picked in the views bar: the corpus's view drawing a file in its sandboxed frame (ViewerFrame) at the place a
-// ref names, with Raw one click away. A view that fails says so with Raw beside it. While a Files label filter is set,
+// A view picked in the views bar: the corpus's view drawing its files in its sandboxed frame (ViewerFrame) at the place a
+// ref names, with Raw one click away. Under the name, the files it reads (a click lists them, and a file picked opens in
+// Raw) and, in red, the lines of them its reader could not read. A view that fails says so with Raw beside it. While a
+// Files label filter is set,
 // the head shows it as a chip that clears it, since the view keeps only the records the filter keeps. At the head's
 // right end, the mark of the review of the view's pictures (ReviewMark).
 // The pane keeps the version of the view it opened (usePinnedView): a newer one, from a change, the review or the
@@ -9,14 +11,18 @@ import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { Button, Segmented } from '../components/Button'
 import { CheckMark } from '../components/CheckMark'
 import { FilterChip } from '../components/FilterChip'
+import { Popover } from '../components/Menu'
 import { api } from '../lib/api'
 import { bus } from '../lib/bus'
 import { refreshProposals } from '../lib/proposals'
+import { refPath } from '../lib/refs'
 import { track } from '../lib/telemetry'
 import { hhmm } from '../lib/time'
-import type { ViewReview } from '../lib/types'
+import type { ViewProblems, ViewReview } from '../lib/types'
 import type { SourceKind } from '../lib/types'
+import { inferKind } from './params'
 import { Reader, ViewFailed } from './Reader'
+import { kindIn, useFolderStore } from './Tree'
 import { useFilesFilter, type FilesLabels } from './useLabels'
 import { ViewerFrame, type ViewLabelActions, type ViewQuote } from './ViewerFrame'
 import { usePinnedView, ViewUpdated } from './viewVersion'
@@ -25,7 +31,7 @@ import type { BuiltView } from './ViewsBar'
 interface Props {
   ws: string
   view: BuiltView
-  /** the file the view shows: the one a ref named, else the first it claims */
+  /** the file Raw shows: the one a ref named, else the first the view claims */
   path: string | null
   /** the file's kind, from the folder listing */
   kind: SourceKind
@@ -46,6 +52,9 @@ interface Props {
 
 export function ViewPane({ ws, view, path, kind, targetRef, quote, onQuoteMissing, labels, onMode, lead, first, onNewLabel }: Props) {
   const [mode, setMode] = useState<'view' | 'raw'>('view')
+  // a file or line picked in the head, which Raw shows in place of `path`
+  const [rawAt, setRawAt] = useState<{ path: string; ref?: string } | null>(null)
+  const folders = useFolderStore(ws)
   const [failure, setFailure] = useState<string | null>(null)
   const filter = useFilesFilter(ws)
   const filterLabel = filter ? labels.byId.get(filter.concept) : undefined
@@ -67,6 +76,7 @@ export function ViewPane({ ws, view, path, kind, targetRef, quote, onQuoteMissin
   useEffect(() => {
     setMode('view')
     setFailure(null)
+    setRawAt(null)
   }, [view.slug, targetRef])
   const reload = () => {
     track('view-open', { target: `view:${view.slug}`, detail: { from: 'view-pane', to: 'reload' } })
@@ -80,13 +90,23 @@ export function ViewPane({ ws, view, path, kind, targetRef, quote, onQuoteMissin
     track('view-open', { target: `view:${view.slug}`, detail: { from: 'view-pane', to: m } })
     setMode(m)
   }
+  const showRaw = (at: { path: string; ref?: string }) => {
+    setRawAt(at)
+    pick('raw')
+  }
+  const rawPath = rawAt?.path ?? path
+  const rawKind = rawAt ? (kindIn(folders.store, rawAt.path) ?? inferKind(rawAt.path)) : kind
   return (
     <div className="view-pane">
       <div className="view-pane-head">
         {lead}
         <div className="view-pane-title">
           <span className="view-pane-name">{view.name}</span>
-          {path && <span className="view-pane-file mono">{path}</span>}
+          <span className="view-pane-sub">
+            <ViewFiles view={view} current={mode === 'raw' ? rawPath : null} onPick={(f) => showRaw({ path: f })} />
+            {mode === 'raw' && rawPath && (view.n_files ?? 0) > 1 && <span className="view-pane-file mono">{rawPath}</span>}
+            <ReaderProblems ws={ws} slug={view.slug} version={pin.pinned || undefined} onPick={(ref) => showRaw({ path: refPath(ref) ?? rawPath ?? '', ref })} />
+          </span>
         </div>
         {pin.stale && mode === 'view' && <ViewUpdated onReload={reload} className="view-pane-updated" />}
         {filter && filterLabel && <FilterChip concept={filter.concept} name={filterLabel.name} value={filter.value} className="view-pane-filter" onClear={() => void api.deleteFilter(ws, 'files').catch(() => undefined)} />}
@@ -105,9 +125,9 @@ export function ViewPane({ ws, view, path, kind, targetRef, quote, onQuoteMissin
         {view.review && <ReviewMark ws={ws} slug={view.slug} review={view.review} onUndo={pin.follow} />}
       </div>
       <div className="view-pane-body">
-        {mode === 'raw' && path ? (
+        {mode === 'raw' && rawPath ? (
           <div className="view-pane-raw">
-            <Reader workspace={ws} path={path} kind={kind} targetRef={targetRef} labels={labels} only="raw" onMode={onMode} />
+            <Reader workspace={ws} path={rawPath} kind={rawKind} targetRef={rawAt ? rawAt.ref : targetRef} labels={labels} only="raw" onMode={onMode} />
           </div>
         ) : (
           <>
@@ -117,6 +137,89 @@ export function ViewPane({ ws, view, path, kind, targetRef, quote, onQuoteMissin
         )}
       </div>
     </div>
+  )
+}
+
+/** The files a view reads, in its head: their count, or the file's name when it reads one, which a click lists them
+ * under; a file picked there opens in Raw. */
+function ViewFiles({ view, current, onPick }: { view: BuiltView; current: string | null; onPick: (path: string) => void }) {
+  const [at, setAt] = useState<HTMLButtonElement | null>(null)
+  const [open, setOpen] = useState(false)
+  const files = view.files ?? (view.first_file ? [view.first_file] : [])
+  const n = view.n_files ?? files.length
+  if (!n) return null
+  return (
+    <>
+      <button ref={setAt} type="button" className="view-pane-files" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
+        {n === 1 ? files[0] : `${n.toLocaleString()} files`}
+      </button>
+      <Popover anchor={at} open={open} onClose={() => setOpen(false)} label={`The files ${view.name} reads`} className="view-pane-list">
+        {files.map((f) => (
+          <button
+            key={f}
+            type="button"
+            className={'view-pane-list-item mono' + (f === current ? ' is-current' : '')}
+            onClick={() => {
+              setOpen(false)
+              onPick(f)
+            }}
+          >
+            {f}
+          </button>
+        ))}
+        {n > files.length && <span className="view-pane-list-more">and {(n - files.length).toLocaleString()} more</span>}
+      </Popover>
+    </>
+  )
+}
+
+/** The lines of a view's files its reader could not read and left out, in red in the view's head: their count, which a
+ * click lists the first of, each with why; a line picked there opens in Raw. Nothing while there are none. */
+function ReaderProblems({ ws, slug, version, onPick }: { ws: string; slug: string; version?: string; onPick: (ref: string) => void }) {
+  const [problems, setProblems] = useState<ViewProblems | null>(null)
+  const [at, setAt] = useState<HTMLButtonElement | null>(null)
+  const [open, setOpen] = useState(false)
+  useEffect(() => {
+    let alive = true
+    setProblems(null)
+    api
+      .viewProblems(ws, slug, version)
+      .then((p) => alive && setProblems(p))
+      .catch(() => undefined)
+    return () => {
+      alive = false
+    }
+  }, [ws, slug, version])
+  if (!problems?.count) return null
+  const { count, examples } = problems
+  const lines = `${count.toLocaleString()} ${count === 1 ? 'line' : 'lines'}`
+  return (
+    <>
+      <button ref={setAt} type="button" className="view-pane-problems" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
+        {lines} could not be read
+      </button>
+      <Popover anchor={at} open={open} onClose={() => setOpen(false)} label="Lines the view could not read" className="view-pane-list">
+        <span className="view-pane-list-head">
+          {lines} of the data could not be read and {count === 1 ? 'is' : 'are'} left out of the view
+        </span>
+        {examples.map((x, i) => (
+          <button
+            key={`${x.ref}:${i}`}
+            type="button"
+            className="view-pane-list-item"
+            disabled={!x.ref}
+            onClick={() => {
+              setOpen(false)
+              onPick(x.ref)
+            }}
+          >
+            <span className="mono">{x.ref}</span>
+            <span className="view-pane-list-why">{x.why}</span>
+          </button>
+        ))}
+        {count > examples.length && <span className="view-pane-list-more">and {(count - examples.length).toLocaleString()} more</span>}
+      </Popover>
+    </>
   )
 }
 

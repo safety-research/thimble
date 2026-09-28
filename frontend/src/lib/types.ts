@@ -461,8 +461,11 @@ export interface View {
   ok: boolean
   /** the forms as written in a citation */
   forms: ViewForm[]
-  /** the first file it claims, which a view opened on its own shows */
+  /** the first file it claims, which Raw shows for a view opened on its own */
   first_file?: string | null
+  /** the files it claims, the first 500 of them, and how many there are */
+  files?: string[]
+  n_files?: number
   /** every claim is one extension's glob: a viewer for a file type, a mode of the File browser for the files it claims */
   file_type?: boolean
 }
@@ -475,6 +478,12 @@ export interface GraphDataset {
 /** A timeline card's dataset (canvas/DataViz.tsx). */
 export interface TimelineDataset {
   events: ({ time: string | number; label: string; lane?: string; end?: string | number } & Record<string, unknown>)[]
+}
+
+/** `GET /ws/{c}/views/{slug}/problems`: the lines of its files a view's reader could not read, the first few of them. */
+export interface ViewProblems {
+  count: number
+  examples: { ref: string; why: string }[]
 }
 
 /** What a view's page gets as `open` (`GET /ws/{c}/views/{slug}/resolve?ref=`). */

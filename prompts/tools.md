@@ -196,7 +196,7 @@ Propose a view, a page that shows records in a form their files hide, or a viewe
   "properties": {
     "name": {"type": "string", "description": "A short name in Title Case, as its tab shows it, such as Message Board."},
     "why": {"type": "string", "description": "What the analyst sees and why that helps, in whatever form fits the records, such as a wiki page with its edit history or a graph of who replies to whom."},
-    "claims": {"type": "array", "items": {"type": "string"}, "description": "Globs of the files it reads. For a viewer of one file type, the extension's glob, such as **/*.vtt."},
+    "claims": {"type": "array", "items": {"type": "string"}, "description": "Globs of every file that holds its records, by pattern rather than one file, such as runs/*/events.jsonl. For a viewer of one file type, the extension's glob, such as **/*.vtt."},
     "unit": {"type": "string", "description": "What one row, mark or card stands for, the field that keys it, and how many there are."},
     "overview": {"type": "string", "description": "What does the overview look like?"},
     "zoom": {"type": "string", "description": "How do you zoom?"},
@@ -691,7 +691,11 @@ No file of the corpus matches {claims}, so the view was not proposed and the dev
 
 ## propose_view-cap
 
-{view} was not proposed: an orientation proposes at most {n} views, and yours are {views}. To improve one, propose it again under its name.
+{view} was not proposed: a workspace gets at most {n} views from the orientation, and it has had {views}, counting any the analyst deleted. To improve one, propose it again under its name.
+
+## propose_view-deleted
+
+{view} was not proposed: the analyst deleted it, so it is not proposed again.
 
 ## propose_view-near
 

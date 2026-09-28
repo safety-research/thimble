@@ -9,6 +9,7 @@ in this process (the `inproc` fixture replaces views._runner with an exec of the
 from __future__ import annotations
 
 import contextlib
+import fnmatch
 import io
 import json
 import os
@@ -159,6 +160,28 @@ async def test_a_reader_resolves_a_line_and_a_key_and_its_answer_is_kept(ws, inp
     assert list((ws / "views" / "threads" / "cache").glob("*.index.pickle"))
 
 
+async def test_a_workspace_gets_four_views_from_the_orientation_and_a_deleted_one_stays_deleted(ws, monkeypatch):
+    monkeypatch.setattr(views, "_queue", lambda c, slug: None)
+
+    def propose(name, **k):
+        return views.propose(CORPUS, name, "The posts.", ["board.jsonl"], "Unit: a post", **k)
+
+    first = [propose(n, orientation=True) for n in ("One", "Two", "Three", "Four")]
+    with pytest.raises(views.HTTPException) as e:
+        propose("Five", orientation=True)
+    assert e.value.status_code == 409
+    assert propose("Two", orientation=True)["slug"] == first[1]["slug"], "one of the four is improved under its name"
+    # the analyst deletes a proposal and a view: neither frees a place or comes back, and their own asks still build
+    views.delete_proposal(CORPUS, first[0]["slug"])
+    views.delete_view(CORPUS, "threads")
+    for name in ("One", "Threads", "Five"):
+        with pytest.raises(views.HTTPException) as e:
+            propose(name, orientation=True)
+        assert e.value.status_code == 409, name
+    assert propose("One", asked=True)["status"] == "queued"
+    assert [p["name"] for p in views.list_proposals(CORPUS)] == ["Two", "Three", "Four", "One"]
+
+
 def test_the_frame_document_blocks_every_host_before_any_script(ws):
     doc = views.frame_document(views.read_view(CORPUS, "threads"))
     assert doc.lower().startswith("<!doctype html>")
@@ -210,7 +233,7 @@ def _save_example(name: str) -> str:
     return slug
 
 
-# per example, lines a sample file gets appended that its reader must count rather than fail on: (file, text, problems
+# per example, lines a sample file gets appended that its reader must report rather than fail on: (file, text, problems
 # they add)
 BROKEN = {
     "incident-timeline": [("agents.log", '2026-05-16T05:00:00Z INFO autoheal action=scan result=ok msg="matched \\d+"\n', 1),
@@ -225,13 +248,20 @@ BROKEN = {
 async def test_every_worked_example_answers_the_checks_over_its_sample(name, samples, inproc, bound, tmp_path, monkeypatch):
     """The reader's half of the checks: the index builds, the sampled lines and the declared keys resolve, each answer
     cites its place back, and every excerpt is literal text of the records it cites. The page's half is a test below.
-    Lines that do not parse, a CSV cell over two lines among them, are counted for the page rather than failing."""
+    Lines that do not parse, a CSV cell over two lines among them, are reported (reader_problems) rather than failing.
+    Each sample label the example ships (labels.json) marks some line of the files it runs over."""
     async def no_page(c, slug, states, **k):
         return [{"ok": True, "errors": [], "fetches": 0, "records": 1} for _ in states]
 
     monkeypatch.setattr(views, "shoot_states", no_page)
+    root = samples / name
+    files = [p for p in root.rglob("*") if p.is_file()]
+    for label in json.loads((views.EXAMPLES_DIR / name / "labels.json").read_text("utf-8")):
+        pattern = re.compile(label["spec"])
+        over = [p for p in files if any(fnmatch.fnmatchcase(p.relative_to(root).as_posix(), g) for g in label["paths"])]
+        assert any(pattern.search(line) for p in over for line in p.read_text("utf-8").splitlines()), label["name"]
     slug = _save_example(name)
-    before = (await views.reader_call(name, slug, "records", {}))["problems"]["count"]
+    before = (await views.reader_problems(name, slug))["count"]
     for rel, text, _ in BROKEN[name]:
         path = samples / name / rel
         old = "" if rel.endswith(".json") else path.read_text("utf-8")
@@ -241,7 +271,7 @@ async def test_every_worked_example_answers_the_checks_over_its_sample(name, sam
     checked = [r["locator"] for r in rep["checks"]]
     assert set(EXAMPLES[name][1]) <= set(checked)
     assert any(re.search(r"#L\d+$", c) for c in checked), "sampled lines were checked beside the keys"
-    problems = (await views.reader_call(name, slug, "records", {}))["problems"]
+    problems = await views.reader_problems(name, slug)
     assert problems["count"] == before + sum(n for *_, n in BROKEN[name]), problems
 
 
