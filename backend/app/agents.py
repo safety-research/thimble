@@ -209,7 +209,7 @@ def new_thread(c: str, anchor: str | None, anchor_text: str | None, title: str |
     ensure_main(c)
     cid = secrets.token_hex(4)
     clean = lambda v, n=200: (str(v or "").strip()[:n] or None)  # noqa: E731
-    meta = _defaults({"id": cid, "kind": KIND_THREAD, "role": "thread", "title": (title or "").strip() or _unique_title(c, _title_from(anchor, anchor_text)),
+    meta = _defaults({"id": cid, "kind": KIND_THREAD, "role": "thread", "title": _unique_title(c, (title or "").strip() or _title_from(anchor, anchor_text)),
                       "created_at": _now(), "parent": thread_parent(c, parent, anchor, element), "anchor": clean(anchor, 4000),
                       "anchor_text": clean(anchor_text, ANCHOR_TEXT_CHARS), "anchor_surface": clean(surface, 40),
                       "anchor_element": clean(element, 80), "anchor_selector": clean(selector, 400)})

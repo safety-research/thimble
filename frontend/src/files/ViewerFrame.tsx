@@ -397,8 +397,10 @@ export function ViewerFrame({ ws, slug, targetRef, path, title, fit, labels = NO
           const question = String(d.question ?? '').trim()
           if (!question) return post({ type: P + 'asked', error: 'the question is empty' })
           const anchor = typeof d.ref === 'string' && d.ref ? d.ref : `view:${slug}`
+          // named by the question's first words, as a ⌘-click's thread is by the text it points at
+          const title = (question.match(/[A-Za-z0-9]+/g) ?? []).slice(0, 4).join('-').toLowerCase() || null
           try {
-            const meta = await api.createThread(ws, { anchor, anchor_text: String(d.text ?? '') || null, surface: 'files', element: `view:${slug}`, selector: '', image: null, parent: 'main', text: question })
+            const meta = await api.createThread(ws, { anchor, anchor_text: String(d.text ?? '') || null, title, surface: 'files', element: `view:${slug}`, selector: '', image: null, parent: 'main', text: question })
             post({ type: P + 'asked', thread: meta.name || meta.title || meta.id })
             bus.emit('openChat', { chatId: meta.id })
           } catch (err) {
