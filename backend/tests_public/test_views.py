@@ -676,47 +676,130 @@ async def test_every_worked_example_answers_the_checks_over_its_sample(name, sam
 
 def test_each_worked_example_describes_its_files():
     """A builder maps an example onto other data by what its files hold: view.json's `data` and the reader's opening
-    comment name each claimed file and each field of its records, and the sample holds those files."""
+    comment name each claim, each claim matches files of the sample, and both name every field of the records in its
+    JSON-lines files."""
     for name in EXAMPLES:
         d = views.EXAMPLES_DIR / name
         raw = json.loads((d / "view.json").read_text("utf-8"))
         comment = (d / "reader.py").read_text("utf-8").split("\nimport ", 1)[0]
+        sample = sorted(p.relative_to(d / "sample").as_posix() for p in (d / "sample").rglob("*") if p.is_file())
         for claim in raw["claims"]:
-            assert (d / "sample" / claim).is_file(), (name, claim)
-            fields = set().union(*(json.loads(ln) for ln in (d / "sample" / claim).read_text("utf-8").splitlines()))
+            files = [f for f in sample if views.glob_matches(f, claim)]
+            assert files, (name, claim)
             assert claim in raw["data"] and claim in comment, (name, claim)
-            for field in fields:
-                assert f"`{field}`" in raw["data"] and re.search(rf"^#   {field} ", comment, re.M), (name, claim, field)
+            for f in (f for f in files if f.endswith(".jsonl")):
+                fields = set().union(*(json.loads(ln) for ln in (d / "sample" / f).read_text("utf-8").splitlines()))
+                for field in fields:
+                    assert f"`{field}`" in raw["data"] and re.search(rf"^#   {field} ", comment, re.M), (name, f, field)
 
 
 async def test_the_incident_timeline_example_puts_every_source_on_one_axis_and_gathers_its_units(samples, inproc,
                                                                                                     bound):
     """The overview sends every record of the five sources in time order, with each field's values named, and while a
-    label is on its values with each record's marks; a line opens in its incident, a record's details name the record
-    it answers, an incident cites its records in time order, and a window cites the records inside it."""
+    label is on its values with each record's marks. A record's line is the one that holds its text, in every file. A
+    line opens its record in its incident, and a line that holds none the nearest record; a record's details name the
+    record it answers, in another file too; an incident cites its records in time order, and a window cites the
+    records inside it."""
     name = "incident-timeline"
     slug = _save_example(name)
-    rows = [json.loads(ln) for ln in (samples / name / "events.jsonl").read_text("utf-8").splitlines()]
     over = await views.reader_call(name, slug, "records", {"op": "overview"})
-    cols, names = over["cols"], over["names"]
-    assert len(cols["r"]) == len(rows) and cols["t"] == sorted(cols["t"])
-    assert {names["source"][v] for v in cols["source"]} == {r["source"] for r in rows}
+    cols, names, files = over["cols"], over["names"], over["files"]
+    refs_ = [f"{files[f]}#L{ln}" for f, ln in zip(cols["f"], cols["ln"])]
+    assert cols["t"] == sorted(cols["t"]) and len(set(refs_)) == len(refs_)
+    assert {names["source"][v] for v in cols["source"]} == {"alert", "deploy", "chat", "ticket", "agent"}
+    assert {r.split("/")[0].split("#")[0] for r in refs_} == {"agents.log", "alerts", "chat", "deploys.csv", "tickets"}
     assert over["marks"] == [] and set(cols["m"]) == {-1}
     probed = await views.reader_call(name, slug, "records", {"op": "overview"}, labels=views.probe_context())
     assert len(probed["marks"]) == 1, "the label that is on lists its value, the colour the page draws it in"
     assert set(probed["cols"]["m"]) == {-1, 0} and probed["cols"]["mb"] == [m + 1 for m in probed["cols"]["m"]]
-    one = await views.resolve_locator(name, slug, {"path": "events.jsonl", "fragment": "L1"})
-    assert one["excerpt"] == rows[0]["text"] and one["key"] == rows[0]["incident"]
-    child = next(n for n, r in enumerate(rows, 1) if r.get("re"))
-    parent = next(n for n, r in enumerate(rows, 1) if r["id"] == rows[child - 1]["re"])
-    rec = await views.reader_call(name, slug, "records", {"op": "record", "r": cols["r"][cols["ln"].index(child)]})
-    assert rec["answers"]["ref"] == f"events.jsonl#L{parent}"
-    order = sorted(range(1, len(rows) + 1), key=lambda n: (views_time(rows[n - 1]["at"]), n))
+    texts = dict((await views.reader_call(name, slug, "records", {"op": "texts", "rows": cols["r"]}))["texts"])
+    for i, ref in zip(cols["r"], refs_):
+        path, n = ref.split("#L")
+        line = _sample_line(samples / name / path, int(n))
+        assert texts[i] and (texts[i] in line or json.dumps(texts[i], ensure_ascii=False)[1:-1] in line), ref
+    one = await views.resolve_locator(name, slug, {"path": "agents.log", "fragment": "L1"})
+    assert one["refs"] == ["agents.log#L1"] and one["key"] == "INC-311" and one["excerpt"] in _sample_line(samples / name / "agents.log", 1)
+    head = await views.resolve_locator(name, slug, {"path": "chat/inc-312.json", "fragment": "L1"})
+    first = min((ref for ref in refs_ if ref.startswith("chat/inc-312.json#")), key=lambda r: int(r.split("#L")[1]))
+    assert head["refs"][0].startswith("chat/inc-312.json#L1-") and head["target"]["r"] == cols["r"][refs_.index(first)]
+    at = {ref: k for k, ref in enumerate(refs_)}
+    opened = await views.reader_call(name, slug, "records", {"op": "record", "r": cols["r"][at["agents.log#L1"]]})
+    fired = _sample_line_of(samples / name / "alerts/monitor-20260516-0000.jsonl", '"alr-42"')
+    assert opened["answers"]["ref"] == f"alerts/monitor-20260516-0000.jsonl#L{fired}"
+    assert opened["record"]["source"] == "agent" and opened["record"]["re"] == "alr-42"
     incident = await views.resolve_locator(name, slug, {"key": "INC-312"})
-    assert incident["refs"] == [f"events.jsonl#L{n}" for n in order if rows[n - 1].get("incident") == "INC-312"]
+    assert incident["refs"] == [ref for k, ref in enumerate(refs_) if names["incident"][cols["incident"][k]] == "INC-312"]
     window = await views.resolve_locator(name, slug, {"key": "2026-05-16T08:00..2026-05-16T09:00"})
-    a, b = views_time("2026-05-16T08:00:00Z"), views_time("2026-05-16T09:00:00Z")
-    assert len(window["refs"]) == sum(a <= views_time(r["at"]) < b for r in rows) > 0
+    a, b = (views_time(f"2026-05-16T{h}:00:00Z") - over["t0"] for h in ("08", "09"))
+    assert len(window["refs"]) == sum(a <= t < b for t in cols["t"]) > 0
+
+
+def _sample_line(path: Path, n: int) -> str:
+    return path.read_text("utf-8").splitlines()[n - 1]
+
+
+def _sample_line_of(path: Path, needle: str) -> int:
+    """The number of the first line of the file that holds `needle`."""
+    return next(n for n, ln in enumerate(path.read_text("utf-8").splitlines(), 1) if needle in ln)
+
+
+async def test_the_incident_timeline_reader_cleans_what_its_sources_get_wrong(samples, inproc, bound):
+    """The sources' clocks all land in UTC, renamed fields and free text are read as the fields they stand for, an
+    alert delivered twice is one record, a torn line, join notices and the monitor's start line are none, tickets are
+    the files on disk with the index's fields, people get their names, and links between sources become `re`."""
+    name = "incident-timeline"
+    slug = _save_example(name)
+    d = samples / name
+    over = await views.reader_call(name, slug, "records", {"op": "overview"})
+    cols, names, files = over["cols"], over["names"], over["files"]
+    refs_ = [f"{files[f]}#L{ln}" for f, ln in zip(cols["f"], cols["ln"])]
+
+    def rec(path: str, needle: str) -> dict:
+        """The record on the first line of the file that holds `needle`, its fields named, its time in epoch seconds."""
+        k = refs_.index(f"{path}#L{_sample_line_of(d / path, needle)}")
+        return {"t": over["t0"] + cols["t"][k], "re": refs_[cols["re"][k]] if cols["re"][k] >= 0 else None,
+                **{f: names[f][cols[f][k]] for f in names}}
+
+    # every clock in UTC: local time with and without an offset, epoch ms, epoch seconds, email dates, a naive UTC log
+    assert rec("deploys.csv", ",rollback,")["t"] == views_time("2026-05-16T08:28:52Z")
+    assert rec("deploys.csv", "2026-05-16T03:00:05+01:00")["t"] == views_time("2026-05-16T02:00:05Z")
+    assert rec("alerts/monitor-20260516-0000.jsonl", '"alr-41"')["t"] == views_time("2026-05-16T02:57:20Z")
+    assert rec("chat/inc-312.json", "ack, looking")["t"] == views_time("2026-05-16T08:15:26Z")
+    assert rec("tickets/5514.txt", "bank has blocked")["t"] == views_time("2026-05-16T08:21:55Z")
+    assert rec("tickets/5525.txt", "boarding pass twice")["t"] == views_time("2026-05-16T08:52:30Z")
+    assert rec("agents.log", "2026-05-16 08:04:58")["t"] == views_time("2026-05-16T08:04:58Z")
+    # the monitor's renamed fields and capitals, and a null service taken from the summary
+    old, new = rec("alerts/monitor-20260516-0000.jsonl", '"alr-41"'), rec("alerts/monitor-20260516-0431.jsonl", '"alr-57"')
+    assert (old["service"], old["kind"], new["service"], new["kind"]) == ("payments", "fired", "payments", "resolved")
+    assert rec("alerts/monitor-20260516-0431.jsonl", '"alr-61"')["service"] == "web"
+    # an alert delivered twice is one record, and its second line opens the first
+    lines = [n for n, ln in enumerate((d / "alerts/monitor-20260516-0431.jsonl").read_text("utf-8").splitlines(), 1) if '"id": "alr-50"' in ln]
+    assert len(lines) == 2 and f"alerts/monitor-20260516-0431.jsonl#L{lines[1]}" not in refs_
+    again = await views.resolve_locator(name, slug, {"path": "alerts/monitor-20260516-0431.jsonl", "fragment": f"L{lines[1]}"})
+    assert again["target"]["r"] == cols["r"][refs_.index(f"alerts/monitor-20260516-0431.jsonl#L{lines[0]}")]
+    # lines that hold no record: the monitor's start, join notices, the log's torn last line
+    assert "alerts/monitor-20260516-0431.jsonl#L1" not in refs_
+    joins = [n for n, ln in enumerate((d / "chat/inc-312.json").read_text("utf-8").splitlines(), 1) if "has joined" in ln]
+    assert joins and not {f"chat/inc-312.json#L{n}" for n in joins} & set(refs_)
+    log = (d / "agents.log").read_text("utf-8")
+    assert not log.endswith("\n") and f"agents.log#L{len(log.splitlines())}" not in refs_
+    # tickets: the files on disk, with the index's fields; free text read as the priority it names
+    assert not any(r.startswith(("tickets/5516", "tickets/index.csv", "chat/users.json")) for r in refs_)
+    assert rec("tickets/5541.txt", "Can I bring a bicycle")["severity"] == rec("tickets/5502.txt", "Left a blue umbrella")["severity"] == ""
+    assert (rec("tickets/5519.txt", "Double charge again")["severity"], rec("tickets/5514.txt", "bank has blocked")["severity"]) == ("urgent", "high")
+    assert rec("deploys.csv", "rolled back from")["outcome"] == "ok"
+    assert rec("deploys.csv", ",rollback,")["incident"] == rec("deploys.csv", "rolled back from")["incident"] == "INC-312"
+    # people: a login, a chat id, a guest's profile, a bot
+    assert rec("deploys.csv", ",rollback,")["actor"] == rec("chat/inc-312.json", "rolling payments back")["actor"] == "Tobias"
+    assert rec("chat/inc-312.json", "Declaring INC-312")["actor"] == "Dara"
+    assert rec("chat/ops.json", "Release train done")["actor"] == "deploybot"
+    # links across files: a resolution in the new monitor's file, a thread reply, a ticket reply, a deploy, a chat command
+    at = lambda path, needle: f"{path}#L{_sample_line_of(d / path, needle)}"  # noqa: E731
+    assert rec("alerts/monitor-20260516-0431.jsonl", '"alr-46"')["re"] == at("alerts/monitor-20260516-0000.jsonl", '"alr-45"')
+    assert rec("chat/inc-312.json", "8 replicas x 40")["re"] == at("chat/inc-312.json", "ack, looking")
+    assert rec("tickets/5509.txt", "Boarded with the pass")["re"] == at("tickets/5509.txt", "Paid at")
+    assert rec("deploys.csv", "rolled back from")["re"] == at("deploys.csv", ",rollback,")
+    assert rec("agents.log", "action=pause")["re"] == at("chat/inc-312.json", "pausing autoheal")
 
 
 async def test_the_repository_example_compares_any_runs_and_filters_by_who_did_what(samples, inproc, bound):

@@ -1,0 +1,15 @@
+Ticket: 5513
+Subject: Boarding pass email missing
+Requester: N. Petrakis <n.petrakis@example.net>
+
+From: N. Petrakis <n.petrakis@example.net>
+Date: Sat, 16 May 2026 09:19:02 +0100
+Status: open
+
+The boarding pass email never came. Booking MF-20417.
+
+From: Mateo <mateo@marrowby-ferries.example>
+Date: Sat, 16 May 2026 10:21:40 +0100
+Status: closed
+
+Pass sent again at 10:20.
