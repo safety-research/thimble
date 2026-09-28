@@ -4,6 +4,8 @@
 //   quoted    whether that passage showed; when it did not, onQuoteMissing
 //   fetch     answered with reader.records(index, query)
 //   cite      a ⌘-click inside the frame opens the pointer's box on that element
+//   ask       a question typed in the view's own box, sent as the pointer's box sends one: a thread about the view
+//             (or the ref the page names), with what the page says it shows, hung under main; answered with `asked`
 //   navigate  another place, opened the way a chip opens it (lib/teleport)
 //   size      the document's height, used when the frame sizes to its content (`fit`)
 //   anchors   the data-anchor refs the page shows, answered with `labels`: the marks of its records (labels.ts
@@ -389,6 +391,19 @@ export function ViewerFrame({ ws, slug, targetRef, path, title, fit, labels = NO
           const rect = d.rect ? toPage(frame, d.rect) : frame.getBoundingClientRect()
           const payload = { anchor: d.ref, text: String(d.text ?? ''), element: String(d.element ?? ''), rect, frame, view: slug }
           bus.emit('pointAt', payload)
+          return
+        }
+        case P + 'ask': {
+          const question = String(d.question ?? '').trim()
+          if (!question) return post({ type: P + 'asked', error: 'the question is empty' })
+          const anchor = typeof d.ref === 'string' && d.ref ? d.ref : `view:${slug}`
+          try {
+            const meta = await api.createThread(ws, { anchor, anchor_text: String(d.text ?? '') || null, surface: 'files', element: `view:${slug}`, selector: '', image: null, parent: 'main', text: question })
+            post({ type: P + 'asked', thread: meta.name || meta.title || meta.id })
+            bus.emit('openChat', { chatId: meta.id })
+          } catch (err) {
+            post({ type: P + 'asked', error: (err as Error).message })
+          }
           return
         }
         case P + 'point':

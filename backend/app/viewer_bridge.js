@@ -9,6 +9,10 @@
 //   fetch {id, query}      frame to page, answered by result {id, data} from reader.records (window.thimble.fetch)
 //   cite {ref, text, ...}  frame to page: a ⌘-click on an element with data-anchor, or on any other part of the view
 //                          (its legend, a control, the empty page), asked about as the view itself, `view:<slug>`
+//   ask {question, text, ref}
+//                          frame to page: a question typed in the view's own box, sent as a thread about `ref` (the
+//                          view itself when none) with `text`, what the view shows; answered by asked {thread} or
+//                          asked {error}, which window.thimble.ask's promise resolves or rejects with
 //   navigate {ref}         frame to page: open another place, in this view or anywhere in thimble (window.thimble.navigate)
 //   size {height}          frame to page: the document's height, for a frame that sizes to its content
 //   anchors {refs}         frame to page: the data-anchor values that appeared since the last report
@@ -44,6 +48,7 @@
   var last = null
   var pointed = null
   var picked = null // the data-anchor of the element the analyst last clicked since the last `open`
+  var asking = [] // thimble.ask's promises, answered in order
   function post(msg) {
     try {
       parent.postMessage(msg, '*')
@@ -120,6 +125,14 @@
     cite: function (ref, text, element, el) {
       post({ type: P + 'cite', ref: String(ref), text: String(text || ''), element: String(element || ''), rect: el ? rectOf(el) : null })
     },
+    /** ask the analyst's Claude Code session a question typed in the view, as a thread about `ref` (the view itself when
+     *  none), with `text` saying what the view shows; resolves with the thread's name */
+    ask: function (question, text, ref) {
+      return new Promise(function (resolve, reject) {
+        asking.push({ resolve: resolve, reject: reject })
+        post({ type: P + 'ask', question: String(question || ''), text: String(text || ''), ref: ref ? String(ref) : '' })
+      })
+    },
     /** open another place: a view ref, a file ref or any other ref thimble knows */
     navigate: function (ref) {
       post({ type: P + 'navigate', ref: String(ref) })
@@ -172,6 +185,9 @@
         }
       }
       paint()
+    } else if (d.type === P + 'asked') {
+      var a = asking.shift()
+      if (a) d.error ? a.reject(new Error(String(d.error))) : a.resolve(String(d.thread || ''))
     } else if (d.type === P + 'cmd') {
       setCmdCursor(d.cursor)
       cmdHeld(d.on)

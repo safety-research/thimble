@@ -1,8 +1,8 @@
 // The frame half of a view's bridge (backend/app/viewer_bridge.js), which a custom view's page loads first and which is
 // the only way the view, sandboxed with no network, talks to thimble. Run in a jsdom window of its own: the bridge says
 // it is ready and reports each data-anchor once; window.thimble.fetch posts a query and resolves with the page's answer
-// to that id; a message from anywhere but the parent page is ignored; and with a label filter on, what the filter drops
-// is hidden.
+// to that id; window.thimble.ask posts a question and resolves with the thread; a message from anywhere but the parent
+// page is ignored; and with a label filter on, what the filter drops is hidden.
 import { readFileSync } from 'node:fs'
 import path from 'node:path'
 import { JSDOM } from 'jsdom'
@@ -55,6 +55,19 @@ describe('the view bridge', () => {
     fromPage({ type: 'thimble:result', id: q1.id, data: [{ n: 1 }] })
     await expect(got).resolves.toEqual([{ n: 1 }])
     await expect(bad).rejects.toThrow('no such page')
+  })
+
+  test('ask posts the question with what the view shows, and resolves with the thread the page opened', async () => {
+    const got = win().thimble.ask('who confirmed it?', '12 cards of 5 accounts')
+    const bad = win().thimble.ask('')
+    expect(of('ask')).toEqual([
+      { type: 'thimble:ask', question: 'who confirmed it?', text: '12 cards of 5 accounts', ref: '' },
+      { type: 'thimble:ask', question: '', text: '', ref: '' },
+    ])
+    fromPage({ type: 'thimble:asked', thread: 'who-confirmed-it' })
+    fromPage({ type: 'thimble:asked', error: 'the question is empty' })
+    await expect(got).resolves.toBe('who-confirmed-it')
+    await expect(bad).rejects.toThrow('the question is empty')
   })
 
   test('a message from anything but the parent page is ignored', async () => {
