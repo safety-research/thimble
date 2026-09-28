@@ -2231,7 +2231,9 @@ def cmd_ensure(args: argparse.Namespace) -> int:
             second = resume_lines(url, name, archive)
         else:
             second = [RESUME_LINE] if not opened and resumes(url, name) else []
-        if args.session and leave_link(str(args.session), ui_url(name)):
+        # with the plugin's hooks off no Stop hook shows the link, so the page opens without the key
+        if (args.session and not cc_channel.hooks_blocked(cwd, plugin_root())
+                and leave_link(str(args.session), ui_url(name))):
             print(LINK_LINE)
         else:
             print(f"thimble: {ui_url(name, key=not args.session and to_terminal())}")

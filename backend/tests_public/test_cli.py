@@ -108,8 +108,13 @@ def test_up_prints_the_url_and_opens_a_sessions_folder(home, data, monkeypatch, 
     assert capsys.readouterr().out.splitlines() == [cli.LINK_LINE]
     assert (home / "links" / "s9").read_text() == f"http://127.0.0.1:5300/?ws=calls#k={key}"
     assert posted == [("http://127.0.0.1:8300/api/corpora/register", {"path": str(folder), "exact": True})]
+    (tmp_path / "cc").mkdir()
+    (tmp_path / "cc" / "settings.json").write_text(json.dumps({"disableAllHooks": True}))
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "cc"))
+    assert cli.main(["ensure", "--cwd", str(folder), "--session", "s8"]) == 0
+    assert capsys.readouterr().out.splitlines() == ["thimble: http://127.0.0.1:5300/?ws=calls"], "no hook to show it"
     assert cli.main(["up", "--cwd", str(folder)]) == 0, "a bare up read by a program"
-    assert capsys.readouterr().out.splitlines() == ["thimble: http://127.0.0.1:5300/"] and len(posted) == 1
+    assert capsys.readouterr().out.splitlines() == ["thimble: http://127.0.0.1:5300/"] and len(posted) == 2
     monkeypatch.setattr(cli, "to_terminal", lambda: True)
     assert cli.main(["up", "--cwd", str(folder)]) == 0, "a bare up from a shell"
     assert capsys.readouterr().out.splitlines() == [f"thimble: http://127.0.0.1:5300/#k={key}"]
