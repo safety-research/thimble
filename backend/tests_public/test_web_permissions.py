@@ -56,10 +56,14 @@ async def test_an_unanswered_request_is_denied_after_the_wait_and_its_card_says_
     one = _request("WebFetch", PAGE)
     await _waiting(chat)
     two = _request("WebFetch", OTHER_PAGE)
+    long = _request("WebFetch", {"url": f"{PAGE['url']}?q={'x' * agent_session.ALSO_CHARS}"})
+    [first, own] = await _waiting(chat, 2)
+    assert first["also"] == [OTHER_PAGE["url"]] and "also" not in own, "a call the card cannot list whole asks on its own"
     denied = {"behavior": "deny", "message": agent_session.timed_out_line(0.1)}
-    assert await one == denied and await two == denied
+    assert await one == denied and await two == denied and await long == denied
+    assert agent_session.answer(CORPUS, chat, own["id"], False)
     [p] = _card(chat)
-    assert p["expired"] and p["what"] == PAGE["url"] and [e["what"] for e in heard] == [PAGE["url"]]
+    assert p["expired"] and p["what"] == PAGE["url"] and [e["what"] for e in heard][0] == PAGE["url"]
     assert not agent_session.asking(CORPUS, KEY)
     assert agent_session.answer(CORPUS, chat, p["id"], False) and _card(chat) == []
     assert not agent_session.answer(CORPUS, chat, p["id"], False)
@@ -71,3 +75,5 @@ async def test_an_unanswered_request_is_denied_after_the_wait_and_its_card_says_
     agent_session.unhost(CORPUS, KEY)
     assert await waiting == {"behavior": "deny", "message": agent_session.GONE_LINE}
     assert _card(chat) == [] and await _request("Bash", {"command": "ls"}) == {"behavior": "deny", "message": agent_session.GONE_LINE}
+    assert agent_session.web_rule("WebFetch", {"url": "https://evil.example\\@docs.python.org/"}) is None, \
+        "Claude Code would fetch evil.example"

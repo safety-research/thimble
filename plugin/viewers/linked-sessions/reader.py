@@ -25,7 +25,9 @@
 # What the reader cleans up, since the harness changed between runs and runs end untidily:
 #   - timestamps come as ISO 8601 with Z or an offset, with or without milliseconds, or as epoch milliseconds;
 #   - a line written twice (the same uuid) counts once, and a session's lines are put in time order;
-#   - a line that is not JSON, such as the last line of a session that was cut off, is skipped;
+#   - a line that is not JSON, such as the last line of a session that was cut off, a line with no time the reader can
+#     read, and an index that is not JSON are left out, and the page says how many there are, with the first few
+#     (`problems`);
 #   - the files on disk are the sessions: the index only names the team and the agents, and it may miss a session or
 #     list one that is gone;
 #   - r1's harness flags an error with isError and the later ones with is_error, and r3's calls the Task tool Agent;
@@ -63,6 +65,14 @@ PATH = re.compile(r"(?<![\w./:-])((?:[\w.-]+/)+[\w.-]+\.[A-Za-z]\w*)")  # a path
 EXIT = re.compile(r"Exit code (\d+)")
 DENIED = re.compile(r"Permission to use \S+ has been denied[.:]?\s*")
 AGENT_ID = re.compile(r"agentId: (\w+)")
+PROBLEMS_SHOWN = 5  # lines that do not parse which the page names, beside their count
+
+
+def _problem(problems, ref, why):
+    """Note that the line `ref` holds no record because it does not parse (`problems`: a count and the first few)."""
+    problems["count"] += 1
+    if len(problems["examples"]) < PROBLEMS_SHOWN:
+        problems["examples"].append(f"{ref}: {why}")
 
 
 def _epoch(t):
@@ -180,8 +190,9 @@ def _where(path):
     return (parts[-2] if len(parts) >= 2 else "."), name, None
 
 
-def _run_index(path, offs):
-    """{team, team_line, names: {session or agent id: agent name}} from a run's index, in either version."""
+def _run_index(path, offs, problems):
+    """{team, team_line, names: {session or agent id: agent name}} from a run's index, in either version; {} for an index
+    that does not parse, which is a problem."""
     with open(path, "rb") as f:
         raw = f.read()
     pos = 0
@@ -191,8 +202,9 @@ def _run_index(path, offs):
     try:
         doc = json.loads(raw)
     except ValueError:
-        return {}
+        doc = None
     if not isinstance(doc, dict):
+        _problem(problems, f"{path}#L1", "the index is not a JSON object")
         return {}
     names = {}
     for e in doc.get("entries") or doc.get("sessions") or []:
@@ -204,28 +216,31 @@ def _run_index(path, offs):
     return {"team": str(doc.get("team") or ""), "team_line": team_line, "names": names}
 
 
-def _transcript(path, offs, dups):
+def _transcript(path, offs, dups, problems):
     """A session's lines in time order, each (time, line number, ref, record). A line that is not JSON or has no time
-    is skipped, and a line whose uuid came before is noted in `dups` as the ref it repeats."""
+    is a problem, and a line whose uuid came before is noted in `dups` as the ref it repeats."""
     lines, seen = [], {}
     with open(path, "rb") as f:
         pos = 0
         for n, raw in enumerate(f, 1):
             offs.append(pos)
             pos += len(raw)
+            ref = f"{path}#L{n}"
             try:
                 r = json.loads(raw)
             except ValueError:
-                continue
+                r = None
             if not isinstance(r, dict):
+                if raw.strip():
+                    _problem(problems, ref, "not a JSON object")
                 continue
-            ref = f"{path}#L{n}"
             u = r.get("uuid")
             if u and u in seen:
                 dups[ref] = seen[u]
                 continue
             t = _epoch(r.get("timestamp"))
             if t is None:
+                _problem(problems, ref, "no timestamp the reader can read")
                 continue
             if u:
                 seen[u] = ref
@@ -259,18 +274,20 @@ def _session_lines(sid, lines):
 
 def build_index(paths):
     """{"offsets": {path: [byte offset of line n at n-1]}, "runs": {run: facts}, "sessions": {id: facts}, "calls": [facts],
-    "messages": [facts], "lines": {ref: (what it holds, its key)}, "values": {field: [values in their order]}}. Times
+    "messages": [facts], "lines": {ref: (what it holds, its key)}, "values": {field: [values in their order]},
+    "problems": {count, examples} of the lines that do not parse}. Times
     are seconds on the run's clock. A run's `sessions` are in tree order, each after the session that spawned it; a
     call's `words` is the lowercased text a search looks in."""
     offsets, dups, indexes, sessions, raw_calls, raw_msgs = {}, {}, {}, {}, [], []
+    problems = {"count": 0, "examples": []}
     for path in sorted(paths):
         offs = offsets.setdefault(path, [])
         if not path.endswith(".jsonl"):
             parts = path.replace(os.sep, "/").split("/")
-            indexes[parts[-2] if len(parts) > 1 else "."] = dict(_run_index(path, offs), path=path)
+            indexes[parts[-2] if len(parts) > 1 else "."] = dict(_run_index(path, offs, problems), path=path)
             continue
         run, sid, lead = _where(path)
-        lines = _transcript(path, offs, dups)
+        lines = _transcript(path, offs, dups, problems)
         if not lines:
             continue
         msgs, calls = _session_lines(sid, lines)
@@ -385,7 +402,7 @@ def build_index(paths):
     # what every run's lead was asked, when they were all asked the same
     prompts = {_prompt_text(offsets, sessions[runs[k]["sessions"][0]]["prompt"]) for k in order}
     return {"offsets": offsets, "runs": runs, "order": order, "task": prompts.pop() if len(prompts) == 1 else None, "sessions": sessions,
-            "calls": calls, "messages": messages, "lines": held, "values": values}
+            "calls": calls, "messages": messages, "lines": held, "values": values, "problems": problems}
 
 
 def _record(offsets, ref):
@@ -527,7 +544,7 @@ def _overview(index, query):
             "calls": [{"ref": c["ref"], "s": c["s"], "t": c["t"], "d": c["d"], "tool": c["tool"], "out": c["out"], "ftype": c["ftype"],
                        "dur": c["dur"], "files": c["files"], "child": c["child"], "input": c["input"][:80], "m": sel.marks.get(c["i"], [])}
                       for c in passing],
-            "task": ix["task"], "totals": {"runs": len(ix["runs"]), "sessions": len(ix["sessions"])},
+            "task": ix["task"], "totals": {"runs": len(ix["runs"]), "sessions": len(ix["sessions"])}, "problems": ix["problems"],
             "days": sorted({ix["runs"][k]["started"][:10] for k in ix["order"]}),
             "messages": hits, "fields": fields, "classes": classes, "none": none, "total": len(ix["calls"])}
 

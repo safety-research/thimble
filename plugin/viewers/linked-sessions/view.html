@@ -27,6 +27,7 @@
   #ds .stats { font-size: var(--text-ui-sm); color: var(--text-tertiary); white-space: nowrap; }
   #ds b, .counts b, .legend b { font-weight: 500; color: var(--text-primary); font-variant-numeric: tabular-nums; }
   #bar { padding: 12px 16px 0; border-bottom: 1px solid var(--border-subtle); }
+  #problems { margin: 0; padding: 10px 16px 0; font: 400 var(--text-xs) / 1.4 var(--font-body); color: var(--status-warning); overflow-wrap: anywhere; }
   .r1, .r2 { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
   .r2 { gap: 8px 16px; padding: 10px 0 11px; }
   .search { position: relative; flex: 0 1 240px; min-width: 170px; }
@@ -217,6 +218,7 @@
 </style>
 </head>
 <body>
+<p id="problems" role="status" hidden></p>
 <main id="view"></main>
 <script>
 // ------------------------------------------------------------------------------------------------------------ setup
@@ -319,16 +321,26 @@ const inWin = (c) => !st.win || (c.t + c.d >= st.win[0] && c.t <= st.win[1])
 const full = () => !st.win
 const winOf = () => st.win || [0, ov ? ov.span : 1]
 const agentName = (s) => s.label || s.agent
-const tag = (id) => (RUN[id] ? `${runName(id)} <span class="run">all sessions</span>` : S[id] ? `${esc(agentName(S[id]))} <span class="run">${runName(S[id].run)}</span>` : esc(id))
+const tag = (id) => (RUN[id] ? `${esc(runName(id))} <span class="run">all sessions</span>` : S[id] ? `${esc(agentName(S[id]))} <span class="run">${esc(runName(S[id].run))}</span>` : esc(id))
 
 // ------------------------------------------------------------------------------------------------------------ fetches
 const selection = () => ({ filters: Object.fromEntries(Object.entries(st.filters).map(([f, h]) => [f, [...h]])), search: st.search, hide: [...st.hide], win: st.win })
+
+// the lines the reader could not parse: how many, and the first few
+function showProblems(p) {
+  const el = document.getElementById('problems')
+  el.hidden = !(p && p.count)
+  if (el.hidden) return
+  const one = p.count === 1
+  el.textContent = `${p.count} ${one ? 'line' : 'lines'} of the data could not be read and ${one ? 'is' : 'are'} left out: ${p.examples.join('; ')}${p.count > p.examples.length ? '; …' : ''}`
+}
 
 async function loadOverview() {
   const my = ++seq
   const got = await thimble.fetch({ op: 'overview', ...selection() })
   if (my !== seq) return false
   ov = got
+  showProblems(ov.problems)
   S = {}, RUN = {}, CALL = {}
   for (const r of ov.runs) RUN[r.id] = r
   for (const s of ov.sessions) { S[s.id] = { ...s, calls: [], tasks: [] } }
@@ -582,9 +594,9 @@ function labelCol(rows, { w, compareCol = true, badges = null, cols }) {
     const cb = compareCol && r.kind !== 'sum' ? `<span class="cb ${on ? 'on' : ''}" role="checkbox" aria-checked="${on}" data-act="tick" data-id="${esc(id)}" title="Select to compare">${on ? ico.check : ''}</span>` : ''
     const badge = badges && badges[id] ? `<span class="badge" style="position:absolute;left:0">${badges[id]}</span>` : ''
     let name, nums = '', act = '', anchor = ''
-    if (r.kind === 'run') { name = `${st.collapsed.has(r.run.id) ? ico.right : ico.caret}${runName(r.run.id)}<span class="setup">${esc(r.run.team)}</span>`; nums = numOf(r.run); act = `data-act="collapse" data-id="${esc(r.run.id)}"`; anchor = `data-anchor="${esc(unitRef(r.run.key))}"` }
+    if (r.kind === 'run') { name = `${st.collapsed.has(r.run.id) ? ico.right : ico.caret}${esc(runName(r.run.id))}<span class="setup">${esc(r.run.team)}</span>`; nums = numOf(r.run); act = `data-act="collapse" data-id="${esc(r.run.id)}"`; anchor = `data-anchor="${esc(unitRef(r.run.key))}"` }
     else if (r.kind === 'sum') name = `${r.run.sessions.length} sessions, collapsed`
-    else { name = esc(agentName(r.s)) + (badges && badges[id] ? ` <span class="t3">${runName(r.s.run)}</span>` : ''); nums = numOf(r.s); act = `data-act="open" data-id="${esc(r.s.id)}"`; anchor = `data-anchor="${esc(unitRef(r.s.key))}"` }
+    else { name = esc(agentName(r.s)) + (badges && badges[id] ? ` <span class="t3">${esc(runName(r.s.run))}</span>` : ''); nums = numOf(r.s); act = `data-act="open" data-id="${esc(r.s.id)}"`; anchor = `data-anchor="${esc(unitRef(r.s.key))}"` }
     const maxW = w - nameX(r) - numW
     out.push(`<div class="lrow ${r.kind} ${r.kind === 'lane' && id === st.open && st.view === 'overview' ? 'open' : ''}" ${anchor} style="height:${r.kind === 'run' ? RH : LH}px">${cb}${badge}<span class="ln" ${act} style="left:${nameX(r)}px;max-width:${Math.max(40, maxW)}px" title="${esc(r.kind === 'lane' ? agentName(r.s) : r.kind === 'run' ? `${runName(r.run.id)} · ${r.run.team}` : '')}">${name}</span>${nums}</div>`)
   }
@@ -679,7 +691,7 @@ function callDetails(c, s) {
     ${labs ? `<h4 class="cap">Labels</h4><div>${labs}</div>` : ''}
     <h4 class="cap">${c.child ? 'Returned' : 'Output'}</h4><pre class="out">${output}</pre>
     ${c.files.length ? `<h4 class="cap">Files</h4><div class="chips">${c.files.map((f) => `<span class="chip chip-act" data-act="searchfor" data-v="${esc(f)}">${esc(f)}</span>`).join('')}</div>` : ''}</div>
-    ${conc.length ? `<h4 class="cap">${runName(s.run)} at ${fmt(c.t)}</h4>${conc.join('')}` : ''}`
+    ${conc.length ? `<h4 class="cap">${esc(runName(s.run))} at ${fmt(c.t)}</h4>${conc.join('')}` : ''}`
 }
 function details() {
   if (!st.open || !S[st.open] || !sess) return ''
@@ -690,7 +702,7 @@ function details() {
   const kids = Object.values(S).filter((k) => k.parent === s.id).sort((a, b) => a.start - b.start)
   const run = RUN[s.run]
   return `<section id="det"><div class="dhead" data-anchor="${esc(unitRef(s.key))}">
-      <h2>${esc(agentName(s))}<span class="run">${runName(s.run)} · ${esc(run.team)}</span></h2>
+      <h2>${esc(agentName(s))}<span class="run">${esc(runName(s.run))} · ${esc(run.team)}</span></h2>
       ${parent ? `<span class="grp"><span class="lab">Spawned by</span><button class="chip chip-sans chip-act" data-act="open" data-id="${esc(parent.id)}" ${task ? `data-call="${esc(task.ref)}"` : ''}>${ico.parent}${esc(agentName(parent))}${s.spawn != null ? ` · Task <span class="v">${fmt(s.spawn)}</span>` : ''}</button></span>` : ''}
       ${kids.length ? `<span class="grp"><span class="lab">Subagents</span>${kids.map((k) => `<button class="chip chip-sans chip-act" data-act="open" data-id="${esc(k.id)}">${esc(agentName(k))}${ico.child}</button>`).join('')}</span>` : ''}
       <span class="dstats"><span><b>${s.n}</b> calls</span><span>ran <b>${fmtd(s.end - s.start)}</b></span><span class="err"><b>${s.err}</b> errors</span></span>
@@ -722,7 +734,7 @@ function compare() {
       <span class="lab">Align</span><div class="seg seg-track"><button class="seg-opt ${st.align === 'clock' ? 'active' : ''}" data-act="align" data-v="clock">Run clock</button><button class="seg-opt ${st.align === 'start' ? 'active' : ''}" data-act="align" data-v="start">Session start</button></div></div>`
   const lanes = `<div class="cmp-lanes"><div class="lanes">${labelCol(rows, { w: lw, compareCol: false, badges: letters, cols: COLS() })}${svg}</div></div>`
   const cells = []
-  cells.push('<div class="ch"></div>', ...groups.map((g) => `<div class="ch" data-anchor="${esc(unitRef(g.id))}"><div class="top"><span class="badge">${letters[g.root]}</span><b>${RUN[g.id] ? runName(g.id) : esc(S[g.root] ? agentName(S[g.root]) : g.root)}</b><span class="run">${RUN[g.id] ? '' : runName(g.run) + ' · '}${esc(g.team)}</span></div>
+  cells.push('<div class="ch"></div>', ...groups.map((g) => `<div class="ch" data-anchor="${esc(unitRef(g.id))}"><div class="top"><span class="badge">${letters[g.root]}</span><b>${RUN[g.id] ? esc(runName(g.id)) : esc(S[g.root] ? agentName(S[g.root]) : g.root)}</b><span class="run">${RUN[g.id] ? '' : esc(runName(g.run)) + ' · '}${esc(g.team)}</span></div>
     <div class="path">${g.sessions.length > 1 ? `with ${esc([...new Set(g.agents.slice(1))].join(', '))}` : 'no subagents'} · <span class="mono">${fmt(g.start)}–${fmt(g.end)}</span> into the run</div></div>`))
   const barRow = (label, vals, max, colour, fmtv = (v) => v, sw = '') => {
     cells.push(`<div class="ml">${sw}${label}</div>`)

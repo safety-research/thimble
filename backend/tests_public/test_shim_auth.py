@@ -18,7 +18,8 @@ def test_the_server_answers_the_shim_s_routes_only_to_a_request_that_proves_the_
     cwd = str(config.corpus_dir(CORPUS))
     tool = {"args": {"ref": "events.jsonl#L1"}, "actor": "analyst", "cwd": cwd}
     asks = [("POST", "/api/tools/read_ref", {"json": tool}), ("GET", "/api/channel", {"params": {"cwd": "/nowhere"}}),
-            ("POST", "/api/channel/permission", {"json": {**REQUEST, "cwd": "/nowhere", "session": None}})]
+            ("POST", "/api/channel/permission", {"json": {**REQUEST, "cwd": "/nowhere", "session": None}}),
+            ("POST", f"/api/ws/{CORPUS}/sessions/permission", {"json": {"session": "orient", "tool_name": "Bash"}})]
     with TestClient(create_app(), base_url="http://127.0.0.1") as client:
         wrong = hook_auth.headers("another-token", "n0nce")
         for method, path, kw in asks:

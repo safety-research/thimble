@@ -11,6 +11,7 @@
   .dim { color: var(--text-tertiary); }
 
   #bar { flex: none; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 16px 8px; }
+  #problems { flex: none; margin: 0; padding: 0 16px 8px; font: 400 var(--text-xs) / 1.4 var(--font-body); color: var(--status-warning); overflow-wrap: anywhere; }
   #tabs .n { margin-left: 2px; font: 400 var(--text-mono-sm) / 1 var(--font-mono); color: var(--text-tertiary); }
   #body { flex: 1; min-height: 0; display: flex; }
   #main { flex: 1; min-width: 0; overflow: auto; }
@@ -223,6 +224,7 @@
       <button class="seg-opt" data-mode="compare">Compare</button>
     </div>
   </header>
+  <p id="problems" role="status" hidden></p>
   <div id="body">
     <main id="main">
       <section id="overview"><div id="runs"></div><div id="activity"></div></section>
@@ -416,7 +418,16 @@
     if (mine !== loading) return
     data = res
     S.hide = data.hide
+    showProblems(data.problems)
     draw()
+  }
+  // the lines the reader could not parse: how many, and the first few
+  function showProblems(p) {
+    const el = document.getElementById('problems')
+    el.hidden = !(p && p.count)
+    if (el.hidden) return
+    const one = p.count === 1
+    el.textContent = `${p.count} ${one ? 'line' : 'lines'} of the data could not be read and ${one ? 'is' : 'are'} left out: ${p.examples.join('; ')}${p.count > p.examples.length ? '; …' : ''}`
   }
   async function more() {
     const res = await thimble.fetch(query({ offset: data.items.length }))

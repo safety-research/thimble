@@ -47,7 +47,9 @@
 #               index does not list, or lists with no priority, has no severity
 #   duplicates  an alert delivered twice is kept once, and the later line opens the first
 #   order       records are sorted by time, whatever order their file holds them in
-#   torn lines  a line that does not parse whole, such as agents.log's last, is no record
+#   bad lines   a line that does not parse whole, such as agents.log's torn last line, a JSON escape a log value gets
+#               wrong or a record with no time the reader can read, is no record: the page says how many there are,
+#               with the first few (`problems`)
 #   the index   tickets are the files on disk: the index gives their fields, and its rows without a file are ignored
 #   free text   a priority or result with words around it ("Urgent - 2nd double charge") takes the value it names;
 #               a deploy's reason or a chat message that names an incident belongs to it, and a deploy's later events
@@ -90,6 +92,7 @@ NEAR = 4  # records before and after the chosen one, across every source
 UNIT_REFS = 200  # refs a unit's citation carries
 EXCERPT_RECORDS = 12  # records whose text a unit's excerpt quotes
 MARKS_MAX = 24  # label values the page tells apart, as bits of one number per record
+PROBLEMS_SHOWN = 5  # lines that do not parse which the page names, beside their count
 MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
 LOG_LINE = re.compile(r"(\d{4}-\d\d-\d\d[T ]\d\d:\d\d:\d\d(?:\.\d+)?(?:Z|[+-]\d\d:?\d\d)?)\s+([A-Z]+)\s+(\S+)\s+(.*)")
 LOG_PAIR = re.compile(r'(\w+)=("(?:[^"\\]|\\.)*"|[^\s"]\S*)')
@@ -143,6 +146,36 @@ def _lines(path, offs):
             yield n, raw.decode("utf-8", "replace").rstrip("\r\n")
 
 
+def _problem(ctx, fi, n, why):
+    """Note that line n of file fi holds no record because it does not parse (`problems`: a count and the first few)."""
+    ctx["problems"]["count"] += 1
+    if len(ctx["problems"]["examples"]) < PROBLEMS_SHOWN:
+        ctx["problems"]["examples"].append(f"{ctx['files'][fi]}#L{n}: {why}")
+
+
+def _csv_rows(lines, fi, ctx):
+    """(first line, last line, cells) of each row of a CSV file's lines, a quoted cell that runs over several lines
+    included; a row that does not parse is a problem."""
+    numbers = []
+
+    def feed():
+        for n, s in lines:
+            numbers.append(n)
+            yield s + "\n"
+
+    rows, done = csv.reader(feed(), strict=True), 0
+    while True:
+        try:
+            cells = next(rows)
+        except StopIteration:
+            return
+        except csv.Error as e:
+            _problem(ctx, fi, numbers[done], f"not a CSV row ({e})")
+        else:
+            yield numbers[done], numbers[rows.line_num - 1], cells
+        done = rows.line_num
+
+
 def _rec(fi, line, span, t, source, kind, actor, service, severity, outcome, incident, rid, key=None, re_key=None):
     """A record found while indexing: `key` is how other records name it, `re_key` how it names the one it answers."""
     vals = map(_str, (source, kind, actor, service, severity, outcome, incident))
@@ -159,6 +192,8 @@ def _alerts(lines, fi, ctx):
         try:
             r = json.loads(line)
         except ValueError:
+            if line.strip():
+                _problem(ctx, fi, n, "not a JSON object")
             continue
         if not isinstance(r, dict) or not r.get("id") or not r.get("state"):
             continue
@@ -176,8 +211,7 @@ def _alerts(lines, fi, ctx):
 
 def _deploys(lines, fi, ctx):
     header, incidents = None, {}  # each deploy's incident, which its later events share
-    for n, line in lines:
-        cells = next(csv.reader([line]), [])
+    for n, last, cells in _csv_rows(lines, fi, ctx):
         if header is None:
             header = ctx["headers"][fi] = [c.strip().lower() for c in cells]
             continue
@@ -188,7 +222,7 @@ def _deploys(lines, fi, ctx):
         incident = found.group(0) if found else "" if first else incidents.get(dep, "")
         incidents.setdefault(dep, incident)
         actor = ctx["people"].get(login.lower(), login)
-        yield _rec(fi, n, (n, n), _epoch(r.get("time"), LOCAL), "deploy", event, actor, r.get("service"), "",
+        yield _rec(fi, n, (n, last), _epoch(r.get("time"), LOCAL), "deploy", event, actor, r.get("service"), "",
                    _word(r.get("result"), OUTCOMES), incident, dep,
                    key=("deploy", dep) if first else None, re_key=None if first else ("deploy", dep))
 
@@ -213,7 +247,8 @@ def _chat(lines, fi, ctx):
     text = "\n".join(s for _, s in lines)
     try:
         doc = json.loads(text)
-    except ValueError:
+    except ValueError as e:
+        _problem(ctx, fi, text.count("\n", 0, e.pos) + 1 if isinstance(e, json.JSONDecodeError) else 1, "not valid JSON")
         return
     if not isinstance(doc, dict):
         return
@@ -280,7 +315,10 @@ def _log_line(s):
     m = LOG_LINE.fullmatch(s.strip())
     if not m or LOG_PAIR.sub("", m.group(4)).strip():
         return None
-    out = {k: json.loads(v) if v.startswith('"') else v for k, v in LOG_PAIR.findall(m.group(4))}
+    try:
+        out = {k: json.loads(v) if v.startswith('"') else v for k, v in LOG_PAIR.findall(m.group(4))}
+    except ValueError:  # a quoted value with an escape JSON does not have, such as \d
+        return None
     return {**out, "time": m.group(1), "level": m.group(2), "agent": m.group(3)}
 
 
@@ -288,6 +326,8 @@ def _log(lines, fi, ctx):
     for n, s in lines:
         r = _log_line(s)
         if r is None:
+            if s.strip():
+                _problem(ctx, fi, n, "not a log line of time, level, agent and key=value pairs")
             continue
         via = r.get("via", "").split("/", 1)
         cause = (("alert", r["alert"]) if r.get("alert") else ("ticket", r["ticket"]) if r.get("ticket")
@@ -300,11 +340,11 @@ SOURCES = {".jsonl": _alerts, ".csv": _deploys, ".json": _chat, ".txt": _ticket,
 LOOKUPS = ("users.json", "index.csv")  # files that describe other files' records and hold none
 
 
-def _lookups(files):
+def _lookups(files, ctx):
     """{people: {chat id or login: name}, tickets: {ticket: {priority, service, incident}}} from users.json and the
-    ticket index."""
+    ticket index; a lookup that does not parse is a problem."""
     people, tickets = {}, {}
-    for path in files:
+    for fi, path in enumerate(files):
         name = PurePosixPath(path).name
         try:
             if name == "users.json":
@@ -314,12 +354,12 @@ def _lookups(files):
                         people[_str(u.get("id"))] = people[_str(u.get("name")).lower()] = shown
             elif name == "index.csv":
                 with open(path, encoding="utf-8", newline="") as fh:
-                    for r in csv.DictReader(fh):
+                    for r in csv.DictReader(fh, strict=True):
                         tickets[_str(r.get("ticket"))] = {"priority": _word(r.get("priority"), PRIORITIES),
                                                           "service": _str(r.get("service")),
                                                           "incident": _str(r.get("incident"))}
-        except (OSError, ValueError, AttributeError):
-            continue
+        except (OSError, ValueError, AttributeError, csv.Error) as e:
+            _problem(ctx, fi, 1, f"cannot be read ({type(e).__name__})")
     return {"people": people, "tickets": tickets}
 
 
@@ -331,9 +371,11 @@ def build_index(paths):
     last line] per row], "files": [path], "kinds": [each file's suffix, "" for a lookup], "headers": {file: csv
     header}, "names": {field: [name]} (index 0 is "", a record without the field), "offsets": [[byte offset of line n at
     n-1] per file], "at_line": [[firsts, lasts, rows] per file, the lines each row's record spans], "answered": {row:
-    [rows that answer it]}, "units": {incident: [first row, last row]}}."""
+    [rows that answer it]}, "units": {incident: [first row, last row]}, "problems": {count, examples} of the lines that
+    do not parse}."""
     files = list(paths)
-    ctx = {"files": files, "headers": {}, **_lookups(files)}
+    ctx = {"files": files, "headers": {}, "problems": {"count": 0, "examples": []}}
+    ctx.update(_lookups(files, ctx))
     offsets, kinds, found = [], [], []
     for fi, path in enumerate(files):
         offs = []
@@ -345,7 +387,11 @@ def build_index(paths):
             for _ in _lines(path, offs):
                 pass
             continue
-        found += [r for r in parse(_lines(path, offs), fi, ctx) if r["t"] is not None]
+        for r in parse(_lines(path, offs), fi, ctx):
+            if r["t"] is None:
+                _problem(ctx, fi, r["line"], "no time the reader can read")
+            else:
+                found.append(r)
     kept, seen, alias = [], {}, []
     for r in found:
         dup = (r["vals"]["source"], r["id"], r["vals"]["kind"], r["t"]) if r["id"] else None
@@ -390,7 +436,7 @@ def build_index(paths):
             answered.setdefault(row[RE], []).append(i)
     return {"rows": rows, "ids": [r["id"] for r in kept], "spans": [list(r["span"]) for r in kept], "files": files,
             "kinds": kinds, "headers": ctx["headers"], "names": names, "offsets": offsets, "at_line": at_line,
-            "answered": answered, "units": units}
+            "answered": answered, "units": units, "problems": ctx["problems"]}
 
 
 def _text_of(kind, lines, header):
@@ -400,14 +446,14 @@ def _text_of(kind, lines, header):
             r = json.loads(lines[0][1])
             return _str(r.get("summary", r.get("msg")))
         if kind == ".csv":
-            return _str(dict(zip(header or [], next(csv.reader([lines[0][1]])), strict=False)).get("notes"))
+            return _str(dict(zip(header or [], next(csv.reader(s + "\n" for _, s in lines)), strict=False)).get("notes"))
         if kind == ".json":
             return _str(json.loads("\n".join(s for _, s in lines).rstrip().rstrip(",")).get("text"))
         if kind == ".txt":
             return "\n".join(s for _, s in _message(lines)[1])
         if kind == ".log":
             return _str((_log_line(lines[0][1]) or {}).get("msg"))
-    except (ValueError, AttributeError, StopIteration):
+    except (ValueError, AttributeError, StopIteration, csv.Error):
         pass
     return ""
 
@@ -455,7 +501,8 @@ def _overview(index, keep):
     """Every row the filter keeps, and the rows in `keep` (a citation asked for them), as columns: `r` the row, `t`
     seconds since `t0`, `f` and `ln` its file and line, a column per field, `re` the row it answers and `tk` the seconds
     since that row (-1 for none), `m` the index in `marks` of its first mark (-1 for none) and `mb` all its marks as
-    bits. `marks` holds every value of the labels that are on, each {label, value, colour}, marking records or not."""
+    bits. `marks` holds every value of the labels that are on, each {label, value, colour}, marking records or not.
+    `problems` counts the lines that do not parse, with the first few."""
     on = thimble.view_labels()
     rows = index["rows"]
     t0 = rows[0][T] if rows else 0
@@ -477,7 +524,8 @@ def _overview(index, keep):
         for k, v in zip(cols, (i, row[T] - t0, row[F], row[L], *row[3:RE], row[RE], took, first, bits), strict=True):
             cols[k].append(v)
     return {"t0": t0, "span": [0, rows[-1][T] - t0 if rows else 0], "files": index["files"], "names": index["names"],
-            "cols": cols, "marks": marks, "starts": {k: rows[a][T] - t0 for k, (a, _) in index["units"].items()}}
+            "cols": cols, "marks": marks, "starts": {k: rows[a][T] - t0 for k, (a, _) in index["units"].items()},
+            "problems": index["problems"]}
 
 
 def _strings(r):

@@ -1200,11 +1200,6 @@ def read_only_fence(folders: "tuple[Path, ...] | list[Path]",
     return out
 
 
-def server_url() -> str:
-    """This server's address, as a session's hooks and commands reach it."""
-    return f"http://127.0.0.1:{config_port()}"
-
-
 def permission_mode(c: str) -> str:
     """The mode a dev session of workspace `c` asks in, by Start's names (cc_settings.ORIENT_MODES): the orientation's
     while it runs (agent_session follows that at each request), else the one it last ran in, else the one Start opens
@@ -1292,7 +1287,7 @@ class Sessions:
             settings["permissions"] = {**perms, **({"allow": list(dict.fromkeys(allow))} if allow else {})}
             settings = agent_session.with_web_asks(settings, mode)
             hooks = agent_session.permission_hooks(str(workspace), mode == "auto", session=str((asking or {})["key"]),
-                                                   url=server_url())
+                                                   home=str(thimble_home()))
             box = (asking or {}).get("sandbox")
             if box and "sandbox" in settings:
                 # before a call both hooks run; a request is the permission hook's alone, which applies the same rule

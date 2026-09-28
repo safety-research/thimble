@@ -25,7 +25,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Awaitable, Callable
-from urllib.parse import urlsplit
+from urllib.parse import urlsplit, urlunsplit
 
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
@@ -2017,16 +2017,21 @@ def shot_ports() -> set[int]:
 
 async def _shot_page(url: str, selector: str | None) -> ToolResult:
     """A page of the thimble interface, headless (dev.run_shot), only on this machine (SCREENSHOT_HOSTS) and on this
-    server's own port or its interface's (shot_ports)."""
+    server's own port or its interface's (shot_ports). The browser loads the address rebuilt from what was checked, and
+    one with a backslash or a user part is refused, since Chromium reads those hosts differently from Python."""
     parts = urlsplit(url)
     try:
         port = parts.port
     except ValueError:
         port = None
     allowed = shot_ports()
-    if (parts.hostname or "") not in SCREENSHOT_HOSTS or port not in allowed:
+    host = parts.hostname or ""
+    if (host not in SCREENSHOT_HOSTS or port not in allowed or parts.scheme not in ("http", "https") or "\\" in url
+            or "@" in parts.netloc):
         return err(f"screenshot: an http address must be thimble's own interface on this machine (port "
                    f"{', '.join(str(p) for p in sorted(allowed))})")
+    url = urlunsplit((parts.scheme, f"[{host}]:{port}" if ":" in host else f"{host}:{port}", parts.path, parts.query,
+                      parts.fragment))
     run_shot = _optional("dev", "run_shot")
     if run_shot is None:
         return _not_available("screenshot", "dev", "run_shot")

@@ -1459,9 +1459,6 @@ button.model-line-part[aria-expanded='true'] {
   list-style: none;
   overflow-wrap: anywhere;
 }
-.chat-perm-also-more {
-  color: var(--text-tertiary);
-}
 /* denied unanswered: the card says so in a neutral edge, with Dismiss */
 .chat-perm[data-expired] {
   border-color: var(--border-strong);

@@ -34,7 +34,10 @@
 #     the run's `timezone`, else UTC, and every time is read onto one clock.
 #   - The forge redelivered some events: a line whose `id` came earlier in its file repeats that event and is left out.
 #   - Some events were logged late, and the export lists reviews by pull request, so records are put in time order.
-#   - r4's events.jsonl ends in a line cut off when the run stopped: a line that does not parse is skipped.
+#   - r4's events.jsonl ends in a line cut off when the run stopped. A line or row that does not parse, a manifest that
+#     does not parse, and a timezone the machine does not know (the run's times are then read as UTC) are left out,
+#     and the page says how many there are, with the first few (`problems`).
+#   - A cell of an export table may run over several lines inside its quotes; its row cites its first line.
 #   - r4's manifest lists an agent that left no transcript: a run's agents are the manifest's and the transcripts', and
 #     one without a transcript has no note.
 #   - A linked issue or a number of approvals written as free text ("#14", "18 (regression from #15)") is its first
@@ -65,6 +68,7 @@
 # them that marks it (thimble.marked), since thimble cannot see inside a chart, and the page draws them in the labels'
 # colours. The page may hide the records of some of those values, or the records none marks.
 import csv
+import io
 import json
 import re
 import statistics
@@ -94,6 +98,7 @@ SHAPES = {"manifest.json": "manifest", "events.jsonl": "events", "board.jsonl": 
           "export/pulls.csv": "pulls", "export/commits.csv": "commits", "export/comments.csv": "comments",
           "export/reviews.json": "reviews"}
 TABLES = ("issues", "pulls", "commits", "comments")
+PROBLEMS_SHOWN = 5  # lines that do not parse which the page names, beside their count
 
 
 # ------------------------------------------------------------------------------------------------ reading the files
@@ -110,6 +115,13 @@ def _time(v, tz=None):
     except ValueError:
         return None
     return (dt if dt.tzinfo else dt.replace(tzinfo=ZoneInfo(tz) if tz else timezone.utc)).timestamp()
+
+
+def _problem(problems, ref, why):
+    """Note that the line `ref` holds no record because it does not parse (`problems`: a count and the first few)."""
+    problems["count"] += 1
+    if len(problems["examples"]) < PROBLEMS_SHOWN:
+        problems["examples"].append(f"{ref}: {why}")
 
 
 def _number(v):
@@ -185,17 +197,21 @@ def _turn(r, name, note):
 
 
 def _parse(ctx, n, raw):
-    """The records on line `n` of a file whose context (build_index) is `ctx`; [] for a line that holds none."""
+    """The records on line `n` of a file whose context (build_index) is `ctx`, a table's row whole however many lines it
+    takes; [] for a line that holds none, ValueError for one that does not parse."""
     shape, tz = ctx["shape"], ctx.get("tz")
     text = raw.decode("utf-8", "replace").strip()
-    if not text or shape == "manifest":
+    if not text or shape == "manifest" or (shape == "reviews" and text in ("[", "]")):
         return []
     if shape in TABLES:
-        return [] if n == 1 else _row(shape, dict(zip(ctx["header"], next(csv.reader([text])))), tz)
+        try:
+            return [] if n == 1 else _row(shape, dict(zip(ctx["header"], next(csv.reader(io.StringIO(text), strict=True)))), tz)
+        except csv.Error as e:
+            raise ValueError(f"not a CSV row ({e})") from e
     try:
         r = json.loads(text.rstrip(","))  # reviews.json holds one object per line, each but the last with a comma
-    except ValueError:
-        return []
+    except ValueError as e:
+        raise ValueError("not a JSON object") from e
     if not isinstance(r, dict):
         return []
     if shape == "events":
@@ -209,15 +225,27 @@ def _parse(ctx, n, raw):
     return _turn(r, ctx["agent"], n == ctx["note"])
 
 
-def _manifest(path):
-    """A run's setup from its manifest, whichever keys it uses, with the line of its brief."""
+def _manifest(path, problems):
+    """A run's setup from its manifest, whichever keys it uses, with the line of its brief; a manifest that does not
+    parse is a problem and gives no setup, and a timezone the machine does not know is a problem and read as UTC."""
     with open(path, encoding="utf-8") as f:
         text = f.read()
-    m = json.loads(text)
+    line = lambda key: next((n for n, ln in enumerate(text.splitlines(), 1) if ln.strip().startswith(f'"{key}"')), None)  # noqa: E731
+    try:
+        m = json.loads(text)
+    except ValueError:
+        m = None
+    if not isinstance(m, dict):
+        _problem(problems, f"{path}#L1", "the manifest is not a JSON object")
+        return {"agents": []}
     tz = m.get("timezone")
+    try:
+        ZoneInfo(tz) if tz else None
+    except (ValueError, TypeError, KeyError):  # an unknown name raises ZoneInfoNotFoundError, a KeyError
+        _problem(problems, f"{path}#L{line('timezone') or 1}", f"unknown timezone {tz!r}; the run's local times are read as UTC")
+        tz = None
     brief = "brief" if "brief" in m else "prompt"
-    at = next((n for n, ln in enumerate(text.splitlines(), 1) if ln.strip().startswith(f'"{brief}"')), None)
-    return {"start": _time(_first(m, "started", "started_at"), tz), "tz": tz, "brief": m.get(brief), "line": at,
+    return {"start": _time(_first(m, "started", "started_at"), tz), "tz": tz, "brief": m.get(brief), "line": line(brief),
             "agents": [a.get("name") if isinstance(a, dict) else a for a in _first(m, "agents", "team") or []],
             "approvals": _number(_first(m, "approvals", "required_approvals")
                                  or (m.get("policy") or {}).get("approvals"))}
@@ -255,20 +283,45 @@ def _lines(path):
     return out
 
 
+def _table(path, lines, ctx, problems):
+    """[(first line, raw row)] of an export table's rows after its header, a quoted cell that runs over several lines
+    included: the header goes in ctx["header"], and each row of more than one line in ctx["rows"] as first: last. A row
+    that does not parse is a problem."""
+    rows = csv.reader((raw.decode("utf-8", "replace") for _, raw in lines), strict=True)
+    ctx["header"], ctx["rows"], out, done = [], {}, [], 0
+    while True:
+        try:
+            cells = next(rows)
+        except StopIteration:
+            return out
+        except csv.Error as e:
+            _problem(problems, f"{path}#L{done + 1}", f"not a CSV row ({e})")
+        else:
+            if done == 0:
+                ctx["header"] = cells
+            else:
+                out.append((done + 1, b"".join(raw for _, raw in lines[done:rows.line_num])))
+                if rows.line_num > done + 1:
+                    ctx["rows"][done + 1] = rows.line_num
+        done = rows.line_num
+
+
 def build_index(paths):
     """{"files": {path: context}, "offsets": {path: [byte offset of line n at n-1]}, "runs": {run: setup}, "units":
-    {key: unit}, "line": {ref: key of its unit}, "same": {ref of a redelivered event: ref of its first line}}. A unit
+    {key: unit}, "line": {ref: key of its unit}, "same": {ref of a redelivered event: ref of its first line},
+    "problems": {count, examples} of the lines that do not parse}. A unit
     holds its tab, run, facts, `refs` (the lines it gathers) and `events` ([ref, hours since its run started, action,
     author, the record's place among its line's records, epoch seconds] in time order, its strip and its part of the
     activity). An agent's refs start with its note, then every record it wrote, and its transcript's other lines are
     its `more`; an issue's events include the merge that fixed it."""
     files, offsets, runs, recs, same, by_run = {}, {}, {}, [], {}, {}
+    problems = {"count": 0, "examples": []}
     for path in sorted(paths):
         if shape := _shape(path):
             by_run.setdefault(path.split("/")[1], []).append((path, shape))
     for run, found in by_run.items():
         man = next((p for p, s in found if s == "manifest"), None)
-        setup = _manifest(man) if man else {"agents": []}
+        setup = _manifest(man, problems) if man else {"agents": []}
         runs[run] = {"start": setup.get("start"), "end": None, "approvals": setup.get("approvals"),
                      "ref": f"{man}#L{setup['line']}" if man and setup.get("line") else None,
                      "brief": setup.get("brief"), "agents": list(setup["agents"])}
@@ -276,17 +329,21 @@ def build_index(paths):
             lines = _lines(path)
             offsets[path] = [pos for pos, _ in lines]
             ctx = files[path] = {"run": run, "shape": shape, "tz": setup.get("tz")}
-            if shape in TABLES:
-                ctx["header"] = next(csv.reader([lines[0][1].decode("utf-8", "replace")])) if lines else []
-            elif shape == "agent":
+            items = _table(path, lines, ctx, problems) if shape in TABLES else [(n, raw) for n, (_, raw) in enumerate(lines, 1)]
+            if shape == "agent":
                 ctx["agent"] = path.rsplit("/", 1)[1][:-len(".jsonl")]
                 ctx["note"] = max((n for n, (_, raw) in enumerate(lines, 1) if _says(raw)), default=None)
                 if ctx["agent"] not in runs[run]["agents"]:
                     runs[run]["agents"].append(ctx["agent"])
             seen, last = {}, None
-            for n, (_, raw) in enumerate(lines, 1):
+            for n, raw in items:
                 ref = f"{path}#L{n}"
-                for i, r in enumerate(_parse(ctx, n, raw)):
+                try:
+                    found = _parse(ctx, n, raw)
+                except ValueError as e:
+                    _problem(problems, ref, str(e))
+                    continue
+                for i, r in enumerate(found):
                     if r.get("id") is not None:
                         if r["id"] in seen:
                             same[ref] = seen[r["id"]]
@@ -356,7 +413,8 @@ def build_index(paths):
             merge = next(e for e in u["events"] if e[2] == "merged")
             issue["events"].append([merge[0], u["ended"], "fixed", merge[3], merge[4], merge[5]])
     _agent_facts(units)
-    return {"files": files, "offsets": offsets, "runs": runs, "units": units, "line": line, "same": same}
+    return {"files": files, "offsets": offsets, "runs": runs, "units": units, "line": line, "same": same,
+            "problems": problems}
 
 
 def _action(r):
@@ -464,16 +522,21 @@ def _agent_facts(units):
 
 
 def _read(index, refs):
-    """{ref: [its line's records]} for the refs, each line read at its byte offset."""
+    """{ref: [its line's records]} for the refs, each line (a table's row, all its lines) read at its byte offset."""
     out, by_path = {}, {}
     for ref in refs:
         path, _, n = ref.rpartition("#L")
         by_path.setdefault(path, set()).add(int(n))
     for path, ns in by_path.items():
+        ctx = index["files"][path]
         with open(path, "rb") as f:
             for n in ns:
                 f.seek(index["offsets"][path][n - 1])
-                out[f"{path}#L{n}"] = _parse(index["files"][path], n, f.readline())
+                raw = b"".join(f.readline() for _ in range(ctx.get("rows", {}).get(n, n) - n + 1))
+                try:
+                    out[f"{path}#L{n}"] = _parse(ctx, n, raw)
+                except ValueError:
+                    out[f"{path}#L{n}"] = []
     return out
 
 
@@ -768,7 +831,7 @@ def _view(index, query):
            # the activity leaves out the time range, so the chart shows the range among the rest
            "activity": _activity(active, index, labels, chosen, picked, field),
            "colour": _colours(tab, field, index, found, chosen, all_runs, ok, picked, labels),
-           **_classes(active, labels, picked), "hide": sorted(labels.hide)}
+           **_classes(active, labels, picked), "hide": sorted(labels.hide), "problems": index["problems"]}
     if query.get("compare") and tab in ("pulls", "issues"):
         out["grid"] = _grid(tab, shown, index)
     if tab == "agents":
