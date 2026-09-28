@@ -66,15 +66,14 @@ def timing(doc: dict[str, Any]) -> dict[str, Any]:
     return {"duration": round(t + TAIL_S, 2), "lines": out}
 
 
-def parse(page: dict[str, Any]) -> dict[str, Any]:
-    """{title, lines: [{say, pause_after}], film} from the page form's reading of the markdown (report_types.parse_markdown):
-    each of its claims is a line, a closing `(pause 0.8)` taken off as the line's pause."""
+def parse(title: str, said: list[str], film: str, changed: list[str]) -> dict[str, Any]:
+    """{title, lines: [{say, pause_after}], film, what_changed} from the markdown as report_types.parse_markdown reads
+    it: each paragraph a line, a closing `(pause 0.8)` taken off as its pause, and a `What changed` section's lines apart."""
     lines = []
-    for claim in page.get("claims") or []:
-        say = str(claim)
+    for say in said:
         m = _PAUSE_RE.search(say)
         lines.append({"say": say[: m.start()] if m else say, "pause_after": float(m.group(1)) if m else 0.0})
-    return {"title": page.get("title") or "", "lines": lines, "film": page.get("html") or ""}
+    return {"title": title or "", "lines": lines, "film": film or "", "what_changed": changed}
 
 
 def normalize(t: dict[str, Any], raw: dict[str, Any], valid: Any) -> dict[str, Any]:

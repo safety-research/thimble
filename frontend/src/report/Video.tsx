@@ -63,7 +63,7 @@ export interface VideoViewProps {
 
 export function VideoView({ ws, slug, doc, comments, on, look, picked }: VideoViewProps) {
   const timing = doc?.timing ?? null
-  const lines = doc?.lines ?? []
+  const lines = useMemo(() => doc?.lines ?? [], [doc])
   const windows = timing?.lines ?? []
   const duration = timing?.duration ?? 0
 

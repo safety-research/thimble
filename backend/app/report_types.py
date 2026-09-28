@@ -1884,24 +1884,18 @@ def parse_markdown(text: str, form: str) -> dict[str, Any]:
     {title, sections: [{heading, level, body, figures}]}, for a story {title, sections: [{heading, body, figures}]}, for
     slides {title, slides: [{heading, body, figure, notes}]}, for a page {title, html, claims}, for a video {title,
     lines, film} (video.parse)."""
-    if form == "video":
-        from . import video  # noqa: PLC0415
-
-        return video.parse(parse_markdown(text, "page"))
-    if form == "page":
+    if form in ("page", "video"):
         m = _MD_HTML_RE.search(str(text or ""))
         html = m.group(1) if m else ""
         rest = (text[: m.start()] + text[m.end():]) if m else str(text or "")
         title, secs = _md_sections(rest)
-        claims: list[str] = []
-        for sec in secs:
-            for para in _paragraphs(sec["lines"]):
-                rows = [r for r in para.split("\n") if r.strip()]
-                if all(_MD_BULLET_RE.match(r) for r in rows):
-                    claims += [_MD_BULLET_RE.sub("", r).strip() for r in rows]
-                else:
-                    claims.append(" ".join(r.strip() for r in rows))
-        return {"title": title, "html": html, "claims": claims}
+        if form == "video":
+            from . import versions, video  # noqa: PLC0415
+
+            changed = [sec for sec in secs if versions._norm_heading(sec["heading"]) == versions.WHAT_CHANGED]
+            summary = [versions.plain(x) for x in _claims(changed)][:versions.SUMMARY_LINES]
+            return video.parse(title, _claims([sec for sec in secs if sec not in changed]), html, summary)
+        return {"title": title, "html": html, "claims": _claims(secs)}
     title, secs = _md_sections(text, headlines=form == "story")
     if form == "slides":
         out = []
@@ -1919,6 +1913,19 @@ def parse_markdown(text: str, form: str) -> dict[str, Any]:
                                           "body": "\n".join(sec["lines"]).strip(), "figures": sec["figures"]}
                                          for i, sec in enumerate(secs)
                                          if "".join(sec["lines"]).strip() or sec["figures"] or over_subheading(secs, i)]}
+
+
+def _claims(secs: list[dict[str, Any]]) -> list[str]:
+    """Each paragraph of the sections as one claim, or each item of a paragraph that is all a list."""
+    claims: list[str] = []
+    for sec in secs:
+        for para in _paragraphs(sec["lines"]):
+            rows = [r for r in para.split("\n") if r.strip()]
+            if all(_MD_BULLET_RE.match(r) for r in rows):
+                claims += [_MD_BULLET_RE.sub("", r).strip() for r in rows]
+            else:
+                claims.append(" ".join(r.strip() for r in rows))
+    return claims
 
 
 def over_subheading(secs: list[dict[str, Any]], i: int) -> bool:
@@ -2295,7 +2302,7 @@ async def tool_write_document(ctx: Any, args: dict[str, Any]) -> Any:
     same_run = bool(run_key and prev is not None and prev.get("writer_run") == run_key)
     base = versions.previous_of(ctx.c, inv, slug, int(prev.get("generation") or 1)) if same_run and prev else prev
     raw = parse_markdown(text, form)
-    what_changed = versions.pop_what_changed(raw) if base is not None else []
+    what_changed = (raw.pop("what_changed", None) or versions.pop_what_changed(raw)) if base is not None else []
     # the cards the writer's figure lines named, to say which of them the saved document shows
     asked = [str(f.get("cell")) for s in raw.get("sections") or [] for f in s.get("figures") or [] if isinstance(f, dict)] + \
         [str(f.get("cell")) for u in raw.get("slides") or [] for f in (u.get("figures") or [])[:slides.MAX_FIGURES] if isinstance(f, dict)]
