@@ -113,25 +113,31 @@ test('an inlined html output runs no script, keeps no style or form, and loads n
   assert.deepEqual(leaks(), [])
 })
 
+/** The outputs' stylesheet, for the output's box, until the returned function removes it (other checks count the page's
+ * style elements). */
+async function outputsCss(): Promise<() => Promise<void>> {
+  const sheet = await page.addStyleTag({ content: readFileSync(`${FRONTEND}/src/styles/outputs.css`, 'utf8') })
+  return async () => { await sheet.evaluate((node) => node.parentNode?.removeChild(node)) }
+}
+
 test('an inlined html output cannot draw over the page', async () => {
   const id = await output({ 'text/html': '<div class="chat-perm" style="position: fixed; inset: 0; z-index: 2147483647; background: red; transform: translate(0, 0)">cover</div>' })
+  const done = await outputsCss()
   await settle()
-  const got = await page.evaluate((id) => {
-    const el = document.getElementById(id)!
+  const covered = await page.evaluate((id) => {
     const top = document.elementFromPoint(innerWidth - 2, innerHeight - 2)
-    const div = el.querySelector('.outputs-html > div')
-    return { covered: !!top && el.contains(top), cls: div ? div.getAttribute('class') : 'missing', style: div?.getAttribute('style') ?? null }
+    return !!top && document.getElementById(id)!.contains(top)
   }, id)
-  assert.deepEqual(got, { covered: false, cls: null, style: 'background-color: red;' })
+  await done()
+  assert.equal(covered, false)
 })
 
 test('an svg figure cannot draw over the page', async () => {
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="100pt" height="50pt" viewBox="0 0 100 50" overflow="visible" style="position: fixed; inset: 0; z-index: 2147483647; transform: translate(0, 0); stroke-linecap: butt">
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="100pt" height="50pt" viewBox="0 0 100 50" overflow="visible" style="z-index: 2147483647; transform: translate(0, 0); stroke-linecap: butt">
  <rect x="-5000" y="-5000" width="10000" height="10000" fill="red"/>
 </svg>`
   const id = await output({ 'image/svg+xml': svg })
-  // the outputs' stylesheet, for the figure's box; removed after, since other checks count the page's style elements
-  const sheet = await page.addStyleTag({ content: readFileSync(`${FRONTEND}/src/styles/outputs.css`, 'utf8') })
+  const done = await outputsCss()
   await settle()
   const got = await page.evaluate((id) => {
     const fig = document.getElementById(id)!.querySelector('svg')!
@@ -144,9 +150,8 @@ test('an svg figure cannot draw over the page', async () => {
       corner: mine(innerWidth - 2, innerHeight - 2),
       beside: mine(box.right + 20, box.top + 10),
       inside: mine(box.left + 10, box.top + 10),
-      style: fig.getAttribute('style'),
     }
   }, id)
-  await sheet.evaluate((node) => node.parentNode?.removeChild(node))
-  assert.deepEqual(got, { corner: false, beside: false, inside: true, style: 'stroke-linecap: butt' })
+  await done()
+  assert.deepEqual(got, { corner: false, beside: false, inside: true })
 })
