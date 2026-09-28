@@ -36,7 +36,7 @@
 #   - Some events were logged late, and the export lists reviews by pull request, so records are put in time order.
 #   - r4's events.jsonl ends in a line cut off when the run stopped. A line or row that does not parse, a manifest that
 #     does not parse, and a timezone the machine does not know (the run's times are then read as UTC) are left out,
-#     and the page says how many there are, with the first few (`problems`).
+#     and problems() lists them for thimble to show.
 #   - A cell of an export table may run over several lines inside its quotes; its row cites its first line.
 #   - r4's manifest lists an agent that left no transcript: a run's agents are the manifest's and the transcripts', and
 #     one without a transcript has no note.
@@ -98,7 +98,6 @@ SHAPES = {"manifest.json": "manifest", "events.jsonl": "events", "board.jsonl": 
           "export/pulls.csv": "pulls", "export/commits.csv": "commits", "export/comments.csv": "comments",
           "export/reviews.json": "reviews"}
 TABLES = ("issues", "pulls", "commits", "comments")
-PROBLEMS_SHOWN = 5  # lines that do not parse which the page names, beside their count
 
 
 # ------------------------------------------------------------------------------------------------ reading the files
@@ -118,10 +117,8 @@ def _time(v, tz=None):
 
 
 def _problem(problems, ref, why):
-    """Note that the line `ref` holds no record because it does not parse (`problems`: a count and the first few)."""
-    problems["count"] += 1
-    if len(problems["examples"]) < PROBLEMS_SHOWN:
-        problems["examples"].append(f"{ref}: {why}")
+    """Note that the line `ref` holds no record because it does not parse."""
+    problems.append({"ref": ref, "why": why})
 
 
 def _number(v):
@@ -319,13 +316,13 @@ def _table(path, lines, ctx, problems):
 def build_index(paths):
     """{"files": {path: context}, "offsets": {path: [byte offset of line n at n-1]}, "runs": {run: setup}, "units":
     {key: unit}, "line": {ref: key of its unit}, "same": {ref of a redelivered event: ref of its first line},
-    "problems": {count, examples} of the lines that do not parse}. A unit
+    "problems": [{ref, why}] of the lines that do not parse}. A unit
     holds its tab, run, facts, `refs` (the lines it gathers) and `events` ([ref, hours since its run started, action,
     author, the record's place among its line's records, epoch seconds] in time order, its strip and its part of the
     activity). An agent's refs start with its note, then every record it wrote, and its transcript's other lines are
     its `more`; an issue's events include the merge that fixed it."""
     files, offsets, runs, recs, same, by_run = {}, {}, {}, [], {}, {}
-    problems = {"count": 0, "examples": []}
+    problems = []
     for path in sorted(paths):
         if shape := _shape(path):
             by_run.setdefault(path.split("/")[1], []).append((path, shape))
@@ -841,7 +838,7 @@ def _view(index, query):
            # the activity leaves out the time range, so the chart shows the range among the rest
            "activity": _activity(active, index, labels, chosen, picked, field),
            "colour": _colours(tab, field, index, found, chosen, all_runs, ok, picked, labels),
-           **_classes(active, labels, picked), "hide": sorted(labels.hide), "problems": index["problems"]}
+           **_classes(active, labels, picked), "hide": sorted(labels.hide)}
     if query.get("compare") and tab in ("pulls", "issues"):
         out["grid"] = _grid(tab, shown, index)
     if tab == "agents":
@@ -1032,3 +1029,8 @@ def resolve(index, locator):
         label = f"{run} {_action(r)} by {who}"
     return {"excerpt": _excerpt(r), "label": label[:40], "refs": [ref], "key": key,
             "target": {"key": key} if r["kind"] == "turn" else {"key": key, "ref": shown}}
+
+
+def problems(index):
+    """The lines that do not parse, each {ref, why}, which thimble shows beside the page."""
+    return index["problems"]

@@ -2020,10 +2020,81 @@
   font: 500 15px / 1.35 var(--font-body);
   color: var(--text-primary);
 }
+/* under the name: the files the view reads, the file Raw shows, and in red the lines its reader could not read */
+.view-pane-sub {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 12px;
+  min-width: 0;
+}
 .view-pane-file {
   overflow-wrap: break-word;
   font: var(--type-mono-sm);
   color: var(--text-tertiary);
+}
+.view-pane-files,
+.view-pane-problems {
+  padding: 0;
+  border: 0;
+  background: none;
+  font: var(--type-ui-sm);
+  color: var(--text-tertiary);
+  text-align: left;
+  cursor: pointer;
+}
+.view-pane-files:hover,
+.view-pane-files[aria-expanded='true'] {
+  color: var(--text-secondary);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.view-pane-problems {
+  color: var(--status-negative);
+}
+.view-pane-problems:hover,
+.view-pane-problems[aria-expanded='true'] {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.view-pane-list.popover {
+  display: flex;
+  flex-direction: column;
+  max-height: min(360px, calc(100vh - 16px));
+}
+.view-pane-list-head {
+  padding: 4px 8px 6px;
+  color: var(--status-negative);
+}
+.view-pane-list-item {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1px;
+  padding: 4px 8px;
+  border: 0;
+  border-radius: var(--radius-seg);
+  background: transparent;
+  color: var(--text-primary);
+  font: var(--type-ui-sm);
+  text-align: left;
+  overflow-wrap: anywhere;
+  cursor: pointer;
+}
+.view-pane-list-item.mono,
+.view-pane-list-item .mono {
+  font: var(--type-mono-sm);
+}
+.view-pane-list-item:hover:not(:disabled),
+.view-pane-list-item.is-current {
+  background: var(--surface-hover);
+}
+.view-pane-list-why,
+.view-pane-list-more {
+  color: var(--text-tertiary);
+}
+.view-pane-list-more {
+  padding: 4px 8px;
 }
 .view-pane-body {
   flex: 1;

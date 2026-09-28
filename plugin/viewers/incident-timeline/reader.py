@@ -48,8 +48,8 @@
 #   duplicates  an alert delivered twice is kept once, and the later line opens the first
 #   order       records are sorted by time, whatever order their file holds them in
 #   bad lines   a line that does not parse whole, such as agents.log's torn last line, a JSON escape a log value gets
-#               wrong or a record with no time the reader can read, is no record: the page says how many there are,
-#               with the first few (`problems`)
+#               wrong or a record with no time the reader can read, is no record, and problems() lists it for
+#               thimble to show
 #   the index   tickets are the files on disk: the index gives their fields, and its rows without a file are ignored
 #   free text   a priority or result with words around it ("Urgent - 2nd double charge") takes the value it names;
 #               a deploy's reason or a chat message that names an incident belongs to it, and a deploy's later events
@@ -92,7 +92,6 @@ NEAR = 4  # records before and after the chosen one, across every source
 UNIT_REFS = 200  # refs a unit's citation carries
 EXCERPT_RECORDS = 12  # records whose text a unit's excerpt quotes
 MARKS_MAX = 24  # label values the page tells apart, as bits of one number per record
-PROBLEMS_SHOWN = 5  # lines that do not parse which the page names, beside their count
 MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
 LOG_LINE = re.compile(r"(\d{4}-\d\d-\d\d[T ]\d\d:\d\d:\d\d(?:\.\d+)?(?:Z|[+-]\d\d:?\d\d)?)\s+([A-Z]+)\s+(\S+)\s+(.*)")
 LOG_PAIR = re.compile(r'(\w+)=("(?:[^"\\]|\\.)*"|[^\s"]\S*)')
@@ -147,10 +146,8 @@ def _lines(path, offs):
 
 
 def _problem(ctx, fi, n, why):
-    """Note that line n of file fi holds no record because it does not parse (`problems`: a count and the first few)."""
-    ctx["problems"]["count"] += 1
-    if len(ctx["problems"]["examples"]) < PROBLEMS_SHOWN:
-        ctx["problems"]["examples"].append(f"{ctx['files'][fi]}#L{n}: {why}")
+    """Note that line n of file fi holds no record because it does not parse."""
+    ctx["problems"].append({"ref": f"{ctx['files'][fi]}#L{n}", "why": why})
 
 
 def _csv_rows(lines, fi, ctx):
@@ -371,10 +368,10 @@ def build_index(paths):
     last line] per row], "files": [path], "kinds": [each file's suffix, "" for a lookup], "headers": {file: csv
     header}, "names": {field: [name]} (index 0 is "", a record without the field), "offsets": [[byte offset of line n at
     n-1] per file], "at_line": [[firsts, lasts, rows] per file, the lines each row's record spans], "answered": {row:
-    [rows that answer it]}, "units": {incident: [first row, last row]}, "problems": {count, examples} of the lines that
-    do not parse}."""
+    [rows that answer it]}, "units": {incident: [first row, last row]}, "problems": [{ref, why}] of the lines that do
+    not parse}."""
     files = list(paths)
-    ctx = {"files": files, "headers": {}, "problems": {"count": 0, "examples": []}}
+    ctx = {"files": files, "headers": {}, "problems": []}
     ctx.update(_lookups(files, ctx))
     offsets, kinds, found = [], [], []
     for fi, path in enumerate(files):
@@ -501,8 +498,7 @@ def _overview(index, keep):
     """Every row the filter keeps, and the rows in `keep` (a citation asked for them), as columns: `r` the row, `t`
     seconds since `t0`, `f` and `ln` its file and line, a column per field, `re` the row it answers and `tk` the seconds
     since that row (-1 for none), `m` the index in `marks` of its first mark (-1 for none) and `mb` all its marks as
-    bits. `marks` holds every value of the labels that are on, each {label, value, colour}, marking records or not.
-    `problems` counts the lines that do not parse, with the first few."""
+    bits. `marks` holds every value of the labels that are on, each {label, value, colour}, marking records or not."""
     on = thimble.view_labels()
     rows = index["rows"]
     t0 = rows[0][T] if rows else 0
@@ -524,8 +520,7 @@ def _overview(index, keep):
         for k, v in zip(cols, (i, row[T] - t0, row[F], row[L], *row[3:RE], row[RE], took, first, bits), strict=True):
             cols[k].append(v)
     return {"t0": t0, "span": [0, rows[-1][T] - t0 if rows else 0], "files": index["files"], "names": index["names"],
-            "cols": cols, "marks": marks, "starts": {k: rows[a][T] - t0 for k, (a, _) in index["units"].items()},
-            "problems": index["problems"]}
+            "cols": cols, "marks": marks, "starts": {k: rows[a][T] - t0 for k, (a, _) in index["units"].items()}}
 
 
 def _strings(r):
@@ -657,3 +652,8 @@ def resolve(index, locator):
     return {"excerpt": text, "label": f"{_text(r, 'actor') or _text(r, 'source')} · {_when(rows[i][T])}",
             "refs": [f"{path}#L{a}" if a == b else f"{path}#L{a}-L{b}"],
             "key": inc if inc in index["units"] else None, "target": {"r": i}}
+
+
+def problems(index):
+    """The lines that do not parse, each {ref, why}, which thimble shows beside the page."""
+    return index["problems"]

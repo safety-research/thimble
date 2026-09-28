@@ -79,6 +79,8 @@ EXCERPT_MAX = refs.EXCERPT_MAX
 REFS_MAX = 200  # file refs a resolved locator carries
 MEMO_MAX = 5000  # resolved locators kept in memory
 ERROR_MAX = 2000
+PROBLEMS_SHOWN = 20  # the lines a reader could not read that thimble lists beside the view (reader_problems)
+FILES_LISTED = 500  # the claimed files a view's record lists (_public)
 SOURCE_MAX = 400_000  # chars of reader.py or view.html a view may hold
 # the checks: sample lines per claimed file, files sampled, keys followed, cited records read per key
 CHECK_LINES, CHECK_FILES, CHECK_KEYS, CHECK_KEY_REFS = 3, 3, 3, 30
@@ -869,6 +871,22 @@ async def reader_call(c: str, slug: str, op: str, arg: Any = None, *, labels: di
         ctx = labels if labels is not None else await asyncio.to_thread(labels_context, c)
         req = {**req, "labels": _wire(ctx)}
     return await _call(c, req, op, arg)
+
+
+def clean_problems(raw: Any) -> dict[str, Any]:
+    """reader.problems(index) as {count, examples: [{ref, why}]}, the first PROBLEMS_SHOWN examples."""
+    items = raw if isinstance(raw, list) else []
+    examples = []
+    for x in items[:PROBLEMS_SHOWN]:
+        x = x if isinstance(x, dict) else {"why": x}
+        examples.append({"ref": str(x.get("ref") or "")[:500], "why": " ".join(str(x.get("why") or "").split())[:500]})
+    return {"count": len(items), "examples": examples}
+
+
+async def reader_problems(c: str, slug: str, version: str | None = None) -> dict[str, Any]:
+    """The lines of the claimed files the view's reader could not read (reader.problems), which thimble shows beside
+    the view's page."""
+    return clean_problems(await reader_call(c, slug, "problems", version=version))
 
 
 # ----------------------------------------------------------------------------------------------------------
@@ -1775,6 +1793,9 @@ def gate_lines(report: dict[str, Any]) -> list[str]:
     lines: list[str] = []
     if report.get("index"):
         lines.append(f"index: {report['index']['files']} file(s) in {report['index']['seconds']} s")
+    if (unread := report.get("unread") or {}).get("count"):
+        first = unread["examples"][0]
+        lines.append(f"unread: {unread['count']} line(s) the reader could not parse, such as {first['ref']}: {first['why']}")
     for p in report.get("problems") or []:
         lines.append(f"problem: {p}")
     if report.get("traceback"):
@@ -2211,6 +2232,10 @@ async def check(c: str, slug: str, locators: list[str] | None = None, *, shot_di
         report["traceback"] = e.detail
         return report
     report["index"] = {"files": len(files), "seconds": round(time.monotonic() - t0, 2)}
+    try:
+        report["unread"] = await reader_problems(c, slug)
+    except ReaderError as e:
+        report["problems"].append(f"problems() failed: {e.message}")
 
     wanted: list[str] = list(dict.fromkeys(str(x).strip() for x in (locators or []) if str(x).strip()))
     # sampled lines beside the locators, so a view is never checked only on the refs its author chose; a binary file
@@ -2689,8 +2714,9 @@ def _view_or_404(c: str, slug: str, version: str | None = None) -> dict[str, Any
 
 
 def _public(v: dict[str, Any], c: str | None = None) -> dict[str, Any]:
-    """A view record for a route's answer: everything but the on-disk directory, with its forms, and with `c` the first
-    file it claims (what a view opened on its own shows). Blocking when a claim is a glob (the corpus walk)."""
+    """A view record for a route's answer: everything but the on-disk directory, with its forms, and with `c` the files
+    it claims, `files` (the first FILES_LISTED) and `n_files`, and the first of them (what Raw shows of a view opened on
+    its own). Blocking when a claim is a glob (the corpus walk)."""
     out = {k: x for k, x in v.items() if k != "dir"}
     out["forms"] = [{"form": f, "means": m} for f, m in view_forms(v)]
     out["file_type"] = file_type_viewer(v)
@@ -2700,6 +2726,8 @@ def _public(v: dict[str, Any], c: str | None = None) -> dict[str, Any]:
         except (ValueError, OSError, HTTPException):
             files = []
         out["first_file"] = files[0][0] if files else None
+        out["files"] = [f[0] for f in files[:FILES_LISTED]]
+        out["n_files"] = len(files)
     return out
 
 
@@ -2854,6 +2882,17 @@ async def records_route(c: str, slug: str, body: RecordsBody, v: str | None = No
     _view_or_404(c, slug, v)
     try:
         return {"data": await reader_call(c, slug, "records", body.query, version=v)}
+    except ReaderError as e:
+        raise HTTPException(502, {"message": e.message, "traceback": e.detail[-ERROR_MAX:]}) from None
+
+
+@router.get("/ws/{c}/views/{slug}/problems")
+async def problems_route(c: str, slug: str, v: str | None = None) -> dict[str, Any]:
+    """The lines the view's reader could not read, {count, examples: [{ref, why}]} (reader_problems). 502 with the
+    reader's error."""
+    _view_or_404(c, slug, v)
+    try:
+        return await reader_problems(c, slug, v)
     except ReaderError as e:
         raise HTTPException(502, {"message": e.message, "traceback": e.detail[-ERROR_MAX:]}) from None
 

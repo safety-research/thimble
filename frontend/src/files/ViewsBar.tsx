@@ -35,6 +35,11 @@ export interface BuiltView {
   slug: string
   name: string
   first_file?: string | null
+  /** the files it reads, the first 500 of them, and how many there are */
+  files?: string[]
+  n_files?: number
+  /** a file-type viewer thimble ships, which cannot be deleted */
+  builtin?: boolean
   /** the files it claims, as globs: what a label made beside it applies to */
   claims?: string[]
   /** when it last passed its checks */
@@ -82,9 +87,11 @@ export function useViews(ws: string): { views: BuiltView[]; proposals: Proposal[
   const built: BuiltView[] = [
     ...listed.map((p) => {
       const v = known.get(p.slug)
-      return { slug: p.slug, name: p.name, first_file: v?.first_file, claims: v?.claims, built: v?.built, version: v?.version, review: p.review, ...(p.status !== 'built' ? { updating: true } : {}) }
+      return { slug: p.slug, name: p.name, first_file: v?.first_file, files: v?.files, n_files: v?.n_files, claims: v?.claims, built: v?.built, version: v?.version, review: p.review, ...(p.status !== 'built' ? { updating: true } : {}) }
     }),
-    ...views.filter((v) => !proposals.some((p) => p.slug === v.slug)).map((v) => ({ slug: v.slug, name: v.name, first_file: v.first_file, claims: v.claims, built: v.built, version: v.version })),
+    ...views
+      .filter((v) => !proposals.some((p) => p.slug === v.slug))
+      .map((v) => ({ slug: v.slug, name: v.name, first_file: v.first_file, files: v.files, n_files: v.n_files, claims: v.claims, built: v.built, version: v.version, builtin: v.origin === 'builtin' })),
   ]
   // a viewer the File browser suggests for a file type shows there alone until it is accepted, and an orientation's
   // view appears once it is built

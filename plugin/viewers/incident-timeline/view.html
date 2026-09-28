@@ -21,7 +21,6 @@
   #status { flex-wrap: nowrap; min-height: 24px; }
   #readout { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 2px 0 2px 2px; font: 400 var(--text-mono-sm) / 1.3 var(--font-mono); color: var(--text-secondary); font-variant-numeric: tabular-nums; }
   #status .btn { flex: none; }
-  #problems { margin: 7px 0 0; font: 400 var(--text-xs) / 1.4 var(--font-body); color: var(--status-warning); overflow-wrap: anywhere; }
   #charts { padding: 8px 16px 8px; min-width: 0; }
   #chartbar { margin: 2px 0 8px; row-gap: 6px; }
   svg { display: block; overflow: visible; user-select: none; -webkit-user-select: none; }
@@ -141,7 +140,6 @@
     <button id="zoomout" class="btn btn-ghost btn-sm">Zoom out</button>
     <button id="whole" class="btn btn-ghost btn-sm">Whole span</button>
   </div>
-  <p id="problems" role="status" hidden></p>
 </div>
 <main>
   <section id="charts">
@@ -292,21 +290,11 @@ let foldLanes = true
 let tableLimit = ROWS
 let sortBy = 't' // the list's order: 't' by time, 'gap' by the time since the record before, 'tk' by the time since the record answered
 
-// the lines the reader could not parse: how many, and the first few
-function showProblems(p) {
-  const el = document.getElementById('problems')
-  el.hidden = !(p && p.count)
-  if (el.hidden) return
-  const one = p.count === 1
-  el.textContent = `${p.count} ${one ? 'line' : 'lines'} of the data could not be read and ${one ? 'is' : 'are'} left out: ${p.examples.join('; ')}${p.count > p.examples.length ? '; …' : ''}`
-}
-
 async function load() {
   const my = ++loadSeq
   const data = await thimble.fetch(keepRow != null ? { op: 'overview', keep: [keepRow] } : { op: 'overview' })
   if (my !== loadSeq) return false
   D = data
-  showProblems(data.problems)
   T0 = data.t0
   const c = data.cols
   N = c.r.length

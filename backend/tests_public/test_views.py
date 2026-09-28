@@ -210,7 +210,7 @@ def _save_example(name: str) -> str:
     return slug
 
 
-# per example, lines a sample file gets appended that its reader must count rather than fail on: (file, text, problems
+# per example, lines a sample file gets appended that its reader must report rather than fail on: (file, text, problems
 # they add)
 BROKEN = {
     "incident-timeline": [("agents.log", '2026-05-16T05:00:00Z INFO autoheal action=scan result=ok msg="matched \\d+"\n', 1),
@@ -225,13 +225,13 @@ BROKEN = {
 async def test_every_worked_example_answers_the_checks_over_its_sample(name, samples, inproc, bound, tmp_path, monkeypatch):
     """The reader's half of the checks: the index builds, the sampled lines and the declared keys resolve, each answer
     cites its place back, and every excerpt is literal text of the records it cites. The page's half is a test below.
-    Lines that do not parse, a CSV cell over two lines among them, are counted for the page rather than failing."""
+    Lines that do not parse, a CSV cell over two lines among them, are reported (reader_problems) rather than failing."""
     async def no_page(c, slug, states, **k):
         return [{"ok": True, "errors": [], "fetches": 0, "records": 1} for _ in states]
 
     monkeypatch.setattr(views, "shoot_states", no_page)
     slug = _save_example(name)
-    before = (await views.reader_call(name, slug, "records", {}))["problems"]["count"]
+    before = (await views.reader_problems(name, slug))["count"]
     for rel, text, _ in BROKEN[name]:
         path = samples / name / rel
         old = "" if rel.endswith(".json") else path.read_text("utf-8")
@@ -241,7 +241,7 @@ async def test_every_worked_example_answers_the_checks_over_its_sample(name, sam
     checked = [r["locator"] for r in rep["checks"]]
     assert set(EXAMPLES[name][1]) <= set(checked)
     assert any(re.search(r"#L\d+$", c) for c in checked), "sampled lines were checked beside the keys"
-    problems = (await views.reader_call(name, slug, "records", {}))["problems"]
+    problems = await views.reader_problems(name, slug)
     assert problems["count"] == before + sum(n for *_, n in BROKEN[name]), problems
 
 
