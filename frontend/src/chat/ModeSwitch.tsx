@@ -1,5 +1,5 @@
-// The orientation's permission mode on its card, changeable while it runs: Start's three modes (PERMISSION_OPTIONS) as
-// a small segmented track. Manual and Bypass switch at once (the session runs in Claude Code's manual mode in both, and
+// A running session's permission mode on its card, changeable for that session: the three modes (PERMISSION_OPTIONS),
+// less those the analyst's Claude Code settings turn off, as a small segmented track. Manual and Bypass switch at once (the session runs in Claude Code's manual mode in both, and
 // in Bypass thimble grants every request). A switch into or out of Auto restarts the session in the new mode at its
 // next pause, with its work kept; until then a line says it waits. In Bypass, the first sentence of Claude Code's own
 // warning stays under the switcher.
@@ -8,6 +8,7 @@ import { Segmented } from '../components/Button'
 import { Icon } from '../components/Icon'
 import { api } from '../lib/api'
 import { bus } from '../lib/bus'
+import { loadSettings } from '../lib/models'
 import { track } from '../lib/telemetry'
 import type { ChatMeta, OrientPermissions } from '../lib/types'
 import { BYPASS_WARNING, PERMISSION_OPTIONS } from './StartGate'
@@ -27,6 +28,16 @@ export function ModeSwitch({ ws, chat, meta }: { ws: string; chat: string; meta:
   // the analyst's pick, shown until the chat's meta, read again on the stream, says what the server made of it
   const [picked, setPicked] = useState<OrientPermissions | null>(null)
   useEffect(() => setPicked(null), [meta.permission_mode, meta.mode_switch])
+  const [off, setOff] = useState<readonly string[]>([])
+  useEffect(() => {
+    let alive = true
+    loadSettings(ws)
+      .then((s) => alive && setOff(s.disabled_modes ?? []))
+      .catch(() => undefined)
+    return () => {
+      alive = false
+    }
+  }, [ws])
   const mode = picked ?? shownMode(meta)
   if (!mode) return null
   const pick = (v: OrientPermissions) => {
@@ -42,7 +53,7 @@ export function ModeSwitch({ ws, chat, meta }: { ws: string; chat: string; meta:
     <div className="chat-perms" data-mode={mode}>
       <div className="chat-perms-row">
         <span className="chat-perms-label">Permissions</span>
-        <Segmented size="sm" track label="The orientation's permission mode" options={PERMISSION_OPTIONS} value={mode} onChange={pick} />
+        <Segmented size="sm" track label="This session's permission mode" options={PERMISSION_OPTIONS.filter((o) => !off.includes(o.value))} value={mode} onChange={pick} />
       </div>
       {switching ? (
         <p className="chat-perms-note" role="status">

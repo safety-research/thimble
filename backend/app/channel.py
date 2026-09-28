@@ -738,6 +738,25 @@ async def held_route(body: HeldBody) -> dict[str, Any]:
     return {"text": meanwhile(riders), "terminal": "\n".join(x for x in lines if x)}
 
 
+class ModeBody(BaseModel):
+    cwd: str
+    session: str | None = None
+    permission_mode: str = ""
+
+
+@router.post("/channel/mode")
+async def mode_route(body: ModeBody) -> dict[str, Any]:
+    """The mode hook, as a turn of main's begins and ends: the permission mode Claude Code reports for the session,
+    which main's meta keeps when the session is main (session.note_mode). 404 when the folder is no workspace."""
+    from . import session  # noqa: PLC0415
+
+    c = config.workspace_for_cwd(body.cwd)
+    if not c:
+        raise HTTPException(404, f"{body.cwd} is not a thimble workspace")
+    session.note_mode(c, body.session, body.permission_mode)
+    return {}
+
+
 @router.get("/channel/main")
 async def main_route(cwd: str, pid: int | None = None) -> dict[str, Any]:
     """`{workspace, main}`: whether `pid`, a `claude` process, runs the session that is main in the folder's workspace. The

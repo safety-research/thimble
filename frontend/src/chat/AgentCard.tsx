@@ -3,9 +3,9 @@
 //
 // The orientation and a writer, each a Claude Code session of its own, are a tool-call card whose steps are that
 // session's subagents and workflow agents (sessionSteps). While it runs the card shows what holds the session (Holds)
-// and Stop; its permission requests wait on the one permission card above the composer (PermissionCard). The
-// orientation's card also carries its permission mode (ModeSwitch). In main, a finished orientation's card follows one
-// line counting what it left for review. A follow-up of the orientation is the same card for that run alone (`run`),
+// and Stop; its permission requests wait on the one permission card above the composer (PermissionCard), and its
+// permission mode shows beside them (ModeSwitch). In main, a finished orientation's card follows one line counting what
+// it left for review. A follow-up of the orientation is the same card for that run alone (`run`),
 // with what it changed and Undo while the last undo step is that follow-up's (backend undo.py).
 import { useContext, useEffect, useMemo, useState } from 'react'
 import { Button } from '../components/Button'
@@ -464,7 +464,7 @@ function AgentCardView({ ws, chat, role, title, ts, log, openWhileRunning = fals
       chips={
         own && running ? (
           <>
-            {role === 'orient' && meta?.permission_mode ? <ModeSwitch ws={ws} chat={chat} meta={meta} /> : null}
+            {meta?.permission_mode ? <ModeSwitch ws={ws} chat={chat} meta={meta} /> : null}
             {holds}
           </>
         ) : holds ? (

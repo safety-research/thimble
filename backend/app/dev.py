@@ -26,11 +26,11 @@ sessions, and is then dropped quietly; a view the analyst asked for fails with R
 
 Permissions. A session of a workspace asks the analyst like the other agents: its --settings carry agent_session's
 permission hook with the session's key (`view:<slug>`, `ticket:<id>`), and the run hosts that key on its chat
-(agent_session.host), so each request shows on the card and is answered by the workspace's mode (permission_mode), or
-denied after PERMISSION_WAIT_S unanswered. Allowed unasked is only its work in its own folder: edits there, reads of the
-folders its task names, and Bash in the sandbox (sandbox_allow's rule, before each call and on each request) with its
-check command. A session with no workspace (`thimble fix`,
-while the server is down) has nobody to ask, so it keeps UNHOSTED_TOOLS and has no web tools.
+(agent_session.host), so each request shows on the card and is answered by the mode of its row (modes.py: the dev
+agent's for a ticket, view builds' for a view, agent_row), or denied after PERMISSION_WAIT_S unanswered. Allowed
+unasked is only its work in its own folder: edits there, reads of the folders its task names, and Bash in the sandbox
+(sandbox_allow's rule, before each call and on each request) with its check command. A session with no workspace
+(`thimble fix`, while the server is down) has nobody to ask, so it keeps UNHOSTED_TOOLS and has no web tools.
 """
 from __future__ import annotations
 
@@ -62,7 +62,7 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
-from . import agents, cc_settings, cli, config, procs, prompts
+from . import agents, cc_settings, cli, config, modes, procs, prompts
 from .cli import SOURCE_CHANGED, home as thimble_home
 from .ledger import atomic_write_text
 from .session import find_transcript
@@ -1200,16 +1200,10 @@ def read_only_fence(folders: "tuple[Path, ...] | list[Path]",
     return out
 
 
-def permission_mode(c: str) -> str:
-    """The mode a dev session of workspace `c` asks in, by Start's names (cc_settings.ORIENT_MODES): the orientation's
-    while it runs (agent_session follows that at each request), else the one it last ran in, else the one Start opens
-    on."""
-    from . import agent_session, orient_session, orientation, tools  # noqa: PLC0415
-
-    run = agent_session.current(c, tools.ORIENT_SESSION)
-    if run is not None and run.mode:
-        return run.mode
-    return orientation.permissions((orientation.read_run(c) or {}).get("permissions")) or orient_session.mode_of(c, None)
+def agent_row(key: str) -> str:
+    """The row of the permission modes (modes.AGENTS) a dev session with this key asks by: view builds' for a view,
+    else the dev agent's."""
+    return "views" if key.startswith("view:") else "dev"
 
 
 def own_work(folder: Path, reads: "tuple[Path, ...] | list[Path]" = ()) -> list[str]:
@@ -1230,8 +1224,8 @@ def _host(c: str | None, asking: dict[str, Any], chat: str | None, run_log: "Log
                                           wait=agent_session.wait_words(PERMISSION_WAIT_S)))
 
     box = asking.get("sandbox")
-    agent_session.host(c, str(asking["key"]), chat, mode=permission_mode(c), wait_s=PERMISSION_WAIT_S, on_expired=expired,
-                       sandbox=(list(box[0]), list(box[1])) if box else None)
+    agent_session.host(c, str(asking["key"]), chat, agent=agent_row(str(asking["key"])), wait_s=PERMISSION_WAIT_S,
+                       on_expired=expired, sandbox=(list(box[0]), list(box[1])) if box else None)
 
 
 def _unhost(c: str | None, key: str) -> None:
@@ -1267,8 +1261,8 @@ class Sessions:
         """The session's flags: the dev role's model settings, `--add-dir` folders, the `fence` settings and how it asks
         (module note, permissions). `asking` names the session's key, {key, allow, sandbox?}, the allow rules of its work
         in its own folder, and for a session whose Bash runs in the sandbox, sandbox_allow's rule; with it and a
-        workspace, the permission hook answers its requests by the workspace's mode, and a process in Auto runs in auto
-        mode. Without, it keeps UNHOSTED_TOOLS and gets no web tools. It gets no MCP
+        workspace, the permission hook answers its requests by its row's mode (agent_row), and a process in Auto runs in
+        auto mode. Without, it keeps UNHOSTED_TOOLS and gets no web tools. It gets no MCP
         server, since its task needs none of the analyst's, not the tools that schedule a later turn
         (agent_session.LATER_TOOLS), since the session is stopped once its turn ends, and, when fenced, not
         FENCED_OFF_TOOLS."""
@@ -1280,7 +1274,7 @@ class Sessions:
         settings: dict[str, Any] = {"fastMode": True} if conf.get("fast") else {}
         settings.update(fence or {})
         hosted = bool(workspace and asking and asking.get("key"))
-        mode = cc_settings.orient_permission_flag(permission_mode(str(workspace))) if hosted else "default"
+        mode = modes.flag(modes.mode_for(str(workspace), agent_row(str((asking or {})["key"])))) if hosted else "default"
         if hosted:
             perms = dict(settings.get("permissions") or {})
             allow = [*(perms.get("allow") or []), *(asking or {}).get("allow", [])]

@@ -448,6 +448,21 @@
 .settings-fast {
   justify-self: start;
 }
+/* each agent's permission mode under the table (SettingsPopover's MODE_ROWS): its name, then the mode's menu */
+.settings-modes {
+  border-top: 1px solid var(--border-subtle);
+}
+.settings-modes .settings-row {
+  grid-template-columns: 132px minmax(0, 1fr);
+}
+.settings-mode {
+  justify-self: start;
+}
+.settings-modes-warn {
+  margin: 6px 6px 0;
+  color: var(--status-warning);
+  font: var(--type-body-sm);
+}
 /* the workspace's switches under the table (SettingsPopover's SWITCHES): the switch, then its name and what it does */
 .settings-switches {
   display: flex;

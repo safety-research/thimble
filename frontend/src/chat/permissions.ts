@@ -130,9 +130,8 @@ function denyAfter(s: number): string {
   return min <= 1 ? 'after a minute' : `after ${min} minutes`
 }
 
-/** The chat whose permission mode the card can switch for this request: the asking session's own, when it has a mode
- * of its own (the orientation, whose card's switcher is ModeSwitch); null for a session that runs in the analyst's own
- * mode. Pure. */
+/** The chat whose permission mode the card can switch for this request: the asking session's own, when it runs one
+ * (its card's switcher is ModeSwitch); null for main and the dev agent's sessions. Pure. */
 export function modeChat(ask: PendingAsk, metas: ReadonlyMap<string, ChatMeta>): string | null {
   return ask.chat !== 'main' && metas.get(ask.chat)?.permission_mode ? ask.chat : null
 }
@@ -141,9 +140,9 @@ export function modeChat(ask: PendingAsk, metas: ReadonlyMap<string, ChatMeta>):
 const MODE_NAMES: Readonly<Record<string, string>> = { manual: 'Manual', auto: 'Auto', bypass: 'Bypass' }
 
 /** Why the session asks, in one line: auto mode could not judge the call (and when it is denied unanswered) or left it
- * to the analyst, the orientation runs in Manual, a writer or check runs in the analyst's mode (denied after a minute
- * unanswered), the dev agent runs in a mode that asks (denied after its wait), or main's prompt also waits in the
- * terminal, where the first answer counts; for a request denied unanswered, that it was. Pure. */
+ * to the analyst, the session runs in Manual (a writer's or check's request is denied after a minute unanswered, the dev
+ * agent's after its wait), or main's prompt also waits in the terminal, where the first answer counts; for a request
+ * denied unanswered, that it was. Pure. */
 export function askWhy(ask: PendingAsk, metas: ReadonlyMap<string, ChatMeta>): string {
   const p = ask.request
   if (p.expired) return `Nobody answered within ${waitWords(p.wait_s ?? 60)}, so it was denied and the session went on without it.`
@@ -156,16 +155,10 @@ export function askWhy(ask: PendingAsk, metas: ReadonlyMap<string, ChatMeta>): s
   if (ask.chat === 'main') return 'Claude Code asks in your terminal too; the first answer counts.'
   const m = metas.get(ask.chat)
   const kind = m ? threadKind(m) : null
-  if (kind === 'writer' || kind === 'check') return 'It runs in your Claude Code permission mode, which asks for this call. Unanswered, it is denied after a minute.'
-  if (kind === 'dev') {
-    const denied = p.wait_s ? ` Unanswered, it is denied after ${waitWords(p.wait_s)} and the work goes on without it.` : ''
-    const mode = p.mode ? MODE_NAMES[p.mode] : null
-    return `${mode === 'Manual' ? 'It runs in Manual, which asks before each call.' : 'Its permission mode asks for this call.'}${denied}`
-  }
-  // a critique runs in its orientation's mode
-  const session = kind === 'step' && m?.parent ? metas.get(m.parent) ?? m : m
-  const mode = session?.permission_mode ? MODE_NAMES[session.permission_mode] : null
-  if (mode === 'Manual') return `${kind === 'step' ? 'The orientation' : 'It'} runs in Manual, which asks before each call.`
-  if (mode === 'Auto') return 'Auto mode asks you about this call.'
-  return 'Its permission mode asks for this call.'
+  const name = m?.permission_mode ?? p.mode
+  const mode = name ? MODE_NAMES[name] : null
+  const why = mode === 'Manual' ? 'It runs in Manual, which asks before each call.' : mode === 'Auto' ? 'Auto mode asks you about this call.' : 'Its permission mode asks for this call.'
+  if (kind === 'writer' || kind === 'check') return `${why} Unanswered, it is denied after a minute.`
+  if (kind === 'dev' && p.wait_s) return `${why} Unanswered, it is denied after ${waitWords(p.wait_s)} and the work goes on without it.`
+  return why
 }

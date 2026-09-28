@@ -19,12 +19,11 @@ the thimble tools that are not the orientation's (ORIENT_TOOLS) and those of eac
 The fence. The session writes only into `workspaces/<c>/orient/work/`; where Claude Code's Bash sandbox runs, Bash runs
 there with no network and no write into the corpus. When a run ends (unless it failed) its `tmp_*` files are deleted.
 
-Permissions. Start's switcher offers Manual, Auto or Bypass for the orientation alone; a tool-started orientation takes
-the stored `orient_permissions`, else the mode the analyst's own mode stands for. The start_orientation call may lower
-that mode, never raise it (lowered). Manual and Bypass pass `--permission-
-mode default` (requests wait on the card, or are granted at once); Auto passes `auto`, and a refused call waits on the
-card. Effort, Ultracode and the critique come from Start's choices, kept on the run's record for follow-ups; the model
-settings come from the `orient` and `subagents` roles (config.models_for).
+Permissions. The session runs in the orientation's row of the permission modes (modes.py), which Start's switcher shows
+and edits. Manual and Bypass pass `--permission-mode default` (requests wait on the card, or are granted at once); Auto
+passes `auto`, and a refused call waits on the card. Effort, Ultracode and the critique come from Start's choices, kept
+on the run's record for follow-ups; the model settings come from the `orient` and `subagents` roles
+(config.models_for).
 
 Calls. Each call the session, its agents, its critique and its follow-ups make is numbered in its chat's sequence and
 citable as `call:<chat>/<n>` (calls.py).
@@ -84,7 +83,6 @@ WORK_DIR = "work"  # orient/work: the one folder outside the corpus the session 
 TEMP_GLOB = "tmp_*"  # what in the work folder is deleted when a run ends (_clear_temp)
 INSTRUCTIONS = "orient-instructions"  # prompts/orient-instructions.md, thimble's default instructions
 SETTING = "orient_instructions"  # settings.json: the analyst's own instructions, which replace the defaults (instructions_of)
-PERMISSIONS_SETTING = ledger.ORIENT_PERMISSIONS_KEY  # settings.json: the stored mode for the orientation
 # What stands in each slot the analyst's text fills until the parts are left out (system_prompt).
 _MARKS = {"request": "\x00request\x00", "instructions": "\x00instructions\x00"}
 BROWSER = "browser"  # `by` of a message typed in the orientation's thread
@@ -185,31 +183,6 @@ def disallowed(parts: "list[str] | tuple[str, ...]") -> list[str]:
     return agent_session.not_own([n for n in ORIENT_TOOLS if n not in off])
 
 
-def mode_of(c: str, choice: str | None) -> str:
-    """The mode the session runs in: Start's choice, else the workspace's stored one, else the analyst's own mode's."""
-    chosen = orientation.permissions(choice) or orientation.permissions(ledger.stored_settings(c).get(PERMISSIONS_SETTING))
-    return cc_settings.orient_mode(config.corpus_dir(c), chosen)
-
-
-MODE_RANK = {m: i for i, m in enumerate(cc_settings.ORIENT_MODES)}  # manual < auto < bypass
-
-
-def lowered(c: str, asked: Any) -> str | None:
-    """The mode a start_orientation call asked for when it is no higher than the one the session would run in without it
-    (mode_of with Start's choice); None otherwise, which keeps that one. A model's call may lower the mode, never raise
-    it."""
-    mode = orientation.permissions(asked)
-    if mode is None:
-        return None
-    return mode if MODE_RANK[mode] <= MODE_RANK[mode_of(c, orientation.choices(c).get("permissions"))] else None
-
-
-def _mode_changed(run: agent_session.Run) -> None:
-    """The analyst switched the session's mode on its card (agent_session.set_mode): the record keeps it for a
-    follow-up."""
-    orientation.record(run.c, permissions=run.mode)
-
-
 def subagent_start(c: str, brief: str, passes: "list[str]") -> str:
     """start_orientation in terminal-first mode (orientation module note): the prompt, without the critique's part
     since main's shim does not list `critique`, is written to its file, the run is recorded as requested for the
@@ -235,22 +208,20 @@ def _launch(c: str, brief: str, passes: "list[str]", choices: dict[str, Any]) ->
     effort = effort_of(choices)
     ultracode = bool(choices.get("ultracode"))
     parts = parts_of(choices, passes)
-    mode = mode_of(c, choices.get("permissions"))
     name, agent = agent_definition(c, brief, parts)
     env = {config.SUBAGENT_MODEL_ENV: subagents["model"]} if subagents["model"] else None
     return dict(role=orientation.ROLE, title=orientation.TITLE,
                 agent_args=["--agents", json.dumps({name: agent}, ensure_ascii=False), "--agent", name], effort=effort,
                 settings=agent_session.settings_json(effort, env, ultracode=ultracode, fastMode=bool(own["fast"])),
                 agent_type=name, append_shared=False, model=own["model"], work=work_dir(c), calls=True,
-                permission_mode=cc_settings.orient_permission_flag(mode), mode=mode, patient=True, on_mode=_mode_changed,
-                disallowed=disallowed(parts), background=bg_session.wanted(c, "orient"))
+                agent="orient", patient=True, disallowed=disallowed(parts), background=bg_session.wanted(c, "orient"))
 
 
 async def start(c: str, brief: str, passes: "list[str] | tuple[str, ...]" = ("final", "views"),
                 call: str | None = None, chosen: "dict[str, Any] | None" = None) -> agent_session.Run:
     """Start the orientation session for workspace `c` with the parts `passes` names (PASSES) and follow it, `call`
-    being main's start_orientation call (agent_session.start); `chosen` holds the critique and permission choices the
-    call made, over Start's. RuntimeError when one runs or claude cannot be started."""
+    being main's start_orientation call (agent_session.start); `chosen` holds the critique choice the call made, over
+    Start's. RuntimeError when one runs or claude cannot be started."""
     if running(c):
         raise RuntimeError("an orientation is running")
     choices = orientation.choices(c)
@@ -269,7 +240,7 @@ async def start(c: str, brief: str, passes: "list[str] | tuple[str, ...]" = ("fi
     def started(run: agent_session.Run) -> None:
         orientation.started(c, run.chat, session=run.sid, pid=run.pid, passes=passes)
         orientation.record(c, effort=choices.get("effort"), ultracode=bool(choices.get("ultracode")),
-                           critique=bool(choices.get("critique", True)), permissions=run.mode)
+                           critique=bool(choices.get("critique", True)))
 
     return await agent_session.start(
         c, KEY, prompt=tools.hint("orient-start"), on_start=started, on_end=_ended, on_pid=_moved,
@@ -301,8 +272,7 @@ async def _restart(c: str, rec: dict[str, Any], chat: str, sid: str, call: str |
     session-resumed` on stdin."""
     meta = agents.meta_or_none(c, chat) or {}
     choices = {"effort": rec.get("effort") or meta.get("effort") or orientation.DEFAULT_EFFORT,
-               "ultracode": rec.get("ultracode"), "critique": rec.get("critique", True),
-               "permissions": rec.get("permissions")}
+               "ultracode": rec.get("ultracode"), "critique": rec.get("critique", True)}
     passes = [p for p in PASSES if p in (rec.get("passes") or [])]
     args = _launch(c, str(meta.get("brief") or ""), passes, choices)
     log.info("%s: the orientation's first run failed (%s); resuming its session %s", c,
@@ -401,8 +371,7 @@ async def resume(c: str, messages: "list[dict[str, Any]]", call: str | None = No
         raise Gone(f"Claude Code no longer keeps the transcript of session {sid}")
     k = int(rec.get("run") or 0) + 1
     meta = agents.meta_or_none(c, chat) or {}
-    choices = {"effort": rec.get("effort"), "ultracode": rec.get("ultracode"), "critique": rec.get("critique", True),
-               "permissions": rec.get("permissions")}
+    choices = {"effort": rec.get("effort"), "ultracode": rec.get("ultracode"), "critique": rec.get("critique", True)}
     if choices["effort"] is None:  # a record without stored choices: the ones its chat names
         choices["effort"] = meta.get("effort") or orientation.DEFAULT_EFFORT
     passes = [p for p in PASSES if p in (rec.get("passes") or [])]
@@ -686,8 +655,7 @@ async def _resume_left(c: str, meta: dict[str, Any], prompt: str) -> agent_sessi
     if (rec.get("chats") or {}).get(orientation.ROLE) != chat or rec.get("status") != "running":
         raise agent_session.NotResumed("another orientation has started since")
     choices = {"effort": rec.get("effort") or meta.get("effort") or orientation.DEFAULT_EFFORT,
-               "ultracode": rec.get("ultracode"), "critique": rec.get("critique", True),
-               "permissions": rec.get("permissions")}
+               "ultracode": rec.get("ultracode"), "critique": rec.get("critique", True)}
     passes = [p for p in PASSES if p in (rec.get("passes") or [])]
     args = _launch(c, str(meta.get("brief") or ""), passes, choices)
     return await agent_session.start(c, KEY, prompt=prompt, on_start=_moved, on_end=_ended, on_pid=_moved,
@@ -732,12 +700,10 @@ async def tool_start_orientation(ctx: Any, args: dict[str, Any]) -> Any:
     final = switch("final_notebook" if args.get("final_notebook") is not None else "analyze_data", "final", True)
     views = switch("propose_views", "views", True)
     report = switch("generate_report", "report", False)
-    # Start's other choices, from the call (/thimble:orient's flags); left out, Start's or the defaults hold
+    # the critique from the call (/thimble:orient's --no-critique); left out, Start's or the default holds
     chosen: dict[str, Any] = {}
     if args.get("critique") is not None:
         chosen["critique"] = orientation.flag(args["critique"], True)
-    if lowered(ctx.c, args.get("permissions")):
-        chosen["permissions"] = lowered(ctx.c, args.get("permissions"))
     if running(ctx.c) or orientation.active(ctx.c):
         return tools.err(tools.hint("start_orientation-running"))
     passes = [p for p, on in (("final", final), ("views", views), ("report", report)) if on]

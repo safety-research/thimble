@@ -383,8 +383,7 @@ Start an orientation, a broad analysis of the corpus that helps the analyst unde
     "final_notebook": {"type": "boolean", "description": "Leave a deck of cards for the analyst, the group `Orientation`, which appears when the orientation ends. Default true."},
     "propose_views": {"type": "boolean", "description": "Propose views of the files. Default true."},
     "generate_report": {"type": "boolean", "description": "Write the report when the orientation ends. Default false."},
-    "critique": {"type": "boolean", "description": "Have a critic review the analysis before the outputs are written. Default true."},
-    "permissions": {"type": "string", "enum": ["manual", "auto"], "description": "A lower permission mode for the orientation than Start's or the workspace's, which is the default. A higher one is ignored."}
+    "critique": {"type": "boolean", "description": "Have a critic review the analysis before the outputs are written. Default true."}
   }
 }
 ```

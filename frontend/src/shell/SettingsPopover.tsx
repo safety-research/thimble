@@ -3,8 +3,10 @@
 // PUT session/effort and session/fast. Other roles are settings.models, resolved with defaults by GET /settings; a save
 // sends only the changed fields so defaults stay defaults, and applies to the next session or subagent. Choices that
 // cannot take effect are dimmed with the reason in a tooltip. Every row names its model exactly, never `default`. Under
-// the table, the workspace's switches (SWITCHES), each saved with the rest. Turning terminal-first on the first time on
-// this install says what it changes in Claude Code's files and saves only once the analyst allows it (CONSENT_LINE).
+// the table, the permission mode of each agent thimble starts (MODE_ROWS): the analyst's pick, else the mode of their
+// Claude Code session, as main's hooks report it (backend modes.py). Then the workspace's switches (SWITCHES), each saved
+// with the rest. Turning terminal-first on the first time on this install says what it changes in Claude Code's files
+// and saves only once the analyst allows it (CONSENT_LINE).
 import { useEffect, useState } from 'react'
 import { Button } from '../components/Button'
 import { Chip } from '../components/Chip'
@@ -16,9 +18,10 @@ import { Switch } from '../components/Switch'
 import { useTooltip } from '../components/Tooltip'
 import { api } from '../lib/api'
 import { hasFastMode, invalidateSettings, loadSettings, modelChoices, modelLabel, sameModel } from '../lib/models'
-import { EFFORTS, ROLES, type Attached, type MainEffort, type ModelConf, type Settings } from '../lib/types'
+import { EFFORTS, ROLES, type Attached, type MainEffort, type ModeAgent, type ModelConf, type OrientPermissions, type Settings } from '../lib/types'
 import { EFFORT_CHOICES, FAST_TIP, FastBolt, MODEL_TIP, effortWord, mainEffort, mainFast, noFastTip } from '../chat/ModelLine'
-import { TERMINAL_FIRST_NOTE } from '../chat/StartGate'
+import { BYPASS_LINE } from '../chat/ModeSwitch'
+import { PERMISSION_OPTIONS, TERMINAL_FIRST_NOTE, agentMode, permissionChoice } from '../chat/StartGate'
 
 type Models = Record<string, ModelConf>
 
@@ -41,6 +44,26 @@ export const ORIENT_ROUTES: { value: 'subagent' | 'session'; label: string; note
   { value: 'subagent', label: 'subagent', note: "a subagent of your session, in its permission mode and effort, without a write fence, workflows or critique of its own" },
   { value: 'session', label: 'background session', note: 'a Claude Code background session with its own folder, permission mode, workflows and critique' },
 ]
+
+/** The agents whose permission modes the settings list, by their names there (backend modes.AGENTS). */
+export const MODE_ROWS: { agent: ModeAgent; label: string }[] = [
+  { agent: 'orient', label: 'Orientation' },
+  { agent: 'writer', label: 'Writers' },
+  { agent: 'critic', label: 'Critic and checks' },
+  { agent: 'dev', label: 'Dev agent' },
+  { agent: 'views', label: 'View builds' },
+]
+const MODE_NAME: Record<OrientPermissions, string> = { manual: 'Manual', auto: 'Auto', bypass: 'Bypass' }
+
+type Rows = Settings['permission_modes']
+
+/** What a save sends for the permission modes: each agent whose pick differs from the loaded one, null for one put
+ * back on the session's mode. Pure. */
+export function changedModes(loaded: Rows, now: Rows): Partial<Record<ModeAgent, OrientPermissions | null>> {
+  const out: Partial<Record<ModeAgent, OrientPermissions | null>> = {}
+  for (const { agent } of MODE_ROWS) if ((loaded?.[agent] ?? null) !== (now?.[agent] ?? null)) out[agent] = now?.[agent] ?? null
+  return out
+}
 
 /** What a save sends for the switches: each whose state differs from the loaded settings. Pure. */
 export function changedSwitches(loaded: Settings | null, now: Record<string, boolean>): Record<string, boolean> {
@@ -134,6 +157,7 @@ export function SettingsPopover({ ws, anchor, open, onClose }: { ws: string; anc
   const [typing, setTyping] = useState<string | null>(null)
   const [switches, setSwitches] = useState<Record<string, boolean>>({})
   const [route, setRoute] = useState<'subagent' | 'session'>('subagent')
+  const [modeRows, setModeRows] = useState<Rows>({})
   // the analyst allowed terminal-first's changes here, before its first save
   const [allowed, setAllowed] = useState(false)
 
@@ -150,6 +174,7 @@ export function SettingsPopover({ ws, anchor, open, onClose }: { ws: string; anc
         setSettings(s)
         setSwitches(Object.fromEntries(SWITCHES.map((sw) => [sw.key, s[sw.key] === true])))
         setRoute(s.orient_route === 'session' ? 'session' : 'subagent')
+        setModeRows(s.permission_modes ?? {})
         setAttached(a)
         const fast = mainFast(a)
         setModels({ ...(s.models ?? {}), main: { model: a?.model ?? '', effort: mainEffort(a), fast: !!fast } })
@@ -172,7 +197,9 @@ export function SettingsPopover({ ws, anchor, open, onClose }: { ws: string; anc
       const flipped: Record<string, boolean | string> = changedSwitches(settings, switches)
       if (route !== (settings?.orient_route === 'session' ? 'session' : 'subagent')) flipped.orient_route = route
       if (asking && flipped.terminal_first === true) flipped.terminal_first_consent = true
-      if (Object.keys(changed).length || Object.keys(flipped).length) await api.putSettings(ws, { ...(Object.keys(changed).length ? { models: changed } : {}), ...flipped })
+      const modes = changedModes(settings?.permission_modes, modeRows)
+      if (Object.keys(changed).length || Object.keys(flipped).length || Object.keys(modes).length)
+        await api.putSettings(ws, { ...(Object.keys(changed).length ? { models: changed } : {}), ...(Object.keys(modes).length ? { permission_modes: modes } : {}), ...flipped })
       const was = { effort: mainEffort(attached), fast: !!mainFast(attached) }
       const main = models.main
       if (main && attached && main.effort !== was.effort) await api.setEffort(ws, main.effort as MainEffort)
@@ -186,6 +213,8 @@ export function SettingsPopover({ ws, anchor, open, onClose }: { ws: string; anc
     }
   }
   const roles = rolesOf(settings)
+  const off = settings?.disabled_modes ?? []
+  const own = permissionChoice(attached?.permission_mode)
   return (
     <Popover anchor={anchor} open={open} onClose={onClose} align="end" role="dialog" label="Settings" className="settings-pop">
       <div className="settings" data-panel="settings">
@@ -272,6 +301,42 @@ export function SettingsPopover({ ws, anchor, open, onClose }: { ws: string; anc
                 </div>
               )
             })}
+          </div>
+        )}
+        {settings && (
+          <div className="settings-grid settings-modes" role="table" aria-label="Permission modes">
+            <div className="settings-row settings-headrow" role="row">
+              <span className="label">agent</span>
+              <span className="label">permission mode</span>
+            </div>
+            {MODE_ROWS.map(({ agent, label }) => {
+              const picked = modeRows?.[agent]
+              const mode = agentMode(modeRows, agent, attached?.permission_mode, off)
+              const pick = (m: OrientPermissions | undefined) => setModeRows((r) => ({ ...r, [agent]: m }))
+              const items: MenuItem[] = [
+                { id: 'session', label: "Your session's", note: MODE_NAME[off.includes(own) ? 'manual' : own], checked: !picked, onSelect: () => pick(undefined) },
+                ...PERMISSION_OPTIONS.filter((o) => !off.includes(o.value)).map((o) => ({ id: o.value, label: o.label, checked: picked === o.value, onSelect: () => pick(o.value) })),
+              ]
+              return (
+                <div className="settings-row" role="row" key={agent} data-mode-agent={agent}>
+                  <span className="settings-role">{label}</span>
+                  <Menu
+                    label={`${label} permission mode`}
+                    items={items}
+                    trigger={
+                      <Chip kind="plain" face="sans" as="button" trailingIcon="chevron-down" className="settings-cell settings-mode" aria-label={`${label} permission mode`} data-mode={mode} data-picked={picked ?? undefined}>
+                        {picked ? MODE_NAME[mode] : `${MODE_NAME[mode]} (your session's)`}
+                      </Chip>
+                    }
+                  />
+                </div>
+              )
+            })}
+            {MODE_ROWS.some(({ agent }) => agentMode(modeRows, agent, attached?.permission_mode, off) === 'bypass') && (
+              <p className="settings-modes-warn" role="note">
+                {BYPASS_LINE}
+              </p>
+            )}
           </div>
         )}
         {settings && (

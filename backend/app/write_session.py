@@ -104,7 +104,7 @@ def _launch(c: str, doc: str) -> dict[str, Any]:
                                                               "--agent", name],
                 effort=effort, settings=agent_session.settings_json(effort, fastMode=bool(models["writer"]["fast"])),
                 agent_type=name, on_end=_ended, model=str(agent.get("model") or ""), work=work_dir(c, doc), unasked=True,
-                disallowed=agent_session.not_own(OWN_TOOLS), doc=doc, background=background)
+                agent="writer", disallowed=agent_session.not_own(OWN_TOOLS), doc=doc, background=background)
 
 
 async def _resume_left(c: str, meta: dict[str, Any], prompt: str) -> agent_session.Run:

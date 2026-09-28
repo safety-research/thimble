@@ -1,7 +1,8 @@
-"""The orientation's Auto mode and the hook's route (agent_session, permissions; permission_hook.py). Auto is Claude
-Code's own auto mode: a call it refuses never reaches a PermissionRequest hook, so its PermissionDenied hook brings the
-call to the card, where it waits for the analyst like any request. The hook's route answers for the session its shim
-names.
+"""Each agent's permission mode (modes.py), the orientation's Auto mode and the hook's route (agent_session,
+permissions; permission_hook.py). An agent runs in its row of the settings, else in the mode Claude Code reports to
+main's hooks. Auto is Claude Code's own auto mode: a call it refuses never reaches a PermissionRequest hook, so its
+PermissionDenied hook brings the call to the card, where it waits for the analyst like any request. The hook's route
+answers for the session its shim names.
 
 A stand-in for the CLI (FAKE, run as agent_session.CLAUDE_BIN) records its argv and stdin and writes the transcript
 records Claude Code writes in each case; SIGINT ends it as it ends `claude -p`."""
@@ -13,9 +14,9 @@ import sys
 from pathlib import Path
 
 import pytest
+from fastapi import HTTPException
 
-from app import agent_session, agents, channel, orient_session
-from app import session
+from app import agent_session, agents, channel, config, ledger, modes, orient_session, session, tools
 
 CORPUS = "mini"
 KEY = orient_session.KEY
@@ -142,6 +143,54 @@ def _flag(argv: list[str]) -> str:
     return argv[argv.index("--permission-mode") + 1]
 
 
+# ----------------------------------------------------------------------------- each agent's mode
+
+
+async def test_each_agent_runs_in_its_row_else_in_main_s_mode_and_nothing_else_picks_one(fake, monkeypatch):
+    """An agent's mode is the analyst's pick in Settings, else the mode Claude Code reports to main's hooks. No
+    settings file, neither the corpus folder's nor the analyst's, chooses one; start_orientation has no mode to give; and
+    a mode the analyst's Claude Code settings turn off is refused and never used."""
+    cwd = config.corpus_dir(CORPUS)
+    (cwd / ".claude").mkdir(exist_ok=True)
+    (cwd / ".claude" / "settings.json").write_text(json.dumps({"permissions": {"defaultMode": "bypassPermissions"}}))
+    user = fake.parent / "claude-config" / "settings.json"
+    user.parent.mkdir(parents=True, exist_ok=True)
+    user.write_text(json.dumps({"permissions": {"defaultMode": "auto"}}))
+    assert modes.mode_for(CORPUS, "orient") == "manual", "before main reports its mode: Manual"
+    session._live[CORPUS] = session.Live(CORPUS, "sid-main", str(cwd), None, None)
+    agents.write_meta(CORPUS, {**agents.ensure_main(CORPUS), "attached": {"session": "sid-main"}})
+
+    async def report(sid: str, mode: str) -> None:
+        await channel.mode_route(channel.ModeBody(cwd=str(cwd), session=sid, permission_mode=mode))
+
+    await report("sid-other", "bypassPermissions")
+    assert modes.mode_for(CORPUS, "writer") == "manual", "another session's mode is not main's"
+    await report("sid-main", "auto")
+    assert [modes.mode_for(CORPUS, a) for a in modes.AGENTS] == ["auto"] * len(modes.AGENTS)
+    ledger.put_settings_route(CORPUS, {modes.SETTING: {"views": "bypass", "writer": "manual"}})
+    assert (modes.mode_for(CORPUS, "views"), modes.mode_for(CORPUS, "writer"), modes.mode_for(CORPUS, "dev")) == \
+        ("bypass", "manual", "auto"), "each row apart"
+    ledger.put_settings_route(CORPUS, {modes.SETTING: {"writer": None}})
+    assert modes.mode_for(CORPUS, "writer") == "auto", "a row put back follows main again"
+
+    assert "permissions" not in tools.schema_of("start_orientation")["properties"]
+    seen: dict = {}
+
+    async def fake_start(c, brief, passes, call=None, chosen=None):
+        seen.update(chosen=chosen)
+
+    monkeypatch.setattr(orient_session, "start", fake_start)
+    await tools.call(CORPUS, "start_orientation", {"brief": "", "permissions": "bypass"})
+    assert seen["chosen"] == {}, "a model's call chooses no mode"
+
+    user.write_text(json.dumps({"permissions": {"disableBypassPermissionsMode": "disable"}}))
+    with pytest.raises(HTTPException) as e:
+        ledger.put_settings_route(CORPUS, {modes.SETTING: {"orient": "bypass"}})
+    assert e.value.status_code == 400 and "Bypass" in e.value.detail
+    assert modes.mode_for(CORPUS, "views") == "auto", "a Bypass turned off is not used"
+    assert ledger.get_settings(CORPUS)["disabled_modes"] == ["bypass"]
+
+
 # ----------------------------------------------------------------------------- Auto
 
 
@@ -152,7 +201,7 @@ async def test_auto_is_claude_code_s_auto_mode_and_a_call_it_refuses_waits_for_t
     shows as not run."""
     monkeypatch.setenv("FAKE_MODE", "sleep")
     _listen()
-    channel.post(CORPUS, "start", {"text": "", "permissions": "auto"})
+    ledger.put_settings(CORPUS, {modes.SETTING: {"orient": "auto"}})
     run = await orient_session.start(CORPUS, "")
     assert run.mode == "auto" and _flag(run.argv) == "auto"
     settings = json.loads(run.argv[run.argv.index("--settings") + 1])
@@ -196,7 +245,7 @@ async def test_auto_is_claude_code_s_auto_mode_and_a_call_it_refuses_waits_for_t
 async def test_the_hook_s_route_answers_for_the_session_its_shim_names(fake, monkeypatch):
     monkeypatch.setenv("FAKE_MODE", "sleep")
     _listen()
-    channel.post(CORPUS, "start", {"text": "", "permissions": "bypass"})
+    ledger.put_settings(CORPUS, {modes.SETTING: {"orient": "bypass"}})
     await orient_session.start(CORPUS, "")
     body = agent_session.PermissionRequestBody(session=KEY, tool_name="Bash", tool_input={"command": "ls"}, agent_id="a9")
     assert await agent_session.permission_request_route(CORPUS, body) == {"behavior": "allow",

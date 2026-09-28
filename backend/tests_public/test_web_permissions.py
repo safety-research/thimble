@@ -52,7 +52,7 @@ async def test_an_unanswered_request_is_denied_after_the_wait_and_its_card_says_
     run's end. Requests that joined it are denied with it."""
     chat = _chat()
     heard: list[dict] = []
-    agent_session.host(CORPUS, KEY, chat, mode="manual", wait_s=0.1, on_expired=lambda run, entry: heard.append(entry))
+    agent_session.host(CORPUS, KEY, chat, agent="views", wait_s=0.1, on_expired=lambda run, entry: heard.append(entry))
     one = _request("WebFetch", PAGE)
     await _waiting(chat)
     two = _request("WebFetch", OTHER_PAGE)

@@ -207,24 +207,15 @@ def stored_settings(c: str) -> dict[str, Any]:
     return stored if isinstance(stored, dict) else {}
 
 
-ORIENT_PERMISSIONS_KEY = "orient_permissions"  # Start's mode switcher for the orientation: manual | auto | bypass
-
-
 def with_features(stored: dict[str, Any], c: str | None = None) -> dict[str, Any]:
-    """The effective settings: SETTINGS_DEFAULTS under `stored`, `models` as config.models_for resolves it, and
-    `orient_permissions`, the stored mode or the one the analyst's own permission mode stands for."""
-    from . import cc_settings  # noqa: PLC0415 — cc_settings imports this module
+    """The effective settings: SETTINGS_DEFAULTS under `stored`, `models` as config.models_for resolves it, the rows of
+    the permission modes the analyst set (modes.chosen), and `disabled_modes`, those the analyst's Claude Code settings
+    turn off."""
+    from . import claude_changes, modes  # noqa: PLC0415 — both import this module
 
-    from . import claude_changes  # noqa: PLC0415
-
-    out = {**SETTINGS_DEFAULTS, **stored, config.MODELS_KEY: config.models_for(c, stored),
-           "terminal_first_consented": claude_changes.consented()}
-    if out.get(ORIENT_PERMISSIONS_KEY) not in cc_settings.ORIENT_MODES:
-        try:
-            out[ORIENT_PERMISSIONS_KEY] = cc_settings.orient_mode_default(config.corpus_dir(c)) if c else "manual"
-        except Exception:  # noqa: BLE001 — a workspace whose corpus is gone still has settings
-            out[ORIENT_PERMISSIONS_KEY] = "manual"
-    return out
+    return {**SETTINGS_DEFAULTS, **stored, config.MODELS_KEY: config.models_for(c, stored),
+            "terminal_first_consented": claude_changes.consented(), modes.SETTING: modes.chosen(stored),
+            "disabled_modes": sorted(modes.disabled())}
 
 
 @router.get("/ws/{c}/settings")
@@ -236,19 +227,24 @@ TERMINAL_FIRST_CONSENT = "terminal_first_consent"  # a PUT's word that the analy
 CONSENT_NEEDED = ("Terminal-first marks thimble's work folders trusted in Claude Code's config and sets this folder's "
                   "statusline, which needs your agreement the first time: turn it on in Settings.")
 
-# The keys PUT /settings may change: the settings the browser's settings panel and switches save, and the consent word.
-# Every other key is the server's own or the analyst's to edit in the file (kernel_wrap, orient_permissions,
-# orient_instructions), since the route is unauthenticated and a kernel cell or a session's command can reach it on
-# loopback.
-PUT_KEYS = frozenset({*SETTINGS_DEFAULTS, config.MODELS_KEY, TERMINAL_FIRST_CONSENT})
+# The keys PUT /settings may change: the settings the browser's settings panel and switches save, the rows of the
+# permission modes, and the consent word. Every other key is the server's own or the analyst's to edit in the file
+# (kernel_wrap, orient_instructions), since the route is unauthenticated and a kernel cell or a session's command can
+# reach it on loopback.
+PUT_KEYS = frozenset({*SETTINGS_DEFAULTS, config.MODELS_KEY, "permission_modes", TERMINAL_FIRST_CONSENT})
 
 
 @router.put("/ws/{c}/settings")
 def put_settings_route(c: str, settings: dict[str, Any] = Body(...)) -> dict[str, Any]:
-    """put_settings for the browser, which may change PUT_KEYS only; 400 names any other key."""
+    """put_settings for the browser, which may change PUT_KEYS only; 400 names any other key, or why a permission mode
+    cannot be chosen."""
+    from . import modes  # noqa: PLC0415 — modes imports this module
+
     refused = sorted(set(settings) - PUT_KEYS)
     if refused:
         raise HTTPException(400, f"these settings cannot be changed here: {', '.join(refused)}")
+    if modes.SETTING in settings and (why := modes.patch_error(settings[modes.SETTING])):
+        raise HTTPException(400, why)
     return put_settings(c, settings)
 
 
@@ -269,6 +265,10 @@ def put_settings(c: str, settings: dict[str, Any]) -> dict[str, Any]:
     stored = read_json(path, {})
     stored = stored if isinstance(stored, dict) else {}
     merged = {**stored, **settings}
+    # the permission modes merge per agent, None putting an agent back on main's mode
+    if isinstance(settings.get("permission_modes"), dict):
+        held = stored.get("permission_modes") if isinstance(stored.get("permission_modes"), dict) else {}
+        merged["permission_modes"] = {a: m for a, m in {**held, **settings["permission_modes"]}.items() if m is not None}
     # `models` merges per role and within a role, so a PUT of one role's effort keeps the rest
     if isinstance(settings.get(config.MODELS_KEY), dict):
         held = stored.get(config.MODELS_KEY) if isinstance(stored.get(config.MODELS_KEY), dict) else {}

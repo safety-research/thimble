@@ -32,7 +32,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from . import agents, cc_channel, cc_settings, cite, config, orientation, terminal_tools, threads
+from . import agents, cc_channel, cc_settings, cite, config, modes, orientation, terminal_tools, threads
 from .ledger import atomic_write_text
 
 log = logging.getLogger("thimble.session")
@@ -421,7 +421,7 @@ def attach(c: str, sid: Any, cwd: Any, transcript_path: str | None = None, pid: 
     _live[c] = lv
     if not restored:
         own = cc_settings.analyst_effort(Path(lv.cwd)) if lv.cwd else None
-        mode = cc_settings.permission_mode(Path(lv.cwd)) if lv.cwd else None
+        mode = held.get("permission_mode")  # until the new session's hooks report its own (note_mode)
         meta["attached"] = {"session": sid, "cwd": lv.cwd, "since": lv.since, **({"settings_effort": own} if own else {}),
                             **({"permission_mode": mode} if mode else {}), **({"after": after} if after else {})}
         meta["ended"] = None
@@ -435,6 +435,20 @@ def attach(c: str, sid: Any, cwd: Any, transcript_path: str | None = None, pid: 
             _bg().new_main(c)
     log.info("%s: session %s attached (%s)", c, sid, "restored" if restored else "new")
     return lv
+
+
+def note_mode(c: str, sid: str | None, mode: str) -> None:
+    """Main's hooks report the permission mode Claude Code runs the session `sid` in: when `sid` is main, main's meta
+    keeps it (`attached.permission_mode`), the mode each agent's row follows until the analyst sets it (modes.py)."""
+    lv = _live.get(c)
+    meta = agents.meta_or_none(c, agents.MAIN_ID) or {}
+    held = meta.get("attached") or {}
+    if lv is None or not sid or lv.sid != sid or held.get("session") != sid or mode not in modes.CLAUDE_MODES:
+        return
+    if held.get("permission_mode") != mode:
+        meta["attached"] = {**held, "permission_mode": mode}
+        agents.write_meta(c, meta)
+        agents.notify(c, agents.MAIN_ID)
 
 
 def _runs_elsewhere(c: str, cur: Live, pid: int | None) -> bool:

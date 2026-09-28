@@ -19,12 +19,12 @@ def client(workspaces_tmp):
 
 def test_the_settings_route_changes_only_the_browser_s_settings(client, workspaces_tmp):
     """The route is unauthenticated and a kernel cell or a session's command can reach it on loopback, so the wrapper's
-    switch, the orientation's stored mode and its instructions are not among the keys it takes."""
+    switch and the orientation's instructions are not among the keys it takes, and a permission mode must be one."""
     path = workspaces_tmp / CORPUS / "settings.json"
-    for key, value in (("kernel_wrap", "none"), ("orient_permissions", "bypass"), ("orient_instructions", "x"),
-                       ("card_check", False), ("anything", 1)):
+    for key, value in (("kernel_wrap", "none"), ("orient_instructions", "x"), ("card_check", False), ("anything", 1),
+                       ("permission_modes", {"orient": "yolo"}), ("permission_modes", {"main": "bypass"})):
         r = client.put(f"/api/ws/{CORPUS}/settings", json={"hide_chat": True, key: value})
-        assert r.status_code == 400 and key in r.json()["detail"], key
+        assert r.status_code == 400, (key, value)
     assert not path.exists() or "hide_chat" not in json.loads(path.read_text()), "a refused PUT changes nothing"
     r = client.put(f"/api/ws/{CORPUS}/settings", json={"hide_chat": True, "terminal_first": False, "orient_route": "subagent",
                                                        "run_cell_result_lines": 20})

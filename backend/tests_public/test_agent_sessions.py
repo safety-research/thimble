@@ -1,6 +1,7 @@
 """The Claude Code sessions thimble starts beside main (agent_session.py, orient_session.py) and their permissions:
 every session asks through the PermissionRequest hook and no prompt tool, and the hook hands each request to the server
-and prints its decision. Manual waits for the analyst, while a writer's request is denied after a minute; Bypass grants.
+and prints its decision. Manual waits for the analyst, while a writer's request is denied after a minute; Bypass grants,
+and a card's switch holds for its session's later runs.
 
 A stand-in for the CLI (FAKE, run as agent_session.CLAUDE_BIN) records its argv, its environment and what it read on
 stdin, and writes what Claude Code writes for such a session: the transcript under the config dir's projects/, a
@@ -18,8 +19,8 @@ from pathlib import Path
 import pytest
 from fastapi import HTTPException
 
-from app import (agent_session, agents, channel, config, hook_auth, orient_session, orientation,
-                 permission_hook, session, tools)
+from app import (agent_session, agents, channel, config, hook_auth, ledger, modes, orient_session, permission_hook,
+                 session, tools)
 
 CORPUS = "mini"
 KEY = orient_session.KEY
@@ -167,13 +168,13 @@ async def test_every_session_asks_through_the_permission_hook_and_no_prompt_tool
     assert "permission_hook.py" in hook["command"] and hook["command"].endswith(f"--ws {CORPUS}")
     settings = json.loads(argv[argv.index("--settings") + 1])
     assert settings["hooks"]["PermissionDenied"] == hooks and "PreToolUse" not in settings["hooks"]
-    assert run.mode == "manual" and _flag(argv) == "default", "no Start and no mode of the analyst's: Manual"
+    assert run.mode == "manual" and _flag(argv) == "default", "no row and no mode main reported: Manual"
     assert "ask_permission" not in tools.REGISTRY
 
 
 async def test_manual_waits_for_the_analyst_however_long_while_a_writer_s_request_is_denied_after_a_minute(fake, monkeypatch):
     """Manual is Claude Code's manual mode: each request it makes waits on the orientation's card, with the agent that
-    asked, until the analyst answers, with no minute's deny. A writer, which runs in the analyst's own mode, keeps the minute."""
+    asked, until the analyst answers, with no minute's deny. A writer, which is not patient, keeps the minute."""
     monkeypatch.setenv("FAKE_MODE", "sleep")
     monkeypatch.setattr(agent_session, "PERMISSION_WAIT_S", 0.05)
     run = await orient_session.start(CORPUS, "")
@@ -216,11 +217,11 @@ async def test_manual_waits_for_the_analyst_however_long_while_a_writer_s_reques
 
 async def test_bypass_grants_every_request_and_switches_with_manual_while_the_session_runs(fake, monkeypatch):
     """Bypass never asks and runs in Claude Code's manual mode, so the card switches it with Manual on the same
-    process: a switch to Bypass grants what waits, the critique's included, and after a switch back the next request
-    waits again. The record keeps the mode for a follow-up."""
+    process: a switch to Bypass grants what waits, and after a switch back the next request waits again. The session's
+    later runs keep the switch, and its row is left alone."""
     monkeypatch.setenv("FAKE_MODE", "sleep")
     _listen()
-    channel.post(CORPUS, "start", {"text": "", "permissions": "bypass"})
+    ledger.put_settings(CORPUS, {modes.SETTING: {"orient": "bypass"}})
     run = await orient_session.start(CORPUS, "")
     pid = run.pid
     assert run.mode == "bypass" and _flag(run.argv) == "default"
@@ -229,25 +230,12 @@ async def test_bypass_grants_every_request_and_switches_with_manual_while_the_se
                                                                                    "updatedInput": {"command": "rm -r out"}}
     assert not agents.read_meta(CORPUS, run.chat).get("permissions"), "nothing reached the card"
     assert agent_session.set_mode(CORPUS, run.chat, "manual") == {"mode": "manual", "switching": None}
-    assert orientation.read_run(CORPUS)["permissions"] == "manual"
     call = _ask("Bash", {"command": "rm -r out"})
-    # the critique follows the orientation's mode at each request
-    critic = agent_session.Run(CORPUS, "critique:orient", "", "sid-c", Path("."), "step", pid=1, mode="manual", mode_owner=KEY, patient=True)
-    critic.chat = str(agents.new_agent(CORPUS, "step", "critique", parent=run.chat)["id"])
-    agent_session._runs[(CORPUS, critic.key)] = critic
-    try:
-        asked = _ask("Read", {"file_path": "/etc/hosts"}, key=critic.key)
-        await _pending(run.chat)
-        await _pending(critic.chat)
-        assert agent_session.set_mode(CORPUS, run.chat, "bypass") == {"mode": "bypass", "switching": None}
-        assert (await call)["behavior"] == "allow" and (await asked)["behavior"] == "allow", "what waited is granted"
-        assert run.pid == pid and _flag(run.argv) == "default", "the same process"
-        assert agents.read_meta(CORPUS, run.chat)["permission_mode"] == "bypass"
-        with pytest.raises(HTTPException) as e:
-            await agent_session.mode_route(CORPUS, critic.chat, agent_session.ModeBody(mode="auto"))
-        assert e.value.status_code == 409, "the critique has no mode of its own"
-    finally:
-        agent_session._runs.pop((CORPUS, critic.key), None)
+    await _pending(run.chat)
+    assert agent_session.set_mode(CORPUS, run.chat, "bypass") == {"mode": "bypass", "switching": None}
+    assert (await call)["behavior"] == "allow", "what waited is granted"
+    assert run.pid == pid and _flag(run.argv) == "default", "the same process"
+    agent_session.set_mode(CORPUS, run.chat, "manual")
     with pytest.raises(HTTPException) as e:
         await agent_session.mode_route(CORPUS, run.chat, agent_session.ModeBody(mode="yolo"))
     assert e.value.status_code == 400
@@ -256,6 +244,11 @@ async def test_bypass_grants_every_request_and_switches_with_manual_while_the_se
     with pytest.raises(HTTPException) as e:
         await agent_session.mode_route(CORPUS, run.chat, agent_session.ModeBody(mode="manual"))
     assert e.value.status_code == 404
+    again = await orient_session.message(CORPUS, "one more look", orient_session.BROWSER)
+    assert again["status"] == "resumed" and agent_session.current(CORPUS, KEY).mode == "manual", "its follow-up keeps the switch"
+    assert ledger.get_settings(CORPUS)[modes.SETTING] == {"orient": "bypass"}
+    await orient_session.stop(CORPUS)
+    await _done()
 
 
 RULE = {"type": "addRules", "rules": [{"toolName": "Bash", "ruleContent": "npm test *"}], "behavior": "allow",

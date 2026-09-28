@@ -310,46 +310,7 @@ def clear_override(cwd: Path) -> bool:
     return effort or fast
 
 
-# --------------------------------------------------------------------------- the orientation's permissions and sandbox
-# Start's mode switcher for the orientation: Manual, Auto and Bypass. It opens on the analyst's own mode (the highest of
-# analyst_sources' `permissions.defaultMode`; a mode it does not offer opens it on Manual). The orientation runs with
-# `--permission-mode` `auto` for Auto and `default` for Manual and Bypass alike: in Bypass thimble grants every request
-# itself (agent_session), so the analyst can switch between Manual and Bypass without restarting the session.
-# Start's names, and the Claude Code mode each is named after
-ORIENT_MODES = {"manual": "default", "auto": "auto", "bypass": "bypassPermissions"}
-
-
-def permission_mode(cwd: Path) -> str:
-    """The analyst's own permission mode: the `permissions.defaultMode` of the last of analyst_sources that sets one
-    (the managed file over the user's settings.json), else `default`. The settings of the corpus folder `cwd` are not
-    read, so a corpus cannot pre-select Bypass."""
-    mode = "default"
-    for path in analyst_sources():
-        d = _read(path)
-        perms = d.get("permissions") if isinstance(d.get("permissions"), dict) else {}
-        if isinstance(perms.get("defaultMode"), str) and perms["defaultMode"].strip():
-            mode = perms["defaultMode"].strip()
-    return mode
-
-
-def orient_mode_default(cwd: Path) -> str:
-    """The choice Start's switcher opens on for the analyst's own mode: `auto` for auto, `bypass` for bypassPermissions,
-    else `manual`."""
-    return {"auto": "auto", "bypassPermissions": "bypass"}.get(permission_mode(cwd), "manual")
-
-
-def orient_mode(cwd: Path, choice: str | None) -> str:
-    """The mode the orientation runs in: `choice` when it is one of ORIENT_MODES, else the one the analyst's own mode
-    stands for."""
-    return choice if choice in ORIENT_MODES else orient_mode_default(cwd)
-
-
-def orient_permission_flag(mode: str) -> str:
-    """The `--permission-mode` of an orientation in `mode`: `auto` for Auto, else `default`, the manual mode Bypass runs in
-    too."""
-    return "auto" if mode == "auto" else "default"
-
-
+# --------------------------------------------------------------------------- the sandbox
 # Claude Code's Bash sandbox. On Linux it needs bubblewrap, socat and unprivileged user namespaces (which Ubuntu 24.04
 # restricts unless an AppArmor profile allows bwrap), so sandbox_ok probes it once. A session where it cannot run gets
 # no sandbox block and runs Bash under the analyst's permission mode instead.

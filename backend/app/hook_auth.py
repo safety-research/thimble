@@ -22,7 +22,7 @@ from pathlib import Path
 from starlette.datastructures import Headers, MutableHeaders
 
 HOOK_PATHS = frozenset({
-    "/api/channel/pull", "/api/channel/ack", "/api/channel/held", "/api/channel/permission/hook",
+    "/api/channel/pull", "/api/channel/ack", "/api/channel/held", "/api/channel/mode", "/api/channel/permission/hook",
     "/api/agents", "/api/bg/relay", "/api/bg/agent-check", "/api/bg/proxy-stop",
 })
 SHIM_PATHS = frozenset({"/api/channel", "/api/channel/permission"})
