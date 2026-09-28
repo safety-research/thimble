@@ -36,8 +36,9 @@
 # what its save changed, the name it signs with and the accounts it names are read back from its line when it is shown.
 #
 # The chart: the cards are the records the labels that are on give a highlighted value (thimble.marked), kept by the
-# label filter (thimble.kept), in event order, CARDS_MAX at a time, of the values the page's legend keeps (`only`, all
-# when none). With no label on they are the actions of the map a
+# label filter (thimble.kept), of the values the page's legend keeps (`only`, all when none), CARDS_MAX at a time in
+# event order, each page taking the values in turn so the first shows them all. With no label on they are the actions
+# of the map a
 # swarm step wrote (swarm.json beside the view, in the workspace's orient folder or in the corpus, when there is one),
 # else the actions on the PLACES_SHOWN places the most accounts acted on. Links between cards come from the records:
 #   reply       the card's record answers the other card's record (its reply field)
@@ -350,7 +351,7 @@ def _did(index, r):
         head = parts[0] if len(parts[0]) > 12 or len(parts) == 1 else " ".join(parts[:2])
         return {"line": _cut(head), "said": text}
     if not r["before"]:
-        return {"line": _cut(next((s for s in text.splitlines() if s.strip()), "")) or "Created the page", "said": text}
+        return {"line": _gist([s for s in text.splitlines() if s.strip()]) or "Created the page", "said": text}
     hunks = _hunks(_text(index, r["before"]), text)
     added = [s for h in hunks for s in h["add"] if s.strip()]
     removed = [s for h in hunks for s in h["del"] if s.strip()]
@@ -359,10 +360,18 @@ def _did(index, r):
     elif len(added) == 1 and len(removed) == 1:
         line = _swap(removed[0], added[0])
     elif added:
-        line = _cut(added[0]) + (f" (+{len(added) - 1} lines)" if len(added) > 1 else "")
+        line = _gist(added)
     else:
         line = "Removed " + _cut(removed[0], CARD_CHARS - 8)
     return {"line": line, "said": "\n".join(added), "before": r["before"], "hunks": hunks}
+
+
+def _gist(lines):
+    """A card's words for the lines a save wrote: the last that ends in a signature, where a note ends, else the last."""
+    if not lines:
+        return ""
+    pick = next((s for s in reversed(lines) if SIGNATURE.search(s.strip())), lines[-1])
+    return _cut(pick) + (f" (+{len(lines) - 1} lines)" if len(lines) > 1 else "")
 
 
 def _signature(said):
@@ -452,6 +461,7 @@ def _chart(index, query):
         only = {(x.get("label"), x.get("value")) for x in query.get("only") or () if isinstance(x, dict)}
         if only:
             picked = [(ref, got) for ref, got in picked if ref in keep or any((x["label"], x["value"]) in only for x in got)]
+        picked = _by_turns(picked, mark_at)
     elif m and m["refs"]:
         source, wanted = "map", set(m["refs"])
         picked = [(ref, []) for ref in index["order"] if ref in wanted and kept(ref)]
@@ -491,6 +501,20 @@ def _chart(index, query):
             "marks": marks, "mark_counts": per_mark, "offset": offset, "total": len(picked), "page": CARDS_MAX,
             "counts": {"records": len(index["order"]), "accounts": len(index["accounts"]), "places": len(index["places"])},
             "about": _about(index), "problems": index["problems"]}
+
+
+def _by_turns(picked, mark_at):
+    """The cards in pages of CARDS_MAX that take the values in turn, so the first page shows each value; a page keeps event
+    order."""
+    if len(picked) <= CARDS_MAX:
+        return picked
+    seen, turn = {}, []
+    for ref, got in picked:
+        v = min((mark_at[k] for x in got if (k := (x["label"], x["value"])) in mark_at), default=-1)
+        seen[v] = seen.get(v, -1) + 1
+        turn.append(seen[v])
+    order = sorted(range(len(picked)), key=lambda i: (turn[i], i))
+    return [picked[i] for p in range(0, len(order), CARDS_MAX) for i in sorted(order[p: p + CARDS_MAX])]
 
 
 def _links(index, cards, by_ref, said, m):

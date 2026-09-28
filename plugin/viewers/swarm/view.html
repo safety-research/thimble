@@ -11,6 +11,9 @@
   .row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; min-width: 0; }
   .row + .row { margin-top: 7px; }
   .grow { flex: 1 1 auto; }
+  /* the places keep to one row that scrolls sideways */
+  #threads { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: thin; }
+  #threads > * { flex: none; }
   #askf { display: flex; gap: 6px; }
   #ask { flex: 1 1 auto; min-width: 0; }
   #asked { margin: 6px 0 0; font: 400 var(--text-xs) / 1.4 var(--font-body); color: var(--text-secondary); overflow-wrap: anywhere; }
@@ -143,9 +146,9 @@
     #bar { padding: 8px 12px 6px; }
     #title { flex-basis: 100%; }
     #q { flex: 1 1 110px; }
-    /* the places and the filters each keep to one row that scrolls sideways */
-    #threads, #filters { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
-    #threads > *, #filters > * { flex: none; }
+    /* so do the filters */
+    #filters { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
+    #filters > * { flex: none; }
     .plink { max-width: 160px; }
     #corner { padding-left: 10px; }
     .agent { padding: 0 6px 0 8px; gap: 6px; }
@@ -377,14 +380,15 @@ function showProblems(p) {
 function context() {
   if (!D) return ''
   const on = labelState.labels.map((l) => (l.id ? `${l.name} (concept:${l.id})` : l.name))
-  const shown = D.source === 'labels' ? 'the records the labels that are on give a highlighted value'
-    : D.source === 'map' ? 'the actions of the swarm map, since no label is on' : 'the records of the places the most accounts acted on, since no label is on'
   const lines = [
-    `The ${thimble.view && thimble.view.name ? thimble.view.name : 'Swarm'} view (view:${slug}) draws a row per account, columns in event order and as cards ${shown}, coloured by value, linked by replies, names of other accounts and the record before on the same place. A label that is on becomes its cards.`,
+    `The ${thimble.view && thimble.view.name ? thimble.view.name : 'Swarm'} view (view:${slug}) draws a row per account, columns in event order and as cards the records the labels that are on give a highlighted value, coloured by value, linked by replies, names of other accounts and the record before on the same place.`,
     `The records: ${D.about}`,
-    `Now: ${D.cards.length ? `cards ${D.offset + 1}–${D.offset + D.cards.length} of ${fmt(D.total)}` : 'no cards'}, of ${plural(rowsList.length, 'row')} on ${plural(D.places.length, 'place')}; labels on: ${on.length ? on.join(', ') : 'none'}${only.length ? `; the legend keeps ${only.map((o) => o.value).join(', ')}` : ''}${labelState.filter ? `; filter: ${labelState.filter.label} = ${labelState.filter.value}` : ''}.`,
   ]
-  if (D.cards.length) lines.push(`Cards: ${D.cards.slice(0, CARD_REFS_SENT).map((c) => c.ref).join(', ')}${D.cards.length > CARD_REFS_SENT ? ', …' : ''}`)
+  if (!labelsOn()) lines.push(`No label is on, so it shows ${D.source === 'map' ? 'the actions of the swarm map' : 'the records of the places the most accounts acted on'}, which need not bear on the question.`)
+  else {
+    lines.push(`Now: ${D.cards.length ? `cards ${D.offset + 1}–${D.offset + D.cards.length} of ${fmt(D.total)}` : 'no cards'}; labels on: ${on.join(', ')}${only.length ? `; the legend keeps ${only.map((o) => o.value).join(', ')}` : ''}${labelState.filter ? `; filter: ${labelState.filter.label} = ${labelState.filter.value}` : ''}.`)
+    if (D.cards.length) lines.push(`Cards: ${D.cards.slice(0, CARD_REFS_SENT).map((c) => c.ref).join(', ')}${D.cards.length > CARD_REFS_SENT ? ', …' : ''}`)
+  }
   const text = lines.join('\n')
   return text.length > CONTEXT_MAX ? text.slice(0, CONTEXT_MAX - 1) + '…' : text
 }
@@ -400,7 +404,7 @@ async function ask() {
   try {
     const thread = await thimble.ask(question, context())
     input.value = ''
-    out.textContent = `Asked in the thread ${thread}. The labels it makes come on here as they run.`
+    out.textContent = `“${question}”, asked in the thread ${thread}: the labels that answer it come on here as they run.`
   } catch (err) {
     out.className = 'err'
     out.textContent = `The question was not sent: ${err.message || err}`
@@ -672,7 +676,8 @@ function layout(v) {
   grid.hidden = !cards0.length
   if (!cards0.length) {
     empty.textContent = D.cards.length ? 'No card matches the filters.'
-      : labelsOn() || labelState.labels.length ? 'No record of these files takes a highlighted value of the labels that are on.'
+      : labelsOn() ? `${labelState.labels.map((l) => l.name).join(' and ')} ${labelState.labels.length > 1 ? 'give' : 'gives'} no record the value ${D.marks.map((m) => `“${m.value}”`).join(' or ')}.`
+      : labelState.labels.length ? 'No record of these files takes a highlighted value of the labels that are on.'
       : 'No record to show.'
     L = null
     return
