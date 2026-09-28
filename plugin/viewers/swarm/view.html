@@ -220,8 +220,8 @@
 // their record's ref as data-anchor, and rows and places their unit keys, so thimble marks them.
 const slug = (thimble.view && thimble.view.slug) || 'swarm'
 const NS = 'http://www.w3.org/2000/svg'
-const TYPE_VIZ = { reply: 1, names: 3, 'same place': 7, support: 3, contradicts: 4, related: 2 } // the viz colour of each link type
-const DASH = { reply: '', names: '', 'same place': '1.5 3.5', contradicts: '6 3', related: '1.5 3.5' }
+const TYPE_VIZ = { reply: 1, names: 3, 'same place': 7 } // the viz colour of each link type
+const DASH = { reply: '', names: '', 'same place': '1.5 3.5' }
 const MON = 'Jan Feb Mar Apr May Jun Jul Aug Sep Oct Nov Dec'.split(' ')
 const HEAD_H = 58 // the column header's height
 const ROW_PAD = 10 // above and below a row's cards
@@ -385,7 +385,7 @@ function context() {
     `The ${thimble.view && thimble.view.name ? thimble.view.name : 'Swarm'} view (view:${slug}) draws a row per account, columns in event order and as cards the records the labels that are on give a highlighted value, coloured by value, linked by replies, names of other accounts and the record before on the same place.`,
     `The records: ${D.about}`,
   ]
-  if (!labelsOn()) lines.push(`No label is on, so it shows ${D.source === 'map' ? 'the actions of the swarm map' : 'the records of the places the most accounts acted on'}, which need not bear on the question.`)
+  if (!labelsOn()) lines.push(`No label is on, so it shows the records of the places the most accounts acted on, which need not bear on the question.`)
   else {
     lines.push(`Now: ${D.cards.length ? `cards ${D.offset + 1}–${D.offset + D.cards.length} of ${fmt(D.total)}` : 'no cards'}; labels on: ${on.join(', ')}${only.length ? `; the legend keeps ${only.map((o) => o.value).join(', ')}` : ''}${labelState.filter ? `; filter: ${labelState.filter.label} = ${labelState.filter.value}` : ''}.`)
     if (D.cards.length) lines.push(`Cards: ${D.cards.slice(0, CARD_REFS_SENT).map((c) => c.ref).join(', ')}${D.cards.length > CARD_REFS_SENT ? ', …' : ''}`)

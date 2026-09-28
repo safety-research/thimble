@@ -38,11 +38,8 @@
 # The chart: the cards are the records the labels that are on give a highlighted value (thimble.marked), kept by the
 # label filter (thimble.kept), of the values the page's legend keeps (`only`, all when none), CARDS_MAX at a time in
 # event order, each page taking the values in turn so the first shows them all. With no label on they are the actions
-# of the map a
-# swarm step wrote (swarm.json beside the view, in the workspace's orient folder or in the corpus, when there is one),
-# else the actions on the PLACES_SHOWN places the most accounts acted on. Links between cards come from the records:
+# on the PLACES_SHOWN places the most accounts acted on. Links between cards come from the records:
 #   reply       the card's record answers the other card's record (its reply field)
-#   <type>      the map's link between the two, typed as the map types it
 #   names       the card's text names the other card's account (the latest card of that account before it)
 #   same place  the card before it on its place, by another account
 # A pair keeps one link, the first of these that holds. A card signs as someone when a line of its text ends with
@@ -70,7 +67,6 @@ REPLY_KEYS = ("reply_to", "parent", "in_reply_to", "parent_id")
 ID_KEYS = ("id", "rev_id", "message_id")
 SEQ_KEYS = ("rev", "seq", "revision")
 GOAL_KEYS = ("objective", "goal", "brief", "purpose", "role")
-MAP_NAME = "swarm.json"
 CARDS_MAX = 40
 PLACES_SHOWN = 3
 MARKS_MAX = 24  # label values the page tells apart, as bits of one number per card
@@ -386,37 +382,6 @@ def _signature(said):
     return sig
 
 
-# ------------------------------------------------------------------------------------------------ the map (optional)
-
-_map = {"sig": None, "map": None}
-
-
-def _load_map():
-    """{title, goals: {account: goal}, refs: [action refs], links: {(from ref, to ref): {type, reason}}} of the map, or
-    None when there is none."""
-    ws = getattr(thimble, "WS", None)
-    p = next((p for p in (Path(__file__).with_name(MAP_NAME), Path(ws) / "orient" / MAP_NAME if ws else None,
-                          Path(MAP_NAME)) if p is not None and p.is_file()), None)
-    if p is None:
-        return None
-    st = p.stat()
-    sig = (str(p), st.st_mtime_ns, st.st_size)
-    if _map["sig"] != sig:
-        try:
-            raw = json.loads(p.read_text("utf-8"))
-        except (OSError, ValueError):
-            raw = {}
-        raw = raw if isinstance(raw, dict) else {}
-        acts = {a.get("id"): str(a.get("ref") or "") for a in raw.get("actions") or [] if isinstance(a, dict)}
-        links = {(acts[x["from"]], acts[x["to"]]): {"type": str(x.get("type") or "related"), "reason": str(x.get("reason") or "")}
-                 for x in raw.get("links") or [] if isinstance(x, dict) and acts.get(x.get("from")) and acts.get(x.get("to"))}
-        goals = {str(a["username"]): str(a.get("goal") or "") for a in raw.get("agents") or []
-                 if isinstance(a, dict) and a.get("username")}
-        _map.update(sig=sig, map={"title": str(raw.get("title") or ""), "goals": goals,
-                                  "refs": [r for r in acts.values() if r], "links": links})
-    return _map["map"]
-
-
 # ------------------------------------------------------------------------------------------------ the chart
 
 
@@ -452,7 +417,6 @@ def _chart(index, query):
              for lab in on["labels"] for v in lab["values"]][:MARKS_MAX]
     mark_at = {(x["label"], x["value"]): i for i, x in enumerate(marks)}
     keep = {str(r) for r in query.get("keep") or ()}
-    m = _load_map()
 
     def kept(ref):
         return ref in keep or thimble.kept(ref)
@@ -468,9 +432,6 @@ def _chart(index, query):
         if only:
             picked = [(ref, got) for ref, got in picked if ref in keep or any((x["label"], x["value"]) in only for x in got)]
         picked = _by_turns(picked, mark_at)
-    elif m and m["refs"]:
-        source, wanted = "map", set(m["refs"])
-        picked = [(ref, []) for ref in index["order"] if ref in wanted and kept(ref)]
     else:
         ranked = sorted(index["places"], key=lambda p: (-len(index["places"][p]["accounts"]), p))
         source, wanted = "busiest", set(ranked[:PLACES_SHOWN])
@@ -491,18 +452,16 @@ def _chart(index, query):
         said[n] = did["said"]
         cards.append(c)
         by_ref[ref] = c
-    links = _links(index, cards, by_ref, said, m)
+    links = _links(index, cards, by_ref, said)
     tags = {}
     for c in cards:
         c["tag"] = tags.setdefault(c["place"], f"T{len(tags) + 1}")
-    goals = (m or {}).get("goals") or {}
-    rows = [{"account": a, "goal": goals.get(a) or index["accounts"][a]["goal"], "n": index["accounts"][a]["n"]}
+    rows = [{"account": a, "goal": index["accounts"][a]["goal"], "n": index["accounts"][a]["n"]}
             for a in dict.fromkeys(c["account"] for c in cards)]
     places = [{"tag": t, "name": p, "title": index["places"][p]["title"], "ref": index["places"][p]["ref"],
                "n": len(index["places"][p]["refs"]), "accounts": len(index["places"][p]["accounts"])}
               for p, t in tags.items()]
-    title = ("; ".join(lab["name"] for lab in on["labels"]) if source == "labels"
-             else (m["title"] or "The swarm map") if source == "map" else "The places the most accounts acted on")
+    title = "; ".join(lab["name"] for lab in on["labels"]) if source == "labels" else "The places the most accounts acted on"
     return {"title": title, "source": source, "cards": cards, "rows": rows, "places": places, "links": links,
             "marks": marks, "mark_counts": per_mark, "offset": offset, "total": len(picked), "page": CARDS_MAX,
             "counts": {"records": len(index["order"]), "accounts": len(index["accounts"]), "places": len(index["places"])},
@@ -523,11 +482,10 @@ def _by_turns(picked, mark_at):
     return [picked[i] for p in range(0, len(order), CARDS_MAX) for i in sorted(order[p: p + CARDS_MAX])]
 
 
-def _links(index, cards, by_ref, said, m):
+def _links(index, cards, by_ref, said):
     """The links between the cards (the chart note above): [{from, to, key, type, reason}], the later card first."""
     out, seen, last_on, last_by = [], set(), {}, {}
     names = {c["account"].lower(): c["account"] for c in cards if not re.fullmatch(r"[\d.:]+", c["account"])}
-    map_links = (m or {}).get("links") or {}
 
     def add(a, b, kind, reason):
         if b is None or b["account"] == a["account"] or (a["id"], b["id"]) in seen:
@@ -539,9 +497,6 @@ def _links(index, cards, by_ref, said, m):
         reply = index["recs"][c["ref"]]["reply_ref"]
         if reply in by_ref:
             add(c, by_ref[reply], "reply", f"Replies to {by_ref[reply]['account']}")
-        for (src, dst), x in map_links.items():
-            if src == c["ref"] and dst in by_ref:
-                add(c, by_ref[dst], x["type"], x["reason"])
         for w in dict.fromkeys(WORD.findall(said[c["id"]])):
             who = names.get(w.lstrip("@").lower())
             if who in last_by:
