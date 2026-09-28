@@ -1104,14 +1104,26 @@ def within_units(ws: Path, corpus_dir: Path, sources: list[dict], within: dict) 
             lines.setdefault(path, set()).add(int(line))
     out: list[Unit] = []
     for src in sources:
-        want = sorted(lines.get(src["path"], ()))
-        if not want:
-            continue
-        path = config.safe_corpus_path(corpus_dir, src["path"])
-        for n in want:
-            for r in corpus.load_records(path, src["path"], src["kind"], n, n):
-                ref, text = f"{src['path']}#L{r['line']}", "\n\n".join(b["text"] for b in r["blocks"])
-                out.append(Unit(ref, [src["path"]], lambda ref=ref, text=text: iter([(ref, text)]), r["record"]))
+        out += line_units(corpus_dir, src["path"], src["kind"], lines.get(src["path"], ()))
+    return out
+
+
+def line_units(corpus_dir: Path, rel: str, kind: str, lines: Any) -> list[Unit]:
+    """The record units on these lines of one file, in line order, read CHUNK lines at a time. Blocking."""
+    want = sorted(set(lines))
+    path = config.safe_corpus_path(corpus_dir, rel)
+    out: list[Unit] = []
+    i = 0
+    while i < len(want):
+        j = i
+        while j + 1 < len(want) and want[j + 1] < want[i] + CHUNK:
+            j += 1
+        keep = set(want[i:j + 1])
+        for r in corpus.load_records(path, rel, kind, want[i], want[j]):
+            if r["line"] in keep:
+                ref, text = f"{rel}#L{r['line']}", "\n\n".join(b["text"] for b in r["blocks"])
+                out.append(Unit(ref, [rel], lambda ref=ref, text=text: iter([(ref, text)]), r["record"]))
+        i = j + 1
     return out
 
 
@@ -1218,14 +1230,14 @@ def examples(c: str, concept_id: str, value: str, n: int = EXAMPLES_SHOWN) -> li
     matched = {str(r.get("ref") or ""): {x.casefold() for x in r.get("spans") or [] if x} for r in rows}
     order = [rows[i] for i in spread(len(rows), len(rows))]
     order.sort(key=lambda r: -len(matched[str(r.get("ref") or "")]))
-    units: list[Unit] = []
+    lines: dict[str, list[int]] = {}
     for r in order[:EXAMPLES_READ]:
         rel, line = labels_store.ref_parts(str(r.get("ref") or ""))
-        if not rel or not line:
-            continue
-        for rec in corpus.load_records(config.safe_corpus_path(corpus_dir, rel), rel, corpus.source_kind(rel), line, line):
-            ref, text = f"{rel}#L{line}", "\n\n".join(b["text"] for b in rec["blocks"])
-            units.append(Unit(ref, [rel], lambda ref=ref, text=text: iter([(ref, text)]), rec["record"]))
+        if rel and line:
+            lines.setdefault(rel, []).append(line)
+    rank = {str(r.get("ref") or ""): i for i, r in enumerate(order[:EXAMPLES_READ])}
+    units = sorted((u for rel, ns in lines.items() for u in line_units(corpus_dir, rel, corpus.source_kind(rel), ns)),
+                   key=lambda u: rank[u.ref])
     out: list[tuple[str, str]] = []
     docs: set = set()
     for u in picked_as_changes(corpus_dir, units, header=False):
