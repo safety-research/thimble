@@ -1,9 +1,10 @@
 // The Table view: one row per record, one column per field, offered when the records are flat objects that share
-// their keys, and for a CSV or TSV file, whose first line names the columns. Columns are ordered by how many records carry them; records that read as posts lead with author, time
-// and body. Every cell is one line cut with an ellipsis. The labels that are on tint rows and highlight marked texts in
-// cells (a cell starts a little before its first mark when the mark would fall past what it shows), and the pinned
-// line-number column holds a slot per label that is on, under the label's mark (LabelMark). Only rows near the view are
-// drawn, with spacer rows for the rest; hidden width holders in the header keep column widths stable.
+// their keys, and for a CSV or TSV file, whose first line names the columns. Columns are ordered by how many records
+// carry them; records that read as posts lead with author, time and body. Every cell is one line cut with an ellipsis.
+// The labels that are on tint rows and highlight marked texts in cells (a cell starts a little before its first mark
+// when the mark would fall past what it shows), and the pinned line-number column holds a slot per label that is on,
+// under the label's mark (LabelMark). Only rows near the view are drawn, with spacer rows for the rest; hidden width
+// holders in the header keep column widths stable.
 import { memo, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type RefObject } from 'react'
 import { flushSync } from 'react-dom'
 import { Tipped } from '../../components/Tooltip'
@@ -253,24 +254,44 @@ function useDrawnRows(rootRef: RefObject<HTMLElement | null>, bodyRef: RefObject
 
 const DELIMITED = /\.(csv|tsv)$/i
 
-/** One line of a CSV or TSV file as its cells; a quoted cell may hold the delimiter and doubled quotes. Pure. */
-export function splitDelimited(line: string, sep: string): string[] {
-  const out: string[] = []
+/** The lines of a CSV or TSV file as its records' cells. A quoted cell may hold the delimiter, doubled quotes and line
+ * breaks, so a line that ends inside one goes on in the next line; a record is keyed by its first line. Pure. */
+export function splitDelimited(lines: { line: number; text: string }[], sep: string): { line: number; cells: string[] }[] {
+  const out: { line: number; cells: string[] }[] = []
+  let first = 0
+  let last = -1
+  let cells: string[] = []
   let cur = ''
   let quoted = false
-  for (let i = 0; i < line.length; i++) {
-    const ch = line[i]
-    if (quoted) {
-      if (ch !== '"') cur += ch
-      else if (line[i + 1] === '"') cur += line[++i]
-      else quoted = false
-    } else if (ch === '"' && cur === '') quoted = true
-    else if (ch === sep) {
-      out.push(cur)
-      cur = ''
-    } else cur += ch
+  const end = () => {
+    cells.push(cur)
+    out.push({ line: first, cells })
   }
-  out.push(cur)
+  for (const { line, text } of lines) {
+    if (quoted && line === last + 1) cur += '\n'
+    else {
+      if (quoted) end()
+      first = line
+      cells = []
+      cur = ''
+      quoted = false
+    }
+    last = line
+    for (let i = 0; i < text.length; i++) {
+      const ch = text[i]
+      if (quoted) {
+        if (ch !== '"') cur += ch
+        else if (text[i + 1] === '"') cur += text[++i]
+        else quoted = false
+      } else if (ch === '"' && cur === '') quoted = true
+      else if (ch === sep) {
+        cells.push(cur)
+        cur = ''
+      } else cur += ch
+    }
+    if (!quoted) end()
+  }
+  if (quoted) end()
   return out
 }
 
@@ -285,13 +306,14 @@ function useDelimited(workspace: string, path: string, records: SourceRecord[]):
   const [header, setHeader] = useState<string[] | null>(null)
   useEffect(() => {
     if (!delimited) return
-    if (first != null) return setHeader(splitDelimited(first, sep))
+    const cellsOf = (t: string) => splitDelimited([{ line: 1, text: t }], sep)[0]?.cells ?? []
+    if (first != null) return setHeader(cellsOf(first))
     let alive = true
     api
       .source(workspace, path, 1, 1)
       .then((p) => {
         const t = lineText(p.records[0])
-        if (alive && t != null) setHeader(splitDelimited(t, sep))
+        if (alive && t != null) setHeader(cellsOf(t))
       })
       .catch(() => undefined)
     return () => {
@@ -301,7 +323,9 @@ function useDelimited(workspace: string, path: string, records: SourceRecord[]):
   return useMemo(() => {
     if (!delimited || !header) return records
     const name = (i: number) => header[i]?.trim() || `column ${i + 1}`
-    return records.filter((r) => r.line > 1).map((r) => ({ ...r, record: Object.fromEntries(splitDelimited(lineText(r) ?? '', sep).map((v, i) => [name(i), v])) }))
+    const byLine = new Map(records.map((r) => [r.line, r]))
+    const lines = records.filter((r) => r.line > 1).map((r) => ({ line: r.line, text: lineText(r) ?? '' }))
+    return splitDelimited(lines, sep).map(({ line, cells }) => ({ ...byLine.get(line)!, record: Object.fromEntries(cells.map((v, i) => [name(i), v])) }))
   }, [records, header, delimited, sep])
 }
 
