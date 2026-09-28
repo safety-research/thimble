@@ -25,6 +25,7 @@ const RATES = [0.8, 0.9, 1, 1.1, 1.25, 1.5]
 const VOICE_KEY = 'thimble:video-voice'
 const RATE_KEY = 'thimble:video-rate'
 const CAPTIONS_KEY = 'thimble:video-captions'
+const FILM_ERRORS_MAX = 20 // distinct film errors logged; any others are only counted
 const P = 'thimble:'
 
 /** m:ss */
@@ -127,15 +128,29 @@ export function VideoView({ ws, slug, doc, comments, on, look, picked }: VideoVi
   )
   useEffect(() => () => player.dispose(), [player])
   useEffect(() => {
+    // an error the film repeats, such as a seek that throws on every frame, is logged once, then with its count when
+    // the film is left or loaded again
+    const seen = new Map<string, number>()
+    let more = 0
     const onMessage = (e: MessageEvent) => {
       if (!frame.current || e.source !== frame.current.contentWindow) return
       const d = (e.data ?? {}) as { type?: string; message?: string }
       if (d.type === P + 'ready') post(player.t)
-      else if (d.type === P + 'error') console.error(`the film of report:${slug}: ${d.message ?? ''}`)
+      else if (d.type === P + 'error') {
+        const text = `the film of report:${slug}: ${d.message ?? ''}`
+        if (!seen.has(text) && seen.size >= FILM_ERRORS_MAX) return void more++
+        const n = (seen.get(text) ?? 0) + 1
+        seen.set(text, n)
+        if (n === 1) console.error(text)
+      }
     }
     window.addEventListener('message', onMessage)
-    return () => window.removeEventListener('message', onMessage)
-  }, [post, player, slug])
+    return () => {
+      window.removeEventListener('message', onMessage)
+      seen.forEach((n, text) => n > 1 && console.error(`${text} (${n} times)`))
+      if (more) console.error(`the film of report:${slug}: ${more} more errors`)
+    }
+  }, [post, player, slug, page])
 
   const texts = useMemo(() => lines.map((l) => readableText((l.sentences ?? []).map((s) => s.text).join(' '))), [lines])
   // a document read again with the same script leaves playback as it is
