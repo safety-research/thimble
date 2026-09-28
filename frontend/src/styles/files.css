@@ -96,17 +96,17 @@
 .files-views .seg-opt[data-anchor^='view:']:focus-visible {
   box-shadow: 0 0 0 1.5px var(--accent);
 }
-/* a proposal: its button, then Retry for a failed build, with × on its top right corner on hover */
+/* a proposal: its button, with × on its top right corner on hover, then Retry for a failed build */
 .files-proposal {
   position: relative;
-  gap: 4px;
+  gap: 8px;
+}
+.files-proposal-opt .files-proposal-failed {
+  color: var(--status-negative);
 }
 /* a proposal still building has no thread to open until its build starts; it keeps its colours while it waits */
 .files-proposal-opt.seg-opt:disabled {
   opacity: 1;
-}
-.files-proposal-mark {
-  flex: none;
 }
 .files-proposal-retry.btn {
   flex: none;

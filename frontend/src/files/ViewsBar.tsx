@@ -1,15 +1,14 @@
 // Files' views: File browser, then every view written for this corpus, one exclusive choice (Segmented), a view whose
 // newer version builds or is reviewed with its name shimmering; then proposals not built yet (spinner while building, a
-// still warning dot while its session waits for permission, ✕ and Retry on failure); then New view, a field that asks
-// main for one. A view or a proposal shows × on hover, which deletes it once confirmed. A row
-// across the top of Files, or, while Files shows in a pane beside another, in that pane's head (`compact`, portalled by
+// still warning dot while its session waits for permission, a warning icon and Retry on failure); then New view, a
+// field that asks main for one. A view or a proposal shows × on hover, which deletes it once confirmed. A row across
+// the top of Files, or, while Files shows in a pane beside another, in that pane's head (`compact`, portalled by
 // FilesTab), where what does not fit goes in a ⋯ menu (viewsFit.ts). Refetches on bus `view`.
 import { useEffect, useLayoutEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
 import { openThread } from '../chat/Notes'
 import { Button, Segmented } from '../components/Button'
 import { TextInput } from '../components/Field'
 import { Icon, type IconName } from '../components/Icon'
-import { Mark } from '../components/Marks'
 import { Menu, Popover } from '../components/Menu'
 import { Spinner } from '../components/Spinner'
 import { Tipped, useTooltip } from '../components/Tooltip'
@@ -106,8 +105,8 @@ export function buildLabel(status: Proposal['status'], asking: boolean): string 
 }
 
 /** A proposal in the bar: the view's button as the bar draws a view, its state after the name, a click that opens the
- * build's thread; for a failed build (a view the analyst asked for) Retry beside it; × on hover to delete it (`onDismiss`
- * gets the proposal's box, which a confirm sits by). A viewer
+ * build's thread; for a failed build (a view the analyst asked for) a warning icon with the error on hover, and Retry
+ * beside it; × on hover to delete it (`onDismiss` gets the proposal's box, which a confirm sits by). A viewer
  * suggested for a file type (in the File browser's mode row) wears the sparkle, shows its `why` on hover, and a click
  * builds it (`onAccept` runs then). */
 export function ProposalOption({ ws, p, onDismiss, onAccept, size, asking = false }: { ws: string; p: Proposal; onDismiss: (at: HTMLElement) => void; onAccept?: () => void; size: 'md' | 'lg'; asking?: boolean }) {
@@ -136,42 +135,43 @@ export function ProposalOption({ ws, p, onDismiss, onAccept, size, asking = fals
       .catch((e: Error) => bus.emit('toast', { text: `Could not build ${p.name}. ${e.message}`, kind: 'error' }))
       .finally(() => setAccepting(false))
   }
-  const mark = <Mark kind="failed" className="files-proposal-mark" />
+  const icon = <Icon name={suggested ? 'sparkle' : failed ? 'warning' : 'view'} size={14} className={failed ? 'seg-ico files-proposal-failed' : 'seg-ico'} />
   return (
-    <span className={`seg seg-${size} files-proposal seg-removable`} data-status={accepting ? 'queued' : p.status}>
-      <button
-        type="button"
-        className="seg-opt files-proposal-opt"
-        data-anchor={`view:${p.slug}`}
-        data-anchor-text={p.name}
-        disabled={!suggested && !p.chat}
-        onClick={() => {
-          if (suggested) return accept()
-          if (!p.chat) return
-          track('chip-teleport', { target: `chat:${p.chat}`, detail: { kind: 'view-build' } })
-          openThread(p.chat, 'view')
-        }}
-        {...tipProps}
-      >
-        <Icon name={suggested ? 'sparkle' : 'view'} size={14} className="seg-ico" />
-        <span className="seg-label">{p.name}</span>
-        {pending &&
-          (asking ? (
-            <Tipped text={buildLabel(p.status, asking)}>
-              <span className="dot tt-waiting files-proposal-wait" role="status" aria-label={buildLabel(p.status, asking)} />
-            </Tipped>
-          ) : (
-            <Spinner size={10} label={accepting ? 'Queued' : buildLabel(p.status, asking)} />
-          ))}
-        {failed && (p.error ? <Tipped text={p.error}>{mark}</Tipped> : mark)}
-      </button>
+    <span className={`seg seg-${size} files-proposal`} data-status={accepting ? 'queued' : p.status}>
+      <span className="seg-removable">
+        <button
+          type="button"
+          className="seg-opt files-proposal-opt"
+          data-anchor={`view:${p.slug}`}
+          data-anchor-text={p.name}
+          disabled={!suggested && !p.chat}
+          onClick={() => {
+            if (suggested) return accept()
+            if (!p.chat) return
+            track('chip-teleport', { target: `chat:${p.chat}`, detail: { kind: 'view-build' } })
+            openThread(p.chat, 'view')
+          }}
+          {...tipProps}
+        >
+          {failed && p.error ? <Tipped text={p.error}>{icon}</Tipped> : icon}
+          <span className="seg-label">{p.name}</span>
+          {pending &&
+            (asking ? (
+              <Tipped text={buildLabel(p.status, asking)}>
+                <span className="dot tt-waiting files-proposal-wait" role="status" aria-label={buildLabel(p.status, asking)} />
+              </Tipped>
+            ) : (
+              <Spinner size={10} label={accepting ? 'Queued' : buildLabel(p.status, asking)} />
+            ))}
+        </button>
+        <Button variant="icon" size="sm" icon="x" title="Delete" aria-label={`Delete ${p.name}`} className="seg-remove" onClick={(e) => onDismiss(e.currentTarget.closest<HTMLElement>('.files-proposal') ?? e.currentTarget)} />
+      </span>
       {tip}
       {failed && (
         <Button size="sm" className="files-proposal-retry" busy={retrying} aria-label={`Retry ${p.name}`} onClick={retry}>
           Retry
         </Button>
       )}
-      <Button variant="icon" size="sm" icon="x" title="Delete" aria-label={`Delete ${p.name}`} className="seg-remove" onClick={(e) => onDismiss(e.currentTarget.parentElement ?? e.currentTarget)} />
     </span>
   )
 }
