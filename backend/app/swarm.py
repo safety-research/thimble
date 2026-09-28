@@ -337,7 +337,7 @@ def check(corpus: Path, doc: Any) -> tuple[list[str], list[str]]:
 
 def _names_thread(rec: _Record, tid: str) -> bool:
     """Whether the record holds the thread's id as a whole value, or each `/` part of it as one (a record that keeps
-    `dse/Start` as `wiki: dse` and `page: Start`)."""
+    `ops/Start` as `wiki: ops` and `page: Start`)."""
     parts = [p for p in tid.split("/") if p]
     return rec.is_value(tid) or (len(parts) > 1 and all(rec.is_value(p) for p in parts))
 

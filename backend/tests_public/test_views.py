@@ -187,7 +187,7 @@ EXAMPLES = {
     "repository": ("repository", ["view:repository/r1/pull/11", "view:repository/r3", "view:repository/r2/issues/6",
                                   "view:repository/r3/discussions/2", "view:repository/r4/agents/moss"]),
     "linked-sessions": ("linked-sessions", ["view:linked-sessions/r1", "view:linked-sessions/a07a4da7"]),
-    "swarm": ("swarm", ["view:swarm/T1", "view:swarm/agent/lamplighter", "view:swarm/9-7"]),
+    "swarm": ("swarm", ["view:swarm/agent/lamplighter", "view:swarm/place/Night-14/Schedule"]),
 }
 
 
@@ -261,3 +261,28 @@ async def test_every_worked_example_s_page_loads_headless_at_its_first_place(nam
     assert rep["ok"], views.gate_lines(rep)
     assert rep["page"]["fetches"] >= 1 and Path(rep["page"]["png"]).is_file()
     assert not views.unmarked(rep["page"]), "the records a worked example shows carry their file refs, for the labels"
+
+
+async def test_the_swarm_view_draws_as_cards_the_records_a_label_marks_with_the_links_they_carry(samples, inproc, bound):
+    """A question from the Swarm view is answered with labels, and the chart is what they mark: a regex label over the
+    sample's chat and wiki marks the records about the gain, and once it is on the chart's cards are exactly those
+    records in event order, coloured by the label's value, with a reply the chat carries and the save before on the
+    same page as links; a save that changed one value reads as that change."""
+    from app import concepts
+
+    slug = _save_example("swarm")
+    s = await concepts.apply_scoped("swarm", scope="files", name="gain", kind="regex", text=r"(?i)\bgain\b|1\.84|1\.48",
+                                    values=["about the gain", "other"], paths=["chat/*.jsonl", "wiki/pages/**/*.jsonl"],
+                                    limit=None, comment=False, filter=False, created_by="test", chat=None, group=None, card=False)
+    await concepts.wait_apply("swarm", s["concept"], 60)
+    marked = {r["ref"] for r in concepts.read_labels(config.WORKSPACES_DIR / "swarm", s["concept"]) if r["label"] == "about the gain"}
+    marked -= {"wiki/pages/Calibration/Gain.jsonl#L4", "chat/help-desk.jsonl#L8"}  # a replayed save and a post sent twice
+    concepts.show_concept("swarm", s["concept"], True)
+    views._memo.clear()
+    chart = await views.reader_call("swarm", slug, "records", {"op": "chart"})
+    assert chart["source"] == "labels" and {c["ref"] for c in chart["cards"]} == marked
+    assert [c["id"] for c in chart["cards"]] == list(range(1, len(marked) + 1))
+    assert all(c["m"] == 0 for c in chart["cards"]) and chart["marks"][0]["value"] == "about the gain"
+    types = {x["type"] for x in chart["links"]}
+    assert {"reply", "same place"} <= types, chart["links"]
+    assert any(c["line"] == "1.84 → 1.48" for c in chart["cards"]), [c["line"] for c in chart["cards"]]

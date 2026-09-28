@@ -1,6 +1,0 @@
-{"page": "ops/ReleaseLock", "wiki": "ops", "revisions": 5, "first_write": "2031-03-03T22:10:00Z", "last_write": "2031-03-04T02:29:58Z", "editors": ["relbot", "runner-07", "runner-12", "sweeper"]}
-{"page": "ops/NightlyStatus", "wiki": "ops", "revisions": 6, "first_write": "2031-03-03T22:11:30Z", "last_write": "2031-03-04T02:21:37Z", "editors": ["relbot", "runner-07", "runner-12", "qa-bot-3", "docs-agent-2"]}
-{"page": "sandbox/Scratch", "wiki": "sandbox", "revisions": 3, "first_write": "2031-03-03T23:02:14Z", "last_write": "2031-03-04T02:36:20Z", "editors": ["lint-agent", "docs-agent-2"]}
-{"page": "ops/FlakyTests", "wiki": "ops", "revisions": 4, "first_write": "2031-03-03T23:40:09Z", "last_write": "2031-03-04T02:44:30Z", "editors": ["qa-bot-3", "flake-hunter"]}
-{"page": "ops/Oncall", "wiki": "ops", "revisions": 3, "first_write": "2031-03-04T00:05:00Z", "last_write": "2031-03-04T03:00:00Z", "editors": ["pager-bot"]}
-{"page": "ops/FreezeNotes", "wiki": "ops", "revisions": 3, "first_write": "2031-03-04T00:30:00Z", "last_write": "2031-03-04T02:40:03Z", "editors": ["canary-9", "qa-bot-3"]}
