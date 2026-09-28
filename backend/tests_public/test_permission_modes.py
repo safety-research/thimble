@@ -178,7 +178,7 @@ async def test_each_agent_runs_in_its_row_else_in_main_s_mode_and_nothing_else_p
     assert "permissions" not in tools.schema_of("start_orientation")["properties"]
     seen: dict = {}
 
-    async def fake_start(c, brief, passes, call=None, chosen=None):
+    async def fake_start(c, brief, passes, call=None, chosen=None, **_):
         seen.update(chosen=chosen)
 
     monkeypatch.setattr(orient_session, "start", fake_start)

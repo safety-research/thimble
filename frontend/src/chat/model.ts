@@ -821,6 +821,8 @@ const groupPart = (g: unknown): string => groupName(g).toLowerCase()
 
 /** The slug a propose_view result names (`Proposed the view Inbox (view:inbox) over …`). */
 const VIEW_REF_RE = /\(view:([a-z0-9][a-z0-9-]{0,39})\)/
+/** A view's own ref, `view:<slug>`, as a chip names it. */
+const VIEW_KEY_RE = /^view:([a-z0-9][a-z0-9-]{0,39})$/
 
 /** The calls whose `group` places a card, and so names a group of the canvas. */
 const PLACING = new Set(['add_card', 'edit_card', 'apply_label'])
@@ -834,6 +836,13 @@ export function madeBy(rows: readonly Row[]): Made {
   }
   const walk = (list: readonly Row[]) => {
     for (const r of list) {
+      // a viewer thimble proposed for the run as it started (backend orient_session._note_proposed)
+      if (r.kind === 'chip' && r.chip === 'view') {
+        add(out.views, r.text)
+        const slug = VIEW_KEY_RE.exec(r.ref ?? '')?.[1]
+        if (slug) out.viewSlugs = { ...out.viewSlugs, [r.text]: slug }
+        continue
+      }
       if (r.kind !== 'tool') continue
       const inp = (r.input && typeof r.input === 'object' ? r.input : {}) as Record<string, unknown>
       const ok = !!r.result && !r.result.is_error

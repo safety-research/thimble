@@ -4,7 +4,7 @@
 import { readFileSync } from 'node:fs'
 import path from 'node:path'
 import { describe, expect, test } from 'vitest'
-import { foldRecords, MCP_PREFIXES } from '../../src/chat/model.ts'
+import { foldRecords, madeBy, MCP_PREFIXES } from '../../src/chat/model.ts'
 import type { ChatRecord } from '../../src/lib/types.ts'
 
 const ROOT = path.resolve(__dirname, '../../..')
@@ -28,6 +28,16 @@ const LOG = records([
 ])
 
 describe('the fold', () => {
+  test('a view thimble proposed for a run, as a chip in its chat, is among the views the run proposed', () => {
+    const made = madeBy(foldRecords(records([
+      { type: 'chip', ts: '2026-08-30T14:00:00Z', kind: 'view', text: 'Swarm', ref: 'view:swarm' },
+      { type: 'tool_use', ts: '2026-08-30T14:00:01Z', id: 'v1', name: `${P}propose_view`, input: { name: 'Wiki Pages' } },
+      { type: 'tool_result', ts: '2026-08-30T14:00:02Z', id: 'v1', summary: 'Proposed the view Wiki Pages (view:wiki-pages) over …' },
+    ])))
+    expect(made.views).toEqual(['Swarm', 'Wiki Pages'])
+    expect(made.viewSlugs).toEqual({ Swarm: 'swarm', 'Wiki Pages': 'wiki-pages' })
+  })
+
   test('text coalesces, a subagent nests under its call, results attach, chips and agents are rows', () => {
     const rows = foldRecords(LOG) as any[]
     expect(rows.map((r) => r.kind)).toEqual(['user', 'text', 'tool', 'text', 'chip', 'agent', 'error'])
