@@ -283,6 +283,7 @@ export function ReportTab({ ws, active }: { ws: string; active: boolean }) {
   const doc = load.state === 'ok' ? load.doc : null
   const renderer = rendererOf(types, slug, doc)
   const isPage = renderer === 'custom'
+  const isVideo = renderer === 'video'
   useEffect(() => {
     if (doc) lastShown.current = { slug, doc }
   }, [slug, doc])
@@ -342,7 +343,7 @@ export function ReportTab({ ws, active }: { ws: string; active: boolean }) {
     </div>
   )
   const closePast = useCallback(() => setPast(null), [])
-  const pastShown = past != null && written && !isPage
+  const pastShown = past != null && written && !isPage && !isVideo
   const view = pastShown ? (
     past.view.kind === 'diff' ? (
       <DraftDiff ws={ws} slug={slug} from={past.view.from} to={past.view.to} rows={past.rows} onClose={closePast} />
@@ -384,7 +385,7 @@ export function ReportTab({ ws, active }: { ws: string; active: boolean }) {
         <NewDocMenu ws={ws} onMade={(t) => void made(t)} />
         <span className="wu-bar-spacer" />
         {filter && <FilterChip concept={filter.concept} name={filter.name} value={filter.value} count={filter.sets.sids.size} onClear={() => void clearFilter()} />}
-        {written && !isPage && <HistoryMenu ws={ws} slug={slug} generation={bodyDoc?.generation} view={pastShown ? past.view : null} onView={(view, rows) => setPast(view == null ? null : { view, rows })} />}
+        {written && !isPage && !isVideo && <HistoryMenu ws={ws} slug={slug} generation={bodyDoc?.generation} view={pastShown ? past.view : null} onView={(view, rows) => setPast(view == null ? null : { view, rows })} />}
         {written && (
           <button type="button" className="wu-export" onClick={() => void doExport()}>
             Export

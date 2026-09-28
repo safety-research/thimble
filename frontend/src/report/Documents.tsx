@@ -1,12 +1,12 @@
 // The document views behind one lazy import, so BlockNote loads the first time the tab is shown and switching documents
 // is a prop change. One view per renderer: the report as a page with its sidebar and margin, slides as a deck, the story
-// in its editor (StoryEditor.tsx), a page in its frame. Each has the sidebar with the Checks pane (Checks.tsx); slides
+// in its editor (StoryEditor.tsx), a page in its frame, a video in its player (Video.tsx). Each has the sidebar with the Checks pane (Checks.tsx); slides
 // and story also list cards to drag in. Written documents take comments: a selection offers Comment (SelectComment.tsx)
 // and a click on a tinted sentence holds its evidence card.
 import { useMemo, useRef, useState, type MouseEvent } from 'react'
 import { bus } from '../lib/bus'
 import { track } from '../lib/telemetry'
-import type { AnyDoc, DeckDoc, PageDoc, StoryDoc, Writeup, WriteupComment } from '../lib/types'
+import type { AnyDoc, DeckDoc, PageDoc, StoryDoc, VideoDoc, Writeup, WriteupComment } from '../lib/types'
 import { ReadProbe } from '../shell/dock'
 import { ChecksSidebar, SidebarShow, useChecks, useSidebar } from './Checks'
 import { commentsApi } from './commentsApi'
@@ -17,6 +17,7 @@ import { PageView } from './Page'
 import { ReportPage } from './ReportPage'
 import { SelectComment } from './SelectComment'
 import { StoryEditor, StorySidebar, type StoryEditorHandle } from './StoryEditor'
+import { VideoView } from './Video'
 
 export interface DocumentViewProps {
   ws: string
@@ -35,14 +36,14 @@ export interface DocumentViewProps {
 export function DocumentView(props: DocumentViewProps) {
   const { ws, slug, renderer, doc, filter, client, onSaved } = props
   const key = `${ws}:${slug}`
-  if (renderer === 'story' || renderer === 'slides' || renderer === 'custom') return <Arranged key={key} {...props} />
+  if (renderer === 'story' || renderer === 'slides' || renderer === 'custom' || renderer === 'video') return <Arranged key={key} {...props} />
   return doc ? <ReportPage key={key} ws={ws} slug={slug} doc={doc as Writeup} filter={filter} client={client} onSaved={onSaved} /> : null
 }
 
 /** A frame, the shape a slides or story type has before a write (GET …/frame), rather than its written document. */
 const isFrame = (doc: AnyDoc | null): doc is Writeup => !!doc && (doc as Writeup).frame === true
 
-/** The slides, the story or a page beside the sidebar's Checks pane. */
+/** The slides, the story, a page or a video beside the sidebar's Checks pane. */
 function Arranged({ ws, slug, renderer, doc, filter, client, drawer, onSaved }: DocumentViewProps) {
   const side = useSidebar(ws)
   const checks = useChecks(ws)
@@ -92,6 +93,8 @@ function Arranged({ ws, slug, renderer, doc, filter, client, drawer, onSaved }: 
     if (doc) view = <DeckView ref={deck} ws={ws} slug={slug} doc={doc as DeckDoc} client={client} onSaved={onSaved} filter={filter} {...shared} />
   } else if (renderer === 'story') {
     if (doc) view = <StoryEditor ref={story} ws={ws} slug={slug} doc={doc as StoryDoc} client={client} onSaved={onSaved} filter={filter} {...shared} />
+  } else if (renderer === 'video') {
+    if (doc) view = <VideoView ws={ws} slug={slug} doc={doc as VideoDoc} {...shared} />
   } else {
     view = <PageView ws={ws} slug={slug} doc={(doc as PageDoc | null) ?? null} drawer={drawer} onSaved={onSaved} {...shared} />
   }

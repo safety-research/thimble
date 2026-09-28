@@ -1312,8 +1312,37 @@ export interface PageDoc {
   model?: string
 }
 
+/** A video's line (backend video.py): what the voice says, one or two cited sentences, and the seconds of silence
+ * after it. */
+export interface VideoLine {
+  id: string
+  sentences: WriteupSentence[]
+  pause_after?: number
+}
+
+/** When each line starts and ends in the film, in seconds, the lines in script order (backend video.timing). */
+export interface VideoTiming {
+  duration: number
+  lines: { id: string; start: number; end: number }[]
+}
+
+/** A video: its narration as lines and its film, one html page drawn at 1280×720 from `window.seek(t)`. */
+export interface VideoDoc {
+  id?: string
+  type?: string
+  renderer: 'video'
+  title: string
+  lines: VideoLine[]
+  film?: string
+  timing?: VideoTiming
+  comments?: WriteupComment[]
+  generation?: number
+  generated_at?: string
+  model?: string
+}
+
 /** Any stored document the Report tab shows. */
-export type AnyDoc = Writeup | StoryDoc | DeckDoc | PageDoc
+export type AnyDoc = Writeup | StoryDoc | DeckDoc | PageDoc | VideoDoc
 
 /** A preset + New offers (`GET /report-types/presets`, backend prompts/types/<id>.md). */
 export interface DocPreset {

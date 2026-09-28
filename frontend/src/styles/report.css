@@ -2721,6 +2721,132 @@ body .bn-mantine .bn-form-popover .mantine-TextInput-input {
 .wu-page-claims > .label {
   line-height: 16px;
 }
+/* the video: the film across the column, the controls under it, then the narration at a card's width */
+.wu-videodoc {
+  position: absolute;
+  inset: 0;
+  overflow: auto;
+  background: var(--surface-card);
+}
+.wu-videodoc-col {
+  max-width: 1280px;
+  margin: 0 auto;
+  padding: 24px 32px 80px;
+}
+.wu-side-hidden .wu-videodoc-col {
+  padding-top: 48px;
+}
+.wu-video-stage {
+  position: relative;
+  overflow: hidden;
+  border-radius: var(--radius-card);
+  border: 1px solid var(--border-hairline);
+  background: var(--bg-sunken);
+  cursor: pointer;
+}
+/* drawn at the film's own size and scaled to the stage; a click falls through to the stage, which plays or pauses */
+.wu-video-frame {
+  position: absolute;
+  left: 0;
+  top: 0;
+  border: 0;
+  transform-origin: 0 0;
+  pointer-events: none;
+  background: transparent;
+}
+.wu-video-controls {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 8px 0;
+}
+.wu-video-scrub {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 80px;
+  margin: 0 8px;
+}
+.wu-video-seg {
+  position: relative;
+  flex: 1 1 0;
+  height: 16px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+}
+.wu-video-seg::before,
+.wu-video-fill {
+  position: absolute;
+  left: 0;
+  top: 6px;
+  height: 4px;
+  border-radius: 2px;
+}
+.wu-video-seg::before {
+  content: '';
+  right: 0;
+  background: var(--track-bg);
+}
+.wu-video-seg:hover::before {
+  background: var(--border-strong);
+}
+.wu-video-fill {
+  background: var(--accent);
+}
+.wu-video-time {
+  margin-right: 4px;
+  font: var(--type-mono-sm);
+  font-variant-numeric: tabular-nums;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+.wu-video-voice .btn-label {
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.wu-video-transcript {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-width: var(--w-card);
+  margin: 20px auto 0;
+  font: var(--type-report-body);
+  color: var(--text-primary);
+}
+.wu-video-title {
+  margin: 0 0 6px 56px;
+  font: var(--type-report-h2);
+  color: var(--text-primary);
+}
+.wu-video-line {
+  display: grid;
+  grid-template-columns: 44px 1fr;
+  gap: 12px;
+  align-items: baseline;
+  color: var(--text-secondary);
+}
+.wu-video-line.now {
+  color: var(--text-primary);
+}
+.wu-video-at {
+  padding: 0;
+  border: 0;
+  background: none;
+  font: var(--type-mono-sm);
+  font-variant-numeric: tabular-nums;
+  color: var(--text-tertiary);
+  text-align: left;
+  cursor: pointer;
+}
+.wu-video-at:hover,
+.wu-video-line.now .wu-video-at {
+  color: var(--text-accent);
+}
 /* the drawer: under the page, its own scroll, sections each under a small uppercase label */
 .wu-drawer {
   display: flex;
