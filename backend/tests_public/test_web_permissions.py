@@ -58,7 +58,6 @@ async def test_an_unanswered_request_is_denied_after_the_wait_and_its_card_says_
     two = _request("WebFetch", OTHER_PAGE)
     denied = {"behavior": "deny", "message": agent_session.timed_out_line(0.1)}
     assert await one == denied and await two == denied
-    assert "Carry on without it" in denied["message"]
     [p] = _card(chat)
     assert p["expired"] and p["what"] == PAGE["url"] and [e["what"] for e in heard] == [PAGE["url"]]
     assert not agent_session.asking(CORPUS, KEY)

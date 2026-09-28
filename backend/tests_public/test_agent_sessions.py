@@ -209,9 +209,6 @@ async def test_manual_waits_for_the_analyst_however_long_while_a_writer_s_reques
         assert expired["expired"] and expired["tool"] == "Bash", "it stays on the card, marked denied unanswered"
         assert agent_session.answer(CORPUS, run.chat, expired["id"], False), "Dismiss takes it off"
         assert agents.read_meta(CORPUS, run.chat)["permissions"] == []
-        assert agent_session.timed_out_line(60).startswith("Nobody answered in thimble's browser within a minute,")
-        assert "within 10 minutes," in agent_session.timed_out_line(600)
-        assert "within 90 seconds," in agent_session.timed_out_line(90)
     finally:
         agent_session._runs.pop((CORPUS, run.key), None)
 

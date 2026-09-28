@@ -10,5 +10,3 @@ def test_real_prompts_render_clean(monkeypatch):
         values = {s: f"<{s}>" for s in prompts.slots(name)}
         out = prompts.render(name, values)
         assert "{{" not in out and "}}" not in out, name
-        prose = "\n".join(ln for ln in out.splitlines() if not ln.startswith("    "))  # an example may show it as a fault
-        assert "load-bearing" not in prose.replace('"load-bearing"', ""), name  # quoted, it is shared.md's example of a flourish

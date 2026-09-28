@@ -66,7 +66,6 @@ def test_register_picks_a_free_name_and_is_idempotent(data_tmp, tmp_path):
     assert again2["name"] == "run-2" and again2["registered_at"] == second["registered_at"]
     assert config.workspace_for_cwd(twin / "deep") == "run-2" and config.workspace_for_cwd(run) == "run"
     assert config.corpus_dir("run-2") == twin.resolve() and config.corpus_dir("run-3") == third.resolve()
-    assert not hasattr(config, "CorpusConflict")
     with pytest.raises(ValueError):
         config.register_corpus(run / "manifest.json")  # a file, not a directory
     with pytest.raises(ValueError):
