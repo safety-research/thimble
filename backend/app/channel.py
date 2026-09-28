@@ -231,7 +231,11 @@ def terminal_line(kind: str, words: str, fields: dict[str, Any]) -> str:
         line = f"agent: {fields.get('name') or ''}"
     else:
         line = words
-    return line if len(line) <= LINE_CHARS else line[: LINE_CHARS - 1].rsplit(" ", 1)[0] + "…"
+    if len(line) <= LINE_CHARS:
+        return line
+    cut = line[: LINE_CHARS - 1]
+    at_word = cut.rsplit(" ", 1)[0]  # a line with no space late enough, such as a URL or Japanese, is cut mid-word
+    return (at_word if len(at_word) > LINE_CHARS // 2 else cut) + "…"
 
 
 def post(c: str, kind: str, payload: dict[str, Any] | None = None, *, check_kind: bool = True,
