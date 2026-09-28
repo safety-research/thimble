@@ -440,6 +440,9 @@ def _about(index):
     for (kind, names), g in groups.items():
         shown = ", ".join(g["paths"][:3]) + (f" and {len(g['paths']) - 3} more" if len(g["paths"]) > 3 else "")
         lines.append(f"{shown}: {g['n']:,} {kind} ({', '.join(names)})")
+    if any(kind.startswith("saves") for kind, _n in groups):
+        lines.append("A save holds its whole page, so a regex over saves marks every later save of a page that once held the "
+                     "words; code that compares a save with the one before it on its page narrows to what each save wrote.")
     return "\n".join(lines)
 
 

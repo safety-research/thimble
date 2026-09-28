@@ -1106,19 +1106,19 @@ def within_units(ws: Path, corpus_dir: Path, sources: list[dict], within: dict) 
     return out
 
 
-SAVE_PLACE_KEYS = ("page_id", "page", "document", "doc_id", "slug")  # the document a record saves
+SAVE_PLACE_KEYS = ("page_id", "page", "document", "doc_id", "slug")  # the document a record saves, else its file
 SAVE_SEQ_KEYS = ("seq", "rev", "revision", "version")  # the field that numbers its saves
 SAVE_TEXT_KEYS = ("text", "body", "content")  # the field that holds the document
 
 
 def _save_key(record: Any) -> tuple[str, str] | None:
-    """(the document, the field that holds it) of a record that saves a whole document, one with a place, a sequence and
-    a text field; else None."""
+    """(the document, "" for the record's file, and the field that holds it) of a record that may save a whole document,
+    one with a sequence and a text field; else None."""
     if not isinstance(record, dict) or not any(k in record for k in SAVE_SEQ_KEYS):
         return None
-    place = next((str(record[k]) for k in SAVE_PLACE_KEYS if isinstance(record.get(k), (str, int)) and str(record[k])), None)
+    place = next((str(record[k]) for k in SAVE_PLACE_KEYS if isinstance(record.get(k), (str, int)) and str(record[k])), "")
     field = next((k for k in SAVE_TEXT_KEYS if isinstance(record.get(k), str)), None)
-    return (place, field) if place and field else None
+    return (place, field) if field else None
 
 
 def _befores(path: Path, wanted: set[int]) -> dict[int, str]:
@@ -1150,7 +1150,7 @@ def _changed(u: Unit, key: tuple[str, str], old: Any) -> Unit:
     if 2 * sum(s in now for s in a) < len(a):
         return u
     diff = [f"+ {s}" for s in b if s not in was] + [f"- {s}" for s in a if s not in now]
-    text = f"What this save changed on {key[0]}:\n" + ("\n".join(diff) or "nothing")
+    text = f"What this save changed on {key[0] or labels_store.ref_parts(u.ref)[0]}:\n" + ("\n".join(diff) or "nothing")
     return Unit(u.ref, u.paths, lambda ref=u.ref, text=text: iter([(ref, text)]), u.record)
 
 

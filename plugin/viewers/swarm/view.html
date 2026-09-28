@@ -233,6 +233,7 @@ const PAD_L = 16, PAD_R = 40
 const END_GAP = 8 // between two link ends on one card
 const FIT_MIN = 0.3
 const CONTEXT_MAX = 1900 // characters of what the chart shows, sent with a question (a thread keeps 2,000)
+const RUN_POLL_MS = 3000 // how often the chart is read again while a label that is on runs
 const CARD_REFS_SENT = 20
 
 const token = (n) => getComputedStyle(document.documentElement).getPropertyValue(n).trim()
@@ -1203,6 +1204,7 @@ async function start() {
   if (!(await load())) return
   refresh()
   if (target) { const t = target; target = null; applyTarget(t) }
+  watchRuns()
 }
 thimble.onOpen(async (place) => {
   const t = (place && place.target) || null
@@ -1223,7 +1225,20 @@ thimble.onLabels(async (state) => {
   if (!(await load())) return
   refresh()
   renderPop()
+  watchRuns()
 })
+// a label that is on has no count while it runs, and the page hears of no rows until it ends, so the chart is read again
+// meanwhile and drawn again when its cards changed
+let runT = null
+function watchRuns() {
+  clearTimeout(runT)
+  if (!(labelState.all || []).some((l) => l.on && l.count == null)) return
+  runT = setTimeout(async () => {
+    const was = D && JSON.stringify([D.total, D.mark_counts, D.cards.map((c) => c.ref)])
+    if ((await load()) && JSON.stringify([D.total, D.mark_counts, D.cards.map((c) => c.ref)]) !== was) refresh()
+    watchRuns()
+  }, RUN_POLL_MS)
+}
 start()
 </script>
 </body>
