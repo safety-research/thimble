@@ -41,6 +41,9 @@ PROOF_HEADER = "x-thimble-proof"
 NONCE_MAX = 128  # characters
 UI_COOKIE = "thimble-ui"
 UI_COOKIE_AGE_S = 400 * 24 * 3600  # the longest a browser keeps a cookie
+# The routes analyst() guards all sit under this path. A cookie is not bound to a port, so the path is what keeps it from
+# the browser's requests to other services on 127.0.0.1, except requests to their own /api/ws/ paths.
+UI_COOKIE_PATH = "/api/ws/"
 ANALYST_ONLY = ("open thimble from the link `/thimble` or `thimble up` printed to answer permission requests or change"
                 " permission modes")
 
@@ -105,7 +108,8 @@ def claim(key: object) -> Response:
     if not (want and isinstance(key, str) and hmac.compare_digest(key, want)):
         return Response(status_code=403)
     r = Response(status_code=204)
-    r.set_cookie(UI_COOKIE, want, max_age=UI_COOKIE_AGE_S, httponly=True, samesite="strict")
+    r.delete_cookie(UI_COOKIE, path="/")  # and none for every path, which other services' pages would get too
+    r.set_cookie(UI_COOKIE, want, max_age=UI_COOKIE_AGE_S, path=UI_COOKIE_PATH, httponly=True, samesite="strict")
     return r
 
 
