@@ -231,6 +231,8 @@ async def test_every_worked_example_s_page_loads_headless_at_its_first_place(nam
     """The whole check a view ticket's session runs, the headless page included, where this machine has Node and the
     frontend's packages with their Chromium (scripts/check.sh install)."""
     if why := views.build_problem():
+        if os.environ.get("CI") == "true":
+            pytest.fail(why)  # CI installs them, so there the page is always loaded
         pytest.skip(why)
     slug = _save_example(name)
     rep = await views.check(name, slug, EXAMPLES[name][1], shot_dir=tmp_path)
