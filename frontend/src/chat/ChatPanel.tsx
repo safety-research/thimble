@@ -304,12 +304,18 @@ export function ChatPanel({ ws, onCollapse, dock = false }: { ws: string; onColl
     setOrientConf((c) => (c ? { ...c, ...patch } : c))
     saveRole(ws, 'orient', patch).catch((e: Error) => bus.emit('toast', { text: `Could not change the orientation's settings: ${e.message}`, kind: 'error' }))
   }
+  // a pick the server refuses goes back to the saved row, so Start shows the mode the orientation will start in
   const saveOrientMode = (mode: OrientPermissions) => {
+    const before = modeRows?.orient
     setModeRows((r) => ({ ...r, orient: mode }))
     api
       .putSettings(ws, { permission_modes: { orient: mode } })
       .then(() => invalidateSettings(ws))
-      .catch((e: Error) => bus.emit('toast', { text: `Could not change the orientation's permission mode: ${e.message}`, kind: 'error' }))
+      .catch((e: Error) => {
+        setModeRows((r) => ({ ...r, orient: before }))
+        invalidateSettings(ws)
+        bus.emit('toast', { text: `Could not change the orientation's permission mode: ${e.message}`, kind: 'error' })
+      })
   }
   // a kept thread that is gone (deleted, or the workspace archived) falls back to main at the first load of the list
   const restored = useRef(false)
