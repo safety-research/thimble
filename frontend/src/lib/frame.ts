@@ -6,14 +6,19 @@ import { useEffect, useState } from 'react'
 import type { Resolved } from './theme'
 import { token } from './vizTheme'
 
-/** The frame's style: `fonts` is the page's faces as @font-face rules (useFrameFonts), which a sandboxed document with
- * an opaque origin cannot load from the app by URL. */
+/** Takes WebRTC away from a frame before its own scripts run, since no content security policy covers it. A frame the
+ * page opens inside itself has it again, so this is no boundary; the headless shots take it from every frame
+ * (scripts/view_shot.mjs). */
+export const NO_RTC = "<script>for(const k of ['RTCPeerConnection','webkitRTCPeerConnection','RTCDataChannel'])try{Object.defineProperty(window,k,{value:undefined})}catch{}</script>"
+
+/** The frame's head: NO_RTC, then the style. `fonts` is the page's faces as @font-face rules (useFrameFonts), which a
+ * sandboxed document with an opaque origin cannot load from the app by URL. */
 export function frameStyle(scheme: Resolved, tokens: Readonly<Record<string, string>>, fonts: string = ''): string {
   const vars = Object.entries(tokens)
     .filter(([, v]) => v)
     .map(([k, v]) => `${k}:${v}`)
     .join(';')
-  return `<style>${fonts}:root{color-scheme:${scheme};${vars}}body{background:transparent!important;color:var(--text-primary, inherit)!important;font-family:var(--font-body, system-ui, sans-serif)!important;font-size:13px;line-height:1.5}code,pre,kbd,samp{font-family:var(--font-mono, ui-monospace, monospace)}</style>`
+  return `${NO_RTC}<style>${fonts}:root{color-scheme:${scheme};${vars}}body{background:transparent!important;color:var(--text-primary, inherit)!important;font-family:var(--font-body, system-ui, sans-serif)!important;font-size:13px;line-height:1.5}code,pre,kbd,samp{font-family:var(--font-mono, ui-monospace, monospace)}</style>`
 }
 
 /** The html with the frame style at its head (inside `<head>` when there is one, else first). */
@@ -102,14 +107,14 @@ export const VIEW_TOKENS = [
   '--label-none',
 ]
 
-/** The theme for a view's page: the colour scheme and the tokens as CSS variables, and no font import, because the
- * page's policy lets it reach no host. */
+/** The head for a view's page: NO_RTC, then the colour scheme and the tokens as CSS variables, and no font import,
+ * because the page's policy lets it load nothing from another host. */
 export function viewStyle(scheme: Resolved): string {
   const vars = VIEW_TOKENS.map((k) => [k, token(k)] as const)
     .filter(([, v]) => v)
     .map(([k, v]) => `${k}:${v}`)
     .join(';')
-  return `<style>:root{color-scheme:${scheme};${vars}}</style>`
+  return `${NO_RTC}<style>:root{color-scheme:${scheme};${vars}}</style>`
 }
 
 /** the families the page serves itself (styles/fonts.css) */

@@ -1,15 +1,16 @@
 // A video: the film in a sandboxed frame, the current line under it as a caption with the spoken word marked, the
 // controls, and the narration as a transcript with its citations.
-// The frame has `allow-scripts` alone, so the film runs at an opaque origin with no access to the app, and its page
-// carries the views' policy (backend video.film_document), so it reaches no host; the app's faces are inlined as a
-// view's page has them. The film is drawn at 1280×720 and scaled to the column. It hears the time to draw through its
-// bridge (backend film_bridge.js), which draws each time it is sent even before the film says ready, and playback is
-// videoPlayer.ts. The voice, the rate and the captions switch are this browser's, kept in localStorage.
+// The frame has `allow-scripts` alone, so the film runs at an opaque origin with no access to the app. Its page carries
+// the views' policy (backend video.film_document), so it loads and fetches nothing from the network, and the head that
+// takes WebRTC away (NO_RTC); the app's faces are inlined as a view's page has them. The film is drawn at 1280×720 and
+// scaled to the column. It hears the time to draw through its bridge (backend film_bridge.js), which draws each time it
+// is sent even before the film says ready, and playback is videoPlayer.ts. The voice, the rate and the captions switch
+// are this browser's, kept in localStorage.
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { Button } from '../components/Button'
 import { Menu, type MenuItem } from '../components/Menu'
 import { docsApi } from '../lib/api'
-import { useFrameFonts, withFrameStyle } from '../lib/frame'
+import { NO_RTC, useFrameFonts, withFrameStyle } from '../lib/frame'
 import { track } from '../lib/telemetry'
 import type { VideoDoc } from '../lib/types'
 import { readStorage, writeStorage } from '../lib/workspace'
@@ -113,7 +114,7 @@ export function VideoView({ ws, slug, doc, comments, on, look, picked }: VideoVi
     }
   }, [ws, slug, doc?.film, timingKey])
   const fonts = useFrameFonts()
-  const shown = useMemo(() => (page != null && fonts != null ? withFrameStyle(page, `<style>${fonts}</style>`) : null), [page, fonts])
+  const shown = useMemo(() => (page != null && fonts != null ? withFrameStyle(page, `${NO_RTC}<style>${fonts}</style>`) : null), [page, fonts])
 
   // every time is sent to the frame; its page says ready once it has loaded, and is sent the time again then
   const frame = useRef<HTMLIFrameElement | null>(null)

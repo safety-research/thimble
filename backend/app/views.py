@@ -2,7 +2,7 @@
 
 A view is three files in `workspaces/<c>/views/<slug>/`, written by the dev agent's session (dev.run_view):
 view.json {name, why, claims, accepts, declares, default, libs, built}, reader.py (the contract in view_host.py), and
-view.html, drawn in a sandboxed frame that reaches no host but the view's media route. `claims` are globs of the
+view.html, drawn in a sandboxed frame that loads nothing but the view's media route. `claims` are globs of the
 files
 the view opens, `accepts` the fragment forms it understands (`L<n>`), `declares` its own `view:<slug>/<key>` units.
 thimble also ships file-type viewers under the same contract (BUILTIN_VIEWERS). Readers run on the workspace's
@@ -120,7 +120,8 @@ BUILTIN_VIEWERS = ("pdf",)
 BUILTIN_CACHE = ".builtin"  # under the workspace's views folder: a built-in viewer's index cache and check shots
 # Scripts and styles inline (the bridge, the vendored libraries, the view's own), images as data or blob URLs, workers
 # from blob URLs, and eval for vega's expression parser. `{media}` is the view's own media route (frame_document),
-# the one URL an image, audio or video element may load; no script can fetch or send anything (connect-src 'none').
+# the one URL an image, audio or video element may load; no script can fetch anything (connect-src 'none'). No policy
+# covers WebRTC, which the page's head in the browser (frontend lib/frame.ts NO_RTC) and the headless shots take away.
 FRAME_CSP = ("default-src 'none'; script-src 'unsafe-inline' 'unsafe-eval'; style-src 'unsafe-inline'; "
              "img-src data: blob:{media}; font-src data:; media-src data: blob:{media}; worker-src blob:; "
              "connect-src 'none'; form-action 'none'; base-uri 'none'")
@@ -1909,7 +1910,7 @@ def _script_text(js: str) -> str:
 
 
 def frame_document(view: dict[str, Any], media: str | None = None) -> str:
-    """The view's page as a frame loads it: the policy that blocks every host but the view's media route, the bridge
+    """The view's page as a frame loads it: the policy that blocks every load but the view's media route, the bridge
     (viewer_bridge.js), thimble's parts (viewer_kit.css), the vendored libraries the view names, then view.html, whose
     own styles come after the parts. The browser adds the theme's tokens (ViewerFrame.tsx). `media` is the media
     route's absolute URL (media_url), which the policy allows for images, audio and video and thimble.mediaUrl builds
