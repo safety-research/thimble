@@ -2732,6 +2732,7 @@ body .bn-mantine .bn-form-popover .mantine-TextInput-input {
   max-width: 1280px;
   margin: 0 auto;
   padding: 24px 32px 80px;
+  container-type: inline-size;
 }
 .wu-side-hidden .wu-videodoc-col {
   padding-top: 48px;
@@ -2754,11 +2755,33 @@ body .bn-mantine .bn-form-popover .mantine-TextInput-input {
   pointer-events: none;
   background: transparent;
 }
+/* the line being said under the film, two lines tall so the controls stay put; the word being said in the accent */
+.wu-video-caption {
+  box-sizing: content-box;
+  min-height: 2.9em;
+  max-width: 960px;
+  margin: 12px auto 0;
+  font: 500 clamp(15px, 1.6cqi, 20px) / 1.45 var(--font-body);
+  color: var(--text-primary);
+  text-align: center;
+  text-wrap: balance;
+}
+.wu-video-caption .now {
+  color: var(--accent);
+}
 .wu-video-controls {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 4px;
   padding: 8px 0;
+}
+@container (max-width: 560px) {
+  .wu-video-controls .wu-video-scrub {
+    order: -1;
+    flex: 1 0 100%;
+    margin: 0 0 4px;
+  }
 }
 .wu-video-scrub {
   flex: 1;
