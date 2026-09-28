@@ -238,7 +238,9 @@ def _says(raw):
         r = json.loads(raw)
     except ValueError:
         return False
-    content = (r.get("message") or {}).get("content") if isinstance(r, dict) else None
+    if not isinstance(r, dict):
+        return False
+    content = (r.get("message") or {}).get("content")
     return r.get("type") == "assistant" and (isinstance(content, str) or any(
         isinstance(b, dict) and b.get("type") == "text" for b in content or []))
 
