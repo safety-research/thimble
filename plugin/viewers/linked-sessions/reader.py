@@ -115,9 +115,15 @@ def _merge(spans):
 # ------------------------------------------------------------------------------------------------ reading the lines
 
 
+def _msg_of(record):
+    """A line's message; {} when it is not an object."""
+    msg = record.get("message")
+    return msg if isinstance(msg, dict) else {}
+
+
 def _blocks(record):
     """A line's content blocks; a prompt written as a plain string is one text block."""
-    content = (record.get("message") or {}).get("content")
+    content = _msg_of(record).get("content")
     if isinstance(content, str):
         return [{"type": "text", "text": content}]
     return [b for b in content if isinstance(b, dict)] if isinstance(content, list) else []
@@ -207,7 +213,8 @@ def _run_index(path, offs, problems):
         _problem(problems, f"{path}#L1", "the index is not a JSON object")
         return {}
     names = {}
-    for e in doc.get("entries") or doc.get("sessions") or []:
+    entries = doc.get("entries") or doc.get("sessions")
+    for e in entries if isinstance(entries, list) else []:
         if isinstance(e, dict):
             key, name = e.get("agentId") or e.get("session_id") or e.get("sessionId"), e.get("agentType") or e.get("agent")
             if key and name:
@@ -217,8 +224,9 @@ def _run_index(path, offs, problems):
 
 
 def _transcript(path, offs, dups, problems):
-    """A session's lines in time order, each (time, line number, ref, record). A line that is not JSON or has no time
-    is a problem, and a line whose uuid came before is noted in `dups` as the ref it repeats."""
+    """A session's lines in time order, each (time, line number, ref, record). A line that is not JSON, has no time or
+    has a uuid of another shape is a problem, and a line whose uuid came before is noted in `dups` as the ref it
+    repeats."""
     lines, seen = [], {}
     with open(path, "rb") as f:
         pos = 0
@@ -235,6 +243,9 @@ def _transcript(path, offs, dups, problems):
                     _problem(problems, ref, "not a JSON object")
                 continue
             u = r.get("uuid")
+            if u is not None and not isinstance(u, str):
+                _problem(problems, ref, "a uuid that is not a string")
+                continue
             if u and u in seen:
                 dups[ref] = seen[u]
                 continue
@@ -248,14 +259,18 @@ def _transcript(path, offs, dups, problems):
     return sorted(lines, key=lambda x: (x[0], x[1]))
 
 
-def _session_lines(sid, lines):
+def _session_lines(sid, lines, problems):
     """A session's messages, each {ref, s, at, kind, words, text}, and its calls, each {ref, s, at, id, tool, inp} with
     {res, end, block, tur} once its result came. A user's text is a prompt; the last thing the agent said, when no
-    call follows it, is its result."""
+    call follows it, is its result. A line whose blocks are of another shape is a problem."""
     msgs, calls, pending = [], [], {}
     for t, _n, ref, r in lines:
-        user = (r.get("type") or (r.get("message") or {}).get("role")) == "user"
-        for b in _blocks(r):
+        user = (r.get("type") or _msg_of(r).get("role")) == "user"
+        blocks = _blocks(r)
+        if any(not isinstance(b.get(k), (str, type(None))) for b in blocks for k in ("id", "tool_use_id")):
+            _problem(problems, ref, "a content block whose id is not a string")
+            continue
+        for b in blocks:
             kind = b.get("type")
             if kind == "text" and str(b.get("text") or "").strip():
                 msgs.append({"ref": ref, "s": sid, "at": t, "kind": "prompt" if user else "text", "text": str(b["text"])})
@@ -290,7 +305,7 @@ def build_index(paths):
         lines = _transcript(path, offs, dups, problems)
         if not lines:
             continue
-        msgs, calls = _session_lines(sid, lines)
+        msgs, calls = _session_lines(sid, lines, problems)
         prompt = next((m for m in msgs if m["kind"] == "prompt"), None)
         sessions[sid] = {"id": sid, "ref": lines[0][2], "run": run, "lead": lead, "t0": lines[0][0], "t1": lines[-1][0], "agent": None,
                          "parent": None, "prompt": prompt["ref"] if prompt else None, "asked": prompt["text"] if prompt else ""}
