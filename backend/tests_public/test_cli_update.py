@@ -11,9 +11,6 @@ import pytest
 
 from app import cli, config
 
-REPO = Path(__file__).resolve().parents[2]
-
-
 @pytest.fixture()
 def release_install(monkeypatch, tmp_path):
     """The tree is an unzipped release: scripts/update.sh, plugin.json naming an invented repo, no .git, no

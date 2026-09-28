@@ -17,9 +17,7 @@ import shutil
 import sys
 from pathlib import Path
 
-import httpx
 import pytest
-from fastapi import FastAPI
 
 from app import config, views
 
@@ -141,11 +139,6 @@ async def bound():
     yield
 
 
-def _events(ws: Path) -> list[dict]:
-    p = ws / "investigations" / "main" / "events.jsonl"
-    return [json.loads(ln) for ln in p.read_text().splitlines() if ln.strip()] if p.is_file() else []
-
-
 # ----------------------------------------------------------------------------------------------------------- disk
 
 
@@ -178,19 +171,6 @@ def test_the_frame_document_blocks_every_host_before_any_script(ws):
         assert with_libs.count("<script>") == 6, "the view's name, the bridge, vega, vega-lite, vega-embed and the view's own"
     assert views._script_text("a</script>b") == "a<\\/script>b"
     assert views._libs(["vega-embed"]) == ["vega", "vega-lite", "vega-embed"]
-
-
-@pytest.fixture()
-def app() -> FastAPI:
-    a = FastAPI()
-    a.include_router(views.router, prefix="/api")
-    return a
-
-
-@pytest.fixture()
-async def client(app):
-    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://t", timeout=120) as c:
-        yield c
 
 
 # ------------------------------------------------------------------------------------------------- worked examples

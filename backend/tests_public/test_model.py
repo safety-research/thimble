@@ -1,7 +1,6 @@
 """model.py's structured(): a valid tool call comes back as the output, with the model, cost and session it ran on. The
 fakes yield real SDK dataclasses through the stream model.structured() drains."""
 
-import httpx
 import pytest
 from claude_agent_sdk import (
     AssistantMessage,
@@ -121,22 +120,3 @@ async def test_ok_valid_tool_call(monkeypatch):
     assert r.fallback_note == "" and r.detail == ""
     assert r.attempts == 1 and r.cost_usd == 0.12 and r.session_id == "sess-1"
     assert r.duration_s >= 0 and len(made) == 1 and made[0].exited
-
-
-# ----------------------------------------------------------------------------- terminal failures, never retried here
-
-
-@pytest.fixture(autouse=True)
-def _no_rate_limit_wait(monkeypatch):
-    """The one wait-and-retry on a 429 sleeps RATE_LIMIT_RETRY_S (45 s) in production; tests wait 0."""
-    monkeypatch.setattr(model, "RATE_LIMIT_RETRY_S", 0.0)
-
-
-# ----------------------------------------------------------------------------- the API-key path, on a fake client alone,
-# so no test reaches the network
-
-API_REQ = httpx.Request("POST", "https://api.anthropic.com/v1/messages")
-
-
-def api_error(cls, status, message="boom", headers=None):
-    return cls(message, response=httpx.Response(status, request=API_REQ, headers=headers or {}), body=None)

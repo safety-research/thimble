@@ -1,38 +1,14 @@
 """A view ticket's build session (app/dev.py) may read the corpus but not change it."""
 from __future__ import annotations
 
-import contextlib
-import io
 import json
-import os
 from pathlib import Path
 
 import pytest
-from fastapi import FastAPI
 
-from app import config, dev, ledger, views
+from app import config, dev, views
 
 CORPUS = "boards"
-READER = '''
-import json
-
-
-def build_index(paths):
-    return {"lines": {f"{p}#L{n}": json.loads(line)["body"] for p in paths for n, line in enumerate(open(p), 1)}}
-
-
-def records(index, query):
-    return [{"ref": r, "body": b} for r, b in index["lines"].items()]
-
-
-def resolve(index, locator):
-    ref = f"{locator.get('path')}#{locator.get('fragment')}"
-    body = index["lines"].get(ref)
-    return None if body is None else {"excerpt": body, "label": "a post", "refs": [ref], "key": None, "target": {"ref": ref}}
-'''
-HTML = """<!doctype html><html><body><div id="out"></div><script>
-thimble.onOpen(async () => { document.getElementById('out').textContent = JSON.stringify(await thimble.fetch({})) })
-</script></body></html>"""
 
 
 @pytest.fixture()
@@ -44,18 +20,6 @@ def board(tmp_path, monkeypatch, workspaces_tmp) -> Path:
     (corpus / "board.jsonl").write_text("".join(json.dumps({"body": b}) + "\n" for b in ("first post", "second post")))
     monkeypatch.setattr(config, "DATA_DIR", d.resolve())
     return corpus
-
-
-async def _inproc_run(c: str, code: str, timeout: float) -> tuple[list[dict], str]:
-    buf = io.StringIO()
-    here = os.getcwd()
-    os.chdir(config.corpus_dir(c))
-    try:
-        with contextlib.redirect_stdout(buf):
-            exec(code, {})  # noqa: S102 — the snippet the views kernel runs
-    finally:
-        os.chdir(here)
-    return [{"text/plain": buf.getvalue(), "_stream": "stdout"}], "ok"
 
 
 def test_a_view_build_s_session_may_read_the_corpus_but_not_change_it(board, monkeypatch):
@@ -83,10 +47,3 @@ def test_a_view_build_s_session_may_read_the_corpus_but_not_change_it(board, mon
     assert "sandbox" not in dev.read_only_fence([corpus]), "no sandbox where it cannot run; the deny stays"
     inside = corpus / ".thimble" / "views" / "posts"
     assert dev.view_read_only(corpus, inside) == (views.EXAMPLES_DIR,), "a corpus that holds the view's folder is left out"
-
-
-def _app() -> FastAPI:
-    a = FastAPI()
-    a.include_router(views.router, prefix="/api")
-    a.include_router(ledger.router, prefix="/api")
-    return a

@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from app import config, investigation, notebook, report, report_types
+from app import config, investigation, notebook, report
 
 CORPUS = "mini"
 
@@ -43,21 +43,6 @@ def seed_cells(ws: Path, inv_id: str) -> dict[str, str]:
         ids[key] = cell["id"]
     notebook.write_notebook(ws, nb)
     return ids
-
-
-SUMMARY = ("Agent-03 stopped after an admin action. The incident write-up would need redoing if that were false.\n\n"
-           "Three admin actions cluster on day 3; the deletions follow within minutes.\n")
-
-
-async def write(inv_id: str, raw: dict) -> dict:
-    """The report saved from `raw` as the write_document tool saves a document: normalized, the previous generation's
-    locks, comments and pinned figures carried, stored as the new generation."""
-    t = report_types.read_type(CORPUS, "report")
-    doc = report_types.normalize(t, raw, report._Refs(CORPUS))
-    report_types.finish_generation(CORPUS, inv_id, "report", doc)
-    doc.update(generated_at="2026-09-23T00:00:00+00:00", words=report_types.doc_words(doc))
-    report_types.store(CORPUS, inv_id, "report", doc)
-    return report_types.read_doc(CORPUS, inv_id, "report")
 
 
 # --------------------------------------------------------------------------- the citation check

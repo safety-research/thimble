@@ -1,41 +1,11 @@
 """The plain sentence for a link out of the corpus (config.safe_corpus_path)."""
 from __future__ import annotations
 
-import errno
 import os
 
 import pytest
-from fastapi import FastAPI
-from fastapi.responses import StreamingResponse
 
-from app import config, errors
-
-
-def _app() -> FastAPI:
-    app = FastAPI()
-    app.add_middleware(errors.ErrorLog)
-
-    @app.get("/api/ws/{c}/boom")
-    def boom(c: str):
-        raise RuntimeError("the store was half written")
-
-    @app.get("/api/corpora/{c}/source")
-    def unreadable(c: str, path: str):
-        raise PermissionError(errno.EACCES, "Permission denied", f"/corpus/{path}")
-
-    @app.post("/api/ws/{c}/save")
-    def full(c: str):
-        raise OSError(errno.ENOSPC, "No space left on device", "/ws/cards.json")
-
-    @app.get("/api/stream")
-    def stream():
-        def gen():
-            yield b"first"
-            raise RuntimeError("mid-stream")
-
-        return StreamingResponse(gen())
-
-    return app
+from app import config
 
 
 def test_a_link_out_of_the_corpus_is_named_as_one(tmp_path):

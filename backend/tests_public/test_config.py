@@ -3,15 +3,11 @@ idempotent."""
 from __future__ import annotations
 
 import json
-from pathlib import Path
 
 import pytest
 
 from app import config
 from app import agent_session, cli  # noqa: F401  imported before _isolated_auth replaces REPO_ROOT: they read it once
-
-SECRET = "sk-ant-test-secret-never-logged"  # gitleaks:allow  a fake key; the tests assert it never appears in logs
-
 
 @pytest.fixture(autouse=True)
 def _isolated_auth(monkeypatch, tmp_path):
@@ -27,12 +23,6 @@ def _isolated_auth(monkeypatch, tmp_path):
     monkeypatch.setattr(config, "_helper_failed", None)
     yield
     config.HAS_API_KEY = False
-
-
-def user_settings(tmp_path: Path, **entries) -> Path:
-    p = tmp_path / "claude-home" / "settings.json"
-    p.write_text(json.dumps(entries))
-    return p
 
 
 # --------------------------------------------------------------------------- the user's apiKeyHelper (the command, not a secret)

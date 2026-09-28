@@ -15,10 +15,6 @@ MINI = "/api/corpora/mini"
 AGENT = "agents/agent-01.jsonl"
 
 
-def lines(page):
-    return [r["line"] for r in page["records"]]
-
-
 # --------------------------------------------------------------------------- ref endpoint
 
 

@@ -2,7 +2,6 @@
 but never raise it."""
 from __future__ import annotations
 
-import asyncio
 import json
 
 import pytest
@@ -19,24 +18,6 @@ def _fresh(workspaces_tmp):
     agents._busy.clear()
     yield
     channel._subs.clear()
-
-
-def _listen() -> asyncio.Queue:
-    q: asyncio.Queue = asyncio.Queue()
-    channel._subs.setdefault(CORPUS, set()).add(q)
-    return q
-
-
-def _thread(tid: str, name: str) -> dict:
-    meta = agents._defaults({"id": tid, "kind": agents.KIND_THREAD, "role": "thread", "title": name, "created_at": "t",
-                             "parent": agents.MAIN_ID, "anchor": "card:0a1b2c3d", "anchor_text": "trees per orchard"})
-    agents.write_meta(CORPUS, meta)
-    agents.paths(CORPUS, tid)[1].touch()
-    return meta
-
-
-def _log(chat: str) -> list[dict]:
-    return agents.read_events(agents.paths(CORPUS, chat)[1])
 
 
 def _analyst_mode(monkeypatch, tmp_path, mode: str) -> None:

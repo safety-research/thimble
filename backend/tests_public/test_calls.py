@@ -4,9 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from app import agent_session, agents, calls
-
-CORPUS = "mini"
+from app import agent_session, calls
 
 
 @pytest.fixture(autouse=True)
@@ -16,13 +14,6 @@ def _fresh(workspaces_tmp):
     yield
     calls.forget()
     agent_session._runs.clear()
-
-
-def _chat() -> str:
-    return str(agents.new_agent(CORPUS, "orient", "Orientation", session="s-1")["id"])
-
-
-# --------------------------------------------------------------------------- the store
 
 
 def test_only_a_file_in_the_session_s_own_tool_results_folder_is_read(tmp_path):

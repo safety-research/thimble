@@ -116,7 +116,7 @@ def fake(tmp_path, monkeypatch) -> Path:
     monkeypatch.setenv("THIMBLE_CHANNEL", "plugin:thimble@inline")  # the server's own, inherited from main's session
     monkeypatch.delenv("FAKE_MODE", raising=False)
     monkeypatch.delenv("FAKE_SLEEP", raising=False)
-    monkeypatch.setenv("THIMBLE_SANDBOX", "0")  # the fence without the sandbox; test_the_fence turns it on
+    monkeypatch.setenv("THIMBLE_SANDBOX", "0")  # the fence without the sandbox
     return out
 
 
@@ -124,10 +124,6 @@ def _listen() -> asyncio.Queue:
     q: asyncio.Queue = asyncio.Queue()
     channel._subs.setdefault(CORPUS, set()).add(q)
     return q
-
-
-def _log(chat: str) -> list[dict]:
-    return agents.read_events(agents.paths(CORPUS, chat)[1])
 
 
 async def _done(key: str = orient_session.KEY) -> None:

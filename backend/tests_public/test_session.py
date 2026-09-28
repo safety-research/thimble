@@ -50,15 +50,6 @@ def _attach(cwd: str, transcript: Path, sid: str = SID, **kw) -> session.Live:
     return lv
 
 
-def _thread(tid: str, anchor: str = "card:ab12cd34") -> dict:
-    """A thread chat under a fixed id, as agents.new_thread makes one."""
-    meta = agents._defaults({"id": tid, "kind": agents.KIND_THREAD, "role": "thread", "title": tid, "created_at": "t",
-                             "parent": agents.MAIN_ID, "anchor": anchor})
-    agents.write_meta(CORPUS, meta)
-    agents.paths(CORPUS, tid)[1].touch()
-    return meta
-
-
 END = {"type": "system", "subtype": "turn_duration"}
 
 

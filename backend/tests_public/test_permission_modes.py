@@ -138,28 +138,8 @@ async def _pending(chat: str, n: int = 1) -> list[dict]:
     raise AssertionError(f"fewer than {n} requests on the chat")
 
 
-def _ask(tool: str, inp: dict, agent_id: str | None = None, key: str = KEY) -> "asyncio.Future":
-    return asyncio.ensure_future(agent_session.ask(CORPUS, key, tool, inp, agent_id=agent_id))
-
-
 def _flag(argv: list[str]) -> str:
     return argv[argv.index("--permission-mode") + 1]
-
-
-async def _until(check, what: str, tries: int = 300) -> None:
-    for _ in range(tries):
-        if check():
-            return
-        await asyncio.sleep(0.02)
-    raise AssertionError(what)
-
-
-def _use(tid: str, name: str, inp: dict | None = None) -> dict:
-    return {"type": "assistant", "message": {"content": [{"type": "tool_use", "id": tid, "name": name, "input": inp or {}}]}}
-
-
-def _result(tid: str) -> dict:
-    return {"type": "user", "message": {"content": [{"type": "tool_result", "tool_use_id": tid, "content": "ok"}]}}
 
 
 # ----------------------------------------------------------------------------- Auto

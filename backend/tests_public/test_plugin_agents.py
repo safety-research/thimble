@@ -8,9 +8,6 @@ import yaml
 from app import config
 
 PLUGIN = config.REPO_ROOT / "plugin"
-AGENTS = PLUGIN / "agents"
-DEFINITIONS = {name: config.REPO_ROOT / "prompts" / f"{name}.md" for name in ("orient", "writer", "critic", "check")}
-CORPUS = "mini"
 
 
 def split(text: str) -> tuple[dict, str]:
@@ -20,12 +17,6 @@ def split(text: str) -> tuple[dict, str]:
     front = yaml.safe_load(head)
     assert isinstance(front, dict), head
     return front, body
-
-
-def agents() -> dict[str, tuple[dict, str]]:
-    """Every agent definition by stem: the plugin's own and the four passed with --agents."""
-    return {**{p.stem: split(p.read_text("utf-8")) for p in sorted(AGENTS.glob("*.md"))},
-            **{name: split(path.read_text("utf-8")) for name, path in DEFINITIONS.items()}}
 
 
 def test_the_thimble_skill_pre_approves_only_the_commands_it_injects():

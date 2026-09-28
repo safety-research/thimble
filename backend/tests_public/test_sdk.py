@@ -24,12 +24,6 @@ def isolated(monkeypatch, tmp_path):
     return home
 
 
-def user_settings(home: Path, **entries) -> Path:
-    p = home / "settings.json"
-    p.write_text(json.dumps(entries))
-    return p
-
-
 def build(cwd: Path, **kw):
     base = dict(cwd=cwd, tools=[], mcp_servers={}, system_append="", model="claude-fable-5-1", effort=None, env=None)
     base.update(kw)

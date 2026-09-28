@@ -6,9 +6,6 @@ import json
 import pytest
 from fastapi.testclient import TestClient
 
-from app import agents
-
-
 CORPUS = "mini"
 
 
@@ -18,14 +15,6 @@ def client(workspaces_tmp):
 
     with TestClient(app, base_url="http://127.0.0.1") as c:
         yield c
-
-
-def _events(c: str, chat_id: str) -> list[dict]:
-    _, log_path = agents.paths(c, chat_id)
-    return agents.read_events(log_path)
-
-
-# ----------------------------------------------------------------------------- routes
 
 
 def test_the_settings_route_changes_only_the_browser_s_settings(client, workspaces_tmp):
