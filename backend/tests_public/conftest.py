@@ -17,8 +17,7 @@ from mini_corpus import write_mini  # noqa: E402
 
 # Nothing reads a credential: model calls and Claude Code sessions are faked wherever a test reaches them.
 os.environ.setdefault("THIMBLE_SKIP_KEY", "1")
-# No headless Chromium per test app, no card check after every add_card and no review after every view build; the
-# tests of the renderer, the check and the review turn them on.
+# No headless Chromium per test app, no card check after every add_card and no review after every view build.
 os.environ.setdefault("THIMBLE_RENDER", "off")
 os.environ.setdefault("THIMBLE_CARD_CHECK", "off")
 os.environ.setdefault("THIMBLE_VIEW_REVIEW", "off")
@@ -158,8 +157,7 @@ def _no_backoff_wait(monkeypatch):
 
 @pytest.fixture(autouse=True)
 def _no_plugin_list(monkeypatch):
-    """launch_args asks `claude plugin list` which plugin copy main loads (cli.installed_copy). Tests load plugin/; the
-    tests of that lookup put the real function back with a stand-in `claude`."""
+    """launch_args asks `claude plugin list` which plugin copy main loads (cli.installed_copy). Tests load plugin/."""
     from app import cli
 
     monkeypatch.setattr(cli, "installed_copy", lambda cwd: None)
