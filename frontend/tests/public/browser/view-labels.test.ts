@@ -1,9 +1,8 @@
-// The frame half of a view's bridge (backend/app/viewer_bridge.js) drawing the labels that are on, in a real browser:
-// a page holds a view in a sandboxed frame as ViewerFrame does. A `labels` message draws its marks (a bar in the
-// label's colour, and the marked text highlighted through the CSS Custom Highlight API, which leaves the view's DOM as
-// it wrote it), marks again an element the view replaces, keeps the view's own box-shadow, and an empty `labels`
-// removes them all; while the pointer key is held (`cmd`) the frame's cursor is the page's pointer arrow. What the
-// bridge reports and posts is tests/public/bridge.test.ts, under jsdom, which has no layout and no highlights.
+// The frame half of a view's bridge (backend/app/viewer_bridge.js) drawing the labels that are on, in a real browser: a
+// page holds a view in a sandboxed frame as ViewerFrame does, and a `labels` message draws its marks, a bar in the
+// label's colour and the marked text highlighted through the CSS Custom Highlight API, which leaves the view's DOM as
+// it wrote it. What the bridge reports and posts is tests/public/bridge.test.ts, under jsdom, which has no layout and
+// no highlights.
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import path from 'node:path'

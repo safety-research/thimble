@@ -1,18 +1,13 @@
-"""The dev agent's permission requests and the web tools of every session (agent_session, hosted sessions and the web;
-dev.py, permissions). A dev session's hook names its key (`view:<slug>`, `ticket:<id>`) and this server; its run hosts
-that key on its chat, so its requests show on the card and are answered by the workspace's mode, or denied after
-dev.PERMISSION_WAIT_S unanswered. WebFetch and WebSearch ask in manual mode whatever else allows them, collapse into one
-card per site or for search, and a "don't ask again" keeps the site, or web search, for the workspace."""
+"""The dev agent's permission requests (agent_session, dev.py, permissions): a dev session's request shows on the card
+and is denied after dev.PERMISSION_WAIT_S unanswered."""
 from __future__ import annotations
 
 import asyncio
-import io
 import json
-from pathlib import Path
 
 import pytest
 
-from app import agent_session, agents, config, dev, ledger, orientation, permission_hook, views
+from app import agent_session, agents, config
 
 CORPUS = "mini"
 KEY = "view:posts"
@@ -51,10 +46,6 @@ def _request(tool: str, inp: dict, key: str = KEY, **extra) -> "asyncio.Future":
     return asyncio.ensure_future(agent_session.permission_request_route(CORPUS, body))
 
 
-def _allowed(inp: dict) -> dict:
-    return {"behavior": "allow", "updatedInput": inp}
-
-
 async def test_an_unanswered_request_is_denied_after_the_wait_and_its_card_says_so_until_dismissed():
     """A hosted session's request nobody answers is denied after its wait, so the build goes on; the model is told to
     carry on without it, the thread hears of it, and the card keeps it marked denied unanswered until Dismiss or the
@@ -81,10 +72,3 @@ async def test_an_unanswered_request_is_denied_after_the_wait_and_its_card_says_
     agent_session.unhost(CORPUS, KEY)
     assert await waiting == {"behavior": "deny", "message": agent_session.GONE_LINE}
     assert _card(chat) == [] and await _request("Bash", {"command": "ls"}) == {"behavior": "deny", "message": agent_session.GONE_LINE}
-
-
-# ----------------------------------------------------------------------------- the dev agent's flags
-
-
-def _settings(flags: list[str]) -> dict:
-    return json.loads(flags[flags.index("--settings") + 1])

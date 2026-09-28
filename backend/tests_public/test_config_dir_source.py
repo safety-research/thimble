@@ -4,19 +4,16 @@ apiKeyHelper and which CLAUDE_CONFIG_DIR its sessions get, so it comes from the 
 can write."""
 from __future__ import annotations
 
-import asyncio
-import json
 import os
 import subprocess
 import sys
-from pathlib import Path
 
 import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
-from test_delivery import CORPUS, _cwd, _fresh  # noqa: F401 — the fixture, used by name
+from test_delivery import _cwd, _fresh  # noqa: F401 — the fixture, used by name
 
-from app import channel, config, export, feedback, main, procs, session
+from app import config, main, procs, session
 
 FIRST = "11111111-aaaa-4aaa-8aaa-000000000001"
 needs_proc = pytest.mark.skipif(not procs.HAVE_PROC, reason="another process's environment is read from /proc")
@@ -63,10 +60,3 @@ def test_the_subscription_serves_the_config_dir_of_the_claude_process_it_names(s
     q = f"cwd={_cwd()}&session={FIRST}&pid={pid}&delivery=channel&config_dir={tmp_path / 'planted'}"
     assert _subscribe_once(q, monkeypatch, plugin_headers()) == 418
     assert config.claude_config_dir() == real
-
-
-def _plant_config_dir(planted: Path, sid: str = FIRST, pid: int | None = None) -> None:
-    """A sessions.json whose record names `planted` as the session's config dir (and `pid` as its process), as a
-    notebook cell could write it."""
-    (config.workspace_dir(CORPUS) / "sessions.json").write_text(json.dumps(
-        {sid: {"session": sid, "cwd": _cwd(), "config_dir": str(planted), "pid": pid, "since": "2026-01-01T00:00:00Z"}}))

@@ -248,9 +248,3 @@ def test_a_tool_call_carries_the_id_claude_code_gave_it(tmp_path, server):
            until=lambda: len(server.calls) >= 2)
     assert [(name, body["args"], body["tool_use_id"]) for name, body in server.calls] == [  # noqa: E501
         ("message_orientation", {"message": "more"}, "toolu_01abc"), ("message_orientation", {"message": "again"}, None)]
-
-
-DISCOVER = {"jsonrpc": "2.0", "id": 9, "method": "server/discover",
-            "params": {"_meta": {"io.modelcontextprotocol/protocolVersion": "2026-07-28",
-                                 "io.modelcontextprotocol/clientInfo": {"name": "t", "version": "1"},
-                                 "io.modelcontextprotocol/clientCapabilities": {}}}}

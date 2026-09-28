@@ -1,10 +1,5 @@
-"""thimble's agents as Claude Code background sessions in terminal-first mode (bg_session.py): a writer starts as a
-`claude --bg` session named thimble:writer, its run ends when the session is idle with its turn ended while the session
-goes on, a turn the session starts on its own is followed as the chat's next run, and a message for it waits in its
-outbox for the tray entry (the proxy) to send, which the relay hook swaps in, once. The proxy's wait returns the
-session's news, the stop hook keeps it going while its session runs, and a second proxy is told to stop. A restart
-follows a running session again; a session whose process went away leaves its chat stopped. The statusline and
-/thimble:agents list every running agent, and the hooks print a start and a finish line once.
+"""Uninstall with terminal-first mode on (bg_session.py): it puts back the statusline and the trust thimble set before
+it removes anything.
 
 A stand-in CLI (FAKE_BG) keeps its sessions in a JSON file: `claude --bg` starts one and writes its transcript,
 `--bg --resume` wakes a stopped one under its id, `agents --json` lists them and `stop` ends one's process."""
@@ -18,7 +13,7 @@ from pathlib import Path
 
 import pytest
 
-from app import agent_session, agents, bg_session, channel, config, ledger, session, tools, write_session
+from app import agent_session, agents, bg_session, channel, config, ledger, session
 
 CORPUS = "mini"
 
@@ -118,18 +113,6 @@ def fake(tmp_path, monkeypatch) -> Path:
     return out
 
 
-def _bg_calls(fake: Path) -> list[list[str]]:
-    return [a for a in map(json.loads, (fake / "argvs.jsonl").read_text().splitlines()) if "--bg" in a]
-
-
-def _state(fake: Path) -> dict:
-    return json.loads((fake / "sessions.json").read_text())
-
-
-def _transcript(sid: str) -> Path:
-    return Path(session.find_transcript(sid) or "")
-
-
 async def _until(cond, timeout: float = 10.0) -> None:
     deadline = time.monotonic() + timeout
     while not cond():
@@ -140,14 +123,6 @@ async def _until(cond, timeout: float = 10.0) -> None:
 
 def _log(chat: str) -> list[dict]:
     return agents.read_events(agents.paths(CORPUS, chat)[1])
-
-
-def _proxy_transcript(tmp_path: Path, agent_id: str, *recs: dict, key: str = "writer:report") -> Path:
-    """A tray entry's transcript: its first prompt names its instructions file, as main's Agent call gives it."""
-    path = tmp_path / f"agent-{agent_id}.jsonl"
-    first = {"type": "user", "message": {"role": "user", "content": str(bg_session.proxy_file(CORPUS, key))}}
-    path.write_text("".join(json.dumps(r) + "\n" for r in (first, *recs)))
-    return path
 
 
 def test_uninstall_puts_back_the_statusline_and_the_trust_before_it_removes_anything(tmp_path, monkeypatch):

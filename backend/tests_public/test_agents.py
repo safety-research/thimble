@@ -1,16 +1,12 @@
-"""agents.py: the chat store, threads and the anchor they keep, chips and agent chats. No server session runs main or
-a thread: they are the analyst's Claude Code session and its forks."""
+"""agents.py's settings route: the browser changes only the settings it owns."""
 from __future__ import annotations
 
-import asyncio
-import base64
 import json
 
 import pytest
-from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
-from app import agents, config
+from app import agents
 
 
 CORPUS = "mini"
@@ -29,9 +25,6 @@ def _events(c: str, chat_id: str) -> list[dict]:
     return agents.read_events(log_path)
 
 
-# ----------------------------------------------------------------------------- store
-
-
 # ----------------------------------------------------------------------------- routes
 
 
@@ -48,8 +41,3 @@ def test_the_settings_route_changes_only_the_browser_s_settings(client, workspac
                                                        "run_cell_result_lines": 20})
     assert r.status_code == 200 and r.json()["hide_chat"] is True
     assert set(json.loads(path.read_text())) == {"hide_chat", "terminal_first", "orient_route", "run_cell_result_lines"}
-
-
-# ----------------------------------------------------------------------------- threads and running, without a server session
-
-PNG = b"\x89PNG\r\n\x1a\n" + b"\x00" * 32

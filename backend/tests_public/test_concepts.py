@@ -1,24 +1,18 @@
-"""app.concepts, the labels: define and validate, a regex apply writes one row per unit, a classifier apply batches
-its units through a scripted model, the analyst's verdicts override the model's rows, and an apply the run would refuse
-leaves no label behind.
+"""app.concepts, the labels: a regex apply writes one row per unit, and a classifier apply batches its units through a
+scripted model.
 
-The prompt kind's classifier is scripted at concepts.classify_structured (CallResults; no subprocess, no network), or,
-for the fallback after a refusal, runs through model.structured against a stubbed Messages API (stub_messages). The
-regex kind runs for real over the synthetic corpus `mini`.
-"""
+The prompt kind's classifier is scripted at concepts.classify_structured (CallResults; no subprocess, no network). The
+regex kind runs for real over the synthetic corpus `mini`."""
 from __future__ import annotations
 
-import asyncio
 import json
 import re
-from pathlib import Path
 
 import httpx
 import pytest
 from fastapi import FastAPI
 
-import stub_messages
-from app import concepts, config, labels_store, notebook, refs
+from app import concepts, config, refs
 from app import model as model_mod
 
 CORPUS = "mini"
@@ -67,22 +61,8 @@ async def _create(api, **kw) -> dict:
     return r.json()
 
 
-def _seed_rows(ws: Path, cid: str, rows: list[dict]) -> None:
-    p = concepts.labels_file(ws, cid)
-    p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text("".join(json.dumps(r) + "\n" for r in rows))
-
-
-def _model_row(ref: str, label: str, conf: float) -> dict:
-    return {"ref": ref, "label": label, "confidence": conf, "source": "model", "ts": "2026-01-01T00:00:00+00:00"}
-
-
 def _ok(labels: list[dict]) -> "model_mod.CallResult":
     return model_mod.CallResult(status="ok", output={"labels": labels})
-
-
-def _bad(status: str, detail: str = "") -> "model_mod.CallResult":
-    return model_mod.CallResult(status=status, detail=detail)
 
 
 class FakeClassify:
@@ -120,19 +100,6 @@ def fake_classify(monkeypatch):
     monkeypatch.setattr(concepts, "classify_structured", FakeClassify.call)
     monkeypatch.setattr(model_mod, "api_path_ready", _no_api)
     return FakeClassify
-
-
-def _canvas(ws: Path) -> tuple[dict, list[dict]]:
-    """A group with three cards: a code cell with output, a note and a label card (never a unit)."""
-    nb = notebook.create_notebook(ws, "Your work", role="analyst")
-    code = notebook.new_cell("code", "user", "How many posts claim a PR?", nb["id"], code="df.claim.sum()")
-    code["status"], code["outputs"] = "ok", [{"text/plain": "3", "_stream": True}]
-    code["takeaway"] = "Three posts claim a PR."
-    note = notebook.new_cell("note", "user", "", nb["id"], payload={"text": "The backlog is about merges, not claims."})
-    label = notebook.new_cell("label", "user", "old label", nb["id"], payload={"concept": "deadbeef"})
-    nb["cells"] += [code, note, label]
-    notebook.write_notebook(ws, nb)
-    return nb, [code, note, label]
 
 
 async def test_regex_apply_records_for_real(api, workspaces_tmp):

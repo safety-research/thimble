@@ -1,7 +1,6 @@
-"""channel.py: the one event path from the browser to the analyst's Claude Code session. The kinds are the bullets of
-main.md's events section, main's prompt is main.md with shared.md pasted in, an event is refused while no session listens, `main` and
-`thread` log the analyst's line when they post, a thread's first event carries its anchor and a follow-up its fork's
-agent id, and the shim's subscription delivers each event as {content, meta}. The shim's side is test_shim_channel.py."""
+"""channel.py: the one event path from the browser to the analyst's Claude Code session. `main` logs the analyst's line
+when it posts, and the shim's subscription waits for the workspace, attaches and delivers each event as {content, meta}.
+The shim's side is test_shim_channel.py."""
 from __future__ import annotations
 
 import asyncio
@@ -10,7 +9,7 @@ import json
 import pytest
 from fastapi.testclient import TestClient
 
-from app import agents, channel, config, prompts, session, threads
+from app import agents, channel, config, session
 
 CORPUS = "mini"
 
@@ -43,9 +42,6 @@ def _listen() -> asyncio.Queue:
 def _log(chat: str) -> list[dict]:
     _, log_path = agents.paths(CORPUS, chat)
     return agents.read_events(log_path)
-
-
-# ----------------------------------------------------------------------------- the prompt and the kinds
 
 
 # ----------------------------------------------------------------------------- posting

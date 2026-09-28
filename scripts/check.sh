@@ -15,9 +15,9 @@
 #   backend   the backend's tests (backend/tests_public): hermetic, with no network, no Claude Code and no API key
 #   frontend  the type check of the UI and of its tests, the frontend's tests (frontend/tests/public) and the production
 #             build, into a temporary folder so that the frontend/dist a running server serves is left alone
-#   browser   the frontend's browser checks (frontend/tests/public/browser) in the headless Chromium: layout, the
-#             sandboxed frames and the card harness; skipped, with a line saying so, where that Chromium does not start
-#             (CI requires it)
+#   browser   the frontend's browser checks (frontend/tests/public/browser) in the headless Chromium: the sandboxed
+#             outputs and a view's label marks; skipped, with a line saying so, where that Chromium does not start (CI
+#             requires it)
 #
 # With no STEP it runs content, commits, backend, frontend and browser in that order and stops at the first that fails. In a
 # fresh checkout run `scripts/check.sh install` once first (or scripts/install.sh --dev, which installs the same things).

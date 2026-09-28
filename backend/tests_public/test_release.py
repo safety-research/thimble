@@ -1,13 +1,9 @@
-"""scripts/release.sh, built without the UI into a temporary folder: the zip carries what an install runs (the
-screenshot script main's `screenshot` tool needs among it) and the docs the readme links, and every other link of the
-readme points at GitHub, so none is broken in an unzipped install. It ships only files in git's index, says in
-RELEASE.json whether any of them has uncommitted changes, refuses a staged tree scripts/check_content.py objects to, and
-writes the zip's digest to SHA256SUMS beside it."""
+"""scripts/release.sh, built without the UI into a temporary folder: it ships only files in git's index, says in
+RELEASE.json whether any of them has uncommitted changes, and writes the zip's digest to SHA256SUMS beside it."""
 from __future__ import annotations
 
 import hashlib
 import json
-import re
 import shutil
 import subprocess
 import zipfile

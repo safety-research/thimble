@@ -1,19 +1,12 @@
-"""The screenshot tool's own pages (app/tools.py): an http address is shot only on thimble's own port, and a card's
-figure (an SVG, a Vega chart) is drawn from a page of its own where it is data in a frame sandboxed to scripts alone,
-under a policy that loads nothing, shot with every request refused. The last test draws both in the headless Chromium
-of frontend/node_modules and skips where there is none."""
+"""The screenshot tool (app/tools.py): an http address is shot only on thimble's own port or its interface's."""
 from __future__ import annotations
 
 import base64
-import html
-import io
-import re
-import shutil
 from pathlib import Path
 
 import pytest
 
-from app import config, dev, tools
+from app import dev, tools
 
 
 class FakeShot:
@@ -37,13 +30,6 @@ def shots(monkeypatch):
     return fake
 
 
-def _frame(page: str) -> str:
-    """The document a figure page's frame holds."""
-    m = re.search(r"<iframe id='fig' sandbox='allow-scripts' [^>]*srcdoc=\"([^\"]*)\"", page)
-    assert m, page[:300]
-    return html.unescape(m.group(1))
-
-
 async def test_a_page_screenshot_reaches_only_thimble_s_own_port_or_its_interface_s(shots, monkeypatch):
     monkeypatch.setenv("THIMBLE_PORT", "8721")
     monkeypatch.delenv("THIMBLE_DEV", raising=False)
@@ -58,11 +44,3 @@ async def test_a_page_screenshot_reaches_only_thimble_s_own_port_or_its_interfac
     monkeypatch.setenv("THIMBLE_FRONTEND_URL", "http://127.0.0.1:5399")
     assert tools.shot_ports() == {8721, 5399}
     assert not (await tools._shot_page("http://localhost:5399/", ".canvas")).is_error
-
-
-def _playwright_missing() -> str | None:
-    if shutil.which("node") is None or not (config.REPO_ROOT / "frontend" / "node_modules" / "playwright").is_dir():
-        return "no node or frontend/node_modules/playwright"
-    if any(not p.is_file() for p in tools.VEGA_BUILDS):
-        return "no vega builds in frontend/node_modules"
-    return None

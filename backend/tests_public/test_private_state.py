@@ -4,12 +4,11 @@ from __future__ import annotations
 
 import os
 import stat
-from datetime import datetime
 from pathlib import Path
 
 import pytest
 
-from app import cli, config, feedback
+from app import cli, config
 
 
 def _mode(p: Path) -> int:

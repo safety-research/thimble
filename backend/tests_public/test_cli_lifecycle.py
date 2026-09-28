@@ -1,21 +1,15 @@
-"""The server's lifecycle under the supervisor (app.cli): which recorded process is trusted as the server, what `stop`
-ends (the server answering on the port when the record is stale, the workspaces' kernels by their records, never
-another program), a restart that hands the kernels over and announces itself, the restart after a source change that
-waits until the server is idle, and `/thimble restore` with the archives it lists and restores. The stand-in
-processes run `sleep` under a server's command line on port 8398, where nothing listens."""
+"""What `stop` ends under the supervisor (app.cli): the workspaces' kernels by their records, and never a recorded pid
+whose command line is no kernel. The stand-in kernels are Python processes that sleep."""
 from __future__ import annotations
 
 import json
 import subprocess
 import sys
-import time
-from pathlib import Path
 
 import pytest
 
-from app import cli, config, procs
-from test_cli import (SERVER_LIKE, _free_port, _healthy_no_process, _healthy_with_state, _restart_seam,  # noqa: F401
-                      _started, fake)
+from app import cli
+from test_cli import _free_port, _started
 
 pytestmark = pytest.mark.usefixtures("named_sessions")
 
@@ -25,9 +19,6 @@ def _stop_all(*ps: subprocess.Popen) -> None:
         if p.poll() is None:
             p.kill()
             p.wait(5)
-
-
-# ----------------------------------------------------------------------------- which process is the server
 
 
 # ----------------------------------------------------------------------------- stop
@@ -68,9 +59,3 @@ def test_stop_ends_the_workspaces_kernels_by_their_records_and_restart_keeps_the
         assert cli.stop()[0] == "kernels: none running"
     finally:
         _stop_all(recorded, other, orphan)
-
-
-# ----------------------------------------------------------------------------- restart
-
-
-# ----------------------------------------------------------------------------- resuming a run

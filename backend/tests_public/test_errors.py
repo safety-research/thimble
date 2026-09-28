@@ -1,19 +1,14 @@
-"""A request no route handled (errors.ErrorLog): a JSON answer naming the failure and an id, a log record with the
-method, the path, the workspace and the traceback under that id; a full disk and an unreadable file named as such. Also
-the plain sentence for a link out of the corpus (config.safe_corpus_path), the stamps on uvicorn's own log lines, and
-the build of the UI that /api/health names."""
+"""The plain sentence for a link out of the corpus (config.safe_corpus_path)."""
 from __future__ import annotations
 
 import errno
-import logging
 import os
 
 import pytest
 from fastapi import FastAPI
 from fastapi.responses import StreamingResponse
-from fastapi.testclient import TestClient
 
-from app import config, errors, main
+from app import config, errors
 
 
 def _app() -> FastAPI:

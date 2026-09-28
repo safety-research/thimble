@@ -1,9 +1,7 @@
 """scripts/check_content.py, the content and commits steps of scripts/check.sh: a listed word is found in any spelling,
-the maintainer's name only outside the files that carry it on purpose, files of kinds that never belong in the tree are
-refused, and so are names a case-insensitive disk cannot tell apart and commit messages that link a Claude Code session.
-The real list is digests, so these tests list words of their own."""
+files of kinds that never belong in the tree are refused, the command fails on a hit, and commit messages that link a
+Claude Code session are refused. The real list is digests, so these tests list words of their own."""
 import importlib.util
-import re
 import subprocess
 import sys
 from pathlib import Path

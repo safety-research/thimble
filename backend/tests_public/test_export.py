@@ -1,11 +1,8 @@
-"""export.py: GET /ws/{c}/export, one zip with every usage record of a workspace. The zip holds every stream, lists the
-corpus by path, size and hash and never copies it, drops torn lines, and copies transcripts only from Claude Code's
-transcript roots. The workspace is built by hand under a temp WORKSPACES_DIR over the synthetic corpus `mini`, with
-rows in every stream, and Claude Code's transcripts under a temp CLAUDE_CONFIG_DIR: main's session with two threads'
-forks, and an orientation session with a workflow run and a spilled tool result, all written here."""
+"""export.py: GET /ws/{c}/export copies transcripts only from Claude Code's transcript roots, and never through a
+symlink planted among them. The workspace is built by hand under a temp WORKSPACES_DIR over the synthetic corpus `mini`,
+and Claude Code's transcripts under a temp CLAUDE_CONFIG_DIR."""
 from __future__ import annotations
 
-import hashlib
 import io
 import json
 import zipfile

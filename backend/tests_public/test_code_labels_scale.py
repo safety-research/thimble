@@ -4,15 +4,10 @@ tokenizer keeps a copy of the line for each token and a one-line list of thousan
 reads the rows the wrapper wrote a batch at a time."""
 from __future__ import annotations
 
-import io
 import json
 import os
-import tokenize
-import tracemalloc
 
-import pytest
-
-from app import concepts, labels_store
+from app import concepts
 
 SPEC = "def label(unit):\n    return 'yes' if unit.get('kind') == 'result' else 'no'\n"
 

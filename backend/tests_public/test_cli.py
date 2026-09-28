@@ -1,8 +1,8 @@
-"""The supervisor (app.cli): `thimble server up | stop`, doctor, launch-args and the launcher script. `server up` prints
-one line and exits 0 whatever happens, refuses $HOME and /, and starts one server when two race; stop signals only a pid
-whose command line is this checkout's server. Unit tests fake `spawn`, `healthy` and `_request`; one integration test
-starts a real uvicorn on a free port under a scratch THIMBLE_HOME. The supervisor records nothing about auth, and
-`doctor` names the path of a credential, never its value."""
+"""The supervisor (app.cli): `thimble server up | stop` and doctor. `server up` prints the url and opens a folder's
+workspace, refuses $HOME and /, and starts one server when two race; stop signals only a pid whose command line is this
+checkout's server. Unit tests fake `spawn`, `healthy` and `_request`; one integration test starts a real uvicorn on a
+free port under a scratch THIMBLE_HOME. `doctor` names the path of a credential, never its value, and runs no command to
+find it."""
 from __future__ import annotations
 
 import contextlib
@@ -15,7 +15,6 @@ import threading
 import time
 import urllib.parse
 import urllib.request
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 import pytest
@@ -23,8 +22,6 @@ import pytest
 from app import cli, config, procs
 
 SECRET = "sk-ant-test-secret-never-written"  # gitleaks:allow  a fake key asserting nothing writes it
-REAL_FOREIGN_HOME = cli.foreign_home  # the `home` fixture fakes it; the test of it puts it back
-REAL_INSTALLED_COPY = cli.installed_copy  # conftest fakes it; the tests of it put it back
 BACKEND = Path(__file__).resolve().parents[1]
 
 pytestmark = pytest.mark.usefixtures("named_sessions")
@@ -259,33 +256,6 @@ def test_real_up_starts_a_detached_server_idempotently_and_stop_ends_it(home, da
                 os.kill(q, 9)
 
 
-def _healthy_with_state(monkeypatch, fingerprint: str, pid: int = 4242, alive: bool = True) -> None:
-    """A healthy server recorded in server.json, in dev mode (auto-restart is gated on THIMBLE_DEV); `alive` says whether
-    the recorded pid (and the restart's 5151) is a live process, i.e. whether the server is ours."""
-    monkeypatch.setattr(cli, "healthy", lambda url=None, timeout=1.0: True)
-    monkeypatch.setattr(cli, "listening", lambda p: p == cli.DEFAULT_UI_PORT)  # Vite up: nothing to spawn
-    monkeypatch.setattr(cli, "pid_alive", lambda q: alive and q in (pid, 5151))
-    monkeypatch.setattr(cli, "is_server", lambda q, p, repo=None: alive and q in (pid, 5151))
-    monkeypatch.setenv("THIMBLE_DEV", "1")
-    cli.write_state({"port": 8300, "pid": pid, "api": "http://127.0.0.1:8300", "url": "http://127.0.0.1:8300",
-                     "repo": str(config.REPO_ROOT), "source_fingerprint": fingerprint, "env": {}})
-
-
-def _restart_seam(monkeypatch) -> list[int]:
-    calls: list[int] = []
-
-    def fake_spawn_restart():
-        calls.append(1)
-        st = cli.read_state()
-        st.update({"pid": 5151, "source_fingerprint": cli.source_fingerprint()})
-        st.pop("source_restart", None)
-        cli.write_state(st)
-        return 777
-
-    monkeypatch.setattr(cli, "spawn_restart", fake_spawn_restart)
-    return calls
-
-
 def test_up_refuses_home_and_root_and_starts_nothing(home, data, monkeypatch, capsys, tmp_path):
     started = []
     monkeypatch.setattr(cli, "ensure_running", lambda wait: started.append(1) or True)
@@ -297,120 +267,3 @@ def test_up_refuses_home_and_root_and_starts_nothing(home, data, monkeypatch, ca
         assert line == [cli.REFUSED_LINE.format(path=folder)] and "http://" not in line[0], folder
     assert started == [] and not cli.server_json().exists()
     assert cli.refused(data / "mini") is False and cli.refused(tmp_path) is False
-
-
-class _Health:
-    """A stand-in server on a free port whose /api/health names `home` (none when None, as a server older than the
-    field answers)."""
-
-    def __init__(self, home: str | None) -> None:
-        self.home = home
-        outer = self
-
-        class H(BaseHTTPRequestHandler):
-            def do_GET(self):  # noqa: N802
-                body = json.dumps({"ok": True, **({"home": outer.home} if outer.home else {})}).encode()
-                self.send_response(200 if self.path == "/api/health" else 404)
-                self.send_header("Content-Type", "application/json")
-                self.send_header("Content-Length", str(len(body)))
-                self.end_headers()
-                self.wfile.write(body)
-
-            def log_message(self, *a):
-                pass
-
-        self.httpd = ThreadingHTTPServer(("127.0.0.1", 0), H)
-        self.port = self.httpd.server_address[1]
-        threading.Thread(target=self.httpd.serve_forever, daemon=True).start()
-
-    def close(self) -> None:
-        self.httpd.shutdown()
-        self.httpd.server_close()
-
-
-def _installed_copy(tmp_path: Path, monkeypatch, enabled: bool = True) -> tuple[Path, str]:
-    """A copy of plugin/ where Claude Code keeps an installed plugin, a stand-in `claude` whose `plugin list --json`
-    lists it, and the pointer its bin/thimble-app-dir follows to this tree. Returns the copy and its channel entry."""
-    name = json.loads(cli.MARKETPLACE_FILE.read_text())["name"]
-    root = tmp_path / "claude-home" / "plugins" / "cache" / name / "thimble" / "9.9.9"
-    import shutil  # noqa: PLC0415
-
-    shutil.copytree(cli.PLUGIN_DIR, root, ignore=shutil.ignore_patterns("__pycache__", "*.pyc", ".DS_Store"))
-    listing = tmp_path / "plugin-list.json"
-    listing.write_text(json.dumps([{"id": "other@elsewhere", "enabled": True, "installPath": str(tmp_path)},
-                                   {"id": f"thimble@{name}", "enabled": enabled, "installPath": str(root)}]))
-    stub = tmp_path / "stub-bin"
-    stub.mkdir(exist_ok=True)
-    (stub / "claude").write_text(STUB_CLAUDE)
-    (stub / "claude").chmod(0o755)
-    monkeypatch.setenv("PATH", f"{stub}{os.pathsep}{os.environ.get('PATH', '')}")
-    monkeypatch.setenv("STUB_LIST", str(listing))
-    monkeypatch.setenv("STUB_OUT", str(tmp_path))
-    monkeypatch.delenv("THIMBLE_APP_DIR", raising=False)
-    (Path(os.environ["THIMBLE_HOME"])).mkdir(parents=True, exist_ok=True)
-    (Path(os.environ["THIMBLE_HOME"]) / "app-dir").write_text(f"{config.REPO_ROOT}\n")
-    monkeypatch.delenv("STUB_MARKETPLACES", raising=False)
-    monkeypatch.setattr(cli, "installed_copy", REAL_INSTALLED_COPY)
-    return root.resolve(), f"plugin:thimble@{name}"
-
-
-def _directory_marketplace(tmp_path: Path, monkeypatch, source: Path) -> None:
-    """The stand-in `claude` lists the marketplace as a directory source at `source`, the way scripts/install.sh
-    registers a checkout or a release."""
-    name = json.loads(cli.MARKETPLACE_FILE.read_text())["name"]
-    listing = tmp_path / "marketplaces.json"
-    listing.write_text(json.dumps([{"name": "other", "source": "directory", "path": str(tmp_path)},
-                                   {"name": name, "source": "directory", "path": str(source)}]))
-    monkeypatch.setenv("STUB_MARKETPLACES", str(listing))
-
-
-# ----------------------------------------------------------------------------- the Bash sandbox and a stale record
-
-
-STUB_CLAUDE = """#!/bin/sh
-# a stand-in `claude`: `plugin marketplace list --json` prints the file $STUB_MARKETPLACES names and `plugin list
-# --json` the file $STUB_LIST names (nothing without one); any other call records its arguments and the idle limit it
-# was given, then exits
-if [ "$1 $2" = "plugin marketplace" ]; then [ -z "${STUB_MARKETPLACES:-}" ] || cat "$STUB_MARKETPLACES"; exit 0; fi
-if [ "$1" = plugin ]; then [ -z "${STUB_LIST:-}" ] || cat "$STUB_LIST"; exit 0; fi
-printf '%s\\n' "$@" > "$STUB_OUT/argv"
-printf '%s' "${CLAUDE_CODE_MCP_TOOL_IDLE_TIMEOUT:-}" > "$STUB_OUT/idle"
-"""
-
-
-def _launcher_env(tmp_path: Path) -> dict[str, str]:
-    """The launcher's environment with a stand-in `claude` first on PATH, a scratch home and a port nothing uses."""
-    stub = tmp_path / "stub-bin"
-    stub.mkdir(exist_ok=True)
-    (stub / "claude").write_text(STUB_CLAUDE)
-    (stub / "claude").chmod(0o755)
-    out = tmp_path / "stub-out"
-    out.mkdir(exist_ok=True)
-    env = {k: v for k, v in os.environ.items() if not k.startswith(("CLAUDE", "THIMBLE_"))}
-    env.update({"PATH": f"{stub}{os.pathsep}{os.environ.get('PATH', '')}", "HOME": str(tmp_path),
-                "THIMBLE_HOME": str(tmp_path / "home"), "THIMBLE_PORT": str(_free_port()), "STUB_OUT": str(out),
-                "CLAUDE_CONFIG_DIR": str(tmp_path / "claude-home")})
-    return env
-
-
-SID_A = "aaaaaaaa-0000-4000-8000-000000000001"
-SID_B = "bbbbbbbb-0000-4000-8000-000000000002"
-
-
-def _main_sessions(tmp_path: Path, env: dict[str, str], corpus: Path) -> dict[str, Path]:
-    """The corpus `mini` under a scratch data dir, and its workspace's sessions.json with two ended main sessions whose
-    transcripts are in the launcher's Claude Code config dir, B written after A."""
-    env.update({"THIMBLE_DATA_DIR": str(corpus.parent), "THIMBLE_WORKSPACES_DIR": str(tmp_path / "ws")})
-    (corpus / "manifest.json").write_text('{"name": "mini"}')
-    projects = Path(env["CLAUDE_CONFIG_DIR"]) / "projects" / "-corpus"
-    projects.mkdir(parents=True, exist_ok=True)
-    paths = {}
-    for n, sid in enumerate((SID_A, SID_B)):
-        paths[sid] = projects / f"{sid}.jsonl"
-        paths[sid].write_text('{"type": "user"}\n')
-        os.utime(paths[sid], (1_700_000_000 + n, 1_700_000_000 + n))
-    recs = {sid: {"session": sid, "cwd": str(corpus), "transcript_path": str(t), "pid": 1, "ended": "t",
-                  "since": "2026-09-25T10:00:00+00:00"} for sid, t in paths.items()}
-    (tmp_path / "ws" / "mini").mkdir(parents=True, exist_ok=True)
-    (tmp_path / "ws" / "mini" / "sessions.json").write_text(json.dumps(recs))
-    return paths

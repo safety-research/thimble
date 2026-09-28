@@ -1,8 +1,8 @@
 """Delivery without a channel: thimble uses channels where Claude Code offers them and falls back to hooks. The server
-side (channel.py): a subscription names its route, an event for a session on the hook route is queued for it and taken
-by one watcher with a long poll, in flight until acknowledged, and the PermissionRequest hook's prompt waits on main's
-meta until the browser answers. The watcher (plugin/bin/.thimble-watch) and the permission hook run against a stand-in
-server, and exit 0 when there is none; the plugin's hooks.json wires them."""
+side (channel.py): an event for a session on the hook route is taken by one watcher, in flight until acknowledged, and
+the PermissionRequest hook's prompt waits on main's meta until the browser answers. The server answers a hook route only
+to a request that proves the token, and the hooks, run against a stand-in server, do nothing without server.json or with
+a server that cannot prove the token."""
 from __future__ import annotations
 
 import asyncio
@@ -20,15 +20,12 @@ import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
-from app import agents, cc_channel, channel, config, hook_auth, prompts, session
+from app import agents, cc_channel, channel, config, hook_auth, session
 
 CORPUS = "mini"
 SID = "5e55a000-0000-4000-8000-000000000001"
-NEW = "5e55a000-0000-4000-8000-000000000002"  # the session /clear starts in the same `claude` process
-PID = 4242  # that process
 PLUGIN = config.REPO_ROOT / "plugin"
 WATCHER = PLUGIN / "bin" / ".thimble-watch"
-MARKER = "thimble browser event:"  # hooks.json's rewakeMessage, which main.md names
 TOKEN = "t0ken-of-this-install"  # server.json's, which the hooks prove they hold (app/hook_auth.py)
 
 

@@ -1,17 +1,9 @@
 // @vitest-environment jsdom
-// What a record of the workspace stream does once, when it is new, and what stays on its item. The first open of the
-// stream replays the workspace's whole history, then the server sends `live` (src/lib/events.ts): a record of that
-// history raises no toast, no tab dot and opens nothing. A writer's failure shows its toast once and afterwards stays on
-// its document until dismissed or written (src/report/writeFailures.ts); a view the analyst asked for opens by itself
-// once built, or waits with Open and a dot while they type (src/files/viewReady.ts). Records are invented; the socket
-// is a fake EventSource.
+// The workspace stream (src/lib/events.ts): a reopen resumes after the last record seen, from the log it came from, and
+// a reset replays the new log as history and tells the bus. The socket is a fake EventSource.
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 import { bus } from '../../src/lib/bus.ts'
-import { dispatch, isReplay, subscribeWorkspace } from '../../src/lib/events.ts'
-import { markOpened, markReady, onBuilt, typingIn, useOpenAskedViews, useReadyViews } from '../../src/files/viewReady.ts'
-import { failedDetail, failedText, nextFailures, useWriteFailures, type WriteFailure } from '../../src/report/writeFailures.ts'
-import { useTabDots } from '../../src/shell/dots.ts'
-import { mount, settle, unmountAll } from './mount.tsx'
+import { isReplay, subscribeWorkspace } from '../../src/lib/events.ts'
 
 class FakeSource {
   static all: FakeSource[] = []
@@ -34,27 +26,18 @@ class FakeSource {
   }
 }
 
-const toasts: { text: string; ref?: string }[] = []
-let offToast: () => void
-
 beforeEach(() => {
   FakeSource.all = []
   vi.stubGlobal('EventSource', FakeSource)
   vi.stubGlobal('fetch', async () => {
     throw new Error('no network in tests')
   })
-  window.localStorage.clear()
-  toasts.length = 0
-  offToast = bus.on('toast', (t) => toasts.push(t))
 })
 afterEach(() => {
-  offToast()
-  unmountAll()
   vi.unstubAllGlobals()
 })
 
 describe('the stream', () => {
-
   test('a reopen names the log the stream served, and a reset starts the history over and tells the bus', () => {
     vi.useFakeTimers()
     try {

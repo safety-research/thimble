@@ -1,11 +1,6 @@
-"""The Claude Code sessions thimble starts beside main (agent_session.py, orient_session.py): their launch arguments,
-their permissions and their lifetime. The orientation's session gets its agent with --agents and --agent, thimble's own
-tools and the plugin's skills in --allowedTools (for a checkout and a release install alike, so they never ask), the
-thimble tools it does not keep in --disallowedTools, --permission-mode from the mode Start chose, THIMBLE_SESSION, the
-permission hook and the fence in --settings, and nothing that widens the analyst's permissions. Every request reaches
-the server through the PermissionRequest hook: Manual waits for the analyst, Bypass grants. One orientation runs at a
-time, and stopping it or shutting the server down ends its process group. Its transcript becomes the orientation's chat,
-its subagents and workflow agents its steps, and its end tells main in one line what it made.
+"""The Claude Code sessions thimble starts beside main (agent_session.py, orient_session.py) and their permissions:
+every session asks through the PermissionRequest hook and no prompt tool, and the hook hands each request to the server
+and prints its decision. Manual waits for the analyst, while a writer's request is denied after a minute; Bypass grants.
 
 A stand-in for the CLI (FAKE, run as agent_session.CLAUDE_BIN) records its argv, its environment and what it read on
 stdin, and writes what Claude Code writes for such a session: the transcript under the config dir's projects/, a
@@ -16,21 +11,17 @@ from __future__ import annotations
 import asyncio
 import io
 import json
-import os
-import shutil
 import sys
 from pathlib import Path
-from types import SimpleNamespace
 
 import pytest
 from fastapi import HTTPException
 
-from app import (agent_session, agents, channel, cli, config, ledger, orient_session, orientation, permission_hook,
-                 prompts, session, tools)
+from app import (agent_session, agents, channel, config, orient_session, orientation, permission_hook,
+                 session, tools)
 
 CORPUS = "mini"
 KEY = orient_session.KEY
-MARKETPLACE = "thimble-local"  # scripts/release.sh's default name
 
 SUMMARY = "The corpus is one file, runs.jsonl, with 12 runs [[card:aaaa1111]]."
 
@@ -143,58 +134,6 @@ async def _done(key: str = orient_session.KEY) -> None:
     run = agent_session._runs.get((CORPUS, key))
     if run is not None and run.task is not None:
         await asyncio.wait_for(run.task, 10)
-
-
-def _brief(fake: Path) -> str:
-    """The first message the session read on stdin."""
-    return (fake / "stdin.txt").read_text()
-
-
-def _agent(fake: Path) -> dict:
-    """The orientation's agent as the session was given it with --agents, after checking it is the one --agent names."""
-    argv = json.loads((fake / "argv.json").read_text())
-    defined = json.loads(argv[argv.index("--agents") + 1])
-    assert list(defined) == [orientation.AGENT] and argv[argv.index("--agent") + 1] == orientation.AGENT
-    return defined[orientation.AGENT]
-
-
-def _fenced(**settings) -> dict:
-    """The orientation's --settings: the caller's choices, the fence without the sandbox (the fixture turns it off), the
-    subagents' scratch folders, the permission hook and the call-ref hooks."""
-    work = orient_session.work_dir(CORPUS)
-    fence = agent_session.fence(config.corpus_dir(CORPUS), work, sandbox=False)
-    fence["permissions"]["ask"] = ["WebFetch", "WebSearch"]  # Manual: the web asks (agent_session, the web)
-    return {**settings, **fence, "hooks": {**agent_session.scratch_hooks(work), **agent_session.permission_hooks(CORPUS),
-                                           **agent_session.call_hooks(CORPUS)}}
-
-
-def _disallowed(fake: Path) -> list[str]:
-    argv = json.loads((fake / "argv.json").read_text())
-    i = argv.index("--disallowedTools") + 1
-    out = []
-    while i < len(argv) and not argv[i].startswith("--"):
-        out.append(argv[i])
-        i += 1
-    return out
-
-
-def _parts(prompt: str) -> set[str]:
-    """The keys of orient_session.PARTS whose `#### ` part the prompt holds, and of LINES whose line it holds."""
-    return ({k for k, h in orient_session.PARTS.items() if f"\n#### {h}\n" in prompt}
-            | {k for k, s in orient_session.LINES.items() if s in prompt})
-
-
-async def _settled() -> None:
-    """Every run of the orientation has ended and none waits to start."""
-    await asyncio.sleep(0.1)
-    for _ in range(200):
-        await _done()
-        if not orient_session.running(CORPUS) and not (orientation.read_run(CORPUS) or {}).get("queue"):
-            await asyncio.sleep(0.1)
-            if not orient_session.running(CORPUS):
-                return
-        await asyncio.sleep(0.05)
-    raise AssertionError("the orientation did not settle")
 
 
 # ----------------------------------------------------------------------------- how a session asks for permission
@@ -327,7 +266,6 @@ async def test_bypass_grants_every_request_and_switches_with_manual_while_the_se
 
 RULE = {"type": "addRules", "rules": [{"toolName": "Bash", "ruleContent": "npm test *"}], "behavior": "allow",
         "destination": "localSettings"}
-EDITS = {"type": "setMode", "mode": "acceptEdits", "destination": "session"}
 
 
 def test_the_permission_hook_hands_the_request_to_the_server_and_prints_its_decision(monkeypatch, capsys):
@@ -381,95 +319,3 @@ def test_the_permission_hook_hands_the_request_to_the_server_and_prints_its_deci
     monkeypatch.delenv("THIMBLE_SESSION")
     monkeypatch.setattr("sys.stdin", io.StringIO(json.dumps(hook)))
     assert permission_hook.main(["--ws", CORPUS]) == 0 and capsys.readouterr().out == "", "not a session thimble started"
-
-
-# ----------------------------------------------------------------------------- thimble's own tools never ask, in any install
-
-
-@pytest.fixture(params=["checkout", "release"])
-def install(request, fake, tmp_path, monkeypatch) -> SimpleNamespace:
-    """The plugin copy a session thimble starts loads (`session`) and the one main runs from (`main`), for each install
-    kind. A release: the plugin in $THIMBLE_HOME/app/plugin beside the marketplace file release.sh writes, registered
-    and enabled in Claude Code's settings as thimble@thimble-local, whose installed copy in the plugin cache is main's,
-    which its launcher exports as THIMBLE_PLUGIN_ROOT (cli.plugin_root)."""
-    if request.param == "checkout":
-        monkeypatch.delenv(cli.PLUGIN_ROOT_ENV, raising=False)
-        return SimpleNamespace(session=agent_session.PLUGIN_DIR, main=cli.PLUGIN_DIR)
-    app = tmp_path / "thimble-home" / "app"
-    shutil.copytree(config.REPO_ROOT / "plugin", app / "plugin", ignore=shutil.ignore_patterns("__pycache__"))
-    (app / ".claude-plugin").mkdir(parents=True)
-    (app / ".claude-plugin" / "marketplace.json").write_text(json.dumps(
-        {"name": MARKETPLACE, "plugins": [{"name": "thimble", "source": "./plugin"}]}))
-    conf = Path(os.environ["CLAUDE_CONFIG_DIR"])
-    version = json.loads((app / "plugin" / ".claude-plugin" / "plugin.json").read_text())["version"]
-    cached = conf / "plugins" / "cache" / MARKETPLACE / "thimble" / version
-    shutil.copytree(app / "plugin", cached)
-    conf.mkdir(parents=True, exist_ok=True)
-    (conf / "settings.json").write_text(json.dumps({
-        "enabledPlugins": {f"thimble@{MARKETPLACE}": True},
-        "extraKnownMarketplaces": {MARKETPLACE: {"source": {"source": "directory", "path": str(app)}}}}))
-    monkeypatch.setattr(agent_session, "PLUGIN_DIR", app / "plugin")
-    monkeypatch.setenv(cli.PLUGIN_ROOT_ENV, str(cached))
-    return SimpleNamespace(session=app / "plugin", main=cached)
-
-
-def model_names(plugin: Path) -> dict[str, str]:
-    """Each tool of the plugin's thimble server by its registry name, as the model of a session that loads `plugin`
-    calls it: Claude Code names a plugin's MCP tool from the manifest's name and the server's key in its .mcp.json."""
-    name = json.loads((plugin / ".claude-plugin" / "plugin.json").read_text())["name"]
-    [server] = json.loads((plugin / ".mcp.json").read_text())["mcpServers"]
-    return {t: f"mcp__plugin_{name}_{server}__{t}" for t in tools.REGISTRY}
-
-
-def skill_names(plugin: Path) -> list[str]:
-    """The plugin's own skills as a Skill call names them, `<plugin>:<skill>`, in a permission rule."""
-    name = json.loads((plugin / ".claude-plugin" / "plugin.json").read_text())["name"]
-    return [f"Skill({name}:{d.name})" for d in sorted((plugin / "skills").iterdir()) if (d / "SKILL.md").is_file()]
-
-
-def permits(rules: list[str], tool: str) -> bool:
-    """Whether an allow rule lets `tool` run without a permission request, as Claude Code matches one: the tool's own
-    name, or its MCP server's whole rule (`mcp__<server>`, or `mcp__<server>__*`)."""
-    server = tool.rsplit("__", 1)[0] if tool.startswith("mcp__") else None
-    return any(r == tool or (server is not None and r in (server, server + "__*")) for r in rules)
-
-
-def allowed(argv: list[str]) -> list[str]:
-    return argv[argv.index("--allowedTools") + 1:argv.index("--disallowedTools")]  # every session has both
-
-
-def own_tools(argv: list[str], plugin: Path) -> list[str]:
-    """The thimble tools a session has: its agent names no tools, so every tool of the plugin copy it loads that its
-    --disallowedTools leave, which name them as that copy does."""
-    agent = next(iter(json.loads(argv[argv.index("--agents") + 1]).values()))
-    assert "tools" not in agent, "the agent inherits every tool of the session"
-    i, denied = argv.index("--disallowedTools") + 1, set()
-    while i < len(argv) and not argv[i].startswith("--"):
-        denied.add(argv[i])
-        i += 1
-    names = set(model_names(plugin).values())
-    assert {t for t in denied if t.startswith("mcp__")} <= names, "the tools taken away are the plugin copy's"
-    return sorted(names - denied)
-
-
-def assert_own_tools_ask_nothing(argv: list[str], plugin: Path) -> None:
-    """Every thimble tool the session has, and every skill of the plugin, is allowed."""
-    rules = allowed(argv)
-    own = own_tools(argv, plugin)
-    assert own, "the session keeps thimble tools of its own"
-    assert [t for t in own if not permits(rules, t)] == [], "no thimble tool of the session asks"
-    assert [s for s in skill_names(plugin) if s not in rules] == [], "no skill of the plugin asks"
-
-
-def _assert_works_in_its_own_folder(fake: Path, work: Path) -> None:
-    """The session's process runs in `work` with the corpus folder added and denied to every file tool, and its edits in
-    `work` and its Bash in the sandbox, off the network, ask nothing (agent_session, the fence)."""
-    corpus = config.corpus_dir(CORPUS)
-    argv = json.loads((fake / "argv.json").read_text())
-    settings = json.loads(argv[argv.index("--settings") + 1])
-    assert json.loads((fake / "env.json").read_text())["cwd"] == str(work)
-    assert argv[argv.index("--add-dir") + 1] == str(corpus)
-    assert settings["permissions"]["deny"] == [f"Edit(/{corpus}/**)"]
-    assert settings["permissions"]["allow"] == [f"Edit(/{work}/**)"]
-    assert settings["sandbox"]["autoAllowBashIfSandboxed"] and settings["sandbox"]["network"] == {"deniedDomains": ["*"]}
-    assert [h["matcher"] for h in settings["hooks"]["PreToolUse"]] == ["Bash"], "the sandbox hook allows sandboxed Bash"

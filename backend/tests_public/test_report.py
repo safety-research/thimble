@@ -1,10 +1,7 @@
-"""report.py: the report's shape from the writer's output, ref validation, the text edits that lock a passage, comments
-across generations and the citation check. A report is saved the way the write_document tool saves one (normalize,
-finish_generation, store; `write` below), from the output shapes the normalizer reads; cells are written to disk with
-handmade outputs, no kernel and no model."""
+"""report.py's citation check: a value that moved is repaired, and a sentence nothing shows is tagged. Cells are written
+to disk with handmade outputs, no kernel and no model."""
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 import pytest
@@ -52,79 +49,6 @@ SUMMARY = ("Agent-03 stopped after an admin action. The incident write-up would 
            "Three admin actions cluster on day 3; the deletions follow within minutes.\n")
 
 
-def seed_orient(c: str, inv_id: str, cells: dict[str, str]) -> None:
-    """orient/summary.md, what the orientation leaves behind."""
-    d = config.workspace_dir(c) / "orient"
-    d.mkdir(parents=True, exist_ok=True)
-    (d / "summary.md").write_text(SUMMARY)
-
-
-def tool_output(cells: dict[str, str], *, title: str = "Agent-03 stopped after an admin action") -> dict:
-    """A `document` tool output citing the seeded cells, the sections given as paragraphs of sentence objects."""
-    return {
-        "title": title,
-        "sections": [
-            {"heading": report.FIXED["data"], "paragraphs": [{"sentences": [
-                {"text": "The corpus holds one run of agent logs.", "refs": ["README.md#L1"], "tags": ["fact"],
-                 "tag_notes": {"fact": "The README states it."}},
-            ]}]},
-            {"heading": report.FIXED["takeaways"], "paragraphs": [{"sentences": [
-                {"text": "Agent-03 stopped after an admin action.", "refs": [f"card:{cells['chart']}"],
-                 "tags": ["crucial"], "tag_notes": {"crucial": "Everything else rests on it."},
-                 "section": "The admin action"},
-            ]}]},
-            {
-                "heading": "The admin action",
-                "paragraphs": [{"sentences": [
-                    {"text": f"There are [[38|card:{cells['table']}#count/alpha]] alpha rows.",
-                     "refs": [f"card:{cells['table']}"], "tags": ["fact"]},
-                    {"text": "An invented ref is dropped.", "refs": ["card:nope", "claim:deadbeef", "no/such/file.md#L9"],
-                     "tags": []},
-                ]}],
-                "figures": [
-                    {"cell": f"card:{cells['chart']}", "caption": "Admin actions per day."},
-                    {"cell": f"card:{cells['table']}", "caption": "Counts by kind.", "after_paragraph": 1},
-                    {"cell": f"card:{cells['text']}", "caption": "Not chart- or table-bearing; dropped."},
-                ],
-            },
-            {"heading": report.FIXED["uncertainty"], "paragraphs": [{"sentences": [
-                {"text": "A kernel crash would look different.", "refs": [], "tags": ["judgment"],
-                 "tag_notes": {"judgment": "An interpretation of absence.", "caveat": "note for a tag it lacks"}},
-            ]}]},
-            {"heading": report.FIXED["unused"], "paragraphs": [{"sentences": [{"text": "One dead-end cell.", "refs": [], "tags": []}]}]},
-            {"heading": report.FIXED["caveats"], "paragraphs": [{"sentences": [{"text": "Motive was not checked.", "refs": [], "tags": ["caveat"]}]}]},
-        ],
-    }
-
-
-def raw_document(cells: dict[str, str], *, title: str = "Agent-03 stopped after an admin action", finding: str | None = None) -> dict:
-    """The same statements as tool_output's, as markdown bodies."""
-    return {"title": title, "sections": [
-        {"heading": "What this data is and what we analyzed", "body": "The corpus holds one run of agent logs [[README.md#L1]]."},
-        {"heading": "Main takeaways", "body": f"Agent-03 stopped after an admin action [[card:{cells['chart']}]]."},
-        {"heading": "The admin action",
-         "body": finding or (f"There are [[38|card:{cells['table']}#count/alpha]] alpha rows. An invented ref is dropped [[card:nope]]."),
-         "figures": [{"cell": f"card:{cells['chart']}", "caption": "Admin actions per day."},
-                     {"cell": f"card:{cells['table']}", "caption": "Counts by kind.", "after_paragraph": 1},
-                     {"cell": f"card:{cells['text']}", "caption": "Not chart- or table-bearing; dropped."}]},
-        {"heading": "Limitations", "body": "Motive was not checked."},
-    ]}
-
-
-def slot(out: dict, role: str) -> dict:
-    if role in report.FIXED:
-        return next(sec for sec in out["sections"] if sec["heading"] == report.FIXED[role])
-    return next(sec for sec in out["sections"] if sec["heading"] not in report.FIXED.values())
-
-
-def sentences(doc: dict) -> list[dict]:
-    return report_types.all_sentences(doc)
-
-
-def by_text(doc: dict, prefix: str) -> dict:
-    return next(x for x in sentences(doc) if x["text"].startswith(prefix))
-
-
 async def write(inv_id: str, raw: dict) -> dict:
     """The report saved from `raw` as the write_document tool saves a document: normalized, the previous generation's
     locks, comments and pinned figures carried, stored as the new generation."""
@@ -134,19 +58,6 @@ async def write(inv_id: str, raw: dict) -> dict:
     doc.update(generated_at="2026-09-23T00:00:00+00:00", words=report_types.doc_words(doc))
     report_types.store(CORPUS, inv_id, "report", doc)
     return report_types.read_doc(CORPUS, inv_id, "report")
-
-
-def stored(inv_id: str) -> dict:
-    return report_types.read_doc(CORPUS, inv_id, "report")
-
-
-# --------------------------------------------------------------------------- generation and the stored shape
-
-
-# --------------------------------------------------------------------------- locks, edits and their carry
-
-
-# --------------------------------------------------------------------------- comments across generations
 
 
 # --------------------------------------------------------------------------- the citation check

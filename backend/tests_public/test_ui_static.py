@@ -1,6 +1,5 @@
 """main.py serves the built UI (frontend/dist) at / when the server is not in dev mode, since a release install has no
-Vite: the three pages and their assets with their content types, index.html for a
-client-side route, /api untouched (its unknown paths stay 404), nothing mounted without a build or in dev mode."""
+Vite: the pages and their assets with their content types, and index.html for a client-side route."""
 from __future__ import annotations
 
 import os

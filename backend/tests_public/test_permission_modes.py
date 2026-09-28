@@ -1,26 +1,21 @@
-"""The orientation's permission modes beyond Manual and Bypass (agent_session, permissions and the mode switch;
-permission_hook.py). Auto is Claude Code's own auto mode: a call it refuses never reaches a PermissionRequest hook, so
-its PermissionDenied hook brings the call to the card, where it waits for the analyst like any request, and the hook
-before each call lets the call made again run once. A switch into or out of Auto changes the process's
---permission-mode, so the session is paused when no call runs (a call that waits on the analyst counts as paused) and
-resumed with its work in the new mode, told which agents stopped. The orientation's fence allows nothing of its own,
-and thimble's own tools never ask in a critique or a check's run, whatever install the plugin came from.
+"""The orientation's Auto mode and the hook's route (agent_session, permissions; permission_hook.py). Auto is Claude
+Code's own auto mode: a call it refuses never reaches a PermissionRequest hook, so its PermissionDenied hook brings the
+call to the card, where it waits for the analyst like any request. The hook's route answers for the session its shim
+names.
 
 A stand-in for the CLI (FAKE, run as agent_session.CLAUDE_BIN) records its argv and stdin and writes the transcript
 records Claude Code writes in each case; SIGINT ends it as it ends `claude -p`."""
 from __future__ import annotations
 
 import asyncio
-import io
 import json
 import sys
 from pathlib import Path
 
 import pytest
 
-from app import agent_session, agents, channel, checks, config, notebook, orient_session, orientation, permission_hook
-from app import session, tools
-from test_agent_sessions import assert_own_tools_ask_nothing, install  # noqa: F401 — the fixture, used by name
+from app import agent_session, agents, channel, orient_session
+from app import session
 
 CORPUS = "mini"
 KEY = orient_session.KEY
@@ -147,10 +142,6 @@ def _ask(tool: str, inp: dict, agent_id: str | None = None, key: str = KEY) -> "
     return asyncio.ensure_future(agent_session.ask(CORPUS, key, tool, inp, agent_id=agent_id))
 
 
-def _argvs(fake: Path) -> list[list[str]]:
-    return [json.loads(line) for line in (fake / "argvs.jsonl").read_text().splitlines()]
-
-
 def _flag(argv: list[str]) -> str:
     return argv[argv.index("--permission-mode") + 1]
 
@@ -163,27 +154,12 @@ async def _until(check, what: str, tries: int = 300) -> None:
     raise AssertionError(what)
 
 
-def _put(path: Path, *recs: dict) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("a") as f:
-        for r in recs:
-            f.write(json.dumps(r) + "\n")
-
-
 def _use(tid: str, name: str, inp: dict | None = None) -> dict:
     return {"type": "assistant", "message": {"content": [{"type": "tool_use", "id": tid, "name": name, "input": inp or {}}]}}
 
 
 def _result(tid: str) -> dict:
     return {"type": "user", "message": {"content": [{"type": "tool_result", "tool_use_id": tid, "content": "ok"}]}}
-
-
-class _Resp(io.BytesIO):
-    def __enter__(self):
-        return self
-
-    def __exit__(self, *a):
-        return False
 
 
 # ----------------------------------------------------------------------------- Auto
@@ -250,12 +226,3 @@ async def test_the_hook_s_route_answers_for_the_session_its_shim_names(fake, mon
         "Bypass grants the orientation's requests, never another session's"
     await orient_session.stop(CORPUS)
     await _done()
-
-
-# ----------------------------------------------------------------------------- the switch into or out of Auto
-
-
-# ----------------------------------------------------------------------------- the hook
-
-
-# ----------------------------------------------------------------------------- what each session is allowed

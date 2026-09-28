@@ -1,10 +1,8 @@
-"""app.notebook's kernels: a cell runs in the workspace's scratch mirror of the corpus, so its writes never reach the
-corpus; the kernel's environment holds no credential; a timeout interrupts and the kernel survives; outputs are
-bounded; side files stay under the cell's outputs; the ipynb export.
+"""app.notebook's kernels: a cell runs and its output is stored; it runs in the workspace's scratch mirror of the
+corpus, so its writes never reach the corpus; and the kernel's environment holds no credential.
 
 Each test gets a fresh workspace dir (workspaces_tmp) and shuts its kernel down at the end. Kernel startup takes a
-second or two, so timeouts are generous.
-"""
+second or two, so timeouts are generous."""
 from __future__ import annotations
 
 import json
@@ -14,8 +12,6 @@ import pytest
 from fastapi import FastAPI
 
 from app import config, notebook
-
-ERR = notebook.ERROR_MIME
 
 
 @pytest.fixture()
@@ -107,32 +103,3 @@ def test_kernel_env_drops_secrets(monkeypatch):
               "CLAUDE_CODE_OAUTH_TOKEN", "CLAUDE_CONFIG_DIR"):
         assert k not in env
     assert env["HARMLESS"] == "1" and "PATH" in env
-
-
-def _small_caps(monkeypatch, max_lines: int = 100, head: int = 50, tail: int = 20) -> None:
-    monkeypatch.setattr(notebook, "OUTPUT_MAX_LINES", max_lines)
-    monkeypatch.setattr(notebook, "OUTPUT_HEAD_LINES", head)
-    monkeypatch.setattr(notebook, "OUTPUT_TAIL_LINES", tail)
-
-
-# ----------------------------------------------------------------------------- .ipynb export
-
-
-def _export_nb(c: str) -> dict:
-    ws = config.workspace_dir(c)
-    nb = notebook.create_notebook(ws, "Finding 1: the count", role="analyst", kind="split")
-    note = notebook.new_cell("note", "chat:c1", "", nb["id"], payload={"text": "How many? The count matters."})
-    code1 = notebook.new_cell("table", "chat:c1", "How many things?", nb["id"], code="print(7)")
-    code1.update(status="ok", exec_count=1, takeaway="Seven.",
-                 outputs=[{"text/plain": "7\n", "_stream": "stdout"},
-                          {"image/png": "aGk=", "text/plain": "<Figure size 640x480 with 1 Axes>"}])
-    code2 = notebook.new_cell("code", "chat:c1", "What breaks?", nb["id"], code="1/0")
-    code2.update(status="error", exec_count=2,
-                 outputs=[{notebook.ERROR_MIME: {"ename": "ZeroDivisionError", "evalue": "division by zero",
-                                                 "traceback": ["tb line"]}}])
-    example = notebook.new_cell("example", "chat:c1", "One record", nb["id"], payload={"refs": ["events.jsonl#L1"]})
-    custom = notebook.new_cell("custom", "chat:c1", "", nb["id"], payload={"html": "<b>hi</b>"})
-    timeline = notebook.new_cell("timeline", "chat:c1", "When?", nb["id"], payload={"dataset": {"events": [1]}})
-    nb["cells"] = [note, code1, code2, example, custom, timeline]
-    notebook.write_notebook(ws, nb)
-    return nb

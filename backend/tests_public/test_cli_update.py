@@ -1,10 +1,7 @@
-"""`thimble update` (app.cli, INSTALL.md "Update"): a release install brings itself up to date. `--from <zip>` hands
-the zip to scripts/update.sh; with no argument the latest GitHub release is downloaded with the gh CLI (members are
-logged in) and handed over the same way; when the download fails, two lines name the cause and the --from form. gh
-answers "release not found" when no release is published, when the account cannot see the repo and when it is not logged
-in, so the update asks gh which of the three it is. A git checkout runs update.sh plain (its git pull path). The repo
-slug is RELEASE.json's `repo` when the install carries one, else the `repository` of plugin.json. subprocess is faked
-throughout: nothing is downloaded or installed here."""
+"""`thimble update` (app.cli, INSTALL.md "Update"): a release install brings itself up to date. `--from <zip>` hands the
+zip to scripts/update.sh; with no argument the latest GitHub release and its SHA256SUMS are downloaded with the gh CLI
+and handed over the same way, and a release without SHA256SUMS is not installed. subprocess is faked throughout: nothing
+is downloaded or installed here."""
 from __future__ import annotations
 
 import json

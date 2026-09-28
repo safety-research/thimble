@@ -1,8 +1,5 @@
-"""The document tools: `write_document` saves a whole document
-the writer agent wrote in markdown as its new generation, and `edit_document` replaces one passage or inserts a
-paragraph or a figure after it. Both run in report_types (tool_write_document, tool_edit_document) and are called here
-through tools.call as the analyst's session and its agents would. No model call and no kernel.
-"""
+"""The document tools: `write_document` saves a whole document the writer agent wrote in markdown as its new generation
+and checks it, called through tools.call as the analyst's session and its agents would. No model call and no kernel."""
 from __future__ import annotations
 
 import pytest
@@ -63,10 +60,3 @@ async def test_write_document_saves_a_generation_and_checks_it(cells):
     r = await call("write_document", doc="report", text="# Shorter\n\n## One account\n\nOne account did it.\n")
     doc = report_types.read_doc(CORPUS, MAIN, "report")
     assert not r.is_error and doc["generation"] == 2 and doc["title"] == "Shorter"
-
-
-async def _written(cid: str, tid: str) -> dict:
-    await call("write_document", doc="report", text=(
-        f"# One account issued every deletion\n\n## One account\n\nAll [[27|card:{cid}]] deletions came from one account. "
-        "The operator meant to hide the change.\n\n## Caveats\n\nThe log covers one week.\n"))
-    return report_types.read_doc(CORPUS, MAIN, "report")

@@ -1,18 +1,12 @@
-"""The card tools in app.tools: add_card (kinds, payloads, the kind check, groups), edit_card (a re-run in place, and a
-takeaway checked against the new output), delete_card (a card a document cites is kept), list_cards, and a chart's rows
-in every result that shows the card, so its numbers reach the model without a table on the canvas.
-
-Every test calls through tools.call as a browser chat running as the analyst with an explicit group. No model writes a
-takeaway: the agent that ran a card writes it with edit_card, and a clean card's result says when it has none.
-"""
+"""The card tools in app.tools: add_card runs its code on the kernel and reports the output, called through tools.call
+as a browser chat running as the analyst."""
 from __future__ import annotations
 
-import json
 import re
 
 import pytest
 
-from app import config, notebook, refs, tools
+from app import config, notebook, tools
 
 CORPUS = "mini"
 
@@ -88,8 +82,3 @@ async def test_add_cell_runs_code_and_reports_the_output(group):
     assert (await call("add_card", group, code="print(1)")).is_error
     assert (await call("add_card", group, kind="md", question="q", code="1")).is_error
     assert (await call("add_card", group, kind="table", question="q")).is_error
-
-
-ALTAIR_BAR = """import altair as alt, pandas as pd
-df = pd.DataFrame({"sender": ["agent-3", "agent-7", "agent-1"], "messages": [412, 201, 97]})
-alt.Chart(df).mark_bar().encode(x="sender", y="messages")"""

@@ -1,22 +1,11 @@
 // @vitest-environment jsdom
-// The chat drawn by its real components under jsdom (src/chat/Rows.tsx, src/chat/Holds.tsx). A session's records
-// render as rows: the analyst's message, the reply's markdown with its citations as chips, a tool-call card with the
-// card it made, and a stopped turn; Claude Code's API error as its card, with Retry, and a view build's wait after one.
-// What holds a session besides its permission requests (an alert, the rules "don't ask again" added) shows above the
-// composer. A chip names a thing in words in the sans and anything code-like in mono; a chip that names a document, a
-// canvas group or a label is drawn as that thing on its surface. Rendering logs no React error.
-import { readFileSync } from 'node:fs'
-import path from 'node:path'
+// The chat drawn by its real components under jsdom (src/chat/Rows.tsx): a session's records render as rows, the
+// analyst's message, the reply's markdown with its citations as chips, a tool-call card with the card it made, and a
+// stopped turn. Rendering logs no React error.
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
-import { act } from 'react'
-import { restartedNow } from '../../src/chat/AgentCard.tsx'
-import { Holds, RESTARTED_LINE } from '../../src/chat/Holds.tsx'
-import { apiRetry, foldRecords, withApiErrors } from '../../src/chat/model.ts'
-import { ThreadChip, ThreadsContext } from '../../src/chat/Notes.tsx'
-import { MAIN_RETRY_NOTE, Rows } from '../../src/chat/Rows.tsx'
-import { cardsText, DocChip, GroupChip, LabelChip, withDocName } from '../../src/chat/SurfaceChips.tsx'
-import { Chip } from '../../src/components/Chip.tsx'
-import { RefChip } from '../../src/components/RefChip.tsx'
+import { foldRecords } from '../../src/chat/model.ts'
+import { ThreadsContext } from '../../src/chat/Notes.tsx'
+import { Rows } from '../../src/chat/Rows.tsx'
 import type { ChatRecord } from '../../src/lib/types.ts'
 import { mount, settle, unmountAll } from './mount.tsx'
 
@@ -56,7 +45,6 @@ async function rows(records: ChatRecord[] | ReturnType<typeof foldRecords>): Pro
 }
 
 describe('chat rows', () => {
-
   test("the analyst's message, markdown with a value chip, a tool-call card with the card it made, and a stopped turn", async () => {
     const el = await rows(LOG)
     const user = el.querySelector('.chat-user .chat-message')

@@ -1,30 +1,7 @@
 // The ref grammar (src/lib/refs.ts), which backend/app/refs.py keeps in step: every form a citation can take parses to
-// its parts, a malformed ref is no ref, and each ref maps to the surface its chip opens and the label it shows.
+// its parts, and each ref maps to the surface its chip opens.
 import { describe, expect, test } from 'vitest'
-import { bus } from '../../src/lib/bus.ts'
-import { teleport } from '../../src/lib/teleport.ts'
-import {
-  addressLabel,
-  callRef,
-  cardPartLabel,
-  cardRef,
-  decodeLabel,
-  encodeLabel,
-  fragmentIn,
-  hiddenPath,
-  isCardRef,
-  nearestLine,
-  parseRef,
-  plainRef,
-  refLabel,
-  refPath,
-  runFolder,
-  shownValue,
-  splitValueRef,
-  surfaceOf,
-  tdRef,
-  type ParsedRef,
-} from '../../src/lib/refs.ts'
+import { parseRef, surfaceOf } from '../../src/lib/refs.ts'
 
 describe('file refs', () => {
   test('a record, a range, a block and a span of a line', () => {

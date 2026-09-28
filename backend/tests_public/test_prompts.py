@@ -1,11 +1,8 @@
-"""prompts.py: load, includes, slots and render, and the repository's own prompt files: every one loads and renders
-with its own slots and no `{{` left, includes stay under prompts/, and cycles, escapes or stray braces raise naming the
-file."""
+"""prompts.py and the repository's own prompt files: every one loads and renders with its own slots and no `{{` left."""
 
 import pytest
 
 from app import prompts
-from app.prompts import PromptError
 
 
 @pytest.fixture()
@@ -22,15 +19,6 @@ def write(pdir, rel, text):
     return p
 
 
-# ----------------------------------------------------------------------------- load and includes
-
-
-# ----------------------------------------------------------------------------- directive grammar
-
-
-# ----------------------------------------------------------------------------- render
-
-
 # ----------------------------------------------------------------------------- the repository's own prompts
 
 
@@ -43,6 +31,3 @@ def test_real_prompts_render_clean(monkeypatch):
         assert "{{" not in out and "}}" not in out, name
         prose = "\n".join(ln for ln in out.splitlines() if not ln.startswith("    "))  # an example may show it as a fault
         assert "load-bearing" not in prose.replace('"load-bearing"', ""), name  # quoted, it is shared.md's example of a flourish
-
-
-# ----------------------------------------------------------------------------- half-typed directives

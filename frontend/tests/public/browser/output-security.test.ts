@@ -1,9 +1,9 @@
-// What model- or corpus-written output can do in a real browser (components/Outputs.tsx, chat/markdown.tsx), the half
-// of tests/public/security.test.tsx that jsdom cannot show: the browser's own sandbox and what it fetches. A scripted
-// html output runs in a frame that cannot reach the page, and what it posts to the API leaves as `Origin: null`, which
-// the backend's Origin check refuses; inlined html or svg runs no script and loads nothing from another host; a
-// markdown image from another host is drawn as its alt text; a Vega chart fetches no URL but a data: one. Every request
-// the page and its frames make is recorded, and any to another host fails the check.
+// What model- or corpus-written output can do in a real browser (components/Outputs.tsx), the half of
+// tests/public/security.test.tsx that jsdom cannot show: the browser's own sandbox, layout and what it fetches. A
+// scripted html output runs in a frame that cannot reach the page, and what it posts to the API leaves as `Origin:
+// null`, which the backend's Origin check refuses; inlined html or svg runs no script, loads nothing from another host
+// and cannot draw over the page. Every request the page and its frames make is recorded, and any to another host fails
+// the check.
 import assert from 'node:assert/strict'
 import { afterAll, beforeAll, test } from 'vitest'
 import type { Browser, Page } from 'playwright'
@@ -22,9 +22,8 @@ beforeAll(async () => {
     `import { createRoot } from 'react-dom/client'`,
     `import { flushSync } from 'react-dom'`,
     `import { Output } from '${src('components/Outputs.tsx')}'`,
-    `import { ChatMarkdown } from '${src('chat/markdown.tsx')}'`,
     `const mount = (node) => { const el = document.createElement('div'); el.style.width = '640px'; el.id = 'm' + Math.random().toString(36).slice(2); document.body.appendChild(el); flushSync(() => createRoot(el).render(node)); return el.id }`,
-    `window.__t = { output: (bundle) => mount(<Output bundle={bundle} />), chat: (text) => mount(<ChatMarkdown text={text} />) }`,
+    `window.__t = { output: (bundle) => mount(<Output bundle={bundle} />) }`,
   ])
   browser = await launch()
   page = await browser.newPage()

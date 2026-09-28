@@ -1,32 +1,27 @@
-"""app.views: viewers written for how a corpus arranges its records. The reader resolves lines and keys, view refs
-resolve and outlive their view, the frame document blocks every host, the media route serves only the media files a view
-claims inside the corpus, the built-in viewers open workbooks and PDFs, and the worked examples a view ticket reads pass
-the view checks over their own samples.
+"""app.views: viewers written for how a corpus arranges its records. The reader resolves lines and keys, the frame
+document blocks every host, and the worked examples a view ticket reads pass the view checks over their own samples, one
+of them with its page loaded headless.
 
 A temp DATA_DIR holds the corpus `boards`: `board.jsonl`, one post per line, each {thread, author, time, body}, and
 `notes.md`. The `ws` fixture saves the view `threads`, whose reader (THREADS_READER) groups the posts by thread: it
 accepts `board.jsonl#L<n>` (the post) and declares `view:threads/<thread>` (a whole thread). Most tests run the reader
-in this process (the `inproc` fixture replaces views._runner with an exec of the same snippet the kernel gets).
-"""
+in this process (the `inproc` fixture replaces views._runner with an exec of the same snippet the kernel gets)."""
 from __future__ import annotations
 
-import asyncio
 import contextlib
-import csv
 import io
 import json
 import os
 import re
 import shutil
 import sys
-from datetime import datetime, timezone
 from pathlib import Path
 
 import httpx
 import pytest
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI
 
-from app import config, refs, verify, views
+from app import config, views
 
 CORPUS = "boards"
 POSTS = [  # (thread, author, time, body); line n of board.jsonl is POSTS[n-1]
@@ -185,10 +180,6 @@ def test_the_frame_document_blocks_every_host_before_any_script(ws):
     assert views._libs(["vega-embed"]) == ["vega", "vega-lite", "vega-embed"]
 
 
-needs_browser = pytest.mark.skipif(shutil.which("node") is None or not (config.REPO_ROOT / "frontend" / "node_modules" / "playwright").is_dir(),
-                                   reason="the headless page load needs node and frontend/node_modules/playwright")
-
-
 @pytest.fixture()
 def app() -> FastAPI:
     a = FastAPI()
@@ -200,91 +191,6 @@ def app() -> FastAPI:
 async def client(app):
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://t", timeout=120) as c:
         yield c
-
-
-CLIP = bytes(range(256)) * 4  # 1,024 bytes, each byte's value its offset mod 256, so a range's bytes name where it is
-PATHS_READER = """
-def build_index(paths):
-    return {"paths": list(paths)}
-
-
-def records(index, query):
-    return index["paths"]
-
-
-def resolve(index, locator):
-    return None
-"""
-
-
-@pytest.fixture()
-def clips(ws, data, tmp_path) -> Path:
-    """The view `clips` over `clips/*` (a video, a text file and a dot-file under it), beside `secret.mp4`, which it does
-    not claim, and `clips/out.mp4`, a symlink to a file outside the corpus."""
-    corpus = data / CORPUS
-    (corpus / "clips").mkdir()
-    (corpus / "clips" / "a.mp4").write_bytes(CLIP)
-    (corpus / "clips" / "notes.txt").write_text("not media\n")
-    (corpus / "clips" / ".hidden.mp4").write_bytes(CLIP)
-    (corpus / "secret.mp4").write_bytes(CLIP)
-    (tmp_path / "outside.mp4").write_bytes(CLIP)
-    (corpus / "clips" / "out.mp4").symlink_to(tmp_path / "outside.mp4")
-    views.write_view(CORPUS, "clips", reader=PATHS_READER, html=THREADS_HTML,
-                     **dict(VIEW, name="Clips", claims=["clips/*"], default=False))
-    return corpus
-
-
-PLAYER_HTML = """<!doctype html><html><head></head><body><audio id="a" controls></audio><div id="d"></div><script>
-const a = document.getElementById('a')
-a.addEventListener('loadedmetadata', () => { document.getElementById('d').textContent = 'duration ' + a.duration; thimble.fetch({ duration: a.duration }) })
-a.addEventListener('error', () => { throw new Error('the audio did not load') })
-a.src = thimble.mediaUrl(SRC)
-thimble.onOpen(() => {})
-</script></body></html>"""
-
-
-def _workbook(path: Path) -> None:
-    import openpyxl
-
-    wb = openpyxl.Workbook()
-    wb.active.title = "Q2"
-    wb.active.append(["dept", "travel"])
-    q3 = wb.create_sheet("Q3")
-    q3.append(["dept", "item", "", "amount"])
-    for i in range(2, 20):
-        q3.append([f"Dept {i}", "Travel", "", 1000 * i + (200 if i == 17 else 0)])
-    wb.save(path)
-
-
-def _pdf(path: Path, pages: list[list[str]]) -> None:
-    """A PDF with one Helvetica text line per string, written by hand (no writer library is installed)."""
-    objs: list[bytes] = [b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>"]
-    pages_id = 1 + 2 * len(pages) + 1
-    kids = []
-    for lines in pages:
-        body = b"BT /F1 12 Tf 72 720 Td 16 TL " + b" ".join(b"(" + ln.encode() + b") '" for ln in lines) + b" ET"
-        objs.append(b"<< /Length %d >>\nstream\n" % len(body) + body + b"\nendstream")
-        objs.append(b"<< /Type /Page /Parent %d 0 R /MediaBox [0 0 612 792] /Contents %d 0 R /Resources << /Font << /F1 1 0 R >> >> >>"
-                    % (pages_id, len(objs)))
-        kids.append(len(objs))
-    objs.append(b"<< /Type /Pages /Kids [" + b" ".join(b"%d 0 R" % k for k in kids) + b"] /Count %d >>" % len(kids))
-    objs.append(b"<< /Type /Catalog /Pages %d 0 R >>" % pages_id)
-    out, offs = bytearray(b"%PDF-1.4\n"), []
-    for i, o in enumerate(objs, 1):
-        offs.append(len(out))
-        out += b"%d 0 obj\n" % i + o + b"\nendobj\n"
-    xref = len(out)
-    out += b"xref\n0 %d\n0000000000 65535 f \n" % (len(objs) + 1) + b"".join(b"%010d 00000 n \n" % o for o in offs)
-    out += b"trailer\n<< /Size %d /Root %d 0 R >>\nstartxref\n%d\n%%%%EOF\n" % (len(objs) + 1, len(objs), xref)
-    path.write_bytes(bytes(out))
-
-
-@pytest.fixture()
-async def docs(data, workspaces_tmp) -> Path:
-    corpus = config.corpus_dir(CORPUS)
-    _workbook(corpus / "budget.xlsx")
-    _pdf(corpus / "policy.pdf", [["Travel policy"], ["Section 2. Claims", "Receipts are filed within a 30-day limit."]])
-    return corpus
 
 
 # ------------------------------------------------------------------------------------------------- worked examples
@@ -340,54 +246,6 @@ async def test_every_worked_example_answers_the_checks_over_its_sample(name, sam
     assert any(re.search(r"#L\d+$", c) for c in checked), "sampled lines were checked beside the keys"
 
 
-def _fields(path: Path) -> set[str]:
-    """The field names of a sample file's records: a CSV file's columns, else the keys of its JSON objects, in one
-    document or one per line (a line that does not parse is left out)."""
-    text = path.read_text("utf-8")
-    if path.suffix == ".csv":
-        return set(next(csv.reader(text.splitlines()[:1]), []))
-    try:
-        docs = [json.loads(text)]
-    except ValueError:
-        docs = []
-        for ln in text.splitlines():
-            with contextlib.suppress(ValueError):
-                docs.append(json.loads(ln))
-    return {k for doc in docs for r in (doc if isinstance(doc, list) else [doc]) if isinstance(r, dict) for k in r}
-
-
-def _sample_line(path: Path, n: int) -> str:
-    return path.read_text("utf-8").splitlines()[n - 1]
-
-
-def _sample_line_of(path: Path, needle: str) -> int:
-    """The number of the first line of the file that holds `needle`."""
-    return next(n for n, ln in enumerate(path.read_text("utf-8").splitlines(), 1) if needle in ln)
-
-
-# the repository sample's runs: each one's team and the approvals a merge needs, and its number of pull requests
-REPO_RUNS = {"r1": (3, 1, 8), "r2": (3, 2, 7), "r3": (5, 1, 11), "r4": (5, 2, 9)}
-
-
-def _transcripts(d: Path) -> dict[str, list[dict]]:
-    """The sample's transcripts by session id (a lead's file name, a subagent's agent id), each line that parses once."""
-    out = {}
-    for p in sorted(d.glob("runs/**/*.jsonl")):
-        seen, lines = set(), []
-        for ln in p.read_text("utf-8").splitlines():
-            with contextlib.suppress(ValueError):
-                r = json.loads(ln)
-                if r["uuid"] not in seen:
-                    seen.add(r["uuid"])
-                    lines.append(r)
-        out[p.stem.removeprefix("agent-")] = lines
-    return out
-
-
-def _uses(lines: list[dict]) -> list[dict]:
-    return [b for r in lines if isinstance(r["message"]["content"], list) for b in r["message"]["content"] if b["type"] == "tool_use"]
-
-
 @pytest.mark.parametrize("name", ["repository"])
 async def test_every_worked_example_s_page_loads_headless_at_its_first_place(name, samples, inproc, bound, tmp_path):
     """The whole check a view ticket's session runs, the headless page included, where this machine has Node and the
@@ -399,8 +257,3 @@ async def test_every_worked_example_s_page_loads_headless_at_its_first_place(nam
     assert rep["ok"], views.gate_lines(rep)
     assert rep["page"]["fetches"] >= 1 and Path(rep["page"]["png"]).is_file()
     assert not views.unmarked(rep["page"]), "the records a worked example shows carry their file refs, for the labels"
-
-
-def views_time(ts: str) -> float:
-    t = datetime.fromisoformat(ts.replace("Z", "+00:00"))
-    return (t if t.tzinfo else t.replace(tzinfo=timezone.utc)).timestamp()

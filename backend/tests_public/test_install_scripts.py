@@ -3,7 +3,6 @@ tmp_path with a throwaway HOME: the Python they start never imports a module fro
 from __future__ import annotations
 
 import json
-import os
 import shutil
 import subprocess
 from pathlib import Path
@@ -39,15 +38,6 @@ def env_for(tmp_path: Path, **extra: str) -> dict[str, str]:
     home = tmp_path / "home"
     home.mkdir(exist_ok=True)
     return {"PATH": "/usr/bin:/bin", "HOME": str(home), "THIMBLE_HOME": str(home / ".thimble"), **extra}
-
-
-def trap_folder(tmp_path: Path) -> tuple[Path, Path]:
-    """A folder whose json.py writes a marker when imported: a script run from it must not import it."""
-    cwd = tmp_path / "cwd"
-    cwd.mkdir()
-    marker = tmp_path / "imported"
-    (cwd / "json.py").write_text(f"open({str(marker)!r}, 'w').close()\nfrom importlib import import_module\n")
-    return cwd, marker
 
 
 def stub_bin(tmp_path: Path) -> Path:

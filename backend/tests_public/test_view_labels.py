@@ -1,7 +1,5 @@
-"""Labels in every view: the labels context a view's reader gets (views.labels_context), thimble.marked, thimble.kept
-and thimble.view_labels over a label whose records a cover holds, the test label the checks use, the marks of a view's
-units (views.marks_for and the marks route), and a reader that filters its records by the Files label filter, which
-leaves alone the files its label never ran over.
+"""Labels in every view: a reader marks and keeps its records by the labels and the Files label filter, and a label that
+ran over two files keeps the units its value is on in either.
 
 The corpus is invented: board.jsonl has twelve posts in three threads, and the posts that ask for help say "help". A
 regex label `asks` marks them ("asks" on a match, "other" from the covers over the rest)."""
@@ -27,7 +25,6 @@ POSTS = [  # (thread, body); line n is POSTS[n-1]
     ("t3", "who is in"), ("t2", "help me find the notes"), ("t3", "me"), ("t1", "fixed it"),
     ("t2", "thanks"), ("t3", "see you"),
 ]
-ASKS = [1, 4, 8]  # the lines that say "help"
 
 READER = '''
 import json

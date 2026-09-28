@@ -9,11 +9,10 @@ import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 import { Output } from '../../src/components/Outputs.tsx'
 import { ChatMarkdown } from '../../src/chat/markdown.tsx'
-import { isLocalUrl, purifyHtml, purifySvg, styleReachesOut } from '../../src/lib/sanitize.ts'
-import { inlineSvg, ownRootStyle, rootDecls } from '../../src/lib/svg.ts'
-import { dataOnly, specObject, withoutEmbedOptions } from '../../src/lib/vegaLoader.ts'
+import { purifyHtml } from '../../src/lib/sanitize.ts'
+import { dataOnly, withoutEmbedOptions } from '../../src/lib/vegaLoader.ts'
 import { parseInline } from '../../src/report/inlineParse.ts'
-import { mount, settle, unmountAll } from './mount.tsx'
+import { mount, unmountAll } from './mount.tsx'
 
 const SRC = path.resolve(__dirname, '../../src')
 const fetched: string[] = []
@@ -35,7 +34,6 @@ afterEach(() => {
 const html = (el: Element) => el.innerHTML
 
 describe('html output', () => {
-
   test('inlined html keeps its table and loses script, event handlers, style, forms and remote URLs', async () => {
     const markup = [
       '<table><thead><tr><th></th><th>n</th></tr></thead><tbody><tr><th>a</th><td>1</td></tr></tbody></table>',
@@ -146,7 +144,6 @@ describe('markdown', () => {
 })
 
 describe('the pure checks', () => {
-
   test("Vega's loader fetches no URL but a data: one, and a spec cannot hand it embed options of its own", async () => {
     const base = { options: {}, sanitize: async (uri: string) => ({ href: uri }) }
     const safe = dataOnly(base)

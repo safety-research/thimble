@@ -1,8 +1,7 @@
-"""The corpus routes over the synthetic `mini` corpus: listing, paging, the line index, databases through /forge/*, and
-refs. Corpus access is read-only and confined to the corpus folder."""
+"""The corpus routes over the synthetic `mini` corpus: registering a folder, refs, databases and the Host check. Corpus
+access is read-only and confined to the corpus folder."""
 import shutil
 import sqlite3
-import time
 from contextlib import closing
 from pathlib import Path
 
@@ -14,18 +13,10 @@ from app.main import app
 client = TestClient(app)
 MINI = "/api/corpora/mini"
 AGENT = "agents/agent-01.jsonl"
-ALL_TABLES = {"agents", "assignments", "comments", "events", "issue_comments", "issues", "messages", "pr_closes",
-              "prs", "reports", "reviews", "threads"}
 
 
 def lines(page):
     return [r["line"] for r in page["records"]]
-
-
-# --------------------------------------------------------------------------- corpora, sources
-
-
-# --------------------------------------------------------------------------- paging
 
 
 # --------------------------------------------------------------------------- ref endpoint
@@ -51,30 +42,6 @@ def test_rejects_untrusted_host_header():
     assert client.get("/api/corpora", headers={"Host": "evil.example:8000"}).status_code == 400
     assert client.get("/api/corpora", headers={"Host": "127.0.0.1:8000"}).status_code == 200
     assert client.get("/api/corpora", headers={"Host": "localhost:8000"}).status_code == 200
-
-
-# --------------------------------------------------------------------------- nested corpora
-
-NESTED = "/api/corpora/nested"
-
-
-# --------------------------------------------------------------------------- unknown extensions / non-text bytes
-
-
-@pytest.fixture()
-def odd_files_data(tmp_path, monkeypatch, mini_dir):
-    """A DATA_DIR whose corpus `odd` (a copy of mini) also holds files of no known kind: `notes.dat` with Latin-1 and
-    control bytes, a `.csv`, and `other.db`, a database by name whose bytes (a truncated header) sqlite cannot read.
-    Returns the data dir."""
-    from app import config
-
-    data = tmp_path / "data"
-    shutil.copytree(mini_dir, data / "odd")
-    (data / "odd" / "notes.dat").write_bytes(b"caf\xe9 au lait\n\xff\xfe\x01 bytes\r\n\x89PNG\n")
-    (data / "odd" / "rows.csv").write_text("a,b\n1,2\n", encoding="utf-8")
-    (data / "odd" / "other.db").write_bytes(b"SQLite format 3\x00" + b"\x00" * 16)
-    monkeypatch.setattr(config, "DATA_DIR", data.resolve())
-    return data
 
 
 # --------------------------------------------------------------------------- any sqlite file is a database
@@ -108,9 +75,6 @@ def databases_data(tmp_path, monkeypatch, mini_dir):
     (data / "dbs" / "bad.db").write_bytes(b"not a database\n" * 8)
     monkeypatch.setattr(config, "DATA_DIR", data.resolve())
     return data
-
-
-DBS = "/api/corpora/dbs"
 
 
 def test_open_database_is_read_only_and_checks_the_header(databases_data):
@@ -155,15 +119,3 @@ def test_register_route_lists_and_serves_a_directory_without_a_manifest(data_tmp
     assert client.post("/api/corpora/register", json={"path": str(run / "agents")}).json()["name"] == "incident-run"
     assert client.post("/api/corpora/register", json={"path": str(data_tmp / "mini" / "agents")}).json()["name"] == "mini"
     assert sorted(p.name for p in data_tmp.glob("*.corpus.json")) == ["incident-run.corpus.json"]
-
-
-# --------------------------------------------------------------------------- the sparse line index and the source memo
-
-
-def _every_line_start(p: Path) -> list[int]:
-    offsets, pos = [], 0
-    with open(p, "rb") as f:
-        for line in f:
-            offsets.append(pos)
-            pos += len(line)
-    return offsets

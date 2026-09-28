@@ -1,21 +1,14 @@
 // The report editor's model (src/report/model.ts). A stored document becomes editor blocks and back: a block the
-// analyst did not touch saves the writer's own text unchanged, a citation is one atom that is never split or lost, a
-// prompt block is never saved, and the blocks the analyst locked are named so the editor shows them locked.
+// analyst did not touch saves the writer's own text unchanged, and a citation is one atom that is never split.
 import { describe, expect, test } from 'vitest'
 import {
-  anchorAbove,
   blocksFromDoc,
   CITE_CHAR,
   contentFromText,
   editorBlocksFromWire,
-  lockedBlocks,
   origTexts,
   plainOf,
-  PROMPT_TYPE,
-  readableOf,
-  readableText,
   sameWire,
-  textFromContent,
   TITLE_ID,
   wireFromEditor,
 } from '../../src/report/model.ts'
@@ -47,7 +40,6 @@ const DOC = doc({
 })
 
 describe('inline text', () => {
-
   test('a citation is never split: a value with a bar, spaces or a slash stays one atom with its ref', () => {
     const content = contentFromText('Median [[4.2 days|card:ab12#median wait/all PRs]] per review.') as any[]
     const cites = content.filter((p) => p.type === 'cite')

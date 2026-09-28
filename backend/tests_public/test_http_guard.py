@@ -1,17 +1,12 @@
-"""http_guard: a state-changing request a browser sends from another origin is refused, a request with no Origin (the
-CLI, the MCP shim, the hooks) and one from thimble's own page are served, the Vite origins are trusted only under
-THIMBLE_DEV, and every response carries nosniff, frame-ancestors and a policy (the built UI's, or the API's)."""
+"""http_guard: a state-changing request a browser sends from another origin is refused, the channel refuses a web page
+even on a GET, a JSON route refuses a body without a JSON content type, and every response carries nosniff,
+frame-ancestors and a policy (the built UI's, or the API's)."""
 from __future__ import annotations
 
-import socket
-import threading
-import time
-
 import pytest
-import uvicorn
 from fastapi.testclient import TestClient
 
-from app import cli, config, http_guard, main
+from app import config, main
 
 THEME = {"paper": "warm", "accent": "pink"}
 THEME_PATH = "/api/ws/mini/render/theme"

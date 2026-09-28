@@ -1,11 +1,6 @@
-"""`thimble list` and `thimble purge` (app/runs.py): the workspaces by id from the disk, with the open sessions from the
-server when it is up; what answers on the port (runs.server); what purge prints, its refusals, the server's
-DELETE when it is up and the disk when not, and the guards that keep it inside the workspaces folder and the registry;
-the server's side (the sessions route, DELETE /api/ws/<c>?idle=true)."""
+"""`thimble purge` (app/runs.py) never follows a link out of the workspaces folder."""
 from __future__ import annotations
 
-import asyncio
-import io
 import json
 import os
 import time
@@ -13,12 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from app import channel, cli, config, ledger, runs
-
-
-class Tty(io.StringIO):
-    def isatty(self) -> bool:
-        return True
+from app import cli, runs
 
 
 @pytest.fixture()
@@ -38,29 +28,6 @@ def server_down(monkeypatch) -> None:
     monkeypatch.setattr(cli, "healthy", lambda url=None, timeout=1.0: False)
     monkeypatch.setattr(cli, "listening", lambda p: False)  # the default port may be a live server's
     monkeypatch.setattr(cli, "_request", lambda *a, **k: (_ for _ in ()).throw(AssertionError("no request")))
-
-
-def server_up(monkeypatch, sessions: dict[str, list[str]] | None, delete_status: int = 200,
-              folders: tuple[Path, Path] | None = None) -> list[tuple[str, str]]:
-    """A healthy server of this install answering the sessions read (with `folders`, the registry and workspaces folder
-    it works on, by default the ones purge lists; None sessions: 404, a server older than the route) and the workspace
-    DELETE; the requests made."""
-    calls: list[tuple[str, str]] = []
-    data, ws = runs.dirs() if folders is None else folders
-
-    def request(method, url, body=None, timeout=5.0):
-        calls.append((method, url.split("/api", 1)[1]))
-        if method == "GET" and url.endswith(runs.SESSIONS_PATH):
-            if sessions is None:
-                return 404, {"detail": "Not Found"}
-            return 200, {"workspaces": sessions, "data_dir": str(data), "workspaces_dir": str(ws)}
-        if method == "DELETE":
-            return delete_status, {"ok": True} if delete_status == 200 else {"detail": "no"}
-        raise AssertionError(f"unexpected {method} {url}")
-
-    monkeypatch.setattr(cli, "healthy", lambda url=None, timeout=1.0: True)
-    monkeypatch.setattr(cli, "_request", request)
-    return calls
 
 
 def register(data: Path, name: str, folder: Path, *, make: bool = True) -> Path:

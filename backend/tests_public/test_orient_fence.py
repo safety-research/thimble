@@ -1,20 +1,15 @@
-"""The fence and permissions of the sessions thimble starts: the process runs in its work folder, where alone it
-writes; Edit, Write and sandboxed Bash refuse the whole corpus folder; nothing limits what it reads; Claude Code's Bash
-sandbox runs where it can (no network) and its absence never blocks the session; the fence allows nothing of thimble's
-own, so Claude Code's own permission mode decides; and Start's mode switcher becomes the session's mode, defaulting to
-the one the analyst's own stands for. install.sh never runs sudo."""
+"""The fence and permissions of the sessions thimble starts: Edit, Write and sandboxed Bash refuse the whole corpus
+folder, nothing limits what it reads, and Claude Code's Bash sandbox runs where it can; the sandbox hook allows
+sandboxed Bash and leaves the rest to the mode; and the corpus folder's settings never choose the mode."""
 from __future__ import annotations
 
 import json
-import os
-import shutil
-import subprocess
 import sys
 from pathlib import Path
 
 import pytest
 
-from app import agent_session, cc_settings, channel, config, ledger, orient_session
+from app import agent_session, cc_settings, config, ledger, orient_session
 
 CORPUS = "mini"
 

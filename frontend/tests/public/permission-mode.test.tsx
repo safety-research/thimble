@@ -1,11 +1,9 @@
 // @vitest-environment jsdom
-// The orientation's permission mode in the page: Start's options are collapsed behind Show options, and its switcher of Claude Code's three modes (src/chat/StartGate.tsx) opens on the analyst's own mode, always sends the
-// mode it shows, and shows Claude Code's warning while Bypass is chosen; the running orientation's card (src/chat/ModeSwitch.tsx) shows the mode it runs in, sends a switch to the
-// server, keeps the first sentence of the warning while it runs in Bypass, and says when a switch into or out of Auto
-// waits for a pause. Every request is recorded and answered by a stand-in fetch.
+// The orientation's permission mode in the Start panel (src/chat/StartGate.tsx): its switcher of Claude Code's three
+// modes opens on the analyst's own mode, always sends the mode it shows, and shows Claude Code's warning while Bypass
+// is chosen. Every request is recorded and answered by a stand-in fetch.
 import { act } from 'react'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
-import { BYPASS_LINE, ModeSwitch, shownMode } from '../../src/chat/ModeSwitch.tsx'
 import { BYPASS_WARNING, permissionChoice, startBody, StartGate, ALL_ON } from '../../src/chat/StartGate.tsx'
 import { mount, settle, unmountAll } from './mount.tsx'
 
@@ -40,7 +38,6 @@ const mountOpen = async (node: Parameters<typeof mount>[0]) => {
 }
 
 describe('the Start panel', () => {
-
   test("the switcher opens on the analyst's own mode: Auto for auto, Bypass for bypassPermissions, else Manual", () => {
     expect(permissionChoice('auto')).toBe('auto')
     expect(permissionChoice('bypassPermissions')).toBe('bypass')

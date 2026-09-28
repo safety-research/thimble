@@ -1,18 +1,13 @@
-"""session.py: the mirror of the analyst's Claude Code session. Attach and detach by the channel's subscription, which
-is the session's liveness; the transcript tail, which reads only complete new lines from where it attached; a thread's
-fork, whose tool calls go to its thread; a subagent, which is an agent chat ending with the report it handed back; the
-end token, which no chat shows; push_event; and the startup sweep. Every transcript here is written by the test in
-Claude Code's record shapes."""
+"""session.py: the mirror of the analyst's Claude Code session. The transcript tail translates a turn and skips every
+other record. Every transcript here is written by the test in Claude Code's record shapes."""
 from __future__ import annotations
 
-import asyncio
 import json
-import signal
 from pathlib import Path
 
 import pytest
 
-from app import agents, channel, config, session, threads
+from app import agents, channel, config, session
 
 CORPUS = "mini"
 SID = "e7b0a1f2-0000-4000-8000-000000000001"
@@ -88,15 +83,6 @@ def _result(tool_use_id: str, content) -> dict:
         {"type": "tool_result", "tool_use_id": tool_use_id, "content": content}]}}
 
 
-def _subagent_file(tmp_path: Path, agent: str, meta: dict, records: list[dict]) -> Path:
-    """A subagent's transcript where Claude Code writes it, <transcript dir>/<session id>/subagents/, with its meta."""
-    path = tmp_path / SID / "subagents" / f"agent-{agent}.jsonl"
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.with_name(f"agent-{agent}.meta.json").write_text(json.dumps(meta))
-    path.write_text("".join(json.dumps({**r, "isSidechain": True, "agentId": agent}) + "\n" for r in records))
-    return path
-
-
 # ----------------------------------------------------------------------------- the tail
 
 
@@ -135,28 +121,7 @@ def test_the_tail_translates_a_turn_and_skips_every_other_record(cwd, tmp_path):
 # ----------------------------------------------------------------------------- subagents and threads' forks
 
 
-def _agent_chats() -> list[dict]:
-    return [m for m in agents.list_chats(CORPUS) if m.get("kind") == "agent"]
-
-
-def _channel_event(kind: str, event: str, body: str = "", **attrs: str) -> dict:
-    extra = "".join(f' {k}="{v}"' for k, v in attrs.items())
-    return {"type": "user", "isMeta": True, "origin": {"kind": "channel", "server": "plugin:thimble:thimble"},
-            "message": {"content": f'<channel source="plugin:thimble:thimble" kind="{kind}" event="{event}"{extra}>\n{body}\n</channel>'}}
-
-
 def _append(p: Path, lv: session.Live, recs: list[dict]) -> None:
     with p.open("a") as f:
         f.write("".join(json.dumps(r) + "\n" for r in recs))
     session.tail_once(lv)
-
-
-def _note(agent: str, use: str) -> dict:
-    """The task notification Claude Code writes in main when a background agent stops."""
-    return {"type": "user", "origin": {"kind": "task-notification"}, "message": {"content": (
-        f"<task-notification>\n<task-id>{agent}</task-id>\n<tool-use-id>{use}</tool-use-id>\n<status>completed</status>\n"
-        "</task-notification>")}}
-
-
-def _launched(agent: str) -> str:
-    return f"Async agent launched successfully.\nagentId: {agent} (internal ID)"

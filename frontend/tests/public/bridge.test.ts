@@ -1,11 +1,8 @@
-// The frame half of a view's bridge (backend/app/viewer_bridge.js), which a custom view's page loads first and which
-// is the only way the view, sandboxed with no network, talks to thimble. Run in a jsdom window of its own: the bridge
-// says it is ready and reports each data-anchor once, including ones the view adds later; window.thimble.fetch posts a
-// query and resolves with the page's answer to that id; an `open` reaches every opener, and one registered late gets
-// the last; a quoted passage an open brings is found in the page, or said missing; navigate and cite post their refs; and a message from anywhere but the parent page is ignored. A click
-// with the pointer's key on an anchored element cites it: ⌘ on a Mac, Ctrl (or the Super key) elsewhere; on a part of
-// the view no anchor names (its legend, the bare page) it cites the view itself. The page's label controls post the
-// label's id to thimble, and onLabels hears every label over files and the palette with the labels that are on.
+// The frame half of a view's bridge (backend/app/viewer_bridge.js), which a custom view's page loads first and which is
+// the only way the view, sandboxed with no network, talks to thimble. Run in a jsdom window of its own: the bridge says
+// it is ready and reports each data-anchor once; window.thimble.fetch posts a query and resolves with the page's answer
+// to that id; a message from anywhere but the parent page is ignored; and with a label filter on, what the filter drops
+// is hidden.
 import { readFileSync } from 'node:fs'
 import path from 'node:path'
 import { JSDOM } from 'jsdom'
@@ -29,16 +26,9 @@ const win = () => dom.window as unknown as Window & typeof globalThis & { thimbl
 const fromPage = (data: object, source: unknown = win().parent) => win().dispatchEvent(new dom.window.MessageEvent('message', { data, source: source as any }))
 const of = (type: string) => sent.filter((m) => m.type === `thimble:${type}`)
 
-/** The view loaded in a fresh window whose browser names `platform` (jsdom names none, which is not a Mac). */
-async function load(platform?: string, html = VIEW) {
-  dom = new JSDOM(html, {
-    runScripts: 'dangerously',
-    pretendToBeVisual: true,
-    url: 'http://view.invalid/',
-    beforeParse: (w) => {
-      if (platform) Object.defineProperty(w.navigator, 'platform', { value: platform, configurable: true })
-    },
-  })
+/** The view loaded in a fresh window. */
+async function load() {
+  dom = new JSDOM(VIEW, { runScripts: 'dangerously', pretendToBeVisual: true, url: 'http://view.invalid/' })
   sent = []
   // a top-level window is its own parent, so the frame's parent.postMessage lands here, before the bridge is ready
   dom.window.postMessage = ((msg: Msg) => void sent.push(msg)) as typeof dom.window.postMessage

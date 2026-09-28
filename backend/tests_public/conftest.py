@@ -84,14 +84,6 @@ def plugin_headers():
     return lambda: hook_auth.headers(PLUGIN_TOKEN, os.urandom(8).hex())
 
 
-@pytest.fixture()
-def consented():
-    """The analyst agreed to terminal-first's changes to Claude Code's files (claude_changes.consent)."""
-    from app import claude_changes
-
-    claude_changes.consent()
-
-
 @pytest.fixture(autouse=True)
 def _dev_dir_off_the_checkout(tmp_path, monkeypatch):
     """The dev panel's tickets and feedback live under the test's tmp dir, never the checkout's dev/. A test's own
@@ -139,8 +131,7 @@ def _no_held_events():
 
 @pytest.fixture(autouse=True)
 def _no_keychain(monkeypatch):
-    """No test asks the machine's macOS Keychain for a Claude Code login; test_keychain_login.py tests the probe with
-    stubbed commands through config.keychain_login as the module defines it."""
+    """No test asks the machine's macOS Keychain for a Claude Code login."""
     from app import config
 
     monkeypatch.setattr(config, "keychain_login", lambda: "")
@@ -188,26 +179,6 @@ def _claude_stand_in(tmp_path_factory, monkeypatch):
         exe.write_text(f'#!/bin/sh\n[ "$1" = --version ] && echo "{cli.TESTED_CLAUDE_CODE} (Claude Code)"\nexit 0\n')
         exe.chmod(0o755)
     monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ.get('PATH', '')}")
-
-
-@pytest.fixture()
-def nested_data(tmp_path, monkeypatch):
-    """A DATA_DIR holding the flat `mini` corpus plus `nested`, whose runs `run-a/` and `run-b/` are copies of mini.
-    Returns the data dir."""
-    import json
-
-    from app import config
-
-    data = tmp_path / "data"
-    shutil.copytree(MINI, data / "mini")
-    nested = data / "nested"
-    for run in ("run-a", "run-b"):
-        shutil.copytree(MINI, nested / run)
-    (nested / "manifest.json").write_text(json.dumps({"name": "nested", "runs": ["run-a", "run-b"]}))
-    (nested / "README.md").write_text("# nested\n\nTwo runs.\n")
-    (nested / "run-a" / "forge.db-wal").write_bytes(b"")  # a sqlite side file, which is never listed
-    monkeypatch.setattr(config, "DATA_DIR", data.resolve())
-    return data
 
 
 @pytest.fixture()

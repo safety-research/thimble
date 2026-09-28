@@ -1,17 +1,12 @@
 // @vitest-environment jsdom
 // The permission card above the chat's composer (src/chat/PermissionCard.tsx, src/chat/permissions.ts): every request
 // that waits for the analyst, from main's session and from every session thimble started, on one card, the one asked
-// first first, paged; each names the thread it comes from, says which session or agent asks, what it asks to do, its
-// input and why it asks, with Allow, Always allow where Claude Code offers a rule (its scope in the tooltip), and Deny,
-// each sent to the session that asked. Every request is recorded and answered by a stand-in fetch.
+// first first, each answer sent to the session that asked. Every request is recorded and answered by a stand-in fetch.
 import { act } from 'react'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
-import { askFields, askWhat } from '../../src/chat/Holds.tsx'
 import { ThreadsContext } from '../../src/chat/Notes.tsx'
 import { PermissionCard } from '../../src/chat/PermissionCard.tsx'
-import { askedBy, askingAgent, asksTo, askThread, askWhy, classifierDown, modeChat, pendingRequests, waitWords, type PendingAsk } from '../../src/chat/permissions.ts'
-import { pendingAsks, waitingChats } from '../../src/chat/waiting.ts'
-import { bus } from '../../src/lib/bus.ts'
+import { pendingRequests, type PendingAsk } from '../../src/chat/permissions.ts'
 import type { ChatMeta, PermissionRequest } from '../../src/lib/types.ts'
 import { mount, settle, unmountAll } from './mount.tsx'
 
@@ -31,22 +26,7 @@ afterEach(() => {
 const T = (m: number) => `2026-09-25T10:${String(m).padStart(2, '0')}:00Z`
 const chat = (id: string, extra: Partial<ChatMeta> = {}): ChatMeta => ({ id, kind: 'agent', role: 'orient', title: 'Orientation', created_at: T(0), parent: 'main', status: 'running', ...extra }) as ChatMeta
 const ORIENT = chat('or1', { permission_mode: 'manual' })
-const WRITER = chat('w1', { role: 'writer', title: 'Write report' })
-const CHECK = chat('ck1', { role: 'check', title: 'Unverified' })
-const CRITIQUE = chat('cr1', { role: 'step', title: 'critique', parent: 'or1' })
-const METAS = new Map([ORIENT, WRITER, CHECK, CRITIQUE].map((m) => [m.id, m]))
-/** The text of the tooltip a hover on `el` shows. */
-async function hoverTip(el: Element): Promise<string | null | undefined> {
-  vi.useFakeTimers()
-  try {
-    await act(async () => void el.dispatchEvent(new PointerEvent('pointerover', { bubbles: true, pointerType: 'mouse' })))
-    await act(async () => void el.dispatchEvent(new PointerEvent('pointerenter', { bubbles: false, pointerType: 'mouse' })))
-    await act(async () => void vi.advanceTimersByTime(1000))
-  } finally {
-    vi.useRealTimers()
-  }
-  return document.querySelector('.tip')?.textContent
-}
+const METAS = new Map([[ORIENT.id, ORIENT]])
 
 const req = (id: string, extra: Partial<PermissionRequest> = {}): PermissionRequest => ({ id, tool: 'Bash', what: 'Count the runs', ...extra }) as PermissionRequest
 

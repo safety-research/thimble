@@ -1,21 +1,15 @@
-"""The terminal's commands for what only the chat bar did: /thimble:ask sends a message to a thread as its composer
-would (message_thread): a side thread's follow-up with its anchor, Ask again with no message, a follow-up for the
-orientation, a change to a view for its build thread, and main's own for any other chat; /thimble:orient passes Start's
-switches, the critique and the permission mode among them, to start_orientation. The skills run no shell command, since
-Claude Code puts typed arguments into one unescaped."""
+"""start_orientation, as /thimble:orient calls it: the permission mode is the analyst's, and a model's call may lower it
+but never raise it."""
 from __future__ import annotations
 
 import asyncio
 import json
-from pathlib import Path
 
 import pytest
-import yaml
 
-from app import agents, cc_settings, channel, config, ledger, orient_session, orientation, session, threads, tools, views
+from app import agents, cc_settings, channel, orient_session, orientation, session, tools
 
 CORPUS = "mini"
-SKILLS = config.REPO_ROOT / "plugin" / "skills"
 
 
 @pytest.fixture(autouse=True)
@@ -43,12 +37,6 @@ def _thread(tid: str, name: str) -> dict:
 
 def _log(chat: str) -> list[dict]:
     return agents.read_events(agents.paths(CORPUS, chat)[1])
-
-
-def _split(path: Path) -> tuple[dict, str]:
-    text = path.read_text("utf-8")
-    head, _, body = text[4:].partition("\n---\n")
-    return yaml.safe_load(head), body
 
 
 def _analyst_mode(monkeypatch, tmp_path, mode: str) -> None:
