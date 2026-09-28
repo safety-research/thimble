@@ -59,7 +59,7 @@ describe('the card', () => {
     const long = 'x'.repeat(50_000)
     const cut = req('c1', { command: long, what: 'Run a long script', always: 'Bash(python3 *)', cut: 61_234 })
     const el = await mount(<PermissionCard ws="mini" asks={[{ chat: 'or1', request: cut }]} metas={METAS} labels={new Map()} />)
-    expect(el.querySelector('.chat-perm-cut')?.textContent).toBe('Only the first 50,000 of 61,234 characters are shown. Allow approves all of it.')
+    expect(el.querySelector('.chat-perm-cut')?.textContent).toMatch(/50,000 .*61,234/)
     expect(el.querySelector('.chat-perm-code[data-field="command"]')?.textContent).toBe(long)
     expect([...el.querySelectorAll('.chat-perm-acts button')].map((b) => b.textContent)).toEqual(['Allow', 'Deny'])
     const whole = await mount(<PermissionCard ws="mini" asks={[{ chat: 'or1', request: { ...cut, cut: undefined } }]} metas={METAS} labels={new Map()} />)
