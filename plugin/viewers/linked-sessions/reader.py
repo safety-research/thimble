@@ -1,49 +1,53 @@
 # Linked sessions: the sessions of agent teams, each run's sessions on one clock, with every subagent under the session
 # that spawned it.
 #
-# The data (sample/): three files, one JSON record per line. A record is known by its fields, not by its file's name.
-# sessions.jsonl, one line per session:
-#   id         the session's id, unique across runs
-#   run        the run it belongs to; a run's sessions share one clock, which starts with its first session
-#   team       how the run's team was set up, the same on each of its sessions
-#   agent      the agent's name, such as lead or client-port
-#   parent     the session that spawned it with a Task call, or null for the run's lead
-#   started    when it started, ISO 8601
-#   ended      when it ended, ISO 8601
-# calls.jsonl, one line per tool call:
-#   session    the session that made the call
-#   at         when the call started, ISO 8601
-#   seconds    how long it ran; a Task call runs until its subagent returns
-#   tool       the tool, such as Read, Edit, Bash, Grep, WebSearch or Task
-#   input      what the call was given: a path, a command, a pattern, a query, or a Task's description
-#   outcome    ok, error, or denied when the permission rules refused it
-#   result     what came back, in a line
-#   exit       a failed command's exit code
-#   files      the paths the call read, edited or ran against
-#   matches    the files a Grep matched
-#   old        the text an Edit replaced
-#   new        the text the Edit put in its place
-#   output     a command's whole output
-#   spawned    the session a Task call started
-# messages.jsonl, one line per message:
-#   session    the session it belongs to
-#   at         when, ISO 8601
-#   kind       prompt (the task the session was given), text (what the agent said between calls) or result (what it
-#              handed back when it ended)
-#   text       the message
+# The data (sample/): transcripts, runs/*.jsonl, and each run's index, runs/*/sessions-index.json, one folder per run as
+# the harness that ran the teams wrote it.
+#   runs/<run>/<session id>.jsonl                        the lead's transcript
+#   runs/<run>/<session id>/subagents/agent-<id>.jsonl   a subagent's transcript, named by its agent id; the subagents a
+#                                                        subagent spawned sit in the same folder
+#   runs/<run>/sessions-index.json                       the run's index
+# A transcript holds one JSON object per line:
+#   type           user or assistant
+#   uuid           the line's id
+#   parentUuid     the line before it in the conversation, or null
+#   timestamp      when the line was written
+#   message        {role, content}: content is a string for a prompt, else a list of blocks: text {text}, tool_use
+#                  {id, name, input} and tool_result {tool_use_id, content, is_error}. A Task call's input holds the
+#                  subagent's description, prompt and subagent_type.
+#   toolUseResult  the harness's copy of a result: {agentId} for a Task, {filenames} for a Grep, a string for an error
+# sessions-index.json, one JSON document:
+#   version        1 or 2
+#   team           how the run's team was set up
+#   sessions       version 1: [{session_id, agent, file}]
+#   entries        version 2: [{sessionId, agentId, agentType, path, created, messageCount}]
+#
+# What the reader cleans up, since the harness changed between runs and runs end untidily:
+#   - timestamps come as ISO 8601 with Z or an offset, with or without milliseconds, or as epoch milliseconds;
+#   - a line written twice (the same uuid) counts once, and a session's lines are put in time order;
+#   - a line that is not JSON, such as the last line of a session that was cut off, is skipped;
+#   - the files on disk are the sessions: the index only names the team and the agents, and it may miss a session or
+#     list one that is gone;
+#   - version 1 flags an error with isError, later versions with is_error; version 3 calls the Task tool Agent;
+#   - a subagent is named by its Task call's subagent_type, else by the index; the call that spawned it is the one
+#     whose toolUseResult names its agentId, else whose result's text says "agentId: <id>", else whose prompt it got;
+#   - some facts are only in a result's text: a command's exit code ("Exit code 1"), a permission denial ("Permission to
+#     use Bash has been denied: ..."), a Grep's matched files one per line, and the files a command ran against.
 #
 # The method: the index keeps each session's place in its run's tree, each call's facts (its session, its time on the
-# run's clock, its tool, outcome, files and the words a search looks in) and every record's byte offset; the text of a
-# call or a message is read back when a transcript shows it. One fetch answers the overview under the page's selection:
-# the runs and sessions with their counts, every call that passes as one mark, and the values of every field with their
-# counts, each count holding every filter but its own field's. Other fetches answer a session's transcript, what the
-# other sessions of its run were doing at one moment, and a comparison of sessions or runs side by side.
+# run's clock, its tool, outcome, files and the words a search looks in) and every line's byte offset. A call is its
+# tool_use line and its tool_result line; its text, or a message's, is read back when a transcript shows it. One fetch
+# answers the overview under the page's selection: the runs and sessions with their counts, every call that passes as
+# one mark, and the values of every field with their counts, each count holding every filter but its own field's.
+# Other fetches answer a session's transcript, what the other sessions of its run were doing at one moment, and a
+# comparison of sessions or runs side by side.
 #
-# Labels: they apply when records are served, never in the index. A call passes when thimble.kept holds for it, and a
-# session stays when thimble.kept_unit holds for its records or one of its subagents stays, so the tree keeps its
-# shape. Every call carries the values of the labels that are on that mark it (thimble.marked), which colour it in the
-# page; the page may also hide the calls a label value marks, or the calls no label marks.
+# Labels: they apply when records are served, never in the index. A call passes when thimble.kept_unit holds for its
+# two lines, and a session stays when it holds for its records or one of its subagents stays, so the tree keeps its
+# shape. Every call carries the values of the labels that are on that mark either of its lines (thimble.marked), which
+# colour it in the page; the page may also hide the calls a label value marks, or the calls no label marks.
 import json
+import os
 import re
 from datetime import datetime, timezone
 
@@ -52,12 +56,23 @@ import thimble
 FIELDS = ("run", "agent", "tool", "outcome", "ftype", "dur")
 DURATIONS = ("under 1 s", "1–10 s", "over 10 s")
 NO_FILE = "no file"
+LEAD = "lead"
 TEST_PATH = re.compile(r"(^|/)tests?/|(^|/)test_[^/]*$")
+TOOL_NAMES = {"Agent": "Task"}
+PATH = re.compile(r"(?<![\w./:-])((?:[\w.-]+/)+[\w.-]+\.[A-Za-z]\w*)")  # a path with a folder and an extension
+EXIT = re.compile(r"Exit code (\d+)")
+DENIED = re.compile(r"Permission to use \S+ has been denied[.:]?\s*")
+AGENT_ID = re.compile(r"agentId: (\w+)")
 
 
 def _epoch(t):
+    """Seconds since the epoch: from epoch milliseconds, or from ISO 8601 with Z, an offset or none (read as UTC)."""
+    if isinstance(t, bool) or t is None:
+        return None
+    if isinstance(t, (int, float)):
+        return t / 1000 if t > 1e11 else float(t)
     try:
-        dt = datetime.fromisoformat(str(t).replace("Z", "+00:00"))
+        dt = datetime.fromisoformat(str(t).strip().replace("Z", "+00:00"))
     except ValueError:
         return None
     return (dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)).timestamp()
@@ -87,84 +102,260 @@ def _merge(spans):
     return out
 
 
+# ------------------------------------------------------------------------------------------------ reading the lines
+
+
+def _blocks(record):
+    """A line's content blocks; a prompt written as a plain string is one text block."""
+    content = (record.get("message") or {}).get("content")
+    if isinstance(content, str):
+        return [{"type": "text", "text": content}]
+    return [b for b in content if isinstance(b, dict)] if isinstance(content, list) else []
+
+
+def _text(content):
+    """The text of a block's content, a string or a list of text blocks."""
+    if isinstance(content, list):
+        return "\n".join(str(b.get("text") or "") for b in content if isinstance(b, dict) and b.get("type") == "text")
+    return "" if content is None else str(content)
+
+
+def _message_text(record):
+    return "\n".join(str(b.get("text") or "") for b in _blocks(record) if b.get("type") == "text")
+
+
+def _block(record, kind, key, value):
+    return next((b for b in _blocks(record) if b.get("type") == kind and b.get(key) == value), None)
+
+
+def _input(tool, inp, literal=False):
+    """What a call was given, in a line: a path, a command, a Grep's pattern with its path and mode, a query, or a
+    Task's description. `literal` keeps a Grep to its pattern, which the record holds word for word."""
+    if tool == "Grep":
+        if literal:
+            return str(inp.get("pattern") or "")
+        pattern = str(inp.get("pattern") or "").replace('"', '\\"')
+        return " ".join(x for x in (f'"{pattern}"', str(inp.get("path") or ""),
+                                    "-l" if inp.get("output_mode") == "files_with_matches" else "", "-n" if inp.get("-n") else "") if x)
+    for k in ("file_path", "command", "query", "description", "url", "pattern"):
+        if inp.get(k):
+            return str(inp[k])
+    return next((str(v) for v in inp.values() if isinstance(v, str)), "")
+
+
+def _facts(tool, inp, block, tur):
+    """What a call's lines say, as any version of the harness wrote them: {out, result, exit, text, output, files,
+    matches, old, new}. `text` is what came back without an "Exit code" or "agentId" line, `result` its first line
+    without a denial's or an error's prefix, and `output` the text when it runs to more lines."""
+    lines = [ln for ln in (_text(block.get("content")) if block else "").splitlines() if ln.strip()]
+    code = EXIT.fullmatch(lines[0].strip()) if lines else None
+    lines = [ln for ln in lines[1 if code else 0:] if not AGENT_ID.fullmatch(ln.strip())]
+    first = lines[0] if lines else ""
+    denied = bool(DENIED.match(first))
+    first = re.sub(r"^Error: ", "", first[DENIED.match(first).end():] if denied else first)
+    flagged = bool(block and (block.get("is_error") or block.get("isError")))
+    if isinstance(tur, dict) and isinstance(tur.get("filenames"), list):
+        matches = [str(f) for f in tur["filenames"]]
+    elif tool == "Grep":
+        matches = [ln.strip() for ln in lines[1:] if PATH.fullmatch(ln.strip())]
+    else:
+        matches = []
+    if inp.get("file_path"):
+        files = [str(inp["file_path"])]
+    elif tool == "Bash":
+        files = list(dict.fromkeys(PATH.findall(str(inp.get("command") or "")) + PATH.findall("\n".join(lines))))
+    else:
+        files = []
+    return {"out": "denied" if denied else "error" if flagged else "ok", "result": first, "exit": int(code[1]) if code else None,
+            "text": "\n".join(lines), "output": "\n".join(lines) if len(lines) > 1 else None, "files": files, "matches": matches,
+            "old": inp.get("old_string"), "new": inp.get("new_string")}
+
+
+def _where(path):
+    """(run, session id, the lead's session id or None) of a transcript, from where it sits."""
+    parts = path.replace(os.sep, "/").split("/")
+    name = parts[-1][: -len(".jsonl")]
+    if len(parts) >= 4 and parts[-2] == "subagents":
+        return parts[-4], name[len("agent-"):] if name.startswith("agent-") else name, parts[-3]
+    return (parts[-2] if len(parts) >= 2 else "."), name, None
+
+
+def _run_index(path, offs):
+    """{team, team_line, names: {session or agent id: agent name}} from a run's index, in either version."""
+    with open(path, "rb") as f:
+        raw = f.read()
+    pos = 0
+    for line in raw.splitlines(keepends=True):
+        offs.append(pos)
+        pos += len(line)
+    try:
+        doc = json.loads(raw)
+    except ValueError:
+        return {}
+    if not isinstance(doc, dict):
+        return {}
+    names = {}
+    for e in doc.get("entries") or doc.get("sessions") or []:
+        if isinstance(e, dict):
+            key, name = e.get("agentId") or e.get("session_id") or e.get("sessionId"), e.get("agentType") or e.get("agent")
+            if key and name:
+                names[str(key)] = str(name)
+    team_line = next((n for n, line in enumerate(raw.splitlines(), 1) if b'"team"' in line), None)
+    return {"team": str(doc.get("team") or ""), "team_line": team_line, "names": names}
+
+
+def _transcript(path, offs, dups):
+    """A session's lines in time order, each (time, line number, ref, record). A line that is not JSON or has no time
+    is skipped, and a line whose uuid came before is noted in `dups` as the ref it repeats."""
+    lines, seen = [], {}
+    with open(path, "rb") as f:
+        pos = 0
+        for n, raw in enumerate(f, 1):
+            offs.append(pos)
+            pos += len(raw)
+            try:
+                r = json.loads(raw)
+            except ValueError:
+                continue
+            if not isinstance(r, dict):
+                continue
+            ref = f"{path}#L{n}"
+            u = r.get("uuid")
+            if u and u in seen:
+                dups[ref] = seen[u]
+                continue
+            t = _epoch(r.get("timestamp"))
+            if t is None:
+                continue
+            if u:
+                seen[u] = ref
+            lines.append((t, n, ref, r))
+    return sorted(lines, key=lambda x: (x[0], x[1]))
+
+
+def _session_lines(sid, lines):
+    """A session's messages, each {ref, s, at, kind, words, text}, and its calls, each {ref, s, at, id, tool, inp} with
+    {res, end, block, tur} once its result came. A user's text is a prompt; the last thing the agent said, when no
+    call follows it, is its result."""
+    msgs, calls, pending = [], [], {}
+    for t, _n, ref, r in lines:
+        user = (r.get("type") or (r.get("message") or {}).get("role")) == "user"
+        for b in _blocks(r):
+            kind = b.get("type")
+            if kind == "text" and str(b.get("text") or "").strip():
+                msgs.append({"ref": ref, "s": sid, "at": t, "kind": "prompt" if user else "text", "text": str(b["text"])})
+            elif kind == "tool_use" and b.get("id"):
+                name = str(b.get("name") or "")
+                pending[b["id"]] = {"ref": ref, "s": sid, "at": t, "id": b["id"], "tool": TOOL_NAMES.get(name, name),
+                                    "inp": b.get("input") if isinstance(b.get("input"), dict) else {}}
+                calls.append(pending[b["id"]])
+            elif kind == "tool_result" and b.get("tool_use_id") in pending:
+                pending.pop(b["tool_use_id"]).update(res=ref, end=t, block=b, tur=r.get("toolUseResult"))
+    said = [m for m in msgs if m["kind"] == "text"]
+    if said and not any(c["at"] > said[-1]["at"] for c in calls):
+        said[-1]["kind"] = "result"
+    return msgs, calls
+
+
 def build_index(paths):
     """{"offsets": {path: [byte offset of line n at n-1]}, "runs": {run: facts}, "sessions": {id: facts}, "calls": [facts],
-    "messages": [facts], "values": {field: [values in their order]}}. Times are seconds on the run's clock. A session's
-    `order` is its run's sessions in tree order, each after the session that spawned it; a call's `words` is the
-    lowercased text a search looks in. A line that is not JSON, that no kind of record fits, or a session without a
-    start and an end, is in `offsets` only."""
-    offsets, sessions, raw_calls, raw_msgs = {}, {}, [], []
-    for path in paths:
+    "messages": [facts], "lines": {ref: (what it holds, its key)}, "values": {field: [values in their order]}}. Times
+    are seconds on the run's clock. A run's `sessions` are in tree order, each after the session that spawned it; a
+    call's `words` is the lowercased text a search looks in."""
+    offsets, dups, indexes, sessions, raw_calls, raw_msgs = {}, {}, {}, {}, [], []
+    for path in sorted(paths):
         offs = offsets.setdefault(path, [])
-        with open(path, "rb") as f:
-            pos = 0
-            for n, raw in enumerate(f, 1):
-                offs.append(pos)
-                pos += len(raw)
-                try:
-                    r = json.loads(raw)
-                except ValueError:
-                    continue
-                if not isinstance(r, dict):
-                    continue
-                ref = f"{path}#L{n}"
-                if r.get("tool") and r.get("session"):
-                    raw_calls.append((ref, r))
-                elif r.get("kind") and r.get("session") and "text" in r:
-                    raw_msgs.append((ref, r))
-                elif r.get("id") and r.get("run") and r.get("agent"):
-                    t0, t1 = _epoch(r.get("started")), _epoch(r.get("ended"))
-                    if t0 is not None and t1 is not None:
-                        sessions[str(r["id"])] = {"id": str(r["id"]), "ref": ref, "run": str(r["run"]), "team": str(r.get("team") or ""),
-                                                  "agent": str(r["agent"]), "parent": r.get("parent"), "t0": t0, "t1": t1}
+        if not path.endswith(".jsonl"):
+            parts = path.replace(os.sep, "/").split("/")
+            indexes[parts[-2] if len(parts) > 1 else "."] = dict(_run_index(path, offs), path=path)
+            continue
+        run, sid, lead = _where(path)
+        lines = _transcript(path, offs, dups)
+        if not lines:
+            continue
+        msgs, calls = _session_lines(sid, lines)
+        prompt = next((m for m in msgs if m["kind"] == "prompt"), None)
+        sessions[sid] = {"id": sid, "ref": lines[0][2], "run": run, "lead": lead, "t0": lines[0][0], "t1": lines[-1][0], "agent": None,
+                         "parent": None, "prompt": prompt["ref"] if prompt else None, "asked": prompt["text"] if prompt else ""}
+        raw_msgs += msgs
+        raw_calls += calls
+
+    # each subagent under the session whose Task call spawned it
+    for c in raw_calls:
+        c.update(_facts(c["tool"], c["inp"], c.get("block"), c.get("tur")))
+        c["child"] = None
+        if c["tool"] != "Task" or "block" not in c:
+            continue
+        tur = c["tur"] if isinstance(c.get("tur"), dict) else {}
+        said = AGENT_ID.search(_text(c["block"].get("content")))
+        kid = str(tur.get("agentId") or (said[1] if said else ""))
+        if kid not in sessions:
+            prompt = str(c["inp"].get("prompt") or "")
+            kid = next((x["id"] for x in sessions.values() if x["lead"] and x["parent"] is None and x["run"] == sessions[c["s"]]["run"]
+                        and prompt and x["asked"] == prompt), None)
+        if kid in sessions and kid != c["s"] and sessions[kid]["lead"] and sessions[kid]["parent"] is None:
+            c["child"] = kid
+            sessions[kid]["parent"] = c["s"]
+            sessions[kid]["agent"] = c["inp"].get("subagent_type")
+    for s in sessions.values():
+        ix = indexes.get(s["run"]) or {}
+        s["agent"] = str(s["agent"] or (ix.get("names") or {}).get(s["id"]) or (LEAD if s["lead"] is None else f"agent-{s['id']}"))
+        s["team"] = ix.get("team") or ""
+        if s["parent"] is None and s["lead"] in sessions:
+            s["parent"] = s["lead"]
+        del s["asked"]
 
     runs = {}
     for s in sessions.values():
         run = runs.setdefault(s["run"], {"id": s["run"], "team": s["team"], "start": s["t0"], "sessions": []})
         run["start"] = min(run["start"], s["t0"])
+    for run in runs.values():
+        ix = indexes.get(run["id"]) or {}
+        run["team_ref"] = f"{ix['path']}#L{ix['team_line']}" if ix.get("team_line") else None
     for s in sessions.values():
         start = runs[s["run"]]["start"]
         s["start"], s["end"] = round(s["t0"] - start, 1), round(s["t1"] - start, 1)
         s["calls"], s["msgs"], s["tasks"] = [], [], []
-        if s["parent"] not in sessions:
-            s["parent"] = None
 
-    calls = []
-    for ref, r in sorted(raw_calls, key=lambda x: _epoch(x[1].get("at")) or 0):
-        s = sessions.get(str(r["session"]))
-        t = _epoch(r.get("at"))
-        if s is None or t is None:
-            continue
-        files = [str(f) for f in r.get("files") or []]
-        d = float(r.get("seconds") or 0)
-        c = {"ref": ref, "i": len(calls), "s": s["id"], "t": round(t - runs[s["run"]]["start"], 1), "d": round(d, 2), "tool": str(r["tool"]),
-             "out": str(r.get("outcome") or "ok"), "files": files, "child": r.get("spawned") if r.get("spawned") in sessions else None,
-             "input": str(r.get("input") or "")[:160]}
-        c["ftype"], c["dur"] = _ftype(files), _dur(d)
-        c["words"] = " ".join(str(r.get(k) or "") for k in ("tool", "input", "result", "old", "new", "output")).lower() + " " + " ".join(
-            files + [str(m) for m in r.get("matches") or []]).lower()
+    calls, held = [], {}
+    for r in sorted(raw_calls, key=lambda x: x["at"]):
+        s = sessions[r["s"]]
+        d = max(0.0, r["end"] - r["at"]) if "end" in r else 0.0
+        c = {"ref": r["ref"], "refs": [r["ref"]] + ([r["res"]] if r.get("res") else []), "id": r["id"], "i": len(calls), "s": s["id"],
+             "t": round(r["at"] - runs[s["run"]]["start"], 1), "d": round(d, 2), "tool": r["tool"], "out": r["out"], "files": r["files"],
+             "child": r["child"], "input": _input(r["tool"], r["inp"])[:160]}
+        c["ftype"], c["dur"] = _ftype(c["files"]), _dur(d)
+        c["words"] = " ".join(str(x or "") for x in (c["tool"], c["input"], r["text"], r["old"], r["new"])).lower() + " " + " ".join(
+            c["files"] + r["matches"]).lower()
         calls.append(c)
         s["calls"].append(c["i"])
+        for ref in c["refs"]:
+            held[ref] = ("call", c["i"])
         if c["child"]:
             s["tasks"].append(c["i"])
             sessions[c["child"]]["spawn"] = c["i"]
 
     messages = []
-    for ref, r in sorted(raw_msgs, key=lambda x: _epoch(x[1].get("at")) or 0):
-        s = sessions.get(str(r["session"]))
-        t = _epoch(r.get("at"))
-        if s is None or t is None:
-            continue
+    for r in sorted(raw_msgs, key=lambda x: x["at"]):
+        s = sessions[r["s"]]
+        held[r["ref"]] = ("message", len(messages))
         s["msgs"].append(len(messages))
-        messages.append({"ref": ref, "s": s["id"], "t": round(t - runs[s["run"]]["start"], 1), "kind": str(r["kind"]),
-                         "words": str(r.get("text") or "").lower()})
+        messages.append({"ref": r["ref"], "s": s["id"], "t": round(r["at"] - runs[s["run"]]["start"], 1), "kind": r["kind"],
+                         "words": r["text"].lower()})
+    for dup, first in dups.items():
+        if first in held:
+            held[dup] = held[first]
+    for run, ix in indexes.items():
+        if run in runs:
+            for n in range(1, len(offsets[ix["path"]]) + 1):
+                held[f"{ix['path']}#L{n}"] = ("run", run)
 
     for s in sessions.values():
         s["waits"] = _merge([(calls[i]["t"], calls[i]["t"] + calls[i]["d"]) for i in s["tasks"]])
-        # a session's records: its own line, its prompt, then its calls and other messages in time order
-        rest = sorted([(calls[i]["t"], calls[i]["ref"]) for i in s["calls"]] +
+        # a session's records: its prompt, then its calls' lines and its other messages in time order
+        rest = sorted([(calls[i]["t"], r) for i in s["calls"] for r in calls[i]["refs"]] +
                       [(messages[i]["t"], messages[i]["ref"]) for i in s["msgs"] if messages[i]["kind"] != "prompt"])
-        s["refs"] = [s["ref"]] + [messages[i]["ref"] for i in s["msgs"] if messages[i]["kind"] == "prompt"] + [r for _, r in rest]
+        s["refs"] = [messages[i]["ref"] for i in s["msgs"] if messages[i]["kind"] == "prompt"] + [r for _, r in rest] or [s["ref"]]
     for run in runs.values():
         def walk(parent, depth):
             kids = sorted((x for x in sessions.values() if x["run"] == run["id"] and x["parent"] == parent), key=lambda x: x["start"])
@@ -192,16 +383,21 @@ def build_index(paths):
     values = {"run": order, "agent": agents, "tool": by_count("tool"), "outcome": by_count("out"),
               "ftype": by_count("ftype", (NO_FILE,)), "dur": [d for d in DURATIONS if any(c["dur"] == d for c in calls)]}
     # what every run's lead was asked, when they were all asked the same
-    prompts = {str(_text_of(offsets, messages[i]["ref"])) for k in order for i in sessions[runs[k]["sessions"][0]]["msgs"]
-               if messages[i]["kind"] == "prompt"}
-    return {"offsets": offsets, "runs": runs, "order": order, "task": prompts.pop() if len(prompts) == 1 else None, "sessions": sessions, "calls": calls, "messages": messages, "values": values}
+    prompts = {_prompt_text(offsets, sessions[runs[k]["sessions"][0]]["prompt"]) for k in order}
+    return {"offsets": offsets, "runs": runs, "order": order, "task": prompts.pop() if len(prompts) == 1 else None, "sessions": sessions,
+            "calls": calls, "messages": messages, "lines": held, "values": values}
 
 
-def _text_of(offsets, ref):
+def _record(offsets, ref):
+    """The record a ref names, read from its byte offset."""
     path, _, line = ref.rpartition("#L")
     with open(path, "rb") as f:
         f.seek(offsets[path][int(line) - 1])
-        return json.loads(f.readline()).get("text") or ""
+        return json.loads(f.readline())
+
+
+def _prompt_text(offsets, ref):
+    return _message_text(_record(offsets, ref)) if ref else ""
 
 
 # ----------------------------------------------------------------------------------------------------- the selection
@@ -240,8 +436,8 @@ class Selection:
         self.marks, self.kept = {}, {}
         for c in index["calls"]:
             if self.classes:
-                self.marks[c["i"]] = sorted({keys[k] for m in thimble.marked(c["ref"]) if (k := _key(m["label"], m["value"])) in keys})
-            self.kept[c["i"]] = thimble.kept(c["ref"])
+                self.marks[c["i"]] = sorted({keys[k] for r in c["refs"] for m in thimble.marked(r) if (k := _key(m["label"], m["value"])) in keys})
+            self.kept[c["i"]] = thimble.kept_unit(c["refs"])
 
     def fields(self, c, but=None):
         """Whether a call passes the field filters, all or all but the field `but`, and the search."""
@@ -340,11 +536,23 @@ def _overview(index, query):
 
 
 def _read(index, ref):
-    """The record a ref names, read from its byte offset."""
-    path, _, line = ref.rpartition("#L")
-    with open(path, "rb") as f:
-        f.seek(index["offsets"][path][int(line) - 1])
-        return json.loads(f.readline())
+    return _record(index["offsets"], ref)
+
+
+def _call(index, c):
+    """A call as its two lines hold it: its input as a line and as the record holds it word for word (`literal`), and
+    its facts (_facts)."""
+    use = _block(_read(index, c["refs"][0]), "tool_use", "id", c["id"]) or {}
+    inp = use.get("input") if isinstance(use.get("input"), dict) else {}
+    block, tur = None, None
+    if len(c["refs"]) > 1:
+        r = _read(index, c["refs"][1])
+        block, tur = _block(r, "tool_result", "tool_use_id", c["id"]), r.get("toolUseResult")
+    return {"input": _input(c["tool"], inp), "literal": _input(c["tool"], inp, literal=True), **_facts(c["tool"], inp, block, tur)}
+
+
+def _message(index, m):
+    return _message_text(_read(index, m["ref"]))
 
 
 def _session(index, query):
@@ -357,25 +565,28 @@ def _session(index, query):
     items = []
     for i in s["msgs"]:
         m = ix["messages"][i]
-        items.append({"kind": m["kind"], "ref": m["ref"], "t": m["t"], "text": str(_read(ix, m["ref"]).get("text") or "")})
+        items.append({"kind": m["kind"], "ref": m["ref"], "t": m["t"], "text": _message(ix, m)})
     for k, i in enumerate(s["calls"]):
         c = ix["calls"][i]
         if not sel.passes(c):
             continue
-        r = _read(ix, c["ref"])
+        r = _call(ix, c)
         again = next((ix["calls"][j] for j in s["calls"][k + 1:] if ix["calls"][j]["tool"] == c["tool"] == "Bash" and ix["calls"][j]["input"] == c["input"]), None)
         items.append({"kind": "call", "ref": c["ref"], "t": c["t"], "d": c["d"], "tool": c["tool"], "out": c["out"], "k": k + 1,
-                      "input": str(r.get("input") or ""), "result": str(r.get("result") or ""), "exit": r.get("exit"),
-                      "files": c["files"], "matches": [str(m) for m in r.get("matches") or []], "old": r.get("old"), "new": r.get("new"),
-                      "output": r.get("output"), "child": c["child"], "m": sel.marks.get(c["i"], []),
+                      "input": r["input"], "result": r["result"], "exit": r["exit"],
+                      "files": c["files"], "matches": r["matches"], "old": r["old"], "new": r["new"],
+                      "output": r["output"], "child": c["child"], "m": sel.marks.get(c["i"], []),
                       "again": {"t": again["t"], "out": again["out"]} if again else None})
     for i in s["tasks"]:
         c = ix["calls"][i]
         kid = ix["sessions"][c["child"]]
         result = next((ix["messages"][j] for j in kid["msgs"] if ix["messages"][j]["kind"] == "result"), None)
-        items.append({"kind": "return", "t": kid["end"], "child": kid["id"], "ran": round(kid["end"] - kid["start"], 1),
-                      "ref": result["ref"] if result else None,
-                      "text": str(_read(ix, result["ref"]).get("text") or "") if result else ""})
+        # a subagent without a last message of its own still returned what its Task call's result holds
+        if result:
+            text, ref = _message(ix, result), result["ref"]
+        else:
+            text, ref = _call(ix, c)["text"], c["refs"][-1] if len(c["refs"]) > 1 else None
+        items.append({"kind": "return", "t": kid["end"], "child": kid["id"], "ran": round(kid["end"] - kid["start"], 1), "ref": ref, "text": text})
     for a, b in s["waits"]:
         kids = [ix["sessions"][ix["calls"][i]["child"]]["id"] for i in s["tasks"] if ix["calls"][i]["t"] < b and ix["calls"][i]["t"] + ix["calls"][i]["d"] > a]
         items.append({"kind": "wait", "t": a + 1.5, "a": a, "b": b, "on": kids})
@@ -448,7 +659,7 @@ def _compare(index, query):
                 elif c["tool"] == "Read":
                     use[1] += 1
         errors = [{"ref": c["ref"], "t": round(c["t"] - root["start"], 1), "out": c["out"], "agent": ix["sessions"][c["s"]]["agent"],
-                   "tool": c["tool"], "input": c["input"], "result": str(_read(ix, c["ref"]).get("result") or c["out"])}
+                   "tool": c["tool"], "input": c["input"], "result": _call(ix, c)["result"] or c["out"]}
                   for c in calls if c["out"] != "ok"]
         groups.append({"id": gid, "run": root["run"], "team": ix["runs"][root["run"]]["team"], "root": root["id"], "sessions": members,
                        "agents": [ix["sessions"][i]["agent"] for i in members], "start": root["start"], "end": root["end"],
@@ -487,37 +698,32 @@ def resolve(index, locator):
         if key in ix["runs"]:
             run = ix["runs"][key]
             lead = ix["sessions"][run["sessions"][0]]
-            prompt = next((ix["messages"][i] for i in lead["msgs"] if ix["messages"][i]["kind"] == "prompt"), None)
-            refs = [ix["sessions"][i]["ref"] for i in run["sessions"]] + [r for i in run["sessions"] for r in ix["sessions"][i]["refs"][1:]]
-            text = str(_read(ix, prompt["ref"]).get("text") or "") if prompt else ""
-            return {"excerpt": "\n".join(x for x in (run["team"], text) if x) or lead["agent"], "label": f"{key} · {run['team']}".strip(" ·"),
-                    "refs": refs, "key": key, "target": {"run": key}}
+            # the team is cited from the run's index, the task from the lead's prompt
+            refs = ([run["team_ref"]] if run["team_ref"] else []) + [r for i in run["sessions"] for r in ix["sessions"][i]["refs"]]
+            text = "\n".join(x for x in (run["team"] if run["team_ref"] else "", _prompt_text(ix["offsets"], lead["prompt"])) if x)
+            return {"excerpt": text or lead["agent"], "label": f"{key} · {run['team']}".strip(" ·"), "refs": refs, "key": key, "target": {"run": key}}
         s = ix["sessions"].get(key)
         if s is None:
             return None
-        prompt = next((ix["messages"][i] for i in s["msgs"] if ix["messages"][i]["kind"] == "prompt"), None)
-        text = str(_read(ix, prompt["ref"]).get("text") or "") if prompt else ""
-        return {"excerpt": "\n".join(x for x in (s["agent"], text) if x), "label": f"{s['agent']} · {s['run']}", "refs": s["refs"],
+        return {"excerpt": _prompt_text(ix["offsets"], s["prompt"]) or s["agent"], "label": f"{s['agent']} · {s['run']}", "refs": s["refs"],
                 "key": key, "target": {"session": key}}
     path, frag = str(locator.get("path") or ""), str(locator.get("fragment") or "")
     m = re.fullmatch(r"L(\d+)", frag)
     if not m or path not in ix["offsets"]:
         return None
     ref = f"{path}#L{m[1]}"
-    for c in ix["calls"]:
-        if c["ref"] == ref:
-            r = _read(ix, ref)
-            s = ix["sessions"][c["s"]]
-            text = "\n".join(str(r.get(k)) for k in ("input", "result") if r.get(k))
-            return {"excerpt": text or c["tool"], "label": f"{s['agent']} · {c['tool']} {_clock(c['t'])}", "refs": [ref], "key": s["id"],
-                    "target": {"session": s["id"], "call": ref}}
-    for mm in ix["messages"]:
-        if mm["ref"] == ref:
-            s = ix["sessions"][mm["s"]]
-            return {"excerpt": str(_read(ix, ref).get("text") or ""), "label": f"{s['agent']} · {mm['kind']} {_clock(mm['t'])}", "refs": [ref],
-                    "key": s["id"], "target": {"session": s["id"], "message": ref}}
-    for s in ix["sessions"].values():
-        if s["ref"] == ref:
-            return {"excerpt": f"{s['agent']}\n{s['id']}", "label": f"{s['agent']} · {s['run']}", "refs": [ref], "key": s["id"],
-                    "target": {"session": s["id"]}}
+    kind, i = ix["lines"].get(ref, (None, None))
+    if kind == "run":
+        run = ix["runs"][i]
+        return {"excerpt": run["team"] or i, "label": f"{i} · {run['team']}".strip(" ·"), "refs": [ref], "key": i, "target": {"run": i}}
+    if kind == "call":
+        c = ix["calls"][i]
+        r, s = _call(ix, c), ix["sessions"][c["s"]]
+        return {"excerpt": "\n".join(x for x in (r["literal"], r["result"]) if x) or c["tool"], "label": f"{s['agent']} · {c['tool']} {_clock(c['t'])}",
+                "refs": list(dict.fromkeys(c["refs"] + [ref])), "key": s["id"], "target": {"session": s["id"], "call": c["ref"]}}
+    if kind == "message":
+        mm = ix["messages"][i]
+        s = ix["sessions"][mm["s"]]
+        return {"excerpt": _message(ix, mm), "label": f"{s['agent']} · {mm['kind']} {_clock(mm['t'])}", "refs": list(dict.fromkeys([mm["ref"], ref])),
+                "key": s["id"], "target": {"session": s["id"], "message": mm["ref"]}}
     return None
