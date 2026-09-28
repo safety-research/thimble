@@ -1,7 +1,11 @@
 """scripts/check_content.py, the content and commits steps of scripts/check.sh: a listed word is found in any spelling,
-files of kinds that never belong in the tree are refused, the command fails on a hit, and commit messages that link a
-Claude Code session are refused. The real list is digests, so these tests list words of their own."""
+files of kinds that never belong in the tree are refused, gitleaks' findings are reported, the command fails on a hit,
+and commit messages that link a Claude Code session are refused. The real list is digests, so these tests list words of
+their own."""
 import importlib.util
+import random
+import shutil
+import string
 import subprocess
 import sys
 from pathlib import Path
@@ -53,6 +57,15 @@ def test_the_command_fails_on_a_hit_and_passes_a_clean_tree(tmp_path):
     assert subprocess.run([*run, str(clean)], capture_output=True).returncode == 0
     r = subprocess.run([*run, str(dirty)], capture_output=True, text=True)
     assert r.returncode == 1 and "a.db:0: [path]" in r.stdout
+
+
+@pytest.mark.skipif(shutil.which("gitleaks") is None, reason="gitleaks is not installed (CI installs it)")
+def test_a_secret_gitleaks_finds_fails_the_command(tmp_path):
+    # a GitHub token made at run time, so the tree itself holds none
+    token = "ghp_" + "".join(random.choices(string.ascii_letters + string.digits, k=36))
+    write(tmp_path, {"deploy.py": f"TOKEN = '{token}'\n"})
+    r = subprocess.run([sys.executable, str(SCRIPT), str(tmp_path)], capture_output=True, text=True)
+    assert r.returncode == 1 and "deploy.py:1: [secret]" in r.stdout, r.stdout
 
 
 GIT = ["git", "-c", "core.hooksPath=/dev/null", "-c", "user.name=Test", "-c", "user.email=test@example.org",
