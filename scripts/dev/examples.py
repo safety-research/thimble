@@ -4,7 +4,8 @@
 
 For each example in plugin/viewers that has a sample/, this copies the sample to <folder>/<example>, registers the copy
 as a workspace, saves the example as a built view of it, and applies the labels its labels.json defines, turned on in
-Files. The labels are regex labels, so no model is called. Run it in the environment of the stack it is for
+Files. The labels are regex labels, so no model is called. A copy an earlier run made is replaced; any other folder of
+that name stops the script before it changes anything. Run it in the environment of the stack it is for
 (THIMBLE_HOME, THIMBLE_DATA_DIR, THIMBLE_WORKSPACES_DIR); a server already running picks the views and labels up.
 """
 import asyncio
@@ -18,6 +19,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "backend"))
 from app import concepts, config, views
 
 VIEW_KEYS = ("name", "why", "claims", "accepts", "declares", "default", "libs")
+MARK = ".thimble-example"  # in each copy, so a later run knows the folder is one it made
 
 
 def save_view(name: str, src: Path) -> None:
@@ -43,12 +45,18 @@ async def apply_labels(name: str, src: Path) -> None:
 
 
 async def main(folder: Path) -> None:
+    examples = sorted(p for p in views.EXAMPLES_DIR.iterdir() if (p / "sample").is_dir())
+    taken = [folder / p.name for p in examples if (folder / p.name).exists() and not (folder / p.name / MARK).is_file()]
+    if taken:
+        sys.exit(f"examples.py: not replacing {', '.join(map(str, taken))}, which this script did not make; "
+                 "move it away or pick another folder")
     try:
-        for src in sorted(p for p in views.EXAMPLES_DIR.iterdir() if (p / "sample").is_dir()):
+        for src in examples:
             dst = folder / src.name
             if dst.exists():
                 shutil.rmtree(dst)
             shutil.copytree(src / "sample", dst)
+            (dst / MARK).touch()
             c = config.register_corpus(dst)["name"]
             save_view(c, src)
             await apply_labels(c, src)
