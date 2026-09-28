@@ -39,9 +39,10 @@ export function cutLine(p: Pick<PermissionRequest, 'cut' | 'command' | 'input'>)
 }
 
 /** Send the analyst's answer to the session that asked: main's prompt through the shim, any other session's through
- * its chat (backend agent_session.permission_route). */
+ * its chat with how many of the later calls the card listed (backend agent_session.permission_route). */
 function answer(ws: string, ask: PendingAsk, allow: boolean, always: boolean): Promise<unknown> {
-  return ask.chat === 'main' ? api.answerPermission(ws, ask.request.id, allow) : api.answerSessionPermission(ws, ask.chat, ask.request.id, allow, always)
+  const shown = ask.request.also?.length ?? 0
+  return ask.chat === 'main' ? api.answerPermission(ws, ask.request.id, allow) : api.answerSessionPermission(ws, ask.chat, ask.request.id, allow, always, shown)
 }
 
 export function PermissionCard({ ws, asks, metas, labels }: {

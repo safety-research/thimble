@@ -41,6 +41,14 @@ async def _waiting(chat: str, n: int = 1) -> list[dict]:
     raise AssertionError(f"no {n} request(s) on the card: {_card(chat)}")
 
 
+async def _until(ok) -> None:
+    for _ in range(300):
+        if ok():
+            return
+        await asyncio.sleep(0.01)
+    raise AssertionError("the card never got there")
+
+
 def _request(tool: str, inp: dict, key: str = KEY, **extra) -> "asyncio.Future":
     body = agent_session.PermissionRequestBody(session=key, tool_name=tool, tool_input=inp, **extra)
     return asyncio.ensure_future(agent_session.permission_request_route(CORPUS, body))
@@ -49,7 +57,8 @@ def _request(tool: str, inp: dict, key: str = KEY, **extra) -> "asyncio.Future":
 async def test_an_unanswered_request_is_denied_after_the_wait_and_its_card_says_so_until_dismissed():
     """A hosted session's request nobody answers is denied after its wait, so the build goes on; the model is told to
     carry on without it, the thread hears of it, and the card keeps it marked denied unanswered until Dismiss or the
-    run's end. Requests that joined it are denied with it."""
+    run's end. Requests that joined it are denied with it. An Allow covers the requests that joined the card before it
+    was clicked, as many as the card says it listed; a later one is asked on its own."""
     chat = _chat()
     heard: list[dict] = []
     agent_session.host(CORPUS, KEY, chat, agent="views", wait_s=0.1, on_expired=lambda run, entry: heard.append(entry))
@@ -73,6 +82,22 @@ async def test_an_unanswered_request_is_denied_after_the_wait_and_its_card_says_
     await _waiting(chat)
     assert agent_session.asking(CORPUS, KEY)
     agent_session.unhost(CORPUS, KEY)
+
+    chat, key, late = _chat("view: Other"), "view:other", {"url": f"{PAGE['url']}?late"}
+    agent_session.host(CORPUS, key, chat, agent="views", wait_s=10)
+    one = _request("WebFetch", PAGE, key=key)
+    [first] = await _waiting(chat)
+    two = _request("WebFetch", OTHER_PAGE, key=key)
+    three = _request("WebFetch", late, key=key)
+    await _until(lambda: len(_card(chat)[0].get("also") or []) == 2)
+    assert agent_session.answer(CORPUS, chat, first["id"], True, shown=1)
+    assert (await one)["behavior"] == (await two)["behavior"] == "allow"
+    await _until(lambda: [p for p in _card(chat) if p["id"] != first["id"]])
+    [own] = _card(chat)
+    assert own["what"] == late["url"] and not three.done(), "the call the card had not listed asks on its own"
+    assert agent_session.answer(CORPUS, chat, own["id"], False)
+    assert (await three)["behavior"] == "deny"
+    agent_session.unhost(CORPUS, key)
     assert await waiting == {"behavior": "deny", "message": agent_session.GONE_LINE}
     assert _card(chat) == [] and await _request("Bash", {"command": "ls"}) == {"behavior": "deny", "message": agent_session.GONE_LINE}
     assert agent_session.web_rule("WebFetch", {"url": "https://evil.example\\@docs.python.org/"}) is None, \

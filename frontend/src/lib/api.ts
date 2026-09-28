@@ -178,17 +178,19 @@ export const api = {
   /** Allow or deny a permission prompt of main's session that the shim relayed (channel.permission_route). */
   answerPermission: (c: string, id: string, allow: boolean) => j<{ answered: string }>(`${ws(c)}/permission`, { method: 'POST', body: JSON.stringify({ id, allow }) }),
   /** Allow or deny a permission request of a session thimble started beside main (agent_session.permission_route);
-     * `always` also applies Claude Code's suggested "don't ask again" rules for the rest of the session. */
-  answerSessionPermission: (c: string, chat: string, id: string, allow: boolean, always = false) =>
-    j<{ answered: string }>(`${ws(c)}/chats/${enc(chat)}/permission`, { method: 'POST', body: JSON.stringify({ id, allow, ...(always ? { always } : {}) }) }),
+     * `always` also applies Claude Code's suggested "don't ask again" rules for the rest of the session, and `shown`
+     * is how many of the later calls that joined it the card listed, which the answer alone covers. */
+  answerSessionPermission: (c: string, chat: string, id: string, allow: boolean, always = false, shown = 0) =>
+    j<{ answered: string }>(`${ws(c)}/chats/${enc(chat)}/permission`, { method: 'POST', body: JSON.stringify({ id, allow, ...(always ? { always } : {}), shown }) }),
   /** Start a session that is waiting to retry after the API was at capacity (agent_session.retry_route); 404 when it is
      * not waiting. */
   retrySession: (c: string, chat: string) => j<{ retrying: string }>(`${ws(c)}/chats/${enc(chat)}/retry`, { method: 'POST' }),
   /** a stopped background session's Resume (backend agent_session.resume_chat) */
   resumeSession: (c: string, chat: string) => j<{ resumed: string; run: number }>(`${ws(c)}/chats/${enc(chat)}/resume`, { method: 'POST' }),
-  /** Change the permission mode of the running session whose chat is `chat` (the orientation's card): Manual and
-   * Bypass at once, Auto and out of it once the session has paused and resumed (agent_session.mode_route); 404 when
-   * no session runs for it, 409 when it has no mode of its own. */
+  /** Change the permission mode of the running session whose chat is `chat` (its card): Manual and Bypass at once,
+   * Auto and out of it once the session has paused and resumed (agent_session.mode_route); 403 from a page not opened
+   * from thimble's link (claimKey), 404 when no session runs for it, 409 for a background session's switch into or out
+   * of Auto. */
   setSessionMode: (c: string, chat: string, mode: OrientPermissions) =>
     j<{ mode: OrientPermissions; switching: OrientPermissions | null }>(`${ws(c)}/chats/${enc(chat)}/permission-mode`, { method: 'POST', body: JSON.stringify({ mode }) }),
   /** A message to the orientation: resumes a finished orientation's session, or queues while a run goes on (`queued`);

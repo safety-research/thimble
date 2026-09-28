@@ -29,7 +29,8 @@ The web. WebFetch and WebSearch follow the mode in every session: in manual mode
 auto mode the classifier judges them. The card offers "don't ask again" for the site, or for web search, kept for the
 workspace in WEB_RULES_FILE, which every session's later request of it meets (web_rules). While a request waits, the
 session's later requests for the same site or for search wait on the same card (`groups`), each listed on it whole,
-up to WEB_ALSO_MAX.
+up to WEB_ALSO_MAX. The card's answer says how many it listed (`shown`); a later one it did not list is asked on its own
+once the answer comes.
 
 Don't ask again. The request's `permission_suggestions` become the card's third choice (offer); chosen, they are sent
 as `updatedPermissions` with destination session, kept on the chat's meta (RULES_KEY), and put in each later process's
@@ -314,11 +315,12 @@ class Run:
     # (the analyst's excluded commands, their Bash ask rules) of an `unasked` session whose Bash runs in the sandbox,
     # for ask
     sandbox_rule: tuple[list[str], list[str]] | None = None
-    mode: str | None = None  # the mode it runs in, one of modes.MODES (module note, permissions)
+    mode: str = "manual"  # the mode it runs in, one of modes.MODES (module note, permissions)
     patient: bool = False  # a request waits until the analyst answers, else `wait_s` (module note, permissions)
     wait_s: float | None = None  # None for PERMISSION_WAIT_S
     on_expired: Callable[["Run", dict[str, Any]], None] | None = None  # told of each request denied unanswered
     groups: dict[str, str] = field(default_factory=dict)  # web rule -> the id of the request waiting for it (module note, the web)
+    shown: dict[str, int] = field(default_factory=dict)  # answered request id -> how many joined calls its card listed
     asking: dict[str, tuple[str | None, str]] = field(default_factory=dict)  # request id -> (agent that asked, tool)
     # the analyst's answers to calls auto mode refused, by (agent, tool, input): (allowed, time.monotonic() when), which
     # the call made again meets before it runs (module note, auto mode)
@@ -2143,11 +2145,12 @@ async def ask(c: str, key: str | None, tool_name: str, inp: Any, agent_id: str |
     unjudged = event == DENIED and bool(CLASSIFIER_DOWN.search(reason or ""))
     if unjudged and (again := await _recheck(run, agent_id, tool_name, inp, reason, tool_use_id)) is not None:
         return again
-    first = run.groups.get(web) if web else None
-    also = _also_text(tool_name, inp)
-    if (first is not None and first in run.waits and not run.waits[first].done() and also is not None
-            and len(next((p.get("also") or [] for p in _pending(c, run.chat) if p.get("id") == first), [])) < WEB_ALSO_MAX):
-        return await _join(run, first, also, tool_name, inp, agent_id, event, tool_use_id, granted)
+    also, tried = _also_text(tool_name, inp), set()
+    while (also is not None and (first := run.groups.get(web) if web else None) is not None and first not in tried
+           and first in run.waits and not run.waits[first].done() and len(_also(run, first)) < WEB_ALSO_MAX):
+        tried.add(first)
+        if (joined := await _join(run, first, also, tool_name, inp, agent_id, event, tool_use_id, granted)) is not None:
+            return joined
     rid = uuid.uuid4().hex[:10]
     whole = json.dumps(inp, ensure_ascii=False, default=str) if inp is not None else ""
     command = _command(tool_name, inp)
@@ -2256,19 +2259,30 @@ def _also_text(tool_name: str, inp: Any) -> str | None:
     return text if isinstance(text, str) and text.strip() and len(text) <= ALSO_CHARS else None
 
 
+def _also(run: Run, rid: str) -> list[str]:
+    """The later calls listed on the card of the waiting request `rid`."""
+    return next((p.get("also") or [] for p in _pending(run.c, run.chat) if p.get("id") == rid), [])
+
+
 async def _join(run: Run, first: str, what: str, tool_name: str, inp: Any, agent_id: str | None, event: str,
-                tool_use_id: str | None, granted: dict[str, Any]) -> dict[str, Any]:
+                tool_use_id: str | None, granted: dict[str, Any]) -> dict[str, Any] | None:
     """A web call whose site, or search, a waiting request `first` of the same session asks for already: `what` is
-    listed on that request's card (`also`) and the call gets its answer."""
+    listed on that request's card (`also`) and the call gets its answer. None when it must be asked on its own: it could
+    not be listed, or the analyst allowed `first` before the card showed it."""
     fut = run.waits[first]
-    with contextlib.suppress(Exception):
+    at = len(_also(run, first))
+    try:
         agents.update_agent(run.c, run.chat, permissions=[
             {**p, "also": [*(p.get("also") or []), what]} if p.get("id") == first else p
             for p in _pending(run.c, run.chat)])
+    except Exception:  # noqa: BLE001 — unlisted, it is asked on its own
+        return None
     agents.log_permission(run.c, "asked", chat=run.chat, session=run.key, tool=tool_name, what=what, agent_id=agent_id,
                           joined=first)
     allow = await asyncio.shield(fut)
     allow = True if allow in (ALWAYS, COVERED) else allow
+    if allow is True and at >= run.shown.get(first, 0):
+        return None
     if event == DENIED and isinstance(allow, bool):
         _remember(run, agent_id, tool_name, inp, allow, tool_use_id)
     return granted if allow is True else {"behavior": "deny", "message": _deny_message(run, allow)}
@@ -2518,14 +2532,16 @@ def before_call(c: str, key: str | None, tool_name: str, inp: Any, agent_id: str
     return allowed if _use_pass(run, agent_id, tool_name) else {}
 
 
-def answer(c: str, chat: str, request_id: str, allow: bool, always: bool = False) -> bool:
+def answer(c: str, chat: str, request_id: str, allow: bool, always: bool = False, shown: int = 0) -> bool:
     """The analyst's answer to a pending request of the session whose chat is `chat`, `always` for the card's "don't
-    ask again", which allows it with the updates offered for it (module note, don't ask again); for a request denied
-    unanswered, its dismissal from the card. False when there is none by that id."""
+    ask again", which allows it with the updates offered for it (module note, don't ask again), covering the first
+    `shown` calls that joined it (module note, the web); for a request denied unanswered, its dismissal from the card.
+    False when there is none by that id."""
     run = _by_chat(c, chat)
     fut = run.waits.get(request_id) if run is not None else None
     if run is None or fut is None or fut.done():
         return dismiss(c, chat, request_id)
+    run.shown[request_id] = shown
     fut.set_result(ALWAYS if allow and always and run.offers.get(request_id) else bool(allow))
     return True
 
@@ -2786,6 +2802,7 @@ class PermissionAnswer(BaseModel):
     id: str
     allow: bool
     always: bool = False  # the card's "don't ask again"
+    shown: int = 0  # how many of the calls that joined it the card listed
 
 
 @router.post("/ws/{c}/chats/{chat}/resume")
@@ -2808,7 +2825,7 @@ async def retry_route(c: str, chat: str) -> dict[str, Any]:
 
 @router.post("/ws/{c}/chats/{chat}/permission")
 async def permission_route(c: str, chat: str, body: PermissionAnswer) -> dict[str, Any]:
-    if not answer(c, chat, body.id, body.allow, body.always):
+    if not answer(c, chat, body.id, body.allow, body.always, body.shown):
         raise HTTPException(404, "no such permission request is waiting")
     return {"answered": body.id, "allow": body.allow}
 
