@@ -589,14 +589,15 @@ def scratch_hooks(work: Path) -> dict[str, Any]:
                                                           "timeout": SANDBOX_HOOK_TIMEOUT_S}]}]}
 
 
-def permission_hooks(c: str, auto: bool = False, session: str = "", url: str = "") -> dict[str, Any]:
+def permission_hooks(c: str, auto: bool = False, session: str = "", home: str = "") -> dict[str, Any]:
     """The `hooks` that hand every permission request of a session, its subagents and its workflow agents to ask, and every
     call auto mode refused: permission_hook.py, run without site-packages, with a day to wait for the analyst. `auto` adds
     it before each call, where the server answers whether the analyst allowed that call after a refusal. `session` and
-    `url` name the session and this server on the hook's command line, for a session whose environment does not."""
+    `home` name the session and thimble's home (where server.json is) on the hook's command line, for a session whose
+    environment does not."""
     command = f"{shlex.quote(sys.executable)} -S {shlex.quote(str(PERMISSION_HOOK))} --ws {shlex.quote(c)}"
     command += f" --session {shlex.quote(session)}" if session else ""
-    command += f" --url {shlex.quote(url)}" if url else ""
+    command += f" --home {shlex.quote(home)}" if home else ""
 
     def entry(timeout: int) -> list[dict[str, Any]]:
         return [{"matcher": "*", "hooks": [{"type": "command", "command": command, "timeout": timeout}]}]

@@ -12,13 +12,14 @@ import asyncio
 import io
 import json
 import sys
+import urllib.request
 from pathlib import Path
 
 import pytest
 from fastapi import HTTPException
 
-from app import (agent_session, agents, channel, config, orient_session, orientation, permission_hook,
-                 session, tools)
+from app import (agent_session, agents, channel, config, hook_auth, orient_session, orientation,
+                 permission_hook, session, tools)
 
 CORPUS = "mini"
 KEY = orient_session.KEY
@@ -261,10 +262,19 @@ RULE = {"type": "addRules", "rules": [{"toolName": "Bash", "ruleContent": "npm t
         "destination": "localSettings"}
 
 
-def test_the_permission_hook_hands_the_request_to_the_server_and_prints_its_decision(monkeypatch, capsys):
+def test_the_permission_hook_hands_the_request_to_the_server_and_prints_its_decision(monkeypatch, capsys, tmp_path):
+    """The hook signs its request with the token in server.json and believes only an answer that proves the server holds
+    it too (app/hook_auth.py)."""
     sent: list[tuple[str, dict]] = []
+    (tmp_path / "server.json").write_text(json.dumps({"port": 8311, "token": "tok"}))
+    monkeypatch.setenv("THIMBLE_HOME", str(tmp_path))
+    proof = {"ok": True}
 
     class Resp(io.BytesIO):
+        def __init__(self, data: bytes, nonce: str) -> None:
+            super().__init__(data)
+            self.headers = {"X-Thimble-Proof": hook_auth.sign("tok", "server", nonce) if proof["ok"] else "forged"}
+
         def __enter__(self):
             return self
 
@@ -274,12 +284,13 @@ def test_the_permission_hook_hands_the_request_to_the_server_and_prints_its_deci
     answer = {"behavior": "deny", "message": "Denied from thimble's browser."}
 
     def urlopen(req, timeout=None):
+        nonce = req.get_header("X-thimble-nonce")
+        assert req.get_header("X-thimble-auth") == hook_auth.sign("tok", "hook", nonce)
         sent.append((req.full_url, json.loads(req.data)))
         assert timeout == permission_hook.TIMEOUT
-        return Resp(json.dumps(answer).encode())
+        return Resp(json.dumps(answer).encode(), nonce)
 
-    monkeypatch.setattr(permission_hook.urllib.request, "urlopen", urlopen)
-    monkeypatch.setattr(permission_hook, "server_url", lambda: "http://127.0.0.1:8311")
+    monkeypatch.setattr(urllib.request, "urlopen", urlopen)
     monkeypatch.setenv("THIMBLE_SESSION", KEY)
     hook = {"hook_event_name": "PermissionRequest", "tool_name": "Bash", "tool_input": {"command": "ls"},
             "agent_id": "a1", "agent_type": "general-purpose", "session_id": "sid"}
@@ -290,6 +301,10 @@ def test_the_permission_hook_hands_the_request_to_the_server_and_prints_its_deci
                       "agent_id": "a1", "agent_type": "general-purpose"})]
     assert json.loads(capsys.readouterr().out) == {"hookSpecificOutput": {"hookEventName": "PermissionRequest",
                                                                           "decision": answer}}
+    proof["ok"] = False
+    monkeypatch.setattr("sys.stdin", io.StringIO(json.dumps(hook)))
+    assert permission_hook.main(["--ws", CORPUS]) == 0 and capsys.readouterr().out == "", "an answer without the proof"
+    proof["ok"] = True
     answer = {"behavior": "allow", "updatedInput": {"command": "ls"}}
     monkeypatch.setattr("sys.stdin", io.StringIO(json.dumps(hook)))
     permission_hook.main(["--ws", CORPUS])
@@ -303,10 +318,7 @@ def test_the_permission_hook_hands_the_request_to_the_server_and_prints_its_deci
     assert json.loads(capsys.readouterr().out)["hookSpecificOutput"]["decision"] == {"behavior": "allow",
                                                                                      "updatedPermissions": updates}
 
-    def down(req, timeout=None):
-        raise OSError("connection refused")
-
-    monkeypatch.setattr(permission_hook.urllib.request, "urlopen", down)
+    (tmp_path / "server.json").unlink()
     monkeypatch.setattr("sys.stdin", io.StringIO(json.dumps(hook)))
     assert permission_hook.main(["--ws", CORPUS]) == 0 and capsys.readouterr().out == "", "no server: no decision"
     monkeypatch.delenv("THIMBLE_SESSION")

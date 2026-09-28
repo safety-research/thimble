@@ -13,10 +13,11 @@ only the hook; using both would ask twice for foreground requests. Claude Code w
 timeout in the session's settings is a day). In auto mode a refused call never reaches PermissionRequest, hence
 PermissionDenied with `retry` plus a PreToolUse `allow`.
 
-It posts the event to POST {server}/api/ws/{ws}/sessions/permission, waits for the answer and prints Claude Code's hook
-output. The session is `--session` when given, else THIMBLE_SESSION, and the server `--url` when given, else
-call_ref.server_url's. Standard library only, run with `python -S`. Anything unexpected prints nothing: a request is then
-denied, a refusal stays refused, and before a call auto mode decides.
+It posts the event to POST {server}/api/ws/{ws}/sessions/permission with call_ref.post, which signs it with the token in
+server.json and believes only an answer that carries the server's proof (app/hook_auth.py), waits for the answer and
+prints Claude Code's hook output. The session is `--session` when given, else THIMBLE_SESSION, and thimble's home
+`--home` when given, else THIMBLE_HOME, else ~/.thimble. Standard library only, run with `python -S`. Anything
+unexpected prints nothing: a request is then denied, a refusal stays refused, and before a call auto mode decides.
 """
 from __future__ import annotations
 
@@ -25,7 +26,6 @@ import json
 import os
 import sys
 import urllib.parse
-import urllib.request
 from pathlib import Path
 
 REQUEST, DENIED, PRE = "PermissionRequest", "PermissionDenied", "PreToolUse"
@@ -34,15 +34,14 @@ TIMEOUT = 86_400  # the hook's own timeout in the session's settings for a reque
 PRE_TIMEOUT = 10  # its timeout before each call, which the server answers at once (agent_session.permission_hooks)
 
 
-def server_url() -> str:
-    """The server's address, as call_ref.server_url finds it, loaded from the file beside this one, since the hook runs
-    as a script outside the app package."""
+def post(path: str, body: dict, timeout: float, home: str) -> object:
+    """call_ref.post, loaded from the file beside this one, since the hook runs as a script outside the app package."""
     spec = importlib.util.spec_from_file_location("thimble_call_ref", Path(__file__).with_name("call_ref.py"))
     if spec is None or spec.loader is None:
         raise OSError("call_ref.py is missing")
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
-    return mod.server_url()
+    return mod.post(path, body, timeout, home)
 
 
 def decision(answer: object, event: str = REQUEST) -> dict | None:
@@ -89,12 +88,9 @@ def main(argv: list[str]) -> int:
         fields["reason"] = str(hook.get("reason") or "")
     if event == REQUEST and isinstance(hook.get("permission_suggestions"), list):
         fields["suggestions"] = hook["permission_suggestions"]
-    body = json.dumps(fields).encode("utf-8")
     try:
-        url = f"{(arg(argv, '--url') or server_url()).rstrip('/')}/api/ws/{urllib.parse.quote(ws, safe='')}/sessions/permission"
-        req = urllib.request.Request(url, data=body, method="POST", headers={"Content-Type": "application/json"})
-        with urllib.request.urlopen(req, timeout=PRE_TIMEOUT - 2 if event == PRE else TIMEOUT) as resp:
-            out = decision(json.loads(resp.read().decode("utf-8") or "{}"), event)
+        out = decision(post(f"/api/ws/{urllib.parse.quote(ws, safe='')}/sessions/permission", fields,
+                            PRE_TIMEOUT - 2 if event == PRE else TIMEOUT, arg(argv, "--home")), event)
     except (OSError, ValueError):
         return 0
     if out is not None:

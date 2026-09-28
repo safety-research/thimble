@@ -1,5 +1,6 @@
-"""The routes only thimble's plugin calls: its hooks' (plugin/bin/.thimble-watch, and bin/thimble-agents for
-/api/agents) and its MCP shim's (bin/thimble-mcp: the channel subscription, relayed permission prompts, tool calls).
+"""The routes only thimble's plugin and hooks call: the plugin's hooks' (plugin/bin/.thimble-watch, and
+bin/thimble-agents for /api/agents), its MCP shim's (bin/thimble-mcp: the channel subscription, relayed permission
+prompts, tool calls), and the hooks of the sessions thimble starts (app/permission_hook.py, app/call_ref.py).
 
 Any process on the machine can reach a loopback port, and the plugin runs in every Claude Code session that has it,
 so each side proves it holds the token the supervisor writes into <home>/server.json (readable by its owner alone,
@@ -15,6 +16,7 @@ import hashlib
 import hmac
 import json
 import os
+import re
 from pathlib import Path
 
 from starlette.datastructures import Headers, MutableHeaders
@@ -25,6 +27,7 @@ HOOK_PATHS = frozenset({
 })
 SHIM_PATHS = frozenset({"/api/channel", "/api/channel/permission"})
 TOOL_PREFIX = "/api/tools/"  # POST /api/tools/<name>; GET /api/tools/holdings is the CLI's and stays open
+SESSION_HOOK_PATHS = re.compile(r"/api/ws/[^/]+/(sessions/permission|calls/ref)")
 NONCE_HEADER = "x-thimble-nonce"
 AUTH_HEADER = "x-thimble-auth"
 PROOF_HEADER = "x-thimble-proof"
@@ -45,7 +48,8 @@ def headers(token: str, nonce: str) -> dict[str, str]:
 
 def guarded(method: str, path: str) -> bool:
     """Whether a request needs the proof: a hook's or shim route's, or a tool call."""
-    return path in HOOK_PATHS or path in SHIM_PATHS or (method == "POST" and path.startswith(TOOL_PREFIX))
+    return (path in HOOK_PATHS or path in SHIM_PATHS or (method == "POST" and path.startswith(TOOL_PREFIX))
+            or SESSION_HOOK_PATHS.fullmatch(path) is not None)
 
 
 def token() -> str:
