@@ -386,7 +386,7 @@ function context() {
   const lines = [
     `The ${thimble.view && thimble.view.name ? thimble.view.name : 'Swarm'} view (view:${slug}) draws a row per account, columns in event order and as cards the records the labels that are on give a highlighted value, coloured by value, linked by replies, names of other accounts and the record before on the same place.`,
   ]
-  if (!labelsOn()) lines.push(`No label is on, so it shows the records of the places the most accounts acted on, which need not bear on the question.`)
+  if (!labelsOn()) lines.push(`No label is on, so it shows the records that answer or name another account on the places that hold the most of them, which need not bear on the question.`)
   else {
     lines.push(`Now: ${D.cards.length ? `cards ${D.offset + 1}–${D.offset + D.cards.length} of ${fmt(D.total)}` : 'no cards'}; labels on: ${on.join(', ')}${only.length ? `; the legend keeps ${only.map((o) => o.value).join(', ')}` : ''}${labelState.filter ? `; filter: ${labelState.filter.label} = ${labelState.filter.value}` : ''}.`)
     if (D.cards.length) lines.push(`Cards: ${D.cards.slice(0, CARD_REFS_SENT).map((c) => c.ref).join(', ')}${D.cards.length > CARD_REFS_SENT ? ', …' : ''}`)

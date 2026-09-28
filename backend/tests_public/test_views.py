@@ -264,13 +264,16 @@ async def test_every_worked_example_s_page_loads_headless_at_its_first_place(nam
 
 
 async def test_the_swarm_view_draws_as_cards_the_records_a_label_marks_with_the_links_they_carry(samples, inproc, bound):
-    """A question from the Swarm view is answered with labels, and the chart is what they mark: a regex label over the
-    sample's chat and wiki marks the records about the gain, and once it is on the chart's cards are exactly those
-    records in event order, coloured by the label's value, with a reply the chat carries and the save before on the
-    same page as links; a save that changed one value reads as that change."""
+    """With no label on, the Swarm view opens on the records where accounts answer or name each other. A question from
+    it is answered with labels, and the chart is what they mark: a regex label over the sample's chat and wiki marks the
+    records about the gain, and once it is on the chart's cards are exactly those records in event order, coloured by
+    the label's value, with a reply the chat carries and the save before on the same page as links; a save that changed
+    one value reads as that change."""
     from app import concepts
 
     slug = _save_example("swarm")
+    first = await views.reader_call("swarm", slug, "records", {"op": "chart"})
+    assert first["source"] == "addressed" and [p["name"] for p in first["places"]] == ["help-desk", "Night-14/Schedule"]
     s = await concepts.apply_scoped("swarm", scope="files", name="gain", kind="regex", text=r"(?i)\bgain\b|1\.84|1\.48",
                                     values=["about the gain", "other"], paths=["chat/*.jsonl", "wiki/pages/**/*.jsonl"],
                                     limit=None, comment=False, filter=False, created_by="test", chat=None, group=None, card=False)

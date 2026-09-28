@@ -13,7 +13,8 @@
 #           the save before it on its place; any other action is a post, and what it did is what it says
 #   reply   a field naming the id of the record it answers (REPLY_KEYS)
 # A record with an account and a goal field (GOAL_KEYS) but no text is a roster row: its goal heads the account's row.
-# A record with a place and a title but no text names its place (a page index). Other records are left alone.
+# A record with a place and a title but no text names its place (a page index), as does an action's title field
+# (TITLE_KEYS) for a place nothing else names. Other records are left alone.
 #
 # The sample: one night of a survey team's shared wiki and chat, and its roster. roster.csv (`account`, `objective`,
 # `joined`); wiki/index.jsonl (`slug`, `title`, `created`, `by`); wiki/pages/<slug>.jsonl, one page's saves (`rev`,
@@ -38,7 +39,9 @@
 # The chart: the cards are the records the labels that are on give a highlighted value (thimble.marked), kept by the
 # label filter (thimble.kept), of the values the page's legend keeps (`only`, all when none), CARDS_MAX at a time in
 # event order, each page taking the values in turn so the first shows them all. With no label on they are the actions
-# on the PLACES_SHOWN places the most accounts acted on. Links between cards come from the records:
+# that address another account (a reply to another account's record, or what it wrote naming another account that acts
+# on its place) on the PLACES_SHOWN places where they are most and most of what is done (their count times their
+# share). Links between cards come from the records:
 #   reply       the card's record answers the other card's record (its reply field)
 #   names       the card's text names the other card's account (the latest card of that account before it)
 #   same place  the card before it on its place, by another account
@@ -71,6 +74,7 @@ REPLY_KEYS = ("reply_to", "parent", "in_reply_to", "parent_id")
 ID_KEYS = ("id", "rev_id", "message_id")
 SEQ_KEYS = ("rev", "seq", "revision")
 GOAL_KEYS = ("objective", "goal", "brief", "purpose", "role")
+TITLE_KEYS = ("thread_title", "title", "subject")  # an action's name for its place, when nothing else names it
 CARDS_MAX = 40
 DETECT_FILES = 400  # record files applies() reads, the shallowest first
 DETECT_RECORDS = 20_000  # records it reads of each
@@ -211,11 +215,12 @@ def _common_dir(paths):
 
 def build_index(paths):
     """{files: {path: {offsets, kind, fields, n}}, recs: {ref: action}, order: [action refs in event order], same:
-    {ref of a repeat: ref of the first}, places: {place: {ref, title, refs, accounts}}, accounts: {account: {n, goal,
-    goal_refs}}, problems}. An action keeps its account, place, time, kind, the save before it and the record it replies
-    to; texts are read back from their lines when shown."""
+    {ref of a repeat: ref of the first}, places: {place: {ref, title, refs, accounts, addressed}}, accounts: {account:
+    {n, goal, goal_refs}}, problems}. An action keeps its account, place, time, kind, the save before it, the record it
+    replies to and whether it addresses another account (_addressing); texts are read back from their lines when
+    shown."""
     problems = {"count": 0, "examples": []}
-    files, recs, same, actions, places, roster = {}, {}, {}, [], {}, {}
+    files, recs, same, actions, places, roster, texts, titles = {}, {}, {}, [], {}, {}, {}, {}
     parsed = {p: _rows(p, problems) for p in sorted(paths)}
     fields = {p: _fields(rows) for p, rows in parsed.items()}
     placeless = [p for p, f in fields.items() if ("actor" in f or "anon" in f) and "text" in f and "place" not in f]
@@ -263,6 +268,8 @@ def build_index(paths):
             r = {"ref": ref, "account": who, "place": place, "t": t, "known": known, "kind": "save" if seq else "post",
                  "id": rid, "reply": _first(rec, REPLY_KEYS)[1], "before": None, "reply_ref": None}
             recs[ref] = r
+            texts[ref] = rec[f["text"]]
+            titles[ref] = _first(rec, TITLE_KEYS)[1]
             actions.append(r)
             files[path]["n"] += 1
     actions.sort(key=lambda r: (r["t"], r["ref"]))
@@ -277,7 +284,7 @@ def build_index(paths):
             by_id[(r["place"], r["id"])] = r["ref"]
             by_id.setdefault((None, r["id"]), r["ref"])
         del r["reply"]
-        p = places.setdefault(r["place"], {"ref": r["ref"], "title": r["place"], "refs": [], "accounts": {}})
+        p = places.setdefault(r["place"], {"ref": r["ref"], "title": titles[r["ref"]] or r["place"], "refs": [], "accounts": {}})
         p["refs"].append(r["ref"])
         p["accounts"][r["account"]] = p["accounts"].get(r["account"], 0) + 1
         a = accounts.setdefault(r["account"], {"n": 0})
@@ -285,6 +292,7 @@ def build_index(paths):
     for name, a in accounts.items():
         row = roster.get(name.lower()) or {}
         a["goal"], a["goal_refs"] = row.get("goal", ""), row.get("refs", [])
+    _addressing(actions, recs, places, texts)
     return {"files": files, "recs": recs, "order": [r["ref"] for r in actions], "same": same,
             "places": {k: v for k, v in places.items() if v["refs"]}, "accounts": accounts, "problems": problems}
 
@@ -364,6 +372,25 @@ def _claims(paths):
         else:
             out += sorted({f"{d + '/' if d else ''}*.{p.rsplit('.', 1)[-1]}" for p in ps})
     return out
+
+
+def _addressing(actions, recs, places, texts):
+    """Mark each action that addresses another account (`to`): it replies to another account's record, or what it
+    wrote (a save's lines that the save before it on its place lacked) names, as the account is written, another
+    account that acts on its place; count them per place (`addressed`)."""
+    who = {p: set(v["accounts"]) for p, v in places.items()}
+    last = {}
+    for r in actions:
+        text = texts[r["ref"]]
+        said = text
+        if r["kind"] == "save":
+            before = set(last.get(r["place"], "").splitlines())
+            said = "\n".join(s for s in text.splitlines() if s not in before)
+            last[r["place"]] = text
+        others = who[r["place"]] - {r["account"]}
+        reply = recs.get(r["reply_ref"]) if r["reply_ref"] else None
+        r["to"] = bool(reply and reply["account"] != r["account"]) or bool(others & {w.lstrip("@") for w in WORD.findall(said)})
+        places[r["place"]]["addressed"] = places[r["place"]].get("addressed", 0) + r["to"]
 
 
 # ------------------------------------------------------------------------------------------------ reading records back
@@ -494,9 +521,11 @@ def _chart(index, query):
             picked = [(ref, got) for ref, got in picked if ref in keep or any((x["label"], x["value"]) in only for x in got)]
         picked = _by_turns(picked, mark_at)
     else:
-        ranked = sorted(index["places"], key=lambda p: (-len(index["places"][p]["accounts"]), p))
-        source, wanted = "busiest", set(ranked[:PLACES_SHOWN])
-        picked = [(ref, []) for ref in index["order"] if index["recs"][ref]["place"] in wanted and kept(ref)]
+        ranked = sorted(index["places"], key=lambda p: (-(v := index["places"][p])["addressed"] ** 2 / len(v["refs"]),
+                                                        -len(v["accounts"]), p))
+        source, wanted = "addressed", set(ranked[:PLACES_SHOWN])
+        picked = [(ref, []) for ref in index["order"]
+                  if (r := index["recs"][ref])["place"] in wanted and (r["to"] or ref in keep) and kept(ref)]
     offset = max(0, min(int(query.get("offset") or 0), max(0, len(picked) - 1)))
     cards, by_ref, said = [], {}, {}
     for n, (ref, got) in enumerate(picked[offset: offset + CARDS_MAX], offset + 1):
@@ -522,7 +551,8 @@ def _chart(index, query):
     places = [{"tag": t, "name": p, "title": index["places"][p]["title"], "ref": index["places"][p]["ref"],
                "n": len(index["places"][p]["refs"]), "accounts": len(index["places"][p]["accounts"])}
               for p, t in tags.items()]
-    title = "; ".join(lab["name"] for lab in on["labels"]) if source == "labels" else "The places the most accounts acted on"
+    title = ("; ".join(lab["name"] for lab in on["labels"]) if source == "labels"
+             else "Where accounts most answer or name each other")
     return {"title": title, "source": source, "cards": cards, "rows": rows, "places": places, "links": links,
             "marks": marks, "mark_counts": per_mark, "offset": offset, "total": len(picked), "page": CARDS_MAX,
             "counts": {"records": len(index["order"]), "accounts": len(index["accounts"]), "places": len(index["places"])},
