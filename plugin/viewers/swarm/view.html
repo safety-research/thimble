@@ -34,7 +34,10 @@
   #pager { display: inline-flex; align-items: center; gap: 4px; font: 400 var(--text-xs) / 1 var(--font-body); color: var(--text-secondary); font-variant-numeric: tabular-nums; }
   #problems { margin: 7px 0 0; font: 400 var(--text-xs) / 1.4 var(--font-body); color: var(--status-warning); overflow-wrap: anywhere; }
   .lg { display: inline-flex; align-items: center; gap: 6px; height: 22px; padding: 0 6px 0 4px; border-radius: var(--radius-chip); font: 400 var(--text-xs) / 1 var(--font-body); color: var(--text-secondary); }
+  .lg { cursor: pointer; }
+  .lg:hover { background: var(--surface-hover); color: var(--text-primary); }
   .lg .n { color: var(--text-tertiary); font-variant-numeric: tabular-nums; }
+  .lg.off { opacity: .38; }
   .swb { display: inline-grid; place-items: center; width: 16px; height: 16px; margin: 0 -4px; border-radius: 3px; flex: none; cursor: pointer; }
   .swb:hover { background: var(--track-bg); }
 
@@ -156,10 +159,10 @@
 </head>
 <body>
 <div id="bar">
-  <form id="askf" autocomplete="off" data-anchor-name="Question box">
-    <input id="ask" class="field" type="text" placeholder="Ask how these agents coordinated" aria-label="Ask a question about these records" spellcheck="false">
-    <button id="askb" class="btn btn-secondary btn-sm" type="submit">Ask</button>
-  </form>
+  <div id="askf" data-anchor-name="Question box">
+    <input id="ask" class="field" type="text" placeholder="Ask how these agents coordinated" aria-label="Ask a question about these records" autocomplete="off" spellcheck="false">
+    <button id="askb" class="btn btn-secondary btn-sm" type="button">Ask</button>
+  </div>
   <p id="asked" role="status" hidden></p>
   <div class="row" style="margin-top:8px">
     <p id="title"></p>
@@ -173,6 +176,7 @@
     <div id="near" class="seg seg-track seg-sm" aria-label="Linked cards">
       <button class="seg-opt active" data-v="0">Matches</button><button class="seg-opt" data-v="1">With linked</button>
     </div>
+    <div id="group" class="seg seg-track seg-sm" aria-label="Rows"><button class="seg-opt active" data-v="account">By account</button><button class="seg-opt" data-v="sig">By signature</button></div>
     <button id="clear" class="btn btn-ghost btn-sm">Clear filters</button>
     <span class="grow"></span>
     <span id="pager"><button id="prev" class="btn btn-ghost btn-sm" aria-label="Earlier cards">‹</button><span id="span"></span><button id="next" class="btn btn-ghost btn-sm" aria-label="Later cards">›</button></span>
@@ -185,7 +189,6 @@
     <p id="empty" hidden></p>
     <div id="grid">
       <div id="corner"><span class="hcap" id="rowcap">Account · goal</span>
-        <div id="group" class="seg seg-track seg-sm" aria-label="Rows"><button class="seg-opt active" data-v="account">Account</button><button class="seg-opt" data-v="sig">Signature</button></div>
         <div id="zoom" class="seg seg-track seg-sm" aria-label="Zoom"><button class="seg-opt" data-v="fit">Fit</button><button class="seg-opt active" data-v="1">100%</button></div>
       </div>
       <div id="cols"></div>
@@ -289,6 +292,7 @@ let near = false
 let group = 'account' // 'account' or 'sig'
 let zoom = 1 // 1 or 'fit'
 let offset = 0
+let only = [] // the label values the legend keeps, [{label, value}]; all when empty
 let sel = null // {kind: card|row|link|record, id|key|ref}
 let hover = null
 let keepRef = null // the record a citation opened, shown whatever the labels mark
@@ -317,7 +321,7 @@ async function load() {
   const seq = ++loadSeq
   let data
   try {
-    data = await thimble.fetch({ op: 'chart', offset, keep: keepRef ? [keepRef] : [] })
+    data = await thimble.fetch({ op: 'chart', offset, only, keep: keepRef ? [keepRef] : [] })
   } catch (e) {
     const p = document.getElementById('problems')
     p.hidden = false
@@ -378,14 +382,14 @@ function context() {
   const lines = [
     `The ${thimble.view && thimble.view.name ? thimble.view.name : 'Swarm'} view (view:${slug}) draws a row per account, columns in event order and as cards ${shown}, coloured by value, linked by replies, names of other accounts and the record before on the same place. A label that is on becomes its cards.`,
     `The records: ${D.about}`,
-    `Now: ${D.cards.length ? `cards ${D.offset + 1}–${D.offset + D.cards.length} of ${fmt(D.total)}` : 'no cards'}, of ${plural(rowsList.length, 'row')} on ${plural(D.places.length, 'place')}; labels on: ${on.length ? on.join(', ') : 'none'}${labelState.filter ? `; filter: ${labelState.filter.label} = ${labelState.filter.value}` : ''}.`,
+    `Now: ${D.cards.length ? `cards ${D.offset + 1}–${D.offset + D.cards.length} of ${fmt(D.total)}` : 'no cards'}, of ${plural(rowsList.length, 'row')} on ${plural(D.places.length, 'place')}; labels on: ${on.length ? on.join(', ') : 'none'}${only.length ? `; the legend keeps ${only.map((o) => o.value).join(', ')}` : ''}${labelState.filter ? `; filter: ${labelState.filter.label} = ${labelState.filter.value}` : ''}.`,
   ]
   if (D.cards.length) lines.push(`Cards: ${D.cards.slice(0, CARD_REFS_SENT).map((c) => c.ref).join(', ')}${D.cards.length > CARD_REFS_SENT ? ', …' : ''}`)
   const text = lines.join('\n')
   return text.length > CONTEXT_MAX ? text.slice(0, CONTEXT_MAX - 1) + '…' : text
 }
-document.getElementById('askf').addEventListener('submit', async (e) => {
-  e.preventDefault()
+// the frame's sandbox blocks a form's submission, so Enter and the button send the question themselves
+async function ask() {
   const input = document.getElementById('ask'), btn = document.getElementById('askb'), out = document.getElementById('asked')
   const question = input.value.trim()
   if (!question || !thimble.ask) return
@@ -403,7 +407,9 @@ document.getElementById('askf').addEventListener('submit', async (e) => {
   } finally {
     input.disabled = btn.disabled = false
   }
-})
+}
+document.getElementById('ask').addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); ask() } })
+document.getElementById('askb').addEventListener('click', ask)
 
 // ---------------------------------------------------------------- filters
 function hay(c) {
@@ -499,26 +505,35 @@ function renderBar(v) {
   const ids = on.map((l) => l.id).filter(Boolean).join(' ')
   if (ids) cb.dataset.label = ids
   else delete cb.dataset.label
-  renderLegend(v)
+  renderLegend()
 }
 function toggleSet(set, x, add) {
   if (add) set.has(x) ? set.delete(x) : set.add(x)
   else if (set.size === 1 && set.has(x)) set.clear()
   else { set.clear(); set.add(x) }
 }
-// while a label is on: its values with the cards each marks, a value's swatch opening thimble's palette
-function renderLegend(v) {
+// while a label is on: its values with the records each marks, a click keeping only that value's cards (shift-click
+// adding it), a value's swatch opening thimble's palette
+function renderLegend() {
   const el = document.getElementById('legend')
   el.hidden = !labelsOn()
   el.innerHTML = ''
   if (el.hidden) return
-  const n = new Map()
-  for (const c of v.cards) for (let j = 0; j < D.marks.length; j++) if (c.mb & (1 << j)) n.set(j, (n.get(j) || 0) + 1)
+  const kept = (m) => !only.length || only.some((o) => o.label === m.label && o.value === m.value)
   D.marks.forEach((m, j) => {
     const label = (labelState.all || labelState.labels).find((l) => l.name === m.label)
-    const it = h('span', 'lg')
+    const it = h('span', `lg${kept(m) ? '' : ' off'}`)
     if (label && label.id) it.dataset.label = label.id
-    it.append(swatch(m.colour, label, m.value), h('span', null, labelState.labels.length > 1 ? `${m.label}: ${m.value}` : m.value), h('span', 'n', fmt(n.get(j) || 0)))
+    it.title = 'Click: only these cards · Shift-click: add them'
+    it.append(swatch(m.colour, label, m.value), h('span', null, labelState.labels.length > 1 ? `${m.label}: ${m.value}` : m.value), h('span', 'n', fmt((D.mark_counts || [])[j] || 0)))
+    it.onclick = async (e) => {
+      const at = only.findIndex((o) => o.label === m.label && o.value === m.value)
+      if (e.shiftKey) only = at >= 0 ? only.filter((_, i) => i !== at) : [...only, { label: m.label, value: m.value }]
+      else only = at >= 0 && only.length === 1 ? [] : [{ label: m.label, value: m.value }]
+      offset = 0
+      sel = null
+      if (await load()) refresh()
+    }
     el.append(it)
   })
 }
@@ -1111,9 +1126,9 @@ async function renderDetail() {
     const r = rowBy.get(sel.key)
     if (!r) return
     box.dataset.anchor = `view:${slug}/agent/${r.own ? r.key : r.accounts[0]}`
-    const only = h('button', 'btn btn-ghost btn-sm', F.row === r.key ? 'All rows' : 'Only this row')
-    only.onclick = () => { F.row = F.row === r.key ? '' : r.key; refresh() }
-    box.append(detailHead([chip(group === 'sig' ? 'Signed name' : 'Account', 'chip chip-sans chip-tone-neutral'), only], null))
+    const solo = h('button', 'btn btn-ghost btn-sm', F.row === r.key ? 'All rows' : 'Only this row')
+    solo.onclick = () => { F.row = F.row === r.key ? '' : r.key; refresh() }
+    box.append(detailHead([chip(group === 'sig' ? 'Signed name' : 'Account', 'chip chip-sans chip-tone-neutral'), solo], null))
     box.append(rowBlock(r.key))
     const own = D.cards.filter((c) => rowOfCard.get(c.id) === r.key)
     box.append(sec('Cards', own.length))
@@ -1199,6 +1214,7 @@ thimble.onLabels(async (state) => {
   // a label turned on, off or still running (its count moving) changes the cards
   if (JSON.stringify([labelState.labels, labelState.filter, (labelState.all || []).map((l) => [l.id, l.count])]) === was) { renderPop(); return }
   offset = 0
+  only = only.filter((o) => labelState.labels.some((l) => l.name === o.label && (l.values || []).some((x) => x.name === o.value)))
   if (!(await load())) return
   refresh()
   renderPop()

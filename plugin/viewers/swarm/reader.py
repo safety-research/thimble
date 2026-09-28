@@ -36,7 +36,8 @@
 # what its save changed, the name it signs with and the accounts it names are read back from its line when it is shown.
 #
 # The chart: the cards are the records the labels that are on give a highlighted value (thimble.marked), kept by the
-# label filter (thimble.kept), in event order, CARDS_MAX at a time. With no label on they are the actions of the map a
+# label filter (thimble.kept), in event order, CARDS_MAX at a time, of the values the page's legend keeps (`only`, all
+# when none). With no label on they are the actions of the map a
 # swarm step wrote (swarm.json beside the view, in the workspace's orient folder or in the corpus, when there is one),
 # else the actions on the PLACES_SHOWN places the most accounts acted on. Links between cards come from the records:
 #   reply       the card's record answers the other card's record (its reply field)
@@ -441,9 +442,16 @@ def _chart(index, query):
     def kept(ref):
         return ref in keep or thimble.kept(ref)
 
+    per_mark = [0] * len(marks)
     if marks:
         source = "labels"
         picked = [(ref, got) for ref in index["order"] if ((got := thimble.marked(ref)) or ref in keep) and kept(ref)]
+        for _ref, got in picked:
+            for i in {mark_at[k] for x in got if (k := (x["label"], x["value"])) in mark_at}:
+                per_mark[i] += 1
+        only = {(x.get("label"), x.get("value")) for x in query.get("only") or () if isinstance(x, dict)}
+        if only:
+            picked = [(ref, got) for ref, got in picked if ref in keep or any((x["label"], x["value"]) in only for x in got)]
     elif m and m["refs"]:
         source, wanted = "map", set(m["refs"])
         picked = [(ref, []) for ref in index["order"] if ref in wanted and kept(ref)]
@@ -480,7 +488,7 @@ def _chart(index, query):
     title = ("; ".join(lab["name"] for lab in on["labels"]) if source == "labels"
              else (m["title"] or "The swarm map") if source == "map" else "The places the most accounts acted on")
     return {"title": title, "source": source, "cards": cards, "rows": rows, "places": places, "links": links,
-            "marks": marks, "offset": offset, "total": len(picked), "page": CARDS_MAX,
+            "marks": marks, "mark_counts": per_mark, "offset": offset, "total": len(picked), "page": CARDS_MAX,
             "counts": {"records": len(index["order"]), "accounts": len(index["accounts"]), "places": len(index["places"])},
             "about": _about(index), "problems": index["problems"]}
 
@@ -540,8 +548,9 @@ def _detail(index, ref):
 
 
 def records(index, query):
-    """{op: chart, offset?, keep?}: the chart (_chart), the records whose refs are in `keep` shown whatever the labels
-    and the filter keep. {op: record, ref}: one record in full (_detail)."""
+    """{op: chart, offset?, keep?, only?}: the chart (_chart), the records whose refs are in `keep` shown whatever the
+    labels and the filter keep, and only the records of the label values in `only` [{label, value}] when it is given.
+    {op: record, ref}: one record in full (_detail)."""
     query = query if isinstance(query, dict) else {}
     if query.get("op") == "record":
         return _detail(index, str(query.get("ref") or ""))
