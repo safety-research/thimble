@@ -1,0 +1,11 @@
+{
+  "run": "r2",
+  "started": 1778576400000,
+  "agents": [
+    "dune",
+    "elm",
+    "fern"
+  ],
+  "approvals": "2 (raised from 1 after r1)",
+  "brief": "Work the brindle backlog together: fix what you can, review each other's pull requests and keep main green. A pull request needs two approvals before it merges."
+}

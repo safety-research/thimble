@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import csv
 import io
 import json
 import os
@@ -674,23 +675,38 @@ async def test_every_worked_example_answers_the_checks_over_its_sample(name, sam
     assert any(re.search(r"#L\d+$", c) for c in checked), "sampled lines were checked beside the keys"
 
 
+def _fields(path: Path) -> set[str]:
+    """The field names of a sample file's records: a CSV file's columns, else the keys of its JSON objects, in one
+    document or one per line (a line that does not parse is left out)."""
+    text = path.read_text("utf-8")
+    if path.suffix == ".csv":
+        return set(next(csv.reader(text.splitlines()[:1]), []))
+    try:
+        docs = [json.loads(text)]
+    except ValueError:
+        docs = []
+        for ln in text.splitlines():
+            with contextlib.suppress(ValueError):
+                docs.append(json.loads(ln))
+    return {k for doc in docs for r in (doc if isinstance(doc, list) else [doc]) if isinstance(r, dict) for k in r}
+
+
 def test_each_worked_example_describes_its_files():
     """A builder maps an example onto other data by what its files hold: view.json's `data` and the reader's opening
-    comment name each claim, each claim matches files of the sample, and both name every field of the records in its
-    JSON-lines files."""
+    comment name each claim, each claim matches files of the sample, and the comment names every field of their
+    records, a JSON-lines record's in backticks or on a line of its own."""
     for name in EXAMPLES:
         d = views.EXAMPLES_DIR / name
         raw = json.loads((d / "view.json").read_text("utf-8"))
         comment = (d / "reader.py").read_text("utf-8").split("\nimport ", 1)[0]
-        sample = sorted(p.relative_to(d / "sample").as_posix() for p in (d / "sample").rglob("*") if p.is_file())
+        sample = [p.relative_to(d / "sample").as_posix() for p in sorted((d / "sample").rglob("*")) if p.is_file()]
         for claim in raw["claims"]:
             files = [f for f in sample if views.glob_matches(f, claim)]
-            assert files, (name, claim)
-            assert claim in raw["data"] and claim in comment, (name, claim)
-            for f in (f for f in files if f.endswith(".jsonl")):
-                fields = set().union(*(json.loads(ln) for ln in (d / "sample" / f).read_text("utf-8").splitlines()))
-                for field in fields:
-                    assert f"`{field}`" in raw["data"] and re.search(rf"^#   {field} ", comment, re.M), (name, f, field)
+            assert files and claim in raw["data"] and claim in comment, (name, claim)
+            for f in files:
+                for field in map(re.escape, _fields(d / "sample" / f)):
+                    named = rf"`{field}`|^#   {field} " if f.endswith(".jsonl") else rf"\b{field}\b"
+                    assert re.search(named, comment, re.M), (name, f, field)
 
 
 async def test_the_incident_timeline_example_puts_every_source_on_one_axis_and_gathers_its_units(samples, inproc,
@@ -802,34 +818,31 @@ async def test_the_incident_timeline_reader_cleans_what_its_sources_get_wrong(sa
     assert rec("agents.log", "action=pause")["re"] == at("chat/inc-312.json", "pausing autoheal")
 
 
+# the repository sample's runs: each one's team and the approvals a merge needs, and its number of pull requests
+REPO_RUNS = {"r1": (3, 1, 8), "r2": (3, 2, 7), "r3": (5, 1, 11), "r4": (5, 2, 9)}
+
+
 async def test_the_repository_example_compares_any_runs_and_filters_by_who_did_what(samples, inproc, bound):
     """Every run has a row of measures with its setup; choosing runs narrows the list to them and keeps every run's row,
     the compare grid lines the runs up issue by issue, and a record filter keeps the units with a record it picks."""
     name = "repository"
     slug = _save_example(name)
-    rows = [json.loads(ln) for ln in (samples / name / "repo.jsonl").read_text("utf-8").splitlines()]
-    setups = {r["run"]: (r["team"], r["approvals"]) for r in rows if r["kind"] == "run"}
     pulls = await views.reader_call(name, slug, "records", {"op": "view", "tab": "pulls"})
-    assert {r["run"]: (r["team"], r["approvals"]) for r in pulls["runs"]} == setups
-    assert pulls["total"] == len({(r["run"], r["number"]) for r in rows if r["kind"] == "pr"})
+    assert {r["run"]: (r["team"], r["approvals"], r["n"]) for r in pulls["runs"]} == REPO_RUNS
+    assert pulls["total"] == sum(n for _, _, n in REPO_RUNS.values())
     two = await views.reader_call(name, slug, "records", {"op": "view", "tab": "pulls", "runs": ["r2", "r4"]})
     assert {i["run"] for i in two["items"]} == {"r2", "r4"}
     assert {r["run"]: r["chosen"] for r in two["runs"]} == {"r1": False, "r2": True, "r3": False, "r4": True}
     grid = (await views.reader_call(name, slug, "records", {"op": "view", "tab": "issues", "compare": True}))["grid"]
-    backlog = {r["number"] for r in rows if r["kind"] == "issue" and r["run"] == "r1" and r["at"] == rows[0]["at"]}
-    assert backlog and all(set(g["cells"]) == set(setups) for g in grid if g["number"] in backlog)
+    backlog = [g for g in grid if g["number"] in range(1, 9)]
+    assert len(backlog) == 8 and all(set(g["cells"]) == set(REPO_RUNS) for g in backlog)
     query = {"op": "view", "tab": "pulls", "filters": {"actor": "moss", "action": "approved"}}
     approved = await views.reader_call(name, slug, "records", query)
-    assert {(i["run"], i["number"]) for i in approved["items"]} == {
-        (r["run"], r["number"]) for r in rows if r["kind"] == "review" and r["author"] == "moss"
-        and r["verdict"] == "approved"} != set()
+    assert {(i["run"], i["number"]) for i in approved["items"]} == {("r4", n) for n in (9, 10, 11, 12, 14, 17, 18)}
     # a filter takes several values, and a unit meets it with any of them
-    verdicts = ["approved", "changes requested"]
-    query = {"op": "view", "tab": "pulls", "filters": {"actor": ["moss"], "action": verdicts}}
+    query = {"op": "view", "tab": "pulls", "filters": {"actor": ["moss"], "action": ["approved", "changes requested"]}}
     either = await views.reader_call(name, slug, "records", query)
-    assert {(i["run"], i["number"]) for i in either["items"]} == {
-        (r["run"], r["number"]) for r in rows if r["kind"] == "review" and r["author"] == "moss"
-        and r["verdict"] in verdicts} > {(i["run"], i["number"]) for i in approved["items"]}
+    assert {(i["run"], i["number"]) for i in either["items"]} == {("r4", n) for n in (9, 10, 11, 12, 14, 15, 17, 18)}
     # the colour field keys the activity, and its own counts leave its filter out, as a legend's do
     query = {"op": "view", "tab": "pulls", "colour": "actor", "filters": {"actor": ["moss"]}}
     by = await views.reader_call(name, slug, "records", query)
@@ -837,12 +850,105 @@ async def test_the_repository_example_compares_any_runs_and_filters_by_who_did_w
     assert len(by["colour"]["values"]) > 1 and "moss" in by["colour"]["order"]
     # the agents tab filters by what its agents did
     merged = await views.reader_call(name, slug, "records", {"op": "view", "tab": "agents", "filters": {"action": ["merged"]}})
-    assert {(i["run"], i["name"]) for i in merged["items"]} == {(r["run"], r["author"]) for r in rows if r["kind"] == "merge"}
+    assert {(i["run"], i["name"]) for i in merged["items"]} == {
+        ("r1", "ash"), ("r1", "birch"), ("r1", "cedar"), ("r2", "dune"), ("r2", "elm"), ("r2", "fern"), ("r3", "gale"),
+        ("r3", "hazel"), ("r3", "iris"), ("r3", "juniper"), ("r4", "larch"), ("r4", "moss"), ("r4", "pine")}
     # while a label is on its values key the records, and the page may hide the records none marks
     probe = views.probe_context()
     marked = await views.reader_call(name, slug, "records", {"op": "view", "tab": "pulls", "hide": ["none"]}, labels=probe)
     assert len(marked["classes"]) == 1 and marked["hide"] == ["none"]
     assert {row[2] for row in marked["activity"]["rows"]} == {0} and 0 < marked["total"] < pulls["total"]
+
+
+async def test_the_repository_reader_cleans_what_a_real_corpus_gets_wrong(samples, inproc, bound):
+    """The sample is messy as a real corpus is, and the reader cleans it: one clock for every way a time is written,
+    a redelivered event counted once, events in time order, a cut-off line skipped, an agent without a transcript,
+    numbers in free text, a missing area, a review with no reviewer, a post with no time, a pull request's row that
+    holds several events, a force-push and a reopened pull request."""
+    name = "repository"
+    slug = _save_example(name)
+    runs = samples / name / "runs"
+
+    async def unit(key: str) -> dict:
+        return await views.reader_call(name, slug, "records", {"op": "unit", "key": key})
+
+    # r3's export writes local time in the manifest's zone (UTC+1 in May) and its reviews an offset; a row of
+    # pulls.csv holds the opening and the merge, and both cite it
+    nine = await unit("r3/pull/9")
+    assert [(x["kind"], x["at"]) for x in nine["records"]] == [
+        ("pr", "2026-05-13T09:15:00Z"), ("commit", "2026-05-13T09:16:00Z"), ("review", "2026-05-13T09:19:00Z"),
+        ("merge", "2026-05-13T09:20:00Z")]
+    assert nine["records"][0]["ref"] == nine["records"][-1]["ref"] == "runs/r3/export/pulls.csv#L2"
+    # r2's manifest starts in epoch milliseconds and its merges are UTC without an offset; a review the forge logged
+    # after the merge is before it
+    lines = (runs / "r2" / "events.jsonl").read_text("utf-8").splitlines()
+    nine = await unit("r2/pull/9")
+    assert [x["action"] for x in nine["records"]][-2:] == ["approved", "merged"]
+    assert nine["records"][-1]["at"] == "2026-05-12T10:37:00Z" and nine["records"][-1]["hours"] == pytest.approx(1.617)
+    assert int(nine["records"][-2]["ref"].rsplit("#L", 1)[1]) > int(nine["records"][-1]["ref"].rsplit("#L", 1)[1])
+    # a redelivered event counts once, and its line opens the event it repeats
+    dup = next(n for n in range(2, len(lines) + 1) if lines[n - 1] == lines[n - 2])
+    ten = await unit("r2/pull/10")
+    assert ten["reviews"] == [["fern", "changes requested", 1.167], ["fern", "approved", 1.833], ["dune", "approved", 2.133]]
+    res = await views.resolve_locator(name, slug, {"path": "runs/r2/events.jsonl", "fragment": f"L{dup}"})
+    assert res["target"] == {"key": "r2/pull/10", "ref": f"runs/r2/events.jsonl#L{dup - 1}"}
+    # r4's events are schema 2 in epoch milliseconds; the last line was cut off and opens nothing
+    moss = (await views.reader_call(name, slug, "records", {"op": "view", "tab": "agents", "runs": ["r4"]}))["items"]
+    assert {i["name"] for i in moss} == {"larch", "moss", "nettle", "oak", "pine"}
+    assert next((i["approved"], i["changes"]) for i in moss if i["name"] == "moss") == (7, 2)
+    last = len((runs / "r4" / "events.jsonl").read_text("utf-8").splitlines())
+    assert await views.resolve_locator(name, slug, {"path": "runs/r4/events.jsonl", "fragment": f"L{last}"}) is None
+    # nettle is in r4's manifest but left no transcript: an agent with its activity and no note
+    nettle = await unit("r4/agents/nettle")
+    assert nettle["opened"] == 2 and not any(x["kind"] == "agent" for x in nettle["records"])
+    assert any(x["kind"] == "agent" for x in (await unit("r4/agents/moss"))["records"])
+    # numbers written as free text, and an area taken from the issue a pull request fixes
+    assert (await unit("r1/pull/15"))["closes"] == 14 and (await unit("r3/pull/19"))["closes"] == 18
+    assert (await unit("r2/pull/13"))["area"] == "formatting"
+    # a review whose account is gone
+    assert (await unit("r3/pull/20"))["latest"] == {"unknown": "approved"}
+    # a post saved without its time takes the time of the line before it
+    thread = await unit("r1/discussions/1")
+    assert [x["at"] for x in thread["records"][:2]] == ["2026-05-11T09:02:00Z"] * 2
+    # a force-push says so, and is still a push after the last approval
+    seventeen = await unit("r4/pull/17")
+    assert [x["sha"] for x in seventeen["records"] if x.get("forced")] == ["99ef3f3"]
+    assert "pushed after its last approval" in seventeen["flags"]
+    # a pull request closed and reopened is open again, still waiting for its second approval
+    twelve = await unit("r2/pull/12")
+    assert twelve["state"] == "open" and [x["action"] for x in twelve["records"]][-2:] == ["closed", "reopened"]
+    assert "waiting for approvals" in twelve["flags"]
+    # an exported close has no words of its own: the closer's comment of that minute says why
+    query = {"op": "view", "tab": "pulls", "runs": ["r3"], "filters": {"state": "closed"}}
+    closed = (await views.reader_call(name, slug, "records", query))["items"]
+    assert {i["number"]: (i["reason"], i["why"]["text"]) for i in closed} == {
+        10: ("duplicate", "Duplicate of #9, which is merged."), 17: ("superseded", "Superseded by #16, merged a minute ago.")}
+
+
+async def test_a_label_over_the_corpus_marks_the_repository_s_records_in_every_file(samples, inproc, bound, tmp_path):
+    """The reader cites each record by its own file line, so a label run over every file of the corpus marks exactly
+    the records whose lines it took, from the forge's events of each schema and from r3's export alike."""
+    name = "repository"
+    slug = _save_example(name)
+    rx = re.compile(r"clock change|DST|skipped hour|01:30", re.I)
+    rows, hits = [], set()
+    for p in sorted((samples / name / "runs").rglob("*")):
+        rel = p.relative_to(samples / name).as_posix()
+        for n, ln in enumerate(p.read_text("utf-8").splitlines() if p.is_file() else [], 1):
+            rows.append({"ref": f"{rel}#L{n}", "label": "yes" if rx.search(ln) else "no", "source": "regex"})
+            hits |= {f"{rel}#L{n}"} if rx.search(ln) else set()
+    jsonl = tmp_path / "clock.jsonl"
+    jsonl.write_text("".join(json.dumps(r) + "\n" for r in rows))
+    ctx = {"labels": [{"id": "clock", "name": "about the clock change", "colour": "#c0504d", "jsonl": str(jsonl),
+                       "values": [{"name": "yes", "colour": "#c0504d", "highlight": True},
+                                  {"name": "no", "colour": "#8a8a8a", "highlight": False}]}], "filter": None}
+    pulls = await views.reader_call(name, slug, "records", {"op": "view", "tab": "pulls"}, labels=ctx)
+    marked = {t[0] for i in pulls["items"] for t in i["ticks"] if t[3] == 0}
+    assert marked and marked <= hits
+    assert {"runs/r1/events.jsonl", "runs/r2/events.jsonl", "runs/r4/events.jsonl", "runs/r3/export/pulls.csv"} <= {
+        m.rsplit("#", 1)[0] for m in marked}
+    detail = await views.reader_call(name, slug, "records", {"op": "unit", "key": "r1/pull/11"}, labels=ctx)
+    assert {x["ref"] for x in detail["records"] if x["part"] == 0} == {x["ref"] for x in detail["records"]} & hits
 
 
 async def test_the_linked_sessions_example_lays_each_run_out_as_a_tree_and_compares_sessions(samples, inproc, bound):

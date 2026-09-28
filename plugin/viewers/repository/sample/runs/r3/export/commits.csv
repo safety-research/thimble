@@ -1,0 +1,13 @@
+pull,sha,author,committed_at,message
+9,8a503ec,gale,2026-05-13 10:16:00,Skip today in next_weekday
+10,e8b509c,hazel,2026-05-13 10:19:00,Start from tomorrow
+11,e337efa,hazel,2026-05-13 10:36:00,Allow W with other designators
+12,8b67264,iris,2026-05-13 10:46:00,Build occurrences in local time
+13,d8caf89,juniper,2026-05-13 10:51:00,Check the day against the month
+14,d0ba60b,kelp,2026-05-13 10:56:00,Count hours within a day
+15,2c7af0c,gale,2026-05-13 11:01:00,Jump to the first period in range
+12,c7a7b23,iris,2026-05-13 11:25:00,Move nonexistent times forward
+16,810fe9f,juniper,2026-05-13 11:41:00,Add the strict mode section
+17,3f2f4cf,kelp,2026-05-13 11:45:00,Write the strict mode docs
+19,c60720d,juniper,2026-05-13 12:46:00,Keep the start bound
+20,81abdfe,hazel,2026-05-13 13:21:00,Add the fortnight unit

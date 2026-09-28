@@ -273,7 +273,7 @@
   // what each action is drawn in, in the activity, on the strips and on a page's timeline (reader.py ACTION)
   const ACTIONS = {
     opened: '--viz-ink-2', pushed: '--viz-ink-3', approved: '--viz-3', 'changes requested': '--viz-2', commented: '--viz-1',
-    posted: '--viz-6', merged: '--viz-5', fixed: '--viz-5', closed: '--viz-4', 'signed off': '--viz-ink-4',
+    posted: '--viz-6', merged: '--viz-5', fixed: '--viz-5', closed: '--viz-4', reopened: '--viz-ink-1', 'signed off': '--viz-ink-4',
   }
   const STATE_COLOURS = { open: '--status-positive', merged: '--viz-5', fixed: '--viz-5', closed: '--status-negative' }
   // the states in ink, while the records are coloured by a field whose colours they would repeat
@@ -403,7 +403,7 @@
     if (tab === 'issues') return icon(state === 'fixed' ? 'fixed' : state === 'closed' ? 'issueclosed' : 'issue', 's-' + state)
     return icon('thread', 's-thread')
   }
-  const ACTION_ICON = { opened: 'pr', pushed: 'commit', approved: 'approved', 'changes requested': 'changes', commented: 'comment', posted: 'comment', merged: 'merged', fixed: 'merged', closed: 'close', 'signed off': 'agent' }
+  const ACTION_ICON = { opened: 'pr', pushed: 'commit', approved: 'approved', 'changes requested': 'changes', commented: 'comment', posted: 'comment', merged: 'merged', fixed: 'merged', closed: 'close', reopened: 'pr', 'signed off': 'agent' }
 
   // ------------------------------------------------------------------------------------------------ fetching
   function query(extra) {
@@ -1472,9 +1472,9 @@
     frag.append(String(text || '').slice(last))
     return frag
   }
-  const VERB = { opened: 'opened this', pushed: 'pushed', approved: 'approved', 'changes requested': 'requested changes', commented: 'commented', posted: 'posted', merged: 'merged this', closed: 'closed this', 'signed off': 'signed off' }
+  const VERB = { opened: 'opened this', pushed: 'pushed', approved: 'approved', 'changes requested': 'requested changes', commented: 'commented', posted: 'posted', merged: 'merged this', closed: 'closed this', reopened: 'reopened this', 'signed off': 'signed off' }
   // on an agent's page each record names the pull request or issue it was on
-  const ON = { opened: 'opened', pushed: 'pushed to', approved: 'approved', 'changes requested': 'requested changes on', commented: 'commented on', merged: 'merged', closed: 'closed' }
+  const ON = { opened: 'opened', pushed: 'pushed to', approved: 'approved', 'changes requested': 'requested changes on', commented: 'commented on', merged: 'merged', closed: 'closed', reopened: 'reopened' }
   function event(x, links) {
     const e = el('div', 'ev' + (x.ref === focusRef ? ' focus' : '') + (x.text && x.kind !== 'commit' ? ' boxed' : ''))
     e.dataset.anchor = x.ref
@@ -1492,7 +1492,7 @@
     else if (x.kind === 'issue' && x.hours <= 0) head.append('reported this in the backlog')
     else if (unit.tab === 'agents' && x.number != null) head.append(`${ON[x.action] || x.action} `, linkText(`#${x.number}`, links), x.title ? ` ${x.title}` : '')
     else if (x.kind === 'close') head.append(`closed this as ${x.reason}`)
-    else if (x.kind === 'commit') head.append('pushed ', el('span', 'sha', x.sha))
+    else if (x.kind === 'commit') head.append(x.forced ? 'force-pushed ' : 'pushed ', el('span', 'sha', x.sha))
     else head.append(VERB[x.action] || x.action)
     const when = el('span', 'when', since(x.hours))
     when.title = clock(x.at)

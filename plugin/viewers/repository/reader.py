@@ -1,23 +1,50 @@
 # Repository: a code forge's log of several agent runs on one library, read the way its GitHub pages read.
 #
-# The data (sample/repo.jsonl): one line is one record of one run, in the order the forge wrote them.
-#   kind       what the record is: run, agent, issue, pr, commit, review, comment, merge, close or post
-#   run        the run it belongs to, such as r1; numbers, threads and agents are read within their run
-#   at         when, ISO 8601
-#   author     who wrote it: an agent of the run, or for a backlog issue the person who reported it
-#   number     the issue or pull request it belongs to; issues and pull requests share one numbering in a run
-#   title      an issue's or pull request's title, and a discussion's on its first post
-#   area       the part of the library an issue or pull request is about
-#   closes     on a pull request, the number of the issue it fixes when it merges
-#   sha        a commit's id
-#   verdict    a review's verdict: approved, changes requested or commented
-#   reason     why a close ended its pull request or issue without a merge, such as duplicate or abandoned
-#   thread     a post's discussion, numbered within its run
-#   team       on a run, how many agents it had
-#   approvals  on a run, how many approvals a pull request needed to merge
-#   text       the body: a description, a commit message, a review, a comment, a post, a run's brief, or the note an
-#              agent left when it signed off
-# Every run works the same backlog, so issue #3 of one run is issue #3 of another, and runs compare issue by issue.
+# The data: one folder per run, runs/<run>/, which the claims runs/*.json, runs/*.jsonl and runs/*.csv match. Each run
+# is a team of agents working the same backlog of one library, so issue #3 of one run is issue #3 of another, and runs
+# compare issue by issue. The files and their fields:
+#   manifest.json        the run's setup, whose keys changed between runs: its id (`run` or `id`), its start (`started`
+#                        or `started_at`), its agents (`agents` or `team`, as names or as objects with a `name` and a
+#                        `session`), the approvals a merge needs (`approvals`, `required_approvals`, or the `approvals`
+#                        of `policy`), its brief (`brief` or `prompt`), and `timezone`, the zone of the run's times
+#                        written without an offset; `schema` and `forge` name the layout of its forge data
+#   events.jsonl         the forge's events, one per line: `id`; `type`, one of issue.opened, pr.opened, push, review,
+#                        comment, pr.merged, pr.closed and pr.reopened; `ts` (when); `actor` (who); `number` (the issue
+#                        or pull request; they share one numbering in a run); `title`; `labels` (the first is the part
+#                        of the library it is about); `fixes` (the issue a pull request fixes); `sha` and `message` (a
+#                        push's); `forced` and `before` (a force-push, and the head it replaced); `state` (a review's
+#                        verdict: approved, changes_requested or commented); `reason` (why a close ended it without a
+#                        merge); and `body`. r4's forge wrote schema 2, which renamed fields: `v` is 2, and `event`,
+#                        `time` (epoch milliseconds), `user`, `area`, `closes` and `text` stand for type, ts, actor,
+#                        labels, fixes, and body or message; its verdicts are in capitals
+#   board.jsonl          the discussion: `id`, `thread_id`, `thread_title` (on a thread's first post), `author`,
+#                        `created_at` and `body`
+#   agents/<name>.jsonl  one agent's transcript: `type` (user or assistant), `session_id`, `timestamp` and `message`,
+#                        whose content is text or blocks; its last assistant text is the note the agent signed off with
+#   export/              r3's forge data, exported as tables in place of events.jsonl, with local times in the
+#                        manifest's timezone: issues.csv (`number`, `title`, `author`, `created_at`, `state`, `labels`,
+#                        `body`); pulls.csv (the same, with `merged_at`, `merged_by`, `closed_at`, `closed_by`,
+#                        `state_reason` and `linked_issue`); commits.csv (`pull`, `sha`, `author`, `committed_at`,
+#                        `message`); comments.csv (`number`, `author`, `created_at`, `body`); and reviews.json, a JSON
+#                        array with one review per line (`id`, `pull`, `user` with its login, `state`, `submitted_at`,
+#                        `body`)
+#
+# What the reader cleans:
+#   - Times are ISO 8601 with or without an offset, epoch milliseconds, or local time. A time without an offset is in
+#     the run's `timezone`, else UTC, and every time is read onto one clock.
+#   - The forge redelivered some events: a line whose `id` came earlier in its file repeats that event and is left out.
+#   - Some events were logged late, and the export lists reviews by pull request, so records are put in time order.
+#   - r4's events.jsonl ends in a line cut off when the run stopped: a line that does not parse is skipped.
+#   - r4's manifest lists an agent that left no transcript: a run's agents are the manifest's and the transcripts', and
+#     one without a transcript has no note.
+#   - A linked issue or a number of approvals written as free text ("#14", "18 (regression from #15)") is its first
+#     number.
+#   - A pull request opened without an area label takes the area of the issue it fixes.
+#   - A review from an account that no longer exists names no reviewer, and counts as the reviewer `unknown`.
+#   - A post saved without a time takes the time of the line before it in its file.
+#   - A row of pulls.csv holds a pull request's opening and its merge or close, so all of them cite that row. The row's
+#     close has no words; the closer's comment of the same minute says why.
+#   - A force-push is a push that says so, and a reopened pull request is open again.
 #
 # The method: the reader gathers each run's records into the units a forge shows, keyed as its URLs are: pull requests
 # (<run>/pull/<n>), issues (<run>/issues/<n>), discussions (<run>/discussions/<n>) and agents (<run>/agents/<name>),
@@ -37,10 +64,12 @@
 # on, the values of the labels that are on key the records in place of the colour field: each record by the first of
 # them that marks it (thimble.marked), since thimble cannot see inside a chart, and the page draws them in the labels'
 # colours. The page may hide the records of some of those values, or the records none marks.
+import csv
 import json
 import re
 import statistics
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 
 import thimble
 
@@ -50,100 +79,286 @@ BINS = [5, 10, 15, 20, 30, 60, 120, 240, 480, 1440]  # minutes; the activity's b
 MAX_BARS = 40
 # what each kind of record did, as the activity and the strips name it; a review is named by its verdict
 ACTION = {"pr": "opened", "issue": "opened", "commit": "pushed", "comment": "commented", "merge": "merged",
-          "close": "closed", "post": "posted", "agent": "signed off"}
+          "close": "closed", "reopen": "reopened", "post": "posted", "agent": "signed off"}
 MENTION = re.compile(r"#(\d+)\b")
 # the fields that can colour the records on each tab: a record's action or author, or its unit's run, state or area
 COLOURS = {"pulls": ("action", "actor", "run", "state", "area"), "issues": ("action", "actor", "run", "state", "area"),
            "discussions": ("action", "actor", "run"), "agents": ("action", "actor", "run")}
+NO_NAME = "unknown"  # the reviewer of a review whose account is gone
+# a record's kind by an event's `type` (schema 2: `event`), and a review's verdict by its `state`, in any case
+KINDS = {"issue.opened": "issue", "pr.opened": "pr", "push": "commit", "review": "review", "comment": "comment",
+         "pr.merged": "merge", "pr.closed": "close", "issue.closed": "close", "pr.reopened": "reopen"}
+VERDICTS = {"approved": "approved", "changes_requested": "changes requested", "commented": "commented"}
+# a run's files by their path in its folder; agents/<name>.jsonl are transcripts
+SHAPES = {"manifest.json": "manifest", "events.jsonl": "events", "board.jsonl": "board", "export/issues.csv": "issues",
+          "export/pulls.csv": "pulls", "export/commits.csv": "commits", "export/comments.csv": "comments",
+          "export/reviews.json": "reviews"}
+TABLES = ("issues", "pulls", "commits", "comments")
 
 
-def _epoch(t):
+# ------------------------------------------------------------------------------------------------ reading the files
+
+
+def _time(v, tz=None):
+    """Epoch seconds of epoch milliseconds or ISO 8601; a time without an offset is in the zone `tz`, else UTC."""
+    if isinstance(v, bool) or v in (None, ""):
+        return None
+    if isinstance(v, (int, float)):
+        return v / 1000
     try:
-        dt = datetime.fromisoformat(str(t).replace("Z", "+00:00"))
+        dt = datetime.fromisoformat(str(v).strip().replace("Z", "+00:00"))
     except ValueError:
         return None
-    return (dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)).timestamp()
+    return (dt if dt.tzinfo else dt.replace(tzinfo=ZoneInfo(tz) if tz else timezone.utc)).timestamp()
 
 
-def _action(r):
-    return (r.get("verdict") or "commented") if r.get("kind") == "review" else ACTION.get(r.get("kind"), "other")
+def _number(v):
+    """The first number in `v`: an int, "#14", or free text such as "18 (regression from #15)"; None for none."""
+    if isinstance(v, int) and not isinstance(v, bool):
+        return v
+    m = re.search(r"\d+", str(v or ""))
+    return int(m.group()) if m else None
+
+
+def _first(r, *keys):
+    """The value of the first of `keys` that the record gives, for a field whose name changed between versions."""
+    return next((r[k] for k in keys if r.get(k) not in (None, "")), None)
+
+
+def _rec(kind, t, **fields):
+    """One of the reader's records: its kind, its time in epoch seconds, and the fields it has."""
+    return {"kind": kind, "t": t, **{k: v for k, v in fields.items() if v is not None and v is not False and v != ""}}
+
+
+def _verdict(state):
+    return VERDICTS.get(str(state or "commented").lower(), "commented")
+
+
+def _event(r, tz):
+    """An events.jsonl line, in either schema, as records; [] for a type the reader does not use."""
+    kind = KINDS.get(_first(r, "type", "event"))
+    if kind is None:
+        return []
+    labels = r.get("labels")
+    return [_rec(kind, _time(_first(r, "ts", "time"), tz), id=r.get("id"), author=_first(r, "actor", "user"),
+                 number=_number(r.get("number")), title=r.get("title"),
+                 area=labels[0] if isinstance(labels, list) and labels else r.get("area"),
+                 closes=_number(_first(r, "fixes", "closes")), sha=r.get("sha"),
+                 verdict=_verdict(r.get("state")) if kind == "review" else None, reason=r.get("reason"),
+                 text=_first(r, "body", "text", "message"), forced=bool(r.get("forced")), before=r.get("before"))]
+
+
+def _row(shape, c, tz):
+    """A row of an export table, {column: cell}, as records: a pull request's row holds its opening and its merge or
+    close."""
+    def t(col):
+        return _time(c.get(col), tz)
+
+    n = _number(c.get("number"))
+    if shape == "issues":
+        return [_rec("issue", t("created_at"), author=c.get("author"), number=n, title=c.get("title"),
+                     area=c.get("labels"), text=c.get("body"))]
+    if shape == "pulls":
+        out = [_rec("pr", t("created_at"), author=c.get("author"), number=n, title=c.get("title"), area=c.get("labels"),
+                    closes=_number(c.get("linked_issue")), text=c.get("body"))]
+        if c.get("merged_at"):
+            out.append(_rec("merge", t("merged_at"), author=c.get("merged_by"), number=n))
+        elif c.get("closed_at"):
+            out.append(_rec("close", t("closed_at"), author=c.get("closed_by"), number=n,
+                            reason=c.get("state_reason") or "closed"))
+        return out
+    if shape == "commits":
+        return [_rec("commit", t("committed_at"), author=c.get("author"), number=_number(c.get("pull")),
+                     sha=c.get("sha"), text=c.get("message"))]
+    return [_rec("comment", t("created_at"), author=c.get("author"), number=n, text=c.get("body"))]
+
+
+def _turn(r, name, note):
+    """A transcript line as a record: the agent's sign-off when it is its last words (`note`), else a turn, which the
+    agent's unit cites but the page does not show."""
+    content = (r.get("message") or {}).get("content")
+    blocks = [{"text": content}] if isinstance(content, str) else content if isinstance(content, list) else []
+    words = [b.get("text") or b.get("content") or (b.get("input") or {}).get("command") for b in blocks
+             if isinstance(b, dict)]
+    return [_rec("agent" if note else "turn", _time(r.get("timestamp")), author=name,
+                 text="\n".join(w for w in words if isinstance(w, str) and w))]
+
+
+def _parse(ctx, n, raw):
+    """The records on line `n` of a file whose context (build_index) is `ctx`; [] for a line that holds none."""
+    shape, tz = ctx["shape"], ctx.get("tz")
+    text = raw.decode("utf-8", "replace").strip()
+    if not text or shape == "manifest":
+        return []
+    if shape in TABLES:
+        return [] if n == 1 else _row(shape, dict(zip(ctx["header"], next(csv.reader([text])))), tz)
+    try:
+        r = json.loads(text.rstrip(","))  # reviews.json holds one object per line, each but the last with a comma
+    except ValueError:
+        return []
+    if not isinstance(r, dict):
+        return []
+    if shape == "events":
+        return _event(r, tz)
+    if shape == "board":
+        return [_rec("post", _time(r.get("created_at"), tz), author=r.get("author"), thread=_number(r.get("thread_id")),
+                     title=r.get("thread_title"), text=r.get("body"))]
+    if shape == "reviews":
+        return [_rec("review", _time(r.get("submitted_at"), tz), author=(r.get("user") or {}).get("login") or NO_NAME,
+                     number=_number(r.get("pull")), verdict=_verdict(r.get("state")), text=r.get("body"))]
+    return _turn(r, ctx["agent"], n == ctx["note"])
+
+
+def _manifest(path):
+    """A run's setup from its manifest, whichever keys it uses, with the line of its brief."""
+    with open(path, encoding="utf-8") as f:
+        text = f.read()
+    m = json.loads(text)
+    tz = m.get("timezone")
+    brief = "brief" if "brief" in m else "prompt"
+    at = next((n for n, ln in enumerate(text.splitlines(), 1) if ln.strip().startswith(f'"{brief}"')), None)
+    return {"start": _time(_first(m, "started", "started_at"), tz), "tz": tz, "brief": m.get(brief), "line": at,
+            "agents": [a.get("name") if isinstance(a, dict) else a for a in _first(m, "agents", "team") or []],
+            "approvals": _number(_first(m, "approvals", "required_approvals")
+                                 or (m.get("policy") or {}).get("approvals"))}
+
+
+def _shape(path):
+    parts = path.split("/")
+    if len(parts) < 3 or parts[0] != "runs":
+        return None
+    if len(parts) == 4 and parts[2] == "agents" and parts[3].endswith(".jsonl"):
+        return "agent"
+    return SHAPES.get("/".join(parts[2:]))
+
+
+def _says(raw):
+    """Whether a transcript line is the agent's own words: an assistant message with text."""
+    try:
+        r = json.loads(raw)
+    except ValueError:
+        return False
+    content = (r.get("message") or {}).get("content") if isinstance(r, dict) else None
+    return r.get("type") == "assistant" and (isinstance(content, str) or any(
+        isinstance(b, dict) and b.get("type") == "text" for b in content or []))
+
+
+def _lines(path):
+    """[(byte offset, raw line)] of a file."""
+    out, pos = [], 0
+    with open(path, "rb") as f:
+        for raw in f:
+            out.append((pos, raw))
+            pos += len(raw)
+    return out
 
 
 def build_index(paths):
-    """{"offsets": {path: [byte offset of line n at n-1]}, "runs": {run: facts}, "units": {key: unit}, "line": {ref:
-    key of its unit}}. A unit holds its tab, run, facts, `refs` (the records it gathers) and `events` ([ref, hours since
-    its run started, action, author] in time order, its strip and its part of the activity). An agent's refs start with
-    its own record, then every record it wrote; an issue's events include the merge that fixed it. The agents of a run
-    are the authors of its `agent` records. A line that is not JSON, or has no run or no time, is in `offsets` only."""
-    offsets, recs = {}, []
-    for path in paths:
-        offs = offsets.setdefault(path, [])
-        with open(path, "rb") as f:
-            pos = 0
-            for n, raw in enumerate(f, 1):
-                offs.append(pos)
-                pos += len(raw)
-                try:
-                    r = json.loads(raw)
-                except ValueError:
-                    continue
-                if isinstance(r, dict) and r.get("run") and (t := _epoch(r.get("at"))) is not None:
-                    recs.append((t, f"{path}#L{n}", str(r["run"]), r))
+    """{"files": {path: context}, "offsets": {path: [byte offset of line n at n-1]}, "runs": {run: setup}, "units":
+    {key: unit}, "line": {ref: key of its unit}, "same": {ref of a redelivered event: ref of its first line}}. A unit
+    holds its tab, run, facts, `refs` (the lines it gathers) and `events` ([ref, hours since its run started, action,
+    author, the record's place among its line's records, epoch seconds] in time order, its strip and its part of the
+    activity). An agent's refs start with its note, then every record it wrote, and its transcript's other lines are
+    its `more`; an issue's events include the merge that fixed it."""
+    files, offsets, runs, recs, same, by_run = {}, {}, {}, [], {}, {}
+    for path in sorted(paths):
+        if shape := _shape(path):
+            by_run.setdefault(path.split("/")[1], []).append((path, shape))
+    for run, found in by_run.items():
+        man = next((p for p, s in found if s == "manifest"), None)
+        setup = _manifest(man) if man else {"agents": []}
+        runs[run] = {"start": setup.get("start"), "end": None, "approvals": setup.get("approvals"),
+                     "ref": f"{man}#L{setup['line']}" if man and setup.get("line") else None,
+                     "brief": setup.get("brief"), "agents": list(setup["agents"])}
+        for path, shape in found:
+            lines = _lines(path)
+            offsets[path] = [pos for pos, _ in lines]
+            ctx = files[path] = {"run": run, "shape": shape, "tz": setup.get("tz")}
+            if shape in TABLES:
+                ctx["header"] = next(csv.reader([lines[0][1].decode("utf-8", "replace")])) if lines else []
+            elif shape == "agent":
+                ctx["agent"] = path.rsplit("/", 1)[1][:-len(".jsonl")]
+                ctx["note"] = max((n for n, (_, raw) in enumerate(lines, 1) if _says(raw)), default=None)
+                if ctx["agent"] not in runs[run]["agents"]:
+                    runs[run]["agents"].append(ctx["agent"])
+            seen, last = {}, None
+            for n, (_, raw) in enumerate(lines, 1):
+                ref = f"{path}#L{n}"
+                for i, r in enumerate(_parse(ctx, n, raw)):
+                    if r.get("id") is not None:
+                        if r["id"] in seen:
+                            same[ref] = seen[r["id"]]
+                            break
+                        seen[r["id"]] = ref
+                    last = r["t"] if r["t"] is not None else last
+                    if last is not None:
+                        recs.append((last, ref, i, run, r))
     recs.sort(key=lambda x: x[0])
+    for run, info in runs.items():
+        times = [x[0] for x in recs if x[3] == run]
+        info["start"] = info["start"] if info["start"] is not None else min(times, default=0)
+        info["end"] = max([info["start"], *times])
+        info["team"] = len(info["agents"]) or None
 
-    runs, agents, numbered = {}, set(), {}
-    for t, ref, run, r in recs:
-        info = runs.setdefault(run, {"start": t, "end": t, "team": None, "approvals": None, "ref": None})
-        info["end"] = max(info["end"], t)
-        if r.get("kind") == "run":
-            info.update(start=t, team=r.get("team"), approvals=r.get("approvals"), ref=ref)
-        elif r.get("kind") == "agent":
-            agents.add((run, str(r.get("author"))))
-        elif r.get("kind") in ("pr", "issue") and r.get("number") is not None:
-            numbered[(run, int(r["number"]))] = f"{run}/{'pull' if r['kind'] == 'pr' else 'issues'}/{r['number']}"
-
-    units, line = {}, {}
-    for t, ref, run, r in recs:
-        kind, who = r.get("kind"), str(r.get("author") or "")
+    agents = {(run, a) for run, info in runs.items() for a in info["agents"]}
+    numbered = {(run, r["number"]): f"{run}/{'pull' if r['kind'] == 'pr' else 'issues'}/{r['number']}"
+                for _, _, _, run, r in recs if r["kind"] in ("pr", "issue") and r.get("number") is not None}
+    units, more, line = {}, {}, {info["ref"]: run for run, info in runs.items() if info["ref"]}
+    for t, ref, i, run, r in recs:
+        kind, who = r["kind"], str(r.get("author") or "")
         h, act = round((t - runs[run]["start"]) / 3600, 3), _action(r)
-        if kind == "run":
-            line[ref] = run
-            continue
-        if kind == "agent":
+        if kind in ("agent", "turn"):
             key = f"{run}/agents/{who}"
         elif kind == "post" and r.get("thread") is not None:
             key = f"{run}/discussions/{r['thread']}"
-        elif r.get("number") is not None and (run, int(r["number"])) in numbered:
-            key = numbered[(run, int(r["number"]))]
+        elif (run, r.get("number")) in numbered:
+            key = numbered[(run, r["number"])]
         else:
             continue
         line[ref] = key
+        if kind == "turn":
+            more.setdefault(key, []).append(ref)
+            continue
         u = units.get(key) or units.setdefault(key, _unit(key, run, r, h))
-        _add(u, kind, r, who, h, act)
-        u["refs"].insert(0, ref) if kind == "agent" else u["refs"].append(ref)
-        u["events"].append([ref, h, act, who])
+        _add(u, kind, r, who, h, act, [ref, i])
+        if ref not in u["refs"]:
+            u["refs"].insert(0, ref) if kind == "agent" else u["refs"].append(ref)
+        event = [ref, h, act, who, i, t]
+        u["events"].append(event)
         u["words"].append(" ".join(str(r.get(f) or "") for f in ("title", "text", "reason", "sha")))
         if (run, who) in agents and kind != "agent":
-            a = units.setdefault(f"{run}/agents/{who}", _unit(f"{run}/agents/{who}", run, {"author": who}, h))
-            a["refs"].append(ref)
-            a["events"].append([ref, h, act, who])
+            a = units.get(f"{run}/agents/{who}") or units.setdefault(f"{run}/agents/{who}",
+                                                                     _unit(f"{run}/agents/{who}", run, r, h))
+            if ref not in a["refs"]:
+                a["refs"].append(ref)
+            a["events"].append(event)
 
+    for key, refs in more.items():
+        units.setdefault(key, _unit(key, key.split("/")[0], {"author": key.rsplit("/", 1)[1]}, 0))["more"] = refs
     for u in units.values():
         numbers = [f"#{n}" for n in (u.get("number"), u.get("closes")) if n is not None and u["tab"] != "discussions"]
         u["search"] = " ".join([u.get("title") or "", u.get("author") or "", *numbers, *u.pop("words")]).lower()
+        if u.get("state") == "closed" and u["why"] is None:
+            u["why"] = next(([e[0], e[4]] for e in u["events"] if e[2] == "commented" and e[3] == u["closed_by"]
+                             and abs(e[1] - u["ended"]) < 1 / 60), None)
         if u["tab"] == "pulls":
             _pull_facts(u, runs[u["run"]])
     for u in [u for u in units.values() if u["tab"] == "pulls" and u.get("closes") is not None]:
         issue = units.get(f"{u['run']}/issues/{u['closes']}")
         if issue is None:
             continue
+        u["area"] = u["area"] or issue["area"]
         issue["prs"].append(u["number"])
         if u["state"] == "merged" and issue["state"] == "open":
             issue.update(state="fixed", fixed_by=u["number"], ended=u["ended"])
             merge = next(e for e in u["events"] if e[2] == "merged")
-            issue["events"].append([merge[0], u["ended"], "fixed", merge[3]])
+            issue["events"].append([merge[0], u["ended"], "fixed", merge[3], merge[4], merge[5]])
     _agent_facts(units)
-    return {"offsets": offsets, "runs": runs, "units": units, "line": line}
+    return {"files": files, "offsets": offsets, "runs": runs, "units": units, "line": line, "same": same}
+
+
+def _action(r):
+    return (r.get("verdict") or "commented") if r["kind"] == "review" else ACTION.get(r["kind"], "other")
 
 
 def _unit(key, run, r, h):
@@ -153,7 +368,7 @@ def _unit(key, run, r, h):
          "words": []}
     if tab in ("pulls", "issues"):
         u.update(number=int(key.rsplit("/", 1)[1]), title="", area="", state="open", closed_by=None, reason=None,
-                 ended=None, comments=0)
+                 ended=None, comments=0, why=None)
     if tab == "pulls":
         u.update(closes=None, merged_by=None, reviews=[], commits=[])
     elif tab == "issues":
@@ -161,12 +376,12 @@ def _unit(key, run, r, h):
     elif tab == "discussions":
         u.update(number=int(key.rsplit("/", 1)[1]), title="", posts=0, posters=[], mentions=[])
     else:
-        u.update(name=key.rsplit("/", 1)[1])
+        u.update(name=key.rsplit("/", 1)[1], more=[])
     return u
 
 
-def _add(u, kind, r, who, h, act):
-    """What one record adds to its unit's facts."""
+def _add(u, kind, r, who, h, act, at):
+    """What one record adds to its unit's facts; `at` is [its ref, its place among its line's records]."""
     if kind in ("pr", "issue"):
         u.update(title=str(r.get("title") or ""), area=str(r.get("area") or ""), author=who, at=h)
         if kind == "pr":
@@ -182,7 +397,10 @@ def _add(u, kind, r, who, h, act):
     elif kind == "merge":
         u.update(state="merged", merged_by=who, ended=h)
     elif kind == "close":
-        u.update(state="closed", closed_by=who, reason=str(r.get("reason") or "closed"), ended=h)
+        u.update(state="closed", closed_by=who, reason=str(r.get("reason") or "closed"), ended=h,
+                 why=at if r.get("text") else None)
+    elif kind == "reopen":
+        u.update(state="open", closed_by=None, reason=None, ended=None, why=None)
     elif kind == "post":
         u["title"] = u["title"] or str(r.get("title") or "")
         u["posts"] += 1
@@ -244,20 +462,23 @@ def _agent_facts(units):
 
 
 def _read(index, refs):
-    """{ref: record} for the refs, each line read at its byte offset."""
+    """{ref: [its line's records]} for the refs, each line read at its byte offset."""
     out, by_path = {}, {}
     for ref in refs:
         path, _, n = ref.rpartition("#L")
-        by_path.setdefault(path, []).append(int(n))
+        by_path.setdefault(path, set()).add(int(n))
     for path, ns in by_path.items():
         with open(path, "rb") as f:
             for n in ns:
                 f.seek(index["offsets"][path][n - 1])
-                try:
-                    out[f"{path}#L{n}"] = json.loads(f.readline())
-                except ValueError:
-                    continue
+                out[f"{path}#L{n}"] = _parse(index["files"][path], n, f.readline())
     return out
+
+
+def _record(index, at):
+    """The record at [ref, place among its line's records], or {}."""
+    got = _read(index, [at[0]]).get(at[0]) or []
+    return got[at[1]] if at[1] < len(got) else {}
 
 
 def _key(label, value):
@@ -303,7 +524,7 @@ class _Labels:
 
     def unit(self, u):
         if u["key"] not in self._unit:
-            self._unit[u["key"]] = thimble.kept_unit(u["refs"])
+            self._unit[u["key"]] = thimble.kept_unit(u["refs"] + u.get("more", []))
         return self._unit[u["key"]]
 
 
@@ -371,12 +592,11 @@ def _part(field, u, e, labels):
 def _item(tab, u, index, labels, field, on):
     """A unit as a row of the list, with its kept records as strip ticks: [ref, hours, action, part (_part), 1 when
     `on(event)` holds, the time range and the record filters picking it, else 0], and for a closed one the closer's
-    words (`why`, read from its close record)."""
+    words (`why`, read from its close record or from the closer's comment beside it)."""
     ticks = [[e[0], e[1], e[2], _part(field, u, e, labels), int(on(e))] for e in u["events"] if labels.keep(e[0])]
     base = {"key": u["key"], "run": u["run"], "at": u["at"], "ticks": ticks}
-    if u.get("state") == "closed":
-        ref = next(e[0] for e in reversed(u["events"]) if e[2] == "closed")
-        base["why"] = {"ref": ref, "text": str(_read(index, [ref])[ref].get("text") or "")}
+    if u.get("state") == "closed" and u["why"]:
+        base["why"] = {"ref": u["why"][0], "text": str(_record(index, u["why"]).get("text") or "")}
     if tab == "pulls":
         return {**base, **{k: u[k] for k in ("number", "title", "author", "state", "area", "closes", "merged_by",
                                              "closed_by", "reason", "ended", "to_merge", "first_review", "approvals",
@@ -594,20 +814,26 @@ def _classes(units, labels, picked):
     return {"classes": [{**c, "n": n[i]} for i, c in enumerate(labels.classes)], "none": none}
 
 
-def _texts(index, refs):
-    """The records of the refs as a page shows them: [{ref, kind, action, author, at, hours, text, ...}]."""
-    read = _read(index, refs)
+def _iso(t):
+    return datetime.fromtimestamp(t, timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _texts(index, events, part=None):
+    """The records of the events as a page shows them: [{ref, kind, action, author, at, hours, text, ..., part}], `at`
+    in UTC, `part` the event's under the callable `part` when given."""
+    read = _read(index, [e[0] for e in events])
     out = []
-    for ref in refs:
-        r = read.get(ref)
-        if not r:
+    for e in events:
+        got = read.get(e[0]) or []
+        if e[4] >= len(got):
             continue
-        run = index["runs"][str(r["run"])]
-        t = _epoch(r.get("at")) or run["start"]
-        out.append({"ref": ref, "kind": r.get("kind"), "action": _action(r), "author": r.get("author") or "",
-                    "at": r.get("at"), "hours": round((t - run["start"]) / 3600, 3),
-                    **{f: r[f] for f in ("number", "title", "text", "sha", "verdict", "reason", "closes", "thread")
-                       if r.get(f) is not None}})
+        r = got[e[4]]
+        x = {"ref": e[0], "kind": r["kind"], "action": _action(r), "author": r.get("author") or "", "at": _iso(e[5]),
+             "hours": e[1], **{f: r[f] for f in ("number", "title", "text", "sha", "verdict", "reason", "closes",
+                                                 "thread", "forced", "before") if r.get(f) is not None}}
+        if part:
+            x["part"] = part(e)
+        out.append(x)
     return out
 
 
@@ -639,14 +865,12 @@ def _detail(index, key, field="action", hide=()):
         return None
     labels = _Labels(hide)
     run = index["runs"][u["run"]]
-    out = {k: v for k, v in u.items() if k not in ("refs", "events", "search")}
+    out = {k: v for k, v in u.items() if k not in ("refs", "events", "search", "more", "why")}
     out["setup"] = {"team": run["team"], "approvals": run["approvals"],
                     "hours": round((run["end"] - run["start"]) / 3600, 3)}
-    refs = [e[0] for e in u["events"]] if u["tab"] != "agents" else u["refs"]
-    events = {e[0]: e for e in u["events"]}
-    out["records"] = [dict(x, part=_part(field, u, events.get(x["ref"]) or [x["ref"], x["hours"], x["action"], x["author"]],
-                                         labels))
-                      for x in _texts(index, refs) if labels.keep(x["ref"]) or x["ref"] == refs[0]]
+    first = u["refs"][0] if u["refs"] else None
+    out["records"] = [x for x in _texts(index, u["events"], lambda e: _part(field, u, e, labels))
+                      if labels.keep(x["ref"]) or x["ref"] == first]
     if u["tab"] in ("pulls", "issues"):
         out["elsewhere"] = _elsewhere(index, u)
     if u["tab"] == "pulls" and (issue := index["units"].get(f"{u['run']}/issues/{u.get('closes')}")):
@@ -681,15 +905,17 @@ def records(index, query):
 
 
 def _excerpt(r):
-    """A record's own text, one field per line; a record with none (a merge) gives its author."""
-    lines = [str(r[f]) for f in ("title", "text", "verdict", "reason", "sha") if r.get(f)]
+    """A record's own words, one field per line, as its line writes them; a record with none (a merge) gives its
+    author."""
+    lines = [str(r[f]) for f in ("title", "text", "reason", "sha") if r.get(f)]
     return "\n".join(lines) or str(r.get("author") or r.get("kind") or "")
 
 
 def resolve(index, locator):
-    """repo.jsonl#L<n>: the record, opened in its unit. view:<slug>/<run>: the run, its excerpt the brief.
+    """<file>#L<n>: the record, opened in its unit; a manifest's line opens its run, a transcript's line its agent,
+    and a redelivered event the event it repeats. view:<slug>/<run>: the run, its excerpt the brief.
     view:<slug>/<run>/pull/<n>, issues/<n>, discussions/<n> or agents/<name>: the unit, its excerpt the first record's
-    text, citing every record it gathers in time order."""
+    text, citing every line it gathers."""
     if "key" in locator:
         key = str(locator["key"])
         if key in index["runs"]:
@@ -697,33 +923,37 @@ def resolve(index, locator):
             if not run["ref"]:
                 return None
             refs = [run["ref"]] + [ref for ref, k in index["line"].items() if k.startswith(key + "/")]
-            brief = _read(index, [run["ref"]])[run["ref"]]
-            return {"excerpt": str(brief.get("text") or key), "label": f"{key} · {run['team']} agents",
+            return {"excerpt": str(run["brief"] or key), "label": f"{key} · {run['team']} agents",
                     "refs": refs[:200], "key": key, "target": {"run": key}}
         u = index["units"].get(key)
         if u is None or not u["refs"]:
             return None
-        first = _read(index, u["refs"][:1])[u["refs"][0]]
         name = u.get("title") or u.get("name") or key
         label = f"{u['run']} #{u['number']} {name}" if u.get("number") is not None and u["tab"] != "discussions" \
             else f"{u['run']} {name}"
-        return {"excerpt": _excerpt(first), "label": label[:40], "refs": u["refs"][:200], "key": key,
-                "target": {"key": key}}
+        return {"excerpt": _excerpt(_record(index, [u["refs"][0], 0])), "label": label[:40],
+                "refs": (u["refs"] + u.get("more", []))[:200], "key": key, "target": {"key": key}}
     path, fragment = locator.get("path"), str(locator.get("fragment") or "")
     m = re.fullmatch(r"L(\d+)", fragment)
     if not m or path not in index["offsets"] or not 1 <= int(m.group(1)) <= len(index["offsets"][path]):
         return None
-    ref = f"{path}#{fragment}"
-    r = _read(index, [ref]).get(ref)
-    key = index["line"].get(ref)
-    if not isinstance(r, dict) or key is None:
+    ref, ctx = f"{path}#{fragment}", index["files"][path]
+    run = ctx["run"]
+    if ctx["shape"] == "manifest":
+        info = index["runs"][run]
+        return {"excerpt": str(info["brief"] or run), "label": f"{run} manifest", "refs": [ref], "key": run,
+                "target": {"run": run}}
+    shown = index["same"].get(ref, ref)
+    key = index["line"].get(shown)
+    got = _read(index, [ref]).get(ref) or []
+    if not got or key is None:
         return None
-    run, who = str(r["run"]), str(r.get("author") or "")
-    if r.get("kind") == "run":
-        label = f"{run} brief"
+    r, who = got[0], str(got[0].get("author") or "")
+    if r["kind"] in ("agent", "turn"):
+        label = f"{run} {who}'s {'sign-off' if r['kind'] == 'agent' else 'transcript'}"
     elif r.get("number") is not None:
         label = f"{run} #{r['number']} {_action(r)} by {who}"
     else:
         label = f"{run} {_action(r)} by {who}"
     return {"excerpt": _excerpt(r), "label": label[:40], "refs": [ref], "key": key,
-            "target": {"run": key} if key == run else {"key": key, "ref": ref}}
+            "target": {"key": key} if r["kind"] == "turn" else {"key": key, "ref": shown}}
