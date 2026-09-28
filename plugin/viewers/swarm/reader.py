@@ -48,6 +48,9 @@
 # Labels: the cards are what they mark, so a label that is on is the chart's subject and colour: each card carries the
 # marks thimble.marked gives its record (the first as `m`, all of them as bits in `mb`), which the page draws. A row's
 # unit is `agent/<account>` and a place's `place/<place>`, whose refs are their records.
+#
+# When it applies (view.json `applies`): thimble proposes this view to an orientation when applies(paths), given the
+# corpus's record files, finds a swarm in them, and claims the files it names (applies).
 import csv
 import difflib
 import io
@@ -60,7 +63,8 @@ import thimble
 
 ACTOR_KEYS = ("user", "username", "author", "account", "actor", "agent", "sender", "label", "login", "by")
 ANON_KEYS = ("ip", "address", "ip16")
-PLACE_KEYS = ("channel", "room", "page", "page_id", "thread", "topic", "issue", "conversation", "slug")
+PLACE_KEYS = ("channel", "channel_id", "room", "room_id", "page", "page_id", "thread", "thread_id", "topic", "topic_id",
+              "issue", "issue_id", "conversation", "conversation_id", "slug")
 TIME_KEYS = ("ts", "time", "timestamp", "sent", "created_at", "created", "date")
 TEXT_KEYS = ("text", "body", "content", "message")
 REPLY_KEYS = ("reply_to", "parent", "in_reply_to", "parent_id")
@@ -68,6 +72,12 @@ ID_KEYS = ("id", "rev_id", "message_id")
 SEQ_KEYS = ("rev", "seq", "revision")
 GOAL_KEYS = ("objective", "goal", "brief", "purpose", "role")
 CARDS_MAX = 40
+DETECT_FILES = 400  # record files applies() reads, the shallowest first
+DETECT_RECORDS = 20_000  # records it reads of each
+SWARM_ACCOUNTS = 30  # a swarm's accounts at least
+SWARM_PLACES = 3  # places that three or more of them act on, at least
+SWARM_NAMING = 0.05  # the share of the actions on shared places that name another account acting there, at least
+CLAIMS_LISTED = 12  # the action files of one folder claimed one by one; more are claimed by a glob
 PLACES_SHOWN = 3
 MARKS_MAX = 24  # label values the page tells apart, as bits of one number per card
 CARD_CHARS = 110
@@ -279,6 +289,83 @@ def build_index(paths):
             "places": {k: v for k, v in places.items() if v["refs"]}, "accounts": accounts, "problems": problems}
 
 
+# ------------------------------------------------------------------------------------------------ when the view applies
+
+
+def _head(path, most):
+    """The first `most` records of a JSON Lines file or a CSV, as _rows gives them."""
+    if path.endswith(".csv"):
+        return _rows(path, {"count": 0, "examples": []})[:most]
+    out = []
+    with open(path, "rb") as fh:
+        for n, line in enumerate(fh, 1):
+            if len(out) >= most:
+                break
+            try:
+                rec = json.loads(line.decode("utf-8", "replace"))
+            except ValueError:
+                continue
+            if isinstance(rec, dict):
+                out.append((n, n, rec))
+    return out
+
+
+def applies(paths):
+    """{claims, found} when the record files among `paths` record a swarm, else None: actions (as build_index reads
+    them) by SWARM_ACCOUNTS accounts or more, SWARM_PLACES places or more that three or more of them act on, and
+    SWARM_NAMING of the actions on shared places naming another account that acts there. `claims` are the files that
+    hold the actions, `found` says what was found."""
+    files = sorted((p for p in paths if p.endswith((".jsonl", ".csv"))), key=lambda p: (p.count("/"), p))[:DETECT_FILES]
+    acts = {}
+    for path in files:
+        rows = _head(path, DETECT_RECORDS)
+        f = _fields(rows)
+        if not (("actor" in f or "anon" in f) and "text" in f):
+            continue
+        got = []
+        for _a, _b, rec in rows:
+            who = _first(rec, ACTOR_KEYS)[1] or _first(rec, ANON_KEYS)[1]
+            if who and isinstance(rec.get(f["text"]), str):
+                got.append((who, _first(rec, PLACE_KEYS)[1], rec[f["text"]]))
+        if got:
+            acts[path] = got
+    placeless = [p for p, got in acts.items() if not any(place for _w, place, _t in got)]
+    base = _common_dir(placeless) if len(placeless) > 1 else ""
+    places = {}
+    for path, got in acts.items():
+        for who, place, _t in got:
+            places.setdefault(place or path[len(base):], set()).add(who.lower())
+    on_shared = naming = 0
+    for path, got in acts.items():
+        for who, place, text in got:
+            others = places[place or path[len(base):]] - {who.lower()}
+            if others:
+                on_shared += 1
+                naming += bool(others & {w.lstrip("@").lower() for w in WORD.findall(text)})
+    accounts = set().union(*places.values()) if places else set()
+    shared = sum(len(who) >= 3 for who in places.values())
+    share = naming / on_shared if on_shared else 0.0
+    if len(accounts) < SWARM_ACCOUNTS or shared < SWARM_PLACES or share < SWARM_NAMING:
+        return None
+    return {"claims": _claims(list(acts)),
+            "found": f"{len(accounts):,} accounts act on {shared:,} places that three or more of them share, and "
+                     f"{share:.0%} of what they write there names another account acting on the place."}
+
+
+def _claims(paths):
+    """The files as claims: each one, or a folder's files by one glob when it holds more than CLAIMS_LISTED."""
+    by_dir = {}
+    for p in paths:
+        by_dir.setdefault(p.rpartition("/")[0], []).append(p)
+    out = []
+    for d, ps in sorted(by_dir.items()):
+        if len(ps) <= CLAIMS_LISTED:
+            out += sorted(ps)
+        else:
+            out += sorted({f"{d + '/' if d else ''}*.{p.rsplit('.', 1)[-1]}" for p in ps})
+    return out
+
+
 # ------------------------------------------------------------------------------------------------ reading records back
 
 
@@ -385,32 +472,6 @@ def _signature(said):
 # ------------------------------------------------------------------------------------------------ the chart
 
 
-def _about(index):
-    """What the records are, for the question the page sends: each kind of file with its count and fields."""
-    groups = {}
-    for path, f in index["files"].items():
-        if f["kind"] != "actions" or not f["n"]:
-            continue
-        roles = f["fields"]
-        names = [f"{w} `{roles[k]}`" for k, w in (("actor", "account"), ("place", "place"), ("time", "time"),
-                                                   ("text", "text"), ("seq", "sequence"), ("reply", "reply to"))
-                 if k in roles]
-        if "place" not in roles:
-            names.insert(1, "place: the file's path")
-        kind = "saves of whole documents" if "seq" in roles else "posts"
-        g = groups.setdefault((kind, tuple(names)), {"paths": [], "n": 0})
-        g["paths"].append(path)
-        g["n"] += f["n"]
-    lines = []
-    for (kind, names), g in groups.items():
-        shown = ", ".join(g["paths"][:3]) + (f" and {len(g['paths']) - 3} more" if len(g["paths"]) > 3 else "")
-        lines.append(f"{shown}: {g['n']:,} {kind} ({', '.join(names)})")
-    if any(kind.startswith("saves") for kind, _n in groups):
-        lines.append("A save holds its whole page, so a regex over saves marks every later save of a page that once held the "
-                     "words; code that compares a save with the one before it on its page narrows to what each save wrote.")
-    return "\n".join(lines)
-
-
 def _chart(index, query):
     on = thimble.view_labels()
     marks = [{"label": lab["name"], "value": v["name"], "colour": v["colour"]}
@@ -465,7 +526,7 @@ def _chart(index, query):
     return {"title": title, "source": source, "cards": cards, "rows": rows, "places": places, "links": links,
             "marks": marks, "mark_counts": per_mark, "offset": offset, "total": len(picked), "page": CARDS_MAX,
             "counts": {"records": len(index["order"]), "accounts": len(index["accounts"]), "places": len(index["places"])},
-            "about": _about(index), "problems": index["problems"]}
+            "problems": index["problems"]}
 
 
 def _by_turns(picked, mark_at):

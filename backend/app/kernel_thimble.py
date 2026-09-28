@@ -39,6 +39,7 @@ A cover over a range of records supplies their negative value. Only the standard
 when a DataFrame is made.
 """
 import json
+import math
 import numbers
 import re
 import sqlite3
@@ -64,6 +65,36 @@ LABEL_COLOURS = ["#a09c93", "#0072b2", "#e69f00", "#009e73", "#cc79a7", "#d55e00
 # A value a label does not define: --viz-ink-1, -2 and -4 in turn (the third step is the label grey's near twin).
 NEUTRAL_COLOURS = ["#1b1a18", "#6b675f", "#cfcbc2"]
 _QUIET = frozenset({"no", "none", "other", "no match", "not", "neither", "n/a", "unknown"})  # concepts.QUIET_VALUES
+_LEFTOVER = frozenset({"no", "not", "none", "neither", "nothing", "other", "unrelated", "irrelevant"})  # concepts.LEFTOVER_WORDS
+
+
+def _negative(value: str, index: int, n: int) -> bool:
+    """concepts.is_negative: a quiet word, the second of two, or a last value of more that starts with a leftover word."""
+    v = value.strip().lower()
+    return v in _QUIET or (n == 2 and index == 1) or (n > 2 and index == n - 1 and v.split(" ", 1)[0] in _LEFTOVER)
+
+
+def _oklab(hex_colour: str) -> tuple:
+    """A colour's place in OKLab, where distance is how different two colours look."""
+    def lin(x: int) -> float:
+        c = x / 255
+        return c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4
+
+    r, g, b = (lin(int(hex_colour[i:i + 2], 16)) for i in (1, 3, 5))
+    lms = [(0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * b) ** (1 / 3),
+           (0.2119034982 * r + 0.6806995451 * g + 0.1073969566 * b) ** (1 / 3),
+           (0.0883024619 * r + 0.2817188376 * g + 0.6299787005 * b) ** (1 / 3)]
+    return tuple(sum(w * x for w, x in zip(row, lms)) for row in ((0.2104542553, 0.7936177850, -0.0040720468),
+                                                                  (1.9779984951, -2.4285922050, 0.4505937099),
+                                                                  (0.0259040371, 0.7827717662, -0.8086757660)))
+
+
+_LAB = [_oklab(h) for h in LABEL_COLOURS]
+
+
+def most_distinct(taken, candidates) -> int:
+    """The candidate colour index that looks most unlike the nearest of `taken`; the lowest index on a tie."""
+    return max(candidates, key=lambda m: (min((math.dist(_LAB[m], _LAB[t]) for t in taken), default=0.0), -m))
 
 
 def _ws() -> Path:
@@ -117,9 +148,9 @@ def _classes(k: dict) -> list:
 
 def _fill_colours(ks: list) -> list:
     """Give every class without a colour the one concepts.fill_colours gives it, in place: while a colour is free, one no
-    class of any label has, a label's first class takes the first free one and a further class the first free one from
-    its place after its label's first colour; else a first class takes the colours in turn and a further class the one
-    at its place. A negative class takes the grey, and a label's classes do not repeat a colour while one remains."""
+    class of any label has, a label's first class takes the first free one; else the colours in turn. A further class
+    takes the free colour, else any, that looks most unlike its label's colours (most_distinct). A negative class takes
+    the grey, and a label's classes do not repeat a colour while one remains."""
     n_colours = len(LABEL_COLOURS) - 1
     used = {c[1] for k in ks for c in k["classes"] if c[1]}
 
@@ -141,9 +172,8 @@ def _fill_colours(ks: list) -> list:
         taken = {base} if cs[0][1] else set()
         for i, c in enumerate(cs[1:], 1):
             if c[1] is None:
-                negative = c[0].lower() in _QUIET or (len(cs) == 2 and i == 1)
-                at = (base - 1 + i) % n_colours + 1
-                c[1] = 0 if negative else free(at) or at
+                mine = [m for m in range(1, n_colours + 1) if m not in taken]
+                c[1] = 0 if _negative(c[0], i, len(cs)) else most_distinct(taken, [m for m in mine if m not in used] or mine or [base])
             if c[1] and c[1] in taken:
                 c[1] = next((m for m in ((c[1] - 1 + j) % n_colours + 1 for j in range(1, n_colours)) if m not in taken), c[1])
             if c[1]:

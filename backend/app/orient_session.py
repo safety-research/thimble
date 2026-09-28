@@ -707,6 +707,8 @@ async def tool_start_orientation(ctx: Any, args: dict[str, Any]) -> Any:
     if running(ctx.c) or orientation.active(ctx.c):
         return tools.err(tools.hint("start_orientation-running"))
     passes = [p for p, on in (("final", final), ("views", views), ("report", report)) if on]
+    if views:  # before the prompt is rendered, so its forms list the viewers proposed
+        await _propose_builtins(ctx.c)
     if orientation.terminal_first(ctx.c) and not bg_session.wanted(ctx.c, tools.ORIENT_SESSION):
         return tools.ok(subagent_start(ctx.c, brief, passes))
     try:
@@ -714,6 +716,16 @@ async def tool_start_orientation(ctx: Any, args: dict[str, Any]) -> Any:
     except RuntimeError as e:
         return tools.err(f"start_orientation: {e}")
     return tools.ok(tools.hint("start_orientation-started"))
+
+
+async def _propose_builtins(c: str) -> None:
+    """views.propose_builtins, whose failure the orientation starts without."""
+    from . import views  # noqa: PLC0415
+
+    try:
+        await views.propose_builtins(c)
+    except Exception:  # noqa: BLE001
+        log.exception("%s: the viewers that apply were not proposed", c)
 
 
 async def tool_message_orientation(ctx: Any, args: dict[str, Any]) -> Any:

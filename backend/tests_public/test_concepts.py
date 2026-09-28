@@ -172,9 +172,20 @@ async def test_a_prompt_label_within_another_reads_only_the_records_it_kept(work
     assert k["within"] == {"label": concepts.find_concept(workspaces_tmp / CORPUS, "claims a PR")["id"], "value": "yes"}
     assert k["shown"] and not concepts.find_concept(workspaces_tmp / CORPUS, "claims a PR")["shown"]
 
+    # a wider narrowing under the same name runs the prompt label again over what it keeps now
+    await concepts.apply_scoped(CORPUS, name="claims a PR", kind="regex", text=r"(?i)claim", **kw)
+    await concepts.wait_apply(CORPUS, k["within"]["label"], 60)
+    fake_classify.calls.clear()
+    s = await concepts.apply_scoped(CORPUS, name="asks for review", kind="prompt", text="The post asks for a review.",
+                                    within={"label": "claims a PR"}, show=True, **kw)
+    s = await concepts.wait_apply(CORPUS, s["concept"], 60) if s["partial"] else s
+    wider = {ref for ref, v in _board_expected(r"(?i)claim").items() if v == "yes"}
+    assert not s.get("unchanged") and {ref for call in fake_classify.calls for ref, _t in call["items"]} == wider > kept
+
 
 def test_a_prompt_label_reads_a_save_of_a_whole_page_as_what_it_changed(tmp_path):
-    """A record that saves a page again reads as the lines it added and removed from the page's save before it, the same
+    """A record that saves a page again reads as the lines it added and removed from the page's save before it (under a
+    line naming the page for a model, without it for a regex), the same
     whether the run reads every record in order or only the records a trial or `within` picked; a page's first save and a
     save that rewrites most of the page read whole."""
     saves = [{"page_id": "a", "seq": 1, "user": "ann", "body": "Intro\nline one"},
@@ -186,5 +197,6 @@ def test_a_prompt_label_reads_a_save_of_a_whole_page_as_what_it_changed(tmp_path
     every = {u.ref: u.text(10_000) for u in concepts.as_changes(iter(units))}
     picked = {u.ref: u.text(10_000) for u in concepts.picked_as_changes(tmp_path, units[2:])}
     assert every["revisions.jsonl#L3"] == picked["revisions.jsonl#L3"] == "What this save changed on a:\n+ line two -- bo"
+    assert [u.text(10_000) for u in concepts.as_changes(iter(units), header=False)][2] == "+ line two -- bo"  # a regex's
     assert every["revisions.jsonl#L1"] == "Intro\nline one"
     assert every["revisions.jsonl#L4"] == picked["revisions.jsonl#L4"] == "All new\ntext here\nand more"

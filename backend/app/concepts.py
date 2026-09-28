@@ -49,7 +49,7 @@ from datetime import datetime, timezone
 from decimal import ROUND_HALF_UP, Decimal
 from functools import partial
 from pathlib import Path
-from typing import Any, Callable, Iterator, NamedTuple
+from typing import Any, Callable, Iterable, Iterator, NamedTuple
 
 from fastapi import APIRouter, HTTPException, Response
 from pydantic import BaseModel, Field
@@ -109,6 +109,7 @@ MARKS = ("span", "record", "file")  # what a label over files marks in the reade
 MARKS_UNIT = {"span": "record", "record": "record", "file": "agent"}
 PALETTE = 12              # label colours --label-1..12; 0 is --label-none, the grey of "no match"
 QUIET_VALUES = frozenset({"no", "none", "other", "no match", "not", "neither", "n/a", "unknown"})  # values that say nothing
+LEFTOVER_WORDS = frozenset({"no", "not", "none", "neither", "nothing", "other", "unrelated", "irrelevant"})  # a leftover's first
 UNITS = (*FILE_UNITS, "cell", "span")
 SCOPES = {"files": "record", "canvas": "cell", "report": "span"}
 DEFAULT_LABELS = ["yes", "no"]
@@ -211,8 +212,10 @@ def _labels_list(labels: Any) -> list[str]:
 
 
 def is_negative(value: str, index: int, n: int) -> bool:
-    """Whether a value is a label's negative: a quiet word (no, none, other, no match), or the second of two."""
-    return value.strip().lower() in QUIET_VALUES or (n == 2 and index == 1)
+    """Whether a value is a label's negative: a quiet word (no, none, other, no match), the second of two, or the last of
+    more when it starts with a word such as not, no or other ("not about it"), the value left for what fits no other."""
+    v = value.strip().lower()
+    return v in QUIET_VALUES or (n == 2 and index == 1) or (n > 2 and index == n - 1 and v.split(" ", 1)[0] in LEFTOVER_WORDS)
 
 
 def marks_of(unit: str, marks: Any = None) -> str | None:
@@ -265,10 +268,10 @@ def free_colour(start: int, used: set[int]) -> int | None:
 
 def fill_colours(concepts: list[dict]) -> list[dict]:
     """Give every class without a colour one, in place, and return the list. While a palette colour is free, one no class
-    of any label has, a label's first class takes the first free one and a further class the first free one from its
-    place after its label's first colour; when none is free, a first class takes the colours in turn and a further class
-    the one at its place. A negative class takes the grey, and a label's classes do not repeat a colour while one is
-    free (own_colour)."""
+    of any label has, a label's first class takes the first free one; when none is free, the colours in turn. A further
+    class takes the free colour, else any, that looks most unlike its label's colours (kernel_thimble.most_distinct). A
+    negative class takes the grey, and a label's classes do not repeat a colour while one is free (own_colour)."""
+    from .kernel_thimble import most_distinct  # noqa: PLC0415
     used = {c["color"] for x in concepts for c in x.get("classes") or [] if c["color"]}
     k = 0
     for concept in concepts:
@@ -286,8 +289,8 @@ def fill_colours(concepts: list[dict]) -> list[dict]:
         taken = {base} if classes[0]["color"] else set()
         for i, c in enumerate(classes[1:], 1):
             if c["color"] is None:
-                at = (base - 1 + i) % PALETTE + 1
-                c["color"] = 0 if is_negative(c["name"], i, n) else free_colour(at, used) or at
+                mine = [m for m in range(1, PALETTE + 1) if m not in taken]
+                c["color"] = 0 if is_negative(c["name"], i, n) else most_distinct(taken, [m for m in mine if m not in used] or mine or [base])
             c["color"] = own_colour(c["color"], taken)
             if c["color"]:
                 taken.add(c["color"])
@@ -1084,6 +1087,12 @@ def resolve_within(ws: Path, within: Any) -> dict | None:
     return {"label": k["id"], "value": value}
 
 
+def _rev_of(ws: Path, concept_id: str) -> int | None:
+    """The label's revision (note_change), which steps whenever its rows change; None when it is gone."""
+    k = read_concept(ws, concept_id)
+    return int(k.get("rev") or 0) if k else None
+
+
 def within_units(ws: Path, corpus_dir: Path, sources: list[dict], within: dict) -> list[Unit]:
     """The records of the sources that the label `within` names gave its value, in corpus order. Blocking (a thread)."""
     st = _store_ready(ws, within["label"])
@@ -1140,23 +1149,32 @@ def _befores(path: Path, wanted: set[int]) -> dict[int, str]:
     return out
 
 
-def _changed(u: Unit, key: tuple[str, str], old: Any) -> Unit:
-    """The unit of a save as the lines it added (`+`) and removed (`-`) from `old`, the document before it; the unit itself
-    when there is none before it or the save keeps under half of its lines."""
+def change_lines(old: Any, new: str) -> list[str] | None:
+    """The lines `new` added (`+ line`) and removed (`- line`) from `old`, the document the save before it held; None when
+    there is none before it or it keeps under half of the lines before, so the save is read whole."""
     if not isinstance(old, str):
-        return u
-    a, b = [s for s in old.splitlines() if s.strip()], [s for s in u.record[key[1]].splitlines() if s.strip()]
+        return None
+    a, b = [s for s in old.splitlines() if s.strip()], [s for s in new.splitlines() if s.strip()]
     was, now = set(a), set(b)
     if 2 * sum(s in now for s in a) < len(a):
+        return None
+    return [f"+ {s}" for s in b if s not in was] + [f"- {s}" for s in a if s not in now]
+
+
+def _changed(u: Unit, key: tuple[str, str], old: Any, header: bool = True) -> Unit:
+    """The unit of a save as the lines it changed from `old` (change_lines), under a line naming the document when
+    `header`; the unit itself when the save reads whole."""
+    diff = change_lines(old, u.record[key[1]])
+    if diff is None:
         return u
-    diff = [f"+ {s}" for s in b if s not in was] + [f"- {s}" for s in a if s not in now]
-    text = f"What this save changed on {key[0] or labels_store.ref_parts(u.ref)[0]}:\n" + ("\n".join(diff) or "nothing")
+    text = ("\n".join(diff) if not header
+            else f"What this save changed on {key[0] or labels_store.ref_parts(u.ref)[0]}:\n" + ("\n".join(diff) or "nothing"))
     return Unit(u.ref, u.paths, lambda ref=u.ref, text=text: iter([(ref, text)]), u.record)
 
 
-def as_changes(units: Iterator[Unit]) -> Iterator[Unit]:
+def as_changes(units: Iterator[Unit], header: bool = True) -> Iterator[Unit]:
     """Every record of some files in order (iter_units), a record that saves a document again (_save_key) reading as what
-    it changed from the save before it, so a model judges what the save did rather than the whole document."""
+    it changed from the save before it, so a model or a regex judges what the save did rather than the whole document."""
     last: dict[tuple[str, str], Any] = {}
     for u in units:
         key = _save_key(u.record)
@@ -1165,10 +1183,10 @@ def as_changes(units: Iterator[Unit]) -> Iterator[Unit]:
             continue
         doc = (labels_store.ref_parts(u.ref)[0] or "", key[0])
         old, last[doc] = last.get(doc), u.record[key[1]]
-        yield _changed(u, key, old)
+        yield _changed(u, key, old, header)
 
 
-def picked_as_changes(corpus_dir: Path, units: list[Unit]) -> list[Unit]:
+def picked_as_changes(corpus_dir: Path, units: list[Unit], header: bool = True) -> list[Unit]:
     """as_changes over the records a trial or `within` picked, each file that holds a save among them read once for the
     saves before them. Blocking."""
     wanted: dict[str, set[int]] = {}
@@ -1181,8 +1199,25 @@ def picked_as_changes(corpus_dir: Path, units: list[Unit]) -> list[Unit]:
     for u in units:
         rel, line = labels_store.ref_parts(u.ref)
         key = _save_key(u.record)
-        out.append(_changed(u, key, befores.get(rel or "", {}).get(line or 0)) if key else u)
+        out.append(_changed(u, key, befores.get(rel or "", {}).get(line or 0), header) if key else u)
     return out
+
+
+SAVES_SNIFF = 20  # records read from the head of a JSON Lines file to tell whether it holds saves
+
+
+def holds_saves(corpus_dir: Path, sources: list[dict]) -> bool:
+    """Whether a JSON Lines file among the sources opens with a record that saves a document (_save_key). Blocking."""
+    for src in sources:
+        if not src["path"].endswith(".jsonl"):
+            continue
+        for raw in corpus.read_lines(config.safe_corpus_path(corpus_dir, src["path"]), 1, SAVES_SNIFF):
+            try:
+                if _save_key(json.loads(corpus.decode_line(raw))):
+                    return True
+            except ValueError:
+                continue
+    return False
 
 
 TRIAL_SKIP_LINES = 8  # a trial's pick that lands on a blank line takes the next record with words within this many lines
@@ -2021,22 +2056,24 @@ async def _apply_regex(c: str, concept: dict, corpus_dir: Path, sources: list[di
     return labeled, failed, message
 
 
-async def _apply_regex_units(c: str, concept: dict, units: list[Unit], out: Path, cancel: threading.Event) -> tuple[int, int, str | None]:
-    """The regex kind over units already in hand (cards, sentences, a trial's sampled records), in a worker thread: one
-    row per unit, the matched text as the rationale and every matched text as `spans`, as the scan pool writes a
-    record's. A regex reads as much of a unit as the scan pool does, not the classifier's share of it."""
+REGEX_BATCH = 2_000  # units a regex over streamed units labels between writes
+
+
+async def _apply_regex_units(c: str, concept: dict, units: Iterable[Unit], out: Path, cancel: threading.Event) -> tuple[int, int, str | None]:
+    """The regex kind over units in hand or streamed (cards, sentences, the records a trial or `within` picked, the records
+    of files that hold saves), REGEX_BATCH at a time in a worker thread: one row per unit, the matched text as the
+    rationale and every matched text as `spans`, as the scan pool writes a record's. A regex reads as much of a unit as
+    the scan pool does, not the classifier's share of it."""
     rx = _compiled(concept)
     labels = concept["labels"]
     pos, neg = labels[0], (labels[1] if len(labels) > 1 else "no")
-    cap = UNIT_TEXT_MAX
+    todo = iter(units)
 
     def scan() -> tuple[list[dict], int]:
         rows: list[dict] = []
         hits = 0
-        for u in units:
-            if cancel.is_set():
-                break
-            text = u.text(cap)
+        for u in itertools.islice(todo, REGEX_BATCH):
+            text = u.text(UNIT_TEXT_MAX)
             m = rx.search(text)
             if m:
                 hits += 1
@@ -2045,15 +2082,21 @@ async def _apply_regex_units(c: str, concept: dict, units: list[Unit], out: Path
                 rows.append(_row(u.ref, neg, 1.0, "regex"))
         return rows, hits
 
-    rows, hits = await asyncio.to_thread(scan)
+    done = hits = 0
     writer = _LabelsWriter(out).start()
     try:
-        await asyncio.to_thread(writer.put, concept_scan.jsonl_bytes(rows), rows)
+        while not cancel.is_set():
+            rows, h = await asyncio.to_thread(scan)
+            if not rows:
+                break
+            await asyncio.to_thread(writer.put, concept_scan.jsonl_bytes(rows), rows)
+            done, hits = done + len(rows), hits + h
+            _progress(c, concept["id"], done=done, labeled=done, failed=0, matches=hits)
     finally:
         await asyncio.to_thread(writer.close)
-    message = _cancelled_message(len(rows), concept["unit"]) if cancel.is_set() else None
-    _progress(c, concept["id"], done=len(rows), labeled=len(rows), failed=0, matches=hits, eta_s=None)
-    return len(rows), 0, message
+    message = _cancelled_message(done, concept["unit"]) if cancel.is_set() else None
+    _progress(c, concept["id"], done=done, labeled=done, failed=0, matches=hits, eta_s=None)
+    return done, 0, message
 
 
 def implicit_value(labels: list[str]) -> str | None:
@@ -2366,6 +2409,7 @@ async def run_apply(c: str, concept_id: str, paths: list[str] | None = None, lim
     version = concept["version"]
     unit = concept["unit"]
     within = concept.get("within") if unit == "record" else None
+    within_rev = _rev_of(ws, within["label"]) if within else None
     patterns = _patterns(paths) if unit in FILE_UNITS else []
     corpus_dir = config.corpus_dir(c)
     if unit in FILE_UNITS:
@@ -2432,9 +2476,14 @@ async def run_apply(c: str, concept_id: str, paths: list[str] | None = None, lim
                 concept = {**concept, "examples": few}
                 _progress(c, concept_id, examples=len(few))
             if concept["kind"] == "regex":
-                if unit in FILE_UNITS and not sampled:
+                # a regex reads a save as what it changed, as a model does, so files that hold saves go record by record
+                saves = unit == "record" and await asyncio.to_thread(holds_saves, corpus_dir, sources)
+                if unit in FILE_UNITS and not sampled and not saves:
                     labeled, failed, message = await _apply_regex(c, concept, corpus_dir, sources, index, None, out, cancel)
                 else:
+                    if saves:
+                        units = (await asyncio.to_thread(picked_as_changes, corpus_dir, units, False) if sampled
+                                 else as_changes(iter_units(corpus_dir, sources, unit), False))
                     labeled, failed, message = await _apply_regex_units(c, concept, units, out, cancel)
             elif concept["kind"] == "prompt":
                 stream: Iterator[Unit] = iter_units(corpus_dir, sources, unit) if unit in FILE_UNITS and not sampled else iter(units)
@@ -2475,7 +2524,7 @@ async def run_apply(c: str, concept_id: str, paths: list[str] | None = None, lim
             app = {"ts": started, "paths": patterns, "total": total, "matched_total": matched, "labeled": labeled, "failed": failed,
                    "matches": int(state.get("matches") or 0), "status": "done", "message": message, "created_by": created_by,
                    "version": version, "examples": len(concept.get("examples") or []), "limit": limit, "stopped": cancel.is_set(),
-                   "within": within}
+                   "within": within, "within_rev": within_rev}
             concept = (_record_application(ws, concept_id, app, calibration, _stored_stats(file_key, stats))
                        or {**concept, "calibration": calibration})
             summary = {**app, "run_id": run_id, "concept": concept_id, "name": concept["name"], "unit": concept["unit"],
@@ -3132,7 +3181,8 @@ def covered(c: str, concept: dict, patterns: list[str], limit: int | None) -> bo
     last = concept["applications"][-1] if concept["applications"] else None
     if not last or last.get("status") != "done" or last.get("version") != concept["version"] or last.get("stopped"):
         return False
-    if (last.get("within") or None) != (concept.get("within") or None):
+    within = concept.get("within") or None
+    if (last.get("within") or None) != within or (within and last.get("within_rev") != _rev_of(_ws(c), within["label"])):
         return False
     whole = last.get("limit") is None and last.get("total") == last.get("matched_total")
     if concept["unit"] in FILE_UNITS:

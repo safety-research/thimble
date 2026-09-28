@@ -3,7 +3,8 @@ kernel and calls `call` there).
 
 A viewer's reader.py defines build_index(paths) -> index, records(index, query) -> JSON, and resolve(index, locator)
 ->
-{excerpt, label, refs, key?, target?} or None. `call` loads reader.py (again when it changed), builds the index or
+{excerpt, label, refs, key?, target?} or None; a viewer thimble ships may also define applies(paths) -> {claims, found}
+or None, whether it fits a corpus (views.propose_builtins), which runs with no index. `call` loads reader.py (again when it changed), builds the index or
 loads
 it from a pickle keyed by the files' and reader's fingerprint, runs one operation and prints SENTINEL followed by the
 JSON answer. A reader that raises answers {ok: false, error, traceback}. Only the last fingerprint per view stays in
@@ -95,14 +96,18 @@ def _thimble(req: dict) -> object | None:
 
 
 def answer(req: dict) -> dict:
-    """The answer to one request {slug, reader, fp, paths, cache, op, arg, labels?}; op is index, records, resolve or
-    resolve_many (a list of locators, answered with a list). A records call runs with `labels`, the labels context,
+    """The answer to one request {slug, reader, fp, paths, cache, op, arg, labels?}; op is index, records, resolve,
+    resolve_many (a list of locators, answered with a list) or applies (the corpus's record files as `arg`). A records call runs with `labels`, the labels context,
     as thimble's _view_ctx, which thimble.marked and thimble.kept read."""
     t0 = time.monotonic()
     th = None
     try:
         _thimble(req)  # before reader.py loads, since it may import thimble at its top
         mod = _reader(req["slug"], req["reader"])
+        if req.get("op") == "applies":
+            fn = getattr(mod, "applies", None)
+            result = fn(list(req.get("arg") or [])) if callable(fn) else None
+            return {"ok": True, "result": result, "built": False, "ms": round((time.monotonic() - t0) * 1000)}
         idx, built = _index(req["slug"], mod, req["fp"], req.get("paths") or [], req.get("cache"))
         op = req.get("op")
         if op == "index":

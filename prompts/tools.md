@@ -102,7 +102,7 @@ Define a category, apply it to every unit of a scope, and get the counts per val
     "predicate": {
       "type": "object",
       "properties": {
-        "kind": {"type": "string", "enum": ["prompt", "regex", "code"], "description": "A model judges each unit, a regex matches its text, or code defines label(unit) returning (value, confidence), where a unit is a JSONL record as its dict, a text line or a sentence a dict with its words in unit['text'], and a card a dict with its text, kind, question, takeaway, group and groups, the titles of the frames around it. A record that saves a whole document again, such as a wiki page's revision, is read by a model as what it changed from the save before, and by a regex or code whole."},
+        "kind": {"type": "string", "enum": ["prompt", "regex", "code"], "description": "A model judges each unit, a regex matches its text, or code defines label(unit) returning (value, confidence), where a unit is a JSONL record as its dict, a text line or a sentence a dict with its words in unit['text'], and a card a dict with its text, kind, question, takeaway, group and groups, the titles of the frames around it. A record that saves a whole document again, such as a wiki page's revision, is read by a model or a regex as what it changed from the save before, and by code whole."},
         "text": {"type": "string", "description": "The description, pattern or function."}
       },
       "required": ["kind", "text"]

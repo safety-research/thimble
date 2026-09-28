@@ -10,6 +10,9 @@ thimble also ships file-type viewers under the same contract (BUILTIN_VIEWERS). 
 kernel with a cached index; refs.resolve hands file refs with a fragment to enrich_file_ref, and resolve_sync bridges
 synchronous callers to the kernel on the server's loop.
 
+A viewer thimble ships may say when it applies (view.json `applies`, reader.py's applies(paths)): an orientation of a
+corpus it fits proposes it, installed from its files with the claims applies() names (propose_builtins).
+
 A proposal is a view ticket in `views/proposals.json` that starts building as soon as it is proposed. Until the
 server
 stamps `built` into view.json the view is a draft that nothing lists or opens. After each session turn the server
@@ -579,6 +582,18 @@ def glob_matches(rel_file: str, pattern: str | None) -> bool:
     if not pattern or pattern == "*":
         return True
     return fnmatch.fnmatch(rel_file, pattern) or fnmatch.fnmatch(rel_file.rsplit("/", 1)[-1], pattern)
+
+
+def records_text(c: str, slug: str) -> str:
+    """What the records of the files the view claims hold (fields.describe), under a line saying so; "" for no view.
+    Blocking."""
+    from . import fields  # noqa: PLC0415
+
+    view = read_built(c, slug)
+    if view is None:
+        return ""
+    text = fields.describe(config.corpus_dir(c), [f[0] for f in claimed_files(c, view)])
+    return f"The records the view reads:\n{text}" if text else ""
 
 
 def claims_path(view: dict[str, Any], rel: str) -> bool:
@@ -1407,6 +1422,56 @@ def title_case(name: Any) -> str:
 
 # the views an orientation may propose; a viewer it suggests for a file type is not counted, nor a view dropped
 ORIENTATION_VIEWS_MAX = 3
+
+
+def proposable_viewers() -> list[str]:
+    """The viewers thimble ships that say when they apply (view.json `applies`)."""
+    return sorted(d.name for d in VIEWERS_DIR.iterdir() if d.is_dir() and read_json(d / VIEW_JSON, {}).get("applies"))
+
+
+async def propose_builtins(c: str) -> list[str]:
+    """Propose to the orientation each viewer that applies to the corpus (proposable_viewers): its reader's
+    applies(paths) gets the corpus's record files, and when it names claims the viewer is installed from its files with
+    them and registered built (write_view), under an orientation proposal that counts toward ORIENTATION_VIEWS_MAX and
+    is deleted like any. One the workspace has under its slug already, or one past the cap, is left out. Returns the
+    slugs proposed."""
+    from . import corpus  # noqa: PLC0415
+
+    made: list[str] = []
+    for slug in proposable_viewers():
+        if slug in _view_dirs(c) or read_proposal(c, slug) is not None or len(orientation_views(c)) >= ORIENTATION_VIEWS_MAX:
+            continue
+        sources = await asyncio.to_thread(corpus.list_sources, config.corpus_dir(c))
+        paths = [s["path"] for s in sources if str(s["path"]).endswith((".jsonl", ".csv"))]
+        req = {"slug": f"builtin-{slug}", "reader": str((VIEWERS_DIR / slug / READER_PY).resolve()), "fp": "applies",
+               "paths": [], "cache": None, "thimble": str(KERNEL_THIMBLE)}
+        try:
+            fit = await _call(c, req, "applies", paths)
+        except ReaderError as e:
+            log.warning("%s: whether the viewer %s applies is not known: %s", c, slug, e)
+            continue
+        if isinstance(fit, dict) and _str_list(fit.get("claims")):
+            await asyncio.to_thread(_install_builtin, c, slug, fit)
+            made.append(slug)
+    return made
+
+
+def _install_builtin(c: str, slug: str, fit: dict[str, Any]) -> None:
+    """The viewer's files as the workspace's view `slug` claiming what `fit` names, under a built orientation proposal
+    whose why is what applies() found."""
+    d = VIEWERS_DIR / slug
+    raw = read_json(d / VIEW_JSON, {})
+    claims = _str_list(fit["claims"])
+    with _proposals_lock:
+        items = list_proposals(c)
+        items.append({"slug": slug, "name": title_case(raw.get("name") or slug),
+                      "why": " ".join(str(fit.get("found") or raw.get("why") or "").split()), "claims": claims,
+                      "arrangement": " ".join(str(raw.get("why") or "").split()), "proposed_by": "thimble",
+                      "status": "queued", "orientation": True, "ts": _now()})
+        _save_proposals(c, items)
+    write_view(c, slug, name=raw.get("name") or slug, why=raw.get("why") or "", claims=claims, accepts=raw.get("accepts"),
+               declares=raw.get("declares"), default=bool(raw.get("default")), libs=raw.get("libs"),
+               reader=(d / READER_PY).read_text("utf-8"), html=(d / VIEW_HTML).read_text("utf-8"))
 
 
 def orientation_views(c: str) -> list[dict[str, Any]]:
@@ -2413,6 +2478,7 @@ async def tool_read_ref(ctx: Any, args: dict[str, Any]) -> Any:
                 lines.append(f"arrangement: {arrangement}")
             forms = view_forms(view)
             lines += [f"form: {f}  {m}" for f, m in forms] or ["forms: none"]
+            lines.append(await asyncio.to_thread(records_text, ctx.c, p["slug"]))
             return tools.ok("\n".join(ln for ln in lines if ln))
         prop = read_proposal(ctx.c, p["slug"])
         if prop is not None:

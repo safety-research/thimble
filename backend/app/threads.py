@@ -175,7 +175,12 @@ def _read(c: str, ref: str) -> str:
             res = tools._read_cell(tools.Ctx(c, tools.ANALYST), "card:" + ref.split(":", 1)[1])
             return res.text
         hit = refs.resolve(config.corpus_dir(c), ref)
-        return f"{ref} ({hit.get('kind', 'record')})\n{str(hit.get('excerpt') or '').strip()}"
+        text = f"{ref} ({hit.get('kind', 'record')})\n{str(hit.get('excerpt') or '').strip()}"
+        if hit.get("kind") == "view" and not hit.get("key"):
+            from . import views  # noqa: PLC0415
+
+            text += "\n" + views.records_text(c, str(hit.get("slug")))
+        return text
     except Exception as e:  # noqa: BLE001 — a ref that does not resolve still opens the thread
         detail = getattr(e, "detail", None) or f"{type(e).__name__}: {e}"
         return f"{ref} does not resolve: {detail}"
@@ -200,8 +205,8 @@ def _chat_record(c: str, chat_id: str, index: int) -> str:
 
 async def warm(c: str, anchor: str | None) -> None:
     """Resolve the anchor's view refs once in a worker thread, so the thread's first event, built on the server's loop,
-    finds
-    them in the views memo (views.resolve_sync cannot run a reader on that loop). Waits WARM_S at most."""
+    finds them in the views memo (views.resolve_sync cannot run a reader on that loop), and a view's records described
+    (views.records_text). Waits WARM_S at most."""
     from . import refs  # noqa: PLC0415
 
     wanted = [a for a in _anchors({"anchor": anchor}) if a.startswith("view:") or _file_ref(a) and "#" in a]
@@ -210,8 +215,12 @@ async def warm(c: str, anchor: str | None) -> None:
     corpus = config.corpus_dir(c)
 
     async def one(ref: str) -> None:
+        from . import views  # noqa: PLC0415
+
         try:
-            await asyncio.to_thread(refs.resolve, corpus, ref)
+            hit = await asyncio.to_thread(refs.resolve, corpus, ref)
+            if hit.get("kind") == "view" and not hit.get("key"):
+                await asyncio.to_thread(views.records_text, c, str(hit.get("slug")))
         except Exception:  # noqa: BLE001 — _read says why a ref does not resolve
             return
 

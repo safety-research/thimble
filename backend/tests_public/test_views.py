@@ -276,7 +276,8 @@ async def test_the_swarm_view_draws_as_cards_the_records_a_label_marks_with_the_
                                     limit=None, comment=False, filter=False, created_by="test", chat=None, group=None, card=False)
     await concepts.wait_apply("swarm", s["concept"], 60)
     marked = {r["ref"] for r in concepts.read_labels(config.WORKSPACES_DIR / "swarm", s["concept"]) if r["label"] == "about the gain"}
-    marked -= {"wiki/pages/Calibration/Gain.jsonl#L4", "chat/help-desk.jsonl#L8"}  # a replayed save and a post sent twice
+    assert "wiki/pages/Calibration/Gain.jsonl#L4" not in marked  # a regex reads a save as what it changed: a replay, nothing
+    marked -= {"chat/help-desk.jsonl#L8"}  # a post sent twice
     concepts.show_concept("swarm", s["concept"], True)
     views._memo.clear()
     chart = await views.reader_call("swarm", slug, "records", {"op": "chart"})
@@ -286,3 +287,24 @@ async def test_the_swarm_view_draws_as_cards_the_records_a_label_marks_with_the_
     types = {x["type"] for x in chart["links"]}
     assert {"reply", "same place"} <= types, chart["links"]
     assert any(c["line"] == "1.84 → 1.48" for c in chart["cards"]), [c["line"] for c in chart["cards"]]
+
+
+async def test_a_viewer_that_applies_is_proposed_to_the_orientation_installed_from_its_files(samples, inproc, bound):
+    """The Swarm viewer says when it applies: on a corpus where many accounts act on pages they share and name each
+    other, it is installed at once claiming the files that hold their actions, as an orientation's proposal that
+    counts toward the cap and is deleted like one; on the worked examples' samples, a small team's, it is not."""
+    d = samples / "big-swarm"
+    d.mkdir()
+    rows = [{"page": f"p{i % 4}", "user": f"bot{i % 35}", "text": f"Relay from bot{(i + 1) % 35}: the value is {i}."}
+            for i in range(140)]
+    (d / "saves.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows))
+    (d / "manifest.json").write_text(json.dumps({"name": "big-swarm", "description": "a swarm"}))
+    for name in EXAMPLES:
+        assert await views.propose_builtins(name) == [], name
+    assert await views.propose_builtins("big-swarm") == ["swarm"]
+    prop = views.read_proposal("big-swarm", "swarm")
+    assert prop["status"] == "built" and prop["orientation"] and prop["claims"] == ["saves.jsonl"]
+    assert "35 accounts" in prop["why"] and views.orientation_views("big-swarm") == [prop]
+    assert views.read_view("big-swarm", "swarm")["ok"] and await views.propose_builtins("big-swarm") == []
+    views.delete_proposal("big-swarm", "swarm")
+    assert views.read_view("big-swarm", "swarm") is None and views.orientation_views("big-swarm") == []

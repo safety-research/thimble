@@ -9,5 +9,6 @@
     {"form": "place/<place>", "means": "one page or channel, such as place/Night-14/Schedule: all its records"}
   ],
   "default": true,
+  "applies": true,
   "libs": []
 }
