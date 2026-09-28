@@ -167,8 +167,9 @@ esac
 
 def test_claude_codes_config_changes_only_on_a_yes_and_uninstall_takes_back_what_thimble_wrote(tmp_path):
     """install.sh's trust step writes nothing into Claude Code's config without a yes (no terminal, no flag), then with
-    --trust-workspaces the one entry, keeping the rest, and asks no more; uninstall takes that entry back and the keys an
-    older version wrote into a folder's settings.local.json, where they still hold thimble's value."""
+    --trust-workspaces the one entry, keeping the rest, and asks no more; a later --no-trust-workspaces takes it back.
+    Uninstall takes back the entries thimble added, an older version's per-folder one too, and the keys an older
+    version wrote into a folder's settings.local.json, where they still hold thimble's value."""
     tree = fake_tree(tmp_path / "app")
     (tree / "backend" / "app").mkdir(parents=True)
     shutil.copy(REPO / "backend" / "app" / "claude_changes.py", tree / "backend" / "app")
@@ -179,17 +180,26 @@ def test_claude_codes_config_changes_only_on_a_yes_and_uninstall_takes_back_what
     cfg = Path(env["HOME"]) / ".claude.json"
     before = json.dumps({"numStartups": 3, "projects": {"/x": {"lastCost": 1}}})
     cfg.write_text(before)
+    ours = {str(tree / "workspaces"): {"hasTrustDialogAccepted": True}}
 
-    def trust(*flag: str) -> str:
-        return subprocess.run(["python3", "-I", str(tree / "backend" / "app" / "claude_changes.py"), "trust", str(tree),
-                               *flag], capture_output=True, text=True, env=env, stdin=subprocess.DEVNULL, timeout=30).stdout
+    def trust(*flag: str) -> dict:
+        subprocess.run(["python3", "-I", str(tree / "backend" / "app" / "claude_changes.py"), "trust", str(tree), *flag],
+                       capture_output=True, text=True, env=env, stdin=subprocess.DEVNULL, timeout=30, check=True)
+        rec = home / "trust.json"
+        return json.loads(rec.read_text()) if rec.exists() else {}
 
-    assert "not asked" in trust() and cfg.read_text() == before and not (home / "trust.json").exists()
-    assert "marked" in trust("--yes")
+    assert trust() == {} and cfg.read_text() == before, "nothing is written without a yes"
+    yes = {"folder": str(tree / "workspaces"), "config": str(cfg), "answer": "yes", "added": True}
+    assert trust("--yes") == yes
     data = json.loads(cfg.read_text())
-    assert data["numStartups"] == 3 and data["projects"] == {"/x": {"lastCost": 1},
-                                                             str(tree / "workspaces"): {"hasTrustDialogAccepted": True}}
-    assert "earlier install" in trust()
+    assert data["numStartups"] == 3 and data["projects"] == {"/x": {"lastCost": 1}, **ours}
+    assert trust() == yes and json.loads(cfg.read_text()) == data, "asked once"
+    assert trust("--no") == {**yes, "answer": "no", "added": False} and json.loads(cfg.read_text()) == json.loads(before)
+    assert trust("--yes") == yes
+    old = str(tmp_path / "old-workspace")
+    data = json.loads(cfg.read_text())
+    cfg.write_text(json.dumps({**data, "projects": {**data["projects"], old: {"hasTrustDialogAccepted": True}}}))
+    (home / "trusted-folders.json").write_text(json.dumps({old: {"config": str(cfg), "created": True}}))
     folder = tmp_path / "corpus"
     (folder / ".claude").mkdir(parents=True)
     (folder / ".claude" / "settings.local.json").write_text(json.dumps({"env": {"CLAUDE_CODE_EFFORT_LEVEL": "max",
@@ -197,7 +207,6 @@ def test_claude_codes_config_changes_only_on_a_yes_and_uninstall_takes_back_what
     (home / "effort-overrides.json").write_text(json.dumps({str(folder): "max"}))
     r = subprocess.run(["bash", str(tree / "plugin" / "bin" / "thimble"), "uninstall", "--yes"], capture_output=True,
                        text=True, env=env, timeout=60)
-    assert "put back what thimble changed in Claude Code's files" in r.stdout, r.stdout + r.stderr
-    assert json.loads(cfg.read_text()) == json.loads(before)
+    assert json.loads(cfg.read_text()) == json.loads(before), r.stdout + r.stderr
     assert json.loads((folder / ".claude" / "settings.local.json").read_text()) == {"env": {"MINE": "1"}}
-    assert not home.exists(), r.stdout + r.stderr
+    assert not home.exists(), "removed once what it recorded was put back"

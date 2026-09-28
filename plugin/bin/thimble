@@ -146,7 +146,7 @@ uninstall() {
   [ -n "${HOME:-}" ] || { printf 'thimble uninstall: HOME is not set\n' >&2; exit 2; }
   local home_raw="${THIMBLE_HOME:-}" home home_note="" home_state=0 link="$HOME/.local/bin/thimble" tree="" kind="" name="" name_note=""
   local inside=0 pid="" port="" pid_note="" conf="" planned="" pport="" link_ours=0 link_why="" stop_how="" have_claude=0 ans cwd rc
-  local nsteps=0 ndone=0 nleft=0 left="" id_ok=0 id_conf="" id_note="" changed=0 undo=0 undo_py="" undo_cmd=""
+  local nsteps=0 ndone=0 nleft=0 left="" id_ok=0 id_conf="" id_note="" changed=0 undo=0 undo_py="" undo_cmd="" undone=1
   case "$home_raw" in *[![:space:]]*) ;; *) home_raw="$HOME/.thimble";; esac   # unset or blank: the default
   home="${home_raw%/}"; [ -n "$home" ] || home=/
   enable -n kill 2>/dev/null || true   # `kill` is the program on PATH, not the builtin: the `+ kill …` line names what ran, and a test can stand a failing one in for it
@@ -264,7 +264,7 @@ uninstall() {
   [ -z "$pid" ] || step "stop the thimble server this install recorded (pid $pid, $conf)"
   [ -z "$pid_note" ] || printf '  %s\n' "$pid_note"
   # what thimble changed in Claude Code's files, recorded in $home: put back with python3, else the tree's venv
-  if [ -f "$home/trust.json" ] || [ -f "$home/effort-overrides.json" ] || [ -f "$home/fast-overrides.json" ] || [ -f "$home/statusline-overrides.json" ]; then
+  if [ -f "$home/trust.json" ] || [ -f "$home/trusted-folders.json" ] || [ -f "$home/effort-overrides.json" ] || [ -f "$home/fast-overrides.json" ] || [ -f "$home/statusline-overrides.json" ]; then
     undo=1 undo_cmd="THIMBLE_HOME=$home python3 -I <a thimble tree>/backend/app/claude_changes.py undo"
     if [ -n "$tree" ] && [ -f "$tree/backend/app/claude_changes.py" ]; then
       if command -v python3 >/dev/null 2>&1; then undo_py=python3
@@ -335,7 +335,7 @@ uninstall() {
   fi
   if [ "$undo" = 1 ]; then
     if [ -n "$undo_py" ] && THIMBLE_HOME="$home" "$undo_py" -I "$tree/backend/app/claude_changes.py" undo; then ndone=$((ndone + 1))
-    else add_left "what thimble changed in Claude Code's files was not put back" "$undo_cmd"; fi
+    else add_left "what thimble changed in Claude Code's files was not put back" "$undo_cmd"; undone=0; fi
   fi
   if [ "$have_claude" = 1 ]; then
     if run claude plugin uninstall "thimble@$name"; then ndone=$((ndone + 1))
@@ -348,7 +348,9 @@ uninstall() {
   if [ "$link_ours" = 1 ]; then
     if run rm -f "$link"; then ndone=$((ndone + 1)); else add_left "$link was not removed" "rm -f $link"; fi
   fi
-  if [ "$keep_home" != 1 ] && [ "$home_state" = 1 ]; then
+  if [ "$keep_home" != 1 ] && [ "$home_state" = 1 ] && [ "$undone" = 0 ]; then
+    add_left "$home was kept: it records what the command above puts back" "rm -rf $home   # once that has run"
+  elif [ "$keep_home" != 1 ] && [ "$home_state" = 1 ]; then
     cwd="$(pwd -P 2>/dev/null || printf '%s' "$PWD")"
     if run rm -rf "$home"; then
       ndone=$((ndone + 1))
