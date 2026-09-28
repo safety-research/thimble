@@ -1,0 +1,6 @@
+[
+  {"name": "Clock change", "kind": "regex", "spec": "(?i)\\bDST\\b|clock change|daylight|nonexistent", "labels": ["clock change", "other"],
+   "paths": ["runs/*.json", "runs/*.jsonl", "runs/*.csv"]},
+  {"name": "Tests", "kind": "regex", "spec": "(?i)\\btests?\\b|\\bfixtures?\\b", "labels": ["tests", "other"],
+   "paths": ["runs/*.json", "runs/*.jsonl", "runs/*.csv"]}
+]

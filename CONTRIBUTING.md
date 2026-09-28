@@ -28,7 +28,8 @@ State lives under `~/.thimble` (`THIMBLE_HOME`): `server.json`, `server.log` and
 Per-workspace state is `workspaces/<c>/` in the checkout (`THIMBLE_WORKSPACES_DIR`). To run a scratch stack beside the
 live one, set `THIMBLE_HOME`, `THIMBLE_WORKSPACES_DIR`, `THIMBLE_DATA_DIR` and `THIMBLE_DEV_DIR` under /tmp and
 `THIMBLE_PORT` above 8400 (`THIMBLE_UI_PORT` above 5400 with Vite). `scripts/dev/make_toy_corpus.py` writes a synthetic
-corpus to try it on.
+corpus to try it on, and `scripts/dev/examples.py <folder>` opens the worked examples of custom views there, each on its
+sample with its sample labels (`labels.json`) on.
 
 ## Run the tests
 

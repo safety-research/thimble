@@ -1,0 +1,6 @@
+[
+  {"name": "Database connections", "kind": "regex", "spec": "(?i)\\bconnections?\\b|\\bpool\\b", "labels": ["connections", "other"],
+   "paths": ["agents.log", "alerts/*.jsonl", "chat/*.json", "deploys.csv", "tickets/*.txt"]},
+  {"name": "Charged twice", "kind": "regex", "spec": "(?i)charged twice|double charge|duplicate charge|two (pending )?charges|charge twice|same charge", "labels": ["charged twice", "other"],
+   "paths": ["agents.log", "alerts/*.jsonl", "chat/*.json", "deploys.csv", "tickets/*.txt"]}
+]
