@@ -27,11 +27,14 @@ router = APIRouter()
 
 # GET /settings layers these under what the file stores (tools.RESULT_LINES_KEY: lines of each output a card's result
 # shows).
-# terminal_first: the orientation runs as a subagent of the analyst's session (orientation.terminal_first); hide_chat:
-# the browser shows no chat column, only a dock (frontend shell/Shell)
-# orient_route: in terminal-first mode the orientation runs as a subagent or as a background session (bg_session)
-SETTINGS_DEFAULTS: dict[str, Any] = {"run_cell_result_lines": 40, "terminal_first": False, "hide_chat": False,
-                                     "orient_route": "subagent"}
+# terminal_first (on by default): the orientation, its critic and the writers run as background sessions the analyst's
+# terminal shows (orientation.terminal_first, bg_session); hide_chat: the browser shows no chat column, only a dock
+# (frontend shell/Shell)
+SETTINGS_DEFAULTS: dict[str, Any] = {"run_cell_result_lines": 40, "terminal_first": True, "hide_chat": False}
+# Settings earlier builds stored that nothing reads any more: GET leaves them out, a PUT that sends one (a tab still
+# running an earlier build) is taken with the key dropped, and the next PUT removes it from the file. orient_route
+# picked how terminal-first mode ran the orientation, which now always runs as a background session.
+RETIRED_KEYS = frozenset({"orient_route"})
 
 
 # --------------------------------------------------------------------------- plain-file helpers
@@ -208,12 +211,13 @@ def stored_settings(c: str) -> dict[str, Any]:
 
 
 def with_features(stored: dict[str, Any], c: str | None = None) -> dict[str, Any]:
-    """The effective settings: SETTINGS_DEFAULTS under `stored`, `models` as config.models_for resolves it, the rows of
+    """The effective settings: SETTINGS_DEFAULTS under `stored` less RETIRED_KEYS, `models` as config.models_for resolves it, the rows of
     the permission modes the analyst set (modes.chosen), and `disabled_modes`, those the analyst's Claude Code settings
     turn off."""
     from . import modes  # noqa: PLC0415 — modes imports this module
 
-    return {**SETTINGS_DEFAULTS, **stored, config.MODELS_KEY: config.models_for(c, stored),
+    kept = {k: v for k, v in stored.items() if k not in RETIRED_KEYS}
+    return {**SETTINGS_DEFAULTS, **kept, config.MODELS_KEY: config.models_for(c, stored),
             modes.SETTING: modes.chosen(stored), "disabled_modes": sorted(modes.disabled())}
 
 
@@ -225,14 +229,15 @@ def get_settings(c: str) -> dict[str, Any]:
 # The keys PUT /settings may change: the settings the browser's settings panel and switches save, and the rows of the
 # permission modes, which only the analyst's browser may change (hook_auth.analyst). Every other key is the server's
 # own or the analyst's to edit in the file (kernel_wrap, orient_instructions), since a kernel cell or a session's
-# command can reach the route on loopback.
-PUT_KEYS = frozenset({*SETTINGS_DEFAULTS, config.MODELS_KEY, "permission_modes"})
+# command can reach the route on loopback. RETIRED_KEYS are taken too, and dropped.
+PUT_KEYS = frozenset({*SETTINGS_DEFAULTS, config.MODELS_KEY, "permission_modes", *RETIRED_KEYS})
 
 
 @router.put("/ws/{c}/settings")
 def put_settings_route(c: str, request: Request, settings: dict[str, Any] = Body(...)) -> dict[str, Any]:
-    """put_settings for the browser, which may change PUT_KEYS only; 400 names any other key, or why a permission mode
-    cannot be chosen, and 403 refuses a change of permission modes from anything but the analyst's browser."""
+    """put_settings for the browser, which may change PUT_KEYS only (RETIRED_KEYS among them are dropped); 400 names any
+    other key, or why a permission mode cannot be chosen, and 403 refuses a change of permission modes from anything but
+    the analyst's browser."""
     from . import hook_auth, modes  # noqa: PLC0415 — modes imports this module
 
     refused = sorted(set(settings) - PUT_KEYS)
@@ -243,16 +248,17 @@ def put_settings_route(c: str, request: Request, settings: dict[str, Any] = Body
             raise HTTPException(403, hook_auth.ANALYST_ONLY)
         if why := modes.patch_error(settings[modes.SETTING]):
             raise HTTPException(400, why)
-    return put_settings(c, settings)
+    return put_settings(c, {k: v for k, v in settings.items() if k not in RETIRED_KEYS})
 
 
 def put_settings(c: str, settings: dict[str, Any]) -> dict[str, Any]:
     """Merges into the stored settings, so a partial PUT keeps the rest. Only what was stored plus the patch is written,
-    never SETTINGS_DEFAULTS, so a changed default takes effect. Returns the effective settings."""
+    never SETTINGS_DEFAULTS, so a changed default takes effect, and RETIRED_KEYS are left out. Returns the effective
+    settings."""
     path = ws_dir(c) / "settings.json"
     stored = read_json(path, {})
     stored = stored if isinstance(stored, dict) else {}
-    merged = {**stored, **settings}
+    merged = {k: v for k, v in {**stored, **settings}.items() if k not in RETIRED_KEYS}
     # the permission modes merge per agent, None putting an agent back on main's mode
     if isinstance(settings.get("permission_modes"), dict):
         held = stored.get("permission_modes") if isinstance(stored.get("permission_modes"), dict) else {}

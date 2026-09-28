@@ -33,7 +33,7 @@ For a development build, clone the repo and run `bash scripts/install.sh` (requi
 ## Usage
 
 - Run `thimble` in a directory, just as you would run `claude` 
-- It starts a Claude Code session there with the thimble plugin loaded and prints the dashboard URL. 
+- It starts a Claude Code session there with the thimble plugin loaded and prints the dashboard URL. The session is named `thimble:main · <workspace>` (as `claude agents` and `/resume` list it), and each agent thimble starts is named the same way, such as `thimble:orient · <workspace>`.
 - Each run starts a new conversation on the same workspace (cards, report, labels). `thimble --continue` picks up your last conversation in this folder instead.
 - To chat only in the terminal, with the browser as a dashboard, see [docs/terminal-first.md](docs/terminal-first.md).
 

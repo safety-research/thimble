@@ -7,13 +7,13 @@ calling that tool with the brief and the three output switches (`final_notebook`
 `ultracode`), and is told when the session starts (started) and stops (finished).
 
 The orientation's cards go to its deck, the root group `Orientation`, whatever group a call names, so the model never
-writes into the analyst's Your work. The first run's outputs are drafts until it ends: the canvas leaves its deck cards
-out (held) and its view proposals stay unlisted (holding) while they build. A follow-up (orient_session.message) resumes
+writes into the analyst's Your work. Its deck cards show on the canvas as it adds them; the first run's view proposals
+stay unlisted (holding) while they build. A follow-up (orient_session.message) resumes
 the same session, and its changes land in place, one Undo reverting them all.
 
   orient/run.json    {status: requested|running|done|failed|stopped, passes, query, effort?, critique?, ultracode?,
                       event?, requested?, started, ended, groups: {orientation}, chats: {orient?},
-                      session?, pid?, agent_id?, error?, run (0 the first, then one per follow-up), queue: [{text, by,
+                      session?, pid?, error?, run (0 the first, then one per follow-up), queue: [{text, by,
                       ts}], followups: [{run, status, started, ended, messages, added, revised, deleted, views}],
                       report_asked?}
   orient/summary.md  the session's last message, kept as a record for the export
@@ -21,15 +21,13 @@ the same session, and its changes land in place, one Undo reverting them all.
 `query` is only ever the analyst's own words typed with Start. A run with a `final` group uses it as its deck. `status`
 is the latest run's, so start_orientation refuses while any run goes.
 
-Terminal-first mode (the workspace's `terminal_first` setting): the orientation runs as a background subagent of the
-analyst's own session instead, the plugin agent SUBAGENT (plugin/agents/orient-subagent.md), so the analyst can watch
-and message it in Claude Code's agent view. start_orientation writes its prompt to subagent_prompt_file and asks main to
-start it; the mirror finds it as a subagent of main (session.py) and calls started and finished as for a session. It
-gives up what its own session has: a write fence (the work folder is the only place it writes), its own permission
-mode, Ultracode's workflows and effort, and the critique, since main's shim does not list `critique`. Its record has
-`route: subagent`.
+Terminal-first mode (the workspace's `terminal_first` setting, on by default): the orientation's session runs as the
+Claude Code background session `thimble:orient · <workspace>` (bg_session), which the analyst sees in the agent tray of
+their own terminal through its tray entry (plugin/agents/orient-tray.md) and can attach to and message. It is the same
+session as with the mode off, with everything Start chooses: the orientation role's model, effort and Ultracode, fast
+mode, its permission mode, the critique, the work-folder fence and the editable instructions.
 
-When run 0 ends, the deck and the held proposals appear, and the orientation's chat gets chips for them. A failed run 0
+When run 0 ends, the held proposals appear, and the orientation's chat gets chips for them. A failed run 0
 runs again in its session when a start asks for the same orientation. When the report was asked for, orient_session
 sends the `write` channel event once no follow-up waits.
 """
@@ -50,10 +48,7 @@ from .ledger import read_json, write_json
 log = logging.getLogger("thimble.orientation")
 
 AGENT = "thimble-orient"  # prompts/orient.md's name, the agent its session runs as
-SUBAGENT = "orient"  # plugin/agents/orient-subagent.md's name, the agent of terminal-first mode (`thimble:orient`)
-TERMINAL_FIRST_KEY = "terminal_first"  # settings.json: the orientation runs as a subagent of main (module note)
-SUBAGENT_ROUTE = "subagent"  # the record's `route` in terminal-first mode
-SUBAGENT_PROMPT = "subagent-prompt.md"  # under orient/: the prompt the subagent reads first
+TERMINAL_FIRST_KEY = "terminal_first"  # settings.json: terminal-first mode (module note)
 PLUGIN = "thimble"  # the plugin's name (plugin/.claude-plugin/plugin.json), the scope of its agents and skills
 AGENT_FILE = config.REPO_ROOT / "prompts" / "orient.md"
 EFFORTS = ("low", "medium", "high", "xhigh", "max")  # Start's effort menu below Ultracode, its highest choice
@@ -67,7 +62,7 @@ REPORT_DOC = "report"
 WRITE_KIND = "write"  # the channel kind the Report tab's Write sends
 RUNNING = ("requested", "running")
 START_KIND = "start"  # the channel kind the browser's Start sends (prompts/main.md, Events from the browser)
-REQUEST_WAIT_S = 600.0  # a Start whose subagent main has not started in this long is taken as dropped
+REQUEST_WAIT_S = 600.0  # a Start main has not taken up with start_orientation in this long is taken as dropped
 # analyst-facing lines
 CARDS_CHIP = "the orientation's cards"
 FOLLOWUP_LABEL = "the orientation's follow-up"  # the undo label of a follow-up's changes (undo.batching)
@@ -129,31 +124,18 @@ def _emit(c: str, status: str, **fields: Any) -> None:
         log.warning("orientation %s: could not emit %s", c, status, exc_info=True)
 
 
-def is_orient(agent_type: Any) -> bool:
-    """Whether an Agent call's subagent_type, or a subagent's recorded agentType, is an orientation's agent, bare or
-    scoped as `thimble:orient`: the session's agent or terminal-first mode's SUBAGENT."""
-    return isinstance(agent_type, str) and agent_type.strip().rsplit(":", 1)[-1] in (AGENT, SUBAGENT)
-
-
 def terminal_first(c: str) -> bool:
-    """Whether the workspace runs the orientation as a subagent of main (TERMINAL_FIRST_KEY)."""
-    from .ledger import stored_settings  # noqa: PLC0415
+    """Whether the workspace runs in terminal-first mode (TERMINAL_FIRST_KEY), where the orientation, its critique and
+    the writers run as background sessions (bg_session.wanted): what settings.json stores, else the default
+    (ledger.SETTINGS_DEFAULTS, on)."""
+    from .ledger import SETTINGS_DEFAULTS, stored_settings  # noqa: PLC0415
 
+    default = SETTINGS_DEFAULTS[TERMINAL_FIRST_KEY] is True
     try:
-        return stored_settings(c).get(TERMINAL_FIRST_KEY) is True
-    except Exception:  # noqa: BLE001 — a workspace whose settings cannot be read runs the default route
-        return False
-
-
-def subagent_prompt_file(c: str) -> Path:
-    """The file the orientation's subagent reads its prompt from (terminal-first mode)."""
-    return orient_dir(c) / SUBAGENT_PROMPT
-
-
-def subagent_run(c: str) -> dict[str, Any] | None:
-    """The latest run's record when it ran or runs as a subagent of main, else None."""
-    run = read_run(c)
-    return run if run and run.get("route") == SUBAGENT_ROUTE else None
+        value = stored_settings(c).get(TERMINAL_FIRST_KEY, default)
+    except Exception:  # noqa: BLE001 — a workspace whose settings cannot be read runs the default mode
+        return default
+    return value is True
 
 
 def effort(value: Any) -> str:
@@ -222,26 +204,6 @@ def drafting(c: str) -> bool:
     return bool(run and run.get("status") == "running" and int(run.get("run") or 0) == 0 and running(c))
 
 
-def held(c: str) -> set[str]:
-    """The ids of the cards the orientation's running first run has put in its deck since it started: the canvas leaves
-    them out until it ends, so the deck appears whole. Earlier deck cards stay shown and follow-up changes are never
-    held. Empty when no first run goes or its deck is off."""
-    from . import notebook  # noqa: PLC0415
-
-    run = read_run(c)
-    deck = deck_of(run) if drafting(c) else None
-    since = _at((run or {}).get("started"))
-    if not deck or since is None:
-        return set()
-    nb = notebook.read_notebook(config.workspace_dir(c), deck)
-    out: set[str] = set()
-    for cell in (nb or {}).get("cells") or []:
-        at = _at(cell.get("created_ts")) if isinstance(cell, dict) else None
-        if at is not None and at >= since and cell.get("id"):
-            out.add(str(cell["id"]))
-    return out
-
-
 def _gone(run: dict[str, Any]) -> bool:
     """Whether a run's own session process is gone (a server that died under it never recorded its end)."""
     pid = run.get("pid")
@@ -267,7 +229,7 @@ def active(c: str) -> bool:
 
 def running(c: str) -> bool:
     """Whether an orientation is running: its record says so and its agent chat has not ended, or a Start was sent
-    less than REQUEST_WAIT_S ago and main has not started the subagent yet (after that the request is taken as
+    less than REQUEST_WAIT_S ago and main has not started the orientation yet (after that the request is taken as
     dropped)."""
     run = read_run(c)
     if not run or run.get("status") not in RUNNING:
@@ -321,9 +283,9 @@ def start_passes(payload: dict[str, Any]) -> list[str]:
     return [p for p, on in (("final", final), ("views", views), ("report", report)) if on]
 
 
-def started(c: str, chat_id: str, *, agent_id: str | None = None, session: str | None = None,
-            pid: int | None = None, passes: "list[str] | None" = None) -> dict[str, Any]:
-    """The orientation's session started, or the mirror found orient.md as a subagent of main: a requested run becomes
+def started(c: str, chat_id: str, *, session: str | None = None, pid: int | None = None,
+            passes: "list[str] | None" = None) -> dict[str, Any]:
+    """The orientation's session started: a requested run becomes
     running with its chat, as run 0, and an orientation nobody asked Start for opens a run of its own. `passes` from
     start_orientation win over the Start's; without them a requested run keeps its own and a new run has deck and views.
     """
@@ -336,14 +298,12 @@ def started(c: str, chat_id: str, *, agent_id: str | None = None, session: str |
     fresh = {"run": 0, "queue": [], "followups": [], "report_asked": False}
     if run and requested:
         run.update(status="running", started=_now(), passes=list(passes), groups=groups, chats={ROLE: chat_id},
-                   agent_id=agent_id, **fresh, **extra)
+                   **fresh, **extra)
     elif run and run.get("status") == "running" and (run.get("chats") or {}).get(ROLE) == chat_id:
-        if agent_id and not run.get("agent_id"):
-            run["agent_id"] = agent_id
         return _write_run(c, run)
     else:
         run = {"status": "running", "passes": list(passes), "query": None, "started": _now(), "ended": None, "groups": groups,
-               "chats": {ROLE: chat_id}, "agent_id": agent_id, "error": None, **fresh, **extra}
+               "chats": {ROLE: chat_id}, "error": None, **fresh, **extra}
     _write_run(c, run)
     if groups.get("orientation"):  # the chat's group is where the cards it writes land: the deck
         agents.update_agent(c, chat_id, group=groups["orientation"])
@@ -352,8 +312,7 @@ def started(c: str, chat_id: str, *, agent_id: str | None = None, session: str |
 
 
 def finished(c: str, chat_id: str, status: str, result: str | None, report: bool = True) -> dict[str, Any] | None:
-    """The first run stopped: its last message is kept as summary.md, the run ends with the session's status (ending
-    held), and the orientation's chat gets a chip for the deck.
+    """The first run stopped: its last message is kept as summary.md, the run ends with the session's status, and the orientation's chat gets a chip for the deck.
     With `report`, a done run that asked for the report asks for it. A notification for another session, or for a run
     already ended, changes nothing."""
     run = read_run(c)

@@ -1,5 +1,5 @@
 // Files' views: File browser, then every view written for this corpus, one exclusive choice (Segmented), a view whose
-// newer version builds or is reviewed with its name shimmering; then proposals not built yet (spinner while building, a
+// newer version builds or is reviewed with its chip shimmering; then proposals not built yet (spinner while building, a
 // still warning dot while its session waits for permission, a warning icon and Retry on failure); then New view, a
 // field that asks main for one. A view or a proposal shows × on hover, which deletes it once confirmed. A row across
 // the top of Files, or, while Files shows in a pane beside another, in that pane's head (`compact`, portalled by
@@ -262,7 +262,7 @@ export function ViewsBar({ ws, value, onChange, views, proposals, compact = fals
         anchor: `view:${v.slug}`,
         dot: ready.includes(v.slug) || updated.includes(v.slug),
         note: ready.includes(v.slug) ? 'new' : updated.includes(v.slug) ? 'updated' : undefined,
-        className: v.updating || v.review?.state === 'running' ? 'is-updating' : undefined,
+        className: v.updating || v.review?.state === 'running' ? 'is-updating is-fresh' : ready.includes(v.slug) || updated.includes(v.slug) ? 'is-fresh' : undefined,
         ...(v.builtin ? {} : { removeLabel: `Delete ${v.name}`, onRemove: (at: HTMLElement) => setRemoving({ slug: v.slug, name: v.name, view: true, at }) }),
       })),
   ]

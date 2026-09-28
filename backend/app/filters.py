@@ -104,19 +104,18 @@ def check_state(cell: dict) -> str:
 
 
 def canvas_cards(c: str) -> list[dict]:
-    """The cards the canvas draws, as the canvas route serves them (no Scratch, no card the orientation still holds),
+    """The cards the canvas draws, as the canvas route serves them (no Scratch),
     each {id, kind, group, maker, check, starred, locked, text}."""
-    from . import agents, notebook, orientation
+    from . import agents, notebook
 
     notebook.migrate_scratch(c)
     data = notebook.canvas(config.workspace_dir(c))
-    hold = orientation.held(c)
     chats = {str(m.get("id")): m for m in agents.list_chats(c)}
     loose = {g["id"] for g in data["groups"] if g.get("kind") == LOOSE_GROUP}
     out = []
     for cell in data["cells"]:
         cid = str(cell.get("id") or "")
-        if not cid or cid in hold:
+        if not cid:
             continue
         group = cell.get("notebook")
         out.append({"id": cid, "kind": "note" if cell.get("kind") == "md" else str(cell.get("kind") or "code"),

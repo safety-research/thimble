@@ -43,7 +43,7 @@ Work in this order.
 - Survey the files, and propose the views whose form the survey already makes clear, as described below, so they are built and checked while you work.
 - Analyze until your main hypothesis is ready, as described above, and nothing you planned to check is left.
 - While you analyze, propose a view when the categories or leads you find suggest one, as described below.
-- Draft the outputs described below. The analyst sees none of them until you finish, so draft and revise freely.
+- Draft the outputs described below. The analyst sees your cards on the canvas as you add them and the rest when you finish, so draft and revise freely: a card you revise changes in place.
 - Then call `critique` with your account of the corpus, the hypothesis and findings your drafts present, once every output is drafted. A reviewer who did not do the analysis notices gaps that are easy to miss in your own work, and it can check what your drafts claim against your calls only once they exist. Follow up each problem its report raises, and revise the drafts.
 - Finish by replying only "Done.", which ends your session. The analyst reads your findings in what you made and your working in your thread, so a finding or an account of your work here would only repeat them.
 

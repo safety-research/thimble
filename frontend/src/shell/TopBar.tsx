@@ -1,6 +1,6 @@
 // The top bar: at the left the thimble mark and the corpus's folder in mono; the surfaces' tabs over the main area
 // (a click shows the surface, a drag takes it to a pane); at the right Undo and Redo (shell/undo.ts), Report a problem,
-// the chat's switch (the chat column on or off, Shell), the links toggle, the theme popover and the settings gear.
+// the links toggle, the theme popover and the settings gear (whose settings include turning the chat off, Shell).
 import { useEffect, useState, type PointerEvent as ReactPointerEvent } from 'react'
 import { Button, type TabOption } from '../components/Button'
 import { Icon } from '../components/Icon'
@@ -24,12 +24,9 @@ export interface TopBarProps {
   tabs: readonly SurfaceTab[]
   onTab: (tab: Tab) => void
   onTabDrag: (e: ReactPointerEvent, tab: Tab) => void
-  /** the chat column is off (the workspace's `hide_chat`) */
-  chatOff?: boolean
-  onChatOff?: (off: boolean) => void
 }
 
-export function TopBar({ ws, tabs, onTab, onTabDrag, chatOff = false, onChatOff }: TopBarProps) {
+export function TopBar({ ws, tabs, onTab, onTabDrag }: TopBarProps) {
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [gear, setGear] = useState<HTMLButtonElement | null>(null)
   const [themeOpen, setThemeOpen] = useState(false)
@@ -97,9 +94,6 @@ export function TopBar({ ws, tabs, onTab, onTabDrag, chatOff = false, onChatOff 
             setProblemOpen((o) => !o)
           }}
           data-tel="report-problem" />
-        {onChatOff && (
-          <Button variant="icon" icon="chat" title={chatOff ? 'Show the chat' : 'Hide the chat'} aria-label={chatOff ? 'Show the chat' : 'Hide the chat'} aria-pressed={!chatOff} className="shell-chat-toggle" onClick={() => onChatOff(!chatOff)} data-tel="chat-off" />
-        )}
         <Button variant="icon" icon={links ? 'link' : 'link-off'} title={links ? 'Hide links' : 'Show links'} aria-label={links ? 'Hide links' : 'Show links'} aria-pressed={links} className={`shell-links${links ? ' on' : ''}`} onClick={toggleLinks} data-tel="links" />
         <Button variant="icon" icon="palette" title="Theme" aria-label="Theme" aria-haspopup="dialog" aria-expanded={themeOpen} onClick={() => {
             setSettingsOpen(false)

@@ -158,12 +158,13 @@ export const api = {
 
   // ---- chats ----
   chats: (c: string) => j<ChatMeta[]>(`${ws(c)}/chats`),
+  instance: (c: string) => j<{ stamp: string | null }>(`${ws(c)}/instance`),
   main: (c: string) => j<ChatDetail>(`${ws(c)}/chats/main`),
   chat: (c: string, id: string) => j<ChatDetail>(`${ws(c)}/chats/${enc(id)}`),
   createThread: (c: string, body: NewThreadBody) => j<ChatMeta>(`${ws(c)}/chats`, { method: 'POST', body: JSON.stringify(body) }),
   updateChat: (c: string, id: string, patch: ChatPatch) => j<ChatMeta>(`${ws(c)}/chats/${enc(id)}`, { method: 'PUT', body: JSON.stringify(patch) }),
   deleteChat: (c: string, id: string) => j<{ deleted: string }>(`${ws(c)}/chats/${enc(id)}`, { method: 'DELETE' }),
-  interrupt: (c: string, id: string) => j<{ stopped: boolean }>(`${ws(c)}/chats/${enc(id)}/interrupt`, { method: 'POST' }),
+  interrupt: (c: string, id: string) => j<{ stopped: boolean; asked?: 'main' }>(`${ws(c)}/chats/${enc(id)}/interrupt`, { method: 'POST' }),
   askAgain: (c: string, id: string) => j<{ asked: string; event: string; questions: number }>(`${ws(c)}/chats/${enc(id)}/ask-again`, { method: 'POST' }),
   /**
      * Send the analyst's Claude Code session an event (`POST /ws/{c}/events {kind, payload}`), e.g. a message typed in main

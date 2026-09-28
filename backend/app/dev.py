@@ -521,12 +521,15 @@ def _running() -> bool:
     return _current is not None and _current.status == "running"
 
 
-DEV_SESSION_NAME = "thimble:dev"  # the name `claude agents` shows a code ticket's background session under
+def dev_session_name(workspace: str | None) -> str:
+    """The name `claude agents` shows a code ticket's background session under: thimble:dev · <workspace>, or
+    thimble:dev for a ticket of no workspace (config.session_name)."""
+    return config.session_name("dev", workspace)
 
 
-def view_session_name(slug: str) -> str:
-    """The name `claude agents` shows a view build's background session under: thimble:view-<slug>."""
-    return f"thimble:view-{slug}"
+def view_session_name(c: str, slug: str) -> str:
+    """The name `claude agents` shows a view build's background session under: thimble:view-<slug> · <c>."""
+    return config.session_name(f"view-{slug}", c)
 
 
 def running_builds(c: str) -> list[dict[str, Any]]:
@@ -535,11 +538,11 @@ def running_builds(c: str) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     t = _get(_current.ticket_id) if _running() and _current is not None and not _current.ticket_id.startswith("view:") else None
     if t is not None and t.get("workspace") in (None, c):
-        rows.append({"name": DEV_SESSION_NAME, "state": "working", "kind": "build",
+        rows.append({"name": dev_session_name(t.get("workspace")), "state": "working", "kind": "build",
                      **({"attach": f"claude attach {_current.session}"} if _current and _current.session else {})})
     for (cc, slug), run in [*_view_runs.items(), *_review_runs.items()]:
         if cc == c and run.status == "running":
-            rows.append({"name": view_session_name(slug), "state": "working", "kind": "build",
+            rows.append({"name": view_session_name(c, slug), "state": "working", "kind": "build",
                          **({"attach": f"claude attach {run.session}"} if run.session else {})})
     return rows
 
@@ -1525,13 +1528,13 @@ async def _worker_turn(run: Run, run_log: Log, cwd: Path, prompt: str, resume: s
     key = str((asking or {}).get("key") or "")
     if resume:
         tail = Tail(resume, _size(SESSIONS.transcript(resume)))
-        sess = await SESSIONS.resume(cwd, resume, prompt, env=env, name=name[:80], workspace=workspace,
+        sess = await SESSIONS.resume(cwd, resume, prompt, env=env, name=name, workspace=workspace,
                                      add_dirs=add_dirs, **fenced)
         if sess["session_id"] != resume:
             # the resume started a copy under a new id: follow the turn in the copy's transcript
             tail = Tail(sess["session_id"], after=prompt, copied=_uuids(SESSIONS.transcript(resume)))
     else:
-        sess = await SESSIONS.start(cwd, prompt, name=name[:80], workspace=workspace, add_dirs=add_dirs, env=env,
+        sess = await SESSIONS.start(cwd, prompt, name=name, workspace=workspace, add_dirs=add_dirs, env=env,
                                     **fenced)
         tail = Tail(sess["session_id"])
     run.session, run.session_id = sess["id"], sess["session_id"]
@@ -1789,8 +1792,8 @@ async def _run_ticket(t: dict[str, Any], run: Run, *, doctor: str | None = None)
         ok = False
         for attempt in range(1, MAX_ATTEMPTS + 1):
             run_log.stage(f"worker, attempt {attempt}")
-            result_text = await _worker_turn(run, run_log, wt, prompt, resume, name=DEV_SESSION_NAME,
-                                             workspace=t.get("workspace"),
+            result_text = await _worker_turn(run, run_log, wt, prompt, resume,
+                                             name=dev_session_name(t.get("workspace")), workspace=t.get("workspace"),
                                              on_session=lambda short, sid: _update(tid, session=short, session_id=sid),
                                              **({"asking": {"key": ticket_key(tid), "allow": own_work(wt, (shots_dir(tid),))}}
                                                 if t.get("workspace") else {}))
@@ -2402,7 +2405,7 @@ async def _run_view(c: str, slug: str, run: Run) -> None:
             try:
                 # the view's folder is its one extra working directory; the worked examples are only read, since as a
                 # working directory they would receive the sandbox's `.claude/.cc-writes/`
-                result_text = await _worker_turn(run, run_log, corpus, prompt, resume, name=view_session_name(slug),
+                result_text = await _worker_turn(run, run_log, corpus, prompt, resume, name=view_session_name(c, slug),
                                                  workspace=c, on_session=on_session, add_dirs=(folder,),
                                                  env=env, answered=False, fence=view_fence(c, slug, corpus, folder),
                                                  asking=asking)
@@ -2536,7 +2539,7 @@ async def review_revision(c: str, slug: str, message: str) -> tuple[bool, str]:
             if attempt > 1:
                 run_log.stage(f"the session fixes what the checks found (attempt {attempt} of {MAX_ATTEMPTS})")
             try:
-                result_text = await _worker_turn(run, run_log, corpus, prompt, resume, name=view_session_name(slug),
+                result_text = await _worker_turn(run, run_log, corpus, prompt, resume, name=view_session_name(c, slug),
                                                  workspace=c, on_session=on_session, add_dirs=(folder,),
                                                  env={SESSION_ENV: view_key(slug)}, answered=False,
                                                  fence=view_fence(c, slug, corpus, folder),
@@ -2865,8 +2868,8 @@ async def _pending_poller() -> None:
 
 
 async def orient_ended(c: str | None) -> None:
-    """Fires a deferred restart once no orientation is running. The pending poller calls it, since the orientation
-    subagent's end is recorded only in orient/run.json (orientation.finished)."""
+    """Fires a deferred restart once no orientation is running. The pending poller calls it, since an
+    orientation's end is recorded only in orient/run.json (orientation.finished)."""
     global _restart_pending
     if _restart_pending is None or orient_running():
         return
@@ -3024,6 +3027,21 @@ def _stop_run(tid: str, why: str) -> bool:
     run.stop_reason = why
     run.task.cancel()
     return True
+
+
+def stop_workspace(c: str) -> int:
+    """Stop what runs for workspace `c` here, main's session having ended (agents.stop_all): its code ticket, which ends
+    `stopped` (Retry runs it again), and its view builds and review revisions. Returns how many were stopped."""
+    n = 0
+    t = _get(_current.ticket_id) if _current is not None and not _current.ticket_id.startswith("view:") else None
+    if t is not None and t.get("workspace") == c and _stop_run(_current.ticket_id, "stopped"):
+        n += 1
+    for (cc, _slug), run in [*_view_runs.items(), *_review_runs.items()]:
+        if cc == c and run.status == "running" and run.task is not None and not run.task.done():
+            run.stop_reason = "stopped"
+            run.task.cancel()
+            n += 1
+    return n
 
 
 @router.post("/dev/tickets/{tid}/stop", status_code=202)

@@ -72,6 +72,10 @@ export interface SegmentedOption<V extends string> {
    * does; an option with a label shows it as the browser's title */
   title?: string
   disabled?: boolean
+  /** drawn as disabled yet still focusable and clickable (aria-disabled): its title, in the one tooltip on hover and
+   * keyboard focus, says why it cannot be chosen, and a click can do what can be done instead (the Segmented's
+   * onChange hears it) */
+  unavailable?: boolean
   /** a ref the ⌘ pointer can open a thread on (a view in the views bar): `data-anchor`, with the label as its text */
   anchor?: string
   /** something new waits there (a view built for the analyst's ask, not opened yet): the accent dot after the label */
@@ -127,7 +131,8 @@ export function Segmented<V extends string>({ options, value, onChange, size = '
 
 function SegOption<V extends string>({ option: o, size, active, onPick }: { option: SegmentedOption<V>; size: SegmentedSize; active: boolean; onPick: () => void }) {
   const glyphOnly = o.icon != null && o.label == null
-  const { props: tipProps, tip } = useTooltip(glyphOnly ? o.title : null)
+  const tipped = glyphOnly || !!o.unavailable
+  const { props: tipProps, tip } = useTooltip(tipped ? o.title : null)
   const option = (
     <>
       <button
@@ -136,8 +141,9 @@ function SegOption<V extends string>({ option: o, size, active, onPick }: { opti
         aria-checked={active}
         aria-label={glyphOnly ? o.title : undefined}
         className={`seg-opt${glyphOnly ? ' seg-glyph' : ''}${active ? ' active' : ''}${o.className ? ` ${o.className}` : ''}`}
-        title={glyphOnly ? undefined : o.title}
+        title={tipped ? undefined : o.title}
         disabled={o.disabled}
+        aria-disabled={o.unavailable || undefined}
         data-anchor={o.anchor}
         data-anchor-text={o.anchor && typeof o.label === 'string' ? o.label : undefined}
         onClick={onPick}

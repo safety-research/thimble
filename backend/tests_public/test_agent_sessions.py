@@ -118,6 +118,8 @@ def fake(tmp_path, monkeypatch) -> Path:
     monkeypatch.setenv("THIMBLE_CHANNEL", "plugin:thimble@inline")  # the server's own, inherited from main's session
     monkeypatch.delenv("FAKE_MODE", raising=False)
     monkeypatch.delenv("FAKE_SLEEP", raising=False)
+    # the stand-in is a `claude -p`: the sessions run as thimble's own, not as terminal-first mode's `claude --bg`
+    ledger.put_settings(CORPUS, {"terminal_first": False})
     monkeypatch.setenv("THIMBLE_SANDBOX", "0")  # the fence without the sandbox
     return out
 

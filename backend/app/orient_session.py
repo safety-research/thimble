@@ -34,8 +34,8 @@ analyst when its build passed its checks); the report is asked for once no follo
 Restarts. A run a server stop cut short is resumed by the next server with `--resume` in the same chat. A failed first
 run is resumed as run 0 when start_orientation asks for the same orientation again, rather than redoing its work.
 
-Terminal-first mode (orientation module note): start_orientation writes the subagent's prompt and asks main to start
-it (subagent_start), and a message to it goes through main, which alone can message its subagent (Subagent).
+Terminal-first mode (orientation module note): the same session runs as the background session `thimble:orient · <c>`
+(agent_session's `background`, bg_session.wanted), which the analyst's terminal shows in its agent tray.
 
 Follow-ups. Messages from main's `message_orientation` tool or the thread's composer go through message(): a finished
 orientation's session is resumed with the message in `## orient-follow-up`; a message sent while a run goes waits in the
@@ -95,15 +95,6 @@ class NoOrientation(RuntimeError):
 
 class Gone(RuntimeError):
     """Claude Code no longer keeps the orientation's transcript, so its session cannot be resumed."""
-
-
-class Subagent(RuntimeError):
-    """The orientation runs as a subagent of main (terminal-first mode), which only main can message; the agent id,
-    with its chat."""
-
-    def __init__(self, agent_id: str, chat: str) -> None:
-        super().__init__(agent_id)
-        self.chat = chat
 
 
 def current(c: str) -> agent_session.Run | None:
@@ -181,23 +172,6 @@ def disallowed(parts: "list[str] | tuple[str, ...]") -> list[str]:
     off."""
     off = {t for part, names in PART_TOOLS.items() if part not in parts for t in names}
     return agent_session.not_own([n for n in ORIENT_TOOLS if n not in off])
-
-
-def subagent_start(c: str, brief: str, passes: "list[str]") -> str:
-    """start_orientation in terminal-first mode (orientation module note): the prompt, without the critique's part
-    since main's shim does not list `critique`, is written to its file, the run is recorded as requested for the
-    subagent, and the answer asks main to start it with the Agent tool."""
-    parts = parts_of({**orientation.choices(c), "critique": False}, passes)
-    work_dir(c).mkdir(parents=True, exist_ok=True)
-    path = orientation.subagent_prompt_file(c)
-    ledger.atomic_write_text(path, system_prompt(c, brief, parts) + "\n\n" + tools.hint("orient-subagent-notes") + "\n")
-    fields = {"route": orientation.SUBAGENT_ROUTE, "critique": False}
-    run = orientation.read_run(c)
-    if run and run.get("status") == "requested":
-        orientation.record(c, passes=list(passes), **fields)
-    else:
-        orientation.request(c, brief, passes, **fields)
-    return tools.hint("start_orientation-subagent", agent=f"{orientation.PLUGIN}:{orientation.SUBAGENT}", prompt=str(path))
 
 
 def _launch(c: str, brief: str, passes: "list[str]", choices: dict[str, Any]) -> dict[str, Any]:
@@ -296,17 +270,13 @@ def _moved(run: agent_session.Run) -> None:
 
 
 def undo_batch(c: str) -> tuple[str, str] | None:
-    """(id, label) of the undo batch a call of the orientation's session or subagent belongs to: its follow-up's,
-    `<chat>/<run>`, while one runs; None during the first run, whose cards appear whole when it ends and are each a
+    """(id, label) of the undo batch a call of the orientation's session belongs to: its follow-up's,
+    `<chat>/<run>`, while one runs; None during the first run, whose cards are each a
     step."""
     run = current(c)
-    if run is not None:
-        return (f"{run.chat}/{run.k}", orientation.FOLLOWUP_LABEL) if run.k > 0 else None
-    sub = orientation.subagent_run(c) or {}  # terminal-first mode: the follow-up the mirror recorded (session._revive)
-    k, chat = int(sub.get("run") or 0), (sub.get("chats") or {}).get(orientation.ROLE)
-    if k <= 0 or not chat or sub.get("status") != "running":
+    if run is None or run.k <= 0:
         return None
-    return f"{chat}/{k}", orientation.FOLLOWUP_LABEL
+    return f"{run.chat}/{run.k}", orientation.FOLLOWUP_LABEL
 
 
 def _lead(messages: "list[dict[str, Any]]") -> str:
@@ -336,9 +306,6 @@ async def message(c: str, text: str, by: str = MAIN, call: str | None = None) ->
     text = str(text or "").strip()
     if not text:
         raise ValueError("the message is empty")
-    sub = orientation.subagent_run(c)
-    if sub is not None:
-        raise Subagent(str(sub.get("agent_id") or ""), str((sub.get("chats") or {}).get(orientation.ROLE) or ""))
     rec, chat, sid = _chat_of(c)
     entry = {"text": text, "by": by if by in (MAIN, BROWSER) else MAIN, "ts": _now()}
     if running(c) or orientation.running(c):
@@ -707,8 +674,6 @@ async def tool_start_orientation(ctx: Any, args: dict[str, Any]) -> Any:
     if running(ctx.c) or orientation.active(ctx.c):
         return tools.err(tools.hint("start_orientation-running"))
     passes = [p for p, on in (("final", final), ("views", views), ("report", report)) if on]
-    if orientation.terminal_first(ctx.c) and not bg_session.wanted(ctx.c, tools.ORIENT_SESSION):
-        return tools.ok(subagent_start(ctx.c, brief, passes))
     try:
         await start(ctx.c, brief, passes, call=ctx.tool_use_id, chosen=chosen)
     except RuntimeError as e:
@@ -726,8 +691,6 @@ async def tool_message_orientation(ctx: Any, args: dict[str, Any]) -> Any:
         return tools.err(tools.hint("message_orientation-none"))
     except Gone:
         return tools.err(tools.hint("message_orientation-gone"))
-    except Subagent as e:
-        return tools.ok(tools.hint("message_orientation-subagent", agent_id=str(e)))
     except RuntimeError as e:
         return tools.err(f"message_orientation: {e}")
     if res["status"] == "queued":
@@ -743,19 +706,12 @@ class MessageBody(BaseModel):
 async def message_route(c: str, body: MessageBody) -> dict[str, Any]:
     """The orientation thread's composer: message() from the analyst. 400 for an empty message, 404 when no orientation
     has run, 410 when its session is gone, 409 when it cannot start."""
-    from . import channel, session  # noqa: PLC0415
+    from . import channel  # noqa: PLC0415
 
     config.workspace_dir(c)
     line = channel.terminal_line(channel.MAIN, f"orientation: {body.text}", {})
     try:
         out = await message(c, body.text, BROWSER)
-    except Subagent as e:
-        # terminal-first mode: only main can message its subagent, so main is asked to pass the message on
-        posted = channel.post(c, channel.MAIN, {"text": tools.hint("orient-relay", text=body.text.strip())}, mirror=False,
-                              line=line)
-        if e.chat:
-            session.relay(c, e.chat, body.text.strip(), BROWSER)
-        return {"status": "relayed", "event": posted["id"]}
     except ValueError as e:
         raise HTTPException(400, str(e)) from e
     except NoOrientation as e:

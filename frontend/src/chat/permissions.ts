@@ -37,7 +37,8 @@ export function askThread(ask: PendingAsk, metas?: ReadonlyMap<string, ChatMeta>
   const id = ask.request.chat
   const m = id ? metas?.get(id) : undefined
   if (!id || !m || labels?.has(id) || threadKind(m) != null) return id || 'main'
-  // a subagent of main, which the thread tree does not list: the orientation it works for, else main
+  // a subagent of main, which the thread tree does not list: main, or (in a chat an earlier build left) the orientation
+  // run as main's subagent that started it
   const parent = m.parent ? metas?.get(m.parent) : undefined
   return parent && threadKind(parent) === 'orient' ? parent.id : 'main'
 }
@@ -72,7 +73,8 @@ export function askedBy(ask: PendingAsk, metas: ReadonlyMap<string, ChatMeta>, l
     const id = ask.request.chat
     const from = id ? labels.get(id) : null
     if (from && from !== 'main') return from === 'orient' || from.startsWith('orient-') ? 'The orientation' : `The thread ${from}`
-    // a subagent of main, or one the orientation subagent started, which the tree does not list
+    // a subagent of main, or (in a chat an earlier build left) one an orientation run as main's subagent started, which
+    // the tree does not list
     const m = id ? metas.get(id) : undefined
     if (!m || from === 'main') return 'Your Claude Code session'
     const parent = m.parent ? metas.get(m.parent) : undefined

@@ -381,9 +381,15 @@
   color: var(--text-primary);
   font-weight: 500;
 }
-.seg-opt:disabled {
+.seg-opt:disabled,
+.seg-opt[aria-disabled='true'] {
   opacity: 0.4;
   cursor: default;
+}
+/* an unavailable option (SegmentedOption.unavailable) keeps its dimmed look under the pointer */
+.seg-opt[aria-disabled='true']:hover {
+  background: transparent;
+  color: var(--text-secondary);
 }
 .seg-opt:focus-visible {
   box-shadow: 0 0 0 1.5px var(--accent);
@@ -898,13 +904,27 @@ a.card:hover {
   color: var(--text-primary);
   font: var(--type-ui-sm);
 }
+/* the head's hover and focus wash is inset 2px from the card's edges on every side (the card's 2px block padding
+   above, this margin at the sides), rounded 2px less than the card; its padding keeps the title 10px from the card */
 .toolcard-head {
   display: flex;
   align-items: center;
   gap: 8px;
   min-width: 0;
-  padding: 5px 10px;
+  margin: 0 2px;
+  padding: 5px 8px;
   border-radius: var(--radius-ui);
+}
+/* a head with Stop (a small ghost button with the stop square, after the spinner) is as tall as the button with 2px
+   around it, so as tall as a head without one, the button as far from the wash's right edge as from its top and
+   bottom; its label then sits about as far from the card's right edge as the title from its left */
+.toolcard-head-stop {
+  padding-block: 2px;
+  padding-right: 2px;
+}
+/* what opens under the head starts a little below its wash */
+.toolcard-head + :is(.toolcard-lead, .toolcard-steps) {
+  margin-top: 4px;
 }
 .toolcard-head-act {
   cursor: pointer;
@@ -953,20 +973,6 @@ a.card:hover {
   gap: 6px;
   flex: none;
   margin-left: auto;
-}
-/* the right edge's Stop while a run goes on: a small primary button with the spinner in the button's text colour
-   (the accent ring would vanish on the accent fill); negative margins keep the head at one line */
-.toolcard-stop {
-  margin: -3px -4px -3px 0;
-}
-.toolcard-stop .btn-label {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-}
-.toolcard-stop .spinner {
-  border-color: currentColor;
-  border-right-color: transparent;
 }
 .toolcard-lead {
   max-height: 120px;

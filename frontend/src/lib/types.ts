@@ -911,10 +911,9 @@ export interface ModelConf {
 /** `GET /ws/{c}/settings` layers the effective `models` in; a PUT merges what it is given. */
 export interface Settings {
   models: Record<string, ModelConf>
-  /** the orientation runs as a subagent of the analyst's Claude Code session (backend orientation.terminal_first) */
+  /** terminal-first mode: the orientation, its critic and the writers run as Claude Code background sessions the
+   * analyst's terminal shows (backend orientation.terminal_first) */
   terminal_first?: boolean
-  /** in terminal-first mode, how the orientation runs: a subagent of main, or a background session (backend bg_session) */
-  orient_route?: 'subagent' | 'session'
   /** the chat column is hidden and main's foot shows in a dock (shell/Shell, chat off) */
   hide_chat?: boolean
   /** the agents whose permission mode the analyst set; any other runs in the mode of their Claude Code session */
@@ -1452,6 +1451,9 @@ export interface ChatMeta {
   mode_switch?: OrientPermissions | null
   /** a session thimble runs as a Claude Code background session (backend bg_session) */
   background?: boolean
+  /** a session thimble started: its agent's row of the permission modes (backend modes.AGENTS), which a pick its card
+   * cannot make while it runs saves to (ModeSwitch) */
+  mode_agent?: ModeAgent
   /** the orientation's session: whether it runs with Ultracode, and its critique */
   ultracode?: boolean
   critique?: boolean

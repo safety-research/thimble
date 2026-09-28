@@ -633,6 +633,13 @@ def _orientation_status(c: str) -> str | None:
     return str(status) if status else None
 
 
+@router.get("/ws/{c}/instance")
+async def instance_route(c: str) -> dict:
+    """The workspace instance's birth stamp, its main chat's `created_at`: the browser clears what it kept under the
+    workspace's name when the stamp changed (frontend lib/workspace syncInstance). Reads main's meta alone, no log."""
+    return {"stamp": ensure_main(c).get("created_at") or None}
+
+
 @router.get("/ws/{c}/chats/main")
 async def main_route(c: str) -> dict:
     meta = ensure_main(c)
@@ -811,7 +818,7 @@ async def interrupt_route(c: str, chat_id: str) -> dict:
     if await agent_session.stop_chat(c, chat_id) or await stop_agent(c, chat_id):
         return {"stopped": True}
     if meta.get("agent_id") and meta.get("parent") == MAIN_ID and not meta.get("pid") and meta.get("status") == "running":
-        # a subagent of the analyst's session (the orientation in terminal-first mode): only main can stop it
+        # a subagent of the analyst's session: only main can stop it
         from . import channel, tools  # noqa: PLC0415
 
         title = str(meta.get("title") or "a subagent")
@@ -820,6 +827,36 @@ async def interrupt_route(c: str, chat_id: str) -> dict:
                      line=channel.terminal_line(channel.MAIN, f"Stop {title}", {}))
         return {"stopped": False, "asked": "main"}
     return {"stopped": False}
+
+
+async def stop_all(c: str) -> list[str]:
+    """Stop every agent of workspace `c`, main's session having ended (session.disconnected): each agent chat that runs
+    (the orientation, a writer, the critic, a check's run: agent_session.stop_chat or a server task), its dev ticket and
+    view builds (dev.stop_workspace), and its background sessions still alive with no run open (`claude stop`, which
+    keeps their conversations for `claude attach`). Returns the titles of what it stopped, for the log."""
+    from . import agent_session, bg_session, dev  # noqa: PLC0415 — each imports this module
+
+    stopped: list[str] = []
+    for meta in list_chats(c):
+        if meta.get("kind") != KIND_AGENT or meta.get("status") != "running":
+            continue
+        try:
+            if await agent_session.stop_chat(c, meta["id"]) or await stop_agent(c, meta["id"]):
+                stopped.append(str(meta.get("title") or meta["id"]))
+        except Exception:  # noqa: BLE001 — one agent that will not stop leaves the others to stop
+            log.warning("%s: could not stop agent chat %s", c, meta.get("id"), exc_info=True)
+    try:
+        stopped += ["dev build"] * dev.stop_workspace(c)
+    except Exception:  # noqa: BLE001
+        log.warning("%s: could not stop the dev builds", c, exc_info=True)
+    for e in bg_session.entries(c):
+        if bg_session.alive(e) and e.short:
+            try:
+                await asyncio.to_thread(bg_session.stop_cli, e.short)
+                stopped.append(e.name)
+            except Exception:  # noqa: BLE001
+                log.warning("%s: could not stop background session %s", c, e.name, exc_info=True)
+    return stopped
 
 
 # --------------------------------------------------------------------------- text helpers other modules import

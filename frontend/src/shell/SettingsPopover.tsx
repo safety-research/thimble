@@ -35,12 +35,6 @@ export const SWITCHES: { key: string; label: string; note: string }[] = [
   { key: 'terminal_first', label: 'Terminal-first', note: TERMINAL_FIRST_NOTE },
 ]
 
-/** The ways the orientation runs in terminal-first mode, as the setting names them and the settings show them. */
-export const ORIENT_ROUTES: { value: 'subagent' | 'session'; label: string; note: string }[] = [
-  { value: 'subagent', label: 'subagent', note: "a subagent of your session, in its permission mode and effort, without a write fence, workflows or critique of its own" },
-  { value: 'session', label: 'background session', note: 'a Claude Code background session with its own folder, permission mode, workflows and critique' },
-]
-
 /** The agents whose permission modes the settings list, by their names there (backend modes.AGENTS). */
 export const MODE_ROWS: { agent: ModeAgent; label: string }[] = [
   { agent: 'orient', label: 'Orientation' },
@@ -151,7 +145,6 @@ export function SettingsPopover({ ws, anchor, open, onClose }: { ws: string; anc
   // the role whose model is being typed rather than picked
   const [typing, setTyping] = useState<string | null>(null)
   const [switches, setSwitches] = useState<Record<string, boolean>>({})
-  const [route, setRoute] = useState<'subagent' | 'session'>('subagent')
   const [modeRows, setModeRows] = useState<Rows>({})
 
   useEffect(() => {
@@ -165,7 +158,6 @@ export function SettingsPopover({ ws, anchor, open, onClose }: { ws: string; anc
         const a = main?.meta?.attached ?? null
         setSettings(s)
         setSwitches(Object.fromEntries(SWITCHES.map((sw) => [sw.key, s[sw.key] === true])))
-        setRoute(s.orient_route === 'session' ? 'session' : 'subagent')
         setModeRows(s.permission_modes ?? {})
         setAttached(a)
         const fast = mainFast(a)
@@ -184,8 +176,7 @@ export function SettingsPopover({ ws, anchor, open, onClose }: { ws: string; anc
     setError(null)
     try {
       const changed = changedRoles(settings?.models ?? {}, models)
-      const flipped: Record<string, boolean | string> = changedSwitches(settings, switches)
-      if (route !== (settings?.orient_route === 'session' ? 'session' : 'subagent')) flipped.orient_route = route
+      const flipped = changedSwitches(settings, switches)
       const modes = changedModes(settings?.permission_modes, modeRows)
       if (Object.keys(changed).length || Object.keys(flipped).length || Object.keys(modes).length)
         await api.putSettings(ws, { ...(Object.keys(changed).length ? { models: changed } : {}), ...(Object.keys(modes).length ? { permission_modes: modes } : {}), ...flipped })
@@ -341,19 +332,6 @@ export function SettingsPopover({ ws, anchor, open, onClose }: { ws: string; anc
                     {sw.label}
                   </span>
                   <span className="settings-switch-note">{sw.note}</span>
-                  {sw.key === 'terminal_first' && switches.terminal_first && (
-                    <span className="settings-route" role="radiogroup" aria-label="Orientation runs as">
-                      <span className="settings-route-label">Orientation runs as:</span>
-                      {ORIENT_ROUTES.map((r, i) => (
-                        <span key={r.value} className="settings-route-choice">
-                          {i > 0 && <span className="settings-route-sep">/</span>}
-                          <button type="button" role="radio" aria-checked={route === r.value} className={`settings-route-opt${route === r.value ? ' on' : ''}`} data-route={r.value} title={r.note} onClick={() => setRoute(r.value)}>
-                            {r.label}
-                          </button>
-                        </span>
-                      ))}
-                    </span>
-                  )}
                 </span>
               </div>
             ))}

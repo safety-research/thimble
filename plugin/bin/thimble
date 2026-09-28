@@ -20,7 +20,8 @@
 #                                        workspace read or Claude Code's transcripts (backend/app/runs.py)
 #   thimble launch-args [--cwd <p>] [--settings <s>]
 #                                        what a session starts with: the channel entry, the --allowedTools, --effort and
-#                                        --settings values, the tools that end a turn without text, then main's prompt
+#                                        --settings values, the tools that end a turn without text, main's --name, then
+#                                        main's prompt
 #   thimble prompt <name>… [--cwd <p>]   prompt files rendered for a session in <p> (the injected command of the
 #                                        /thimble and shared skills and of the SessionStart hook); in a session
 #                                        thimble started in its own work folder, the ones its server rendered
@@ -427,6 +428,10 @@ esac
 # the installed plugin copy, else plugin:thimble@inline for --plugin-dir. Main's prompt is appended to the system prompt,
 # since Claude Code cuts MCP server instructions at about 2 KB and an appended prompt reaches every fork whole.
 # --effort is passed only when neither the analyst's settings nor their flags name one, unless the composer chose one.
+# --name is `thimble:main · <workspace>` (cli.main_name), since `claude agents` and /resume list the sessions of every
+# folder; it is passed on -c/--continue and -r/--resume too, so a resumed main keeps that name (one an earlier build
+# left unnamed takes it, and so does one the analyst renamed with /rename), and an -n/--name among the analyst's own
+# flags wins.
 # --settings carries thimble's statusline and the composer's fast mode, merged into the analyst's own --settings, since
 # Claude Code reads only the last one. --allowedTools lets the thimble
 # tools and the plugin's skills run without a permission prompt, since a fork answering the browser must not wait on a
@@ -470,6 +475,8 @@ settings="${rest%%$'\n'*}"
 rest="${rest#*$'\n'}"
 turn_tools="${rest%%$'\n'*}"
 rest="${rest#*$'\n'}"
+name="${rest%%$'\n'*}"
+rest="${rest#*$'\n'}"
 last=""
 if [ "$cont" = 1 ]; then last="${rest%%$'\n'*}"; rest="${rest#*$'\n'}"; fi
 prompt="$rest"
@@ -477,6 +484,9 @@ tools=(--allowedTools "$allowed" --settings "$settings")
 # an --effort among the analyst's own flags is their choice, so thimble's default is left out
 for a in "$@"; do case "$a" in --effort | --effort=*) effort="";; esac; done
 [ -z "$effort" ] || tools+=(--effort "$effort")
+# an -n/--name among the analyst's own flags is their choice, so thimble's name is left out
+for a in "$@"; do case "$a" in -n | --name | --name=*) name="";; esac; done
+[ -z "$name" ] || tools+=(--name "$name")
 resume=()
 if [ -n "$last" ]; then
   resume=(--resume "$last")

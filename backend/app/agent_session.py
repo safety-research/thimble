@@ -15,7 +15,8 @@ Permissions. A --print session has no terminal, so a PermissionRequest hook (per
 the session, its subagents and workflow agents to ask, which shows it on the chat's card with Allow and Deny. A hook is
 used rather than --permission-prompt-tool because the prompt tool never hears background or workflow agents' requests.
 Each session runs in the mode of its agent's row (modes.py, the caller's `agent`), or in the mode a card switched it to
-(set_mode), which its later runs keep while this server runs (`_switched`). In Bypass ask allows at once; a patient
+(set_mode), which its later runs keep while this server runs (`_switched`); a continued background session keeps the
+mode its chat's meta records, since Claude Code keeps its flags (BG_AUTO_LINE). In Bypass ask allows at once; a patient
 session's request (the orientation's) waits for the analyst, any other is denied after PERMISSION_WAIT_S. A request
 denied unanswered stays on the card, marked `expired`, until the analyst dismisses it or the session ends. thimble's
 own tools and skills are always allowed (own_rules).
@@ -172,9 +173,10 @@ CLASSIFIER_WAITS_S = (10.0, 30.0, 90.0)
 CLASSIFIER_ASK_S = 600.0
 BYPASS = "bypass"
 AUTO = "auto"
-# a background session keeps its --permission-mode: bg_session.start sends a running one the prompt in place and
-# resumes a stopped one without its flags
-BG_AUTO_LINE = "A background session cannot switch into or out of Auto while it runs; stop it and start it again."
+# a background session keeps its --permission-mode, in every run of its chat: bg_session.start sends a running one the
+# prompt in place and resumes a stopped one without its flags, so start() takes a continued one's mode from its meta
+BG_AUTO_LINE = ("A background session cannot switch into or out of Auto while it runs; the mode saved for its agent in"
+                " Settings applies to the agent's next new session.")
 # prompts/tools.md: the stdin prompt of a session resumed in a new mode, and its sentence naming the agents that stopped
 # with the pause (module note, mode switch)
 MODE_PROMPT = "session-mode-changed"
@@ -618,6 +620,18 @@ def call_hooks(c: str) -> dict[str, Any]:
     return {event: hook for event in CALL_REF_EVENTS}
 
 
+def start_mode(c: str, agent: str, *, chat: str | None = None, background: bool = False) -> str:
+    """The mode a session of `agent` starts in (module note, permissions): its row (modes.mode_for); when it continues
+    the chat `chat`, the mode a card switched that chat to while this server runs (`_switched`); and when that chat's
+    session is a background one, the mode its meta records, since Claude Code keeps a background session's flags
+    (BG_AUTO_LINE), Bypass read as Manual once the settings turn it off."""
+    kept = (agents.meta_or_none(c, chat) or {}).get("permission_mode") if background and chat else None
+    if kept in modes.MODES:
+        return "manual" if kept in modes.disabled() and modes.flag(str(kept)) == modes.flag("manual") else str(kept)
+    switched = _switched.get((c, chat)) if chat else None
+    return switched if switched and switched not in modes.disabled() else modes.mode_for(c, agent)
+
+
 async def start(c: str, key: str, *, role: str, title: str, agent_args: list[str], effort: str, settings: str,
                 prompt: str, agent_type: str, on_start: Callable[[Run], None] | None = None,
                 on_end: Callable[[Run, str, str], None] | None = None, append_shared: bool = True,
@@ -642,8 +656,7 @@ async def start(c: str, key: str, *, role: str, title: str, agent_args: list[str
     cwd = config.corpus_dir(c)
     folder = work if work is not None else cwd  # where the process runs (module note, the fence)
     sid = resume or str(uuid.uuid4())
-    switched = _switched.get((c, chat or "")) if resume else None
-    mode = switched if switched and switched not in modes.disabled() else modes.mode_for(c, agent)
+    mode = start_mode(c, agent, chat=chat if resume else None, background=background)
     permission_mode = modes.flag(mode)
     extra_env: dict[str, str] = {}
     given = json.loads(settings)
@@ -697,8 +710,9 @@ async def start(c: str, key: str, *, role: str, title: str, agent_args: list[str
     extra: dict[str, Any] = {"server": os.getpid(), "workspace_dir": str(config.workspace_dir(c).resolve()),
                              **({"model": model} if model else {})}
     if background:
-        extra.update(background=True, bg=proc.short, bg_name=bg_session.name_of(key))
-    extra.update(permission_mode=mode, mode_switch=None)  # what the card's switcher shows
+        extra.update(background=True, bg=proc.short)
+    # what the card's switcher shows, and the row of modes.AGENTS a pick it cannot make live saves to (ModeSwitch)
+    extra.update(permission_mode=mode, mode_switch=None, mode_agent=agent)
     if resume and chat and agents.meta_or_none(c, chat) is not None:
         extra["restarted"] = {"run": run_k, "ts": _now()} if restarted else None
         meta = _reopen(c, chat, parent, run_k, pid=proc.pid, effort=effort, leads=leads or [], call=call,
@@ -1993,6 +2007,9 @@ async def _delivering() -> None:
         await asyncio.sleep(UNHEARD_POLL_S)
         for key in [k for k, notes in _unheard.items() if notes]:
             folder = Path(key).parent
+            if not folder.is_dir():  # the workspace was purged: its unheard ends go with it, never to a new one's main
+                _unheard.pop(key, None)
+                continue
             try:
                 if folder.parent.resolve() == config.WORKSPACES_DIR.resolve():
                     deliver_unheard(folder.name)

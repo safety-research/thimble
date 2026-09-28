@@ -1,10 +1,20 @@
 """thimble's agents as Claude Code background sessions (`claude --bg`), for a workspace in terminal-first mode: the
-writers, the orientation's critique, and the orientation when Settings has it run as a background session. The analyst
+orientation, its critique and the writers. The analyst
 sees each in `claude agents`, in the agent view (←) and at the bottom of main's terminal, and can attach to it, answer
 its permission prompts there and message it.
 
-Names. Each session is named for Claude Code as `thimble:<role>` (name_of): thimble:orient, thimble:writer (the
-report's; another document's is thimble:writer-<doc>) and thimble:critic.
+Names. Each session is named for Claude Code as `thimble:<role> · <workspace>` (name_of, config.session_name):
+thimble:orient · <c>, thimble:writer · <c> (the report's; another document's is thimble:writer-<doc> · <c>) and
+thimble:critic · <c>, since `claude agents` and ListAgents list the sessions of every folder and SendMessage's `to`
+addresses a session by its name alone (its listed ` [ref]` is not the short id). The name, spaces and `·` included, is
+the session's address everywhere: SendMessage's `to` in the proxy's instructions, wait_session's `session`, main's
+messages that relay_check follows. Entry.name is the name `claude agents` listed for the session when it was recorded,
+so a session an earlier build named `thimble:orient` keeps being addressed as that, and keeps that name, which another
+folder's old session may share, until a new session replaces it: a session started again with `claude --bg --resume` is
+passed no `-n`, since a resume with a flag starts a copy under a new id (dev.Sessions.resume). ListAgents writes `  ·  ` between a row's
+fields, so a name copied from it can lose its workspace; main's instructions give it the whole name to send to. A long
+name has its workspace shortened (config.session_name), and by_name also takes the role before any separator a model
+wrote in place of ` · `. The workspace's own lines (the statusline, the news) show the role alone (config.session_role).
 
 Start. agent_session builds the `claude -p` command as for any session and hands it to start(), which turns it into a
 `claude --bg` command: the first message goes on the command line, and the session's own environment goes in the
@@ -24,16 +34,33 @@ keeps its id; a copy under a new id is recorded as the session's new id.
 
 The proxy. For each session main runs a thin background subagent of the plugin (plugin/agents: thimble:orient,
 thimble:writer, thimble:critic), which reads its instructions from proxy_file and loops on the `wait_session` tool for
-the session's life: the tool returns the session's news (its replies, its state, the end) and the outbox's messages as
-tokens. Two plugin hooks keep it reliable: before a SendMessage (relay_check) the server swaps a token for its message,
-prefixes a message the analyst typed in the proxy's view, and refuses a message sent twice; when the proxy would stop
-while its session runs (proxy_stop), the hook sends it back to waiting.
+the session's life: the tool returns the session's news (below) as one block of lines, which the proxy copies into its
+reply word for word, one reply per call, and the outbox's messages as tokens. Two plugin hooks keep it reliable: before
+a SendMessage (relay_check) the server swaps a token for its message, prefixes a message the analyst typed in the
+proxy's view, and refuses a message sent twice; when the proxy would stop while its session runs (proxy_stop), the hook
+sends it back to waiting.
+
+The news. What the analyst would see of a subagent, read from the session's transcript in its order (_read_news, which
+keeps an offset past the last whole line it read, so no line shows twice): each reply as `<name>: <text>` (NEWS_CHARS, a
+longer one keeps its start and says how much was cut), each tool call as `● <tool>: <what it acts on>` (a thimble tool
+by its bare name, a card tool by its card's question, an Agent call by its subagent type and description, a Bash call by
+its command's first line, a file tool by its path; _call_words, TOOL_CHARS), each failed result as `✗ <tool>: <the
+error's first line>` (`✗ tool:` when its call came before a server restart, since the calls' names are not kept), each
+interrupted turn as `<name> was interrupted.`, and each message
+as `✉ <sender> → <recipient>: <text>` (MESSAGE_CHARS): those it sends with SendMessage, and those it gets (the
+analyst's, relayed from the tray or the browser or typed with `claude attach`, main's, another session's, a subagent's
+hand-back, a finished background task, the prompts thimble starts it with, read from the transcript's start for a new
+session). Claude Code's own records (meta prompts, command output, system records) give none. To this the watcher adds
+the session's state (waiting for a permission, ended) and the end of each run. A waiting wait_session reads the
+transcript every NEWS_POLL_S and returns once there is news, so a tool call shows in the tray within about NEWS_POLL_S +
+NEWS_GATHER_S and the proxy's turn; one answer holds at most NEWS_RETURN_CHARS of news, the rest coming with the next. The session
+itself, as Claude Code draws it, shows with `claude attach <id>`.
 
 The watcher. One task per server lists `claude agents` every POLL_S for every session known here (REGISTRY_FILE keeps
-them across restarts): a session whose process has gone ends stopped; one that starts a turn with no run of thimble's
-(a message typed in its terminal or in the proxy's view, or main's SendMessage) is followed again as a new run of its
-chat (on_wake); its state and replies become the proxy's news, the statusline's line and the /thimble:agents list
-(agents_route).
+them across restarts): a session whose process has gone ends stopped; one that starts a turn with no run of thimble's (a
+message typed in its terminal or in the proxy's view, or main's SendMessage) is followed again as a new run of its chat
+(on_wake); it reads the session's transcript for the news too, and its state becomes the proxy's news, the statusline's
+line and the /thimble:agents list (agents_route).
 """
 from __future__ import annotations
 
@@ -46,6 +73,7 @@ import re
 import secrets
 import shutil
 import subprocess
+import textwrap
 import time
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
@@ -54,14 +82,11 @@ from typing import Any, Awaitable, Callable
 from fastapi import APIRouter
 from pydantic import BaseModel
 
-from . import agents, cite, config, ledger, session
+from . import agents, calls, cite, config, ledger, session
 
 log = logging.getLogger("thimble.bg_session")
 router = APIRouter()
 
-PREFIX = "thimble:"
-ORIENT_ROUTE_KEY = "orient_route"  # settings.json: how the orientation runs in terminal-first mode
-ROUTE_SUBAGENT, ROUTE_SESSION = "subagent", "session"
 REGISTRY_FILE = "bg-sessions.json"  # in the workspace: the background sessions thimble started
 PROXY_DIR = "bg"  # in the workspace: each proxy's instructions (proxy_file)
 POLL_S = 1.5
@@ -75,7 +100,23 @@ IDENTIFY_TRIES = 20
 CLI_TIMEOUT_S = 60
 MAX_ARG = 100_000  # bytes of a first message kept on the command line; a longer one goes through a file
 FIRST_MESSAGE_FILE = ".thimble-first-message.md"
-NEWS_CHARS = 1_500  # of one reply of the session, as the proxy shows it
+NEWS_CHARS = 4_000  # of one reply of the session in its news; a longer one keeps its start and says how much was cut
+TOOL_CHARS = 140  # of what a tool call's news line shows of the call, and of a failed call's error
+MESSAGE_CHARS = 400  # of a message to or from the session, as its news line shows it
+NEWS_POLL_S = 0.4  # how often a waiting wait_session reads the session's transcript for news
+NEWS_GATHER_S = 0.3  # how long wait_session waits after the first news for the lines that come with it
+CALLS_KEEP = 256  # the session's newest tool calls whose names its news keeps, for their results that come later
+NEWS_KEEP = 200  # news lines that wait for a proxy; older ones are dropped (_news)
+HEARD_KEEP = 16  # the session's newest messages its news keeps, so a message in two shapes shows once
+PROMPT_KEY = 200  # characters of a prompt start() gave a session that tell it from what the analyst typed (_message)
+CALL_KEYS = ("question", "name", "title", "doc", "span", "ref", "card", "thread", "label", "query", "url", "path",
+             "file_path", "pattern", "description", "command", "prompt", "text", "message")  # _call_words, in order
+# main's SendMessage to the session, as its queued command or prompt carries it (origin coordinator)
+COORDINATOR_RE = re.compile(r"^[^\n]*sent a message while you were working:\n(.*?)(?:\n\nAddress this.*)?\Z", re.S)
+NEWS_RETURN_CHARS = 10_000  # of the news one wait_session returns; the rest waits for the next call
+HANDBACK_RE = re.compile(r"\A\[Subagent hand-back\].*?follows:\n", re.S)  # the harness's lead of a hand-back
+SUMMARY_RE = re.compile(r"<summary>(.*?)</summary>", re.S)  # of a task notification
+ERROR_TAG_RE = re.compile(r"</?tool_use_error>")
 BLOCKS_MAX = 12  # stops of a proxy refused in a row with no wait_session between them, after which it may stop
 GONE_AFTER = 3  # listings in a row without its process after which a session counts as ended
 START_GRACE_S = 20.0  # a session this young is never taken for ended
@@ -124,44 +165,24 @@ def terminal_first(c: str) -> bool:
     return orientation.terminal_first(c)
 
 
-def orient_route(c: str) -> str:
-    """How the orientation runs in terminal-first mode: as a subagent of main (the default) or a background session."""
-    try:
-        value = ledger.stored_settings(c).get(ORIENT_ROUTE_KEY)
-    except Exception:  # noqa: BLE001 — a workspace whose settings cannot be read runs the default route
-        return ROUTE_SUBAGENT
-    return ROUTE_SESSION if value == ROUTE_SESSION else ROUTE_SUBAGENT
-
-
 def wanted(c: str, kind: str) -> bool:
     """Whether a session of `kind` (orient, writer, critique) runs as a background session in workspace `c`."""
-    if not terminal_first(c):
-        return False
-    if kind == "orient":
-        return orient_route(c) == ROUTE_SESSION
-    return kind in ("writer", "critique")
+    return terminal_first(c) and kind in PROXY_TYPES
 
 
 def kind_of(key: str) -> str:
     return key.split(":", 1)[0]
 
 
-def name_of(key: str) -> str:
-    """The session's name in Claude Code: thimble:orient, thimble:writer (the report's), thimble:writer-<doc>,
-    thimble:critic."""
+def name_of(c: str, key: str) -> str:
+    """The name a new session of `key` in workspace `c` gets in Claude Code (module note, names): thimble:orient · <c>,
+    thimble:writer · <c> (the report's), thimble:writer-<doc> · <c>, thimble:critic · <c>."""
     kind, _, rest = key.partition(":")
     if kind == "writer":
-        return f"{PREFIX}writer" if rest in ("", "report") else f"{PREFIX}writer-{rest}"
-    return PREFIX + PROXY_TYPES.get(kind, kind)
-
-
-def tray_label(key: str) -> str:
-    """How the session's tray entry describes it, beside its agent's name: `writing report`, `orientation session`,
-    `critique`."""
-    kind, _, rest = key.partition(":")
-    if kind == "writer":
-        return f"writing {rest or 'report'}"
-    return "orientation session" if kind == "orient" else "critique" if kind == "critique" else kind
+        role = "writer" if rest in ("", "report") else f"writer-{rest}"
+    else:
+        role = PROXY_TYPES.get(kind, kind)
+    return config.session_name(role, c)
 
 
 def proxy_type(key: str) -> str:
@@ -278,6 +299,12 @@ class Entry:
     ended_at: float = 0.0
     offset: int = 0  # of its transcript, read for the proxy's news
     news: list[str] = field(default_factory=list)
+    dropped: int = 0  # news lines dropped since the last wait_session, since no proxy took them (_news)
+    tx_path: str = ""  # its transcript, as _transcript found it for the session id tx_sid
+    tx_sid: str = ""
+    calls: dict[str, str] = field(default_factory=dict)  # tool_use_id -> tool name of its newest calls (CALLS_KEEP)
+    heard: list[tuple[str, str, str]] = field(default_factory=list)  # (uuid, text, shape) of its newest messages
+    prompts: list[str] = field(default_factory=list)  # the starts of the prompts start() gave it on the command line
     outbox: list[dict[str, Any]] = field(default_factory=list)
     proxy_seen: float = 0.0  # time.monotonic() of the proxy's last wait_session call
     proxy_asked: float = 0.0  # time.monotonic() when main was last asked to start the proxy
@@ -296,6 +323,11 @@ class Entry:
 
     KEEP = ("c", "key", "name", "short", "sid", "chat", "role", "folder", "started", "status", "run_open", "result",
             "ended_at", "proxy_agents", "relayed")
+
+    @property
+    def shown(self) -> str:
+        """The session's name as the workspace's own lines show it: its role alone (module note, names)."""
+        return config.session_role(self.name)
 
     def saved(self) -> dict[str, Any]:
         d = asdict(self)
@@ -355,9 +387,38 @@ def entries(c: str | None = None) -> list[Entry]:
     return [e for (cc, _), e in list(_entries.items()) if c is None or cc == c]
 
 
-def by_name(c: str, name: str) -> Entry | None:
-    want = str(name or "").strip().lower()
-    return next((e for e in entries(c) if want in (e.name.lower(), e.key.lower(), e.short)), None)
+REF_RE = re.compile(r"\s+\[[0-9A-Za-z]+\]\Z")  # the ` [ref]` SendMessage's `to` may carry after a listed name
+# where a name's role ends however its separator was written (`thimble:writer - mini`, `thimble:writer·mini`), for by_name
+ROLE_END_RE = re.compile(r"\s|[·•]")
+
+
+def by_name(c: str, name: str, exact: bool = False) -> Entry | None:
+    """The session of workspace `c` that `name` names: its name, without a ` [ref]` after it (REF_RE), ignoring case;
+    unless `exact` (a SendMessage's `to`, which Claude Code delivers by the name alone), also its role (config.session_role,
+    such as `thimble:writer`, which only one session of the workspace has), alone or followed by the workspace after any
+    separator (ROLE_END_RE), its key or its short id."""
+    want = REF_RE.sub("", str(name or "").strip()).lower()
+    if not want:
+        return None
+    hit = next((e for e in entries(c) if e.name.lower() == want), None)
+    if hit is not None or exact:
+        return hit
+    role = ROLE_END_RE.split(want, maxsplit=1)[0]
+    return next((e for e in entries(c) if want in (e.key.lower(), e.short) or config.session_role(e.name).lower() == role),
+                None)
+
+
+def _slug(name: str) -> str:
+    return re.sub(r"[^0-9a-z]+", "-", name.lower()).strip("-")
+
+
+def by_origin(c: str, name: str) -> Entry | None:
+    """The session of workspace `c` a peer message's origin `name` names (session._peer): as by_name takes it, else with
+    its first `-` read as `:` or compared as a slug (`thimble-writer-mini` for `thimble:writer · mini`), should Claude Code
+    record a sender's name in a slugged form; which form it records for a name with spaces and `·` is not known."""
+    hit = by_name(c, name) or by_name(c, name.replace("-", ":", 1))
+    want = _slug(name)
+    return hit or next((e for e in entries(c) if want and want in (_slug(e.name), _slug(config.session_role(e.name)))), None)
 
 
 def alive(e: Entry | None) -> bool:
@@ -381,18 +442,25 @@ def _status(row: dict[str, Any]) -> str:
 
 
 def record(c: str, key: str, *, short: str, sid: str, chat: str, role: str, folder: Path,
-           status: str = "working") -> Entry:
-    """A session thimble started or attached to, followed from now on by the watcher."""
+           status: str = "working", offset: int | None = None, name: str = "") -> Entry:
+    """A session thimble started or attached to, followed from now on by the watcher, under `name`, the name `claude
+    agents` lists it by (by default name_of's; module note, names). A session not followed before under this short id
+    has its news read from `offset` in its transcript: 0 for a new session, whose whole transcript is its own, the
+    transcript's size before `claude --bg --resume` for one started again, and by default (a running session attached
+    to) its size now."""
     _load(c)
     old = _entries.get((c, key))
-    e = old if old is not None and old.short == short else Entry(c, key, name_of(key), short, sid, chat, role, str(folder))
+    e = old if old is not None and old.short == short else Entry(c, key, name or name_of(c, key), short, sid, chat, role,
+                                                                 str(folder))
+    if name:
+        e.name = name
     if old is not None and old is not e:
         e.proxy_agents, e.proxy_seen, e.outbox = old.proxy_agents, old.proxy_seen, old.outbox
     e.sid, e.chat, e.status, e.run_open = sid, chat, status, True
     e.started, e.misses = time.time(), 0
     path = session.find_transcript(sid)
     if old is None or old.short != short:
-        e.offset = session._size(Path(path)) if path else 0
+        e.offset = offset if offset is not None else session._size(Path(path)) if path else 0
     _entries[(c, key)] = e
     _save(c)
     _ensure_watcher()
@@ -408,7 +476,7 @@ def run_ended(c: str, key: str, summary: str) -> None:
     e.result = " ".join(str(summary or "").split())[:400]
     e.ended_at = time.time()
     said = cite.to_links(e.result)
-    _news(e, f"{e.name} finished its task" + (f": {said}" if said and not e.last_said.startswith(said[:200]) else "."))
+    _news(e, f"{e.shown} finished its task" + (f": {said}" if said and not e.last_said.startswith(said[:200]) else "."))
     _save(c)
 
 
@@ -418,7 +486,12 @@ def forget(c: str, key: str) -> None:
 
 
 def _news(e: Entry, line: str) -> None:
+    """A news line for the session's proxy; while no proxy takes them, only the newest NEWS_KEEP wait, and the next
+    wait_session says how many earlier ones were dropped."""
     e.news.append(line)
+    if len(e.news) > NEWS_KEEP:
+        e.dropped += len(e.news) - NEWS_KEEP
+        del e.news[: len(e.news) - NEWS_KEEP]
     _changed.set()
 
 
@@ -463,7 +536,7 @@ async def _tick(rows: list[dict[str, Any]]) -> None:
             if not _gone(e, hit):
                 continue
             e.status, e.waiting_for, e.pid, e.missing_since = "stopped", "", None, 0.0
-            _news(e, f"{e.name} has ended.")
+            _news(e, f"{e.shown} has ended.")
             _save(e.c)
             if agent_session.current(e.c, e.key) is None:
                 _stopped_while_idle(e)
@@ -477,7 +550,7 @@ async def _tick(rows: list[dict[str, Any]]) -> None:
         e.waiting_for = str(hit.get("waitingFor") or "") if e.status == "waiting" else ""
         if (e.status, e.waiting_for) != before:
             if e.status == "waiting":
-                _news(e, f"{e.name} waits for a {e.waiting_for or 'reply'}; answer it in the browser or with "
+                _news(e, f"{e.shown} waits for a {e.waiting_for or 'reply'}; answer it in the browser or with "
                          f"`claude attach {e.short}`.")
             _changed.set()
         if not proxy_alive(e) and time.monotonic() - e.proxy_asked > PROXY_ASK_S:
@@ -491,7 +564,7 @@ async def _tick(rows: list[dict[str, Any]]) -> None:
         _flush_outbox(e)
     for c, keys in unshown.items():
         if ask_main_for_proxy(c, *keys):
-            log.info("%s: main is asked to show %s in the agent tray", c, ", ".join(name_of(k) for k in keys))
+            log.info("%s: main is asked to show %s in the agent tray", c, ", ".join(name_of(c, k) for k in keys))
 
 
 def _lingering(e: Entry) -> bool:
@@ -546,11 +619,12 @@ def _iso_now() -> str:
 
 
 def _read_news(e: Entry) -> None:
-    """The session's replies since the last read, as the proxy's news."""
-    path = session.find_transcript(e.sid)
-    if not path:
+    """The session's transcript since the last read, as its proxy's news (module note, the news): each whole line
+    after `e.offset`, which moves past it, so no line is read twice and a line Claude Code is still writing waits for
+    the next read. A line that cannot be read is logged and skipped."""
+    p = _transcript(e)
+    if p is None:
         return
-    p = Path(path)
     size = session._size(p)
     if size <= e.offset:
         return
@@ -565,19 +639,270 @@ def _read_news(e: Entry) -> None:
         return
     e.offset += cut + 1
     for line in data[:cut].split(b"\n"):
-        if b'"assistant"' not in line:
-            continue
         try:
-            rec = json.loads(line)
-        except ValueError:
+            lines = _news_lines(e, line)
+        except Exception:  # noqa: BLE001 — one odd record never costs the rest of the news, a wait or a watcher pass
+            log.exception("%s: a line of %s's transcript could not be read for its news", e.c, e.name)
             continue
-        msg = rec.get("message") if isinstance(rec, dict) and rec.get("type") == "assistant" else None
-        for b in (msg or {}).get("content") or [] if isinstance(msg, dict) else []:
-            if isinstance(b, dict) and b.get("type") == "text":
-                text = cite.to_links(session.visible(str(b.get("text") or ""))).strip()
-                if text:
-                    e.last_said = " ".join(text.split())
-                    _news(e, f"{e.name}: {text[:NEWS_CHARS]}{'…' if len(text) > NEWS_CHARS else ''}")
+        for news in lines:
+            _news(e, news)
+
+
+def _transcript(e: Entry) -> Path | None:
+    """The session's transcript, found once per session id and then kept, since wait_session reads it every
+    NEWS_POLL_S."""
+    if e.tx_path and e.tx_sid == e.sid and os.path.isfile(e.tx_path):
+        return Path(e.tx_path)
+    found = session.find_transcript(e.sid)
+    e.tx_path, e.tx_sid = found or "", e.sid
+    return Path(found) if found else None
+
+
+def _news_lines(e: Entry, line: bytes) -> list[str]:
+    """One line of the session's transcript as its news lines, in the order the record holds them: its replies, a line
+    per tool call and per failed result, a line per message it got or sent (module note, the news), and a line when a
+    turn was interrupted (Esc with `claude attach`), which Claude Code writes as a prompt. Claude Code's own records
+    (meta prompts, command output, system records, subagents' sidechains) give none."""
+    if not line.strip():
+        return []
+    try:
+        rec = session._load(line)
+    except session.Unreadable:
+        return []
+    if rec.get("isSidechain"):
+        return []
+    t = rec.get("type")
+    if t == "assistant":
+        return _said(e, rec)
+    if t == "user":
+        if session.INTERRUPT_RE.match((session._user_text(rec) or "").strip()):
+            return _failed(e, rec) + [f"{e.shown} was interrupted."]
+        return _failed(e, rec) + _heard(e, rec)
+    if t == "attachment":
+        return _heard(e, rec)
+    return []
+
+
+def _said(e: Entry, rec: dict[str, Any]) -> list[str]:
+    """An assistant record's news: each reply as `<name>: <text>` (clipped to NEWS_CHARS), each tool call as one line
+    (_call_line)."""
+    out: list[str] = []
+    for b in session._content_list(rec):
+        if not isinstance(b, dict):
+            continue
+        if b.get("type") == "text":
+            text = cite.to_links(session.visible(str(b.get("text") or ""))).strip()
+            if text:
+                e.last_said = " ".join(text.split())
+                out.append(f"{e.shown}: {_clip(text, NEWS_CHARS, e.short)}")
+        elif b.get("type") == "tool_use" and isinstance(b.get("name"), str):
+            name = b["name"]
+            if isinstance(b.get("id"), str):
+                e.calls[b["id"]] = name
+                while len(e.calls) > CALLS_KEEP:
+                    e.calls.pop(next(iter(e.calls)))
+            said = _call_line(e, name, b.get("input") if isinstance(b.get("input"), dict) else {})
+            if said:
+                out.append(said)
+    return out
+
+
+def _call_line(e: Entry, name: str, inp: dict[str, Any]) -> str | None:
+    """A tool call as one news line: `● <tool>: <what it acts on>` (_call_words), or `✉ <session> → <to>: <message>`
+    for a SendMessage; None for Claude Code's plumbing (session.PLUMBING_TOOLS)."""
+    if name in session.PLUMBING_TOOLS:
+        return None
+    if name == session.SEND_TOOL:
+        to = str(inp.get("to") or inp.get("recipient") or "?")
+        said = _one_line(_as_text(inp.get("message") or inp.get("content")), MESSAGE_CHARS)
+        return f"✉ {e.shown} → {config.session_role(to)}: {said}"
+    words = _one_line(_call_words(name, inp, e.folder, e.c), TOOL_CHARS)
+    return f"● {_tool_name(name)}" + (f": {words}" if words else "")
+
+
+def _tool_name(name: str) -> str:
+    """A tool's name as its news line shows it: a thimble tool's bare name (add_card), another MCP server's tool as
+    `<server>:<tool>`, a built-in tool's as it is."""
+    if calls.is_thimble(name):
+        return calls._short(name)
+    if name.startswith("mcp__"):
+        server, _, tool = name[len("mcp__"):].partition("__")
+        return f"{server}:{tool}" if tool else server
+    return name
+
+
+def _call_words(name: str, inp: dict[str, Any], folder: str = "", c: str = "") -> str:
+    """What a tool call acts on, as its news line shows it: an Agent call's subagent type and description, the skill
+    of a Skill call, a Bash call's command's first line, the path or pattern of a file tool, the question (a card's
+    title) of a card tool, a call that names only its card by that card's question as workspace `c` stores it
+    (_card_title), and for any other tool the first of CALL_KEYS it has, or else its first short string. Paths in the
+    session's folder are written relative to it."""
+    short = _tool_name(name)
+    s = {k: v.strip() for k, v in inp.items() if isinstance(v, str) and v.strip()}
+    if name in session.AGENT_TOOLS:
+        kind = s.get("subagent_type") or "subagent"
+        return f"{kind} · {s['description']}" if s.get("description") else kind
+    if name == "Skill":
+        return " ".join(x for x in (s.get("skill"), s.get("args")) if x)
+    if name == "Bash":
+        return s.get("command", "").split("\n", 1)[0]
+    if name == session.WORKFLOW_TOOL:
+        meta = {k: v.strip() for k, _, v in session.WORKFLOW_META_RE.findall(s.get("script", "").split("}", 1)[0])}
+        return meta.get("description") or meta.get("name") or s.get("name") or s.get("scriptPath") or ""
+    if name in ("Read", "Edit", "Write", "MultiEdit", "NotebookEdit"):
+        words = _relative(s.get("file_path") or s.get("notebook_path") or "", folder)
+    elif name in ("Grep", "Glob"):
+        where = _relative(s.get("path") or s.get("glob") or "", folder)
+        words = s.get("pattern", "") + (f" in {where}" if where else "")
+    elif short in session.CELL_TOOLS:
+        card = s.get("card", "")
+        words = s.get("question") or (_card_title(c, card) if card else "")
+    else:
+        key = next((k for k in CALL_KEYS if k in s), None) or \
+            next((k for k, v in s.items() if len(v) <= TOOL_CHARS), None)
+        words = s.get(key, "") if key else ""
+    return words.split("\n", 1)[0]
+
+
+def _card_title(c: str, card: str) -> str:
+    """The question of the card `card` (card:<id> or its bare id) in workspace `c`, else `card` as it is: a card
+    another agent deleted, or one that cannot be read."""
+    from . import notebook  # noqa: PLC0415
+
+    try:
+        hit = notebook.find_cell(config.workspace_dir(c), card.removeprefix("card:")) if c else None
+    except Exception:  # noqa: BLE001 — a news line never fails for a card it cannot read
+        hit = None
+    title = str((hit[1].get("title") if hit else "") or "").strip()
+    return title or card
+
+
+def _relative(path: str, folder: str) -> str:
+    base = folder.rstrip("/") + "/" if folder else ""
+    return path[len(base):] if base and path.startswith(base) else path
+
+
+def _failed(e: Entry, rec: dict[str, Any]) -> list[str]:
+    """A user record's failed tool results, each as `✗ <tool>: <the error's first line>`."""
+    out: list[str] = []
+    for b in session._content_list(rec):
+        if isinstance(b, dict) and b.get("type") == "tool_result" and b.get("is_error"):
+            name = e.calls.get(str(b.get("tool_use_id") or ""), "")
+            if name in session.PLUMBING_TOOLS:
+                continue
+            text = ERROR_TAG_RE.sub("", session.response_text(b.get("content"))).strip()
+            first = next((ln.strip() for ln in text.splitlines() if ln.strip()), "failed")
+            out.append(f"✗ {_tool_name(name) if name else 'tool'}: {_one_line(first, TOOL_CHARS)}")
+    return out
+
+
+def _heard(e: Entry, rec: dict[str, Any]) -> list[str]:
+    """A message the session got, as `✉ <sender> → <session>: <message>` (_message), once even when Claude Code writes
+    it in two shapes, a queued command and then a prompt: the prompt carries the queued command's source_uuid as its
+    uuid, or else the same text right after it (as _typed_messages takes a proxy's messages once). A prompt pairs with
+    the queued command right before it only, so the same words sent again later, in either shape, show again."""
+    got = _message(e, rec)
+    if got is None:
+        return []
+    by, text = got
+    norm = _norm(text)
+    att = rec.get("attachment") if rec.get("type") == "attachment" and isinstance(rec.get("attachment"), dict) else {}
+    uid, shape = str(att.get("source_uuid") or rec.get("uuid") or ""), "queued" if att else "prompt"
+    last = e.heard[-1] if e.heard else ("", "", "")
+    if not norm:
+        return []
+    copy = bool(uid and any(h[0] == uid for h in e.heard)) or (shape == "prompt" and last[2] == "queued"
+                                                                    and last[1] == norm)
+    e.heard = [*e.heard, (uid, norm, shape)][-HEARD_KEEP:]  # a copy too, so the prompt it closes pairs with no other
+    return [] if copy else [f"✉ {by} → {e.shown}: {_one_line(text, MESSAGE_CHARS)}"]
+
+
+def _message(e: Entry, rec: dict[str, Any]) -> tuple[str, str] | None:
+    """(sender, text) of a record that is a message for the session, else None: another session's SendMessage or a
+    subagent's hand-back (origin peer), main's message (origin coordinator), a finished background task (a task
+    notification), what the analyst typed with `claude attach` (origin human), and the prompt thimble started or
+    resumed it with, which Claude Code also writes as typed (origin human), told apart by e.prompts and the
+    bg-first-message hint. A message thimble relayed names its first sender (_relayed_by)."""
+    att = rec.get("attachment") if rec.get("type") == "attachment" and isinstance(rec.get("attachment"), dict) else None
+    if att is not None:
+        if att.get("type") != "queued_command":
+            return None
+        origin, text = att.get("origin"), str(att.get("prompt") or "")
+    elif rec.get("type") == "user":
+        text = session._user_text(rec)
+        if text is None:
+            return None
+        origin = rec.get("origin")
+    else:
+        return None
+    o = origin if isinstance(origin, dict) else {}
+    kind = o.get("kind")
+    if kind == "peer":
+        body = str(o.get("body") or "")
+        if o.get("handback"):
+            body = HANDBACK_RE.sub("", body, count=1)
+            return f"{config.session_role(str(o.get('name') or 'subagent'))} (hand-back)", textwrap.dedent(body).strip()
+        if any(not i["by"] and _norm(i["text"]) == _norm(body) for i in e.outbox):
+            return "thimble", body.strip()  # thimble's own message, sent in place (deliver with no sender)
+        return _relayed_by(body) or (config.session_role(str(o.get("name") or o.get("from") or "another session")),
+                                        body.strip())
+    if kind == "coordinator":
+        return "main", COORDINATOR_RE.sub(r"\1", text).strip()
+    if kind == "task-notification" or (att is not None and att.get("commandMode") == "task-notification"):
+        m = SUMMARY_RE.search(text)
+        said = (m.group(1) if m else dict(session.TASK_FIELD_RE.findall(text)).get("status") or "").strip()
+        return ("background task", said) if said else None
+    if (rec.get("isMeta") and kind != "human") or rec.get("isCompactSummary") or rec.get("isVisibleInTranscriptOnly"):
+        return None
+    typed = session._typed(rec) if kind == "human" else None
+    text = (typed or text).strip()
+    if not text or text.startswith("<") or session.INTERRUPT_RE.match(text):
+        return None  # a command's line or output, a system reminder, the harness's note of an interrupt (_news_lines)
+    return _relayed_by(text) or ("thimble" if _from_thimble(e, text) else "analyst (attached)", text)
+
+
+def _from_thimble(e: Entry, text: str) -> bool:
+    """Whether a prompt is one thimble gave the session on the command line (start): one of e.prompts, or the
+    bg-first-message hint that stands for a long one."""
+    from . import tools  # noqa: PLC0415
+
+    head = tools.hint("bg-first-message", path="\0").partition("\0")[0]
+    return _norm(text)[:PROMPT_KEY] in e.prompts or bool(head and text.startswith(head))
+
+
+def _relayed_by(text: str) -> tuple[str, str] | None:
+    """(sender, message) of a message thimble relayed to the session in the words of its bg-from-* hints (_outgoing):
+    the analyst in the browser or in the tray, or main."""
+    from . import tools  # noqa: PLC0415
+
+    for hint, by in (("bg-from-browser", "analyst (browser)"), ("bg-from-terminal", "analyst (tray)"),
+                     ("bg-from-main", "main")):
+        head, _, tail = tools.hint(hint, text="\0").partition("\0")
+        if head and text.startswith(head):
+            body = text[len(head):]
+            if tail.strip() and body.rstrip().endswith(tail.strip()):
+                body = body.rstrip()[: -len(tail.strip())]
+            return by, body.strip()
+    return None
+
+
+def _as_text(v: Any) -> str:
+    return v if isinstance(v, str) else json.dumps(v, ensure_ascii=False, default=str) if v is not None else ""
+
+
+def _one_line(text: str, limit: int) -> str:
+    """`text` on one line, clipped to `limit` characters with an ellipsis."""
+    line = " ".join(str(text or "").split())
+    return line if len(line) <= limit else line[: limit - 1].rstrip() + "…"
+
+
+def _clip(text: str, limit: int, short: str = "") -> str:
+    """A reply kept whole up to `limit` characters; a longer one keeps its start and says how many were cut and where
+    the whole reply shows."""
+    if len(text) <= limit:
+        return text
+    where = f"; `claude attach {short}` shows them" if short else ""
+    return f"{text[:limit].rstrip()}… ({len(text) - limit:,} more characters{where})"
 
 
 # --------------------------------------------------------------------------- messages in place
@@ -646,7 +971,7 @@ def proxy_prompt(c: str, key: str) -> str:
     from . import tools  # noqa: PLC0415
 
     e = entry(c, key)
-    name = e.name if e is not None else name_of(key)
+    name = e.name if e is not None else name_of(c, key)
     path = proxy_file(c, key)
     path.parent.mkdir(parents=True, exist_ok=True)
     short = e.short if e is not None else ""
@@ -655,14 +980,16 @@ def proxy_prompt(c: str, key: str) -> str:
 
 
 def proxy_start_hint(c: str, key: str) -> str:
-    """The lines that ask main to start the session's proxy, for a tool's result or an event."""
+    """The lines that ask main to start the session's proxy, for a tool's result or an event: its Agent call's
+    `description`, which the tray entry shows beside the agent's name, is the session's name, as `claude agents` lists
+    it."""
     from . import tools  # noqa: PLC0415
 
     e = entry(c, key)
-    name = e.name if e is not None else name_of(key)
+    name = e.name if e is not None else name_of(c, key)
     if e is not None:
         e.proxy_asked = time.monotonic()
-    return tools.hint("bg-proxy-start", type=proxy_type(key), session=name, label=tray_label(key), prompt=proxy_prompt(c, key),
+    return tools.hint("bg-proxy-start", type=proxy_type(key), session=name, prompt=proxy_prompt(c, key),
                       short=e.short if e is not None else "")
 
 
@@ -691,16 +1018,16 @@ def _proxy_key(c: str, prompt_path: str) -> str | None:
 
 def _by_tray(c: str, agent_type: Any, description: Any, prompt: Any = None) -> Entry | None:
     """The session an Agent call of a plugin agent of PROXY_TYPES shows: the one whose proxy_file its prompt names, or
-    whose tray_label or name its description is, else the one live session of its kind. None for the orientation's own
-    subagent, which is the same plugin agent, when the orientation runs as a subagent."""
+    whose name its description is (by_name), else the one live session of its kind."""
     kind = str(agent_type or "").strip().rsplit(":", 1)[-1]
     if kind not in PROXY_TYPES.values():
         return None
     cands = [e for e in entries(c) if PROXY_TYPES.get(kind_of(e.key)) == kind]
-    text, desc = str(prompt or ""), str(description or "").strip()
-    hit = next((e for e in cands if text and str(proxy_file(c, e.key)) in text), None) or \
-        next((e for e in cands if desc and desc in (tray_label(e.key), e.name)), None)
-    if hit is not None or (kind == PROXY_TYPES["orient"] and orient_route(c) != ROUTE_SESSION):
+    text = str(prompt or "")
+    hit = next((e for e in cands if text and str(proxy_file(c, e.key)) in text), None)
+    if hit is None and (named := by_name(c, str(description or ""))) in cands:
+        hit = named
+    if hit is not None:
         return hit
     live = [e for e in cands if alive(e)]
     return live[0] if len(live) == 1 else None
@@ -784,10 +1111,13 @@ def _fresh(e: Entry, path: Path | None) -> bool:
 
 
 async def wait(c: str, name: str, agent_id: str | None = None, path: Path | None = None) -> str:
-    """The `wait_session` tool of the proxy `agent_id` (its transcript at `path`): the session's news and the outbox's
-    messages, waiting up to WAIT_S for some. The messages this proxy, or an earlier one of the session that ended, got
-    for the session go to the outbox first (_capture). A second proxy of a session whose proxy is alive is told to
-    stop."""
+    """The `wait_session` tool of the proxy `agent_id` (its transcript at `path`): the session's news, as one block of
+    lines to copy, and the outbox's messages, waiting up to WAIT_S for some. While it waits it reads the session's
+    transcript every NEWS_POLL_S (_read_news) and returns as soon as there is news, NEWS_GATHER_S after the first line
+    so that the lines which come together (a call and its result) come in one answer. One answer holds the oldest
+    lines up to NEWS_RETURN_CHARS (at least one); the rest wait for the next call, which returns them at once. The
+    messages this proxy, or an earlier one of the session that ended, got for the session go to the outbox first
+    (_capture). A second proxy of a session whose proxy is alive is told to stop."""
     from . import tools  # noqa: PLC0415
 
     e = by_name(c, name)
@@ -804,18 +1134,32 @@ async def wait(c: str, name: str, agent_id: str | None = None, path: Path | None
         e.owner = agent_id
     e.proxy_seen = time.monotonic()
     e.blocks = 0
+    carried = bool(e.news)  # lines an earlier answer left, which go out without waiting for more
     deadline = time.monotonic() + WAIT_S
-    while not e.news and not _pending_out(e) and alive(e) and not _closing:
-        _changed.clear()
+    while alive(e) and not _closing:
+        _read_news(e)
+        if e.news or _pending_out(e):
+            break
         left = deadline - time.monotonic()
         if left <= 0:
             break
+        _changed.clear()
         with contextlib.suppress(asyncio.TimeoutError):
-            await asyncio.wait_for(_changed.wait(), min(left, POLL_S))
+            await asyncio.wait_for(_changed.wait(), min(left, NEWS_POLL_S))
         e.proxy_seen = time.monotonic()
-    out, e.news = list(e.news), []
-    if out:
-        out.append(tools.hint("wait_session-copy"))
+    if e.news and not carried and alive(e) and not _closing:
+        await asyncio.sleep(NEWS_GATHER_S)
+    _read_news(e)
+    e.proxy_seen = time.monotonic()
+    n, size = 0, 0
+    while n < len(e.news) and (n == 0 or size + len(e.news[n]) + 1 <= NEWS_RETURN_CHARS):
+        size += len(e.news[n]) + 1
+        n += 1
+    news, e.news = e.news[:n], e.news[n:]
+    if e.dropped and news:
+        news.insert(0, f"… {e.dropped:,} earlier lines are not shown; `claude attach {e.short}` shows them")
+    e.dropped = 0
+    out = ["\n".join(news), tools.hint("wait_session-copy")] if news else []
     for item in _pending_out(e):
         out.append(tools.hint("wait_session-send", session=e.name, token=item["token"]))
     if not alive(e):
@@ -912,7 +1256,7 @@ def relay_check(c: str, agent_path: Path | None, to: str, message: str, agent_id
     {allow, message?, reason?}, or None for a message to anything else. A token becomes its queued message, once. A
     message of main's goes as it is, to the proxy, which passes it on, or straight to the session with its sender
     named. A proxy sends only tokens, to its own session; a message it got and passes on in its own words goes once."""
-    e = by_name(c, to)
+    e = by_name(c, to, exact=True)
     if e is None:
         return None
     item = _take(e, message)
@@ -1136,15 +1480,19 @@ async def start(c: str, key: str, argv: list[str], folder: Path, env: dict[str, 
         running = next((r for r in rows if str(r.get("sessionId") or "") == resume and r.get("pid")), None)
         if running is not None:
             short = str(running.get("id") or resume[:8])
-            e = record(c, key, short=short, sid=resume, chat=chat, role=role, folder=folder, status=_status(running))
+            e = record(c, key, short=short, sid=resume, chat=chat, role=role, folder=folder, status=_status(running),
+                       name=str(running.get("name") or ""))
             if prompt.strip():
                 deliver(c, key, prompt, "")
             log.info("%s: attached to background session %s (%s) of %s", c, short, resume, key)
             return BgProc(c, key, short, resume, int(running["pid"]), expect=bool(prompt.strip()))
+        known = session.find_transcript(resume)
+        before = session._size(Path(known)) if known else 0  # where the news of this start begins (record)
         args = [bin_, "--bg", "--resume", resume, "--", prompt.strip() or _nudge()]
         code, out = await asyncio.to_thread(_cli, bin_, args[1:], env, folder, CLI_TIMEOUT_S)
     else:
-        code, out = await asyncio.to_thread(_cli, bin_, bg_argv(argv, env, dict(os.environ), name_of(key), prompt,
+        before = 0
+        code, out = await asyncio.to_thread(_cli, bin_, bg_argv(argv, env, dict(os.environ), name_of(c, key), prompt,
                                                                 folder)[1:], env, folder, CLI_TIMEOUT_S)
     if code != 0 and UNTRUSTED_RE.search(out):
         from . import tools  # noqa: PLC0415
@@ -1160,9 +1508,13 @@ async def start(c: str, key: str, argv: list[str], folder: Path, env: dict[str, 
                    None)
         if hit and hit.get("sessionId"):
             sid = str(hit["sessionId"])
-            if resume and sid != resume:
+            copy = bool(resume and sid != resume)
+            if copy:
                 log.warning("%s: %s was started again as a copy, %s (%s)", c, key, short, sid)
-            record(c, key, short=short, sid=sid, chat=chat, role=role, folder=folder)
+            # a copy's transcript holds the history it copied, whose length is not known here: its news starts now
+            e = record(c, key, short=short, sid=sid, chat=chat, role=role, folder=folder,
+                       offset=None if copy else before, name=str(hit.get("name") or ""))
+            e.prompts = [*e.prompts, _norm(prompt.strip() or _nudge())[:PROMPT_KEY]][-HEARD_KEEP:]  # _message
             log.info("%s: background session %s (%s) %s for %s", c, short, sid, "resumed" if resume else "started", key)
             return BgProc(c, key, short, sid, hit.get("pid"))
         await asyncio.sleep(1)
@@ -1208,11 +1560,12 @@ def agent_rows(c: str) -> list[dict[str, Any]]:
 
 def status_line(rows: list[dict[str, Any]], chars: int = STATUS_CHARS) -> str:
     """Claude Code's statusline: every agent with its state, `thimble · ● thimble:writer working · ◐ thimble:critic
-    waiting for a permission …`, going on to a further line once a line holds about `chars` characters."""
+    waiting for a permission …`, a session by its role alone (config.session_role), going on to a further line once a
+    line holds about `chars` characters."""
     if not rows:
         return ""
     mark = {"working": "●", "waiting": "◐", "restarting": "◐"}
-    parts = [f"{mark.get(r['state'].split()[0], '○')} {r['name']} {r['state']}" for r in rows]
+    parts = [f"{mark.get(r['state'].split()[0], '○')} {config.session_role(r['name'])} {r['state']}" for r in rows]
     lead, pad = "thimble · ", " " * len("thimble")  # a further line starts under the first line's first separator
     lines, cur = [], lead + parts[0]
     for part in parts[1:]:

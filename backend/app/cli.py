@@ -8,7 +8,7 @@
     thimble feedback ["description"] [--no-logs]   (a problem report as a zip; feedback.py)
     thimble list                           (the workspaces by id, archived runs included; runs.py)
     thimble purge <id>… [--dry-run]        (delete workspaces or archived runs by id; runs.py)
-    thimble launch-args --cwd <path>       (the launcher's: channel entry, allowed tools, main's effort and settings, turn tools, main's prompt)
+    thimble launch-args --cwd <path>       (the launcher's: channel entry, allowed tools, main's effort and settings, turn tools, main's name, main's prompt)
     thimble prompt <name>… [--cwd <path>]  (prompt files rendered for a session in <path>, for skills and hooks)
 
 `server up` (alias `ensure`) is the one starter: `GET /api/health`, then under `flock <home>/server.lock` spawn uvicorn
@@ -1444,32 +1444,44 @@ def launch_settings(cwd: Path, given: str = "") -> str:
     return json.dumps(out)
 
 
+def main_name(cwd: Path) -> str:
+    """The name main's session goes by in Claude Code (`claude -n`, config.session_name): `thimble:main · <workspace>`,
+    the workspace being the one /thimble opens `cwd` as (open_workspace with `here`), told before anything is
+    registered: the corpus that claims `cwd` itself or holds it under the data folder, else the name registering `cwd`
+    gives it (config.register_corpus: its basename, config.corpus_name_for, or the next free `-2`, `-3` …, config.free_name)."""
+    data_dir = Path(resolve_env()["data_dir"]).resolve()
+    here = cwd.expanduser().resolve()
+    known = known_corpus(here, data_dir)
+    if known is not None and (known[1] == here or known[1].parent == data_dir):
+        return config.session_name("main", known[0])
+    return config.session_name("main", config.free_name(config.corpus_name_for(here), data_dir))
+
+
 def launch_args(cwd: Path, resume: bool = False, settings: str = "") -> str:
     """The launcher's values, one per line: the channel entry of the plugin copy to load, the `--allowedTools` line, the
     `--effort` value ('' for none), the `--settings` value (launch_settings, over the analyst's own `settings`), the
-    value to export as terminal_tools.ENV ('' when the `claude` it starts does not read it), with `resume` the session
-    to resume, then main's prompt, whose turn ending follows that value."""
+    value to export as terminal_tools.ENV ('' when the `claude` it starts does not read it), main's `--name`
+    (main_name), with `resume` the session to resume, then main's prompt, whose turn ending follows that value."""
     from . import cc_settings, channel, terminal_tools  # noqa: PLC0415 — needed by this subcommand alone
 
     installed = installed_copy(cwd)
     root = installed.root if installed else plugin_root()
     workspaces = Path(resolve_env()["workspaces_dir"]).resolve()
     anchors = workspaces / "*" / ANCHORS_DIR
-    # the prompt the orientation's subagent reads first in terminal-first mode (orientation.subagent_prompt_file), and
     # the instructions of a background session's tray entry (bg_session.proxy_file)
-    orient_prompt = workspaces / "*" / "orient" / "subagent-prompt.md"
     tray_prompts = workspaces / "*" / "bg" / "*.md"
     # on the Monitor route main arms its Monitor on the watcher again every 30 minutes, which must not wait on a prompt;
     # only --stream, since the watcher's other modes report to the server as main's hooks
     watcher = f"Bash({root / WATCHER} --stream *)"
-    tools_line = ",".join([MCP_TOOLS_RULE, f"Read(/{anchors}/**)", f"Read(/{orient_prompt})", f"Read(/{tray_prompts})",
+    tools_line = ",".join([MCP_TOOLS_RULE, f"Read(/{anchors}/**)", f"Read(/{tray_prompts})",
                            watcher, *skill_rules(root)])
     last = [last_main(cwd)] if resume else []
     turn_tools = terminal_tools.launch_value()
     chosen = main_choice(cwd).get("effort")
     effort = cc_settings.level_of(chosen) if chosen in (*cc_settings.EFFORTS, cc_settings.ULTRACODE) else ""
     return "\n".join([installed.channel if installed else cc_channel.channel(root), tools_line,
-                      effort or cc_settings.main_effort_flag(cwd), launch_settings(cwd, settings), turn_tools, *last,
+                      effort or cc_settings.main_effort_flag(cwd), launch_settings(cwd, settings), turn_tools,
+                      main_name(cwd), *last,
                       channel.session_prompt(str(cwd.resolve()), bool(turn_tools))])
 
 
@@ -2544,7 +2556,7 @@ def build_parser() -> argparse.ArgumentParser:
     u.add_argument("--from", dest="from_", metavar="ZIP", help="a downloaded release zip (thimble-<version>-<sha>.zip)")
     u.add_argument("--dry-run", action="store_true", help="print update.sh's steps; change nothing")
     u.set_defaults(fn=cmd_update)
-    la = sub.add_parser("launch-args", help="for plugin/bin/thimble: the channel entry, the --allowedTools, --effort and --settings values, the tools that end a turn without text, then main's prompt")
+    la = sub.add_parser("launch-args", help="for plugin/bin/thimble: the channel entry, the --allowedTools, --effort and --settings values, the tools that end a turn without text, main's --name, then main's prompt")
     la.add_argument("--cwd")
     la.add_argument("--resume", action="store_true", help="a line before the prompt: the folder's last main session")
     la.add_argument("--settings", help="the analyst's own --settings, which thimble's are merged into")
