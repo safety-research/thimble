@@ -17,8 +17,9 @@ cwd to a workspace, print `thimble: <url>`, and name the session to the server. 
 whole when its command exits non-zero. `--action fresh` moves the workspace aside into <workspaces>/.archive/;
 `--action restore` restores an archive. /thimble also reports the route browser events take (cc_channel.delivery).
 
-<home> is `~/.thimble` or THIMBLE_HOME. <home>/server.json records {port, pid, url, repo, env, token}, readable by its
-owner alone; `token` is new at each start and is what the plugin's hooks prove they hold (hook_auth.py). Its `pid` is trusted
+<home> is `~/.thimble` or THIMBLE_HOME. <home>/server.json records {port, pid, url, repo, env, token, ui_key}, readable
+by its owner alone; `token` is new at each start and is what the plugin's hooks prove they hold, and `ui_key`, kept
+across starts, is what the printed link gives the browser to change permission modes (hook_auth.py). Its `pid` is trusted
 only while it is a thimble server on its port (is_server checks the command line and working folder, since a pid
 recorded inside a sandbox's pid namespace can name an unrelated host process). reconcile makes the record true before
 `up` acts on it. A server whose /api/health names another THIMBLE_HOME belongs to another install and is refused.
@@ -219,11 +220,14 @@ def new_token() -> str:
 
 
 def write_state(state: dict[str, Any]) -> None:
-    """server.json, written whole into the private home (ensure_home), with the token the file held when `state` names
-    none, else a new one."""
+    """server.json, written whole into the private home (ensure_home), with the token and the ui_key the file held when
+    `state` names none, else new ones (hook_auth.py)."""
     ensure_home()
+    held = read_state()
     if not state.get("token"):
-        state = {**state, "token": read_state().get("token") or new_token()}
+        state = {**state, "token": held.get("token") or new_token()}
+    if not state.get("ui_key"):
+        state = {**state, "ui_key": held.get("ui_key") or new_token()}
     p = server_json()
     tmp = p.with_suffix(".json.tmp")
     tmp.write_text(json.dumps(state, indent=2) + "\n", "utf-8")
@@ -1134,10 +1138,12 @@ def open_workspace(cwd: Path, data_dir: Path, url: str | None, *, here: bool = F
 
 
 def ui_url(name: str | None) -> str:
-    """The UI port in dev mode (its own Vite), else the API port where the built UI is served."""
+    """The UI port in dev mode (its own Vite), else the API port where the built UI is served, with the key that lets
+    the page change permission modes (hook_auth.claim)."""
     st = read_state()
     base = str(st.get("url") or api_url())
-    return f"{base}/?ws={name}" if name else f"{base}/"
+    key = f"#k={st['ui_key']}" if st.get("ui_key") else ""
+    return f"{base}/?ws={name}{key}" if name else f"{base}/{key}"
 
 
 HELD_KEYS = ("cards", "labels", "documents", "chats")  # what `GET /api/tools/holdings` counts (tools.holdings)
@@ -1411,8 +1417,9 @@ def main_choice(cwd: Path) -> dict[str, Any]:
 
 def launch_settings(cwd: Path, given: str = "") -> str:
     """The one `--settings` value the launcher passes main, since Claude Code reads only the last one: the analyst's own
-    `given` (inline JSON, or a file relative to `cwd`) with thimble's statusline, chained to theirs, and the composer's
-    fast mode and ultracode where they name none. `given` as it is when it cannot be read."""
+    `given` (inline JSON, or a file relative to `cwd`) with thimble's statusline, chained to theirs (from `given`, else
+    their own settings, cc_settings.own_statusline) at their refresh interval, and the composer's fast mode and
+    ultracode where they name none. `given` as it is when it cannot be read."""
     from . import bg_session, cc_settings  # noqa: PLC0415
 
     own: Any = {}
@@ -1426,9 +1433,9 @@ def launch_settings(cwd: Path, given: str = "") -> str:
                   file=sys.stderr)
             return given.replace("\n", " ")
     line = own.get("statusLine")
-    chained = line.get("command") if isinstance(line, dict) and isinstance(line.get("command"), str) else None
-    out = {**own, "statusLine": {"type": "command", "command": bg_session.statusline_command(chained),
-                                 "refreshInterval": cc_settings.STATUSLINE_REFRESH_S}}
+    theirs = line if isinstance(line, dict) and isinstance(line.get("command"), str) else cc_settings.own_statusline()
+    out = {**own, "statusLine": {"type": "command", "command": bg_session.statusline_command(theirs.get("command") or ""),
+                                 "refreshInterval": theirs.get("refreshInterval", cc_settings.STATUSLINE_REFRESH_S)}}
     choice = main_choice(cwd)
     if isinstance(choice.get("fast"), bool):
         out.setdefault("fastMode", choice["fast"])
@@ -1452,8 +1459,9 @@ def launch_args(cwd: Path, resume: bool = False, settings: str = "") -> str:
     # the instructions of a background session's tray entry (bg_session.proxy_file)
     orient_prompt = workspaces / "*" / "orient" / "subagent-prompt.md"
     tray_prompts = workspaces / "*" / "bg" / "*.md"
-    # on the Monitor route main arms its Monitor on the watcher again every 30 minutes, which must not wait on a prompt
-    watcher = f"Bash({root / WATCHER} *)"
+    # on the Monitor route main arms its Monitor on the watcher again every 30 minutes, which must not wait on a prompt;
+    # only --stream, since the watcher's other modes report to the server as main's hooks
+    watcher = f"Bash({root / WATCHER} --stream *)"
     tools_line = ",".join([MCP_TOOLS_RULE, f"Read(/{anchors}/**)", f"Read(/{orient_prompt})", f"Read(/{tray_prompts})",
                            watcher, *skill_rules(root)])
     last = [last_main(cwd)] if resume else []

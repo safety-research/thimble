@@ -1412,6 +1412,8 @@ export interface ChatMeta {
   permission_mode?: OrientPermissions
   /** the mode a switch into or out of Auto goes to, while the session waits for a pause to restart in it */
   mode_switch?: OrientPermissions | null
+  /** a session thimble runs as a Claude Code background session (backend bg_session) */
+  background?: boolean
   /** the orientation's session: whether it runs with Ultracode, and its critique */
   ultracode?: boolean
   critique?: boolean

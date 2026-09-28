@@ -13,7 +13,7 @@ import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import Body, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.datastructures import MutableHeaders
 from starlette.exceptions import HTTPException
@@ -22,6 +22,7 @@ from starlette.staticfiles import StaticFiles
 
 from . import config
 from .errors import ErrorLog
+from . import hook_auth
 from .hook_auth import HookAuth
 from .http_guard import OriginCheck, SecurityHeaders, dev_origins
 
@@ -330,6 +331,11 @@ def create_app() -> FastAPI:
         # `leader` lets `server up`/`stop` find a server whose record was lost, `ui` lets an open tab tell it is stale,
         # and `home`/`app` let another install's `server up` on the same port refuse it
         return {"ok": True, "leader": os.getsid(0), "boot": config.BOOT_ID, "ui": ui_build(), **install}
+
+    @app.post("/api/ui/key")
+    def ui_key(body: dict = Body(...)):
+        # the key of the page's link, traded for the cookie a change of permission modes needs (hook_auth.claim)
+        return hook_auth.claim(body.get("key"))
 
     # the built UI, last: a mount at / matches everything the routes above did not
     dist = frontend_dist()

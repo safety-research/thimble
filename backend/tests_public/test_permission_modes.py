@@ -16,7 +16,7 @@ from pathlib import Path
 import pytest
 from fastapi import HTTPException
 
-from app import agent_session, agents, channel, config, ledger, modes, orient_session, session, tools
+from app import agent_session, agents, cc_channel, channel, config, ledger, modes, orient_session, session, tools
 
 CORPUS = "mini"
 KEY = orient_session.KEY
@@ -146,10 +146,10 @@ def _flag(argv: list[str]) -> str:
 # ----------------------------------------------------------------------------- each agent's mode
 
 
-async def test_each_agent_runs_in_its_row_else_in_main_s_mode_and_nothing_else_picks_one(fake, monkeypatch):
+async def test_each_agent_runs_in_its_row_else_in_main_s_mode_and_nothing_else_picks_one(fake, monkeypatch, analyst):
     """An agent's mode is the analyst's pick in Settings, else the mode Claude Code reports to main's hooks. No
-    settings file, neither the corpus folder's nor the analyst's, chooses one; start_orientation has no mode to give; and
-    a mode the analyst's Claude Code settings turn off is refused and never used."""
+    settings file, neither the corpus folder's nor the analyst's, chooses one, nor main's meta; start_orientation has no
+    mode to give; and a mode the analyst's or the org's Claude Code settings turn off is refused and never used."""
     cwd = config.corpus_dir(CORPUS)
     (cwd / ".claude").mkdir(exist_ok=True)
     (cwd / ".claude" / "settings.json").write_text(json.dumps({"permissions": {"defaultMode": "bypassPermissions"}}))
@@ -158,7 +158,9 @@ async def test_each_agent_runs_in_its_row_else_in_main_s_mode_and_nothing_else_p
     user.write_text(json.dumps({"permissions": {"defaultMode": "auto"}}))
     assert modes.mode_for(CORPUS, "orient") == "manual", "before main reports its mode: Manual"
     session._live[CORPUS] = session.Live(CORPUS, "sid-main", str(cwd), None, None)
-    agents.write_meta(CORPUS, {**agents.ensure_main(CORPUS), "attached": {"session": "sid-main"}})
+    agents.write_meta(CORPUS, {**agents.ensure_main(CORPUS), "attached": {"session": "sid-main",
+                                                                          "permission_mode": "bypassPermissions"}})
+    assert modes.mode_for(CORPUS, "orient") == "manual", "a mode written into main's meta is no report"
 
     async def report(sid: str, mode: str) -> None:
         await channel.mode_route(channel.ModeBody(cwd=str(cwd), session=sid, permission_mode=mode))
@@ -167,10 +169,10 @@ async def test_each_agent_runs_in_its_row_else_in_main_s_mode_and_nothing_else_p
     assert modes.mode_for(CORPUS, "writer") == "manual", "another session's mode is not main's"
     await report("sid-main", "auto")
     assert [modes.mode_for(CORPUS, a) for a in modes.AGENTS] == ["auto"] * len(modes.AGENTS)
-    ledger.put_settings_route(CORPUS, {modes.SETTING: {"views": "bypass", "writer": "manual"}})
+    ledger.put_settings_route(CORPUS, analyst, {modes.SETTING: {"views": "bypass", "writer": "manual"}})
     assert (modes.mode_for(CORPUS, "views"), modes.mode_for(CORPUS, "writer"), modes.mode_for(CORPUS, "dev")) == \
         ("bypass", "manual", "auto"), "each row apart"
-    ledger.put_settings_route(CORPUS, {modes.SETTING: {"writer": None}})
+    ledger.put_settings_route(CORPUS, analyst, {modes.SETTING: {"writer": None}})
     assert modes.mode_for(CORPUS, "writer") == "auto", "a row put back follows main again"
 
     assert "permissions" not in tools.schema_of("start_orientation")["properties"]
@@ -185,10 +187,21 @@ async def test_each_agent_runs_in_its_row_else_in_main_s_mode_and_nothing_else_p
 
     user.write_text(json.dumps({"permissions": {"disableBypassPermissionsMode": "disable"}}))
     with pytest.raises(HTTPException) as e:
-        ledger.put_settings_route(CORPUS, {modes.SETTING: {"orient": "bypass"}})
+        ledger.put_settings_route(CORPUS, analyst, {modes.SETTING: {"orient": "bypass"}})
     assert e.value.status_code == 400 and "Bypass" in e.value.detail
     assert modes.mode_for(CORPUS, "views") == "auto", "a Bypass turned off is not used"
     assert ledger.get_settings(CORPUS)["disabled_modes"] == ["bypass"]
+    user.write_text("{}")
+    remote = user.parent / "remote-settings.json"
+    remote.write_text(json.dumps({"disableAutoMode": "disable", "permissions": {"disableBypassPermissionsMode": "disable"}}))
+    assert modes.disabled() == {"auto", "bypass"}, "the org's server-managed settings"
+    remote.unlink()
+    managed = fake.parent / "managed"
+    (managed / "managed-settings.d").mkdir(parents=True)
+    monkeypatch.setitem(cc_channel.MANAGED_DIRS, sys.platform, managed)
+    (managed / "managed-settings.json").write_text(json.dumps({"permissions": {"disableBypassPermissionsMode": "disable"}}))
+    (managed / "managed-settings.d" / "auto.json").write_text(json.dumps({"permissions": {"disableAutoMode": "disable"}}))
+    assert modes.disabled() == {"auto", "bypass"}, "the managed file with its drop-ins"
 
 
 # ----------------------------------------------------------------------------- Auto

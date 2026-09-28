@@ -130,10 +130,12 @@ function denyAfter(s: number): string {
   return min <= 1 ? 'after a minute' : `after ${min} minutes`
 }
 
-/** The chat whose permission mode the card can switch for this request: the asking session's own, when it runs one
- * (its card's switcher is ModeSwitch); null for main and the dev agent's sessions. Pure. */
+/** The chat whose permission mode the card can switch out of Auto for this request: the asking session's own, when it
+ * runs one (its card's switcher is ModeSwitch); null for main, the dev agent's sessions and a background session, which
+ * cannot leave Auto while it runs (backend agent_session.BG_AUTO_LINE). Pure. */
 export function modeChat(ask: PendingAsk, metas: ReadonlyMap<string, ChatMeta>): string | null {
-  return ask.chat !== 'main' && metas.get(ask.chat)?.permission_mode ? ask.chat : null
+  const m = metas.get(ask.chat)
+  return ask.chat !== 'main' && m?.permission_mode && !m.background ? ask.chat : null
 }
 
 /** The modes an orientation runs in, as its switcher names them. */

@@ -1,8 +1,9 @@
 // A running session's permission mode on its card, changeable for that session: the three modes (PERMISSION_OPTIONS),
-// less those the analyst's Claude Code settings turn off, as a small segmented track. Manual and Bypass switch at once (the session runs in Claude Code's manual mode in both, and
-// in Bypass thimble grants every request). A switch into or out of Auto restarts the session in the new mode at its
-// next pause, with its work kept; until then a line says it waits. In Bypass, the first sentence of Claude Code's own
-// warning stays under the switcher.
+// less those the analyst's Claude Code settings turn off, as a small segmented track. Manual and Bypass switch at once
+// (the session runs in Claude Code's manual mode in both, and in Bypass thimble grants every request). A switch into or
+// out of Auto restarts the session in the new mode at its next pause, with its work kept; until then a line says it
+// waits. A background session cannot make that switch, so its track leaves it out. In Bypass, the first sentence of
+// Claude Code's own warning stays under the switcher.
 import { useEffect, useState } from 'react'
 import { Segmented } from '../components/Button'
 import { Icon } from '../components/Icon'
@@ -24,7 +25,7 @@ export function shownMode(meta: Pick<ChatMeta, 'permission_mode' | 'mode_switch'
 /** The first sentence of Claude Code's Bypass warning, which the card keeps while the session runs in Bypass. */
 export const BYPASS_LINE = BYPASS_WARNING.slice(0, BYPASS_WARNING.indexOf('. ') + 1)
 
-export function ModeSwitch({ ws, chat, meta }: { ws: string; chat: string; meta: Pick<ChatMeta, 'permission_mode' | 'mode_switch'> }) {
+export function ModeSwitch({ ws, chat, meta }: { ws: string; chat: string; meta: Pick<ChatMeta, 'permission_mode' | 'mode_switch' | 'background'> }) {
   // the analyst's pick, shown until the chat's meta, read again on the stream, says what the server made of it
   const [picked, setPicked] = useState<OrientPermissions | null>(null)
   useEffect(() => setPicked(null), [meta.permission_mode, meta.mode_switch])
@@ -53,7 +54,7 @@ export function ModeSwitch({ ws, chat, meta }: { ws: string; chat: string; meta:
     <div className="chat-perms" data-mode={mode}>
       <div className="chat-perms-row">
         <span className="chat-perms-label">Permissions</span>
-        <Segmented size="sm" track label="This session's permission mode" options={PERMISSION_OPTIONS.filter((o) => !off.includes(o.value))} value={mode} onChange={pick} />
+        <Segmented size="sm" track label="This session's permission mode" options={PERMISSION_OPTIONS.filter((o) => !off.includes(o.value) && (!meta.background || (o.value === 'auto') === (mode === 'auto')))} value={mode} onChange={pick} />
       </div>
       {switching ? (
         <p className="chat-perms-note" role="status">

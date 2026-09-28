@@ -215,7 +215,7 @@ async def test_manual_waits_for_the_analyst_however_long_while_a_writer_s_reques
         agent_session._runs.pop((CORPUS, run.key), None)
 
 
-async def test_bypass_grants_every_request_and_switches_with_manual_while_the_session_runs(fake, monkeypatch):
+async def test_bypass_grants_every_request_and_switches_with_manual_while_the_session_runs(fake, monkeypatch, analyst):
     """Bypass never asks and runs in Claude Code's manual mode, so the card switches it with Manual on the same
     process: a switch to Bypass grants what waits, and after a switch back the next request waits again. The session's
     later runs keep the switch, and its row is left alone."""
@@ -237,12 +237,12 @@ async def test_bypass_grants_every_request_and_switches_with_manual_while_the_se
     assert run.pid == pid and _flag(run.argv) == "default", "the same process"
     agent_session.set_mode(CORPUS, run.chat, "manual")
     with pytest.raises(HTTPException) as e:
-        await agent_session.mode_route(CORPUS, run.chat, agent_session.ModeBody(mode="yolo"))
+        await agent_session.mode_route(CORPUS, run.chat, agent_session.ModeBody(mode="yolo"), analyst)
     assert e.value.status_code == 400
     await orient_session.stop(CORPUS)
     await _done()
     with pytest.raises(HTTPException) as e:
-        await agent_session.mode_route(CORPUS, run.chat, agent_session.ModeBody(mode="manual"))
+        await agent_session.mode_route(CORPUS, run.chat, agent_session.ModeBody(mode="manual"), analyst)
     assert e.value.status_code == 404
     again = await orient_session.message(CORPUS, "one more look", orient_session.BROWSER)
     assert again["status"] == "resumed" and agent_session.current(CORPUS, KEY).mode == "manual", "its follow-up keeps the switch"

@@ -64,12 +64,12 @@ def sources(cwd: Path) -> list[Path]:
     return [config_dir() / "settings.json", cwd / PROJECT_SETTINGS, cwd / LOCAL_SETTINGS, *([managed] if managed else [])]
 
 
-def analyst_sources() -> list[Path]:
-    """The settings files that are the analyst's own wherever a session runs, lowest precedence first: the user's
-    settings.json and the managed file. A corpus folder's .claude/ is left out, since a file planted there must not
-    choose a permission mode or a command thimble runs."""
-    managed = MANAGED.get(sys.platform)
-    return [config_dir() / "settings.json", *([managed] if managed else [])]
+def analyst_tiers() -> list[dict[str, Any]]:
+    """The settings that are the analyst's own wherever a session runs, lowest precedence first: the user's settings.json
+    and the org's managed tier (cc_channel.managed: server-managed settings, else the managed file with its drop-ins). A
+    corpus folder's .claude/ is left out, since a file planted there must not choose a permission mode or a command
+    thimble runs."""
+    return [_read(config_dir() / "settings.json"), cc_channel.managed({config.CONFIG_DIR_ENV: str(config_dir())}) or {}]
 
 
 def model_key(model: str | None) -> str:
@@ -170,15 +170,14 @@ def analyst_effort(cwd: Path, environ: dict[str, str] | None = None) -> str | No
 STATUSLINE_REFRESH_S = 2
 
 
-def own_statusline() -> str:
-    """The statusline command of the analyst's own settings (analyst_sources), the most specific file's; '' for none.
-    thimble-agents runs it with a shell, so a corpus folder's settings never supply it."""
-    for path in reversed(analyst_sources()):
-        line = _read(path).get("statusLine")
-        cmd = line.get("command") if isinstance(line, dict) else None
-        if isinstance(cmd, str) and cmd.strip():
-            return cmd
-    return ""
+def own_statusline() -> dict[str, Any]:
+    """The statusLine of the analyst's own settings (analyst_tiers), the highest tier's that names a command; {} for
+    none. thimble-agents runs its command with a shell, so a corpus folder's settings never supply it."""
+    for tier in reversed(analyst_tiers()):
+        line = tier.get("statusLine")
+        if isinstance(line, dict) and isinstance(line.get("command"), str) and line["command"].strip():
+            return line
+    return {}
 
 
 # --------------------------------------------------------------------------- the sandbox

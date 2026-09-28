@@ -68,20 +68,38 @@ def _thimble_home_off_the_user(tmp_path, monkeypatch):
 
 
 PLUGIN_TOKEN = "t0ken-of-the-test-server"
+UI_KEY = "ui-key-of-the-test-server"
+
+
+def _record(**values: str) -> None:
+    """`values` into the test's server.json, keeping what it holds."""
+    import json
+
+    p = Path(os.environ["THIMBLE_HOME"]) / "server.json"
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(json.dumps({**(json.loads(p.read_text()) if p.exists() else {}), **values}))
 
 
 @pytest.fixture()
 def plugin_headers():
     """A function giving the headers thimble's plugin sends to the routes only it may call (app/hook_auth.py), for a
     fresh nonce each time, proving the token this fixture records in the test's server.json."""
-    import json
+    from app import hook_auth
+
+    _record(token=PLUGIN_TOKEN)
+    return lambda: hook_auth.headers(PLUGIN_TOKEN, os.urandom(8).hex())
+
+
+@pytest.fixture()
+def analyst():
+    """A request from the analyst's browser as the routes that change permission modes take it: it carries the cookie of
+    the ui_key this fixture records in the test's server.json (app/hook_auth.py)."""
+    from starlette.requests import Request
 
     from app import hook_auth
 
-    home = Path(os.environ["THIMBLE_HOME"])
-    home.mkdir(parents=True, exist_ok=True)
-    (home / "server.json").write_text(json.dumps({"token": PLUGIN_TOKEN}))
-    return lambda: hook_auth.headers(PLUGIN_TOKEN, os.urandom(8).hex())
+    _record(ui_key=UI_KEY)
+    return Request({"type": "http", "headers": [(b"cookie", f"{hook_auth.UI_COOKIE}={UI_KEY}".encode())]})
 
 
 @pytest.fixture(autouse=True)
@@ -108,15 +126,15 @@ def _view_tickets_held(monkeypatch):
 
 @pytest.fixture(autouse=True)
 def _no_held_events():
-    """The quiet events channel.post holds for the next event, and the messages session.relay waits to see main pass
-    on, are module state: none carries over from another test."""
+    """The quiet events channel.post holds for the next event, the messages session.relay waits to see main pass on, and
+    the modes main's hooks reported are module state: none carries over from another test."""
     from app import channel, session
 
-    channel._held.clear()
-    session._relays.clear()
+    for held in (channel._held, session._relays, session._modes):
+        held.clear()
     yield
-    channel._held.clear()
-    session._relays.clear()
+    for held in (channel._held, session._relays, session._modes):
+        held.clear()
 
 
 @pytest.fixture(autouse=True)

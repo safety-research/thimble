@@ -1178,15 +1178,13 @@ def _nudge() -> str:
 # --------------------------------------------------------------------------- what the terminal lists
 
 
-def statusline_command(own: str | None = None) -> str:
+def statusline_command(own: str = "") -> str:
     """The statusline command the launcher passes to main: plugin/bin/thimble-agents, which lists thimble's agents
-    while the workspace is in terminal-first mode (agents_route), chained to `own`, else to the analyst's own
-    statusline when their settings name one."""
+    while the workspace is in terminal-first mode (agents_route), chained to the analyst's statusline command `own`."""
     import shlex  # noqa: PLC0415
 
-    from . import agent_session, cc_settings  # noqa: PLC0415
+    from . import agent_session  # noqa: PLC0415
 
-    own = cc_settings.own_statusline() if own is None else own
     cmd = f"{shlex.quote(str(agent_session.PLUGIN_DIR / 'bin' / 'thimble-agents'))} --statusline"
     return f"{cmd} --chain {shlex.quote(own)}" if own else cmd
 

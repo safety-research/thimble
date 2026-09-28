@@ -4,7 +4,9 @@
 // does, every later call that waits on the same answer (scrolled), and why it asks, then Allow, Always allow (where Claude Code
 // offers a rule for the session, or for a web call its site or web search in the workspace; the scope in its tooltip)
 // and Deny, in one row. A request denied unanswered says so, with Dismiss. When auto mode's classifier could not judge
-// a call, an orientation's request offers the switch to Manual or Bypass. An answer hides the request at once. A long
+// a call, the request of a session that is not a background one offers the switch to Manual, and to Bypass unless the
+// analyst's Claude Code settings turn it off. An answer hides the request at once, and Allow covers only the later
+// calls the card listed. A long
 // command wraps and scrolls past 96px. A request too long to show whole says how much of it shows and offers no
 // "don't ask again".
 import { useEffect, useMemo, useState } from 'react'
@@ -14,6 +16,7 @@ import { Icon } from '../components/Icon'
 import { TipButton, Tipped } from '../components/Tooltip'
 import { api } from '../lib/api'
 import { bus } from '../lib/bus'
+import { loadSettings } from '../lib/models'
 import { track } from '../lib/telemetry'
 import type { ChatMeta, PermissionRequest } from '../lib/types'
 import { askFields, askWhat, CODE_LANGS } from './Holds'
@@ -54,6 +57,17 @@ export function PermissionCard({ ws, asks, metas, labels }: {
   const [at, setAt] = useState(0)
   // the sessions whose mode the card has switched, which no longer offer the switch
   const [switched, setSwitched] = useState<ReadonlySet<string>>(new Set())
+  // the modes the analyst's Claude Code settings turn off
+  const [off, setOff] = useState<readonly string[]>([])
+  useEffect(() => {
+    let alive = true
+    loadSettings(ws)
+      .then((s) => alive && setOff(s.disabled_modes ?? []))
+      .catch(() => undefined)
+    return () => {
+      alive = false
+    }
+  }, [ws])
   const shown = useMemo(() => asks.filter((a) => !answered.has(a.request.id)), [asks, answered])
   const i = Math.min(at, Math.max(0, shown.length - 1))
   const ask = shown[i] ?? null
@@ -73,7 +87,7 @@ export function PermissionCard({ ws, asks, metas, labels }: {
   const also = p.also ?? []
   const cut = cutLine(p)
   const always = cut ? null : alwaysChoice(p)
-  // while auto mode's classifier gives no verdict, the orientation's mode can switch from here
+  // while auto mode's classifier gives no verdict, the session's mode can switch from here
   const switchChat = classifierDown(p) ? modeChat(ask, metas) : null
   const switchTo = (mode: 'manual' | 'bypass') => {
     if (!switchChat) return
@@ -155,9 +169,11 @@ export function PermissionCard({ ws, asks, metas, labels }: {
           <Button variant="secondary" size="sm" className="chat-perm-manual" disabled={busy} onClick={() => switchTo('manual')}>
             Switch to Manual
           </Button>
-          <Button variant="secondary" size="sm" className="chat-perm-bypass" title={BYPASS_LINE} disabled={busy} onClick={() => switchTo('bypass')}>
-            Switch to Bypass
-          </Button>
+          {!off.includes('bypass') && (
+            <Button variant="secondary" size="sm" className="chat-perm-bypass" title={BYPASS_LINE} disabled={busy} onClick={() => switchTo('bypass')}>
+              Switch to Bypass
+            </Button>
+          )}
         </div>
       )}
       {expired ? (

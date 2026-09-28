@@ -115,7 +115,7 @@ from pathlib import Path
 from typing import Any, Awaitable, Callable
 from urllib.parse import urlsplit
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
 from . import (agents, bg_session, calls as calls_store, cc_settings, config, modes, orientation, permission_hook,
@@ -164,12 +164,16 @@ REQUEST, DENIED, PRE = permission_hook.REQUEST, permission_hook.DENIED, permissi
 # auto mode)
 GRANT_TTL_S = 600.0
 # auto mode's reason when its classifier gave no verdict on a call, the waits before each time the call goes back to
-# auto mode, and how long the card that then asks waits in a mode of thimble's before it denies the call (module note,
+# auto mode, and how long the card that then asks waits for a patient session before it denies the call (module note,
 # auto mode). Claude Code reads only `retry` from a PermissionDenied hook, so a deny carries no message to the model.
 CLASSIFIER_DOWN = re.compile(r"\bclassifier\b.*\bunavailable\b", re.I)
 CLASSIFIER_WAITS_S = (10.0, 30.0, 90.0)
 CLASSIFIER_ASK_S = 600.0
 BYPASS = "bypass"
+AUTO = "auto"
+# a background session keeps its --permission-mode: bg_session.start sends a running one the prompt in place and
+# resumes a stopped one without its flags
+BG_AUTO_LINE = "A background session cannot switch into or out of Auto while it runs; stop it and start it again."
 # prompts/tools.md: the stdin prompt of a session resumed in a new mode, and its sentence naming the agents that stopped
 # with the pause (module note, mode switch)
 MODE_PROMPT = "session-mode-changed"
@@ -2571,17 +2575,20 @@ def _set_flag(run: Run, flag: str) -> None:
 def set_mode(c: str, chat: str, mode: str) -> dict[str, Any]:
     """Switch the running session whose chat is `chat` to `mode`: at once between Manual and Bypass (a switch to Bypass
     granting what waits) or while a retry waits, else once the follower has paused it. Returns {mode, switching}.
-    LookupError when no session runs for the chat, ValueError for a mode that cannot be chosen (modes.refused)."""
+    LookupError when no session runs for the chat, ValueError for a mode that cannot be chosen (modes.refused),
+    RuntimeError for a background session's switch into or out of Auto (BG_AUTO_LINE)."""
     run = by_chat(c, chat)
     if run is None:
         raise LookupError("no session runs for this chat")
     if why := modes.refused(mode):
         raise ValueError(why)
+    if run.bg and (mode == AUTO) != ((run.switching or run.mode) == AUTO):
+        raise RuntimeError(BG_AUTO_LINE)
     flag = modes.flag(mode)
     if run.paused:
         run.switching = mode  # the process is ending for a switch; it starts again in this mode
         agents.update_agent(c, chat, mode_switch=mode)
-    elif flag == modes.flag(run.mode or "") or run.pid is None:
+    elif flag == modes.flag(run.mode) or run.pid is None:
         _set_flag(run, flag)
         _mode_is(run, mode)
         if mode == BYPASS:
@@ -2835,15 +2842,22 @@ class ModeBody(BaseModel):
 
 
 @router.post("/ws/{c}/chats/{chat}/permission-mode")
-async def mode_route(c: str, chat: str, body: ModeBody) -> dict[str, Any]:
-    """A session card's mode switcher: set_mode. 404 when no session runs for the chat, 400 for a mode that cannot be
-    chosen."""
+async def mode_route(c: str, chat: str, body: ModeBody, request: Request) -> dict[str, Any]:
+    """A session card's mode switcher: set_mode. 403 for a request that is not the analyst's browser's
+    (hook_auth.analyst), 404 when no session runs for the chat, 400 for a mode that cannot be chosen, 409 for a switch
+    the session cannot make."""
+    from . import hook_auth  # noqa: PLC0415
+
+    if not hook_auth.analyst(request):
+        raise HTTPException(403, hook_auth.ANALYST_ONLY)
     try:
         return set_mode(c, chat, body.mode)
     except LookupError as e:
         raise HTTPException(404, str(e)) from e
     except ValueError as e:
         raise HTTPException(400, str(e)) from e
+    except RuntimeError as e:
+        raise HTTPException(409, str(e)) from e
 
 
 async def shutdown() -> None:

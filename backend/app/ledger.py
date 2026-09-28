@@ -18,7 +18,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable
 
-from fastapi import APIRouter, Body, HTTPException
+from fastapi import APIRouter, Body, HTTPException, Request
 
 from . import config
 
@@ -223,23 +223,26 @@ def get_settings(c: str) -> dict[str, Any]:
 
 
 # The keys PUT /settings may change: the settings the browser's settings panel and switches save, and the rows of the
-# permission modes. Every other key is the server's own or the analyst's to edit in the file (kernel_wrap,
-# orient_instructions), since the route is unauthenticated and a kernel cell or a session's command can reach it on
-# loopback.
+# permission modes, which only the analyst's browser may change (hook_auth.analyst). Every other key is the server's
+# own or the analyst's to edit in the file (kernel_wrap, orient_instructions), since a kernel cell or a session's
+# command can reach the route on loopback.
 PUT_KEYS = frozenset({*SETTINGS_DEFAULTS, config.MODELS_KEY, "permission_modes"})
 
 
 @router.put("/ws/{c}/settings")
-def put_settings_route(c: str, settings: dict[str, Any] = Body(...)) -> dict[str, Any]:
+def put_settings_route(c: str, request: Request, settings: dict[str, Any] = Body(...)) -> dict[str, Any]:
     """put_settings for the browser, which may change PUT_KEYS only; 400 names any other key, or why a permission mode
-    cannot be chosen."""
-    from . import modes  # noqa: PLC0415 — modes imports this module
+    cannot be chosen, and 403 refuses a change of permission modes from anything but the analyst's browser."""
+    from . import hook_auth, modes  # noqa: PLC0415 — modes imports this module
 
     refused = sorted(set(settings) - PUT_KEYS)
     if refused:
         raise HTTPException(400, f"these settings cannot be changed here: {', '.join(refused)}")
-    if modes.SETTING in settings and (why := modes.patch_error(settings[modes.SETTING])):
-        raise HTTPException(400, why)
+    if modes.SETTING in settings:
+        if not hook_auth.analyst(request):
+            raise HTTPException(403, hook_auth.ANALYST_ONLY)
+        if why := modes.patch_error(settings[modes.SETTING]):
+            raise HTTPException(400, why)
     return put_settings(c, settings)
 
 

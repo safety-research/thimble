@@ -3,10 +3,11 @@ subagents, the writers, the critic and the report checks, the dev agent's ticket
 Auto or Bypass (MODES).
 
 A row the analyst has not set follows main, the Claude Code session that started thimble: the mode Claude Code reports
-to main's hooks (session.note_mode), Manual before the first report. So an agent runs in Bypass only when main does, or
-when the analyst chose Bypass for it in thimble: in Settings, on Start (the orientation's row), or on a session's card
-(that session alone, agent_session.set_mode). A mode the analyst's Claude Code settings turn off (disabled) is never
-used. Main's own mode is Claude Code's alone.
+to main's hooks (session.note_mode), which this server keeps in memory, Manual before the first report. So an agent runs
+in Bypass only when main does, or when the analyst chose Bypass for it in thimble's page: in Settings, on Start (the
+orientation's row), or on a session's card (that session alone, agent_session.set_mode), each a write only the
+analyst's browser may make (hook_auth.analyst). A mode the analyst's or the org's Claude Code settings turn off
+(disabled) is never used. Main's own mode is Claude Code's alone.
 
 Manual and Bypass both run Claude Code's manual mode (FLAGS): in Bypass thimble grants every request itself
 (agent_session.ask), so a card switches between them without restarting the session. Auto runs Claude Code's auto mode.
@@ -15,7 +16,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from . import agents, cc_settings, ledger
+from . import cc_settings, ledger
 
 MODES = ("manual", "auto", "bypass")
 AGENTS = ("orient", "writer", "critic", "dev", "views")
@@ -32,11 +33,11 @@ def flag(mode: str) -> str:
 
 
 def disabled() -> set[str]:
-    """The modes the analyst's Claude Code settings turn off: Bypass by `permissions.disableBypassPermissionsMode`,
-    Auto by `disableAutoMode` or `permissions.disableAutoMode`, each set to "disable"."""
+    """The modes the analyst's or the org's Claude Code settings turn off (cc_settings.analyst_tiers): Bypass by
+    `permissions.disableBypassPermissionsMode`, Auto by `disableAutoMode` or `permissions.disableAutoMode`, each set to
+    "disable"."""
     off: set[str] = set()
-    for path in cc_settings.analyst_sources():
-        d = cc_settings._read(path)
+    for d in cc_settings.analyst_tiers():
         perms = d.get("permissions") if isinstance(d.get("permissions"), dict) else {}
         if perms.get("disableBypassPermissionsMode") == "disable":
             off.add("bypass")
@@ -55,9 +56,11 @@ def refused(mode: Any) -> str | None:
 
 
 def session_mode(c: str) -> str:
-    """The mode main runs in, as its hooks last reported it; Manual before any report."""
-    held = (agents.meta_or_none(c, agents.MAIN_ID) or {}).get("attached") or {}
-    return OF_CLAUDE.get(str(held.get("permission_mode") or ""), "manual")
+    """The mode main runs in, as its hooks last reported it to this server (session.main_mode); Manual before any
+    report."""
+    from . import session  # noqa: PLC0415 — session imports this module
+
+    return OF_CLAUDE.get(session.main_mode(c) or "", "manual")
 
 
 def chosen(stored: dict[str, Any]) -> dict[str, str]:

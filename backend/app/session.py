@@ -232,6 +232,7 @@ _not_run: dict[str, None] = {}
 NOT_RUN_KEEP = 2_000
 _shim_pids: dict[tuple[str, str], int] = {}  # (workspace, session) -> the `claude` pid its shim reported (main_pid)
 _shim_configs: dict[tuple[str, str], str] = {}  # (workspace, session) -> the CLAUDE_CONFIG_DIR its shim reported ("": unset)
+_modes: dict[str, tuple[str, str]] = {}  # workspace -> (main's session, the permission mode its hooks reported: note_mode)
 SHIM_PIDS_KEPT = 256  # _shim_pids and _shim_configs keep the newest this many
 STAMP_LINES = 200  # _began_since looks this far into a transcript for its first record with a timestamp
 CURSOR_CALLS = 200  # the cursor keeps the names of main's newest this many tool calls, for results that come later
@@ -415,12 +416,14 @@ def attach(c: str, sid: Any, cwd: Any, transcript_path: str | None = None, pid: 
     _live[c] = lv
     if not restored:
         own = cc_settings.analyst_effort(Path(lv.cwd)) if lv.cwd else None
-        mode = held.get("permission_mode")  # until the new session's hooks report its own (note_mode)
         meta["attached"] = {"session": sid, "cwd": lv.cwd, "since": lv.since, **({"settings_effort": own} if own else {}),
-                            **({"permission_mode": mode} if mode else {}), **({"after": after} if after else {})}
+                            **({"after": after} if after else {})}
         meta["ended"] = None
         agents.write_meta(c, meta)
         agents.notify(c, agents.MAIN_ID)
+    elif "permission_mode" in held and _modes.get(c, ("",))[0] != sid:  # an earlier server's report, no longer in force
+        del held["permission_mode"]
+        agents.write_meta(c, meta)
     _persist(lv, keep_subs=restored or bool(lv.subs))
     _cancel_grace(c)
     _ensure_tail(lv)
@@ -432,17 +435,26 @@ def attach(c: str, sid: Any, cwd: Any, transcript_path: str | None = None, pid: 
 
 
 def note_mode(c: str, sid: str | None, mode: str) -> None:
-    """Main's hooks report the permission mode Claude Code runs the session `sid` in: when `sid` is main, main's meta
-    keeps it (`attached.permission_mode`), the mode each agent's row follows until the analyst sets it (modes.py)."""
+    """Main's hooks report the permission mode Claude Code runs the session `sid` in: when `sid` is main, this server
+    keeps it (main_mode), the mode each agent's row follows until the analyst sets it (modes.py), and main's meta shows
+    it (`attached.permission_mode`)."""
     lv = _live.get(c)
+    if lv is None or not sid or lv.sid != sid or mode not in modes.CLAUDE_MODES:
+        return
+    _modes[c] = (sid, mode)
     meta = agents.meta_or_none(c, agents.MAIN_ID) or {}
     held = meta.get("attached") or {}
-    if lv is None or not sid or lv.sid != sid or held.get("session") != sid or mode not in modes.CLAUDE_MODES:
-        return
-    if held.get("permission_mode") != mode:
+    if held.get("session") == sid and held.get("permission_mode") != mode:
         meta["attached"] = {**held, "permission_mode": mode}
         agents.write_meta(c, meta)
         agents.notify(c, agents.MAIN_ID)
+
+
+def main_mode(c: str) -> str | None:
+    """The permission mode main's hooks last reported to this server (note_mode), by Claude Code's name; None before
+    the first report."""
+    lv, got = _live.get(c), _modes.get(c)
+    return got[1] if lv is not None and got is not None and got[0] == lv.sid else None
 
 
 def _runs_elsewhere(c: str, cur: Live, pid: int | None) -> bool:
