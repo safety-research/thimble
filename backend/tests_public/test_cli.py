@@ -97,15 +97,22 @@ def test_up_prints_the_url_and_opens_a_sessions_folder(home, data, monkeypatch, 
     monkeypatch.setattr(cli, "_request", request)
     rc = cli.main(["up", "--cwd", str(data / "mini" / "agents"), "--session", "s9"])
     key = json.loads((home / "server.json").read_text())["ui_key"]
-    assert rc == 0 and capsys.readouterr().out.splitlines() == [f"thimble: http://127.0.0.1:5300/?ws=mini#k={key}"]
+    # the link carries the key to the analyst's cookie, so what the skill puts in the model's context holds none: the
+    # session's Stop hook shows the link it left
+    assert rc == 0 and capsys.readouterr().out.splitlines() == [cli.LINK_LINE]
+    assert (home / "links" / "s9").read_text() == f"http://127.0.0.1:5300/?ws=mini#k={key}"
     assert posted == [], "a folder inside the data dir is known already"
     folder = tmp_path / "calls"
     folder.mkdir()
     assert cli.main(["ensure", "--cwd", str(folder), "--session", "s9"]) == 0
-    assert capsys.readouterr().out.splitlines() == [f"thimble: http://127.0.0.1:5300/?ws=calls#k={key}"]
+    assert capsys.readouterr().out.splitlines() == [cli.LINK_LINE]
+    assert (home / "links" / "s9").read_text() == f"http://127.0.0.1:5300/?ws=calls#k={key}"
     assert posted == [("http://127.0.0.1:8300/api/corpora/register", {"path": str(folder), "exact": True})]
+    assert cli.main(["up", "--cwd", str(folder)]) == 0, "a bare up read by a program"
+    assert capsys.readouterr().out.splitlines() == ["thimble: http://127.0.0.1:5300/"] and len(posted) == 1
+    monkeypatch.setattr(cli, "to_terminal", lambda: True)
     assert cli.main(["up", "--cwd", str(folder)]) == 0, "a bare up from a shell"
-    assert capsys.readouterr().out.splitlines() == [f"thimble: http://127.0.0.1:5300/#k={key}"] and len(posted) == 1
+    assert capsys.readouterr().out.splitlines() == [f"thimble: http://127.0.0.1:5300/#k={key}"]
     assert cli.build_parser().parse_args(["up"]).cmd == "up" and cli.build_parser().parse_args(["ensure"]).cmd == "ensure"
 
 
@@ -196,9 +203,10 @@ def test_real_up_starts_a_detached_server_idempotently_and_stop_ends_it(home, da
         out = subprocess.run(cmd, cwd=BACKEND, env=env, capture_output=True, text=True, timeout=90)
         first = time.monotonic() - t0
         lines = out.stdout.splitlines()
-        # the URL alone: the workspace holds nothing from an earlier run, so there is nothing to resume
+        # the link's line alone: the workspace holds nothing from an earlier run, so there is nothing to resume
         st = json.loads((home / "server.json").read_text())
-        assert out.returncode == 0 and lines == [f"thimble: http://127.0.0.1:{port}/?ws=mini#k={st['ui_key']}"], out
+        assert out.returncode == 0 and lines == [cli.LINK_LINE], out
+        assert (home / "links" / "it-1").read_text() == f"http://127.0.0.1:{port}/?ws=mini#k={st['ui_key']}"
         pid = st["pid"]
         assert cli.pid_alive(pid) and st["port"] == port and st["env"]["data_dir"] == str(data)
         assert os.getsid(pid) == pid, "uvicorn is its own session leader"

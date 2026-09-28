@@ -56,8 +56,8 @@ export function describeDetail(d: unknown): string {
   }
 }
 
-/** Trade the key in the link thimble printed (`#k=`) for the cookie that lets this browser change permission modes
- * (backend hook_auth.claim), and take it out of the address. */
+/** Trade the key in the link thimble showed (`#k=`) for the cookie that lets this browser answer permission requests
+ * and change permission modes (backend hook_auth.claim), and take it out of the address. */
 export function claimKey(): void {
   const key = new URLSearchParams(window.location.hash.slice(1)).get('k')
   if (!key) return

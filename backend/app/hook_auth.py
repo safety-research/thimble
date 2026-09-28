@@ -11,9 +11,10 @@ nothing or believes nothing, so a process that holds the recorded port learns no
 it.
 
 A change of permission modes, and an answer to a permission request, must come from the analyst's browser (analyst).
-The link `thimble up` prints carries the `ui_key` of server.json after `#k=`; the page trades it for an HttpOnly,
-SameSite=Strict cookie (claim), which such a request must carry. A process that cannot read server.json, such as a
-notebook kernel in bubblewrap, can do neither.
+The dashboard link carries the `ui_key` of server.json after `#k=`; the page trades it for an HttpOnly, SameSite=Strict
+cookie (claim), which such a request must carry. Only the analyst's terminal shows that link (cli.py leave_link), never
+the model's context, so a process that cannot read server.json, such as a notebook kernel in bubblewrap that the model
+writes cells for, can do neither.
 """
 from __future__ import annotations
 
@@ -44,8 +45,8 @@ UI_COOKIE_AGE_S = 400 * 24 * 3600  # the longest a browser keeps a cookie
 # The routes analyst() guards all sit under this path. A cookie is not bound to a port, so the path is what keeps it from
 # the browser's requests to other services on 127.0.0.1, except requests to their own /api/ws/ paths.
 UI_COOKIE_PATH = "/api/ws/"
-ANALYST_ONLY = ("open thimble from the link `/thimble` or `thimble up` printed to answer permission requests or change"
-                " permission modes")
+ANALYST_ONLY = ("open thimble from the link shown under /thimble's reply, or printed by `thimble up` in a shell, to"
+                " answer permission requests or change permission modes")
 
 _cache: tuple[tuple[str, int, int], dict] | None = None
 

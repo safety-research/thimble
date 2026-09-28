@@ -298,6 +298,23 @@ def test_the_server_answers_a_hook_route_only_to_a_request_that_proves_the_token
         assert client.post("/api/channel/held", json=body, headers=_signed("rotated")[0]).status_code == 200
 
 
+def test_main_s_stop_hook_shows_the_link_thimble_up_left_once_and_only_as_it_ends(tmp_path):
+    """/thimble prints no link into the model's context, since the link carries the key to the analyst's cookie
+    (cli.LINK_LINE): main's Stop hook shows the link `server up` left, once, as a systemMessage, which Claude Code shows
+    the analyst and not the model."""
+    link = "http://127.0.0.1:8300/?ws=mini#k=the-ui-key"
+    (tmp_path / "thome" / "links").mkdir(parents=True)
+    (tmp_path / "thome" / "links" / SID).write_text(link)
+    stop = {"session_id": SID, "cwd": "/data/mini", "hook_event_name": "Stop", "permission_mode": "default"}
+    stand = _Stand([])
+    try:
+        assert _watch(tmp_path, stand.port, {**stop, "hook_event_name": "UserPromptSubmit"}, "--mode").stdout == ""
+        assert json.loads(_watch(tmp_path, stand.port, stop, "--mode").stdout) == {"systemMessage": f"thimble: {link}"}
+        assert _watch(tmp_path, stand.port, stop, "--mode").stdout == "", "once"
+    finally:
+        stand.close()
+
+
 def test_the_hooks_do_nothing_without_server_json_or_with_a_server_that_cannot_prove_the_token(tmp_path):
     """The hooks run in every Claude Code session with the plugin: with no server.json, or one without a token, they
     reach no port at all (not THIMBLE_PORT, not 8300); a process that answers on the recorded port without the

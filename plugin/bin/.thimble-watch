@@ -39,7 +39,9 @@ subagent, when nothing waits or when no server answers within HELD_WAIT_S.
 
 The mode hook tells the server (POST /api/channel/mode) the permission mode Claude Code reports for the session as each
 of its turns begins and ends, which is the mode the agents thimble starts follow by default. It sends nothing in a
-subagent.
+subagent. As a turn ends it also shows, once, as its systemMessage, the dashboard link /thimble left for the session
+(app/cli.py leave_link): the link carries the key that lets the browser answer permission requests and change
+permission modes, and a systemMessage reaches the analyst's terminal but not the model's context.
 
 The agents hook asks the server (POST /api/agents) for the lines main's terminal has not shown about thimble's
 background sessions, each one's start with the command that attaches it and its finish, and prints them as the hook's
@@ -336,6 +338,8 @@ def held(inp: dict) -> int:
 
 def mode(inp: dict) -> int:
     """The mode hook (module note)."""
+    if inp.get("hook_event_name") == "Stop" and not inp.get("agent_id"):
+        show_link(str(inp.get("session_id") or ""))
     if inp.get("agent_id") or not inp.get("permission_mode"):
         return 0
     body = {"cwd": folder(inp), "session": str(inp.get("session_id") or "") or None,
@@ -345,6 +349,21 @@ def mode(inp: dict) -> int:
     except (OSError, http.client.HTTPException):
         pass
     return 0
+
+
+def show_link(session: str) -> None:
+    """The link /thimble left for `session`, printed as the hook's systemMessage and then deleted (module note)."""
+    name = "".join(ch for ch in session if ch.isalnum() or ch in "-_")
+    if not name:
+        return
+    path = home() / "links" / name
+    try:
+        url = path.read_text("utf-8").strip()
+        path.unlink()
+    except OSError:
+        return
+    if url:
+        print(json.dumps({"systemMessage": f"thimble: {url}"}))
 
 
 def announcements(inp: dict) -> str:
