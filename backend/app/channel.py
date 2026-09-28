@@ -21,8 +21,9 @@ agent_moved).
 Main's terminal shows each event as one line (terminal_line): the analyst's words after SAID, with the thread or button
 they belong to, else a short line saying what happened. On the channel route Claude Code shows the start of the body
 itself. On the hook route it shows only the watcher's fixed summary, so the watcher's acknowledgment keeps the event's
-line (_lines) for the UserPromptSubmit hook, which Claude Code runs as the event's turn begins, to print (held_route).
-With every hook off (the Monitor route) nothing can print it.
+line (_lines) for the UserPromptSubmit hook, which Claude Code runs as the event's turn begins, to print (held_route);
+the line of something the analyst did that sends main no event, such as a follow-up to the orientation, waits there
+too (show). With every hook off (the Monitor route) nothing can print them.
 """
 from __future__ import annotations
 
@@ -344,6 +345,14 @@ def send(c: str, kind: str, text: str, fields: dict[str, Any], *, thread: str | 
     session.expect(c, event_id, thread=thread)
     note = {**notification(kind, event_id, text, fields), "terminal": line}
     return {"id": event_id, "kind": kind, "delivered": _publish(c, note)}
+
+
+def show(c: str, line: str) -> None:
+    """A line for main's terminal about something the analyst did in the browser that sends main no event (a follow-up
+    to the orientation), printed as main's next turn begins (held_route)."""
+    main = _main_sid(c)
+    if main and line:
+        _lines.setdefault((c, main), []).append(line)
 
 
 def hand(c: str, event_id: str, text: str, fields: dict[str, Any], *, thread: str) -> str:

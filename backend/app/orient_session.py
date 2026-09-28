@@ -777,15 +777,16 @@ class MessageBody(BaseModel):
 async def message_route(c: str, body: MessageBody) -> dict[str, Any]:
     """The orientation thread's composer: message() from the analyst. 400 for an empty message, 404 when no orientation
     has run, 410 when its session is gone, 409 when it cannot start."""
+    from . import channel, session  # noqa: PLC0415
+
     config.workspace_dir(c)
+    line = channel.terminal_line(channel.MAIN, f"orientation: {body.text}", {})
     try:
-        return await message(c, body.text, BROWSER)
+        out = await message(c, body.text, BROWSER)
     except Subagent as e:
         # terminal-first mode: only main can message its subagent, so main is asked to pass the message on
-        from . import channel, session  # noqa: PLC0415
-
         posted = channel.post(c, channel.MAIN, {"text": tools.hint("orient-relay", text=body.text.strip())}, mirror=False,
-                              line=channel.terminal_line(channel.MAIN, f"orientation: {body.text}", {}))
+                              line=line)
         if e.chat:
             session.relay(c, e.chat, body.text.strip(), BROWSER)
         return {"status": "relayed", "event": posted["id"]}
@@ -797,3 +798,5 @@ async def message_route(c: str, body: MessageBody) -> dict[str, Any]:
         raise HTTPException(410, f"{e}; start a new orientation to explore further") from e
     except RuntimeError as e:
         raise HTTPException(409, str(e)) from e
+    channel.show(c, line)
+    return out
