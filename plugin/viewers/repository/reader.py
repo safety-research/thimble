@@ -11,12 +11,13 @@
 #   events.jsonl         the forge's events, one per line: `id`; `type`, one of issue.opened, pr.opened, push, review,
 #                        comment, pr.merged, pr.closed and pr.reopened; `ts` (when); `actor` (who); `number` (the issue
 #                        or pull request; they share one numbering in a run); `title`; `labels` (the first is the part
-#                        of the library it is about); `fixes` (the issue a pull request fixes); `sha` and `message` (a
-#                        push's); `forced` and `before` (a force-push, and the head it replaced); `state` (a review's
-#                        verdict: approved, changes_requested or commented); `reason` (why a close ended it without a
-#                        merge); and `body`. r4's forge wrote schema 2, which renamed fields: `v` is 2, and `event`,
-#                        `time` (epoch milliseconds), `user`, `area`, `closes` and `text` stand for type, ts, actor,
-#                        labels, fixes, and body or message; its verdicts are in capitals
+#                        of the library it is about); `fixes` (the issue a pull request fixes); `sha`, `message` and
+#                        `diff` (a push's; the diff is unified, over the files it changed); `forced` and `before` (a
+#                        force-push, and the head it replaced); `state` (a review's verdict: approved,
+#                        changes_requested or commented); `reason` (why a close ended it without a merge); and `body`.
+#                        r4's forge wrote schema 2, which renamed fields: `v` is 2, and `event`, `time` (epoch
+#                        milliseconds), `user`, `area`, `closes`, `text` and `patch` stand for type, ts, actor, labels,
+#                        fixes, body or message, and diff; its verdicts are in capitals
 #   board.jsonl          the discussion: `id`, `thread_id`, `thread_title` (on a thread's first post), `author`,
 #                        `created_at` and `body`
 #   agents/<name>.jsonl  one agent's transcript: `type` (user or assistant), `session_id`, `timestamp` and `message`,
@@ -25,9 +26,9 @@
 #                        manifest's timezone: issues.csv (`number`, `title`, `author`, `created_at`, `state`, `labels`,
 #                        `body`); pulls.csv (the same, with `merged_at`, `merged_by`, `closed_at`, `closed_by`,
 #                        `state_reason` and `linked_issue`); commits.csv (`pull`, `sha`, `author`, `committed_at`,
-#                        `message`); comments.csv (`number`, `author`, `created_at`, `body`); and reviews.json, a JSON
-#                        array with one review per line (`id`, `pull`, `user` with its login, `state`, `submitted_at`,
-#                        `body`)
+#                        `message`, and `patch`, the diff, in a cell over several lines); comments.csv (`number`,
+#                        `author`, `created_at`, `body`); and reviews.json, a JSON array with one review per line
+#                        (`id`, `pull`, `user` with its login, `state`, `submitted_at`, `body`)
 #
 # What the reader cleans:
 #   - Times are ISO 8601 with or without an offset, epoch milliseconds, or local time. A time without an offset is in
@@ -152,7 +153,7 @@ def _event(r, tz):
     return [_rec(kind, _time(_first(r, "ts", "time"), tz), id=r.get("id"), author=_first(r, "actor", "user"),
                  number=_number(r.get("number")), title=r.get("title"),
                  area=labels[0] if isinstance(labels, list) and labels else r.get("area"),
-                 closes=_number(_first(r, "fixes", "closes")), sha=r.get("sha"),
+                 closes=_number(_first(r, "fixes", "closes")), sha=r.get("sha"), diff=_first(r, "diff", "patch"),
                  verdict=_verdict(r.get("state")) if kind == "review" else None, reason=r.get("reason"),
                  text=_first(r, "body", "text", "message"), forced=bool(r.get("forced")), before=r.get("before"))]
 
@@ -178,7 +179,7 @@ def _row(shape, c, tz):
         return out
     if shape == "commits":
         return [_rec("commit", t("committed_at"), author=c.get("author"), number=_number(c.get("pull")),
-                     sha=c.get("sha"), text=c.get("message"))]
+                     sha=c.get("sha"), text=c.get("message"), diff=c.get("patch"))]
     return [_rec("comment", t("created_at"), author=c.get("author"), number=n, text=c.get("body"))]
 
 
@@ -437,7 +438,7 @@ def _unit(key, run, r, h):
         u.update(number=int(key.rsplit("/", 1)[1]), title="", area="", state="open", closed_by=None, reason=None,
                  ended=None, comments=0, why=None)
     if tab == "pulls":
-        u.update(closes=None, merged_by=None, reviews=[], commits=[])
+        u.update(closes=None, merged_by=None, reviews=[], commits=[], plus=0, minus=0, paths=[])
     elif tab == "issues":
         u.update(origin="backlog", prs=[], fixed_by=None)
     elif tab == "discussions":
@@ -448,7 +449,8 @@ def _unit(key, run, r, h):
 
 
 def _add(u, kind, r, who, h, act, at):
-    """What one record adds to its unit's facts; `at` is [its ref, its place among its line's records]."""
+    """What one record adds to its unit's facts; `at` is [its ref, its place among its line's records]. A pull
+    request's commits add their diff's lines and files."""
     if kind in ("pr", "issue"):
         u.update(title=str(r.get("title") or ""), area=str(r.get("area") or ""), author=who, at=h)
         if kind == "pr":
@@ -457,6 +459,10 @@ def _add(u, kind, r, who, h, act, at):
             u["origin"] = "backlog" if h <= 0 else "found during the run"
     elif kind == "commit":
         u["commits"].append(h)
+        lines = str(r.get("diff") or "").splitlines()
+        u["plus"] += sum(ln.startswith("+") and not ln.startswith("+++") for ln in lines)
+        u["minus"] += sum(ln.startswith("-") and not ln.startswith("---") for ln in lines)
+        u["paths"] += [ln[6:] for ln in lines if ln.startswith("+++ b/") and ln[6:] not in u["paths"]]
     elif kind == "review":
         u["reviews"].append([who, act, h])
     elif kind == "comment":
@@ -588,6 +594,10 @@ class _Labels:
     def first(self, ref):
         return next((i for i in self.marks(ref) if i not in self._off), -1)
 
+    def of_unit(self, u):
+        """The classes that mark any record the unit gathers and are not hidden, in thimble's order."""
+        return sorted({i for ref in u["refs"] + u.get("more", []) for i in self.marks(ref) if i not in self._off})
+
     def hidden(self, ref):
         if not self.hide:
             return False
@@ -663,17 +673,18 @@ def _part(field, u, e, labels):
 
 def _item(tab, u, index, labels, field, on):
     """A unit as a row of the list, with its kept records as strip ticks: [ref, hours, action, part (_part), 1 when
-    `on(event)` holds, the time range and the record filters picking it, else 0], and for a closed one the closer's
-    words (`why`, read from its close record or from the closer's comment beside it)."""
+    `on(event)` holds, the time range and the record filters picking it, else 0], `marks` (the classes that mark any of
+    its records), and for a closed one the closer's words (`why`, read from its close record or from the closer's
+    comment beside it)."""
     ticks = [[e[0], e[1], e[2], _part(field, u, e, labels), int(on(e))] for e in u["events"] if labels.keep(e[0])]
-    base = {"key": u["key"], "run": u["run"], "at": u["at"], "ticks": ticks}
+    base = {"key": u["key"], "run": u["run"], "at": u["at"], "ticks": ticks, "marks": labels.of_unit(u)}
     if u.get("state") == "closed" and u["why"]:
         base["why"] = {"ref": u["why"][0], "text": str(_record(index, u["why"]).get("text") or "")}
     if tab == "pulls":
         return {**base, **{k: u[k] for k in ("number", "title", "author", "state", "area", "closes", "merged_by",
                                              "closed_by", "reason", "ended", "to_merge", "first_review", "approvals",
-                                             "changes", "comments", "flags", "latest")}, "commits": len(u["commits"]),
-                "reviews": len(u["reviews"])}
+                                             "changes", "comments", "flags", "latest", "plus", "minus")},
+                "commits": len(u["commits"]), "reviews": len(u["reviews"]), "files": len(u["paths"])}
     if tab == "issues":
         return {**base, **{k: u[k] for k in ("number", "title", "author", "state", "area", "origin", "prs",
                                              "fixed_by", "closed_by", "reason", "ended", "comments")}}
@@ -901,8 +912,8 @@ def _texts(index, events, part=None):
             continue
         r = got[e[4]]
         x = {"ref": e[0], "kind": r["kind"], "action": _action(r), "author": r.get("author") or "", "at": _iso(e[5]),
-             "hours": e[1], **{f: r[f] for f in ("number", "title", "text", "sha", "verdict", "reason", "closes",
-                                                 "thread", "forced", "before") if r.get(f) is not None}}
+             "hours": e[1], **{f: r[f] for f in ("number", "title", "text", "sha", "diff", "verdict", "reason",
+                                                 "closes", "thread", "forced", "before") if r.get(f) is not None}}
         if part:
             x["part"] = part(e)
         out.append(x)
@@ -938,6 +949,7 @@ def _detail(index, key, field="action", hide=()):
     labels = _Labels(hide)
     run = index["runs"][u["run"]]
     out = {k: v for k, v in u.items() if k not in ("refs", "events", "search", "more", "why")}
+    out["marks"] = labels.of_unit(u)
     out["setup"] = {"team": run["team"], "approvals": run["approvals"],
                     "hours": round((run["end"] - run["start"]) / 3600, 3)}
     first = u["refs"][0] if u["refs"] else None

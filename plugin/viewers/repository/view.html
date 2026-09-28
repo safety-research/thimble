@@ -2,61 +2,80 @@
 <html>
 <head>
 <style>
-  /* thimble's parts (.chip, .btn, .seg, .field, .table) and the theme's tokens come with the frame; this page lays
-     them out and draws the charts, strips and icons */
+  /* thimble's parts (.chip, .btn, .seg, .field, .table) and the theme's tokens come with the frame; this page lays them
+     out as a code forge lays out its pages, and draws the charts, strips, avatars, diffs and icons */
   html, body { margin: 0; height: 100%; }
-  body { display: flex; flex-direction: column; overflow: hidden; }
+  body { display: flex; flex-direction: column; overflow: hidden; background: var(--surface-card); }
   button { font: inherit; color: inherit; }
   .mono { font: 400 var(--text-mono-sm) / 1.4 var(--font-mono); font-variant-numeric: tabular-nums; }
   .dim { color: var(--text-tertiary); }
+  .grow { flex: 1 1 auto; min-width: 0; }
 
-  #bar { flex: none; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 16px 8px; }
-  #tabs .n { margin-left: 2px; font: 400 var(--text-mono-sm) / 1 var(--font-mono); color: var(--text-tertiary); }
+  /* the head: the run selector and the mode over the tabs, which are underlined as a forge's are */
+  #top { flex: none; padding: 12px 16px 0; border-bottom: 1px solid var(--border-subtle); }
+  .toprow { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .runbtn { gap: 6px; padding: 0 8px 0 10px; }
+  .runbtn .k { color: var(--text-tertiary); font-weight: 400; }
+  .runbtn b { font-weight: 600; }
+  .runbtn .ico { color: var(--text-tertiary); }
+  .runchips { display: flex; gap: 4px; flex-wrap: wrap; }
+  .nav { display: flex; gap: 2px; margin: 6px -8px 0; overflow-x: auto; scrollbar-width: none; }
+  .nav button { position: relative; flex: none; height: 44px; padding: 0; border: 0; background: none; cursor: pointer; }
+  .nav button > span { display: inline-flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: var(--radius-ui); color: var(--text-secondary); font: 400 var(--text-sm) / 1.2 var(--font-body); white-space: nowrap; }
+  .nav button:hover > span { background: var(--surface-hover); color: var(--text-primary); }
+  .nav button.on > span { color: var(--text-primary); font-weight: 600; }
+  .nav button.on::after { content: ''; position: absolute; left: 8px; right: 8px; bottom: -1px; height: 2px; border-radius: 2px; background: var(--accent); }
+  .nav .ico { color: var(--text-tertiary); }
+  .count { display: inline-block; min-width: 18px; padding: 1px 6px; border-radius: 999px; background: rgba(var(--ink-rgb), .08); color: var(--text-primary); font: 500 var(--text-xs) / 1.4 var(--font-body); font-weight: 500; text-align: center; font-variant-numeric: tabular-nums; }
+
   #body { flex: 1; min-height: 0; display: flex; }
-  #main { flex: 1; min-width: 0; overflow: auto; }
-  #detail { display: none; flex: 0 0 min(50%, 760px); min-width: 0; overflow: auto; border-left: 1px solid var(--border-hairline); }
+  #main { flex: 1; min-width: 0; overflow: auto; padding: 16px 16px 28px; }
+  #detail { display: none; flex: 0 0 min(52%, 820px); min-width: 0; overflow: auto; border-left: 1px solid var(--border-subtle); }
   .open #detail { display: block; }
   /* below this width the detail takes the pane, and its back button returns to the list */
   .narrow.open #main { display: none; }
   .narrow.open #detail { flex: 1; border-left: 0; }
 
-  /* the overview: the runs, which are also the run selector, beside the activity */
-  #overview { display: flex; gap: 20px; align-items: flex-start; padding: 2px 16px 12px; }
-  #runs { flex: 0 1 auto; min-width: 0; }
-  #activity { flex: 1 1 320px; min-width: 240px; }
-  .compare #overview, .w-s #overview { display: block; }
-  .w-s #runs .runs, .compare #runs .runs { width: 100%; }
-  .w-s #activity { margin-top: 10px; }
+  /* a box, as the forge frames its lists: a hairline border, rounded, with a tinted head */
+  .box { border: 1px solid var(--border-subtle); border-radius: var(--radius-card); background: var(--surface-card); min-width: 0; }
+  .box-head { box-sizing: border-box; display: flex; align-items: center; flex-wrap: wrap; gap: 6px 14px; min-height: 40px; padding: 5px 14px; background: var(--bg-sub); border-bottom: 1px solid var(--border-subtle); border-radius: var(--radius-card) var(--radius-card) 0 0; }
+  .box-head h3 { margin: 0; font: 600 var(--text-sm) / 1.3 var(--font-body); }
+  .box > :last-child { border-bottom-left-radius: var(--radius-card); border-bottom-right-radius: var(--radius-card); }
+
+  /* the overview: the runs, which also choose the runs, beside the activity */
+  #overview { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(260px, 1fr); gap: 16px; margin-bottom: 16px; }
+  .compare #overview { grid-template-columns: minmax(0, 1fr); }
   .compare #activity { display: none; }
-  .runs td, .runs th { padding: 4px 10px 4px 8px; white-space: nowrap; }
+  .runs { margin: 0; }
+  .runs td, .runs th { padding: 5px 10px 5px 12px; white-space: nowrap; }
   .runs th { font-size: 10px; }
   .runs tbody tr { cursor: pointer; }
+  .runs tbody tr:last-child td { border-bottom: 0; }
   .runs tr.off td { color: var(--text-tertiary); }
   .runs tr.off .bars, .runs tr.off svg { opacity: .35; }
-  .runs td.setup { font: 400 var(--text-xs) / 1.3 var(--font-body); }
-  .runs td.num { text-align: right; }
-  .runs th.num { text-align: right; }
+  .runs td.setup { font: 400 var(--text-xs) / 1.3 var(--font-body); color: var(--text-secondary); }
+  .runs td.num, .runs th.num { text-align: right; }
   .runs td.act { padding-top: 2px; padding-bottom: 2px; width: 100%; }
   .runs td.act svg { display: block; }
   .runs tfoot td { border-bottom: 0; padding-top: 0; }
   .axisrow { position: relative; height: 14px; font: 400 10.5px / 14px var(--font-mono); color: var(--text-tertiary); }
   .axisrow span { position: absolute; top: 0; }
   .axisrow span:not(:first-child) { transform: translateX(-50%); }
-  .bars { display: flex; height: 6px; margin: 3px 0 3px; border-radius: 1px; overflow: hidden; background: rgba(var(--ink-rgb), 0.05); }
+  .bars { display: flex; height: 6px; margin: 3px 0; border-radius: 3px; overflow: hidden; background: rgba(var(--ink-rgb), 0.05); }
   .bars span { display: block; height: 100%; }
   .words { font: 400 var(--text-mono-sm) / 1.2 var(--font-mono); }
   .words b { font-weight: 500; }
   .spread { display: flex; align-items: flex-end; gap: 1px; height: 18px; }
   .spread span { width: 5px; background: var(--viz-ink-3); }
-  /* the columns a narrow pane leaves out; a narrow pane stacks the runs over the activity, so they have the width */
-  .w-s .wide2, .w-m .wide2, .compare .w-s .wide1 { display: none; }
+  /* the columns a narrow pane leaves out */
+  .w-s .wide1, .w-s .wide2, .w-m .wide2 { display: none; }
+  #activity .body { padding: 8px 14px 10px; }
 
-  .legend { display: flex; flex-wrap: wrap; align-items: center; gap: 2px; margin: 0 0 6px; font: 400 var(--text-xs) / 1 var(--font-body); color: var(--text-secondary); }
+  .legend { display: flex; flex-wrap: wrap; align-items: center; gap: 2px; margin: 0 0 8px; font: 400 var(--text-xs) / 1 var(--font-body); color: var(--text-secondary); }
   .legend .per { margin-left: 6px; color: var(--text-tertiary); white-space: nowrap; }
   .legend .btn { margin-left: 4px; }
   .sw { display: inline-block; width: 8px; height: 8px; border-radius: 2px; flex: none; }
-  .ico.s12 { width: 12px; height: 12px; }
-  .cbtn { gap: 7px; margin-right: 6px; padding: 0 8px 0 10px; }
+  .cbtn { gap: 7px; padding: 0 8px 0 10px; }
   .cbtn .k { color: var(--text-tertiary); font-weight: 400; }
   .cbtn .ico { color: var(--text-tertiary); }
   .cbtn .sws { display: inline-flex; gap: 2px; }
@@ -70,104 +89,143 @@
   .lg.off .sw { background: transparent !important; box-shadow: inset 0 0 0 1.3px var(--text-tertiary); }
   .swb { display: inline-grid; place-items: center; width: 16px; height: 16px; margin-right: -3px; border-radius: 3px; flex: none; cursor: pointer; }
   .swb:hover { background: var(--track-bg); }
-  .menu { position: fixed; z-index: 50; min-width: 250px; max-width: 320px; padding: 4px; border-radius: var(--radius-card); background: var(--raised-bg); box-shadow: var(--raised-ring), 0 10px 28px rgba(var(--ink-rgb), .14); font-size: var(--text-ui-sm); }
+  .menu { position: fixed; z-index: 50; min-width: 250px; max-width: 340px; padding: 4px; border-radius: var(--radius-card); background: var(--raised-bg); box-shadow: var(--raised-ring), 0 10px 28px rgba(var(--ink-rgb), .14); font-size: var(--text-ui-sm); }
   .mh { padding: 8px 8px 4px; color: var(--text-tertiary); font: 400 10.5px / 1.2 var(--font-body); letter-spacing: .08em; text-transform: uppercase; }
-  .mi { display: flex; align-items: center; gap: 8px; width: 100%; height: 28px; padding: 0 8px; border: 0; border-radius: var(--radius-chip); background: none; color: var(--text-primary); font: 400 var(--text-ui-sm) / 1 var(--font-body); text-align: left; cursor: pointer; }
+  .mi { box-sizing: border-box; display: flex; align-items: center; gap: 8px; width: 100%; min-height: 28px; padding: 0 8px; border: 0; border-radius: var(--radius-chip); background: none; color: var(--text-primary); font: 400 var(--text-ui-sm) / 1 var(--font-body); text-align: left; cursor: pointer; }
   .mi:hover { background: var(--surface-hover); }
   .mi.sub { padding-left: 30px; color: var(--text-secondary); cursor: default; }
   .mi .ck { width: 14px; display: inline-grid; place-items: center; flex: none; }
   .mi .nm { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .mi .n { margin-left: auto; display: inline-flex; gap: 1px; color: var(--text-tertiary); font-variant-numeric: tabular-nums; font-size: var(--text-xs); flex: none; }
   .mi .swb { width: 18px; height: 18px; margin: 0 -2px; }
-  .box { display: inline-block; flex: none; width: 12px; height: 12px; border-radius: 3px; border: 1.5px solid var(--mark); background: transparent; }
-  .box.on { background: var(--mark); }
+  .mi.run { min-height: 40px; }
+  .mi.run .nm b { display: block; font-weight: 600; margin-bottom: 2px; }
+  .mi.run .nm span { color: var(--text-tertiary); font-size: var(--text-xs); }
+  .tick { width: 14px; height: 14px; border-radius: 4px; border: 1px solid var(--border-strong); display: inline-grid; place-items: center; background: var(--surface-card); flex: none; cursor: pointer; }
+  .tick:hover { border-color: var(--text-secondary); }
+  .tick.on { background: var(--surface-inverse); border-color: var(--surface-inverse); color: var(--text-on-inverse); }
+  .tick .ico { width: 10px; height: 10px; stroke-width: 2; }
+  .lmark { display: inline-block; flex: none; width: 12px; height: 12px; border-radius: 3px; border: 1.5px solid var(--mark); background: transparent; }
+  .lmark.on { background: var(--mark); }
   .msep { height: 1px; margin: 4px 0; background: var(--border-hairline); }
   .pal { position: fixed; z-index: 60; display: grid; grid-template-columns: repeat(7, 20px); gap: 6px; padding: 10px; border-radius: var(--radius-card); background: var(--raised-bg); box-shadow: var(--raised-ring), 0 10px 28px rgba(var(--ink-rgb), .14); }
   .pal button { width: 20px; height: 20px; padding: 0; border: 0; border-radius: 4px; cursor: pointer; }
   .pal button:hover { transform: scale(1.12); }
   .pal button.cur { box-shadow: 0 0 0 2px var(--surface-card), 0 0 0 3.5px var(--text-primary); }
-  .chip .sw { margin-right: 2px; }
   svg.chart { display: block; overflow: visible; cursor: crosshair; user-select: none; }
   svg.chart text { font: 400 10.5px var(--font-mono); fill: var(--text-tertiary); }
   svg.chart .base { stroke: var(--border-hairline); }
   svg.chart .brush { fill: rgba(var(--ink-rgb), 0.07); stroke: var(--text-tertiary); stroke-dasharray: 2 2; }
 
-  #filters { position: sticky; top: 0; z-index: 2; display: flex; flex-direction: column; gap: 6px; padding: 8px 16px; background: var(--surface-card); border-top: 1px solid var(--border-hairline); border-bottom: 1px solid var(--border-hairline); }
-  #filters .frow { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; }
-  #filters .field[type=search] { flex: 1 1 160px; max-width: 320px; }
+  /* the filters over the list */
+  #filters { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 12px; }
+  #filters .search { position: relative; flex: 1 1 220px; max-width: 420px; }
+  #filters .search .ico { position: absolute; left: 9px; top: 50%; transform: translateY(-50%); color: var(--text-tertiary); pointer-events: none; }
+  #filters .search .field { width: 100%; padding-left: 30px; box-sizing: border-box; }
   /* a select as wide as its chosen option, not its longest one */
   #filters select.field { flex: 0 1 auto; min-width: 0; max-width: 220px; field-sizing: content; }
   #filters select.set { border-color: var(--text-secondary); }
-  #filters .total { margin-left: auto; font: 400 var(--text-mono-sm) / 1 var(--font-mono); color: var(--text-tertiary); white-space: nowrap; }
-  .seg .n { font: 400 var(--text-mono-sm) / 1 var(--font-mono); color: var(--text-tertiary); }
+  .states { display: flex; align-items: center; gap: 4px 14px; flex-wrap: wrap; }
+  .states button { display: inline-flex; align-items: center; gap: 6px; padding: 2px 0; border: 0; background: none; color: var(--text-secondary); font: 400 var(--text-sm) / 1.3 var(--font-body); cursor: pointer; }
+  .states button:hover { color: var(--text-primary); }
+  .states button.on { color: var(--text-primary); font-weight: 600; }
+  .states button .ico { width: 16px; height: 16px; }
+  .box-head .field { height: var(--control-sm); }
+  .box-head select.field { field-sizing: content; }
+  .box-head .total { font: 400 var(--text-mono-sm) / 1 var(--font-mono); color: var(--text-tertiary); white-space: nowrap; }
 
-  /* rows of pull requests, issues and discussions, as a forge lists them */
-  .row { display: grid; grid-template-columns: 18px minmax(0, 1fr) auto auto auto; column-gap: 12px; align-items: start; padding: 8px 16px 8px 12px; border-bottom: 1px solid var(--border-hairline); cursor: pointer; }
-  .row:hover { background: rgba(var(--ink-rgb), 0.03); }
+  /* rows of pull requests, issues and discussions, as the forge lists them */
+  .row { display: grid; grid-template-columns: 16px minmax(0, 1fr) auto auto auto; column-gap: 14px; align-items: start; padding: 10px 16px; border-top: 1px solid var(--border-hairline); cursor: pointer; }
+  .box-head + .row, .box-head + div > .row:first-child { border-top: 0; }
+  .row:hover { background: rgba(var(--ink-rgb), 0.025); }
   .row.active { background: var(--surface-selected); }
-  .row .ico { margin-top: 2px; }
-  .row .t { display: flex; align-items: baseline; gap: 6px; min-width: 0; }
-  .row .title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
-  .row .num { color: var(--text-tertiary); font: 400 var(--text-mono-sm) / 1 var(--font-mono); white-space: nowrap; }
-  .row .meta { margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--text-xs); color: var(--text-secondary); }
-  .row .why { margin-top: 3px; padding-left: 8px; border-left: 2px solid var(--border-subtle); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--text-xs); color: var(--text-secondary); }
-  .row .t .chip { flex: none; }
-  .row .flags { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
-  .row .revs { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 2px 8px; max-width: 220px; margin-top: 2px; font-size: var(--text-xs); color: var(--text-secondary); }
-  .row .revs span { display: inline-flex; align-items: center; gap: 3px; white-space: nowrap; }
-  .row .revs .ico { width: 13px; height: 13px; }
-  .w-s .row .revs { display: none; }
-  .row svg.strip { margin-top: 3px; }
-  .counts { display: flex; gap: 10px; margin-top: 2px; font: 400 var(--text-mono-sm) / 1.4 var(--font-mono); color: var(--text-tertiary); white-space: nowrap; }
-  .counts span { display: inline-flex; align-items: center; gap: 3px; min-width: 28px; }
-  .counts .ico { width: 13px; height: 13px; }
-  .lnk { padding: 0; border: 0; background: none; color: inherit; cursor: pointer; }
-  .lnk:hover { color: var(--text-primary); text-decoration: underline; }
+  .row > .ico { margin-top: 3px; }
+  .row .t { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 6px; min-width: 0; }
+  .row .title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 600 calc(var(--text-lg) + 1px) / 1.35 var(--font-body); color: var(--text-primary); }
+  .row:hover .title { color: var(--text-accent); }
+  .row .meta { display: flex; align-items: center; flex-wrap: wrap; gap: 2px 4px; margin-top: 3px; font-size: var(--text-xs); color: var(--text-tertiary); }
+  .row .meta .sep::before { content: '·'; margin: 0 6px 0 2px; }
+  .row .why { margin-top: 5px; padding-left: 8px; border-left: 2px solid var(--border-subtle); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--text-xs); color: var(--text-secondary); }
+  .row .flags { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
+  .row .side { display: flex; align-items: center; gap: 10px; margin-top: 2px; }
+  .row svg.strip { margin-top: 5px; }
+  .counts { display: flex; gap: 10px; margin-top: 3px; font: 400 var(--text-mono-sm) / 1.4 var(--font-mono); color: var(--text-tertiary); white-space: nowrap; }
+  .counts span { display: inline-flex; align-items: center; gap: 4px; min-width: 26px; }
+  .counts .ico { width: 14px; height: 14px; }
+  .lnk { padding: 0; border: 0; background: none; color: inherit; cursor: pointer; font: inherit; }
+  .lnk:hover { color: var(--text-accent); text-decoration: underline; }
+  .lnk.strong { color: var(--text-secondary); font-weight: 500; }
   .more { margin: 12px 16px; }
-  .empty { padding: 24px 16px; color: var(--text-tertiary); }
+  .empty { padding: 32px 16px; text-align: center; color: var(--text-tertiary); }
 
-  /* icons, drawn in a state's or an action's colour while the records are coloured by activity or state, else in ink */
+  /* labels, as the forge shows them after a title: thimble's chips, a label value's tinted in its colour */
+  .row .t .chip, .facts .chip { height: 20px; }
+  .lp { border-color: color-mix(in oklab, var(--c) 55%, transparent); background: color-mix(in oklab, var(--c) 14%, var(--surface-card)); color: var(--text-primary); font-weight: 500; }
+  .lp::before { content: ''; width: 8px; height: 8px; border-radius: 50%; background: var(--c); }
+
+  /* avatars: a person's initial on a neutral disc, so the labels keep the colours */
+  .av { position: relative; display: inline-grid; place-items: center; flex: none; width: 20px; height: 20px; border-radius: 50%; background: rgba(var(--ink-rgb), var(--a, .12)); box-shadow: 0 0 0 1.5px var(--surface-card); color: var(--text-primary); font: 600 10px / 1 var(--font-body); text-transform: uppercase; }
+  .av.s16 { width: 16px; height: 16px; font-size: 8.5px; }
+  .av.s32 { width: 32px; height: 32px; font-size: 13px; }
+  .av .v { position: absolute; right: -4px; bottom: -3px; display: grid; place-items: center; width: 12px; height: 12px; border-radius: 50%; background: var(--surface-card); }
+  .av .v .ico { width: 10px; height: 10px; stroke-width: 2; }
+  .avs { display: inline-flex; align-items: center; padding-left: 5px; }
+  .avs .av { margin-left: -5px; }
+  .who { display: inline-flex; align-items: center; gap: 6px; }
+
+  /* the state of a pull request or an issue: a chip filled with the state's colour, with its icon */
+  .chip.state { height: 28px; padding: 0 12px 0 10px; border-color: var(--c); background: var(--c); color: var(--surface-card); font-size: var(--text-sm); font-weight: 500; }
+  .chip.state .ico { width: 15px; height: 15px; }
+
+  /* icons, in a state's or an action's colour while the records are coloured by activity or state, else in ink */
   .ico { width: 16px; height: 16px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+  .ico.s12 { width: 12px; height: 12px; }
   .s-open { color: var(--status-positive); }
-  .s-merged, .s-fixed { color: var(--viz-5); }
+  .s-merged, .s-fixed { color: var(--viz-6); }
   .s-closed { color: var(--status-negative); }
   .s-thread { color: var(--text-secondary); }
   .inked .s-open, .inked .s-merged, .inked .s-fixed, .inked .s-closed, .inked .matrix td .cr { color: var(--text-secondary); }
 
+  /* a diff's size as its added and removed lines, and five blocks in those shares */
+  .dstat { display: inline-flex; align-items: center; gap: 6px; font: 500 var(--text-mono-sm) / 1 var(--font-mono); white-space: nowrap; }
+  .dstat .p { color: var(--status-positive); }
+  .dstat .m { color: var(--status-negative); }
+  .dstat .blk { display: inline-flex; gap: 1px; }
+  .dstat .blk i { width: 7px; height: 7px; border-radius: 1px; background: rgba(var(--ink-rgb), .14); }
+  .dstat .blk i.p { background: var(--status-positive); }
+  .dstat .blk i.m { background: var(--status-negative); }
+
   /* the compare grid: one row per issue, one column per chosen run */
   .grid { width: 100%; border-collapse: collapse; }
-  .grid th, .grid td { padding: 6px 10px; border-bottom: 1px solid var(--border-hairline); text-align: left; vertical-align: top; }
-  .grid thead th { position: sticky; top: var(--filters-h, 0); z-index: 1; background: var(--surface-card); font: 400 10.5px / 1.3 var(--font-body); letter-spacing: .08em; text-transform: uppercase; color: var(--text-tertiary); }
-  .grid thead th .sub { display: block; margin-top: 2px; letter-spacing: 0; text-transform: none; font: 400 var(--text-xs) / 1.2 var(--font-body); }
-  .grid thead th .chip, .cols h3 .chip { letter-spacing: 0; text-transform: none; }
+  .grid th, .grid td { padding: 8px 12px; border-top: 1px solid var(--border-hairline); text-align: left; vertical-align: top; }
+  .grid thead th { position: sticky; top: -16px; z-index: 1; background: var(--surface-card); font: 600 var(--text-xs) / 1.3 var(--font-body); color: var(--text-primary); }
+  .grid thead th .sub { display: block; margin-top: 2px; font: 400 var(--text-xs) / 1.2 var(--font-body); color: var(--text-tertiary); }
   .grid td.issue { width: 34%; max-width: 0; }
-  .grid td.issue .t { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .grid td.issue .n { color: var(--text-tertiary); font: 400 var(--text-mono-sm) / 1 var(--font-mono); margin-right: 6px; }
+  .grid td.issue .t { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
+  .grid td.issue .n { color: var(--text-tertiary); font: 400 var(--text-mono-sm) / 1 var(--font-mono); margin-right: 6px; font-weight: 400; }
   .grid .cell { display: flex; flex-wrap: wrap; gap: 4px; }
   .grid .none { color: var(--text-tertiary); }
-  .chip .ico { width: 13px; height: 13px; }
-  .cols { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: 0; }
-  .cols > div { min-width: 0; border-right: 1px solid var(--border-hairline); }
-  .cols > div:last-child { border-right: 0; }
-  .cols h3 { margin: 0; padding: 8px 12px 6px; font: 400 10.5px / 1.3 var(--font-body); letter-spacing: .08em; text-transform: uppercase; color: var(--text-tertiary); border-bottom: 1px solid var(--border-hairline); }
-  .cols h3 .sub { display: block; letter-spacing: 0; text-transform: none; font-size: var(--text-xs); }
+  .gchip { padding: 0 8px 0 6px; }
+  .gchip .ico { width: 13px; height: 13px; }
+  .cols { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: 12px; }
+  .cols .box-head { gap: 8px; }
   .cols .list-row { margin: 2px 4px; align-items: baseline; }
   .cols .list-row .name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .agents.mini { table-layout: fixed; }
-  .agents.mini th, .agents.mini td { padding: 4px 6px; overflow: hidden; text-overflow: ellipsis; }
-  .agents.mini th:first-child, .agents.mini td:first-child { width: 30%; padding-left: 12px; }
-  .agents.mini thead th { letter-spacing: 0; text-transform: none; font-size: 11px; }
-  .agents.mini td.who { font: 500 var(--text-xs) / 1.3 var(--font-body); }
+  .agents.mini { table-layout: fixed; margin: 0; }
+  .agents.mini th, .agents.mini td { padding: 5px 6px; overflow: hidden; text-overflow: ellipsis; }
+  .agents.mini th:first-child, .agents.mini td:first-child { width: 36%; padding-left: 12px; }
 
   /* agents */
+  .agents { margin: 0; }
   .agents td { vertical-align: middle; }
+  .agents tbody tr:last-child td { border-bottom: 0; }
   .w-s .agents .opt { display: none; }
   .agents td.n, .agents th.n { text-align: right; }
   .agents th button { padding: 0; border: 0; background: none; font: inherit; letter-spacing: inherit; text-transform: inherit; color: inherit; cursor: pointer; }
   .agents th button.on { color: var(--text-primary); }
   .agents tbody tr { cursor: pointer; }
-  .agents .who { font: 500 var(--text-sm) / 1.3 var(--font-body); }
-  .matrices { display: flex; flex-wrap: wrap; gap: 28px; padding: 14px 16px 24px; }
+  .agents .name { font: 600 var(--text-sm) / 1.3 var(--font-body); }
+  .matrices { display: flex; flex-wrap: wrap; gap: 28px; padding: 14px 16px 20px; }
   .matrix { border-collapse: collapse; }
   .matrix caption { caption-side: top; text-align: left; padding-bottom: 8px; font-size: var(--text-xs); color: var(--text-secondary); }
   .matrix th { font: 400 var(--text-mono-sm) / 1 var(--font-mono); color: var(--text-tertiary); padding: 3px 6px; }
@@ -179,53 +237,91 @@
   .matrix td .cr { display: block; margin-top: 1px; font-size: 9.5px; color: var(--viz-2); }
   .matrix .axis { vertical-align: bottom; text-align: right; font: 400 10px / 1.5 var(--font-body); letter-spacing: .06em; text-transform: uppercase; color: var(--text-tertiary); }
 
-  /* details */
+  /* a unit's page: its title and state, its own tabs, then its conversation, commits or files beside its facts */
   .dnav { display: flex; align-items: center; justify-content: space-between; padding: 8px 12px 0 8px; }
-  .dhead { padding: 6px 20px 12px; border-bottom: 1px solid var(--border-hairline); }
-  .dhead h1 { margin: 0; font: 500 var(--text-lg) / 1.3 var(--font-body); }
-  .dhead h1 .num { color: var(--text-tertiary); font-weight: 400; }
-  .dhead .sub { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; margin-top: 6px; font-size: var(--text-xs); color: var(--text-secondary); }
-  .dbody { display: grid; grid-template-columns: minmax(0, 1fr) 210px; gap: 20px; padding: 14px 20px 40px; }
+  .dhead { padding: 4px 20px 0; border-bottom: 1px solid var(--border-subtle); }
+  .dhead h1 { margin: 0; font: 400 calc(var(--text-lg) + 8px) / 1.25 var(--font-body); overflow-wrap: anywhere; }
+  .dhead h1 .num { color: var(--text-tertiary); font-weight: 300; }
+  .dhead .sub { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; margin-top: 10px; font-size: var(--text-sm); color: var(--text-secondary); }
+  .dhead .sub b { color: var(--text-primary); font-weight: 600; }
+  .dhead .nav { margin: 8px -8px 0; }
+  .dbody { display: grid; grid-template-columns: minmax(0, 1fr) 220px; gap: 24px; padding: 16px 20px 40px; }
   .dnarrow .dbody { grid-template-columns: minmax(0, 1fr); }
   .dnarrow .facts { order: -1; }
+
+  /* the conversation: a line down the left, comments as boxes by their author's avatar, events as badges on the line */
   .timeline { position: relative; }
-  .ev { position: relative; display: grid; grid-template-columns: 22px minmax(0, 1fr); column-gap: 8px; padding: 6px 8px 8px 4px; }
-  .ev::before { content: ''; position: absolute; left: 14px; top: 26px; bottom: -6px; border-left: 1px solid var(--border-hairline); }
-  .ev:last-child::before { display: none; }
-  .ev.focus { background: var(--surface-selected); }
-  .ev .dot { display: flex; align-items: center; justify-content: center; width: 22px; height: 22px; border-radius: 50%; background: var(--bg-sub, var(--surface-card)); box-shadow: 0 0 0 1px var(--border-hairline); }
-  .ev .dot .ico { width: 13px; height: 13px; }
-  .ev .head { padding-top: 2px; font-size: var(--text-xs); color: var(--text-secondary); }
-  .ev .head b { color: var(--text-primary); font-weight: 500; }
-  .ev .when { margin-left: 6px; font: 400 var(--text-mono-sm) / 1 var(--font-mono); color: var(--text-tertiary); }
-  .ev .text { margin-top: 4px; white-space: pre-wrap; overflow-wrap: anywhere; }
-  .ev.boxed .text { padding: 8px 10px; border: 1px solid var(--border-subtle); border-radius: var(--radius-ui); background: var(--surface-card); }
-  .ev .sha { font: 400 var(--text-mono-sm) / 1 var(--font-mono); color: var(--text-tertiary); }
-  .facts h4 { margin: 0 0 6px; font: 400 10px / 1.2 var(--font-body); letter-spacing: .08em; text-transform: uppercase; color: var(--text-tertiary); }
-  .facts section { padding-bottom: 12px; margin-bottom: 12px; border-bottom: 1px solid var(--border-hairline); font-size: var(--text-xs); }
+  .timeline::before { content: ''; position: absolute; left: 15px; top: 8px; bottom: 8px; border-left: 2px solid var(--border-hairline); }
+  .it { position: relative; display: grid; grid-template-columns: 32px minmax(0, 1fr); column-gap: 12px; align-items: start; padding: 8px 0; }
+  .it.focus { background: var(--surface-selected); border-radius: var(--radius-ui); }
+  .it > .av, .it > .badge { justify-self: center; }
+  .badge { display: grid; place-items: center; width: 28px; height: 28px; border-radius: 50%; background: var(--bg-sub); box-shadow: 0 0 0 3px var(--surface-card); color: var(--text-secondary); }
+  .badge.fill { background: var(--c); color: var(--surface-card); }
+  .badge .ico { width: 15px; height: 15px; }
+  .it .line { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 6px; min-height: 28px; font-size: var(--text-sm); color: var(--text-secondary); }
+  .it .line b { color: var(--text-primary); font-weight: 600; }
+  .it .when { font: 400 var(--text-mono-sm) / 1 var(--font-mono); color: var(--text-tertiary); }
+  .cbox { border: 1px solid var(--border-subtle); border-radius: var(--radius-card); background: var(--surface-card); overflow: hidden; }
+  .cbox .ch { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 6px; padding: 7px 12px; background: var(--bg-sub); border-bottom: 1px solid var(--border-subtle); font-size: var(--text-sm); color: var(--text-secondary); }
+  .cbox .ch b { color: var(--text-primary); font-weight: 600; }
+  .cbox .cb { padding: 10px 12px; white-space: pre-wrap; overflow-wrap: anywhere; font-size: var(--text-sm); line-height: 1.55; }
+  .it .commit { display: flex; align-items: center; gap: 8px; min-width: 0; margin-top: 2px; font-size: var(--text-sm); }
+  .it .commit .msg { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-primary); }
+  .sha { display: inline-flex; align-items: center; height: 20px; padding: 0 6px; border-radius: var(--radius-chip); background: rgba(var(--ink-rgb), .06); font: 400 var(--text-mono-sm) / 1 var(--font-mono); color: var(--text-secondary); }
+  .note { margin: 0 0 14px; padding: 10px 12px; border: 1px solid var(--border-subtle); border-radius: var(--radius-card); background: var(--bg-sub); color: var(--text-secondary); }
+  .dstrip { margin: 4px 0 14px; }
+
+  /* commits and files changed */
+  .clist .crow { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 12px; align-items: center; padding: 9px 14px; border-top: 1px solid var(--border-hairline); }
+  .clist .crow:first-of-type { border-top: 0; }
+  .clist .crow .msg { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .clist .crow .by { grid-column: 1; display: flex; align-items: center; gap: 6px; font-size: var(--text-xs); color: var(--text-tertiary); }
+  .clist .crow .r { grid-column: 2; grid-row: 1 / 3; display: flex; align-items: center; gap: 10px; }
+  .file { margin-bottom: 16px; }
+  .file .box-head { min-height: 38px; gap: 10px; }
+  .file .path { font: 500 var(--text-mono-sm) / 1.3 var(--font-mono); color: var(--text-primary); overflow-wrap: anywhere; }
+  .diff { width: 100%; border-collapse: collapse; font: 400 var(--text-mono-sm) / 20px var(--font-mono); table-layout: fixed; }
+  .diff td { padding: 0 8px; vertical-align: top; }
+  .diff col.ln { width: 44px; }
+  .diff td.ln { text-align: right; color: var(--text-tertiary); user-select: none; }
+  .diff td.code { white-space: pre-wrap; overflow-wrap: anywhere; padding-left: 22px; text-indent: -14px; color: var(--text-primary); }
+  .diff tr.add td { background: color-mix(in oklab, var(--status-positive) 12%, var(--surface-card)); }
+  .diff tr.add td.ln { background: color-mix(in oklab, var(--status-positive) 20%, var(--surface-card)); }
+  .diff tr.del td { background: color-mix(in oklab, var(--status-negative) 11%, var(--surface-card)); }
+  .diff tr.del td.ln { background: color-mix(in oklab, var(--status-negative) 18%, var(--surface-card)); }
+  .diff tr.hunk td { background: color-mix(in oklab, var(--accent) 7%, var(--surface-card)); color: var(--text-tertiary); }
+  .diff tr:last-child td { padding-bottom: 2px; }
+
+  /* the facts beside a unit's page */
+  .facts h4 { margin: 0 0 8px; font: 600 var(--text-xs) / 1.2 var(--font-body); color: var(--text-secondary); }
+  .facts section { padding-bottom: 14px; margin-bottom: 14px; border-bottom: 1px solid var(--border-hairline); font-size: var(--text-xs); }
   .facts section:last-child { border-bottom: 0; }
-  .facts .line { display: flex; align-items: center; gap: 6px; min-height: 22px; }
-  .facts .line .grow { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .facts .kv { display: grid; grid-template-columns: auto 1fr; gap: 3px 10px; }
+  .facts .fline { display: flex; align-items: center; gap: 8px; min-height: 24px; }
+  .facts .fline .grow { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .facts .kv { display: grid; grid-template-columns: auto 1fr; gap: 4px 10px; }
   .facts .kv span:nth-child(odd) { color: var(--text-tertiary); }
   .facts .kv span:nth-child(even) { font: 400 var(--text-mono-sm) / 1.5 var(--font-mono); }
-  .runsgrid { display: grid; grid-template-columns: auto 1fr; gap: 4px 8px; align-items: center; }
+  .facts .pills { display: flex; flex-wrap: wrap; gap: 4px; }
+  .runsgrid { display: grid; grid-template-columns: auto 1fr; gap: 6px 8px; align-items: center; }
   .runsgrid .cell { display: flex; flex-wrap: wrap; gap: 4px; }
-  .note { margin: 0 0 12px; padding: 8px 10px; border-left: 2px solid var(--border-subtle); color: var(--text-secondary); }
-  .dstrip { margin: 4px 0 14px; }
 </style>
 </head>
 <body>
-  <header id="bar">
-    <div class="seg seg-track" id="tabs"></div>
-    <div class="seg seg-track" id="mode">
-      <button class="seg-opt active" data-mode="combined">Combined</button>
-      <button class="seg-opt" data-mode="compare">Compare</button>
+  <header id="top">
+    <div class="toprow">
+      <button class="btn btn-secondary btn-sm runbtn" id="runbtn"></button>
+      <div class="runchips" id="runchips"></div>
+      <span class="grow"></span>
+      <div class="seg seg-track" id="mode">
+        <button class="seg-opt active" data-mode="combined">Combined</button>
+        <button class="seg-opt" data-mode="compare">Compare</button>
+      </div>
     </div>
+    <nav class="nav" id="tabs"></nav>
   </header>
   <div id="body">
     <main id="main">
-      <section id="overview"><div id="runs"></div><div id="activity"></div></section>
+      <section id="overview"><div id="runs" class="box"></div><div id="activity" class="box"></div></section>
       <div id="filters"></div>
       <div id="list"></div>
     </main>
@@ -233,49 +329,50 @@
   </div>
   <div id="pop"></div>
 <script>
-  // Repository: several agent runs on one library, as a forge's pages show them. It opens on the overview: one row per
-  // run with its setup and measures, which also chooses the runs (a row or its chip adds or removes the run, All takes
-  // every run), beside the chosen runs' activity per time bin. Every panel below follows the chosen runs. The tabs
-  // switch between pull requests, issues, discussions and agents; the filters narrow the tab by any field, each to one
-  // value or several, with the count each value would give, and a drag across the activity narrows it to a time range.
-  // Participant and Activity pick records, so with a time range they keep the units where that agent did that in that
-  // range. The Colour menu colours the records in the activity, on the strips and on a page by their activity, who did
-  // it, their run, or their unit's state or area, and its legend shows a value alone on a click and hides it on a
-  // shift-click. Compare
-  // puts the chosen runs side by side: each run's activity in its row, and below it the pull requests or issues issue
-  // by issue, or the discussions and agents run by run. A row opens its unit's page beside the list (or in its place in
-  // a narrow pane).
+  // Repository: several agent runs on one library, as a code forge shows them. The run selector at the top picks one run
+  // or several (All takes every run), and every panel follows the chosen runs. It opens on the overview: one row per
+  // run with its setup and measures, which also chooses the runs, beside the chosen runs' activity per time bin. The
+  // tabs switch between pull requests, issues, discussions and agents; the filters narrow the tab by any field, each to
+  // one value or several, with the count each value would give, and a drag across the activity narrows it to a time
+  // range. Participant and Activity pick records, so with a time range they keep the units where that agent did that
+  // in that range. The Colour menu colours the records in the activity, on the strips and on a page by their activity,
+  // who did it, their run, or their unit's state or area, and its legend shows a value alone on a click and hides it on
+  // a shift-click. Compare puts the chosen runs side by side: each run's activity in its row, and below it the pull
+  // requests or issues issue by issue, or the discussions and agents run by run. A row opens its unit's page beside the
+  // list (or in its place in a narrow pane): its conversation, and for a pull request its commits and the files they
+  // changed, as diffs.
   //
   // Labels: each unit's element carries view:<slug>/<key>, each record on a strip or a page its file ref, and each
   // run's row view:<slug>/<run>, so thimble marks them. While a label is on it is the colouring: the page draws the
-  // records each of its values marks in that value's colour in the activity, the strips and the runs' bars, and the
-  // other categories in ink, and a value's swatch opens thimble's palette. The filter is applied by the reader, so the
-  // page fetches again in thimble.onLabels.
+  // records each of its values marks in that value's colour in the activity, the strips, the runs' bars and a page's
+  // badges, a unit whose records it marks carries its pill, as the forge's labels, and the other categories are drawn
+  // in ink. A value's swatch opens thimble's palette. The filter is applied by the reader, so the page fetches again in
+  // thimble.onLabels.
   const slug = (thimble.view && thimble.view.slug) || 'repository'
   const $ = (s, root) => (root || document).querySelector(s)
   const NS = 'http://www.w3.org/2000/svg'
-  const PAGE = 100 // reader.py PAGE
   const WIDE = 1100 // the pane width from which the detail sits beside the list
 
   const TABS = {
-    pulls: { name: 'Pull requests', noun: ['pull request', 'pull requests'], states: ['open', 'merged', 'closed'],
+    pulls: { name: 'Pull requests', icon: 'pr', noun: ['pull request', 'pull requests'], states: ['open', 'merged', 'closed'],
       selects: [['author', 'Author', 'authors'], ['reviewer', 'Reviewer', 'reviewers'], ['verdict', 'Review', 'reviews'], ['actor', 'Participant', 'participants'], ['action', 'Activity', 'activities'], ['area', 'Area', 'areas'], ['reason', 'Close reason', 'close reasons'], ['flag', 'Flag', 'flags']],
       sorts: [['newest', 'Newest'], ['oldest', 'Oldest'], ['longest to merge', 'Longest to merge'], ['quickest first review', 'Quickest first review'], ['most reviews', 'Most reviews'], ['most commits', 'Most commits']] },
-    issues: { name: 'Issues', noun: ['issue', 'issues'], states: ['open', 'fixed', 'closed'],
+    issues: { name: 'Issues', icon: 'issue', noun: ['issue', 'issues'], states: ['open', 'fixed', 'closed'],
       selects: [['author', 'Author', 'authors'], ['actor', 'Participant', 'participants'], ['action', 'Activity', 'activities'], ['origin', 'Origin', 'origins'], ['area', 'Area', 'areas'], ['reason', 'Close reason', 'close reasons']],
       sorts: [['newest', 'Newest'], ['oldest', 'Oldest'], ['longest to fix', 'Longest to fix'], ['most comments', 'Most comments']] },
-    discussions: { name: 'Discussions', noun: ['discussion', 'discussions'], states: null,
+    discussions: { name: 'Discussions', icon: 'thread', noun: ['discussion', 'discussions'], states: null,
       selects: [['actor', 'Posted by', 'posters', 'Anyone posting']],
       sorts: [['most posts', 'Most posts'], ['latest', 'Latest post'], ['oldest', 'Oldest']] },
-    agents: { name: 'Agents', noun: ['agent', 'agents'], states: null,
+    agents: { name: 'Agents', icon: 'agent', noun: ['agent', 'agents'], states: null,
       selects: [['agent', 'Agent', 'agents'], ['action', 'Activity', 'activities'], ['reviewed', 'Reviewed', 'agents', 'Reviewed anyone']], sorts: [] },
   }
-  // what each action is drawn in, in the activity, on the strips and on a page's timeline (reader.py ACTION)
+  const STATE_NAMES = { open: 'Open', merged: 'Merged', closed: 'Closed', fixed: 'Closed', thread: 'Discussion' }
+  // what each action is drawn in, in the activity, on the strips and on a page's badges (reader.py ACTION)
   const ACTIONS = {
     opened: '--viz-ink-2', pushed: '--viz-ink-3', approved: '--viz-3', 'changes requested': '--viz-2', commented: '--viz-1',
-    posted: '--viz-6', merged: '--viz-5', fixed: '--viz-5', closed: '--viz-4', reopened: '--viz-ink-1', 'signed off': '--viz-ink-4',
+    posted: '--viz-5', merged: '--viz-6', fixed: '--viz-6', closed: '--viz-4', reopened: '--viz-ink-1', 'signed off': '--viz-ink-4',
   }
-  const STATE_COLOURS = { open: '--status-positive', merged: '--viz-5', fixed: '--viz-5', closed: '--status-negative' }
+  const STATE_COLOURS = { open: '--status-positive', merged: '--viz-6', fixed: '--viz-6', closed: '--status-negative' }
   // the states in ink, while the records are coloured by a field whose colours they would repeat
   const STATE_INKS = { open: '--viz-ink-2', merged: '--viz-ink-3', fixed: '--viz-ink-3', closed: '--viz-ink-4' }
   // the fields the Colour menu offers on each tab (reader.py COLOURS), and the viz colours their values take in order
@@ -283,19 +380,18 @@
     discussions: ['action', 'actor', 'run'], agents: ['action', 'actor', 'run'] }
   const FIELD_NAMES = { action: 'Activity', actor: 'Participant', run: 'Run', state: 'State', area: 'Area' }
   const CAT = ['--viz-1', '--viz-2', '--viz-3', '--viz-6', '--viz-5', '--viz-7']
-  const COUNT_ACTION = { approved: 'approved', changes: 'changes requested', commit: 'pushed', comment: 'commented', pr: 'opened' }
   const AGENT_COLS = [['opened', 'Opened'], ['merged', 'Merged'], ['merges', 'Merges done'], ['approved', 'Approvals'], ['changes', 'Changes req.'], ['comments', 'Comments'], ['posts', 'Posts']]
 
   // what the analyst chose; every change refetches the tab. `filters` holds each filter's chosen values, `colour` the
-  // field that colours the records, and `hide` the label values whose records the legend hides ('none' for the records
-  // none marks)
+  // field that colours the records, `hide` the label values whose records the legend hides ('none' for the records none
+  // marks), and `page` the open unit's tab
   const S = { tab: 'pulls', runs: [], compare: false, q: '', filters: {}, sort: '', range: null, agentView: 'table', agentSort: 'merges',
-    colour: 'action', hide: [] }
+    colour: 'action', hide: [], page: 'conversation' }
   let data = null // the reader's answer for the tab (reader.py _view)
   let unit = null // the open unit's page (reader.py _detail)
   let focusRef = null // the record a citation opened
   let labelState = { labels: [], filter: null, all: null, palette: null } // what thimble.onLabels last said
-  let menu = null // 'colour' while the Colour menu is open
+  let menu = null // 'colour' or 'runs' while that menu is open
   let pal = null // {id, value, from} while a label value's palette is open
   let loading = 0
 
@@ -369,7 +465,7 @@
   // a flag chip's tone, neutral while a label is on
   const flagTone = () => (labelOn() ? 'chip-tone-neutral' : 'chip-tone-warning')
 
-  // ------------------------------------------------------------------------------------------------ icons
+  // ------------------------------------------------------------------------------------------------ icons and avatars
   const ICONS = {
     pr: ['circle cx=4 cy=3.5 r=1.7', 'circle cx=4 cy=12.5 r=1.7', 'path d=M4 5.2v5.6', 'circle cx=12 cy=12.5 r=1.7', 'path d=M12 10.8V6.5a2 2 0 0 0-2-2H7.2'],
     merged: ['circle cx=4 cy=3.5 r=1.7', 'circle cx=4 cy=12.5 r=1.7', 'circle cx=12 cy=8 r=1.7', 'path d=M4 5.2v5.6', 'path d=M4.6 5.1C5.6 7.3 7.6 8 10.3 8'],
@@ -384,6 +480,9 @@
     comment: ['path d=M2.5 3.5h11v7h-6l-3 2.5v-2.5h-2z'],
     close: ['path d=M4.3 4.3l7.4 7.4M11.7 4.3l-7.4 7.4'],
     agent: ['circle cx=8 cy=5.2 r=2.6', 'path d=M3 13.6c.6-2.6 2.6-4 5-4s4.4 1.4 5 4'],
+    branch: ['circle cx=4.5 cy=3.5 r=1.6', 'circle cx=4.5 cy=12.5 r=1.6', 'circle cx=11.5 cy=4.5 r=1.6', 'path d=M4.5 5.1v5.8', 'path d=M11.5 6.1c0 3-7 2.5-7 4.8'],
+    file: ['path d=M4 1.8h5.2L12 4.6v9.6H4z', 'path d=M9 1.8v3h3'],
+    search: ['circle cx=7 cy=7 r=4.5', 'path d=M10.5 10.5 14 14'],
   }
   function icon(name, cls) {
     const s = svg('svg', { viewBox: '0 0 16 16', class: 'ico' + (cls ? ' ' + cls : ''), 'aria-hidden': 'true' })
@@ -398,12 +497,69 @@
     }
     return s
   }
+  const CARET = '<svg class="ico s12" viewBox="0 0 12 12"><path d="M3.5 4.75 6 7.25l2.5-2.5"/></svg>'
+  const CHECK = '<svg class="ico s12" viewBox="0 0 12 12"><path d="M2.5 6.2 5 8.5l4.5-5"/></svg>'
   function stateIcon(tab, state) {
     if (tab === 'pulls') return icon(state === 'merged' ? 'merged' : state === 'closed' ? 'prclosed' : 'pr', 's-' + state)
     if (tab === 'issues') return icon(state === 'fixed' ? 'fixed' : state === 'closed' ? 'issueclosed' : 'issue', 's-' + state)
     return icon('thread', 's-thread')
   }
   const ACTION_ICON = { opened: 'pr', pushed: 'commit', approved: 'approved', 'changes requested': 'changes', commented: 'comment', posted: 'comment', merged: 'merged', fixed: 'merged', closed: 'close', reopened: 'pr', 'signed off': 'agent' }
+  // a person as the initial of their name on a neutral disc, its shade from the name, so it reads the same everywhere
+  function avatar(name, size, verdict) {
+    const a = el('span', 'av' + (size ? ` s${size}` : ''), String(name || '?').replace(/[^a-z0-9]/gi, '').slice(0, 1) || '?')
+    let h = 0
+    for (const ch of String(name || '')) h = (h * 31 + ch.charCodeAt(0)) >>> 0
+    a.style.setProperty('--a', (0.08 + (h % 5) * 0.04).toFixed(2))
+    a.title = name || ''
+    if (verdict) {
+      const v = el('span', 'v')
+      const ic = icon(ACTION_ICON[verdict] || 'comment')
+      ic.style.color = actionInk() ? 'var(--text-secondary)' : colourOf(verdict)
+      v.append(ic)
+      a.append(v)
+    }
+    return a
+  }
+  // a state as the forge's pill: its icon and name on the state's colour
+  function statePill(tab, state) {
+    const p = el('span', 'chip chip-sans state')
+    p.style.setProperty('--c', stateColour(state))
+    const ic = stateIcon(tab, state)
+    ic.setAttribute('class', 'ico')
+    p.append(ic, tab === 'issues' && state === 'fixed' ? 'Fixed' : STATE_NAMES[state] || state)
+    return p
+  }
+  // a label value that marks a unit's records, as the forge's coloured label
+  function labelPill(i) {
+    const p = el('span', 'chip chip-sans lp', className(i))
+    p.style.setProperty('--c', classColour(i))
+    const l = labelBy(data.classes[i].label)
+    if (l && l.id) p.dataset.label = l.id
+    return p
+  }
+  function areaPill(area) {
+    const b = el('button', 'chip chip-sans chip-tone-neutral chip-act', area)
+    b.onclick = (e) => {
+      e.stopPropagation()
+      setFilter('area', area)
+    }
+    return b
+  }
+  function runTag(run) {
+    return el('span', 'chip chip-tone-neutral', run)
+  }
+  // the size of a diff: its added and removed lines, and five blocks in those shares
+  function diffstat(plus, minus) {
+    const box = el('span', 'dstat')
+    box.append(el('span', 'p', `+${plus}`), el('span', 'm', `−${minus}`))
+    const blk = el('span', 'blk')
+    const n = plus + minus, filled = Math.min(5, n), p = n ? Math.round((filled * plus) / n) : 0
+    for (let i = 0; i < 5; i++) blk.append(el('i', i < p ? 'p' : i < filled ? 'm' : ''))
+    box.append(blk)
+    box.title = `${plus} lines added, ${minus} removed`
+    return box
+  }
 
   // ------------------------------------------------------------------------------------------------ fetching
   function query(extra) {
@@ -429,7 +585,7 @@
   function draw() {
     document.body.classList.toggle('inked', inked())
     document.body.classList.toggle('compare', S.compare)
-    drawTabs()
+    drawTop()
     drawRuns()
     drawActivity()
     drawFilters()
@@ -437,21 +593,54 @@
     drawPop()
   }
 
-  // ------------------------------------------------------------------------------------------------ tabs and runs
-  function drawTabs() {
+  // ------------------------------------------------------------------------------------------------ the head
+  // The run selector names the chosen runs; its menu takes one run on a click on its name, adds or removes a run on its
+  // box, and takes every run on All runs.
+  function drawTop() {
+    const b = $('#runbtn')
+    const names = allChosen() ? 'All runs' : data.chosen.length > 3 ? `${data.chosen.length} runs` : data.chosen.join(', ')
+    b.innerHTML = ''
+    b.append(icon('branch'))
+    b.insertAdjacentHTML('beforeend', `<span class="k">Runs</span><b>${esc(names)}</b>${CARET}`)
+    b.onclick = (e) => {
+      e.stopPropagation()
+      menu = menu === 'runs' ? null : 'runs'
+      pal = null
+      drawPop()
+    }
+    const chips = $('#runchips')
+    chips.replaceChildren()
+    if (!allChosen()) {
+      const all = el('button', 'btn btn-ghost btn-sm', 'All runs')
+      all.onclick = () => {
+        S.runs = []
+        load()
+      }
+      chips.append(all)
+    }
     const box = $('#tabs')
     box.replaceChildren(...Object.entries(TABS).map(([key, t]) => {
-      const b = el('button', 'seg-opt' + (key === S.tab ? ' active' : ''), t.name + ' ')
-      b.append(el('span', 'n', String(data.tabs[key])))
-      b.onclick = () => {
+      const btn = el('button', key === S.tab ? 'on' : '')
+      const inner = el('span')
+      inner.append(icon(t.icon), t.name, el('span', 'count', String(data.tabs[key])))
+      btn.append(inner)
+      btn.onclick = () => {
         if (S.tab === key) return
         Object.assign(S, { tab: key, filters: {}, sort: '', q: '' })
         $('#main').scrollTop = 0
         load()
       }
-      return b
+      return btn
     }))
-    for (const b of document.querySelectorAll('#mode .seg-opt')) b.classList.toggle('active', (b.dataset.mode === 'compare') === S.compare)
+    for (const m of document.querySelectorAll('#mode .seg-opt')) m.classList.toggle('active', (m.dataset.mode === 'compare') === S.compare)
+  }
+  function runsMenuHtml() {
+    const all = allChosen()
+    const rows = data.runs.map((r) => {
+      const on = data.chosen.includes(r.run)
+      return `<div class="mi run" data-act="onlyrun" data-run="${esc(r.run)}"><span class="tick ${on ? 'on' : ''}" data-act="togglerun" data-run="${esc(r.run)}" role="checkbox" aria-checked="${on}" title="Add or remove this run">${on ? CHECK : ''}</span><span class="nm"><b>${esc(r.run)}</b><span>${esc(setup(r))}</span></span><span class="n">${Math.round(r.hours * 10) / 10}h</span></div>`
+    }).join('')
+    return `<div class="menu" id="menu" data-anchor-name="Run selector"><div class="mh">Runs</div><button class="mi" data-act="allruns"><span class="ck">${all ? CHECK : ''}</span>All runs<span class="n">${data.runs.length}</span></button><div class="msep"></div>${rows}</div>`
   }
 
   // A run's row toggles the run; with every run chosen it takes that run alone, as a legend does, and the last run left
@@ -568,14 +757,7 @@
     const cols = RUN_COLS[S.tab]
     const table = el('table', 'table runs')
     const head = el('tr')
-    const allTh = el('th')
-    const all = el('button', 'chip chip-sans chip-tone-neutral chip-act' + (allChosen() ? ' active' : ''), 'All')
-    all.onclick = () => {
-      S.runs = []
-      load()
-    }
-    allTh.append(all)
-    head.append(allTh, el('th', null, 'Setup'))
+    head.append(el('th', null, 'Run'), el('th', null, 'Setup'))
     for (const c of cols) head.append(el('th', [c.num ? 'num' : '', c.cls || ''].join(' ').trim(), c.head))
     if (S.compare) head.append(el('th', null, `Activity, per ${data.activity.bin} min`))
     const thead = el('thead')
@@ -610,10 +792,7 @@
             td.append(b)
           } else td.append(el('span', 'dim', '0'))
         } else if (c.key) td.append(String(r[c.key]))
-        else {
-          const v = c.cell(r, max)
-          td.append(v)
-        }
+        else td.append(c.cell(r, max))
         tr.append(td)
       }
       if (S.compare) {
@@ -626,6 +805,8 @@
     }
     table.append(thead, body)
     const box = $('#runs')
+    const bh = el('div', 'box-head')
+    bh.append(el('h3', null, 'Runs'), el('span', 'dim', allChosen() ? `all ${data.runs.length}` : `${data.chosen.length} of ${data.runs.length} chosen`))
     if (S.compare) {
       const foot = el('tfoot')
       const tr = el('tr')
@@ -635,8 +816,9 @@
       tr.append(axis)
       foot.append(tr)
       table.append(foot)
-      box.replaceChildren(table, legend())
-    } else box.replaceChildren(table)
+      bh.append(el('span', 'grow'), legend())
+    }
+    box.replaceChildren(bh, table)
   }
 
   // ------------------------------------------------------------------------------------------------ activity
@@ -797,10 +979,10 @@
       const ids = labelState.labels.map((l) => l.id).filter(Boolean).join(' ')
       if (ids) b.dataset.label = ids
     }
-    b.innerHTML = `<span class="k">Colour</span>${what}<svg class="ico s12" viewBox="0 0 12 12"><path d="M3.5 4.75 6 7.25l2.5-2.5"/></svg>`
+    b.innerHTML = `<span class="k">Colour</span>${what}${CARET}`
     b.onclick = (e) => {
       e.stopPropagation()
-      menu = menu ? null : 'colour'
+      menu = menu === 'colour' ? null : 'colour'
       pal = null
       drawPop()
     }
@@ -863,7 +1045,7 @@
     load()
   }
 
-  // ------------------------------------------------------------------------------------------------ the Colour menu and the palette
+  // ------------------------------------------------------------------------------------------------ the menus and the palette
   function openPalette(id, value, from) {
     pal = pal && pal.id === id && pal.value === value ? null : { id, value, from }
     drawPop()
@@ -877,7 +1059,7 @@
     const fields = COLOURS[S.tab].map((f) => {
       const on = !labelOn() && field() === f
       const sws = previewColours(f).map((c) => `<i class="sw" style="width:5px;border-radius:1px;background:${c}"></i>`).join('')
-      return `<button class="mi" data-act="field" data-f="${f}"><span class="ck">${on ? '<svg class="ico s12" viewBox="0 0 12 12"><path d="M2.5 6.2 5 8.5l4.5-5"/></svg>' : ''}</span>${FIELD_NAMES[f]}<span class="n">${sws}</span></button>`
+      return `<button class="mi" data-act="field" data-f="${f}"><span class="ck">${on ? CHECK : ''}</span>${FIELD_NAMES[f]}<span class="n">${sws}</span></button>`
     }).join('')
     // every label over files, as thimble lists them; a click turns one on or off in thimble's Labels pane
     const all = labelState.all || labelState.labels.map((l) => ({ ...l, on: true }))
@@ -888,7 +1070,7 @@
     }
     const rows = all.map((l) => {
       const lit = (l.values || []).filter((v) => v.highlight !== false)
-      const box = `<span class="box ${l.on ? 'on' : ''}" style="--mark:${esc(l.colour)}"></span>`
+      const box = `<span class="lmark ${l.on ? 'on' : ''}" style="--mark:${esc(l.colour)}"></span>`
       const main = `<button class="mi" data-act="label" data-id="${esc(l.id || '')}" data-label="${esc(l.id || '')}" ${l.id && thimble.setLabel ? '' : 'disabled'}><span class="ck">${box}</span><span class="nm">${esc(l.name)}</span>
         <span class="n">${l.count == null ? '' : l.count}</span>${lit.length === 1 ? sw(l, lit[0]) : ''}</button>`
       const subs = l.on && lit.length > 1 ? lit.map((v) => `<div class="mi sub" data-label="${esc(l.id || '')}"><span class="nm">${esc(v.name)}</span><span class="n"></span>${sw(l, v)}</div>`).join('') : ''
@@ -902,13 +1084,13 @@
     const cur = String((l && ((l.values || []).find((v) => v.name === pal.value) || {}).colour) || '').toLowerCase()
     return `<div class="pal" id="pal" data-label="${esc(pal.id)}">${labelState.palette.map((c) => `<button data-act="colour" data-colour="${esc(c)}" class="${c.toLowerCase() === cur ? 'cur' : ''}" style="background:${esc(c)}" aria-label="Colour ${esc(c)}"></button>`).join('')}</div>`
   }
-  // the menu opens under the Colour button; the palette beside the swatch that opened it, in the menu or the legend
+  // a menu opens under the button that opened it; the palette beside the swatch that opened it, in the menu or the legend
   function drawPop() {
     const pop = $('#pop')
-    const btn = $('#cbtn')
+    const btn = menu === 'runs' ? $('#runbtn') : $('#cbtn')
     if (menu && !btn) menu = null
     if (pal && !(labelState.palette || []).length) pal = null
-    pop.innerHTML = (menu ? menuHtml() : '') + (pal ? palHtml() : '')
+    pop.innerHTML = (menu === 'colour' ? menuHtml() : menu === 'runs' && data ? runsMenuHtml() : '') + (pal ? palHtml() : '')
     const m = $('#menu')
     if (m) {
       const r = btn.getBoundingClientRect()
@@ -947,9 +1129,13 @@
   function drawActivity() {
     const box = $('#activity')
     if (S.compare) return box.replaceChildren()
-    const width = Math.max(240, box.clientWidth || 320)
+    const head = el('div', 'box-head')
+    head.append(el('h3', null, 'Activity'), el('span', 'dim', allChosen() ? 'every run' : data.chosen.join(', ')))
+    const body = el('div', 'body')
+    box.replaceChildren(head, body)
+    const width = Math.max(240, body.clientWidth - 28 || 300)
     const narrow = $('#main').classList.contains('w-s')
-    box.replaceChildren(legend(), chart(data.activity.rows, { width, height: narrow ? 92 : 118, axis: true }))
+    body.append(legend(), chart(data.activity.rows, { width, height: narrow ? 92 : 112, axis: true }))
   }
 
   // ------------------------------------------------------------------------------------------------ filters
@@ -959,8 +1145,8 @@
   function drawFilters() {
     const t = TABS[S.tab]
     const box = $('#filters')
-    const top = el('div', 'frow')
-    const fields = el('div', 'frow')
+    const parts = []
+    const wrap = el('label', 'search')
     const search = el('input', 'field')
     search.type = 'search'
     search.placeholder = `Search ${t.name.toLowerCase()}`
@@ -974,45 +1160,8 @@
         load()
       }, 180)
     })
-    top.append(search)
-    if (t.states) {
-      const seg = el('div', 'seg seg-track')
-      const counts = Object.fromEntries(facet('state'))
-      const total = Object.values(counts).reduce((s, v) => s + v, 0)
-      const states = S.filters.state || []
-      for (const st of [null, ...t.states]) {
-        if (st && !counts[st] && !states.includes(st)) continue
-        const b = el('button', 'seg-opt' + ((st ? states.includes(st) : !states.length) ? ' active' : ''), st ? st[0].toUpperCase() + st.slice(1) + ' ' : 'All ')
-        b.append(el('span', 'n', String(st ? counts[st] || 0 : total)))
-        b.onclick = () => setFilter('state', st)
-        seg.append(b)
-      }
-      top.append(seg)
-    }
-    if (t.sorts.length) {
-      const sel = el('select', 'field')
-      sel.setAttribute('aria-label', 'Sort')
-      for (const [v, text] of t.sorts) sel.append(new Option(text, v, false, (S.sort || t.sorts[0][0]) === v))
-      sel.onchange = () => {
-        S.sort = sel.value
-        load()
-      }
-      top.append(sel)
-    }
-    if (S.tab === 'agents') {
-      const seg = el('div', 'seg seg-track')
-      for (const [v, text] of [['table', 'Table'], ['matrix', 'Who reviewed whom']]) {
-        const b = el('button', 'seg-opt' + (S.agentView === v ? ' active' : ''), text)
-        b.onclick = () => {
-          S.agentView = v
-          drawFilters()
-          drawList()
-        }
-        seg.append(b)
-      }
-      top.append(seg)
-    }
-    top.append(el('span', 'total', plural(data.total, t.noun)))
+    wrap.append(icon('search'), search)
+    parts.push(wrap)
     // A select adds the value picked to its filter's values, or removes one already chosen (ticked); its closed face
     // names the field and the chosen values, and Any clears them.
     for (const [name, what, many, any] of t.selects) {
@@ -1021,7 +1170,7 @@
       const picked = S.filters[name] || []
       const sel = el('select', 'field' + (picked.length ? ' set' : ''))
       sel.setAttribute('aria-label', what)
-      sel.append(new Option(any || `Any ${what.toLowerCase()}`, ''))
+      sel.append(new Option(any || `${what}`, ''))
       if (picked.length) {
         const names = picked.join(', ')
         const face = new Option(`${what}: ${picked.length > 2 || names.length > 28 ? `${picked.length} ${many}` : names}`, 'chosen')
@@ -1035,7 +1184,7 @@
       }
       sel.value = picked.length ? 'chosen' : ''
       sel.onchange = () => (sel.value ? toggleFilter(name, sel.value) : setFilter(name, null))
-      fields.append(sel)
+      parts.push(sel)
     }
     if (S.range) {
       const c = el('button', 'chip chip-sans chip-tone-neutral chip-act active', `${since(S.range[0])} to ${since(S.range[1])} ✕`)
@@ -1044,23 +1193,22 @@
         S.range = null
         load()
       }
-      fields.append(c)
+      parts.push(c)
     }
     if (Object.keys(S.filters).length || S.q || S.range || S.hide.length) {
-      const clear = el('button', 'btn btn-ghost btn-sm', 'Clear')
+      const clear = el('button', 'btn btn-ghost btn-sm', 'Clear filters')
       clear.onclick = () => {
         Object.assign(S, { filters: {}, q: '', range: null, hide: [] })
         load()
       }
-      fields.append(clear)
+      parts.push(clear)
     }
     const hadFocus = document.activeElement && document.activeElement.type === 'search'
-    box.replaceChildren(...[top, fields].filter((r) => r.childNodes.length))
+    box.replaceChildren(...parts)
     if (hadFocus) {
       search.focus()
       search.setSelectionRange(search.value.length, search.value.length)
     }
-    document.documentElement.style.setProperty('--filters-h', `${box.offsetHeight}px`)
   }
   // a filter narrowed to one value, or cleared with none
   function setFilter(name, value) {
@@ -1074,6 +1222,53 @@
     if (next.length) S.filters[name] = next
     else delete S.filters[name]
     load()
+  }
+  // the list's head: the states as the forge's open and closed switch, then the sort and the count
+  function listHead() {
+    const t = TABS[S.tab]
+    const head = el('div', 'box-head')
+    const states = el('div', 'states')
+    if (t.states) {
+      const counts = Object.fromEntries(facet('state'))
+      const chosenStates = S.filters.state || []
+      const total = Object.values(counts).reduce((s, v) => s + v, 0)
+      const all = el('button', chosenStates.length ? '' : 'on')
+      all.append(icon(t.icon), `${total} All`)
+      all.onclick = () => setFilter('state', null)
+      states.append(all)
+      for (const st of t.states) {
+        if (!counts[st] && !chosenStates.includes(st)) continue
+        const b = el('button', chosenStates.includes(st) ? 'on' : '')
+        b.append(stateIcon(S.tab, st), `${counts[st] || 0} ${st === 'fixed' ? 'Fixed' : STATE_NAMES[st]}`)
+        b.onclick = () => setFilter('state', st)
+        states.append(b)
+      }
+    } else states.append(el('h3', null, plural(data.total, t.noun)))
+    head.append(states, el('span', 'grow'))
+    if (S.tab === 'agents') {
+      const seg = el('div', 'seg seg-track')
+      for (const [v, text] of [['table', 'Table'], ['matrix', 'Who reviewed whom']]) {
+        const b = el('button', 'seg-opt' + (S.agentView === v ? ' active' : ''), text)
+        b.onclick = () => {
+          S.agentView = v
+          drawList()
+        }
+        seg.append(b)
+      }
+      head.append(seg)
+    }
+    if (t.sorts.length) {
+      const sel = el('select', 'field')
+      sel.setAttribute('aria-label', 'Sort')
+      for (const [v, text] of t.sorts) sel.append(new Option(`Sort: ${text}`, v, false, (S.sort || t.sorts[0][0]) === v))
+      sel.onchange = () => {
+        S.sort = sel.value
+        load()
+      }
+      head.append(sel)
+    }
+    if (t.states) head.append(el('span', 'total', plural(data.total, t.noun)))
+    return head
   }
 
   // ------------------------------------------------------------------------------------------------ lists
@@ -1092,11 +1287,8 @@
     }
     return s
   }
-  function chipFor(run) {
-    return el('span', 'chip chip-tone-neutral', run)
-  }
   function who(name, filterName) {
-    const b = el('button', 'lnk', name)
+    const b = el('button', 'lnk strong', name)
     b.onclick = (e) => {
       e.stopPropagation()
       setFilter(filterName, name)
@@ -1107,7 +1299,7 @@
     thimble.navigate(unitRef(key))
   }
   function unitLink(text, key) {
-    const b = el('button', 'lnk', text)
+    const b = el('button', 'lnk strong', text)
     b.onclick = (e) => {
       e.stopPropagation()
       openKey(key)
@@ -1126,53 +1318,53 @@
     for (const [ic, n, tip] of pairs) {
       const s = el('span')
       s.title = tip
-      if (n) {
-        const i = icon(ic)
-        i.style.color = actionInk() ? 'var(--text-tertiary)' : colourOf(COUNT_ACTION[ic])
-        s.append(i, String(n))
-      }
+      if (n) s.append(icon(ic), String(n))
       box.append(s)
     }
     return box
   }
   function stripWidth() {
     const m = $('#main')
-    return m.classList.contains('w-s') ? 110 : m.classList.contains('w-m') ? 170 : 240
+    return m.classList.contains('w-s') ? 110 : m.classList.contains('w-m') ? 150 : 200
   }
-  function titleLine(text, number, run) {
+  // a unit's title with the forge's labels after it: its area, then the label values that mark its records
+  function titleLine(text, item) {
     const t = el('div', 't')
     const title = el('span', 'title', text)
     title.title = text
-    t.append(title)
-    if (number != null) t.append(el('span', 'num', `#${number}`))
-    t.append(chipFor(run))
+    t.append(title, runTag(item.run))
+    if (item.area) t.append(areaPill(item.area))
+    for (const i of item.marks || []) t.append(labelPill(i))
     return t
   }
-  // each reviewer's latest verdict, as the row's own column
-  function reviewers(latest) {
-    const box = el('div', 'revs')
-    for (const [name, verdict] of Object.entries(latest || {})) {
+  function meta(...parts) {
+    const m = el('div', 'meta')
+    parts.filter((p) => p != null && p !== '').forEach((p, i) => {
       const s = el('span')
-      const ic = icon(ACTION_ICON[verdict] || 'comment')
-      ic.style.color = actionInk() ? 'var(--text-tertiary)' : colourOf(verdict)
-      s.append(ic, name)
-      s.title = `${name}: ${verdict}`
-      box.append(s)
+      if (i) s.append(el('span', 'sep'))
+      s.append(...(Array.isArray(p) ? p : [p]))
+      m.append(s)
+    })
+    return m
+  }
+  // each reviewer as an avatar with their latest verdict on it
+  function reviewers(latest) {
+    const box = el('span', 'avs')
+    for (const [name, verdict] of Object.entries(latest || {})) {
+      const a = avatar(name, 20, verdict)
+      a.title = `${name}: ${verdict}`
+      box.append(a)
     }
     return box
   }
   function pullRow(p) {
     const row = rowBase(p, `pull request ${p.run} #${p.number}, ${p.title}`)
     const main = el('div')
-    const t = titleLine(p.title, p.number, p.run)
-    const meta = el('div', 'meta')
-    meta.append('by ', who(p.author, 'author'))
-    if (p.state === 'merged') meta.append(` · merged by ${p.merged_by} ${dur(p.to_merge)} after opening`)
-    else if (p.state === 'closed') meta.append(` · closed by ${p.closed_by} as ${p.reason}`)
-    else meta.append(` · open for ${dur(data.runs.find((r) => r.run === p.run).hours - p.at)}`)
-    if (p.closes != null) meta.append(' · closes ', unitLink(`#${p.closes}`, `${p.run}/issues/${p.closes}`))
-    meta.append(' · ', who(p.area, 'area'))
-    main.append(t, meta)
+    const state = p.state === 'merged' ? [`merged by `, who(p.merged_by, 'actor'), ` ${dur(p.to_merge)} after opening`]
+      : p.state === 'closed' ? [`closed by `, who(p.closed_by, 'actor'), ` as ${p.reason}`]
+        : [`open for ${dur(data.runs.find((r) => r.run === p.run).hours - p.at)}`]
+    main.append(titleLine(p.title, p), meta([`#${p.number} opened by `, who(p.author, 'author')], state,
+      p.closes != null ? ['closes ', unitLink(`#${p.closes}`, `${p.run}/issues/${p.closes}`)] : null))
     if (p.why && p.why.text) main.append(whyLine(p.why))
     // a row names who opened and who merged it, so its chips leave out the self-merge flag
     const loud = p.flags.filter((f) => f !== 'merged by its author')
@@ -1188,8 +1380,12 @@
       }
       main.append(f)
     }
-    row.append(stateIcon('pulls', p.state), main, reviewers(p.latest), strip(p.ticks, stripWidth(), 14),
-      countsBox([['approved', p.approvals, 'reviewers who approved'], ['changes', p.changes, 'reviewers requesting changes'], ['commit', p.commits, 'commits'], ['comment', p.comments, 'comments']]))
+    const side = el('div', 'side')
+    side.append(diffstat(p.plus || 0, p.minus || 0), reviewers(p.latest))
+    const st = el('div', 'rstrip')
+    st.append(strip(p.ticks, stripWidth(), 14))
+    row.append(stateIcon('pulls', p.state), main, side, st,
+      countsBox([['commit', p.commits, 'commits'], ['comment', p.comments, 'comments']]))
     return row
   }
   // a closed unit's close record, in the closer's words
@@ -1202,27 +1398,30 @@
   function issueRow(i) {
     const row = rowBase(i, `issue ${i.run} #${i.number}, ${i.title}`)
     const main = el('div')
-    const t = titleLine(i.title, i.number, i.run)
-    const meta = el('div', 'meta')
-    meta.append('opened by ', who(i.author, 'author'), i.origin === 'backlog' ? ' in the backlog' : ` ${since(i.at)}`)
-    if (i.state === 'fixed') meta.append(' · fixed by ', unitLink(`#${i.fixed_by}`, `${i.run}/pull/${i.fixed_by}`), i.origin === 'backlog' ? ` at ${since(i.ended)}` : ` ${dur(i.ended - i.at)} after it opened`)
-    else if (i.state === 'closed') meta.append(` · closed by ${i.closed_by} as ${i.reason}`)
-    else if (i.prs.length) meta.append(` · ${i.prs.length === 1 ? 'pull request' : 'pull requests'} ${i.prs.map((n) => '#' + n).join(', ')} not merged`)
-    meta.append(' · ', who(i.area, 'area'))
-    main.append(t, meta)
+    const opened = [`#${i.number} opened by `, who(i.author, 'author'), i.origin === 'backlog' ? ' in the backlog' : ` ${since(i.at)}`]
+    const state = i.state === 'fixed' ? ['fixed by ', unitLink(`#${i.fixed_by}`, `${i.run}/pull/${i.fixed_by}`), i.origin === 'backlog' ? ` at ${since(i.ended)}` : ` ${dur(i.ended - i.at)} after it opened`]
+      : i.state === 'closed' ? [`closed by ${i.closed_by} as ${i.reason}`]
+        : i.prs.length ? [`${i.prs.length === 1 ? 'pull request' : 'pull requests'} ${i.prs.map((n) => '#' + n).join(', ')} not merged`] : null
+    main.append(titleLine(i.title, i), meta(opened, state))
     if (i.why && i.why.text) main.append(whyLine(i.why))
-    row.append(stateIcon('issues', i.state), main, el('div'), strip(i.ticks, stripWidth(), 14), countsBox([['pr', i.prs.length, 'pull requests that close it'], ['comment', i.comments, 'comments']]))
+    const side = el('div', 'side')
+    const st = el('div', 'rstrip')
+    st.append(strip(i.ticks, stripWidth(), 14))
+    row.append(stateIcon('issues', i.state), main, side, st, countsBox([['pr', i.prs.length, 'pull requests that close it'], ['comment', i.comments, 'comments']]))
     return row
   }
   function threadRow(d) {
     const row = rowBase(d, `discussion ${d.run}, ${d.title}`)
     const main = el('div')
-    const t = titleLine(d.title || `Discussion ${d.number}`, null, d.run)
-    const meta = el('div', 'meta')
-    meta.append('started by ', who(d.author, 'actor'), ` · ${d.posters.length} posting`)
-    if (d.mentions.length) meta.append(` · mentions ${[...d.mentions].sort((a, b) => a - b).map((n) => '#' + n).join(', ')}`)
-    main.append(t, meta)
-    row.append(stateIcon('discussions'), main, el('div'), strip(d.ticks, stripWidth(), 14), countsBox([['comment', d.posts, 'posts']]))
+    main.append(titleLine(d.title || `Discussion ${d.number}`, d), meta(['started by ', who(d.author, 'actor')], `${d.posters.length} posting`,
+      d.mentions.length ? `mentions ${[...d.mentions].sort((a, b) => a - b).map((n) => '#' + n).join(', ')}` : null))
+    const side = el('div', 'side')
+    const avs = el('span', 'avs')
+    for (const n of d.posters.slice(0, 5)) avs.append(avatar(n, 20))
+    side.append(avs)
+    const st = el('div', 'rstrip')
+    st.append(strip(d.ticks, stripWidth(), 14))
+    row.append(stateIcon('discussions'), main, side, st, countsBox([['comment', d.posts, 'posts']]))
     return row
   }
 
@@ -1248,7 +1447,9 @@
       tr.dataset.anchor = unitRef(a.key)
       tr.dataset.anchorName = `the agent ${a.name} of ${a.run}`
       const name = el('td')
-      name.append(el('span', 'who', a.name + ' '), chipFor(a.run))
+      const w = el('span', 'who')
+      w.append(avatar(a.name, 20), el('span', 'name', a.name), runTag(a.run))
+      name.append(w)
       const act = el('td')
       act.append(strip(a.ticks, stripWidth(), 14))
       tr.append(name, act)
@@ -1271,7 +1472,7 @@
       const max = Math.max(1, ...Object.values(pairs).flatMap((p) => Object.values(p).map((v) => v[0])))
       const t = el('table', 'matrix')
       const cap = el('caption')
-      cap.append(chipFor(run), ` ${setup(info)}`)
+      cap.append(runTag(run), ` ${setup(info)}`)
       t.append(cap)
       const hr = el('tr')
       const corner = el('th', 'axis')
@@ -1318,9 +1519,8 @@
     const runs = data.runs.filter((r) => data.chosen.includes(r.run))
     for (const r of runs) {
       const th = el('th')
-      const sub = el('span', 'sub')
-      sub.append(`${r.team} agents`, el('br'), `${r.approvals} approval${r.approvals === 1 ? '' : 's'}`)
-      th.append(chipFor(r.run), sub)
+      const sub = el('span', 'sub', setup(r))
+      th.append(r.run, sub)
       hr.append(th)
     }
     const thead = el('thead')
@@ -1349,7 +1549,7 @@
     return table
   }
   function gridChip(c) {
-    const b = el('button', 'chip chip-sans chip-tone-neutral chip-act')
+    const b = el('button', 'chip chip-sans chip-tone-neutral chip-act gchip')
     b.dataset.anchor = unitRef(c.key)
     if (S.tab === 'pulls') {
       b.dataset.anchorName = `pull request #${c.number}`
@@ -1366,10 +1566,10 @@
   function columns(items) {
     const box = el('div', 'cols')
     for (const run of data.chosen) {
-      const col = el('div')
+      const col = el('div', 'box')
       const info = data.runs.find((r) => r.run === run)
-      const h = el('h3')
-      h.append(chipFor(run), el('span', 'sub', setup(info)))
+      const h = el('div', 'box-head')
+      h.append(el('h3', null, run), el('span', 'dim', setup(info)))
       col.append(h)
       const mine = items.filter((x) => x.run === run)
       if (S.tab === 'agents') col.append(agentMini(mine))
@@ -1410,7 +1610,11 @@
       const tr = el('tr', unit && unit.key === a.key ? 'active' : '')
       tr.dataset.anchor = unitRef(a.key)
       tr.dataset.anchorName = `the agent ${a.name} of ${a.run}`
-      tr.append(el('td', 'who', a.name))
+      const td = el('td')
+      const w = el('span', 'who')
+      w.append(avatar(a.name, 16), el('span', 'name', a.name))
+      td.append(w)
+      tr.append(td)
       for (const [k] of MINI) tr.append(el('td', 'n', String(a[k])))
       tr.onclick = () => openKey(a.key)
       body.append(tr)
@@ -1419,15 +1623,23 @@
     return table
   }
 
+  // the list in its box under the states; compare lays the chosen runs out issue by issue in the box, or run by run in
+  // boxes of their own under it
   function drawList() {
     const box = $('#list')
     const items = data.items
-    const parts = []
-    if (!items.length) parts.push(el('div', 'empty', `No ${TABS[S.tab].noun[1]} match.`))
-    else if (S.tab === 'agents') parts.push(S.agentView === 'matrix' ? matrices() : S.compare ? columns(items) : agentTable(items))
-    else if (S.compare && data.grid) parts.push(grid())
-    else if (S.compare) parts.push(columns(items))
-    else parts.push(...items.map(S.tab === 'pulls' ? pullRow : S.tab === 'issues' ? issueRow : threadRow))
+    const b = el('div', 'box')
+    b.append(listHead())
+    const parts = [b]
+    if (!items.length) b.append(el('div', 'empty', `No ${TABS[S.tab].noun[1]} match.`))
+    else if (S.tab === 'agents' && S.agentView === 'matrix') b.append(matrices())
+    else if (S.compare && data.grid) b.append(grid())
+    else if (S.compare) {
+      const cols = columns(items)
+      cols.style.marginTop = '12px'
+      parts.push(cols)
+    } else if (S.tab === 'agents') b.append(agentTable(items))
+    else b.append(...items.map(S.tab === 'pulls' ? pullRow : S.tab === 'issues' ? issueRow : threadRow))
     if (items.length && items.length < data.total && !(S.compare && data.grid)) {
       const b = el('button', 'btn btn-secondary btn-sm more', `${data.total - items.length} more`)
       b.onclick = more
@@ -1436,14 +1648,17 @@
     box.replaceChildren(...parts)
   }
 
-  // ------------------------------------------------------------------------------------------------ details
+  // ------------------------------------------------------------------------------------------------ a unit's page
   function tabOf(key) {
     const kind = key.split('/')[1]
     return { pull: 'pulls', issues: 'issues', discussions: 'discussions', agents: 'agents' }[kind]
   }
   async function openUnit(key, ref) {
     focusRef = ref || null
+    if (!unit || unit.key !== key) S.page = 'conversation'
     unit = await thimble.fetch({ op: 'unit', key, colour: S.colour, hide: S.hide })
+    // a cited commit opens on the commits
+    if (unit && ref && unit.records.some((x) => x.ref === ref && x.kind === 'commit')) S.page = 'commits'
     document.body.classList.toggle('open', !!unit)
     drawDetail()
     for (const r of document.querySelectorAll('.row, .agents tbody tr, .cols .list-row')) r.classList.toggle('active', r.dataset.anchor === unitRef(key))
@@ -1463,7 +1678,7 @@
       const key = links && links[m[1]]
       if (!key) continue
       frag.append(text.slice(last, m.index))
-      const b = el('button', 'lnk', m[0])
+      const b = el('button', 'lnk strong', m[0])
       b.style.textDecoration = 'underline'
       b.onclick = () => openKey(key)
       frag.append(b)
@@ -1472,38 +1687,84 @@
     frag.append(String(text || '').slice(last))
     return frag
   }
-  const VERB = { opened: 'opened this', pushed: 'pushed', approved: 'approved', 'changes requested': 'requested changes', commented: 'commented', posted: 'posted', merged: 'merged this', closed: 'closed this', reopened: 'reopened this', 'signed off': 'signed off' }
+  const VERB = { opened: 'opened this', pushed: 'pushed', approved: 'approved these changes', 'changes requested': 'requested changes', commented: 'commented', posted: 'posted', merged: 'merged this', closed: 'closed this', reopened: 'reopened this', 'signed off': 'signed off' }
   // on an agent's page each record names the pull request or issue it was on
   const ON = { opened: 'opened', pushed: 'pushed to', approved: 'approved', 'changes requested': 'requested changes on', commented: 'commented on', merged: 'merged', closed: 'closed', reopened: 'reopened' }
+  // what a record says it did, as the conversation's line names it
+  function said(x, links) {
+    const frag = document.createDocumentFragment()
+    const fixes = unit.tab === 'issues' && x.kind === 'merge'
+    if (fixes) frag.append('merged ', linkText(`#${x.number}`, links), ', which fixes this')
+    else if (x.kind === 'issue' && x.hours <= 0) frag.append('reported this in the backlog')
+    else if (unit.tab === 'agents' && x.number != null) frag.append(`${ON[x.action] || x.action} `, linkText(`#${x.number}`, links), x.title ? ` ${x.title}` : '')
+    else if (x.kind === 'close') frag.append(`closed this as ${x.reason}`)
+    else if (x.kind === 'commit') frag.append(x.forced ? 'force-pushed' : 'pushed a commit')
+    else frag.append(VERB[x.action] || x.action)
+    return frag
+  }
+  // a record's badge on the conversation's line: its action's icon, filled in its part's colour
+  function badge(x) {
+    const fixes = unit.tab === 'issues' && x.kind === 'merge'
+    const b = el('span', 'badge')
+    const ic = icon(x.kind === 'issue' ? 'issue' : fixes ? 'fixed' : ACTION_ICON[x.action] || 'comment')
+    b.append(ic)
+    const unmarked = labelOn() && x.part < 0
+    if (!unmarked && !(field() === 'action' && !labelOn() && ['pushed', 'commented', 'opened', 'posted'].includes(x.action))) {
+      b.classList.add('fill')
+      b.style.setProperty('--c', partColour(x.part))
+    }
+    return b
+  }
+  // the label value that marks a record, as its pill on the conversation's line
+  function markOf(x) {
+    return labelOn() && x.part >= 0 ? labelPill(x.part) : null
+  }
   function event(x, links) {
-    const e = el('div', 'ev' + (x.ref === focusRef ? ' focus' : '') + (x.text && x.kind !== 'commit' ? ' boxed' : ''))
+    const words = x.text && x.kind !== 'commit'
+    const e = el('div', 'it' + (x.ref === focusRef ? ' focus' : ''))
     e.dataset.anchor = x.ref
     e.dataset.anchorName = `${x.author}'s ${x.kind} at ${x.at}`
     if (x.text) e.dataset.anchorText = x.text
-    const fixes = unit.tab === 'issues' && x.kind === 'merge'
-    const dot = el('span', 'dot')
-    const ic = icon(x.kind === 'issue' ? 'issue' : fixes ? 'fixed' : ACTION_ICON[x.action] || 'comment')
-    ic.style.color = labelOn() && x.part < 0 ? 'var(--text-secondary)' : partColour(x.part)
-    dot.append(ic)
-    const body = el('div')
-    const head = el('div', 'head')
-    head.append(el('b', null, x.author), ' ')
-    if (fixes) head.append('merged ', linkText(`#${x.number}`, links), ', which fixes this')
-    else if (x.kind === 'issue' && x.hours <= 0) head.append('reported this in the backlog')
-    else if (unit.tab === 'agents' && x.number != null) head.append(`${ON[x.action] || x.action} `, linkText(`#${x.number}`, links), x.title ? ` ${x.title}` : '')
-    else if (x.kind === 'close') head.append(`closed this as ${x.reason}`)
-    else if (x.kind === 'commit') head.append(x.forced ? 'force-pushed ' : 'pushed ', el('span', 'sha', x.sha))
-    else head.append(VERB[x.action] || x.action)
     const when = el('span', 'when', since(x.hours))
     when.title = clock(x.at)
-    head.append(when)
-    body.append(head)
-    if (x.text) {
-      const text = el('div', 'text')
-      text.append(x.kind === 'commit' ? x.text : linkText(x.text, links))
-      body.append(text)
+    if (words) {
+      // a comment, a review with words, a post or an opening: a box by its author's avatar
+      e.append(avatar(x.author, 32))
+      const box = el('div', 'cbox')
+      const ch = el('div', 'ch')
+      ch.append(el('b', null, x.author), said(x, links), when)
+      const m = markOf(x)
+      if (m) ch.append(el('span', 'grow'), m)
+      if (x.kind === 'review') {
+        const v = el('span', 'grow')
+        ch.append(v)
+        const ic = icon(ACTION_ICON[x.action] || 'comment')
+        ic.style.color = labelOn() ? 'var(--text-secondary)' : partColour(x.part)
+        ch.append(ic)
+      }
+      const body = el('div', 'cb')
+      body.append(linkText(x.text, links))
+      box.append(ch, body)
+      e.append(box)
+      return e
     }
-    e.append(dot, body)
+    e.append(badge(x))
+    const col = el('div')
+    const line = el('div', 'line')
+    line.append(avatar(x.author, 16), el('b', null, x.author), said(x, links), when)
+    const m = markOf(x)
+    if (m) line.append(m)
+    col.append(line)
+    if (x.kind === 'commit') {
+      const c = el('div', 'commit')
+      c.append(el('span', 'sha', x.sha || ''), el('span', 'msg', x.text || ''))
+      if (x.diff) {
+        const [p, n] = countDiff(x.diff)
+        c.append(diffstat(p, n))
+      }
+      col.append(c)
+    }
+    e.append(col)
     return e
   }
   function factsSection(title, ...content) {
@@ -1517,7 +1778,7 @@
     return box
   }
   function unitChip(p, tab) {
-    const b = el('button', 'chip chip-sans chip-tone-neutral chip-act')
+    const b = el('button', 'chip chip-sans chip-tone-neutral chip-act gchip')
     b.dataset.anchor = unitRef(p.key)
     b.append(stateIcon(tab, p.state), `#${p.number}`)
     b.title = p.title || ''
@@ -1528,7 +1789,8 @@
   function everyRun(list, here) {
     const box = el('div', 'runsgrid')
     for (const r of list) {
-      const c = el('span', 'chip chip-tone-neutral' + (r.run === here ? ' active' : ''), r.run)
+      const c = runTag(r.run)
+      if (r.run === here) c.style.fontWeight = '700'
       const cell = el('div', 'cell')
       if (unit.tab === 'pulls') {
         for (const p of r.prs) cell.append(unitChip(p, 'pulls'))
@@ -1540,6 +1802,108 @@
       box.append(c, cell)
     }
     return box
+  }
+
+  // ------------------------------------------------------------------------------------------------ commits and diffs
+  const countDiff = (d) => {
+    const ls = String(d || '').split('\n')
+    return [ls.filter((l) => l.startsWith('+') && !l.startsWith('+++')).length, ls.filter((l) => l.startsWith('-') && !l.startsWith('---')).length]
+  }
+  // a unified diff as its files, each with its hunks' lines and their old and new line numbers
+  function parseDiff(text) {
+    const files = []
+    let f = null, oldN = 0, newN = 0
+    for (const line of String(text || '').split('\n')) {
+      if (line.startsWith('--- ')) continue
+      if (line.startsWith('+++ ')) {
+        f = { path: line.slice(4).replace(/^b\//, ''), rows: [], plus: 0, minus: 0 }
+        files.push(f)
+        continue
+      }
+      if (!f) continue
+      const h = /^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@(.*)$/.exec(line)
+      if (h) {
+        oldN = Number(h[1])
+        newN = Number(h[2])
+        f.rows.push({ kind: 'hunk', text: line })
+      } else if (line.startsWith('+')) {
+        f.rows.push({ kind: 'add', b: newN++, text: line })
+        f.plus++
+      } else if (line.startsWith('-')) {
+        f.rows.push({ kind: 'del', a: oldN++, text: line })
+        f.minus++
+      } else if (line.startsWith(' ')) f.rows.push({ kind: 'ctx', a: oldN++, b: newN++, text: line })
+    }
+    return files
+  }
+  function diffTable(f) {
+    const t = el('table', 'diff')
+    const cols = el('colgroup')
+    cols.append(el('col', 'ln'), el('col', 'ln'), el('col'))
+    t.append(cols)
+    for (const r of f.rows) {
+      const tr = el('tr', r.kind)
+      if (r.kind === 'hunk') {
+        const td = el('td', 'code', r.text)
+        td.colSpan = 3
+        tr.append(td)
+      } else tr.append(el('td', 'ln', r.a == null ? '' : String(r.a)), el('td', 'ln', r.b == null ? '' : String(r.b)), el('td', 'code', r.text))
+      t.append(tr)
+    }
+    return t
+  }
+  function commitsOf(u) {
+    return u.records.filter((x) => x.kind === 'commit')
+  }
+  // the commits, one row each with its author, sha and size
+  function commitList(u) {
+    const box = el('div', 'box clist')
+    const head = el('div', 'box-head')
+    const cs = commitsOf(u)
+    head.append(el('h3', null, plural(cs.length, ['commit', 'commits'])))
+    box.append(head)
+    for (const x of cs) {
+      const row = el('div', 'crow' + (x.ref === focusRef ? ' focus' : ''))
+      row.dataset.anchor = x.ref
+      row.dataset.anchorName = `the commit ${x.sha}`
+      row.dataset.anchorText = x.text || ''
+      const r = el('div', 'r')
+      const [p, n] = countDiff(x.diff)
+      r.append(diffstat(p, n), el('span', 'sha', x.sha || ''))
+      const by = el('div', 'by')
+      by.append(avatar(x.author, 16), el('b', null, x.author), x.forced ? 'force-pushed' : 'committed', el('span', 'mono', since(x.hours)))
+      const m = markOf(x)
+      if (m) by.append(m)
+      row.append(el('div', 'msg', x.text || ''), r, by)
+      row.onclick = () => {
+        S.page = 'files'
+        focusRef = x.ref
+        drawDetail()
+      }
+      row.style.cursor = 'pointer'
+      box.append(row)
+    }
+    if (!cs.length) box.append(el('div', 'empty', 'No commits.'))
+    return box
+  }
+  // the files each commit changed, as diffs, in the order they were pushed
+  function filesChanged(u) {
+    const wrap = el('div')
+    let any = false
+    for (const x of commitsOf(u)) {
+      for (const f of parseDiff(x.diff)) {
+        any = true
+        const box = el('div', 'box file')
+        box.dataset.anchor = x.ref
+        box.dataset.anchorName = `${f.path} in ${x.sha}`
+        const head = el('div', 'box-head')
+        head.append(icon('file'), el('span', 'path', f.path), diffstat(f.plus, f.minus), el('span', 'grow'), el('span', 'sha', x.sha || ''), el('span', 'dim', x.author))
+        box.append(head, diffTable(f))
+        wrap.append(box)
+      }
+    }
+    if (!any) wrap.append(el('div', 'empty', 'No files changed.'))
+    return wrap
   }
   function drawDetail() {
     const box = $('#detail')
@@ -1565,93 +1929,129 @@
     const h1 = el('h1')
     const sub = el('div', 'sub')
     const runChip = el('button', 'chip chip-sans chip-tone-neutral chip-act', `${u.run} · ${setup(u.setup)}`)
+    runChip.title = 'Show this run alone'
     runChip.onclick = () => onlyRun(u.run)
+    const cs = commitsOf(u)
     if (u.tab === 'pulls' || u.tab === 'issues') {
       h1.append(u.title, ' ', el('span', 'num', `#${u.number}`))
-      const st = el('span', 'chip chip-sans chip-tone-neutral')
-      st.append(stateIcon(u.tab, u.state), u.state[0].toUpperCase() + u.state.slice(1))
-      sub.append(st)
+      sub.append(statePill(u.tab, u.state))
+      const line = el('span')
       if (u.tab === 'pulls') {
-        const whose = (by) => (by === u.author ? 'their own pull request' : `${u.author}'s pull request`)
-        sub.append(u.state === 'merged' ? `${u.merged_by} merged ${whose(u.merged_by)} ${dur(u.to_merge)} after it opened`
-          : u.state === 'closed' ? `${u.closed_by} closed ${whose(u.closed_by)} as ${u.reason}` : `${u.author} opened this ${since(u.at)}`)
-      } else {
-        sub.append(u.origin === 'backlog' ? `${u.author} reported this in the backlog` : `${u.author} opened this ${since(u.at)}`)
-      }
+        const commits = plural(u.commits.length, ['commit', 'commits'])
+        if (u.state === 'merged') line.append(el('b', null, u.merged_by), ` merged ${commits} ${dur(u.to_merge)} after `, el('b', null, u.author), ' opened this')
+        else if (u.state === 'closed') line.append(el('b', null, u.closed_by), ` closed this as ${u.reason}; `, el('b', null, u.author), ` pushed ${commits}`)
+        else line.append(el('b', null, u.author), ` wants to merge ${commits}, open since ${since(u.at)}`)
+      } else line.append(el('b', null, u.author), u.origin === 'backlog' ? ' reported this in the backlog' : ` opened this ${since(u.at)}`)
+      sub.append(line)
       head.dataset.anchorName = `${u.tab === 'pulls' ? 'pull request' : 'issue'} ${u.run} #${u.number}`
     } else if (u.tab === 'discussions') {
       h1.append(u.title || `Discussion ${u.number}`)
-      sub.append(`${u.author} started this · ${plural(u.posts, ['post', 'posts'])} by ${u.posters.length}`)
+      sub.append(statePill('discussions', 'thread'))
+      const line = el('span')
+      line.append(el('b', null, u.author), ` started this · ${plural(u.posts, ['post', 'posts'])} by ${u.posters.length}`)
+      sub.append(line)
       head.dataset.anchorName = `the discussion ${u.title}`
     } else {
-      h1.append(u.name)
+      const w = el('span', 'who')
+      w.append(avatar(u.name, 32), u.name)
+      h1.append(w)
       sub.append(`${u.opened} opened · ${u.merges} merges · ${u.approved} approvals · ${u.changes} change requests · ${u.posts} posts`)
       head.dataset.anchorName = `the agent ${u.name} of ${u.run}`
     }
     sub.append(runChip)
     head.append(h1, sub)
+    // a pull request's own tabs: its conversation, its commits and the files they changed
+    if (u.tab === 'pulls') {
+      const tabs = el('nav', 'nav')
+      const conv = u.records.filter((x) => x.kind !== 'commit').length
+      const files = cs.reduce((n, x) => n + parseDiff(x.diff).length, 0)
+      for (const [key, name, ic, n] of [['conversation', 'Conversation', 'comment', conv], ['commits', 'Commits', 'commit', cs.length], ['files', 'Files changed', 'file', files]]) {
+        const b = el('button', S.page === key ? 'on' : '')
+        const inner = el('span')
+        inner.append(icon(ic), name, el('span', 'count', String(n)))
+        b.append(inner)
+        b.onclick = () => {
+          S.page = key
+          drawDetail()
+        }
+        tabs.append(b)
+      }
+      head.append(tabs)
+    } else head.style.paddingBottom = '16px'
 
     const main = el('div')
     const facts = el('div', 'facts')
     const links = u.links || {}
-    if (u.tab === 'agents') {
-      const note = u.records.find((x) => x.kind === 'agent')
-      if (note) {
-        const n = el('p', 'note')
-        n.dataset.anchor = note.ref
-        n.append(note.text)
-        main.append(n)
+    const page = u.tab === 'pulls' ? S.page : 'conversation'
+    if (page === 'commits') main.append(commitList(u))
+    else if (page === 'files') main.append(filesChanged(u))
+    else {
+      if (u.tab === 'agents') {
+        const note = u.records.find((x) => x.kind === 'agent')
+        if (note) {
+          const n = el('p', 'note')
+          n.dataset.anchor = note.ref
+          n.append(note.text)
+          main.append(n)
+        }
+        main.append(strip(u.records.filter((x) => x.kind !== 'agent').map((x) => [x.ref, x.hours, x.action, x.part]), 420, 18))
+        main.lastChild.classList.add('dstrip')
       }
-      main.append(strip(u.records.filter((x) => x.kind !== 'agent').map((x) => [x.ref, x.hours, x.action, x.part]), 420, 18))
-      main.lastChild.classList.add('dstrip')
+      const tl = el('div', 'timeline')
+      for (const x of u.records) if (!(u.tab === 'agents' && x.kind === 'agent')) tl.append(event(x, links))
+      main.append(tl)
     }
-    const tl = el('div', 'timeline')
-    for (const x of u.records) if (!(u.tab === 'agents' && x.kind === 'agent')) tl.append(event(x, links))
-    main.append(tl)
 
     if (u.tab === 'pulls') {
       const revs = el('div')
       for (const [name, verdict] of Object.entries(u.latest)) {
-        const line = el('div', 'line')
+        const line = el('div', 'fline')
         const ic = icon(ACTION_ICON[verdict] || 'comment')
         ic.style.color = actionInk() ? 'var(--text-secondary)' : colourOf(verdict)
-        line.append(ic, el('span', 'grow', name), el('span', 'dim', verdict))
+        line.append(avatar(name, 20), el('span', 'grow', name), ic)
+        line.title = `${name}: ${verdict}`
         revs.append(line)
       }
       if (!revs.childNodes.length) revs.append(el('span', 'dim', 'No reviews'))
       facts.append(factsSection('Reviewers', revs))
+    }
+    if (u.tab === 'pulls' || u.tab === 'issues' || (u.marks || []).length) {
+      const pills = el('div', 'pills')
+      if (u.area) pills.append(areaPill(u.area))
+      if (data) for (const i of u.marks || []) if (i < data.classes.length) pills.append(labelPill(i))
+      if (!pills.childNodes.length) pills.append(el('span', 'dim', 'None'))
+      facts.append(factsSection('Labels', pills))
+    }
+    if (u.tab === 'pulls') {
       if (u.issue) {
-        const line = el('div', 'line')
+        const line = el('div', 'fline')
         line.append(unitChip(u.issue, 'issues'), el('span', 'grow', u.issue.title))
         line.lastChild.title = u.issue.title
         facts.append(factsSection('Closes', line))
       }
       facts.append(factsSection('Timing', kv([['opened', since(u.at)], ['first review', u.first_review == null ? '–' : `${dur(u.first_review)} later`],
-        [u.state === 'closed' ? 'closed' : 'merged', u.ended == null ? '–' : since(u.ended)], ['commits', String(u.commits.length)]])))
+        [u.state === 'closed' ? 'closed' : 'merged', u.ended == null ? '–' : since(u.ended)], ['commits', String(u.commits.length)], ['changed', `+${u.plus} −${u.minus} in ${plural(u.paths.length, ['file', 'files'])}`]])))
       if (u.flags.length) {
-        const f = el('div', 'flags')
-        f.style.cssText = 'display:flex;flex-wrap:wrap;gap:4px'
+        const f = el('div', 'pills')
         for (const x of u.flags) f.append(el('span', `chip chip-sans ${flagTone()}`, x))
         facts.append(factsSection('Flags', f))
       }
     }
     if (u.tab === 'issues') {
-      const prs = el('div', 'cell')
-      prs.style.cssText = 'display:flex;flex-wrap:wrap;gap:4px'
+      const prs = el('div', 'pills')
       for (const p of u.pulls) prs.append(unitChip(p, 'pulls'))
       if (!u.pulls.length) prs.append(el('span', 'dim', 'None'))
-      facts.append(factsSection('Pull requests', prs), factsSection('Details', kv([['area', u.area], ['origin', u.origin], ['comments', String(u.comments)]])))
+      facts.append(factsSection('Pull requests', prs), factsSection('Details', kv([['origin', u.origin], ['comments', String(u.comments)]])))
     }
     if ((u.tab === 'pulls' || u.tab === 'issues') && u.elsewhere && u.elsewhere.length > 1) facts.append(factsSection('In every run', everyRun(u.elsewhere, u.run)))
     if (u.tab === 'discussions') {
-      const people = el('div')
-      people.append(u.posters.join(', '))
+      const people = el('div', 'avs')
+      for (const n of u.posters) people.append(avatar(n, 20))
       facts.append(factsSection('Posting', people))
       if (Object.keys(links).length) {
-        const m = el('div')
-        m.style.cssText = 'display:flex;flex-wrap:wrap;gap:4px'
+        const m = el('div', 'pills')
         for (const [n, key] of Object.entries(links)) {
-          const b = el('button', 'chip chip-sans chip-tone-neutral chip-act', `#${n}`)
+          const b = el('button', 'chip chip-sans chip-tone-neutral chip-act gchip', `#${n}`)
           b.dataset.anchor = unitRef(key)
           b.onclick = () => openKey(key)
           m.append(b)
@@ -1669,8 +2069,7 @@
       }
       if (names.length) facts.append(factsSection('Review partners', t))
       if (u.pulls.length) {
-        const prs = el('div')
-        prs.style.cssText = 'display:flex;flex-wrap:wrap;gap:4px'
+        const prs = el('div', 'pills')
         for (const p of u.pulls) prs.append(unitChip(p, 'pulls'))
         facts.append(factsSection('Pull requests opened', prs))
       }
@@ -1679,8 +2078,9 @@
     body.append(main, facts)
     box.replaceChildren(nav, head, body)
     box.classList.toggle('dnarrow', box.clientWidth < 620)
-    const hit = box.querySelector('.ev.focus')
+    const hit = box.querySelector('.it.focus, .crow.focus')
     if (hit) hit.scrollIntoView({ block: 'center' })
+    else if (page === 'files' && focusRef) box.querySelector(`.file[data-anchor="${CSS.escape(focusRef)}"]`)?.scrollIntoView({ block: 'start' })
     else box.scrollTop = 0
   }
 
@@ -1756,11 +2156,24 @@
       if (pal && thimble.setLabelColour) thimble.setLabelColour(pal.id, pal.value, b.dataset.colour)
       pal = null
       drawPop()
+    } else if (act === 'allruns') {
+      menu = null
+      S.runs = []
+      load()
+    } else if (act === 'togglerun') {
+      e.stopPropagation()
+      const all = data.runs.map((r) => r.run)
+      const next = data.chosen.includes(b.dataset.run) ? data.chosen.filter((r) => r !== b.dataset.run) : [...data.chosen, b.dataset.run]
+      S.runs = next.length && next.length < all.length ? all.filter((r) => next.includes(r)) : []
+      load()
+    } else if (act === 'onlyrun') {
+      menu = null
+      onlyRun(b.dataset.run)
     }
   })
-  // a click anywhere else closes the menu and the palette, before the page's own handlers see it
+  // a click anywhere else closes the menus and the palette, before the page's own handlers see it
   document.addEventListener('click', (e) => {
-    if ((menu || pal) && !e.target.closest('#pop, #cbtn, .swb')) {
+    if ((menu || pal) && !e.target.closest('#pop, #cbtn, #runbtn, .swb')) {
       menu = null
       pal = null
       drawPop()
