@@ -828,6 +828,84 @@ async def test_the_linked_sessions_example_lays_each_run_out_as_a_tree_and_compa
     assert both["groups"][1]["n"] == sum(len(_uses(files[s["id"]])) for s in ov["sessions"] if s["run"] == "r2")
 
 
+async def test_the_linked_sessions_reader_cleans_up_what_the_harness_wrote(samples, inproc, bound):
+    """The sample's runs come from three versions of a harness, and the reader reads each the same way: a truncated last
+    line is skipped, a line written twice counts once, lines out of order are read in time order, the files on disk
+    win over the index, every timestamp form lands on one UTC clock, and the facts only a result's text holds are read
+    from it."""
+    name = "linked-sessions"
+    slug = _save_example(name)
+    d = samples / name
+    files = _transcripts(d)
+    ov = await views.reader_call(name, slug, "records", {"op": "overview"})
+    by_id = {s["id"]: s for s in ov["sessions"]}
+
+    # r2's lead was cut off while writing its last message: its calls stand, it has no result, the torn line resolves to
+    # nothing
+    lead2 = next((d / "runs" / "r2").glob("*.jsonl"))
+    torn = lead2.read_text("utf-8").splitlines()
+    with pytest.raises(ValueError):
+        json.loads(torn[-1])
+    t = await views.reader_call(name, slug, "records", {"op": "session", "id": lead2.stem})
+    assert t["n"] == len(_uses(files[lead2.stem])) and not any(i["kind"] == "result" for i in t["items"])
+    assert await views.resolve_locator(name, slug, {"path": f"runs/r2/{lead2.name}", "fragment": f"L{len(torn)}"}) is None
+
+    # r3's webhooks logger wrote three lines twice: they count once, and a repeated line cites the call it repeats
+    hooks = next(s["id"] for s in ov["sessions"] if s["run"] == "r3" and s["agent"] == "webhooks")
+    path = next(p for p in d.glob(f"runs/r3/*/subagents/agent-{hooks}.jsonl"))
+    raw = [json.loads(ln) for ln in path.read_text("utf-8").splitlines()]
+    again = next(n for n, r in enumerate(raw, 1) if any(x["uuid"] == r["uuid"] for x in raw[: n - 1]))
+    assert by_id[hooks]["n"] == len({u["id"] for u in _uses(raw)}) < len(_uses(raw))
+    rel = path.relative_to(d).as_posix()
+    got = await views.resolve_locator(name, slug, {"path": rel, "fragment": f"L{again}"})
+    assert f"{rel}#L{again}" in got["refs"] and got["key"] == hooks
+
+    # lines out of order in r1's client-port are read in time order
+    port = next(s["id"] for s in ov["sessions"] if s["run"] == "r1" and s["agent"] == "client-port")
+    t = await views.reader_call(name, slug, "records", {"op": "session", "id": port})
+    times = [i["t"] for i in t["items"] if i["kind"] == "call"]
+    assert times == sorted(times)
+
+    # the index: r2's misses its test-runner, found on disk and under the Task call that sent it its prompt; r1's lists a
+    # survey whose file is gone
+    index2 = json.loads((d / "runs" / "r2" / "sessions-index.json").read_text("utf-8"))
+    listed = {e.get("agentId") for e in index2["entries"]}
+    missing = [s for s in ov["sessions"] if s["run"] == "r2" and s["parent"] and s["id"] not in listed]
+    assert [s["agent"] for s in missing] == ["test-runner"] and missing[0]["parent"] == lead2.stem and missing[0]["spawn"] is not None
+    index1 = json.loads((d / "runs" / "r1" / "sessions-index.json").read_text("utf-8"))
+    gone = [e["session_id"] for e in index1["sessions"] if not (d / "runs" / "r1" / e["file"]).is_file()]
+    assert gone and not set(gone) & set(by_id)
+    # r1's Task calls name no subagent_type, so its subagents take their names from the index
+    assert {s["agent"] for s in ov["sessions"] if s["run"] == "r1"} == {e["agent"] for e in index1["sessions"]}
+
+    # every timestamp form on one clock: r3 wrote local time at +02:00, r2 its prompts in epoch milliseconds
+    runs = {r["id"]: r for r in ov["runs"]}
+    assert runs["r3"]["started"] == "2026-09-13T09:15:00+00:00"
+    tester = missing[0]
+    assert 0 < tester["start"] - tester["spawn"] < 10, "a subagent starts just after the call that spawned it"
+    assert all(by_id[c["s"]]["start"] <= c["t"] <= by_id[c["s"]]["end"] for c in ov["calls"])
+
+    # versions: the Task tool renamed Agent is one tool, and version 1's isError flags errors as is_error does
+    assert "Agent" not in [f["v"] for f in ov["fields"]["tool"]]
+    assert {c["out"] for c in ov["calls"] if by_id[c["s"]]["run"] == "r1"} == {"ok", "error", "denied"}
+
+    # facts only in a result's text: an exit code, a denial's reason, a Grep's matched files, a command's files
+    t = await views.reader_call(name, slug, "records", {"op": "session", "id": port})
+    calls = [i for i in t["items"] if i["kind"] == "call"]
+    failed = next(i for i in calls if i["out"] == "error" and i["tool"] == "Bash")
+    assert failed["exit"] == 1 and failed["result"] and not failed["result"].startswith("Exit code")
+    assert "invoicer/client/http.py" in failed["files"]
+    lead1 = next((d / "runs" / "r1").glob("*.jsonl")).stem
+    t = await views.reader_call(name, slug, "records", {"op": "session", "id": lead1})
+    push = next(i for i in t["items"] if i["kind"] == "call" and i["out"] == "denied")
+    assert push["result"] == "git push needs the analyst's approval"
+    # a Grep's matches: in version 1 its result's lines after the first, later in toolUseResult.filenames
+    t2 = await views.reader_call(name, slug, "records", {"op": "session", "id": lead2.stem})
+    for items in (t["items"], t2["items"]):
+        grep = next(i for i in items if i["kind"] == "call" and i["tool"] == "Grep" and i["matches"])
+        assert grep["matches"] and all("/" in m for m in grep["matches"])
+
+
 @pytest.mark.parametrize("name", sorted(EXAMPLES))
 async def test_every_worked_example_s_page_loads_headless_at_its_first_place(name, samples, inproc, bound, tmp_path):
     """The whole check a view ticket's session runs, the headless page included, where this machine has Node and the
