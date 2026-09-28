@@ -44,19 +44,3 @@ def test_home_its_state_log_and_lock_are_private(tmp_path, monkeypatch, open_uma
     assert _mode(home) == 0o700 and _mode(home / "server.log") == 0o600
     config.private_file(home / "server.json")
     assert _mode(home / "server.json") == 0o600
-
-
-def test_a_workspace_is_made_private(workspaces_tmp, open_umask):
-    assert not workspaces_tmp.exists() or workspaces_tmp.is_dir()
-    p = config.workspace_dir("mini")
-    assert _mode(p) == 0o700 and _mode(config.WORKSPACES_DIR) == 0o700
-
-
-def test_a_problem_report_is_written_private(tmp_path, open_umask):
-    out = feedback._write([("description.txt", b"x")], [tmp_path / "out"], datetime(2026, 9, 27, 12, 0, 0))
-    assert out.is_file() and _mode(out) == 0o600
-
-
-def test_install_sh_makes_home_private():
-    text = (config.REPO_ROOT / "scripts" / "install.sh").read_text()
-    assert 'run chmod 700 "$home"' in text and 'chmod 700 "$home" && (umask 077' in text

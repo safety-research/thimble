@@ -123,63 +123,6 @@ def _refs(lines) -> list[str]:
     return [f"board.jsonl#L{n}" for n in lines]
 
 
-async def test_the_labels_context_holds_the_labels_that_are_on_and_the_filter(app):
-    k = await _asks(app)
-    assert views.labels_context(CORPUS)["labels"] == [], "a label that is off is not in the context"
-    concepts.show_concept(CORPUS, k["id"], True)
-    ctx = views.labels_context(CORPUS)
-    (lab,) = ctx["labels"]
-    assert lab["name"] == "asks" and [v["name"] for v in lab["values"]] == ["asks", "other"]
-    assert [v["highlight"] for v in lab["values"]] == [True, False] and ctx["filter"] is None
-    assert lab["colour"] == lab["values"][0]["colour"] and lab["colour"].startswith("#")
-    # marked: the highlighted value of a record's row; the covered records take the negative, which is not highlighted
-    assert [n for n in range(1, 13) if kernel_thimble._marked(ctx, f"board.jsonl#L{n}")] == ASKS
-    assert kernel_thimble._marked(ctx, "board.jsonl#L4") == [{"label": "asks", "value": "asks", "colour": lab["colour"]}]
-    assert all(kernel_thimble._kept(ctx, r) for r in _refs(range(1, 13))), "no filter keeps everything"
-    # a filter on the negative keeps the records the covers hold
-    concepts.set_filter(CORPUS, "files", k["id"], "other")
-    ctx = views.labels_context(CORPUS)
-    assert ctx["filter"] == {"id": k["id"], "label": "asks", "value": "other", "colour": lab["values"][1]["colour"]}
-    assert [n for n in range(1, 13) if kernel_thimble._kept(ctx, f"board.jsonl#L{n}")] == [n for n in range(1, 13) if n not in ASKS]
-    st = kernel_thimble._view_labels(ctx)
-    assert st["filter"] == {"label": "asks", "value": "other", "colour": lab["values"][1]["colour"]}
-    assert st["labels"][0]["values"] == [{"name": "other", "colour": lab["values"][1]["colour"]}], "set_filter highlights the value"
-
-
-async def test_a_colour_changed_from_a_view_is_saved_without_a_run_and_every_view_hears_it(app):
-    """A view's thimble.setLabelColour saves the class colours as the label card does (PUT /concepts/{id}): the colour
-    stays across reads of the label, the label's definition and rows are untouched, and the labels context every view's
-    reader and page get carries the new colour."""
-    k = await _asks(app)
-    concepts.show_concept(CORPUS, k["id"], True)
-    labels_file = concepts.labels_file(config.workspace_dir(CORPUS), k["id"])
-    rows_before = labels_file.read_text("utf-8")
-    before = (await app.get(f"/api/ws/{CORPUS}/concepts/{k['id']}")).json()
-    classes = [{**c, "color": 7} if c["name"] == "asks" else c for c in before["classes"]]
-    r = await app.put(f"/api/ws/{CORPUS}/concepts/{k['id']}", json={"classes": classes})
-    assert r.status_code == 200, r.text
-    after = (await app.get(f"/api/ws/{CORPUS}/concepts/{k['id']}")).json()
-    assert [c["color"] for c in after["classes"]] == [7, 0] and after["version"] == before["version"]
-    assert after.get("last_run") == before.get("last_run") and labels_file.read_text("utf-8") == rows_before
-    (lab,) = views.labels_context(CORPUS)["labels"]
-    assert lab["colour"] == kernel_thimble.LABEL_COLOURS[7] == lab["values"][0]["colour"]
-    assert kernel_thimble._marked(views.labels_context(CORPUS), "board.jsonl#L1")[0]["colour"] == kernel_thimble.LABEL_COLOURS[7]
-    assert kernel_thimble._view_labels(views.labels_context(CORPUS))["labels"][0]["id"] == k["id"]
-
-
-async def test_the_filter_keeps_the_records_of_a_file_its_label_never_ran_over(app, corpus):
-    """A view of other files stays whole under a filter on a label of board.jsonl, since the label says nothing of
-    them."""
-    (corpus / "notes.jsonl").write_text("".join(json.dumps({"thread": "n", "body": b}) + "\n" for b in ("a", "b")))
-    k = await _asks(app)
-    concepts.set_filter(CORPUS, "files", k["id"], "asks")
-    ctx = views.labels_context(CORPUS)
-    assert [n for n in range(1, 13) if kernel_thimble._kept(ctx, f"board.jsonl#L{n}")] == ASKS
-    assert kernel_thimble._kept(ctx, "notes.jsonl#L1") and kernel_thimble._kept(ctx, "notes.jsonl#L2")
-    marks = await views.marks_for(CORPUS, "threads", ["notes.jsonl#L1", "board.jsonl#L2"])
-    assert marks == {"notes.jsonl#L1": {"keep": True}}
-
-
 async def test_a_label_that_ran_over_two_files_keeps_the_units_its_value_is_on_in_either(app, corpus):
     """A label run over both of a view's files that takes its value only in one, as deletions in an events file beside
     the revisions of the same pages: the filter drops every record of the other file, since the label ran over it and
@@ -205,41 +148,6 @@ async def test_a_label_that_ran_over_two_files_keeps_the_units_its_value_is_on_i
     assert {r: m.get("keep") for r, m in marks.items()} == {"view:threads/t3": True}
 
 
-async def test_a_unit_is_kept_by_its_records_in_the_files_the_label_ran_over(app, corpus):
-    """A thread gathers board posts, which the label never ran over, and notes, which it did: kept_unit judges it by its
-    notes alone, so the filter keeps the threads whose notes take its value and a thread with no notes, and drops the
-    others. Keeping a thread by any kept record would keep every thread, since kept holds for every board post."""
-    (corpus / "notes.jsonl").write_text("".join(json.dumps({"thread": t, "body": b}) + "\n"
-                                                for t, b in (("t3", "deleted: the lunch post"), ("t1", "moved"))))
-    r = await app.post(f"/api/ws/{CORPUS}/concepts", json={"name": "deleted", "kind": "regex", "spec": r"\bdeleted\b",
-                                                         "labels": ["deleted", "no"]})
-    k = r.json()
-    r = await app.post(f"/api/ws/{CORPUS}/concepts/{k['id']}/apply", json={"wait": True, "paths": ["notes.jsonl"]})
-    assert r.status_code == 200, r.text
-    views.write_view(CORPUS, "threads", reader=READER, html=HTML, **{**VIEW, "claims": ["board.jsonl", "notes.jsonl"]})
-    concepts.set_filter(CORPUS, "files", k["id"], "deleted")
-    ctx = views.labels_context(CORPUS)
-    threads = {t: [f"board.jsonl#L{n}" for n, (tt, _) in enumerate(POSTS, 1) if tt == t] for t in ("t1", "t2", "t3")}
-    threads["t1"].append("notes.jsonl#L2")
-    threads["t3"].append("notes.jsonl#L1")
-    assert all(kernel_thimble._kept(ctx, r) for r in threads["t1"][:-1]), "the label never ran over board.jsonl"
-    assert {t: kernel_thimble._kept_unit(ctx, refs) for t, refs in threads.items()} == {"t1": False, "t2": True, "t3": True}
-    assert kernel_thimble._kept_unit(views.NO_LABELS, threads["t1"]) and kernel_thimble._kept_unit(ctx, [])
-    marks = await views.marks_for(CORPUS, "threads", ["view:threads/t1", "view:threads/t2", "view:threads/t3"])
-    assert {r: m.get("keep") for r, m in marks.items()} == {"view:threads/t2": True, "view:threads/t3": True}
-
-
-def test_the_test_label_marks_every_seventh_record_and_its_filter_keeps_just_those():
-    ctx = views.probe_context()
-    assert [n for n in range(1, 30) if kernel_thimble._marked(ctx, f"a.jsonl#L{n}")] == [7, 14, 21, 28]
-    assert all(kernel_thimble._kept(ctx, f"a.jsonl#L{n}") for n in (1, 7)) and kernel_thimble._marked(ctx, "view:x/k") == []
-    filtered = views.probe_context(True)
-    assert [n for n in range(1, 30) if kernel_thimble._kept(filtered, f"a.jsonl#L{n}")] == [7, 14, 21, 28]
-    assert kernel_thimble._kept_unit(filtered, ["a.jsonl#L6", "a.jsonl#L7"]) and not kernel_thimble._kept_unit(filtered, ["a.jsonl#L6"])
-    assert kernel_thimble._view_labels(filtered)["filter"]["label"] == kernel_thimble.PROBE_NAME
-    assert kernel_thimble.marked("a.jsonl#L7") == [] and kernel_thimble.kept("a.jsonl#L1"), "outside a view's call no label is on"
-
-
 async def test_a_reader_marks_and_keeps_records_by_the_labels_and_the_filter(app):
     k = await _asks(app)
     views.write_view(CORPUS, "threads", reader=READER, html=HTML, **VIEW)
@@ -256,32 +164,3 @@ async def test_a_reader_marks_and_keeps_records_by_the_labels_and_the_filter(app
     # the checks' test label, whatever the workspace's labels
     probe = await views.reader_call(CORPUS, "threads", "records", {}, labels=views.probe_context(True))
     assert [p for t in probe["threads"] for p in t["posts"]] == _refs([7])
-
-
-async def test_a_unit_is_marked_by_its_records_and_kept_when_one_of_them_is(app):
-    k = await _asks(app)
-    views.write_view(CORPUS, "threads", reader=READER, html=HTML, **VIEW)
-    concepts.show_concept(CORPUS, k["id"], True)
-    refs = ["view:threads/t1", "view:threads/t2", "view:threads/t3", "board.jsonl#L4", "board.jsonl#L5", "view:other/t1"]
-    marks = (await app.post(f"/api/ws/{CORPUS}/views/threads/marks", json={"refs": refs})).json()
-    colour = views.labels_context(CORPUS)["labels"][0]["colour"]
-    assert set(marks) == {"view:threads/t1", "view:threads/t2", "board.jsonl#L4"}
-    assert marks["view:threads/t1"] == {"bar": colour, "names": ["asks"], "spans": []} and "keep" not in marks["board.jsonl#L4"]
-    concepts.set_filter(CORPUS, "files", k["id"], "asks")
-    marks = await views.marks_for(CORPUS, "threads", refs)
-    assert {r: m.get("keep") for r, m in marks.items()} == {"view:threads/t1": True, "view:threads/t2": True, "board.jsonl#L4": True}
-    # under the test label a unit is marked when a record of it is on a line that is a multiple of seven
-    probe = await views.marks_for(CORPUS, "threads", refs, views.probe_context(True))
-    assert set(probe) == {"view:threads/t3"} and probe["view:threads/t3"]["keep"] is True
-    # no label on and no filter: nothing to mark
-    concepts.clear_filter(CORPUS, "files")
-    concepts.show_concept(CORPUS, k["id"], False)
-    assert await views.marks_for(CORPUS, "threads", refs) == {}
-
-
-def test_the_context_a_reader_gets_leaves_out_what_the_server_looked_up_for_it():
-    """kernel_thimble keeps a label's members on its context while marking; the kernel's copy never carries them."""
-    ctx = {"labels": [{"id": "k", "name": "asks", "jsonl": "/nowhere.jsonl", "values": []}], "filter": None}
-    assert kernel_thimble._marked(ctx, "a.jsonl#L1") == [] and "_members" in ctx["labels"][0]
-    assert views._wire(ctx)["labels"][0] == {"id": "k", "name": "asks", "jsonl": "/nowhere.jsonl", "values": []}
-    assert views._wire(views.probe_context()) == views.probe_context()

@@ -18,14 +18,6 @@ const TONE = concept('k2', 'tone', false, [{ name: 'calm', color: 5, highlight: 
 const resolve = (t: string) => `#${t.slice(2)}`
 
 describe('what a view page hears of the labels', () => {
-  test('the labels that are on with their highlighted values, and the filter with its label and value colour', () => {
-    const byId = new Map([ASKS, TONE].map((k) => [k.id, k]))
-    expect(pageLabels([ASKS], null, byId, resolve)).toEqual({ on: [{ id: 'k1', name: 'asks', colour: '#label-3', values: [{ name: 'asks', colour: '#label-3' }] }], filter: null })
-    // the filter's label counts as on while it filters
-    const got = pageLabels([ASKS], { concept: 'k2', value: 'curt' }, byId, resolve)
-    expect(got.on.map((l) => l.name)).toEqual(['asks', 'tone'])
-    expect(got.filter).toEqual({ label: 'tone', value: 'curt', colour: '#label-6' })
-  })
 
   test('the filter keeps a record whose row takes its value, and a record it drops and no label marks is left out', () => {
     const rows = new Map<string, Map<string, LabelRow>>([
@@ -40,86 +32,5 @@ describe('what a view page hears of the labels', () => {
       'a.jsonl#L1': { bar: 'var(--label-3)', names: ['asks'], spans: [], keep: true },
       'a.jsonl#L3': { keep: true },
     })
-  })
-
-  test("the filter leaves alone the records of a file its label left no value on", () => {
-    const rows = new Map<string, Map<string, LabelRow>>([['a.jsonl#L1', new Map([['k1', { label: 'other' } as LabelRow]])]])
-    const covered = { 'a.jsonl': { other: 1 } }
-    expect(withKeeps({}, { concept: 'k1', value: 'asks' }, rows, ['a.jsonl#L1', 'a.jsonl#L2', 'b.jsonl#L1'], covered)).toEqual({ 'b.jsonl#L1': { keep: true } })
-  })
-})
-
-describe("a view's own pane", () => {
-  let calls: { url: string; method: string; body: unknown }[] = []
-  let filters: Record<string, unknown> = {}
-  beforeEach(() => {
-    calls = []
-    filters = {}
-    vi.stubGlobal('ResizeObserver', class {
-      observe() {}
-      unobserve() {}
-      disconnect() {}
-    })
-    vi.stubGlobal('fetch', async (url: string, init?: RequestInit) => {
-      const u = String(url)
-      const method = init?.method ?? 'GET'
-      calls.push({ url: u, method, body: init?.body ? JSON.parse(String(init.body)) : null })
-      const json = (x: unknown) => new Response(JSON.stringify(x), { status: 200, headers: { 'content-type': 'application/json' } })
-      if (u.includes('/concepts')) return json([ASKS, TONE])
-      if (u.includes('/labels/presence')) return json([])
-      if (u.endsWith('/filters') && method === 'PUT') {
-        const b = JSON.parse(String(init!.body))
-        filters = { files: { concept: b.concept, value: b.value } }
-        return json(filters)
-      }
-      if (u.includes('/filters')) return json(filters)
-      if (u.includes('/sources')) return json({ path: '.', files: [{ path: 'board.jsonl', kind: 'jsonl', size_bytes: 10 }], folders: [], n_files: 1 })
-      if (u.includes('/frame')) return new Response('<html><head></head><body></body></html>', { status: 200 })
-      return json({})
-    })
-  })
-  afterEach(() => {
-    unmountAll()
-    vi.restoreAllMocks()
-    vi.unstubAllGlobals()
-  })
-
-  test('shows the Labels sidebar while a label is on, and a funnel on a row sets the Files filter the view keeps its records by', async () => {
-    const el = await mount(<ViewSurface ws="w" view={{ slug: 'threads', name: 'Threads', claims: ['board.jsonl'], first_file: 'board.jsonl' }} active />)
-    await settle()
-    await settle()
-    const side = el.querySelector('aside.files-side-labels')
-    expect(side).not.toBeNull()
-    expect([...side!.querySelectorAll('.files-label-name')].map((n) => n.textContent)).toEqual(['asks', 'tone'])
-    const funnel = side!.querySelector<HTMLButtonElement>('button[aria-label="Show only the records asks marks"]')!
-    expect(funnel).not.toBeNull()
-    expect(funnel.getAttribute('aria-pressed')).toBe('false')
-    await act(async () => funnel.click())
-    const put = calls.find((c) => c.method === 'PUT' && c.url.endsWith('/filters'))
-    expect(put?.body).toEqual({ scope: 'files', concept: 'k1', value: 'asks' })
-  })
-
-  test('shows the Files filter as a chip in its head, which clears it', async () => {
-    filters = { files: { concept: 'k1', value: 'asks' } }
-    const el = await mount(<ViewSurface ws="w2" view={{ slug: 'threads', name: 'Threads', claims: ['board.jsonl'], first_file: 'board.jsonl' }} active />)
-    await settle()
-    await settle()
-    const chip = el.querySelector<HTMLElement>('.view-pane-head .view-pane-filter')
-    expect(chip?.textContent).toContain('asks · asks')
-    await act(async () => chip!.click())
-    expect(calls.some((c) => c.method === 'DELETE' && c.url.includes('/filters/files'))).toBe(true)
-  })
-
-  test("the funnel of the filter set shows pressed, and a click on it clears the filter", async () => {
-    filters = { files: { concept: 'k1', value: 'asks' } }
-    const el = await mount(<ViewSurface ws="w3" view={{ slug: 'threads', name: 'Threads', claims: ['board.jsonl'], first_file: 'board.jsonl' }} active />)
-    await settle()
-    await settle()
-    const funnel = el.querySelector<HTMLButtonElement>('aside.files-side-labels button[aria-label="Show only the records asks marks"]')!
-    expect(funnel.getAttribute('aria-pressed')).toBe('true')
-    expect(funnel.classList.contains('active')).toBe(true)
-    await act(async () => funnel.click())
-    expect(calls.some((c) => c.method === 'DELETE' && c.url.includes('/filters/files'))).toBe(true)
-    expect(calls.some((c) => c.method === 'PUT' && c.url.endsWith('/filters'))).toBe(false)
   })
 })

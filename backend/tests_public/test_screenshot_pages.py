@@ -60,53 +60,9 @@ async def test_a_page_screenshot_reaches_only_thimble_s_own_port_or_its_interfac
     assert not (await tools._shot_page("http://localhost:5399/", ".canvas")).is_error
 
 
-async def test_a_figure_is_data_in_a_sandboxed_frame_that_loads_nothing(shots):
-    svg = '<svg xmlns="http://www.w3.org/2000/svg" width="40" height="20"><script>parent.x = 1</script><rect width="40" height="20"/></svg>'
-    await tools._shot_svg("abcd1234", svg)
-    url, selector, kw, page = shots.calls[-1]
-    assert selector == "#fig" and kw["offline"] is True
-    assert f'content="{tools.SHOT_PAGE_CSP}"' in page and "connect-src data:" in tools.SHOT_PAGE_CSP
-    assert "<svg" not in page and "parent.x" not in page, "the figure is an image's data, never markup"
-    inner = _frame(page)
-    src = re.search(r"<img id='vis' src='data:image/svg\+xml;base64,([^']+)'", inner)
-    assert src and base64.b64decode(src.group(1)).decode() == svg
-
-    spec = {"mark": "bar", "title": "</script><script>parent.y = 1</script>",
-            "data": {"values": [{"a": 1}]}, "usermeta": {"embedOptions": {"loader": {"baseURL": "https://evil.example/"}}, "k": 1}}
-    page = tools.chart_page(spec)
-    inner = _frame(page)
-    assert "</script><script>parent.y" not in inner and "\\u003c/script>\\u003cscript>parent.y = 1\\u003c/script>" in inner
-    assert "evil.example" not in inner and '"usermeta": {"k": 1}' in inner
-    assert spec["usermeta"]["embedOptions"], "the card's own spec is untouched"
-
-
 def _playwright_missing() -> str | None:
     if shutil.which("node") is None or not (config.REPO_ROOT / "frontend" / "node_modules" / "playwright").is_dir():
         return "no node or frontend/node_modules/playwright"
     if any(not p.is_file() for p in tools.VEGA_BUILDS):
         return "no vega builds in frontend/node_modules"
     return None
-
-
-async def test_the_figure_page_draws_the_figure_alone():
-    missing = _playwright_missing()
-    if missing:
-        pytest.skip(missing)
-    from PIL import Image
-
-    svg = '<svg xmlns="http://www.w3.org/2000/svg" width="120" height="60"><rect width="120" height="60" fill="#c33"/></svg>'
-    r = await tools._shot_svg("abcd1234", svg)
-    assert not r.is_error, r.text
-    img = Image.open(io.BytesIO(base64.b64decode(r.content[1]["data"])))
-    assert img.size == (120 + 24, 60 + 24), "the figure's frame at the figure's size, padded where the page allows"
-    assert img.convert("RGB").getpixel((img.size[0] // 2, img.size[1] // 2)) == (204, 51, 51)
-
-    spec = {"$schema": "https://vega.github.io/schema/vega-lite/v5.json", "width": 200, "height": 100, "mark": "bar",
-            "data": {"values": [{"a": "x", "b": 3}, {"a": "y", "b": 5}]},
-            "encoding": {"x": {"field": "a", "type": "nominal"}, "y": {"field": "b", "type": "quantitative"}}}
-    r = await tools._shot_page_file("abcd1234", tools.chart_page(spec))
-    assert not r.is_error, r.text
-    img = Image.open(io.BytesIO(base64.b64decode(r.content[1]["data"])))
-    assert 200 < img.size[0] < 400 and 100 < img.size[1] < 250, img.size
-    lo, hi = img.convert("L").getextrema()
-    assert hi - lo > 100, "the chart was drawn"

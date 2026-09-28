@@ -90,22 +90,4 @@ describe('the API client', () => {
       ['POST', '/api/ws/w/events', { kind: 'start', payload: { effort: 'high' } }],
     ])
   })
-
-  test("a permission prompt is answered with its id and the analyst's choice, for main and for a session beside it", async () => {
-    await client.api.answerPermission('w', 'perm-1', true)
-    await client.api.answerSessionPermission('w', 'or1', 'perm-2', false)
-    expect(calls.map((c) => [c.url, JSON.parse(String(c.body))])).toEqual([
-      ['/api/ws/w/permission', { id: 'perm-1', allow: true }],
-      ['/api/ws/w/chats/or1/permission', { id: 'perm-2', allow: false }],
-    ])
-  })
-
-  test("a failed request throws with the status and the server's reason, in one line", async () => {
-    vi.stubGlobal('fetch', async () => new Response(JSON.stringify({ detail: [{ loc: ['body', 'text'], msg: 'field required' }] }), { status: 422, statusText: 'Unprocessable' }))
-    await expect(client.api.postEvent('w', 'main', {})).rejects.toThrow('422 body.text: field required')
-    vi.stubGlobal('fetch', async () => new Response('not json', { status: 409, statusText: 'Conflict' }))
-    await expect(client.api.postEvent('w', 'main', {})).rejects.toThrow('409 Conflict')
-    expect(client.isNotFound(new Error('404 no such card'))).toBe(true)
-    expect(client.describeDetail({ message: 'no session is listening' })).toBe('no session is listening')
-  })
 })

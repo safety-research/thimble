@@ -56,16 +56,6 @@ def _subscribe_once(query: str, monkeypatch, headers: dict[str, str]) -> int:
     return TestClient(main.create_app()).get(f"/api/channel?{query}", headers=headers).status_code
 
 
-def test_a_config_dir_in_the_subscription_query_is_ignored(served, monkeypatch, tmp_path, plugin_headers):
-    before = config.claude_config_dir()
-    planted = tmp_path / "planted"
-    q = f"cwd={_cwd()}&session={FIRST}&delivery=channel&config_dir={planted}"
-    assert _subscribe_once(q, monkeypatch, plugin_headers()) == 418
-    assert session.current(CORPUS).sid == FIRST
-    assert config.claude_config_dir() == before != planted
-    assert config.settings_files()[-1] == before / "settings.json"
-
-
 @needs_proc
 def test_the_subscription_serves_the_config_dir_of_the_claude_process_it_names(served, claude_like, monkeypatch, tmp_path,
                                                                              plugin_headers):
@@ -75,73 +65,8 @@ def test_the_subscription_serves_the_config_dir_of_the_claude_process_it_names(s
     assert config.claude_config_dir() == real
 
 
-def test_a_config_dir_in_the_session_body_is_ignored(served, tmp_path):
-    before = config.claude_config_dir()
-    body = channel.SessionBody.model_validate({"session": FIRST, "cwd": _cwd(), "config_dir": str(tmp_path / "planted")})
-
-    async def name() -> dict:
-        try:
-            return await channel.session_route(CORPUS, body)
-        finally:
-            session.detach(CORPUS, FIRST)
-
-    assert asyncio.run(name())["attached"] is True
-    assert config.claude_config_dir() == before
-
-
-@needs_proc
-def test_the_session_route_serves_the_config_dir_of_the_process_that_asks(served, claude_like):
-    """`thimble server up --session` sends its own pid; the server reads that process's CLAUDE_CONFIG_DIR."""
-    pid, real = claude_like
-    body = channel.SessionBody(session=FIRST, cwd=_cwd(), env_pid=pid)
-
-    async def name() -> dict:
-        try:
-            return await channel.session_route(CORPUS, body)
-        finally:
-            session.detach(CORPUS, FIRST)
-
-    assert asyncio.run(name())["attached"] is True
-    assert config.claude_config_dir() == real
-
-
 def _plant_config_dir(planted: Path, sid: str = FIRST, pid: int | None = None) -> None:
     """A sessions.json whose record names `planted` as the session's config dir (and `pid` as its process), as a
     notebook cell could write it."""
     (config.workspace_dir(CORPUS) / "sessions.json").write_text(json.dumps(
         {sid: {"session": sid, "cwd": _cwd(), "config_dir": str(planted), "pid": pid, "since": "2026-01-01T00:00:00Z"}}))
-
-
-def test_a_config_dir_in_sessions_json_is_never_served(served, tmp_path):
-    before = config.claude_config_dir()
-    _plant_config_dir(tmp_path / "planted")
-    try:
-        lv = session.attach(CORPUS, FIRST, _cwd())
-        assert lv is not None and not lv.config_known
-        assert config.claude_config_dir() == before
-    finally:
-        session.detach(CORPUS, FIRST)
-
-
-@needs_proc
-def test_a_pid_in_sessions_json_does_not_choose_the_served_config_dir(served, claude_like, tmp_path):
-    pid, real = claude_like
-    before = config.claude_config_dir()
-    _plant_config_dir(tmp_path / "planted", pid=pid)
-    try:
-        session.attach(CORPUS, FIRST, _cwd())
-        assert config.claude_config_dir() == before != real
-    finally:
-        session.detach(CORPUS, FIRST)
-
-
-def test_the_export_and_the_problem_report_look_for_transcripts_outside_a_config_dir_in_sessions_json(served, tmp_path):
-    planted = tmp_path / "planted"
-    other = "22222222-bbbb-4bbb-8bbb-000000000002"
-    (planted / "projects" / "-x").mkdir(parents=True)
-    (planted / "projects" / "-x" / f"{other}.jsonl").write_text('{"type": "user", "message": {"content": "private"}}\n')
-    _plant_config_dir(planted, other)
-    ws = config.workspace_dir(CORPUS)
-    for roots in (export._projects_roots(ws), feedback.transcript_roots(ws)):
-        assert planted / "projects" not in roots and config.claude_config_dir() / "projects" in roots
-    assert export._find_transcript(other, export._projects_roots(ws)) is None

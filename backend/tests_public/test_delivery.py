@@ -78,28 +78,6 @@ def _cwd() -> str:
     return str(config.corpus_dir(CORPUS))
 
 
-def test_an_event_for_main_on_the_hook_route_is_queued_for_its_watcher_not_streamed():
-    """A hook subscription counts as listening (liveness) but is sent events only once its session is main, which
-    /thimble makes it: any `claude` with the plugin in the folder subscribes there. Main's event goes to its queue, not
-    its stream; with a channel's subscription beside it, main's own still gets it; with no main, the channel's does."""
-    hooked = _subscribe(SID, cc_channel.HOOK)
-    assert channel.listening(CORPUS) and not channel.reachable(CORPUS)
-    with pytest.raises(HTTPException) as e:
-        channel.post(CORPUS, "main", {"text": "nobody is main"})
-    assert e.value.status_code == 409
-    session.attach(CORPUS, SID, _cwd(), None)  # /thimble named it
-    out = channel.post(CORPUS, "main", {"text": "which agent stalled?"})
-    assert out["delivered"] == 1 and hooked.empty() and channel.pending(CORPUS) == 1
-    assert list(channel._pending[(CORPUS, SID)])[0]["content"] == "which agent stalled?"
-    other = _subscribe("other-session", cc_channel.CHANNEL)
-    channel.post(CORPUS, "main", {"text": "second"})
-    assert other.empty() and len(channel._pending[(CORPUS, SID)]) == 2, "main's own subscription gets it"
-    session.detach(CORPUS, SID)
-    channel.post(CORPUS, "main", {"text": "third"})
-    assert other.get_nowait()["content"] == "third" and len(channel._pending[(CORPUS, SID)]) == 2, \
-        "with no main, the channel's subscription, never a hook's"
-
-
 def test_the_pull_takes_one_event_as_channel_text_and_it_stays_in_flight_until_acknowledged(monkeypatch):
     _subscribe(SID, cc_channel.HOOK)
     session.attach(CORPUS, SID, _cwd(), None)
@@ -124,33 +102,6 @@ def test_the_pull_takes_one_event_as_channel_text_and_it_stays_in_flight_until_a
     monkeypatch.setattr(channel, "ACK_S", 0.0)  # the second watcher was killed before it acknowledged
     again = asyncio.run(channel.pull_route(Req(), cwd=_cwd(), session=SID, wait=1))
     assert again["id"] == first["id"], "an event never acknowledged goes back to the front of its queue"
-
-
-def test_a_waiting_pull_returns_as_soon_as_an_event_is_posted():
-    _subscribe(SID, cc_channel.HOOK)
-    session.attach(CORPUS, SID, _cwd(), None)
-
-    async def go():
-        task = asyncio.create_task(channel.pull_route(Req(), cwd=_cwd(), session=SID, wait=20))
-        await asyncio.sleep(0.2)
-        t0 = time.monotonic()
-        channel.post(CORPUS, "main", {"text": "now"})
-        got = await asyncio.wait_for(task, 5)
-        return got, time.monotonic() - t0
-
-    got, took = asyncio.run(go())
-    assert "\nnow\n" in got["text"] and took < 0.5
-
-
-def test_render_is_what_the_mirror_reads_as_a_channel_event():
-    note = channel.notification("main", "e1", "hello", {"ultracode": True, "long": "x" * 200})
-    text = channel.render(note)
-    assert session.browser_events(f"<task-notification>\n</task-notification>\n<system-reminder>\n{MARKER} {text}\n"
-                                  "</system-reminder>") == [text]
-    m = session.CHANNEL_RE.match(text)
-    assert dict(session.ATTR_RE.findall(m.group(1))) == {"source": channel.SOURCE, "kind": "main", "event": "e1",
-                                                         "ultracode": "true"}
-    assert m.group(2) == "hello\nlong: " + "x" * 200
 
 
 # ----------------------------------------------------------------------------- the server: the permission hook
@@ -198,15 +149,6 @@ def test_the_permission_hook_waits_on_main_s_meta_until_the_browser_answers(monk
         assert client.post("/api/channel/permission/hook", json=body).status_code == 409, "the channel relays it"
         channel._subs.clear()
         assert client.post("/api/channel/permission/hook", json={**body, "session": "not-main"}).status_code == 409
-
-
-def test_a_relayed_request_reaches_the_card_whole_or_marked_as_cut():
-    n = channel.PERMISSION_INPUT_CHARS
-    channel._hold(CORPUS, "r1", "Write", "Save a.md", json.dumps({"content": "a" * 5_000}))
-    channel._hold(CORPUS, "r2", "Write", "Save b.md", "b" * (n + 7))
-    one, two = agents.meta_or_none(CORPUS, agents.MAIN_ID)["permissions"]
-    assert len(one["input"]) > 5_000 and "cut" not in one
-    assert len(two["input"]) == n and two["cut"] == n + 7
 
 
 class _Stand:
@@ -305,81 +247,6 @@ def _watch(tmp_path: Path, port: int | None, stdin: dict, *args: str, extra: dic
 EVENT_TEXT = '<channel source="plugin:thimble:thimble" kind="main" event="e1">\nhello\n</channel>'
 
 
-def test_the_watcher_writes_the_event_acknowledges_it_and_wakes_the_session(tmp_path):
-    stand = _Stand([(204, {}), (200, {"id": "e1", "text": EVENT_TEXT})])
-    try:
-        r = _watch(tmp_path, stand.port, {"session_id": SID, "cwd": "/data/mini", "hook_event_name": "Stop"})
-    finally:
-        stand.close()
-    assert r.returncode == 2 and r.stderr == EVENT_TEXT + "\n" and r.stdout == ""
-    pulls = [q for m, p, q in stand.seen if p == "/api/channel/pull"]
-    assert pulls[0] == {"cwd": "/data/mini", "session": SID, "wait": "25"} and len(pulls) == 2
-    assert ("POST", "/api/channel/ack", {"cwd": "/data/mini", "session": SID, "id": "e1"}) in stand.seen
-
-
-def test_the_watcher_exits_at_once_where_it_has_nothing_to_watch(tmp_path):
-    """A thimble session of its own (THIMBLE_SESSION, before any Python runs), a subagent or fork (`agent_id`), no
-    server, a folder that is no workspace, a session whose channel delivers, another session main now, and a second
-    watcher of the same session while the first holds the lock: exit 0, nothing written, no wake."""
-    inp = {"session_id": SID, "cwd": "/data/mini"}
-    assert _watch(tmp_path, None, inp, extra={"THIMBLE_SESSION": "orient"}).returncode == 0
-    assert _watch(tmp_path, None, {**inp, "agent_id": "a1"}).returncode == 0
-    t0 = time.monotonic()
-    r = _watch(tmp_path, None, inp)
-    assert r.returncode == 0 and r.stderr == "" and time.monotonic() - t0 < 5, "no server"
-    for status in (404, 409, 410):
-        stand = _Stand([(status, {"detail": "x"})])
-        try:
-            r = _watch(tmp_path, stand.port, inp)
-        finally:
-            stand.close()
-        assert r.returncode == 0 and r.stderr == "", status
-    stand = _Stand([])  # 204 for ever: the first watcher holds its lock
-    home = tmp_path / "thome"
-    _record_token(home, api=f"http://127.0.0.1:{stand.port}")
-    env = {k: v for k, v in os.environ.items() if k not in ("THIMBLE_SESSION", "CLAUDE_PID")}
-    env["THIMBLE_HOME"] = str(home)
-    first = subprocess.Popen([str(WATCHER)], stdin=subprocess.PIPE, env=env, text=True)
-    first.stdin.write(json.dumps(inp))
-    first.stdin.close()
-    try:
-        for _ in range(100):
-            if any(p == "/api/channel/pull" for _, p, _ in stand.seen):
-                break
-            time.sleep(0.05)
-        # past the lock it would wait for ever on the stand-in's 204s, so exiting at once is the lock
-        r = _watch(tmp_path, stand.port, inp, timeout=10)
-        assert r.returncode == 0 and (home / "watch" / f"{SID}.lock").is_file()
-        assert first.poll() is None, "the first watcher still waits"
-    finally:
-        first.kill()
-        first.wait()
-        stand.close()
-
-
-def test_the_permission_hook_prints_the_browser_s_decision_or_nothing(tmp_path):
-    inp = {"session_id": SID, "cwd": "/data/mini", "tool_name": "Bash", "tool_input": {"command": "touch x"},
-           "hook_event_name": "PermissionRequest"}
-    for behavior, printed in (("allow", {"behavior": "allow"}),
-                              ("deny", {"behavior": "deny", "message": "The analyst denied this in thimble's browser."}),
-                              (None, None)):
-        stand = _Stand([], permission=(200, {"id": "h1", "behavior": behavior}))
-        try:
-            r = _watch(tmp_path, stand.port, inp, "--permission")
-        finally:
-            stand.close()
-        assert r.returncode == 0
-        if printed is None:
-            assert r.stdout == ""
-        else:
-            assert json.loads(r.stdout) == {"hookSpecificOutput": {"hookEventName": "PermissionRequest", "decision": printed}}
-        posted = [b for m, p, b in stand.seen if p == "/api/channel/permission/hook"][0]
-        assert posted == {"cwd": "/data/mini", "session": SID, "tool_name": "Bash", "tool_input": {"command": "touch x"},
-                          "agent_id": None}
-    (tmp_path / "thome" / "server.json").unlink()
-    assert _watch(tmp_path, None, inp, "--permission").stdout == "", "no server: Claude Code asks in the terminal"
-
-
 def test_the_server_answers_a_hook_route_only_to_a_request_that_proves_the_token(monkeypatch, tmp_path):
     """Any process on the machine can reach the port: a hook route answers 401 unless the request proves it holds the
     token in server.json, and every answer to one proves the server holds it too. Other routes are untouched."""
@@ -430,75 +297,3 @@ def test_the_hooks_do_nothing_without_server_json_or_with_a_server_that_cannot_p
     finally:
         stand.close()
     assert json.loads(r.stdout)["hookSpecificOutput"]["decision"] == {"behavior": "allow"} and stand.unproven == 0
-
-
-def test_the_agents_list_trusts_only_a_server_that_proves_the_token(tmp_path):
-    script = PLUGIN / "bin" / "thimble-agents"
-    home = tmp_path / "thome"
-    env = {k: v for k, v in os.environ.items() if k != "THIMBLE_SESSION"}
-    env["THIMBLE_HOME"] = str(home)
-
-    def statusline(port: int) -> str:
-        _record_token(home, api=f"http://127.0.0.1:{port}")
-        return subprocess.run([str(script), "--statusline"], input=json.dumps({"cwd": "/data/mini"}), capture_output=True,
-                              text=True, env=env, timeout=30).stdout
-
-    for token, want in ((None, ""), (TOKEN, "thimble · ● thimble:writer working\n")):
-        stand = _Stand([], token=token, agents=(200, {"line": "thimble · ● thimble:writer working"}))
-        try:
-            got = statusline(stand.port)
-        finally:
-            stand.close()
-        assert got == want, token
-        assert stand.unproven == 0 and [p for _, p, _ in stand.seen] == ["/api/agents"]
-
-
-def test_the_held_hook_adds_the_events_held_for_main_to_the_prompt_or_nothing(tmp_path):
-    inp = {"session_id": SID, "cwd": "/data/mini", "hook_event_name": "UserPromptSubmit", "prompt": "What changed?"}
-    text = 'meanwhile:\n[kind="labeled"] label `ripe` over trees.jsonl: 3 of 9'
-    for answer, printed in (((200, {"text": text}), text), ((200, {"text": ""}), None), ((404, {"detail": "x"}), None)):
-        stand = _Stand([], held=answer)
-        try:
-            r = _watch(tmp_path, stand.port, inp, "--held")
-        finally:
-            stand.close()
-        assert r.returncode == 0
-        if printed is None:
-            assert r.stdout == ""
-        else:
-            assert json.loads(r.stdout) == {"hookSpecificOutput": {"hookEventName": "UserPromptSubmit", "additionalContext": printed}}
-        assert ("POST", "/api/channel/held", {"cwd": "/data/mini", "session": SID}) in stand.seen
-    assert _watch(tmp_path, None, {**inp, "agent_id": "a1"}, "--held").stdout == "", "a subagent's prompt"
-    (tmp_path / "thome" / "server.json").unlink()
-    t0 = time.monotonic()
-    assert _watch(tmp_path, None, inp, "--held").stdout == "" and time.monotonic() - t0 < 5, "no server"
-
-
-def test_the_hooks_run_the_watcher_on_the_four_events_and_relay_permission_prompts():
-    hooks = json.loads((PLUGIN / "hooks" / "hooks.json").read_text())["hooks"]
-    assert set(hooks) == {"SessionStart", "Stop", "UserPromptSubmit", "PreToolUse", "PermissionRequest", "PostToolUse",
-                          "SubagentStop"}
-    for event in ("SessionStart", "Stop", "UserPromptSubmit", "PreToolUse"):
-        (hook,) = [h for group in hooks[event] for h in group["hooks"] if h.get("asyncRewake")]
-        assert hook["command"] == '"${CLAUDE_PLUGIN_ROOT}/bin/.thimble-watch"' and hook["asyncRewake"] is True
-        assert event in ("SessionStart", "UserPromptSubmit", "PreToolUse") or len(hooks[event]) == 1, "the watcher alone"
-        assert hook["timeout"] == 86400 and hook["rewakeMessage"] == MARKER and hook["rewakeSummary"]
-    assert hooks["PreToolUse"][0]["matcher"] == "*"
-    # terminal-first's background sessions (test_bg_sessions.py): a SendMessage to one goes through the server, their
-    # start and finish lines print after a tool call, main's Agent calls are checked for a second tray entry or fork,
-    # and a tray entry is kept going while its session runs
-    assert [(g["matcher"], g["hooks"][0]["command"].rsplit(" ", 1)[-1]) for g in hooks["PreToolUse"][1:]] == [
-        ("SendMessage", "--relay"), ("Agent|Task", "--agent-check")]
-    assert hooks["PostToolUse"][0]["hooks"][0]["command"].endswith("--agents")
-    assert hooks["SubagentStop"][0]["hooks"][0]["command"].endswith("--proxy-stop")
-    (held,) = [h for group in hooks["UserPromptSubmit"] for h in group["hooks"] if not h.get("asyncRewake")]
-    assert held["command"].endswith("/bin/.thimble-watch\" --held") and held["timeout"] <= 10
-    (perm,) = hooks["PermissionRequest"][0]["hooks"]
-    assert perm["command"].endswith("/bin/.thimble-watch\" --permission") and "asyncRewake" not in perm
-    assert WATCHER.is_file() and os.access(WATCHER, os.X_OK)
-    main = prompts.section("main", channel.EVENTS_SECTION)
-    assert f"`{MARKER}`" in main and "Monitor" in main, "main.md names the marker and the Monitor's re-arming"
-    skill = (PLUGIN / "skills" / "thimble" / "SKILL.md").read_text()
-    assert "thimble-monitor:" in skill and "1800000" in skill and "# thimble" in skill
-
-

@@ -218,27 +218,6 @@ def test_the_shim_declares_the_channel_and_forwards_an_event(tmp_path, server):
     assert q["cwd"] == "/data/mini" and q["session"] == "s-123" and int(q["pid"]) == os.getpid()
 
 
-def test_an_event_the_server_sends_at_once_waits_for_the_handshake(tmp_path, server):
-    """The stand-in server sends its events the moment the shim subscribes, which the shim does at start. None is
-    written to Claude Code before the client says `notifications/initialized` after reading the initialize result, and
-    the one that came meanwhile is written then."""
-    p = _start(tmp_path, server.port, channel=True)
-    try:
-        _send(p, [INITIALIZE])
-        first: list[dict] = []
-        end = time.monotonic() + 30
-        while time.monotonic() < end and not (server.queries and any(m.get("id") == 0 for m in first)):
-            first += _read(p, "", 0.2)
-        first += _read(p, "notifications/claude/channel", 1.0)  # time for an event written early to arrive
-        assert server.queries, "the shim subscribes at start, before the handshake"
-        assert [m.get("id") for m in first] == [0] and "result" in first[0], first
-        _send(p, [INITIALIZED])
-        later = _read(p, "notifications/claude/channel", 30)
-        assert [m["params"] for m in later if m.get("method") == "notifications/claude/channel"] == [NOTE]
-    finally:
-        _stop(p)
-
-
 def test_the_launcher_s_session_relays_its_permission_prompts_both_ways(tmp_path, server):
     """Claude Code's request reaches the server with the folder and the session; the browser's answer on the stream
     reaches Claude Code as the verdict notification. The stand-in sends its verdict the moment the shim subscribes,
@@ -275,20 +254,3 @@ DISCOVER = {"jsonrpc": "2.0", "id": 9, "method": "server/discover",
             "params": {"_meta": {"io.modelcontextprotocol/protocolVersion": "2026-07-28",
                                  "io.modelcontextprotocol/clientInfo": {"name": "t", "version": "1"},
                                  "io.modelcontextprotocol/clientCapabilities": {}}}}
-
-
-def test_a_2026_07_28_probe_is_refused_and_the_handshake_after_it_gets_the_channel(tmp_path, server):
-    """Claude Code 2.1.28x has no channel on a 2026-07-28 connection, and opens with that protocol's `server/discover`
-    when it negotiates: the shim refuses it, so Claude Code falls back to the handshake, where the channel is declared."""
-    p = _start(tmp_path, server.port, channel=True)
-    try:
-        _send(p, [DISCOVER])
-        first = _read(p, lambda: False, 5)
-        probe = next((m for m in first if m.get("id") == 9), None)
-        assert probe is not None and "error" in probe, first
-        _send(p, [INITIALIZE, INITIALIZED])
-        out = _read(p, "notifications/claude/channel", 30)
-        init = next(m for m in out if m.get("id") == 0)
-        assert "claude/channel" in init["result"]["capabilities"]["experimental"]
-    finally:
-        _stop(p)

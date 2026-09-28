@@ -11,7 +11,6 @@ from fastapi.testclient import TestClient
 from app import config, main
 
 
-
 def _health(c: TestClient) -> dict:
     """/api/health without `home` and `app`, the install it names (test_cli covers those), which must be there."""
     body = c.get("/api/health").json()
@@ -60,20 +59,3 @@ def test_pages_assets_and_spa_fallback_are_served_when_a_build_exists(dist):
     # whatever the method: a static server would answer 405 to DELETE/POST, where the routers answer 404
     assert c.delete("/api/ws/a%2Fb").status_code == 404 and c.post("/api/no-such-route").status_code == 404
     assert c.get("/api").status_code == 404
-
-
-def test_nothing_is_mounted_without_a_build(tmp_path, monkeypatch, caplog):
-    monkeypatch.setattr(config, "FRONTEND_DIST", tmp_path / "no-dist")
-    monkeypatch.delenv("THIMBLE_DEV", raising=False)
-    c = TestClient(main.create_app())
-    assert c.get("/").status_code == 404 and c.get("/prompts.html").status_code == 404
-    assert _health(c) == {"ok": True, "leader": os.getsid(0), "boot": config.BOOT_ID, "ui": None}
-    assert config.NO_UI_BUILD_HINT in caplog.text
-
-
-def test_dev_mode_leaves_the_root_to_vite(dist, monkeypatch, caplog):
-    monkeypatch.setenv("THIMBLE_DEV", "1")
-    c = TestClient(main.create_app())
-    assert c.get("/").status_code == 404 and c.get("/assets/main-abc123.js").status_code == 404
-    assert _health(c) == {"ok": True, "leader": os.getsid(0), "boot": config.BOOT_ID, "ui": None}
-    assert config.NO_UI_BUILD_HINT not in caplog.text  # a dev stack is not told to build

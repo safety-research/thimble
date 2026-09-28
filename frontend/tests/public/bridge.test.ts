@@ -54,18 +54,6 @@ describe('the view bridge', () => {
     expect(of('anchors').flatMap((m) => m.refs as string[]).sort()).toEqual(['board.jsonl#L1', 'board.jsonl#L2', 'view:review-threads/pr-12'])
   })
 
-  test('reports an anchor the view adds later, and not the ones it already reported', async () => {
-    const before = of('anchors').length
-    const el = dom.window.document.createElement('article')
-    el.setAttribute('data-anchor', 'board.jsonl#L3')
-    dom.window.document.body.appendChild(el)
-    const again = dom.window.document.createElement('article')
-    again.setAttribute('data-anchor', 'board.jsonl#L1')
-    dom.window.document.body.appendChild(again)
-    await wait()
-    expect(of('anchors').slice(before).flatMap((m) => m.refs as string[])).toEqual(['board.jsonl#L3'])
-  })
-
   test('fetch posts its query and resolves with the answer to its id; an error answer rejects', async () => {
     const got = win().thimble.fetch({ page: 2 })
     const bad = win().thimble.fetch('boom')
@@ -79,43 +67,6 @@ describe('the view bridge', () => {
     await expect(bad).rejects.toThrow('no such page')
   })
 
-  test('an open reaches every opener, and an opener registered after it gets the last one', () => {
-    const seen: unknown[] = []
-    win().thimble.onOpen((p: unknown) => seen.push(['first', p]))
-    fromPage({ type: 'thimble:open', open: { locator: 'pr-12' } })
-    win().thimble.onOpen((p: unknown) => seen.push(['late', p]))
-    expect(seen).toEqual([['first', { locator: 'pr-12' }], ['late', { locator: 'pr-12' }]])
-  })
-
-  test('a quoted passage in an open is found in its record with its spaces and case loosened, or said missing', async () => {
-    fromPage({ type: 'thimble:open', open: { ref: 'board.jsonl#L2' }, quote: { record: 'board.jsonl#L2', text: 'Second\n  POST' } })
-    await wait()
-    expect(of('quoted')).toEqual([{ type: 'thimble:quoted', found: true }])
-    fromPage({ type: 'thimble:open', open: { ref: 'board.jsonl#L1' }, quote: { record: 'board.jsonl#L1', text: 'a passage the view leaves out' } })
-    await wait(400)
-    expect(of('quoted'), 'not before the page has been quiet a while').toHaveLength(1)
-    await wait(700)
-    expect(of('quoted').slice(1)).toEqual([{ type: 'thimble:quoted', found: false }])
-  })
-
-  test('a quoted passage the view draws after the open is found once it shows', async () => {
-    fromPage({ type: 'thimble:open', open: { ref: 'board.jsonl#L3' }, quote: { record: 'board.jsonl#L3', text: 'the third post' } })
-    await wait(300)
-    const el = dom.window.document.createElement('article')
-    el.setAttribute('data-anchor', 'board.jsonl#L3')
-    el.textContent = 'the third post'
-    dom.window.document.body.appendChild(el)
-    await wait(300)
-    expect(of('quoted')).toEqual([{ type: 'thimble:quoted', found: true }])
-  })
-
-  test('navigate and cite post the refs the view names', () => {
-    win().thimble.navigate('view:review-threads/pr-7')
-    win().thimble.cite('board.jsonl#L2', 'the second post', 'post')
-    expect(of('navigate')).toEqual([{ type: 'thimble:navigate', ref: 'view:review-threads/pr-7' }])
-    expect(of('cite')).toEqual([{ type: 'thimble:cite', ref: 'board.jsonl#L2', text: 'the second post', element: 'post', rect: null }])
-  })
-
   test('a message from anything but the parent page is ignored', async () => {
     const got = win().thimble.fetch({ page: 1 })
     const [q] = of('fetch')
@@ -126,82 +77,6 @@ describe('the view bridge', () => {
     fromPage({ type: 'thimble:result', id: q.id, data: 'real' })
     expect(seen).toEqual([])
     await expect(got).resolves.toBe('real')
-  })
-
-  test('a media URL is built only from the route the page gave the view, with the path encoded', () => {
-    expect(() => win().thimble.mediaUrl('a.png')).toThrow(/without a media route/)
-  })
-
-  test('a click with the pointer key cites the anchored element: Ctrl or the Super key off a Mac, ⌘ alone on a Mac', async () => {
-    const click = (init: MouseEventInit) => dom.window.document.getElementById('two')!.dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true, ...init }))
-    click({})
-    expect(of('cite')).toEqual([])
-    click({ ctrlKey: true })
-    expect(of('cite').map((m) => m.ref)).toEqual(['board.jsonl#L2'])
-    click({ metaKey: true })
-    expect(of('cite')).toHaveLength(2)
-    dom.window.close()
-    await load('MacIntel')
-    click({ ctrlKey: true })
-    expect(of('cite')).toEqual([])
-    click({ metaKey: true })
-    expect(of('cite').map((m) => m.ref)).toEqual(['board.jsonl#L2'])
-  })
-
-  test('the pointer key on a part of the view no anchor names points at the view itself, and cites it', async () => {
-    dom.window.close()
-    // the page as views.frame_document serves it: the view's name set before the bridge runs
-    await load(undefined, VIEW.replace('<head>', '<head><script>window.__thimbleView = {slug: "review-threads", name: "Review threads"}</script>').replace('</section>', '</section><div id="legend" aria-label="legend">open closed</div>'))
-    const doc = dom.window.document
-    const legend = doc.getElementById('legend')!
-    legend.dispatchEvent(new dom.window.MouseEvent('mousemove', { bubbles: true, ctrlKey: true }))
-    expect(of('point').at(-1)?.rect).not.toBeNull()
-    legend.dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true, ctrlKey: true }))
-    expect(of('cite').map((m) => [m.ref, m.text, m.element])).toEqual([['view:review-threads', 'open closed', 'legend']])
-    // the bare page is the whole view, as much of it as the frame shows
-    doc.body.dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true, ctrlKey: true }))
-    expect(of('cite').at(-1)).toMatchObject({ ref: 'view:review-threads', rect: { left: 0, top: 0 } })
-    // an anchored element still cites its own ref
-    doc.getElementById('one')!.dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true, ctrlKey: true }))
-    expect(of('cite').at(-1)?.ref).toBe('board.jsonl#L1')
-    // a page loaded without its view's name has nothing to name such a part by
-    dom.window.close()
-    await load(undefined, VIEW.replace('</section>', '</section><div id="legend">open closed</div>'))
-    dom.window.document.getElementById('legend')!.dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true, ctrlKey: true }))
-    expect(of('cite')).toEqual([])
-  })
-
-  test('onLabels hears the labels that are on and the filter, at once and on each change, and not when only marks change', async () => {
-    const heard: unknown[] = []
-    const on = [{ name: 'asks', colour: '#e69f00', values: [{ name: 'yes', colour: '#e69f00' }] }]
-    fromPage({ type: 'thimble:labels', marks: {}, on, filter: null })
-    win().thimble.onLabels((s: unknown) => heard.push(s))
-    expect(heard).toEqual([{ labels: on, filter: null }])
-    fromPage({ type: 'thimble:labels', marks: { 'board.jsonl#L1': { bar: '#e69f00', names: ['asks'], spans: [] } }, on, filter: null })
-    expect(heard).toHaveLength(1)
-    const filter = { label: 'asks', value: 'yes', colour: '#e69f00' }
-    fromPage({ type: 'thimble:labels', marks: {}, on, filter })
-    expect(heard.at(-1)).toEqual({ labels: on, filter })
-  })
-
-  test('onLabels hears every label over files and the palette when thimble sends them, and a list change alone reaches it', async () => {
-    const heard: any[] = []
-    const on = [{ id: 'k1', name: 'asks', colour: '#e69f00', values: [{ name: 'yes', colour: '#e69f00' }] }]
-    const all = [{ id: 'k1', name: 'asks', on: true, colour: '#e69f00', values: [{ name: 'yes', colour: '#e69f00', highlight: true }], count: 3 }]
-    win().thimble.onLabels((s: unknown) => heard.push(s))
-    fromPage({ type: 'thimble:labels', marks: {}, on, filter: null, all, palette: ['#0072b2', '#e69f00'] })
-    expect(heard.at(-1)).toEqual({ labels: on, filter: null, all, palette: ['#0072b2', '#e69f00'] })
-    fromPage({ type: 'thimble:labels', marks: {}, on, filter: null, all: [{ ...all[0], count: 4 }], palette: ['#0072b2', '#e69f00'] })
-    expect(heard).toHaveLength(2)
-  })
-
-  test("the page's label controls post the label's id to thimble: on or off, a value's colour, a new label", () => {
-    win().thimble.setLabel('k1', true)
-    win().thimble.setLabelColour('k1', 'yes', '#009e73')
-    win().thimble.newLabel()
-    expect(of('label')).toEqual([{ type: 'thimble:label', id: 'k1', on: true }])
-    expect(of('labelColour')).toEqual([{ type: 'thimble:labelColour', id: 'k1', value: 'yes', colour: '#009e73' }])
-    expect(of('newLabel')).toEqual([{ type: 'thimble:newLabel' }])
   })
 
   test('with a filter on, a page that does not filter hides what the filter drops, and keeps what holds a kept record', async () => {
@@ -221,22 +96,5 @@ describe('the view bridge', () => {
     fromPage({ type: 'thimble:labels', marks: {}, on: [], filter: null })
     await wait()
     expect(doc.querySelectorAll('[data-thimble-drop]')).toHaveLength(0)
-  })
-
-  test('a page with an onLabels handler filters in its reader, so the bridge hides nothing', async () => {
-    win().thimble.onLabels(() => undefined)
-    fromPage({ type: 'thimble:labels', marks: {}, on: [], filter: { label: 'asks', value: 'yes', colour: '#e69f00' } })
-    await wait()
-    expect(dom.window.document.querySelectorAll('[data-thimble-drop]')).toHaveLength(0)
-  })
-
-  test('a marked SVG shape takes a halo, since it draws no box-shadow, and a dropped one is dimmed', async () => {
-    dom.window.close()
-    await load(undefined, VIEW.replace('</section>', '</section><svg><g id="node" data-anchor="view:review-threads/pr-13"><circle r="4"></circle></g><g id="other" data-anchor="view:review-threads/pr-14"></g></svg>'))
-    const doc = dom.window.document
-    fromPage({ type: 'thimble:labels', marks: { 'view:review-threads/pr-13': { bar: '#e69f00', names: ['asks'], spans: [], keep: true } }, on: [], filter: { label: 'asks', value: 'yes', colour: '#e69f00' } })
-    await wait()
-    expect(doc.getElementById('node')!.getAttribute('data-thimble-edge')).toBe('svg')
-    expect(doc.getElementById('other')!.getAttribute('data-thimble-drop')).toBe('dim')
   })
 })

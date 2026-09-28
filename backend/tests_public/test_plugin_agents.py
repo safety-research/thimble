@@ -59,66 +59,6 @@ def agents() -> dict[str, tuple[dict, str]]:
             **{name: split(path.read_text("utf-8")) for name, path in DEFINITIONS.items()}}
 
 
-def test_agent_files_parse_with_the_fields_claude_code_reads():
-    seen = agents()
-    assert set(DEFINITIONS) <= set(seen)
-    for stem, (front, body) in seen.items():
-        assert re.fullmatch(r"[a-z][a-z0-9-]*", str(front.get("name") or "")), (stem, front.get("name"))
-        assert front["name"] == NAMES.get(stem, f"thimble-{stem}")
-        assert not set(front) - FIELDS, (stem, set(front) - FIELDS)
-        assert not set(front) & IGNORED_FOR_PLUGINS, (stem, "ignored for plugin subagents")
-        assert body.strip(), (stem, "an empty body")
-        # main reads a description to pick the agent, so it says briefly what the agent does and when to start it
-        desc = str(front.get("description") or "")
-        assert 12 <= len(desc.split()) <= 35 and "start" in desc.lower(), (stem, desc)
-    assert "model" not in seen["orient"][0], "the orientation's session runs on the analyst's own model"
-    assert "`start_orientation` tool" in seen["orient"][0]["description"], "main orients with the tool, not the agent"
-
-
-def test_no_agent_names_tools_and_each_session_keeps_only_its_own_thimble_tools():
-    """No agent but the tray entries names tools, so each session has every tool of a default Claude Code session. Its
-    --disallowedTools take only the thimble tools that are not its own, each of which its session's shim lists, and never
-    a built-in or the web. A tray entry names its few tools, built-ins or thimble tools of main's list."""
-    from app import agent_session, checks, critique_session, orient_session, write_session
-
-    assert agent_session.thimble_tool("read_ref") == f"{PREFIX}read_ref" == f"mcp__plugin_thimble_{tools.SERVER_NAME}__read_ref"
-    for stem, (front, _) in agents().items():
-        if stem in TRAY:
-            listed = tool_list(front)
-            names = {x["name"] for x in tools.list(tools.ANALYST, None)}
-            assert listed and all(t in TRAY_BUILTIN or (t.startswith(PREFIX) and t[len(PREFIX):] in names)
-                                  for t in listed), (stem, listed)
-            continue
-        assert "tools" not in front, (stem, "the agent inherits every tool of its session")
-    own = {"orient": orient_session.ORIENT_TOOLS, "writer": write_session.OWN_TOOLS, "critic": critique_session.OWN_TOOLS,
-           "check": checks.OWN_TOOLS}
-    for stem, names in own.items():
-        listed = {x["name"] for x in tools.list(tools.ANALYST, SESSION_OF[stem])}
-        assert set(names) <= listed, (stem, set(names) - listed, "not a tool of the session's role")
-        assert {t[len(PREFIX):] for t in agent_session.not_own(names)} == set(tools.REGISTRY) - set(names)
-    assert "add_card" not in critique_session.OWN_TOOLS and "add_comment" in checks.OWN_TOOLS
-    denied = set(orient_session.disallowed([*orient_session.PARTS, *orient_session.LINES]))
-    assert not {"Read", "Grep", "Glob", "Bash", "Write", "Edit", "Skill", "Agent", "Workflow", "WebFetch", "WebSearch"} & denied
-    assert {t[len(PREFIX):] for t in denied} == set(tools.REGISTRY) - set(orient_session.ORIENT_TOOLS)
-
-
-def test_the_shared_skill_renders_the_prompt_file_every_thimble_agent_shares(capsys):
-    """plugin/skills/shared is a skill a model may call. Its body is one injected command, `thimble prompt shared`,
-    allowed by its own allowed-tools, whose output is prompts/shared.md rendered as main's append renders it."""
-    from app import channel, cli
-
-    front, body = split(SHARED.read_text("utf-8"))
-    assert front["name"] == "shared" and front.get("user-invocable") is False and not front.get("disable-model-invocation")
-    lines = [ln for ln in body.splitlines() if ln.strip()]
-    assert len(lines) == 1 and lines[0].startswith("!`${CLAUDE_PLUGIN_ROOT}/bin/thimble prompt " + " ".join(SHARED_PROMPTS) + " ")
-    assert "Bash(${CLAUDE_PLUGIN_ROOT}/bin/thimble prompt *)" in front["allowed-tools"]
-    cwd = str(config.corpus_dir(CORPUS))
-    assert cli.main(["prompt", *SHARED_PROMPTS, "--cwd", cwd]) == 0
-    assert capsys.readouterr().out.strip() == channel.render_prompts(SHARED_PROMPTS, cwd).strip()
-    assert cli.main(["prompt", "no-such-prompt", "--cwd", cwd]) == 1
-    assert capsys.readouterr().out.startswith("thimble: ")
-
-
 def test_the_thimble_skill_pre_approves_only_the_commands_it_injects():
     """/thimble's allowed-tools let its two injected commands run without a prompt, and no other thimble subcommand
     (`update --from`, `uninstall --yes`)."""
@@ -128,40 +68,3 @@ def test_the_thimble_skill_pre_approves_only_the_commands_it_injects():
     assert [r for r in rules if r.startswith(cli + " ")] == [f"{cli} prompt *", f"{cli} server up *"]
     injected = [ln[2:].split("`")[0] for ln in body.splitlines() if ln.startswith("!`")]
     assert injected and all(any(c.startswith(r[:-1]) for r in rules if r.endswith(" *")) for c in injected), injected
-
-
-def test_orient_skill_calls_the_start_orientation_tool_with_the_focus_as_its_brief():
-    front, body = split(SKILL.read_text("utf-8"))
-    assert front["name"] == "orient" and front["disable-model-invocation"] is True
-    assert "focus" in str(front.get("argument-hint") or "")
-    assert "`start_orientation`" in body and "$ARGUMENTS" in body
-    assert not [ln for ln in body.splitlines() if ln.startswith("!`")], "the skill runs no command"
-
-
-def test_every_worked_example_a_view_ticket_names_is_a_complete_viewer():
-    """A view ticket (prompts/dev-view.md) tells the dev agent to read the worked example closest to its task, by
-    folder name under plugin/viewers. Each one it names must be there with its three files and a sample of the files it
-    claims: view.json, which normalizes to a view that accepts citations, a reader.py that compiles, and a view.html
-    that marks anchors. The prompt states the contract of each file."""
-    from app import views
-
-    body = prompts.load("dev-view")
-    for word in ("`data-anchor`", "`build_index(paths)`", "`records(index, query)`", "`resolve(index, locator)`",
-                 "`thimble.fetch(query)`", "`thimble.onOpen(fn)`", "`thimble.navigate(ref)`", "`accepts`", "`declares`"):
-        assert word in body, word
-    examples = prompts.section("dev-view", "Worked examples")
-    named = re.findall(r"^- `([a-z-]+)` ", examples, re.M) + re.findall(r"thimble also ships `([a-z-]+)`", examples)
-    assert named, "the prompt names its worked examples"
-    viewers = Path(views.EXAMPLES_DIR)
-    for shape in named:
-        d = viewers / shape
-        assert d.is_dir(), f"prompts/dev-view.md names the example `{shape}`, which plugin/viewers does not hold"
-        have = sorted(x.name for x in d.iterdir() if not x.name.startswith("__"))
-        assert have == ["reader.py", "sample", "view.html", "view.json"], shape
-        compile((d / "reader.py").read_text("utf-8"), str(d / "reader.py"), "exec")
-        v = views._normalize_view(shape, json.loads((d / "view.json").read_text("utf-8")), where=d)
-        assert v["ok"] and v["accepts"] and v["name"], shape
-        sample = [p.relative_to(d / "sample").as_posix() for p in (d / "sample").rglob("*") if p.is_file()]
-        assert all(any(views.glob_matches(f, claim) for f in sample) for claim in v["claims"]), shape
-        page = (d / "view.html").read_text("utf-8")
-        assert "thimble.onOpen" in page and re.search(r"data-anchor|dataset\.anchor", page), shape

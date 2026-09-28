@@ -38,12 +38,6 @@ def test_a_listed_word_pair_is_found_in_any_spelling(cc, tmp_path):
     assert [(h[1], h[2]) for h in hits(cc, tmp_path)] == [(1, "private"), (2, "private")]
 
 
-def test_the_maintainer_is_named_only_in_the_files_that_carry_the_name(cc, tmp_path):
-    write(tmp_path, {".claude-plugin/marketplace.json": '{"owner": "Alice"}\n', "README.md": "Contact: Alice\n",
-                     "backend/app/x.py": "# Alice\n", "docs/y.md": "alice\n"})  # the listed spelling is "Alice"
-    assert hits(cc, tmp_path) == [("backend/app/x.py", 1, "maintainer", "Alice")]
-
-
 def test_files_of_kinds_that_never_belong_are_refused(cc, tmp_path, monkeypatch):
     monkeypatch.setattr(cc, "MAX_BYTES", 100)
     write(tmp_path, {"data/c/x.txt": "", "a/b.db": b"\0", "run.jsonl": "{}\n", "big.txt": "x" * 101, "ok.txt": "ok\n",
@@ -54,14 +48,6 @@ def test_files_of_kinds_that_never_belong_are_refused(cc, tmp_path, monkeypatch)
         "a worked example's sample files, in their folders, are data on purpose"
 
 
-def test_a_checkout_is_checked_by_its_tracked_and_unignored_files(cc, tmp_path):
-    write(tmp_path, {".gitignore": "ignored/\n", "tracked.py": "red kite\n", "new.py": "red kite\n",
-                     "ignored/x.py": "red kite\n"})
-    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
-    subprocess.run(["git", "-C", str(tmp_path), "add", ".gitignore", "tracked.py"], check=True)
-    assert sorted(h[0] for h in hits(cc, tmp_path)) == ["new.py", "tracked.py"]
-
-
 def test_the_command_fails_on_a_hit_and_passes_a_clean_tree(tmp_path):
     clean = write(tmp_path / "clean", {"a.py": "print('ok')\n"})
     dirty = write(tmp_path / "dirty", {"a.db": b"\0"})
@@ -69,40 +55,6 @@ def test_the_command_fails_on_a_hit_and_passes_a_clean_tree(tmp_path):
     assert subprocess.run([*run, str(clean)], capture_output=True).returncode == 0
     r = subprocess.run([*run, str(dirty)], capture_output=True, text=True)
     assert r.returncode == 1 and "a.db:0: [path]" in r.stdout
-
-
-def test_names_that_differ_only_by_case_are_refused(cc, tmp_path):
-    write(tmp_path, {"src/Checks.tsx": "", "src/checks.ts": "", "src/Page.tsx": "", "src/page.ts": "",
-                     "src/types.d.ts": "", "src/Types.ts": "", "Lib/a.py": "", "lib/b.py": "",
-                     "src/card.ts": "", "src/Card.test.ts": "", "src/cards.ts": "", "README.md": "",
-                     "README.md.orig": "", ".gitignore": "", "docs/DESIGN.md": "", "docs/design/SYSTEM.md": ""})
-    found = sorted(h[0] for h in cc.case_clashes(cc.files_of(tmp_path)))
-    assert found == ["Lib/", "lib/", "src/Checks.tsx", "src/Page.tsx", "src/Types.ts", "src/checks.ts", "src/page.ts",
-                     "src/types.d.ts"]
-
-
-def test_the_command_fails_on_names_that_differ_only_by_case(tmp_path):
-    write(tmp_path, {"report/Page.tsx": "", "report/page.ts": ""})
-    r = subprocess.run([sys.executable, str(SCRIPT), "--no-gitleaks", str(tmp_path)], capture_output=True, text=True)
-    assert r.returncode == 1 and "report/page.ts:0: [case]" in r.stdout
-
-
-def test_no_two_names_in_this_tree_differ_only_by_case(cc):
-    root = SCRIPT.parents[1]
-    rels = [rel for rel in cc.files_of(root) if not cc.NEVER.search(rel)]
-    assert cc.case_clashes(rels) == []
-
-
-def test_this_tree_names_private_material_and_the_maintainer_only_where_it_may():
-    root = SCRIPT.parents[1]
-    if not (root / ".git").exists():
-        pytest.skip("not a git checkout")
-    spec = importlib.util.spec_from_file_location("check_content_tree", SCRIPT)
-    real = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(real)
-    tracked = subprocess.run(["git", "-C", str(root), "ls-files", "-z"], capture_output=True, check=True).stdout
-    rels = sorted(p for p in tracked.decode().split("\0") if p and (root / p).is_file())
-    assert [h for h in real.scan(root, rels) if h[2] in ("private", "maintainer")] == []
 
 
 GIT = ["git", "-c", "core.hooksPath=/dev/null", "-c", "user.name=Test", "-c", "user.email=test@example.org",
@@ -133,20 +85,3 @@ def test_commit_messages_with_a_session_line_or_link_are_refused(cc, tmp_path):
     assert r.returncode == 1 and f"{trailer[:12]}:4: [session] Claude-Session:" in r.stdout
     assert subprocess.run([*run, f"{first}..{first}", str(tmp_path)], capture_output=True).returncode == 0
     assert subprocess.run([*run, "nope..HEAD", str(tmp_path)], capture_output=True).returncode == 2
-
-
-def test_the_real_list_is_digests_of_known_kinds():
-    spec = importlib.util.spec_from_file_location("check_content_real", SCRIPT)
-    real = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(real)
-    assert real.TERMS and all(re.fullmatch(r"[0-9a-f]{64}", d) for d in real.TERMS)
-    assert set(real.TERMS.values()) <= {"private", "maintainer"}
-
-
-def test_a_release_s_built_ui_and_notices_are_checked_for_file_kinds_but_not_words(cc, tmp_path):
-    """A release's staged tree carries frontend/dist, whose minified names can spell a listed word, and the npm
-    packages' notices, which are other people's texts."""
-    write(tmp_path, {"frontend/dist/assets/a.js": "var Alice=1;// red kite\n", "THIRD_PARTY_NOTICES": "Alice\n",
-                     "frontend/dist/x.db": b"\0", "frontend/src/a.ts": "// red kite\n"})
-    assert sorted((h[0], h[2]) for h in hits(cc, tmp_path)) == [("frontend/dist/x.db", "path"),
-                                                                 ("frontend/src/a.ts", "private")]

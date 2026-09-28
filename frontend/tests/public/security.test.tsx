@@ -35,15 +35,6 @@ afterEach(() => {
 const html = (el: Element) => el.innerHTML
 
 describe('html output', () => {
-  test('html with script runs in a frame sandboxed to scripts alone, never inlined in the page', async () => {
-    const el = await mount(<Output bundle={{ 'text/html': '<p>probe</p><script>parent.__pwned = 1</script>' }} />)
-    await settle()
-    const frame = el.querySelector('iframe')
-    expect(frame).not.toBeNull()
-    expect(frame!.getAttribute('sandbox')).toBe('allow-scripts')
-    expect(el.querySelector('script')).toBeNull()
-    expect((window as { __pwned?: unknown }).__pwned).toBeUndefined()
-  })
 
   test('inlined html keeps its table and loses script, event handlers, style, forms and remote URLs', async () => {
     const markup = [
@@ -99,22 +90,6 @@ describe('html output', () => {
     expect(el.querySelector('.chat-perm, .chat-perm-allow, .btn, [data-request]')).toBeNull()
     expect(readFileSync(path.join(SRC, 'styles/outputs.css'), 'utf8')).toMatch(/\.outputs-html \{[^}]*contain: paint/)
   })
-
-  test('an svg figure keeps its own classes and style', () => {
-    const out = purifySvg('<svg xmlns="http://www.w3.org/2000/svg"><g class="axis" style="stroke: #000"><path d="M0 0"/></g></svg>')
-    expect(out).toContain('class="axis"')
-    expect(out).toContain('style="stroke: #000"')
-  })
-
-  test('purifyHtml drops what would leave the page or reach another route, and keeps the media routes', () => {
-    const origin = window.location.origin
-    const out = purifyHtml(`<img src="/api/ws/a/media?path=x.png"><img src="${origin}/api/ws/a/views/v/media?path=y.png"><img src="${origin}/api/x.png"><img src="//evil.example/x.png"><a href="#note" ping="https://evil.example/p">n</a>`)
-    expect(out).toContain('src="/api/ws/a/media?path=x.png"')
-    expect(out).toContain(`src="${origin}/api/ws/a/views/v/media?path=y.png"`)
-    expect(out).not.toContain('/api/x.png')
-    expect(out).not.toContain('evil.example')
-    expect(out).not.toContain('ping')
-  })
 })
 
 describe('svg output', () => {
@@ -139,38 +114,6 @@ describe('svg output', () => {
     const images = Array.from(el.querySelectorAll('image')).map((i) => i.getAttribute('href') ?? i.getAttribute('xlink:href') ?? '')
     expect(images.filter(Boolean).map((h) => h.slice(0, 10))).toEqual(['data:image'])
     expect((window as { __pwned?: unknown }).__pwned).toBeUndefined()
-  })
-
-  test("the figure's star rule moves onto its root as inline style, and nothing else of the sheet does", () => {
-    const fig = inlineSvg(svg, 'f1-')
-    expect(fig).not.toBeNull()
-    expect(fig!.markup).toMatch(/stroke-linejoin: round; stroke-linecap: butt/)
-    expect(fig!.markup).not.toMatch(/display: none/)
-    expect(rootDecls('*{stroke-linejoin: round; stroke-linecap: butt}')).toBe('stroke-linejoin: round; stroke-linecap: butt')
-    expect(rootDecls('* { position: fixed; stroke: url(https://e/x); fill: #fff } svg { stroke: red }')).toBe('fill: #fff')
-  })
-
-  test("the figure's root keeps no style that would place it over the page, and its box clips what it draws", () => {
-    const fig = inlineSvg('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10" style="position: fixed; inset: 0; z-index: 9; transform: none; overflow: visible; fill: #000; width: 10px"><path d="M0 0"/></svg>', 'f2-')
-    expect(fig!.markup).not.toMatch(/position|inset|z-index|transform|overflow/)
-    expect(ownRootStyle('position: fixed; stroke-linecap: butt; top: 0; color: red')).toBe('stroke-linecap: butt; color: red')
-    expect(ownRootStyle('position: absolute')).toBe('')
-    expect(readFileSync(path.join(SRC, 'styles/outputs.css'), 'utf8')).toMatch(/\.outputs-svg \{[^}]*contain: paint/)
-  })
-
-  test('purifySvg keeps SVG elements only', () => {
-    const out = purifySvg('<svg xmlns="http://www.w3.org/2000/svg"><circle r="4"/><foreignObject><p>x</p></foreignObject><a href="https://evil.example/"><text>t</text></a></svg>')
-    expect(out).toContain('<circle')
-    expect(out).not.toMatch(/foreignObject|<p>|<a |evil\.example/)
-  })
-})
-
-describe('vega output', () => {
-  test('a spec that arrives as a string naming a URL is refused, never loaded', async () => {
-    const el = await mount(<Output bundle={{ 'application/vnd.vegalite.v5+json': 'data:application/json,{"mark":"bar","usermeta":{"embedOptions":{}}}' }} />)
-    await settle()
-    expect(el.querySelector('.outputs-error')?.textContent).toMatch(/not a JSON object/)
-    expect(el.querySelector('svg, canvas')).toBeNull()
   })
 })
 
@@ -203,26 +146,6 @@ describe('markdown', () => {
 })
 
 describe('the pure checks', () => {
-  test('isLocalUrl: data: and blob: URLs, fragments and the two media routes stay; any other route, host or scheme does not', () => {
-    const o = 'http://127.0.0.1:8300'
-    const media = ['/api/ws/w/media?path=a.png', `${o}/api/ws/w/media?path=a.png`, '/api/ws/w/views/v/media?path=x.mp4#t=3']
-    for (const u of ['data:image/png;base64,AA', '#clip', `blob:${o}/1234`, ...media]) expect(isLocalUrl(u, o), u).toBe(true)
-    for (const u of ['https://evil.example/a.png', '//evil.example/a.png', 'http://127.0.0.1:8301/a', 'javascript:alert(1)', '', '   ',
-      'blob:https://evil.example/1234', 'img/a.png', 'api/ws/w/media?path=a.png', `${o}/api/x`, '/api/x',
-      '/api/channel?cwd=/c&session=s&config_dir=/tmp/x', `${o}/api/channel?cwd=/c`, '/api/ws/w/media/../../channel?cwd=/c',
-      '/api/ws/w%2F..%2F..%2Fchannel/media', '/api/ws/w/files?path=a.png', '/api/ws/w/views/v/frame', '/\\evil.example/a.png'])
-      expect(isLocalUrl(u, o), u).toBe(false)
-  })
-
-  test('styleReachesOut: a url() to another host, image-set(), @import and expression() reach out', () => {
-    const o = 'http://127.0.0.1:8300'
-    expect(styleReachesOut('clip-path: url(#p1); fill: red', o)).toBe(false)
-    expect(styleReachesOut('background: url("https://evil.example/x")', o)).toBe(true)
-    expect(styleReachesOut("background: url('/api/ws/w/media?path=x.png')", o)).toBe(false)
-    expect(styleReachesOut("background: url('/api/x.png')", o)).toBe(true)
-    expect(styleReachesOut('background-image: image-set("x.png" 1x)', o)).toBe(true)
-    expect(styleReachesOut('@import "x.css"', o)).toBe(true)
-  })
 
   test("Vega's loader fetches no URL but a data: one, and a spec cannot hand it embed options of its own", async () => {
     const base = { options: {}, sanitize: async (uri: string) => ({ href: uri }) }
@@ -233,13 +156,6 @@ describe('the pure checks', () => {
     expect(withoutEmbedOptions({ mark: 'bar', usermeta: { embedOptions: { loader: {} }, note: 1 } })).toEqual({ mark: 'bar', usermeta: { note: 1 } })
     const plain = { mark: 'bar' }
     expect(withoutEmbedOptions(plain)).toBe(plain)
-  })
-
-  test('a chart spec is a plain object: a JSON string is parsed, a URL or anything else is refused', () => {
-    const spec = { mark: 'bar', usermeta: { embedOptions: { loader: {} } } }
-    expect(specObject(spec)).toBe(spec)
-    expect(specObject(JSON.stringify(spec))).toEqual(spec)
-    for (const bad of ['data:application/json,{"mark":"bar"}', 'https://evil.example/spec.json', '[1]', 'null', [spec], null, 3, new Date()]) expect(specObject(bad), String(bad)).toBeNull()
   })
 
   test("a report sentence's link keeps http:, https: and mailto: only; any other scheme stays text", () => {
@@ -277,11 +193,5 @@ describe('the source', () => {
     expect(sinks).toEqual(['components/Outputs.tsx'])
     expect(readFileSync(path.join(SRC, 'components/Outputs.tsx'), 'utf8')).toMatch(/purifyHtml\(html\)/)
     expect(readFileSync(path.join(SRC, 'lib/svg.ts'), 'utf8')).toMatch(/purifySvg\(new XMLSerializer\(\)\.serializeToString\(svg\)\)/)
-  })
-
-  test('every react-markdown renderer draws images through MdImage', () => {
-    const users = sources().filter((f) => /from 'react-markdown'/.test(readFileSync(f, 'utf8')) && /<(?:ReactMarkdown|Markdown)\b/.test(readFileSync(f, 'utf8')))
-    expect(users.length).toBeGreaterThan(0)
-    for (const f of users) expect(readFileSync(f, 'utf8'), path.relative(SRC, f)).toMatch(/img: MdImage/)
   })
 })

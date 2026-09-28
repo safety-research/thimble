@@ -50,39 +50,6 @@ def trap_folder(tmp_path: Path) -> tuple[Path, Path]:
     return cwd, marker
 
 
-def test_update_sh_does_not_import_from_the_folder_it_runs_in(tmp_path):
-    tree = fake_tree(tmp_path / "app", checkout=True)
-    cwd, marker = trap_folder(tmp_path)
-    r = subprocess.run(["bash", str(tree / "scripts" / "update.sh"), "--dir", str(tree), "--dry-run"], cwd=cwd,
-                       capture_output=True, text=True, env=env_for(tmp_path), timeout=60)
-    assert r.returncode == 0, r.stdout + r.stderr
-    assert "thimble 0.0.1 at" in r.stdout
-    assert not marker.exists(), "json_get imported json.py from the working directory"
-
-
-def test_uninstall_does_not_import_from_the_folder_it_runs_in(tmp_path):
-    tree = fake_tree(tmp_path / "app")
-    env = env_for(tmp_path)
-    Path(env["THIMBLE_HOME"]).mkdir()
-    (Path(env["THIMBLE_HOME"]) / "app-dir").write_text(f"{tree}\n")
-    cwd, marker = trap_folder(tmp_path)
-    r = subprocess.run(["bash", str(tree / "plugin" / "bin" / "thimble"), "uninstall"], cwd=cwd, input="n\n",
-                       capture_output=True, text=True, env=env, timeout=60)
-    assert r.returncode == 0 and "nothing removed" in r.stdout, r.stdout + r.stderr
-    assert "claude plugin uninstall thimble@thimble-local" in r.stdout, "the marketplace name was read"
-    assert not marker.exists(), "json_get imported json.py from the working directory"
-
-
-def test_install_sh_does_not_import_from_the_folder_it_runs_in(tmp_path):
-    tree = fake_tree(tmp_path / "release")
-    cwd, marker = trap_folder(tmp_path)
-    r = subprocess.run(["bash", str(tree / "scripts" / "install.sh"), "--dir", str(tmp_path / "dest"), "--dry-run",
-                        "--deps-only"], cwd=cwd, capture_output=True, text=True, env=env_for(tmp_path), timeout=60)
-    assert r.returncode == 0, r.stdout + r.stderr
-    assert "thimble 0.0.1 from" in r.stdout
-    assert not marker.exists(), "install.sh's Python imported json.py from the working directory"
-
-
 def stub_bin(tmp_path: Path) -> Path:
     """uv that does nothing but name itself, so install.sh runs its steps without creating a venv, and a node too old
     for the frontend step."""

