@@ -210,3 +210,38 @@ def test_claude_codes_config_changes_only_on_a_yes_and_uninstall_takes_back_what
     assert json.loads(cfg.read_text()) == json.loads(before), r.stdout + r.stderr
     assert json.loads((folder / ".claude" / "settings.local.json").read_text()) == {"env": {"MINE": "1"}}
     assert not home.exists(), "removed once what it recorded was put back"
+
+
+def test_the_plugin_is_registered_only_on_a_yes_and_uninstall_removes_only_what_install_added(tmp_path):
+    """install.sh --no-plugin registers nothing and records the no, so uninstall runs no `claude plugin` step; --plugin
+    registers at user scope and a later --no-plugin takes that back; uninstall removes what a yes registered."""
+    tree = fake_tree(tmp_path / "release")
+    dest = tmp_path / "home" / ".thimble" / "app"
+    bin_ = stub_bin(tmp_path)
+    (bin_ / "claude").write_text('#!/bin/sh\necho "$*" >> "$STUB_LOG"\n'
+                                 'case "$1 $2" in "--version ") echo 2.1.284;; "plugin list") echo "[]";; esac\n')
+    (bin_ / "claude").chmod(0o755)
+    log = tmp_path / "claude.log"
+    env = env_for(tmp_path, PATH=f"{bin_}:/usr/bin:/bin", STUB_LOG=str(log))
+    record = Path(env["THIMBLE_HOME"]) / "plugin.json"
+
+    def run(cmd: list[str]) -> list[str]:
+        log.write_text("")
+        r = subprocess.run(cmd, capture_output=True, text=True, env=env, stdin=subprocess.DEVNULL, timeout=60)
+        assert r.returncode == 0, r.stdout + r.stderr
+        return [c for c in log.read_text().splitlines() if c.startswith("plugin ") and c != "plugin list --json"]
+
+    def install(flag: str) -> list[str]:
+        return run(["bash", str(tree / "scripts" / "install.sh"), "--dir", str(dest), flag, "--no-trust-workspaces"])
+
+    uninstall = ["bash", str(dest / "plugin" / "bin" / "thimble"), "uninstall", "--yes"]
+    assert install("--no-plugin") == [] and json.loads(record.read_text()) == {"answer": "no", "registered": ""}
+    assert run(uninstall) == [] and not record.exists()
+    assert install("--plugin") == [f"plugin marketplace add {dest}", "plugin marketplace update thimble-local",
+                                   "plugin install --scope user thimble@thimble-local",
+                                   "plugin update --scope user thimble@thimble-local"]
+    assert json.loads(record.read_text()) == {"answer": "yes", "registered": "thimble-local"}
+    taken_back = ["plugin uninstall thimble@thimble-local", "plugin marketplace remove thimble-local"]
+    assert install("--no-plugin") == taken_back and json.loads(record.read_text())["registered"] == ""
+    install("--plugin")
+    assert run(uninstall) == taken_back and not record.exists()

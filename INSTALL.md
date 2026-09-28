@@ -29,11 +29,12 @@ cd thimble
 bash scripts/install.sh
 ```
 
-Either install registers the plugin with Claude Code, links the `thimble` command into `~/.local/bin` (and prints the
-line to add to your shell startup file when that folder is not on your PATH), and runs `thimble doctor`. It asks once
-whether to mark thimble's workspaces folder trusted in Claude Code's config, which Terminal-first's background sessions
-need; `--trust-workspaces` or `--no-trust-workspaces` answers without asking. `install.sh --dry-run` prints every step
-and changes nothing.
+Either install links the `thimble` command into `~/.local/bin` (and prints the line to add to your shell startup file
+when that folder is not on your PATH) and runs `thimble doctor`. It asks once whether to add thimble's plugin to all
+Claude Code sessions, so `/thimble` works in any (the `thimble` command works either way), and whether to mark thimble's
+workspaces folder trusted in Claude Code's config, which Terminal-first's background sessions need. `--plugin`,
+`--no-plugin`, `--trust-workspaces` and `--no-trust-workspaces` answer without asking. `install.sh --dry-run` prints
+every step and changes nothing.
 
 ## Update
 
@@ -45,9 +46,9 @@ until `thimble server restart`.
 
 ## Uninstall
 
-`thimble uninstall` asks, then removes the plugin registration, `~/.local/bin/thimble`, the trust entry the install
-added, and `~/.thimble`, which holds a Global install's workspaces. `--keep-home` keeps `~/.thimble`. A clone stays where
-it is.
+`thimble uninstall` asks, then removes the plugin registration and the trust entry the install added,
+`~/.local/bin/thimble`, and `~/.thimble`, which holds a Global install's workspaces. `--keep-home` keeps `~/.thimble`.
+A clone stays where it is.
 
 To delete one workspace and keep the install, `thimble list` shows the workspaces by id and `thimble purge <id>` deletes
 that one and prints each path it deleted. The folder it read and your Claude Code transcripts stay.
@@ -55,6 +56,7 @@ that one and prints each path it deleted. The folder it read and your Claude Cod
 ## Troubleshooting
 
 - `thimble doctor` shows the server, the versions, the auth path and the log's recent errors.
-- `/thimble` is not recognised right after an install: run `/reload-plugins`, or start a new session.
+- `/thimble` is not recognised in a `claude` session: it works there only after `install.sh --plugin`; then run
+  `/reload-plugins`, or start a new session.
 - To report a problem, run `thimble feedback "<what went wrong>"`. It writes a zip of the logs, chats and Claude
   Code transcripts, with keys removed, and says where to send it. The chats and transcripts quote your corpus.
