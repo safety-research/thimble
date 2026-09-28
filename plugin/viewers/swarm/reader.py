@@ -367,11 +367,14 @@ def _did(index, r):
 
 
 def _gist(lines):
-    """A card's words for the lines a save wrote: the last that ends in a signature, where a note ends, else the last."""
+    """A card's words for the lines a save wrote: the last that ends in a signature, where a note ends, or the line above
+    a signature on a line of its own; else the last."""
     if not lines:
         return ""
-    pick = next((s for s in reversed(lines) if SIGNATURE.search(s.strip())), lines[-1])
-    return _cut(pick) + (f" (+{len(lines) - 1} lines)" if len(lines) > 1 else "")
+    i = next((i for i in range(len(lines) - 1, -1, -1) if SIGNATURE.search(lines[i].strip())), len(lines) - 1)
+    if i > 0 and len(SIGNATURE.sub("", lines[i].strip())) < 12:
+        i -= 1
+    return _cut(lines[i]) + (f" (+{len(lines) - 1} lines)" if len(lines) > 1 else "")
 
 
 def _signature(said):

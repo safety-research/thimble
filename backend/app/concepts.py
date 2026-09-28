@@ -3248,8 +3248,9 @@ async def apply_scoped(c: str, *, scope: str, name: str, kind: str, text: str, v
     counts = result.get("counts") if not partial else await asyncio.to_thread(_live_counts, ws, concept["id"])
     stale = await asyncio.to_thread(stale_cards, ws, read_concept(ws, concept["id"]) or concept)
     return {"concept": concept["id"], "name": concept["name"], "unit": unit, "total": result.get("total"), "counts": counts or {},
-            "failed": result.get("failed") or 0, "message": result.get("message"), "partial": partial, "cell": made["id"] if made else None, "filter": chosen,
-            "labels_path": str(labels_file(ws, concept["id"])), "unchanged": unchanged, "stale": [x["id"] for x in stale]}
+            "failed": result.get("failed") or 0, "message": result.get("message"), "partial": partial,
+            "cell": made["id"] if made else None, "filter": chosen, "labels_path": str(labels_file(ws, concept["id"])),
+            "unchanged": unchanged, "stale": [x["id"] for x in stale]}
 
 
 def show_concept(c: str, id_or_name: str, on: bool, values: list[str] | None = None) -> dict:
