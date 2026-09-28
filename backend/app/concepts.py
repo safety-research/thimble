@@ -1203,35 +1203,45 @@ def picked_as_changes(corpus_dir: Path, units: list[Unit], header: bool = True) 
     return out
 
 
-EXAMPLES_SHOWN = 5  # records an apply's result quotes of the value it asks about (examples)
+EXAMPLES_SHOWN = 10  # records an apply's result quotes of the value it asks about (examples)
+EXAMPLES_READ = 200  # records read to choose them from
 EXAMPLE_CHARS = 200
 
 
 def examples(c: str, concept_id: str, value: str, n: int = EXAMPLES_SHOWN) -> list[tuple[str, str]]:
-    """Up to `n` records of a label over records that took `value`, spread over them, each with the line of what the
-    label read that holds its rationale (a regex's match), else the first line, a save read as what it changed.
-    Blocking."""
+    """Up to `n` records of a label over records that took `value`: those that matched the most different texts of a
+    regex first, else spread over them, and one per document a save holds. Each is quoted by the line of what the label
+    read (a save as what it changed) that holds the most of its matches, else by its first line. Blocking."""
     ws, corpus_dir = _ws(c), config.corpus_dir(c)
     st = _store_ready(ws, concept_id)
     rows, _total, _next = st.rows(value, PROMPT_APPLY_MAX) if st is not None else ([], 0, None)
-    picked = [rows[i] for i in spread(len(rows), n)]
-    why = {str(r.get("ref") or ""): str(r.get("rationale") or "") for r in picked}
+    matched = {str(r.get("ref") or ""): {x.casefold() for x in r.get("spans") or [] if x} for r in rows}
+    order = [rows[i] for i in spread(len(rows), len(rows))]
+    order.sort(key=lambda r: -len(matched[str(r.get("ref") or "")]))
     units: list[Unit] = []
-    for ref in why:
-        rel, line = labels_store.ref_parts(ref)
+    for r in order[:EXAMPLES_READ]:
+        rel, line = labels_store.ref_parts(str(r.get("ref") or ""))
         if not rel or not line:
             continue
-        for r in corpus.load_records(config.safe_corpus_path(corpus_dir, rel), rel, corpus.source_kind(rel), line, line):
-            text = "\n\n".join(b["text"] for b in r["blocks"])
-            units.append(Unit(ref, [rel], lambda ref=ref, text=text: iter([(ref, text)]), r["record"]))
-    out = []
+        for rec in corpus.load_records(config.safe_corpus_path(corpus_dir, rel), rel, corpus.source_kind(rel), line, line):
+            ref, text = f"{rel}#L{line}", "\n\n".join(b["text"] for b in rec["blocks"])
+            units.append(Unit(ref, [rel], lambda ref=ref, text=text: iter([(ref, text)]), rec["record"]))
+    out: list[tuple[str, str]] = []
+    docs: set = set()
     for u in picked_as_changes(corpus_dir, units, header=False):
-        lines = [x.strip() for x in u.text(UNIT_TEXT_MAX).splitlines() if x.strip()]
-        hit = why[u.ref].casefold()
-        at = next((x for x in lines if hit and hit in x.casefold()), lines[0] if lines else "")
-        start = max(0, at.casefold().find(hit) - EXAMPLE_CHARS // 3) if hit and hit in at.casefold() else 0
-        cut = at[start: start + EXAMPLE_CHARS]
-        out.append((u.ref, ("…" if start else "") + cut + ("…" if start + EXAMPLE_CHARS < len(at) else "")))
+        key = _save_key(u.record)
+        doc = (labels_store.ref_parts(u.ref)[0], key[0]) if key else u.ref
+        if doc in docs:
+            continue
+        docs.add(doc)
+        hits = matched.get(u.ref) or set()
+        lines = [x.strip() for x in u.text(UNIT_TEXT_MAX).splitlines() if x.strip()] or [""]
+        at = max(lines, key=lambda x: sum(h in x.casefold() for h in hits))
+        first = min((i for h in hits if (i := at.casefold().find(h)) >= 0), default=0)
+        start = max(0, first - EXAMPLE_CHARS // 3)
+        out.append((u.ref, ("…" if start else "") + at[start: start + EXAMPLE_CHARS] + ("…" if start + EXAMPLE_CHARS < len(at) else "")))
+        if len(out) >= n:
+            break
     return out
 
 
