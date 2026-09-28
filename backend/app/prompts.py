@@ -37,7 +37,8 @@ CHECKS_DIR = "checks"
 # frontmatter, the type's text as the body (report_types.presets, type_form).
 TYPES_DIR = "types"
 # Each document form's text, what read_ref("type:<name>") returns to the writer agent (report_types.type_form).
-TYPE_FILES = {"document": "report-markdown", "slides": "report-slides", "story": "report-story", "custom": "report-custom"}
+TYPE_FILES = {"document": "report-markdown", "slides": "report-slides", "story": "report-story", "custom": "report-custom",
+              "video": "report-video"}
 # The dev calls: dev.md is the preamble every dev call reads, ending in `{{task}}`, filled with the call's own body
 # file: a code ticket (dev-ticket), the server-down fix (dev-fix) or a view ticket (dev-view).
 DEV_PROMPT = "dev"

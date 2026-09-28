@@ -364,8 +364,9 @@ Get a picture of what the analyst sees in the browser, such as a card as the can
 {
   "type": "object",
   "properties": {
-    "ref": {"type": "string", "description": "card:<id>, view:<slug>, a file ref a view opens, report:<slug>#<id> of a figure, thread:<id>, or an http address of thimble's own interface on this machine."},
-    "selector": {"type": "string", "description": "With an http address, the CSS selector of the one element to shoot."}
+    "ref": {"type": "string", "description": "card:<id>, view:<slug>, a file ref a view opens, report:<slug>#<id> of a figure, report:<slug> of a video, thread:<id>, or an http address of thimble's own interface on this machine."},
+    "selector": {"type": "string", "description": "With an http address, the CSS selector of the one element to shoot."},
+    "t": {"type": "array", "items": {"type": "number"}, "description": "With a video, the seconds of its film to shoot, up to six frames, such as [2, 12.5]. Left out, a frame in the middle of each line, up to six."}
   },
   "required": ["ref"]
 }
@@ -397,7 +398,7 @@ Start a writer, in a Claude Code session of its own beside yours, which writes o
 {
   "type": "object",
   "properties": {
-    "doc": {"type": "string", "description": "The document's slug, such as report, the write event's `doc`."},
+    "doc": {"type": "string", "description": "The document's slug, such as report, story, slides or video, the write event's `doc`."},
     "request": {"type": "string", "description": "What the analyst asked for, in their words, the write event's text. Empty for the document as its form asks."},
     "after": {"type": "string", "description": "The passage the request is about, the write event's `after`."},
     "type": {"type": "string", "description": "Only for a document that does not exist yet, which is then made: casefile (one document, a section per case, such as an agent, a run or a session), comparison (a page with a grid of the cases against measures), timeline (dated events in phases), page, or document, slides or story for one the request describes."},
@@ -668,6 +669,14 @@ The analyst laid out no frame, so the shape is yours.
 ## screenshot-none
 
 {what}, so screenshot cannot take it. `read_ref` on it reads what the analyst sees.
+
+## screenshot-frames
+
+The film of {ref}, {duration} s long, its lines at {windows} s.
+
+## screenshot-frames-errors
+
+The film reported: {errors}
 
 ## propose_view-proposed
 
