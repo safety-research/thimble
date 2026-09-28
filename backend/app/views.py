@@ -2597,12 +2597,11 @@ def _fmt_size(n: int) -> str:
 async def _suggest_call(c: str, system: str, user: str, tool: Any) -> Any:
     """The proposal's one model call: the `dev` role's model at low effort (the fallback model after a refusal, as
     model.structured runs it). Tests replace it."""
-    from . import agents, model  # noqa: PLC0415
+    from . import model  # noqa: PLC0415
 
     role = config.models_for(c).get("dev") or dict(config.ROLE_MODELS_DEFAULT["dev"])
     return await model.structured(user, tool=tool, model=role.get("model") or config.ROLE_MODELS_DEFAULT["dev"]["model"],
-                                  effort="low", system_append=system, cwd=config.corpus_dir(c),
-                                  config_env=agents.call_env(c), cache_prompt=False)
+                                  effort="low", system_append=system, cwd=config.corpus_dir(c))
 
 
 async def suggest(c: str, rel: str) -> str | None:

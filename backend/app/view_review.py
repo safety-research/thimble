@@ -463,13 +463,13 @@ def _semaphore() -> asyncio.Semaphore:
 
 async def _call(c: str, system: str, user: str, tool: Any, images: list[tuple[bytes, str]], effort: str) -> Any:
     """The reading: one model.structured call on the `verify` role's model at `effort`. Tests replace it."""
-    from . import agents, model  # noqa: PLC0415
+    from . import model  # noqa: PLC0415
 
     role = _role(c)
     return await model.structured(
         user, tool=tool, model=role.get("model") or config.ROLE_MODELS_DEFAULT["verify"]["model"], effort=effort or None,
-        system_append=system, cwd=config.corpus_dir(c), config_env=agents.call_env(c),
-        speed="fast" if role.get("fast") else "standard", images=images, idle_timeout_s=READ_IDLE_S, cache_prompt=False)
+        system_append=system, cwd=config.corpus_dir(c),
+        speed="fast" if role.get("fast") else "standard", images=images, idle_timeout_s=READ_IDLE_S)
 
 
 async def read(c: str, run: _Run, prop: dict[str, Any], view: dict[str, Any], shots: list[dict[str, Any]],

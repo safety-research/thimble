@@ -382,7 +382,7 @@ def plural(n: int, word: str) -> str:
 
 
 def claude_version() -> str:
-    exe = shutil.which("claude")
+    exe = shutil.which(os.environ.get("THIMBLE_CLAUDE_BIN") or "claude")
     if not exe:
         return "not found on PATH"
     try:
@@ -461,8 +461,8 @@ def without_log(text: str) -> str:
 # What doctor_summary makes of a doctor line, by the start of its value: a word or two, so no path, host, variable or
 # log line reaches a public issue.
 SUMMARY_WORDS = {
-    "auth": (("env credential", "env credential"), ("apiKeyHelper", "apiKeyHelper"),
-             ("CLI token", "CLI token"), ("CLI login", "CLI login"), ("none", "none")),
+    "auth": (("logged in", "logged in"), ("not logged in", "not logged in"), ("not known", "not known"),
+             ("no claude", "no claude")),
     "network": (("not checked", "not checked"), ("cannot reach", "unreachable")),
     "card harness": (("ready", "ready"), ("not drawing", "not drawing"), ("headless Chromium fetched", "Chromium fetched"),
                      ("no headless Chromium", "no Chromium")),
@@ -628,7 +628,7 @@ def transcript_roots(ws: Path) -> list[Path]:
     if os.environ.get("CLAUDE_CONFIG_DIR"):
         dirs.append(Path(os.environ["CLAUDE_CONFIG_DIR"]))
     dirs.append(Path.home() / ".claude")
-    return list(dict.fromkeys([d.expanduser() / "projects" for d in dirs] + [ws / ".claude-config" / "projects"]))
+    return list(dict.fromkeys(d.expanduser() / "projects" for d in dirs))
 
 
 def find_transcript(sid: str, roots: list[Path]) -> tuple[Path, Path] | None:

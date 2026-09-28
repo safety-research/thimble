@@ -91,6 +91,10 @@ BG_ID_RE = re.compile(r"backgrounded\W+([0-9a-f]{8})\b")
 DROP_FLAGS = {"-p", "--print", "--verbose"}
 DROP_WITH_VALUE = {"--output-format", "--session-id", "--input-format"}
 PASSED_ENV = {"PATH"}  # what the background service takes from the caller's environment
+# the provider settings a session gets in its --settings `env`, since the background service passes it only PATH; a
+# credential is never put on a command line, so a session authenticates as the service's environment and the user's
+# settings let it
+PROVIDER_ENV = re.compile(r"CLAUDE_CODE_(USE_\w+|SKIP_\w+_AUTH)|ANTHROPIC_BASE_URL")
 # a long call of thimble's tools, such as the critique, stays a foreground call, as under `claude -p`, so the session
 # never looks idle while one runs
 FOREGROUND_ENV = {"CLAUDE_CODE_MCP_AUTO_BACKGROUND_MS": "0"}
@@ -252,11 +256,13 @@ def untrust(c: str) -> list[str]:
 
 def bg_argv(argv: list[str], env: dict[str, str], base_env: dict[str, str], name: str, prompt: str,
             folder: Path) -> list[str]:
-    """The `claude --bg` argv for the `claude -p` argv `argv`, named `name`, with `prompt` as the first message and the
-    variables `env` adds to `base_env` in its --settings `env` (module note, start)."""
+    """The `claude --bg` argv for the `claude -p` argv `argv`, named `name`, with `prompt` as the first message and, in
+    its --settings `env`, the variables `env` adds to `base_env` and the provider settings (PROVIDER_ENV) (module note,
+    start)."""
     out: list[str] = [argv[0], "--bg", "-n", name]
     extra_env = {**{k: v for k, v in env.items() if k not in PASSED_ENV | {config.CONFIG_DIR_ENV}
-                    and (k.startswith("THIMBLE_") or base_env.get(k) != v)}, **FOREGROUND_ENV}
+                    and (k.startswith("THIMBLE_") or PROVIDER_ENV.fullmatch(k) or base_env.get(k) != v)},
+                 **FOREGROUND_ENV}
     i = 1
     while i < len(argv):
         a = argv[i]

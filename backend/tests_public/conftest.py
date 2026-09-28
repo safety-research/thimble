@@ -15,7 +15,8 @@ if str(HERE) not in sys.path:
 
 from mini_corpus import write_mini  # noqa: E402
 
-# Nothing reads a credential: model calls and Claude Code sessions are faked wherever a test reaches them.
+# No test asks Claude Code about its login (config.auth_status): model calls and Claude Code sessions are faked wherever
+# a test reaches them.
 os.environ.setdefault("THIMBLE_SKIP_KEY", "1")
 # No headless Chromium per test app, no card check after every add_card and no review after every view build.
 os.environ.setdefault("THIMBLE_RENDER", "off")
@@ -129,14 +130,6 @@ def _no_held_events():
 
 
 @pytest.fixture(autouse=True)
-def _no_keychain(monkeypatch):
-    """No test asks the machine's macOS Keychain for a Claude Code login."""
-    from app import config
-
-    monkeypatch.setattr(config, "keychain_login", lambda: "")
-
-
-@pytest.fixture(autouse=True)
 def _no_rate_limit_retry_wait(monkeypatch):
     """model.structured waits before its one 429 retry; tests wait 0 s."""
     from app import model
@@ -209,7 +202,7 @@ def home(tmp_path, monkeypatch):
     monkeypatch.setenv("THIMBLE_FRONTEND_DIST", str(tmp_path / "ui-dist"))
     monkeypatch.setattr(config, "FRONTEND_DIST", tmp_path / "ui-dist")
     monkeypatch.setenv(cli.CHANNEL_ENV, "plugin:thimble@inline")
-    monkeypatch.setattr(cc_channel, "claude_ai_login", lambda cwd, environ=None, argv=None: True)
+    monkeypatch.setattr(cc_channel, "login", lambda environ=None: {"loggedIn": True, "authMethod": "claude.ai"})
     monkeypatch.setattr(cli, "health_leader", lambda url=None: None)
     monkeypatch.setattr(cli, "foreign_home", lambda url=None: None)  # nor refuses one: another test covers that
     monkeypatch.delenv(cli.SANDBOX_ENV, raising=False)
@@ -226,6 +219,33 @@ def data(tmp_path, monkeypatch):
     monkeypatch.setenv("THIMBLE_DATA_DIR", str(d))
     monkeypatch.setenv("THIMBLE_WORKSPACES_DIR", str(tmp_path / "ws"))
     return d
+
+
+def fake_claude_bin(folder: Path, status: dict) -> Path:
+    """A stand-in `claude` in `folder` whose `auth status --json` prints `status` (config.auth_status), and which names
+    itself a recent version."""
+    import json
+    import shlex
+
+    (folder / "auth-status.json").write_text(json.dumps(status))
+    bin_ = folder / "fake-claude"
+    bin_.write_text(f'#!/bin/sh\ncase "$1" in --version) echo "9.9.9 (Claude Code)";; '
+                    f'auth) cat {shlex.quote(str(folder / "auth-status.json"))};; esac\n')
+    bin_.chmod(0o755)
+    return bin_
+
+
+@pytest.fixture()
+def fake_claude(tmp_path, monkeypatch) -> Path:
+    """fake_claude_bin on a claude.ai login as config.CLI_PATH and THIMBLE_CLAUDE_BIN, with THIMBLE_SKIP_KEY off; a test
+    rewrites the returned status file to report another login."""
+    from app import config
+
+    bin_ = fake_claude_bin(tmp_path, {"loggedIn": True, "authMethod": "claude.ai", "apiProvider": "firstParty"})
+    monkeypatch.setattr(config, "CLI_PATH", str(bin_))
+    monkeypatch.setenv("THIMBLE_CLAUDE_BIN", str(bin_))
+    monkeypatch.delenv("THIMBLE_SKIP_KEY", raising=False)
+    return tmp_path / "auth-status.json"
 
 
 @pytest.fixture()

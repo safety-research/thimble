@@ -1,13 +1,11 @@
 # Installing thimble
 
-thimble uses the credentials of the Claude Code session that starts it. For its direct API calls it reads
-`ANTHROPIC_API_KEY` or `ANTHROPIC_AUTH_TOKEN`, or runs your `apiKeyHelper`, and keeps the key in memory. Without a key,
-it links Claude Code's login file into its workspaces. It never writes an API key to disk and never logs one.
+thimble uses whichever auth path you have configured for `claude`: every model call runs through your own `claude`, in
+your config dir with your settings.
 
 ## Requirements
 
-- [Claude Code](https://docs.anthropic.com/en/docs/claude-code) (tested with 2.1.281), logged in or with
-  `ANTHROPIC_API_KEY` set.
+- [Claude Code](https://docs.anthropic.com/en/docs/claude-code) (tested with 2.1.281), logged in (`claude auth status`).
 - macOS or Linux, and Python 3.12+. [uv](https://docs.astral.sh/uv/getting-started/installation/) is recommended: it
   installs the pinned versions and fetches Python when the machine has none.
 - Node 20+ for a Dev install and for custom views.

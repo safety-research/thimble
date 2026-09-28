@@ -204,9 +204,7 @@ class BuiltUI(StaticFiles):
 
 @asynccontextmanager
 async def _lifespan(app: FastAPI):
-    # Nothing here waits on auth: a model call resolves its credential when it is made, so /api/health answers as soon
-    # as the imports are done.
-    log.info("data dir %s, workspaces dir %s; auth: %s", config.DATA_DIR, config.WORKSPACES_DIR, config.auth_path()[1])
+    log.info("data dir %s, workspaces dir %s", config.DATA_DIR, config.WORKSPACES_DIR)
     # the versions in play, so a log sent with a problem report says what ran
     try:
         from . import cli

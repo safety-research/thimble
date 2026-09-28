@@ -291,38 +291,6 @@ def list_chats(c: str) -> list[dict]:
     return out
 
 
-# --------------------------------------------------------------------------- the workspace's config dir and prompts
-
-
-def config_dir(c: str) -> Path:
-    """workspaces/<c>/.claude-config: a per-workspace CLAUDE_CONFIG_DIR, which sdk.build's `setting_sources=["user"]`
-    resolves to. It holds the CLI's login when there is no key and links to the analyst's CLAUDE.md and skills/, never their
-    settings.json, hooks or plugins."""
-    cfg = _ws(c) / ".claude-config"
-    fresh = not cfg.exists()
-    cfg.mkdir(parents=True, exist_ok=True)
-    try:
-        from . import claude_config  # noqa: PLC0415
-
-        claude_config.link_credentials(cfg, f"chat {c}")
-        claude_config.link_user_setup(cfg, f"chat {c}")
-        if fresh:  # the account and its entitlements, so the CLI does not refuse a model on a cold dir
-            claude_config.seed_account(cfg, f"chat {c}")
-    except Exception:  # noqa: BLE001 — a session runs on the environment's credential then
-        log.debug("credentials not linked into %s", cfg, exc_info=True)
-    return cfg
-
-
-def call_env(c: str) -> dict[str, str]:
-    """The config env of a model call the server makes for `c` on the CLI path: the workspace's own dir when the login reaches
-    it (claude_config.login_linkable), else the served config dir (config.claude_env), for a login in the macOS Keychain."""
-    from . import claude_config  # noqa: PLC0415
-
-    if claude_config.login_linkable():
-        return {config.CONFIG_DIR_ENV: str(config_dir(c))}
-    return config.claude_env({})
-
-
 # --------------------------------------------------------------------------- where a chat's cards land
 
 
@@ -886,6 +854,6 @@ async def check_refs(c: str, refs_: list[str]) -> tuple[list[str], list[str]]:
     return [r for r, hit in zip(refs_, ok) if hit], [r for r, hit in zip(refs_, ok) if not hit]
 
 
-__all__ = ["KIND_MAIN", "KIND_THREAD", "KIND_AGENT", "MAIN_ID", "Recorder", "chip", "config_dir", "ensure_main", "finish_agent",
+__all__ = ["KIND_MAIN", "KIND_THREAD", "KIND_AGENT", "MAIN_ID", "Recorder", "chip", "ensure_main", "finish_agent",
            "list_chats", "mirror", "new_agent", "new_thread", "paths", "read_events", "read_meta", "start_agent", "stop_agent",
            "set_running", "update_agent", "write_meta"]

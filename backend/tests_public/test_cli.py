@@ -1,8 +1,7 @@
 """The supervisor (app.cli): `thimble server up | stop` and doctor. `server up` prints the url and opens a folder's
 workspace, refuses $HOME and /, and starts one server when two race; stop signals only a pid whose command line is this
 checkout's server. Unit tests fake `spawn`, `healthy` and `_request`; one integration test starts a real uvicorn on a
-free port under a scratch THIMBLE_HOME. `doctor` names the path of a credential, never its value, and runs no command to
-find it."""
+free port under a scratch THIMBLE_HOME. `doctor` says what `claude auth status` reports, never a credential's value."""
 from __future__ import annotations
 
 import contextlib
@@ -19,7 +18,7 @@ from pathlib import Path
 
 import pytest
 
-from app import cli, config, procs
+from app import cli, procs
 
 SECRET = "sk-ant-test-secret-never-written"  # gitleaks:allow  a fake key asserting nothing writes it
 BACKEND = Path(__file__).resolve().parents[1]
@@ -114,36 +113,16 @@ def line(text: str, key: str) -> str:
     return next(ln for ln in text.splitlines() if ln.strip().startswith(key))
 
 
-def test_doctor_with_server_down_names_the_auth_path_and_never_a_value(home, monkeypatch, tmp_path):
-    monkeypatch.delenv("THIMBLE_SKIP_KEY", raising=False)
-    monkeypatch.setattr(config, "REPO_ROOT", tmp_path / "repo")
+def test_doctor_says_what_claude_reports_about_its_login_and_never_a_value(home, monkeypatch, fake_claude):
     monkeypatch.setenv("ANTHROPIC_API_KEY", SECRET)
     monkeypatch.setattr(cli, "healthy", lambda url=None, timeout=1.0: False)
     monkeypatch.setattr(cli, "listening", lambda p: False)
+    fake_claude.write_text(json.dumps({"loggedIn": True, "authMethod": "api_key", "apiProvider": "firstParty"}))
     text = cli.doctor_text()
     assert SECRET not in text and "down" in line(text, "server:")
-    assert "ANTHROPIC_API_KEY" in line(text, "auth:")
-    monkeypatch.delenv("ANTHROPIC_API_KEY")
-    settings = Path(os.environ["CLAUDE_CONFIG_DIR"]) / "settings.json"
-    settings.write_text(json.dumps({"apiKeyHelper": "fetch-key secret-ref"}))
-    text = cli.doctor_text()
-    assert str(settings) in line(text, "auth:") and "secret-ref" not in text
-    settings.unlink()
-    (Path(os.environ["CLAUDE_CONFIG_DIR"]) / ".credentials.json").write_text("{}")
-    assert "login" in line(cli.doctor_text(), "auth:")
-    (Path(os.environ["CLAUDE_CONFIG_DIR"]) / ".credentials.json").unlink()
-    assert "none" in line(cli.doctor_text(), "auth:")
-
-
-def test_doctor_runs_no_command_for_auth(home, monkeypatch):
-    def boom(*a, **k):
-        raise AssertionError("doctor must not run a helper")
-
-    monkeypatch.setattr(config.subprocess, "run", boom)
-    monkeypatch.setattr(cli, "_git", lambda *a: "")
-    monkeypatch.setattr(cli, "git_branch", lambda: "main")
-    monkeypatch.setattr(cli, "healthy", lambda url=None, timeout=1.0: False)
-    assert "auth:" in cli.doctor_text()
+    assert "logged in (api_key, firstParty)" in line(text, "auth:")
+    fake_claude.write_text(json.dumps({"loggedIn": False, "authMethod": "none"}))
+    assert "not logged in" in line(cli.doctor_text(), "auth:")
 
 
 SERVER_LIKE = [sys.executable, "-c", "import time; time.sleep(60)", "-m", "uvicorn", "app.main:app", "--host", "127.0.0.1",
@@ -197,18 +176,16 @@ def _uvicorns_on(p: int) -> list[int]:
     return out
 
 
-def test_real_up_starts_a_detached_server_idempotently_and_stop_ends_it(home, data, tmp_path):
+def test_real_up_starts_a_detached_server_idempotently_and_stop_ends_it(home, data, tmp_path, fake_claude):
     probe = subprocess.run([sys.executable, "-c", "import app.main"], cwd=BACKEND, capture_output=True, text=True, timeout=120,
                            env={**os.environ, "THIMBLE_SKIP_KEY": "1"})
     if probe.returncode != 0:
         pytest.skip("app.main does not import in this tree: " + probe.stderr.strip().splitlines()[-1][:200])
     port = _free_port()
-    env = {**os.environ, "THIMBLE_HOME": str(home), "THIMBLE_PORT": str(port), "THIMBLE_SKIP_KEY": "1",
+    # a claude.ai login (fake_claude), so the launcher's channel stands and /thimble prints the URL alone
+    env = {**os.environ, "THIMBLE_HOME": str(home), "THIMBLE_PORT": str(port),
            "THIMBLE_DATA_DIR": str(data), "THIMBLE_WORKSPACES_DIR": str(tmp_path / "ws")}
     env.pop("THIMBLE_DEV", None)
-    # a claude.ai login in the session's config dir, so the launcher's channel stands and /thimble prints the URL alone
-    (tmp_path / "claude-home" / ".credentials.json").write_text(json.dumps({"claudeAiOauth": {"accessToken": "t",
-                                                                                              "scopes": ["user:inference"]}}))
     for k in ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_PROFILE"):
         env.pop(k, None)
     cmd = [sys.executable, "-m", "app.cli", "server", "up", "--cwd", str(data / "mini"), "--session", "it-1"]

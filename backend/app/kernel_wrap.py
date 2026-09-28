@@ -29,7 +29,6 @@ ETC_RO = ("ld.so.cache", "ld.so.conf", "ld.so.conf.d", "passwd", "group", "nsswi
           "ca-certificates.conf", "pki", "fonts", "alternatives", "mime.types", "magic", "magic.mime", "os-release")
 EXTRA_RO = ("/var/cache/fontconfig",)  # fontconfig's cache, so matplotlib's first import does not rescan the fonts
 UNSET_ENV = ("XDG_CACHE_HOME", "XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_STATE_HOME", "XDG_RUNTIME_DIR")
-CONFIG_SUBDIR = ".claude-config"  # agents.config_dir: the per-workspace CLAUDE_CONFIG_DIR, with the login linked in
 SETTINGS_FILE = "settings.json"  # cli.settings_path: the workspace's settings, the `kernel_wrap` switch among them
 EMPTY_FILE = "/dev/null"  # bound over the workspace's settings.json
 # bound read-only over the writable workspace when they exist
@@ -74,6 +73,6 @@ def kernel_wrap_argv(argv: Sequence[str], *, corpus_dir: str | Path, workspace_d
         out += ["--ro-bind", EMPTY_FILE, str(ws / SETTINGS_FILE)]
     for name in LOG_FILES:  # read-only over the workspace bind when the file exists (the server appends from outside)
         out += ["--ro-bind-try", str(ws / name), str(ws / name)]
-    out += ["--tmpfs", str(ws / CONFIG_SUBDIR), "--", *argv]
+    out += ["--", *argv]
     return out
 

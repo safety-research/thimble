@@ -125,7 +125,7 @@ from .ledger import atomic_write_text
 log = logging.getLogger("thimble.agent_session")
 router = APIRouter()
 
-CLAUDE_BIN = os.environ.get("THIMBLE_CLAUDE_BIN", "claude")
+CLAUDE_BIN = config.CLAUDE_BIN
 PLUGIN_DIR = config.REPO_ROOT / "plugin"
 SESSION_ENV = "THIMBLE_SESSION"  # the shim's name for the session it serves (plugin/bin/thimble-mcp)
 # What the shared skill renders after the preamble, appended here, since Claude Code preloads no skill for the agent a
@@ -489,13 +489,10 @@ def command(agent_args: list[str], sid: str, effort: str, settings: str, cwd: Pa
 
 
 def environ(key: str, extra: dict[str, str] | None = None) -> dict[str, str]:
-    """The session's environment: the server's, less the Claude Code session identity it may carry, with main's
-    CLAUDE_CONFIG_DIR (config.claude_env), THIMBLE_SESSION, no ceiling on --print's background wait (BG_WAIT_ENV), a 4 h
-    idle limit on a thimble call (IDLE_TIMEOUT_ENV), and `extra` on top."""
-    from . import cli  # noqa: PLC0415
-
-    env = config.claude_env({k: v for k, v in os.environ.items()
-                             if k in cli._KEEP or not k.startswith(cli._STRIP_PREFIXES)})
+    """The session's environment: the server's, less the Claude Code session identity it may carry (config.passes),
+    with main's CLAUDE_CONFIG_DIR (config.claude_env), THIMBLE_SESSION, no ceiling on --print's background wait
+    (BG_WAIT_ENV), a 4 h idle limit on a thimble call (IDLE_TIMEOUT_ENV), and `extra` on top."""
+    env = config.claude_env(config.passed_environ())
     env.pop("THIMBLE_CHANNEL", None)  # the session hears no browser events; main does
     env[SESSION_ENV] = key
     env[BG_WAIT_ENV] = BG_WAIT_MS

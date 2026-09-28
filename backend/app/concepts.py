@@ -6,11 +6,11 @@
     workspaces/<c>/labels/<id>.sqlite   the store (labels_store.py), derived from the jsonl and rebuilt from it
     workspaces/<c>/filters.json         the filter per scope: {files?, canvas?, report?}
 
-Kinds: `prompt` sends units to the labels role's model (model.structured, `labels` tool) over the Messages API, or in
-batches through the claude CLI without an API credential (classifier_lane); `regex` matches a pattern, in the scan pool
-(concept_scan.py) for file units; `code` runs a Python `label(unit)` in a dedicated kernel. Units: `record` (a line,
-`<path>#L<n>`), `agent` (a file), `run` (a run directory), `cell` (a card, `card:<id>`, `cell:<id>` read as the same
-unit) and `span` (a report sentence). An apply runs as a background task whose run record streams on GET .../events.
+Kinds: `prompt` sends units to the labels role's model in batches through the claude CLI (model.structured, `labels`
+tool); `regex` matches a pattern, in the scan pool (concept_scan.py) for file units; `code` runs a Python `label(unit)`
+in a dedicated kernel. Units: `record` (a line, `<path>#L<n>`), `agent` (a file), `run` (a run directory), `cell` (a
+card, `card:<id>`, `cell:<id>` read as the same unit) and `span` (a report sentence). An apply runs as a background task
+whose run record streams on GET .../events.
 
 Trials: apply_label with a `limit` defines a trial (`trial: true`), left out of the Labels list and label counts until
 a run without a limit makes it a label; a limited run over files samples its units across files (trial_sample).
@@ -113,10 +113,9 @@ DEFAULT_LABELS = ["yes", "no"]
 REPORT_SLUG = "report"
 CODE_KERNEL = "labels"  # the dedicated kernel the code kind runs in
 
-BATCH_ITEMS = 10          # items per classifier call through the claude CLI (prompt kind, no API credential)
+BATCH_ITEMS = 10          # items per classifier call through the claude CLI (prompt kind)
 BATCH_CHARS = 40_000      # or fewer items when their texts add up to this many chars
 CONCURRENCY = 8           # classifier calls in flight through the CLI, a process each
-API_IN_FLIGHT = 48        # classifier calls in flight through the Messages API, one unit each (labels_in_flight)
 RETRY_DELAYS = (1.0, 2.0, 4.0, 8.0)  # seconds before each retry of a rate-limited batch
 RETRY_JITTER = 0.25
 BACKOFF_POLL = 0.2        # seconds between cancel checks while a retry waits
@@ -156,18 +155,6 @@ def apply_workers() -> int:
             return n
         log.warning("THIMBLE_APPLY_WORKERS=%r is not a positive integer; using the default", raw)
     return max(1, min((os.cpu_count() or 2) - 1, 8))
-
-
-def labels_in_flight() -> int:
-    """THIMBLE_LABELS_IN_FLIGHT held to 32..64, else API_IN_FLIGHT: classifier calls in flight over HTTP. Above 64 the calls
-    outrun model.API_CONCURRENCY and wait on it."""
-    raw = os.environ.get("THIMBLE_LABELS_IN_FLIGHT", "").strip()
-    try:
-        n = int(raw) if raw else API_IN_FLIGHT
-    except ValueError:
-        log.warning("THIMBLE_LABELS_IN_FLIGHT=%r is not an integer; using %d", raw, API_IN_FLIGHT)
-        n = API_IN_FLIGHT
-    return max(32, min(64, n))
 
 
 def labels_model(c: str) -> tuple[str, str | None]:
@@ -1290,14 +1277,10 @@ def _progress(c: str, concept_id: str, **fields: Any) -> dict:
 
 
 def _require_model_access() -> None:
-    """502 up front, naming the fix, when a prompt apply could reach no model. Skipped under THIMBLE_SKIP_KEY=1."""
-    if os.environ.get("THIMBLE_SKIP_KEY") == "1" or config.HAS_API_KEY:
-        return
-    if config.auth_path()[0] != "none":
-        return
-    raise HTTPException(502, "no model access: no ANTHROPIC_API_KEY, no apiKeyHelper in the Claude settings "
-                             "and the `claude` CLI is not logged in — run `claude login` (or set apiKeyHelper in your Claude "
-                             "settings) so prompt labels can be applied")
+    """502 up front when a prompt apply could reach no model: no `claude`, or it is not logged in (config.auth_problem)."""
+    problem = config.auth_problem()
+    if problem:
+        raise HTTPException(502, f"prompt labels cannot run: {problem}")
 
 
 
@@ -1414,7 +1397,7 @@ def labels_tool(concept: dict, comment: bool = True) -> Any:
 async def classify_structured(c: str, concept: dict, items: list[tuple[str, str]], comment: bool = True) -> Any:
     """One classifier batch through model.structured (never raises; read the CallResult's status), on the concept's
     `model` when it names one, else the labels role's."""
-    from . import agents, model
+    from . import model
 
     system, user = build_classify_prompt(concept, items, comment)
     model_name, effort = labels_model(c)
@@ -1428,8 +1411,6 @@ async def classify_structured(c: str, concept: dict, items: list[tuple[str, str]
             effort=effort,
             system_append=system,
             cwd=config.corpus_dir(c),
-            config_env=agents.call_env(c),
-            cache_prompt=False,  # the items differ on every call; the tool and the system prompt are the cached prefix
         )
 
 
@@ -1566,26 +1547,14 @@ def _cancelled_message(n: int, unit: str) -> str:
     return f"cancelled by the analyst after {n:,} {unit}{'' if n == 1 else 's'}; the rows written so far are kept"
 
 
-async def classifier_lane() -> tuple[int, int, bool]:
-    """How a prompt label's classifier calls are shaped: (units per call, calls in flight, whether they go over HTTP). With an
-    API credential each call carries one unit and 32 to 64 run at once, sharing a cached prompt prefix; without one the
-    calls go through the claude CLI, a process each, BATCH_ITEMS units per call and CONCURRENCY at once."""
-    from . import model
-
-    if await model.api_path_ready():
-        return 1, labels_in_flight(), True
-    return BATCH_ITEMS, CONCURRENCY, False
-
-
 async def _apply_prompt(c: str, concept: dict, units: Iterator[Unit], out: Path, cancel: threading.Event,
                         files: list[str] | None = None, comment: bool = True) -> tuple[int, int, str | None]:
-    """The classifier calls of a prompt label, shaped by classifier_lane, keeping `in_flight` calls running. Over HTTP the
-    first call runs alone, since a cache entry is readable only once the response that wrote it has started. Rows are
+    """The classifier calls of a prompt label, BATCH_ITEMS units per call and CONCURRENCY calls running. Rows are
     committed in the units' order. `cancel` stops new calls; a rate-limited call is retried with backoff; calls that ran on
     the fallback model are counted in the run's message."""
-    _require_model_access()
+    await asyncio.to_thread(_require_model_access)
     unit = concept["unit"]
-    per_call, in_flight, over_http = await classifier_lane()
+    per_call, in_flight = BATCH_ITEMS, CONCURRENCY
     labeled = failed = matches = cut = 0
     labels = concept["labels"]
     pos_label = labels[0]
@@ -1685,11 +1654,10 @@ async def _apply_prompt(c: str, concept: dict, units: Iterator[Unit], out: Path,
     pending: deque[tuple[asyncio.Task, list[_Item]]] = deque()  # started calls, in the units' order
     ready: deque[list[_Item]] = deque()  # batches read and not started
     exhausted = False
-    warming = over_http
     try:
         while True:
             running = sum(1 for task, _b in pending if not task.done())
-            while not cancel.is_set() and running < (1 if warming else in_flight) and len(pending) < 4 * in_flight:
+            while not cancel.is_set() and running < in_flight and len(pending) < 4 * in_flight:
                 if not ready and not exhausted:
                     got = await asyncio.to_thread(take, in_flight)
                     exhausted = not got
@@ -1706,7 +1674,6 @@ async def _apply_prompt(c: str, concept: dict, units: Iterator[Unit], out: Path,
                 await asyncio.wait([task for task, _b in pending if not task.done()], return_when=asyncio.FIRST_COMPLETED)
                 continue
             pending.popleft()
-            warming = False
             answers, msg = head.result()
             rows, n_failed = settle(b, answers)
             if rows:
@@ -3673,12 +3640,11 @@ def draft_of(output: dict | None, paths: list[str]) -> dict:
 
 async def _labels_call(c: str, prompt: str, tool: Any) -> Any:
     """One structured call of the labels role (never raises; read the CallResult's status)."""
-    from . import agents, model
+    from . import model
 
     model_name, effort = labels_model(c)
     with capture.scope("concepts draft", keep=True):
-        return await model.structured(prompt, tool=tool, model=model_name, effort=effort, cwd=config.corpus_dir(c),
-                                      config_env=agents.call_env(c))
+        return await model.structured(prompt, tool=tool, model=model_name, effort=effort, cwd=config.corpus_dir(c))
 
 
 def _call_failed(call: Any) -> HTTPException:

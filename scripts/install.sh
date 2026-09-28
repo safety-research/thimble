@@ -117,11 +117,11 @@ check_prerequisites() {  # uv or python >= pyproject's requires-python; node >= 
   fi
   have_claude=0
   if command -v claude >/dev/null 2>&1; then have_claude=1; say "claude CLI $(claude --version 2>/dev/null | head -n 1)"; else say "claude CLI not on PATH — the plugin registration step will print the commands to run"; fi
-  say "auth: none needed here — thimble uses the auth path of the Claude Code session that launches it"
+  say "auth: none needed here — thimble runs every model call through your claude, on whichever auth path you have configured for it"
 }
 
 copy_tree() {  # a release install: the release's entries replace the install's; .venv, node_modules, workspaces/, data/ and dev/ stay
-  step "2/11 the tree at $dir"
+  step "2/12 the tree at $dir"
   if [ "$in_place" = 1 ]; then say "in place: nothing to copy"; return 0; fi
   say "copying the release into $dir (kept there if present: backend/.venv, frontend/node_modules, workspaces/, data/, dev/)"
   run mkdir -p "$dir"

@@ -94,7 +94,7 @@ EXPIRED_LINE = "nobody answered the request to use {tool} ({what}) within {wait}
 # Not given to a fenced session, a view build in the corpus folder: EnterWorktree writes a git worktree into the
 # session's own folder, which the fence's denies do not stop, and nobody answers AskUserQuestion or plan mode's approval.
 FENCED_OFF_TOOLS = ("EnterWorktree", "ExitWorktree", "AskUserQuestion", "EnterPlanMode", "ExitPlanMode")
-CLAUDE_BIN = os.environ.get("THIMBLE_CLAUDE_BIN", "claude")
+CLAUDE_BIN = config.CLAUDE_BIN
 VIEW_CHECK = Path(__file__).with_name("view_check.py")  # the command a view build checks its draft with (view_fence)
 CLI_TIMEOUT_S = 60
 POLL_S = float(os.environ.get("THIMBLE_DEV_POLL_S", "3") or "3")  # between two looks at the session's state
@@ -1167,10 +1167,9 @@ def _result_text(content: Any) -> str:
 
 def _cli_env() -> dict[str, str]:
     """The environment the `claude` commands run with: this server's, less an inherited Claude Code session identity
-    (which would make the new session look nested) and THIMBLE_*, with the analyst's CLAUDE_CONFIG_DIR
+    (config.passes: it would make the new session look nested) and THIMBLE_*, with the analyst's CLAUDE_CONFIG_DIR
     (config.claude_env)."""
-    return config.claude_env({k: v for k, v in os.environ.items()
-                              if k in cli._KEEP or not (k.startswith(cli._STRIP_PREFIXES) or k.startswith("THIMBLE_"))})
+    return config.claude_env({k: v for k, v in config.passed_environ().items() if not k.startswith("THIMBLE_")})
 
 
 class SessionError(RuntimeError):
@@ -1269,7 +1268,7 @@ class Sessions:
         from . import agent_session  # noqa: PLC0415 — agent_session is large and this module otherwise needs none of it
 
         conf = config.models_for(workspace)["dev"]
-        model = config.resolve_model(conf["model"])[0] or conf["model"]
+        model = conf["model"]
         denied = [*agent_session.LATER_TOOLS, *(FENCED_OFF_TOOLS if fence else ())]
         settings: dict[str, Any] = {"fastMode": True} if conf.get("fast") else {}
         settings.update(fence or {})

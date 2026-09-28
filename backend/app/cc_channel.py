@@ -7,11 +7,10 @@ and wins. An entry counts when it names this plugin copy: `plugin:thimble@inline
 `plugin:thimble@<marketplace>` for an installed one.
 
 Claude Code still refuses the channel after the flag for a third-party provider (Bedrock, Vertex, Foundry), for a
-login that is not a claude.ai one (an API key, auth token, apiKeyHelper or ANTHROPIC_PROFILE, or no OAuth token with the
-`user:inference` scope; on macOS an `oauthAccount` in `.claude.json` stands for the Keychain token), and by the org's
-managed settings (`channelsEnabled`; `--channels` also needs `allowedChannelPlugins`). Without channels, browser events
-go through the plugin's hooks, unless hooks are disabled too; then the model arms a Monitor. `delivery` names the route
-and the reason.
+login that is not a claude.ai one (an API key, auth token, apiKeyHelper or ANTHROPIC_PROFILE in any settings tier, or a
+login `claude auth status` names otherwise), and by the org's managed settings (`channelsEnabled`; `--channels` also
+needs `allowedChannelPlugins`). Without channels, browser events go through the plugin's hooks, unless hooks are
+disabled too; then the model arms a Monitor. `delivery` names the route and the reason.
 """
 from __future__ import annotations
 
@@ -21,7 +20,7 @@ import sys
 from pathlib import Path
 from typing import Any, Mapping, NamedTuple
 
-from . import procs
+from . import config, procs
 
 ENV = "THIMBLE_CHANNEL"  # the explicit signal: the launcher exports it (plugin/bin/thimble)
 # how Claude Code marks the environment of a background session it runs from its daemon, such as the copy of a session
@@ -38,15 +37,12 @@ REMOTE_SETTINGS = "remote-settings.json"  # the org's server-managed settings, i
 MANAGED_DIRS = {"darwin": Path("/Library/Application Support/ClaudeCode"), "linux": Path("/etc/claude-code")}
 MANAGED_FILE = "managed-settings.json"
 MANAGED_DROPINS = "managed-settings.d"
-TEAM_ORGS = ("claude_team", "claude_enterprise")  # oauthAccount.organizationType of a claude.ai Team or Enterprise seat
-TEAM_SUBSCRIPTIONS = ("team", "enterprise")  # the OAuth token's subscriptionType for the same seats
+TEAM_SUBSCRIPTIONS = ("team", "enterprise")  # `claude auth status`'s subscriptionType of a claude.ai Team or Enterprise seat
 USER_SETTINGS = "settings.json"
 PROJECT_SETTINGS = (Path(".claude") / "settings.json", Path(".claude") / "settings.local.json")
-CREDENTIALS = ".credentials.json"  # Claude Code's own login in its config dir (the Keychain on macOS)
-INFERENCE_SCOPE = "user:inference"  # the scope that makes an OAuth token a claude.ai login
 # The login sources that make a session's login not a claude.ai one (module note), by environment variable
 KEY_ENVS = ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "CLAUDE_CODE_API_KEY_FILE_DESCRIPTOR", "ANTHROPIC_PROFILE")
-OAUTH_ENVS = ("CLAUDE_CODE_OAUTH_TOKEN", "CLAUDE_CODE_OAUTH_TOKEN_FILE_DESCRIPTOR")
+CLAUDE_AI_METHODS = ("claude.ai", "oauth_token")  # `claude auth status`'s authMethod of a login channels work with
 SETTINGS_FLAG = "--settings"  # a settings file or inline JSON on Claude Code's command line (its "flag" tier)
 # the routes (module note) and why channels are off
 CHANNEL, HOOK, MONITOR = "channel", "hook", "monitor"
@@ -178,24 +174,11 @@ def managed(environ: Mapping[str, str] | None = None) -> dict[str, Any] | None:
     return tier
 
 
-def _state_file(environ: Mapping[str, str] | None = None) -> Path:
-    """Claude Code's `.claude.json`: in CLAUDE_CONFIG_DIR when set, else in the home directory."""
+def login(environ: Mapping[str, str] | None = None) -> dict[str, Any]:
+    """What `claude auth status` reports for a session with the environment `environ` (config.auth_status); {} when it
+    cannot tell."""
     env = os.environ if environ is None else environ
-    return Path(env["CLAUDE_CONFIG_DIR"]) / ".claude.json" if env.get("CLAUDE_CONFIG_DIR") else Path.home() / ".claude.json"
-
-
-def account_type(environ: Mapping[str, str] | None = None) -> str:
-    """`oauthAccount.organizationType` from Claude Code's `.claude.json`; "" when there is none, as for an API key."""
-    account = (_read(_state_file(environ)) or {}).get("oauthAccount")
-    value = account.get("organizationType") if isinstance(account, dict) else None
-    return value if isinstance(value, str) else ""
-
-
-def _oauth(environ: Mapping[str, str] | None = None) -> dict[str, Any] | None:
-    """`claudeAiOauth` from Claude Code's `.credentials.json` in its config dir: None when the file is missing or holds
-    none. Only the token's presence, scopes and subscription type are read from it, and nothing of it leaves here."""
-    o = (_read(config_dir(environ) / CREDENTIALS) or {}).get("claudeAiOauth")
-    return o if isinstance(o, dict) else None
+    return config.auth_status(config.passed_environ(env)) or {}
 
 
 def _truthy(value: str | None) -> bool:
@@ -223,10 +206,12 @@ def _flag_settings(argv: list[str], cwd: Path) -> list[dict[str, Any]]:
     return out
 
 
-def claude_ai_login(cwd: Path | str, environ: Mapping[str, str] | None = None, argv: list[str] | None = None) -> bool:
+def claude_ai_login(cwd: Path | str, environ: Mapping[str, str] | None = None, argv: list[str] | None = None,
+                    status: dict[str, Any] | None = None) -> bool:
     """Whether the session in `cwd`, with the environment `environ` and the command line `argv`, runs on a claude.ai
     login, the only one channels work with (module note): no API key, auth token or apiKeyHelper in any tier, no
-    Anthropic profile, and an OAuth token with the inference scope."""
+    Anthropic profile, and a claude.ai login or OAuth token as `claude auth status` reports it (`status`, else asked
+    now)."""
     env = os.environ if environ is None else environ
     tiers = [_read(config_dir(env) / USER_SETTINGS), *(_read(Path(cwd) / p) for p in PROJECT_SETTINGS), managed(env),
              *_flag_settings(argv or [], Path(cwd))]
@@ -235,18 +220,7 @@ def claude_ai_login(cwd: Path | str, environ: Mapping[str, str] | None = None, a
         return False
     if any(isinstance(t.get("apiKeyHelper"), str) and t["apiKeyHelper"].strip() for t in tiers if t):
         return False
-    if env.get(OAUTH_ENVS[0]):
-        scopes = str(env.get("CLAUDE_CODE_OAUTH_SCOPES") or INFERENCE_SCOPE).split()
-        return INFERENCE_SCOPE in scopes
-    if env.get(OAUTH_ENVS[1]):
-        return True
-    o = _oauth(env)
-    if o is not None:
-        scopes = o.get("scopes")
-        return bool(o.get("accessToken")) and isinstance(scopes, list) and INFERENCE_SCOPE in scopes
-    if sys.platform == "darwin":  # the Keychain holds the token (module note)
-        return isinstance((_read(_state_file(env)) or {}).get("oauthAccount"), dict)
-    return False
+    return (login(env) if status is None else status).get("authMethod") in CLAUDE_AI_METHODS
 
 
 def channels_blocked(root: Path, named: set[str], environ: Mapping[str, str] | None = None,
@@ -256,15 +230,16 @@ def channels_blocked(root: Path, named: set[str], environ: Mapping[str, str] | N
     env = os.environ if environ is None else environ
     if any(_truthy(env.get(k)) for k in PROVIDER_ENVS):
         return PROVIDER
-    if not claude_ai_login(Path(cwd) if cwd is not None else Path(os.devnull), env, argv):
+    status = login(env)
+    if not claude_ai_login(Path(cwd) if cwd is not None else Path(os.devnull), env, argv, status):
         return ACCOUNT
     tier = managed(env)
     allowed = (tier or {}).get("channelsEnabled")
     if allowed is False:
         return ORG
     if allowed is not True:
-        sub = (_oauth(env) or {}).get("subscriptionType") or env.get("CLAUDE_CODE_SUBSCRIPTION_TYPE")
-        if sub in TEAM_SUBSCRIPTIONS or account_type(env) in TEAM_ORGS:
+        sub = status.get("subscriptionType") or env.get("CLAUDE_CODE_SUBSCRIPTION_TYPE")
+        if sub in TEAM_SUBSCRIPTIONS:
             return ORG
     if named and DEV_FLAG not in named:
         listed = (tier or {}).get("allowedChannelPlugins")
@@ -292,11 +267,13 @@ def hooks_blocked(cwd: Path, root: Path, environ: Mapping[str, str] | None = Non
     return value is True
 
 
-def delivery(pid: int | None, root: Path, cwd: Path | str, environ: Mapping[str, str] | None = None) -> Delivery:
+def delivery(pid: int | None, root: Path, cwd: Path | str, environ: Mapping[str, str] | None = None,
+             explain: bool = False) -> Delivery:
     """How browser events reach the session of the `claude` process `pid` in `cwd` (module note): the channel when the
-    flag names this copy's and nothing refuses it, else the hooks, else the Monitor, with why channels are off."""
+    flag names this copy's and nothing refuses it, else the hooks, else the Monitor, with why channels are off. For a
+    session started without the flag the reason is SESSION, unless `explain` asks what else would refuse the channel."""
     named = flags(pid, root, environ)
-    blocked = channels_blocked(root, named, environ, cwd, procs.argv(pid) if pid else [])
+    blocked = channels_blocked(root, named, environ, cwd, procs.argv(pid) if pid else []) if named or explain else ""
     if named and not blocked:
         return Delivery(CHANNEL)
     reason = blocked or SESSION

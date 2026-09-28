@@ -136,7 +136,7 @@ do_start() {
   mkdir -p "$DEV" "$WORKSPACES"
   if [ -n "$CORPUS" ] && [ -d "$WS_SRC/$CORPUS" ] && [ ! -d "$WORKSPACES/$CORPUS" ]; then
     cp -a "$WS_SRC/$CORPUS" "$WORKSPACES/$CORPUS"
-    rm -rf "$WORKSPACES/$CORPUS/.claude-config" "$WORKSPACES/$CORPUS/kernels"
+    rm -rf "$WORKSPACES/$CORPUS/kernels"
   fi
   if [ -f "$STACK" ]; then do_stop >/dev/null; fi
   if listening "$API_PORT"; then echo "dev_stack.sh: port $API_PORT is in use by a process this script did not start" >&2; exit 1; fi
@@ -147,7 +147,10 @@ do_start() {
     THIMBLE_HOME="$DEV/stack.home" THIMBLE_PLUGIN_DIR="$PLUGIN" THIMBLE_DEV_STACK=0
     VITE_CACHE_DIR="$DEV/vite-cache")  # frontend/vite.config.ts: never the shared node_modules/.vite of a symlinked checkout
   [ -n "${THIMBLE_SKIP_KEY:-}" ] && common+=(THIMBLE_SKIP_KEY="$THIMBLE_SKIP_KEY")
-  [ -n "${THIMBLE_MODEL_BACKEND:-}" ] && common+=(THIMBLE_MODEL_BACKEND="$THIMBLE_MODEL_BACKEND")
+  # the stack's model calls run `claude` as the user's own does: their config dir, provider and network settings
+  for v in $(compgen -e | grep -E '^(CLAUDE_CONFIG_DIR|CLAUDE_CODE_USE_[A-Z_]+|ANTHROPIC_[A-Z_]+|HTTPS?_PROXY|NO_PROXY)$' || true); do
+    common+=("$v=${!v}")
+  done
   [ -n "${VITE_CACHE_DIR:-}" ] && common+=(VITE_CACHE_DIR="$VITE_CACHE_DIR")  # a worktree's Vite cache off the shared node_modules (vite.config.ts)
   [ -n "${THIMBLE_DEV:-}" ] && common+=(THIMBLE_DEV="$THIMBLE_DEV")  # dev mode on the stack too (main.dev_mode)
   [ -n "${THIMBLE_PROMPT_CAPTURE:-}" ] && common+=(THIMBLE_PROMPT_CAPTURE="$THIMBLE_PROMPT_CAPTURE")  # backend/app/capture.py: every model call written to this directory

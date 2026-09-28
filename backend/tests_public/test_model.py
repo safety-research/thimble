@@ -19,18 +19,11 @@ def _no_real_cli(opts):
 
 @pytest.fixture(autouse=True)
 def _fresh_backend_state(monkeypatch):
-    """No forced backend, no cached API client, no remembered forced-tool bans between tests, and no real CLI: a
-    test that reaches the SDK path without `install()` fails at once instead of running a real session on this
-    machine's credentials."""
-    monkeypatch.delenv("THIMBLE_MODEL_BACKEND", raising=False)
-    monkeypatch.setattr(model, "_api_client", None)
-    monkeypatch.setattr(model, "_api_client_cred", None)
-    monkeypatch.setattr(model, "_api_sem", None)
+    """No real CLI: a test that reaches the SDK without `install()` fails at once instead of running a real session on
+    this machine's login. A `claude` is named, since a call without one fails before it starts."""
     monkeypatch.setattr(model, "_make_client", _no_real_cli)
+    monkeypatch.setattr(model.config, "CLI_PATH", "claude")
     monkeypatch.setattr(model.config, "FALLBACK_MODEL", FALLBACK)
-    model._API_NO_FORCED_TOOL.clear()
-    yield
-    model._API_NO_FORCED_TOOL.clear()
 
 FALLBACK = "claude-opus-4-8"
 
