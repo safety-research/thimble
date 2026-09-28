@@ -102,7 +102,7 @@ Define a category, apply it to every unit of a scope, and get the counts per val
     "predicate": {
       "type": "object",
       "properties": {
-        "kind": {"type": "string", "enum": ["prompt", "regex", "code"], "description": "A model judges each unit, a regex matches its text, or code defines label(unit) returning (value, confidence), where a unit is a JSONL record as its dict, a text line or a sentence a dict with its words in unit['text'], and a card a dict with its text, kind, question, takeaway, group and groups, the titles of the frames around it."},
+        "kind": {"type": "string", "enum": ["prompt", "regex", "code"], "description": "A model judges each unit (a record that saves a whole document again, such as a wiki page's revision, as what it changed from the save before), a regex matches its text, or code defines label(unit) returning (value, confidence), where a unit is a JSONL record as its dict, a text line or a sentence a dict with its words in unit['text'], and a card a dict with its text, kind, question, takeaway, group and groups, the titles of the frames around it."},
         "text": {"type": "string", "description": "The description, pattern or function."}
       },
       "required": ["kind", "text"]
@@ -588,7 +588,7 @@ card:{cid} has no takeaway. Write it with `edit_card` and `takeaway`, one or two
 
 ## apply_label-rows
 
-Count and cite from the rows in a card. thimble.labels("{label}") is a DataFrame (path, line, effective, label, source, verdict, confidence, ref) of the units that got the first value, and thimble.labels("{label}", negatives=True) of every labeled unit.
+Count and cite from the rows in a card's code, the one place thimble's Python module is. thimble.labels("{label}") is a DataFrame (path, line, effective, label, source, verdict, confidence, ref) of the units that got the first value, and thimble.labels("{label}", negatives=True) of every labeled unit.
 
 ## apply_label-unchanged
 
