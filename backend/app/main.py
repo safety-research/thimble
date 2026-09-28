@@ -7,12 +7,13 @@ import contextlib
 import importlib
 import logging
 import os
+import shutil
 import sys
 import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import Body, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.datastructures import MutableHeaders
 from starlette.exceptions import HTTPException
@@ -21,6 +22,7 @@ from starlette.staticfiles import StaticFiles
 
 from . import config
 from .errors import ErrorLog
+from . import hook_auth
 from .hook_auth import HookAuth
 from .http_guard import OriginCheck, SecurityHeaders, dev_origins
 
@@ -204,9 +206,7 @@ class BuiltUI(StaticFiles):
 
 @asynccontextmanager
 async def _lifespan(app: FastAPI):
-    # Nothing here waits on auth: a model call resolves its credential when it is made, so /api/health answers as soon
-    # as the imports are done.
-    log.info("data dir %s, workspaces dir %s; auth: %s", config.DATA_DIR, config.WORKSPACES_DIR, config.auth_path()[1])
+    log.info("data dir %s, workspaces dir %s", config.DATA_DIR, config.WORKSPACES_DIR)
     # the versions in play, so a log sent with a problem report says what ran
     try:
         from . import cli
@@ -215,14 +215,11 @@ async def _lifespan(app: FastAPI):
                  cli.home(), cli.versions_line(), cli.claude_code_version() or "not found on PATH")
     except Exception:
         log.exception("reading the versions for the log failed")
-    # thimble's state is its owner's alone: <home>, the log and state in it, and the workspaces (config.private_dir)
+    # thimble's state is its owner's alone: <home> and the workspaces are private folders (config.private_dir)
     try:
         from . import cli
 
         cli.ensure_home()
-        for f in (cli.server_json(), cli.log_path(), cli.log_path().with_name(cli.log_path().name + ".1"),
-                  cli.vite_log_path()):
-            config.private_file(f)
         st = cli.read_state()
         if st and not st.get("token"):  # a record an older supervisor wrote: the hooks' token (hook_auth.py)
             cli.write_state(st)
@@ -234,6 +231,17 @@ async def _lifespan(app: FastAPI):
         config.migrate_registry()
     except Exception:
         log.exception("bringing the install tree's registry records into %s failed", config.DATA_DIR)
+    # what older versions left in Claude Code's files and in the workspaces, taken out once: the keys they wrote into
+    # folders' settings.local.json (claude_changes.cleanup) and each workspace's own Claude Code config dir
+    try:
+        from . import claude_changes
+
+        for line in claude_changes.cleanup():
+            log.info("%s", line)
+        for old in config.WORKSPACES_DIR.glob("*/.claude-config"):
+            shutil.rmtree(old, ignore_errors=True)
+    except Exception:
+        log.exception("removing what an older thimble left failed")
     await _startup()
     yield
     # shutdown: modules that own subprocesses expose `shutdown()`, so a restart never leaves an orphan running
@@ -323,6 +331,11 @@ def create_app() -> FastAPI:
         # `leader` lets `server up`/`stop` find a server whose record was lost, `ui` lets an open tab tell it is stale,
         # and `home`/`app` let another install's `server up` on the same port refuse it
         return {"ok": True, "leader": os.getsid(0), "boot": config.BOOT_ID, "ui": ui_build(), **install}
+
+    @app.post("/api/ui/key")
+    def ui_key(body: dict = Body(...)):
+        # the key of the page's link, traded for the cookie a change of permission modes needs (hook_auth.claim)
+        return hook_auth.claim(body.get("key"))
 
     # the built UI, last: a mount at / matches everything the routes above did not
     dist = frontend_dist()

@@ -18,8 +18,9 @@
 #                                        each was last used and the sessions open on it (backend/app/runs.py)
 #   thimble purge <id>… [-y] [--dry-run] delete workspaces or archived runs by id, printing what went; never the folder a
 #                                        workspace read or Claude Code's transcripts (backend/app/runs.py)
-#   thimble launch-args [--cwd <p>]      what a session starts with: the channel entry, the --allowedTools and --effort
-#                                        values, the tools that end a turn without text, then main's prompt
+#   thimble launch-args [--cwd <p>] [--settings <s>]
+#                                        what a session starts with: the channel entry, the --allowedTools, --effort and
+#                                        --settings values, the tools that end a turn without text, then main's prompt
 #   thimble prompt <name>… [--cwd <p>]   prompt files rendered for a session in <p> (the injected command of the
 #                                        /thimble and shared skills and of the SessionStart hook); in a session
 #                                        thimble started in its own work folder, the ones its server rendered
@@ -117,91 +118,17 @@ feedback() {
 }
 
 # thimble uninstall [--yes] [--keep-home]: bash, so it works when the venv is missing or inside the tree being removed.
-# It touches only Claude Code's plugin registration, ~/.local/bin/thimble, $THIMBLE_HOME and the keys thimble wrote into
-# folders' .claude/settings.local.json (undo_settings); a tree outside $THIMBLE_HOME (a clone) is left in place with its
-# workspaces. The `rm -rf` is guarded: $THIMBLE_HOME is canonicalized
-# once, `/`, $HOME and relative paths are refused, and it is removed only when it holds thimble state. The recorded
+# It touches only the plugin registration and the trust entry install.sh added, ~/.local/bin/thimble and $THIMBLE_HOME;
+# a tree outside $THIMBLE_HOME (a clone) is left in place with its workspaces. The `rm -rf` is guarded:
+# $THIMBLE_HOME is canonicalized once, `/`, $HOME and relative paths are refused, and it is removed only when it holds
+# thimble state. The recorded
 # server is stopped only when its command line is a thimble server on the recorded port (argv[0] is not checked, since
 # macOS ps shows the venv's python as the framework binary) and the port confirms it (lsof, ss or /api/health); the
-# check is repeated before each signal. Stopping escalates from `thimble stop` to TERM to KILL, 5 s apart. What
-# terminal-first changed in Claude Code's files (a corpus folder's statusline, the trust of thimble's work folders),
-# recorded in $THIMBLE_HOME, is put back before anything is removed (backend/app/claude_changes.py, run with the tree's
-# venv, else python3). A failing step does not stop the others; the last block lists what is left (exit 1 only then).
-# undo_settings PYTHON HOME list|undo: the keys backend/app/cc_settings.py wrote into folders'
-# .claude/settings.local.json, by its records in HOME (the effort and fast-mode `env` keys, the statusline). `list` prints
-# each file that holds one; `undo` removes each key that still holds thimble's value (a statusline gets back the one it
-# replaced), removes a file left empty, prints each file it changed, then removes the records; exit 1 when a file could
-# not be written.
-UNDO_SETTINGS_PY='
-import json, os, sys
-
-home, mode = sys.argv[1], sys.argv[2]
-
-
-def read(path):
-    try:
-        with open(path, encoding="utf-8") as f:
-            d = json.load(f)
-    except (OSError, ValueError):
-        return {}
-    return d if isinstance(d, dict) else {}
-
-
-RECORDS = {"effort-overrides.json": "CLAUDE_CODE_EFFORT_LEVEL", "fast-overrides.json": "CLAUDE_CODE_DISABLE_FAST_MODE",
-           "statusline-overrides.json": None}
-edits = {}
-for record, key in RECORDS.items():
-    for folder, value in read(os.path.join(home, record)).items():
-        if key and isinstance(value, str):
-            edits.setdefault(folder, []).append((key, value))
-        elif not key and isinstance(value, dict):
-            edits.setdefault(folder, []).append((None, value))
-files = {os.path.join(folder, ".claude", "settings.local.json"): e for folder, e in sorted(edits.items())}
-if mode == "list":
-    for path in files:
-        if os.path.isfile(path):
-            print(path)
-    sys.exit(0)
-failed = False
-for path, todo in files.items():
-    d = read(path)
-    changed = False
-    for key, value in todo:
-        env = d.get("env")
-        line = d.get("statusLine")
-        if key and isinstance(env, dict) and str(env.get(key)) == value:
-            del env[key]
-            if not env:
-                del d["env"]
-            changed = True
-        elif not key and isinstance(line, dict) and line.get("command") == value.get("ours"):
-            if value.get("previous"):
-                d["statusLine"] = value["previous"]
-            else:
-                del d["statusLine"]
-            changed = True
-    if not changed:
-        continue
-    try:
-        if d:
-            with open(path + ".thimble-tmp", "w", encoding="utf-8") as f:
-                f.write(json.dumps(d, indent=2) + "\n")
-            os.replace(path + ".thimble-tmp", path)
-        else:
-            os.unlink(path)
-        print(path)
-    except OSError as e:
-        print(f"could not write {path}: {e}", file=sys.stderr)
-        failed = True
-if failed:
-    sys.exit(1)
-for record in RECORDS:
-    try:
-        os.unlink(os.path.join(home, record))
-    except FileNotFoundError:
-        pass
-'
-
+# check is repeated before each signal. Stopping escalates from `thimble stop` to TERM to KILL, 5 s apart. What thimble
+# changed in Claude Code's files, recorded in $THIMBLE_HOME (the trust of its workspaces folder, and keys an older
+# version wrote into folders' .claude/settings.local.json), is put back before anything is removed
+# (backend/app/claude_changes.py, run with python3, else the tree's venv). A failing step does not stop the others; the
+# last block lists what is left (exit 1 only then).
 uninstall() {
   local yes=0 keep_home=0 arg
   for arg in "$@"; do
@@ -219,7 +146,8 @@ uninstall() {
   [ -n "${HOME:-}" ] || { printf 'thimble uninstall: HOME is not set\n' >&2; exit 2; }
   local home_raw="${THIMBLE_HOME:-}" home home_note="" home_state=0 link="$HOME/.local/bin/thimble" tree="" kind="" name="" name_note=""
   local inside=0 pid="" port="" pid_note="" conf="" planned="" pport="" link_ours=0 link_why="" stop_how="" have_claude=0 ans cwd rc
-  local nsteps=0 ndone=0 nleft=0 left="" id_ok=0 id_conf="" id_note="" changed=0 undo=0 undo_py="" undo_cmd="" py="" settings=""
+  local nsteps=0 ndone=0 nleft=0 left="" id_ok=0 id_conf="" id_note="" changed=0 undo=0 undo_py="" undo_cmd="" undone=1
+  local reg="" reg_ok=1
   case "$home_raw" in *[![:space:]]*) ;; *) home_raw="$HOME/.thimble";; esac   # unset or blank: the default
   home="${home_raw%/}"; [ -n "$home" ] || home=/
   enable -n kill 2>/dev/null || true   # `kill` is the program on PATH, not the builtin: the `+ kill …` line names what ran, and a test can stand a failing one in for it
@@ -306,6 +234,12 @@ uninstall() {
   fi
   if [ -z "$name" ]; then if [ "$inside" = 1 ] || [ -z "$tree" ]; then name=thimble-local; else name=thimble; fi; fi
   ! command -v claude >/dev/null 2>&1 || have_claude=1
+  # the plugin registration, removed only when install.sh added it: $home/plugin.json names the marketplace it registered
+  # thimble under, "" after a no. Without that record (an install older than its question, which registered the plugin
+  # unasked) it goes when Claude Code lists it, or, with no claude to ask, the commands are printed
+  if [ -f "$home/plugin.json" ]; then reg="$(json_get "$home/plugin.json" registered || true)"
+  elif [ "$have_claude" = 0 ]; then reg="$name"
+  else case "$(claude plugin list --json 2>/dev/null || true)" in *"\"thimble@$name\""*) reg="$name";; esac; fi
   # the link: ours when it ends at this tree's plugin/bin/thimble, or is a thimble link (…/plugin/bin/thimble) whose target
   # is gone or lies inside $THIMBLE_HOME — it would dangle after the rm
   if [ -L "$link" ]; then
@@ -318,9 +252,6 @@ uninstall() {
       esac
     fi
   fi
-  # the Claude Code settings thimble changed in folders it opened, read with python3, else the tree's own Python
-  if command -v python3 >/dev/null 2>&1; then py=python3; elif [ -n "$tree" ] && [ -x "$tree/backend/.venv/bin/python" ]; then py="$tree/backend/.venv/bin/python"; fi
-  if [ -n "$py" ] && [ -d "$home" ]; then settings="$("$py" -I -c "$UNDO_SETTINGS_PY" "$home" list 2>/dev/null || true)"; fi
   read_record
   # a running server: server.json's pid, alive, this install's server by identify; anything else is left alone, with what it is
   if [ -n "$pid" ]; then
@@ -339,30 +270,28 @@ uninstall() {
   [ -z "$name_note" ] || printf '  %s\n' "$name_note"
   [ -z "$pid" ] || step "stop the thimble server this install recorded (pid $pid, $conf)"
   [ -z "$pid_note" ] || printf '  %s\n' "$pid_note"
-  # what terminal-first changed in Claude Code's files, recorded in $home: put back with the tree's venv, else python3
-  if [ -f "$home/trusted-folders.json" ] || [ -f "$home/statusline-overrides.json" ]; then
-    undo=1 undo_cmd="cd <a thimble tree>/backend && THIMBLE_HOME=$home python3 -m app.claude_changes undo"
+  # what thimble changed in Claude Code's files, recorded in $home: put back with python3, else the tree's venv
+  if [ -f "$home/trust.json" ] || [ -f "$home/trusted-folders.json" ] || [ -f "$home/effort-overrides.json" ] || [ -f "$home/fast-overrides.json" ] || [ -f "$home/statusline-overrides.json" ]; then
+    undo=1 undo_cmd="THIMBLE_HOME=$home python3 -I <a thimble tree>/backend/app/claude_changes.py undo"
     if [ -n "$tree" ] && [ -f "$tree/backend/app/claude_changes.py" ]; then
-      if [ -x "$tree/backend/.venv/bin/python" ]; then undo_py="$tree/backend/.venv/bin/python"
-      elif command -v python3 >/dev/null 2>&1; then undo_py=python3; fi
+      if command -v python3 >/dev/null 2>&1; then undo_py=python3
+      elif [ -x "$tree/backend/.venv/bin/python" ]; then undo_py="$tree/backend/.venv/bin/python"; fi
     fi
-    if [ -n "$undo_py" ]; then step "put back what terminal-first changed in Claude Code's files: the statusline it set in corpus folders and the trust it gave thimble's work folders"
-    else printf "  what terminal-first changed in Claude Code's files cannot be put back here (no thimble tree with a Python to run it); run this yourself:\n    %s\n" "$undo_cmd"; fi
+    if [ -n "$undo_py" ]; then step "put back what thimble changed in Claude Code's files: the trust of its workspaces folder, if install.sh added it"
+    else printf "  what thimble changed in Claude Code's files cannot be put back here (no thimble tree with a Python to run it); run this yourself:\n    %s\n" "$undo_cmd"; fi
   fi
-  if [ "$have_claude" = 1 ]; then
-    step "claude plugin uninstall thimble@$name"
-    step "claude plugin marketplace remove $name"
+  if [ -z "$reg" ] && [ -f "$home/plugin.json" ]; then
+    printf "  thimble's plugin: install.sh did not register it (answered no), so nothing is removed there\n"
+  elif [ -z "$reg" ]; then
+    printf "  thimble's plugin: Claude Code does not list thimble@%s, so nothing is removed there\n" "$name"
+  elif [ "$have_claude" = 1 ]; then
+    step "claude plugin uninstall thimble@$reg"
+    step "claude plugin marketplace remove $reg"
   else
-    printf '  claude is not on PATH; run these yourself when it is:\n    claude plugin uninstall thimble@%s\n    claude plugin marketplace remove %s\n' "$name" "$name"
+    printf '  claude is not on PATH; run these yourself when it is:\n    claude plugin uninstall thimble@%s\n    claude plugin marketplace remove %s\n' "$reg" "$reg"
   fi
   if [ "$link_ours" = 1 ]; then step "rm $link ($link_why)"
   elif [ -e "$link" ] || [ -L "$link" ]; then printf '  %s is left alone: not a link into this tree\n' "$link"; fi
-  if [ -n "$settings" ]; then
-    step "put back the Claude Code settings thimble changed (effort, fast mode, statusline) in:"
-    printf '%s\n' "$settings" | sed 's/^/       /'
-  elif [ -z "$py" ] && { [ -f "$home/effort-overrides.json" ] || [ -f "$home/fast-overrides.json" ] || [ -f "$home/statusline-overrides.json" ]; }; then
-    printf "  without python3 the settings thimble wrote into .claude/settings.local.json files stay; %s/*-overrides.json name the folders\n" "$home"
-  fi
   # what $THIMBLE_HOME holds: the registry of folders (data/) and server state; the app copy and its workspaces
   # only when the tree is inside it
   local holds="the registry of folders you opened with /thimble (data/) and server state (app-dir, server.json, server.log)"
@@ -416,31 +345,25 @@ uninstall() {
     else ndone=$((ndone + 1)); fi
   fi
   if [ "$undo" = 1 ]; then
-    if [ -n "$undo_py" ] && (cd "$tree/backend" && THIMBLE_HOME="$home" "$undo_py" -m app.claude_changes undo); then ndone=$((ndone + 1))
-    else add_left "what terminal-first changed in Claude Code's files was not put back" "$undo_cmd"; fi
+    if [ -n "$undo_py" ] && THIMBLE_HOME="$home" "$undo_py" -I "$tree/backend/app/claude_changes.py" undo; then ndone=$((ndone + 1))
+    else add_left "what thimble changed in Claude Code's files was not put back" "$undo_cmd"; undone=0; fi
   fi
-  if [ "$have_claude" = 1 ]; then
-    if run claude plugin uninstall "thimble@$name"; then ndone=$((ndone + 1))
-    else rc=$?; printf '(exit %s)\n' "$rc"; add_left "claude plugin uninstall thimble@$name failed (exit $rc)" "claude plugin uninstall thimble@$name"; fi
-    if run claude plugin marketplace remove "$name"; then ndone=$((ndone + 1))
-    else rc=$?; printf '(exit %s)\n' "$rc"; add_left "claude plugin marketplace remove $name failed (exit $rc)" "claude plugin marketplace remove $name"; fi
-  else
-    add_left "claude is not on PATH, so the plugin is still registered" "claude plugin uninstall thimble@$name && claude plugin marketplace remove $name"
+  if [ -n "$reg" ] && [ "$have_claude" = 1 ]; then
+    if run claude plugin uninstall "thimble@$reg"; then ndone=$((ndone + 1))
+    else rc=$?; reg_ok=0; printf '(exit %s)\n' "$rc"; add_left "claude plugin uninstall thimble@$reg failed (exit $rc)" "claude plugin uninstall thimble@$reg"; fi
+    if run claude plugin marketplace remove "$reg"; then ndone=$((ndone + 1))
+    else rc=$?; reg_ok=0; printf '(exit %s)\n' "$rc"; add_left "claude plugin marketplace remove $reg failed (exit $rc)" "claude plugin marketplace remove $reg"; fi
+  elif [ -n "$reg" ]; then
+    reg_ok=0; add_left "claude is not on PATH, so the plugin is still registered" "claude plugin uninstall thimble@$reg && claude plugin marketplace remove $reg"
   fi
+  # the record goes with what it records, --keep-home or not, so that a later install asks again
+  [ "$reg_ok" = 0 ] || rm -f "$home/plugin.json"
   if [ "$link_ours" = 1 ]; then
     if run rm -f "$link"; then ndone=$((ndone + 1)); else add_left "$link was not removed" "rm -f $link"; fi
   fi
-  if [ -n "$settings" ]; then
-    printf '+ put back the settings thimble wrote\n'
-    if "$py" -I -c "$UNDO_SETTINGS_PY" "$home" undo; then ndone=$((ndone + 1))
-    else
-      add_left "a .claude/settings.local.json could not be written (above), so the keys thimble wrote stay there" "remove CLAUDE_CODE_EFFORT_LEVEL and CLAUDE_CODE_DISABLE_FAST_MODE from its env block, and thimble's statusLine"
-      if [ "$keep_home" != 1 ] && [ "$home_state" = 1 ]; then
-        keep_home=1; add_left "$home was kept: it records what thimble wrote into those files" "rm -rf $home"
-      fi
-    fi
-  fi
-  if [ "$keep_home" != 1 ] && [ "$home_state" = 1 ]; then
+  if [ "$keep_home" != 1 ] && [ "$home_state" = 1 ] && [ "$undone" = 0 ]; then
+    add_left "$home was kept: it records what the command above puts back" "rm -rf $home   # once that has run"
+  elif [ "$keep_home" != 1 ] && [ "$home_state" = 1 ]; then
     cwd="$(pwd -P 2>/dev/null || printf '%s' "$PWD")"
     if run rm -rf "$home"; then
       ndone=$((ndone + 1))
@@ -503,7 +426,9 @@ esac
 # reach it (where channels are off, the plugin's watcher delivers instead). `launch-args` prints the channel entry of
 # the installed plugin copy, else plugin:thimble@inline for --plugin-dir. Main's prompt is appended to the system prompt,
 # since Claude Code cuts MCP server instructions at about 2 KB and an appended prompt reaches every fork whole.
-# --effort is passed only when neither the analyst's settings nor their flags name one. --allowedTools lets the thimble
+# --effort is passed only when neither the analyst's settings nor their flags name one, unless the composer chose one.
+# --settings carries thimble's statusline and the composer's fast mode, merged into the analyst's own --settings, since
+# Claude Code reads only the last one. --allowedTools lets the thimble
 # tools and the plugin's skills run without a permission prompt, since a fork answering the browser must not wait on a
 # terminal nobody watches; nothing is denied. THIMBLE_CHANNEL tells the MCP shim to subscribe. The session opens with
 # /thimble, which starts the server and opens this folder as a workspace.
@@ -512,18 +437,24 @@ command -v claude >/dev/null 2>&1 || {
   exit 1; }
 # Each launch starts a new session; the workspace stays. -c/--continue resumes the folder's last main session by
 # thimble's own record (cli.last_main), since Claude Code's --continue could pick a writer's session in the same
-# folder; with none, --continue goes to `claude` as it is. Other flags go to `claude` as they are; --new is dropped.
-cont=0 args=()
-for a in "$@"; do
-  case "$a" in
+# folder; with none, --continue goes to `claude` as it is. The analyst's --settings goes to launch-args, which merges it
+# into thimble's. Other flags go to `claude` as they are; --new is dropped.
+cont=0 args=() own=""
+while [ "$#" -gt 0 ]; do
+  case "$1" in
     --new) ;;
     -c | --continue) cont=1;;
-    *) args+=("$a");;
+    --settings) [ "$#" -lt 2 ] || { own="$2"; shift; };;
+    --settings=*) own="${1#--settings=}";;
+    --) args+=("$@"); break;;
+    *) args+=("$1");;
   esac
+  shift
 done
 set -- ${args[@]+"${args[@]}"}
 ask=()
 [ "$cont" = 0 ] || ask=(--resume)
+[ -z "$own" ] || ask+=(--settings="$own")
 repo="$("$here/thimble-app-dir")"
 cwd="$PWD"
 out="$(cd "$repo/backend" && THIMBLE_CALLER_CWD="$cwd" \
@@ -535,12 +466,14 @@ allowed="${rest%%$'\n'*}"
 rest="${rest#*$'\n'}"
 effort="${rest%%$'\n'*}"
 rest="${rest#*$'\n'}"
+settings="${rest%%$'\n'*}"
+rest="${rest#*$'\n'}"
 turn_tools="${rest%%$'\n'*}"
 rest="${rest#*$'\n'}"
 last=""
 if [ "$cont" = 1 ]; then last="${rest%%$'\n'*}"; rest="${rest#*$'\n'}"; fi
 prompt="$rest"
-tools=(--allowedTools "$allowed")
+tools=(--allowedTools "$allowed" --settings "$settings")
 # an --effort among the analyst's own flags is their choice, so thimble's default is left out
 for a in "$@"; do case "$a" in --effort | --effort=*) effort="";; esac; done
 [ -z "$effort" ] || tools+=(--effort "$effort")

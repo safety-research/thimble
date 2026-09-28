@@ -1,4 +1,5 @@
-"""The analyst's own Claude Code settings, as far as thimble reads or writes them: effort, ultracode and fast mode.
+"""The analyst's own Claude Code settings, as far as thimble reads them: effort, ultracode, the statusline and the
+sandbox. thimble writes none of their files.
 
 Nothing here overrides a setting the analyst has; thimble's defaults apply only where the settings say nothing
 (names_effort), and then the launcher passes `--effort high` to main (main_effort_flag).
@@ -10,12 +11,8 @@ block or the environment), or an effort for main's model (`modelSettings.<model 
 `effortLevel` in the user's own file only for LEGACY_EFFORT_MODELS; for later models thimble passes that level as
 main's `--effort` itself.
 
-Changing main's effort while it runs: channel messages, `--settings` edits and `effortLevel` edits have no effect on a
-running session, but CLAUDE_CODE_EFFORT_LEVEL in the `env` block of the folder's `.claude/settings.local.json` takes
-effect at main's next request. set_main_effort writes that key and records it in <thimble home>/effort-overrides.json;
-the launcher removes it before the next session (clear_override), leaving any value edited by hand. The model cannot
-change mid-session. Fast mode can be turned off and on again (CLAUDE_CODE_DISABLE_FAST_MODE "1"/"0" in the same
-block) but not turned on in a session that started without it; set_main_fast records it in fast-overrides.json.
+The composer's effort and fast-mode choices for main are kept in the workspace's settings and applied at main's next
+launch (cli.launch_args), never written into the folder's Claude Code settings.
 """
 from __future__ import annotations
 
@@ -27,8 +24,7 @@ import sys
 from pathlib import Path
 from typing import Any, Mapping
 
-from . import cc_channel, claude_changes, config
-from .ledger import atomic_write_text
+from . import cc_channel, config
 
 log = logging.getLogger("thimble.cc_settings")
 
@@ -44,11 +40,8 @@ LEGACY_EFFORT_MODELS = frozenset({
     "claude-opus-4-6", "claude-opus-4-7", "claude-opus-4-8", "claude-opus-5", "claude-fable-5", "claude-fable-5-1"})
 MODEL_ENV = "ANTHROPIC_MODEL"  # the model a session runs when set, over every settings file's `model`
 EFFORT_ENV = "CLAUDE_CODE_EFFORT_LEVEL"
-FAST_OFF_ENV = "CLAUDE_CODE_DISABLE_FAST_MODE"  # "1" turns a running session's fast mode off, "0" back on (module note)
 LOCAL_SETTINGS = Path(".claude") / "settings.local.json"
 PROJECT_SETTINGS = Path(".claude") / "settings.json"
-OVERRIDES_FILE = "effort-overrides.json"  # in thimble's home: {folder: the level thimble wrote there}
-FAST_OVERRIDES_FILE = "fast-overrides.json"  # in thimble's home: {folder: the FAST_OFF_ENV value thimble wrote there}
 MANAGED = {platform: d / cc_channel.MANAGED_FILE for platform, d in cc_channel.MANAGED_DIRS.items()}
 
 
@@ -71,31 +64,12 @@ def sources(cwd: Path) -> list[Path]:
     return [config_dir() / "settings.json", cwd / PROJECT_SETTINGS, cwd / LOCAL_SETTINGS, *([managed] if managed else [])]
 
 
-def analyst_sources() -> list[Path]:
-    """The settings files that are the analyst's own wherever a session runs, lowest precedence first: the user's
-    settings.json and the managed file. A corpus folder's .claude/ is left out, since a file planted there must not
-    choose a permission mode or a command thimble runs (config.settings_files does the same for apiKeyHelper)."""
-    managed = MANAGED.get(sys.platform)
-    return [config_dir() / "settings.json", *([managed] if managed else [])]
-
-
-def _thimble_home() -> Path:
-    return Path(os.environ.get("THIMBLE_HOME") or "~/.thimble").expanduser()
-
-
-def _overrides(name: str = OVERRIDES_FILE) -> dict[str, str]:
-    d = _read(_thimble_home() / name)
-    return {str(k): str(v) for k, v in d.items() if isinstance(v, str)}
-
-
-def _write_overrides(d: dict[str, str], name: str = OVERRIDES_FILE) -> None:
-    path = _thimble_home() / name
-    path.parent.mkdir(parents=True, exist_ok=True)
-    atomic_write_text(path, json.dumps(d, indent=1))
-
-
-def _key(cwd: Path) -> str:
-    return str(cwd.resolve())
+def analyst_tiers() -> list[dict[str, Any]]:
+    """The settings that are the analyst's own wherever a session runs, lowest precedence first: the user's settings.json
+    and the org's managed tier (cc_channel.managed: server-managed settings, else the managed file with its drop-ins). A
+    corpus folder's .claude/ is left out, since a file planted there must not choose a permission mode or a command
+    thimble runs."""
+    return [_read(config_dir() / "settings.json"), cc_channel.managed({config.CONFIG_DIR_ENV: str(config_dir())}) or {}]
 
 
 def model_key(model: str | None) -> str:
@@ -120,19 +94,18 @@ def main_model(cwd: Path, environ: Mapping[str, str] | None = None) -> str:
 
 
 def _efforts(cwd: Path, environ: Mapping[str, str] | None = None) -> tuple[bool, str | None, bool | None, str | None, str | None]:
-    """What the analyst's settings files say about the effort of a session in `cwd`, a key thimble wrote itself left out:
-    (env names CLAUDE_CODE_EFFORT_LEVEL, its level, `ultracode`, the effort for main's model, the user file's unread
-    top-level `effortLevel`)."""
+    """What the analyst's settings files say about the effort of a session in `cwd`: (env names
+    CLAUDE_CODE_EFFORT_LEVEL, its level, `ultracode`, the effort for main's model, the user file's unread top-level
+    `effortLevel`)."""
     key = model_key(main_model(cwd, environ))
     user = sources(cwd)[0]
-    ours = _overrides().get(_key(cwd))
     named = False
     by_env = ultracode = level = unread = None
     for path in sources(cwd):  # lowest first, so a later file overwrites what an earlier one said
         d = _read(path)
         block = d.get("env") if isinstance(d.get("env"), dict) else {}
         raw = block.get(EFFORT_ENV)
-        if raw not in (None, "") and not (path == cwd / LOCAL_SETTINGS and ours is not None and str(raw) == ours):
+        if raw not in (None, ""):
             named = True
             v = str(raw).strip().lower()
             by_env = v if v in EFFORTS else by_env
@@ -154,8 +127,7 @@ def _efforts(cwd: Path, environ: Mapping[str, str] | None = None) -> tuple[bool,
 
 def names_effort(cwd: Path, environ: dict[str, str] | None = None) -> bool:
     """Whether the analyst's own settings or environment choose an effort or ultracode for a session in `cwd` that
-    Claude Code runs at (module note: not the user file's top-level `effortLevel`, which it reads only for older models).
-    A key thimble wrote itself (set_main_effort) is not the analyst's."""
+    Claude Code runs at (module note: not the user file's top-level `effortLevel`, which it reads only for older models)."""
     env = os.environ if environ is None else environ
     if env.get(EFFORT_ENV, "").strip():
         return True
@@ -186,7 +158,7 @@ def level_of(choice: str) -> str:
 def analyst_effort(cwd: Path, environ: dict[str, str] | None = None) -> str | None:
     """The effort the analyst's own settings or environment choose for a session in `cwd`, as the effort menus name it:
     CLAUDE_CODE_EFFORT_LEVEL, else `ultracode`, else the effort for main's model, else the user file's top-level
-    `effortLevel`; None when they choose none. A key thimble wrote itself is not the analyst's."""
+    `effortLevel`; None when they choose none."""
     env = os.environ if environ is None else environ
     value = env.get(EFFORT_ENV, "").strip().lower()
     if value in EFFORTS:
@@ -195,161 +167,20 @@ def analyst_effort(cwd: Path, environ: dict[str, str] | None = None) -> str | No
     return by_env or (ULTRACODE if ultracode else level or unread)
 
 
-def _set_env_key(cwd: Path, key: str, value: str, overrides_file: str) -> None:
-    """Write `key: value` into the `env` block of the folder's local settings (module note) and remember in thimble's
-    home that thimble wrote it. The rest of the file is kept as it was."""
-    path = cwd / LOCAL_SETTINGS
-    d = _read(path)
-    env = dict(d.get("env") or {}) if isinstance(d.get("env"), dict) else {}
-    env[key] = value
-    d["env"] = env
-    path.parent.mkdir(parents=True, exist_ok=True)
-    atomic_write_text(path, json.dumps(d, indent=2) + "\n")
-    overrides = _overrides(overrides_file)
-    overrides[_key(cwd)] = value
-    _write_overrides(overrides, overrides_file)
-
-
-def set_main_effort(cwd: Path, choice: str) -> str:
-    """Write the level of `choice` into the folder's local settings as CLAUDE_CODE_EFFORT_LEVEL (module note) and
-    remember that thimble wrote it; the level."""
-    level = level_of(choice)
-    _set_env_key(cwd, EFFORT_ENV, level, OVERRIDES_FILE)
-    return level
-
-
-def set_main_fast(cwd: Path, on: bool) -> None:
-    """Turn fast mode off (`on` false) or back on for main from its next request, by CLAUDE_CODE_DISABLE_FAST_MODE in
-    the folder's local settings (module note: it cannot turn on fast mode the session started without)."""
-    _set_env_key(cwd, FAST_OFF_ENV, "0" if on else "1", FAST_OVERRIDES_FILE)
-
-
-def _clear_env_key(cwd: Path, key: str, overrides_file: str) -> bool:
-    """Remove `key` from the folder's local settings when it still holds the value thimble wrote (an edit by hand is the
-    analyst's and stays); True when it was removed. A file left empty is removed."""
-    overrides = _overrides(overrides_file)
-    ours = overrides.pop(_key(cwd), None)
-    if ours is None:
-        return False
-    _write_overrides(overrides, overrides_file)
-    path = cwd / LOCAL_SETTINGS
-    d = _read(path)
-    env = d.get("env") if isinstance(d.get("env"), dict) else None
-    if not env or str(env.get(key)) != ours:
-        return False
-    env.pop(key, None)
-    if not env:
-        d.pop("env", None)
-    try:
-        if d:
-            atomic_write_text(path, json.dumps(d, indent=2) + "\n")
-        else:
-            path.unlink()
-    except OSError as e:
-        log.warning("could not clear %s in %s: %s", key, path, e)
-        return False
-    return True
-
-
-STATUSLINE_FILE = claude_changes.STATUSLINE_FILE  # in thimble's home: {folder: {ours, previous}} (set_statusline)
 STATUSLINE_REFRESH_S = 2
 
 
-def own_statusline() -> str:
-    """The statusline command of the analyst's own settings (analyst_sources), the most specific file's; '' for none.
-    thimble-agents runs it with a shell, so a corpus folder's settings never supply it."""
-    for path in reversed(analyst_sources()):
-        line = _read(path).get("statusLine")
-        cmd = line.get("command") if isinstance(line, dict) else None
-        if isinstance(cmd, str) and cmd.strip():
-            return cmd
-    return ""
+def own_statusline() -> dict[str, Any]:
+    """The statusLine of the analyst's own settings (analyst_tiers), the highest tier's that names a command; {} for
+    none. thimble-agents runs its command with a shell, so a corpus folder's settings never supply it."""
+    for tier in reversed(analyst_tiers()):
+        line = tier.get("statusLine")
+        if isinstance(line, dict) and isinstance(line.get("command"), str) and line["command"].strip():
+            return line
+    return {}
 
 
-def _statuslines() -> dict[str, Any]:
-    try:
-        d = json.loads((_thimble_home() / STATUSLINE_FILE).read_text("utf-8"))
-    except (OSError, ValueError):
-        return {}
-    return d if isinstance(d, dict) else {}
-
-
-def _write_statuslines(d: dict[str, Any]) -> None:
-    path = _thimble_home() / STATUSLINE_FILE
-    path.parent.mkdir(parents=True, exist_ok=True)
-    atomic_write_text(path, json.dumps(d, indent=1))
-
-
-def set_statusline(cwd: Path, command: str) -> None:
-    """Make `command` the statusline of sessions in `cwd`, by `statusLine` in the folder's local settings, and remember
-    what that key held before, which clear_statusline puts back."""
-    path = cwd / LOCAL_SETTINGS
-    d = _read(path)
-    line = {"type": "command", "command": command, "refreshInterval": STATUSLINE_REFRESH_S}
-    if d.get("statusLine") == line:
-        return
-    kept = _statuslines()
-    prev = kept.get(_key(cwd), {}).get("previous") if _key(cwd) in kept else d.get("statusLine")
-    d["statusLine"] = line
-    path.parent.mkdir(parents=True, exist_ok=True)
-    atomic_write_text(path, json.dumps(d, indent=2) + "\n")
-    kept[_key(cwd)] = {"ours": command, "previous": prev}
-    _write_statuslines(kept)
-
-
-def clear_statusline(cwd: Path) -> bool:
-    """Put back the folder's own `statusLine` in place of thimble's, when thimble's is still there; True when it did."""
-    return claude_changes.restore_statusline(cwd)
-
-
-def clear_override(cwd: Path) -> bool:
-    """Remove the effort and fast-mode keys thimble wrote into the folder's local settings (_clear_env_key), before a
-    new session starts; True when either was removed."""
-    effort = _clear_env_key(cwd, EFFORT_ENV, OVERRIDES_FILE)
-    fast = _clear_env_key(cwd, FAST_OFF_ENV, FAST_OVERRIDES_FILE)
-    return effort or fast
-
-
-# --------------------------------------------------------------------------- the orientation's permissions and sandbox
-# Start's mode switcher for the orientation: Manual, Auto and Bypass. It opens on the analyst's own mode (the highest of
-# analyst_sources' `permissions.defaultMode`; a mode it does not offer opens it on Manual). The orientation runs with
-# `--permission-mode` `auto` for Auto and `default` for Manual and Bypass alike: in Bypass thimble grants every request
-# itself (agent_session), so the analyst can switch between Manual and Bypass without restarting the session.
-# Start's names, and the Claude Code mode each is named after
-ORIENT_MODES = {"manual": "default", "auto": "auto", "bypass": "bypassPermissions"}
-
-
-def permission_mode(cwd: Path) -> str:
-    """The analyst's own permission mode: the `permissions.defaultMode` of the last of analyst_sources that sets one
-    (the managed file over the user's settings.json), else `default`. The settings of the corpus folder `cwd` are not
-    read, so a corpus cannot pre-select Bypass."""
-    mode = "default"
-    for path in analyst_sources():
-        d = _read(path)
-        perms = d.get("permissions") if isinstance(d.get("permissions"), dict) else {}
-        if isinstance(perms.get("defaultMode"), str) and perms["defaultMode"].strip():
-            mode = perms["defaultMode"].strip()
-    return mode
-
-
-def orient_mode_default(cwd: Path) -> str:
-    """The choice Start's switcher opens on for the analyst's own mode: `auto` for auto, `bypass` for bypassPermissions,
-    else `manual`."""
-    return {"auto": "auto", "bypassPermissions": "bypass"}.get(permission_mode(cwd), "manual")
-
-
-def orient_mode(cwd: Path, choice: str | None) -> str:
-    """The mode the orientation runs in: `choice` when it is one of ORIENT_MODES, else the one the analyst's own mode
-    stands for."""
-    return choice if choice in ORIENT_MODES else orient_mode_default(cwd)
-
-
-def orient_permission_flag(mode: str) -> str:
-    """The `--permission-mode` of an orientation in `mode`: `auto` for Auto, else `default`, the manual mode Bypass runs in
-    too."""
-    return "auto" if mode == "auto" else "default"
-
-
+# --------------------------------------------------------------------------- the sandbox
 # Claude Code's Bash sandbox. On Linux it needs bubblewrap, socat and unprivileged user namespaces (which Ubuntu 24.04
 # restricts unless an AppArmor profile allows bwrap), so sandbox_ok probes it once. A session where it cannot run gets
 # no sandbox block and runs Bash under the analyst's permission mode instead.

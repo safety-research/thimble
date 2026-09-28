@@ -12,7 +12,7 @@ out (held) and its view proposals stay unlisted (holding) while they build. A fo
 the same session, and its changes land in place, one Undo reverting them all.
 
   orient/run.json    {status: requested|running|done|failed|stopped, passes, query, effort?, critique?, ultracode?,
-                      permissions?, event?, requested?, started, ended, groups: {orientation}, chats: {orient?},
+                      event?, requested?, started, ended, groups: {orientation}, chats: {orient?},
                       session?, pid?, agent_id?, error?, run (0 the first, then one per follow-up), queue: [{text, by,
                       ts}], followups: [{run, status, started, ended, messages, added, revised, deleted, views}],
                       report_asked?}
@@ -44,7 +44,7 @@ from typing import Any
 
 from fastapi import HTTPException
 
-from . import agents, cc_settings, config, investigation
+from . import agents, config, investigation
 from .ledger import read_json, write_json
 
 log = logging.getLogger("thimble.orientation")
@@ -59,12 +59,10 @@ AGENT_FILE = config.REPO_ROOT / "prompts" / "orient.md"
 EFFORTS = ("low", "medium", "high", "xhigh", "max")  # Start's effort menu below Ultracode, its highest choice
 DEFAULT_EFFORT = "max"
 DEFAULT_ULTRACODE = True  # an orientation runs with Ultracode unless Start turns it off
-ROLE = "orient"  # the two-way choice a page without the mode switcher sends
+ROLE = "orient"  # the orientation's chat role
 TITLE = "Orientation"  # the agent chat's title
 ORIENT_KIND = "orient"  # the channel kind that tells main the orientation ended (prompts/main.md)
 GROUP_PATHS = {"deck": "Orientation"}  # the orientation's one group, its deck
-PERMISSIONS = tuple(cc_settings.ORIENT_MODES)  # Start's mode switcher for the orientation: manual, auto, bypass
-OLD_PERMISSIONS = {"ask": "manual", "run": "auto"}  # the two-way choice a page loaded before the switcher sends
 REPORT_DOC = "report"
 WRITE_KIND = "write"  # the channel kind the Report tab's Write sends
 RUNNING = ("requested", "running")
@@ -173,23 +171,14 @@ def flag(value: Any, default: bool) -> bool:
     return default
 
 
-def permissions(value: Any) -> str | None:
-    """Start's permission choice, one of PERMISSIONS (or the two-way choice mapped by OLD_PERMISSIONS); None for
-    anything else."""
-    v = str(value or "").strip().lower()
-    v = OLD_PERMISSIONS.get(v, v)
-    return v if v in PERMISSIONS else None
-
-
 def choices(c: str) -> dict[str, Any]:
-    """{effort, critique, ultracode, permissions} for the next orientation session: the requested run's, recorded from
-    Start, else the defaults; `permissions` None is the workspace's stored choice or the analyst's own mode
-    (orient_session.permission_flag)."""
+    """{effort, critique, ultracode} for the next orientation session: the requested run's, recorded from Start, else
+    the defaults."""
     run = read_run(c)
     if run and run.get("status") == "requested":
         return {"effort": effort(run.get("effort")), "critique": flag(run.get("critique"), True),
-                "ultracode": flag(run.get("ultracode"), DEFAULT_ULTRACODE), "permissions": permissions(run.get("permissions"))}
-    return {"effort": DEFAULT_EFFORT, "critique": True, "ultracode": DEFAULT_ULTRACODE, "permissions": None}
+                "ultracode": flag(run.get("ultracode"), DEFAULT_ULTRACODE)}
+    return {"effort": DEFAULT_EFFORT, "critique": True, "ultracode": DEFAULT_ULTRACODE}
 
 
 def ensure_groups(c: str, deck: bool = False) -> dict[str, str]:
@@ -309,7 +298,6 @@ def start_requested(c: str, payload: dict[str, Any], posted: dict[str, Any]) -> 
     _write_run(c, {"status": "requested", "passes": passes, "query": text or None, "effort": effort(payload.get("effort")),
                    "critique": flag(payload.get("critique"), True),
                    "ultracode": flag(payload.get("ultracode"), DEFAULT_ULTRACODE),
-                   "permissions": permissions(payload.get("permissions")),
                    "event": posted.get("id"), "requested": _now(), "started": None, "ended": None,
                    "groups": ensure_groups(c, deck=True) if "final" in passes else {}, "chats": {}, "error": None})
 

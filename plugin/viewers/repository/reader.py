@@ -185,10 +185,16 @@ def _row(shape, c, tz):
     return [_rec("comment", t("created_at"), author=c.get("author"), number=n, text=c.get("body"))]
 
 
+def _content(r):
+    """A transcript line's message content; None when its message is not an object."""
+    msg = r.get("message")
+    return msg.get("content") if isinstance(msg, dict) else None
+
+
 def _turn(r, name, note):
     """A transcript line as a record: the agent's sign-off when it is its last words (`note`), else a turn, which the
     agent's unit cites but the page does not show."""
-    content = (r.get("message") or {}).get("content")
+    content = _content(r)
     blocks = [{"text": content}] if isinstance(content, str) else content if isinstance(content, list) else []
     words = [b.get("text") or b.get("content") or (b.get("input") or {}).get("command") for b in blocks
              if isinstance(b, dict)]
@@ -227,9 +233,10 @@ def _parse(ctx, n, raw):
 
 def _manifest(path, problems):
     """A run's setup from its manifest, whichever keys it uses, with the line of its brief; a manifest that does not
-    parse is a problem and gives no setup, and a timezone the machine does not know is a problem and read as UTC."""
-    with open(path, encoding="utf-8") as f:
-        text = f.read()
+    parse is a problem and gives no setup, a timezone the machine does not know is a problem and read as UTC, and a
+    team or policy of another shape is a problem and left out."""
+    with open(path, "rb") as f:
+        text = f.read().decode("utf-8", "replace")
     line = lambda key: next((n for n, ln in enumerate(text.splitlines(), 1) if ln.strip().startswith(f'"{key}"')), None)  # noqa: E731
     try:
         m = json.loads(text)
@@ -244,11 +251,14 @@ def _manifest(path, problems):
     except (ValueError, TypeError, KeyError):  # an unknown name raises ZoneInfoNotFoundError, a KeyError
         _problem(problems, f"{path}#L{line('timezone') or 1}", f"unknown timezone {tz!r}; the run's local times are read as UTC")
         tz = None
+    team, policy = _first(m, "agents", "team") or [], m.get("policy") or {}
+    if not isinstance(team, list) or not isinstance(policy, dict):
+        _problem(problems, f"{path}#L1", "the manifest's team or policy is not of the shape the reader knows")
+        team, policy = team if isinstance(team, list) else [], policy if isinstance(policy, dict) else {}
     brief = "brief" if "brief" in m else "prompt"
     return {"start": _time(_first(m, "started", "started_at"), tz), "tz": tz, "brief": m.get(brief), "line": line(brief),
-            "agents": [a.get("name") if isinstance(a, dict) else a for a in _first(m, "agents", "team") or []],
-            "approvals": _number(_first(m, "approvals", "required_approvals")
-                                 or (m.get("policy") or {}).get("approvals"))}
+            "agents": [str(a.get("name")) if isinstance(a, dict) else str(a) for a in team],
+            "approvals": _number(_first(m, "approvals", "required_approvals") or policy.get("approvals"))}
 
 
 def _shape(path):
@@ -268,9 +278,9 @@ def _says(raw):
         return False
     if not isinstance(r, dict):
         return False
-    content = (r.get("message") or {}).get("content")
-    return r.get("type") == "assistant" and (isinstance(content, str) or any(
-        isinstance(b, dict) and b.get("type") == "text" for b in content or []))
+    content = _content(r)
+    return r.get("type") == "assistant" and (isinstance(content, str) or isinstance(content, list) and any(
+        isinstance(b, dict) and b.get("type") == "text" for b in content))
 
 
 def _lines(path):
@@ -340,8 +350,8 @@ def build_index(paths):
                 ref = f"{path}#L{n}"
                 try:
                     found = _parse(ctx, n, raw)
-                except ValueError as e:
-                    _problem(problems, ref, str(e))
+                except Exception as e:  # noqa: BLE001 — any line the reader cannot read is a problem, never the index's end
+                    _problem(problems, ref, str(e) if isinstance(e, ValueError) else "a record of a shape the reader does not know")
                     continue
                 for i, r in enumerate(found):
                     if r.get("id") is not None:

@@ -8,7 +8,7 @@
     thimble feedback ["description"] [--no-logs]   (a problem report as a zip; feedback.py)
     thimble list                           (the workspaces by id, archived runs included; runs.py)
     thimble purge <id>… [--dry-run]        (delete workspaces or archived runs by id; runs.py)
-    thimble launch-args --cwd <path>       (the launcher's: channel entry, allowed tools, main's effort, turn tools, main's prompt)
+    thimble launch-args --cwd <path>       (the launcher's: channel entry, allowed tools, main's effort and settings, turn tools, main's prompt)
     thimble prompt <name>… [--cwd <path>]  (prompt files rendered for a session in <path>, for skills and hooks)
 
 `server up` (alias `ensure`) is the one starter: `GET /api/health`, then under `flock <home>/server.lock` spawn uvicorn
@@ -17,8 +17,9 @@ cwd to a workspace, print `thimble: <url>`, and name the session to the server. 
 whole when its command exits non-zero. `--action fresh` moves the workspace aside into <workspaces>/.archive/;
 `--action restore` restores an archive. /thimble also reports the route browser events take (cc_channel.delivery).
 
-<home> is `~/.thimble` or THIMBLE_HOME. <home>/server.json records {port, pid, url, repo, env, token}, readable by its
-owner alone; `token` is new at each start and is what the plugin's hooks prove they hold (hook_auth.py). Its `pid` is trusted
+<home> is `~/.thimble` or THIMBLE_HOME. <home>/server.json records {port, pid, url, repo, env, token, ui_key}, readable
+by its owner alone; `token` is new at each start and is what the plugin's hooks prove they hold, and `ui_key`, kept
+across starts, is what the printed link gives the browser to change permission modes (hook_auth.py). Its `pid` is trusted
 only while it is a thimble server on its port (is_server checks the command line and working folder, since a pid
 recorded inside a sandbox's pid namespace can name an unrelated host process). reconcile makes the record true before
 `up` acts on it. A server whose /api/health names another THIMBLE_HOME belongs to another install and is refused.
@@ -80,7 +81,7 @@ RESTARTED_LINE = "thimble: server restarted (source changed)"
 NOT_RESTARTED_LINE = "thimble: source changed since the server started; not restarting while {reason}"
 REGISTER_FAILED_LINE = "thimble: could not open {path} as a workspace (the server refused to register it); see {log} and say `/thimble` again."
 NO_UI_LINE = "thimble: the dashboard is not built yet, so that URL shows no page; run `thimble doctor` in a shell for the fix."
-NO_AUTH_LINE = "thimble: no Claude login or API key was found; nothing will run until there is one (`thimble doctor` says how)."
+NO_AUTH_LINE = "thimble: WARNING - {problem}. Nothing that calls a model runs until then."
 FEEDBACK = "feedback"  # /thimble feedback: the problem report (feedback.py)
 # where the server did not start: how to send the developer a problem report, which needs no server
 REPORT_LINE = ("thimble: to report it, say `/thimble feedback` or run `thimble feedback \"the server did not start\"` in a "
@@ -170,9 +171,6 @@ STOP_DECLINED_LINE = "thimble: not stopped."
 RUNNING_KINDS = {"orient": "the orientation", "writer": "the writer", "check": "the report check",
                  "view": "the view build"}
 NOTICES: list[str] = []  # lines `ensure_running` leaves for `cmd_ensure`
-# the caller's Claude Code session leaks into the environment; the server must not inherit a session's identity
-_STRIP_PREFIXES = ("CLAUDE_", "CLAUDECODE")
-_KEEP = {"CLAUDE_CONFIG_DIR"}
 MAIN = "main"
 
 
@@ -191,16 +189,6 @@ def home() -> Path:
 def ensure_home() -> Path:
     """<home>, made if missing and kept private (0700), since it holds the server's log, state and registry."""
     return config.private_dir(home())
-
-
-def private_append(p: Path) -> int:
-    """A file descriptor appending to `p`, which is made, or kept, readable by its owner alone (0600)."""
-    fd = os.open(p, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o600)
-    try:
-        os.fchmod(fd, 0o600)
-    except OSError:
-        pass
-    return fd
 
 
 def server_json() -> Path:
@@ -232,17 +220,17 @@ def new_token() -> str:
 
 
 def write_state(state: dict[str, Any]) -> None:
-    """server.json, written whole and private (0600), with the token the file held when `state` names none, else a
-    new one."""
+    """server.json, written whole into the private home (ensure_home), with the token and the ui_key the file held when
+    `state` names none, else new ones (hook_auth.py)."""
     ensure_home()
+    held = read_state()
     if not state.get("token"):
-        state = {**state, "token": read_state().get("token") or new_token()}
+        state = {**state, "token": held.get("token") or new_token()}
+    if not state.get("ui_key"):
+        state = {**state, "ui_key": held.get("ui_key") or new_token()}
     p = server_json()
     tmp = p.with_suffix(".json.tmp")
-    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-    with os.fdopen(fd, "w", encoding="utf-8") as f:
-        os.fchmod(f.fileno(), 0o600)
-        f.write(json.dumps(state, indent=2) + "\n")
+    tmp.write_text(json.dumps(state, indent=2) + "\n", "utf-8")
     tmp.replace(p)
 
 
@@ -257,7 +245,7 @@ def _log(line: str) -> None:
     """Supervisor diagnostics go to the server log, never to stdout."""
     try:
         ensure_home()
-        with os.fdopen(private_append(log_path()), "a", encoding="utf-8") as f:
+        with log_path().open("a", encoding="utf-8") as f:
             f.write(f"{_now()} thimble-server: {line}\n")
     except OSError:
         pass
@@ -300,7 +288,7 @@ def resolve_env() -> dict[str, Any]:
 
 
 def _server_environ(env: dict[str, Any], p: int, ui: int) -> dict[str, str]:
-    base = {k: v for k, v in os.environ.items() if k in _KEEP or not k.startswith(_STRIP_PREFIXES)}
+    base = config.passed_environ()  # without the calling session's identity (config.passes)
     base.update({
         "THIMBLE_DATA_DIR": env["data_dir"],
         "THIMBLE_WORKSPACES_DIR": env["workspaces_dir"],
@@ -503,7 +491,7 @@ def _detach() -> None:
 def spawn(cmd: list[str], *, cwd: Path, env: dict[str, str], log_file: Path) -> int:
     """Start `cmd` as its own session leader, stdin from /dev/null, output appended to `log_file`; the pid. Seam for tests."""
     config.private_dir(log_file.parent)
-    with os.fdopen(private_append(log_file), "ab") as out:
+    with log_file.open("ab") as out:
         proc = subprocess.Popen(cmd, cwd=str(cwd), stdin=subprocess.DEVNULL, stdout=out, stderr=subprocess.STDOUT,
                                 env=env, start_new_session=True, preexec_fn=_detach, close_fds=True)
     return proc.pid
@@ -536,8 +524,7 @@ def start(p: int | None = None) -> dict[str, Any]:
     pid = spawn(backend_cmd(p, autorestart_enabled()), cwd=BACKEND_DIR, env=environ, log_file=log_path())
     LAST_START.clear()
     LAST_START.update(pid=pid, port=p, log_offset=offset)
-    _log(f"started uvicorn pid {pid} on {p} (data_dir {env['data_dir']}, workspaces_dir {env['workspaces_dir']}, "
-         f"auth {config.auth_path()[0]})")
+    _log(f"started uvicorn pid {pid} on {p} (data_dir {env['data_dir']}, workspaces_dir {env['workspaces_dir']})")
     vite_pid = read_state().get("vite_pid") if listening(ui) else None
     if env["dev"] and not listening(ui):
         vite_pid = start_vite(ui, p, environ)
@@ -1011,7 +998,7 @@ def _leave_restart_reason(title: str) -> None:
 def spawn_restart() -> int:
     """`thimble restart --keep-vite --yes` as a detached session leader, so the restart outlives the caller; busy_reason
     has found the server idle, so it asks nothing. Seam for tests."""
-    env = {k: v for k, v in os.environ.items() if k in _KEEP or not k.startswith(_STRIP_PREFIXES)}
+    env = config.passed_environ()
     env.update({"THIMBLE_HOME": str(home()), "THIMBLE_PORT": str(port())})
     return spawn([sys.executable, "-m", "app.cli", "restart", "--keep-vite", "--yes"], cwd=BACKEND_DIR, env=env,
                  log_file=log_path())
@@ -1151,10 +1138,12 @@ def open_workspace(cwd: Path, data_dir: Path, url: str | None, *, here: bool = F
 
 
 def ui_url(name: str | None) -> str:
-    """The UI port in dev mode (its own Vite), else the API port where the built UI is served."""
+    """The UI port in dev mode (its own Vite), else the API port where the built UI is served, with the key that lets
+    the page change permission modes (hook_auth.claim)."""
     st = read_state()
     base = str(st.get("url") or api_url())
-    return f"{base}/?ws={name}" if name else f"{base}/"
+    key = f"#k={st['ui_key']}" if st.get("ui_key") else ""
+    return f"{base}/?ws={name}{key}" if name else f"{base}/{key}"
 
 
 HELD_KEYS = ("cards", "labels", "documents", "chats")  # what `GET /api/tools/holdings` counts (tools.holdings)
@@ -1338,12 +1327,11 @@ def installed_copy(cwd: Path) -> Installed | None:
 
 
 def name_session(url: str, name: str, session: str, cwd: Path) -> str | None:
-    """Tell the server which Claude Code session asked (`POST /api/ws/{c}/session`), with this process's pid, whose
-    environment the server reads for the CLAUDE_CONFIG_DIR the session runs under. Returns the session this one took main
+    """Tell the server which Claude Code session asked (`POST /api/ws/{c}/session`). Returns the session this one took main
     over from while it still runs in another terminal, else None."""
     try:
         status, body = _request("POST", f"{url}/api/ws/{urllib.parse.quote(name)}/session",
-                                {"session": session, "cwd": str(cwd), "env_pid": os.getpid()}, timeout=3.0)
+                                {"session": session, "cwd": str(cwd)}, timeout=3.0)
         if status != 200:
             _log(f"session {session} for {name}: {status} {str(body)[:200]}")
             return None
@@ -1415,11 +1403,52 @@ def last_main(cwd: Path) -> str:
     return best[1] if best else ""
 
 
-def launch_args(cwd: Path, resume: bool = False) -> str:
+def main_choice(cwd: Path) -> dict[str, Any]:
+    """The composer's effort and fast-mode choice for main in the folder's workspace (channel.effort_route), kept in the
+    workspace's settings.json as models.main; {} for none."""
+    c = config.workspace_for_cwd(str(cwd))
+    try:
+        stored = json.loads((config.workspace_path(c) / "settings.json").read_text("utf-8")) if c else {}
+        main = stored.get(config.MODELS_KEY, {}).get("main")
+    except (OSError, ValueError, AttributeError):
+        return {}
+    return main if isinstance(main, dict) else {}
+
+
+def launch_settings(cwd: Path, given: str = "") -> str:
+    """The one `--settings` value the launcher passes main, since Claude Code reads only the last one: the analyst's own
+    `given` (inline JSON, or a file relative to `cwd`) with thimble's statusline, chained to theirs (from `given`, else
+    their own settings, cc_settings.own_statusline) at their refresh interval, and the composer's fast mode and
+    ultracode where they name none. `given` as it is when it cannot be read."""
+    from . import bg_session, cc_settings  # noqa: PLC0415
+
+    own: Any = {}
+    if given:
+        try:
+            own = json.loads(given if given.lstrip().startswith("{") else (cwd / Path(given).expanduser()).read_text("utf-8"))
+        except (OSError, ValueError):
+            own = None
+        if not isinstance(own, dict):
+            print(f"thimble: WARNING - --settings {given} could not be read, so thimble's statusline is left out",
+                  file=sys.stderr)
+            return given.replace("\n", " ")
+    line = own.get("statusLine")
+    theirs = line if isinstance(line, dict) and isinstance(line.get("command"), str) else cc_settings.own_statusline()
+    out = {**own, "statusLine": {"type": "command", "command": bg_session.statusline_command(theirs.get("command") or ""),
+                                 "refreshInterval": theirs.get("refreshInterval", cc_settings.STATUSLINE_REFRESH_S)}}
+    choice = main_choice(cwd)
+    if isinstance(choice.get("fast"), bool):
+        out.setdefault("fastMode", choice["fast"])
+    if choice.get("effort") == cc_settings.ULTRACODE:
+        out.setdefault("ultracode", True)
+    return json.dumps(out)
+
+
+def launch_args(cwd: Path, resume: bool = False, settings: str = "") -> str:
     """The launcher's values, one per line: the channel entry of the plugin copy to load, the `--allowedTools` line, the
-    `--effort` value ('' for none), the value to export as terminal_tools.ENV ('' when the `claude` it starts does not
-    read it), with `resume` the session to resume, then main's prompt, whose turn ending follows that value. An effort
-    key the composer's chip wrote into the folder's local settings is removed first (cc_settings)."""
+    `--effort` value ('' for none), the `--settings` value (launch_settings, over the analyst's own `settings`), the
+    value to export as terminal_tools.ENV ('' when the `claude` it starts does not read it), with `resume` the session
+    to resume, then main's prompt, whose turn ending follows that value."""
     from . import cc_settings, channel, terminal_tools  # noqa: PLC0415 — needed by this subcommand alone
 
     installed = installed_copy(cwd)
@@ -1430,29 +1459,23 @@ def launch_args(cwd: Path, resume: bool = False) -> str:
     # the instructions of a background session's tray entry (bg_session.proxy_file)
     orient_prompt = workspaces / "*" / "orient" / "subagent-prompt.md"
     tray_prompts = workspaces / "*" / "bg" / "*.md"
-    # on the Monitor route main arms its Monitor on the watcher again every 30 minutes, which must not wait on a prompt
-    watcher = f"Bash({root / WATCHER} *)"
+    # on the Monitor route main arms its Monitor on the watcher again every 30 minutes, which must not wait on a prompt;
+    # only --stream, since the watcher's other modes report to the server as main's hooks
+    watcher = f"Bash({root / WATCHER} --stream *)"
     tools_line = ",".join([MCP_TOOLS_RULE, f"Read(/{anchors}/**)", f"Read(/{orient_prompt})", f"Read(/{tray_prompts})",
                            watcher, *skill_rules(root)])
-    cc_settings.clear_override(cwd)
-    _sync_statusline(cwd)
     last = [last_main(cwd)] if resume else []
     turn_tools = terminal_tools.launch_value()
-    return "\n".join([installed.channel if installed else cc_channel.channel(root), tools_line, cc_settings.main_effort_flag(cwd),
-                      turn_tools, *last, channel.session_prompt(str(cwd.resolve()), bool(turn_tools))])
-
-
-def _sync_statusline(cwd: Path) -> None:
-    """The folder's statusline, set for terminal-first mode or put back (bg_session.sync_statusline)."""
-    from . import bg_session  # noqa: PLC0415
-
-    c = config.workspace_for_cwd(str(cwd))
-    if c:
-        bg_session.sync_statusline(c)
+    chosen = main_choice(cwd).get("effort")
+    effort = cc_settings.level_of(chosen) if chosen in (*cc_settings.EFFORTS, cc_settings.ULTRACODE) else ""
+    return "\n".join([installed.channel if installed else cc_channel.channel(root), tools_line,
+                      effort or cc_settings.main_effort_flag(cwd), launch_settings(cwd, settings), turn_tools, *last,
+                      channel.session_prompt(str(cwd.resolve()), bool(turn_tools))])
 
 
 def cmd_launch_args(args: argparse.Namespace) -> int:
-    print(launch_args(Path(args.cwd or os.environ.get("THIMBLE_CALLER_CWD") or os.getcwd()), bool(args.resume)))
+    print(launch_args(Path(args.cwd or os.environ.get("THIMBLE_CALLER_CWD") or os.getcwd()), bool(args.resume),
+                      args.settings or ""))
     # on stderr, which the launcher leaves on the terminal, before Claude Code starts
     warning = claude_code_warning(claude_code_version())
     if warning:
@@ -1572,47 +1595,15 @@ def release_line() -> str:
         return ""
 
 
-ENV_KEY_WARNING = ("Warning: {names} is set alongside {other}. The environment key takes precedence. Unset it to bill "
-                   "the login.")
-
-
-def auth_line(path: tuple[str, str] | None = None) -> str:
-    """The auth path this process would take (config.auth_path, or `path` when the caller has it), named by kind and
-    never by value; with the warning when an environment credential sits beside an apiKeyHelper or a CLI login."""
-    kind, line = path or config.auth_path()
-    if kind != "env":
-        return line
-    others = []
-    if config.api_key_helper_source() is not None:
-        others.append("an apiKeyHelper in the Claude settings")
-    if (config.claude_config_dir() / config.CREDENTIALS_FILE).is_file() or config.keychain_login():
-        others.append("a CLI login")
-    if not others:
-        return line
-    return f"{line}. " + ENV_KEY_WARNING.format(names=" and ".join(config.env_credential_names()), other=" and ".join(others))
-
-
-def model_calls_line(kind: str) -> str:
-    """How the server's own model calls (the card check's reading, the labels classifier, a label's draft:
-    model.structured) authenticate on the auth path of `kind` (config.auth_path), and "fail: ..." when they cannot. A
-    CLI login in the macOS Keychain reaches no config dir but the served one, so they run there (agents.call_env)."""
-    from . import claude_config  # noqa: PLC0415
-
-    if kind in ("env", "helper"):
-        return "the Messages API, on the credential above"
-    if kind == "oauth_token":
-        return f"the CLI, on {config.ENV_OAUTH_TOKEN}"
-    if kind == "cli":
-        if claude_config.login_linkable():
-            return "the CLI, in each workspace's own config dir with the login file linked in"
-        return (f"the CLI, in {config.claude_config_dir()} (its login is in the macOS Keychain, which a workspace's own "
-                "config dir cannot reach)")
-    return "fail: no login, so the card check, the labels classifier and a label's draft cannot run"
-
-
-def auth_missing() -> bool:
-    """Whether no auth path is known at all; False under THIMBLE_SKIP_KEY."""
-    return not config._skip() and config.auth_path()[0] == "none"
+def auth_line(status: dict[str, Any] | None) -> str:
+    """The doctor's auth line: the login `claude auth status` reports (config.auth_status), by method and provider."""
+    if not config.CLI_PATH:
+        return f"no claude CLI: {config.NO_CLAUDE}"
+    if status is None:
+        return "not known: `claude auth status --json` did not answer"
+    if status.get("loggedIn") is False:
+        return "not logged in: log in with `claude`; nothing that calls a model runs until then"
+    return f"logged in ({status.get('authMethod') or '?'}, {status.get('apiProvider') or '?'}), as `claude auth status` reports"
 
 
 def _last_jsonl(p: Path) -> dict[str, Any] | None:
@@ -1754,7 +1745,7 @@ def version_tuple(text: str | None) -> tuple[int, int, int] | None:
 
 def claude_code_version() -> str | None:
     """The version `claude --version` prints (`2.1.282`), or None when claude is not on PATH or prints no version."""
-    exe = os.environ.get("THIMBLE_CLAUDE_BIN") or shutil.which("claude")
+    exe = config.CLI_PATH
     if not exe:
         return None
     try:
@@ -1766,10 +1757,8 @@ def claude_code_version() -> str | None:
 
 
 def claude_code_warning(version: str | None) -> str | None:
-    """A line for the analyst when Claude Code is missing or older than the version thimble is tested with; None when
-    it is that version or newer."""
-    if version is None:
-        return "thimble: WARNING - the `claude` CLI was not found on PATH; thimble runs inside Claude Code, so install it first."
+    """A line for the analyst when Claude Code is older than the version thimble is tested with; None when it is that
+    version or newer, or its version is not known (config.auth_problem says when `claude` is missing)."""
     have, tested = version_tuple(version), version_tuple(TESTED_CLAUDE_CODE)
     if have and tested and have < tested:
         return (f"thimble: WARNING - Claude Code {version} is older than {TESTED_CLAUDE_CODE}, the version thimble is tested "
@@ -1779,6 +1768,8 @@ def claude_code_warning(version: str | None) -> str | None:
 
 def claude_code_line() -> str:
     v = claude_code_version()
+    if v is None:
+        return config.NO_CLAUDE if not config.CLI_PATH else "`claude --version` printed no version"
     warning = claude_code_warning(v)
     if warning:
         return warning.removeprefix("thimble: WARNING - ")
@@ -1877,10 +1868,14 @@ def api_host() -> str:
     return host or API_HOST
 
 
-def network_line(timeout_s: float = NET_TIMEOUT_S) -> str:
+def network_line(status: dict[str, Any] | None = None, timeout_s: float = NET_TIMEOUT_S) -> str:
     """Whether a TCP connection to the API host on 443 opens within `timeout_s` (a thread bounds the name lookup,
-    which has no timeout of its own). Nothing is sent."""
+    which has no timeout of its own). Nothing is sent. Not checked for a provider other than Anthropic's API, as
+    `status` (config.auth_status) names it."""
     host = api_host()
+    provider = (status or {}).get("apiProvider")
+    if provider and provider != "firstParty":
+        return f"not checked: model calls go to {provider}"
     if in_sandbox():  # the sandbox's own network namespace has no route out, whatever the machine has
         return ("not checked: this runs inside Claude Code's Bash sandbox, which has no network (run `thimble doctor` "
                 "in a terminal)")
@@ -1995,10 +1990,9 @@ def doctor_text() -> str:
     lines.append(f"  data_dir: {env['data_dir']} ({'exists' if Path(env['data_dir']).is_dir() else 'missing'}; {data_src})")
     lines.append(f"  workspaces_dir: {env['workspaces_dir']} ({'exists' if Path(env['workspaces_dir']).is_dir() else 'missing'})")
     lines.append(f"  disk: {_checked(disk_line, [home(), Path(env['workspaces_dir'])])}")
-    path = config.auth_path()
-    lines.append(f"  auth: {auth_line(path)}")
-    lines.append(f"  server's model calls: {model_calls_line(path[0])}")
-    lines.append(f"  network: {_checked(network_line)}")
+    status = config.auth_status()
+    lines.append(f"  auth: {auth_line(status)}")
+    lines.append(f"  network: {_checked(network_line, status)}")
     caller = Path(os.environ.get("THIMBLE_CALLER_CWD") or os.getcwd())
     lines.append(f"  delivery (a session `thimble` starts in {caller}): {_checked(delivery_line, caller)}")
     lines.append(f"  card harness: {harness_line(url, up)}")
@@ -2203,8 +2197,9 @@ def cmd_ensure(args: argparse.Namespace) -> int:
         print(f"thimble: {ui_url(name)}")
         for line in second:
             print(line)
+        status = config.auth_status(cwd=cwd)
         if args.session:
-            route = cc_channel.delivery(cc_channel.claude_pid(), plugin_root(), cwd)
+            route = cc_channel.delivery(cc_channel.claude_pid(), plugin_root(), cwd, explain=True, status=status)
             lines = delivery_lines(route, cwd, str(args.session))
             mark = [ln for ln in lines if ln.startswith(MONITOR_MARK)]
             for line in lines:
@@ -2217,8 +2212,9 @@ def cmd_ensure(args: argparse.Namespace) -> int:
         if not env["dev"] and not has_ui_build():
             _log(config.NO_UI_BUILD_HINT)
             print(NO_UI_LINE)
-        if auth_missing():
-            print(NO_AUTH_LINE)
+        problem = config.auth_problem(status)
+        if problem:
+            print(NO_AUTH_LINE.format(problem=problem))
         if args.session:
             warning = claude_code_warning(claude_code_version())
             if warning:
@@ -2548,9 +2544,10 @@ def build_parser() -> argparse.ArgumentParser:
     u.add_argument("--from", dest="from_", metavar="ZIP", help="a downloaded release zip (thimble-<version>-<sha>.zip)")
     u.add_argument("--dry-run", action="store_true", help="print update.sh's steps; change nothing")
     u.set_defaults(fn=cmd_update)
-    la = sub.add_parser("launch-args", help="for plugin/bin/thimble: the channel entry, the --allowedTools and --effort values, the tools that end a turn without text, then main's prompt")
+    la = sub.add_parser("launch-args", help="for plugin/bin/thimble: the channel entry, the --allowedTools, --effort and --settings values, the tools that end a turn without text, then main's prompt")
     la.add_argument("--cwd")
     la.add_argument("--resume", action="store_true", help="a line before the prompt: the folder's last main session")
+    la.add_argument("--settings", help="the analyst's own --settings, which thimble's are merged into")
     la.set_defaults(fn=cmd_launch_args)
     pr = sub.add_parser("prompt", help="for a plugin skill's injected command: prompt files rendered for a session in --cwd")
     pr.add_argument("names", nargs="+", help="prompt names under prompts/, such as shared")

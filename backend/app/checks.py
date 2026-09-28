@@ -497,7 +497,7 @@ async def _go(act: _Active) -> None:
                     c, session_key(act.check, act.doc), role=ROLE, title=str(check["name"]),
                     agent_args=["--agents", _json({name: agent}), "--agent", name], effort=effort,
                     settings=agent_session.settings_json(effort, fastMode=bool(conf["fast"])), prompt=prompt,
-                    agent_type=name, on_end=ended, model=str(agent.get("model") or ""),
+                    agent_type=name, on_end=ended, model=str(agent.get("model") or ""), agent="critic",
                     work=work_dir(c, act.check, act.doc), unasked=True, disallowed=agent_session.not_own(OWN_TOOLS),
                     announce=False,
                     check=act.check, doc=act.doc, run_id=act.run,

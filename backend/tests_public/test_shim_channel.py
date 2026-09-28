@@ -25,6 +25,7 @@ from typing import Any
 import pytest
 
 from app import config, hook_auth
+from conftest import fake_claude_bin
 
 SHIM = config.REPO_ROOT / "plugin" / "bin" / "thimble-mcp"
 NOTE = {"content": "question: why?", "meta": {"kind": "thread", "event": "e1", "thread": "t1"}}
@@ -153,12 +154,12 @@ def _start(tmp_path: Path, port: int | None, channel: bool, parent: list[str] | 
     home.mkdir(exist_ok=True)
     if port is not None:
         (home / "server.json").write_text(json.dumps({"port": port, "api": f"http://127.0.0.1:{port}", "token": TOKEN}))
-    login = tmp_path / "cc" / ".credentials.json"  # a claude.ai login, which channels need (cc_channel.claude_ai_login)
-    if not login.exists():
-        login.parent.mkdir(parents=True, exist_ok=True)
-        login.write_text(json.dumps({"claudeAiOauth": {"accessToken": "t", "scopes": ["user:inference"]}}))
+    # a claude.ai login, which channels need (cc_channel.channels_blocked)
+    claude = fake_claude_bin(home, {"loggedIn": True, "authMethod": "claude.ai"})
+    (tmp_path / "cc").mkdir(exist_ok=True)
     env = {**os.environ, "THIMBLE_HOME": str(home), "THIMBLE_CWD": "/data/mini", "CLAUDE_CONFIG_DIR": str(tmp_path / "cc"),
-           "CLAUDE_CODE_SESSION_ID": "s-123"}
+           "CLAUDE_CODE_SESSION_ID": "s-123", "THIMBLE_CLAUDE_BIN": str(claude)}
+    env.pop("THIMBLE_SKIP_KEY", None)
     for k in ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_PROFILE", "CLAUDE_CODE_USE_BEDROCK",
               "CLAUDE_CODE_USE_VERTEX", "CLAUDE_CODE_USE_FOUNDRY"):
         env.pop(k, None)  # the runner's own login must not decide the route the test asserts
