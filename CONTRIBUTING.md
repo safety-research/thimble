@@ -9,7 +9,7 @@ You need Claude Code, macOS or Linux, Python 3.12+ ([uv](https://docs.astral.sh/
 ```
 git clone https://github.com/safety-research/thimble.git
 cd thimble
-bash scripts/install.sh --dev   # backend/.venv with the test extras, frontend/dist, the plugin, ~/.local/bin/thimble
+bash scripts/install.sh   # backend/.venv with the test extras, frontend/dist, ~/.local/bin/thimble
 ```
 
 ## Run it

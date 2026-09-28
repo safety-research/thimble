@@ -21,7 +21,7 @@ The latest release, copied into `~/.thimble/app` (`$THIMBLE_HOME/app` when `THIM
 
 ## Dev install
 
-A clone, installed in place:
+A clone, installed in place with the backend's test tools:
 
 ```bash
 git clone https://github.com/safety-research/thimble.git
@@ -30,11 +30,13 @@ bash scripts/install.sh
 ```
 
 Either install links the `thimble` command into `~/.local/bin` (and prints the line to add to your shell startup file
-when that folder is not on your PATH) and runs `thimble doctor`. It asks once whether to add thimble's plugin to all
-Claude Code sessions, so `/thimble` works in any (the `thimble` command works either way), and whether to mark thimble's
-workspaces folder trusted in Claude Code's config, which Terminal-first's background sessions need. `--plugin`,
-`--no-plugin`, `--trust-workspaces` and `--no-trust-workspaces` answer without asking. `install.sh --dry-run` prints
-every step and changes nothing.
+when that folder is not on your PATH) and runs `thimble doctor`. It asks once whether to add thimble to
+`~/.claude/settings.json` and `~/.claude/plugins`, so it is available in every `claude` session from startup (the
+`thimble` command works either way), and whether to trust thimble's workspaces folder by adding it to `~/.claude.json`,
+so thimble can start its background agents without Claude Code stopping to ask (with a no, only Terminal-first mode's
+background agents are refused, with a message saying how to trust the folder). `--plugin`, `--no-plugin`,
+`--trust-workspaces` and `--no-trust-workspaces` answer without asking. `install.sh --dry-run` prints every step and
+changes nothing.
 
 ## Update
 

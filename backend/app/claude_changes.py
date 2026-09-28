@@ -23,8 +23,10 @@ from typing import Any
 
 TRUST_FILE = "trust.json"  # in thimble's home: {folder, config, answer: yes | no, added}
 TRUST_KEY = "hasTrustDialogAccepted"
-QUESTION = ("Mark thimble's workspaces folder {folder} trusted in {config}?\n"
-            "Claude Code starts Terminal-first's background sessions only in a trusted folder.")
+QUESTION = ("Trust thimble's workspaces folder {folder} by adding it to {config}?\n"
+            "thimble needs this to start its background agents without Claude Code stopping to ask. Everything works "
+            "with a no, except Terminal-first mode (a Settings option for chatting in the terminal), whose background "
+            "agents are then refused with a message saying how to trust the folder. `thimble uninstall` removes it.")
 # the records of the keys older versions wrote: file in thimble's home -> the key in a folder's settings.local.json
 # (None: statusLine, recorded as {ours, previous})
 OLD_RECORDS = {"effort-overrides.json": "CLAUDE_CODE_EFFORT_LEVEL", "fast-overrides.json": "CLAUDE_CODE_DISABLE_FAST_MODE",

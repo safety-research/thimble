@@ -13,13 +13,13 @@
 #                      [--trust-workspaces | --no-trust-workspaces] [--dry-run]
 #   --dir DIR                where the tree lives (default: this checkout; $THIMBLE_HOME/app for a release)
 #   --marketplace-name NAME  the name Claude Code registers the tree under (default: the one in marketplace.json)
-#   --dev                    also install the backend's test extras (pytest, pytest-asyncio)
+#   --dev                    also install the backend's test extras (pytest, pytest-asyncio); a git checkout always does
 #   --deps-only              stop after the frontend step: no pointer, no plugin, no doctor
-#   --plugin                 add thimble's plugin to every Claude Code session: registered at user scope, its hooks and
-#                            MCP server load in each and /thimble works in any. --no-plugin answers no, and takes back
-#                            the registration an earlier yes added. The `thimble` command loads the plugin either way
-#   --trust-workspaces       mark thimble's workspaces folder trusted in Claude Code's config, which Terminal-first's
-#                            background sessions need; --no-trust-workspaces answers no
+#   --plugin                 add thimble to ~/.claude/settings.json and ~/.claude/plugins, so it is available in every
+#                            claude session from startup. --no-plugin answers no, and takes back what an earlier yes
+#                            added. The `thimble` command works either way
+#   --trust-workspaces       trust thimble's workspaces folder by adding it to ~/.claude.json, so thimble can start its
+#                            background agents without Claude Code stopping to ask; --no-trust-workspaces answers no
 #   --dry-run                print every step and command; change nothing
 set -euo pipefail
 
@@ -58,6 +58,7 @@ parse_args() {
 locate_tree() {  # checkout or release, in place or copied, and the version
   [ -f "$src/backend/pyproject.toml" ] && [ -d "$src/plugin/bin" ] || die "$src is not a thimble tree (no backend/pyproject.toml + plugin/bin)"
   checkout=0; [ -e "$src/.git" ] && checkout=1
+  if [ "$checkout" = 1 ]; then dev=1; fi  # a Dev install gets the backend's test extras
   if [ -z "$dir" ]; then if [ "$checkout" = 1 ]; then dir="$src"; else dir="$home/app"; fi; fi
   in_place=0
   if [ -d "$dir" ] && [ "$(cd "$dir" && pwd -P)" = "$src" ]; then in_place=1; dir="$src"; fi  # the resolved spelling, however --dir wrote it
@@ -334,8 +335,8 @@ ask() {  # the two questions, before anything is installed: each on a terminal, 
   plugin_record
   { [ "$dry" = 0 ] && [ -t 0 ]; } || return 0
   if [ -z "$plugin" ] && [ -z "$plugin_prev" ] && [ "$have_claude" = 1 ]; then
-    printf "\nAdd thimble's plugin to all Claude Code sessions? Its hooks and MCP server then load in every session, and /thimble works in any.\n"
-    printf 'The `thimble` command works either way. [y/N] '
+    printf "\nAdd thimble to ~/.claude/settings.json and ~/.claude/plugins, so it is available in every claude session from startup?\n"
+    printf 'The `thimble` command works either way, and `thimble uninstall` removes it. [y/N] '
     if yes_no; then plugin=yes; else plugin=no; fi
   fi
   # the trust question when claude_changes.install_trust would ask it (python3 runs the file before backend/.venv exists;
