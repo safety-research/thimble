@@ -1224,6 +1224,16 @@ The message is empty. Pass what the analyst asks the orientation as `message`.
 
 Your session stopped because Anthropic's API was at capacity, and it has now been resumed. Carry on with your task from where you stopped.
 
+## swarm-start
+
+Map the swarm of the corpus in {corpus} as your instructions describe, and write it to {out}.
+
+## swarm-check-failed
+
+The check of {out} found these errors. Fix each one in the file and run the check again until it passes, then reply only "Done.".
+
+{errors}
+
 ## session-unfinished
 
 Your session ended while agents or workflows you started in the background were still running, and they stopped with it. It has now been resumed. Continue each stopped agent with SendMessage, or start again what cannot be continued, then wait for all their results and use them before you finish.
