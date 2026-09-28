@@ -12,7 +12,6 @@ dependencies = [
   "sse-starlette>=2.1",
   "pydantic>=2.7",
   "claude-agent-sdk>=0.1",
-  "anthropic>=0.40",
   "jupyter_client>=8.6",
   "ipykernel>=6.29",
   "pandas>=2.2",

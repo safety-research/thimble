@@ -384,8 +384,7 @@ Start an orientation, a broad analysis of the corpus that helps the analyst unde
     "final_notebook": {"type": "boolean", "description": "Leave a deck of cards for the analyst, the group `Orientation`, which appears when the orientation ends. Default true."},
     "propose_views": {"type": "boolean", "description": "Propose views of the files. Default true."},
     "generate_report": {"type": "boolean", "description": "Write the report when the orientation ends. Default false."},
-    "critique": {"type": "boolean", "description": "Have a critic review the analysis before the outputs are written. Default true."},
-    "permissions": {"type": "string", "enum": ["manual", "auto"], "description": "A lower permission mode for the orientation than Start's or the workspace's, which is the default. A higher one is ignored."}
+    "critique": {"type": "boolean", "description": "Have a critic review the analysis before the outputs are written. Default true."}
   }
 }
 ```
@@ -1081,7 +1080,7 @@ Your first message is in {path}. Read it whole and follow it.
 
 ## bg-untrusted
 
-Claude Code does not trust {folder}, so the background session could not start there. The analyst can agree to thimble marking its work folders trusted by turning Terminal-first off and on again in Settings, or run `claude` in {folder} once and accept its trust prompt; then start it again.
+Claude Code does not trust {folder}, so the background session could not start there. The analyst can have thimble's workspaces folder ({workspaces}) trusted by running `bash {install} --trust-workspaces`, or run `claude` in {folder} once and accept its trust prompt; then start it again.
 
 ## bg-carry-on
 

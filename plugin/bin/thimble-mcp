@@ -14,8 +14,8 @@ plugin's hooks do (app/hook_auth.py). Without server.json or a token the shim re
 server is recorded, and the channel waits.
 
 Channel: the shim declares Claude Code's experimental `claude/channel` capability and, in the analyst's session,
-subscribes to GET {server}/api/channel (server-sent events), which attaches the session to its workspace. The route
-is `channel` when `claude` was started with this plugin's channel entry (THIMBLE_CHANNEL says so explicitly), else
+subscribes to GET {server}/api/channel (server-sent events) with the session's CLAUDE_CONFIG_DIR, which attaches the
+session to its workspace. The route is `channel` when `claude` was started with this plugin's channel entry (THIMBLE_CHANNEL says so explicitly), else
 `hook` or `monitor` (app.cc_channel.delivery). On the channel route each event is written to Claude Code as `notifications/claude/channel`, and
 permission prompts are relayed to the browser (`claude/channel/permission`); on the hook or monitor route the plugin's
 watcher delivers instead. The subscription is renewed when the session id changes (/clear, /resume). No event is
@@ -362,8 +362,9 @@ async def channel_loop(write_stream: Any, delivery: str = cc_channel.CHANNEL, ha
     while True:
         sid = session_id()
         moved = False  # the session id changed under a live subscription: renew it without waiting
-        query = urllib.parse.urlencode({k: v for k, v in (("cwd", cwd()), ("session", sid), ("pid", os.getppid()),
-                                                          ("delivery", delivery)) if v})
+        query = urllib.parse.urlencode({**{k: v for k, v in (("cwd", cwd()), ("session", sid), ("pid", os.getppid()),
+                                                             ("delivery", delivery)) if v},
+                                        "config_dir": os.environ.get("CLAUDE_CONFIG_DIR", "")})
         try:
             found = server()
             if found is None:

@@ -9,6 +9,10 @@ answer carries HMAC-SHA256(token, "server:" + nonce). HookAuth answers a request
 proof with 401. A hook or shim that finds no server.json, no token in it, or no valid proof on the answer sends
 nothing or believes nothing, so a process that holds the recorded port learns nothing from the plugin and cannot answer
 it.
+
+A change of permission modes must come from the analyst's browser (analyst). The link `thimble up` prints carries the
+`ui_key` of server.json after `#k=`; the page trades it for an HttpOnly, SameSite=Strict cookie (claim), which a mode
+write must carry. A process that cannot read server.json, such as a notebook kernel in bubblewrap, cannot change them.
 """
 from __future__ import annotations
 
@@ -20,9 +24,11 @@ import re
 from pathlib import Path
 
 from starlette.datastructures import Headers, MutableHeaders
+from starlette.requests import Request
+from starlette.responses import Response
 
 HOOK_PATHS = frozenset({
-    "/api/channel/pull", "/api/channel/ack", "/api/channel/held", "/api/channel/permission/hook",
+    "/api/channel/pull", "/api/channel/ack", "/api/channel/held", "/api/channel/mode", "/api/channel/permission/hook",
     "/api/agents", "/api/bg/relay", "/api/bg/agent-check", "/api/bg/proxy-stop",
 })
 SHIM_PATHS = frozenset({"/api/channel", "/api/channel/permission"})
@@ -32,8 +38,11 @@ NONCE_HEADER = "x-thimble-nonce"
 AUTH_HEADER = "x-thimble-auth"
 PROOF_HEADER = "x-thimble-proof"
 NONCE_MAX = 128  # characters
+UI_COOKIE = "thimble-ui"
+UI_COOKIE_AGE_S = 400 * 24 * 3600  # the longest a browser keeps a cookie
+ANALYST_ONLY = "open thimble from the link `/thimble` or `thimble up` printed to change permission modes"
 
-_cache: tuple[tuple[str, int, int], str] | None = None
+_cache: tuple[tuple[str, int, int], dict] | None = None
 
 
 def sign(token: str, role: str, nonce: str) -> str:
@@ -52,25 +61,50 @@ def guarded(method: str, path: str) -> bool:
             or SESSION_HOOK_PATHS.fullmatch(path) is not None)
 
 
-def token() -> str:
-    """The token in <home>/server.json ('' when there is none), read again whenever the file changes."""
+def _state() -> dict:
+    """<home>/server.json, read again whenever the file changes; {} when there is none."""
     global _cache
     p = Path(os.environ.get("THIMBLE_HOME") or "~/.thimble").expanduser() / "server.json"
     try:
         st = p.stat()
     except OSError:
-        return ""
+        return {}
     key = (str(p), st.st_mtime_ns, st.st_size)
     if _cache is not None and _cache[0] == key:
         return _cache[1]
     try:
         data = json.loads(p.read_text("utf-8"))
     except (OSError, ValueError):
-        return ""
-    value = data.get("token") if isinstance(data, dict) else None
-    value = value if isinstance(value, str) else ""
-    _cache = (key, value)
-    return value
+        return {}
+    data = data if isinstance(data, dict) else {}
+    _cache = (key, data)
+    return data
+
+
+def _field(name: str) -> str:
+    value = _state().get(name)
+    return value if isinstance(value, str) else ""
+
+
+def token() -> str:
+    """The token in <home>/server.json ('' when there is none)."""
+    return _field("token")
+
+
+def analyst(request: Request) -> bool:
+    """Whether `request` carries the cookie claim gave for server.json's ui_key."""
+    key = _field("ui_key")
+    return bool(key) and hmac.compare_digest(request.cookies.get(UI_COOKIE, ""), key)
+
+
+def claim(key: object) -> Response:
+    """The cookie for the ui_key `key` from the page's link; 403 for any other key."""
+    want = _field("ui_key")
+    if not (want and isinstance(key, str) and hmac.compare_digest(key, want)):
+        return Response(status_code=403)
+    r = Response(status_code=204)
+    r.set_cookie(UI_COOKIE, want, max_age=UI_COOKIE_AGE_S, httponly=True, samesite="strict")
+    return r
 
 
 class HookAuth:

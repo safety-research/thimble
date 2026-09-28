@@ -8,7 +8,7 @@ Start. Only the orientation's session lists `critique`. The server starts `claud
 running as the critic agent (prompts/critic.md via `--agents`, shared.md appended), with the `critic` role's model
 settings. It has every tool of a default Claude Code session and, of thimble's, OWN_TOOLS, so it adds no card, and it
 runs in a work folder of its own with the corpus read-only (agent_session, the fence). One critique runs at a time, in
-the orientation's permission mode.
+the critic's row of the permission modes (modes.py).
 
 The transcript. Raw transcripts run to megabytes of JSON and Read cuts lines at 2,000 characters, so the critique
 renders the session's and its agents' transcripts into one digest, each tool call under its ref in the orientation's
@@ -32,7 +32,7 @@ import textwrap
 from pathlib import Path
 from typing import Any
 
-from . import agent_session, agents, cc_settings, config, orient_checks, orientation, session, tools
+from . import agent_session, agents, config, orient_checks, orientation, session, tools
 
 log = logging.getLogger("thimble.critique_session")
 
@@ -394,9 +394,7 @@ async def start(c: str, caller: agent_session.Run, context: str = "") -> tuple[a
         effort=effort, settings=agent_session.settings_json(effort, fastMode=bool(conf["fast"])), prompt=prompt,
         agent_type=agent_name, on_end=ended, parent=caller.chat, model=str(agent.get("model") or ""),
         calls=caller.calls or caller.chat,  # numbered in the orientation's sequence
-        # the orientation's permission mode, followed at each request
-        permission_mode=cc_settings.orient_permission_flag(caller.mode) if caller.mode else "",
-        mode_owner=caller.key if caller.mode else None, patient=caller.patient,
+        agent="critic", patient=caller.patient,
         work=work_dir(c, caller.chat), unasked=True, disallowed=agent_session.not_own(OWN_TOOLS),
         brief=prompt.split("\n\n", 1)[0], background=caller.bg, **fields)  # the critique-task line that opens the first message
     return run, done
@@ -414,7 +412,7 @@ def _relaunch(c: str, meta: dict[str, Any]) -> dict[str, Any]:
                 agent_args=["--agents", json.dumps({agent_name: agent}, ensure_ascii=False), "--agent", agent_name, *readable],
                 effort=effort, settings=agent_session.settings_json(effort, fastMode=bool(conf["fast"])),
                 agent_type=agent_name, parent=parent, model=str(agent.get("model") or ""), work=work_dir(c, parent),
-                unasked=True, disallowed=agent_session.not_own(OWN_TOOLS), background=True)
+                agent="critic", unasked=True, disallowed=agent_session.not_own(OWN_TOOLS), background=True)
 
 
 agent_session.on_relaunch(tools.CRITIQUE_SESSION, _relaunch)

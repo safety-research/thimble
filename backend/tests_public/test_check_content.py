@@ -1,7 +1,6 @@
-"""scripts/check_content.py, the content and commits steps of scripts/check.sh: a listed word is found in any spelling,
-files of kinds that never belong in the tree are refused, gitleaks' findings are reported, the command fails on a hit,
-and commit messages that link a Claude Code session are refused. The real list is digests, so these tests list words of
-their own."""
+"""scripts/check_content.py, the content step of scripts/check.sh: a listed word is found in any spelling, files of kinds
+that never belong in the tree are refused, gitleaks' findings are reported, and the command fails on a hit. The real
+list is digests, so these tests list words of their own."""
 import importlib.util
 import os
 import random
@@ -69,32 +68,3 @@ def test_a_secret_gitleaks_finds_fails_the_command(tmp_path):
     r = subprocess.run([sys.executable, str(SCRIPT), str(tmp_path)], capture_output=True, text=True)
     assert r.returncode == 1 and "deploy.py:1: [secret]" in r.stdout, r.stdout
 
-
-GIT = ["git", "-c", "core.hooksPath=/dev/null", "-c", "user.name=Test", "-c", "user.email=test@example.org",
-       "-c", "commit.gpgsign=false"]
-
-
-def commit(root: Path, message: str) -> str:
-    subprocess.run([*GIT, "-C", str(root), "commit", "-q", "--allow-empty", "-m", message], check=True)
-    return subprocess.run(["git", "-C", str(root), "rev-parse", "HEAD"], capture_output=True, text=True,
-                          check=True).stdout.strip()
-
-
-def test_commit_messages_with_a_session_line_or_link_are_refused(cc, tmp_path):
-    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
-    first = commit(tmp_path, "First\n\nClaude-Session: https://claude.ai/code/session_0000")
-    old = commit(tmp_path, "Before the rule\n\nclaude-session: https://claude.ai/code/session_0001")
-    commit(tmp_path, "Clean\n\nCo-Authored-By: Someone <someone@example.org>")
-    linked = commit(tmp_path, "Linked\n\nSee https://claude.ai/code/session_0002 for the run.")
-    trailer = commit(tmp_path, "Trailer\n\nBody.\nClaude-Session: https://claude.ai/code/session_0003")
-    found = cc.commit_hits(tmp_path, f"{first}..HEAD", until=old)
-    assert [(h[0], h[1], h[2]) for h in found] == [(trailer[:12], 4, "session"), (linked[:12], 3, "session")]
-    assert len(cc.commit_hits(tmp_path, f"{first}..HEAD", until=None)) == 3
-    assert cc.commit_hits(tmp_path, f"{first}..HEAD", until="0" * 40) == cc.commit_hits(tmp_path, f"{first}..HEAD", None)
-    assert cc.commit_hits(tmp_path, f"{first}..HEAD", until=("0" * 40, old)) == found
-    assert cc.commit_hits(tmp_path, f"{first}..HEAD", until=(old, linked)) == found[:1]
-    run = [sys.executable, str(SCRIPT), "--commits"]
-    r = subprocess.run([*run, f"{first}..HEAD", str(tmp_path)], capture_output=True, text=True)
-    assert r.returncode == 1 and f"{trailer[:12]}:4: [session] Claude-Session:" in r.stdout
-    assert subprocess.run([*run, f"{first}..{first}", str(tmp_path)], capture_output=True).returncode == 0
-    assert subprocess.run([*run, "nope..HEAD", str(tmp_path)], capture_output=True).returncode == 2

@@ -136,21 +136,23 @@ do_start() {
   mkdir -p "$DEV" "$WORKSPACES"
   if [ -n "$CORPUS" ] && [ -d "$WS_SRC/$CORPUS" ] && [ ! -d "$WORKSPACES/$CORPUS" ]; then
     cp -a "$WS_SRC/$CORPUS" "$WORKSPACES/$CORPUS"
-    rm -rf "$WORKSPACES/$CORPUS/.claude-config" "$WORKSPACES/$CORPUS/kernels"
+    rm -rf "$WORKSPACES/$CORPUS/kernels"
   fi
   if [ -f "$STACK" ]; then do_stop >/dev/null; fi
   if listening "$API_PORT"; then echo "dev_stack.sh: port $API_PORT is in use by a process this script did not start" >&2; exit 1; fi
 
-  local common=(env -i HOME="$HOME" PATH="$PATH" USER="${USER:-}" LANG="${LANG:-C.UTF-8}"
-    THIMBLE_DATA_DIR="$DATA_DIR" THIMBLE_WORKSPACES_DIR="$WORKSPACES"
+  # The stack starts with every variable unset but `keep`, which pass through the environment: the user's own, the
+  # switches below, and what the stack's model calls need to run `claude` as the user's own does (the config dir,
+  # provider, login and network settings; backend/app/config.py passes)
+  local keep='^(HOME|PATH|USER|LANG|CLAUDE_CONFIG_DIR|CLAUDE_CODE_(USE_[A-Z_]+|SKIP_[A-Z_]+_AUTH|OAUTH_(TOKEN|REFRESH_TOKEN|SCOPES)|CLIENT_[A-Z_]+|API_KEY_HELPER_TTL_MS|DISABLE_NONESSENTIAL_TRAFFIC)|ANTHROPIC_[A-Z_]+|HTTPS?_PROXY|NO_PROXY|THIMBLE_SKIP_KEY|THIMBLE_DEV|THIMBLE_PROMPT_CAPTURE)$'
+  # THIMBLE_DEV: dev mode on the stack too (main.dev_mode); THIMBLE_PROMPT_CAPTURE: every model call written to that
+  # directory (backend/app/capture.py)
+  local common=(env) v
+  for v in $(compgen -e); do [[ "$v" =~ $keep ]] || common+=(-u "$v"); done
+  common+=(LANG="${LANG:-C.UTF-8}" THIMBLE_DATA_DIR="$DATA_DIR" THIMBLE_WORKSPACES_DIR="$WORKSPACES"
     THIMBLE_PORT="$API_PORT" THIMBLE_UI_PORT="$UI_PORT" THIMBLE_FRONTEND_URL="http://127.0.0.1:$UI_PORT"
     THIMBLE_HOME="$DEV/stack.home" THIMBLE_PLUGIN_DIR="$PLUGIN" THIMBLE_DEV_STACK=0
-    VITE_CACHE_DIR="$DEV/vite-cache")  # frontend/vite.config.ts: never the shared node_modules/.vite of a symlinked checkout
-  [ -n "${THIMBLE_SKIP_KEY:-}" ] && common+=(THIMBLE_SKIP_KEY="$THIMBLE_SKIP_KEY")
-  [ -n "${THIMBLE_MODEL_BACKEND:-}" ] && common+=(THIMBLE_MODEL_BACKEND="$THIMBLE_MODEL_BACKEND")
-  [ -n "${VITE_CACHE_DIR:-}" ] && common+=(VITE_CACHE_DIR="$VITE_CACHE_DIR")  # a worktree's Vite cache off the shared node_modules (vite.config.ts)
-  [ -n "${THIMBLE_DEV:-}" ] && common+=(THIMBLE_DEV="$THIMBLE_DEV")  # dev mode on the stack too (main.dev_mode)
-  [ -n "${THIMBLE_PROMPT_CAPTURE:-}" ] && common+=(THIMBLE_PROMPT_CAPTURE="$THIMBLE_PROMPT_CAPTURE")  # backend/app/capture.py: every model call written to this directory
+    VITE_CACHE_DIR="${VITE_CACHE_DIR:-$DEV/vite-cache}")  # frontend/vite.config.ts: never the shared node_modules/.vite of a symlinked checkout
 
   local backend_pid vite_pid=""
   backend_pid="$(cd "$WORKTREE/backend" && spawn "$BACKEND_LOG" "${common[@]}" .venv/bin/python -m uvicorn app.main:app \

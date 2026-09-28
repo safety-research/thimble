@@ -11,6 +11,7 @@ the standard library and runs on every tool call.
     .thimble-watch --permission         the PermissionRequest hook
     .thimble-watch --held               the UserPromptSubmit hook that adds the events held for main to the prompt
                                         and prints the lines of the events the watcher wrote out
+    .thimble-watch --mode               the UserPromptSubmit and Stop hook that reports the session's permission mode
     .thimble-watch --agents             the PostToolUse hook that prints the start and finish lines of thimble's
                                         background sessions
     .thimble-watch --relay              the PreToolUse hook of SendMessage to a background session of thimble's
@@ -35,6 +36,10 @@ with: it takes the events the server holds for main (app/channel.py QUIET_KINDS)
 context, and prints the lines main's terminal shows of the events the watcher wrote out (app/channel.py terminal_line)
 as its systemMessage, since Claude Code shows such an event only as the fixed rewakeSummary. It prints nothing in a
 subagent, when nothing waits or when no server answers within HELD_WAIT_S.
+
+The mode hook tells the server (POST /api/channel/mode) the permission mode Claude Code reports for the session as each
+of its turns begins and ends, which is the mode the agents thimble starts follow by default. It sends nothing in a
+subagent.
 
 The agents hook asks the server (POST /api/agents) for the lines main's terminal has not shown about thimble's
 background sessions, each one's start with the command that attaches it and its finish, and prints them as the hook's
@@ -329,6 +334,19 @@ def held(inp: dict) -> int:
     return 0
 
 
+def mode(inp: dict) -> int:
+    """The mode hook (module note)."""
+    if inp.get("agent_id") or not inp.get("permission_mode"):
+        return 0
+    body = {"cwd": folder(inp), "session": str(inp.get("session_id") or "") or None,
+            "permission_mode": str(inp["permission_mode"])}
+    try:
+        request("POST", "/api/channel/mode", body, timeout=AGENTS_WAIT_S)
+    except (OSError, http.client.HTTPException):
+        pass
+    return 0
+
+
 def announcements(inp: dict) -> str:
     """The start and finish lines of thimble's background sessions main's terminal has not shown yet (module note)."""
     body = {"cwd": folder(inp), "session": str(inp.get("session_id") or "") or None, "announce": True}
@@ -485,6 +503,8 @@ def main() -> int:
             return permission(hook_input())
         if "--held" in args:
             return held(hook_input())
+        if "--mode" in args:
+            return mode(hook_input())
         if "--agents" in args:
             return agents_hook(hook_input())
         if "--relay" in args:

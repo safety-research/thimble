@@ -224,14 +224,14 @@ def _chats(w: Writer, ws: Path) -> list[dict[str, Any]]:
 
 def _projects_roots(ws: Path) -> list[Path]:
     """Where Claude Code writes transcripts: the config dir of the workspace's attached session and the one this server
-    serves, both read from the attaching process (config.process_claude_config), this server's own, and the
-    workspace's own. sessions.json's `config_dir` is not read, since a cell can write that file."""
+    serves, both as the session's shim reported them, and this server's own. sessions.json's `config_dir` is not read,
+    since a cell can write that file."""
     from . import session  # noqa: PLC0415 — session imports most of the app
 
     live = session.current(ws.name)
     dirs = [live.config_dir] if live is not None and live.config_known else []
     dirs += [config.claude_config_dir(), config.config_dir_of(config.own_claude_config())]
-    return list(dict.fromkeys([d / "projects" for d in dirs] + [ws / ".claude-config" / "projects"]))
+    return list(dict.fromkeys(d / "projects" for d in dirs))
 
 
 def _own_file(p: Path, root: Path) -> bool:
@@ -294,10 +294,6 @@ def session_records(ws: Path, chats: list[dict[str, Any]], tickets: Iterable[dic
     ticket_chats = {str(m.get("ticket")): str(m.get("id")) for m in chats if m.get("role") == "dev" and m.get("ticket")}
     for t in tickets:
         put(t.get("session_id"), role="dev", chat=ticket_chats.get(str(t.get("id"))), ticket=t.get("id"))
-    own = ws / ".claude-config" / "projects"
-    if own.is_dir():
-        for p in sorted(own.glob("*/*.jsonl")):
-            put(p.stem, role="worker", transcript_path=str(p))
     return out
 
 

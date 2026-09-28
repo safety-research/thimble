@@ -538,9 +538,9 @@ export interface PermissionRequest {
   expired?: string
   /** the seconds it waits before it is denied unanswered, when it does not wait for the analyst however long */
   wait_s?: number
-  /** a dev session's: the mode it is answered by (Start's names) */
+  /** the mode of the session that asks (manual, auto, bypass) */
   mode?: string
-  /** the later calls for the same site, or later searches, that wait on this request's answer */
+  /** the later calls for the same site, or later searches, that wait on this request's answer, each listed whole */
   also?: string[]
   /** a web call's "don't ask again", kept for the workspace: its site, or `web search` */
   keep?: string
@@ -574,14 +574,15 @@ export interface StartBody {
   ultracode: boolean
   effort: OrientEffort
   text?: string
-  /** the orientation's permission mode, Start's switcher: `manual` sends each request Claude Code makes to its card,
-   * `auto` runs in Claude Code's auto mode and sends the calls it will not decide there, `bypass` grants every request
-   * without asking; absent, the workspace's stored mode, else the one the analyst's own mode maps to */
-  permissions?: OrientPermissions
 }
 
-/** Start's mode switcher for the orientation's session alone, Claude Code's own modes: Manual, Auto or Bypass. */
+/** A permission mode of the sessions thimble starts (backend modes.MODES): `manual` sends each request Claude Code makes
+ * to the card, `auto` runs in Claude Code's auto mode and sends the calls it refuses there, `bypass` grants every
+ * request without asking. */
 export type OrientPermissions = 'manual' | 'auto' | 'bypass'
+
+/** The agents that each run in a permission mode of their own (backend modes.AGENTS). */
+export type ModeAgent = 'orient' | 'writer' | 'critic' | 'dev' | 'views'
 
 // ---- documents ----
 
@@ -903,18 +904,22 @@ export interface Settings {
   models: Record<string, ModelConf>
   /** the orientation runs as a subagent of the analyst's Claude Code session (backend orientation.terminal_first) */
   terminal_first?: boolean
-  /** the analyst agreed on this install to terminal-first's changes to Claude Code's files (backend claude_changes) */
-  terminal_first_consented?: boolean
   /** in terminal-first mode, how the orientation runs: a subagent of main, or a background session (backend bg_session) */
   orient_route?: 'subagent' | 'session'
   /** the chat column is hidden and main's foot shows in a dock (shell/Shell, chat off) */
   hide_chat?: boolean
+  /** the agents whose permission mode the analyst set; any other runs in the mode of their Claude Code session */
+  permission_modes?: Partial<Record<ModeAgent, OrientPermissions>>
+  /** the modes the analyst's Claude Code settings turn off */
+  disabled_modes?: OrientPermissions[]
   [k: string]: unknown
 }
 
-/** `PUT /ws/{c}/settings`: `models` merges per role and within a role, so a role's patch names only what changes. */
+/** `PUT /ws/{c}/settings`: `models` merges per role and within a role, so a role's patch names only what changes;
+ * `permission_modes` merges per agent, null putting an agent back on the session's mode. */
 export interface SettingsPatch {
   models?: Record<string, Partial<ModelConf>>
+  permission_modes?: Partial<Record<ModeAgent, OrientPermissions | null>>
   [k: string]: unknown
 }
 
@@ -1389,17 +1394,16 @@ export interface Attached {
   model?: string
   /** the effort they ran at, as the mirror last read it */
   effort?: string
-  /** what the composer's chip set for this session */
+  /** what the composer's chip chose for main's next launch, while this session runs */
   effort_choice?: MainEffort
   /** the effort the analyst's own Claude Code settings choose (cc_settings.analyst_effort), where main's effort menu opens */
   settings_effort?: MainEffort
   /** whether the session's last reply ran in fast mode, as the mirror read it */
   fast?: boolean
-  /** the permission mode the analyst's user and managed Claude Code settings choose, never the folder's own
-   * (`permissions.defaultMode`: default, acceptEdits, auto, plan, bypassPermissions, dontAsk), which the Start panel's
-   * permission choice opens on */
+  /** the permission mode Claude Code last reported to the session's hooks (default, acceptEdits, auto, plan,
+   * bypassPermissions, dontAsk), which each agent's permission mode follows until the analyst sets it (backend modes.py) */
   permission_mode?: string
-  /** what the composer's fast-mode switch set for this session */
+  /** what the composer's fast-mode switch chose for main's next launch, while this session runs */
   fast_choice?: boolean
   /** the session that was main until this one took its place while it runs on in another terminal */
   after?: string
@@ -1432,11 +1436,13 @@ export interface ChatMeta {
   /** a session thimble started: what the analyst's "don't ask again" answers added for the rest of it, each in Claude
    * Code's words (backend agent_session, don't ask again) */
   session_rules?: { text: string }[]
-  /** the orientation's session (and its critique's): the permission mode it runs in now, which its card's switcher
-   * shows and changes (agent_session, permissions) */
+  /** a session thimble started: the permission mode it runs in now, which its card's switcher shows and changes
+   * (agent_session, permissions) */
   permission_mode?: OrientPermissions
   /** the mode a switch into or out of Auto goes to, while the session waits for a pause to restart in it */
   mode_switch?: OrientPermissions | null
+  /** a session thimble runs as a Claude Code background session (backend bg_session) */
+  background?: boolean
   /** the orientation's session: whether it runs with Ultracode, and its critique */
   ultracode?: boolean
   critique?: boolean

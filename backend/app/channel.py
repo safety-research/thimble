@@ -6,11 +6,10 @@ subscription here, `GET /api/channel`; each event posted for the workspace becom
 which the model sees as `<channel source="plugin:thimble:thimble" kind="…" …>body</channel>`.
 
 The browser posts `POST /api/ws/{c}/events {kind, payload}`; server code calls post(). A kind is a bullet of main.md's
-`## Events from the browser`, and other kinds are refused. A post with no subscriber is refused with 409. Claude Code
-picks up a changed settings file only once it has been still for about a second, so an event within SETTINGS_SETTLE_S of
-a chip change waits out the rest. An event of QUIET_KINDS asks main for nothing, so it wakes no turn: it waits in the
-workspace's HELD_FILE and rides along, under MEANWHILE, with the next event or the analyst's next prompt in the terminal
-(the plugin's UserPromptSubmit hook takes it with held_route).
+`## Events from the browser`, and other kinds are refused. A post with no subscriber is refused with 409. An event of
+QUIET_KINDS asks main for nothing, so it wakes no turn: it waits in the workspace's HELD_FILE and rides along, under
+MEANWHILE, with the next event or the analyst's next prompt in the terminal (the plugin's UserPromptSubmit hook takes it
+with held_route).
 
 Without channels, events are queued per workspace and session (_pending) and the plugin's watcher takes them with a long
 poll (pull_route) as the text a channel would have shown (render); unacknowledged events return to the queue after
@@ -36,7 +35,6 @@ import secrets
 import time
 from collections import deque
 from contextlib import asynccontextmanager
-from pathlib import Path
 from typing import Any, AsyncIterator, Callable, NamedTuple
 
 from fastapi import APIRouter, HTTPException, Request, Response
@@ -69,7 +67,6 @@ NOT_LISTENING = ("no Claude Code session is listening in {cwd}. Start thimble wi
                  "/thimble in a Claude Code session there.")
 PERMISSION_EVENT = "permission"  # the stream's event carrying the analyst's answer to a relayed permission prompt
 PERMISSION_INPUT_CHARS = 50_000  # of a relayed request's input shown in the browser; past it the entry's `cut` says so
-SETTINGS_SETTLE_S = 1.8  # Claude Code's settings watcher: 1 s still, 0.5 s polls, and a margin (module note)
 SOURCE = cc_channel.SOURCE  # the `source` Claude Code gives the plugin server's channel events; render uses it too
 PULL_WAIT_S = 25.0  # a pull's longest wait (module note); the watcher asks again
 PULL_WAIT_MAX_S = 60.0
@@ -90,7 +87,6 @@ _taken: dict[str, tuple[str, str, dict[str, Any], float]] = {}  # event id -> (w
 _waiters: dict[str, set[tuple[asyncio.AbstractEventLoop, asyncio.Future]]] = {}  # workspace -> its waiting pulls
 _asks: dict[str, "Ask"] = {}  # hook permission id -> the request waiting for the analyst
 _lines: dict[tuple[str, str], list[str]] = {}  # (workspace, session) -> lines of events its watcher wrote out, to print
-_settings_written: dict[str, float] = {}  # workspace -> when the chip last wrote the folder's local settings (monotonic)
 _observers: dict[str, list[Callable[[str, dict[str, Any], dict[str, Any]], None]]] = {}  # kind -> observe()'s functions
 
 
@@ -372,12 +368,19 @@ def hand(c: str, event_id: str, text: str, fields: dict[str, Any], *, thread: st
 
 
 def _ultracode(c: str) -> dict[str, Any]:
-    """`ultracode: true` on a browser message to main while the composer's chip has Ultracode on: a channel message gets none
-    of the keyword's effect in Claude Code, so main.md asks for the Workflow tool itself. A thread event carries nothing."""
-    from . import agents, cc_settings  # noqa: PLC0415
+    """`ultracode: true` on a browser message to main while the composer's chip has Ultracode on (for this session, else
+    as models.main keeps it): a channel message gets none of the keyword's effect in Claude Code, so main.md asks for the
+    Workflow tool itself. A thread event carries nothing."""
+    from . import agents, cc_settings, ledger  # noqa: PLC0415
 
     held = (agents.meta_or_none(c, agents.MAIN_ID) or {}).get("attached") or {}
-    return {"ultracode": True} if held.get("effort_choice") == cc_settings.ULTRACODE else {}
+    choice = held.get("effort_choice")
+    if choice is None:
+        try:
+            choice = ((ledger.stored_settings(c).get(config.MODELS_KEY) or {}).get("main") or {}).get("effort")
+        except Exception:  # noqa: BLE001 — a settings file that cannot be read chooses nothing
+            choice = None
+    return {"ultracode": True} if choice == cc_settings.ULTRACODE else {}
 
 
 def _filters(c: str) -> dict[str, Any]:
@@ -517,21 +520,17 @@ class EventBody(BaseModel):
 
 @router.post("/ws/{c}/events")
 async def events_route(c: str, body: EventBody) -> dict[str, Any]:
-    """The browser's one way to reach the session, after the chip's last change has settled."""
+    """The browser's one way to reach the session."""
     try:
         config.workspace_dir(c)
     except ValueError as e:
         raise HTTPException(404, str(e)) from e
-    wait = _settings_written.get(c, 0.0) + SETTINGS_SETTLE_S - time.monotonic()
-    if wait > 0:
-        await asyncio.sleep(wait)
     return post(c, body.kind, body.payload)
 
 
 class SessionBody(BaseModel):
     session: str
     cwd: str | None = None
-    env_pid: int | None = None  # the process sending this, whose environment has the session's CLAUDE_CONFIG_DIR
 
 
 @router.post("/ws/{c}/session")
@@ -547,73 +546,59 @@ async def session_route(c: str, body: SessionBody) -> dict[str, Any]:
     before = session.current(c)
     # a session another terminal runs, whose shim is still subscribed, stops hearing the browser: /thimble says so
     replaced = before.sid if before is not None and before.sid != body.session and listening(c, before.sid) else None
-    known, value = config.process_claude_config(body.env_pid)
-    lv = session.attach(c, body.session, body.cwd or str(corpus), config_dir=(value or "") if known else None)
+    lv = session.attach(c, body.session, body.cwd or str(corpus))
     return {"attached": bool(lv), "session": body.session, "listening": listening(c), "replaced": replaced}
 
 
-class EffortBody(BaseModel):
-    effort: str
+class MainChoice(BaseModel):
+    effort: str | None = None
+    fast: bool | None = None
+
+
+def _choose(c: str, choice: dict[str, Any]) -> None:
+    """The composer's choice for main, kept in the workspace's settings as models.main and applied at main's next
+    launch (cli.launch_args); on main's `attached` too, as effort_choice and fast_choice, for the chip to show."""
+    from . import agents, ledger  # noqa: PLC0415
+
+    try:
+        config.corpus_dir(c)
+    except ValueError as e:
+        raise HTTPException(404, str(e)) from e
+    ledger.put_settings(c, {config.MODELS_KEY: {"main": choice}})
+    meta = agents.ensure_main(c)
+    if meta.get("attached"):
+        meta["attached"] = {**meta["attached"], **{f"{k}_choice": v for k, v in choice.items()}}
+        agents.write_meta(c, meta)
+        agents.notify(c, agents.MAIN_ID)
 
 
 @router.put("/ws/{c}/session/effort")
-async def effort_route(c: str, body: EffortBody) -> dict[str, Any]:
-    """The composer's effort chip: main's effort from its next request (low to max, or ultracode), written where the running
-    session reads it and kept on main's `attached` as `effort_choice`. 409 without an attached session."""
-    from . import agents, cc_settings  # noqa: PLC0415
+async def effort_route(c: str, body: MainChoice) -> dict[str, Any]:
+    """The composer's effort chip: main's effort (low to max, or ultracode) from its next launch (_choose)."""
+    from . import cc_settings  # noqa: PLC0415
 
+    choice = str(body.effort or "").strip().lower()
     try:
-        corpus = config.corpus_dir(c)
-    except ValueError as e:
-        raise HTTPException(404, str(e)) from e
-    meta = agents.ensure_main(c)
-    held = meta.get("attached") or {}
-    if not held.get("session"):
-        raise HTTPException(409, "no Claude Code session is attached; start thimble with `thimble` in the corpus folder")
-    try:
-        level = cc_settings.set_main_effort(Path(str(held.get("cwd") or corpus)), body.effort)
+        level = cc_settings.level_of(choice)
     except ValueError as e:
         raise HTTPException(400, str(e)) from e
-    _settings_written[c] = time.monotonic()
-    choice = body.effort.strip().lower()
-    meta["attached"] = {**held, "effort_choice": choice}
-    agents.write_meta(c, meta)
-    agents.notify(c, agents.MAIN_ID)
+    _choose(c, {"effort": choice})
     return {"effort": level, "choice": choice}
 
 
-class FastBody(BaseModel):
-    fast: bool
-
-
 @router.put("/ws/{c}/session/fast")
-async def fast_route(c: str, body: FastBody) -> dict[str, Any]:
-    """The composer's fast-mode switch: main's fast mode off or back on from its next request, kept on main's `attached` as
-    `fast_choice`. 409 without an attached session."""
-    from . import agents, cc_settings  # noqa: PLC0415
-
-    try:
-        corpus = config.corpus_dir(c)
-    except ValueError as e:
-        raise HTTPException(404, str(e)) from e
-    meta = agents.ensure_main(c)
-    held = meta.get("attached") or {}
-    if not held.get("session"):
-        raise HTTPException(409, "no Claude Code session is attached; start thimble with `thimble` in the corpus folder")
-    cc_settings.set_main_fast(Path(str(held.get("cwd") or corpus)), body.fast)
-    _settings_written[c] = time.monotonic()
-    meta["attached"] = {**held, "fast_choice": body.fast}
-    agents.write_meta(c, meta)
-    agents.notify(c, agents.MAIN_ID)
-    return {"fast": body.fast}
+async def fast_route(c: str, body: MainChoice) -> dict[str, Any]:
+    """The composer's fast-mode switch: main's fast mode from its next launch (_choose)."""
+    _choose(c, {"fast": bool(body.fast)})
+    return {"fast": bool(body.fast)}
 
 
 @router.get("/channel")
 async def subscribe(request: Request, cwd: str, session: str | None = None, pid: int | None = None,
-                    delivery: str = cc_channel.CHANNEL) -> EventSourceResponse:
-    """The shim's subscription, with the route its session hears events by (`delivery`) and the pid of its `claude`, whose
-    environment gives the session's CLAUDE_CONFIG_DIR (session.attach). 404 while the folder is not a workspace yet: the
-    shim retries, and `/thimble` registers the folder."""
+                    delivery: str = cc_channel.CHANNEL, config_dir: str | None = None) -> EventSourceResponse:
+    """The shim's subscription, with the route its session hears events by (`delivery`), the pid of its `claude` and that
+    session's CLAUDE_CONFIG_DIR ("" for unset). 404 while the folder is not a workspace yet: the shim retries, and
+    `/thimble` registers the folder."""
     from . import session as session_mod  # noqa: PLC0415
 
     c = config.workspace_for_cwd(cwd)
@@ -624,7 +609,7 @@ async def subscribe(request: Request, cwd: str, session: str | None = None, pid:
     q: asyncio.Queue = asyncio.Queue()
     _subs.setdefault(c, set()).add(q)
     _routes[q] = (session or None, delivery)
-    session_mod.connected(c, session, cwd, pid, claim=delivery == cc_channel.CHANNEL)
+    session_mod.connected(c, session, cwd, pid, config_dir, claim=delivery == cc_channel.CHANNEL)
     _wake(c)  # a watcher of this session's that waits learns it delivers by channel now
     log.info("%s: channel subscribed (session %s, pid %s, Claude Code %s, %s)", c, session, pid,
              procs.version_of(pid) or "version unknown", delivery)
@@ -736,6 +721,25 @@ async def held_route(body: HeldBody) -> dict[str, Any]:
     riders = pop_held(c) if main and body.session == main else []
     lines = [*_lines.pop((c, body.session or ""), []), _joined(riders)]
     return {"text": meanwhile(riders), "terminal": "\n".join(x for x in lines if x)}
+
+
+class ModeBody(BaseModel):
+    cwd: str
+    session: str | None = None
+    permission_mode: str = ""
+
+
+@router.post("/channel/mode")
+async def mode_route(body: ModeBody) -> dict[str, Any]:
+    """The mode hook, as a turn of main's begins and ends: the permission mode Claude Code reports for the session,
+    which main's meta keeps when the session is main (session.note_mode). 404 when the folder is no workspace."""
+    from . import session  # noqa: PLC0415
+
+    c = config.workspace_for_cwd(body.cwd)
+    if not c:
+        raise HTTPException(404, f"{body.cwd} is not a thimble workspace")
+    session.note_mode(c, body.session, body.permission_mode)
+    return {}
 
 
 @router.get("/channel/main")

@@ -1,13 +1,12 @@
 # Installing thimble
 
-thimble uses the credentials of the Claude Code session that starts it. For its direct API calls it reads
-`ANTHROPIC_API_KEY` or `ANTHROPIC_AUTH_TOKEN`, or runs your `apiKeyHelper`, and keeps the key in memory. Without a key,
-it links Claude Code's login file into its workspaces. It never writes an API key to disk and never logs one.
+thimble uses whichever auth path you have configured for `claude`: every model call runs through your own `claude`, in
+your config dir with your user settings (thimble's sessions run in folders of their own, so auth set only in a
+project's `.claude/` settings does not reach them). thimble tells you when `claude` is missing or not logged in.
 
 ## Requirements
 
-- [Claude Code](https://docs.anthropic.com/en/docs/claude-code) (tested with 2.1.281), logged in or with
-  `ANTHROPIC_API_KEY` set.
+- [Claude Code](https://docs.anthropic.com/en/docs/claude-code) (tested with 2.1.281), logged in (`claude auth status`).
 - macOS or Linux, and Python 3.12+. [uv](https://docs.astral.sh/uv/getting-started/installation/) is recommended: it
   installs the pinned versions and fetches Python when the machine has none.
 - Node 20+ for a Dev install and for custom views.
@@ -30,9 +29,12 @@ cd thimble
 bash scripts/install.sh
 ```
 
-Either install registers the plugin with Claude Code, links the `thimble` command into `~/.local/bin` (and prints the
-line to add to your shell startup file when that folder is not on your PATH), and runs `thimble doctor`.
-`install.sh --dry-run` prints every step and changes nothing.
+Either install links the `thimble` command into `~/.local/bin` (and prints the line to add to your shell startup file
+when that folder is not on your PATH) and runs `thimble doctor`. It asks once whether to add thimble's plugin to all
+Claude Code sessions, so `/thimble` works in any (the `thimble` command works either way), and whether to mark thimble's
+workspaces folder trusted in Claude Code's config, which Terminal-first's background sessions need. `--plugin`,
+`--no-plugin`, `--trust-workspaces` and `--no-trust-workspaces` answer without asking. `install.sh --dry-run` prints
+every step and changes nothing.
 
 ## Update
 
@@ -44,9 +46,9 @@ until `thimble server restart`.
 
 ## Uninstall
 
-`thimble uninstall` asks, then removes the plugin registration, `~/.local/bin/thimble` and `~/.thimble`, which holds a
-Global install's workspaces, and takes out the settings thimble wrote into folders' `.claude/settings.local.json`.
-`--keep-home` keeps `~/.thimble`. A clone stays where it is.
+`thimble uninstall` asks, then removes the plugin registration and the trust entry the install added,
+`~/.local/bin/thimble`, and `~/.thimble`, which holds a Global install's workspaces. `--keep-home` keeps `~/.thimble`.
+A clone stays where it is.
 
 To delete one workspace and keep the install, `thimble list` shows the workspaces by id and `thimble purge <id>` deletes
 that one and prints each path it deleted. The folder it read and your Claude Code transcripts stay.
@@ -54,6 +56,7 @@ that one and prints each path it deleted. The folder it read and your Claude Cod
 ## Troubleshooting
 
 - `thimble doctor` shows the server, the versions, the auth path and the log's recent errors.
-- `/thimble` is not recognised right after an install: run `/reload-plugins`, or start a new session.
+- `/thimble` is not recognised in a `claude` session: it works there only after `install.sh --plugin`; then run
+  `/reload-plugins`, or start a new session.
 - To report a problem, run `thimble feedback "<what went wrong>"`. It writes a zip of the logs, chats and Claude
   Code transcripts, with keys removed, and says where to send it. The chats and transcripts quote your corpus.

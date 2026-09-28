@@ -70,7 +70,7 @@ describe('the card', () => {
   test("each answer goes to the session that asked, and the next request takes the card's place", async () => {
     const el = await card()
     await click(el.querySelector('.chat-perm-always'))
-    expect(posted).toEqual([['/api/ws/mini/chats/or1/permission', { id: 'o1', allow: true, always: true }]])
+    expect(posted).toEqual([['/api/ws/mini/chats/or1/permission', { id: 'o1', allow: true, always: true, shown: 0 }]])
     expect(el.querySelector('.chat-perm')?.getAttribute('data-request')).toBe('m1')
     expect(el.querySelector('.chat-perm-count')).toBeNull()
     await click(el.querySelector('.chat-perm-deny'))

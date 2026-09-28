@@ -45,7 +45,7 @@ def _fresh(workspaces_tmp, tmp_path, monkeypatch):
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "claude-config"))
     for table in (channel._subs, channel._routes, channel._pending, channel._taken, channel._asks, channel._waiters,
                   channel._lines, session._live, session._expected, session._event_threads, session._came_back,
-                  session._shim_pids):
+                  session._shim_pids, session._shim_configs):
         table.clear()
     agents._busy.clear()
     yield

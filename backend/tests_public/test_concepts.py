@@ -87,18 +87,12 @@ class FakeClassify:
                 for n, (_ref, t) in enumerate(items, 1)]
 
 
-async def _no_api() -> bool:
-    return False
-
-
 @pytest.fixture()
 def fake_classify(monkeypatch):
-    """The scripted classifier on the CLI lane (batches of BATCH_ITEMS, CONCURRENCY in flight), whatever credential the
-    shell running the suite has; the HTTP lane's tests switch model.api_path_ready on themselves."""
+    """The scripted classifier (batches of BATCH_ITEMS, CONCURRENCY in flight)."""
     FakeClassify.calls = []
     FakeClassify.plan = []
     monkeypatch.setattr(concepts, "classify_structured", FakeClassify.call)
-    monkeypatch.setattr(model_mod, "api_path_ready", _no_api)
     return FakeClassify
 
 

@@ -165,34 +165,83 @@ esac
     assert r.returncode == 1 and "no SHA256SUMS beside the zip" in r.stderr and "install.sh ran" not in r.stdout
 
 
-def test_uninstall_puts_back_the_claude_code_settings_thimble_wrote(tmp_path, monkeypatch):
-    """cc_settings writes the effort and fast-mode keys and the statusline into a folder's .claude/settings.local.json
-    and records them in thimble's home; uninstall undoes each that still holds thimble's value before removing the home,
-    and leaves the analyst's own keys and a value edited by hand."""
-    from app import cc_settings
-
+def test_claude_codes_config_changes_only_on_a_yes_and_uninstall_takes_back_what_thimble_wrote(tmp_path):
+    """install.sh's trust step writes nothing into Claude Code's config without a yes (no terminal, no flag), then with
+    --trust-workspaces the one entry, keeping the rest, and asks no more; a later --no-trust-workspaces takes it back.
+    Uninstall takes back the entries thimble added, an older version's per-folder one too, and the keys an older
+    version wrote into a folder's settings.local.json, where they still hold thimble's value."""
     tree = fake_tree(tmp_path / "app")
+    (tree / "backend" / "app").mkdir(parents=True)
+    shutil.copy(REPO / "backend" / "app" / "claude_changes.py", tree / "backend" / "app")
     env = env_for(tmp_path)
     home = Path(env["THIMBLE_HOME"])
     home.mkdir()
     (home / "app-dir").write_text(f"{tree}\n")
-    monkeypatch.setenv("THIMBLE_HOME", str(home))
-    a, b, c = (tmp_path / n for n in ("a", "b", "c"))
-    (a / ".claude").mkdir(parents=True)
-    own_line = {"type": "command", "command": "my-statusline"}
-    (a / ".claude" / "settings.local.json").write_text(json.dumps({"env": {"MINE": "1"}, "statusLine": own_line}))
-    cc_settings.set_main_effort(a, "max")
-    cc_settings.set_statusline(a, "thimble-agents --statusline")
-    cc_settings.set_main_fast(b, False)
-    cc_settings.set_main_effort(c, "high")
-    edited = json.loads((c / ".claude" / "settings.local.json").read_text())
-    edited["env"]["CLAUDE_CODE_EFFORT_LEVEL"] = "low"
-    (c / ".claude" / "settings.local.json").write_text(json.dumps(edited))
+    cfg = Path(env["HOME"]) / ".claude.json"
+    before = json.dumps({"numStartups": 3, "projects": {"/x": {"lastCost": 1}}})
+    cfg.write_text(before)
+    ours = {str(tree / "workspaces"): {"hasTrustDialogAccepted": True}}
+
+    def trust(*flag: str) -> dict:
+        subprocess.run(["python3", "-I", str(tree / "backend" / "app" / "claude_changes.py"), "trust", str(tree), *flag],
+                       capture_output=True, text=True, env=env, stdin=subprocess.DEVNULL, timeout=30, check=True)
+        rec = home / "trust.json"
+        return json.loads(rec.read_text()) if rec.exists() else {}
+
+    assert trust() == {} and cfg.read_text() == before, "nothing is written without a yes"
+    yes = {"folder": str(tree / "workspaces"), "config": str(cfg), "answer": "yes", "added": True}
+    assert trust("--yes") == yes
+    data = json.loads(cfg.read_text())
+    assert data["numStartups"] == 3 and data["projects"] == {"/x": {"lastCost": 1}, **ours}
+    assert trust() == yes and json.loads(cfg.read_text()) == data, "asked once"
+    assert trust("--no") == {**yes, "answer": "no", "added": False} and json.loads(cfg.read_text()) == json.loads(before)
+    assert trust("--yes") == yes
+    old = str(tmp_path / "old-workspace")
+    data = json.loads(cfg.read_text())
+    cfg.write_text(json.dumps({**data, "projects": {**data["projects"], old: {"hasTrustDialogAccepted": True}}}))
+    (home / "trusted-folders.json").write_text(json.dumps({old: {"config": str(cfg), "created": True}}))
+    folder = tmp_path / "corpus"
+    (folder / ".claude").mkdir(parents=True)
+    (folder / ".claude" / "settings.local.json").write_text(json.dumps({"env": {"CLAUDE_CODE_EFFORT_LEVEL": "max",
+                                                                                "MINE": "1"}}))
+    (home / "effort-overrides.json").write_text(json.dumps({str(folder): "max"}))
     r = subprocess.run(["bash", str(tree / "plugin" / "bin" / "thimble"), "uninstall", "--yes"], capture_output=True,
                        text=True, env=env, timeout=60)
-    assert "put back the Claude Code settings thimble changed" in r.stdout, r.stdout + r.stderr
-    assert str(b / ".claude" / "settings.local.json") in r.stdout
-    assert json.loads((a / ".claude" / "settings.local.json").read_text()) == {"env": {"MINE": "1"}, "statusLine": own_line}
-    assert not (b / ".claude" / "settings.local.json").exists(), "a file thimble's keys alone made is removed"
-    assert json.loads((c / ".claude" / "settings.local.json").read_text())["env"] == {"CLAUDE_CODE_EFFORT_LEVEL": "low"}
-    assert not home.exists(), r.stdout + r.stderr
+    assert json.loads(cfg.read_text()) == json.loads(before), r.stdout + r.stderr
+    assert json.loads((folder / ".claude" / "settings.local.json").read_text()) == {"env": {"MINE": "1"}}
+    assert not home.exists(), "removed once what it recorded was put back"
+
+
+def test_the_plugin_is_registered_only_on_a_yes_and_uninstall_removes_only_what_install_added(tmp_path):
+    """install.sh --no-plugin registers nothing and records the no, so uninstall runs no `claude plugin` step; --plugin
+    registers at user scope and a later --no-plugin takes that back; uninstall removes what a yes registered."""
+    tree = fake_tree(tmp_path / "release")
+    dest = tmp_path / "home" / ".thimble" / "app"
+    bin_ = stub_bin(tmp_path)
+    (bin_ / "claude").write_text('#!/bin/sh\necho "$*" >> "$STUB_LOG"\n'
+                                 'case "$1 $2" in "--version ") echo 2.1.284;; "plugin list") echo "[]";; esac\n')
+    (bin_ / "claude").chmod(0o755)
+    log = tmp_path / "claude.log"
+    env = env_for(tmp_path, PATH=f"{bin_}:/usr/bin:/bin", STUB_LOG=str(log))
+    record = Path(env["THIMBLE_HOME"]) / "plugin.json"
+
+    def run(cmd: list[str]) -> list[str]:
+        log.write_text("")
+        r = subprocess.run(cmd, capture_output=True, text=True, env=env, stdin=subprocess.DEVNULL, timeout=60)
+        assert r.returncode == 0, r.stdout + r.stderr
+        return [c for c in log.read_text().splitlines() if c.startswith("plugin ") and c != "plugin list --json"]
+
+    def install(flag: str) -> list[str]:
+        return run(["bash", str(tree / "scripts" / "install.sh"), "--dir", str(dest), flag, "--no-trust-workspaces"])
+
+    uninstall = ["bash", str(dest / "plugin" / "bin" / "thimble"), "uninstall", "--yes"]
+    assert install("--no-plugin") == [] and json.loads(record.read_text()) == {"answer": "no", "registered": ""}
+    assert run(uninstall) == [] and not record.exists()
+    assert install("--plugin") == [f"plugin marketplace add {dest}", "plugin marketplace update thimble-local",
+                                   "plugin install --scope user thimble@thimble-local",
+                                   "plugin update --scope user thimble@thimble-local"]
+    assert json.loads(record.read_text()) == {"answer": "yes", "registered": "thimble-local"}
+    taken_back = ["plugin uninstall thimble@thimble-local", "plugin marketplace remove thimble-local"]
+    assert install("--no-plugin") == taken_back and json.loads(record.read_text())["registered"] == ""
+    install("--plugin")
+    assert run(uninstall) == taken_back and not record.exists()

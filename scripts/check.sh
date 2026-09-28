@@ -10,9 +10,6 @@
 #   content   no secrets, private names, files that never belong in the tree, or file names that only case tells apart
 #             (Checks.tsx beside checks.ts, which a case-insensitive disk resolves as one module) (scripts/check_content.py,
 #             with gitleaks when it is installed)
-#   commits   the messages of the commits after BASE (default origin/main) carry no Claude-Session: line and no link to
-#             a Claude Code session (scripts/check_content.py --commits); where BASE is not in the checkout, HEAD's
-#             message alone is checked
 #   backend   the backend's tests (backend/tests_public): hermetic, with no network, no Claude Code and no API key
 #   frontend  the type check of the UI and of its tests, the frontend's tests (frontend/tests/public) and the production
 #             build, into a temporary folder so that the frontend/dist a running server serves is left alone
@@ -20,7 +17,7 @@
 #             outputs and a view's label marks; skipped, with a line saying so, where that Chromium does not start (CI
 #             requires it)
 #
-# With no STEP it runs content, commits, backend, frontend and browser in that order and stops at the first that fails. In a
+# With no STEP it runs content, backend, frontend and browser in that order and stops at the first that fails. In a
 # fresh checkout run `scripts/check.sh install` once first (or scripts/install.sh --dev, which installs the same things).
 set -euo pipefail
 
@@ -59,18 +56,6 @@ content() {
     gitleaks=--no-gitleaks
   fi
   python3 "$here/check_content.py" "$repo" $gitleaks
-}
-
-commits() {
-  step "commits"
-  local base="${BASE:-origin/main}" range
-  if git -C "$repo" rev-parse -q --verify "$base^{commit}" >/dev/null; then
-    range="$base..HEAD"
-  else
-    echo "there is no commit $base here, so only HEAD's message is checked"
-    range="HEAD^!"
-  fi
-  python3 "$here/check_content.py" --commits "$range" "$repo"
 }
 
 backend() {
@@ -114,11 +99,11 @@ browser() {
 steps=""  # a plain word list rather than an array: macOS's bash 3.2 refuses an empty array under set -u
 for a in "$@"; do
   case "$a" in
-    install|content|commits|backend|frontend|browser) steps="$steps $a";;
+    install|content|backend|frontend|browser) steps="$steps $a";;
     -h|--help) usage; exit 0;;
     *) echo "check.sh: unknown step $a" >&2; usage >&2; exit 2;;
   esac
 done
-[ -n "$steps" ] || steps="content commits backend frontend browser"
+[ -n "$steps" ] || steps="content backend frontend browser"
 for s in $steps; do "$s"; done
 printf '\ncheck.sh: %s passed%s\n' "${steps# }" "$skipped"

@@ -22,12 +22,12 @@ import { fetchCall } from '../lib/calls'
 import { callRef, parseRef } from '../lib/refs'
 import { track } from '../lib/telemetry'
 import { hhmm } from '../lib/time'
-import type { ChatMeta, ChatRecord, MainEffort, ModelConf, QueuedMessage, SessionAlert, Ticket } from '../lib/types'
-import { loadSettings, onSettingsChange, saveRole } from '../lib/models'
+import type { ChatMeta, ChatRecord, MainEffort, ModelConf, OrientPermissions, QueuedMessage, SessionAlert, Settings, Ticket } from '../lib/types'
+import { invalidateSettings, loadSettings, onSettingsChange, saveRole } from '../lib/models'
 import { findProposal, useProposals } from '../lib/proposals'
 import { readStorage, storageKey, writeStorage } from '../lib/workspace'
 import { Composer } from './Composer'
-import { EFFORT_CHOICES, mainEffort, mainFast, ORIENT_DEFAULT_EFFORT } from './ModelLine'
+import { EFFORT_CHOICES, mainEffort, mainFast, NEXT_LAUNCH, ORIENT_DEFAULT_EFFORT } from './ModelLine'
 import { API_ERROR_KIND, apiRetry, branchIndex, capacityNote, foldRecords, isFollowUpRow, madeBy, mainSkips, orientRuns, orientSummaries, orientWriters, sessionSteps, stepEnded, toolSteps, withApiErrors, withBranches, withCallNumbers, type MainContext, type Row, type ShotRow } from './model'
 import { Holds, useRetryText } from './Holds'
 import { TicketStatus, useTicket } from './TicketStatus'
@@ -35,7 +35,7 @@ import { Divider, Note, ThreadChip, ThreadsContext } from './Notes'
 import { RefText } from './markdown'
 import { CallFocusContext, MAIN_RETRY_NOTE, Rows, THREAD_RETRY_NOTE, type CallFocus, type ErrorRetry } from './Rows'
 import { countMessages, isUnread, markSeen, readSeen, type SeenMap } from './seen'
-import { SKIPPED_NOTE, StartGate, startGateShown } from './StartGate'
+import { SKIPPED_NOTE, StartGate, agentMode, startGateShown } from './StartGate'
 import { AgentCard, StoppedHold, useAgentRows } from './AgentCard'
 import { ViewChip } from './ViewChip'
 import { replayHeld } from './pending'
@@ -234,6 +234,9 @@ export function ChatPanel({ ws, onCollapse, dock = false }: { ws: string; onColl
   const [orientConf, setOrientConf] = useState<ModelConf | null>(null)
   // terminal-first mode: the orientation runs as a subagent of the analyst's session (StartGate `subagent`)
   const [terminalFirst, setTerminalFirst] = useState(false)
+  // the permission modes the analyst set per agent, and those their Claude Code settings turn off (Start's switcher)
+  const [modeRows, setModeRows] = useState<Settings['permission_modes']>({})
+  const [offModes, setOffModes] = useState<OrientPermissions[]>([])
   useEffect(() => {
     let alive = true
     let retry: number | undefined
@@ -242,6 +245,8 @@ export function ChatPanel({ ws, onCollapse, dock = false }: { ws: string; onColl
         .then((s) => {
           if (!alive) return
           setOrientConf(s.models?.orient ?? null)
+          setModeRows(s.permission_modes ?? {})
+          setOffModes(s.disabled_modes ?? [])
           // the orientation runs as main's subagent, whose Start has no permission mode of its own
           setTerminalFirst(s.terminal_first === true && s.orient_route !== 'session')
         })
@@ -261,6 +266,13 @@ export function ChatPanel({ ws, onCollapse, dock = false }: { ws: string; onColl
   const saveOrient = (patch: Partial<ModelConf>) => {
     setOrientConf((c) => (c ? { ...c, ...patch } : c))
     saveRole(ws, 'orient', patch).catch((e: Error) => bus.emit('toast', { text: `Could not change the orientation's settings: ${e.message}`, kind: 'error' }))
+  }
+  const saveOrientMode = (mode: OrientPermissions) => {
+    setModeRows((r) => ({ ...r, orient: mode }))
+    api
+      .putSettings(ws, { permission_modes: { orient: mode } })
+      .then(() => invalidateSettings(ws))
+      .catch((e: Error) => bus.emit('toast', { text: `Could not change the orientation's permission mode: ${e.message}`, kind: 'error' }))
   }
   // a kept thread that is gone (deleted, or the workspace archived) falls back to main at the first load of the list
   const restored = useRef(false)
@@ -491,7 +503,10 @@ export function ChatPanel({ ws, onCollapse, dock = false }: { ws: string; onColl
       track('chat-settings', { target: 'chat:main', detail: { effort: e } })
       api
         .setEffort(ws, e)
-        .then(() => main.reload())
+        .then(() => {
+          main.reload()
+          bus.emit('toast', { text: `Effort ${e}: ${NEXT_LAUNCH}.`, kind: 'info' })
+        })
         .catch((err: Error) => bus.emit('toast', { text: `Could not set the effort: ${err.message}`, kind: 'error' }))
     },
     [ws, main.reload],
@@ -501,7 +516,10 @@ export function ChatPanel({ ws, onCollapse, dock = false }: { ws: string; onColl
       track('chat-settings', { target: 'chat:main', detail: { fast: on } })
       api
         .setFast(ws, on)
-        .then(() => main.reload())
+        .then(() => {
+          main.reload()
+          bus.emit('toast', { text: `Fast mode ${on ? 'on' : 'off'}: ${NEXT_LAUNCH}.`, kind: 'info' })
+        })
         .catch((err: Error) => bus.emit('toast', { text: `Could not set fast mode: ${err.message}`, kind: 'error' }))
     },
     [ws, main.reload],
@@ -623,7 +641,9 @@ export function ChatPanel({ ws, onCollapse, dock = false }: { ws: string; onColl
                 fast={orientConf ? !!orientConf.fast : null}
                 onEffort={(effort) => saveOrient({ effort })}
                 onFast={orientConf ? (fast) => (track('start-toggle', { target: 'orient:fast', detail: { fast } }), saveOrient({ fast })) : undefined}
-                permissionMode={attached?.permission_mode ?? null}
+                mode={agentMode(modeRows, 'orient', attached?.permission_mode, offModes)}
+                offModes={offModes}
+                onMode={saveOrientMode}
                 subagent={terminalFirst}
                 sessionModel={mainModel}
                 onStarted={() => setStarted(true)}
@@ -733,7 +753,9 @@ export function ChatPanel({ ws, onCollapse, dock = false }: { ws: string; onColl
               fast={orientConf ? !!orientConf.fast : null}
               onEffort={(effort) => saveOrient({ effort })}
               onFast={orientConf ? (fast) => (track('start-toggle', { target: 'orient:fast', detail: { fast } }), saveOrient({ fast })) : undefined}
-              permissionMode={attached?.permission_mode ?? null}
+              mode={agentMode(modeRows, 'orient', attached?.permission_mode, offModes)}
+              offModes={offModes}
+              onMode={saveOrientMode}
               subagent={terminalFirst}
               sessionModel={mainModel}
               onStarted={() => setStarted(true)}

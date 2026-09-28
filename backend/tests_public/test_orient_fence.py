@@ -1,6 +1,6 @@
 """The fence and permissions of the sessions thimble starts: Edit, Write and sandboxed Bash refuse the whole corpus
 folder, nothing limits what it reads, and Claude Code's Bash sandbox runs where it can; the sandbox hook allows
-sandboxed Bash and leaves the rest to the mode; and the corpus folder's settings never choose the mode."""
+sandboxed Bash and leaves the rest to the mode."""
 from __future__ import annotations
 
 import json
@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from app import agent_session, cc_settings, config, ledger, orient_session
+from app import agent_session, cc_settings, config, orient_session
 
 CORPUS = "mini"
 
@@ -52,25 +52,6 @@ def test_the_fence_denies_the_whole_corpus_folder_blocks_no_read_and_adds_the_sa
     assert env["PATH"].split(":")[0] == str(Path(sys.prefix) / "bin")
     assert env["XDG_CACHE_HOME"] == str(work / agent_session.CACHE_DIR) and (work / agent_session.CACHE_DIR).is_dir()
     assert env[agent_session.MEMORY_ENV] == "1", "the corpus's CLAUDE.md, read as the added folder's"
-
-
-def test_the_corpus_folder_s_settings_never_choose_the_mode_and_the_settings_route_opens_on_the_user_s(tmp_path):
-    """A corpus is other agents' work: a .claude/settings*.json in it must not pre-select Bypass."""
-    cwd = config.corpus_dir(CORPUS)
-    planted = cwd / ".claude"
-    planted.mkdir(exist_ok=True)
-    for name in ("settings.json", "settings.local.json"):
-        (planted / name).write_text(json.dumps({"permissions": {"defaultMode": "bypassPermissions"}}))
-    assert cc_settings.permission_mode(cwd) == "default"
-    assert ledger.get_settings(CORPUS)["orient_permissions"] == "manual"
-    assert orient_session.mode_of(CORPUS, None) == "manual"
-    (tmp_path / "cc" / "settings.json").write_text(json.dumps({"permissions": {"defaultMode": "auto"}}))
-    assert ledger.get_settings(CORPUS)["orient_permissions"] == "auto"
-    ledger.put_settings(CORPUS, {"orient_permissions": "manual"})
-    assert ledger.get_settings(CORPUS)["orient_permissions"] == "manual", "a stored choice wins"
-    assert orient_session.mode_of(CORPUS, None) == "manual", "and a tool-started orientation takes it"
-    assert orient_session.mode_of(CORPUS, "bypass") == "bypass", "Start's choice wins over it"
-    assert cc_settings.permission_mode(cwd) == "auto"
 
 
 def _hook(argv: list[str], event: dict, capsys) -> str:
