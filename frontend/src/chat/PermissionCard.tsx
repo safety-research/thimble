@@ -1,7 +1,7 @@
 // The permission requests waiting for the analyst, as one card pinned above the chat's composer in every chat. It holds
 // every session's requests (chat/permissions.ts pendingRequests), oldest first and those denied unanswered last, one at
 // a time with `1 of 3` paging. Its head names the requesting thread (askThread); the body says who asks, what the call
-// does, the later calls that wait on the same answer, and why it asks, then Allow, Always allow (where Claude Code
+// does, every later call that waits on the same answer (scrolled), and why it asks, then Allow, Always allow (where Claude Code
 // offers a rule for the session, or for a web call its site or web search in the workspace; the scope in its tooltip)
 // and Deny, in one row. A request denied unanswered says so, with Dismiss. When auto mode's classifier could not judge
 // a call, an orientation's request offers the switch to Manual or Bypass. An answer hides the request at once. A long
@@ -20,9 +20,6 @@ import { askFields, askWhat, CODE_LANGS } from './Holds'
 import { BYPASS_LINE } from './ModeSwitch'
 import { ThreadChip } from './Notes'
 import { askedBy, askingAgent, asksTo, askThread, askWhy, classifierDown, modeChat, type PendingAsk } from './permissions'
-
-/** How many of a request's later calls the card lists before it counts the rest. */
-const ALSO_SHOWN = 5
 
 /** A request's "don't ask again" choice: the button's label, and its tooltip saying what it keeps and where. */
 function alwaysChoice(p: PermissionRequest): { label: string; tip: string } | null {
@@ -146,10 +143,9 @@ export function PermissionCard({ ws, asks, metas, labels }: {
         <div className="chat-perm-also" data-count={also.length}>
           <span className="chat-perm-key label">{p.tool === 'WebSearch' ? 'and the searches' : 'and from this site'}</span>
           <ul className="chat-perm-also-list">
-            {also.slice(0, ALSO_SHOWN).map((a, k) => (
+            {also.map((a, k) => (
               <li key={k}>{a}</li>
             ))}
-            {also.length > ALSO_SHOWN && <li className="chat-perm-also-more">{`${also.length - ALSO_SHOWN} more`}</li>}
           </ul>
         </div>
       )}

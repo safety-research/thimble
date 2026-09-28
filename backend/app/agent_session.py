@@ -26,7 +26,8 @@ The web. WebFetch and WebSearch follow the mode in every session: in manual mode
 (web_asks), over the analyst's own allow rules and Claude Code's list of documentation sites it fetches unasked, and in
 auto mode the classifier judges them. The card offers "don't ask again" for the site, or for web search, kept for the
 workspace in WEB_RULES_FILE, which every session's later request of it meets (web_rules). While a request waits, the
-session's later requests for the same site or for search wait on the same card (`groups`).
+session's later requests for the same site or for search wait on the same card (`groups`), each listed on it whole,
+up to WEB_ALSO_MAX.
 
 Don't ask again. The request's `permission_suggestions` become the card's third choice (offer); chosen, they are sent
 as `updatedPermissions` with destination session, kept on the chat's meta (RULES_KEY), and put in each later process's
@@ -225,7 +226,8 @@ WEB_TOOLS = ("WebFetch", "WebSearch")
 WEB_ASK_MODES = ("default", "acceptEdits")
 WEB_RULES_FILE = "web_rules.json"
 WORKSPACE = "workspace"  # the `destination` of a "don't ask again" update kept for the workspace, never sent to Claude Code
-WEB_ALSO_MAX = 20  # the later requests a web card lists (`also`)
+WEB_ALSO_MAX = 20  # the later requests that join a waiting web request, each listed on its card (`also`)
+ALSO_CHARS = 300  # of a joining request's address or search; a longer one is a request of its own
 TIMED_OUT = "timed out"  # the answer of a request nobody answered in time
 BG_WAIT_ENV = "CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS"
 BG_WAIT_MS = "0"  # no ceiling
@@ -2073,15 +2075,19 @@ def asking(c: str, key: str | None) -> bool:
 
 def web_rule(tool_name: str, inp: Any) -> str | None:
     """The web rule a call falls under, as Claude Code writes it: `WebFetch(domain:<host>)` for a fetch, `WebSearch` for a
-    search; None for any other call or a fetch with no host."""
+    search; None for any other call, and for a fetch whose address is not a plain http(s) host with an optional port
+    (a user part, a backslash or a percent escape make Claude Code read another host than Python), which is then asked
+    on its own."""
     if tool_name == "WebSearch":
         return "WebSearch"
     url = inp.get("url") if tool_name == "WebFetch" and isinstance(inp, dict) else None
     try:
-        host_name = urlsplit(url).hostname if isinstance(url, str) else None
+        parts = urlsplit(url) if isinstance(url, str) and "\\" not in url else None
     except ValueError:
-        host_name = None
-    return f"WebFetch(domain:{host_name})" if host_name else None
+        parts = None
+    if parts is None or parts.scheme not in ("http", "https") or not re.fullmatch(r"[A-Za-z0-9_.-]+(:\d+)?", parts.netloc):
+        return None
+    return f"WebFetch(domain:{parts.hostname})"
 
 
 def web_offer(rule: str) -> list[dict[str, Any]]:
@@ -2152,8 +2158,10 @@ async def ask(c: str, key: str | None, tool_name: str, inp: Any, agent_id: str |
     if unjudged and (again := await _recheck(run, agent_id, tool_name, inp, reason, tool_use_id)) is not None:
         return again
     first = run.groups.get(web) if web else None
-    if first is not None and first in run.waits and not run.waits[first].done():
-        return await _join(run, first, tool_name, inp, agent_id, event, tool_use_id, granted)
+    also = _also_text(tool_name, inp)
+    if (first is not None and first in run.waits and not run.waits[first].done() and also is not None
+            and len(next((p.get("also") or [] for p in _pending(c, run.chat) if p.get("id") == first), [])) < WEB_ALSO_MAX):
+        return await _join(run, first, also, tool_name, inp, agent_id, event, tool_use_id, granted)
     rid = uuid.uuid4().hex[:10]
     whole = json.dumps(inp, ensure_ascii=False, default=str) if inp is not None else ""
     command = _command(tool_name, inp)
@@ -2255,15 +2263,21 @@ async def _recheck(run: Run, agent_id: str | None, tool_name: str, inp: Any, rea
     return {"behavior": "deny", "message": tools.hint(MODE_SWITCHING) if got == SWITCHING else GONE_LINE}
 
 
-async def _join(run: Run, first: str, tool_name: str, inp: Any, agent_id: str | None, event: str,
+def _also_text(tool_name: str, inp: Any) -> str | None:
+    """A web call's address, or its search, whole, as the card lists a call that joins a waiting request; None for one
+    past ALSO_CHARS."""
+    text = (inp if isinstance(inp, dict) else {}).get("url" if tool_name == "WebFetch" else "query")
+    return text if isinstance(text, str) and text.strip() and len(text) <= ALSO_CHARS else None
+
+
+async def _join(run: Run, first: str, what: str, tool_name: str, inp: Any, agent_id: str | None, event: str,
                 tool_use_id: str | None, granted: dict[str, Any]) -> dict[str, Any]:
-    """A web call whose site, or search, a waiting request `first` of the same session asks for already: it is listed on
-    that request's card (`also`) and gets its answer."""
+    """A web call whose site, or search, a waiting request `first` of the same session asks for already: `what` is
+    listed on that request's card (`also`) and the call gets its answer."""
     fut = run.waits[first]
-    what = _what(tool_name, inp)
     with contextlib.suppress(Exception):
         agents.update_agent(run.c, run.chat, permissions=[
-            {**p, "also": [*(p.get("also") or []), what][:WEB_ALSO_MAX]} if p.get("id") == first else p
+            {**p, "also": [*(p.get("also") or []), what]} if p.get("id") == first else p
             for p in _pending(run.c, run.chat)])
     agents.log_permission(run.c, "asked", chat=run.chat, session=run.key, tool=tool_name, what=what, agent_id=agent_id,
                           joined=first)
