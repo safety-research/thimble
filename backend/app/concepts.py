@@ -1106,6 +1106,85 @@ def within_units(ws: Path, corpus_dir: Path, sources: list[dict], within: dict) 
     return out
 
 
+SAVE_PLACE_KEYS = ("page_id", "page", "document", "doc_id", "slug")  # the document a record saves
+SAVE_SEQ_KEYS = ("seq", "rev", "revision", "version")  # the field that numbers its saves
+SAVE_TEXT_KEYS = ("text", "body", "content")  # the field that holds the document
+
+
+def _save_key(record: Any) -> tuple[str, str] | None:
+    """(the document, the field that holds it) of a record that saves a whole document, one with a place, a sequence and
+    a text field; else None."""
+    if not isinstance(record, dict) or not any(k in record for k in SAVE_SEQ_KEYS):
+        return None
+    place = next((str(record[k]) for k in SAVE_PLACE_KEYS if isinstance(record.get(k), (str, int)) and str(record[k])), None)
+    field = next((k for k in SAVE_TEXT_KEYS if isinstance(record.get(k), str)), None)
+    return (place, field) if place and field else None
+
+
+def _befores(path: Path, wanted: set[int]) -> dict[int, str]:
+    """{line: the document the save before it held} for the saves of a JSON Lines file on the `wanted` lines. Blocking."""
+    last: dict[str, Any] = {}
+    out: dict[int, str] = {}
+    total = len(corpus.line_offsets(path))
+    for start in range(1, min(total, max(wanted, default=0)) + 1, CHUNK):
+        for n, raw in enumerate(corpus.read_lines(path, start, min(total, start + CHUNK - 1)), start):
+            try:
+                rec = json.loads(corpus.decode_line(raw))
+            except ValueError:
+                continue
+            key = _save_key(rec)
+            if key:
+                if n in wanted and isinstance(last.get(key[0]), str):
+                    out[n] = last[key[0]]
+                last[key[0]] = rec[key[1]]
+    return out
+
+
+def _changed(u: Unit, key: tuple[str, str], old: Any) -> Unit:
+    """The unit of a save as the lines it added (`+`) and removed (`-`) from `old`, the document before it; the unit itself
+    when there is none before it or the save keeps under half of its lines."""
+    if not isinstance(old, str):
+        return u
+    a, b = [s for s in old.splitlines() if s.strip()], [s for s in u.record[key[1]].splitlines() if s.strip()]
+    was, now = set(a), set(b)
+    if 2 * sum(s in now for s in a) < len(a):
+        return u
+    diff = [f"+ {s}" for s in b if s not in was] + [f"- {s}" for s in a if s not in now]
+    text = f"What this save changed on {key[0]}:\n" + ("\n".join(diff) or "nothing")
+    return Unit(u.ref, u.paths, lambda ref=u.ref, text=text: iter([(ref, text)]), u.record)
+
+
+def as_changes(units: Iterator[Unit]) -> Iterator[Unit]:
+    """Every record of some files in order (iter_units), a record that saves a document again (_save_key) reading as what
+    it changed from the save before it, so a model judges what the save did rather than the whole document."""
+    last: dict[tuple[str, str], Any] = {}
+    for u in units:
+        key = _save_key(u.record)
+        if key is None:
+            yield u
+            continue
+        doc = (labels_store.ref_parts(u.ref)[0] or "", key[0])
+        old, last[doc] = last.get(doc), u.record[key[1]]
+        yield _changed(u, key, old)
+
+
+def picked_as_changes(corpus_dir: Path, units: list[Unit]) -> list[Unit]:
+    """as_changes over the records a trial or `within` picked, each file that holds a save among them read once for the
+    saves before them. Blocking."""
+    wanted: dict[str, set[int]] = {}
+    for u in units:
+        rel, line = labels_store.ref_parts(u.ref)
+        if rel and line and rel.endswith(".jsonl") and _save_key(u.record):
+            wanted.setdefault(rel, set()).add(line)
+    befores = {rel: _befores(config.safe_corpus_path(corpus_dir, rel), lines) for rel, lines in wanted.items()}
+    out = []
+    for u in units:
+        rel, line = labels_store.ref_parts(u.ref)
+        key = _save_key(u.record)
+        out.append(_changed(u, key, befores.get(rel or "", {}).get(line or 0)) if key else u)
+    return out
+
+
 TRIAL_SKIP_LINES = 8  # a trial's pick that lands on a blank line takes the next record with words within this many lines
 
 
@@ -2359,6 +2438,8 @@ async def run_apply(c: str, concept_id: str, paths: list[str] | None = None, lim
                     labeled, failed, message = await _apply_regex_units(c, concept, units, out, cancel)
             elif concept["kind"] == "prompt":
                 stream: Iterator[Unit] = iter_units(corpus_dir, sources, unit) if unit in FILE_UNITS and not sampled else iter(units)
+                if unit == "record":
+                    stream = iter(await asyncio.to_thread(picked_as_changes, corpus_dir, units)) if sampled else as_changes(stream)
                 labeled, failed, message = await _apply_prompt(c, concept, stream, out, cancel, files=[s["path"] for s in sources],
                                                                comment=comment)
             else:
@@ -3167,7 +3248,7 @@ async def apply_scoped(c: str, *, scope: str, name: str, kind: str, text: str, v
     counts = result.get("counts") if not partial else await asyncio.to_thread(_live_counts, ws, concept["id"])
     stale = await asyncio.to_thread(stale_cards, ws, read_concept(ws, concept["id"]) or concept)
     return {"concept": concept["id"], "name": concept["name"], "unit": unit, "total": result.get("total"), "counts": counts or {},
-            "partial": partial, "cell": made["id"] if made else None, "filter": chosen,
+            "failed": result.get("failed") or 0, "message": result.get("message"), "partial": partial, "cell": made["id"] if made else None, "filter": chosen,
             "labels_path": str(labels_file(ws, concept["id"])), "unchanged": unchanged, "stale": [x["id"] for x in stale]}
 
 

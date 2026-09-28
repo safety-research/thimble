@@ -2279,6 +2279,8 @@ async def _h_apply_label(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
     line = (f"applied label {s.get('name', name)} [[concept:{s.get('concept')}]] over {s.get('total', 0)} {unit}(s)"
             f"{' in ' + ', '.join(paths) if scope == 'files' else ''}{' within ' + within['label'] if within else ''}: "
             f"{counts or 'no values yet'}.")
+    if s.get("failed"):
+        line += f" {s['failed']} {unit}(s) failed: {s.get('message') or 'no reason given'}."
     if s.get("unchanged"):
         line += " " + hint("apply_label-unchanged")
     if s.get("partial"):

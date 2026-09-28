@@ -169,3 +169,20 @@ async def test_a_prompt_label_within_another_reads_only_the_records_it_kept(work
     assert {r["ref"] for r in rows} == kept
     k = concepts.find_concept(workspaces_tmp / CORPUS, "asks for review")
     assert k["within"] == {"label": concepts.find_concept(workspaces_tmp / CORPUS, "claims a PR")["id"], "value": "yes"}
+
+
+def test_a_prompt_label_reads_a_save_of_a_whole_page_as_what_it_changed(tmp_path):
+    """A record that saves a page again reads as the lines it added and removed from the page's save before it, the same
+    whether the run reads every record in order or only the records a trial or `within` picked; a page's first save and a
+    save that rewrites most of the page read whole."""
+    saves = [{"page_id": "a", "seq": 1, "user": "ann", "body": "Intro\nline one"},
+             {"page_id": "b", "seq": 1, "user": "bo", "body": "Other page"},
+             {"page_id": "a", "seq": 2, "user": "bo", "body": "Intro\nline one\nline two -- bo"},
+             {"page_id": "a", "seq": 3, "user": "cy", "body": "All new\ntext here\nand more"}]
+    (tmp_path / "revisions.jsonl").write_text("".join(json.dumps(r) + "\n" for r in saves))
+    units = list(concepts.iter_units(tmp_path, [{"path": "revisions.jsonl", "kind": "text"}], "record"))
+    every = {u.ref: u.text(10_000) for u in concepts.as_changes(iter(units))}
+    picked = {u.ref: u.text(10_000) for u in concepts.picked_as_changes(tmp_path, units[2:])}
+    assert every["revisions.jsonl#L3"] == picked["revisions.jsonl#L3"] == "What this save changed on a:\n+ line two -- bo"
+    assert every["revisions.jsonl#L1"] == "Intro\nline one"
+    assert every["revisions.jsonl#L4"] == picked["revisions.jsonl#L4"] == "All new\ntext here\nand more"
