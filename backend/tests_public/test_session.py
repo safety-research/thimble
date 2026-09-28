@@ -74,6 +74,12 @@ def _result(tool_use_id: str, content) -> dict:
         {"type": "tool_result", "tool_use_id": tool_use_id, "content": content}]}}
 
 
+def _append(p: Path, lv: session.Live, recs: list[dict]) -> None:
+    with p.open("a") as f:
+        f.write("".join(json.dumps(r) + "\n" for r in recs))
+    session.tail_once(lv)
+
+
 # ----------------------------------------------------------------------------- the tail
 
 
@@ -107,12 +113,3 @@ def test_the_tail_translates_a_turn_and_skips_every_other_record(cwd, tmp_path):
     n = len(_log(agents.MAIN_ID))
     session.tail_once(lv)
     assert len(_log(agents.MAIN_ID)) == n  # nothing new
-
-
-# ----------------------------------------------------------------------------- subagents and threads' forks
-
-
-def _append(p: Path, lv: session.Live, recs: list[dict]) -> None:
-    with p.open("a") as f:
-        f.write("".join(json.dumps(r) + "\n" for r in recs))
-    session.tail_once(lv)

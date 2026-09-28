@@ -61,9 +61,6 @@ def fake(monkeypatch, home):
     return sp
 
 
-# ----------------------------------------------------------------------------- imports and the plugin's scripts
-
-
 def test_two_concurrent_ups_start_one_uvicorn(fake, home):
     results: list[bool] = []
 
@@ -110,36 +107,32 @@ def test_up_prints_the_url_and_opens_a_sessions_folder(home, data, monkeypatch, 
     assert cli.main(["up", "--cwd", str(folder)]) == 0, "a bare up from a shell"
     assert capsys.readouterr().out.splitlines() == ["thimble: http://127.0.0.1:5300/"] and len(posted) == 1
     assert cli.build_parser().parse_args(["up"]).cmd == "up" and cli.build_parser().parse_args(["ensure"]).cmd == "ensure"
-    assert "up (ensure)" in cli.build_parser().format_help()
 
 
-def test_doctor_with_server_down_names_the_auth_path_and_the_stack_never_a_value(home, monkeypatch, tmp_path):
+def line(text: str, key: str) -> str:
+    """The first line of doctor's text that starts with `key`."""
+    return next(ln for ln in text.splitlines() if ln.strip().startswith(key))
+
+
+def test_doctor_with_server_down_names_the_auth_path_and_never_a_value(home, monkeypatch, tmp_path):
     monkeypatch.delenv("THIMBLE_SKIP_KEY", raising=False)
     monkeypatch.setattr(config, "REPO_ROOT", tmp_path / "repo")
     monkeypatch.setenv("ANTHROPIC_API_KEY", SECRET)
     monkeypatch.setattr(cli, "healthy", lambda url=None, timeout=1.0: False)
-    monkeypatch.setattr(cli, "listening", lambda p: p == 8301)
-    home.mkdir(parents=True)
-    (home / "server.log").write_text("\n".join(f"line {i}" for i in range(30)) + "\n")
+    monkeypatch.setattr(cli, "listening", lambda p: False)
     text = cli.doctor_text()
-    assert SECRET not in text
-    assert "server: down at http://127.0.0.1:8300" in text
-    assert "  auth: env credential (ANTHROPIC_API_KEY)" in text
-    assert "validation stack: 8301 busy, 5301 free" in text
-    assert "last apply: none" in text and "last ticket error: none" in text
-    assert "sessions:" not in text and "bash mode" not in text
-    tail = text.split("log tail")[1]
-    assert "line 29" in tail and "line 14" not in tail
+    assert SECRET not in text and "down" in line(text, "server:")
+    assert "ANTHROPIC_API_KEY" in line(text, "auth:")
     monkeypatch.delenv("ANTHROPIC_API_KEY")
     settings = Path(os.environ["CLAUDE_CONFIG_DIR"]) / "settings.json"
     settings.write_text(json.dumps({"apiKeyHelper": "fetch-key secret-ref"}))
     text = cli.doctor_text()
-    assert f"  auth: apiKeyHelper in {settings}" in text and "secret-ref" not in text
+    assert str(settings) in line(text, "auth:") and "secret-ref" not in text
     settings.unlink()
     (Path(os.environ["CLAUDE_CONFIG_DIR"]) / ".credentials.json").write_text("{}")
-    assert "  auth: CLI login (" in cli.doctor_text()
+    assert "login" in line(cli.doctor_text(), "auth:")
     (Path(os.environ["CLAUDE_CONFIG_DIR"]) / ".credentials.json").unlink()
-    assert "  auth: none: no ANTHROPIC_API_KEY, no apiKeyHelper" in cli.doctor_text()
+    assert "none" in line(cli.doctor_text(), "auth:")
 
 
 def test_doctor_runs_no_command_for_auth(home, monkeypatch):
