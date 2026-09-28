@@ -175,10 +175,10 @@ def test_the_frame_document_blocks_every_host_before_any_script(ws):
 
 # ------------------------------------------------------------------------------------------------- worked examples
 #
-# plugin/viewers/linked-sessions, incident-timeline and repository are the worked examples a view ticket's session
-# reads (prompts/dev-view.md). Each ships an invented sample of the files it claims under sample/, and passes over it
-# the checks a view a session writes must pass. Each sample is copied into the temp DATA_DIR as a corpus named after
-# its example.
+# plugin/viewers/linked-sessions, incident-timeline, repository and swarm are the worked examples a view ticket's
+# session reads (prompts/dev-view.md). Each ships an invented sample of the files it claims under sample/, and passes
+# over it the checks a view a session writes must pass. Each sample is copied into the temp DATA_DIR as a corpus named
+# after its example.
 
 # the example, the slug it is saved under, and a key of each kind it declares
 EXAMPLES = {
@@ -187,6 +187,7 @@ EXAMPLES = {
     "repository": ("repository", ["view:repository/r1/pull/11", "view:repository/r3", "view:repository/r2/issues/6",
                                   "view:repository/r3/discussions/2", "view:repository/r4/agents/moss"]),
     "linked-sessions": ("linked-sessions", ["view:linked-sessions/r1", "view:linked-sessions/a07a4da7"]),
+    "swarm": ("swarm", ["view:swarm/T1", "view:swarm/agent/lamplighter", "view:swarm/9-7"]),
 }
 
 
@@ -218,6 +219,8 @@ BROKEN = {
     "repository": [("runs/r3/export/comments.csv", '4,hazel,2026-05-20T10:00:00,"Repro:\n2 failures"\n', 0),
                    ("runs/r2/manifest.json", "{", 1)],
     "linked-sessions": [("runs/r1/sessions-index.json", "not json", 1)],
+    "swarm": [("roster.csv", 'nightjar,"Watch the\nweather",2026-04-11\n', 0),
+              ("chat/help-desk.jsonl", '{"id": "m109", "te\n', 1)],
 }
 
 
@@ -245,7 +248,7 @@ async def test_every_worked_example_answers_the_checks_over_its_sample(name, sam
     assert problems["count"] == before + sum(n for *_, n in BROKEN[name]), problems
 
 
-@pytest.mark.parametrize("name", ["repository"])
+@pytest.mark.parametrize("name", ["repository", "swarm"])
 async def test_every_worked_example_s_page_loads_headless_at_its_first_place(name, samples, inproc, bound, tmp_path):
     """The whole check a view ticket's session runs, the headless page included, where this machine has Node and the
     frontend's packages with their Chromium (scripts/check.sh install)."""

@@ -1,0 +1,607 @@
+<!doctype html>
+<html>
+<head>
+<style>
+  /* thimble's parts (.chip, .btn, .seg, .field, .table) and the theme's tokens come with the frame; this page lays out
+     the swimlane map, its legends, the details of what is picked and the list of every thread */
+  html, body { margin: 0; }
+  body { background: var(--surface-card); }
+  * { box-sizing: border-box; }
+  button { font-family: inherit; }
+  .ico { width: 14px; height: 14px; flex: none; stroke: currentColor; fill: none; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+  .ico-s { width: 12px; height: 12px; }
+  .mono { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+  .t3 { color: var(--text-tertiary); }
+
+  #problems { margin: 0; padding: 10px 16px 0; font: 400 var(--text-xs) / 1.4 var(--font-body); color: var(--status-warning); overflow-wrap: anywhere; }
+  #head { padding: 14px 16px 0; }
+  #head h1 { margin: 0; font: 500 var(--text-lg) / 1.3 var(--font-body); color: var(--text-primary); }
+  #head .stats { margin-top: 3px; font-size: var(--text-ui-sm); color: var(--text-tertiary); }
+  #head .stats b { font-weight: 500; color: var(--text-primary); font-variant-numeric: tabular-nums; }
+  #bar { padding: 10px 16px 8px; border-bottom: 1px solid var(--border-subtle); }
+  .r1, .r2 { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 8px; }
+  .r2 { margin-top: 8px; gap: 2px 4px; }
+  .search { position: relative; flex: 0 1 220px; min-width: 150px; }
+  .search .ico { position: absolute; left: 9px; top: 6px; color: var(--text-tertiary); pointer-events: none; }
+  .search .field { width: 100%; padding-left: 28px; }
+  select.field { max-width: 200px; }
+  .vsep { width: 1px; height: 16px; margin: 0 6px; background: var(--border-subtle); flex: none; }
+  .lg { display: inline-flex; align-items: center; gap: 5px; height: 22px; padding: 0 6px 0 4px; border: 0; border-radius: var(--radius-chip); background: none; color: var(--text-secondary); font: 400 var(--text-xs) / 1 var(--font-body); white-space: nowrap; cursor: pointer; }
+  .lg:hover { background: var(--surface-hover); color: var(--text-primary); }
+  .lg .n { color: var(--text-tertiary); font-variant-numeric: tabular-nums; }
+  .lg.off { opacity: .38; }
+  .lg .nm { max-width: 150px; overflow: hidden; text-overflow: ellipsis; }
+  .tg { display: inline-grid; place-items: center; min-width: 20px; height: 15px; padding: 0 3px; border: 1px solid var(--border-strong); border-radius: 3px; font: 500 9.5px / 1 var(--font-mono); color: var(--text-secondary); background: var(--surface-card); flex: none; }
+
+  #chart { position: relative; margin: 0 16px; }
+  .band { position: absolute; left: -16px; right: -16px; }
+  .band.alt { background: var(--bg-sub); }
+  .band.hl { background: var(--surface-selected); }
+  .agcol { position: absolute; left: 0; top: 0; }
+  .ag { position: absolute; left: 0; display: flex; gap: 8px; padding: 8px 6px 0 0; cursor: pointer; }
+  .ag svg { flex: none; margin-top: 1px; }
+  .ag .who { min-width: 0; }
+  .ag .un { font: 500 var(--text-ui-sm) / 16px var(--font-body); color: var(--text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .ag:hover .un { text-decoration: underline; text-decoration-color: var(--border-strong); text-underline-offset: 3px; }
+  .ag .goal { font: 400 11.5px / 14.5px var(--font-body); color: var(--text-secondary); display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+  .ag .sa { margin-top: 2px; font: 400 11px / 14px var(--font-body); color: var(--text-tertiary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .ag .sa i { font-style: normal; color: var(--text-secondary); }
+  .ag.dim { opacity: .5; }
+  .tl { position: absolute; top: 0; overflow-x: auto; overflow-y: hidden; scrollbar-width: thin; }
+  .tlin { position: relative; }
+  .axis { position: absolute; top: 0; left: 0; right: 0; height: 34px; }
+  .axis span { position: absolute; font: 400 var(--text-mono-sm) / 1 var(--font-mono); font-variant-numeric: tabular-nums; color: var(--text-tertiary); white-space: nowrap; }
+  .axis .day { top: 3px; color: var(--text-secondary); font-family: var(--font-body); font-size: var(--text-xs); }
+  .axis .tick { position: absolute; top: 30px; width: 1px; height: 4px; background: var(--border-strong); }
+  svg.links { position: absolute; left: 0; top: 0; overflow: visible; pointer-events: none; }
+  svg.links path.hit { pointer-events: stroke; cursor: pointer; }
+  svg.links .ln { transition: opacity .12s; }
+  svg.links .ln.dim { opacity: .14; }
+  svg.links .ln.on path.vis { stroke-width: 2.2; }
+  .card { position: absolute; padding: 5px 8px 6px; border: 1px solid var(--border-subtle); border-radius: var(--radius-ui); background: var(--surface-card); box-shadow: 0 1px 2px rgba(var(--ink-rgb), .06); cursor: pointer; overflow: hidden; }
+  .card:hover { border-color: var(--border-strong); }
+  .card .ch { display: flex; align-items: center; gap: 5px; height: 15px; font: 400 var(--text-mono-sm) / 1 var(--font-mono); font-variant-numeric: tabular-nums; color: var(--text-tertiary); white-space: nowrap; }
+  .card .ch b { font-weight: 500; color: var(--text-primary); }
+  .card .ch .tm { margin-left: auto; }
+  .card .ch .nt { margin-left: auto; font-family: var(--font-body); font-size: 10.5px; }
+  .card .ca { margin-top: 3px; font: 400 11.5px / 14.5px var(--font-body); color: var(--text-primary); display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
+  .card.sel { border-color: var(--text-primary); box-shadow: 0 0 0 1px var(--text-primary); }
+  .card.lk { border-color: var(--text-secondary); }
+  .card.ctx { background: var(--bg-sub); }
+  .card.ctx .ca { color: var(--text-secondary); }
+  .card.fade { opacity: .45; }
+  .ll { position: absolute; height: 16px; padding: 0 4px; border-radius: 3px; background: var(--surface-card); font: 500 10px / 14px var(--font-mono); font-variant-numeric: tabular-nums; white-space: nowrap; cursor: pointer; border: 1px solid; }
+  .empty { padding: 32px 0; color: var(--text-tertiary); font-size: var(--text-sm); }
+
+  #det { position: sticky; bottom: 0; z-index: 5; margin-top: 12px; border-top: 1px solid var(--border-strong); background: var(--surface-card); box-shadow: 0 -8px 20px rgba(var(--ink-rgb), .07); }
+  .dh { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 10px; padding: 9px 12px 9px 16px; border-bottom: 1px solid var(--border-hairline); }
+  .dh h2 { margin: 0; font: 500 var(--text-lg) / 1.2 var(--font-body); }
+  .dh .meta { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 4px 10px; font-size: var(--text-ui-sm); color: var(--text-tertiary); }
+  .dh .x { margin-left: auto; }
+  .lnk { color: var(--text-accent); cursor: pointer; white-space: nowrap; }
+  .lnk:hover { text-decoration: underline; text-underline-offset: 3px; }
+  .db { max-height: min(46vh, 380px); overflow: auto; padding: 10px 16px 14px; scrollbar-width: thin; }
+  .db h3 { margin: 0 0 8px; font: 500 var(--text-sm) / 1.4 var(--font-body); }
+  .kv { display: flex; flex-wrap: wrap; gap: 4px 22px; margin: 0 0 8px; font-size: var(--text-ui-sm); }
+  .kv .k { color: var(--text-tertiary); margin-right: 6px; }
+  pre.diff { margin: 0 0 10px; padding: 7px 10px; border-radius: var(--radius-ui); background: var(--bg-sub); font: 400 var(--text-mono-sm) / 1.55 var(--font-mono); white-space: pre-wrap; overflow-wrap: anywhere; }
+  pre.diff .a { color: var(--status-positive); }
+  pre.diff .d { color: var(--status-negative); text-decoration: line-through; text-decoration-color: color-mix(in oklab, var(--status-negative) 45%, transparent); }
+  pre.diff .k { color: var(--text-tertiary); }
+  .post { margin: 0 0 10px; padding: 7px 10px; border-left: 2px solid var(--border-strong); font: 400 var(--text-sm) / 1.5 var(--font-body); overflow-wrap: anywhere; }
+  .cap { margin: 12px 0 4px; color: var(--text-tertiary); font: 400 10.5px / 1.2 var(--font-body); letter-spacing: .08em; text-transform: uppercase; }
+  .lrow { display: grid; grid-template-columns: 22px 30px 118px 86px minmax(0, 1fr); gap: 0 8px; align-items: baseline; padding: 4px 6px; border-radius: var(--radius-chip); cursor: pointer; font-size: var(--text-ui-sm); }
+  .lrow:hover { background: rgba(var(--ink-rgb), .04); }
+  .lrow .why { color: var(--text-secondary); min-width: 0; }
+  .lrow .q { grid-column: 3 / 6; color: var(--text-tertiary); font: 400 var(--text-mono-sm) / 1.45 var(--font-mono); overflow-wrap: anywhere; }
+  .rrow { display: grid; grid-template-columns: 88px 28px 110px minmax(0, 1fr); gap: 0 8px; align-items: baseline; padding: 5px 6px; border-bottom: 1px solid var(--border-hairline); cursor: pointer; font-size: var(--text-ui-sm); }
+  .rrow:hover { background: rgba(var(--ink-rgb), .03); }
+  .rrow.cur { box-shadow: inset 0 0 0 1.5px rgba(var(--ink-rgb), .55); border-radius: var(--radius-chip); }
+  .rrow .tm { font: 400 var(--text-mono-sm) / 1.5 var(--font-mono); color: var(--text-tertiary); font-variant-numeric: tabular-nums; }
+  .rrow .id { font: 500 var(--text-mono-sm) / 1.5 var(--font-mono); color: var(--text-primary); }
+  .rrow .who { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .rrow .what { min-width: 0; overflow-wrap: anywhere; }
+  .rrow .what.off { color: var(--text-secondary); }
+  .rrow pre.diff, .rrow .post { grid-column: 2 / 5; margin: 4px 0 2px; }
+  .sw { display: inline-block; width: 16px; height: 8px; flex: none; }
+
+  #threads { padding: 18px 16px 24px; }
+  #threads .table td.num, #threads .table th.num { text-align: right; }
+  #threads .table tr { cursor: pointer; }
+  #threads .table td .nm { font-family: var(--font-body); font-size: var(--text-ui-sm); }
+  #threads .table tr.off td { color: var(--text-tertiary); }
+</style>
+</head>
+<body>
+<p id="problems" role="status" hidden></p>
+<header id="head"></header>
+<div id="bar"></div>
+<div id="chart"></div>
+<section id="det" hidden></section>
+<section id="threads"></section>
+<script>
+// ------------------------------------------------------------------------------------------------------------ setup
+const slug = (thimble.view && thimble.view.slug) || 'swarm'
+const unit = (key) => `view:${slug}/${key}`
+const root = getComputedStyle(document.documentElement)
+const tok = (name, fallback) => root.getPropertyValue(name).trim() || fallback
+const TYPES = ['reply', 'support', 'contradicts', 'related']
+// the link types in the theme's viz colours, told apart by their dashes too; while a label is on, the labels alone
+// colour the records, so the links and avatars take the viz inks
+const TYPE_COL = { reply: tok('--viz-1', '#0072b2'), support: tok('--viz-3', '#009e73'), contradicts: tok('--viz-4', '#d62728'), related: tok('--viz-6', '#8c65e8') }
+const DASH = { reply: '', support: '6 3', contradicts: '9 3 2 3', related: '2 3' }
+const INK = tok('--viz-ink-2', '#6b675f'), QUIET = tok('--viz-ink-3', '#a19d94')
+const AV = [['--viz-1', '#0072b2'], ['--viz-2', '#e69f00'], ['--viz-3', '#009e73'], ['--viz-5', '#cc79a7'], ['--viz-6', '#8c65e8'], ['--viz-7', '#8a6d3b']].map(([n, f]) => tok(n, f))
+const FONT = tok('--font-body', 'sans-serif'), MONO = tok('--font-mono', 'monospace')
+const PAD = 16, GAP = 12, CW = 146, CH = 70, AXIS = 38, MIN_STEP = 24, MAX_STEP = 170
+
+const st = { hideThreads: new Set(), hideTypes: new Set(), agents: new Set(), kind: 'all', q: '', sel: null }
+let M = null // the chart as the reader serves it under the filters
+let D = null // the details of what is picked
+let seq = 0, dseq = 0
+let first = null
+const ensureMap = () => (first ||= loadMap().then((ok) => ok || !!M))
+
+// ------------------------------------------------------------------------------------------------------------ helpers
+const esc = (s) => String(s == null ? '' : s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c])
+const plural = (n, one, many) => `${n} ${n === 1 ? one : many || one + 's'}`
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+const hm = (iso) => (iso ? iso.slice(11, 16) : null)
+const hms = (iso) => (iso ? iso.slice(11, 19) : null)
+const day = (iso) => (iso ? `${+iso.slice(8, 10)} ${MONTHS[+iso.slice(5, 7) - 1]}` : null)
+const cv = document.createElement('canvas').getContext('2d')
+const textW = (s, font) => { cv.font = font; return cv.measureText(String(s)).width }
+const labelsOn = () => !!(M && M.labels_on)
+const typeCol = (t) => (labelsOn() ? INK : TYPE_COL[t])
+const ico = {
+  search: '<svg class="ico" viewBox="0 0 16 16"><circle cx="7" cy="7" r="4.5"/><path d="M10.5 10.5 14 14"/></svg>',
+  close: '<svg class="ico" viewBox="0 0 16 16"><path d="M4.5 4.5l7 7M11.5 4.5l-7 7"/></svg>',
+  out: '<svg class="ico ico-s" viewBox="0 0 12 12"><path d="M9.5 6H2.5M5 3.5 2.5 6 5 8.5"/></svg>',
+  in: '<svg class="ico ico-s" viewBox="0 0 12 12"><path d="M2.5 6h7M7 3.5 9.5 6 7 8.5"/></svg>',
+}
+function hash(s) { let h = 2166136261; for (const c of String(s)) { h ^= c.codePointAt(0); h = Math.imul(h, 16777619) } return h >>> 0 }
+// a small figure per agent, its shape and colour from its name
+function avatar(name, size = 26) {
+  const h = hash(name), col = labelsOn() ? QUIET : AV[h % AV.length], kind = (h >> 4) % 3
+  const top = kind === 0 ? '<path d="M7 9 5 3.5 11 7.5M23 9l2-5.5L19 7.5"/>' : kind === 1 ? '<path d="M15 6V2.5"/><circle cx="15" cy="2.2" r="1.6"/>' : '<path d="M9 7.5 8 4M21 7.5 22 4"/>'
+  return `<svg width="${size}" height="${size}" viewBox="0 0 30 30" aria-hidden="true"><g fill="${col}" stroke="${col}" stroke-width="1.6" stroke-linejoin="round">${top}<rect x="6" y="7" width="18" height="13" rx="${kind === 2 ? 6.5 : 3.5}"/><rect x="8.5" y="21" width="13" height="7" rx="2"/></g><circle cx="11.5" cy="13" r="2.1" fill="var(--surface-card)"/><circle cx="18.5" cy="13" r="2.1" fill="var(--surface-card)"/><circle cx="11.8" cy="13.3" r="0.9" fill="var(--text-primary)"/><circle cx="18.8" cy="13.3" r="0.9" fill="var(--text-primary)"/></svg>`
+}
+const lineSwatch = (t) => `<svg class="sw" viewBox="0 0 16 8"><path d="M1 4h14" stroke="${typeCol(t)}" stroke-width="${t === 'contradicts' ? 2 : 1.6}" stroke-dasharray="${DASH[t] ? DASH[t].split(' ').map((v) => v * 0.6).join(' ') : ''}"/></svg>`
+const actionById = (id) => (M ? M.actions.find((a) => a.id === id) : null)
+const threadOf = (tag) => (M ? M.threads.find((t) => t.tag === tag) : null)
+const tagChip = (tag) => (tag ? `<span class="tg">${esc(tag)}</span>` : '')
+
+// ------------------------------------------------------------------------------------------------------------ fetches
+const mapQuery = () => ({ op: 'map', hide_threads: [...st.hideThreads], hide_types: [...st.hideTypes], agents: [...st.agents], kinds: st.kind === 'all' ? [] : [st.kind], q: st.q })
+
+function showProblems(p) {
+  const el = document.getElementById('problems')
+  el.hidden = !(p && p.count)
+  if (el.hidden) return
+  const one = p.count === 1
+  el.textContent = `${p.count} ${one ? 'line' : 'lines'} of the data could not be read and ${one ? 'is' : 'are'} left out: ${p.examples.join('; ')}${p.count > p.examples.length ? '; …' : ''}`
+}
+async function loadMap() {
+  const my = ++seq
+  const got = await thimble.fetch(mapQuery())
+  if (my !== seq) return false
+  M = got
+  showProblems(M.problems)
+  return true
+}
+async function loadDetail() {
+  const s = st.sel
+  if (!s) { D = null; return }
+  const my = ++dseq
+  let got = null
+  if (s.kind === 'record' || s.kind === 'link') got = await thimble.fetch({ op: 'record', ref: s.ref })
+  else if (s.kind === 'thread') got = await thimble.fetch({ op: 'thread', id: s.id })
+  else if (s.kind === 'agent') got = await thimble.fetch({ op: 'agent', username: s.name })
+  if (my === dseq) D = got
+}
+async function reload({ detail = true } = {}) {
+  if (!(await loadMap())) return
+  if (detail) await loadDetail()
+  render()
+}
+async function pick(sel, { scroll = false } = {}) {
+  st.sel = sel
+  await loadDetail()
+  render()
+  if (scroll) scrollToPick()
+}
+// the picked card (a link's two cards) in the middle of the part of the pane the details leave in view
+function scrollToPick() {
+  const id = pickedId()
+  const el = id && document.querySelector(`.card[data-id="${id}"]`)
+  if (el) {
+    el.scrollIntoView({ block: 'nearest', inline: 'nearest' })
+    const other = st.sel && st.sel.kind === 'link' ? document.querySelector(`.card[data-id="${st.sel.to}"]`) : null
+    const a = el.getBoundingClientRect(), b = other ? other.getBoundingClientRect() : a
+    const top = Math.min(a.top, b.top), bottom = Math.max(a.bottom, b.bottom)
+    const det = document.getElementById('det')
+    const room = innerHeight - (det.hidden ? 0 : det.getBoundingClientRect().height)
+    const at = bottom - top <= room - 16 ? top - (room - (bottom - top)) / 2 : a.top - 16
+    window.scrollBy(0, at)
+  }
+  const row = document.querySelector('.rrow.cur')
+  if (row) row.scrollIntoView({ block: 'nearest' })
+}
+// the action the details are about, when it is one on the chart
+function pickedId() {
+  const s = st.sel
+  if (!s) return null
+  if (s.kind === 'link') return s.from
+  if (s.kind === 'record' && D && D.ref === s.ref && D.id) return D.id
+  if (s.kind === 'record' && M) { const a = M.actions.find((x) => x.ref === s.ref); return a ? a.id : null }
+  return null
+}
+
+// ------------------------------------------------------------------------------------------------------------ the head
+function head() {
+  if (!M) return ''
+  const c = M.counts, t = M.total
+  const part = (k, one, many) => (c[k] === t[k] ? `<b>${c[k]}</b> ${c[k] === 1 ? one : many}` : `<b>${c[k]}</b> of ${t[k]} ${t[k] === 1 ? one : many}`)
+  return `<h1>${esc(M.title)}</h1><div class="stats">${part('agents', 'agent', 'agents')} · ${part('threads', 'thread', 'threads')} · ${part('actions', 'action', 'actions')} · ${part('links', 'link', 'links')}</div>`
+}
+function bar() {
+  if (!M) return ''
+  const f = M.facets
+  const agents = Object.keys(f.agent).sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }))
+  const chosen = [...st.agents][0] || ''
+  const opts = [`<option value="">All agents</option>`, ...[...new Set([...agents, ...(chosen ? [chosen] : [])])].map((a) => `<option value="${esc(a)}" ${a === chosen ? 'selected' : ''}>${esc(a)} · ${f.agent[a] || 0}</option>`)]
+  const seg = [['all', 'All'], ['save', 'Saves'], ['post', 'Posts']].map(([k, n]) => `<button class="seg-opt ${st.kind === k ? 'active' : ''}" data-act="kind" data-kind="${k}">${n}</button>`).join('')
+  const filtered = st.hideThreads.size || st.hideTypes.size || st.agents.size || st.kind !== 'all' || st.q
+  const threads = M.threads.map((t) => `<button class="lg ${st.hideThreads.has(t.tag) ? 'off' : ''}" data-act="thread" data-tag="${esc(t.tag)}" data-anchor="${esc(unit(t.tag))}" data-anchor-name="${esc(`${t.tag} ${t.id}`)}" title="${esc(t.id)}">${tagChip(t.tag)}<span class="nm">${esc(t.id)}</span><span class="n">${f.thread[t.tag] || 0}</span></button>`).join('')
+  const types = TYPES.map((t) => `<button class="lg ${st.hideTypes.has(t) ? 'off' : ''}" data-act="type" data-type="${t}">${lineSwatch(t)}${t}<span class="n">${f.type[t] || 0}</span></button>`).join('')
+  return `<div class="r1"><label class="search">${ico.search}<input id="q" class="field" type="search" placeholder="Search actions" value="${esc(st.q)}" aria-label="Search actions"></label>
+    <select id="agent" class="field" aria-label="Agent">${opts.join('')}</select>
+    <div class="seg seg-track">${seg}</div>${filtered ? '<button class="btn btn-ghost btn-sm" data-act="clear">Clear filters</button>' : ''}</div>
+    <div class="r2">${threads}<span class="vsep"></span>${types}</div>`
+}
+
+// ------------------------------------------------------------------------------------------------------------ the chart
+// Each action takes a column in event order, so a card sits at its agent's row and its column; spacing is order, not
+// elapsed time. Cards of one agent that would overlap stack in tracks within its row.
+function layout(W) {
+  const acts = M.actions, n = acts.length
+  const AW = W < 640 ? 150 : 188
+  const avail = Math.max(240, W - 2 * PAD - AW - GAP)
+  let step = n > 1 ? Math.min(MAX_STEP, (avail - CW) / (n - 1)) : 0
+  if (n > 1 && step < MIN_STEP) step = MIN_STEP
+  const TW = n ? Math.max(avail, CW + (n - 1) * step + 4) : avail
+  const col = new Map(acts.map((a, i) => [a.id, i * step]))
+  const rows = M.agents.map((ag) => ({ ag, tracks: [], cards: [] }))
+  const rowOf = new Map(rows.map((r, i) => [r.ag.username, i]))
+  for (const a of acts) {
+    const r = rows[rowOf.get(a.agent)]
+    if (!r) continue
+    const x = col.get(a.id)
+    let t = r.tracks.findIndex((end) => end + 8 <= x)
+    if (t < 0) { t = r.tracks.length; r.tracks.push(0) }
+    r.tracks[t] = x + CW
+    r.cards.push({ a, x, t })
+  }
+  const place = new Map()
+  let y = AXIS
+  const goalW = AW - 40
+  for (const r of rows) {
+    const lines = Math.max(1, Math.min(3, Math.ceil((textW(r.ag.goal, `400 11.5px ${FONT}`) + 6) / goalW)))
+    const agH = 8 + 16 + lines * 14.5 + (r.ag.signs_as && r.ag.signs_as.length ? 16 : 0) + 10
+    const trH = Math.max(1, r.tracks.length) * (CH + 6) + 6
+    r.y = y
+    r.h = Math.max(agH, trH)
+    const top = y + (r.h - trH) / 2 + 6
+    for (const c of r.cards) place.set(c.a.id, { x: c.x, y: top + c.t * (CH + 6), row: r })
+    y += r.h
+  }
+  return { AW, TW, H: y + 6, rows, place, step }
+}
+
+// Each link leaves the later card from its top or bottom edge (a dot), runs to the earlier card's row and enters its
+// right side (an arrow); where the cards overlap in columns it enters the earlier card's facing edge instead. Each
+// route carries the spots its label may take, nearest the dot first.
+function routes(L) {
+  const box = (id) => { const p = L.place.get(id); return p && { x1: p.x, x2: p.x + CW, y1: p.y, y2: p.y + CH, cx: p.x + CW / 2, cy: p.y + CH / 2 } }
+  const out = []
+  const ends = new Map() // `${id}:${side}` -> the routes that meet on that side of the card, for spreading them
+  const at = (k, r) => { if (!ends.has(k)) ends.set(k, []); ends.get(k).push(r) }
+  for (const l of M.links) {
+    const f = box(l.from), t = box(l.to)
+    if (!f || !t) continue
+    const r = { l, f, t, up: t.cy < f.cy }
+    at(`${l.from}:${r.up ? 'T' : 'B'}`, r)
+    out.push(r)
+  }
+  for (const [k, rs] of ends) {
+    rs.sort((a, b) => a.t.x2 - b.t.x2 || (a.up ? b.t.cy - a.t.cy : a.t.cy - b.t.cy))
+    rs.forEach((r, i) => { r.xs = r.f.x1 + 14 + i * 13 })
+  }
+  const into = new Map()
+  for (const r of out) {
+    r.kind = r.xs >= r.t.x2 + 14 ? 'elbow' : 'straight'
+    const k = `${r.l.to}:${r.kind === 'elbow' ? 'R' : r.up ? 'B' : 'T'}`
+    if (!into.has(k)) into.set(k, [])
+    into.get(k).push(r)
+  }
+  for (const [k, rs] of into) {
+    const side = k.split(':')[1]
+    if (side === 'R') {
+      rs.sort((a, b) => a.f.cy - b.f.cy)
+      rs.forEach((r, i) => { r.yt = r.t.cy + (i - (rs.length - 1) / 2) * 10 })
+    } else {
+      rs.sort((a, b) => a.xs - b.xs)
+      rs.forEach((r, i) => { r.xt = Math.min(r.xs, r.t.x2 - 12 - (rs.length - 1 - i) * 12) })
+    }
+  }
+  const R = 6
+  for (const r of out) {
+    const { f, t, xs } = r
+    const s = r.up ? -1 : 1
+    const y0 = r.up ? f.y1 : f.y2
+    r.dot = { x: xs, y: y0 }
+    if (r.kind === 'elbow') {
+      const yt = r.yt, rr = Math.min(R, Math.abs(yt - y0) / 2)
+      r.d = `M${xs},${y0} V${yt - s * rr} Q${xs},${yt} ${xs - rr},${yt} H${t.x2 + 1}`
+      r.pts = [[xs, y0], [xs, yt], [t.x2, yt]]
+    } else {
+      const xt = r.xt, y1 = r.up ? t.y2 + 1 : t.y1 - 1
+      const ym = r.up ? Math.max(y1 + 10, y0 - 12) : Math.min(y1 - 10, y0 + 12)
+      r.d = Math.abs(xt - xs) < 1 ? `M${xs},${y0} V${y1}` : `M${xs},${y0} V${ym} H${xt} V${y1}`
+      r.pts = Math.abs(xt - xs) < 1 ? [[xs, y0], [xs, y1]] : [[xs, y0], [xs, ym], [xt, ym], [xt, y1]]
+    }
+    r.spots = spots(r.pts)
+  }
+  return out
+}
+// points along a path every few pixels from its start, where a label may be centred
+function spots(pts) {
+  const out = []
+  for (let i = 1; i < pts.length; i++) {
+    const [x0, y0] = pts[i - 1], [x1, y1] = pts[i]
+    const len = Math.hypot(x1 - x0, y1 - y0), n = Math.max(1, Math.floor(len / 8))
+    for (let k = i === 1 ? 1 : 0; k <= n; k++) out.push({ x: x0 + ((x1 - x0) * k) / n, y: y0 + ((y1 - y0) * k) / n })
+  }
+  return out
+}
+
+function chart() {
+  if (!M) return ''
+  if (!M.actions.length) return `<div class="empty">No action meets these filters.</div>`
+  const W = Math.max(560, document.body.clientWidth)
+  const L = layout(W)
+  const picked = pickedId()
+  const sel = st.sel
+  const onLink = (l) => (sel && sel.kind === 'link' ? l.from === sel.from && l.to === sel.to : picked != null && (l.from === picked || l.to === picked))
+  const linkedIds = new Set()
+  for (const l of M.links) if (onLink(l)) { linkedIds.add(l.from); linkedIds.add(l.to) }
+  const focusAgent = sel && sel.kind === 'agent' ? sel.name : null
+  // row bands and the agents
+  let bands = '', ags = ''
+  L.rows.forEach((r, i) => {
+    const ag = r.ag
+    bands += `<div class="band ${focusAgent === ag.username ? 'hl' : i % 2 ? 'alt' : ''}" style="top:${r.y}px;height:${r.h}px"></div>`
+    const sa = ag.signs_as && ag.signs_as.length ? `<div class="sa" title="${esc(ag.signs_as.join(', '))}">signs as <i>${esc(ag.signs_as.join(', '))}</i></div>` : ''
+    ags += `<div class="ag ${M.actions.some((a) => a.agent === ag.username && !a.context) ? '' : 'dim'}" data-act="agent" data-name="${esc(ag.username)}" data-anchor="${esc(unit('agent/' + ag.username))}" data-anchor-name="${esc(ag.username)}" style="top:${r.y}px;width:${L.AW}px;height:${r.h}px">${avatar(ag.username)}<div class="who"><div class="un" title="${esc(ag.username)}">${esc(ag.username)}</div><div class="goal" title="${esc(ag.goal)}">${esc(ag.goal)}</div>${sa}</div></div>`
+  })
+  // the axis: the day where it changes, and each column's time where it fits
+  let axis = '', lastDay = null, lastRight = -1e9
+  M.actions.forEach((a, i) => {
+    const x = L.place.get(a.id) ? L.place.get(a.id).x : i * L.step
+    axis += `<i class="tick" style="left:${x + 8}px"></i>`
+    const d = day(a.time)
+    if (d && d !== lastDay) { axis += `<span class="day" style="left:${x + 8}px">${esc(d)}${lastDay ? '' : ' · UTC'}</span>`; lastDay = d }
+    const text = a.time ? hm(a.time) : 'no time'
+    const w = textW(text, `400 11px ${MONO}`)
+    if (x + 8 >= lastRight + 8) { axis += `<span style="left:${x + 8}px;top:17px">${esc(text)}</span>`; lastRight = x + 8 + w }
+  })
+  // the cards
+  let cards = ''
+  const rects = []
+  for (const a of M.actions) {
+    const p = L.place.get(a.id)
+    if (!p) continue
+    rects.push({ x1: p.x, y1: p.y, x2: p.x + CW, y2: p.y + CH })
+    const cls = ['card', a.id === picked ? 'sel' : '', linkedIds.has(a.id) && a.id !== picked ? 'lk' : '', a.context ? 'ctx' : '',
+      (picked != null || (sel && sel.kind === 'link')) && !linkedIds.has(a.id) && a.id !== picked ? 'fade' : ''].filter(Boolean).join(' ')
+    const when = a.time ? `<span class="tm">${hm(a.time)}</span>` : '<span class="nt">no time</span>'
+    cards += `<div class="${cls}" data-act="card" data-id="${a.id}" data-anchor="${esc(a.ref)}" data-anchor-name="${esc(`#${a.id} ${a.agent} · ${a.thread}`)}" style="left:${p.x}px;top:${p.y}px;width:${CW}px;height:${CH}px" title="${esc(a.action)}"><div class="ch"><b>#${a.id}</b>${tagChip(a.thread)}${when}</div><div class="ca">${esc(a.action)}</div></div>`
+  }
+  // the links, and their labels where they fit clear of the cards and of each other
+  const rs = routes(L)
+  const anyOn = rs.some((r) => onLink(r.l))
+  let paths = '', marks = '', labels = ''
+  const placed = []
+  const clear = (b) => b.x1 >= 0 && b.x2 <= L.TW && b.y1 >= AXIS && !rects.some((c) => b.x1 < c.x2 + 2 && b.x2 > c.x1 - 2 && b.y1 < c.y2 + 2 && b.y2 > c.y1 - 2) && !placed.some((c) => b.x1 < c.x2 + 3 && b.x2 > c.x1 - 3 && b.y1 < c.y2 + 2 && b.y2 > c.y1 - 2)
+  const order = [...rs].sort((a, b) => (onLink(b.l) ? 1 : 0) - (onLink(a.l) ? 1 : 0))
+  for (const r of order) {
+    const l = r.l, c = typeCol(l.type), on = onLink(l)
+    if (!marks.includes(`id="ah-${l.type}"`)) marks += `<marker id="ah-${l.type}" viewBox="0 0 8 8" refX="7.2" refY="4" markerWidth="7" markerHeight="7" orient="auto-start-reverse" markerUnits="userSpaceOnUse"><path d="M0.5,0.8 L7.5,4 L0.5,7.2 Z" fill="${c}"/></marker>`
+    const title = `${l.from} → ${l.to} · ${l.type}: ${l.reason}`
+    paths += `<g class="ln ${anyOn ? (on ? 'on' : 'dim') : ''}"><path class="vis" d="${r.d}" fill="none" stroke="${c}" stroke-width="${l.type === 'contradicts' ? 1.8 : 1.4}" stroke-dasharray="${DASH[l.type]}" marker-end="url(#ah-${l.type})"/><circle cx="${r.dot.x}" cy="${r.dot.y}" r="2.6" fill="${c}"/><path class="hit" d="${r.d}" fill="none" stroke="transparent" stroke-width="9" data-act="link" data-from="${l.from}" data-to="${l.to}"><title>${esc(title)}</title></path></g>`
+    if (anyOn && !on) continue
+    const text = on ? `${l.from}→${l.to} · ${l.type}` : `${l.from}→${l.to}`
+    const w = textW(text, `500 10px ${MONO}`) + 10, h = 16
+    const spot = r.spots.map((s) => ({ x1: s.x - w / 2, y1: s.y - h / 2, x2: s.x + w / 2, y2: s.y + h / 2 })).find(clear) || (on ? { x1: r.spots[0].x - w / 2, y1: r.spots[0].y - h / 2, x2: r.spots[0].x + w / 2, y2: r.spots[0].y + h / 2 } : null)
+    if (!spot) continue
+    placed.push(spot)
+    labels += `<span class="ll" data-act="link" data-from="${l.from}" data-to="${l.to}" data-anchor="${esc(unit(`${l.from}-${l.to}`))}" data-anchor-name="${esc(`${l.from} → ${l.to} ${l.type}`)}" title="${esc(l.reason)}" style="left:${spot.x1}px;top:${spot.y1}px;color:${c};border-color:${c}">${esc(text)}</span>`
+  }
+  const svg = `<svg class="links" width="${L.TW}" height="${L.H}"><defs>${marks}</defs>${paths}</svg>`
+  return `<div style="position:relative;height:${L.H}px">${bands}<div class="agcol">${ags}</div>
+    <div class="tl" id="tl" style="left:${L.AW + GAP}px;right:0;height:${L.H + 14}px"><div class="tlin" style="width:${L.TW}px;height:${L.H}px"><div class="axis">${axis}</div>${svg}${cards}${labels}</div></div></div>`
+}
+
+// ------------------------------------------------------------------------------------------------------------ details
+function diffBlock(diff) {
+  if (!diff || !diff.length) return ''
+  return `<pre class="diff">${diff.map(([op, ln]) => `<span class="${op === '+' ? 'a' : op === '-' ? 'd' : 'k'}">${op === ' ' ? '  ' : op + ' '}${esc(ln)}</span>`).join('\n')}</pre>`
+}
+function timeText(r) { return r.time ? `${day(r.time)} ${hms(r.time)} UTC` : 'no time' }
+function linkRows(links) {
+  if (!links || !links.length) return ''
+  return `<div class="cap">Links</div>` + links.map((x) => `<div class="lrow" data-act="golink" data-from="${x.from}" data-to="${x.to}" data-other="${x.other}" data-anchor="${esc(unit(`${x.from}-${x.to}`))}" data-anchor-name="${esc(`${x.from} → ${x.to} ${x.type}`)}">
+      <span class="t3">${x.dir === 'out' ? ico.out : ico.in}</span><span class="mono">#${x.other}</span><span>${lineSwatch(x.type)} ${esc(x.type)}</span><span class="t3" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(x.agent)}</span><span class="why">${esc(x.reason)}</span>
+      ${x.evidence && x.evidence[0] ? `<span class="q">“${esc(x.evidence[0].quote)}”</span>` : ''}</div>`).join('')
+}
+// a list of records, each time with its day where the day changes
+function recordRows(rows, cur) {
+  let last = null
+  return rows.map((r) => {
+    const d = day(r.time), when = !r.time ? 'no time' : d !== last ? `${d} ${hm(r.time)}` : hm(r.time)
+    if (d) last = d
+    return `<div class="rrow ${r.ref === cur ? 'cur' : ''}" data-act="${r.id ? 'goaction' : 'gorecord'}" data-ref="${esc(r.ref)}" data-anchor="${esc(r.ref)}" data-anchor-name="${esc(`${r.agent} · ${r.thread}`)}">
+      <span class="tm">${when}</span><span class="id">${r.id ? '#' + r.id : ''}</span><span class="who" title="${esc(r.agent)}">${esc(r.agent)}</span><span class="what ${r.id ? '' : 'off'}">${esc(r.what)}</span>
+      ${r.diff && r.diff.length ? diffBlock(r.diff) : ''}</div>`
+  }).join('')
+}
+function detail() {
+  const s = st.sel
+  if (!s || !D) return ''
+  const close = `<button class="btn btn-ghost btn-sm x" data-act="close" aria-label="Close">${ico.close}</button>`
+  if (s.kind === 'record' || s.kind === 'link') {
+    const r = D, a = r.action
+    const th = r.tag ? `<span class="lnk" data-act="gothread" data-id="${esc(r.thread)}">${esc(r.tag)} ${esc(r.thread)}</span>` : `<span class="lnk" data-act="gothread" data-id="${esc(r.thread)}">${esc(r.thread)}</span>`
+    const meta = `<span class="meta"><span class="lnk" data-act="goagent" data-name="${esc(r.agent)}">${esc(r.agent)}</span>${th}${r.rev != null ? `<span>rev ${esc(r.rev)}</span>` : ''}<span class="mono">${esc(timeText(r))}</span>${a ? '' : '<span class="chip chip-sans chip-tone-neutral">not on the chart</span>'}</span>`
+    let body = ''
+    if (s.kind === 'link') {
+      const l = (r.links || []).find((x) => x.from === s.from && x.to === s.to)
+      if (l) body += `<h3>${lineSwatch(l.type)} #${l.from} → #${l.to} · ${esc(l.type)}: ${esc(l.reason)}</h3>`
+    }
+    if (a) body += `<h3>${esc(a.action)}</h3>`
+    if (r.kind === 'save') {
+      body += r.summary ? `<div class="kv"><span><span class="k">Summary</span>${esc(r.summary)}</span>${r.before ? `<span><span class="k">Against</span><span class="lnk" data-act="gorecord" data-ref="${esc(r.before)}">the save before</span></span>` : ''}${r.restores ? `<span><span class="k">Restores</span><span class="lnk" data-act="gorecord" data-ref="${esc(r.restores)}">an earlier save</span></span>` : ''}</div>` : ''
+      body += `<div data-anchor="${esc(r.ref)}">${diffBlock(r.diff)}</div>`
+    } else if (r.kind === 'post') {
+      if (r.reply_to) body += `<div class="kv"><span><span class="k">In reply to</span><span class="lnk" data-act="${r.reply_to.id ? 'goaction' : 'gorecord'}" data-ref="${esc(r.reply_to.ref)}">${r.reply_to.id ? '#' + r.reply_to.id + ' ' : ''}${esc(r.reply_to.agent)}</span></span></div>`
+      body += `<div class="post" data-anchor="${esc(r.ref)}">${esc(r.text)}</div>`
+    } else body += `<div class="post" data-anchor="${esc(r.ref)}">${esc(r.what)}</div>`
+    body += linkRows(r.links)
+    return `<div class="dh"><h2>${a ? '#' + a.id : { save: 'Save', post: 'Post', join: 'Joined' }[r.kind] || 'Record'}</h2>${meta}${close}</div><div class="db">${body}</div>`
+  }
+  if (s.kind === 'thread') {
+    const t = D
+    const saves = t.records.filter((r) => r.kind === 'save').length, posts = t.records.filter((r) => r.kind === 'post').length
+    const counts = [saves ? plural(saves, 'save') : '', posts ? plural(posts, 'post') : '', plural(new Set(t.records.filter((r) => r.kind !== 'join').map((r) => r.agent)).size, 'agent'), plural(t.links, 'link')].filter(Boolean).join(' · ')
+    const rows = t.records.length ? recordRows(t.records, s.ref) : `<div class="empty">${t.kind === 'page' && t.listed ? 'The index lists this page, and no save of it is in the data.' : 'No record.'}</div>`
+    return `<div class="dh"><h2>${tagChip(t.tag)} ${esc(t.id)}</h2><span class="meta"><span>${t.kind === 'channel' ? 'channel' : 'page'}</span>${t.title && t.title !== t.id ? `<span>${esc(t.title)}</span>` : ''}<span>${esc(counts)}</span></span>${close}</div><div class="db" data-anchor="${esc(t.tag ? unit(t.tag) : t.ref)}">${rows}</div>`
+  }
+  if (s.kind === 'agent') {
+    const g = D
+    const onChart = g.records.filter((r) => r.id).length
+    let body = ''
+    if (g.goal) body += `<h3>${esc(g.goal)}</h3>`
+    if (g.roster) body += `<div class="kv" data-anchor="${esc(g.roster.ref)}"><span><span class="k">Roster</span>${esc(g.roster.objective || 'no objective')}</span><span><span class="k">Joined</span>${esc(g.roster.joined)}</span>${g.roster.account !== g.username ? `<span><span class="k">Listed as</span>${esc(g.roster.account)}</span>` : ''}</div>`
+    else body += `<div class="kv"><span><span class="k">Roster</span>not listed</span></div>`
+    if (g.signs_as && g.signs_as.length) body += `<div class="kv"><span><span class="k">Signs as</span>${esc(g.signs_as.join(', '))}</span></div>`
+    body += `<div class="cap">Records</div>${recordRows(g.records, null)}`
+    const focus = st.agents.has(g.username)
+    const btn = M && M.agents.some((a) => a.username === g.username) || focus ? `<button class="btn btn-secondary btn-sm" data-act="focus" data-name="${esc(g.username)}">${focus ? 'Show every agent' : 'Only this agent and its links'}</button>` : ''
+    return `<div class="dh">${avatar(g.username, 22)}<h2>${esc(g.username)}</h2><span class="meta"><span>${plural(onChart, 'action')} on the chart</span><span>${plural(g.records.length, 'record')}</span></span>${btn}${close}</div><div class="db" data-anchor="${esc(unit('agent/' + g.username))}">${body}</div>`
+  }
+  return ''
+}
+
+// ------------------------------------------------------------------------------------------------------------ threads
+function threads() {
+  if (!M) return ''
+  const rows = M.all_threads.map((t) => `<tr class="${t.tag ? '' : 'off'} ${st.sel && st.sel.kind === 'thread' && st.sel.id === t.id ? 'active' : ''}" data-act="gothread" data-id="${esc(t.id)}" data-anchor="${esc(t.tag ? unit(t.tag) : t.ref)}" data-anchor-name="${esc(t.id)}">
+      <td>${t.tag ? tagChip(t.tag) : ''}</td><td><span class="nm">${esc(t.id)}</span></td><td><span class="nm">${t.kind}</span></td><td class="num">${t.records}</td><td class="num">${t.agents}</td><td class="num">${t.links}</td></tr>`).join('')
+  return `<table class="table"><thead><tr><th>Chart</th><th>Thread</th><th>Kind</th><th class="num">Records</th><th class="num">Agents</th><th class="num">Links</th></tr></thead><tbody>${rows}</tbody></table>`
+}
+
+// ------------------------------------------------------------------------------------------------------------ render
+function render() {
+  const tl = document.getElementById('tl')
+  const scrollX = tl ? tl.scrollLeft : 0
+  document.getElementById('head').innerHTML = head()
+  const focused = document.activeElement && document.activeElement.id === 'q'
+  const caret = focused ? document.activeElement.selectionStart : null
+  document.getElementById('bar').innerHTML = bar()
+  if (focused) { const q = document.getElementById('q'); q.focus(); if (caret != null) q.setSelectionRange(caret, caret) }
+  document.getElementById('chart').innerHTML = chart()
+  const t2 = document.getElementById('tl')
+  if (t2) t2.scrollLeft = scrollX
+  const det = document.getElementById('det')
+  const html = detail()
+  det.hidden = !html
+  det.innerHTML = html
+  document.getElementById('threads').innerHTML = threads()
+}
+
+// ------------------------------------------------------------------------------------------------------------ events
+document.addEventListener('click', async (e) => {
+  const el = e.target.closest('[data-act]')
+  if (!el || e.metaKey || e.ctrlKey) return
+  const act = el.dataset.act
+  switch (act) {
+    case 'card': { const a = actionById(+el.dataset.id); if (a) await pick({ kind: 'record', ref: a.ref }); return }
+    case 'link': { const f = +el.dataset.from, t = +el.dataset.to, a = actionById(f); if (a) await pick({ kind: 'link', from: f, to: t, ref: a.ref }); return }
+    case 'golink': { const o = actionById(+el.dataset.other); if (o) await pick({ kind: 'record', ref: o.ref }, { scroll: true }); else if (D && D.links) { const x = D.links.find((l) => l.other === +el.dataset.other); if (x) await pick({ kind: 'link', from: x.from, to: x.to, ref: D.ref }) } return }
+    case 'agent': case 'goagent': await pick({ kind: 'agent', name: el.dataset.name }); return
+    case 'goaction': await pick({ kind: 'record', ref: el.dataset.ref }, { scroll: true }); return
+    case 'gorecord': await pick({ kind: 'record', ref: el.dataset.ref }); return
+    case 'gothread': await pick({ kind: 'thread', id: el.dataset.id }); return
+    case 'close': st.sel = null; D = null; render(); return
+    case 'thread': { const tag = el.dataset.tag; st.hideThreads.has(tag) ? st.hideThreads.delete(tag) : st.hideThreads.add(tag); await reload(); return }
+    case 'type': { const t = el.dataset.type; st.hideTypes.has(t) ? st.hideTypes.delete(t) : st.hideTypes.add(t); await reload(); return }
+    case 'kind': st.kind = el.dataset.kind; await reload(); return
+    case 'focus': { const n = el.dataset.name; st.agents = st.agents.has(n) ? new Set() : new Set([n]); await reload(); return }
+    case 'clear': st.hideThreads.clear(); st.hideTypes.clear(); st.agents.clear(); st.kind = 'all'; st.q = ''; await reload(); return
+  }
+})
+document.addEventListener('change', async (e) => {
+  if (e.target.id !== 'agent') return
+  st.agents = e.target.value ? new Set([e.target.value]) : new Set()
+  await reload()
+})
+let typing = null
+document.addEventListener('input', (e) => {
+  if (e.target.id !== 'q') return
+  st.q = e.target.value
+  clearTimeout(typing)
+  typing = setTimeout(() => reload({ detail: false }), 220)
+})
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && st.sel) { st.sel = null; D = null; render() } })
+let resizing = null
+window.addEventListener('resize', () => { clearTimeout(resizing); resizing = setTimeout(render, 60) })
+
+// ------------------------------------------------------------------------------------------------------------ thimble
+// a place opened from a citation: a card (its filters let go so it shows), a record off the chart in its thread, a
+// thread on the chart filtered to it, an agent with its links, or a link between two cards
+thimble.onOpen(async (place) => {
+  const to = (place && place.target) || {}
+  if (!(await ensureMap())) return
+  const tags = M.threads.map((t) => t.tag)
+  if (to.action) {
+    st.hideThreads.clear(); st.agents.clear(); st.kind = 'all'; st.q = ''
+    await loadMap()
+    await pick({ kind: 'record', ref: to.ref }, { scroll: true })
+  } else if (to.link) {
+    st.hideThreads.clear(); st.agents.clear(); st.hideTypes.clear(); st.kind = 'all'; st.q = ''
+    await loadMap()
+    const a = actionById(to.link[0])
+    if (a) await pick({ kind: 'link', from: to.link[0], to: to.link[1], ref: a.ref }, { scroll: true })
+    else render()
+  } else if (to.ref) {
+    await pick({ kind: 'thread', id: to.thread, ref: to.ref }, { scroll: true })
+  } else if (to.thread) {
+    const th = threadOf(to.thread)
+    if (th) {
+      st.hideThreads = new Set(tags.filter((t) => t !== th.tag))
+      await loadMap()
+      await pick({ kind: 'thread', id: th.id })
+    } else await pick({ kind: 'thread', id: to.thread })
+  } else if (to.agent) {
+    if (M.agents.some((a) => a.username === to.agent)) { st.agents = new Set([to.agent]); await loadMap() }
+    await pick({ kind: 'agent', name: to.agent })
+  } else render()
+})
+thimble.onLabels(async () => {
+  if (!M) return // the first fetch reads them
+  await reload()
+})
+;(async () => { if (await ensureMap()) render() })()
+</script>
+</body>
+</html>

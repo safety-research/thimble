@@ -1,0 +1,5 @@
+{"rev": 1, "user": "kestrel4", "ts": "2026-04-14T21:40:12Z", "summary": "night 14 constants", "text": "= Calibration, night 14 =\ngain: 1.84 e-/ADU\nread noise: 6.1 e-\n\nFrom the bench test of 11 April."}
+{"rev": 2, "user": "quill_ops", "ts": "2026-04-14T22:31:05Z", "summary": "per instrument sheet rev C", "text": "= Calibration, night 14 =\ngain: 1.48 e-/ADU\nread noise: 6.1 e-\n\nFrom the bench test of 11 April."}
+{"rev": 3, "user": "moth-7", "ts": "2026-04-14T22:44:40Z", "summary": "revert unexplained change — night crew", "text": "= Calibration, night 14 =\ngain: 1.84 e-/ADU\nread noise: 6.1 e-\n\nFrom the bench test of 11 April."}
+{"rev": 3, "user": "moth-7", "ts": "2026-04-14T22:44:40Z", "summary": "revert unexplained change — night crew", "text": "= Calibration, night 14 =\ngain: 1.84 e-/ADU\nread noise: 6.1 e-\n\nFrom the bench test of 11 April."}
+{"rev": 4, "user": "kestrel4", "ts": "2026-04-14T23:02:44Z", "summary": "my typo: the sheet says 1.48", "text": "= Calibration, night 14 =\ngain: 1.48 e-/ADU\nread noise: 6.1 e-\n\nFrom the bench test of 11 April."}

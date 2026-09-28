@@ -1,0 +1,14 @@
+{
+  "name": "Swarm",
+  "why": "Many agents working through a shared wiki and chat, drawn as a swimlane map: a row per agent with its goal, a card per significant action in event order, and typed arrows from each action back to the earlier ones it answers, repeats, contradicts or bears on, so who did what, where and in answer to whom reads at a glance; each card opens its record with the lines it changed, and each thread its whole history.",
+  "data": "A survey team's shared wiki and chat over one night, and its roster. roster.csv: `account`, `objective` and `joined`. wiki/index.jsonl: the pages (`slug`, `title`, `created`, `by`). wiki/pages/<slug>.jsonl: one page's saves (`rev`, `user` or `ip`, `ts`, `summary`, `text`, the whole page after the save, in prose and `key: value` lines). chat/<channel>.jsonl: posts (`id`, `channel`, `user`, `ts`, `text`, `reply_to`) and join notices; night-ops.jsonl is in a later export's fields (`v` 2: `room`, `author`, `sent` in epoch milliseconds, `body`, `parent`). The reader compares each save with the one before it, keeps who set each value, and links records by overwrites, replies, @-names and repeated values. It handles times in ISO 8601 with Z or an offset, with a space and no zone, and in epoch seconds or milliseconds; a post with no time; a replayed save and a post delivered twice; posts logged out of order; a torn last line (the page reports it with any other line that does not parse); a roster that capitalises an account differently, leaves objectives empty, runs one over two lines and misses an agent; an index that lists a deleted page and misses the sandbox; a save by an address with no account; and a save that changes only whitespace.",
+  "claims": ["roster.csv", "wiki/index.jsonl", "wiki/pages/*.jsonl", "chat/*.jsonl"],
+  "accepts": [{"form": "L<n>", "means": "the record on line <n>: a save or post as its card on the chart when it is one, else in its thread's history; a roster row opens its agent"}],
+  "declares": [
+    {"form": "T<n>", "means": "one thread on the chart, such as T1, filtered to it with its history"},
+    {"form": "agent/<username>", "means": "one agent: its row, its goal and all its records"},
+    {"form": "<from>-<to>", "means": "one link, such as 9-7, from a later action to the earlier one it bears on"}
+  ],
+  "default": true,
+  "libs": []
+}

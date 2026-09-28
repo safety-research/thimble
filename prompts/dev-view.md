@@ -39,11 +39,12 @@ A label marks records, such as the posts that ask for help. The analyst turns la
 
 ## Worked examples
 
-Three views in {{examples}} show methods on invented data, each described in its `view.json` under `data`. Each sample is several files with the mess a real corpus has, such as renamed fields, mixed time formats, duplicates and a torn last line, and the reader cleans it. A line the reader cannot parse is left out, and the page says how many there are, with a few of them. Read the one closest to your task. Take the method, not their domain, fields or layout.
+Four views in {{examples}} show methods on invented data, each described in its `view.json` under `data`. Each sample is several files with the mess a real corpus has, such as renamed fields, mixed time formats, duplicates and a torn last line, and the reader cleans it. A line the reader cannot parse is left out, and the page says how many there are, with a few of them. Read the one closest to your task. Take the method, not their domain, fields or layout.
 
 - `linked-sessions` is for agent transcripts, sessions and subagents: one lane per session with each subagent under the session that spawned it, a session's transcript, and sessions or runs compared side by side.
 - `incident-timeline` is for events over time from several sources: an overview of the whole span to zoom into, a select for every field, and sources or incidents compared side by side as lanes.
 - `repository` is for work items across runs, such as pull requests and issues: the runs' measures side by side, any runs chosen and compared unit by unit, and filters on each unit's facts and on who did what.
+- `swarm` is for many agents acting on shared pages or channels: a row per agent with its goal, a card per significant action in event order, and typed links from each action to the earlier ones it answers, repeats or contradicts, found by comparing each save with the one before it.
 
 ## The three files
 
