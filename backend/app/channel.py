@@ -225,6 +225,8 @@ def terminal_line(kind: str, words: str, fields: dict[str, Any]) -> str:
         line = f"view built: {fields.get('view') or ''}"
     elif kind == "written":
         line = f"the {fields.get('doc') or 'document'} writer ended"
+    elif kind == "checked":
+        line = f"a check of the {fields.get('doc') or 'document'} ended"
     elif kind == "agent":
         line = f"agent: {fields.get('name') or ''}"
     else:
