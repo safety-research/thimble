@@ -36,7 +36,8 @@ async def test_a_page_screenshot_reaches_only_thimble_s_own_port_or_its_interfac
     ok = await tools._shot_page("http://127.0.0.1:8721/?ws=mini", None)
     assert not ok.is_error and shots.calls[-1][0] == "http://127.0.0.1:8721/?ws=mini"
     for url in ("http://127.0.0.1:22/", "http://localhost/", "http://127.0.0.1:8722/", "http://evil.example:8721/",
-                "http://127.0.0.1:99999/", "http://localhost.evil.example:8721/"):
+                "http://127.0.0.1:99999/", "http://localhost.evil.example:8721/", "http://evil.example\\@127.0.0.1:8721/",
+                "http://127.0.0.1:9\\@127.0.0.1:8721/", "http://x@127.0.0.1:8721/"):
         r = await tools._shot_page(url, None)
         assert r.is_error and "8721" in r.text, url
     assert len(shots.calls) == 1, "nothing else was loaded"
