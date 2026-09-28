@@ -2848,7 +2848,13 @@ async def retry_route(c: str, chat: str) -> dict[str, Any]:
 
 
 @router.post("/ws/{c}/chats/{chat}/permission")
-async def permission_route(c: str, chat: str, body: PermissionAnswer) -> dict[str, Any]:
+async def permission_route(c: str, chat: str, body: PermissionAnswer, request: Request) -> dict[str, Any]:
+    """The analyst's answer on a session's card: answer. 403 for a request that is not the analyst's browser's
+    (hook_auth.analyst), 404 when no such request waits."""
+    from . import hook_auth  # noqa: PLC0415
+
+    if not hook_auth.analyst(request):
+        raise HTTPException(403, hook_auth.ANALYST_ONLY)
     if not answer(c, chat, body.id, body.allow, body.always, body.shown):
         raise HTTPException(404, "no such permission request is waiting")
     return {"answered": body.id, "allow": body.allow}

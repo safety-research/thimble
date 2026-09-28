@@ -10,9 +10,10 @@ proof with 401. A hook or shim that finds no server.json, no token in it, or no 
 nothing or believes nothing, so a process that holds the recorded port learns nothing from the plugin and cannot answer
 it.
 
-A change of permission modes must come from the analyst's browser (analyst). The link `thimble up` prints carries the
-`ui_key` of server.json after `#k=`; the page trades it for an HttpOnly, SameSite=Strict cookie (claim), which a mode
-write must carry. A process that cannot read server.json, such as a notebook kernel in bubblewrap, cannot change them.
+A change of permission modes, and an answer to a permission request, must come from the analyst's browser (analyst).
+The link `thimble up` prints carries the `ui_key` of server.json after `#k=`; the page trades it for an HttpOnly,
+SameSite=Strict cookie (claim), which such a request must carry. A process that cannot read server.json, such as a
+notebook kernel in bubblewrap, can do neither.
 """
 from __future__ import annotations
 
@@ -40,7 +41,8 @@ PROOF_HEADER = "x-thimble-proof"
 NONCE_MAX = 128  # characters
 UI_COOKIE = "thimble-ui"
 UI_COOKIE_AGE_S = 400 * 24 * 3600  # the longest a browser keeps a cookie
-ANALYST_ONLY = "open thimble from the link `/thimble` or `thimble up` printed to change permission modes"
+ANALYST_ONLY = ("open thimble from the link `/thimble` or `thimble up` printed to answer permission requests or change"
+                " permission modes")
 
 _cache: tuple[tuple[str, int, int], dict] | None = None
 
