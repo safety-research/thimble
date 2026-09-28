@@ -19,16 +19,17 @@ const NOVELTY = new Set(['albert', 'bad news', 'bahh', 'bells', 'boing', 'bubble
 const DATED = new Set(['agnes', 'bruce', 'fred', 'junior', 'kathy', 'ralph', 'vicki', 'victoria'])
 const baseName = (v: SpeechSynthesisVoice) => v.name.replace(/\s*\(.*\)\s*$/, '').trim().toLowerCase()
 
-/** The voices worth offering, best first: in the page's language, then Premium or Enhanced, then natural or neural,
- * then the system's own local voices, the system default before the rest; no novelty voice. */
+/** The voices worth offering, best first: in the page's language, then those that run on this machine before online
+ * ones (localService), then Premium or Enhanced, then natural or neural, then the rest but dated voices, the system
+ * default before the rest; no novelty voice. */
 export function rankVoices(voices: readonly SpeechSynthesisVoice[], lang: string): SpeechSynthesisVoice[] {
   const want = lang.toLowerCase().replace('_', '-')
   const wantBase = want.split('-')[0]
   const key = (v: SpeechSynthesisVoice): (number | string)[] => {
     const l = v.lang.toLowerCase().replace('_', '-')
     const n = v.name.toLowerCase()
-    const tier = /premium|enhanced/.test(n) ? 0 : /natural|neural/.test(n) ? 1 : v.localService && !DATED.has(baseName(v)) ? 2 : 3
-    return [l.split('-')[0] === wantBase ? 0 : 1, tier, l === want ? 0 : 1, v.default ? 0 : 1, v.name]
+    const tier = /premium|enhanced/.test(n) ? 0 : /natural|neural/.test(n) ? 1 : !DATED.has(baseName(v)) ? 2 : 3
+    return [l.split('-')[0] === wantBase ? 0 : 1, v.localService ? 0 : 1, tier, l === want ? 0 : 1, v.default ? 0 : 1, v.name]
   }
   const order = (a: (number | string)[], b: (number | string)[]) => {
     for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return a[i] < b[i] ? -1 : 1
