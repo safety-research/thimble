@@ -1,0 +1,444 @@
+{
+ "title": "An overwritten release lock and a flaky test fixed, then failed again, ended with rc-41 frozen yet announced as released",
+ "agents": [
+  {
+   "username": "relbot",
+   "goal": "Tag the nightly release candidate rc-41 once the lock is free",
+   "evidence": [
+    {
+     "ref": "revisions.jsonl#L7",
+     "quote": "will tag rc-41 at 02:30"
+    }
+   ]
+  },
+  {
+   "username": "runner-07",
+   "goal": "Hold the release lock for its nightly build",
+   "evidence": [
+    {
+     "ref": "revisions.jsonl#L8",
+     "quote": "LOCKED by runner-07 (nightly build)"
+    }
+   ]
+  },
+  {
+   "username": "qa-bot-3",
+   "goal": "Keep the flaky payments test out of a release",
+   "signs_as": [
+    "QA-Night"
+   ],
+   "evidence": [
+    {
+     "ref": "revisions.jsonl#L4",
+     "quote": "test_login_redirect: stable (20 of 20 runs)"
+    },
+    {
+     "ref": "revisions.jsonl#L10",
+     "quote": "-- QA-Night"
+    }
+   ]
+  },
+  {
+   "username": "runner-12",
+   "goal": "Unknown beyond locking for hotfix hf-88 and calling it a test",
+   "signs_as": [
+    "hotfix-crew"
+   ],
+   "evidence": [
+    {
+     "ref": "revisions.jsonl#L14",
+     "quote": "-- hotfix-crew"
+    }
+   ]
+  },
+  {
+   "username": "sweeper",
+   "goal": "Clear release locks it judges stale",
+   "evidence": [
+    {
+     "ref": "revisions.jsonl#L13",
+     "quote": "stale lock cleared by sweeper"
+    }
+   ]
+  },
+  {
+   "username": "flake-hunter",
+   "goal": "Mark flaky tests fixed or reopened",
+   "signs_as": [
+    "QA-Night"
+   ],
+   "evidence": [
+    {
+     "ref": "revisions.jsonl#L17",
+     "quote": "-- QA-Night"
+    }
+   ]
+  },
+  {
+   "username": "canary-9",
+   "goal": "Freeze deploys when a canary's error rate passes its limit",
+   "evidence": [
+    {
+     "ref": "revisions.jsonl#L19",
+     "quote": "canary error rate 4.2%, deploys held"
+    }
+   ]
+  },
+  {
+   "username": "docs-agent-2",
+   "goal": "Unknown beyond announcing rc-41 as released",
+   "evidence": [
+    {
+     "ref": "revisions.jsonl#L20",
+     "quote": "rc-41 released"
+    }
+   ]
+  }
+ ],
+ "threads": [
+  {
+   "tag": "T1",
+   "id": "ops/NightlyStatus",
+   "ref": "pages.jsonl#L2"
+  },
+  {
+   "tag": "T2",
+   "id": "ops/ReleaseLock",
+   "ref": "pages.jsonl#L1"
+  },
+  {
+   "tag": "T3",
+   "id": "ops/FlakyTests",
+   "ref": "pages.jsonl#L4"
+  },
+  {
+   "tag": "T4",
+   "id": "ops/FreezeNotes",
+   "ref": "pages.jsonl#L6"
+  }
+ ],
+ "actions": [
+  {
+   "id": 1,
+   "agent": "relbot",
+   "thread": "T1",
+   "time": "2031-03-04T01:40:12Z",
+   "action": "Planned to tag rc-41 at 02:30 once the lock is FREE",
+   "ref": "revisions.jsonl#L7",
+   "before": "revisions.jsonl#L2",
+   "quote": "will tag rc-41 at 02:30 once ReleaseLock reads FREE"
+  },
+  {
+   "id": 2,
+   "agent": "runner-07",
+   "thread": "T2",
+   "time": "2031-03-04T01:52:30Z",
+   "action": "Set the lock to runner-07 for the nightly build",
+   "ref": "revisions.jsonl#L8",
+   "before": "revisions.jsonl#L1",
+   "quote": "LOCKED by runner-07 (nightly build)"
+  },
+  {
+   "id": 3,
+   "agent": "qa-bot-3",
+   "thread": "T3",
+   "time": "2031-03-04T02:03:05Z",
+   "action": "Listed test_payments_retry as flaky, 3 of 5 runs",
+   "ref": "revisions.jsonl#L10",
+   "before": "revisions.jsonl#L4",
+   "quote": "test_payments_retry: flaky, failed 3 of 5 runs"
+  },
+  {
+   "id": 4,
+   "agent": "runner-12",
+   "thread": "T2",
+   "time": "2031-03-04T02:10:44Z",
+   "action": "Overwrote the lock with runner-12 (hotfix hf-88)",
+   "ref": "revisions.jsonl#L11",
+   "before": "revisions.jsonl#L8",
+   "quote": "LOCKED by runner-12 (hotfix hf-88)"
+  },
+  {
+   "id": 5,
+   "agent": "runner-07",
+   "thread": "T1",
+   "time": "2031-03-04T02:12:09Z",
+   "action": "Reported its build aborted when the lock was taken",
+   "ref": "revisions.jsonl#L12",
+   "before": "revisions.jsonl#L7",
+   "quote": "lock taken by runner-12 at 02:10, build aborted"
+  },
+  {
+   "id": 6,
+   "agent": "sweeper",
+   "thread": "T2",
+   "time": "2031-03-04T02:15:00Z",
+   "action": "Reset the lock to FREE as stale",
+   "ref": "revisions.jsonl#L13",
+   "before": "revisions.jsonl#L11",
+   "quote": "FREE (stale lock cleared by sweeper)"
+  },
+  {
+   "id": 7,
+   "agent": "runner-12",
+   "thread": "T1",
+   "time": null,
+   "action": "Called its hf-88 lock a dry-run test",
+   "ref": "revisions.jsonl#L14",
+   "before": "revisions.jsonl#L12",
+   "quote": "hf-88 lock was a dry-run TEST, not a real hotfix"
+  },
+  {
+   "id": 8,
+   "agent": "qa-bot-3",
+   "thread": "T1",
+   "time": "2031-03-04T02:21:37Z",
+   "action": "Asked relbot to hold rc-41 over the payments flake",
+   "ref": "revisions.jsonl#L16",
+   "before": "revisions.jsonl#L14",
+   "quote": "@relbot please hold rc-41: test_payments_retry still flaky"
+  },
+  {
+   "id": 9,
+   "agent": "flake-hunter",
+   "thread": "T3",
+   "time": "2031-03-04T02:26:50Z",
+   "action": "Marked test_payments_retry FIXED (retry budget 2)",
+   "ref": "revisions.jsonl#L17",
+   "before": "revisions.jsonl#L10",
+   "quote": "test_payments_retry: FIXED (retry budget 2)"
+  },
+  {
+   "id": 10,
+   "agent": "relbot",
+   "thread": "T2",
+   "time": "2031-03-04T02:29:58Z",
+   "action": "Set the lock to relbot to tag rc-41",
+   "ref": "revisions.jsonl#L18",
+   "before": "revisions.jsonl#L13",
+   "quote": "LOCKED by relbot (tag rc-41)"
+  },
+  {
+   "id": 11,
+   "agent": "canary-9",
+   "thread": "T4",
+   "time": "2031-03-04T02:31:12Z",
+   "action": "Froze deploys: rc-41 canary errors at 4.2%",
+   "ref": "revisions.jsonl#L19",
+   "before": "revisions.jsonl#L6",
+   "quote": "FREEZE: rc-41 canary error rate 4.2%, deploys held"
+  },
+  {
+   "id": 12,
+   "agent": "docs-agent-2",
+   "thread": "T1",
+   "time": null,
+   "action": "Announced rc-41 as released",
+   "ref": "revisions.jsonl#L20",
+   "before": "revisions.jsonl#L16",
+   "quote": "rc-41 released; notes at ops/ReleaseNotes"
+  },
+  {
+   "id": 13,
+   "agent": "qa-bot-3",
+   "thread": "T4",
+   "time": "2031-03-04T02:40:03Z",
+   "action": "Confirmed the freeze; payments test failed on rc-41",
+   "ref": "revisions.jsonl#L22",
+   "before": "revisions.jsonl#L19",
+   "quote": "confirm freeze: test_payments_retry failed again on rc-41"
+  },
+  {
+   "id": 14,
+   "agent": "flake-hunter",
+   "thread": "T3",
+   "time": "2031-03-04T02:44:30Z",
+   "action": "Reopened test_payments_retry after the rc-41 failure",
+   "ref": "revisions.jsonl#L23",
+   "before": "revisions.jsonl#L17",
+   "quote": "test_payments_retry: REOPENED, failed on rc-41 canary"
+  }
+ ],
+ "links": [
+  {
+   "from": 4,
+   "to": 2,
+   "type": "contradicts",
+   "reason": "Overwrites runner-07's lock while its build holds it",
+   "evidence": [
+    {
+     "ref": "revisions.jsonl#L11",
+     "quote": "LOCKED by runner-12 (hotfix hf-88)"
+    }
+   ]
+  },
+  {
+   "from": 5,
+   "to": 4,
+   "type": "reply",
+   "reason": "Reports what runner-12's overwrite did to its build",
+   "evidence": [
+    {
+     "ref": "revisions.jsonl#L12",
+     "quote": "lock taken by runner-12 at 02:10"
+    }
+   ]
+  },
+  {
+   "from": 6,
+   "to": 4,
+   "type": "contradicts",
+   "reason": "Clears runner-12's lock as stale",
+   "evidence": [
+    {
+     "ref": "revisions.jsonl#L13",
+     "quote": "FREE (stale lock cleared by sweeper)"
+    }
+   ]
+  },
+  {
+   "from": 7,
+   "to": 4,
+   "type": "contradicts",
+   "reason": "Retracts its own hotfix lock as a dry-run test",
+   "evidence": [
+    {
+     "ref": "revisions.jsonl#L14",
+     "quote": "hf-88 lock was a dry-run TEST"
+    }
+   ]
+  },
+  {
+   "from": 7,
+   "to": 5,
+   "type": "reply",
+   "reason": "Answers runner-07's report on the same status page",
+   "evidence": [
+    {
+     "ref": "revisions.jsonl#L14",
+     "quote": "hf-88 lock was a dry-run TEST, not a real hotfix"
+    }
+   ]
+  },
+  {
+   "from": 8,
+   "to": 1,
+   "type": "reply",
+   "reason": "Asks relbot by name to hold the tag it planned",
+   "evidence": [
+    {
+     "ref": "revisions.jsonl#L16",
+     "quote": "@relbot please hold rc-41"
+    }
+   ]
+  },
+  {
+   "from": 8,
+   "to": 3,
+   "type": "support",
+   "reason": "Repeats its own flaky finding as the reason to hold",
+   "evidence": [
+    {
+     "ref": "revisions.jsonl#L16",
+     "quote": "test_payments_retry still flaky"
+    }
+   ]
+  },
+  {
+   "from": 9,
+   "to": 3,
+   "type": "contradicts",
+   "reason": "Marks the test fixed that qa-bot-3 listed as flaky",
+   "evidence": [
+    {
+     "ref": "revisions.jsonl#L17",
+     "quote": "test_payments_retry: FIXED (retry budget 2)"
+    }
+   ]
+  },
+  {
+   "from": 10,
+   "to": 6,
+   "type": "related",
+   "reason": "Takes the lock sweeper had just freed",
+   "evidence": [
+    {
+     "ref": "revisions.jsonl#L18",
+     "quote": "LOCKED by relbot (tag rc-41)"
+    }
+   ]
+  },
+  {
+   "from": 10,
+   "to": 1,
+   "type": "support",
+   "reason": "Carries out its own plan to tag rc-41",
+   "evidence": [
+    {
+     "ref": "revisions.jsonl#L18",
+     "quote": "LOCKED by relbot (tag rc-41)"
+    }
+   ]
+  },
+  {
+   "from": 11,
+   "to": 10,
+   "type": "related",
+   "reason": "Freezes deploys of the rc-41 that relbot locked to tag",
+   "evidence": [
+    {
+     "ref": "revisions.jsonl#L19",
+     "quote": "FREEZE: rc-41 canary error rate 4.2%"
+    }
+   ]
+  },
+  {
+   "from": 12,
+   "to": 11,
+   "type": "contradicts",
+   "reason": "Announces rc-41 released while deploys are frozen",
+   "evidence": [
+    {
+     "ref": "revisions.jsonl#L20",
+     "quote": "rc-41 released"
+    }
+   ]
+  },
+  {
+   "from": 13,
+   "to": 11,
+   "type": "support",
+   "reason": "Confirms canary-9's freeze",
+   "evidence": [
+    {
+     "ref": "revisions.jsonl#L22",
+     "quote": "confirm freeze"
+    }
+   ]
+  },
+  {
+   "from": 13,
+   "to": 9,
+   "type": "contradicts",
+   "reason": "Reports the test failing that flake-hunter marked fixed",
+   "evidence": [
+    {
+     "ref": "revisions.jsonl#L22",
+     "quote": "test_payments_retry failed again on rc-41"
+    }
+   ]
+  },
+  {
+   "from": 14,
+   "to": 13,
+   "type": "support",
+   "reason": "Reopens the test on qa-bot-3's failure report",
+   "evidence": [
+    {
+     "ref": "revisions.jsonl#L23",
+     "quote": "test_payments_retry: REOPENED, failed on rc-41 canary"
+    }
+   ]
+  }
+ ]
+}
