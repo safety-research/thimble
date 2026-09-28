@@ -214,14 +214,11 @@ async def _lifespan(app: FastAPI):
                  cli.home(), cli.versions_line(), cli.claude_code_version() or "not found on PATH")
     except Exception:
         log.exception("reading the versions for the log failed")
-    # thimble's state is its owner's alone: <home>, the log and state in it, and the workspaces (config.private_dir)
+    # thimble's state is its owner's alone: <home> and the workspaces are private folders (config.private_dir)
     try:
         from . import cli
 
         cli.ensure_home()
-        for f in (cli.server_json(), cli.log_path(), cli.log_path().with_name(cli.log_path().name + ".1"),
-                  cli.vite_log_path()):
-            config.private_file(f)
         st = cli.read_state()
         if st and not st.get("token"):  # a record an older supervisor wrote: the hooks' token (hook_auth.py)
             cli.write_state(st)

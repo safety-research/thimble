@@ -224,8 +224,8 @@ def _chats(w: Writer, ws: Path) -> list[dict[str, Any]]:
 
 def _projects_roots(ws: Path) -> list[Path]:
     """Where Claude Code writes transcripts: the config dir of the workspace's attached session and the one this server
-    serves, both read from the attaching process (config.process_claude_config), and this server's own. sessions.json's
-    `config_dir` is not read, since a cell can write that file."""
+    serves, both as the session's shim reported them, and this server's own. sessions.json's `config_dir` is not read,
+    since a cell can write that file."""
     from . import session  # noqa: PLC0415 — session imports most of the app
 
     live = session.current(ws.name)

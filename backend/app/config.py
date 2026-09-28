@@ -209,9 +209,9 @@ FALLBACK_MODEL = os.environ.get("THIMBLE_FALLBACK_MODEL", "claude-opus-4-8").str
 
 # Claude Code's config dir: CLAUDE_CONFIG_DIR, else ~/.claude (transcripts, sessions/<pid>.json, settings.json, the
 # login). The one that counts is the one the served `claude` process runs with, which need not be this server's, so
-# when a session attaches this server reads the value from that process's environment (process_claude_config), never
-# from a request, and claude_config_dir() answers with it from then on (serve_claude_config), while this server's own
-# CLAUDE_CONFIG_DIR is unchanged. Sessions this server starts get the same value (claude_env).
+# the session's shim reports it in its signed subscription (session.connected), and claude_config_dir() answers with it
+# from then on (serve_claude_config), while this server's own CLAUDE_CONFIG_DIR is unchanged. Sessions this server
+# starts get the same value (claude_env).
 CONFIG_DIR_ENV = "CLAUDE_CONFIG_DIR"
 _served_config: tuple[str | None, str | None] | None = None  # (our own value when learned, the served process's value)
 
@@ -239,19 +239,6 @@ def claude_config_dir() -> Path:
 def config_dir_of(value: str | None) -> Path:
     """The config dir a CLAUDE_CONFIG_DIR value names: the value, or ~/.claude when it is unset."""
     return Path(value) if value else Path.home() / ".claude"
-
-
-def process_claude_config(pid: int | None) -> tuple[bool, str | None]:
-    """(known, CLAUDE_CONFIG_DIR) of the process `pid`, read from its environment (procs.environ): (False, None) when it
-    cannot be read, and for this process itself, whose own value may have changed since it started."""
-    from . import procs  # noqa: PLC0415 — procs imports only the standard library
-
-    if not pid or pid == os.getpid():
-        return False, None
-    env = procs.environ(pid)
-    if env is None:
-        return False, None
-    return True, env.get(CONFIG_DIR_ENV) or None
 
 
 def serve_claude_config(value: str | None, who: str = "") -> bool:
@@ -674,15 +661,6 @@ def private_dir(p: Path) -> Path:
     except OSError:  # a folder of another owner keeps its mode
         pass
     return p
-
-
-def private_file(p: Path) -> None:
-    """A file of thimble's state made readable by its owner alone (0600), when it is not already."""
-    try:
-        if p.stat().st_mode & 0o077:
-            os.chmod(p, 0o600)
-    except OSError:
-        pass
 
 
 def workspace_dir(name: str) -> Path:

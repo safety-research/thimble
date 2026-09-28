@@ -190,16 +190,6 @@ def ensure_home() -> Path:
     return config.private_dir(home())
 
 
-def private_append(p: Path) -> int:
-    """A file descriptor appending to `p`, which is made, or kept, readable by its owner alone (0600)."""
-    fd = os.open(p, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o600)
-    try:
-        os.fchmod(fd, 0o600)
-    except OSError:
-        pass
-    return fd
-
-
 def server_json() -> Path:
     return home() / "server.json"
 
@@ -229,17 +219,14 @@ def new_token() -> str:
 
 
 def write_state(state: dict[str, Any]) -> None:
-    """server.json, written whole and private (0600), with the token the file held when `state` names none, else a
-    new one."""
+    """server.json, written whole into the private home (ensure_home), with the token the file held when `state` names
+    none, else a new one."""
     ensure_home()
     if not state.get("token"):
         state = {**state, "token": read_state().get("token") or new_token()}
     p = server_json()
     tmp = p.with_suffix(".json.tmp")
-    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-    with os.fdopen(fd, "w", encoding="utf-8") as f:
-        os.fchmod(f.fileno(), 0o600)
-        f.write(json.dumps(state, indent=2) + "\n")
+    tmp.write_text(json.dumps(state, indent=2) + "\n", "utf-8")
     tmp.replace(p)
 
 
@@ -254,7 +241,7 @@ def _log(line: str) -> None:
     """Supervisor diagnostics go to the server log, never to stdout."""
     try:
         ensure_home()
-        with os.fdopen(private_append(log_path()), "a", encoding="utf-8") as f:
+        with log_path().open("a", encoding="utf-8") as f:
             f.write(f"{_now()} thimble-server: {line}\n")
     except OSError:
         pass
@@ -500,7 +487,7 @@ def _detach() -> None:
 def spawn(cmd: list[str], *, cwd: Path, env: dict[str, str], log_file: Path) -> int:
     """Start `cmd` as its own session leader, stdin from /dev/null, output appended to `log_file`; the pid. Seam for tests."""
     config.private_dir(log_file.parent)
-    with os.fdopen(private_append(log_file), "ab") as out:
+    with log_file.open("ab") as out:
         proc = subprocess.Popen(cmd, cwd=str(cwd), stdin=subprocess.DEVNULL, stdout=out, stderr=subprocess.STDOUT,
                                 env=env, start_new_session=True, preexec_fn=_detach, close_fds=True)
     return proc.pid
@@ -1334,12 +1321,11 @@ def installed_copy(cwd: Path) -> Installed | None:
 
 
 def name_session(url: str, name: str, session: str, cwd: Path) -> str | None:
-    """Tell the server which Claude Code session asked (`POST /api/ws/{c}/session`), with this process's pid, whose
-    environment the server reads for the CLAUDE_CONFIG_DIR the session runs under. Returns the session this one took main
+    """Tell the server which Claude Code session asked (`POST /api/ws/{c}/session`). Returns the session this one took main
     over from while it still runs in another terminal, else None."""
     try:
         status, body = _request("POST", f"{url}/api/ws/{urllib.parse.quote(name)}/session",
-                                {"session": session, "cwd": str(cwd), "env_pid": os.getpid()}, timeout=3.0)
+                                {"session": session, "cwd": str(cwd)}, timeout=3.0)
         if status != 200:
             _log(f"session {session} for {name}: {status} {str(body)[:200]}")
             return None

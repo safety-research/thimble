@@ -1,13 +1,11 @@
 """The mirror: the analyst's Claude Code session is the workspace's `main`, and the browser shows its transcript.
 
 A session attaches when its MCP shim subscribes to the channel naming it or when `/thimble` names it
-(`POST /api/ws/{c}/session`); its transcript is found under its `claude` process's config dir (find_transcript,
-_config_of). One session is main per workspace, kept in `workspaces/<c>/sessions.json` with the tail's cursor and
-each
-subagent's place, so a restarted server reads on where it stopped. The channel subscription is the session's
-liveness: with no subscriber for GRACE_S the session detaches. /clear and /resume switch sessions in the same
-process,
-and main follows the new id by pid (_follow).
+(`POST /api/ws/{c}/session`); its transcript is found under the config dir its shim reported (find_transcript). One
+session is main per workspace, kept in `workspaces/<c>/sessions.json` with the tail's cursor and each subagent's place,
+so a restarted server reads on where it stopped. The channel subscription is the session's liveness: with no
+subscriber for GRACE_S the session detaches. /clear and /resume switch sessions in the same process, and main follows
+the new id by pid (_follow).
 
 The tail translates transcript records into main's log (`by: terminal`): the analyst's lines (not /thimble's own turn
 or local commands such as /model), channel events, task notifications, peer messages, tool calls and results, text,
@@ -167,7 +165,7 @@ class Live:
     def __init__(self, c: str, sid: str, cwd: str, transcript_path: str | None, pid: int | None) -> None:
         self.c, self.sid, self.cwd, self.transcript_path, self.pid = c, sid, cwd, transcript_path, pid
         self.since = _now()
-        # the CLAUDE_CONFIG_DIR of the session's `claude` process (None: Claude Code's default), once known (_config_of)
+        # the CLAUDE_CONFIG_DIR of the session's `claude` process (None: Claude Code's default), once its shim reported it
         self.config: str | None = None
         self.config_known = False
         self.offset = -1  # bytes of the transcript read; -1 before the first look
@@ -233,7 +231,8 @@ _came_back: set[str] = set()  # workspaces where main's own shim subscribed sinc
 _not_run: dict[str, None] = {}
 NOT_RUN_KEEP = 2_000
 _shim_pids: dict[tuple[str, str], int] = {}  # (workspace, session) -> the `claude` pid its shim reported (main_pid)
-SHIM_PIDS_KEPT = 256  # _shim_pids keeps the newest this many
+_shim_configs: dict[tuple[str, str], str] = {}  # (workspace, session) -> the CLAUDE_CONFIG_DIR its shim reported ("": unset)
+SHIM_PIDS_KEPT = 256  # _shim_pids and _shim_configs keep the newest this many
 STAMP_LINES = 200  # _began_since looks this far into a transcript for its first record with a timestamp
 CURSOR_CALLS = 200  # the cursor keeps the names of main's newest this many tool calls, for results that come later
 SUBS_KEY = "subs"  # sessions.json: each followed subagent transcript's place, by its path (_sub_places)
@@ -353,18 +352,11 @@ def find_transcript(sid: str, config_dir: Path | None = None) -> str | None:
     return None
 
 
-def _config_of(known_value: str | None, pid: int | None) -> tuple[bool, str | None]:
-    """(known, CLAUDE_CONFIG_DIR) of a session's `claude` process: `known_value` when the caller read it from a process
-    ("" for unset), else read from the process's environment; (False, None) when neither says. sessions.json's
-    `config_dir` is not read, since a cell can write that file."""
-    if known_value is not None:
-        return True, known_value or None
-    return config.process_claude_config(pid)
-
-
-def _learn_config(lv: Live, known: bool, value: str | None) -> bool:
-    """Keep the session's config dir on `lv` and serve it (config.serve_claude_config); True when it is new for `lv`."""
-    if not known or (lv.config_known and lv.config == value):
+def _learn_config(lv: Live, reported: str | None) -> bool:
+    """Keep the session's config dir, as its shim reported it ("" for unset, None when not reported), on `lv` and serve
+    it (config.serve_claude_config); True when it is new for `lv`."""
+    value = reported or None
+    if reported is None or (lv.config_known and lv.config == value):
         return False
     lv.config, lv.config_known = value, True
     config.serve_claude_config(value, f"{lv.c}'s session {lv.sid}")
@@ -380,18 +372,20 @@ def current(c: str) -> Live | None:
 
 def attach(c: str, sid: Any, cwd: Any, transcript_path: str | None = None, pid: int | None = None,
            config_dir: str | None = None, *, follow: bool = False, after: str | None = None) -> Live | None:
-    """Make the session main; the Live, or None for a malformed id. `config_dir` is the session's CLAUDE_CONFIG_DIR as
-    read from a process's environment ("" for unset, None when unknown), never a value a request carried; `follow` says the session runs in the process of the one it replaces (_follow);
-    `attached.after` names the previous main when it still runs in another process."""
+    """Make the session main; the Live, or None for a malformed id. `config_dir` is the session's CLAUDE_CONFIG_DIR ("" for
+    unset, None for what its shim reported); `follow` says the session runs in the process of the one it replaces
+    (_follow); `attached.after` names the previous main when it still runs in another process."""
     sid, cwd = str(sid or ""), str(cwd or "")
     if not SID_RE.match(sid):
         return None
-    pid = pid or _shim_pids.get((c, sid))  # `/thimble` names no pid; the session's shim reported one when it subscribed
+    # `/thimble` names neither; the session's shim reported both when it subscribed
+    pid = pid or _shim_pids.get((c, sid))
+    config_dir = _shim_configs.get((c, sid)) if config_dir is None else config_dir
     cur = _live.get(c)
     if cur is not None and cur.sid == sid:
         if pid:
             cur.pid = pid
-        if _learn_config(cur, *_config_of(config_dir, pid)):
+        if _learn_config(cur, config_dir):
             if not cur.transcript_path:
                 cur.transcript_path = find_transcript(sid, cur.config_dir)
             _persist(cur)
@@ -410,7 +404,7 @@ def attach(c: str, sid: Any, cwd: Any, transcript_path: str | None = None, pid: 
     restored = held.get("session") == sid and not stored.get("ended")  # this server restarted under the session
     lv = Live(c, sid, cwd or str(stored.get("cwd") or ""), transcript_path or stored.get("transcript_path"),
               pid or stored.get("pid"))
-    _learn_config(lv, *_config_of(config_dir, pid))  # never sessions.json's pid, which a cell can write
+    _learn_config(lv, config_dir)
     lv.transcript_path = lv.transcript_path or find_transcript(sid, lv.config_dir)
     if restored:
         lv.since = str(stored.get("since") or lv.since)
@@ -558,16 +552,17 @@ def detach(c: str, sid: str, reason: str | None = None) -> bool:
     return True
 
 
-def connected(c: str, sid: str | None, cwd: str, pid: int | None, *, claim: bool = True) -> None:
-    """A shim subscribed. On the channel (`claim`) the session it names is main. On the hook and Monitor routes only
-    /thimble makes a session main, so a subscription attaches only the current (or last) main, or a new session in
-    main's
-    own `claude` process (`pid`), which main follows (_follow)."""
-    if sid and pid:
-        _shim_pids.pop((c, sid), None)
-        _shim_pids[(c, sid)] = pid
-        while len(_shim_pids) > SHIM_PIDS_KEPT:
-            _shim_pids.pop(next(iter(_shim_pids)))
+def connected(c: str, sid: str | None, cwd: str, pid: int | None, config_dir: str | None = None, *,
+              claim: bool = True) -> None:
+    """A shim subscribed, naming its session's `claude` pid and CLAUDE_CONFIG_DIR. On the channel (`claim`) the session it
+    names is main. On the hook and Monitor routes only /thimble makes a session main, so a subscription attaches only the
+    current (or last) main, or a new session in main's own `claude` process (`pid`), which main follows (_follow)."""
+    for table, value in ((_shim_pids, pid), (_shim_configs, config_dir)):
+        if sid and value is not None:
+            table.pop((c, sid), None)
+            table[(c, sid)] = value
+            while len(table) > SHIM_PIDS_KEPT:
+                table.pop(next(iter(table)))
     old = None
     if not claim:
         held = ((agents.meta_or_none(c, agents.MAIN_ID) or {}).get("attached") or {}).get("session")

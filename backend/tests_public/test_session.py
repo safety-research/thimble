@@ -23,6 +23,7 @@ def _fresh(workspaces_tmp, tmp_path, monkeypatch):
     session._event_threads.clear()
     session._came_back.clear()
     session._shim_pids.clear()
+    session._shim_configs.clear()
     channel._subs.clear()
     agents._busy.clear()
     yield
