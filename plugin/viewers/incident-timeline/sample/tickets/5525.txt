@@ -1,0 +1,15 @@
+Ticket: 5525
+Subject: Two boarding passes
+Requester: V. Quist <v.quist@example.net>
+
+From: V. Quist <v.quist@example.net>
+Date: Sat, 16 May 2026 04:52:30 -0400
+Status: open
+
+I got my boarding pass twice. Which one do I use?
+
+From: Mateo <mateo@marrowby-ferries.example>
+Date: Sat, 16 May 2026 10:09:10 +0100
+Status: closed
+
+Either pass works: both carry the same code.
