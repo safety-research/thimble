@@ -10,23 +10,31 @@ import type { Cell, Concept, ConceptDetail } from '../lib/types'
 type Listener = () => void
 const cache = new Map<string, Map<string, Concept>>()
 const inflight = new Map<string, Promise<void>>()
+// workspaces asked to load again while a read was in flight: that read may have started before the change it was asked
+// for, so another follows it
+const again = new Set<string>()
 const listeners = new Set<Listener>()
 const EMPTY: Map<string, Concept> = new Map()
 
 function load(ws: string): Promise<void> {
   let p = inflight.get(ws)
-  if (!p) {
-    p = api
-      .concepts(ws)
-      .then((list) => {
-        cache.set(ws, new Map(list.map((k) => [k.id, k])))
-        registerConcepts(list.map((k) => ({ id: k.id, name: k.name })))
-        for (const fn of listeners) fn()
-      })
-      .catch(() => undefined)
-      .finally(() => inflight.delete(ws))
-    inflight.set(ws, p)
+  if (p) {
+    again.add(ws)
+    return p
   }
+  p = api
+    .concepts(ws)
+    .then((list) => {
+      cache.set(ws, new Map(list.map((k) => [k.id, k])))
+      registerConcepts(list.map((k) => ({ id: k.id, name: k.name })))
+      for (const fn of listeners) fn()
+    })
+    .catch(() => undefined)
+    .finally(() => {
+      inflight.delete(ws)
+      if (again.delete(ws)) void load(ws)
+    })
+  inflight.set(ws, p)
   return p
 }
 
