@@ -1925,25 +1925,72 @@ async def shoot(c: str, slug: str, open_place: dict[str, Any] | None, out_png: P
 
 async def shoot_states(c: str, slug: str, states: list[dict[str, Any]], *, width: int = SHOT_SIZE[0],
                        height: int = SHOT_SIZE[1], answers: int = 0) -> list[dict[str, Any]]:
-    """Load the view's page headless once per state (scripts/view_shot.mjs, in the frontend's Playwright Chromium), each
-    state {out, open, labels}: send it `open`, answer its fetches from the reader and its marks requests under the state's
-    labels context (NO_LABELS, a probe_context or labels_context), serve its media requests with the file media_file
-    names, and write a picture of it to `out`. Returns one result per state, {ok, errors, fetches, height, refs, records,
-    units, marked, hidden, controls, fonts, fetched_records, png?}, and with `answers` the first that many reader
-    answers each state's page got; without Node or the frontend's packages each has build_problem's line as its one
-    error."""
+    """Load the view's page headless once per state (shoot_page), each state {out, open, labels}: send it `open`,
+    answer its fetches from the reader and its marks requests under the state's labels context (NO_LABELS, a
+    probe_context or labels_context), serve its media requests with the file media_file names, and write a picture of it
+    to `out`. Returns one result per state, {ok, errors, fetches, height, refs, records, units, marked, hidden, controls,
+    fonts, fetched_records, png?}, and with `answers` the first that many reader answers each state's page got; without
+    Node or the frontend's packages each has build_problem's line as its one error."""
+    view = read_view(c, slug)
+    if view is None:
+        return [{"ok": False, "errors": [f"no view {slug!r}"], "fetches": 0} for _ in states]
+    media = media_url(SHOT_MEDIA_ORIGIN, c, slug)
+    ctxs = [s.get("labels") if s.get("labels") is not None else dict(NO_LABELS) for s in states]
+    fetched: list[set[str]] = [set() for _ in states]  # the record refs each state's reader answers handed its page
+    kept: list[list[Any]] = [[] for _ in states]  # the first `answers` reader answers of each state
+
+    async def answer(kind: str, i: int, msg: dict[str, Any]) -> dict[str, Any]:
+        if kind == "fetch":
+            try:
+                data = await reader_call(c, slug, "records", msg.get("query"), labels=ctxs[i])
+            except ReaderError as e:
+                return {"error": e.message}
+            strings: list[str] = []
+            _strings(data, strings)
+            fetched[i].update(s for s in strings[:FETCHED_SCAN_MAX] if _RECORD_REF.match(s))
+            if len(kept[i]) < answers:
+                kept[i].append(data)
+            return {"data": data}
+        if kind == "marks":
+            refs_in = [str(r) for r in msg.get("refs") or []][:5000]
+            try:
+                marks = await marks_for(c, slug, refs_in, ctxs[i]) if refs_in else {}
+            except ReaderError:
+                marks = {}
+            return {"marks": marks, **_state_labels(ctxs[i])}
+        # the script reads the bytes itself, a range at a time; here the path passes the route's checks
+        try:
+            f, media_type = await asyncio.to_thread(media_file, c, slug, str(msg.get("path") or ""))
+            return {"file": str(f), "type": media_type, "size": f.stat().st_size}
+        except (HTTPException, OSError) as e:
+            return {"error": str(getattr(e, "detail", e))}
+
+    shot_states = [{"out": s["out"], "open": s.get("open") or {},
+                    "labels": [str(lab.get("name") or "") for lab in labels_state(ctx)["labels"]],
+                    "ids": [str(lab.get("id") or "") for lab in labels_state(ctx)["labels"] if lab.get("id")]}
+                   for s, ctx in zip(states, ctxs)]
+    out = await shoot_page(frame_document(view, media), shot_states, answer, width=width, height=height, media=media)
+    for i, r in enumerate(out):
+        r["fetched_records"] = len(fetched[i])
+        if answers:
+            r["answers"] = kept[i]
+    return out
+
+
+async def shoot_page(doc: str, states: list[dict[str, Any]], answer: Any, *, width: int, height: int,
+                     media: str | None = None) -> list[dict[str, Any]]:
+    """Load a frame document headless once per state (scripts/view_shot.mjs, in the frontend's Playwright Chromium),
+    each state {out, open, labels?, ids?}, send it `open` once it says ready, and write a picture of it to `out`. Every
+    request the page makes, `fetch`, `marks` or `media`, is answered by `await answer(kind, state index, message)`, a
+    dict of the answer's fields. Returns one result per state, {ok, errors, fetches, fonts, png?, ...} as view_shot.mjs
+    reports it; without Node or the frontend's packages each has build_problem's line as its one error."""
     def failed(why: str) -> list[dict[str, Any]]:
         return [{"ok": False, "errors": [why], "fetches": 0} for _ in states]
 
-    view = read_view(c, slug)
-    if view is None:
-        return failed(f"no view {slug!r}")
     if why := await asyncio.to_thread(build_problem):
         return failed(why)
     if not states:
         return []
-    media = media_url(SHOT_MEDIA_ORIGIN, c, slug)
-    doc = frame_document(view, media)
     first = Path(states[0]["out"])
     first.parent.mkdir(parents=True, exist_ok=True)
     frame_file = first.with_suffix(".html")
@@ -1951,21 +1998,15 @@ async def shoot_states(c: str, slug: str, states: list[dict[str, Any]], *, width
     states_file = first.with_suffix(".states.json")
     for s in states:
         Path(s["out"]).parent.mkdir(parents=True, exist_ok=True)
-    ctxs = [s.get("labels") if s.get("labels") is not None else dict(NO_LABELS) for s in states]
-    states_file.write_text(json.dumps([{"out": str(s["out"]), "open": s.get("open") or {},
-                                        "labels": [str(lab.get("name") or "") for lab in labels_state(ctx)["labels"]],
-                                        "ids": [str(lab.get("id") or "") for lab in labels_state(ctx)["labels"] if lab.get("id")]}
-                                       for s, ctx in zip(states, ctxs)]), "utf-8")
+    states_file.write_text(json.dumps([{**s, "out": str(s["out"])} for s in states], default=str), "utf-8")
     cmd = ["node", str(SHOT_SCRIPT), "--frame", str(frame_file), "--states", str(states_file), "--viewport",
-           f"{width}x{height}", "--media", media]
+           f"{width}x{height}", *(["--media", media] if media else [])]
     try:
         proc = await asyncio.create_subprocess_exec(*cmd, cwd=str(config.REPO_ROOT), stdin=asyncio.subprocess.PIPE,
                                                     stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
                                                     limit=SHOT_LINE_MAX)
     except OSError as e:
         return failed(f"the headless browser could not start: {e}")
-    fetched: list[set[str]] = [set() for _ in states]  # the record refs each state's reader answers handed its page
-    kept: list[list[Any]] = [[] for _ in states]  # the first `answers` reader answers of each state
     results: list[dict[str, Any]] | None = None
 
     async def reply(obj: dict[str, Any]) -> None:
@@ -1991,33 +2032,9 @@ async def shoot_states(c: str, slug: str, states: list[dict[str, Any]], *, width
                 msg = json.loads(line)
             except ValueError:
                 continue
-            if "fetch" in msg:
-                i = state_of(msg)
-                try:
-                    data = await reader_call(c, slug, "records", msg.get("query"), labels=ctxs[i])
-                    strings: list[str] = []
-                    _strings(data, strings)
-                    fetched[i].update(s for s in strings[:FETCHED_SCAN_MAX] if _RECORD_REF.match(s))
-                    if len(kept[i]) < answers:
-                        kept[i].append(data)
-                    await reply({"id": msg["fetch"], "data": data})
-                except ReaderError as e:
-                    await reply({"id": msg["fetch"], "error": e.message})
-            elif "marks" in msg:
-                i = state_of(msg)
-                refs_in = [str(r) for r in msg.get("refs") or []][:5000]
-                try:
-                    marks = await marks_for(c, slug, refs_in, ctxs[i]) if refs_in else {}
-                except ReaderError:
-                    marks = {}
-                await reply({"id": msg["marks"], "marks": marks, **_state_labels(ctxs[i])})
-            elif "media" in msg:
-                # the script reads the bytes itself, a range at a time; here the path passes the route's checks
-                try:
-                    f, media_type = await asyncio.to_thread(media_file, c, slug, str(msg.get("path") or ""))
-                    await reply({"id": msg["media"], "file": str(f), "type": media_type, "size": f.stat().st_size})
-                except (HTTPException, OSError) as e:
-                    await reply({"id": msg["media"], "error": str(getattr(e, "detail", e))})
+            kind = next((k for k in ("fetch", "marks", "media") if k in msg), None)
+            if kind is not None:
+                await reply({"id": msg[kind], **await answer(kind, state_of(msg), msg)})
             elif msg.get("done"):
                 results = list(msg.get("states") or [])
                 if msg.get("error") and not results:
@@ -2050,9 +2067,6 @@ async def shoot_states(c: str, slug: str, states: list[dict[str, Any]], *, width
         r = dict(results[i]) if i < len(results) and isinstance(results[i], dict) else {"ok": False, "errors": ["the state was not shot"]}
         r.setdefault("errors", [])
         r.setdefault("fetches", 0)
-        r["fetched_records"] = len(fetched[i])
-        if answers:
-            r["answers"] = kept[i]
         if Path(s["out"]).is_file():
             r["png"] = str(s["out"])
         out.append(r)
