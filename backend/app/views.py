@@ -52,6 +52,7 @@ KERNEL = "views"  # the workspace's dedicated kernel for readers
 VIEWS_SUBDIR = "views"
 CACHE_SUBDIR = "cache"
 PROPOSALS_FILE = "proposals.json"
+DELETED_FILE = "deleted.json"  # the proposals the analyst deleted, [{slug, name, counted, ts}] (delete_proposal)
 KEY_REFS_FILE = "key-refs.json"  # view:<slug>/<key> -> {refs, excerpt, label, name}, kept past the view's deletion
 VIEW_JSON, READER_PY, VIEW_HTML = "view.json", "reader.py", "view.html"
 TOOLS_PROMPT = "tools"  # prompts/tools.md, whose lowercase sections are the lines the view tools' results carry
@@ -485,18 +486,22 @@ def read_version(c: str, slug: str, version: str) -> dict[str, Any] | None:
 
 
 def delete_view(c: str, slug: str) -> None:
-    """Remove the view and the proposal it was built from. Its `view:` refs keep resolving through key-refs.json. A
-    built-in
-    viewer is not deleted."""
+    """Remove the view and the proposal it was built from, stopping a change being made to it; it is kept in
+    DELETED_FILE, so the orientation never proposes it again. Its `view:` refs keep resolving through key-refs.json. A
+    built-in viewer is not deleted."""
+    from . import dev  # noqa: PLC0415
+
     d = _view_dirs(c).get(slug)
-    if d is not None:
-        _stop_review(c, slug, forget=True)
     if d is None:
         if _builtin_dir(slug) is not None:
             raise HTTPException(400, f"{slug} is a viewer thimble ships; a workspace view of the same slug overrides it")
         raise HTTPException(404, f"no such view: {slug}")
+    _keep_deleted(c, read_proposal(c, slug) or {"slug": slug, "name": _view_json(d).get("name") or slug})
+    dev.stop_view(c, slug, "deleted")
+    _stop_review(c, slug, forget=True)
     shutil.rmtree(d, ignore_errors=True)
     shutil.rmtree(_versions_dir(c, slug), ignore_errors=True)
+    drop_built_copy(c, slug)
     _forget(c, slug)
     items = list_proposals(c)
     if any(p.get("slug") == slug for p in items):
@@ -1423,14 +1428,38 @@ def title_case(name: Any) -> str:
     return " ".join("-".join(p[:1].upper() + p[1:] for p in w.split("-")) for w in words)
 
 
-# the views an orientation may propose; a viewer it suggests for a file type is not counted, nor a view dropped
-ORIENTATION_VIEWS_MAX = 3
+# the views the orientation may propose in a workspace, those the analyst deleted included; a viewer it suggests for a
+# file type is not counted, nor a view dropped
+VIEW_PROPOSALS_MAX = 4
+
+
+def _counted(p: dict[str, Any]) -> bool:
+    """Whether a proposal counts toward VIEW_PROPOSALS_MAX: the orientation's, neither dropped nor a file-type viewer."""
+    return (bool(p.get("orientation") or p.get("held")) and p.get("status") not in ("dropped", "suggested")
+            and not offered_type_viewer(p.get("claims")))
 
 
 def orientation_views(c: str) -> list[dict[str, Any]]:
-    """The views the orientation proposed that count toward ORIENTATION_VIEWS_MAX."""
-    return [p for p in list_proposals(c) if (p.get("orientation") or p.get("held")) and p.get("status") != "dropped"
-            and p.get("status") != "suggested" and not offered_type_viewer(p.get("claims"))]
+    """The views the orientation proposed that count toward VIEW_PROPOSALS_MAX."""
+    return [p for p in list_proposals(c) if _counted(p)]
+
+
+def deleted_proposals(c: str) -> list[dict[str, Any]]:
+    """The proposals the analyst deleted (delete_proposal), which the orientation cannot propose again."""
+    p = views_dir(c) / DELETED_FILE
+    raw = read_json(p, []) if p.is_file() else []
+    return [x for x in raw if isinstance(x, dict) and x.get("name")] if isinstance(raw, list) else []
+
+
+def _keep_deleted(c: str, prop: dict[str, Any]) -> None:
+    with _proposals_lock:
+        name = str(prop["name"])
+        items = deleted_proposals(c)
+        same = [x for x in items if str(x["name"]).casefold() == name.casefold()]
+        counted = _counted(prop) or any(x.get("counted") for x in same)
+        items = [x for x in items if x not in same]
+        items.append({"slug": prop.get("slug"), "name": name, "counted": counted, "ts": _now()})
+        write_json(views_dir(c) / DELETED_FILE, items)
 
 
 def propose(c: str, name: str, why: str, claims: Any, arrangement: str, proposed_by: str = "analyst",
@@ -1440,8 +1469,9 @@ def propose(c: str, name: str, why: str, claims: Any, arrangement: str, proposed
     name not yet built is replaced under its slug, its build stopped. An `orientation` proposal is stored
     `orientation: true` and, unless `suggested`, `held: true`, queued unannounced until its view passes its checks
     (mark_built); a held proposal proposed again unchanged is left as it is, and changed it is revised (revise), still
-    held. An orientation proposes at most ORIENTATION_VIEWS_MAX views: one more under a new name is refused (409), and
-    one under a name it proposed before improves that view in place.
+    held. A workspace gets at most VIEW_PROPOSALS_MAX views from the orientation, those the analyst deleted included:
+    one more under a new name is refused (409), and one under a name it proposed before improves that view in place.
+    One the analyst deleted is refused (409).
     `asked` says the analyst asked for it. With `suggested` (a viewer for a file type the File browser proposes) it is
     stored `suggested` and not queued until the analyst accepts it (accept). A `spec` (propose_view's fields) is stored
     with the proposal and written out as its `arrangement`."""
@@ -1453,11 +1483,14 @@ def propose(c: str, name: str, why: str, claims: Any, arrangement: str, proposed
         raise HTTPException(400, "a proposal claims at least one file: give `claims` as corpus-relative globs")
     spec = clean_spec(spec)
     hold = orientation and not suggested
-    if hold:
+    if orientation:
+        gone = deleted_proposals(c)
+        if any(str(d["name"]).casefold() == name.casefold() for d in gone):
+            raise HTTPException(409, _hint("propose_view-deleted", view=name))
         mine = orientation_views(c)
-        if len(mine) >= ORIENTATION_VIEWS_MAX and not any(str(p["name"]).casefold() == name.casefold() for p in mine):
-            raise HTTPException(409, _hint("propose_view-cap", view=name, n=ORIENTATION_VIEWS_MAX,
-                                           views=", ".join(str(p["name"]) for p in mine)))
+        spent = [*(str(p["name"]) for p in mine), *(str(d["name"]) for d in gone if d.get("counted"))]
+        if hold and len(spent) >= VIEW_PROPOSALS_MAX and not any(n.casefold() == name.casefold() for n in spent):
+            raise HTTPException(409, _hint("propose_view-cap", view=name, n=VIEW_PROPOSALS_MAX, views=", ".join(spent)))
     arrangement = spec_arrangement(spec) if spec else _lines(arrangement)
     if not arrangement:
         raise HTTPException(400, "a proposal says which records a unit gathers and how the page lays it out (`arrangement`)")
@@ -1722,8 +1755,9 @@ def drop(c: str, slug: str, why: str) -> dict[str, Any] | None:
 
 
 def delete_proposal(c: str, slug: str) -> None:
-    """Dismiss the proposal: its build is stopped, its folder removed, and its view with it when it was built. A change
-    to a built view that is dismissed while it is made stops, and the view is put back as it was."""
+    """Delete the proposal: its build is stopped, its folder removed, and its view with it when it was built; it is kept
+    in DELETED_FILE, so the orientation never proposes it again. A change to a built view that is dismissed while it is
+    made stops, and the view is put back as it was."""
     from . import dev  # noqa: PLC0415
 
     with _proposals_lock:
@@ -1738,6 +1772,7 @@ def delete_proposal(c: str, slug: str) -> None:
             return
         _stop_build(c, slug, "dismissed")
         _save_proposals(c, [p for p in list_proposals(c) if p.get("slug") != slug])
+        _keep_deleted(c, hit)
         if hit.get("status") == "suggested":
             for suffix in {s for g in hit.get("claims") or [] if (s := type_suffix(g))}:
                 _answer_suffix(c, suffix, "dismissed")

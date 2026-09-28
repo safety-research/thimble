@@ -327,6 +327,30 @@
   border-radius: var(--radius-ui);
   font-size: var(--text-ui-sm);
 }
+/* an option with an × at its top right corner, shown on hover (SegmentedOption onRemove) */
+.seg-removable {
+  position: relative;
+  display: inline-flex;
+}
+.seg-remove.btn {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  width: 16px;
+  height: 16px;
+  min-height: 0;
+  padding: 0;
+  border-radius: 50%;
+  background: var(--surface-card);
+  box-shadow: 0 0 0 1px var(--chip-edge);
+  color: var(--text-tertiary);
+  opacity: 0;
+  transition: opacity var(--dur-fast) var(--ease-out);
+}
+.seg-removable:hover .seg-remove.btn,
+.seg-remove.btn:focus-visible {
+  opacity: 1;
+}
 /* an option that is a glyph alone, named in the tooltip: a square, as an icon button is */
 .seg-opt.seg-glyph {
   padding: 0;

@@ -78,7 +78,7 @@ After a follow-up, edit each card its answer changes and add a card only for wha
 
 #### Views
 
-A view is a page that shows the corpus's records in a form their files hide. Propose up to three with `propose_view`: up to two early, whose form the survey makes clear, and one that emerges from the analysis. Each is built and checked in the background and reaches the analyst once it works. Propose one again under its name only when the analysis changed what it must show, and change only that: a view is improved, never replaced.
+A view is a page that shows the corpus's records in a form their files hide. Propose up to four with `propose_view`: up to two early, whose form the survey makes clear, and up to two that emerge from the analysis. Each is built and checked in the background and reaches the analyst once it works. Propose one again under its name only when the analysis changed what it must show, and change only that: a view is improved, never replaced.
 
 These are ideas, not a menu. A view can take any form that helps the analyst read the records.
 
@@ -88,7 +88,7 @@ These are ideas, not a menu. A view can take any form that helps the analyst rea
 
 Labels are first class. Every view shows the labels that are on as marks on its records and chart marks, and obeys the Labels pane's filter. Labels mark lines of text files, so a view reads the files whose lines hold its records.
 
-For a file type the files view shows only as raw text or bytes, propose a viewer with the extension's glob as its claim, such as `**/*.vtt`. The File browser offers it beside Raw, and it is not one of the three.
+For a file type the files view shows only as raw text or bytes, propose a viewer with the extension's glob as its claim, such as `**/*.vtt`. The File browser offers it beside Raw, and it is not one of the four.
 
 #### The report
 

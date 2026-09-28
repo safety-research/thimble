@@ -691,7 +691,11 @@ No file of the corpus matches {claims}, so the view was not proposed and the dev
 
 ## propose_view-cap
 
-{view} was not proposed: an orientation proposes at most {n} views, and yours are {views}. To improve one, propose it again under its name.
+{view} was not proposed: a workspace gets at most {n} views from the orientation, and it has had {views}, counting any the analyst deleted. To improve one, propose it again under its name.
+
+## propose_view-deleted
+
+{view} was not proposed: the analyst deleted it, so it is not proposed again.
 
 ## propose_view-near
 

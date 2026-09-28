@@ -159,6 +159,28 @@ async def test_a_reader_resolves_a_line_and_a_key_and_its_answer_is_kept(ws, inp
     assert list((ws / "views" / "threads" / "cache").glob("*.index.pickle"))
 
 
+async def test_a_workspace_gets_four_views_from_the_orientation_and_a_deleted_one_stays_deleted(ws, monkeypatch):
+    monkeypatch.setattr(views, "_queue", lambda c, slug: None)
+
+    def propose(name, **k):
+        return views.propose(CORPUS, name, "The posts.", ["board.jsonl"], "Unit: a post", **k)
+
+    first = [propose(n, orientation=True) for n in ("One", "Two", "Three", "Four")]
+    with pytest.raises(views.HTTPException) as e:
+        propose("Five", orientation=True)
+    assert e.value.status_code == 409
+    assert propose("Two", orientation=True)["slug"] == first[1]["slug"], "one of the four is improved under its name"
+    # the analyst deletes a proposal and a view: neither frees a place or comes back, and their own asks still build
+    views.delete_proposal(CORPUS, first[0]["slug"])
+    views.delete_view(CORPUS, "threads")
+    for name in ("One", "Threads", "Five"):
+        with pytest.raises(views.HTTPException) as e:
+            propose(name, orientation=True)
+        assert e.value.status_code == 409, name
+    assert propose("One", asked=True)["status"] == "queued"
+    assert [p["name"] for p in views.list_proposals(CORPUS)] == ["Two", "Three", "Four", "One"]
+
+
 def test_the_frame_document_blocks_every_host_before_any_script(ws):
     doc = views.frame_document(views.read_view(CORPUS, "threads"))
     assert doc.lower().startswith("<!doctype html>")

@@ -1,7 +1,7 @@
 // Files' views: File browser, then every view written for this corpus, one exclusive choice (Segmented), a view whose
 // newer version builds or is reviewed with its name shimmering; then proposals not built yet (spinner while building, a
 // still warning dot while its session waits for permission, ✕ and Retry on failure); then New view, a field that asks
-// main for one. A row
+// main for one. A view or a proposal shows × on hover, which deletes it once confirmed. A row
 // across the top of Files, or, while Files shows in a pane beside another, in that pane's head (`compact`, portalled by
 // FilesTab), where what does not fit goes in a ⋯ menu (viewsFit.ts). Refetches on bus `view`.
 import { useEffect, useLayoutEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
@@ -106,10 +106,11 @@ export function buildLabel(status: Proposal['status'], asking: boolean): string 
 }
 
 /** A proposal in the bar: the view's button as the bar draws a view, its state after the name, a click that opens the
- * build's thread; for a failed build (a view the analyst asked for) Retry beside it; × on hover to dismiss it. A viewer
+ * build's thread; for a failed build (a view the analyst asked for) Retry beside it; × on hover to delete it (`onDismiss`
+ * gets the proposal's box, which a confirm sits by). A viewer
  * suggested for a file type (in the File browser's mode row) wears the sparkle, shows its `why` on hover, and a click
  * builds it (`onAccept` runs then). */
-export function ProposalOption({ ws, p, onDismiss, onAccept, size, asking = false }: { ws: string; p: Proposal; onDismiss: () => void; onAccept?: () => void; size: 'md' | 'lg'; asking?: boolean }) {
+export function ProposalOption({ ws, p, onDismiss, onAccept, size, asking = false }: { ws: string; p: Proposal; onDismiss: (at: HTMLElement) => void; onAccept?: () => void; size: 'md' | 'lg'; asking?: boolean }) {
   const [retrying, setRetrying] = useState(false)
   const [accepting, setAccepting] = useState(false)
   const suggested = p.status === 'suggested' && !accepting
@@ -137,7 +138,7 @@ export function ProposalOption({ ws, p, onDismiss, onAccept, size, asking = fals
   }
   const mark = <Mark kind="failed" className="files-proposal-mark" />
   return (
-    <span className={`seg seg-${size} files-proposal`} data-status={accepting ? 'queued' : p.status}>
+    <span className={`seg seg-${size} files-proposal seg-removable`} data-status={accepting ? 'queued' : p.status}>
       <button
         type="button"
         className="seg-opt files-proposal-opt"
@@ -170,7 +171,7 @@ export function ProposalOption({ ws, p, onDismiss, onAccept, size, asking = fals
           Retry
         </Button>
       )}
-      <Button variant="icon" size="sm" icon="x" title="Dismiss" aria-label={`Dismiss ${p.name}`} className="files-proposal-x" onClick={onDismiss} />
+      <Button variant="icon" size="sm" icon="x" title="Delete" aria-label={`Delete ${p.name}`} className="seg-remove" onClick={(e) => onDismiss(e.currentTarget.parentElement ?? e.currentTarget)} />
     </span>
   )
 }
@@ -188,8 +189,17 @@ interface Props {
 /** The ⋯ menu's note after a proposal's name: its build's state. */
 const STATE_NOTE: Partial<Record<Proposal['status'], string>> = { queued: 'queued', building: 'building', failed: 'failed' }
 
+/** What the × of a view or a proposal asks to delete, and the box the confirm sits by. */
+interface Removing {
+  slug: string
+  name: string
+  view: boolean
+  at: HTMLElement
+}
+
 export function ViewsBar({ ws, value, onChange, views, proposals, compact = false }: Props) {
   const [gone, setGone] = useState<Set<string>>(new Set())
+  const [removing, setRemoving] = useState<Removing | null>(null)
   const [askAt, setAskAt] = useState<HTMLButtonElement | null>(null)
   const [asking, setAsking] = useState(false)
   const [ask, setAsk] = useState('')
@@ -211,18 +221,21 @@ export function ViewsBar({ ws, value, onChange, views, proposals, compact = fals
       else next.delete(slug)
       return next
     })
-  const dismiss = async (p: Proposal) => {
-    track('view-dismiss', { target: `view:${p.slug}` })
-    hide(p.slug, true)
+  const remove = async ({ slug, name, view }: Removing) => {
+    setRemoving(null)
+    track('view-dismiss', { target: `view:${slug}` })
+    hide(slug, true)
+    if (value === viewKey(slug)) onChange(BROWSER)
     try {
-      await api.deleteProposal(ws, p.slug)
+      await (view ? api.deleteView(ws, slug) : api.deleteProposal(ws, slug))
       await refreshProposals(ws)
     } catch (e) {
-      bus.emit('toast', { text: `Could not remove ${p.name}. ${(e as Error).message}`, kind: 'error' })
+      bus.emit('toast', { text: `Could not delete ${name}. ${(e as Error).message}`, kind: 'error' })
     } finally {
-      hide(p.slug, false)
+      hide(slug, false)
     }
   }
+  const dismiss = (p: Proposal, at: HTMLElement) => setRemoving({ slug: p.slug, name: p.name, view: false, at })
   const sendAsk = () => {
     const text = ask.trim()
     if (!text) return
@@ -240,7 +253,18 @@ export function ViewsBar({ ws, value, onChange, views, proposals, compact = fals
 
   const options: { value: string; label: string; icon: IconName; anchor?: string; dot?: boolean; note?: string; className?: string }[] = [
     { value: BROWSER, label: 'File browser', icon: 'folder-open' },
-    ...views.map((v) => ({ value: viewKey(v.slug), label: v.name, icon: 'view' as const, anchor: `view:${v.slug}`, dot: ready.includes(v.slug) || updated.includes(v.slug), note: ready.includes(v.slug) ? 'new' : updated.includes(v.slug) ? 'updated' : undefined, className: v.updating || v.review?.state === 'running' ? 'is-updating' : undefined })),
+    ...views
+      .filter((v) => !gone.has(v.slug))
+      .map((v) => ({
+        value: viewKey(v.slug),
+        label: v.name,
+        icon: 'view' as const,
+        anchor: `view:${v.slug}`,
+        dot: ready.includes(v.slug) || updated.includes(v.slug),
+        note: ready.includes(v.slug) ? 'new' : updated.includes(v.slug) ? 'updated' : undefined,
+        className: v.updating || v.review?.state === 'running' ? 'is-updating' : undefined,
+        ...(v.builtin ? {} : { removeLabel: `Delete ${v.name}`, onRemove: (at: HTMLElement) => setRemoving({ slug: v.slug, name: v.name, view: true, at }) }),
+      })),
   ]
   const pending = proposals.filter((p) => !gone.has(p.slug))
   // the builds whose session waits for permission, read from their chats only while a build runs
@@ -281,6 +305,23 @@ export function ViewsBar({ ws, value, onChange, views, proposals, compact = fals
     ...hiddenProposals.map((p) => ({ id: `p:${p.slug}`, label: p.name, icon: 'view' as const, note: askingFor(p) ? 'waiting for permission' : STATE_NOTE[p.status], disabled: !p.chat, onSelect: () => openBuild(p) })),
   ]
 
+  const confirm = (
+    <Popover anchor={removing?.at} open={!!removing} onClose={() => setRemoving(null)} label={removing ? `Delete ${removing.name}` : 'Delete'} className="files-views-delete" width={280}>
+      {removing && (
+        <div className="files-views-delete-body">
+          <p>Delete {removing.name}? It will not be proposed again.</p>
+          <div className="files-views-delete-actions">
+            <Button size="sm" onClick={() => setRemoving(null)}>
+              Cancel
+            </Button>
+            <Button size="sm" variant="secondary" className="files-views-delete-go" onClick={() => void remove(removing)}>
+              Delete
+            </Button>
+          </div>
+        </div>
+      )}
+    </Popover>
+  )
   const newView = (
     <Popover anchor={askAt} open={asking} onClose={() => setAsking(false)} label="New view" className="files-views-ask">
       <form
@@ -306,12 +347,13 @@ export function ViewsBar({ ws, value, onChange, views, proposals, compact = fals
       <div className="files-views" aria-label="Views" onPointerDown={dragOut}>
         <Segmented label="Views" size="lg" value={value} onChange={onChange} options={options} />
         {pending.map((p) => (
-          <ProposalOption key={p.slug} ws={ws} p={p} size="lg" asking={askingFor(p)} onDismiss={() => void dismiss(p)} />
+          <ProposalOption key={p.slug} ws={ws} p={p} size="lg" asking={askingFor(p)} onDismiss={(at) => dismiss(p, at)} />
         ))}
         <Button ref={setAskAt} icon="plus" className="files-views-new" active={asking} onClick={() => setAsking((o) => !o)}>
           New view
         </Button>
         {newView}
+        {confirm}
       </div>
     )
 
@@ -346,7 +388,7 @@ export function ViewsBar({ ws, value, onChange, views, proposals, compact = fals
         {pending
           .filter((_, i) => shows(options.length + i))
           .map((p) => (
-            <ProposalOption key={p.slug} ws={ws} p={p} size="md" asking={askingFor(p)} onDismiss={() => void dismiss(p)} />
+            <ProposalOption key={p.slug} ws={ws} p={p} size="md" asking={askingFor(p)} onDismiss={(at) => dismiss(p, at)} />
           ))}
         {overflow.length > 0 && (
           <span className="files-views-more">
@@ -356,6 +398,7 @@ export function ViewsBar({ ws, value, onChange, views, proposals, compact = fals
         )}
         <Button ref={setAskAt} variant="icon" size="sm" icon="plus" title="New view" aria-label="New view" className="files-views-new" active={asking} onClick={() => setAsking((o) => !o)} />
         {newView}
+        {confirm}
       </div>
     </>
   )

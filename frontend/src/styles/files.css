@@ -114,28 +114,29 @@
   min-height: 0;
   padding: 0 6px;
 }
-.files-proposal-x.btn {
-  position: absolute;
-  top: -6px;
-  right: -6px;
-  width: 16px;
-  height: 16px;
-  min-height: 0;
-  padding: 0;
-  border-radius: 50%;
-  background: var(--surface-card);
-  box-shadow: 0 0 0 1px var(--chip-edge);
-  color: var(--text-tertiary);
-  opacity: 0;
-  transition: opacity var(--dur-fast) var(--ease-out);
-}
-.files-proposal:hover .files-proposal-x.btn,
-.files-proposal-x.btn:focus-visible {
-  opacity: 1;
-}
 .files-views-new.btn {
   flex: none;
   font-weight: 400;
+}
+/* the confirm a view's or a proposal's × opens */
+.files-views-delete-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+}
+.files-views-delete-body p {
+  margin: 0;
+  font: 400 var(--text-ui-sm) / 1.45 var(--font-body);
+  color: var(--text-primary);
+}
+.files-views-delete-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+}
+.files-views-delete-go.btn {
+  color: var(--status-negative);
 }
 .files-views-ask.popover {
   width: 300px;
