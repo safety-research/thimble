@@ -43,7 +43,9 @@ cd frontend && npx vitest run --config vitest.browser.config.ts tests/public/bro
 ```
 
 The backend's tests run on a small synthetic corpus (`backend/tests_public/mini_corpus.py`) and fake every model call
-and Claude Code session. A change to behaviour comes with a test on synthetic data.
+and Claude Code session. The tests cover what must not break, not every feature: install and update, the server, the
+security boundaries, the permission flow, the analysis loop and views. A change to one of these comes with a test on
+synthetic data; a test does not pin wording, copy or layout.
 
 ## Layout
 
