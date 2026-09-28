@@ -110,6 +110,15 @@ Define a category, apply it to every unit of a scope, and get the counts per val
     "values": {"type": "array", "items": {"type": "string"}, "description": "Positive first. Default yes and no."},
     "paths": {"type": "array", "items": {"type": "string"}, "description": "Globs, for files."},
     "limit": {"type": "integer", "description": "Units to label, for a trial."},
+    "within": {
+      "type": "object",
+      "properties": {
+        "label": {"type": "string"},
+        "value": {"type": "string", "description": "Default its first."}
+      },
+      "required": ["label"],
+      "description": "For files: label only the records another label gave this value, such as the few a regex or code label kept before a prompt label reads them."
+    },
     "comment": {"type": "boolean", "description": "A one-line reason per unit."},
     "filter": {"type": "boolean", "description": "Make it the scope's filter."},
     "group": {"type": "string"}

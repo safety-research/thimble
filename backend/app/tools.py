@@ -2267,14 +2267,18 @@ async def _h_apply_label(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
     if target:
         _note_group(ctx, target)
     question = " ".join(str(args.get("question") or "").split()) or None
+    within = args.get("within") or None
+    if isinstance(within, str):
+        within = {"label": within}
     s = await concepts.apply_scoped(ctx.c, scope=scope, name=name, kind=kind, text=text, values=values, paths=paths, limit=limit,
                                     comment=bool(args.get("comment")), filter=bool(args.get("filter")),
                                     created_by=ctx.created_by, chat=ctx.chat, group=target, question=question,
-                                    card=not orienting)
+                                    card=not orienting, within=within)
     counts = ", ".join(f"{k} {v}" for k, v in sorted((s.get("counts") or {}).items()))
     unit = UNIT_WORDS.get(str(s.get("unit") or ""), s.get("unit") or "unit")
     line = (f"applied label {s.get('name', name)} [[concept:{s.get('concept')}]] over {s.get('total', 0)} {unit}(s)"
-            f"{' in ' + ', '.join(paths) if scope == 'files' else ''}: {counts or 'no values yet'}.")
+            f"{' in ' + ', '.join(paths) if scope == 'files' else ''}{' within ' + within['label'] if within else ''}: "
+            f"{counts or 'no values yet'}.")
     if s.get("unchanged"):
         line += " " + hint("apply_label-unchanged")
     if s.get("partial"):

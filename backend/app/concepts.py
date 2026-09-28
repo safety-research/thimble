@@ -16,6 +16,8 @@ Trials: apply_label with a `limit` defines a trial (`trial: true`), left out of 
 a run without a limit makes it a label; a limited run over files samples its units across files (trial_sample).
 The same predicate again: re-applying a label with the same definition (same_definition) keeps its version and rows,
 and runs only over what its rows do not cover (covered).
+Within: a label over records may run only over the records another label gave one value (`within {label, value}`, kept
+on the concept), such as a prompt label over the few records a regex or code label kept in a large corpus.
 The analyst's labels: a label run from the browser gets a card and main hears of it (`labeled`, tell_main) once per
 version. A label that ran before without a card (such as the orientation's) keeps having none.
 Revisions: `rev` counts changes to a label's rows (redefinition, correction, a finished run; note_change). A card that
@@ -337,7 +339,15 @@ def _normalize(concept_id: str, data: Any) -> dict:
         "changes": _changes_field(data.get("changes")),
         "applications": applications,
         "label_stats": _label_stats_field(data.get("label_stats")),
+        "within": _within_field(data.get("within")) if unit == "record" else None,
     }
+
+
+def _within_field(v: Any) -> dict | None:
+    """`within` as stored: {label: an id, value}, else None."""
+    if not isinstance(v, dict) or not ID_RE.match(str(v.get("label") or "")) or not str(v.get("value") or ""):
+        return None
+    return {"label": str(v["label"]), "value": str(v["value"])}
 
 
 def _changes_field(v: Any) -> list[dict]:
@@ -1054,6 +1064,46 @@ def iter_units(corpus_dir: Path, sources: list[dict], unit: str) -> Iterator[Uni
                     yield f"{s['path']}#L{line}", text
 
         yield Unit(g["ref"], g["paths"], texts)
+
+
+def resolve_within(ws: Path, within: Any) -> dict | None:
+    """An apply's `within` {label: a name or id, value?} as stored ({label: its id, value}), the value its first when
+    none is given; None for none. 400 for a label that is not over records or a value it does not have."""
+    if not within:
+        return None
+    if not isinstance(within, dict) or not str(within.get("label") or "").strip():
+        raise HTTPException(400, "within names a label over records: {label, value}")
+    k = find_concept(ws, str(within["label"]).strip())
+    if k is None:
+        raise HTTPException(400, f"within: no label {within['label']!r}")
+    if k["unit"] != "record":
+        raise HTTPException(400, f"within: the label {k['name']!r} is not over records")
+    value = str(within.get("value") or "").strip() or (k["labels"][0] if k["labels"] else "")
+    if value not in k["labels"]:
+        raise HTTPException(400, f"within: the label {k['name']!r} has no value {value!r}; its values are {', '.join(k['labels'])}")
+    return {"label": k["id"], "value": value}
+
+
+def within_units(ws: Path, corpus_dir: Path, sources: list[dict], within: dict) -> list[Unit]:
+    """The records of the sources that the label `within` names gave its value, in corpus order. Blocking (a thread)."""
+    st = _store_ready(ws, within["label"])
+    rows, _total, _next = st.rows(within["value"], PROMPT_APPLY_MAX + 1) if st is not None else ([], 0, None)
+    lines: dict[str, set[int]] = {}
+    for r in rows:
+        path, line = labels_store.ref_parts(str(r.get("ref") or ""))
+        if path is not None and line:
+            lines.setdefault(path, set()).add(int(line))
+    out: list[Unit] = []
+    for src in sources:
+        want = sorted(lines.get(src["path"], ()))
+        if not want:
+            continue
+        path = config.safe_corpus_path(corpus_dir, src["path"])
+        for n in want:
+            for r in corpus.load_records(path, src["path"], src["kind"], n, n):
+                ref, text = f"{src['path']}#L{r['line']}", "\n\n".join(b["text"] for b in r["blocks"])
+                out.append(Unit(ref, [src["path"]], lambda ref=ref, text=text: iter([(ref, text)]), r["record"]))
+    return out
 
 
 TRIAL_SKIP_LINES = 8  # a trial's pick that lands on a blank line takes the next record with words within this many lines
@@ -2236,6 +2286,7 @@ async def run_apply(c: str, concept_id: str, paths: list[str] | None = None, lim
         _notify(c, concept_id, "defined")
     version = concept["version"]
     unit = concept["unit"]
+    within = concept.get("within") if unit == "record" else None
     patterns = _patterns(paths) if unit in FILE_UNITS else []
     corpus_dir = config.corpus_dir(c)
     if unit in FILE_UNITS:
@@ -2271,7 +2322,15 @@ async def run_apply(c: str, concept_id: str, paths: list[str] | None = None, lim
             if unit in FILE_UNITS:
                 index = await _index_sources(c, concept_id, corpus_dir, sources, unit, cancel)
                 matched = index["total"]
-                if scope_groups is not None:
+                if within:
+                    units = await asyncio.to_thread(within_units, ws, corpus_dir, sources, within)
+                    if concept["kind"] == "prompt" and not limit and len(units) > PROMPT_APPLY_MAX:
+                        raise HTTPException(400, prompt_apply_too_wide(len(units), len(sources), len(sources), unit))
+                    matched = len(units)
+                    if limit and len(units) > limit:
+                        units = [units[i] for i in spread(len(units), limit)]
+                    total = len(units)
+                elif scope_groups is not None:
                     total, matched = matched, scope_groups
                 elif limit:
                     lines = {p: int(i.get("lines") or 0) for p, i in index["files"].items()}
@@ -2286,8 +2345,9 @@ async def run_apply(c: str, concept_id: str, paths: list[str] | None = None, lim
                     units = [units[i] for i in spread(len(units), limit)]
                 total = len(units)
             _progress(c, concept_id, total=total, matched_total=matched)
-            # what the kinds below run over: the sampled records of a trial, else the whole scope
-            sampled = unit == "record" and bool(limit)
+            # what the kinds below run over: the sampled records of a trial or the records `within` names, else the
+            # whole scope
+            sampled = unit == "record" and (bool(limit) or bool(within))
             if examples and concept["kind"] == "prompt":
                 few = await asyncio.to_thread(few_shot_examples, ws, concept, corpus_dir)
                 concept = {**concept, "examples": few}
@@ -2333,7 +2393,8 @@ async def run_apply(c: str, concept_id: str, paths: list[str] | None = None, lim
             # `limit` and `stopped` say what the run covered, which an apply of the same predicate reads (covered)
             app = {"ts": started, "paths": patterns, "total": total, "matched_total": matched, "labeled": labeled, "failed": failed,
                    "matches": int(state.get("matches") or 0), "status": "done", "message": message, "created_by": created_by,
-                   "version": version, "examples": len(concept.get("examples") or []), "limit": limit, "stopped": cancel.is_set()}
+                   "version": version, "examples": len(concept.get("examples") or []), "limit": limit, "stopped": cancel.is_set(),
+                   "within": within}
             concept = (_record_application(ws, concept_id, app, calibration, _stored_stats(file_key, stats))
                        or {**concept, "calibration": calibration})
             summary = {**app, "run_id": run_id, "concept": concept_id, "name": concept["name"], "unit": concept["unit"],
@@ -2419,14 +2480,14 @@ def no_files_match(corpus_dir: Path, patterns: list[str]) -> str:
     return f"no files match {patterns}"
 
 
-def scope_sources(c: str, unit: str, kind: str, patterns: list[str], limit: int | None) -> list[dict]:
+def scope_sources(c: str, unit: str, kind: str, patterns: list[str], limit: int | None, within: bool = False) -> list[dict]:
     """The sources an apply of a file unit runs over, or HTTPException(400) when it cannot run: no file matches, or a
-    prompt label would run over the whole of a big corpus with no limit. Blocking (a thread)."""
+    prompt label would run over the whole of a big corpus with neither a limit nor `within`. Blocking (a thread)."""
     corpus_dir = config.corpus_dir(c)
     sources = match_paths(corpus_dir, patterns)
     if not sources:
         raise HTTPException(400, no_files_match(corpus_dir, patterns))
-    if kind == "prompt" and not limit and not narrowing(patterns):
+    if kind == "prompt" and not limit and not within and not narrowing(patterns):
         # a prompt label needs a model call per BATCH_ITEMS units; over a whole big corpus that is unbounded, so past
         # PROMPT_APPLY_MAX units the analyst must cap it or name the files
         n, read = units_at_least(corpus_dir, sources, unit, PROMPT_APPLY_MAX)
@@ -2448,7 +2509,8 @@ async def start_apply(c: str, concept_id: str, paths: list[str] | None = None, l
     limit = int(limit) if limit else None
     if concept["unit"] in FILE_UNITS:
         if sources is None:
-            sources = await asyncio.to_thread(scope_sources, c, concept["unit"], concept["kind"], patterns, limit)
+            sources = await asyncio.to_thread(scope_sources, c, concept["unit"], concept["kind"], patterns, limit,
+                                              bool(concept.get("within")))
     else:
         patterns, sources = [], []
     if running_apply(c, concept_id) is not None:
@@ -2989,6 +3051,8 @@ def covered(c: str, concept: dict, patterns: list[str], limit: int | None) -> bo
     last = concept["applications"][-1] if concept["applications"] else None
     if not last or last.get("status") != "done" or last.get("version") != concept["version"] or last.get("stopped"):
         return False
+    if (last.get("within") or None) != (concept.get("within") or None):
+        return False
     whole = last.get("limit") is None and last.get("total") == last.get("matched_total")
     if concept["unit"] in FILE_UNITS:
         if sorted(_patterns(last.get("paths"))) != sorted(_patterns(patterns)):
@@ -3036,10 +3100,11 @@ def _follow(c: str, concept: dict) -> Callable[[Any], Any]:
 
 async def apply_scoped(c: str, *, scope: str, name: str, kind: str, text: str, values: list[str] | None, paths: list[str] | None,
                        limit: int | None, comment: bool, filter: bool, created_by: str, chat: str | None, group: str | None,
-                       question: str | None = None, card: bool = True) -> dict:
+                       question: str | None = None, card: bool = True, within: Any = None) -> dict:
     """Define a label from a predicate and apply it over one scope: the concept, its card in `group` asking `question` unless
     `card` is False or the label ran before without one, the run in the background followed by an agent chat of role
-    `labels`, and with `filter` the scope's filter set to the positive value. A `limit` makes a new label a trial. The same
+    `labels`, and with `filter` the scope's filter set to the positive value. `within` {label, value?} runs a label over
+    records only over the records that label gave that value (its first by default). A `limit` makes a new label a trial. The same
     predicate under the same name starts no run when its rows already cover the call (`unchanged: true`). Returns after
     APPLY_WAIT_S at the latest, with `stale`, the ids of cards that read the label at an older revision."""
     if scope not in SCOPES:
@@ -3054,11 +3119,18 @@ async def apply_scoped(c: str, *, scope: str, name: str, kind: str, text: str, v
     # what the run would refuse is refused before the label is defined, so a failed apply leaves no empty label behind
     if kind == "regex":
         _compiled({"spec": text})
-    sources = await asyncio.to_thread(scope_sources, c, unit, kind, _patterns(paths), limit) if unit in FILE_UNITS else None
     ws = _ws(c)
+    if within and unit != "record":
+        raise HTTPException(400, "within narrows a label over records of files")
+    narrowed = resolve_within(ws, within)
+    sources = (await asyncio.to_thread(scope_sources, c, unit, kind, _patterns(paths), limit, bool(narrowed))
+               if unit in FILE_UNITS else None)
     prior = find_concept(ws, name)
     concept = define_concept(c, name, text if kind == "prompt" else "", kind, "" if kind == "prompt" else text, unit, values, author,
                              glob=", ".join(_patterns(paths)) if unit in FILE_UNITS else "", trial=limit is not None)
+    if unit == "record" and concept.get("within") != narrowed:
+        concept["within"] = narrowed
+        write_concept(ws, concept)
     same = prior is not None and prior["id"] == concept["id"] and prior["version"] == concept["version"]
     if concept["told"] != concept["version"]:  # a chat defined it, so main need not hear of it (tell_main)
         concept["told"] = concept["version"]
