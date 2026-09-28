@@ -634,7 +634,7 @@ EXAMPLES = {
                                                 "view:incident-timeline/2026-05-16T08:00..2026-05-16T09:00"]),
     "repository": ("repository", ["view:repository/r1/pull/11", "view:repository/r3", "view:repository/r2/issues/6",
                                   "view:repository/r3/discussions/2", "view:repository/r4/agents/moss"]),
-    "linked-sessions": ("linked-sessions", ["view:linked-sessions/r1", "view:linked-sessions/r1-client-port"]),
+    "linked-sessions": ("linked-sessions", ["view:linked-sessions/r1", "view:linked-sessions/a07a4da7"]),
 }
 
 
@@ -676,17 +676,33 @@ async def test_every_worked_example_answers_the_checks_over_its_sample(name, sam
 
 def test_each_worked_example_describes_its_files():
     """A builder maps an example onto other data by what its files hold: view.json's `data` and the reader's opening
-    comment name each claimed file and each field of its records, and the sample holds those files."""
+    comment name each claim and each top-level field of the records it matches, and the sample holds files for each."""
     for name in EXAMPLES:
         d = views.EXAMPLES_DIR / name
         raw = json.loads((d / "view.json").read_text("utf-8"))
         comment = (d / "reader.py").read_text("utf-8").split("\nimport ", 1)[0]
+        sample = sorted(p.relative_to(d / "sample").as_posix() for p in (d / "sample").rglob("*") if p.is_file())
         for claim in raw["claims"]:
-            assert (d / "sample" / claim).is_file(), (name, claim)
-            fields = set().union(*(json.loads(ln) for ln in (d / "sample" / claim).read_text("utf-8").splitlines()))
+            files = [f for f in sample if views.glob_matches(f, claim)]
+            assert files, (name, claim)
             assert claim in raw["data"] and claim in comment, (name, claim)
-            for field in fields:
-                assert f"`{field}`" in raw["data"] and re.search(rf"^#   {field} ", comment, re.M), (name, claim, field)
+            for f in files:
+                for field in _top_fields(d / "sample" / f):
+                    assert f"`{field}`" in raw["data"] and re.search(rf"^#   {field} ", comment, re.M), (name, f, field)
+
+
+def _top_fields(path: Path) -> set[str]:
+    """The top-level fields of a .json document, or of each line of a JSON-lines file that parses."""
+    text = path.read_text("utf-8")
+    if path.suffix == ".json":
+        doc = json.loads(text)
+        return set(doc) if isinstance(doc, dict) else set()
+    out: set[str] = set()
+    for ln in text.splitlines():
+        with contextlib.suppress(ValueError):
+            r = json.loads(ln)
+            out |= set(r) if isinstance(r, dict) else set()
+    return out
 
 
 async def test_the_incident_timeline_example_puts_every_source_on_one_axis_and_gathers_its_units(samples, inproc,
@@ -762,34 +778,54 @@ async def test_the_repository_example_compares_any_runs_and_filters_by_who_did_w
     assert {row[2] for row in marked["activity"]["rows"]} == {0} and 0 < marked["total"] < pulls["total"]
 
 
+def _transcripts(d: Path) -> dict[str, list[dict]]:
+    """The sample's transcripts by session id (a lead's file name, a subagent's agent id), each line that parses once."""
+    out = {}
+    for p in sorted(d.glob("runs/**/*.jsonl")):
+        seen, lines = set(), []
+        for ln in p.read_text("utf-8").splitlines():
+            with contextlib.suppress(ValueError):
+                r = json.loads(ln)
+                if r["uuid"] not in seen:
+                    seen.add(r["uuid"])
+                    lines.append(r)
+        out[p.stem.removeprefix("agent-")] = lines
+    return out
+
+
+def _uses(lines: list[dict]) -> list[dict]:
+    return [b for r in lines if isinstance(r["message"]["content"], list) for b in r["message"]["content"] if b["type"] == "tool_use"]
+
+
 async def test_the_linked_sessions_example_lays_each_run_out_as_a_tree_and_compares_sessions(samples, inproc, bound):
     """Each run's sessions come in tree order, a subagent after the session that spawned it, and every call is counted
     once; a field filter's counts hold every other filter; a session's transcript holds its messages, its calls and its
     subagents' returns; and a comparison counts each group's calls, a session's subagents included."""
     slug = _save_example("linked-sessions")
     d = samples / "linked-sessions"
-    sessions = [json.loads(ln) for ln in (d / "sessions.jsonl").read_text("utf-8").splitlines()]
-    calls = [json.loads(ln) for ln in (d / "calls.jsonl").read_text("utf-8").splitlines()]
+    files = _transcripts(d)
+    n_calls = sum(len(_uses(lines)) for lines in files.values())
     ov = await views.reader_call("linked-sessions", slug, "records", {"op": "overview"})
-    assert len(ov["calls"]) == ov["total"] == len(calls) and len(ov["sessions"]) == len(sessions)
+    assert len(ov["calls"]) == ov["total"] == n_calls and len(ov["sessions"]) == len(files)
     seen = set()
     for s in ov["sessions"]:
         assert s["parent"] is None or s["parent"] in seen, "a subagent comes after the session that spawned it"
         seen.add(s["id"])
     errors = await views.reader_call("linked-sessions", slug, "records", {"op": "overview", "filters": {"outcome": ["ok", "denied"]}})
     assert {c["out"] for c in errors["calls"]} == {"error"}
-    assert sum(x["n"] for x in errors["fields"]["outcome"]) == len(calls), "the outcome's own counts leave its filter out"
+    assert sum(x["n"] for x in errors["fields"]["outcome"]) == n_calls, "the outcome's own counts leave its filter out"
     assert sum(x["n"] for x in errors["fields"]["tool"]) == len(errors["calls"])
-    lead = next(s for s in sessions if s["run"] == "r1" and s["parent"] is None)
-    t = await views.reader_call("linked-sessions", slug, "records", {"op": "session", "id": lead["id"]})
-    kids = {s["id"] for s in sessions if s["parent"] == lead["id"]}
-    assert {i["child"] for i in t["items"] if i["kind"] == "return"} == kids
+    lead = next(p.stem for p in (d / "runs" / "r1").glob("*.jsonl"))
+    t = await views.reader_call("linked-sessions", slug, "records", {"op": "session", "id": lead})
+    returned = {i["child"] for i in t["items"] if i["kind"] == "return"}
+    assert len(returned) == sum(u["name"] in ("Task", "Agent") for u in _uses(files[lead])) > 0
+    assert all((d / "runs" / "r1" / lead / "subagents" / f"agent-{k}.jsonl").is_file() for k in returned)
     assert t["items"][0]["kind"] == "prompt" and sum(i["kind"] == "call" for i in t["items"]) == t["n"]
-    port = next(s for s in sessions if s["run"] == "r1" and s["agent"] == "client-port")
+    port = next(s for s in ov["sessions"] if s["run"] == "r1" and s["agent"] == "client-port")
     both = await views.reader_call("linked-sessions", slug, "records", {"op": "compare", "ids": [port["id"], "r2"], "subs": True})
-    mine = {port["id"]} | {s["id"] for s in sessions if s["parent"] == port["id"]}
-    assert both["groups"][0]["n"] == sum(1 for c in calls if c["session"] in mine)
-    assert both["groups"][1]["n"] == sum(1 for c in calls if next(s for s in sessions if s["id"] == c["session"])["run"] == "r2")
+    mine = {port["id"]} | {s["id"] for s in ov["sessions"] if s["parent"] == port["id"]}
+    assert both["groups"][0]["n"] == sum(len(_uses(files[k])) for k in mine)
+    assert both["groups"][1]["n"] == sum(len(_uses(files[s["id"]])) for s in ov["sessions"] if s["run"] == "r2")
 
 
 @pytest.mark.parametrize("name", sorted(EXAMPLES))
