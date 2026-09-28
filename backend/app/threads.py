@@ -336,8 +336,10 @@ def flush(c: str, thread_id: str) -> bool:
     if not queued or not channel.reachable(c):
         return False
     agents.update_agent(c, thread_id, **{QUEUED_KEY: []})
-    body, fields, _ = build(c, thread_id, [str(q["text"]) for q in queued])
-    channel.send(c, channel.THREAD, body, fields, thread=thread_id)
+    questions = [str(q["text"]) for q in queued]
+    body, fields, _ = build(c, thread_id, questions)
+    channel.send(c, channel.THREAD, body, fields, thread=thread_id,
+                 line=channel.terminal_line(channel.THREAD, " ".join(questions), fields))
     agents.set_running(c, thread_id, True)
     return True
 
@@ -378,7 +380,8 @@ def ask_again(c: str, thread_id: str, *, hand: bool = False) -> dict[str, Any]:
         event_id = secrets.token_hex(4)
         out = {"text": channel.hand(c, event_id, body, fields, thread=thread_id)}
     else:
-        posted = channel.send(c, channel.THREAD, body, fields, thread=thread_id)
+        posted = channel.send(c, channel.THREAD, body, fields, thread=thread_id,
+                              line=channel.terminal_line(channel.THREAD, " ".join(questions), fields))
         event_id, out = posted["id"], {}
     _, log_path = agents.paths(c, thread_id)
     agents.append(log_path, {"type": "again", "ts": _now(), "event": event_id, "questions": len(questions)})

@@ -17,6 +17,12 @@ poll (pull_route) as the text a channel would have shown (render); unacknowledge
 ACK_S. Permission prompts on the hook route come from the PermissionRequest hook; since Claude Code does not signal that
 hook when the analyst answers in the terminal, the server ends the wait itself (clear_permissions, release_asks,
 agent_moved).
+
+Main's terminal shows each event as one line (terminal_line): the analyst's words after SAID, with the thread or button
+they belong to, else a short line saying what happened. On the channel route Claude Code shows the start of the body
+itself. On the hook route it shows only the watcher's fixed summary, so the watcher's acknowledgment keeps the event's
+line (_lines) for the UserPromptSubmit hook, which Claude Code runs as the event's turn begins, to print (held_route).
+With every hook off (the Monitor route) nothing can print it.
 """
 from __future__ import annotations
 
@@ -71,6 +77,8 @@ ACK_S = 15.0  # an event taken and not acknowledged within this goes back to the
 GONE = "gone"  # _pull_state: another session is main now
 DORMANT = "dormant"  # _pull_state: another session is main now, and this one is main again when that one ends
 HOOK_ASK_PREFIX = "h"  # the ids of the permission requests the PermissionRequest hook relays
+SAID = "› "  # opens the analyst's own words in main's terminal (terminal_line)
+LINE_CHARS = 160  # of an event's line in main's terminal: about two lines
 _KEY_RE = re.compile(r"[^A-Za-z0-9_]")
 _KIND_RE = re.compile(r"^- `([a-z_]+)`", re.M)
 
@@ -80,6 +88,7 @@ _pending: dict[tuple[str, str], deque] = {}  # (workspace, session or "") -> eve
 _taken: dict[str, tuple[str, str, dict[str, Any], float]] = {}  # event id -> (workspace, session, note, when taken)
 _waiters: dict[str, set[tuple[asyncio.AbstractEventLoop, asyncio.Future]]] = {}  # workspace -> its waiting pulls
 _asks: dict[str, "Ask"] = {}  # hook permission id -> the request waiting for the analyst
+_lines: dict[tuple[str, str], list[str]] = {}  # (workspace, session) -> lines of events its watcher wrote out, to print
 _settings_written: dict[str, float] = {}  # workspace -> when the chip last wrote the folder's local settings (monotonic)
 _observers: dict[str, list[Callable[[str, dict[str, Any], dict[str, Any]], None]]] = {}  # kind -> observe()'s functions
 
@@ -199,11 +208,35 @@ def describe(kind: str, payload: dict[str, Any]) -> str:
     return f"The analyst sent `{kind}` from the browser"
 
 
+def terminal_line(kind: str, words: str, fields: dict[str, Any]) -> str:
+    """An event's line in main's terminal (module note): the analyst's `words` after SAID, else a short line saying what
+    happened, on one line and cut at LINE_CHARS."""
+    words = " ".join(str(words or "").split())
+    if kind in (MAIN, "card"):
+        line = SAID + words
+    elif kind == THREAD:
+        line = f"{SAID}thread {fields.get('name') or ''}: {words}"
+    elif kind in ("start", "write"):
+        line = SAID + describe(kind, fields) + (f": {words}" if words else "")
+    elif kind == "labeled":
+        line = f"label {fields.get('what') or 'defined'}: {fields.get('name') or ''}"
+    elif kind == "view":
+        line = f"view built: {fields.get('view') or ''}"
+    elif kind == "written":
+        line = f"the {fields.get('doc') or 'document'} writer ended"
+    elif kind == "agent":
+        line = f"agent: {fields.get('name') or ''}"
+    else:
+        line = words
+    return line if len(line) <= LINE_CHARS else line[: LINE_CHARS - 1].rsplit(" ", 1)[0] + "…"
+
+
 def post(c: str, kind: str, payload: dict[str, Any] | None = None, *, check_kind: bool = True,
-         mirror: bool = True) -> dict[str, Any]:
+         mirror: bool = True, line: str | None = None) -> dict[str, Any]:
     """Send one event to the workspace's session: {id, kind, delivered, thread?}. A `main` event shows in main's chat
-    as the analyst's line unless `mirror` is False, for a request server code writes to main. 409 when no session
-    listens, 400 for a kind main.md names no bullet for (when `check_kind`), or for a message with no text."""
+    as the analyst's line unless `mirror` is False, for a request server code writes to main, which passes the `line`
+    main's terminal shows instead of terminal_line's. 409 when no session listens, 400 for a kind main.md names no
+    bullet for (when `check_kind`), or for a message with no text."""
     from . import agents, session, threads  # noqa: PLC0415
 
     kind = str(kind or "").strip()
@@ -216,31 +249,31 @@ def post(c: str, kind: str, payload: dict[str, Any] | None = None, *, check_kind
     out: dict[str, Any] = {"id": event_id, "kind": kind}
     seen = dict(payload)  # what an observer reads, before the builders below take their keys out
     if kind == MAIN:
-        text = str(payload.pop("text", "") or "").strip()
-        if not text:
+        words = str(payload.pop("text", "") or "").strip()
+        if not words:
             raise HTTPException(400, "empty message")
         if mirror:
-            agents.mirror(c, "user", by=agents.BROWSER, text=text, event=event_id)
-        session.expect(c, event_id)
-        note = notification(kind, event_id, text, {**payload, **_ultracode(c), **_filters(c)})
+            agents.mirror(c, "user", by=agents.BROWSER, text=words, event=event_id)
+        note = notification(kind, event_id, words, {**payload, **_ultracode(c), **_filters(c)})
     elif kind == THREAD:
+        words = str(payload.get("text") or "")
         built = threads.event(c, payload, event_id)
         if built is None:  # it waits for the thread's fork, which gets it once known (threads.flush)
             return {**out, "thread": str(payload.get("thread") or ""), "delivered": 0, "queued": True}
-        text, fields, thread_id = built
-        session.expect(c, event_id, thread=thread_id)
-        note = notification(kind, event_id, text, {**fields, **_filters(c)})
+        text, payload, thread_id = built
+        note = notification(kind, event_id, text, {**payload, **_filters(c)})
         out["thread"] = thread_id
     else:
-        text = str(payload.pop("text", "") or "").strip() or describe(kind, payload)
-        note = notification(kind, event_id, text, payload)
-        if kind in QUIET_KINDS:
-            _keep_held(c, [*held(c), note])
-            out.update(delivered=0, held=True)
-            log.info("%s: event %s kind=%s held for the next event", c, event_id, kind)
-            _observe(c, kind, seen, out)
-            return out
-        session.expect(c, event_id)
+        words = str(payload.pop("text", "") or "").strip()
+        note = notification(kind, event_id, words or describe(kind, payload), payload)
+    note["terminal"] = terminal_line(kind, words, payload) if line is None else line
+    if kind in QUIET_KINDS:
+        _keep_held(c, [*held(c), note])
+        out.update(delivered=0, held=True)
+        log.info("%s: event %s kind=%s held for the next event", c, event_id, kind)
+        _observe(c, kind, seen, out)
+        return out
+    session.expect(c, event_id, thread=out.get("thread"))
     out["delivered"] = _publish(c, note)
     _observe(c, kind, seen, out)
     return out
@@ -283,10 +316,14 @@ def pop_held(c: str) -> list[dict[str, Any]]:
     return notes
 
 
-def take_held(c: str) -> str:
-    """The quiet events waiting, as MEANWHILE and one line each, and no longer waiting; '' when none wait."""
-    notes = pop_held(c)
+def meanwhile(notes: list[dict[str, Any]]) -> str:
+    """Held events as MEANWHILE and one line each; '' for none."""
     return "\n".join([MEANWHILE, *(held_line(h) for h in notes)]) if notes else ""
+
+
+def _joined(notes: list[dict[str, Any]]) -> str:
+    """The events' lines in main's terminal, one per line."""
+    return "\n".join(str(n.get("terminal") or "") for n in notes if n.get("terminal"))
 
 
 def _observe(c: str, kind: str, seen: dict[str, Any], out: dict[str, Any]) -> None:
@@ -297,14 +334,16 @@ def _observe(c: str, kind: str, seen: dict[str, Any], out: dict[str, Any]) -> No
             log.exception("%s: the %s observer %s failed", c, kind, getattr(fn, "__name__", fn))
 
 
-def send(c: str, kind: str, text: str, fields: dict[str, Any], *, thread: str | None = None) -> dict[str, Any]:
-    """Send an event whose body server code built (threads.flush and ask_again): {id, kind, delivered}. The caller has
-    logged whatever the chats show, and checked that a session listens."""
+def send(c: str, kind: str, text: str, fields: dict[str, Any], *, thread: str | None = None,
+         line: str = "") -> dict[str, Any]:
+    """Send an event whose body server code built (threads.flush and ask_again), with its `line` in main's terminal:
+    {id, kind, delivered}. The caller has logged whatever the chats show, and checked that a session listens."""
     from . import session  # noqa: PLC0415
 
     event_id = secrets.token_hex(4)
     session.expect(c, event_id, thread=thread)
-    return {"id": event_id, "kind": kind, "delivered": _publish(c, notification(kind, event_id, text, fields))}
+    note = {**notification(kind, event_id, text, fields), "terminal": line}
+    return {"id": event_id, "kind": kind, "delivered": _publish(c, note)}
 
 
 def hand(c: str, event_id: str, text: str, fields: dict[str, Any], *, thread: str) -> str:
@@ -357,13 +396,15 @@ def _publish(c: str, note: dict[str, Any]) -> int:
     main = _main_sid(c)
     mine = [q for q in subs if main and _route(q)[0] == main]
     if held(c) and (mine or any(_route(q)[1] == cc_channel.CHANNEL for q in subs)):
-        note = {**note, "content": f"{note.get('content') or ''}\n\n{take_held(c)}"}
+        riders = pop_held(c)
+        note = {**note, "content": f"{note.get('content') or ''}\n\n{meanwhile(riders)}",
+                "terminal": _joined([note, *riders])}
     n = 0
     queued: set[str] = set()
     for q in mine or [q for q in subs if _route(q)[1] == cc_channel.CHANNEL]:
         sid, delivery = _route(q)
-        if delivery == cc_channel.CHANNEL:
-            q.put_nowait(note)
+        if delivery == cc_channel.CHANNEL:  # the notification alone: Claude Code shows the body's start itself
+            q.put_nowait({"content": note.get("content"), "meta": note.get("meta")})
             n += 1
         else:
             queued.add(sid or "")
@@ -647,13 +688,17 @@ class AckBody(BaseModel):
     cwd: str
     session: str | None = None
     id: str
+    terminal: bool = False  # the hook's watcher: the UserPromptSubmit hook prints the event's line (module note)
 
 
 @router.post("/channel/ack")
 async def ack_route(body: AckBody) -> dict[str, Any]:
     """The watcher wrote the event out: it leaves the flight. 404 when it is not in flight."""
-    if _taken.pop(body.id, None) is None:
+    taken = _taken.pop(body.id, None)
+    if taken is None:
         raise HTTPException(404, "no such event is in flight")
+    if body.terminal and taken[2].get("terminal"):
+        _lines.setdefault((taken[0], body.session or ""), []).append(str(taken[2]["terminal"]))
     return {"acknowledged": body.id}
 
 
@@ -664,14 +709,17 @@ class HeldBody(BaseModel):
 
 @router.post("/channel/held")
 async def held_route(body: HeldBody) -> dict[str, Any]:
-    """The UserPromptSubmit hook, as the analyst sends main a prompt in the terminal: `{text}`, the quiet events waiting
-    (take_held), which the hook adds to the prompt; '' when none wait or `session` is not main. 404 when the folder is no
-    workspace."""
+    """The UserPromptSubmit hook, as a turn of main's begins (a prompt typed in the terminal, or an event the watcher
+    wrote out): `{text, terminal}`, the quiet events waiting as MEANWHILE, which the hook adds to the prompt ('' when
+    none wait or `session` is not main), and the lines main's terminal shows of the events the session's watcher wrote
+    out and of those quiet events, which it prints. 404 when the folder is no workspace."""
     c = config.workspace_for_cwd(body.cwd)
     if not c:
         raise HTTPException(404, f"{body.cwd} is not a thimble workspace")
     main = _main_sid(c)
-    return {"text": take_held(c) if main and body.session == main else ""}
+    riders = pop_held(c) if main and body.session == main else []
+    lines = [*_lines.pop((c, body.session or ""), []), _joined(riders)]
+    return {"text": meanwhile(riders), "terminal": "\n".join(x for x in lines if x)}
 
 
 @router.get("/channel/main")

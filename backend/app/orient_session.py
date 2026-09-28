@@ -784,7 +784,8 @@ async def message_route(c: str, body: MessageBody) -> dict[str, Any]:
         # terminal-first mode: only main can message its subagent, so main is asked to pass the message on
         from . import channel, session  # noqa: PLC0415
 
-        posted = channel.post(c, channel.MAIN, {"text": tools.hint("orient-relay", text=body.text.strip())}, mirror=False)
+        posted = channel.post(c, channel.MAIN, {"text": tools.hint("orient-relay", text=body.text.strip())}, mirror=False,
+                              line=channel.terminal_line(channel.MAIN, f"orientation: {body.text}", {}))
         if e.chat:
             session.relay(c, e.chat, body.text.strip(), BROWSER)
         return {"status": "relayed", "event": posted["id"]}

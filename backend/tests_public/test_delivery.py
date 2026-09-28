@@ -44,7 +44,8 @@ def _record_token(home: Path, token: str = TOKEN, **extra) -> None:
 def _fresh(workspaces_tmp, tmp_path, monkeypatch):
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "claude-config"))
     for table in (channel._subs, channel._routes, channel._pending, channel._taken, channel._asks, channel._waiters,
-                  session._live, session._expected, session._event_threads, session._came_back, session._shim_pids):
+                  channel._lines, session._live, session._expected, session._event_threads, session._came_back,
+                  session._shim_pids):
         table.clear()
     agents._busy.clear()
     yield
@@ -99,6 +100,29 @@ def test_the_pull_takes_one_event_as_channel_text_and_it_stays_in_flight_until_a
     monkeypatch.setattr(channel, "ACK_S", 0.0)  # the second watcher was killed before it acknowledged
     again = asyncio.run(channel.pull_route(Req(), cwd=_cwd(), session=SID, wait=1))
     assert again["id"] == first["id"], "an event never acknowledged goes back to the front of its queue"
+
+
+def test_the_held_hook_prints_what_the_analyst_wrote_once_its_event_is_written_out():
+    """Claude Code shows a woken turn only as the watcher's fixed summary, so the UserPromptSubmit hook prints the
+    analyst's words, each thread's name with its question, and a line for each quiet event, without ids."""
+    _subscribe(SID, cc_channel.HOOK)
+    session.attach(CORPUS, SID, _cwd(), None)
+    channel.post(CORPUS, "labeled", {"text": "links whose host is api-la", "name": "api-la", "ref": "concept:c0ffee12"})
+    asked = channel.post(CORPUS, "main", {"text": "Which kinds of link failed today?"})
+    thread = agents.new_thread(CORPUS, None, None, "Days the page changed")
+    posted = channel.post(CORPUS, "thread", {"thread": thread["id"], "text": "On which days did it change?"})
+
+    async def deliver() -> None:
+        for _ in range(2):
+            got = await channel.pull_route(Req(), cwd=_cwd(), session=SID, wait=1)
+            await channel.ack_route(channel.AckBody(cwd=_cwd(), session=SID, id=got["id"], terminal=True))
+
+    asyncio.run(deliver())
+    lines = asyncio.run(channel.held_route(channel.HeldBody(cwd=_cwd(), session=SID)))["terminal"].splitlines()
+    assert len(lines) == 3 and "Which kinds of link failed today?" in lines[0] and "api-la" in lines[1]
+    assert "days-the-page-changed" in lines[2] and "On which days did it change?" in lines[2]
+    assert not any(x in "\n".join(lines) for x in (asked["id"], posted["id"], thread["id"], "c0ffee12"))
+    assert not asyncio.run(channel.held_route(channel.HeldBody(cwd=_cwd(), session=SID)))["terminal"], "printed once"
 
 
 # ----------------------------------------------------------------------------- the server: the permission hook

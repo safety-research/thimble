@@ -846,8 +846,10 @@ async def interrupt_route(c: str, chat_id: str) -> dict:
         # a subagent of the analyst's session (the orientation in terminal-first mode): only main can stop it
         from . import channel, tools  # noqa: PLC0415
 
-        text = tools.hint("stop-subagent", title=str(meta.get("title") or "a subagent"), agent_id=str(meta["agent_id"]))
-        channel.post(c, channel.MAIN, {"text": text}, mirror=False)
+        title = str(meta.get("title") or "a subagent")
+        text = tools.hint("stop-subagent", title=title, agent_id=str(meta["agent_id"]))
+        channel.post(c, channel.MAIN, {"text": text}, mirror=False,
+                     line=channel.terminal_line(channel.MAIN, f"Stop {title}", {}))
         return {"stopped": False, "asked": "main"}
     return {"stopped": False}
 

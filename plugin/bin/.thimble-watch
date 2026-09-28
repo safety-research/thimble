@@ -10,6 +10,7 @@ the standard library and runs on every tool call.
     .thimble-watch                      the asyncRewake hook (SessionStart, Stop, PreToolUse, UserPromptSubmit)
     .thimble-watch --permission         the PermissionRequest hook
     .thimble-watch --held               the UserPromptSubmit hook that adds the events held for main to the prompt
+                                        and prints the lines of the events the watcher wrote out
     .thimble-watch --agents             the PostToolUse hook that prints the start and finish lines of thimble's
                                         background sessions
     .thimble-watch --relay              the PreToolUse hook of SendMessage to a background session of thimble's
@@ -29,9 +30,11 @@ another watcher holds the session's lock, when no server listens at first, on 40
 
 The permission hook relays the prompt to the server, which shows it in main's chat and answers when the analyst does.
 
-The held hook runs on each prompt the analyst sends main in the terminal: it takes the events the server holds for main
-(app/channel.py QUIET_KINDS) and prints them as the prompt's added context. It prints nothing in a subagent, when none
-wait or when no server answers within HELD_WAIT_S.
+The held hook runs as each of main's turns begins, on a prompt the analyst typed and on an event the watcher woke it
+with: it takes the events the server holds for main (app/channel.py QUIET_KINDS) and prints them as the prompt's added
+context, and prints the lines main's terminal shows of the events the watcher wrote out (app/channel.py terminal_line)
+as its systemMessage, since Claude Code shows such an event only as the fixed rewakeSummary. It prints nothing in a
+subagent, when nothing waits or when no server answers within HELD_WAIT_S.
 
 The agents hook asks the server (POST /api/agents) for the lines main's terminal has not shown about thimble's
 background sessions, each one's start with the command that attaches it and its finish, and prints them as the hook's
@@ -260,9 +263,9 @@ def pull(cwd: str, session: str, until: float, pid: int | None = None, *,
     return None
 
 
-def ack(cwd: str, session: str, event_id: str) -> None:
+def ack(cwd: str, session: str, event_id: str, terminal: bool = False) -> None:
     try:
-        request("POST", "/api/channel/ack", {"cwd": cwd, "session": session, "id": event_id})
+        request("POST", "/api/channel/ack", {"cwd": cwd, "session": session, "id": event_id, "terminal": terminal})
     except (OSError, http.client.HTTPException):
         pass
 
@@ -284,7 +287,7 @@ def watch(inp: dict) -> int:
         return 0  # /clear while the event came: neither written nor acknowledged, so the new session gets it
     sys.stderr.write(got[1] + "\n")
     sys.stderr.flush()
-    ack(cwd, session, got[0])
+    ack(cwd, session, got[0], terminal=True)
     return WAKE
 
 
@@ -316,9 +319,9 @@ def held(inp: dict) -> int:
         status, answer = request("POST", "/api/channel/held", body, timeout=HELD_WAIT_S)
     except (OSError, http.client.HTTPException):
         return 0
-    text = str(answer.get("text") or "") if status == 200 else ""
+    text, said = (str(answer.get("text") or ""), str(answer.get("terminal") or "")) if status == 200 else ("", "")
     out: dict = {"hookSpecificOutput": {"hookEventName": "UserPromptSubmit", "additionalContext": text}} if text else {}
-    lines = announcements(inp)
+    lines = "\n".join(x for x in (said, announcements(inp)) if x)
     if lines:
         out["systemMessage"] = lines
     if out:

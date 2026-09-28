@@ -447,7 +447,7 @@ def request_report(c: str, request: str = "") -> bool:
     if request.strip():
         payload["text"] = request.strip()
     try:
-        channel.post(c, WRITE_KIND, payload, check_kind=False)
+        channel.post(c, WRITE_KIND, payload, check_kind=False, line=channel.describe(WRITE_KIND, payload))
     except HTTPException as e:
         log.warning("orientation %s: the report pass was not sent (%s %s)", c, e.status_code, e.detail)
         return False
