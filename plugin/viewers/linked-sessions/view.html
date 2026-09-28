@@ -4,8 +4,25 @@
 <style>
   /* thimble's parts (.chip, .btn, .seg, .field) and the theme's tokens come with the frame; this page lays them out and
      draws the lanes, the context strip, the menus and the comparison */
-  html, body { margin: 0; }
-  body { background: var(--surface-card); }
+  html, body { margin: 0; height: 100%; }
+  body { background: var(--surface-card); overflow: hidden; }
+  #view { position: relative; height: 100%; display: flex; flex-direction: column; }
+  #ds, #bar { flex: none; }
+  #area { flex: 1; min-height: 0; display: flex; }
+  #left { flex: 1; min-width: 0; overflow: auto; scrollbar-width: thin; }
+  #grip { flex: none; width: 7px; margin-left: -3px; position: relative; z-index: 2; cursor: col-resize; }
+  #grip::after { content: ''; position: absolute; left: 3px; top: 0; bottom: 0; width: 1px; background: var(--border-subtle); }
+  #grip:hover::after, #grip.drag::after { width: 3px; left: 2px; background: var(--border-strong); }
+  #side { flex: none; min-width: 0; display: flex; flex-direction: column; }
+  #side #det { flex: 1; min-height: 0; display: flex; flex-direction: column; border-top: 0; }
+  #side .dhead { flex: none; gap: 6px 10px; padding: 10px 14px; }
+  #side .dhead h2 { flex: 1 1 auto; min-width: 0; }
+  #side .dbody { flex: 1; min-height: 0; height: auto; display: flex; flex-direction: column; }
+  #side .tx { flex: 1 1 58%; min-height: 140px; border-right: 0; border-bottom: 1px solid var(--border-subtle); }
+  #side .cd { flex: 1 1 42%; min-height: 120px; }
+  #side .tr { padding: 6px 14px; grid-template-columns: 40px 78px minmax(0, 1fr) auto; gap: 0 8px; }
+  /* in the panel a call's outcome shows in its tint, its result line and its details, which leaves the command room */
+  #side .tr .rt .o-err, #side .tr .rt .o-den { display: none; }
   * { box-sizing: border-box; }
   button { font-family: inherit; }
   .mono { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
@@ -254,7 +271,10 @@ const durT = (d) => Math.max(0, Math.min(1, (Math.log10(Math.max(d, 0.05)) + 1) 
 const st = {
   field: 'tool', filters: {}, search: '', hide: new Set(), win: null, ticked: [], view: 'overview', collapsed: new Set(),
   open: null, sel: null, menu: null, pal: null, includeSubs: true, align: 'start', narrow: false,
+  side: false, compact: false, panelW: 0, leftW: 0, // the open session beside the lanes, and the widths render worked out
 }
+const SIDE_MIN = 760 // the page width from which an open session sits in a panel beside the lanes rather than below them
+const PANEL_MIN = 340, LANES_MIN = 420
 let labels = { labels: [], filter: null, all: null, palette: null } // what thimble.onLabels last said
 let ov = null, sess = null, moment = null, cmp = null
 let S = {}, RUN = {}, CALL = {}
@@ -500,8 +520,11 @@ function laneSvg({ rows, dom, width, sel = null, compare = false }) {
   for (let t = Math.ceil(dom[0] / step) * step; t <= dom[1]; t += step) {
     const x = X(t)
     out.push(`<line x1="${x}" x2="${x}" y1="${AX - 4}" y2="${H}" stroke="rgba(${inkRgb},.08)"/>`)
-    if (selX != null && Math.abs(x - selX) < 42) continue
-    out.push(`<text x="${x}" y="${AX - 10}" font-size="10.5" fill="var(--text-tertiary)" text-anchor="${x - plotL < 20 ? 'start' : 'middle'}">${mins(t)}</text>`)
+    // a tick's label gives way to the chosen call's time, which sits on the axis in a 42 px box
+    const start = x - plotL < 20, w = mins(t).length * 6.4
+    const [l0, l1] = start ? [x, x + w] : [x - w / 2, x + w / 2]
+    if (selX != null && l1 > selX - 24 && l0 < selX + 24) continue
+    out.push(`<text x="${x}" y="${AX - 10}" font-size="10.5" fill="var(--text-tertiary)" text-anchor="${start ? 'start' : 'middle'}">${mins(t)}</text>`)
   }
   const clip = `clip-${Math.random().toString(36).slice(2, 7)}`
   out.push(`<clipPath id="${clip}"><rect x="${plotL}" y="0" width="${W}" height="${H}"/></clipPath>`)
@@ -590,9 +613,10 @@ function labelCol(rows, { w, compareCol = true, badges = null, cols }) {
   }
   return `<div class="lcol" style="width:${w}px">${out.join('')}</div>`
 }
-const viewWidth = () => Math.max(560, (document.getElementById('view').clientWidth || window.innerWidth) - 32)
-const labelWidth = () => (st.narrow ? 250 : 320)
-const COLS = () => [{ name: 'Calls', r: st.narrow ? 58 : 66, v: (s) => s.n }, { name: 'Errors', r: 6, v: (s) => s.err || '–', cls: (s) => (s.err ? 'err' : 'zero') }]
+// the lanes' width, left of an open session's panel; beside a narrow panel the session column drops its counts
+const viewWidth = () => Math.max(st.side ? 300 : 560, st.leftW - 44)
+const labelWidth = () => (st.compact ? 180 : st.narrow ? 250 : 320)
+const COLS = () => (st.compact ? [] : [{ name: 'Calls', r: st.narrow ? 58 : 66, v: (s) => s.n }, { name: 'Errors', r: 6, v: (s) => s.err || '–', cls: (s) => (s.err ? 'err' : 'zero') }])
 function overview() {
   const rows = []
   for (const run of ov.runs) {
@@ -689,14 +713,15 @@ function details() {
   const task = parent ? parent.tasks.find((x) => x.child === s.id) : null
   const kids = Object.values(S).filter((k) => k.parent === s.id).sort((a, b) => a.start - b.start)
   const run = RUN[s.run]
+  const close = `<button class="btn btn-ghost btn-sm" data-act="closedet" aria-label="Close">${ico.close}</button>`
   return `<section id="det"><div class="dhead" data-anchor="${esc(unitRef(s.key))}">
-      <h2>${esc(agentName(s))}<span class="run">${esc(runName(s.run))} · ${esc(run.team)}</span></h2>
+      <h2>${esc(agentName(s))}<span class="run">${esc(runName(s.run))} · ${esc(run.team)}</span></h2>${st.side ? close : ''}
       ${parent ? `<span class="grp"><span class="lab">Spawned by</span><button class="chip chip-sans chip-act" data-act="open" data-id="${esc(parent.id)}" ${task ? `data-call="${esc(task.ref)}"` : ''}>${ico.parent}${esc(agentName(parent))}${s.spawn != null ? ` · Task <span class="v">${fmt(s.spawn)}</span>` : ''}</button></span>` : ''}
       ${kids.length ? `<span class="grp"><span class="lab">Subagents</span>${kids.map((k) => `<button class="chip chip-sans chip-act" data-act="open" data-id="${esc(k.id)}">${esc(agentName(k))}${ico.child}</button>`).join('')}</span>` : ''}
       <span class="dstats"><span><b>${s.n}</b> calls</span><span>ran <b>${fmtd(s.end - s.start)}</b></span><span class="err"><b>${s.err}</b> errors</span></span>
       <div class="grow"></div>
       <span class="grp"><button class="btn btn-ghost btn-sm" data-act="err" data-dir="-1">${ico.up}Previous error</button><button class="btn btn-ghost btn-sm" data-act="err" data-dir="1">${ico.down}Next error</button></span>
-      <button class="btn btn-ghost btn-sm" data-act="closedet" aria-label="Close">${ico.close}</button></div>
+      ${st.side ? '' : close}</div>
     <div class="dbody"><div class="tx" id="tx">${transcript(s)}</div><div class="cd">${c ? callDetails(c, s) : ''}</div></div></section>`
 }
 
@@ -775,13 +800,25 @@ function compare() {
 }
 
 // ------------------------------------------------------------------------------------------------------------ render and events
+// An open session sits in a resizable panel beside the lanes, or below them in a narrow page; the lanes and the panel's
+// transcript keep their scroll across renders.
 function render() {
   const view = document.getElementById('view')
   if (!ov) { view.innerHTML = ''; return }
-  st.narrow = (view.clientWidth || window.innerWidth) < 980
-  view.classList.toggle('narrow', st.narrow)
+  const W = view.clientWidth || window.innerWidth
+  st.side = st.view === 'overview' && !!st.open && !!S[st.open] && !!sess && W >= SIDE_MIN
+  if (st.side) st.panelW = Math.round(Math.max(PANEL_MIN, Math.min(st.panelW || W * 0.42, 640, W - LANES_MIN)))
+  st.leftW = st.side ? W - st.panelW : W
+  st.narrow = st.leftW < 980
+  st.compact = st.side && st.leftW < 640
+  view.classList.toggle('narrow', st.narrow && !st.side)
   const txScroll = document.getElementById('tx')?.scrollTop
-  view.innerHTML = dataset() + topBar() + (st.view === 'compare' ? compare() : overview() + details()) + menus() + palette()
+  const leftScroll = render.toTop ? 0 : document.getElementById('left')?.scrollTop || 0
+  render.toTop = false
+  const left = st.view === 'compare' ? compare() : overview() + (st.side ? '' : details())
+  const side = st.side ? `<div id="grip" title="Drag to resize"></div><aside id="side" style="width:${st.panelW}px">${details()}</aside>` : ''
+  view.innerHTML = dataset() + topBar() + `<div id="area"><div id="left">${left}</div>${side}</div>` + menus() + palette()
+  document.getElementById('left').scrollTop = leftScroll
   place('menu', `[data-menu="${st.menu && st.menu.startsWith('f:') ? st.menu : 'colour'}"]`)
   if (st.pal) place('pal', `[data-act="palette"][data-id="${CSS.escape(st.pal.id)}"][data-value="${CSS.escape(st.pal.value)}"]`, st.pal.from)
   const tx = document.getElementById('tx'), row = document.getElementById('selrow')
@@ -820,8 +857,8 @@ async function openSession(id, call) {
   if (call) st.sel = call
   await loadMoment()
   render()
-  // the session opens below the lanes, so it is brought into sight when its head is out of it
-  const head = document.querySelector('#det .dhead')
+  // below the lanes, the session is brought into sight when its head is out of it
+  const head = st.side ? null : document.querySelector('#det .dhead')
   const top = head ? head.getBoundingClientRect().top : 0
   if (head && (top < 0 || top > window.innerHeight - 160)) head.scrollIntoView({ block: 'start' })
 }
@@ -897,7 +934,7 @@ document.addEventListener('click', async (e) => {
     case 'compare':
       // one run or session alone is compared with its counterparts in the other runs
       if (st.ticked.length === 1) st.ticked = [st.ticked[0], ...counterparts(st.ticked[0])].slice(0, MAX_TICKED)
-      if (st.ticked.length >= 2) { st.view = 'compare'; st.menu = null; await loadCompare(); window.scrollTo(0, 0) }
+      if (st.ticked.length >= 2) { st.view = 'compare'; st.menu = null; await loadCompare(); render.toTop = true }
       break
     case 'overview': st.view = 'overview'; break
     case 'collapse': st.collapsed.has(id) ? st.collapsed.delete(id) : st.collapsed.add(id); break
@@ -942,6 +979,21 @@ document.addEventListener('mousedown', (e) => {
   const t0 = tAt(e.clientX)
   const move = (ev) => { const t1 = tAt(ev.clientX); const b = document.getElementById('brush'); const a = Math.min(t0, t1), c = Math.max(t0, t1); b.setAttribute('x', cl + (a / span) * cw); b.setAttribute('width', ((c - a) / span) * cw) }
   const up = (ev) => { document.removeEventListener('mousemove', move); document.removeEventListener('mouseup', up); const t1 = tAt(ev.clientX); setWin(Math.min(t0, t1), Math.max(t0, t1)); reload({ session: false }) }
+  document.addEventListener('mousemove', move); document.addEventListener('mouseup', up)
+})
+// the grip between the lanes and the session's panel: drag it to widen one or the other
+document.addEventListener('mousedown', (e) => {
+  const grip = e.target.closest('#grip')
+  if (!grip) return
+  e.preventDefault()
+  grip.classList.add('drag')
+  let frame = 0
+  const move = (ev) => {
+    st.panelW = document.getElementById('view').getBoundingClientRect().right - ev.clientX
+    cancelAnimationFrame(frame)
+    frame = requestAnimationFrame(() => { render(); document.getElementById('grip')?.classList.add('drag') })
+  }
+  const up = () => { document.removeEventListener('mousemove', move); document.removeEventListener('mouseup', up); document.getElementById('grip')?.classList.remove('drag') }
   document.addEventListener('mousemove', move); document.addEventListener('mouseup', up)
 })
 let resizing = null
