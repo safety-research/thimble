@@ -14,15 +14,13 @@ export interface PlayerOut {
 }
 
 // macOS's novelty voices, left out of the list
-const NOVELTY = new Set(['albert', 'bad news', 'bahh', 'bells', 'boing', 'bubbles', 'cellos', 'deranged', 'good news', 'hysterical', 'jester', 'organ', 'pipe organ', 'princess', 'superstar', 'trinoids', 'wobble', 'zarvox'])
-// novelty voices kept in the list, ranked last so none is the default
-const KEPT_NOVELTY = new Set(['whisper'])
+const NOVELTY = new Set(['albert', 'bad news', 'bahh', 'bells', 'boing', 'bubbles', 'cellos', 'deranged', 'good news', 'hysterical', 'jester', 'organ', 'pipe organ', 'princess', 'superstar', 'trinoids', 'whisper', 'wobble', 'zarvox'])
 // older synthesized voices, kept in the list but ranked after the natural ones
 const DATED = new Set(['agnes', 'bruce', 'fred', 'junior', 'kathy', 'ralph', 'vicki', 'victoria'])
 const baseName = (v: SpeechSynthesisVoice) => v.name.replace(/\s*\(.*\)\s*$/, '').trim().toLowerCase()
 
 /** The voices worth offering, best first: in the page's language, then Premium or Enhanced, then natural or neural,
- * then the system's own local voices, the system default before the rest; the novelty voices kept come last. */
+ * then the system's own local voices, the system default before the rest; no novelty voice. */
 export function rankVoices(voices: readonly SpeechSynthesisVoice[], lang: string): SpeechSynthesisVoice[] {
   const want = lang.toLowerCase().replace('_', '-')
   const wantBase = want.split('-')[0]
@@ -30,7 +28,7 @@ export function rankVoices(voices: readonly SpeechSynthesisVoice[], lang: string
     const l = v.lang.toLowerCase().replace('_', '-')
     const n = v.name.toLowerCase()
     const tier = /premium|enhanced/.test(n) ? 0 : /natural|neural/.test(n) ? 1 : v.localService && !DATED.has(baseName(v)) ? 2 : 3
-    return [KEPT_NOVELTY.has(baseName(v)) ? 1 : 0, l.split('-')[0] === wantBase ? 0 : 1, tier, l === want ? 0 : 1, v.default ? 0 : 1, v.name]
+    return [l.split('-')[0] === wantBase ? 0 : 1, tier, l === want ? 0 : 1, v.default ? 0 : 1, v.name]
   }
   const order = (a: (number | string)[], b: (number | string)[]) => {
     for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return a[i] < b[i] ? -1 : 1
