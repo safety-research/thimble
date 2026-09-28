@@ -28,7 +28,7 @@
 #   - a line that is not JSON, such as the last line of a session that was cut off, is skipped;
 #   - the files on disk are the sessions: the index only names the team and the agents, and it may miss a session or
 #     list one that is gone;
-#   - version 1 flags an error with isError, later versions with is_error; version 3 calls the Task tool Agent;
+#   - r1's harness flags an error with isError and the later ones with is_error, and r3's calls the Task tool Agent;
 #   - a subagent is named by its Task call's subagent_type, else by the index; the call that spawned it is the one
 #     whose toolUseResult names its agentId, else whose result's text says "agentId: <id>", else whose prompt it got;
 #   - some facts are only in a result's text: a command's exit code ("Exit code 1"), a permission denial ("Permission to
