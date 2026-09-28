@@ -1203,6 +1203,38 @@ def picked_as_changes(corpus_dir: Path, units: list[Unit], header: bool = True) 
     return out
 
 
+EXAMPLES_SHOWN = 5  # records an apply's result quotes of the value it asks about (examples)
+EXAMPLE_CHARS = 200
+
+
+def examples(c: str, concept_id: str, value: str, n: int = EXAMPLES_SHOWN) -> list[tuple[str, str]]:
+    """Up to `n` records of a label over records that took `value`, spread over them, each with the line of what the
+    label read that holds its rationale (a regex's match), else the first line, a save read as what it changed.
+    Blocking."""
+    ws, corpus_dir = _ws(c), config.corpus_dir(c)
+    st = _store_ready(ws, concept_id)
+    rows, _total, _next = st.rows(value, PROMPT_APPLY_MAX) if st is not None else ([], 0, None)
+    picked = [rows[i] for i in spread(len(rows), n)]
+    why = {str(r.get("ref") or ""): str(r.get("rationale") or "") for r in picked}
+    units: list[Unit] = []
+    for ref in why:
+        rel, line = labels_store.ref_parts(ref)
+        if not rel or not line:
+            continue
+        for r in corpus.load_records(config.safe_corpus_path(corpus_dir, rel), rel, corpus.source_kind(rel), line, line):
+            text = "\n\n".join(b["text"] for b in r["blocks"])
+            units.append(Unit(ref, [rel], lambda ref=ref, text=text: iter([(ref, text)]), r["record"]))
+    out = []
+    for u in picked_as_changes(corpus_dir, units, header=False):
+        lines = [x.strip() for x in u.text(UNIT_TEXT_MAX).splitlines() if x.strip()]
+        hit = why[u.ref].casefold()
+        at = next((x for x in lines if hit and hit in x.casefold()), lines[0] if lines else "")
+        start = max(0, at.casefold().find(hit) - EXAMPLE_CHARS // 3) if hit and hit in at.casefold() else 0
+        cut = at[start: start + EXAMPLE_CHARS]
+        out.append((u.ref, ("…" if start else "") + cut + ("…" if start + EXAMPLE_CHARS < len(at) else "")))
+    return out
+
+
 SAVES_SNIFF = 20  # records read from the head of a JSON Lines file to tell whether it holds saves
 
 

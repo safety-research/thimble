@@ -2281,6 +2281,11 @@ async def _h_apply_label(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
             f"{counts or 'no values yet'}.")
     if s.get("failed"):
         line += f" {s['failed']} {unit}(s) failed: {s.get('message') or 'no reason given'}."
+    first = (concepts.find_concept(ctx.ws, s["concept"]) or {}).get("labels", [None])[0]
+    if kind != "prompt" and s.get("unit") == "record" and not s.get("partial") and (s.get("counts") or {}).get(first):
+        shown = await asyncio.to_thread(concepts.examples, ctx.c, s["concept"], first)
+        if shown:
+            line += f" Some it gave {first!r}: " + "; ".join(f"{ref} “{text}”" for ref, text in shown) + "."
     if s.get("unchanged"):
         line += " " + hint("apply_label-unchanged")
     if s.get("partial"):
