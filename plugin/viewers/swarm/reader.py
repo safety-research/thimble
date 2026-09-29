@@ -94,6 +94,7 @@ CARD_CHARS = 110
 TEXT_MAX = 60_000  # characters of a record's text the page gets
 FIELD_MAX = 300
 HUNK_LINES = 400
+HUNK_PAIRS_MAX = 4_000_000  # line pairs a save's diff compares at most; past it the lines are compared as sets
 EXCERPT_LINES = 12
 LINE_MAX = 400
 REFS_MAX = 200
@@ -485,16 +486,38 @@ def _clean(text):
 
 def _hunks(old, new):
     """[{at, add, del}]: where the new text differs from the old, line by line on each line's _key, `at` the first added
-    line's number."""
+    line's number. The lines both texts start and end with are equal; when what lies between them is too large to diff
+    (HUNK_PAIRS_MAX), it is one hunk of the lines each side has that the other lacks."""
     a, b = old.splitlines(), new.splitlines()
+    ka, kb = [_key(x) for x in a], [_key(x) for x in b]
+    lo = 0
+    while lo < min(len(ka), len(kb)) and ka[lo] == kb[lo]:
+        lo += 1
+    hi = 0
+    while hi < min(len(ka), len(kb)) - lo and ka[-1 - hi] == kb[-1 - hi]:
+        hi += 1
+    ia, ib = len(a) - hi, len(b) - hi
+    if (ia - lo) * (ib - lo) > HUNK_PAIRS_MAX:
+        old_keys, new_keys = set(ka[lo:ia]), set(kb[lo:ib])
+        ops = [("replace", lo, ia, lo, ib)]
+
+        def pick(i1, i2, j1, j2):
+            return [b[j] for j in range(j1, j2) if kb[j] not in old_keys], [a[i] for i in range(i1, i2) if ka[i] not in new_keys]
+    else:
+        ops = [(op, i1 + lo, i2 + lo, j1 + lo, j2 + lo)
+               for op, i1, i2, j1, j2 in difflib.SequenceMatcher(None, ka[lo:ia], kb[lo:ib], autojunk=False).get_opcodes()]
+
+        def pick(i1, i2, j1, j2):
+            return b[j1:j2], a[i1:i2]
     out, budget = [], HUNK_LINES
-    for op, i1, i2, j1, j2 in difflib.SequenceMatcher(None, [_key(x) for x in a], [_key(x) for x in b],
-                                                        autojunk=False).get_opcodes():
+    for op, i1, i2, j1, j2 in ops:
         if op == "equal" or budget <= 0:
             continue
-        add, rem = b[j1:j2][:budget], a[i1:i2][:budget]
+        add, rem = pick(i1, i2, j1, j2)
+        add, rem = add[:budget], rem[:budget]
         budget -= len(add) + len(rem)
-        out.append({"at": j1 + 1, "add": add, "del": rem})
+        if add or rem:
+            out.append({"at": j1 + 1, "add": add, "del": rem})
     return out
 
 
