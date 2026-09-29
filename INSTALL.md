@@ -30,13 +30,22 @@ bash scripts/install.sh
 ```
 
 Either install links the `thimble` command into `~/.local/bin` (and prints the line to add to your shell startup file
-when that folder is not on your PATH) and runs `thimble doctor`. It asks once whether to add thimble to
-`~/.claude/settings.json` and `~/.claude/plugins`, so it is available in every `claude` session from startup (the
-`thimble` command works either way), and whether to trust thimble's workspaces folder by adding it to `~/.claude.json`,
-so thimble can start its background agents without Claude Code stopping to ask (with a no, only Terminal-first mode's
-background agents are refused, with a message saying how to trust the folder). `--plugin`, `--no-plugin`,
-`--trust-workspaces` and `--no-trust-workspaces` answer without asking. Later, `thimble trust` asks the trust question
-again and `thimble trust --remove` takes the entry back. `install.sh --dry-run` prints every step and changes nothing.
+when that folder is not on your PATH) and runs `thimble doctor`. Before it installs anything, it shows what it installs
+and where, then asks three questions:
+
+- **A browser for screenshots.** thimble checks the cards and views it draws in screenshots, and repairs graphics that
+  look wrong. It uses the Chrome or Edge on your machine (no download), Playwright's headless Chromium (a download of
+  about 350 MB), or none, which means no screenshot checks: no self-repair of graphics and no view review.
+  `--browser system`, `--browser bundled` or `--browser off` answers it.
+- **thimble in every Claude Code session.** A yes adds thimble to `~/.claude/settings.json` and `~/.claude/plugins`.
+  The `thimble` command works either way. `--plugin` or `--no-plugin` answers it.
+- **Trust of thimble's workspaces folder**, where thimble keeps each workspace and runs its agents. A yes adds it to
+  `~/.claude.json`. With a no, the orientation, its critic and the writers run as `claude -p` sessions and don't show
+  in your terminal's agent tray. `--trust-workspaces` or `--no-trust-workspaces` answers it.
+
+Without a terminal, a question no flag answers gets a no. Answers are kept, so an update doesn't ask again. To change
+one, run install.sh again with its flag; it skips the steps that are done. `install.sh --dry-run` prints the questions
+and every step, and changes nothing.
 
 ## Package mirrors and your own Python
 
@@ -64,7 +73,7 @@ until `thimble server restart`.
 
 `thimble uninstall` asks, then removes the plugin registration and the trust entry the install added,
 `~/.local/bin/thimble`, and `~/.thimble`, which holds a Global install's workspaces. `--keep-home` keeps `~/.thimble`.
-A clone stays where it is.
+A clone stays where it is, and so does a downloaded headless Chromium, in Playwright's cache folder.
 
 To delete one workspace and keep the install, `thimble list` shows the workspaces by id and `thimble purge <id>` deletes
 that one and prints each path it deleted. The folder it read and your Claude Code transcripts stay.
@@ -72,9 +81,10 @@ that one and prints each path it deleted. The folder it read and your Claude Cod
 ## Troubleshooting
 
 - `thimble doctor` shows the server, the versions, the auth path and the log's recent errors.
-- Cards are not checked, views are checked without loading their page, or screenshots are unavailable: the headless
-  Chromium was not fetched at install, or the machine lacks its system libraries. thimble never fetches it by itself;
-  `thimble doctor` names the commands that do. Run them, then `thimble restart`.
+- Cards are not checked, views are checked without loading their page, or screenshots are unavailable: there is no
+  browser (the install's answer, or no Chrome or Edge found), or the machine lacks the headless Chromium's system
+  libraries. thimble never downloads a browser by itself. `install.sh --browser system` or `--browser bundled` sets one
+  up, and `thimble doctor` names the command for missing libraries. Then run `thimble restart`.
 - `/thimble` is not recognised in a `claude` session: it works there only after `install.sh --plugin`; then run
   `/reload-plugins`, or start a new session.
 - To report a problem, run `thimble feedback "<what went wrong>"`. It writes a zip of the logs, chats and Claude
