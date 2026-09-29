@@ -12,10 +12,12 @@
   #flow { display: grid; grid-template-columns: minmax(0, 1fr) minmax(180px, 2.2fr) minmax(0, 1fr); column-gap: 10px; }
   .side { display: flex; flex-wrap: wrap; align-content: center; gap: 4px; padding: 6px 0; min-width: 0; }
   .side.l { justify-content: flex-end; }
-  .side .chip { cursor: pointer; }
+  .side .chip { cursor: pointer; max-width: 100%; }
+  .side .chip .a { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
   .side .chip .k { width: 8px; height: 2px; flex: none; border-radius: 1px; }
   .side .chip.names .k { height: 0; border-top: 2px dashed; background: none !important; }
   .side .chip.same .k { height: 0; border-top: 2px dotted; background: none !important; }
+  .side .chip .n { color: var(--text-tertiary); }
   .side .more { font: 400 var(--text-mono-sm) / 22px var(--font-mono); color: var(--text-tertiary); }
   .mid { position: relative; padding: 5px 0; }
   .mid::before { content: ""; position: absolute; left: 50%; top: 0; bottom: 0; border-left: 1px solid var(--border-hairline); }
@@ -69,15 +71,17 @@ function chip(c) {
   const k = h('span', 'k')
   k.style.background = typeColour(c.kind)
   k.style.borderColor = typeColour(c.kind)
-  b.append(k, h('span', null, c.n > 1 ? `${c.account} ×${c.n}` : c.account))
+  b.append(k, h('span', 'a', c.account), ...(c.n > 1 ? [h('span', 'n', `×${c.n}`)] : []))
   b.title = `${c.kind}: ${c.account}${c.n > 1 ? `, ${c.n} links` : ''}`
   b.dataset.anchor = c.ref
   b.onclick = () => thimble.navigate(c.ref)
   return b
 }
+const CHIPS_SHOWN = 3
 function side(cls, chips, more) {
   const d = h('div', `side ${cls}`)
-  for (const c of chips) d.append(chip(c))
+  for (const c of chips.slice(0, CHIPS_SHOWN)) d.append(chip(c))
+  more += chips.slice(CHIPS_SHOWN).reduce((n, c) => n + c.n, 0)
   if (more) d.append(h('span', 'more', `+${fmt(more)}`))
   return d
 }
