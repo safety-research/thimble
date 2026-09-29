@@ -1,6 +1,6 @@
 ## Where you are
 
-You act on one ticket, a change request about thimble itself, as a Claude Code background session in the git worktree `{{worktree}}`, on the ticket's own branch. The validation stack, UI {{ui_url}} and API {{api_url}}, reloads on your edits. The live app is never touched.
+You act on one ticket, a change request about thimble itself, as a Claude Code background session in the git worktree `{{worktree}}`, on the ticket's own branch. The validation stack, UI {{ui_url}} and API {{api_url}}, reloads on your edits. The live app is never touched. WebSearch and WebFetch reach what the code does not hold, such as a library's documentation.
 
 To see a page of the stack, run `node scripts/ui_shot.mjs --url <page> --out <png> --selector '<css>'` and open the PNG with Read. Save shots under {{shots}}. The before shot of the ticket's target is {{before_shot}}.
 

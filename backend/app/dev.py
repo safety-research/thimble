@@ -31,6 +31,10 @@ agent's for a ticket, view builds' for a view, agent_row), or denied after PERMI
 unasked is only its work in its own folder: edits there, reads of the folders its task names, and Bash in the sandbox
 (sandbox_allow's rule, before each call and on each request) with its check command. A session with no workspace
 (`thimble fix`, while the server is down) has nobody to ask, so it keeps UNHOSTED_TOOLS and has no web tools.
+
+The offline fence. A view build stays off the network in every mode, with or without the sandbox: it has no web tools,
+and deny rules refuse the commands that reach the network or install software (offline_deny). Where the sandbox runs,
+its Bash also has no network.
 """
 from __future__ import annotations
 
@@ -91,9 +95,23 @@ UNHOSTED_TOOLS = ["Read", "Edit", "Write", "NotebookEdit", "Bash", "Grep", "Glob
 PERMISSION_WAIT_S = float(os.environ.get("THIMBLE_DEV_PERMISSION_WAIT_S", "") or 10 * 60)
 # the thread's line for a request denied unanswered
 EXPIRED_LINE = "nobody answered the request to use {tool} ({what}) within {wait}, so it was denied and the session went on"
+WEB_TOOLS = ("WebFetch", "WebSearch")  # agent_session.WEB_TOOLS
 # Not given to a fenced session, a view build in the corpus folder: EnterWorktree writes a git worktree into the
-# session's own folder, which the fence's denies do not stop, and nobody answers AskUserQuestion or plan mode's approval.
-FENCED_OFF_TOOLS = ("EnterWorktree", "ExitWorktree", "AskUserQuestion", "EnterPlanMode", "ExitPlanMode")
+# session's own folder, which the fence's denies do not stop, nobody answers AskUserQuestion or plan mode's approval,
+# and a view build stays off the network (offline_deny).
+FENCED_OFF_TOOLS = ("EnterWorktree", "ExitWorktree", "AskUserQuestion", "EnterPlanMode", "ExitPlanMode", *WEB_TOOLS)
+# The Bash commands a view build's session may not run in any permission mode (offline_deny): those that reach the
+# network or install software, each by name and at a path, the subcommands that do, the modules that do as `python -m`,
+# and a shell run inside a command, whose own commands no rule would see. Claude Code checks a rule against each command
+# of a line, also after wrappers such as `timeout` and `env`.
+OFFLINE_PROGRAMS = ("curl", "wget", "aria2c", "nc", "ncat", "netcat", "socat", "telnet", "ftp", "sftp", "scp", "ssh",
+                    "rsync", "gh", "pip", "pip3", "pipx", "uv", "uvx", "poetry", "pdm", "conda", "mamba", "micromamba",
+                    "npm", "npx", "pnpm", "pnpx", "yarn", "bun", "bunx", "corepack", "deno", "gem", "cargo", "apt",
+                    "apt-get", "aptitude", "dpkg", "snap", "brew", "port", "yum", "dnf", "zypper", "pacman", "apk",
+                    "nix", "nix-env", "sudo", "playwright")
+OFFLINE_COMMANDS = ("git clone", "git fetch", "git pull", "git push", "git ls-remote", "git submodule", "go get",
+                    "go install", "go mod download", "bash -c", "sh -c", "zsh -c", "eval")
+OFFLINE_MODULES = ("pip", "ensurepip", "playwright", "uv")
 CLAUDE_BIN = config.CLAUDE_BIN
 VIEW_CHECK = Path(__file__).with_name("view_check.py")  # the command a view build checks its draft with (view_fence)
 CLI_TIMEOUT_S = 60
@@ -1281,7 +1299,8 @@ class Sessions:
             perms = dict(settings.get("permissions") or {})
             allow = [*(perms.get("allow") or []), *(asking or {}).get("allow", [])]
             settings["permissions"] = {**perms, **({"allow": list(dict.fromkeys(allow))} if allow else {})}
-            settings = agent_session.with_web_asks(settings, mode)
+            if not fence:  # a fenced session has no web tools
+                settings = agent_session.with_web_asks(settings, mode)
             hooks = agent_session.permission_hooks(str(workspace), mode == "auto", session=str((asking or {})["key"]),
                                                    home=str(thimble_home()))
             box = (asking or {}).get("sandbox")
@@ -1293,8 +1312,8 @@ class Sessions:
         else:
             denied += agent_session.WEB_TOOLS
         allowed = [] if hosted else ["--allowedTools", ",".join(UNHOSTED_TOOLS)]
-        flags = ["-n", name, "--model", str(model), *allowed, "--disallowedTools", ",".join(denied), "--strict-mcp-config",
-                 "--permission-mode", mode]
+        flags = ["-n", name, "--model", str(model), *allowed, "--disallowedTools", ",".join(dict.fromkeys(denied)),
+                 "--strict-mcp-config", "--permission-mode", mode]
         for d in add_dirs:
             flags += ["--add-dir", str(d)]
         if conf.get("effort"):
@@ -2251,10 +2270,20 @@ def view_read_only(corpus: Path, folder: Path) -> tuple[Path, ...]:
 
 
 def view_fence(c: str, slug: str, corpus: Path, folder: Path) -> dict[str, Any]:
-    """The settings that fence a view build's session: the view_read_only folders read-only, and its check command run
-    outside the sandbox, where it can reach this server."""
+    """The settings that fence a view build's session: the view_read_only folders read-only, its check command run
+    outside the sandbox, where it can reach this server, and offline_deny."""
     check = view_check_command(c, slug)
-    return read_only_fence(view_read_only(corpus, folder), outside=(check, f"{check} *"))
+    out = read_only_fence(view_read_only(corpus, folder), outside=(check, f"{check} *"))
+    perms = dict(out.get("permissions") or {})
+    deny = [*(perms.get("deny") or []), *offline_deny()]
+    return {**out, "permissions": {**perms, "deny": deny}}
+
+
+def offline_deny() -> list[str]:
+    """The deny rules that keep a view build off the network in every permission mode, where the sandbox cannot run as
+    well: the web tools, and Bash commands by OFFLINE_PROGRAMS, OFFLINE_COMMANDS and OFFLINE_MODULES."""
+    return [*WEB_TOOLS, *(r for p in OFFLINE_PROGRAMS for r in (f"Bash({p}:*)", f"Bash(*/{p} *)")),
+            *(f"Bash({cmd}:*)" for cmd in OFFLINE_COMMANDS), *(f"Bash(* -m {m} *)" for m in OFFLINE_MODULES)]
 
 
 def view_key(slug: str) -> str:
