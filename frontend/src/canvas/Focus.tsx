@@ -101,7 +101,7 @@ export function Focus({ cell, list, frame, onPick, onClose, onAskNew }: FocusPro
                 <CardBody cell={cell} width={(wide ? colW : FOCUS_W) - FOCUS_PAD_X} label={label} big />
                 {cell.takeaway ? (
                   <div className="bfocus-take">
-                    <div className="chat-text">
+                    <div className={'chat-text' + (cell.takeaway_stale ? ' is-stale' : '')} title={cell.takeaway_stale ? 'Written before the card ran again' : undefined}>
                       <ChatMarkdown text={cell.takeaway} />
                     </div>
                   </div>

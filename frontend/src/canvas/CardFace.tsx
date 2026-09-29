@@ -141,7 +141,7 @@ function Face(p: CardFaceProps) {
         </div>
       ) : cell.takeaway ? (
         <div className="bcell-take" data-anchor={`card:${cell.id}`} data-anchor-text={cell.takeaway} onMouseDown={p.onTextDown?.('takeaway')} onClick={p.onTextClick?.('takeaway')}>
-          <div className="chat-text bcell-take-text">
+          <div className={'chat-text bcell-take-text' + (cell.takeaway_stale ? ' is-stale' : '')} title={cell.takeaway_stale ? 'Written before the card ran again' : undefined}>
             <ChatMarkdown text={cell.takeaway} />
           </div>
           <CheckMark check={check} idle={!check && !!p.onCheckAgain && checkable(cell)} onUndo={p.onUndoFix} onAgain={p.onCheckAgain} onStop={p.onStopCheck} />

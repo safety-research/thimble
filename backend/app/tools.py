@@ -1663,10 +1663,16 @@ async def _h_delete_card(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
 
 def _takeaway_missing(ctx: Ctx, nb_id: str, cell: dict) -> str:
     """What a run's result ends with when the card ran clean and has no takeaway: the `## takeaway-missing` line, since
-    the agent that ran the card writes its takeaway. An errored card gets the error's hint instead."""
-    if cell.get("status") != "ok" or str(cell.get("takeaway") or "").strip():
+    the agent that ran the card writes its takeaway, or `## takeaway-stale` when it kept one written before its outputs
+    changed. An errored card gets the error's hint instead."""
+    from . import notebook
+
+    if cell.get("status") != "ok":
         return ""
-    line = hint("takeaway-missing", cid=str(cell.get("id") or ""))
+    if str(cell.get("takeaway") or "").strip():
+        line = hint("takeaway-stale", cid=str(cell.get("id") or "")) if cell.get(notebook.TAKEAWAY_STALE) else ""
+    else:
+        line = hint("takeaway-missing", cid=str(cell.get("id") or ""))
     return f"\n\n{line}" if line else ""
 
 

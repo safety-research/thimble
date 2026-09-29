@@ -598,6 +598,10 @@ The analyst locked card:{cid}, so it stays as it is. Leave it, or add a new card
 
 card:{cid} has no takeaway. Write it with `edit_card` and `takeaway`, one or two sentences answering its question from the output above.
 
+## takeaway-stale
+
+card:{cid} kept its takeaway, written before this run changed its output. Write it again now with `edit_card` and `takeaway` from the output above, before any other call.
+
 ## takeaway-missing-shown
 
 card:{cid} has no takeaway. Write it with `edit_card` and `takeaway`, one or two sentences answering its question from what the card shows.

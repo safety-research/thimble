@@ -167,6 +167,8 @@ export interface Cell {
   slug?: string | null
   takeaway?: string
   takeaway_author?: string
+  /** the takeaway was written before the card's last run changed its outputs (backend notebook.TAKEAWAY_STALE) */
+  takeaway_stale?: boolean
   created_by: string
   created_at_event?: number | null
   created_ts?: string

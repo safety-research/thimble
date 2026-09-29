@@ -539,6 +539,11 @@ body[data-cmd] .board-stage * {
   line-height: 1.55;
   text-wrap: pretty;
 }
+/* a takeaway written before the card's last run changed its outputs, until it is written again */
+.bcell-take-text.is-stale,
+.bfocus-take .is-stale {
+  opacity: 0.55;
+}
 .bcell-take-text p {
   margin: 0;
 }

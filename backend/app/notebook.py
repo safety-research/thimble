@@ -1136,6 +1136,7 @@ def edit_cell(workspace: str, cell_id: str, *, code: str | None = None, title: s
     if takeaway is not None:
         cell["takeaway"] = takeaway
         cell["takeaway_author"] = "analyst" if takeaway.strip() else None
+        cell.pop(TAKEAWAY_STALE, None)
         if takeaway.strip() and run:
             _verify_hook("takeaway", workspace, nb, cell)
     if locked is not None:
@@ -2538,7 +2539,8 @@ async def edit_and_run(workspace: str, nb_id: str, cell_id: str, code: str, *, b
                        timeout_s: float | None = None, default_timeout_s: float | None = None,
                        title: str | None = None, kind: str | None = None, from_dataset: bool = False) -> dict:
     """Replace a cell's code and run it again in place, for the `edit_card` tool. The replaced code stays as
-    `previous_code`, the edit is recorded in `edited`, the stale takeaway is cleared. `title` and `kind` change in the
+    `previous_code`, the edit is recorded in `edited`, the stale takeaway is cleared. A run of the same code, title and
+    kind keeps the takeaway, marked TAKEAWAY_STALE when the outputs' text changed. `title` and `kind` change in the
     same edit when given. `from_dataset` turns a diagram or timeline stored with a dataset into a card of code. Returns
     the cell with complete outputs. 404 for an unknown cell, 400 for a data cell or a kind without code."""
     nb = load_notebook(workspace, nb_id)
@@ -2559,9 +2561,18 @@ async def edit_and_run(workspace: str, nb_id: str, cell_id: str, code: str, *, b
         cell["kind"] = kind
     if changed:
         cell.setdefault("edited", []).append({"by": by, "ts": _now()})
-    cell["takeaway"] = ""
-    cell["takeaway_author"] = None
+    kept = "" if changed else str(cell.get("takeaway") or "").strip()
+    before = outputs_text(hydrate_outputs(_ws(workspace), cell.get("outputs"))) if kept else ""
+    if not kept:
+        cell["takeaway"] = ""
+        cell["takeaway_author"] = None
+        cell.pop(TAKEAWAY_STALE, None)
     _, full = await _execute_cell(workspace, nb, cell, None, timeout_s, default_timeout_s)
+    if kept and outputs_text(full.get("outputs") or []) != before:
+        cell[TAKEAWAY_STALE] = True
+        full[TAKEAWAY_STALE] = True
+        write_notebook(_ws(workspace), nb)
+        _emit(workspace, cell)
     return dict(full)  # a copy: the stored cell is the cached object
 
 
@@ -2636,6 +2647,7 @@ def append_takeaway(workspace: str, cell_id: str, text: str, *, only_if_empty: b
     if only_if_empty and existing.strip():
         return True
     cell["takeaway"] = text if overwrite or not existing else (existing + "\n\n" + text).strip()
+    cell.pop(TAKEAWAY_STALE, None)
     if author:
         cell["takeaway_author"] = author
     if runnable(cell):
