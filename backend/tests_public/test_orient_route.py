@@ -6,7 +6,9 @@ from __future__ import annotations
 
 import pytest
 
-from app import agent_session, bg_session, ledger, orient_session, orientation, tools
+import json
+
+from app import agent_session, bg_session, config, ledger, orient_session, orientation, tools
 
 CORPUS = "mini"
 
@@ -39,6 +41,30 @@ async def test_start_orientation_runs_the_session_in_the_background_exactly_in_t
     assert call["key"] == orient_session.KEY and call["background"] is terminal_first
     assert call["critique"] is True and call["ultracode"] is True, "Start's critique and Ultracode hold in either mode"
     assert "route" not in (orientation.read_run(CORPUS) or {})
+
+
+async def test_without_claude_code_s_trust_terminal_first_is_off_unless_the_analyst_turns_it_on(launched,
+                                                                                               claude_global_config):
+    """`claude --bg` refuses a folder Claude Code does not trust. Where the workspace's folder is not trusted (install.sh's
+    trust question answered no), terminal-first mode is off by default, as the settings show, so Start runs the
+    orientation as thimble's own session; the analyst's own choice of the mode holds either way, and install.sh's entry
+    for the workspaces folder turns the default on."""
+    claude_global_config.write_text("{}")
+    assert not bg_session.trusted(CORPUS)
+    assert orientation.terminal_first(CORPUS) is False and ledger.get_settings(CORPUS)["terminal_first"] is False
+    orientation.start_requested(CORPUS, {"text": "", "final_notebook": True, "propose_views": True}, {"id": "e1"})
+    res = await tools.call(CORPUS, "start_orientation", {"brief": ""})
+    assert not res.is_error, res
+    [call] = launched
+    assert call["background"] is False, "the orientation starts, as thimble's own session"
+    ledger.put_settings(CORPUS, {"terminal_first": True})
+    assert bg_session.wanted(CORPUS, "orient") and ledger.get_settings(CORPUS)["terminal_first"] is True
+    (config.workspace_dir(CORPUS) / "settings.json").write_text("{}")
+    claude_global_config.write_text(json.dumps({"projects": {str(config.WORKSPACES_DIR): {"hasTrustDialogAccepted": True}}}))
+    assert bg_session.trusted(CORPUS) and bg_session.wanted(CORPUS, "orient")
+    assert ledger.get_settings(CORPUS)["terminal_first"] is True
+    ledger.put_settings(CORPUS, {"terminal_first": False})
+    assert not bg_session.wanted(CORPUS, "orient")
 
 
 def test_an_orientation_an_earlier_build_ran_as_main_s_subagent_ends_its_record_with_its_chat(workspaces_tmp):

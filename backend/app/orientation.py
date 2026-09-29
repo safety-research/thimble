@@ -21,7 +21,8 @@ the same session, and its changes land in place, one Undo reverting them all.
 `query` is only ever the analyst's own words typed with Start. A run with a `final` group uses it as its deck. `status`
 is the latest run's, so start_orientation refuses while any run goes.
 
-Terminal-first mode (the workspace's `terminal_first` setting, on by default): the orientation's session runs as the
+Terminal-first mode (the workspace's `terminal_first` setting, on by default where Claude Code trusts the workspace's
+folder, default_terminal_first): the orientation's session runs as the
 Claude Code background session `thimble:orient · <workspace>` (bg_session), which the analyst sees in the agent tray of
 their own terminal through its tray entry (plugin/agents/orient-tray.md) and can attach to and message. It is the same
 session as with the mode off, with everything Start chooses: the orientation role's model, effort and Ultracode, fast
@@ -127,15 +128,24 @@ def _emit(c: str, status: str, **fields: Any) -> None:
 def terminal_first(c: str) -> bool:
     """Whether the workspace runs in terminal-first mode (TERMINAL_FIRST_KEY), where the orientation, its critique and
     the writers run as background sessions (bg_session.wanted): what settings.json stores, else the default
-    (ledger.SETTINGS_DEFAULTS, on)."""
-    from .ledger import SETTINGS_DEFAULTS, stored_settings  # noqa: PLC0415
+    (default_terminal_first)."""
+    from .ledger import stored_settings  # noqa: PLC0415
 
-    default = SETTINGS_DEFAULTS[TERMINAL_FIRST_KEY] is True
     try:
-        value = stored_settings(c).get(TERMINAL_FIRST_KEY, default)
+        stored = stored_settings(c)
     except Exception:  # noqa: BLE001 — a workspace whose settings cannot be read runs the default mode
-        return default
-    return value is True
+        return default_terminal_first(c)
+    return stored[TERMINAL_FIRST_KEY] is True if TERMINAL_FIRST_KEY in stored else default_terminal_first(c)
+
+
+def default_terminal_first(c: str) -> bool:
+    """Terminal-first mode where the analyst has not set it: on (ledger.SETTINGS_DEFAULTS) when Claude Code trusts the
+    workspace's folder, since `claude --bg` refuses a folder it does not trust (bg_session.trusted); off otherwise, so
+    that the orientation and the writers run as thimble's own sessions, which need no trust."""
+    from . import bg_session  # noqa: PLC0415
+    from .ledger import SETTINGS_DEFAULTS  # noqa: PLC0415
+
+    return SETTINGS_DEFAULTS[TERMINAL_FIRST_KEY] is True and bg_session.trusted(c)
 
 
 def effort(value: Any) -> str:
