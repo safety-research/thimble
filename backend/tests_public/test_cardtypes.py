@@ -6,8 +6,8 @@ cites; the card check's page gets the type's frame from the request. Keep writes
 the card change into the card's one thimble.card call. Main hears when a label it ran finishes, and can colour a label's
 values.
 
-The corpus `crew` is 140 saves of 35 accounts on 4 pages, each naming the next account, which the Swarm viewer's
-applies() reads as a swarm. Reader calls run in this process (views._runner replaced by an exec of the kernel's
+The corpus `crew` is 140 saves of 35 accounts on 4 pages, each naming the next account, which the Swarm extension's
+view reads as a swarm; the extension is added. Reader calls run in this process (views._runner replaced by an exec of the kernel's
 snippet), and thimble.card runs in this process in a module built from kernel_thimble.py, as a kernel builds it."""
 from __future__ import annotations
 
@@ -24,7 +24,7 @@ import pytest
 
 from fastapi import HTTPException
 
-from app import card_check, cardtypes, channel, concepts, config, render, tools, views
+from app import card_check, cardtypes, channel, concepts, config, extensions, render, tools, views
 
 CORPUS = "crew"
 ROWS = [{"page": f"p{i % 4}", "user": f"bot{i % 35}", "ts": f"2026-04-14T{i // 60:02d}:{i % 60:02d}:00Z",
@@ -38,7 +38,13 @@ def crew(workspaces_tmp, tmp_path, monkeypatch) -> Path:
     (d / "saves.jsonl").write_text("".join(json.dumps(r) + "\n" for r in ROWS))
     (d / "manifest.json").write_text(json.dumps({"name": CORPUS, "description": "a swarm"}))
     monkeypatch.setattr(config, "DATA_DIR", (tmp_path / "data").resolve())
+    extensions.add("swarm", yes=True, say=lambda _: None)
     return d.resolve()
+
+
+async def _refresh() -> dict:
+    await extensions.refresh(CORPUS)
+    return await cardtypes.refresh(CORPUS, warm=False)
 
 
 async def _inproc_run(c: str, code: str, timeout: float) -> tuple[list[dict], str]:
@@ -89,9 +95,9 @@ async def _label(name: str, pattern: str, values: list[str]) -> str:
     return s["concept"]
 
 
-async def test_the_swarm_type_is_found_without_a_proposal_and_listed_for_main(crew):
-    types_ = await cardtypes.refresh(CORPUS, warm=False)
-    assert list(types_) == ["swarm"] and views.read_view(CORPUS, "swarm") is None
+async def test_the_swarm_extensions_types_are_found_and_listed_for_main_with_their_guides(crew):
+    types_ = await _refresh()
+    assert sorted(types_) == ["agent-flow", "swarm"] and types_["agent-flow"]["reader"] == types_["swarm"]["reader"]
     t = types_["swarm"]
     assert t["claims"] == ["saves.jsonl"] and t["paths"] == ["saves.jsonl"] and Path(t["card"]).is_file()
     assert Path(t["reader"]).is_relative_to(config.workspace_dir(CORPUS)), "a card's kernel sees only the workspace"
@@ -99,16 +105,17 @@ async def test_the_swarm_type_is_found_without_a_proposal_and_listed_for_main(cr
     text = cardtypes.prompt_text(CORPUS)
     assert text.startswith("### Card types") and "\n- `swarm`: " in text
     assert '`rows` "account" or "signature"' in text and 'thimble.card("swarm"' in text
+    assert "\n- `agent-flow`: " in text and "use `swarm` to compare accounts" in text
 
 
 async def test_a_corpus_that_is_no_swarm_lists_no_card_type(crew):
     (crew / "saves.jsonl").write_text("".join(json.dumps({**r, "user": f"bot{i % 3}"}) + "\n" for i, r in enumerate(ROWS)))
-    assert await cardtypes.refresh(CORPUS, warm=False) == {}
+    assert await _refresh() == {}
     assert cardtypes.prompt_text(CORPUS) == ""
 
 
 async def test_a_card_draws_the_records_a_label_kept_coloured_by_another_and_lists_its_numbers(crew, kernel):
-    await cardtypes.refresh(CORPUS, warm=False)
+    await _refresh()
     await _label("early", r"value is [0-5]?\d\.", ["early", "later"])
     colour = await _label("even", r"value is \d*[02468]\.", ["even", "odd"])
     concepts.show_concept(CORPUS, "even", True, ["odd"])  # Files highlights only "odd", which the card does not follow
@@ -140,8 +147,25 @@ async def test_a_card_draws_the_records_a_label_kept_coloured_by_another_and_lis
     assert texts[0].split("\n")[1] == "L1|" + lines[0], "main cites the listing as card:<id>@out0#L<n>"
 
 
+async def test_an_agent_flow_card_lists_one_accounts_steps_with_the_accounts_it_followed_and_that_followed_it(crew, kernel):
+    await _refresh()
+    kernel.card("agent-flow", account="BOT3")
+    bundle = kernel.shown[-1]
+    data = bundle[cardtypes.CARD_MIME]["data"]
+    assert data["account"] == "bot3" and data["steps_total"] == 4 and [s["place"] for s in data["steps"]] == ["p3", "p2", "p1", "p0"]
+    later = data["steps"][1]
+    assert {"account": "bot34", "kind": "same place"} in [{k: c[k] for k in ("account", "kind")} for c in later["left"]]
+    assert any(c["account"] == "bot4" and c["kind"] == "names" for c in later["left"]), "the account its save names"
+    assert any(c["account"] == "bot2" and c["kind"] == "names" for c in data["steps"][0]["right"]), "the account naming it"
+    lines = bundle["text/plain"].split("\n")
+    assert lines[0] == "agent-flow: bot3, 4 records on 4 places in 4 steps"
+    assert [ln.split(". ")[0] for ln in lines[-4:]] == ["1", "2", "3", "4"] and lines[-1].endswith(data["steps"][-1]["ref"])
+    with pytest.raises(ValueError, match=r"no account 'nobody'; the busiest are"):
+        kernel.card("agent-flow", account="nobody")
+
+
 async def test_a_wrong_argument_names_what_the_type_takes(crew, kernel):
-    await cardtypes.refresh(CORPUS, warm=False)
+    await _refresh()
     with pytest.raises(ValueError, match=r"`rows` is one of 'account', 'signature', not 'accounts'"):
         kernel.card("swarm", rows="accounts")
     with pytest.raises(ValueError, match=r"has no `colour`; the keys are within, rows"):
@@ -152,7 +176,7 @@ async def test_a_wrong_argument_names_what_the_type_takes(crew, kernel):
 
 
 async def test_the_check_s_page_gets_the_type_s_frame_from_the_request(crew, kernel):
-    await cardtypes.refresh(CORPUS, warm=False)
+    await _refresh()
     kernel.card("swarm")
     cell = {"id": "c1", "kind": "plot", "status": "ok", "title": "Who names whom?", "outputs": [kernel.shown[-1]]}
     req = render.request_for(CORPUS, cell)
@@ -184,7 +208,7 @@ def test_keep_rewrites_the_literal_arguments_of_the_one_card_call():
 
 
 async def test_keep_changes_only_the_arguments_the_type_lets_the_card_change(crew, kernel):
-    await cardtypes.refresh(CORPUS, warm=False)
+    await _refresh()
     code = 'import thimble\nthimble.card("swarm", links=["names"])'
     kernel.card("swarm", links=["names"])
     cell = {"id": "c1", "kind": "plot", "code": code, "outputs": [kernel.shown[-1]]}
@@ -198,7 +222,7 @@ async def test_keep_changes_only_the_arguments_the_type_lets_the_card_change(cre
 
 
 async def test_the_card_check_gives_back_the_arguments_keep_set(crew, kernel):
-    await cardtypes.refresh(CORPUS, warm=False)
+    await _refresh()
     kernel.card("swarm", rows="signature")
     kept = 'import thimble\nthimble.card("swarm", rows="signature", links=["names"])'
     cell = {"id": "c1", "kind": "plot", "code": kept, "outputs": [kernel.shown[-1]], "kept_args": {"rows": "signature"}}
