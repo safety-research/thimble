@@ -38,6 +38,24 @@ background agents are refused, with a message saying how to trust the folder). `
 `--trust-workspaces` and `--no-trust-workspaces` answer without asking. `install.sh --dry-run` prints every step and
 changes nothing.
 
+## The swarm branch
+
+The `swarm` branch adds the Swarm view, which draws many agents acting on shared pages and channels, and questions
+typed in a view, which main answers with labels the view draws. To try it, install a clone of it:
+
+```bash
+git clone -b swarm https://github.com/safety-research/thimble.git thimble-swarm
+cd thimble-swarm && bash scripts/install.sh
+```
+
+A server already running keeps the other install's code until `thimble server restart`. To go back, run
+`bash scripts/install.sh` in the unzipped release, then `thimble server restart`; if you added the plugin, run
+`bash scripts/install.sh --no-plugin` in the clone first and give the release's install `--plugin`. In the clone,
+`thimble update` pulls the swarm branch and ignores `--from`. Known limitations: only an orientation proposes the Swarm
+view, when the first 400 JSON Lines or CSV files show 30 or more accounts naming each other on 3 or more shared places;
+accounts of the same name in different runs share a row; a "names" link points only to an earlier card; and a large
+human team chat can pass for a swarm.
+
 ## Update
 
 `thimble update` installs the latest release; in a Dev install it runs `git pull --ff-only` and the install steps,

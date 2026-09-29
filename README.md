@@ -26,7 +26,7 @@ claude "install thimble from https://github.com/safety-research/thimble"
 2. Unzip it.
 3. Run `bash scripts/install.sh` inside the unzipped folder.
 
-For a development build, clone the repo and run `bash scripts/install.sh` (requires Node 20+).
+For a development build, clone the repo and run `bash scripts/install.sh` (requires Node 20+). To try the `swarm` branch, see [INSTALL.md](INSTALL.md#the-swarm-branch).
 
 [INSTALL.md](INSTALL.md) covers requirements, updating and troubleshooting.
 
