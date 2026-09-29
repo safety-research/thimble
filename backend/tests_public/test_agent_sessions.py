@@ -253,6 +253,29 @@ async def test_bypass_grants_every_request_and_switches_with_manual_while_the_se
     await _done()
 
 
+async def test_a_switch_to_bypass_leaves_the_config_s_asks_waiting_for_the_analyst(fake, monkeypatch):
+    """A switch to Bypass grants what waits on the card, but not an install command thimble's config sent there: that
+    one waits for the analyst's own answer."""
+    monkeypatch.setenv("FAKE_MODE", "sleep")
+    _listen()
+    run = await orient_session.start(CORPUS, "")
+    assert run.mode == "manual" and run.config is not None
+    install = {"command": "bash -c 'pip install requests'"}
+    assert run.config.verdict("Bash", install) == "ask"
+    held = _ask("Bash", install)
+    plain = _ask("Bash", {"command": "rm -r out"})
+    pending = await _pending(run.chat, 2)
+    agent_session.set_mode(CORPUS, run.chat, "bypass")
+    assert (await plain)["behavior"] == "allow"
+    await asyncio.sleep(0.1)
+    assert not held.done(), "the install still waits"
+    rid = next(p["id"] for p in pending if "pip install" in p.get("command", ""))
+    assert agent_session.answer(CORPUS, run.chat, rid, False)
+    assert (await held)["behavior"] == "deny"
+    await orient_session.stop(CORPUS)
+    await _done()
+
+
 async def test_main_s_end_parks_the_orientation_and_the_next_main_session_resumes_it(fake, monkeypatch):
     """Main's end (agent_session.wind_down) ends the orientation's process as the server's stop does: its chat stays
     running, marked parked, and no Stop reaches its record. The next session that is main resumes it in the same chat

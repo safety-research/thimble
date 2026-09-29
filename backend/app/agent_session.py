@@ -341,6 +341,7 @@ class Run:
     groups: dict[str, str] = field(default_factory=dict)  # web rule -> the id of the request waiting for it (module note, the web)
     shown: dict[str, int] = field(default_factory=dict)  # answered request id -> how many joined calls its card listed
     asking: dict[str, tuple[str | None, str]] = field(default_factory=dict)  # request id -> (agent that asked, tool)
+    forced: set[str] = field(default_factory=set)  # ids of the waiting requests thimble's config sends to the analyst
     # the analyst's answers to calls auto mode refused, by (agent, tool, input): (allowed, time.monotonic() when), which
     # the call made again meets before it runs (module note, auto mode)
     grants: dict[tuple[str | None, str, str], tuple[bool, float]] = field(default_factory=dict)
@@ -2324,6 +2325,8 @@ async def ask(c: str, key: str | None, tool_name: str, inp: Any, agent_id: str |
     fut: asyncio.Future = asyncio.get_running_loop().create_future()
     run.waits[rid] = fut
     run.asking[rid] = (agent_id or None, tool_name)
+    if verdict == "ask":
+        run.forced.add(rid)
     if run.bg:
         from . import channel  # noqa: PLC0415 — channel imports the views module, which this module does not need
 
@@ -2347,6 +2350,7 @@ async def ask(c: str, key: str | None, tool_name: str, inp: Any, agent_id: str |
             fut.set_result(None)
         run.waits.pop(rid, None)
         run.asking.pop(rid, None)
+        run.forced.discard(rid)
         run.ask_keys.pop(rid, None)
         chosen = run.offers.pop(rid, None)
         if web and run.groups.get(web) == rid:
@@ -2391,6 +2395,8 @@ async def _recheck(run: Run, agent_id: str | None, tool_name: str, inp: Any, rea
     fut: asyncio.Future = asyncio.get_running_loop().create_future()
     run.waits[rid] = fut
     run.asking[rid] = (agent_id or None, tool_name)
+    if run.config is not None and run.config.verdict(tool_name, inp) == "ask":
+        run.forced.add(rid)
     try:
         got = await asyncio.wait_for(fut, CLASSIFIER_WAITS_S[n])
     except asyncio.TimeoutError:
@@ -2398,6 +2404,7 @@ async def _recheck(run: Run, agent_id: str | None, tool_name: str, inp: Any, rea
     finally:
         run.waits.pop(rid, None)
         run.asking.pop(rid, None)
+        run.forced.discard(rid)
     if got in ("again", ELSEWHERE):  # ELSEWHERE: another call of this tool got its result (_answered_in_terminal)
         if tool_use_id:
             session.not_run(tool_use_id)
@@ -2713,9 +2720,9 @@ def answer(c: str, chat: str, request_id: str, allow: bool, always: bool = False
 
 
 def _grant_waiting(run: Run) -> None:
-    """Allow every request that waits on `run` (a switch to Bypass)."""
-    for fut in list(run.waits.values()):
-        if not fut.done():
+    """Allow every request that waits on `run` (a switch to Bypass), except those thimble's config sends to the analyst."""
+    for rid, fut in list(run.waits.items()):
+        if not fut.done() and rid not in run.forced:
             fut.set_result(True)
 
 
