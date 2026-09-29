@@ -20,7 +20,7 @@ Your goal is the smallest change that does the job. Change nothing around the ta
 
 Read the file the target points at and its neighbours first. Check what you touched.
 
-- Frontend, `cd frontend && npx tsc --noEmit -p tsconfig.app.json` and `npm test`.
+- Frontend, `cd frontend && npx tsc --noEmit -p tsconfig.app.json` and `npx vitest run --configLoader runner`.
 - Backend, `cd backend && THIMBLE_SKIP_KEY=1 .venv/bin/python -m pytest tests_public/test_<module>.py -q -p no:cacheprovider`.
 - A prompt, from `backend/`, `.venv/bin/python -c "from app import prompts; prompts.load('<name>')"`.
 

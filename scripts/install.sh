@@ -22,8 +22,8 @@
 # (uv.lock's versions, with their hashes) by uv pip, or by pip where pip is set up with an index and uv is not; with its
 # prebuilt frontend/dist, only the frontend packages the server and its scripts load (frontend/runtime, pinned by its own
 # lockfile). Where the index lacks a pinned version, the newest versions pyproject.toml or frontend/runtime/package.json
-# allow that the index has are installed instead, and the packages that differ from the pinned versions are listed;
-# --require-pinned stops there instead. A file whose hash differs from the pinned one stops the install, from either index.
+# allow that the index has are installed instead (uv keeps the backend's other pins), and the packages that differ from
+# the pinned versions are listed; --require-pinned stops there instead. A file whose hash differs from the pinned one stops the install, from either index.
 # Needs: uv (or python3 >= 3.12); node >= 20 for custom views, and to build frontend/dist when it is missing or out of date;
 # the claude CLI to register the plugin.
 # The marketplace name is thimble-local from a release zip and thimble from a checkout (.claude-plugin/marketplace.json).
@@ -380,10 +380,24 @@ release_venv() {  # the pinned packages of backend/requirements.txt (uv.lock's, 
   elif [ "$require_pinned" = 1 ]; then
     die "the package index lacks a version backend/requirements.txt pins (above), and --require-pinned installs only pinned versions"
   else
-    say "the package index lacks a version backend/requirements.txt pins (above), so install.sh installs the newest versions backend/pyproject.toml allows that the index has"
-    py_ranges all
+    say "the package index lacks a version backend/requirements.txt pins (above)"
+    if [ "$pytool" != uv ] || ! prefer_pins "$req"; then
+      say "so install.sh installs the newest versions backend/pyproject.toml allows that the index has"
+      py_ranges all
+    fi
     py_differs "$req"
   fi
+}
+
+prefer_pins() {  # prefer_pins REQ (uv): backend/pyproject.toml resolved from the index with REQ's pins kept wherever the
+  # index has them, the others at the newest versions it allows that the index has, installed with their hashes checked
+  local out="$tmp/prefs.txt" py="$dir/backend/.venv/bin/python" extra=()
+  [ "$dev" = 0 ] || extra=(--extra dev)
+  say "so install.sh keeps each pin the index has, and for the others installs the newest versions backend/pyproject.toml allows that the index has"
+  run cp "$1" "$out"  # uv pip compile keeps the versions its output file already names where it can
+  logged "$tmp/py.log" uv pip compile "$src/backend/pyproject.toml" ${extra[@]+"${extra[@]}"} -o "$out" --generate-hashes \
+    --quiet --python "$py" || return 1
+  logged "$tmp/py.log" uv pip sync --require-hashes "$out" --python "$py"
 }
 
 system_browser() {  # sys_channel, sys_name, sys_path: the Chrome or Edge that Playwright's chrome and msedge channels
@@ -435,11 +449,19 @@ pw_location() {  # pw_location PLAYWRIGHT…: where that Playwright keeps the he
     | awk '/^browser: chromium-headless-shell/ { f = 1; next } f && /Install location:/ { sub(/.*Install location: */, ""); print; exit }'
 }
 
-browser_prev() {  # the browser an earlier install or the user chose: config.json's "browser" in thimble's home, or ""
-  local v=""
+browser_prev() {  # the browser an earlier install or the user chose: config.json's "browser" in thimble's home; else
+  # bundled over an earlier install whose backend's headless Chromium is downloaded (installs before 0.3.0 fetched it
+  # without asking); else ""
+  local v="" loc=""
   [ ! -f "$home/config.json" ] || v="$(json_get "$home/config.json" browser 2>/dev/null)" || v=""
-  case "$v" in system | bundled | off) printf '%s\n' "$v";; esac
+  case "$v" in
+    system | bundled | off) printf '%s\n' "$v";;
+    *) if earlier_install; then loc="$(pw_location "$dir/backend/.venv/bin/python" -I -m playwright)" || loc=""; fi
+       if [ -n "$loc" ] && [ -f "$loc/INSTALLATION_COMPLETE" ]; then printf 'bundled\n'; fi;;
+  esac
 }
+
+earlier_install() { [ -e "$dir/backend/.venv" ]; }  # an earlier install is in --dir, which this run installs over
 
 record_browser() {  # record_browser VALUE: config.json's "browser" (the file is created with that key alone when missing)
   local py="python3"
@@ -900,7 +922,7 @@ ask() {  # the questions, before anything is installed: the browser, the sandbox
   if [ "$dry" = 1 ]; then
     step "the questions install.sh asks on a terminal, and the flag that gives each answer"
     if [ -n "$browser" ]; then say "1. the browser: answered by --browser $browser"
-    elif [ -n "$browser_was" ]; then say "1. the browser: answered $browser_was earlier ($home/config.json); --browser changes it"
+    elif [ -n "$browser_was" ]; then say "1. the browser: answered $browser_was earlier; --browser changes it"
     else
       probe_browser
       item 1 "$(browser_text)"
@@ -931,9 +953,13 @@ ask() {  # the questions, before anything is installed: the browser, the sandbox
         need+=("the trust: --trust-workspaces or --no-trust-workspaces")
       fi
     fi
+    local again="bash $src/scripts/install.sh --dry-run prints the questions; then run install.sh again with a flag for each."
+    if [ "$src" != "$dir" ] && earlier_install; then
+      again="Ask them, then run \`thimble update\` again with a flag for each, which it passes on to install.sh. An install older than 0.3.0 has a \`thimble update\` that takes no flags: unzip the release and run its scripts/install.sh --dir $dir with the flags."
+    fi
     [ "${#need[@]}" = 0 ] || die "there is no terminal to ask on, so each question needs its answer as a flag. Not answered:
 $(printf '  %s\n' "${need[@]}")
-bash $src/scripts/install.sh --dry-run prints the questions; then run install.sh again with a flag for each."
+$again"
     return 0
   fi
   if [ -z "$browser" ] && [ -z "$browser_was" ]; then

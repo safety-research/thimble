@@ -44,15 +44,15 @@ def env_for(tmp_path: Path, **extra: str) -> dict[str, str]:
 
 
 # uv's stand-in: `uv venv DIR` makes DIR/bin/python the base interpreter without site-packages, so it holds no package
-# (and install.sh fetches no browser for one); `uv pip …` is written to $STUB_LOG, and `uv pip sync` prints
-# $STUB_SYNC_OUT and exits with $STUB_SYNC_RC
+# (and install.sh fetches no browser for one); `uv pip …` is written to $STUB_LOG, and `uv pip sync` of a
+# requirements.txt prints $STUB_SYNC_OUT and exits with $STUB_SYNC_RC
 UV_STUB = f"""#!/bin/sh
 case "$1" in
   --version) echo "uv 0.0.0";;
   venv) for a; do d="$a"; done; mkdir -p "$d/bin"
         printf '#!/bin/sh\\nexec %s -S "$@"\\n' {os.path.realpath(sys.executable)} > "$d/bin/python"; chmod +x "$d/bin/python";;
   pip) echo "uv $*" >> "${{STUB_LOG:-/dev/null}}"
-       if [ "$2" = sync ]; then printf '%s\\n' "${{STUB_SYNC_OUT:-}}"; exit "${{STUB_SYNC_RC:-0}}"; fi;;
+       case "$2 $*" in sync*requirements.txt*) printf '%s\\n' "${{STUB_SYNC_OUT:-}}"; exit "${{STUB_SYNC_RC:-0}}";; esac;;
 esac
 """
 
@@ -146,8 +146,8 @@ def test_a_release_installs_the_backend_with_the_tool_set_up_with_a_package_inde
 
 
 def test_a_pinned_install_falls_back_to_pyproject_s_ranges_only_when_the_index_lacks_a_version(tmp_path):
-    """The newest versions the ranges allow, and the packages that differ from the pins listed; --require-pinned stops
-    there instead, and a hash mismatch always stops."""
+    """The pins the index has kept and the newest versions the ranges allow for the others, with their hashes, and the
+    packages that differ from the pins listed; --require-pinned stops there instead, and a hash mismatch always stops."""
     tree = pinned_release(tmp_path)
     dest = tmp_path / "home" / ".thimble" / "app"
     log = tmp_path / "uv.log"
@@ -166,8 +166,10 @@ def test_a_pinned_install_falls_back_to_pyproject_s_ranges_only_when_the_index_l
     assert r.returncode == 0 and calls == [] and "installed by an earlier run" in r.stdout, "a re-run keeps them"
     missing = {"STUB_SYNC_RC": "1", "STUB_SYNC_OUT": "Because there is no version of httpx==0.28.1 and you require it"}
     r, calls = run(**missing)
-    assert r.returncode == 0 and len(calls) == 2 and calls[1].startswith("uv pip install -r "), r.stdout + r.stderr
-    assert "the newest versions backend/pyproject.toml allows that the index has" in r.stdout
+    assert r.returncode == 0 and len(calls) == 3, r.stdout + r.stderr
+    assert calls[1].startswith(f"uv pip compile {tree}/backend/pyproject.toml -o ") and "--generate-hashes" in calls[1]
+    assert calls[2].startswith("uv pip sync --require-hashes ") and calls[2].endswith("prefs.txt")
+    assert "keeps each pin the index has" in r.stdout
     venv = dest / "backend" / ".venv"  # a real environment holding an older httpx, as the ranges installed it
     shutil.rmtree(venv)
     subprocess.run([os.path.realpath(sys.executable), "-m", "venv", "--without-pip", str(venv)], check=True, timeout=60)
@@ -463,6 +465,13 @@ esac
     r = run("--browser", "off", "--no-trust-workspaces")
     assert r.returncode == 0 and json.loads(conf.read_text()) == {"browser": "off"}, r.stdout + r.stderr
     assert json.loads(cfg.read_text())["projects"] == {} and len(log.read_text().splitlines()) == 1
+    # an install before 0.3.0 kept no answers but downloaded the Chromium: an update without a terminal asks no browser
+    # question, and names `thimble update` for the flags it lacks
+    conf.unlink()
+    (home / ".thimble" / "plugin.json").unlink()
+    r = run()
+    assert r.returncode == 1 and "--browser" not in r.stderr and "--plugin or --no-plugin" in r.stderr, r.stderr
+    assert "run `thimble update` again with a flag for each" in r.stderr
 
 
 def test_the_plugin_is_registered_only_on_a_yes_and_uninstall_removes_only_what_install_added(tmp_path):

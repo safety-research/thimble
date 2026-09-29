@@ -473,10 +473,10 @@ def mode_rows(c: str) -> dict[str, str]:
             if agents[name].get("permissionMode") in PERMISSION_MODES}
 
 
-def sandbox_runs() -> bool:
+def sandbox_runs(refresh: bool = False) -> bool:
     from . import cc_settings  # noqa: PLC0415 — cc_settings imports ledger, which imports config
 
-    return cc_settings.sandbox_ok()
+    return cc_settings.sandbox_ok(refresh=refresh)
 
 
 @dataclass
@@ -491,6 +491,7 @@ class Session:
     own_bash: list[str] = field(default_factory=list)  # commands it runs unasked in every case (allow_own)
     hosted: bool = True  # False for a session nobody can answer, which is refused what it would ask for
     offline: bool = False  # a view build whose network is off, whose deny rules refuse every install (dev.view_fence)
+    enforced: bool = False  # sandbox.enforce: Claude Code refuses to start the session when its sandbox can't run
 
     @property
     def network(self) -> bool:
@@ -580,12 +581,14 @@ def session(c: str | None, agent: str, *, sandbox: bool = True) -> Session:
     conf = load(c)
     box = conf["sandbox"]
     runs = box["use"] != "never" and sandbox_runs()
+    if box["enforce"] and sandbox and not runs and box["use"] != "never":
+        runs = sandbox_runs(refresh=True)  # the analyst may have installed what it needs since the last check
     if box["enforce"] and not (sandbox and runs):
         key = ("outside" if not sandbox else "never" if box["use"] == "never" else
                "env" if os.environ.get("THIMBLE_SANDBOX", "").strip() == "0" else "missing")
         why, fix = NO_SANDBOX_WHY[key]
         raise ConfigError(NO_SANDBOX.format(why=why, agent=agent, fix=fix).strip())
-    return Session(c, agent, conf["agents"][agent], conf["installs"], sandbox and runs)
+    return Session(c, agent, conf["agents"][agent], conf["installs"], sandbox and runs, enforced=bool(box["enforce"]))
 
 
 # --------------------------------------------------------------------------- prompts

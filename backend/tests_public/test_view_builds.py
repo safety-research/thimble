@@ -194,3 +194,17 @@ def test_a_resumed_build_keeps_its_fence(board, monkeypatch):
     assert argv[:3] == ["--bg", "--resume", "0123abcd-x"] and argv[-2:] == ["--", "go on"]
     assert {"--settings", "--disallowedTools", "--add-dir"} <= set(argv)
     assert argv[argv.index("-n") + 1] == "thimble:view-posts"
+
+
+async def test_main_hears_at_once_when_the_sandbox_refuses_a_view_build(board, monkeypatch):
+    """Where thimble's config requires the sandbox and it can't run, propose_view tells main that the view can't be
+    built and why, rather than that the dev agent is building it."""
+    from app import tools
+
+    monkeypatch.setenv("THIMBLE_SANDBOX", "0")
+    monkeypatch.setattr(views, "build_problem", lambda: "")
+    spec = {k: f"the {k}" for k, _ in views.SPEC_FIELDS}
+    res = await tools.call(CORPUS, "propose_view", {"name": "Posts", "why": "to read the board", "claims": ["board.jsonl"],
+                                                    **spec}, actor="analyst")
+    text = " ".join(b.get("text", "") for b in res.content)
+    assert "cannot be built" in text and "sandbox.enforce" in text and "building it now" not in text

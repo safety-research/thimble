@@ -556,6 +556,8 @@ export interface PermissionRequest {
   /** the length of the command or input when the card shows only its start (backend PERMISSION_INPUT_CHARS); such a
    * request offers no "don't ask again" */
   cut?: number
+  /** why thimble itself asks, which the card says in place of the mode's reason (backend dev.CODE_WHY) */
+  why?: string
 }
 
 /** A session held where the browser cannot answer: the model-switch dialog after a safety stop (session.py). */

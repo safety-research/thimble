@@ -215,11 +215,12 @@ def sandbox_ok(refresh: bool = False) -> bool:
     return ok
 
 
-def offline_sandbox(auto_allow: bool = False, network: bool = False) -> dict[str, Any]:
+def offline_sandbox(auto_allow: bool = False, network: bool = False, required: bool = False) -> dict[str, Any]:
     """The `sandbox` settings of a session thimble fences (agent_session.fence, view builds): on, with no network unless
     `network` (then the analyst's own sandbox settings say where it reaches), and no command run outside it;
-    `auto_allow` lets a command that runs in it skip its permission request."""
-    out = {"enabled": True, "failIfUnavailable": False, "autoAllowBashIfSandboxed": auto_allow,
+    `auto_allow` lets a command that runs in it skip its permission request; `required` (sandbox.enforce) has Claude
+    Code refuse to start the session when its sandbox can't run, rather than run its commands unsandboxed."""
+    out = {"enabled": True, "failIfUnavailable": required, "autoAllowBashIfSandboxed": auto_allow,
            "allowUnsandboxedCommands": False}
     return out if network else {**out, "network": {"deniedDomains": ["*"]}}
 

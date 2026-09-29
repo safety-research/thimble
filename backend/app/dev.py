@@ -35,6 +35,10 @@ the folders its task names, and Bash in the sandbox (sandbox_allow's rule, befor
 its check command. A session with no workspace (`thimble fix`, while the server is down) has nobody to ask, so it keeps
 UNHOSTED_TOOLS, has no web tools, and is refused what thimble's config would have it ask for.
 
+Before a code ticket starts, thimble asks the analyst on the card, in every mode, whether it may edit thimble's own code
+(CODE_QUESTION), since the validation stack, the gates and the server's git then run that code outside the sandbox;
+`thimble fix` asks in the terminal before it starts. Anything but an Allow stops the ticket before its worktree exists.
+
 thimble's config. Code tickets and view builds are the dev agent's sessions, with its `agents.dev` settings
 (userconf.py, dev_config); agent_session's module note says what the config adds. Their Bash runs in the sandbox
 where it can run. A code ticket's sandbox also writes what a commit in its worktree writes into the checkout's git
@@ -589,8 +593,50 @@ class GitError(RuntimeError):
     pass
 
 
+# A ticket's session can write its worktree and the worktree's own git folder (ticket_fence), so the server's git
+# commands there run with no fsmonitor command and no hooks, and only while the worktree still points at the live
+# checkout's git folder (_check_worktree).
+WORKTREE_GIT = ("-c", "core.fsmonitor=", "-c", "core.hooksPath=/dev/null")
+WORKTREE_MOVED = ("the ticket's worktree no longer points at the live checkout's git folder ({why}), so thimble ran no "
+                  "git command in it")
+
+
+def _in_worktrees(cwd: Path) -> bool:
+    try:
+        return Path(cwd).resolve().is_relative_to(worktrees_dir().resolve())
+    except OSError:
+        return False
+
+
+def _check_worktree(wt: Path) -> None:
+    """GitError (WORKTREE_MOVED) unless `wt/.git` names a folder of the live checkout's `worktrees/` whose commondir is
+    the checkout's git folder, with no config of its own."""
+    common = Path(subprocess.run(["git", "rev-parse", "--path-format=absolute", "--git-common-dir"], cwd=str(REPO),
+                                 capture_output=True, text=True, timeout=60).stdout.strip()).resolve()
+    try:
+        text = (Path(wt) / ".git").read_text("utf-8").strip()
+        own = Path(text.removeprefix("gitdir: ")).resolve()
+        why = ("its .git is not a gitdir line" if not text.startswith("gitdir: ") else
+               "its .git names a folder outside the checkout's worktrees" if own.parent != common / "worktrees" else
+               "its git folder names another commondir"
+               if (own / (own / "commondir").read_text("utf-8").strip()).resolve() != common else
+               "its git folder has a config of its own" if (own / "config.worktree").exists() else "")
+    except OSError as e:
+        why = f"{type(e).__name__}: {e}"
+    if why:
+        raise GitError(WORKTREE_MOVED.format(why=why))
+
+
+def _git_argv(cwd: Path, args: "tuple[str, ...] | list[str]") -> list[str]:
+    """`git` with `args` for a command in `cwd`, hardened in a ticket's worktree (WORKTREE_GIT)."""
+    if not _in_worktrees(cwd):
+        return ["git", *args]
+    _check_worktree(cwd)
+    return ["git", *WORKTREE_GIT, *args]
+
+
 def _git(cwd: Path, *args: str, check: bool = True, timeout: int = 120) -> str:
-    out = subprocess.run(["git", *args], cwd=str(cwd), capture_output=True, text=True, timeout=timeout)
+    out = subprocess.run(_git_argv(cwd, args), cwd=str(cwd), capture_output=True, text=True, timeout=timeout)
     if check and out.returncode != 0:
         raise GitError((out.stderr.strip() or out.stdout.strip() or f"git {' '.join(args)} failed")[:800])
     return out.stdout.rstrip()
@@ -728,11 +774,11 @@ def rebase_branch(wt: Path, branch: str, base: str, touched: list[str]) -> dict[
         return result
     head = live_head()
     result["head"] = head
-    if subprocess.run(["git", "merge-base", "--is-ancestor", head, "HEAD"], cwd=str(wt), capture_output=True,
+    if subprocess.run(_git_argv(wt, ("merge-base", "--is-ancestor", head, "HEAD")), cwd=str(wt), capture_output=True,
                       timeout=60).returncode == 0:
         result["ok"] = True  # the branch already sits on the live head
         return result
-    rb = subprocess.run(["git", "-c", "user.name=thimble dev", "-c", "user.email=dev@thimble.local", "rebase", head],
+    rb = subprocess.run(_git_argv(wt, ("-c", "user.name=thimble dev", "-c", "user.email=dev@thimble.local", "rebase", head)),
                         cwd=str(wt), capture_output=True, text=True, timeout=120)
     if rb.returncode != 0:
         conflicts = _git(wt, "diff", "--name-only", "--diff-filter=U", check=False).splitlines()
@@ -1233,7 +1279,7 @@ def read_only_fence(folders: "tuple[Path, ...] | list[Path]", outside: "tuple[st
     out: dict[str, Any] = {"permissions": {"deny": [f"Edit(/{Path(f)}/**)" for f in folders]}}
     if conf.sandboxed if conf is not None else cc_settings.sandbox_ok():
         box = cc_settings.offline_sandbox(auto_allow=not (conf and conf.install_asks()),
-                                          network=bool(conf and conf.network))
+                                          network=bool(conf and conf.network), required=bool(conf and conf.enforced))
         out["sandbox"] = {**box, **({"excludedCommands": list(outside)} if outside else {})}
     return out
 
@@ -1291,15 +1337,15 @@ def trust_folder(cwd: Path) -> Path:
         return Path(cwd)
 
 
-def ticket_fence(wt: Path, network: bool = False) -> dict[str, Any]:
+def ticket_fence(wt: Path, network: bool = False, required: bool = False) -> dict[str, Any]:
     """The --settings of a code ticket's session whose Bash runs in the sandbox: no network unless the dev agent's is
     on, and writes to the worktree, its session's folder, and to what a commit there writes into the checkout's git
     folder: the objects, the ticket branch's ref and its log, and the worktree's own git folder. The git folder's hooks
-    and config stay read-only."""
+    and config stay read-only. `required` as cc_settings.offline_sandbox takes it."""
     common = Path(_git(wt, "rev-parse", "--path-format=absolute", "--git-common-dir"))
     own = Path(_git(wt, "rev-parse", "--absolute-git-dir"))
     group = Path(_git(wt, "symbolic-ref", "--short", "HEAD")).parent  # `dev` of dev/<id>
-    box = cc_settings.offline_sandbox(network=network)
+    box = cc_settings.offline_sandbox(network=network, required=required)
     box["filesystem"] = {"allowWrite": [str(common / "objects"), str(common / "refs" / "heads" / group),
                                         str(common / "logs" / "refs" / "heads" / group), str(own)]}
     return {"sandbox": box}
@@ -1765,6 +1811,32 @@ class TicketError(RuntimeError):
     """A ticket that cannot go on, with a message written for the analyst (runner_problem's lines)."""
 
 
+class NotAllowed(TicketError):
+    """The analyst did not allow the ticket to edit thimble's own code (module note, permissions): it ends stopped."""
+
+
+# the card's tool name for the question (frontend chat/permissions.ts ASKS_TO)
+CODE_TOOL = "ThimbleCode"
+CODE_QUESTION = ("This edits thimble's own code, which then runs outside the sandbox (its test server, its checks and "
+                 "git). Allow?")
+CODE_WHY = ("thimble asks this before every code ticket, in every permission mode. Unanswered, the ticket is cancelled "
+            "after {wait}.")
+CODE_NOT_ALLOWED = "the analyst did not allow it to edit thimble's own code, so it did not start"
+CODE_NOBODY = ("it has no workspace, so no permission card could ask the analyst whether it may edit thimble's own code, "
+               "and it did not start")
+
+
+async def _code_refusal(t: dict[str, Any]) -> str:
+    """'' once the analyst allowed the ticket on its chat's card (CODE_QUESTION), else why it did not start."""
+    from . import agent_session  # noqa: PLC0415
+
+    if not t.get("workspace") or not t.get("chat"):
+        return CODE_NOBODY
+    got = await agent_session.ask(str(t["workspace"]), ticket_key(t["id"]), CODE_TOOL, {"description": CODE_QUESTION},
+                                  force=True, why=CODE_WHY.format(wait=agent_session.wait_words(PERMISSION_WAIT_S)))
+    return "" if got.get("behavior") == "allow" else CODE_NOT_ALLOWED
+
+
 def _kept_worktree(t: dict[str, Any]) -> tuple[Path, str, str] | None:
     """The worktree a restart interrupted, kept with the session's commits so the resumed session goes on from them:
     (path, branch, base) when it is still a worktree on the ticket's branch, else None."""
@@ -1828,9 +1900,9 @@ def ticket_key(tid: str) -> str:
     return f"ticket:{tid}"
 
 
-async def run_ticket(t: dict[str, Any], run: Run, *, doctor: str | None = None) -> dict[str, Any]:
+async def run_ticket(t: dict[str, Any], run: Run, *, doctor: str | None = None, allowed: bool = False) -> dict[str, Any]:
     """The whole ticket (_run_ticket), its session's permission requests answered on its chat meanwhile, as thimble's
-    config asks (dev_config)."""
+    config asks (dev_config); `allowed` when the analyst already allowed it to edit thimble's code (`thimble fix`)."""
     try:
         conf: userconf.Session | str = dev_config(t.get("workspace"), sandbox=True, hosted=bool(t.get("workspace")))
     except userconf.ConfigError as e:
@@ -1838,17 +1910,18 @@ async def run_ticket(t: dict[str, Any], run: Run, *, doctor: str | None = None) 
     if not isinstance(conf, str):
         _host(t.get("workspace"), {"key": ticket_key(t["id"]), "config": conf}, t.get("chat"), _log_for(t))
     try:
-        return await _run_ticket(t, run, doctor=doctor, conf=conf)
+        return await _run_ticket(t, run, doctor=doctor, conf=conf, allowed=allowed)
     finally:
         _unhost(t.get("workspace"), ticket_key(t["id"]))
 
 
 async def _run_ticket(t: dict[str, Any], run: Run, *, doctor: str | None = None,
-                      conf: "userconf.Session | str | None" = None) -> dict[str, Any]:
-    """The whole ticket: worktree, stack and before shot, the session's turns with gates fed back, after shot, apply, UI
-    rebuild (rolled back when it fails), then the restart rules. `doctor` is `thimble fix`'s path: no stack, rebuild or
-    restart. A stopped run ends `stopped` or `dismissed`; one a shutdown cuts short is queued again up to REQUEUE_MAX
-    times. Returns the ticket's record."""
+                      conf: "userconf.Session | str | None" = None, allowed: bool = False) -> dict[str, Any]:
+    """The whole ticket: the analyst's Allow unless `allowed` (_code_refusal), worktree, stack and before shot, the
+    session's turns with gates fed back, after shot, apply, UI rebuild (rolled back when it fails), then the restart
+    rules. `doctor` is `thimble fix`'s path: no stack, rebuild or restart. A stopped run ends `stopped` or `dismissed`, as
+    does one the analyst did not allow; one a shutdown cuts short is queued again up to REQUEUE_MAX times. Returns the
+    ticket's record."""
     tid = t["id"]
     fixing = doctor is not None
     run_log = _log_for(t)
@@ -1863,6 +1936,8 @@ async def _run_ticket(t: dict[str, Any], run: Run, *, doctor: str | None = None,
     try:
         if why := runner_problem(fixing=fixing) or (conf if isinstance(conf, str) else ""):
             raise TicketError(why)
+        if not allowed and (why := await _code_refusal(t)):
+            raise NotAllowed(why)
         kept = await asyncio.to_thread(_kept_worktree, t)
         if kept is not None:
             wt, branch, base = kept
@@ -1878,7 +1953,7 @@ async def _run_ticket(t: dict[str, Any], run: Run, *, doctor: str | None = None,
         api_url = stack["api"] if stack else f"http://127.0.0.1:{config_port()}"
         before = await _take_shot(t, run_log, "before", ui_url)
         boxed = isinstance(conf, userconf.Session) and conf.sandboxed
-        fence = await asyncio.to_thread(ticket_fence, wt, conf.network) if boxed else None
+        fence = await asyncio.to_thread(ticket_fence, wt, conf.network, conf.enforced) if boxed else None
         if fixing:
             prompt = build_fix_prompt(t, worktree=wt, doctor=doctor or "")
         else:
@@ -1936,7 +2011,7 @@ async def _run_ticket(t: dict[str, Any], run: Run, *, doctor: str | None = None,
             log.exception("ticket run failed")
             error = f"{type(e).__name__}: {e}"
         if not applied:
-            status = "failed"
+            status = "stopped" if isinstance(e, NotAllowed) else "failed"
         run_log.error(error)
     finally:
         try:
@@ -2814,11 +2889,12 @@ FIX_BODY = "thimble's server is down or unhealthy (thimble doctor, below)."
 
 async def fix_offline(doctor: str, title: str = "fix: thimble server is down") -> str:
     """`thimble fix`: one ticket on prompts/dev-fix.md, run by a background session in a worktree without a stack and
-    fast-forwarded into the live checkout; the caller restarts the server."""
+    fast-forwarded into the live checkout; the caller restarts the server, and has asked the analyst's Allow
+    (CODE_QUESTION) in the terminal."""
     t = file_ticket(None, title, FIX_BODY, "terminal", start=False)
     run = Run(ticket_id=t["id"], title=t["title"], ts_start=_now())
     _update(t["id"], status="running", attempts=1, runner=os.getpid(), finished=False)
-    rec = await run_ticket({**t, "attempts": 1}, run, doctor=doctor)
+    rec = await run_ticket({**t, "attempts": 1}, run, doctor=doctor, allowed=True)
     return f"fix ticket {rec.get('status')}: {rec.get('error') or (rec.get('result') or '')[:600]}"
 
 

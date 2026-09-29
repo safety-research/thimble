@@ -62,12 +62,13 @@ every step, and changes nothing.
 ## Package mirrors and your own Python
 
 A Global install uses the package indexes your machine is set up with. It installs the backend's packages with `uv pip`
-from uv's index (`UV_DEFAULT_INDEX`, `uv.toml`), or with pip where pip has an index (`PIP_INDEX_URL`, `pip.conf`) and
-uv has none. Of the frontend's packages it installs only the few thimble loads at run time, with npm from its registry.
-All are pinned with their hashes. When the index lacks a pinned version, install.sh installs the newest versions the
-index has within the ranges thimble allows, without pinned hashes, and lists the packages that differ from the pinned
-versions. `--require-pinned` stops the install there instead. A file whose hash differs from the pinned one stops the
-install, from either index. A Dev install uses `uv sync` and `npm ci`.
+from uv's index (`UV_DEFAULT_INDEX`, `uv.toml`), or with pip where pip has an index (`PIP_INDEX_URL`, `pip.conf`) and uv
+has none. Of the frontend's packages it installs only the few thimble loads at run time, with npm from its registry. All
+are pinned with their hashes. When the index lacks a pinned version, install.sh installs the newest versions the index
+has within the ranges thimble allows, and lists the packages that differ from the pinned versions. With uv it keeps
+every other pin the index has and checks the index's hashes; otherwise nothing is checked against pinned hashes.
+`--require-pinned` stops the install there instead. A file whose hash differs from the pinned one stops the install,
+from either index. A Dev install uses `uv sync` and `npm ci`.
 
 To use a Python environment you prepared, run `bash scripts/install.sh --python <venv>/bin/python`. install.sh checks
 that it holds the packages `backend/pyproject.toml` asks for at versions it allows, links `backend/.venv` to it and

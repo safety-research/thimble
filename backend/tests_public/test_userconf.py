@@ -117,12 +117,16 @@ def test_what_a_session_gets_from_the_config(workspaces_tmp, monkeypatch):
     assert not userconf.session(CORPUS, "dev").bash_asks
     _write(userconf.global_file(), {})
     monkeypatch.delenv("THIMBLE_SANDBOX")
-    monkeypatch.setattr(userconf, "sandbox_runs", lambda: False)
+    monkeypatch.setattr(userconf, "sandbox_runs", lambda refresh=False: False)
     with pytest.raises(userconf.ConfigError, match="can't run on this machine") as e:
         userconf.session(CORPUS, "orientation")
     assert "--sandbox-deps" in str(e.value) and "install.sh" not in str(e.value)
-    monkeypatch.setattr(userconf, "sandbox_runs", lambda: True)
-    assert userconf.session(CORPUS, "writer").sandboxed
+    # installed since the server's first check: the refusal checks again, so no restart is needed
+    checks: list[bool] = []
+    monkeypatch.setattr(userconf, "sandbox_runs", lambda refresh=False: checks.append(refresh) or refresh)
+    assert userconf.session(CORPUS, "orientation").sandboxed and checks == [False, True]
+    monkeypatch.setattr(userconf, "sandbox_runs", lambda refresh=False: True)
+    assert userconf.session(CORPUS, "writer").sandboxed and userconf.session(CORPUS, "writer").enforced
     with pytest.raises(userconf.ConfigError, match="run outside it"):
         userconf.session(CORPUS, "dev", sandbox=False)
 

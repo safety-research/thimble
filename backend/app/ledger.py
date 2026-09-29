@@ -29,9 +29,9 @@ router = APIRouter()
 # shows). hide_chat: the browser shows no chat column, only a dock (frontend shell/Shell)
 SETTINGS_DEFAULTS: dict[str, Any] = {"run_cell_result_lines": 40, "hide_chat": False}
 # Settings earlier builds stored that nothing reads any more: GET leaves them out, a PUT that sends one (a tab still
-# running an earlier build) is taken with the key dropped, and the next PUT removes it from the file. orient_route
-# picked how an earlier build ran the orientation.
-RETIRED_KEYS = frozenset({"orient_route"})
+# running an earlier build) is taken with the key dropped, and the next PUT removes it from the file. Each picked how
+# an earlier build ran the orientation.
+RETIRED_KEYS = frozenset({"orient_route", "terminal_first"})
 
 
 # --------------------------------------------------------------------------- plain-file helpers

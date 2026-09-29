@@ -1903,8 +1903,10 @@ def sandbox_lines(commands: bool = True) -> list[str]:
                    "the agents' Bash runs with your user's access, limited only by each agent's permission mode")]
     if not missing:
         return ["  bash sandbox: runs (every agent's Bash runs in it: no writes outside the agent's folder and no "
-                "network unless the agent's network is \"on\"; Claude Code's sandbox adds an empty .claude/.cc-writes/ "
-                "folder where its commands run, the corpus folder among them)"]
+                "network unless the agent's network is \"on\"; a code ticket, once you allow it, has thimble run its "
+                "edited code outside it, in the ticket's test server, its checks and git, until full containment in "
+                "0.3.1; Claude Code's sandbox adds an empty .claude/.cc-writes/ folder where its commands run, the "
+                "corpus folder among them)"]
     after = ("thimble's config (sandbox.enforce) refuses to start the agents" if box.get("enforce") else
              "the agents' Bash runs outside it, under each agent's permission mode")
     head = "  bash sandbox: off, missing " + ", ".join(missing) + "; " + after
@@ -2301,8 +2303,27 @@ def restart(*, keep_vite: bool = False) -> list[str]:
     return lines
 
 
+FIX_NO_TERMINAL = ("thimble fix did not run: it edits thimble's own code, which then runs outside the sandbox, so it "
+                   "asks you first, and only in a terminal. Run `thimble fix` in your own terminal.")
+FIX_DECLINED = "thimble fix did not run: you did not allow it."
+
+
+def fix_refusal() -> str:
+    """'' once the analyst allowed `thimble fix` in the terminal (dev.CODE_QUESTION), else why it did not run."""
+    from . import dev  # noqa: PLC0415
+
+    if not sys.stdin.isatty():
+        return FIX_NO_TERMINAL
+    try:
+        answer = input(f"thimble fix: {dev.CODE_QUESTION} [y/N] ")
+    except EOFError:
+        answer = ""
+    return "" if answer.strip().lower() in ("y", "yes") else FIX_DECLINED
+
+
 def fix() -> str:
-    """Server down: the ticket runner on prompts/dev-fix.md in the live checkout. `dev` is imported lazily."""
+    """Server down: the ticket runner on prompts/dev-fix.md in the live checkout, once fix_refusal passed. `dev` is
+    imported lazily."""
     import asyncio  # noqa: PLC0415
 
     from . import dev  # noqa: PLC0415
@@ -2548,6 +2569,9 @@ def _action(args: argparse.Namespace, up: bool, url: str) -> int:
             print(doctor_text(commands=False))
             print(FIX_INSTRUCTION)
             return 0
+        if refused := fix_refusal():
+            print(refused)
+            return 0
         try:
             result = fix()
         except Exception as e:  # noqa: BLE001 — never a traceback in the skill text
@@ -2608,6 +2632,9 @@ def cmd_fix(_: argparse.Namespace) -> int:
         print(doctor_text())
         print(FIX_INSTRUCTION)
         return 0
+    if refused := fix_refusal():
+        print(refused)
+        return 1
     result = fix()
     for ln in restart():
         print(ln)

@@ -548,17 +548,18 @@ def memory_excludes(corpus: Path, work: Path, home: Path | None = None) -> list[
 
 
 def fence(corpus: Path, work: Path, sandbox: bool | None = None, unasked: bool = False, network: bool = False,
-          auto_allow: bool = True) -> dict[str, Any]:
+          auto_allow: bool = True, required: bool = False) -> dict[str, Any]:
     """The --settings keys that keep the corpus folder read-only to a session whose process runs in its work folder `work`:
     the permissions and memory excludes always, and the sandbox, with no network unless `network`, where it runs
     (`sandbox` None asks cc_settings.sandbox_ok). `unasked` adds the allows of the session's work in its own folder:
-    edits in the work folder and Bash in the sandbox, by Claude Code itself too unless `auto_allow` is False."""
+    edits in the work folder and Bash in the sandbox, by Claude Code itself too unless `auto_allow` is False; `required`
+    as cc_settings.offline_sandbox takes it."""
     perms: dict[str, Any] = {"additionalDirectories": [str(corpus)], "deny": [f"Edit(/{corpus}/**)"]}
     if unasked:
         perms["allow"] = [f"Edit(/{work}/**)"]
     out: dict[str, Any] = {"permissions": perms, "claudeMdExcludes": memory_excludes(corpus, work)}
     if sandbox if sandbox is not None else cc_settings.sandbox_ok():
-        out["sandbox"] = cc_settings.offline_sandbox(auto_allow=unasked and auto_allow, network=network)
+        out["sandbox"] = cc_settings.offline_sandbox(auto_allow=unasked and auto_allow, network=network, required=required)
     return out
 
 
@@ -698,7 +699,7 @@ async def start(c: str, key: str, *, role: str, title: str, agent_args: list[str
     if work is not None:
         work.mkdir(parents=True, exist_ok=True)
         fenced = fence(cwd, work, sandbox=conf.sandboxed, unasked=unasked, network=conf.network,
-                       auto_allow=not conf.install_asks())
+                       auto_allow=not conf.install_asks(), required=conf.enforced)
         perms = given.get("permissions") if isinstance(given.get("permissions"), dict) else {}
         given = {**given, **fenced, "permissions": {**perms, **fenced["permissions"]}}
         extra_env.update(fence_env(work))
@@ -2257,24 +2258,27 @@ def timed_out_line(seconds: float) -> str:
 
 async def ask(c: str, key: str | None, tool_name: str, inp: Any, agent_id: str | None = None,
               agent_type: str | None = None, event: str = REQUEST, reason: str = "",
-              tool_use_id: str | None = None, suggestions: Any = None) -> dict[str, Any]:
+              tool_use_id: str | None = None, suggestions: Any = None, force: bool = False,
+              why: str = "") -> dict[str, Any]:
     """One permission request of the session `key` or of its subagent or workflow agent `agent_id`, or with `event` DENIED a
     call auto mode refused for `reason`; the answer as Claude Code reads it. In Bypass it is allowed at once, as is a
     Bash call the sandbox rule allows and a web call the workspace's kept rules allow; during a switch pause it is denied
     at once; a call auto mode gave no verdict on goes back to it first (_recheck); a web call joins a waiting request for
     the same site or for search; otherwise it waits on the chat until the analyst answers (or the session's `wait_s`,
     unless it is patient, and CLASSIFIER_ASK_S for a call auto mode never judged). `suggestions` become the card's "don't
-    ask again" choice, and a web call's is the site's rule, or web search's, for the workspace."""
+    ask again" choice, and a web call's is the site's rule, or web search's, for the workspace. `force` asks the analyst
+    in every mode, as a call thimble's config sends to them, with `why` as the card's reason, and nothing noted when it
+    is denied unanswered (dev's code-ticket question)."""
     run = asker(c, key)
     if run is None:
         return {"behavior": "deny", "message": GONE_LINE}
     granted = {"behavior": "allow", "updatedInput": inp if isinstance(inp, dict) else {}}
-    verdict = run.config.verdict(tool_name, inp) if run.config is not None else ""
+    verdict = "ask" if force else run.config.verdict(tool_name, inp) if run.config is not None else ""
     if verdict == "deny":
         agents.log_permission(c, "answered", chat=run.chat, session=key, tool=tool_name, what=_what(tool_name, inp),
                               agent_id=agent_id, answer="deny: thimble's config")
         return {"behavior": "deny", "message": CONFIG_DENIED_LINE}
-    if verdict == "own" or _cleared(run, agent_id, tool_name, inp):
+    if verdict == "own" or (not force and _cleared(run, agent_id, tool_name, inp)):
         return granted
     if verdict != "ask" and run.sandbox_rule is not None and sandbox_allow.allows(tool_name, inp, *run.sandbox_rule):
         return granted
@@ -2322,7 +2326,7 @@ async def ask(c: str, key: str | None, tool_name: str, inp: Any, agent_id: str |
              **({"refused": " ".join(reason.split())[:200] or "no reason given"} if event == DENIED else {}),
              **({"rechecked": len(CLASSIFIER_WAITS_S)} if unjudged else {}),
              **({"deny_after_s": limit} if unjudged and limit is not None else {}),
-             **_offered(updates), **({"wait_s": limit} if limit else {}),
+             **_offered(updates), **({"wait_s": limit} if limit else {}), **({"why": why} if why else {}),
              "mode": run.mode}
     fut: asyncio.Future = asyncio.get_running_loop().create_future()
     run.waits[rid] = fut
@@ -2360,7 +2364,7 @@ async def ask(c: str, key: str | None, tool_name: str, inp: Any, agent_id: str |
         with contextlib.suppress(Exception):
             _off_card(run, rid, fut.result() == TIMED_OUT)
     message = _deny_message(run, allow, limit)
-    if allow == TIMED_OUT and run.on_expired is not None:
+    if allow == TIMED_OUT and run.on_expired is not None and not force:
         with contextlib.suppress(Exception):
             run.on_expired(run, entry)
     if allow == ALWAYS and chosen:

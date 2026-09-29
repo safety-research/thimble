@@ -142,9 +142,15 @@ if [ -f "$stage/frontend/package-lock.json" ]; then
 import json, os, sys
 
 fe, names = sys.argv[1], sys.argv[2:]
-pkg = json.load(open(os.path.join(fe, "package.json")))
 entries = json.load(open(os.path.join(fe, "package-lock.json")))["packages"]
-ranges = {**pkg.get("devDependencies", {}), **pkg.get("dependencies", {})}
+
+
+def within_major(version):
+    """Any version of the pinned one's major (of its minor for 0.x): what install.sh's fallback may install where the
+    registry lacks the pin, older versions included."""
+    major, minor = version.split(".")[:2]
+    return f"^{major}.0.0" if major != "0" else f"^0.{minor}.0"
+
 
 
 def find(at, name):
@@ -179,7 +185,8 @@ while todo:
                 todo.append(hit)
             elif dep not in optional:
                 sys.exit(f"{path} needs {dep}, which frontend/package-lock.json does not hold")
-root = {"name": "thimble-runtime", "private": True, "dependencies": {n: ranges[n] for n in names}}
+root = {"name": "thimble-runtime", "private": True,
+        "dependencies": {n: within_major(entries[f"node_modules/{n}"]["version"]) for n in names}}
 os.makedirs(os.path.join(fe, "runtime"), exist_ok=True)
 with open(os.path.join(fe, "runtime", "package.json"), "w") as f:
     f.write(json.dumps(root, indent=2) + "\n")

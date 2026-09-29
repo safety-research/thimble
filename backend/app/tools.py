@@ -2392,12 +2392,27 @@ async def _h_propose_view(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
     claimed = ", ".join(prop.get("claims") or [])
     if status == "suggested":
         return ok(hint("propose_view-suggested", view=prop.get("name"), slug=prop.get("slug"), claims=claimed))
-    # without Node 20+ or the frontend's packages the build fails at once (dev.run_view), and main is told why
-    if why := await asyncio.to_thread(views.build_problem):
+    # without Node 20+ or the frontend's packages, or where thimble's config refuses the dev agent's session (the
+    # sandbox), the build fails at once (dev.run_view), and main is told why
+    if why := await asyncio.to_thread(views.build_problem) or await asyncio.to_thread(_view_refusal, ctx.c):
         return ok(hint("propose_view-cannot-build", view=prop.get("name"), slug=prop.get("slug"), why=why))
     if prop.get("revised") and not prop.get("held"):  # a view built under this name is changed in place (views.revise)
         return ok(hint("view-changing", view=prop.get("name"), slug=prop.get("slug")))
     return ok(hint("propose_view-proposed", view=prop.get("name"), slug=prop.get("slug"), claims=claimed))
+
+
+def _view_refusal(c: str) -> str:
+    """Why thimble's config refuses a view build's session in workspace `c` (dev.dev_config), '' when it doesn't."""
+    config_of = _optional("dev", "dev_config")
+    if config_of is None:
+        return ""
+    from . import userconf  # noqa: PLC0415
+
+    try:
+        config_of(c, sandbox=True)
+    except userconf.ConfigError as e:
+        return str(e)
+    return ""
 
 
 async def _h_file_dev_ticket(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
@@ -2433,7 +2448,8 @@ async def _h_file_dev_ticket(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
     label = f"ticket #{n}" if n else "ticket"
     if isinstance(rec, dict) and rec.get("status") == "failed":
         return ok(hint("file_dev_ticket-cannot-run", label=label, why=rec.get("error") or ""))
-    return ok(f"filed {label}: {title}. The dev agent's row in the chat shows its progress.")
+    return ok(f"filed {label}: {title}. It starts once the analyst allows it on the permission card, since it edits "
+              "thimble's own code. The dev agent's row in the chat shows its progress.")
 
 # --------------------------------------------------------------------------- HTTP
 

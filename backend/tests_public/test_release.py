@@ -71,7 +71,8 @@ def test_only_files_in_the_index_ship_and_dirty_says_whether_they_changed(tmp_pa
 def test_a_release_pins_the_backend_with_hashes_and_carries_the_frontend_s_runtime_packages_alone(tmp_path):
     """backend/requirements.txt holds uv.lock's runtime packages with their hashes, which install.sh installs from any
     index; frontend/runtime holds the packages the server and its scripts load, with the whole of their part of
-    package-lock.json (so npm ci needs nothing else) at its versions and hashes, and nothing the UI alone needs."""
+    package-lock.json (so npm ci needs nothing else) at its versions and hashes, and nothing the UI alone needs. Its
+    package.json allows any version of each pin's major, so a registry that lacks a pin installs an older one."""
     root = small_repo(tmp_path, "backend/pyproject.toml", "backend/uv.lock", "frontend/package.json",
                       "frontend/package-lock.json")
     runtime = ("frontend/runtime/package.json", "frontend/runtime/package-lock.json")
@@ -82,11 +83,10 @@ def test_a_release_pins_the_backend_with_hashes_and_carries_the_frontend_s_runti
     assert any(ln.startswith("fastapi==") for ln in pins) and not any(ln.startswith("pytest==") for ln in pins)
     assert all(ln.endswith(" \\") for ln in pins) and text.count("--hash=sha256:") >= len(pins), "each with its hashes"
     full = json.loads((root / "frontend" / "package-lock.json").read_text())["packages"]
-    ranges = {**json.loads((root / "frontend" / "package.json").read_text())["devDependencies"],
-              **json.loads((root / "frontend" / "package.json").read_text())["dependencies"]}
     manifest, lock = json.loads(meta[runtime[0]]), json.loads(meta[runtime[1]])["packages"]
     names = {"vega", "vega-lite", "vega-embed", "playwright", "@fontsource/geist-mono", "@fontsource/hanken-grotesk"}
-    assert manifest["dependencies"] == {n: ranges[n] for n in names} == lock[""]["dependencies"]
+    majors = {n: f"^{full[f'node_modules/{n}']['version'].split('.')[0]}.0.0" for n in names}
+    assert manifest["dependencies"] == majors == lock[""]["dependencies"] and majors["vega"] == "^6.0.0"
     for path, entry in lock.items():
         if not path:
             continue
