@@ -943,6 +943,24 @@ export interface SettingsPatch {
   [k: string]: unknown
 }
 
+/** One extension added to thimble, as this workspace finds it (backend extensions.public): whether it runs here and
+ * why not, this workspace's switch, and whether it cannot run here whatever that switch says (`locked`). */
+export interface ExtensionRow {
+  name: string
+  title: string
+  version: string
+  active: boolean
+  why: string
+  on: boolean
+  locked: boolean
+}
+
+/** `GET /ws/{c}/extensions`: the extensions added, and the conflicts among those that run here, in words. */
+export interface Extensions {
+  extensions: ExtensionRow[]
+  conflicts: string[]
+}
+
 // ---- the corpus (backend corpus.py) ----
 
 export interface Manifest {

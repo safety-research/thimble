@@ -1,0 +1,1 @@
+Count first, then read.

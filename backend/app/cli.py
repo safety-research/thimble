@@ -10,6 +10,7 @@
     thimble purge <id>… [--dry-run]        (delete workspaces or archived runs by id; runs.py)
     thimble launch-args --cwd <path>       (the launcher's: channel entry, allowed tools, main's effort and settings, turn tools, main's name, main's prompt)
     thimble prompt <name>… [--cwd <path>]  (prompt files rendered for a session in <path>, for skills and hooks)
+    thimble extension add <git URL | folder | built-in name> [--yes] | list | remove <name>   (extensions.py)
 
 `server up` (alias `ensure`) is the one starter: `GET /api/health`, then under `flock <home>/server.lock` spawn uvicorn
 on THIMBLE_PORT (8300) as its own session leader (plus Vite on 5300 when THIMBLE_DEV is on), wait for health, map the
@@ -1989,6 +1990,13 @@ def validation_ports() -> tuple[int, int]:
 
 # feedback.doctor_summary reads the server, auth, network and card harness lines and the recent errors line by their
 # labels, for the one line a problem report's new issue carries.
+def extensions_line() -> str:
+    from . import extensions  # noqa: PLC0415
+
+    problems = extensions.config_problems(extensions.user_config())
+    return extensions.doctor_line() + "".join(f"; config: {x}" for x in problems)
+
+
 def doctor_text() -> str:
     st = read_state()
     env = resolve_env()
@@ -2034,6 +2042,7 @@ def doctor_text() -> str:
     lines.append(f"  delivery (a session `thimble` starts in {caller}): {_checked(delivery_line, caller)}")
     lines.append(f"  card harness: {harness_line(url, up)}")
     lines += sandbox_lines()
+    lines.append(f"  extensions: {_checked(extensions_line)}")
     lines.append("  validation stack: "
                  + ", ".join(f"{q} {'busy' if listening(q) else 'free'}" for q in validation_ports())
                  + f"; env from server.json: {'yes' if st.get('env') else 'no (defaults)'}")
@@ -2477,6 +2486,41 @@ def cmd_feedback(args: argparse.Namespace) -> int:
     return feedback.run(" ".join(args.description), cwd=cwd, logs=not args.no_logs)
 
 
+def cmd_extension(args: argparse.Namespace) -> int:
+    """`thimble extension add | list | remove`, then every workspace a session has open finds its extensions again."""
+    from . import extensions  # noqa: PLC0415
+
+    if args.ext_cmd == "list":
+        for ln in extensions.list_lines(Path(resolve_env()["workspaces_dir"])):
+            print(ln)
+        return 0
+    if args.ext_cmd == "add":
+        if not args.yes and not sys.stdin.isatty():
+            print("thimble extension add: run it in a terminal to answer its question, or pass --yes", file=sys.stderr)
+            return 1
+        try:
+            name = extensions.add(args.source, yes=args.yes)
+        except extensions.AddError as e:
+            print(f"thimble extension add: {e}", file=sys.stderr)
+            return 1
+        if name is None:
+            print("Not added.")
+            return 0
+        print(f"Added {name}. It runs in every workspace it applies to; "
+              f"`\"extensions\": {{\"{name}\": {{\"enabled\": false}}}}` in {home() / 'config.json'} turns it off.")
+    else:
+        if not extensions.remove(args.name):
+            print(f"thimble extension remove: no extension {args.name!r} is added", file=sys.stderr)
+            return 1
+        print(f"Removed {args.name}.")
+    url = api_url(int(read_state().get("port") or port()))
+    if healthy(url):
+        status, body = _request("POST", f"{url}/api/extensions/refresh", {}, timeout=60)
+        if status != 200:
+            print(f"thimble: the server did not take the change yet ({body}); it will when a session next connects")
+    return 0
+
+
 def cmd_list(_: argparse.Namespace) -> int:
     from . import runs  # noqa: PLC0415
 
@@ -2582,6 +2626,15 @@ def build_parser() -> argparse.ArgumentParser:
     pg.add_argument("-y", "--yes", action="store_true", help="accepted and ignored (purge does not ask)")
     pg.add_argument("--dry-run", action="store_true", help="print what would be deleted; delete nothing")
     pg.set_defaults(fn=cmd_purge)
+    ex = sub.add_parser("extension", help="add, list or remove extensions (views, card types, agents, report types)")
+    exs = ex.add_subparsers(dest="ext_cmd", required=True)
+    ea = exs.add_parser("add", help="show what an extension gives, ask, then add it")
+    ea.add_argument("source", help="a git URL, a local folder, or the name of an extension thimble ships")
+    ea.add_argument("-y", "--yes", action="store_true", help="add it without asking")
+    exs.add_parser("list", help="the extensions added, and whether each runs in each workspace")
+    er = exs.add_parser("remove", help="delete an added extension")
+    er.add_argument("name")
+    ex.set_defaults(fn=cmd_extension)
     u = sub.add_parser("update", help="bring the install up to date: the latest GitHub release via gh, or --from <zip>")
     u.add_argument("--from", dest="from_", metavar="ZIP", help="a downloaded release zip (thimble-<version>-<sha>.zip)")
     u.add_argument("--dry-run", action="store_true", help="print update.sh's steps; change nothing")

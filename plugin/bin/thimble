@@ -53,7 +53,7 @@ plugin="$(cd "$here/.." && pwd -P)"
 
 # the supervisor's subcommands (backend/app/cli.py build_parser) plus the `server` group; `up` is an alias of `ensure`.
 # `uninstall` is the bash function below, so it works with backend/.venv missing or broken.
-SUPERVISOR_COMMANDS=" server up ensure stop restart doctor fix revert update list purge launch-args prompt "
+SUPERVISOR_COMMANDS=" server up ensure stop restart doctor fix revert update list purge extension launch-args prompt "
 
 # usage: what `thimble help` prints; the header above has the details.
 usage() {
@@ -73,6 +73,8 @@ usage: thimble [claude flags...]          start thimble in this folder: a new Cl
                                           delete workspaces or archived runs by id, after asking
        thimble feedback ["what went wrong"] [--no-logs]
                                           write a problem report to send the developer
+       thimble extension add <git URL | folder | name> [--yes] | list | remove <name>
+                                          add, list or remove extensions
        thimble update [--from <zip>]      bring the install up to date
        thimble uninstall [--yes] [--keep-home]
 EOF
