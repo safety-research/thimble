@@ -6,7 +6,8 @@ no reading.
 tools.call hands every thimble tool result to after_tool(); an add_card or edit_card result starts a check of its card
 when wants_check() holds and the workspace's automatic check is on (settings.json `card_check`). A new change to the
 card cancels a running check and starts the next. At most READ_CONCURRENCY readings run at once. Each check:
-1. Draw: render.render_card shoots the card with the app's own card face; with no picture the check ends `error`.
+1. Draw: render.render_card shoots the card with the app's own card face; a card that did not draw ends the check
+   `error`. Where no card can be drawn (render.down), no check begins, and one that began is taken off the card.
 2. Critique: the `verify` role's model reads the question, takeaway, resolved links, code, the work that led to the
    card (context.render) and the picture, names what fails each criterion, and gives the replacement card.
 3. Replace: the parts that differ and that the check may change (checkstore.fixable) are tried on a copy of the card
@@ -184,7 +185,7 @@ def start(c: str, cid: str, author: str, *, again: bool = False) -> _Run | None:
         old.outcome = "superseded"
         old.task.cancel()
     try:
-        if not wants_check(notebook.get_cell(c, cid)):
+        if render.down() or not wants_check(notebook.get_cell(c, cid)):
             checkstore.drop_stale(c, cid)
             return None
         check = checkstore.begin(c, cid, author=author, again=again)
@@ -424,7 +425,7 @@ async def _draw(c: str, cell: dict[str, Any]) -> render.Rendered | None:
     try:
         return await render.render_card(c, cell)
     except render.Unavailable as e:
-        log.info("card check: no picture of card:%s (%s)", cell.get("id"), e)
+        log.debug("card check: no picture of card:%s (%s)", cell.get("id"), e)
         return None
 
 
@@ -441,13 +442,16 @@ async def _check(run: _Run) -> None:
     t0 = time.perf_counter()
     drawn = await _draw(c, cell)
     timing["render_ms"] = _ms(t0)
-    if drawn is None or not drawn.ok:
-        why = drawn.error if drawn is not None else f"no picture can be drawn here ({render.why() or 'the harness is off'})"
-        if not checkstore.stage(c, cid, run.check, "render", {"status": "skipped" if drawn is None else "error",
-                                                              "ms": timing["render_ms"], "message": why}):
+    if drawn is None:
+        run.outcome = "skipped"
+        checkstore.discard(c, cid, run.check)
+        return
+    if not drawn.ok:
+        if not checkstore.stage(c, cid, run.check, "render", {"status": "error", "ms": timing["render_ms"],
+                                                              "message": drawn.error}):
             _gone(run)
             return
-        _end(run, "error", why if drawn is None else f"the card did not draw: {why}")
+        _end(run, "error", f"the card did not draw: {drawn.error}")
         return
     typed = (typed_numbers(str(cell.get("code") or ""), shown_numbers(notebook.get_cell(c, cid, full_outputs=True) or cell))
              if cell.get("code") else [])
@@ -1148,6 +1152,8 @@ async def again_route(c: str, cid: str) -> dict[str, Any]:
         raise HTTPException(404, f"no card {cid}")
     if not enabled():
         raise HTTPException(409, "the card check is off (THIMBLE_CARD_CHECK)")
+    if render.down():
+        raise HTTPException(409, f"no card can be drawn here: {render.why()}")
     if not wants_check(cell):
         raise HTTPException(409, "this card gets no check: it has no takeaway, is a label card, or is the analyst's or locked")
     rec = checkstore.current(c, cid) or {}
