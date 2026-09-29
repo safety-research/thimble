@@ -4,8 +4,9 @@
   (`$CLAUDE_CONFIG_DIR/.claude.json`, else `~/.claude.json`). install.sh asks once whether to trust thimble's
   workspaces folder, whose entry covers every work folder below it: before it installs anything when it has python3
   (question), else at its trust step (install_trust), which records the answer in thimble's home (TRUST_FILE), so that
-  an update does not ask again; a later answer of no takes back the entry an earlier yes added. `thimble uninstall`
-  takes back the entries thimble added, an older version's per-folder ones (OLD_TRUST) included (untrust).
+  an update does not ask again; a later answer of no takes back the entry an earlier yes added. `thimble trust` asks
+  the same question again at any time, and `thimble trust --remove` takes the entry back (trust_command). `thimble
+  uninstall` takes back the entries thimble added, an older version's per-folder ones (OLD_TRUST) included (untrust).
 - Older versions wrote statusLine, CLAUDE_CODE_EFFORT_LEVEL and CLAUDE_CODE_DISABLE_FAST_MODE into folders'
   .claude/settings.local.json and recorded them in thimble's home. cleanup removes each key that still holds thimble's
   value, and the records with it, so it runs once.
@@ -131,8 +132,7 @@ def install_trust(tree: Path, answer: str | None = None) -> str:
     rec = _read(home() / TRUST_FILE)
     same = rec.get("folder") == str(folder) and rec.get("config") == str(config)
     if answer is None and same and rec.get("answer") in ("yes", "no"):
-        return (f"answered {rec['answer']} at an earlier install; install.sh --trust-workspaces or --no-trust-workspaces "
-                "changes it")
+        return f"answered {rec['answer']} at an earlier install; `thimble trust` or `thimble trust --remove` changes it"
     added = bool(rec.get("added") and rec.get("folder") and rec.get("config"))
     if added and (answer == "no" or not same):  # the entry an earlier yes added: refused now, or for another folder
         try:
@@ -147,7 +147,7 @@ def install_trust(tree: Path, answer: str | None = None) -> str:
     if answer is None:
         if not sys.stdin.isatty():
             return (f"not asked (no terminal), so nothing was written. Terminal-first's background sessions need {folder} "
-                    "trusted, which install.sh --trust-workspaces does")
+                    "trusted, which `thimble trust` does")
         try:
             reply = input(QUESTION.format(folder=folder, config=config) + " [y/N] ")
             answer = "yes" if reply.strip().lower() in ("y", "yes") else "no"
@@ -162,7 +162,31 @@ def install_trust(tree: Path, answer: str | None = None) -> str:
     _write(home() / TRUST_FILE, {**record, "answer": answer, "added": answer == "yes"})
     if answer == "yes":
         return f"marked {folder} trusted in {config}"
-    return "not trusted. Terminal-first's background sessions need it, which install.sh --trust-workspaces does"
+    return "not trusted. Terminal-first's background sessions need it, which `thimble trust` does"
+
+
+def trust_command(tree: Path, remove: bool = False) -> tuple[bool, str]:
+    """`thimble trust`: install.sh's trust question for the install at `tree`, asked on a terminal whatever an earlier
+    install answered, and on a yes the same entry and record (install_trust); with `remove`, the entry thimble added
+    taken back. (whether it could run, the line to print)."""
+    folder, config = workspaces_dir(tree), global_config()
+    if remove:
+        before = trusted(folder, _read(config))
+        line = install_trust(tree, "no")
+        if not before:
+            return True, f"{folder} is not trusted in {config}; nothing to take back"
+        return True, line if trusted(folder, _read(config)) else f"took back the trust of {folder} in {config}"
+    if trusted(folder, _read(config)):
+        return True, install_trust(tree, "yes")
+    if not sys.stdin.isatty():
+        return False, "not asked (no terminal), so nothing was written: run `thimble trust` in a terminal"
+    try:
+        reply = input(QUESTION.format(folder=folder, config=config) + " [y/N] ")
+    except EOFError:
+        reply = ""
+    if reply.strip().lower() not in ("y", "yes"):
+        return True, "nothing written"
+    return True, install_trust(tree, "yes")
 
 
 def untrust() -> list[str]:
@@ -234,6 +258,10 @@ if __name__ == "__main__":
     args = sys.argv[1:]
     if args[:1] == ["trust"] and len(args) in (2, 3):
         print(install_trust(Path(args[1]), {"--yes": "yes", "--no": "no"}.get(args[2]) if len(args) == 3 else None))
+    elif args[:1] == ["trust-command"] and len(args) in (2, 3) and args[2:] in ([], ["--remove"]):
+        ok, line = trust_command(Path(args[1]), remove=args[2:] == ["--remove"])
+        print(line)
+        sys.exit(0 if ok else 1)
     elif args[:1] == ["question"] and len(args) == 2:
         print(question(Path(args[1])))
     elif args == ["undo"]:
@@ -250,5 +278,6 @@ if __name__ == "__main__":
             failed = True
         sys.exit(1 if failed else 0)
     else:
-        print("usage: claude_changes.py trust <tree> [--yes | --no] | question <tree> | undo", file=sys.stderr)
+        print("usage: claude_changes.py trust <tree> [--yes | --no] | trust-command <tree> [--remove] | question <tree> | undo",
+              file=sys.stderr)
         sys.exit(2)

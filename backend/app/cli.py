@@ -1837,6 +1837,18 @@ def node_line() -> str:
     return out + ("" if modules.is_dir() else f"; {modules} is missing, so custom views cannot build (run `{fix}` again)")
 
 
+def trust_line(workspaces: Path) -> str:
+    """Whether Claude Code trusts the workspaces folder, which terminal-first mode's background sessions need
+    (bg_session.trusted), and the command that trusts it."""
+    from . import bg_session, claude_changes  # noqa: PLC0415
+
+    path = bg_session.claude_json()
+    if claude_changes.trusted(workspaces, claude_changes._read(path)):
+        return f"Claude Code trusts {workspaces} ({path})"
+    return (f"Claude Code does not trust {workspaces} ({path}), so terminal-first mode is off unless you turn it on, and "
+            "then its background sessions are refused; `thimble trust` trusts it, after asking")
+
+
 def human_bytes(n: float) -> str:
     for unit in ("B", "KB", "MB", "GB", "TB"):
         if n < 1000 or unit == "TB":
@@ -2027,6 +2039,7 @@ def doctor_text() -> str:
     data_src = "THIMBLE_DATA_DIR" if os.environ.get("THIMBLE_DATA_DIR") else "server.json" if recorded else "default $THIMBLE_HOME/data"
     lines.append(f"  data_dir: {env['data_dir']} ({'exists' if Path(env['data_dir']).is_dir() else 'missing'}; {data_src})")
     lines.append(f"  workspaces_dir: {env['workspaces_dir']} ({'exists' if Path(env['workspaces_dir']).is_dir() else 'missing'})")
+    lines.append(f"  trust: {_checked(trust_line, Path(env['workspaces_dir']))}")
     lines.append(f"  disk: {_checked(disk_line, [home(), Path(env['workspaces_dir'])])}")
     status = config.auth_status()
     lines.append(f"  auth: {auth_line(status)}")

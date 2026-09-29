@@ -22,7 +22,7 @@ def _posix_tools():
 
 def fake_tree(root: Path, *, checkout: bool = False) -> Path:
     """A thimble tree holding the real scripts and plugin/bin/thimble, and the manifests they read."""
-    for rel in ("scripts/install.sh", "scripts/update.sh", "plugin/bin/thimble"):
+    for rel in ("scripts/install.sh", "scripts/update.sh", "plugin/bin/thimble", "plugin/bin/thimble-app-dir"):
         (root / rel).parent.mkdir(parents=True, exist_ok=True)
         shutil.copy(REPO / rel, root / rel)
     (root / "backend").mkdir(parents=True, exist_ok=True)
@@ -275,6 +275,53 @@ def test_claude_codes_config_changes_only_on_a_yes_and_uninstall_takes_back_what
     assert json.loads(cfg.read_text()) == json.loads(before), r.stdout + r.stderr
     assert json.loads((folder / ".claude" / "settings.local.json").read_text()) == {"env": {"MINE": "1"}}
     assert not home.exists(), "removed once what it recorded was put back"
+
+
+def test_thimble_trust_asks_on_a_terminal_and_remove_takes_back_only_its_entry(tmp_path):
+    """`thimble trust` writes install.sh's entry only on a yes typed on a terminal, whatever an earlier install answered,
+    and nothing without a terminal; --remove takes back the entry thimble added and leaves one it did not add."""
+    import pty
+
+    tree = fake_tree(tmp_path / "app")
+    (tree / "backend" / "app").mkdir(parents=True)
+    shutil.copy(REPO / "backend" / "app" / "claude_changes.py", tree / "backend" / "app")
+    env = env_for(tmp_path)
+    home = Path(env["THIMBLE_HOME"])
+    home.mkdir()
+    cfg = Path(env["HOME"]) / ".claude.json"
+    before = {"projects": {"/x": {"lastCost": 1}}}
+    cfg.write_text(json.dumps(before))
+    folder = str(tree / "workspaces")
+    (home / "trust.json").write_text(json.dumps({"folder": folder, "config": str(cfg), "answer": "no", "added": False}))
+
+    def trust(*args: str, typed: str | None = None) -> subprocess.CompletedProcess:
+        cmd = ["bash", str(tree / "plugin" / "bin" / "thimble"), "trust", *args]
+        if typed is None:
+            return subprocess.run(cmd, capture_output=True, text=True, env=env, stdin=subprocess.DEVNULL, timeout=30)
+        term, stdin = pty.openpty()
+        os.write(term, typed.encode())
+        try:
+            return subprocess.run(cmd, capture_output=True, text=True, env=env, stdin=stdin, timeout=30)
+        finally:
+            os.close(term)
+            os.close(stdin)
+
+    r = trust()
+    assert r.returncode == 1 and "no terminal" in r.stdout and json.loads(cfg.read_text()) == before, r.stdout + r.stderr
+    r = trust(typed="n\n")
+    assert "Trust thimble's workspaces folder" in r.stdout and json.loads(cfg.read_text()) == before, r.stdout + r.stderr
+    r = trust(typed="y\n")
+    assert r.returncode == 0 and json.loads(cfg.read_text())["projects"] == {**before["projects"],
+                                                                           folder: {"hasTrustDialogAccepted": True}}
+    assert json.loads((home / "trust.json").read_text()) == {"folder": folder, "config": str(cfg), "answer": "yes",
+                                                             "added": True}
+    r = trust("--remove")
+    assert "took back" in r.stdout and json.loads(cfg.read_text()) == before, r.stdout + r.stderr
+    assert "nothing to take back" in trust("--remove").stdout
+    theirs = {"projects": {folder: {"hasTrustDialogAccepted": True}}}
+    cfg.write_text(json.dumps(theirs))
+    r = trust("--remove")
+    assert "did not add" in r.stdout and json.loads(cfg.read_text()) == theirs, r.stdout + r.stderr
 
 
 def test_the_plugin_is_registered_only_on_a_yes_and_uninstall_removes_only_what_install_added(tmp_path):

@@ -35,8 +35,8 @@ when that folder is not on your PATH) and runs `thimble doctor`. It asks once wh
 `thimble` command works either way), and whether to trust thimble's workspaces folder by adding it to `~/.claude.json`,
 so thimble can start its background agents without Claude Code stopping to ask (with a no, only Terminal-first mode's
 background agents are refused, with a message saying how to trust the folder). `--plugin`, `--no-plugin`,
-`--trust-workspaces` and `--no-trust-workspaces` answer without asking. `install.sh --dry-run` prints every step and
-changes nothing.
+`--trust-workspaces` and `--no-trust-workspaces` answer without asking. Later, `thimble trust` asks the trust question
+again and `thimble trust --remove` takes the entry back. `install.sh --dry-run` prints every step and changes nothing.
 
 ## Package mirrors
 
