@@ -204,6 +204,8 @@ class _Turn:
     resets_at: int | None = None
     text_parts: list[str] = field(default_factory=list)
     out_inputs: list[Any] = field(default_factory=list)  # the output tool's calls' inputs, in order (a cut-off one included)
+    recorded_by: str | None = None  # the model named on the message that made the first recorded call
+    interrupted: bool = False  # the turn was interrupted once the CLI returned that call's result
 
 
 class _Stalled(Exception):
@@ -352,7 +354,6 @@ async def _drain(client: Any, state: CallState, tool_name: str, idle_s: float, l
     full = f"mcp__{_SERVER}__{tool_name}"
     it = aiter(client.receive_response())
     recorded: str | None = None  # the id of the first call recorded
-    interrupted = False
     while True:
         try:
             async with asyncio.timeout(idle_s):
@@ -371,7 +372,7 @@ async def _drain(client: Any, state: CallState, tool_name: str, idle_s: float, l
                 elif isinstance(block, ToolUseBlock) and block.name == full:
                     turn.out_inputs.append(block.input)
                     if await state.offer_async(block.input) == "recorded" and recorded is None:
-                        recorded = block.id
+                        recorded, turn.recorded_by = block.id, msg.model
             if msg.error == "rate_limit":
                 turn.rate_limited = True
         elif isinstance(msg, ResultMessage):
@@ -381,8 +382,8 @@ async def _drain(client: Any, state: CallState, tool_name: str, idle_s: float, l
             for block in (msg.content if isinstance(msg.content, list) else []):
                 if isinstance(block, ToolResultBlock):
                     cap.tool_result(block.tool_use_id, block.content, bool(block.is_error))
-                    if block.tool_use_id == recorded and not interrupted:
-                        interrupted = True
+                    if block.tool_use_id == recorded and not turn.interrupted:
+                        turn.interrupted = True
                         await _interrupt(client)
         elif is_rate_limit_rejection(msg):
             turn.rate_limited = True
@@ -509,10 +510,11 @@ def _corrective(tool_name: str, state: CallState) -> str:
     return f"Return the output by calling the `{tool_name}` tool exactly once{correcting}. Do not answer in prose."
 
 
-def model_used(requested: str | None, result: ResultMessage | None) -> tuple[str | None, str]:
+def model_used(requested: str | None, result: ResultMessage | None, ran: str | None = None) -> tuple[str | None, str]:
     """(model that actually ran, runtime substitution note or ''). The CLI's model_usage also lists its helper calls, so
-    the test is whether the requested model is among the keys."""
-    used = sorted(k for k in (getattr(result, "model_usage", None) or {}) if isinstance(k, str))
+    the test is whether the requested model is among the keys. `ran`, the model named on the message that made the call,
+    is read in place of model_usage when given."""
+    used = [ran] if ran else sorted(k for k in (getattr(result, "model_usage", None) or {}) if isinstance(k, str))
     if not used:
         return None, ""
     if requested:
@@ -704,12 +706,17 @@ async def _structured(
                     turn = await _drain(client, state, tool.name, idle_timeout_s, life, cap)
                     status, detail = _classify(turn, state)
                     used, run_note = model_used(requested, turn.result)
+                    cost = getattr(turn.result, "total_cost_usd", None)
+                    if run_note and turn.interrupted and turn.recorded_by:
+                        # the interrupt can end the turn before its result counts the model's usage, leaving the CLI's
+                        # helper calls alone in model_usage and in the cost
+                        (used, run_note), cost = model_used(requested, None, turn.recorded_by), None
                     last = CallResult(
                         status=status,
                         output=state.captured if status == "ok" else None,
                         model_used=used,
                         fallback_note=run_note,
-                        cost_usd=getattr(turn.result, "total_cost_usd", None),
+                        cost_usd=cost,
                         usage=usage_of(turn.result),
                         session_id=(turn.result.session_id if turn.result is not None
                                     else getattr(turn.assistant, "session_id", None)),
