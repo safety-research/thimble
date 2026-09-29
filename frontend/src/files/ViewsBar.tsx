@@ -213,6 +213,16 @@ export function ViewsBar({ ws, value, onChange, views, proposals, compact = fals
   useEffect(() => {
     if (asking) requestAnimationFrame(() => askInput.current?.focus())
   }, [asking])
+  // the delete confirm takes focus, and gives it back to its × when it closes, unless focus has moved elsewhere
+  const cancelRef = useRef<HTMLButtonElement>(null)
+  useEffect(() => {
+    if (!removing) return
+    const x = removing.at.querySelector<HTMLElement>('.seg-remove')
+    requestAnimationFrame(() => cancelRef.current?.focus())
+    return () => {
+      if (x?.isConnected && (!document.activeElement || document.activeElement === document.body)) x.focus()
+    }
+  }, [removing])
 
   const hide = (slug: string, on: boolean) =>
     setGone((prev) => {
@@ -311,7 +321,7 @@ export function ViewsBar({ ws, value, onChange, views, proposals, compact = fals
         <div className="files-views-delete-body">
           <p>Delete {removing.name}? It will not be proposed again.</p>
           <div className="files-views-delete-actions">
-            <Button size="sm" onClick={() => setRemoving(null)}>
+            <Button size="sm" ref={cancelRef} onClick={() => setRemoving(null)}>
               Cancel
             </Button>
             <Button size="sm" variant="secondary" className="files-views-delete-go" onClick={() => void remove(removing)}>

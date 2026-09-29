@@ -17,6 +17,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 import pytest
+from conftest import UI_KEY
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
@@ -130,7 +131,7 @@ def test_the_held_hook_prints_what_the_analyst_wrote_once_its_event_is_written_o
 
 def test_the_permission_hook_waits_on_main_s_meta_until_the_browser_answers(monkeypatch, tmp_path):
     monkeypatch.setenv("THIMBLE_HOME", str(tmp_path / "thome"))
-    _record_token(tmp_path / "thome")
+    _record_token(tmp_path / "thome", ui_key=UI_KEY)
     client = TestClient(__import__("app.main", fromlist=["app"]).app, base_url="http://127.0.0.1",
                         headers=_signed()[0])
     session.attach(CORPUS, SID, _cwd(), None)
@@ -146,6 +147,12 @@ def test_the_permission_hook_waits_on_main_s_meta_until_the_browser_answers(monk
                 break
             time.sleep(0.05)
         assert held and held[0]["tool"] == "Bash" and held[0]["what"] == "Create x" and '"touch x"' in held[0]["input"]
+        # an answer is the analyst's browser's alone: without the cookie the page gets for the link's key it is refused
+        r = client.post(f"/api/ws/{CORPUS}/permission", json={"id": held[0]["id"], "allow": True})
+        assert r.status_code == 403
+        t.join(0.2)
+        assert t.is_alive(), "the hook still waits"
+        assert client.post("/api/ui/key", json={"key": UI_KEY}).status_code == 204
         r = client.post(f"/api/ws/{CORPUS}/permission", json={"id": held[0]["id"], "allow": True})
         assert r.status_code == 200
         t.join(10)
@@ -289,6 +296,23 @@ def test_the_server_answers_a_hook_route_only_to_a_request_that_proves_the_token
         _record_token(home, token="rotated")  # a new start writes a new token, which the server reads at once
         assert client.post("/api/channel/held", json=body, headers=_signed()[0]).status_code == 401
         assert client.post("/api/channel/held", json=body, headers=_signed("rotated")[0]).status_code == 200
+
+
+def test_main_s_stop_hook_shows_the_link_thimble_up_left_once_and_only_as_it_ends(tmp_path):
+    """/thimble prints no link into the model's context, since the link carries the key to the analyst's cookie
+    (cli.LINK_LINE): main's Stop hook shows the link `server up` left, once, as a systemMessage, which Claude Code shows
+    the analyst and not the model."""
+    link = "http://127.0.0.1:8300/?ws=mini#k=the-ui-key"
+    (tmp_path / "thome" / "links").mkdir(parents=True)
+    (tmp_path / "thome" / "links" / SID).write_text(link)
+    stop = {"session_id": SID, "cwd": "/data/mini", "hook_event_name": "Stop", "permission_mode": "default"}
+    stand = _Stand([])
+    try:
+        assert _watch(tmp_path, stand.port, {**stop, "hook_event_name": "UserPromptSubmit"}, "--mode").stdout == ""
+        assert json.loads(_watch(tmp_path, stand.port, stop, "--mode").stdout) == {"systemMessage": f"thimble: {link}"}
+        assert _watch(tmp_path, stand.port, stop, "--mode").stdout == "", "once"
+    finally:
+        stand.close()
 
 
 def test_the_hooks_do_nothing_without_server_json_or_with_a_server_that_cannot_prove_the_token(tmp_path):

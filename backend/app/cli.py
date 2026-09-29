@@ -13,16 +13,19 @@
 
 `server up` (alias `ensure`) is the one starter: `GET /api/health`, then under `flock <home>/server.lock` spawn uvicorn
 on THIMBLE_PORT (8300) as its own session leader (plus Vite on 5300 when THIMBLE_DEV is on), wait for health, map the
-cwd to a workspace, print `thimble: <url>`, and name the session to the server. It always exits 0, since a skill fails
-whole when its command exits non-zero. `--action fresh` moves the workspace aside into <workspaces>/.archive/;
-`--action restore` restores an archive. /thimble also reports the route browser events take (cc_channel.delivery).
+cwd to a workspace, print `thimble: <url>` (LINK_LINE in a session), and name the session to the server. It always
+exits 0, since a skill fails whole when its command exits non-zero. `--action fresh` moves the workspace aside into
+<workspaces>/.archive/; `--action restore` restores an archive. /thimble also reports the route browser events take
+(cc_channel.delivery).
 
 <home> is `~/.thimble` or THIMBLE_HOME. <home>/server.json records {port, pid, url, repo, env, token, ui_key}, readable
 by its owner alone; `token` is new at each start and is what the plugin's hooks prove they hold, and `ui_key`, kept
-across starts, is what the printed link gives the browser to change permission modes (hook_auth.py). Its `pid` is trusted
-only while it is a thimble server on its port (is_server checks the command line and working folder, since a pid
-recorded inside a sandbox's pid namespace can name an unrelated host process). reconcile makes the record true before
-`up` acts on it. A server whose /api/health names another THIMBLE_HOME belongs to another install and is refused.
+across starts, is what the link gives the browser to answer permission requests and change permission modes
+(hook_auth.py). Only a terminal gets that link: `up` from a shell prints it, and /thimble prints LINK_LINE for main's
+Stop hook to show it (leave_link). Its `pid` is trusted only while it is a thimble server on its port (is_server checks
+the command line and working folder, since a pid recorded inside a sandbox's pid namespace can name an unrelated host
+process). reconcile makes the record true before `up` acts on it. A server whose /api/health names another
+THIMBLE_HOME belongs to another install and is refused.
 
 Claude Code's Bash sandbox gives each command its own network and pid namespace, so `up` starts nothing there and
 prints the `sandbox.excludedCommands` entry that runs it outside (sandbox_rule). `restart` and `stop` name the work
@@ -80,7 +83,7 @@ SOURCE_CHANGED = "source changed"  # restart.json's title; dev.PLAIN_REASONS
 RESTARTED_LINE = "thimble: server restarted (source changed)"
 NOT_RESTARTED_LINE = "thimble: source changed since the server started; not restarting while {reason}"
 REGISTER_FAILED_LINE = "thimble: could not open {path} as a workspace (the server refused to register it); see {log} and say `/thimble` again."
-NO_UI_LINE = "thimble: the dashboard is not built yet, so that URL shows no page; run `thimble doctor` in a shell for the fix."
+NO_UI_LINE = "thimble: the dashboard is not built yet, so its link shows no page; run `thimble doctor` in a shell for the fix."
 NO_AUTH_LINE = "thimble: WARNING - {problem}. Nothing that calls a model runs until then."
 FEEDBACK = "feedback"  # /thimble feedback: the problem report (feedback.py)
 # where the server did not start: how to send the developer a problem report, which needs no server
@@ -118,6 +121,10 @@ RESUME = "restore"  # /thimble restore [<archive>]: an archive restored in its p
 ALIASES = {"resume": RESUME}  # another name the action takes
 OPENING = ("", "on", FRESH, RESUME)  # the actions that open the workspace (and print the delivery note)
 RESUME_LINE = "thimble: resuming the dashboard from your last run; `/thimble fresh` starts over"
+# what /thimble prints in place of the link, which carries the ui_key and so is kept out of the model's context: main's
+# Stop hook shows it under the reply (leave_link, plugin/bin/.thimble-watch)
+LINK_LINE = "thimble: the dashboard link is under this reply (or run `thimble up` in a shell)"
+LINKS_DIR = "links"  # under <home>: the link each session's Stop hook shows once
 FRESH_LINE = ("thimble: Cleared the session at {cwd}. The last run is archived at {path}. To bring it back, run: "
               "/thimble restore {name}")
 NOTHING_ARCHIVED_LINE = "thimble: this folder had no workspace to archive"
@@ -1137,13 +1144,31 @@ def open_workspace(cwd: Path, data_dir: Path, url: str | None, *, here: bool = F
     return None, False
 
 
-def ui_url(name: str | None) -> str:
-    """The UI port in dev mode (its own Vite), else the API port where the built UI is served, with the key that lets
-    the page change permission modes (hook_auth.claim)."""
+def ui_url(name: str | None, key: bool = True) -> str:
+    """The UI port in dev mode (its own Vite), else the API port where the built UI is served, with `key` the key that
+    lets the page answer permission requests and change permission modes (hook_auth.claim)."""
     st = read_state()
     base = str(st.get("url") or api_url())
-    key = f"#k={st['ui_key']}" if st.get("ui_key") else ""
-    return f"{base}/?ws={name}{key}" if name else f"{base}/{key}"
+    k = f"#k={st['ui_key']}" if key and st.get("ui_key") else ""
+    return f"{base}/?ws={name}{k}" if name else f"{base}/{k}"
+
+
+def leave_link(session: str, url: str) -> bool:
+    """`url` for the session's Stop hook to show under main's reply (LINK_LINE); False when it could not be left."""
+    name = "".join(ch for ch in session if ch.isalnum() or ch in "-_")
+    try:
+        d = ensure_home() / LINKS_DIR
+        d.mkdir(exist_ok=True)
+        (d / name).write_text(url, "utf-8")
+    except OSError as e:
+        _log(f"the link for session {session} was not left: {e}")
+        return False
+    return bool(name)
+
+
+def to_terminal() -> bool:
+    """Whether stdout is a terminal, the analyst's; a command's output read by a program can reach a model's context."""
+    return sys.stdout.isatty()
 
 
 HELD_KEYS = ("cards", "labels", "documents", "chats")  # what `GET /api/tools/holdings` counts (tools.holdings)
@@ -2206,7 +2231,12 @@ def cmd_ensure(args: argparse.Namespace) -> int:
             second = resume_lines(url, name, archive)
         else:
             second = [RESUME_LINE] if not opened and resumes(url, name) else []
-        print(f"thimble: {ui_url(name)}")
+        # with the plugin's hooks off no Stop hook shows the link, so the page opens without the key
+        if (args.session and not cc_channel.hooks_blocked(cwd, plugin_root())
+                and leave_link(str(args.session), ui_url(name))):
+            print(LINK_LINE)
+        else:
+            print(f"thimble: {ui_url(name, key=not args.session and to_terminal())}")
         for line in second:
             print(line)
         status = config.auth_status(cwd=cwd)

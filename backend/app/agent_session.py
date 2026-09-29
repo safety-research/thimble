@@ -2145,13 +2145,20 @@ async def ask(c: str, key: str | None, tool_name: str, inp: Any, agent_id: str |
     if run.sandbox_rule is not None and sandbox_allow.allows(tool_name, inp, *run.sandbox_rule):
         return granted
     web = web_rule(tool_name, inp)
-    kept = web is not None and web in web_rules(c)
-    if kept or run.mode == BYPASS:
+
+    def at_once() -> dict[str, Any] | None:
+        """granted in Bypass or for a web call the workspace's kept rules allow, else None."""
+        kept = web is not None and web in web_rules(c)
+        if not (kept or run.mode == BYPASS):
+            return None
         if event == DENIED:
             _remember(run, agent_id, tool_name, inp, True, tool_use_id)
         agents.log_permission(c, "answered", chat=run.chat, session=key, tool=tool_name, what=_what(tool_name, inp),
                               agent_id=agent_id, answer="allow: kept for the workspace" if kept else "allow: Bypass")
         return granted
+
+    if (now := at_once()) is not None:
+        return now
     if run.releasing:
         agents.log_permission(c, "answered", chat=run.chat, session=key, tool=tool_name, what=_what(tool_name, inp),
                               agent_id=agent_id, answer="deny: answered for a mode switch")
@@ -2165,6 +2172,9 @@ async def ask(c: str, key: str | None, tool_name: str, inp: Any, agent_id: str |
         tried.add(first)
         if (joined := await _join(run, first, also, tool_name, inp, agent_id, event, tool_use_id, granted)) is not None:
             return joined
+    # a joined call asked on its own: the switch to Bypass or the kept rule that allowed its request may cover it
+    if tried and (now := at_once()) is not None:
+        return now
     rid = uuid.uuid4().hex[:10]
     whole = json.dumps(inp, ensure_ascii=False, default=str) if inp is not None else ""
     command = _command(tool_name, inp)
@@ -2838,7 +2848,13 @@ async def retry_route(c: str, chat: str) -> dict[str, Any]:
 
 
 @router.post("/ws/{c}/chats/{chat}/permission")
-async def permission_route(c: str, chat: str, body: PermissionAnswer) -> dict[str, Any]:
+async def permission_route(c: str, chat: str, body: PermissionAnswer, request: Request) -> dict[str, Any]:
+    """The analyst's answer on a session's card: answer. 403 for a request that is not the analyst's browser's
+    (hook_auth.analyst), 404 when no such request waits."""
+    from . import hook_auth  # noqa: PLC0415
+
+    if not hook_auth.analyst(request):
+        raise HTTPException(403, hook_auth.ANALYST_ONLY)
     if not answer(c, chat, body.id, body.allow, body.always, body.shown):
         raise HTTPException(404, "no such permission request is waiting")
     return {"answered": body.id, "allow": body.allow}

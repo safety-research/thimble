@@ -1,5 +1,5 @@
 """app.views: viewers written for how a corpus arranges its records. The reader resolves lines and keys, the frame
-document blocks every host, and the worked examples a view ticket reads pass the view checks over their own samples, one
+document blocks every load, and the worked examples a view ticket reads pass the view checks over their own samples, one
 of them with its page loaded headless.
 
 A temp DATA_DIR holds the corpus `boards`: `board.jsonl`, one post per line, each {thread, author, time, body}, and

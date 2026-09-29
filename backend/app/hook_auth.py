@@ -10,9 +10,11 @@ proof with 401. A hook or shim that finds no server.json, no token in it, or no 
 nothing or believes nothing, so a process that holds the recorded port learns nothing from the plugin and cannot answer
 it.
 
-A change of permission modes must come from the analyst's browser (analyst). The link `thimble up` prints carries the
-`ui_key` of server.json after `#k=`; the page trades it for an HttpOnly, SameSite=Strict cookie (claim), which a mode
-write must carry. A process that cannot read server.json, such as a notebook kernel in bubblewrap, cannot change them.
+A change of permission modes, and an answer to a permission request, must come from the analyst's browser (analyst).
+The dashboard link carries the `ui_key` of server.json after `#k=`; the page trades it for an HttpOnly, SameSite=Strict
+cookie (claim), which such a request must carry. Only the analyst's terminal shows that link (cli.py leave_link), never
+the model's context, so a process that cannot read server.json, such as a notebook kernel in bubblewrap that the model
+writes cells for, can do neither.
 """
 from __future__ import annotations
 
@@ -40,7 +42,11 @@ PROOF_HEADER = "x-thimble-proof"
 NONCE_MAX = 128  # characters
 UI_COOKIE = "thimble-ui"
 UI_COOKIE_AGE_S = 400 * 24 * 3600  # the longest a browser keeps a cookie
-ANALYST_ONLY = "open thimble from the link `/thimble` or `thimble up` printed to change permission modes"
+# The routes analyst() guards all sit under this path. A cookie is not bound to a port, so the path is what keeps it from
+# the browser's requests to other services on 127.0.0.1, except requests to their own /api/ws/ paths.
+UI_COOKIE_PATH = "/api/ws/"
+ANALYST_ONLY = ("open thimble from the link shown under /thimble's reply, or printed by `thimble up` in a shell, to"
+                " answer permission requests or change permission modes")
 
 _cache: tuple[tuple[str, int, int], dict] | None = None
 
@@ -103,7 +109,8 @@ def claim(key: object) -> Response:
     if not (want and isinstance(key, str) and hmac.compare_digest(key, want)):
         return Response(status_code=403)
     r = Response(status_code=204)
-    r.set_cookie(UI_COOKIE, want, max_age=UI_COOKIE_AGE_S, httponly=True, samesite="strict")
+    r.delete_cookie(UI_COOKIE, path="/")  # and none for every path, which other services' pages would get too
+    r.set_cookie(UI_COOKIE, want, max_age=UI_COOKIE_AGE_S, path=UI_COOKIE_PATH, httponly=True, samesite="strict")
     return r
 
 
