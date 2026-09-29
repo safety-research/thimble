@@ -70,6 +70,7 @@ import difflib
 import io
 import json
 import math
+import os
 import re
 import sys
 from datetime import datetime, timezone
@@ -1268,9 +1269,9 @@ def resolve(index, locator):
 
 # ------------------------------------------------------------------------------------------------ run as a script
 
-USAGE = """python reader.py [--share K/N | --place NAME ...] [--files GLOB ...]
+USAGE = """python reader.py [--in DIR] [--share K/N | --place NAME ...] [--files GLOB ...]
 
-Run in the corpus folder. With neither option, the places the records are on, busiest first, one line each: its rank,
+Reads the corpus folder DIR (by default the working folder). With neither --share nor --place, the places the records are on, busiest first, one line each: its rank,
 records, accounts and name. --share K/N deals the places in turn into N shares, busiest first, and prints the records of
 the Kth; --place NAME prints that place's (give it again for more). A place's records come in time order, each headed
 by its ref, time, account and kind, a post as its text and a save as the lines it changed from the save before it.
@@ -1280,7 +1281,6 @@ by its ref, time, account and kind, a post as its text and a save as the lines i
 def _script_files(globs):
     """The files `globs` name, or the record files of the working folder that applies() claims."""
     import glob
-    import os
 
     if not globs:
         found = []
@@ -1323,8 +1323,10 @@ def main(argv):
         if arg in ("-h", "--help"):
             print(USAGE)
             return 0
-        if arg in ("--share", "--place", "--files") and i + 1 < len(argv):
-            if arg == "--share":
+        if arg in ("--in", "--share", "--place", "--files") and i + 1 < len(argv):
+            if arg == "--in":
+                os.chdir(argv[i + 1])
+            elif arg == "--share":
                 share = argv[i + 1]
             elif arg == "--place":
                 names.append(argv[i + 1])
