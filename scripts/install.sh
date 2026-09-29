@@ -9,8 +9,9 @@
 # a re-run or `thimble update` does not ask again, and a flag answers it without asking. Without a terminal an unanswered
 # question gets no: nothing is downloaded or changed in Claude Code's files, and a system Chrome or Edge is used if found.
 # --dry-run prints the questions with the flag for each answer, which is how Claude asks them when it runs the install.
-# Re-running it (after `git pull`, over a newer release, or to answer a question again with its flag) is safe; the browser
-# is fetched only on a yes and only when the build thimble's Playwright needs is missing.
+# Re-running it (after `git pull`, over a newer release, or to answer a question again with its flag) skips the steps that
+# are done: the same release is not copied again, pinned packages already installed are kept, and the browser is fetched
+# only on a yes and only when the build thimble's Playwright needs is missing.
 # A checkout gets backend/.venv from uv.lock with uv sync, and npm ci when package-lock.json changed since the packages were
 # installed; it rebuilds frontend/dist when it is older than the frontend's sources or the lockfile, so a pulled clone ends
 # with the current UI.
@@ -224,6 +225,11 @@ check_prerequisites() {  # uv or python >= pyproject's requires-python, or --pyt
 copy_tree() {  # a release install: the release's entries replace the install's; .venv, node_modules, workspaces/, data/ and dev/ stay
   step "2/12 the tree at $dir"
   if [ "$in_place" = 1 ]; then say "in place: nothing to copy"; return 0; fi
+  if [ -f "$src/RELEASE.json" ] && cmp -s "$src/RELEASE.json" "$dir/RELEASE.json"; then
+    say "this release is installed there already (RELEASE.json matches, and it is copied last): nothing to copy"
+    dir="$(cd "$dir" && pwd -P)"
+    return 0
+  fi
   say "copying the release into $dir (kept there if present: backend/.venv, frontend/node_modules, workspaces/, data/, dev/)"
   run mkdir -p "$dir"
   for entry in plugin backend prompts frontend .claude-plugin scripts README.md INSTALL.md docs LICENSE THIRD_PARTY_NOTICES RELEASE.json; do
@@ -307,7 +313,11 @@ print("\n".join(dev if sys.argv[2] == "dev" else p.get("dependencies", []) + dev
 
 release_venv() {  # the pinned packages of backend/requirements.txt (uv.lock's, with their hashes: release.sh) from the index
   # uv or pip is set up with (check_prerequisites); where that index lacks a pinned version, the versions pyproject.toml allows
-  local venv="$dir/backend/.venv" req="$src/backend/requirements.txt" args
+  local venv="$dir/backend/.venv" req="$src/backend/requirements.txt" stamp="$dir/backend/.venv/.thimble-requirements.txt" args
+  if [ "$dev" = 0 ] && [ -f "$req" ] && cmp -s "$req" "$stamp" && (cd / && "$venv/bin/python" -I -c '') 2>/dev/null; then
+    say "backend/.venv holds the packages backend/requirements.txt pins, installed by an earlier run"
+    return 0
+  fi
   if ! { [ -x "$venv/bin/python" ] && (cd / && "$venv/bin/python" -I -c '') 2>/dev/null; }; then new_venv "$venv"
   elif [ "$pytool" = pip ] && ! (cd / && "$venv/bin/python" -I -c 'import pip') 2>/dev/null; then
     run "$venv/bin/python" -I -m ensurepip --quiet  # a venv an earlier install made with uv, which holds no pip
@@ -319,7 +329,12 @@ release_venv() {  # the pinned packages of backend/requirements.txt (uv.lock's, 
   fi
   args=(sync --require-hashes "$req"); [ "$pytool" = uv ] || args=(--require-hashes --no-deps -r "$req")
   if py_install "$tmp/py.log" "${args[@]}"; then
-    [ "$dev" = 0 ] || py_ranges dev
+    if [ "$dev" = 0 ]; then
+      say "+ cp $req $stamp"
+      [ "$dry" = 1 ] || cp "$req" "$stamp"
+    else
+      py_ranges dev
+    fi
   elif grep -qE 'Hash mismatch|DO NOT MATCH THE HASHES' "$tmp/py.log"; then
     die "the package index served a file whose hash is not the one backend/requirements.txt pins (above), so nothing more is installed from it"
   else
@@ -721,6 +736,10 @@ register_plugin() {  # the plugin question's answer: yes registers the tree as a
     if [ -f "$home/plugin.json" ]; then say "answered $answer at an earlier install; install.sh --plugin or --no-plugin changes it"
     else say "registered by an earlier install; kept (install.sh --no-plugin takes it back)"; fi
   fi
+  if [ "$answer" = yes ] && [ "$have_claude" = 1 ] && [ "$plugin_reg" = "$mp_name" ] && [ "$(plugin_listed)" = "$version" ]; then
+    say "thimble@$mp_name $version is registered already: nothing to do"
+    return 0
+  fi
   if [ "$answer" = yes ] && [ "$have_claude" = 1 ]; then
     run claude plugin marketplace add "$dir" || die "could not register $dir as marketplace \"$mp_name\". A marketplace of that name may point elsewhere: \`claude plugin marketplace list\`, then \`claude plugin marketplace remove $mp_name\` or re-run with --marketplace-name <other>"
     run claude plugin marketplace update "$mp_name" || say "(marketplace update failed; continuing)"
@@ -748,6 +767,16 @@ register_plugin() {  # the plugin question's answer: yes registers the tree as a
   fi
   plugin_write no "$left"
   say "not registered: the \`thimble\` command loads the plugin for its own sessions. install.sh --plugin adds it to every session"
+}
+
+plugin_listed() {  # the version of thimble@$mp_name that Claude Code lists, or nothing
+  command -v python3 >/dev/null 2>&1 || return 0
+  claude plugin list --json 2>/dev/null | python3 -I -c 'import json, sys
+try:
+    rows = json.load(sys.stdin)
+except ValueError:
+    rows = []
+print(next((r.get("version") or "" for r in rows if isinstance(r, dict) and r.get("id") == sys.argv[1]), ""))' "thimble@$mp_name" || true
 }
 
 plugin_write() {  # plugin_write ANSWER REGISTERED: $home/plugin.json

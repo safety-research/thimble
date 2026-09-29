@@ -156,6 +156,8 @@ def test_a_pinned_install_falls_back_to_pyproject_s_ranges_only_when_the_index_l
 
     r, calls = run()
     assert r.returncode == 0 and calls == [f"uv pip sync --require-hashes {tree}/backend/requirements.txt"], r.stdout
+    r, calls = run(fresh=False)
+    assert r.returncode == 0 and calls == [] and "installed by an earlier run" in r.stdout, "a re-run keeps them"
     r, calls = run(STUB_SYNC_RC="1", STUB_SYNC_OUT="Because there is no version of httpx==0.28.1 and you require it")
     assert r.returncode == 0 and len(calls) == 2 and calls[1].startswith("uv pip install -r "), r.stdout + r.stderr
     assert "installed instead" in r.stdout
