@@ -69,10 +69,13 @@ def stub_bin(tmp_path: Path) -> Path:
     return bin_
 
 
+ANSWERS = ("--browser", "off", "--no-sandbox-deps")  # install.sh's questions --deps-only asks, answered
+
+
 def install(tree: Path, dest: Path, tmp_path: Path, *flags: str, **extra: str) -> subprocess.CompletedProcess:
     env = env_for(tmp_path, PATH=f"{stub_bin(tmp_path)}:/usr/bin:/bin", **extra)
-    return subprocess.run(["bash", str(tree / "scripts" / "install.sh"), "--dir", str(dest), "--deps-only", *flags],
-                          capture_output=True, text=True, env=env, timeout=60)
+    return subprocess.run(["bash", str(tree / "scripts" / "install.sh"), "--dir", str(dest), "--deps-only", *ANSWERS,
+                           *flags], capture_output=True, text=True, env=env, stdin=subprocess.DEVNULL, timeout=60)
 
 
 def test_a_release_install_carries_the_files_the_readme_links(tmp_path):
@@ -348,6 +351,44 @@ def test_claude_codes_config_changes_only_on_a_yes_and_uninstall_takes_back_what
     assert not home.exists(), "removed once what it recorded was put back"
 
 
+@pytest.mark.skipif(not sys.platform.startswith("linux") or os.geteuid() == 0, reason="a Linux user who needs sudo")
+def test_install_sh_installs_the_sandbox_s_missing_packages_only_on_a_yes_and_through_sudo(tmp_path):
+    """Where bubblewrap and socat are missing, a run without a terminal needs --sandbox-deps or --no-sandbox-deps; a yes
+    runs the package manager's install through sudo, a no says the agents won't run and how to set the sandbox up later.
+    sudo and the package managers are stand-ins that only log."""
+    tree = fake_tree(tmp_path / "release")
+    bin_ = stub_bin(tmp_path)
+    log = tmp_path / "sudo.log"
+    for name in ("sudo", "apt-get", "dnf", "pacman", "zypper", "apk", "apparmor_parser"):
+        (bin_ / name).write_text(f'#!/bin/sh\necho "{name} $*" >> "$SUDO_LOG"\n')
+        (bin_ / name).chmod(0o755)
+    tools = tmp_path / "tools"  # the system's programs, bwrap and socat left out
+    tools.mkdir()
+    for folder in ("/usr/bin", "/bin"):
+        for exe in Path(folder).iterdir():
+            if exe.name not in ("bwrap", "socat") and not (tools / exe.name).exists():
+                (tools / exe.name).symlink_to(exe)
+    env = env_for(tmp_path, PATH=f"{bin_}:{tools}", SUDO_LOG=str(log))
+
+    def run(*flags: str) -> subprocess.CompletedProcess:
+        log.write_text("")
+        return subprocess.run(["bash", str(tree / "scripts" / "install.sh"), "--dir", str(tmp_path / "app"),
+                               "--deps-only", "--browser", "off", *flags], capture_output=True, text=True, env=env,
+                              stdin=subprocess.DEVNULL, timeout=60)
+
+    r = run()
+    assert r.returncode == 1 and "--sandbox-deps or --no-sandbox-deps" in r.stderr, r.stdout + r.stderr
+    assert log.read_text() == ""
+    r = run("--no-sandbox-deps")
+    assert r.returncode == 0 and log.read_text() == "", r.stdout + r.stderr
+    later = f"To set it up later, run: bash {tmp_path / 'app'}/scripts/install.sh --sandbox-deps"
+    assert "won't run until the sandbox works" in r.stdout and later in r.stdout
+    r = run("--sandbox-deps")
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "sudo apt-get install -y bubblewrap socat" in log.read_text().splitlines()
+    assert "still doesn't run" in r.stdout, "the stand-ins installed nothing"
+
+
 SYSTEM_BROWSERS = ("/opt/google/chrome/chrome", "/opt/microsoft/msedge/msedge",
                    "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
                    "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge")
@@ -356,7 +397,7 @@ SYSTEM_BROWSERS = ("/opt/google/chrome/chrome", "/opt/microsoft/msedge/msedge",
 def test_install_sh_asks_before_it_installs_and_downloads_no_browser_without_a_yes(tmp_path):
     """On a terminal install.sh shows what it installs, then asks about the browser, the plugin and the trust; the
     browser is downloaded only on a yes, and not again once it is there; a re-run asks nothing. Without a terminal it
-    asks nothing, downloads nothing and writes nothing into Claude Code's config."""
+    refuses while a question has no flag, having downloaded nothing and written nothing into Claude Code's config."""
     import pty
 
     tree = fake_tree(tmp_path / "release")
@@ -381,7 +422,7 @@ case "$*" in
 esac
 """)
             venv.chmod(0o755)
-        cmd = ["bash", str(tree / "scripts" / "install.sh"), *flags]
+        cmd = ["bash", str(tree / "scripts" / "install.sh"), "--no-sandbox-deps", *flags]
         env = env_for(tmp_path, PATH=f"{bin_}:/usr/bin:/bin")
         if typed is None:
             return subprocess.run(cmd, capture_output=True, text=True, env=env, stdin=subprocess.DEVNULL, timeout=60)
@@ -398,11 +439,13 @@ esac
     cfg.parent.mkdir(parents=True, exist_ok=True)
     cfg.write_text(json.dumps({"projects": {}}))
     r = run()
-    assert r.returncode == 0 and "[y/N]" not in r.stdout and "not asked, with no terminal" in r.stdout, r.stdout + r.stderr
+    system = any(Path(p).exists() for p in SYSTEM_BROWSERS)
+    assert r.returncode == 1 and "[y/N]" not in r.stdout and "Not answered:" in r.stderr, r.stdout + r.stderr
+    assert ("--browser bundled or --browser off" in r.stderr) != system, "a system browser found is used unasked"
+    assert "--plugin or --no-plugin" in r.stderr and "--trust-workspaces or --no-trust-workspaces" in r.stderr
     assert "and only on a yes to its question:" in r.stdout
     assert not log.exists() and not conf.exists() and json.loads(cfg.read_text()) == {"projects": {}}
-    system = any(Path(p).exists() for p in SYSTEM_BROWSERS)
-    r = run(typed=("n\n" if system else "") + "y\nn\ny\n")  # no system browser, download, no plugin, trust
+    r = run(typed="y\nn\ny\n")  # download, no plugin, trust
     out = r.stdout
     assert r.returncode == 0, out + r.stderr
     assert out.index("what install.sh installs, and where") < out.index("A browser for screenshots") < out.index("== 2/12")
@@ -442,7 +485,8 @@ def test_the_plugin_is_registered_only_on_a_yes_and_uninstall_removes_only_what_
         return [c for c in log.read_text().splitlines() if c.startswith("plugin ") and c != "plugin list --json"]
 
     def install(flag: str) -> list[str]:
-        return run(["bash", str(tree / "scripts" / "install.sh"), "--dir", str(dest), flag, "--no-trust-workspaces"])
+        return run(["bash", str(tree / "scripts" / "install.sh"), "--dir", str(dest), *ANSWERS, flag,
+                    "--no-trust-workspaces"])
 
     uninstall = ["bash", str(dest / "plugin" / "bin" / "thimble"), "uninstall", "--yes"]
     assert install("--no-plugin") == [] and json.loads(record.read_text()) == {"answer": "no", "registered": ""}

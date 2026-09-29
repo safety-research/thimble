@@ -1,13 +1,16 @@
 #!/usr/bin/env bash
 # scripts/install.sh — install thimble: a git checkout in place, or an unzipped release copied to ~/.thimble/app.
-# Steps: prerequisites · what it installs and where, then its three questions · copy the release into --dir · backend/.venv ·
-# the frontend's packages and frontend/dist · a browser for screenshots, if wanted · the Bash sandbox's root commands (printed) ·
-# the app-dir pointer · `thimble` on PATH (~/.local/bin/thimble → the tree's plugin/bin/thimble) · thimble's plugin in every
-# Claude Code session, if wanted · the trust of thimble's workspaces folder, if wanted · doctor · what to do next.
-# The questions (the browser, the plugin, the trust) are asked on a terminal before anything is installed, so the rest runs
-# unattended. Each is asked once: its answer is kept in $THIMBLE_HOME (config.json's "browser", plugin.json, trust.json), so
-# a re-run or `thimble update` does not ask again, and a flag answers it without asking. Without a terminal an unanswered
-# question gets no: nothing is downloaded or changed in Claude Code's files, and a system Chrome or Edge is used if found.
+# Steps: prerequisites · what it installs and where, then its questions · the agents' Bash sandbox (on Linux its system
+# packages, if wanted) · copy the release into --dir · backend/.venv · the frontend's packages and frontend/dist · a
+# browser for screenshots · the app-dir pointer · `thimble` on PATH (~/.local/bin/thimble → the tree's plugin/bin/thimble) ·
+# thimble's plugin in every Claude Code session, if wanted · the trust of thimble's workspaces folder, if wanted · doctor ·
+# what to do next.
+# The questions (the browser; on Linux, the sandbox's system packages while it can't run; the plugin; the trust) are asked
+# on a terminal before anything is installed, and the sandbox step runs right after them, so only sudo asks for more (its
+# password). The browser, plugin and trust answers are kept in $THIMBLE_HOME (config.json's "browser", plugin.json,
+# trust.json), so a re-run or `thimble update` does not ask them again. A flag answers a question without asking.
+# Without a terminal install.sh refuses to run while a question it would ask has no flag, except the browser question
+# when a system Chrome or Edge is found: that browser is then used and nothing is downloaded.
 # --dry-run prints the questions with the flag for each answer, which is how Claude asks them when it runs the install.
 # Re-running it (after `git pull`, over a newer release, or to answer a question again with its flag) skips the steps that
 # are done: the same release is not copied again, pinned packages already installed are kept, and the browser is fetched
@@ -26,7 +29,7 @@
 # The marketplace name is thimble-local from a release zip and thimble from a checkout (.claude-plugin/marketplace.json).
 #
 #   scripts/install.sh [--dir DIR] [--marketplace-name NAME] [--dev] [--python PATH] [--deps-only] [--require-pinned]
-#                      [--browser system|bundled|off] [--plugin | --no-plugin]
+#                      [--browser bundled|system|off] [--sandbox-deps | --no-sandbox-deps] [--plugin | --no-plugin]
 #                      [--trust-workspaces | --no-trust-workspaces] [--dry-run]
 #   --dir DIR                where the tree lives (default: this checkout; $THIMBLE_HOME/app for a release)
 #   --marketplace-name NAME  the name Claude Code registers the tree under (default: the one in marketplace.json)
@@ -35,20 +38,23 @@
 #                            creating backend/.venv: install.sh checks that it holds the packages pyproject.toml asks for,
 #                            at versions it allows, links backend/.venv to it and installs nothing into it. Later runs
 #                            and `thimble update` keep the link and check it again
-#   --deps-only              stop after the sandbox step: no pointer, no plugin, no trust, no doctor
+#   --deps-only              stop after the browser step: no pointer, no plugin, no trust, no doctor
 #   --require-pinned         install only pinned versions: stop where the package index lacks one, and where nothing pins
 #                            them (a Dev install without uv or without backend/uv.lock)
-#   --browser system         screenshots with the Chrome or Edge installed on this machine (where Playwright's chrome and
-#                            msedge channels look); nothing is downloaded
 #   --browser bundled        download Playwright's headless Chromium into Playwright's cache folder (about 210 MB to
 #                            download, 650 MB on disk: the backend's and the frontend's Playwright each pin a build)
-#   --browser off            no browser: no screenshot checks of cards and views, so no self-repair of graphics and no
-#                            view review
+#   --browser system         screenshots with the Chrome or Edge installed on this machine (where Playwright's chrome and
+#                            msedge channels look); nothing is downloaded
+#   --browser off            no browser: no screenshots, so thimble can't check and improve its cards and views
+#   --sandbox-deps           on Linux, install with sudo what Claude Code's Bash sandbox lacks, which thimble's agents run
+#                            in: bubblewrap and socat from the system's package manager, and on Ubuntu 23.10 or later an
+#                            AppArmor profile that lets bwrap create user namespaces (/etc/apparmor.d/bwrap).
+#                            --no-sandbox-deps answers no
 #   --plugin                 add thimble to ~/.claude/settings.json and ~/.claude/plugins, so it is available in every
 #                            claude session from startup. --no-plugin answers no, and takes back what an earlier yes
 #                            added. The `thimble` command works either way
-#   --trust-workspaces       trust thimble's workspaces folder by adding it to ~/.claude.json, so the orientation, its
-#                            critic and the writers run as background agents in the terminal's agent tray;
+#   --trust-workspaces       trust thimble's workspaces folder by adding it to ~/.claude.json. The orientation, its critic
+#                            and the writers run as Claude Code background agents, which start only in a trusted folder.
 #                            --no-trust-workspaces answers no, and takes back what an earlier yes added
 #   --dry-run                print what it installs, its questions and every step and command; change nothing
 set -euo pipefail
@@ -67,7 +73,7 @@ json_get() {  # json_get FILE KEY — a top-level string value (python3 when pre
 parse_args() {
   src="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
   home="${THIMBLE_HOME:-$HOME/.thimble}"
-  dir="" mp_name="" dev=0 deps_only=0 plugin="" dry=0 trust="" byo="" browser="" require_pinned=0
+  dir="" mp_name="" dev=0 deps_only=0 plugin="" dry=0 trust="" byo="" browser="" sandbox_deps="" require_pinned=0
   while [ $# -gt 0 ]; do
     case "$1" in
       --dir) dir="$2"; shift 2;;
@@ -79,6 +85,8 @@ parse_args() {
       --python) byo="$2"; shift 2;;
       --deps-only) deps_only=1; shift;;
       --require-pinned) require_pinned=1; shift;;
+      --sandbox-deps) sandbox_deps=yes; shift;;
+      --no-sandbox-deps) sandbox_deps=no; shift;;
       --plugin) plugin=yes; shift;;
       --no-plugin) plugin=no; shift;;
       --trust-workspaces) trust=--yes; shift;;
@@ -208,19 +216,19 @@ check_prerequisites() {  # uv or python >= pyproject's requires-python, or --pyt
   node_ok=0; [ "${major:-0}" -ge 20 ] && node_ok=1
   if [ "$node_ok" = 1 ]; then
     if [ -n "$stale" ]; then
-      say "node $node_found >= 20 — step 4 installs the frontend's packages and rebuilds frontend/dist, which is older than frontend/$stale"
+      say "node $node_found >= 20 — step 5 installs the frontend's packages and rebuilds frontend/dist, which is older than frontend/$stale"
     else
-      say "node $node_found >= 20 — step 4 installs the frontend's packages$( [ "$has_dist" = 1 ] && echo ' (frontend/dist present)' || echo ' and builds frontend/dist' )"
+      say "node $node_found >= 20 — step 5 installs the frontend's packages$( [ "$has_dist" = 1 ] && echo ' (frontend/dist present)' || echo ' and builds frontend/dist' )"
     fi
   elif [ -n "$stale" ]; then
     say "frontend/dist is older than frontend/$stale, and without node >= 20 (found: $node_found) it cannot be rebuilt: the UI stays at that build until Node 20+ is installed and this script runs again"
   elif [ "$has_dist" = 1 ]; then
-    say "frontend/dist present; no node >= 20 (found: $node_found), so step 4 installs no frontend packages"
+    say "frontend/dist present; no node >= 20 (found: $node_found), so step 5 installs no frontend packages"
   elif [ "$checkout" = 1 ]; then
     slug="$(json_get "$src/plugin/.claude-plugin/plugin.json" repository | sed -e 's#^https\{0,1\}://github\.com/##' -e 's#\.git$##')"
     die "no frontend/dist and no node >= 20 (found: $node_found). Install Node 20+ (https://nodejs.org) and re-run this script, or install from the release zip, which carries the built UI: gh release download --repo $slug --pattern 'thimble-*.zip' --dir ~/Downloads"
   else
-    say "no frontend/dist and no node >= 20 (found: $node_found) — the browser UI needs a build (step 4 says how); the rest installs"
+    say "no frontend/dist and no node >= 20 (found: $node_found) — the browser UI needs a build (step 5 says how); the rest installs"
   fi
   have_claude=0
   if command -v claude >/dev/null 2>&1; then have_claude=1; say "claude CLI $(claude --version 2>/dev/null | head -n 1)"; else say "claude CLI not on PATH — the plugin step will print the commands to run"; fi
@@ -228,7 +236,7 @@ check_prerequisites() {  # uv or python >= pyproject's requires-python, or --pyt
 }
 
 copy_tree() {  # a release install: the release's entries replace the install's; .venv, node_modules, workspaces/, data/ and dev/ stay
-  step "2/12 the tree at $dir"
+  step "3/12 the tree at $dir"
   if [ "$in_place" = 1 ]; then say "in place: nothing to copy"; return 0; fi
   if [ -f "$src/RELEASE.json" ] && cmp -s "$src/RELEASE.json" "$dir/RELEASE.json"; then
     say "this release is installed there already (RELEASE.json matches, and it is copied last): nothing to copy"
@@ -253,7 +261,7 @@ copy_tree() {  # a release install: the release's entries replace the install's;
 
 make_venv() {  # --python's environment linked; a linked one kept and checked; a checkout's from uv.lock (uv sync, else
   # venv + pip from pyproject); a release's from backend/requirements.txt (release_venv)
-  step "3/12 backend/.venv (the server's Python and dependencies)"
+  step "4/12 backend/.venv (the server's Python and dependencies)"
   local venv="$dir/backend/.venv" lacking
   extra=(); if [ "$dev" = 1 ]; then extra=(--extra dev); fi
   if [ -n "$byo" ] && [ "$venv" -ef "$byo_prefix" ]; then
@@ -393,6 +401,24 @@ system_browser() {  # sys_channel, sys_name, sys_path: the Chrome or Edge that P
   done
 }
 
+probe_browser() {  # sys_starts=1 when the system browser starts headless with remote debugging on, which is how
+  # Playwright drives it (a policy such as RemoteDebuggingAllowed turns that off); 0 when it does not within 10 s
+  local profile="$tmp/browser-probe" log="$tmp/browser-probe.log" pid
+  sys_starts=0
+  [ -n "$sys_path" ] || return 0
+  mkdir -p "$profile"
+  "$sys_path" --headless=new --no-sandbox --no-first-run --no-default-browser-check --disable-gpu \
+    --user-data-dir="$profile" --remote-debugging-port=0 about:blank > "$log" 2>&1 &
+  pid=$!
+  for _ in $(seq 40); do
+    if grep -q 'DevTools listening on' "$log" 2>/dev/null; then sys_starts=1; break; fi
+    kill -0 "$pid" 2>/dev/null || break
+    sleep 0.25
+  done
+  kill "$pid" 2>/dev/null || true
+  wait "$pid" 2>/dev/null || true
+}
+
 BUNDLED_SIZE="about 210 MB to download, 650 MB on disk"  # both headless Chromium builds and ffmpeg, measured
 
 pw_cache() {  # the folder Playwright downloads its browsers into, as Playwright resolves it
@@ -465,6 +491,8 @@ PY
   elif printf '%s' "$why" | grep -qiE 'missing dependencies|install-deps'; then
     say "it was fetched, but this machine lacks the system libraries it needs; there are no screenshots until you run:"
     say "  sudo $venv/bin/python -m playwright install-deps chromium-headless-shell"
+  elif [ -n "${1:-}" ]; then
+    say "it did not start under automation ($why), which a policy on this machine can block; there are no screenshots until that is fixed, or until install.sh --browser bundled downloads Playwright's headless Chromium"
   else
     say "it did not start ($why); there are no screenshots until that is fixed"
   fi
@@ -495,7 +523,7 @@ fetch_bundled() {  # the headless Chromium each of thimble's Playwrights launche
 
 browser_step() {  # the answer to the browser question (ask): the system Chrome or Edge, nothing downloaded; Playwright's
   # headless Chromium, downloaded only on that answer; or none. A new answer is recorded in config.json
-  step "5/12 a browser for screenshots"
+  step "6/12 a browser for screenshots"
   local choice="${browser:-$browser_was}"
   case "$choice" in
     system)
@@ -510,23 +538,118 @@ browser_step() {  # the answer to the browser question (ask): the system Chrome 
       fetch_bundled
       launch_check;;
     off)
-      say "off: no screenshot checks of cards and views. install.sh --browser system or --browser bundled turns them on";;
+      say "off: no screenshots, so thimble can't check and improve its cards and views. install.sh --browser bundled or --browser system turns them on";;
     *)
-      say "not asked ($( [ "$dry" = 1 ] && echo 'dry run' || echo 'no terminal' )), so nothing is downloaded$( [ -n "$sys_path" ] && echo "; thimble uses $sys_name at $sys_path" || echo '; with no Chrome or Edge found there are no screenshot checks' ). install.sh --browser system, bundled or off answers";;
+      if [ "$dry" = 1 ]; then
+        say "(the answer to the browser question, above)"
+      else
+        say "not asked (no terminal), so nothing is downloaded: thimble uses $sys_name at $sys_path. For the best experience, install.sh --browser bundled downloads Playwright's headless Chromium"
+        launch_check "$sys_channel"
+      fi;;
   esac
   if [ -n "$browser" ] && [ "$browser" != "$browser_was" ]; then record_browser "$browser"; fi
 }
 
-check_sandbox() {  # Claude Code's Bash sandbox, which the agents' Bash runs in where it can (the config's sandbox.use):
-  # on Linux bubblewrap and socat, and on Ubuntu 23.10 or later an AppArmor profile that lets bwrap create user
-  # namespaces. Installing them needs root, so this prints the commands (the backend's cc_settings.sandbox_setup, the
-  # same lines `thimble doctor` prints) and runs none; without them the agents' Bash runs outside it under their
-  # permission modes.
-  step "6/12 the agents' Bash sandbox"
-  local venv="$dir/backend/.venv"
-  if [ "$dry" = 1 ]; then say "(checked by the backend's sandbox_lines once backend/.venv exists; prints root commands, runs none)"; return 0; fi
-  ( cd "$dir/backend" && "$venv/bin/python" -c 'from app import cli; print("\n".join(l[2:] for l in cli.sandbox_lines()))' ) \
-    || say "(the sandbox was not checked; \`thimble doctor\` checks it)"
+APPARMOR_USERNS=/proc/sys/kernel/apparmor_restrict_unprivileged_userns  # 1 (Ubuntu 23.10+): a user namespace needs an AppArmor profile
+
+sandbox_runs() {  # Claude Code's Bash sandbox can run here: on Linux socat is on PATH and bwrap creates a sandbox
+  local bw
+  bw="$(command -v bwrap)" && command -v socat >/dev/null 2>&1 \
+    && "$bw" --ro-bind / / --dev /dev --unshare-all --die-with-parent true >/dev/null 2>&1
+}
+
+sandbox_plan() {  # what Claude Code's Bash sandbox needs here: sb_ok=1 when it runs (macOS has it built in); else sb_need
+  # names what it lacks, and sb_cmds holds the root commands that set it up (the sandbox question offers them), or
+  # sb_why says why there are none
+  sb_ok=0 sb_need="" sb_why="" sb_pm="" sb_cmds=()
+  if [ "$(uname -s)" != Linux ] || sandbox_runs; then sb_ok=1; return 0; fi
+  local pkgs=() bw sudo="" f profile=0
+  command -v bwrap >/dev/null 2>&1 || pkgs+=(bubblewrap)
+  command -v socat >/dev/null 2>&1 || pkgs+=(socat)
+  bw="$(command -v bwrap || echo /usr/bin/bwrap)"
+  if [ "$(cat "$APPARMOR_USERNS" 2>/dev/null)" = 1 ]; then
+    profile=1
+    for f in /etc/apparmor.d/*; do
+      if [ -f "$f" ] && grep -qF "$bw" "$f" && grep -q userns "$f"; then profile=0; break; fi
+    done
+  fi
+  [ "${#pkgs[@]}" = 0 ] || sb_need="${pkgs[*]}"
+  sb_need="${sb_need/ / and }"
+  [ "$profile" = 0 ] || sb_need="${sb_need:+$sb_need, and }an AppArmor profile that lets bwrap create user namespaces (/etc/apparmor.d/bwrap)"
+  if [ -z "$sb_need" ]; then
+    sb_need="user namespaces for bwrap"
+    sb_why="bwrap is installed but can't create a sandbox here (user namespaces may be turned off, as in some containers)"
+    return 0
+  fi
+  if [ "$(id -u)" != 0 ]; then
+    command -v sudo >/dev/null 2>&1 || { sb_why="setting up $sb_need needs root: ask an administrator"; return 0; }
+    sudo="sudo "
+  fi
+  if [ "${#pkgs[@]}" -gt 0 ]; then
+    for sb_pm in apt-get dnf pacman zypper apk ""; do [ -z "$sb_pm" ] || ! command -v "$sb_pm" >/dev/null 2>&1 || break; done
+    case "$sb_pm" in
+      apt-get | dnf) sb_cmds+=("${sudo}$sb_pm install -y ${pkgs[*]}");;
+      pacman) sb_cmds+=("${sudo}pacman -S --needed --noconfirm ${pkgs[*]}");;
+      zypper) sb_cmds+=("${sudo}zypper --non-interactive install ${pkgs[*]}");;
+      apk) sb_cmds+=("${sudo}apk add ${pkgs[*]}");;
+      *) sb_why="install ${pkgs[*]} with this system's package manager"; return 0;;
+    esac
+  fi
+  if [ "$profile" = 1 ]; then
+    sb_cmds+=("printf 'abi <abi/4.0>,\ninclude <tunables/global>\nprofile bwrap $bw flags=(unconfined) {\n  userns,\n  include if exists <local/bwrap>\n}\n' | ${sudo}tee /etc/apparmor.d/bwrap >/dev/null"
+              "${sudo}apparmor_parser -r /etc/apparmor.d/bwrap")
+  fi
+}
+
+sandbox_text() {  # the sandbox question
+  say "thimble's agents run their Bash only in Claude Code's sandbox, which on Linux needs $sb_need. install.sh can install them now by running:"
+  printf '  %s\n' "${sb_cmds[@]}"
+  say "With a no, thimble's agents won't run until the sandbox works. \`thimble uninstall\` leaves these installed."
+}
+
+sandbox_later() {  # what a sandbox that can't run means, and how to set it up later
+  if [ "${#sb_cmds[@]}" -gt 0 ]; then
+    say "thimble's agents won't run until the sandbox works. To set it up later, run: bash $dir/scripts/install.sh --sandbox-deps"
+  else
+    say "thimble's agents won't run until the sandbox works; \`thimble doctor\` shows when it does."
+  fi
+}
+
+sandbox_step() {  # the sandbox question's answer, right after the questions so that sudo asks for its password while the
+  # user is at the terminal: sandbox_plan's root commands on a yes, then whether the sandbox runs
+  step "2/12 the agents' Bash sandbox"
+  local c upd
+  if [ "$sb_ok" = 1 ]; then
+    say "Claude Code's Bash sandbox $( [ "$(uname -s)" = Linux ] && echo 'runs here' || echo 'is built into macOS' ): nothing to install"
+    return 0
+  fi
+  if [ "${#sb_cmds[@]}" = 0 ]; then say "Claude Code's Bash sandbox can't run here: $sb_why."; sandbox_later; return 0; fi
+  if [ "$sandbox_deps" != yes ]; then
+    if [ "$dry" = 1 ] && [ -z "$sandbox_deps" ]; then say "(the answer to the sandbox question, above)"; return 0; fi
+    say "Claude Code's Bash sandbox lacks $sb_need, and you answered no to installing it."
+    sandbox_later
+    return 0
+  fi
+  if [ "$dry" = 0 ] && [ "$tty" = 0 ] && [ "$(id -u)" != 0 ] && ! sudo -n true 2>/dev/null; then
+    say "sudo needs your password, which install.sh can't ask for without a terminal. Run these in a terminal, then \`thimble doctor\`:"
+    printf '  %s\n' "${sb_cmds[@]}"
+    sandbox_later
+    return 0
+  fi
+  for c in "${sb_cmds[@]}"; do
+    say "+ $c"
+    [ "$dry" = 0 ] || continue
+    bash -c "$c" && continue
+    if [ "$sb_pm" = apt-get ] && [ "$c" = "${sb_cmds[0]}" ]; then  # the package lists may predate the packages
+      upd="${c%%apt-get install*}apt-get update"
+      say "+ $upd"
+      if bash -c "$upd" && say "+ $c" && bash -c "$c"; then continue; fi
+    fi
+    say "(that failed, above)"
+    break
+  done
+  [ "$dry" = 0 ] || return 0
+  if sandbox_runs; then say "Claude Code's Bash sandbox runs now"; else say "Claude Code's Bash sandbox still doesn't run."; sandbox_later; fi
 }
 
 dist_stale() {  # dist_stale FRONTEND: the first file frontend/dist is built from that is newer than its index.html (git
@@ -624,7 +747,7 @@ runtime_packages() {  # only the frontend packages the server and its scripts lo
 build_ui() {  # with node >= 20 the frontend's packages, which custom views need; a checkout's frontend/dist older than
   # its sources is rebuilt (scripts/rebuild_ui.sh, which swaps the build in under a running server), any other existing
   # frontend/dist is kept, and without one the typecheck and vite build make it
-  step "4/12 frontend"
+  step "5/12 frontend"
   if [ "$node_ok" = 1 ] && ! install_packages; then
     [ "$has_dist" = 1 ] || die "npm ci failed in $dir/frontend (above), so the UI cannot be built; fix that and run this script again"
     say "(npm failed, above: custom views need the frontend's packages, so run this script again)"
@@ -721,8 +844,12 @@ show_plan() {  # what the install puts where, before its questions
     system) [ -z "$sys_path" ] || say "  a browser for screenshots: $sys_name at $sys_path, nothing downloaded";;
     bundled) say "  a browser for screenshots: Playwright's headless Chromium, downloaded into $(pw_cache) ($BUNDLED_SIZE)";;
     off) ;;
-    *) asked+=("a browser for screenshots: $( [ -n "$sys_path" ] && echo "$sys_name at $sys_path, nothing downloaded; or " )Playwright's headless Chromium, downloaded into $(pw_cache) ($BUNDLED_SIZE)");;
+    *) asked+=("a browser for screenshots: Playwright's headless Chromium, downloaded into $(pw_cache) ($BUNDLED_SIZE)");;
   esac
+  if [ "${#sb_cmds[@]}" -gt 0 ]; then
+    if [ "$sandbox_deps" = yes ]; then say "  the sandbox's system packages: $sb_need"
+    elif [ -z "$sandbox_deps" ]; then asked+=("the sandbox's system packages: $sb_need"); fi
+  fi
   if [ "$deps_only" = 0 ]; then
     if [ "${plugin:-$plugin_prev}" = yes ]; then say "  thimble's plugin in every Claude Code session: $(cc_path settings.json) and $(cc_path plugins)"
     elif [ -z "$plugin$plugin_prev" ] && [ "$have_claude" = 1 ]; then asked+=("thimble's plugin in every Claude Code session: $(cc_path settings.json) and $(cc_path plugins)"); fi
@@ -735,8 +862,15 @@ show_plan() {  # what the install puts where, before its questions
   for a in "${asked[@]}"; do say "  - $a"; done
 }
 
-browser_text() {  # the browser question's explanation
-  say "A browser for screenshots. thimble takes screenshots of the cards and views it draws to check them, and repairs graphics that look wrong. Without a browser there are no screenshot checks of cards and views, so no self-repair of graphics and no view review."
+browser_text() {  # the browser question's explanation, after probe_browser
+  say "A browser for screenshots. thimble takes screenshots of the cards and views it draws, to check and improve them. For the best experience, install Playwright's headless Chromium ($BUNDLED_SIZE, in $(pw_cache); not downloaded again when it is there already)."
+  if [ -z "$sys_path" ]; then
+    say "No Chrome or Edge was found, so without it thimble can't take screenshots, and can't check and improve its cards and views."
+  elif [ "$sys_starts" = 1 ]; then
+    say "With a no, thimble falls back to $sys_name at $sys_path, which starts under automation here."
+  else
+    say "With a no, thimble falls back to $sys_name at $sys_path, but it did not start under automation here, which a policy on this machine can block, so the download is recommended."
+  fi
 }
 
 plugin_text() {  # the plugin question
@@ -754,45 +888,66 @@ earlier_answers() {  # what settles each question before it is asked: the browse
   fi
 }
 
-ask() {  # the three questions, before anything is installed: the browser, the plugin, the trust. Each is asked on a
-  # terminal when neither its flag nor an earlier answer settles it (earlier_answers); --dry-run prints them with their
-  # flags instead
-  local tty=0 dl="Playwright's headless Chromium, downloaded into $(pw_cache) ($BUNDLED_SIZE; not again when it is there already)"
+item() {  # item N TEXT: TEXT as the dry run's question N, its later lines indented under the first
+  printf '%s\n' "$2" | sed -e "1s/^/$1. /" -e '2,$s/^/   /'
+}
+
+ask() {  # the questions, before anything is installed: the browser, the sandbox's system packages, the plugin, the
+  # trust. Each is asked on a terminal when neither its flag nor an earlier answer settles it (earlier_answers);
+  # --dry-run prints them with their flags instead, and without a terminal install.sh stops while one is unanswered
+  local need=()
+  tty=0
   if [ "$dry" = 1 ]; then
     step "the questions install.sh asks on a terminal, and the flag that gives each answer"
     if [ -n "$browser" ]; then say "1. the browser: answered by --browser $browser"
     elif [ -n "$browser_was" ]; then say "1. the browser: answered $browser_was earlier ($home/config.json); --browser changes it"
     else
-      say "1. $(browser_text)"
-      [ -z "$sys_path" ] || say "   - $sys_name at $sys_path, nothing downloaded: --browser system"
-      say "   - $dl: --browser bundled"
+      probe_browser
+      item 1 "$(browser_text)"
+      say "   - yes, download it: --browser bundled"
+      [ -z "$sys_path" ] || say "   - no, use $sys_name: --browser system"
       say "   - no browser: --browser off"
-      [ -n "$sys_path" ] || say "   (no Chrome or Edge was found where Playwright looks for one)"
     fi
+    if [ "${#sb_cmds[@]}" = 0 ]; then say "2. the sandbox's system packages: not asked, since $( [ "$sb_ok" = 1 ] && echo 'the sandbox runs here' || echo "$sb_why" )"
+    elif [ -n "$sandbox_deps" ]; then say "2. the sandbox's system packages: answered by --$( [ "$sandbox_deps" = yes ] || echo 'no-' )sandbox-deps"
+    else item 2 "$(sandbox_text)"; say "   - yes: --sandbox-deps"; say "   - no: --no-sandbox-deps"; fi
     [ "$deps_only" = 0 ] || return 0
-    if [ -n "$plugin" ]; then say "2. the plugin: answered by --$( [ "$plugin" = yes ] || echo 'no-' )plugin"
-    elif [ -n "$plugin_prev" ]; then say "2. the plugin: answered $plugin_prev earlier; --plugin or --no-plugin changes it"
-    elif [ "$have_claude" = 0 ]; then say "2. the plugin: not asked, since there is no claude CLI"
-    else say "2. $(plugin_text)"; say "   - yes: --plugin"; say "   - no: --no-plugin"; fi
-    if [ -n "$trust" ]; then say "3. the trust: answered by --$( [ "$trust" = --yes ] || echo 'no-' )trust-workspaces"
-    elif [ -n "$trust_q" ]; then say "3. $(printf '%s' "$trust_q" | tr '\n' ' ')"; say "   - yes: --trust-workspaces"; say "   - no: --no-trust-workspaces"
-    else say "3. the trust: answered earlier, or the folder is trusted already; --trust-workspaces or --no-trust-workspaces changes it"; fi
+    if [ -n "$plugin" ]; then say "3. the plugin: answered by --$( [ "$plugin" = yes ] || echo 'no-' )plugin"
+    elif [ -n "$plugin_prev" ]; then say "3. the plugin: answered $plugin_prev earlier; --plugin or --no-plugin changes it"
+    elif [ "$have_claude" = 0 ]; then say "3. the plugin: not asked, since there is no claude CLI"
+    else say "3. $(plugin_text)"; say "   - yes: --plugin"; say "   - no: --no-plugin"; fi
+    if [ -n "$trust" ]; then say "4. the trust: answered by --$( [ "$trust" = --yes ] || echo 'no-' )trust-workspaces"
+    elif [ -n "$trust_q" ]; then item 4 "$trust_q"; say "   - yes: --trust-workspaces"; say "   - no: --no-trust-workspaces"
+    else say "4. the trust: answered earlier, or the folder is trusted already; --trust-workspaces or --no-trust-workspaces changes it"; fi
     return 0
   fi
   [ -t 0 ] && tty=1
-  if [ "$tty" = 1 ] && [ -z "$browser" ] && [ -z "$browser_was" ]; then
-    printf '\n'; browser_text
-    if [ -n "$sys_path" ]; then
-      printf 'Use %s at %s? Nothing is downloaded. [Y/n] ' "$sys_name" "$sys_path"
-      if yes_no y; then browser=system; fi
+  if [ "$tty" = 0 ]; then
+    [ -n "$browser$browser_was$sys_path" ] || need+=("the browser: --browser bundled or --browser off")
+    [ "${#sb_cmds[@]}" = 0 ] || [ -n "$sandbox_deps" ] || need+=("the sandbox's system packages: --sandbox-deps or --no-sandbox-deps")
+    if [ "$deps_only" = 0 ]; then
+      [ -n "$plugin$plugin_prev" ] || [ "$have_claude" = 0 ] || need+=("the plugin: --plugin or --no-plugin")
+      if [ -z "$trust" ] && { [ -n "$trust_q" ] || ! command -v python3 >/dev/null 2>&1; }; then
+        need+=("the trust: --trust-workspaces or --no-trust-workspaces")
+      fi
     fi
-    if [ -z "$browser" ]; then
-      printf "%s Playwright's headless Chromium (%s) into %s? It is not downloaded again when it is there already. [y/N] " \
-        "$( [ -n "$sys_path" ] && echo 'Download' || echo 'No Chrome or Edge was found. Download' )" "$BUNDLED_SIZE" "$(pw_cache)"
-      if yes_no n; then browser=bundled; else browser=off; fi
-    fi
+    [ "${#need[@]}" = 0 ] || die "there is no terminal to ask on, so each question needs its answer as a flag. Not answered:
+$(printf '  %s\n' "${need[@]}")
+bash $src/scripts/install.sh --dry-run prints the questions; then run install.sh again with a flag for each."
+    return 0
   fi
-  [ "$deps_only" = 0 ] && [ "$tty" = 1 ] || return 0
+  if [ -z "$browser" ] && [ -z "$browser_was" ]; then
+    probe_browser
+    printf '\n'; browser_text
+    printf "Download Playwright's headless Chromium? [Y/n] "
+    if yes_no y; then browser=bundled; elif [ -n "$sys_path" ]; then browser=system; else browser=off; fi
+  fi
+  if [ "${#sb_cmds[@]}" -gt 0 ] && [ -z "$sandbox_deps" ]; then
+    printf '\n'; sandbox_text
+    printf 'Install them now? [Y/n] '
+    if yes_no y; then sandbox_deps=yes; else sandbox_deps=no; fi
+  fi
+  [ "$deps_only" = 0 ] || return 0
   if [ -z "$plugin" ] && [ -z "$plugin_prev" ] && [ "$have_claude" = 1 ]; then
     printf '\n%s [y/N] ' "$(plugin_text)"
     if yes_no n; then plugin=yes; else plugin=no; fi
@@ -897,14 +1052,6 @@ finish() {  # doctor, then the one next step (and the PATH line the link needs)
     say "  export THIMBLE_HOME=$(printf '%q' "$home")"
   fi
   say "next: run $cmd in a folder of transcripts; it starts Claude Code with thimble and prints the dashboard's URL"
-  local open=()
-  [ -n "$browser$browser_was" ] || open+=("the browser")
-  [ -n "$plugin$plugin_prev" ] || [ "$have_claude" = 0 ] || open+=("the plugin")
-  [ -n "$trust" ] || [ -z "$trust_q" ] || open+=("the trust")
-  if [ "$dry" = 0 ] && [ "${#open[@]}" -gt 0 ]; then
-    say "not asked, with no terminal: $(IFS=,; printf '%s' "${open[*]}" | sed 's/,/, /g'). So nothing was downloaded for them or changed in Claude Code's files."
-    say "bash $dir/scripts/install.sh --dry-run lists those questions and the flag for each answer; a re-run with the flags skips the steps that are done"
-  fi
 }
 
 keep_log() {  # the run's output also goes to $home/install.log (the last run only), which `thimble feedback` carries
@@ -922,14 +1069,15 @@ main() {
   marketplace_name
   check_prerequisites
   system_browser
+  sandbox_plan
   earlier_answers
   show_plan
   ask
+  sandbox_step
   copy_tree
   make_venv
   build_ui
   browser_step
-  check_sandbox
   if [ "$deps_only" = 1 ]; then say; say "--deps-only: done"; exit 0; fi
   write_pointer
   link_cli
