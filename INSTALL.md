@@ -40,8 +40,8 @@ changes nothing.
 
 ## The swarm branch
 
-The `swarm` branch adds the Swarm view, which draws many agents acting on shared pages and channels, and questions
-typed in a view, which main answers with labels the view draws. To try it, install a clone of it:
+The `swarm` branch adds the Swarm view, which draws many agents acting on shared pages and channels, and Swarm cards,
+which main makes when a question in the chat asks how the agents coordinated. To try it, install a clone of it:
 
 ```bash
 git clone -b swarm https://github.com/safety-research/thimble.git thimble-swarm
@@ -52,9 +52,9 @@ A server already running keeps the other install's code until `thimble server re
 `bash scripts/install.sh` in the unzipped release, then `thimble server restart`; if you added the plugin, run
 `bash scripts/install.sh --no-plugin` in the clone first and give the release's install `--plugin`. In the clone,
 `thimble update` pulls the swarm branch and ignores `--from`. Known limitations: only an orientation proposes the Swarm
-view, when the first 400 JSON Lines or CSV files show 30 or more accounts naming each other on 3 or more shared places;
-accounts of the same name in different runs share a row; a "names" link points only to an earlier card; and a large
-human team chat can pass for a swarm.
+view, and main makes Swarm cards only, when the first 400 JSON Lines or CSV files show 30 or more accounts naming each
+other on 3 or more shared places; accounts of the same name in different runs share a row; a "names" link points only
+to an earlier card; and a large human team chat can pass for a swarm.
 
 ## Update
 
