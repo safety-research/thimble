@@ -415,7 +415,8 @@ def agent_check(inp: dict) -> int:
     tool_input = inp.get("tool_input") if isinstance(inp.get("tool_input"), dict) else {}
     if inp.get("agent_id") or not tool_input:
         return 0
-    body = {"cwd": folder(inp), "agent_id": None, "tool_input": tool_input}
+    body = {"cwd": folder(inp), "agent_id": None, "tool_use_id": inp.get("tool_use_id") or None,
+            "tool_input": tool_input}
     try:
         status, answer = request("POST", "/api/bg/agent-check", body, timeout=AGENTS_WAIT_S)
     except (OSError, http.client.HTTPException):

@@ -39,7 +39,8 @@ the session's life: the tool returns the session's news (below) as one block of 
 reply word for word, one reply per call, and the outbox's messages as tokens. Two plugin hooks keep it reliable: before
 a SendMessage (relay_check) the server swaps a token for its message, prefixes a message the analyst typed in the
 proxy's view, and refuses a message sent twice; when the proxy would stop while its session runs (proxy_stop), the hook
-sends it back to waiting.
+sends it back to waiting. Main is asked to start a proxy again while none runs, unless Claude Code refused its call for
+that session, as auto mode can (proxy_refused).
 
 The news. What the analyst would see of a subagent, read from the session's transcript in its order (_read_news, which
 keeps an offset past the last whole line it read, so no line shows twice): each reply as `<name>: <text>` (NEWS_CHARS, a
@@ -349,9 +350,10 @@ class Entry:
     tx_seen: int = -1  # the transcript offset _lingering last saw
     tx_grew: float = 0.0  # time.monotonic() when that offset last changed
     tx_ended: bool | None = None  # whether the transcript's last turn had ended at that offset, once read
+    proxy_refused: bool = False  # Claude Code refused main's Agent call that would start its proxy (proxy_refused)
 
     KEEP = ("c", "key", "name", "short", "sid", "chat", "role", "folder", "started", "status", "run_open", "result",
-            "ended_at", "proxy_agents", "relayed")
+            "ended_at", "proxy_agents", "relayed", "proxy_refused")
 
     @property
     def shown(self) -> str:
@@ -582,7 +584,7 @@ async def _tick(rows: list[dict[str, Any]]) -> None:
                 _news(e, f"{e.shown} waits for a {e.waiting_for or 'reply'}; answer it in the browser or with "
                          f"`claude attach {e.short}`.")
             _changed.set()
-        if not proxy_alive(e) and time.monotonic() - e.proxy_asked > PROXY_ASK_S:
+        if not proxy_alive(e) and not e.proxy_refused and time.monotonic() - e.proxy_asked > PROXY_ASK_S:
             unshown.setdefault(e.c, []).append(e.key)
         if e.status != "idle" and not e.run_open and agent_session.current(e.c, e.key) is None:
             fn = _wake.get(kind_of(e.key))
@@ -1026,7 +1028,7 @@ def ask_main_for_proxy(c: str, *keys: str) -> bool:
     """Ask main, with one `agent` event, to start the proxies of the sessions `keys`; False when no session listens."""
     from . import channel  # noqa: PLC0415
 
-    found = [e for e in (entry(c, k) for k in keys) if e is not None]
+    found = [e for e in (entry(c, k) for k in keys) if e is not None and not e.proxy_refused]
     if not found or not channel.reachable(c):
         return False
     try:
@@ -1073,8 +1075,26 @@ def proxy_started(c: str, agent_type: str, description: str, agent_id: str | Non
     if e is None:
         return None
     e.proxy_seen = time.monotonic()
+    e.proxy_refused = False
     proxy_agent(c, e.key, agent_id)
     return e.key
+
+
+def proxy_refused(c: str, key: str, tool_use_id: str | None) -> None:
+    """Main's Agent call that would start the session's proxy ended in an error: Claude Code refused it (auto mode, a
+    permission rule, the analyst) or could not start it. Main is not asked again for this session, since the same call
+    would be refused again and each ask costs main a turn and the terminal its lines. A refusal of agent_check's own, of
+    a second proxy, changes nothing."""
+    if tool_use_id and tool_use_id in _own_refusals:
+        _own_refusals.discard(tool_use_id)
+        return
+    e = entry(c, key)
+    if e is None or e.proxy_refused:
+        return
+    e.proxy_refused = True
+    e.proxy_seen, e.proxy_starting = 0.0, 0.0
+    log.info("%s: main's call to show %s in the agent tray was refused; main is not asked again", c, e.name)
+    _save(c)
 
 
 def proxy_agent(c: str, key: str, agent_id: str | None) -> None:
@@ -1086,9 +1106,11 @@ def proxy_agent(c: str, key: str, agent_id: str | None) -> None:
 
 
 def new_main(c: str) -> None:
-    """Another session became main: the proxies ran in the one before, so each session is shown anew."""
+    """Another session became main: the proxies ran in the one before, so each session is shown anew, and a session
+    whose proxy the one before refused is asked for again once."""
     for e in entries(c):
         e.proxy_seen, e.proxy_asked, e.proxy_starting, e.owner = 0.0, 0.0, 0.0, None
+        e.proxy_refused = False
 
 
 def proxy_ended(c: str, agent_id: str | None) -> None:
@@ -1096,7 +1118,7 @@ def proxy_ended(c: str, agent_id: str | None) -> None:
     for e in entries(c):
         if agent_id and agent_id in e.proxy_agents and e.owner in (None, agent_id):
             e.proxy_seen, e.proxy_starting, e.owner = 0.0, 0.0, None
-            if alive(e):
+            if alive(e) and not e.proxy_refused:
                 log.info("%s: %s's proxy %s ended while its session runs; main is asked for another", c, e.name, agent_id)
                 ask_main_for_proxy(c, e.key)
 
@@ -1345,14 +1367,16 @@ def proxy_stop(c: str, agent_type: str, agent_path: Path | None, active: bool, a
     return tools.hint("bg-proxy-keep", session=e.name)
 
 
-def agent_check(c: str, tool_input: dict[str, Any]) -> str | None:
-    """Main's Agent call, before it runs: why it must not start (a second proxy of a session whose proxy runs or is
-    starting, a second fork of a thread whose fork runs or is starting), or None to let it start."""
+def agent_check(c: str, tool_input: dict[str, Any], tool_use_id: str | None = None) -> str | None:
+    """Main's Agent call `tool_use_id`, before it runs: why it must not start (a second proxy of a session whose proxy
+    runs or is starting, a second fork of a thread whose fork runs or is starting), or None to let it start."""
     agent_type, description = tool_input.get("subagent_type"), tool_input.get("description")
     e = _by_tray(c, agent_type, description, tool_input.get("prompt"))
     if e is not None:
         now = time.monotonic()
         if proxy_alive(e) or (e.proxy_starting and now - e.proxy_starting < PROXY_ASK_S):
+            if tool_use_id:
+                _own_refusals.add(tool_use_id)
             return f"{e.name} already shows in the agent tray."
         e.proxy_starting = now
         return None
@@ -1369,6 +1393,7 @@ def agent_check(c: str, tool_input: dict[str, Any]) -> str | None:
 
 
 _forking: dict[tuple[str, str], float] = {}  # (workspace, thread) -> time.monotonic() when its fork's Agent call ran
+_own_refusals: set[str] = set()  # the tool_use_ids of the second proxies agent_check refused (proxy_refused)
 
 
 def fork_ended(c: str, thread_id: str) -> None:
@@ -1709,6 +1734,7 @@ async def relay_route(body: RelayBody) -> dict[str, Any]:
 class AgentCheckBody(BaseModel):
     cwd: str
     agent_id: str | None = None
+    tool_use_id: str | None = None
     tool_input: dict[str, Any] = {}
 
 
@@ -1716,7 +1742,7 @@ class AgentCheckBody(BaseModel):
 async def agent_check_route(body: AgentCheckBody) -> dict[str, Any]:
     """The PreToolUse hook before main's Agent call (agent_check): `{deny, reason}`."""
     c = config.workspace_for_cwd(body.cwd)
-    reason = agent_check(c, body.tool_input) if c and not body.agent_id else None
+    reason = agent_check(c, body.tool_input, body.tool_use_id) if c and not body.agent_id else None
     if reason:
         log.info("%s: an Agent call is refused: %s", c, reason)
     return {"deny": bool(reason), "reason": reason or ""}

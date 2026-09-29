@@ -1057,6 +1057,8 @@ def _tool_result(lv: Live, tool_use_id: str, content: Any, is_error: bool = Fals
         lv.forked.discard(tid)
         threads.fork_lost(lv.c, tid)
     sub = _sub_by(lv, tool_use_id=tool_use_id)
+    if sub is not None and sub.proxy and is_error and sub.report:
+        _bg().proxy_refused(lv.c, sub.report, tool_use_id)
     if sub is not None and name in AGENT_TOOLS:
         _agent_result(lv, sub, content, is_error)
     elif sub is not None and sub.workflow:
