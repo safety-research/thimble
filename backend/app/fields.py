@@ -5,7 +5,7 @@ on a view gives it (views.tool_read_ref).
 describe(corpus_dir, paths) groups the files whose records have the same fields, such as one page's saves per file, and
 reads each group's records up to its share of SCAN_BYTES. A field's line gives its values with their counts when it has at most
 ENUM_MAX, else how many it has and the commonest; the span of a time or a number; the length of a long text. Relations:
-  saves  records with a sequence and a text field (concepts._save_key) that mostly keep at least half the lines of the
+  saves  records that may save a whole document (concepts._save_key) that mostly keep at least half the lines of the
          save before them on their document, which labels read as what each save changed (concepts.change_lines)
   names  a text field whose values are almost all values of another field that is different on every record (judged
          on NAMES_SAMPLE of its values)
