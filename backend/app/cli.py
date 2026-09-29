@@ -2640,6 +2640,11 @@ def update_script() -> Path:
     return config.REPO_ROOT / "scripts" / "update.sh"
 
 
+# install.sh's answers to its questions, and --require-pinned, which `thimble update` passes on to it through update.sh
+INSTALL_FLAGS = ("--sandbox-deps", "--no-sandbox-deps", "--plugin", "--no-plugin", "--trust-workspaces",
+                 "--no-trust-workspaces", "--require-pinned")
+
+
 def _gh_ok(gh: str, *args: str) -> bool:
     """True when `gh args` exits 0; False when it fails, times out or cannot start."""
     try:
@@ -2692,6 +2697,8 @@ def cmd_update(args: argparse.Namespace) -> int:
     release and its SHA256SUMS with gh, and update.sh checks the zip against it; a checkout skips the download
     (update.sh pulls). When the download fails: two lines naming the cause and the --from form, and exit 1."""
     extra = ["--dry-run"] if getattr(args, "dry_run", False) else []
+    extra += ["--browser", args.browser] if getattr(args, "browser", None) else []
+    extra += getattr(args, "install_flags", None) or []
     if getattr(args, "from_", None):
         return run_update_script("--from", args.from_, *extra)
     if is_git_checkout():
@@ -2839,6 +2846,9 @@ def build_parser() -> argparse.ArgumentParser:
     u = sub.add_parser("update", help="bring the install up to date: the latest GitHub release via gh, or --from <zip>")
     u.add_argument("--from", dest="from_", metavar="ZIP", help="a downloaded release zip (thimble-<version>-<sha>.zip)")
     u.add_argument("--dry-run", action="store_true", help="print update.sh's steps; change nothing")
+    u.add_argument("--browser", choices=("bundled", "system", "off"), help="passed on to install.sh")
+    for flag in INSTALL_FLAGS:
+        u.add_argument(flag, dest="install_flags", action="append_const", const=flag, help="passed on to install.sh")
     u.set_defaults(fn=cmd_update)
     la = sub.add_parser("launch-args", help="for plugin/bin/thimble: the channel entry, the --allowedTools, --effort and --settings values, the tools that end a turn without text, main's --name, then main's prompt")
     la.add_argument("--cwd")

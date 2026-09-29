@@ -69,10 +69,13 @@ def stub_bin(tmp_path: Path) -> Path:
     return bin_
 
 
+ANSWERS = ("--browser", "off", "--no-sandbox-deps")  # install.sh's questions --deps-only asks, answered
+
+
 def install(tree: Path, dest: Path, tmp_path: Path, *flags: str, **extra: str) -> subprocess.CompletedProcess:
     env = env_for(tmp_path, PATH=f"{stub_bin(tmp_path)}:/usr/bin:/bin", **extra)
-    return subprocess.run(["bash", str(tree / "scripts" / "install.sh"), "--dir", str(dest), "--deps-only", *flags],
-                          capture_output=True, text=True, env=env, timeout=60)
+    return subprocess.run(["bash", str(tree / "scripts" / "install.sh"), "--dir", str(dest), "--deps-only", *ANSWERS,
+                           *flags], capture_output=True, text=True, env=env, stdin=subprocess.DEVNULL, timeout=60)
 
 
 def test_a_release_install_carries_the_files_the_readme_links(tmp_path):
@@ -143,24 +146,39 @@ def test_a_release_installs_the_backend_with_the_tool_set_up_with_a_package_inde
 
 
 def test_a_pinned_install_falls_back_to_pyproject_s_ranges_only_when_the_index_lacks_a_version(tmp_path):
+    """The newest versions the ranges allow, and the packages that differ from the pins listed; --require-pinned stops
+    there instead, and a hash mismatch always stops."""
     tree = pinned_release(tmp_path)
     dest = tmp_path / "home" / ".thimble" / "app"
     log = tmp_path / "uv.log"
 
-    def run(fresh: bool = True, **extra: str) -> tuple[subprocess.CompletedProcess, list[str]]:
+    def run(fresh: bool = True, extra_flags: tuple[str, ...] = (),
+            **extra: str) -> tuple[subprocess.CompletedProcess, list[str]]:
         log.write_text("")
         if fresh:
             shutil.rmtree(dest, ignore_errors=True)
-        r = install(tree, dest, tmp_path, STUB_LOG=str(log), **extra)
+        r = install(tree, dest, tmp_path, *extra_flags, STUB_LOG=str(log), **extra)
         return r, [ln.split(" --python")[0] for ln in log.read_text().splitlines()]
 
     r, calls = run()
     assert r.returncode == 0 and calls == [f"uv pip sync --require-hashes {tree}/backend/requirements.txt"], r.stdout
     r, calls = run(fresh=False)
     assert r.returncode == 0 and calls == [] and "installed by an earlier run" in r.stdout, "a re-run keeps them"
-    r, calls = run(STUB_SYNC_RC="1", STUB_SYNC_OUT="Because there is no version of httpx==0.28.1 and you require it")
+    missing = {"STUB_SYNC_RC": "1", "STUB_SYNC_OUT": "Because there is no version of httpx==0.28.1 and you require it"}
+    r, calls = run(**missing)
     assert r.returncode == 0 and len(calls) == 2 and calls[1].startswith("uv pip install -r "), r.stdout + r.stderr
-    assert "installed instead" in r.stdout
+    assert "the newest versions backend/pyproject.toml allows that the index has" in r.stdout
+    venv = dest / "backend" / ".venv"  # a real environment holding an older httpx, as the ranges installed it
+    shutil.rmtree(venv)
+    subprocess.run([os.path.realpath(sys.executable), "-m", "venv", "--without-pip", str(venv)], check=True, timeout=60)
+    [site] = venv.glob("lib/python3*/site-packages")
+    (site / "httpx-0.27.2.dist-info").mkdir()
+    (site / "httpx-0.27.2.dist-info" / "METADATA").write_text("Metadata-Version: 2.1\nName: httpx\nVersion: 0.27.2\n")
+    r, calls = run(fresh=False, **missing)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "differ from the versions backend/requirements.txt pins:\n  httpx 0.27.2 (pinned 0.28.1)" in r.stdout
+    r, calls = run(**missing, extra_flags=("--require-pinned",))
+    assert r.returncode == 1 and "--require-pinned" in r.stderr and len(calls) == 1, r.stdout + r.stderr
     r, calls = run(STUB_SYNC_RC="1", STUB_SYNC_OUT="Hash mismatch for `httpx==0.28.1`")
     assert r.returncode == 1 and "hash is not the one" in r.stderr and len(calls) == 1, r.stdout + r.stderr
     for rel in ("frontend/dist/index.html", "frontend/runtime/package-lock.json"):
@@ -244,9 +262,9 @@ def update(tmp_path: Path, *args: str, path: str = "/usr/bin:/bin", **extra: str
 def test_update_from_a_zip_checks_it_against_sha256sums_before_running_its_installer(tmp_path):
     zp = release_zip(tmp_path)
     sums = zp.parent / "SHA256SUMS"
-    r = update(tmp_path, "--from", str(zp))
+    r = update(tmp_path, "--from", str(zp), "--browser", "off", "--no-plugin")
     assert r.returncode == 0 and f"the SHA-256 of {zp.name} matches" in r.stdout, r.stdout + r.stderr
-    assert "the release install.sh ran: --dir" in r.stdout
+    assert f"install.sh ran: --dir {tmp_path / 'inst'} --browser off --no-plugin" in r.stdout, "the answers passed on"
     listed = sums.read_text()
     sums.write_text("0" * 64 + f"  {zp.name}\n")
     r = update(tmp_path, "--from", str(zp))
@@ -333,6 +351,44 @@ def test_claude_codes_config_changes_only_on_a_yes_and_uninstall_takes_back_what
     assert not home.exists(), "removed once what it recorded was put back"
 
 
+@pytest.mark.skipif(not sys.platform.startswith("linux") or os.geteuid() == 0, reason="a Linux user who needs sudo")
+def test_install_sh_installs_the_sandbox_s_missing_packages_only_on_a_yes_and_through_sudo(tmp_path):
+    """Where bubblewrap and socat are missing, a run without a terminal needs --sandbox-deps or --no-sandbox-deps; a yes
+    runs the package manager's install through sudo, a no says the agents won't run and how to set the sandbox up later.
+    sudo and the package managers are stand-ins that only log."""
+    tree = fake_tree(tmp_path / "release")
+    bin_ = stub_bin(tmp_path)
+    log = tmp_path / "sudo.log"
+    for name in ("sudo", "apt-get", "dnf", "pacman", "zypper", "apk", "apparmor_parser"):
+        (bin_ / name).write_text(f'#!/bin/sh\necho "{name} $*" >> "$SUDO_LOG"\n')
+        (bin_ / name).chmod(0o755)
+    tools = tmp_path / "tools"  # the system's programs, bwrap and socat left out
+    tools.mkdir()
+    for folder in ("/usr/bin", "/bin"):
+        for exe in Path(folder).iterdir():
+            if exe.name not in ("bwrap", "socat") and not (tools / exe.name).exists():
+                (tools / exe.name).symlink_to(exe)
+    env = env_for(tmp_path, PATH=f"{bin_}:{tools}", SUDO_LOG=str(log))
+
+    def run(*flags: str) -> subprocess.CompletedProcess:
+        log.write_text("")
+        return subprocess.run(["bash", str(tree / "scripts" / "install.sh"), "--dir", str(tmp_path / "app"),
+                               "--deps-only", "--browser", "off", *flags], capture_output=True, text=True, env=env,
+                              stdin=subprocess.DEVNULL, timeout=60)
+
+    r = run()
+    assert r.returncode == 1 and "--sandbox-deps or --no-sandbox-deps" in r.stderr, r.stdout + r.stderr
+    assert log.read_text() == ""
+    r = run("--no-sandbox-deps")
+    assert r.returncode == 0 and log.read_text() == "", r.stdout + r.stderr
+    later = f"To set it up later, run: bash {tmp_path / 'app'}/scripts/install.sh --sandbox-deps"
+    assert "won't run until the sandbox works" in r.stdout and later in r.stdout
+    r = run("--sandbox-deps")
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "sudo apt-get install -y bubblewrap socat" in log.read_text().splitlines()
+    assert "still doesn't run" in r.stdout, "the stand-ins installed nothing"
+
+
 SYSTEM_BROWSERS = ("/opt/google/chrome/chrome", "/opt/microsoft/msedge/msedge",
                    "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
                    "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge")
@@ -341,7 +397,7 @@ SYSTEM_BROWSERS = ("/opt/google/chrome/chrome", "/opt/microsoft/msedge/msedge",
 def test_install_sh_asks_before_it_installs_and_downloads_no_browser_without_a_yes(tmp_path):
     """On a terminal install.sh shows what it installs, then asks about the browser, the plugin and the trust; the
     browser is downloaded only on a yes, and not again once it is there; a re-run asks nothing. Without a terminal it
-    asks nothing, downloads nothing and writes nothing into Claude Code's config."""
+    refuses while a question has no flag, having downloaded nothing and written nothing into Claude Code's config."""
     import pty
 
     tree = fake_tree(tmp_path / "release")
@@ -366,7 +422,7 @@ case "$*" in
 esac
 """)
             venv.chmod(0o755)
-        cmd = ["bash", str(tree / "scripts" / "install.sh"), *flags]
+        cmd = ["bash", str(tree / "scripts" / "install.sh"), "--no-sandbox-deps", *flags]
         env = env_for(tmp_path, PATH=f"{bin_}:/usr/bin:/bin")
         if typed is None:
             return subprocess.run(cmd, capture_output=True, text=True, env=env, stdin=subprocess.DEVNULL, timeout=60)
@@ -383,11 +439,13 @@ esac
     cfg.parent.mkdir(parents=True, exist_ok=True)
     cfg.write_text(json.dumps({"projects": {}}))
     r = run()
-    assert r.returncode == 0 and "[y/N]" not in r.stdout and "not asked, with no terminal" in r.stdout, r.stdout + r.stderr
+    system = any(Path(p).exists() for p in SYSTEM_BROWSERS)
+    assert r.returncode == 1 and "[y/N]" not in r.stdout and "Not answered:" in r.stderr, r.stdout + r.stderr
+    assert ("--browser bundled or --browser off" in r.stderr) != system, "a system browser found is used unasked"
+    assert "--plugin or --no-plugin" in r.stderr and "--trust-workspaces or --no-trust-workspaces" in r.stderr
     assert "and only on a yes to its question:" in r.stdout
     assert not log.exists() and not conf.exists() and json.loads(cfg.read_text()) == {"projects": {}}
-    system = any(Path(p).exists() for p in SYSTEM_BROWSERS)
-    r = run(typed=("n\n" if system else "") + "y\nn\ny\n")  # no system browser, download, no plugin, trust
+    r = run(typed="y\nn\ny\n")  # download, no plugin, trust
     out = r.stdout
     assert r.returncode == 0, out + r.stderr
     assert out.index("what install.sh installs, and where") < out.index("A browser for screenshots") < out.index("== 2/12")
@@ -427,7 +485,8 @@ def test_the_plugin_is_registered_only_on_a_yes_and_uninstall_removes_only_what_
         return [c for c in log.read_text().splitlines() if c.startswith("plugin ") and c != "plugin list --json"]
 
     def install(flag: str) -> list[str]:
-        return run(["bash", str(tree / "scripts" / "install.sh"), "--dir", str(dest), flag, "--no-trust-workspaces"])
+        return run(["bash", str(tree / "scripts" / "install.sh"), "--dir", str(dest), *ANSWERS, flag,
+                    "--no-trust-workspaces"])
 
     uninstall = ["bash", str(dest / "plugin" / "bin" / "thimble"), "uninstall", "--yes"]
     assert install("--no-plugin") == [] and json.loads(record.read_text()) == {"answer": "no", "registered": ""}

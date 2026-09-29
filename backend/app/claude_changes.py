@@ -25,11 +25,13 @@ from typing import Any
 TRUST_FILE = "trust.json"  # in thimble's home: {folder, config, answer: yes | no, added}
 TRUST_KEY = "hasTrustDialogAccepted"
 QUESTION = ("Trust thimble's workspaces folder {folder} by adding it to {config}?\n"
-            "The workspaces folder is where thimble keeps each workspace and runs its agents, and Claude Code starts "
-            "background agents only in a folder it trusts. With a yes, the orientation, its critic and the writers run "
-            "as background agents that show in your terminal's agent tray. With a no, they run as `claude -p` sessions, "
-            "which do the same work but don't show in the tray. `thimble uninstall` takes the entry back.")
+            "The workspaces folder is where thimble keeps each workspace and runs its agents. The orientation, its "
+            "critic and the writers need this: they run as Claude Code background agents, which show in your "
+            "terminal's agent tray, and Claude Code starts those only in a folder it trusts. With a no, they can't "
+            "start until the folder is trusted. `thimble uninstall` takes the entry back.")
 CHANGE = "install.sh --trust-workspaces or --no-trust-workspaces changes it"
+UNTRUSTED = ("the orientation, its critic and the writers can't start until it is; `bash {install} --trust-workspaces` "
+             "trusts it")
 # the records of the keys older versions wrote: file in thimble's home -> the key in a folder's settings.local.json
 # (None: statusLine, recorded as {ours, previous})
 OLD_RECORDS = {"effort-overrides.json": "CLAUDE_CODE_EFFORT_LEVEL", "fast-overrides.json": "CLAUDE_CODE_DISABLE_FAST_MODE",
@@ -133,7 +135,10 @@ def install_trust(tree: Path, answer: str | None = None) -> str:
     folder, config = workspaces_dir(tree), global_config()
     rec = _read(home() / TRUST_FILE)
     same = rec.get("folder") == str(folder) and rec.get("config") == str(config)
+    untrusted = UNTRUSTED.format(install=tree / "scripts" / "install.sh")
     if answer is None and same and rec.get("answer") in ("yes", "no"):
+        if rec["answer"] == "no" and not trusted(folder, _read(config)):
+            return f"answered no at an earlier install, so {folder} is not trusted, and {untrusted}"
         return f"answered {rec['answer']} at an earlier install; {CHANGE}"
     added = bool(rec.get("added") and rec.get("folder") and rec.get("config"))
     if added and (answer == "no" or not same):  # the entry an earlier yes added: refused now, or for another folder
@@ -148,7 +153,7 @@ def install_trust(tree: Path, answer: str | None = None) -> str:
         return f"{folder} is trusted in {config}{' by an entry thimble did not add' if answer == 'no' else ''}"
     if answer is None:
         if not sys.stdin.isatty():
-            return f"not asked (no terminal), so nothing was written; {CHANGE}"
+            return f"not asked (no terminal), so {folder} is not trusted, and {untrusted}"
         try:
             reply = input(QUESTION.format(folder=folder, config=config) + " [y/N] ")
             answer = "yes" if reply.strip().lower() in ("y", "yes") else "no"
@@ -163,7 +168,7 @@ def install_trust(tree: Path, answer: str | None = None) -> str:
     _write(home() / TRUST_FILE, {**record, "answer": answer, "added": answer == "yes"})
     if answer == "yes":
         return f"marked {folder} trusted in {config}"
-    return f"not trusted; {CHANGE}"
+    return f"not trusted, so {untrusted}"
 
 
 def untrust() -> list[str]:
