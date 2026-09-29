@@ -290,7 +290,7 @@ export function VideoView({ ws, slug, doc, comments, on, look, picked }: VideoVi
             <Menu
               trigger={
                 <Button size="sm" disabled={!voices.length} className="wu-video-voice">
-                  {voice?.name ?? 'Voice'}
+                  {voice?.name ?? 'No voice'}
                 </Button>
               }
               items={voiceItems}

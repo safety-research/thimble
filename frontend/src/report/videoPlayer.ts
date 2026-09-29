@@ -164,12 +164,11 @@ export class VideoPlayer {
   private speak(i: number, token: number): boolean {
     const synth = speech()
     const text = this.texts[i]?.trim()
-    if (!synth || !text) return false
+    // with no voice set the browser would pick its default, which can be an online one
+    if (!synth || !text || !this.voice) return false
     const u = new SpeechSynthesisUtterance(text)
-    if (this.voice) {
-      u.voice = this.voice
-      u.lang = this.voice.lang
-    }
+    u.voice = this.voice
+    u.lang = this.voice.lang
     u.rate = this.rate
     const said = performance.now()
     // a voice that fails, or ends before it could have said anything, leaves the line to the clock
