@@ -2033,7 +2033,7 @@ audio.bcell-media {
   margin: 0 auto;
 }
 .bfocus-col.is-wide {
-  max-width: 1600px;
+  max-width: none;
 }
 .bfocus-meta,
 .bfocus-pos {

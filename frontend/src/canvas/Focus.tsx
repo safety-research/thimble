@@ -1,7 +1,7 @@
 // Focus mode: one card at full size over the board, the cards of its frame listed at the left. ↑ and ↓ step through
 // them, Escape goes back to the board. The composer under the card asks about it in the thread that made it; a card an
-// agent made is asked about in a new thread on the card. A card of a card type takes the stage's width (FOCUS_WIDE_MAX
-// at most), since its type's page draws more at full size.
+// agent made is asked about in a new thread on the card. A card of a card type takes the stage's whole width, since its
+// type's page draws more at full size.
 import { useContext, useLayoutEffect, useRef, useState, type CSSProperties } from 'react'
 import { ChatMarkdown } from '../chat/markdown'
 import { Button } from '../components/Button'
@@ -20,7 +20,6 @@ import { hhmm, kindOf } from './layout'
 /** the card's width in focus, and its padding at the sides */
 const FOCUS_W = 760
 const FOCUS_PAD_X = 56
-const FOCUS_WIDE_MAX = 1600
 
 export interface FocusProps {
   cell: Cell
@@ -50,7 +49,7 @@ export function Focus({ cell, list, frame, onPick, onClose, onAskNew }: FocusPro
   useLayoutEffect(() => {
     const el = col.current
     if (!el || !wide) return
-    const fit = () => setColW(Math.max(FOCUS_W, Math.min(FOCUS_WIDE_MAX, el.clientWidth)))
+    const fit = () => setColW(Math.max(FOCUS_W, el.clientWidth))
     fit()
     if (typeof ResizeObserver === 'undefined') return
     const ro = new ResizeObserver(fit)
