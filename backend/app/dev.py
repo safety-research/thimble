@@ -23,7 +23,8 @@ folder; the corpus folder and the worked examples are fenced read-only (view_fen
 view's gate; a failure wakes the session, a pass registers the view. A turn the API ended at capacity is no attempt: the
 build waits and wakes the session again. An orientation's proposal that runs out of attempts gets up to VIEW_REPAIRS new
 sessions, and is then dropped quietly; a view the analyst asked for fails with Retry. The orientation's Stop stops the
-builds of the views it proposed (stop_orientation_views).
+builds of the views it proposed (stop_orientation_views), and main's end holds every build of the workspace until a
+session is main again (stop_workspace, resume_views).
 
 Permissions. A session of a workspace asks the analyst like the other agents: its --settings carry agent_session's
 permission hook with the session's key (`view:<slug>`, `ticket:<id>`), and the run hosts that key on its chat
@@ -2011,6 +2012,7 @@ def _recover() -> None:
 _view_runs: dict[tuple[str, str], Run] = {}  # (workspace, slug) -> the build running
 _view_queue: list[tuple[str, str]] = []  # (workspace, slug) waiting for room in the pool, in the order queued
 _view_stopping: dict[tuple[str, str], Run] = {}  # builds stop_view cancelled whose tasks have not ended yet
+_parked: set[tuple[str, str]] = set()  # view tickets main's end stopped, left queued until a session is main again
 _closing = False  # the server is shutting down: a build that ends starts no other
 
 
@@ -2018,6 +2020,7 @@ def queue_view(c: str, slug: str) -> None:
     """Queue the view ticket of the proposal `slug` and start what the pool has room for (views.propose, views.retry,
     recover_views). A ticket already queued or running is left as it is."""
     key = (c, slug)
+    _parked.discard(key)
     if key not in _view_queue and key not in _view_runs:
         _view_queue.append(key)
     _start_views()
@@ -2131,12 +2134,13 @@ def stop_orientation_views(c: str) -> list[str]:
 def recover_views(c: str) -> None:
     """Queue again the workspace's view tickets that are queued or building with no build, queue entry or winding-down
     run in this process (after a restart or an archive restore). A building one's session is stopped first so its run
-    resumes it."""
+    resumes it. One main's end stopped waits for resume_views."""
     from . import views  # noqa: PLC0415
 
     for p in views.list_proposals(c):
         key = (c, str(p["slug"]))
-        if p.get("status") not in views.PENDING or key in _view_runs or key in _view_queue or key in _view_stopping:
+        if (p.get("status") not in views.PENDING or key in _view_runs or key in _view_queue or key in _view_stopping
+                or key in _parked):
             continue
         if p.get("status") == "building" and p.get("session"):
             SESSIONS.stop(str(p["session"]))
@@ -3063,17 +3067,30 @@ def _stop_run(tid: str, why: str) -> bool:
 
 def stop_workspace(c: str) -> int:
     """Stop what runs for workspace `c` here, main's session having ended (agents.stop_all): its code ticket, which ends
-    `stopped` (Retry runs it again), and its view builds and review revisions. Returns how many were stopped."""
+    `stopped` (Retry runs it again), and its view builds and review revisions. Its view tickets, running or queued, wait
+    until a session is main again (resume_views). Returns how many were stopped."""
     n = 0
     t = _get(_current.ticket_id) if _current is not None and not _current.ticket_id.startswith("view:") else None
     if t is not None and t.get("workspace") == c and _stop_run(_current.ticket_id, "stopped"):
         n += 1
+    for key in [k for k in _view_queue if k[0] == c]:
+        _view_queue.remove(key)
+        _parked.add(key)
+    _parked.update(k for k in _view_runs if k[0] == c)
     for (cc, _slug), run in [*_view_runs.items(), *_review_runs.items()]:
         if cc == c and run.status == "running" and run.task is not None and not run.task.done():
             run.stop_reason = "stopped"
             run.task.cancel()
             n += 1
     return n
+
+
+def resume_views(c: str) -> None:
+    """A session is main in workspace `c` again: the view tickets stop_workspace stopped are queued again."""
+    mine = {k for k in _parked if k[0] == c}
+    if mine:
+        _parked.difference_update(mine)
+        recover_views(c)
 
 
 @router.post("/dev/tickets/{tid}/stop", status_code=202)

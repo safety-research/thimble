@@ -424,6 +424,10 @@ def attach(c: str, sid: Any, cwd: Any, transcript_path: str | None = None, pid: 
     if not restored:
         with contextlib.suppress(Exception):
             _bg().new_main(c)
+    with contextlib.suppress(Exception):
+        from . import dev  # noqa: PLC0415 — dev imports this module
+
+        dev.resume_views(c)
     log.info("%s: session %s attached (%s)", c, sid, "restored" if restored else "new")
     return lv
 

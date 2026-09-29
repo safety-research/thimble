@@ -97,3 +97,29 @@ def test_stopping_the_orientation_stops_the_builds_of_its_views_and_no_other(wor
     assert {s: (views.read_proposal(c, s) or {}).get("status") for s in ours} == dict.fromkeys(ours, "dropped")
     dev.recover_views(c)  # the browser lists the proposals
     assert dev._view_queue == [(c, asked)]
+
+
+def test_main_s_end_holds_the_view_builds_until_a_session_is_main_again(workspaces_tmp):
+    """Main's end stops the workspace's view builds (dev.stop_workspace): a queued one does not start in a stopped one's
+    place, and no listing of the proposals queues them again until a session is main again."""
+    from app import config, views
+
+    c = "mini"
+    first, second = (views.propose(c, n, "why", ["board.jsonl"], "one row per post", asked=True)["slug"]
+                     for n in ("Posts", "Threads"))
+
+    async def go() -> None:
+        building = await _running_build(c, first)
+        assert dev.stop_workspace(c) == 1
+        await asyncio.sleep(0)
+        assert building.cancelled() and not dev._view_runs
+
+    asyncio.run(go())
+    assert not dev._view_queue, "the queued one waits too"
+    dev.recover_views(c)  # the browser lists the proposals
+    assert not dev._view_queue
+    session.attach(c, "sid-next", str(config.corpus_dir(c)))
+    try:
+        assert sorted(dev._view_queue) == sorted([(c, first), (c, second)])
+    finally:
+        session._live.pop(c, None)
