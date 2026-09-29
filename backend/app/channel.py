@@ -147,6 +147,11 @@ def subscribed_sessions(c: str) -> list[str]:
     return [str(_route(q)[0] or "") for q in _subs.get(c, ())]
 
 
+def connected_workspaces() -> list[str]:
+    """The workspaces a session's shim holds a subscription for."""
+    return sorted(c for c, subs in _subs.items() if subs)
+
+
 def reachable(c: str) -> bool:
     """Whether an event posted now reaches a session: a channel's subscription, or one of the session that is main.
     Another `claude` in the folder subscribes on the hook route too, and never gets main's events (_publish)."""
@@ -615,9 +620,9 @@ async def subscribe(request: Request, cwd: str, session: str | None = None, pid:
     _routes[q] = (session or None, delivery)
     session_mod.connected(c, session, cwd, pid, config_dir, claim=delivery == cc_channel.CHANNEL)
     _wake(c)  # a watcher of this session's that waits learns it delivers by channel now
-    from . import cardtypes  # noqa: PLC0415
+    from . import extensions  # noqa: PLC0415
 
-    asyncio.get_running_loop().create_task(cardtypes.announce(c), name=f"cardtypes-{c}")
+    asyncio.get_running_loop().create_task(extensions.connected(c), name=f"extensions-{c}")
     log.info("%s: channel subscribed (session %s, pid %s, Claude Code %s, %s)", c, session, pid,
              procs.version_of(pid) or "version unknown", delivery)
 

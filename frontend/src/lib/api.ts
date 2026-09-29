@@ -1,6 +1,7 @@
 // The typed client for every route of the backend's API.
 import type {
   CanvasResponse,
+  Extensions,
   Cell,
   CellName,
   CellPatch,
@@ -362,6 +363,10 @@ export const api = {
   // ---- settings ----
   settings: (c: string) => j<Settings>(`${ws(c)}/settings`),
   putSettings: (c: string, patch: SettingsPatch) => j<Settings>(`${ws(c)}/settings`, { method: 'PUT', body: JSON.stringify(patch) }),
+  /** the extensions added, found again for this workspace (backend extensions.list_route) */
+  extensions: (c: string) => j<Extensions>(`${ws(c)}/extensions`),
+  /** this workspace's switch of one extension; the analyst's browser alone may turn it */
+  switchExtension: (c: string, name: string, on: boolean) => j<Extensions>(`${ws(c)}/extensions/${enc(name)}`, { method: 'PUT', body: JSON.stringify({ on }) }),
   /** the paper and accent this browser shows, so the card harness draws a card in them (backend/app/render.py) */
   reportTheme: (c: string, paper: string, accent: string) => j<{ paper: string; accent: string }>(`${ws(c)}/render/theme`, { method: 'PUT', body: JSON.stringify({ paper, accent }) }),
 }

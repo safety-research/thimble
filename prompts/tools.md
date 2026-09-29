@@ -1054,6 +1054,10 @@ This message is from the analyst's own session.
 
 This message is from the analyst, typed in your thread.
 
+## orient-from-extension
+
+The analyst added the extension {extension}, which gives the orientation these instructions. Follow them as far as the work you did allows.
+
 ## orient-followed-up
 
 The orientation's follow-up has finished: {changed}.

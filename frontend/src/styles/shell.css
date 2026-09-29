@@ -497,6 +497,12 @@
   color: var(--text-secondary);
   font: var(--type-body-sm);
 }
+.settings-extensions-head {
+  padding: 8px 6px 0;
+}
+.settings-extension-version {
+  color: var(--text-tertiary);
+}
 .settings-error {
   color: var(--status-negative);
   font: var(--type-body-sm);

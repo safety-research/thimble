@@ -83,10 +83,14 @@ WORK_DIR = "work"  # orient/work: the one folder outside the corpus the session 
 TEMP_GLOB = "tmp_*"  # what in the work folder is deleted when a run ends (_clear_temp)
 INSTRUCTIONS = "orient-instructions"  # prompts/orient-instructions.md, thimble's default instructions
 SETTING = "orient_instructions"  # settings.json: the analyst's own instructions, which replace the defaults (instructions_of)
+# The blocks of the prompt thimble gives a default for, which an extension may replace (extensions.orient_blocks), by
+# name: each one's default prompt file.
+BLOCKS = {"instructions": INSTRUCTIONS}
 # What stands in each slot the analyst's text fills until the parts are left out (system_prompt).
 _MARKS = {"request": "\x00request\x00", "instructions": "\x00instructions\x00"}
 BROWSER = "browser"  # `by` of a message typed in the orientation's thread
 MAIN = "main"  # `by` of a message main's message_orientation sent
+EXTENSION = "extension"  # `by` of an extension's orientation instructions, sent when it starts running here
 
 
 class NoOrientation(RuntimeError):
@@ -132,11 +136,19 @@ def parts_of(choices: dict[str, Any], passes: "list[str] | tuple[str, ...]") -> 
 
 def instructions_of(c: str, own: "str | None" = None) -> str:
     """The instructions part of workspace `c`'s prompt: `own` when given, else the workspace's SETTING; either one, when
-    it holds text, replaces thimble's defaults (INSTRUCTIONS) rather than adding to them."""
+    it holds text, replaces thimble's defaults (INSTRUCTIONS) rather than adding to them. Without it, an active
+    extension's replacement of the block stands in for the defaults. Each active extension's orient.md follows, under its
+    name."""
+    from . import extensions  # noqa: PLC0415
+
     if own is None:
         stored = ledger.stored_settings(c).get(SETTING)
         own = stored if isinstance(stored, str) else ""
-    return own.strip() or prompts.render(INSTRUCTIONS, {}).strip()
+    blocks = extensions.orient_blocks(c)
+    text = own.strip() or blocks["replaced"].get("instructions") or prompts.render(INSTRUCTIONS, {}).strip()
+    for title, added in blocks["added"]:
+        text += f"\n\n#### {title}\n\n{added}"
+    return text
 
 
 def system_prompt(c: str, brief: str, parts: "list[str] | tuple[str, ...]", instructions: "str | None" = None) -> str:
@@ -184,9 +196,12 @@ def _launch(c: str, brief: str, passes: "list[str]", choices: dict[str, Any]) ->
     ultracode = bool(choices.get("ultracode"))
     parts = parts_of(choices, passes)
     name, agent = agent_definition(c, brief, parts)
+    from . import extensions  # noqa: PLC0415
+
+    defined = {**extensions.agent_definitions(c), name: agent}
     env = {config.SUBAGENT_MODEL_ENV: subagents["model"]} if subagents["model"] else None
     return dict(role=orientation.ROLE, title=orientation.TITLE,
-                agent_args=["--agents", json.dumps({name: agent}, ensure_ascii=False), "--agent", name], effort=effort,
+                agent_args=["--agents", json.dumps(defined, ensure_ascii=False), "--agent", name], effort=effort,
                 settings=agent_session.settings_json(effort, env, ultracode=ultracode, fastMode=bool(own["fast"])),
                 agent_type=name, append_shared=False, model=own["model"], work=work_dir(c), calls=True,
                 agent="orient", patient=True, disallowed=disallowed(parts), background=bg_session.wanted(c, "orient"))
@@ -287,7 +302,10 @@ def _lead(messages: "list[dict[str, Any]]") -> str:
     """The follow-up's stdin prompt, `## orient-follow-up` with each message after the line that says who sent it."""
     parts = []
     for m in messages:
-        who = tools.hint("orient-from-main" if m.get("by") == MAIN else "orient-from-analyst")
+        if m.get("by") == EXTENSION:
+            who = tools.hint("orient-from-extension", extension=m.get("extension") or "")
+        else:
+            who = tools.hint("orient-from-main" if m.get("by") == MAIN else "orient-from-analyst")
         parts.append(f"{who}\n\n{str(m.get('text') or '').strip()}")
     return tools.hint("orient-follow-up", messages="\n\n".join(parts))
 
@@ -303,15 +321,18 @@ def _chat_of(c: str) -> tuple[dict[str, Any], str, str]:
     return rec, chat, sid
 
 
-async def message(c: str, text: str, by: str = MAIN, call: str | None = None) -> dict[str, Any]:
-    """The one server function a follow-up goes through: `text` from `by` (MAIN or BROWSER) resumes the finished
-    orientation, {status: resumed, chat, run}, or waits for the run going, {status: queued, chat, queued}. `call` is
-    main's message_orientation call. ValueError for an empty message, NoOrientation, Gone."""
+async def message(c: str, text: str, by: str = MAIN, call: str | None = None, extension: str = "") -> dict[str, Any]:
+    """The one server function a follow-up goes through: `text` from `by` (MAIN, BROWSER or EXTENSION, whose title is
+    `extension`) resumes the finished orientation, {status: resumed, chat, run}, or waits for the run going, {status:
+    queued, chat, queued}. `call` is main's message_orientation call. ValueError for an empty message, NoOrientation,
+    Gone."""
     text = str(text or "").strip()
     if not text:
         raise ValueError("the message is empty")
     rec, chat, sid = _chat_of(c)
-    entry = {"text": text, "by": by if by in (MAIN, BROWSER) else MAIN, "ts": _now()}
+    entry = {"text": text, "by": by if by in (MAIN, BROWSER, EXTENSION) else MAIN, "ts": _now()}
+    if entry["by"] == EXTENSION:
+        entry["extension"] = extension
     if running(c) or orientation.running(c):
         queue = [*(rec.get("queue") or []), entry]
         orientation.record(c, queue=queue)

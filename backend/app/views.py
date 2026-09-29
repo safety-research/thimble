@@ -1477,57 +1477,96 @@ def proposable_viewers() -> list[str]:
 
 
 async def propose_builtins(c: str) -> list[str]:
-    """Propose to the orientation each viewer that applies to the corpus (proposable_viewers): its reader's
-    applies(paths) gets the corpus's record files, and when it names claims the viewer is installed from its files with
-    them and registered built (write_view), under an orientation proposal that counts toward VIEW_PROPOSALS_MAX and
-    is deleted like any. One the workspace has under its slug already, one the analyst deleted, or one past the cap
-    (propose's count, the deleted views included) is left out, and a corpus with no .jsonl or .csv file asks no reader.
-    Returns the slugs proposed."""
-    from . import corpus  # noqa: PLC0415
+    """Propose to the orientation each viewer that applies to the corpus: thimble's (proposable_viewers), whose reader's
+    applies(paths) gets the corpus's record files, and the active extensions' `show: proposed` views, with the claims
+    extensions.refresh found. One that names claims is installed from its files with them and registered built
+    (install_viewer), under an orientation proposal that counts toward VIEW_PROPOSALS_MAX and is deleted like any. One
+    the workspace has under its slug already, one the analyst deleted, or one past the cap (propose's count, the deleted
+    views included) is left out, and a corpus with no .jsonl or .csv file asks no reader. Returns the slugs proposed."""
+    from . import corpus, extensions  # noqa: PLC0415
 
     made: list[str] = []
     paths: list[str] | None = None
-    for slug in proposable_viewers():
+    offers: list[tuple[str, Path, str | None]] = [(s, VIEWERS_DIR / s, None) for s in proposable_viewers()]
+    offers += [(v["slug"], Path(v["dir"]), v["extension"]) for v in extensions.views_of(c, "proposed")]
+    for slug, d, ext in offers:
         gone = deleted_proposals(c)
-        spent = len(orientation_views(c)) + sum(1 for d in gone if d.get("counted"))
-        if (slug in _view_dirs(c) or read_proposal(c, slug) is not None or any(d.get("slug") == slug for d in gone)
+        spent = len(orientation_views(c)) + sum(1 for x in gone if x.get("counted"))
+        if (slug in _view_dirs(c) or read_proposal(c, slug) is not None or any(x.get("slug") == slug for x in gone)
                 or spent >= VIEW_PROPOSALS_MAX):
             continue
-        if paths is None:
-            sources = await asyncio.to_thread(corpus.list_sources, config.corpus_dir(c))
-            paths = [s["path"] for s in sources if str(s["path"]).endswith((".jsonl", ".csv"))]
-        if not paths:
-            break
-        req = {"slug": f"builtin-{slug}", "reader": str((VIEWERS_DIR / slug / READER_PY).resolve()), "fp": "applies",
-               "paths": [], "cache": None, "thimble": str(KERNEL_THIMBLE)}
-        try:
-            fit = await _call(c, req, "applies", paths)
-        except ReaderError as e:
-            log.warning("%s: whether the viewer %s applies is not known: %s", c, slug, e)
-            continue
+        if ext is not None:
+            fit = {"claims": extensions.view_claims(c, ext, slug)}
+        else:
+            if paths is None:
+                sources = await asyncio.to_thread(corpus.list_sources, config.corpus_dir(c))
+                paths = [s["path"] for s in sources if str(s["path"]).endswith((".jsonl", ".csv"))]
+            if not paths:
+                continue
+            req = {"slug": f"builtin-{slug}", "reader": str((d / READER_PY).resolve()), "fp": "applies",
+                   "paths": [], "cache": None, "thimble": str(KERNEL_THIMBLE)}
+            try:
+                fit = await _call(c, req, "applies", paths)
+            except ReaderError as e:
+                log.warning("%s: whether the viewer %s applies is not known: %s", c, slug, e)
+                continue
         if isinstance(fit, dict) and _str_list(fit.get("claims")):
-            await asyncio.to_thread(_install_builtin, c, slug, fit)
+            raw = read_json(d / VIEW_JSON, {})
+            await asyncio.to_thread(install_viewer, c, slug, d, fit["claims"], why=str(fit.get("found") or raw.get("why") or ""),
+                                    proposed_by="extension" if ext else "thimble", orientation=True, extension=ext)
             made.append(slug)
     return made
 
 
-def _install_builtin(c: str, slug: str, fit: dict[str, Any]) -> None:
-    """The viewer's files as the workspace's view `slug` claiming what `fit` names, under a built orientation proposal
-    whose why is what applies() found, and which keeps the digest of the files as installed (`installed`)."""
-    d = VIEWERS_DIR / slug
+def install_viewer(c: str, slug: str, d: Path, claims: Any, *, why: str, proposed_by: str, orientation: bool,
+                   extension: str | None = None) -> None:
+    """The viewer in folder `d` as the workspace's view `slug` claiming `claims`, under a built proposal (an
+    `orientation` one counts toward VIEW_PROPOSALS_MAX) that keeps the digest of the files as installed (`installed`)
+    and the `extension` they came from."""
     raw = read_json(d / VIEW_JSON, {})
-    claims = _str_list(fit["claims"])
     with _proposals_lock:
-        items = list_proposals(c)
-        items.append({"slug": slug, "name": title_case(raw.get("name") or slug),
-                      "why": " ".join(str(fit.get("found") or raw.get("why") or "").split()), "claims": claims,
-                      "arrangement": " ".join(str(raw.get("why") or "").split()), "proposed_by": "thimble",
-                      "status": "queued", "orientation": True, "ts": _now()})
+        items = [p for p in list_proposals(c) if p.get("slug") != slug]
+        prop = {"slug": slug, "name": title_case(raw.get("name") or slug), "why": " ".join(why.split()),
+                "claims": _str_list(claims), "arrangement": " ".join(str(raw.get("why") or "").split()),
+                "proposed_by": proposed_by, "status": "queued", "orientation": orientation, "ts": _now()}
+        if extension:
+            prop["extension"] = extension
+        items.append(prop)
         _save_proposals(c, items)
-    write_view(c, slug, name=raw.get("name") or slug, why=raw.get("why") or "", claims=claims, accepts=raw.get("accepts"),
-               declares=raw.get("declares"), default=bool(raw.get("default")), libs=raw.get("libs"),
-               reader=(d / READER_PY).read_text("utf-8"), html=(d / VIEW_HTML).read_text("utf-8"))
+    write_view(c, slug, name=raw.get("name") or slug, why=raw.get("why") or "", claims=_str_list(claims),
+               accepts=raw.get("accepts"), declares=raw.get("declares"), default=bool(raw.get("default")),
+               libs=raw.get("libs"), reader=(d / READER_PY).read_text("utf-8"), html=(d / VIEW_HTML).read_text("utf-8"))
     update_proposal(c, slug, installed=view_digest(views_dir(c) / slug))
+
+
+def stale_install(c: str, slug: str, src: Path) -> bool:
+    """Whether the workspace's view `slug` is thimble's install of the viewer in folder `src`, unchanged since (its
+    proposal's `installed` digest), and older than that folder's files."""
+    prop = read_proposal(c, slug) or {}
+    d = views_dir(c) / slug
+    if not prop.get("installed") or not d.is_dir() or view_digest(d) != prop["installed"]:
+        return False
+    try:
+        return any((d / n).read_bytes() != (src / n).read_bytes() for n in (READER_PY, VIEW_HTML))
+    except OSError:
+        return False
+
+
+def withdraw(c: str, slug: str, extension: str) -> bool:
+    """Take out the view `slug` that `extension` installed, when nobody changed it since, without counting it deleted:
+    the extension stopped running here. Its `view:` refs keep resolving through key-refs.json. True when it went."""
+    prop = read_proposal(c, slug) or {}
+    d = _view_dirs(c).get(slug)
+    if prop.get("extension") != extension or d is None or view_digest(d) != prop.get("installed"):
+        return False
+    _stop_review(c, slug, forget=True)
+    shutil.rmtree(d, ignore_errors=True)
+    shutil.rmtree(_versions_dir(c, slug), ignore_errors=True)
+    _forget(c, slug)
+    with _proposals_lock:
+        _save_proposals(c, [p for p in list_proposals(c) if p.get("slug") != slug])
+    _emit(c, slug, "deleted")
+    return True
 
 
 def orientation_views(c: str) -> list[dict[str, Any]]:
@@ -2005,8 +2044,8 @@ def frame_document(view: dict[str, Any], media: str | None = None, *, card: bool
     own styles come after the parts. The browser adds the theme's tokens (ViewerFrame.tsx). `media` is the media
     route's absolute URL (media_url), which the policy allows for images, audio and video and thimble.mediaUrl builds
     on; without it the page loads no URL at all. `card` marks the page as a card's (cardtypes.py), which draws what the
-    bridge's `init` brings."""
-    html = (Path(view["dir"]) / VIEW_HTML).read_text("utf-8")
+    bridge's `init` brings; `page` names a page file other than view.html (a card type's own card.html)."""
+    html = (Path(view["dir"]) / (view.get("page") or VIEW_HTML)).read_text("utf-8")
     who = json.dumps({"slug": view["slug"], "name": view["name"], "media": media, **({"card": True} if card else {})},
                      ensure_ascii=False)
     csp = FRAME_CSP.format(media=f" {media}" if media else "")
