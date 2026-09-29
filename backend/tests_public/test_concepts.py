@@ -204,23 +204,40 @@ async def test_a_prompt_apply_asks_a_rate_limited_or_refused_call_no_second_time
     assert {asked[r] for r, st in status.items() if st == "refused"} == {1}
 
 
-async def test_a_prompt_label_answers_once_its_first_rows_are_in(workspaces_tmp, monkeypatch):
-    """apply_scoped answers a prompt label with the run so far once APPLY_ENOUGH units are labeled, and the run goes on."""
+async def _scoped_prompt_label(monkeypatch, *, in_flight: int, wait_s: float) -> tuple[dict, float]:
+    """apply_scoped's answer for a prompt label over the board's 8 posts, one per call and each call 0.3 s, with one
+    labeled unit enough; and the seconds from the first call's start to the answer."""
     monkeypatch.setattr(concepts, "BATCH_ITEMS", 1)
-    monkeypatch.setattr(concepts, "CONCURRENCY", 2)
-    monkeypatch.setattr(concepts, "APPLY_ENOUGH", 2)
+    monkeypatch.setattr(concepts, "CONCURRENCY", in_flight)
+    monkeypatch.setattr(concepts, "APPLY_ENOUGH", 1)
+    monkeypatch.setattr(concepts, "APPLY_WAIT_S", wait_s)
+    loop = asyncio.get_running_loop()
+    started: list[float] = []
 
     async def call(c, concept, items, comment=True, on_retry=None):
-        await asyncio.sleep(0.2)
+        started.append(loop.time())
+        await asyncio.sleep(0.3)
         return _ok(FakeClassify.rule(items))
 
     monkeypatch.setattr(concepts, "classify_structured", call)
     s = await concepts.apply_scoped(CORPUS, scope="files", name="claims a PR", kind="prompt", text="The post claims a PR.",
                                     values=None, paths=["board.jsonl"], limit=None, comment=False, filter=False,
                                     created_by="test", chat=None, group=None, card=False)
-    assert s["partial"] and 2 <= sum(s["counts"].values()) < 8
+    return s, loop.time() - started[0]
+
+
+async def test_a_prompt_label_that_will_not_end_within_the_wait_answers_with_its_first_rows(workspaces_tmp, monkeypatch):
+    """Once APPLY_ENOUGH units are labeled and the run's eta is past the wait left, apply_scoped answers with the run so
+    far before the wait ends, and the run goes on."""
+    s, took = await _scoped_prompt_label(monkeypatch, in_flight=1, wait_s=2.0)
+    assert s["partial"] and 1 <= sum(s["counts"].values()) < 8 and took < 1.0
     done = await concepts.wait_apply(CORPUS, s["concept"], 60)
     assert done["labeled"] == 8
+
+
+async def test_a_prompt_label_that_will_end_within_the_wait_answers_whole(workspaces_tmp, monkeypatch):
+    s, _took = await _scoped_prompt_label(monkeypatch, in_flight=4, wait_s=5.0)
+    assert not s["partial"] and sum(s["counts"].values()) == 8
 
 
 async def test_a_slow_classifier_call_starts_no_call_past_the_limit(api, monkeypatch):

@@ -130,7 +130,7 @@ CHUNK = 500               # records read per corpus.load_records call
 RATIONALE_MAX = 500       # chars of a classifier's rationale kept on a row
 APPLICATIONS_KEPT = 50    # run summaries kept on the concept
 APPLY_WAIT_S = 60.0       # apply_scoped and `wait: true` wait this long for the summary, then answer with the run so far
-APPLY_ENOUGH = 2 * CONCURRENCY * BATCH_ITEMS  # units a prompt label's apply_scoped waits for before it answers with the run so far
+APPLY_ENOUGH = 2 * CONCURRENCY * BATCH_ITEMS  # labeled units before apply_scoped may answer a prompt label with the run so far
 PROGRESS_EVERY_S = 0.25   # a run's progress record is streamed at most this often
 SCAN_INFLIGHT_PER_WORKER = 2
 SCAN_STOPPED = "a scan worker stopped; the rows so far are kept, apply again to finish"
@@ -2819,7 +2819,8 @@ async def start_apply(c: str, concept_id: str, paths: list[str] | None = None, l
 async def wait_apply(c: str, concept_id: str, timeout: float | None = None, enough: int | None = None) -> dict:
     """Wait for the concept's running apply: its summary when it ends within `timeout` seconds (APPLY_WAIT_S when
     None; its HTTPException when it fails), else the run record so far with `partial: true`, which it also answers with
-    once the run has done `enough` units. 404 when nothing runs and no summary is on record."""
+    once the run has labeled `enough` units and its eta is longer than the wait left. 404 when nothing runs and no
+    summary is on record."""
     if timeout is None:
         timeout = APPLY_WAIT_S
     key = (c, concept_id)
@@ -2838,8 +2839,12 @@ async def wait_apply(c: str, concept_id: str, timeout: float | None = None, enou
         done, _pending = await asyncio.wait({task}, timeout=step)
         if task in done:
             return task.result()
-        timed_out = left is not None and left <= step
-        if timed_out or (enough is not None and int((_runs.get(key) or {}).get("done") or 0) >= enough):
+        if left is not None and left <= step:
+            return _partial_record(c, concept_id)
+        run = _runs.get(key) or {}
+        eta = run.get("eta_s")
+        if (enough is not None and not forever and int(run.get("labeled") or 0) >= enough
+                and eta is not None and eta > end - loop.time()):
             return _partial_record(c, concept_id)
 
 
@@ -3405,8 +3410,8 @@ async def apply_scoped(c: str, *, scope: str, name: str, kind: str, text: str, v
     records only over the records that label gave that value (its first by default), and `show` turns a label over files on in
     Files and the views before it runs, so they draw it as it runs. A `limit` makes a new label a trial. The same
     predicate under the same name starts no run when its rows already cover the call (`unchanged: true`). Returns when the
-    run ends, when a prompt label has labeled APPLY_ENOUGH units, or after APPLY_WAIT_S, with `stale`, the ids of cards
-    that read the label at an older revision."""
+    run ends, when a prompt label has labeled APPLY_ENOUGH units and its eta is longer than the wait left, or after
+    APPLY_WAIT_S, with `stale`, the ids of cards that read the label at an older revision."""
     if scope not in SCOPES:
         raise HTTPException(400, f"scope must be one of {', '.join(SCOPES)}")
     if kind not in KINDS:
