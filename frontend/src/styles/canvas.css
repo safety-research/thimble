@@ -2535,6 +2535,11 @@ audio.bcell-media {
 .bcell-type .viewer-frame-loading {
   min-height: 120px;
 }
+.bcell-type-gone {
+  margin: 0 0 6px;
+  font: var(--type-body-sm);
+  color: var(--text-secondary);
+}
 .bcell.is-sized .bcell-type {
   flex: 1 1 auto;
   min-height: 0;

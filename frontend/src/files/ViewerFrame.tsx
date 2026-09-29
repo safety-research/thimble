@@ -89,6 +89,8 @@ export interface ViewerFrameProps {
   /** what the page's label controls do; without it they do nothing */
   labelActions?: ViewLabelActions
   onError?: (message: string) => void
+  /** the page itself did not load, in place of onError */
+  onNoPage?: (message: string) => void
   className?: string
   /** a passage inside the record `targetRef` names, for a view that shows the record but not the span */
   quote?: ViewQuote
@@ -287,7 +289,7 @@ function useViewLabels(
   return useMemo(() => ({ add, reset, ready }), [add, reset, ready])
 }
 
-export function ViewerFrame({ ws, slug, targetRef, path, title, fit, labels = NO_LABELS, filter = null, filterFiles, byId = NO_CONCEPTS, first, labelActions, onError, className, quote, onQuoteMissing, version, restore, handle, card, onSettled, onQuery, targetPick, query }: ViewerFrameProps) {
+export function ViewerFrame({ ws, slug, targetRef, path, title, fit, labels = NO_LABELS, filter = null, filterFiles, byId = NO_CONCEPTS, first, labelActions, onError, onNoPage, className, quote, onQuoteMissing, version, restore, handle, card, onSettled, onQuery, targetPick, query }: ViewerFrameProps) {
   const ref = useRef<HTMLIFrameElement>(null)
   const [page, setPage] = useState<string | null>(null)
   const [height, setHeight] = useState<number | null>(null)
@@ -297,6 +299,8 @@ export function ViewerFrame({ ws, slug, targetRef, path, title, fit, labels = NO
   target.current = targetRef
   const report = useRef(onError)
   report.current = onError
+  const noPage = useRef(onNoPage)
+  noPage.current = onNoPage
   const quoted = useRef(quote)
   quoted.current = quote
   const missing = useRef(onQuoteMissing)
@@ -323,7 +327,7 @@ export function ViewerFrame({ ws, slug, targetRef, path, title, fit, labels = NO
     ready.current = false
     ;(cardType ? api.cardTypeFrame(ws, cardType) : api.viewFrame(ws, slug, version))
       .then((doc) => alive && setPage(doc))
-      .catch((e: Error) => alive && report.current?.(`the view's page did not load: ${e.message}`))
+      .catch((e: Error) => alive && (noPage.current ? noPage.current(e.message) : report.current?.(`the view's page did not load: ${e.message}`)))
     void viewFonts().then((f) => alive && setFonts(f))
     return () => {
       alive = false

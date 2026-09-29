@@ -12,6 +12,8 @@
 // literals in place of any code that computed them, which a toast then names, runs the card again and checks it. Undo
 // draws the card as stored again. At full size, Open as view opens the type's live view with the card's labels and
 // arguments. In the harness the frame is as tall as the whole chart (FULL_SIZE), so the check sees every record.
+// A type the workspace no longer has (its extension removed or off), or a page that does not load, leaves the card its
+// listing under one line that says so.
 import { useContext, useEffect, useMemo, useState } from 'react'
 import { Button } from '../components/Button'
 import { asText, CARD_MIME, outIndex } from '../components/Outputs'
@@ -74,6 +76,8 @@ export function TypeCard({ cell, bundle, width, big }: { cell: Cell; bundle: Mim
   const [patch, setPatch] = useState<Record<string, unknown> | null>(null)
   const [drawn, setDrawn] = useState(0)
   const [keeping, setKeeping] = useState(false)
+  // why the type's page did not load, when it did not
+  const [gone, setGone] = useState<string | null>(null)
   // the patch Keep can write, as the server answered for it
   const [keepable, setKeepable] = useState<string | null>(null)
   const patchKey = patch ? JSON.stringify(patch) : ''
@@ -185,6 +189,13 @@ export function TypeCard({ cell, bundle, width, big }: { cell: Cell; bundle: Mim
     }
   }
   const busy = keeping || cell.status === 'running'
+  if (gone)
+    return (
+      <div className="bcell-type" data-body="">
+        <p className="bcell-type-gone">{/\b404\b/.test(gone) ? `No ${made.type} card type in this workspace; add its extension again to draw the card.` : `The ${made.type} card type's page did not load: ${gone}`}</p>
+        <pre className="outputs-text">{listing}</pre>
+      </div>
+    )
   return (
     <div className="bcell-type" data-body="" data-settled={render ? String(settled) : undefined}>
       <ViewerFrame
@@ -201,6 +212,7 @@ export function TypeCard({ cell, bundle, width, big }: { cell: Cell; bundle: Mim
         byId={files.byId}
         labelActions={actions}
         onSettled={() => setSettled(true)}
+        onNoPage={setGone}
         onQuery={setPatch}
         className="bcell-type-frame"
       />
