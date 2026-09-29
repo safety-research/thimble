@@ -31,6 +31,12 @@ agent's for a ticket, view builds' for a view, agent_row), or denied after PERMI
 unasked is only its work in its own folder: edits there, reads of the folders its task names, and Bash in the sandbox
 (sandbox_allow's rule, before each call and on each request) with its check command. A session with no workspace
 (`thimble fix`, while the server is down) has nobody to ask, so it keeps UNHOSTED_TOOLS and has no web tools.
+
+The offline fence. A view build stays off the network in every mode, with or without the sandbox: it has no web tools,
+deny rules refuse the commands that reach the network or install software (offline_deny), and its Bash runs with the
+package managers offline and a proxy that refuses every connection (view_env). Where the sandbox runs, its Bash also has
+no network. It runs the model settings of the session that asked for it, unless the analyst chose the dev agent's in
+Settings (view_models).
 """
 from __future__ import annotations
 
@@ -91,9 +97,31 @@ UNHOSTED_TOOLS = ["Read", "Edit", "Write", "NotebookEdit", "Bash", "Grep", "Glob
 PERMISSION_WAIT_S = float(os.environ.get("THIMBLE_DEV_PERMISSION_WAIT_S", "") or 10 * 60)
 # the thread's line for a request denied unanswered
 EXPIRED_LINE = "nobody answered the request to use {tool} ({what}) within {wait}, so it was denied and the session went on"
+WEB_TOOLS = ("WebFetch", "WebSearch")  # agent_session.WEB_TOOLS
 # Not given to a fenced session, a view build in the corpus folder: EnterWorktree writes a git worktree into the
-# session's own folder, which the fence's denies do not stop, and nobody answers AskUserQuestion or plan mode's approval.
-FENCED_OFF_TOOLS = ("EnterWorktree", "ExitWorktree", "AskUserQuestion", "EnterPlanMode", "ExitPlanMode")
+# session's own folder, which the fence's denies do not stop, nobody answers AskUserQuestion or plan mode's approval,
+# and a view build stays off the network (offline_deny).
+FENCED_OFF_TOOLS = ("EnterWorktree", "ExitWorktree", "AskUserQuestion", "EnterPlanMode", "ExitPlanMode", *WEB_TOOLS)
+# The Bash commands a view build's session may not run in any permission mode (offline_deny): those that reach the
+# network or install software, each by name and at a path, the subcommands that do, the modules that do as `python -m`,
+# and a shell run inside a command, whose own commands no rule would see. Claude Code checks a rule against each command
+# of a line, also after wrappers such as `timeout` and `env`.
+OFFLINE_PROGRAMS = ("curl", "wget", "aria2c", "nc", "ncat", "netcat", "socat", "telnet", "ftp", "sftp", "scp", "ssh",
+                    "rsync", "gh", "pip", "pip3", "pipx", "uv", "uvx", "poetry", "pdm", "conda", "mamba", "micromamba",
+                    "npm", "npx", "pnpm", "pnpx", "yarn", "bun", "bunx", "corepack", "deno", "gem", "cargo", "apt",
+                    "apt-get", "aptitude", "dpkg", "snap", "brew", "port", "yum", "dnf", "zypper", "pacman", "apk",
+                    "nix", "nix-env", "sudo", "playwright")
+OFFLINE_COMMANDS = ("git clone", "git fetch", "git pull", "git push", "git ls-remote", "git submodule", "go get",
+                    "go install", "go mod download", "bash -c", "sh -c", "zsh -c", "eval")
+OFFLINE_MODULES = ("pip", "ensurepip", "playwright", "uv")
+# A view build's environment beside its key (view_env): the package managers and Playwright's browser download offline,
+# and as CLAUDE_ENV_FILE, which Claude Code sources before each Bash command, OFFLINE_ENV_FILE. Neither reaches the
+# session's own calls to the API. It goes in the session's --settings `env`, since Claude Code's background service
+# starts a session with its own environment rather than the environment of the `claude --bg` that asked for it.
+OFFLINE_ENV = {"npm_config_offline": "true", "PIP_NO_INDEX": "1", "UV_OFFLINE": "1",
+               "PLAYWRIGHT_DOWNLOAD_HOST": "http://127.0.0.1:9"}
+OFFLINE_ENV_FILE = Path(__file__).with_name("offline_env.sh")
+ENV_FILE = "CLAUDE_ENV_FILE"
 CLAUDE_BIN = config.CLAUDE_BIN
 VIEW_CHECK = Path(__file__).with_name("view_check.py")  # the command a view build checks its draft with (view_fence)
 CLI_TIMEOUT_S = 60
@@ -1259,8 +1287,10 @@ class Sessions:
         return "" if shutil.which(CLAUDE_BIN, path=_cli_env().get("PATH")) else NO_CLAUDE_LINE.format(bin=CLAUDE_BIN)
 
     def _flags(self, workspace: str | None, name: str, add_dirs: "tuple[Path, ...] | list[Path]" = (),
-               fence: dict[str, Any] | None = None, asking: dict[str, Any] | None = None) -> list[str]:
-        """The session's flags: the dev role's model settings, `--add-dir` folders, the `fence` settings and how it asks
+               fence: dict[str, Any] | None = None, asking: dict[str, Any] | None = None,
+               models: dict[str, Any] | None = None) -> list[str]:
+        """The session's flags: its `models` ({model, effort, fast}, where None leaves one to the analyst's Claude Code
+        settings), else the dev role's, `--add-dir` folders, the `fence` settings and how it asks
         (module note, permissions). `asking` names the session's key, {key, allow, sandbox?}, the allow rules of its work
         in its own folder, and for a session whose Bash runs in the sandbox, sandbox_allow's rule; with it and a
         workspace, the permission hook answers its requests by its row's mode (agent_row), and a process in Auto runs in
@@ -1270,10 +1300,9 @@ class Sessions:
         FENCED_OFF_TOOLS."""
         from . import agent_session  # noqa: PLC0415 — agent_session is large and this module otherwise needs none of it
 
-        conf = config.models_for(workspace)["dev"]
-        model = conf["model"]
+        conf = models or config.models_for(workspace)["dev"]
         denied = [*agent_session.LATER_TOOLS, *(FENCED_OFF_TOOLS if fence else ())]
-        settings: dict[str, Any] = {"fastMode": True} if conf.get("fast") else {}
+        settings: dict[str, Any] = {} if conf.get("fast") is None else {"fastMode": bool(conf["fast"])}
         settings.update(fence or {})
         hosted = bool(workspace and asking and asking.get("key"))
         mode = modes.flag(modes.mode_for(str(workspace), agent_row(str((asking or {})["key"])))) if hosted else "default"
@@ -1281,7 +1310,8 @@ class Sessions:
             perms = dict(settings.get("permissions") or {})
             allow = [*(perms.get("allow") or []), *(asking or {}).get("allow", [])]
             settings["permissions"] = {**perms, **({"allow": list(dict.fromkeys(allow))} if allow else {})}
-            settings = agent_session.with_web_asks(settings, mode)
+            if not fence:  # a fenced session has no web tools
+                settings = agent_session.with_web_asks(settings, mode)
             hooks = agent_session.permission_hooks(str(workspace), mode == "auto", session=str((asking or {})["key"]),
                                                    home=str(thimble_home()))
             box = (asking or {}).get("sandbox")
@@ -1293,8 +1323,8 @@ class Sessions:
         else:
             denied += agent_session.WEB_TOOLS
         allowed = [] if hosted else ["--allowedTools", ",".join(UNHOSTED_TOOLS)]
-        flags = ["-n", name, "--model", str(model), *allowed, "--disallowedTools", ",".join(denied), "--strict-mcp-config",
-                 "--permission-mode", mode]
+        flags = ["-n", name, *(["--model", str(conf["model"])] if conf.get("model") else []), *allowed,
+                 "--disallowedTools", ",".join(dict.fromkeys(denied)), "--strict-mcp-config", "--permission-mode", mode]
         for d in add_dirs:
             flags += ["--add-dir", str(d)]
         if conf.get("effort"):
@@ -1305,12 +1335,14 @@ class Sessions:
 
     async def start(self, cwd: Path, prompt: str, *, name: str, workspace: str | None,
                     add_dirs: "tuple[Path, ...] | list[Path]" = (), env: dict[str, str] | None = None,
-                    fence: dict[str, Any] | None = None, asking: dict[str, Any] | None = None) -> dict[str, str]:
+                    fence: dict[str, Any] | None = None, asking: dict[str, Any] | None = None,
+                    models: dict[str, Any] | None = None) -> dict[str, str]:
         """A new background session in `cwd` whose first message is `prompt`, with `env` over the CLI's environment, the
-        settings `fence` and how it asks, `asking` (_flags). {id, session_id}; RuntimeError when the CLI could not start
-        one."""
+        settings `fence`, how it asks, `asking`, and its `models` (_flags). {id, session_id}; RuntimeError when the CLI
+        could not start one."""
         since = time.time() * 1000 - 5000
-        code, out = await self._run(["--bg", *self._flags(workspace, name, add_dirs, fence, asking), "--", prompt], cwd, env)
+        flags = self._flags(workspace, name, add_dirs, fence, asking, models)
+        code, out = await self._run(["--bg", *flags, "--", prompt], cwd, env)
         if code != 0 and UNTRUSTED_RE.search(out):
             raise SessionError(UNTRUSTED_LINE.format(folder=trust_folder(cwd)))
         if code != 0:
@@ -1320,12 +1352,13 @@ class Sessions:
     async def resume(self, cwd: Path, session_id: str, prompt: str, *, env: dict[str, str] | None = None,
                      name: str = "", workspace: str | None = None,
                      add_dirs: "tuple[Path, ...] | list[Path]" = (),
-                     fence: dict[str, Any] | None = None, asking: dict[str, Any] | None = None) -> dict[str, str]:
+                     fence: dict[str, Any] | None = None, asking: dict[str, Any] | None = None,
+                     models: dict[str, Any] | None = None) -> dict[str, str]:
         """Wake the session `session_id` with `prompt`, under its own id and saved options. `--resume` on a running
         session, or with any flag, starts a copy under a new id, so the process is stopped first, and one that still
         runs is copied with its start options; the caller follows a copy by the returned ids."""
         short = session_id[:8]
-        flags = self._flags(workspace, name, add_dirs, fence, asking) if await self._running(cwd, short) else []
+        flags = self._flags(workspace, name, add_dirs, fence, asking, models) if await self._running(cwd, short) else []
         code, out = await self._run(["--bg", "--resume", session_id, *flags, "--", prompt], cwd, env)
         if code != 0:
             raise SessionError(f"`claude --bg --resume` failed (exit {code}): {out.strip()[-400:]}")
@@ -1513,18 +1546,20 @@ async def _worker_turn(run: Run, run_log: Log, cwd: Path, prompt: str, resume: s
                        workspace: str | None, on_session: Callable[[str, str], Any],
                        add_dirs: "tuple[Path, ...] | list[Path]" = (), env: dict[str, str] | None = None,
                        answered: bool = True, fence: dict[str, Any] | None = None,
-                       turn_timeout_s: float | None = None, asking: dict[str, Any] | None = None) -> str:
+                       turn_timeout_s: float | None = None, asking: dict[str, Any] | None = None,
+                       models: dict[str, Any] | None = None) -> str:
     """One turn of a ticket's background session, started with `prompt` or woken with it when `resume` names the
     session, then watched until the turn ends, its transcript copied into the chat. `on_session(short id, full id)`
     records the session. Returns the session's report; SessionError when it ended any way but done, ran past
     TURN_TIMEOUT_S, or waited ASK_TIMEOUT_S on a question (the session is then stopped). With `answered` False, a
     `blocked` session whose transcript shows its turn ended counts as ended, since Claude Code lists a finished turn
     `blocked` when its last message reads as a question. A turn that ended on an API error is not a question: a view
-    ticket's turn returns the error text, a code ticket's raises it. `asking` is how it asks (Sessions._flags); while
-    one of its permission requests waits on the card, it is no question."""
+    ticket's turn returns the error text, a code ticket's raises it. `asking` is how it asks and `models` its model
+    settings (Sessions._flags); while one of its permission requests waits on the card, it is no question."""
     from . import agent_session  # noqa: PLC0415
 
-    fenced = {**({"fence": fence} if fence else {}), **({"asking": asking} if asking else {})}
+    fenced = {**({"fence": fence} if fence else {}), **({"asking": asking} if asking else {}),
+              **({"models": models} if models else {})}
     key = str((asking or {}).get("key") or "")
     if resume:
         tail = Tail(resume, _size(SESSIONS.transcript(resume)))
@@ -2251,10 +2286,53 @@ def view_read_only(corpus: Path, folder: Path) -> tuple[Path, ...]:
 
 
 def view_fence(c: str, slug: str, corpus: Path, folder: Path) -> dict[str, Any]:
-    """The settings that fence a view build's session: the view_read_only folders read-only, and its check command run
-    outside the sandbox, where it can reach this server."""
+    """The settings that fence a view build's session: the view_read_only folders read-only, its check command run
+    outside the sandbox, where it can reach this server, offline_deny, and its environment (view_env)."""
     check = view_check_command(c, slug)
-    return read_only_fence(view_read_only(corpus, folder), outside=(check, f"{check} *"))
+    out = read_only_fence(view_read_only(corpus, folder), outside=(check, f"{check} *"))
+    perms = dict(out.get("permissions") or {})
+    deny = [*(perms.get("deny") or []), *offline_deny()]
+    return {**out, "permissions": {**perms, "deny": deny}, "env": view_env(slug)}
+
+
+def offline_deny() -> list[str]:
+    """The deny rules that keep a view build off the network in every permission mode, where the sandbox cannot run as
+    well: the web tools, and Bash commands by OFFLINE_PROGRAMS, OFFLINE_COMMANDS and OFFLINE_MODULES."""
+    return [*WEB_TOOLS, *(r for p in OFFLINE_PROGRAMS for r in (f"Bash({p}:*)", f"Bash(*/{p} *)")),
+            *(f"Bash({cmd}:*)" for cmd in OFFLINE_COMMANDS), *(f"Bash(* -m {m} *)" for m in OFFLINE_MODULES)]
+
+
+def view_models(c: str, prop: dict[str, Any]) -> dict[str, Any]:
+    """The model, effort and fast mode of a view build's session: each the analyst chose for the dev agent in Settings
+    (config.chosen), else the one of the session that asked for the view (asker_models)."""
+    dev, mine, asker = config.models_for(c)["dev"], config.chosen(c, "dev"), asker_models(c, prop)
+    out = {k: dev[k] if k in mine else asker.get(k) for k in ("model", "effort", "fast")}
+    if out["fast"] and out["model"] and not config.has_fast_mode(out["model"]):
+        out["fast"] = False
+    return out
+
+
+def asker_models(c: str, prop: dict[str, Any]) -> dict[str, Any]:
+    """The model settings of the session that asked for the view `prop`. For the orientation's proposals the
+    orientation's: its model without the 1M tag, as its subagents run it, the effort it runs at and its fast mode. For
+    the analyst's, main's as its replies report them (session._note_model); before main's first reply, the model and
+    fast mode are left to the analyst's Claude Code settings (None) and the effort is main's launch effort."""
+    from . import orient_session, orientation  # noqa: PLC0415
+
+    if prop.get("orientation"):
+        own, run = config.models_for(c)["orient"], orientation.read_run(c)
+        effort = orient_session.effort_of(run) if run else cc_settings.level_of(own["effort"])
+        return {"model": config.base_model(own["model"]), "effort": effort, "fast": bool(own["fast"])}
+    held = (agents.meta_or_none(c, agents.MAIN_ID) or {}).get("attached") or {}
+    effort = held.get("effort") if held.get("effort") in cc_settings.EFFORTS else None
+    return {"model": held.get("model") or None,
+            "effort": effort or cc_settings.main_effort_flag(config.corpus_dir(c)) or None,
+            "fast": held["fast"] if isinstance(held.get("fast"), bool) else None}
+
+
+def view_env(slug: str) -> dict[str, str]:
+    """A view build's session's environment: its key, OFFLINE_ENV and OFFLINE_ENV_FILE."""
+    return {SESSION_ENV: view_key(slug), **OFFLINE_ENV, ENV_FILE: str(OFFLINE_ENV_FILE)}
 
 
 def view_key(slug: str) -> str:
@@ -2350,7 +2428,6 @@ async def _run_view(c: str, slug: str, run: Run) -> None:
     asking = view_asking(c, slug, folder)
     _host(c, asking, chat, run_log)
     resume = prop.get("session_id")
-    env = {SESSION_ENV: view_key(slug)}
     report: dict[str, Any] | None = None
     built, error, result_text = False, "", ""
     capacity = ""  # why the last turn ended, when the API ended it (capacity_failure)
@@ -2407,8 +2484,8 @@ async def _run_view(c: str, slug: str, run: Run) -> None:
                 # working directory they would receive the sandbox's `.claude/.cc-writes/`
                 result_text = await _worker_turn(run, run_log, corpus, prompt, resume, name=view_session_name(c, slug),
                                                  workspace=c, on_session=on_session, add_dirs=(folder,),
-                                                 env=env, answered=False, fence=view_fence(c, slug, corpus, folder),
-                                                 asking=asking)
+                                                 answered=False, fence=view_fence(c, slug, corpus, folder),
+                                                 asking=asking, models=view_models(c, prop))
             except RuntimeError as e:
                 error, result_text = str(e), ""
             capacity = capacity_failure(error) or capacity_failure(result_text)
@@ -2541,9 +2618,9 @@ async def review_revision(c: str, slug: str, message: str) -> tuple[bool, str]:
             try:
                 result_text = await _worker_turn(run, run_log, corpus, prompt, resume, name=view_session_name(c, slug),
                                                  workspace=c, on_session=on_session, add_dirs=(folder,),
-                                                 env={SESSION_ENV: view_key(slug)}, answered=False,
-                                                 fence=view_fence(c, slug, corpus, folder),
-                                                 turn_timeout_s=REVIEW_TURN_TIMEOUT_S, asking=asking)
+                                                 answered=False, fence=view_fence(c, slug, corpus, folder),
+                                                 turn_timeout_s=REVIEW_TURN_TIMEOUT_S, asking=asking,
+                                                 models=view_models(c, prop))
             except RuntimeError as e:
                 why = str(e)
                 run_log.error(why)
