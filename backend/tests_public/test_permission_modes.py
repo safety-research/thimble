@@ -291,3 +291,22 @@ async def test_the_hook_s_route_answers_for_the_session_its_shim_names(fake, mon
         "Bypass grants the orientation's requests, never another session's"
     await orient_session.stop(CORPUS)
     await _done()
+
+
+async def test_a_switch_into_auto_keeps_the_config_s_asks_waiting_for_the_analyst(fake, monkeypatch):
+    """A session switched into Auto gets the same waiting hook before each call as one started there, and loses it on
+    the way back."""
+    monkeypatch.setenv("FAKE_MODE", "sleep")
+    _listen()
+    run = await orient_session.start(CORPUS, "")
+    assert run.mode == "manual"
+
+    def pre() -> list | None:
+        return json.loads(run.argv[run.argv.index("--settings") + 1])["hooks"].get("PreToolUse")
+
+    agent_session._set_flag(run, "auto")
+    assert pre() == agent_session.permission_hooks(CORPUS, auto=True, wait=True)["PreToolUse"]
+    agent_session._set_flag(run, "default")
+    assert not pre()
+    await orient_session.stop(CORPUS)
+    await _done()

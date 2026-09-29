@@ -2742,8 +2742,9 @@ def _set_flag(run: Run, flag: str) -> None:
     at = argv.index("--settings") + 1
     given = with_web_asks(json.loads(argv[at]), argv[argv.index("--permission-mode") + 1])
     hooks = dict(given.get("hooks") or {})
-    ours = permission_hooks(run.c, auto=True)[PRE]
-    kept = [e for e in hooks.get(PRE) or [] if e not in ours] + (ours if flag == "auto" else [])
+    ours = permission_hooks(run.c, auto=True, wait=bool(run.config and run.config.may_ask()))[PRE]
+    either = [*permission_hooks(run.c, auto=True)[PRE], *permission_hooks(run.c, auto=True, wait=True)[PRE]]
+    kept = [e for e in hooks.get(PRE) or [] if e not in either] + (ours if flag == "auto" else [])
     if kept:
         hooks[PRE] = kept
     else:
