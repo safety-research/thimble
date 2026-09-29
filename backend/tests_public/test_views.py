@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import fnmatch
+import importlib.util
 import io
 import json
 import os
@@ -420,6 +421,27 @@ async def test_the_swarm_extension_installs_its_view_where_it_applies_outside_th
     views.delete_proposal("big-swarm", "swarm")
     await extensions.refresh("big-swarm")
     assert views.read_view("big-swarm", "swarm") is None  # one the analyst deleted is not installed again
+
+
+def test_the_swarm_reader_s_shares_print_every_record_once(samples, monkeypatch, capsys):
+    """The Swarm reader's shares are cut by size at records, so a place may run over two, and between them they print
+    every record once; --from and --count print part of one place."""
+    spec = importlib.util.spec_from_file_location("swarm_reader", _example_dir("swarm") / "reader.py")
+    reader = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(reader)
+    monkeypatch.chdir(samples / "swarm")
+    files = [x for g in json.loads((_example_dir("swarm") / "view.json").read_text())["claims"] for x in ("--files", g)]
+    printed, cut = [], False
+    for k in range(1, 5):
+        reader.main([*files, "--share", f"{k}/4"])
+        out = capsys.readouterr().out
+        printed += re.findall(r"^(\S+#L\d+) ", out, re.M)
+        cut = cut or " of " in out
+    index = reader.build_index(reader._script_files(files[1::2]))
+    assert sorted(printed) == sorted(index["order"]) and cut
+    reader.main([*files, "--place", "Night-14/Schedule", "--from", "2", "--count", "2"])
+    out = capsys.readouterr().out
+    assert "records 2–3 of 4" in out and re.findall(r"^(\S+#L\d+) ", out, re.M) == index["places"]["Night-14/Schedule"]["refs"][1:3]
 
 
 async def test_whether_swarm_applies_is_read_from_the_head_of_a_big_csv(samples, inproc, bound):

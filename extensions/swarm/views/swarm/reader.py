@@ -1003,12 +1003,17 @@ def resolve(index, locator):
 
 # ------------------------------------------------------------------------------------------------ run as a script
 
-USAGE = """python reader.py [--in DIR] [--share K/N | --place NAME ...] [--files GLOB ...]
+SHARE_BYTES = 200_000  # about the output one share holds, which one agent reads whole
 
-Reads the corpus folder DIR (by default the working folder). With neither --share nor --place, the places the records are on, busiest first, one line each: its rank,
-records, accounts and name. --share K/N deals the places in turn into N shares, busiest first, and prints the records of
-the Kth; --place NAME prints that place's (give it again for more). A place's records come in time order, each headed
-by its ref, time, account and kind, a post as its text and a save as the lines it changed from the save before it.
+USAGE = f"""python reader.py [--in DIR] [--share K/N | --place NAME ... [--from I] [--count M]] [--files GLOB ...]
+
+Reads the corpus folder DIR (by default the working folder). With no other option, the places the records are on,
+busiest first, one line each: its rank, records, accounts and name; then how many shares of about {SHARE_BYTES // 1000} KB
+the records make. --share K/N prints the Kth of N shares: every record, busiest place first and each place in time
+order, cut at records into N parts of about the same size, so a busy place runs over several shares. --place NAME
+prints that place's records (give it again for more); --from I and --count M print records I to I+M-1 of each. A
+record is headed by its ref, time, account and kind, then a post's text or the lines a save changed from the save
+before it. A place's heading says which of its records follow, and the last line how many records were printed.
 --files GLOB reads those files; by default the files the Swarm view claims here (applies)."""
 
 
@@ -1028,47 +1033,114 @@ def _script_files(globs):
     return sorted({p for g in globs for p in glob.glob(g, recursive=True) if Path(p).is_file()})
 
 
-def _print_place(index, name, out):
+def _block(index, ref):
+    """One record as the script prints it: its head line, then a post's text or the lines its save changed."""
+    r = index["recs"][ref]
+    did = _did(index, r)
+    head = f"{ref} {_iso(r['t']) if r['known'] else 'time unknown'} {r['account']} {r['kind']}"
+    if r["reply_ref"]:
+        head += f", reply to {r['reply_ref']}"
+    out = [head + "\n"]
+    if did.get("hunks") is not None:
+        for h in did["hunks"]:
+            out += [f"  - {_clean(x)[:LINE_MAX]}\n" for x in h["del"] if x.strip()]
+            out += [f"  + {_clean(x)[:LINE_MAX]}\n" for x in h["add"] if x.strip()]
+        if not did["hunks"]:
+            out.append("  (no change)\n")
+    else:
+        out += [f"  {_clean(x)[:LINE_MAX]}\n" for x in did["said"].splitlines() if x.strip()]
+    return "".join(out)
+
+
+def _n(n, one, many=None):
+    return f"{n:,} {one if n == 1 else many or one + 's'}"
+
+
+def _heading(index, name, a, b):
     p = index["places"][name]
+    n = len(p["refs"])
     title = f" · {_cut(p['title'], 80)}" if p["title"] != name else ""
-    out.write(f"## {name}{title}: {len(p['refs']):,} records by {len(p['accounts']):,} accounts\n")
-    for ref in p["refs"]:
-        r = index["recs"][ref]
-        did = _did(index, r)
-        head = f"{ref} {_iso(r['t']) if r['known'] else 'time unknown'} {r['account']} {r['kind']}"
-        if r["reply_ref"]:
-            head += f", reply to {r['reply_ref']}"
-        out.write(head + "\n")
-        if did.get("hunks") is not None:
-            for h in did["hunks"]:
-                out.writelines(f"  - {_clean(x)[:LINE_MAX]}\n" for x in h["del"] if x.strip())
-                out.writelines(f"  + {_clean(x)[:LINE_MAX]}\n" for x in h["add"] if x.strip())
-            if not did["hunks"]:
-                out.write("  (no change)\n")
+    which = (_n(n, "record") if a == 1 and b == n else f"record {a:,} of {n:,}" if a == b
+             else f"records {a:,}–{b:,} of {n:,}")
+    return f"## {name}{title}: {which} by {_n(len(p['accounts']), 'account')}\n"
+
+
+def _blocks(index, places):
+    """Every record of `places` in their order as (place, its record's number on the place, block, bytes it prints), a
+    place's heading counted with its first record."""
+    out = []
+    for p in places:
+        refs = index["places"][p]["refs"]
+        for i, ref in enumerate(refs, 1):
+            text = _block(index, ref)
+            size = len(text.encode()) + (len(_heading(index, p, 1, len(refs)).encode()) + 1 if i == 1 else 0)
+            out.append((p, i, text, size))
+    return out
+
+
+def _print(index, picked, out):
+    """The records `picked` (_blocks), a heading before each run of one place's records."""
+    runs = []
+    for name, i, text, _size in picked:
+        if runs and runs[-1][0] == name and runs[-1][2] == i - 1:
+            runs[-1][2] = i
+            runs[-1][3].append(text)
         else:
-            out.writelines(f"  {_clean(x)[:LINE_MAX]}\n" for x in did["said"].splitlines() if x.strip())
-    out.write("\n")
+            runs.append([name, i, i, [text]])
+    for name, a, b, texts in runs:
+        out.write(_heading(index, name, a, b))
+        out.writelines(texts)
+        out.write("\n")
+    out.write(f"-- {_n(len(picked), 'record')} printed\n")
+
+
+def _shares(blocks):
+    """How many shares of about SHARE_BYTES the blocks make, with room for the headings of places cut between two."""
+    return max(1, -(-sum(b[3] for b in blocks) * 20 // (SHARE_BYTES * 19)))
+
+
+def _share(blocks, k, n):
+    """The Kth of N shares of `blocks`: cut at records into N parts of about the same size, a record going to the part
+    its first byte falls in."""
+    total = sum(b[3] for b in blocks) or 1
+    at, picked = 0, []
+    for b in blocks:
+        if (k - 1) * total <= at * n < k * total:
+            picked.append(b)
+        at += b[3]
+    return picked
 
 
 def main(argv):
-    share, names, globs, i = None, [], [], 0
+    share, names, globs, first, count, i = None, [], [], 1, None, 0
     while i < len(argv):
         arg = argv[i]
         if arg in ("-h", "--help"):
             print(USAGE)
             return 0
-        if arg in ("--in", "--share", "--place", "--files") and i + 1 < len(argv):
+        if arg in ("--in", "--share", "--place", "--files", "--from", "--count") and i + 1 < len(argv):
+            v = argv[i + 1]
             if arg == "--in":
-                os.chdir(argv[i + 1])
+                os.chdir(v)
             elif arg == "--share":
-                share = argv[i + 1]
+                share = v
             elif arg == "--place":
-                names.append(argv[i + 1])
+                names.append(v)
+            elif arg == "--files":
+                globs.append(v)
+            elif not v.isdigit() or int(v) < 1:
+                sys.exit(f"reader.py: {arg} takes a whole number from 1, not {v!r}")
+            elif arg == "--from":
+                first = int(v)
             else:
-                globs.append(argv[i + 1])
+                count = int(v)
             i += 2
             continue
         sys.exit(f"reader.py: {arg!r} is no option\n\n{USAGE}")
+    if share and names:
+        sys.exit("reader.py: give --share or --place, not both")
+    if (first != 1 or count is not None) and not names:
+        sys.exit("reader.py: --from and --count go with --place")
     index = build_index(_script_files(globs))
     ranked = sorted(index["places"], key=lambda p: (-len(index["places"][p]["refs"]), p))
     out = sys.stdout
@@ -1076,17 +1148,26 @@ def main(argv):
         k, _, n = share.partition("/")
         if not (k.isdigit() and n.isdigit() and 1 <= int(k) <= int(n)):
             sys.exit(f"reader.py: --share takes K/N with 1 <= K <= N, not {share!r}")
-        names += ranked[int(k) - 1:: int(n)]
+        _print(index, _share(_blocks(index, ranked), int(k), int(n)), out)
+        return 0
     if not names:
         for rank, p in enumerate(ranked, 1):
             v = index["places"][p]
             out.write(f"{rank}\t{len(v['refs'])}\t{len(v['accounts'])}\t{p}\n")
+        blocks = _blocks(index, ranked)
+        n = _shares(blocks)
+        out.write(f"{_n(len(index['order']), 'record')}, {sum(b[3] for b in blocks) // 1000:,} KB printed: "
+                  f"{_n(n, 'share')} of about {SHARE_BYTES // 1000} KB, --share 1/{n} to --share {n}/{n}\n")
         return 0
     missing = [p for p in names if p not in index["places"]]
     if missing:
         sys.exit(f"reader.py: no place {missing[0]!r}; run it with no option for the places")
+    picked = []
     for p in names:
-        _print_place(index, p, out)
+        refs = index["places"][p]["refs"]
+        last = len(refs) if count is None else min(len(refs), first + count - 1)
+        picked += [(p, j, _block(index, refs[j - 1]), 0) for j in range(first, last + 1)]
+    _print(index, picked, out)
     return 0
 
 
