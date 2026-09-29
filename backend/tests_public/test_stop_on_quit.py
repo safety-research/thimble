@@ -1,36 +1,40 @@
-"""When main's session ends and no session takes over, every agent of the workspace stops (session._stop_agents,
-agents.stop_all): nothing works on after the analyst quit."""
+"""When main's session ends and no session takes over, everything thimble runs for the workspace stops
+(session._stop_agents, agents.stop_all), so nothing works on after the analyst quit, and the server stops itself once no
+workspace has a main session."""
 from __future__ import annotations
 
 import asyncio
 
-from app import agent_session, agents, bg_session, dev, session
+from app import agent_session, agents, bg_session, card_check, checks, cli, dev, notebook, session
 
 
-def test_stop_all_stops_running_agent_chats_dev_builds_and_live_background_sessions(monkeypatch):
-    chats = [{"id": "m", "kind": "main", "status": None}, {"id": "o", "kind": "agent", "status": "running", "title": "Orientation"},
-             {"id": "w", "kind": "agent", "status": "done", "title": "Writer"}]
-    monkeypatch.setattr(agents, "list_chats", lambda c: chats)
-    asked: list[str] = []
+def test_stop_all_stops_the_checks_the_builds_the_sessions_the_live_background_sessions_and_the_kernels(monkeypatch):
+    called: list[str] = []
+    monkeypatch.setattr(checks, "stop_workspace", lambda c: called.append("report checks") or 0)
+    monkeypatch.setattr(card_check, "stop_workspace", lambda c: called.append("card checks") or 0)
+    monkeypatch.setattr(dev, "stop_workspace", lambda c: called.append("builds") or 1)
 
-    async def stop_chat(c, chat):
-        asked.append(chat)
-        return True
+    async def wind_down(c):
+        called.append("sessions")
+        return ["Orientation"]
 
-    monkeypatch.setattr(agent_session, "stop_chat", stop_chat)
-    monkeypatch.setattr(dev, "stop_workspace", lambda c: 1)
+    async def kernels(c):
+        called.append("kernels")
+
+    monkeypatch.setattr(agent_session, "wind_down", wind_down)
+    monkeypatch.setattr(notebook, "shutdown_workspace", kernels)
 
     class E:
         def __init__(self, name, short, status):
             self.name, self.short, self.status, self.replacing = name, short, status, False
 
     monkeypatch.setattr(bg_session, "entries", lambda c: [E("thimble:critic · w", "abc", "idle"), E("thimble:writer · w", "def", "stopped")])
-    cli: list[str] = []
-    monkeypatch.setattr(bg_session, "stop_cli", cli.append)
+    cli_stops: list[str] = []
+    monkeypatch.setattr(bg_session, "stop_cli", cli_stops.append)
     got = asyncio.run(agents.stop_all("w"))
-    assert asked == ["o"], "only the running agent chat"
-    assert cli == ["abc"], "only a background session still alive"
-    assert got == ["Orientation", "dev build", "thimble:critic · w"]
+    assert called == ["report checks", "card checks", "builds", "sessions", "kernels"], "nothing starts a session after its stop"
+    assert cli_stops == ["abc"], "only a background session still alive"
+    assert got == ["dev build", "Orientation", "thimble:critic · w"]
 
 
 def test_main_ending_with_no_successor_stops_the_agents(monkeypatch):
@@ -49,6 +53,33 @@ def test_main_ending_with_no_successor_stops_the_agents(monkeypatch):
     monkeypatch.setattr(session, "GRACE_S", 0)
     session.disconnected("w", "s1")
     assert called == ["w"]
+
+
+def test_the_server_stops_itself_once_no_workspace_has_a_main_session(monkeypatch):
+    stopped: list[str] = []
+
+    async def stop_all(c):
+        stopped.append(c)
+        return []
+
+    monkeypatch.setattr(agents, "stop_all", stop_all)
+    monkeypatch.setattr(agents, "at_work", lambda: {"idle"})
+    stops: list[int] = []
+    monkeypatch.setattr(cli, "stop_self", lambda: stops.append(1))
+
+    async def main_ends() -> None:
+        session._stop_agents("w")
+        await asyncio.sleep(0.2)
+
+    session._live["other"] = object()
+    try:
+        asyncio.run(main_ends())
+    finally:
+        session._live.pop("other", None)
+    assert stopped == ["w"] and not stops, "another workspace's main session keeps the server"
+    asyncio.run(main_ends())
+    assert stopped == ["w", "w", "idle"], "what another workspace still runs stops too"
+    assert stops == [1]
 
 
 async def _running_build(c: str, slug: str) -> "asyncio.Task":
@@ -99,27 +130,32 @@ def test_stopping_the_orientation_stops_the_builds_of_its_views_and_no_other(wor
     assert dev._view_queue == [(c, asked)]
 
 
-def test_main_s_end_holds_the_view_builds_until_a_session_is_main_again(workspaces_tmp):
-    """Main's end stops the workspace's view builds (dev.stop_workspace): a queued one does not start in a stopped one's
-    place, and no listing of the proposals queues them again until a session is main again."""
+def test_main_s_end_fails_the_views_the_analyst_asked_for_and_holds_a_session_s_until_a_session_is_main_again(workspaces_tmp):
+    """Main's end (dev.stop_workspace) stops every view build of the workspace: a view the analyst asked for, running or
+    queued, fails with Retry, while a view the orientation proposed waits, and no listing of the proposals queues it
+    again until a session is main again."""
     from app import config, views
 
     c = "mini"
     first, second = (views.propose(c, n, "why", ["board.jsonl"], "one row per post", asked=True)["slug"]
                      for n in ("Posts", "Threads"))
+    ours = views.propose(c, "Timeline", "why", ["events.jsonl"], "one row per event", orientation=True)["slug"]
 
     async def go() -> None:
         building = await _running_build(c, first)
+        run = dev._view_runs[(c, first)]
         assert dev.stop_workspace(c) == 1
         await asyncio.sleep(0)
-        assert building.cancelled() and not dev._view_runs
+        assert building.cancelled() and run.status == dev.MAIN_ENDED, "its build ends failed (dev._run_view)"
 
     asyncio.run(go())
-    assert not dev._view_queue, "the queued one waits too"
+    assert not dev._view_queue, "no queued view starts in a stopped one's place"
+    queued = views.read_proposal(c, second) or {}
+    assert (queued.get("status"), queued.get("error")) == ("failed", dev.MAIN_ENDED)
     dev.recover_views(c)  # the browser lists the proposals
-    assert not dev._view_queue
+    assert (c, ours) not in dev._view_queue
     session.attach(c, "sid-next", str(config.corpus_dir(c)))
     try:
-        assert sorted(dev._view_queue) == sorted([(c, first), (c, second)])
+        assert (c, ours) in dev._view_queue
     finally:
         session._live.pop(c, None)
