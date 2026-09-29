@@ -733,6 +733,10 @@ no citation resolves, because its `accepts` and `declares` are empty
 
 The page has {count} controls of its own that name the test label, such as a toggle, a checkbox or a menu item. Remove them, or make each one thimble's: it calls `thimble.setLabel` or `thimble.setLabelColour` and carries `data-label` with the label's id.
 
+## view-no-screenshots
+
+Screenshots are unavailable on this machine, so the checks did not load the page and took no pictures. Check the page by reading it and what the reader answers, and take no pictures any other way.
+
 ## view-no-record-anchors
 
 The page fetched {fetched} records, but only {records} of its elements carry a record's `<path>#L<n>` as their `data-anchor`, so the labels the analyst turns on show on almost nothing in it. Give each element that shows a record its file ref.

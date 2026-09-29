@@ -1845,7 +1845,7 @@ def gate_lines(report: dict[str, Any]) -> list[str]:
     page = report.get("page") or {}
     shots = report.get("shots") or []
     if page.get("unavailable"):
-        lines.append(f"note: {headless.NO_SCREENSHOTS}, so the page was not loaded")
+        lines.append("note: " + _hint("view-no-screenshots"))
     for s in shots:
         if s.get("ok"):
             lines.append(f"page: {s.get('state')}, {int(s.get('records') or 0)} records and {int(s.get('units') or 0)} units "
