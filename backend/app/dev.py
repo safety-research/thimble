@@ -23,8 +23,9 @@ folder; the corpus folder and the worked examples are fenced read-only (view_fen
 view's gate; a failure wakes the session, a pass registers the view. A turn the API ended at capacity is no attempt: the
 build waits and wakes the session again. An orientation's proposal that runs out of attempts gets up to VIEW_REPAIRS new
 sessions, and is then dropped quietly; a view the analyst asked for fails with Retry. The orientation's Stop stops the
-builds of the views it proposed (stop_orientation_views), and main's end holds every build of the workspace until a
-session is main again (stop_workspace, resume_views).
+builds of the views it proposed (stop_orientation_views). Main's end stops every build of the workspace
+(stop_workspace): a view the analyst asked for fails with Retry, and a session's proposal waits, queued, until a session
+is main again (resume_views).
 
 Permissions. A session of a workspace asks the analyst like the other agents: its --settings carry agent_session's
 permission hook with the session's key (`view:<slug>`, `ticket:<id>`), and the run hosts that key on its chat
@@ -2041,7 +2042,7 @@ def _recover() -> None:
 _view_runs: dict[tuple[str, str], Run] = {}  # (workspace, slug) -> the build running
 _view_queue: list[tuple[str, str]] = []  # (workspace, slug) waiting for room in the pool, in the order queued
 _view_stopping: dict[tuple[str, str], Run] = {}  # builds stop_view cancelled whose tasks have not ended yet
-_parked: set[tuple[str, str]] = set()  # view tickets main's end stopped, left queued until a session is main again
+_parked: set[tuple[str, str]] = set()  # a session's view tickets main's end stopped, until a session is main again
 _closing = False  # the server is shutting down: a build that ends starts no other
 
 
@@ -2559,6 +2560,9 @@ async def _run_view(c: str, slug: str, run: Run) -> None:
                           else build_gates_prompt("\n".join(views.gate_lines(report))))
     except asyncio.CancelledError:
         await asyncio.to_thread(SESSIONS.stop, run.session)
+        if run.status == MAIN_ENDED:
+            _view_failed(c, slug, MAIN_ENDED, chat)
+            raise
         why = run.status if run.status not in ("running",) else "server shut down during the run"
         if chat:
             _close_chat({"workspace": c, "chat": chat}, "stopped", why)
@@ -3137,32 +3141,54 @@ def _stop_run(tid: str, why: str) -> bool:
     return True
 
 
+# why the build of a view the analyst asked for stopped when main's session ended (stop_workspace), its Retry's line
+MAIN_ENDED = "thimble stopped when its Claude Code session ended"
+
+
 def stop_workspace(c: str) -> int:
     """Stop what runs for workspace `c` here, main's session having ended (agents.stop_all): its code ticket, which ends
-    `stopped` (Retry runs it again), and its view builds and review revisions. Its view tickets, running or queued, wait
-    until a session is main again (resume_views). Returns how many were stopped."""
+    `stopped` (Retry runs it again), its view builds, queued or running, and the reviews of its views. A view the analyst
+    asked for fails with MAIN_ENDED and Retry; a session's proposal waits for resume_views. Returns how many were
+    stopped."""
+    from . import view_review, views  # noqa: PLC0415
+
     n = 0
     t = _get(_current.ticket_id) if _current is not None and not _current.ticket_id.startswith("view:") else None
     if t is not None and t.get("workspace") == c and _stop_run(_current.ticket_id, "stopped"):
         n += 1
-    for key in [k for k in _view_queue if k[0] == c]:
-        _view_queue.remove(key)
-        _parked.add(key)
-    _parked.update(k for k in _view_runs if k[0] == c)
-    for (cc, _slug), run in [*_view_runs.items(), *_review_runs.items()]:
-        if cc == c and run.status == "running" and run.task is not None and not run.task.done():
-            run.stop_reason = "stopped"
+    for key in [k for k in [*_view_queue, *_view_runs] if k[0] == c]:
+        asked = bool((views.read_proposal(*key) or {}).get("asked"))
+        if key in _view_queue:
+            _view_queue.remove(key)
+            if asked:
+                _view_failed(*key, MAIN_ENDED)
+        run = _view_runs.get(key)
+        if run is not None and run.task is not None and not run.task.done():
+            run.status = MAIN_ENDED if asked else "stopped"
             run.task.cancel()
+            n += 1
+        if not asked:
+            _parked.add(key)
+    for p in views.list_proposals(c):
+        if view_review.stop(c, str(p["slug"])):
             n += 1
     return n
 
 
+def workspaces_at_work() -> set[str]:
+    """The workspaces this server runs a code ticket, a view build or a view review for, or has view tickets queued for."""
+    from . import view_review  # noqa: PLC0415
+
+    t = _get(_current.ticket_id) if _running() and _current is not None and not _current.ticket_id.startswith("view:") else None
+    return ({c for c, _ in [*_view_queue, *_view_runs]} | {c for c, _ in view_review._runs}
+            | ({str(t["workspace"])} if t is not None and t.get("workspace") else set()))
+
+
 def resume_views(c: str) -> None:
-    """A session is main in workspace `c` again: the view tickets stop_workspace stopped are queued again."""
-    mine = {k for k in _parked if k[0] == c}
-    if mine:
-        _parked.difference_update(mine)
-        recover_views(c)
+    """A session is main in workspace `c`: the view tickets stop_workspace left waiting, and those a previous server
+    left, are queued again (recover_views)."""
+    _parked.difference_update({k for k in _parked if k[0] == c})
+    recover_views(c)
 
 
 @router.post("/dev/tickets/{tid}/stop", status_code=202)
