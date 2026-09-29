@@ -101,15 +101,15 @@ NO_CLAUDE = f"{NO_CLAUDE_FOUND}: install Claude Code, or name its path with THIM
 
 # --------------------------------------------------------------------------- the kernel wrapper
 #
-#   none    the kernel runs backend/.venv's python in the server's scrubbed environment (the default)
+#   none    the kernel runs backend/.venv's python in the server's scrubbed environment
 #   bwrap   the kernel runs inside bubblewrap (kernel_wrap.kernel_wrap_argv): the system, the venv and the corpus
 #           read-only, the workspace and a private /tmp writable, the host's
 #           network shared, so it narrows what a cell sees but is not a security boundary. When bwrap is not on PATH
 #           the kernel does not start, so a workspace set to bwrap never runs unwrapped unnoticed.
-# Resolution, first hit wins: THIMBLE_KERNEL_WRAP, then the workspace's settings.json `kernel_wrap`, then
-# KERNEL_WRAP_DEFAULT. A value that names no wrapper is ignored.
+# Resolution, first hit wins: THIMBLE_KERNEL_WRAP, then the workspace's settings.json `kernel_wrap`, then the default:
+# bwrap on Linux where bubblewrap works (kernel_wrap.works), else none, as on macOS, which has no wrapper yet. A value
+# that names no wrapper is ignored.
 KERNEL_WRAPS = ("none", "bwrap")
-KERNEL_WRAP_DEFAULT = "none"
 KERNEL_WRAP_ENV = "THIMBLE_KERNEL_WRAP"
 KERNEL_WRAP_KEY = "kernel_wrap"  # settings.json: none | bwrap
 KERNEL_WRAP_NONE, KERNEL_WRAP_BWRAP = KERNEL_WRAPS
@@ -132,7 +132,14 @@ def resolve_kernel_wrap(settings: Mapping[str, Any] | None = None,
     v = s.get(KERNEL_WRAP_KEY)
     if isinstance(v, str) and v.strip().lower() in KERNEL_WRAPS:
         return v.strip().lower(), "settings"
-    return KERNEL_WRAP_DEFAULT, "default"
+    return default_kernel_wrap(), "default"
+
+
+def default_kernel_wrap() -> str:
+    """The kernel wrapper where nothing names one: bwrap on Linux where bubblewrap works (kernel_wrap.works), else none."""
+    from . import kernel_wrap  # noqa: PLC0415
+
+    return KERNEL_WRAP_BWRAP if sys.platform.startswith("linux") and kernel_wrap.works() else KERNEL_WRAP_NONE
 
 
 def kernel_wrap(settings: Mapping[str, Any] | None = None, environ: Mapping[str, str] | None = None) -> str:

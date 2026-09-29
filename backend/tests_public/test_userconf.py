@@ -153,3 +153,27 @@ def test_a_wrapped_kernel_can_neither_read_nor_write_the_workspace_s_config(tmp_
                                         connection_dir=tmp_path / "k", venv=None, python="/usr/bin/python3")
     binds = {argv[i + 2]: argv[i + 1] for i, a in enumerate(argv) if a == "--ro-bind"}
     assert binds[str(tmp_path / "w" / "config.json")] == binds[str(tmp_path / "w" / "settings.json")] == "/dev/null"
+
+
+def test_the_kernel_is_wrapped_by_default_on_linux_where_bubblewrap_works_and_never_on_macos(monkeypatch):
+    """With nothing naming a wrapper, the kernel runs in bubblewrap on Linux where bwrap can make its namespaces, and
+    unwrapped where it cannot or on macOS, which has no wrapper yet and where bwrap is never probed. Claude Code's
+    sandbox on macOS is sandbox-exec, so agents may start there."""
+    from app import cc_settings, config, kernel_wrap
+
+    monkeypatch.delenv(config.KERNEL_WRAP_ENV, raising=False)
+    probed = []
+    monkeypatch.setattr(kernel_wrap, "works", lambda: probed.append(1) or True)
+    monkeypatch.setattr(config.sys, "platform", "linux")
+    assert config.resolve_kernel_wrap({}) == ("bwrap", "default")
+    assert config.resolve_kernel_wrap({"kernel_wrap": "none"}) == ("none", "settings")
+    monkeypatch.setattr(kernel_wrap, "works", lambda: probed.append(1) or False)
+    assert config.resolve_kernel_wrap({}) == ("none", "default")
+    probed.clear()
+    monkeypatch.setattr(config.sys, "platform", "darwin")
+    assert config.resolve_kernel_wrap({}) == ("none", "default") and probed == []
+    monkeypatch.delenv("THIMBLE_SANDBOX", raising=False)
+    monkeypatch.setattr(cc_settings.sys, "platform", "darwin")
+    monkeypatch.setattr(cc_settings, "_sandbox", {})
+    monkeypatch.setattr(cc_settings.Path, "exists", lambda p: str(p) == "/usr/bin/sandbox-exec")
+    assert cc_settings.sandbox_ok() and userconf.session(None, "writer").sandboxed
