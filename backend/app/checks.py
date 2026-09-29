@@ -33,7 +33,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
-from . import agent_session, config, investigation, prompts, tools
+from . import agent_session, config, investigation, prompts, tools, userconf
 from .ledger import read_json, write_json
 
 log = logging.getLogger("thimble.checks")
@@ -486,7 +486,8 @@ async def _go(act: _Active) -> None:
                 return
             cover = [p for p in passages(act.doc, _doc(c, act.doc)) if p["ref"] in set(act.covered)]
             prompt = await asyncio.to_thread(first_message, c, check, act.doc, cover or [])
-            name, agent = agent_definition()
+            with prompts.custom(userconf.prompt_files(c, "checks")):
+                name, agent = agent_definition()
             conf = config.models_for(c)[MODEL_ROLE]
             agent = agent_session.role_agent(agent, conf)
             effort = str(agent.get("effort") or DEFAULT_EFFORT)
@@ -497,7 +498,7 @@ async def _go(act: _Active) -> None:
                     c, session_key(act.check, act.doc), role=ROLE, title=str(check["name"]),
                     agent_args=["--agents", _json({name: agent}), "--agent", name], effort=effort,
                     settings=agent_session.settings_json(effort, fastMode=bool(conf["fast"])), prompt=prompt,
-                    agent_type=name, on_end=ended, model=str(agent.get("model") or ""), agent="critic",
+                    agent_type=name, on_end=ended, model=str(agent.get("model") or ""), agent="checks",
                     work=work_dir(c, act.check, act.doc), unasked=True, disallowed=agent_session.not_own(OWN_TOOLS),
                     announce=False,
                     check=act.check, doc=act.doc, run_id=act.run,

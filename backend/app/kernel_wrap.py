@@ -6,7 +6,8 @@ says when it is used. Stdlib only.
 
 What the kernel gets:
   read     the system, a short list of /etc entries (ETC_RO), the backend venv and its interpreter, and the corpus
-  write    the workspace directory except settings.json (an empty file in its place) and telemetry.jsonl (read-only);
+  write    the workspace directory except settings.json (an empty file in its place), and telemetry.jsonl and
+           config.json (thimble's config for the workspace), each read-only;
            the connection file's directory; a private /tmp and HOME
   network  the host's: the server connects to the kernel's ZMQ ports on 127.0.0.1
 Everything else is absent; `--unshare-all` gives a private pid namespace and /proc, and `--unshare-user
@@ -32,7 +33,7 @@ UNSET_ENV = ("XDG_CACHE_HOME", "XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_STATE_HO
 SETTINGS_FILE = "settings.json"  # cli.settings_path: the workspace's settings, the `kernel_wrap` switch among them
 EMPTY_FILE = "/dev/null"  # bound over the workspace's settings.json
 # bound read-only over the writable workspace when they exist
-LOG_FILES = ("telemetry.jsonl",)
+READ_ONLY_FILES = ("telemetry.jsonl", "config.json")
 SIGINT_PREFIX = ("/bin/sh", "-c", 'trap "" INT; exec "$@"', "thimble-kernel-wrap")  # shell prefix that ignores SIGINT in bwrap (module docstring)
 
 
@@ -71,7 +72,7 @@ def kernel_wrap_argv(argv: Sequence[str], *, corpus_dir: str | Path, workspace_d
     if settings_file:
         # over the workspace bind: an empty file where settings.json is
         out += ["--ro-bind", EMPTY_FILE, str(ws / SETTINGS_FILE)]
-    for name in LOG_FILES:  # read-only over the workspace bind when the file exists (the server appends from outside)
+    for name in READ_ONLY_FILES:  # read-only over the workspace bind when the file exists (the server writes from outside)
         out += ["--ro-bind-try", str(ws / name), str(ws / name)]
     out += ["--", *argv]
     return out

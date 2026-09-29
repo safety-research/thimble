@@ -1399,7 +1399,10 @@ async def classify_structured(c: str, concept: dict, items: list[tuple[str, str]
     `model` when it names one, else the labels role's."""
     from . import model
 
-    system, user = build_classify_prompt(concept, items, comment)
+    from . import prompts, userconf  # noqa: PLC0415
+
+    with prompts.custom(userconf.prompt_files(c, "labels")):
+        system, user = build_classify_prompt(concept, items, comment)
     model_name, effort = labels_model(c)
     if concept.get("model"):
         model_name = concept["model"]
