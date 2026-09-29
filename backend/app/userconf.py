@@ -73,10 +73,16 @@ DEFAULTS: dict[str, Any] = {
 
 def install_rules() -> list[str]:
     """The contents of Claude Code's Bash rules for every install or download command (sandbox_allow.INSTALL_*), a
-    program's also at a path. Claude Code's matching misses a command behind `sh -c` or a path it does not know, which
-    Session.verdict catches."""
+    program's also at a path, a command's also with options before its subcommand. Claude Code's matching misses a
+    command behind `sh -c` or a path it does not know, which Session.verdict catches."""
+    def spread(c: str) -> list[str]:
+        head, _, rest = c.partition(" ")
+        return [f"{c}:*", f"{head} * {rest} *"] if rest else [f"{c}:*"]
+
     return [*(r for p in sandbox_allow.INSTALL_PROGRAMS for r in (f"{p}:*", f"*/{p} *")),
-            *(f"{c}:*" for c in sandbox_allow.INSTALL_COMMANDS), *(f"* -m {m} *" for m in sandbox_allow.INSTALL_MODULES)]
+            *(r for c in sandbox_allow.INSTALL_COMMANDS for r in spread(c)),
+            *(r for m in sandbox_allow.INSTALL_MODULES for r in (f"* -m {m} *", *[f"* -m {x}" for x in spread(m)[1:]])),
+            "pip3.*", "uv run --with *", "uv run * --with *", "uv run --script *", "uv run * --script *"]
 
 
 class ConfigError(RuntimeError):

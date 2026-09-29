@@ -37,6 +37,11 @@ INSTALL_COMMANDS = ("pip install", "pip3 install", "pip download", "pip3 downloa
                     "bun x", "deno install", "gem install", "cargo install", "go install", "go get", "git clone",
                     "gh repo clone", "gh release download", "playwright install", "nix profile install")
 INSTALL_MODULES = ("pip install", "pip download", "ensurepip", "playwright install")
+# options that take the next word as their value, skipped with it between a program and its subcommand
+VALUE_OPTIONS = ("-C", "-c", "--prefix", "--python", "-p", "--with", "--with-requirements", "--directory", "--project",
+                 "--cwd", "--dir", "--git-dir", "--work-tree", "--log", "--cache-dir", "--index-url", "-i",
+                 "--extra-index-url", "--target", "-t", "--config", "--userconfig", "--registry", "--filter", "-F",
+                 "--workspace", "-w")
 SHELLS = ("sh", "bash", "zsh", "dash", "ksh")
 # words that run the command after them: skipped, with their own options, to find the command that runs
 WRAPPERS = ("env", "command", "exec", "builtin", "nohup", "nice", "time", "timeout", "xargs", "stdbuf", "setsid", "chrt",
@@ -58,6 +63,20 @@ def _segments(command: str) -> list[list[str]]:
     return [s for s in out if s]
 
 
+def _operands(words: list[str]) -> list[str]:
+    """The words that are not options, with the values of VALUE_OPTIONS: `-q install x` and `--prefix app ci` read as
+    `install x` and `ci`."""
+    out, skip = [], False
+    for w in words:
+        if skip:
+            skip = False
+        elif w in VALUE_OPTIONS:
+            skip = True
+        elif not w.startswith("-"):
+            out.append(w)
+    return out
+
+
 def _installs(words: list[str], depth: int) -> bool:
     i = 0
     while i < len(words) and (re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*=.*", words[i]) or
@@ -67,14 +86,17 @@ def _installs(words: list[str], depth: int) -> bool:
     words = words[i:]
     if not words:
         return False
-    head = os.path.basename(words[0])
+    head = re.sub(r"^(pip3?)[0-9.]+$", r"\1", os.path.basename(words[0]))
     if head in INSTALL_PROGRAMS:
         return True
-    plain = [head, *words[1:]]
+    plain = [head, *_operands(words[1:])]
     if any(plain[:len(c.split())] == c.split() for c in INSTALL_COMMANDS):
         return True
+    if plain[:2] == ["uv", "run"] and any(w.split("=")[0] in ("--with", "--with-requirements", "--script")
+                                          for w in words[1:]):
+        return True
     if re.fullmatch(r"python[0-9.]*", head) and "-m" in words:
-        rest = words[words.index("-m") + 1:]
+        rest = _operands(words[words.index("-m") + 1:])
         if any(rest[:len(m.split())] == m.split() for m in INSTALL_MODULES):
             return True
     if head in (*SHELLS, "eval") and depth < 3:

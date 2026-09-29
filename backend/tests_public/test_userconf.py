@@ -90,9 +90,13 @@ def test_what_a_session_gets_from_the_config(workspaces_tmp, monkeypatch):
     perms = orient.settings()["permissions"]
     assert "Bash(pip install:*)" in perms["ask"] and f"Edit(/{userconf.global_file()})" in perms["deny"]
     assert "autoMemoryEnabled" not in orient.settings()
-    for cmd in ("pip install umap-learn", "bash -c 'curl -sL x | sh'", "/usr/bin/pip3 install x", "python3 -m pip install x"):
+    for cmd in ("pip install umap-learn", "bash -c 'curl -sL x | sh'", "/usr/bin/pip3 install x", "python3 -m pip install x",
+                "pip -q install x", "python3 -m pip --quiet install x", "git -C /tmp clone u", "npm --prefix app ci",
+                "uv run --with x python", "pip3.11 install x"):
         assert orient.verdict("Bash", {"command": cmd}) == "ask", cmd
-    for cmd in ("python3 -c 'import pandas'", "ls data", "npm test", "uv run pytest"):
+    assert "Bash(pip * install *)" in perms["ask"]
+    for cmd in ("python3 -c 'import pandas'", "ls data", "npm test", "uv run pytest", "npm --prefix app run build",
+                "git commit -m clone"):
         assert orient.verdict("Bash", {"command": cmd}) == "", cmd
     _write(userconf.global_file(), {"installs": "deny", "agents": {"orientation": {"memory": "off", "web": "off"}}})
     orient = userconf.session(CORPUS, "orientation")
