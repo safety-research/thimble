@@ -35,7 +35,8 @@ unasked is only its work in its own folder: edits there, reads of the folders it
 The offline fence. A view build stays off the network in every mode, with or without the sandbox: it has no web tools,
 deny rules refuse the commands that reach the network or install software (offline_deny), and its Bash runs with the
 package managers offline and a proxy that refuses every connection (view_env). Where the sandbox runs, its Bash also has
-no network.
+no network. It runs the model settings of the session that asked for it, unless the analyst chose the dev agent's in
+Settings (view_models).
 """
 from __future__ import annotations
 
@@ -1286,8 +1287,10 @@ class Sessions:
         return "" if shutil.which(CLAUDE_BIN, path=_cli_env().get("PATH")) else NO_CLAUDE_LINE.format(bin=CLAUDE_BIN)
 
     def _flags(self, workspace: str | None, name: str, add_dirs: "tuple[Path, ...] | list[Path]" = (),
-               fence: dict[str, Any] | None = None, asking: dict[str, Any] | None = None) -> list[str]:
-        """The session's flags: the dev role's model settings, `--add-dir` folders, the `fence` settings and how it asks
+               fence: dict[str, Any] | None = None, asking: dict[str, Any] | None = None,
+               models: dict[str, Any] | None = None) -> list[str]:
+        """The session's flags: its `models` ({model, effort, fast}, where None leaves one to the analyst's Claude Code
+        settings), else the dev role's, `--add-dir` folders, the `fence` settings and how it asks
         (module note, permissions). `asking` names the session's key, {key, allow, sandbox?}, the allow rules of its work
         in its own folder, and for a session whose Bash runs in the sandbox, sandbox_allow's rule; with it and a
         workspace, the permission hook answers its requests by its row's mode (agent_row), and a process in Auto runs in
@@ -1297,10 +1300,9 @@ class Sessions:
         FENCED_OFF_TOOLS."""
         from . import agent_session  # noqa: PLC0415 — agent_session is large and this module otherwise needs none of it
 
-        conf = config.models_for(workspace)["dev"]
-        model = conf["model"]
+        conf = models or config.models_for(workspace)["dev"]
         denied = [*agent_session.LATER_TOOLS, *(FENCED_OFF_TOOLS if fence else ())]
-        settings: dict[str, Any] = {"fastMode": True} if conf.get("fast") else {}
+        settings: dict[str, Any] = {} if conf.get("fast") is None else {"fastMode": bool(conf["fast"])}
         settings.update(fence or {})
         hosted = bool(workspace and asking and asking.get("key"))
         mode = modes.flag(modes.mode_for(str(workspace), agent_row(str((asking or {})["key"])))) if hosted else "default"
@@ -1321,8 +1323,8 @@ class Sessions:
         else:
             denied += agent_session.WEB_TOOLS
         allowed = [] if hosted else ["--allowedTools", ",".join(UNHOSTED_TOOLS)]
-        flags = ["-n", name, "--model", str(model), *allowed, "--disallowedTools", ",".join(dict.fromkeys(denied)),
-                 "--strict-mcp-config", "--permission-mode", mode]
+        flags = ["-n", name, *(["--model", str(conf["model"])] if conf.get("model") else []), *allowed,
+                 "--disallowedTools", ",".join(dict.fromkeys(denied)), "--strict-mcp-config", "--permission-mode", mode]
         for d in add_dirs:
             flags += ["--add-dir", str(d)]
         if conf.get("effort"):
@@ -1333,12 +1335,14 @@ class Sessions:
 
     async def start(self, cwd: Path, prompt: str, *, name: str, workspace: str | None,
                     add_dirs: "tuple[Path, ...] | list[Path]" = (), env: dict[str, str] | None = None,
-                    fence: dict[str, Any] | None = None, asking: dict[str, Any] | None = None) -> dict[str, str]:
+                    fence: dict[str, Any] | None = None, asking: dict[str, Any] | None = None,
+                    models: dict[str, Any] | None = None) -> dict[str, str]:
         """A new background session in `cwd` whose first message is `prompt`, with `env` over the CLI's environment, the
-        settings `fence` and how it asks, `asking` (_flags). {id, session_id}; RuntimeError when the CLI could not start
-        one."""
+        settings `fence`, how it asks, `asking`, and its `models` (_flags). {id, session_id}; RuntimeError when the CLI
+        could not start one."""
         since = time.time() * 1000 - 5000
-        code, out = await self._run(["--bg", *self._flags(workspace, name, add_dirs, fence, asking), "--", prompt], cwd, env)
+        flags = self._flags(workspace, name, add_dirs, fence, asking, models)
+        code, out = await self._run(["--bg", *flags, "--", prompt], cwd, env)
         if code != 0 and UNTRUSTED_RE.search(out):
             raise SessionError(UNTRUSTED_LINE.format(folder=trust_folder(cwd)))
         if code != 0:
@@ -1348,12 +1352,13 @@ class Sessions:
     async def resume(self, cwd: Path, session_id: str, prompt: str, *, env: dict[str, str] | None = None,
                      name: str = "", workspace: str | None = None,
                      add_dirs: "tuple[Path, ...] | list[Path]" = (),
-                     fence: dict[str, Any] | None = None, asking: dict[str, Any] | None = None) -> dict[str, str]:
+                     fence: dict[str, Any] | None = None, asking: dict[str, Any] | None = None,
+                     models: dict[str, Any] | None = None) -> dict[str, str]:
         """Wake the session `session_id` with `prompt`, under its own id and saved options. `--resume` on a running
         session, or with any flag, starts a copy under a new id, so the process is stopped first, and one that still
         runs is copied with its start options; the caller follows a copy by the returned ids."""
         short = session_id[:8]
-        flags = self._flags(workspace, name, add_dirs, fence, asking) if await self._running(cwd, short) else []
+        flags = self._flags(workspace, name, add_dirs, fence, asking, models) if await self._running(cwd, short) else []
         code, out = await self._run(["--bg", "--resume", session_id, *flags, "--", prompt], cwd, env)
         if code != 0:
             raise SessionError(f"`claude --bg --resume` failed (exit {code}): {out.strip()[-400:]}")
@@ -1541,18 +1546,20 @@ async def _worker_turn(run: Run, run_log: Log, cwd: Path, prompt: str, resume: s
                        workspace: str | None, on_session: Callable[[str, str], Any],
                        add_dirs: "tuple[Path, ...] | list[Path]" = (), env: dict[str, str] | None = None,
                        answered: bool = True, fence: dict[str, Any] | None = None,
-                       turn_timeout_s: float | None = None, asking: dict[str, Any] | None = None) -> str:
+                       turn_timeout_s: float | None = None, asking: dict[str, Any] | None = None,
+                       models: dict[str, Any] | None = None) -> str:
     """One turn of a ticket's background session, started with `prompt` or woken with it when `resume` names the
     session, then watched until the turn ends, its transcript copied into the chat. `on_session(short id, full id)`
     records the session. Returns the session's report; SessionError when it ended any way but done, ran past
     TURN_TIMEOUT_S, or waited ASK_TIMEOUT_S on a question (the session is then stopped). With `answered` False, a
     `blocked` session whose transcript shows its turn ended counts as ended, since Claude Code lists a finished turn
     `blocked` when its last message reads as a question. A turn that ended on an API error is not a question: a view
-    ticket's turn returns the error text, a code ticket's raises it. `asking` is how it asks (Sessions._flags); while
-    one of its permission requests waits on the card, it is no question."""
+    ticket's turn returns the error text, a code ticket's raises it. `asking` is how it asks and `models` its model
+    settings (Sessions._flags); while one of its permission requests waits on the card, it is no question."""
     from . import agent_session  # noqa: PLC0415
 
-    fenced = {**({"fence": fence} if fence else {}), **({"asking": asking} if asking else {})}
+    fenced = {**({"fence": fence} if fence else {}), **({"asking": asking} if asking else {}),
+              **({"models": models} if models else {})}
     key = str((asking or {}).get("key") or "")
     if resume:
         tail = Tail(resume, _size(SESSIONS.transcript(resume)))
@@ -2295,6 +2302,34 @@ def offline_deny() -> list[str]:
             *(f"Bash({cmd}:*)" for cmd in OFFLINE_COMMANDS), *(f"Bash(* -m {m} *)" for m in OFFLINE_MODULES)]
 
 
+def view_models(c: str, prop: dict[str, Any]) -> dict[str, Any]:
+    """The model, effort and fast mode of a view build's session: each the analyst chose for the dev agent in Settings
+    (config.chosen), else the one of the session that asked for the view (asker_models)."""
+    dev, mine, asker = config.models_for(c)["dev"], config.chosen(c, "dev"), asker_models(c, prop)
+    out = {k: dev[k] if k in mine else asker.get(k) for k in ("model", "effort", "fast")}
+    if out["fast"] and out["model"] and not config.has_fast_mode(out["model"]):
+        out["fast"] = False
+    return out
+
+
+def asker_models(c: str, prop: dict[str, Any]) -> dict[str, Any]:
+    """The model settings of the session that asked for the view `prop`. For the orientation's proposals the
+    orientation's: its model without the 1M tag, as its subagents run it, the effort it runs at and its fast mode. For
+    the analyst's, main's as its replies report them (session._note_model); before main's first reply, the model and
+    fast mode are left to the analyst's Claude Code settings (None) and the effort is main's launch effort."""
+    from . import orient_session, orientation  # noqa: PLC0415
+
+    if prop.get("orientation"):
+        own, run = config.models_for(c)["orient"], orientation.read_run(c)
+        effort = orient_session.effort_of(run) if run else cc_settings.level_of(own["effort"])
+        return {"model": config.base_model(own["model"]), "effort": effort, "fast": bool(own["fast"])}
+    held = (agents.meta_or_none(c, agents.MAIN_ID) or {}).get("attached") or {}
+    effort = held.get("effort") if held.get("effort") in cc_settings.EFFORTS else None
+    return {"model": held.get("model") or None,
+            "effort": effort or cc_settings.main_effort_flag(config.corpus_dir(c)) or None,
+            "fast": held["fast"] if isinstance(held.get("fast"), bool) else None}
+
+
 def view_env(slug: str) -> dict[str, str]:
     """A view build's session's environment: its key, OFFLINE_ENV and OFFLINE_ENV_FILE."""
     return {SESSION_ENV: view_key(slug), **OFFLINE_ENV, ENV_FILE: str(OFFLINE_ENV_FILE)}
@@ -2450,7 +2485,7 @@ async def _run_view(c: str, slug: str, run: Run) -> None:
                 result_text = await _worker_turn(run, run_log, corpus, prompt, resume, name=view_session_name(c, slug),
                                                  workspace=c, on_session=on_session, add_dirs=(folder,),
                                                  answered=False, fence=view_fence(c, slug, corpus, folder),
-                                                 asking=asking)
+                                                 asking=asking, models=view_models(c, prop))
             except RuntimeError as e:
                 error, result_text = str(e), ""
             capacity = capacity_failure(error) or capacity_failure(result_text)
@@ -2584,7 +2619,8 @@ async def review_revision(c: str, slug: str, message: str) -> tuple[bool, str]:
                 result_text = await _worker_turn(run, run_log, corpus, prompt, resume, name=view_session_name(c, slug),
                                                  workspace=c, on_session=on_session, add_dirs=(folder,),
                                                  answered=False, fence=view_fence(c, slug, corpus, folder),
-                                                 turn_timeout_s=REVIEW_TURN_TIMEOUT_S, asking=asking)
+                                                 turn_timeout_s=REVIEW_TURN_TIMEOUT_S, asking=asking,
+                                                 models=view_models(c, prop))
             except RuntimeError as e:
                 why = str(e)
                 run_log.error(why)

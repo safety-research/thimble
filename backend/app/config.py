@@ -879,10 +879,8 @@ def _env_role(role: str, base: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
-def models_for(c: str | None = None, settings: Mapping[str, Any] | None = None) -> dict[str, dict[str, Any]]:
-    """{role: {model, effort, fast}} for a workspace, every role of MODEL_ROLES: its default under the environment under
-    settings.models (`settings` given, else read from workspaces/<c>/settings.json; a missing file is no override).
-    The orientation's default reads the analyst's settings for the folder of `c` when it is given."""
+def _stored_models(c: str | None, settings: Mapping[str, Any] | None = None) -> Mapping[str, Any]:
+    """settings.models of `settings`, else of workspaces/<c>/settings.json; {} for none or a broken file."""
     stored: Mapping[str, Any] = settings or {}
     if settings is None and c:
         try:
@@ -892,7 +890,31 @@ def models_for(c: str | None = None, settings: Mapping[str, Any] | None = None) 
                 stored = data if isinstance(data, dict) else {}
         except Exception:  # noqa: BLE001 — a broken file is no override
             stored = {}
-    over = stored.get(MODELS_KEY) if isinstance(stored.get(MODELS_KEY), dict) else {}
+    over = stored.get(MODELS_KEY)
+    return over if isinstance(over, dict) else {}
+
+
+def chosen(c: str | None, role: str) -> set[str]:
+    """The fields of a role (model, effort, fast) the analyst chose for workspace `c`, in its settings.models or with
+    THIMBLE_<ROLE>_MODEL / _EFFORT / _FAST, as models_for reads them."""
+    o = _stored_models(c).get(role)
+    out: set[str] = set()
+    if isinstance(o, dict):
+        if isinstance(o.get("model"), str) and o["model"].strip():
+            out.add("model")
+        if isinstance(o.get("effort"), str) and o["effort"].strip().lower() in role_efforts(role):
+            out.add("effort")
+        if isinstance(o.get("fast"), bool):
+            out.add("fast")
+    env = {f for f in ("model", "effort", "fast") if os.environ.get(f"THIMBLE_{role.upper()}_{f.upper()}", "").strip()}
+    return out | env
+
+
+def models_for(c: str | None = None, settings: Mapping[str, Any] | None = None) -> dict[str, dict[str, Any]]:
+    """{role: {model, effort, fast}} for a workspace, every role of MODEL_ROLES: its default under the environment under
+    settings.models (`settings` given, else read from workspaces/<c>/settings.json; a missing file is no override).
+    The orientation's default reads the analyst's settings for the folder of `c` when it is given."""
+    over = _stored_models(c, settings)
     out: dict[str, dict[str, Any]] = {}
     for role in MODEL_ROLES:
         conf = _env_role(role, role_default(role, c))
