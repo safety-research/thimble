@@ -143,9 +143,10 @@ def system_prompt(c: str, brief: str, parts: "list[str] | tuple[str, ...]", inst
     """orient.md's body rendered for workspace `c`: the prefix with shared.md (with the workspace's view citation forms)
     and the request, the instructions, and the suffix with each part not in `parts` left out (and OUTPUT_LINES when no
     output is on, VIEWS_LINES when the views are off)."""
-    from . import views  # noqa: PLC0415 — views imports refs, which the rest of this module does not need
+    from . import cardtypes, views  # noqa: PLC0415 — views imports refs, which the rest of this module does not need
 
-    values = {"workdir": str(config.corpus_dir(c)), "workfolder": str(work_dir(c)), "forms": views.forms_text(c), **_MARKS}
+    values = {"workdir": str(config.corpus_dir(c)), "workfolder": str(work_dir(c)), "forms": views.forms_text(c),
+              "card_types": cardtypes.prompt_text(c), **_MARKS}
     lines = [s for p, s in LINES.items() if p not in parts] + ([] if any(p in parts for p in PARTS) else list(OUTPUT_LINES))
     lines += [] if "views" in parts else list(VIEWS_LINES)
     text = prompts.without(prompts.agent_prompt(PROMPT, values), [h for p, h in PARTS.items() if p not in parts], lines)

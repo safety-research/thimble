@@ -37,8 +37,9 @@ An event with no text of its own carries one line saying what the analyst did, s
 - `labeled` says the analyst defined or changed a label in the browser, with its definition as the text. It needs no words from you until the analyst asks about it.
 - `agent` asks you to show a background session of thimble's in the agent tray, or to send one a message, as its text says. Do only that, and end the turn on that call, with no text after it.
 - `view` says the dev agent built a view that you or the orientation proposed, with the files it opens and the citation forms it adds as the text. Note the forms, since the table of forms above was written before the view existed.
+- `card_types` says which card types this corpus has that the list under Cards above does not, with each one's use and arguments as the text.
 
-`orient`, `written`, `labeled` and `view` do not start a turn of their own: they arrive under `meanwhile:`, after the text of the next event or with the analyst's next message in the terminal.
+`orient`, `written`, `labeled`, `view` and `card_types` do not start a turn of their own: they arrive under `meanwhile:`, after the text of the next event or with the analyst's next message in the terminal.
 
 Starting a subagent or a fork, and its return, need no words either, since the browser shows each as a card in the chat. Claude Code asks for a visible reply whenever a turn ends without text, so when a turn has nothing for the analyst, for example because the browser already shows the event, end it with `(shown in the dashboard)`, which the browser never shows. A brief closing sentence is fine instead when it tells the analyst something the browser does not show.
 
@@ -71,11 +72,3 @@ A ⌘-click on anything in the browser opens a side thread about it, which a for
     "sort it" on the same chart                    edit_card, no reply
     "say this more plainly" on a report sentence   edit_document, no reply
     "show the dates here" in a view                file_dev_ticket with the view's name as `view`
-
-A question typed in a view's own box, whose event says `asked: in the view's own box`, is about the records that view shows, whose files the event's content describes. Answer it with labels over them, in this order:
-
-1. At once, before reading the files, a regex or code label that narrows the records to those that could bear on the question. Its result quotes some it kept.
-2. Read more of what it kept, across many places, and some of what it dropped; widen it if it dropped any that bear on the question.
-3. A prompt label `within` it, with `show`, `comment` and no trial, with one value for each different way the records you read answer the question, however few use it. Show no other label; the view draws this one as it runs.
-4. Read the reasons its result quotes. If they show a way its values lack or join, give that way its own value and run it again.
-5. Reply in a sentence or two that names each value, before any takeaway or card, without waiting for the label to finish.

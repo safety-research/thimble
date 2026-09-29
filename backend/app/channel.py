@@ -110,11 +110,11 @@ def render_prompts(names: tuple[str, ...] | list[str], workdir: str, terminal: b
     forms of the folder's views filled in. Main's append and the shared skill's command both come from here. Main's
     prompt keeps one ending of a turn with nothing for the analyst (terminal_tools.main_prompt): without closing words
     when `terminal`, or when it is None and this process's environment says so (terminal_tools.on)."""
-    from . import terminal_tools, views  # noqa: PLC0415 — views imports refs, which a launcher does not otherwise need
+    from . import cardtypes, terminal_tools, views  # noqa: PLC0415 — views imports refs, which a launcher does not otherwise need
 
     c = config.workspace_for_cwd(workdir)
     forms = views.forms_text(c) if c else ""
-    values = {"workdir": str(workdir), "forms": forms}
+    values = {"workdir": str(workdir), "forms": forms, "card_types": cardtypes.prompt_text(c)}
     parts = []
     for name in names:
         part = prompts.render(name, values).strip()
@@ -185,7 +185,7 @@ def notification(kind: str, event_id: str, text: str, fields: dict[str, Any]) ->
 START_OUTPUTS = {"final": "final notebook", "views": "views", "report": "report"}  # orientation.start_passes, in words
 # the kinds that say something ended and ask main for nothing: each waits and rides along with the next event, under
 # MEANWHILE (prompts/main.md)
-QUIET_KINDS = frozenset({"orient", "written", "labeled", "view"})
+QUIET_KINDS = frozenset({"orient", "written", "labeled", "view", "card_types"})
 MEANWHILE = "meanwhile:"
 HELD_FILE = "held-events.json"  # in the workspace: the quiet events waiting, as notifications, across restarts
 _held: dict[str, list[dict[str, Any]]] = {}  # workspace -> HELD_FILE's notifications, once read
@@ -219,6 +219,8 @@ def terminal_line(kind: str, words: str, fields: dict[str, Any]) -> str:
         line = f"label {fields.get('what') or 'defined'}: {fields.get('name') or ''}"
     elif kind == "view":
         line = f"view built: {fields.get('view') or ''}"
+    elif kind == "card_types":
+        line = f"card types: {fields.get('types') or ''}"
     elif kind == "written":
         line = f"the {fields.get('doc') or 'document'} writer ended"
     elif kind == "checked":
@@ -611,6 +613,9 @@ async def subscribe(request: Request, cwd: str, session: str | None = None, pid:
     _routes[q] = (session or None, delivery)
     session_mod.connected(c, session, cwd, pid, config_dir, claim=delivery == cc_channel.CHANNEL)
     _wake(c)  # a watcher of this session's that waits learns it delivers by channel now
+    from . import cardtypes  # noqa: PLC0415
+
+    asyncio.get_running_loop().create_task(cardtypes.announce(c), name=f"cardtypes-{c}")
     log.info("%s: channel subscribed (session %s, pid %s, Claude Code %s, %s)", c, session, pid,
              procs.version_of(pid) or "version unknown", delivery)
 
