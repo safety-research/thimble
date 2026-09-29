@@ -1093,15 +1093,35 @@ def _rev_of(ws: Path, concept_id: str) -> int | None:
     return int(k.get("rev") or 0) if k else None
 
 
-def within_units(ws: Path, corpus_dir: Path, sources: list[dict], within: dict) -> list[Unit]:
-    """The records of the sources that the label `within` names gave its value, in corpus order. Blocking (a thread)."""
+def within_lines(ws: Path, sources: list[dict], within: dict, most: int | None = None) -> dict[str, set[int]]:
+    """{path: lines} of the records of the sources that the label `within` names gave its value, from `most` of its rows
+    at most (all when None). Blocking (a thread)."""
     st = _store_ready(ws, within["label"])
-    rows, _total, _next = st.rows(within["value"], PROMPT_APPLY_MAX + 1) if st is not None else ([], 0, None)
+    if st is None:
+        return {}
+    if most is None:
+        most = st.rows(within["value"], 1)[1]
+    rows, _total, _next = st.rows(within["value"], most)
+    wanted = {src["path"] for src in sources}
     lines: dict[str, set[int]] = {}
     for r in rows:
         path, line = labels_store.ref_parts(str(r.get("ref") or ""))
-        if path is not None and line:
+        if path in wanted and line:
             lines.setdefault(path, set()).add(int(line))
+    return lines
+
+
+def within_too_wide(ws: Path, within: dict, count: int) -> str:
+    """The sentence a prompt label within a narrowing too wide to read answers with."""
+    parent = read_concept(ws, within["label"]) or {"name": within["label"]}
+    return (f"The label {parent['name']!r} gave {within['value']!r} to {count:,} records of these files, more than a prompt "
+            f"label reads ({PROMPT_APPLY_MAX:,}); narrow that label further, or pass limit to label a sample of them.")
+
+
+def within_units(ws: Path, corpus_dir: Path, sources: list[dict], within: dict, most: int | None = None) -> list[Unit]:
+    """The records of the sources that the label `within` names gave its value (within_lines), in corpus order.
+    Blocking (a thread)."""
+    lines = within_lines(ws, sources, within, most)
     out: list[Unit] = []
     for src in sources:
         out += line_units(corpus_dir, src["path"], src["kind"], lines.get(src["path"], ()))
@@ -2541,9 +2561,18 @@ async def run_apply(c: str, concept_id: str, paths: list[str] | None = None, lim
                 index = await _index_sources(c, concept_id, corpus_dir, sources, unit, cancel)
                 matched = index["total"]
                 if within:
-                    units = await asyncio.to_thread(within_units, ws, corpus_dir, sources, within)
+                    parent = read_concept(ws, within["label"])
+                    if parent is None:
+                        raise HTTPException(400, "within: the label this one runs within is gone; apply it again with "
+                                                 "another label's value as `within`, or without it")
+                    if within["value"] not in parent["labels"]:
+                        raise HTTPException(400, f"within: the label {parent['name']!r} no longer has the value "
+                                                 f"{within['value']!r}; its values are {', '.join(parent['labels'])}")
+                    # a prompt label reads PROMPT_APPLY_MAX records at most, so one more tells it the narrowing is wider
+                    most = PROMPT_APPLY_MAX + 1 if concept["kind"] == "prompt" else None
+                    units = await asyncio.to_thread(within_units, ws, corpus_dir, sources, within, most)
                     if concept["kind"] == "prompt" and not limit and len(units) > PROMPT_APPLY_MAX:
-                        raise HTTPException(400, prompt_apply_too_wide(len(units), len(sources), len(sources), unit))
+                        raise HTTPException(400, within_too_wide(ws, within, len(units)))
                     matched = len(units)
                     if limit and len(units) > limit:
                         units = [units[i] for i in spread(len(units), limit)]
@@ -3352,9 +3381,15 @@ async def apply_scoped(c: str, *, scope: str, name: str, kind: str, text: str, v
     if within and unit != "record":
         raise HTTPException(400, "within narrows a label over records of files")
     narrowed = resolve_within(ws, within)
+    prior = find_concept(ws, name)
+    if narrowed and prior is not None and prior["id"] == narrowed["label"]:
+        raise HTTPException(400, f"within names the label {prior['name']!r} itself; narrow it by another label")
     sources = (await asyncio.to_thread(scope_sources, c, unit, kind, _patterns(paths), limit, bool(narrowed))
                if unit in FILE_UNITS else None)
-    prior = find_concept(ws, name)
+    if narrowed and kind == "prompt" and not limit:
+        lines = await asyncio.to_thread(within_lines, ws, sources or [], narrowed, PROMPT_APPLY_MAX + 1)
+        if (n := sum(len(v) for v in lines.values())) > PROMPT_APPLY_MAX:
+            raise HTTPException(400, within_too_wide(ws, narrowed, n))
     concept = define_concept(c, name, text if kind == "prompt" else "", kind, "" if kind == "prompt" else text, unit, values, author,
                              glob=", ".join(_patterns(paths)) if unit in FILE_UNITS else "", trial=limit is not None)
     if unit == "record" and concept.get("within") != narrowed:
