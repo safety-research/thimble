@@ -5,6 +5,7 @@ The prompt kind's classifier is scripted at concepts.classify_structured (CallRe
 regex kind runs for real over the synthetic corpus `mini`."""
 from __future__ import annotations
 
+import asyncio
 import json
 import re
 
@@ -73,7 +74,7 @@ class FakeClassify:
     plan: list = []
 
     @staticmethod
-    async def call(c, concept, items, comment=True):
+    async def call(c, concept, items, comment=True, on_retry=None):
         FakeClassify.calls.append({"workspace": c, "concept": dict(concept), "items": list(items), "comment": comment})
         if FakeClassify.plan:
             nxt = FakeClassify.plan.pop(0)
@@ -150,6 +151,36 @@ async def test_prompt_apply_batches_rows(api, workspaces_tmp, fake_classify, mon
     assert {r["ref"]: r["label"] for r in rows} == expected  # 'YES' is coerced to the concept's 'yes'
     assert s["counts"] == {"yes": sum(v == "yes" for v in expected.values()), "no": sum(v == "no" for v in expected.values())}
     assert (await api.get(f"/api/ws/{CORPUS}/concepts/{k['id']}")).json()["applications"][-1]["created_by"] == "chat:ab12"
+
+
+async def test_a_prompt_apply_slows_down_when_the_api_pushes_back_and_asks_again_what_failed(api, monkeypatch):
+    """A 429 or 529 on one call halves the calls in flight; a failed call's items and an item a call left out are asked
+    once more, so every unit gets a row."""
+    monkeypatch.setattr(concepts, "BATCH_ITEMS", 1)
+    monkeypatch.setattr(concepts, "CONCURRENCY", 4)
+    running, seen, asked = 0, [], []
+
+    async def call(c, concept, items, comment=True, on_retry=None):
+        nonlocal running
+        running += 1
+        seen.append(running)
+        asked.append(items[0][0])
+        n = len(asked)
+        if n == 1:
+            on_retry(1, 0.0, "overloaded", None)
+        await asyncio.sleep(0.05)
+        running -= 1
+        if n == 2:
+            return model_mod.CallResult(status="no_tool_call", detail="the model answered in prose")
+        return _ok([] if n == 3 else FakeClassify.rule(items))
+
+    monkeypatch.setattr(concepts, "classify_structured", call)
+    k = await _create(api, description="a board post that claims a PR")
+    r = await api.post(f"/api/ws/{CORPUS}/concepts/{k['id']}/apply", json={"wait": True, "paths": ["board.jsonl"]})
+    s = r.json()
+    assert s["total"] == 8 and s["labeled"] == 8 and s["failed"] == 0
+    assert len(asked) == 10 and asked[1] in asked[4:] and asked[2] in asked[4:]
+    assert max(seen[:4]) == 4 and max(seen[4:]) < 4
 
 
 async def test_a_prompt_label_within_another_reads_only_the_records_it_kept(workspaces_tmp, fake_classify):

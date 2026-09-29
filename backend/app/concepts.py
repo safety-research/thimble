@@ -118,7 +118,7 @@ CODE_KERNEL = "labels"  # the dedicated kernel the code kind runs in
 
 BATCH_ITEMS = 10          # items per classifier call through the claude CLI (prompt kind)
 BATCH_CHARS = 40_000      # or fewer items when their texts add up to this many chars
-CONCURRENCY = 8           # classifier calls in flight through the CLI, a process each
+CONCURRENCY = 24          # classifier calls in flight through the CLI, a process each, at most (halved on a 429 or 529)
 RETRY_DELAYS = (1.0, 2.0, 4.0, 8.0)  # seconds before each retry of a rate-limited batch
 RETRY_JITTER = 0.25
 BACKOFF_POLL = 0.2        # seconds between cancel checks while a retry waits
@@ -1673,9 +1673,10 @@ def labels_tool(concept: dict, comment: bool = True) -> Any:
     )
 
 
-async def classify_structured(c: str, concept: dict, items: list[tuple[str, str]], comment: bool = True) -> Any:
+async def classify_structured(c: str, concept: dict, items: list[tuple[str, str]], comment: bool = True,
+                              on_retry: Callable[[int, float, str, BaseException | None], Any] | None = None) -> Any:
     """One classifier batch through model.structured (never raises; read the CallResult's status), on the concept's
-    `model` when it names one, else the labels role's."""
+    `model` when it names one, else the labels role's. `on_retry` hears each retry model.structured waits for."""
     from . import model
 
     system, user = build_classify_prompt(concept, items, comment)
@@ -1690,6 +1691,7 @@ async def classify_structured(c: str, concept: dict, items: list[tuple[str, str]
             effort=effort,
             system_append=system,
             cwd=config.corpus_dir(c),
+            on_retry=on_retry,
         )
 
 
@@ -1828,12 +1830,15 @@ def _cancelled_message(n: int, unit: str) -> str:
 
 async def _apply_prompt(c: str, concept: dict, units: Iterator[Unit], out: Path, cancel: threading.Event,
                         files: list[str] | None = None, comment: bool = True) -> tuple[int, int, str | None]:
-    """The classifier calls of a prompt label, BATCH_ITEMS units per call and CONCURRENCY calls running. Rows are
-    committed in the units' order. `cancel` stops new calls; a rate-limited call is retried with backoff; calls that ran on
-    the fallback model are counted in the run's message."""
+    """The classifier calls of a prompt label, BATCH_ITEMS units per call and up to CONCURRENCY calls running: a 429 or
+    529 halves the calls let run, and each round of answered calls lets one more run again. Rows are committed in the
+    units' order. `cancel` stops new calls; a rate-limited call is retried with backoff; calls that ran on the fallback
+    model are counted in the run's message."""
     await asyncio.to_thread(_require_model_access)
     unit = concept["unit"]
     per_call, in_flight = BATCH_ITEMS, CONCURRENCY
+    allowed = float(in_flight)  # the calls let run now
+    slowdowns = 0  # a call started before the last slowdown does not slow the run again
     labeled = failed = matches = cut = 0
     labels = concept["labels"]
     pos_label = labels[0]
@@ -1854,8 +1859,44 @@ async def _apply_prompt(c: str, concept: dict, units: Iterator[Unit], out: Path,
         lines = [_fallback_message(n, *pair) for pair, n in fell_back.items()] + messages
         return "; ".join(lines) or None
 
+    def slow(since: int) -> None:
+        nonlocal allowed, slowdowns
+        if since == slowdowns:
+            allowed, slowdowns = max(1.0, allowed / 2), slowdowns + 1
+            log.info("classifier calls: the API pushed back; %d in flight at most for now", int(allowed))
+
+    def grow() -> None:
+        nonlocal allowed
+        allowed = min(float(in_flight), allowed + 1 / allowed)
+
+    async def ask(items: list[tuple[str, str]]) -> tuple[dict[int, dict], str | None]:
+        """The classifier's answers by item number (parse_labels) and, when the call failed, why."""
+        for attempt in range(len(RETRY_DELAYS) + 1):
+            since = slowdowns
+            call = await classify_structured(
+                c, concept, items, comment,
+                on_retry=lambda _n, _wait, cls, _e, since=since: slow(since) if cls in ("rate_limited", "overloaded") else None)
+            if call.refused_by:
+                pair = (call.refused_by, call.model_requested)
+                fell_back[pair] = fell_back.get(pair, 0) + 1
+            if call.status == "ok":
+                grow()
+                break
+            if call.status == "rate_limited":
+                slow(since)
+            failure = f"{call.status}: {call.detail}" if call.detail else call.status
+            if attempt >= len(RETRY_DELAYS) or call.status != "rate_limited" or cancel.is_set():
+                return {}, failure
+            delay = RETRY_DELAYS[attempt] * (1 + random.random() * RETRY_JITTER)
+            log.warning("classifier call: %s; retry %d/%d in %.1f s", call.status, attempt + 1, len(RETRY_DELAYS), delay)
+            await _backoff(delay, cancel)
+            if cancel.is_set():
+                return {}, failure
+        return parse_labels(call.output, concept, len(items), comment), None
+
     async def one(batch: list[_Item]) -> tuple[list[dict | None], str | None]:
-        """Each item's answer ({label, confidence, rationale, spans}; None where it got none) and the problem, if any."""
+        """Each item's answer ({label, confidence, rationale, spans}; None where it got none) and the problem, if any. The
+        items a call failed or left out are asked once more."""
         answers: list[dict | None] = [None] * len(batch)
         live = [n for n, it in enumerate(batch) if (it.text or "").strip()]
         cause = None
@@ -1865,26 +1906,15 @@ async def _apply_prompt(c: str, concept: dict, units: Iterator[Unit], out: Path,
             if not live:
                 return answers, cause
         items = [(batch[n].unit.ref, batch[n].text) for n in live]
-        for attempt in range(len(RETRY_DELAYS) + 1):
-            call = await classify_structured(c, concept, items, comment)
-            if call.refused_by:
-                pair = (call.refused_by, call.model_requested)
-                fell_back[pair] = fell_back.get(pair, 0) + 1
-            if call.status == "ok":
-                break
-            failure = f"{call.status}: {call.detail}" if call.detail else call.status
-            if attempt >= len(RETRY_DELAYS) or call.status != "rate_limited" or cancel.is_set():
-                return answers, failure
-            delay = RETRY_DELAYS[attempt] * (1 + random.random() * RETRY_JITTER)
-            log.warning("classifier call: %s; retry %d/%d in %.1f s", call.status, attempt + 1, len(RETRY_DELAYS), delay)
-            await _backoff(delay, cancel)
-            if cancel.is_set():
-                return answers, failure
-        res = parse_labels(call.output, concept, len(items), comment)
+        res, failure = await ask(items)
+        missing = [i for i in range(1, len(items) + 1) if i not in res]
+        if missing and not cancel.is_set():
+            again, failure = await ask([items[i - 1] for i in missing])
+            res.update({missing[j - 1]: r for j, r in again.items()})
         for i, n in enumerate(live, 1):
             if (r := res.get(i)) is not None:
                 answers[n] = {**r, "spans": quoted_span(batch[n].text, r.get("quote", "")) if spans else None}
-        msg = None if res else "classifier returned no usable labels"
+        msg = failure or (None if res else "classifier returned no usable labels")
         if cause:
             msg = cause if msg is None else f"{cause}; {msg}"
         return answers, msg
@@ -1936,7 +1966,7 @@ async def _apply_prompt(c: str, concept: dict, units: Iterator[Unit], out: Path,
     try:
         while True:
             running = sum(1 for task, _b in pending if not task.done())
-            while not cancel.is_set() and running < in_flight and len(pending) < 4 * in_flight:
+            while not cancel.is_set() and running < int(allowed) and len(pending) < 4 * in_flight:
                 if not ready and not exhausted:
                     got = await asyncio.to_thread(take, in_flight)
                     exhausted = not got
