@@ -1,0 +1,4 @@
+<main id="tally"></main>
+<script>
+thimble.fetch({}).then((d) => { document.getElementById("tally").textContent = `${d.rows.length} records` })
+</script>
