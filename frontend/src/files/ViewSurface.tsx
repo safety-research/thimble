@@ -32,6 +32,13 @@ export function ViewSurface({ ws, view, active }: { ws: string; view: BuiltView;
   const quoteMissing = useCallback(() => {
     if (at?.quote) bus.emit('openRef', { ref: at.quote.span, browser: true })
   }, [at])
+  // the view dropped the arguments of the card it was opened from
+  const clearQuery = useCallback(() => {
+    if (!at?.query) return
+    const next = { ...at, query: undefined }
+    places.set(key, next)
+    setAt(next)
+  }, [at, key])
   const path = at?.path ?? view.first_file ?? null
   const { ensure } = folders
   useEffect(() => {
@@ -42,7 +49,7 @@ export function ViewSurface({ ws, view, active }: { ws: string; view: BuiltView;
   return (
     <div className="view-surface files-body is-view">
       {side.side}
-      <ViewPane ws={ws} view={view} path={path} kind={kind} targetRef={at?.ref} quote={at?.quote} query={at?.query} onQuoteMissing={quoteMissing} labels={labels} lead={side.lead} first={side.first} onNewLabel={side.newLabel} />
+      <ViewPane ws={ws} view={view} path={path} kind={kind} targetRef={at?.ref} quote={at?.quote} query={at?.query} onClearQuery={clearQuery} onQuoteMissing={quoteMissing} labels={labels} lead={side.lead} first={side.first} onNewLabel={side.newLabel} />
       {side.card}
     </div>
   )

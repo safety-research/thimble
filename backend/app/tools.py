@@ -172,6 +172,8 @@ REGISTRY: dict[str, Spec] = {
         Spec("clear_filter", (ANALYST,), "app.filters:tool_clear_filter"),
         # the browser's panes, laid out in one of the presets (panes.py); main's, since it answers the analyst
         Spec("set_layout", (ANALYST,), "app.panes:tool_set_layout", sessions=MAIN_ONLY),
+        # a card of a card type opened as its view in Files, as the card's Open as view does (cardtypes.py); main's
+        Spec("open_view", (ANALYST,), "app.cardtypes:tool_open_view", sessions=MAIN_ONLY),
         Spec("propose_view", (ANALYST,), _H + "propose_view"),
         Spec("write_document", (ANALYST,), "app.report_types:tool_write_document"),
         Spec("edit_document", (ANALYST,), "app.report_types:tool_edit_document"),

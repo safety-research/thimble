@@ -33,6 +33,7 @@ import asyncio
 import hashlib
 import json
 import logging
+import re
 import shutil
 from pathlib import Path
 from typing import Any
@@ -574,29 +575,74 @@ def _stale_install(c: str, t: dict[str, Any], v: dict[str, Any]) -> bool:
     return any((d / n).read_bytes() != (src / n).read_bytes() for n in (views.READER_PY, views.VIEW_HTML))
 
 
-@router.post("/ws/{c}/cells/{cell_id}/as-view")
-async def as_view_route(c: str, cell_id: str) -> dict[str, Any]:
+async def as_view(c: str, cell_id: str) -> dict[str, Any]:
     """Open as view: the view of the card's type, made the workspace's from thimble's type when it has none or has
-    thimble's older install of it, with the card's labels turned on in Files; {slug, query}, the card's arguments, which
-    the view's page draws its records by."""
+    thimble's older install of it, with the card's labels turned on in Files. {slug, query}: `query` is {card, title,
+    args}, the card and the arguments the view's page draws its records by."""
     from . import concepts, notebook  # noqa: PLC0415
 
     cell = await asyncio.to_thread(notebook.get_cell, c, cell_id)
-    made = card_of((cell or {}).get("outputs"))
-    if not made:
-        raise HTTPException(404 if cell is None else 400, f"card:{cell_id} draws no card type")
-    t = read_registry(c).get(str(made.get("type")))
-    if t is None:
-        raise HTTPException(404, f"no card type {made.get('type')!r} in this workspace")
+    if cell is None:
+        raise HTTPException(404, f"no such card: {cell_id}")
+    made = card_of(cell.get("outputs"))
+    t = type_of(c, cell)
     v = await asyncio.to_thread(views.read_built, c, t["slug"])
     if v is None or not v["ok"] or (t["origin"] == "thimble" and v["origin"] == "workspace"
                                     and await asyncio.to_thread(_stale_install, c, t, v)):
         if t["origin"] != "thimble":
             raise HTTPException(409, f"the view {t['slug']} does not pass its checks")
         await asyncio.to_thread(install_view, c, t)
-    for k in made.get("labels") or []:
+    for k in (made or {}).get("labels") or []:
         try:
             await asyncio.to_thread(concepts.show_concept, c, str(k.get("id")), True)
         except HTTPException as e:
             log.info("%s: the label %s of card:%s was not turned on: %s", c, k.get("id"), cell_id, e.detail)
-    return {"slug": t["slug"], "query": {k: x for k, x in (made.get("args") or {}).items() if x is not None}}
+    args = {k: x for k, x in ((made or {}).get("args") or {}).items() if x is not None}
+    return {"slug": t["slug"], "query": {"card": cell_id, "title": str(cell.get("title") or ""), "args": args}}
+
+
+@router.post("/ws/{c}/cells/{cell_id}/as-view")
+async def as_view_route(c: str, cell_id: str) -> dict[str, Any]:
+    """as_view for the card's Open as view."""
+    return await as_view(c, cell_id)
+
+
+OPEN_VIEW = "open-view"  # the stream's record that opens a view in Files (frontend lib/events.ts)
+
+
+async def tool_open_view(ctx: Any, args: dict[str, Any]) -> Any:
+    """The `open_view` tool: a card of a card type opened as its view (as_view), or a view opened as it is, with no
+    card's arguments; sent to the browser as the stream's OPEN_VIEW record."""
+    from . import investigation, notebook, panes, tools  # noqa: PLC0415
+
+    raw_card = re.sub(r"^(?:card|cell):", "", str(args.get("card") or "").strip().strip("[]")).split("#", 1)[0].split("@", 1)[0]
+    raw_view = str(args.get("view") or "").strip()
+    if bool(raw_card) == bool(raw_view):
+        return tools.err("open_view: give `card`, a card of a card type, or `view`, a view to open with no card's arguments")
+    if raw_card:
+        cell = await asyncio.to_thread(notebook.get_cell, ctx.c, raw_card)
+        if cell is None:
+            return tools.err(f"open_view: there is no card:{raw_card}")
+        if not card_of(cell.get("outputs")):
+            return tools.err(f"open_view: card:{raw_card} draws no card type, so it has no view")
+        await refresh_quietly(ctx.c, warm=False)
+        try:
+            opened = await as_view(ctx.c, raw_card)
+        except HTTPException as e:
+            return tools.err(f"open_view: {e.detail}")
+        slug, query = opened["slug"], opened["query"]
+    else:
+        have = await asyncio.to_thread(panes.surfaces, ctx.c)
+        sid = panes._surface(raw_view, have)
+        if sid is None or not sid.startswith("view:"):
+            names = ", ".join(s.removeprefix("view:") for s, _ in have if s.startswith("view:")) or "none"
+            return tools.err(f"open_view: there is no view {raw_view!r}; the views are {names}")
+        slug, query = sid.removeprefix("view:"), None
+    try:
+        investigation.emit(ctx.c, investigation.MAIN, {"type": OPEN_VIEW, "slug": slug, "query": query})
+    except Exception:  # noqa: BLE001 — a page that misses the record stays as it is
+        log.warning("open_view: could not send the view for %s", ctx.c, exc_info=True)
+        return tools.err("open_view: the view could not be sent to the browser")
+    if query:
+        return tools.ok(tools.hint("open_view-card", card=f"card:{raw_card}", view=slug))
+    return tools.ok(tools.hint("open_view-view", view=slug))

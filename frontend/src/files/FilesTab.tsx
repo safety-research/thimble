@@ -16,7 +16,7 @@ import { mediaOf } from '../lib/media'
 import { fragmentIn, parseRef, refPath } from '../lib/refs'
 import { pressedPane, surfaceShown, useFilesViewsSlot, useShownSurfaces } from '../lib/surfaces'
 import { track } from '../lib/telemetry'
-import type { ConceptRun, LabelDraft, SourceKind } from '../lib/types'
+import type { ConceptRun, LabelDraft, SourceKind, ViewQuery } from '../lib/types'
 import { readSession, readStorage, storageKey, writeSession, writeStorage } from '../lib/workspace'
 import { ReadProbe, useDock, useFoldingSide } from '../shell/dock'
 import { viewSurface } from '../shell/panes'
@@ -41,8 +41,8 @@ interface Open {
   /** in a view: a passage inside the record `ref` names, and the span ref the File browser opens when the view does not
    * show it */
   quote?: ViewQuote & { span: string }
-  /** in a view: the arguments of the card it was opened from (a card type's Open as view) */
-  query?: Record<string, unknown>
+  /** in a view: the card it was opened from and its arguments (a card type's Open as view) */
+  query?: ViewQuery
 }
 
 /** The open tabs a workspace keeps: their paths and the one shown. */
@@ -315,7 +315,7 @@ export function FilesTab({ ws, active, focused = active }: { ws: string; active:
           .then((all) => {
             const v = all.find((x) => x.slug === slug)
             if (!v?.first_file) throw new Error(`there is no view ${slug}`)
-            toView(slug, { path: v.first_file, query }, from)
+            toView(slug, { path: v.first_file, query: query ?? undefined }, from)
           })
           .catch((e: Error) => bus.emit('toast', { text: `Could not open the view. ${e.message}`, kind: 'error' }))
       }),
@@ -388,6 +388,8 @@ export function FilesTab({ ws, active, focused = active }: { ws: string; active:
   const quoteMissing = useCallback(() => {
     if (viewAt?.quote) openTab({ path: viewAt.path, ref: viewAt.quote.span })
   }, [viewAt, openTab])
+  // the view dropped the arguments of the card it was opened from
+  const clearQuery = useCallback(() => setViewAt((v) => (v?.query ? { ...v, query: undefined } : v)), [])
   useEffect(() => {
     if (!pendingRef) return
     void openRef(pendingRef.ref, !!pendingRef.browser, pendingRef.from)
@@ -516,6 +518,7 @@ export function FilesTab({ ws, active, focused = active }: { ws: string; active:
             targetRef={viewAt?.ref}
             quote={viewAt?.quote}
             query={viewAt?.query}
+            onClearQuery={clearQuery}
             onQuoteMissing={quoteMissing}
             labels={labels}
             onMode={setMode}

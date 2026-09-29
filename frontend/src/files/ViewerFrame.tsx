@@ -22,7 +22,8 @@
 // stored once it is ready and says `settled` once it has drawn it; its fetches go to the type's records route under the
 // card's labels, its `open` names the record ref as it is (with `pick` to open it in full), and its height stays within
 // the type's range. The page's `setQuery` says how the analyst reshaped the card, as a patch of its call's arguments
-// (onQuery). A view opened from a card (`query`) gets the card's arguments with every `open`.
+// (onQuery). Every `open` of a view carries `query`: the card it was opened from with its arguments, or null, which
+// drops them; a view's `setQuery` null says the page dropped them itself (onQuery).
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject } from 'react'
 import { api } from '../lib/api'
 import { bus } from '../lib/bus'
@@ -32,7 +33,7 @@ import { teleport } from '../lib/teleport'
 import { useTheme } from '../lib/theme'
 import { token } from '../lib/vizTheme'
 import { cmdCursors } from '../pointer/cursor'
-import type { Concept, LabelRow, ViewOpen } from '../lib/types'
+import type { Concept, LabelRow, ViewOpen, ViewQuery } from '../lib/types'
 import { PALETTE, pageLabelList, pageLabels, pagePalette, recordRef, viewMarks, withKeeps, type Keep, type LabelFilter, type PageLabelItem, type ViewMark } from './labels'
 import { wantLabels, watchPathLabels } from './marks'
 
@@ -103,12 +104,13 @@ export interface ViewerFrameProps {
   card?: CardFrame
   /** a card's page has drawn what it was given */
   onSettled?: () => void
-  /** a card's page asks for its call's arguments to change (the patch), or for none (null) */
+  /** a card's page asks for its call's arguments to change (the patch), or for none (null); a view's page dropped the
+   * card's arguments it was opened with (null) */
   onQuery?: (patch: Record<string, unknown> | null) => void
   /** in a card, the record `targetRef` names is opened in full rather than lit */
   targetPick?: boolean
-  /** a view opened from a card: the card's arguments, which the page draws its records by */
-  query?: Record<string, unknown> | null
+  /** a view opened from a card: the card and its arguments, which the page draws its records by */
+  query?: ViewQuery | null
 }
 
 /** A card of a card type drawn in the frame: the card's id, its type, how it is drawn (on the canvas, full size or for
@@ -381,14 +383,14 @@ export function ViewerFrame({ ws, slug, targetRef, path, title, fit, labels = NO
       if (open.error) report.current?.(`${r}: ${open.error}`)
     }
     const q = quoted.current
-    const withQuery = viewQuery.current ? { ...open, query: viewQuery.current } : open
+    const withQuery = drawn.current ? open : { ...open, query: viewQuery.current ?? null }
     if (target.current === r) post({ type: P + 'open', open: withQuery, quote: q && q.record === r ? q : undefined })
   }
   // A newer version's page opens where the analyst was, when this version knows that place, else where the ref it was
   // given names; then the rest of what they were looking at is put back.
   const reopen = async (st: ViewState) => {
     const at = st.ref && st.ref !== target.current ? await api.viewOpen(ws, slug, st.ref, version).catch(() => null) : null
-    if (at && !at.error) post({ type: P + 'open', open: at })
+    if (at && !at.error) post({ type: P + 'open', open: { ...at, query: viewQuery.current ?? null } })
     else await sendOpen(target.current)
     post({ type: P + 'restore', state: st })
   }

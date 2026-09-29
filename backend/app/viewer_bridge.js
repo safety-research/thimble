@@ -5,8 +5,8 @@
 // postMessage calls:
 //   open {locator, quote?} page to frame: show this place (window.thimble.onOpen); with quote {record, text}, a passage
 //                          inside that record, which the bridge highlights and scrolls to (the view shows the record).
-//                          In a card's frame its target is {ref, pick}, pick to open the record in full; a view opened
-//                          from a card gets the card's arguments as its `query`
+//                          In a card's frame its target is {ref, pick}, pick to open the record in full; in a view,
+//                          `query` is {card, title, args} of the card it was opened from, or null
 //   quoted {found}         frame to page: whether the quoted passage showed in the page
 //   fetch {id, query}      frame to page, answered by result {id, data} from reader.records (window.thimble.fetch)
 //   cite {ref, text, ...}  frame to page: a ⌘-click on an element with data-anchor, or on any other part of the view
@@ -16,7 +16,8 @@
 //                          with no fetch (window.thimble.onInit); mode is card, full or render, `card` its id, and `key`
 //                          names what it stored, the same key when only the mode or the width changed
 //   setQuery {patch}       frame to page, in a card's frame: the card's call's arguments the analyst's reshaping would
-//                          change, {} for none, which Keep writes into the call (window.thimble.setQuery)
+//                          change, {} for none, which Keep writes into the call (window.thimble.setQuery); in a view
+//                          opened from a card, null when the page dropped the card's arguments
 //   navigate {ref}         frame to page: open another place, in this view or anywhere in thimble (window.thimble.navigate)
 //   size {height}          frame to page: the document's height, for a frame that sizes to its content, or the height a
 //                          page says it needs (window.thimble.size), after which the document's own height is not sent
@@ -171,9 +172,10 @@
     settled: function () {
       post({ type: P + 'settled' })
     },
-    /** the card's call's arguments the analyst's reshaping in the page would change ({} for none), in a card's frame */
+    /** the card's call's arguments the analyst's reshaping in the page would change ({} for none), in a card's frame;
+     *  in a view opened from a card, setQuery(null) says the page dropped the card's arguments */
     setQuery: function (patch) {
-      if (cardMode) post({ type: P + 'setQuery', patch: patch && typeof patch === 'object' ? patch : {} })
+      post({ type: P + 'setQuery', patch: patch && typeof patch === 'object' ? patch : cardMode ? {} : null })
     },
     /** open another place: a view ref, a file ref or any other ref thimble knows */
     navigate: function (ref) {

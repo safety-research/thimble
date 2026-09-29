@@ -197,6 +197,20 @@ Lay out the browser's main area, right of the chat, as panes that each show one 
 }
 ```
 
+## open_view
+
+Open a card of a card type as its view in Files, as the card's Open as view does: the card's labels turn on and its arguments choose the view's records, which follow the labels live. Call it when the analyst asks to see such a card as a view, or with `view` to open a view with no card's arguments.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "card": {"type": "string", "description": "The card, card:<id>."},
+    "view": {"type": "string", "description": "A view's slug or name, opened with no card's arguments, in place of `card`."}
+  }
+}
+```
+
 ## propose_view
 
 Propose a view, a page that shows records in a form their files hide, or a viewer for one unusual file type. thimble's dev agent builds it from these fields alone, so name the fields, keys and counts it needs.
@@ -627,6 +641,14 @@ Files shows the label turned on with that value highlighted, and its views keep 
 ## set_layout-set
 
 The browser shows {surfaces} {layout}.
+
+## open_view-card
+
+Opened {card} as the {view} view in Files, with its labels on and its arguments choosing the records.
+
+## open_view-view
+
+Opened the {view} view in Files, with no card's arguments.
 
 ## clear_filter-cleared
 
