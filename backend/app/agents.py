@@ -291,38 +291,6 @@ def list_chats(c: str) -> list[dict]:
     return out
 
 
-# --------------------------------------------------------------------------- the workspace's config dir and prompts
-
-
-def config_dir(c: str) -> Path:
-    """workspaces/<c>/.claude-config: a per-workspace CLAUDE_CONFIG_DIR, which sdk.build's `setting_sources=["user"]`
-    resolves to. It holds the CLI's login when there is no key and links to the analyst's CLAUDE.md and skills/, never their
-    settings.json, hooks or plugins."""
-    cfg = _ws(c) / ".claude-config"
-    fresh = not cfg.exists()
-    cfg.mkdir(parents=True, exist_ok=True)
-    try:
-        from . import claude_config  # noqa: PLC0415
-
-        claude_config.link_credentials(cfg, f"chat {c}")
-        claude_config.link_user_setup(cfg, f"chat {c}")
-        if fresh:  # the account and its entitlements, so the CLI does not refuse a model on a cold dir
-            claude_config.seed_account(cfg, f"chat {c}")
-    except Exception:  # noqa: BLE001 — a session runs on the environment's credential then
-        log.debug("credentials not linked into %s", cfg, exc_info=True)
-    return cfg
-
-
-def call_env(c: str) -> dict[str, str]:
-    """The config env of a model call the server makes for `c` on the CLI path: the workspace's own dir when the login reaches
-    it (claude_config.login_linkable), else the served config dir (config.claude_env), for a login in the macOS Keychain."""
-    from . import claude_config  # noqa: PLC0415
-
-    if claude_config.login_linkable():
-        return {config.CONFIG_DIR_ENV: str(config_dir(c))}
-    return config.claude_env({})
-
-
 # --------------------------------------------------------------------------- where a chat's cards land
 
 
@@ -665,6 +633,13 @@ def _orientation_status(c: str) -> str | None:
     return str(status) if status else None
 
 
+@router.get("/ws/{c}/instance")
+async def instance_route(c: str) -> dict:
+    """The workspace instance's birth stamp, its main chat's `created_at`: the browser clears what it kept under the
+    workspace's name when the stamp changed (frontend lib/workspace syncInstance). Reads main's meta alone, no log."""
+    return {"stamp": ensure_main(c).get("created_at") or None}
+
+
 @router.get("/ws/{c}/chats/main")
 async def main_route(c: str) -> dict:
     meta = ensure_main(c)
@@ -838,9 +813,50 @@ async def interrupt_route(c: str, chat_id: str) -> dict:
     from . import agent_session  # noqa: PLC0415 — agent_session imports this module
 
     meta = read_meta(c, chat_id)
-    if meta.get("kind") == KIND_AGENT:
-        return {"stopped": await agent_session.stop_chat(c, chat_id) or await stop_agent(c, chat_id)}
+    if meta.get("kind") != KIND_AGENT:
+        return {"stopped": False}
+    if await agent_session.stop_chat(c, chat_id) or await stop_agent(c, chat_id):
+        return {"stopped": True}
+    if meta.get("agent_id") and meta.get("parent") == MAIN_ID and not meta.get("pid") and meta.get("status") == "running":
+        # a subagent of the analyst's session: only main can stop it
+        from . import channel, tools  # noqa: PLC0415
+
+        title = str(meta.get("title") or "a subagent")
+        text = tools.hint("stop-subagent", title=title, agent_id=str(meta["agent_id"]))
+        channel.post(c, channel.MAIN, {"text": text}, mirror=False,
+                     line=channel.terminal_line(channel.MAIN, f"Stop {title}", {}))
+        return {"stopped": False, "asked": "main"}
     return {"stopped": False}
+
+
+async def stop_all(c: str) -> list[str]:
+    """Stop every agent of workspace `c`, main's session having ended (session.disconnected): each agent chat that runs
+    (the orientation, a writer, the critic, a check's run: agent_session.stop_chat or a server task), its dev ticket and
+    view builds (dev.stop_workspace), and its background sessions still alive with no run open (`claude stop`, which
+    keeps their conversations for `claude attach`). Returns the titles of what it stopped, for the log."""
+    from . import agent_session, bg_session, dev  # noqa: PLC0415 — each imports this module
+
+    stopped: list[str] = []
+    for meta in list_chats(c):
+        if meta.get("kind") != KIND_AGENT or meta.get("status") != "running":
+            continue
+        try:
+            if await agent_session.stop_chat(c, meta["id"]) or await stop_agent(c, meta["id"]):
+                stopped.append(str(meta.get("title") or meta["id"]))
+        except Exception:  # noqa: BLE001 — one agent that will not stop leaves the others to stop
+            log.warning("%s: could not stop agent chat %s", c, meta.get("id"), exc_info=True)
+    try:
+        stopped += ["dev build"] * dev.stop_workspace(c)
+    except Exception:  # noqa: BLE001
+        log.warning("%s: could not stop the dev builds", c, exc_info=True)
+    for e in bg_session.entries(c):
+        if bg_session.alive(e) and e.short:
+            try:
+                await asyncio.to_thread(bg_session.stop_cli, e.short)
+                stopped.append(e.name)
+            except Exception:  # noqa: BLE001
+                log.warning("%s: could not stop background session %s", c, e.name, exc_info=True)
+    return stopped
 
 
 # --------------------------------------------------------------------------- text helpers other modules import
@@ -875,6 +891,6 @@ async def check_refs(c: str, refs_: list[str]) -> tuple[list[str], list[str]]:
     return [r for r, hit in zip(refs_, ok) if hit], [r for r, hit in zip(refs_, ok) if not hit]
 
 
-__all__ = ["KIND_MAIN", "KIND_THREAD", "KIND_AGENT", "MAIN_ID", "Recorder", "chip", "config_dir", "ensure_main", "finish_agent",
+__all__ = ["KIND_MAIN", "KIND_THREAD", "KIND_AGENT", "MAIN_ID", "Recorder", "chip", "ensure_main", "finish_agent",
            "list_chats", "mirror", "new_agent", "new_thread", "paths", "read_events", "read_meta", "start_agent", "stop_agent",
            "set_running", "update_agent", "write_meta"]

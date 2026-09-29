@@ -1,0 +1,17 @@
+ticket,subject,priority,service,incident
+5501,Holiday Monday sailing times,normal,web,
+5502,Lost umbrella,,,
+5506,Payment page keeps spinning,high,payments,INC-312
+5507,Charged but no confirmation,high,payments,INC-312
+5508,Charged twice,Urgent,payments,INC-312
+5509,No boarding pass,high,passes,INC-312
+5510,Two pending charges,urgent,payments,INC-312
+5511,Is the site down?,high,web,INC-312
+5512,"Double charge, please refund",urgent,payments,INC-312
+5513,Boarding pass email missing,high,passes,INC-312
+5514,Card blocked after failed payments,HIGH,payments,INC-312
+5515,Same charge twice,urgent,payments,INC-312
+5516,Payment failed twice,high,payments,INC-312
+5517,Can I board with my booking code?,high,passes,INC-312
+5519,Double charge on car booking,Urgent - 2nd double charge,payments,INC-312
+5525,Two boarding passes,normal,passes,INC-312

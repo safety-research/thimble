@@ -11,7 +11,8 @@ export interface UserRow {
   ts?: string
   /** where the analyst typed it: the session's terminal or the browser; `main` for a message main sent the orientation */
   by?: string
-  /** `orient-follow-up` for a message to a finished orientation, which resumed its session (backend orientation.message) */
+  /** `orient-follow-up` on a message an earlier build passed to the orientation through main, kept in older logs; a
+   * follow-up's message now says so by its `run` */
   event?: string
   /** the orientation's run that message started: 1 for its first follow-up */
   run?: number
@@ -26,8 +27,8 @@ export interface ToolResult {
   /** when the result came back */
   ts?: string
   is_error?: boolean
-  /** the call did not run and is made again: auto mode refused it and the analyst allowed it, or a mode switch
-   * answered it (backend session.not_run) */
+  /** the call did not run and is made again: auto mode refused it and the analyst allowed it, auto mode could not
+   * judge it and thimble sent it back, or a mode switch answered it (backend session.not_run) */
   not_run?: boolean
   cell_id?: string
   /** the card an apply_label call left, which its result names (backend session.LABEL_TOOL) */
@@ -154,6 +155,10 @@ export function foldRecords(records: readonly ChatRecord[], skip?: ReadonlySet<n
         rows.push({ kind: 'user', index, text: e.text, ts: e.ts, by: e.by, event: e.event, run: e.run })
         return
       case 'text': {
+        // a Claude Code notification the model copied into its reply is harness text, not words for the analyst
+        const delta = withoutNotifications(e.delta)
+        if (delta !== e.delta && !delta.trim()) return
+        e = { ...e, delta }
         const stage = parent ? null : stageLine(e.delta)
         if (stage) {
           rows.push({ kind: 'note', index, text: stage })
@@ -314,6 +319,10 @@ export function toolSummary(name: string, input: unknown, ws = ''): string {
       return str(inp.span ?? inp.ref)
     case 'reply_in_thread':
       return oneLine(str(inp.text))
+    case 'message_thread':
+      return [str(inp.thread), inp.message ? oneLine(str(inp.message)) : ''].filter(Boolean).join(': ')
+    case 'wait_session':
+      return str(inp.session)
     case 'rename_thread':
       return `${str(inp.thread)} → ${str(inp.name)}`
     case 'delete_thread':
@@ -324,7 +333,8 @@ export function toolSummary(name: string, input: unknown, ws = ''): string {
       return oneLine(str(inp.title))
     case 'Agent':
     case 'Task':
-      // the call that started a subagent, such as the orientation: its description, never its input as JSON
+      // the call that started a subagent or a background session's tray entry (thimble:orient, thimble:writer): its
+      // description, never its input as JSON
       return oneLine(str(inp.description)) || oneLine(str(inp.subagent_type))
     case 'Workflow':
       return workflowTitle(inp)
@@ -383,6 +393,9 @@ export const TOOL_WORDS: Record<string, string> = {
   add_comment: 'Comment',
   resolve_comment: 'Resolve comment',
   reply_in_thread: 'Reply',
+  message_thread: 'Message thread',
+  wait_session: 'Wait for session',
+  list_agents: 'List agents',
   rename_thread: 'Rename thread',
   delete_thread: 'Delete thread',
   screenshot: 'Screenshot',
@@ -427,6 +440,9 @@ export const TOOL_GROUPS: Record<string, string> = {
   file_dev_ticket: 'Dev ticket',
   screenshot: 'Screenshot',
   reply_in_thread: 'Reply',
+  message_thread: 'Threads',
+  wait_session: 'Sessions',
+  list_agents: 'Sessions',
   rename_thread: 'Threads',
   delete_thread: 'Threads',
 }
@@ -651,6 +667,12 @@ export function plainStep(t: ToolRow, questions: ReadonlyMap<string, string> = n
       return with_(inp.reopen === true ? 'Reopened comment' : 'Resolved comment', str(inp.comment).startsWith('report:') ? refs(inp.comment) : '')
     case 'reply_in_thread':
       return 'Replied'
+    case 'message_thread':
+      return with_(inp.message ? 'Sent to thread' : 'Asked again in thread', str(inp.thread))
+    case 'wait_session':
+      return with_('Waited for', str(inp.session))
+    case 'list_agents':
+      return 'Listed agents'
     case 'rename_thread':
       return with_('Renamed thread', `${str(inp.thread)} to ${str(inp.name)}`)
     case 'delete_thread':
@@ -754,9 +776,9 @@ export interface Made {
   docs: string[]
   /** each group's name as the call wrote it (Orientation), by its key in `cells` and `labelCards` */
   groupNames?: Record<string, string>
-  /** the card each applied label has on the canvas, one per label name, in the group its call named ('' for none), with
-   * its id when the result named it. The canvas counts these among a group's cards, so the chat's counts do too. */
-  labelCards: { name: string; group: string; id?: string }[]
+  /** the card of each applied label whose result named one (the orientation's labels get none), one per label name, in
+   * the group its call named ('' for none). The canvas counts these among a group's cards, so the chat's counts do too. */
+  labelCards: { name: string; group: string; id: string }[]
 }
 
 /** Every card a log left on the canvas: the cards it made or edited and its labels' cards. Pure. */
@@ -864,11 +886,10 @@ export function madeBy(rows: readonly Row[]): Made {
           if (inp.limit == null || inp.limit === '') add(out.labels, inp.name)
           const name = str(inp.name).trim()
           const id = r.result?.label_card
-          const had = out.labelCards.find((c) => c.name === name)
-          if (name && !had) out.labelCards.push({ name, group: groupPart(inp.group), ...(id ? { id } : {}) })
-          else if (had && id && !had.id) had.id = id
+          if (!id) break
+          if (name && !out.labelCards.some((c) => c.name === name)) out.labelCards.push({ name, group: groupPart(inp.group), id })
           // a label applied again after edit_card changed its card: the card is the label's, not one more
-          if (id) out.cells = out.cells.filter((c) => c.id !== id)
+          out.cells = out.cells.filter((c) => c.id !== id)
           break
         }
         case 'write_document':
@@ -949,8 +970,9 @@ export function withBranches<T extends { index: number }>(rows: readonly T[], re
 export interface MainContext {
   /** the Agent calls whose subagent has a chat of its own (its meta's `tool_use_id`), which shows as its card or thread */
   spawned: ReadonlySet<string>
-  /** the summaries the orientation handed back (orientSummaries); main's word-for-word relay of one is left out, since
-   * the orientation's thread shows it and main shows the counted line and the card */
+  /** the summaries the orientation handed back (orientSummaries: its last message, and in an earlier build's log, where
+   * it ran as main's subagent, its hand-backs); main's word-for-word relay of one is left out, since the orientation's
+   * thread shows it and main shows the counted line and the card */
   summaries: readonly string[]
   /** when each subagent ran, from its chat's creation to its end (null while it runs): a label run started then is the
    * subagent's, and its card lists the label */
@@ -1053,8 +1075,9 @@ export function labelRunName(title: string): string {
   return title.startsWith(LABEL_RUN_PREFIX) ? title.slice(LABEL_RUN_PREFIX.length).trim() : title.trim()
 }
 
-/** The summaries an orientation's rows handed back: each SubagentHandback's message and, once the orientation has
- * ended, its last message. Claude Code's API error line is no summary, so main's copy of the same line still shows.
+/** The summaries an orientation's rows handed back: each SubagentHandback's message (an earlier build's, which ran the
+ * orientation as main's subagent; terminal-first now runs it as its own background session) and, once the orientation
+ * has ended, its last message. Claude Code's API error line is no summary, so main's copy of the same line still shows.
  * Pure. */
 export function orientSummaries(rows: readonly Row[], ended = false): string[] {
   const out: string[] = []
@@ -1430,6 +1453,15 @@ const HARNESS_TAG_RE = /^\s*\[[^\]\n]*harness[^\]\n]*\][^\n]*(?:\n|$)/i
 
 /** A subagent's prompt with the harness's preamble left off and the task it wraps dedented; any other text as it is.
  * Pure. */
+const NOTIFICATION_RE = /\s*<task-notification>[\s\S]*?<\/task-notification>\s*/g
+
+/** `text` without the `<task-notification>` blocks a model copied from Claude Code into its reply; unchanged (the same
+ * string) when it holds none. Pure. */
+export function withoutNotifications(text: string): string {
+  if (!text.includes('<task-notification>')) return text
+  return text.replace(NOTIFICATION_RE, '\n\n').trim()
+}
+
 export function stripHarness(text: string): string {
   const m = HARNESS_HEAD_RE.exec(text) ?? HARNESS_TAG_RE.exec(text)
   if (!m) return text

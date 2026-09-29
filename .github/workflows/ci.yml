@@ -1,11 +1,13 @@
-# The checks every push and pull request must pass. Each step is one step of scripts/check.sh, the command a
-# contributor runs locally, so CI and a local run check the same things.
+# The checks every push and pull request must pass, which can also be run by hand from the Actions tab. Each step is
+# one step of scripts/check.sh, the command a contributor runs locally, so CI and a local run check the same things.
+# The steps run in two jobs side by side, the type check and build of the UI in one and everything else in the other,
+# and the job `checks`, the status the main branch requires, passes only when both did.
 name: checks
 
 on:
   push:
-    branches: [main]
   pull_request:
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -15,9 +17,7 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  checks:
-    # public repositories only, so that a private fork or mirror spends no Actions minutes
-    if: ${{ !github.event.repository.private }}
+  backend:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -57,16 +57,59 @@ jobs:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ hashFiles('frontend/package-lock.json', 'backend/uv.lock') }}
 
+      # the frontend's packages and Chromium too, which a backend test (a worked example's view page) and the browser
+      # checks drive
       - name: Install
         run: scripts/check.sh install
 
       - name: Backend
         run: scripts/check.sh backend
 
-      - name: Frontend
-        run: scripts/check.sh frontend
-
       # in the Chromium that Install put in; under CI (which Actions sets) a Chromium that does not start fails the step
       # instead of skipping it
       - name: Browser
         run: scripts/check.sh browser
+
+  frontend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          enable-cache: true
+          cache-dependency-glob: backend/uv.lock
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Cache the headless Chromium
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('frontend/package-lock.json', 'backend/uv.lock') }}
+
+      - name: Install
+        run: scripts/check.sh install
+
+      - name: Frontend
+        run: scripts/check.sh frontend
+
+  checks:
+    needs: [backend, frontend]
+    if: always()  # a skipped required job counts as passed, so this one runs, and fails, whatever the others did
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Both jobs passed
+        env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          echo "backend and frontend: $RESULTS"
+          for r in $RESULTS; do [ "$r" = success ] || exit 1; done

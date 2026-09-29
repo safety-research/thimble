@@ -9,8 +9,20 @@ the standard library and runs on every tool call.
 
     .thimble-watch                      the asyncRewake hook (SessionStart, Stop, PreToolUse, UserPromptSubmit)
     .thimble-watch --permission         the PermissionRequest hook
+    .thimble-watch --held               the UserPromptSubmit hook that adds the events held for main to the prompt
+                                        and prints the lines of the events the watcher wrote out
+    .thimble-watch --mode               the UserPromptSubmit and Stop hook that reports the session's permission mode
+    .thimble-watch --agents             the PostToolUse hook that prints the start and finish lines of thimble's
+                                        background sessions
+    .thimble-watch --relay              the PreToolUse hook of SendMessage to a background session of thimble's
+    .thimble-watch --agent-check        the PreToolUse hook of main's Agent calls
+    .thimble-watch --proxy-stop         the SubagentStop hook that keeps a background session's tray entry going
     .thimble-watch --stream --cwd <folder> --session <id>
                                         the Monitor route
+
+Every hook but the stream does nothing without $THIMBLE_HOME/server.json and the token in it. Each request proves it
+holds the token and each answer must prove the server does (app/hook_auth.py); an answer without that proof counts as
+no server, so a process on the recorded port is neither told anything nor believed.
 
 The hook long-polls the server for the session's next event (GET /api/channel/pull), writes it to stderr in the
 `<channel …>` form, acknowledges it and exits 2, which makes Claude Code wake the session. It exits 0 in a subagent, when
@@ -19,15 +31,39 @@ another watcher holds the session's lock, when no server listens at first, on 40
 
 The permission hook relays the prompt to the server, which shows it in main's chat and answers when the analyst does.
 
+The held hook runs as each of main's turns begins, on a prompt the analyst typed and on an event the watcher woke it
+with: it takes the events the server holds for main (app/channel.py QUIET_KINDS) and prints them as the prompt's added
+context, and prints the lines main's terminal shows of the events the watcher wrote out (app/channel.py terminal_line)
+as its systemMessage, since Claude Code shows such an event only as the fixed rewakeSummary. It prints nothing in a
+subagent, when nothing waits or when no server answers within HELD_WAIT_S.
+
+The mode hook tells the server (POST /api/channel/mode) the permission mode Claude Code reports for the session as each
+of its turns begins and ends, which is the mode the agents thimble starts follow by default. It sends nothing in a
+subagent. As a turn ends it also shows, once, as its systemMessage, the dashboard link /thimble left for the session
+(app/cli.py leave_link): the link carries the key that lets the browser answer permission requests and change
+permission modes, and a systemMessage reaches the analyst's terminal but not the model's context.
+
+The agents hook asks the server (POST /api/agents) for the lines main's terminal has not shown about thimble's
+background sessions, each one's start with the command that attaches it and its finish, and prints them as the hook's
+systemMessage. The held hook prints them too. The relay hook hands a SendMessage bound for a background session to the
+server (POST /api/bg/relay), which answers with the message to send in its place, or refuses one sent already. The
+proxy-stop hook asks the server (POST /api/bg/proxy-stop) whether a tray entry's session still runs, and if so tells
+Claude Code to keep the entry going. The agent-check hook asks the server (POST /api/bg/agent-check) whether main's
+Agent call would start a second tray entry of a session or a second fork of a thread, and refuses such a call. Each
+prints nothing when no server answers.
+
 The stream writes each event as one block of lines. Claude Code truncates Monitor output at 500 characters per line and
 about 3,000 per event, so lines are wrapped under LINE_CHARS and a longer event is cut and saved whole under
 <thimble home>/events/.
 """
 import fcntl
+import hashlib
+import hmac
 import http.client
 import json
 import os
 import re
+import secrets
 import sys
 import time
 import urllib.error
@@ -35,7 +71,6 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 
-DEFAULT_PORT = 8300
 PULL_WAIT_S = 25  # app/channel.py PULL_WAIT_S: the server holds a pull this long
 LIFETIME_S = 23 * 3600  # the hook's own timeout is 86400 s (hooks.json)
 RETRY_S = 2.0
@@ -49,39 +84,67 @@ WAKE = 2  # the exit code that wakes the session (asyncRewake)
 STOP = {404, 409, 410}  # the server's answers that end a watcher (module note)
 CUT_NOTE = "(cut here, since a Monitor event holds about 3,000 characters; the whole event is in {path})"
 DENIED = "The analyst denied this in thimble's browser."
+HELD_WAIT_S = 3.0
+AGENTS_WAIT_S = 3.0
 
 
 def home() -> Path:
     return Path(os.environ.get("THIMBLE_HOME") or (Path.home() / ".thimble"))
 
 
-def server_url() -> str:
-    """The server's API base URL, read as bin/thimble-mcp's server_url reads it: $THIMBLE_HOME/server.json's `api`, then
-    its `port`, else THIMBLE_PORT or 8300."""
+def server() -> tuple[str, str] | None:
+    """(the server's API base URL, its token) from $THIMBLE_HOME/server.json (`api`, then `port`, as bin/thimble-mcp
+    reads it); None without the file or a token."""
     try:
         data = json.loads((home() / "server.json").read_text("utf-8"))
-        if isinstance(data, dict):
-            if data.get("api"):
-                return str(data["api"]).rstrip("/")
-            if data.get("port"):
-                return f"http://127.0.0.1:{int(data['port'])}"
-    except (OSError, ValueError, TypeError):
+    except (OSError, ValueError):
+        return None
+    token = data.get("token") if isinstance(data, dict) else None
+    if not isinstance(token, str) or not token:
+        return None
+    try:
+        if data.get("api"):
+            return str(data["api"]).rstrip("/"), token
+        if data.get("port"):
+            return f"http://127.0.0.1:{int(data['port'])}", token
+    except (TypeError, ValueError):
         pass
-    return f"http://127.0.0.1:{os.environ.get('THIMBLE_PORT') or DEFAULT_PORT}"
+    return None
 
 
-def request(method: str, path: str, body: dict | None = None, timeout: float | None = 10.0) -> tuple[int, dict]:
-    """(status, JSON body) of one request to the server; an HTTP error is its status. A transport failure raises
-    urllib.error.URLError when no connection was made, else another OSError or an http.client.HTTPException."""
+class NoServer(urllib.error.URLError):
+    """No thimble server to ask: no server.json or token, or an answer without the server's proof (module note)."""
+
+
+def sign(token: str, role: str, nonce: str) -> str:
+    """app/hook_auth.py's sign: the proof `role` gives for `nonce`."""
+    return hmac.new(token.encode("utf-8"), f"{role}:{nonce}".encode("utf-8"), hashlib.sha256).hexdigest()
+
+
+def request(method: str, path: str, body: dict | None = None, timeout: float | None = 10.0,
+            proven: bool = True) -> tuple[int, dict]:
+    """(status, JSON body) of one request to the server, with this hook's proof; an HTTP error is its status. NoServer,
+    a urllib.error.URLError, when there is no server to ask or, unless not `proven`, its answer lacks the server's proof.
+    A transport failure raises urllib.error.URLError when no connection was made, else another OSError or an
+    http.client.HTTPException."""
+    found = server()
+    if found is None:
+        raise NoServer("no server.json with a token")
+    base, token = found
+    nonce = secrets.token_hex(16)
     data = json.dumps(body).encode("utf-8") if body is not None else None
-    req = urllib.request.Request(server_url() + path, data=data, method=method,
-                                 headers={"Content-Type": "application/json"} if data else {})
+    headers = {"X-Thimble-Nonce": nonce, "X-Thimble-Auth": sign(token, "hook", nonce),
+               **({"Content-Type": "application/json"} if data else {})}
+    req = urllib.request.Request(base + path, data=data, method=method, headers=headers)
     try:
         with urllib.request.urlopen(req, timeout=timeout) as resp:  # noqa: S310 — loopback, thimble's own server
             raw = resp.read()
             status = resp.status
+            proof = resp.headers.get("X-Thimble-Proof") or ""
     except urllib.error.HTTPError as e:
-        return e.code, {}
+        raw, status, proof = b"", e.code, (e.headers.get("X-Thimble-Proof") if e.headers else None) or ""
+    if proven and not hmac.compare_digest(proof, sign(token, "server", nonce)):
+        raise NoServer("the answer does not carry thimble's proof")
     try:
         parsed = json.loads(raw.decode("utf-8")) if raw else {}
     except ValueError:
@@ -207,9 +270,9 @@ def pull(cwd: str, session: str, until: float, pid: int | None = None, *,
     return None
 
 
-def ack(cwd: str, session: str, event_id: str) -> None:
+def ack(cwd: str, session: str, event_id: str, terminal: bool = False) -> None:
     try:
-        request("POST", "/api/channel/ack", {"cwd": cwd, "session": session, "id": event_id})
+        request("POST", "/api/channel/ack", {"cwd": cwd, "session": session, "id": event_id, "terminal": terminal})
     except (OSError, http.client.HTTPException):
         pass
 
@@ -231,7 +294,7 @@ def watch(inp: dict) -> int:
         return 0  # /clear while the event came: neither written nor acknowledged, so the new session gets it
     sys.stderr.write(got[1] + "\n")
     sys.stderr.flush()
-    ack(cwd, session, got[0])
+    ack(cwd, session, got[0], terminal=True)
     return WAKE
 
 
@@ -251,6 +314,131 @@ def permission(inp: dict) -> int:
     if behavior == "deny":
         decision["message"] = DENIED
     print(json.dumps({"hookSpecificOutput": {"hookEventName": "PermissionRequest", "decision": decision}}))
+    return 0
+
+
+def held(inp: dict) -> int:
+    """The held hook (module note)."""
+    if inp.get("agent_id"):
+        return 0
+    body = {"cwd": folder(inp), "session": str(inp.get("session_id") or "") or None}
+    try:
+        status, answer = request("POST", "/api/channel/held", body, timeout=HELD_WAIT_S)
+    except (OSError, http.client.HTTPException):
+        return 0
+    text, said = (str(answer.get("text") or ""), str(answer.get("terminal") or "")) if status == 200 else ("", "")
+    out: dict = {"hookSpecificOutput": {"hookEventName": "UserPromptSubmit", "additionalContext": text}} if text else {}
+    lines = "\n".join(x for x in (said, announcements(inp)) if x)
+    if lines:
+        out["systemMessage"] = lines
+    if out:
+        print(json.dumps(out))
+    return 0
+
+
+def mode(inp: dict) -> int:
+    """The mode hook (module note)."""
+    if inp.get("hook_event_name") == "Stop" and not inp.get("agent_id"):
+        show_link(str(inp.get("session_id") or ""))
+    if inp.get("agent_id") or not inp.get("permission_mode"):
+        return 0
+    body = {"cwd": folder(inp), "session": str(inp.get("session_id") or "") or None,
+            "permission_mode": str(inp["permission_mode"])}
+    try:
+        request("POST", "/api/channel/mode", body, timeout=AGENTS_WAIT_S)
+    except (OSError, http.client.HTTPException):
+        pass
+    return 0
+
+
+def show_link(session: str) -> None:
+    """The link /thimble left for `session`, printed as the hook's systemMessage and then deleted (module note)."""
+    name = "".join(ch for ch in session if ch.isalnum() or ch in "-_")
+    if not name:
+        return
+    path = home() / "links" / name
+    try:
+        url = path.read_text("utf-8").strip()
+        path.unlink()
+    except OSError:
+        return
+    if url:
+        print(json.dumps({"systemMessage": f"thimble: {url}"}))
+
+
+def announcements(inp: dict) -> str:
+    """The start and finish lines of thimble's background sessions main's terminal has not shown yet (module note)."""
+    body = {"cwd": folder(inp), "session": str(inp.get("session_id") or "") or None, "announce": True}
+    try:
+        status, answer = request("POST", "/api/agents", body, timeout=AGENTS_WAIT_S)
+    except (OSError, http.client.HTTPException):
+        return ""
+    return str(answer.get("announce") or "") if status == 200 else ""
+
+
+def agents_hook(inp: dict) -> int:
+    """The agents hook (module note)."""
+    if inp.get("agent_id"):
+        return 0
+    lines = announcements(inp)
+    if lines:
+        print(json.dumps({"systemMessage": lines}))
+    return 0
+
+
+def relay(inp: dict) -> int:
+    """The relay hook (module note)."""
+    tool_input = inp.get("tool_input") if isinstance(inp.get("tool_input"), dict) else {}
+    to = str(tool_input.get("to") or "")
+    if not to.startswith("thimble:"):
+        return 0
+    body = {"cwd": folder(inp), "agent_id": inp.get("agent_id") or None, "agent_type": inp.get("agent_type") or None,
+            "transcript_path": inp.get("transcript_path") or None, "to": to,
+            "message": str(tool_input.get("message") or "")}
+    try:
+        status, answer = request("POST", "/api/bg/relay", body, timeout=AGENTS_WAIT_S)
+    except (OSError, http.client.HTTPException):
+        return 0
+    decision = answer.get("decision") if status == 200 else None
+    if decision == "allow":
+        updated = {**tool_input, "message": str(answer.get("message") or tool_input.get("message") or "")}
+        print(json.dumps({"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "allow",
+                                                 "updatedInput": updated}}))
+    elif decision == "deny":
+        print(json.dumps({"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny",
+                                                 "permissionDecisionReason": str(answer.get("reason") or "")}}))
+    return 0
+
+
+def agent_check(inp: dict) -> int:
+    """The agent-check hook (module note)."""
+    tool_input = inp.get("tool_input") if isinstance(inp.get("tool_input"), dict) else {}
+    if inp.get("agent_id") or not tool_input:
+        return 0
+    body = {"cwd": folder(inp), "agent_id": None, "tool_input": tool_input}
+    try:
+        status, answer = request("POST", "/api/bg/agent-check", body, timeout=AGENTS_WAIT_S)
+    except (OSError, http.client.HTTPException):
+        return 0
+    if status == 200 and answer.get("deny"):
+        print(json.dumps({"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny",
+                                                 "permissionDecisionReason": str(answer.get("reason") or "")}}))
+    return 0
+
+
+def proxy_stop(inp: dict) -> int:
+    """The proxy-stop hook (module note)."""
+    body = {"cwd": folder(inp), "agent_id": inp.get("agent_id") or None, "agent_type": str(inp.get("agent_type") or ""),
+            "agent_transcript_path": inp.get("agent_transcript_path") or None,
+            "stop_hook_active": bool(inp.get("stop_hook_active"))}
+    if not body["agent_type"].startswith("thimble:"):
+        return 0
+    try:
+        status, answer = request("POST", "/api/bg/proxy-stop", body, timeout=AGENTS_WAIT_S)
+    except (OSError, http.client.HTTPException):
+        return 0
+    if status == 200 and answer.get("block"):
+        print(json.dumps({"decision": "block", "reason": str(answer.get("reason") or "")}))
     return 0
 
 
@@ -313,7 +501,7 @@ def stream(args: list[str]) -> int:
         got = pull(cwd, session, time.monotonic() + LIFETIME_S, pid, follow=True)
         if got is None:
             try:
-                request("GET", "/api/health", timeout=3.0)
+                request("GET", "/api/health", timeout=3.0, proven=False)
             except (OSError, http.client.HTTPException):
                 time.sleep(RETRY_S)  # the server is down: the Monitor waits for it rather than ending
                 continue
@@ -328,8 +516,22 @@ def main() -> int:
     try:
         if "--stream" in args:
             return stream(args)
+        if server() is None:  # no thimble server recorded: every hook does nothing (module note)
+            return 0
         if "--permission" in args:
             return permission(hook_input())
+        if "--held" in args:
+            return held(hook_input())
+        if "--mode" in args:
+            return mode(hook_input())
+        if "--agents" in args:
+            return agents_hook(hook_input())
+        if "--relay" in args:
+            return relay(hook_input())
+        if "--proxy-stop" in args:
+            return proxy_stop(hook_input())
+        if "--agent-check" in args:
+            return agent_check(hook_input())
         return watch(hook_input())
     except KeyboardInterrupt:
         return 0

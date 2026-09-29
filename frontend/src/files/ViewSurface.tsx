@@ -1,11 +1,13 @@
-// A view on its own in a pane (shell/PaneArea), on the file a ref named or the first file the view claims. While a pane
-// shows it, refs Files would open in this view open here instead (bus `openInView`).
+// A view on its own in a pane (shell/PaneArea), on the file a ref named or the first file the view claims, with the
+// Labels sidebar Files shows beside a view (ViewSide). While a pane shows it, refs Files would open in this view open
+// here instead (bus `openInView`).
 import { useCallback, useEffect, useState } from 'react'
 import { bus, type Events } from '../lib/bus'
 import { inferKind } from './params'
 import { kindIn, parentOf, useFolderStore } from './Tree'
 import { useFilesLabels } from './useLabels'
 import { ViewPane } from './ViewPane'
+import { useViewSide } from './ViewSide'
 import type { BuiltView } from './ViewsBar'
 
 type Place = Omit<Events['openInView'], 'slug'>
@@ -36,9 +38,12 @@ export function ViewSurface({ ws, view, active }: { ws: string; view: BuiltView;
     if (path && active) ensure(parentOf(path))
   }, [path, active, ensure])
   const kind = path ? kindIn(folders.store, path) ?? inferKind(path) : 'text'
+  const side = useViewSide(ws, view, labels)
   return (
-    <div className="view-surface">
-      <ViewPane ws={ws} view={view} path={path} kind={kind} targetRef={at?.ref} quote={at?.quote} onQuoteMissing={quoteMissing} labels={labels} />
+    <div className="view-surface files-body is-view">
+      {side.side}
+      <ViewPane ws={ws} view={view} path={path} kind={kind} targetRef={at?.ref} quote={at?.quote} onQuoteMissing={quoteMissing} labels={labels} lead={side.lead} first={side.first} onNewLabel={side.newLabel} />
+      {side.card}
     </div>
   )
 }

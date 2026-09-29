@@ -106,7 +106,7 @@ export type WsEvent = { ts?: string; seq?: number } & (
   | { type: 'cell'; notebook: string; cell: string; kind: 'ran' | 'note' | 'verified' | string }
   | { type: 'orient'; status: 'started' | 'done' | 'failed' | 'stopped' | string; [k: string]: unknown }
   | { type: 'report'; slug: string; status: 'generating' | 'generated' | 'failed' | 'verified' | 'figures' | 'rewritten' | string; span?: string; run?: string }
-  | { type: 'view'; slug: string; status: 'queued' | 'building' | 'built' | 'failed' | 'deleted' | string; path?: string; chat?: string }
+  | { type: 'view'; slug: string; status: 'queued' | 'building' | 'built' | 'failed' | 'deleted' | string; path?: string; chat?: string; version?: string }
   | { type: 'ticket'; id: string; n: number; status: string }
   | { type: 'concepts'; concept: string; what: 'defined' | 'applied' | 'deleted' | string }
   | { type: 'filter'; scope: FilterScope; concept?: string; value?: string }
@@ -383,8 +383,9 @@ export interface Filters {
 // ---- views and proposals ----
 
 /** A view ticket's build: `dropped` is an orientation proposal that could not be built, shown nowhere (backend
- * views.drop). */
-export type ProposalStatus = 'queued' | 'building' | 'built' | 'failed' | 'dropped'
+ * views.drop); `suggested` a viewer for a file type, such as one the orientation proposes, shown only in the File
+ * browser until the analyst accepts it (backend views.accept). */
+export type ProposalStatus = 'queued' | 'building' | 'built' | 'failed' | 'dropped' | 'suggested'
 
 /** A view ticket (the propose_view tool): what the analyst sees in the view and why, the files it reads, the unit and
  * the layout, and the state of the dev agent's build, whose agent chat is `chat`. */
@@ -397,13 +398,42 @@ export interface Proposal {
   proposed_by: string
   /** the analyst asked for it (backend views.propose): it opens by itself once built (files/viewReady.ts) */
   asked?: boolean
+  /** an orientation's proposal whose view has not passed its checks yet: its card shows the build, the views bar not */
+  held?: boolean
   status: ProposalStatus
   ts: string
   error?: string
   /** the request of a change to the built view that failed, which Retry makes again (backend views.end_revision) */
   failed_change?: string
+  /** a change to a built view is being made (backend views.revise); the view stays open at the version it last passed */
+  revision?: boolean
   chat?: string | null
   attempts?: number
+  /** the review of the built view's pictures (backend view_review) */
+  review?: ViewReview
+}
+
+/** The review of a built view's pictures: running, done (with what it revised and what problems are left), failed
+ * or stopped, with a note that says why; `undo` once the analyst put the view back as it was built. */
+export interface ViewReview {
+  state: 'running' | 'done' | 'failed' | 'stopped'
+  round?: number
+  ts?: string
+  revised?: string[]
+  left?: string[]
+  note?: string
+  undo?: boolean
+}
+
+/** `GET /ws/{c}/views/suggestions?path=`: whether a viewer may be proposed for the type of a file opened in the File
+ * browser, why not, the workspace's answer for the type and its proposal (backend views.suggestion_for). */
+export interface ViewSuggestion {
+  path: string
+  suffix: string
+  eligible: boolean
+  reason: string
+  answer: 'suggested' | 'none' | 'dismissed' | null
+  proposal: Proposal | null
 }
 
 /** One form a view adds to the citation grammar: a fragment of a file it claims, or view:<slug>/<key>. */
@@ -425,12 +455,19 @@ export interface View {
   default: boolean
   libs: string[]
   built: string
+  /** the digest of its files when it last passed its checks: a page loaded at it keeps it until reloaded */
+  version?: string
   /** reader.py, view.html and claims are all there */
   ok: boolean
   /** the forms as written in a citation */
   forms: ViewForm[]
-  /** the first file it claims, which a view opened on its own shows */
+  /** the first file it claims, which Raw shows for a view opened on its own */
   first_file?: string | null
+  /** the files it claims, the first 500 of them, and how many there are */
+  files?: string[]
+  n_files?: number
+  /** every claim is one extension's glob: a viewer for a file type, a mode of the File browser for the files it claims */
+  file_type?: boolean
 }
 
 /** A diagram card's dataset (canvas/DataViz.tsx). */
@@ -441,6 +478,12 @@ export interface GraphDataset {
 /** A timeline card's dataset (canvas/DataViz.tsx). */
 export interface TimelineDataset {
   events: ({ time: string | number; label: string; lane?: string; end?: string | number } & Record<string, unknown>)[]
+}
+
+/** `GET /ws/{c}/views/{slug}/problems`: the lines of its files a view's reader could not read, the first few of them. */
+export interface ViewProblems {
+  count: number
+  examples: { ref: string; why: string }[]
 }
 
 /** What a view's page gets as `open` (`GET /ws/{c}/views/{slug}/resolve?ref=`). */
@@ -495,6 +538,24 @@ export interface PermissionRequest {
   /** why auto mode refused the call, when the request is one it refused and the analyst may allow (backend
    * agent_session, auto mode) */
   refused?: string
+  /** how many times thimble sent the call back to auto mode after its classifier gave no verdict, before asking */
+  rechecked?: number
+  /** how long the request waits unanswered before the call is denied, in seconds; absent when it waits for good */
+  deny_after_s?: number
+  /** when nobody answered it in time and it was denied: it stays on the card until dismissed (backend agent_session,
+   * permissions) */
+  expired?: string
+  /** the seconds it waits before it is denied unanswered, when it does not wait for the analyst however long */
+  wait_s?: number
+  /** the mode of the session that asks (manual, auto, bypass) */
+  mode?: string
+  /** the later calls for the same site, or later searches, that wait on this request's answer, each listed whole */
+  also?: string[]
+  /** a web call's "don't ask again", kept for the workspace: its site, or `web search` */
+  keep?: string
+  /** the length of the command or input when the card shows only its start (backend PERMISSION_INPUT_CHARS); such a
+   * request offers no "don't ask again" */
+  cut?: number
 }
 
 /** A session held where the browser cannot answer: the model-switch dialog after a safety stop (session.py). */
@@ -522,14 +583,15 @@ export interface StartBody {
   ultracode: boolean
   effort: OrientEffort
   text?: string
-  /** the orientation's permission mode, Start's switcher: `manual` sends each request Claude Code makes to its card,
-   * `auto` runs in Claude Code's auto mode and sends the calls it will not decide there, `bypass` grants every request
-   * without asking; absent, the workspace's stored mode, else the one the analyst's own mode maps to */
-  permissions?: OrientPermissions
 }
 
-/** Start's mode switcher for the orientation's session alone, Claude Code's own modes: Manual, Auto or Bypass. */
+/** A permission mode of the sessions thimble starts (backend modes.MODES): `manual` sends each request Claude Code makes
+ * to the card, `auto` runs in Claude Code's auto mode and sends the calls it refuses there, `bypass` grants every
+ * request without asking. */
 export type OrientPermissions = 'manual' | 'auto' | 'bypass'
+
+/** The agents that each run in a permission mode of their own (backend modes.AGENTS). */
+export type ModeAgent = 'orient' | 'writer' | 'critic' | 'dev' | 'views'
 
 // ---- documents ----
 
@@ -849,12 +911,23 @@ export interface ModelConf {
 /** `GET /ws/{c}/settings` layers the effective `models` in; a PUT merges what it is given. */
 export interface Settings {
   models: Record<string, ModelConf>
+  /** terminal-first mode: the orientation, its critic and the writers run as Claude Code background sessions the
+   * analyst's terminal shows (backend orientation.terminal_first) */
+  terminal_first?: boolean
+  /** the chat column is hidden and main's foot shows in a dock (shell/Shell, chat off) */
+  hide_chat?: boolean
+  /** the agents whose permission mode the analyst set; any other runs in the mode of their Claude Code session */
+  permission_modes?: Partial<Record<ModeAgent, OrientPermissions>>
+  /** the modes the analyst's Claude Code settings turn off */
+  disabled_modes?: OrientPermissions[]
   [k: string]: unknown
 }
 
-/** `PUT /ws/{c}/settings`: `models` merges per role and within a role, so a role's patch names only what changes. */
+/** `PUT /ws/{c}/settings`: `models` merges per role and within a role, so a role's patch names only what changes;
+ * `permission_modes` merges per agent, null putting an agent back on the session's mode. */
 export interface SettingsPatch {
   models?: Record<string, Partial<ModelConf>>
+  permission_modes?: Partial<Record<ModeAgent, OrientPermissions | null>>
   [k: string]: unknown
 }
 
@@ -1252,8 +1325,37 @@ export interface PageDoc {
   model?: string
 }
 
+/** A video's line (backend video.py): what the voice says, one or two cited sentences, and the seconds of silence
+ * after it. */
+export interface VideoLine {
+  id: string
+  sentences: WriteupSentence[]
+  pause_after?: number
+}
+
+/** When each line starts and ends in the film, in seconds, the lines in script order (backend video.timing). */
+export interface VideoTiming {
+  duration: number
+  lines: { id: string; start: number; end: number }[]
+}
+
+/** A video: its narration as lines and its film, one html page drawn at 1280×720 from `window.seek(t)`. */
+export interface VideoDoc {
+  id?: string
+  type?: string
+  renderer: 'video'
+  title: string
+  lines: VideoLine[]
+  film?: string
+  timing?: VideoTiming
+  comments?: WriteupComment[]
+  generation?: number
+  generated_at?: string
+  model?: string
+}
+
 /** Any stored document the Report tab shows. */
-export type AnyDoc = Writeup | StoryDoc | DeckDoc | PageDoc
+export type AnyDoc = Writeup | StoryDoc | DeckDoc | PageDoc | VideoDoc
 
 /** A preset + New offers (`GET /report-types/presets`, backend prompts/types/<id>.md). */
 export interface DocPreset {
@@ -1300,16 +1402,16 @@ export interface Attached {
   model?: string
   /** the effort they ran at, as the mirror last read it */
   effort?: string
-  /** what the composer's chip set for this session */
+  /** what the composer's chip chose for main's next launch, while this session runs */
   effort_choice?: MainEffort
   /** the effort the analyst's own Claude Code settings choose (cc_settings.analyst_effort), where main's effort menu opens */
   settings_effort?: MainEffort
   /** whether the session's last reply ran in fast mode, as the mirror read it */
   fast?: boolean
-  /** the permission mode the analyst's own Claude Code settings choose for the folder (`permissions.defaultMode`:
-   * default, acceptEdits, auto, plan, bypassPermissions, dontAsk), which the Start panel's permission choice opens on */
+  /** the permission mode Claude Code last reported to the session's hooks (default, acceptEdits, auto, plan,
+   * bypassPermissions, dontAsk), which each agent's permission mode follows until the analyst sets it (backend modes.py) */
   permission_mode?: string
-  /** what the composer's fast-mode switch set for this session */
+  /** what the composer's fast-mode switch chose for main's next launch, while this session runs */
   fast_choice?: boolean
   /** the session that was main until this one took its place while it runs on in another terminal */
   after?: string
@@ -1342,11 +1444,16 @@ export interface ChatMeta {
   /** a session thimble started: what the analyst's "don't ask again" answers added for the rest of it, each in Claude
    * Code's words (backend agent_session, don't ask again) */
   session_rules?: { text: string }[]
-  /** the orientation's session (and its critique's): the permission mode it runs in now, which its card's switcher
-   * shows and changes (agent_session, permissions) */
+  /** a session thimble started: the permission mode it runs in now, which its card's switcher shows and changes
+   * (agent_session, permissions) */
   permission_mode?: OrientPermissions
   /** the mode a switch into or out of Auto goes to, while the session waits for a pause to restart in it */
   mode_switch?: OrientPermissions | null
+  /** a session thimble runs as a Claude Code background session (backend bg_session) */
+  background?: boolean
+  /** a session thimble started: its agent's row of the permission modes (backend modes.AGENTS), which a pick its card
+   * cannot make while it runs saves to (ModeSwitch) */
+  mode_agent?: ModeAgent
   /** the orientation's session: whether it runs with Ultracode, and its critique */
   ultracode?: boolean
   critique?: boolean

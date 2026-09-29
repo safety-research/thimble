@@ -5,7 +5,7 @@
 import type { ChatMeta, PermissionRequest } from '../lib/types'
 import { toolDisplayName } from './model'
 import { threadKind } from './threads'
-import { pendingAsks } from './waiting'
+import { cardAsks } from './waiting'
 
 /** One request waiting for the analyst, and the chat whose session asks: `main` for a prompt of the analyst's own
  * session. */
@@ -14,22 +14,33 @@ export interface PendingAsk {
   request: PermissionRequest
 }
 
-/** Every request waiting for the analyst: main's, then those of every session thimble started while it runs, the one
- * asked first first. Pure. */
+/** Every request on the card: main's, then those of every session thimble started while it runs, the one asked first
+ * first, and after them those denied unanswered. Pure. */
 export function pendingRequests(main: Pick<ChatMeta, 'permissions'> | null | undefined, metas: Iterable<ChatMeta>): PendingAsk[] {
   const out: PendingAsk[] = (main?.permissions ?? []).map((request) => ({ chat: 'main', request }))
   for (const m of metas) {
     if (m.id === 'main') continue
-    for (const request of pendingAsks(m)) out.push({ chat: m.id, request })
+    for (const request of cardAsks(m)) out.push({ chat: m.id, request })
   }
   // a stable order: by when each asked, and in the order read where a time is missing
-  return out.map((a, i) => ({ a, i })).sort((x, y) => (x.a.request.since ?? '').localeCompare(y.a.request.since ?? '') || x.i - y.i).map((x) => x.a)
+  const done = (a: PendingAsk) => (a.request.expired ? 1 : 0)
+  return out
+    .map((a, i) => ({ a, i }))
+    .sort((x, y) => done(x.a) - done(y.a) || (x.a.request.since ?? '').localeCompare(y.a.request.since ?? '') || x.i - y.i)
+    .map((x) => x.a)
 }
 
 /** The thread a request comes from, which the card's head names: the thread of main whose agent asked (main's
  * request that names it), else the chat of the session that asked, main for main's own. Pure. */
-export function askThread(ask: PendingAsk): string {
-  return ask.chat === 'main' ? ask.request.chat || 'main' : ask.chat
+export function askThread(ask: PendingAsk, metas?: ReadonlyMap<string, ChatMeta>, labels?: ReadonlyMap<string, string>): string {
+  if (ask.chat !== 'main') return ask.chat
+  const id = ask.request.chat
+  const m = id ? metas?.get(id) : undefined
+  if (!id || !m || labels?.has(id) || threadKind(m) != null) return id || 'main'
+  // a subagent of main, which the thread tree does not list: main, or (in a chat an earlier build left) the orientation
+  // run as main's subagent that started it
+  const parent = m.parent ? metas?.get(m.parent) : undefined
+  return parent && threadKind(parent) === 'orient' ? parent.id : 'main'
 }
 
 /** What a call of each tool asks to do, as the card's head says it (asks to run a command). */
@@ -55,23 +66,48 @@ export function asksTo(tool: string): string {
 }
 
 /** The session that asks, in words: your Claude Code session for main (or the thread of it that asked), the
- * orientation, its critique, the report writer, a report check. `labels` names each chat as the thread tree does. Pure. */
+ * orientation, its critique, the report writer, a report check, the dev agent and its task (dev · view Posts, dev ·
+ * ticket #3). `labels` names each chat as the thread tree does. Pure. */
 export function askedBy(ask: PendingAsk, metas: ReadonlyMap<string, ChatMeta>, labels: ReadonlyMap<string, string> = new Map()): string {
   if (ask.chat === 'main') {
-    const from = ask.request.chat ? labels.get(ask.request.chat) : null
-    return from && from !== 'main' ? `The thread ${from}` : 'Your Claude Code session'
+    const id = ask.request.chat
+    const from = id ? labels.get(id) : null
+    if (from && from !== 'main') return from === 'orient' || from.startsWith('orient-') ? 'The orientation' : `The thread ${from}`
+    // a subagent of main, or (in a chat an earlier build left) one an orientation run as main's subagent started, which
+    // the tree does not list
+    const m = id ? metas.get(id) : undefined
+    if (!m || from === 'main') return 'Your Claude Code session'
+    const parent = m.parent ? metas.get(m.parent) : undefined
+    const title = (m.title || 'agent').trim()
+    return parent && threadKind(parent) === 'orient' ? `The orientation's agent “${title}”` : `Main's agent “${title}”`
   }
   const m = metas.get(ask.chat)
   const kind = m ? threadKind(m) : null
   if (kind === 'orient') return 'The orientation'
   if (kind === 'writer') return 'The report writer'
   if (kind === 'check') return m?.title ? `The ${m.title} check` : 'A report check'
+  if (kind === 'dev') return `dev · ${devTask(m?.title ?? '', !!m?.view)}`
   if (kind === 'step') {
     const parent = m?.parent ? metas.get(m.parent) : undefined
     const title = (m?.title || 'step').trim()
     return parent && threadKind(parent) === 'orient' ? `The orientation's ${title}` : `The step ${title}`
   }
   return labels.get(ask.chat) ?? 'A session'
+}
+
+/** A dev chat's task as its title names it (backend dev: `view: <name>`, `ticket #<n>: <title>`): `view <name>`,
+ * `ticket #<n>`. Pure. */
+function devTask(title: string, view: boolean): string {
+  const t = title.trim()
+  if (view) return `view ${t.replace(/^view:\s*/, '')}`
+  const m = /^(ticket(?: #\d+)?):/.exec(t)
+  return m ? m[1] : t || 'ticket'
+}
+
+/** A wait in words: `a minute`, `10 minutes`, or `90 seconds` for one that is no whole number of minutes. Pure. */
+export function waitWords(seconds: number): string {
+  if (seconds < 60 || seconds % 60) return `${Math.round(seconds)} seconds`
+  return seconds === 60 ? 'a minute' : `${seconds / 60} minutes`
 }
 
 /** The agent of the session that made the call, when a subagent or a workflow agent did: its step's title and type,
@@ -82,40 +118,51 @@ export function askingAgent(p: Pick<PermissionRequest, 'agent_id' | 'agent_type'
   return { title: p.agent_title || '', type, chat: p.agent_chat || null }
 }
 
-/** Claude Code's reason when auto mode's classifier cannot run in the session: auto mode then leaves every call it
- * would have judged to the analyst, for the whole session. */
+/** Claude Code's reason when auto mode's classifier gave no verdict on a call (backend agent_session.CLASSIFIER_DOWN). */
 const CLASSIFIER_DOWN = /\bclassifier\b.*\bunavailable\b/i
 
-/** Whether auto mode left the call to the analyst only because its classifier cannot run in this session. Pure. */
+/** Whether auto mode left the call to the analyst only because its classifier gave no verdict. Pure. */
 export function classifierDown(p: Pick<PermissionRequest, 'refused'>): boolean {
   return !!p.refused && CLASSIFIER_DOWN.test(p.refused)
 }
 
-/** The chat whose permission mode the card can switch for this request: the asking session's own, when it has a mode
- * of its own (the orientation, whose card's switcher is ModeSwitch); null for a session that runs in the analyst's own
- * mode. Pure. */
+/** When an unanswered request is denied, as the card says it: "after a minute", "after 10 minutes". Pure. */
+function denyAfter(s: number): string {
+  const min = Math.round(s / 60)
+  return min <= 1 ? 'after a minute' : `after ${min} minutes`
+}
+
+/** The chat whose permission mode the card can switch out of Auto for this request: the asking session's own, when it
+ * runs one (its card's switcher is ModeSwitch); null for main, the dev agent's sessions and a background session, which
+ * cannot leave Auto while it runs (backend agent_session.BG_AUTO_LINE). Pure. */
 export function modeChat(ask: PendingAsk, metas: ReadonlyMap<string, ChatMeta>): string | null {
-  return ask.chat !== 'main' && metas.get(ask.chat)?.permission_mode ? ask.chat : null
+  const m = metas.get(ask.chat)
+  return ask.chat !== 'main' && m?.permission_mode && !m.background ? ask.chat : null
 }
 
 /** The modes an orientation runs in, as its switcher names them. */
 const MODE_NAMES: Readonly<Record<string, string>> = { manual: 'Manual', auto: 'Auto', bypass: 'Bypass' }
 
-/** Why the session asks, in one line: auto mode cannot decide or left the call to the analyst, the orientation runs in
- * Manual, a writer or check runs in the analyst's mode (denied after a minute unanswered), or main's prompt also waits
- * in the terminal, where the first answer counts. Pure. */
+/** Why the session asks, in one line: auto mode could not judge the call (and when it is denied unanswered) or left it
+ * to the analyst, the session runs in Manual (a writer's or check's request is denied after a minute unanswered, the dev
+ * agent's after its wait), or main's prompt also waits in the terminal, where the first answer counts; for a request
+ * denied unanswered, that it was. Pure. */
 export function askWhy(ask: PendingAsk, metas: ReadonlyMap<string, ChatMeta>): string {
   const p = ask.request
-  if (classifierDown(p)) return "Auto mode cannot decide in this session (Claude Code's classifier is unavailable), so it asks you about each call."
+  if (p.expired) return `Nobody answered within ${waitWords(p.wait_s ?? 60)}, so it was denied and the session went on without it.`
+  if (classifierDown(p)) {
+    const tries = p.rechecked ? `, all ${p.rechecked + 1} times it was asked` : ''
+    const late = p.deny_after_s ? ` Unanswered, it is denied ${denyAfter(p.deny_after_s)}.` : ''
+    return `Auto mode could not judge this call: Claude Code's classifier was unavailable${tries}.${late}`
+  }
   if (p.refused) return `Auto mode did not allow it on its own: ${p.refused.replace(/[.\s]+$/, '')}.`
   if (ask.chat === 'main') return 'Claude Code asks in your terminal too; the first answer counts.'
   const m = metas.get(ask.chat)
   const kind = m ? threadKind(m) : null
-  if (kind === 'writer' || kind === 'check') return 'It runs in your Claude Code permission mode, which asks for this call. Unanswered, it is denied after a minute.'
-  // a critique runs in its orientation's mode
-  const session = kind === 'step' && m?.parent ? metas.get(m.parent) ?? m : m
-  const mode = session?.permission_mode ? MODE_NAMES[session.permission_mode] : null
-  if (mode === 'Manual') return `${kind === 'step' ? 'The orientation' : 'It'} runs in Manual, which asks before each call.`
-  if (mode === 'Auto') return 'Auto mode asks you about this call.'
-  return 'Its permission mode asks for this call.'
+  const name = m?.permission_mode ?? p.mode
+  const mode = name ? MODE_NAMES[name] : null
+  const why = mode === 'Manual' ? 'It runs in Manual, which asks before each call.' : mode === 'Auto' ? 'Auto mode asks you about this call.' : 'Its permission mode asks for this call.'
+  if (kind === 'writer' || kind === 'check') return `${why} Unanswered, it is denied after a minute.`
+  if (kind === 'dev' && p.wait_s) return `${why} Unanswered, it is denied after ${waitWords(p.wait_s)} and the work goes on without it.`
+  return why
 }

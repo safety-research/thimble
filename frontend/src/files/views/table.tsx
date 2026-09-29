@@ -1,12 +1,14 @@
 // The Table view: one row per record, one column per field, offered when the records are flat objects that share
-// their keys. Columns are ordered by how many records carry them; records that read as posts lead with author, time
-// and body. Every cell is one line cut with an ellipsis. The labels that are on tint rows and highlight marked texts in
-// cells (a cell starts a little before its first mark when the mark would fall past what it shows), and the pinned
-// line-number column holds a slot per label that is on, under the label's mark (LabelMark). Only rows near the view are
-// drawn, with spacer rows for the rest; hidden width holders in the header keep column widths stable.
+// their keys, and for a CSV or TSV file, whose first line names the columns. Columns are ordered by how many records
+// carry them; records that read as posts lead with author, time and body. Every cell is one line cut with an ellipsis.
+// The labels that are on tint rows and highlight marked texts in cells (a cell starts a little before its first mark
+// when the mark would fall past what it shows), and the pinned line-number column holds a slot per label that is on,
+// under the label's mark (LabelMark). Only rows near the view are drawn, with spacer rows for the rest; hidden width
+// holders in the header keep column widths stable.
 import { memo, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type RefObject } from 'react'
 import { flushSync } from 'react-dom'
 import { Tipped } from '../../components/Tooltip'
+import { api } from '../../lib/api'
 import type { SourceKind, SourceRecord } from '../../lib/types'
 import { cellFill, laneTags, markSegments, type SpanMark } from '../labels'
 import { ReaderLabelsContext, useMarksAt } from '../marks'
@@ -250,8 +252,87 @@ function useDrawnRows(rootRef: RefObject<HTMLElement | null>, bodyRef: RefObject
   return { from, to, above: from * rowH, below: (n - to) * rowH }
 }
 
-export function Table({ path, page, targetRef }: ViewProps) {
-  const records = page.records
+const DELIMITED = /\.(csv|tsv)$/i
+
+/** The lines of a CSV or TSV file as its records' cells. In CSV a quoted cell may hold the delimiter, doubled quotes and
+ * line breaks, so a line that ends inside one goes on in the next line; a record is keyed by its first line. A TSV line
+ * is one record, its cells split at tabs with no quoting. Pure. */
+export function splitDelimited(lines: { line: number; text: string }[], sep: string): { line: number; cells: string[] }[] {
+  if (sep === '\t') return lines.map(({ line, text }) => ({ line, cells: text.split('\t') }))
+  const out: { line: number; cells: string[] }[] = []
+  let first = 0
+  let last = -1
+  let cells: string[] = []
+  let cur = ''
+  let quoted = false
+  const end = () => {
+    cells.push(cur)
+    out.push({ line: first, cells })
+  }
+  for (const { line, text } of lines) {
+    if (quoted && line === last + 1) cur += '\n'
+    else {
+      if (quoted) end()
+      first = line
+      cells = []
+      cur = ''
+      quoted = false
+    }
+    last = line
+    for (let i = 0; i < text.length; i++) {
+      const ch = text[i]
+      if (quoted) {
+        if (ch !== '"') cur += ch
+        else if (text[i + 1] === '"') cur += text[++i]
+        else quoted = false
+      } else if (ch === '"' && cur === '') quoted = true
+      else if (ch === sep) {
+        cells.push(cur)
+        cur = ''
+      } else cur += ch
+    }
+    if (!quoted) end()
+  }
+  if (quoted) end()
+  return out
+}
+
+const lineText = (rec: SourceRecord | undefined): string | null => (rec && typeof rec.record?.text === 'string' ? rec.record.text : null)
+
+/** A CSV or TSV file's records as objects keyed by its first line, which is read on its own when the page does not
+ * hold it; the first line itself is no row. Any other file's records as they are. */
+function useDelimited(workspace: string, path: string, records: SourceRecord[]): SourceRecord[] {
+  const delimited = DELIMITED.test(path)
+  const sep = /\.tsv$/i.test(path) ? '\t' : ','
+  const first = records[0]?.line === 1 ? lineText(records[0]) : null
+  const [header, setHeader] = useState<string[] | null>(null)
+  useEffect(() => {
+    if (!delimited) return
+    const cellsOf = (t: string) => splitDelimited([{ line: 1, text: t }], sep)[0]?.cells ?? []
+    if (first != null) return setHeader(cellsOf(first))
+    let alive = true
+    api
+      .source(workspace, path, 1, 1)
+      .then((p) => {
+        const t = lineText(p.records[0])
+        if (alive && t != null) setHeader(cellsOf(t))
+      })
+      .catch(() => undefined)
+    return () => {
+      alive = false
+    }
+  }, [workspace, path, delimited, first, sep])
+  return useMemo(() => {
+    if (!delimited || !header) return records
+    const name = (i: number) => header[i]?.trim() || `column ${i + 1}`
+    const byLine = new Map(records.map((r) => [r.line, r]))
+    const lines = records.filter((r) => r.line > 1).map((r) => ({ line: r.line, text: lineText(r) ?? '' }))
+    return splitDelimited(lines, sep).map(({ line, cells }) => ({ ...byLine.get(line)!, record: Object.fromEntries(cells.map((v, i) => [name(i), v])) }))
+  }, [records, header, delimited, sep])
+}
+
+export function Table({ workspace, path, page, targetRef }: ViewProps) {
+  const records = useDelimited(workspace, path, page.records)
   const rootRef = useRef<HTMLDivElement | null>(null)
   const bodyRef = useRef<HTMLTableSectionElement | null>(null)
   const { target, hit } = useTarget(targetRef, path, rootRef, [records])
@@ -441,6 +522,7 @@ export function tableScore(sample: any[]): number {
 }
 
 function match(path: string, kind: SourceKind, sample: any[]): number {
+  if (DELIMITED.test(path)) return 0.85
   return isJsonlFile(path, kind) ? tableScore(sample) : 0
 }
 

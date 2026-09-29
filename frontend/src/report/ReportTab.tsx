@@ -1,11 +1,13 @@
-// The Report tab: the type bar, then the document in its arrangement. The bar holds the types as tabs, + New
+// The Report tab: the type bar, then the document in its arrangement. The bar holds the types as chips with an icon,
+// drawn as the Files views bar draws its views (Segmented), + New
 // (DocMenus.tsx), Export, the story's Read, the lock note (LockNote.tsx), History (History.tsx) and the primary action,
 // Write or Revise, which asks the analyst's session for the document (a `write` channel event; `report` stream events
 // follow it). A failed write stays on its document (writeFailures.ts) with Retry until dismissed or written. A document
 // not written yet is its frame (GET …/frame). The views' module (Documents.tsx) is imported once in an effect rather than
 // with React.lazy, whose Suspense retry can stall; documents are kept by slug so a switch never shows an empty body.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Button, Tabs } from '../components/Button'
+import { Button, Segmented } from '../components/Button'
+import type { IconName } from '../components/Icon'
 import { FilterChip } from '../components/FilterChip'
 import { Mark } from '../components/Marks'
 import { Spinner } from '../components/Spinner'
@@ -69,6 +71,9 @@ async function exportDoc(ws: string, slug: string): Promise<void> {
   a.click()
   window.setTimeout(() => URL.revokeObjectURL(url), 1000)
 }
+
+/** Each kind of document's icon in the type bar, by its renderer. */
+const DOC_ICON: Record<string, IconName> = { document: 'doc', slides: 'image', story: 'writeup', video: 'run', custom: 'page' }
 
 export function ReportTab({ ws, active }: { ws: string; active: boolean }) {
   const [slug, setSlugState] = useState<string>(() => readStorage<string>(docKey(ws), SLUG) || SLUG)
@@ -283,6 +288,7 @@ export function ReportTab({ ws, active }: { ws: string; active: boolean }) {
   const doc = load.state === 'ok' ? load.doc : null
   const renderer = rendererOf(types, slug, doc)
   const isPage = renderer === 'custom'
+  const isVideo = renderer === 'video'
   useEffect(() => {
     if (doc) lastShown.current = { slug, doc }
   }, [slug, doc])
@@ -294,6 +300,8 @@ export function ReportTab({ ws, active }: { ws: string; active: boolean }) {
   // a writer's session of this document that runs: the write goes on after its first save (the stream says
   // `generated` then), so the primary action stays Writing, never Revise, until the session ends
   const writer = chats.find((m) => m.role === 'writer' && m.status === 'running' && writerDoc(m) === slug) ?? null
+  // a document is being written while its write is pending or a writer of it runs (which goes on after its first save)
+  const writingOf = (s: string) => !!generating[s] || types?.[s]?.status === 'generating' || chats.some((m) => m.role === 'writer' && m.status === 'running' && writerDoc(m) === s)
   const busy = writingSlug === slug || !!generating[slug] || types?.[slug]?.status === 'generating' || !!writer
   // the request reaches the session as an event; the stream's `report` events (generating, then generated or failed)
   // carry the write from there, so the button stays busy while the writer works
@@ -342,7 +350,7 @@ export function ReportTab({ ws, active }: { ws: string; active: boolean }) {
     </div>
   )
   const closePast = useCallback(() => setPast(null), [])
-  const pastShown = past != null && written && !isPage
+  const pastShown = past != null && written && !isPage && !isVideo
   const view = pastShown ? (
     past.view.kind === 'diff' ? (
       <DraftDiff ws={ws} slug={slug} from={past.view.from} to={past.view.to} rows={past.rows} onClose={closePast} />
@@ -351,7 +359,7 @@ export function ReportTab({ ws, active }: { ws: string; active: boolean }) {
     )
   ) : shown && (bodyDoc || (isPage && load.state === 'none')) ? (
       views ? (
-        <views.DocumentView ws={ws} slug={bodySlug} renderer={bodyRenderer} doc={bodyDoc} filter={filter} client={CLIENT} drawer={drawer || load.state === 'none'} onSaved={onSaved} />
+        <views.DocumentView ws={ws} slug={bodySlug} renderer={bodyRenderer} doc={bodyDoc} filter={filter} client={CLIENT} drawer={drawer || load.state === 'none'} onSaved={onSaved} writing={writingOf(bodySlug)} />
       ) : viewsError ? (
         <div className="wu-status wu-error">
           Could not load the editor
@@ -364,18 +372,21 @@ export function ReportTab({ ws, active }: { ws: string; active: boolean }) {
   return (
     <div className="wu-root" ref={root} data-panel="report" data-doc={slug} data-renderer={renderer}>
       <div className="wu-bar">
-        <Tabs
+        <Segmented
           className="wu-types"
           label="Documents"
+          size="lg"
           value={slug}
           onChange={setSlug}
           options={items.map((it) => ({
             value: it.slug,
+            icon: DOC_ICON[it.renderer] ?? 'doc',
+            className: it.generating || writingOf(it.slug) ? 'is-updating' : undefined,
             label: (
               <span className="wu-type" data-doc-chip={it.slug}>
-                {!it.generating && failures[it.slug] && <Mark kind="failed" label="Not written" className="wu-type-failed" />}
+                {!(it.generating || writingOf(it.slug)) && failures[it.slug] && <Mark kind="failed" label="Not written" className="wu-type-failed" />}
                 {it.label}
-                {it.generating && <Spinner size={10} label="Writing" className="tab-dot tab-spinner" />}
+                {(it.generating || writingOf(it.slug)) && <Spinner size={10} label="Writing" className="tab-dot tab-spinner" />}
               </span>
             ),
           }))}
@@ -384,7 +395,7 @@ export function ReportTab({ ws, active }: { ws: string; active: boolean }) {
         <NewDocMenu ws={ws} onMade={(t) => void made(t)} />
         <span className="wu-bar-spacer" />
         {filter && <FilterChip concept={filter.concept} name={filter.name} value={filter.value} count={filter.sets.sids.size} onClear={() => void clearFilter()} />}
-        {written && !isPage && <HistoryMenu ws={ws} slug={slug} generation={bodyDoc?.generation} view={pastShown ? past.view : null} onView={(view, rows) => setPast(view == null ? null : { view, rows })} />}
+        {written && !isPage && !isVideo && <HistoryMenu ws={ws} slug={slug} generation={bodyDoc?.generation} view={pastShown ? past.view : null} onView={(view, rows) => setPast(view == null ? null : { view, rows })} />}
         {written && (
           <button type="button" className="wu-export" onClick={() => void doExport()}>
             Export

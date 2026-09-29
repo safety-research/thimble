@@ -54,6 +54,7 @@ function fanOut(ev: WsEvent): void {
           path: typeof rest.path === 'string' ? rest.path : undefined,
           chat: typeof rest.chat === 'string' ? rest.chat : undefined,
           asked: rest.asked === true || undefined,
+          version: typeof rest.version === 'string' ? rest.version : undefined,
         })
       return
     case 'ticket':

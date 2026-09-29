@@ -18,7 +18,7 @@ import { loadSettings, modelChoices, modelLabel } from '../lib/models'
 import { track } from '../lib/telemetry'
 import { hhmm } from '../lib/time'
 import type { Concept, ConceptKind, ConceptPatch, ConceptRun, LabelClass, LabelDraft, LabelMarks } from '../lib/types'
-import { classesOf, colourVar, draftClasses, isFilesLabel, isMultiClass, LABEL_COLOURS, MULTI_COLOUR, labelStatus, marksOf, nextColour, overOf, ownColour, progressText, unitOfOver, unitWord, type LabelOver } from './labels'
+import { classesOf, colourVar, draftClasses, freeColour, isFilesLabel, isMultiClass, LABEL_COLOURS, MULTI_COLOUR, labelStatus, marksOf, nextColour, overOf, ownColour, progressText, unitOfOver, unitWord, usedColours, type LabelOver } from './labels'
 import { useFilesLabels, type FilesLabels } from './useLabels'
 
 interface Props {
@@ -76,14 +76,13 @@ function LabelSwatch({ classes }: { classes: readonly LabelClass[] }) {
   return <span className="label-card-swatch" style={{ '--c': colourVar(classes[0]?.color) } as CSSProperties} />
 }
 
-/** The colour a new label takes: the first no label has, else the next in turn (the server's rule, fill_colours). */
+/** The colour a new label takes: the first no class of any label has, else the next in turn (the server's rule,
+ * fill_colours). */
 export function nextFreeColour(labels: Concept[]): number {
-  const used = new Set(labels.map((k) => classesOf(k)[0]?.color).filter((c): c is number => !!c))
-  for (let n = 1; n <= LABEL_COLOURS; n++) if (!used.has(n)) return n
-  return (labels.length % LABEL_COLOURS) + 1
+  return freeColour(1, usedColours(labels)) ?? (labels.length % LABEL_COLOURS) + 1
 }
 
-export const draftOf = (k: Concept | null, appliesTo: string[], colour = 1, drafted: LabelDraft | null = null): Draft =>
+export const draftOf = (k: Concept | null, appliesTo: string[], colour = 1, drafted: LabelDraft | null = null, used: readonly number[] = []): Draft =>
   drafted && !k
     ? {
         name: drafted.name,
@@ -93,7 +92,7 @@ export const draftOf = (k: Concept | null, appliesTo: string[], colour = 1, draf
         kind: drafted.kind,
         body: drafted.text,
         model: '',
-        classes: draftClasses(drafted.values, colour),
+        classes: draftClasses(drafted.values, colour, used),
       }
     : k
     ? {
@@ -174,14 +173,14 @@ export function editsOf(k: Concept, d: Draft): string[] {
 }
 
 export function LabelCard({ ws, label, labels, appliesTo, draft: drafted = null, lead, onClose, onRun }: Props) {
-  const [draft, setDraft] = useState<Draft>(() => draftOf(label, appliesTo, nextFreeColour(labels.all), drafted))
+  const [draft, setDraft] = useState<Draft>(() => draftOf(label, appliesTo, nextFreeColour(labels.all), drafted, usedColours(labels.all)))
   const [saving, setSaving] = useState(false)
   const isNew = label == null
   const set = (patch: Partial<Draft>) => setDraft((d) => ({ ...d, ...patch }))
   const classes = withSavedColours(label, draft)
 
   useEffect(() => {
-    setDraft(draftOf(label, appliesTo, nextFreeColour(labels.all), drafted))
+    setDraft(draftOf(label, appliesTo, nextFreeColour(labels.all), drafted, usedColours(labels.all)))
     // a different label (or a new one, or another drafted one) starts a fresh draft; the same label's live changes leave
     // the draft alone
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -291,7 +290,12 @@ function LabelFields({ ws, label, labels, draft, classes, set, counts }: { ws: s
     if (label && ('color' in patch || 'highlight' in patch) && next.length === liveClasses.length && next.every((c, j) => c.name === liveClasses[j].name))
       labels.setClasses(label.id, next)
   }
-  const addClass = () => set({ classes: [...classes, { name: '', color: ownColour((((classes[0]?.color || 1) - 1 + classes.length) % LABEL_COLOURS) + 1, classes.map((x) => x.color)), highlight: true }] })
+  const addClass = () => {
+    const at = (((classes[0]?.color || 1) - 1 + classes.length) % LABEL_COLOURS) + 1
+    const own = classes.map((x) => x.color)
+    const others = usedColours(labels.all.filter((k) => k.id !== label?.id))
+    set({ classes: [...classes, { name: '', color: freeColour(at, [...others, ...own]) ?? ownColour(at, own), highlight: true }] })
+  }
   const dropClass = (i: number) => set({ classes: classes.filter((_, j) => j !== i) })
   const saved = new Set(liveClasses.map((c) => c.name))
 
@@ -444,7 +448,7 @@ export function LabelSheet({ ws, label, draft, onDraft, onClose, onOpen, onRevie
     onDraft(definitionOf(next) === definitionOf(draftOf(label, [])) ? null : next)
   }
   const status = labelStatus(k)
-  const counted = status?.state === 'done' ? `${status.total.toLocaleString()} ${unitWord(status.unit, status.total)}` : status?.state === 'running' ? progressText(status) : ''
+  const counted = status?.state === 'done' ? (status.total == null ? '' : `${status.total.toLocaleString()} ${unitWord(status.unit, status.total)}`) : status?.state === 'running' ? progressText(status) : ''
   return (
     <div className="label-sheet">
       <div className="label-card-head">

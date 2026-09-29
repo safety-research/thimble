@@ -382,9 +382,11 @@ def plural(n: int, word: str) -> str:
 
 
 def claude_version() -> str:
-    exe = shutil.which("claude")
+    """`claude --version` of the `claude` thimble runs (config.CLI_PATH; PATH's when config cannot be imported)."""
+    cfg = _lazy("config")
+    exe = cfg.CLI_PATH if cfg is not None else shutil.which("claude")
     if not exe:
-        return "not found on PATH"
+        return "not found"
     try:
         out = subprocess.run([exe, "--version"], capture_output=True, text=True, timeout=CLAUDE_TIMEOUT_S)
     except (OSError, subprocess.SubprocessError) as e:
@@ -461,8 +463,8 @@ def without_log(text: str) -> str:
 # What doctor_summary makes of a doctor line, by the start of its value: a word or two, so no path, host, variable or
 # log line reaches a public issue.
 SUMMARY_WORDS = {
-    "auth": (("env credential", "env credential"), ("apiKeyHelper", "apiKeyHelper"),
-             ("CLI token", "CLI token"), ("CLI login", "CLI login"), ("none", "none")),
+    "auth": (("logged in", "logged in"), ("not logged in", "not logged in"), ("not known", "not known"),
+             ("no claude", "no claude")),
     "network": (("not checked", "not checked"), ("cannot reach", "unreachable")),
     "card harness": (("ready", "ready"), ("not drawing", "not drawing"), ("headless Chromium fetched", "Chromium fetched"),
                      ("no headless Chromium", "no Chromium")),
@@ -616,12 +618,9 @@ def dev_tickets(c: str) -> list[dict[str, Any]]:
 
 
 def transcript_roots(ws: Path) -> list[Path]:
-    """The Claude Code projects folders a background session's transcript may be in."""
+    """The Claude Code projects folders a background session's transcript may be in. sessions.json's `config_dir` is
+    not read, since a cell can write that file."""
     dirs: list[Path] = []
-    stored = _read_json(ws / "sessions.json")
-    for r in stored.values() if isinstance(stored, dict) else []:
-        if isinstance(r, dict) and "config_dir" in r:
-            dirs.append(Path(str(r["config_dir"])) if r.get("config_dir") else Path.home() / ".claude")
     cfg = _lazy("config")
     if cfg is not None:
         try:
@@ -631,7 +630,7 @@ def transcript_roots(ws: Path) -> list[Path]:
     if os.environ.get("CLAUDE_CONFIG_DIR"):
         dirs.append(Path(os.environ["CLAUDE_CONFIG_DIR"]))
     dirs.append(Path.home() / ".claude")
-    return list(dict.fromkeys([d.expanduser() / "projects" for d in dirs] + [ws / ".claude-config" / "projects"]))
+    return list(dict.fromkeys(d.expanduser() / "projects" for d in dirs))
 
 
 def find_transcript(sid: str, roots: list[Path]) -> tuple[Path, Path] | None:
@@ -934,7 +933,10 @@ def _write(entries: list[tuple[str, bytes]], dirs: list[Path], now: datetime) ->
             path = _target(out, now)
             tmp = path.with_name(f".{path.name}.tmp")
             try:
-                with zipfile.ZipFile(tmp, "w", zipfile.ZIP_DEFLATED) as z:
+                # readable by its owner alone: it holds logs, transcripts and chats, and may land in a shared temp folder
+                fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+                os.fchmod(fd, 0o600)
+                with os.fdopen(fd, "wb") as raw, zipfile.ZipFile(raw, "w", zipfile.ZIP_DEFLATED) as z:
                     for name, data in entries:
                         # a PNG or JPEG is compressed already
                         kind = zipfile.ZIP_STORED if name.startswith("screenshot.") else zipfile.ZIP_DEFLATED

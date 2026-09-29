@@ -1,0 +1,20 @@
+{
+  "channel": "support",
+  "messages": [
+    {
+      "ts": "1778911337.000303",
+      "user": "U03A14",
+      "text": "Morning all, support desk is open. Holiday rush today: 14 sailings."
+    },
+    {
+      "ts": "1778916000.000305",
+      "user": "U03A11",
+      "text": "Holiday traffic expected from 07:30. Bookings usually peak between 08:00 and 09:00."
+    },
+    {
+      "ts": "1778926020.000321",
+      "user": "U04B20",
+      "text": "The timetable banner is live. Thanks Mateo for passing on the question."
+    }
+  ]
+}

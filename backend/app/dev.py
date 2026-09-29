@@ -23,6 +23,14 @@ folder; the corpus folder and the worked examples are fenced read-only (view_fen
 view's gate; a failure wakes the session, a pass registers the view. A turn the API ended at capacity is no attempt: the
 build waits and wakes the session again. An orientation's proposal that runs out of attempts gets up to VIEW_REPAIRS new
 sessions, and is then dropped quietly; a view the analyst asked for fails with Retry.
+
+Permissions. A session of a workspace asks the analyst like the other agents: its --settings carry agent_session's
+permission hook with the session's key (`view:<slug>`, `ticket:<id>`), and the run hosts that key on its chat
+(agent_session.host), so each request shows on the card and is answered by the mode of its row (modes.py: the dev
+agent's for a ticket, view builds' for a view, agent_row), or denied after PERMISSION_WAIT_S unanswered. Allowed
+unasked is only its work in its own folder: edits there, reads of the folders its task names, and Bash in the sandbox
+(sandbox_allow's rule, before each call and on each request) with its check command. A session with no workspace
+(`thimble fix`, while the server is down) has nobody to ask, so it keeps UNHOSTED_TOOLS and has no web tools.
 """
 from __future__ import annotations
 
@@ -54,7 +62,7 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
-from . import agents, cc_settings, cli, config, procs, prompts
+from . import agents, cc_settings, cli, config, modes, procs, prompts
 from .cli import SOURCE_CHANGED, home as thimble_home
 from .ledger import atomic_write_text
 from .session import find_transcript
@@ -75,10 +83,18 @@ SHOT_TIMEOUT_S = 90
 BROWSER_MISSING_RE = re.compile(r"download new browsers|Executable doesn't exist at", re.IGNORECASE)
 BROWSER_MISSING_LINE = "Playwright's Chromium is not installed for this user: run `npx playwright install chromium` in frontend/"
 GATE_TIMEOUT_S = 900
-# The background session's tool set, each allowed without a prompt; a tool outside the set does not exist in the session
-# rather than blocking it on a permission question.
-ALLOWED_TOOLS = ["Read", "Edit", "Write", "Bash", "Grep", "Glob"]
-CLAUDE_BIN = os.environ.get("THIMBLE_CLAUDE_BIN", "claude")
+# The tools a session with no workspace uses without a permission request, since nobody can answer one: its file tools,
+# Bash, skills and workflows (module note, permissions). The session has every tool of a default Claude Code session
+# less the ones _flags takes away.
+UNHOSTED_TOOLS = ["Read", "Edit", "Write", "NotebookEdit", "Bash", "Grep", "Glob", "Skill", "Workflow"]
+# how long a request of a session with a workspace waits for the analyst before it is denied (module note, permissions)
+PERMISSION_WAIT_S = float(os.environ.get("THIMBLE_DEV_PERMISSION_WAIT_S", "") or 10 * 60)
+# the thread's line for a request denied unanswered
+EXPIRED_LINE = "nobody answered the request to use {tool} ({what}) within {wait}, so it was denied and the session went on"
+# Not given to a fenced session, a view build in the corpus folder: EnterWorktree writes a git worktree into the
+# session's own folder, which the fence's denies do not stop, and nobody answers AskUserQuestion or plan mode's approval.
+FENCED_OFF_TOOLS = ("EnterWorktree", "ExitWorktree", "AskUserQuestion", "EnterPlanMode", "ExitPlanMode")
+CLAUDE_BIN = config.CLAUDE_BIN
 VIEW_CHECK = Path(__file__).with_name("view_check.py")  # the command a view build checks its draft with (view_fence)
 CLI_TIMEOUT_S = 60
 POLL_S = float(os.environ.get("THIMBLE_DEV_POLL_S", "3") or "3")  # between two looks at the session's state
@@ -503,6 +519,32 @@ _announced = False
 
 def _running() -> bool:
     return _current is not None and _current.status == "running"
+
+
+def dev_session_name(workspace: str | None) -> str:
+    """The name `claude agents` shows a code ticket's background session under: thimble:dev · <workspace>, or
+    thimble:dev for a ticket of no workspace (config.session_name)."""
+    return config.session_name("dev", workspace)
+
+
+def view_session_name(c: str, slug: str) -> str:
+    """The name `claude agents` shows a view build's background session under: thimble:view-<slug> · <c>."""
+    return config.session_name(f"view-{slug}", c)
+
+
+def running_builds(c: str) -> list[dict[str, Any]]:
+    """The code ticket, view builds and view review revisions that run for workspace `c`, for the terminal's list of
+    thimble's agents (bg_session.agent_rows): {name, state, attach?, kind}."""
+    rows: list[dict[str, Any]] = []
+    t = _get(_current.ticket_id) if _running() and _current is not None and not _current.ticket_id.startswith("view:") else None
+    if t is not None and t.get("workspace") in (None, c):
+        rows.append({"name": dev_session_name(t.get("workspace")), "state": "working", "kind": "build",
+                     **({"attach": f"claude attach {_current.session}"} if _current and _current.session else {})})
+    for (cc, slug), run in [*_view_runs.items(), *_review_runs.items()]:
+        if cc == c and run.status == "running":
+            rows.append({"name": view_session_name(c, slug), "state": "working", "kind": "build",
+                         **({"attach": f"claude attach {run.session}"} if run.session else {})})
+    return rows
 
 
 # ----------------------------------------------------------------------------- git helpers (blocking; run in threads)
@@ -1006,10 +1048,10 @@ def shot_script() -> Path:
 
 async def run_shot(url: str, out: Path, selector: str | None = None, *, info_out: Path | None = None,
                    viewport: str | None = None, scale: float | None = None, storage: dict[str, str] | None = None,
-                   press: list[str] | None = None, wait_ms: int | None = None) -> int:
+                   press: list[str] | None = None, wait_ms: int | None = None, offline: bool = False) -> int:
     """`node scripts/ui_shot.mjs`: 0 ok, 2 selector not found (the viewport is written instead), 1 error, -1 timeout.
     Options map to the script's options of the same names."""
-    cmd = ["node", str(shot_script()), "--url", url, "--out", str(out)]
+    cmd = ["node", str(shot_script()), "--url", url, "--out", str(out), *(["--offline"] if offline else [])]
     if selector:
         cmd += ["--selector", selector]
     if info_out is not None:
@@ -1128,10 +1170,9 @@ def _result_text(content: Any) -> str:
 
 def _cli_env() -> dict[str, str]:
     """The environment the `claude` commands run with: this server's, less an inherited Claude Code session identity
-    (which would make the new session look nested) and THIMBLE_*, with the analyst's CLAUDE_CONFIG_DIR
+    (config.passes: it would make the new session look nested) and THIMBLE_*, with the analyst's CLAUDE_CONFIG_DIR
     (config.claude_env)."""
-    return config.claude_env({k: v for k, v in os.environ.items()
-                              if k in cli._KEEP or not (k.startswith(cli._STRIP_PREFIXES) or k.startswith("THIMBLE_"))})
+    return config.claude_env({k: v for k, v in config.passed_environ().items() if not k.startswith("THIMBLE_")})
 
 
 class SessionError(RuntimeError):
@@ -1150,14 +1191,50 @@ def read_only_fence(folders: "tuple[Path, ...] | list[Path]",
                     outside: "tuple[str, ...] | list[str]" = ()) -> dict[str, Any]:
     """The --settings keys that keep `folders` unchanged by a background session: a deny of Edit in each (which Claude
     Code's path checks also apply to Bash commands naming those files) and, where the sandbox can run, the Bash sandbox
-    with no network, which turns the deny into a write deny for scripts too; `outside` commands run outside it. Reads
-    stay allowed. {} for no folders."""
+    with no network, which turns the deny into a write deny for scripts too, and whose commands run unasked; `outside`
+    commands run outside it. Reads stay allowed. {} for no folders."""
     if not folders:
         return {}
     out: dict[str, Any] = {"permissions": {"deny": [f"Edit(/{Path(f)}/**)" for f in folders]}}
     if cc_settings.sandbox_ok():
-        out["sandbox"] = {**cc_settings.offline_sandbox(), **({"excludedCommands": list(outside)} if outside else {})}
+        out["sandbox"] = {**cc_settings.offline_sandbox(auto_allow=True),
+                          **({"excludedCommands": list(outside)} if outside else {})}
     return out
+
+
+def agent_row(key: str) -> str:
+    """The row of the permission modes (modes.AGENTS) a dev session with this key asks by: view builds' for a view,
+    else the dev agent's."""
+    return "views" if key.startswith("view:") else "dev"
+
+
+def own_work(folder: Path, reads: "tuple[Path, ...] | list[Path]" = ()) -> list[str]:
+    """The allow rules of a session's work in its own folder `folder`: edits there, and reads of `reads`."""
+    return [f"Edit(/{Path(folder)}/**)", *(f"Read(/{Path(r)}/**)" for r in reads)]
+
+
+def _host(c: str | None, asking: dict[str, Any], chat: str | None, run_log: "Log") -> None:
+    """Answer the permission requests of the session `asking` names (Sessions._flags) on its chat, each denied
+    unanswered noted in the thread (module note, permissions); nothing without a workspace or a chat."""
+    from . import agent_session  # noqa: PLC0415
+
+    if not c or not chat:
+        return
+
+    def expired(_run: Any, entry: dict[str, Any]) -> None:
+        run_log.stage(EXPIRED_LINE.format(tool=entry.get("tool"), what=entry.get("what"),
+                                          wait=agent_session.wait_words(PERMISSION_WAIT_S)))
+
+    box = asking.get("sandbox")
+    agent_session.host(c, str(asking["key"]), chat, agent=agent_row(str(asking["key"])), wait_s=PERMISSION_WAIT_S,
+                       on_expired=expired, sandbox=(list(box[0]), list(box[1])) if box else None)
+
+
+def _unhost(c: str | None, key: str) -> None:
+    from . import agent_session  # noqa: PLC0415
+
+    if c:
+        agent_session.unhost(c, key)
 
 
 def trust_folder(cwd: Path) -> Path:
@@ -1182,32 +1259,58 @@ class Sessions:
         return "" if shutil.which(CLAUDE_BIN, path=_cli_env().get("PATH")) else NO_CLAUDE_LINE.format(bin=CLAUDE_BIN)
 
     def _flags(self, workspace: str | None, name: str, add_dirs: "tuple[Path, ...] | list[Path]" = (),
-               fence: dict[str, Any] | None = None) -> list[str]:
-        """The session's flags: the dev role's model settings, the tool set, `--add-dir` folders, the `fence` settings,
-        and no MCP server, since a plugin's tools would only stop it at a permission question. The permission mode is
-        `default`, since under auto mode a Bash call still goes to the classifier despite `--allowedTools`."""
+               fence: dict[str, Any] | None = None, asking: dict[str, Any] | None = None) -> list[str]:
+        """The session's flags: the dev role's model settings, `--add-dir` folders, the `fence` settings and how it asks
+        (module note, permissions). `asking` names the session's key, {key, allow, sandbox?}, the allow rules of its work
+        in its own folder, and for a session whose Bash runs in the sandbox, sandbox_allow's rule; with it and a
+        workspace, the permission hook answers its requests by its row's mode (agent_row), and a process in Auto runs in
+        auto mode. Without, it keeps UNHOSTED_TOOLS and gets no web tools. It gets no MCP
+        server, since its task needs none of the analyst's, not the tools that schedule a later turn
+        (agent_session.LATER_TOOLS), since the session is stopped once its turn ends, and, when fenced, not
+        FENCED_OFF_TOOLS."""
+        from . import agent_session  # noqa: PLC0415 — agent_session is large and this module otherwise needs none of it
+
         conf = config.models_for(workspace)["dev"]
-        model = config.resolve_model(conf["model"])[0] or conf["model"]
-        tools_arg = ",".join(ALLOWED_TOOLS)
-        flags = ["-n", name, "--model", str(model), "--tools", tools_arg, "--allowedTools", tools_arg, "--strict-mcp-config",
-                 "--permission-mode", "default"]
+        model = conf["model"]
+        denied = [*agent_session.LATER_TOOLS, *(FENCED_OFF_TOOLS if fence else ())]
+        settings: dict[str, Any] = {"fastMode": True} if conf.get("fast") else {}
+        settings.update(fence or {})
+        hosted = bool(workspace and asking and asking.get("key"))
+        mode = modes.flag(modes.mode_for(str(workspace), agent_row(str((asking or {})["key"])))) if hosted else "default"
+        if hosted:
+            perms = dict(settings.get("permissions") or {})
+            allow = [*(perms.get("allow") or []), *(asking or {}).get("allow", [])]
+            settings["permissions"] = {**perms, **({"allow": list(dict.fromkeys(allow))} if allow else {})}
+            settings = agent_session.with_web_asks(settings, mode)
+            hooks = agent_session.permission_hooks(str(workspace), mode == "auto", session=str((asking or {})["key"]),
+                                                   home=str(thimble_home()))
+            box = (asking or {}).get("sandbox")
+            if box and "sandbox" in settings:
+                # before a call both hooks run; a request is the permission hook's alone, which applies the same rule
+                pre = agent_session.sandbox_hooks((list(box[0]), list(box[1])))[agent_session.PRE]
+                hooks[agent_session.PRE] = [*pre, *hooks.get(agent_session.PRE, [])]
+            settings["hooks"] = hooks
+        else:
+            denied += agent_session.WEB_TOOLS
+        allowed = [] if hosted else ["--allowedTools", ",".join(UNHOSTED_TOOLS)]
+        flags = ["-n", name, "--model", str(model), *allowed, "--disallowedTools", ",".join(denied), "--strict-mcp-config",
+                 "--permission-mode", mode]
         for d in add_dirs:
             flags += ["--add-dir", str(d)]
         if conf.get("effort"):
             flags += ["--effort", str(conf["effort"])]
-        settings: dict[str, Any] = {"fastMode": True} if conf.get("fast") else {}
-        settings.update(fence or {})
         if settings:
             flags += ["--settings", json.dumps(settings)]
         return flags
 
     async def start(self, cwd: Path, prompt: str, *, name: str, workspace: str | None,
                     add_dirs: "tuple[Path, ...] | list[Path]" = (), env: dict[str, str] | None = None,
-                    fence: dict[str, Any] | None = None) -> dict[str, str]:
-        """A new background session in `cwd` whose first message is `prompt`, with `env` over the CLI's environment and
-        the settings `fence` (_flags). {id, session_id}; RuntimeError when the CLI could not start one."""
+                    fence: dict[str, Any] | None = None, asking: dict[str, Any] | None = None) -> dict[str, str]:
+        """A new background session in `cwd` whose first message is `prompt`, with `env` over the CLI's environment, the
+        settings `fence` and how it asks, `asking` (_flags). {id, session_id}; RuntimeError when the CLI could not start
+        one."""
         since = time.time() * 1000 - 5000
-        code, out = await self._run(["--bg", *self._flags(workspace, name, add_dirs, fence), "--", prompt], cwd, env)
+        code, out = await self._run(["--bg", *self._flags(workspace, name, add_dirs, fence, asking), "--", prompt], cwd, env)
         if code != 0 and UNTRUSTED_RE.search(out):
             raise SessionError(UNTRUSTED_LINE.format(folder=trust_folder(cwd)))
         if code != 0:
@@ -1217,12 +1320,12 @@ class Sessions:
     async def resume(self, cwd: Path, session_id: str, prompt: str, *, env: dict[str, str] | None = None,
                      name: str = "", workspace: str | None = None,
                      add_dirs: "tuple[Path, ...] | list[Path]" = (),
-                     fence: dict[str, Any] | None = None) -> dict[str, str]:
+                     fence: dict[str, Any] | None = None, asking: dict[str, Any] | None = None) -> dict[str, str]:
         """Wake the session `session_id` with `prompt`, under its own id and saved options. `--resume` on a running
         session, or with any flag, starts a copy under a new id, so the process is stopped first, and one that still
         runs is copied with its start options; the caller follows a copy by the returned ids."""
         short = session_id[:8]
-        flags = self._flags(workspace, name, add_dirs, fence) if await self._running(cwd, short) else []
+        flags = self._flags(workspace, name, add_dirs, fence, asking) if await self._running(cwd, short) else []
         code, out = await self._run(["--bg", "--resume", session_id, *flags, "--", prompt], cwd, env)
         if code != 0:
             raise SessionError(f"`claude --bg --resume` failed (exit {code}): {out.strip()[-400:]}")
@@ -1409,24 +1512,29 @@ def _size(p: Path | None) -> int:
 async def _worker_turn(run: Run, run_log: Log, cwd: Path, prompt: str, resume: str | None, *, name: str,
                        workspace: str | None, on_session: Callable[[str, str], Any],
                        add_dirs: "tuple[Path, ...] | list[Path]" = (), env: dict[str, str] | None = None,
-                       answered: bool = True, fence: dict[str, Any] | None = None) -> str:
+                       answered: bool = True, fence: dict[str, Any] | None = None,
+                       turn_timeout_s: float | None = None, asking: dict[str, Any] | None = None) -> str:
     """One turn of a ticket's background session, started with `prompt` or woken with it when `resume` names the
     session, then watched until the turn ends, its transcript copied into the chat. `on_session(short id, full id)`
     records the session. Returns the session's report; SessionError when it ended any way but done, ran past
     TURN_TIMEOUT_S, or waited ASK_TIMEOUT_S on a question (the session is then stopped). With `answered` False, a
     `blocked` session whose transcript shows its turn ended counts as ended, since Claude Code lists a finished turn
     `blocked` when its last message reads as a question. A turn that ended on an API error is not a question: a view
-    ticket's turn returns the error text, a code ticket's raises it."""
-    fenced = {"fence": fence} if fence else {}
+    ticket's turn returns the error text, a code ticket's raises it. `asking` is how it asks (Sessions._flags); while
+    one of its permission requests waits on the card, it is no question."""
+    from . import agent_session  # noqa: PLC0415
+
+    fenced = {**({"fence": fence} if fence else {}), **({"asking": asking} if asking else {})}
+    key = str((asking or {}).get("key") or "")
     if resume:
         tail = Tail(resume, _size(SESSIONS.transcript(resume)))
-        sess = await SESSIONS.resume(cwd, resume, prompt, env=env, name=name[:80], workspace=workspace,
+        sess = await SESSIONS.resume(cwd, resume, prompt, env=env, name=name, workspace=workspace,
                                      add_dirs=add_dirs, **fenced)
         if sess["session_id"] != resume:
             # the resume started a copy under a new id: follow the turn in the copy's transcript
             tail = Tail(sess["session_id"], after=prompt, copied=_uuids(SESSIONS.transcript(resume)))
     else:
-        sess = await SESSIONS.start(cwd, prompt, name=name[:80], workspace=workspace, add_dirs=add_dirs, env=env,
+        sess = await SESSIONS.start(cwd, prompt, name=name, workspace=workspace, add_dirs=add_dirs, env=env,
                                     **fenced)
         tail = Tail(sess["session_id"])
     run.session, run.session_id = sess["id"], sess["session_id"]
@@ -1436,11 +1544,12 @@ async def _worker_turn(run: Run, run_log: Log, cwd: Path, prompt: str, resume: s
                       f"background session {run.session} (`claude attach {run.session}` opens it)")
     waiting, unlisted, early, idle = False, 0, 0, 0
     started = time.monotonic()
+    limit = TURN_TIMEOUT_S if turn_timeout_s is None else turn_timeout_s
     asked_at = 0.0
     while True:
         await asyncio.sleep(POLL_S)
         tail.read(run_log)
-        if time.monotonic() - started > TURN_TIMEOUT_S:
+        if time.monotonic() - started > limit:
             state = "timed out"
             break
         if waiting and time.monotonic() - asked_at > ASK_TIMEOUT_S:
@@ -1465,6 +1574,9 @@ async def _worker_turn(run: Run, run_log: Log, cwd: Path, prompt: str, resume: s
             if tail.turn_ended and (tail.api_error or not answered):
                 state = "done" if not answered else "api error"
                 break
+            if key and workspace and agent_session.asking(workspace, key):
+                waiting = False  # it waits on the card, which denies the request in time
+                continue
             if not waiting:
                 if not tail.api_error:
                     run_log.stage(f"the session is waiting for an answer; `claude attach {run.session}` opens it")
@@ -1482,7 +1594,7 @@ async def _worker_turn(run: Run, run_log: Log, cwd: Path, prompt: str, resume: s
     # would start a copy).
     await asyncio.to_thread(SESSIONS.stop, run.session)
     if state == "timed out":
-        raise SessionError(f"the session had not finished after {_minutes(TURN_TIMEOUT_S)}, so it was stopped; Retry "
+        raise SessionError(f"the session had not finished after {_minutes(limit)}, so it was stopped; Retry "
                            "wakes it again")
     if state == "unanswered":
         raise SessionError(f"the session waited {_minutes(ASK_TIMEOUT_S)} for an answer nobody gave, so it was "
@@ -1624,7 +1736,21 @@ async def _apply(t: dict[str, Any], wt: Path, branch: str, base: str, touched: l
 UI_BUILD_FAILED_LINE = "the UI build failed after the change was applied, so it was rolled back"
 
 
+def ticket_key(tid: str) -> str:
+    """A code ticket's session key, which its permission hook names (module note, permissions)."""
+    return f"ticket:{tid}"
+
+
 async def run_ticket(t: dict[str, Any], run: Run, *, doctor: str | None = None) -> dict[str, Any]:
+    """The whole ticket (_run_ticket), its session's permission requests answered on its chat meanwhile."""
+    _host(t.get("workspace"), {"key": ticket_key(t["id"])}, t.get("chat"), _log_for(t))
+    try:
+        return await _run_ticket(t, run, doctor=doctor)
+    finally:
+        _unhost(t.get("workspace"), ticket_key(t["id"]))
+
+
+async def _run_ticket(t: dict[str, Any], run: Run, *, doctor: str | None = None) -> dict[str, Any]:
     """The whole ticket: worktree, stack and before shot, the session's turns with gates fed back, after shot, apply, UI
     rebuild (rolled back when it fails), then the restart rules. `doctor` is `thimble fix`'s path: no stack, rebuild or
     restart. A stopped run ends `stopped` or `dismissed`; one a shutdown cuts short is queued again up to REQUEUE_MAX
@@ -1666,9 +1792,11 @@ async def run_ticket(t: dict[str, Any], run: Run, *, doctor: str | None = None) 
         ok = False
         for attempt in range(1, MAX_ATTEMPTS + 1):
             run_log.stage(f"worker, attempt {attempt}")
-            result_text = await _worker_turn(run, run_log, wt, prompt, resume, name=f"thimble {_label(t)}: {t['title']}",
-                                             workspace=t.get("workspace"),
-                                             on_session=lambda short, sid: _update(tid, session=short, session_id=sid))
+            result_text = await _worker_turn(run, run_log, wt, prompt, resume,
+                                             name=dev_session_name(t.get("workspace")), workspace=t.get("workspace"),
+                                             on_session=lambda short, sid: _update(tid, session=short, session_id=sid),
+                                             **({"asking": {"key": ticket_key(tid), "allow": own_work(wt, (shots_dir(tid),))}}
+                                                if t.get("workspace") else {}))
             resume = run.session_id
             touched, validation = await _check(wt, base, run_log)
             _update(tid, touched=touched, validation=validation)
@@ -2005,8 +2133,9 @@ def _view_chat(c: str, prop: dict[str, Any]) -> str | None:
 
 
 def build_view_prompt(c: str, prop: dict[str, Any], folder: Path, corpus: Path) -> str:
-    """The view ticket's first message: prompts/dev.md with prompts/dev-view.md as its task, the proposal's four fields,
-    the slug, the view's folder, the corpus, the worked examples and the check command's URL."""
+    """The view ticket's first message: prompts/dev.md with prompts/dev-view.md as its task, the proposal's fields (its
+    spec as bullets, views.spec_lines), the slug, the view's folder, the corpus, the worked examples and the check
+    command's URL."""
     from . import views  # noqa: PLC0415
 
     return prompts.render_dev("dev-view", {
@@ -2014,7 +2143,7 @@ def build_view_prompt(c: str, prop: dict[str, Any], folder: Path, corpus: Path) 
         "slug": str(prop["slug"]),
         "why": str(prop.get("why") or ""),
         "claims": ", ".join(prop.get("claims") or []),
-        "arrangement": str(prop.get("arrangement") or ""),
+        "spec": views.spec_lines(prop),
         "folder": str(folder),
         "corpus": str(corpus),
         "examples": str(views.EXAMPLES_DIR),
@@ -2032,12 +2161,14 @@ def view_check_command(c: str, slug: str) -> str:
 def build_view_change_prompt(prop: dict[str, Any], folder: Path) -> str:
     """The message of a change to a view (views.revise): prompts/dev-view-change.md with the proposal's fields and the
     analyst's request fenced as data."""
+    from . import views  # noqa: PLC0415
+
     request = str(prop.get("change") or "").strip()
     return prompts.render("dev-view-change", {
         "name": str(prop.get("name") or prop["slug"]),
         "why": str(prop.get("why") or ""),
         "claims": ", ".join(prop.get("claims") or []),
-        "arrangement": str(prop.get("arrangement") or "") or "-",
+        "spec": views.spec_lines(prop),
         "request": fenced("the analyst's request", request) if request else "",
         "folder": str(folder),
     })
@@ -2053,12 +2184,19 @@ def _change_failed_chip(c: str, prop: dict[str, Any], why: str) -> None:
 
 
 def _view_failed(c: str, slug: str, error: str, chat: str | None = None, *, drop_why: str | None = None) -> None:
-    """A build that ended without its view: a view the analyst asked for fails, its chip showing why with Retry, and an
-    orientation's proposal is dropped (_view_dropped), with `drop_why` as its line's reason when given."""
+    """A build that ended without its view: a change to a built view leaves the view as it was (views.end_revision), a
+    view the analyst asked for fails, its chip showing why with Retry, and an orientation's proposal is dropped
+    (_view_dropped), with `drop_why` as its line's reason when given."""
     from . import views  # noqa: PLC0415
 
     current = views.read_proposal(c, slug) or {}
     chat = chat or current.get("chat")
+    if current.get("revision"):
+        views.end_revision(c, slug, error, failed_change=str(current.get("change") or ""))
+        if chat:
+            _close_chat({"workspace": c, "chat": chat}, "failed", error)
+        _change_failed_chip(c, current, error)
+        return
     if not current.get("asked"):
         _view_dropped(c, slug, drop_why or error, chat)
         return
@@ -2119,6 +2257,25 @@ def view_fence(c: str, slug: str, corpus: Path, folder: Path) -> dict[str, Any]:
     return read_only_fence(view_read_only(corpus, folder), outside=(check, f"{check} *"))
 
 
+def view_key(slug: str) -> str:
+    """A view build's session key, which its permission hook names (module note, permissions)."""
+    return f"view:{slug}"
+
+
+def view_asking(c: str, slug: str, folder: Path) -> dict[str, Any]:
+    """How a view build's session asks (Sessions._flags): its key, and allowed unasked its edits in the view's folder,
+    reads of the worked examples, its check command, and Bash in the sandbox where the sandbox runs."""
+    from . import agent_session, views  # noqa: PLC0415
+
+    check = view_check_command(c, slug)
+    out: dict[str, Any] = {"key": view_key(slug),
+                           "allow": [*own_work(folder, (views.EXAMPLES_DIR,)), f"Bash({check})", f"Bash({check} *)"]}
+    if cc_settings.sandbox_ok():
+        names, asks = agent_session.sandbox_rule(config.corpus_dir(c))
+        out["sandbox"] = [names, asks]
+    return out
+
+
 def view_capacity_waits() -> list[float]:
     """The waits of a view build whose turns the API keeps ending at capacity: the same schedule as agent_session's
     retries."""
@@ -2152,12 +2309,20 @@ REPAIR_LINE = "the view did not pass, so a new session builds it again from what
 
 
 async def run_view(c: str, slug: str, run: Run) -> None:
+    """The whole view ticket (_run_view), its session's permission requests answered on its chat meanwhile."""
+    try:
+        await _run_view(c, slug, run)
+    finally:
+        _unhost(c, view_key(slug))
+
+
+async def _run_view(c: str, slug: str, run: Run) -> None:
     """The whole view ticket: the chat, the session's turns with the gate fed back, then the view registered and main
     told, or the build's failure. An orientation's proposal first gets VIEW_REPAIRS new sessions. A run over a proposal
     that has a session runs the gate first, since an interrupted build may have finished. A change (`changed`) wakes the
     session with what changed; a change to a built view (`revision`) is built only when its files differ, and on failure
     or dismissal the view goes back to how it was."""
-    from . import agent_session, session, tools, views  # noqa: PLC0415
+    from . import agent_session, session, tools, view_review, views  # noqa: PLC0415
 
     prop = views.read_proposal(c, slug)
     if prop is None:
@@ -2182,8 +2347,10 @@ async def run_view(c: str, slug: str, run: Run) -> None:
                                  attempts=int(prop.get("attempts") or 0) + 1) or prop
     views._emit(c, slug, "building", chat=chat)
     run_log = Log(agents.Recorder(c, chat)) if chat else Log(None)
+    asking = view_asking(c, slug, folder)
+    _host(c, asking, chat, run_log)
     resume = prop.get("session_id")
-    env = {SESSION_ENV: f"view:{slug}"}
+    env = {SESSION_ENV: view_key(slug)}
     report: dict[str, Any] | None = None
     built, error, result_text = False, "", ""
     capacity = ""  # why the last turn ended, when the API ended it (capacity_failure)
@@ -2238,9 +2405,10 @@ async def run_view(c: str, slug: str, run: Run) -> None:
             try:
                 # the view's folder is its one extra working directory; the worked examples are only read, since as a
                 # working directory they would receive the sandbox's `.claude/.cc-writes/`
-                result_text = await _worker_turn(run, run_log, corpus, prompt, resume, name=f"thimble view: {prop.get('name')}",
+                result_text = await _worker_turn(run, run_log, corpus, prompt, resume, name=view_session_name(c, slug),
                                                  workspace=c, on_session=on_session, add_dirs=(folder,),
-                                                 env=env, answered=False, fence=view_fence(c, slug, corpus, folder))
+                                                 env=env, answered=False, fence=view_fence(c, slug, corpus, folder),
+                                                 asking=asking)
             except RuntimeError as e:
                 error, result_text = str(e), ""
             capacity = capacity_failure(error) or capacity_failure(result_text)
@@ -2297,8 +2465,7 @@ async def run_view(c: str, slug: str, run: Run) -> None:
         log.info("view ticket %s/%s built%s", c, slug, " (a change)" if revision else "")
         if chat:
             _close_chat({"workspace": c, "chat": chat}, "done", result_text[:400] or None)
-        if slug in views.held_slugs(c):
-            return  # the orientation's first run still holds it: views.release_held tells main
+        view_review.after_built(c, slug)
         try:
             session.push_event(c, "view", views.built_line(view), view=slug)
         except Exception:  # noqa: BLE001 — the view is built; main learns its forms at its next prompt render
@@ -2324,6 +2491,88 @@ async def run_view(c: str, slug: str, run: Run) -> None:
         _change_failed_chip(c, prop, why)
         return
     _view_failed(c, slug, why, chat, drop_why=drop_why)
+
+
+# a turn of a revision the view review asked for, and the stage line its thread gets
+REVIEW_TURN_TIMEOUT_S = float(os.environ.get("THIMBLE_VIEW_REVIEW_TURN_S", "") or 12 * 60)
+REVIEW_LINE = "a review of the view's pictures found problems, so the session fixes them"
+_review_runs: dict[tuple[str, str], Run] = {}  # (workspace, slug) -> the revision the view review is running
+
+
+def stop_review_session(c: str, slug: str) -> None:
+    """Stop the background session of the view review's revision, if one runs (view_review.stop)."""
+    run = _review_runs.get((c, slug))
+    if run is not None:
+        SESSIONS.stop(run.session)
+
+
+async def review_revision(c: str, slug: str, message: str) -> tuple[bool, str]:
+    """A revision the view review asks for: the view's build session woken with `message` (prompts/dev-view-review.md)
+    in the view's thread, the view's checks run after each turn and fed back up to MAX_ATTEMPTS times. (passed, the
+    session's report or why it did not pass). A view with no build session gets a new one, started with its ticket. Its
+    session asks as a build's does (view_asking)."""
+    from . import views  # noqa: PLC0415
+
+    prop = views.read_proposal(c, slug)
+    if prop is None:
+        return False, "the view has no proposal"
+    folder = views.views_dir(c) / slug
+    corpus = config.corpus_dir(c)
+    chat = _view_chat(c, prop)
+    if chat and chat != prop.get("chat"):
+        views.update_proposal(c, slug, chat=chat)
+    run_log = Log(agents.Recorder(c, chat)) if chat else Log(None)
+    run = Run(ticket_id=f"view-review:{slug}", title=str(prop.get("name") or slug), ts_start=_now())
+    _review_runs[(c, slug)] = run
+    asking = view_asking(c, slug, folder)
+    _host(c, asking, chat, run_log)
+    resume = prop.get("session_id")
+    prompt = message if resume else f"{build_view_prompt(c, prop, folder, corpus)}\n\n{message}"
+    run_log.stage(REVIEW_LINE)
+    why, result_text = "", ""
+
+    def on_session(short: str, sid: str) -> None:
+        views.update_proposal(c, slug, session=short, session_id=sid)
+
+    try:
+        for attempt in range(1, MAX_ATTEMPTS + 1):
+            if attempt > 1:
+                run_log.stage(f"the session fixes what the checks found (attempt {attempt} of {MAX_ATTEMPTS})")
+            try:
+                result_text = await _worker_turn(run, run_log, corpus, prompt, resume, name=view_session_name(c, slug),
+                                                 workspace=c, on_session=on_session, add_dirs=(folder,),
+                                                 env={SESSION_ENV: view_key(slug)}, answered=False,
+                                                 fence=view_fence(c, slug, corpus, folder),
+                                                 turn_timeout_s=REVIEW_TURN_TIMEOUT_S, asking=asking)
+            except RuntimeError as e:
+                why = str(e)
+                run_log.error(why)
+                break
+            if capacity := capacity_failure(result_text):
+                why = capacity
+                break
+            resume = run.session_id or resume
+            rep = await views.gate(c, slug, views._kept_locators(c, slug))
+            if rep.get("ok"):
+                run_log.stage(f"checks passed: {len(rep.get('checks') or [])} ref(s), the page loaded")
+                if chat:
+                    _close_chat({"workspace": c, "chat": chat}, "done", result_text[:400] or None)
+                return True, result_text
+            why = views.first_failure(rep) or "the checks did not pass"
+            run_log.stage(f"checks failed: {why}")
+            prompt = build_gates_prompt("\n".join(views.gate_lines(rep)))
+    except asyncio.CancelledError:
+        await asyncio.to_thread(SESSIONS.stop, run.session)
+        if chat:
+            _close_chat({"workspace": c, "chat": chat}, "stopped", "the review was stopped")
+        raise
+    finally:
+        _unhost(c, view_key(slug))
+        if _review_runs.get((c, slug)) is run:
+            del _review_runs[(c, slug)]
+    if chat:
+        _close_chat({"workspace": c, "chat": chat}, "failed", why[:ERROR_CHARS] or None)
+    return False, why
 
 
 CAPACITY_WORDS = {"overloaded": "Anthropic's API was overloaded", "rate_limited": "Anthropic's API rate limit was reached",
@@ -2619,8 +2868,8 @@ async def _pending_poller() -> None:
 
 
 async def orient_ended(c: str | None) -> None:
-    """Fires a deferred restart once no orientation is running. The pending poller calls it, since the orientation
-    subagent's end is recorded only in orient/run.json (orientation.finished)."""
+    """Fires a deferred restart once no orientation is running. The pending poller calls it, since an
+    orientation's end is recorded only in orient/run.json (orientation.finished)."""
     global _restart_pending
     if _restart_pending is None or orient_running():
         return
@@ -2778,6 +3027,21 @@ def _stop_run(tid: str, why: str) -> bool:
     run.stop_reason = why
     run.task.cancel()
     return True
+
+
+def stop_workspace(c: str) -> int:
+    """Stop what runs for workspace `c` here, main's session having ended (agents.stop_all): its code ticket, which ends
+    `stopped` (Retry runs it again), and its view builds and review revisions. Returns how many were stopped."""
+    n = 0
+    t = _get(_current.ticket_id) if _current is not None and not _current.ticket_id.startswith("view:") else None
+    if t is not None and t.get("workspace") == c and _stop_run(_current.ticket_id, "stopped"):
+        n += 1
+    for (cc, _slug), run in [*_view_runs.items(), *_review_runs.items()]:
+        if cc == c and run.status == "running" and run.task is not None and not run.task.done():
+            run.stop_reason = "stopped"
+            run.task.cancel()
+            n += 1
+    return n
 
 
 @router.post("/dev/tickets/{tid}/stop", status_code=202)

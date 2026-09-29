@@ -5,19 +5,20 @@
 #   scripts/check.sh [STEP...]
 #
 #   install   backend/.venv with the test extras (uv), frontend/node_modules (npm ci), and the headless Chromium that
-#             the renderer's, the views' and the browser checks drive (with its system libraries when CI is set)
+#             the renderer's, the views' and the browser checks drive (its system libraries are the machine's; GitHub's
+#             Ubuntu runners have them)
 #   content   no secrets, private names, files that never belong in the tree, or file names that only case tells apart
 #             (Checks.tsx beside checks.ts, which a case-insensitive disk resolves as one module) (scripts/check_content.py,
 #             with gitleaks when it is installed)
 #   backend   the backend's tests (backend/tests_public): hermetic, with no network, no Claude Code and no API key
 #   frontend  the type check of the UI and of its tests, the frontend's tests (frontend/tests/public) and the production
 #             build, into a temporary folder so that the frontend/dist a running server serves is left alone
-#   browser   the frontend's browser checks (frontend/tests/public/browser) in the headless Chromium: layout, the
-#             sandboxed frames and the card harness; skipped, with a line saying so, where that Chromium does not start
-#             (CI requires it)
+#   browser   the frontend's browser checks (frontend/tests/public/browser) in the headless Chromium: the sandboxed
+#             outputs and a view's label marks; skipped, with a line saying so, where that Chromium does not start (CI
+#             requires it)
 #
 # With no STEP it runs content, backend, frontend and browser in that order and stops at the first that fails. In a
-# fresh checkout run `scripts/check.sh install` once first (or scripts/install.sh --dev, which installs the same things).
+# fresh checkout run `scripts/check.sh install` once first (or scripts/install.sh, which installs the same things there).
 set -euo pipefail
 
 usage() { sed -n '2,/^set -euo/p' "$0" | sed '$d' | sed 's/^# \{0,1\}//'; }
@@ -37,14 +38,12 @@ install() {
   step "install"
   command -v uv >/dev/null || die "uv is required: https://docs.astral.sh/uv/getting-started/installation/"
   command -v npm >/dev/null || die "Node 20+ with npm is required"
-  local deps=""
-  if [ "${CI:-}" = true ]; then deps=--with-deps; fi  # the browser's system libraries, which need root
-  # the same sync install.sh --dev runs: the runtime closure of uv.lock plus the test extras
+  # the same sync install.sh runs in a checkout: the runtime closure of uv.lock plus the test extras
   (cd "$repo/backend" && uv sync --frozen --no-dev --no-install-project --extra dev)
   (cd "$repo/frontend" && npm ci --no-audit --no-fund)
   # the backend's and the frontend's Playwright pin different builds of the browser: the card harness (app/render.py)
   # drives the first, a view's check page (scripts/view_shot.mjs) the second
-  (cd "$repo/backend" && .venv/bin/python -m playwright install $deps chromium-headless-shell)
+  (cd "$repo/backend" && .venv/bin/python -m playwright install chromium-headless-shell)
   (cd "$repo/frontend" && npx playwright install chromium-headless-shell)
 }
 

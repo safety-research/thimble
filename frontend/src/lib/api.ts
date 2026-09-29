@@ -34,7 +34,9 @@ import type {
   CallIndex,
   Ticket,
   View,
+  ViewSuggestion,
   ViewOpen,
+  ViewProblems,
   Writeup,
 } from './types'
 
@@ -52,6 +54,15 @@ export function describeDetail(d: unknown): string {
   } catch {
     return String(d)
   }
+}
+
+/** Trade the key in the link thimble showed (`#k=`) for the cookie that lets this browser answer permission requests
+ * and change permission modes (backend hook_auth.claim), and take it out of the address. */
+export function claimKey(): void {
+  const key = new URLSearchParams(window.location.hash.slice(1)).get('k')
+  if (!key) return
+  window.history.replaceState(window.history.state, '', window.location.pathname + window.location.search)
+  void fetch(`${BASE}/ui/key`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ key }) }).catch(() => undefined)
 }
 
 async function j<T>(url: string, init?: RequestInit): Promise<T> {
@@ -147,12 +158,13 @@ export const api = {
 
   // ---- chats ----
   chats: (c: string) => j<ChatMeta[]>(`${ws(c)}/chats`),
+  instance: (c: string) => j<{ stamp: string | null }>(`${ws(c)}/instance`),
   main: (c: string) => j<ChatDetail>(`${ws(c)}/chats/main`),
   chat: (c: string, id: string) => j<ChatDetail>(`${ws(c)}/chats/${enc(id)}`),
   createThread: (c: string, body: NewThreadBody) => j<ChatMeta>(`${ws(c)}/chats`, { method: 'POST', body: JSON.stringify(body) }),
   updateChat: (c: string, id: string, patch: ChatPatch) => j<ChatMeta>(`${ws(c)}/chats/${enc(id)}`, { method: 'PUT', body: JSON.stringify(patch) }),
   deleteChat: (c: string, id: string) => j<{ deleted: string }>(`${ws(c)}/chats/${enc(id)}`, { method: 'DELETE' }),
-  interrupt: (c: string, id: string) => j<{ stopped: boolean }>(`${ws(c)}/chats/${enc(id)}/interrupt`, { method: 'POST' }),
+  interrupt: (c: string, id: string) => j<{ stopped: boolean; asked?: 'main' }>(`${ws(c)}/chats/${enc(id)}/interrupt`, { method: 'POST' }),
   askAgain: (c: string, id: string) => j<{ asked: string; event: string; questions: number }>(`${ws(c)}/chats/${enc(id)}/ask-again`, { method: 'POST' }),
   /**
      * Send the analyst's Claude Code session an event (`POST /ws/{c}/events {kind, payload}`), e.g. a message typed in main
@@ -168,15 +180,19 @@ export const api = {
   /** Allow or deny a permission prompt of main's session that the shim relayed (channel.permission_route). */
   answerPermission: (c: string, id: string, allow: boolean) => j<{ answered: string }>(`${ws(c)}/permission`, { method: 'POST', body: JSON.stringify({ id, allow }) }),
   /** Allow or deny a permission request of a session thimble started beside main (agent_session.permission_route);
-     * `always` also applies Claude Code's suggested "don't ask again" rules for the rest of the session. */
-  answerSessionPermission: (c: string, chat: string, id: string, allow: boolean, always = false) =>
-    j<{ answered: string }>(`${ws(c)}/chats/${enc(chat)}/permission`, { method: 'POST', body: JSON.stringify({ id, allow, ...(always ? { always } : {}) }) }),
+     * `always` also applies Claude Code's suggested "don't ask again" rules for the rest of the session, and `shown`
+     * is how many of the later calls that joined it the card listed, which the answer alone covers. */
+  answerSessionPermission: (c: string, chat: string, id: string, allow: boolean, always = false, shown = 0) =>
+    j<{ answered: string }>(`${ws(c)}/chats/${enc(chat)}/permission`, { method: 'POST', body: JSON.stringify({ id, allow, ...(always ? { always } : {}), shown }) }),
   /** Start a session that is waiting to retry after the API was at capacity (agent_session.retry_route); 404 when it is
      * not waiting. */
   retrySession: (c: string, chat: string) => j<{ retrying: string }>(`${ws(c)}/chats/${enc(chat)}/retry`, { method: 'POST' }),
-  /** Change the permission mode of the running session whose chat is `chat` (the orientation's card): Manual and
-   * Bypass at once, Auto and out of it once the session has paused and resumed (agent_session.mode_route); 404 when
-   * no session runs for it, 409 when it has no mode of its own. */
+  /** a stopped background session's Resume (backend agent_session.resume_chat) */
+  resumeSession: (c: string, chat: string) => j<{ resumed: string; run: number }>(`${ws(c)}/chats/${enc(chat)}/resume`, { method: 'POST' }),
+  /** Change the permission mode of the running session whose chat is `chat` (its card): Manual and Bypass at once,
+   * Auto and out of it once the session has paused and resumed (agent_session.mode_route); 403 from a page not opened
+   * from thimble's link (claimKey), 404 when no session runs for it, 409 for a background session's switch into or out
+   * of Auto. */
   setSessionMode: (c: string, chat: string, mode: OrientPermissions) =>
     j<{ mode: OrientPermissions; switching: OrientPermissions | null }>(`${ws(c)}/chats/${enc(chat)}/permission-mode`, { method: 'POST', body: JSON.stringify({ mode }) }),
   /** A message to the orientation: resumes a finished orientation's session, or queues while a run goes on (`queued`);
@@ -246,6 +262,13 @@ export const api = {
 
   // ---- views and proposals ----
   proposals: (c: string) => j<Proposal[]>(`${ws(c)}/views/proposals`),
+  /** what thimble proposes for a file opened in the File browser: whether a viewer may be proposed for its type, and
+   * the proposal for the type when there is one (backend views.suggestion_for) */
+  viewSuggestions: (c: string, path: string) => j<ViewSuggestion>(`${ws(c)}/views/suggestions${q({ path })}`),
+  /** ask for a viewer for the type of a file the analyst opened: the suggested proposal's slug, or null */
+  suggestView: (c: string, path: string) => j<{ slug: string | null }>(`${ws(c)}/views/suggest`, { method: 'POST', body: JSON.stringify({ path }) }),
+  /** build a suggested viewer */
+  acceptProposal: (c: string, slug: string) => j<Proposal>(`${ws(c)}/views/proposals/${enc(slug)}/accept`, { method: 'POST' }),
   retryProposal: (c: string, slug: string) => j<Proposal>(`${ws(c)}/views/proposals/${enc(slug)}/retry`, { method: 'POST' }),
   /** A message typed in a view build's thread: logged there and queued as a change to the view, whose run goes on in
    * that thread (views.message); answers the proposal. */
@@ -256,17 +279,25 @@ export const api = {
   /** the working views that claim a file, in the order a citation into it opens them */
   viewsForFile: (c: string, path: string) => j<View[]>(`${ws(c)}/views${q({ path })}`),
   deleteView: (c: string, slug: string) => j<{ ok: boolean }>(`${ws(c)}/views/${enc(slug)}`, { method: 'DELETE' }),
-  /** the view's page as a sandboxed frame loads it: the policy, the bridge, the libraries and view.html. The page's
-     * origin is sent so the frame's media URLs name the host this browser reaches. */
-  viewFrame: async (c: string, slug: string): Promise<string> => {
-    const res = await fetch(`${ws(c)}/views/${enc(slug)}/frame${q({ origin: location.origin })}`)
+  /** the view's page as a sandboxed frame loads it: the policy, the bridge, the libraries and view.html, at `version`
+     * when given (the calls below then answer for the same version). The page's origin is sent so the frame's media URLs
+     * name the host this browser reaches. */
+  viewFrame: async (c: string, slug: string, version?: string): Promise<string> => {
+    const res = await fetch(`${ws(c)}/views/${enc(slug)}/frame${q({ origin: location.origin, v: version })}`)
     if (!res.ok) throw new Error(`${res.status} ${res.statusText}`)
     return res.text()
   },
   /** reader.records(index, query), for the page's thimble.fetch */
-  viewRecords: (c: string, slug: string, query: unknown) => j<{ data: unknown }>(`${ws(c)}/views/${enc(slug)}/records`, { method: 'POST', body: JSON.stringify({ query }) }),
+  viewRecords: (c: string, slug: string, query: unknown, version?: string) => j<{ data: unknown }>(`${ws(c)}/views/${enc(slug)}/records${q({ v: version })}`, { method: 'POST', body: JSON.stringify({ query }) }),
   /** the `open` message for a ref in the view */
-  viewOpen: (c: string, slug: string, ref: string) => j<ViewOpen>(`${ws(c)}/views/${enc(slug)}/resolve${q({ ref })}`),
+  /** the marks of the labels that are on for refs a view's page shows, its units' above all: {ref: {bar, names, spans, keep?}} */
+  viewMarks: (c: string, slug: string, refs: string[], version?: string) => j<Record<string, { bar?: string; names?: string[]; spans?: { text: string; colour: string }[]; keep?: boolean }>>(`${ws(c)}/views/${enc(slug)}/marks${q({ v: version })}`, { method: 'POST', body: JSON.stringify({ refs }) }),
+  /** review the built view's pictures again; stop a review; put the view back as it was built before its review */
+  viewReviewAgain: (c: string, slug: string) => j<{ ok: boolean }>(`${ws(c)}/views/${enc(slug)}/review`, { method: 'POST' }),
+  viewReviewStop: (c: string, slug: string) => j<{ ok: boolean }>(`${ws(c)}/views/${enc(slug)}/review`, { method: 'DELETE' }),
+  viewReviewUndo: (c: string, slug: string) => j<{ ok: boolean }>(`${ws(c)}/views/${enc(slug)}/review/undo`, { method: 'POST' }),
+  viewProblems: (c: string, slug: string, version?: string) => j<ViewProblems>(`${ws(c)}/views/${enc(slug)}/problems${q({ v: version })}`),
+  viewOpen: (c: string, slug: string, ref: string, version?: string) => j<ViewOpen>(`${ws(c)}/views/${enc(slug)}/resolve${q({ ref, v: version })}`),
   // ---- orientation ----
   /** Ask the analyst's session for the orientation (`POST /ws/{c}/events {kind: start}`): main calls start_orientation
      * with `text` as the brief and the switches `final_notebook`, `propose_views` and `generate_report`; `effort`,
@@ -418,6 +449,8 @@ export const docsApi = {
   putStory: (c: string, slug: string, body: StoryBody) => j<StoryDoc>(`${inv(c, slug)}/story`, { method: 'PUT', body: JSON.stringify(body) }),
   /** `PUT …/types/{slug}/html`: the page's whole html from the code drawer; creates the page's document when none is written. */
   putHtml: (c: string, slug: string, html: string) => j<PageDoc>(`${inv(c, slug)}/html`, { method: 'PUT', body: JSON.stringify({ html }) }),
+  /** `GET …/types/{slug}/film`: a video's film as its frame loads it, under the views' policy, with its timing and bridge. */
+  film: (c: string, slug: string) => j<{ html: string }>(`${inv(c, slug)}/film`),
 }
 
 // --- scale: one folder at a time for the tree, one page of labels for the reader ---

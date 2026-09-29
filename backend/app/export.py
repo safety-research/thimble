@@ -223,34 +223,37 @@ def _chats(w: Writer, ws: Path) -> list[dict[str, Any]]:
 
 
 def _projects_roots(ws: Path) -> list[Path]:
-    """Where Claude Code writes transcripts: the config dir each of main's sessions ran with (from sessions.json), the
-    analyst's, this server's own, and the workspace's own."""
-    stored = _read_json(ws / "sessions.json")
-    dirs = [config.config_dir_of(str(r.get("config_dir") or "") or None)
-            for r in (stored.values() if isinstance(stored, dict) else []) if isinstance(r, dict) and "config_dir" in r]
+    """Where Claude Code writes transcripts: the config dir of the workspace's attached session and the one this server
+    serves, both as the session's shim reported them, and this server's own. sessions.json's `config_dir` is not read,
+    since a cell can write that file."""
+    from . import session  # noqa: PLC0415 — session imports most of the app
+
+    live = session.current(ws.name)
+    dirs = [live.config_dir] if live is not None and live.config_known else []
     dirs += [config.claude_config_dir(), config.config_dir_of(config.own_claude_config())]
-    return list(dict.fromkeys([d / "projects" for d in dirs] + [ws / ".claude-config" / "projects"]))
+    return list(dict.fromkeys(d / "projects" for d in dirs))
 
 
-def _under_roots(path: Path, roots: list[Path]) -> bool:
+def _own_file(p: Path, root: Path) -> bool:
+    """A regular file that is no symlink and resolves inside `root` (as feedback._own_file)."""
     try:
-        resolved = path.resolve()
-        return any(resolved.is_relative_to(root.resolve()) for root in roots)
-    except OSError:
+        return p.is_file() and not p.is_symlink() and p.resolve().is_relative_to(root.resolve())
+    except (OSError, ValueError):
         return False
 
 
 def _find_transcript(sid: str, roots: list[Path], hint: Any = None) -> Path | None:
-    """Session `sid`'s transcript: the path sessions.json recorded when it lies under one of Claude Code's transcript
-    roots, else the newest `<root>/*/<sid>.jsonl`. Any other recorded path is ignored, since a cell can write
-    sessions.json and the zip is meant to be shared."""
+    """Session `sid`'s transcript: the path sessions.json recorded when it is an own file (_own_file) of one of Claude
+    Code's transcript roots, else the newest `<root>/*/<sid>.jsonl` that is one. Any other path is ignored, since a cell
+    can write sessions.json and plant a symlink, and the zip is meant to be shared."""
     if isinstance(hint, str) and hint:
         p = Path(hint)
-        if p.name == f"{sid}.jsonl" and p.is_file() and _under_roots(p, roots):
+        if p.name == f"{sid}.jsonl" and any(_own_file(p, root) for root in roots):
             return p
     for root in roots:
         try:
-            hits = sorted(root.glob(f"*/{sid}.jsonl"), key=lambda p: p.stat().st_mtime, reverse=True)
+            hits = sorted((h for h in root.glob(f"*/{sid}.jsonl") if _own_file(h, root)),
+                          key=lambda p: p.stat().st_mtime, reverse=True)
         except OSError:
             hits = []
         if hits:
@@ -291,10 +294,6 @@ def session_records(ws: Path, chats: list[dict[str, Any]], tickets: Iterable[dic
     ticket_chats = {str(m.get("ticket")): str(m.get("id")) for m in chats if m.get("role") == "dev" and m.get("ticket")}
     for t in tickets:
         put(t.get("session_id"), role="dev", chat=ticket_chats.get(str(t.get("id"))), ticket=t.get("id"))
-    own = ws / ".claude-config" / "projects"
-    if own.is_dir():
-        for p in sorted(own.glob("*/*.jsonl")):
-            put(p.stem, role="worker", transcript_path=str(p))
     return out
 
 
@@ -326,10 +325,10 @@ def _sessions(w: Writer, ws: Path, chats: list[dict[str, Any]], tickets: list[di
         stats = w.copy_jsonl(f"sessions/{sid}.jsonl", path)
         index.append({**row, "file": "session", "path": f"sessions/{sid}.jsonl", "found": True, **stats})
         side = path.with_suffix("")  # <projects>/<slug>/<sid>/
-        if not side.is_dir():
+        if side.is_symlink() or not side.is_dir():
             continue
         for p in sorted(side.rglob("*")):
-            if not p.is_file() or p.is_symlink():
+            if not _own_file(p, side):
                 continue
             rel = p.relative_to(side).as_posix()
             arc = f"sessions/{sid}/{rel}"
@@ -343,11 +342,14 @@ def _sessions(w: Writer, ws: Path, chats: list[dict[str, Any]], tickets: list[di
                 entry: dict[str, Any] = {"session": sid, "parent_role": info.get("role"), "file": kind, "path": arc, "found": True, **stats}
                 if m:
                     entry["agent_id"] = m.group(1)
-                    meta = _read_json(p.with_name(f"agent-{m.group(1)}.meta.json"))
+                    meta_path = p.with_name(f"agent-{m.group(1)}.meta.json")
+                    meta = _read_json(meta_path) if _own_file(meta_path, side) else None
                     fork = threads.FORK_DESCRIPTION_RE.match(str(meta.get("description") or "")) if isinstance(meta, dict) else None
-                    # A thread's fork is described `thread:<id>` (threads.FORK_DESCRIPTION), which names its thread even
-                    # when the thread's meta no longer lists it.
-                    entry["chat"] = agents.get(m.group(1)) or (fork.group(1) if fork else None)
+                    # A thread's fork is described `thread:<fork name>` or `thread:<id>` (threads.FORK_DESCRIPTION_RE),
+                    # which names its thread even when the thread's meta no longer lists it.
+                    named = fork.group(1) if fork else None
+                    by_name = {str(c.get(threads.FORK_NAME_KEY)): str(c["id"]) for c in chats if c.get(threads.FORK_NAME_KEY)}
+                    entry["chat"] = agents.get(m.group(1)) or (by_name.get(named, named) if named else None)
                     if isinstance(meta, dict):
                         entry["meta"] = meta
                 if "/workflows/" in f"/{rel}":

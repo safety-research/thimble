@@ -1,6 +1,7 @@
 // Which of thimble's sessions wait for the analyst. A session thimble starts beside main has no terminal, so a call
 // that needs permission puts its request on the session's chat meta (`permissions`, backend agent_session.ask) until
-// the analyst answers or a minute passes. Every request waits on PermissionCard.
+// the analyst answers or its wait passes; one denied unanswered stays there, marked `expired`, until dismissed. Every
+// request waits on PermissionCard.
 import { useEffect, useState } from 'react'
 import { api } from '../lib/api'
 import { bus } from '../lib/bus'
@@ -8,9 +9,15 @@ import type { ChatMeta, PermissionRequest } from '../lib/types'
 
 const REFETCH_DEBOUNCE_MS = 150
 
-/** A chat's pending permission requests while it runs; none once it has ended. Pure. */
-export function pendingAsks(m: Pick<ChatMeta, 'status' | 'permissions'> | null | undefined): readonly PermissionRequest[] {
+/** A chat's permission requests on the card while it runs, those denied unanswered among them; none once it has
+ * ended. Pure. */
+export function cardAsks(m: Pick<ChatMeta, 'status' | 'permissions'> | null | undefined): readonly PermissionRequest[] {
   return m && m.status === 'running' ? m.permissions ?? [] : []
+}
+
+/** A chat's permission requests that wait for the analyst's answer while it runs. Pure. */
+export function pendingAsks(m: Pick<ChatMeta, 'status' | 'permissions'> | null | undefined): readonly PermissionRequest[] {
+  return cardAsks(m).filter((p) => !p.expired)
 }
 
 const firstAsk = (m: ChatMeta): string => pendingAsks(m).map((p) => p.since ?? '').sort()[0] ?? ''
@@ -41,16 +48,21 @@ export function waitingAt(id: string | null | undefined, metas: Iterable<ChatMet
   return waitingChats(all.filter((m) => under.has(m.id)))[0] ?? null
 }
 
-/** The workspace's chat metas, read again on the stream's `chat` records, for a surface outside the chat panel. */
-export function useChatMetas(ws: string): ChatMeta[] {
+/** The workspace's chat metas, read again on the stream's `chat` records, for a surface outside the chat panel; none
+ * read while `enabled` is off. */
+export function useChatMetas(ws: string, enabled = true): ChatMeta[] {
   const [metas, setMetas] = useState<ChatMeta[]>([])
   useEffect(() => {
+    if (!enabled) {
+      setMetas([])
+      return
+    }
     let alive = true
     let timer: number | null = null
     const load = () =>
       api
         .chats(ws)
-        .then((l) => alive && setMetas(l))
+        .then((l) => alive && setMetas(Array.isArray(l) ? l : []))
         .catch(() => undefined)
     void load()
     const off = bus.on('chat', () => {
@@ -62,6 +74,6 @@ export function useChatMetas(ws: string): ChatMeta[] {
       off()
       if (timer != null) window.clearTimeout(timer)
     }
-  }, [ws])
+  }, [ws, enabled])
   return metas
 }

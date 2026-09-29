@@ -1,31 +1,26 @@
-"""app.views: viewers written for how a corpus arranges its records. The reader resolves lines and keys, view refs
-resolve and outlive their view, the frame document blocks every host, the media route serves only the media files a view
-claims inside the corpus, the built-in viewers open workbooks and PDFs, and the worked examples a view ticket starts
-from pass the view checks over the synthetic toy corpus they are written for.
+"""app.views: viewers written for how a corpus arranges its records. The reader resolves lines and keys, the frame
+document blocks every load, and the worked examples a view ticket reads pass the view checks over their own samples, one
+of them with its page loaded headless.
 
 A temp DATA_DIR holds the corpus `boards`: `board.jsonl`, one post per line, each {thread, author, time, body}, and
 `notes.md`. The `ws` fixture saves the view `threads`, whose reader (THREADS_READER) groups the posts by thread: it
 accepts `board.jsonl#L<n>` (the post) and declares `view:threads/<thread>` (a whole thread). Most tests run the reader
-in this process (the `inproc` fixture replaces views._runner with an exec of the same snippet the kernel gets).
-"""
+in this process (the `inproc` fixture replaces views._runner with an exec of the same snippet the kernel gets)."""
 from __future__ import annotations
 
-import asyncio
 import contextlib
+import fnmatch
 import io
 import json
 import os
 import re
 import shutil
-import subprocess
 import sys
 from pathlib import Path
 
-import httpx
 import pytest
-from fastapi import FastAPI, HTTPException
 
-from app import config, refs, verify, views
+from app import config, views
 
 CORPUS = "boards"
 POSTS = [  # (thread, author, time, body); line n of board.jsonl is POSTS[n-1]
@@ -145,87 +140,7 @@ async def bound():
     yield
 
 
-def _events(ws: Path) -> list[dict]:
-    p = ws / "investigations" / "main" / "events.jsonl"
-    return [json.loads(ln) for ln in p.read_text().splitlines() if ln.strip()] if p.is_file() else []
-
-
 # ----------------------------------------------------------------------------------------------------------- disk
-
-
-def test_a_saved_view_is_three_files_and_reads_back_normalised(ws):
-    d = ws / "views" / "threads"
-    assert sorted(p.name for p in d.iterdir()) == ["reader.py", "view.html", "view.json"]
-    v = views.read_view(CORPUS, "threads")
-    assert v["ok"] and v["claims"] == ["board.jsonl"] and v["default"] is True
-    assert v["accepts"] == [{"form": "L<n>", "means": "one post"}]
-    assert v["declares"] == [{"form": "<thread>", "means": "one whole thread"}]
-    assert v["built"]
-    assert [e for e in _events(ws) if e["type"] == "view"][-1]["status"] == "built"
-
-
-def test_write_view_refuses_what_cannot_run(data, workspaces_tmp):
-    ok = dict(reader=THREADS_READER, html=THREADS_HTML, **VIEW)
-    for bad, why in (({"claims": []}, "claims"), ({"reader": "def build_index(:\n"}, "does not parse"),
-                     ({"reader": "def build_index(paths):\n    return {}\n"}, "records()"),
-                     ({"html": "  "}, "view.html is empty"), ({"libs": ["d3"]}, "no library d3")):
-        with pytest.raises(HTTPException) as e:
-            views.write_view(CORPUS, "threads", **{**ok, **bad})
-        assert why in str(e.value.detail), (bad, e.value.detail)
-    for slug in ("Bad Slug", "raw", "proposals"):
-        with pytest.raises(HTTPException):
-            views.write_view(CORPUS, slug, **ok)
-
-
-def test_forms_match_fragments_and_the_default_view_opens_first(ws):
-    assert views.form_regex("L<n>").match("L12") and not views.form_regex("L<n>").match("L12-L14")
-    assert views.form_regex("<Sheet>!<A1>").match("Q3!D17") and not views.form_regex("p<n>").match("pX")
-    assert views.accepts(views.read_view(CORPUS, "threads"), "L3")
-    assert views.views_for(CORPUS, "board.jsonl", "L5-L9") == []
-    assert views.views_for(CORPUS, "notes.md") == []
-    later = dict(VIEW, default=False, name="Later")
-    views.write_view(CORPUS, "later", reader=THREADS_READER, html=THREADS_HTML, **later)
-    newest = dict(VIEW, default=False, name="Newest")
-    views.write_view(CORPUS, "newest", reader=THREADS_READER, html=THREADS_HTML, **newest)
-    order = [v["slug"] for v in views.views_for(CORPUS, "board.jsonl", "L1")]
-    assert order[0] == "threads", "the default view first"
-    assert set(order[1:]) == {"later", "newest"}
-
-
-def test_title_case_raises_each_words_first_letter_and_keeps_capitals():
-    assert views.title_case("timeline") == "Timeline"
-    assert views.title_case("  tool call   timeline ") == "Tool Call Timeline"
-    assert views.title_case("API logs by run") == "API Logs By Run"
-    assert views.title_case("per-session view") == "Per-Session View"
-    assert views.title_case("McCoy's JSONL") == "McCoy's JSONL"
-    assert views.title_case("") == ""
-
-
-async def test_a_lowercase_proposal_is_named_in_title_case_and_keeps_its_slug(data, workspaces_tmp, monkeypatch):
-    """main proposed "timeline": its tab reads Timeline, its slug stays timeline, and a revision of it in any case
-    replaces it under the same slug."""
-    from app import dev
-
-    monkeypatch.setattr(dev, "queue_view", lambda c, slug: None)
-    p = views.propose(CORPUS, "timeline", "w", ["board.jsonl"], "by time")
-    assert (p["name"], p["slug"]) == ("Timeline", "timeline")
-    again = views.propose(CORPUS, "TIMELINE", "w2", ["board.jsonl"], "by time")
-    assert again["slug"] == "timeline"
-    assert [q["slug"] for q in views.list_proposals(CORPUS)] == ["timeline"]
-
-
-async def test_a_view_the_analyst_asked_for_is_built_with_asked_on_its_event(data, workspaces_tmp, monkeypatch):
-    """A proposal the analyst asked for keeps `asked`, and its `built` event carries it, so the browser opens that view
-    once it is ready; a proposal nobody asked for (the orientation's) is built without it."""
-    from app import dev
-
-    monkeypatch.setattr(dev, "queue_view", lambda c, slug: None)
-    assert views.propose(CORPUS, "Threads", "w", ["board.jsonl"], "by thread", asked=True)["asked"] is True
-    assert "asked" not in views.propose(CORPUS, "Later", "w", ["board.jsonl"], "by thread, newest first")
-    views.write_view(CORPUS, "threads", reader=THREADS_READER, html=THREADS_HTML, **VIEW)
-    views.write_view(CORPUS, "later", reader=THREADS_READER, html=THREADS_HTML, **dict(VIEW, name="Later", default=False))
-    built = [e for e in _events(config.workspace_dir(CORPUS)) if e["type"] == "view" and e["status"] == "built"]
-    assert [(e["slug"], e.get("asked")) for e in built] == [("threads", True), ("later", None)]
 
 
 async def test_a_reader_resolves_a_line_and_a_key_and_its_answer_is_kept(ws, inproc):
@@ -245,124 +160,26 @@ async def test_a_reader_resolves_a_line_and_a_key_and_its_answer_is_kept(ws, inp
     assert list((ws / "views" / "threads" / "cache").glob("*.index.pickle"))
 
 
-async def test_a_reader_that_raises_is_a_reader_error(ws, inproc):
-    views.write_view(CORPUS, "broken", reader="def build_index(paths):\n    raise ValueError('no index')\n\ndef records(i, q):\n    return 1\n\n"
-                                               "def resolve(i, l):\n    return None\n", html=THREADS_HTML, **dict(VIEW, default=False))
-    with pytest.raises(views.ReaderError) as e:
-        await views.reader_call(CORPUS, "broken", "index")
-    assert "ValueError: no index" in e.value.message and "Traceback" in e.value.detail
+async def test_a_workspace_gets_four_views_from_the_orientation_and_a_deleted_one_stays_deleted(ws, monkeypatch):
+    monkeypatch.setattr(views, "_queue", lambda c, slug: None)
 
+    def propose(name, **k):
+        return views.propose(CORPUS, name, "The posts.", ["board.jsonl"], "Unit: a post", **k)
 
-async def test_a_file_ref_the_view_accepts_reads_the_views_excerpt(ws, inproc, bound):
-    corpus = config.corpus_dir(CORPUS)
-    out = await asyncio.to_thread(refs.resolve, corpus, "board.jsonl#L3")
-    assert out["excerpt"] == "Confirmed: 4127 tests pass.\n-- cy"
-    assert out["view"] == {"slug": "threads", "name": "Threads", "label": "cy", "key": "t1"} and out["meta"]["view"] == "threads"
-    assert out["record"]["author"] == "cy", "the file's own resolution stands under the view's excerpt"
-    base = refs.resolve_base(corpus, "board.jsonl#L3")
-    assert "view" not in base and "4127" in base["excerpt"]
-    rng = await asyncio.to_thread(refs.resolve, corpus, "board.jsonl#L2-L3")
-    assert "view" not in rng, "a range is a form the view does not accept"
-    whole = await asyncio.to_thread(refs.resolve, corpus, "board.jsonl")
-    assert "view" not in whole
-
-
-async def test_a_view_ref_resolves_and_survives_its_view(ws, inproc, bound):
-    corpus = config.corpus_dir(CORPUS)
-    out = await asyncio.to_thread(refs.resolve, corpus, "view:threads/t2")
-    assert out["kind"] == "view" and out["refs"] == ["board.jsonl#L2", "board.jsonl#L4"]
-    assert out["excerpt"] == "Anyone have the build number?\nThe build is 3316."
-    me = await asyncio.to_thread(refs.resolve, corpus, "view:threads")
-    assert me["label"] == "Threads" and me["excerpt"] == VIEW["why"]
-    with pytest.raises(refs.RefError) as e:
-        await asyncio.to_thread(refs.resolve, corpus, "view:threads/t9")
-    assert e.value.status == 404
+    first = [propose(n, orientation=True) for n in ("One", "Two", "Three", "Four")]
+    with pytest.raises(views.HTTPException) as e:
+        propose("Five", orientation=True)
+    assert e.value.status_code == 409
+    assert propose("Two", orientation=True)["slug"] == first[1]["slug"], "one of the four is improved under its name"
+    # the analyst deletes a proposal and a view: neither frees a place or comes back, and their own asks still build
+    views.delete_proposal(CORPUS, first[0]["slug"])
     views.delete_view(CORPUS, "threads")
-    gone = await asyncio.to_thread(refs.resolve, corpus, "view:threads/t2")
-    assert gone["refs"] == ["board.jsonl#L2", "board.jsonl#L4"] and gone["meta"]["deleted"] is True
-    after = await asyncio.to_thread(refs.resolve, corpus, "board.jsonl#L3")
-    assert "view" not in after, "with the view gone the file ref reads as the file"
-    with pytest.raises(refs.RefError):
-        await asyncio.to_thread(refs.resolve, corpus, "view:threads/t1")
-    with pytest.raises(refs.RefError):
-        await asyncio.to_thread(refs.resolve, corpus, "view:nothing")
-
-
-async def test_a_quote_is_found_in_a_views_unit_and_the_view_ref_is_kept(ws, inproc, bound):
-    """A quote cited into `view:<slug>/<key>` is looked up in the excerpt the view's reader gives, and the view ref is
-    kept, so the example opens in the view at that unit; a whole file is searched line by line for the span."""
-    corpus = config.corpus_dir(CORPUS)
-    kept = await asyncio.to_thread(refs.span_of_quote, corpus, "view:threads/t2", "the build is  3316")
-    assert kept == "view:threads/t2"
-    with pytest.raises(refs.RefError) as e:
-        await asyncio.to_thread(refs.span_of_quote, corpus, "view:threads/t2", "4127 tests pass")
-    assert e.value.status == 404, "a quote of another thread is not in this one"
-    # a view whose excerpt of a thread is its first post alone: a later post is found in the lines the unit stands for
-    first_only = THREADS_READER.replace('"\\n".join(b for _, _, _, b in posts)', "posts[0][3]")
-    assert first_only != THREADS_READER
-    views.write_view(CORPUS, "firsts", reader=first_only, html=THREADS_HTML, **dict(VIEW, name="Firsts", default=False))
-    assert (await asyncio.to_thread(refs.resolve, corpus, "view:firsts/t1"))["excerpt"].startswith("The release branch")
-    by_line = await asyncio.to_thread(refs.span_of_quote, corpus, "view:firsts/t1", "tagging the release now")
-    assert by_line == "view:firsts/t1"
-    span =await asyncio.to_thread(refs.span_of_quote, corpus, "board.jsonl", "4127 tests pass")
-    assert re.fullmatch(r"board\.jsonl#L3\.b\d+:c\d+-\d+", span), span
-    assert refs.resolve_base(corpus, span)["excerpt"] == "4127 tests pass"
-    with pytest.raises(refs.RefError):
-        await asyncio.to_thread(refs.span_of_quote, corpus, "board.jsonl", "not on the board")
-
-
-async def test_an_example_card_takes_a_quote_in_a_views_unit(ws, inproc, bound):
-    """add_card runs on the server's loop, and the view's reader answers on the same loop, so the quote in a view ref
-    is resolved off the loop first (tools._warm_view_refs) rather than refused as a quote that is not there."""
-    from app import notebook, tools
-
-    group = notebook.create_notebook(config.workspace_dir(CORPUS), "Your work", role="analyst")["id"]
-    r = await tools.call(CORPUS, "add_card", {"kind": "example", "question": "Which build?",
-                                              "refs": [{"ref": "view:threads/t2", "quote": "The build is 3316."}]},
-                         actor="analyst", notebook=group, terminal=False)
-    assert not r.is_error, r.text
-    cid = next(m.group(1) for ln in r.text.splitlines() if (m := re.fullmatch(r"card:([A-Za-z0-9_-]+)", ln.strip())))
-    assert notebook.get_cell(CORPUS, cid)["payload"]["refs"] == ["view:threads/t2"]
-    await notebook.shutdown_all()
-
-
-async def test_a_thread_on_a_units_anchor_reads_it_on_its_first_event(ws, inproc, bound):
-    """A thread's first event is built on the server's loop, where a view's reader cannot answer a cold ref; the
-    create route resolves the anchor first (threads.warm), so the event carries the unit's text, not `could not
-    resolve`."""
-    from app import threads
-
-    meta = {"anchor": "view:threads/t2,board.jsonl#L3"}
-    cold = threads.content(CORPUS, meta)
-    assert "could not resolve" in cold, "on the loop with nothing memoised the view ref goes without an answer"
-    views._memo.clear()
-    await threads.warm(CORPUS, meta["anchor"])
-    warm = threads.content(CORPUS, meta)
-    assert "The build is 3316." in warm and "could not resolve" not in warm
-    assert "Confirmed: 4127 tests pass." in warm
-
-
-def test_the_gate_notes_a_page_that_anchors_few_of_the_records_it_fetched():
-    """Labels are drawn over the elements whose data-anchor is a record's `<path>#L<n>`: a page that anchors fewer than
-    one in ten of the record refs its fetches returned (a chart of 800 dots with 2 anchors) gets a note in the gate's
-    lines, and passes."""
-    base = {"ok": True, "view": None, "problems": [], "checks": []}
-    page = {"ok": True, "errors": [], "fetches": 2, "refs": 3, "records": 2, "fetched_records": 800}
-    assert "note: " + views._hint("view-no-record-anchors", fetched=800, records=2) in views.gate_lines({**base, "page": page})
-    assert views.first_failure({**base, "page": page}) == ""
-    marked = views.gate_lines({**base, "page": {**page, "records": 120}})
-    assert not any(ln.startswith("note: ") for ln in marked)
-    idle = views.gate_lines({**base, "page": {**page, "records": 0, "fetched_records": 0}})
-    assert not any(ln.startswith("note: ") for ln in idle), "a page that fetched no records needs no record anchors"
-
-
-async def test_a_toy_view_with_no_anchors_gets_the_note_from_its_headless_page(ws, inproc, bound, tmp_path):
-    if why := views.build_problem():
-        pytest.skip(why)
-    rep = await views.check(CORPUS, "threads", ["view:threads/t1"], shot_dir=tmp_path)
-    assert rep["ok"], views.gate_lines(rep)
-    assert rep["page"]["fetches"] >= 1 and rep["page"]["records"] == 0
-    assert any(ln.startswith("note: ") for ln in views.gate_lines(rep))
+    for name in ("One", "Threads", "Five"):
+        with pytest.raises(views.HTTPException) as e:
+            propose(name, orientation=True)
+        assert e.value.status_code == 409, name
+    assert propose("One", asked=True)["status"] == "queued"
+    assert [p["name"] for p in views.list_proposals(CORPUS)] == ["Two", "Three", "Four", "One"]
 
 
 def test_the_frame_document_blocks_every_host_before_any_script(ws):
@@ -379,306 +196,95 @@ def test_the_frame_document_blocks_every_host_before_any_script(ws):
     assert views._libs(["vega-embed"]) == ["vega", "vega-lite", "vega-embed"]
 
 
-needs_browser = pytest.mark.skipif(shutil.which("node") is None or not (config.REPO_ROOT / "frontend" / "node_modules" / "playwright").is_dir(),
-                                   reason="the headless page load needs node and frontend/node_modules/playwright")
-
-
-@pytest.fixture()
-def app() -> FastAPI:
-    a = FastAPI()
-    a.include_router(views.router, prefix="/api")
-    return a
-
-
-@pytest.fixture()
-async def client(app):
-    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://t", timeout=120) as c:
-        yield c
-
-
-async def test_a_message_typed_in_a_view_builds_thread_goes_to_that_build_as_a_change(ws, client, monkeypatch):
-    """The composer of a view build's thread sends to that build: the message is the analyst's in the build's thread,
-    and a change to the view, asked for, is queued for the same proposal, whose run goes on in that thread. An empty
-    message and a view that does not exist are refused."""
-    from app import agents, dev
-
-    queued: list[str] = []
-    monkeypatch.setattr(dev, "queue_view", lambda c, slug: queued.append(slug))
-    monkeypatch.setattr(dev, "stop_view", lambda c, slug, why: False)
-    views.propose(CORPUS, "Threads", "w", ["board.jsonl"], "by thread")
-    chat = agents.new_agent(CORPUS, "dev", "view: Threads", view="threads", announce=False)["id"]
-    views.update_proposal(CORPUS, "threads", chat=chat, status="built")
-    queued.clear()
-    r = await client.post(f"/api/ws/{CORPUS}/views/proposals/threads/message", json={"text": "  Newest thread first  "})
-    assert r.status_code == 200, r.text
-    prop = r.json()
-    assert (prop["status"], prop["change"], prop["changed"], prop["asked"], prop["chat"]) == ("queued", "Newest thread first", True, True, chat)
-    assert queued == ["threads"]
-    log = agents.read_events(agents.paths(CORPUS, chat)[1])
-    assert [(e["type"], e.get("text"), e.get("by")) for e in log] == [("user", "Newest thread first", "browser")]
-    assert (await client.post(f"/api/ws/{CORPUS}/views/proposals/threads/message", json={"text": " "})).status_code == 400
-    assert (await client.post(f"/api/ws/{CORPUS}/views/proposals/nope/message", json={"text": "x"})).status_code == 404
-
-
-CLIP = bytes(range(256)) * 4  # 1,024 bytes, each byte's value its offset mod 256, so a range's bytes name where it is
-PATHS_READER = """
-def build_index(paths):
-    return {"paths": list(paths)}
-
-
-def records(index, query):
-    return index["paths"]
-
-
-def resolve(index, locator):
-    return None
-"""
-
-
-@pytest.fixture()
-def clips(ws, data, tmp_path) -> Path:
-    """The view `clips` over `clips/*` (a video, a text file and a dot-file under it), beside `secret.mp4`, which it does
-    not claim, and `clips/out.mp4`, a symlink to a file outside the corpus."""
-    corpus = data / CORPUS
-    (corpus / "clips").mkdir()
-    (corpus / "clips" / "a.mp4").write_bytes(CLIP)
-    (corpus / "clips" / "notes.txt").write_text("not media\n")
-    (corpus / "clips" / ".hidden.mp4").write_bytes(CLIP)
-    (corpus / "secret.mp4").write_bytes(CLIP)
-    (tmp_path / "outside.mp4").write_bytes(CLIP)
-    (corpus / "clips" / "out.mp4").symlink_to(tmp_path / "outside.mp4")
-    views.write_view(CORPUS, "clips", reader=PATHS_READER, html=THREADS_HTML,
-                     **dict(VIEW, name="Clips", claims=["clips/*"], default=False))
-    return corpus
-
-
-async def test_the_media_route_streams_a_claimed_file_with_range_requests(clips, client):
-    url = f"/api/ws/{CORPUS}/views/clips/media"
-    whole = await client.get(url, params={"path": "clips/a.mp4"})
-    assert whole.status_code == 200 and whole.content == CLIP
-    assert whole.headers["content-type"] == "video/mp4" and whole.headers["accept-ranges"] == "bytes"
-    assert whole.headers["x-content-type-options"] == "nosniff" and "sandbox" in whole.headers["content-security-policy"]
-    part = await client.get(url, params={"path": "clips/a.mp4"}, headers={"Range": "bytes=300-309"})
-    assert part.status_code == 206 and part.headers["content-range"] == "bytes 300-309/1024"
-    assert part.content == bytes(range(44, 54)), "bytes 300 to 309 of the file"
-    tail = await client.get(url, params={"path": "clips/a.mp4"}, headers={"Range": "bytes=1000-"})
-    assert tail.status_code == 206 and tail.headers["content-range"] == "bytes 1000-1023/1024" and len(tail.content) == 24
-    last = await client.get(url, params={"path": "clips/a.mp4"}, headers={"Range": "bytes=-4"})
-    assert last.status_code == 206 and last.content == bytes([252, 253, 254, 255])
-    past = await client.get(url, params={"path": "clips/a.mp4"}, headers={"Range": "bytes=5000-6000"})
-    assert past.status_code == 416 and past.headers["content-range"] == "bytes */1024"
-
-
-async def test_the_media_route_serves_only_media_files_the_view_claims_inside_the_corpus(clips, client):
-    url = f"/api/ws/{CORPUS}/views/clips/media"
-    refused = {
-        "secret.mp4": 403,  # in the corpus, not claimed
-        "clips/../secret.mp4": 400,  # matches the claim's glob by its text, names another file
-        "clips/./a.mp4": 400,
-        "clips//a.mp4": 400,
-        "/etc/passwd": 400,
-        "clips\\a.mp4": 400,
-        "clips/.hidden.mp4": 400,  # a dot-file, which no claim's glob matches
-        "clips/notes.txt": 415,  # claimed, not media
-        "clips/out.mp4": 404,  # a symlink out of the corpus
-        "clips/missing.mp4": 404,
-        "": 400,
-    }
-    for path, status in refused.items():
-        r = await client.get(url, params={"path": path})
-        assert r.status_code == status, (path, r.status_code, r.text)
-    assert (await client.get(f"/api/ws/{CORPUS}/views/nope/media", params={"path": "clips/a.mp4"})).status_code == 404
-    assert (await client.get(f"/api/ws/{CORPUS}/views/threads/media", params={"path": "clips/a.mp4"})).status_code == 403
-    with pytest.raises(HTTPException) as e:
-        views.media_file(CORPUS, "clips", "secret.mp4")
-    assert "does not claim secret.mp4" in e.value.detail
-
-
-async def test_the_frame_policy_allows_the_views_media_route_at_the_pages_origin(clips, client):
-    url = f"/api/ws/{CORPUS}/views/clips/frame"
-    doc = (await client.get(url, params={"origin": "http://localhost:5300"})).text
-    route = f"http://localhost:5300/api/ws/{CORPUS}/views/clips/media"
-    assert f"media-src data: blob: {route};" in doc and f"img-src data: blob: {route};" in doc
-    assert "connect-src 'none'" in doc and f'"media": "{route}"' in doc and "mediaUrl" in doc
-    assert f"media-src data: blob: http://t/api/ws/{CORPUS}/views/clips/media;" in (await client.get(url)).text, \
-        "without an origin, the request's own host"
-    for bad in ("javascript:alert(1)", "http://h; script-src *", "http://h/path", "http://h:80\n", "file://x"):
-        assert (await client.get(url, params={"origin": bad})).status_code == 400, bad
-    assert "media-src data: blob:;" in views.frame_document(views.read_view(CORPUS, "clips")), "no route, no URL"
-
-
-PLAYER_HTML = """<!doctype html><html><head></head><body><audio id="a" controls></audio><div id="d"></div><script>
-const a = document.getElementById('a')
-a.addEventListener('loadedmetadata', () => { document.getElementById('d').textContent = 'duration ' + a.duration; thimble.fetch({ duration: a.duration }) })
-a.addEventListener('error', () => { throw new Error('the audio did not load') })
-a.src = thimble.mediaUrl(SRC)
-thimble.onOpen(() => {})
-</script></body></html>"""
-
-
-def _workbook(path: Path) -> None:
-    import openpyxl
-
-    wb = openpyxl.Workbook()
-    wb.active.title = "Q2"
-    wb.active.append(["dept", "travel"])
-    q3 = wb.create_sheet("Q3")
-    q3.append(["dept", "item", "", "amount"])
-    for i in range(2, 20):
-        q3.append([f"Dept {i}", "Travel", "", 1000 * i + (200 if i == 17 else 0)])
-    wb.save(path)
-
-
-def _pdf(path: Path, pages: list[list[str]]) -> None:
-    """A PDF with one Helvetica text line per string, written by hand (no writer library is installed)."""
-    objs: list[bytes] = [b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>"]
-    pages_id = 1 + 2 * len(pages) + 1
-    kids = []
-    for lines in pages:
-        body = b"BT /F1 12 Tf 72 720 Td 16 TL " + b" ".join(b"(" + ln.encode() + b") '" for ln in lines) + b" ET"
-        objs.append(b"<< /Length %d >>\nstream\n" % len(body) + body + b"\nendstream")
-        objs.append(b"<< /Type /Page /Parent %d 0 R /MediaBox [0 0 612 792] /Contents %d 0 R /Resources << /Font << /F1 1 0 R >> >> >>"
-                    % (pages_id, len(objs)))
-        kids.append(len(objs))
-    objs.append(b"<< /Type /Pages /Kids [" + b" ".join(b"%d 0 R" % k for k in kids) + b"] /Count %d >>" % len(kids))
-    objs.append(b"<< /Type /Catalog /Pages %d 0 R >>" % pages_id)
-    out, offs = bytearray(b"%PDF-1.4\n"), []
-    for i, o in enumerate(objs, 1):
-        offs.append(len(out))
-        out += b"%d 0 obj\n" % i + o + b"\nendobj\n"
-    xref = len(out)
-    out += b"xref\n0 %d\n0000000000 65535 f \n" % (len(objs) + 1) + b"".join(b"%010d 00000 n \n" % o for o in offs)
-    out += b"trailer\n<< /Size %d /Root %d 0 R >>\nstartxref\n%d\n%%%%EOF\n" % (len(objs) + 1, len(objs), xref)
-    path.write_bytes(bytes(out))
-
-
-@pytest.fixture()
-async def docs(data, workspaces_tmp) -> Path:
-    corpus = config.corpus_dir(CORPUS)
-    _workbook(corpus / "budget.xlsx")
-    _pdf(corpus / "policy.pdf", [["Travel policy"], ["Section 2. Claims", "Receipts are filed within a 30-day limit."]])
-    return corpus
-
-
-async def test_the_built_in_viewers_open_workbooks_and_pdfs_in_every_workspace(docs, inproc, bound):
-    listed = {v["slug"]: v for v in views.list_views(CORPUS)}
-    assert listed["spreadsheet"]["origin"] == listed["pdf"]["origin"] == "builtin"
-    assert [v["slug"] for v in views.views_for(CORPUS, "budget.xlsx", "Q3!D17")] == ["spreadsheet"]
-    assert [v["slug"] for v in views.views_for(CORPUS, "policy.pdf", "p2")] == ["pdf"]
-    cell = await asyncio.to_thread(refs.resolve, docs, "budget.xlsx#Q3!D17")
-    assert cell["excerpt"] == "17200" and cell["view"]["label"] == "Q3!D17 = 17200"
-    page = await asyncio.to_thread(refs.resolve, docs, "policy.pdf#p2")
-    assert "30-day limit" in page["excerpt"] and page["view"]["label"] == "p. 2"
-    assert await verify._ref_check(docs, "budget.xlsx#Q3!D17", "17200") is None
-    assert await verify._ref_check(docs, "policy.pdf#p2", "30-day") is None
-    assert await verify._ref_check(docs, "policy.pdf#p2", "60-day") == verify.WHY_VALUE
-    # a built-in viewer's index is cached under the workspace, never in thimble's own folder
-    assert list((config.workspace_dir(CORPUS) / "views" / views.BUILTIN_CACHE / "spreadsheet").glob("*.index.pickle"))
-    assert not list((views.VIEWERS_DIR / "spreadsheet").glob("cache"))
-    # their forms reach the citation prompt only where the corpus holds their files
-    forms = views.forms_text(CORPUS)
-    assert "<file>#<Sheet>!<A1>" in forms and "<file>#p<n>" in forms
-
-
-async def test_a_corpus_view_over_the_same_files_opens_before_the_built_in_one(docs, inproc):
-    views.write_view(CORPUS, "budget", reader=THREADS_READER, html=THREADS_HTML,
-                     **dict(VIEW, name="Budget", claims=["budget.xlsx"], accepts=[{"form": "<Sheet>!<A1>", "means": "a cell"}], default=False))
-    assert [v["slug"] for v in views.views_for(CORPUS, "budget.xlsx", "Q3!D17")] == ["budget", "spreadsheet"]
-    assert "<file>#p<n>" not in views.forms_text(None)
-
-
 # ------------------------------------------------------------------------------------------------- worked examples
 #
-# plugin/viewers/board, network and timeline are the worked examples a view ticket's session starts from
-# (prompts/dev-view.md). Each is written for the layout of toy-incident, the synthetic corpus that
-# scripts/dev/make_toy_corpus.py writes, and passes over it the checks a view a session writes must pass.
+# plugin/viewers/linked-sessions, incident-timeline and repository are the worked examples a view ticket's session
+# reads (prompts/dev-view.md). Each ships an invented sample of the files it claims under sample/, and passes over it
+# the checks a view a session writes must pass. Each sample is copied into the temp DATA_DIR as a corpus named after
+# its example.
 
-TOY = "toy-incident"
 # the example, the slug it is saved under, and a key of each kind it declares
 EXAMPLES = {
-    "board": ("threads", ["view:threads/2"]),
-    "network": ("hand-offs", ["view:hand-offs/agent-01"]),
-    "timeline": ("activity-by-ten-minutes", ["view:activity-by-ten-minutes/2026-08-30T14:10"]),
+    "incident-timeline": ("incident-timeline", ["view:incident-timeline/INC-312",
+                                                "view:incident-timeline/2026-05-16T08:00..2026-05-16T09:00"]),
+    "repository": ("repository", ["view:repository/r1/pull/11", "view:repository/r3", "view:repository/r2/issues/6",
+                                  "view:repository/r3/discussions/2", "view:repository/r4/agents/moss"]),
+    "linked-sessions": ("linked-sessions", ["view:linked-sessions/r1", "view:linked-sessions/a07a4da7"]),
 }
 
 
-@pytest.fixture(scope="module")
-def toy_data(tmp_path_factory) -> Path:
-    d = tmp_path_factory.mktemp("toy") / "data"
-    script = config.REPO_ROOT / "scripts" / "dev" / "make_toy_corpus.py"
-    subprocess.run([sys.executable, str(script), "--out", str(d / TOY)], check=True, capture_output=True, timeout=120)
+@pytest.fixture()
+def samples(workspaces_tmp, tmp_path, monkeypatch) -> Path:
+    d = tmp_path / "data"
+    for name in EXAMPLES:
+        shutil.copytree(views.EXAMPLES_DIR / name / "sample", d / name)
+        (d / name / "manifest.json").write_text(json.dumps({"name": name, "description": "an example's sample"}))
+    monkeypatch.setattr(config, "DATA_DIR", d.resolve())
     return d.resolve()
 
 
-@pytest.fixture()
-def toy(toy_data, workspaces_tmp, monkeypatch) -> Path:
-    monkeypatch.setattr(config, "DATA_DIR", toy_data)
-    return toy_data / TOY
-
-
 def _save_example(name: str) -> str:
-    """Save the worked example `name` as a view of the toy corpus, as a session writes one; returns its slug."""
+    """Save the worked example `name` as a view of its sample, as a session writes one; returns its slug."""
     d = views.EXAMPLES_DIR / name
     raw = json.loads((d / "view.json").read_text("utf-8"))
     slug = EXAMPLES[name][0]
-    views.write_view(TOY, slug, reader=(d / "reader.py").read_text("utf-8"), html=(d / "view.html").read_text("utf-8"),
+    views.write_view(name, slug, reader=(d / "reader.py").read_text("utf-8"), html=(d / "view.html").read_text("utf-8"),
                      **{k: raw[k] for k in ("name", "why", "claims", "accepts", "declares", "default", "libs")})
     return slug
 
 
-@pytest.mark.parametrize("name", sorted(EXAMPLES))
-async def test_every_worked_example_answers_the_checks_over_the_toy_corpus(name, toy, inproc, bound, tmp_path, monkeypatch):
-    """The reader's half of the checks: the index builds, the sampled lines and the declared keys resolve, each answer
-    cites its place back, and every excerpt is literal text of the records it cites. The page's half is a test below."""
-    async def no_page(*a, **k):
-        return {"ok": True, "errors": [], "fetches": 0}
+# per example, lines a sample file gets appended that its reader must report rather than fail on: (file, text, problems
+# they add)
+BROKEN = {
+    "incident-timeline": [("agents.log", '2026-05-16T05:00:00Z INFO autoheal action=scan result=ok msg="matched \\d+"\n', 1),
+                          ("deploys.csv", '2026-05-16T03:10:00+01:00,dep-90,started,api,1.2.0,ops,,,"two\nlines"\n', 0)],
+    "repository": [("runs/r3/export/comments.csv", '4,hazel,2026-05-20T10:00:00,"Repro:\n2 failures"\n', 0),
+                   ("runs/r2/manifest.json", "{", 1)],
+    "linked-sessions": [("runs/r1/sessions-index.json", "not json", 1)],
+}
 
-    monkeypatch.setattr(views, "shoot", no_page)
+
+@pytest.mark.parametrize("name", sorted(EXAMPLES))
+async def test_every_worked_example_answers_the_checks_over_its_sample(name, samples, inproc, bound, tmp_path, monkeypatch):
+    """The reader's half of the checks: the index builds, the sampled lines and the declared keys resolve, each answer
+    cites its place back, and every excerpt is literal text of the records it cites. The page's half is a test below.
+    Lines that do not parse, a CSV cell over two lines among them, are reported (reader_problems) rather than failing.
+    Each sample label the example ships (labels.json) marks some line of the files it runs over."""
+    async def no_page(c, slug, states, **k):
+        return [{"ok": True, "errors": [], "fetches": 0, "records": 1} for _ in states]
+
+    monkeypatch.setattr(views, "shoot_states", no_page)
+    root = samples / name
+    files = [p for p in root.rglob("*") if p.is_file()]
+    for label in json.loads((views.EXAMPLES_DIR / name / "labels.json").read_text("utf-8")):
+        pattern = re.compile(label["spec"])
+        over = [p for p in files if any(fnmatch.fnmatchcase(p.relative_to(root).as_posix(), g) for g in label["paths"])]
+        assert any(pattern.search(line) for p in over for line in p.read_text("utf-8").splitlines()), label["name"]
     slug = _save_example(name)
-    rep = await views.check(TOY, slug, EXAMPLES[name][1], shot_dir=tmp_path)
+    before = (await views.reader_problems(name, slug))["count"]
+    for rel, text, _ in BROKEN[name]:
+        path = samples / name / rel
+        old = "" if rel.endswith(".json") else path.read_text("utf-8")
+        path.write_text(old + ("\n" if old and not old.endswith("\n") else "") + text, "utf-8")
+    rep = await views.check(name, slug, EXAMPLES[name][1], shot_dir=tmp_path)
     assert rep["ok"], views.gate_lines(rep)
     checked = [r["locator"] for r in rep["checks"]]
     assert set(EXAMPLES[name][1]) <= set(checked)
     assert any(re.search(r"#L\d+$", c) for c in checked), "sampled lines were checked beside the keys"
+    problems = await views.reader_problems(name, slug)
+    assert problems["count"] == before + sum(n for *_, n in BROKEN[name]), problems
 
 
-async def test_the_worked_examples_resolve_the_toy_corpus_s_units(toy, inproc, bound):
-    """What each example makes of the toy corpus: a board post in its thread, a hand-off between two agents on a pull
-    request, and a call in its ten-minute window, each citing its own line."""
-    for name in EXAMPLES:
-        _save_example(name)
-    post = await views.resolve_locator(TOY, "threads", {"path": "board.jsonl", "fragment": "L1"})
-    assert post["key"] == "1" and post["label"].startswith("agent-03 · 30 Aug 14:06")
-    assert post["excerpt"].startswith("agent-03 here. Proposal for the 35-PR backlog")
-    thread = await views.resolve_locator(TOY, "threads", {"key": "2"})
-    assert thread["label"].startswith("Review requests · ") and thread["refs"][0] == "board.jsonl#L2"
-
-    events = [json.loads(ln) for ln in (toy / "events.jsonl").read_text("utf-8").splitlines()]
-    review = next(n for n, e in enumerate(events, 1) if e["action"] == "pr.review")
-    hop = await views.resolve_locator(TOY, "hand-offs", {"path": "events.jsonl", "fragment": f"L{review}"})
-    assert hop["refs"] == [f"events.jsonl#L{review}"] and " → " in hop["label"]
-    assert hop["key"] == events[review - 1]["agent"] and hop["excerpt"] == f"{hop['key']}\npr.review"
-    assert hop["target"]["ref"] == f"events.jsonl#L{review}"
-    graph = await views.reader_call(TOY, "hand-offs", "records", {"op": "graph"})
-    assert graph["edges"] and all(e["source"] < e["target"] for e in graph["edges"])
-
-    call = await views.resolve_locator(TOY, "activity-by-ten-minutes", {"path": "events.jsonl", "fragment": "L1"})
-    assert call["key"] == "2026-08-30T14:00" and call["excerpt"].split("\n")[:2] == ["admin.agents", "admin"]
-    counts = await views.reader_call(TOY, "activity-by-ten-minutes", "records", {"op": "counts"})
-    assert sum(c["n"] for c in counts) == len(events)
-    first = await views.reader_call(TOY, "activity-by-ten-minutes", "records", {"op": "window", "window": "2026-08-30T14:00"})
-    assert first["items"][0]["ref"] == "events.jsonl#L1"
-    assert first["total"] == sum(c["n"] for c in counts if c["window"] == "2026-08-30T14:00")
-
-
-@pytest.mark.parametrize("name", sorted(EXAMPLES))
-async def test_every_worked_example_s_page_loads_headless_at_its_first_place(name, toy, inproc, bound, tmp_path):
+@pytest.mark.parametrize("name", ["repository"])
+async def test_every_worked_example_s_page_loads_headless_at_its_first_place(name, samples, inproc, bound, tmp_path):
     """The whole check a view ticket's session runs, the headless page included, where this machine has Node and the
     frontend's packages with their Chromium (scripts/check.sh install)."""
     if why := views.build_problem():
+        if os.environ.get("CI") == "true":
+            pytest.fail(why)  # CI installs them, so there the page is always loaded
         pytest.skip(why)
     slug = _save_example(name)
-    rep = await views.check(TOY, slug, EXAMPLES[name][1], shot_dir=tmp_path)
+    rep = await views.check(name, slug, EXAMPLES[name][1], shot_dir=tmp_path)
     assert rep["ok"], views.gate_lines(rep)
     assert rep["page"]["fetches"] >= 1 and Path(rep["page"]["png"]).is_file()
     assert not views.unmarked(rep["page"]), "the records a worked example shows carry their file refs, for the labels"

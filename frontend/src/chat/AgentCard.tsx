@@ -3,10 +3,11 @@
 //
 // The orientation and a writer, each a Claude Code session of its own, are a tool-call card whose steps are that
 // session's subagents and workflow agents (sessionSteps). While it runs the card shows what holds the session (Holds)
-// and Stop; its permission requests wait on the one permission card above the composer (PermissionCard). The
-// orientation's card also carries its permission mode (ModeSwitch). In main, a finished orientation's card follows one
-// line counting what it left for review. A follow-up of the orientation is the same card for that run alone (`run`),
-// with what it changed and Undo while the last undo step is that follow-up's (backend undo.py).
+// and Stop (in its own thread the composer's stop square is its Stop instead, ChatPanel); its permission requests wait
+// on the one permission card above the composer (PermissionCard), and its permission mode shows beside them
+// (ModeSwitch). In main, a finished orientation's card follows one line counting what it left for review. A follow-up
+// of the orientation is the same card for that run alone (`run`), with what it changed and Undo while the last undo
+// step is that follow-up's (backend undo.py).
 import { useContext, useEffect, useMemo, useState } from 'react'
 import { Button } from '../components/Button'
 import { Chip } from '../components/Chip'
@@ -14,6 +15,7 @@ import { Icon } from '../components/Icon'
 import { RefChip } from '../components/RefChip'
 import { Mark } from '../components/Marks'
 import { Spinner } from '../components/Spinner'
+import { UserMessage } from '../components/Message'
 import { ChipRun, StepGlyph, ToolCard, type ToolSection, type ToolState } from '../components/ToolCard'
 import { api, undoApi } from '../lib/api'
 import { bus, type Tab } from '../lib/bus'
@@ -30,6 +32,7 @@ import { openThread, ThreadChip, ThreadsContext } from './Notes'
 import { DocChip, GroupChip, LabelChip } from './SurfaceChips'
 import { ViewChip } from './ViewChip'
 import { failureText, ReportProblemButton } from '../shell/ProblemReport'
+import { RefText } from './markdown'
 
 const REFETCH_DEBOUNCE_MS = 150
 /** The roles of the sessions thimble starts beside main (agent_session.py): their card lists their agents as steps and
@@ -217,9 +220,58 @@ export interface AgentCardProps {
   report?: string | null
   /** the orientation's run the card stands for: 0 its first, then each follow-up; unset, its whole session */
   run?: number
+  /** a stopped background session's Resume shows on the card; its own thread shows it at the end instead */
+  resumeHere?: boolean
+  /** a running session's Stop shows on the card; its own thread has it on the composer instead */
+  stopHere?: boolean
+  /** the analyst's instructions show as their own message above the card rather than inside it (the orientation in
+   * its own thread) */
+  briefAbove?: boolean
+}
+
+/** The browser's Stop of a session thimble started (the orientation, a writer, a check's run): its chat is interrupted
+ * (backend agents.interrupt_route). A subagent of main, which only main can stop, is asked of main, and a toast says so;
+ * a toast also says when the server runs no session for it or the request fails. Resolves true when the stop went
+ * through or was asked of main, false otherwise. */
+export function stopSession(ws: string, chat: string, role: string): Promise<boolean> {
+  track('chat-interrupt', { target: `chat:${chat}`, detail: { role } })
+  return api
+    .interrupt(ws, chat)
+    .then((r) => {
+      if (r.stopped) return true
+      if (r.asked === 'main') return (bus.emit('toast', { text: 'Asked main to stop it.' }), true)
+      // the server answers `stopped: false` when it runs no session for this chat, which would otherwise look as if
+      // Stop had worked
+      return (bus.emit('toast', { text: 'Could not stop it: the server runs no session for it.', kind: 'error' }), false)
+    })
+    .catch((e: Error) => (bus.emit('toast', { text: `Could not stop it: ${e.message}`, kind: 'error' }), false))
 }
 
 /** The card of a session thimble started (the orientation, a writer, a check's run), or a subagent's chip. */
+/** A background session whose process stopped (a crash, a kill, `claude stop`): what happened, and Resume, which
+ * starts it again under its id with its conversation (backend agent_session.resume_chat). */
+export function StoppedHold({ ws, chat, text }: { ws: string; chat: string; text: string }) {
+  const [busy, setBusy] = useState(false)
+  const resume = () => {
+    setBusy(true)
+    track('ui-click', { target: `chat:${chat}`, detail: { action: 'resume-session' } })
+    api
+      .resumeSession(ws, chat)
+      .catch((e: Error) => bus.emit('toast', { text: `Could not resume it: ${e.message}`, kind: 'error' }))
+      .finally(() => setBusy(false))
+  }
+  return (
+    <div className="chat-holds">
+      <div className="chat-hold chat-hold-stopped" data-kind="stopped" role="alert">
+        <span>{text}</span>
+        <Button variant="secondary" size="sm" busy={busy} onClick={resume}>
+          Resume
+        </Button>
+      </div>
+    </div>
+  )
+}
+
 export function AgentCard(props: AgentCardProps) {
   if (!SESSION_ROLES.has(props.role)) return props.log ? <AgentChip {...props} log={props.log} /> : <AgentChipLive {...props} />
   return props.log ? <AgentCardView {...props} log={props.log} /> : <AgentCardLive {...props} />
@@ -340,7 +392,7 @@ function useUndoRun(ws: string, chat: string, run: number | undefined, want: boo
   return want && top === `${chat}/${run}`
 }
 
-function AgentCardView({ ws, chat, role, title, ts, log, openWhileRunning = false, report, run }: AgentCardProps & { log: NonNullable<AgentCardProps['log']> }) {
+function AgentCardView({ ws, chat, role, title, ts, log, openWhileRunning = false, report, run, resumeHere = true, stopHere = true, briefAbove = false }: AgentCardProps & { log: NonNullable<AgentCardProps['log']> }) {
   const { meta, records, error } = log
   const all = useMemo(() => foldRecords(records), [records])
   // the run the card stands for, and whether a later one followed it (an earlier run has ended, whatever the chat's
@@ -366,17 +418,14 @@ function AgentCardView({ ws, chat, role, title, ts, log, openWhileRunning = fals
   const [stopping, setStopping] = useState(false)
   const stop = () => {
     setStopping(true)
-    track('chat-interrupt', { target: `chat:${chat}`, detail: { role } })
-    api
-      .interrupt(ws, chat)
-      // the server answers `stopped: false` when it runs no session for this chat, which the card would otherwise
-      // leave looking as if Stop had worked
-      .then((r) => r.stopped || bus.emit('toast', { text: 'Could not stop it: the server runs no session for it.', kind: 'error' }))
-      .catch((e: Error) => bus.emit('toast', { text: `Could not stop it: ${e.message}`, kind: 'error' }))
-      .finally(() => setStopping(false))
+    void stopSession(ws, chat, role).finally(() => setStopping(false))
   }
   // what holds its session besides its permission requests, which wait on the permission card above the composer
-  const holds = running && own ? <Holds alert={meta?.alert} rules={meta?.session_rules} restarted={restartedNow(meta, run, running)} onRetry={() => api.retrySession(ws, chat)} /> : null
+  const holds = running && own ? (
+    <Holds alert={meta?.alert} rules={meta?.session_rules} restarted={restartedNow(meta, run, running)} onRetry={() => api.retrySession(ws, chat)} />
+  ) : !running && own && resumeHere && meta?.alert?.kind === 'stopped' ? (
+    <StoppedHold ws={ws} chat={chat} text={meta.alert.text} />
+  ) : null
   // waiting for the analyst: on its own prompt, or on its critique's (chat/waiting.ts)
   const waitingFor = useMemo(() => {
     if (!running) return null
@@ -416,7 +465,7 @@ function AgentCardView({ ws, chat, role, title, ts, log, openWhileRunning = fals
       .catch((e: Error) => bus.emit('toast', { text: `Could not undo it: ${e.message}`, kind: 'error' }))
       .finally(() => setUndoing(false))
   }
-  return (
+  const card = (
     <ToolCard
       className="chat-task"
       data-chat={chat}
@@ -428,13 +477,13 @@ function AgentCardView({ ws, chat, role, title, ts, log, openWhileRunning = fals
       title={<span className="chat-task-title">{role === 'orient' ? 'Orientation' : taskTitle(meta?.title || title)}</span>}
       meta={metaText || undefined}
       state={status}
-      lead={brief ? <span className="chat-task-brief">{brief}</span> : undefined}
+      lead={brief && !briefAbove ? <span className="chat-task-brief">{brief}</span> : undefined}
       steps={steps}
       body={error ? <div className="chat-error">{error}</div> : undefined}
       chips={
         own && running ? (
           <>
-            {role === 'orient' && meta?.permission_mode ? <ModeSwitch ws={ws} chat={chat} meta={meta} /> : null}
+            {meta?.permission_mode ? <ModeSwitch ws={ws} chat={chat} meta={meta} /> : null}
             {holds}
           </>
         ) : holds ? (
@@ -447,7 +496,7 @@ function AgentCardView({ ws, chat, role, title, ts, log, openWhileRunning = fals
           <ReportProblemButton description={failureText(`${role === 'orient' ? 'The orientation' : taskTitle(meta?.title || title)} failed.`, meta?.result)} focus={[chat]} className="chat-task-report" />
         ) : undefined
       }
-      stop={own && running ? { onStop: stop, busy: stopping, className: 'chat-task-stop' } : undefined}
+      stop={own && running && stopHere ? { onStop: stop, busy: stopping, className: 'chat-task-stop' } : undefined}
       open={shownOpen}
       onToggle={(o) => {
         if (o) track('agent-row-expand', { target: `chat:${chat}`, detail: { role } })
@@ -455,6 +504,17 @@ function AgentCardView({ ws, chat, role, title, ts, log, openWhileRunning = fals
       }}
       sections={madeSections(ws, made, { report, writer })}
     />
+  )
+  if (!briefAbove || !brief) return card
+  return (
+    <>
+      <div className="chat-msg chat-user">
+        <UserMessage className="chat-message">
+          <RefText text={brief} workspace={ws} />
+        </UserMessage>
+      </div>
+      {card}
+    </>
   )
 }
 

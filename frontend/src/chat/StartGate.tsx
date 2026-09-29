@@ -1,9 +1,12 @@
 // The start gate: until an orientation has been asked for (main's meta `orientation`) or the analyst skips it, the offer
 // of an orientation wraps main's composer. Show options opens the orientation's switches (Write Orientation deck,
-// Propose views, Critique and revise, Generate report) and its permission mode (manual, auto, bypass; Claude Code's own
-// warning shows under Bypass). The field's text is the orientation's instructions and may stay empty; its model line
-// (ModelLine) edits the orientation role's settings. Start sends the analyst's session the `start` event with the
-// instructions as its text and the choices as attributes (prompts/main.md); Skip leaves main to the analyst.
+// Propose views, Critique and revise, Generate report) and its permission mode, the orientation's row of the settings'
+// permission modes, which a pick here saves (manual, auto, bypass; Claude Code's own warning shows under Bypass). The
+// field's text is the orientation's instructions and may stay empty; its model line (ModelLine) edits the orientation
+// role's settings: the model (a menu of lib/models modelChoices, as RoleChip's), the effort and fast mode. Start sends
+// the analyst's session the `start` event with the instructions as its text and the choices as attributes
+// (prompts/main.md); Skip leaves main to the analyst. The gate is the same in terminal-first mode, where the
+// orientation runs as the background session `thimble:orient · <workspace>` with every one of these choices.
 import { useEffect, useRef, useState } from 'react'
 import { Button, Segmented, type SegmentedOption } from '../components/Button'
 import { TextArea } from '../components/Field'
@@ -11,9 +14,10 @@ import { Icon } from '../components/Icon'
 import { Switch } from '../components/Switch'
 import { api } from '../lib/api'
 import { bus } from '../lib/bus'
+import { loadSettings, modelChoices, onSettingsChange } from '../lib/models'
 import { track } from '../lib/telemetry'
-import type { MainEffort, OrientPass, OrientPermissions, StartBody } from '../lib/types'
-import { EFFORT_CHOICES, ModelLine, ORIENT_DEFAULT_EFFORT, ORIENT_MODEL_TIP } from './ModelLine'
+import type { MainEffort, ModeAgent, OrientPass, OrientPermissions, Settings, StartBody } from '../lib/types'
+import { EFFORT_CHOICES, ModelLine, ORIENT_DEFAULT_EFFORT } from './ModelLine'
 
 export const PASSES: { id: OrientPass; label: string }[] = [
   { id: 'final', label: 'Write Orientation deck' },
@@ -21,6 +25,10 @@ export const PASSES: { id: OrientPass; label: string }[] = [
   { id: 'critique', label: 'Critique and revise' },
   { id: 'report', label: 'Generate report' },
 ]
+
+/** What terminal-first mode does, where the settings offer it (backend orientation, module note). */
+export const TERMINAL_FIRST_NOTE =
+  "Runs the orientation, its critic and the writers as Claude Code background sessions you can steer from your terminal: each shows in the agent tray at the bottom of it and takes your messages, with the model, effort and permission mode you pick here."
 
 /** The level Ultracode runs at, sent as the `start` event's `effort` beside `ultracode` (cc_settings.ULTRACODE_EFFORT). */
 export const ULTRACODE_LEVEL = 'xhigh'
@@ -53,9 +61,8 @@ export function startGateShown(s: { main: boolean; skipped: boolean; started: bo
 export const chosenPasses = (on: Passes): OrientPass[] => PASSES.map((p) => p.id).filter((id) => on[id])
 
 /** The body of the `start` event: start_orientation's three switches, the session's settings (the critique, the
- * effort, Ultracode as `ultracode` at its level, and the permission mode), and the instructions when the analyst wrote
- * any. Pure. */
-export function startBody(on: Passes, instructions: string, effort: MainEffort = ORIENT_DEFAULT_EFFORT, permissions?: OrientPermissions | null): StartBody {
+ * effort, Ultracode as `ultracode` at its level), and the instructions when the analyst wrote any. Pure. */
+export function startBody(on: Passes, instructions: string, effort: MainEffort = ORIENT_DEFAULT_EFFORT): StartBody {
   const text = instructions.trim()
   const ultracode = effort === 'ultracode'
   return {
@@ -66,17 +73,22 @@ export function startBody(on: Passes, instructions: string, effort: MainEffort =
     ultracode,
     effort: effort === 'ultracode' ? ULTRACODE_LEVEL : effort,
     ...(text ? { text } : {}),
-    ...(permissions ? { permissions } : {}),
   }
 }
 
-/** The mode the switcher opens on for the analyst's own Claude Code permission mode for the folder: Auto for auto,
- * Bypass for bypassPermissions, Manual for any other (acceptEdits, plan and dontAsk are not offered) or none known,
- * as cc_settings.orient_mode_default. Pure. */
+/** A Claude Code permission mode (main's `attached.permission_mode`) as thimble's: Auto for auto, Bypass for
+ * bypassPermissions, Manual for any other (acceptEdits, plan and dontAsk are not offered) or none known (backend
+ * modes.OF_CLAUDE). Pure. */
 export const permissionChoice = (mode: string | null | undefined): OrientPermissions =>
   mode === 'auto' ? 'auto' : mode === 'bypassPermissions' ? 'bypass' : 'manual'
 
-/** Claude Code's modes by the names its own switcher shows (cc_settings.ORIENT_MODES). Manual and Bypass both run in
+/** The mode an agent starts in: its row, else the mode of the analyst's Claude Code session, else Manual, whichever
+ * their Claude Code settings do not turn off (backend modes.mode_for). Pure. */
+export function agentMode(rows: Settings['permission_modes'], agent: ModeAgent, sessionMode: string | null | undefined, off: readonly string[] = []): OrientPermissions {
+  return [rows?.[agent], permissionChoice(sessionMode), 'manual' as const].find((m): m is OrientPermissions => !!m && !off.includes(m))!
+}
+
+/** Claude Code's modes by the names its own switcher shows (backend modes.MODES). Manual and Bypass both run in
  * Claude Code's manual mode (thimble grants every request in Bypass), so the card can switch between them live. */
 export const PERMISSION_OPTIONS: SegmentedOption<OrientPermissions>[] = [
   { value: 'manual', label: 'Manual', icon: 'pause' },
@@ -89,10 +101,12 @@ export const BYPASS_WARNING =
   'In Bypass Permissions mode, Claude Code will not ask for your approval before running potentially dangerous commands. ' +
   'This mode should only be used in a sandboxed container/VM that has restricted internet access and can easily be restored if damaged.'
 
-export function StartGate({ ws, model, defaultEffort = ORIENT_DEFAULT_EFFORT, fast = null, onEffort, onFast, permissionMode = null, onStarted, onSkip }: {
+export function StartGate({ ws, model, onModel, defaultEffort = ORIENT_DEFAULT_EFFORT, fast = null, onEffort, onFast, mode: rowMode = 'manual', offModes = [], onMode, onStarted, onSkip }: {
   ws: string
   /** the orientation role's model (settings.models.orient); nothing while it is not read yet */
   model?: string | null
+  /** saves a model picked here to the orientation's role; without it the model is text */
+  onModel?: (model: string) => void
   /** the orientation role's effort, where the menu opens (ModelLine.ORIENT_DEFAULT_EFFORT while it is not read yet) */
   defaultEffort?: MainEffort
   /** the orientation role's fast mode; null while it is not read yet */
@@ -101,9 +115,12 @@ export function StartGate({ ws, model, defaultEffort = ORIENT_DEFAULT_EFFORT, fa
   onEffort?: (e: MainEffort) => void
   /** switches the orientation role's fast mode */
   onFast?: (on: boolean) => void
-  /** the analyst's own Claude Code permission mode for the folder (main's `attached.permission_mode`), where the
-   * switcher opens */
-  permissionMode?: string | null
+  /** the orientation's permission mode (agentMode), where the switcher opens */
+  mode?: OrientPermissions
+  /** the modes the analyst's Claude Code settings turn off, which the switcher leaves out */
+  offModes?: readonly string[]
+  /** saves a mode picked here to the orientation's row */
+  onMode?: (m: OrientPermissions) => void
   onStarted?: () => void
   onSkip?: () => void
 }) {
@@ -113,7 +130,23 @@ export function StartGate({ ws, model, defaultEffort = ORIENT_DEFAULT_EFFORT, fa
   // the role's effort changed (a pick saved from here, or the settings popover): the line shows the role's
   useEffect(() => setPicked(null), [defaultEffort])
   const [pickedMode, setPickedMode] = useState<OrientPermissions | null>(null)
-  const mode = pickedMode ?? permissionChoice(permissionMode)
+  useEffect(() => setPickedMode(null), [rowMode])
+  const mode = pickedMode ?? rowMode
+  // the model menu's choices: the models the settings name across roles, then the current ones (lib/models)
+  const [settings, setSettings] = useState<Settings | null>(null)
+  useEffect(() => {
+    let alive = true
+    const read = () =>
+      loadSettings(ws)
+        .then((s) => alive && setSettings(s))
+        .catch(() => undefined)
+    void read()
+    const off = onSettingsChange((w) => w === ws && void read())
+    return () => {
+      alive = false
+      off()
+    }
+  }, [ws])
   const [text, setText] = useState('')
   const [optionsOpen, setOptionsOpen] = useState(false)
   const [busy, setBusy] = useState(false)
@@ -129,12 +162,16 @@ export function StartGate({ ws, model, defaultEffort = ORIENT_DEFAULT_EFFORT, fa
     setPicked(e)
     onEffort?.(e)
   }
+  const pickModel = (m: string) => {
+    track('start-toggle', { target: 'orient:model', detail: { model: m } })
+    onModel?.(m)
+  }
   const start = async () => {
     if (busy) return
     setBusy(true)
     setError(null)
     try {
-      await api.start(ws, startBody(on, text, effort, mode))
+      await api.start(ws, startBody(on, text, effort))
       onStarted?.()
     } catch (e) {
       const msg = (e as Error).message
@@ -185,11 +222,12 @@ export function StartGate({ ws, model, defaultEffort = ORIENT_DEFAULT_EFFORT, fa
                 track
                 block
                 label="The orientation's permission mode"
-                options={PERMISSION_OPTIONS}
+                options={PERMISSION_OPTIONS.filter((o) => !offModes.includes(o.value))}
                 value={mode}
                 onChange={(v) => {
                   track('start-toggle', { target: 'orient:permissions', detail: { permissions: v } })
                   setPickedMode(v)
+                  onMode?.(v)
                 }}
               />
             </div>
@@ -223,7 +261,7 @@ export function StartGate({ ws, model, defaultEffort = ORIENT_DEFAULT_EFFORT, fa
         />
         <div className="chat-gate-meta">
           <span className="composer-model">
-            <ModelLine model={model} modelTip={ORIENT_MODEL_TIP} effort={effort} efforts={EFFORT_CHOICES} onEffort={(e) => pickEffort(e as MainEffort)} fast={fast} onFast={onFast} label="the orientation" className="chat-gate-line" />
+            <ModelLine model={model} models={onModel ? modelChoices(settings, model) : undefined} onModel={onModel && pickModel} effort={effort} efforts={EFFORT_CHOICES} onEffort={(e) => pickEffort(e as MainEffort)} fast={fast} onFast={onFast} label="the orientation" className="chat-gate-line" />
           </span>
         </div>
       </div>

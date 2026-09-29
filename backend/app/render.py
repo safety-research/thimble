@@ -24,6 +24,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from . import config
+from .http_guard import APP_CSP
 
 log = logging.getLogger("thimble.render")
 
@@ -40,6 +41,7 @@ THEMES_FILE = "render-theme.json"  # workspaces/<c>/: the theme the analyst's br
 PAPERS = ("warm", "neutral", "dark")  # frontend/src/lib/theme.ts
 ACCENTS = ("pink", "orange", "yellow", "lime", "blue", "iris", "graphite")
 DEFAULT_THEME = {"paper": "warm", "accent": "iris"}
+LOCAL_HOSTS = frozenset({"127.0.0.1", "localhost", "::1", urlsplit(RENDER_ORIGIN).hostname})  # what the page may reach
 _TAKEAWAY_REF = re.compile(r"\[\[(?:[^\[\]|]*\|)?([^\[\]|]+?)\]\]")
 
 
@@ -146,10 +148,9 @@ class Pool:
                                                                 reduced_motion="reduce")
                 if folder is not None:
                     await self._context.route(f"{RENDER_ORIGIN}/**", lambda route: _fulfil(route, folder))
-                # nothing leaves the machine: a page asset from another origin (a web font's stylesheet) is refused, so
-                # a render never waits on the network and draws the same offline
-                await self._context.route(re.compile(r"^https?://(?!127\.0\.0\.1|localhost|thimble\.render)"),
-                                          lambda route: route.abort())
+                # nothing leaves the machine: a page asset from another host (a web font's stylesheet) is refused, so
+                # a render never waits on the network and draws the same offline. Registered last, so it runs first.
+                await self._context.route("**/*", _keep_local)
                 pages = await asyncio.gather(*(self._new_page(url) for _ in range(self.size)))
             except Exception as e:  # noqa: BLE001 — a missing browser, a page that did not load: the harness is off
                 self.why = _launch_why(e)
@@ -257,7 +258,24 @@ class Pool:
         self._context = self._browser = self._pw = None
 
 
+def stays_local(url: str) -> bool:
+    """Whether a request of the render page stays on this machine: its host, parsed, is exactly one of LOCAL_HOSTS."""
+    try:
+        host = urlsplit(url).hostname
+    except ValueError:
+        return False
+    return (host or "") in LOCAL_HOSTS
+
+
+async def _keep_local(route: Any) -> None:
+    if urlsplit(route.request.url).scheme in ("http", "https") and not stays_local(route.request.url):
+        await route.abort()
+    else:
+        await route.fallback()
+
+
 async def _fulfil(route: Any, folder: Path) -> None:
+    """A file of the page's folder, under the built UI's policy (http_guard.APP_CSP), as the server would send it."""
     p = _serve_path(folder, route.request.url)
     if p is None:
         await route.fulfill(status=404, body="")
@@ -265,7 +283,8 @@ async def _fulfil(route: Any, folder: Path) -> None:
     ctype = mimetypes.guess_type(p.name)[0] or "application/octet-stream"
     if p.suffix in (".js", ".mjs"):
         ctype = "text/javascript"
-    await route.fulfill(status=200, body=p.read_bytes(), headers={"content-type": ctype})
+    await route.fulfill(status=200, body=p.read_bytes(),
+                        headers={"content-type": ctype, "content-security-policy": APP_CSP})
 
 
 def _clip(box: dict[str, float]) -> dict[str, float]:

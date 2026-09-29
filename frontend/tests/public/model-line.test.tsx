@@ -1,139 +1,95 @@
 // @vitest-environment jsdom
-// The model line at a composer's foot (src/chat/ModelLine.tsx), main's, the Start card's and a role's (RoleChip): the
-// model is text with its tip on hover where it cannot change here, a menu of the models on offer where it can, each
-// model once; the effort menu lists the efforts alone; fast mode is a bolt beside the effort, which switches where the
-// session can and otherwise shows its state with the reason in its tip. The Start card shows the orientation role's
-// values and saves a pick to it, so it and the settings popover agree. The server is a stand-in fetch.
+// The model line at a composer's foot (src/chat/ModelLine.tsx): on the Start card the orientation's model is a menu of
+// the models the settings name and the current ones, as a role's is, and a pick is handed to the card's owner to save;
+// the card has one form, which also offers Ultracode, the critique and the permission mode (terminal-first mode runs
+// the orientation as a background session that takes them all). Fast mode's bolt names itself in the
+// shared tooltip on hover and on keyboard focus, wherever it is drawn. Every request is answered by a stand-in fetch.
 import { act } from 'react'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
-import { FAST_TIP, MODEL_TIP, ModelLine, ORIENT_MODEL_TIP } from '../../src/chat/ModelLine.tsx'
-import { RoleChip } from '../../src/chat/RoleChip.tsx'
+import { FastBolt, fastTip, noFastTip } from '../../src/chat/ModelLine.tsx'
 import { StartGate } from '../../src/chat/StartGate.tsx'
-import { baseModel, invalidateSettings, modelChoices, modelLabel, sameModel } from '../../src/lib/models.ts'
-import type { ModelConf } from '../../src/lib/types.ts'
+import { TIP_DELAY_MS } from '../../src/components/Tooltip.tsx'
+import { invalidateSettings } from '../../src/lib/models.ts'
 import { mount, settle, unmountAll } from './mount.tsx'
 
-const puts: unknown[] = []
-let served: Record<string, ModelConf> = {}
+const SETTINGS = { models: { orient: { model: 'claude-opus-5-5', effort: 'ultracode', fast: true }, dev: { model: 'claude-custom-9', effort: 'high' } } }
 
 beforeEach(() => {
-  puts.length = 0
-  served = { orient: { model: 'claude-opus-5-5[1m]', effort: 'xhigh', fast: true }, dev: { model: 'claude-sonnet-5', effort: 'high', fast: false } }
   invalidateSettings('mini')
-  vi.stubGlobal('ResizeObserver', class {
-    observe() {}
-    disconnect() {}
-  })
-  vi.stubGlobal('fetch', async (url: unknown, init?: RequestInit) => {
-    const json = (body: unknown) => new Response(JSON.stringify(body), { status: 200, headers: { 'content-type': 'application/json' } })
-    if (init?.method === 'PUT') {
-      const body = JSON.parse(String(init.body ?? '{}')) as { models: Record<string, Partial<ModelConf>> }
-      puts.push(body)
-      for (const [role, conf] of Object.entries(body.models ?? {})) served = { ...served, [role]: { ...served[role], ...conf } }
-    }
-    if (String(url).endsWith('/api/ws/mini/settings')) return json({ models: served })
-    return json({})
-  })
+  // jsdom has no ResizeObserver, which the menu's popover watches its size with
+  vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} })
+  vi.stubGlobal('fetch', async () => new Response(JSON.stringify(SETTINGS), { status: 200, headers: { 'content-type': 'application/json' } }))
 })
 afterEach(() => {
   unmountAll()
-  vi.unstubAllGlobals()
   vi.useRealTimers()
+  vi.unstubAllGlobals()
 })
 
-const menuLabels = () => Array.from(document.querySelectorAll('.popover .menu-item .menu-item-label')).map((e) => e.textContent)
-const bolt = (root: ParentNode = document) => root.querySelector<HTMLButtonElement>('.fast-bolt')!
+const click = async (b: HTMLElement) => {
+  await act(async () => b.click())
+  await settle()
+}
+const tip = () => document.querySelector('.tip')?.textContent ?? null
+/** The pointer resting on `el` for as long as a tip waits. */
+const hover = async (el: Element) => {
+  vi.useFakeTimers()
+  await act(async () => void el.dispatchEvent(new MouseEvent('pointerover', { bubbles: true, relatedTarget: document.body })))
+  await act(async () => void vi.advanceTimersByTime(TIP_DELAY_MS + 50))
+  vi.useRealTimers()
+}
 
-describe('models are named once', () => {
-  test('a tag is left out of the name and the menus', () => {
-    expect(baseModel('claude-opus-5-5[1m]')).toBe('claude-opus-5-5')
-    expect(modelLabel('claude-opus-5-5[1m]')).toBe('Opus 5.5')
-    expect(sameModel('claude-opus-5-5[1m]', 'claude-opus-5-5')).toBe(true)
-    expect(sameModel('', '')).toBe(false)
-    const choices = modelChoices({ models: { orient: { model: 'claude-opus-5-5[1m]', effort: 'xhigh', fast: true } } }, 'claude-opus-5-5')
-    expect(choices.filter((m) => baseModel(m) === 'claude-opus-5-5')).toEqual(['claude-opus-5-5'])
-    expect(choices.some((m) => m.includes('['))).toBe(false)
-  })
-})
-
-describe("main's line", () => {
-  test('the model is text whose tip shows on hover only; the menu lists the efforts alone', async () => {
-    vi.useFakeTimers()
+describe("the Start card's model", () => {
+  test('is a menu of the models the settings name and the current ones, and a pick is handed on to be saved', async () => {
     const picked: string[] = []
-    await mount(<ModelLine model="claude-opus-5-5" modelTip={MODEL_TIP} effort="medium" onEffort={(e) => picked.push(e)} fast={false} fastTip={FAST_TIP} label="main" />)
-    const name = document.querySelector<HTMLElement>('.model-line-model')!
-    expect(name.tagName).toBe('SPAN')
-    expect(name.textContent).toBe('Opus 5.5')
-    expect(document.querySelector('.tip')).toBeNull()
-    // React hears a pointer's entering and leaving from pointerover and pointerout
-    await act(async () => {
-      name.dispatchEvent(new PointerEvent('pointerover', { bubbles: true, relatedTarget: document.body }))
-      vi.advanceTimersByTime(400)
-    })
-    expect(document.querySelector('.tip')?.textContent).toBe(MODEL_TIP)
-    await act(async () => name.dispatchEvent(new PointerEvent('pointerout', { bubbles: true, relatedTarget: document.body })))
-    expect(document.querySelector('.tip')).toBeNull()
-    vi.useRealTimers()
-    await act(async () => document.querySelector<HTMLButtonElement>('.model-line-effort')!.click())
-    expect(menuLabels()).toEqual(['low', 'medium', 'high', 'xhigh', 'max', 'ultracode'])
-    await act(async () => document.querySelector<HTMLButtonElement>('.popover .menu-item[data-item="max"]')!.click())
-    expect(picked).toEqual(['max'])
+    const el = await mount(<StartGate ws="mini" model="claude-opus-5-5" onModel={(m) => picked.push(m)} fast={true} onFast={() => {}} />)
+    await settle()
+    const trigger = el.querySelector<HTMLButtonElement>('button[aria-label="Model for the orientation"]')!
+    expect(trigger.textContent).toBe('Opus 5.5')
+    expect(el.querySelector('.model-line-model')).toBeNull()
+    await click(trigger)
+    const items = [...document.querySelectorAll<HTMLButtonElement>('.menu-item')]
+    const notes = items.map((b) => b.querySelector('.menu-item-note')?.textContent)
+    expect(notes.slice(0, 2)).toEqual(['claude-opus-5-5', 'claude-custom-9'])
+    expect(notes).toContain('claude-haiku-4-5-20251001')
+    expect(items.find((b) => b.classList.contains('checked'))?.querySelector('.menu-item-label')?.textContent).toBe('Opus 5.5')
+    await click(items.find((b) => b.textContent?.includes('claude-haiku-4-5-20251001'))!)
+    expect(picked).toEqual(['claude-haiku-4-5-20251001'])
   })
 
-  test('the bolt switches fast mode where the session can, else shows its state with where it changes', async () => {
-    const turned: boolean[] = []
-    const on = await mount(<ModelLine model="claude-opus-5-5" effort="high" onEffort={() => {}} fast onFast={(v) => turned.push(v)} fastTip={FAST_TIP} label="main" />)
-    expect(bolt(on).getAttribute('aria-pressed')).toBe('true')
-    expect(bolt(on).getAttribute('aria-disabled')).toBeNull()
-    await act(async () => bolt(on).click())
-    expect(turned).toEqual([false])
-    const off = await mount(<ModelLine model="claude-opus-5-5" effort="high" onEffort={() => {}} fast={false} fastTip={FAST_TIP} label="main" />)
-    expect(bolt(off).getAttribute('aria-pressed')).toBe('false')
-    expect(bolt(off).getAttribute('aria-disabled')).toBe('true')
-    expect(bolt(off).getAttribute('aria-label')).toBe('Fast mode for main')
-    const sonnet = await mount(<ModelLine model="claude-sonnet-5" effort="high" onEffort={() => {}} fast={false} onFast={(v) => turned.push(v)} label="main" />)
-    expect(bolt(sonnet).getAttribute('aria-disabled'), 'a model without fast mode').toBe('true')
-    await act(async () => bolt(sonnet).click())
-    expect(turned).toEqual([false])
+  test('sits beside an effort menu with Ultracode, and the options offer the critique and the permission mode', async () => {
+    const el = await mount(<StartGate ws="mini" model="claude-opus-5-5" onModel={() => {}} fast={false} onFast={() => {}} />)
+    await settle()
+    await click(el.querySelector<HTMLButtonElement>('button[aria-label="Effort for the orientation"]')!)
+    expect([...document.querySelectorAll('.menu-item')].some((b) => /ultracode/i.test(b.textContent ?? ''))).toBe(true)
+    await click(el.querySelector<HTMLButtonElement>('.chat-gate-options-toggle')!)
+    expect(el.querySelector('.chat-gate-row[data-pass="critique"]')).not.toBeNull()
+    expect(el.querySelector('.chat-gate-perms')).not.toBeNull()
   })
 })
 
-describe("a role's line", () => {
-  test('the model is a menu of each model once, a pick saves only what changed', async () => {
-    await mount(<RoleChip ws="mini" role="orient" label="the orientation" />)
-    await settle()
-    expect(document.querySelector('.model-line-part')!.textContent).toBe('Opus 5.5')
-    await act(async () => document.querySelector<HTMLButtonElement>('.model-line-part')!.click())
-    const labels = menuLabels()
-    expect(labels.filter((l) => l === 'Opus 5.5')).toHaveLength(1)
-    expect(labels).not.toContain('low')
-    await act(async () => document.querySelector<HTMLButtonElement>('.popover .menu-item.checked')!.click())
-    await settle()
-    expect(puts, 'the model it runs already: nothing to save').toEqual([])
-    await act(async () => document.querySelector<HTMLButtonElement>('.model-line-effort')!.click())
-    expect(menuLabels()).toEqual(['low', 'medium', 'high', 'xhigh', 'max', 'ultracode'])
-    await act(async () => document.querySelector<HTMLButtonElement>('.popover .menu-item[data-item="max"]')!.click())
-    await settle()
-    expect(puts).toEqual([{ models: { orient: { effort: 'max' } } }])
-    await act(async () => bolt().click())
-    await settle()
-    expect(puts[1]).toEqual({ models: { orient: { fast: false } } })
+describe("fast mode's bolt", () => {
+  test('names fast mode and its state in the tooltip on the Start card, on hover and on keyboard focus', async () => {
+    const el = await mount(<StartGate ws="mini" model="claude-opus-5-5" onModel={() => {}} fast={false} onFast={() => {}} />)
+    const bolt = el.querySelector<HTMLButtonElement>('.fast-bolt')!
+    expect(bolt.getAttribute('aria-label')).toBe('Fast mode for the orientation')
+    await hover(bolt)
+    expect(tip()).toBe('Fast mode: off')
+    expect(bolt.getAttribute('aria-describedby')).toBe(document.querySelector('.tip')!.id)
   })
-})
 
-describe('the Start card', () => {
-  test("shows the orientation role's model, effort and fast mode, and saves a pick to the role", async () => {
-    const saved: string[] = []
-    await mount(<StartGate ws="mini" model="claude-opus-5-5[1m]" defaultEffort="xhigh" fast onEffort={(e) => saved.push(e)} onFast={() => {}} />)
-    const line = document.querySelector<HTMLElement>('.chat-gate-meta .model-line')!
-    expect(line.querySelector('.model-line-model')!.textContent).toBe('Opus 5.5')
-    expect(line.querySelector('.model-line-effort')!.textContent).toBe('xhigh')
-    expect(bolt(line).getAttribute('aria-pressed')).toBe('true')
-    expect(ORIENT_MODEL_TIP).toMatch(/Settings/)
-    await act(async () => line.querySelector<HTMLButtonElement>('.model-line-effort')!.click())
-    expect(menuLabels()).toEqual(['low', 'medium', 'high', 'xhigh', 'max', 'ultracode'])
-    await act(async () => document.querySelector<HTMLButtonElement>('.popover .menu-item[data-item="ultracode"]')!.click())
-    expect(saved).toEqual(['ultracode'])
-    expect(line.querySelector('.model-line-effort')!.textContent).toBe('ultracode')
+  test('says why where it cannot be switched, and shows on keyboard focus too', async () => {
+    const el = await mount(<FastBolt on={false} label="Fast mode for main" why={noFastTip('claude-haiku-4-5-20251001')} onChange={() => {}} />)
+    const bolt = el.querySelector<HTMLButtonElement>('.fast-bolt')!
+    expect(bolt.getAttribute('aria-disabled')).toBe('true')
+    bolt.matches = ((sel: string) => sel === ':focus-visible' || Element.prototype.matches.call(bolt, sel)) as typeof bolt.matches
+    await act(async () => bolt.focus())
+    expect(tip()).toBe('Fast mode: Haiku 4.5 has no fast mode')
+  })
+
+  test('its tip always opens with "Fast mode"', () => {
+    expect(fastTip(true, null)).toBe('Fast mode: on')
+    expect(fastTip(false, null)).toBe('Fast mode: off')
+    expect(fastTip(true, 'No Claude Code session is attached to main')).toBe('Fast mode: No Claude Code session is attached to main')
   })
 })

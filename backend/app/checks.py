@@ -45,6 +45,7 @@ MODEL_ROLE = "checks"  # config.models_for's role for the runs' sessions
 AUTHOR = "check"  # a check's comment's author (report.CHECK_AUTHOR)
 DIR = "checks"  # workspaces/<c>/checks/<id>.json
 WORK_DIR = "work"  # workspaces/<c>/checks/work/<id>-<doc>/, a run's own folder, where its Bash may write
+OWN_TOOLS = ("read_ref", "list_cards", "add_comment")  # a check's thimble tools
 BUILTINS = ("unverified", "verified", "judgment")  # prompts/checks/<id>.md, listed first in this order
 COLOURS = tuple(range(1, 9))
 CONTEXT_CHARS = 400_000  # of the context engine's part of a run's first message
@@ -496,8 +497,9 @@ async def _go(act: _Active) -> None:
                     c, session_key(act.check, act.doc), role=ROLE, title=str(check["name"]),
                     agent_args=["--agents", _json({name: agent}), "--agent", name], effort=effort,
                     settings=agent_session.settings_json(effort, fastMode=bool(conf["fast"])), prompt=prompt,
-                    agent_type=name, on_end=ended, model=str(agent.get("model") or ""),
-                    work=work_dir(c, act.check, act.doc), unasked=True, announce=False,
+                    agent_type=name, on_end=ended, model=str(agent.get("model") or ""), agent="critic",
+                    work=work_dir(c, act.check, act.doc), unasked=True, disallowed=agent_session.not_own(OWN_TOOLS),
+                    announce=False,
                     check=act.check, doc=act.doc, run_id=act.run,
                     brief=tools.hint("check-instructions", check=check["name"], prompt=str(check.get("prompt") or "").strip()))
             except (RuntimeError, ValueError, OSError) as e:

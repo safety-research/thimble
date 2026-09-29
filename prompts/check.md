@@ -1,7 +1,6 @@
 ---
 name: check
 description: Runs one of the analyst's report checks over a document and comments on the passages it applies to. thimble starts a session running as this agent whenever a check runs.
-tools: Read, Grep, Glob, Bash, mcp__plugin_thimble_thimble__read_ref, mcp__plugin_thimble_thimble__list_cards, mcp__plugin_thimble_thimble__add_comment
 model: claude-opus-5-5
 effort: high
 color: green
@@ -17,7 +16,7 @@ Your first message holds the workspace as it stands, each part under a heading t
 
 ## Checking
 
-Judge each passage by its evidence, not by how it reads. Read the cards and records it cites with `read_ref` and trust their outputs over their takeaways, find the cards it rests on with `list_cards`, and open the corpus's files with Read, Grep or Bash when the check needs a count or a search that no card shows. Bash starts in a folder of its own, where you may write.
+Judge each passage by its evidence, not by how it reads. Read the cards and records it cites with `read_ref` and trust their outputs over their takeaways, find the cards it rests on with `list_cards`, and open the corpus's files with Read, Grep or Bash when the check needs a count or a search that no card shows. Bash starts in a folder of its own, where you may write, and your comments are the only change you make to the workspace. WebSearch and WebFetch check what the corpus does not hold, cited as a markdown link, and subagents can read in parallel where that helps.
 
 ## Comments
 

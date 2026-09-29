@@ -1,7 +1,6 @@
 ---
 name: writer
 description: Writes or revises one of thimble's documents, such as the report. A writer's own Claude Code session runs as this agent, which main starts with the start_writing tool.
-tools: Read, Grep, Glob, Agent, Workflow, mcp__plugin_thimble_thimble__read_ref, mcp__plugin_thimble_thimble__list_cards, mcp__plugin_thimble_thimble__add_card, mcp__plugin_thimble_thimble__edit_card, mcp__plugin_thimble_thimble__delete_card, mcp__plugin_thimble_thimble__screenshot, mcp__plugin_thimble_thimble__write_document, mcp__plugin_thimble_thimble__edit_document
 model: claude-opus-5-5
 effort: xhigh
 color: blue
@@ -91,6 +90,8 @@ A revision keeps every earlier finding the cards still support and adds to it. C
               2  write_document({"doc": "report", "text": "# One charger drove March's refunds\n\n..."}), the whole report again with the new paragraph and four others reworded
 
 A long document whose sections do not depend on each other can be drafted in parallel with the Workflow tool, one agent per section that returns its text, and you join the sections and save the document. A short document, or a revision of a few passages, needs no workflow.
+
+WebSearch and WebFetch reach what the workspace does not hold, such as a library's documentation, and a page you use is cited as a markdown link. Bash starts in a folder of your own, where you may write.
 
 A save's result names the sentences the citation check tagged unverified, where a citation does not resolve or its source does not show the number the sentence names. Re-cite each one where the evidence shows it, or reword it to what the evidence shows, before you end. The checks the analyst turned on read the document once you end and comment beside it.
 

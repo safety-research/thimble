@@ -5,8 +5,10 @@ model or corpus wrote (shown in sandboxed frames with `Origin: null`) may reach 
 
 - OriginCheck refuses a state-changing request (any method but GET, HEAD, OPTIONS) whose Origin is present and not this
   server's own (or, under THIMBLE_DEV, the Vite origin), or which has no Origin and Sec-Fetch-Site cross-site. A request
-  with neither header (CLI, MCP shim, hooks' curl) passes. The channel routes are checked on every method, since the
-  shim's subscription GET makes the session it names main, and a same-site page's <img> or EventSource sends GETs.
+  with neither header (CLI, MCP shim, hooks' curl) passes. The channel routes refuse, on every method, any request
+  that carries an Origin or a Sec-Fetch-* header, which a browser sends and the shim and hooks never do: the shim's
+  subscription GET makes the session it names main, and even the app's own page (an <img> in markdown a model wrote)
+  sends GETs.
 - SecurityHeaders gives every response nosniff, frame-ancestors 'self' (and X-Frame-Options) and a CSP unless the
   route set its own: APP_CSP on the built UI, API_CSP on /api.
 - dev_origins: the Vite origins that CORS and OriginCheck accept under THIMBLE_DEV.
@@ -101,10 +103,11 @@ class OriginCheck:
         h = Headers(scope=scope)
         origin = h.get("origin")
         site = h.get("sec-fetch-site")
-        if origin is not None:
+        if channel:
+            browser = origin is not None or any(k.startswith("sec-fetch-") for k in h.keys())
+            why = "a web page may not reach the plugin's channel" if browser else None
+        elif origin is not None:
             why = None if self.allowed(origin, h.get("host", "")) else f"a page at {origin} may not change state here"
-        elif channel:
-            why = None if site in (None, "same-origin") else "a web page may not reach the plugin's channel"
         else:
             why = "a cross-site page may not change state here" if site == "cross-site" else None
         if why is None:

@@ -21,8 +21,11 @@ PROMPTS_DIR = Path(os.environ.get("THIMBLE_PROMPTS_DIR", REPO_ROOT / "prompts"))
 
 # The files a model call sends as they are rendered: main (the analyst session's system-prompt append), shared (rules
 # main's and the orientation's prompts include), tools, dev, labels (the label classifier's system prompt), context
-# (what the context engine renders for writers, checks and critiques) and card-check (card_check.py's calls).
-PROMPT_NAMES = ("main", "shared", "tools", "dev", "labels", "context", "card-check")
+# (what the context engine renders for writers, checks and critiques), card-check (card_check.py's calls), view-review
+# (view_review.py's reading), dev-view-review (what a view's build session gets from the review) and file-viewer (the
+# proposal of a viewer for a file type, views.suggest).
+PROMPT_NAMES = ("main", "shared", "tools", "dev", "labels", "context", "card-check", "view-review", "dev-view-review",
+                "file-viewer")
 # Agent definitions, in a plugin agent's form, that Claude Code gets with --agents instead of from plugin/agents/, where
 # main would also see them: the writer, the orientation, the critic and the report check. orient.md's body is a template
 # the server renders before Claude Code gets it (orient_session.system_prompt).
@@ -34,7 +37,8 @@ CHECKS_DIR = "checks"
 # frontmatter, the type's text as the body (report_types.presets, type_form).
 TYPES_DIR = "types"
 # Each document form's text, what read_ref("type:<name>") returns to the writer agent (report_types.type_form).
-TYPE_FILES = {"document": "report-markdown", "slides": "report-slides", "story": "report-story", "custom": "report-custom"}
+TYPE_FILES = {"document": "report-markdown", "slides": "report-slides", "story": "report-story", "custom": "report-custom",
+              "video": "report-video"}
 # The dev calls: dev.md is the preamble every dev call reads, ending in `{{task}}`, filled with the call's own body
 # file: a code ticket (dev-ticket), the server-down fix (dev-fix) or a view ticket (dev-view).
 DEV_PROMPT = "dev"

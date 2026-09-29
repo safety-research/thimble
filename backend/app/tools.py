@@ -25,7 +25,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Awaitable, Callable
-from urllib.parse import urlsplit
+from urllib.parse import urlsplit, urlunsplit
 
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
@@ -58,9 +58,8 @@ TERMINAL = "terminal"  # created_by of the terminal session's cells and notebook
 # holding a root notebook stamped `created_by: terminal` keeps writing into it (find_terminal_notebook). Groups the
 # session's add_card makes are not stamped `terminal` (_group_author).
 BROWSER_AUTHOR = "user"  # a browser chat's comments, labels and report requests: the analyst asking through their chat
-# created_by of a cell a browser chat's model writes (chat.py re-stamps it chat:<id> once the turn knows the chat);
-# never
-# `user` or `terminal`.
+# created_by of a cell the analyst's caller outside the terminal writes when the call names no chat (one that does
+# stamps `chat:<id>`, cell_author); never `user` or `terminal`.
 BROWSER_CELL_AUTHOR = "chat"
 # The add_card result shows the first RESULT_LINES lines of each output (settings.json `run_cell_result_lines`, read
 # fresh per call), at most RESULT_CHARS_PER_LINE chars per allowed line, and at most RESULT_OUTPUTS outputs' worth of
@@ -91,6 +90,10 @@ EDIT_CELL_KINDS = ADD_CELL_KINDS
 RUN_KINDS = ("plot", "table", "code", "timeline", "diagram")  # notebook.RUNNABLE_KINDS: the kinds that run `code`
 INSTRUCTIONS_HINT = "instructions"  # prompts/tools.md `## instructions`: the shim's MCP server instructions (instructions)
 SCREENSHOT_HOSTS = ("127.0.0.1", "localhost", "::1")  # a page screenshot is of thimble's own interface on this machine
+# a figure's own page (_shot_page_file): no network, inline script and style only, images from data: URLs; the figure
+# runs in a frame sandboxed to scripts alone, which reports its size to the page
+SHOT_PAGE_CSP = ("default-src 'none'; script-src 'unsafe-inline' 'unsafe-eval'; style-src 'unsafe-inline'; "
+                 "img-src data: blob:; font-src data:; connect-src data:")
 # the browser builds a card's chart is drawn with for its screenshot (the frontend's vega, vega-lite and vega-embed)
 VEGA_BUILDS = tuple(config.REPO_ROOT / "frontend" / "node_modules" / p for p in
                     ("vega/build/vega.min.js", "vega-lite/build/vega-lite.min.js", "vega-embed/build/vega-embed.min.js"))
@@ -177,6 +180,11 @@ REGISTRY: dict[str, Spec] = {
         # a comment resolved or opened again, as the margin's ✓ does; main's, since a check's run only adds comments
         Spec("resolve_comment", (ANALYST,), "app.comments:tool_resolve_comment", sessions=MAIN_ONLY),
         Spec("reply_in_thread", (ANALYST,), "app.threads:tool_reply_in_thread"),
+        # a message typed in the terminal to a thread, sent as that thread's composer would (/thimble:ask); main's
+        Spec("message_thread", (ANALYST,), "app.threads:tool_message_thread", sessions=MAIN_ONLY),
+        # a background session's tray entry waits for its news (bg_session.py); thimble's agents listed for the terminal
+        Spec("wait_session", (ANALYST,), "app.bg_session:tool_wait_session", sessions=MAIN_ONLY),
+        Spec("list_agents", (ANALYST,), "app.bg_session:tool_list_agents", sessions=MAIN_ONLY),
         # a thread renamed or deleted from the chat, as its row's menu does; main's, as the analyst asks it
         Spec("rename_thread", (ANALYST,), "app.threads:tool_rename_thread", sessions=MAIN_ONLY),
         Spec("delete_thread", (ANALYST,), "app.threads:tool_delete_thread", sessions=MAIN_ONLY),
@@ -1993,12 +2001,37 @@ async def _h_screenshot(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
     return await _delegate("app.threads:tool_screenshot", ctx, {**args, "ref": ref})
 
 
+def shot_ports() -> set[int]:
+    """The ports a page screenshot may reach: this server's (THIMBLE_PORT, else 8300) and, in dev mode, the Vite
+    server's that serves its interface (ui_base)."""
+    import os
+
+    port = os.environ.get("THIMBLE_PORT", "").strip()
+    ports = {int(port) if port.isdigit() else 8300}
+    ui = ui_base()
+    with contextlib.suppress(ValueError):
+        if ui and urlsplit(ui).port:
+            ports.add(int(urlsplit(ui).port))  # type: ignore[arg-type]
+    return ports
+
+
 async def _shot_page(url: str, selector: str | None) -> ToolResult:
-    """A page of the thimble interface, headless (dev.run_shot), only on this machine (SCREENSHOT_HOSTS): the analyst's
-    own server, or a ticket's validation stack."""
+    """A page of the thimble interface, headless (dev.run_shot), only on this machine (SCREENSHOT_HOSTS) and on this
+    server's own port or its interface's (shot_ports). The browser loads the address rebuilt from what was checked, and
+    one with a backslash or a user part is refused, since Chromium reads those hosts differently from Python."""
     parts = urlsplit(url)
-    if (parts.hostname or "") not in SCREENSHOT_HOSTS:
-        return err(f"screenshot: an http address must be on this machine ({', '.join(SCREENSHOT_HOSTS)})")
+    try:
+        port = parts.port
+    except ValueError:
+        port = None
+    allowed = shot_ports()
+    host = parts.hostname or ""
+    if (host not in SCREENSHOT_HOSTS or port not in allowed or parts.scheme not in ("http", "https") or "\\" in url
+            or "@" in parts.netloc):
+        return err(f"screenshot: an http address must be thimble's own interface on this machine (port "
+                   f"{', '.join(str(p) for p in sorted(allowed))})")
+    url = urlunsplit((parts.scheme, f"[{host}]:{port}" if ":" in host else f"{host}:{port}", parts.path, parts.query,
+                      parts.fragment))
     run_shot = _optional("dev", "run_shot")
     if run_shot is None:
         return _not_available("screenshot", "dev", "run_shot")
@@ -2058,11 +2091,7 @@ async def _shot_card(ctx: Ctx, ref: str) -> ToolResult:
     missing = [p for p in VEGA_BUILDS if not p.is_file()]
     if missing:
         return err(f"screenshot: {missing[0].relative_to(config.REPO_ROOT)} is missing (no npm install here), so the chart cannot be drawn")
-    scripts = "".join(f"<script src='{p.as_uri()}'></script>" for p in VEGA_BUILDS)
-    body = (f"<div id='vis'></div><script>vegaEmbed('#vis', {json.dumps(spec)}, "
-            "{renderer: 'svg', actions: false}).catch(e => document.body.append(String(e)))</script>")
-    return await _shot_page_file(cid, f"<!doctype html><html><head>{scripts}</head>"
-                                      f"<body style='margin:0;background:#fff'>{body}</body></html>", "#vis")
+    return await _shot_page_file(cid, chart_page(spec))
 
 
 # The page a card is shot in: 1280 px wide at device scale 2, tall enough for the tallest cards, with the chat closed
@@ -2113,21 +2142,70 @@ async def _shot_card_in_ui(c: str, cid: str, ui: str) -> ToolResult | None:
     return _image(data, "image/png", f"screenshot of card:{cid}")
 
 
+def _inline_script(js: str) -> str:
+    """Script text that cannot end its <script> element early."""
+    return js.replace("</script", "<\\/script").replace("</SCRIPT", "<\\/SCRIPT")
+
+
+def figure_page(inner: str) -> str:
+    """The page a card's figure is shot on: `inner`, a document of its own, in a frame sandboxed to scripts alone under
+    SHOT_PAGE_CSP, which takes the size the figure reports (`{w, h}` posted to its parent)."""
+    import html as html_mod  # noqa: PLC0415
+
+    size = ("addEventListener('message', (e) => { const f = document.getElementById('fig'); const d = e.data || {}; "
+            "if (e.source === f.contentWindow && d.w > 0 && d.h > 0) { f.style.width = d.w + 'px'; "
+            "f.style.height = d.h + 'px' } })")
+    return (f"<!doctype html><html><head><meta http-equiv='Content-Security-Policy' content=\"{SHOT_PAGE_CSP}\">"
+            f"<script>{size}</script></head><body style='margin:0;background:#fff'>"
+            f"<iframe id='fig' sandbox='allow-scripts' style='border:0;display:block;width:1200px;height:900px' "
+            f"srcdoc=\"{html_mod.escape(inner, quote=True)}\"></iframe></body></html>")
+
+
+# the figure's frame reports the size of what it drew, so the shot is of the figure alone
+_REPORT_SIZE = ("const r = document.getElementById('vis').getBoundingClientRect(); "
+                "parent.postMessage({w: Math.ceil(r.right), h: Math.ceil(r.bottom)}, '*')")
+
+
+def chart_page(spec: dict[str, Any]) -> str:
+    """A Vega or Vega-Lite chart's page (figure_page): the spec as data, never as markup, without the embed options
+    it may carry, drawn by the frontend's vega, vega-lite and vega-embed builds inlined."""
+    meta = spec.get("usermeta")
+    if isinstance(meta, dict) and "embedOptions" in meta:
+        spec = {**spec, "usermeta": {k: v for k, v in meta.items() if k != "embedOptions"}}
+    data = json.dumps(spec).replace("<", "\\u003c")
+    scripts = "".join(f"<script>{_inline_script(p.read_text('utf-8'))}</script>" for p in VEGA_BUILDS)
+    body = (f"<div id='vis' style='display:inline-block'></div><script>vegaEmbed('#vis', {data}, "
+            f"{{renderer: 'svg', actions: false}}).then(() => {{ {_REPORT_SIZE} }})"
+            ".catch(e => document.body.append(String(e)))</script>")
+    return figure_page(f"<!doctype html><html><head>{scripts}</head><body style='margin:0;background:#fff'>{body}"
+                       "</body></html>")
+
+
+def svg_page(svg: str) -> str:
+    """An SVG figure's page (figure_page): the figure as an image, which runs no script and loads nothing."""
+    src = "data:image/svg+xml;base64," + base64.b64encode(svg.encode("utf-8")).decode("ascii")
+    return figure_page(f"<!doctype html><html><body style='margin:0;background:#fff'><img id='vis' src='{src}' "
+                       f"style='display:block' onload=\"{_REPORT_SIZE}\"></body></html>")
+
+
 async def _shot_svg(cid: str, svg: str) -> ToolResult:
     """An SVG figure as a PNG, since a model reads raster images only: the figure alone on a white page."""
-    return await _shot_page_file(cid, f"<!doctype html><html><body style='margin:0;background:#fff'>{svg}</body></html>", "svg")
+    return await _shot_page_file(cid, svg_page(svg))
 
 
-async def _shot_page_file(cid: str, page_html: str, selector: str) -> ToolResult:
-    """A card's figure drawn on a page of its own in a temporary file and shot by its element (dev.run_shot, the headless
-    Chromium the ticket runner's page shots use)."""
+FIGURE_SHOT_WAIT_MS = 800  # after the page is quiet: the frame draws the figure and takes its size
+
+
+async def _shot_page_file(cid: str, page_html: str) -> ToolResult:
+    """A card's figure drawn on a page of its own (figure_page) in a temporary file and shot by its frame
+    (dev.run_shot, the headless Chromium the ticket runner's page shots use), with every request refused."""
     run_shot = _optional("dev", "run_shot")
     if run_shot is None:
         return _not_available("screenshot", "dev", "run_shot")
     with tempfile.TemporaryDirectory(prefix="thimble-shot-") as d:
         page, png = Path(d) / "card.html", Path(d) / "card.png"
         page.write_text(page_html, "utf-8")
-        code = await _maybe_await(run_shot(page.as_uri(), png, selector))
+        code = await _maybe_await(run_shot(page.as_uri(), png, "#fig", offline=True, wait_ms=FIGURE_SHOT_WAIT_MS))
         if not png.is_file() or code not in (0, None):
             return err(f"screenshot: card:{cid}'s figure did not render (exit {code})")
         data = base64.b64encode(png.read_bytes()).decode("ascii")
@@ -2257,35 +2335,45 @@ async def _h_show_label(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
 
 async def _h_propose_view(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
     """A proposal for a view written for how the corpus arranges its records, a ticket the dev agent builds at once
-    (views.propose, dev.run_view). The orientation's first run holds its proposals until it ends
-    (orientation.holding). A
-    claim that matches no corpus file is refused, naming real paths near it; where views cannot be built the proposal
-    fails
-    at once. A proposal from main's shim is one the analyst asked for, so the browser opens the view once built."""
-    from . import orientation, views
+    (views.propose, dev.run_view) from its fields (views.SPEC_FIELDS). The orientation's proposals are held until their
+    views pass their checks, so each reaches the analyst as soon as it works. A viewer of unusual file types the
+    orientation proposes
+    (views.offered_type_viewer) is stored `suggested`, offered in the File browser and built once the analyst accepts
+    it. A claim that matches no corpus file is refused, naming real paths near it; where views cannot be built the
+    proposal fails at once. A proposal from main's shim is one the analyst asked for, so the browser opens the view once
+    built."""
+    from . import views
 
     claims = args.get("claims")
     if isinstance(claims, str):
         claims = views._fold(claims)
-    for k, v in (("name", args.get("name")), ("why", args.get("why")), ("claims", claims), ("arrangement", args.get("arrangement"))):
+    spec = views.clean_spec(args)
+    given = {"name": args.get("name"), "why": args.get("why"), "claims": claims, **spec}
+    for k in ("name", "why", "claims", *(k for k, _ in views.SPEC_FIELDS)):
+        v = given.get(k)
         if not v or (isinstance(v, str) and not v.strip()):
             return err(f"propose_view: `{k}` is required")
     unmatched = await asyncio.to_thread(views.unmatched_claims, ctx.c, claims)
     if unmatched:
         near = " ".join(hint("propose_view-near", claim=g, paths=", ".join(p)) for g, p in unmatched.items() if p)
         return err(" ".join(hint("propose_view-unmatched", claims=", ".join(unmatched), near=near).split()))
-    hold = session_kind(ctx.session) == ORIENT_SESSION and orientation.holding(ctx.c)
+    orient = session_kind(ctx.session) == ORIENT_SESSION
     prop = await _maybe_await(views.propose(ctx.c, name=str(args["name"]).strip(), why=str(args["why"]).strip(),
-                                            claims=claims, arrangement=str(args["arrangement"]).strip(),
-                                            proposed_by=ctx.created_by, hold=hold, asked=ctx.session is None))
-    if not hold or prop.get("revised"):
-        _chip(ctx.c, "view", str(prop.get("name") or prop.get("slug")), ref=f"view:{prop.get('slug')}", status="queued")
+                                            claims=claims, arrangement="", proposed_by=ctx.created_by,
+                                            orientation=orient, asked=ctx.session is None,
+                                            suggested=orient and views.offered_type_viewer(claims), spec=spec))
+    status = str(prop.get("status") or "queued")
+    if not prop.get("held"):
+        _chip(ctx.c, "view", str(prop.get("name") or prop.get("slug")), ref=f"view:{prop.get('slug')}", status=status)
+    claimed = ", ".join(prop.get("claims") or [])
+    if status == "suggested":
+        return ok(hint("propose_view-suggested", view=prop.get("name"), slug=prop.get("slug"), claims=claimed))
     # without Node 20+ or the frontend's packages the build fails at once (dev.run_view), and main is told why
     if why := await asyncio.to_thread(views.build_problem):
         return ok(hint("propose_view-cannot-build", view=prop.get("name"), slug=prop.get("slug"), why=why))
-    if prop.get("revised"):  # a view built under this name is changed in place (views.revise)
+    if prop.get("revised") and not prop.get("held"):  # a view built under this name is changed in place (views.revise)
         return ok(hint("view-changing", view=prop.get("name"), slug=prop.get("slug")))
-    return ok(hint("propose_view-proposed", view=prop.get("name"), slug=prop.get("slug"), claims=", ".join(prop.get("claims") or [])))
+    return ok(hint("propose_view-proposed", view=prop.get("name"), slug=prop.get("slug"), claims=claimed))
 
 
 async def _h_file_dev_ticket(ctx: Ctx, args: dict[str, Any]) -> ToolResult:

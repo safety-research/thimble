@@ -7,12 +7,13 @@ import contextlib
 import importlib
 import logging
 import os
+import shutil
 import sys
 import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import Body, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.datastructures import MutableHeaders
 from starlette.exceptions import HTTPException
@@ -21,6 +22,8 @@ from starlette.staticfiles import StaticFiles
 
 from . import config
 from .errors import ErrorLog
+from . import hook_auth
+from .hook_auth import HookAuth
 from .http_guard import OriginCheck, SecurityHeaders, dev_origins
 
 # every line of thimble's own loggers carries a wall-clock stamp, so the server log can be read against the other logs
@@ -81,9 +84,13 @@ ROUTER_MODULES = [
     # the Claude Code sessions thimble starts beside main, the orientation's and each writer's: their permission
     # requests (shut down with the server), and the orientation's calls, stored whole and citable
     "agent_session", "calls", "orient_session",
+    # those of them that run as Claude Code background sessions in terminal-first mode, and their tray entries
+    "bg_session",
     # the card harness (a headless Chromium that draws every card offscreen) and the card check that reads it, and
     # where the check's records and fixes are kept (the Undo of a fix)
     "render", "card_check", "checkstore",
+    # the review of a built view's pictures, which sends what it finds back to the view's build session
+    "view_review",
 ]
 
 # The backend binds to 127.0.0.1, but a DNS-rebinding page can still reach it as same-origin unless the Host
@@ -199,9 +206,7 @@ class BuiltUI(StaticFiles):
 
 @asynccontextmanager
 async def _lifespan(app: FastAPI):
-    # Nothing here waits on auth: a model call resolves its credential when it is made, so /api/health answers as soon
-    # as the imports are done.
-    log.info("data dir %s, workspaces dir %s; auth: %s", config.DATA_DIR, config.WORKSPACES_DIR, config.auth_path()[1])
+    log.info("data dir %s, workspaces dir %s", config.DATA_DIR, config.WORKSPACES_DIR)
     # the versions in play, so a log sent with a problem report says what ran
     try:
         from . import cli
@@ -210,11 +215,33 @@ async def _lifespan(app: FastAPI):
                  cli.home(), cli.versions_line(), cli.claude_code_version() or "not found on PATH")
     except Exception:
         log.exception("reading the versions for the log failed")
+    # thimble's state is its owner's alone: <home> and the workspaces are private folders (config.private_dir)
+    try:
+        from . import cli
+
+        cli.ensure_home()
+        st = cli.read_state()
+        if st and not st.get("token"):  # a record an older supervisor wrote: the hooks' token (hook_auth.py)
+            cli.write_state(st)
+        config.private_dir(config.WORKSPACES_DIR)
+    except Exception:
+        log.exception("making thimble's home and workspaces private failed")
     # the records an install tree's data/ holds are brought into the registry once (config.migrate_registry)
     try:
         config.migrate_registry()
     except Exception:
         log.exception("bringing the install tree's registry records into %s failed", config.DATA_DIR)
+    # what older versions left in Claude Code's files and in the workspaces, taken out once: the keys they wrote into
+    # folders' settings.local.json (claude_changes.cleanup) and each workspace's own Claude Code config dir
+    try:
+        from . import claude_changes
+
+        for line in claude_changes.cleanup():
+            log.info("%s", line)
+        for old in config.WORKSPACES_DIR.glob("*/.claude-config"):
+            shutil.rmtree(old, ignore_errors=True)
+    except Exception:
+        log.exception("removing what an older thimble left failed")
     await _startup()
     yield
     # shutdown: modules that own subprocesses expose `shutdown()`, so a restart never leaves an orphan running
@@ -274,6 +301,7 @@ def create_app() -> FastAPI:
     vite = dev_origins(dev_mode())
     if vite:
         app.add_middleware(CORSMiddleware, allow_origins=vite, allow_methods=["*"], allow_headers=["*"])
+    app.add_middleware(HookAuth)  # inside OriginCheck: a page's request is refused as a page's first
     app.add_middleware(OriginCheck, extra_origins=vite)  # after TrustedHost: the Host it compares with is an allowed one
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=ALLOWED_HOSTS)
     app.add_middleware(SecurityHeaders)  # outside the two checks, so their refusals carry the headers too
@@ -303,6 +331,11 @@ def create_app() -> FastAPI:
         # `leader` lets `server up`/`stop` find a server whose record was lost, `ui` lets an open tab tell it is stale,
         # and `home`/`app` let another install's `server up` on the same port refuse it
         return {"ok": True, "leader": os.getsid(0), "boot": config.BOOT_ID, "ui": ui_build(), **install}
+
+    @app.post("/api/ui/key")
+    def ui_key(body: dict = Body(...)):
+        # the key of the page's link, traded for the cookie a change of permission modes needs (hook_auth.claim)
+        return hook_auth.claim(body.get("key"))
 
     # the built UI, last: a mount at / matches everything the routes above did not
     dist = frontend_dist()

@@ -18,7 +18,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable
 
-from fastapi import APIRouter, Body, HTTPException
+from fastapi import APIRouter, Body, HTTPException, Request
 
 from . import config
 
@@ -27,7 +27,14 @@ router = APIRouter()
 
 # GET /settings layers these under what the file stores (tools.RESULT_LINES_KEY: lines of each output a card's result
 # shows).
-SETTINGS_DEFAULTS: dict[str, Any] = {"run_cell_result_lines": 40}
+# terminal_first (on by default): the orientation, its critic and the writers run as background sessions the analyst's
+# terminal shows (orientation.terminal_first, bg_session); hide_chat: the browser shows no chat column, only a dock
+# (frontend shell/Shell)
+SETTINGS_DEFAULTS: dict[str, Any] = {"run_cell_result_lines": 40, "terminal_first": True, "hide_chat": False}
+# Settings earlier builds stored that nothing reads any more: GET leaves them out, a PUT that sends one (a tab still
+# running an earlier build) is taken with the key dropped, and the next PUT removes it from the file. orient_route
+# picked how terminal-first mode ran the orientation, which now always runs as a background session.
+RETIRED_KEYS = frozenset({"orient_route"})
 
 
 # --------------------------------------------------------------------------- plain-file helpers
@@ -203,21 +210,15 @@ def stored_settings(c: str) -> dict[str, Any]:
     return stored if isinstance(stored, dict) else {}
 
 
-ORIENT_PERMISSIONS_KEY = "orient_permissions"  # Start's mode switcher for the orientation: manual | auto | bypass
-
-
 def with_features(stored: dict[str, Any], c: str | None = None) -> dict[str, Any]:
-    """The effective settings: SETTINGS_DEFAULTS under `stored`, `models` as config.models_for resolves it, and
-    `orient_permissions`, the stored mode or the one the analyst's own permission mode stands for."""
-    from . import cc_settings  # noqa: PLC0415 — cc_settings imports this module
+    """The effective settings: SETTINGS_DEFAULTS under `stored` less RETIRED_KEYS, `models` as config.models_for resolves it, the rows of
+    the permission modes the analyst set (modes.chosen), and `disabled_modes`, those the analyst's Claude Code settings
+    turn off."""
+    from . import modes  # noqa: PLC0415 — modes imports this module
 
-    out = {**SETTINGS_DEFAULTS, **stored, config.MODELS_KEY: config.models_for(c, stored)}
-    if out.get(ORIENT_PERMISSIONS_KEY) not in cc_settings.ORIENT_MODES:
-        try:
-            out[ORIENT_PERMISSIONS_KEY] = cc_settings.orient_mode_default(config.corpus_dir(c)) if c else "manual"
-        except Exception:  # noqa: BLE001 — a workspace whose corpus is gone still has settings
-            out[ORIENT_PERMISSIONS_KEY] = "manual"
-    return out
+    kept = {k: v for k, v in stored.items() if k not in RETIRED_KEYS}
+    return {**SETTINGS_DEFAULTS, **kept, config.MODELS_KEY: config.models_for(c, stored),
+            modes.SETTING: modes.chosen(stored), "disabled_modes": sorted(modes.disabled())}
 
 
 @router.get("/ws/{c}/settings")
@@ -225,14 +226,43 @@ def get_settings(c: str) -> dict[str, Any]:
     return with_features(stored_settings(c), c)
 
 
+# The keys PUT /settings may change: the settings the browser's settings panel and switches save, and the rows of the
+# permission modes, which only the analyst's browser may change (hook_auth.analyst). Every other key is the server's
+# own or the analyst's to edit in the file (kernel_wrap, orient_instructions), since a kernel cell or a session's
+# command can reach the route on loopback. RETIRED_KEYS are taken too, and dropped.
+PUT_KEYS = frozenset({*SETTINGS_DEFAULTS, config.MODELS_KEY, "permission_modes", *RETIRED_KEYS})
+
+
 @router.put("/ws/{c}/settings")
-def put_settings(c: str, settings: dict[str, Any] = Body(...)) -> dict[str, Any]:
+def put_settings_route(c: str, request: Request, settings: dict[str, Any] = Body(...)) -> dict[str, Any]:
+    """put_settings for the browser, which may change PUT_KEYS only (RETIRED_KEYS among them are dropped); 400 names any
+    other key, or why a permission mode cannot be chosen, and 403 refuses a change of permission modes from anything but
+    the analyst's browser."""
+    from . import hook_auth, modes  # noqa: PLC0415 — modes imports this module
+
+    refused = sorted(set(settings) - PUT_KEYS)
+    if refused:
+        raise HTTPException(400, f"these settings cannot be changed here: {', '.join(refused)}")
+    if modes.SETTING in settings:
+        if not hook_auth.analyst(request):
+            raise HTTPException(403, hook_auth.ANALYST_ONLY)
+        if why := modes.patch_error(settings[modes.SETTING]):
+            raise HTTPException(400, why)
+    return put_settings(c, {k: v for k, v in settings.items() if k not in RETIRED_KEYS})
+
+
+def put_settings(c: str, settings: dict[str, Any]) -> dict[str, Any]:
     """Merges into the stored settings, so a partial PUT keeps the rest. Only what was stored plus the patch is written,
-    never SETTINGS_DEFAULTS, so a changed default takes effect. Returns the effective settings."""
+    never SETTINGS_DEFAULTS, so a changed default takes effect, and RETIRED_KEYS are left out. Returns the effective
+    settings."""
     path = ws_dir(c) / "settings.json"
     stored = read_json(path, {})
     stored = stored if isinstance(stored, dict) else {}
-    merged = {**stored, **settings}
+    merged = {k: v for k, v in {**stored, **settings}.items() if k not in RETIRED_KEYS}
+    # the permission modes merge per agent, None putting an agent back on main's mode
+    if isinstance(settings.get("permission_modes"), dict):
+        held = stored.get("permission_modes") if isinstance(stored.get("permission_modes"), dict) else {}
+        merged["permission_modes"] = {a: m for a, m in {**held, **settings["permission_modes"]}.items() if m is not None}
     # `models` merges per role and within a role, so a PUT of one role's effort keeps the rest
     if isinstance(settings.get(config.MODELS_KEY), dict):
         held = stored.get(config.MODELS_KEY) if isinstance(stored.get(config.MODELS_KEY), dict) else {}

@@ -30,8 +30,7 @@ export interface ReportPageProps {
   onSaved: (doc: Writeup) => void
 }
 
-/** The canvas's cards and groups, read again when a card or a group changes, and when an orientation ends, since the
- * canvas route holds its deck back until then (backend orientation.held). */
+/** The canvas's cards and groups, read again when a card or a group changes, and when an orientation ends. */
 export function useCanvas(ws: string): { cells: Cell[]; groups: Group[] } {
   const [state, setState] = useState<{ cells: Cell[]; groups: Group[] }>({ cells: [], groups: [] })
   useEffect(() => {

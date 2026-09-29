@@ -1,0 +1,112 @@
+#!/bin/sh
+''''exec "$(dirname "$0")/thimble-python" -S "$0" "$@" # '''
+"""thimble's running agents, as its server lists them: its background sessions (the orientation, writers, the critic)
+with their state, and the threads and subagents of main's session.
+
+    thimble-agents --statusline [--chain <command>]
+        one line for Claude Code's statusline, read from the statusline's JSON on stdin; with --chain, the analyst's
+        own statusline command runs first on the same input and its output comes before thimble's line
+    thimble-agents [--cwd <folder>]
+        the list /thimble:agents prints
+
+The first two lines make this file both a shell script and a Python program, as in thimble-mcp. It uses only the
+standard library and prints nothing of thimble's when no server answers within WAIT_S, or when the answer does not
+prove it is thimble's (the token in server.json, as bin/.thimble-watch proves it; app/hook_auth.py).
+"""
+import hashlib
+import hmac
+import json
+import os
+import secrets
+import subprocess
+import sys
+import urllib.error
+import urllib.request
+from pathlib import Path
+
+WAIT_S = 1.5
+CHAIN_WAIT_S = 5.0
+
+
+def server() -> tuple[str, str] | None:
+    """(the server's API base URL, its token), as bin/.thimble-watch reads them; None without server.json or a token."""
+    home = Path(os.environ.get("THIMBLE_HOME") or (Path.home() / ".thimble"))
+    try:
+        data = json.loads((home / "server.json").read_text("utf-8"))
+    except (OSError, ValueError):
+        return None
+    token = data.get("token") if isinstance(data, dict) else None
+    if not isinstance(token, str) or not token:
+        return None
+    try:
+        if data.get("api"):
+            return str(data["api"]).rstrip("/"), token
+        if data.get("port"):
+            return f"http://127.0.0.1:{int(data['port'])}", token
+    except (TypeError, ValueError):
+        pass
+    return None
+
+
+def sign(token: str, role: str, nonce: str) -> str:
+    return hmac.new(token.encode("utf-8"), f"{role}:{nonce}".encode("utf-8"), hashlib.sha256).hexdigest()
+
+
+def agents(cwd: str, session: str | None) -> dict:
+    found = server()
+    if found is None:
+        return {}
+    base, token = found
+    nonce = secrets.token_hex(16)
+    body = json.dumps({"cwd": cwd, "session": session}).encode("utf-8")
+    req = urllib.request.Request(base + "/api/agents", data=body, method="POST",
+                                 headers={"Content-Type": "application/json", "X-Thimble-Nonce": nonce,
+                                          "X-Thimble-Auth": sign(token, "hook", nonce)})
+    try:
+        with urllib.request.urlopen(req, timeout=WAIT_S) as resp:  # noqa: S310 — loopback, thimble's own server
+            if not hmac.compare_digest(resp.headers.get("X-Thimble-Proof") or "", sign(token, "server", nonce)):
+                return {}
+            data = json.loads(resp.read().decode("utf-8") or "{}")
+    except (OSError, ValueError, urllib.error.URLError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def statusline(args: list[str]) -> int:
+    raw = sys.stdin.read() if not sys.stdin.isatty() else ""
+    try:
+        inp = json.loads(raw or "{}")
+    except ValueError:
+        inp = {}
+    inp = inp if isinstance(inp, dict) else {}
+    workspace = inp.get("workspace") if isinstance(inp.get("workspace"), dict) else {}
+    cwd = str(workspace.get("current_dir") or inp.get("cwd") or os.getcwd())
+    out: list[str] = []
+    if "--chain" in args and args.index("--chain") + 1 < len(args):
+        try:
+            own = subprocess.run(args[args.index("--chain") + 1], shell=True, input=raw, capture_output=True,
+                                 text=True, timeout=CHAIN_WAIT_S)
+            if own.stdout.strip():
+                out.append(own.stdout.rstrip("\n"))
+        except (OSError, subprocess.SubprocessError):
+            pass
+    line = str(agents(cwd, str(inp.get("session_id") or "") or None).get("line") or "")
+    if line:
+        out.append(line)
+    if out:
+        print("\n".join(out))
+    return 0
+
+
+def main() -> int:
+    args = sys.argv[1:]
+    if "--statusline" in args:
+        return statusline(args)
+    cwd = args[args.index("--cwd") + 1] if "--cwd" in args and args.index("--cwd") + 1 < len(args) else os.getcwd()
+    text = str(agents(cwd, None).get("text") or "")
+    print(text or "thimble's server does not answer.")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

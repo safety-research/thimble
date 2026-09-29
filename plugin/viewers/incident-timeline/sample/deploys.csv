@@ -1,0 +1,13 @@
+time,deploy,event,service,version,by,reason,result,notes
+2026-05-16T03:00:05+01:00,dep-18,started,web,2.31.0,deploybot,release train,,web 2.31.0: new seat map on the booking page
+2026-05-16T03:04:40+01:00,dep-18,finished,web,2.31.0,deploybot,,ok,web 2.31.0 live on 3 of 3 replicas
+2026-05-16T03:06:02+01:00,dep-19,started,payments,4.12.0,deploybot,release train,,"payments 4.12.0: connection pool rework, card calls retried on timeout"
+2026-05-16T03:11:31+01:00,dep-19,finished,payments,4.12.0,deploybot,,ok,payments 4.12.0 live on 3 of 3 replicas
+2026-05-16 09:28:52,dep-20,rollback,payments,4.11.3,tobias,INC-312: pool exhaustion,,payments 4.12.0 back to 4.11.3
+2026-05-16 09:34:47,dep-20,finished,payments,4.11.3,tobias,,ok (rolled back from 4.12.0),payments 4.11.3 live on 3 of 3 replicas
+2026-05-16 11:02:30,dep-21,started,web,2.31.1,oona,,,web 2.31.1: holiday Monday banner on the timetable page
+2026-05-16 11:06:10,dep-21,finished,web,,oona,,ok,web 2.31.1 live on 3 of 3 replicas
+2026-05-16 11:24:30,dep-22,started,payments,4.12.1,tobias,"fix for INC-312, canary first",,payments 4.12.1 canary on payments-1
+2026-05-16 11:27:12,dep-22,finished,payments,4.12.1,tobias,,ok,payments 4.12.1 live on 1 of 3 replicas
+2026-05-16 11:50:10,dep-23,started,payments,4.12.1,tobias,INC-312,,payments 4.12.1 on every replica
+2026-05-16 11:56:40,dep-23,finished,payments,4.12.1,tobias,,ok,payments 4.12.1 live on 3 of 3 replicas

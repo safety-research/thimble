@@ -1,27 +1,48 @@
 // The permission requests waiting for the analyst, as one card pinned above the chat's composer in every chat. It holds
-// every session's requests (chat/permissions.ts pendingRequests), oldest first, one at a time with `1 of 3` paging. Its
-// head names the requesting thread (askThread); the body says who asks, what the call does and why it asks, then Allow,
-// Allow and don't ask again (where Claude Code offers a rule) and Deny. When auto mode cannot decide in a session, an
-// orientation's request offers the switch to Manual or Bypass. An answer hides the request at once. A long command
-// wraps and scrolls past 96px.
+// every session's requests (chat/permissions.ts pendingRequests), oldest first and those denied unanswered last, one at
+// a time with `1 of 3` paging. Its head names the requesting thread (askThread); the body says who asks, what the call
+// does, every later call that waits on the same answer (scrolled), and why it asks, then Allow, Always allow (where Claude Code
+// offers a rule for the session, or for a web call its site or web search in the workspace; the scope in its tooltip)
+// and Deny, in one row. A request denied unanswered says so, with Dismiss. When auto mode's classifier could not judge
+// a call, the request of a session that is not a background one offers the switch to Manual, and to Bypass unless the
+// analyst's Claude Code settings turn it off. An answer hides the request at once, and Allow covers only the later
+// calls the card listed. A long
+// command wraps and scrolls past 96px. A request too long to show whole says how much of it shows and offers no
+// "don't ask again".
 import { useEffect, useMemo, useState } from 'react'
 import { Button } from '../components/Button'
 import { CodeText } from '../components/Code'
 import { Icon } from '../components/Icon'
-import { TipButton } from '../components/Tooltip'
+import { TipButton, Tipped } from '../components/Tooltip'
 import { api } from '../lib/api'
 import { bus } from '../lib/bus'
+import { loadSettings } from '../lib/models'
 import { track } from '../lib/telemetry'
-import type { ChatMeta } from '../lib/types'
+import type { ChatMeta, PermissionRequest } from '../lib/types'
 import { askFields, askWhat, CODE_LANGS } from './Holds'
 import { BYPASS_LINE } from './ModeSwitch'
 import { ThreadChip } from './Notes'
 import { askedBy, askingAgent, asksTo, askThread, askWhy, classifierDown, modeChat, type PendingAsk } from './permissions'
 
+/** A request's "don't ask again" choice: the button's label, and its tooltip saying what it keeps and where. */
+function alwaysChoice(p: PermissionRequest): { label: string; tip: string } | null {
+  if (p.keep) return { label: `Always allow ${p.keep}`, tip: `Allow, and don't ask again for ${p.keep === 'web search' ? 'web searches' : p.keep} in this workspace` }
+  if (p.always) return { label: `Always allow ${p.always}`, tip: `Allow, and don't ask again for ${p.always} for the rest of this session` }
+  return null
+}
+
+/** The line a request the card shows only the start of carries: how much shows, and that Allow approves all of it. */
+export function cutLine(p: Pick<PermissionRequest, 'cut' | 'command' | 'input'>): string | null {
+  if (!p.cut) return null
+  const shown = (p.command || p.input || '').length
+  return `Only the first ${shown.toLocaleString('en-US')} of ${p.cut.toLocaleString('en-US')} characters are shown. Allow approves all of it.`
+}
+
 /** Send the analyst's answer to the session that asked: main's prompt through the shim, any other session's through
- * its chat (backend agent_session.permission_route). */
+ * its chat with how many of the later calls the card listed (backend agent_session.permission_route). */
 function answer(ws: string, ask: PendingAsk, allow: boolean, always: boolean): Promise<unknown> {
-  return ask.chat === 'main' ? api.answerPermission(ws, ask.request.id, allow) : api.answerSessionPermission(ws, ask.chat, ask.request.id, allow, always)
+  const shown = ask.request.also?.length ?? 0
+  return ask.chat === 'main' ? api.answerPermission(ws, ask.request.id, allow) : api.answerSessionPermission(ws, ask.chat, ask.request.id, allow, always, shown)
 }
 
 export function PermissionCard({ ws, asks, metas, labels }: {
@@ -37,6 +58,17 @@ export function PermissionCard({ ws, asks, metas, labels }: {
   const [at, setAt] = useState(0)
   // the sessions whose mode the card has switched, which no longer offer the switch
   const [switched, setSwitched] = useState<ReadonlySet<string>>(new Set())
+  // the modes the analyst's Claude Code settings turn off
+  const [off, setOff] = useState<readonly string[]>([])
+  useEffect(() => {
+    let alive = true
+    loadSettings(ws)
+      .then((s) => alive && setOff(s.disabled_modes ?? []))
+      .catch(() => undefined)
+    return () => {
+      alive = false
+    }
+  }, [ws])
   const shown = useMemo(() => asks.filter((a) => !answered.has(a.request.id)), [asks, answered])
   const i = Math.min(at, Math.max(0, shown.length - 1))
   const ask = shown[i] ?? null
@@ -52,7 +84,11 @@ export function PermissionCard({ ws, asks, metas, labels }: {
   const agent = askingAgent(p)
   const what = askWhat(p)
   const fields = askFields(p)
-  // auto mode that cannot decide in this session asks about every call: the orientation's mode can switch from here
+  const expired = !!p.expired
+  const also = p.also ?? []
+  const cut = cutLine(p)
+  const always = cut ? null : alwaysChoice(p)
+  // while auto mode's classifier gives no verdict, the session's mode can switch from here
   const switchChat = classifierDown(p) ? modeChat(ask, metas) : null
   const switchTo = (mode: 'manual' | 'bypass') => {
     if (!switchChat) return
@@ -74,13 +110,13 @@ export function PermissionCard({ ws, asks, metas, labels }: {
       .finally(() => setBusy(false))
   }
   return (
-    <div className="chat-perm" role="alertdialog" aria-label="Permission needed" data-chat={ask.chat} data-request={p.id} data-count={shown.length}>
+    <div className={`chat-perm${shown.length > 1 ? ' chat-perm-stack' : ''}`} role="alertdialog" aria-label={expired ? 'Denied unanswered' : 'Permission needed'} data-chat={ask.chat} data-request={p.id} data-count={shown.length} data-expired={expired || undefined}>
       <div className="chat-perm-head">
         <Icon name="warning" size={13} className="chat-perm-ico" />
-        <span className="chat-perm-title">Permission needed</span>
+        <span className="chat-perm-title">{expired ? 'Denied unanswered' : 'Permission needed'}</span>
         <span className="chat-perm-from">
           <span className="chat-perm-from-word">from</span>
-          <ThreadChip id={askThread(ask)} />
+          <ThreadChip id={askThread(ask, metas, labels)} />
         </span>
         {shown.length > 1 && (
           <span className="chat-perm-pager">
@@ -98,7 +134,7 @@ export function PermissionCard({ ws, asks, metas, labels }: {
         <span className="chat-perm-session">{agent ? `${who}'s ${agent.type && !agent.title ? `${agent.type} ` : ''}agent` : who}</span>
         {agent?.title && (agent.chat ? <ThreadChip id={agent.chat} label={agent.title} /> : <span className="chat-perm-agent">{agent.title}</span>)}
         {agent?.title && agent.type && <span className="chat-perm-type">({agent.type})</span>}
-        <span>{`asks to ${asksTo(p.tool)}`}</span>
+        <span>{`${expired ? 'asked' : 'asks'} to ${asksTo(p.tool)}`}</span>
       </p>
       {what && <p className="chat-perm-what">{what}</p>}
       {fields.map((f, k) =>
@@ -113,30 +149,57 @@ export function PermissionCard({ ws, asks, metas, labels }: {
           </p>
         ),
       )}
+      {cut && (
+        <p className="chat-perm-cut" role="note">
+          {cut}
+        </p>
+      )}
+      {also.length > 0 && (
+        <div className="chat-perm-also" data-count={also.length}>
+          <span className="chat-perm-key label">{p.tool === 'WebSearch' ? 'and the searches' : 'and from this site'}</span>
+          <ul className="chat-perm-also-list">
+            {also.map((a, k) => (
+              <li key={k}>{a}</li>
+            ))}
+          </ul>
+        </div>
+      )}
       <p className="chat-perm-why">{askWhy(ask, metas)}</p>
       {switchChat && !switched.has(switchChat) && (
         <div className="chat-perm-switch" data-chat={switchChat}>
           <Button variant="secondary" size="sm" className="chat-perm-manual" disabled={busy} onClick={() => switchTo('manual')}>
             Switch to Manual
           </Button>
-          <Button variant="secondary" size="sm" className="chat-perm-bypass" title={BYPASS_LINE} disabled={busy} onClick={() => switchTo('bypass')}>
-            Switch to Bypass
+          {!off.includes('bypass') && (
+            <Button variant="secondary" size="sm" className="chat-perm-bypass" title={BYPASS_LINE} disabled={busy} onClick={() => switchTo('bypass')}>
+              Switch to Bypass
+            </Button>
+          )}
+        </div>
+      )}
+      {expired ? (
+        <div className="chat-perm-acts">
+          <Button variant="secondary" size="sm" className="chat-perm-dismiss" disabled={busy} onClick={() => reply(false)}>
+            Dismiss
+          </Button>
+        </div>
+      ) : (
+        <div className="chat-perm-acts">
+          <Button variant="primary" size="sm" className="chat-perm-allow" disabled={busy} onClick={() => reply(true)}>
+            Allow
+          </Button>
+          {always && (
+            <Tipped text={always.tip} className="chat-perm-always-tip">
+              <Button variant="secondary" size="sm" className="chat-perm-always" data-keep={p.keep} disabled={busy} onClick={() => reply(true, true)}>
+                {always.label}
+              </Button>
+            </Tipped>
+          )}
+          <Button variant="ghost" size="sm" className="chat-perm-deny" disabled={busy} onClick={() => reply(false)}>
+            Deny
           </Button>
         </div>
       )}
-      <div className="chat-perm-acts">
-        <Button variant="primary" size="sm" className="chat-perm-allow" disabled={busy} onClick={() => reply(true)}>
-          Allow
-        </Button>
-        {p.always && (
-          <Button variant="secondary" size="sm" className="chat-perm-always" disabled={busy} onClick={() => reply(true, true)}>
-            Allow and don't ask again for <span className="chat-perm-rule">{p.always}</span>
-          </Button>
-        )}
-        <Button variant="ghost" size="sm" className="chat-perm-deny" disabled={busy} onClick={() => reply(false)}>
-          Deny
-        </Button>
-      </div>
     </div>
   )
 }

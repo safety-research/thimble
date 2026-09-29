@@ -233,11 +233,17 @@ const UNIT_WORDS: Record<string, [string, string]> = { record: ['record', 'recor
 export const unitWord = (unit: string, n: number): string => (UNIT_WORDS[unit] ?? [unit, `${unit}s`])[n === 1 ? 0 : 1]
 
 /** Where a label over files stands, for its row in the Labels pane: an apply running (done of total units, or of the
- * files while they are indexed and the total is not known), the last run's outcome, or a failed run with its message. */
+ * files while they are indexed and the total is not known), the last run's outcome (its total null when the run kept
+ * none it can state), or a failed run with its message. */
 export type LabelStatus =
   | { state: 'running'; done: number; total: number | null; unit: string }
-  | { state: 'done'; matches: number; total: number; failed: number; ts: string; unit: string }
+  | { state: 'done'; matches: number; total: number | null; failed: number; ts: string; unit: string }
   | { state: 'error'; message: string }
+
+/** A run's total as its outcome can state it: none when the run kept none, or kept one below the units that matched
+ * (0 for a run whose files were never counted). Pure. */
+const statedTotal = (total: number | null | undefined, matches: number): number | null =>
+  total != null && total > 0 && total >= matches ? total : null
 
 const later = (a: string | null | undefined, b: string | null | undefined): boolean => {
   const ta = a ? Date.parse(a) : NaN
@@ -259,20 +265,20 @@ export function labelStatus(k: Pick<Concept, 'unit' | 'labels' | 'counts' | 'las
   const last = k.last_run ?? null
   if (run && (run.status === 'error' || run.status === 'done') && (!last || later(run.started, last.ts))) {
     if (run.status === 'error') return { state: 'error', message: run.message || 'the run failed' }
-    const total = run.total ?? 0
-    return { state: 'done', matches: run.matches ?? 0, total, failed: run.failed ?? 0, ts: run.started ?? '', unit: k.unit }
+    const matches = run.matches ?? 0
+    return { state: 'done', matches, total: statedTotal(run.total, matches), failed: run.failed ?? 0, ts: run.started ?? '', unit: k.unit }
   }
   if (!last) return null
   if (last.status === 'error') return { state: 'error', message: last.message || 'the run failed' }
   const total = last.total ?? last.matched_total ?? last.labeled
   const matches = k.counts ? matchedCount(k.labels, k.counts, total) : last.matches ?? 0
-  return { state: 'done', matches, total, failed: last.failed ?? 0, ts: last.ts, unit: k.unit }
+  return { state: 'done', matches, total: statedTotal(total, matches), failed: last.failed ?? 0, ts: last.ts, unit: k.unit }
 }
 
-/** An outcome as the label row says it: "468 of 2,392,002 records", with "· 3 failed" when units failed; the time
- * follows it on the row. */
+/** An outcome as the label row says it: "468 of 2,392,002 records", or "468 records" without a total, with "· 3 failed"
+ * when units failed; the time follows it on the row. */
 export function outcomeText(s: Extract<LabelStatus, { state: 'done' }>): string {
-  const text = `${s.matches.toLocaleString()} of ${s.total.toLocaleString()} ${unitWord(s.unit, s.total)}`
+  const text = s.total == null ? `${s.matches.toLocaleString()} ${unitWord(s.unit, s.matches)}` : `${s.matches.toLocaleString()} of ${s.total.toLocaleString()} ${unitWord(s.unit, s.total)}`
   return s.failed > 0 ? `${text} · ${s.failed.toLocaleString()} failed` : text
 }
 
@@ -392,6 +398,122 @@ export interface ViewMark {
   names: string[]
   /** the texts to highlight in the record's element, each span cut into the pieces `needles` looks for */
   spans: { text: string; colour: string }[]
+  /** with a label filter on, whether the record or unit passes it */
+  keep?: boolean
+}
+
+/** A mark that only says whether a ref passes the filter: no label draws on it. */
+export type Keep = Partial<ViewMark> & { keep: boolean }
+
+/** The Files label filter, which a view keeps its records by. */
+export interface LabelFilter {
+  concept: string
+  value: string
+}
+
+/** A label that is on as a view's page hears it (thimble.onLabels): its id, name, colour and its highlighted values'. */
+export interface PageLabel {
+  id: string
+  name: string
+  colour: string
+  values: { name: string; colour: string }[]
+}
+
+/** A label over files as a view's page lists it (thimble.onLabels `all`): whether it is on, every value with its colour
+ * and highlight, and how many records it marks once a run is done. */
+export interface PageLabelItem {
+  id: string
+  name: string
+  on: boolean
+  colour: string
+  values: { name: string; colour: string; highlight: boolean }[]
+  count: number | null
+}
+
+/** What a view's page hears of the labels (thimble.onLabels): those that are on, the filter's label with them, and the
+ * filter with its value's colour. `resolve` turns a token (--label-3) into the colour a chart can use. Pure. */
+export function pageLabels(
+  on: readonly Concept[],
+  filter: LabelFilter | null,
+  byId: ReadonlyMap<string, Concept>,
+  resolve: (token: string) => string,
+): { on: PageLabel[]; filter: { label: string; value: string; colour: string } | null } {
+  const fk = filter ? byId.get(filter.concept) : undefined
+  const shown = fk && !on.some((k) => k.id === fk.id) ? [...on, fk] : on
+  const page = shown.filter(isFilesLabel).map((k) => {
+    const cls = classesOf(k)
+    const lit = cls.filter((c) => c.highlight)
+    return {
+      id: k.id,
+      name: k.name,
+      colour: resolve(colourToken((lit[0] ?? cls[0])?.color ?? 1)),
+      values: lit.map((c) => ({ name: c.name, colour: resolve(colourToken(c.color)) })),
+    }
+  })
+  if (!filter || !fk) return { on: page, filter: null }
+  const c = classesOf(fk).find((x) => x.name === filter.value)
+  return { on: page, filter: { label: fk.name, value: filter.value, colour: resolve(colourToken(c?.color ?? classesOf(fk)[0]?.color ?? 1)) } }
+}
+
+/** Every label over files as a view's page lists it, in the Labels pane's order, with those that mark the view's files
+ * (`first`) ahead. Pure. */
+export function pageLabelList(all: Iterable<Concept>, resolve: (token: string) => string, first?: ReadonlySet<string>): PageLabelItem[] {
+  const files = [...all].filter(isFilesLabel)
+  const ordered = first ? [...files.filter((k) => first.has(k.id)), ...files.filter((k) => !first.has(k.id))] : files
+  return ordered.map((k) => {
+    const cls = classesOf(k)
+    const lit = cls.filter((c) => c.highlight)
+    const status = labelStatus(k)
+    return {
+      id: k.id,
+      name: k.name,
+      on: !!k.shown,
+      colour: resolve(colourToken((lit[0] ?? cls[0])?.color ?? 1)),
+      values: cls.map((c) => ({ name: c.name, colour: resolve(colourToken(c.color)), highlight: c.highlight })),
+      count: status?.state === 'done' ? status.matches : null,
+    }
+  })
+}
+
+/** The colours a label's value can take, in the palette's order: --label-1..LABEL_COLOURS, then the grey. */
+export const PALETTE: readonly number[] = [...Array.from({ length: LABEL_COLOURS }, (_, i) => i + 1), 0]
+
+/** The palette as a view's page hears it (thimble.onLabels `palette`): each colour resolved. Pure. */
+export const pagePalette = (resolve: (token: string) => string): string[] => PALETTE.map((n) => resolve(colourToken(n)))
+
+/** A label's classes with the value `value` in the palette colour `colour`; a value of the label that had that colour
+ * takes the value's old one, so no two values share a colour. Null when the label has no such value or the colour is
+ * not the palette's. Pure. */
+export function withClassColour(classes: readonly LabelClass[], value: string, colour: number): LabelClass[] | null {
+  const at = classes.findIndex((c) => c.name === value)
+  if (at < 0 || !PALETTE.includes(colour)) return null
+  const old = classes[at].color
+  return classes.map((c, i) => (i === at ? { ...c, color: colour } : colour && c.color === colour ? { ...c, color: old } : c))
+}
+
+/** The record marks with the filter's verdict on each record ref: `keep` when the filter's label takes its value on the
+ * record, or when the record's file is not among `covered`, the files the label left a value on (its presence), since
+ * the label says nothing of the others; without `covered` every file counts. A kept record no label draws on gets a
+ * keep-only mark, and a record the filter drops and no label marks is left out, which the bridge reads as dropped.
+ * Pure. */
+export function withKeeps(
+  marks: Record<string, ViewMark>,
+  filter: LabelFilter | null,
+  rows: { get(ref: string): ReadonlyMap<string, LabelRow> | undefined },
+  refs: Iterable<string>,
+  covered?: Readonly<Record<string, unknown>>,
+): Record<string, ViewMark | Keep> {
+  if (!filter) return marks
+  const out: Record<string, ViewMark | Keep> = {}
+  for (const ref of refs) {
+    const at = recordRef(ref)
+    if (!at) continue
+    const row = rows.get(ref)?.get(filter.concept)
+    const keep = (!!covered && !(at.path in covered)) || (!!row && valueOf(row) === filter.value)
+    if (marks[ref]) out[ref] = { ...marks[ref], keep }
+    else if (keep) out[ref] = { keep }
+  }
+  return out
 }
 
 /** The marks a custom view's page draws (viewer_bridge.js `labels` message), keyed by record ref: for each ref, the
@@ -438,18 +560,40 @@ export function ownColour(want: number, taken: readonly number[]): number {
   return want
 }
 
+/** Every palette colour a class of the labels has (the grey aside). Pure. */
+export function usedColours(labels: readonly Pick<Concept, 'labels' | 'classes'>[]): number[] {
+  return [...new Set(labels.flatMap((k) => classesOf(k).map((c) => c.color)).filter((c) => !!c))]
+}
+
+/** The first palette colour from `at` on, round the palette, that `used` does not hold; null when it holds every one
+ * (the server's free_colour). Pure. */
+export function freeColour(at: number, used: readonly number[]): number | null {
+  for (let j = 0; j < LABEL_COLOURS; j++) {
+    const m = ((at - 1 + j) % LABEL_COLOURS) + 1
+    if (!used.includes(m)) return m
+  }
+  return null
+}
+
 /** The classes a drafted label is created with: the first value highlighted in `colour`, a negative value (isNegative)
- * in the grey and not highlighted, any other in the colours after `colour`, highlighted. Pure. */
-export function draftClasses(values: readonly string[], colour: number): LabelClass[] {
-  return values.map((name, i) =>
-    isNegative(name, i, values.length) && i > 0 ? { name, color: 0, highlight: false } : { name, color: ((colour - 1 + i) % LABEL_COLOURS) + 1, highlight: true },
-  )
+ * in the grey and not highlighted, any other highlighted in the first colour after `colour` that neither `used` (the
+ * other labels' colours) nor an earlier value has, while one is free, else the colour at its place after `colour`. Pure. */
+export function draftClasses(values: readonly string[], colour: number, used: readonly number[] = []): LabelClass[] {
+  const taken = [...used, colour]
+  return values.map((name, i) => {
+    if (i === 0) return { name, color: colour, highlight: true }
+    if (isNegative(name, i, values.length)) return { name, color: 0, highlight: false }
+    const at = ((colour - 1 + i) % LABEL_COLOURS) + 1
+    const color = freeColour(at, taken) ?? at
+    taken.push(color)
+    return { name, color, highlight: true }
+  })
 }
 
 /** The body POST /concepts takes for a drafted label, as the edit card's Run sends it for a new one: a label over files
  * marks and applies to what the draft says and is created on in Files; a prompt's text is its description, a regex's
- * or code's its spec. Pure. */
-export function draftBody(d: LabelDraft, colour: number): ConceptPatch & { name: string; unit: ConceptUnit } {
+ * or code's its spec; its classes take draftClasses' colours, away from `used`. Pure. */
+export function draftBody(d: LabelDraft, colour: number, used: readonly number[] = []): ConceptPatch & { name: string; unit: ConceptUnit } {
   const files = d.over === 'files'
   const marks = d.marks ?? 'span'
   return {
@@ -458,7 +602,7 @@ export function draftBody(d: LabelDraft, colour: number): ConceptPatch & { name:
     ...(files ? { marks, glob: d.glob } : {}),
     kind: d.kind,
     model: '',
-    classes: draftClasses(d.values, colour),
+    classes: draftClasses(d.values, colour, used),
     ...(d.kind === 'prompt' ? { description: d.text, spec: '' } : { spec: d.text }),
     shown: files,
   }

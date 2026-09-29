@@ -62,13 +62,16 @@ TERMS: dict[str, str] = {
     "2b61e117ac894f8ac9a777f7298b4952212712f9f3b76a77c54c16cab7d891a8": "private",
     "1db75045812446d78b988690eee79ba892125fd58edb1554b6d54dc6de2f148e": "private",
 }
-# The files that name the maintainer on purpose: the marketplace owner and the contact address.
-MAINTAINER_FILES = {".claude-plugin/marketplace.json", "README.md", "backend/app/feedback.py"}
-# Third-party texts and lockfiles: other people's names and generated hashes, checked for secrets and file kinds only.
-EXEMPT = re.compile(r"^(LICENSE|backend/app/fonts/OFL-[\w-]+\.txt|backend/uv\.lock|"
-                    r"frontend/package-lock\.json)$")
+# The files that name the maintainer on purpose: the marketplace owner, the contact address and the maintainer notes.
+MAINTAINER_FILES = {".claude-plugin/marketplace.json", "CLAUDE.md", "README.md", "backend/app/feedback.py"}
+# Third-party texts, lockfiles and the built UI (a release's): other people's names, generated hashes and minified
+# names, checked for secrets and file kinds only.
+EXEMPT = re.compile(r"^(LICENSE|THIRD_PARTY_NOTICES|backend/app/fonts/OFL-[\w-]+\.txt|backend/uv\.lock|"
+                    r"frontend/package-lock\.json|frontend/dist/.+)$")
 NEVER = re.compile(r"(^|/)(__pycache__|node_modules|\.venv)(/|$)|^(data|dev|notes|context|experiments|"
                    r"workspaces[^/]*|\.claude|docs/archive|docs/proposals)/|\.(db|sqlite3?|jsonl|pyc)$")
+# the worked examples' invented sample files, in their folders, which are data on purpose
+SAMPLES = re.compile(r"^plugin/viewers/[\w-]+/sample/.+$")
 MAX_BYTES = 2_000_000
 # the extension a module import leaves out, with TypeScript's declaration suffix (types.d.ts is the module ./types)
 EXTENSION = re.compile(r"(?<=.)(\.d)?\.[^.]+$")
@@ -102,7 +105,7 @@ def scan(root: Path, rels: list[str]) -> list[tuple[str, int, str, str]]:
     hits = []
     for rel in rels:
         p = root / rel
-        if NEVER.search(rel):
+        if NEVER.search(rel) and not SAMPLES.match(rel):
             hits.append((rel, 0, "path", "a file of a kind that never belongs in the tree"))
         if p.stat().st_size > MAX_BYTES:
             hits.append((rel, 0, "path", f"{p.stat().st_size} bytes, over {MAX_BYTES}"))

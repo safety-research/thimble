@@ -75,6 +75,8 @@
   max-width: 100%;
   max-height: 400px;
   overflow: auto;
+  /* what the output draws stays in its box */
+  contain: paint;
   font-size: var(--text-sm);
 }
 /* tables read the same everywhere: a caps header over hairline rows, rows in mono, numbers right aligned. pandas'
@@ -247,6 +249,8 @@ body[data-cmd] #vg-tooltip-element {
 .outputs-svg {
   min-width: 0;
   user-select: none;
+  /* what the figure draws stays in its box */
+  contain: paint;
 }
 .outputs-svg > svg {
   display: block;

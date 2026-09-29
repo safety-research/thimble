@@ -1,6 +1,6 @@
 """Documents: their types, storage, frames, the tools that save and check them, and routes.
 
-A type is {slug, name, description, renderer, prompt, rubric}; the built-ins (report, story, slides) are backed by
+A type is {slug, name, description, renderer, prompt, rubric}; the built-ins (report, story, slides, video) are backed by
 prompts/report-*.md and custom types live under workspaces/<c>/report-types/<slug>/. A document is stored at
 investigations/<inv>/<slug>.json, its frame at <slug>.frame.json, its earlier generations under <slug>/.
 
@@ -33,8 +33,8 @@ from .story import StoryBody
 
 log = logging.getLogger("thimble.report_types")
 
-RENDERERS = ("document", "slides", "story", "custom")
-BUILTIN_SLUGS = ("report", "story", "slides")
+RENDERERS = ("document", "slides", "story", "custom", "video")
+BUILTIN_SLUGS = ("report", "story", "slides", "video")
 RESERVED = set(BUILTIN_SLUGS) | {"brief", "findings", "run", "investigation", "events", "notes", "critiques", "reports",
                                  "types", "draft", "versions", "presets", "new"}
 SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9-]{1,40}$")
@@ -191,6 +191,9 @@ def _builtin(slug: str) -> dict[str, Any]:
     elif slug == "slides":
         prompt, renderer = type_paragraph_text("slides"), "slides"
         desc = "A short narrative slideshow over the report's verified material: one point per slide, with the same citations."
+    elif slug == "video":
+        prompt, renderer = type_paragraph_text("video"), "video"
+        desc = "A short narrated video: cited lines the browser reads aloud over a film drawn in HTML in time with them."
     else:
         prompt, renderer = type_paragraph_text("story"), "story"
         desc = "A scrolling story in the style of a newsroom's interactive graphics: a title, a one-sentence answer, then sections, each a headline with its cited text beside the card that carries it."
@@ -502,6 +505,10 @@ def _with_defaults(doc: dict[str, Any]) -> dict[str, Any]:
         x.setdefault("tag_notes", {})
     if isinstance(doc.get("slides"), list):
         slides.upgrade(doc)
+    if doc.get("renderer") == "video":
+        from . import video  # noqa: PLC0415
+
+        doc["timing"] = video.timing(doc)
     return doc
 
 
@@ -517,6 +524,8 @@ def read_doc(c: str, inv_id: str, slug: str) -> dict[str, Any] | None:
         doc.setdefault("title_ok", _title_ok(_collapse(doc.get("title"))))
     elif slug == "slides":
         doc.setdefault("renderer", "slides")
+    elif slug == "video":
+        doc.setdefault("renderer", "video")
     _legacy_comments(doc)
     return _with_defaults(doc)
 
@@ -580,8 +589,9 @@ def store(c: str, inv_id: str, slug: str, doc: dict[str, Any]) -> None:
 
 
 # --------------------------------------------------------------------------- shape adapters
-# A document and a story have `sections`, a deck `slides`, a custom document its own schema; a legacy story has `beats`
-# and an `answer` until it is read (story.upgrade). A unit is a section, a slide or a beat: a heading with sentences.
+# A document and a story have `sections`, a deck `slides`, a video `lines`, a custom document its own schema; a legacy
+# story has `beats` and an `answer` until it is read (story.upgrade). A unit is a section, a slide or a beat, a heading
+# with sentences, or a video's line, sentences without a heading.
 
 
 def is_sentence(x: Any) -> bool:
@@ -636,7 +646,7 @@ def units(doc: dict[str, Any]) -> list[dict[str, Any]]:
             if k not in META_KEYS:
                 _walk_units(v, out)
         return out
-    for key in ("beats", "slides", "sections"):
+    for key in ("beats", "slides", "sections", "lines"):
         if isinstance(doc.get(key), list):
             return [u for u in doc[key] if isinstance(u, dict)]
     return []
@@ -1089,6 +1099,10 @@ def normalize(t: dict[str, Any], raw: dict[str, Any], valid: _Refs) -> dict[str,
             return doc
         if t["renderer"] == "story":
             return story.normalize_outline(raw, valid, slug)
+        if t["renderer"] == "video":
+            from . import video  # noqa: PLC0415
+
+            return video.normalize(t, raw, valid)
         if t.get("page"):
             return _normalize_page(t, raw, valid)
     except HTTPException as e:
@@ -1588,7 +1602,8 @@ def carry_comments(prev: dict[str, Any] | None, doc: dict[str, Any], generation:
     for x in all_sentences(doc):
         by_text.setdefault(f"s:{x.get('text') or ''}", str(x["id"]))
     for u in units(doc):
-        by_text.setdefault(f"h:{u.get('heading') or ''}", str(u["id"]))
+        if "heading" in u:
+            by_text.setdefault(f"h:{u.get('heading') or ''}", str(u["id"]))
     for cm in prev.get("comments") or []:
         if not isinstance(cm, dict):
             continue
@@ -1688,6 +1703,8 @@ def _locate_span(doc: dict[str, Any], uid: str) -> tuple[dict[str, Any], dict[st
         unit, para = hit
         return unit, para, para.setdefault("sentences", []), list(para["sentences"])
     t = find_target(doc, uid)
+    if t["kind"] == "heading" and "heading" not in t["unit"] and isinstance(t["unit"].get("sentences"), list):
+        return t["unit"], None, t["unit"]["sentences"], list(t["unit"]["sentences"])  # a video's line, whole
     if t["kind"] != "sentence" or t.get("unit") is None:
         raise HTTPException(404, f"no sentence or paragraph {uid}")
     unit, sentence = t["unit"], t["sentence"]
@@ -1783,7 +1800,7 @@ def replace_heading(c: str, slug: str, uid: str, text: str, actor: str, *, span:
         target = find_target(doc, uid)
     except HTTPException:
         return None
-    if target["kind"] != "heading":
+    if target["kind"] != "heading" or "heading" not in target["unit"]:
         return None
     heading = _collapse(re.sub(r"^#+[ \t]+", "", text.strip()))
     if not heading or "\n" in text.strip():
@@ -1801,7 +1818,8 @@ def replace_heading(c: str, slug: str, uid: str, text: str, actor: str, *, span:
 # The writer saves a whole document as markdown, each form reading it its own way (prompts/report-<form>.md). `# ` opens
 # the title and `## ` a section or a slide; in a document `### ` or deeper opens a subsection with that `level`. A line
 # that is only `![caption](card:<id>)` (or `cell:<id>`) is a figure. In a story a `### ` line is a headline; in a deck a
-# paragraph starting `Notes` is the speaker notes; a page is its title, one ```html block and its claims.
+# paragraph starting `Notes` is the speaker notes; a page is its title, one ```html block and its claims, and a video its
+# title, its lines as a page's claims and its film as the ```html block.
 
 _MD_TITLE_RE = re.compile(r"^#[ \t]+(.+?)[ \t]*#*[ \t]*$")
 _MD_HEADING_RE = re.compile(r"^#{2,6}[ \t]+(.+?)[ \t]*#*[ \t]*$")
@@ -1864,21 +1882,20 @@ def _lead(kind: str, paras: list[str]) -> tuple[str, list[str]]:
 def parse_markdown(text: str, form: str) -> dict[str, Any]:
     """The shape a form's normalizer reads from a document written as markdown (module note above): for a document
     {title, sections: [{heading, level, body, figures}]}, for a story {title, sections: [{heading, body, figures}]}, for
-    slides {title, slides: [{heading, body, figure, notes}]}, for a page {title, html, claims}."""
-    if form == "page":
+    slides {title, slides: [{heading, body, figure, notes}]}, for a page {title, html, claims}, for a video {title,
+    lines, film} (video.parse)."""
+    if form in ("page", "video"):
         m = _MD_HTML_RE.search(str(text or ""))
         html = m.group(1) if m else ""
         rest = (text[: m.start()] + text[m.end():]) if m else str(text or "")
         title, secs = _md_sections(rest)
-        claims: list[str] = []
-        for sec in secs:
-            for para in _paragraphs(sec["lines"]):
-                rows = [r for r in para.split("\n") if r.strip()]
-                if all(_MD_BULLET_RE.match(r) for r in rows):
-                    claims += [_MD_BULLET_RE.sub("", r).strip() for r in rows]
-                else:
-                    claims.append(" ".join(r.strip() for r in rows))
-        return {"title": title, "html": html, "claims": claims}
+        if form == "video":
+            from . import versions, video  # noqa: PLC0415
+
+            changed = [sec for sec in secs if versions._norm_heading(sec["heading"]) == versions.WHAT_CHANGED]
+            summary = [versions.plain(x) for x in _claims(changed)][:versions.SUMMARY_LINES]
+            return video.parse(title, _claims([sec for sec in secs if sec not in changed]), html, summary)
+        return {"title": title, "html": html, "claims": _claims(secs)}
     title, secs = _md_sections(text, headlines=form == "story")
     if form == "slides":
         out = []
@@ -1898,6 +1915,19 @@ def parse_markdown(text: str, form: str) -> dict[str, Any]:
                                          if "".join(sec["lines"]).strip() or sec["figures"] or over_subheading(secs, i)]}
 
 
+def _claims(secs: list[dict[str, Any]]) -> list[str]:
+    """Each paragraph of the sections as one claim, or each item of a paragraph that is all a list."""
+    claims: list[str] = []
+    for sec in secs:
+        for para in _paragraphs(sec["lines"]):
+            rows = [r for r in para.split("\n") if r.strip()]
+            if all(_MD_BULLET_RE.match(r) for r in rows):
+                claims += [_MD_BULLET_RE.sub("", r).strip() for r in rows]
+            else:
+                claims.append(" ".join(r.strip() for r in rows))
+    return claims
+
+
 def over_subheading(secs: list[dict[str, Any]], i: int) -> bool:
     """Whether the section at `i` is a heading whose next section is a deeper one, its subheading, so it stands even
     with no text of its own."""
@@ -1912,9 +1942,9 @@ def _level(value: Any) -> int:
 
 
 def form_of(t: dict[str, Any]) -> str | None:
-    """The markdown form a type is written in: document, slides, story or page; None for a custom type with a schema of
-    its own, which is not written from markdown."""
-    if t.get("renderer") in ("document", "slides", "story"):
+    """The markdown form a type is written in: document, slides, story, video or page; None for a custom type with a
+    schema of its own, which is not written from markdown."""
+    if t.get("renderer") in ("document", "slides", "story", "video"):
         return str(t["renderer"])
     return "page" if t.get("page") else None
 
@@ -1984,6 +2014,10 @@ def document_lines(doc: dict[str, Any]) -> list[str]:
     from . import story  # noqa: PLC0415
 
     lines = [f"# {doc.get('title') or '(no title)'}" + (" · locked" if doc.get("title_locked") is True else "")]
+    if doc.get("renderer") == "video":
+        from . import video  # noqa: PLC0415
+
+        return lines + video.document_lines(doc, _sentence_lines, READ_HTML_CHARS)
     answer = doc.get("answer") if isinstance(doc.get("answer"), dict) else None
     if answer:
         lines += ["", "answer"] + _sentence_lines([answer])
@@ -2268,7 +2302,7 @@ async def tool_write_document(ctx: Any, args: dict[str, Any]) -> Any:
     same_run = bool(run_key and prev is not None and prev.get("writer_run") == run_key)
     base = versions.previous_of(ctx.c, inv, slug, int(prev.get("generation") or 1)) if same_run and prev else prev
     raw = parse_markdown(text, form)
-    what_changed = versions.pop_what_changed(raw) if base is not None else []
+    what_changed = (raw.pop("what_changed", None) or versions.pop_what_changed(raw)) if base is not None else []
     # the cards the writer's figure lines named, to say which of them the saved document shows
     asked = [str(f.get("cell")) for s in raw.get("sections") or [] for f in s.get("figures") or [] if isinstance(f, dict)] + \
         [str(f.get("cell")) for u in raw.get("slides") or [] for f in (u.get("figures") or [])[:slides.MAX_FIGURES] if isinstance(f, dict)]
@@ -2313,8 +2347,14 @@ async def tool_write_document(ctx: Any, args: dict[str, Any]) -> Any:
              if isinstance(f, dict) and f.get("cell")}
     kept = sum(1 for cell in asked if cite.canon(cell) in shown)
     saved_as = f"generation {doc['generation']}" + (f" (this run's save {doc['revision']} of it)" if same_run else "")
-    line = (f"saved [[report:{slug}]] as {saved_as}, {_plural(len(units(doc)), 'section')}, "
-            f"{_plural(len(all_sentences(doc)), 'sentence')} and {_plural(kept, 'figure')}")
+    if form == "video":
+        from . import video  # noqa: PLC0415
+
+        line = (f"saved [[report:{slug}]] as {saved_as}, {_plural(len(units(doc)), 'line')} over "
+                f"{video.timing(doc)['duration']:g} s and {_plural(len(all_sentences(doc)), 'sentence')}")
+    else:
+        line = (f"saved [[report:{slug}]] as {saved_as}, {_plural(len(units(doc)), 'section')}, "
+                f"{_plural(len(all_sentences(doc)), 'sentence')} and {_plural(kept, 'figure')}")
     if kept < len(asked):
         line += f"\nleft out {_plural(len(asked) - kept, 'figure')} whose card shows no chart or table"
     if refused:  # hold_locks put back the locked blocks the text changed, so the writer does not report those changes
@@ -2432,7 +2472,10 @@ def unit_of(doc: dict[str, Any], uid: str) -> dict[str, Any] | None:
 
 
 def _units_key(doc: dict[str, Any]) -> str:
-    return "beats" if isinstance(doc.get("beats"), list) else "slides" if isinstance(doc.get("slides"), list) else "sections"
+    for key in ("beats", "slides", "lines"):
+        if isinstance(doc.get(key), list):
+            return key
+    return "sections"
 
 
 def _reid(nodes: list[dict[str, Any]], used: set[str]) -> None:
@@ -2658,10 +2701,19 @@ def _opens_unit(text: str, renderer: str | None) -> bool:
 
 async def tool_screenshot(ctx: Any, args: dict[str, Any]) -> Any:
     """`screenshot` of a `report:` passage. A figure's passage is its card, so it is the card's picture; a sentence or
-    a paragraph has no picture of its own and is read with read_ref."""
+    a paragraph has no picture of its own and is read with read_ref. A whole video, `report:<slug>`, is its film's frames
+    (video.tool_screenshot)."""
     from . import tools  # noqa: PLC0415
 
     ref = str(args.get("ref") or "").strip()
+    whole = re.fullmatch(r"report:([a-z0-9][a-z0-9-]*)", ref)
+    if whole and (read_type(ctx.c, whole.group(1)) or {}).get("renderer") == "video":
+        from . import video  # noqa: PLC0415
+
+        doc = read_doc(ctx.c, investigation.MAIN, whole.group(1))
+        if doc is None:
+            return tools.err(tools.hint("screenshot-none", what=f"{ref} is not written yet") or f"screenshot: {ref} is not written yet")
+        return await video.tool_screenshot(ctx, whole.group(1), doc, args)
     try:
         slug, _ = parse_span(ref)
         doc = _load(ctx.c, investigation.MAIN, slug)
@@ -4037,6 +4089,18 @@ def set_html(c: str, inv_id: str, slug: str, html: str, t: dict[str, Any]) -> di
     doc["html_edited_at"] = _now()
     write_doc(c, inv_id, slug, doc)
     return doc
+
+
+@router.get("/ws/{c}/investigations/{inv_id}/types/{slug}/film")
+async def film_route(c: str, inv_id: str, slug: str) -> dict[str, Any]:
+    """A video's film as its frame loads it (video.film_document). 409 on a type that is not a video."""
+    from . import video  # noqa: PLC0415
+
+    investigation.inv_dir(c, inv_id)
+    slug = _check_slug(slug, custom=False)
+    if _require_type(c, slug)["renderer"] != "video":
+        raise HTTPException(409, f"{slug!r} is not a video")
+    return {"html": video.film_document(_load(c, inv_id, slug))}
 
 
 @router.put("/ws/{c}/investigations/{inv_id}/types/{slug}/html")

@@ -1,6 +1,6 @@
 // The frame half of a viewer's bridge (views.frame_document puts it first in every view page; the page half is
 // frontend/src/files/ViewerFrame.tsx, and scripts/view_shot.mjs plays the page for a view's checks and screenshots).
-// A viewer runs in a sandboxed iframe that reaches no host but its view's media route (window.thimble.mediaUrl, the
+// A viewer runs in a sandboxed iframe that loads nothing but its view's media route (window.thimble.mediaUrl, the
 // URL of an image, audio or video file it claims, for an element's src), so everything else it knows arrives through
 // postMessage calls:
 //   open {locator, quote?} page to frame: show this place (window.thimble.onOpen); with quote {record, text}, a passage
@@ -12,22 +12,38 @@
 //   navigate {ref}         frame to page: open another place, in this view or anywhere in thimble (window.thimble.navigate)
 //   size {height}          frame to page: the document's height, for a frame that sizes to its content
 //   anchors {refs}         frame to page: the data-anchor values that appeared since the last report
-//   labels {marks}         page to frame: {ref: {bar, names, spans: [{text, colour}]}}, the marks of the labels that are
-//                          on for the records among those refs, drawn over every element with that data-anchor; each
-//                          replaces the last
+//   labels {marks, on, filter, all, palette}
+//                          page to frame: marks {ref: {bar, names, spans: [{text, colour}], keep?}}, the marks of the
+//                          labels that are on for the records and units among those refs, drawn over every element with
+//                          that data-anchor, with `keep` whether the ref passes the label filter; on [{id, name, colour,
+//                          values}], the labels that are on; filter {label, value, colour} or null; all [{id, name, on,
+//                          colour, values: [{name, colour, highlight}], count}], every label over files; palette, the
+//                          colours a label's value can take. Each replaces the last; window.thimble.onLabels hears all
+//                          but the marks
+//   label {id, on}, labelColour {id, value, colour}, newLabel
+//                          frame to page: the page's label controls (window.thimble.setLabel, setLabelColour and
+//                          newLabel), which thimble does as its Labels pane does them
 //   cmd {on, cursor}       page to frame: ⌘ went down or up, and the page's ⌘ arrow as a CSS cursor value, which this
 //                          page shows while ⌘ is held so the pointer over the frame is the same one pointer
+//   state {id}             page to frame, answered by state {id, state}: what the analyst is looking at, before a newer
+//                          version of the view is loaded in its place: {ref, scroll, fields, segs} (pageState)
+//   restore {state}        page to frame: that state put back in the newer version's page, as far as it fits (restore)
 // plus ready (the frame can take `open`), error (an uncaught error or a blocked request, shown with a Raw button) and
 // point {rect} (the element under the pointer while ⌘ is held, so the page's one highlight follows the pointer into the
 // frame).
 ;(function () {
   'use strict'
   var P = 'thimble:'
+  var labelFns = []
+  var labelState = null
+  var labelKey = ''
+  var filter = null
   var seq = 0
   var pending = {}
   var openers = []
   var last = null
   var pointed = null
+  var picked = null // the data-anchor of the element the analyst last clicked since the last `open`
   function post(msg) {
     try {
       parent.postMessage(msg, '*')
@@ -64,6 +80,34 @@
         }
       }
     },
+    /** fn({labels, filter, all, palette}) runs with the labels that are on, the label filter, every label over files
+     *  and the palette of label colours, at once with the current ones when they have arrived, and again whenever they
+     *  change; a page that registers it filters its records itself (its reader's thimble.kept), so the bridge hides
+     *  nothing for the filter */
+    onLabels: function (fn) {
+      labelFns.push(fn)
+      if (labelState) {
+        try {
+          fn(labelState)
+        } catch (e) {
+          report(e)
+        }
+      }
+      if (dropped.length) paint()
+    },
+    /** turn a label on or off in thimble's Labels pane, by the id onLabels gives it */
+    setLabel: function (id, on) {
+      post({ type: P + 'label', id: String(id), on: !!on })
+    },
+    /** give a label's value one of the colours onLabels' palette holds; thimble saves it as its Labels pane does, and
+     *  every view hears the new colour through onLabels */
+    setLabelColour: function (id, value, colour) {
+      post({ type: P + 'labelColour', id: String(id), value: String(value), colour: String(colour) })
+    },
+    /** open thimble's prompt for a new label */
+    newLabel: function () {
+      post({ type: P + 'newLabel' })
+    },
     /** the answer of reader.records(index, query), as a promise */
     fetch: function (query) {
       return new Promise(function (resolve, reject) {
@@ -93,6 +137,7 @@
     var d = e.data || {}
     if (d.type === P + 'open') {
       last = d.open || {}
+      picked = null
       for (var i = 0; i < openers.length; i++) {
         try {
           openers[i](last)
@@ -101,6 +146,7 @@
         }
       }
       startQuote(d.quote)
+      if (dropping()) paint()
     } else if (d.type === P + 'result') {
       var p = pending[d.id]
       if (!p) return
@@ -109,10 +155,30 @@
       else p.resolve(d.data)
     } else if (d.type === P + 'labels') {
       marks = d.marks && typeof d.marks === 'object' ? d.marks : {}
+      filter = d.filter && typeof d.filter === 'object' ? d.filter : null
+      var state = { labels: Array.isArray(d.on) ? d.on : [], filter: filter }
+      if (Array.isArray(d.all)) state.all = d.all
+      if (Array.isArray(d.palette)) state.palette = d.palette
+      var key = JSON.stringify(state)
+      if (key !== labelKey) {
+        labelKey = key
+        labelState = state
+        for (var f = 0; f < labelFns.length; f++) {
+          try {
+            labelFns[f](state)
+          } catch (err) {
+            report(err)
+          }
+        }
+      }
       paint()
     } else if (d.type === P + 'cmd') {
       setCmdCursor(d.cursor)
       cmdHeld(d.on)
+    } else if (d.type === P + 'state') {
+      post({ type: P + 'state', id: d.id, state: pageState() })
+    } else if (d.type === P + 'restore') {
+      startRestore(d.state)
     }
   })
   addEventListener('error', function (e) {
@@ -203,6 +269,8 @@
         post({ type: P + 'cite', ref: hit.ref, text: textOf(hit.el), element: nameOf(hit.el), rect: rectOf(hit.el) })
         return
       }
+      var own = e.target && e.target.closest ? e.target.closest('[data-anchor]') : null
+      if (own) picked = own.getAttribute('data-anchor')
       // a link never takes the frame anywhere: the frame has no network, and a view moves with thimble.navigate
       var a = e.target && e.target.closest ? e.target.closest('a[href]') : null
       if (a) e.preventDefault()
@@ -229,12 +297,48 @@
   var BARS =
     '[data-thimble-edge]{--thimble-own:0 0 transparent}' +
     '[data-thimble-edge="in"]{box-shadow:inset ' + BAR + 'px 0 0 var(--thimble-label),var(--thimble-own)!important}' +
-    '[data-thimble-edge="out"]{box-shadow:-' + 2 * BAR + 'px 0 0 -' + BAR + 'px var(--thimble-label),var(--thimble-own)!important}'
+    // a row's cells paint over the row's own shadow when they have a background, so a row's bar is drawn on its first
+    // cell as well
+    'tr[data-thimble-edge="in"]>:first-child{box-shadow:inset ' + BAR + 'px 0 0 var(--thimble-label)!important}' +
+    '[data-thimble-edge="out"]{box-shadow:-' + 2 * BAR + 'px 0 0 -' + BAR + 'px var(--thimble-label),var(--thimble-own)!important}' +
+    // an SVG element draws no box-shadow, so a mark there is a halo in the label's colour around the shape; a group's
+    // text keeps no halo, so its label stays sharp
+    '[data-thimble-edge="svg"]:not(g),g[data-thimble-edge="svg"]>:not(text):not(title){filter:drop-shadow(0 0 1.5px var(--thimble-label)) drop-shadow(0 0 1.5px var(--thimble-label))}'
+  var DROP = '[data-thimble-drop="hide"]{display:none!important}[data-thimble-drop="dim"]{opacity:.25!important}'
   var COLOUR = /^[\w\s(),.#%-]+$/
   var SHADOW = /^[\w\s(),.#%\/-]+$/ // a computed box-shadow: colours, lengths, inset, commas between shadows
   function hasMarks() {
     for (var k in marks) return true
     return false
+  }
+  // With a label filter on, a page that does not filter its own records (it registered no onLabels) has every
+  // anchored element hidden whose ref the filter does not keep and that holds no kept element: an HTML element leaves
+  // the layout, and an SVG shape is dimmed, since removing it would break the drawing. The place the page was opened at
+  // stays, since the analyst asked for it. Whether anything is dropped.
+  var dropped = []
+  function dropping() {
+    return !!filter && !labelFns.length
+  }
+  function drop() {
+    for (var i = 0; i < dropped.length; i++) dropped[i].removeAttribute('data-thimble-drop')
+    dropped = []
+    if (!dropping()) return false
+    var opened = last && last.ref ? String(last.ref) : null
+    var els = document.querySelectorAll('[data-anchor]')
+    var held = []
+    for (var j = 0; j < els.length; j++) {
+      var ref = els[j].getAttribute('data-anchor')
+      var m = marks[ref]
+      if ((m && m.keep) || ref === opened) held.push(els[j])
+    }
+    var keep = new Set(held)
+    for (var h = 0; h < held.length; h++) for (var a = held[h].parentElement; a; a = a.parentElement) keep.add(a)
+    for (var k = 0; k < els.length; k++) {
+      if (keep.has(els[k])) continue
+      els[k].setAttribute('data-thimble-drop', els[k] instanceof SVGElement ? 'dim' : 'hide')
+      dropped.push(els[k])
+    }
+    return true
   }
   function note(el) {
     var ref = el.getAttribute('data-anchor')
@@ -333,15 +437,19 @@
         var inner = false
         for (var a = el.parentElement; a && !inner; a = a.parentElement) inner = a.getAttribute('data-anchor') === ref
         if (inner) continue
+        if (el instanceof SVGElement) {
+          todo.push([el, m, 'svg', null])
+          continue
+        }
         var own = getComputedStyle(el).boxShadow
-        todo.push([el, m, room(el), own && own !== 'none' && SHADOW.test(own) ? own : null])
+        todo.push([el, m, room(el) ? 'in' : 'out', own && own !== 'none' && SHADOW.test(own) ? own : null])
       }
       for (var d = 0; d < todo.length; d++) {
         var el2 = todo[d][0]
         var m2 = todo[d][1]
         el2.setAttribute('data-thimble-label', (m2.names || []).join(', '))
         el2.setAttribute('data-thimble-bar', String(slot(m2.bar)))
-        el2.setAttribute('data-thimble-edge', todo[d][2] ? 'in' : 'out')
+        el2.setAttribute('data-thimble-edge', todo[d][2])
         if (todo[d][3]) {
           var o = owns.indexOf(todo[d][3])
           if (o < 0) o = owns.push(todo[d][3]) - 1
@@ -356,7 +464,7 @@
         }
       }
     }
-    var css = colours.length ? BARS : ''
+    var css = (colours.length ? BARS : '') + (drop() ? DROP : '')
     for (var k = 0; k < colours.length; k++) {
       css += '[data-thimble-bar="' + k + '"]{--thimble-label:' + colours[k] + '}'
       css += '::highlight(thimble-label-' + k + '){background-color:color-mix(in oklab,' + colours[k] + ' 24%,transparent)}'
@@ -531,6 +639,7 @@
   new MutationObserver(function (records) {
     var changed = false
     if (quote) quote.changed = Date.now()
+    if (restoring) restoring.changed = Date.now()
     for (var i = 0; i < records.length; i++) {
       var r = records[i]
       if (sheet && (r.target === sheet || (r.addedNodes.length === 1 && r.addedNodes[0] === sheet))) continue
@@ -548,8 +657,120 @@
       if (!changed && r.target.closest && r.target.closest('[data-thimble-label]')) changed = true
     }
     if (unsent.length && sendTimer == null) sendTimer = setTimeout(sendAnchors, 30)
-    if (changed && hasMarks() && paintTimer == null) paintTimer = setTimeout(paint, 30)
+    if (changed && (hasMarks() || dropping()) && paintTimer == null) paintTimer = setTimeout(paint, 30)
   }).observe(document.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: ['data-anchor', 'class'] })
+
+  // What the analyst is looking at, for a newer version of the view loaded in this page's place: `ref` the element they
+  // last clicked since the last `open`, `scroll` the scroll positions of the page and of each box scrolled, `fields`
+  // the values typed or picked in its inputs, and `segs` the chosen option of each segmented control, by its text. An
+  // element is named by its id, else by its path of child positions from the body.
+  var SCAN_MAX = 5000
+  function pathOf(el) {
+    if (el === document.scrollingElement || el === document.documentElement || el === document.body) return ''
+    if (el.id) return '#' + el.id
+    var parts = []
+    for (var e = el; e && e !== document.body; e = e.parentElement) {
+      if (e.id) {
+        parts.unshift('#' + e.id)
+        break
+      }
+      parts.unshift(String(Array.prototype.indexOf.call(e.parentElement ? e.parentElement.children : [], e)))
+    }
+    return parts.join('/')
+  }
+  function atPath(path) {
+    if (!path) return document.scrollingElement || document.documentElement
+    var parts = path.split('/')
+    var el = document.body
+    for (var i = 0; i < parts.length && el; i++) el = parts[i].charAt(0) === '#' ? document.getElementById(parts[i].slice(1)) : el.children[Number(parts[i])]
+    return el || null
+  }
+  function pageState() {
+    var scroll = []
+    var root = document.scrollingElement || document.documentElement
+    if (root.scrollTop || root.scrollLeft) scroll.push({ path: '', top: root.scrollTop, left: root.scrollLeft })
+    var all = document.body ? document.body.getElementsByTagName('*') : []
+    for (var i = 0; i < all.length && i < SCAN_MAX; i++) {
+      var el = all[i]
+      if (el.scrollTop || el.scrollLeft) scroll.push({ path: pathOf(el), top: el.scrollTop, left: el.scrollLeft })
+    }
+    var fields = []
+    var inputs = document.querySelectorAll('input, select, textarea')
+    for (var j = 0; j < inputs.length; j++) {
+      var f = inputs[j]
+      var box = f.type === 'checkbox' || f.type === 'radio'
+      if (box ? f.checked !== f.defaultChecked : f.tagName === 'SELECT' ? f.selectedIndex > 0 : f.value !== f.defaultValue)
+        fields.push(box ? { path: pathOf(f), checked: f.checked } : { path: pathOf(f), value: f.value })
+    }
+    var segs = []
+    var chosen = document.querySelectorAll('.seg .seg-opt.active')
+    for (var k = 0; k < chosen.length; k++) segs.push({ path: pathOf(chosen[k].closest('.seg')), text: chosen[k].textContent.trim() })
+    return { ref: picked || (last && last.ref) || null, scroll: scroll, fields: fields, segs: segs }
+  }
+  // The state put back, again after each change of the page, until it has been quiet for QUOTE_QUIET ms with no fetch
+  // pending or RESTORE_MAX ms pass, or the analyst scrolls, clicks or types: each field and segmented control once it is
+  // there, the change told to the page as the analyst's own would be, and the scroll positions.
+  var RESTORE_MAX = 5000
+  var restoring = null
+  function startRestore(st) {
+    if (!st || typeof st !== 'object') return
+    var now = Date.now()
+    restoring = {
+      fields: Array.isArray(st.fields) ? st.fields.slice() : [],
+      segs: Array.isArray(st.segs) ? st.segs.slice() : [],
+      scroll: Array.isArray(st.scroll) ? st.scroll : [],
+      changed: now,
+      max: now + RESTORE_MAX,
+    }
+    setTimeout(restoreStep, 0)
+  }
+  function restoreField(want) {
+    var f = atPath(String(want.path || ''))
+    if (!f || !('value' in f)) return false
+    if (typeof want.checked === 'boolean') {
+      if (f.checked === want.checked) return true
+      f.checked = want.checked
+    } else if (typeof want.value === 'string' && f.value !== want.value) f.value = want.value
+    else return true
+    f.dispatchEvent(new Event('input', { bubbles: true }))
+    f.dispatchEvent(new Event('change', { bubbles: true }))
+    return true
+  }
+  function restoreSeg(want) {
+    var seg = atPath(String(want.path || ''))
+    var opts = seg ? seg.querySelectorAll('.seg-opt') : []
+    for (var o = 0; o < opts.length; o++) {
+      if (opts[o].textContent.trim() !== want.text) continue
+      if (!opts[o].classList.contains('active')) opts[o].click()
+      return true
+    }
+    return false
+  }
+  function restoreStep() {
+    var r = restoring
+    if (!r) return
+    r.fields = r.fields.filter(function (f) {
+      return !restoreField(f)
+    })
+    r.segs = r.segs.filter(function (g) {
+      return !restoreSeg(g)
+    })
+    for (var i = 0; i < r.scroll.length; i++) {
+      var el = atPath(String(r.scroll[i].path || ''))
+      if (!el) continue
+      if (el.scrollTop !== r.scroll[i].top) el.scrollTop = r.scroll[i].top
+      if (el.scrollLeft !== r.scroll[i].left) el.scrollLeft = r.scroll[i].left
+    }
+    var now = Date.now()
+    if (now >= r.max || (now - r.changed >= QUOTE_QUIET && !hasPending())) restoring = null
+    else setTimeout(restoreStep, 100)
+  }
+  function stopRestore() {
+    restoring = null
+  }
+  addEventListener('wheel', stopRestore, { passive: true, capture: true })
+  addEventListener('pointerdown', stopRestore, true)
+  addEventListener('keydown', stopRestore, true)
 
   function size() {
     var b = document.body

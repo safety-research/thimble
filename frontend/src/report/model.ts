@@ -2,7 +2,7 @@
 // a block's text, card drop positions, filter sets, the other document types in the report's shape and the type bar's
 // options. The story's helpers are in storyModel.ts.
 import { parseRef } from '../lib/refs'
-import type { AnyDoc, Cell, DeckBody, DeckDoc, DeckSlide, LabelRow, PageDoc, ReportBlock, StoryDoc, TypesState, Writeup, WriteupFigure, WriteupParagraph, WriteupSection, WriteupSentence } from '../lib/types'
+import type { AnyDoc, Cell, DeckBody, DeckDoc, DeckSlide, LabelRow, PageDoc, ReportBlock, StoryDoc, TypesState, VideoDoc, Writeup, WriteupFigure, WriteupParagraph, WriteupSection, WriteupSentence } from '../lib/types'
 import { storageKey } from '../lib/workspace'
 import { parseInline, type InlineNode } from './inlineParse'
 
@@ -483,7 +483,7 @@ export function indexDoc(doc: Pick<Writeup, 'sections'>): { byParagraph: Map<str
 
 // ---- the other documents in the report's shape: a story's sections, a deck's slides, a page's claims ----
 
-export type DocShape = 'document' | 'story' | 'slides' | 'page'
+export type DocShape = 'document' | 'story' | 'slides' | 'page' | 'video'
 
 /** What a stored document is, by its renderer or its shape: `document` (sections), `story` (sections of blocks beside
  * their card), `slides`, `page` (html). */
@@ -492,6 +492,7 @@ export function shapeOf(doc: AnyDoc | null | undefined): DocShape {
   const d = doc as { renderer?: string; slides?: unknown; sections?: unknown }
   if (d.renderer === 'story') return 'story'
   if (d.renderer === 'slides' || Array.isArray(d.slides)) return 'slides'
+  if (d.renderer === 'video') return 'video'
   if (d.renderer === 'custom' && !Array.isArray(d.sections)) return 'page'
   return 'document'
 }
@@ -769,6 +770,11 @@ export function sectionsOfPage(doc: Pick<PageDoc, 'claims'>): WriteupSection[] {
   return claims.length ? [{ id: CLAIMS_ID, heading: '', paragraphs: [{ id: `${CLAIMS_ID}-p`, sentences: claims }], figures: [] }] : []
 }
 
+/** A video's lines, each a section without a heading holding one paragraph of its sentences. */
+export function sectionsOfVideo(doc: Pick<VideoDoc, 'lines'>): WriteupSection[] {
+  return (doc.lines ?? []).map((l) => ({ id: l.id, heading: '', paragraphs: [{ id: `${l.id}-p`, sentences: l.sentences ?? [] }], figures: [] }))
+}
+
 export function sectionsOf(doc: AnyDoc): WriteupSection[] {
   switch (shapeOf(doc)) {
     case 'story':
@@ -777,6 +783,8 @@ export function sectionsOf(doc: AnyDoc): WriteupSection[] {
       return sectionsOfDeck(doc as DeckDoc)
     case 'page':
       return sectionsOfPage(doc as PageDoc)
+    case 'video':
+      return sectionsOfVideo(doc as VideoDoc)
     default:
       return (doc as Writeup).sections ?? []
   }
@@ -791,9 +799,9 @@ export function asWriteup(doc: AnyDoc): Writeup {
 // ---- the switcher ----
 
 /** the three document types in the type bar's order */
-export const BUILTIN_SLUGS = ['report', 'slides', 'story'] as const
-const BUILTIN_RENDERER: Record<string, string> = { report: 'document', story: 'story', slides: 'slides' }
-const BUILTIN_LABEL: Record<string, string> = { report: 'Report', story: 'Story', slides: 'Slides' }
+export const BUILTIN_SLUGS = ['report', 'slides', 'story', 'video'] as const
+const BUILTIN_RENDERER: Record<string, string> = { report: 'document', story: 'story', slides: 'slides', video: 'video' }
+const BUILTIN_LABEL: Record<string, string> = { report: 'Report', story: 'Story', slides: 'Slides', video: 'Video' }
 
 /** A document's name on its tab in the type bar: Report, Slides, Story, or a custom type's name (else its slug). */
 export const docLabel = (slug: string, state: TypesState | null | undefined): string => BUILTIN_LABEL[slug] ?? ((state?.[slug]?.name ?? '').trim() || slug)

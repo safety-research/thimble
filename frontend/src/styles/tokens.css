@@ -1,7 +1,6 @@
 /* thimble tokens. Three papers (Warm, the default; Neutral; Dark) set as `data-paper` on <html> by lib/theme.ts, and
    one of seven accents set as `data-accent`. Layering is recessed: the window is lighter than the pane and the cell is
-   the lightest thing on screen. Every text colour reads at WCAG AA (4.5:1) or more on its grounds, per paper;
-   tests/public/contrast.test.ts measures the pairs. */
+   the lightest thing on screen. Every text colour reads at WCAG AA (4.5:1) or more on its grounds, per paper. */
 
 /* -------- paper: Warm, the default. --paper-2 window · --paper-1 pane · --paper-0 inset · --white cell -------- */
 :root {

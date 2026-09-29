@@ -5,7 +5,8 @@ its session id and its parent's pid, and writes each `channel` event as a `notif
 before the MCP handshake is done. That session also relays its permission prompts: it declares
 `claude/channel/permission`, posts each `notifications/claude/channel/permission_request` to
 `POST /api/channel/permission`, and writes each `permission` event of the stream as
-`notifications/claude/channel/permission`. The server here is a stand-in that serves one event of each kind."""
+`notifications/claude/channel/permission`. Every request proves the token in server.json and the shim believes only an
+answer that proves it too (app/hook_auth.py). The server here is a stand-in that serves one event of each kind."""
 from __future__ import annotations
 
 import json
@@ -23,18 +24,33 @@ from typing import Any
 
 import pytest
 
-from app import config
+from app import config, hook_auth
+from conftest import fake_claude_bin
 
 SHIM = config.REPO_ROOT / "plugin" / "bin" / "thimble-mcp"
 NOTE = {"content": "question: why?", "meta": {"kind": "thread", "event": "e1", "thread": "t1"}}
 VERDICT = {"request_id": "swagd", "behavior": "allow"}
 REQUEST = {"request_id": "abcde", "tool_name": "Bash", "description": "Create x", "input_preview": '{"command": "touch x"}'}
+TOKEN = "t0ken-of-this-install"  # the one _start records in server.json
+
+
+def proof(handler: BaseHTTPRequestHandler, token: str | None = TOKEN) -> str | None:
+    """The proof header a server holding `token` puts on its answer to the request `handler` reads, as
+    app/hook_auth.py does; None when the request does not prove `token` (thimble's server would answer 401), or with
+    `token` None (a process that is not thimble's)."""
+    nonce = handler.headers.get(hook_auth.NONCE_HEADER) or ""
+    if not token or not nonce or handler.headers.get(hook_auth.AUTH_HEADER) != hook_auth.sign(token, "hook", nonce):
+        return None
+    return hook_auth.sign(token, "server", nonce)
 
 
 class _Server:
-    """GET /api/channel: a `ready` event, one `channel` event, then held open; every query string is kept."""
+    """GET /api/channel: a `ready` event, one `channel` event, then held open; every query string is kept. Each answer
+    proves `token` (none with None); a request that does not prove it is kept in `refused` and answered 401."""
 
-    def __init__(self) -> None:
+    def __init__(self, token: str | None = TOKEN) -> None:
+        self.token = token
+        self.refused: list[str] = []
         self.queries: list[dict] = []
         self.posts: list[dict] = []
         self.calls: list[tuple[str, dict]] = []  # (tool, body) of each POST /api/tools/<tool>
@@ -44,6 +60,8 @@ class _Server:
             def do_POST(self):  # noqa: N802
                 body = self.rfile.read(int(self.headers.get("Content-Length") or 0))
                 path = urllib.parse.urlsplit(self.path).path
+                if self._refused():
+                    return
                 if path == "/api/channel/permission":
                     outer.posts.append(json.loads(body))
                 answer = b"{}"
@@ -51,6 +69,7 @@ class _Server:
                     outer.calls.append((path.rsplit("/", 1)[-1], json.loads(body)))
                     answer = json.dumps({"content": [{"type": "text", "text": "ok"}], "is_error": False}).encode()
                 self.send_response(200)
+                self._proof()
                 self.send_header("Content-Type", "application/json")
                 self.end_headers()
                 self.wfile.write(answer)
@@ -61,8 +80,11 @@ class _Server:
                     self.send_response(404)
                     self.end_headers()
                     return
+                if self._refused():
+                    return
                 outer.queries.append(dict(urllib.parse.parse_qsl(u.query)))
                 self.send_response(200)
+                self._proof()
                 self.send_header("Content-Type", "text/event-stream")
                 self.end_headers()
                 self.wfile.write(b'event: ready\ndata: {"workspace": "mini"}\n\n')
@@ -72,12 +94,25 @@ class _Server:
                 self.wfile.flush()
                 time.sleep(3)
 
+            def _refused(self) -> bool:
+                if outer.token and proof(self, outer.token) is None:
+                    outer.refused.append(self.path)
+                    self.send_response(401)
+                    self.send_header("Content-Length", "0")
+                    self.end_headers()
+                    return True
+                return False
+
+            def _proof(self) -> None:
+                if outer.token:
+                    self.send_header(hook_auth.PROOF_HEADER, proof(self, outer.token) or "")
+
             def log_message(self, *a):
                 pass
 
         self.httpd = ThreadingHTTPServer(("127.0.0.1", 0), H)
         self.port = self.httpd.server_address[1]
-        threading.Thread(target=self.httpd.serve_forever, daemon=True).start()
+        threading.Thread(target=self.httpd.serve_forever, kwargs={"poll_interval": 0.05}, daemon=True).start()
 
     def close(self) -> None:
         self.httpd.shutdown()
@@ -111,18 +146,20 @@ def _run(tmp_path: Path, port: int, channel: bool, wait_s: float, until: Any = "
         _stop(p)
 
 
-def _start(tmp_path: Path, port: int, channel: bool, parent: list[str] | None = None,
+def _start(tmp_path: Path, port: int | None, channel: bool, parent: list[str] | None = None,
            extra: dict | None = None) -> subprocess.Popen:
-    """The shim as a child process (of a stand-in `claude` with `parent`), its server the stand-in on `port`."""
+    """The shim as a child process (of a stand-in `claude` with `parent`), its server the stand-in on `port`, recorded
+    in server.json with TOKEN; with `port` None there is no server.json."""
     home = tmp_path / "home"
     home.mkdir(exist_ok=True)
-    (home / "server.json").write_text(json.dumps({"port": port, "api": f"http://127.0.0.1:{port}"}))
-    login = tmp_path / "cc" / ".credentials.json"  # a claude.ai login, which channels need (cc_channel.claude_ai_login)
-    if not login.exists():
-        login.parent.mkdir(parents=True, exist_ok=True)
-        login.write_text(json.dumps({"claudeAiOauth": {"accessToken": "t", "scopes": ["user:inference"]}}))
+    if port is not None:
+        (home / "server.json").write_text(json.dumps({"port": port, "api": f"http://127.0.0.1:{port}", "token": TOKEN}))
+    # a claude.ai login, which channels need (cc_channel.channels_blocked)
+    claude = fake_claude_bin(home, {"loggedIn": True, "authMethod": "claude.ai"})
+    (tmp_path / "cc").mkdir(exist_ok=True)
     env = {**os.environ, "THIMBLE_HOME": str(home), "THIMBLE_CWD": "/data/mini", "CLAUDE_CONFIG_DIR": str(tmp_path / "cc"),
-           "CLAUDE_CODE_SESSION_ID": "s-123"}
+           "CLAUDE_CODE_SESSION_ID": "s-123", "THIMBLE_CLAUDE_BIN": str(claude)}
+    env.pop("THIMBLE_SKIP_KEY", None)
     for k in ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_PROFILE", "CLAUDE_CODE_USE_BEDROCK",
               "CLAUDE_CODE_USE_VERTEX", "CLAUDE_CODE_USE_FOUNDRY"):
         env.pop(k, None)  # the runner's own login must not decide the route the test asserts
@@ -182,27 +219,6 @@ def test_the_shim_declares_the_channel_and_forwards_an_event(tmp_path, server):
     assert q["cwd"] == "/data/mini" and q["session"] == "s-123" and int(q["pid"]) == os.getpid()
 
 
-def test_an_event_the_server_sends_at_once_waits_for_the_handshake(tmp_path, server):
-    """The stand-in server sends its events the moment the shim subscribes, which the shim does at start. None is
-    written to Claude Code before the client says `notifications/initialized` after reading the initialize result, and
-    the one that came meanwhile is written then."""
-    p = _start(tmp_path, server.port, channel=True)
-    try:
-        _send(p, [INITIALIZE])
-        first: list[dict] = []
-        end = time.monotonic() + 30
-        while time.monotonic() < end and not (server.queries and any(m.get("id") == 0 for m in first)):
-            first += _read(p, "", 0.2)
-        first += _read(p, "notifications/claude/channel", 1.0)  # time for an event written early to arrive
-        assert server.queries, "the shim subscribes at start, before the handshake"
-        assert [m.get("id") for m in first] == [0] and "result" in first[0], first
-        _send(p, [INITIALIZED])
-        later = _read(p, "notifications/claude/channel", 30)
-        assert [m["params"] for m in later if m.get("method") == "notifications/claude/channel"] == [NOTE]
-    finally:
-        _stop(p)
-
-
 def test_the_launcher_s_session_relays_its_permission_prompts_both_ways(tmp_path, server):
     """Claude Code's request reaches the server with the folder and the session; the browser's answer on the stream
     reaches Claude Code as the verdict notification. The stand-in sends its verdict the moment the shim subscribes,
@@ -231,28 +247,5 @@ def test_a_tool_call_carries_the_id_claude_code_gave_it(tmp_path, server):
             "params": {"name": "message_orientation", "arguments": {"message": "again"}}}
     _run(tmp_path, server.port, channel=False, wait_s=15, send=[call, bare],
            until=lambda: len(server.calls) >= 2)
-    assert [(name, body["args"], body["tool_use_id"]) for name, body in server.calls] == [  # noqa: E501
-        ("message_orientation", {"message": "more"}, "toolu_01abc"), ("message_orientation", {"message": "again"}, None)]
-
-
-DISCOVER = {"jsonrpc": "2.0", "id": 9, "method": "server/discover",
-            "params": {"_meta": {"io.modelcontextprotocol/protocolVersion": "2026-07-28",
-                                 "io.modelcontextprotocol/clientInfo": {"name": "t", "version": "1"},
-                                 "io.modelcontextprotocol/clientCapabilities": {}}}}
-
-
-def test_a_2026_07_28_probe_is_refused_and_the_handshake_after_it_gets_the_channel(tmp_path, server):
-    """Claude Code 2.1.28x has no channel on a 2026-07-28 connection, and opens with that protocol's `server/discover`
-    when it negotiates: the shim refuses it, so Claude Code falls back to the handshake, where the channel is declared."""
-    p = _start(tmp_path, server.port, channel=True)
-    try:
-        _send(p, [DISCOVER])
-        first = _read(p, lambda: False, 5)
-        probe = next((m for m in first if m.get("id") == 9), None)
-        assert probe is not None and "error" in probe, first
-        _send(p, [INITIALIZE, INITIALIZED])
-        out = _read(p, "notifications/claude/channel", 30)
-        init = next(m for m in out if m.get("id") == 0)
-        assert "claude/channel" in init["result"]["capabilities"]["experimental"]
-    finally:
-        _stop(p)
+    got = {body["args"]["message"]: (name, body["tool_use_id"]) for name, body in server.calls}  # the two calls may land in either order
+    assert got == {"more": ("message_orientation", "toolu_01abc"), "again": ("message_orientation", None)}

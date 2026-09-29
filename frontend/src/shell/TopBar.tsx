@@ -1,6 +1,6 @@
 // The top bar: at the left the thimble mark and the corpus's folder in mono; the surfaces' tabs over the main area
 // (a click shows the surface, a drag takes it to a pane); at the right Undo and Redo (shell/undo.ts), Report a problem,
-// the links toggle, the theme popover and the settings gear.
+// the links toggle, the theme popover and the settings gear (whose settings include turning the chat off, Shell).
 import { useEffect, useState, type PointerEvent as ReactPointerEvent } from 'react'
 import { Button, type TabOption } from '../components/Button'
 import { Icon } from '../components/Icon'

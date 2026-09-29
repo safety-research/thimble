@@ -4,10 +4,11 @@ The critic reviews the orientation's whole transcript and cards for coverage and
 drafted deck's claims against the calls that should support them. The machinery shared with other agent sessions is
 agent_session.py; this module holds what is the critique's own.
 
-Start. Only the orientation's session lists `critique`. The server starts `claude -p` in the corpus folder running as
-the critic agent (prompts/critic.md via `--agents`, shared.md appended), with the `critic` role's model settings. Its
-tools are Read, Grep, Glob, read_ref and list_cards, so it writes nothing. One critique runs at a time, in the
-orientation's permission mode.
+Start. Only the orientation's session lists `critique`. The server starts `claude -p` in the critic's work folder
+running as the critic agent (prompts/critic.md via `--agents`, shared.md appended), with the `critic` role's model
+settings. It has every tool of a default Claude Code session and, of thimble's, OWN_TOOLS, so it adds no card, and it
+runs in a work folder of its own with the corpus read-only (agent_session, the fence). One critique runs at a time, in
+the critic's row of the permission modes (modes.py).
 
 The transcript. Raw transcripts run to megabytes of JSON and Read cuts lines at 2,000 characters, so the critique
 renders the session's and its agents' transcripts into one digest, each tool call under its ref in the orientation's
@@ -27,10 +28,11 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import textwrap
 from pathlib import Path
 from typing import Any
 
-from . import agent_session, agents, cc_settings, config, orient_checks, orientation, session, tools
+from . import agent_session, agents, config, orient_checks, orientation, session, tools
 
 log = logging.getLogger("thimble.critique_session")
 
@@ -41,6 +43,8 @@ DEFAULT_EFFORT = "high"  # when critic.md names none
 # is stopped past the limit and the orientation hears `## critique-ended`.
 CRITIQUE_LIMIT_S = {"low": 1200.0, "medium": 1200.0, "high": 1800.0, "xhigh": 2700.0, "max": 3600.0}
 DIGEST_DIR = "critique"  # the one folder outside the corpus the critic may read
+WORK_DIR = "work"  # critique/<chat>/work, the critic's own folder, where it may write
+OWN_TOOLS = ("read_ref", "list_cards")  # the critic's thimble tools
 DIGEST_FILE = "transcript.md"
 RESULT_LINES = 8  # lines of a tool result the digest shows; a card reads whole with read_ref, a file with Read
 # lines of a Read's result: the critic reads the file itself, and the call's input says which part the agent saw
@@ -292,6 +296,11 @@ def resolve_chat(c: str, p: dict[str, Any], ref: str) -> dict[str, Any]:
             "meta": {"chat": chat, "line": a, "end_line": b, "lines": len(lines)}}
 
 
+def work_dir(c: str, chat: str) -> Path:
+    """The critic's own folder for the orientation chat `chat`, where it may write."""
+    return config.workspace_dir(c) / DIGEST_DIR / chat / WORK_DIR
+
+
 def write_digest(c: str, run: agent_session.Run) -> Path | None:
     """The digest of the session `run`, written to its folder in workspace `c`; None when the transcript is not found or
     the file cannot be written."""
@@ -314,17 +323,17 @@ def write_digest(c: str, run: agent_session.Run) -> Path | None:
 
 def drafts(c: str) -> list[str]:
     """The parts of the first message that name the orientation's drafts: `## critique-deck` when its deck is on, and
-    `## critique-proposals` with each view proposal it holds, since no tool lists a held proposal."""
+    `## critique-proposals` with each view it proposed, since no tool lists proposals."""
     from . import views  # noqa: PLC0415
 
     out: list[str] = []
     run = orientation.read_run(c) or {}
     if orientation.deck_of(run):
         out.append(tools.hint("critique-deck", deck=orientation.GROUP_PATHS["deck"]))
-    held = [p for p in views.list_proposals(c) if p.get("held") and p.get("status") != "dropped"]
-    if held:
-        rows = "\n".join(f"- {p.get('name')}: {p.get('why')} Claims {', '.join(p.get('claims') or [])}. {p.get('arrangement')}"
-                         for p in held)
+    mine = [p for p in views.list_proposals(c) if (p.get("orientation") or p.get("held")) and p.get("status") != "dropped"]
+    if mine:
+        rows = "\n".join(f"- {p.get('name')}: {p.get('why')} Claims {', '.join(p.get('claims') or [])}.\n"
+                         + textwrap.indent(views.spec_lines(p), "  ") for p in mine)
         out.append(tools.hint("critique-proposals", proposals=rows))
     return out
 
@@ -385,11 +394,28 @@ async def start(c: str, caller: agent_session.Run, context: str = "") -> tuple[a
         effort=effort, settings=agent_session.settings_json(effort, fastMode=bool(conf["fast"])), prompt=prompt,
         agent_type=agent_name, on_end=ended, parent=caller.chat, model=str(agent.get("model") or ""),
         calls=caller.calls or caller.chat,  # numbered in the orientation's sequence
-        # the orientation's permission mode, followed at each request
-        permission_mode=cc_settings.orient_permission_flag(caller.mode) if caller.mode else "",
-        mode_owner=caller.key if caller.mode else None, patient=caller.patient,
-        brief=prompt.split("\n\n", 1)[0], **fields)  # the critique-task line that opens the first message
+        agent="critic", patient=caller.patient,
+        work=work_dir(c, caller.chat), unasked=True, disallowed=agent_session.not_own(OWN_TOOLS),
+        brief=prompt.split("\n\n", 1)[0], background=caller.bg, **fields)  # the critique-task line that opens the first message
     return run, done
+
+
+def _relaunch(c: str, meta: dict[str, Any]) -> dict[str, Any]:
+    """The start arguments of a critic's background session that this server did not start, from its chat's meta
+    (agent_session.on_relaunch): a later turn of it is followed, and its Resume starts it again, with no critique
+    waiting on it."""
+    agent_name, agent, conf, effort = _critic(c)
+    transcript = str(meta.get("transcript") or "")
+    readable = ["--add-dir", str(Path(transcript).parent)] if transcript else []
+    parent = str(meta.get("parent") or agents.MAIN_ID)
+    return dict(role=agent_session.STEP_ROLE, title=TITLE,
+                agent_args=["--agents", json.dumps({agent_name: agent}, ensure_ascii=False), "--agent", agent_name, *readable],
+                effort=effort, settings=agent_session.settings_json(effort, fastMode=bool(conf["fast"])),
+                agent_type=agent_name, parent=parent, model=str(agent.get("model") or ""), work=work_dir(c, parent),
+                agent="critic", unasked=True, disallowed=agent_session.not_own(OWN_TOOLS), background=True)
+
+
+agent_session.on_relaunch(tools.CRITIQUE_SESSION, _relaunch)
 
 
 def _critic(c: str) -> tuple[str, dict[str, Any], dict[str, Any], str]:

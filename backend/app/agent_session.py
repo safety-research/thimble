@@ -4,16 +4,34 @@ session of its own with its own system prompt rather than a fork of main.
 
 Start. The server runs `claude -p --agents <json> --agent <name> --session-id <uuid> --output-format stream-json …` in
 the corpus folder (command) and writes the first message on stdin, since Linux refuses an argument over 128 KiB. The
-agent is defined for that session alone with `--agents`. shared.md is appended with --append-system-prompt, since
-Claude Code applies an agent's `skills` to subagents only. The session inherits the analyst's settings; thimble layers
-on the role's model, effort (also as CLAUDE_CODE_EFFORT_LEVEL) and fast mode. THIMBLE_SESSION names the session for
-its shim (`orient`, `writer:<doc>`, `critique:orient`, `check:<id>:<doc>`).
+agent is defined for that session alone with `--agents`. Its file names no tools, so it has every tool of a default
+Claude Code session less the session's --disallowedTools: LATER_TOOLS and the thimble tools that are not its own
+(not_own). shared.md is appended with --append-system-prompt, since Claude Code applies an agent's `skills` to
+subagents only. The session inherits the analyst's settings; thimble layers on the role's model, effort (also as
+CLAUDE_CODE_EFFORT_LEVEL) and fast mode. THIMBLE_SESSION names the session for its shim (`orient`, `writer:<doc>`,
+`critique:orient`, `check:<id>:<doc>`).
 
 Permissions. A --print session has no terminal, so a PermissionRequest hook (permission_hook.py) hands each request of
 the session, its subagents and workflow agents to ask, which shows it on the chat's card with Allow and Deny. A hook is
 used rather than --permission-prompt-tool because the prompt tool never hears background or workflow agents' requests.
-In Bypass ask allows at once; a session in thimble's mode waits for the analyst (`patient`); one in the analyst's own
-mode is denied after PERMISSION_WAIT_S. thimble's own tools and skills are always allowed (own_rules).
+Each session runs in the mode of its agent's row (modes.py, the caller's `agent`), or in the mode a card switched it to
+(set_mode), which its later runs keep while this server runs (`_switched`); a continued background session keeps the
+mode its chat's meta records, since Claude Code keeps its flags (BG_AUTO_LINE). In Bypass ask allows at once; a patient
+session's request (the orientation's) waits for the analyst, any other is denied after PERMISSION_WAIT_S. A request
+denied unanswered stays on the card, marked `expired`, until the analyst dismisses it or the session ends. thimble's
+own tools and skills are always allowed (own_rules).
+
+Hosted sessions. The dev agent's background sessions (dev.py) are not followed here, yet ask answers their hook's
+requests the same way: host registers one on its chat for the length of its run, with its agent's mode and its wait
+before an unanswered request is denied.
+
+The web. WebFetch and WebSearch follow the mode in every session: in manual mode an `ask` rule sends each call to ask
+(web_asks), over the analyst's own allow rules and Claude Code's list of documentation sites it fetches unasked, and in
+auto mode the classifier judges them. The card offers "don't ask again" for the site, or for web search, kept for the
+workspace in WEB_RULES_FILE, which every session's later request of it meets (web_rules). While a request waits, the
+session's later requests for the same site or for search wait on the same card (`groups`), each listed on it whole,
+up to WEB_ALSO_MAX. The card's answer says how many it listed (`shown`); a later one it did not list is asked on its own
+once the answer comes.
 
 Don't ask again. The request's `permission_suggestions` become the card's third choice (offer); chosen, they are sent
 as `updatedPermissions` with destination session, kept on the chat's meta (RULES_KEY), and put in each later process's
@@ -22,7 +40,10 @@ argv (with_rules), since Claude Code holds session rules in memory only.
 Auto mode. A call auto mode's classifier refuses never reaches the PermissionRequest hook, so the hook also runs on
 PermissionDenied: the card asks the analyst, and an allow answers `retry` and is remembered (`grants`, `passes`, for
 GRANT_TTL_S) so a PreToolUse hook (before_call) lets the call made again run. The model may reword the call, so an allow
-also covers the same agent's next call of that tool within GRANT_TTL_S.
+also covers the same agent's next call of that tool within GRANT_TTL_S. A refusal only because the classifier was
+unavailable (CLASSIFIER_DOWN) is no verdict: after each of CLASSIFIER_WAITS_S the hook answers `retry` with nothing
+remembered, so auto mode judges the call made again, and only then does the card ask; for a patient session that card
+denies the call after CLASSIFIER_ASK_S unanswered, so the session never waits on it for good.
 
 Mode switch. Between Manual and Bypass the switch is instant (both run Claude Code's manual mode). Into or out of Auto,
 the process's --permission-mode must change, so the follower pauses the process when it is quiet (no call without its
@@ -34,7 +55,7 @@ The process runs in the work folder with the corpus added via `--add-dir`, since
 over dangerous names in the process's own folder, which a write deny of that folder would break. Its --settings deny
 Edit in the corpus and exclude the CLAUDE.md files of the work folder's ancestry (memory_excludes). Where the sandbox
 can run it has no network. A SubagentStart hook gives each subagent its own scratch folder, since the sandbox gives all
-agents one $TMPDIR. A caller that passes `unasked` (a check's run, which nobody watches) also auto-allows Bash in the
+agents one $TMPDIR. A caller that passes `unasked` (a writer, a critique, a check's run) also auto-allows Bash in the
 sandbox and edits in the work folder (sandbox_allow.py).
 
 Calls. A caller that passes `calls` numbers every call in an orientation chat's sequence (calls.py), and the call-ref
@@ -58,14 +79,21 @@ are disallowed (LATER_TOOLS). A process that exits with background work unreport
 
 Auto mode unavailable. When auto mode's classifier gives no verdict too many times, Claude Code ends the turn
 (AUTO_OFF_KIND) and a --print session exits; the session is resumed in Auto up to AUTO_RESUMES times, then waits for
-the analyst (_hold) or, in the analyst's own mode, fails.
+the analyst for up to AUTO_HOLD_S before it resumes in Auto again (_hold).
 
 Safeguards. When a safety classifier stopped a response (`stop_reason: refusal`) and the session made no call after
 it, the session runs again once on FALLBACK_MODEL with `## session-model-fallback`; the earlier result is kept
 (with_earlier).
 
+Background sessions. In terminal-first mode a caller may pass `background`: the session then runs as a Claude Code
+background session (bg_session.py), which the analyst can attach to and message. Its process outlives a run, so a run
+ends when the session is idle, and a later turn of the session is a new run of its chat (bg_session.on_wake). A resume
+reaches a running session in place rather than with `--resume`, and a retry sends its prompt the same way. A permission
+prompt answered in the session's own terminal ends the card's wait once the call's result shows in its transcript.
+
 Restart. The server's stop ends every process; a session whose caller can resume it is left running in its chat for
-the next server (_suspend), any other fails. At start, recover ends processes a dead server left, then resumes each run
+the next server (_suspend), any other fails. A background session is left running, and the next server follows it again
+(bg_session.recover). At start, recover ends processes a dead server left, then resumes each run
 through its caller (on_resume) with `## session-restarted`, or closes it (on_left). Ends main did not hear are kept
 (UNHEARD_FILE) and posted once a session listens (tell_main, deliver_unheard).
 """
@@ -87,17 +115,19 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Awaitable, Callable
+from urllib.parse import urlsplit
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
-from . import (agents, calls as calls_store, cc_settings, config, orientation, permission_hook, procs, retry,
-               sandbox_allow, session, tools)
+from . import (agents, bg_session, calls as calls_store, cc_settings, config, modes, orientation, permission_hook,
+               procs, retry, sandbox_allow, session, tools)
+from .ledger import atomic_write_text
 
 log = logging.getLogger("thimble.agent_session")
 router = APIRouter()
 
-CLAUDE_BIN = os.environ.get("THIMBLE_CLAUDE_BIN", "claude")
+CLAUDE_BIN = config.CLAUDE_BIN
 PLUGIN_DIR = config.REPO_ROOT / "plugin"
 SESSION_ENV = "THIMBLE_SESSION"  # the shim's name for the session it serves (plugin/bin/thimble-mcp)
 # What the shared skill renders after the preamble, appended here, since Claude Code preloads no skill for the agent a
@@ -107,17 +137,19 @@ STEP_ROLE = agents.STEP_ROLE  # a subagent or workflow agent of the session
 STEP_TITLE = "agent"  # a step whose meta names nothing
 POLL_S = 0.5
 STOP_WAIT_S = 4.0  # after SIGINT, then again after SIGTERM, before the next signal
-# an unanswered permission request of a session in the analyst's own mode is denied after this long; one of the
-# orientation's, in a mode of thimble's, waits (module note, permissions)
+# an unanswered permission request is denied after this long, unless its session is patient (the orientation's) or
+# hosted with a wait of its own (module note, permissions)
 PERMISSION_WAIT_S = 60.0
 STDERR_TAIL = 800  # chars of the session's stderr kept as a failed run's error
-PERMISSION_INPUT_CHARS = 2_000  # of a request's input shown to the analyst
+# of a request's input the card shows, scrolled; past it the entry's `cut` is the input's length and the card offers
+# no "don't ask again"
+PERMISSION_INPUT_CHARS = 50_000
 WORKFLOW_DIR_RE = session.WORKFLOW_DIR_RE
 ASYNC_RESULT_RE = session.ASYNC_RESULT_RE
 AGENT_TOOLS = session.AGENT_TOOLS
 # analyst-facing lines, and the deny messages Claude Code passes to the session's model
 DENIED_LINE = "Denied from thimble's browser."
-TIMED_OUT_LINE = ("Nobody answered in thimble's browser within a minute, so the call was denied. Carry on without it, "
+TIMED_OUT_LINE = ("Nobody answered in thimble's browser within {wait}, so the call was denied. Carry on without it, "
                   "or find a way that needs no permission.")
 GONE_LINE = "The session ended before it was answered."
 ALLOWED_LINE = "Allowed in thimble's browser."  # a refused call made again, once allowed (module note, auto mode)
@@ -133,15 +165,28 @@ REQUEST, DENIED, PRE = permission_hook.REQUEST, permission_hook.DENIED, permissi
 # how long the analyst's answer to a call auto mode refused waits for the model to make that call again (module note,
 # auto mode)
 GRANT_TTL_S = 600.0
-# the modes a session in a mode of thimble's runs in (orient_session), by Start's names (cc_settings.ORIENT_MODES)
-MODES = tuple(cc_settings.ORIENT_MODES)
+# auto mode's reason when its classifier gave no verdict on a call, the waits before each time the call goes back to
+# auto mode, and how long the card that then asks waits for a patient session before it denies the call (module note,
+# auto mode). Claude Code reads only `retry` from a PermissionDenied hook, so a deny carries no message to the model.
+CLASSIFIER_DOWN = re.compile(r"\bclassifier\b.*\bunavailable\b", re.I)
+CLASSIFIER_WAITS_S = (10.0, 30.0, 90.0)
+CLASSIFIER_ASK_S = 600.0
 BYPASS = "bypass"
+AUTO = "auto"
+# a background session keeps its --permission-mode, in every run of its chat: bg_session.start sends a running one the
+# prompt in place and resumes a stopped one without its flags, so start() takes a continued one's mode from its meta
+BG_AUTO_LINE = ("A background session cannot switch into or out of Auto while it runs; the mode saved for its agent in"
+                " Settings applies to the agent's next new session.")
 # prompts/tools.md: the stdin prompt of a session resumed in a new mode, and its sentence naming the agents that stopped
 # with the pause (module note, mode switch)
 MODE_PROMPT = "session-mode-changed"
 MODE_STOPPED = "session-mode-stopped"
 MODE_SWITCHING = "session-mode-switching"  # the deny of a request answered so the session can pause for a switch
 SWITCHING = "switching"  # the answer a waiting request gets when a switch pauses the session (_release)
+ELSEWHERE = "elsewhere"  # the answer of a background session's request the analyst answered in its terminal
+ELSEWHERE_LINE = "Answered in the session's own terminal."
+# the alert of a background session's chat whose process stopped (a crash, a kill, `claude stop`), which offers Resume
+STOPPED_ALERT = {"kind": "stopped", "text": "The background session stopped. Resume starts it again with its conversation."}
 # the answers that allow a request with the "don't ask again" updates Claude Code suggested for it, and a waiting one
 # those updates cover (module note, don't ask again)
 ALWAYS, COVERED = "always", "covered"
@@ -177,10 +222,20 @@ RETRY_BUDGET_ENV = "THIMBLE_SESSION_RETRY_BUDGET_S"
 RETRY_PROMPT = "session-retry"  # prompts/tools.md: the stdin prompt of a session started again after the wait
 RETRY_REASONS = {"overloaded": "Anthropic's API is overloaded", "rate_limited": "Anthropic's API rate limit was reached"}
 FAILURE_CHARS = 400  # of a failure's text in the one line that says why (failure_line)
-# A session never ends while its own background work runs: the tools that schedule a later turn are taken away, --print
-# waits for background agents and workflows however long they run (BG_WAIT_ENV), and a session that still exits with some
-# running is resumed with UNFINISHED_PROMPT, at most UNFINISHED_RESUMES times in a run.
+# A session never ends while its own background work runs: the tools that schedule a later turn are taken away, since a
+# --print session exits before that turn comes, --print waits for background agents and workflows however long they run
+# (BG_WAIT_ENV), and a session that still exits with some running is resumed with UNFINISHED_PROMPT, at most
+# UNFINISHED_RESUMES times in a run.
 LATER_TOOLS = ("ScheduleWakeup", "CronCreate", "CronDelete", "CronList")
+# The web tools, which ask in a session in manual mode whatever else allows them (module note, the web), the process
+# modes they ask in, and the workspace's file of the web rules the analyst kept, {"allow": [rule, ...]}.
+WEB_TOOLS = ("WebFetch", "WebSearch")
+WEB_ASK_MODES = ("default", "acceptEdits")
+WEB_RULES_FILE = "web_rules.json"
+WORKSPACE = "workspace"  # the `destination` of a "don't ask again" update kept for the workspace, never sent to Claude Code
+WEB_ALSO_MAX = 20  # the later requests that join a waiting web request, each listed on its card (`also`)
+ALSO_CHARS = 300  # of a joining request's address or search; a longer one is a request of its own
+TIMED_OUT = "timed out"  # the answer of a request nobody answered in time
 BG_WAIT_ENV = "CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS"
 BG_WAIT_MS = "0"  # no ceiling
 # Claude Code aborts an MCP call that sends neither a result nor progress for this long (30 min by default). The shim
@@ -193,9 +248,12 @@ UNFINISHED_RESUMES = 3
 # row and Claude Code ended the turn (CLI 2.1.282), which ends a --print session (module note, auto mode unavailable).
 AUTO_OFF_KIND = "automode-unavailable"
 AUTO_RESUMES = 3  # resumes in Auto in a row, after which the session waits for the analyst to switch its mode
+AUTO_HOLD_S = 900.0  # how long it waits for them before it is resumed in Auto again
+AUTO_OFF_REASON = "Auto mode's safety check gave no verdict"
 RESUMED_PROMPT = "session-resumed"  # prompts/tools.md: the stdin prompt of a session resumed after it ended early
 AUTO_OFF_ALERT = ("Auto mode's safety check gave no verdict, so Claude Code ended this session {times}. Switch it to "
-                  "Manual or Bypass to carry on with its work kept, or retry Auto.")
+                  "Manual or Bypass to carry on with its work kept, or retry Auto, which thimble also does in "
+                  f"{round(AUTO_HOLD_S / 60)} minutes.")
 # The model a session runs on again, once, when a safety classifier stopped its model's response and the session made
 # no call after it (module note, safeguards).
 FALLBACK_MODEL = config.FALLBACK_MODEL
@@ -218,6 +276,9 @@ LAUNCHED_AGENT_RE = re.compile(r"\bagentId:\s*(\w+)")  # in a background Agent c
 LAUNCHED_TASK_RE = re.compile(r"\bTask ID:\s*(\S+)")  # in a Workflow call's result
 RESUMED_AGENT_RE = re.compile(r'"resumedAgentId"\s*:\s*"(\w+)"')  # in a SendMessage's result that continued an agent
 TASK_ID_RE = re.compile(r"<task-id>\s*(.*?)\s*</task-id>", re.S)  # a notification may name several tasks
+MOVED_TASK_RE = re.compile(r"\bmoved to the background as task (\w+)")  # a long call Claude Code let run on
+STOP_TOOL = "TaskStop"
+STOPPED_TASK_RE = re.compile(r'"task_id"\s*:\s*"([^"]+)"')  # in a TaskStop's result, which no notification follows
 
 
 def _now() -> str:
@@ -253,13 +314,15 @@ class Run:
     k: int = 0  # the run's number in its chat: 0 for the session's start, then one per resume
     lead: str = ""  # a resume's stdin prompt, whose copy in the transcript the follower leaves out (module note, resume)
     kept: int = -1  # the transcript offset last kept on the chat's meta
-    # (the analyst's excluded commands, their Bash ask rules) of a check's run whose Bash runs in the sandbox, for ask
+    # (the analyst's excluded commands, their Bash ask rules) of an `unasked` session whose Bash runs in the sandbox,
+    # for ask
     sandbox_rule: tuple[list[str], list[str]] | None = None
-    # the mode of thimble's the session runs in (MODES: the orientation's), None for the analyst's own, and `mode_owner`
-    # the key of the run whose mode it follows at each request, a critique its orientation's (module note, permissions)
-    mode: str | None = None
-    mode_owner: str | None = None
-    patient: bool = False  # a request waits until the analyst answers, else PERMISSION_WAIT_S (module note, permissions)
+    mode: str = "manual"  # the mode it runs in, one of modes.MODES (module note, permissions)
+    patient: bool = False  # a request waits until the analyst answers, else `wait_s` (module note, permissions)
+    wait_s: float | None = None  # None for PERMISSION_WAIT_S
+    on_expired: Callable[["Run", dict[str, Any]], None] | None = None  # told of each request denied unanswered
+    groups: dict[str, str] = field(default_factory=dict)  # web rule -> the id of the request waiting for it (module note, the web)
+    shown: dict[str, int] = field(default_factory=dict)  # answered request id -> how many joined calls its card listed
     asking: dict[str, tuple[str | None, str]] = field(default_factory=dict)  # request id -> (agent that asked, tool)
     # the analyst's answers to calls auto mode refused, by (agent, tool, input): (allowed, time.monotonic() when), which
     # the call made again meets before it runs (module note, auto mode)
@@ -267,11 +330,12 @@ class Run:
     # the allows among them by (agent, tool), each by its key in `grants`, which that agent's next call of the tool uses
     # up whatever its input (module note, auto mode)
     passes: dict[tuple[str | None, str], list[tuple[str | None, str, str]]] = field(default_factory=dict)
+    # the calls sent back to auto mode after its classifier gave no verdict, by (agent, tool, input): (times, when)
+    rechecks: dict[tuple[str | None, str, str], tuple[int, float]] = field(default_factory=dict)
     # the "don't ask again" updates the card offers for each waiting request, by its id, and those the analyst chose,
     # which each process of the run starts with (module note, don't ask again)
     offers: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
     rules: list[dict[str, Any]] = field(default_factory=list)
-    on_mode: Callable[["Run"], None] | None = None  # told when its mode changes
     # a switch into or out of Auto (module note, mode switch): the mode it goes to, whether the process was paused for
     # it, and the calls each transcript has open, by its path: [bytes read, the partial line, {tool_use_id: tool}]
     switching: str | None = None
@@ -308,9 +372,32 @@ class Run:
     suspended: bool = False  # the server's stop left it for the next server to resume (module note, restart)
     # by transcript path: [bytes read, the partial line, the models its replies came from, in order] (_note_models)
     models: dict[str, list] = field(default_factory=dict)
+    bg: bool = False  # a Claude Code background session (module note, background sessions)
+    # request id -> the call it asks about (channel.call_key), which its result in the transcript answers
+    ask_keys: dict[str, tuple[str, str]] = field(default_factory=dict)
 
 
 _runs: dict[tuple[str, str], Run] = {}  # by (workspace, key): the sessions that run
+_hosted: dict[tuple[str, str], Run] = {}  # by (workspace, key): the hosted sessions (module note, hosted sessions)
+_switched: dict[tuple[str, str], str] = {}  # by (workspace, chat): the mode a card switched the chat's session to
+# by (workspace, key): the start arguments of a background session's last run, for a turn it starts on its own
+# (bg_session.on_wake, revive)
+_launches: dict[tuple[str, str], dict[str, Any]] = {}
+# by the kind of a background session's key: its caller's rebuild of those arguments from its chat's meta, for a
+# session this server did not start (on_relaunch)
+_relaunchers: dict[str, Callable[[str, dict[str, Any]], dict[str, Any]]] = {}
+
+
+def on_relaunch(kind: str, fn: Callable[[str, dict[str, Any]], dict[str, Any]]) -> None:
+    """Have `fn(c, meta)` rebuild the start arguments of a background session of `kind` whose chat's meta is `meta`,
+    for a turn it starts after a server restart and for its Resume."""
+    _relaunchers[kind] = fn
+
+
+def _launch_kw(c: str, key: str, meta: dict[str, Any]) -> dict[str, Any] | None:
+    kw = _launches.get((c, key))
+    fn = _relaunchers.get(bg_session.kind_of(key)) if kw is None else None
+    return fn(c, meta) if fn is not None else kw
 
 
 def current(c: str, key: str | None) -> Run | None:
@@ -363,11 +450,39 @@ def own_rules() -> list[str]:
     return [cli.MCP_TOOLS_RULE, *cli.skill_rules(PLUGIN_DIR)]
 
 
+def web_asks(process_mode: str) -> list[str]:
+    """The `permissions.ask` rules of a session whose process runs in Claude Code's `process_mode`: WEB_TOOLS in manual
+    mode, none in auto mode, whose classifier judges them, or in bypassPermissions (module note, the web)."""
+    return list(WEB_TOOLS) if process_mode in WEB_ASK_MODES else []
+
+
+def with_web_asks(settings: dict[str, Any], process_mode: str) -> dict[str, Any]:
+    """`settings` with its `permissions.ask` holding web_asks(process_mode) and no other web tool."""
+    perms = dict(settings.get("permissions") or {})
+    asks = [a for a in perms.get("ask") or [] if a not in WEB_TOOLS] + web_asks(process_mode)
+    if asks:
+        perms["ask"] = asks
+    else:
+        perms.pop("ask", None)
+    return {**settings, "permissions": perms} if perms or "permissions" in settings else settings
+
+
+def thimble_tool(name: str) -> str:
+    """A thimble tool's name as a session sees it, from the plugin's server."""
+    return f"mcp__plugin_{orientation.PLUGIN}_{tools.SERVER_NAME}__{name}"
+
+
+def not_own(own: "list[str] | tuple[str, ...]") -> list[str]:
+    """The thimble tools of the registry not in `own`, as the session sees them: its --disallowedTools, which leave a
+    session with its own thimble tools beside Claude Code's."""
+    return [thimble_tool(n) for n in tools.REGISTRY if n not in own]
+
+
 def command(agent_args: list[str], sid: str, effort: str, settings: str, cwd: Path,
             append_shared: bool = True, model: str = "", *, resume: bool = False, permission_mode: str = "",
             disallowed: "list[str] | tuple[str, ...]" = (), add_dirs: "list[Path] | tuple[Path, ...]" = ()) -> list[str]:
-    """The session's argv. `permission_mode` is the orientation's Claude Code mode (`default` or `auto`), '' for the analyst's
-    own. `append_shared` False leaves shared.md out. `model` '' passes no --model. `resume` continues the session `sid`;
+    """The session's argv. `permission_mode` is its Claude Code mode (modes.flag). `append_shared` False leaves shared.md
+    out. `model` '' passes no --model. `resume` continues the session `sid`;
     `disallowed` are tools the session does not get, beside LATER_TOOLS. `add_dirs` are working directories beside the
     process's folder. `cwd` is the corpus folder, whatever folder the process runs in."""
     append = ["--append-system-prompt", shared_prompt(cwd)] if append_shared else []
@@ -382,13 +497,10 @@ def command(agent_args: list[str], sid: str, effort: str, settings: str, cwd: Pa
 
 
 def environ(key: str, extra: dict[str, str] | None = None) -> dict[str, str]:
-    """The session's environment: the server's, less the Claude Code session identity it may carry, with main's
-    CLAUDE_CONFIG_DIR (config.claude_env), THIMBLE_SESSION, no ceiling on --print's background wait (BG_WAIT_ENV), a 4 h
-    idle limit on a thimble call (IDLE_TIMEOUT_ENV), and `extra` on top."""
-    from . import cli  # noqa: PLC0415
-
-    env = config.claude_env({k: v for k, v in os.environ.items()
-                             if k in cli._KEEP or not k.startswith(cli._STRIP_PREFIXES)})
+    """The session's environment: the server's, less the Claude Code session identity it may carry (config.passes),
+    with main's CLAUDE_CONFIG_DIR (config.claude_env), THIMBLE_SESSION, no ceiling on --print's background wait
+    (BG_WAIT_ENV), a 4 h idle limit on a thimble call (IDLE_TIMEOUT_ENV), and `extra` on top."""
+    env = config.claude_env(config.passed_environ())
     env.pop("THIMBLE_CHANNEL", None)  # the session hears no browser events; main does
     env[SESSION_ENV] = key
     env[BG_WAIT_ENV] = BG_WAIT_MS
@@ -420,8 +532,8 @@ def memory_excludes(corpus: Path, work: Path, home: Path | None = None) -> list[
 def fence(corpus: Path, work: Path, sandbox: bool | None = None, unasked: bool = False) -> dict[str, Any]:
     """The --settings keys that keep the corpus folder read-only to a session whose process runs in its work folder `work`:
     the permissions and memory excludes always, and the sandbox with no network where it can run (`sandbox` None asks
-    cc_settings.sandbox_ok). `unasked` adds the allows of a session nobody watches: edits in the work folder and Bash in the
-    sandbox."""
+    cc_settings.sandbox_ok). `unasked` adds the allows of the session's work in its own folder: edits in the work folder
+    and Bash in the sandbox."""
     perms: dict[str, Any] = {"additionalDirectories": [str(corpus)], "deny": [f"Edit(/{corpus}/**)"]}
     if unasked:
         perms["allow"] = [f"Edit(/{work}/**)"]
@@ -481,11 +593,15 @@ def scratch_hooks(work: Path) -> dict[str, Any]:
                                                           "timeout": SANDBOX_HOOK_TIMEOUT_S}]}]}
 
 
-def permission_hooks(c: str, auto: bool = False) -> dict[str, Any]:
+def permission_hooks(c: str, auto: bool = False, session: str = "", home: str = "") -> dict[str, Any]:
     """The `hooks` that hand every permission request of a session, its subagents and its workflow agents to ask, and every
     call auto mode refused: permission_hook.py, run without site-packages, with a day to wait for the analyst. `auto` adds
-    it before each call, where the server answers whether the analyst allowed that call after a refusal."""
+    it before each call, where the server answers whether the analyst allowed that call after a refusal. `session` and
+    `home` name the session and thimble's home (where server.json is) on the hook's command line, for a session whose
+    environment does not."""
     command = f"{shlex.quote(sys.executable)} -S {shlex.quote(str(PERMISSION_HOOK))} --ws {shlex.quote(c)}"
+    command += f" --session {shlex.quote(session)}" if session else ""
+    command += f" --home {shlex.quote(home)}" if home else ""
 
     def entry(timeout: int) -> list[dict[str, Any]]:
         return [{"matcher": "*", "hooks": [{"type": "command", "command": command, "timeout": timeout}]}]
@@ -496,12 +612,6 @@ def permission_hooks(c: str, auto: bool = False) -> dict[str, Any]:
     return out
 
 
-def runs_auto(permission_mode: str, cwd: Path) -> bool:
-    """Whether a session's process runs in Claude Code's auto mode: its `--permission-mode`, else the analyst's own
-    mode for the corpus folder `cwd`."""
-    return (permission_mode or cc_settings.permission_mode(cwd)) == "auto"
-
-
 def call_hooks(c: str) -> dict[str, Any]:
     """The `hooks` that tell a session's model the ref of each call it made (module note, calls): call_ref.py after
     every call, failed ones included, run by this server's interpreter without site-packages."""
@@ -510,27 +620,44 @@ def call_hooks(c: str) -> dict[str, Any]:
     return {event: hook for event in CALL_REF_EVENTS}
 
 
+def start_mode(c: str, agent: str, *, chat: str | None = None, background: bool = False) -> str:
+    """The mode a session of `agent` starts in (module note, permissions): its row (modes.mode_for); when it continues
+    the chat `chat`, the mode a card switched that chat to while this server runs (`_switched`); and when that chat's
+    session is a background one, the mode its meta records, since Claude Code keeps a background session's flags
+    (BG_AUTO_LINE), Bypass read as Manual once the settings turn it off."""
+    kept = (agents.meta_or_none(c, chat) or {}).get("permission_mode") if background and chat else None
+    if kept in modes.MODES:
+        return "manual" if kept in modes.disabled() and modes.flag(str(kept)) == modes.flag("manual") else str(kept)
+    switched = _switched.get((c, chat)) if chat else None
+    return switched if switched and switched not in modes.disabled() else modes.mode_for(c, agent)
+
+
 async def start(c: str, key: str, *, role: str, title: str, agent_args: list[str], effort: str, settings: str,
                 prompt: str, agent_type: str, on_start: Callable[[Run], None] | None = None,
                 on_end: Callable[[Run, str, str], None] | None = None, append_shared: bool = True,
                 parent: str = agents.MAIN_ID, model: str = "", work: Path | None = None, calls: bool | str = False,
-                permission_mode: str = "", disallowed: "list[str] | tuple[str, ...]" = (), mode: str | None = None,
-                mode_owner: str | None = None, patient: bool = False,
-                on_mode: Callable[[Run], None] | None = None, unasked: bool = False, call: str | None = None,
+                agent: str, disallowed: "list[str] | tuple[str, ...]" = (), patient: bool = False,
+                unasked: bool = False, call: str | None = None,
                 resume: str | None = None, chat: str | None = None, run_k: int = 0,
                 leads: "list[dict[str, Any]] | None" = None, announce: bool = True,
-                on_pid: Callable[[Run], None] | None = None, restarted: bool = False, **fields: Any) -> Run:
+                on_pid: Callable[[Run], None] | None = None, restarted: bool = False, background: bool = False,
+                **fields: Any) -> Run:
     """Start the session `key` for workspace `c` with its first message and follow it into an agent chat of `role` under
     `parent`; RuntimeError when it runs already or claude cannot be started. `on_start`/`on_end` hear the run's start and
-    end; `mode`, `mode_owner`, `patient` and `on_mode` govern permissions; `work` and `unasked` fence it; `calls` numbers its
+    end; `agent` (its row of modes.AGENTS) and `patient` govern permissions; `work` and `unasked` fence it; `calls` numbers its
     calls; `resume`, `chat`, `run_k` and `leads` continue an earlier session; `restarted` marks a resume after a server
     restart; `call` is main's tool call that started it; `announce` False writes no row into the parent chat; `on_pid` hears
-    each process change; `fields` land on the chat's meta."""
+    each process change; `background` runs it as a Claude Code background session (module note); `fields` land on the
+    chat's meta."""
     if running(c, key):
         raise RuntimeError(f"the session {key} is running")
+    if resume and chat and (agents.meta_or_none(c, chat) or {}).get("background"):
+        background = True  # a chat that ran as a background session keeps its session
     cwd = config.corpus_dir(c)
     folder = work if work is not None else cwd  # where the process runs (module note, the fence)
     sid = resume or str(uuid.uuid4())
+    mode = start_mode(c, agent, chat=chat if resume else None, background=background)
+    permission_mode = modes.flag(mode)
     extra_env: dict[str, str] = {}
     given = json.loads(settings)
     hooks: dict[str, Any] = {}
@@ -546,8 +673,9 @@ async def start(c: str, key: str, *, role: str, title: str, agent_args: list[str
         if "sandbox" in fenced and unasked:
             rule = sandbox_rule(cwd)
             hooks.update(sandbox_hooks(rule))
-    for event, entries in permission_hooks(c, runs_auto(permission_mode, cwd)).items():
-        # the permission hook alone answers a request, since ask applies a check's sandbox rule itself; before a call
+    given = with_web_asks(given, permission_mode)
+    for event, entries in permission_hooks(c, permission_mode == "auto").items():
+        # the permission hook alone answers a request, since ask applies the sandbox rule itself; before a call
         # both hooks run
         hooks[event] = [*hooks.get(event, []), *entries] if event == PRE else entries
     if calls:
@@ -558,26 +686,50 @@ async def start(c: str, key: str, *, role: str, title: str, agent_args: list[str
     argv = command(agent_args, sid, effort, settings, cwd, append_shared, model, resume=bool(resume),
                    permission_mode=permission_mode, disallowed=disallowed, add_dirs=[cwd] if work is not None else [])
     rules = kept_rules(c, chat) if resume else []  # module note, don't ask again
-    argv = with_rules(argv, rules, cwd)
+    argv = with_rules(argv, rules)
     env = environ(key, extra_env)
-    proc = await _exec(argv, folder, env)
+    if background:
+        _launches[(c, key)] = {"role": role, "title": title, "agent_args": agent_args, "effort": effort,
+                               "settings": settings, "agent_type": agent_type, "on_end": on_end, "append_shared": append_shared,
+                               "parent": parent, "model": model, "work": work, "calls": calls, "agent": agent,
+                               "disallowed": disallowed, "patient": patient, "unasked": unasked, "on_pid": on_pid,
+                               "background": True, **fields}
+        old = bg_session.entry(c, key)
+        if old is not None and bg_session.alive(old) and old.sid != (resume or ""):
+            await asyncio.to_thread(bg_session.replace, c, key)  # a new session of the key replaces the old one
+        try:
+            proc = await bg_session.start(c, key, argv, folder, env, prompt, resume, chat or "", role)
+        finally:
+            if old is not None and old.replacing and bg_session.entry(c, key) is old:
+                old.replacing = False  # no new session took its place
+        sid = proc.session_id
+    else:
+        proc = await _exec(argv, folder, env)
     # `server`: this server's pid, the process's parent while this server follows it (_followed_elsewhere); and the
     # workspace's folder, which a copy of the workspace does not share (module note, restart)
     extra: dict[str, Any] = {"server": os.getpid(), "workspace_dir": str(config.workspace_dir(c).resolve()),
                              **({"model": model} if model else {})}
-    if mode:
-        extra.update(permission_mode=mode, mode_switch=None)  # what the orientation's card switcher shows
+    if background:
+        extra.update(background=True, bg=proc.short)
+    # what the card's switcher shows, and the row of modes.AGENTS a pick it cannot make live saves to (ModeSwitch)
+    extra.update(permission_mode=mode, mode_switch=None, mode_agent=agent)
     if resume and chat and agents.meta_or_none(c, chat) is not None:
         extra["restarted"] = {"run": run_k, "ts": _now()} if restarted else None
         meta = _reopen(c, chat, parent, run_k, pid=proc.pid, effort=effort, leads=leads or [], call=call,
-                       announce=not restarted, **extra, **fields)
+                       announce=announce and not restarted, **({"session": sid} if background else {}), **extra, **fields)
     else:
         meta = agents.new_agent(c, role, title, parent=parent, by=agents.TERMINAL, announce=announce, call=call,
                                 session=sid, pid=proc.pid, agent_type=agent_type, effort=effort, **extra, **fields)
     run = Run(c, key, str(meta["id"]), sid, cwd, role, proc=proc, pid=proc.pid, prompt=prompt, on_end=on_end, k=run_k,
-              argv=argv, env=env, folder=folder, spawned=time.monotonic(), on_pid=on_pid)
+              argv=argv, env=env, folder=folder, spawned=time.monotonic(), on_pid=on_pid, bg=background)
+    if background:
+        proc.busy = lambda: bool(run.background)
+        e = bg_session.entry(c, key)
+        if e is not None and e.chat != run.chat:
+            e.chat = run.chat
+            bg_session._save(c)
     run.calls = (run.chat if calls is True else str(calls)) if calls else None
-    run.sandbox_rule, run.mode, run.mode_owner, run.patient, run.on_mode = rule, mode, mode_owner, patient, on_mode
+    run.sandbox_rule, run.mode, run.patient = rule, mode, patient
     run.rules = rules
     run.lv = session.Live(c, sid, str(cwd), None, proc.pid)
     run.main = session.Sub(c, run.chat, None, None, role=role)
@@ -728,8 +880,9 @@ async def _watch(run: Run) -> None:
     """One process of the session, from its start to its exit: stdin fed, stdout and stderr read, and transcripts copied into
     the chats until the last pass after it exited. A switch into or out of Auto pauses it when quiet. A permission request
     still waiting is answered as gone."""
-    readers = [asyncio.ensure_future(_feed(run)), asyncio.ensure_future(_read_stdout(run)),
-               asyncio.ensure_future(_read_stderr(run))]
+    bg = isinstance(run.proc, bg_session.BgProc)
+    readers = [] if bg else [asyncio.ensure_future(_feed(run)), asyncio.ensure_future(_read_stdout(run)),
+                             asyncio.ensure_future(_read_stderr(run))]
     try:
         while run.proc is not None and run.proc.returncode is None:
             try:
@@ -750,6 +903,9 @@ async def _watch(run: Run) -> None:
                 await asyncio.wait_for(asyncio.shield(run.proc.wait()), POLL_S)
         with contextlib.suppress(asyncio.TimeoutError):
             await asyncio.wait_for(asyncio.gather(*readers, return_exceptions=True), 5.0)
+        if bg and isinstance(run.proc, bg_session.BgProc):
+            run.result = run.proc.result or run.result
+            run.result_error, run.api_status = run.proc.result_error, run.proc.api_status
         try:
             follow_once(run)
         except Exception:  # noqa: BLE001
@@ -931,16 +1087,13 @@ async def _resume_auto(run: Run) -> bool:
     run.auto_off = ""
     stopped = _stop_steps(run)
     if run.auto_resumes >= AUTO_RESUMES:
-        if run.mode is None or run.mode_owner:
-            run.result, run.result_error = cause, True
-            return False
         if not await _hold(run):
             return False
         run.auto_resumes = 0
     else:
         run.auto_resumes += 1
     log.info("%s: session %s (%s) ended by auto mode (%s); resumed in %s (%d in a row)", run.c, run.key, run.sid,
-             failure_line(cause)[:200], run.mode or "the analyst's mode", run.auto_resumes)
+             failure_line(cause)[:200], run.mode, run.auto_resumes)
     text = stopped_text(stopped)
     try:
         await _respawn(run, RESUMED_PROMPT, stopped=f"{text} " if text else "")
@@ -953,17 +1106,20 @@ async def _resume_auto(run: Run) -> bool:
 
 async def _hold(run: Run) -> bool:
     """Wait, with no process, for the analyst after auto mode ended the session AUTO_RESUMES times in a row: the alert
-    on its chat says why, a switch of its mode on the card (set_mode) or the alert's retry ends the wait (True), and
-    Stop ends the run (False)."""
+    on its chat says why and when it retries Auto; a switch of its mode on the card (set_mode), the alert's retry or
+    AUTO_HOLD_S passing ends the wait (True), and Stop ends the run (False)."""
     run.held = True
     _set_pid(run, None)
     times = f"{AUTO_RESUMES + 1} times in a row"
+    until = datetime.now(timezone.utc) + timedelta(seconds=AUTO_HOLD_S)
     with contextlib.suppress(Exception):
         agents.update_agent(run.c, run.chat, permissions=[], alert={
-            "kind": "retry", "text": AUTO_OFF_ALERT.format(times=times), "since": _now(), "cause": AUTO_OFF_KIND})
+            "kind": "retry", "text": AUTO_OFF_ALERT.format(times=times), "reason": AUTO_OFF_REASON,
+            "until": until.isoformat(timespec="seconds"), "since": _now(), "cause": AUTO_OFF_KIND})
     log.info("%s: session %s (%s) waits for the analyst after auto mode ended it %s", run.c, run.key, run.sid, times)
     run.wake.clear()
-    await run.wake.wait()
+    with contextlib.suppress(asyncio.TimeoutError):
+        await asyncio.wait_for(run.wake.wait(), AUTO_HOLD_S)
     run.held = False
     with contextlib.suppress(Exception):
         agents.update_agent(run.c, run.chat, alert=None)
@@ -985,7 +1141,7 @@ async def _fall_back(run: Run) -> bool:
     run the session again, once, on FALLBACK_MODEL with `--resume` and `## session-model-fallback`, and say so in its thread
     and main. True when a new process runs."""
     refused = run.refused
-    if not refused or run.stopping or run.fell_back or not FALLBACK_MODEL or refused.startswith(FALLBACK_MODEL):
+    if not refused or run.stopping or run.fell_back or not FALLBACK_MODEL or refused.startswith(FALLBACK_MODEL) or run.bg:
         return False
     run.refused, run.fell_back = "", True
     run.before_fallback = "" if run.result_error else (run.result or "").strip()
@@ -1031,7 +1187,15 @@ async def _respawn(run: Run, hint: str = RETRY_PROMPT, **values: Any) -> None:
     if "--resume" in argv:
         prompt = run.nudge = tools.hint(hint, **values)
     assert run.folder is not None
-    proc = await _exec(argv, run.folder, run.env)
+    if run.bg:
+        proc = await bg_session.start(run.c, run.key, argv, run.folder, run.env, prompt, run.sid, run.chat, run.role)
+        proc.busy = lambda: bool(run.background)
+        if proc.session_id != run.sid:  # a copy under a new id
+            run.sid = proc.session_id
+            with contextlib.suppress(Exception):
+                agents.update_agent(run.c, run.chat, session=run.sid, bg=proc.short)
+    else:
+        proc = await _exec(argv, run.folder, run.env)
     run.argv, run.proc, run.prompt = argv, proc, prompt
     run.result, run.result_error, run.api_status, run.stderr = None, False, None, ""
     run.auto_off = run.refused = ""  # what ended the last process is its own
@@ -1183,6 +1347,21 @@ def _tail_main(run: Run) -> None:
             session.translate_sub(run.lv, sub, line)
         except session.Unreadable as e:
             log.warning("%s: a transcript line of session %s was skipped (%s)", run.c, run.key, e)
+    if run.bg:
+        _answered_in_terminal(run, None, session._results(sub, lines))
+
+
+def _answered_in_terminal(run: Run, agent_id: str | None, done: "list[tuple[tuple[str, str], float]]") -> None:
+    """Calls of a background session, or of its agent `agent_id`, got their results: a permission request that still
+    waits on one of them was answered in the session's own terminal, so its card's wait ends (module note, background
+    sessions). A call is matched to its request by channel.call_key, else to the one request of its tool open."""
+    for key, _at in done:
+        mine = [rid for rid, (who, tool) in run.asking.items() if who == agent_id and tool == key[0] and rid in run.waits]
+        hit = next((rid for rid in mine if run.ask_keys.get(rid) == key), mine[0] if len(mine) == 1 else None)
+        fut = run.waits.get(hit) if hit else None
+        if fut is not None and not fut.done():
+            log.info("%s: session %s: request %s was answered in its terminal", run.c, run.key, hit)
+            fut.set_result(ELSEWHERE)
 
 
 def _auto_off_of(run: Run, rec: dict) -> None:
@@ -1232,27 +1411,26 @@ def bookkeeping(rec: dict) -> bool:
 def _steps_of(run: Run, rec: dict) -> None:
     """What a line of the session's own transcript says about its steps: an Agent result ends a foreground step, a Workflow
     result names the run directory whose agents become steps, a task notification ends a background step. Launched
-    background agents and workflows are kept in run.background until a notification names them."""
+    background agents and workflows, and tool calls moved to the background, are kept in run.background until a
+    notification names them or TaskStop stops them. A notification comes as a prompt of its own while the session is
+    idle, and as a `queued_command` attachment when it arrives during a turn."""
     if rec.get("type") == "assistant":
         for b in session._content_list(rec):
             if isinstance(b, dict) and b.get("type") == "tool_use" and isinstance(b.get("id"), str):
                 run.main.names[b["id"]] = str(b.get("name") or "")  # type: ignore[union-attr]
+        return
+    if rec.get("type") == "attachment":
+        att = rec.get("attachment") if isinstance(rec.get("attachment"), dict) else {}
+        att_origin = att.get("origin") if isinstance(att.get("origin"), dict) else {}
+        if att.get("type") == "queued_command" and "task-notification" in (att_origin.get("kind"), att.get("commandMode")):
+            _task_notice(run, str(att.get("prompt") or ""))
         return
     if rec.get("type") != "user":
         return
     origin = rec.get("origin") if isinstance(rec.get("origin"), dict) else {}
     text = session._user_text(rec)
     if origin.get("kind") == "task-notification" and text:
-        run.background.difference_update(TASK_ID_RE.findall(text))
-        fields = dict(session.TASK_FIELD_RE.findall(text))
-        step = _step_by(run, tool_use_id=fields.get("tool-use-id"), agent_id=fields.get("task-id"))
-        done = str(fields.get("status") or "").strip() in session.TASK_DONE
-        if step is not None and step.done and done and step.agent_id in run.halted:
-            run.halted.discard(step.agent_id)  # an agent that stopped with a process was continued, and has finished
-            with contextlib.suppress(Exception):
-                agents.finish_agent(run.c, step.chat, "done")
-        elif step is not None:
-            _finish_step(run, step, "done" if done else "failed")
+        _task_notice(run, text)
         return
     for b in session._content_list(rec):
         if not isinstance(b, dict) or b.get("type") != "tool_result" or not isinstance(b.get("tool_use_id"), str):
@@ -1272,6 +1450,12 @@ def _steps_of(run: Run, rec: dict) -> None:
             launched = LAUNCHED_AGENT_RE.search(content)
         if launched and not b.get("is_error"):
             run.background.add(launched.group(1))
+        moved = MOVED_TASK_RE.search(content) if not launched else None
+        if moved and not b.get("is_error"):
+            run.background.add(moved.group(1))
+        stopped = STOPPED_TASK_RE.search(content) if name == STOP_TOOL and not b.get("is_error") else None
+        if stopped:
+            run.background.discard(stopped.group(1))
         if name in AGENT_TOOLS and not ASYNC_RESULT_RE.match(content):
             _scan_subagents(run)
             step = _step_by(run, tool_use_id=tid)
@@ -1294,9 +1478,25 @@ def _new_step(run: Run, agent_id: str, title: str, path: Path, **fields: Any) ->
     if run.calls:
         sub.calls = calls_store.Numbering(run.c, run.calls, agent_id, at=sub.chat)
     run.steps[agent_id] = sub
+    if run.bg:
+        sub.on_results = lambda done, a=agent_id: _answered_in_terminal(run, a, done)
     assert run.lv is not None
     run.lv.subs.append(sub)  # so a subagent this step starts finds its caller (session._child_finished)
     return sub
+
+
+def _task_notice(run: Run, text: str) -> None:
+    """A task notification: the tasks it names leave run.background, and the step it names ends."""
+    run.background.difference_update(TASK_ID_RE.findall(text))
+    fields = dict(session.TASK_FIELD_RE.findall(text))
+    step = _step_by(run, tool_use_id=fields.get("tool-use-id"), agent_id=fields.get("task-id"))
+    done = str(fields.get("status") or "").strip() in session.TASK_DONE
+    if step is not None and step.done and done and step.agent_id in run.halted:
+        run.halted.discard(step.agent_id)  # an agent that stopped with a process was continued, and has finished
+        with contextlib.suppress(Exception):
+            agents.finish_agent(run.c, step.chat, "done")
+    elif step is not None:
+        _finish_step(run, step, "done" if done else "failed")
 
 
 def _finish_step(run: Run, sub: session.Sub, status: str) -> None:
@@ -1405,6 +1605,11 @@ def _end(run: Run) -> None:
     _runs.pop((run.c, run.key), None)
     agents.finish_agent(run.c, run.chat, status, (summary or "")[: session.RESULT_LIMIT] or None)
     log.info("%s: session %s (%s) ended %s (exit %s)", run.c, run.key, run.sid, status, code)
+    if run.bg:
+        bg_session.run_ended(run.c, run.key, summary)
+        if code in (-1, -2) and not run.interrupted:
+            with contextlib.suppress(Exception):
+                agents.update_agent(run.c, run.chat, alert={**STOPPED_ALERT, "since": _now()})
     if run.on_end is not None:
         try:
             run.on_end(run, status, summary)
@@ -1425,8 +1630,8 @@ def _suspend(run: Run) -> None:
 
 
 def _signal(run: Run, sig: int) -> None:
-    if run.pid is None:
-        return
+    if run.pid is None or run.bg:
+        return  # a background session outlives the follower; Stop uses `claude stop`
     with contextlib.suppress(ProcessLookupError, PermissionError):
         os.killpg(run.pid, sig)
 
@@ -1462,6 +1667,9 @@ async def _halt(run: Run) -> None:
     note, mode switch) both end it this way."""
     if run.proc is None:
         return
+    if isinstance(run.proc, bg_session.BgProc):
+        await run.proc.stop()
+        return
     # read before any signal: a process whose parent has died is re-parented and no longer found under the session
     tree = await asyncio.to_thread(procs.descendants, run.pid) if run.pid is not None else []
     for sig in (signal.SIGINT, signal.SIGTERM, signal.SIGKILL):
@@ -1494,6 +1702,63 @@ async def stop_chat(c: str, chat: str) -> bool:
     await asyncio.to_thread(_kill_left, meta)
     _close_left(c, meta, "stopped", "")
     return True
+
+
+async def resume_chat(c: str, chat: str) -> Run:
+    """The Resume of a background session's chat whose process stopped: its session starts again under its id with
+    its conversation, as the chat's next run. RuntimeError when the chat is no such chat or runs."""
+    from . import orient_session, write_session  # noqa: PLC0415 — both import this module
+
+    meta = agents.meta_or_none(c, chat)
+    if meta is None or not meta.get("background"):
+        raise RuntimeError("this chat is no background session of thimble's")
+    if by_chat(c, chat) is not None:
+        raise RuntimeError("it runs")
+    agents.update_agent(c, chat, alert=None)
+    role, k = str(meta.get("role") or ""), int(meta.get("run") or 0)
+    carry_on = tools.hint(RESUMED_PROMPT, stopped="")
+    if role == orientation.ROLE:
+        return await orient_session.resume(c, [{"text": tools.hint("bg-carry-on"), "by": agents.BROWSER}])
+    if role == write_session.ROLE:
+        doc = str(meta.get("doc") or "")
+        return await _start_writer(c, doc, meta, carry_on, k + 1)
+    key = next((e.key for e in bg_session.entries(c) if e.chat == chat), None)
+    kw = _launch_kw(c, key, meta) if key else None
+    if key is None or kw is None:
+        raise RuntimeError("thimble no longer knows how to start this session")
+    return await start(c, key, **kw, prompt=carry_on, resume=str(meta.get("session") or ""), chat=chat, run_k=k + 1)
+
+
+async def _start_writer(c: str, doc: str, meta: dict[str, Any], prompt: str, run_k: int) -> Run:
+    from . import write_session  # noqa: PLC0415
+
+    return await start(c, write_session.session_key(doc), prompt=prompt, resume=str(meta.get("session") or ""),
+                       chat=str(meta["id"]), run_k=run_k, **write_session._launch(c, doc))
+
+
+async def revive(c: str, e: "bg_session.Entry") -> Run | None:
+    """Follow again a background session that runs with no run of this server's (bg_session.on_wake): as its chat's run
+    that was left running, when a server restart cut its follower off (its caller's resumer, with no prompt, attaches to
+    the session), else as its chat's next run, a turn the session started on its own. None when its chat is gone."""
+    meta = agents.meta_or_none(c, e.chat)
+    if meta is None:
+        return None
+    k = int(meta.get("run") or 0)
+    if meta.get("status") == "running":
+        fn = _resumers.get(str(meta.get("role") or ""))
+        if fn is not None:
+            return await fn(c, meta, "")
+        kw = _launch_kw(c, e.key, meta)
+        if kw is None:
+            return None
+        return await start(c, e.key, **kw, prompt="", resume=e.sid, chat=e.chat, run_k=k, restarted=True)
+    kw = _launch_kw(c, e.key, meta)
+    if kw is None:
+        fn = _resumers.get(str(meta.get("role") or ""))
+        if fn is None:
+            return None
+        return await fn(c, {**meta, "run": k + 1}, "")
+    return await start(c, e.key, **kw, prompt="", resume=e.sid, chat=e.chat, run_k=k + 1, announce=False)
 
 
 # --------------------------------------------------------------------------- what a previous server left (restart)
@@ -1534,7 +1799,7 @@ def resumable(run: Run) -> bool:
 def _left_running(c: str, meta: dict[str, Any]) -> bool:
     """Whether an agent chat is a session thimble started (its meta keeps a `pid`, None while a retry waits) that says
     it runs, with no run of this server's behind it, and no other live server's either (_followed_elsewhere)."""
-    return (meta.get("status") == "running" and "pid" in meta and bool(meta.get("session"))
+    return (meta.get("status") == "running" and "pid" in meta and bool(meta.get("session")) and not meta.get("background")
             and by_chat(c, str(meta.get("id"))) is None and not _followed_elsewhere(meta))
 
 
@@ -1742,6 +2007,9 @@ async def _delivering() -> None:
         await asyncio.sleep(UNHEARD_POLL_S)
         for key in [k for k, notes in _unheard.items() if notes]:
             folder = Path(key).parent
+            if not folder.is_dir():  # the workspace was purged: its unheard ends go with it, never to a new one's main
+                _unheard.pop(key, None)
+                continue
             try:
                 if folder.parent.resolve() == config.WORKSPACES_DIR.resolve():
                     deliver_unheard(folder.name)
@@ -1760,17 +2028,104 @@ def _pending(c: str, chat: str) -> list[dict[str, Any]]:
 def _what(tool_name: str, inp: Any) -> str:
     """What a call would do, for the analyst: its own description when it gave one, else its command, file or pattern."""
     d = inp if isinstance(inp, dict) else {}
-    for key in ("description", "command", "file_path", "path", "pattern", "url", "prompt"):
+    for key in ("description", "command", "file_path", "path", "pattern", "url", "query", "prompt"):
         if isinstance(d.get(key), str) and d[key].strip():
             return " ".join(d[key].split())[:300]
     return tool_name
 
 
-def mode_of(run: Run) -> str | None:
-    """The mode a request of `run` is answered by (module note, permissions): its owner's while that runs (a critique's
-    orientation's), else its own; None for a session in the analyst's own mode."""
-    owner = current(run.c, run.mode_owner) if run.mode_owner else None
-    return (owner or run).mode
+def asker(c: str, key: str | None) -> Run | None:
+    """The session whose requests ask answers for `key`: a followed one that runs, else a hosted one."""
+    return current(c, key) or _hosted.get((c, key or ""))
+
+
+def _by_chat(c: str, chat: str) -> Run | None:
+    """The followed or hosted session whose chat is `chat`."""
+    return by_chat(c, chat) or next((r for (cc, _), r in list(_hosted.items()) if cc == c and r.chat == chat), None)
+
+
+def host(c: str, key: str, chat: str, *, agent: str, wait_s: float,
+         on_expired: Callable[[Run, dict[str, Any]], None] | None = None,
+         sandbox: "tuple[list[str], list[str]] | None" = None) -> Run:
+    """Answer the permission hook's requests of the session `key`, which this module does not follow, on the chat `chat`
+    (module note, hosted sessions): by the mode of the row `agent` (modes.AGENTS), each denied after `wait_s`
+    unanswered, when `on_expired` hears of it. With `sandbox` (sandbox_rule) a Bash call that runs in the sandbox is
+    allowed at once."""
+    run = Run(c, key, chat, "", config.corpus_dir(c), "dev", mode=modes.mode_for(c, agent), wait_s=wait_s,
+              on_expired=on_expired, sandbox_rule=sandbox)
+    _hosted[(c, key)] = run
+    return run
+
+
+def unhost(c: str, key: str) -> None:
+    """The hosted session `key`'s run is over: what still waits is denied, and its chat's card is cleared."""
+    run = _hosted.pop((c, key), None)
+    if run is None:
+        return
+    for fut in list(run.waits.values()):
+        if not fut.done():
+            fut.set_result(None)
+    with contextlib.suppress(Exception):
+        agents.update_agent(run.c, run.chat, permissions=[])
+
+
+def asking(c: str, key: str | None) -> bool:
+    """Whether a permission request of the session `key` waits for the analyst."""
+    run = asker(c, key)
+    return run is not None and any(not f.done() for f in run.waits.values())
+
+
+def web_rule(tool_name: str, inp: Any) -> str | None:
+    """The web rule a call falls under, as Claude Code writes it: `WebFetch(domain:<host>)` for a fetch, `WebSearch` for a
+    search; None for any other call, and for a fetch whose address is not a plain http(s) host with an optional port
+    (a user part, a backslash or a percent escape make Claude Code read another host than Python), which is then asked
+    on its own."""
+    if tool_name == "WebSearch":
+        return "WebSearch"
+    url = inp.get("url") if tool_name == "WebFetch" and isinstance(inp, dict) else None
+    try:
+        parts = urlsplit(url) if isinstance(url, str) and "\\" not in url else None
+    except ValueError:
+        parts = None
+    if parts is None or parts.scheme not in ("http", "https") or not re.fullmatch(r"[A-Za-z0-9_.-]+(:\d+)?", parts.netloc):
+        return None
+    return f"WebFetch(domain:{parts.hostname})"
+
+
+def web_offer(rule: str) -> list[dict[str, Any]]:
+    """The card's "don't ask again" for a web rule, kept for the workspace (module note, the web)."""
+    tool, _, content = rule.partition("(")
+    kept = {"toolName": tool, **({"ruleContent": content[:-1]} if content else {})}
+    return [{"type": "addRules", "rules": [kept], "behavior": "allow", "destination": WORKSPACE}]
+
+
+def web_rules(c: str) -> list[str]:
+    """The web rules the analyst kept for workspace `c`."""
+    try:
+        data = json.loads((config.workspace_dir(c) / WEB_RULES_FILE).read_text("utf-8"))
+    except (OSError, ValueError):
+        return []
+    rules = data.get("allow") if isinstance(data, dict) else None
+    return [r for r in rules if isinstance(r, str)] if isinstance(rules, list) else []
+
+
+def keep_web_rule(c: str, rule: str) -> None:
+    """Keep `rule` for workspace `c`, so no session of it asks for it again."""
+    rules = web_rules(c)
+    if rule not in rules:
+        atomic_write_text(config.workspace_dir(c) / WEB_RULES_FILE, json.dumps({"allow": [*rules, rule]}, indent=1) + "\n")
+
+
+def wait_words(seconds: float) -> str:
+    """A wait in words: `a minute`, `10 minutes`, or `90 seconds` for one that is no whole number of minutes."""
+    if seconds < 60 or seconds % 60:
+        return f"{seconds:g} seconds"
+    return "a minute" if seconds == 60 else f"{seconds / 60:g} minutes"
+
+
+def timed_out_line(seconds: float) -> str:
+    """TIMED_OUT_LINE for a wait of `seconds`."""
+    return TIMED_OUT_LINE.format(wait=wait_words(seconds))
 
 
 async def ask(c: str, key: str | None, tool_name: str, inp: Any, agent_id: str | None = None,
@@ -1778,60 +2133,201 @@ async def ask(c: str, key: str | None, tool_name: str, inp: Any, agent_id: str |
               tool_use_id: str | None = None, suggestions: Any = None) -> dict[str, Any]:
     """One permission request of the session `key` or of its subagent or workflow agent `agent_id`, or with `event` DENIED a
     call auto mode refused for `reason`; the answer as Claude Code reads it. In Bypass it is allowed at once, as is a
-    check's Bash call the sandbox rule allows; during a switch pause it is denied at once; otherwise it waits on the chat
-    until the analyst answers (or PERMISSION_WAIT_S for a session in the analyst's own mode). `suggestions` become the
-    card's "don't ask again" choice."""
-    run = current(c, key)
+    Bash call the sandbox rule allows and a web call the workspace's kept rules allow; during a switch pause it is denied
+    at once; a call auto mode gave no verdict on goes back to it first (_recheck); a web call joins a waiting request for
+    the same site or for search; otherwise it waits on the chat until the analyst answers (or the session's `wait_s`,
+    unless it is patient, and CLASSIFIER_ASK_S for a call auto mode never judged). `suggestions` become the card's "don't
+    ask again" choice, and a web call's is the site's rule, or web search's, for the workspace."""
+    run = asker(c, key)
     if run is None:
         return {"behavior": "deny", "message": GONE_LINE}
     granted = {"behavior": "allow", "updatedInput": inp if isinstance(inp, dict) else {}}
     if run.sandbox_rule is not None and sandbox_allow.allows(tool_name, inp, *run.sandbox_rule):
         return granted
-    if mode_of(run) == BYPASS:
+    web = web_rule(tool_name, inp)
+
+    def at_once() -> dict[str, Any] | None:
+        """granted in Bypass or for a web call the workspace's kept rules allow, else None."""
+        kept = web is not None and web in web_rules(c)
+        if not (kept or run.mode == BYPASS):
+            return None
         if event == DENIED:
             _remember(run, agent_id, tool_name, inp, True, tool_use_id)
         agents.log_permission(c, "answered", chat=run.chat, session=key, tool=tool_name, what=_what(tool_name, inp),
-                              agent_id=agent_id, answer="allow: Bypass")
+                              agent_id=agent_id, answer="allow: kept for the workspace" if kept else "allow: Bypass")
         return granted
+
+    if (now := at_once()) is not None:
+        return now
     if run.releasing:
         agents.log_permission(c, "answered", chat=run.chat, session=key, tool=tool_name, what=_what(tool_name, inp),
                               agent_id=agent_id, answer="deny: answered for a mode switch")
         return {"behavior": "deny", "message": tools.hint(MODE_SWITCHING)}
+    unjudged = event == DENIED and bool(CLASSIFIER_DOWN.search(reason or ""))
+    if unjudged and (again := await _recheck(run, agent_id, tool_name, inp, reason, tool_use_id)) is not None:
+        return again
+    also, tried = _also_text(tool_name, inp), set()
+    while (also is not None and (first := run.groups.get(web) if web else None) is not None and first not in tried
+           and first in run.waits and not run.waits[first].done() and len(_also(run, first)) < WEB_ALSO_MAX):
+        tried.add(first)
+        if (joined := await _join(run, first, also, tool_name, inp, agent_id, event, tool_use_id, granted)) is not None:
+            return joined
+    # a joined call asked on its own: the switch to Bypass or the kept rule that allowed its request may cover it
+    if tried and (now := at_once()) is not None:
+        return now
     rid = uuid.uuid4().hex[:10]
-    preview = json.dumps(inp, ensure_ascii=False, default=str)[:PERMISSION_INPUT_CHARS] if inp is not None else ""
-    updates = offer(suggestions) if event == REQUEST else []
-    entry = {"id": rid, "tool": tool_name, "what": _what(tool_name, inp), "input": preview, "since": _now(),
-             **_command(tool_name, inp), **(_asker(run, agent_id, agent_type) if agent_id else {}),
+    whole = json.dumps(inp, ensure_ascii=False, default=str) if inp is not None else ""
+    command = _command(tool_name, inp)
+    cut = _cut(tool_name, inp, whole)
+    updates = [] if cut else web_offer(web) if web else offer(suggestions) if event == REQUEST else []
+    limit = CLASSIFIER_ASK_S if unjudged and run.patient else None if run.patient else run.wait_s or PERMISSION_WAIT_S
+    entry = {"id": rid, "tool": tool_name, "what": _what(tool_name, inp), "input": whole[:PERMISSION_INPUT_CHARS],
+             "since": _now(), **command, **({"cut": cut} if cut else {}),
+             **(_asker(run, agent_id, agent_type) if agent_id else {}),
              **({"refused": " ".join(reason.split())[:200] or "no reason given"} if event == DENIED else {}),
-             **({"always": offer_text(updates)} if updates else {})}
+             **({"rechecked": len(CLASSIFIER_WAITS_S)} if unjudged else {}),
+             **({"deny_after_s": limit} if unjudged and limit is not None else {}),
+             **_offered(updates), **({"wait_s": limit} if limit else {}),
+             "mode": run.mode}
     fut: asyncio.Future = asyncio.get_running_loop().create_future()
     run.waits[rid] = fut
     run.asking[rid] = (agent_id or None, tool_name)
+    if run.bg:
+        from . import channel  # noqa: PLC0415 — channel imports the views module, which this module does not need
+
+        run.ask_keys[rid] = channel.call_key(tool_name, inp)
+    if web:
+        run.groups[web] = rid
     if updates:
         run.offers[rid] = updates
     agents.update_agent(c, run.chat, permissions=[*_pending(c, run.chat), entry])
-    agents.log_permission(c, "asked", chat=run.chat, session=key, mode=mode_of(run), **entry)
+    agents.log_permission(c, "asked", chat=run.chat, session=key, **entry)
     chosen: list[dict[str, Any]] | None = None
     try:
-        allow = await asyncio.wait_for(fut, None if run.patient else PERMISSION_WAIT_S)
-        message = {None: GONE_LINE, SWITCHING: tools.hint(MODE_SWITCHING)}.get(allow, DENIED_LINE)
+        try:
+            allow = await asyncio.wait_for(asyncio.shield(fut), limit)
+        except asyncio.TimeoutError:
+            allow = TIMED_OUT
+            if not fut.done():
+                fut.set_result(TIMED_OUT)
+    finally:
+        if not fut.done():
+            fut.set_result(None)
+        run.waits.pop(rid, None)
+        run.asking.pop(rid, None)
+        run.ask_keys.pop(rid, None)
+        chosen = run.offers.pop(rid, None)
+        if web and run.groups.get(web) == rid:
+            run.groups.pop(web, None)
+        with contextlib.suppress(Exception):
+            _off_card(run, rid, fut.result() == TIMED_OUT)
+    message = _deny_message(run, allow, limit)
+    if allow == TIMED_OUT and run.on_expired is not None:
+        with contextlib.suppress(Exception):
+            run.on_expired(run, entry)
+    if allow == ALWAYS and chosen:
+        told = _add_rules(run, chosen)
+        agents.log_permission(c, "answered", id=rid, chat=run.chat,
+                              answer=f"allow, don't ask again: {offer_text(chosen)}")
+        return {**granted, "updatedPermissions": told} if told else granted
+    agents.log_permission(c, "answered", id=rid, chat=run.chat, answer=_answer_word(allow))
+    if event == DENIED and isinstance(allow, bool):
+        _remember(run, agent_id, tool_name, inp, allow, tool_use_id)
+    return granted if allow in (True, ALWAYS, COVERED) else {"behavior": "deny", "message": message}
+
+
+async def _recheck(run: Run, agent_id: str | None, tool_name: str, inp: Any, reason: str,
+                   tool_use_id: str | None) -> dict[str, Any] | None:
+    """A call auto mode refused because its classifier gave no verdict, sent back to auto mode: after the next of
+    CLASSIFIER_WAITS_S for this call, a `retry` with nothing remembered, so before_call leaves the call made again to auto
+    mode's classifier and the refused call shows as not run. None once this call's waits are spent, when the analyst is
+    asked. A switch of mode or the session's end during the wait answers it as it answers a request on the card."""
+    k = grant_key(agent_id, tool_name, inp)
+    now = time.monotonic()
+    for old in [x for x, (_, when) in run.rechecks.items() if now - when > GRANT_TTL_S]:
+        run.rechecks.pop(old, None)
+    n = run.rechecks.get(k, (0, now))[0]
+    if n >= len(CLASSIFIER_WAITS_S):
+        run.rechecks.pop(k, None)
+        return None
+    run.rechecks[k] = (n + 1, now)
+    what = _what(tool_name, inp)
+    agents.log_permission(run.c, "rechecked", chat=run.chat, session=run.key, tool=tool_name, what=what,
+                          agent_id=agent_id, refused=" ".join(reason.split())[:200], attempt=n + 1,
+                          wait_s=CLASSIFIER_WAITS_S[n])
+    rid = uuid.uuid4().hex[:10]
+    fut: asyncio.Future = asyncio.get_running_loop().create_future()
+    run.waits[rid] = fut
+    run.asking[rid] = (agent_id or None, tool_name)
+    try:
+        got = await asyncio.wait_for(fut, CLASSIFIER_WAITS_S[n])
     except asyncio.TimeoutError:
-        allow, message = False, TIMED_OUT_LINE
+        got = "again"
     finally:
         run.waits.pop(rid, None)
         run.asking.pop(rid, None)
-        chosen = run.offers.pop(rid, None)
-        with contextlib.suppress(Exception):
-            agents.update_agent(c, run.chat, permissions=[p for p in _pending(c, run.chat) if p.get("id") != rid])
-    if allow == ALWAYS and chosen:
-        _add_rules(run, chosen)
-        agents.log_permission(c, "answered", id=rid, chat=run.chat,
-                              answer=f"allow, don't ask again: {offer_text(chosen)}")
-        return {**granted, "updatedPermissions": chosen}
-    agents.log_permission(c, "answered", id=rid, chat=run.chat, answer=_answer_word(allow, message))
-    if event == DENIED and isinstance(allow, bool) and message != TIMED_OUT_LINE:
+    if got in ("again", ELSEWHERE):  # ELSEWHERE: another call of this tool got its result (_answered_in_terminal)
+        if tool_use_id:
+            session.not_run(tool_use_id)
+        return {"behavior": "allow"}
+    if got is True:  # a switch to Bypass allowed what waited
+        _remember(run, agent_id, tool_name, inp, True, tool_use_id)
+        return {"behavior": "allow", "updatedInput": inp if isinstance(inp, dict) else {}}
+    return {"behavior": "deny", "message": tools.hint(MODE_SWITCHING) if got == SWITCHING else GONE_LINE}
+
+
+def _also_text(tool_name: str, inp: Any) -> str | None:
+    """A web call's address, or its search, whole, as the card lists a call that joins a waiting request; None for one
+    past ALSO_CHARS."""
+    text = (inp if isinstance(inp, dict) else {}).get("url" if tool_name == "WebFetch" else "query")
+    return text if isinstance(text, str) and text.strip() and len(text) <= ALSO_CHARS else None
+
+
+def _also(run: Run, rid: str) -> list[str]:
+    """The later calls listed on the card of the waiting request `rid`."""
+    return next((p.get("also") or [] for p in _pending(run.c, run.chat) if p.get("id") == rid), [])
+
+
+async def _join(run: Run, first: str, what: str, tool_name: str, inp: Any, agent_id: str | None, event: str,
+                tool_use_id: str | None, granted: dict[str, Any]) -> dict[str, Any] | None:
+    """A web call whose site, or search, a waiting request `first` of the same session asks for already: `what` is
+    listed on that request's card (`also`) and the call gets its answer. None when it must be asked on its own: it could
+    not be listed, or the analyst allowed `first` before the card showed it."""
+    fut = run.waits[first]
+    at = len(_also(run, first))
+    try:
+        agents.update_agent(run.c, run.chat, permissions=[
+            {**p, "also": [*(p.get("also") or []), what]} if p.get("id") == first else p
+            for p in _pending(run.c, run.chat)])
+    except Exception:  # noqa: BLE001 — unlisted, it is asked on its own
+        return None
+    agents.log_permission(run.c, "asked", chat=run.chat, session=run.key, tool=tool_name, what=what, agent_id=agent_id,
+                          joined=first)
+    allow = await asyncio.shield(fut)
+    allow = True if allow in (ALWAYS, COVERED) else allow
+    if allow is True and at >= run.shown.get(first, 0):
+        return None
+    if event == DENIED and isinstance(allow, bool):
         _remember(run, agent_id, tool_name, inp, allow, tool_use_id)
-    return granted if allow in (True, ALWAYS, COVERED) else {"behavior": "deny", "message": message}
+    return granted if allow is True else {"behavior": "deny", "message": _deny_message(run, allow)}
+
+
+def _deny_message(run: Run, allow: Any, wait_s: float | None = None) -> str:
+    """What Claude Code tells the model of a request that ended with `allow` (when it is a deny), one that waited
+    `wait_s` (else the session's wait) when nobody answered it in time."""
+    if allow == TIMED_OUT:
+        return timed_out_line(wait_s or run.wait_s or PERMISSION_WAIT_S)
+    return {None: GONE_LINE, SWITCHING: tools.hint(MODE_SWITCHING), ELSEWHERE: ELSEWHERE_LINE}.get(allow, DENIED_LINE)
+
+
+def _off_card(run: Run, rid: str, expired: bool) -> None:
+    """The request `rid` leaves the chat's card, or stays on it marked `expired` when nobody answered it in time."""
+    pending = _pending(run.c, run.chat)
+    if expired:
+        pending = [{**p, "expired": _now()} if p.get("id") == rid else p for p in pending]
+    else:
+        pending = [p for p in pending if p.get("id") != rid]
+    agents.update_agent(run.c, run.chat, permissions=pending)
 
 
 def _command(tool_name: str, inp: Any) -> dict[str, str]:
@@ -1839,6 +2335,13 @@ def _command(tool_name: str, inp: Any) -> dict[str, str]:
     input's JSON; {} for any other call."""
     cmd = inp.get("command") if tool_name == "Bash" and isinstance(inp, dict) else None
     return {"command": cmd[:PERMISSION_INPUT_CHARS]} if isinstance(cmd, str) and cmd.strip() else {}
+
+
+def _cut(tool_name: str, inp: Any, whole: str) -> int:
+    """The length of what the card shows of a request when PERMISSION_INPUT_CHARS cuts it (a Bash request's command,
+    else the input's JSON `whole`), 0 when it shows all of it."""
+    shown = (inp.get("command") if _command(tool_name, inp) else None) or whole
+    return len(shown) if len(shown) > PERMISSION_INPUT_CHARS else 0
 
 
 def _asker(run: Run, agent_id: str, agent_type: str | None) -> dict[str, Any]:
@@ -1887,15 +2390,34 @@ def rule_text(rule: dict[str, Any]) -> str:
 def offer_text(updates: list[dict[str, Any]]) -> str:
     """What a "don't ask again" adds, in Claude Code's terms: its rules, `all edits` for acceptEdits (Claude Code's
     "allow all edits during this session") and `files in <folder>/` for a working directory, named by its last part as
-    Claude Code's dialog names it."""
-    parts = [rule_text(r) for u in updates if u["type"] == "addRules" for r in u["rules"]]
+    Claude Code's dialog names it; a web rule kept for the workspace by its site, or as web search."""
+    parts = [web_text(r) if u.get("destination") == WORKSPACE else rule_text(r)
+             for u in updates if u["type"] == "addRules" for r in u["rules"]]
     parts += [f"files in {Path(d).name or d}/"
               for u in updates if u["type"] == "addDirectories" for d in u["directories"]]
     parts += ["all edits" for u in updates if u["type"] == "setMode"]
     return ", ".join(parts)
 
 
-def with_rules(argv: list[str], rules: list[dict[str, Any]], cwd: Path) -> list[str]:
+def _offered(updates: list[dict[str, Any]]) -> dict[str, str]:
+    """The card's words for a request's "don't ask again": `keep`, the site or `web search`, for a web rule kept for the
+    workspace, else `always`, what it adds for the session (offer_text); {} for none."""
+    if not updates:
+        return {}
+    if all(u.get("destination") == WORKSPACE for u in updates):
+        rule = updates[0]["rules"][0]
+        return {"keep": str(rule.get("ruleContent") or "").removeprefix("domain:") or "web search"}
+    return {"always": offer_text(updates)}
+
+
+def web_text(rule: dict[str, Any]) -> str:
+    """A web rule kept for the workspace, in the card's words: `<site> in this workspace`, `web search in this
+    workspace`."""
+    site = str(rule.get("ruleContent") or "").removeprefix("domain:")
+    return f"{site or 'web search'} in this workspace"
+
+
+def with_rules(argv: list[str], rules: list[dict[str, Any]]) -> list[str]:
     """`argv` with the "don't ask again" updates `rules` in it: each allow rule in --settings' `permissions.allow`, each folder in
     `permissions.additionalDirectories`, and acceptEdits as its --permission-mode where that would be manual mode."""
     out = list(argv)
@@ -1910,26 +2432,42 @@ def with_rules(argv: list[str], rules: list[dict[str, Any]], cwd: Path) -> list[
         if dirs:
             perms["additionalDirectories"] = list(dict.fromkeys([*(perms.get("additionalDirectories") or []), *dirs]))
         out[at] = json.dumps({**given, "permissions": perms})
-    if any(u["type"] == "setMode" for u in rules):
-        if "--permission-mode" in out:
-            at = out.index("--permission-mode") + 1
-            out[at] = EDIT_MODE if out[at] == "default" else out[at]
-        elif cc_settings.permission_mode(cwd) == "default":
-            out.extend(["--permission-mode", EDIT_MODE])
+    if any(u["type"] == "setMode" for u in rules) and "--permission-mode" in out:
+        at = out.index("--permission-mode") + 1
+        out[at] = EDIT_MODE if out[at] == "default" else out[at]
     return out
 
 
-def _add_rules(run: Run, updates: list[dict[str, Any]]) -> None:
-    """The analyst chose a request's "don't ask again": its updates are the session's from now on (chat meta and later argv),
-    and each other waiting request with the same suggested updates is allowed."""
-    run.rules.extend(u for u in updates if u not in run.rules)
-    run.argv[:] = with_rules(run.argv, run.rules, run.cwd)
-    with contextlib.suppress(Exception):
-        agents.update_agent(run.c, run.chat, **{RULES_KEY: [{"text": offer_text([u]), "update": u} for u in run.rules]})
-    for rid, offered in list(run.offers.items()):
-        fut = run.waits.get(rid)
-        if offered == updates and fut is not None and not fut.done():
-            fut.set_result(COVERED)
+def dismiss(c: str, chat: str, request_id: str) -> bool:
+    """Take a request that was denied unanswered off the card of the chat `chat`; False when there is none by that id."""
+    pending = _pending(c, chat)
+    if not any(p.get("id") == request_id and p.get("expired") for p in pending):
+        return False
+    agents.update_agent(c, chat, permissions=[p for p in pending if p.get("id") != request_id])
+    return True
+
+
+def _add_rules(run: Run, updates: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """The analyst chose a request's "don't ask again": a web rule is kept for the workspace (keep_web_rule), and each
+    other update is the session's from now on (chat meta and later argv); each other waiting request with the same
+    offered updates is allowed, in every session of the workspace for a web rule. Returns the session's updates, which
+    Claude Code is told."""
+    kept = [u for u in updates if u.get("destination") == WORKSPACE]
+    told = [u for u in updates if u.get("destination") != WORKSPACE]
+    for rule in (r for u in kept for r in u["rules"]):
+        keep_web_rule(run.c, rule_text(rule))
+    if told:
+        run.rules.extend(u for u in told if u not in run.rules)
+        run.argv[:] = with_rules(run.argv, run.rules)
+        with contextlib.suppress(Exception):
+            agents.update_agent(run.c, run.chat, **{RULES_KEY: [{"text": offer_text([u]), "update": u} for u in run.rules]})
+    others = [r for (cc, _), r in [*_runs.items(), *_hosted.items()] if cc == run.c and r is not run] if kept else []
+    for r in [run, *others]:
+        for rid, offered in list(r.offers.items()):
+            fut = r.waits.get(rid)
+            if offered == updates and fut is not None and not fut.done():
+                fut.set_result(COVERED)
+    return told
 
 
 def kept_rules(c: str, chat: str | None) -> list[dict[str, Any]]:
@@ -1942,16 +2480,18 @@ def kept_rules(c: str, chat: str | None) -> list[dict[str, Any]]:
     return [r["update"] for r in kept if isinstance(r, dict) and isinstance(r.get("update"), dict)]
 
 
-def _answer_word(allow: Any, message: str) -> str:
+def _answer_word(allow: Any) -> str:
     """How a request ended, for the permission log (agents.log_permission)."""
     if allow is True:
         return "allow"
     if allow == COVERED:
         return "allow: covered by a rule added for this session"
-    if message == TIMED_OUT_LINE:
+    if allow == TIMED_OUT:
         return "deny: nobody answered in time"
     if allow is None:
         return "none: the session ended"
+    if allow == ELSEWHERE:
+        return "none: answered in the session's own terminal"
     if allow == SWITCHING:
         return "deny: answered for a mode switch"
     return "deny"
@@ -2000,7 +2540,7 @@ def before_call(c: str, key: str | None, tool_name: str, inp: Any, agent_id: str
     """The permission hook before a call of a session in auto mode: `allow` when the analyst allowed this call (or a reworded
     call of the same tool by the same agent) after auto mode refused it, `deny` when they denied it, each once; {} for any
     other call."""
-    run = current(c, key)
+    run = asker(c, key)
     if run is None:
         return {}
     exact = grant_key(agent_id, tool_name, inp)
@@ -2016,14 +2556,16 @@ def before_call(c: str, key: str | None, tool_name: str, inp: Any, agent_id: str
     return allowed if _use_pass(run, agent_id, tool_name) else {}
 
 
-def answer(c: str, chat: str, request_id: str, allow: bool, always: bool = False) -> bool:
+def answer(c: str, chat: str, request_id: str, allow: bool, always: bool = False, shown: int = 0) -> bool:
     """The analyst's answer to a pending request of the session whose chat is `chat`, `always` for the card's "don't
-    ask again", which allows it with the updates offered for it (module note, don't ask again); False when there is
-    none by that id."""
-    run = by_chat(c, chat)
+    ask again", which allows it with the updates offered for it (module note, don't ask again), covering the first
+    `shown` calls that joined it (module note, the web); for a request denied unanswered, its dismissal from the card.
+    False when there is none by that id."""
+    run = _by_chat(c, chat)
     fut = run.waits.get(request_id) if run is not None else None
     if run is None or fut is None or fut.done():
-        return False
+        return dismiss(c, chat, request_id)
+    run.shown[request_id] = shown
     fut.set_result(ALWAYS if allow and always and run.offers.get(request_id) else bool(allow))
     return True
 
@@ -2032,39 +2574,34 @@ def answer(c: str, chat: str, request_id: str, allow: bool, always: bool = False
 
 
 def _grant_waiting(run: Run) -> None:
-    """Allow every request that waits on `run` or on a session that follows its mode (a switch to Bypass)."""
-    for r in [run, *(x for (cc, _), x in list(_runs.items()) if cc == run.c and x.mode_owner == run.key)]:
-        for fut in list(r.waits.values()):
-            if not fut.done():
-                fut.set_result(True)
+    """Allow every request that waits on `run` (a switch to Bypass)."""
+    for fut in list(run.waits.values()):
+        if not fut.done():
+            fut.set_result(True)
 
 
 def _mode_is(run: Run, mode: str) -> None:
-    """`run` runs in `mode` now: its chat's meta says so, no switch waits, and the caller's `on_mode` hears it."""
+    """`run` runs in `mode` now: its chat's meta says so, no switch waits, and its later runs keep it (`_switched`)."""
     run.mode, run.switching, run.releasing = mode, None, False
+    _switched[(run.c, run.chat)] = mode
     with contextlib.suppress(Exception):
         agents.update_agent(run.c, run.chat, permission_mode=mode, mode_switch=None)
-    if run.on_mode is not None:
-        try:
-            run.on_mode(run)
-        except Exception:  # noqa: BLE001 — a caller's record never stops the switch
-            log.exception("%s: session %s: the caller did not record its mode", run.c, run.key)
 
 
 def _set_flag(run: Run, flag: str) -> None:
     """The process's --permission-mode in `run.argv`, in place, for the next time it starts (acceptEdits for manual
-    mode once the analyst allowed all edits, with_rules), and the permission hook before each call in its --settings
-    while that is auto mode (permission_hooks)."""
+    mode once the analyst allowed all edits, with_rules), and in its --settings the web's ask rules for that mode
+    (web_asks) and the permission hook before each call while that is auto mode (permission_hooks)."""
     argv = run.argv
     if "--permission-mode" in argv:
         argv[argv.index("--permission-mode") + 1] = flag
     else:
         argv.extend(["--permission-mode", flag])
-    argv[:] = with_rules(argv, run.rules, run.cwd)
+    argv[:] = with_rules(argv, run.rules)
     if "--settings" not in argv:
         return
     at = argv.index("--settings") + 1
-    given = json.loads(argv[at])
+    given = with_web_asks(json.loads(argv[at]), argv[argv.index("--permission-mode") + 1])
     hooks = dict(given.get("hooks") or {})
     ours = permission_hooks(run.c, auto=True)[PRE]
     kept = [e for e in hooks.get(PRE) or [] if e not in ours] + (ours if flag == "auto" else [])
@@ -2078,19 +2615,20 @@ def _set_flag(run: Run, flag: str) -> None:
 def set_mode(c: str, chat: str, mode: str) -> dict[str, Any]:
     """Switch the running session whose chat is `chat` to `mode`: at once between Manual and Bypass (a switch to Bypass
     granting what waits) or while a retry waits, else once the follower has paused it. Returns {mode, switching}.
-    LookupError when no session runs for the chat, ValueError for a bad mode or a session with no mode of its own."""
+    LookupError when no session runs for the chat, ValueError for a mode that cannot be chosen (modes.refused),
+    RuntimeError for a background session's switch into or out of Auto (BG_AUTO_LINE)."""
     run = by_chat(c, chat)
     if run is None:
         raise LookupError("no session runs for this chat")
-    if mode not in MODES:
-        raise ValueError(f"no permission mode {mode!r}; one of {', '.join(MODES)}")
-    if run.mode is None or run.mode_owner:
-        raise ValueError("this session runs in the analyst's own permission mode")
-    flag = cc_settings.orient_permission_flag(mode)
+    if why := modes.refused(mode):
+        raise ValueError(why)
+    if run.bg and (mode == AUTO) != ((run.switching or run.mode) == AUTO):
+        raise RuntimeError(BG_AUTO_LINE)
+    flag = modes.flag(mode)
     if run.paused:
         run.switching = mode  # the process is ending for a switch; it starts again in this mode
         agents.update_agent(c, chat, mode_switch=mode)
-    elif flag == cc_settings.orient_permission_flag(run.mode) or run.pid is None:
+    elif flag == modes.flag(run.mode) or run.pid is None:
         _set_flag(run, flag)
         _mode_is(run, mode)
         if mode == BYPASS:
@@ -2233,8 +2771,8 @@ async def _switch_mode(run: Run) -> bool:
     if not run.paused:
         return False
     run.paused = False
-    mode = run.switching or run.mode or ""
-    if run.stopping or not mode:
+    mode = run.switching or run.mode
+    if run.stopping:
         return False
     stopped = run.paused_steps or _running_steps(run)
     run.paused_steps = []
@@ -2247,7 +2785,7 @@ async def _switch_mode(run: Run) -> bool:
         if sub.agent_id:
             run.halted.add(sub.agent_id)
     run.background.clear()  # the resumed session names again what it continues or starts again
-    _set_flag(run, cc_settings.orient_permission_flag(mode))
+    _set_flag(run, modes.flag(mode))
     _mode_is(run, mode)
     text = stopped_text(metas)
     try:
@@ -2288,6 +2826,17 @@ class PermissionAnswer(BaseModel):
     id: str
     allow: bool
     always: bool = False  # the card's "don't ask again"
+    shown: int = 0  # how many of the calls that joined it the card listed
+
+
+@router.post("/ws/{c}/chats/{chat}/resume")
+async def resume_route(c: str, chat: str) -> dict[str, Any]:
+    """A stopped background session's Resume (resume_chat); 409 when it cannot resume."""
+    try:
+        run = await resume_chat(c, chat)
+    except Exception as e:  # noqa: BLE001 — the analyst reads why
+        raise HTTPException(409, str(e) or type(e).__name__) from e
+    return {"resumed": chat, "run": run.k}
 
 
 @router.post("/ws/{c}/chats/{chat}/retry")
@@ -2299,8 +2848,14 @@ async def retry_route(c: str, chat: str) -> dict[str, Any]:
 
 
 @router.post("/ws/{c}/chats/{chat}/permission")
-async def permission_route(c: str, chat: str, body: PermissionAnswer) -> dict[str, Any]:
-    if not answer(c, chat, body.id, body.allow, body.always):
+async def permission_route(c: str, chat: str, body: PermissionAnswer, request: Request) -> dict[str, Any]:
+    """The analyst's answer on a session's card: answer. 403 for a request that is not the analyst's browser's
+    (hook_auth.analyst), 404 when no such request waits."""
+    from . import hook_auth  # noqa: PLC0415
+
+    if not hook_auth.analyst(request):
+        raise HTTPException(403, hook_auth.ANALYST_ONLY)
+    if not answer(c, chat, body.id, body.allow, body.always, body.shown):
         raise HTTPException(404, "no such permission request is waiting")
     return {"answered": body.id, "allow": body.allow}
 
@@ -2334,15 +2889,22 @@ class ModeBody(BaseModel):
 
 
 @router.post("/ws/{c}/chats/{chat}/permission-mode")
-async def mode_route(c: str, chat: str, body: ModeBody) -> dict[str, Any]:
-    """The orientation card's mode switcher: set_mode. 404 when no session runs for the chat, 409 when it has no mode
-    of its own, 400 for a mode that is not Manual, Auto or Bypass."""
+async def mode_route(c: str, chat: str, body: ModeBody, request: Request) -> dict[str, Any]:
+    """A session card's mode switcher: set_mode. 403 for a request that is not the analyst's browser's
+    (hook_auth.analyst), 404 when no session runs for the chat, 400 for a mode that cannot be chosen, 409 for a switch
+    the session cannot make."""
+    from . import hook_auth  # noqa: PLC0415
+
+    if not hook_auth.analyst(request):
+        raise HTTPException(403, hook_auth.ANALYST_ONLY)
     try:
         return set_mode(c, chat, body.mode)
     except LookupError as e:
         raise HTTPException(404, str(e)) from e
     except ValueError as e:
-        raise HTTPException(400 if body.mode not in MODES else 409, str(e)) from e
+        raise HTTPException(400, str(e)) from e
+    except RuntimeError as e:
+        raise HTTPException(409, str(e)) from e
 
 
 async def shutdown() -> None:
@@ -2350,8 +2912,8 @@ async def shutdown() -> None:
     (_suspend), any other recorded as failed with `## session-server-stopped`. SIGTERM then SIGKILL, with short waits. Ends
     main does not hear now are kept (tell_main)."""
     for run in list(_runs.values()):
-        # one the analyst's Stop is ending ends stopped, as they asked
-        run.suspended = not run.stopping and resumable(run)
+        # one the analyst's Stop is ending ends stopped, as they asked; a background session is left to run
+        run.suspended = not run.stopping and (resumable(run) or run.bg)
         run.stopping = True
         if not run.suspended:
             run.interrupted = tools.hint(SERVER_STOPPED)
@@ -2391,8 +2953,12 @@ async def _recover_logged() -> None:
             log.info("sessions left running by the previous server, closed as failed: %s", ", ".join(closed))
         if resumed:
             log.info("sessions left running by the previous server, resumed: %s", ", ".join(resumed))
+        found = await bg_session.recover()
+        if found:
+            log.info("background sessions followed again: %s", ", ".join(found))
     except Exception:  # noqa: BLE001 — never fails the start
         log.exception("resuming or closing the sessions left running by the previous server failed")
 
 
 router.lifespan_context = _lifespan
+bg_session.on_wake(tools.CRITIQUE_SESSION, revive)

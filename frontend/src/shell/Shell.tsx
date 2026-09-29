@@ -1,9 +1,13 @@
 // The shell: the top bar (its tabs over the panes), the chat column on the left and the panes that show the surfaces
 // on the right. It sets --pane-x, the main area's left edge, so the tabs line up with it. A tab, chip or citation shows
 // its surface in the pane that holds it, else in the focused pane (panes.show). The layout and the chat column's width
-// and fold state are kept per workspace in browser storage; a new workspace opens on the Canvas, or on Files while the
-// canvas is empty. A folded chat column opens when something asks for a thread. When the workspace is replaced (the
-// stream's `reset`), the page reloads. With no Claude Code session attached the shell is inert under SessionGone.
+// and fold state are kept per workspace in browser storage (App clears it first when the workspace was replaced by a new
+// one of the same name, lib/workspace.ts syncInstance); a new workspace opens on Files. A folded chat column opens when
+// something asks for a thread. With the chat off (the workspace's `hide_chat` setting, in the settings popover) there is
+// no column at all: main's alert, permission card, orientation strip
+// and Start gate show in the dock at the bottom left (ChatPanel `dock`), a ⌘-click's box answers in place (CmdPointer
+// `inline`), and a request for a thread turns the chat on. When the workspace is replaced (the stream's `reset`), the
+// page reloads. With no Claude Code session attached the shell is inert under SessionGone.
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { Canvas } from '../canvas/Canvas'
 import { ChatPanel } from '../chat/ChatPanel'
@@ -15,8 +19,8 @@ import type { IconName } from '../components/Icon'
 import { FilesTab } from '../files/FilesTab'
 import { useViews } from '../files/ViewsBar'
 import { ViewSurface } from '../files/ViewSurface'
-import { api } from '../lib/api'
 import { bus, type Tab } from '../lib/bus'
+import { loadSettings, onSettingsChange, saveSetting } from '../lib/models'
 import { isReplay, useWorkspaceEvents } from '../lib/events'
 import { track } from '../lib/telemetry'
 import { notePress, pressedPane, renewPress, setShownSurfaces, setSurfaceDrag } from '../lib/surfaces'
@@ -67,20 +71,44 @@ interface Layout {
   panes: Panes
 }
 
-/** What a workspace keeps, read back: the stored layout, else one pane on the tab an older page kept. */
-function readLayout(key: string): { layout: Layout; first: boolean } {
+/** What a workspace keeps, read back: the stored layout, else one pane on the tab an older page kept, else (a first
+ * open) one pane on Files. */
+function readLayout(key: string): Layout {
   const saved = readStorage<Partial<Layout> & { tab?: unknown }>(key, {})
   const w = Number(saved.chatWidth)
   const tab = saved.tab === 'files' || saved.tab === 'report' || saved.tab === 'canvas' ? saved.tab : null
-  const panes = parsePanes(saved.panes) ?? single(tab ?? 'canvas')
+  const panes = parsePanes(saved.panes) ?? single(tab ?? 'files')
   return {
-    layout: {
-      chatWidth: Number.isFinite(w) && w > 0 ? Math.min(CHAT_WIDTH.max, Math.max(CHAT_WIDTH.min, w)) : CHAT_WIDTH.def,
-      chatOpen: saved.chatOpen !== false,
-      panes,
-    },
-    first: saved.panes == null && tab == null,
+    chatWidth: Number.isFinite(w) && w > 0 ? Math.min(CHAT_WIDTH.max, Math.max(CHAT_WIDTH.min, w)) : CHAT_WIDTH.def,
+    chatOpen: saved.chatOpen !== false,
+    panes,
   }
+}
+
+/** The chat off (the workspace's `hide_chat` setting): whether it is, and its switch, which saves the setting. */
+export function useChatOff(ws: string): [boolean, (off: boolean) => void] {
+  const [off, setOff] = useState(false)
+  useEffect(() => {
+    let alive = true
+    const read = () =>
+      loadSettings(ws)
+        .then((s) => alive && setOff(s.hide_chat === true))
+        .catch(() => undefined)
+    void read()
+    const unsub = onSettingsChange((w) => w === ws && void read())
+    return () => {
+      alive = false
+      unsub()
+    }
+  }, [ws])
+  const set = useCallback(
+    (v: boolean) => {
+      setOff(v)
+      saveSetting(ws, 'hide_chat', v).catch((e: Error) => bus.emit('toast', { text: `Could not save the chat setting: ${e.message}`, kind: 'error' }))
+    },
+    [ws],
+  )
+  return [off, set]
 }
 
 /** The element's size, measured as it changes; `guess` until the first measure. */
@@ -103,8 +131,7 @@ export function Shell({ ws }: { ws: string }) {
   useWorkspaceEvents(ws)
   useEffect(() => bus.on('wsReset', (e) => e.workspace === ws && window.location.reload()), [ws])
   const key = storageKey(ws, 'layout')
-  const [{ layout: initial, first: firstOpen }] = useState(() => readLayout(key))
-  const [layout, setLayout] = useState<Layout>(initial)
+  const [layout, setLayout] = useState<Layout>(() => readLayout(key))
   const [liveWidth, setLiveWidth] = useState(layout.chatWidth)
   // the panes focused before the current one, most recent first (panes.show, panes.close)
   const recent = useRef<string[]>([])
@@ -131,18 +158,6 @@ export function Shell({ ws }: { ws: string }) {
     [key],
   )
   useEffect(() => setLiveWidth(layout.chatWidth), [layout.chatWidth])
-  useEffect(() => {
-    if (!firstOpen) return
-    let alive = true
-    api
-      .canvas(ws)
-      // a layout the analyst made meanwhile is kept
-      .then((c) => alive && c.cells.length === 0 && readStorage<Partial<Layout>>(key, {}).panes == null && setLayout((cur) => ({ ...cur, panes: single('files') })))
-      .catch(() => undefined)
-    return () => {
-      alive = false
-    }
-  }, [ws, key, firstOpen])
 
   // the views, each of which a pane can show on its own
   const { views } = useViews(ws)
@@ -184,13 +199,15 @@ export function Shell({ ws }: { ws: string }) {
     [setPanes, available],
   )
 
-  // a request for the chat while its column is folded opens the column, and the chat panel takes the request once it
-  // has mounted (chat/pending.ts)
-  const chatOpen = useRef(layout.chatOpen)
-  chatOpen.current = layout.chatOpen
+  const [chatOff, setChatOff] = useChatOff(ws)
+  // a request for the chat while its column is folded, or off, opens the column, and the chat panel takes the request
+  // once it has mounted (chat/pending.ts)
+  const chatOpen = useRef(layout.chatOpen && !chatOff)
+  chatOpen.current = layout.chatOpen && !chatOff
   useEffect(() => {
     const open = () => {
       track('panel-open', { target: 'panel:chat', detail: { via: 'request' } })
+      if (chatOff) setChatOff(false)
       patch({ chatOpen: true })
     }
     const offs = [
@@ -206,7 +223,7 @@ export function Shell({ ws }: { ws: string }) {
       }),
     ]
     return () => offs.forEach((off) => off())
-  }, [patch])
+  }, [patch, chatOff, setChatOff])
   // a `?ref=` in the URL opens its element once the surfaces are mounted (their effects run before this one), as a
   // click on its chip would
   useEffect(() => {
@@ -215,8 +232,9 @@ export function Shell({ ws }: { ws: string }) {
   }, [])
   const gone = useSessionGone(ws)
 
-  // the main area's left edge: the window's 12px margin, the chat column and the 12px seam, or the collapsed strip
-  const paneX = 12 + (layout.chatOpen ? liveWidth + 12 : 40)
+  // the main area's left edge: the window's 12px margin, the chat column and the 12px seam, or the collapsed strip, or
+  // nothing with the chat off
+  const paneX = 12 + (chatOff ? 0 : layout.chatOpen ? liveWidth + 12 : 40)
   // the main area: its size, whether it is too small for more than one pane, and each pane's rectangle in it
   const [area, setArea] = useState<HTMLDivElement | null>(null)
   const size = useSize(area, () => ({ w: Math.max(0, window.innerWidth - paneX - 12), h: Math.max(0, window.innerHeight - 52) }))
@@ -274,7 +292,7 @@ export function Shell({ ws }: { ws: string }) {
   const signals = tabSignals(dots, writing(metas))
 
   return (
-    <div className="shell" data-chat={layout.chatOpen ? 'open' : 'closed'} data-session={gone ? 'gone' : undefined} inert={!!gone} style={{ '--pane-x': `${paneX}px` } as React.CSSProperties}>
+    <div className="shell" data-chat={chatOff ? 'off' : layout.chatOpen ? 'open' : 'closed'} data-session={gone ? 'gone' : undefined} inert={!!gone} style={{ '--pane-x': `${paneX}px` } as React.CSSProperties}>
       <TopBar
         ws={ws}
         tabs={BASE.map((t) => ({
@@ -291,7 +309,7 @@ export function Shell({ ws }: { ws: string }) {
         onTabDrag={startDrag}
       />
       <div className="shell-body">
-        {layout.chatOpen ? (
+        {chatOff ? null : layout.chatOpen ? (
           <>
             <aside className="shell-left" style={{ width: liveWidth }}>
               <ChatPanel
@@ -340,7 +358,8 @@ export function Shell({ ws }: { ws: string }) {
         </div>
       </div>
       {drag && <DragGhost drag={drag} />}
-      <CmdPointer ws={ws} />
+      {chatOff && <ChatPanel ws={ws} dock />}
+      <CmdPointer ws={ws} inline={chatOff} />
       <Toasts />
       <ServerDown />
       <NewVersion />

@@ -6,6 +6,7 @@ import { useContext, useEffect, useLayoutEffect, useRef, useState, useSyncExtern
 import { createPortal } from 'react-dom'
 import { ChatMarkdown } from '../chat/markdown'
 import { Button } from '../components/Button'
+import { CheckMark as SharedCheckMark } from '../components/CheckMark'
 import { TextArea } from '../components/Field'
 import { Icon } from '../components/Icon'
 import { Mark } from '../components/Marks'
@@ -325,10 +326,6 @@ function LabelTag({ id, label: k, ws, why, regenerate }: { id: string; label: Co
  * stops a running check or runs a finished one again. With `idle`, an unchecked card shows a faint mark on hover.
  */
 function CheckMark({ check, idle, onUndo, onAgain, onStop }: { check: CardCheck | null; idle?: boolean; onUndo?: (check: CardCheck) => void; onAgain?: () => void; onStop?: () => void }) {
-  const [open, setOpen] = useState(false)
-  const at = useRef<HTMLButtonElement>(null)
-  const hide = useRef<ReturnType<typeof setTimeout> | null>(null)
-  useEffect(() => () => void (hide.current && clearTimeout(hide.current)), [])
   if (!check && idle && onAgain) {
     const stopIt = (e: MouseEvent) => e.stopPropagation()
     return (
@@ -340,14 +337,6 @@ function CheckMark({ check, idle, onUndo, onAgain, onStop }: { check: CardCheck 
     )
   }
   if (!check) return null
-  const enter = () => {
-    if (hide.current) clearTimeout(hide.current)
-    setOpen(true)
-  }
-  const leave = () => {
-    hide.current = setTimeout(() => setOpen(false), 180)
-  }
-  const stop = (e: MouseEvent) => e.stopPropagation()
   const running = check.state === 'running'
   const act = running ? onStop : onAgain
   const fix = check.fix
@@ -357,24 +346,16 @@ function CheckMark({ check, idle, onUndo, onAgain, onStop }: { check: CardCheck 
   const typed = typedLine(check)
   const ended = check.state === 'failed' || check.state === 'stopped'
   return (
-    <span className="bcell-check" onMouseEnter={enter} onMouseLeave={leave} onMouseDown={stop} onClick={stop}>
-      <button
-        ref={at}
-        type="button"
-        className={`bcell-check-mark is-${check.state}${check.phase ? ` is-${check.phase}` : ''}${typed ? ' is-flagged' : ''}`}
-        aria-label={[line, typed.replace(/\.$/, ''), act ? (running ? 'Stop the check' : 'Check again') : ''].filter(Boolean).join('. ')}
-        aria-disabled={!act || undefined}
-        onFocus={enter}
-        onBlur={leave}
-        onClick={() => {
-          setOpen(false)
-          act?.()
-        }}
-      >
-        {running ? <Spinner size={10} /> : <Icon name={ended ? 'refresh' : typed ? 'flag' : 'check'} size={12} />}
-      </button>
-      {open && at.current && (
-        <CheckPop anchor={at.current} onEnter={enter} onLeave={leave} label="The card check">
+    <SharedCheckMark
+      state={check.state}
+      phase={check.phase}
+      flagged={!!typed}
+      label={[line, typed.replace(/\.$/, ''), act ? (running ? 'Stop the check' : 'Check again') : ''].filter(Boolean).join('. ')}
+      popLabel="The card check"
+      onClick={act}
+    >
+      {(close) => (
+        <>
           <span className="bcell-check-when">{line}</span>
           {typed && <span className="bcell-check-what">{typed}</span>}
           {check.note && <span className="bcell-check-what">{check.note}.</span>}
@@ -386,7 +367,7 @@ function CheckMark({ check, idle, onUndo, onAgain, onStop }: { check: CardCheck 
                 size="sm"
                 icon="stop"
                 onClick={() => {
-                  setOpen(false)
+                  close()
                   onStop()
                 }}
               >
@@ -419,7 +400,7 @@ function CheckMark({ check, idle, onUndo, onAgain, onStop }: { check: CardCheck 
                   size="sm"
                   icon="refresh"
                   onClick={() => {
-                    setOpen(false)
+                    close()
                     onAgain()
                   }}
                 >
@@ -428,35 +409,9 @@ function CheckMark({ check, idle, onUndo, onAgain, onStop }: { check: CardCheck 
               )}
             </span>
           )}
-        </CheckPop>
+        </>
       )}
-    </span>
-  )
-}
-
-/** The mark's hover card, on the page rather than in the card (a card clips what runs past its edge), under the mark
- * or over it where there is no room below. */
-function CheckPop({ anchor, onEnter, onLeave, label, children }: { anchor: HTMLElement; onEnter: () => void; onLeave: () => void; label: string; children: ReactNode }) {
-  const el = useRef<HTMLDivElement>(null)
-  const [pos, setPos] = useState<{ left: number; top: number } | null>(null)
-  useLayoutEffect(() => {
-    const pop = el.current
-    if (pop) setPos(placeTip(anchor.getBoundingClientRect(), pop.offsetWidth, pop.offsetHeight, window.innerWidth, window.innerHeight))
-  }, [anchor])
-  return createPortal(
-    <div
-      ref={el}
-      className="bcell-check-pop overlay"
-      role="dialog"
-      aria-label={label}
-      style={{ position: 'fixed', left: pos?.left ?? 0, top: pos?.top ?? 0, visibility: pos ? 'visible' : 'hidden' }}
-      onMouseEnter={onEnter}
-      onMouseLeave={onLeave}
-      onMouseDown={(e) => e.stopPropagation()}
-    >
-      {children}
-    </div>,
-    document.body,
+    </SharedCheckMark>
   )
 }
 

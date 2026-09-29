@@ -2779,17 +2779,11 @@ class NotebookMeta(BaseModel):
 
 @router.get("/ws/{c}/canvas")
 async def canvas_route(c: str) -> dict:
-    """The canvas as the browser shows it, without the cards the orientation's first run still holds, which appear when
-    it ends. A Scratch group is marked first (migrate_scratch), so canvas() leaves it out."""
-    from . import orientation  # noqa: PLC0415 — orientation imports agents, which imports this module
-
+    """The canvas as the browser shows it, the orientation's cards among them as it adds them. A Scratch group is marked
+    first (migrate_scratch), so canvas() leaves it out."""
     migrate_scratch(c)
     migrate_writer_groups(c)
-    out = canvas(_ws(c))
-    hold = orientation.held(c)
-    if hold:
-        out["cells"] = [x for x in out["cells"] if x.get("id") not in hold]
-    return out
+    return canvas(_ws(c))
 
 
 # Scratch: a working group of role `working` in stored workspaces. Its cards are kept, since their ids are cited: on

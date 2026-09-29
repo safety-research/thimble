@@ -46,7 +46,6 @@ AROUND_MAX = 250  # per side, so a page stays within PAGE_MAX-ish
 CLIP_MIN = 1000  # the shortest a page's `clip` may cut a string to
 ROWS_MAX = 500
 QUERY_LIMIT = 1000
-IGNORED_FILES = {"GROUND_TRUTH.md"}  # answer key of the toy corpus; not part of the corpus format
 KIND_ORDER = {"text": 0, "board": 1, "events": 2, "forge": 3, "prompt": 4, "agent": 5}
 EDITABLE_SUFFIXES = (".txt", ".md", ".markdown")  # the files PUT /source may replace; by name, any case
 
@@ -150,7 +149,7 @@ def _walk_sources(corpus: Path, include_hidden: bool) -> tuple[list[dict[str, An
                 size = e.stat().st_size
             except OSError:
                 continue
-            if rel in IGNORED_FILES or rel.endswith(SKIPPED_SUFFIXES):
+            if rel.endswith(SKIPPED_SUFFIXES):
                 continue
             kind = source_kind(rel)
             rec: dict[str, Any] = {"path": rel, "kind": kind, "size_bytes": size, "title": source_title(rel, kind)}

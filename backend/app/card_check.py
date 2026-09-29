@@ -999,7 +999,7 @@ def read_effort(c: str) -> str:
 async def _call(c: str, system: str, user: str, tool: Any, images: list[tuple[bytes, str]], *, effort: str) -> Any:
     """The reading: one model.structured call on the `verify` role's model and fast mode at `effort`. Retry waits and a
     refused reading before the fallback are left out of the check's time (_on_retry, _on_fallback)."""
-    from . import agents, model  # noqa: PLC0415
+    from . import model  # noqa: PLC0415
 
     role = _role(c)
     run = _current.get()
@@ -1007,9 +1007,8 @@ async def _call(c: str, system: str, user: str, tool: Any, images: list[tuple[by
         user, tool=tool, model=role.get("model") or config.ROLE_MODELS_DEFAULT["verify"]["model"],
         effort=effort or None,
         system_append=system, cwd=config.corpus_dir(c),
-        config_env=agents.call_env(c),
         speed="fast" if role.get("fast") else "standard", images=images, idle_timeout_s=READ_IDLE_S,
-        cache_prompt=False, on_retry=_on_retry(run) if run is not None else None,
+        on_retry=_on_retry(run) if run is not None else None,
         on_fallback=_on_fallback(run) if run is not None else None)
 
 

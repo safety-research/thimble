@@ -16,6 +16,13 @@ it with `WS` (the workspace directory) set and registers it as `thimble`.
                               a node-link diagram the canvas lays out: nodes as names or {id, label, detail}, edges as
                               (source, target[, label]) or dicts. A node's first line is its label, the rest its
                               detail. Output is DIAGRAM_MIME with a text/plain listing the model reads and cites
+    thimble.marked(ref)       in a view's reader: the marks of the labels that are on for one record, each
+                              {label, value, colour}, [] outside a view's call
+    thimble.kept(ref)         in a view's reader: whether the record passes the analyst's label filter (True with none)
+    thimble.kept_unit(refs)   in a view's reader: whether a unit that gathers the records `refs` passes that filter,
+                              judged by its records in the files the filter's label ran over (True when there are none)
+    thimble.view_labels()     in a view's reader: {labels, filter}, the labels that are on with their highlighted values,
+                              and the filter {label, value, colour} or None
     thimble.timeline(events, spacing="time")
                               events on a time axis: (time, label[, lane]) or {time, label, lane, end}; TIMELINE_MIME
                               with a text/plain listing. Clock times ("HH:MM[:SS]") are read on CLOCK_DAY, rolling over
@@ -39,7 +46,7 @@ from pathlib import Path
 
 WS = globals().get("WS")  # the workspace directory, set by the injector (notebook.kernel_argv)
 
-__all__ = ["labels", "colours", "diagram", "timeline"]
+__all__ = ["labels", "colours", "marked", "kept", "view_labels", "diagram", "timeline"]
 
 FRAME_ROWS = 500  # rows of a table card's DataFrame the card keeps and shows (frames.ROWS_MAX)
 
@@ -109,33 +116,39 @@ def _classes(k: dict) -> list:
 
 
 def _fill_colours(ks: list) -> list:
-    """Give every class without a colour the one concepts.fill_colours gives it, in place: a label's first class takes
-    the first colour no label's first class has, a negative class the grey, further classes the following colours,
-    avoiding repeats within a label while colours remain."""
+    """Give every class without a colour the one concepts.fill_colours gives it, in place: while a colour is free, one no
+    class of any label has, a label's first class takes the first free one and a further class the first free one from
+    its place after its label's first colour; else a first class takes the colours in turn and a further class the one
+    at its place. A negative class takes the grey, and a label's classes do not repeat a colour while one remains."""
     n_colours = len(LABEL_COLOURS) - 1
-    used = {k["classes"][0][1] for k in ks if k["classes"] and k["classes"][0][1]}
-    free = [n for n in range(1, n_colours + 1) if n not in used]
+    used = {c[1] for k in ks for c in k["classes"] if c[1]}
+
+    def free(start: int):
+        return next((m for m in ((start - 1 + i) % n_colours + 1 for i in range(n_colours)) if m not in used), None)
+
     j = 0
     for k in ks:
         cs = k["classes"]
         if not cs:
             continue
         if cs[0][1] is None:
-            if free:
-                cs[0][1] = free.pop(0)
-            else:
+            cs[0][1] = free(1)
+            if cs[0][1] is None:
                 cs[0][1] = j % n_colours + 1
                 j += 1
+            used.add(cs[0][1])
         base = cs[0][1] or 1
         taken = {base} if cs[0][1] else set()
         for i, c in enumerate(cs[1:], 1):
             if c[1] is None:
                 negative = c[0].lower() in _QUIET or (len(cs) == 2 and i == 1)
-                c[1] = 0 if negative else (base - 1 + i) % n_colours + 1
+                at = (base - 1 + i) % n_colours + 1
+                c[1] = 0 if negative else free(at) or at
             if c[1] and c[1] in taken:
                 c[1] = next((m for m in ((c[1] - 1 + j) % n_colours + 1 for j in range(1, n_colours)) if m not in taken), c[1])
             if c[1]:
                 taken.add(c[1])
+                used.add(c[1])
     return ks
 
 
@@ -227,7 +240,9 @@ def _with_covers(rows: list, covers: list, negatives: bool) -> list:
     return out
 
 
-def _rows_from_store(db: Path, negatives: bool = False):
+def _store_parts(db: Path):
+    """(rows, covers) of the store: rows (path, line, label, source, verdict, confidence, ref), covers (path, first,
+    last, value, source)."""
     conn = sqlite3.connect(f"file:{db}?mode=ro", uri=True, timeout=5.0)
     try:
         rows = conn.execute("SELECT path, line, label, source, analyst, confidence, ref FROM current "
@@ -238,7 +253,11 @@ def _rows_from_store(db: Path, negatives: bool = False):
             covers = []
     finally:
         conn.close()
-    return _with_covers(rows, covers, negatives)
+    return rows, covers
+
+
+def _rows_from_store(db: Path, negatives: bool = False):
+    return _with_covers(*_store_parts(db), negatives)
 
 
 def _trim(covers: list, path: str, a: int, b: int) -> list:
@@ -258,13 +277,18 @@ def _trim(covers: list, path: str, a: int, b: int) -> list:
 def _rows_from_jsonl(jsonl: Path, negatives: bool = False):
     """The labels file read whole: the last classifier row and the last analyst row per ref, its cover and clear lines
     applied in their place (labels_store, covers)."""
+    return _with_covers(*_jsonl_parts(jsonl), negatives)
+
+
+def _jsonl_parts(jsonl: Path):
+    """(rows, covers) of the labels file, as _store_parts gives them for the store."""
     model = {}
     analyst = {}
     covers: list = []
     try:
         f = open(jsonl, "r", encoding="utf-8")
     except OSError:
-        return []
+        return [], []
     with f:
         for line in f:
             line = line.strip()
@@ -303,7 +327,7 @@ def _rows_from_jsonl(jsonl: Path, negatives: bool = False):
         if ref not in model:
             path, line = _ref_parts(ref)
             out.append((path, line, None, None, a.get("label"), None, ref))
-    return _with_covers(out, covers, negatives)
+    return out, covers
 
 
 def labels(name=None, negatives=False):
@@ -351,6 +375,169 @@ def colours(name, values=None):
     out = {v: c for v, c in own.items() if v in given}
     out.update({v: NEUTRAL_COLOURS[i % len(NEUTRAL_COLOURS)] for i, v in enumerate(others)})
     return out
+
+
+# A view's reader call sets _view_ctx (view_host) to the labels context views.labels_context builds: {"labels": [{id,
+# name, colour, values: [{name, colour, highlight}], jsonl}], "filter": {id, label, value, colour} | None}, or to the
+# probe {"probe": n, "filter": bool}, a test label that marks every record whose line is a multiple of n. Outside a
+# view's call it is None, and marked() and kept() answer as if no label were on.
+_view_ctx = None
+PROBE_NAME = "test label"
+PROBE_ID = "test-label"
+# the colour the analyst's first label takes (--label-1), so the pictures show a view's own colour that clashes with a
+# label where the analyst would see it
+PROBE_COLOUR = LABEL_COLOURS[1]
+_MEMBERS: dict = {}  # labels file -> (the files' signature, ({ref: value}, {path: [(first, last, value)]}, {path}))
+
+
+def _signature(*paths: Path) -> tuple:
+    out = []
+    for p in paths:
+        try:
+            st = p.stat()
+            out.append((st.st_mtime_ns, st.st_size))
+        except OSError:
+            out.append(None)
+    return tuple(out)
+
+
+def _members(jsonl) -> tuple:
+    """({ref: effective value}, {path: [(first, last, value)]}, {path}) of one label: its rows' values, its covers, and
+    the files it left a value on. Read from its store when that is fresh, else its labels file, and kept until either
+    file changes, so a reader's lookups cost a dict access each."""
+    jsonl = Path(jsonl)
+    db = jsonl.with_suffix(".sqlite")
+    sig = _signature(jsonl, db)
+    hit = _MEMBERS.get(str(jsonl))
+    if hit is not None and hit[0] == sig:
+        return hit[1]
+    rows, covers = _store_parts(db) if _store_fresh(jsonl, db) else _jsonl_parts(jsonl)
+    values = {}
+    paths = set()
+    for path, _line, label, _source, verdict, _confidence, ref in rows:
+        v = verdict if verdict is not None else label
+        if v is not None:
+            values[str(ref)] = str(v)
+            if path is not None:
+                paths.add(str(path))
+    spans: dict = {}
+    for c in covers:
+        if c[3] is not None:
+            spans.setdefault(c[0], []).append((int(c[1]), int(c[2]), str(c[3])))
+            paths.add(str(c[0]))
+    _MEMBERS[str(jsonl)] = (sig, (values, spans, paths))
+    return values, spans, paths
+
+
+def _label_members(label: dict) -> tuple:
+    """The label's members (_members), looked up once per labels context: each reader call gets a fresh context, so a
+    reader that asks about every record reads no file state per record."""
+    members = label.get("_members")
+    if members is None:
+        members = label["_members"] = _members(label["jsonl"]) if label.get("jsonl") else ({}, {}, set())
+    return members
+
+
+def _value_of(label: dict, ref: str):
+    """The label's effective value on the record `ref`: its row's, else the value of the cover that holds its line."""
+    values, spans, _paths = _label_members(label)
+    v = values.get(ref)
+    if v is not None:
+        return v
+    path, line = _ref_parts(ref)
+    if path is None or line is None:
+        return None
+    return next((value for a, b, value in spans.get(path, ()) if a <= line <= b), None)
+
+
+def _probed(ref: str, every) -> bool:
+    _path, line = _ref_parts(ref)
+    return bool(line) and line % int(every) == 0
+
+
+def marked(ref):
+    """The marks of the labels that are on for the record `ref` (`<path>#L<n>`): each {label, value, colour} whose value
+    the record takes and the analyst highlights, in the labels' order. [] outside a view's reader call."""
+    return _marked(_view_ctx, ref)
+
+
+def kept(ref):
+    """Whether the record `ref` passes the analyst's label filter: True with no filter or when the filter's label left
+    no value in the record's file, else whether the label takes the filter's value on it."""
+    return _kept(_view_ctx, ref)
+
+
+def kept_unit(refs):
+    """Whether a unit that gathers the records `refs` passes the analyst's label filter: True with no filter or when the
+    filter's label left no value in any of their files, else whether the label takes the filter's value on one of its
+    records in a file it ran over. Records of other files never keep a unit, since kept holds for all of them."""
+    return _kept_unit(_view_ctx, refs)
+
+
+def view_labels():
+    """{labels, filter}: the labels that are on, each {id, name, colour, values: [{name, colour}]} with its highlighted
+    values, and the filter {label, value, colour}, or None."""
+    return _view_labels(_view_ctx)
+
+
+def _marked(ctx, ref) -> list:
+    if not ctx:
+        return []
+    ref = str(ref)
+    if ctx.get("probe"):
+        return [{"label": PROBE_NAME, "value": PROBE_NAME, "colour": PROBE_COLOUR}] if _probed(ref, ctx["probe"]) else []
+    out = []
+    for k in ctx.get("labels") or []:
+        v = _value_of(k, ref)
+        hit = next((x for x in k.get("values") or [] if x.get("highlight") and x.get("name") == v), None)
+        if hit is not None:
+            out.append({"label": k.get("name"), "value": v, "colour": hit.get("colour") or k.get("colour")})
+    return out
+
+
+def _kept(ctx, ref) -> bool:
+    f = ctx.get("filter") if ctx else None
+    if not f:
+        return True
+    ref = str(ref)
+    if ctx.get("probe"):
+        return _probed(ref, ctx["probe"])
+    k = next((x for x in ctx.get("labels") or [] if x.get("id") == f.get("id")), None)
+    if k is None:
+        return False
+    path, _line = _ref_parts(ref)
+    # a file the label never ran over is outside the filter, so a view of other files keeps its records
+    if path is not None and path not in _label_members(k)[2]:
+        return True
+    return _value_of(k, ref) == f.get("value")
+
+
+def _kept_unit(ctx, refs) -> bool:
+    f = ctx.get("filter") if ctx else None
+    if not f:
+        return True
+    refs = [str(r) for r in refs]
+    if ctx.get("probe"):
+        return any(_probed(r, ctx["probe"]) for r in refs)
+    k = next((x for x in ctx.get("labels") or [] if x.get("id") == f.get("id")), None)
+    if k is None:
+        return False
+    paths = _label_members(k)[2]
+    ran = [r for r in refs if _ref_parts(r)[0] in paths]
+    return not ran or any(_value_of(k, r) == f.get("value") for r in ran)
+
+
+def _view_labels(ctx) -> dict:
+    ctx = ctx or {}
+    if ctx.get("probe"):
+        probe = {"id": PROBE_ID, "name": PROBE_NAME, "colour": PROBE_COLOUR, "values": [{"name": PROBE_NAME, "colour": PROBE_COLOUR}]}
+        f = {"label": PROBE_NAME, "value": PROBE_NAME, "colour": PROBE_COLOUR} if ctx.get("filter") else None
+        return {"labels": [probe], "filter": f}
+    labels = [{"id": k.get("id"), "name": k.get("name"), "colour": k.get("colour"),
+               "values": [{"name": v.get("name"), "colour": v.get("colour")} for v in k.get("values") or [] if v.get("highlight")]}
+              for k in ctx.get("labels") or []]
+    f = ctx.get("filter")
+    return {"labels": labels, "filter": {"label": f.get("label"), "value": f.get("value"), "colour": f.get("colour")} if f else None}
 
 
 def _missing(v) -> bool:

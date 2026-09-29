@@ -1,16 +1,12 @@
 // @vitest-environment jsdom
 // The permission card above the chat's composer (src/chat/PermissionCard.tsx, src/chat/permissions.ts): every request
 // that waits for the analyst, from main's session and from every session thimble started, on one card, the one asked
-// first first, paged; each names the thread it comes from, says which session or agent asks, what it asks to do, its
-// input and why it asks, with Allow, Allow and don't ask again where Claude Code offers a rule, and Deny, each sent to
-// the session that asked. Every request is recorded and answered by a stand-in fetch.
+// first first, each answer sent to the session that asked. Every request is recorded and answered by a stand-in fetch.
 import { act } from 'react'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
-import { askFields, askWhat } from '../../src/chat/Holds.tsx'
 import { ThreadsContext } from '../../src/chat/Notes.tsx'
 import { PermissionCard } from '../../src/chat/PermissionCard.tsx'
-import { askedBy, askingAgent, asksTo, askThread, askWhy, classifierDown, modeChat, pendingRequests, type PendingAsk } from '../../src/chat/permissions.ts'
-import { bus } from '../../src/lib/bus.ts'
+import { pendingRequests, type PendingAsk } from '../../src/chat/permissions.ts'
 import type { ChatMeta, PermissionRequest } from '../../src/lib/types.ts'
 import { mount, settle, unmountAll } from './mount.tsx'
 
@@ -30,10 +26,8 @@ afterEach(() => {
 const T = (m: number) => `2026-09-25T10:${String(m).padStart(2, '0')}:00Z`
 const chat = (id: string, extra: Partial<ChatMeta> = {}): ChatMeta => ({ id, kind: 'agent', role: 'orient', title: 'Orientation', created_at: T(0), parent: 'main', status: 'running', ...extra }) as ChatMeta
 const ORIENT = chat('or1', { permission_mode: 'manual' })
-const WRITER = chat('w1', { role: 'writer', title: 'Write report' })
-const CHECK = chat('ck1', { role: 'check', title: 'Unverified' })
-const CRITIQUE = chat('cr1', { role: 'step', title: 'critique', parent: 'or1' })
-const METAS = new Map([ORIENT, WRITER, CHECK, CRITIQUE].map((m) => [m.id, m]))
+const METAS = new Map([[ORIENT.id, ORIENT]])
+
 const req = (id: string, extra: Partial<PermissionRequest> = {}): PermissionRequest => ({ id, tool: 'Bash', what: 'Count the runs', ...extra }) as PermissionRequest
 
 describe('the requests and their words', () => {
@@ -42,52 +36,6 @@ describe('the requests and their words', () => {
     const metas: ChatMeta[] = [chat('main', { kind: 'main' } as Partial<ChatMeta>), { ...ORIENT, permissions: [req('o1', { since: T(3) }), req('o2', { since: T(7) })] }, chat('w1', { role: 'writer', status: 'done', permissions: [req('w1', { since: T(1) })] })]
     expect(pendingRequests(main, metas).map((a) => `${a.chat}:${a.request.id}`)).toEqual(['or1:o1', 'main:m1', 'or1:o2'])
     expect(pendingRequests(null, [])).toEqual([])
-  })
-
-  test('who asks, in words: your session or its thread, the orientation, its critique, the writer, a check', () => {
-    const labels = new Map([['t1', 'main/why-the-spike']])
-    const ask = (chat: string, extra: Partial<PermissionRequest> = {}): PendingAsk => ({ chat, request: req('x', extra) })
-    expect(askedBy(ask('main'), METAS, labels)).toBe('Your Claude Code session')
-    expect(askedBy(ask('main', { chat: 't1' }), METAS, labels)).toBe('The thread main/why-the-spike')
-    expect(askedBy(ask('or1'), METAS)).toBe('The orientation')
-    expect(askedBy(ask('cr1'), METAS)).toBe("The orientation's critique")
-    expect(askedBy(ask('w1'), METAS)).toBe('The report writer')
-    expect(askedBy(ask('ck1'), METAS)).toBe('The Unverified check')
-  })
-
-  test('the thread a request comes from: the session that asked, or the thread of main whose agent asked', () => {
-    expect(askThread({ chat: 'or1', request: req('x') })).toBe('or1')
-    expect(askThread({ chat: 'cr1', request: req('x') })).toBe('cr1')
-    expect(askThread({ chat: 'main', request: req('x') })).toBe('main')
-    expect(askThread({ chat: 'main', request: req('x', { chat: 't1' }) })).toBe('t1')
-  })
-
-  test('what it asks to do, by the tool; the agent that asked when a subagent did', () => {
-    expect(asksTo('Bash')).toBe('run a command')
-    expect(asksTo('Write')).toBe('write a file')
-    expect(asksTo('WebFetch')).toBe('fetch a web page')
-    expect(asksTo('mcp__plugin_thimble_thimble__add_card')).toBe('use add_card')
-    expect(askingAgent({ agent_id: 'a1', agent_type: 'general-purpose', agent_title: 'Count runs', agent_chat: 's1' })).toEqual({ title: 'Count runs', type: 'general-purpose', chat: 's1' })
-    expect(askingAgent({ agent_id: 'a2', agent_type: 'Explore' })).toEqual({ title: '', type: 'Explore', chat: null })
-    expect(askingAgent({})).toBeNull()
-  })
-
-  test("why it asks: auto mode's reason, Manual, the analyst's own mode for a writer or a check, the terminal's prompt", () => {
-    const ask = (chat: string, extra: Partial<PermissionRequest> = {}): PendingAsk => ({ chat, request: req('x', extra) })
-    expect(askWhy(ask('or1', { refused: 'Writes outside the working folder' }), METAS)).toBe('Auto mode did not allow it on its own: Writes outside the working folder.')
-    expect(askWhy(ask('or1', { refused: 'Classifier unavailable' }), METAS)).toBe("Auto mode cannot decide in this session (Claude Code's classifier is unavailable), so it asks you about each call.")
-    expect(askWhy(ask('or1'), METAS)).toBe('It runs in Manual, which asks before each call.')
-    expect(askWhy(ask('cr1'), METAS)).toBe('The orientation runs in Manual, which asks before each call.')
-    expect(askWhy(ask('w1'), METAS)).toMatch(/your Claude Code permission mode.*denied after a minute/)
-    expect(askWhy(ask('main'), METAS)).toBe('Claude Code asks in your terminal too; the first answer counts.')
-  })
-
-  test('the input: a Bash command whole as code, never its JSON; other fields but the description; a command with no description of its own once', () => {
-    const command = "cd /data/toy && python3 - <<'EOF'\nprint(1)\nEOF"
-    expect(askFields({ command, what: 'Count the runs', input: JSON.stringify({ command }).slice(0, 30) })).toEqual([{ key: 'command', code: true, value: command }])
-    expect(askFields({ what: '/data/toy/notes.md', input: '{"file_path": "/data/toy/notes.md", "content": "a\\nb", "description": "x"}' })).toEqual([{ key: 'content', code: false, value: 'a\nb' }])
-    expect(askWhat({ command: 'wc -l a  b', what: 'wc -l a b' })).toBe('')
-    expect(askWhat({ command: 'wc -l a b', what: 'Count the lines' })).toBe('Count the lines')
   })
 })
 
@@ -107,72 +55,26 @@ describe('the card', () => {
     await settle()
   }
 
-  test('one request at a time, paged: who asks and what, its input as code, why, then Allow, Allow and don\'t ask again, Deny', async () => {
-    const el = await card()
-    const c = el.querySelector('.chat-perm')!
-    expect(c.getAttribute('role')).toBe('alertdialog')
-    expect(c.querySelector('.chat-perm-title')?.textContent).toBe('Permission needed')
-    expect(c.querySelector('.chat-perm-count')?.textContent).toBe('1 of 2')
-    expect(c.querySelector('.chat-perm-who')?.textContent).toBe("The orientation's agentAudit: batch2(workflow-subagent)asks to run a command")
-    expect(c.querySelector('.chat-perm-who [data-thread="s1"]')).not.toBeNull()
-    expect(c.querySelector('.chat-perm-what')?.textContent).toBe('Count refunds')
-    expect(c.querySelector('.chat-perm-code[data-field="command"]')?.textContent).toBe('grep -c refund tickets/*.jsonl')
-    expect(c.querySelector('.chat-perm-why')?.textContent).toBe('It runs in Manual, which asks before each call.')
-    expect([...c.querySelectorAll('.chat-perm-acts button')].map((b) => b.textContent)).toEqual(['Allow', "Allow and don't ask again for Bash(grep *)", 'Deny'])
-    await click(c.querySelector('[aria-label="Next request"]'))
-    expect(el.querySelector('.chat-perm-count')?.textContent).toBe('2 of 2')
-    expect(el.querySelector('.chat-perm-who')?.textContent).toBe('Your Claude Code sessionasks to write a file')
-    expect(el.querySelector('.chat-perm-field[data-field="content"]')?.textContent).toBe('contenthi')
+  test('a request the card shows only the start of says how much shows and offers no Always allow', async () => {
+    const long = 'x'.repeat(50_000)
+    const cut = req('c1', { command: long, what: 'Run a long script', always: 'Bash(python3 *)', cut: 61_234 })
+    const el = await mount(<PermissionCard ws="mini" asks={[{ chat: 'or1', request: cut }]} metas={METAS} labels={new Map()} />)
+    expect(el.querySelector('.chat-perm-cut')?.textContent).toMatch(/50,000 .*61,234/)
+    expect(el.querySelector('.chat-perm-code[data-field="command"]')?.textContent).toBe(long)
     expect([...el.querySelectorAll('.chat-perm-acts button')].map((b) => b.textContent)).toEqual(['Allow', 'Deny'])
+    const whole = await mount(<PermissionCard ws="mini" asks={[{ chat: 'or1', request: { ...cut, cut: undefined } }]} metas={METAS} labels={new Map()} />)
+    expect(whole.querySelector('.chat-perm-cut')).toBeNull()
+    expect(whole.querySelector('.chat-perm-always')).not.toBeNull()
   })
 
   test("each answer goes to the session that asked, and the next request takes the card's place", async () => {
     const el = await card()
     await click(el.querySelector('.chat-perm-always'))
-    expect(posted).toEqual([['/api/ws/mini/chats/or1/permission', { id: 'o1', allow: true, always: true }]])
+    expect(posted).toEqual([['/api/ws/mini/chats/or1/permission', { id: 'o1', allow: true, always: true, shown: 0 }]])
     expect(el.querySelector('.chat-perm')?.getAttribute('data-request')).toBe('m1')
     expect(el.querySelector('.chat-perm-count')).toBeNull()
     await click(el.querySelector('.chat-perm-deny'))
     expect(posted[1]).toEqual(['/api/ws/mini/permission', { id: 'm1', allow: false }])
     expect(el.querySelector('.chat-perm')).toBeNull()
-  })
-
-  test('the head names the thread each request comes from as its chip, which opens that thread', async () => {
-    const opened: string[] = []
-    const off = bus.on('openChat', (e) => void opened.push(e.chatId))
-    const el = await mount(
-      <ThreadsContext.Provider value={{ labels: new Map([['or1', 'orient'], ['main', 'main'], ['t1', 'main/why-the-spike']]) }}>
-        <PermissionCard ws="mini" asks={[...asks, { chat: 'main', request: req('m2', { chat: 't1' }) }]} metas={METAS} labels={new Map()} />
-      </ThreadsContext.Provider>,
-    )
-    const from = () => el.querySelector('.chat-perm-head .chat-perm-from')
-    expect(from()?.textContent).toBe('fromorient')
-    expect(from()?.querySelector('.chip')?.classList.contains('chip-sans')).toBe(true)
-    await click(from()!.querySelector('[data-thread="or1"]'))
-    expect(opened).toEqual(['or1'])
-    await click(el.querySelector('[aria-label="Next request"]'))
-    expect(from()?.textContent).toBe('frommain')
-    await click(el.querySelector('[aria-label="Next request"]'))
-    expect(from()?.textContent).toBe('frommain/why-the-spike')
-    off()
-  })
-
-  test('auto mode that cannot decide in the session: the orientation offers Manual and Bypass, a writer only says why', async () => {
-    const auto = new Map([...METAS, ['or1', { ...ORIENT, permission_mode: 'auto' } as ChatMeta]])
-    const down = (chat: string, id: string): PendingAsk => ({ chat, request: req(id, { command: 'ls runs', refused: 'Classifier unavailable' }) })
-    expect(classifierDown({ refused: 'Classifier unavailable' })).toBe(true)
-    expect(classifierDown({ refused: 'Writes outside the working folder' })).toBe(false)
-    expect(modeChat(down('or1', 'x'), auto)).toBe('or1')
-    expect(modeChat(down('w1', 'x'), auto)).toBeNull()
-    const el = await mount(<PermissionCard ws="mini" asks={[down('or1', 'o9'), down('w1', 'w9')]} metas={auto} labels={new Map()} />)
-    expect(el.querySelector('.chat-perm-why')?.textContent).toMatch(/^Auto mode cannot decide in this session/)
-    expect([...el.querySelectorAll('.chat-perm-switch button')].map((b) => b.textContent)).toEqual(['Switch to Manual', 'Switch to Bypass'])
-    await act(async () => (el.querySelector('.chat-perm-bypass') as HTMLButtonElement).click())
-    await settle()
-    expect(posted).toEqual([['/api/ws/mini/chats/or1/permission-mode', { mode: 'bypass' }]])
-    expect(el.querySelector('.chat-perm-switch')).toBeNull()
-    await act(async () => (el.querySelector('[aria-label="Next request"]') as HTMLButtonElement).click())
-    expect(el.querySelector('.chat-perm-why')?.textContent).toMatch(/^Auto mode cannot decide in this session/)
-    expect(el.querySelector('.chat-perm-switch')).toBeNull()
   })
 })

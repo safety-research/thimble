@@ -38,7 +38,7 @@ while [ $# -gt 0 ]; do
 done
 
 jsonq() {  # jsonq <file> <dotted.key>  → the value or ""
-  python3 - "$1" "$2" <<'PY'
+  python3 -I - "$1" "$2" <<'PY'
 import json, sys
 try:
     d = json.load(open(sys.argv[1]))
@@ -53,7 +53,7 @@ PY
 spawn() {  # spawn <logfile> <cmd...> → pid. Own session (setsid), stdin /dev/null, stdout+stderr appended to the log,
   # every other fd closed: a child that inherits a copy of this script's stdout pipe keeps the caller's read() from
   # ever seeing EOF (dev.py's start_stack would hang on that).
-  python3 - "$@" <<'PY'
+  python3 -I - "$@" <<'PY'
 import os, subprocess, sys
 with open(sys.argv[1], "ab") as log:
     p = subprocess.Popen(sys.argv[2:], stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT,
@@ -62,29 +62,28 @@ print(p.pid)
 PY
 }
 
+# process state comes from ps, which Linux and macOS both have
 alive() {  # a live, non-zombie process
-  if [ -z "${1:-}" ] || ! kill -0 "$1" 2>/dev/null; then return 1; fi
-  if [ "$(awk '{ sub(/.*\) /, ""); print $1 }' "/proc/$1/stat" 2>/dev/null || echo X)" = "Z" ]; then return 1; fi
-  return 0
+  local st
+  [ -n "${1:-}" ] || return 1
+  st="$(ps -o stat= -p "$1" 2>/dev/null || true)"; st="${st#"${st%%[![:space:]]*}"}"
+  case "$st" in "" | Z*) return 1;; *) return 0;; esac
 }
-cmdline() { tr '\0' ' ' < "/proc/$1/cmdline" 2>/dev/null || true; }
-listening() { python3 -c 'import socket,sys; s=socket.socket(); s.settimeout(0.3); sys.exit(0 if s.connect_ex(("127.0.0.1", int(sys.argv[1])))==0 else 1)' "$1"; }
+cmdline() { ps -ww -o args= -p "$1" 2>/dev/null || true; }
+listening() { python3 -I -c 'import socket,sys; s=socket.socket(); s.settimeout(0.3); sys.exit(0 if s.connect_ex(("127.0.0.1", int(sys.argv[1])))==0 else 1)' "$1"; }
 healthy() { curl -sf -m 1 "http://127.0.0.1:$API_PORT/api/health" >/dev/null 2>&1; }
 
-session_pids() {  # every live pid whose session id is $1 (the session setsid created for our command), leader first
-  local leader="$1" p sid
+session_pids() {  # every pid whose session id is $1 (the session setsid created for our command), leader first; by
+  # process group where ps has no session column (macOS), which the leader's children share unless they leave it
+  local leader="$1" rows
   echo "$leader"
-  for p in /proc/[0-9]*; do
-    p="${p#/proc/}"
-    if [ "$p" = "$leader" ]; then continue; fi
-    sid="$(awk '{ sub(/.*\) /, ""); print $4 }' "/proc/$p/stat" 2>/dev/null || true)"
-    if [ "$sid" = "$leader" ]; then echo "$p"; fi
-  done
+  rows="$(ps -A -o pid= -o sid= 2>/dev/null)" || rows="$(ps -A -o pid= -o pgid= 2>/dev/null)" || rows=""
+  printf '%s\n' "$rows" | awk -v l="$leader" '$2 == l && $1 != l { print $1 }'
   return 0
 }
 
 kill_pid() {  # kill_pid <pid> <must-contain> <label>: TERM then KILL every pid in the leader's session (by pid, from
-  local pid="$1" needle="$2" label="$3" victims p any    # /proc; never a name pattern), only when the leader is ours
+  local pid="$1" needle="$2" label="$3" victims p any    # ps; never a name pattern), only when the leader is ours
   if ! alive "$pid"; then echo "$label: not running"; return 0; fi
   local cl; cl="$(cmdline "$pid")"
   case "$cl" in
@@ -137,21 +136,23 @@ do_start() {
   mkdir -p "$DEV" "$WORKSPACES"
   if [ -n "$CORPUS" ] && [ -d "$WS_SRC/$CORPUS" ] && [ ! -d "$WORKSPACES/$CORPUS" ]; then
     cp -a "$WS_SRC/$CORPUS" "$WORKSPACES/$CORPUS"
-    rm -rf "$WORKSPACES/$CORPUS/.claude-config" "$WORKSPACES/$CORPUS/kernels"
+    rm -rf "$WORKSPACES/$CORPUS/kernels"
   fi
   if [ -f "$STACK" ]; then do_stop >/dev/null; fi
   if listening "$API_PORT"; then echo "dev_stack.sh: port $API_PORT is in use by a process this script did not start" >&2; exit 1; fi
 
-  local common=(env -i HOME="$HOME" PATH="$PATH" USER="${USER:-}" LANG="${LANG:-C.UTF-8}"
-    THIMBLE_DATA_DIR="$DATA_DIR" THIMBLE_WORKSPACES_DIR="$WORKSPACES"
+  # The stack starts with every variable unset but `keep`, which pass through the environment: the user's own, the
+  # switches below, and what the stack's model calls need to run `claude` as the user's own does (the config dir,
+  # provider, login and network settings; backend/app/config.py passes)
+  local keep='^(HOME|PATH|USER|LANG|CLAUDE_CONFIG_DIR|CLAUDE_CODE_(USE_[A-Z_]+|SKIP_[A-Z_]+_AUTH|OAUTH_(TOKEN|REFRESH_TOKEN|SCOPES)|CLIENT_[A-Z_]+|API_KEY_HELPER_TTL_MS|DISABLE_NONESSENTIAL_TRAFFIC)|ANTHROPIC_[A-Z_]+|HTTPS?_PROXY|NO_PROXY|THIMBLE_SKIP_KEY|THIMBLE_DEV|THIMBLE_PROMPT_CAPTURE)$'
+  # THIMBLE_DEV: dev mode on the stack too (main.dev_mode); THIMBLE_PROMPT_CAPTURE: every model call written to that
+  # directory (backend/app/capture.py)
+  local common=(env) v
+  for v in $(compgen -e); do [[ "$v" =~ $keep ]] || common+=(-u "$v"); done
+  common+=(LANG="${LANG:-C.UTF-8}" THIMBLE_DATA_DIR="$DATA_DIR" THIMBLE_WORKSPACES_DIR="$WORKSPACES"
     THIMBLE_PORT="$API_PORT" THIMBLE_UI_PORT="$UI_PORT" THIMBLE_FRONTEND_URL="http://127.0.0.1:$UI_PORT"
     THIMBLE_HOME="$DEV/stack.home" THIMBLE_PLUGIN_DIR="$PLUGIN" THIMBLE_DEV_STACK=0
-    VITE_CACHE_DIR="$DEV/vite-cache")  # frontend/vite.config.ts: never the shared node_modules/.vite of a symlinked checkout
-  [ -n "${THIMBLE_SKIP_KEY:-}" ] && common+=(THIMBLE_SKIP_KEY="$THIMBLE_SKIP_KEY")
-  [ -n "${THIMBLE_MODEL_BACKEND:-}" ] && common+=(THIMBLE_MODEL_BACKEND="$THIMBLE_MODEL_BACKEND")
-  [ -n "${VITE_CACHE_DIR:-}" ] && common+=(VITE_CACHE_DIR="$VITE_CACHE_DIR")  # a worktree's Vite cache off the shared node_modules (vite.config.ts)
-  [ -n "${THIMBLE_DEV:-}" ] && common+=(THIMBLE_DEV="$THIMBLE_DEV")  # dev mode on the stack too (main.dev_mode)
-  [ -n "${THIMBLE_PROMPT_CAPTURE:-}" ] && common+=(THIMBLE_PROMPT_CAPTURE="$THIMBLE_PROMPT_CAPTURE")  # backend/app/capture.py: every model call written to this directory
+    VITE_CACHE_DIR="${VITE_CACHE_DIR:-$DEV/vite-cache}")  # frontend/vite.config.ts: never the shared node_modules/.vite of a symlinked checkout
 
   local backend_pid vite_pid=""
   backend_pid="$(cd "$WORKTREE/backend" && spawn "$BACKEND_LOG" "${common[@]}" .venv/bin/python -m uvicorn app.main:app \

@@ -1,11 +1,13 @@
-// The chat's threads as the thread tree lists them (components/ThreadTree). The top level is main and the latest
-// orientation. Everything started from main hangs under main (threads, writers, dev tickets, earlier orientations,
-// running report checks); a thread born from a ⌘-click hangs under the chat it was started from (`parent`), and each
+// The chat's threads as the thread tree lists them (components/ThreadTree). The top level is main, the latest
+// orientation and the `dev` group (DEV_GROUP, a row that only folds), under which hangs every dev ticket, a view build
+// among them, named `dev/…`. Everything else started from main hangs
+// under main (threads, writers, earlier orientations, running report checks); a thread born from a ⌘-click hangs under the chat it was started from (`parent`), and each
 // step of an orientation or writer under that session. Rows are ordered by latest activity. Work the analyst did not
-// start is listed only while it is relevant (running, waiting, or shown).
+// start (a report check's run) is listed only while it is relevant (running, waiting, or shown); every dev ticket, the
+// orientation's view builds among them, is always listed.
 //
 // Names: `main/<title>` for a thread, `orient` (and `orient-1`, `orient-2`, ...), `write-<document>` (`-2`, `-3` for
-// later runs), `check/<title>`, `dev/<first words of its title>`, and a step `orient/<phase>: <agent key>`. A chat's
+// later runs), `check/<title>`, `dev/<view>` for a view's build and `dev/<first words of its title>` for another ticket, and a step `orient/<phase>: <agent key>`. A chat's
 // own `name` replaces the last part.
 import type { ThreadNode } from '../components/ThreadTree'
 import { hhmm } from '../lib/time'
@@ -137,7 +139,7 @@ export function ticketSlug(title: string): string {
 }
 
 /**
- * The tree's items: main and what hangs under it, then the latest orientation and what hangs under it, each row's
+ * The tree's items: main and what hangs under it, then the latest orientation and each dev ticket and what hangs under them, each row's
  * children in the order they started. Every chat the tree knows is an item, so every chip that points at one has its
  * name; `hidden` says which the tree leaves out (module note). Pure.
  */
@@ -149,15 +151,13 @@ export function pickItems(chats: readonly ChatMeta[], running: (m: ChatMeta) => 
   const latestOrient = orients[orients.length - 1]?.id ?? null
   const mainId = main?.id ?? null
   // the row a chat hangs under: a thread under the chat it was asked from, a step under its session, the latest
-  // orientation at the top level, and every other chat under main
+  // orientation and each dev ticket at the top level, and every other chat under main
   const parentOf = (t: ChatMeta): string | null => {
     const kind = threadKind(t)
-    if (kind === 'main' || t.id === latestOrient) return null
+    if (kind === 'main' || kind === 'dev' || t.id === latestOrient) return null
     if ((kind === 'thread' || kind === 'step') && t.parent && t.parent !== t.id && listed.has(t.parent)) return t.parent
     return mainId
   }
-  // the chats that hold a thread with something in it
-  const askedAbout = new Set(listedChats.filter((t) => threadKind(t) === 'thread' && (t.n_messages || running(t)) && t.parent).map((t) => t.parent as string))
   const labels = new Map<string, string>()
   if (main) labels.set(main.id, 'main')
   orients.forEach((m, i) => labels.set(m.id, i === orients.length - 1 ? 'orient' : `orient-${i + 1}`))
@@ -166,7 +166,7 @@ export function pickItems(chats: readonly ChatMeta[], running: (m: ChatMeta) => 
   // a document's first writer is `write-<doc>` and each later one takes the next number, so a name never moves to
   // another run and a chip in main's history keeps pointing at the run it named
   for (const [doc, ms] of writes) ms.forEach((m, i) => labels.set(m.id, i === 0 ? `write-${doc}` : `write-${doc}-${i + 1}`))
-  for (const m of listedChats) if (threadKind(m) === 'dev') labels.set(m.id, `dev/${ticketSlug(m.title || m.id)}`)
+  for (const m of listedChats) if (threadKind(m) === 'dev') labels.set(m.id, `dev/${m.view || ticketSlug(m.title || m.id)}`)
   for (const m of listedChats) if (threadKind(m) === 'check') labels.set(m.id, checkLabel(m.title || m.id))
   for (const m of listedChats) {
     const known = labels.get(m.id)
@@ -191,9 +191,8 @@ export function pickItems(chats: readonly ChatMeta[], running: (m: ChatMeta) => 
     // a thread with nothing in it (asked nothing yet, or its first question never went out) is noise in the tree
     const empty = kind === 'thread' && !m.n_messages && !isRunning
     const waiting = !!opts.waiting?.has(m.id)
-    // the orientation's view builds stay out of the list, running or not, unless one waits for the analyst or holds a
-    // thread they asked about the view
-    const left = orientBuild(m) ? !waiting && !askedAbout.has(m.id) : (startedByThimble(m) && !isRunning) || empty
+    // every dev ticket is listed (the orientation's view builds among them); a report check's run only while it runs
+    const left = kind === 'dev' ? false : (startedByThimble(m) && !isRunning) || empty
     return {
       id: m.id,
       label,
@@ -236,6 +235,9 @@ export function pickItems(chats: readonly ChatMeta[], running: (m: ChatMeta) => 
  * The tree's nodes from the picked items, hidden items left out: main first, then rows ordered by latest activity
  * (theirs or a descendant's). A finished agent shows how it ended and when. Pure.
  */
+/** The id of the tree's `dev` row, which holds the dev tickets and is no thread: picking it folds it. */
+export const DEV_GROUP = 'group:dev'
+
 export function threadNodes(items: readonly PickItem[]): ThreadNode[] {
   const visible = items.filter((it) => !it.hidden)
   const ids = new Set(visible.map((it) => it.id))
@@ -257,7 +259,10 @@ export function threadNodes(items: readonly PickItem[]): ThreadNode[] {
     }
   }
   const order = [...visible].sort((a, b) => Number(b.isMain) - Number(a.isMain) || ((latest.get(b.id) ?? '') < (latest.get(a.id) ?? '') ? -1 : (latest.get(b.id) ?? '') > (latest.get(a.id) ?? '') ? 1 : 0))
-  return order.map((it) => {
+  // the dev tickets hang under the `dev` row, which sits among the top-level rows by its latest ticket's activity
+  const devs = order.filter((it) => it.kind === 'dev' && parentOf.get(it.id) === null)
+  for (const it of devs) parentOf.set(it.id, DEV_GROUP)
+  const nodes: ThreadNode[] = order.map((it) => {
     const endTime = it.ended && (it.endTs ?? it.lastTs) ? hhmm((it.endTs ?? it.lastTs)!) : undefined
     return {
       id: it.id,
@@ -272,6 +277,13 @@ export function threadNodes(items: readonly PickItem[]): ThreadNode[] {
       fixed: it.isMain,
     }
   })
+  if (!devs.length) return nodes
+  const group: ThreadNode = { id: DEV_GROUP, name: 'dev', path: 'dev', parent: null, fixed: true, group: true, running: devs.some((it) => it.running), waiting: devs.some((it) => it.waiting) || undefined }
+  // before the first top-level row whose activity is older than the latest ticket's
+  const newest = latest.get(devs[0].id) ?? ''
+  const at = nodes.findIndex((n, i) => i > 0 && n.parent === null && (latest.get(n.id) ?? '') < newest)
+  nodes.splice(at < 0 ? nodes.length : at, 0, group)
+  return nodes
 }
 
 /** The label of every listed chat by id, for the chips that point at a thread (main/why-the-spike, orient). Pure. */

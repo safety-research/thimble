@@ -3,25 +3,30 @@
 // beside a hidden native cursor would double up. Pure; CmdPointer puts the values on the body and files/ViewerFrame
 // gives the arrow to a view's page.
 
-/** The normal pointer's outline, its tip at (3, 2) of a 22 box. */
-const ARROW = 'M3 2 L3 18 L7.5 14 L10.5 20.5 L13 19.4 L10.1 13 L16 13 Z'
+/** The ⌘ pointer: a dart at the normal pointer's angle and size, its tip at (3, 2) of a 22 box, with a notch in place
+ * of the normal pointer's tail. */
+const ARROW = 'M3 2 L3 18 L7.2 11.4 L16 13 Z'
 /** The I-beam: a stem with a curved serif at each end, centred on (11, 11). */
 const BEAM = 'M8 3.5 Q 11 3.5 11 5.5 Q 11 3.5 14 3.5 M11 5.5 V16.5 M8 18.5 Q 11 18.5 11 16.5 Q 11 18.5 14 18.5'
 
-/** The CSS box of each image, in px: the glyph's 22 and room for its shadow. */
-export const CURSOR_BOX = 28
-export const ARROW_HOT = { x: 3, y: 2 }
-export const BEAM_HOT = { x: 11, y: 11 }
+/** The CSS box of each image, in px: the glyph's 22, moved in by PAD so its outline and glow fit on every side. */
+export const CURSOR_BOX = 32
+const PAD = 5
+export const ARROW_HOT = { x: 3 + PAD, y: 2 + PAD }
+export const BEAM_HOT = { x: 11 + PAD, y: 11 + PAD }
 
-/** An SVG image of one glyph in `colour`, `scale` times the CSS box (2 for a screen of two device pixels a px). */
+/** An SVG image of one glyph in `colour`, `scale` times the CSS box (2 for a screen of two device pixels a px): the glyph
+ * filled in `colour` inside a white outline, so it reads on any ground, with a soft glow of the same colour. */
 export function cursorSvg(glyph: 'arrow' | 'beam', colour: string, scale = 1): string {
   const size = CURSOR_BOX * scale
-  const shadow = `<filter id="s" x="-50%" y="-50%" width="200%" height="200%"><feDropShadow dx="0" dy="2" stdDeviation="1.6" flood-color="${colour}" flood-opacity="0.45"/></filter>`
+  const glow = `<filter id="g" filterUnits="userSpaceOnUse" x="${-PAD}" y="${-PAD}" width="${CURSOR_BOX}" height="${CURSOR_BOX}"><feDropShadow dx="0" dy="0.6" stdDeviation="1.6" flood-color="${colour}" flood-opacity="0.5"/></filter>`
   const shape =
     glyph === 'arrow'
-      ? `<path d="${ARROW}" fill="${colour}" stroke="${colour}" stroke-width="1.4" stroke-linejoin="round"/>`
-      : `<path d="${BEAM}" fill="none" stroke="${colour}" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>`
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 ${CURSOR_BOX} ${CURSOR_BOX}"><defs>${shadow}</defs><g filter="url(#s)">${shape}</g></svg>`
+      ? `<path d="${ARROW}" fill="none" stroke="#fff" stroke-width="5" stroke-linejoin="round"/>` +
+        `<path d="${ARROW}" fill="${colour}" stroke="${colour}" stroke-width="2" stroke-linejoin="round"/>`
+      : `<path d="${BEAM}" fill="none" stroke="#fff" stroke-width="3.6" stroke-linecap="round" stroke-linejoin="round"/>` +
+        `<path d="${BEAM}" fill="none" stroke="${colour}" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>`
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 ${CURSOR_BOX} ${CURSOR_BOX}"><defs>${glow}</defs><g filter="url(#g)" transform="translate(${PAD} ${PAD})">${shape}</g></svg>`
 }
 
 const url = (svg: string) => `url("data:image/svg+xml,${encodeURIComponent(svg)}")`

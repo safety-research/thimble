@@ -2,7 +2,7 @@
 a run can be reviewed with their templates filled.
 
 Off by default. Set, each call becomes `<dir>/<utc stamp>-<seq>-<caller>.md` with a header (caller, model, effort,
-speed, and path `sdk` or `api`), then ## Options, ## System prompt, ## Tools, ## Messages and ## Output sections.
+speed, and path), then ## Options, ## System prompt, ## Tools, ## Messages and ## Output sections.
 Callers name themselves with `scope(name)` (a contextvar) and `caller(default)` reads it. Writes are small synchronous
 appends; the switch is a debugging aid, not for a served deployment.
 """
@@ -23,9 +23,8 @@ from typing import Any, Iterator
 log = logging.getLogger("thimble.capture")
 
 ENV = "THIMBLE_PROMPT_CAPTURE"
-# environment variables whose values never reach a capture file (sdk.auth_env passes the first three to a worker)
+# environment variables whose values never reach a capture file
 REDACTED_ENV = ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "CLAUDE_CODE_OAUTH_TOKEN")
-REDACTED_SETTINGS = ("apiKeyHelper",)  # inline CLI settings keys shown as <redacted> (the helper is a command, shown blind)
 REDACTED = "<redacted>"
 
 _seq = 0
@@ -151,18 +150,13 @@ def fence(body: str, lang: str = "") -> str:
     return f"{ticks}{lang}\n{body}\n{ticks}"
 
 
-def _redact_settings(settings: Any) -> Any:
+def _settings(settings: Any) -> Any:
     if not isinstance(settings, str) or not settings.strip().startswith("{"):
         return settings
     try:
-        obj = json.loads(settings)
+        return json.loads(settings)
     except ValueError:
         return settings
-    if isinstance(obj, dict):
-        for k in REDACTED_SETTINGS:
-            if k in obj:
-                obj[k] = REDACTED
-    return obj
 
 
 def _redact_env(env: Any) -> Any:
@@ -255,7 +249,7 @@ def options_dict(opts: Any) -> dict[str, Any]:
             else:
                 out[name] = "<see ## System prompt>"
         elif name == "settings":
-            out[name] = _redact_settings(v)
+            out[name] = _settings(v)
         elif name == "env":
             out[name] = _redact_env(v)
         elif name in ("can_use_tool", "stderr"):
@@ -347,22 +341,6 @@ class Call:
         self.section("Tools (as the CLI serves them to the model)", head + "\n\n" + fence(_json(tools), "json"))
         self.section("Messages (as sent)")
 
-    def api_request(self, kwargs: dict[str, Any], attempt: int) -> None:
-        """The Messages API path: the request's kwargs exactly as the anthropic client gets them, plus the system
-        text and the tools pulled out for reading."""
-        if not self.on:
-            return
-        title = "Request (Messages API kwargs, exactly as sent)" if attempt == 1 else f"Request (attempt {attempt}: the corrective turn appended)"
-        self.fenced(title, {k: v for k, v in kwargs.items() if k != "timeout"})
-        if attempt == 1:
-            system = kwargs.get("system")
-            text = "\n\n".join(str(b.get("text", "")) for b in system if isinstance(b, dict)) if isinstance(system, list) else str(system or "")
-            self.text("System prompt", text)
-            self.fenced("Tools", kwargs.get("tools") or [])
-            self.section("Messages (as sent)")
-            for m in kwargs.get("messages") or []:
-                self.user(_content_text(m.get("content")) if isinstance(m, dict) else str(m), role=str(m.get("role", "user")))
-
     def user(self, text: str, *, role: str = "user", label: str = "") -> None:
         if not self.on:
             return
@@ -414,15 +392,6 @@ class Call:
         d = {k: _jsonable(getattr(msg, k)) for k in keep if getattr(msg, k, None) is not None}
         self.fenced("result", d, sub=True)
 
-    def api_response(self, resp: Any) -> None:
-        """A Messages API response: the content blocks as the assistant turn, then stop_reason, model and usage."""
-        if not self.on:
-            return
-        self.assistant(list(getattr(resp, "content", []) or []))
-        d = {k: _jsonable(getattr(resp, k)) for k in ("id", "model", "stop_reason", "stop_sequence", "usage")
-             if getattr(resp, k, None) is not None}
-        self.fenced("response", d, sub=True)
-
     def finish(self, status: str, detail: str = "", **extra: Any) -> None:
         if not self.on:
             return
@@ -458,8 +427,6 @@ def begin(name: str, *, model: str | None = None, effort: str | None = None, pat
                 "its claude_code preset plus the append below and manages the conversation, so this file holds what "
                 "thimble passes (options, append, tool definitions, the messages it sends) and the transcript the CLI "
                 "streamed back — not the exact request bytes."),
-        "api": "api — one Messages API request (anthropic.AsyncAnthropic, streaming); the request below is exact.",
-        "hook": "hook — a Claude Code hook round trip (plugin/bin/thimble-hook → POST /api/hooks); the payload and the answer are exact.",
         "message": "message — text the server hands a terminal Claude Code session (channel, inbox or the next prompt's status block); exact.",
         "note": "note — rendered outside a live call.",
     }

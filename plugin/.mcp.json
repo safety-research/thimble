@@ -3,6 +3,7 @@
     "thimble": {
       "type": "stdio",
       "command": "${CLAUDE_PLUGIN_ROOT}/bin/thimble-mcp",
+      "alwaysLoad": true,
       "env": {
         "THIMBLE_CWD": "${CLAUDE_PROJECT_DIR}"
       }

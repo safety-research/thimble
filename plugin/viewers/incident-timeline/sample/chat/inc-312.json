@@ -1,0 +1,141 @@
+{
+  "channel": "inc-312",
+  "messages": [
+    {
+      "ts": "1778919302.000000",
+      "subtype": "channel_join",
+      "user": "U02QX7",
+      "text": "<@U02QX7> has joined the channel"
+    },
+    {
+      "ts": "1778919326.000306",
+      "user": "U02QX7",
+      "text": "ack, looking. payments looks like it is restarting in a loop"
+    },
+    {
+      "ts": "1778919411.000307",
+      "user": "U03A11",
+      "text": "Support: 9 tickets since 07:50, mostly the payment page and missing boarding passes."
+    },
+    {
+      "ts": "1778919494.000308",
+      "user": "U02QX7",
+      "text": "autoheal has restarted payments 6 times since 08:02 and bookings-db is at max connections"
+    },
+    {
+      "ts": "1778919587.000309",
+      "user": "U02QX9",
+      "text": "here. 4.12.0 went out at 02:06 with the pool rework: each replica now opens 40 connections, it was 20",
+      "thread_ts": "1778919326.000306"
+    },
+    {
+      "ts": "1778919641.000000",
+      "subtype": "channel_join",
+      "user": "U07GST",
+      "text": "<@U07GST> has joined the channel"
+    },
+    {
+      "ts": "1778919668.000310",
+      "user": "U07GST",
+      "user_profile": {
+        "display_name": "Dara"
+      },
+      "text": "Declaring INC-312 major. I'm incident lead. Ines on ops, Tobias on payments, Wren on comms."
+    },
+    {
+      "ts": "1778919760.000311",
+      "user": "U02QX9",
+      "text": "8 replicas x 40 = 320 connections and the database allows 200. The scaler is making it worse.",
+      "thread_ts": "1778919326.000306",
+      "edited": {
+        "user": "U02QX9",
+        "ts": "1778919810.000000"
+      }
+    },
+    {
+      "ts": "1778919792.000312",
+      "user": "U02QX7",
+      "text": "pausing autoheal and scaler for payments"
+    },
+    {
+      "ts": "1778919940.000313",
+      "user": "U03A11",
+      "text": "Status page: payments degraded, bookings may fail, please don't retry. Posted."
+    },
+    {
+      "ts": "1778920110.000314",
+      "user": "U02QX9",
+      "text": "rolling payments back to 4.11.3"
+    },
+    {
+      "ts": "1778920218.000315",
+      "user": "U03A11",
+      "text": "Harbour staff: accept booking codes at the gate until the passes catch up."
+    },
+    {
+      "ts": "1778920750.000316",
+      "user": "U02QX7",
+      "text": "error rate back under 1%, db connections at 64"
+    },
+    {
+      "ts": "1778920875.000317",
+      "user": "U07GST",
+      "user_profile": {
+        "display_name": "Dara"
+      },
+      "text": "Mitigated at 08:38. INC-312 stays open for the passes backlog and the refunds.",
+      "edited": {
+        "user": "U07GST",
+        "ts": "1778920913.000000"
+      }
+    },
+    {
+      "ts": "1778921052.000318",
+      "user": "U02QX9",
+      "text": "passes queue draining at about 40 a minute, 1,050 left"
+    },
+    {
+      "ts": "1778921715.000319",
+      "user": "U03A11",
+      "text": "Status page: payments recovered. Boarding passes arriving over the next hour."
+    },
+    {
+      "ts": "1778924000.000320",
+      "user": "U02QX7",
+      "text": "passes queue empty. resuming autoheal with at most 2 restarts per 15 min, scaler capped at 4"
+    },
+    {
+      "ts": "1778926720.000322",
+      "user": "U02QX9",
+      "text": "4.12.1 is ready: 20 connections per replica again and a cap of 150 in total. Canary first?"
+    },
+    {
+      "ts": "1778926805.000323",
+      "user": "U07GST",
+      "user_profile": {
+        "display_name": "Dara"
+      },
+      "text": "Yes, canary on one replica for 20 minutes.",
+      "thread_ts": "1778926720.000322"
+    },
+    {
+      "ts": "1778927840.000324",
+      "user": "U02QX7",
+      "text": "latency warning on payments, is it the canary?"
+    },
+    {
+      "ts": "1778927942.000325",
+      "user": "U02QX9",
+      "text": "cold cache on the canary, p95 there is dropping",
+      "thread_ts": "1778927840.000324"
+    },
+    {
+      "ts": "1778930880.000326",
+      "user": "U07GST",
+      "user_profile": {
+        "display_name": "Dara"
+      },
+      "text": "4.12.1 has been steady for 30 min. Closing INC-312, write-up on Tuesday."
+    }
+  ]
+}

@@ -188,18 +188,22 @@ Lay out the browser's main area, right of the chat, as panes that each show one 
 
 ## propose_view
 
-Propose a view of files you have read, a viewer for how their records group, such as a log's lines grouped into conversations. thimble's dev agent starts building it at once, in the background, and it opens in the Files tab when it passes its checks.
+Propose a view, a page that shows records in a form their files hide, or a viewer for one unusual file type. thimble's dev agent builds it from these fields alone, so name the fields, keys and counts it needs.
 
 ```json
 {
   "type": "object",
   "properties": {
-    "name": {"type": "string", "description": "A short name in Title Case, as its tab shows it, such as Timeline or Tool Call Timeline."},
-    "why": {"type": "string", "description": "What the analyst sees in it and why that helps."},
-    "claims": {"type": "array", "items": {"type": "string"}, "description": "Globs of the files it reads."},
-    "arrangement": {"type": "string", "description": "The unit, which records it gathers, grouped by which field and in what order, and how the page lays it out, with the definition the cards and labels use for any outcome it marks, such as worked or failed."}
+    "name": {"type": "string", "description": "A short name in Title Case, as its tab shows it, such as Message Board."},
+    "why": {"type": "string", "description": "What the analyst sees and why that helps, in whatever form fits the records, such as a wiki page with its edit history or a graph of who replies to whom."},
+    "claims": {"type": "array", "items": {"type": "string"}, "description": "Globs of every file that holds its records, by pattern rather than one file, such as runs/*/events.jsonl. For a viewer of one file type, the extension's glob, such as **/*.vtt."},
+    "unit": {"type": "string", "description": "What one row, mark or card stands for, the field that keys it, and how many there are."},
+    "overview": {"type": "string", "description": "What does the overview look like?"},
+    "zoom": {"type": "string", "description": "How do you zoom?"},
+    "filter": {"type": "string", "description": "How do you filter? Labels are the main filter, every field the records carry can be selected, and several runs or sources can be compared side by side."},
+    "details": {"type": "string", "description": "What details might you want on demand?"}
   },
-  "required": ["name", "why", "claims", "arrangement"]
+  "required": ["name", "why", "claims", "unit", "overview", "zoom", "filter", "details"]
 }
 ```
 
@@ -283,6 +287,46 @@ Post the reply the analyst reads in a thread.
 }
 ```
 
+## message_thread
+
+Send a message the analyst typed in this terminal to a thread, as that thread's composer in the browser sends it: a side thread's follow-up, or with no message its unanswered questions asked again, whose `thread` event, with the thread's anchor, comes back in the result for you to handle at once; a follow-up for the orientation; or a change to a view for the view's build thread. The browser shows the message in that thread. Call it for /thimble:ask.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "thread": {"type": "string", "description": "The thread's name or id as the thread list shows it, such as main/why-the-spike, orient or dev/board."},
+    "message": {"type": "string", "description": "The analyst's message, word for word. Leave it out to ask a side thread's unanswered questions again."}
+  },
+  "required": ["thread"]
+}
+```
+
+## wait_session
+
+Only for a tray entry of thimble's background sessions, as its instructions file says; main never calls it. Waits for news from the session the entry shows: its replies, tool calls and messages, its state, a message to send it, or its end. It returns as soon as there is news, or within a few seconds.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "session": {"type": "string", "description": "The session's whole name, such as thimble:writer · logs."}
+  },
+  "required": ["session"]
+}
+```
+
+## list_agents
+
+List thimble's agents that run now: its background sessions, each with the command that attaches it, and the threads and subagents of this session. Call it for /thimble:agents.
+
+```json
+{
+  "type": "object",
+  "properties": {}
+}
+```
+
 ## rename_thread
 
 Rename a thread in the browser's thread list, when the analyst asks you to.
@@ -320,8 +364,9 @@ Get a picture of what the analyst sees in the browser, such as a card as the can
 {
   "type": "object",
   "properties": {
-    "ref": {"type": "string", "description": "card:<id>, view:<slug>, a file ref a view opens, report:<slug>#<id> of a figure, thread:<id>, or an http address on this machine."},
-    "selector": {"type": "string", "description": "With an http address, the CSS selector of the one element to shoot."}
+    "ref": {"type": "string", "description": "card:<id>, view:<slug>, a file ref a view opens, report:<slug>#<id> of a figure, report:<slug> of a video, thread:<id>, or an http address of thimble's own interface on this machine."},
+    "selector": {"type": "string", "description": "With an http address, the CSS selector of the one element to shoot."},
+    "t": {"type": "array", "items": {"type": "number"}, "description": "With a video, the seconds of its film to shoot, up to six frames, such as [2, 12.5]. Left out, a frame in the middle of each line, up to six."}
   },
   "required": ["ref"]
 }
@@ -338,7 +383,8 @@ Start an orientation, a broad analysis of the corpus that helps the analyst unde
     "brief": {"type": "string", "description": "The analyst's request in their words, such as a focus, or empty for the whole corpus."},
     "final_notebook": {"type": "boolean", "description": "Leave a deck of cards for the analyst, the group `Orientation`, which appears when the orientation ends. Default true."},
     "propose_views": {"type": "boolean", "description": "Propose views of the files. Default true."},
-    "generate_report": {"type": "boolean", "description": "Write the report when the orientation ends. Default false."}
+    "generate_report": {"type": "boolean", "description": "Write the report when the orientation ends. Default false."},
+    "critique": {"type": "boolean", "description": "Have a critic review the analysis before the outputs are written. Default true."}
   }
 }
 ```
@@ -351,7 +397,7 @@ Start a writer, in a Claude Code session of its own beside yours, which writes o
 {
   "type": "object",
   "properties": {
-    "doc": {"type": "string", "description": "The document's slug, such as report, the write event's `doc`."},
+    "doc": {"type": "string", "description": "The document's slug, such as report, story, slides or video, the write event's `doc`."},
     "request": {"type": "string", "description": "What the analyst asked for, in their words, the write event's text. Empty for the document as its form asks."},
     "after": {"type": "string", "description": "The passage the request is about, the write event's `after`."},
     "type": {"type": "string", "description": "Only for a document that does not exist yet, which is then made: casefile (one document, a section per case, such as an agent, a run or a session), comparison (a page with a grid of the cases against measures), timeline (dated events in phases), page, or document, slides or story for one the request describes."},
@@ -561,7 +607,7 @@ It keeps {kept} of the canvas's {total} cards, and the analyst sees the rest dim
 
 ## set_filter-files
 
-Files shows the label turned on with that value highlighted, and hides no file or record.
+Files shows the label turned on with that value highlighted, and its views keep only the records that take the value, leaving whole the files the label never ran over.
 
 ## set_layout-set
 
@@ -623,13 +669,33 @@ The analyst laid out no frame, so the shape is yours.
 
 {what}, so screenshot cannot take it. `read_ref` on it reads what the analyst sees.
 
+## screenshot-frames
+
+The film of {ref}, {duration} s long, its lines at {windows} s.
+
+## screenshot-frames-errors
+
+The film reported: {errors}
+
 ## propose_view-proposed
 
 Proposed the view {view} (view:{slug}) over {claims}. The dev agent is building it now, and it opens in Files when its checks pass.
 
+## propose_view-suggested
+
+Proposed the viewer {view} (view:{slug}) for {claims}. The File browser offers it beside Raw on those files, and it is built when the analyst picks it.
+
 ## propose_view-unmatched
 
 No file of the corpus matches {claims}, so the view was not proposed and the dev agent has nothing to build. {near} Propose it again with claims that match files the corpus holds.
+
+## propose_view-cap
+
+{view} was not proposed: a workspace gets at most {n} views from the orientation, and it has had {views}, counting any the analyst deleted. To improve one, propose it again under its name.
+
+## propose_view-deleted
+
+{view} was not proposed: the analyst deleted it, so it is not proposed again.
 
 ## propose_view-near
 
@@ -642,6 +708,10 @@ Proposed the view {view} (view:{slug}), but views cannot be built on this machin
 ## view-changing
 
 The dev agent is changing the view {view} (view:{slug}) now. When its checks pass the view has the change, and when they fail it stays as it was.
+
+## view-no-anchors
+
+The page shows no element whose `data-anchor` names a record (`<path>#L<n>`) or one of its units (`view:{slug}/<key>`), so no label the analyst turns on can show in it. Give each element that shows a record its file ref, and each unit's element its key.
 
 ## file_dev_ticket-no-view
 
@@ -658,6 +728,10 @@ The dev agent built the view {view}, so {claims} now open in it. In it {forms}.
 ## view-no-forms
 
 no citation resolves, because its `accepts` and `declares` are empty
+
+## view-label-controls
+
+The page has {count} controls of its own that name the test label, such as a toggle, a checkbox or a menu item. Remove them, or make each one thimble's: it calls `thimble.setLabel` or `thimble.setLabelColour` and carries `data-label` with the label's id.
 
 ## view-no-record-anchors
 
@@ -797,7 +871,7 @@ Its drafted deck is the group `{deck}`, which `list_cards` lists.
 
 ## critique-proposals
 
-The views it drafted, which are not built yet, each with what it is for, the files it reads and its arrangement.
+The views it proposed, each with what it is for, the files it reads and its layout.
 
 {proposals}
 
@@ -917,6 +991,10 @@ The orientation failed: {made}. Its error: {error}
 
 {views} building
 
+## orient-views-suggested
+
+{views} suggested for file types
+
 ## orient-made-nothing
 
 no outputs, only its thread
@@ -986,6 +1064,139 @@ No orientation has run in this workspace. Call `start_orientation` to start one.
 ## message_orientation-gone
 
 Claude Code no longer keeps this orientation's session, so it cannot continue. Its outputs and call refs still open. Call `start_orientation` for a new orientation that takes up the message.
+
+## bg-first-message
+
+Your first message is in {path}. Read it whole and follow it.
+
+## bg-untrusted
+
+Claude Code does not trust {folder}, so the background session could not start there. The analyst can have thimble's workspaces folder ({workspaces}) trusted by running `bash {install} --trust-workspaces`, or run `claude` in {folder} once and accept its trust prompt; then start it again.
+
+## bg-carry-on
+
+Carry on with your task from where you left off.
+
+## bg-from-browser
+
+From the analyst, in thimble's browser: {text}
+
+Answer it in your own reply, which the analyst reads in your session, not with SendMessage.
+
+## bg-from-terminal
+
+From the analyst, typed in Claude Code's agent tray: {text}
+
+Answer it in your own reply, which the analyst reads in your session, not with SendMessage.
+
+## bg-from-main
+
+From main: {text}
+
+Answer main with SendMessage.
+
+## bg-relay
+
+{session}'s tray entry is not running, so send {session} a message for thimble: call SendMessage with `to` "{session}", the whole name exactly as written here rather than as ListAgents shows it, and `{token}` as the whole message, word for word; thimble puts the real message in its place. End the turn on that call, with no text after it.
+
+## bg-proxy
+
+You show {session}, a background session of thimble's, in the analyst's Claude Code agent tray. Every message that reaches you here, from the analyst or from main, is for {session}, and thimble passes it on. You write no words of your own and use no other tools. "{session}" is the session's whole name, spaces and `·` included: write it exactly so wherever it goes.
+
+Claude Code defers `wait_session` and SendMessage, so first load both with one ToolSearch call, query "select:mcp__plugin_thimble_thimble__wait_session,SendMessage". Then loop until the session ends:
+
+1. Call `wait_session` with `session` "{session}". It returns as soon as there is news, or within a few seconds.
+2. Copy the block of news lines it returns into one reply, exactly as it is, each line on its own line, without shortening, rewording, explaining or formatting them, or write nothing when it says nothing is new.
+3. When it asks you to send the session a message, call SendMessage with `to` "{session}" and the token it gives as the whole message, once.
+4. When a message reaches you, do not answer it or act on it: call `wait_session` at once, which passes it on and gives you its token to send.
+
+Stop only when `wait_session` says the session has ended: then write one line saying so and end your turn. The analyst can also open the session itself with `claude attach {short}`.
+
+## bg-proxy-start
+
+A background session of thimble's, {session}, runs for this workspace (`claude attach {short}`). Show it in the agent tray now: call the Agent tool with `subagent_type` "{type}", `run_in_background` true, `description` "{session}" and `{prompt}` as the whole prompt, then end the turn on that call, with no text after it. The tray entry follows the session by itself, so call nothing else for it.
+
+## bg-proxy-keep
+
+Keep showing {session}: call `wait_session` with `session` "{session}" again, and stop only when it says the session has ended.
+
+## wait_session-none
+
+thimble follows no background session named {session}. Write one line saying so and end your turn.
+
+## wait_session-send
+
+Send {session} a message: call SendMessage with `to` "{session}" and `{token}` as the whole message, word for word.
+
+## wait_session-main
+
+Only a tray entry calls `wait_session`, and the tray entry you started shows the session already. End your turn, with no text.
+
+## wait_session-duplicate
+
+Another tray entry already shows {session}. Write nothing and end your turn now.
+
+## wait_session-ended
+
+{session} has ended. Write one line saying so and end your turn.
+
+## wait_session-quiet
+
+Nothing new; {session} is {state}. Call `wait_session` again.
+
+## wait_session-copy
+
+Write all the news lines above in one reply, exactly as they are, each on its own line, adding and changing nothing.
+
+## wait_session-rule
+
+A message that reaches you now is for {session}: do not answer it, call `wait_session`, which passes it on.
+
+## agents-none
+
+No agent of thimble's runs now.
+
+## agents-help
+
+↓ at the prompt shows the tray entries and threads of this session, and `claude attach <id>` opens a background session in another terminal.
+
+## agents-print
+
+Print the text below in a code block, as it is, and add nothing else.
+
+{text}
+
+## message_thread-event
+
+The browser shows the message in the thread {thread}. Handle the thread's event now, as its bullet in your prompt says, and end the turn on that call, with no text after it: the terminal shows the call, and the thread shows the answer.
+
+{event}
+
+## message_thread-again
+
+The analyst asks the thread {thread} its questions again. Handle the thread's event now, as its bullet in your prompt says, and end the turn on that call, with no text after it: the terminal shows the call, and the thread shows the answer.
+
+{event}
+
+## message_thread-queued
+
+The message is in the thread {thread}, which waits for the fork you started for it and gets the message once that fork is known, so this turn needs no words from you.
+
+## message_thread-view
+
+The change is queued for the view's build in {thread}, which the browser shows, so this turn needs no words from you.
+
+## message_thread-empty
+
+{thread} takes no empty message. Pass what the analyst wrote as `message`.
+
+## message_thread-main
+
+{thread} takes no messages of its own: its composer sends them to you. Do what the message asks yourself.
+
+## stop-subagent
+
+The analyst pressed Stop on {title}, your subagent `{agent_id}`, in the browser. Stop it with TaskStop.
 
 ## message_orientation-empty
 
