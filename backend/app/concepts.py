@@ -121,10 +121,13 @@ BATCH_ITEMS = 10          # items per classifier call through the claude CLI (pr
 BATCH_CHARS = 40_000      # or fewer items when their texts add up to this many chars
 CONCURRENCY = 24          # classifier calls in flight through the CLI, a process each, at most (halved on a 429 or 529)
 RETRY_DELAYS = (1.0, 2.0, 4.0, 8.0)  # seconds before each retry of a rate-limited batch
-HEDGE_AFTER = 4           # answered calls a run times before it runs a slow call a second time
-HEDGE_FACTOR = 2.0        # a call is slow past this many times the run's median call
-HEDGE_MIN_S = 15.0        # and past this many seconds
 RETRY_JITTER = 0.25
+HEDGE_AFTER = 4           # answered calls a run times before it runs a slow call a second time
+HEDGE_FACTOR = 2.0        # a call is slow past this many times the median of the run's recent calls
+HEDGE_MIN_S = 15.0        # and past this many seconds
+HEDGE_RECENT = 50         # the median is of this many of the run's last answered calls
+HEDGE_POLL_S = 1.0        # how often a running call is checked for slowness
+HEDGE_SHARE = 4           # at most one in this many of the calls let run has a twin at a time
 BACKOFF_POLL = 0.2        # seconds between cancel checks while a retry waits
 QUOTE_MAX = 4_000         # chars of a classifier's quote kept on a row
 WINDOW_TEXT_MAX = 30_000  # chars of a record's or a sentence's text in one classifier item; a longer one is read in windows
@@ -1878,10 +1881,13 @@ async def _apply_prompt(c: str, concept: dict, units: Iterator[Unit], out: Path,
         allowed = min(float(in_flight), allowed + 1 / allowed)
 
     took: list[float] = []  # seconds of the run's answered calls
+    twins = 0  # calls running with a twin
 
     async def hedged(items: list[tuple[str, str]], since: int) -> Any:
-        """classify_structured, run a second time alongside when it is slow for this run (HEDGE_FACTOR x its median call,
-        at least HEDGE_MIN_S); the first answered call wins and the other is stopped."""
+        """classify_structured, run a second time alongside once it is slow for this run (HEDGE_FACTOR x the median of
+        its recent calls, at least HEDGE_MIN_S) and few others have a twin (HEDGE_SHARE); the first answered call wins and
+        the other is stopped."""
+        nonlocal twins
 
         def start() -> asyncio.Task:
             return asyncio.create_task(classify_structured(
@@ -1891,11 +1897,17 @@ async def _apply_prompt(c: str, concept: dict, units: Iterator[Unit], out: Path,
         t = time.monotonic()
         running = {start()}
         call = None
+        twinned = False
         try:
-            if len(took) >= HEDGE_AFTER:
-                done, _ = await asyncio.wait(running, timeout=max(HEDGE_MIN_S, HEDGE_FACTOR * statistics.median(took)))
-                if not done:
+            while len(running) == 1:
+                done, _ = await asyncio.wait(running, timeout=HEDGE_POLL_S)
+                if done:
+                    break
+                recent = took[-HEDGE_RECENT:]
+                if (len(recent) >= HEDGE_AFTER and twins < max(1, int(allowed) // HEDGE_SHARE)
+                        and time.monotonic() - t > max(HEDGE_MIN_S, HEDGE_FACTOR * statistics.median(recent))):
                     running.add(start())
+                    twinned, twins = True, twins + 1
             while running:
                 done, running = await asyncio.wait(running, return_when=asyncio.FIRST_COMPLETED)
                 for task in done:
@@ -1905,6 +1917,7 @@ async def _apply_prompt(c: str, concept: dict, units: Iterator[Unit], out: Path,
                         return call
             return call
         finally:
+            twins -= twinned
             for task in running:
                 task.cancel()
                 _stopping.add(task)

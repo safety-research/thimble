@@ -203,16 +203,18 @@ async def test_a_prompt_label_answers_once_its_first_rows_are_in(workspaces_tmp,
 
 
 async def test_a_slow_classifier_call_is_run_again_and_the_first_answer_wins(api, monkeypatch):
+    """The first call runs on while the calls beside it answer, so once they show it is slow it gets a twin."""
     monkeypatch.setattr(concepts, "BATCH_ITEMS", 1)
-    monkeypatch.setattr(concepts, "CONCURRENCY", 1)
+    monkeypatch.setattr(concepts, "CONCURRENCY", 4)
     monkeypatch.setattr(concepts, "HEDGE_MIN_S", 0.1)
+    monkeypatch.setattr(concepts, "HEDGE_POLL_S", 0.05)
     stopped = []
 
     async def call(c, concept, items, comment=True, on_retry=None):
         n = len(stopped)
         stopped.append(False)
         try:
-            await asyncio.sleep(600 if n == 5 else 0.01)
+            await asyncio.sleep(600 if n == 0 else 0.01)
         except asyncio.CancelledError:
             stopped[n] = True
             raise
@@ -222,7 +224,7 @@ async def test_a_slow_classifier_call_is_run_again_and_the_first_answer_wins(api
     k = await _create(api, description="a board post that claims a PR")
     s = (await api.post(f"/api/ws/{CORPUS}/concepts/{k['id']}/apply", json={"wait": True, "paths": ["board.jsonl"]})).json()
     await asyncio.sleep(0)
-    assert s["labeled"] == 8 and len(stopped) == 9 and stopped[5] and not any(stopped[:5] + stopped[6:])
+    assert s["labeled"] == 8 and len(stopped) == 9 and stopped[0] and not any(stopped[1:])
 
 
 async def test_a_prompt_label_within_another_reads_only_the_records_it_kept(workspaces_tmp, fake_classify):
