@@ -6,9 +6,11 @@ slot, or a stray '{{' or '}}' raises PromptError naming the file, so nothing mal
 """
 from __future__ import annotations
 
+import contextlib
+import contextvars
 import os
 import re
-from collections.abc import Iterable
+from collections.abc import Iterable, Iterator
 from pathlib import Path
 
 from . import capture
@@ -71,7 +73,28 @@ def _norm(name: str) -> str:
     return rel
 
 
+# The files that replace prompt files in the calls made inside `custom`, by the prompt file's path.
+_custom: contextvars.ContextVar[dict[str, Path]] = contextvars.ContextVar("custom_prompts", default={})
+
+
+@contextlib.contextmanager
+def custom(files: dict[str, Path]) -> Iterator[None]:
+    """Within the block, each prompt file named in `files` ({name: path}) is read from its path instead, whenever it is
+    loaded itself rather than included: an agent's `prompt` in thimble's config (userconf.prompt_files). The file is
+    filled in as the one it replaces, its includes still relative to the prompts directory."""
+    token = _custom.set({**_custom.get(), **{_norm(k): Path(v) for k, v in files.items()}})
+    try:
+        yield
+    finally:
+        _custom.reset(token)
+
+
 def _path(rel: str, stack: tuple[str, ...]) -> Path:
+    if not stack and rel in _custom.get():
+        found = _custom.get()[rel]
+        if not found.is_file():
+            raise PromptError(f"{rel}: the prompt file that replaces it, {found}, is missing")
+        return found
     if rel in stack:
         raise PromptError(f"{stack[-1]}: include cycle {' -> '.join((*stack, rel))}")
     path = _dir() / rel

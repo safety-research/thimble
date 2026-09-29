@@ -56,7 +56,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-from . import agent_session, agents, bg_session, cc_settings, config, ledger, orientation, prompts, tools
+from . import agent_session, agents, bg_session, cc_settings, config, ledger, orientation, prompts, tools, userconf
 
 log = logging.getLogger("thimble.orient_session")
 router = APIRouter()
@@ -182,7 +182,8 @@ def _launch(c: str, brief: str, passes: "list[str]", choices: dict[str, Any]) ->
     effort = effort_of(choices)
     ultracode = bool(choices.get("ultracode"))
     parts = parts_of(choices, passes)
-    name, agent = agent_definition(c, brief, parts)
+    with prompts.custom(userconf.prompt_files(c, "orientation")):
+        name, agent = agent_definition(c, brief, parts)
     env = {config.SUBAGENT_MODEL_ENV: subagents["model"]} if subagents["model"] else None
     return dict(role=orientation.ROLE, title=orientation.TITLE,
                 agent_args=["--agents", json.dumps({name: agent}, ensure_ascii=False), "--agent", name], effort=effort,

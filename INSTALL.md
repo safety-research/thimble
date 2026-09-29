@@ -4,6 +4,8 @@ thimble uses whichever auth path you have configured for `claude`: every model c
 your config dir with your user settings (thimble's sessions run in folders of their own, so auth set only in a
 project's `.claude/` settings does not reach them). thimble tells you when `claude` is missing or not logged in.
 
+What thimble's agents may do, and on which models, is set in `~/.thimble/config.json`: [docs/config.md](docs/config.md).
+
 ## Requirements
 
 - [Claude Code](https://docs.anthropic.com/en/docs/claude-code) (tested with 2.1.281), logged in (`claude auth status`).

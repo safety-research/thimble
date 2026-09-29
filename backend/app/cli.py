@@ -1791,6 +1791,27 @@ def harness_line(url: str, up: bool, commands: bool = True) -> str:
     return f"no headless Chromium in {playwright_browsers_dir()}, so cards are not checked{fix}"
 
 
+def config_line(workspaces: Path) -> str:
+    """thimble's config (userconf): its file and whether it is read, each workspace that overrides it, and the first
+    error of any of them."""
+    from . import userconf  # noqa: PLC0415
+
+    path = userconf.global_file()
+    over = sorted(p.parent.name for p in workspaces.glob(f"*/{userconf.FILE}")) if workspaces.is_dir() else []
+    errors = [e for e in [userconf.problem(), *(userconf.problem(c) for c in over)] if e]
+    text = f"{path} ({'read' if path.is_file() else 'no file, so the defaults'})"
+    text += f"; overridden for {', '.join(over)}" if over else ""
+    return text + (f"; {errors[0]}, and no agent starts until it is fixed" if errors else "")
+
+
+def browser_line() -> str:
+    """The browser the screenshots and the card harness start (userconf.browser)."""
+    from . import userconf  # noqa: PLC0415
+
+    which, what = userconf.browser()
+    return {"system": f"the system browser, {what}", "bundled": "Playwright's own Chromium"}.get(which, f"none: {what}")
+
+
 def pages_line(commands: bool = True) -> str:
     """Whether the frontend's headless Chromium, which loads a view's page for its checks and review and takes the
     screenshots, was fetched, and with `commands` the command that fetches it."""
@@ -2130,6 +2151,8 @@ def doctor_text(commands: bool = True) -> str:
     lines.append(f"  network: {_checked(network_line, status)}")
     caller = Path(os.environ.get("THIMBLE_CALLER_CWD") or os.getcwd())
     lines.append(f"  delivery (a session `thimble` starts in {caller}): {_checked(delivery_line, caller)}")
+    lines.append(f"  config: {_checked(config_line, Path(env['workspaces_dir']))}")
+    lines.append(f"  browser: {_checked(browser_line)}")
     lines.append(f"  card harness: {harness_line(url, up, commands)}")
     lines.append(f"  views and screenshots: {_checked(pages_line, commands)}")
     lines += sandbox_lines(commands)

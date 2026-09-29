@@ -1,6 +1,7 @@
 """Whether the headless Chromium thimble drives can start: the card harness's (render.py, the backend's Playwright) and
 the pages' (a view's checks and review, the screenshot tool and a video's frames: scripts/view_shot.mjs and
-scripts/ui_shot.mjs, the frontend's Playwright).
+scripts/ui_shot.mjs, the frontend's Playwright). Which browser that is, the system's Chrome, Edge or Chromium or
+Playwright's own, is thimble's config's `browser` (launch).
 
 A launch that fails because the browser or its system libraries are missing stays failed for the rest of the server
 run: the log warns once, and whatever needs that browser is skipped. The words here reach models, so they say what is
@@ -46,3 +47,16 @@ def mark_missing(kind: str, why: str) -> None:
 def missing(kind: str) -> str:
     """Why `kind`'s browser cannot start in this server run, '' while nothing says so."""
     return _missing.get(kind, "")
+
+
+def launch(kind: str) -> str | None:
+    """The browser `kind` starts by thimble's config (userconf.browser): the system browser's path, '' for Playwright's
+    own Chromium; None, with `kind` marked missing, when the config turns it off or names a system browser that is not
+    there."""
+    from . import userconf  # noqa: PLC0415 — userconf imports config, which the importers of this module import
+
+    which, what = userconf.browser()
+    if which == "off":
+        mark_missing(kind, what)
+        return None
+    return what

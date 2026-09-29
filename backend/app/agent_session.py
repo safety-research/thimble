@@ -58,6 +58,15 @@ can run it has no network. A SubagentStart hook gives each subagent its own scra
 agents one $TMPDIR. A caller that passes `unasked` (a writer, a critique, a check's run) also auto-allows Bash in the
 sandbox and edits in the work folder (sandbox_allow.py).
 
+The config. thimble's config (userconf.py) adds its rules to the session's --settings (userconf.Session.settings): an
+ask or a deny of every install or download command (`installs`), the web tools allowed or taken away (`web`), auto
+memory when it is not inherited, and, where the session's network is off and its Bash runs outside the sandbox, an ask
+of every Bash command. A command that `installs` or that ask covers goes to the card in every mode, Bypass included
+(userconf.Session.verdict): Claude Code's own ask rules miss a command behind `bash -c` or a path, so in auto mode the
+hook before each call asks for it as well, and the call it allowed is let through (`cleared`). The fence's sandbox has
+no network unless the agent's network is on, and a session whose config requires the sandbox (`sandbox.enforce`) does
+not start without it.
+
 Calls. A caller that passes `calls` numbers every call in an orientation chat's sequence (calls.py), and the call-ref
 hook (call_ref.py) tells the model each call's ref.
 
@@ -121,7 +130,7 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
 from . import (agents, bg_session, calls as calls_store, cc_settings, config, modes, orientation, permission_hook,
-               procs, retry, sandbox_allow, session, tools)
+               procs, retry, sandbox_allow, session, tools, userconf)
 from .ledger import atomic_write_text
 
 log = logging.getLogger("thimble.agent_session")
@@ -149,6 +158,7 @@ ASYNC_RESULT_RE = session.ASYNC_RESULT_RE
 AGENT_TOOLS = session.AGENT_TOOLS
 # analyst-facing lines, and the deny messages Claude Code passes to the session's model
 DENIED_LINE = "Denied from thimble's browser."
+CONFIG_DENIED_LINE = "thimble's config refuses this command."  # userconf: `installs` is "deny"
 TIMED_OUT_LINE = ("Nobody answered in thimble's browser within {wait}, so the call was denied. Carry on without it, "
                   "or find a way that needs no permission.")
 GONE_LINE = "The session ended before it was answered."
@@ -317,6 +327,9 @@ class Run:
     # (the analyst's excluded commands, their Bash ask rules) of an `unasked` session whose Bash runs in the sandbox,
     # for ask
     sandbox_rule: tuple[list[str], list[str]] | None = None
+    config: userconf.Session | None = None  # what thimble's config asks of it (module note, the config)
+    # calls the analyst allowed on the card before they ran (module note, the config), by grant_key: when
+    cleared: dict[tuple[str | None, str, str], float] = field(default_factory=dict)
     mode: str = "manual"  # the mode it runs in, one of modes.MODES (module note, permissions)
     patient: bool = False  # a request waits until the analyst answers, else `wait_s` (module note, permissions)
     wait_s: float | None = None  # None for PERMISSION_WAIT_S
@@ -529,18 +542,27 @@ def memory_excludes(corpus: Path, work: Path, home: Path | None = None) -> list[
     return out
 
 
-def fence(corpus: Path, work: Path, sandbox: bool | None = None, unasked: bool = False) -> dict[str, Any]:
+def fence(corpus: Path, work: Path, sandbox: bool | None = None, unasked: bool = False, network: bool = False,
+          auto_allow: bool = True) -> dict[str, Any]:
     """The --settings keys that keep the corpus folder read-only to a session whose process runs in its work folder `work`:
-    the permissions and memory excludes always, and the sandbox with no network where it can run (`sandbox` None asks
-    cc_settings.sandbox_ok). `unasked` adds the allows of the session's work in its own folder: edits in the work folder
-    and Bash in the sandbox."""
+    the permissions and memory excludes always, and the sandbox, with no network unless `network`, where it runs
+    (`sandbox` None asks cc_settings.sandbox_ok). `unasked` adds the allows of the session's work in its own folder:
+    edits in the work folder and Bash in the sandbox, by Claude Code itself too unless `auto_allow` is False."""
     perms: dict[str, Any] = {"additionalDirectories": [str(corpus)], "deny": [f"Edit(/{corpus}/**)"]}
     if unasked:
         perms["allow"] = [f"Edit(/{work}/**)"]
     out: dict[str, Any] = {"permissions": perms, "claudeMdExcludes": memory_excludes(corpus, work)}
     if sandbox if sandbox is not None else cc_settings.sandbox_ok():
-        out["sandbox"] = cc_settings.offline_sandbox(auto_allow=unasked)
+        out["sandbox"] = cc_settings.offline_sandbox(auto_allow=unasked and auto_allow, network=network)
     return out
+
+
+def with_config(settings: dict[str, Any], conf: dict[str, Any]) -> dict[str, Any]:
+    """`settings` with thimble's config's keys (userconf.Session.settings) added, each permission list joined."""
+    perms = dict(settings.get("permissions") or {})
+    for key, rules in (conf.get("permissions") or {}).items():
+        perms[key] = list(dict.fromkeys([*(perms.get(key) or []), *rules]))
+    return {**settings, **{k: v for k, v in conf.items() if k != "permissions"}, "permissions": perms}
 
 
 def fence_env(work: Path) -> dict[str, str]:
@@ -573,11 +595,13 @@ def sandbox_rule(cwd: Path) -> tuple[list[str], list[str]]:
     return cc_settings.sandbox_excluded(cwd), cc_settings.bash_ask_rules(cwd)
 
 
-def sandbox_hooks(rule: tuple[list[str], list[str]]) -> dict[str, Any]:
+def sandbox_hooks(rule: tuple[list[str], list[str]], installs: bool = False) -> dict[str, Any]:
     """The `hooks` that allow a fenced session's Bash calls where they run in the sandbox (module note, the fence):
-    sandbox_allow.py before every Bash call and on every Bash permission request, told `rule` (sandbox_rule)."""
+    sandbox_allow.py before every Bash call and on every Bash permission request, told `rule` (sandbox_rule) and with
+    `installs`, to leave install commands to the permission flow (module note, the config)."""
     names, asks = rule
     flags = "".join(f" --exclude {shlex.quote(n)}" for n in names) + "".join(f" --ask {shlex.quote(a)}" for a in asks)
+    flags += " --installs" if installs else ""
     command = f"{shlex.quote(sys.executable)} -S {shlex.quote(str(SANDBOX_HOOK))}{flags}"
     entry = [{"matcher": "Bash", "hooks": [{"type": "command", "command": command, "timeout": SANDBOX_HOOK_TIMEOUT_S}]}]
     return {event: entry for event in sandbox_allow.EVENTS}
@@ -593,22 +617,23 @@ def scratch_hooks(work: Path) -> dict[str, Any]:
                                                           "timeout": SANDBOX_HOOK_TIMEOUT_S}]}]}
 
 
-def permission_hooks(c: str, auto: bool = False, session: str = "", home: str = "") -> dict[str, Any]:
+def permission_hooks(c: str, auto: bool = False, session: str = "", home: str = "", wait: bool = False) -> dict[str, Any]:
     """The `hooks` that hand every permission request of a session, its subagents and its workflow agents to ask, and every
     call auto mode refused: permission_hook.py, run without site-packages, with a day to wait for the analyst. `auto` adds
-    it before each call, where the server answers whether the analyst allowed that call after a refusal. `session` and
+    it before each call, where the server answers whether the analyst allowed that call after a refusal, or with `wait`,
+    for a call thimble's config sends to the analyst, after the analyst answered (module note, the config). `session` and
     `home` name the session and thimble's home (where server.json is) on the hook's command line, for a session whose
     environment does not."""
     command = f"{shlex.quote(sys.executable)} -S {shlex.quote(str(PERMISSION_HOOK))} --ws {shlex.quote(c)}"
     command += f" --session {shlex.quote(session)}" if session else ""
     command += f" --home {shlex.quote(home)}" if home else ""
 
-    def entry(timeout: int) -> list[dict[str, Any]]:
-        return [{"matcher": "*", "hooks": [{"type": "command", "command": command, "timeout": timeout}]}]
+    def entry(timeout: int, flag: str = "") -> list[dict[str, Any]]:
+        return [{"matcher": "*", "hooks": [{"type": "command", "command": command + flag, "timeout": timeout}]}]
 
     out = {REQUEST: entry(permission_hook.TIMEOUT), DENIED: entry(permission_hook.TIMEOUT)}
     if auto:
-        out[PRE] = entry(permission_hook.PRE_TIMEOUT)
+        out[PRE] = entry(permission_hook.TIMEOUT, " --wait") if wait else entry(permission_hook.PRE_TIMEOUT)
     return out
 
 
@@ -655,6 +680,7 @@ async def start(c: str, key: str, *, role: str, title: str, agent_args: list[str
         background = True  # a chat that ran as a background session keeps its session
     cwd = config.corpus_dir(c)
     folder = work if work is not None else cwd  # where the process runs (module note, the fence)
+    conf = userconf.session(c, userconf.agent_of_row(agent), sandbox=work is not None)
     sid = resume or str(uuid.uuid4())
     mode = start_mode(c, agent, chat=chat if resume else None, background=background)
     permission_mode = modes.flag(mode)
@@ -664,7 +690,8 @@ async def start(c: str, key: str, *, role: str, title: str, agent_args: list[str
     rule: tuple[list[str], list[str]] | None = None
     if work is not None:
         work.mkdir(parents=True, exist_ok=True)
-        fenced = fence(cwd, work, unasked=unasked)
+        fenced = fence(cwd, work, sandbox=conf.sandboxed, unasked=unasked, network=conf.network,
+                       auto_allow=not conf.install_asks())
         perms = given.get("permissions") if isinstance(given.get("permissions"), dict) else {}
         given = {**given, **fenced, "permissions": {**perms, **fenced["permissions"]}}
         extra_env.update(fence_env(work))
@@ -672,9 +699,13 @@ async def start(c: str, key: str, *, role: str, title: str, agent_args: list[str
         hooks.update(scratch_hooks(work))
         if "sandbox" in fenced and unasked:
             rule = sandbox_rule(cwd)
-            hooks.update(sandbox_hooks(rule))
-    given = with_web_asks(given, permission_mode)
-    for event, entries in permission_hooks(c, permission_mode == "auto").items():
+            hooks.update(sandbox_hooks(rule, conf.install_asks()))
+    given = with_config(given, conf.settings())
+    if conf.web == "ask":
+        given = with_web_asks(given, permission_mode)
+    elif conf.web == "off":
+        disallowed = [*disallowed, *WEB_TOOLS]
+    for event, entries in permission_hooks(c, permission_mode == "auto", wait=conf.may_ask()).items():
         # the permission hook alone answers a request, since ask applies the sandbox rule itself; before a call
         # both hooks run
         hooks[event] = [*hooks.get(event, []), *entries] if event == PRE else entries
@@ -729,7 +760,7 @@ async def start(c: str, key: str, *, role: str, title: str, agent_args: list[str
             e.chat = run.chat
             bg_session._save(c)
     run.calls = (run.chat if calls is True else str(calls)) if calls else None
-    run.sandbox_rule, run.mode, run.patient = rule, mode, patient
+    run.sandbox_rule, run.config, run.mode, run.patient = rule, conf, mode, patient
     run.rules = rules
     run.lv = session.Live(c, sid, str(cwd), None, proc.pid)
     run.main = session.Sub(c, run.chat, None, None, role=role)
@@ -2046,13 +2077,13 @@ def _by_chat(c: str, chat: str) -> Run | None:
 
 def host(c: str, key: str, chat: str, *, agent: str, wait_s: float,
          on_expired: Callable[[Run, dict[str, Any]], None] | None = None,
-         sandbox: "tuple[list[str], list[str]] | None" = None) -> Run:
+         sandbox: "tuple[list[str], list[str]] | None" = None, conf: userconf.Session | None = None) -> Run:
     """Answer the permission hook's requests of the session `key`, which this module does not follow, on the chat `chat`
     (module note, hosted sessions): by the mode of the row `agent` (modes.AGENTS), each denied after `wait_s`
     unanswered, when `on_expired` hears of it. With `sandbox` (sandbox_rule) a Bash call that runs in the sandbox is
-    allowed at once."""
+    allowed at once; `conf` is what thimble's config asks of it (module note, the config)."""
     run = Run(c, key, chat, "", config.corpus_dir(c), "dev", mode=modes.mode_for(c, agent), wait_s=wait_s,
-              on_expired=on_expired, sandbox_rule=sandbox)
+              on_expired=on_expired, sandbox_rule=sandbox, config=conf)
     _hosted[(c, key)] = run
     return run
 
@@ -2142,14 +2173,22 @@ async def ask(c: str, key: str | None, tool_name: str, inp: Any, agent_id: str |
     if run is None:
         return {"behavior": "deny", "message": GONE_LINE}
     granted = {"behavior": "allow", "updatedInput": inp if isinstance(inp, dict) else {}}
-    if run.sandbox_rule is not None and sandbox_allow.allows(tool_name, inp, *run.sandbox_rule):
+    verdict = run.config.verdict(tool_name, inp) if run.config is not None else ""
+    if verdict == "deny":
+        agents.log_permission(c, "answered", chat=run.chat, session=key, tool=tool_name, what=_what(tool_name, inp),
+                              agent_id=agent_id, answer="deny: thimble's config")
+        return {"behavior": "deny", "message": CONFIG_DENIED_LINE}
+    if verdict == "own" or _cleared(run, agent_id, tool_name, inp):
+        return granted
+    if verdict != "ask" and run.sandbox_rule is not None and sandbox_allow.allows(tool_name, inp, *run.sandbox_rule):
         return granted
     web = web_rule(tool_name, inp)
 
     def at_once() -> dict[str, Any] | None:
-        """granted in Bypass or for a web call the workspace's kept rules allow, else None."""
+        """granted in Bypass or for a web call the workspace's kept rules allow, else None; never for a call thimble's
+        config sends to the analyst."""
         kept = web is not None and web in web_rules(c)
-        if not (kept or run.mode == BYPASS):
+        if verdict == "ask" or not (kept or run.mode == BYPASS):
             return None
         if event == DENIED:
             _remember(run, agent_id, tool_name, inp, True, tool_use_id)
@@ -2556,6 +2595,13 @@ def before_call(c: str, key: str | None, tool_name: str, inp: Any, agent_id: str
     return allowed if _use_pass(run, agent_id, tool_name) else {}
 
 
+def _cleared(run: Run, agent_id: str | None, tool_name: str, inp: Any) -> bool:
+    """Whether the analyst allowed this call on the card before it ran, within GRANT_TTL_S (module note, the config); the
+    allow is used up."""
+    when = run.cleared.pop(grant_key(agent_id, tool_name, inp), None)
+    return when is not None and time.monotonic() - when <= GRANT_TTL_S
+
+
 def answer(c: str, chat: str, request_id: str, allow: bool, always: bool = False, shown: int = 0) -> bool:
     """The analyst's answer to a pending request of the session whose chat is `chat`, `always` for the card's "don't
     ask again", which allows it with the updates offered for it (module note, don't ask again), covering the first
@@ -2878,7 +2924,18 @@ async def permission_request_route(c: str, body: PermissionRequestBody) -> dict[
     auto mode refused, answered by ask however long the analyst takes, or a call about to run, answered by before_call
     at once."""
     if body.event == PRE:
-        return before_call(c, body.session, body.tool_name, body.tool_input, body.agent_id)
+        got = before_call(c, body.session, body.tool_name, body.tool_input, body.agent_id)
+        run = asker(c, body.session)
+        verdict = run.config.verdict(body.tool_name, body.tool_input) if not got and run and run.config else ""
+        if verdict == "deny":
+            return {"behavior": "deny", "message": CONFIG_DENIED_LINE}
+        if verdict != "ask" or run is None:
+            return got
+        answered = await ask(c, body.session, body.tool_name, body.tool_input, body.agent_id, body.agent_type)
+        if answered.get("behavior") != "allow":
+            return {"behavior": "deny", "message": answered.get("message") or DENIED_LINE}
+        run.cleared[grant_key(body.agent_id, body.tool_name, body.tool_input)] = time.monotonic()
+        return {"behavior": "allow", "message": ALLOWED_LINE}
     return await ask(c, body.session, body.tool_name, body.tool_input, body.agent_id, body.agent_type,
                      event=DENIED if body.event == DENIED else REQUEST, reason=body.reason, tool_use_id=body.tool_use_id,
                      suggestions=body.suggestions)

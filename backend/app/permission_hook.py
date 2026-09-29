@@ -6,7 +6,8 @@ its subagents and its workflow agents, and it hands each to the server:
 - PermissionDenied: auto mode refused a call. The server shows it like a request; if the analyst allows it the hook
   answers `retry`, so the model may make the call again.
 - PreToolUse, in auto mode: the hook answers `allow` for a call the analyst allowed after auto mode refused it, so the
-  retry skips the classifier, or `deny` for one the analyst denied.
+  retry skips the classifier, or `deny` for one the analyst denied. With `--wait`, a call thimble's config sends to the
+  analyst waits here for their answer (agent_session, the config).
 
 A hook is used rather than --permission-prompt-tool because requests from background subagents and workflow agents reach
 only the hook; using both would ask twice for foreground requests. Claude Code waits for the hook's decision (its
@@ -90,7 +91,8 @@ def main(argv: list[str]) -> int:
         fields["suggestions"] = hook["permission_suggestions"]
     try:
         out = decision(post(f"/api/ws/{urllib.parse.quote(ws, safe='')}/sessions/permission", fields,
-                            PRE_TIMEOUT - 2 if event == PRE else TIMEOUT, arg(argv, "--home")), event)
+                            PRE_TIMEOUT - 2 if event == PRE and "--wait" not in argv else TIMEOUT, arg(argv, "--home")),
+                       event)
     except (OSError, ValueError):
         return 0
     if out is not None:

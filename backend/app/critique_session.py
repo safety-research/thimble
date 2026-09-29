@@ -421,7 +421,10 @@ agent_session.on_relaunch(tools.CRITIQUE_SESSION, _relaunch)
 def _critic(c: str) -> tuple[str, dict[str, Any], dict[str, Any], str]:
     """(name, definition, role settings, effort) of the critic for workspace `c`: critic.md's agent with the `critic`
     role's model, effort and fast mode (config.models_for)."""
-    agent_name, agent = agent_definition()
+    from . import prompts, userconf  # noqa: PLC0415
+
+    with prompts.custom(userconf.prompt_files(c, "critic")):
+        agent_name, agent = agent_definition()
     conf = config.models_for(c)["critic"]
     agent = agent_session.role_agent(agent, conf)
     return agent_name, agent, conf, str(agent.get("effort") or DEFAULT_EFFORT)

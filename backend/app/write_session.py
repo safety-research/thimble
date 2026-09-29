@@ -95,7 +95,10 @@ async def start(c: str, doc: str, request: str = "", after: str = "") -> agent_s
 def _launch(c: str, doc: str) -> dict[str, Any]:
     """The arguments of agent_session.start that a start and a resume after a restart share: the writer's agent, its
     role's model, effort and fast mode, and its document."""
-    name, agent = agent_definition()
+    from . import prompts, userconf  # noqa: PLC0415
+
+    with prompts.custom(userconf.prompt_files(c, "writer")):
+        name, agent = agent_definition()
     models = config.models_for(c)
     background = bg_session.wanted(c, "writer")
     agent = agent_session.role_agent(agent, models["writer"])

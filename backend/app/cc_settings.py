@@ -215,11 +215,13 @@ def sandbox_ok(refresh: bool = False) -> bool:
     return ok
 
 
-def offline_sandbox(auto_allow: bool = False) -> dict[str, Any]:
-    """The `sandbox` settings of a session thimble fences (agent_session.fence, view builds): on, with no network and no
-    command run outside it; `auto_allow` lets a command that runs in it skip its permission request."""
-    return {"enabled": True, "failIfUnavailable": False, "autoAllowBashIfSandboxed": auto_allow,
-            "allowUnsandboxedCommands": False, "network": {"deniedDomains": ["*"]}}
+def offline_sandbox(auto_allow: bool = False, network: bool = False) -> dict[str, Any]:
+    """The `sandbox` settings of a session thimble fences (agent_session.fence, view builds): on, with no network unless
+    `network` (then the analyst's own sandbox settings say where it reaches), and no command run outside it;
+    `auto_allow` lets a command that runs in it skip its permission request."""
+    out = {"enabled": True, "failIfUnavailable": False, "autoAllowBashIfSandboxed": auto_allow,
+           "allowUnsandboxedCommands": False}
+    return out if network else {**out, "network": {"deniedDomains": ["*"]}}
 
 
 def sandbox_excluded(cwd: Path) -> list[str]:

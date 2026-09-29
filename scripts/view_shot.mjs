@@ -345,7 +345,9 @@ async function main() {
   const opt = args(process.argv.slice(2))
   const doc = readFileSync(opt.frame, 'utf8')
   const states = JSON.parse(readFileSync(opt.states, 'utf8') || '[]')
-  const browser = await chromium.launch()
+  // the system's Chrome, Edge or Chromium when thimble's config picks it (backend/app/userconf.py)
+  const executablePath = process.env.THIMBLE_BROWSER_PATH || undefined
+  const browser = await chromium.launch({ executablePath })
   const out = []
   try {
     for (let i = 0; i < states.length; i++) {

@@ -47,9 +47,9 @@ describe('the permission modes', () => {
     expect(agentMode({}, 'writer', 'auto')).toBe('auto')
     expect(agentMode({}, 'writer', 'bypassPermissions')).toBe('bypass')
     for (const other of ['default', 'acceptEdits', 'plan', 'dontAsk', null, undefined]) expect(agentMode({}, 'dev', other)).toBe('manual')
-    expect(agentMode({ views: 'bypass' }, 'views', 'auto')).toBe('bypass')
-    expect(agentMode({ views: 'bypass' }, 'orient', 'auto')).toBe('auto')
-    expect(agentMode({ views: 'bypass' }, 'views', 'auto', ['bypass'])).toBe('auto')
+    expect(agentMode({ checks: 'bypass' }, 'checks', 'auto')).toBe('bypass')
+    expect(agentMode({ checks: 'bypass' }, 'orient', 'auto')).toBe('auto')
+    expect(agentMode({ checks: 'bypass' }, 'checks', 'auto', ['bypass'])).toBe('auto')
     expect(agentMode({}, 'orient', 'auto', ['auto'])).toBe('manual')
   })
 

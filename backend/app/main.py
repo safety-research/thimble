@@ -231,6 +231,10 @@ async def _lifespan(app: FastAPI):
         config.migrate_registry()
     except Exception:
         log.exception("bringing the install tree's registry records into %s failed", config.DATA_DIR)
+    from . import userconf
+
+    if why := userconf.problem():
+        log.warning("%s; no agent starts until it is fixed", why)
     # what older versions left in Claude Code's files and in the workspaces, taken out once: the keys they wrote into
     # folders' settings.local.json (claude_changes.cleanup) and each workspace's own Claude Code config dir
     try:

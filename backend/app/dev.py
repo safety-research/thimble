@@ -28,17 +28,23 @@ session is main again (stop_workspace, resume_views).
 
 Permissions. A session of a workspace asks the analyst like the other agents: its --settings carry agent_session's
 permission hook with the session's key (`view:<slug>`, `ticket:<id>`), and the run hosts that key on its chat
-(agent_session.host), so each request shows on the card and is answered by the mode of its row (modes.py: the dev
-agent's for a ticket, view builds' for a view, agent_row), or denied after PERMISSION_WAIT_S unanswered. Allowed
-unasked is only its work in its own folder: edits there, reads of the folders its task names, and Bash in the sandbox
-(sandbox_allow's rule, before each call and on each request) with its check command. A session with no workspace
-(`thimble fix`, while the server is down) has nobody to ask, so it keeps UNHOSTED_TOOLS and has no web tools.
+(agent_session.host), so each request shows on the card and is answered by the mode of the dev agent's row (modes.py),
+or denied after PERMISSION_WAIT_S unanswered. Allowed unasked is only its work in its own folder: edits there, reads of
+the folders its task names, and Bash in the sandbox (sandbox_allow's rule, before each call and on each request) with
+its check command. A session with no workspace (`thimble fix`, while the server is down) has nobody to ask, so it keeps
+UNHOSTED_TOOLS, has no web tools, and is refused what thimble's config would have it ask for.
 
-The offline fence. A view build stays off the network in every mode, with or without the sandbox: it has no web tools,
-deny rules refuse the commands that reach the network or install software (offline_deny), and its Bash runs with the
-package managers offline and a proxy that refuses every connection (view_env). Where the sandbox runs, its Bash also has
-no network. It runs the model settings of the session that asked for it, unless the analyst chose the dev agent's in
-Settings (view_models).
+thimble's config. Code tickets and view builds are the dev agent's sessions, with its `agents.dev` settings
+(userconf.py, dev_config); agent_session's module note says what the config adds. A view build's Bash runs in the
+sandbox where it can run; a code ticket's never does, since it commits into the checkout's git folder and shoots the
+validation stack on loopback. By default the dev agent has no web tools and its network is off.
+
+The offline fence. With the dev agent's network off, a view build's Bash runs in the sandbox with no network where the
+sandbox runs; where it does not, every command but its check goes to the analyst. Deny rules refuse the commands that
+reach the network or install software (offline_deny), and its Bash runs with the package managers offline and a proxy
+that refuses every connection (view_env); these stop a mistake, not a command that means to get round them, which is
+why the sandbox or the analyst decides. A view build runs the model settings of the session that asked for it, unless
+the dev agent's are set (view_models).
 """
 from __future__ import annotations
 
@@ -70,7 +76,7 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
-from . import agents, cc_settings, cli, config, headless, modes, procs, prompts
+from . import agents, cc_settings, cli, config, headless, modes, procs, prompts, userconf
 from .cli import SOURCE_CHANGED, home as thimble_home
 from .ledger import atomic_write_text
 from .session import find_transcript
@@ -99,13 +105,12 @@ PERMISSION_WAIT_S = float(os.environ.get("THIMBLE_DEV_PERMISSION_WAIT_S", "") or
 EXPIRED_LINE = "nobody answered the request to use {tool} ({what}) within {wait}, so it was denied and the session went on"
 WEB_TOOLS = ("WebFetch", "WebSearch")  # agent_session.WEB_TOOLS
 # Not given to a fenced session, a view build in the corpus folder: EnterWorktree writes a git worktree into the
-# session's own folder, which the fence's denies do not stop, nobody answers AskUserQuestion or plan mode's approval,
-# and a view build stays off the network (offline_deny).
-FENCED_OFF_TOOLS = ("EnterWorktree", "ExitWorktree", "AskUserQuestion", "EnterPlanMode", "ExitPlanMode", *WEB_TOOLS)
-# The Bash commands a view build's session may not run in any permission mode (offline_deny): those that reach the
-# network or install software, each by name and at a path, the subcommands that do, the modules that do as `python -m`,
-# and a shell run inside a command, whose own commands no rule would see. Claude Code checks a rule against each command
-# of a line, also after wrappers such as `timeout` and `env`.
+# session's own folder, which the fence's denies do not stop, and nobody answers AskUserQuestion or plan mode's approval.
+FENCED_OFF_TOOLS = ("EnterWorktree", "ExitWorktree", "AskUserQuestion", "EnterPlanMode", "ExitPlanMode")
+# The Bash commands a view build's session may not run in any permission mode while the dev agent's network is off
+# (offline_deny): those that reach the network or install software, each by name and at a path, the subcommands that
+# do, the modules that do as `python -m`, and a shell run inside a command, whose own commands no rule would see. Claude
+# Code checks a rule against each command of a line, also after wrappers such as `timeout` and `env`.
 OFFLINE_PROGRAMS = ("curl", "wget", "aria2c", "nc", "ncat", "netcat", "socat", "telnet", "ftp", "sftp", "scp", "ssh",
                     "rsync", "gh", "pip", "pip3", "pipx", "uv", "uvx", "poetry", "pdm", "conda", "mamba", "micromamba",
                     "npm", "npx", "pnpm", "pnpx", "yarn", "bun", "bunx", "corepack", "deno", "gem", "cargo", "apt",
@@ -1072,8 +1077,9 @@ async def run_shot(url: str, out: Path, selector: str | None = None, *, info_out
     """`node scripts/ui_shot.mjs`: 0 ok, 2 selector not found (the viewport is written instead), 1 error, -1 timeout.
     Options map to the script's options of the same names. headless.Missing when the browser is missing, which stays so
     for the rest of the server run."""
-    if gone := headless.missing(headless.PAGES):
-        raise headless.Missing(gone)
+    path = headless.launch(headless.PAGES)
+    if path is None or headless.missing(headless.PAGES):
+        raise headless.Missing(headless.missing(headless.PAGES))
     cmd = ["node", str(shot_script()), "--url", url, "--out", str(out), *(["--offline"] if offline else [])]
     if selector:
         cmd += ["--selector", selector]
@@ -1089,7 +1095,9 @@ async def run_shot(url: str, out: Path, selector: str | None = None, *, info_out
         cmd += ["--press", key]
     if wait_ms is not None:
         cmd += ["--wait", str(int(wait_ms))]
-    proc = await asyncio.create_subprocess_exec(*cmd, cwd=str(REPO), stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+    env = {**os.environ, **({userconf.BROWSER_ENV: path} if path else {})}
+    proc = await asyncio.create_subprocess_exec(*cmd, cwd=str(REPO), stdout=asyncio.subprocess.PIPE,
+                                                stderr=asyncio.subprocess.PIPE, env=env)
     try:
         _, err = await asyncio.wait_for(proc.communicate(), SHOT_TIMEOUT_S)
     except asyncio.TimeoutError:
@@ -1211,25 +1219,36 @@ UNTRUSTED_LINE = ("Claude Code does not trust {folder}, so the dev agent's sessi
                   "{folder} once and accept its trust prompt, then Retry.")
 
 
-def read_only_fence(folders: "tuple[Path, ...] | list[Path]",
-                    outside: "tuple[str, ...] | list[str]" = ()) -> dict[str, Any]:
+def read_only_fence(folders: "tuple[Path, ...] | list[Path]", outside: "tuple[str, ...] | list[str]" = (),
+                    conf: "userconf.Session | None" = None) -> dict[str, Any]:
     """The --settings keys that keep `folders` unchanged by a background session: a deny of Edit in each (which Claude
-    Code's path checks also apply to Bash commands naming those files) and, where the sandbox can run, the Bash sandbox
-    with no network, which turns the deny into a write deny for scripts too, and whose commands run unasked; `outside`
-    commands run outside it. Reads stay allowed. {} for no folders."""
+    Code's path checks also apply to Bash commands naming those files) and, where the session's Bash runs in the
+    sandbox (`conf`, by default where the sandbox can run), the sandbox, with no network unless the config's is on,
+    which turns the deny into a write deny for scripts too, and whose commands run unasked unless the config asks about
+    some; `outside` commands run outside it. Reads stay allowed. {} for no folders."""
     if not folders:
         return {}
     out: dict[str, Any] = {"permissions": {"deny": [f"Edit(/{Path(f)}/**)" for f in folders]}}
-    if cc_settings.sandbox_ok():
-        out["sandbox"] = {**cc_settings.offline_sandbox(auto_allow=True),
-                          **({"excludedCommands": list(outside)} if outside else {})}
+    if conf.sandboxed if conf is not None else cc_settings.sandbox_ok():
+        box = cc_settings.offline_sandbox(auto_allow=not (conf and conf.install_asks()),
+                                          network=bool(conf and conf.network))
+        out["sandbox"] = {**box, **({"excludedCommands": list(outside)} if outside else {})}
     return out
 
 
 def agent_row(key: str) -> str:
-    """The row of the permission modes (modes.AGENTS) a dev session with this key asks by: view builds' for a view,
-    else the dev agent's."""
-    return "views" if key.startswith("view:") else "dev"
+    """The row of the permission modes (modes.AGENTS) a dev session asks by: the dev agent's, for a view build too."""
+    return "dev"
+
+
+def dev_config(workspace: str | None, *, sandbox: bool, hosted: bool = True) -> userconf.Session:
+    """What thimble's config asks of a dev session (userconf.session): `sandbox` for a view build, whose Bash runs in the
+    sandbox where it can; `hosted` False for one nobody can answer (module note, permissions). ConfigError as
+    userconf.session raises it."""
+    conf = userconf.session(workspace, "dev", sandbox=sandbox)
+    if not hosted:
+        conf.hosted = False
+    return conf
 
 
 def own_work(folder: Path, reads: "tuple[Path, ...] | list[Path]" = ()) -> list[str]:
@@ -1251,7 +1270,8 @@ def _host(c: str | None, asking: dict[str, Any], chat: str | None, run_log: "Log
 
     box = asking.get("sandbox")
     agent_session.host(c, str(asking["key"]), chat, agent=agent_row(str(asking["key"])), wait_s=PERMISSION_WAIT_S,
-                       on_expired=expired, sandbox=(list(box[0]), list(box[1])) if box else None)
+                       on_expired=expired, sandbox=(list(box[0]), list(box[1])) if box else None,
+                       conf=asking.get("config"))
 
 
 def _unhost(c: str | None, key: str) -> None:
@@ -1286,45 +1306,48 @@ class Sessions:
                fence: dict[str, Any] | None = None, asking: dict[str, Any] | None = None,
                models: dict[str, Any] | None = None) -> list[str]:
         """The session's flags: its `models` ({model, effort, fast}, where None leaves one to the analyst's Claude Code
-        settings), else the dev role's, `--add-dir` folders, the `fence` settings and how it asks
-        (module note, permissions). `asking` names the session's key, {key, allow, sandbox?}, the allow rules of its work
-        in its own folder, and for a session whose Bash runs in the sandbox, sandbox_allow's rule; with it and a
-        workspace, the permission hook answers its requests by its row's mode (agent_row), and a process in Auto runs in
-        auto mode. Without, it keeps UNHOSTED_TOOLS and gets no web tools. It gets no MCP
-        server, since its task needs none of the analyst's, not the tools that schedule a later turn
-        (agent_session.LATER_TOOLS), since the session is stopped once its turn ends, and, when fenced, not
+        settings), else the dev role's, `--add-dir` folders, the `fence` settings, thimble's config for the dev agent and
+        how it asks (module note, permissions). `asking` names the session's key, {key, allow, sandbox?, config?}, the
+        allow rules of its work in its own folder, for a session whose Bash runs in the sandbox, sandbox_allow's rule,
+        and what the config asks of it (dev_config); with it and a workspace, the permission hook answers its requests by
+        the dev agent's mode, and a process in Auto runs in auto mode. Without, it keeps UNHOSTED_TOOLS and gets no web
+        tools. It gets no MCP server, since its task needs none of the analyst's, not the tools that schedule a later
+        turn (agent_session.LATER_TOOLS), since the session is stopped once its turn ends, and, when fenced, not
         FENCED_OFF_TOOLS."""
         from . import agent_session  # noqa: PLC0415 — agent_session is large and this module otherwise needs none of it
 
-        conf = models or config.models_for(workspace)["dev"]
-        denied = [*agent_session.LATER_TOOLS, *(FENCED_OFF_TOOLS if fence else ())]
-        settings: dict[str, Any] = {} if conf.get("fast") is None else {"fastMode": bool(conf["fast"])}
-        settings.update(fence or {})
+        conf_models = models or config.models_for(workspace)["dev"]
         hosted = bool(workspace and asking and asking.get("key"))
-        mode = modes.flag(modes.mode_for(str(workspace), agent_row(str((asking or {})["key"])))) if hosted else "default"
+        conf = (asking or {}).get("config") or dev_config(workspace, sandbox=bool(fence and "sandbox" in fence),
+                                                           hosted=hosted)
+        denied = [*agent_session.LATER_TOOLS, *(FENCED_OFF_TOOLS if fence else ())]
+        settings: dict[str, Any] = {} if conf_models.get("fast") is None else {"fastMode": bool(conf_models["fast"])}
+        settings.update(fence or {})
+        settings = agent_session.with_config(settings, conf.settings())
+        mode = modes.flag(modes.mode_for(str(workspace), "dev")) if hosted else "default"
         if hosted:
             perms = dict(settings.get("permissions") or {})
             allow = [*(perms.get("allow") or []), *(asking or {}).get("allow", [])]
             settings["permissions"] = {**perms, **({"allow": list(dict.fromkeys(allow))} if allow else {})}
-            if not fence:  # a fenced session has no web tools
+            if conf.web == "ask":
                 settings = agent_session.with_web_asks(settings, mode)
             hooks = agent_session.permission_hooks(str(workspace), mode == "auto", session=str((asking or {})["key"]),
-                                                   home=str(thimble_home()))
+                                                   home=str(thimble_home()), wait=conf.may_ask())
             box = (asking or {}).get("sandbox")
             if box and "sandbox" in settings:
                 # before a call both hooks run; a request is the permission hook's alone, which applies the same rule
-                pre = agent_session.sandbox_hooks((list(box[0]), list(box[1])))[agent_session.PRE]
+                pre = agent_session.sandbox_hooks((list(box[0]), list(box[1])), conf.install_asks())[agent_session.PRE]
                 hooks[agent_session.PRE] = [*pre, *hooks.get(agent_session.PRE, [])]
             settings["hooks"] = hooks
-        else:
+        if not hosted or conf.web == "off":
             denied += agent_session.WEB_TOOLS
         allowed = [] if hosted else ["--allowedTools", ",".join(UNHOSTED_TOOLS)]
-        flags = ["-n", name, *(["--model", str(conf["model"])] if conf.get("model") else []), *allowed,
+        flags = ["-n", name, *(["--model", str(conf_models["model"])] if conf_models.get("model") else []), *allowed,
                  "--disallowedTools", ",".join(dict.fromkeys(denied)), "--strict-mcp-config", "--permission-mode", mode]
         for d in add_dirs:
             flags += ["--add-dir", str(d)]
-        if conf.get("effort"):
-            flags += ["--effort", str(conf["effort"])]
+        if conf_models.get("effort"):
+            flags += ["--effort", str(conf_models["effort"])]
         if settings:
             flags += ["--settings", json.dumps(settings)]
         return flags
@@ -1658,6 +1681,11 @@ def _target_lines(t: dict[str, Any]) -> str:
 
 
 def build_prompt(t: dict[str, Any], *, worktree: Path, ui_url: str, api_url: str, before_shot: str | None) -> str:
+    with prompts.custom(userconf.prompt_files(t.get("workspace"), "dev")):
+        return _ticket_prompt(t, worktree=worktree, ui_url=ui_url, api_url=api_url, before_shot=before_shot)
+
+
+def _ticket_prompt(t: dict[str, Any], *, worktree: Path, ui_url: str, api_url: str, before_shot: str | None) -> str:
     return prompts.render_dev("dev-ticket", {
         "ticket": str(t["id"]),
         "title": str(t.get("title") or ""),
@@ -1673,13 +1701,10 @@ def build_prompt(t: dict[str, Any], *, worktree: Path, ui_url: str, api_url: str
 
 
 def build_fix_prompt(t: dict[str, Any], *, worktree: Path, doctor: str) -> str:
-    return prompts.render_dev("dev-fix", {
-        "ticket": str(t["id"]),
-        "title": str(t.get("title") or ""),
-        "body": fenced("ticket", str(t.get("body") or "")),
-        "worktree": str(worktree),
-        "doctor": fenced("thimble doctor", doctor),
-    })
+    values = {"ticket": str(t["id"]), "title": str(t.get("title") or ""), "body": fenced("ticket", str(t.get("body") or "")),
+              "worktree": str(worktree), "doctor": fenced("thimble doctor", doctor)}
+    with prompts.custom(userconf.prompt_files(None, "dev")):
+        return prompts.render_dev("dev-fix", values)
 
 
 def build_gates_prompt(report: str) -> str:
@@ -1773,15 +1798,22 @@ def ticket_key(tid: str) -> str:
 
 
 async def run_ticket(t: dict[str, Any], run: Run, *, doctor: str | None = None) -> dict[str, Any]:
-    """The whole ticket (_run_ticket), its session's permission requests answered on its chat meanwhile."""
-    _host(t.get("workspace"), {"key": ticket_key(t["id"])}, t.get("chat"), _log_for(t))
+    """The whole ticket (_run_ticket), its session's permission requests answered on its chat meanwhile, as thimble's
+    config asks (dev_config)."""
     try:
-        return await _run_ticket(t, run, doctor=doctor)
+        conf: userconf.Session | str = dev_config(t.get("workspace"), sandbox=False, hosted=bool(t.get("workspace")))
+    except userconf.ConfigError as e:
+        conf = str(e)
+    if not isinstance(conf, str):
+        _host(t.get("workspace"), {"key": ticket_key(t["id"]), "config": conf}, t.get("chat"), _log_for(t))
+    try:
+        return await _run_ticket(t, run, doctor=doctor, conf=conf)
     finally:
         _unhost(t.get("workspace"), ticket_key(t["id"]))
 
 
-async def _run_ticket(t: dict[str, Any], run: Run, *, doctor: str | None = None) -> dict[str, Any]:
+async def _run_ticket(t: dict[str, Any], run: Run, *, doctor: str | None = None,
+                      conf: "userconf.Session | str | None" = None) -> dict[str, Any]:
     """The whole ticket: worktree, stack and before shot, the session's turns with gates fed back, after shot, apply, UI
     rebuild (rolled back when it fails), then the restart rules. `doctor` is `thimble fix`'s path: no stack, rebuild or
     restart. A stopped run ends `stopped` or `dismissed`; one a shutdown cuts short is queued again up to REQUEUE_MAX
@@ -1798,7 +1830,7 @@ async def _run_ticket(t: dict[str, Any], run: Run, *, doctor: str | None = None)
     applied = False  # the commit point passed (_merge_and_record)
     requeue = False  # a shutdown cut the run short and it runs again at the next start
     try:
-        if why := runner_problem(fixing=fixing):
+        if why := runner_problem(fixing=fixing) or (conf if isinstance(conf, str) else ""):
             raise TicketError(why)
         kept = await asyncio.to_thread(_kept_worktree, t)
         if kept is not None:
@@ -1826,7 +1858,8 @@ async def _run_ticket(t: dict[str, Any], run: Run, *, doctor: str | None = None)
             result_text = await _worker_turn(run, run_log, wt, prompt, resume,
                                              name=dev_session_name(t.get("workspace")), workspace=t.get("workspace"),
                                              on_session=lambda short, sid: _update(tid, session=short, session_id=sid),
-                                             **({"asking": {"key": ticket_key(tid), "allow": own_work(wt, (shots_dir(tid),))}}
+                                             **({"asking": {"key": ticket_key(tid), "allow": own_work(wt, (shots_dir(tid),)),
+                                                            **({"config": conf} if conf is not None else {})}}
                                                 if t.get("workspace") else {}))
             resume = run.session_id
             touched, validation = await _check(wt, base, run_log)
@@ -2203,17 +2236,28 @@ def build_view_prompt(c: str, prop: dict[str, Any], folder: Path, corpus: Path) 
     command's URL."""
     from . import views  # noqa: PLC0415
 
-    return prompts.render_dev("dev-view", {
-        "name": str(prop.get("name") or prop["slug"]),
-        "slug": str(prop["slug"]),
-        "why": str(prop.get("why") or ""),
-        "claims": ", ".join(prop.get("claims") or []),
-        "spec": views.spec_lines(prop),
-        "folder": str(folder),
-        "corpus": str(corpus),
-        "examples": str(views.EXAMPLES_DIR),
-        "check": view_check_command(c, str(prop["slug"])),
-    })
+    values = {"name": str(prop.get("name") or prop["slug"]), "slug": str(prop["slug"]), "why": str(prop.get("why") or ""),
+              "claims": ", ".join(prop.get("claims") or []), "spec": views.spec_lines(prop), "folder": str(folder),
+              "corpus": str(corpus), "examples": str(views.EXAMPLES_DIR), "check": view_check_command(c, str(prop["slug"])),
+              "network": view_network_line(c)}
+    with prompts.custom(userconf.prompt_files(c, "dev")):
+        return prompts.render_dev("dev-view", values)
+
+
+VIEW_NETWORK_LINES = {
+    "sandboxed": "There is no network, so nothing can be fetched or installed. ",
+    "asked": "Fetch and install nothing. Every command but the check command waits for the analyst's permission. ",
+    "on": "",
+}
+
+
+def view_network_line(c: str) -> str:
+    """The view-build prompt's line on the network, true of how the build's Bash runs (dev_config)."""
+    try:
+        conf = dev_config(c, sandbox=True)
+    except userconf.ConfigError:
+        return VIEW_NETWORK_LINES["sandboxed"]
+    return VIEW_NETWORK_LINES["on" if conf.network else "sandboxed" if conf.sandboxed else "asked"]
 
 
 def view_check_command(c: str, slug: str) -> str:
@@ -2315,20 +2359,24 @@ def view_read_only(corpus: Path, folder: Path) -> tuple[Path, ...]:
     return tuple(out)
 
 
-def view_fence(c: str, slug: str, corpus: Path, folder: Path) -> dict[str, Any]:
+def view_fence(c: str, slug: str, corpus: Path, folder: Path, conf: userconf.Session) -> dict[str, Any]:
     """The settings that fence a view build's session: the view_read_only folders read-only, its check command run
-    outside the sandbox, where it can reach this server, offline_deny, and its environment (view_env)."""
+    outside the sandbox, where it can reach this server, and while the dev agent's network is off (`conf`),
+    offline_deny and the offline environment (view_env)."""
     check = view_check_command(c, slug)
-    out = read_only_fence(view_read_only(corpus, folder), outside=(check, f"{check} *"))
+    out = read_only_fence(view_read_only(corpus, folder), outside=(check, f"{check} *"), conf=conf)
+    if conf.network:
+        return {**out, "env": view_env(slug, offline=False)}
+    conf.offline = True
     perms = dict(out.get("permissions") or {})
     deny = [*(perms.get("deny") or []), *offline_deny()]
     return {**out, "permissions": {**perms, "deny": deny}, "env": view_env(slug)}
 
 
 def offline_deny() -> list[str]:
-    """The deny rules that keep a view build off the network in every permission mode, where the sandbox cannot run as
-    well: the web tools, and Bash commands by OFFLINE_PROGRAMS, OFFLINE_COMMANDS and OFFLINE_MODULES."""
-    return [*WEB_TOOLS, *(r for p in OFFLINE_PROGRAMS for r in (f"Bash({p}:*)", f"Bash(*/{p} *)")),
+    """The deny rules of a view build whose network is off, in every permission mode: Bash commands by OFFLINE_PROGRAMS,
+    OFFLINE_COMMANDS and OFFLINE_MODULES."""
+    return [*(r for p in OFFLINE_PROGRAMS for r in (f"Bash({p}:*)", f"Bash(*/{p} *)")),
             *(f"Bash({cmd}:*)" for cmd in OFFLINE_COMMANDS), *(f"Bash(* -m {m} *)" for m in OFFLINE_MODULES)]
 
 
@@ -2360,9 +2408,9 @@ def asker_models(c: str, prop: dict[str, Any]) -> dict[str, Any]:
             "fast": held["fast"] if isinstance(held.get("fast"), bool) else None}
 
 
-def view_env(slug: str) -> dict[str, str]:
-    """A view build's session's environment: its key, OFFLINE_ENV and OFFLINE_ENV_FILE."""
-    return {SESSION_ENV: view_key(slug), **OFFLINE_ENV, ENV_FILE: str(OFFLINE_ENV_FILE)}
+def view_env(slug: str, offline: bool = True) -> dict[str, str]:
+    """A view build's session's environment: its key, and when `offline`, OFFLINE_ENV and OFFLINE_ENV_FILE."""
+    return {SESSION_ENV: view_key(slug), **({**OFFLINE_ENV, ENV_FILE: str(OFFLINE_ENV_FILE)} if offline else {})}
 
 
 def view_key(slug: str) -> str:
@@ -2370,15 +2418,17 @@ def view_key(slug: str) -> str:
     return f"view:{slug}"
 
 
-def view_asking(c: str, slug: str, folder: Path) -> dict[str, Any]:
-    """How a view build's session asks (Sessions._flags): its key, and allowed unasked its edits in the view's folder,
-    reads of the worked examples, its check command, and Bash in the sandbox where the sandbox runs."""
+def view_asking(c: str, slug: str, folder: Path, conf: userconf.Session) -> dict[str, Any]:
+    """How a view build's session asks (Sessions._flags): its key, what thimble's config asks of it (`conf`), and allowed
+    unasked its edits in the view's folder, reads of the worked examples, its check command, and Bash in the sandbox
+    where its Bash runs there, but for the commands the config asks about."""
     from . import agent_session, views  # noqa: PLC0415
 
     check = view_check_command(c, slug)
-    out: dict[str, Any] = {"key": view_key(slug),
+    conf.own_bash = [check]
+    out: dict[str, Any] = {"key": view_key(slug), "config": conf,
                            "allow": [*own_work(folder, (views.EXAMPLES_DIR,)), f"Bash({check})", f"Bash({check} *)"]}
-    if cc_settings.sandbox_ok():
+    if conf.sandboxed:
         names, asks = agent_session.sandbox_rule(config.corpus_dir(c))
         out["sandbox"] = [names, asks]
     return out
@@ -2437,8 +2487,14 @@ async def _run_view(c: str, slug: str, run: Run) -> None:
         return
     revision = bool(prop.get("revision"))
     change = bool(prop.get("changed"))
-    # without Node or the frontend's packages no session could pass the checks, so the build ends at once
-    if why := await asyncio.to_thread(views.build_problem):
+    conf, why = None, ""
+    try:
+        conf = dev_config(c, sandbox=True)
+    except userconf.ConfigError as e:
+        why = str(e)
+    # without Node or the frontend's packages, or with an error in thimble's config, no session could pass the checks,
+    # so the build ends at once
+    if why := why or await asyncio.to_thread(views.build_problem):
         run.status = "failed"
         if revision:
             views.end_revision(c, slug, why, failed_change=str(prop.get("change") or ""))
@@ -2455,7 +2511,7 @@ async def _run_view(c: str, slug: str, run: Run) -> None:
                                  attempts=int(prop.get("attempts") or 0) + 1) or prop
     views._emit(c, slug, "building", chat=chat)
     run_log = Log(agents.Recorder(c, chat)) if chat else Log(None)
-    asking = view_asking(c, slug, folder)
+    asking = view_asking(c, slug, folder, conf)
     _host(c, asking, chat, run_log)
     resume = prop.get("session_id")
     report: dict[str, Any] | None = None
@@ -2515,7 +2571,7 @@ async def _run_view(c: str, slug: str, run: Run) -> None:
                 # working directory they would receive the sandbox's `.claude/.cc-writes/`
                 result_text = await _worker_turn(run, run_log, corpus, prompt, resume, name=view_session_name(c, slug),
                                                  workspace=c, on_session=on_session, add_dirs=(folder,),
-                                                 answered=False, fence=view_fence(c, slug, corpus, folder),
+                                                 answered=False, fence=view_fence(c, slug, corpus, folder, conf),
                                                  asking=asking, models=view_models(c, prop))
             except RuntimeError as e:
                 error, result_text = str(e), ""
@@ -2630,9 +2686,14 @@ async def review_revision(c: str, slug: str, message: str) -> tuple[bool, str]:
     if chat and chat != prop.get("chat"):
         views.update_proposal(c, slug, chat=chat)
     run_log = Log(agents.Recorder(c, chat)) if chat else Log(None)
+    try:
+        conf = dev_config(c, sandbox=True)
+    except userconf.ConfigError as e:
+        run_log.error(str(e))
+        return False, str(e)
     run = Run(ticket_id=f"view-review:{slug}", title=str(prop.get("name") or slug), ts_start=_now())
     _review_runs[(c, slug)] = run
-    asking = view_asking(c, slug, folder)
+    asking = view_asking(c, slug, folder, conf)
     _host(c, asking, chat, run_log)
     resume = prop.get("session_id")
     prompt = message if resume else f"{build_view_prompt(c, prop, folder, corpus)}\n\n{message}"
@@ -2649,7 +2710,7 @@ async def review_revision(c: str, slug: str, message: str) -> tuple[bool, str]:
             try:
                 result_text = await _worker_turn(run, run_log, corpus, prompt, resume, name=view_session_name(c, slug),
                                                  workspace=c, on_session=on_session, add_dirs=(folder,),
-                                                 answered=False, fence=view_fence(c, slug, corpus, folder),
+                                                 answered=False, fence=view_fence(c, slug, corpus, folder, conf),
                                                  turn_timeout_s=REVIEW_TURN_TIMEOUT_S, asking=asking,
                                                  models=view_models(c, prop))
             except RuntimeError as e:

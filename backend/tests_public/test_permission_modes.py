@@ -171,9 +171,11 @@ async def test_each_agent_runs_in_its_row_else_in_main_s_mode_and_nothing_else_p
     assert modes.mode_for(CORPUS, "writer") == "manual", "another session's mode is not main's"
     await report("sid-main", "auto")
     assert [modes.mode_for(CORPUS, a) for a in modes.AGENTS] == ["auto"] * len(modes.AGENTS)
-    ledger.put_settings_route(CORPUS, analyst, {modes.SETTING: {"views": "bypass", "writer": "manual"}})
-    assert (modes.mode_for(CORPUS, "views"), modes.mode_for(CORPUS, "writer"), modes.mode_for(CORPUS, "dev")) == \
+    ledger.put_settings_route(CORPUS, analyst, {modes.SETTING: {"checks": "bypass", "writer": "manual"}})
+    assert (modes.mode_for(CORPUS, "checks"), modes.mode_for(CORPUS, "writer"), modes.mode_for(CORPUS, "critic")) == \
         ("bypass", "manual", "auto"), "each row apart"
+    ledger.put_settings_route(CORPUS, analyst, {modes.SETTING: {"views": "manual"}})
+    assert modes.mode_for(CORPUS, "dev") == modes.mode_for(CORPUS, "views") == "manual", "view builds are the dev agent's"
     ledger.put_settings_route(CORPUS, analyst, {modes.SETTING: {"writer": None}})
     assert modes.mode_for(CORPUS, "writer") == "auto", "a row put back follows main again"
 
@@ -194,7 +196,7 @@ async def test_each_agent_runs_in_its_row_else_in_main_s_mode_and_nothing_else_p
     with pytest.raises(HTTPException) as e:
         ledger.put_settings_route(CORPUS, analyst, {modes.SETTING: {"orient": "bypass"}})
     assert e.value.status_code == 400 and "Bypass" in e.value.detail
-    assert modes.mode_for(CORPUS, "views") == "auto", "a Bypass turned off is not used"
+    assert modes.mode_for(CORPUS, "checks") == "auto", "a Bypass turned off is not used"
     assert ledger.get_settings(CORPUS)["disabled_modes"] == ["bypass"]
     user.write_text("{}")
     remote = user.parent / "remote-settings.json"
@@ -239,7 +241,7 @@ async def test_auto_is_claude_code_s_auto_mode_and_a_call_it_refuses_waits_for_t
     run = await orient_session.start(CORPUS, "")
     assert run.mode == "auto" and _flag(run.argv) == "auto"
     settings = json.loads(run.argv[run.argv.index("--settings") + 1])
-    assert settings["hooks"]["PreToolUse"] == agent_session.permission_hooks(CORPUS, auto=True)["PreToolUse"]
+    assert settings["hooks"]["PreToolUse"] == agent_session.permission_hooks(CORPUS, auto=True, wait=True)["PreToolUse"]
     assert settings["hooks"]["PermissionDenied"] == agent_session.permission_hooks(CORPUS)["PermissionDenied"]
     inp = {"command": "python3 -c 'print(6*7)'", "description": "Multiply"}
     body = dict(session=KEY, event="PermissionDenied", tool_name="Bash", tool_input=inp, agent_id="a2",

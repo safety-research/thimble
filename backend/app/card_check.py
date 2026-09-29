@@ -1035,7 +1035,10 @@ async def _read(c: str, cell: dict[str, Any], png: bytes | None,
     """(assessment, the replacement card {question, code, takeaway}, model) from the model's reading of the card's
     picture; why not, as a sentence, when the call failed or its output lacks a part. _Capacity when the API is at
     capacity after model.structured's own retries."""
-    secs = _sections()
+    from . import prompts, userconf  # noqa: PLC0415
+
+    with prompts.custom(userconf.prompt_files(c, "cardCheck")):
+        secs = _sections()
     none = secs.get("none", "")
     code = str(cell.get("code") or "").strip()
     user = _fill(secs["card"], {
