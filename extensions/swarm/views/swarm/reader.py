@@ -69,11 +69,16 @@ import csv
 import difflib
 import io
 import json
+import math
 import re
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
-import thimble
+try:
+    import thimble
+except ImportError:  # run as a script (main), which asks nothing of the labels
+    thimble = None
 
 ACTOR_KEYS = ("user", "username", "author", "account", "actor", "agent", "sender", "label", "login", "by")
 ANON_KEYS = ("ip", "address", "ip16")
@@ -265,24 +270,39 @@ def _common_dir(paths):
     return "/".join(head) + "/" if head else ""
 
 
+def _runs(paths):
+    """{path: run} for files of the same name in two or more sibling folders, such as runs/<run>/board.jsonl, each
+    folder a run of its own; other files are in no run."""
+    folders = {}
+    for p in paths:
+        d, _, name = p.rpartition("/")
+        if d:
+            folders.setdefault((d.rpartition("/")[0], name), set()).add(d)
+    return {p: p.rpartition("/")[0].rpartition("/")[2] for p in paths
+            if len(folders.get((p.rpartition("/")[0].rpartition("/")[0], p.rpartition("/")[2]), ())) > 1}
+
+
 def build_index(paths):
-    """{files: {path: {offsets, kind, fields, n}}, recs: {ref: action}, order: [action refs in event order], same:
-    {ref of a repeat: ref of the first}, places: {place: {ref, title, refs, accounts, addressed}}, accounts: {account:
-    {n, goal, goal_refs}}, problems: {count, examples: [{ref, why}]}}. An action keeps its account, place, time, kind, the save before
-    it, the record it replies to and whether it addresses another account (_addressing); texts are read back from their
-    lines when shown."""
+    """{files: {path: {offsets, kind, fields, n, run}}, recs: {ref: action}, order: [action refs in event order], same:
+    {ref of a repeat: ref of the first}, places: {place: {ref, title, refs, accounts, addressed, run}}, accounts:
+    {account: {n, goal, goal_refs}}, runs: {run: n}, problems: {count, examples: [{ref, why}]}}. An action keeps its
+    account, place, time, kind, run, the save before it, the record it replies to and whether it addresses another
+    account (_addressing); texts are read back from their lines when shown. A place a field names is named with its run
+    ("<run>/<place>") when the files are in runs (_runs), since each run numbers its threads anew."""
     problems = {"count": 0, "examples": []}
     files, recs, same, actions, places, roster, texts, titles = {}, {}, {}, [], {}, {}, {}, {}
     parsed = {p: _rows(p, problems) for p in sorted(paths)}
     fields = {p: _fields(rows) for p, rows in parsed.items()}
     placeless = [p for p, f in fields.items() if ("actor" in f or "anon" in f) and "text" in f and "place" not in f]
     base = _common_dir(placeless) if len(placeless) > 1 else ""
+    run_of = _runs([p for p, f in fields.items() if ("actor" in f or "anon" in f) and "text" in f and "place" in f])
     for path, rows in parsed.items():
         f = fields[path]
+        run = run_of.get(path)
         own_place = path[len(base):].rsplit(".", 1)[0] if path in placeless else None
         kind = ("actions" if ("actor" in f or "anon" in f) and "text" in f
                 else "roster" if "actor" in f and "goal" in f else "other")
-        files[path] = {"offsets": _offsets(path), "kind": kind, "fields": f, "n": 0,
+        files[path] = {"offsets": _offsets(path), "kind": kind, "fields": f, "n": 0, "run": run,
                        "header": _csv_header(path) if path.endswith(".csv") else None}
         seen, last, names_places = {}, None, False
         for first, end, rec in rows:
@@ -313,7 +333,7 @@ def build_index(paths):
                 _problem(problems, ref, "left out: no account")
                 continue
             _p, place = _first(rec, PLACE_KEYS)
-            place = place or own_place or path
+            place = (f"{run}/{place}" if run else place) if place else own_place or path
             rid = _first(rec, (f["id"],))[1] if "id" in f else ""
             seq = _first(rec, (f["seq"],))[1] if "seq" in f else ""
             key = ("id", rid) if rid else ("seq", place, seq) if seq else None
@@ -330,7 +350,7 @@ def build_index(paths):
             t = t if known else (last + 1e-3 if last is not None else 0.0)
             last = t
             r = {"ref": ref, "account": who, "place": place, "t": t, "known": known, "kind": "save" if seq else "post",
-                 "id": rid, "reply": _first(rec, REPLY_KEYS)[1], "before": None, "reply_ref": None}
+                 "run": run, "id": rid, "reply": _first(rec, REPLY_KEYS)[1], "before": None, "reply_ref": None}
             recs[ref] = r
             texts[ref] = rec[f["text"]]
             titles[ref] = _first(rec, TITLE_KEYS)[1]
@@ -339,7 +359,7 @@ def build_index(paths):
         if kind == "other" and rows and not names_places:
             _problem(problems, path, f"left out: no account and text fields ({', '.join(list(rows[0][2])[:6])})")
     actions.sort(key=lambda r: (r["t"], r["ref"]))
-    last_save, by_id, accounts = {}, {}, {}
+    last_save, by_id, accounts, runs = {}, {}, {}, {}
     for r in actions:
         if r["kind"] == "save":
             r["before"] = last_save.get(r["place"])
@@ -351,7 +371,10 @@ def build_index(paths):
             by_id.setdefault((None, r["id"]), r["ref"])
         del r["reply"]
         p = places.setdefault(r["place"], {"ref": r["ref"], "title": titles[r["ref"]] or r["place"], "refs": [], "accounts": {}})
+        p["run"] = r["run"]
         p["refs"].append(r["ref"])
+        if r["run"]:
+            runs[r["run"]] = runs.get(r["run"], 0) + 1
         p["accounts"][r["account"]] = p["accounts"].get(r["account"], 0) + 1
         a = accounts.setdefault(r["account"], {"n": 0})
         a["n"] += 1
@@ -360,7 +383,8 @@ def build_index(paths):
         a["goal"], a["goal_refs"] = row.get("goal", ""), row.get("refs", [])
     _addressing(actions, recs, places, texts)
     return {"files": files, "recs": recs, "order": [r["ref"] for r in actions], "same": same,
-            "places": {k: v for k, v in places.items() if v["refs"]}, "accounts": accounts, "problems": problems}
+            "places": {k: v for k, v in places.items() if v["refs"]}, "accounts": accounts, "runs": runs,
+            "problems": problems}
 
 
 # ------------------------------------------------------------------------------------------------ when the view applies
@@ -960,6 +984,208 @@ def _detail(index, ref):
     return out
 
 
+# ------------------------------------------------------------------------------------------------ the overview
+
+
+OV_BINS = 120  # time bins the overview gets when the page asks for none
+OV_BINS_MAX = 480
+OV_ACCOUNTS = 40  # account rows; the other accounts share one row
+OV_PLACES = 12  # place strips; the other places share one strip
+BIN_LISTED = 200  # records a bin's listing holds at a time
+STEPS = (1, 2, 5, 10, 15, 30, 60, 120, 300, 600, 900, 1800, 3600, 7200, 10800, 21600, 43200, 86400, 2 * 86400,
+         7 * 86400, 14 * 86400, 30 * 86400, 91 * 86400, 365 * 86400)
+
+
+def _in_runs(index, name):
+    """A place named without its run, as citations written before places carried runs name it: the records of that
+    place in every run; None when no run has it."""
+    hits = [p for key, p in index["places"].items() if p.get("run") and key == f"{p['run']}/{name}"]
+    if not hits:
+        return None
+    refs = sorted((r for p in hits for r in p["refs"]), key=lambda r: (index["recs"][r]["t"], r))
+    return {"ref": refs[0], "title": name, "refs": refs}
+
+
+def _step(width, n):
+    """The bin width: the smallest round step (STEPS) that covers `width` seconds in `n` bins or fewer."""
+    return next((s for s in STEPS if width / s <= n), STEPS[-1])
+
+
+def _chosen(index, query):
+    """The refs, in event order, that the overview's `run`, `within`, `accounts` and `places` choose (a view opened from
+    a card gets the card's), and a test of whether a record's time is in the window [`from`, `to`] (all when neither is
+    given)."""
+    recs = index["recs"]
+    run = query.get("run") if query.get("run") in index["runs"] else None
+    within = _within(query.get("within"))
+    accounts = {str(a).lower() for a in query.get("accounts") or ()}
+    places = {str(p) for p in query.get("places") or ()}
+    refs = [ref for ref in index["order"]
+            if (r := recs[ref]) and (not run or r["run"] == run) and (within is None or ref in within)
+            and (not accounts or r["account"].lower() in accounts) and (not places or r["place"] in places)]
+    return refs, run
+
+
+def _window(index, refs, query):
+    """(span, lo, hi): the first and last known time of `refs`, and the window the query asks for within them; the whole
+    span when it asks for none. None for each when no record has a time."""
+    times = [index["recs"][ref]["t"] for ref in refs if index["recs"][ref]["known"]]
+    if not times:
+        return None, None, None
+    a, b = min(times), max(times)
+    lo = query.get("from")
+    hi = query.get("to")
+    lo = a if not isinstance(lo, (int, float)) else min(max(float(lo), a), b)
+    hi = b if not isinstance(hi, (int, float)) else min(max(float(hi), lo), b)
+    return (a, b), lo, hi
+
+
+def _overview(index, query):
+    """Every record chosen, counted per time bin: a strip per place (the OV_PLACES busiest, the rest in one strip) and a
+    row per account (the OV_ACCOUNTS busiest of those `q` names, with `pin` always among them, the rest in one row),
+    each cell {b, n, k, m}: its bin, its records, those the label filter keeps, and [[mark, n]] for the labels that are
+    on. A `place` counts the account rows over that place's records alone. Records with no time are counted in a bin
+    of their own after the others while the window is the whole span."""
+    recs = index["recs"]
+    on = thimble.view_labels()
+    marks = [{"label": lab["name"], "value": v["name"], "colour": v["colour"]}
+             for lab in on["labels"] for v in lab["values"]][:MARKS_MAX]
+    mark_at = {(x["label"], x["value"]): i for i, x in enumerate(marks)}
+    refs, run = _chosen(index, query)
+    span, lo, hi = _window(index, refs, query)
+    zoomed = span is not None and (lo > span[0] or hi < span[1])
+    n = max(1, min(int(query.get("bins") or OV_BINS), OV_BINS_MAX))
+    step = _step(max(hi - lo, 1.0), n) if span else 1
+    start = math.floor(lo / step) * step if span else 0
+    nb = int((hi - start) // step) + 1 if span else 0
+    place = str(query.get("place") or "") or None
+    q = str(query.get("q") or "").strip().lower()
+    pin = str(query.get("pin") or "")
+
+    def bin_of(r):
+        if not r["known"]:
+            return None if zoomed else nb
+        return None if r["t"] < lo or r["t"] > hi else min(nb - 1, int((r["t"] - start) // step))
+
+    cells = {}  # (kind, key) -> {bin: [n, kept, {mark: n}]}
+    per_mark, unmarked, shown, untimed = [0] * len(marks), 0, 0, 0
+    for ref in refs:
+        r = recs[ref]
+        b = bin_of(r)
+        if b is None:
+            continue
+        kept = thimble.kept(ref)
+        got = {mark_at[k] for x in thimble.marked(ref) if (k := (x["label"], x["value"])) in mark_at} if marks else set()
+        rows = [("place", r["place"])]
+        if not place or r["place"] == place:
+            rows.append(("account", r["account"]))
+            shown += 1
+            untimed += not r["known"]
+            for i in got:
+                per_mark[i] += 1
+            unmarked += bool(marks) and not got
+        for row in rows:
+            c = cells.setdefault(row, {}).setdefault(b, [0, 0, {}])
+            c[0] += 1
+            c[1] += kept
+            for i in got:
+                c[2][i] = c[2].get(i, 0) + 1
+
+    def total(key):
+        return sum(c[0] for c in cells[key].values())
+
+    def row_of(kind, name, keys):
+        merged = {}
+        for key in keys:
+            for b, c in cells[key].items():
+                m = merged.setdefault(b, [0, 0, {}])
+                m[0] += c[0]
+                m[1] += c[1]
+                for i, k in c[2].items():
+                    m[2][i] = m[2].get(i, 0) + k
+        return {"n": sum(c[0] for c in merged.values()), "k": sum(c[1] for c in merged.values()),
+                "cells": [{"b": b, "n": c[0], "k": c[1], "m": sorted(c[2].items())} for b, c in sorted(merged.items())]}
+
+    place_keys = sorted((k for k in cells if k[0] == "place"), key=lambda k: (-total(k), k[1]))
+    account_keys = sorted((k for k in cells if k[0] == "account"), key=lambda k: (-total(k), k[1].lower()))
+    top_places = place_keys[:OV_PLACES]
+    if place and ("place", place) in cells and ("place", place) not in top_places:
+        top_places = [*top_places[:-1], ("place", place)] if len(top_places) >= OV_PLACES else [*top_places, ("place", place)]
+    wanted = [k for k in account_keys if not q or q in k[1].lower()]
+    top_accounts = wanted[:OV_ACCOUNTS]
+    hit = next((k for k in account_keys if k[1].lower() == pin.lower()), None) if pin else None
+    if hit is not None and hit not in top_accounts:
+        top_accounts = [*top_accounts[: OV_ACCOUNTS - 1], hit]
+    rest_places = [k for k in place_keys if k not in top_places]
+    rest_accounts = [k for k in account_keys if k not in top_accounts]
+    places = []
+    for k in top_places:
+        p = index["places"][k[1]]
+        places.append({"name": k[1], "title": p["title"], "accounts": len(p["accounts"]), **row_of("place", k[1], [k])})
+    accounts = []
+    for k in top_accounts:
+        a = index["accounts"][k[1]]
+        accounts.append({"name": k[1], "goal": a["goal"], **row_of("account", k[1], [k])})
+    return {
+        "counts": {"records": len(index["order"]), "accounts": len(index["accounts"]), "places": len(index["places"])},
+        "chosen": {"records": len(refs), "shown": shown, "accounts": len(account_keys), "places": len(place_keys)},
+        "runs": [{"name": k, "n": v} for k, v in sorted(index["runs"].items())], "run": run,
+        "span": list(span) if span else None, "window": [lo, hi] if span else None, "zoomed": zoomed,
+        "start": start, "step": step, "bins": nb, "untimed": untimed,
+        "places": places, "places_rest": ({"count": len(rest_places), **row_of("place", "", rest_places)} if rest_places else None),
+        "accounts": accounts,
+        "accounts_rest": ({"count": len(rest_accounts), **row_of("account", "", rest_accounts)} if rest_accounts else None),
+        "place": place if place and ("place", place) in cells else None, "q": q, "pin": hit[1] if hit else None,
+        "marks": marks, "mark_counts": per_mark, "unmarked": unmarked, "filter": on.get("filter"),
+    }
+
+
+def _bin(index, query):
+    """The records of one cell or row of the overview, in event order: those the overview's query chooses, in its
+    window (or, with `untimed`, those with no time), of the `accounts` or `places` given, or of all but those in
+    `except_accounts` or `except_places` (a rest row), on the `place` given, from `offset`, BIN_LISTED at a time:
+    {total, offset, records: [{ref, account, place, time, kind, line, m, mb}]}."""
+    recs = index["recs"]
+    on = thimble.view_labels()
+    marks = [(lab["name"], v["name"]) for lab in on["labels"] for v in lab["values"]][:MARKS_MAX]
+    mark_at = {k: i for i, k in enumerate(marks)}
+    refs, _run = _chosen(index, {k: query.get(k) for k in ("run", "within")})
+    span, lo, hi = _window(index, refs, query)
+    a, b = query.get("from"), query.get("to")
+    untimed = bool(query.get("untimed"))
+    only_a = {str(x) for x in query.get("accounts") or ()}
+    only_p = {str(x) for x in query.get("places") or ()}
+    not_a = {str(x) for x in query.get("except_accounts") or ()}
+    not_p = {str(x) for x in query.get("except_places") or ()}
+    place = str(query.get("place") or "") or None
+
+    def fits(r):
+        if untimed:
+            if r["known"]:
+                return False
+        elif not r["known"] or span is None or not lo <= r["t"] <= hi:
+            return False
+        elif (isinstance(a, (int, float)) and r["t"] < a) or (isinstance(b, (int, float)) and r["t"] >= b):
+            return False
+        return ((not only_a or r["account"] in only_a) and r["account"] not in not_a and (not only_p or r["place"] in only_p)
+                and r["place"] not in not_p and (not place or r["place"] == place))
+
+    hits = [ref for ref in refs if fits(recs[ref])]
+    offset = max(0, min(int(query.get("offset") or 0), max(0, len(hits) - 1)))
+    out = []
+    for ref in hits[offset: offset + BIN_LISTED]:
+        r = recs[ref]
+        first, bits = -1, 0
+        for x in thimble.marked(ref) if marks else ():
+            i = mark_at.get((x["label"], x["value"]))
+            if i is not None:
+                first = i if first < 0 else first
+                bits |= 1 << i
+        out.append({"ref": ref, "account": r["account"], "place": r["place"], "time": _iso(r["t"]) if r["known"] else None,
+                    "kind": r["kind"], "line": _did(index, r)["line"], "m": first, "mb": bits})
+    return {"total": len(hits), "offset": offset, "records": out}
+
+
 def problems(index):
     """What the reader could not read or left out, as {count, examples: [{ref, why}]}, which thimble shows above the
     page."""
@@ -976,6 +1202,10 @@ def records(index, query):
     query = query if isinstance(query, dict) else {}
     if query.get("op") == "record":
         return _detail(index, str(query.get("ref") or ""))
+    if query.get("op") == "overview":
+        return _overview(index, query)
+    if query.get("op") == "bin":
+        return _bin(index, query)
     return _chart(index, query)
 
 
@@ -1005,7 +1235,7 @@ def resolve(index, locator):
             return {"excerpt": _excerpt(([a["goal"]] if a["goal"] else []) + _first_lines(index, refs)),
                     "label": f"{hit} · {a['n']} record{'s' * (a['n'] != 1)}"[:40], "refs": (a["goal_refs"] + refs)[:REFS_MAX],
                     "key": f"agent/{hit}", "target": {"account": hit}}
-        p = index["places"].get(name) if kind == "place" else None
+        p = (index["places"].get(name) or _in_runs(index, name)) if kind == "place" else None
         if p is None:
             return None
         return {"excerpt": _excerpt(_first_lines(index, p["refs"])), "label": f"{name} · {len(p['refs'])} records"[:40],
@@ -1034,3 +1264,95 @@ def resolve(index, locator):
     label = f"{r['account']} · {when.day} {MONTHS[when.month - 1]} {when:%H:%M}" if r["known"] else r["account"]
     return {"excerpt": _excerpt(lines) or r["account"], "label": label[:40], "refs": cited,
             "key": f"place/{r['place'].replace(' ', '%20')}", "target": {"ref": ref, "account": r["account"], "place": r["place"]}}
+
+
+# ------------------------------------------------------------------------------------------------ run as a script
+
+USAGE = """python reader.py [--share K/N | --place NAME ...] [--files GLOB ...]
+
+Run in the corpus folder. With neither option, the places the records are on, busiest first, one line each: its rank,
+records, accounts and name. --share K/N deals the places in turn into N shares, busiest first, and prints the records of
+the Kth; --place NAME prints that place's (give it again for more). A place's records come in time order, each headed
+by its ref, time, account and kind, a post as its text and a save as the lines it changed from the save before it.
+--files GLOB reads those files; by default the files the Swarm view claims here (applies)."""
+
+
+def _script_files(globs):
+    """The files `globs` name, or the record files of the working folder that applies() claims."""
+    import glob
+    import os
+
+    if not globs:
+        found = []
+        for root, dirs, names in os.walk("."):
+            dirs[:] = sorted(d for d in dirs if not d.startswith("."))
+            found += [os.path.relpath(os.path.join(root, n)) for n in names if n.endswith((".jsonl", ".csv"))]
+        fit = applies(found)
+        if not fit:
+            sys.exit("reader.py: no swarm in this folder's record files; give the files with --files")
+        globs = fit["claims"]
+    return sorted({p for g in globs for p in glob.glob(g, recursive=True) if Path(p).is_file()})
+
+
+def _print_place(index, name, out):
+    p = index["places"][name]
+    title = f" · {_cut(p['title'], 80)}" if p["title"] != name else ""
+    out.write(f"## {name}{title}: {len(p['refs']):,} records by {len(p['accounts']):,} accounts\n")
+    for ref in p["refs"]:
+        r = index["recs"][ref]
+        did = _did(index, r)
+        head = f"{ref} {_iso(r['t']) if r['known'] else 'time unknown'} {r['account']} {r['kind']}"
+        if r["reply_ref"]:
+            head += f", reply to {r['reply_ref']}"
+        out.write(head + "\n")
+        if did.get("hunks") is not None:
+            for h in did["hunks"]:
+                out.writelines(f"  - {_clean(x)[:LINE_MAX]}\n" for x in h["del"] if x.strip())
+                out.writelines(f"  + {_clean(x)[:LINE_MAX]}\n" for x in h["add"] if x.strip())
+            if not did["hunks"]:
+                out.write("  (no change)\n")
+        else:
+            out.writelines(f"  {_clean(x)[:LINE_MAX]}\n" for x in did["said"].splitlines() if x.strip())
+    out.write("\n")
+
+
+def main(argv):
+    share, names, globs, i = None, [], [], 0
+    while i < len(argv):
+        arg = argv[i]
+        if arg in ("-h", "--help"):
+            print(USAGE)
+            return 0
+        if arg in ("--share", "--place", "--files") and i + 1 < len(argv):
+            if arg == "--share":
+                share = argv[i + 1]
+            elif arg == "--place":
+                names.append(argv[i + 1])
+            else:
+                globs.append(argv[i + 1])
+            i += 2
+            continue
+        sys.exit(f"reader.py: {arg!r} is no option\n\n{USAGE}")
+    index = build_index(_script_files(globs))
+    ranked = sorted(index["places"], key=lambda p: (-len(index["places"][p]["refs"]), p))
+    out = sys.stdout
+    if share:
+        k, _, n = share.partition("/")
+        if not (k.isdigit() and n.isdigit() and 1 <= int(k) <= int(n)):
+            sys.exit(f"reader.py: --share takes K/N with 1 <= K <= N, not {share!r}")
+        names += ranked[int(k) - 1:: int(n)]
+    if not names:
+        for rank, p in enumerate(ranked, 1):
+            v = index["places"][p]
+            out.write(f"{rank}\t{len(v['refs'])}\t{len(v['accounts'])}\t{p}\n")
+        return 0
+    missing = [p for p in names if p not in index["places"]]
+    if missing:
+        sys.exit(f"reader.py: no place {missing[0]!r}; run it with no option for the places")
+    for p in names:
+        _print_place(index, p, out)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))
