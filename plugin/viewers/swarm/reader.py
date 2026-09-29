@@ -24,7 +24,10 @@
 #
 # What the reader cleans:
 #   - A line that is not a JSON object, or a CSV row that does not parse, is left out and reported (problems), which
-#     thimble shows above the page. A quoted CSV cell over several lines is one row, citing every line.
+#     thimble shows above the page, as are an action with no account, one whose text is not a string or is under
+#     another text field than its file's, and a claimed file with neither. A time that does not parse, a CSV row with
+#     more or fewer cells than its header, a line that is not UTF-8 and a file that cannot be read are reported too. A
+#     quoted CSV cell over several lines is one row, citing every line. A UTF-8 byte order mark is dropped.
 #   - A repeated record (the same id, or the same sequence on one place, in one file: a replayed save, a post delivered
 #     twice) is left out, and a citation of it opens the first.
 #   - Records are put in time order across files; a record with no time keeps its place after the line before it in its
@@ -98,6 +101,7 @@ HUNK_PAIRS_MAX = 4_000_000  # line pairs a save's diff compares at most; past it
 EXCERPT_LINES = 12
 LINE_MAX = 400
 REFS_MAX = 200
+PROBLEMS_KEPT = 50  # problems the index lists; all are counted
 SIGNATURE = re.compile(r"(?:—|--)\s*([A-Za-z][\w.'-]*(?: [\w.'-]+){0,3})\s*$")
 WORD = re.compile(r"@?[A-Za-z][\w.-]*\w")
 SENTENCE = re.compile(r"(?<=[.?!])\s+")
@@ -141,7 +145,9 @@ def _iso(t):
 
 
 def _problem(problems, ref, why):
-    problems.append({"ref": ref, "why": why})
+    problems["count"] += 1
+    if len(problems["examples"]) < PROBLEMS_KEPT:
+        problems["examples"].append({"ref": ref, "why": why})
 
 
 # ------------------------------------------------------------------------------------------------ the index
@@ -157,7 +163,11 @@ def _rows(path, problems):
         return []
     out = []
     if path.endswith(".csv"):
-        text = raw.decode("utf-8", "replace")
+        try:
+            text = raw.decode("utf-8-sig")
+        except UnicodeDecodeError:
+            _problem(problems, path, "not UTF-8; shown with replacement characters")
+            text = raw.decode("utf-8-sig", "replace")
         reader = csv.reader(io.StringIO(text), strict=True)
         header, done = None, 0
         while True:
@@ -176,18 +186,26 @@ def _rows(path, problems):
             if header is None:
                 header = [c.strip().lower() for c in cells]
                 continue
+            if len(cells) != len(header):
+                _problem(problems, f"{path}#L{first}", f"{len(cells)} cells where the header has {len(header)}")
             out.append((first, last, {k: v.strip() for k, v in zip(header, cells)}))
         return out
     for n, line in enumerate(raw.split(b"\n"), 1):
         if not line.strip():
             continue
         try:
-            rec = json.loads(line.decode("utf-8", "replace"))
+            text, utf8 = line.decode("utf-8"), True
+        except UnicodeDecodeError:
+            text, utf8 = line.decode("utf-8", "replace"), False
+        try:
+            rec = json.loads(text.lstrip("\ufeff"))
         except ValueError:
             rec = None
         if not isinstance(rec, dict):
             _problem(problems, f"{path}#L{n}", "not a JSON object")
             continue
+        if not utf8:
+            _problem(problems, f"{path}#L{n}", "not UTF-8; shown with replacement characters")
         out.append((n, n, rec))
     return out
 
@@ -195,7 +213,7 @@ def _rows(path, problems):
 def _csv_header(path):
     """A CSV's header as _rows reads it: its first row with a cell, lower-cased; None when there is none."""
     try:
-        with open(path, encoding="utf-8", errors="replace", newline="") as fh:
+        with open(path, encoding="utf-8-sig", errors="replace", newline="") as fh:
             for cells in csv.reader(fh):
                 if any(c.strip() for c in cells):
                     return [c.strip().lower() for c in cells]
@@ -246,10 +264,10 @@ def _common_dir(paths):
 def build_index(paths):
     """{files: {path: {offsets, kind, fields, n}}, recs: {ref: action}, order: [action refs in event order], same:
     {ref of a repeat: ref of the first}, places: {place: {ref, title, refs, accounts, addressed}}, accounts: {account:
-    {n, goal, goal_refs}}, problems: [{ref, why}]}. An action keeps its account, place, time, kind, the save before
+    {n, goal, goal_refs}}, problems: {count, examples: [{ref, why}]}}. An action keeps its account, place, time, kind, the save before
     it, the record it replies to and whether it addresses another account (_addressing); texts are read back from their
     lines when shown."""
-    problems = []
+    problems = {"count": 0, "examples": []}
     files, recs, same, actions, places, roster, texts, titles = {}, {}, {}, [], {}, {}, {}, {}
     parsed = {p: _rows(p, problems) for p in sorted(paths)}
     fields = {p: _fields(rows) for p, rows in parsed.items()}
@@ -262,7 +280,7 @@ def build_index(paths):
                 else "roster" if "actor" in f and "goal" in f else "other")
         files[path] = {"offsets": _offsets(path), "kind": kind, "fields": f, "n": 0,
                        "header": _csv_header(path) if path.endswith(".csv") else None}
-        seen, last = {}, None
+        seen, last, names_places = {}, None, False
         for first, end, rec in rows:
             ref = f"{path}#L{first}"
             if kind == "roster":
@@ -276,11 +294,19 @@ def build_index(paths):
                 _t, title = _first(rec, ("title",))
                 if place and title:
                     places.setdefault(place, {"ref": ref, "title": title, "refs": [], "accounts": {}})
+                    names_places = True
                 continue
             _a, who = _first(rec, ACTOR_KEYS)
             if not who:
                 _a, who = _first(rec, ANON_KEYS)
-            if not who or not isinstance(rec.get(f["text"]), str):
+            if not isinstance(rec.get(f["text"]), str):
+                other = next((k for k in TEXT_KEYS if k in rec), None)
+                if other is not None:  # a record with no text field, such as a join notice, is not an action
+                    _problem(problems, ref, f"left out: its text is under `{other}`, not `{f['text']}`" if other != f["text"]
+                             else f"left out: its `{other}` is not text")
+                continue
+            if not who:
+                _problem(problems, ref, "left out: no account")
                 continue
             _p, place = _first(rec, PLACE_KEYS)
             place = place or own_place or path
@@ -292,8 +318,11 @@ def build_index(paths):
                     same[ref] = seen[key]
                     continue
                 seen[key] = ref
-            t = _time(_first(rec, TIME_KEYS)[1])
+            _k, when = _first(rec, TIME_KEYS)
+            t = _time(when)
             known = t is not None
+            if when and not known:
+                _problem(problems, ref, f"time {when[:40]!r} not read; shown as unknown")
             t = t if known else (last + 1e-3 if last is not None else 0.0)
             last = t
             r = {"ref": ref, "account": who, "place": place, "t": t, "known": known, "kind": "save" if seq else "post",
@@ -303,6 +332,8 @@ def build_index(paths):
             titles[ref] = _first(rec, TITLE_KEYS)[1]
             actions.append(r)
             files[path]["n"] += 1
+        if kind == "other" and rows and not names_places:
+            _problem(problems, path, f"left out: no account and text fields ({', '.join(list(rows[0][2])[:6])})")
     actions.sort(key=lambda r: (r["t"], r["ref"]))
     last_save, by_id, accounts = {}, {}, {}
     for r in actions:
@@ -465,7 +496,7 @@ def _raw(index, ref):
     try:
         with open(path, "rb") as fh:
             fh.seek(offs[int(n) - 1])
-            return fh.readline().decode("utf-8", "replace").rstrip("\r\n")
+            return fh.readline().decode("utf-8", "replace").rstrip("\r\n").lstrip("\ufeff")
     except OSError:
         return None
 
@@ -745,7 +776,8 @@ def _detail(index, ref):
 
 
 def problems(index):
-    """The lines that do not parse, each {ref, why}, which thimble shows above the page."""
+    """What the reader could not read or left out, as {count, examples: [{ref, why}]}, which thimble shows above the
+    page."""
     return index["problems"]
 
 

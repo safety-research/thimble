@@ -4,12 +4,11 @@ kernel and calls `call` there).
 A viewer's reader.py defines build_index(paths) -> index, records(index, query) -> JSON, and resolve(index, locator)
 ->
 {excerpt, label, refs, key?, target?} or None, and may define problems(index) -> the lines it could not read, as
-[{ref, why}]; a viewer thimble ships may also define applies(paths) -> {claims, found} or None, whether it fits a corpus
-(views.propose_builtins), which runs with no index. `call` loads reader.py (again when it changed), builds the index or
-loads
-it from a pickle keyed by the files' and reader's fingerprint, runs one operation and prints SENTINEL followed by the
-JSON answer. A reader that raises answers {ok: false, error, traceback}. Only the last fingerprint per view stays in
-memory."""
+[{ref, why}] or {count, examples: [{ref, why}]}; a viewer thimble ships may also define applies(paths) -> {claims,
+found} or None, whether it fits a corpus (views.propose_builtins), which runs with no index. `call` loads reader.py
+(again when it changed), builds the index or loads it from a pickle keyed by the files' and reader's fingerprint, runs
+one operation and prints SENTINEL followed by the JSON answer. A reader that raises answers {ok: false, error,
+traceback}. Only the last fingerprint per view stays in memory."""
 from __future__ import annotations
 
 import importlib.util

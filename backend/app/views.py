@@ -911,13 +911,20 @@ async def reader_call(c: str, slug: str, op: str, arg: Any = None, *, labels: di
 
 
 def clean_problems(raw: Any) -> dict[str, Any]:
-    """reader.problems(index) as {count, examples: [{ref, why}]}, the first PROBLEMS_SHOWN examples."""
-    items = raw if isinstance(raw, list) else []
+    """reader.problems(index) as {count, examples: [{ref, why}]}, the first PROBLEMS_SHOWN examples. A reader returns
+    them all as a list, or, where they may be many, {count, examples} with the first of them."""
+    if isinstance(raw, dict):
+        items = raw.get("examples") if isinstance(raw.get("examples"), list) else []
+        count = raw.get("count")
+        count = count if isinstance(count, int) and not isinstance(count, bool) and count >= len(items) else len(items)
+    else:
+        items = raw if isinstance(raw, list) else []
+        count = len(items)
     examples = []
     for x in items[:PROBLEMS_SHOWN]:
         x = x if isinstance(x, dict) else {"why": x}
         examples.append({"ref": str(x.get("ref") or "")[:500], "why": " ".join(str(x.get("why") or "").split())[:500]})
-    return {"count": len(items), "examples": examples}
+    return {"count": count, "examples": examples}
 
 
 async def reader_problems(c: str, slug: str, version: str | None = None) -> dict[str, Any]:
