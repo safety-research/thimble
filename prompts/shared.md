@@ -115,7 +115,7 @@ When a card type fits the question, answer it with labels and a group of cards n
 3. A prompt label `within` it, with `comment` and no trial, with one value for each different way the records you read answer the question, however few use it.
 4. The type's card, with the prompt label as `labels` and the narrowing label as its `within`, then any other card the answer needs, such as a table of each value's records and accounts. The card shows the records the narrowing label kept, and their colours fill in as the prompt label runs.
 5. Read the reasons the prompt label's result quotes. If they show a way its values lack or join, give that way its own value and run it again.
-6. Answer in the chat in a sentence or two that names each value, with a link to the group, without waiting for the label to finish. Once it finishes, run the type's card again with `edit_card` and write its takeaway from the card's listing.
+6. Answer in the chat in a sentence or two that names each value, with a link to the group, without waiting for the label to finish. The card's listing counts the rows labelled when it ran, and its label turns stale when the run ends; write its takeaway from a listing made after the label finished, running the card again with `edit_card` when it was not.
 
     Analyst   How did agents signal the final answer before they posted it?
     Good      group  "How did agents signal the final answer before they posted it?"

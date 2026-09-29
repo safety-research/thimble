@@ -300,7 +300,7 @@ export const api = {
   viewOpen: (c: string, slug: string, ref: string, version?: string) => j<ViewOpen>(`${ws(c)}/views/${enc(slug)}/resolve${q({ ref, v: version })}`),
   /** a card type's page as a card's frame loads it (backend cardtypes.frame_route) */
   cardTypeFrame: async (c: string, type: string): Promise<string> => {
-    const res = await fetch(`${ws(c)}/cardtypes/${enc(type)}/frame${q({ origin: location.origin })}`)
+    const res = await fetch(`${ws(c)}/cardtypes/${enc(type)}/frame`)
     if (!res.ok) throw new Error(`${res.status} ${res.statusText}`)
     return res.text()
   },

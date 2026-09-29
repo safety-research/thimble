@@ -30,7 +30,7 @@ import shutil
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 
@@ -277,13 +277,14 @@ def card_of(bundles: Any) -> dict[str, Any] | None:
     return None
 
 
-def frame_document(c: str, name: str, media: str | None = None) -> str:
-    """The page of the type `name` as a card's frame loads it (views.frame_document, marked as a card's)."""
+def frame_document(c: str, name: str) -> str:
+    """The page of the type `name` as a card's frame loads it (views.frame_document, marked as a card's), with no media
+    route."""
     t = read_registry(c).get(name)
     if t is None:
         raise HTTPException(404, f"no card type {name!r} in this workspace")
     view = {"dir": t["dir"], "slug": t["slug"], "name": t["name"], "libs": t.get("libs") or []}
-    return views.frame_document(view, media, card=True)
+    return views.frame_document(view, card=True)
 
 
 def labels_context(c: str, ids: list[str]) -> dict[str, Any]:
@@ -297,14 +298,10 @@ router = APIRouter()
 
 
 @router.get("/ws/{c}/cardtypes/{name}/frame")
-async def frame_route(c: str, name: str, request: Request, origin: str | None = None) -> HTMLResponse:
-    """The type's page for a card's frame (frame_document). `origin` is as views.frame_route takes it."""
+async def frame_route(c: str, name: str) -> HTMLResponse:
+    """The type's page for a card's frame (frame_document), which loads no URL: a card draws what its code stored."""
     config.workspace_dir(c)
-    try:
-        media = views.media_url(origin or f"{request.url.scheme}://{request.url.netloc}", c, name)
-    except ValueError as e:
-        raise HTTPException(400, str(e)) from None
-    return HTMLResponse(await asyncio.to_thread(frame_document, c, name, media))
+    return HTMLResponse(await asyncio.to_thread(frame_document, c, name))
 
 
 class RecordsBody(BaseModel):
@@ -321,7 +318,7 @@ async def records_route(c: str, name: str, body: RecordsBody) -> dict[str, Any]:
     t = read_registry(c).get(name)
     if t is None:
         raise HTTPException(404, f"no card type {name!r} in this workspace")
-    cell = notebook.get_cell(c, body.card) if body.card else None
+    cell = await asyncio.to_thread(notebook.get_cell, c, body.card) if body.card else None
     made = card_of((cell or {}).get("outputs")) or {}
     ids = [str(x.get("id")) for x in made.get("labels") or [] if isinstance(x, dict) and x.get("id")]
     ctx = await asyncio.to_thread(labels_context, c, ids)
