@@ -36,11 +36,8 @@ jobs:
           mkdir -p "$RUNNER_TEMP/bin" && tar -xzf "$RUNNER_TEMP/gitleaks.tgz" -C "$RUNNER_TEMP/bin" gitleaks
           echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
 
-      # first, since it needs nothing installed and fails in seconds. The private names it checks for come from the
-      # repository secret, which pull requests from forks do not get; without it that part is skipped, saying so.
+      # first, since it needs nothing installed and fails in seconds
       - name: Content
-        env:
-          THIMBLE_PRIVATE_TERMS: ${{ secrets.THIMBLE_PRIVATE_TERMS }}
         run: scripts/check.sh content
 
       - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0

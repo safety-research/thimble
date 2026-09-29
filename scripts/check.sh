@@ -7,10 +7,9 @@
 #   install   backend/.venv with the test extras (uv), frontend/node_modules (npm ci), and the headless Chromium that
 #             the renderer's, the views' and the browser checks drive (its system libraries are the machine's; GitHub's
 #             Ubuntu runners have them)
-#   content   no secrets, private names, files that never belong in the tree, or file names that only case tells apart
-#             (Checks.tsx beside checks.ts, which a case-insensitive disk resolves as one module) (scripts/check_content.py,
-#             with gitleaks when it is installed; private names only with the private list, which is kept out of the
-#             repo: ~/.config/thimble/private-terms or THIMBLE_PRIVATE_TERMS_FILE)
+#   content   no secrets, files that never belong in the tree, or file names that only case tells apart (Checks.tsx
+#             beside checks.ts, which a case-insensitive disk resolves as one module) (scripts/check_content.py, with
+#             gitleaks when it is installed)
 #   backend   the backend's tests (backend/tests_public): hermetic, with no network, no Claude Code and no API key
 #   frontend  the type check of the UI and of its tests, the frontend's tests (frontend/tests/public) and the production
 #             build, into a temporary folder so that the frontend/dist a running server serves is left alone

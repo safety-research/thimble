@@ -1,11 +1,8 @@
-"""scripts/check_content.py, the content step of scripts/check.sh: a listed word is found in any spelling, the list is
-read from outside the repo and its check is skipped without it, files of kinds that never belong in the tree are
-refused, gitleaks' findings are reported, and the command fails on a hit. The real list is private, so these tests list
-words of their own."""
+"""scripts/check_content.py, the content step of scripts/check.sh: files of kinds that never belong in the tree are
+refused, gitleaks' findings are reported, and the command fails on a hit."""
 import importlib.util
 import os
 import random
-import re
 import shutil
 import string
 import subprocess
@@ -18,11 +15,10 @@ SCRIPT = Path(__file__).resolve().parents[2] / "scripts" / "check_content.py"
 
 
 @pytest.fixture()
-def cc(monkeypatch):
+def cc():
     spec = importlib.util.spec_from_file_location("check_content", SCRIPT)
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
-    monkeypatch.setattr(mod, "TERMS", {mod.digest("red-kite"): "private", mod.digest("Alice"): "maintainer"})
     return mod
 
 
@@ -35,32 +31,6 @@ def write(root: Path, files: dict[str, str | bytes]) -> Path:
 
 def hits(cc, root: Path) -> list[tuple[str, int, str, str]]:
     return cc.scan(root, cc.files_of(root))
-
-
-def test_a_listed_word_pair_is_found_in_any_spelling(cc, tmp_path):
-    write(tmp_path, {"a.py": "x = 'red_kite'\n# Red Kite\n# red-kites, redkite\n"})
-    assert [(h[1], h[2]) for h in hits(cc, tmp_path)] == [(1, "private"), (2, "private")]
-
-
-def test_the_private_list_comes_from_outside_the_repo_and_its_check_is_skipped_without_one(tmp_path):
-    tree = write(tmp_path / "tree", {"a.py": "x = 'red_kite'\n", "b.db": b"\0"})
-    listed = write(tmp_path, {"terms": "# comment\n\nprivate red-kite\n"}) / "terms"
-    home = tmp_path / "home"
-
-    def run(**env):
-        return subprocess.run([sys.executable, str(SCRIPT), str(tree), "--no-gitleaks"], capture_output=True, text=True,
-                              env={"PATH": os.environ["PATH"], "HOME": str(home), **env})
-
-    r = run()
-    assert r.returncode == 1 and "b.db:0: [path]" in r.stdout, "the other checks still run"
-    assert "[private]" not in r.stdout and "no private list" in r.stdout
-    digest = subprocess.run([sys.executable, str(SCRIPT), "--digest", "red-kite"], capture_output=True, text=True).stdout
-    for env in ({"THIMBLE_PRIVATE_TERMS_FILE": str(listed)}, {"THIMBLE_PRIVATE_TERMS": digest}):
-        assert "a.py:1: [private]" in run(**env).stdout, env
-    write(home, {".config/thimble/private-terms": listed.read_text()})
-    assert "a.py:1: [private]" in run().stdout
-    assert run(THIMBLE_PRIVATE_TERMS_FILE=str(tmp_path / "missing")).returncode == 2
-    assert not re.search(r"[0-9a-f]{64}", SCRIPT.read_text()), "no list, not even of digests, in the public script"
 
 
 def test_files_of_kinds_that_never_belong_are_refused(cc, tmp_path, monkeypatch):
