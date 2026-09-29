@@ -31,6 +31,7 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
 from . import cite, config, frames, prompts
+from .kernel_thimble import CARD_MIME  # a card type's graphic, which counts as a chart and is read through its listing
 
 log = logging.getLogger("thimble.tools")
 router = APIRouter()
@@ -79,8 +80,6 @@ ERROR_MIME = "application/vnd.thimble.error+json"
 # the drawings the canvas makes from a card's code, thimble.diagram and thimble.timeline (kernel_thimble.py), by the
 # kind of card that shows each; their text/plain listing is what a model reads
 DRAWING_MIMES = {"application/vnd.thimble.diagram+json": "diagram", "application/vnd.thimble.timeline+json": "timeline"}
-# a card type's graphic (thimble.card, cardtypes.py), which counts as a chart and is read through its listing
-CARD_MIME = "application/vnd.thimble.card+json"
 LABEL_KINDS = ("prompt", "regex", "code")
 LABEL_SCOPES = ("files", "canvas", "report")
 UNIT_WORDS = {"cell": "card", "span": "sentence"}  # a label's stored unit (concepts.SCOPES) as a result names it

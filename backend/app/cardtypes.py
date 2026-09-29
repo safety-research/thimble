@@ -287,13 +287,6 @@ def frame_document(c: str, name: str) -> str:
     return views.frame_document(view, card=True)
 
 
-def labels_context(c: str, ids: list[str]) -> dict[str, Any]:
-    """The labels context of a card (views.labels_context's shape): the labels it names, and no filter, since the Files
-    filter only dims what a card drew."""
-    ctx = views.labels_context(c, only=ids)
-    return {"labels": ctx["labels"], "filter": None}
-
-
 router = APIRouter()
 
 
@@ -321,7 +314,7 @@ async def records_route(c: str, name: str, body: RecordsBody) -> dict[str, Any]:
     cell = await asyncio.to_thread(notebook.get_cell, c, body.card) if body.card else None
     made = card_of((cell or {}).get("outputs")) or {}
     ids = [str(x.get("id")) for x in made.get("labels") or [] if isinstance(x, dict) and x.get("id")]
-    ctx = await asyncio.to_thread(labels_context, c, ids)
+    ctx = await asyncio.to_thread(views.labels_context, c, ids)
     try:
         return {"data": await views._call(c, {**_request(t), "labels": views._wire(ctx)}, "records", body.query)}
     except views.ReaderError as e:
