@@ -189,7 +189,8 @@ def test_a_prompt_label_reads_a_save_of_a_whole_page_as_what_it_changed(tmp_path
     """A record that saves a page again reads as the lines it added and removed from the page's save before it (under a
     line naming the page for a model, without it for a regex), the same
     whether the run reads every record in order or only the records a trial or `within` picked; a page's first save and a
-    save that rewrites most of the page read whole."""
+    save that rewrites most of the page read whole. An event log's records, numbered but naming no document, are not
+    saves."""
     saves = [{"page_id": "a", "seq": 1, "user": "ann", "body": "Intro\nline one"},
              {"page_id": "b", "seq": 1, "user": "bo", "body": "Other page"},
              {"page_id": "a", "seq": 2, "user": "bo", "body": "Intro\nline one\nline two -- bo"},
@@ -202,3 +203,5 @@ def test_a_prompt_label_reads_a_save_of_a_whole_page_as_what_it_changed(tmp_path
     assert [u.text(10_000) for u in concepts.as_changes(iter(units), header=False)][2] == "+ line two -- bo"  # a regex's
     assert every["revisions.jsonl#L1"] == "Intro\nline one"
     assert every["revisions.jsonl#L4"] == picked["revisions.jsonl#L4"] == "All new\ntext here\nand more"
+    assert concepts._save_key({"seq": 2, "service": "web-1", "text": "disk full"}) is None
+    assert concepts._save_key({"version": "2.1.0", "type": "system", "content": "compacted"}) is None

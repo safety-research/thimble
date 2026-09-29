@@ -1129,15 +1129,19 @@ def line_units(corpus_dir: Path, rel: str, kind: str, lines: Any) -> list[Unit]:
 
 SAVE_PLACE_KEYS = ("page_id", "page", "document", "doc_id", "slug")  # the document a record saves, else its file
 SAVE_SEQ_KEYS = ("seq", "rev", "revision", "version")  # the field that numbers its saves
+SAVE_REV_KEYS = ("rev", "revision")  # a sequence field that marks a save even with no document field
 SAVE_TEXT_KEYS = ("text", "body", "content")  # the field that holds the document
 
 
 def _save_key(record: Any) -> tuple[str, str] | None:
     """(the document, "" for the record's file, and the field that holds it) of a record that may save a whole document,
-    one with a sequence and a text field; else None."""
+    one with a text field and either a document and a sequence field or a revision field; else None. A sequence
+    alone, such as an event log's `seq` or a transcript's `version`, does not make a record a save."""
     if not isinstance(record, dict) or not any(k in record for k in SAVE_SEQ_KEYS):
         return None
     place = next((str(record[k]) for k in SAVE_PLACE_KEYS if isinstance(record.get(k), (str, int)) and str(record[k])), "")
+    if not place and not any(k in record for k in SAVE_REV_KEYS):
+        return None
     field = next((k for k in SAVE_TEXT_KEYS if isinstance(record.get(k), str)), None)
     return (place, field) if field else None
 
