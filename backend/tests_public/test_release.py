@@ -99,3 +99,16 @@ def test_a_release_pins_the_backend_with_hashes_and_carries_the_frontend_s_runti
             assert f"{at}/node_modules/{dep}".lstrip("/") in lock, f"{path} needs {dep}"
     assert "node_modules/vega-lite/node_modules/vega-expression" in lock, "a nested version is kept where it was"
     assert not {"node_modules/react", "node_modules/vite", "node_modules/@blocknote/core"} & set(lock)
+
+
+@NEEDS
+def test_the_zip_carries_the_config_s_reference_the_install_guide_links(tmp_path):
+    """INSTALL.md links docs/config.md, which the zip carries; a page's link to a file the zip leaves out goes to GitHub."""
+    root = small_repo(tmp_path, "INSTALL.md", "docs/config.md")
+    (root / "docs" / "config.md").write_text((root / "docs" / "config.md").read_text() + "\nSee [the terminal](terminal-first.md).\n")
+    git(root, "commit", "-q", "-am", "link")
+    r, files, meta = release(root, tmp_path / "out", read=("INSTALL.md", "docs/config.md"))
+    assert r.returncode == 0, r.stderr
+    assert "docs/config.md" in files
+    assert "](docs/config.md)" in meta["INSTALL.md"]
+    assert "/blob/" in meta["docs/config.md"] and "/docs/terminal-first.md)" in meta["docs/config.md"]

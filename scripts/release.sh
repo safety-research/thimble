@@ -23,9 +23,9 @@
 #   scripts/install.sh scripts/update.sh scripts/rebuild_ui.sh   what an install runs; scripts/dev/ never ships
 #   scripts/view_shot.mjs the headless page of a view's checks (backend/app/views.py runs it)
 #   scripts/ui_shot.mjs   the page screenshots of main's `screenshot` tool and of the dev agent (dev.py runs it)
-#   README.md LICENSE INSTALL.md docs/assets/thimble-banner.svg   the readme, the Apache-2.0 license, the install guide
-#                         and the banner the readme links; a link of the readme to a file the zip does not carry points
-#                         at that file on GitHub, at the release's commit
+#   README.md LICENSE INSTALL.md docs/config.md docs/assets/thimble-banner.svg   the readme, the Apache-2.0 license,
+#                         the install guide, the config's reference it links and the banner the readme links; a link of
+#                         these pages to a file the zip does not carry points at that file on GitHub, at the release's commit
 #   THIRD_PARTY_NOTICES   the licenses of the npm packages and fonts frontend/dist bundles, which ask for their notices
 #                         to travel with it; written by scripts/third_party_notices.py from frontend/node_modules, and
 #                         only when the zip carries frontend/dist
@@ -77,7 +77,7 @@ version="$(python3 -I -c 'import json,sys; print(json.load(open(sys.argv[1]))["v
 [ -n "$version" ] || die "plugin/.claude-plugin/plugin.json has no version"
 sha="$(git -C "$repo" rev-parse --short HEAD)"
 full_sha="$(git -C "$repo" rev-parse HEAD)"
-allow=(plugin backend prompts .claude-plugin README.md INSTALL.md docs/assets/thimble-banner.svg LICENSE
+allow=(plugin backend prompts .claude-plugin README.md INSTALL.md docs/config.md docs/assets/thimble-banner.svg LICENSE
        scripts/install.sh scripts/update.sh scripts/rebuild_ui.sh scripts/view_shot.mjs scripts/ui_shot.mjs
        frontend/src frontend/public frontend/index.html frontend/package.json
        frontend/package-lock.json frontend/vite.config.ts frontend/tsconfig.json frontend/tsconfig.app.json frontend/tsconfig.node.json)
@@ -196,19 +196,23 @@ d["name"] = name
 json.dump(d, open(p, "w"), indent=2)
 open(p, "a").write("\n")
 PY
-# the readme's links to files the zip does not carry (CLAUDE.md, docs/) go to GitHub, so none is broken in an install
+# the pages' links to files the zip does not carry (CLAUDE.md, docs/) go to GitHub, so none is broken in an install
 python3 -I - "$stage" "$gh_repo" "$full_sha" <<'PY'
 import os, re, sys
 stage, repo, sha = sys.argv[1:]
-p = os.path.join(stage, "README.md")
-if os.path.isfile(p):
+for rel in ("README.md", "INSTALL.md", "docs/config.md"):
+    p = os.path.join(stage, rel)
+    if not os.path.isfile(p):
+        continue
+    here = os.path.dirname(rel)
     text = open(p, encoding="utf-8").read()
     def fix(m):
         target = m.group(2)
         path = target.split("#", 1)[0]
-        if not path or re.match(r"^[a-z][a-z0-9+.-]*:", target) or os.path.exists(os.path.join(stage, path)):
+        if not path or re.match(r"^[a-z][a-z0-9+.-]*:", target) or os.path.exists(os.path.join(stage, here, path)):
             return m.group(0)
-        return f"{m.group(1)}https://github.com/{repo}/blob/{sha}/{target})"
+        whole = os.path.normpath(os.path.join(here, target)).replace(os.sep, "/")
+        return f"{m.group(1)}https://github.com/{repo}/blob/{sha}/{whole})"
     open(p, "w", encoding="utf-8").write(re.sub(r"(\]\()([^)\s]+)\)", fix, text))
 PY
 python3 -I - "$stage/RELEASE.json" "$version" "$sha" "$full_sha" "$date" "$dirty" "$([ -n "$src_dist" ] && echo true || echo false)" "$gh_repo" <<'PY'
