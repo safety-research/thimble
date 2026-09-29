@@ -1819,7 +1819,7 @@ def wrapped_argv(argv: list[str], *, workspace: str, corpus: Path, connection_fi
         log.error("kernel for %s: %s is bwrap (%s) but bwrap is not on PATH; the kernel is not started — %s",
                   workspace, config.KERNEL_WRAP_KEY, source, config.NO_BWRAP_HINT)
 
-        raise RuntimeError(f"the kernel wrap is bwrap but bubblewrap (bwrap) is not installed; {config.NO_BWRAP_HINT}")
+        raise RuntimeError("the kernel wrap is bwrap but bubblewrap (bwrap) is not installed, so the kernel did not start")
     venv = _VENV_PYTHON.parent.parent if PYTHON == str(_VENV_PYTHON) else None
     return kernel_wrap.kernel_wrap_argv(argv, corpus_dir=Path(corpus).resolve(), workspace_dir=_ws_dir(workspace).resolve(),
                                         connection_dir=connection_file.parent.resolve(), venv=venv,

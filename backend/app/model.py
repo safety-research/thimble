@@ -622,7 +622,7 @@ async def _structured(
         return res
 
     if not config.CLI_PATH:
-        return finish(CallResult(status="error", detail=config.NO_CLAUDE))
+        return finish(CallResult(status="error", detail=config.NO_CLAUDE_FOUND))
     try:
         # the metaschema walk, off the loop
         await asyncio.to_thread(jsonschema.Draft202012Validator.check_schema, tool.input_schema)
