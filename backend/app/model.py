@@ -342,12 +342,16 @@ async def _drain(client: Any, state: CallState, tool_name: str, idle_s: float, l
     """Consume one turn's messages, offering every `out` tool call to `state` (idempotent; this scan is what fake
     clients in tests exercise). `cap` gets every assistant block, tool result and result message as they arrive.
 
-    Every message, partial StreamEvents included, resets the idle clock; a gap of idle_s raises _Stalled.
+    Once the CLI has returned a recorded call's result, the turn is interrupted, so the model does not answer it, and read
+    on to its result message. Every message, partial StreamEvents included, resets the idle clock; a gap of idle_s raises
+    _Stalled.
     """
     _bind_sdk()
     turn = _Turn()
     full = f"mcp__{_SERVER}__{tool_name}"
     it = aiter(client.receive_response())
+    recorded: str | None = None  # the id of the first call recorded
+    interrupted = False
     while True:
         try:
             async with asyncio.timeout(idle_s):
@@ -365,22 +369,38 @@ async def _drain(client: Any, state: CallState, tool_name: str, idle_s: float, l
                     turn.text_parts.append(block.text)
                 elif isinstance(block, ToolUseBlock) and block.name == full:
                     turn.out_inputs.append(block.input)
-                    await state.offer_async(block.input)
+                    if await state.offer_async(block.input) == "recorded" and recorded is None:
+                        recorded = block.id
             if msg.error == "rate_limit":
                 turn.rate_limited = True
         elif isinstance(msg, ResultMessage):
             turn.result = msg
             cap.result(msg)
-        elif isinstance(msg, UserMessage) and cap.on:
+        elif isinstance(msg, UserMessage):
             for block in (msg.content if isinstance(msg.content, list) else []):
                 if isinstance(block, ToolResultBlock):
                     cap.tool_result(block.tool_use_id, block.content, bool(block.is_error))
+                    if block.tool_use_id == recorded and not interrupted:
+                        interrupted = True
+                        await _interrupt(client)
         elif is_rate_limit_rejection(msg):
             turn.rate_limited = True
             turn.resets_at = resets_at(msg)
         # Anything else — StreamEvent partials, system chatter — carries no classification weight; it already
         # counted as the sign of life above.
     return turn
+
+
+INTERRUPT_WAIT_S = 10.0
+
+
+async def _interrupt(client: Any) -> None:
+    """Ask the CLI to end the turn. A failed interrupt only means the rest of the turn is read as it comes."""
+    try:
+        async with asyncio.timeout(INTERRUPT_WAIT_S):
+            await client.interrupt()
+    except Exception:  # noqa: BLE001
+        log.debug("structured: the interrupt after the recorded call failed", exc_info=True)
 
 
 # CLI children that outlive their call. Every client's CLI child is recorded on connect and killed on close when it

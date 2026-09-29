@@ -6,7 +6,9 @@ from claude_agent_sdk import (
     AssistantMessage,
     ResultMessage,
     TextBlock,
+    ToolResultBlock,
     ToolUseBlock,
+    UserMessage,
 )
 
 from app import model
@@ -48,6 +50,10 @@ def amsg(*blocks, **kw):
     return AssistantMessage(content=list(blocks), **kw)
 
 
+def tres(id="t1", text="recorded"):
+    return UserMessage(content=[ToolResultBlock(tool_use_id=id, content=text)])
+
+
 def rmsg(**kw):
     base = dict(subtype="success", duration_ms=10, duration_api_ms=8, is_error=False, num_turns=1,
                 session_id="sess-1")
@@ -63,6 +69,7 @@ class FakeClient:
         self.opts = opts
         self.queries: list[str] = []
         self.exited = False
+        self.interrupts = 0
 
     async def __aenter__(self):
         return self
@@ -77,6 +84,9 @@ class FakeClient:
     async def receive_response(self):
         for m in self.turns.pop(0):
             yield m
+
+    async def interrupt(self):
+        self.interrupts += 1
 
 
 def install(monkeypatch, sessions, cls=FakeClient, **extra):
@@ -105,6 +115,7 @@ async def call(**kw):
 async def test_ok_valid_tool_call(monkeypatch):
     made = install(monkeypatch, [[[
         amsg(TextBlock(text="writing it now"), tuse({"title": "T", "n": 2})),
+        tres(),
         rmsg(model_usage={"claude-sonnet-5": {"inputTokens": 1}}, total_cost_usd=0.12),
     ]]])
     r = await call()
@@ -113,3 +124,14 @@ async def test_ok_valid_tool_call(monkeypatch):
     assert r.fallback_note == "" and r.detail == ""
     assert r.attempts == 1 and r.cost_usd == 0.12 and r.session_id == "sess-1"
     assert r.duration_s >= 0 and len(made) == 1 and made[0].exited
+    assert made[0].interrupts == 1
+
+
+async def test_turn_interrupted_only_once_a_call_is_recorded(monkeypatch):
+    made = install(monkeypatch, [[
+        [amsg(tuse({"n": 2}, id="t1")), tres("t1", "invalid"), rmsg()],
+        [amsg(tuse({"title": "T"}, id="t2")), tres("t2"), rmsg()],
+    ]])
+    r = await call()
+    assert r.status == "ok" and r.output == {"title": "T"} and r.attempts == 2
+    assert made[0].interrupts == 1
