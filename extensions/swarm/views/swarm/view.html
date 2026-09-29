@@ -569,6 +569,10 @@ function renderBar(v) {
   document.getElementById('span').textContent = D.cards.length ? `${fmt(D.offset + 1)}–${fmt(D.offset + D.cards.length)} of ${fmt(D.total)}` : ''
   document.getElementById('prev').disabled = D.offset <= 0
   document.getElementById('next').disabled = D.offset + D.cards.length >= D.total
+  renderLabelsButton()
+  renderLegend()
+}
+function renderLabelsButton() {
   const on = labelState.labels
   const cname = on.length ? on.map((l) => l.name).join(', ') : 'none on'
   const sws = on.slice(0, 4).map((l) => `<i class="sw" style="width:5px;border-radius:1px;background:${esc(l.colour)}"></i>`).join('')
@@ -577,7 +581,6 @@ function renderBar(v) {
   const ids = on.map((l) => l.id).filter(Boolean).join(' ')
   if (ids) cb.dataset.label = ids
   else delete cb.dataset.label
-  renderLegend()
 }
 function toggleSet(set, x, add) {
   if (add) set.has(x) ? set.delete(x) : set.add(x)
@@ -1689,8 +1692,9 @@ function ovQuery() {
 async function ovLoad() {
   const seq = ++ovSeq
   let data
+  const q = ovQuery()
   try {
-    data = await thimble.fetch(ovQuery())
+    data = await thimble.fetch(q)
   } catch (e) {
     if (seq !== ovSeq) return false
     const em = document.getElementById('ovempty')
@@ -1699,7 +1703,7 @@ async function ovLoad() {
     return false
   }
   if (seq !== ovSeq) return false
-  O = data
+  O = { ...data, asked: q.bins }
   return true
 }
 const ovWhen = (t) => { const d = new Date(t * 1000); return `${dayOf(d)} ${hmOf(d)}` }
@@ -1754,6 +1758,7 @@ function ovRenderBar() {
     b.onclick = async () => { ovq.place = null; await ovReload() }
     f.append(b)
   }
+  renderLabelsButton()
   ovRenderLegend()
   const pr = document.getElementById('problems')
   pr.hidden = true
@@ -1860,13 +1865,14 @@ function ovAxis() {
     const t = O.start + b * O.step
     const d = new Date(t * 1000)
     const day = dayOf(d)
-    const text = day !== lastDay || O.step >= 86400 ? `${day}${O.step < 86400 ? ` ${hmOf(d)}` : ''}` : hmOf(d)
+    const hm = hmOf(d)
+    const text = day !== lastDay ? (hm === '00:00' ? day : `${day} ${hm}`) : hm
     lastDay = day
     g.beginPath()
     g.moveTo(b * cw + 0.5, hh - 5)
     g.lineTo(b * cw + 0.5, hh)
     g.stroke()
-    g.fillText(text, b * cw + 3, hh - 7)
+    if (b * cw + 3 + g.measureText(text).width <= w) g.fillText(text, b * cw + 3, hh - 7)
   }
   if (nb > O.bins) g.fillText('no time', O.bins * cw + 2, hh - 7)
 }
@@ -1899,6 +1905,7 @@ async function ovReload() {
 }
 function ovRedraw() {
   if (!O) return
+  renderLabelsButton()
   ovRenderLegend()
   for (const el of document.querySelectorAll('#ov .ovrow')) {
     const cv = el.querySelector('canvas')
@@ -2106,8 +2113,15 @@ if (OV) {
     clearTimeout(ovQT)
     ovQT = setTimeout(async () => { ovq.q = e.target.value.trim(); await ovReload() }, 250)
   })
+  // a narrower or wider page draws the cells again at once, and reads the overview again when its bins would change
   let ovResizeT = null
-  addEventListener('resize', () => { clearTimeout(ovResizeT); ovResizeT = setTimeout(() => ovReload(), 200) })
+  new ResizeObserver(() => {
+    if (!O) return
+    ovAxis()
+    for (const cv of document.querySelectorAll('#ov canvas.ovcells')) ovDraw(cv)
+    clearTimeout(ovResizeT)
+    ovResizeT = setTimeout(() => { if (O && Math.abs(ovQuery().bins - O.asked) > O.asked * 0.25) ovReload() }, 250)
+  }).observe(document.getElementById('ov'))
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && ovDetail && !menu && !pal) ovClose() })
 }
 
