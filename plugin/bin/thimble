@@ -418,15 +418,16 @@ case "${1:-}" in
       # so it always exits 0, with a thimble: line when the tree cannot be found
       up=0
       case "$1 ${2:-}" in "server up"* | "server ensure"* | "up "* | "ensure "*) up=1;; esac
-      # /thimble feedback: the report, with the folder the skill names, and no server
+      # /thimble feedback: the report, with the folder the skill names, and no server; not when the plugin's hook wrote
+      # it already and left what it printed for the supervisor to print (app/cli.py hook_up)
       if [ "$up" = 1 ]; then
-        fb=0 cwd_arg="" prev=""
+        fb=0 cwd_arg="" sid_arg="" prev=""
         for a in "$@"; do
-          case "$prev" in --action) [ "$a" != feedback ] || fb=1;; --cwd) cwd_arg="$a";; esac
-          case "$a" in --action=feedback) fb=1;; --cwd=*) cwd_arg="${a#--cwd=}";; esac
+          case "$prev" in --action) [ "$a" != feedback ] || fb=1;; --cwd) cwd_arg="$a";; --session) sid_arg="$a";; esac
+          case "$a" in --action=feedback) fb=1;; --cwd=*) cwd_arg="${a#--cwd=}";; --session=*) sid_arg="${a#--session=}";; esac
           prev="$a"
         done
-        if [ "$fb" = 1 ]; then
+        if [ "$fb" = 1 ] && ! { [ -n "$sid_arg" ] && [ -f "${THIMBLE_HOME:-$HOME/.thimble}/up/$sid_arg.json" ]; }; then
           [ -z "$cwd_arg" ] || export THIMBLE_CALLER_CWD="$cwd_arg"
           feedback --skill
         fi

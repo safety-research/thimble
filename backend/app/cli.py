@@ -27,8 +27,12 @@ the command line and working folder, since a pid recorded inside a sandbox's pid
 process). reconcile makes the record true before `up` acts on it. A server whose /api/health names another
 THIMBLE_HOME belongs to another install and is refused.
 
-Claude Code's Bash sandbox gives each command its own network and pid namespace, so `up` starts nothing there and
-prints the `sandbox.excludedCommands` entry that runs it outside (sandbox_rule). `restart` and `stop` name the work
+Claude Code's Bash sandbox gives each command its own network and pid namespace, where a server would die with the
+command and the host's cannot be reached. So /thimble's work runs in the plugin's UserPromptExpansion hook, which Claude
+Code runs outside the sandbox just before the skill's commands (`server up --hook`, hook_up): it keeps what `up` printed
+in <home>/up/<session>.json, and the skill's `up` prints that (take_hook_result), or does the work itself when the hook
+left nothing. In the sandbox without the hook's result `up` starts nothing and prints the `sandbox.excludedCommands`
+entries that would run it outside (sandbox_line). `restart` and `stop` name the work
 they would interrupt (running_work) and ask first unless `--yes`. In dev mode an `up` that finds the source tree changed
 while the server is idle restarts the backend (THIMBLE_NO_AUTORESTART=1 disables it). This module imports only
 `config`, `procs`, `cc_channel` and the standard library (others lazily), never `app.notebook`.
@@ -40,6 +44,7 @@ import errno
 import fcntl
 import hashlib
 import importlib.util
+import io
 import json
 import os
 import platform
@@ -58,7 +63,7 @@ import traceback
 import urllib.error
 import urllib.parse
 import urllib.request
-from contextlib import contextmanager
+from contextlib import contextmanager, redirect_stdout, suppress
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterator, Mapping, NamedTuple
@@ -159,9 +164,17 @@ FOREIGN_LINE = ("thimble: port {port} is held by the thimble server of another i
                 "install does not use it. Set THIMBLE_PORT to a free port, or stop that server with "
                 "`THIMBLE_HOME={other} thimble server stop`.")
 SANDBOX_ENV = "SANDBOX_RUNTIME"  # "1" in a command Claude Code's Bash sandbox runs (module note, the Bash sandbox)
+# /thimble in the sandbox when the plugin's UserPromptExpansion hook left nothing (module note, the Bash sandbox)
 SANDBOX_LINE = ("thimble: WARNING - Claude Code's Bash sandbox is on in this session and keeps /thimble from reaching "
-                "thimble's server, so there is no link. To fix it, add \"{rule}\" to sandbox.excludedCommands in "
-                "{settings}, then say /thimble again.")
+                "thimble's server, and the plugin's hook that starts the server outside the sandbox did not finish (it "
+                "needs a recent Claude Code, and a failure is in {log}), so there is no link. Update Claude Code and "
+                "say /thimble again, or add \"{rule}\" to sandbox.excludedCommands in {settings}.")
+SANDBOX_NO_HOOKS_LINE = ("thimble: WARNING - Claude Code's Bash sandbox is on in this session and keeps /thimble from "
+                         "reaching thimble's server, and with the plugin's hooks off nothing can start the server "
+                         "outside the sandbox, so there is no link. To fix it, add \"{rule}\" and \"{watch}\" to "
+                         "sandbox.excludedCommands in {settings}, then say /thimble again.")
+HOOK_RESULTS_DIR = "up"  # under <home>: what /thimble's hook left for the skill's command to print (hook_up)
+HOOK_RESULT_S = 60.0  # a result older than this is not the one the hook left for this /thimble
 MANUAL_RESTART = "manual restart"  # dev.PLAIN_REASONS
 # what `restart` says before it asks (running_work, module note)
 RUNNING_HEAD = "thimble: running now:"
@@ -446,6 +459,22 @@ def sandbox_rule() -> str:
     """The `sandbox.excludedCommands` entry that runs /thimble's `server up` outside the sandbox: the plugin copy's
     own path, as the skill's command spells it once Claude Code has put in its plugin root."""
     return f"{plugin_root() / 'bin' / 'thimble'} server up *"
+
+
+def watch_rule() -> str:
+    """The `sandbox.excludedCommands` entry that runs the Monitor route's watcher outside the sandbox."""
+    return f"{plugin_root() / WATCHER} --stream *"
+
+
+def sandbox_line(cwd: Path) -> str:
+    """What /thimble prints in the sandbox when the hook left no result (module note, the Bash sandbox): with the
+    plugin's hooks off, the Monitor route's watcher needs an entry too."""
+    from . import cc_settings  # noqa: PLC0415 — the settings' path, needed on this path alone
+
+    settings = cc_settings.config_dir() / "settings.json"
+    if cc_channel.hooks_blocked(cwd, plugin_root()):
+        return SANDBOX_NO_HOOKS_LINE.format(rule=sandbox_rule(), watch=watch_rule(), settings=settings)
+    return SANDBOX_LINE.format(rule=sandbox_rule(), settings=settings, log=log_path())
 
 
 def _request(method: str, url: str, body: dict | None = None, timeout: float = 5.0) -> tuple[int, Any]:
@@ -2226,13 +2255,71 @@ def registrable(cwd: Path, session_id: str | None) -> bool:
     return bool(session_id)
 
 
+def hook_result_path(session: str) -> Path | None:
+    """<home>/up/<session>.json, the session id kept to letters, digits, `-` and `_`; None for an id with none."""
+    name = "".join(ch for ch in session if ch.isalnum() or ch in "-_")
+    return home() / HOOK_RESULTS_DIR / f"{name}.json" if name else None
+
+
+def hook_up(raw: str) -> int:
+    """`server up --hook`, /thimble's UserPromptExpansion hook (module note, the Bash sandbox): `up` for the hook's
+    session, folder and arguments, with what it prints kept for the skill's `up` (take_hook_result). It prints nothing,
+    since a hook's output would reach the model beside the skill's."""
+    try:
+        hook = json.loads(raw)
+    except ValueError:
+        return 0
+    path = hook_result_path(str(hook.get("session_id") or "")) if isinstance(hook, dict) else None
+    if path is None:
+        return 0
+    args = str(hook.get("command_args") or "")
+    try:
+        words = shlex.split(args)
+    except ValueError:
+        words = args.split()
+    action, archive = (words + ["", ""])[:2]
+    cwd = os.environ.get("CLAUDE_PROJECT_DIR") or str(hook.get("cwd") or "") or os.getcwd()
+    path.unlink(missing_ok=True)
+    out = io.StringIO()
+    with redirect_stdout(out):
+        cmd_server_up(argparse.Namespace(cwd=cwd, session=str(hook["session_id"]), action=action, archive=archive))
+    config.private_dir(path.parent)
+    fd, tmp = tempfile.mkstemp(prefix=".up.", dir=str(path.parent))
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump({"cwd": cwd, "action": action, "archive": archive, "at": time.time(), "text": out.getvalue()}, f)
+        os.replace(tmp, path)
+    finally:
+        Path(tmp).unlink(missing_ok=True)
+    return 0
+
+
+def take_hook_result(session: str, cwd: Path, action: str, archive: str) -> str | None:
+    """What the hook's `up` printed for this /thimble: the result it left for `session` within HOOK_RESULT_S, for the
+    same folder and arguments, removed once read where the file can be removed; None when there is none."""
+    path = hook_result_path(session)
+    try:
+        result = json.loads(path.read_text("utf-8")) if path else None
+        fresh = 0 <= time.time() - float(result.get("at") or 0) <= HOOK_RESULT_S
+        same = (Path(str(result.get("cwd"))).resolve() == cwd.resolve() and result.get("action") == action
+                and result.get("archive") == archive and isinstance(result.get("text"), str))
+    except (OSError, RuntimeError, ValueError, TypeError, AttributeError):
+        return None
+    if not (fresh and same):
+        return None
+    with suppress(OSError):  # the sandbox mounts <home> read-only; the next hook removes it
+        path.unlink()
+    return result["text"]
+
+
 def cmd_ensure(args: argparse.Namespace) -> int:
-    ensure_home()
-    action = ALIASES.get((args.action or "").strip(), (args.action or "").strip())
     cwd = Path(args.cwd or os.environ.get("THIMBLE_CALLER_CWD") or os.getcwd())
-    env = resolve_env()
-    data_dir = Path(env["data_dir"])
-    url = api_url()
+    if args.session:
+        text = take_hook_result(str(args.session), cwd, args.action or "", args.archive or "")
+        if text is not None:
+            sys.stdout.write(text)
+            return 0
+    action = ALIASES.get((args.action or "").strip(), (args.action or "").strip())
     if action in ("uninstall", "trust"):
         print(UNINSTALL_SHELL_LINE if action == "uninstall" else TRUST_SHELL_LINE)
         return 0
@@ -2244,10 +2331,12 @@ def cmd_ensure(args: argparse.Namespace) -> int:
         print(REFUSED_LINE.format(path=cwd))
         return 0
     if in_sandbox():  # a server started here would die with the command, and the host's is out of reach
-        from . import cc_settings  # noqa: PLC0415 — the settings' path, needed on this path alone
-
-        print(SANDBOX_LINE.format(rule=sandbox_rule(), settings=cc_settings.config_dir() / "settings.json"))
+        print(sandbox_line(cwd))
         return 0
+    ensure_home()
+    env = resolve_env()
+    data_dir = Path(env["data_dir"])
+    url = api_url()
     if refuse_foreign(url):  # another install's server on the port: its workspaces and code are not this install's
         return 0
     if action == "status":
@@ -2564,7 +2653,14 @@ def _ensure_namespace(args: argparse.Namespace, action: str | None = None) -> ar
 
 
 def cmd_server_up(args: argparse.Namespace) -> int:
-    """`thimble server up`: start if needed, open this directory, print the URL; exit 0 whatever happens."""
+    """`thimble server up`: start if needed, open this directory, print the URL; exit 0 whatever happens. With `--hook`,
+    /thimble's hook (hook_up), which reads Claude Code's hook input on stdin."""
+    if getattr(args, "hook", False):
+        try:
+            return hook_up(sys.stdin.read())
+        except Exception as e:  # noqa: BLE001 — the skill's `up` then does the work, or says what is missing
+            _log(f"server up --hook failed: {type(e).__name__}: {e}\n{traceback.format_exc()}")
+            return 0
     try:
         return cmd_ensure(_ensure_namespace(args))
     except Exception as e:  # noqa: BLE001
@@ -2595,6 +2691,8 @@ def add_server_group(sub: Any) -> None:
     up.add_argument("--session", help="the Claude Code session asking; its folder is opened as a workspace")
     up.add_argument("--action", help="status | fix | fresh | restore (or resume) | feedback; empty for a bare /thimble")
     up.add_argument("--archive", help="with --action restore: the archived run to restore; none lists them")
+    up.add_argument("--hook", action="store_true", help="/thimble's UserPromptExpansion hook: the session, folder and "
+                    "arguments from the hook input on stdin, and what up prints kept for the skill's own up")
     up.set_defaults(fn=cmd_server_up)
     st = ssub.add_parser("status", help="one line: server up/down, orientation, queue; starts nothing")
     st.add_argument("--cwd")
