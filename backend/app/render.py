@@ -5,7 +5,9 @@ One headless Chromium keeps POOL_PAGES pages loaded on `render.html` (frontend/s
 with a stub canvas context. Each request carries everything the page needs (the card, its resolved refs, card and
 label names, cited calls, the theme), so the page never calls the API. The page comes from THIMBLE_RENDER_URL, the
 Vite dev server in dev mode, or the built UI served from memory at RENDER_ORIGIN. A page is replaced after
-RECYCLE_AFTER renders or any failure; without Playwright or its Chromium, available() is False and why() says why."""
+RECYCLE_AFTER renders or any failure; without Playwright or its Chromium, available() is False and why() says why.
+A card type's frame that is one flat colour in the picture is shot again twice, then the render fails, so the check
+never reads a card whose graphic did not draw."""
 from __future__ import annotations
 
 import asyncio
@@ -35,6 +37,9 @@ PAGE_LOAD_TIMEOUT_S = 30.0
 SCALE = 2  # device pixels per CSS pixel, what a retina display shows
 VIEWPORT = {"width": 1280, "height": 1000}  # a taller card is shot beyond the viewport
 CARD_W = 720  # frontend/src/canvas/layout.ts CARD_W: a card's width when it has none of its own
+TYPE_W = 1200  # a card of a card type drawn at least this wide, as focus mode shows it
+BLANK_WAITS_S = (0.5, 1.0, 0.0)  # a card type's frame shot blank is shot again after these waits, then the render fails
+BLANK_RANGE = 8  # grey levels between a frame's darkest and lightest pixels under which it drew nothing
 RENDER_ORIGIN = "http://thimble.render"
 RENDER_PAGE = "render.html"
 THEMES_FILE = "render-theme.json"  # workspaces/<c>/: the theme the analyst's browser last reported
@@ -52,11 +57,13 @@ def enabled() -> bool:
 
 @dataclass
 class Rendered:
-    """One card drawn: `png` the card at SCALE (None when the page failed), its box in CSS px, whether the fonts the
-    card asks for were loaded, the API paths the page asked for that the request did not answer, and the times in ms."""
+    """One card drawn: `png` the card at SCALE (None when the page failed), its box and its card-type frames' boxes in
+    CSS px, whether the fonts the card asks for were loaded, the API paths the page asked for that the request did not
+    answer, and the times in ms."""
 
     png: bytes | None = None
     box: dict[str, float] = field(default_factory=dict)
+    frames: list[dict[str, float]] = field(default_factory=list)
     fonts: bool = True
     requests: list[str] = field(default_factory=list)
     ms: dict[str, float] = field(default_factory=dict)
@@ -226,6 +233,7 @@ class Pool:
         out = await page.evaluate("(req) => window.__thimbleRender.render(req)", request)
         t1 = time.perf_counter()
         res.box = out.get("box") or {}
+        res.frames = [f for f in out.get("frames") or [] if isinstance(f, dict)]
         res.fonts = bool(out.get("fonts", True))
         res.requests = list(out.get("requests") or [])
         res.error = str(out.get("error") or "")
@@ -234,8 +242,14 @@ class Pool:
             self._warned_fonts = True
             log.warning("render: the render page drew in a fallback face (its fonts did not load)")
         if not res.error and res.box.get("width"):
-            res.png = await page.screenshot(clip=_clip(res.box), full_page=True, type="png", animations="disabled",
-                                            caret="hide")
+            for wait in BLANK_WAITS_S:
+                res.png = await page.screenshot(clip=_clip(res.box), full_page=True, type="png", animations="disabled",
+                                                caret="hide")
+                if not blank_frames(res.png, res.box, res.frames):
+                    break
+                await asyncio.sleep(wait)
+            else:
+                res.error = "the card type's page drew nothing"
         t2 = time.perf_counter()
         page_ms = {k: v for k, v in (out.get("ms") or {}).items() if isinstance(v, (int, float))}
         res.ms = {"page": round((t1 - t0) * 1000, 1), "shot": round((t2 - t1) * 1000, 1),
@@ -285,6 +299,26 @@ async def _fulfil(route: Any, folder: Path) -> None:
         ctype = "text/javascript"
     await route.fulfill(status=200, body=p.read_bytes(),
                         headers={"content-type": ctype, "content-security-policy": APP_CSP})
+
+
+def blank_frames(png: bytes, box: dict[str, float], frames: list[dict[str, float]]) -> bool:
+    """Whether a frame of the card, a card type's page, is one flat colour in the picture `png` of the card at `box`."""
+    if not frames:
+        return False
+    import io  # noqa: PLC0415
+
+    from PIL import Image  # noqa: PLC0415 — Pillow comes with matplotlib
+
+    im = Image.open(io.BytesIO(png)).convert("L")
+    clip = _clip(box)
+    for f in frames:
+        lo, hi = (f.get("x", 0) - clip["x"]) * SCALE, (f.get("y", 0) - clip["y"]) * SCALE
+        part = im.crop((int(lo), int(hi), int(lo + f.get("width", 0) * SCALE), int(hi + f.get("height", 0) * SCALE)))
+        if part.width > 0 and part.height > 0:
+            a, b = part.getextrema()
+            if b - a < BLANK_RANGE:
+                return True
+    return False
 
 
 def _clip(box: dict[str, float]) -> dict[str, float]:
@@ -498,7 +532,8 @@ def request_for(c: str, cell: dict[str, Any], *, width: int | None = None) -> di
     """The render request for one card as it stands (module note, the page): the card as the canvas reads it, its refs
     resolved, the cards they name, the theme and the width, for a label card its label (label_data), whose rows
     without their own text are quoted from the records their refs resolve to, and for a card of a card type the type's
-    page (type_frames)."""
+    page (type_frames) and at least TYPE_W of width, since the type's page lays its whole graphic out in the width it
+    gets."""
     refs = cited_refs(cell)
     label = label_data(c, cell)
     for rows in (label or {}).get("rows", {}).values():
@@ -507,6 +542,9 @@ def request_for(c: str, cell: dict[str, Any], *, width: int | None = None) -> di
             if ref and not str(r.get("text") or "").strip() and ref not in refs:
                 refs.append(ref)
     w = width or cell.get("width") or CARD_W
+    frames = type_frames(c, cell)
+    if frames and not width and isinstance(w, (int, float)):
+        w = max(w, TYPE_W)
     # the card as it will stand at rest: check records, earlier fixes and a fix candidate's mark are not its content
     card = {k: v for k, v in cell.items() if k not in ("check", "fixes", "candidate")}
     return {
@@ -519,7 +557,7 @@ def request_for(c: str, cell: dict[str, Any], *, width: int | None = None) -> di
         "theme": theme(c),
         "width": int(w) if isinstance(w, (int, float)) and w > 0 else CARD_W,
         **({"label": label} if label else {}),
-        **type_frames(c, cell),
+        **frames,
     }
 
 

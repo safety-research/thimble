@@ -46,6 +46,8 @@ type Box = { x: number; y: number; width: number; height: number }
 
 export interface RenderResult {
   box: Box | null
+  /** each frame a card type's page draws in, which the harness checks drew something */
+  frames?: Box[]
   fonts: boolean
   requests: string[]
   error?: string
@@ -197,7 +199,8 @@ async function render(req: RenderRequest): Promise<RenderResult> {
   // a card still drawing after SETTLE_MAX_MS is shot as it stands
   await settled(card)
   const fonts = await fontsLoaded()
-  return { box: boxOf(card), fonts, requests: [...unanswered], ms: { settle: Math.round(now() - t0) } }
+  const frames = Array.from(card.querySelectorAll('iframe.viewer-frame'), boxOf)
+  return { box: boxOf(card), frames, fonts, requests: [...unanswered], ms: { settle: Math.round(now() - t0) } }
 }
 
 declare global {

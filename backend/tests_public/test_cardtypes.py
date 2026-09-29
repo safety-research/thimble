@@ -24,7 +24,7 @@ import pytest
 
 from fastapi import HTTPException
 
-from app import cardtypes, channel, concepts, config, extensions, render, tools, views
+from app import card_check, cardtypes, channel, concepts, config, extensions, render, tools, views
 
 CORPUS = "crew"
 ROWS = [{"page": f"p{i % 4}", "user": f"bot{i % 35}", "ts": f"2026-04-14T{i // 60:02d}:{i % 60:02d}:00Z",
@@ -163,7 +163,30 @@ async def test_the_check_s_page_gets_the_type_s_frame_from_the_request(crew, ker
     req = render.request_for(CORPUS, cell)
     doc = req["frames"]["swarm"]
     assert "connect-src 'none'" in doc and '"card": true' in doc and 'id="plot"' in doc
+    assert req["width"] == render.TYPE_W, "the check sees a card type's page at full width"
     assert "frames" not in render.request_for(CORPUS, {"id": "c2", "kind": "plot", "outputs": []})
+
+
+def test_a_card_type_frame_shot_blank_is_found():
+    import io
+
+    from PIL import Image, ImageDraw
+
+    box, frame = {"x": 16, "y": 16, "width": 200, "height": 100}, {"x": 26, "y": 56, "width": 180, "height": 50}
+    im = Image.new("RGB", (200 * render.SCALE, 100 * render.SCALE), "#fbfaf6")
+    ImageDraw.Draw(im).text((20, 10), "Who relayed first?", fill="black")
+    png = io.BytesIO()
+    im.save(png, "PNG")
+    assert render.blank_frames(png.getvalue(), box, [frame])
+    ImageDraw.Draw(im).rectangle((40, 100, 120, 140), outline="black")
+    png = io.BytesIO()
+    im.save(png, "PNG")
+    assert not render.blank_frames(png.getvalue(), box, [frame]) and not render.blank_frames(png.getvalue(), box, [])
+
+
+async def test_the_card_check_keeps_no_replacement_that_draws_another_kind_of_card():
+    table = {"status": "ok", "outputs": [{"text/plain": "a table"}]}
+    assert await card_check._not_kept(None, table, "swarm") == "it drew no swarm card"
 
 
 def test_keep_rewrites_the_literal_arguments_of_the_one_card_call():

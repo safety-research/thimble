@@ -33,7 +33,7 @@ What each link resolves to
 
 Its code
 {{code}}
-{{kept}}
+{{typed}}{{kept}}
 
 The work that led to the card, most recent last
 {{context}}
@@ -41,6 +41,10 @@ The work that led to the card, most recent last
 ## none
 
 None.
+
+## typed
+
+The card draws the `{{type}}` card type with thimble.card, and the picture shows it at full width. A replacement draws the same type: change the call's arguments, never the kind of card.
 
 ## kept
 
