@@ -183,6 +183,18 @@ def _rows(path, problems):
     return out
 
 
+def _csv_header(path):
+    """A CSV's header as _rows reads it: its first row with a cell, lower-cased; None when there is none."""
+    try:
+        with open(path, encoding="utf-8", errors="replace", newline="") as fh:
+            for cells in csv.reader(fh):
+                if any(c.strip() for c in cells):
+                    return [c.strip().lower() for c in cells]
+    except (OSError, csv.Error):
+        return None
+    return None
+
+
 def _offsets(path):
     offs, pos = [], 0
     with open(path, "rb") as fh:
@@ -236,7 +248,8 @@ def build_index(paths):
         own_place = path[len(base):].rsplit(".", 1)[0] if path in placeless else None
         kind = ("actions" if ("actor" in f or "anon" in f) and "text" in f
                 else "roster" if "actor" in f and "goal" in f else "other")
-        files[path] = {"offsets": _offsets(path), "kind": kind, "fields": f, "n": 0}
+        files[path] = {"offsets": _offsets(path), "kind": kind, "fields": f, "n": 0,
+                       "header": _csv_header(path) if path.endswith(".csv") else None}
         seen, last = {}, None
         for first, end, rec in rows:
             ref = f"{path}#L{first}"
@@ -443,10 +456,20 @@ def _raw(index, ref):
 
 
 def _record(index, ref):
-    """The record on the ref's line as a dict, or None."""
+    """The record on the ref's line as a dict, or None; a CSV row read from its line's offset by the file's header."""
     path, _, n = ref.partition("#L")
-    if path.endswith(".csv") and n.isdigit():
-        return next((rec for a, _b, rec in _rows(path, []) if a == int(n)), None)
+    if path.endswith(".csv"):
+        f = index["files"].get(path, {})
+        header, offs = f.get("header"), f.get("offsets")
+        if not header or not offs or not n.isdigit() or not 1 <= int(n) <= len(offs):
+            return None
+        try:
+            with open(path, "rb") as fh:
+                fh.seek(offs[int(n) - 1])
+                cells = next(csv.reader(io.TextIOWrapper(fh, "utf-8", "replace", newline=""), strict=True))
+        except (OSError, StopIteration, csv.Error):
+            return None
+        return {k: v.strip() for k, v in zip(header, cells)}
     raw = _raw(index, ref)
     try:
         rec = json.loads(raw) if raw is not None else None
