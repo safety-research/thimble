@@ -43,7 +43,7 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse
 from pydantic import BaseModel
 
-from . import config, headless, investigation, prompts, refs
+from . import config, headless, investigation, prompts, refs, userconf
 from .ledger import atomic_write_text, read_json, write_json
 
 log = logging.getLogger("thimble.views")
@@ -2049,7 +2049,8 @@ async def shoot_page(doc: str, states: list[dict[str, Any]], answer: Any, *, wid
 
     if why := await asyncio.to_thread(build_problem):
         return failed(why)
-    if headless.missing(headless.PAGES):
+    path = headless.launch(headless.PAGES)
+    if path is None or headless.missing(headless.PAGES):
         return unavailable()
     if not states:
         return []
@@ -2066,7 +2067,8 @@ async def shoot_page(doc: str, states: list[dict[str, Any]], answer: Any, *, wid
     try:
         proc = await asyncio.create_subprocess_exec(*cmd, cwd=str(config.REPO_ROOT), stdin=asyncio.subprocess.PIPE,
                                                     stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
-                                                    limit=SHOT_LINE_MAX)
+                                                    limit=SHOT_LINE_MAX,
+                                                    env={**os.environ, **({userconf.BROWSER_ENV: path} if path else {})})
     except OSError as e:
         return failed(f"the headless browser could not start: {e}")
     results: list[dict[str, Any]] | None = None

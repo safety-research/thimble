@@ -1077,8 +1077,9 @@ async def run_shot(url: str, out: Path, selector: str | None = None, *, info_out
     """`node scripts/ui_shot.mjs`: 0 ok, 2 selector not found (the viewport is written instead), 1 error, -1 timeout.
     Options map to the script's options of the same names. headless.Missing when the browser is missing, which stays so
     for the rest of the server run."""
-    if gone := headless.missing(headless.PAGES):
-        raise headless.Missing(gone)
+    path = headless.launch(headless.PAGES)
+    if path is None or headless.missing(headless.PAGES):
+        raise headless.Missing(headless.missing(headless.PAGES))
     cmd = ["node", str(shot_script()), "--url", url, "--out", str(out), *(["--offline"] if offline else [])]
     if selector:
         cmd += ["--selector", selector]
@@ -1094,7 +1095,9 @@ async def run_shot(url: str, out: Path, selector: str | None = None, *, info_out
         cmd += ["--press", key]
     if wait_ms is not None:
         cmd += ["--wait", str(int(wait_ms))]
-    proc = await asyncio.create_subprocess_exec(*cmd, cwd=str(REPO), stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+    env = {**os.environ, **({userconf.BROWSER_ENV: path} if path else {})}
+    proc = await asyncio.create_subprocess_exec(*cmd, cwd=str(REPO), stdout=asyncio.subprocess.PIPE,
+                                                stderr=asyncio.subprocess.PIPE, env=env)
     try:
         _, err = await asyncio.wait_for(proc.communicate(), SHOT_TIMEOUT_S)
     except asyncio.TimeoutError:

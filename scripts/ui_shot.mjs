@@ -167,7 +167,8 @@ try {
   if (elementOutPath) mkdirSync(dirname(elementOutPath), { recursive: true })
   const viewport = args.viewport ?? VIEWPORT
 
-  browser = await chromium.launch({ headless: true })
+  // the system's Chrome, Edge or Chromium when thimble's config picks it (backend/app/userconf.py)
+  browser = await chromium.launch({ headless: true, executablePath: process.env.THIMBLE_BROWSER_PATH || undefined })
   const page = await browser.newPage({ viewport, deviceScaleFactor: args.scale })
   if (args.storage.length)
     await page.addInitScript((pairs) => {

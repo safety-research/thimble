@@ -147,9 +147,13 @@ class Pool:
             if folder is not None and _serve_path(folder, url) is None:
                 self.why = f"there is no {RENDER_PAGE} in {folder} (build the UI, or set THIMBLE_RENDER_DIR)"
                 return False
+            path = headless.launch(headless.HARNESS)
+            if path is None:
+                self.why = headless.missing(headless.HARNESS)
+                return False
             try:
                 self._pw = await async_playwright().start()
-                self._browser = await self._pw.chromium.launch(headless=True)
+                self._browser = await self._pw.chromium.launch(headless=True, **({"executable_path": path} if path else {}))
                 self._context = await self._browser.new_context(viewport=VIEWPORT, device_scale_factor=SCALE,
                                                                 reduced_motion="reduce")
                 if folder is not None:
