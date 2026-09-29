@@ -17,6 +17,9 @@ Where types come from:
                card's kernel may see only the workspace and the corpus (kernel_wrap.py). Its claims are those of the
                workspace's view of the same slug, else what its reader's applies() names, asked once on the views kernel
                and kept (CLAIMS_FILE); a type whose applies() names none is left out.
+  extension's  a view of an active extension with a `card` block and card.py, or a card-only type of one (cards/<slug>/,
+               drawn by its card.html, read by the reader of the extension's view it names); extensions.card_types
+               finds them in the workspace's copy of the extension. Its card.md is its guide in main's prompt.
   workspace's  a built view of the workspace with a `card` block and card.py.
 refresh() writes REGISTRY_FILE, which thimble.card reads, and builds each type's index on the views kernel ahead of the
 first card. prompt_text() is the {{card_types}} slot of prompts/shared.md: prompts/card-types.md with the types listed, or
@@ -145,6 +148,36 @@ def version_of(d: Path) -> str:
     return h.hexdigest()[:12]
 
 
+def _ext_entry(c: str, t: dict[str, Any]) -> dict[str, Any]:
+    """An extension's type (extensions.card_types) as REGISTRY_FILE holds it, its index shared with the workspace's view
+    of the type's view when the extension installed that view and it reads the same files with the same reader."""
+    d, reader = Path(t["dir"]), Path(t["reader"])
+    block = card_block({"card": t["block"]}) or {}
+    reader_src = reader.read_text("utf-8")
+    files = views.claimed_files(c, {"claims": t["claims"]})
+    fp = views.fingerprint(files, reader_src)
+    cache = Path(t["cache"])
+    view = views.read_built(c, t["view"])
+    if view is not None and view["ok"] and view["claims"] == t["claims"]:
+        prop = views.read_proposal(c, t["view"]) or {}
+        try:
+            if prop.get("extension") == t["extension"] and (Path(view["dir"]) / views.READER_PY).read_text("utf-8") == reader_src:
+                cache = views.cache_dir(c, view)
+        except OSError:
+            pass
+    h = hashlib.sha1()
+    for p in (d / "view.json" if t["page"] is None else d / "card.json", reader, d / CARD_PY,
+              d / (t["page"] or views.VIEW_HTML)):
+        h.update(p.read_bytes() if p.is_file() else b"")
+        h.update(b"\0")
+    return {"name": t["name"], "slug": t["slug"], "origin": "extension", "extension": t["extension"], "view": t["view"],
+            **block, "guide": t["guide"], "version": h.hexdigest()[:12], "dir": str(d.resolve()),
+            "view_dir": str(reader.parent.resolve()), "page": t["page"], "reader": str(reader.resolve()),
+            "card": str((d / CARD_PY).resolve()), "libs": views._libs(t.get("libs")), "claims": t["claims"],
+            "paths": [f[0] for f in files], "fp": fp, "cache": str((cache / f"{fp}.index.pickle").resolve()),
+            "host": str((types_dir(c) / HOST_FILE).resolve())}
+
+
 def _entry(c: str, slug: str, d: Path, claims: list[str], origin: str) -> dict[str, Any]:
     """A type as REGISTRY_FILE holds it: what main reads (use, args, size, example), its files, and its index keyed and
     cached as the views kernel keys it (views._prepare), shared with the workspace's view of that slug when both read the
@@ -183,15 +216,28 @@ def read_registry(c: str | None) -> dict[str, dict[str, Any]]:
 
 async def refresh(c: str, *, warm: bool = True) -> dict[str, dict[str, Any]]:
     """The workspace's card types found again and written to REGISTRY_FILE, with each index built on the views kernel in
-    the background (`warm`). Returns them by name."""
+    the background (`warm`). An extension's type takes the place of thimble's of the same slug. Returns them by name."""
+    from . import extensions  # noqa: PLC0415
+
     lock = _locks.setdefault(c, asyncio.Lock())
     async with lock:
         types: dict[str, dict[str, Any]] = {}
+        ext_types = await asyncio.to_thread(extensions.card_types, c)
+        mine = {t["slug"] for t in ext_types}
         for slug in own_types():
+            if slug in mine:
+                continue
             d = await asyncio.to_thread(install_own, c, slug)
             claims = await claims_of(c, slug, d)
             if claims:
                 types[slug] = await asyncio.to_thread(_entry, c, slug, d, claims, "thimble")
+        if ext_types:
+            await asyncio.to_thread(_copy_changed, views.HOST_PY, types_dir(c) / HOST_FILE)
+        for t in ext_types:
+            try:
+                types[t["slug"]] = await asyncio.to_thread(_ext_entry, c, t)
+            except OSError as e:
+                log.warning("%s: the card type %s of the extension %s was left out: %s", c, t["slug"], t["extension"], e)
         for slug, d in (await asyncio.to_thread(views._view_dirs, c)).items():
             v = await asyncio.to_thread(views.read_built, c, slug)
             if v is not None and v["ok"] and _is_type(Path(v["dir"])):
@@ -270,6 +316,8 @@ def _lines(types: dict[str, dict[str, Any]]) -> str:
             out.append("  Arguments: " + "; ".join(_signature(k, v) for k, v in props.items()) + ".")
         if t.get("example"):
             out.append(f"  For example: `{t['example']}`")
+        if t.get("guide"):
+            out.append("\n".join(f"  {ln}" if ln.strip() else "" for ln in str(t["guide"]).splitlines()))
     return "\n".join(out)
 
 
@@ -297,7 +345,7 @@ def frame_document(c: str, name: str) -> str:
     t = read_registry(c).get(name)
     if t is None:
         raise HTTPException(404, f"no card type {name!r} in this workspace")
-    view = {"dir": t["dir"], "slug": t["slug"], "name": t["name"], "libs": t.get("libs") or []}
+    view = {"dir": t["dir"], "slug": t["slug"], "name": t["name"], "libs": t.get("libs") or [], "page": t.get("page")}
     return views.frame_document(view, card=True)
 
 
@@ -579,26 +627,40 @@ async def as_view(c: str, cell_id: str) -> dict[str, Any]:
     """Open as view: the view of the card's type, made the workspace's from thimble's type when it has none or has
     thimble's older install of it, with the card's labels turned on in Files. {slug, query}: `query` is {card, title,
     args}, the card and the arguments the view's page draws its records by."""
-    from . import concepts, notebook  # noqa: PLC0415
+    from . import notebook  # noqa: PLC0415
 
     cell = await asyncio.to_thread(notebook.get_cell, c, cell_id)
     if cell is None:
         raise HTTPException(404, f"no such card: {cell_id}")
     made = card_of(cell.get("outputs"))
     t = type_of(c, cell)
+    if t["origin"] == "extension":
+        slug = t["view"]
+        v = await asyncio.to_thread(views.read_built, c, slug)
+        if v is None or not v["ok"]:
+            await asyncio.to_thread(views.install_viewer, c, slug, Path(t["view_dir"]), t["claims"], why="",
+                                    proposed_by="analyst", orientation=False, extension=t["extension"])
+        return {"slug": slug, "query": await _turn_on(c, cell_id, cell, made)}
     v = await asyncio.to_thread(views.read_built, c, t["slug"])
     if v is None or not v["ok"] or (t["origin"] == "thimble" and v["origin"] == "workspace"
                                     and await asyncio.to_thread(_stale_install, c, t, v)):
         if t["origin"] != "thimble":
             raise HTTPException(409, f"the view {t['slug']} does not pass its checks")
         await asyncio.to_thread(install_view, c, t)
+    return {"slug": t["slug"], "query": await _turn_on(c, cell_id, cell, made)}
+
+
+async def _turn_on(c: str, cell_id: str, cell: dict[str, Any], made: dict[str, Any] | None) -> dict[str, Any]:
+    """The card's labels turned on in Files; the query the view's page draws the card's records by."""
+    from . import concepts  # noqa: PLC0415
+
     for k in (made or {}).get("labels") or []:
         try:
             await asyncio.to_thread(concepts.show_concept, c, str(k.get("id")), True)
         except HTTPException as e:
             log.info("%s: the label %s of card:%s was not turned on: %s", c, k.get("id"), cell_id, e.detail)
     args = {k: x for k, x in ((made or {}).get("args") or {}).items() if x is not None}
-    return {"slug": t["slug"], "query": {"card": cell_id, "title": str(cell.get("title") or ""), "args": args}}
+    return {"card": cell_id, "title": str(cell.get("title") or ""), "args": args}
 
 
 @router.post("/ws/{c}/cells/{cell_id}/as-view")
