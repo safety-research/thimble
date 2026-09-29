@@ -34,8 +34,8 @@ analyst when its build passed its checks); the report is asked for once no follo
 Restarts. A run a server stop cut short is resumed by the next server with `--resume` in the same chat. A failed first
 run is resumed as run 0 when start_orientation asks for the same orientation again, rather than redoing its work.
 
-Terminal-first mode (orientation module note): the same session runs as the background session `thimble:orient · <c>`
-(agent_session's `background`, bg_session.wanted), which the analyst's terminal shows in its agent tray.
+The session runs as the background session `thimble:orient · <c>` (agent_session's `background`), which the analyst's
+terminal shows in its agent tray.
 
 Follow-ups. Messages from main's `message_orientation` tool or the thread's composer go through message(): a finished
 orientation's session is resumed with the message in `## orient-follow-up`; a message sent while a run goes waits in the
@@ -189,7 +189,7 @@ def _launch(c: str, brief: str, passes: "list[str]", choices: dict[str, Any]) ->
                 agent_args=["--agents", json.dumps({name: agent}, ensure_ascii=False), "--agent", name], effort=effort,
                 settings=agent_session.settings_json(effort, env, ultracode=ultracode, fastMode=bool(own["fast"])),
                 agent_type=name, append_shared=False, model=own["model"], work=work_dir(c), calls=True,
-                agent="orient", patient=True, disallowed=disallowed(parts), background=bg_session.wanted(c, "orient"))
+                agent="orient", patient=True, disallowed=disallowed(parts), background=True)
 
 
 async def start(c: str, brief: str, passes: "list[str] | tuple[str, ...]" = ("final", "views"),

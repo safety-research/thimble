@@ -26,15 +26,11 @@ log = logging.getLogger("thimble.ledger")
 router = APIRouter()
 
 # GET /settings layers these under what the file stores (tools.RESULT_LINES_KEY: lines of each output a card's result
-# shows).
-# terminal_first (on by default where Claude Code trusts the workspace's folder, orientation.default_terminal_first): the
-# orientation, its critic and the writers run as background sessions the analyst's terminal shows
-# (orientation.terminal_first, bg_session); hide_chat: the browser shows no chat column, only a dock
-# (frontend shell/Shell)
-SETTINGS_DEFAULTS: dict[str, Any] = {"run_cell_result_lines": 40, "terminal_first": True, "hide_chat": False}
+# shows). hide_chat: the browser shows no chat column, only a dock (frontend shell/Shell)
+SETTINGS_DEFAULTS: dict[str, Any] = {"run_cell_result_lines": 40, "hide_chat": False}
 # Settings earlier builds stored that nothing reads any more: GET leaves them out, a PUT that sends one (a tab still
 # running an earlier build) is taken with the key dropped, and the next PUT removes it from the file. orient_route
-# picked how terminal-first mode ran the orientation, which now always runs as a background session.
+# picked how an earlier build ran the orientation.
 RETIRED_KEYS = frozenset({"orient_route"})
 
 
@@ -212,17 +208,13 @@ def stored_settings(c: str) -> dict[str, Any]:
 
 
 def with_features(stored: dict[str, Any], c: str | None = None) -> dict[str, Any]:
-    """The effective settings: SETTINGS_DEFAULTS under `stored` less RETIRED_KEYS, with workspace `c`'s default of
-    terminal_first (orientation.default_terminal_first), `models` as config.models_for resolves them from thimble's
-    config, the permission modes the config sets (modes.rows), `disabled_modes`, those the analyst's Claude Code settings
-    turn off, and `config_error`, the config's error or ''."""
-    from . import modes, orientation, userconf  # noqa: PLC0415 — they import this module
+    """The effective settings: SETTINGS_DEFAULTS under `stored` less RETIRED_KEYS, `models` as config.models_for resolves
+    them from thimble's config, the permission modes the config sets (modes.rows), `disabled_modes`, those the analyst's
+    Claude Code settings turn off, and `config_error`, the config's error or ''."""
+    from . import modes, userconf  # noqa: PLC0415 — they import this module
 
     kept = {k: v for k, v in stored.items() if k not in RETIRED_KEYS and k != modes.SETTING}
-    defaults = dict(SETTINGS_DEFAULTS)
-    if c is not None:
-        defaults[orientation.TERMINAL_FIRST_KEY] = orientation.default_terminal_first(c)
-    return {**defaults, **kept, config.MODELS_KEY: config.models_for(c), modes.SETTING: modes.rows(c) if c else {},
+    return {**SETTINGS_DEFAULTS, **kept, config.MODELS_KEY: config.models_for(c), modes.SETTING: modes.rows(c) if c else {},
             "disabled_modes": sorted(modes.disabled()), "config_error": userconf.problem(c)}
 
 

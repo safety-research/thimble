@@ -912,9 +912,6 @@ export interface ModelConf {
  * what it is given. */
 export interface Settings {
   models: Record<string, ModelConf>
-  /** terminal-first mode: the orientation, its critic and the writers run as Claude Code background sessions the
-   * analyst's terminal shows (backend orientation.terminal_first) */
-  terminal_first?: boolean
   /** the chat column is hidden and main's foot shows in a dock (shell/Shell, chat off) */
   hide_chat?: boolean
   /** the agents whose permission mode the analyst set; any other runs in the mode of their Claude Code session */

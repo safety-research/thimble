@@ -396,7 +396,7 @@ async def start(c: str, caller: agent_session.Run, context: str = "") -> tuple[a
         calls=caller.calls or caller.chat,  # numbered in the orientation's sequence
         agent="critic", patient=caller.patient,
         work=work_dir(c, caller.chat), unasked=True, disallowed=agent_session.not_own(OWN_TOOLS),
-        brief=prompt.split("\n\n", 1)[0], background=caller.bg, **fields)  # the critique-task line that opens the first message
+        brief=prompt.split("\n\n", 1)[0], background=True, **fields)  # the critique-task line that opens the first message
     return run, done
 
 

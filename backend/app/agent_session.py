@@ -94,8 +94,8 @@ Safeguards. When a safety classifier stopped a response (`stop_reason: refusal`)
 it, the session runs again once on FALLBACK_MODEL with `## session-model-fallback`; the earlier result is kept
 (with_earlier).
 
-Background sessions. In terminal-first mode a caller may pass `background`: the session then runs as a Claude Code
-background session (bg_session.py), which the analyst can attach to and message. Its process outlives a run, so a run
+Background sessions. The orientation, its critique and the writers pass `background`: the session then runs as a Claude
+Code background session (bg_session.py), which the analyst can attach to and message. Its process outlives a run, so a run
 ends when the session is idle, and a later turn of the session is a new run of its chat (bg_session.on_wake). A resume
 reaches a running session in place rather than with `--resume`, and a retry sends its prompt the same way. A permission
 prompt answered in the session's own terminal ends the card's wait once the call's result shows in its transcript.

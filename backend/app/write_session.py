@@ -100,14 +100,13 @@ def _launch(c: str, doc: str) -> dict[str, Any]:
     with prompts.custom(userconf.prompt_files(c, "writer")):
         name, agent = agent_definition()
     models = config.models_for(c)
-    background = bg_session.wanted(c, "writer")
     agent = agent_session.role_agent(agent, models["writer"])
     effort = str(agent.get("effort") or DEFAULT_EFFORT)
     return dict(role=ROLE, title=f"Write {doc}", agent_args=["--agents", json.dumps({name: agent}, ensure_ascii=False),
                                                               "--agent", name],
                 effort=effort, settings=agent_session.settings_json(effort, fastMode=bool(models["writer"]["fast"])),
                 agent_type=name, on_end=_ended, model=str(agent.get("model") or ""), work=work_dir(c, doc), unasked=True,
-                agent="writer", disallowed=agent_session.not_own(OWN_TOOLS), doc=doc, background=background)
+                agent="writer", disallowed=agent_session.not_own(OWN_TOOLS), doc=doc, background=True)
 
 
 async def _resume_left(c: str, meta: dict[str, Any], prompt: str) -> agent_session.Run:

@@ -1,6 +1,5 @@
-"""thimble's agents as Claude Code background sessions (`claude --bg`), for a workspace in terminal-first mode: the
-orientation, its critique and the writers. The analyst
-sees each in `claude agents`, in the agent view (←) and at the bottom of main's terminal, and can attach to it, answer
+"""thimble's agents as Claude Code background sessions (`claude --bg`): the orientation, its critique and the writers.
+The analyst sees each in `claude agents`, in the agent view (←) and at the bottom of main's terminal, and can attach to it, answer
 its permission prompts there and message it.
 
 Names. Each session is named for Claude Code as `thimble:<role> · <workspace>` (name_of, config.session_name):
@@ -19,9 +18,8 @@ Start. agent_session builds the `claude -p` command as for any session and hands
 `claude --bg` command: the first message goes on the command line, and the session's own environment goes in the
 --settings `env`, since the background service starts the session with its own environment. `claude --bg` refuses a
 folder Claude Code does not trust; install.sh asks once to trust thimble's workspaces folder (claude_changes). Without
-that trust (trusted), terminal-first mode is off unless the analyst turns it on (orientation.default_terminal_first), and
-a refusal says how the analyst can trust the folder (the bg-untrusted hint). BgProc stands in for the process agent_session
-follows: a run ends when the session is idle, its
+that trust (trusted) none of these sessions starts, and the refusal says how the analyst can trust the folder (the
+bg-untrusted hint). BgProc stands in for the process agent_session follows: a run ends when the session is idle, its
 transcript's last turn has ended and it has no background work, while the session itself goes on for the analyst. A
 session whose turn ended while a background shell of its own runs on counts as idle once its transcript has been quiet
 for LINGER_S (_lingering), since Claude Code lists it as busy for as long as the shell runs.
@@ -158,18 +156,7 @@ def _plugin() -> str:
     return orientation.PLUGIN
 
 
-# --------------------------------------------------------------------------- which route
-
-
-def terminal_first(c: str) -> bool:
-    from . import orientation  # noqa: PLC0415
-
-    return orientation.terminal_first(c)
-
-
-def wanted(c: str, kind: str) -> bool:
-    """Whether a session of `kind` (orient, writer, critique) runs as a background session in workspace `c`."""
-    return terminal_first(c) and kind in PROXY_TYPES
+# --------------------------------------------------------------------------- trust
 
 
 def claude_json() -> Path:
@@ -185,7 +172,7 @@ _trust_read: dict[str, tuple[tuple[int, int], dict[str, Any]]] = {}  # claude_js
 def trusted(c: str) -> bool:
     """Whether Claude Code trusts workspace `c`'s folder, below which its background sessions run (module note, start),
     by the folder's own entry or one above it such as install.sh's for the workspaces folder (claude_changes). The file
-    is parsed again only when it changed, since the statusline asks on each refresh (orientation.terminal_first)."""
+    is parsed again only when it changed, since the settings ask on each read."""
     from . import claude_changes  # noqa: PLC0415
 
     path = claude_json()
@@ -1595,7 +1582,7 @@ def _nudge() -> str:
 
 def statusline_command(own: str = "") -> str:
     """The statusline command the launcher passes to main: plugin/bin/thimble-agents, which lists thimble's agents
-    while the workspace is in terminal-first mode (agents_route), chained to the analyst's statusline command `own`."""
+    (agents_route), chained to the analyst's statusline command `own`."""
     import shlex  # noqa: PLC0415
 
     from . import agent_session  # noqa: PLC0415
@@ -1684,8 +1671,7 @@ def _save_announced(c: str) -> None:
 
 @router.post("/agents")
 async def agents_route(body: AgentsQuery) -> dict[str, Any]:
-    """thimble's agents for the folder's workspace: `{rows, line, text}` for the statusline (in terminal-first mode only)
-    and /thimble:agents, and with `announce` the lines main's terminal has not shown yet (the plugin's hooks print them):
+    """thimble's agents for the folder's workspace: `{rows, line, text}` for the statusline and /thimble:agents, and with `announce` the lines main's terminal has not shown yet (the plugin's hooks print them):
     each session's start once, with the command that attaches it, and each run's finish."""
     c = config.workspace_for_cwd(body.cwd)
     if not c:
@@ -1706,8 +1692,7 @@ async def agents_route(body: AgentsQuery) -> dict[str, Any]:
                              ("" if alive(e) else " (its session has ended)"))
         if lines:
             _save_announced(c)
-    line = status_line(rows) if terminal_first(c) else ""
-    return {"rows": rows, "line": line, "text": listing_text(rows), "announce": "\n".join(lines)}
+    return {"rows": rows, "line": status_line(rows), "text": listing_text(rows), "announce": "\n".join(lines)}
 
 
 class RelayBody(BaseModel):
