@@ -1,6 +1,6 @@
 """app.views: viewers written for how a corpus arranges its records. The reader resolves lines and keys, the frame
 document blocks every load, and the worked examples a view ticket reads pass the view checks over their own samples, one
-of them with its page loaded headless.
+of them with its page loaded headless, and one on a machine without the headless browser.
 
 A temp DATA_DIR holds the corpus `boards`: `board.jsonl`, one post per line, each {thread, author, time, body}, and
 `notes.md`. The `ws` fixture saves the view `threads`, whose reader (THREADS_READER) groups the posts by thread: it
@@ -12,6 +12,7 @@ import contextlib
 import fnmatch
 import io
 import json
+import logging
 import os
 import re
 import shutil
@@ -20,7 +21,7 @@ from pathlib import Path
 
 import pytest
 
-from app import config, views
+from app import config, headless, tools, views
 
 CORPUS = "boards"
 POSTS = [  # (thread, author, time, body); line n of board.jsonl is POSTS[n-1]
@@ -288,3 +289,35 @@ async def test_every_worked_example_s_page_loads_headless_at_its_first_place(nam
     assert rep["ok"], views.gate_lines(rep)
     assert rep["page"]["fetches"] >= 1 and Path(rep["page"]["png"]).is_file()
     assert not views.unmarked(rep["page"]), "the records a worked example shows carry their file refs, for the labels"
+
+
+# what Playwright's own error says to run, which never reaches a model
+INSTALL_WORDS = re.compile(r"playwright install|npx|download new browsers|Executable doesn't exist|install\.sh", re.I)
+
+
+@pytest.mark.parametrize("name", ["repository"])
+async def test_without_the_headless_browser_a_view_is_checked_on_its_reader_and_nothing_says_how_to_install_it(
+        name, samples, inproc, bound, tmp_path, monkeypatch, caplog):
+    """Where Playwright finds no browser, a view's checks pass on its reader, the session hears only that screenshots are
+    unavailable, the log warns once, and the screenshot tool says only that."""
+    if why := views.build_problem():
+        if os.environ.get("CI") == "true":
+            pytest.fail(why)
+        pytest.skip(why)
+    empty = tmp_path / "browsers"
+    empty.mkdir()
+    monkeypatch.setenv("PLAYWRIGHT_BROWSERS_PATH", str(empty))
+    monkeypatch.setattr(headless, "_missing", {})
+    caplog.set_level(logging.WARNING, logger="thimble.headless")
+    slug = _save_example(name)
+    for _ in range(2):
+        rep = await views.check(name, slug, EXAMPLES[name][1], shot_dir=tmp_path)
+        lines = views.gate_lines(rep)
+        assert rep["ok"] and rep["page"].get("unavailable"), lines
+        assert not any(INSTALL_WORDS.search(ln) for ln in lines), lines
+    assert len(caplog.records) == 1, [r.getMessage() for r in caplog.records]
+    monkeypatch.setattr(headless, "_missing", {})  # the page screenshot's own script finds the browser missing too
+    monkeypatch.setenv("THIMBLE_PORT", "8921")
+    monkeypatch.delenv("THIMBLE_DEV", raising=False)
+    shot = await tools._shot_page("http://127.0.0.1:8921/", None)
+    assert shot.is_error and shot.text == headless.NO_SCREENSHOTS

@@ -63,7 +63,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterator, Mapping, NamedTuple
 
-from . import cc_channel, config, procs
+from . import cc_channel, config, headless, procs
 
 DEFAULT_PORT = 8300
 DEFAULT_UI_PORT = 5300
@@ -1699,6 +1699,8 @@ def source_changed_text(st: dict[str, Any], up: bool) -> str:
 
 
 BROWSER_FETCH = "backend/.venv/bin/python -m playwright install chromium-headless-shell"
+BROWSER_DEPS = "sudo backend/.venv/bin/python -m playwright install-deps chromium-headless-shell"
+PAGES_FETCH = "npx playwright install chromium-headless-shell"  # in frontend/
 
 
 def playwright_browsers_dir(environ: Mapping[str, str] | None = None, platform_: str | None = None) -> Path:
@@ -1723,26 +1725,56 @@ def playwright_browsers_dir(environ: Mapping[str, str] | None = None, platform_:
     return cache / "ms-playwright"
 
 
-def harness_line(url: str, up: bool) -> str:
-    """Whether the card harness draws cards (render.py's headless Chromium), and the command that fixes it when it
-    cannot: the running server's own answer, else whether the browser was fetched. Without it no card is checked, since
-    the card check reads a card's picture."""
+def headless_fetched(browsers_json: Path) -> bool:
+    """Whether the headless Chromium the Playwright with this browsers.json launches is in Playwright's browsers folder;
+    with no readable browsers.json, whether any headless Chromium is."""
+    browsers = playwright_browsers_dir()
+    try:
+        data = json.loads(browsers_json.read_text("utf-8"))
+        rev = next(str(b["revision"]) for b in data["browsers"] if b.get("name") == "chromium-headless-shell")
+    except (OSError, ValueError, KeyError, TypeError, StopIteration):
+        return any(browsers.glob("chromium_headless_shell-*"))
+    return (browsers / f"chromium_headless_shell-{rev}").is_dir()
+
+
+def harness_line(url: str, up: bool, commands: bool = True) -> str:
+    """Whether the card harness draws cards (render.py's headless Chromium), and with `commands` the command that fixes
+    it when it cannot: the running server's own answer, else whether the browser was fetched. Without it no card is
+    checked, since the card check reads a card's picture."""
+    spec = importlib.util.find_spec("playwright")
+    fetched = headless_fetched(Path(spec.origin).parent / "driver" / "package" / "browsers.json" if spec and spec.origin
+                               else Path("-"))
+    fix = f": run `{BROWSER_FETCH}` in {config.REPO_ROOT}, then `thimble restart`" if commands else ""
     if up:
         status, got = _request("GET", f"{url}/api/render/status")
         if status == 200 and isinstance(got, dict):
             if got.get("ready"):
                 return f"ready ({got.get('pages')} pages)"
-            return f"not drawing ({got.get('why') or 'starting'}); cards are not checked"
-    browsers = playwright_browsers_dir()
-    if any(browsers.glob("chromium_headless_shell-*")):
+            why = str(got.get("why") or "starting")
+            if commands and why == headless.NO_LIBRARIES:
+                fix = f": run `{BROWSER_DEPS}` in {config.REPO_ROOT}, then `thimble restart`"
+            return f"not drawing ({why}); cards are not checked" + ("" if fetched and why != headless.NO_LIBRARIES else fix)
+    if fetched:
         return "headless Chromium fetched" + ("" if up else " (the server is down)")
-    return f"no headless Chromium in {browsers}, so cards are not checked: run `{BROWSER_FETCH}` in {config.REPO_ROOT}"
+    return f"no headless Chromium in {playwright_browsers_dir()}, so cards are not checked{fix}"
 
 
-def sandbox_lines() -> list[str]:
+def pages_line(commands: bool = True) -> str:
+    """Whether the frontend's headless Chromium, which loads a view's page for its checks and review and takes the
+    screenshots, was fetched, and with `commands` the command that fetches it."""
+    browsers_json = FRONTEND_DIR / "node_modules" / "playwright-core" / "browsers.json"
+    if not browsers_json.is_file():
+        return "n/a (the frontend's packages are not installed)"
+    if headless_fetched(browsers_json):
+        return "headless Chromium fetched"
+    fix = f": run `{PAGES_FETCH}` in {FRONTEND_DIR}, then `thimble restart`" if commands else ""
+    return f"no headless Chromium in {playwright_browsers_dir()}, so {headless.SKIPPED[headless.PAGES]}{fix}"
+
+
+def sandbox_lines(commands: bool = True) -> list[str]:
     """The doctor's `bash sandbox` line: whether Claude Code's Bash sandbox can run for the orientation (cc_settings.sandbox_ok)
-    and, when not, what it lacks and the root commands that install it. Where it runs, the line names the empty
-    `.claude/.cc-writes/` folder Claude Code creates in the folder a sandboxed command runs in."""
+    and, when not, what it lacks and with `commands` the root commands that install it. Where it runs, the line names
+    the empty `.claude/.cc-writes/` folder Claude Code creates in the folder a sandboxed command runs in."""
     from . import cc_settings  # noqa: PLC0415
 
     try:
@@ -1755,7 +1787,7 @@ def sandbox_lines() -> list[str]:
                 "change to the corpus's files; Claude Code's sandbox adds an empty .claude/.cc-writes/ folder where its "
                 "commands run, the corpus folder among them)"]
     head = "  bash sandbox: off, missing " + ", ".join(missing) + "; the orientation's Bash asks under your permission mode"
-    if not cmds:
+    if not cmds or not commands:
         return [head + (f"; {what}" if what else "")]
     return [f"{head}. To turn it on, run these, which {what}, then `thimble restart`:", *(f"    {c}" for c in cmds)]
 
@@ -1803,13 +1835,15 @@ def claude_code_warning(version: str | None) -> str | None:
     return None
 
 
-def claude_code_line() -> str:
+def claude_code_line(commands: bool = True) -> str:
     v = claude_code_version()
     if v is None:
-        return config.NO_CLAUDE if not config.CLI_PATH else "`claude --version` printed no version"
+        return (config.NO_CLAUDE if commands else config.NO_CLAUDE_FOUND) if not config.CLI_PATH else \
+            "`claude --version` printed no version"
     warning = claude_code_warning(v)
     if warning:
-        return warning.removeprefix("thimble: WARNING - ")
+        return warning.removeprefix("thimble: WARNING - ") if commands else \
+            f"{v}, older than {TESTED_CLAUDE_CODE}, the version thimble is tested with"
     return f"{v} (thimble is tested with {TESTED_CLAUDE_CODE})"
 
 
@@ -1819,10 +1853,11 @@ def _turn_endings_line() -> str:
     return terminal_tools.line()
 
 
-def node_line() -> str:
-    """Node's version, which only custom views need, with what to install when it is missing or too old."""
+def node_line(commands: bool = True) -> str:
+    """Node's version, which only custom views need, and with `commands` what to install when it is missing or too
+    old."""
     exe = shutil.which("node")
-    need = f"custom views need Node {NODE_MIN_MAJOR}+ (https://nodejs.org); everything else works without it"
+    need = f"custom views need Node {NODE_MIN_MAJOR}+{' (https://nodejs.org)' if commands else ''}; everything else works without it"
     if not exe:
         return f"not found; {need}"
     try:
@@ -1833,7 +1868,8 @@ def node_line() -> str:
     if v and v[0] < NODE_MIN_MAJOR:
         return f"{out}, too old; {need}"
     modules = FRONTEND_DIR / "node_modules"
-    return out + ("" if modules.is_dir() else f"; {modules} is missing, so custom views cannot build (run `npm ci` in {FRONTEND_DIR})")
+    return out + ("" if modules.is_dir() else f"; {modules} is missing, so custom views cannot build"
+                  + (f" (run `npm ci` in {FRONTEND_DIR})" if commands else ""))
 
 
 def human_bytes(n: float) -> str:
@@ -1989,7 +2025,9 @@ def validation_ports() -> tuple[int, int]:
 
 # feedback.doctor_summary reads the server, auth, network and card harness lines and the recent errors line by their
 # labels, for the one line a problem report's new issue carries.
-def doctor_text() -> str:
+def doctor_text(commands: bool = True) -> str:
+    """What `thimble doctor` prints. Without `commands` its lines name no command that installs anything, for a model
+    to read (`thimble fix`, `/thimble fix`)."""
     st = read_state()
     env = resolve_env()
     p = int(st.get("port") or port())
@@ -1998,9 +2036,9 @@ def doctor_text() -> str:
     pid = st.get("pid")
     lines = ["thimble doctor"]
     lines.append(f"  versions: {_checked(versions_line)}")
-    lines.append(f"  claude code: {_checked(claude_code_line)}")
+    lines.append(f"  claude code: {_checked(claude_code_line, commands)}")
     lines.append(f"  turn endings: {_checked(_turn_endings_line)}")
-    lines.append(f"  node: {_checked(node_line)}")
+    lines.append(f"  node: {_checked(node_line, commands)}")
     lines.append(f"  port: {_checked(port_line, p, up)}")
     lines.append(f"  server: {'up' if up else 'down'} at {url}; pid {pid or '-'} "
                  f"({'alive' if pid_alive(pid) else 'gone'}); started {st.get('started') or '-'}"
@@ -2032,8 +2070,9 @@ def doctor_text() -> str:
     lines.append(f"  network: {_checked(network_line, status)}")
     caller = Path(os.environ.get("THIMBLE_CALLER_CWD") or os.getcwd())
     lines.append(f"  delivery (a session `thimble` starts in {caller}): {_checked(delivery_line, caller)}")
-    lines.append(f"  card harness: {harness_line(url, up)}")
-    lines += sandbox_lines()
+    lines.append(f"  card harness: {harness_line(url, up, commands)}")
+    lines.append(f"  views and screenshots: {_checked(pages_line, commands)}")
+    lines += sandbox_lines(commands)
     lines.append("  validation stack: "
                  + ", ".join(f"{q} {'busy' if listening(q) else 'free'}" for q in validation_ports())
                  + f"; env from server.json: {'yes' if st.get('env') else 'no (defaults)'}")
@@ -2097,7 +2136,7 @@ def fix() -> str:
 
     from . import dev  # noqa: PLC0415
 
-    return asyncio.run(dev.fix_offline(doctor_text()))
+    return asyncio.run(dev.fix_offline(doctor_text(commands=False)))
 
 
 def revert() -> dict[str, Any]:
@@ -2270,7 +2309,7 @@ def _action(args: argparse.Namespace, up: bool, url: str) -> int:
     a = args.action
     if a in ("fix", "repair"):
         if up:
-            print(doctor_text())
+            print(doctor_text(commands=False))
             print(FIX_INSTRUCTION)
             return 0
         try:

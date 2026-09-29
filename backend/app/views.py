@@ -43,7 +43,7 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse
 from pydantic import BaseModel
 
-from . import config, investigation, prompts, refs
+from . import config, headless, investigation, prompts, refs
 from .ledger import atomic_write_text, read_json, write_json
 
 log = logging.getLogger("thimble.views")
@@ -1844,6 +1844,8 @@ def gate_lines(report: dict[str, Any]) -> list[str]:
             lines.append(f"bad {r['locator']}: {r.get('why')}")
     page = report.get("page") or {}
     shots = report.get("shots") or []
+    if page.get("unavailable"):
+        lines.append("note: " + _hint("view-no-screenshots"))
     for s in shots:
         if s.get("ok"):
             lines.append(f"page: {s.get('state')}, {int(s.get('records') or 0)} records and {int(s.get('units') or 0)} units "
@@ -1852,7 +1854,7 @@ def gate_lines(report: dict[str, Any]) -> list[str]:
             lines.append(f"page: {s.get('state')}: " + "; ".join(s.get("errors") or ["did not load"]))
         if s.get("png"):
             lines.append(f"png: {s['png']}")
-    if page and not shots:
+    if page and not shots and not page.get("unavailable"):
         if page.get("ok"):
             lines.append(f"page: loaded, {page.get('fetches', 0)} fetch(es), no errors")
         else:
@@ -1951,9 +1953,8 @@ def _node_version(node: str, mtime_ns: int) -> str:
 
 def build_problem() -> str:
     """Why a view cannot be built and checked on this machine, '' when it can: the checks need Node 20+ and the
-    frontend's
-    Playwright (scripts/install.sh). The line is written for the analyst."""
-    install = f"bash {config.REPO_ROOT / 'scripts' / 'install.sh'}"
+    frontend's packages. The line reaches the orientation and main too, so it names what is missing and no command
+    (`thimble doctor` names them)."""
     version = ""
     if node := shutil.which("node"):  # the one shoot runs
         with contextlib.suppress(OSError):
@@ -1961,13 +1962,11 @@ def build_problem() -> str:
     m = re.match(r"v(\d+)", version)
     if not m or int(m.group(1)) < NODE_MIN:
         found = f"Node {version.lstrip('v')}" if m else "no Node"
-        return (f"Custom views need Node {NODE_MIN}+, and this machine has {found}. Install Node {NODE_MIN} or newer "
-                f"(https://nodejs.org), run `{install}` again, then Retry the view.")
+        return f"Custom views need Node {NODE_MIN}+, and this machine has {found}."
     if not SHOT_SCRIPT.is_file():
-        return f"Custom views need {SHOT_SCRIPT}, which this install lacks. Install thimble again from a release or a clone."
+        return f"Custom views need {SHOT_SCRIPT}, which this install lacks."
     if not (_NODE_MODULES / "playwright").is_dir() or not all(p.is_file() for p in LIBS.values()):
-        return (f"Custom views need the frontend's packages, which are not installed here. Run `{install}` again, "
-                "which installs them with Node, then Retry the view.")
+        return "Custom views need the frontend's packages, which are not installed here."
     return ""
 
 
@@ -2040,12 +2039,18 @@ async def shoot_page(doc: str, states: list[dict[str, Any]], answer: Any, *, wid
     each state {out, open, labels?, ids?}, send it `open` once it says ready, and write a picture of it to `out`. Every
     request the page makes, `fetch`, `marks` or `media`, is answered by `await answer(kind, state index, message)`, a
     dict of the answer's fields. Returns one result per state, {ok, errors, fetches, fonts, png?, ...} as view_shot.mjs
-    reports it; without Node or the frontend's packages each has build_problem's line as its one error."""
+    reports it; without Node or the frontend's packages each has build_problem's line as its one error, and without the
+    browser (headless.missing) each is `unavailable`, its one error headless.NO_SCREENSHOTS."""
     def failed(why: str) -> list[dict[str, Any]]:
         return [{"ok": False, "errors": [why], "fetches": 0} for _ in states]
 
+    def unavailable() -> list[dict[str, Any]]:
+        return [{"ok": False, "unavailable": True, "errors": [headless.NO_SCREENSHOTS], "fetches": 0} for _ in states]
+
     if why := await asyncio.to_thread(build_problem):
         return failed(why)
+    if headless.missing(headless.PAGES):
+        return unavailable()
     if not states:
         return []
     first = Path(states[0]["out"])
@@ -2065,6 +2070,7 @@ async def shoot_page(doc: str, states: list[dict[str, Any]], answer: Any, *, wid
     except OSError as e:
         return failed(f"the headless browser could not start: {e}")
     results: list[dict[str, Any]] | None = None
+    launch_error = ""  # the run's own error when the browser did not start
 
     async def reply(obj: dict[str, Any]) -> None:
         assert proc.stdin is not None
@@ -2079,7 +2085,7 @@ async def shoot_page(doc: str, states: list[dict[str, Any]], answer: Any, *, wid
         return i if 0 <= i < len(states) else 0
 
     async def converse() -> None:
-        nonlocal results
+        nonlocal results, launch_error
         assert proc.stdout is not None
         while True:
             line = await proc.stdout.readline()
@@ -2095,7 +2101,8 @@ async def shoot_page(doc: str, states: list[dict[str, Any]], answer: Any, *, wid
             elif msg.get("done"):
                 results = list(msg.get("states") or [])
                 if msg.get("error") and not results:
-                    results = [{"ok": False, "errors": [str(msg["error"])]} for _ in states]
+                    launch_error = str(msg["error"])
+                    results = [{"ok": False, "errors": [launch_error.splitlines()[0][:400]]} for _ in states]
                 return
 
     limit = SHOT_TIMEOUT_S + SHOT_STATE_S * len(states)
@@ -2114,8 +2121,11 @@ async def shoot_page(doc: str, states: list[dict[str, Any]], answer: Any, *, wid
         except asyncio.TimeoutError:
             proc.kill()
             await proc.wait()
+    err = (await proc.stderr.read()).decode("utf-8", "replace") if results is None and proc.stderr else ""
+    if gone := headless.why_missing(launch_error + err):
+        headless.mark_missing(headless.PAGES, gone)
+        return unavailable()
     if results is None:
-        err = (await proc.stderr.read()).decode("utf-8", "replace") if proc.stderr else ""
         why = timed_out or (f"the headless browser exited {proc.returncode}: {err[-400:]}" if proc.returncode else
                             "the headless page did not finish")
         results = [{"ok": False, "errors": [why], "fetches": 0} for _ in states]
@@ -2247,8 +2257,9 @@ def _is_line_form(form: str) -> bool:
 
 async def check(c: str, slug: str, locators: list[str] | None = None, *, shot_dir: Path | None = None) -> dict[str, Any]:
     """A view's checks: the index builds, locators and sampled lines round-trip (the answer cites the line back and its
-    excerpt is literal source), declared keys resolve, and the page loads headless without errors. Returns {ok, view,
-    index, checks, page}."""
+    excerpt is literal source), declared keys resolve, and the page loads headless without errors. Without the headless
+    browser the page is not loaded (its `page` is `unavailable`) and the other checks decide. Returns {ok, view, index,
+    checks, page}."""
     view = read_view(c, slug)
     if view is None:
         return {"ok": False, "view": None, "problems": [f"no view {slug!r}"], "checks": [], "page": None}
@@ -2339,11 +2350,15 @@ async def check(c: str, slug: str, locators: list[str] | None = None, *, shot_di
 
     base = shot_dir or (cache_dir(c, view) / "shots")
     shots = await shoot_checks(c, slug, view, files, report["checks"], base, f"check-{int(time.time())}")
-    report["shots"] = shots
-    report["page"] = _page_of(shots)
+    if shots and all(s.get("unavailable") for s in shots):
+        report["shots"], report["page"] = [], {"ok": False, "unavailable": True, "errors": [], "fetches": 0}
+    else:
+        report["shots"], report["page"] = shots, _page_of(shots)
     if anchorless(view, files, shots):
         report["problems"].append(_hint("view-no-anchors", slug=slug))
-    report["ok"] = (not report["problems"] and all(r["ok"] for r in report["checks"]) and bool(report["page"].get("ok")))
+    page = report["page"]
+    report["ok"] = (not report["problems"] and all(r["ok"] for r in report["checks"])
+                    and bool(page.get("ok") or page.get("unavailable")))
     return report
 
 
@@ -2530,6 +2545,8 @@ async def tool_screenshot(ctx: Any, args: dict[str, Any]) -> Any:
         place = await open_place(ctx.c, slug, at, locator_of(ref))
         res = await shoot(ctx.c, slug, place, Path(d) / "view.png")
         png = res.get("png")
+        if res.get("unavailable"):
+            return tools.err(headless.NO_SCREENSHOTS)
         if not png or not Path(png).is_file():
             return tools.err("screenshot: " + "; ".join(res.get("errors") or ["no picture was taken"]))
         data = base64.b64encode(Path(png).read_bytes()).decode("ascii")

@@ -230,7 +230,8 @@ try {
   if (args.info) writeFileSync(resolve(args.info), JSON.stringify(result) + '\n')
   console.log(JSON.stringify(result))
 } catch (e) {
-  console.error(`ui_shot: ${String(e?.stack ?? e?.message ?? e)}`)
+  // without the boxed notice Playwright adds to a failed launch, which names an install command
+  console.error(`ui_shot: ${String(e?.stack ?? e?.message ?? e).split('\n').filter((l) => !/^[╔║╚]/.test(l)).join('\n')}`)
   console.log(JSON.stringify({ ok: false, error: String(e?.message ?? e).split('\n')[0] }))
   code = 1
 } finally {

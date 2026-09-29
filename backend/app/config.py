@@ -95,8 +95,8 @@ def _resolve_cli() -> str | None:
 
 CLI_PATH = _resolve_cli()
 CLAUDE_BIN = CLI_PATH or "claude"
-NO_CLAUDE = ("the `claude` CLI was not found (not on PATH, not at ~/.local/bin/claude): install Claude Code, or name "
-             "its path with THIMBLE_CLAUDE_BIN")
+NO_CLAUDE_FOUND = "the `claude` CLI was not found (not on PATH, not at ~/.local/bin/claude)"  # what a model call says
+NO_CLAUDE = f"{NO_CLAUDE_FOUND}: install Claude Code, or name its path with THIMBLE_CLAUDE_BIN"
 
 
 # --------------------------------------------------------------------------- the kernel wrapper
@@ -113,7 +113,7 @@ KERNEL_WRAP_DEFAULT = "none"
 KERNEL_WRAP_ENV = "THIMBLE_KERNEL_WRAP"
 KERNEL_WRAP_KEY = "kernel_wrap"  # settings.json: none | bwrap
 KERNEL_WRAP_NONE, KERNEL_WRAP_BWRAP = KERNEL_WRAPS
-NO_BWRAP_HINT = "install bubblewrap (`apt install bubblewrap`) or set kernel_wrap: none"  # shown in the cell's error
+NO_BWRAP_HINT = "install bubblewrap (`apt install bubblewrap`) or set kernel_wrap: none"  # in the server log
 _KERNEL_WRAP_WARNED: set[str] = set()
 
 
