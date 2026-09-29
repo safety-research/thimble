@@ -90,7 +90,8 @@ async def _bind_sdk_off_loop() -> None:
 def __getattr__(name: str) -> Any:
     return sdk_attr(globals(), _SDK_NAMES, name)
 
-# Each call is a CLI subprocess. A prompt label runs up to concepts.CONCURRENCY of them, which leaves room for card checks.
+# Each call is a CLI subprocess, and at most this many run at once. A prompt label runs up to concepts.CONCURRENCY (24)
+# of them, which leaves room for card_check.READ_CONCURRENCY (4) card checks.
 MODEL_CONCURRENCY = int(os.environ.get("THIMBLE_MODEL_CONCURRENCY", "32"))
 # The idle window: a failure detector, not a time limit. The API buffers a tool call's JSON until it is complete, so a
 # long silent generation is normal.

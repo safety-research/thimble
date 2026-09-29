@@ -202,29 +202,26 @@ async def test_a_prompt_label_answers_once_its_first_rows_are_in(workspaces_tmp,
     assert done["labeled"] == 8
 
 
-async def test_a_slow_classifier_call_is_run_again_and_the_first_answer_wins(api, monkeypatch):
-    """The first call runs on while the calls beside it answer, so once they show it is slow it gets a twin."""
+async def test_a_slow_classifier_call_starts_no_call_past_the_limit(api, monkeypatch):
+    """While one call runs long, the others go on beside it and never more than CONCURRENCY run at once; each unit is
+    asked once."""
     monkeypatch.setattr(concepts, "BATCH_ITEMS", 1)
-    monkeypatch.setattr(concepts, "CONCURRENCY", 4)
-    monkeypatch.setattr(concepts, "HEDGE_MIN_S", 0.1)
-    monkeypatch.setattr(concepts, "HEDGE_POLL_S", 0.05)
-    stopped = []
+    monkeypatch.setattr(concepts, "CONCURRENCY", 3)
+    running, seen, asked = 0, [], []
 
     async def call(c, concept, items, comment=True, on_retry=None):
-        n = len(stopped)
-        stopped.append(False)
-        try:
-            await asyncio.sleep(600 if n == 0 else 0.01)
-        except asyncio.CancelledError:
-            stopped[n] = True
-            raise
+        nonlocal running
+        running += 1
+        seen.append(running)
+        asked.append(items[0][0])
+        await asyncio.sleep(0.5 if len(asked) == 1 else 0.01)
+        running -= 1
         return _ok(FakeClassify.rule(items))
 
     monkeypatch.setattr(concepts, "classify_structured", call)
     k = await _create(api, description="a board post that claims a PR")
     s = (await api.post(f"/api/ws/{CORPUS}/concepts/{k['id']}/apply", json={"wait": True, "paths": ["board.jsonl"]})).json()
-    await asyncio.sleep(0)
-    assert s["labeled"] == 8 and len(stopped) == 9 and stopped[0] and not any(stopped[1:])
+    assert s["labeled"] == 8 and sorted(asked) == sorted(set(asked)) and max(seen) == 3
 
 
 async def test_a_prompt_label_within_another_reads_only_the_records_it_kept(workspaces_tmp, fake_classify):
