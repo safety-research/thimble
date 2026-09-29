@@ -100,11 +100,15 @@ ends when the session is idle, and a later turn of the session is a new run of i
 reaches a running session in place rather than with `--resume`, and a retry sends its prompt the same way. A permission
 prompt answered in the session's own terminal ends the card's wait once the call's result shows in its transcript.
 
-Restart. The server's stop ends every process; a session whose caller can resume it is left running in its chat for
-the next server (_suspend), any other fails. A background session is left running, and the next server follows it again
-(bg_session.recover). At start, recover ends processes a dead server left, then resumes each run
-through its caller (on_resume) with `## session-restarted`, or closes it (on_left). Ends main did not hear are kept
+Restart. The server's stop ends every process and the processes they started; a session whose caller can resume it is
+left running in its chat for the next server (_suspend), any other fails. A background session is left running, and the
+next server follows it again (bg_session.recover). At start, recover ends processes a dead server left, then resumes each
+run through its caller (on_resume) with `## session-restarted`, or closes it (on_left). Ends main did not hear are kept
 (UNHEARD_FILE) and posted once a session listens (tell_main, deliver_unheard).
+
+Main's end. When main's session ends and none takes over, wind_down ends the workspace's sessions as the server's stop
+does, and stops a background session's process too: one its caller resumes is parked, its chat marked `parked`, and is
+resumed when a session is main in the workspace again (resume_parked) or by the next server; any other stops.
 """
 from __future__ import annotations
 
@@ -1709,10 +1713,7 @@ async def _halt(run: Run) -> None:
             await asyncio.wait_for(asyncio.shield(run.proc.wait()), STOP_WAIT_S)
         if run.proc.returncode is not None:
             break
-    for pid in tree:
-        if procs.alive(pid):
-            with contextlib.suppress(ProcessLookupError, PermissionError):
-                os.kill(pid, signal.SIGKILL)
+    _kill_tree(tree)
 
 
 async def stop(c: str, key: str) -> bool:
@@ -1829,8 +1830,10 @@ def resumable(run: Run) -> bool:
 
 def _left_running(c: str, meta: dict[str, Any]) -> bool:
     """Whether an agent chat is a session thimble started (its meta keeps a `pid`, None while a retry waits) that says
-    it runs, with no run of this server's behind it, and no other live server's either (_followed_elsewhere)."""
-    return (meta.get("status") == "running" and "pid" in meta and bool(meta.get("session")) and not meta.get("background")
+    it runs, with no run of this server's behind it, and no other live server's either (_followed_elsewhere). A
+    background session's chat counts only when main's end parked it (wind_down)."""
+    return (meta.get("status") == "running" and "pid" in meta and bool(meta.get("session"))
+            and (not meta.get("background") or bool(meta.get("parked")))
             and by_chat(c, str(meta.get("id"))) is None and not _followed_elsewhere(meta))
 
 
@@ -1866,10 +1869,7 @@ def _kill_left(meta: dict[str, Any]) -> None:
             time.sleep(0.1)
         if not procs.alive(pid):
             break
-    for p in tree:
-        if procs.alive(p):
-            with contextlib.suppress(ProcessLookupError, PermissionError):
-                os.kill(p, signal.SIGKILL)
+    _kill_tree(tree)
     log.info("session %s (pid %s), left running by a previous server, was ended", sid, pid)
 
 
@@ -1882,7 +1882,7 @@ def _close_left(c: str, meta: dict[str, Any], status: str, summary: str) -> None
             with contextlib.suppress(Exception):
                 agents.finish_agent(c, str(step["id"]), "stopped")
     with contextlib.suppress(Exception):
-        agents.update_agent(c, chat, alert=None, permissions=[], pid=None)
+        agents.update_agent(c, chat, alert=None, permissions=[], pid=None, parked=None)
     agents.finish_agent(c, chat, status, summary or None)
     log.info("%s: session chat %s (%s), left running by a previous server, ended %s", c, chat, meta.get("session"),
              status)
@@ -1961,9 +1961,102 @@ async def _resume_left(c: str, meta: dict[str, Any]) -> str | None:
                     meta.get("id"), sid, e)
         return f"{stopped} {tools.hint(NOT_RESUMED, why=failure_line(str(e) or type(e).__name__))}"
     run.halted.update(str(s["agent_id"]) for s in steps if s.get("agent_id"))
+    if meta.get("parked"):
+        with contextlib.suppress(Exception):
+            agents.update_agent(c, str(meta["id"]), parked=None)
     log.info("%s: session chat %s (%s), left running by a previous server, resumed as run %s", c, meta.get("id"), sid,
              run.k)
     return None
+
+
+# --------------------------------------------------------------------------- main's end
+
+_parked: set[tuple[str, str]] = set()  # (workspace, chat) of the runs wind_down parked, for resume_parked
+
+
+async def wind_down(c: str) -> list[str]:
+    """Main's session ended in workspace `c` and none took over (agents.stop_all): each session of `c` ends. One its
+    caller resumes is parked (module note, main's end), any other stops as Stop stops it. The titles of what ended."""
+    ended: list[str] = []
+    for run in [r for r in list(_runs.values()) if r.c == c and not r.stopping]:
+        title = str((agents.meta_or_none(c, run.chat) or {}).get("title") or run.key)
+        try:
+            if resumable(run):
+                await _park(run)
+            else:
+                await stop_run(run)
+            ended.append(title)
+        except Exception:  # noqa: BLE001 — one session that will not end leaves the others to end
+            log.warning("%s: session %s did not end with main's session", c, run.key, exc_info=True)
+    return ended
+
+
+async def _park(run: Run) -> None:
+    """End a resumable session's process, a background one's with `claude stop`, and leave its run for resume_parked
+    or the next server (_suspend)."""
+    run.suspended = run.stopping = True
+    run.wake.set()  # a retry's wait ends with no new process
+    with contextlib.suppress(Exception):
+        agents.update_agent(run.c, run.chat, parked=True)
+    if isinstance(run.proc, bg_session.BgProc):
+        await run.proc.stop()
+    else:
+        await _end_process(run, STOP_WAIT_S)
+    if run.task is not None:
+        with contextlib.suppress(asyncio.TimeoutError, asyncio.CancelledError):
+            await asyncio.wait_for(asyncio.shield(run.task), STOP_WAIT_S * 2)
+        if not run.task.done():
+            run.task.cancel()
+    if _runs.get((run.c, run.key)) is run:
+        _end(run)
+    _parked.add((run.c, run.chat))
+    log.info("%s: session %s (%s) parked with main's session", run.c, run.key, run.sid)
+
+
+async def _end_process(run: Run, wait_s: float) -> None:
+    """SIGTERM to the session's process group, SIGKILL after `wait_s`, then SIGKILL to whatever is left of the
+    processes it started, since Claude Code runs each Bash command in a group of its own."""
+    if run.proc is None or run.pid is None or run.bg:
+        return
+    tree = await asyncio.to_thread(procs.descendants, run.pid)
+    _signal(run, signal.SIGTERM)
+    with contextlib.suppress(asyncio.TimeoutError):
+        await asyncio.wait_for(asyncio.shield(run.proc.wait()), wait_s)
+    _kill(run)
+    _kill_tree(tree)
+
+
+def _kill_tree(tree: list[int]) -> None:
+    for pid in tree:
+        if procs.alive(pid):
+            with contextlib.suppress(ProcessLookupError, PermissionError):
+                os.kill(pid, signal.SIGKILL)
+
+
+def resume_parked(c: str) -> None:
+    """A session is main in workspace `c` again: the runs wind_down parked are resumed as a restart resumes them
+    (_resume_left)."""
+    chats = [chat for cc, chat in _parked if cc == c]
+    if not chats:
+        return
+    _parked.difference_update((c, chat) for chat in chats)
+    try:
+        asyncio.get_running_loop().create_task(_resume_parked(c, chats), name=f"resume-parked:{c}")
+    except RuntimeError:  # no loop (a test's synchronous call): the next server resumes them
+        pass
+
+
+async def _resume_parked(c: str, chats: list[str]) -> None:
+    for chat in chats:
+        meta = agents.meta_or_none(c, chat)
+        if meta is None or not _left_running(c, meta):
+            continue
+        try:
+            why = await _resume_left(c, meta)
+            if why is not None:
+                _close_left(c, meta, "failed", why)
+        except Exception:  # noqa: BLE001
+            log.exception("%s: parked session chat %s was not resumed", c, chat)
 
 
 def _unheard_path(c: str) -> Path:
@@ -2965,9 +3058,10 @@ async def mode_route(c: str, chat: str, body: ModeBody, request: Request) -> dic
 
 
 async def shutdown() -> None:
-    """The server is going down: every session's process goes with it. One its caller resumes is left for the next server
-    (_suspend), any other recorded as failed with `## session-server-stopped`. SIGTERM then SIGKILL, with short waits. Ends
-    main does not hear now are kept (tell_main)."""
+    """The server is going down: every session's process goes with it, and so do the processes it started. One its caller
+    resumes is left for the next server (_suspend), any other recorded as failed with `## session-server-stopped`.
+    SIGTERM then SIGKILL, with short waits. Ends main does not hear now are kept (tell_main)."""
+    trees = {id(run): procs.descendants(run.pid) for run in list(_runs.values()) if run.pid is not None and not run.bg}
     for run in list(_runs.values()):
         # one the analyst's Stop is ending ends stopped, as they asked; a background session is left to run
         run.suspended = not run.stopping and (resumable(run) or run.bg)
@@ -2981,6 +3075,7 @@ async def shutdown() -> None:
             with contextlib.suppress(asyncio.TimeoutError, Exception):
                 await asyncio.wait_for(asyncio.shield(run.proc.wait()), 1.0)
         _kill(run)
+        _kill_tree(trees.get(id(run), []))
         if run.task is not None and not run.task.done():
             with contextlib.suppress(asyncio.TimeoutError, asyncio.CancelledError, Exception):
                 await asyncio.wait_for(asyncio.shield(run.task), 2.0)

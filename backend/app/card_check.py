@@ -65,6 +65,7 @@ STOPPED = ""  # the analyst stopped it: the hover says only when
 AUTO_OFF = "the automatic card check was turned off"
 CHANGED = "the card changed while it was checked"
 SERVER_STOPPED = "the server stopped while the check ran"
+SESSION_ENDED = "thimble stopped when its Claude Code session ended"  # a check stop_workspace ended
 FALLBACK_NOTE = "Downgrading {model} to {fallback}"  # the record's `note`
 READ_IDLE_S = 60.0  # a reading with no sign of life this long is stalled (model.structured's idle clock)
 PAUSE_POLL_S = 0.05  # how often a check waiting for a reading slot looks at its clock again (_within)
@@ -1166,17 +1167,30 @@ async def again_route(c: str, cid: str) -> dict[str, Any]:
     return {"card": cid, "check": run.check}
 
 
-async def shutdown() -> None:
-    """main's lifespan hook: the running checks end with the server, each record ended `error`, so no card keeps the
-    spinner of a check nothing runs any more and its mark offers to run it again."""
+def _end_runs(runs: list["_Run"], reason: str) -> int:
+    """End each running check with `reason`, its record ended `error`, so no card keeps the spinner of a check nothing
+    runs any more and its mark offers to run it again. How many it ended."""
     from . import checkstore  # noqa: PLC0415
 
-    for run in list(_runs.values()):
+    n = 0
+    for run in runs:
         if run.task is not None and not run.task.done():
-            run.outcome, run.reason = "error", SERVER_STOPPED
+            run.outcome, run.reason = "error", reason
             run.task.cancel()
+            n += 1
             try:
-                checkstore.end_pending(run.c, run.cid, "error", SERVER_STOPPED, check_id=run.check)
-            except Exception:  # noqa: BLE001 — a record left pending never stops the server's shutdown
-                log.exception("card check: card:%s left pending at shutdown", run.cid)
+                checkstore.end_pending(run.c, run.cid, "error", reason, check_id=run.check)
+            except Exception:  # noqa: BLE001 — a record left pending never stops the stop
+                log.exception("card check: card:%s left pending at its stop", run.cid)
+    return n
+
+
+def stop_workspace(c: str) -> int:
+    """Main's session ended in workspace `c` (agents.stop_all): its running checks end (_end_runs)."""
+    return _end_runs([r for (cc, _), r in list(_runs.items()) if cc == c], SESSION_ENDED)
+
+
+async def shutdown() -> None:
+    """main's lifespan hook: the running checks end with the server (_end_runs)."""
+    _end_runs(list(_runs.values()), SERVER_STOPPED)
     _runs.clear()

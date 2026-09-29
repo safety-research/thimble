@@ -869,6 +869,24 @@ def stop(*, vite: bool = True, kernels: bool = True) -> list[str]:
     return lines
 
 
+def stop_self() -> None:
+    """The server stops itself, since no workspace has a main session (session._stop_server): when server.json names
+    this server, Vite (dev mode) is stopped and the record marked stopped, so an `up` meanwhile starts a new server; then
+    SIGTERM goes to the uvicorn `start` spawned, the `--reload` supervisor in dev mode, which ends its worker, else to
+    this process. uvicorn then runs the lifespan's shutdown."""
+    me, leader = os.getpid(), os.getsid(0)
+    st = read_state()
+    p = int(st.get("port") or port())
+    target = leader if leader != me and is_server(leader, p, st.get("repo")) else me
+    if st.get("pid") in (me, target):
+        if st.get("vite_pid"):
+            _log(_kill(st.get("vite_pid"), argv_check("vite"), "vite"))
+        st.update({"pid": None, "vite_pid": None, "stopped": _now()})
+        write_state(st)
+    _log(f"no workspace has a main session: the server (pid {target}) stops")
+    os.kill(target, signal.SIGTERM)
+
+
 def starting(url: str) -> bool:
     """A server this module spawned is alive but not yet answering."""
     st = read_state()

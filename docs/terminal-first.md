@@ -11,7 +11,7 @@ You can chat with thimble only in Claude Code and keep the browser as a dashboar
 
 ## Caveats
 
-- **Quitting main stops everything.** When your Claude Code session ends and no other session takes over as main, thimble stops every agent of the workspace: the orientation, writers, the critic, dev tickets and view builds. Background sessions are stopped with `claude stop`, which keeps their conversations for `claude attach`.
+- **Quitting main stops everything.** When your Claude Code session ends and no other session takes over as main, thimble stops every agent of the workspace: the orientation, writers, the critic, checks, dev tickets, view builds and kernels. Background sessions are stopped with `claude stop`, which keeps their conversations for `claude attach`. The orientation and the writers go on when a session is main in the workspace again, and so do the builds of the orientation's views; a view you asked for shows Retry. Once no workspace has a main session, the server stops too.
 - **Esc stops an agent.** In the agent tray's view of a subagent or thread, Esc stops that agent, not just the view. To go back to main, press ↓ and pick main.
 - **Don't press ← at main's prompt.** Claude Code moves your conversation into its background service, where thimble's tools are gone and the tray entries stop. To get back, quit, stop the copy with `claude stop <id>` (`claude agents` lists it under your conversation's name) and run `thimble --continue`.
 - **Messages to a session are not your approval.** What you type in a tray entry, and what you send a background session from the browser, reaches it as a message from another session, so it does not count as your approval. Answer its permission prompts in the browser or with `claude attach`.

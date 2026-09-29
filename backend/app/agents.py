@@ -830,25 +830,26 @@ async def interrupt_route(c: str, chat_id: str) -> dict:
 
 
 async def stop_all(c: str) -> list[str]:
-    """Stop every agent of workspace `c`, main's session having ended (session.disconnected): each agent chat that runs
-    (the orientation, a writer, the critic, a check's run: agent_session.stop_chat or a server task), its dev ticket and
-    view builds (dev.stop_workspace), and its background sessions still alive with no run open (`claude stop`, which
-    keeps their conversations for `claude attach`). Returns the titles of what it stopped, for the log."""
-    from . import agent_session, bg_session, dev  # noqa: PLC0415 — each imports this module
+    """Stop everything thimble runs for workspace `c`, main's session having ended with none taking over
+    (session.disconnected), so nothing works on after the analyst quit: its report checks and card checks, its dev
+    ticket and view builds (dev.stop_workspace), its sessions (agent_session.wind_down, which parks the orientation's and
+    the writers' for the next session that is main in `c`), its server tasks, its background sessions still alive with
+    no run open (`claude stop`, which keeps their conversations for `claude attach`) and its kernels. Returns what it
+    stopped, for the log."""
+    from . import agent_session, bg_session, card_check, checks, dev, notebook  # noqa: PLC0415 — each imports this module
 
     stopped: list[str] = []
-    for meta in list_chats(c):
-        if meta.get("kind") != KIND_AGENT or meta.get("status") != "running":
-            continue
+    steps: list[tuple[str, Callable[[str], int]]] = [("report check", checks.stop_workspace),
+                                                     ("card check", card_check.stop_workspace), ("dev build", dev.stop_workspace)]
+    for what, fn in steps:
         try:
-            if await agent_session.stop_chat(c, meta["id"]) or await stop_agent(c, meta["id"]):
-                stopped.append(str(meta.get("title") or meta["id"]))
-        except Exception:  # noqa: BLE001 — one agent that will not stop leaves the others to stop
-            log.warning("%s: could not stop agent chat %s", c, meta.get("id"), exc_info=True)
-    try:
-        stopped += ["dev build"] * dev.stop_workspace(c)
-    except Exception:  # noqa: BLE001
-        log.warning("%s: could not stop the dev builds", c, exc_info=True)
+            stopped += [what] * fn(c)
+        except Exception:  # noqa: BLE001 — one part that will not stop leaves the others to stop
+            log.warning("%s: could not stop the %ss", c, what, exc_info=True)
+    stopped += await agent_session.wind_down(c)
+    for cc, chat in [k for k in _agent_tasks if k[0] == c]:
+        if await stop_agent(cc, chat):
+            stopped.append(str((meta_or_none(c, chat) or {}).get("title") or chat))
     for e in bg_session.entries(c):
         if bg_session.alive(e) and e.short:
             try:
@@ -856,7 +857,19 @@ async def stop_all(c: str) -> list[str]:
                 stopped.append(e.name)
             except Exception:  # noqa: BLE001
                 log.warning("%s: could not stop background session %s", c, e.name, exc_info=True)
+    try:
+        await notebook.shutdown_workspace(c)
+    except Exception:  # noqa: BLE001
+        log.warning("%s: could not stop the kernels", c, exc_info=True)
     return stopped
+
+
+def at_work() -> set[str]:
+    """The workspaces where this server runs something stop_all stops."""
+    from . import agent_session, bg_session, dev  # noqa: PLC0415
+
+    return ({c for c, _ in agent_session._runs} | {c for c, _ in _agent_tasks} | dev.workspaces_at_work()
+            | {e.c for e in bg_session.entries() if bg_session.alive(e)})
 
 
 # --------------------------------------------------------------------------- text helpers other modules import
