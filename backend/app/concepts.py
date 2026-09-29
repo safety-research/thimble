@@ -1215,7 +1215,7 @@ def picked_as_changes(corpus_dir: Path, units: list[Unit], header: bool = True) 
     return out
 
 
-EXAMPLES_SHOWN = 10  # records an apply's result quotes of the value it asks about (examples)
+EXAMPLES_SHOWN = 20  # records an apply's result quotes of the value it asks about (examples)
 EXAMPLES_READ = 200  # records read to choose them from
 EXAMPLE_CHARS = 200
 
@@ -1257,6 +1257,34 @@ def examples(c: str, concept_id: str, value: str, n: int = EXAMPLES_SHOWN) -> li
     return out
 
 
+REASONS_SHOWN = 3  # reasons an apply's result quotes of each value (reasons)
+REASONS_READ = 400  # rows of a value read to choose them from
+_REASON_WORD = re.compile(r"[a-z]{3,}")
+
+
+def reasons(c: str, concept_id: str, values: list[str], n: int = REASONS_SHOWN) -> dict[str, list[tuple[str, str]]]:
+    """Per value, up to `n` of the records that took it so far with the reason the model gave, each chosen as the one
+    whose words differ most from those chosen before (the longest first). Blocking."""
+    st = _store_ready(_ws(c), concept_id)
+    out: dict[str, list[tuple[str, str]]] = {}
+    for v in values:
+        rows, _total, _next = st.rows(v, REASONS_READ) if st is not None else ([], 0, None)
+        cand = {str(r["ref"]): str(r.get("rationale") or "").strip() for r in rows if str(r.get("rationale") or "").strip()}
+        words = {ref: set(_REASON_WORD.findall(why.lower())) for ref, why in cand.items()}
+
+        def unlike(ref: str, chosen: list[str]) -> float:
+            if not chosen:
+                return float(len(words[ref]))
+            return min(1 - len(words[ref] & words[x]) / max(1, len(words[ref] | words[x])) for x in chosen)
+
+        chosen: list[str] = []
+        while len(chosen) < min(n, len(cand)):
+            chosen.append(max((r for r in cand if r not in chosen), key=lambda r: unlike(r, chosen)))
+        if chosen:
+            out[v] = [(r, cand[r]) for r in chosen]
+    return out
+
+
 SAVES_SNIFF = 20  # records read from the head of a JSON Lines file to tell whether it holds saves
 
 
@@ -1275,6 +1303,15 @@ def holds_saves(corpus_dir: Path, sources: list[dict]) -> bool:
 
 
 TRIAL_SKIP_LINES = 8  # a trial's pick that lands on a blank line takes the next record with words within this many lines
+
+
+INTERLEAVE_FIRST = 200  # units a pass of interleaved takes, spread over them all
+
+
+def interleaved(n: int) -> list[int]:
+    """range(n) in passes of about INTERLEAVE_FIRST indices each, every pass spread over the whole range."""
+    stride = max(1, n // INTERLEAVE_FIRST)
+    return sorted(range(n), key=lambda i: (i % stride, i))
 
 
 def spread(n: int, k: int) -> list[int]:
@@ -2506,6 +2543,8 @@ async def run_apply(c: str, concept_id: str, paths: list[str] | None = None, lim
                     matched = len(units)
                     if limit and len(units) > limit:
                         units = [units[i] for i in spread(len(units), limit)]
+                    # read spread over the narrowing first, so the first rows and reasons stand for all of it
+                    units = [units[i] for i in interleaved(len(units))]
                     total = len(units)
                 elif scope_groups is not None:
                     total, matched = matched, scope_groups
