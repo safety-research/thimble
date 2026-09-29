@@ -8,6 +8,7 @@ accepts `board.jsonl#L<n>` (the post) and declares `view:threads/<thread>` (a wh
 in this process (the `inproc` fixture replaces views._runner with an exec of the same snippet the kernel gets)."""
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import fnmatch
 import io
@@ -195,6 +196,32 @@ def test_the_frame_document_blocks_every_host_before_any_script(ws):
         assert with_libs.count("<script>") == 6, "the view's name, the bridge, vega, vega-lite, vega-embed and the view's own"
     assert views._script_text("a</script>b") == "a<\\/script>b"
     assert views._libs(["vega-embed"]) == ["vega", "vega-lite", "vega-embed"]
+
+
+async def test_no_thread_is_read_as_a_question_from_a_view_s_own_box(ws, inproc, bound):
+    """Views have no question box: a thread about a view, a record it shows or with the box's old selector gets the
+    anchor's content only."""
+    import httpx  # noqa: PLC0415
+
+    from app import channel  # noqa: PLC0415
+    from app.main import app  # noqa: PLC0415
+
+    q: asyncio.Queue = asyncio.Queue()
+    channel._subs.setdefault(CORPUS, set()).add(q)
+    click = {"surface": "files", "element": "view:threads", "selector": "", "image": None, "parent": None}
+    cases = [{**click, "anchor": "view:threads", "anchor_text": "Legend"},
+             {**click, "anchor": "board.jsonl#L3", "anchor_text": "Confirmed"},
+             {**click, "anchor": "view:threads", "selector": "question box", "parent": "main"}]
+    try:
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://127.0.0.1") as client:
+            for body in cases:
+                r = await client.post(f"/api/ws/{CORPUS}/chats", json={**body, "text": "which posts confirm the release?"})
+                assert r.status_code == 201
+                content = q.get_nowait()["content"]
+                assert "asked: in the view's own box" not in content, body
+                assert "The records the view reads" not in content, body
+    finally:
+        channel._subs.pop(CORPUS, None)
 
 
 # ------------------------------------------------------------------------------------------------- worked examples

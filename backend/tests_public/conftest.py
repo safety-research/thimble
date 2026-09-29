@@ -61,6 +61,21 @@ def _workspaces_off_the_checkout(tmp_path, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def claude_global_config(tmp_path, tmp_path_factory, monkeypatch) -> Path:
+    """Claude Code's global config is the test's own, which trusts the test's tmp dir, where its workspaces live, so no
+    test reads the user's ~/.claude.json and terminal-first mode is on by default (orientation.default_terminal_first).
+    The file lives outside that dir, which some tests scan. A test of an untrusted workspace rewrites it."""
+    import json
+
+    from app import bg_session
+
+    path = tmp_path_factory.mktemp("claude-config") / ".claude.json"
+    path.write_text(json.dumps({"projects": {str(tmp_path): {"hasTrustDialogAccepted": True}}}))
+    monkeypatch.setattr(bg_session, "claude_json", lambda: path)
+    return path
+
+
+@pytest.fixture(autouse=True)
 def _thimble_home_off_the_user(tmp_path, monkeypatch):
     """Every test's thimble home is its own tmp dir, so what the server records there never reaches the user's. A test's
     own THIMBLE_HOME still wins."""

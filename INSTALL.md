@@ -48,13 +48,17 @@ git clone -b swarm https://github.com/safety-research/thimble.git thimble-swarm
 cd thimble-swarm && bash scripts/install.sh
 ```
 
+Then run `thimble` in your corpus folder and press Start. When the corpus looks like a swarm, the orientation proposes
+the Swarm view (Propose views, under Show options, is on by default). Type a question in the view's box, and main
+answers it with labels the view draws.
+
 A server already running keeps the other install's code until `thimble server restart`. To go back, run
 `bash scripts/install.sh` in the unzipped release, then `thimble server restart`; if you added the plugin, run
 `bash scripts/install.sh --no-plugin` in the clone first and give the release's install `--plugin`. In the clone,
 `thimble update` pulls the swarm branch and ignores `--from`. Known limitations: only an orientation proposes the Swarm
-view, when the first 400 JSON Lines or CSV files show 30 or more accounts naming each other on 3 or more shared places;
-accounts of the same name in different runs share a row; a "names" link points only to an earlier card; and a large
-human team chat can pass for a swarm.
+view, when the first 400 JSON Lines or CSV files (256 MB at most) show 30 or more accounts naming each other on 3 or more shared places;
+in a corpus of several runs, places of the same name (such as thread 1) share one place, and accounts of the same name
+share a row; a "names" link points only to an earlier card; and a large human team chat can pass for a swarm.
 
 ## Update
 

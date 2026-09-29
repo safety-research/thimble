@@ -27,8 +27,9 @@ router = APIRouter()
 
 # GET /settings layers these under what the file stores (tools.RESULT_LINES_KEY: lines of each output a card's result
 # shows).
-# terminal_first (on by default): the orientation, its critic and the writers run as background sessions the analyst's
-# terminal shows (orientation.terminal_first, bg_session); hide_chat: the browser shows no chat column, only a dock
+# terminal_first (on by default where Claude Code trusts the workspace's folder, orientation.default_terminal_first): the
+# orientation, its critic and the writers run as background sessions the analyst's terminal shows
+# (orientation.terminal_first, bg_session); hide_chat: the browser shows no chat column, only a dock
 # (frontend shell/Shell)
 SETTINGS_DEFAULTS: dict[str, Any] = {"run_cell_result_lines": 40, "terminal_first": True, "hide_chat": False}
 # Settings earlier builds stored that nothing reads any more: GET leaves them out, a PUT that sends one (a tab still
@@ -211,13 +212,17 @@ def stored_settings(c: str) -> dict[str, Any]:
 
 
 def with_features(stored: dict[str, Any], c: str | None = None) -> dict[str, Any]:
-    """The effective settings: SETTINGS_DEFAULTS under `stored` less RETIRED_KEYS, `models` as config.models_for resolves it, the rows of
+    """The effective settings: SETTINGS_DEFAULTS under `stored` less RETIRED_KEYS, with workspace `c`'s default of
+    terminal_first (orientation.default_terminal_first), `models` as config.models_for resolves it, the rows of
     the permission modes the analyst set (modes.chosen), and `disabled_modes`, those the analyst's Claude Code settings
     turn off."""
-    from . import modes  # noqa: PLC0415 — modes imports this module
+    from . import modes, orientation  # noqa: PLC0415 — both import this module
 
     kept = {k: v for k, v in stored.items() if k not in RETIRED_KEYS}
-    return {**SETTINGS_DEFAULTS, **kept, config.MODELS_KEY: config.models_for(c, stored),
+    defaults = dict(SETTINGS_DEFAULTS)
+    if c is not None:
+        defaults[orientation.TERMINAL_FIRST_KEY] = orientation.default_terminal_first(c)
+    return {**defaults, **kept, config.MODELS_KEY: config.models_for(c, stored),
             modes.SETTING: modes.chosen(stored), "disabled_modes": sorted(modes.disabled())}
 
 
