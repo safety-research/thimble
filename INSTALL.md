@@ -35,7 +35,7 @@ and where, then asks three questions:
 
 - **A browser for screenshots.** thimble checks the cards and views it draws in screenshots, and repairs graphics that
   look wrong. It uses the Chrome or Edge on your machine (no download), Playwright's headless Chromium (a download of
-  about 350 MB), or none, which means no screenshot checks: no self-repair of graphics and no view review.
+  about 210 MB that takes 650 MB on disk), or none, which means no screenshot checks: no self-repair of graphics and no view review.
   `--browser system`, `--browser bundled` or `--browser off` answers it.
 - **thimble in every Claude Code session.** A yes adds thimble to `~/.claude/settings.json` and `~/.claude/plugins`.
   The `thimble` command works either way. `--plugin` or `--no-plugin` answers it.

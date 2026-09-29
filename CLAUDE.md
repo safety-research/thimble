@@ -3,7 +3,7 @@
 ## What install.sh asks
 
 install.sh asks three questions before it installs anything, and each flag below answers one without asking. `thimble uninstall` takes back the plugin and the trust:
-- **Browser** (`--browser system | bundled | off`): thimble takes screenshots of the cards and views it draws to check them, and repairs graphics that look wrong. It can use the Chrome or Edge installed on the machine (nothing is downloaded), download Playwright's headless Chromium (about 350 MB), or have no browser: then there are no screenshot checks of cards and views, so no self-repair of graphics and no view review.
+- **Browser** (`--browser system | bundled | off`): thimble takes screenshots of the cards and views it draws to check them, and repairs graphics that look wrong. It can use the Chrome or Edge installed on the machine (nothing is downloaded), download Playwright's headless Chromium (about 210 MB, 650 MB on disk), or have no browser: then there are no screenshot checks of cards and views, so no self-repair of graphics and no view review.
 - **Plugin** (`--plugin` / `--no-plugin`): adds thimble to `~/.claude/settings.json` and `~/.claude/plugins`, so thimble is available in every `claude` session from startup. The `thimble` command works either way.
 - **Trust** (`--trust-workspaces` / `--no-trust-workspaces`): adds thimble's workspaces folder (`~/.thimble/app/workspaces` for a Global install, `<clone>/workspaces` for a Dev install), where thimble keeps each workspace and runs its agents, to `~/.claude.json`. With a no, the orientation, its critic and the writers run as `claude -p` sessions, which do the same work but don't show in the terminal's agent tray.
 

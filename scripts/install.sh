@@ -37,7 +37,8 @@
 #   --deps-only              stop after the sandbox step: no pointer, no plugin, no trust, no doctor
 #   --browser system         screenshots with the Chrome or Edge installed on this machine (where Playwright's chrome and
 #                            msedge channels look); nothing is downloaded
-#   --browser bundled        download Playwright's headless Chromium (about 350 MB) into Playwright's cache folder
+#   --browser bundled        download Playwright's headless Chromium into Playwright's cache folder (about 210 MB to
+#                            download, 650 MB on disk: the backend's and the frontend's Playwright each pin a build)
 #   --browser off            no browser: no screenshot checks of cards and views, so no self-repair of graphics and no
 #                            view review
 #   --plugin                 add thimble to ~/.claude/settings.json and ~/.claude/plugins, so it is available in every
@@ -358,6 +359,8 @@ system_browser() {  # sys_channel, sys_name, sys_path: the Chrome or Edge that P
   done
 }
 
+BUNDLED_SIZE="about 210 MB to download, 650 MB on disk"  # both headless Chromium builds and ffmpeg, measured
+
 pw_cache() {  # the folder Playwright downloads its browsers into, as Playwright resolves it
   case "${PLAYWRIGHT_BROWSERS_PATH:-}" in
     0) printf '%s\n' "the playwright package's own folder";;
@@ -653,7 +656,7 @@ show_plan() {  # what the install puts where, before its questions
   say "  thimble's settings and state: $home"
   [ "$deps_only" = 1 ] || say "  the \`thimble\` command: a link at ~/.local/bin/thimble"
   say "  and only on a yes to its question:"
-  say "  - a browser for screenshots: $( [ -n "$sys_path" ] && echo "$sys_name at $sys_path, nothing downloaded; or " )Playwright's headless Chromium, downloaded into $(pw_cache) (about 350 MB)"
+  say "  - a browser for screenshots: $( [ -n "$sys_path" ] && echo "$sys_name at $sys_path, nothing downloaded; or " )Playwright's headless Chromium, downloaded into $(pw_cache) ($BUNDLED_SIZE)"
   [ "$deps_only" = 1 ] && return 0
   say "  - thimble's plugin in every Claude Code session: $(cc_path settings.json) and $(cc_path plugins)"
   say "  - Claude Code's trust of thimble's workspaces folder: $cc_json"
@@ -669,7 +672,7 @@ plugin_text() {  # the plugin question
 
 ask() {  # the three questions, before anything is installed: the browser, the plugin, the trust. Each is asked on a
   # terminal when neither its flag nor an earlier answer settles it; --dry-run prints them with their flags instead
-  local tty=0 dl="Playwright's headless Chromium, downloaded into $(pw_cache) (about 350 MB; not again when it is there already)"
+  local tty=0 dl="Playwright's headless Chromium, downloaded into $(pw_cache) ($BUNDLED_SIZE; not again when it is there already)"
   browser_was="$(browser_prev)"
   [ "$deps_only" = 1 ] || plugin_record
   trust_q=""  # the trust question when claude_changes.install_trust would ask it (python3 runs the file before
@@ -706,8 +709,8 @@ ask() {  # the three questions, before anything is installed: the browser, the p
       if yes_no y; then browser=system; fi
     fi
     if [ -z "$browser" ]; then
-      printf "%s Playwright's headless Chromium (about 350 MB) into %s? It is not downloaded again when it is there already. [y/N] " \
-        "$( [ -n "$sys_path" ] && echo 'Download' || echo 'No Chrome or Edge was found. Download' )" "$(pw_cache)"
+      printf "%s Playwright's headless Chromium (%s) into %s? It is not downloaded again when it is there already. [y/N] " \
+        "$( [ -n "$sys_path" ] && echo 'Download' || echo 'No Chrome or Edge was found. Download' )" "$BUNDLED_SIZE" "$(pw_cache)"
       if yes_no n; then browser=bundled; else browser=off; fi
     fi
   fi
