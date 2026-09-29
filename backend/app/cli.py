@@ -32,7 +32,7 @@ command and the host's cannot be reached. So /thimble's work runs in the plugin'
 Code runs outside the sandbox just before the skill's commands (`server up --hook`, hook_up): it keeps what `up` printed
 in <home>/up/<session>.json, and the skill's `up` prints that (take_hook_result), or does the work itself when the hook
 left nothing. In the sandbox without the hook's result `up` starts nothing and prints the `sandbox.excludedCommands`
-entry that would run it outside (sandbox_rule). `restart` and `stop` name the work
+entries that would run it outside (sandbox_line). `restart` and `stop` name the work
 they would interrupt (running_work) and ask first unless `--yes`. In dev mode an `up` that finds the source tree changed
 while the server is idle restarts the backend (THIMBLE_NO_AUTORESTART=1 disables it). This module imports only
 `config`, `procs`, `cc_channel` and the standard library (others lazily), never `app.notebook`.
@@ -163,9 +163,15 @@ FOREIGN_LINE = ("thimble: port {port} is held by the thimble server of another i
                 "install does not use it. Set THIMBLE_PORT to a free port, or stop that server with "
                 "`THIMBLE_HOME={other} thimble server stop`.")
 SANDBOX_ENV = "SANDBOX_RUNTIME"  # "1" in a command Claude Code's Bash sandbox runs (module note, the Bash sandbox)
+# /thimble in the sandbox when the plugin's UserPromptExpansion hook left nothing (module note, the Bash sandbox)
 SANDBOX_LINE = ("thimble: WARNING - Claude Code's Bash sandbox is on in this session and keeps /thimble from reaching "
-                "thimble's server, so there is no link. To fix it, add \"{rule}\" to sandbox.excludedCommands in "
-                "{settings}, then say /thimble again.")
+                "thimble's server, and the plugin's hook that starts the server outside the sandbox did not finish (it "
+                "needs a recent Claude Code, and a failure is in {log}), so there is no link. Update Claude Code and "
+                "say /thimble again, or add \"{rule}\" to sandbox.excludedCommands in {settings}.")
+SANDBOX_NO_HOOKS_LINE = ("thimble: WARNING - Claude Code's Bash sandbox is on in this session and keeps /thimble from "
+                         "reaching thimble's server, and with the plugin's hooks off nothing can start the server "
+                         "outside the sandbox, so there is no link. To fix it, add \"{rule}\" and \"{watch}\" to "
+                         "sandbox.excludedCommands in {settings}, then say /thimble again.")
 HOOK_RESULTS_DIR = "up"  # under <home>: what /thimble's hook left for the skill's command to print (hook_up)
 HOOK_RESULT_S = 60.0  # a result older than this is not the one the hook left for this /thimble
 MANUAL_RESTART = "manual restart"  # dev.PLAIN_REASONS
@@ -452,6 +458,22 @@ def sandbox_rule() -> str:
     """The `sandbox.excludedCommands` entry that runs /thimble's `server up` outside the sandbox: the plugin copy's
     own path, as the skill's command spells it once Claude Code has put in its plugin root."""
     return f"{plugin_root() / 'bin' / 'thimble'} server up *"
+
+
+def watch_rule() -> str:
+    """The `sandbox.excludedCommands` entry that runs the Monitor route's watcher outside the sandbox."""
+    return f"{plugin_root() / WATCHER} --stream *"
+
+
+def sandbox_line(cwd: Path) -> str:
+    """What /thimble prints in the sandbox when the hook left no result (module note, the Bash sandbox): with the
+    plugin's hooks off, the Monitor route's watcher needs an entry too."""
+    from . import cc_settings  # noqa: PLC0415 — the settings' path, needed on this path alone
+
+    settings = cc_settings.config_dir() / "settings.json"
+    if cc_channel.hooks_blocked(cwd, plugin_root()):
+        return SANDBOX_NO_HOOKS_LINE.format(rule=sandbox_rule(), watch=watch_rule(), settings=settings)
+    return SANDBOX_LINE.format(rule=sandbox_rule(), settings=settings, log=log_path())
 
 
 def _request(method: str, url: str, body: dict | None = None, timeout: float = 5.0) -> tuple[int, Any]:
@@ -2231,11 +2253,7 @@ def cmd_ensure(args: argparse.Namespace) -> int:
         if text is not None:
             sys.stdout.write(text)
             return 0
-    ensure_home()
     action = ALIASES.get((args.action or "").strip(), (args.action or "").strip())
-    env = resolve_env()
-    data_dir = Path(env["data_dir"])
-    url = api_url()
     if action == "uninstall":
         print(UNINSTALL_SHELL_LINE)
         return 0
@@ -2247,10 +2265,12 @@ def cmd_ensure(args: argparse.Namespace) -> int:
         print(REFUSED_LINE.format(path=cwd))
         return 0
     if in_sandbox():  # a server started here would die with the command, and the host's is out of reach
-        from . import cc_settings  # noqa: PLC0415 — the settings' path, needed on this path alone
-
-        print(SANDBOX_LINE.format(rule=sandbox_rule(), settings=cc_settings.config_dir() / "settings.json"))
+        print(sandbox_line(cwd))
         return 0
+    ensure_home()
+    env = resolve_env()
+    data_dir = Path(env["data_dir"])
+    url = api_url()
     if refuse_foreign(url):  # another install's server on the port: its workspaces and code are not this install's
         return 0
     if action == "status":

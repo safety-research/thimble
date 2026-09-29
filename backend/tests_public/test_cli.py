@@ -256,7 +256,8 @@ def test_up_refuses_home_and_root_and_starts_nothing(home, data, monkeypatch, ca
 def test_up_in_the_bash_sandbox_prints_what_the_hook_did_outside_it(home, data, monkeypatch, capsys, tmp_path):
     """/thimble's UserPromptExpansion hook runs `up` outside Claude Code's Bash sandbox and prints nothing; the skill's
     `up` in the sandbox prints what the hook's did and starts nothing. With no result left for it, it names the
-    exclusion instead, and a result for other arguments is not taken."""
+    exclusions that would run it outside instead (the watcher's too when hooks are off), and a result for other
+    arguments is not taken."""
     _healthy_no_process(monkeypatch)
     monkeypatch.setattr(cli, "_request", lambda m, u, b=None, timeout=5.0:
                         (201, {"name": Path(b["path"]).name}) if m == "POST" else (404, {}))
@@ -273,6 +274,12 @@ def test_up_in_the_bash_sandbox_prints_what_the_hook_did_outside_it(home, data, 
     assert cli.main(skill) == 0
     out = capsys.readouterr().out
     assert out.startswith("thimble: WARNING") and f'"{cli.sandbox_rule()}"' in out and started == []
+    settings = tmp_path / "claude-home" / "settings.json"
+    settings.write_text(json.dumps({"disableAllHooks": True}))
+    assert cli.main(skill) == 0
+    out = capsys.readouterr().out
+    assert f'"{cli.sandbox_rule()}"' in out and f'"{cli.watch_rule()}"' in out and started == []
+    settings.unlink()
     monkeypatch.delenv(cli.SANDBOX_ENV)
     assert cli.hook_up(json.dumps(hook)) == 0 and started == [1]
     started.clear()
