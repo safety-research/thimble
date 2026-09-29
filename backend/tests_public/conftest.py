@@ -249,9 +249,9 @@ def data(tmp_path, monkeypatch):
 
 
 def print_sessions(monkeypatch) -> None:
-    """Every session agent_session.start starts runs as `claude -p`, as a stand-in `claude` that knows only --print
-    needs, the orientation's, its critic's and the writers' too, which otherwise run as `claude --bg`. The permission
-    flow a test checks is the same in both."""
+    """Every session agent_session.start starts runs as `claude -p`, for a stand-in `claude` that speaks only --print:
+    the orientation's, its critic's and the writers' too, which otherwise run as `claude --bg`. The permission flow a
+    test checks is the same in both."""
     from app import agent_session
 
     real = agent_session.start
