@@ -23,3 +23,5 @@ When a card type fits the question, answer it with labels and a group of cards n
                      1  plot   instructions per hour                                                                          Instructions peaked at 02:00.
 
 The bad card counts instructions over time, so it shows neither who told whom nor whether they followed, which is what the question asks.
+
+When the analyst asks to reshape such a card, such as "only the three busiest accounts", change its call with `edit_card`: add or change the arguments, computing them in the code when they depend on the records, and write its takeaway again from the new listing. The analyst can also reshape it in the card and press Keep, which rewrites the call's arguments and runs it again.

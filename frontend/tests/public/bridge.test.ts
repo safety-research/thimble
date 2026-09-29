@@ -90,7 +90,7 @@ describe('the view bridge', () => {
     expect(doc.querySelectorAll('[data-thimble-drop]')).toHaveLength(0)
   })
 
-  test("in a card's frame the page draws what init brings, sizes itself and has what the filter drops dimmed", async () => {
+  test("in a card's frame the page draws what init brings, sizes itself, says how it was reshaped and has what the filter drops dimmed", async () => {
     dom.window.close()
     await load(true)
     const doc = dom.window.document
@@ -104,6 +104,8 @@ describe('the view bridge', () => {
     win().thimble.settled()
     expect(of('size').at(-1)).toMatchObject({ height: 480 })
     expect(of('settled')).toHaveLength(1)
+    win().thimble.setQuery({ rows: 'signature' })
+    expect(of('setQuery').at(-1)).toMatchObject({ patch: { rows: 'signature' } })
     let heard = 0
     win().thimble.onMarks(() => heard++)
     const marks = { 'board.jsonl#L2': { keep: true }, 'board.jsonl#L1': { bar: '#e69f00', names: ['asks'], spans: [], keep: false } }

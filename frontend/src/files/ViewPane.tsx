@@ -48,9 +48,11 @@ interface Props {
   first?: ReadonlySet<string>
   /** open the new-label prompt in the Labels sidebar beside the view */
   onNewLabel?: () => void
+  /** the arguments of the card the view was opened from (a card type's Open as view) */
+  query?: Record<string, unknown>
 }
 
-export function ViewPane({ ws, view, path, kind, targetRef, quote, onQuoteMissing, labels, onMode, lead, first, onNewLabel }: Props) {
+export function ViewPane({ ws, view, path, kind, targetRef, quote, onQuoteMissing, labels, onMode, lead, first, onNewLabel, query }: Props) {
   const [mode, setMode] = useState<'view' | 'raw'>('view')
   // a file or line picked in the head, which Raw shows in place of `path`
   const [rawAt, setRawAt] = useState<{ path: string; ref?: string } | null>(null)
@@ -132,7 +134,7 @@ export function ViewPane({ ws, view, path, kind, targetRef, quote, onQuoteMissin
         ) : (
           <>
             {failure && <ViewFailed name={view.name} detail={failure} onRaw={path ? () => pick('raw') : undefined} />}
-            <ViewerFrame key={`${view.slug}:${pin.pinned ?? ''}`} ws={ws} slug={view.slug} version={pin.pinned || undefined} restore={pin.restore} handle={pin.frame} targetRef={targetRef} path={path ?? undefined} title={view.name} labels={labels.on} filter={filter} filterFiles={filter ? labels.presence.get(filter.concept) : undefined} byId={labels.byId} first={first} labelActions={labelActions} onError={setFailure} quote={quote} onQuoteMissing={onQuoteMissing} className="view-pane-frame" />
+            <ViewerFrame key={`${view.slug}:${pin.pinned ?? ''}`} ws={ws} slug={view.slug} version={pin.pinned || undefined} restore={pin.restore} handle={pin.frame} targetRef={targetRef} path={path ?? undefined} title={view.name} labels={labels.on} filter={filter} filterFiles={filter ? labels.presence.get(filter.concept) : undefined} byId={labels.byId} first={first} labelActions={labelActions} onError={setFailure} quote={quote} onQuoteMissing={onQuoteMissing} query={query} className="view-pane-frame" />
           </>
         )}
       </div>

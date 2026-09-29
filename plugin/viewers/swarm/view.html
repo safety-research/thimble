@@ -8,10 +8,13 @@
   [hidden] { display: none !important; }
   body { background: var(--surface-card); display: flex; flex-direction: column; overflow: hidden; }
   #bar { flex: none; padding: 10px 16px 8px; border-bottom: 1px solid var(--border-hairline); background: var(--surface-card); }
-  /* as a card (thimble.card) the page has no top row or pager, and its bar runs to the card's edges */
+  /* as a card (thimble.card) the page has no pager, a top row only at full size, and its bar runs to the card's edges */
   body.in-card #bar { padding: 0 0 8px; }
   body.in-card #toprow, body.in-card #pager { display: none; }
-  body.in-card #threads { margin-top: 0; }
+  body.in-card.full #toprow { display: flex; }
+  body.in-card #title { visibility: hidden; }
+  body.in-card #toprow + #threads { margin-top: 0; }
+  body.in-card.full #toprow + #threads { margin-top: 7px; }
   .row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; min-width: 0; }
   .row + .row { margin-top: 7px; }
   .grow { flex: 1 1 auto; }
@@ -207,12 +210,16 @@
 // unknown".
 // As a card (thimble.view.card, a card's code calling thimble.card("swarm", …)), the page draws the chart the card
 // stored, which the bridge's `init` brings, and fetches only a record's detail. Its records and their values are the
-// card's; the legend, grouping, link types and search narrow what it shows here. The colours are the labels' as the
-// analyst edits them, and a record a label marked after the card ran takes the colour of its mark as the label runs. A
-// citation hovered in the card's takeaway lights its record, and a click on it opens the record beside the chart. While
-// the Files filter dims records, their links are dimmed too, and the chart scrolls to the first record it keeps. It
-// tells thimble the height it needs, and that it has drawn; `init` again with the same key keeps what the analyst did
-// here. Rows and places carry no unit ref in a card, so a ⌘-click on them asks about the card.
+// card's; the legend, grouping, account, places, link types and search narrow what it shows here, and the first four
+// are told to thimble as the call's arguments they would set (thimble.setQuery), which Keep writes into the call. The
+// colours are the labels' as the analyst edits them, and a record a label marked after the card ran takes the colour of
+// its mark as the label runs. A citation hovered in the card's takeaway lights its record, and a click on it opens the
+// record beside the chart. While the Files filter dims records, their links are dimmed too, and the chart scrolls to
+// the first record it keeps. It tells thimble the height it needs, and that it has drawn; `init` again with the same
+// key keeps what the analyst did here. At full size it shows the top row, with search and the Labels menu. Rows and
+// places carry no unit ref in a card, so a ⌘-click on them asks about the card.
+// A view opened from a card (Open as view) gets the card's arguments with `open` (place.query) and draws its records
+// by them, live: labels turned on change its records as in any view.
 // Layout: a card spans more than its column, so cards of one row that would overlap stack in the row's lanes. The part
 // of a card no neighbouring column's card reaches, its band, carries the vertical runs of its links, and each link runs
 // horizontally in the gap between rows next to its target, so no link crosses a card. A gap is as tall as the links it
@@ -303,7 +310,11 @@ let group = 'account' // 'account' or 'sig'
 let zoom = 1 // 1 or 'fit'
 let offset = 0
 let only = [] // the label values the legend keeps, [{label, value}]; all when empty
+let mode = 'view' // or, in a card's frame, the card's mode: card, full or render
 let drawnKey = null // in a card, the key of what the card stored as it was last drawn
+let stored = null // in a card, the call's arguments the card was made with
+let base = {} // in a view opened from a card, the card's arguments that choose the records and links
+let baseKey = ''
 let filterKey = 'null'
 let sel = null // {kind: card|row|link|record, id|key|ref}
 let hover = null
@@ -349,7 +360,7 @@ async function load() {
   const seq = ++loadSeq
   let data
   try {
-    data = await thimble.fetch({ op: 'chart', offset, only, keep: keepRef ? [keepRef] : [] })
+    data = await thimble.fetch({ ...base, op: 'chart', offset, only, keep: keepRef ? [keepRef] : [] })
   } catch (e) {
     const p = document.getElementById('problems')
     p.hidden = false
@@ -1184,8 +1195,22 @@ function refresh() {
   renderDetail()
   if (CARD) {
     reportSize()
+    reportQuery()
     setTimeout(() => afterDrops(false), 60)
   }
+}
+// in a card, the call's arguments what the analyst narrowed here would set: {} while it shows what the card stored
+function reportQuery() {
+  if (!stored) return
+  const patch = {}
+  const rows = group === 'sig' ? 'signature' : 'account'
+  if (rows !== (stored.rows || 'account')) patch.rows = rows
+  const key = (xs) => JSON.stringify((xs || []).map((o) => `${o.label}\u0000${o.value}`).sort())
+  if (key(only) !== key(D.only)) patch.only = only.length ? only.map((o) => ({ label: o.label, value: o.value })) : null
+  const r = F.row ? rowBy.get(F.row) : null
+  if (r) patch.accounts = r.accounts.slice()
+  if (F.places.size) patch.places = [...F.places].map((t) => placeBy.get(t)).filter(Boolean).map((p) => p.name)
+  thimble.setQuery(patch)
 }
 // in a card, the links of the records the Files filter dims are dimmed too, and a new filter scrolls the chart to the
 // first record it keeps
@@ -1238,6 +1263,22 @@ function applyTarget(t) {
     if (p) { F.places = new Set([p.tag]); refresh() }
   }
 }
+// a view opened from a card: the card's arguments choose the records and links, set the grouping and the legend; true
+// when they differ from those the view was last opened with
+function applyQuery(qy) {
+  const key = JSON.stringify(qy)
+  if (key === baseKey) return false
+  baseKey = key
+  base = {}
+  for (const k of ['within', 'accounts', 'places', 'links', 'edges']) if (qy[k] != null) base[k] = qy[k]
+  group = qy.rows === 'signature' ? 'sig' : 'account'
+  only = Array.isArray(qy.only) ? qy.only.filter((o) => o && o.label && o.value).map((o) => ({ label: o.label, value: o.value })) : []
+  offset = 0
+  sel = null
+  F.row = ''
+  F.places.clear()
+  return true
+}
 async function start() {
   if (!(await load())) return
   refresh()
@@ -1247,6 +1288,11 @@ async function start() {
 thimble.onOpen(async (place) => {
   const t = (place && place.target) || null
   if (CARD) return t && t.ref && t.pick && D ? pickRef(t.ref) : lightRef(t && t.ref)
+  if (place && place.query && applyQuery(place.query)) {
+    if (!(await load())) return
+    refresh()
+    watchRuns()
+  }
   const again = t && t.ref && t.ref !== keepRef
   if (t && t.ref) keepRef = t.ref
   if (!D) { target = t; return }
@@ -1295,6 +1341,9 @@ if (CARD) {
   let marksT = null
   thimble.onMarks(() => { if (D && marksT == null) marksT = requestAnimationFrame(() => { marksT = null; refresh() }) })
   thimble.onInit((init) => {
+    mode = init.mode
+    document.body.classList.toggle('full', mode === 'full')
+    stored = init.args || {}
     if (D && init.key && init.key === drawnKey) {
       refresh()
       requestAnimationFrame(() => thimble.settled())

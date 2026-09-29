@@ -20,9 +20,13 @@ Where types come from:
   workspace's  a built view of the workspace with a `card` block and card.py.
 refresh() writes REGISTRY_FILE, which thimble.card reads, and builds each type's index on the views kernel ahead of the
 first card. prompt_text() is the {{card_types}} slot of prompts/shared.md: prompts/card-types.md with the types listed, or
-nothing for a workspace with none."""
+nothing for a workspace with none.
+Reshaping: Keep (keep_route) writes a patch of the arguments the type marks `ui` into the card's one thimble.card call
+(rewrite_call), runs the card again and checks it. Open as view (as_view_route) makes the type's view the workspace's, if
+it has none, turns the card's labels on and answers the arguments the view's page draws its records by."""
 from __future__ import annotations
 
+import ast
 import asyncio
 import hashlib
 import json
@@ -36,7 +40,7 @@ from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 
 from . import config, prompts, views
-from .kernel_thimble import CARD_MIME, CARD_TYPES_FILE
+from .kernel_thimble import CARD_MIME, CARD_TYPES_FILE, _checked
 from .ledger import read_json, write_json
 
 log = logging.getLogger("thimble.cardtypes")
@@ -50,6 +54,7 @@ TYPE_FILES = (views.VIEW_JSON, views.READER_PY, CARD_PY, views.VIEW_HTML)
 SIZE = (240, 900)  # a type's height range when its view.json gives none
 CARD_CALL = "thimble.card("
 PROMPT = "card-types"
+LINE_MAX = 110  # characters of a rewritten call on one line; a longer one takes a line per argument
 
 _locks: dict[str, asyncio.Lock] = {}
 
@@ -270,8 +275,8 @@ def _block(types: dict[str, dict[str, Any]]) -> str:
 
 
 def prompt_text(c: str | None) -> str:
-    """The {{card_types}} slot: how main makes a card of a card type, with each type the workspace has, its use, its
-    arguments and an example call; '' for none."""
+    """The {{card_types}} slot: how main makes and reshapes a card of a card type, with each type the workspace has, its
+    use, its arguments and an example call; '' for none."""
     return _block(read_registry(c))
 
 
@@ -325,3 +330,182 @@ async def records_route(c: str, name: str, body: RecordsBody) -> dict[str, Any]:
         return {"data": await views._call(c, {**_request(t), "labels": views._wire(ctx)}, "records", body.query)}
     except views.ReaderError as e:
         raise HTTPException(502, {"message": e.message, "traceback": e.detail[-views.ERROR_MAX:]}) from None
+
+
+class KeepError(ValueError):
+    """Why Keep cannot write a patch into a card's code."""
+
+
+def _py(v: Any) -> str:
+    """A JSON value as a Python literal."""
+    if v is None or isinstance(v, bool):
+        return repr(v)
+    if isinstance(v, (int, float)):
+        return repr(v)
+    if isinstance(v, str):
+        return json.dumps(v, ensure_ascii=False)
+    if isinstance(v, list):
+        return "[" + ", ".join(_py(x) for x in v) + "]"
+    if isinstance(v, dict):
+        return "{" + ", ".join(f"{_py(str(k))}: {_py(x)}" for k, x in v.items()) + "}"
+    raise KeepError(f"{v!r} is no JSON value")
+
+
+def _is_card_call(node: ast.AST) -> bool:
+    f = node.func if isinstance(node, ast.Call) else None
+    return isinstance(f, ast.Attribute) and f.attr == "card" and isinstance(f.value, ast.Name) and f.value.id == "thimble"
+
+
+def _offset(lines: list[str], lineno: int, col: int) -> int:
+    """The character offset of an AST position (1-based line, UTF-8 byte column)."""
+    return sum(len(x) for x in lines[: lineno - 1]) + len(lines[lineno - 1].encode("utf-8")[:col].decode("utf-8"))
+
+
+def rewrite_call(code: str, patch: dict[str, Any], schema: dict[str, Any]) -> str:
+    """`code` with its one thimble.card call's keyword arguments set to `patch`'s values as literals: a value that is
+    None, empty or the schema's default removes the keyword. The rest of the code, and the call's other arguments, stay
+    as written. KeepError when the code has no such call or more than one, or a patched argument is computed there."""
+    try:
+        tree = ast.parse(code)
+    except SyntaxError as e:
+        raise KeepError(f"the card's code does not parse: {e.msg}") from None
+    calls = [n for n in ast.walk(tree) if _is_card_call(n)]
+    if len(calls) != 1:
+        raise KeepError("Keep changes a card whose code calls thimble.card once; ask for this change in the chat")
+    call = calls[0]
+    seg = lambda n: ast.get_source_segment(code, n) or ""  # noqa: E731
+    props = (schema or {}).get("properties") or {}
+
+    def dropped(k: str, v: Any) -> bool:
+        p = props.get(k) if isinstance(props.get(k), dict) else {}
+        return v is None or v == [] or v == {} or ("default" in p and v == p["default"])
+
+    parts = [seg(a) for a in call.args]
+    done = set()
+    for kw in call.keywords:
+        if kw.arg is None:
+            parts.append(seg(kw))
+        elif kw.arg in patch:
+            try:
+                ast.literal_eval(kw.value)
+            except ValueError:
+                raise KeepError(f"the card's code computes `{kw.arg}`; ask for this change in the chat") from None
+            done.add(kw.arg)
+            if not dropped(kw.arg, patch[kw.arg]):
+                parts.append(f"{kw.arg}={_py(patch[kw.arg])}")
+        else:
+            parts.append(seg(kw))
+    parts += [f"{k}={_py(v)}" for k, v in patch.items() if k not in done and not dropped(k, v)]
+    head = seg(call.func)
+    lines = code.splitlines(keepends=True)
+    start = _offset(lines, call.lineno, call.col_offset)
+    end = _offset(lines, call.end_lineno, call.end_col_offset)
+    one = f"{head}({', '.join(parts)})"
+    line_start = code.rfind("\n", 0, start) + 1
+    if "\n" in code[start:end] or start - line_start + len(one) > LINE_MAX:
+        pad = " " * (start - line_start + 4)
+        one = f"{head}(\n" + ",\n".join(pad + x for x in parts) + ")"
+    return code[:start] + one + code[end:]
+
+
+def keep_patch(c: str, cell: dict[str, Any], patch: Any) -> tuple[str, dict[str, Any]]:
+    """The card's code with `patch` written into its call, and the patch checked against the type's schema: each key an
+    argument the type marks `ui`. HTTPException 400 saying what is wrong."""
+    made = card_of(cell.get("outputs"))
+    if not made:
+        raise HTTPException(400, f"card:{cell.get('id')} draws no card type")
+    t = read_registry(c).get(str(made.get("type")))
+    if t is None:
+        raise HTTPException(404, f"no card type {made.get('type')!r} in this workspace")
+    if not isinstance(patch, dict) or not patch:
+        raise HTTPException(400, "Keep needs the arguments to change")
+    schema = t.get("args") or {}
+    props = schema.get("properties") or {}
+    checked = {}
+    for k, v in patch.items():
+        p = props.get(k)
+        if not isinstance(p, dict) or not p.get("ui"):
+            raise HTTPException(400, f"Keep does not change `{k}`; the card changes {', '.join(n for n, q in props.items() if isinstance(q, dict) and q.get('ui'))}")
+        try:
+            checked[k] = None if v is None else _checked(p, v, f"`{k}`")
+        except ValueError as e:
+            raise HTTPException(400, str(e)) from None
+    try:
+        return rewrite_call(str(cell.get("code") or ""), checked, schema), checked
+    except KeepError as e:
+        raise HTTPException(400, str(e)) from None
+
+
+class KeepBody(BaseModel):
+    patch: dict[str, Any]
+
+
+@router.post("/ws/{c}/cells/{cell_id}/keep")
+async def keep_route(c: str, cell_id: str, body: KeepBody) -> dict[str, Any]:
+    """Keep: the card's call rewritten with the patch of arguments the analyst's reshaping in its page made, then the
+    card run again and checked (notebook.regenerate's run and check). The card as stored."""
+    from . import notebook  # noqa: PLC0415
+
+    hit = await asyncio.to_thread(notebook.find_cell, config.workspace_dir(c), cell_id)
+    if hit is None:
+        raise HTTPException(404, f"no such card: {cell_id}")
+    await refresh_quietly(c, warm=False)
+    code, _patch = keep_patch(c, hit[1], body.patch)
+    await asyncio.to_thread(notebook.edit_cell, c, cell_id, code=code, by="user")
+    return await notebook._regenerate(c, cell_id)
+
+
+def install_view(c: str, t: dict[str, Any]) -> None:
+    """thimble's type `t` as the workspace's view of its slug, claiming the files the type reads, under a built proposal
+    of the analyst's that keeps the digest of the files as installed (`installed`)."""
+    d = Path(t["dir"])
+    raw = read_json(d / views.VIEW_JSON, {})
+    with views._proposals_lock:
+        items = [p for p in views.list_proposals(c) if p.get("slug") != t["slug"]]
+        items.append({"slug": t["slug"], "name": views.title_case(raw.get("name") or t["slug"]),
+                      "why": " ".join(str(raw.get("why") or "").split()), "claims": list(t["claims"]), "arrangement": "",
+                      "proposed_by": "analyst", "status": "queued", "orientation": False, "ts": views._now()})
+        views._save_proposals(c, items)
+    views.write_view(c, t["slug"], name=raw.get("name") or t["slug"], why=raw.get("why") or "", claims=list(t["claims"]),
+                     accepts=raw.get("accepts"), declares=raw.get("declares"), default=bool(raw.get("default")),
+                     libs=raw.get("libs"), reader=(d / views.READER_PY).read_text("utf-8"),
+                     html=(d / views.VIEW_HTML).read_text("utf-8"))
+    views.update_proposal(c, t["slug"], installed=views.view_digest(views.views_dir(c) / t["slug"]))
+
+
+def _stale_install(c: str, t: dict[str, Any], v: dict[str, Any]) -> bool:
+    """Whether the workspace's view of thimble's type `t` is thimble's own install, unchanged since (its proposal's
+    `installed` digest), and older than the type's files."""
+    prop = views.read_proposal(c, t["slug"]) or {}
+    d, src = Path(v["dir"]), Path(t["dir"])
+    if not prop.get("installed") or views.view_digest(d) != prop["installed"]:
+        return False
+    return any((d / n).read_bytes() != (src / n).read_bytes() for n in (views.READER_PY, views.VIEW_HTML))
+
+
+@router.post("/ws/{c}/cells/{cell_id}/as-view")
+async def as_view_route(c: str, cell_id: str) -> dict[str, Any]:
+    """Open as view: the view of the card's type, made the workspace's from thimble's type when it has none or has
+    thimble's older install of it, with the card's labels turned on in Files; {slug, query}, the card's arguments, which
+    the view's page draws its records by."""
+    from . import concepts, notebook  # noqa: PLC0415
+
+    cell = await asyncio.to_thread(notebook.get_cell, c, cell_id)
+    made = card_of((cell or {}).get("outputs"))
+    if not made:
+        raise HTTPException(404 if cell is None else 400, f"card:{cell_id} draws no card type")
+    t = read_registry(c).get(str(made.get("type")))
+    if t is None:
+        raise HTTPException(404, f"no card type {made.get('type')!r} in this workspace")
+    v = await asyncio.to_thread(views.read_built, c, t["slug"])
+    if v is None or not v["ok"] or (t["origin"] == "thimble" and v["origin"] == "workspace"
+                                    and await asyncio.to_thread(_stale_install, c, t, v)):
+        if t["origin"] != "thimble":
+            raise HTTPException(409, f"the view {t['slug']} does not pass its checks")
+        await asyncio.to_thread(install_view, c, t)
+    for k in made.get("labels") or []:
+        try:
+            await asyncio.to_thread(concepts.show_concept, c, str(k.get("id")), True)
+        except HTTPException as e:
+            log.info("%s: the label %s of card:%s was not turned on: %s", c, k.get("id"), cell_id, e.detail)
+    return {"slug": t["slug"], "query": {k: x for k, x in (made.get("args") or {}).items() if x is not None}}

@@ -1513,7 +1513,7 @@ async def propose_builtins(c: str) -> list[str]:
 
 def _install_builtin(c: str, slug: str, fit: dict[str, Any]) -> None:
     """The viewer's files as the workspace's view `slug` claiming what `fit` names, under a built orientation proposal
-    whose why is what applies() found."""
+    whose why is what applies() found, and which keeps the digest of the files as installed (`installed`)."""
     d = VIEWERS_DIR / slug
     raw = read_json(d / VIEW_JSON, {})
     claims = _str_list(fit["claims"])
@@ -1527,6 +1527,7 @@ def _install_builtin(c: str, slug: str, fit: dict[str, Any]) -> None:
     write_view(c, slug, name=raw.get("name") or slug, why=raw.get("why") or "", claims=claims, accepts=raw.get("accepts"),
                declares=raw.get("declares"), default=bool(raw.get("default")), libs=raw.get("libs"),
                reader=(d / READER_PY).read_text("utf-8"), html=(d / VIEW_HTML).read_text("utf-8"))
+    update_proposal(c, slug, installed=view_digest(views_dir(c) / slug))
 
 
 def orientation_views(c: str) -> list[dict[str, Any]]:

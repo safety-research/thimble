@@ -41,6 +41,8 @@ interface Open {
   /** in a view: a passage inside the record `ref` names, and the span ref the File browser opens when the view does not
    * show it */
   quote?: ViewQuote & { span: string }
+  /** in a view: the arguments of the card it was opened from (a card type's Open as view) */
+  query?: Record<string, unknown>
 }
 
 /** The open tabs a workspace keeps: their paths and the one shown. */
@@ -207,7 +209,7 @@ export function FilesTab({ ws, active, focused = active }: { ws: string; active:
   const ownPane = !!shownSlug && panesShow.includes(viewSurface(shownSlug))
   useEffect(() => {
     if (!ownPane || !shownSlug) return
-    if (viewAt) bus.emit('openInView', { slug: shownSlug, path: viewAt.path, ref: viewAt.ref, quote: viewAt.quote })
+    if (viewAt) bus.emit('openInView', { slug: shownSlug, path: viewAt.path, ref: viewAt.ref, quote: viewAt.quote, query: viewAt.query })
     bus.emit('showTab', { tab: viewSurface(shownSlug) })
     setBar(BROWSER)
     setViewAt(null)
@@ -287,7 +289,7 @@ export function FilesTab({ ws, active, focused = active }: { ws: string; active:
   const toView = useCallback(
     (slug: string, at: Open | null, from?: string | null) => {
       if (surfaceShown(viewSurface(slug))) {
-        if (at) bus.emit('openInView', { slug, path: at.path, ref: at.ref, quote: at.quote })
+        if (at) bus.emit('openInView', { slug, path: at.path, ref: at.ref, quote: at.quote, query: at.query })
         bus.emit('showTab', { tab: viewSurface(slug), from })
         return
       }
@@ -304,6 +306,21 @@ export function FilesTab({ ws, active, focused = active }: { ws: string; active:
     [openTab],
   )
 
+  useEffect(
+    () =>
+      bus.on('openView', ({ slug, query }) => {
+        const from = pressedPane()
+        api
+          .views(ws)
+          .then((all) => {
+            const v = all.find((x) => x.slug === slug)
+            if (!v?.first_file) throw new Error(`there is no view ${slug}`)
+            toView(slug, { path: v.first_file, query }, from)
+          })
+          .catch((e: Error) => bus.emit('toast', { text: `Could not open the view. ${e.message}`, kind: 'error' }))
+      }),
+    [ws, toView],
+  )
   useEffect(
     () =>
       bus.on('openRef', (e) => {
@@ -498,6 +515,7 @@ export function FilesTab({ ws, active, focused = active }: { ws: string; active:
             kind={shownPath ? kindOf(shownPath) : 'text'}
             targetRef={viewAt?.ref}
             quote={viewAt?.quote}
+            query={viewAt?.query}
             onQuoteMissing={quoteMissing}
             labels={labels}
             onMode={setMode}

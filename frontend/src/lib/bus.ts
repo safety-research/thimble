@@ -38,7 +38,9 @@ export type Events = {
      * pane the request came from (lib/surfaces pressedPane), else the pane pressed last */
   showTab: { tab: Tab | `view:${string}`; from?: string | null }
   /** a ref Files places in a view, opened in the pane that shows that view on its own (files/ViewSurface) */
-  openInView: { slug: string; path: string; ref?: string; quote?: { record: string; text: string; span: string } }
+  openInView: { slug: string; path: string; ref?: string; quote?: { record: string; text: string; span: string }; query?: Record<string, unknown> }
+  /** open a view with a card's arguments (a card type's Open as view, canvas/TypeCard), in Files or in its own pane */
+  openView: { slug: string; query: Record<string, unknown> }
   /** a layout main asked for with set_layout (the stream's `layout` record): a preset, and the surfaces its panes show
    * in reading order */
   layout: { layout: 'one' | 'columns' | 'rows' | 'three' | 'quadrants'; surfaces: string[] }

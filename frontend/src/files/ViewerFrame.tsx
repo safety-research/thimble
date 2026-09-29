@@ -21,7 +21,8 @@
 // A card of a card type (`card`, backend cardtypes.py) loads the type's page, which gets `init` with what the card
 // stored once it is ready and says `settled` once it has drawn it; its fetches go to the type's records route under the
 // card's labels, its `open` names the record ref as it is (with `pick` to open it in full), and its height stays within
-// the type's range.
+// the type's range. The page's `setQuery` says how the analyst reshaped the card, as a patch of its call's arguments
+// (onQuery). A view opened from a card (`query`) gets the card's arguments with every `open`.
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject } from 'react'
 import { api } from '../lib/api'
 import { bus } from '../lib/bus'
@@ -102,8 +103,12 @@ export interface ViewerFrameProps {
   card?: CardFrame
   /** a card's page has drawn what it was given */
   onSettled?: () => void
+  /** a card's page asks for its call's arguments to change (the patch), or for none (null) */
+  onQuery?: (patch: Record<string, unknown> | null) => void
   /** in a card, the record `targetRef` names is opened in full rather than lit */
   targetPick?: boolean
+  /** a view opened from a card: the card's arguments, which the page draws its records by */
+  query?: Record<string, unknown> | null
 }
 
 /** A card of a card type drawn in the frame: the card's id, its type, how it is drawn (on the canvas, full size or for
@@ -280,7 +285,7 @@ function useViewLabels(
   return useMemo(() => ({ add, reset, ready }), [add, reset, ready])
 }
 
-export function ViewerFrame({ ws, slug, targetRef, path, title, fit, labels = NO_LABELS, filter = null, filterFiles, byId = NO_CONCEPTS, first, labelActions, onError, className, quote, onQuoteMissing, version, restore, handle, card, onSettled, targetPick }: ViewerFrameProps) {
+export function ViewerFrame({ ws, slug, targetRef, path, title, fit, labels = NO_LABELS, filter = null, filterFiles, byId = NO_CONCEPTS, first, labelActions, onError, className, quote, onQuoteMissing, version, restore, handle, card, onSettled, onQuery, targetPick, query }: ViewerFrameProps) {
   const ref = useRef<HTMLIFrameElement>(null)
   const [page, setPage] = useState<string | null>(null)
   const [height, setHeight] = useState<number | null>(null)
@@ -301,8 +306,13 @@ export function ViewerFrame({ ws, slug, targetRef, path, title, fit, labels = NO
   drawn.current = card
   const settledFn = useRef(onSettled)
   settledFn.current = onSettled
+  const queryFn = useRef(onQuery)
+  queryFn.current = onQuery
   const pick = useRef(targetPick)
   pick.current = targetPick
+  const viewQuery = useRef(query)
+  viewQuery.current = query
+  const queryKey = query ? JSON.stringify(query) : ''
   const cardType = card?.type
 
   const [fonts, setFonts] = useState<string | null>(null)
@@ -371,7 +381,8 @@ export function ViewerFrame({ ws, slug, targetRef, path, title, fit, labels = NO
       if (open.error) report.current?.(`${r}: ${open.error}`)
     }
     const q = quoted.current
-    if (target.current === r) post({ type: P + 'open', open, quote: q && q.record === r ? q : undefined })
+    const withQuery = viewQuery.current ? { ...open, query: viewQuery.current } : open
+    if (target.current === r) post({ type: P + 'open', open: withQuery, quote: q && q.record === r ? q : undefined })
   }
   // A newer version's page opens where the analyst was, when this version knows that place, else where the ref it was
   // given names; then the rest of what they were looking at is put back.
@@ -386,7 +397,7 @@ export function ViewerFrame({ ws, slug, targetRef, path, title, fit, labels = NO
   useEffect(() => {
     if (ready.current) void sendOpen(targetRef)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [targetRef, quote?.text, targetPick])
+  }, [targetRef, quote?.text, targetPick, queryKey])
   // a card run again, or drawn in another mode or width: a new `init`, no reload
   useEffect(() => {
     if (ready.current) sendInit()
@@ -453,6 +464,9 @@ export function ViewerFrame({ ws, slug, targetRef, path, title, fit, labels = NO
         }
         case P + 'settled':
           settledFn.current?.()
+          return
+        case P + 'setQuery':
+          queryFn.current?.(d.patch && typeof d.patch === 'object' && Object.keys(d.patch).length ? (d.patch as Record<string, unknown>) : null)
           return
         case P + 'anchors':
           marks.add(d.refs)

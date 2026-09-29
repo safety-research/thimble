@@ -2027,6 +2027,9 @@ audio.bcell-media {
   max-width: 760px;
   margin: 0 auto;
 }
+.bfocus-col.is-wide {
+  max-width: 1600px;
+}
 .bfocus-meta,
 .bfocus-pos {
   font: var(--type-mono-sm);
@@ -2533,4 +2536,14 @@ audio.bcell-media {
 }
 .bcell.is-sized .bcell-type .viewer-frame {
   flex: 1 1 auto;
+}
+/* Keep and Undo while the analyst reshaped the card in its page, and Open as view at full size */
+.bcell-type-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding-top: 8px;
+}
+.bcell-type-view {
+  margin-left: auto;
 }

@@ -2,8 +2,9 @@
 Swarm viewer applies to, the registry finds it without any view proposal and lists it for main's prompt; a card's code
 draws it with thimble.card, which checks the arguments against the type's schema, runs card.py on the reader's cached
 index under the labels the call names, whatever Files highlights, and shows the data with a listing main reads and
-cites; the card check's page gets the type's frame from the request. Main hears when a label it ran finishes, and can
-colour a label's values.
+cites; the card check's page gets the type's frame from the request. Keep writes a patch of the arguments the type lets
+the card change into the card's one thimble.card call. Main hears when a label it ran finishes, and can colour a label's
+values.
 
 The corpus `crew` is 140 saves of 35 accounts on 4 pages, each naming the next account, which the Swarm viewer's
 applies() reads as a swarm. Reader calls run in this process (views._runner replaced by an exec of the kernel's
@@ -156,6 +157,36 @@ async def test_the_check_s_page_gets_the_type_s_frame_from_the_request(crew, ker
     doc = req["frames"]["swarm"]
     assert "connect-src 'none'" in doc and '"card": true' in doc and 'id="chart"' in doc
     assert "frames" not in render.request_for(CORPUS, {"id": "c2", "kind": "plot", "outputs": []})
+
+
+def test_keep_rewrites_the_literal_arguments_of_the_one_card_call():
+    schema = {"properties": {"rows": {"type": "string", "enum": ["account", "signature"], "default": "account", "ui": True},
+                             "only": {"type": "array", "ui": True}, "accounts": {"type": "array", "ui": True}}}
+    code = ('import thimble\nkept = ["kestrel"]\n'
+            'thimble.card("swarm", labels=["signal"], within={"label": "early"}, only=[{"label": "signal", "value": "é"}])\n')
+    out = cardtypes.rewrite_call(code, {"rows": "signature", "only": None}, schema)
+    assert out == 'import thimble\nkept = ["kestrel"]\nthimble.card("swarm", labels=["signal"], within={"label": "early"}, rows="signature")\n'
+    back = cardtypes.rewrite_call(out, {"rows": "account", "accounts": ["kestrel", "nova", "ParallelSectorAgent"]}, schema)
+    assert back.endswith('thimble.card(\n    "swarm",\n    labels=["signal"],\n    within={"label": "early"},\n'
+                         '    accounts=["kestrel", "nova", "ParallelSectorAgent"])\n'), (
+        "a call longer than a line takes a line per argument, and a default removes the keyword")
+    with pytest.raises(cardtypes.KeepError, match="computes `accounts`"):
+        cardtypes.rewrite_call('thimble.card("swarm", accounts=kept)', {"accounts": ["nova"]}, schema)
+    with pytest.raises(cardtypes.KeepError, match="calls thimble.card once"):
+        cardtypes.rewrite_call('thimble.card("swarm")\nthimble.card("swarm")', {"rows": "signature"}, schema)
+
+
+async def test_keep_changes_only_the_arguments_the_type_lets_the_card_change(crew, kernel):
+    await cardtypes.refresh(CORPUS, warm=False)
+    code = 'import thimble\nthimble.card("swarm", links=["names"])'
+    kernel.card("swarm", links=["names"])
+    cell = {"id": "c1", "kind": "plot", "code": code, "outputs": [kernel.shown[-1]]}
+    new, patch = cardtypes.keep_patch(CORPUS, cell, {"rows": "signature"})
+    assert new == 'import thimble\nthimble.card("swarm", links=["names"], rows="signature")' and patch == {"rows": "signature"}
+    with pytest.raises(HTTPException, match="Keep does not change `within`"):
+        cardtypes.keep_patch(CORPUS, cell, {"within": {"label": "early"}})
+    with pytest.raises(HTTPException, match="`rows` is one of 'account', 'signature'"):
+        cardtypes.keep_patch(CORPUS, cell, {"rows": "sideways"})
 
 
 async def test_main_hears_when_a_label_it_ran_finishes_and_can_colour_its_values(crew):

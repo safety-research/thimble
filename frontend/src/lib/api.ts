@@ -306,6 +306,11 @@ export const api = {
   },
   /** reader.records(index, query) for a card's page, under the labels the card names */
   cardTypeRecords: (c: string, type: string, card: string, query: unknown) => j<{ data: unknown }>(`${ws(c)}/cardtypes/${enc(type)}/records`, { method: 'POST', body: JSON.stringify({ query, card }) }),
+  /** Keep: a card type's card with its call's arguments changed by `patch`, run again and checked (backend
+   * cardtypes.keep_route); the card as stored */
+  keepCard: (c: string, card: string, patch: Record<string, unknown>) => j<Cell>(`${ws(c)}/cells/${enc(card)}/keep`, { method: 'POST', body: JSON.stringify({ patch }) }),
+  /** Open as view: the view of a card's type made ready, with the card's labels on, and the arguments it opens with */
+  cardAsView: (c: string, card: string) => j<{ slug: string; query: Record<string, unknown> }>(`${ws(c)}/cells/${enc(card)}/as-view`, { method: 'POST' }),
   // ---- orientation ----
   /** Ask the analyst's session for the orientation (`POST /ws/{c}/events {kind: start}`): main calls start_orientation
      * with `text` as the brief and the switches `final_notebook`, `propose_views` and `generate_report`; `effort`,
