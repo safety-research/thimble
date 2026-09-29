@@ -202,6 +202,29 @@ async def test_a_prompt_label_answers_once_its_first_rows_are_in(workspaces_tmp,
     assert done["labeled"] == 8
 
 
+async def test_a_slow_classifier_call_is_run_again_and_the_first_answer_wins(api, monkeypatch):
+    monkeypatch.setattr(concepts, "BATCH_ITEMS", 1)
+    monkeypatch.setattr(concepts, "CONCURRENCY", 1)
+    monkeypatch.setattr(concepts, "HEDGE_MIN_S", 0.1)
+    stopped = []
+
+    async def call(c, concept, items, comment=True, on_retry=None):
+        n = len(stopped)
+        stopped.append(False)
+        try:
+            await asyncio.sleep(600 if n == 5 else 0.01)
+        except asyncio.CancelledError:
+            stopped[n] = True
+            raise
+        return _ok(FakeClassify.rule(items))
+
+    monkeypatch.setattr(concepts, "classify_structured", call)
+    k = await _create(api, description="a board post that claims a PR")
+    s = (await api.post(f"/api/ws/{CORPUS}/concepts/{k['id']}/apply", json={"wait": True, "paths": ["board.jsonl"]})).json()
+    await asyncio.sleep(0)
+    assert s["labeled"] == 8 and len(stopped) == 9 and stopped[5] and not any(stopped[:5] + stopped[6:])
+
+
 async def test_a_prompt_label_within_another_reads_only_the_records_it_kept(workspaces_tmp, fake_classify):
     """A regex label narrows the board to the posts that claim a PR, quoting the line each matched, and a prompt label
     run `within` it sends the model those posts alone; its rows and counts cover them, its concept keeps the narrowing

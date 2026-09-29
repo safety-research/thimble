@@ -38,6 +38,7 @@ import random
 import re
 import secrets
 import sqlite3
+import statistics
 import sys
 import threading
 import time
@@ -120,6 +121,9 @@ BATCH_ITEMS = 10          # items per classifier call through the claude CLI (pr
 BATCH_CHARS = 40_000      # or fewer items when their texts add up to this many chars
 CONCURRENCY = 24          # classifier calls in flight through the CLI, a process each, at most (halved on a 429 or 529)
 RETRY_DELAYS = (1.0, 2.0, 4.0, 8.0)  # seconds before each retry of a rate-limited batch
+HEDGE_AFTER = 4           # answered calls a run times before it runs a slow call a second time
+HEDGE_FACTOR = 2.0        # a call is slow past this many times the run's median call
+HEDGE_MIN_S = 15.0        # and past this many seconds
 RETRY_JITTER = 0.25
 BACKOFF_POLL = 0.2        # seconds between cancel checks while a retry waits
 QUOTE_MAX = 4_000         # chars of a classifier's quote kept on a row
@@ -1829,6 +1833,9 @@ def _cancelled_message(n: int, unit: str) -> str:
     return f"cancelled by the analyst after {n:,} {unit}{'' if n == 1 else 's'}; the rows written so far are kept"
 
 
+_stopping: set[asyncio.Task] = set()  # classifier calls a faster twin made redundant, held until they end
+
+
 async def _apply_prompt(c: str, concept: dict, units: Iterator[Unit], out: Path, cancel: threading.Event,
                         files: list[str] | None = None, comment: bool = True) -> tuple[int, int, str | None]:
     """The classifier calls of a prompt label, BATCH_ITEMS units per call and up to CONCURRENCY calls running: a 429 or
@@ -1870,13 +1877,43 @@ async def _apply_prompt(c: str, concept: dict, units: Iterator[Unit], out: Path,
         nonlocal allowed
         allowed = min(float(in_flight), allowed + 1 / allowed)
 
+    took: list[float] = []  # seconds of the run's answered calls
+
+    async def hedged(items: list[tuple[str, str]], since: int) -> Any:
+        """classify_structured, run a second time alongside when it is slow for this run (HEDGE_FACTOR x its median call,
+        at least HEDGE_MIN_S); the first answered call wins and the other is stopped."""
+
+        def start() -> asyncio.Task:
+            return asyncio.create_task(classify_structured(
+                c, concept, items, comment,
+                on_retry=lambda _n, _wait, cls, _e: slow(since) if cls in ("rate_limited", "overloaded") else None))
+
+        t = time.monotonic()
+        running = {start()}
+        call = None
+        try:
+            if len(took) >= HEDGE_AFTER:
+                done, _ = await asyncio.wait(running, timeout=max(HEDGE_MIN_S, HEDGE_FACTOR * statistics.median(took)))
+                if not done:
+                    running.add(start())
+            while running:
+                done, running = await asyncio.wait(running, return_when=asyncio.FIRST_COMPLETED)
+                for task in done:
+                    call = task.result()
+                    if call.status == "ok":
+                        took.append(time.monotonic() - t)
+                        return call
+            return call
+        finally:
+            for task in running:
+                task.cancel()
+                _stopping.add(task)
+                task.add_done_callback(_stopping.discard)
+
     async def ask(items: list[tuple[str, str]]) -> tuple[dict[int, dict], str | None]:
         """The classifier's answers by item number (parse_labels) and, when the call failed, why."""
         for attempt in range(len(RETRY_DELAYS) + 1):
-            since = slowdowns
-            call = await classify_structured(
-                c, concept, items, comment,
-                on_retry=lambda _n, _wait, cls, _e, since=since: slow(since) if cls in ("rate_limited", "overloaded") else None)
+            call = await hedged(items, since := slowdowns)
             if call.refused_by:
                 pair = (call.refused_by, call.model_requested)
                 fell_back[pair] = fell_back.get(pair, 0) + 1
