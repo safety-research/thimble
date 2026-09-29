@@ -183,6 +183,25 @@ async def test_a_prompt_apply_slows_down_when_the_api_pushes_back_and_asks_again
     assert max(seen[:4]) == 4 and max(seen[4:]) < 4
 
 
+async def test_a_prompt_label_answers_once_its_first_rows_are_in(workspaces_tmp, monkeypatch):
+    """apply_scoped answers a prompt label with the run so far once APPLY_ENOUGH units are labeled, and the run goes on."""
+    monkeypatch.setattr(concepts, "BATCH_ITEMS", 1)
+    monkeypatch.setattr(concepts, "CONCURRENCY", 2)
+    monkeypatch.setattr(concepts, "APPLY_ENOUGH", 2)
+
+    async def call(c, concept, items, comment=True, on_retry=None):
+        await asyncio.sleep(0.2)
+        return _ok(FakeClassify.rule(items))
+
+    monkeypatch.setattr(concepts, "classify_structured", call)
+    s = await concepts.apply_scoped(CORPUS, scope="files", name="claims a PR", kind="prompt", text="The post claims a PR.",
+                                    values=None, paths=["board.jsonl"], limit=None, comment=False, filter=False,
+                                    created_by="test", chat=None, group=None, card=False)
+    assert s["partial"] and 2 <= sum(s["counts"].values()) < 8
+    done = await concepts.wait_apply(CORPUS, s["concept"], 60)
+    assert done["labeled"] == 8
+
+
 async def test_a_prompt_label_within_another_reads_only_the_records_it_kept(workspaces_tmp, fake_classify):
     """A regex label narrows the board to the posts that claim a PR, quoting the line each matched, and a prompt label
     run `within` it sends the model those posts alone; its rows and counts cover them, its concept keeps the narrowing

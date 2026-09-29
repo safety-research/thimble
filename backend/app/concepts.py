@@ -130,6 +130,7 @@ CHUNK = 500               # records read per corpus.load_records call
 RATIONALE_MAX = 500       # chars of a classifier's rationale kept on a row
 APPLICATIONS_KEPT = 50    # run summaries kept on the concept
 APPLY_WAIT_S = 60.0       # apply_scoped and `wait: true` wait this long for the summary, then answer with the run so far
+APPLY_ENOUGH = 2 * CONCURRENCY * BATCH_ITEMS  # units a prompt label's apply_scoped waits for before it answers with the run so far
 PROGRESS_EVERY_S = 0.25   # a run's progress record is streamed at most this often
 SCAN_INFLIGHT_PER_WORKER = 2
 SCAN_STOPPED = "a scan worker stopped; the rows so far are kept, apply again to finish"
@@ -2813,10 +2814,10 @@ async def start_apply(c: str, concept_id: str, paths: list[str] | None = None, l
     return record
 
 
-async def wait_apply(c: str, concept_id: str, timeout: float | None = None) -> dict:
+async def wait_apply(c: str, concept_id: str, timeout: float | None = None, enough: int | None = None) -> dict:
     """Wait for the concept's running apply: its summary when it ends within `timeout` seconds (APPLY_WAIT_S when
-    None; its HTTPException when it fails), else the run record so far with `partial: true`. 404 when nothing runs
-    and no summary is on record."""
+    None; its HTTPException when it fails), else the run record so far with `partial: true`, which it also answers with
+    once the run has done `enough` units. 404 when nothing runs and no summary is on record."""
     if timeout is None:
         timeout = APPLY_WAIT_S
     key = (c, concept_id)
@@ -2826,10 +2827,18 @@ async def wait_apply(c: str, concept_id: str, timeout: float | None = None) -> d
         if state and state.get("summary"):
             return state["summary"]
         raise HTTPException(404, "no apply is running for this concept")
-    done, _pending = await asyncio.wait({task}, timeout=None if timeout == float("inf") else timeout)
-    if task in done:
-        return task.result()
-    return _partial_record(c, concept_id)
+    loop = asyncio.get_running_loop()
+    forever = timeout == float("inf")
+    end = loop.time() + (0.0 if forever else timeout)
+    while True:
+        left = None if forever else max(0.0, end - loop.time())
+        step = left if enough is None else PROGRESS_EVERY_S if left is None else min(PROGRESS_EVERY_S, left)
+        done, _pending = await asyncio.wait({task}, timeout=step)
+        if task in done:
+            return task.result()
+        timed_out = left is not None and left <= step
+        if timed_out or (enough is not None and int((_runs.get(key) or {}).get("done") or 0) >= enough):
+            return _partial_record(c, concept_id)
 
 
 async def cancel_workspace(c: str) -> list[str]:
@@ -3393,8 +3402,9 @@ async def apply_scoped(c: str, *, scope: str, name: str, kind: str, text: str, v
     `labels`, and with `filter` the scope's filter set to the positive value. `within` {label, value?} runs a label over
     records only over the records that label gave that value (its first by default), and `show` turns a label over files on in
     Files and the views before it runs, so they draw it as it runs. A `limit` makes a new label a trial. The same
-    predicate under the same name starts no run when its rows already cover the call (`unchanged: true`). Returns after
-    APPLY_WAIT_S at the latest, with `stale`, the ids of cards that read the label at an older revision."""
+    predicate under the same name starts no run when its rows already cover the call (`unchanged: true`). Returns when the
+    run ends, when a prompt label has labeled APPLY_ENOUGH units, or after APPLY_WAIT_S, with `stale`, the ids of cards
+    that read the label at an older revision."""
     if scope not in SCOPES:
         raise HTTPException(400, f"scope must be one of {', '.join(SCOPES)}")
     if kind not in KINDS:
@@ -3458,7 +3468,7 @@ async def apply_scoped(c: str, *, scope: str, name: str, kind: str, text: str, v
     if unchanged:
         result = {"total": concept["applications"][-1].get("total"), "counts": await asyncio.to_thread(_live_counts, ws, concept["id"])}
     else:
-        result = await wait_apply(c, concept["id"], APPLY_WAIT_S)
+        result = await wait_apply(c, concept["id"], APPLY_WAIT_S, APPLY_ENOUGH if kind == "prompt" else None)
     partial = bool(result.get("partial"))
     counts = result.get("counts") if not partial else await asyncio.to_thread(_live_counts, ws, concept["id"])
     stale = await asyncio.to_thread(stale_cards, ws, read_concept(ws, concept["id"]) or concept)
