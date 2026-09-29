@@ -304,6 +304,7 @@ let hover = null
 let keepRef = null // the record a citation opened, shown whatever the labels mark
 let target = null // the place thimble.onOpen asked for, applied once the chart is loaded
 let loadSeq = 0
+let failed = false // the first load failed, so the next label change tries again
 const recCache = new Map()
 let L = null // the layout: {cards, cells, linkEls, width, height}
 
@@ -332,6 +333,7 @@ async function load() {
     const p = document.getElementById('problems')
     p.hidden = false
     p.textContent = `The records could not be read: ${e.message || e}`
+    failed = !D
     return false
   }
   if (seq !== loadSeq) return false
@@ -1213,7 +1215,10 @@ thimble.onOpen(async (place) => {
 thimble.onLabels(async (state) => {
   const was = JSON.stringify([labelState.labels, labelState.filter, (labelState.all || []).map((l) => [l.id, l.count])])
   labelState = { labels: state.labels || [], filter: state.filter || null, all: state.all || null, palette: state.palette || null }
-  if (!D) return
+  if (!D) {
+    if (failed) { failed = false; await start() }
+    return
+  }
   // a label turned on, off or still running (its count moving) changes the cards
   if (JSON.stringify([labelState.labels, labelState.filter, (labelState.all || []).map((l) => [l.id, l.count])]) === was) { renderPop(); return }
   offset = 0
