@@ -351,6 +351,7 @@ class Entry:
     tx_grew: float = 0.0  # time.monotonic() when that offset last changed
     tx_ended: bool | None = None  # whether the transcript's last turn had ended at that offset, once read
     proxy_refused: bool = False  # Claude Code refused main's Agent call that would start its proxy (proxy_refused)
+    ended_state: str = ""  # the state `claude agents` listed for it when its process went away (stopped_in_claude)
 
     KEEP = ("c", "key", "name", "short", "sid", "chat", "role", "folder", "started", "status", "run_open", "result",
             "ended_at", "proxy_agents", "relayed", "proxy_refused")
@@ -456,6 +457,13 @@ def alive(e: Entry | None) -> bool:
     return e is not None and (e.status != "stopped" or e.replacing)
 
 
+def stopped_in_claude(c: str, key: str) -> bool:
+    """Whether the session's process went away because Claude Code stopped it, as with `claude stop` or the agent view,
+    which the analyst does, rather than a crash."""
+    e = entry(c, key)
+    return e is not None and e.ended_state == "stopped"
+
+
 def replace(c: str, key: str) -> None:
     """A new session of `key` starts in place of the one that runs: that one is stopped, and its proxy shows the new
     one once it is recorded (record)."""
@@ -488,7 +496,7 @@ def record(c: str, key: str, *, short: str, sid: str, chat: str, role: str, fold
     if old is not None and old is not e:
         e.proxy_agents, e.proxy_seen, e.outbox = old.proxy_agents, old.proxy_seen, old.outbox
     e.sid, e.chat, e.status, e.run_open = sid, chat, status, True
-    e.started, e.misses = time.time(), 0
+    e.started, e.misses, e.ended_state = time.time(), 0, ""
     path = session.find_transcript(sid)
     if old is None or old.short != short:
         e.offset = offset if offset is not None else session._size(Path(path)) if path else 0
@@ -567,6 +575,7 @@ async def _tick(rows: list[dict[str, Any]]) -> None:
             if not _gone(e, hit):
                 continue
             e.status, e.waiting_for, e.pid, e.missing_since = "stopped", "", None, 0.0
+            e.ended_state = str((hit or {}).get("state") or "")
             _news(e, f"{e.shown} has ended.")
             _save(e.c)
             if agent_session.current(e.c, e.key) is None:

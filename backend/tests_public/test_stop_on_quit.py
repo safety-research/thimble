@@ -49,3 +49,51 @@ def test_main_ending_with_no_successor_stops_the_agents(monkeypatch):
     monkeypatch.setattr(session, "GRACE_S", 0)
     session.disconnected("w", "s1")
     assert called == ["w"]
+
+
+async def _running_build(c: str, slug: str) -> "asyncio.Task":
+    """The view ticket `slug` as a build that runs, taken off the queue and leaving the pool as dev's own do."""
+    run = dev.Run(ticket_id=f"view:{slug}", title=slug, ts_start="")
+
+    async def build() -> None:
+        try:
+            await asyncio.sleep(3600)
+        finally:
+            dev._view_runs.pop((c, slug), None)
+            dev._view_stopping.pop((c, slug), None)
+
+    run.task = asyncio.get_running_loop().create_task(build())
+    dev._view_queue.remove((c, slug))
+    dev._view_runs[(c, slug)] = run
+    await asyncio.sleep(0)
+    return run.task
+
+
+def test_stopping_the_orientation_stops_the_builds_of_its_views_and_no_other(workspaces_tmp):
+    """The analyst's Stop ends the orientation's run stopped: the views it proposed stop building, running or queued,
+    and no listing of the proposals queues them again, while a view the analyst asked for builds on. The server's own
+    stop, which the next server resumes, stops none."""
+    from app import config, orient_session, orientation, views
+
+    c = "mini"
+    ours = [views.propose(c, n, "why", ["board.jsonl"], "one row per post", orientation=True)["slug"]
+            for n in ("Posts", "Threads")]
+    asked = views.propose(c, "Timeline", "why", ["events.jsonl"], "one row per event", asked=True)["slug"]
+
+    def run(**kw):
+        return agent_session.Run(c, orient_session.KEY, "chat-o", "sid-o", config.corpus_dir(c), orientation.ROLE, **kw)
+
+    async def go() -> None:
+        building = await _running_build(c, ours[0])
+        orient_session._ended(run(interrupted="the server stopped"), "failed", "")
+        await asyncio.sleep(0)
+        assert not building.done() and (c, ours[1]) in dev._view_queue, "the server's stop leaves them to resume"
+        orient_session._ended(run(), "stopped", "")
+        await asyncio.sleep(0)
+        assert building.cancelled()
+
+    asyncio.run(go())
+    assert dev._view_queue == [(c, asked)] and not dev._view_runs
+    assert {s: (views.read_proposal(c, s) or {}).get("status") for s in ours} == dict.fromkeys(ours, "dropped")
+    dev.recover_views(c)  # the browser lists the proposals
+    assert dev._view_queue == [(c, asked)]

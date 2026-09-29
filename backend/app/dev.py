@@ -22,7 +22,8 @@ starts a session on prompts/dev-view.md in the corpus folder (which Claude Code 
 folder; the corpus folder and the worked examples are fenced read-only (view_fence). After each turn the server runs the
 view's gate; a failure wakes the session, a pass registers the view. A turn the API ended at capacity is no attempt: the
 build waits and wakes the session again. An orientation's proposal that runs out of attempts gets up to VIEW_REPAIRS new
-sessions, and is then dropped quietly; a view the analyst asked for fails with Retry.
+sessions, and is then dropped quietly; a view the analyst asked for fails with Retry. The orientation's Stop stops the
+builds of the views it proposed (stop_orientation_views).
 
 Permissions. A session of a workspace asks the analyst like the other agents: its --settings carry agent_session's
 permission hook with the session's key (`view:<slug>`, `ticket:<id>`), and the run hosts that key on its chat
@@ -2096,6 +2097,37 @@ async def stop_views(c: str) -> None:
         await asyncio.gather(*tasks, return_exceptions=True)
 
 
+# why the builds of the views an orientation proposed stopped (stop_orientation_views)
+ORIENTATION_STOPPED = "the orientation was stopped"
+
+
+def stop_orientation_views(c: str) -> list[str]:
+    """The analyst stopped the orientation: the builds of the views it proposed stop, queued or running, and so do the
+    reviews of its views, so none of its builds starts after the Stop. A new view is dropped, and a change to a built
+    view leaves the view as it was. Views and changes the analyst asked for go on. The slugs stopped."""
+    from . import view_review, views  # noqa: PLC0415
+
+    stopped: list[str] = []
+    for p in views.list_proposals(c):
+        if not p.get("orientation") or p.get("asked"):
+            continue
+        slug = str(p["slug"])
+        reviewed = view_review.stop(c, slug)
+        if p.get("status") not in views.PENDING:
+            if reviewed:
+                stopped.append(slug)
+            continue
+        if p.get("revision"):
+            # a running build puts the view back itself once its session has stopped (run_view)
+            if not stop_view(c, slug, ORIENTATION_STOPPED):
+                views.end_revision(c, slug)
+        else:
+            stop_view(c, slug, ORIENTATION_STOPPED)
+            views.drop(c, slug, ORIENTATION_STOPPED)
+        stopped.append(slug)
+    return stopped
+
+
 def recover_views(c: str) -> None:
     """Queue again the workspace's view tickets that are queued or building with no build, queue entry or winding-down
     run in this process (after a restart or an archive restore). A building one's session is stopped first so its run
@@ -2454,7 +2486,7 @@ async def _run_view(c: str, slug: str, run: Run) -> None:
         why = run.status if run.status not in ("running",) else "server shut down during the run"
         if chat:
             _close_chat({"workspace": c, "chat": chat}, "stopped", why)
-        if revision and run.status == "dismissed":
+        if revision and run.status in ("dismissed", ORIENTATION_STOPPED):
             views.end_revision(c, slug)  # its session has stopped, so nothing writes into the folder any more
         raise
     if built:

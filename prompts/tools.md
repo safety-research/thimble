@@ -991,6 +991,10 @@ The orientation failed: {made}. Its error: {error}
 
 {views} building
 
+## orient-views-stopped
+
+{views} stopped
+
 ## orient-views-suggested
 
 {views} suggested for file types
