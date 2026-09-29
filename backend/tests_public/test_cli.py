@@ -251,3 +251,31 @@ def test_up_refuses_home_and_root_and_starts_nothing(home, data, monkeypatch, ca
         assert line == [cli.REFUSED_LINE.format(path=folder)] and "http://" not in line[0], folder
     assert started == [] and not cli.server_json().exists()
     assert cli.refused(data / "mini") is False and cli.refused(tmp_path) is False
+
+
+def test_up_in_the_bash_sandbox_prints_what_the_hook_did_outside_it(home, data, monkeypatch, capsys, tmp_path):
+    """/thimble's UserPromptExpansion hook runs `up` outside Claude Code's Bash sandbox and prints nothing; the skill's
+    `up` in the sandbox prints what the hook's did and starts nothing. With no result left for it, it names the
+    exclusion instead, and a result for other arguments is not taken."""
+    _healthy_no_process(monkeypatch)
+    monkeypatch.setattr(cli, "_request", lambda m, u, b=None, timeout=5.0:
+                        (201, {"name": Path(b["path"]).name}) if m == "POST" else (404, {}))
+    folder = tmp_path / "calls"
+    folder.mkdir()
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(folder))
+    hook = {"session_id": "s7", "cwd": str(folder), "command_name": "thimble:thimble", "command_args": ""}
+    assert cli.hook_up(json.dumps(hook)) == 0 and capsys.readouterr().out == ""
+    started = []
+    monkeypatch.setattr(cli, "ensure_running", lambda wait: started.append(1) or True)
+    monkeypatch.setenv(cli.SANDBOX_ENV, "1")
+    skill = ["server", "up", "--cwd", str(folder), "--session", "s7", "--action", "", "--archive", ""]
+    assert cli.main(skill) == 0 and capsys.readouterr().out.splitlines() == [cli.LINK_LINE]
+    assert cli.main(skill) == 0
+    out = capsys.readouterr().out
+    assert out.startswith("thimble: WARNING") and f'"{cli.sandbox_rule()}"' in out and started == []
+    monkeypatch.delenv(cli.SANDBOX_ENV)
+    assert cli.hook_up(json.dumps(hook)) == 0 and started == [1]
+    started.clear()
+    monkeypatch.setenv(cli.SANDBOX_ENV, "1")
+    assert cli.main([*skill[:-3], "fresh", "--archive", ""]) == 0
+    assert capsys.readouterr().out.startswith("thimble: WARNING") and started == []
