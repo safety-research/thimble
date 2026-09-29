@@ -1,7 +1,8 @@
 """A written document exported as a file: Markdown, HTML, PDF or video, and the formats a report type's export.py adds.
 
 Every format starts from one reading of the document (read_model): its title, lead, units (a report's sections, a
-story's sections, a deck's slides, a video's lines), their figures and the citations, numbered in order of first use.
+story's sections, a deck's slides, a video's lines), their figures and the citations, numbered in order of first use;
+a card a sentence names as a noun is written as the card's title (report_types.card_nouns).
 Markdown writes the citations as footnotes; HTML is one self-contained file (fonts, pictures and styles inlined) with
 the citations as numbered notes linked from the text; PDF is that HTML printed by the browser; video renders the film
 (film_export.py).
@@ -124,9 +125,9 @@ class Notes:
 
 
 def _sentence(x: dict[str, Any], notes: Notes) -> dict[str, Any]:
-    from .report_types import UNVERIFIED_MARK, _sentence_refs  # noqa: PLC0415
+    from .report_types import UNVERIFIED_MARK, _sentence_refs, card_nouns  # noqa: PLC0415
 
-    text = plain_text(str(x.get("text") or ""))
+    text = plain_text(card_nouns(str(x.get("text") or ""), notes.cites))
     if "unverified" in (x.get("tags") or []):
         text += f" {UNVERIFIED_MARK}"
     return {"text": text, "notes": notes.of(_sentence_refs(x)), "bullet": bool(x.get("bullet"))}
@@ -146,8 +147,10 @@ def _figure(f: Any, notes: Notes) -> dict[str, Any] | None:
         cid = raw if re.fullmatch(r"[0-9a-f]{8}", raw) else None
     if not cid:
         return None
+    from .report_types import card_nouns  # noqa: PLC0415
+
     raw_caption = str(f.get("caption") or "")
-    return {"card": cid, "caption": plain_text(raw_caption), "role": f.get("role"),
+    return {"card": cid, "caption": plain_text(card_nouns(raw_caption, notes.cites)), "role": f.get("role"),
             "after": f.get("after_paragraph"), "notes": notes.of([f"card:{cid}", *refs.extract_refs(raw_caption)])}
 
 

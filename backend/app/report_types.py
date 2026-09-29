@@ -2864,8 +2864,34 @@ def _sentence_refs(x: dict[str, Any]) -> list[str]:
     return out
 
 
+_BARE_REF_RE = re.compile(r"\[\[([^\[\]|]+)\]\]")
+# a bare card ref right after one of these words is read as a noun, as in "the sequence is laid out in [[card:<id>]]"
+_NOUN_AFTER = frozenset("in on at by of from into with within under see as and or the a an this that these those its "
+                        "their our like via per".split())
+
+
+def card_nouns(text: str, cites: _Citations) -> str:
+    """A sentence's bare card refs that it reads as nouns, as each card's title in quotes: one a word follows, or one
+    right after a word such as "in" or "the" (_NOUN_AFTER). plain_text drops the others, which cite."""
+    def name(m: "re.Match[str]") -> str:
+        before = re.search(r"([A-Za-z]+)\s*$", text[: m.start()])
+        noun = bool(re.match(r"\s+[^\W_]", text[m.end():])) or bool(before and before.group(1).lower() in _NOUN_AFTER)
+        ref = m.group(1).strip()
+        try:
+            p = refs.parse_ref(ref)
+        except ValueError:
+            return m.group(0)
+        if not noun or p.get("kind") != "cell" or not cites.cite(ref):
+            return m.group(0)
+        cid = str(p["cell_id"])
+        meta = (cites._resolve(f"card:{cid}") or {}).get("meta") or {}
+        return f"“{' '.join(str(meta.get('title') or '').split()) or cites.titles[cid]}”"
+
+    return _BARE_REF_RE.sub(name, text)
+
+
 def _sentence_md(x: dict[str, Any], cites: _Citations) -> tuple[str, str]:
-    prose = plain_text(str(x.get("text") or ""))
+    prose = plain_text(card_nouns(str(x.get("text") or ""), cites))
     text = prose + (f" {UNVERIFIED_MARK}" if "unverified" in (x.get("tags") or []) else "")
     labels: list[str] = []
     for r in _sentence_refs(x):
@@ -2928,7 +2954,7 @@ def render_markdown(c: str, doc: dict[str, Any], *, appendix: bool = False) -> d
                 tldr_words += _words(" ".join(pl for _, pl in rendered))
         for f in u["figures"]:
             raw_caption = str(f.get("caption") or "")
-            caption = plain_text(raw_caption)
+            caption = plain_text(card_nouns(raw_caption, cites))
             labels: list[str] = []
             for r in [str(f.get("cell") or "")] + refs.extract_refs(raw_caption):
                 lab = cites.cite(r) if r else None

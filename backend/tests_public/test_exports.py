@@ -50,6 +50,15 @@ async def test_markdown_numbers_each_citation_once_as_a_footnote(report):
     assert "[^2]: board.jsonl#L1" in md and "forge pr claim" in md.split("[^2]:")[1]
 
 
+async def test_a_card_a_sentence_reads_as_a_noun_is_exported_as_its_title(report):
+    text = (f"# Deletions\n\n## Where\n\nThe count is laid out in [[card:{report}]]. "
+            f"Every deletion came from one account [[card:{report}]].\n")
+    r = await tools.call(CORPUS, "write_document", {"doc": "report", "text": text}, actor="analyst")
+    assert not r.is_error, r.text
+    md = exports.to_markdown(_model())
+    assert "The count is laid out in “How many deletions?”.[^1] Every deletion came from one account.[^1]" in md
+
+
 async def test_html_is_one_file_that_loads_nothing_and_links_each_citation(report):
     await _write(report)
     page = exports.to_html(_model(), {report: {"title": "How many deletions?", "text": "27"}}, faces="")
