@@ -37,7 +37,6 @@ UNTRUSTED = ("the orientation, its critic and the writers can't start until it i
 OLD_RECORDS = {"effort-overrides.json": "CLAUDE_CODE_EFFORT_LEVEL", "fast-overrides.json": "CLAUDE_CODE_DISABLE_FAST_MODE",
                "statusline-overrides.json": None}
 OLD_TRUST = "trusted-folders.json"  # an older version's per-folder trust entries: {folder: {config, ...}}
-OLD_FILES = ("terminal-first-consent.json",)
 LOCAL_SETTINGS = Path(".claude") / "settings.local.json"
 
 
@@ -231,8 +230,6 @@ def cleanup() -> list[str]:
             _write(home() / name, left)
         else:
             (home() / name).unlink(missing_ok=True)
-    for name in OLD_FILES:
-        (home() / name).unlink(missing_ok=True)
     return done
 
 

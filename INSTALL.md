@@ -96,6 +96,9 @@ that one and prints each path it deleted. The folder it read and your Claude Cod
 - `thimble doctor` shows the server, the versions, the auth path and the log's recent errors.
 - thimble's agents don't start because Claude Code's sandbox can't run: `thimble doctor` says what is missing, and on
   Linux `install.sh --sandbox-deps` installs it.
+- thimble warns that Claude Code does not trust its workspaces folder: the orientation, its critic and the writers
+  can't start until it does, while your own session keeps working. Run the command the warning gives,
+  `bash <install dir>/scripts/install.sh --trust-workspaces`.
 - Cards are not checked, views are checked without loading their page, or screenshots are unavailable: there is no
   browser (the install's answer, or no Chrome or Edge found), or the machine lacks the headless Chromium's system
   libraries. thimble never downloads a browser by itself. `install.sh --browser system` or `--browser bundled` sets one
