@@ -10,7 +10,7 @@ For feedback, bug reports, or anything else, please reach out to [@mjoerke](http
 
 ## Demo
 
-https://github.com/user-attachments/assets/a81a1c1b-c526-4b57-a723-62eea3ad7ad3
+https://github.com/user-attachments/assets/3c21e405-6b8d-4ba6-85a8-24211800596c
 
 ## Installation
 
