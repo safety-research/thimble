@@ -34,9 +34,11 @@ def listing(data):
     span = f"cards {data['offset'] + 1}–{data['offset'] + shown} shown" if shown else "no card shown"
     out = [f"swarm: {_n(data['total'], 'record')} by {_n(data['accounts_total'], 'account')} on "
            f"{_n(data['places_total'], 'place')}; {span}"]
+    only = {(x["label"], x["value"]) for x in data.get("only") or ()}
     by_label = {}
     for m, n in zip(data["marks"], data["mark_counts"]):
-        by_label.setdefault(m["label"], []).append(f"{m['value']} {n:,}")
+        if not only or (m["label"], m["value"]) in only:
+            by_label.setdefault(m["label"], []).append(f"{m['value']} {n:,}")
     for label, parts in by_label.items():
         out.append(f"{label}: {', '.join(parts)}")
     if data["marks"] and data.get("unmarked"):

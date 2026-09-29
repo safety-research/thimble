@@ -428,8 +428,11 @@ function renderBar(v) {
   const shownRows = new Set(v.cards.map((c) => rowOfCard.get(c.id)))
   const shownPlaces = new Set(v.cards.map((c) => c.tag))
   const count = (n, total, one, many) => (n === total ? plural(n, one, many) : `${fmt(n)} of ${plural(total, one, many)}`)
-  const counts = [count(shownRows.size, rowsList.length, group === 'sig' ? 'row' : 'account'), count(v.cards.length, D.cards.length, 'card'),
-    count(v.links.length, D.links.length, 'link'), `${fmt(D.counts.records)} records`].join(' · ')
+  // a card counts what its code chose, as its listing does; the view counts what it shows of the corpus
+  const counts = (CARD
+    ? [plural(D.total, 'record'), plural(D.accounts_total, 'account'), plural(D.places_total, 'place'), `${count(v.cards.length, D.cards.length, 'card')} shown`, count(v.links.length, D.links.length, 'link')]
+    : [count(shownRows.size, rowsList.length, group === 'sig' ? 'row' : 'account'), count(v.cards.length, D.cards.length, 'card'),
+      count(v.links.length, D.links.length, 'link'), `${fmt(D.counts.records)} records`]).join(' · ')
   const tr = document.getElementById('threads')
   tr.innerHTML = ''
   const cs = h('span', null, counts)
@@ -517,6 +520,13 @@ function renderLegend() {
     }
     el.append(it)
   })
+  if (CARD && D.unmarked) {
+    const it = h('span', 'lg')
+    const sw = h('i', 'sw')
+    sw.style.background = token('--label-none')
+    it.append(sw, h('span', null, 'no highlighted value'), h('span', 'n', fmt(D.unmarked)))
+    el.append(it)
+  }
 }
 function swatch(colour, label, value) {
   const sw = h('i', 'sw')
@@ -1253,7 +1263,7 @@ if (CARD) {
     mode = init.mode
     D = init.data
     group = D.rows_by === 'sig' ? 'sig' : 'account'
-    only = []
+    only = (D.only || []).slice()
     sel = null
     index()
     refresh()

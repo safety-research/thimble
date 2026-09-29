@@ -726,15 +726,14 @@ def _chart(index, query):
         picked = [(ref, []) for ref in index["order"]
                   if (r := index["recs"][ref])["place"] in wanted and (r["to"] or ref in keep) and kept(ref)]
     unmarked = 0
+    only = {(x.get("label"), x.get("value")) for x in query.get("only") or () if isinstance(x, dict)}
     if marks:
         for _ref, got in picked:
-            hit = {mark_at[k] for x in got if (k := (x["label"], x["value"])) in mark_at}
-            unmarked += not hit
-            for i in hit:
+            for i in {mark_at[k] for x in got if (k := (x["label"], x["value"])) in mark_at}:
                 per_mark[i] += 1
-        only = {(x.get("label"), x.get("value")) for x in query.get("only") or () if isinstance(x, dict)}
         if only:
             picked = [(ref, got) for ref, got in picked if ref in keep or any((x["label"], x["value"]) in only for x in got)]
+        unmarked = sum(1 for _ref, got in picked if not any((x["label"], x["value"]) in mark_at for x in got))
         picked = _by_turns(picked, mark_at)
     tag_of = {}  # numbered over every page, so a place keeps its tag from page to page
     for ref, _got in picked:
@@ -767,7 +766,8 @@ def _chart(index, query):
     title = ("; ".join(lab["name"] for lab in on["labels"]) if marks and source != "addressed"
              else "Chosen records" if source == "chosen" else "Where accounts most answer or name each other")
     return {"title": title, "source": source, "cards": cards, "rows": rows, "places": places_shown, "links": links,
-            "marks": marks, "mark_counts": per_mark, "unmarked": unmarked, "offset": offset, "total": len(picked),
+            "marks": marks, "mark_counts": per_mark, "unmarked": unmarked, "only": [{"label": a, "value": b} for a, b in only],
+            "offset": offset, "total": len(picked),
             "page": CARDS_MAX, "accounts_total": len({index["recs"][ref]["account"] for ref, _ in picked}),
             "places_total": len(tag_of),
             "counts": {"records": len(index["order"]), "accounts": len(index["accounts"]), "places": len(index["places"])}}
