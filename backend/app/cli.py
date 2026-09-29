@@ -1870,21 +1870,31 @@ def pages_line(commands: bool = True) -> str:
 
 
 def sandbox_lines(commands: bool = True) -> list[str]:
-    """The doctor's `bash sandbox` line: whether Claude Code's Bash sandbox can run for the orientation (cc_settings.sandbox_ok)
-    and, when not, what it lacks and with `commands` the root commands that install it. Where it runs, the line names
-    the empty `.claude/.cc-writes/` folder Claude Code creates in the folder a sandboxed command runs in."""
-    from . import cc_settings  # noqa: PLC0415
+    """The doctor's `bash sandbox` line: whether Claude Code's Bash sandbox can run (cc_settings.sandbox_ok), which the
+    agents' Bash then uses unless thimble's config says `sandbox.use` "never", and, when it cannot run, what it lacks and
+    with `commands` the root commands that install it. Where it runs, the line names the empty `.claude/.cc-writes/`
+    folder Claude Code creates in the folder a sandboxed command runs in."""
+    from . import cc_settings, userconf  # noqa: PLC0415
 
     try:
         missing = cc_settings.sandbox_missing()
         cmds, what = cc_settings.sandbox_setup() if missing else ([], "")
     except Exception as e:  # noqa: BLE001 — the doctor reports; it never fails on one of its lines
         return [f"  bash sandbox: not checked ({type(e).__name__})"]
+    try:
+        box = userconf.load_or_defaults()[0]["sandbox"]
+    except Exception:  # noqa: BLE001
+        box = userconf.DEFAULTS["sandbox"]
+    if box.get("use") == "never":
+        return ["  bash sandbox: off in thimble's config (sandbox.use \"never\"), so the agents' Bash runs with your "
+                "user's access, limited only by each agent's permission mode"]
     if not missing:
-        return ["  bash sandbox: runs (the orientation's and the view builds' Bash is sandboxed, with no network and no "
-                "change to the corpus's files; Claude Code's sandbox adds an empty .claude/.cc-writes/ folder where its "
-                "commands run, the corpus folder among them)"]
-    head = "  bash sandbox: off, missing " + ", ".join(missing) + "; the orientation's Bash asks under your permission mode"
+        return ["  bash sandbox: runs (every agent's Bash runs in it, except a code ticket's: no writes outside the "
+                "agent's folder and no network unless the agent's network is \"on\"; Claude Code's sandbox adds an empty "
+                ".claude/.cc-writes/ folder where its commands run, the corpus folder among them)"]
+    after = ("thimble's config (sandbox.enforce) refuses to start the agents" if box.get("enforce") else
+             "the agents' Bash runs outside it, under each agent's permission mode")
+    head = "  bash sandbox: off, missing " + ", ".join(missing) + "; " + after
     if not cmds or not commands:
         return [head + (f"; {what}" if what else "")]
     return [f"{head}. To turn it on, run these, which {what}, then `thimble restart`:", *(f"    {c}" for c in cmds)]

@@ -300,3 +300,21 @@ def test_up_in_the_bash_sandbox_prints_what_the_hook_did_outside_it(home, data, 
     monkeypatch.setenv(cli.SANDBOX_ENV, "1")
     assert cli.main([*skill[:-3], "fresh", "--archive", ""]) == 0
     assert capsys.readouterr().out.startswith("thimble: WARNING") and started == []
+
+
+def test_the_doctor_s_sandbox_line_follows_the_config(monkeypatch):
+    """Every agent's Bash uses the sandbox where it runs; sandbox.use "never" turns it off, and sandbox.enforce
+    refuses to start the agents where it cannot run."""
+    from app import cc_settings, userconf
+
+    conf = {"sandbox": {"use": "when-available", "enforce": False}}
+    monkeypatch.setattr(userconf, "load_or_defaults", lambda c=None: (conf, ""))
+    monkeypatch.setattr(cc_settings, "sandbox_missing", lambda: [])
+    assert "every agent's Bash runs in it" in cli.sandbox_lines()[0]
+    conf["sandbox"]["use"] = "never"
+    assert "off in thimble's config" in cli.sandbox_lines()[0]
+    conf["sandbox"] = {"use": "when-available", "enforce": True}
+    monkeypatch.setattr(cc_settings, "sandbox_missing", lambda: ["bubblewrap"])
+    monkeypatch.setattr(cc_settings, "sandbox_setup", lambda: ([], ""))
+    assert cli.sandbox_lines() == ["  bash sandbox: off, missing bubblewrap; thimble's config (sandbox.enforce) refuses "
+                                   "to start the agents"]

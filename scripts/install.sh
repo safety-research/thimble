@@ -483,12 +483,12 @@ browser_step() {  # the answer to the browser question (ask): the system Chrome 
   if [ -n "$browser" ] && [ "$browser" != "$browser_was" ]; then record_browser "$browser"; fi
 }
 
-check_sandbox() {  # Claude Code's Bash sandbox, which keeps the orientation's Bash off the network and from changing the
-  # corpus: on Linux bubblewrap and socat, and on Ubuntu 23.10 or later an AppArmor profile that lets bwrap create user
+check_sandbox() {  # Claude Code's Bash sandbox, which the agents' Bash runs in where it can (the config's sandbox.use):
+  # on Linux bubblewrap and socat, and on Ubuntu 23.10 or later an AppArmor profile that lets bwrap create user
   # namespaces. Installing them needs root, so this prints the commands (the backend's cc_settings.sandbox_setup, the
-  # same lines `thimble doctor` prints) and runs none; without them the orientation's Bash asks under the analyst's
-  # permission mode.
-  step "6/12 the orientation's Bash sandbox"
+  # same lines `thimble doctor` prints) and runs none; without them the agents' Bash runs outside it under their
+  # permission modes.
+  step "6/12 the agents' Bash sandbox"
   local venv="$dir/backend/.venv"
   if [ "$dry" = 1 ]; then say "(checked by the backend's sandbox_lines once backend/.venv exists; prints root commands, runs none)"; return 0; fi
   ( cd "$dir/backend" && "$venv/bin/python" -c 'from app import cli; print("\n".join(l[2:] for l in cli.sandbox_lines()))' ) \
@@ -655,11 +655,23 @@ show_plan() {  # what the install puts where, before its questions
   fi
   say "  thimble's settings and state: $home"
   [ "$deps_only" = 1 ] || say "  the \`thimble\` command: a link at ~/.local/bin/thimble"
+  local chosen="${browser:-$browser_was}" asked=()
+  case "$chosen" in
+    system) [ -z "$sys_path" ] || say "  a browser for screenshots: $sys_name at $sys_path, nothing downloaded";;
+    bundled) say "  a browser for screenshots: Playwright's headless Chromium, downloaded into $(pw_cache) ($BUNDLED_SIZE)";;
+    off) ;;
+    *) asked+=("a browser for screenshots: $( [ -n "$sys_path" ] && echo "$sys_name at $sys_path, nothing downloaded; or " )Playwright's headless Chromium, downloaded into $(pw_cache) ($BUNDLED_SIZE)");;
+  esac
+  if [ "$deps_only" = 0 ]; then
+    if [ "${plugin:-$plugin_prev}" = yes ]; then say "  thimble's plugin in every Claude Code session: $(cc_path settings.json) and $(cc_path plugins)"
+    elif [ -z "$plugin$plugin_prev" ] && [ "$have_claude" = 1 ]; then asked+=("thimble's plugin in every Claude Code session: $(cc_path settings.json) and $(cc_path plugins)"); fi
+    if [ "$trust" = --yes ]; then say "  Claude Code's trust of thimble's workspaces folder: $cc_json"
+    elif [ -z "$trust" ] && [ -n "$trust_q" ]; then asked+=("Claude Code's trust of thimble's workspaces folder: $cc_json"); fi
+  fi
+  [ "${#asked[@]}" -gt 0 ] || return 0
   say "  and only on a yes to its question:"
-  say "  - a browser for screenshots: $( [ -n "$sys_path" ] && echo "$sys_name at $sys_path, nothing downloaded; or " )Playwright's headless Chromium, downloaded into $(pw_cache) ($BUNDLED_SIZE)"
-  [ "$deps_only" = 1 ] && return 0
-  say "  - thimble's plugin in every Claude Code session: $(cc_path settings.json) and $(cc_path plugins)"
-  say "  - Claude Code's trust of thimble's workspaces folder: $cc_json"
+  local a
+  for a in "${asked[@]}"; do say "  - $a"; done
 }
 
 browser_text() {  # the browser question's explanation
@@ -670,9 +682,8 @@ plugin_text() {  # the plugin question
   say "Add thimble to $(cc_path settings.json) and $(cc_path plugins), so it is available in every claude session from startup? The \`thimble\` command works either way, and \`thimble uninstall\` removes it."
 }
 
-ask() {  # the three questions, before anything is installed: the browser, the plugin, the trust. Each is asked on a
-  # terminal when neither its flag nor an earlier answer settles it; --dry-run prints them with their flags instead
-  local tty=0 dl="Playwright's headless Chromium, downloaded into $(pw_cache) ($BUNDLED_SIZE; not again when it is there already)"
+earlier_answers() {  # what settles each question before it is asked: the browser and plugin answers of an earlier
+  # install, and the trust question when one is due
   browser_was="$(browser_prev)"
   [ "$deps_only" = 1 ] || plugin_record
   trust_q=""  # the trust question when claude_changes.install_trust would ask it (python3 runs the file before
@@ -680,6 +691,12 @@ ask() {  # the three questions, before anything is installed: the browser, the p
   if [ "$deps_only" = 0 ] && [ -z "$trust" ] && command -v python3 >/dev/null 2>&1; then
     trust_q="$(THIMBLE_HOME="$home" python3 -I "$src/backend/app/claude_changes.py" question "$dir" 2>/dev/null)" || trust_q=""
   fi
+}
+
+ask() {  # the three questions, before anything is installed: the browser, the plugin, the trust. Each is asked on a
+  # terminal when neither its flag nor an earlier answer settles it (earlier_answers); --dry-run prints them with their
+  # flags instead
+  local tty=0 dl="Playwright's headless Chromium, downloaded into $(pw_cache) ($BUNDLED_SIZE; not again when it is there already)"
   if [ "$dry" = 1 ]; then
     step "the questions install.sh asks on a terminal, and the flag that gives each answer"
     if [ -n "$browser" ]; then say "1. the browser: answered by --browser $browser"
@@ -844,6 +861,7 @@ main() {
   marketplace_name
   check_prerequisites
   system_browser
+  earlier_answers
   show_plan
   ask
   copy_tree

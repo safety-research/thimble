@@ -384,6 +384,7 @@ esac
     cfg.write_text(json.dumps({"projects": {}}))
     r = run()
     assert r.returncode == 0 and "[y/N]" not in r.stdout and "not asked, with no terminal" in r.stdout, r.stdout + r.stderr
+    assert "and only on a yes to its question:" in r.stdout
     assert not log.exists() and not conf.exists() and json.loads(cfg.read_text()) == {"projects": {}}
     system = any(Path(p).exists() for p in SYSTEM_BROWSERS)
     r = run(typed=("n\n" if system else "") + "y\nn\ny\n")  # no system browser, download, no plugin, trust
@@ -398,6 +399,8 @@ esac
                                                        {"hasTrustDialogAccepted": True}}
     r = run(typed="")
     assert r.returncode == 0 and "[y/N]" not in r.stdout and "[Y/n]" not in r.stdout, r.stdout + r.stderr
+    assert "only on a yes" not in r.stdout, "the plan of a re-run lists no question it will not ask"
+    assert "a browser for screenshots: Playwright's headless Chromium, downloaded" in r.stdout
     assert "not fetched again" in r.stdout and len(log.read_text().splitlines()) == 1
     r = run("--browser", "off", "--no-trust-workspaces")
     assert r.returncode == 0 and json.loads(conf.read_text()) == {"browser": "off"}, r.stdout + r.stderr
