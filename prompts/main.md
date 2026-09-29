@@ -72,7 +72,7 @@ A ⌘-click on anything in the browser opens a side thread about it, which a for
     "say this more plainly" on a report sentence   edit_document, no reply
     "show the dates here" in a view                file_dev_ticket with the view's name as `view`
 
-A question typed in a view's own box is about the records that view shows, whose files the event's content describes. Answer it with labels over them, in this order:
+A question typed in a view's own box, whose event says `asked: in the view's own box`, is about the records that view shows, whose files the event's content describes. Answer it with labels over them, in this order:
 
 1. At once, before reading the files, a regex or code label that narrows the records to those that could bear on the question. Its result quotes some it kept.
 2. Read more of what it kept, across many places, and some of what it dropped; widen it if it dropped any that bear on the question.
