@@ -57,7 +57,8 @@ STOP_TEXT = {
 STOP_KINDS = (SESSION_ENDED, UNANSWERED, FORK_LOST, "failed", "stopped")
 _DATA_URL_RE = re.compile(r"^data:image/png;base64,(.+)$", re.S)
 _CHAT_REF_RE = re.compile(r"^chat:([A-Za-z0-9_-]{1,64})#(\d+)$")
-_VIEW_REF_RE = re.compile(r"^view:[a-z0-9][a-z0-9-]{0,39}$")  # a view's own ref, the element its question box sends
+_VIEW_REF_RE = re.compile(r"^view:[a-z0-9][a-z0-9-]{0,39}$")  # a view's own ref
+BOX_SELECTOR = "question box"  # the selector a view's own question box sends (ViewerFrame's ask); the pointer never does
 # (workspace, thread) -> the session a forkless event of the thread went to, until its fork is known (module note)
 _awaiting: dict[tuple[str, str], str | None] = {}
 
@@ -200,23 +201,26 @@ def _chat_record(c: str, chat_id: str, index: int) -> str:
 
 
 def _box(meta: dict) -> str | None:
-    """The view whose own question box asked the thread's question (the box sends the view's ref as its element), else
-    None."""
+    """The view whose own question box asked the thread's question about the view itself, else None. The box sends
+    BOX_SELECTOR, and the view's ref as both anchor and element; a ⌘-click inside a view's frame sends that element too,
+    with no selector."""
     element = str(meta.get("anchor_element") or "")
-    return element if _VIEW_REF_RE.match(element) else None
+    if meta.get("anchor_selector") != BOX_SELECTOR or meta.get("anchor") != element or not _VIEW_REF_RE.match(element):
+        return None
+    return element
 
 
-async def warm(c: str, anchor: str | None, element: str | None = None) -> None:
+async def warm(c: str, meta: dict) -> None:
     """Resolve the anchor's view refs once in a worker thread, so the thread's first event, built on the server's loop,
     finds them in the views memo (views.resolve_sync cannot run a reader on that loop), and for a question from a view's
     own box, the view's records described (views.records_text). Waits WARM_S at most."""
     from . import refs  # noqa: PLC0415
 
-    wanted = [a for a in _anchors({"anchor": anchor}) if a.startswith("view:") or _file_ref(a) and "#" in a]
+    wanted = [a for a in _anchors(meta) if a.startswith("view:") or _file_ref(a) and "#" in a]
     if not wanted:
         return
     corpus = config.corpus_dir(c)
-    box = _box({"anchor_element": element})
+    box = _box(meta)
 
     async def one(ref: str) -> None:
         from . import views  # noqa: PLC0415
@@ -231,7 +235,7 @@ async def warm(c: str, anchor: str | None, element: str | None = None) -> None:
     try:
         await asyncio.wait_for(asyncio.gather(*(one(r) for r in wanted[:WARM_MAX])), WARM_S)
     except asyncio.TimeoutError:
-        log.info("%s: the anchor %s did not resolve within %.0f s", c, anchor, WARM_S)
+        log.info("%s: the anchor %s did not resolve within %.0f s", c, meta.get("anchor"), WARM_S)
 
 
 def content(c: str, meta: dict) -> str:

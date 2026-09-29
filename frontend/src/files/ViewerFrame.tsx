@@ -5,7 +5,8 @@
 //   fetch     answered with reader.records(index, query)
 //   cite      a ⌘-click inside the frame opens the pointer's box on that element
 //   ask       a question typed in the view's own box, sent as the pointer's box sends one: a thread about the view
-//             (or the ref the page names), with what the page says it shows, hung under main; answered with `asked`
+//             (or the ref the page names), with what the page says it shows, hung under main, its selector
+//             `question box` (threads._box); answered with `asked`
 //   navigate  another place, opened the way a chip opens it (lib/teleport)
 //   size      the document's height, used when the frame sizes to its content (`fit`)
 //   anchors   the data-anchor refs the page shows, answered with `labels`: the marks of its records (labels.ts
@@ -400,7 +401,7 @@ export function ViewerFrame({ ws, slug, targetRef, path, title, fit, labels = NO
           // named by the question's first words, as a ⌘-click's thread is by the text it points at
           const title = (question.match(/[A-Za-z0-9]+/g) ?? []).slice(0, 4).join('-').toLowerCase() || null
           try {
-            const meta = await api.createThread(ws, { anchor, anchor_text: String(d.text ?? '') || null, title, surface: 'files', element: `view:${slug}`, selector: '', image: null, parent: 'main', text: question })
+            const meta = await api.createThread(ws, { anchor, anchor_text: String(d.text ?? '') || null, title, surface: 'files', element: `view:${slug}`, selector: 'question box', image: null, parent: 'main', text: question })
             post({ type: P + 'asked', thread: meta.name || meta.title || meta.id })
             bus.emit('openChat', { chatId: meta.id })
           } catch (err) {

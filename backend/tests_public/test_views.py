@@ -8,6 +8,7 @@ accepts `board.jsonl#L<n>` (the post) and declares `view:threads/<thread>` (a wh
 in this process (the `inproc` fixture replaces views._runner with an exec of the same snippet the kernel gets)."""
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import fnmatch
 import io
@@ -195,6 +196,32 @@ def test_the_frame_document_blocks_every_host_before_any_script(ws):
         assert with_libs.count("<script>") == 6, "the view's name, the bridge, vega, vega-lite, vega-embed and the view's own"
     assert views._script_text("a</script>b") == "a<\\/script>b"
     assert views._libs(["vega-embed"]) == ["vega", "vega-lite", "vega-embed"]
+
+
+async def test_only_a_question_from_the_view_s_own_box_is_marked_asked_there(ws, inproc, bound):
+    """A ⌘-click inside a view's frame names the view as its element too, so only the box's selector marks its question,
+    and only that question gets the view's records described."""
+    import httpx  # noqa: PLC0415
+
+    from app import channel  # noqa: PLC0415
+    from app.main import app  # noqa: PLC0415
+
+    q: asyncio.Queue = asyncio.Queue()
+    channel._subs.setdefault(CORPUS, set()).add(q)
+    click = {"surface": "files", "element": "view:threads", "selector": "", "image": None, "parent": None}
+    cases = [({**click, "anchor": "view:threads", "anchor_text": "Legend"}, False),  # a part of the view with no anchor
+             ({**click, "anchor": "board.jsonl#L3", "anchor_text": "Confirmed"}, False),  # a record the view shows
+             ({**click, "anchor": "view:threads", "selector": "question box", "parent": "main"}, True)]
+    try:
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://127.0.0.1") as client:
+            for body, from_box in cases:
+                r = await client.post(f"/api/ws/{CORPUS}/chats", json={**body, "text": "which posts confirm the release?"})
+                assert r.status_code == 201
+                content = q.get_nowait()["content"]
+                assert ("asked: in the view's own box" in content) is from_box, body
+                assert ("The records the view reads" in content) is from_box, body
+    finally:
+        channel._subs.pop(CORPUS, None)
 
 
 # ------------------------------------------------------------------------------------------------- worked examples
