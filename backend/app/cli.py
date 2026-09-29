@@ -90,6 +90,7 @@ FEEDBACK = "feedback"  # /thimble feedback: the problem report (feedback.py)
 REPORT_LINE = ("thimble: to report it, say `/thimble feedback` or run `thimble feedback \"the server did not start\"` in a "
                "shell; either writes a zip with the logs to send the developer.")
 UNINSTALL_SHELL_LINE = "thimble: uninstall is a shell command, not a /thimble action. Run `thimble uninstall` in a terminal; it says what it will remove and asks first."
+TRUST_SHELL_LINE = "thimble: trust is a shell command, not a /thimble action. Run `thimble trust` in a terminal; it asks first."
 # What the analyst sees on the hook and Monitor routes. Each note says why channels are off, what differs on the route
 # used instead, then the fix, in terms of what the analyst sees. On the Monitor route permission prompts stay in the
 # terminal, and after /clear the Monitor is gone, so that note asks for /thimble again. A reason with no fix the analyst
@@ -1868,8 +1869,32 @@ def node_line(commands: bool = True) -> str:
     if v and v[0] < NODE_MIN_MAJOR:
         return f"{out}, too old; {need}"
     modules = FRONTEND_DIR / "node_modules"
+    fix = f"bash {config.REPO_ROOT / 'scripts' / 'install.sh'}"
     return out + ("" if modules.is_dir() else f"; {modules} is missing, so custom views cannot build"
-                  + (f" (run `npm ci` in {FRONTEND_DIR})" if commands else ""))
+                  + (f" (run `{fix}` again)" if commands else ""))
+
+
+def python_line() -> str:
+    """The server's Python: thimble's own backend/.venv, or the environment install.sh --python linked it to, and what
+    that lacks of pyproject.toml's requirements (env_check)."""
+    from . import env_check  # noqa: PLC0415
+
+    venv = BACKEND_DIR / ".venv"
+    whose = f"your environment {venv.resolve()} (install.sh --python)" if venv.is_symlink() else f"{venv}"
+    lacking = env_check.missing()
+    return f"{whose}, Python {platform.python_version()}" + (f"; lacks {', '.join(lacking)}" if lacking else "")
+
+
+def trust_line(workspaces: Path, commands: bool = True) -> str:
+    """Whether Claude Code trusts the workspaces folder, which terminal-first mode's background sessions need
+    (bg_session.trusted), and with `commands` the command that trusts it."""
+    from . import bg_session, claude_changes  # noqa: PLC0415
+
+    path = bg_session.claude_json()
+    if claude_changes.trusted(workspaces, claude_changes._read(path)):
+        return f"Claude Code trusts {workspaces} ({path})"
+    return (f"Claude Code does not trust {workspaces} ({path}), so terminal-first mode is off unless you turn it on, and "
+            "then its background sessions are refused" + ("; `thimble trust` trusts it, after asking" if commands else ""))
 
 
 def human_bytes(n: float) -> str:
@@ -2039,6 +2064,7 @@ def doctor_text(commands: bool = True) -> str:
     lines.append(f"  claude code: {_checked(claude_code_line, commands)}")
     lines.append(f"  turn endings: {_checked(_turn_endings_line)}")
     lines.append(f"  node: {_checked(node_line, commands)}")
+    lines.append(f"  python: {_checked(python_line)}")
     lines.append(f"  port: {_checked(port_line, p, up)}")
     lines.append(f"  server: {'up' if up else 'down'} at {url}; pid {pid or '-'} "
                  f"({'alive' if pid_alive(pid) else 'gone'}); started {st.get('started') or '-'}"
@@ -2064,6 +2090,7 @@ def doctor_text(commands: bool = True) -> str:
     data_src = "THIMBLE_DATA_DIR" if os.environ.get("THIMBLE_DATA_DIR") else "server.json" if recorded else "default $THIMBLE_HOME/data"
     lines.append(f"  data_dir: {env['data_dir']} ({'exists' if Path(env['data_dir']).is_dir() else 'missing'}; {data_src})")
     lines.append(f"  workspaces_dir: {env['workspaces_dir']} ({'exists' if Path(env['workspaces_dir']).is_dir() else 'missing'})")
+    lines.append(f"  trust: {_checked(trust_line, Path(env['workspaces_dir']), commands)}")
     lines.append(f"  disk: {_checked(disk_line, [home(), Path(env['workspaces_dir'])])}")
     status = config.auth_status()
     lines.append(f"  auth: {auth_line(status)}")
@@ -2206,8 +2233,8 @@ def cmd_ensure(args: argparse.Namespace) -> int:
     env = resolve_env()
     data_dir = Path(env["data_dir"])
     url = api_url()
-    if action == "uninstall":
-        print(UNINSTALL_SHELL_LINE)
+    if action in ("uninstall", "trust"):
+        print(UNINSTALL_SHELL_LINE if action == "uninstall" else TRUST_SHELL_LINE)
         return 0
     if action == FEEDBACK:  # /thimble feedback: the report needs no server (plugin/bin/thimble runs it before this)
         from . import feedback  # noqa: PLC0415

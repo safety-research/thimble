@@ -4,16 +4,24 @@
 # `thimble` on PATH (~/.local/bin/thimble → the tree's plugin/bin/thimble) · thimble's plugin in every Claude Code session, if wanted · the trust of thimble's workspaces folder, if wanted · doctor · what to do next. Re-running it (after `git pull`, or over a newer release) is safe.
 # The two questions (the plugin, then the trust) are asked on a terminal after the prerequisites, before anything is installed, so the rest runs unattended. Each is asked once:
 # its answer is kept in $THIMBLE_HOME, so a re-run or `thimble update` does not ask again, and a flag answers it without asking.
-# In a checkout it runs npm ci when package-lock.json changed since the packages were installed, and rebuilds frontend/dist when it is older than the
-# frontend's sources or the lockfile, so a pulled clone ends with the current UI; a release's prebuilt frontend/dist is kept as it is.
+# A checkout gets backend/.venv from uv.lock with uv sync, and npm ci when package-lock.json changed since the packages were installed; it rebuilds
+# frontend/dist when it is older than the frontend's sources or the lockfile, so a pulled clone ends with the current UI.
+# A release installs from the package indexes the machine is set up with: the backend's packages from backend/requirements.txt (uv.lock's versions,
+# with their hashes) by uv pip, or by pip where pip is set up with an index and uv is not; with its prebuilt frontend/dist, only the frontend packages
+# the server and its scripts load (frontend/runtime, pinned by its own lockfile). Where the index lacks a pinned version, the versions pyproject.toml or
+# frontend/runtime/package.json allow are installed instead, and a file whose hash differs from the pinned one stops the install.
 # Needs: uv (or python3 >= 3.12); node >= 20 for custom views, and to build frontend/dist when it is missing or out of date; the claude CLI to register the plugin.
 # The marketplace name is thimble-local from a release zip and thimble from a checkout (.claude-plugin/marketplace.json).
 #
-#   scripts/install.sh [--dir DIR] [--marketplace-name NAME] [--dev] [--deps-only] [--plugin | --no-plugin]
+#   scripts/install.sh [--dir DIR] [--marketplace-name NAME] [--dev] [--python PATH] [--deps-only] [--plugin | --no-plugin]
 #                      [--trust-workspaces | --no-trust-workspaces] [--dry-run]
 #   --dir DIR                where the tree lives (default: this checkout; $THIMBLE_HOME/app for a release)
 #   --marketplace-name NAME  the name Claude Code registers the tree under (default: the one in marketplace.json)
 #   --dev                    also install the backend's test extras (pytest, pytest-asyncio); a git checkout always does
+#   --python PATH            use the environment of the python at PATH, a virtual environment you prepared, in place of
+#                            creating backend/.venv: install.sh checks that it holds the packages pyproject.toml asks for,
+#                            at versions it allows, links backend/.venv to it and installs nothing into it. Later runs
+#                            and `thimble update` keep the link and check it again
 #   --deps-only              stop after the frontend step: no pointer, no plugin, no doctor
 #   --plugin                 add thimble to ~/.claude/settings.json and ~/.claude/plugins, so it is available in every
 #                            claude session from startup. --no-plugin answers no, and takes back what an earlier yes
@@ -37,12 +45,13 @@ json_get() {  # json_get FILE KEY — a top-level string value (python3 when pre
 parse_args() {
   src="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
   home="${THIMBLE_HOME:-$HOME/.thimble}"
-  dir="" mp_name="" dev=0 deps_only=0 plugin="" dry=0 trust=""
+  dir="" mp_name="" dev=0 deps_only=0 plugin="" dry=0 trust="" byo=""
   while [ $# -gt 0 ]; do
     case "$1" in
       --dir) dir="$2"; shift 2;;
       --marketplace-name) mp_name="$2"; shift 2;;
       --dev) dev=1; shift;;
+      --python) byo="$2"; shift 2;;
       --deps-only) deps_only=1; shift;;
       --plugin) plugin=yes; shift;;
       --no-plugin) plugin=no; shift;;
@@ -88,22 +97,83 @@ locate_tree() {  # checkout or release, in place or copied, and the version
   fi
 }
 
-check_prerequisites() {  # uv or python >= pyproject's requires-python; node >= 20 unless frontend/dist is built; the claude CLI
+py_ok() {  # py_ok PYTHON: it runs and is at least pyproject's requires-python
+  (cd / && "$1" -I -c "import sys; sys.exit(0 if sys.version_info >= tuple(int(x) for x in '$req_py'.split('.')) else 1)") 2>/dev/null
+}
+
+sets_key() {  # sets_key REGEX FILE…: a line of one of the existing FILEs matches REGEX
+  local re="$1" f; shift
+  for f in "$@"; do if [ -n "$f" ] && [ -f "$f" ] && grep -qiE "$re" "$f"; then return 0; fi; done
+  return 1
+}
+
+config_files() {  # config_files NAME: NAME under each folder of XDG_CONFIG_DIRS, where pip and uv look for the machine's settings
+  local rest="${XDG_CONFIG_DIRS:-/etc/xdg}:" d
+  while [ -n "$rest" ]; do d="${rest%%:*}"; rest="${rest#*:}"; [ -z "$d" ] || printf '%s\n' "$d/$1"; done
+}
+
+pip_index_set() {  # pip is set up with a package index: PIP_INDEX_URL or its kin, or the same setting in a pip config file
+  [ -z "${PIP_INDEX_URL:-}${PIP_EXTRA_INDEX_URL:-}${PIP_FIND_LINKS:-}${PIP_NO_INDEX:-}" ] || return 0
+  local files=("${PIP_CONFIG_FILE:-}" "${XDG_CONFIG_HOME:-$HOME/.config}/pip/pip.conf" "$HOME/.pip/pip.conf"
+               "$HOME/Library/Application Support/pip/pip.conf" /etc/pip.conf "/Library/Application Support/pip/pip.conf") f
+  while IFS= read -r f; do files+=("$f"); done < <(config_files pip/pip.conf)
+  sets_key '^[[:space:]]*(index[-_]url|extra[-_]index[-_]url|find[-_]links|no[-_]index)[[:space:]]*[=:]' "${files[@]}"
+}
+
+uv_index_set() {  # uv is set up with a package index: UV_DEFAULT_INDEX or its kin, or an index in a uv.toml it reads
+  [ -z "${UV_DEFAULT_INDEX:-}${UV_INDEX:-}${UV_INDEX_URL:-}${UV_EXTRA_INDEX_URL:-}${UV_FIND_LINKS:-}${UV_NO_INDEX:-}" ] || return 0
+  local files=("${UV_CONFIG_FILE:-}" "${XDG_CONFIG_HOME:-$HOME/.config}/uv/uv.toml" /etc/uv/uv.toml) f
+  while IFS= read -r f; do files+=("$f"); done < <(config_files uv/uv.toml)
+  sets_key '^[[:space:]]*((index-url|extra-index-url|find-links|no-index)[[:space:]]*=|\[\[index\]\])' "${files[@]}"
+}
+
+check_byo() {  # --python, before anything changes: the environment it belongs to (sys.prefix) runs its own bin/python, the
+  # path backend/.venv will link to, and holds what pyproject.toml asks for (backend/app/env_check.py)
+  local lacking
+  case "$byo" in /*) ;; */*) byo="$PWD/$byo";; *) byo="$(command -v "$byo" || printf '%s' "$byo")";; esac
+  py_ok "$byo" || die "--python $byo: not a python >= $req_py that runs"
+  byo_prefix="$(cd / && "$byo" -I -c 'import sys; print(sys.prefix)')"
+  [ "$(cd / && "$byo_prefix/bin/python" -I -c 'import sys; print(sys.prefix)' 2>/dev/null)" = "$byo_prefix" ] \
+    || die "--python $byo: its environment $byo_prefix has no bin/python of its own; give the python of a virtual environment (<venv>/bin/python)"
+  if [ -e "$dir/backend/.venv" ] && [ ! -L "$dir/backend/.venv" ] && [ ! "$dir/backend/.venv" -ef "$byo_prefix" ]; then
+    die "$dir/backend/.venv is the environment an earlier install made; to use $byo_prefix in its place, delete it (rm -rf $dir/backend/.venv) and run this again"
+  fi
+  if ! lacking="$(cd / && "$byo_prefix/bin/python" -I -B "$src/backend/app/env_check.py" "$src/backend/pyproject.toml" 2>&1)"; then
+    die "the environment $byo_prefix lacks what thimble's backend needs. Install these into it, then run this again:
+$lacking"
+  fi
+  say "python: $byo_prefix/bin/python, $(cd / && "$byo" -I -c 'import platform; print(platform.python_version())'), holds what backend/pyproject.toml asks for; backend/.venv will link to it"
+  if [ "$dev" = 1 ] && ! lacking="$(cd / && "$byo_prefix/bin/python" -I -B "$src/backend/app/env_check.py" "$src/backend/pyproject.toml" --extra dev 2>&1)"; then
+    say "it lacks the test extras, which only the tests need:"; say "$lacking"
+  fi
+}
+
+check_prerequisites() {  # uv or python >= pyproject's requires-python, or --python's environment; node >= 20 unless frontend/dist is built; the claude CLI
   step "1/12 prerequisites"
   req_py="$(sed -n 's/^requires-python *= *">=\([0-9][0-9.]*\)".*/\1/p' "$src/backend/pyproject.toml")"; req_py="${req_py:-3.12}"
-  have_uv=0 py=""
-  if command -v uv >/dev/null 2>&1; then
-    have_uv=1
-    say "uv $(uv --version 2>/dev/null | sed 's/^uv //') — creates backend/.venv from uv.lock and fetches Python $req_py itself if the machine has none"
+  have_uv=0 py="" pytool=pip
+  ! command -v uv >/dev/null 2>&1 || have_uv=1
+  for cand in python3 python3.14 python3.13 python3.12; do
+    if command -v "$cand" >/dev/null 2>&1 && py_ok "$cand"; then py="$(command -v "$cand")"; break; fi
+  done
+  if [ "$have_uv" = 1 ] && { uv_index_set || ! pip_index_set; }; then pytool=uv; fi
+  local uv_v="" py_v=""
+  [ "$have_uv" = 0 ] || uv_v="uv $(uv --version 2>/dev/null | sed 's/^uv //')"
+  [ -z "$py" ] || py_v="python $("$py" -I -c 'import sys; print("%d.%d.%d" % sys.version_info[:3])') at $py (>= $req_py)"
+  if [ -n "$byo" ]; then
+    check_byo
+  elif [ "$checkout" = 1 ] && [ "$have_uv" = 1 ]; then
+    say "$uv_v — creates backend/.venv from uv.lock and fetches Python $req_py itself if the machine has none"
+  elif [ "$have_uv" = 0 ] && [ -z "$py" ]; then
+    die "neither uv nor a python >= $req_py was found. Install uv (https://docs.astral.sh/uv/getting-started/installation/) or Python $req_py+"
+  elif [ "$checkout" = 1 ]; then
+    say "no uv; $py_v — venv + pip, unpinned (uv is preferred: it installs the exact versions in backend/uv.lock — https://docs.astral.sh/uv/getting-started/installation/)"
+  elif [ "$pytool" = uv ]; then
+    say "$uv_v — installs the backend's pinned packages from the package index uv is set up with, and fetches Python $req_py itself if the machine has none"
+  elif [ "$have_uv" = 1 ]; then
+    say "pip is set up with a package index and uv is not, so pip installs the backend's pinned packages from it"
   else
-    for cand in python3 python3.14 python3.13 python3.12; do
-      command -v "$cand" >/dev/null 2>&1 || continue
-      if "$cand" -I -c "import sys; sys.exit(0 if sys.version_info >= tuple(int(x) for x in '$req_py'.split('.')) else 1)" 2>/dev/null; then
-        py="$(command -v "$cand")"; break
-      fi
-    done
-    [ -n "$py" ] || die "neither uv nor a python >= $req_py was found. Install uv (https://docs.astral.sh/uv/getting-started/installation/) or Python $req_py+"
-    say "no uv; python $($py -I -c 'import sys; print("%d.%d.%d" % sys.version_info[:3])') at $py (>= $req_py) — venv + pip, unpinned (uv is preferred: it installs the exact versions in backend/uv.lock — https://docs.astral.sh/uv/getting-started/installation/)"
+    say "no uv; $py_v — venv + pip installs the backend's pinned packages from the package index pip is set up with"
   fi
   has_dist=0; [ -f "$src/frontend/dist/index.html" ] && has_dist=1
   stale=""; if [ "$has_dist" = 1 ] && [ "$checkout" = 1 ] && [ "$in_place" = 1 ]; then stale="$(dist_stale "$src/frontend")"; fi
@@ -150,12 +220,24 @@ copy_tree() {  # a release install: the release's entries replace the install's;
   if [ -d "$dir" ]; then dir="$(cd "$dir" && pwd -P)"; fi
 }
 
-make_venv() {  # uv sync from uv.lock when uv is present, else python -m venv + pip from pyproject; a symlinked venv is left alone
+make_venv() {  # --python's environment linked; a linked one kept and checked; a checkout's from uv.lock (uv sync, else
+  # venv + pip from pyproject); a release's from backend/requirements.txt (release_venv)
   step "3/12 backend/.venv (the server's Python and dependencies)"
-  local venv="$dir/backend/.venv"
+  local venv="$dir/backend/.venv" lacking
   extra=(); if [ "$dev" = 1 ]; then extra=(--extra dev); fi
-  if [ -L "$venv" ]; then
-    say "$venv is a symlink → $(readlink "$venv"); shared with another checkout, left alone"
+  if [ -n "$byo" ] && [ "$venv" -ef "$byo_prefix" ]; then
+    say "backend/.venv is $byo_prefix already; used as it is"
+  elif [ -n "$byo" ]; then
+    run ln -sfn "$byo_prefix" "$venv"
+    say "backend/.venv → $byo_prefix: your environment, used as it is; nothing is installed into it"
+  elif [ -L "$venv" ]; then
+    say "backend/.venv → $(readlink "$venv"): an environment of your own (install.sh --python), used as it is"
+    if [ "$dry" = 0 ] && ! lacking="$(cd / && "$venv/bin/python" -I -B "$src/backend/app/env_check.py" "$src/backend/pyproject.toml" 2>&1)"; then
+      say "it lacks what this version of the backend needs; the server may not start until these are installed into it:"
+      say "$lacking"
+    fi
+  elif [ "$checkout" = 0 ]; then
+    release_venv
   elif [ "$have_uv" = 1 ] && [ -f "$src/backend/uv.lock" ]; then
     run_in "$dir/backend" uv sync --frozen --no-dev --no-install-project ${extra[@]+"${extra[@]}"}
   elif [ "$have_uv" = 1 ]; then
@@ -166,6 +248,63 @@ make_venv() {  # uv sync from uv.lock when uv is present, else python -m venv + 
     say "pip from pyproject.toml (the minimum versions, not the pinned ones in uv.lock)"
     run "$venv/bin/python" -I -m pip install --quiet --upgrade pip
     if [ "$dev" = 1 ]; then run "$venv/bin/python" -I -m pip install --quiet -e "$dir/backend[dev]"; else run "$venv/bin/python" -I -m pip install --quiet -e "$dir/backend"; fi
+  fi
+}
+
+logged() {  # logged LOG CMD…: run's printing and running, with the command's output also written to LOG
+  local log="$1"; shift
+  printf '+'; printf ' %q' "$@"; printf '\n'
+  [ "$dry" = 1 ] || "$@" 2>&1 | tee "$log"
+}
+
+new_venv() {  # new_venv VENV: a release's backend/.venv, made by uv, else by the venv module, with pip in it when pip installs
+  local venv="$1" clear=()
+  [ ! -e "$venv" ] || clear=(--clear)  # a venv whose python no longer runs
+  if [ "$pytool" = pip ] && [ -n "$py" ]; then
+    run "$py" -I -m venv ${clear[@]+"${clear[@]}"} "$venv"
+  else
+    run uv venv --quiet ${clear[@]+"${clear[@]}"} --python ">=$req_py" "$venv"
+    [ "$pytool" = uv ] || run "$venv/bin/python" -I -m ensurepip --quiet
+  fi
+}
+
+py_install() {  # py_install LOG ARGS…: uv pip or pip installs ARGS into backend/.venv; LOG keeps the output
+  local log="$1" venv="$dir/backend/.venv"; shift
+  if [ "$pytool" = uv ]; then logged "$log" uv pip "$@" --python "$venv/bin/python"
+  else logged "$log" "$venv/bin/python" -I -m pip install --quiet --disable-pip-version-check "$@"; fi
+}
+
+py_ranges() {  # py_ranges WHICH: pyproject's dependencies (all, or dev: the dev extra alone), at the versions it allows
+  local req="$tmp/requirements.txt"
+  [ "$dry" = 1 ] || "$dir/backend/.venv/bin/python" -I -c 'import sys, tomllib
+p = tomllib.load(open(sys.argv[1], "rb"))["project"]
+dev = p.get("optional-dependencies", {}).get("dev", []) if sys.argv[3] == "1" else []
+print("\n".join(dev if sys.argv[2] == "dev" else p.get("dependencies", []) + dev))' "$src/backend/pyproject.toml" "$1" "$dev" > "$req"
+  say "+ the requirements of backend/pyproject.toml$( [ "$1" = dev ] && echo "'s dev extra" ) into $req"
+  if [ "$pytool" = uv ]; then set -- install -r "$req"; else set -- -r "$req"; fi
+  py_install "$tmp/py.log" "$@" || die "the backend's packages could not be installed (above)"
+}
+
+release_venv() {  # the pinned packages of backend/requirements.txt (uv.lock's, with their hashes: release.sh) from the index
+  # uv or pip is set up with (check_prerequisites); where that index lacks a pinned version, the versions pyproject.toml allows
+  local venv="$dir/backend/.venv" req="$src/backend/requirements.txt" args
+  if ! { [ -x "$venv/bin/python" ] && (cd / && "$venv/bin/python" -I -c '') 2>/dev/null; }; then new_venv "$venv"
+  elif [ "$pytool" = pip ] && ! (cd / && "$venv/bin/python" -I -c 'import pip') 2>/dev/null; then
+    run "$venv/bin/python" -I -m ensurepip --quiet  # a venv an earlier install made with uv, which holds no pip
+  fi
+  if [ ! -f "$req" ]; then
+    say "no backend/requirements.txt, so nothing pins the versions: those backend/pyproject.toml allows"
+    py_ranges all
+    return 0
+  fi
+  args=(sync --require-hashes "$req"); [ "$pytool" = uv ] || args=(--require-hashes --no-deps -r "$req")
+  if py_install "$tmp/py.log" "${args[@]}"; then
+    [ "$dev" = 0 ] || py_ranges dev
+  elif grep -qE 'Hash mismatch|DO NOT MATCH THE HASHES' "$tmp/py.log"; then
+    die "the package index served a file whose hash is not the one backend/requirements.txt pins (above), so nothing more is installed from it"
+  else
+    say "the package index lacks a version backend/requirements.txt pins (above), so the versions backend/pyproject.toml allows are installed instead"
+    py_ranges all
   fi
 }
 
@@ -227,14 +366,17 @@ dist_stale() {  # dist_stale FRONTEND: the first file frontend/dist is built fro
     -newer dist/index.html -type f -print 2>/dev/null | head -n 1) || true
 }
 
-install_packages() {  # npm ci from package-lock.json, and again whenever the lockfile differs from the copy the last
-  # run left in node_modules (after an update); then the headless Chromium of the frontend's Playwright, which a view's
-  # checks (scripts/view_shot.mjs) and the dev agent's screenshots load. A symlinked node_modules is left alone. A
-  # checkout's node_modules installed without this script is kept while npm's own record of the install
-  # (node_modules/.package-lock.json) is newer than package-lock.json. Returns 1 when npm ci failed.
+install_packages() {  # a release with its UI built: the runtime packages (runtime_packages); else npm ci from
+  # package-lock.json, and again whenever the lockfile differs from the copy the last run left in node_modules (after an
+  # update). Then the headless Chromium of the frontend's Playwright, which a view's checks (scripts/view_shot.mjs) and
+  # the dev agent's screenshots load. A symlinked node_modules is left alone. A checkout's node_modules installed without
+  # this script is kept while npm's own record of the install (node_modules/.package-lock.json) is newer than
+  # package-lock.json. Returns 1 when npm failed.
   local fe="$dir/frontend" stamp="$dir/frontend/node_modules/.thimble-package-lock.json"
   if [ -L "$fe/node_modules" ]; then
     say "frontend/node_modules is a symlink → $(readlink "$fe/node_modules"); left alone"
+  elif [ "$checkout" = 0 ] && [ "$has_dist" = 1 ] && [ -f "$src/frontend/runtime/package-lock.json" ]; then
+    runtime_packages || return 1
   elif [ -f "$stamp" ] && cmp -s "$fe/package-lock.json" "$stamp"; then
     say "frontend/node_modules matches package-lock.json"
   elif [ "$checkout" = 1 ] && [ ! -f "$stamp" ] && [ -f "$fe/node_modules/.package-lock.json" ] \
@@ -251,13 +393,42 @@ install_packages() {  # npm ci from package-lock.json, and again whenever the lo
     || say "(the frontend's Chromium download failed; a view's checks cannot load its page until this step is run again)"
 }
 
+runtime_packages() {  # only the frontend packages the server and its scripts load (frontend/runtime, which release.sh
+  # writes: their part of package-lock.json, with each file's hash), from the registry npm is set up with; where it lacks
+  # a pinned version, the versions frontend/runtime/package.json allows. npm installs them in frontend/runtime, and they
+  # move to frontend/node_modules, where the server and the scripts look. The stamp is written only for the pinned ones,
+  # so a later run tries those again
+  local fe="$dir/frontend" rt="$dir/frontend/runtime" stamp="$dir/frontend/node_modules/.thimble-package-lock.json" pinned
+  if [ -f "$stamp" ] && cmp -s "$rt/package-lock.json" "$stamp"; then
+    say "frontend/node_modules holds the runtime packages frontend/runtime/package-lock.json pins"
+    return 0
+  fi
+  say "the frontend's packages the server loads (frontend/runtime/package.json); the UI is built already"
+  if logged "$tmp/npm.log" npm ci --prefix "$rt" --no-audit --no-fund; then
+    pinned=1
+  elif grep -q EINTEGRITY "$tmp/npm.log"; then
+    say "the registry served a file whose hash is not the one frontend/runtime/package-lock.json pins (above), so nothing more is installed from it"
+    return 1
+  else
+    say "the registry lacks a version frontend/runtime/package-lock.json pins (above), so the versions frontend/runtime/package.json allows are installed instead"
+    run npm install --prefix "$rt" --no-audit --no-fund --no-package-lock || return 1
+    pinned=0
+  fi
+  say "+ mv $rt/node_modules $fe/node_modules"
+  [ "$dry" = 1 ] || { rm -rf "$fe/node_modules"; mv "$rt/node_modules" "$fe/node_modules"; }
+  if [ "$pinned" = 1 ]; then
+    say "+ cp $rt/package-lock.json $stamp"
+    [ "$dry" = 1 ] || cp "$rt/package-lock.json" "$stamp"
+  fi
+}
+
 build_ui() {  # with node >= 20 the frontend's packages, which custom views need; a checkout's frontend/dist older than
   # its sources is rebuilt (scripts/rebuild_ui.sh, which swaps the build in under a running server), any other existing
   # frontend/dist is kept, and without one the typecheck and vite build make it
   step "6/12 frontend"
   if [ "$node_ok" = 1 ] && ! install_packages; then
     [ "$has_dist" = 1 ] || die "npm ci failed in $dir/frontend (above), so the UI cannot be built; fix that and run this script again"
-    say "(npm ci failed, above: custom views need the frontend's packages, so run this script again)"
+    say "(npm failed, above: custom views need the frontend's packages, so run this script again)"
     stale=""
   fi
   if [ -n "$stale" ] && [ "$node_ok" = 1 ]; then
@@ -402,7 +573,7 @@ trust_workspaces() {  # the one entry thimble writes into Claude Code's global c
   step "10/12 Claude Code's trust of thimble's workspaces folder"
   if [ "$dry" = 1 ]; then say "(asks once, before anything is installed, whether to mark the workspaces folder trusted in Claude Code's config; --trust-workspaces or --no-trust-workspaces answer it)"; return 0; fi
   THIMBLE_HOME="$home" "$dir/backend/.venv/bin/python" -I "$dir/backend/app/claude_changes.py" trust "$dir" $trust \
-    || say "(the trust step failed; install.sh --trust-workspaces runs it again)"
+    || say "(the trust step failed; \`thimble trust\` runs it again)"
 }
 
 path_has_local_bin() {  # $HOME/.local/bin (or ~/.local/bin) as a PATH entry, a trailing slash on the entry allowed
@@ -440,6 +611,8 @@ keep_log() {  # the run's output also goes to $home/install.log (the last run on
 
 main() {
   parse_args "$@"
+  tmp="$(mktemp -d)"
+  trap 'rm -rf "$tmp"' EXIT
   keep_log
   locate_tree
   marketplace_name

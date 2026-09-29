@@ -4,7 +4,7 @@
 
 install.sh changes two things in Claude Code's own files, each only after a yes, and `thimble uninstall` removes both:
 - **Plugin**: adds thimble to `~/.claude/settings.json` and `~/.claude/plugins`, so thimble is available in every `claude` session from startup. The `thimble` command works either way.
-- **Trust**: adds thimble's workspaces folder (`~/.thimble/app/workspaces` for a Global install, `<clone>/workspaces` for a Dev install) to `~/.claude.json`, so thimble can start its background agents without Claude Code stopping to ask. Everything works with a no, except Terminal-first mode (a Settings option for chatting in the terminal), whose background agents are then refused with a message saying how to trust the folder.
+- **Trust**: adds thimble's workspaces folder (`~/.thimble/app/workspaces` for a Global install, `<clone>/workspaces` for a Dev install) to `~/.claude.json`, so thimble can start its background agents without Claude Code stopping to ask. Everything works with a no, except Terminal-first mode (a Settings option for chatting in the terminal), whose background agents are then refused with a message saying how to trust the folder (`thimble trust`, which asks first).
 
 ## Installing
 
