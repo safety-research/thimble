@@ -2397,6 +2397,10 @@ async def _run_card_code(k: _Kernel, code: str, kind: str | None, timeout_s: flo
     """_execute for a card's code, with the caller holding the kernel's lock: a table card's DataFrame is read in the
     same request and kept in place of pandas' display, and the labels the code read land on k.last_labels and
     k.last_label_revs. `extra_exprs` are more user expressions for the same request."""
+    from . import cardtypes  # noqa: PLC0415 — cardtypes imports views, which imports this module lazily
+
+    if cardtypes.CARD_CALL in code:
+        await cardtypes.refresh_quietly(k.workspace, warm=False)
     exprs = {frames.EXPR_KEY: frames.CAPTURE} if frames.captures(kind) else {}
     exprs[LABELS_EXPR_KEY] = LABELS_EXPR
     exprs.update(extra_exprs or {})

@@ -480,10 +480,25 @@ def label_data(c: str, cell: dict[str, Any]) -> dict[str, Any] | None:
     return json.loads(json.dumps({"concept": detail, "rows": rows, "settings": settings}, default=str))
 
 
+def type_frames(c: str, cell: dict[str, Any]) -> dict[str, Any]:
+    """{"frames": {type: its page}} for a card of a card type, whose frame the page loads from the request; {} for any
+    other card or a type the workspace no longer has."""
+    from . import cardtypes  # noqa: PLC0415 — cardtypes imports views
+
+    made = cardtypes.card_of(cell.get("outputs"))
+    if not made:
+        return {}
+    try:
+        return {"frames": {str(made["type"]): cardtypes.frame_document(c, str(made["type"]))}}
+    except HTTPException:
+        return {}
+
+
 def request_for(c: str, cell: dict[str, Any], *, width: int | None = None) -> dict[str, Any]:
     """The render request for one card as it stands (module note, the page): the card as the canvas reads it, its refs
-    resolved, the cards they name, the theme and the width, and for a label card its label (label_data), whose rows
-    without their own text are quoted from the records their refs resolve to."""
+    resolved, the cards they name, the theme and the width, for a label card its label (label_data), whose rows
+    without their own text are quoted from the records their refs resolve to, and for a card of a card type the type's
+    page (type_frames)."""
     refs = cited_refs(cell)
     label = label_data(c, cell)
     for rows in (label or {}).get("rows", {}).values():
@@ -504,6 +519,7 @@ def request_for(c: str, cell: dict[str, Any], *, width: int | None = None) -> di
         "theme": theme(c),
         "width": int(w) if isinstance(w, (int, float)) and w > 0 else CARD_W,
         **({"label": label} if label else {}),
+        **type_frames(c, cell),
     }
 
 

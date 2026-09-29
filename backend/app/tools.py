@@ -79,6 +79,8 @@ ERROR_MIME = "application/vnd.thimble.error+json"
 # the drawings the canvas makes from a card's code, thimble.diagram and thimble.timeline (kernel_thimble.py), by the
 # kind of card that shows each; their text/plain listing is what a model reads
 DRAWING_MIMES = {"application/vnd.thimble.diagram+json": "diagram", "application/vnd.thimble.timeline+json": "timeline"}
+# a card type's graphic (thimble.card, cardtypes.py), which counts as a chart and is read through its listing
+CARD_MIME = "application/vnd.thimble.card+json"
 LABEL_KINDS = ("prompt", "regex", "code")
 LABEL_SCOPES = ("files", "canvas", "report")
 UNIT_WORDS = {"cell": "card", "span": "sentence"}  # a label's stored unit (concepts.SCOPES) as a result names it
@@ -724,6 +726,8 @@ def _outputs_text(cell: dict, addressed: bool = False) -> tuple["builtins.list[s
                 extras.add("chart")
             elif mime in DRAWING_MIMES:
                 extras.add(DRAWING_MIMES[mime])
+            elif mime == CARD_MIME:
+                extras.add("chart")
         if any(k.startswith("image/") or "vega" in k for k in out):
             chart = cite.chart_table(out)
             rows = chart.text() if chart is not None else ""
@@ -2056,6 +2060,8 @@ async def _shot_card(ctx: Ctx, ref: str) -> ToolResult:
     cell = notebook.get_cell(ctx.c, cid, full_outputs=True) if cid else None
     if cell is None:
         return err(f"screenshot: there is no card {cid or ref}")
+    if any(CARD_MIME in b for _, b in cite.iter_outputs(cell.get("outputs"))):
+        return await _shot_type_card(ctx, cid, cell)
     ui = ui_base()
     if ui:
         shot = await _shot_card_in_ui(ctx.c, cid, ui)
@@ -2092,6 +2098,20 @@ async def _shot_card(ctx: Ctx, ref: str) -> ToolResult:
     if missing:
         return err(f"screenshot: {missing[0].relative_to(config.REPO_ROOT)} is missing (no npm install here), so the chart cannot be drawn")
     return await _shot_page_file(cid, chart_page(spec))
+
+
+async def _shot_type_card(ctx: Ctx, cid: str, cell: dict) -> ToolResult:
+    """A card of a card type drawn by the card harness (render.py) from the data the card stored, as the card check
+    sees it."""
+    from . import render
+
+    try:
+        res = await render.render_card(ctx.c, cell)
+    except render.Unavailable as e:
+        return err(f"screenshot: card:{cid} is drawn in the browser, and the card harness is off here: {e}")
+    if not res.ok:
+        return err(f"screenshot: card:{cid} did not render: {res.error}")
+    return _image(base64.b64encode(res.png).decode("ascii"), "image/png", f"screenshot of card:{cid}")
 
 
 # The page a card is shot in: 1280 px wide at device scale 2, tall enough for the tallest cards, with the chat closed

@@ -944,23 +944,27 @@ def _label_colour(n: Any) -> str:
     return LABEL_COLOURS[n] if isinstance(n, int) and 0 <= n < len(LABEL_COLOURS) else LABEL_COLOURS[1]
 
 
-def labels_context(c: str) -> dict[str, Any]:
+def labels_context(c: str, only: list[str] | None = None) -> dict[str, Any]:
     """The labels a view's reader sees: {labels: [{id, name, colour, values: [{name, colour, highlight}], jsonl}],
     filter: {id, label, value, colour} | None}. The labels are those over records the analyst turned on in Files, and
-    the Files filter's label, which counts as on while it filters; colours are the palette's hex values."""
+    the Files filter's label, which counts as on while it filters; with `only`, the labels of those ids in that order,
+    and no filter. Colours are the palette's hex values."""
     from . import concepts  # noqa: PLC0415
 
     try:
         ws = config.workspace_dir(c)
         ks = concepts.list_concepts(ws)
-        f = concepts.read_filters(ws).get("files")
+        f = None if only is not None else concepts.read_filters(ws).get("files")
     except (HTTPException, OSError, ValueError):
         return dict(NO_LABELS)
+    if only is not None:
+        by_id = {k["id"]: k for k in ks}
+        ks = [by_id[i] for i in dict.fromkeys(only) if i in by_id]
     out: list[dict[str, Any]] = []
     for k in ks:
         if k["unit"] not in concepts.FILE_UNITS or k.get("marks") == "file":
             continue
-        if not (k["shown"] or (f and f.get("concept") == k["id"])):
+        if only is None and not (k["shown"] or (f and f.get("concept") == k["id"])):
             continue
         classes = k.get("classes") or []
         lit = [cl for cl in classes if cl.get("highlight")] or classes
@@ -2005,14 +2009,16 @@ def _script_text(js: str) -> str:
     return js.replace("</script", "<\\/script").replace("</SCRIPT", "<\\/SCRIPT")
 
 
-def frame_document(view: dict[str, Any], media: str | None = None) -> str:
+def frame_document(view: dict[str, Any], media: str | None = None, *, card: bool = False) -> str:
     """The view's page as a frame loads it: the policy that blocks every load but the view's media route, the bridge
     (viewer_bridge.js), thimble's parts (viewer_kit.css), the vendored libraries the view names, then view.html, whose
     own styles come after the parts. The browser adds the theme's tokens (ViewerFrame.tsx). `media` is the media
     route's absolute URL (media_url), which the policy allows for images, audio and video and thimble.mediaUrl builds
-    on; without it the page loads no URL at all."""
+    on; without it the page loads no URL at all. `card` marks the page as a card's (cardtypes.py), which draws what the
+    bridge's `init` brings."""
     html = (Path(view["dir"]) / VIEW_HTML).read_text("utf-8")
-    who = json.dumps({"slug": view["slug"], "name": view["name"], "media": media}, ensure_ascii=False)
+    who = json.dumps({"slug": view["slug"], "name": view["name"], "media": media, **({"card": True} if card else {})},
+                     ensure_ascii=False)
     csp = FRAME_CSP.format(media=f" {media}" if media else "")
     head = [f'<meta http-equiv="Content-Security-Policy" content="{csp}">',
             '<meta charset="utf-8">',

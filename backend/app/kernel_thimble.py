@@ -27,6 +27,10 @@ it with `WS` (the workspace directory) set and registers it as `thimble`.
                               events on a time axis: (time, label[, lane]) or {time, label, lane, end}; TIMELINE_MIME
                               with a text/plain listing. Clock times ("HH:MM[:SS]") are read on CLOCK_DAY, rolling over
                               midnight when a time goes backwards
+    thimble.card(type, labels=None, **args)
+                              a card of a card type (the workspace's CARD_TYPES_FILE): the arguments checked against the
+                              type's schema, the type's card.py run on its reader's index with `labels` as the labels
+                              that mark the records, shown as CARD_MIME with the type's listing as text/plain
 
 Each list may also be a DataFrame or a dict of (key, value) pairs; anything else raises a TypeError naming the forms.
 
@@ -47,7 +51,7 @@ from pathlib import Path
 
 WS = globals().get("WS")  # the workspace directory, set by the injector (notebook.kernel_argv)
 
-__all__ = ["labels", "colours", "marked", "kept", "view_labels", "diagram", "timeline"]
+__all__ = ["labels", "colours", "marked", "kept", "view_labels", "diagram", "timeline", "card"]
 
 FRAME_ROWS = 500  # rows of a table card's DataFrame the card keeps and shows (frames.ROWS_MAX)
 
@@ -119,7 +123,7 @@ def _concepts() -> list:
         out.append({"id": str(k.get("id") or p.stem), "name": str(k.get("name") or p.stem), "kind": k.get("kind"),
                     "unit": k.get("unit"), "values": list(k.get("labels") or []), "n_labeled": int(stats.get("n_labeled") or 0),
                     "superseded_by": k.get("superseded_by"), "ts": str(k.get("ts") or ""), "rev": _rev(k.get("rev")),
-                    "classes": _classes(k)})
+                    "classes": _classes(k), "highlights": _highlights(k)})
     out.sort(key=lambda k: (k["ts"], k["id"]))
     return _fill_colours(out)
 
@@ -144,6 +148,15 @@ def _classes(k: dict) -> list:
             n = None
         out.append([v, n if n is not None and 0 <= n < len(LABEL_COLOURS) else None])
     return out
+
+
+def _highlights(k: dict) -> dict:
+    """{value: whether the analyst highlights it} (concepts.classes_of): the stored class's flag, else every value but
+    the negative one."""
+    classes = _classes(k)
+    stored = {str(c.get("name") or "").strip(): c.get("highlight") for c in k.get("classes") or [] if isinstance(c, dict)}
+    return {v: stored[v] if isinstance(stored.get(v), bool) else not _negative(v, i, len(classes))
+            for i, (v, _n) in enumerate(classes)}
 
 
 def _fill_colours(ks: list) -> list:
@@ -749,6 +762,165 @@ def timeline(events=(), spacing="time"):
     lines = [f"timeline: {len(evs)} events" + (", evenly spaced" if spacing == "even" else "")]
     lines += [f"{t}  {ev['label']}" + (f" [{ev['lane']}]" if ev.get("lane") else "") for t, ev in zip(given, evs)]
     _show({TIMELINE_MIME: {"events": evs, **({"spacing": "even"} if spacing == "even" else {})},
+           "text/plain": "\n".join(lines)})
+
+
+# Card types (backend cardtypes.py): a viewer folder whose view.json has a `card` block. The server writes the types a
+# workspace has to CARD_TYPES_FILE, each with its argument schema, its files and its reader's index as the views kernel
+# keys and caches it, and card() runs the type's card.py on that index in the card's own kernel.
+CARD_MIME = "application/vnd.thimble.card+json"
+CARD_TYPES_FILE = "card_types.json"
+CARD_DATA_MAX = 256 * 1024  # bytes of JSON a card's data may take
+_CARD_MODULES: dict = {}  # card.py's path -> ((mtime_ns, size), module)
+_JSON_TYPES = {"string": str, "integer": numbers.Integral, "number": numbers.Real, "boolean": bool, "array": list,
+               "object": dict}
+_TYPE_WORDS = {"string": "a string", "integer": "a whole number", "number": "a number", "boolean": "True or False",
+               "array": "a list", "object": "a dict"}
+
+
+def _card_types() -> dict:
+    """{name: type} as the server last wrote them for this workspace; {} before it did."""
+    try:
+        with open(_ws() / CARD_TYPES_FILE, encoding="utf-8") as f:
+            got = json.load(f)
+    except (OSError, ValueError):
+        return {}
+    types = got.get("types") if isinstance(got, dict) else None
+    return types if isinstance(types, dict) else {}
+
+
+def _allowed(schema: dict) -> str:
+    """What a schema allows, in words, for an error."""
+    if "enum" in schema:
+        return "one of " + ", ".join(repr(v) for v in schema["enum"])
+    t = schema.get("type")
+    if t == "array" and isinstance(schema.get("items"), dict):
+        return f"a list, each {_allowed(schema['items'])}"
+    if t == "object" and schema.get("properties"):
+        need = set(schema.get("required") or [])
+        return "a dict of " + ", ".join(k if k in need else f"{k} (optional)" for k in schema["properties"])
+    return _TYPE_WORDS.get(t, "any value")
+
+
+def _checked(schema: dict, value, where: str):
+    """`value` checked against a JSON Schema subset (type, enum, items, properties, required, additionalProperties,
+    default), each object's missing properties that have a default filled in; ValueError saying at `where` what is
+    allowed. A tuple, a set or anything with tolist() (a pandas Series) is read as a list."""
+    t = schema.get("type")
+    if t == "array" and not isinstance(value, (str, bytes, dict)):
+        if isinstance(value, (tuple, set, frozenset)):
+            value = list(value)
+        elif callable(getattr(value, "tolist", None)):
+            value = value.tolist()
+    if t in _JSON_TYPES and (not isinstance(value, _JSON_TYPES[t]) or (t in ("integer", "number") and isinstance(value, bool))):
+        raise ValueError(f"{where} is {_allowed(schema)}, not {value!r}")
+    if "enum" in schema and value not in schema["enum"]:
+        raise ValueError(f"{where} is {_allowed(schema)}, not {value!r}")
+    if t == "array":
+        return [_checked(schema.get("items") or {}, v, f"{where}[{i}]") for i, v in enumerate(value)]
+    if t == "object":
+        props = schema.get("properties") or {}
+        out = {}
+        for k, v in value.items():
+            if k not in props and schema.get("additionalProperties") is False:
+                raise ValueError(f"{where} has no `{k}`; the keys are {', '.join(props) or 'none'}")
+            out[k] = _checked(props.get(k) or {}, v, f"`{k}`" if where == "the arguments" else f"{where}.{k}")
+        for k in schema.get("required") or []:
+            if k not in out:
+                raise ValueError(f"{where} needs `{k}`")
+        for k, p in props.items():
+            if k not in out and isinstance(p, dict) and "default" in p:
+                out[k] = p["default"]
+        return out
+    return value
+
+
+def _views_host(path: str):
+    """view_host.py (the reader contract's loader and index cache) as the module `_thimble_views`, loaded again when
+    its source changed, versioned as views.snippet versions it."""
+    import hashlib
+    import sys
+    import types
+
+    src = Path(path).read_text("utf-8")
+    version = hashlib.sha1(src.encode("utf-8")).hexdigest()[:12]
+    mod = sys.modules.get("_thimble_views")
+    if getattr(mod, "VERSION", None) != version:
+        mod = types.ModuleType("_thimble_views")
+        exec(src, mod.__dict__)  # noqa: S102 — thimble's own module source
+        mod.VERSION = version
+        sys.modules["_thimble_views"] = mod
+    return mod
+
+
+def _card_module(slug: str, path: str):
+    """A type's card.py as a module, loaded again when the file's mtime or size changed."""
+    import importlib.util
+    import os
+
+    st = os.stat(path)
+    sig = (st.st_mtime_ns, st.st_size)
+    hit = _CARD_MODULES.get(path)
+    if hit is not None and hit[0] == sig:
+        return hit[1]
+    spec = importlib.util.spec_from_file_location("thimble_card_" + slug.replace("-", "_"), path)
+    if spec is None or spec.loader is None:
+        raise ImportError(f"cannot load {path}")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    for fn in ("card", "listing"):
+        if not callable(getattr(mod, fn, None)):
+            raise AttributeError(f"{path} defines no function {fn}()")
+    _CARD_MODULES[path] = (sig, mod)
+    return mod
+
+
+def _card_label(k: dict) -> dict:
+    """A label as a view's labels context holds it (views.labels_context), read from the workspace."""
+    lit = [n for v, n in k["classes"] if k["highlights"].get(v)] or [n for _v, n in k["classes"]]
+    return {"id": k["id"], "name": k["name"], "colour": LABEL_COLOURS[lit[0] if lit and lit[0] is not None else 1],
+            "values": [{"name": v, "colour": LABEL_COLOURS[n or 0], "highlight": bool(k["highlights"].get(v))}
+                       for v, n in k["classes"]],
+            "jsonl": str(_ws() / "labels" / f"{k['id']}.jsonl")}
+
+
+def card(type, labels=None, **args):
+    """Show a card of the card type `type`, whose records `labels` (label names) mark and colour, with the type's own
+    keyword arguments. Returns nothing, so the card shows the graphic once. The labels context holds the named labels
+    alone: labels turned on later and the Files filter mark and dim what the card drew, they choose nothing."""
+    global _view_ctx
+    types = _card_types()
+    t = types.get(type) if isinstance(type, str) else None
+    if t is None:
+        raise ValueError(f"thimble.card: no card type {type!r}; the types here are {', '.join(map(repr, types)) or 'none yet'}")
+    if isinstance(labels, str):
+        labels = [labels]
+    ks = [_find(n) for n in (labels or [])]
+    try:
+        args = _checked(t.get("args") or {"type": "object"}, args, "the arguments")
+    except ValueError as e:
+        raise ValueError(f"thimble.card({type!r}): {e}") from None
+    for k in ks:
+        if all(x["id"] != k["id"] for x in _LABELS_READ):
+            _LABELS_READ.append({"id": k["id"], "rev": k["rev"]})
+    host = _views_host(t["host"])
+    reader = host._reader(t["slug"], t["reader"])
+    index, _built = host._index(t["slug"], reader, t["fp"], t["paths"], t["cache"])
+    mod = _card_module(t["slug"], t["card"])
+    mod.reader = reader
+    before = _view_ctx
+    _view_ctx = {"labels": [_card_label(k) for k in ks], "filter": None}
+    try:
+        data = json.loads(json.dumps(mod.card(index, **args), ensure_ascii=False, default=str))
+        lines = [" ".join(str(x).split()) for x in mod.listing(data)]
+    finally:
+        _view_ctx = before
+    size = len(json.dumps(data, ensure_ascii=False).encode("utf-8"))
+    if size > CARD_DATA_MAX:
+        raise ValueError(f"thimble.card({type!r}): the card's data is {size:,} bytes, and a card holds {CARD_DATA_MAX:,} "
+                         f"at most; narrow its records")
+    _show({CARD_MIME: {"type": type, "version": str(t.get("version") or ""), "args": args,
+                       "labels": [{"id": k["id"], "name": k["name"]} for k in ks], "data": data},
            "text/plain": "\n".join(lines)})
 
 
