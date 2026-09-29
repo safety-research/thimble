@@ -170,6 +170,7 @@ def test_a_resumed_build_keeps_its_fence(board, monkeypatch):
     """Claude Code keeps none of a stopped session's options, so a resume passes every flag a new session gets."""
     import asyncio
 
+    monkeypatch.setenv("THIMBLE_SANDBOX", "1")
     corpus, folder = config.corpus_dir(CORPUS), views.views_dir(CORPUS) / "posts"
     conf = dev.dev_config(CORPUS, sandbox=True)
     sessions, calls = dev.Sessions(), []

@@ -7,20 +7,22 @@ import logging
 import playwright.async_api
 import pytest
 
-from app import card_check, config, headless, notebook, render
+from app import card_check, config, headless, notebook, render, userconf
 
 CORPUS = "mini"
 
 
 @pytest.fixture()
 def no_browser(tmp_path, monkeypatch, workspaces_tmp):
-    """Playwright's browsers folder empty, the harness and the card check on, and nothing known yet of the browser."""
+    """Playwright's browsers folder empty, no system browser, the harness and the card check on, and nothing known yet
+    of the browser."""
     empty = tmp_path / "browsers"
     empty.mkdir()
     page = tmp_path / "dist"
     page.mkdir()
     (page / render.RENDER_PAGE).write_text("<!doctype html>")
     monkeypatch.setenv("PLAYWRIGHT_BROWSERS_PATH", str(empty))
+    monkeypatch.setattr(userconf, "system_browser", lambda: "")
     monkeypatch.setenv("THIMBLE_RENDER_DIR", str(page))
     monkeypatch.setenv("THIMBLE_RENDER", "on")
     monkeypatch.setenv("THIMBLE_CARD_CHECK", "on")

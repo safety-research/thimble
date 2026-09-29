@@ -21,7 +21,7 @@ from pathlib import Path
 
 import pytest
 
-from app import config, headless, tools, views
+from app import config, headless, tools, userconf, views
 
 CORPUS = "boards"
 POSTS = [  # (thread, author, time, body); line n of board.jsonl is POSTS[n-1]
@@ -298,8 +298,8 @@ INSTALL_WORDS = re.compile(r"playwright install|npx|download new browsers|Execut
 @pytest.mark.parametrize("name", ["repository"])
 async def test_without_the_headless_browser_a_view_is_checked_on_its_reader_and_nothing_says_how_to_install_it(
         name, samples, inproc, bound, tmp_path, monkeypatch, caplog):
-    """Where Playwright finds no browser, a view's checks pass on its reader, the session hears only that screenshots are
-    unavailable, the log warns once, and the screenshot tool says only that."""
+    """Where Playwright finds no browser and there is no system browser, a view's checks pass on its reader, the session
+    hears only that screenshots are unavailable, the log warns once, and the screenshot tool says only that."""
     if why := views.build_problem():
         if os.environ.get("CI") == "true":
             pytest.fail(why)
@@ -307,6 +307,7 @@ async def test_without_the_headless_browser_a_view_is_checked_on_its_reader_and_
     empty = tmp_path / "browsers"
     empty.mkdir()
     monkeypatch.setenv("PLAYWRIGHT_BROWSERS_PATH", str(empty))
+    monkeypatch.setattr(userconf, "system_browser", lambda: "")
     monkeypatch.setattr(headless, "_missing", {})
     caplog.set_level(logging.WARNING, logger="thimble.headless")
     slug = _save_example(name)
