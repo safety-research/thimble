@@ -185,7 +185,7 @@ def read_model(c: str, doc: dict[str, Any], renderer: str) -> dict[str, Any]:
             units.append({"heading": _collapse(u.get("heading")), "level": report_types._level(u.get("level")),
                           "tldr": report_types._is_tldr(u.get("heading")), "layout": u.get("layout") or "",
                           "side": u.get("card") or "", "paragraphs": [p for p in paras if p["sentences"] or p["kind"] == "divider"],
-                          "figures": figs, "speaker_notes": _collapse(u.get("notes")) if isinstance(u.get("notes"), str) else ""})
+                          "figures": figs, "speaker_notes": plain_text(u["notes"]) if isinstance(u.get("notes"), str) else ""})
         if renderer not in ("slides", "story"):
             units.sort(key=lambda u: 0 if u["tldr"] else 1)
     return {"title": title, "renderer": renderer, "lead": lead, "claims": claims, "units": units, "lines": lines,
@@ -355,11 +355,12 @@ padding:44px 56px;display:flex;flex-direction:column;gap:14px;overflow:hidden;bo
 .slide .figs figure{margin:0}
 .slide .figs img{max-height:360px;width:auto;max-width:100%;object-fit:contain}
 .slide .num{position:absolute;right:20px;bottom:14px;font-size:12px;color:var(--ink-500)}
-.slide .speaker{font-size:13px;color:var(--ink-500);border-top:1px solid rgba(var(--ink-rgb),.1);padding-top:8px}
+.speaker{font-size:13px;color:var(--ink-500);margin:-16px 4px 28px}
+.slide .figs{overflow:hidden}.slide .figs figcaption{font-size:12px;margin-top:4px}
 .deck-title{font-size:15px;color:var(--ink-500);margin:0 0 16px}
 @media print{@page{size:13.333in 7.5in;margin:0}html,body{background:var(--white)}main{max-width:none;padding:0}
 .deck-title{display:none}.slide{width:13.333in;height:7.5in;aspect-ratio:auto;border-radius:0;box-shadow:none;margin:0;
-break-after:page;padding:.6in .8in}.slide .figs img{max-height:4.6in}.notes{break-before:page;padding:.6in .8in;margin:0;border:0}}
+break-after:page;padding:.6in .8in}.slide .figs img{max-height:4.2in}.speaker{display:none}.notes{break-before:page;padding:.6in .8in;margin:0;border:0}}
 """
 
 
@@ -471,8 +472,8 @@ def to_html(m: dict[str, Any], pics: dict[str, dict[str, Any]], *, faces: str | 
             figs = "".join(_figure_html(f, pics) for f in u["figures"])
             head = f"<h2>{inline_html(u['heading'])}</h2>" if u["heading"] else ""
             body = f'<div class="body"><div class="copy">{copy}</div>' + (f'<div class="figs">{figs}</div>' if figs else "") + "</div>"
-            speaker = f'<div class="speaker">{_esc(u["speaker_notes"])}</div>' if u["speaker_notes"] else ""
-            parts.append(f'<section class="slide layout-{_esc(layout)}">{head}{body}{speaker}<span class="num">{k}</span></section>')
+            speaker = f'<p class="speaker">{inline_html(u["speaker_notes"])}</p>' if u["speaker_notes"] else ""
+            parts.append(f'<section class="slide layout-{_esc(layout)}">{head}{body}<span class="num">{k}</span></section>{speaker}')
     elif m["renderer"] == "story":
         css += STORY_CSS
         parts.append(f"<h1>{inline_html(m['title'])}</h1>{lead}")

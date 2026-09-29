@@ -323,7 +323,7 @@ def _clock(t: float) -> str:
 
 PLAYER_CSS = """
 main{max-width:1000px}
-.stage{position:relative;width:100%;aspect-ratio:16/9;background:#000;border-radius:12px;overflow:hidden}
+.stage{position:relative;width:100%;aspect-ratio:16/9;background:var(--paper-1);border-radius:12px;overflow:hidden}
 .stage iframe{position:absolute;left:0;top:0;width:1280px;height:720px;border:0;transform-origin:0 0}
 .cap{min-height:3.2em;margin:12px 0 0;font-size:18px;text-align:center}
 .bar{display:flex;align-items:center;gap:12px;margin:12px 0 28px;font-size:13px;color:var(--ink-500)}
