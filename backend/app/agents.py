@@ -663,7 +663,7 @@ async def create_route(c: str, body: NewThread) -> dict:
                       selector=body.selector, image=body.image, parent=body.parent)
     if not text:
         return meta
-    await threads.warm(c, meta.get("anchor"), meta.get("anchor_element"))
+    await threads.warm(c, meta.get("anchor"))
     try:
         posted = channel.post(c, channel.THREAD, {"thread": meta["id"], "text": text})
     except Exception:

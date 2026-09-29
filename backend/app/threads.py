@@ -57,7 +57,6 @@ STOP_TEXT = {
 STOP_KINDS = (SESSION_ENDED, UNANSWERED, FORK_LOST, "failed", "stopped")
 _DATA_URL_RE = re.compile(r"^data:image/png;base64,(.+)$", re.S)
 _CHAT_REF_RE = re.compile(r"^chat:([A-Za-z0-9_-]{1,64})#(\d+)$")
-_VIEW_REF_RE = re.compile(r"^view:[a-z0-9][a-z0-9-]{0,39}$")  # a view's own ref, the element its question box sends
 # (workspace, thread) -> the session a forkless event of the thread went to, until its fork is known (module note)
 _awaiting: dict[tuple[str, str], str | None] = {}
 
@@ -199,32 +198,19 @@ def _chat_record(c: str, chat_id: str, index: int) -> str:
     return f"{ref} ({rec.get('type')})\n{str(rec.get('text') or rec.get('message') or '').strip()}".strip()
 
 
-def _box(meta: dict) -> str | None:
-    """The view whose own question box asked the thread's question (the box sends the view's ref as its element), else
-    None."""
-    element = str(meta.get("anchor_element") or "")
-    return element if _VIEW_REF_RE.match(element) else None
-
-
-async def warm(c: str, anchor: str | None, element: str | None = None) -> None:
+async def warm(c: str, anchor: str | None) -> None:
     """Resolve the anchor's view refs once in a worker thread, so the thread's first event, built on the server's loop,
-    finds them in the views memo (views.resolve_sync cannot run a reader on that loop), and for a question from a view's
-    own box, the view's records described (views.records_text). Waits WARM_S at most."""
+    finds them in the views memo (views.resolve_sync cannot run a reader on that loop). Waits WARM_S at most."""
     from . import refs  # noqa: PLC0415
 
     wanted = [a for a in _anchors({"anchor": anchor}) if a.startswith("view:") or _file_ref(a) and "#" in a]
     if not wanted:
         return
     corpus = config.corpus_dir(c)
-    box = _box({"anchor_element": element})
 
     async def one(ref: str) -> None:
-        from . import views  # noqa: PLC0415
-
         try:
             await asyncio.to_thread(refs.resolve, corpus, ref)
-            if ref == box:
-                await asyncio.to_thread(views.records_text, c, ref.split(":", 1)[1])
         except Exception:  # noqa: BLE001 — _read says why a ref does not resolve
             return
 
@@ -235,21 +221,14 @@ async def warm(c: str, anchor: str | None, element: str | None = None) -> None:
 
 
 def content(c: str, meta: dict) -> str:
-    """What the anchor's refs hold, each cut to an equal share of CONTENT_CHARS; for a question from a view's own box,
-    the view's records described too."""
+    """What the anchor's refs hold, each cut to an equal share of CONTENT_CHARS."""
     anchors = [a for a in _anchors(meta) if not a.startswith("ui:")]
     if not anchors:
         return ""
     share = max(400, CONTENT_CHARS // len(anchors))
-    box = _box(meta)
     parts: list[str] = []
     for ref in anchors:
         text = _read(c, ref).strip()
-        if ref == box:
-            from . import views  # noqa: PLC0415
-
-            # as warm() described them, since describing them here would hold the server's loop
-            text = f"{text}\n{views.records_text_kept(c, ref.split(':', 1)[1])}".strip()
         parts.append(text if len(text) <= share else text[:share].rstrip() + "\n…")
     out = "\n\n".join(parts)
     return out if len(out) <= CONTENT_CHARS else out[:CONTENT_CHARS].rstrip() + "\n…"
@@ -308,7 +287,6 @@ def build(c: str, thread_id: str, questions: list[str]) -> tuple[str, dict[str, 
             _line("ref", meta.get("anchor")),
             _line("surface", meta.get("anchor_surface")),
             _line("element", meta.get("anchor_element")),
-            _line("asked", "in the view's own box" if _box(meta) else None),
             _line("selector", meta.get("anchor_selector")),
             _line("text", meta.get("anchor_text")),
             _line("image", meta.get("anchor_image")),
