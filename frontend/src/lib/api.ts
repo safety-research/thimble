@@ -298,6 +298,14 @@ export const api = {
   viewReviewUndo: (c: string, slug: string) => j<{ ok: boolean }>(`${ws(c)}/views/${enc(slug)}/review/undo`, { method: 'POST' }),
   viewProblems: (c: string, slug: string, version?: string) => j<ViewProblems>(`${ws(c)}/views/${enc(slug)}/problems${q({ v: version })}`),
   viewOpen: (c: string, slug: string, ref: string, version?: string) => j<ViewOpen>(`${ws(c)}/views/${enc(slug)}/resolve${q({ ref, v: version })}`),
+  /** a card type's page as a card's frame loads it (backend cardtypes.frame_route) */
+  cardTypeFrame: async (c: string, type: string): Promise<string> => {
+    const res = await fetch(`${ws(c)}/cardtypes/${enc(type)}/frame${q({ origin: location.origin })}`)
+    if (!res.ok) throw new Error(`${res.status} ${res.statusText}`)
+    return res.text()
+  },
+  /** reader.records(index, query) for a card's page, under the labels the card names */
+  cardTypeRecords: (c: string, type: string, card: string, query: unknown) => j<{ data: unknown }>(`${ws(c)}/cardtypes/${enc(type)}/records`, { method: 'POST', body: JSON.stringify({ query, card }) }),
   // ---- orientation ----
   /** Ask the analyst's session for the orientation (`POST /ws/{c}/events {kind: start}`): main calls start_orientation
      * with `text` as the brief and the switches `final_notebook`, `propose_views` and `generate_report`; `effort`,

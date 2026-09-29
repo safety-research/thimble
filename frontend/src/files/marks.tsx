@@ -154,6 +154,18 @@ function holdInvalidation(): () => void {
   }
 }
 
+const REFRESH_MIN_MS = 2500
+let refreshed = 0
+
+/** Read the shown blocks again, as a `concepts` event does, at most once per REFRESH_MIN_MS: a running label sends no
+ * event per batch, so a page that shows it asks for its new rows this way. */
+export function refreshLabels(): void {
+  const now = Date.now()
+  if (now - refreshed < REFRESH_MIN_MS) return
+  refreshed = now
+  invalidate()
+}
+
 /** Follow the labels on one file outside React: `fn` gets every label's row per record ref now and after each block
  * that arrives or each `concepts` event, until the returned function is called. The rows come for the lines asked for
  * with wantLabels. */

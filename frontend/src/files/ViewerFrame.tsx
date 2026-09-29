@@ -4,10 +4,8 @@
 //   quoted    whether that passage showed; when it did not, onQuoteMissing
 //   fetch     answered with reader.records(index, query)
 //   cite      a ⌘-click inside the frame opens the pointer's box on that element
-//   ask       a question typed in the view's own box, sent as the pointer's box sends one: a thread about the view
-//             (or the ref the page names), with what the page says it shows, hung under main; answered with `asked`
 //   navigate  another place, opened the way a chip opens it (lib/teleport)
-//   size      the document's height, used when the frame sizes to its content (`fit`)
+//   size      the height the page needs, used when the frame sizes to its content (`fit`)
 //   anchors   the data-anchor refs the page shows, answered with `labels`: the marks of its records (labels.ts
 //             viewMarks, with the filter's keep) and of its units (the view's marks route), the labels that are on,
 //             the Files label filter, every label over files and the palette, which the page hears through
@@ -20,6 +18,9 @@
 // plus ready, error, point and cmd (for the ⌘ pointer). A new ref is sent as a new `open` without reloading the page.
 // The page and every call it makes are of the view's `version`, so the page stays as it was loaded while the view
 // changes (backend views.VERSIONS_SUBDIR).
+// A card of a card type (`card`, backend cardtypes.py) loads the type's page, which gets `init` with what the card
+// stored once it is ready and says `settled` once it has drawn it; its fetches go to the type's records route under the
+// card's labels, its `open` names the record ref as it is, and its height stays within the type's range.
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject } from 'react'
 import { api } from '../lib/api'
 import { bus } from '../lib/bus'
@@ -96,6 +97,22 @@ export interface ViewerFrameProps {
   restore?: ViewState | null
   /** filled with what the frame's owner can ask of it */
   handle?: RefObject<ViewerFrameHandle | null>
+  /** a card of a card type, in place of the view `slug` names (slug is then the type) */
+  card?: CardFrame
+  /** a card's page has drawn what it was given */
+  onSettled?: () => void
+}
+
+/** A card of a card type drawn in the frame: the card's id, its type, how it is drawn (on the canvas, full size or for
+ * the card check's picture), what its code stored, its width and the type's height range. */
+export interface CardFrame {
+  id: string
+  type: string
+  mode: 'card' | 'full' | 'render'
+  data: unknown
+  args: Record<string, unknown>
+  width: number
+  size: [number, number]
 }
 
 /** A quoted passage: the record ref it sits in and its text. */
@@ -129,6 +146,7 @@ function useViewLabels(
   all: PageLabelItem[],
   palette: string[],
   post: (msg: unknown) => void,
+  withUnits: boolean,
 ): { add: (refs: unknown) => void; reset: () => void; ready: () => void } {
   const refs = useRef(new Set<string>())
   const units = useRef(new Set<string>())
@@ -151,7 +169,7 @@ function useViewLabels(
     },
     [ws],
   )
-  const unitPrefix = `view:${slug}/`
+  const unitPrefix = withUnits ? `view:${slug}/` : '\u0000'
   const labelled = on.length > 0 || !!filter
   const live = useRef(labelled)
   live.current = labelled
@@ -257,7 +275,7 @@ function useViewLabels(
   return useMemo(() => ({ add, reset, ready }), [add, reset, ready])
 }
 
-export function ViewerFrame({ ws, slug, targetRef, path, title, fit, labels = NO_LABELS, filter = null, filterFiles, byId = NO_CONCEPTS, first, labelActions, onError, className, quote, onQuoteMissing, version, restore, handle }: ViewerFrameProps) {
+export function ViewerFrame({ ws, slug, targetRef, path, title, fit, labels = NO_LABELS, filter = null, filterFiles, byId = NO_CONCEPTS, first, labelActions, onError, className, quote, onQuoteMissing, version, restore, handle, card, onSettled }: ViewerFrameProps) {
   const ref = useRef<HTMLIFrameElement>(null)
   const [page, setPage] = useState<string | null>(null)
   const [height, setHeight] = useState<number | null>(null)
@@ -274,20 +292,24 @@ export function ViewerFrame({ ws, slug, targetRef, path, title, fit, labels = NO
   const restoring = useRef(restore ?? null)
   const asked = useRef(new Map<number, (s: ViewState | null) => void>())
   const seq = useRef(0)
+  const drawn = useRef(card)
+  drawn.current = card
+  const settledFn = useRef(onSettled)
+  settledFn.current = onSettled
+  const cardType = card?.type
 
   const [fonts, setFonts] = useState<string | null>(null)
   useEffect(() => {
     let alive = true
     ready.current = false
-    api
-      .viewFrame(ws, slug, version)
+    ;(cardType ? api.cardTypeFrame(ws, cardType) : api.viewFrame(ws, slug, version))
       .then((doc) => alive && setPage(doc))
       .catch((e: Error) => alive && report.current?.(`the view's page did not load: ${e.message}`))
     void viewFonts().then((f) => alive && setFonts(f))
     return () => {
       alive = false
     }
-  }, [ws, slug, version])
+  }, [ws, slug, version, cardType])
   // the theme's tokens are read when the page is built, so a theme change reloads the page with the new colours; the
   // page waits for the app's faces so it is drawn once, in them
   const doc = useMemo(() => (page == null || fonts == null ? null : withFrameStyle(page, viewStyle(resolved) + fonts)), [page, fonts, resolved, key]) // key: the tokens are read again when the paper or the accent changes
@@ -297,7 +319,7 @@ export function ViewerFrame({ ws, slug, targetRef, path, title, fit, labels = NO
   const all = useMemo(() => pageLabelList(byId.values(), resolveToken, first), [byId, first, resolved, key])
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const palette = useMemo(() => pagePalette(resolveToken), [resolved, key])
-  const marks = useViewLabels(ws, slug, version, labels, filter, filterFiles, byId, all, palette, post)
+  const marks = useViewLabels(ws, slug, version, labels, filter, filterFiles, byId, all, palette, post, !card)
   const actions = useRef(labelActions)
   actions.current = labelActions
   const known = useRef(byId)
@@ -326,9 +348,14 @@ export function ViewerFrame({ ws, slug, targetRef, path, title, fit, labels = NO
     ready.current = false
     marks.reset()
   }, [doc, marks])
+  const sendInit = () => {
+    const c = drawn.current
+    if (c) post({ type: P + 'init', mode: c.mode, data: c.data, args: c.args, width: c.width, card: c.id })
+  }
   const sendOpen = async (r: string | undefined) => {
     let open: ViewOpen = path ? { ref: null, path } : { ref: null }
-    if (r) {
+    if (drawn.current) open = r ? ({ ref: r, target: { ref: r } } as ViewOpen) : { ref: null }
+    else if (r) {
       try {
         open = await api.viewOpen(ws, slug, r, version)
       } catch (e) {
@@ -353,6 +380,11 @@ export function ViewerFrame({ ws, slug, targetRef, path, title, fit, labels = NO
     if (ready.current) void sendOpen(targetRef)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [targetRef, quote?.text])
+  // a card run again, or drawn in another mode: a new `init`, no reload
+  useEffect(() => {
+    if (ready.current) sendInit()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [card?.data, card?.args, card?.mode, card?.width])
 
   useEffect(() => {
     const onMessage = async (e: MessageEvent) => {
@@ -363,6 +395,7 @@ export function ViewerFrame({ ws, slug, targetRef, path, title, fit, labels = NO
         case P + 'ready': {
           ready.current = true
           marks.ready()
+          sendInit()
           const st = restoring.current
           restoring.current = null
           if (st) void reopen(st)
@@ -379,7 +412,8 @@ export function ViewerFrame({ ws, slug, targetRef, path, title, fit, labels = NO
         }
         case P + 'fetch': {
           try {
-            const res = await api.viewRecords(ws, slug, d.query, version)
+            const c = drawn.current
+            const res = c ? await api.cardTypeRecords(ws, c.type, c.id, d.query) : await api.viewRecords(ws, slug, d.query, version)
             post({ type: P + 'result', id: d.id, data: res.data })
           } catch (err) {
             post({ type: P + 'result', id: d.id, error: (err as Error).message })
@@ -391,21 +425,6 @@ export function ViewerFrame({ ws, slug, targetRef, path, title, fit, labels = NO
           const rect = d.rect ? toPage(frame, d.rect) : frame.getBoundingClientRect()
           const payload = { anchor: d.ref, text: String(d.text ?? ''), element: String(d.element ?? ''), rect, frame, view: slug }
           bus.emit('pointAt', payload)
-          return
-        }
-        case P + 'ask': {
-          const question = String(d.question ?? '').trim()
-          if (!question) return post({ type: P + 'asked', error: 'the question is empty' })
-          const anchor = typeof d.ref === 'string' && d.ref ? d.ref : `view:${slug}`
-          // named by the question's first words, as a ⌘-click's thread is by the text it points at
-          const title = (question.match(/[A-Za-z0-9]+/g) ?? []).slice(0, 4).join('-').toLowerCase() || null
-          try {
-            const meta = await api.createThread(ws, { anchor, anchor_text: String(d.text ?? '') || null, title, surface: 'files', element: `view:${slug}`, selector: '', image: null, parent: 'main', text: question })
-            post({ type: P + 'asked', thread: meta.name || meta.title || meta.id })
-            bus.emit('openChat', { chatId: meta.id })
-          } catch (err) {
-            post({ type: P + 'asked', error: (err as Error).message })
-          }
           return
         }
         case P + 'point':
@@ -420,8 +439,13 @@ export function ViewerFrame({ ws, slug, targetRef, path, title, fit, labels = NO
         case P + 'error':
           report.current?.(String(d.message ?? 'the view failed'))
           return
-        case P + 'size':
-          if (typeof d.height === 'number' && Number.isFinite(d.height)) setHeight(Math.min(FIT_MAX, Math.max(FIT_MIN, Math.ceil(d.height))))
+        case P + 'size': {
+          const [lo, hi] = drawn.current?.size ?? [FIT_MIN, FIT_MAX]
+          if (typeof d.height === 'number' && Number.isFinite(d.height)) setHeight(Math.min(hi, Math.max(lo, Math.ceil(d.height))))
+          return
+        }
+        case P + 'settled':
+          settledFn.current?.()
           return
         case P + 'anchors':
           marks.add(d.refs)

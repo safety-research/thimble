@@ -5,7 +5,7 @@ import { useContext, useEffect, useLayoutEffect, useRef, useState, type CSSPrope
 import { ChatMarkdown } from '../chat/markdown'
 import { Chip } from '../components/Chip'
 import { CodeText } from '../components/Code'
-import { chartLabels, Output, outIndex, primaryArtifact } from '../components/Outputs'
+import { CARD_MIME, chartLabels, Output, outIndex, primaryArtifact } from '../components/Outputs'
 import { kindIcon } from '../components/RefChip'
 import { Icon } from '../components/Icon'
 import { Spinner } from '../components/Spinner'
@@ -27,6 +27,7 @@ import { resolvedOf } from './excerpts'
 import { FACT_KINDS, recordFacts } from './facts'
 import { filterIs, kindOf, scopeForUnit } from './layout'
 import { QuoteParts, RecordFacts } from './Quote'
+import { TypeCard } from './TypeCard'
 import { jsonRecordParts, plainMarkdown, quoteLine, quoteParts } from './quotes'
 
 const fail = (e: unknown) => bus.emit('toast', { text: (e as Error)?.message || String(e), kind: 'error' })
@@ -59,6 +60,12 @@ export function CardBody({ cell, width, label, big = false }: { cell: Cell; widt
     default: {
       if ((kind === 'timeline' || kind === 'diagram') && !cell.code && payload.dataset != null) return <DatasetView kind={kind} dataset={payload.dataset} fitWidth={width} />
       const art = primaryArtifact(cell.outputs)
+      if (art && CARD_MIME in art.bundle)
+        return (
+          <div className="bcell-output bcell-output-chart" data-out={outIndex(cell.outputs, art.bundle)}>
+            <TypeCard cell={cell} bundle={art.bundle} width={width} big={big} />
+          </div>
+        )
       const output = art ? (
         <div className={`bcell-output bcell-output-${art.kind}`} data-out={outIndex(cell.outputs, art.bundle)}>
           <Output bundle={art.bundle} maxLines={big ? 80 : 24} maxRows={big ? 40 : 12} fitWidth={width} card labels={chartLabels(cell.labels, concepts)} />

@@ -58,6 +58,9 @@ export type Events = {
   askAbout: { el: HTMLElement }
   /** the anchorable element under the pointer inside a view's frame while ⌘ is held; null when it left */
   pointHover: { rect: DOMRect | null }
+  /** a citation in a card's text is hovered (`ref`) or left (null), so a card that draws records can show the one it
+   * names */
+  citeHover: { card: string; ref: string | null }
   /** ⌘ went down or up: a view's frame shows the ⌘ arrow (`cursor`, a CSS cursor value) while it is held */
   cmdHeld: { on: boolean; cursor: string }
 }

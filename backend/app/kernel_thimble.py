@@ -919,7 +919,7 @@ def card(type, labels=None, **args):
     if size > CARD_DATA_MAX:
         raise ValueError(f"thimble.card({type!r}): the card's data is {size:,} bytes, and a card holds {CARD_DATA_MAX:,} "
                          f"at most; narrow its records")
-    _show({CARD_MIME: {"type": type, "version": str(t.get("version") or ""), "args": args,
+    _show({CARD_MIME: {"type": type, "version": str(t.get("version") or ""), "args": args, "size": t.get("size"),
                        "labels": [{"id": k["id"], "name": k["name"]} for k in ks], "data": data},
            "text/plain": "\n".join(lines)})
 

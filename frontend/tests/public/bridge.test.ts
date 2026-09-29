@@ -1,8 +1,9 @@
 // The frame half of a view's bridge (backend/app/viewer_bridge.js), which a custom view's page loads first and which is
 // the only way the view, sandboxed with no network, talks to thimble. Run in a jsdom window of its own: the bridge says
 // it is ready and reports each data-anchor once; window.thimble.fetch posts a query and resolves with the page's answer
-// to that id; window.thimble.ask posts a question and resolves with the thread; a message from anywhere but the parent
-// page is ignored; and with a label filter on, what the filter drops is hidden.
+// to that id; a message from anywhere but the parent page is ignored; with a label filter on, what the filter drops is
+// hidden; and in a card's frame the page draws what `init` brings, says the height it needs, and has what the filter
+// drops dimmed while it filters its own records.
 import { readFileSync } from 'node:fs'
 import path from 'node:path'
 import { JSDOM } from 'jsdom'
@@ -26,9 +27,10 @@ const win = () => dom.window as unknown as Window & typeof globalThis & { thimbl
 const fromPage = (data: object, source: unknown = win().parent) => win().dispatchEvent(new dom.window.MessageEvent('message', { data, source: source as any }))
 const of = (type: string) => sent.filter((m) => m.type === `thimble:${type}`)
 
-/** The view loaded in a fresh window. */
-async function load() {
-  dom = new JSDOM(VIEW, { runScripts: 'dangerously', pretendToBeVisual: true, url: 'http://view.invalid/' })
+/** The view loaded in a fresh window; `card` loads it as a card's page. */
+async function load(card = false) {
+  const page = card ? VIEW.replace('<head>', '<head><script>window.__thimbleView = {"slug": "swarm", "name": "Swarm", "card": true}</script>') : VIEW
+  dom = new JSDOM(page, { runScripts: 'dangerously', pretendToBeVisual: true, url: 'http://view.invalid/' })
   sent = []
   // a top-level window is its own parent, so the frame's parent.postMessage lands here, before the bridge is ready
   dom.window.postMessage = ((msg: Msg) => void sent.push(msg)) as typeof dom.window.postMessage
@@ -55,19 +57,6 @@ describe('the view bridge', () => {
     fromPage({ type: 'thimble:result', id: q1.id, data: [{ n: 1 }] })
     await expect(got).resolves.toEqual([{ n: 1 }])
     await expect(bad).rejects.toThrow('no such page')
-  })
-
-  test('ask posts the question with what the view shows, and resolves with the thread the page opened', async () => {
-    const got = win().thimble.ask('who confirmed it?', '12 cards of 5 accounts')
-    const bad = win().thimble.ask('')
-    expect(of('ask')).toEqual([
-      { type: 'thimble:ask', question: 'who confirmed it?', text: '12 cards of 5 accounts', ref: '' },
-      { type: 'thimble:ask', question: '', text: '', ref: '' },
-    ])
-    fromPage({ type: 'thimble:asked', thread: 'who-confirmed-it' })
-    fromPage({ type: 'thimble:asked', error: 'the question is empty' })
-    await expect(got).resolves.toBe('who-confirmed-it')
-    await expect(bad).rejects.toThrow('the question is empty')
   })
 
   test('a message from anything but the parent page is ignored', async () => {
@@ -99,5 +88,30 @@ describe('the view bridge', () => {
     fromPage({ type: 'thimble:labels', marks: {}, on: [], filter: null })
     await wait()
     expect(doc.querySelectorAll('[data-thimble-drop]')).toHaveLength(0)
+  })
+
+  test("in a card's frame the page draws what init brings, sizes itself and has what the filter drops dimmed", async () => {
+    dom.window.close()
+    await load(true)
+    const doc = dom.window.document
+    const seen: unknown[] = []
+    win().thimble.onLabels(() => undefined)
+    fromPage({ type: 'thimble:init', mode: 'card', data: { cards: 2 }, args: { rows: 'account' }, width: 692, card: 'c7' })
+    win().thimble.onInit((x: unknown) => seen.push(x))
+    expect(seen).toEqual([{ mode: 'card', data: { cards: 2 }, args: { rows: 'account' }, width: 692, card: 'c7' }])
+    expect(win().thimble.card).toMatchObject({ card: 'c7' })
+    win().thimble.size(480)
+    win().thimble.settled()
+    expect(of('size').at(-1)).toMatchObject({ height: 480 })
+    expect(of('settled')).toHaveLength(1)
+    let heard = 0
+    win().thimble.onMarks(() => heard++)
+    const marks = { 'board.jsonl#L2': { keep: true }, 'board.jsonl#L1': { bar: '#e69f00', names: ['asks'], spans: [], keep: false } }
+    fromPage({ type: 'thimble:labels', marks, on: [], filter: { label: 'asks', value: 'yes', colour: '#e69f00' } })
+    await wait()
+    expect(heard).toBe(1)
+    expect(win().thimble.markOf('board.jsonl#L1')).toMatchObject({ bar: '#e69f00' })
+    expect(doc.getElementById('one')!.getAttribute('data-thimble-drop')).toBe('dim')
+    expect(doc.getElementById('two')!.hasAttribute('data-thimble-drop')).toBe(false)
   })
 })

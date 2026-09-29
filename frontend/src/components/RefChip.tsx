@@ -9,6 +9,7 @@
 import { createContext, useContext, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { createPortal } from 'react-dom'
 import { api } from '../lib/api'
+import { bus } from '../lib/bus'
 import { callOutput, callWords, fetchCall, onCallWords, outputLines } from '../lib/calls'
 import { cellLabel, conceptLabel, ensureCellName, ensureConceptName, hasCellName, hasConceptName, onCellNames } from '../lib/cellName'
 import { callLineText } from '../chat/model'
@@ -366,10 +367,12 @@ export function RefChip({ ref, value, compact, workspace, broken, brokenWhy, qui
   const onEnter = () => {
     cancelHide()
     window.clearTimeout(showTimer.current)
+    if (home) bus.emit('citeHover', { card: home, ref })
     if (pointing()) return
     showTimer.current = window.setTimeout(() => void open(), HOVER_DELAY_MS)
   }
   const onLeave = () => {
+    if (home) bus.emit('citeHover', { card: home, ref: null })
     window.clearTimeout(showTimer.current)
     reqSeq.current++
     unmark()

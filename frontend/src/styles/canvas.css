@@ -2514,3 +2514,23 @@ audio.bcell-media {
   font: 400 var(--text-mono-sm) / 1.5 var(--font-mono);
   color: var(--text-tertiary);
 }
+
+/* a card type's frame (canvas/TypeCard): as tall as its page asks, or filling a card the analyst sized */
+.bcell-type {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.bcell-type .viewer-frame {
+  flex: none;
+}
+.bcell-type .viewer-frame-loading {
+  min-height: 120px;
+}
+.bcell.is-sized .bcell-type {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+.bcell.is-sized .bcell-type .viewer-frame {
+  flex: 1 1 auto;
+}

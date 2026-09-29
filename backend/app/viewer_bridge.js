@@ -9,12 +9,13 @@
 //   fetch {id, query}      frame to page, answered by result {id, data} from reader.records (window.thimble.fetch)
 //   cite {ref, text, ...}  frame to page: a ⌘-click on an element with data-anchor, or on any other part of the view
 //                          (its legend, a control, the empty page), asked about as the view itself, `view:<slug>`
-//   ask {question, text, ref}
-//                          frame to page: a question typed in the view's own box, sent as a thread about `ref` (the
-//                          view itself when none) with `text`, what the view shows; answered by asked {thread} or
-//                          asked {error}, which window.thimble.ask's promise resolves or rejects with
+//   init {mode, data, args, width, card}
+//                          page to frame, in a card's frame (cardtypes.py): what the card stored, which the page draws
+//                          with no fetch (window.thimble.onInit); mode is card, full or render, and `card` its id
 //   navigate {ref}         frame to page: open another place, in this view or anywhere in thimble (window.thimble.navigate)
-//   size {height}          frame to page: the document's height, for a frame that sizes to its content
+//   size {height}          frame to page: the document's height, for a frame that sizes to its content, or the height a
+//                          page says it needs (window.thimble.size), after which the document's own height is not sent
+//   settled                frame to page: a card's page has drawn what `init` brought (window.thimble.settled)
 //   anchors {refs}         frame to page: the data-anchor values that appeared since the last report
 //   labels {marks, on, filter, all, palette}
 //                          page to frame: marks {ref: {bar, names, spans: [{text, colour}], keep?}}, the marks of the
@@ -23,7 +24,9 @@
 //                          values}], the labels that are on; filter {label, value, colour} or null; all [{id, name, on,
 //                          colour, values: [{name, colour, highlight}], count}], every label over files; palette, the
 //                          colours a label's value can take. Each replaces the last; window.thimble.onLabels hears all
-//                          but the marks
+//                          but the marks, which window.thimble.markOf reads and window.thimble.onMarks hears. In a card's
+//                          frame the elements whose records the filter drops are dimmed, never hidden, and the page's
+//                          own filtering is left alone
 //   label {id, on}, labelColour {id, value, colour}, newLabel
 //                          frame to page: the page's label controls (window.thimble.setLabel, setLabelColour and
 //                          newLabel), which thimble does as its Labels pane does them
@@ -48,7 +51,12 @@
   var last = null
   var pointed = null
   var picked = null // the data-anchor of the element the analyst last clicked since the last `open`
-  var asking = [] // thimble.ask's promises, answered in order
+  var cardMode = !!(window.__thimbleView && window.__thimbleView.card)
+  var init = null
+  var initFns = []
+  var markFns = []
+  var markKey = '{}'
+  var ownSize = false // the page said the height it needs, so the document's own height is no longer sent
   function post(msg) {
     try {
       parent.postMessage(msg, '*')
@@ -74,6 +82,8 @@
   window.thimble = {
     /** the view this page belongs to: {slug, name}, for the view:<slug>/<key> refs it writes */
     view: window.__thimbleView || null,
+    /** in a card's frame, what the card stored ({mode, data, args, width, card}) once `init` arrived; null in a view */
+    card: null,
     /** fn(place) runs for every `open`, and at once with the last one when it arrived before the view registered */
     onOpen: function (fn) {
       openers.push(fn)
@@ -125,13 +135,34 @@
     cite: function (ref, text, element, el) {
       post({ type: P + 'cite', ref: String(ref), text: String(text || ''), element: String(element || ''), rect: el ? rectOf(el) : null })
     },
-    /** ask the analyst's Claude Code session a question typed in the view, as a thread about `ref` (the view itself when
-     *  none), with `text` saying what the view shows; resolves with the thread's name */
-    ask: function (question, text, ref) {
-      return new Promise(function (resolve, reject) {
-        asking.push({ resolve: resolve, reject: reject })
-        post({ type: P + 'ask', question: String(question || ''), text: String(text || ''), ref: ref ? String(ref) : '' })
-      })
+    /** fn({mode, data, args, width, card}) runs with what a card stored, in a card's frame only: at once when it has
+     *  arrived, and again when the card is drawn anew */
+    onInit: function (fn) {
+      initFns.push(fn)
+      if (init) {
+        try {
+          fn(init)
+        } catch (e) {
+          report(e)
+        }
+      }
+    },
+    /** the mark of the labels the page is given on one record or unit ref, {bar, names, keep?}, or null */
+    markOf: function (ref) {
+      return marks[String(ref)] || null
+    },
+    /** fn() runs whenever the marks change, such as while a label runs */
+    onMarks: function (fn) {
+      markFns.push(fn)
+    },
+    /** the height the page needs, in px; thimble fits the frame to it within the card's range */
+    size: function (height) {
+      ownSize = true
+      post({ type: P + 'size', height: Number(height) || 0 })
+    },
+    /** a card's page has drawn what it was given, so its picture can be taken */
+    settled: function () {
+      post({ type: P + 'settled' })
     },
     /** open another place: a view ref, a file ref or any other ref thimble knows */
     navigate: function (ref) {
@@ -166,6 +197,16 @@
       delete pending[d.id]
       if (d.error) p.reject(new Error(d.error))
       else p.resolve(d.data)
+    } else if (d.type === P + 'init') {
+      init = { mode: String(d.mode || 'card'), data: d.data, args: d.args || {}, width: Number(d.width) || 0, card: d.card ? String(d.card) : null }
+      window.thimble.card = init
+      for (var n = 0; n < initFns.length; n++) {
+        try {
+          initFns[n](init)
+        } catch (err) {
+          report(err)
+        }
+      }
     } else if (d.type === P + 'labels') {
       marks = d.marks && typeof d.marks === 'object' ? d.marks : {}
       filter = d.filter && typeof d.filter === 'object' ? d.filter : null
@@ -185,9 +226,17 @@
         }
       }
       paint()
-    } else if (d.type === P + 'asked') {
-      var a = asking.shift()
-      if (a) d.error ? a.reject(new Error(String(d.error))) : a.resolve(String(d.thread || ''))
+      var mk = JSON.stringify(marks)
+      if (mk !== markKey) {
+        markKey = mk
+        for (var g = 0; g < markFns.length; g++) {
+          try {
+            markFns[g]()
+          } catch (err) {
+            report(err)
+          }
+        }
+      }
     } else if (d.type === P + 'cmd') {
       setCmdCursor(d.cursor)
       cmdHeld(d.on)
@@ -246,8 +295,9 @@
     var el = t && t.closest ? t.closest('[data-anchor]') : null
     if (el) return { el: el, ref: el.getAttribute('data-anchor') }
     var slug = window.thimble.view && window.thimble.view.slug
-    if (!slug || !t || t.nodeType !== 1) return null
-    return { el: t === document.body ? document.documentElement : t, ref: 'view:' + slug }
+    var own = cardMode ? (init && init.card ? 'card:' + init.card : null) : slug ? 'view:' + slug : null
+    if (!own || !t || t.nodeType !== 1) return null
+    return { el: t === document.body ? document.documentElement : t, ref: own }
   }
   document.addEventListener(
     'mousemove',
@@ -329,11 +379,12 @@
   }
   // With a label filter on, a page that does not filter its own records (it registered no onLabels) has every
   // anchored element hidden whose ref the filter does not keep and that holds no kept element: an HTML element leaves
-  // the layout, and an SVG shape is dimmed, since removing it would break the drawing. The place the page was opened at
-  // stays, since the analyst asked for it. Whether anything is dropped.
+  // the layout, and an SVG shape is dimmed, since removing it would break the drawing. A card's page, whose records its
+  // code chose, has them all dimmed instead. The place the page was opened at stays, since the analyst asked for it.
+  // Whether anything is dropped.
   var dropped = []
   function dropping() {
-    return !!filter && !labelFns.length
+    return !!filter && (cardMode || !labelFns.length)
   }
   function drop() {
     for (var i = 0; i < dropped.length; i++) dropped[i].removeAttribute('data-thimble-drop')
@@ -351,7 +402,7 @@
     for (var h = 0; h < held.length; h++) for (var a = held[h].parentElement; a; a = a.parentElement) keep.add(a)
     for (var k = 0; k < els.length; k++) {
       if (keep.has(els[k])) continue
-      els[k].setAttribute('data-thimble-drop', els[k] instanceof SVGElement ? 'dim' : 'hide')
+      els[k].setAttribute('data-thimble-drop', cardMode || els[k] instanceof SVGElement ? 'dim' : 'hide')
       dropped.push(els[k])
     }
     return true
@@ -790,7 +841,7 @@
 
   function size() {
     var b = document.body
-    if (!b) return
+    if (!b || ownSize) return
     var c = getComputedStyle(b)
     post({ type: P + 'size', height: b.offsetHeight + parseFloat(c.marginTop) + parseFloat(c.marginBottom) })
   }

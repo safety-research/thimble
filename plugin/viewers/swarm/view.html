@@ -8,16 +8,17 @@
   [hidden] { display: none !important; }
   body { background: var(--surface-card); display: flex; flex-direction: column; overflow: hidden; }
   #bar { flex: none; padding: 10px 16px 8px; border-bottom: 1px solid var(--border-hairline); background: var(--surface-card); }
+  /* a card (thimble.card) sits on the card's own paper, its question and controls above it on the card */
+  body.card, body.card #bar, body.card #corner, body.card #cols, body.card #rows, body.card #detail { background: var(--surface-card); }
+  body.card #bar { padding: 0 0 8px; }
+  body.card #toprow, body.card #pager { display: none; }
+  body.card #threads { margin-top: 0; }
   .row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; min-width: 0; }
   .row + .row { margin-top: 7px; }
   .grow { flex: 1 1 auto; }
   /* the places keep to one row that scrolls sideways */
   #threads { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: thin; }
   #threads > * { flex: none; }
-  #askf { display: flex; gap: 6px; }
-  #ask { flex: 1 1 auto; min-width: 0; }
-  #asked { margin: 6px 0 0; font: 400 var(--text-xs) / 1.4 var(--font-body); color: var(--text-secondary); overflow-wrap: anywhere; }
-  #asked.err { color: var(--status-danger, var(--status-warning)); }
   #title { flex: 1 1 200px; min-width: 0; margin: 0; font: 500 var(--text-sm) / 1.35 var(--font-body); color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   #counts { font: 400 var(--text-xs) / 1.3 var(--font-body); color: var(--text-secondary); font-variant-numeric: tabular-nums; margin-right: 6px; white-space: nowrap; }
   #q { flex: 0 1 190px; min-width: 110px; }
@@ -164,12 +165,7 @@
 </head>
 <body>
 <div id="bar">
-  <div id="askf" data-anchor-name="Question box">
-    <input id="ask" class="field" type="text" placeholder="Ask how these agents coordinated" aria-label="Ask a question about these records" autocomplete="off" spellcheck="false">
-    <button id="askb" class="btn btn-secondary btn-sm" type="button">Ask</button>
-  </div>
-  <p id="asked" role="status" hidden></p>
-  <div class="row" style="margin-top:8px">
+  <div class="row" id="toprow">
     <p id="title"></p>
     <input id="q" class="field" type="search" placeholder="Search cards" aria-label="Search cards" autocomplete="off" spellcheck="false">
     <button id="cbtn" class="btn btn-secondary btn-sm cbtn" data-anchor-name="Labels"></button>
@@ -208,8 +204,13 @@
 // Swarm: a row per account (or per name the cards sign with), a card per record the labels that are on mark, in event
 // order, and the links between cards that the records carry, drawn from the reader's chart. Columns follow event
 // order, one card each, so their spacing is no measure of time; each is headed by its card's UTC time, or "Time
-// unknown". The question box sends a question to the analyst's Claude Code session with what the chart shows, and the
-// labels it answers with, once on, become the cards.
+// unknown".
+// As a card (thimble.view.card, a card's code calling thimble.card("swarm", …)), the page draws the chart the card
+// stored, which the bridge's `init` brings, and fetches only a record's detail. Its records and their values are the
+// card's; the legend, grouping, link types and search narrow what it shows here. The colours are the labels' as the
+// analyst edits them, and a record a label marked after the card ran takes the colour of its mark as the label runs. A
+// citation hovered in the card's takeaway lights its record. It tells thimble the height it needs, and that it has
+// drawn.
 // Layout: a card spans more than its column, so cards of one row that would overlap stack in the row's lanes. The part
 // of a card no neighbouring column's card reaches, its band, carries the vertical runs of its links, and each link runs
 // horizontally in the gap between rows next to its target, so no link crosses a card. A gap is as tall as the links it
@@ -219,8 +220,11 @@
 // beside the chart; "Open record" opens it in thimble.
 // Labels: while a label is on it is the colouring: cards take its values' colours, and links are drawn in ink, told
 // apart by dash and label; with none on, each place's tag takes a viz colour and each link type another. Cards carry
-// their record's ref as data-anchor, and rows and places their unit keys, so thimble marks them.
+// their record's ref as data-anchor, and rows and places their unit keys, so thimble marks them. A value's colour is
+// looked up in what thimble last sent (onLabels), so a colour the analyst changes shows at once.
 const slug = (thimble.view && thimble.view.slug) || 'swarm'
+const CARD = !!(thimble.view && thimble.view.card)
+if (CARD) document.body.classList.add('card')
 const NS = 'http://www.w3.org/2000/svg'
 const TYPE_VIZ = { reply: 1, names: 3, 'same place': 7 } // the viz colour of each link type
 const DASH = { reply: '', names: '', 'same place': '1.5 3.5' }
@@ -234,9 +238,7 @@ const CARD_GAP = 8 // between two cards in one lane
 const PAD_L = 16, PAD_R = 40
 const END_GAP = 8 // between two link ends on one card
 const FIT_MIN = 0.3
-const CONTEXT_MAX = 1900 // characters of what the chart shows, sent with a question (a thread keeps 2,000)
 const RUN_POLL_MS = 3000 // how often the chart is read again while a label that is on runs
-const CARD_REFS_SENT = 20
 
 const token = (n) => getComputedStyle(document.documentElement).getPropertyValue(n).trim()
 const fmt = (n) => Number(n).toLocaleString('en-US')
@@ -299,6 +301,7 @@ let group = 'account' // 'account' or 'sig'
 let zoom = 1 // 1 or 'fit'
 let offset = 0
 let only = [] // the label values the legend keeps, [{label, value}]; all when empty
+let mode = 'view' // or, in a card's frame, the card's mode: card, full or render
 let sel = null // {kind: card|row|link|record, id|key|ref}
 let hover = null
 let keepRef = null // the record a citation opened, shown whatever the labels mark
@@ -308,7 +311,7 @@ let failed = false // the first load failed, so the next label change tries agai
 const recCache = new Map()
 let L = null // the layout: {cards, cells, linkEls, width, height}
 
-const labelsOn = () => !!(D && D.source === 'labels' && D.marks.length)
+const labelsOn = () => !!(D && D.source !== 'addressed' && D.marks.length)
 function typeColour(t) {
   if (labelsOn()) return token('--viz-ink-2')
   return TYPE_VIZ[t] ? token(`--viz-${TYPE_VIZ[t]}`) : token('--viz-ink-2')
@@ -317,14 +320,27 @@ function placeColour(tag) {
   const i = Number(String(tag).slice(1)) - 1
   return i >= 0 && i < 6 ? token(`--viz-${[1, 2, 5, 6, 4, 3][i]}`) : token('--viz-ink-3')
 }
+// a label value's colour as thimble last sent it, else the one the chart was drawn with
+function markColour(m) {
+  const label = (labelState.all || labelState.labels || []).find((l) => l.name === m.label)
+  const v = label && (label.values || []).find((x) => x.name === m.value)
+  return (v && v.colour) || m.colour
+}
 function cardColour(c) {
-  if (labelsOn()) return c.m >= 0 ? D.marks[c.m].colour : null
-  return null
+  if (!labelsOn()) return null
+  if (c.m >= 0) return markColour(D.marks[c.m])
+  const live = CARD && thimble.markOf ? thimble.markOf(c.ref) : null
+  return live && live.bar ? live.bar : null
 }
 const types = () => [...new Set(D.links.map((x) => x.type))]
 const rowKey = (c) => (group === 'sig' && c.sig ? c.sig : c.account)
 
 async function load() {
+  if (CARD) {
+    // a card's records are the ones it stored; the legend narrows them here
+    offset = 0
+    return !!D
+  }
   const seq = ++loadSeq
   let data
   try {
@@ -374,51 +390,13 @@ function index() {
   for (const t of [...F.places]) if (!placeBy.has(t)) F.places.delete(t)
 }
 
-// ---------------------------------------------------------------- the question box
-// what the chart shows, sent with a question as the thread's text, so the answer can be about these records
-function context() {
-  if (!D) return ''
-  const on = labelState.labels.map((l) => (l.id ? `${l.name} (concept:${l.id})` : l.name))
-  const lines = [
-    `The ${thimble.view && thimble.view.name ? thimble.view.name : 'Swarm'} view (view:${slug}) draws a row per account, columns in event order and as cards the records the labels that are on give a highlighted value, coloured by value, linked by replies, names of other accounts and the record before on the same place.`,
-  ]
-  if (!labelsOn()) lines.push(`No label is on, so it shows the records that answer or name another account on the places that hold the most of them, which need not bear on the question.`)
-  else {
-    lines.push(`Now: ${D.cards.length ? `cards ${D.offset + 1}–${D.offset + D.cards.length} of ${fmt(D.total)}` : 'no cards'}; labels on: ${on.join(', ')}${only.length ? `; the legend keeps ${only.map((o) => o.value).join(', ')}` : ''}${labelState.filter ? `; filter: ${labelState.filter.label} = ${labelState.filter.value}` : ''}.`)
-    if (D.cards.length) lines.push(`Cards: ${D.cards.slice(0, CARD_REFS_SENT).map((c) => c.ref).join(', ')}${D.cards.length > CARD_REFS_SENT ? ', …' : ''}`)
-  }
-  const text = lines.join('\n')
-  return text.length > CONTEXT_MAX ? text.slice(0, CONTEXT_MAX - 1) + '…' : text
-}
-// the frame's sandbox blocks a form's submission, so Enter and the button send the question themselves
-async function ask() {
-  const input = document.getElementById('ask'), btn = document.getElementById('askb'), out = document.getElementById('asked')
-  const question = input.value.trim()
-  if (!question || !thimble.ask) return
-  input.disabled = btn.disabled = true
-  out.hidden = false
-  out.className = ''
-  out.textContent = 'Asking…'
-  try {
-    const thread = await thimble.ask(question, context())
-    input.value = ''
-    out.textContent = `“${question}”, asked in the thread ${thread}: the labels that answer it come on here as they run.`
-  } catch (err) {
-    out.className = 'err'
-    out.textContent = `The question was not sent: ${err.message || err}`
-  } finally {
-    input.disabled = btn.disabled = false
-  }
-}
-document.getElementById('ask').addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); ask() } })
-document.getElementById('askb').addEventListener('click', ask)
-
 // ---------------------------------------------------------------- filters
 function hay(c) {
   const p = placeBy.get(c.tag) || { name: '' }
   return [`#${c.id}`, c.account, c.sig || '', c.tag, p.name, c.line, D.marks[c.m] ? D.marks[c.m].value : '', c.time || 'time unknown'].join('\n').toLowerCase()
 }
 function matches(c) {
+  if (CARD && only.length && !only.some((o) => c.mb & (1 << D.marks.findIndex((m) => m.label === o.label && m.value === o.value)))) return false
   if (F.row && rowOfCard.get(c.id) !== F.row) return false
   if (F.places.size && !F.places.has(c.tag)) return false
   if (q && !hay(c).includes(q)) return false
@@ -527,7 +505,7 @@ function renderLegend() {
     const it = h('span', `lg${kept(m) ? '' : ' off'}`)
     if (label && label.id) it.dataset.label = label.id
     it.title = 'Click: only these cards · Shift-click: add them'
-    it.append(swatch(m.colour, label, m.value), h('span', null, labelState.labels.length > 1 ? `${m.label}: ${m.value}` : m.value), h('span', 'n', fmt((D.mark_counts || [])[j] || 0)))
+    it.append(swatch(markColour(m), label, m.value), h('span', null, new Set(D.marks.map((x) => x.label)).size > 1 ? `${m.label}: ${m.value}` : m.value), h('span', 'n', fmt((D.mark_counts || [])[j] || 0)))
     it.onclick = async (e) => {
       const at = only.findIndex((o) => o.label === m.label && o.value === m.value)
       if (e.shiftKey) only = at >= 0 ? only.filter((_, i) => i !== at) : [...only, { label: m.label, value: m.value }]
@@ -660,7 +638,7 @@ document.addEventListener('click', (e) => {
 // Everything is measured at zoom 1 and in CSS pixels of the plot; the zoom is applied to the whole grid afterwards.
 function metrics() {
   const narrow = innerWidth < 560
-  return { AGW: narrow ? 124 : 240, W: narrow ? 112 : 120, CW: narrow ? 168 : 184 }
+  return { AGW: narrow ? 124 : CARD ? 168 : 240, W: narrow ? 112 : 120, CW: narrow ? 168 : 184 }
 }
 function layout(v) {
   const M = metrics()
@@ -968,9 +946,6 @@ function select(f, { reveal = true } = {}) {
 }
 function revealSel() {
   if (!L || !sel) return
-  const chart = document.getElementById('chart')
-  const z = parseFloat(document.getElementById('grid').style.zoom || '1') || 1
-  const M = metrics()
   let box = null
   if (sel.kind === 'card' && L.cards.has(sel.id)) { const k = L.cards.get(sel.id); box = { x: k.x, y: k.y, w: k.w, h: k.h } }
   else if (sel.kind === 'link') {
@@ -981,7 +956,13 @@ function revealSel() {
     const own = [...L.cards.values()].filter((k) => rowOfCard.get(k.c.id) === sel.key)
     if (own.length) box = { x: own[0].x, y: own[0].y, w: own[0].w, h: own[0].h }
   }
+  revealBox(box)
+}
+function revealBox(box) {
   if (!box) return
+  const chart = document.getElementById('chart')
+  const z = parseFloat(document.getElementById('grid').style.zoom || '1') || 1
+  const M = metrics()
   const det = document.getElementById('detail')
   const over = !det.hidden && getComputedStyle(det).position === 'absolute' ? Math.min(det.offsetWidth, chart.clientWidth * 0.6) : 0
   const viewW = Math.max(120, (chart.clientWidth - over) / z - M.AGW), viewH = chart.clientHeight / z - HEAD_H
@@ -1112,7 +1093,7 @@ async function renderDetail() {
     const tg = chip(c.tag)
     tg.title = p ? p.name : c.tag
     const chips = [chip(`#${c.id}`), tg]
-    if (labelsOn() && c.m >= 0) { const vv = chip(D.marks[c.m].value); vv.style.color = D.marks[c.m].colour; chips.push(vv) }
+    if (labelsOn() && c.m >= 0) { const vv = chip(D.marks[c.m].value); vv.style.color = markColour(D.marks[c.m]); chips.push(vv) }
     box.append(detailHead(chips, c.ref))
     box.append(h('div', 'd-when', `${whenOf(c.time)}${p ? ` · ${p.name}` : ''}${c.sig && c.sig !== c.account ? ` · signed ${c.sig}` : ''}`), h('p', 'd-h', c.line), rowBlock(rowOfCard.get(c.id)))
     const ls = linksOf.get(c.id) || []
@@ -1181,9 +1162,26 @@ function refresh() {
   layout(v)
   applyFocus()
   renderDetail()
+  if (CARD) reportSize()
+}
+// a card's page asks for the height its chart needs; thimble fits the frame to it within the card's range
+function reportSize() {
+  const chart = document.getElementById('chart')
+  const z = parseFloat(document.getElementById('grid').style.zoom || '1') || 1
+  const bar = document.getElementById('bar').offsetHeight
+  const body = L ? Math.ceil(L.height * z) + (L.width * z > chart.clientWidth ? 14 : 2) : document.getElementById('empty').offsetHeight + 96
+  thimble.size(bar + body)
+}
+// in a card, the record a hovered citation names is lit and scrolled to
+function lightRef(ref) {
+  const card = ref && D ? D.cards.find((c) => c.ref === ref) : null
+  hover = card ? { kind: 'card', id: card.id } : null
+  applyFocus()
+  const k = card && L ? L.cards.get(card.id) : null
+  if (k) revealBox({ x: k.x, y: k.y, w: k.w, h: k.h })
 }
 let resizeT = null
-addEventListener('resize', () => { clearTimeout(resizeT); resizeT = setTimeout(() => { if (D) { layout(visible()); applyFocus() } }, 120) })
+addEventListener('resize', () => { clearTimeout(resizeT); resizeT = setTimeout(() => { if (D) { layout(visible()); applyFocus(); if (CARD) reportSize() } }, 120) })
 
 function applyTarget(t) {
   if (!t) return
@@ -1206,6 +1204,7 @@ async function start() {
 }
 thimble.onOpen(async (place) => {
   const t = (place && place.target) || null
+  if (CARD) return lightRef(t && t.ref)
   const again = t && t.ref && t.ref !== keepRef
   if (t && t.ref) keepRef = t.ref
   if (!D) { target = t; return }
@@ -1215,6 +1214,12 @@ thimble.onOpen(async (place) => {
 thimble.onLabels(async (state) => {
   const was = JSON.stringify([labelState.labels, labelState.filter, (labelState.all || []).map((l) => [l.id, l.count])])
   labelState = { labels: state.labels || [], filter: state.filter || null, all: state.all || null, palette: state.palette || null }
+  if (CARD) {
+    // a card's records are fixed; the labels change only their colours
+    if (D) refresh()
+    renderPop()
+    return
+  }
   if (!D) {
     if (failed) { failed = false; await start() }
     return
@@ -1240,7 +1245,20 @@ function watchRuns() {
     watchRuns()
   }, RUN_POLL_MS)
 }
-start()
+if (CARD) {
+  let marksT = null
+  thimble.onMarks(() => { if (D && marksT == null) marksT = requestAnimationFrame(() => { marksT = null; refresh() }) })
+  thimble.onInit((init) => {
+    mode = init.mode
+    D = init.data
+    group = D.rows_by === 'sig' ? 'sig' : 'account'
+    only = []
+    sel = null
+    index()
+    refresh()
+    requestAnimationFrame(() => thimble.settled())
+  })
+} else start()
 </script>
 </body>
 </html>
