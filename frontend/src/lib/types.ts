@@ -591,7 +591,7 @@ export interface StartBody {
 export type OrientPermissions = 'manual' | 'auto' | 'bypass'
 
 /** The agents that each run in a permission mode of their own (backend modes.AGENTS). */
-export type ModeAgent = 'orient' | 'writer' | 'critic' | 'dev' | 'views'
+export type ModeAgent = 'orient' | 'writer' | 'critic' | 'checks' | 'dev'
 
 // ---- documents ----
 
@@ -908,7 +908,8 @@ export interface ModelConf {
   follows?: string
 }
 
-/** `GET /ws/{c}/settings` layers the effective `models` in; a PUT merges what it is given. */
+/** `GET /ws/{c}/settings` layers the effective `models` and permission modes in from thimble's config; a PUT merges
+ * what it is given. */
 export interface Settings {
   models: Record<string, ModelConf>
   /** terminal-first mode: the orientation, its critic and the writers run as Claude Code background sessions the
@@ -920,6 +921,8 @@ export interface Settings {
   permission_modes?: Partial<Record<ModeAgent, OrientPermissions>>
   /** the modes the analyst's Claude Code settings turn off */
   disabled_modes?: OrientPermissions[]
+  /** why thimble's config cannot be used, '' when it can (backend userconf.problem) */
+  config_error?: string
   [k: string]: unknown
 }
 

@@ -7,6 +7,8 @@ import pytest
 from conftest import UI_KEY
 from fastapi.testclient import TestClient
 
+from app import userconf
+
 CORPUS = "mini"
 
 
@@ -36,8 +38,9 @@ def test_the_settings_route_changes_only_the_browser_s_settings(client, workspac
     r = client.put(f"/api/ws/{CORPUS}/settings", json={"hide_chat": True, "terminal_first": False,
                                                        "run_cell_result_lines": 20})
     assert r.status_code == 200 and r.json()["hide_chat"] is True
-    assert set(json.loads(path.read_text())) == {"hide_chat", "terminal_first", "run_cell_result_lines",
-                                                 "permission_modes"}
+    assert set(json.loads(path.read_text())) == {"hide_chat", "terminal_first", "run_cell_result_lines"}
+    assert json.loads(userconf.global_file().read_text()) == {"agents": {"dev": {"permissionMode": "bypass"}}}, \
+        "the permission modes are thimble's config's"
 
 
 def test_a_retired_setting_an_earlier_build_stored_loads_and_is_dropped(client, workspaces_tmp):

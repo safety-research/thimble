@@ -19,12 +19,12 @@ import { BYPASS_WARNING, PERMISSION_OPTIONS } from './StartGate'
 
 const LABELS: Record<OrientPermissions, string> = { manual: 'Manual', auto: 'Auto', bypass: 'Bypass' }
 /** Each agent's row (modes.AGENTS) as a sentence names whose next new session a saved mode governs. */
-const NEXT_OF: Record<ModeAgent, string> = { orient: "the orientation's", writer: "the writers'", critic: "the critic's", dev: "the dev agent's", views: "view builds'" }
+const NEXT_OF: Record<ModeAgent, string> = { orient: "the orientation's", writer: "the writers'", critic: "the critic's", checks: "the checks'", dev: "the dev agent's" }
 
 type SwitchMeta = Pick<ChatMeta, 'permission_mode' | 'mode_switch' | 'background' | 'mode_agent'> & Partial<Pick<ChatMeta, 'role'>>
 /** The agent row of a chat whose meta names none, by the chat's role (backend orientation.ROLE, write_session.ROLE,
  * checks.ROLE). */
-const ROLE_AGENT: Partial<Record<string, ModeAgent>> = { orient: 'orient', writer: 'writer', check: 'critic' }
+const ROLE_AGENT: Partial<Record<string, ModeAgent>> = { orient: 'orient', writer: 'writer', check: 'checks' }
 
 /** The session's agent's row of the permission modes: its meta's, else its role's; undefined when neither names one.
  * Pure. */

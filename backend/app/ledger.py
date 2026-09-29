@@ -213,17 +213,17 @@ def stored_settings(c: str) -> dict[str, Any]:
 
 def with_features(stored: dict[str, Any], c: str | None = None) -> dict[str, Any]:
     """The effective settings: SETTINGS_DEFAULTS under `stored` less RETIRED_KEYS, with workspace `c`'s default of
-    terminal_first (orientation.default_terminal_first), `models` as config.models_for resolves it, the rows of
-    the permission modes the analyst set (modes.chosen), and `disabled_modes`, those the analyst's Claude Code settings
-    turn off."""
-    from . import modes, orientation  # noqa: PLC0415 — both import this module
+    terminal_first (orientation.default_terminal_first), `models` as config.models_for resolves them from thimble's
+    config, the permission modes the config sets (modes.rows), `disabled_modes`, those the analyst's Claude Code settings
+    turn off, and `config_error`, the config's error or ''."""
+    from . import modes, orientation, userconf  # noqa: PLC0415 — they import this module
 
-    kept = {k: v for k, v in stored.items() if k not in RETIRED_KEYS}
+    kept = {k: v for k, v in stored.items() if k not in RETIRED_KEYS and k != modes.SETTING}
     defaults = dict(SETTINGS_DEFAULTS)
     if c is not None:
         defaults[orientation.TERMINAL_FIRST_KEY] = orientation.default_terminal_first(c)
-    return {**defaults, **kept, config.MODELS_KEY: config.models_for(c, stored),
-            modes.SETTING: modes.chosen(stored), "disabled_modes": sorted(modes.disabled())}
+    return {**defaults, **kept, config.MODELS_KEY: config.models_for(c), modes.SETTING: modes.rows(c) if c else {},
+            "disabled_modes": sorted(modes.disabled()), "config_error": userconf.problem(c)}
 
 
 @router.get("/ws/{c}/settings")
@@ -232,9 +232,10 @@ def get_settings(c: str) -> dict[str, Any]:
 
 
 # The keys PUT /settings may change: the settings the browser's settings panel and switches save, and the rows of the
-# permission modes, which only the analyst's browser may change (hook_auth.analyst). Every other key is the server's
-# own or the analyst's to edit in the file (kernel_wrap, orient_instructions), since a kernel cell or a session's
-# command can reach the route on loopback. RETIRED_KEYS are taken too, and dropped.
+# permission modes, which only the analyst's browser may change (hook_auth.analyst). The models and the permission modes
+# are written to thimble's config (userconf.save), the rest to the workspace's settings.json. Every other key is the
+# server's own or the analyst's to edit in the file (kernel_wrap, orient_instructions), since a kernel cell or a
+# session's command can reach the route on loopback. RETIRED_KEYS are taken too, and dropped.
 PUT_KEYS = frozenset({*SETTINGS_DEFAULTS, config.MODELS_KEY, "permission_modes", *RETIRED_KEYS})
 
 
@@ -248,33 +249,49 @@ def put_settings_route(c: str, request: Request, settings: dict[str, Any] = Body
     refused = sorted(set(settings) - PUT_KEYS)
     if refused:
         raise HTTPException(400, f"these settings cannot be changed here: {', '.join(refused)}")
+    from . import userconf  # noqa: PLC0415
+
     if modes.SETTING in settings:
         if not hook_auth.analyst(request):
             raise HTTPException(403, hook_auth.ANALYST_ONLY)
         if why := modes.patch_error(settings[modes.SETTING]):
             raise HTTPException(400, why)
-    return put_settings(c, {k: v for k, v in settings.items() if k not in RETIRED_KEYS})
+    try:
+        return put_settings(c, {k: v for k, v in settings.items() if k not in RETIRED_KEYS})
+    except userconf.ConfigError as e:
+        raise HTTPException(400, str(e)) from e
 
 
 def put_settings(c: str, settings: dict[str, Any]) -> dict[str, Any]:
-    """Merges into the stored settings, so a partial PUT keeps the rest. Only what was stored plus the patch is written,
+    """Merges into the stored settings, so a partial PUT keeps the rest. The models of the agents and the permission
+    modes go to thimble's config (userconf.save), which raises userconf.ConfigError for a value it does not take;
+    main's model settings and everything else to settings.json, where only what was stored plus the patch is written,
     never SETTINGS_DEFAULTS, so a changed default takes effect, and RETIRED_KEYS are left out. Returns the effective
     settings."""
+    from . import modes, userconf  # noqa: PLC0415 — they import this module
+
+    models = settings.get(config.MODELS_KEY) if isinstance(settings.get(config.MODELS_KEY), dict) else {}
+    patch = userconf.pane_patch(models, settings.get(modes.SETTING) if isinstance(settings.get(modes.SETTING), dict)
+                                else None)
+    if patch:
+        userconf.save(c, patch)
+    settings = {k: v for k, v in settings.items() if k != modes.SETTING}
+    if config.MODELS_KEY in settings:
+        settings[config.MODELS_KEY] = {k: v for k, v in models.items() if k == "main"}
+        if not settings[config.MODELS_KEY]:
+            settings.pop(config.MODELS_KEY)
     path = ws_dir(c) / "settings.json"
     stored = read_json(path, {})
     stored = stored if isinstance(stored, dict) else {}
     merged = {k: v for k, v in {**stored, **settings}.items() if k not in RETIRED_KEYS}
-    # the permission modes merge per agent, None putting an agent back on main's mode
-    if isinstance(settings.get("permission_modes"), dict):
-        held = stored.get("permission_modes") if isinstance(stored.get("permission_modes"), dict) else {}
-        merged["permission_modes"] = {a: m for a, m in {**held, **settings["permission_modes"]}.items() if m is not None}
-    # `models` merges per role and within a role, so a PUT of one role's effort keeps the rest
+    # main's model settings merge within main, so a PUT of its effort keeps its fast mode
     if isinstance(settings.get(config.MODELS_KEY), dict):
         held = stored.get(config.MODELS_KEY) if isinstance(stored.get(config.MODELS_KEY), dict) else {}
         merged[config.MODELS_KEY] = {**held, **{
             role: {**held[role], **conf} if isinstance(conf, dict) and isinstance(held.get(role), dict) else conf
             for role, conf in settings[config.MODELS_KEY].items()}}
-    write_json(path, merged)
+    if merged != stored or not path.exists() and settings:
+        write_json(path, merged)
     return with_features(merged, c)
 
 
