@@ -130,6 +130,14 @@ RESUME_LINE = "thimble: resuming the dashboard from your last run; `/thimble fre
 # Stop hook shows it under the reply (leave_link, plugin/bin/.thimble-watch)
 LINK_LINE = "thimble: the dashboard link is under this reply (or run `thimble up` in a shell)"
 LINKS_DIR = "links"  # under <home>: the link each session's Stop hook shows once
+# while Claude Code does not trust thimble's workspaces folder (untrusted): the line for the analyst's terminal, with the
+# command that trusts it, and the line for a model, which leaves that command to the analyst
+UNTRUSTED_LINE = ("thimble: WARNING - Claude Code does not trust thimble's workspaces folder {folder}, so the orientation, "
+                  "its critic and the writers can't start. To trust it, run this in a terminal:\n  {command}")
+UNTRUSTED_MODEL_LINE = ("thimble: WARNING - Claude Code does not trust thimble's workspaces folder, so the orientation, "
+                        "its critic and the writers can't start. The analyst trusts it by running thimble's installer "
+                        "again in their own terminal with --trust-workspaces, the command their terminal and thimble's "
+                        "browser show.")
 FRESH_LINE = ("thimble: Cleared the session at {cwd}. The last run is archived at {path}. To bring it back, run: "
               "/thimble restore {name}")
 NOTHING_ARCHIVED_LINE = "thimble: this folder had no workspace to archive"
@@ -1200,13 +1208,14 @@ def ui_url(name: str | None, key: bool = True) -> str:
     return f"{base}/?ws={name}{k}" if name else f"{base}/{k}"
 
 
-def leave_link(session: str, url: str) -> bool:
-    """`url` for the session's Stop hook to show under main's reply (LINK_LINE); False when it could not be left."""
+def leave_link(session: str, url: str, notes: "list[str] | tuple[str, ...]" = ()) -> bool:
+    """`url` for the session's Stop hook to show under main's reply (LINK_LINE), with `notes` on the lines after it;
+    False when it could not be left."""
     name = "".join(ch for ch in session if ch.isalnum() or ch in "-_")
     try:
         d = ensure_home() / LINKS_DIR
         d.mkdir(exist_ok=True)
-        (d / name).write_text(url, "utf-8")
+        (d / name).write_text("\n".join([url, *notes]), "utf-8")
     except OSError as e:
         _log(f"the link for session {session} was not left: {e}")
         return False
@@ -1564,6 +1573,9 @@ def cmd_launch_args(args: argparse.Namespace) -> int:
     warning = claude_code_warning(claude_code_version())
     if warning:
         print(warning, file=sys.stderr)
+    folder = untrusted(Path(resolve_env()["workspaces_dir"]))
+    if folder:
+        print(UNTRUSTED_LINE.format(folder=folder, command=trust_command()), file=sys.stderr)
     return 0
 
 
@@ -1992,18 +2004,30 @@ def python_line() -> str:
     return f"{whose}, Python {platform.python_version()}" + (f"; lacks {', '.join(lacking)}" if lacking else "")
 
 
-def trust_line(workspaces: Path, commands: bool = True) -> str:
-    """Whether Claude Code trusts the workspaces folder, which terminal-first mode's background sessions need
-    (bg_session.trusted), and with `commands` the command that trusts it."""
+def trust_command() -> str:
+    """The command that has Claude Code trust thimble's workspaces folder: this install's installer, run again."""
+    return f"bash {shlex.quote(str(config.REPO_ROOT / 'scripts' / 'install.sh'))} --trust-workspaces"
+
+
+def untrusted(workspaces: Path) -> Path | None:
+    """The workspaces folder when Claude Code does not trust it, by its own entry or one above it, so the background
+    sessions of the orientation, its critic and the writers cannot start (bg_session.trusted); None when it does."""
     from . import bg_session, claude_changes  # noqa: PLC0415
 
+    data = claude_changes._read(bg_session.claude_json())
+    return None if any(claude_changes.trusted(f, data) for f in (workspaces, workspaces.resolve())) else workspaces
+
+
+def trust_line(workspaces: Path, commands: bool = True) -> str:
+    """Whether Claude Code trusts the workspaces folder, which the orientation's, its critic's and the writers'
+    background sessions need (untrusted), and with `commands` the command that trusts it."""
+    from . import bg_session  # noqa: PLC0415
+
     path = bg_session.claude_json()
-    if claude_changes.trusted(workspaces, claude_changes._read(path)):
+    if not untrusted(workspaces):
         return f"Claude Code trusts {workspaces} ({path})"
-    install = config.REPO_ROOT / "scripts" / "install.sh"
-    return (f"Claude Code does not trust {workspaces} ({path}), so the orientation, its critic and the writers run as "
-            "`claude -p` sessions, not in the terminal's agent tray"
-            + (f"; `bash {install} --trust-workspaces` trusts it" if commands else ""))
+    return (f"Claude Code does not trust {workspaces} ({path}), so the orientation, its critic and the writers can't "
+            "start" + (f"; `{trust_command()}` trusts it" if commands else ""))
 
 
 def human_bytes(n: float) -> str:
@@ -2476,14 +2500,19 @@ def cmd_ensure(args: argparse.Namespace) -> int:
             second = resume_lines(url, name, archive)
         else:
             second = [RESUME_LINE] if not opened and resumes(url, name) else []
-        # with the plugin's hooks off no Stop hook shows the link, so the page opens without the key
+        folder = untrusted(Path(env["workspaces_dir"]))
+        warn = UNTRUSTED_LINE.format(folder=folder, command=trust_command()) if folder else ""
+        # with the plugin's hooks off no Stop hook shows the link, so the page opens without the key; the terminal
+        # shows the trust warning with its command under the link, and the model reads it without the command
         if (args.session and not cc_channel.hooks_blocked(cwd, plugin_root())
-                and leave_link(str(args.session), ui_url(name))):
+                and leave_link(str(args.session), ui_url(name), [warn] if warn else [])):
             print(LINK_LINE)
         else:
             print(f"thimble: {ui_url(name, key=not args.session and to_terminal())}")
         for line in second:
             print(line)
+        if warn:
+            print(warn if not args.session and to_terminal() else UNTRUSTED_MODEL_LINE)
         status = config.auth_status(cwd=cwd)
         if args.session:
             route = cc_channel.delivery(cc_channel.claude_pid(), plugin_root(), cwd, explain=True, status=status)

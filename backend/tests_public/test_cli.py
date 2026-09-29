@@ -121,6 +121,28 @@ def test_up_prints_the_url_and_opens_a_sessions_folder(home, data, monkeypatch, 
     assert cli.build_parser().parse_args(["up"]).cmd == "up" and cli.build_parser().parse_args(["ensure"]).cmd == "ensure"
 
 
+def test_without_claude_code_s_trust_thimble_and_slash_thimble_warn_with_the_command(home, data, monkeypatch, capsys,
+                                                                                  claude_global_config):
+    """While Claude Code does not trust the workspaces folder, the launcher and /thimble warn that the orientation, its
+    critic and the writers can't start: the terminal gets the command that trusts it, and the model gets no command."""
+    _healthy_no_process(monkeypatch)
+    monkeypatch.setattr(cli, "_request", lambda m, u, b=None, timeout=5.0: (404, {}))
+    claude_global_config.write_text("{}")
+    warn = cli.UNTRUSTED_LINE.format(folder=Path(os.environ["THIMBLE_WORKSPACES_DIR"]), command=cli.trust_command())
+    assert cli.trust_command() == f"bash {cli.config.REPO_ROOT / 'scripts' / 'install.sh'} --trust-workspaces"
+    assert cli.main(["up", "--cwd", str(data / "mini" / "agents"), "--session", "s9"]) == 0
+    assert capsys.readouterr().out.splitlines() == [cli.LINK_LINE, cli.UNTRUSTED_MODEL_LINE]
+    assert "install.sh" not in cli.UNTRUSTED_MODEL_LINE
+    assert (home / "links" / "s9").read_text().split("\n", 1)[1] == warn, "the Stop hook shows it under the link"
+    monkeypatch.setattr(cli, "launch_args", lambda cwd, resume=False, settings="": "args")
+    monkeypatch.setattr(cli, "claude_code_warning", lambda v: None)
+    assert cli.main(["launch-args", "--cwd", str(data / "mini")]) == 0
+    assert capsys.readouterr().err.strip() == warn
+    claude_global_config.write_text(json.dumps({"projects": {os.environ["THIMBLE_WORKSPACES_DIR"]: {"hasTrustDialogAccepted": True}}}))
+    assert cli.main(["launch-args", "--cwd", str(data / "mini")]) == 0
+    assert capsys.readouterr().err == ""
+
+
 def line(text: str, key: str) -> str:
     """The first line of doctor's text that starts with `key`."""
     return next(ln for ln in text.splitlines() if ln.strip().startswith(key))
@@ -215,6 +237,9 @@ def test_real_up_starts_a_detached_server_idempotently_and_stop_ends_it(home, da
     env.pop("THIMBLE_DEV", None)
     for k in ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_PROFILE"):
         env.pop(k, None)
+    # Claude Code trusts the workspaces folder, so /thimble has no warning to print
+    trust = {"projects": {str(tmp_path / "ws"): {"hasTrustDialogAccepted": True}}}
+    (Path(os.environ["CLAUDE_CONFIG_DIR"]) / ".claude.json").write_text(json.dumps(trust))
     cmd = [sys.executable, "-m", "app.cli", "server", "up", "--cwd", str(data / "mini"), "--session", "it-1"]
     pid = None
     try:

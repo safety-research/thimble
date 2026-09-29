@@ -184,7 +184,8 @@ def trusted(c: str) -> bool:
     kept = _trust_read.get(str(path))
     if kept is None or kept[0] != stamp:
         kept = _trust_read[str(path)] = (stamp, claude_changes._read(path))
-    return claude_changes.trusted(config.WORKSPACES_DIR / c, kept[1])
+    folder = config.WORKSPACES_DIR / c
+    return any(claude_changes.trusted(f, kept[1]) for f in (folder, folder.resolve()))
 
 
 def kind_of(key: str) -> str:
@@ -1548,7 +1549,7 @@ async def start(c: str, key: str, argv: list[str], folder: Path, env: dict[str, 
     if code != 0 and UNTRUSTED_RE.search(out):
         from . import tools  # noqa: PLC0415
 
-        raise RuntimeError(tools.hint("bg-untrusted", folder=str(folder), workspaces=str(config.WORKSPACES_DIR)))
+        raise RuntimeError(tools.hint("bg-untrusted", workspaces=str(config.WORKSPACES_DIR)))
     if code != 0:
         raise RuntimeError(f"`claude --bg` failed (exit {code}): {out.strip()[-400:]}")
     m = BG_ID_RE.search(out)

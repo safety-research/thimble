@@ -683,6 +683,8 @@ async def start(c: str, key: str, *, role: str, title: str, agent_args: list[str
         raise RuntimeError(f"the session {key} is running")
     if resume and chat and (agents.meta_or_none(c, chat) or {}).get("background"):
         background = True  # a chat that ran as a background session keeps its session
+    if background and not bg_session.trusted(c):  # `claude --bg` would refuse the folder
+        raise RuntimeError(tools.hint("bg-untrusted", workspaces=str(config.WORKSPACES_DIR)))
     cwd = config.corpus_dir(c)
     folder = work if work is not None else cwd  # where the process runs (module note, the fence)
     conf = userconf.session(c, userconf.agent_of_row(agent), sandbox=work is not None)

@@ -3,9 +3,11 @@
 start a subagent. agent_session.start is replaced by a stand-in that records its arguments."""
 from __future__ import annotations
 
+import json
+
 import pytest
 
-from app import agent_session, orient_session, orientation, tools
+from app import agent_session, bg_session, cli, config, ledger, orient_session, orientation, tools
 
 CORPUS = "mini"
 
@@ -33,6 +35,28 @@ async def test_start_orientation_runs_the_session_in_the_background(launched):
     assert call["key"] == orient_session.KEY and call["background"] is True
     assert call["critique"] is True and call["ultracode"] is True
     assert "route" not in (orientation.read_run(CORPUS) or {})
+
+
+async def test_without_claude_code_s_trust_the_orientation_does_not_start_and_the_settings_say_how_to_trust(
+        workspaces_tmp, claude_global_config, monkeypatch):
+    """`claude --bg` refuses a folder Claude Code does not trust. Where the workspaces folder is not trusted (install.sh's
+    trust question answered no), start_orientation starts nothing and its error, which main reads, says the analyst
+    reruns the installer with --trust-workspaces; the settings give the browser the command itself."""
+    started = []
+
+    async def bg_start(*args, **kw):
+        started.append(args)
+
+    monkeypatch.setattr(bg_session, "start", bg_start)
+    claude_global_config.write_text("{}")
+    orientation.start_requested(CORPUS, {"text": "", "final_notebook": True, "propose_views": True}, {"id": "e1"})
+    res = await tools.call(CORPUS, "start_orientation", {"brief": ""})
+    assert res.is_error and "--trust-workspaces" in res.text and "install.sh" not in res.text
+    assert started == [] and not orient_session.running(CORPUS)
+    assert ledger.get_settings(CORPUS)["untrusted"] == {"folder": str(config.WORKSPACES_DIR),
+                                                        "command": cli.trust_command()}
+    claude_global_config.write_text(json.dumps({"projects": {str(config.WORKSPACES_DIR): {"hasTrustDialogAccepted": True}}}))
+    assert ledger.get_settings(CORPUS)["untrusted"] is None
 
 
 def test_an_orientation_an_earlier_build_ran_as_main_s_subagent_ends_its_record_with_its_chat(workspaces_tmp):

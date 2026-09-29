@@ -920,6 +920,8 @@ export interface Settings {
   disabled_modes?: OrientPermissions[]
   /** why thimble's config cannot be used, '' when it can (backend userconf.problem) */
   config_error?: string
+  /** while Claude Code does not trust thimble's workspaces folder: the folder and the command that trusts it (shell/Untrusted) */
+  untrusted?: { folder: string; command: string } | null
   [k: string]: unknown
 }
 
