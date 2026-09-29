@@ -26,8 +26,7 @@
 #   - timestamps come as ISO 8601 with Z or an offset, with or without milliseconds, or as epoch milliseconds;
 #   - a line written twice (the same uuid) counts once, and a session's lines are put in time order;
 #   - a line that is not JSON, such as the last line of a session that was cut off, a line with no time the reader can
-#     read, and an index that is not JSON are left out, and the page says how many there are, with the first few
-#     (`problems`);
+#     read, and an index that is not JSON are left out, and problems() lists them for thimble to show;
 #   - the files on disk are the sessions: the index only names the team and the agents, and it may miss a session or
 #     list one that is gone;
 #   - r1's harness flags an error with isError and the later ones with is_error, and r3's calls the Task tool Agent;
@@ -65,14 +64,11 @@ PATH = re.compile(r"(?<![\w./:-])((?:[\w.-]+/)+[\w.-]+\.[A-Za-z]\w*)")  # a path
 EXIT = re.compile(r"Exit code (\d+)")
 DENIED = re.compile(r"Permission to use \S+ has been denied[.:]?\s*")
 AGENT_ID = re.compile(r"agentId: (\w+)")
-PROBLEMS_SHOWN = 5  # lines that do not parse which the page names, beside their count
 
 
 def _problem(problems, ref, why):
-    """Note that the line `ref` holds no record because it does not parse (`problems`: a count and the first few)."""
-    problems["count"] += 1
-    if len(problems["examples"]) < PROBLEMS_SHOWN:
-        problems["examples"].append(f"{ref}: {why}")
+    """Note that the line `ref` holds no record because it does not parse."""
+    problems.append({"ref": ref, "why": why})
 
 
 def _epoch(t):
@@ -290,11 +286,11 @@ def _session_lines(sid, lines, problems):
 def build_index(paths):
     """{"offsets": {path: [byte offset of line n at n-1]}, "runs": {run: facts}, "sessions": {id: facts}, "calls": [facts],
     "messages": [facts], "lines": {ref: (what it holds, its key)}, "values": {field: [values in their order]},
-    "problems": {count, examples} of the lines that do not parse}. Times
+    "problems": [{ref, why}] of the lines that do not parse}. Times
     are seconds on the run's clock. A run's `sessions` are in tree order, each after the session that spawned it; a
     call's `words` is the lowercased text a search looks in."""
     offsets, dups, indexes, sessions, raw_calls, raw_msgs = {}, {}, {}, {}, [], []
-    problems = {"count": 0, "examples": []}
+    problems = []
     for path in sorted(paths):
         offs = offsets.setdefault(path, [])
         if not path.endswith(".jsonl"):
@@ -559,7 +555,7 @@ def _overview(index, query):
             "calls": [{"ref": c["ref"], "s": c["s"], "t": c["t"], "d": c["d"], "tool": c["tool"], "out": c["out"], "ftype": c["ftype"],
                        "dur": c["dur"], "files": c["files"], "child": c["child"], "input": c["input"][:80], "m": sel.marks.get(c["i"], [])}
                       for c in passing],
-            "task": ix["task"], "totals": {"runs": len(ix["runs"]), "sessions": len(ix["sessions"])}, "problems": ix["problems"],
+            "task": ix["task"], "totals": {"runs": len(ix["runs"]), "sessions": len(ix["sessions"])},
             "days": sorted({ix["runs"][k]["started"][:10] for k in ix["order"]}),
             "messages": hits, "fields": fields, "classes": classes, "none": none, "total": len(ix["calls"])}
 
@@ -759,3 +755,8 @@ def resolve(index, locator):
         return {"excerpt": _message(ix, mm), "label": f"{s['agent']} · {mm['kind']} {_clock(mm['t'])}", "refs": list(dict.fromkeys([mm["ref"], ref])),
                 "key": s["id"], "target": {"session": s["id"], "message": mm["ref"]}}
     return None
+
+
+def problems(index):
+    """The lines that do not parse, each {ref, why}, which thimble shows beside the page."""
+    return index["problems"]

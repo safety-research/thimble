@@ -1,6 +1,6 @@
 // The frame half of a video's film (video.film_document puts it first in the film's page; the page half is
 // frontend/src/report/Video.tsx, and scripts/view_shot.mjs plays the page for the writer's frames). The film runs in a
-// sandboxed iframe that reaches no host, so it hears the time to draw through postMessage calls:
+// sandboxed iframe at an opaque origin, so it hears the time to draw through postMessage calls:
 //   ready              frame to page: the film's window.ready settled (or never came), so it can be drawn
 //   seek {t}           page to frame: draw the frame at t seconds with the film's window.seek(t)
 //   open {open: {t}}   page to frame: the same, as the headless shots send it

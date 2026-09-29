@@ -1,6 +1,7 @@
 """Paths, the `claude` thimble runs and its environment, corpora, model defaults."""
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import os
@@ -289,13 +290,15 @@ def sidecar_path(name: str) -> Path:
     return DATA_DIR / f"{name}{SIDECAR_SUFFIX}"
 
 
-def read_sidecar(name: str) -> dict | None:
-    """The registration record {name, root, path, registered_at, manifest} of a registered corpus, else None. A record
-    without `root` reads root as the path."""
+def read_sidecar(name: str, data_dir: Path | None = None) -> dict | None:
+    """The registration record {name, root, path, registered_at, manifest} of a registered corpus, else None: under
+    DATA_DIR, or under `data_dir` for a caller that resolves the data folder itself (cli). A record without `root` reads
+    root as the path."""
     if not _valid_name(name):
         return None
     try:
-        rec = json.loads(sidecar_path(name).read_text("utf-8"))
+        path = sidecar_path(name) if data_dir is None else data_dir / f"{name}{SIDECAR_SUFFIX}"
+        rec = json.loads(path.read_text("utf-8"))
     except (OSError, ValueError):
         return None
     if not isinstance(rec, dict) or not isinstance(rec.get("path"), str):
@@ -367,6 +370,41 @@ def corpus_name_for(path: Path) -> str:
     """The corpus name a directory registers under: its basename with anything outside NAME_RE replaced by '-'."""
     name = re.sub(r"[^A-Za-z0-9._-]+", "-", path.name).strip("-.")
     return name if _valid_name(name) else "corpus"
+
+
+SESSION_PREFIX = "thimble:"  # of every Claude Code session's name thimble gives (session_name)
+SESSION_SEP = " · "  # between a session's role and its workspace in its name
+SESSION_NAME_MAX = 80  # a name's length at most, as dev.py kept its sessions' names before names carried the workspace
+SESSION_PART_MIN = 16  # what a long name keeps of its workspace, and of its role, at least (session_name)
+
+
+def _shortened(part: str, n: int) -> str:
+    """`part` when it has at most `n` characters, else its start, `~` and six hex digits of a hash of the whole of it, `n`
+    characters in all, so two long parts that share a start stay apart."""
+    if len(part) <= n:
+        return part
+    return f"{part[:n - 7]}~{hashlib.sha1(part.encode()).hexdigest()[:6]}"
+
+
+def session_name(role: str, workspace: str | None) -> str:
+    """The name a Claude Code session thimble starts goes by (`claude -n`), as `claude agents`, the agent view, the
+    /resume picker and SendMessage's `to` know it: `thimble:<role> · <workspace>`, such as `thimble:main · logs-2` or
+    `thimble:writer-story · logs-2`, since those lists hold the sessions of every folder, so two workspaces must not share
+    a name; `thimble:<role>` alone for a session of no workspace (`thimble fix`'s code ticket). A name is at most
+    SESSION_NAME_MAX characters: a longer one shortens its workspace first, down to SESSION_PART_MIN characters, then its
+    role (_shortened), so distinct roles and workspaces keep distinct names."""
+    room = SESSION_NAME_MAX - len(SESSION_PREFIX) - (len(SESSION_SEP) if workspace else 0)
+    if workspace:
+        workspace = _shortened(workspace, max(SESSION_PART_MIN, room - len(role)))
+        role = _shortened(role, room - len(workspace))
+        return f"{SESSION_PREFIX}{role}{SESSION_SEP}{workspace}"
+    return SESSION_PREFIX + _shortened(role, room)
+
+
+def session_role(name: str) -> str:
+    """A session name of thimble's without its workspace (`thimble:writer · logs` → `thimble:writer`), as the lines of
+    that workspace's own views show it (the statusline, a tray entry's news); any other name as it is."""
+    return name.partition(SESSION_SEP)[0] if name.startswith(SESSION_PREFIX) else name
 
 
 def _under(p: Path, base: Path) -> bool:
@@ -489,13 +527,15 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
-def _free_name(base: str) -> str:
-    """`base` when no DATA_DIR corpus and no sidecar holds it, else base-2, base-3 …: two folders called logs/ are two
-    workspaces, `logs` and `logs-2`."""
+def free_name(base: str, data_dir: Path | None = None) -> str:
+    """`base` when no corpus of the data folder (DATA_DIR, or `data_dir`) and no readable sidecar holds it, else base-2,
+    base-3 …: two folders called logs/ are two workspaces, `logs` and `logs-2`."""
+    d = DATA_DIR if data_dir is None else data_dir.resolve()
     n = 1
     while True:
         name = base if n == 1 else f"{base}-{n}"
-        if _dir_corpus(name) is None and read_sidecar(name) is None:
+        taken = (d / name / "manifest.json").is_file() if data_dir is not None else _dir_corpus(name) is not None
+        if not taken and read_sidecar(name, None if data_dir is None else d) is None:
             return name
         n += 1
 
@@ -531,7 +571,7 @@ def register_corpus(path: str | Path, *, exact: bool = False) -> dict:
             return {"name": kname, "root": str(bases.get("root", kbase)), "path": str(corpus_dir(kname)),
                     "registered_at": rec.get("registered_at"), "manifest": corpus_manifest(kname)}
         # inside (not at) a registered directory with `exact`: the folder becomes a corpus of its own
-    name = prev["name"] if prev else _free_name(corpus_name_for(p))
+    name = prev["name"] if prev else free_name(corpus_name_for(p))
     # the working directory again: the root stays what the first registration recorded
     root = str(_sidecar_bases(prev).get("root", p)) if prev is not None else str(p)
     rec = {"name": name, "root": root, "path": str(p), "registered_at": (prev or {}).get("registered_at") or _now(),

@@ -341,7 +341,7 @@ async function load() {
   if (sel && sel.kind === 'card' && !byId.has(sel.id)) sel = null
   if (sel && sel.kind === 'row' && !rowBy.has(sel.key)) sel = null
   if (sel && sel.kind === 'link' && !D.links.some((x) => x.key === sel.key)) sel = null
-  showProblems(D.problems)
+  document.getElementById('problems').hidden = true
   return true
 }
 // the rows as the grouping keys them: an account, or a name the cards sign with, with the accounts that signed it
@@ -370,12 +370,6 @@ function index() {
   rowsList = [...rowBy.values()]
   if (F.row && !rowBy.has(F.row)) F.row = ''
   for (const t of [...F.places]) if (!placeBy.has(t)) F.places.delete(t)
-}
-function showProblems(p) {
-  const el = document.getElementById('problems')
-  el.hidden = !(p && p.count)
-  if (el.hidden) return
-  el.textContent = `${plural(p.count, 'line')} of the records ${p.count === 1 ? 'does' : 'do'} not parse and ${p.count === 1 ? 'is' : 'are'} left out: ${p.examples.join('; ')}${p.count > p.examples.length ? '; …' : ''}`
 }
 
 // ---------------------------------------------------------------- the question box

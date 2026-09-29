@@ -1,15 +1,17 @@
 // A video: the film in a sandboxed frame, the current line under it as a caption with the spoken word marked, the
 // controls, and the narration as a transcript with its citations.
-// The frame has `allow-scripts` alone, so the film runs at an opaque origin with no access to the app, and its page
-// carries the views' policy (backend video.film_document), so it reaches no host; the app's faces are inlined as a
-// view's page has them. The film is drawn at 1280×720 and scaled to the column. It hears the time to draw through its
-// bridge (backend film_bridge.js), which draws each time it is sent even before the film says ready, and playback is
-// videoPlayer.ts. The voice, the rate and the captions switch are this browser's, kept in localStorage.
+// The frame has `allow-scripts` alone, so the film runs at an opaque origin with no access to the app. Its page carries
+// the views' policy (backend video.film_document), so it loads and fetches nothing from the network, and the head that
+// takes WebRTC away (NO_RTC); the app's faces are inlined as a view's page has them. The film is drawn at 1280×720 and
+// scaled to the column. It hears the time to draw through its bridge (backend film_bridge.js), which draws each time it
+// is sent even before the film says ready, and playback is videoPlayer.ts. The voice, the rate and the captions switch
+// are this browser's, kept in localStorage.
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { Button } from '../components/Button'
 import { Menu, type MenuItem } from '../components/Menu'
+import { Spinner } from '../components/Spinner'
 import { docsApi } from '../lib/api'
-import { useFrameFonts, withFrameStyle } from '../lib/frame'
+import { NO_RTC, useFrameFonts, withFrameStyle } from '../lib/frame'
 import { track } from '../lib/telemetry'
 import type { VideoDoc } from '../lib/types'
 import { readStorage, writeStorage } from '../lib/workspace'
@@ -25,6 +27,7 @@ const RATES = [0.8, 0.9, 1, 1.1, 1.25, 1.5]
 const VOICE_KEY = 'thimble:video-voice'
 const RATE_KEY = 'thimble:video-rate'
 const CAPTIONS_KEY = 'thimble:video-captions'
+const FILM_ERRORS_MAX = 20 // distinct film errors logged; any others are only counted
 const P = 'thimble:'
 
 /** m:ss */
@@ -89,9 +92,11 @@ export interface VideoViewProps {
   on: ReadonlySet<string>
   look: CheckLook
   picked: DocComment | null
+  /** its writer still runs: the film shows that it is being written, and playback waits */
+  writing?: boolean
 }
 
-export function VideoView({ ws, slug, doc, comments, on, look, picked }: VideoViewProps) {
+export function VideoView({ ws, slug, doc, comments, on, look, picked, writing = false }: VideoViewProps) {
   const timing = doc?.timing ?? null
   const lines = useMemo(() => doc?.lines ?? [], [doc])
   const windows = timing?.lines ?? []
@@ -112,7 +117,7 @@ export function VideoView({ ws, slug, doc, comments, on, look, picked }: VideoVi
     }
   }, [ws, slug, doc?.film, timingKey])
   const fonts = useFrameFonts()
-  const shown = useMemo(() => (page != null && fonts != null ? withFrameStyle(page, `<style>${fonts}</style>`) : null), [page, fonts])
+  const shown = useMemo(() => (page != null && fonts != null ? withFrameStyle(page, `${NO_RTC}<style>${fonts}</style>`) : null), [page, fonts])
 
   // every time is sent to the frame; its page says ready once it has loaded, and is sent the time again then
   const frame = useRef<HTMLIFrameElement | null>(null)
@@ -127,15 +132,29 @@ export function VideoView({ ws, slug, doc, comments, on, look, picked }: VideoVi
   )
   useEffect(() => () => player.dispose(), [player])
   useEffect(() => {
+    // an error the film repeats, such as a seek that throws on every frame, is logged once, then with its count when
+    // the film is left or loaded again
+    const seen = new Map<string, number>()
+    let more = 0
     const onMessage = (e: MessageEvent) => {
       if (!frame.current || e.source !== frame.current.contentWindow) return
       const d = (e.data ?? {}) as { type?: string; message?: string }
       if (d.type === P + 'ready') post(player.t)
-      else if (d.type === P + 'error') console.error(`the film of report:${slug}: ${d.message ?? ''}`)
+      else if (d.type === P + 'error') {
+        const text = `the film of report:${slug}: ${d.message ?? ''}`
+        if (!seen.has(text) && seen.size >= FILM_ERRORS_MAX) return void more++
+        const n = (seen.get(text) ?? 0) + 1
+        seen.set(text, n)
+        if (n === 1) console.error(text)
+      }
     }
     window.addEventListener('message', onMessage)
-    return () => window.removeEventListener('message', onMessage)
-  }, [post, player, slug])
+    return () => {
+      window.removeEventListener('message', onMessage)
+      seen.forEach((n, text) => n > 1 && console.error(`${text} (${n} times)`))
+      if (more) console.error(`the film of report:${slug}: ${more} more errors`)
+    }
+  }, [post, player, slug, page])
 
   const texts = useMemo(() => lines.map((l) => readableText((l.sentences ?? []).map((s) => s.text).join(' '))), [lines])
   // a document read again with the same script leaves playback as it is
@@ -217,9 +236,15 @@ export function VideoView({ ws, slug, doc, comments, on, look, picked }: VideoVi
 
   return (
     <div className="wu-view">
-      <div className="wu-videodoc" data-video={slug}>
+      <div className={`wu-videodoc${writing ? ' is-writing' : ''}`} data-video={slug}>
         <div className="wu-videodoc-col">
-          <div className="wu-video-stage" ref={stage} style={{ height: FILM_H * scale }} onClick={toggle}>
+          <div className="wu-video-stage" ref={stage} style={{ height: FILM_H * scale }} onClick={writing ? undefined : toggle}>
+            {writing && (
+              <div className="wu-video-writing" role="status">
+                <Spinner size={14} label="Writing" />
+                The video is still being written
+              </div>
+            )}
             {shown != null && (
               <iframe
                 ref={frame}
@@ -242,7 +267,7 @@ export function VideoView({ ws, slug, doc, comments, on, look, picked }: VideoVi
               ))}
             </p>
           )}
-          <div className="wu-video-controls">
+          <div className="wu-video-controls" inert={writing || undefined}>
             <Button variant="icon" icon="chevron-left" title="Previous line" disabled={!windows.length} onClick={() => go(now - 1)} />
             <Button variant="icon" icon={playing ? 'pause' : 'run'} title={playing ? 'Pause' : 'Play'} disabled={!windows.length} onClick={toggle} />
             <Button variant="icon" icon="chevron-right" title="Next line" disabled={!windows.length} onClick={() => go(now + 1)} />
@@ -274,7 +299,7 @@ export function VideoView({ ws, slug, doc, comments, on, look, picked }: VideoVi
             <Menu
               trigger={
                 <Button size="sm" disabled={!voices.length} className="wu-video-voice">
-                  {voice?.name ?? 'Voice'}
+                  {voice?.name ?? 'No voice'}
                 </Button>
               }
               items={voiceItems}

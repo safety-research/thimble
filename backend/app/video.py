@@ -121,7 +121,7 @@ def document_lines(doc: dict[str, Any], sentence_lines: Any, cut: int) -> list[s
 
 
 def film_document(doc: dict[str, Any]) -> str:
-    """The film's page as its frame loads it: the views' policy, which lets it reach no host, the timing as
+    """The film's page as its frame loads it: the views' policy, which lets it load nothing, the timing as
     `window.timing` ({duration, lines: [{start, end}]}), the bridge (film_bridge.js), then the film."""
     from . import views  # noqa: PLC0415
 

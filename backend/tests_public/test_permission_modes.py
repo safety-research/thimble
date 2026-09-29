@@ -114,6 +114,8 @@ def fake(tmp_path, monkeypatch) -> Path:
     monkeypatch.setenv("THIMBLE_CHANNEL", "plugin:thimble@inline")
     monkeypatch.delenv("FAKE_MODE", raising=False)
     monkeypatch.setenv("THIMBLE_SANDBOX", "0")  # the fence without the sandbox; the fence's test turns it on
+    # the stand-in is a `claude -p`: the sessions run as thimble's own, not as terminal-first mode's `claude --bg`
+    ledger.put_settings(CORPUS, {"terminal_first": False})
     return out
 
 
@@ -182,8 +184,11 @@ async def test_each_agent_runs_in_its_row_else_in_main_s_mode_and_nothing_else_p
         seen.update(chosen=chosen)
 
     monkeypatch.setattr(orient_session, "start", fake_start)
-    await tools.call(CORPUS, "start_orientation", {"brief": "", "permissions": "bypass"})
-    assert seen["chosen"] == {}, "a model's call chooses no mode"
+    for terminal_first in (True, False):  # the orientation is its own session in both modes
+        ledger.put_settings_route(CORPUS, analyst, {"terminal_first": terminal_first})
+        seen.clear()
+        await tools.call(CORPUS, "start_orientation", {"brief": "", "permissions": "bypass"})
+        assert seen["chosen"] == {}, f"a model's call chooses no mode (terminal_first {terminal_first})"
 
     user.write_text(json.dumps({"permissions": {"disableBypassPermissionsMode": "disable"}}))
     with pytest.raises(HTTPException) as e:
@@ -202,6 +207,22 @@ async def test_each_agent_runs_in_its_row_else_in_main_s_mode_and_nothing_else_p
     (managed / "managed-settings.json").write_text(json.dumps({"permissions": {"disableBypassPermissionsMode": "disable"}}))
     (managed / "managed-settings.d" / "auto.json").write_text(json.dumps({"permissions": {"disableAutoMode": "disable"}}))
     assert modes.disabled() == {"auto", "bypass"}, "the managed file with its drop-ins"
+
+
+def test_a_continued_background_session_keeps_the_mode_it_runs_in(fake, monkeypatch):
+    """A background session resumed or sent a message keeps the flags it was launched with (agent_session.BG_AUTO_LINE),
+    so its next run takes the mode its chat's meta records, not the row saved since nor a card's switch; a session of
+    thimble's own, whose process starts again with its flags, takes the switch, else the row."""
+    ledger.put_settings(CORPUS, {modes.SETTING: {"orient": "auto"}})
+    chat = agents.new_agent(CORPUS, "orient", "Orientation", permission_mode="bypass", background=True)["id"]
+    monkeypatch.setitem(agent_session._switched, (CORPUS, chat), "manual")
+    assert agent_session.start_mode(CORPUS, "orient", chat=chat, background=True) == "bypass"
+    assert agent_session.start_mode(CORPUS, "orient", chat=chat) == "manual", "a switch while this server runs"
+    assert agent_session.start_mode(CORPUS, "orient") == "auto", "a new session: its row"
+    monkeypatch.setattr(modes, "disabled", lambda: {"bypass"})
+    assert agent_session.start_mode(CORPUS, "orient", chat=chat, background=True) == "manual", "Bypass turned off"
+    old = agents.new_agent(CORPUS, "orient", "Orientation", background=True)["id"]
+    assert agent_session.start_mode(CORPUS, "orient", chat=old, background=True) == "auto", "a meta with no mode: the row"
 
 
 # ----------------------------------------------------------------------------- Auto

@@ -33,13 +33,13 @@ For a development build, clone the repo and run `bash scripts/install.sh` (requi
 ## Usage
 
 - Run `thimble` in a directory, just as you would run `claude` 
-- It starts a Claude Code session there with the thimble plugin loaded and prints the dashboard URL. 
+- It starts a Claude Code session there with the thimble plugin loaded and prints the dashboard URL. The session is named `thimble:main · <workspace>` (as `claude agents` and `/resume` list it), and each agent thimble starts is named the same way, such as `thimble:orient · <workspace>`.
 - Each run starts a new conversation on the same workspace (cards, report, labels). `thimble --continue` picks up your last conversation in this folder instead.
 - To chat only in the terminal, with the browser as a dashboard, see [docs/terminal-first.md](docs/terminal-first.md).
 
 ### From a running Claude Code session
 
-Type `/thimble` to start the thimble server and print the dashboard URL. If `/thimble` is not recognised, run `/reload-plugins`.
+Type `/thimble` to start the thimble server and print the dashboard URL. A plain `claude` session has `/thimble` only if you answered yes to install.sh's plugin question (`--plugin`); in one started before that, run `/reload-plugins`.
 
 > **Please note:** thimble connects the browser to your Claude Code session through [channels](https://code.claude.com/docs/en/channels). While thimble is under development, a Claude Code session needs to be started with `--dangerously-load-development-channels` (`thimble` from the CLI handles this for you) and a warning screen will appear before starting your Claude Code session (this warning is expected). Without this flag, or if channels are disabled by your org, thimble connects through the plugin's hooks instead and `/thimble` prints a note with the exact command.
 
@@ -78,7 +78,7 @@ Claude Code (tested with 2.1.281), macOS or Linux, and Python 3.12+ ([uv](https:
 ## Security and privacy
 
 - **thimble is a research prototype.** Its server has no login, so any program on your machine can use it, and Claude's code runs in a notebook kernel without a sandbox: treat a corpus like code you are about to run.
-- **Your data stays with you.** The server runs on localhost. What leaves your machine is what Claude Code sends to the model and what Claude's notebook code or Claude Code's web tools reach on the network, as in any Claude Code session.
+- **Your data stays with you.** The server runs on localhost. What leaves your machine is what Claude Code sends to the model and what Claude's notebook code or Claude Code's web tools reach on the network, as in any Claude Code session. A video's narration is read by a voice on your machine.
 - **Auth and billing work through Claude Code**; thimble doesn't touch them.
 - **Report security issues** privately to [@mjoerke](https://github.com/mjoerke).
 

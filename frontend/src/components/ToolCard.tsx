@@ -1,5 +1,5 @@
 // The tool-call card: what the agent did, as one tonal card. The head is the chevron, an optional icon, the name, the
-// meta in mono and, at the right edge, the spinner (or a Stop button with `stop`) or ✓ once done. The chevron opens the
+// meta in mono and, at the right edge, the spinner (and a Stop button after it with `stop`) or ✓ once done. The chevron opens the
 // lead, the steps and any body the caller hands over. Under the head, always shown: the chips of what it made, and a
 // section row per surface the work landed on.
 import { useState, type HTMLAttributes, type KeyboardEvent, type ReactNode } from 'react'
@@ -46,8 +46,8 @@ export interface ToolCardProps extends Omit<HTMLAttributes<HTMLDivElement>, 'tit
   /** always shown under the head: the chips of what the call made */
   chips?: ReactNode
   sections?: readonly ToolSection[]
-  /** while it runs, the right edge shows a small primary (accent) button reading Stop with the spinner inside it in
-   * place of the bare spinner */
+  /** while it runs, the right edge shows the spinner and after it a small ghost Stop button (the stop square), which
+   * turns busy, ignoring clicks, while `busy` says the stop request is in flight */
   stop?: { onStop: () => void; busy?: boolean; className?: string }
   /** controlled open state; without it the card keeps its own, starting at `defaultOpen` */
   open?: boolean
@@ -85,7 +85,7 @@ export function ToolCard({ icon, title, meta, state = null, lead, steps, body, c
   const cls = ['toolcard', open && expandable ? 'open' : '', state ? `toolcard-${state}` : '', className ?? ''].filter(Boolean).join(' ')
   return (
     <div className={cls} data-state={state ?? undefined} {...rest}>
-      <div className={`toolcard-head${expandable ? ' toolcard-head-act' : ''}`} role={expandable ? 'button' : undefined} tabIndex={expandable ? 0 : undefined} aria-expanded={expandable ? open : undefined} onClick={toggle} onKeyDown={expandable ? onKey : undefined}>
+      <div className={`toolcard-head${expandable ? ' toolcard-head-act' : ''}${stop && state === 'running' ? ' toolcard-head-stop' : ''}`} role={expandable ? 'button' : undefined} tabIndex={expandable ? 0 : undefined} aria-expanded={expandable ? open : undefined} onClick={toggle} onKeyDown={expandable ? onKey : undefined}>
         <span className="toolcard-caret" aria-hidden="true">
           {expandable && <Icon name="chevron-right" size={10} strokeWidth={2.7} />}
         </span>
@@ -95,17 +95,20 @@ export function ToolCard({ icon, title, meta, state = null, lead, steps, body, c
         <span className="toolcard-end">
           {state === 'running' &&
             (stop ? (
-              <Button
-                variant="primary"
-                size="sm"
-                className={`toolcard-stop${stop.className ? ` ${stop.className}` : ''}`}
-                disabled={stop.busy}
-                onClick={(e) => (e.stopPropagation(), stop.onStop())}
-                onKeyDown={(e) => e.stopPropagation()}
-              >
-                <Spinner size={10} label="running" />
-                Stop
-              </Button>
+              <>
+                {!stop.busy && <Spinner size={10} label="running" />}
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  icon="stop"
+                  className={`toolcard-stop${stop.className ? ` ${stop.className}` : ''}`}
+                  busy={stop.busy}
+                  onClick={(e) => (e.stopPropagation(), stop.onStop())}
+                  onKeyDown={(e) => e.stopPropagation()}
+                >
+                  Stop
+                </Button>
+              </>
             ) : (
               <Spinner size={10} label="running" />
             ))}

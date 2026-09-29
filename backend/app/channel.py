@@ -909,10 +909,14 @@ class PermissionAnswer(BaseModel):
 
 
 @router.post("/ws/{c}/permission")
-async def permission_route(c: str, body: PermissionAnswer) -> dict[str, Any]:
+async def permission_route(c: str, body: PermissionAnswer, request: Request) -> dict[str, Any]:
     """The analyst's answer to a relayed permission prompt of main's: it goes to the waiting hook, or else to the session's
-    shim on the stream. 404 when no such request waits."""
-    from . import agents  # noqa: PLC0415
+    shim on the stream. 403 for a request that is not the analyst's browser's (hook_auth.analyst), 404 when no such
+    request waits."""
+    from . import agents, hook_auth  # noqa: PLC0415
+
+    if not hook_auth.analyst(request):
+        raise HTTPException(403, hook_auth.ANALYST_ONLY)
 
     meta = agents.ensure_main(c)
     pending = [p for p in meta.get("permissions") or [] if isinstance(p, dict)]

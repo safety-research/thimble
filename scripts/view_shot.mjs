@@ -196,6 +196,13 @@ async function shootState(browser, opt, doc, state, i) {
   let lastActivity = Date.now()
   const page = await browser.newPage({ viewport: opt.viewport })
   try {
+    // no WebRTC in any frame, the page's own nested ones too, since no policy covers it and page.route never sees it
+    await page.addInitScript(() => {
+      for (const k of ['RTCPeerConnection', 'webkitRTCPeerConnection', 'RTCDataChannel'])
+        try {
+          Object.defineProperty(window, k, { value: undefined })
+        } catch {}
+    })
     const isMedia = (url) => !!opt.media && (url === opt.media || url.startsWith(opt.media + '?'))
     await page.route('**/*', async (route) => {
       const req = route.request()

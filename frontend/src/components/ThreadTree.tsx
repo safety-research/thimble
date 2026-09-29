@@ -1,11 +1,12 @@
 // The thread tree: every thread in one card at the top of the chat column. Collapsed it is one row: the current
 // thread's full name and, when something happens elsewhere, how many run, how many hold an unread reply, and "waiting"
 // while a prompt waits. Open, it is drawn like the Files tree (files/Tree): rows by depth with guide lines and
-// chevrons that fold their children; a folded row shows the state of the rows it hides. A row's right edge is its
+// chevrons that fold their children; a folded row shows the state of the rows it hides. While open the rows keep the
+// order they opened with (inKeptOrder), a new thread going after them. A row's right edge is its
 // state (progress, spinner, waiting dot, unread dot, or a finished agent's result and end time) and ⋯ on hover for
 // Rename and Delete. With many threads a search field at the card's foot filters the rows. Picking a row shows that
 // thread's conversation; picking main also folds the tree.
-import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
 import { Icon } from './Icon'
 import { Mark } from './Marks'
 import { Popover } from './Menu'
@@ -33,6 +34,8 @@ export interface ThreadNode {
   ended?: 'done' | 'failed'
   /** main: no rename, no delete */
   fixed?: boolean
+  /** a row that is no thread but holds threads (the dev tickets): picking it folds or unfolds it */
+  group?: boolean
 }
 
 export interface ThreadTreeProps {
@@ -158,7 +161,23 @@ export function attention(nodes: readonly ThreadNode[], current: string): { runn
  * read). Pure. */
 export const activeCount = (nodes: readonly ThreadNode[], current: string): number => nodes.filter((n) => n.running || (n.unread && n.id !== current)).length
 
-export function ThreadTree({ nodes, current, onPick, collapsed, onCollapsedChange, onRename, onDelete, aside, className }: ThreadTreeProps) {
+/** `nodes` in the order `kept` lists them, those it does not know after, in their own order: the open tree holds the
+ * order it opened with, so rows do not move under the pointer as activity comes in. Pure. */
+export function inKeptOrder(nodes: readonly ThreadNode[], kept: readonly string[] | null): readonly ThreadNode[] {
+  if (!kept) return nodes
+  const at = new Map(kept.map((id, i) => [id, i]))
+  return nodes
+    .map((n, i) => ({ n, i }))
+    .sort((a, b) => (at.get(a.n.id) ?? kept.length + a.i) - (at.get(b.n.id) ?? kept.length + b.i))
+    .map((x) => x.n)
+}
+
+export function ThreadTree({ nodes: live, current, onPick, collapsed, onCollapsedChange, onRename, onDelete, aside, className }: ThreadTreeProps) {
+  // the order the rows had when the tree opened, held while it stays open; a new thread goes after them (inKeptOrder)
+  const kept = useRef<string[] | null>(null)
+  if (collapsed) kept.current = null
+  else if (!kept.current) kept.current = live.map((n) => n.id)
+  const nodes = useMemo(() => inKeptOrder(live, kept.current), [live, collapsed])
   const [editing, setEditing] = useState<{ id: string; draft: string } | null>(null)
   const [menu, setMenu] = useState<{ id: string; el: HTMLElement } | null>(null)
   const [confirming, setConfirming] = useState<string | null>(null)
@@ -232,11 +251,12 @@ export function ThreadTree({ nodes, current, onPick, collapsed, onCollapsedChang
         data-parent={n.parent ?? undefined}
         onClick={() => {
           if (isEditing) return
+          if (n.group) return toggleFold(n.id)
           onPick(n.id)
           // main is where the analyst goes back to: picking it folds the open tree
           if (n.fixed && !collapsed) onCollapsedChange(true)
         }}
-        onKeyDown={(e) => !isEditing && pickKeys(e, n.id)}
+        onKeyDown={(e) => !isEditing && (n.group ? (e.key === 'Enter' || e.key === ' ') && (e.preventDefault(), toggleFold(n.id)) : pickKeys(e, n.id))}
       >
         {Array.from({ length: depth }, (_, i) => (
           <span key={i} className="tt-guide" style={{ left: GUIDE_X + i * INDENT }} />

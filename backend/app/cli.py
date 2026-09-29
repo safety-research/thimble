@@ -8,21 +8,24 @@
     thimble feedback ["description"] [--no-logs]   (a problem report as a zip; feedback.py)
     thimble list                           (the workspaces by id, archived runs included; runs.py)
     thimble purge <id>… [--dry-run]        (delete workspaces or archived runs by id; runs.py)
-    thimble launch-args --cwd <path>       (the launcher's: channel entry, allowed tools, main's effort and settings, turn tools, main's prompt)
+    thimble launch-args --cwd <path>       (the launcher's: channel entry, allowed tools, main's effort and settings, turn tools, main's name, main's prompt)
     thimble prompt <name>… [--cwd <path>]  (prompt files rendered for a session in <path>, for skills and hooks)
 
 `server up` (alias `ensure`) is the one starter: `GET /api/health`, then under `flock <home>/server.lock` spawn uvicorn
 on THIMBLE_PORT (8300) as its own session leader (plus Vite on 5300 when THIMBLE_DEV is on), wait for health, map the
-cwd to a workspace, print `thimble: <url>`, and name the session to the server. It always exits 0, since a skill fails
-whole when its command exits non-zero. `--action fresh` moves the workspace aside into <workspaces>/.archive/;
-`--action restore` restores an archive. /thimble also reports the route browser events take (cc_channel.delivery).
+cwd to a workspace, print `thimble: <url>` (LINK_LINE in a session), and name the session to the server. It always
+exits 0, since a skill fails whole when its command exits non-zero. `--action fresh` moves the workspace aside into
+<workspaces>/.archive/; `--action restore` restores an archive. /thimble also reports the route browser events take
+(cc_channel.delivery).
 
 <home> is `~/.thimble` or THIMBLE_HOME. <home>/server.json records {port, pid, url, repo, env, token, ui_key}, readable
 by its owner alone; `token` is new at each start and is what the plugin's hooks prove they hold, and `ui_key`, kept
-across starts, is what the printed link gives the browser to change permission modes (hook_auth.py). Its `pid` is trusted
-only while it is a thimble server on its port (is_server checks the command line and working folder, since a pid
-recorded inside a sandbox's pid namespace can name an unrelated host process). reconcile makes the record true before
-`up` acts on it. A server whose /api/health names another THIMBLE_HOME belongs to another install and is refused.
+across starts, is what the link gives the browser to answer permission requests and change permission modes
+(hook_auth.py). Only a terminal gets that link: `up` from a shell prints it, and /thimble prints LINK_LINE for main's
+Stop hook to show it (leave_link). Its `pid` is trusted only while it is a thimble server on its port (is_server checks
+the command line and working folder, since a pid recorded inside a sandbox's pid namespace can name an unrelated host
+process). reconcile makes the record true before `up` acts on it. A server whose /api/health names another
+THIMBLE_HOME belongs to another install and is refused.
 
 Claude Code's Bash sandbox gives each command its own network and pid namespace, so `up` starts nothing there and
 prints the `sandbox.excludedCommands` entry that runs it outside (sandbox_rule). `restart` and `stop` name the work
@@ -80,7 +83,7 @@ SOURCE_CHANGED = "source changed"  # restart.json's title; dev.PLAIN_REASONS
 RESTARTED_LINE = "thimble: server restarted (source changed)"
 NOT_RESTARTED_LINE = "thimble: source changed since the server started; not restarting while {reason}"
 REGISTER_FAILED_LINE = "thimble: could not open {path} as a workspace (the server refused to register it); see {log} and say `/thimble` again."
-NO_UI_LINE = "thimble: the dashboard is not built yet, so that URL shows no page; run `thimble doctor` in a shell for the fix."
+NO_UI_LINE = "thimble: the dashboard is not built yet, so its link shows no page; run `thimble doctor` in a shell for the fix."
 NO_AUTH_LINE = "thimble: WARNING - {problem}. Nothing that calls a model runs until then."
 FEEDBACK = "feedback"  # /thimble feedback: the problem report (feedback.py)
 # where the server did not start: how to send the developer a problem report, which needs no server
@@ -118,6 +121,10 @@ RESUME = "restore"  # /thimble restore [<archive>]: an archive restored in its p
 ALIASES = {"resume": RESUME}  # another name the action takes
 OPENING = ("", "on", FRESH, RESUME)  # the actions that open the workspace (and print the delivery note)
 RESUME_LINE = "thimble: resuming the dashboard from your last run; `/thimble fresh` starts over"
+# what /thimble prints in place of the link, which carries the ui_key and so is kept out of the model's context: main's
+# Stop hook shows it under the reply (leave_link, plugin/bin/.thimble-watch)
+LINK_LINE = "thimble: the dashboard link is under this reply (or run `thimble up` in a shell)"
+LINKS_DIR = "links"  # under <home>: the link each session's Stop hook shows once
 FRESH_LINE = ("thimble: Cleared the session at {cwd}. The last run is archived at {path}. To bring it back, run: "
               "/thimble restore {name}")
 NOTHING_ARCHIVED_LINE = "thimble: this folder had no workspace to archive"
@@ -1137,13 +1144,31 @@ def open_workspace(cwd: Path, data_dir: Path, url: str | None, *, here: bool = F
     return None, False
 
 
-def ui_url(name: str | None) -> str:
-    """The UI port in dev mode (its own Vite), else the API port where the built UI is served, with the key that lets
-    the page change permission modes (hook_auth.claim)."""
+def ui_url(name: str | None, key: bool = True) -> str:
+    """The UI port in dev mode (its own Vite), else the API port where the built UI is served, with `key` the key that
+    lets the page answer permission requests and change permission modes (hook_auth.claim)."""
     st = read_state()
     base = str(st.get("url") or api_url())
-    key = f"#k={st['ui_key']}" if st.get("ui_key") else ""
-    return f"{base}/?ws={name}{key}" if name else f"{base}/{key}"
+    k = f"#k={st['ui_key']}" if key and st.get("ui_key") else ""
+    return f"{base}/?ws={name}{k}" if name else f"{base}/{k}"
+
+
+def leave_link(session: str, url: str) -> bool:
+    """`url` for the session's Stop hook to show under main's reply (LINK_LINE); False when it could not be left."""
+    name = "".join(ch for ch in session if ch.isalnum() or ch in "-_")
+    try:
+        d = ensure_home() / LINKS_DIR
+        d.mkdir(exist_ok=True)
+        (d / name).write_text(url, "utf-8")
+    except OSError as e:
+        _log(f"the link for session {session} was not left: {e}")
+        return False
+    return bool(name)
+
+
+def to_terminal() -> bool:
+    """Whether stdout is a terminal, the analyst's; a command's output read by a program can reach a model's context."""
+    return sys.stdout.isatty()
 
 
 HELD_KEYS = ("cards", "labels", "documents", "chats")  # what `GET /api/tools/holdings` counts (tools.holdings)
@@ -1444,32 +1469,44 @@ def launch_settings(cwd: Path, given: str = "") -> str:
     return json.dumps(out)
 
 
+def main_name(cwd: Path) -> str:
+    """The name main's session goes by in Claude Code (`claude -n`, config.session_name): `thimble:main · <workspace>`,
+    the workspace being the one /thimble opens `cwd` as (open_workspace with `here`), told before anything is
+    registered: the corpus that claims `cwd` itself or holds it under the data folder, else the name registering `cwd`
+    gives it (config.register_corpus: its basename, config.corpus_name_for, or the next free `-2`, `-3` …, config.free_name)."""
+    data_dir = Path(resolve_env()["data_dir"]).resolve()
+    here = cwd.expanduser().resolve()
+    known = known_corpus(here, data_dir)
+    if known is not None and (known[1] == here or known[1].parent == data_dir):
+        return config.session_name("main", known[0])
+    return config.session_name("main", config.free_name(config.corpus_name_for(here), data_dir))
+
+
 def launch_args(cwd: Path, resume: bool = False, settings: str = "") -> str:
     """The launcher's values, one per line: the channel entry of the plugin copy to load, the `--allowedTools` line, the
     `--effort` value ('' for none), the `--settings` value (launch_settings, over the analyst's own `settings`), the
-    value to export as terminal_tools.ENV ('' when the `claude` it starts does not read it), with `resume` the session
-    to resume, then main's prompt, whose turn ending follows that value."""
+    value to export as terminal_tools.ENV ('' when the `claude` it starts does not read it), main's `--name`
+    (main_name), with `resume` the session to resume, then main's prompt, whose turn ending follows that value."""
     from . import cc_settings, channel, terminal_tools  # noqa: PLC0415 — needed by this subcommand alone
 
     installed = installed_copy(cwd)
     root = installed.root if installed else plugin_root()
     workspaces = Path(resolve_env()["workspaces_dir"]).resolve()
     anchors = workspaces / "*" / ANCHORS_DIR
-    # the prompt the orientation's subagent reads first in terminal-first mode (orientation.subagent_prompt_file), and
     # the instructions of a background session's tray entry (bg_session.proxy_file)
-    orient_prompt = workspaces / "*" / "orient" / "subagent-prompt.md"
     tray_prompts = workspaces / "*" / "bg" / "*.md"
     # on the Monitor route main arms its Monitor on the watcher again every 30 minutes, which must not wait on a prompt;
     # only --stream, since the watcher's other modes report to the server as main's hooks
     watcher = f"Bash({root / WATCHER} --stream *)"
-    tools_line = ",".join([MCP_TOOLS_RULE, f"Read(/{anchors}/**)", f"Read(/{orient_prompt})", f"Read(/{tray_prompts})",
+    tools_line = ",".join([MCP_TOOLS_RULE, f"Read(/{anchors}/**)", f"Read(/{tray_prompts})",
                            watcher, *skill_rules(root)])
     last = [last_main(cwd)] if resume else []
     turn_tools = terminal_tools.launch_value()
     chosen = main_choice(cwd).get("effort")
     effort = cc_settings.level_of(chosen) if chosen in (*cc_settings.EFFORTS, cc_settings.ULTRACODE) else ""
     return "\n".join([installed.channel if installed else cc_channel.channel(root), tools_line,
-                      effort or cc_settings.main_effort_flag(cwd), launch_settings(cwd, settings), turn_tools, *last,
+                      effort or cc_settings.main_effort_flag(cwd), launch_settings(cwd, settings), turn_tools,
+                      main_name(cwd), *last,
                       channel.session_prompt(str(cwd.resolve()), bool(turn_tools))])
 
 
@@ -2194,7 +2231,12 @@ def cmd_ensure(args: argparse.Namespace) -> int:
             second = resume_lines(url, name, archive)
         else:
             second = [RESUME_LINE] if not opened and resumes(url, name) else []
-        print(f"thimble: {ui_url(name)}")
+        # with the plugin's hooks off no Stop hook shows the link, so the page opens without the key
+        if (args.session and not cc_channel.hooks_blocked(cwd, plugin_root())
+                and leave_link(str(args.session), ui_url(name))):
+            print(LINK_LINE)
+        else:
+            print(f"thimble: {ui_url(name, key=not args.session and to_terminal())}")
         for line in second:
             print(line)
         status = config.auth_status(cwd=cwd)
@@ -2544,7 +2586,7 @@ def build_parser() -> argparse.ArgumentParser:
     u.add_argument("--from", dest="from_", metavar="ZIP", help="a downloaded release zip (thimble-<version>-<sha>.zip)")
     u.add_argument("--dry-run", action="store_true", help="print update.sh's steps; change nothing")
     u.set_defaults(fn=cmd_update)
-    la = sub.add_parser("launch-args", help="for plugin/bin/thimble: the channel entry, the --allowedTools, --effort and --settings values, the tools that end a turn without text, then main's prompt")
+    la = sub.add_parser("launch-args", help="for plugin/bin/thimble: the channel entry, the --allowedTools, --effort and --settings values, the tools that end a turn without text, main's --name, then main's prompt")
     la.add_argument("--cwd")
     la.add_argument("--resume", action="store_true", help="a line before the prompt: the folder's last main session")
     la.add_argument("--settings", help="the analyst's own --settings, which thimble's are merged into")

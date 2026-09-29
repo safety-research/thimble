@@ -1,9 +1,10 @@
 // The shell: the top bar (its tabs over the panes), the chat column on the left and the panes that show the surfaces
 // on the right. It sets --pane-x, the main area's left edge, so the tabs line up with it. A tab, chip or citation shows
 // its surface in the pane that holds it, else in the focused pane (panes.show). The layout and the chat column's width
-// and fold state are kept per workspace in browser storage; a new workspace opens on the Canvas, or on Files while the
-// canvas is empty. A folded chat column opens when something asks for a thread. With the chat off (the workspace's
-// `hide_chat` setting, the top bar's toggle) there is no column at all: main's alert, permission card, orientation strip
+// and fold state are kept per workspace in browser storage (App clears it first when the workspace was replaced by a new
+// one of the same name, lib/workspace.ts syncInstance); a new workspace opens on Files. A folded chat column opens when
+// something asks for a thread. With the chat off (the workspace's `hide_chat` setting, in the settings popover) there is
+// no column at all: main's alert, permission card, orientation strip
 // and Start gate show in the dock at the bottom left (ChatPanel `dock`), a ⌘-click's box answers in place (CmdPointer
 // `inline`), and a request for a thread turns the chat on. When the workspace is replaced (the stream's `reset`), the
 // page reloads. With no Claude Code session attached the shell is inert under SessionGone.
@@ -18,7 +19,6 @@ import type { IconName } from '../components/Icon'
 import { FilesTab } from '../files/FilesTab'
 import { useViews } from '../files/ViewsBar'
 import { ViewSurface } from '../files/ViewSurface'
-import { api } from '../lib/api'
 import { bus, type Tab } from '../lib/bus'
 import { loadSettings, onSettingsChange, saveSetting } from '../lib/models'
 import { isReplay, useWorkspaceEvents } from '../lib/events'
@@ -71,19 +71,17 @@ interface Layout {
   panes: Panes
 }
 
-/** What a workspace keeps, read back: the stored layout, else one pane on the tab an older page kept. */
-function readLayout(key: string): { layout: Layout; first: boolean } {
+/** What a workspace keeps, read back: the stored layout, else one pane on the tab an older page kept, else (a first
+ * open) one pane on Files. */
+function readLayout(key: string): Layout {
   const saved = readStorage<Partial<Layout> & { tab?: unknown }>(key, {})
   const w = Number(saved.chatWidth)
   const tab = saved.tab === 'files' || saved.tab === 'report' || saved.tab === 'canvas' ? saved.tab : null
-  const panes = parsePanes(saved.panes) ?? single(tab ?? 'canvas')
+  const panes = parsePanes(saved.panes) ?? single(tab ?? 'files')
   return {
-    layout: {
-      chatWidth: Number.isFinite(w) && w > 0 ? Math.min(CHAT_WIDTH.max, Math.max(CHAT_WIDTH.min, w)) : CHAT_WIDTH.def,
-      chatOpen: saved.chatOpen !== false,
-      panes,
-    },
-    first: saved.panes == null && tab == null,
+    chatWidth: Number.isFinite(w) && w > 0 ? Math.min(CHAT_WIDTH.max, Math.max(CHAT_WIDTH.min, w)) : CHAT_WIDTH.def,
+    chatOpen: saved.chatOpen !== false,
+    panes,
   }
 }
 
@@ -133,8 +131,7 @@ export function Shell({ ws }: { ws: string }) {
   useWorkspaceEvents(ws)
   useEffect(() => bus.on('wsReset', (e) => e.workspace === ws && window.location.reload()), [ws])
   const key = storageKey(ws, 'layout')
-  const [{ layout: initial, first: firstOpen }] = useState(() => readLayout(key))
-  const [layout, setLayout] = useState<Layout>(initial)
+  const [layout, setLayout] = useState<Layout>(() => readLayout(key))
   const [liveWidth, setLiveWidth] = useState(layout.chatWidth)
   // the panes focused before the current one, most recent first (panes.show, panes.close)
   const recent = useRef<string[]>([])
@@ -161,18 +158,6 @@ export function Shell({ ws }: { ws: string }) {
     [key],
   )
   useEffect(() => setLiveWidth(layout.chatWidth), [layout.chatWidth])
-  useEffect(() => {
-    if (!firstOpen) return
-    let alive = true
-    api
-      .canvas(ws)
-      // a layout the analyst made meanwhile is kept
-      .then((c) => alive && c.cells.length === 0 && readStorage<Partial<Layout>>(key, {}).panes == null && setLayout((cur) => ({ ...cur, panes: single('files') })))
-      .catch(() => undefined)
-    return () => {
-      alive = false
-    }
-  }, [ws, key, firstOpen])
 
   // the views, each of which a pane can show on its own
   const { views } = useViews(ws)
@@ -309,11 +294,6 @@ export function Shell({ ws }: { ws: string }) {
   return (
     <div className="shell" data-chat={chatOff ? 'off' : layout.chatOpen ? 'open' : 'closed'} data-session={gone ? 'gone' : undefined} inert={!!gone} style={{ '--pane-x': `${paneX}px` } as React.CSSProperties}>
       <TopBar
-        chatOff={chatOff}
-        onChatOff={(off) => {
-          track('ui-click', { target: 'layout:chat', detail: { off } })
-          setChatOff(off)
-        }}
         ws={ws}
         tabs={BASE.map((t) => ({
           value: t.id,

@@ -118,6 +118,8 @@ def fake(tmp_path, monkeypatch) -> Path:
     monkeypatch.setenv("THIMBLE_CHANNEL", "plugin:thimble@inline")  # the server's own, inherited from main's session
     monkeypatch.delenv("FAKE_MODE", raising=False)
     monkeypatch.delenv("FAKE_SLEEP", raising=False)
+    # the stand-in is a `claude -p`: the sessions run as thimble's own, not as terminal-first mode's `claude --bg`
+    ledger.put_settings(CORPUS, {"terminal_first": False})
     monkeypatch.setenv("THIMBLE_SANDBOX", "0")  # the fence without the sandbox
     return out
 
@@ -172,7 +174,7 @@ async def test_every_session_asks_through_the_permission_hook_and_no_prompt_tool
     assert "ask_permission" not in tools.REGISTRY
 
 
-async def test_manual_waits_for_the_analyst_however_long_while_a_writer_s_request_is_denied_after_a_minute(fake, monkeypatch):
+async def test_manual_waits_for_the_analyst_however_long_while_a_writer_s_request_is_denied_after_a_minute(fake, monkeypatch, analyst):
     """Manual is Claude Code's manual mode: each request it makes waits on the orientation's card, with the agent that
     asked, until the analyst answers, with no minute's deny. A writer, which is not patient, keeps the minute."""
     monkeypatch.setenv("FAKE_MODE", "sleep")
@@ -185,7 +187,7 @@ async def test_manual_waits_for_the_analyst_however_long_while_a_writer_s_reques
     assert (p["tool"], p["what"], p["agent_id"]) == ("Bash", "Create notes.md", "a1") and "touch notes.md" in p["input"]
     await asyncio.sleep(0.3)
     assert not call.done(), "no time limit in Manual"
-    assert (await agent_session.permission_route(CORPUS, run.chat, agent_session.PermissionAnswer(id=p["id"], allow=True)))["allow"]
+    assert (await agent_session.permission_route(CORPUS, run.chat, agent_session.PermissionAnswer(id=p["id"], allow=True), analyst))["allow"]
     assert await call == {"behavior": "allow", "updatedInput": inp}
     call = _ask("Write", {"file_path": "x"})
     [p] = await _pending(run.chat)

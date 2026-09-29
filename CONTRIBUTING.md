@@ -9,7 +9,7 @@ You need Claude Code, macOS or Linux, Python 3.12+ ([uv](https://docs.astral.sh/
 ```
 git clone https://github.com/safety-research/thimble.git
 cd thimble
-bash scripts/install.sh --dev   # backend/.venv with the test extras, frontend/dist, the plugin, ~/.local/bin/thimble
+bash scripts/install.sh   # backend/.venv with the test extras, frontend/dist, ~/.local/bin/thimble
 ```
 
 ## Run it
@@ -28,7 +28,8 @@ State lives under `~/.thimble` (`THIMBLE_HOME`): `server.json`, `server.log` and
 Per-workspace state is `workspaces/<c>/` in the checkout (`THIMBLE_WORKSPACES_DIR`). To run a scratch stack beside the
 live one, set `THIMBLE_HOME`, `THIMBLE_WORKSPACES_DIR`, `THIMBLE_DATA_DIR` and `THIMBLE_DEV_DIR` under /tmp and
 `THIMBLE_PORT` above 8400 (`THIMBLE_UI_PORT` above 5400 with Vite). `scripts/dev/make_toy_corpus.py` writes a synthetic
-corpus to try it on.
+corpus to try it on, and `scripts/dev/examples.py <folder>` opens the worked examples of custom views there, each on its
+sample with its sample labels (`labels.json`) on.
 
 ## Run the tests
 
@@ -56,7 +57,7 @@ synthetic data; a test does not pin wording, copy or layout.
 | every model-facing prompt | `prompts/` (rendered by `backend/app/prompts.py`) |
 | the browser (React, Vite); the types it shares with the backend | `frontend/src/`, `frontend/src/lib/types.ts` |
 | the Claude Code plugin: launcher, MCP server and channel, skills, hooks | `plugin/` |
-| the worked examples of custom views and the built-in spreadsheet and PDF viewers | `plugin/viewers/` |
+| the worked examples of custom views and the built-in PDF viewer | `plugin/viewers/` |
 | install, update, release and dev scripts | `scripts/` |
 | tests | `backend/tests_public/` (pytest), `frontend/tests/public/` (vitest), `frontend/tests/public/browser/` |
 

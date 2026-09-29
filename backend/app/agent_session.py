@@ -15,7 +15,8 @@ Permissions. A --print session has no terminal, so a PermissionRequest hook (per
 the session, its subagents and workflow agents to ask, which shows it on the chat's card with Allow and Deny. A hook is
 used rather than --permission-prompt-tool because the prompt tool never hears background or workflow agents' requests.
 Each session runs in the mode of its agent's row (modes.py, the caller's `agent`), or in the mode a card switched it to
-(set_mode), which its later runs keep while this server runs (`_switched`). In Bypass ask allows at once; a patient
+(set_mode), which its later runs keep while this server runs (`_switched`); a continued background session keeps the
+mode its chat's meta records, since Claude Code keeps its flags (BG_AUTO_LINE). In Bypass ask allows at once; a patient
 session's request (the orientation's) waits for the analyst, any other is denied after PERMISSION_WAIT_S. A request
 denied unanswered stays on the card, marked `expired`, until the analyst dismisses it or the session ends. thimble's
 own tools and skills are always allowed (own_rules).
@@ -172,9 +173,10 @@ CLASSIFIER_WAITS_S = (10.0, 30.0, 90.0)
 CLASSIFIER_ASK_S = 600.0
 BYPASS = "bypass"
 AUTO = "auto"
-# a background session keeps its --permission-mode: bg_session.start sends a running one the prompt in place and
-# resumes a stopped one without its flags
-BG_AUTO_LINE = "A background session cannot switch into or out of Auto while it runs; stop it and start it again."
+# a background session keeps its --permission-mode, in every run of its chat: bg_session.start sends a running one the
+# prompt in place and resumes a stopped one without its flags, so start() takes a continued one's mode from its meta
+BG_AUTO_LINE = ("A background session cannot switch into or out of Auto while it runs; the mode saved for its agent in"
+                " Settings applies to the agent's next new session.")
 # prompts/tools.md: the stdin prompt of a session resumed in a new mode, and its sentence naming the agents that stopped
 # with the pause (module note, mode switch)
 MODE_PROMPT = "session-mode-changed"
@@ -618,6 +620,18 @@ def call_hooks(c: str) -> dict[str, Any]:
     return {event: hook for event in CALL_REF_EVENTS}
 
 
+def start_mode(c: str, agent: str, *, chat: str | None = None, background: bool = False) -> str:
+    """The mode a session of `agent` starts in (module note, permissions): its row (modes.mode_for); when it continues
+    the chat `chat`, the mode a card switched that chat to while this server runs (`_switched`); and when that chat's
+    session is a background one, the mode its meta records, since Claude Code keeps a background session's flags
+    (BG_AUTO_LINE), Bypass read as Manual once the settings turn it off."""
+    kept = (agents.meta_or_none(c, chat) or {}).get("permission_mode") if background and chat else None
+    if kept in modes.MODES:
+        return "manual" if kept in modes.disabled() and modes.flag(str(kept)) == modes.flag("manual") else str(kept)
+    switched = _switched.get((c, chat)) if chat else None
+    return switched if switched and switched not in modes.disabled() else modes.mode_for(c, agent)
+
+
 async def start(c: str, key: str, *, role: str, title: str, agent_args: list[str], effort: str, settings: str,
                 prompt: str, agent_type: str, on_start: Callable[[Run], None] | None = None,
                 on_end: Callable[[Run, str, str], None] | None = None, append_shared: bool = True,
@@ -642,8 +656,7 @@ async def start(c: str, key: str, *, role: str, title: str, agent_args: list[str
     cwd = config.corpus_dir(c)
     folder = work if work is not None else cwd  # where the process runs (module note, the fence)
     sid = resume or str(uuid.uuid4())
-    switched = _switched.get((c, chat or "")) if resume else None
-    mode = switched if switched and switched not in modes.disabled() else modes.mode_for(c, agent)
+    mode = start_mode(c, agent, chat=chat if resume else None, background=background)
     permission_mode = modes.flag(mode)
     extra_env: dict[str, str] = {}
     given = json.loads(settings)
@@ -697,8 +710,9 @@ async def start(c: str, key: str, *, role: str, title: str, agent_args: list[str
     extra: dict[str, Any] = {"server": os.getpid(), "workspace_dir": str(config.workspace_dir(c).resolve()),
                              **({"model": model} if model else {})}
     if background:
-        extra.update(background=True, bg=proc.short, bg_name=bg_session.name_of(key))
-    extra.update(permission_mode=mode, mode_switch=None)  # what the card's switcher shows
+        extra.update(background=True, bg=proc.short)
+    # what the card's switcher shows, and the row of modes.AGENTS a pick it cannot make live saves to (ModeSwitch)
+    extra.update(permission_mode=mode, mode_switch=None, mode_agent=agent)
     if resume and chat and agents.meta_or_none(c, chat) is not None:
         extra["restarted"] = {"run": run_k, "ts": _now()} if restarted else None
         meta = _reopen(c, chat, parent, run_k, pid=proc.pid, effort=effort, leads=leads or [], call=call,
@@ -1993,6 +2007,9 @@ async def _delivering() -> None:
         await asyncio.sleep(UNHEARD_POLL_S)
         for key in [k for k, notes in _unheard.items() if notes]:
             folder = Path(key).parent
+            if not folder.is_dir():  # the workspace was purged: its unheard ends go with it, never to a new one's main
+                _unheard.pop(key, None)
+                continue
             try:
                 if folder.parent.resolve() == config.WORKSPACES_DIR.resolve():
                     deliver_unheard(folder.name)
@@ -2128,13 +2145,20 @@ async def ask(c: str, key: str | None, tool_name: str, inp: Any, agent_id: str |
     if run.sandbox_rule is not None and sandbox_allow.allows(tool_name, inp, *run.sandbox_rule):
         return granted
     web = web_rule(tool_name, inp)
-    kept = web is not None and web in web_rules(c)
-    if kept or run.mode == BYPASS:
+
+    def at_once() -> dict[str, Any] | None:
+        """granted in Bypass or for a web call the workspace's kept rules allow, else None."""
+        kept = web is not None and web in web_rules(c)
+        if not (kept or run.mode == BYPASS):
+            return None
         if event == DENIED:
             _remember(run, agent_id, tool_name, inp, True, tool_use_id)
         agents.log_permission(c, "answered", chat=run.chat, session=key, tool=tool_name, what=_what(tool_name, inp),
                               agent_id=agent_id, answer="allow: kept for the workspace" if kept else "allow: Bypass")
         return granted
+
+    if (now := at_once()) is not None:
+        return now
     if run.releasing:
         agents.log_permission(c, "answered", chat=run.chat, session=key, tool=tool_name, what=_what(tool_name, inp),
                               agent_id=agent_id, answer="deny: answered for a mode switch")
@@ -2148,6 +2172,9 @@ async def ask(c: str, key: str | None, tool_name: str, inp: Any, agent_id: str |
         tried.add(first)
         if (joined := await _join(run, first, also, tool_name, inp, agent_id, event, tool_use_id, granted)) is not None:
             return joined
+    # a joined call asked on its own: the switch to Bypass or the kept rule that allowed its request may cover it
+    if tried and (now := at_once()) is not None:
+        return now
     rid = uuid.uuid4().hex[:10]
     whole = json.dumps(inp, ensure_ascii=False, default=str) if inp is not None else ""
     command = _command(tool_name, inp)
@@ -2821,7 +2848,13 @@ async def retry_route(c: str, chat: str) -> dict[str, Any]:
 
 
 @router.post("/ws/{c}/chats/{chat}/permission")
-async def permission_route(c: str, chat: str, body: PermissionAnswer) -> dict[str, Any]:
+async def permission_route(c: str, chat: str, body: PermissionAnswer, request: Request) -> dict[str, Any]:
+    """The analyst's answer on a session's card: answer. 403 for a request that is not the analyst's browser's
+    (hook_auth.analyst), 404 when no such request waits."""
+    from . import hook_auth  # noqa: PLC0415
+
+    if not hook_auth.analyst(request):
+        raise HTTPException(403, hook_auth.ANALYST_ONLY)
     if not answer(c, chat, body.id, body.allow, body.always, body.shown):
         raise HTTPException(404, "no such permission request is waiting")
     return {"answered": body.id, "allow": body.allow}

@@ -206,7 +206,7 @@ Propose a view, a page that shows records in a form their files hide, or a viewe
   "properties": {
     "name": {"type": "string", "description": "A short name in Title Case, as its tab shows it, such as Message Board."},
     "why": {"type": "string", "description": "What the analyst sees and why that helps, in whatever form fits the records, such as a wiki page with its edit history or a graph of who replies to whom."},
-    "claims": {"type": "array", "items": {"type": "string"}, "description": "Globs of the files it reads. For a viewer of one file type, the extension's glob, such as **/*.vtt."},
+    "claims": {"type": "array", "items": {"type": "string"}, "description": "Globs of every file that holds its records, by pattern rather than one file, such as runs/*/events.jsonl. For a viewer of one file type, the extension's glob, such as **/*.vtt."},
     "unit": {"type": "string", "description": "What one row, mark or card stands for, the field that keys it, and how many there are."},
     "overview": {"type": "string", "description": "What does the overview look like?"},
     "zoom": {"type": "string", "description": "How do you zoom?"},
@@ -314,13 +314,13 @@ Send a message the analyst typed in this terminal to a thread, as that thread's 
 
 ## wait_session
 
-Only for a tray entry of thimble's background sessions, as its instructions file says; main never calls it. Waits for news from the session the entry shows: its replies, its state, a message to send it, or its end. It returns within a few seconds.
+Only for a tray entry of thimble's background sessions, as its instructions file says; main never calls it. Waits for news from the session the entry shows: its replies, tool calls and messages, its state, a message to send it, or its end. It returns as soon as there is news, or within a few seconds.
 
 ```json
 {
   "type": "object",
   "properties": {
-    "session": {"type": "string", "description": "The session's name, such as thimble:writer."}
+    "session": {"type": "string", "description": "The session's whole name, such as thimble:writer · logs."}
   },
   "required": ["session"]
 }
@@ -701,7 +701,11 @@ No file of the corpus matches {claims}, so the view was not proposed and the dev
 
 ## propose_view-cap
 
-{view} was not proposed: an orientation proposes at most {n} views, and yours are {views}. To improve one, propose it again under its name.
+{view} was not proposed: a workspace gets at most {n} views from the orientation, and it has had {views}, counting any the analyst deleted. To improve one, propose it again under its name.
+
+## propose_view-deleted
+
+{view} was not proposed: the analyst deleted it, so it is not proposed again.
 
 ## propose_view-near
 
@@ -766,19 +770,6 @@ The orientation has started in its own session, and the browser shows it, so thi
 ## start_orientation-running
 
 An orientation is running already. Tell the analyst so in one line.
-
-## orient-subagent-notes
-
-These instructions were written for an orientation that runs in a Claude Code session of its own. As a subagent of the analyst's session, these things differ:
-
-- Your commands start in the corpus folder. Change none of its files, and put the files you make, such as a script or a cleaned copy of a file, in the work folder named above, or under /tmp where you cannot write there.
-- You run in the permission mode of the analyst's session, so a call it does not allow waits for the analyst's answer.
-- You have no Workflow tool. Subagents of your own are fine.
-- The analyst and main can message you while you work, from Claude Code's agent view or with SendMessage. Take such a message as a follow-up to your analysis.
-
-## start_orientation-subagent
-
-This workspace runs the orientation as your subagent, so the analyst can steer it from this terminal. Start it now with the Agent tool: `subagent_type` "{agent}", `run_in_background` true, `description` "orientation", and `{prompt}` as the whole prompt. The browser shows it as the Orientation thread, and its task notification tells you when it ends.
 
 ## start_writing-started
 
@@ -1116,16 +1107,16 @@ Answer main with SendMessage.
 
 ## bg-relay
 
-{session}'s tray entry is not running, so send {session} a message for thimble: call SendMessage with `to` "{session}" and `{token}` as the whole message, word for word; thimble puts the real message in its place. End the turn on that call, with no text after it.
+{session}'s tray entry is not running, so send {session} a message for thimble: call SendMessage with `to` "{session}", the whole name exactly as written here rather than as ListAgents shows it, and `{token}` as the whole message, word for word; thimble puts the real message in its place. End the turn on that call, with no text after it.
 
 ## bg-proxy
 
-You show {session}, a background session of thimble's, in the analyst's Claude Code agent tray. Every message that reaches you here, from the analyst or from main, is for {session}, and thimble passes it on. You write no words of your own and use no other tools.
+You show {session}, a background session of thimble's, in the analyst's Claude Code agent tray. Every message that reaches you here, from the analyst or from main, is for {session}, and thimble passes it on. You write no words of your own and use no other tools. "{session}" is the session's whole name, spaces and `·` included: write it exactly so wherever it goes.
 
-Loop until the session ends:
+Claude Code defers `wait_session` and SendMessage, so first load both with one ToolSearch call, query "select:mcp__plugin_thimble_thimble__wait_session,SendMessage". Then loop until the session ends:
 
-1. Call `wait_session` with `session` "{session}". It returns within a few seconds.
-2. Copy the news lines it returns exactly, each on its own line, without shortening or rewording them, or write nothing when it says nothing is new.
+1. Call `wait_session` with `session` "{session}". It returns as soon as there is news, or within a few seconds.
+2. Copy the block of news lines it returns into one reply, exactly as it is, each line on its own line, without shortening, rewording, explaining or formatting them, or write nothing when it says nothing is new.
 3. When it asks you to send the session a message, call SendMessage with `to` "{session}" and the token it gives as the whole message, once.
 4. When a message reaches you, do not answer it or act on it: call `wait_session` at once, which passes it on and gives you its token to send.
 
@@ -1133,7 +1124,7 @@ Stop only when `wait_session` says the session has ended: then write one line sa
 
 ## bg-proxy-start
 
-A background session of thimble's, {session}, runs for this workspace (`claude attach {short}`). Show it in the agent tray now: call the Agent tool with `subagent_type` "{type}", `run_in_background` true, `description` "{label}" and `{prompt}` as the whole prompt, then end the turn on that call, with no text after it. The tray entry follows the session by itself, so call nothing else for it.
+A background session of thimble's, {session}, runs for this workspace (`claude attach {short}`). Show it in the agent tray now: call the Agent tool with `subagent_type` "{type}", `run_in_background` true, `description` "{session}" and `{prompt}` as the whole prompt, then end the turn on that call, with no text after it. The tray entry follows the session by itself, so call nothing else for it.
 
 ## bg-proxy-keep
 
@@ -1165,7 +1156,7 @@ Nothing new; {session} is {state}. Call `wait_session` again.
 
 ## wait_session-copy
 
-Write the news above in your reply exactly as it is, each line on its own, adding and changing nothing.
+Write all the news lines above in one reply, exactly as they are, each on its own line, adding and changing nothing.
 
 ## wait_session-rule
 
@@ -1212,14 +1203,6 @@ The change is queued for the view's build in {thread}, which the browser shows, 
 ## message_thread-main
 
 {thread} takes no messages of its own: its composer sends them to you. Do what the message asks yourself.
-
-## message_orientation-subagent
-
-The orientation runs as your subagent, agent `{agent_id}`, so send it the analyst's message yourself with SendMessage, in their words, and end the turn on that call, with no text after it. It takes the message up whether it is still working or has finished.
-
-## orient-relay
-
-For the orientation, from the browser: {text}
 
 ## stop-subagent
 

@@ -84,8 +84,6 @@ MONITOR_TASK_RE = re.compile(r"\btask\s+([A-Za-z0-9_-]+)")  # "Monitor started (
 # a message the analyst typed to a working subagent in Claude Code's agent view, as the subagent's meta prompt carries it
 TYPED_RE = re.compile(r"^[^\n]*while you were working:\n(.*?)(?:\n\nThis is how Claude Code surfaces.*)?\Z", re.S)
 RELAYED_BY = agents.MAIN_ID  # `by` of a message main sent a thread's fork or a subagent, which its chat shows as from main
-# main's SendMessage to a working subagent, as the subagent's meta prompt carries it
-COORDINATOR_RE = re.compile(r"^[^\n]*sent a message while you were working:\n(.*?)(?:\n\nAddress this.*)?\Z", re.S)
 COMMAND_RE = re.compile(r"<command-name>(.*?)</command-name>", re.S)
 COMMAND_ARGS_RE = re.compile(r"<command-args>(.*?)</command-args>", re.S)
 LOCAL_CAVEAT = "<local-command-caveat>"  # the meta record before a local command's line (module note, the table)
@@ -95,9 +93,9 @@ ASYNC_RESULT_RE = re.compile(r"^\s*Async agent launched")
 AGENT_ID_RE = re.compile(r"agentId:\s*([A-Za-z0-9_-]+)")
 TASK_DONE = ("completed", "done", "success")
 TASK_STOPPED = ("killed", "stopped", "cancelled")  # a task stopped with TaskStop, or Esc in the agent view
-CALL_WAIT_S = 2.0  # call_session's longest wait for a call's line in a transcript
+CALL_WAIT_S = 2.0  # caller_sub's longest wait for a call's line in a transcript
 CALL_POLL_S = 0.02
-CALL_TAIL = 262_144  # bytes at a transcript's end that call_session reads first
+CALL_TAIL = 262_144  # bytes at a transcript's end that caller_sub reads first
 # Stops and waits (module note): the notes main gets, and how the transcript and the session's state file say so
 SAFETY_RE = re.compile(r"safeguards stopped the response")
 INTERRUPT_RE = re.compile(r"^\[Request interrupted by user[^\]]*\]$")
@@ -143,9 +141,7 @@ class Sub:
         self.finish: tuple[str, str | None] | None = None  # a foreground agent's (status, result) until its file is quiet
         self.report: str | None = None  # the message it handed back, its result
         self.typed: str | None = None  # the last message the analyst typed to it in the agent view (_typed)
-        self.prompted = False  # its first prompt was read
         self.of_main = False  # a subagent main started with the Agent tool (_spawn)
-        self.relay_by: str | None = None  # who sent the message main passed on last, when not main (relay)
         self.call_keys: dict[str, tuple[str, str]] = {}  # tool_use id -> its channel.call_key (_results)
         self.on_results: Any = None  # told the calls whose results each read found, when set (_results)
         self.proxy = False  # the tray entry of a background session of thimble's, whose transcript no chat shows
@@ -221,8 +217,6 @@ class Live:
 _live: dict[str, Live] = {}  # by workspace: the one session that is main
 _expected: set[str] = set()  # ids of channel events the channel logged when it posted them
 _event_threads: dict[str, str] = {}  # a thread event's id -> its thread
-_relays: dict[str, list[str]] = {}  # a subagent's chat -> who sent each message main is to pass on (relay)
-RELAY_EVENT = "orient-follow-up"  # the `event` of a relayed message's record, which the browser takes as a follow-up's
 _grace: dict[str, asyncio.TimerHandle] = {}  # workspace -> the pending detach after its last subscriber left
 _sweep_task: asyncio.Task | None = None
 _came_back: set[str] = set()  # workspaces where main's own shim subscribed since this server started (sweep skips them)
@@ -483,10 +477,16 @@ def _restore_subs(lv: Live, places: Any = None, *, revive: bool = True) -> None:
             sub = Sub(lv.c, str(meta["id"]), fork.get("tool_use_id"), fork.get("agent_id"), thread=True)
             sub.done = True
             lv.subs.append(sub)
+        # an `orient` chat of main's is an orientation an earlier build ran as main's subagent: it is followed to its
+        # end like any other subagent, and its run record ends with it (_old_orientation_ended), so neither stays
+        # running
         elif meta.get("role") in (SUBAGENT_ROLE, orientation.ROLE) and meta.get("session") == lv.sid:
             sub = Sub(lv.c, str(meta["id"]), meta.get("tool_use_id"), meta.get("agent_id"), role=str(meta["role"]))
             sub.of_main = True
             sub.done = meta.get("status") != "running"
+            if sub.done and sub.role == orientation.ROLE:  # its chat ended while its record did not
+                _old_orientation_ended(lv, sub, str(meta.get("status") or "stopped"), meta.get("result"),
+                                      report=False)
             if meta.get("workflow_dir"):
                 sub.workflow, sub.workflow_dir = True, Path(str(meta["workflow_dir"]))
             lv.subs.append(sub)
@@ -523,13 +523,13 @@ def _take_place(sub: Sub, path: Path, place: Any, at_end: bool) -> None:
     file, with the calls and the report it needs; else at the file's end when `at_end`, else at its start."""
     at = place.get("offset") if isinstance(place, dict) else None
     if isinstance(at, int) and not isinstance(at, bool) and 0 < at <= _size(path):
-        sub.offset, sub.prompted = at, True
+        sub.offset = at
         sub.names.update({str(k): str(v) for k, v in (place.get("names") or {}).items()})
         sub.seen.update(str(k) for k in place.get("seen") or [])
         if place.get("report") and not sub.report:
             sub.report = str(place["report"])
     elif at_end:
-        sub.offset, sub.prompted = _size(path), True
+        sub.offset = _size(path)
 
 
 def detach(c: str, sid: str, reason: str | None = None) -> bool:
@@ -667,11 +667,30 @@ def disconnected(c: str, sid: str | None) -> None:
         if not mains() and lv is not None and (sid is None or lv.sid == sid):
             detach(c, lv.sid, "ended")
             _hand_back(c, lv.sid)
+            if _live.get(c) is None:  # no session took over as main: the analyst quit, so thimble's agents stop too
+                _stop_agents(c)
 
     try:
         _grace[c] = asyncio.get_running_loop().call_later(GRACE_S, check)
     except RuntimeError:
         check()
+
+
+def _stop_agents(c: str) -> None:
+    """Main's session ended and none took over: every agent of the workspace stops (agents.stop_all), so nothing works
+    on after the analyst quit. A /clear or /resume in the same process is no end (the session follows), nor is a
+    session replaced by another that runs (_hand_back)."""
+    from . import agents  # noqa: PLC0415
+
+    async def run() -> None:
+        stopped = await agents.stop_all(c)
+        if stopped:
+            log.info("%s: main's session ended; stopped %s", c, ", ".join(stopped))
+
+    try:
+        asyncio.get_running_loop().create_task(run(), name=f"stop-agents:{c}")
+    except RuntimeError:  # no loop (a test's synchronous call): nothing runs to stop
+        pass
 
 
 def may_return(c: str, sid: str) -> bool:
@@ -725,13 +744,6 @@ def handed(c: str, event_id: str, thread: str) -> None:
     if lv is not None:
         lv.turn_threads.append(thread)
         lv.handed.append(thread)
-
-
-def relay(c: str, chat: str, text: str, by: str) -> None:
-    """A message the analyst sent a subagent of main's through main (the orientation in terminal-first mode): its chat
-    shows it as theirs now, and main's SendMessage that passes it on is not logged again (_relayed)."""
-    agents.Recorder(c, chat).record("user", text=text, by=by, event=RELAY_EVENT)
-    _relays.setdefault(chat, []).append(by)
 
 
 def push_event(c: str, kind: str, text: str, **meta: Any) -> bool:
@@ -943,10 +955,10 @@ def _peer(lv: Live, *, mid_turn: bool, origin: Any = None) -> None:
         _open_turn(lv)
     o = origin if isinstance(origin, dict) else {}
     name, body = str(o.get("name") or ""), " ".join(cite.prose(str(o.get("body") or "")).split())
-    e = _bg().by_name(lv.c, name) or _bg().by_name(lv.c, name.replace("-", ":", 1)) if name.startswith("thimble") else None
+    e = _bg().by_origin(lv.c, name) if name.startswith("thimble") else None
     if e is not None and body:
         with contextlib.suppress(Exception):
-            agents.chip(lv.c, CHIP_KIND, f"{e.name} to main: {body[:RESULT_LIMIT]}", chat=e.chat)
+            agents.chip(lv.c, CHIP_KIND, f"{e.shown} to main: {body[:RESULT_LIMIT]}", chat=e.chat)
 
 
 def visible(text: str) -> str:
@@ -1017,13 +1029,7 @@ def _tool_use(lv: Live, tool_use_id: str, name: str, tool_input: Any) -> None:
 
 def _relayed(sub: Sub, inp: dict) -> None:
     """Main's SendMessage to a thread's fork or a subagent: its chat shows the message as from main, so the browser
-    holds the same conversation as the terminal's agent view; a message the analyst sent through main is shown already
-    (relay), as theirs."""
-    waiting = _relays.get(sub.chat)
-    if waiting:
-        by = waiting.pop(0)
-        sub.relay_by = by if sub.done else None  # the message resumes a finished subagent (_resumed)
-        return
+    holds the same conversation as the terminal's agent view."""
     text = str(inp.get("message") or inp.get("content") or "").strip()
     if text:
         sub.rec.record("user", text=text, by=RELAYED_BY)
@@ -1096,15 +1102,12 @@ def _spawn(lv: Live, tool_use_id: str | None, agent_id: str | None, title: str, 
             lv.subs.append(sub)
             threads.fork_started(lv.c, tid, agent_id=agent_id, tool_use_id=tool_use_id, session=lv.sid)
             return sub
-        role = orientation.ROLE if orientation.is_orient(agent_type) else SUBAGENT_ROLE
-        title = orientation.TITLE if role == orientation.ROLE else " ".join(title.split()) or SUBAGENT_TITLE
-        meta = agents.new_agent(lv.c, role, title, by=TERMINAL, session=lv.sid, tool_use_id=tool_use_id, agent_id=agent_id,
-                                agent_type=agent_type if isinstance(agent_type, str) else None)
-        sub = Sub(lv.c, str(meta["id"]), tool_use_id, agent_id, role=role)
+        title = " ".join(title.split()) or SUBAGENT_TITLE
+        meta = agents.new_agent(lv.c, SUBAGENT_ROLE, title, by=TERMINAL, session=lv.sid, tool_use_id=tool_use_id,
+                                agent_id=agent_id, agent_type=agent_type if isinstance(agent_type, str) else None)
+        sub = Sub(lv.c, str(meta["id"]), tool_use_id, agent_id)
         sub.of_main = True
         lv.subs.append(sub)
-        if role == orientation.ROLE:
-            _orientation(orientation.started, lv.c, sub.chat, agent_id=agent_id)
         return sub
     fields: dict[str, Any] = {}
     if tool_use_id and not sub.tool_use_id:
@@ -1120,18 +1123,7 @@ def _spawn(lv: Live, tool_use_id: str | None, agent_id: str | None, title: str, 
             threads.fork_started(lv.c, sub.chat, agent_id=sub.agent_id, tool_use_id=sub.tool_use_id, session=lv.sid)
     elif fields:
         agents.update_agent(lv.c, sub.chat, **fields)
-        if sub.role == orientation.ROLE and fields.get("agent_id"):
-            _orientation(orientation.started, lv.c, sub.chat, agent_id=sub.agent_id)
     return sub
-
-
-def _orientation(fn: Any, *args: Any, **kwargs: Any) -> None:
-    """Call orientation.started or finished for the orientation's chat; its record is bookkeeping the mirror never stops
-    for, so a failure is logged."""
-    try:
-        fn(*args, **kwargs)
-    except Exception:  # noqa: BLE001
-        log.exception("%s: the orientation's record was not updated by %s", args[0] if args else "?", getattr(fn, "__name__", fn))
 
 
 def _agent_result(lv: Live, sub: Sub, content: Any, is_error: bool) -> None:
@@ -1180,11 +1172,21 @@ def _finish_sub(lv: Live, sub: Sub, status: str, result: str | None, *, kind: st
     except Exception:  # noqa: BLE001 — a chat deleted under the mirror
         log.debug("%s: subagent chat %s could not be finished", lv.c, sub.chat, exc_info=True)
     if sub.role == orientation.ROLE:
-        k = int((orientation.read_run(lv.c) or {}).get("run") or 0)
-        if k > 0:  # a follow-up of the orientation's subagent (_revive)
-            _orientation(orientation.run_finished, lv.c, sub.chat, k, status, {})
-        else:
-            _orientation(orientation.finished, lv.c, sub.chat, status, sub.report or result)
+        _old_orientation_ended(lv, sub, status, sub.report or result)
+
+
+def _old_orientation_ended(lv: Live, sub: Sub, status: str, result: str | None, *, report: bool = True) -> None:
+    """An orientation an earlier build ran as main's subagent (_restore_subs follows its `orient` chat) ended, now or
+    before this server started: its run record, which names that chat and `route: subagent`, ends with it
+    (orientation.finished: summary.md, the deck's chip, the `orient` event, and the report it asked for only when it
+    ends now, `report`), so it never stays running. The record is bookkeeping the mirror never stops for, so a failure
+    is logged."""
+    try:
+        run = orientation.read_run(lv.c) or {}
+        if run.get("route") == "subagent" and (run.get("chats") or {}).get(orientation.ROLE) == sub.chat:
+            orientation.finished(lv.c, sub.chat, status, result, report=report)
+    except Exception:  # noqa: BLE001
+        log.exception("%s: the record of the orientation %s was not ended", lv.c, sub.chat)
 
 
 def _agent_dir(lv: Live) -> Path | None:
@@ -1328,10 +1330,8 @@ def _tail_sub(lv: Live, sub: Sub) -> int:
         agents.set_running(lv.c, sub.chat, True)
     lines = (sub.buf + data).split(b"\n")
     sub.buf = lines.pop()
-    resumed = _resumed(lines, sub.relay_by) if sub.done and not sub.thread and sub.owner is None and not sub.workflow else None
-    if resumed is not None:
-        sub.relay_by = None
-        _revive(lv, sub, resumed)
+    if sub.done and not sub.thread and sub.owner is None and not sub.workflow and _resumed(lines):
+        _revive(lv, sub)
     n = 0
     try:
         for line in lines:
@@ -1377,11 +1377,9 @@ def _results_in(call_keys: dict[str, tuple[str, str]], lines: list[bytes]) -> li
     return out
 
 
-def _resumed(lines: list[bytes], relayed_by: str | None = None) -> list[dict] | None:
-    """Whether lines a finished subagent's transcript gained show it working again, a reply of its own or a message
-    the analyst or main sent it, which resumes it: the messages ({text, by}), else None when it did not resume. Main's
-    message is `relayed_by`'s when main passed it on for them (relay)."""
-    resumed, messages = False, []
+def _resumed(lines: list[bytes]) -> bool:
+    """Whether lines a finished subagent's transcript gained show it working again: a reply of its own, or a message
+    the analyst or main sent it, which resumes it."""
     for line in lines:
         try:
             rec = json.loads(line)
@@ -1390,20 +1388,14 @@ def _resumed(lines: list[bytes], relayed_by: str | None = None) -> list[dict] | 
         if not isinstance(rec, dict):
             continue
         origin = rec.get("origin") if isinstance(rec.get("origin"), dict) else {}
-        typed = _typed(rec)
-        if typed is not None:
-            messages.append({"text": typed, "by": TERMINAL})
-        elif origin.get("kind") == "coordinator":
-            m = COORDINATOR_RE.match(_user_text(rec) or "")
-            messages.append({"text": (m.group(1) if m else _user_text(rec) or "").strip(), "by": relayed_by or RELAYED_BY})
-        resumed = resumed or rec.get("type") == "assistant" or typed is not None or origin.get("kind") == "coordinator"
-    return messages if resumed else None
+        if rec.get("type") == "assistant" or _typed(rec) is not None or origin.get("kind") == "coordinator":
+            return True
+    return False
 
 
-def _revive(lv: Live, sub: Sub, messages: list[dict]) -> None:
-    """A finished subagent was resumed (a message from the analyst's agent view or from main): its chat runs again,
-    and an orientation's record with it, so its next end closes them anew. An orientation whose first run failed runs
-    that run again (its drafts stay held); one that had finished takes the messages as a follow-up, run k+1."""
+def _revive(lv: Live, sub: Sub) -> None:
+    """A finished subagent was resumed (a message from the analyst's agent view or from main): its chat runs again, so
+    its next end closes it anew."""
     sub.done = False
     sub.finish = None
     try:
@@ -1412,41 +1404,6 @@ def _revive(lv: Live, sub: Sub, messages: list[dict]) -> None:
         log.debug("%s: subagent chat %s could not run again", lv.c, sub.chat, exc_info=True)
         return
     log.info("%s: subagent %s (%s) was resumed", lv.c, sub.agent_id, sub.chat)
-    if sub.role != orientation.ROLE:
-        return
-    rec = orientation.read_run(lv.c) or {}
-    k = int(rec.get("run") or 0)
-    if k == 0 and rec.get("status") == "failed":
-        _orientation(orientation.restarted, lv.c, sub.chat)
-    else:
-        _orientation(orientation.run_started, lv.c, sub.chat, k + 1, messages)
-
-
-async def call_session(c: str, tool_use_id: str | None) -> str | None:
-    """The session a call through main's shim acts for: the orientation's (tools.ORIENT_SESSION) when the call is one
-    of the orientation subagent's in terminal-first mode, or of a subagent it started, else None (main's own). Claude
-    Code writes a call's line to its transcript on a timer, so the call can arrive before its line does: the session's
-    transcripts are read until one holds the call's id, for CALL_WAIT_S at most."""
-    from . import tools  # noqa: PLC0415 — tools imports far more than the mirror needs
-
-    lv = _live.get(c)
-    if lv is None or not tool_use_id or not any(_orient_working(s) for s in lv.subs if s.role == orientation.ROLE):
-        return None
-    needle = tool_use_id.encode()
-    read: dict[str, int] = {}
-    deadline = time.monotonic() + CALL_WAIT_S
-    scanned = False
-    while True:
-        holder = _call_holder(lv, tool_use_id, needle, read)
-        if holder is not None:
-            return tools.ORIENT_SESSION if holder in _orient_family(lv) else None
-        if time.monotonic() >= deadline:
-            log.info("%s: call %s is in no transcript after %.1f s; it is main's", c, tool_use_id, CALL_WAIT_S)
-            return None
-        if not scanned or any(s.path is None for s in lv.subs if s.role == orientation.ROLE):
-            _scan_subs(lv)  # the call may come from a subagent whose transcript is not followed yet
-            scanned = True
-        await asyncio.sleep(CALL_POLL_S)
 
 
 def agent_paths(c: str, agent_ids: "list[str]") -> "list[Path]":
@@ -1475,24 +1432,6 @@ async def caller_sub(c: str, tool_use_id: str | None) -> "Sub | None":
             _scan_subs(lv)
             scanned = True
         await asyncio.sleep(CALL_POLL_S)
-
-
-def _orient_working(sub: Sub) -> bool:
-    """Whether an orientation subagent works: its chat runs, or its transcript grew since the tail last read it (a
-    resume the tail has not seen yet)."""
-    return not sub.done or (sub.path is not None and _size(sub.path) > sub.offset)
-
-
-def _orient_family(lv: Live) -> set[Sub]:
-    """The orientation subagents of the session and the subagents they started, by the Agent calls in their
-    transcripts."""
-    family = {s for s in lv.subs if s.role == orientation.ROLE}
-    while True:
-        calls = {u for s in family for u in s.names}
-        more = {s for s in lv.subs if s not in family and s.tool_use_id in calls}
-        if not more:
-            return family
-        family |= more
 
 
 def _call_holder(lv: Live, tool_use_id: str, needle: bytes, read: dict[str, int]) -> Sub | Live | None:
@@ -1530,7 +1469,7 @@ def _bg() -> Any:
 
 def running_agents(c: str) -> list[dict[str, Any]]:
     """The agents of main's session that run now, for the terminal's list of thimble's agents (bg_session.agent_rows):
-    each thread's fork by its fork name, the orientation subagent, and main's other subagents, {name, state, kind}."""
+    each thread's fork by its fork name and main's other subagents, {name, state, kind}."""
     lv = _live.get(c)
     out: list[dict[str, Any]] = []
     for sub in list(lv.subs) if lv is not None else []:
@@ -1539,8 +1478,6 @@ def running_agents(c: str) -> list[dict[str, Any]]:
         meta = agents.meta_or_none(c, sub.chat) or {}
         if sub.thread:
             name = f"fork {meta.get(threads.FORK_NAME_KEY) or meta.get('title') or sub.chat}"
-        elif sub.role == orientation.ROLE:
-            name = f"{orientation.PLUGIN}:{orientation.SUBAGENT}"
         elif sub.of_main:
             name = str(meta.get("title") or "subagent")
         else:
@@ -1628,9 +1565,6 @@ def translate_sub(lv: Live, sub: Sub, line: bytes | str) -> int:
         if prompt and prompt.strip() and not prompt.lstrip().startswith("<"):
             if INTERRUPT_RE.match(prompt.strip()):
                 return 0  # the stop's own line: the chat's end says it was stopped
-            first, sub.prompted = not sub.prompted, True
-            if first and sub.of_main and sub.role == orientation.ROLE:
-                return 0  # the orientation subagent's prompt names its prompt file, which its card stands for
             sub.rec.record("user", text=prompt.strip(), by=TERMINAL)
             return 1
     if rec.get("type") == "user":

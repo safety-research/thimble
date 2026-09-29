@@ -663,10 +663,9 @@ async def tool_message_thread(ctx: Any, args: dict[str, Any]) -> Any:
     """The `message_thread` tool (the /thimble:ask command): a message typed in the terminal goes where the thread's
     composer in the browser would send it (the frontend's threads.composerTarget). A side thread logs it and hands main
     its `thread` event in the result, so main answers in the same turn (channel.hand), and with no message asks its
-    unanswered questions again (ask_again); the latest orientation takes it as a follow-up (orient_session.message),
-    which main passes on itself when the orientation is its subagent; a view's build thread takes it as a change to
-    the view (views.message). Any other chat's messages go to main."""
-    from . import channel, orient_session, orientation, session, tools, views  # noqa: PLC0415
+    unanswered questions again (ask_again); the latest orientation takes it as a follow-up (orient_session.message);
+    a view's build thread takes it as a change to the view (views.message). Any other chat's messages go to main."""
+    from . import channel, orient_session, orientation, tools, views  # noqa: PLC0415
 
     text = str(args.get("message") or "").strip()
     meta, why = _ask_target(ctx.c, str(args.get("thread") or ""))
@@ -691,11 +690,7 @@ async def tool_message_thread(ctx: Any, args: dict[str, Any]) -> Any:
             return tools.err(tools.hint("message_thread-empty", thread=name))
         latest = (((orientation.read_run(ctx.c) or {}).get("chats") or {}).get(orientation.ROLE))
         if meta.get("role") == orientation.ROLE and tid == latest:
-            try:
-                res = await orient_session.message(ctx.c, text, orient_session.BROWSER)
-            except orient_session.Subagent as e:
-                session.relay(ctx.c, tid, text, agents.TERMINAL)
-                return tools.ok(tools.hint("message_orientation-subagent", agent_id=str(e)))
+            res = await orient_session.message(ctx.c, text, orient_session.BROWSER)
             return tools.ok(tools.hint("message_orientation-queued" if res["status"] == "queued" else "message_orientation-started"))
         if meta.get("role") == "dev" and meta.get("view"):
             views._bind_loop()

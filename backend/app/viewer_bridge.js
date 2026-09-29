@@ -1,6 +1,6 @@
 // The frame half of a viewer's bridge (views.frame_document puts it first in every view page; the page half is
 // frontend/src/files/ViewerFrame.tsx, and scripts/view_shot.mjs plays the page for a view's checks and screenshots).
-// A viewer runs in a sandboxed iframe that reaches no host but its view's media route (window.thimble.mediaUrl, the
+// A viewer runs in a sandboxed iframe that loads nothing but its view's media route (window.thimble.mediaUrl, the
 // URL of an image, audio or video file it claims, for an element's src), so everything else it knows arrives through
 // postMessage calls:
 //   open {locator, quote?} page to frame: show this place (window.thimble.onOpen); with quote {record, text}, a passage

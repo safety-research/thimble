@@ -19,22 +19,23 @@ const NOVELTY = new Set(['albert', 'bad news', 'bahh', 'bells', 'boing', 'bubble
 const DATED = new Set(['agnes', 'bruce', 'fred', 'junior', 'kathy', 'ralph', 'vicki', 'victoria'])
 const baseName = (v: SpeechSynthesisVoice) => v.name.replace(/\s*\(.*\)\s*$/, '').trim().toLowerCase()
 
-/** The voices worth offering, best first: in the page's language, then Premium or Enhanced, then natural or neural,
- * then the system's own local voices, the system default before the rest; no novelty voice. */
+/** The voices worth offering, best first: only voices that run on this machine (localService), since an online voice
+ * sends the narration to its speech service; in the page's language, then Premium or Enhanced, then natural or
+ * neural, then the rest but dated voices, the system default before the rest; no novelty voice. */
 export function rankVoices(voices: readonly SpeechSynthesisVoice[], lang: string): SpeechSynthesisVoice[] {
   const want = lang.toLowerCase().replace('_', '-')
   const wantBase = want.split('-')[0]
   const key = (v: SpeechSynthesisVoice): (number | string)[] => {
     const l = v.lang.toLowerCase().replace('_', '-')
     const n = v.name.toLowerCase()
-    const tier = /premium|enhanced/.test(n) ? 0 : /natural|neural/.test(n) ? 1 : v.localService && !DATED.has(baseName(v)) ? 2 : 3
+    const tier = /premium|enhanced/.test(n) ? 0 : /natural|neural/.test(n) ? 1 : !DATED.has(baseName(v)) ? 2 : 3
     return [l.split('-')[0] === wantBase ? 0 : 1, tier, l === want ? 0 : 1, v.default ? 0 : 1, v.name]
   }
   const order = (a: (number | string)[], b: (number | string)[]) => {
     for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return a[i] < b[i] ? -1 : 1
     return 0
   }
-  return voices.filter((v) => !NOVELTY.has(baseName(v))).sort((a, b) => order(key(a), key(b)))
+  return voices.filter((v) => v.localService && !NOVELTY.has(baseName(v))).sort((a, b) => order(key(a), key(b)))
 }
 
 interface Run {
@@ -163,12 +164,11 @@ export class VideoPlayer {
   private speak(i: number, token: number): boolean {
     const synth = speech()
     const text = this.texts[i]?.trim()
-    if (!synth || !text) return false
+    // with no voice set the browser would pick its default, which can be an online one
+    if (!synth || !text || !this.voice) return false
     const u = new SpeechSynthesisUtterance(text)
-    if (this.voice) {
-      u.voice = this.voice
-      u.lang = this.voice.lang
-    }
+    u.voice = this.voice
+    u.lang = this.voice.lang
     u.rate = this.rate
     const said = performance.now()
     // a voice that fails, or ends before it could have said anything, leaves the line to the clock

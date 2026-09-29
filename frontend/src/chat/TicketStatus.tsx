@@ -1,6 +1,6 @@
-// A dev ticket's state at the foot of its thread: Stop while it runs (saying so while a permission request of its
-// session waits on the card), Discard while it waits, and after a failure or a stop the reason with Retry and Discard.
-// An applied ticket shows nothing. The ticket is re-fetched on each `ticket`
+// A dev ticket's state at the foot of its thread: while it runs, a line only while a permission request of its session
+// waits on the card (its Stop is the composer's stop square, ChatPanel), Discard while it waits, and after a failure or
+// a stop the reason with Retry and Discard. An applied ticket shows nothing. The ticket is re-fetched on each `ticket`
 // stream event.
 import { useEffect, useState } from 'react'
 import { Button } from '../components/Button'
@@ -66,9 +66,9 @@ export const WAITING_LINE = 'Waiting for permission'
 export function TicketStatus({ ticket, waiting = false, onChange }: { ticket: Ticket; waiting?: boolean; onChange: (t: Ticket) => void }) {
   const [busy, setBusy] = useState<string | null>(null)
   // the request itself is the telemetry record (lib/telemetry's wrapped fetch)
-  const act = (what: 'stop' | 'retry' | 'dismiss') => {
+  const act = (what: 'retry' | 'dismiss') => {
     setBusy(what)
-    const call = what === 'stop' ? api.stopTicket(ticket.id) : what === 'retry' ? api.retryTicket(ticket.id) : api.dismissTicket(ticket.id)
+    const call = what === 'retry' ? api.retryTicket(ticket.id) : api.dismissTicket(ticket.id)
     call
       .then(() => api.ticket(ticket.id))
       .then((t) => {
@@ -81,21 +81,7 @@ export function TicketStatus({ ticket, waiting = false, onChange }: { ticket: Ti
   }
   const text = ticketStatusText(ticket)
   const failed = ticket.status === 'failed' || ticket.status === 'needs manual merge' || ticket.status === 'rolled back'
-  if (ticket.status === 'running') {
-    return (
-      <Note
-        className="chat-ticket-status"
-        data-status="running"
-        data-waiting={waiting ? '' : undefined}
-        text={waiting ? WAITING_LINE : undefined}
-        chips={
-          <Button size="sm" className="chat-ticket-act" busy={busy === 'stop'} onClick={() => act('stop')}>
-            Stop
-          </Button>
-        }
-      />
-    )
-  }
+  if (ticket.status === 'running') return waiting ? <Note className="chat-ticket-status" data-status="running" data-waiting="" text={WAITING_LINE} /> : null
   if (ticket.status === 'queued') {
     return (
       <Note

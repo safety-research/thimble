@@ -23,8 +23,8 @@
 # `author`, `sent` in epoch milliseconds, `body`, `parent`).
 #
 # What the reader cleans:
-#   - A line that is not a JSON object, or a CSV row that does not parse, is left out, and the page says how many there
-#     are, with the first few (`problems`). A quoted CSV cell over several lines is one row, citing every line.
+#   - A line that is not a JSON object, or a CSV row that does not parse, is left out and reported (problems), which
+#     thimble shows above the page. A quoted CSV cell over several lines is one row, citing every line.
 #   - A repeated record (the same id, or the same sequence on one place, in one file: a replayed save, a post delivered
 #     twice) is left out, and a citation of it opens the first.
 #   - Records are put in time order across files; a record with no time keeps its place after the line before it in its
@@ -85,7 +85,6 @@ CLAIMS_LISTED = 12  # the action files of one folder claimed one by one; more ar
 PLACES_SHOWN = 3
 MARKS_MAX = 24  # label values the page tells apart, as bits of one number per card
 CARD_CHARS = 110
-PROBLEMS_SHOWN = 5
 TEXT_MAX = 60_000  # characters of a record's text the page gets
 FIELD_MAX = 300
 HUNK_LINES = 400
@@ -128,9 +127,7 @@ def _iso(t):
 
 
 def _problem(problems, ref, why):
-    problems["count"] += 1
-    if len(problems["examples"]) < PROBLEMS_SHOWN:
-        problems["examples"].append(f"{ref}: {why}")
+    problems.append({"ref": ref, "why": why})
 
 
 # ------------------------------------------------------------------------------------------------ the index
@@ -216,10 +213,10 @@ def _common_dir(paths):
 def build_index(paths):
     """{files: {path: {offsets, kind, fields, n}}, recs: {ref: action}, order: [action refs in event order], same:
     {ref of a repeat: ref of the first}, places: {place: {ref, title, refs, accounts, addressed}}, accounts: {account:
-    {n, goal, goal_refs}}, problems}. An action keeps its account, place, time, kind, the save before it, the record it
-    replies to and whether it addresses another account (_addressing); texts are read back from their lines when
-    shown."""
-    problems = {"count": 0, "examples": []}
+    {n, goal, goal_refs}}, problems: [{ref, why}]}. An action keeps its account, place, time, kind, the save before
+    it, the record it replies to and whether it addresses another account (_addressing); texts are read back from their
+    lines when shown."""
+    problems = []
     files, recs, same, actions, places, roster, texts, titles = {}, {}, {}, [], {}, {}, {}, {}
     parsed = {p: _rows(p, problems) for p in sorted(paths)}
     fields = {p: _fields(rows) for p, rows in parsed.items()}
@@ -303,7 +300,7 @@ def build_index(paths):
 def _head(path, most):
     """The first `most` records of a JSON Lines file or a CSV, as _rows gives them."""
     if path.endswith(".csv"):
-        return _rows(path, {"count": 0, "examples": []})[:most]
+        return _rows(path, [])[:most]
     out = []
     with open(path, "rb") as fh:
         for n, line in enumerate(fh, 1):
@@ -410,7 +407,7 @@ def _record(index, ref):
     """The record on the ref's line as a dict, or None."""
     path, _, n = ref.partition("#L")
     if path.endswith(".csv") and n.isdigit():
-        return next((rec for a, _b, rec in _rows(path, {"count": 0, "examples": []}) if a == int(n)), None)
+        return next((rec for a, _b, rec in _rows(path, []) if a == int(n)), None)
     raw = _raw(index, ref)
     try:
         rec = json.loads(raw) if raw is not None else None
@@ -555,8 +552,7 @@ def _chart(index, query):
              else "Where accounts most answer or name each other")
     return {"title": title, "source": source, "cards": cards, "rows": rows, "places": places, "links": links,
             "marks": marks, "mark_counts": per_mark, "offset": offset, "total": len(picked), "page": CARDS_MAX,
-            "counts": {"records": len(index["order"]), "accounts": len(index["accounts"]), "places": len(index["places"])},
-            "problems": index["problems"]}
+            "counts": {"records": len(index["order"]), "accounts": len(index["accounts"]), "places": len(index["places"])}}
 
 
 def _by_turns(picked, mark_at):
@@ -621,6 +617,11 @@ def _detail(index, ref):
         if did.get("before"):
             out.update(before=did["before"], hunks=did["hunks"])
     return out
+
+
+def problems(index):
+    """The lines that do not parse, each {ref, why}, which thimble shows above the page."""
+    return index["problems"]
 
 
 def records(index, query):

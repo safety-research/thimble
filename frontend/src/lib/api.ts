@@ -36,6 +36,7 @@ import type {
   View,
   ViewSuggestion,
   ViewOpen,
+  ViewProblems,
   Writeup,
 } from './types'
 
@@ -55,8 +56,8 @@ export function describeDetail(d: unknown): string {
   }
 }
 
-/** Trade the key in the link thimble printed (`#k=`) for the cookie that lets this browser change permission modes
- * (backend hook_auth.claim), and take it out of the address. */
+/** Trade the key in the link thimble showed (`#k=`) for the cookie that lets this browser answer permission requests
+ * and change permission modes (backend hook_auth.claim), and take it out of the address. */
 export function claimKey(): void {
   const key = new URLSearchParams(window.location.hash.slice(1)).get('k')
   if (!key) return
@@ -157,12 +158,13 @@ export const api = {
 
   // ---- chats ----
   chats: (c: string) => j<ChatMeta[]>(`${ws(c)}/chats`),
+  instance: (c: string) => j<{ stamp: string | null }>(`${ws(c)}/instance`),
   main: (c: string) => j<ChatDetail>(`${ws(c)}/chats/main`),
   chat: (c: string, id: string) => j<ChatDetail>(`${ws(c)}/chats/${enc(id)}`),
   createThread: (c: string, body: NewThreadBody) => j<ChatMeta>(`${ws(c)}/chats`, { method: 'POST', body: JSON.stringify(body) }),
   updateChat: (c: string, id: string, patch: ChatPatch) => j<ChatMeta>(`${ws(c)}/chats/${enc(id)}`, { method: 'PUT', body: JSON.stringify(patch) }),
   deleteChat: (c: string, id: string) => j<{ deleted: string }>(`${ws(c)}/chats/${enc(id)}`, { method: 'DELETE' }),
-  interrupt: (c: string, id: string) => j<{ stopped: boolean }>(`${ws(c)}/chats/${enc(id)}/interrupt`, { method: 'POST' }),
+  interrupt: (c: string, id: string) => j<{ stopped: boolean; asked?: 'main' }>(`${ws(c)}/chats/${enc(id)}/interrupt`, { method: 'POST' }),
   askAgain: (c: string, id: string) => j<{ asked: string; event: string; questions: number }>(`${ws(c)}/chats/${enc(id)}/ask-again`, { method: 'POST' }),
   /**
      * Send the analyst's Claude Code session an event (`POST /ws/{c}/events {kind, payload}`), e.g. a message typed in main
@@ -294,6 +296,7 @@ export const api = {
   viewReviewAgain: (c: string, slug: string) => j<{ ok: boolean }>(`${ws(c)}/views/${enc(slug)}/review`, { method: 'POST' }),
   viewReviewStop: (c: string, slug: string) => j<{ ok: boolean }>(`${ws(c)}/views/${enc(slug)}/review`, { method: 'DELETE' }),
   viewReviewUndo: (c: string, slug: string) => j<{ ok: boolean }>(`${ws(c)}/views/${enc(slug)}/review/undo`, { method: 'POST' }),
+  viewProblems: (c: string, slug: string, version?: string) => j<ViewProblems>(`${ws(c)}/views/${enc(slug)}/problems${q({ v: version })}`),
   viewOpen: (c: string, slug: string, ref: string, version?: string) => j<ViewOpen>(`${ws(c)}/views/${enc(slug)}/resolve${q({ ref, v: version })}`),
   // ---- orientation ----
   /** Ask the analyst's session for the orientation (`POST /ws/{c}/events {kind: start}`): main calls start_orientation

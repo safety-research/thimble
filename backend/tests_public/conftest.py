@@ -126,14 +126,14 @@ def _view_tickets_held(monkeypatch):
 
 @pytest.fixture(autouse=True)
 def _no_held_events():
-    """The quiet events channel.post holds for the next event, the messages session.relay waits to see main pass on, and
-    the modes main's hooks reported are module state: none carries over from another test."""
+    """The quiet events channel.post holds for the next event and the modes main's hooks reported are module state:
+    none carries over from another test."""
     from app import channel, session
 
-    for held in (channel._held, session._relays, session._modes):
+    for held in (channel._held, session._modes):
         held.clear()
     yield
-    for held in (channel._held, session._relays, session._modes):
+    for held in (channel._held, session._modes):
         held.clear()
 
 

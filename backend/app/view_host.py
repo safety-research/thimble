@@ -3,8 +3,9 @@ kernel and calls `call` there).
 
 A viewer's reader.py defines build_index(paths) -> index, records(index, query) -> JSON, and resolve(index, locator)
 ->
-{excerpt, label, refs, key?, target?} or None; a viewer thimble ships may also define applies(paths) -> {claims, found}
-or None, whether it fits a corpus (views.propose_builtins), which runs with no index. `call` loads reader.py (again when it changed), builds the index or
+{excerpt, label, refs, key?, target?} or None, and may define problems(index) -> the lines it could not read, as
+[{ref, why}]; a viewer thimble ships may also define applies(paths) -> {claims, found} or None, whether it fits a corpus
+(views.propose_builtins), which runs with no index. `call` loads reader.py (again when it changed), builds the index or
 loads
 it from a pickle keyed by the files' and reader's fingerprint, runs one operation and prints SENTINEL followed by the
 JSON answer. A reader that raises answers {ok: false, error, traceback}. Only the last fingerprint per view stays in
@@ -97,7 +98,8 @@ def _thimble(req: dict) -> object | None:
 
 def answer(req: dict) -> dict:
     """The answer to one request {slug, reader, fp, paths, cache, op, arg, labels?}; op is index, records, resolve,
-    resolve_many (a list of locators, answered with a list) or applies (the corpus's record files as `arg`). A records call runs with `labels`, the labels context,
+    resolve_many (a list of locators, answered with a list), problems ([] for a reader without problems()) or applies
+    (the corpus's record files as `arg`). A records call runs with `labels`, the labels context,
     as thimble's _view_ctx, which thimble.marked and thimble.kept read."""
     t0 = time.monotonic()
     th = None
@@ -119,6 +121,9 @@ def answer(req: dict) -> dict:
             result = mod.records(idx, req.get("arg"))  # type: ignore[attr-defined]
         elif op == "resolve":
             result = mod.resolve(idx, req.get("arg"))  # type: ignore[attr-defined]
+        elif op == "problems":
+            fn = getattr(mod, "problems", None)
+            result = fn(idx) if callable(fn) else []
         elif op == "resolve_many":
             result = []
             for loc in req.get("arg") or []:

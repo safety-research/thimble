@@ -247,5 +247,5 @@ def test_a_tool_call_carries_the_id_claude_code_gave_it(tmp_path, server):
             "params": {"name": "message_orientation", "arguments": {"message": "again"}}}
     _run(tmp_path, server.port, channel=False, wait_s=15, send=[call, bare],
            until=lambda: len(server.calls) >= 2)
-    assert [(name, body["args"], body["tool_use_id"]) for name, body in server.calls] == [  # noqa: E501
-        ("message_orientation", {"message": "more"}, "toolu_01abc"), ("message_orientation", {"message": "again"}, None)]
+    got = {body["args"]["message"]: (name, body["tool_use_id"]) for name, body in server.calls}  # the two calls may land in either order
+    assert got == {"more": ("message_orientation", "toolu_01abc"), "again": ("message_orientation", None)}

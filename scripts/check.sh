@@ -18,7 +18,7 @@
 #             requires it)
 #
 # With no STEP it runs content, backend, frontend and browser in that order and stops at the first that fails. In a
-# fresh checkout run `scripts/check.sh install` once first (or scripts/install.sh --dev, which installs the same things).
+# fresh checkout run `scripts/check.sh install` once first (or scripts/install.sh, which installs the same things there).
 set -euo pipefail
 
 usage() { sed -n '2,/^set -euo/p' "$0" | sed '$d' | sed 's/^# \{0,1\}//'; }
@@ -38,7 +38,7 @@ install() {
   step "install"
   command -v uv >/dev/null || die "uv is required: https://docs.astral.sh/uv/getting-started/installation/"
   command -v npm >/dev/null || die "Node 20+ with npm is required"
-  # the same sync install.sh --dev runs: the runtime closure of uv.lock plus the test extras
+  # the same sync install.sh runs in a checkout: the runtime closure of uv.lock plus the test extras
   (cd "$repo/backend" && uv sync --frozen --no-dev --no-install-project --extra dev)
   (cd "$repo/frontend" && npm ci --no-audit --no-fund)
   # the backend's and the frontend's Playwright pin different builds of the browser: the card harness (app/render.py)
