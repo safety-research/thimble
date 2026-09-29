@@ -1727,9 +1727,12 @@ def source_changed_text(st: dict[str, Any], up: bool) -> str:
     return text + ("" if off is None else f"; auto-restart disabled ({off})")
 
 
-BROWSER_FETCH = "backend/.venv/bin/python -m playwright install chromium-headless-shell"
 BROWSER_DEPS = "sudo backend/.venv/bin/python -m playwright install-deps chromium-headless-shell"
-PAGES_FETCH = "npx playwright install chromium-headless-shell"  # in frontend/
+
+
+def browser_fix() -> str:
+    """The doctor's fix for a missing headless Chromium: the installer's answer that downloads it."""
+    return f": `bash {config.REPO_ROOT / 'scripts' / 'install.sh'} --browser bundled` downloads it, then `thimble restart`"
 
 
 def playwright_browsers_dir(environ: Mapping[str, str] | None = None, platform_: str | None = None) -> Path:
@@ -1773,7 +1776,7 @@ def harness_line(url: str, up: bool, commands: bool = True) -> str:
     spec = importlib.util.find_spec("playwright")
     fetched = headless_fetched(Path(spec.origin).parent / "driver" / "package" / "browsers.json" if spec and spec.origin
                                else Path("-"))
-    fix = f": run `{BROWSER_FETCH}` in {config.REPO_ROOT}, then `thimble restart`" if commands else ""
+    fix = browser_fix() if commands else ""
     if up:
         status, got = _request("GET", f"{url}/api/render/status")
         if status == 200 and isinstance(got, dict):
@@ -1796,7 +1799,7 @@ def pages_line(commands: bool = True) -> str:
         return "n/a (the frontend's packages are not installed)"
     if headless_fetched(browsers_json):
         return "headless Chromium fetched"
-    fix = f": run `{PAGES_FETCH}` in {FRONTEND_DIR}, then `thimble restart`" if commands else ""
+    fix = browser_fix() if commands else ""
     return f"no headless Chromium in {playwright_browsers_dir()}, so {headless.SKIPPED[headless.PAGES]}{fix}"
 
 
