@@ -183,6 +183,27 @@ async def test_a_prompt_apply_slows_down_when_the_api_pushes_back_and_asks_again
     assert max(seen[:4]) == 4 and max(seen[4:]) < 4
 
 
+async def test_a_prompt_apply_asks_a_rate_limited_or_refused_call_no_second_time(api, monkeypatch):
+    """A call still rate-limited after its retries, or refused, is not asked again: its units fail after one round."""
+    monkeypatch.setattr(concepts, "BATCH_ITEMS", 1)
+    monkeypatch.setattr(concepts, "RETRY_DELAYS", (0.0, 0.0))
+    asked: dict[str, int] = {}
+    status: dict[str, str] = {}
+
+    async def call(c, concept, items, comment=True, on_retry=None):
+        ref = items[0][0]
+        asked[ref] = asked.get(ref, 0) + 1
+        status.setdefault(ref, ("rate_limited", "refused")[len(status) % 2])
+        return model_mod.CallResult(status=status[ref], detail="no")
+
+    monkeypatch.setattr(concepts, "classify_structured", call)
+    k = await _create(api, description="a board post that claims a PR")
+    s = (await api.post(f"/api/ws/{CORPUS}/concepts/{k['id']}/apply", json={"wait": True, "paths": ["board.jsonl"]})).json()
+    assert s["failed"] == 8 and s["labeled"] == 0
+    assert {asked[r] for r, st in status.items() if st == "rate_limited"} == {3}
+    assert {asked[r] for r, st in status.items() if st == "refused"} == {1}
+
+
 async def test_a_prompt_label_answers_once_its_first_rows_are_in(workspaces_tmp, monkeypatch):
     """apply_scoped answers a prompt label with the run so far once APPLY_ENOUGH units are labeled, and the run goes on."""
     monkeypatch.setattr(concepts, "BATCH_ITEMS", 1)
