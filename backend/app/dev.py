@@ -33,8 +33,9 @@ unasked is only its work in its own folder: edits there, reads of the folders it
 (`thimble fix`, while the server is down) has nobody to ask, so it keeps UNHOSTED_TOOLS and has no web tools.
 
 The offline fence. A view build stays off the network in every mode, with or without the sandbox: it has no web tools,
-and deny rules refuse the commands that reach the network or install software (offline_deny). Where the sandbox runs,
-its Bash also has no network.
+deny rules refuse the commands that reach the network or install software (offline_deny), and its Bash runs with the
+package managers offline and a proxy that refuses every connection (view_env). Where the sandbox runs, its Bash also has
+no network.
 """
 from __future__ import annotations
 
@@ -112,6 +113,14 @@ OFFLINE_PROGRAMS = ("curl", "wget", "aria2c", "nc", "ncat", "netcat", "socat", "
 OFFLINE_COMMANDS = ("git clone", "git fetch", "git pull", "git push", "git ls-remote", "git submodule", "go get",
                     "go install", "go mod download", "bash -c", "sh -c", "zsh -c", "eval")
 OFFLINE_MODULES = ("pip", "ensurepip", "playwright", "uv")
+# A view build's environment beside its key (view_env): the package managers and Playwright's browser download offline,
+# and as CLAUDE_ENV_FILE, which Claude Code sources before each Bash command, OFFLINE_ENV_FILE. Neither reaches the
+# session's own calls to the API. It goes in the session's --settings `env`, since Claude Code's background service
+# starts a session with its own environment rather than the environment of the `claude --bg` that asked for it.
+OFFLINE_ENV = {"npm_config_offline": "true", "PIP_NO_INDEX": "1", "UV_OFFLINE": "1",
+               "PLAYWRIGHT_DOWNLOAD_HOST": "http://127.0.0.1:9"}
+OFFLINE_ENV_FILE = Path(__file__).with_name("offline_env.sh")
+ENV_FILE = "CLAUDE_ENV_FILE"
 CLAUDE_BIN = config.CLAUDE_BIN
 VIEW_CHECK = Path(__file__).with_name("view_check.py")  # the command a view build checks its draft with (view_fence)
 CLI_TIMEOUT_S = 60
@@ -2271,12 +2280,12 @@ def view_read_only(corpus: Path, folder: Path) -> tuple[Path, ...]:
 
 def view_fence(c: str, slug: str, corpus: Path, folder: Path) -> dict[str, Any]:
     """The settings that fence a view build's session: the view_read_only folders read-only, its check command run
-    outside the sandbox, where it can reach this server, and offline_deny."""
+    outside the sandbox, where it can reach this server, offline_deny, and its environment (view_env)."""
     check = view_check_command(c, slug)
     out = read_only_fence(view_read_only(corpus, folder), outside=(check, f"{check} *"))
     perms = dict(out.get("permissions") or {})
     deny = [*(perms.get("deny") or []), *offline_deny()]
-    return {**out, "permissions": {**perms, "deny": deny}}
+    return {**out, "permissions": {**perms, "deny": deny}, "env": view_env(slug)}
 
 
 def offline_deny() -> list[str]:
@@ -2284,6 +2293,11 @@ def offline_deny() -> list[str]:
     well: the web tools, and Bash commands by OFFLINE_PROGRAMS, OFFLINE_COMMANDS and OFFLINE_MODULES."""
     return [*WEB_TOOLS, *(r for p in OFFLINE_PROGRAMS for r in (f"Bash({p}:*)", f"Bash(*/{p} *)")),
             *(f"Bash({cmd}:*)" for cmd in OFFLINE_COMMANDS), *(f"Bash(* -m {m} *)" for m in OFFLINE_MODULES)]
+
+
+def view_env(slug: str) -> dict[str, str]:
+    """A view build's session's environment: its key, OFFLINE_ENV and OFFLINE_ENV_FILE."""
+    return {SESSION_ENV: view_key(slug), **OFFLINE_ENV, ENV_FILE: str(OFFLINE_ENV_FILE)}
 
 
 def view_key(slug: str) -> str:
@@ -2379,7 +2393,6 @@ async def _run_view(c: str, slug: str, run: Run) -> None:
     asking = view_asking(c, slug, folder)
     _host(c, asking, chat, run_log)
     resume = prop.get("session_id")
-    env = {SESSION_ENV: view_key(slug)}
     report: dict[str, Any] | None = None
     built, error, result_text = False, "", ""
     capacity = ""  # why the last turn ended, when the API ended it (capacity_failure)
@@ -2436,7 +2449,7 @@ async def _run_view(c: str, slug: str, run: Run) -> None:
                 # working directory they would receive the sandbox's `.claude/.cc-writes/`
                 result_text = await _worker_turn(run, run_log, corpus, prompt, resume, name=view_session_name(c, slug),
                                                  workspace=c, on_session=on_session, add_dirs=(folder,),
-                                                 env=env, answered=False, fence=view_fence(c, slug, corpus, folder),
+                                                 answered=False, fence=view_fence(c, slug, corpus, folder),
                                                  asking=asking)
             except RuntimeError as e:
                 error, result_text = str(e), ""
@@ -2570,8 +2583,7 @@ async def review_revision(c: str, slug: str, message: str) -> tuple[bool, str]:
             try:
                 result_text = await _worker_turn(run, run_log, corpus, prompt, resume, name=view_session_name(c, slug),
                                                  workspace=c, on_session=on_session, add_dirs=(folder,),
-                                                 env={SESSION_ENV: view_key(slug)}, answered=False,
-                                                 fence=view_fence(c, slug, corpus, folder),
+                                                 answered=False, fence=view_fence(c, slug, corpus, folder),
                                                  turn_timeout_s=REVIEW_TURN_TIMEOUT_S, asking=asking)
             except RuntimeError as e:
                 why = str(e)

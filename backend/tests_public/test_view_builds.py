@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import json
+import os
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -53,7 +55,8 @@ def test_a_view_build_s_session_may_read_the_corpus_but_not_change_it(board, mon
 def test_a_view_build_stays_off_the_network_in_every_mode(board, monkeypatch, tmp_path, sandbox):
     """With the sandbox and without it, a view build's session has no web tools, and deny rules, which hold in every
     permission mode, refuse the commands that reach the network or install software: by name, at a path, as a module
-    and in a nested shell. A code ticket's session gets none of it."""
+    and in a nested shell. Its Bash commands find the package managers offline and every connection refused but
+    loopback's. A code ticket's session gets none of it."""
     monkeypatch.setenv("THIMBLE_SANDBOX", sandbox)
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "cc"))
     corpus, folder = config.corpus_dir(CORPUS), views.views_dir(CORPUS) / "posts"
@@ -63,9 +66,16 @@ def test_a_view_build_stays_off_the_network_in_every_mode(board, monkeypatch, tm
     for mode in modes.MODES:
         ledger.put_settings(CORPUS, {modes.SETTING: {"views": mode}})
         flags = dev.Sessions()._flags(CORPUS, "thimble view: Posts", (folder,), fence, asking)
-        perms = json.loads(flags[flags.index("--settings") + 1])["permissions"]
+        settings = json.loads(flags[flags.index("--settings") + 1])
+        perms, env = settings["permissions"], settings["env"]
         assert refused <= set(perms["deny"]) and "ask" not in perms, mode
         assert {"WebFetch", "WebSearch"} <= set(flags[flags.index("--disallowedTools") + 1].split(","))
     code = dev.Sessions()._flags(CORPUS, "thimble ticket 1: x", asking={"key": "ticket:1"})
     perms = json.loads(code[code.index("--settings") + 1])["permissions"]
     assert "WebFetch" not in code[code.index("--disallowedTools") + 1] and "deny" not in perms and perms["ask"]
+
+    assert env[dev.SESSION_ENV] == "view:posts" and env["UV_OFFLINE"] == env["PIP_NO_INDEX"] == "1"
+    shown = subprocess.run(["sh", "-c", f'. "{env[dev.ENV_FILE]}"; echo "$HTTPS_PROXY $no_proxy"'],
+                           env={"PATH": os.environ["PATH"]}, capture_output=True, text=True, check=True).stdout.split()
+    assert shown == ["http://127.0.0.1:9", "127.0.0.1,localhost,::1"]
+
