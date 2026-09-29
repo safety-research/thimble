@@ -600,6 +600,10 @@ The label already held these values from the same predicate over the same units,
 
 {label} [[{ref}]] is already a label over {scope}. A label over {new} needs a name of its own.
 
+## apply_label-takeaway-stale
+
+The takeaway of its card card:{cid} was written for the run before; write it again with `edit_card` from these counts.
+
 ## apply_label-stale
 
 {cards} read this label before it changed, so each shows its older result. `edit_card` with only the card runs one again on the label as it is now, once its counts are final. Then tell the analyst in a sentence which of them changed.

@@ -3515,6 +3515,7 @@ def tell_when_done(c: str, concept_id: str) -> None:
         cards = await asyncio.to_thread(_label_cards, ws, concept_id)
         told = ", ".join(f"{v} {n:,}" for v, n in counts.items()) or "no values"
         text = (f"label {concept['name']} [[concept:{concept_id}]] finished: {told}. "
+                + (f"Its card is [[card:{cards[0][1]['id']}]]. " if cards else "")
                 + ("Cards that read it while it ran: " + ", ".join(f"[[card:{x['id']}]]" for x in stale) + "." if stale
                    else "No card read it while it ran."))
         payload = {"text": text, "name": concept["name"], "ref": f"concept:{concept_id}",

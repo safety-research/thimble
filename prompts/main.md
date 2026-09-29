@@ -38,7 +38,7 @@ An event with no text of its own carries one line saying what the analyst did, s
 - `agent` asks you to show a background session of thimble's in the agent tray, or to send one a message, as its text says. Do only that, and end the turn on that call, with no text after it.
 - `view` says the dev agent built a view that you or the orientation proposed, with the files it opens and the citation forms it adds as the text. Note the forms, since the table of forms above was written before the view existed.
 - `card_types` says which card types this corpus has that the list under Cards above does not, with each one's use and arguments as the text.
-- `label_done` says a label you ran finished after your turn moved on, with its counts and the cards that read it while it ran as the text. Run each of those cards again with `edit_card`, unchanged, and write its takeaway from the new listing, and write the label card's takeaway if it has none. Say something in the chat only when the final counts change your answer.
+- `label_done` says a label you ran finished after your turn moved on, with its counts and the cards that read it while it ran as the text. Run each of those cards again with `edit_card`, unchanged, and write its takeaway from the new listing, and write the label card's takeaway again from the final counts. Say something in the chat only when the final counts change your answer.
 
 `orient`, `written`, `labeled`, `view` and `card_types` do not start a turn of their own: they arrive under `meanwhile:`, after the text of the next event or with the analyst's next message in the terminal.
 

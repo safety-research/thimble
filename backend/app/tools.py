@@ -2338,6 +2338,8 @@ async def _h_apply_label(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
         card = notebook.get_cell(ctx.c, str(s["cell"])) or {}
         if not str(card.get("takeaway") or "").strip():
             line += _takeaway_missing(ctx, target, {**card, "status": "ok"})
+        elif prior is not None and not s.get("unchanged"):
+            line += " " + hint("apply_label-takeaway-stale", cid=str(s["cell"]))
     return ok(line)
 
 
