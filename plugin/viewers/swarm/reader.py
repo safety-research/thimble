@@ -30,7 +30,11 @@
 #   - Records are put in time order across files; a record with no time keeps its place after the line before it in its
 #     file and shows as having none.
 #   - A roster names an account with other capitals than its actions do: accounts are matched without case.
-#   - A save that changes only whitespace changes nothing, and says so.
+#   - A save that changes only spacing, or only re-encodes lines, changes nothing, and says so: saves are compared line
+#     by line on each line with its mojibake repaired (runs of Latin-1 characters that read as UTF-8, such as "Ã©" for
+#     "é", as a wiki that re-encodes its pages on each save grows them) and its spacing collapsed (_key).
+#   - Text shown on a card or beside the chart has its mojibake repaired and control characters dropped (_clean); the
+#     excerpts that cite the records stay as written.
 #
 # The method: the index keeps, per record, only what finding and ordering it needs (its offset, account, place, time,
 # the save before it, the record it replies to), so a corpus of many thousand saves indexes in seconds; a card's text,
@@ -96,6 +100,8 @@ REFS_MAX = 200
 SIGNATURE = re.compile(r"(?:—|--)\s*([A-Za-z][\w.'-]*(?: [\w.'-]+){0,3})\s*$")
 WORD = re.compile(r"@?[A-Za-z][\w.-]*\w")
 SENTENCE = re.compile(r"(?<=[.?!])\s+")
+MOJIBAKE = re.compile(r"[\u0080-\u00ff]{2,}")
+CONTROL = re.compile(r"[\x00-\x08\x0b-\x1f\x7f-\x9f]")
 MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
 
 
@@ -413,8 +419,8 @@ def _addressing(actions, recs, places, texts):
         text = texts[r["ref"]]
         said = text
         if r["kind"] == "save":
-            before = set(last.get(r["place"], "").splitlines())
-            said = "\n".join(s for s in text.splitlines() if s not in before)
+            before = {_key(s) for s in last.get(r["place"], "").splitlines()}
+            said = "\n".join(s for s in text.splitlines() if _key(s) not in before)
             last[r["place"]] = text
         others = who[r["place"]] - {r["account"]}
         reply = recs.get(r["reply_ref"]) if r["reply_ref"] else None
@@ -454,11 +460,36 @@ def _text(index, ref):
     return v if isinstance(v, str) else ""
 
 
+def _unmangle(m):
+    """A run of Latin-1 characters read back as UTF-8 while it decodes; each pass shortens it, so the loop ends."""
+    s = m.group(0)
+    while True:
+        try:
+            t = s.encode("latin-1").decode("utf-8")
+        except UnicodeError:
+            return s
+        if len(t) >= len(s):
+            return s
+        s = t
+
+
+def _key(line):
+    """A line as saves are compared by: its mojibake repaired and its spacing collapsed."""
+    return " ".join(MOJIBAKE.sub(_unmangle, line).split())
+
+
+def _clean(text):
+    """Text to show: its mojibake repaired and control characters other than tab and newline dropped."""
+    return CONTROL.sub("", MOJIBAKE.sub(_unmangle, text))
+
+
 def _hunks(old, new):
-    """[{at, add, del}]: where the new text differs from the old, line by line, `at` the first added line's number."""
+    """[{at, add, del}]: where the new text differs from the old, line by line on each line's _key, `at` the first added
+    line's number."""
     a, b = old.splitlines(), new.splitlines()
     out, budget = [], HUNK_LINES
-    for op, i1, i2, j1, j2 in difflib.SequenceMatcher(None, a, b, autojunk=False).get_opcodes():
+    for op, i1, i2, j1, j2 in difflib.SequenceMatcher(None, [_key(x) for x in a], [_key(x) for x in b],
+                                                        autojunk=False).get_opcodes():
         if op == "equal" or budget <= 0:
             continue
         add, rem = b[j1:j2][:budget], a[i1:i2][:budget]
@@ -468,7 +499,7 @@ def _hunks(old, new):
 
 
 def _cut(s, n=CARD_CHARS):
-    s = " ".join(s.split())
+    s = " ".join(_clean(s).split())
     return s if len(s) <= n else s[: n - 1].rstrip(" ,;:") + "…"
 
 
@@ -495,7 +526,7 @@ def _did(index, r):
     added = [s for h in hunks for s in h["add"] if s.strip()]
     removed = [s for h in hunks for s in h["del"] if s.strip()]
     if [s.split() for s in added] == [s.split() for s in removed]:
-        line = "Changed only whitespace"
+        line = "Changed only spacing or encoding"
     elif len(added) == 1 and len(removed) == 1:
         line = _swap(removed[0], added[0])
     elif added:
@@ -640,14 +671,15 @@ def _detail(index, ref):
         return {"ref": ref, "missing": True, "raw": (_raw(index, ref) or "")[:FIELD_MAX]}
     key = index["files"].get(ref.partition("#L")[0], {}).get("fields", {}).get("text")
     text = rec.get(key) if isinstance(rec.get(key), str) else ""
-    out = {"ref": ref, "fields": [[k, _short(v)] for k, v in rec.items() if k != key], "text_key": key,
-           "text": text[:TEXT_MAX], "cut": len(text) > TEXT_MAX}
+    out = {"ref": ref, "fields": [[k, _clean(_short(v))] for k, v in rec.items() if k != key], "text_key": key,
+           "text": _clean(text[:TEXT_MAX]), "cut": len(text) > TEXT_MAX}
     r = index["recs"].get(ref)
     if r is not None:
         did = _did(index, r)
         out.update(account=r["account"], place=r["place"], sig=_signature(did["said"]))
         if did.get("before"):
-            out.update(before=did["before"], hunks=did["hunks"])
+            out.update(before=did["before"], hunks=[{**h, "add": [_clean(x) for x in h["add"]],
+                                                     "del": [_clean(x) for x in h["del"]]} for h in did["hunks"]])
     return out
 
 
