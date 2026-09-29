@@ -6,8 +6,7 @@
 # The records: JSON Lines or CSV files of saves and posts. The reader finds each file's fields by their names:
 #   who     the first actor field with a value (ACTOR_KEYS), else the address of a save made without an account
 #   where   the place field, such as a page or a channel (PLACE_KEYS), else the file's own path under the folder that
-#           all such files share, as for a wiki kept as one file per page; a place field's value that files in several
-#           folders hold, such as thread "1" in each run of a corpus of runs, is one place per folder, "<folder>/<value>"
+#           all such files share, as for a wiki kept as one file per page
 #   when    ISO 8601 with Z, an offset or no zone (read as UTC), or epoch seconds or milliseconds (TIME_KEYS)
 #   text    the text field (TEXT_KEYS); a record with an actor and a text is an action
 #   save    an action with a sequence field (SEQ_KEYS) holds a whole document, so what it did is what it changed from
@@ -251,17 +250,6 @@ def _fields(rows):
     return out
 
 
-def _spread(values_by_path):
-    """The place field's values that files in more than one folder hold, from (path, the values of its records)."""
-    folders = {}
-    for path, values in values_by_path:
-        folder = path.rpartition("/")[0]
-        for v in values:
-            if v:
-                folders.setdefault(v, set()).add(folder)
-    return {v for v, fs in folders.items() if len(fs) > 1}
-
-
 def _common_dir(paths):
     parts = [p.split("/")[:-1] for p in paths]
     head = parts[0] if parts else []
@@ -285,11 +273,8 @@ def build_index(paths):
     fields = {p: _fields(rows) for p, rows in parsed.items()}
     placeless = [p for p, f in fields.items() if ("actor" in f or "anon" in f) and "text" in f and "place" not in f]
     base = _common_dir(placeless) if len(placeless) > 1 else ""
-    spread = _spread((path, (_first(rec, PLACE_KEYS)[1] for _a, _b, rec in rows)) for path, rows in parsed.items()
-                     if "text" in fields[path] and ("actor" in fields[path] or "anon" in fields[path]))
     for path, rows in parsed.items():
         f = fields[path]
-        folder = path.rpartition("/")[0]
         own_place = path[len(base):].rsplit(".", 1)[0] if path in placeless else None
         kind = ("actions" if ("actor" in f or "anon" in f) and "text" in f
                 else "roster" if "actor" in f and "goal" in f else "other")
@@ -308,7 +293,6 @@ def build_index(paths):
                 _p, place = _first(rec, PLACE_KEYS)
                 _t, title = _first(rec, ("title",))
                 if place and title:
-                    place = f"{folder}/{place}" if place in spread else place
                     places.setdefault(place, {"ref": ref, "title": title, "refs": [], "accounts": {}})
                     names_places = True
                 continue
@@ -325,7 +309,7 @@ def build_index(paths):
                 _problem(problems, ref, "left out: no account")
                 continue
             _p, place = _first(rec, PLACE_KEYS)
-            place = (f"{folder}/{place}" if place in spread else place) or own_place or path
+            place = place or own_place or path
             rid = _first(rec, (f["id"],))[1] if "id" in f else ""
             seq = _first(rec, (f["seq"],))[1] if "seq" in f else ""
             key = ("id", rid) if rid else ("seq", place, seq) if seq else None
@@ -356,12 +340,11 @@ def build_index(paths):
         if r["kind"] == "save":
             r["before"] = last_save.get(r["place"])
             last_save[r["place"]] = r["ref"]
-        folder = r["ref"].partition("#L")[0].rpartition("/")[0]
         if r["reply"]:
-            r["reply_ref"] = by_id.get((r["place"], r["reply"])) or by_id.get((folder, r["reply"]))
+            r["reply_ref"] = by_id.get((r["place"], r["reply"])) or by_id.get((None, r["reply"]))
         if r["id"]:
             by_id[(r["place"], r["id"])] = r["ref"]
-            by_id.setdefault((folder, r["id"]), r["ref"])
+            by_id.setdefault((None, r["id"]), r["ref"])
         del r["reply"]
         p = places.setdefault(r["place"], {"ref": r["ref"], "title": titles[r["ref"]] or r["place"], "refs": [], "accounts": {}})
         p["refs"].append(r["ref"])
@@ -450,19 +433,14 @@ def applies(paths):
             acts[path] = got
     placeless = [p for p, got in acts.items() if not any(place for _w, place, _t in got)]
     base = _common_dir(placeless) if len(placeless) > 1 else ""
-    spread = _spread((path, (place for _w, place, _t in got)) for path, got in acts.items())
-
-    def where(path, place):
-        return (f"{path.rpartition('/')[0]}/{place}" if place in spread else place) or path[len(base):]
-
     places = {}
     for path, got in acts.items():
         for who, place, _t in got:
-            places.setdefault(where(path, place), set()).add(who.lower())
+            places.setdefault(place or path[len(base):], set()).add(who.lower())
     on_shared = naming = 0
     for path, got in acts.items():
         for who, place, text in got:
-            others = places[where(path, place)] - {who.lower()}
+            others = places[place or path[len(base):]] - {who.lower()}
             if others:
                 on_shared += 1
                 naming += bool(others & {w.lstrip("@").lower() for w in WORD.findall(text)})

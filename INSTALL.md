@@ -53,8 +53,8 @@ A server already running keeps the other install's code until `thimble server re
 `bash scripts/install.sh --no-plugin` in the clone first and give the release's install `--plugin`. In the clone,
 `thimble update` pulls the swarm branch and ignores `--from`. Known limitations: only an orientation proposes the Swarm
 view, when the first 400 JSON Lines or CSV files show 30 or more accounts naming each other on 3 or more shared places;
-accounts of the same name in different runs share a row; a "names" link points only to an earlier card; and a large
-human team chat can pass for a swarm.
+in a corpus of several runs, places of the same name (such as thread 1) share one place, and accounts of the same name
+share a row; a "names" link points only to an earlier card; and a large human team chat can pass for a swarm.
 
 ## Update
 
