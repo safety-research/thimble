@@ -1,0 +1,23 @@
+{
+  "reader": "swarm",
+  "name": "Agent flow",
+  "use": "How one account worked, step by step: its records top to bottom in time order, consecutive records on one place merged into a step, and at each step the accounts it answered (left) and that answered it (right), by reply, by name or by editing the same place next.",
+  "args": {
+    "type": "object",
+    "properties": {
+      "account": {"type": "string", "description": "the account whose records are the steps"},
+      "within": {"type": "object", "properties": {"label": {"type": "string"}, "value": {"type": "string"}}, "required": ["label"],
+                 "description": "only the account's records this label gave `value` (its first value when none is given)"},
+      "places": {"type": "array", "items": {"type": "string"}, "ui": true, "description": "only the account's records on these pages or channels"},
+      "links": {"type": "array", "items": {"type": "string", "enum": ["reply", "names", "same place"]}, "ui": true,
+                "description": "the kinds of link shown, all three when none is given"},
+      "edges": {"type": "array", "items": {"type": "object", "required": ["from", "to", "type"],
+                                           "properties": {"from": {"type": "string"}, "to": {"type": "string"}, "type": {"type": "string"}, "reason": {"type": "string"}}},
+                "description": "links your code computed, from a record's ref to an earlier record's, which the records themselves do not carry"}
+    },
+    "required": ["account"],
+    "additionalProperties": false
+  },
+  "size": [260, 1400],
+  "example": "thimble.card(\"agent-flow\", account=\"agent-07\", labels=[\"coordination move\"])"
+}
