@@ -90,6 +90,7 @@ FEEDBACK = "feedback"  # /thimble feedback: the problem report (feedback.py)
 REPORT_LINE = ("thimble: to report it, say `/thimble feedback` or run `thimble feedback \"the server did not start\"` in a "
                "shell; either writes a zip with the logs to send the developer.")
 UNINSTALL_SHELL_LINE = "thimble: uninstall is a shell command, not a /thimble action. Run `thimble uninstall` in a terminal; it says what it will remove and asks first."
+TRUST_SHELL_LINE = "thimble: trust is a shell command, not a /thimble action. Run `thimble trust` in a terminal; it asks first."
 # What the analyst sees on the hook and Monitor routes. Each note says why channels are off, what differs on the route
 # used instead, then the fix, in terms of what the analyst sees. On the Monitor route permission prompts stay in the
 # terminal, and after /clear the Monitor is gone, so that note asks for /thimble again. A reason with no fix the analyst
@@ -2193,8 +2194,8 @@ def cmd_ensure(args: argparse.Namespace) -> int:
     env = resolve_env()
     data_dir = Path(env["data_dir"])
     url = api_url()
-    if action == "uninstall":
-        print(UNINSTALL_SHELL_LINE)
+    if action in ("uninstall", "trust"):
+        print(UNINSTALL_SHELL_LINE if action == "uninstall" else TRUST_SHELL_LINE)
         return 0
     if action == FEEDBACK:  # /thimble feedback: the report needs no server (plugin/bin/thimble runs it before this)
         from . import feedback  # noqa: PLC0415
