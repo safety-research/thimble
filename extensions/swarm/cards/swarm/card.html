@@ -38,9 +38,9 @@
   .act .v { margin-top: 3px; font: 500 10.5px / 1.3 var(--font-body); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .act .tick { position: absolute; left: -1px; right: -1px; top: -1px; height: 3px; border-radius: var(--radius-ui) var(--radius-ui) 0 0; }
   svg#links { position: absolute; left: 0; top: 0; overflow: visible; pointer-events: none; z-index: 2; }
-  svg#links path { fill: none; stroke-width: 1.6; stroke-linejoin: round; transition: opacity .12s; }
+  svg#links g > path { fill: none; stroke-width: 1.6; stroke-linejoin: round; transition: opacity .12s; }
   svg#links circle, svg#links .arrow { transition: opacity .12s; }
-  .lbl { position: absolute; z-index: 2; box-sizing: border-box; height: 17px; padding: 0 5px; border: 1px solid; border-radius: 4px; background: var(--surface-card); font: 500 10.5px / 15px var(--font-mono); white-space: nowrap; transition: opacity .12s; }
+  .lbl { position: absolute; z-index: 3; box-sizing: border-box; height: 17px; padding: 0 5px; border: 1px solid; border-radius: 4px; background: var(--surface-card); font: 500 11px / 15px var(--font-body); white-space: nowrap; transition: opacity .12s; }
   .focus .act:not(.lit), .focus .lbl:not(.lit) { opacity: .28; }
   .focus svg#links g:not(.lit) { opacity: .15; }
 </style>
@@ -61,7 +61,9 @@ const NS = 'http://www.w3.org/2000/svg'
 const MON = 'Jan Feb Mar Apr May Jun Jul Aug Sep Oct Nov Dec'.split(' ')
 const VIZ = ['--viz-1', '--viz-6', '--viz-2', '--viz-3', '--viz-4', '--viz-5', '--viz-7']
 const HEAD_H = 76 // the column header
-const STEP = 124, CW = 196, CH = 74 // a column, a card's width and height
+const CW = 184, CH = 74 // a card's width and height
+const STEP_MIN = 106, STEP_MAX = 136 // a column, narrower to fit the frame's width, down to STEP_MIN
+let STEP = STEP_MAX
 const ROW_PAD = 14, LANE_GAP = 8, AGENT_H = 70 // a row: above and below its cards, between its lanes, at least
 const GAP_MIN = 10, TRACK = 21 // a gap between rows that carries no link, and a link's track in a gap
 const END_GAP = 9 // between two link ends in one band
@@ -109,7 +111,7 @@ let measureCtx = null
 function textWidth(text) {
   if (!measureCtx) {
     measureCtx = document.createElement('canvas').getContext('2d')
-    measureCtx.font = `500 10.5px ${token('--font-mono') || 'monospace'}`
+    measureCtx.font = `500 11px ${token('--font-body') || 'sans-serif'}`
   }
   return Math.ceil(measureCtx.measureText(text).width) + 12
 }
@@ -150,6 +152,7 @@ function layout() {
   const width = document.documentElement.clientWidth || 800
   const headW = width < 700 ? 188 : 244
   const acts = D.actions
+  STEP = Math.round(Math.max(STEP_MIN, Math.min(STEP_MAX, (width - headW - 16 - CW - PAD_R) / Math.max(1, acts.length - 1))))
   const rowOf = new Map(D.rows.map((r, i) => [r.account, i]))
   const nRows = D.rows.length
   // lanes: a card that would overlap the last card of every lane so far in its row starts a lane below them
