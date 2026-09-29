@@ -478,7 +478,7 @@ async def _check(run: _Run) -> None:
                                                             "model": model_used}):
         _gone(run)  # the card changed while the model read it; a change by a tool began the next check
         return
-    patch = _patch(cell, card, notebook.get_cell(c, cid, full_outputs=True))
+    patch = _patch(cell, card, notebook.get_cell(c, cid, full_outputs=True), c=c)
     if patch and not failed:
         # a card that meets every criterion stays as it is: the prompt asks for changes only to what fails one
         log.info("card check: card:%s failed no criterion, so its replacement's changes to %s were not applied", cid,
@@ -708,17 +708,24 @@ def _lines(code: str) -> str:
     return "\n".join(line.rstrip() for line in code.strip().splitlines())
 
 
-def _patch(cell: dict[str, Any], card: dict[str, str], full: dict[str, Any] | None = None) -> dict[str, Any]:
+def _patch(cell: dict[str, Any], card: dict[str, str], full: dict[str, Any] | None = None, *,
+           c: str | None = None) -> dict[str, Any]:
     """The parts of the replacement card that differ from `cell` and that the check may change (checkstore.fixable), as cell
     fields: `title`, `code` (only when the reading saw the whole code) and `takeaway`, the takeaway compared as it would be
-    stored (its values linked against `full`). An empty part leaves the card's own."""
-    from . import checkstore  # noqa: PLC0415
+    stored (its values linked against `full`). An empty part leaves the card's own. The arguments the analyst set with
+    Keep on a card of a card type in workspace `c` are written back into the replacement's code as they were
+    (cardtypes.keep_kept); a code they cannot be written into is no part of the replacement."""
+    from . import cardtypes, checkstore  # noqa: PLC0415
 
     patch: dict[str, Any] = {}
     title = " ".join(card["question"].split())
     if title and title != " ".join(str(cell.get("title") or "").split()):
         patch["title"] = title
     code, old = card["code"], str(cell.get("code") or "")
+    if code.strip() and c is not None and cell.get("kept_args"):
+        code = cardtypes.keep_kept(c, cell, code) or ""
+        if cardtypes.same_code(code, old):
+            code = old
     if code.strip() and len(old.strip()) <= CODE_CHARS and _lines(code) != _lines(old):
         patch["code"] = code
     take, own = card["takeaway"].strip(), str(cell.get("takeaway") or "").strip()
@@ -1042,6 +1049,7 @@ async def _read(c: str, cell: dict[str, Any], png: bytes | None,
         "citations": await asyncio.to_thread(_citations_text, c, cell) or none,
         "code": f"```python\n{code[:CODE_CHARS]}\n```" if code else none,
         "context": await asyncio.to_thread(_context_text, c, cell, run.author) or none,
+        "kept": await asyncio.to_thread(_kept_text, c, cell, secs),
     })
     images = [(await asyncio.to_thread(fit_image, png), "image/png")] if png else []
     effort = run.effort or await asyncio.to_thread(read_effort, c)
@@ -1073,6 +1081,18 @@ async def _read(c: str, cell: dict[str, Any], png: bytes | None,
         log.warning("card check: the reading of card:%s gave no whole assessment and card", run.cid)
         return "the model's reading gave no whole assessment and card"
     return assessment, card, str(res.model_used or res.model_requested or "")
+
+
+def _kept_text(c: str, cell: dict[str, Any], secs: dict[str, str]) -> str:
+    """The `kept` section of the reading's card, naming the arguments the analyst set with Keep that the code still
+    gives as they set them; '' for none."""
+    from . import cardtypes  # noqa: PLC0415
+
+    kept = cardtypes.kept_in_force(c, cell)
+    if not kept:
+        return ""
+    words = ", ".join(f"`{k}={cardtypes._py(v)}`" if v is not None else f"no `{k}`" for k, v in kept.items())
+    return "\n" + _fill(secs["kept"], {"kept": words}).strip()
 
 
 def _read_failure(status: str, detail: str) -> str:

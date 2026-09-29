@@ -24,7 +24,7 @@ import pytest
 
 from fastapi import HTTPException
 
-from app import cardtypes, channel, concepts, config, render, tools, views
+from app import card_check, cardtypes, channel, concepts, config, render, tools, views
 
 CORPUS = "crew"
 ROWS = [{"page": f"p{i % 4}", "user": f"bot{i % 35}", "ts": f"2026-04-14T{i // 60:02d}:{i % 60:02d}:00Z",
@@ -164,14 +164,19 @@ def test_keep_rewrites_the_literal_arguments_of_the_one_card_call():
                              "only": {"type": "array", "ui": True}, "accounts": {"type": "array", "ui": True}}}
     code = ('import thimble\nkept = ["kestrel"]\n'
             'thimble.card("swarm", labels=["signal"], within={"label": "early"}, only=[{"label": "signal", "value": "é"}])\n')
-    out = cardtypes.rewrite_call(code, {"rows": "signature", "only": None}, schema)
+    out, written = cardtypes.rewrite_call(code, {"rows": "signature", "only": None}, schema)
     assert out == 'import thimble\nkept = ["kestrel"]\nthimble.card("swarm", labels=["signal"], within={"label": "early"}, rows="signature")\n'
-    back = cardtypes.rewrite_call(out, {"rows": "account", "accounts": ["kestrel", "nova", "ParallelSectorAgent"]}, schema)
+    assert written == []
+    back, _ = cardtypes.rewrite_call(out, {"rows": "account", "accounts": ["kestrel", "nova", "ParallelSectorAgent"]}, schema)
     assert back.endswith('thimble.card(\n    "swarm",\n    labels=["signal"],\n    within={"label": "early"},\n'
                          '    accounts=["kestrel", "nova", "ParallelSectorAgent"])\n'), (
         "a call longer than a line takes a line per argument, and a default removes the keyword")
-    with pytest.raises(cardtypes.KeepError, match="computes `accounts`"):
-        cardtypes.rewrite_call('thimble.card("swarm", accounts=kept)', {"accounts": ["nova"]}, schema)
+    only = 'thimble.card("swarm", only=[{"label": "signal", "value": v} for v in vals], accounts=top)'
+    out, written = cardtypes.rewrite_call(only, {"only": [{"label": "signal", "value": "ping"}], "accounts": ["nova"]}, schema)
+    assert out == 'thimble.card("swarm", only=[{"label": "signal", "value": "ping"}], accounts=["nova"])'
+    assert written == ["only", "accounts"], "an argument the code computed is written out as the analyst chose it"
+    with pytest.raises(cardtypes.KeepError, match=r"passes its arguments with \*\*"):
+        cardtypes.rewrite_call('thimble.card("swarm", **args)', {"rows": "signature"}, schema)
     with pytest.raises(cardtypes.KeepError, match="calls thimble.card once"):
         cardtypes.rewrite_call('thimble.card("swarm")\nthimble.card("swarm")', {"rows": "signature"}, schema)
 
@@ -181,12 +186,27 @@ async def test_keep_changes_only_the_arguments_the_type_lets_the_card_change(cre
     code = 'import thimble\nthimble.card("swarm", links=["names"])'
     kernel.card("swarm", links=["names"])
     cell = {"id": "c1", "kind": "plot", "code": code, "outputs": [kernel.shown[-1]]}
-    new, patch = cardtypes.keep_patch(CORPUS, cell, {"rows": "signature"})
+    new, patch, written = cardtypes.keep_patch(CORPUS, cell, {"rows": "signature"})
     assert new == 'import thimble\nthimble.card("swarm", links=["names"], rows="signature")' and patch == {"rows": "signature"}
+    assert written == []
     with pytest.raises(HTTPException, match="Keep does not change `within`"):
         cardtypes.keep_patch(CORPUS, cell, {"within": {"label": "early"}})
     with pytest.raises(HTTPException, match="`rows` is one of 'account', 'signature'"):
         cardtypes.keep_patch(CORPUS, cell, {"rows": "sideways"})
+
+
+async def test_the_card_check_gives_back_the_arguments_keep_set(crew, kernel):
+    await cardtypes.refresh(CORPUS, warm=False)
+    kernel.card("swarm", rows="signature")
+    kept = 'import thimble\nthimble.card("swarm", rows="signature", links=["names"])'
+    cell = {"id": "c1", "kind": "plot", "code": kept, "outputs": [kernel.shown[-1]], "kept_args": {"rows": "signature"}}
+    revised = 'import thimble\nthimble.card("swarm", links=["names", "reply"])'
+    assert cardtypes.keep_kept(CORPUS, cell, revised) == 'import thimble\nthimble.card("swarm", links=["names", "reply"], rows="signature")'
+    reverted = {"question": "", "takeaway": "", "code": 'import thimble\nthimble.card("swarm", links=["names"])'}
+    assert card_check._patch(cell, reverted, None, c=CORPUS) == {}, "a revision that only undoes Keep changes nothing"
+    undone = {**cell, "code": 'import thimble\nthimble.card("swarm", links=["names"])'}
+    assert cardtypes.kept_in_force(CORPUS, undone) == {} and cardtypes.keep_kept(CORPUS, undone, revised) == revised, (
+        "once an undo took Keep's arguments out of the code, they bind nothing")
 
 
 async def test_main_hears_when_a_label_it_ran_finishes_and_can_colour_its_values(crew):

@@ -1,6 +1,6 @@
 ### Card types
 
-A card type is a graphic thimble draws for one kind of record, such as how the accounts of a swarm answer each other. Make it as a `plot` card whose code is one call, `thimble.card("<type>", labels=[…], **args)`. The labels colour its records, and choose them unless its arguments do. Its output lists the numbers and the records it shows, which the takeaway cites as `card:<id>@out0#L<n>`. Cite the line of a record for an example, since a click on that citation opens the record in the card. A wrong argument fails with the values it takes. The card types of this corpus:
+A card type is a graphic thimble draws for one kind of record, such as how the accounts of a swarm answer each other. Make it as a `plot` card whose code is one call, `thimble.card("<type>", labels=[…], **args)`. The labels colour its records, and choose them unless its arguments do. Write the arguments the card's controls change, such as `only`, `accounts` and `places`, as literal lists: when their values come from the records, compute them first and paste them into the call, so the call says what the card shows. Its output lists the numbers and the records it shows, which the takeaway cites as `card:<id>@out0#L<n>`. Its first line gives the links among the records shown; when they are few or none, compute the links the question is about and pass them as `edges`, or answer with another kind of card. Cite the line of a record for an example, since a click on that citation opens the record in the card. A wrong argument fails with the values it takes. The card types of this corpus:
 
 {{types}}
 
@@ -24,4 +24,4 @@ When a card type fits the question, answer it with labels and a group of cards n
 
 The bad card counts instructions over time, so it shows neither who told whom nor whether they followed, which is what the question asks.
 
-When the analyst asks to reshape such a card, such as "only the three busiest accounts", change its call with `edit_card`: add or change the arguments, computing them in the code when they depend on the records, and write its takeaway again from the new listing. The analyst can also reshape it in the card and press Keep, which rewrites the call's arguments and runs it again.
+When the analyst asks to reshape such a card, such as "only the three busiest accounts", change its call with `edit_card`: add or change the arguments, as literal values, and write its takeaway again from the new listing. The analyst can also reshape it in the card and press Keep, which writes the arguments into the call and runs it again. When they ask to see it as a view, call `open_view` with the card: the view opens with the card's labels and arguments, and follows the labels live.

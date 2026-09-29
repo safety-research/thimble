@@ -33,6 +33,7 @@ What each link resolves to
 
 Its code
 {{code}}
+{{kept}}
 
 The work that led to the card, most recent last
 {{context}}
@@ -40,6 +41,10 @@ The work that led to the card, most recent last
 ## none
 
 None.
+
+## kept
+
+The analyst reshaped this card in its graphic and pressed Keep, which set {{kept}} in its thimble.card call. These are the analyst's choice, so give them back as they are, and make the question and the takeaway fit the records they draw.
 
 ## critique
 

@@ -7,9 +7,11 @@
 // the type's range (FULL_SIZE at full size), and fills the card when the analyst sized it. In the card harness
 // (render.tsx) the page draws for the check's picture, and the body is settled once the page says so, or after
 // SETTLE_MAX_MS.
-// Reshaping: the page says which of the call's arguments the analyst's changes in it would set (setQuery); Keep writes
-// them into the call, runs the card again and checks it (POST /cells/{id}/keep), Undo draws the card as stored again.
-// At full size, Open as view opens the type's live view with the card's labels and arguments.
+// Reshaping: the page says which of the call's arguments the analyst's changes in it would set (setQuery), and Keep
+// shows once the server says it can write them (a dry POST /cells/{id}/keep); Keep writes them into the call, as
+// literals in place of any code that computed them, which a toast then names, runs the card again and checks it. Undo
+// draws the card as stored again. At full size, Open as view opens the type's live view with the card's labels and
+// arguments. In the harness the frame is as tall as the whole chart (FULL_SIZE), so the check sees every record.
 import { useContext, useEffect, useMemo, useState } from 'react'
 import { Button } from '../components/Button'
 import { asText, CARD_MIME, outIndex } from '../components/Outputs'
@@ -35,6 +37,7 @@ interface Made {
 
 const RUN_POLL_MS = 3000
 const SETTLE_MAX_MS = 4000
+const KEEP_CHECK_MS = 150
 const FULL_SIZE: [number, number] = [480, 2400]
 const RECORD_AT_END = /(\S+#L[1-9]\d*)\s*$/
 
@@ -71,6 +74,25 @@ export function TypeCard({ cell, bundle, width, big }: { cell: Cell; bundle: Mim
   const [patch, setPatch] = useState<Record<string, unknown> | null>(null)
   const [drawn, setDrawn] = useState(0)
   const [keeping, setKeeping] = useState(false)
+  // the patch Keep can write, as the server answered for it
+  const [keepable, setKeepable] = useState<string | null>(null)
+  const patchKey = patch ? JSON.stringify(patch) : ''
+  useEffect(() => {
+    setKeepable(null)
+    if (!patch) return
+    let alive = true
+    const t = window.setTimeout(() => {
+      api.keepCheck(ws, cell.id, patch).then(
+        () => alive && setKeepable(patchKey),
+        () => undefined,
+      )
+    }, KEEP_CHECK_MS)
+    return () => {
+      alive = false
+      window.clearTimeout(t)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ws, cell.id, cell.code, patchKey])
 
   const own = useMemo(() => (made.labels ?? []).map((l) => files.byId.get(l.id)).filter((k): k is Concept => !!k), [made.labels, files.byId])
   // the card's own labels first, so a record they mark takes their colour over a label turned on later
@@ -137,9 +159,13 @@ export function TypeCard({ cell, bundle, width, big }: { cell: Cell; bundle: Mim
     if (!patch) return
     setKeeping(true)
     try {
-      await api.keepCard(ws, cell.id, patch)
+      const got = await api.keepCard(ws, cell.id, patch)
       setPatch(null)
       refresh()
+      if (got.written.length) {
+        const names = got.written.map((k) => `\`${k}\``).join(' and ')
+        bus.emit('toast', { text: `Keep wrote ${names} into the card's call as you chose, in place of the code that computed ${got.written.length > 1 ? 'them' : 'it'}.`, kind: 'info' })
+      }
     } catch (e) {
       fail(e)
     } finally {
@@ -182,9 +208,11 @@ export function TypeCard({ cell, bundle, width, big }: { cell: Cell; bundle: Mim
         <div className="bcell-type-actions" onMouseDown={(e) => e.stopPropagation()} onDoubleClick={(e) => e.stopPropagation()}>
           {patch && (
             <>
-              <Button variant="primary" size="sm" icon="check" busy={busy} disabled={busy || cell.locked === true} onClick={() => void keep()}>
-                Keep
-              </Button>
+              {keepable === patchKey && (
+                <Button variant="primary" size="sm" icon="check" busy={busy} disabled={busy || cell.locked === true} onClick={() => void keep()}>
+                  Keep
+                </Button>
+              )}
               <Button variant="ghost" size="sm" icon="undo" disabled={busy} onClick={undo}>
                 Undo
               </Button>

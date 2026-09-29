@@ -201,6 +201,8 @@ CELL_KINDS = ("plot", "table", "code", "example", "note", "diagram", "timeline",
 RUNNABLE_KINDS = ("plot", "table", "code", "timeline", "diagram")  # carry code and outputs
 DATA_KINDS = ("example", "note", "label", "custom")  # carry a payload
 DEFAULT_KIND = "code"
+KEPT_ARGS = "kept_args"  # a card type's call arguments Keep set, which the card check gives back as they are
+TAKEAWAY_STALE = "takeaway_stale"  # the takeaway was written before the card's last run changed its outputs
 # the payload key per data shape; a diagram or a timeline without code carries a dataset
 PAYLOAD_KEYS = {"example": "refs", "note": "text", "label": "concept", "custom": "html", "diagram": "dataset", "timeline": "dataset"}
 # The canvas layout fields. A group's `pos` {x, y} is on the board for a root group, inside its parent's frame for a
@@ -1091,11 +1093,12 @@ def insert_cell(workspace: str, nb_id: str, cell: dict, after: str | None = None
 def edit_cell(workspace: str, cell_id: str, *, code: str | None = None, title: str | None = None,
               takeaway: str | None = None, payload: dict | None = None, locked: bool | None = None,
               by: str | None = None, width: int | None = None, height: int | None = None,
-              starred: bool | None = None, **layout: Any) -> dict:
+              starred: bool | None = None, kept_args: dict | None = None, **layout: Any) -> dict:
     """Change the given fields of a cell and announce it: code on a runnable cell, a payload on a data cell (400
     otherwise). A change to code, payload or title is recorded in `edited`; a takeaway set here is the analyst's.
     `width`, `height`, `starred` and `pos` are layout, not edits. `locked` is the analyst's lock, which no model's tool
-    may get past; only the browser sends it. 404 for an unknown cell."""
+    may get past; only the browser sends it. `kept_args` are the arguments of a card type's call that Keep wrote with
+    the code (cardtypes.keep_route); other new code drops them. 404 for an unknown cell."""
     ws = _ws(workspace)
     hit = _locate(ws, cell_id)
     if hit is None:
@@ -1111,7 +1114,10 @@ def edit_cell(workspace: str, cell_id: str, *, code: str | None = None, title: s
     changed = False
     if code is not None and code != cell.get("code"):
         cell["code"] = code
+        cell.pop(KEPT_ARGS, None)
         changed = True
+    if kept_args:
+        cell[KEPT_ARGS] = kept_args
     if payload is not None:
         new = _payload_of(kind, payload)
         if new != cell.get("payload"):
@@ -2546,6 +2552,7 @@ async def edit_and_run(workspace: str, nb_id: str, cell_id: str, code: str, *, b
     if code != cell.get("code"):
         cell["previous_code"] = str(cell.get("code") or "")
         cell["code"] = code
+        cell.pop(KEPT_ARGS, None)
     if title:
         cell["title"] = title
     if kind:

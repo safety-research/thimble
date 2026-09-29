@@ -22,8 +22,10 @@ refresh() writes REGISTRY_FILE, which thimble.card reads, and builds each type's
 first card. prompt_text() is the {{card_types}} slot of prompts/shared.md: prompts/card-types.md with the types listed, or
 nothing for a workspace with none.
 Reshaping: Keep (keep_route) writes a patch of the arguments the type marks `ui` into the card's one thimble.card call
-(rewrite_call), runs the card again and checks it. Open as view (as_view_route) makes the type's view the workspace's, if
-it has none, turns the card's labels on and answers the arguments the view's page draws its records by."""
+(rewrite_call), as literals in place of what the code gave, runs the card again and checks it; the card keeps the patch
+as `kept_args`, which the card check gives back as they are (keep_kept). Open as view (as_view, from the card or main's
+open_view tool) makes the type's view the workspace's, if it has none, turns the card's labels on and answers the
+arguments the view's page draws its records by."""
 from __future__ import annotations
 
 import ast
@@ -361,10 +363,11 @@ def _offset(lines: list[str], lineno: int, col: int) -> int:
     return sum(len(x) for x in lines[: lineno - 1]) + len(lines[lineno - 1].encode("utf-8")[:col].decode("utf-8"))
 
 
-def rewrite_call(code: str, patch: dict[str, Any], schema: dict[str, Any]) -> str:
-    """`code` with its one thimble.card call's keyword arguments set to `patch`'s values as literals: a value that is
-    None, empty or the schema's default removes the keyword. The rest of the code, and the call's other arguments, stay
-    as written. KeepError when the code has no such call or more than one, or a patched argument is computed there."""
+def rewrite_call(code: str, patch: dict[str, Any], schema: dict[str, Any]) -> tuple[str, list[str]]:
+    """`code` with its one thimble.card call's keyword arguments set to `patch`'s values as literals, and the names of
+    the arguments the code computed, whose expressions the literals replace. A value that is None, empty or the
+    schema's default removes the keyword. The rest of the code, and the call's other arguments, stay as written.
+    KeepError when the code has no such call or more than one, or passes a patched argument through `**`."""
     try:
         tree = ast.parse(code)
     except SyntaxError as e:
@@ -375,13 +378,16 @@ def rewrite_call(code: str, patch: dict[str, Any], schema: dict[str, Any]) -> st
     call = calls[0]
     seg = lambda n: ast.get_source_segment(code, n) or ""  # noqa: E731
     props = (schema or {}).get("properties") or {}
+    named = {kw.arg for kw in call.keywords if kw.arg is not None}
+    if any(kw.arg is None for kw in call.keywords) and set(patch) - named:
+        raise KeepError("the card's code passes its arguments with **; ask for this change in the chat")
 
     def dropped(k: str, v: Any) -> bool:
         p = props.get(k) if isinstance(props.get(k), dict) else {}
         return v is None or v == [] or v == {} or ("default" in p and v == p["default"])
 
     parts = [seg(a) for a in call.args]
-    done = set()
+    done, written = set(), []
     for kw in call.keywords:
         if kw.arg is None:
             parts.append(seg(kw))
@@ -389,7 +395,7 @@ def rewrite_call(code: str, patch: dict[str, Any], schema: dict[str, Any]) -> st
             try:
                 ast.literal_eval(kw.value)
             except ValueError:
-                raise KeepError(f"the card's code computes `{kw.arg}`; ask for this change in the chat") from None
+                written.append(kw.arg)
             done.add(kw.arg)
             if not dropped(kw.arg, patch[kw.arg]):
                 parts.append(f"{kw.arg}={_py(patch[kw.arg])}")
@@ -405,18 +411,46 @@ def rewrite_call(code: str, patch: dict[str, Any], schema: dict[str, Any]) -> st
     if "\n" in code[start:end] or start - line_start + len(one) > LINE_MAX:
         pad = " " * (start - line_start + 4)
         one = f"{head}(\n" + ",\n".join(pad + x for x in parts) + ")"
-    return code[:start] + one + code[end:]
+    return code[:start] + one + code[end:], written
 
 
-def keep_patch(c: str, cell: dict[str, Any], patch: Any) -> tuple[str, dict[str, Any]]:
-    """The card's code with `patch` written into its call, and the patch checked against the type's schema: each key an
-    argument the type marks `ui`. HTTPException 400 saying what is wrong."""
+def call_args(code: str) -> dict[str, Any] | None:
+    """The literal keyword arguments of `code`'s one thimble.card call, a computed one as ...; None when the code has no
+    such call or more than one."""
+    try:
+        tree = ast.parse(code)
+    except SyntaxError:
+        return None
+    calls = [n for n in ast.walk(tree) if _is_card_call(n)]
+    if len(calls) != 1:
+        return None
+    out: dict[str, Any] = {}
+    for kw in calls[0].keywords:
+        if kw.arg is not None:
+            try:
+                out[kw.arg] = ast.literal_eval(kw.value)
+            except ValueError:
+                out[kw.arg] = ...
+    return out
+
+
+def type_of(c: str, cell: dict[str, Any]) -> dict[str, Any]:
+    """The registry's entry of the type a card draws. HTTPException 400 for a card of no type, 404 for a type the
+    workspace no longer has."""
     made = card_of(cell.get("outputs"))
     if not made:
         raise HTTPException(400, f"card:{cell.get('id')} draws no card type")
     t = read_registry(c).get(str(made.get("type")))
     if t is None:
         raise HTTPException(404, f"no card type {made.get('type')!r} in this workspace")
+    return t
+
+
+def keep_patch(c: str, cell: dict[str, Any], patch: Any) -> tuple[str, dict[str, Any], list[str]]:
+    """The card's code with `patch` written into its call, the patch checked against the type's schema (each key an
+    argument the type marks `ui`), and the arguments the code computed that the patch writes out as literals.
+    HTTPException 400 saying what is wrong."""
+    t = type_of(c, cell)
     if not isinstance(patch, dict) or not patch:
         raise HTTPException(400, "Keep needs the arguments to change")
     schema = t.get("args") or {}
@@ -431,28 +465,85 @@ def keep_patch(c: str, cell: dict[str, Any], patch: Any) -> tuple[str, dict[str,
         except ValueError as e:
             raise HTTPException(400, str(e)) from None
     try:
-        return rewrite_call(str(cell.get("code") or ""), checked, schema), checked
+        code, written = rewrite_call(str(cell.get("code") or ""), checked, schema)
     except KeepError as e:
         raise HTTPException(400, str(e)) from None
+    return code, checked, written
+
+
+def kept_in_force(c: str, cell: dict[str, Any]) -> dict[str, Any]:
+    """The arguments Keep set on a card (its `kept_args`) that its code still gives as Keep wrote them: {} once an undo
+    or an edit changed them."""
+    kept = cell.get("kept_args")
+    if not isinstance(kept, dict) or not kept:
+        return {}
+    have = call_args(str(cell.get("code") or ""))
+    if have is None:
+        return {}
+    try:
+        props = (type_of(c, cell).get("args") or {}).get("properties") or {}
+    except HTTPException:
+        return {}
+
+    def written(k: str, v: Any) -> Any:
+        p = props.get(k) if isinstance(props.get(k), dict) else {}
+        return None if v is None or v == [] or v == {} or ("default" in p and v == p["default"]) else v
+
+    return kept if all(have.get(k) == written(k, v) for k, v in kept.items()) else {}
+
+
+def same_code(a: str, b: str) -> bool:
+    """Whether two codes say the same, the keyword arguments of their thimble.card calls in any order."""
+    def norm(code: str) -> str | None:
+        try:
+            tree = ast.parse(code)
+        except SyntaxError:
+            return None
+        for n in ast.walk(tree):
+            if _is_card_call(n):
+                n.keywords.sort(key=lambda kw: (kw.arg is None, kw.arg or ""))
+        return ast.dump(tree)
+
+    x = norm(a)
+    return x is not None and x == norm(b)
+
+
+def keep_kept(c: str, cell: dict[str, Any], code: str) -> str | None:
+    """`code`, a revision of the card's code, with the arguments Keep set that are in force written back into its call;
+    None when they cannot be."""
+    kept = kept_in_force(c, cell)
+    if not kept:
+        return code
+    try:
+        return rewrite_call(code, kept, type_of(c, cell).get("args") or {})[0]
+    except (KeepError, HTTPException):
+        return None
 
 
 class KeepBody(BaseModel):
     patch: dict[str, Any]
+    dry: bool = False
 
 
 @router.post("/ws/{c}/cells/{cell_id}/keep")
 async def keep_route(c: str, cell_id: str, body: KeepBody) -> dict[str, Any]:
     """Keep: the card's call rewritten with the patch of arguments the analyst's reshaping in its page made, then the
-    card run again and checked (notebook.regenerate's run and check). The card as stored."""
+    card run again and checked (notebook.regenerate's run and check). {cell, written}: the card as stored and the
+    arguments its code computed that Keep wrote out as literals. With `dry`, only whether Keep can write the patch:
+    {cell: None, written}, or the 400 it would give."""
     from . import notebook  # noqa: PLC0415
 
     hit = await asyncio.to_thread(notebook.find_cell, config.workspace_dir(c), cell_id)
     if hit is None:
         raise HTTPException(404, f"no such card: {cell_id}")
     await refresh_quietly(c, warm=False)
-    code, _patch = keep_patch(c, hit[1], body.patch)
-    await asyncio.to_thread(notebook.edit_cell, c, cell_id, code=code, by="user")
-    return await notebook._regenerate(c, cell_id)
+    cell = hit[1]
+    code, patch, written = keep_patch(c, cell, body.patch)
+    if body.dry:
+        return {"cell": None, "written": written}
+    kept = {**kept_in_force(c, cell), **patch}
+    await asyncio.to_thread(notebook.edit_cell, c, cell_id, code=code, by="user", kept_args=kept)
+    return {"cell": await notebook._regenerate(c, cell_id), "written": written}
 
 
 def install_view(c: str, t: dict[str, Any]) -> None:

@@ -487,6 +487,14 @@ export interface ViewProblems {
 }
 
 /** What a view's page gets as `open` (`GET /ws/{c}/views/{slug}/resolve?ref=`). */
+/** A view opened from a card of a card type (Open as view): the card, its question and the arguments of its call, which
+ * choose the view's records. */
+export interface ViewQuery {
+  card: string
+  title: string
+  args: Record<string, unknown>
+}
+
 export interface ViewOpen {
   ref: string | null
   path?: string
@@ -497,6 +505,8 @@ export interface ViewOpen {
   excerpt?: string
   refs?: string[]
   error?: string
+  /** in a view: the card it is drawn from, or null for none */
+  query?: ViewQuery | null
 }
 
 // ---- orientation ----
