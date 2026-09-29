@@ -1,6 +1,6 @@
 // The Report tab: the type bar, then the document in its arrangement. The bar holds the types as chips with an icon,
 // drawn as the Files views bar draws its views (Segmented), + New
-// (DocMenus.tsx), Export, the story's Read, the lock note (LockNote.tsx), History (History.tsx) and the primary action,
+// (DocMenus.tsx), Export (ExportMenu.tsx), the story's Read, the lock note (LockNote.tsx), History (History.tsx) and the primary action,
 // Write or Revise, which asks the analyst's session for the document (a `write` channel event; `report` stream events
 // follow it). A failed write stays on its document (writeFailures.ts) with Retry until dismissed or written. A document
 // not written yet is its frame (GET …/frame). The views' module (Documents.tsx) is imported once in an effect rather than
@@ -13,24 +13,21 @@ import { Mark } from '../components/Marks'
 import { Spinner } from '../components/Spinner'
 import { Tipped } from '../components/Tooltip'
 import { api, docsApi, isNotFound } from '../lib/api'
-import { frameFonts } from '../lib/frame'
 import { bus } from '../lib/bus'
 import { parseRef } from '../lib/refs'
 import { track } from '../lib/telemetry'
 import { revealAnchor } from '../lib/teleport'
-import { getResolved } from '../lib/theme'
 import type { AnyDoc, TypesState, Writeup } from '../lib/types'
 import { readStorage, writeStorage } from '../lib/workspace'
 import { ReportProblemButton } from '../shell/ProblemReport'
 import { writerDoc } from '../chat/threads'
 import { useChatMetas } from '../chat/waiting'
-import { commentsApi } from './commentsApi'
 import { NewDocMenu, TypeActions } from './DocMenus'
 import type { DocFilter } from './Editor'
 import { DraftDiff, HistoryMenu, PastDraft } from './History'
 import type { HistoryRow, HistoryView } from './historyModel'
 import { LockNote } from './LockNote'
-import { pageFile, pageTokens } from './pageFrame'
+import { ExportMenu } from './ExportMenu'
 import { docKey, labelReadDocument, ownType, rendererOf, reportFilterSets, SLUG, switcherItems } from './model'
 import { failedDetail, failedReport, failedText, useWriteFailures, WRITE_RETRY_NOTE } from './writeFailures'
 import { ApiErrorCard } from '../chat/ApiError'
@@ -59,18 +56,6 @@ const ROWS_LIMIT = 5000
 const CLIENT = Math.random().toString(36).slice(2, 10)
 
 type Load = { state: 'loading' } | { state: 'ok'; doc: AnyDoc } | { state: 'none' } | { state: 'error'; message: string }
-
-/** The document saved as a file: a page as its html, in the theme it is shown in, any other document as markdown. */
-async function exportDoc(ws: string, slug: string): Promise<void> {
-  const { markdown, html, title } = await commentsApi.exportDoc(ws, slug)
-  const file = html ? new Blob([pageFile(html, title ?? '', getResolved(), pageTokens(), await frameFonts())], { type: 'text/html' }) : new Blob([markdown], { type: 'text/markdown' })
-  const url = URL.createObjectURL(file)
-  const a = document.createElement('a')
-  a.href = url
-  a.download = `${ws}-${slug}.${html ? 'html' : 'md'}`
-  a.click()
-  window.setTimeout(() => URL.revokeObjectURL(url), 1000)
-}
 
 /** Each kind of document's icon in the type bar, by its renderer. */
 const DOC_ICON: Record<string, IconName> = { document: 'doc', slides: 'image', story: 'writeup', video: 'run', custom: 'page' }
@@ -336,14 +321,6 @@ export function ReportTab({ ws, active }: { ws: string; active: boolean }) {
   // a document the writer has produced: the primary action reads Revise; a frame, or nothing yet, reads Write
   const written = !!bodyDoc && !(bodyDoc as Writeup).frame
   const arranged = bodyRenderer === 'slides' || bodyRenderer === 'story'
-  const doExport = async () => {
-    track('ui-click', { target: `report:${slug}`, detail: { action: 'export' } })
-    try {
-      await exportDoc(ws, slug)
-    } catch (e) {
-      bus.emit('toast', { text: `Could not export the ${slug}. ${(e as Error).message}`, kind: 'error' })
-    }
-  }
   const fallback = (
     <div className="wu-status">
       <Spinner size={14} label="Loading the editor" />
@@ -396,11 +373,7 @@ export function ReportTab({ ws, active }: { ws: string; active: boolean }) {
         <span className="wu-bar-spacer" />
         {filter && <FilterChip concept={filter.concept} name={filter.name} value={filter.value} count={filter.sets.sids.size} onClear={() => void clearFilter()} />}
         {written && !isPage && !isVideo && <HistoryMenu ws={ws} slug={slug} generation={bodyDoc?.generation} view={pastShown ? past.view : null} onView={(view, rows) => setPast(view == null ? null : { view, rows })} />}
-        {written && (
-          <button type="button" className="wu-export" onClick={() => void doExport()}>
-            Export
-          </button>
-        )}
+        {written && <ExportMenu ws={ws} slug={slug} page={isPage} />}
         {isPage && load.state !== 'loading' && <Button variant="icon" icon="code" title="Code" aria-label="Code" active={drawer || load.state === 'none'} disabled={load.state === 'none'} onClick={() => setDrawer((d) => !d)} />}
         {written && <LockNote doc={bodyDoc} root={root} />}
         <Button variant="primary" busy={busy} disabled={(load.state === 'loading' && !held) || load.state === 'error'} onClick={() => void write()}>
