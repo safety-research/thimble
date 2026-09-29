@@ -32,7 +32,7 @@
       },
       "additionalProperties": false
     },
-    "size": [260, 900],
+    "size": [260, 1200],
     "example": "thimble.card(\"swarm\", labels=[\"how told\"], within={\"label\": \"names a page\"}, links=[\"names\", \"reply\"])"
   }
 }

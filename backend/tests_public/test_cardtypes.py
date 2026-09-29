@@ -123,12 +123,14 @@ async def test_a_card_draws_the_records_a_label_kept_coloured_by_another_and_lis
     assert data["mark_counts"] == [30] and data["unmarked"] == 30
     assert {x["type"] for x in data["links"]} <= {"reply", "names"} and data["links"]
     assert len(data["cards"]) == 40 and data["shown"] == "linked"
+    assert sum(c["m"] == 0 for c in data["cards"]) == 20, "the records shown are in proportion to each value's records"
     linked = {c["id"] for x in data["links"] for c in data["cards"] if c["id"] in (x["from"], x["to"])}
-    assert len(linked) >= 30, "the records shown are those most linked to each other"
+    assert len(linked) >= 30, "and the most linked to each other"
     lines = bundle["text/plain"].split("\n")
-    assert lines[0] == "swarm: 60 records by 35 accounts on 4 places; the 40 most linked to each other shown"
-    assert lines[1] == "even: even 30" and lines[2] == "no highlighted value: 30"
-    assert lines[3] == f"links among all 60 records: names {data['reach']['counts']['names']}", "counted over every record"
+    assert lines[0] == f"swarm: 60 records by 35 accounts on 4 places; 40 shown with {len(data['links'])} links among them"
+    assert lines[1] == "the 40 shown: in proportion to each value's records, the most linked first"
+    assert lines[2] == "even: even 30" and lines[3] == "no highlighted value: 30"
+    assert lines[4] == f"links among all 60 records: names {data['reach']['counts']['names']}", "counted over every record"
     assert lines[-1].endswith(data["cards"][-1]["ref"]), "a card's line ends in its record's ref"
     assert {x["id"] for x in kernel._LABELS_READ} >= {colour}, "the card goes stale when its label changes"
 

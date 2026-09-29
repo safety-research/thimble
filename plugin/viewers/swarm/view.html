@@ -145,6 +145,20 @@
   .pal { position: fixed; z-index: 60; display: grid; grid-template-columns: repeat(7, 20px); gap: 6px; padding: 10px; border-radius: var(--radius-card); background: var(--raised-bg); box-shadow: var(--raised-ring), 0 10px 28px rgba(var(--ink-rgb), .14); }
   .pal button { width: 20px; height: 20px; padding: 0; border: 0; border-radius: 4px; cursor: pointer; }
   .pal button.cur { box-shadow: 0 0 0 2px var(--surface-card), 0 0 0 3.5px var(--text-primary); }
+  /* as a card the chart fits the card's width (layoutCard), so it has no zoom; a fade with a control at its foot says
+     there is more below */
+  body.in-card #corner, body.in-card #rows { display: none; }
+  .agent.inl { right: auto; height: auto; padding: 0; gap: 5px; align-items: center; background: none; }
+  .agent.inl .av { width: 16px; height: 16px; border-radius: 4px; }
+  .agent.inl .nm { font-size: var(--text-xs); }
+  .agent.inl .goal, .agent.inl .sig { display: none; }
+  body.in-card .card { padding: 6px 8px 7px; }
+  body.in-card .card .ac { font-size: 12px; -webkit-line-clamp: 2; }
+  .lbl.nin { height: 15px; padding: 0 4px; border: 1px solid var(--border-hairline); color: var(--text-secondary); font-weight: 400; }
+  #more { position: sticky; left: 0; bottom: 0; z-index: 7; height: 36px; margin-top: -36px; display: flex; align-items: flex-end; justify-content: center; padding-bottom: 3px; box-sizing: border-box; background: linear-gradient(to bottom, rgba(0, 0, 0, 0), var(--surface-card) 80%); pointer-events: none; }
+  #more .btn { pointer-events: auto; }
+  #fromcard { max-width: 280px; }
+  #fromcard .t { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
   @media (max-width: 899px) {
     #detail { position: absolute; top: 0; right: 0; bottom: 0; width: min(380px, 100%); z-index: 20; box-shadow: -8px 0 24px rgba(var(--ink-rgb), .08); }
   }
@@ -175,6 +189,7 @@
   </div>
   <div class="row" id="threads"></div>
   <div class="row" id="filters">
+    <button id="fromcard" class="chip chip-sans chip-act active" hidden></button>
     <select id="agent" class="field" aria-label="Account"></select>
     <div id="types" class="row"></div>
     <div id="near" class="seg seg-track seg-sm" aria-label="Linked cards">
@@ -199,6 +214,7 @@
       <div id="rows"></div>
       <div id="plot"></div>
     </div>
+    <div id="more" hidden><button id="moreb" class="btn btn-ghost btn-sm" aria-label="Scroll down"></button></div>
   </div>
   <aside id="detail" hidden></aside>
 </main>
@@ -217,9 +233,11 @@
 // record beside the chart. While the Files filter dims records, their links are dimmed too, and the chart scrolls to
 // the first record it keeps. It tells thimble the height it needs, and that it has drawn; `init` again with the same
 // key keeps what the analyst did here. At full size it shows the top row, with search and the Labels menu. Rows and
-// places carry no unit ref in a card, so a ⌘-click on them asks about the card.
-// A view opened from a card (Open as view) gets the card's arguments with `open` (place.query) and draws its records
-// by them, live: labels turned on change its records as in any view.
+// places carry no unit ref in a card, so a ⌘-click on them asks about the card. As a card the chart has a layout of its
+// own that fits the card's width (layoutCard), and a fade at its foot while more of it is below.
+// A view opened from a card (Open as view) gets the card's arguments with `open` (place.query: {card, title, args}) and
+// draws its records by them, live: labels turned on change its records as in any view. A chip names the card while its
+// arguments hold; a click on it, or an `open` whose query is null, drops them.
 // Layout: a card spans more than its column, so cards of one row that would overlap stack in the row's lanes. The part
 // of a card no neighbouring column's card reaches, its band, carries the vertical runs of its links, and each link runs
 // horizontally in the gap between rows next to its target, so no link crosses a card. A gap is as tall as the links it
@@ -228,7 +246,8 @@
 // a row, a link or a place lights its neighbourhood. A click shows a card's record, a row, a link or a cited record
 // beside the chart; "Open record" opens it in thimble.
 // Labels: while a label is on it is the colouring: cards take its values' colours, and links are drawn in ink, told
-// apart by dash and label; with none on, each place's tag takes a viz colour and each link type another. Cards carry
+// apart by dash and label; a click on a value in the legend hides its cards or shows them again, a shift-click keeps
+// only its cards; with none on, each place's tag takes a viz colour and each link type another. Cards carry
 // their record's ref as data-anchor, and rows and places their unit keys, so thimble marks them. A value's colour is
 // looked up in what thimble last sent (onLabels), so a colour the analyst changes shows at once.
 const slug = (thimble.view && thimble.view.slug) || 'swarm'
@@ -247,6 +266,11 @@ const CARD_GAP = 8 // between two cards in one lane
 const PAD_L = 16, PAD_R = 40
 const END_GAP = 8 // between two link ends on one card
 const FIT_MIN = 0.3
+// as a card (layoutCard): a card's least and greatest width, the corridor right of each column, a row's head (narrow:
+// in a narrow frame), the padding left of the chart, the tracks of runs in a corridor and in a gap, a gap that carries
+// none, and the space above and below a row's cards
+const C_CW = 150, C_CW_MAX = 260, C_CORR = 24, C_HEAD = 104, C_HEAD_NARROW = 84, C_PAD = 4, C_TRACK = 4, C_GAP_TRACK = 7, C_GAP_MIN = 8, C_ROW_PAD = 6
+const C_DASH = { reply: '', names: '5 3', 'same place': '1.5 3.5' }
 const RUN_POLL_MS = 3000 // how often the chart is read again while a label that is on runs
 
 const token = (n) => getComputedStyle(document.documentElement).getPropertyValue(n).trim()
@@ -315,6 +339,7 @@ let drawnKey = null // in a card, the key of what the card stored as it was last
 let stored = null // in a card, the call's arguments the card was made with
 let base = {} // in a view opened from a card, the card's arguments that choose the records and links
 let baseKey = ''
+let fromCard = null // {card, title} of the card the view was opened from while its arguments hold
 let filterKey = 'null'
 let sel = null // {kind: card|row|link|record, id|key|ref}
 let hover = null
@@ -491,6 +516,13 @@ function renderBar(v) {
   for (const o of document.querySelectorAll('#group .seg-opt')) o.classList.toggle('active', o.dataset.v === group)
   document.getElementById('rowcap').textContent = group === 'sig' ? 'Signed name · accounts' : 'Account · goal'
   document.getElementById('clear').hidden = !filtered()
+  const fc = document.getElementById('fromcard')
+  fc.hidden = CARD || !fromCard
+  if (fromCard) {
+    fc.innerHTML = `<span class="t">${esc(fromCard.title || `card:${fromCard.card}`)}</span>${CLOSE}`
+    fc.title = `Drawn by the arguments of card:${fromCard.card}\nClick: all records`
+    fc.dataset.anchor = `card:${fromCard.card}`
+  }
   const pager = document.getElementById('pager')
   pager.hidden = D.total <= D.page
   document.getElementById('span').textContent = D.cards.length ? `${fmt(D.offset + 1)}–${fmt(D.offset + D.cards.length)} of ${fmt(D.total)}` : ''
@@ -511,27 +543,34 @@ function toggleSet(set, x, add) {
   else if (set.size === 1 && set.has(x)) set.clear()
   else { set.clear(); set.add(x) }
 }
-// while a label is on: its values with the records each marks, a click keeping only that value's cards (shift-click
-// adding it), a value's swatch opening thimble's palette
+// while a label is on: its values with the records each marks, a click hiding that value's cards or showing them again
+// (shift-click keeping only them), a value's swatch opening thimble's palette
 function renderLegend() {
   const el = document.getElementById('legend')
   el.hidden = !labelsOn()
   el.innerHTML = ''
   if (el.hidden) return
-  const kept = (m) => !only.length || only.some((o) => o.label === m.label && o.value === m.value)
-  const held = (m) => !(D.only || []).length || D.only.some((o) => o.label === m.label && o.value === m.value)
+  const same = (a, b) => a.label === b.label && a.value === b.value
+  const kept = (m) => !only.length || only.some((o) => same(o, m))
+  const held = (m) => !(D.only || []).length || D.only.some((o) => same(o, m))
+  // a card lists only the values it holds records of
+  const shown = D.marks.filter((m, j) => !CARD || ((D.mark_counts || [])[j] && held(m)))
+  const all = CARD ? (D.only || []).slice() : []
   D.marks.forEach((m, j) => {
-    // a card lists only the values it holds records of
-    if (CARD && (!(D.mark_counts || [])[j] || !held(m))) return
+    if (!shown.includes(m)) return
     const label = (labelState.all || labelState.labels).find((l) => l.name === m.label)
     const it = h('span', `lg${kept(m) ? '' : ' off'}`)
     if (label && label.id) it.dataset.label = label.id
-    it.title = 'Click: only these cards · Shift-click: add them'
+    it.title = kept(m) ? 'Click: hide these cards · Shift-click: only these' : 'Click: show these cards · Shift-click: only these'
     it.append(swatch(markColour(m), label, m.value), h('span', null, new Set(D.marks.map((x) => x.label)).size > 1 ? `${m.label}: ${m.value}` : m.value), h('span', 'n', fmt((D.mark_counts || [])[j] || 0)))
     it.onclick = async (e) => {
-      const at = only.findIndex((o) => o.label === m.label && o.value === m.value)
-      if (e.shiftKey) only = at >= 0 ? only.filter((_, i) => i !== at) : [...only, { label: m.label, value: m.value }]
-      else only = at >= 0 && only.length === 1 ? [] : [{ label: m.label, value: m.value }]
+      const one = { label: m.label, value: m.value }
+      const cur = shown.filter(kept).map((x) => ({ label: x.label, value: x.value }))
+      let next
+      if (e.shiftKey) next = cur.length === 1 && same(cur[0], one) ? shown : [one]
+      else next = kept(m) ? cur.filter((o) => !same(o, one)) : [...cur, one]
+      if (!next.length) return
+      only = next.length === shown.length ? all : next.map((o) => ({ label: o.label, value: o.value }))
       offset = 0
       sel = null
       if (await load()) refresh()
@@ -574,6 +613,22 @@ document.getElementById('group').addEventListener('click', (e) => {
   index()
   refresh()
 })
+document.getElementById('fromcard').addEventListener('click', async () => {
+  if (!applyQuery(null)) return
+  thimble.setQuery(null)
+  if (await load()) { refresh(); watchRuns() }
+})
+document.getElementById('moreb').innerHTML = CARET
+document.getElementById('moreb').addEventListener('click', () => {
+  const chart = document.getElementById('chart')
+  chart.scrollBy({ top: Math.round(chart.clientHeight * 0.8), behavior: 'smooth' })
+})
+document.getElementById('chart').addEventListener('scroll', () => updateMore(), { passive: true })
+// as a card, the fade at the chart's foot shows while there is more of the chart below
+function updateMore() {
+  const chart = document.getElementById('chart')
+  document.getElementById('more').hidden = !CARD || mode === 'render' || !L || chart.scrollHeight - chart.scrollTop - chart.clientHeight <= 8
+}
 document.getElementById('clear').addEventListener('click', () => {
   F.row = ''; F.places.clear(); F.types.clear(); q = ''
   document.getElementById('q').value = ''
@@ -667,7 +722,131 @@ document.addEventListener('click', (e) => {
 // Everything is measured at zoom 1 and in CSS pixels of the plot; the zoom is applied to the whole grid afterwards.
 function metrics() {
   const narrow = innerWidth < 560
-  return { AGW: narrow ? 124 : CARD ? 168 : 240, W: narrow ? 112 : 120, CW: narrow ? 168 : 184 }
+  if (CARD) return { AGW: 0 }
+  return { AGW: narrow ? 124 : 240, W: narrow ? 112 : 120, CW: narrow ? 168 : 184 }
+}
+// a row's head: its figure, its name and goal, or in the signature grouping the accounts that signed with it
+function rowCell(key) {
+  const r = rowBy.get(key)
+  const el = h('div', 'agent')
+  if (!CARD) el.dataset.anchor = r.own ? `view:${slug}/agent/${r.key}` : `view:${slug}/agent/${r.accounts[0]}`
+  el.dataset.anchorName = r.name
+  const who = h('div', 'who')
+  const nm = h('div', 'nm', r.name)
+  nm.title = r.name
+  who.append(nm)
+  if (group === 'sig' && (r.accounts.length > 1 || r.accounts[0] !== r.key)) {
+    const g = h('div', 'goal', `${r.accounts.length > 1 ? `${r.accounts.length} accounts: ` : 'account '}${r.accounts.join(', ')}`)
+    g.title = r.accounts.join('\n')
+    who.append(g)
+  } else if (r.goal) { const g = h('div', 'goal', r.goal); g.title = r.goal; who.append(g) }
+  if (r.sigs.length) { const sg = h('div', 'sig', `signs as ${r.sigs.join(', ')}`); sg.title = sg.textContent; who.append(sg) }
+  el.append(avatar(r.name), who)
+  el.onmouseenter = () => setHover({ kind: 'row', key })
+  el.onmouseleave = () => setHover(null)
+  el.onclick = () => select({ kind: 'row', key })
+  el.style.top = '0px'
+  el.style.visibility = 'hidden'
+  return el
+}
+// one record's card, `cw` wide at `x`
+function cardEl(c, v, x, cw) {
+  const el = h('div', `card${v.ctx.has(c.id) ? ' ctx' : ''}`)
+  el.dataset.anchor = c.ref
+  el.dataset.anchorText = `#${c.id} ${c.line}`
+  el.dataset.id = c.id
+  const hd = h('div', 'hd')
+  hd.dataset.thimbleChrome = ''
+  const colour = cardColour(c)
+  hd.append(h('span', 'no', `#${c.id}`), h('span', 'tag', c.tag))
+  if (labelsOn() && c.m >= 0) { const vv = h('span', 'v', D.marks[c.m].value); vv.style.color = colour; hd.append(vv) }
+  const key = rowOfCard.get(c.id)
+  const as = key !== c.account ? c.account : c.sig && c.sig !== c.account ? `as ${c.sig}` : ''
+  el.append(hd)
+  if (as) { const a = h('div', 'as', group === 'sig' ? `by ${as}` : as); a.title = group === 'sig' ? `Saved by ${c.account}` : `Signed ${c.sig}`; a.dataset.thimbleChrome = ''; el.append(a) }
+  el.append(h('div', 'ac', c.line))
+  el.title = `${c.line}\n${c.account}${c.sig && c.sig !== c.account ? ` (signs ${c.sig})` : ''} · ${whenOf(c.time)}`
+  if (colour) {
+    const tick = h('i', 'tick')
+    tick.style.background = colour
+    el.append(tick)
+    el.style.background = `color-mix(in srgb, ${colour} 13%, var(--surface-card))`
+  } else if (!labelsOn()) hd.querySelector('.tag').style.color = placeColour(c.tag)
+  el.style.width = `${cw}px`
+  el.style.left = `${x}px`
+  el.style.top = '0px'
+  el.style.visibility = 'hidden'
+  el.onmouseenter = () => setHover({ kind: 'card', id: c.id })
+  el.onmouseleave = () => setHover(null)
+  el.onclick = () => { if (!String(getSelection() || '')) select({ kind: 'card', id: c.id }) }
+  el.ondblclick = () => thimble.navigate(c.ref)
+  return el
+}
+// lanes: a card that would overlap the last card of every lane so far in its row starts a lane below them
+function stackLanes(cards0, cards, nRows) {
+  const lanes = Array.from({ length: nRows }, () => [])
+  const laneH = Array.from({ length: nRows }, () => [])
+  for (const c of cards0) {
+    const k = cards.get(c.id)
+    const ls = lanes[k.row]
+    let j = ls.findIndex((right) => right + CARD_GAP <= k.x)
+    if (j < 0) { j = ls.length; ls.push(0); laneH[k.row].push(0) }
+    ls[j] = k.x + k.w
+    laneH[k.row][j] = Math.max(laneH[k.row][j], k.h)
+    k.lane = j
+  }
+  return laneH
+}
+// rows and gaps top to bottom, the bands and row heads placed, the cards placed in their lanes; {gapTop, plotH}
+function placeRows(rowKeys, cells, cellH, laneH, gapH, cards, plot, rows, pad) {
+  let y = 0
+  const gapTop = [], rowTop = []
+  rowKeys.forEach((key, i) => {
+    gapTop[i] = y
+    y += gapH[i]
+    rowTop[i] = y
+    const inner = laneH[i].reduce((sum, hh) => sum + hh, 0) + LANE_GAP * Math.max(0, laneH[i].length - 1)
+    y += Math.max(cellH[i], inner + 2 * pad)
+  })
+  gapTop[rowKeys.length] = y
+  y += gapH[rowKeys.length]
+  const plotH = Math.max(y, 40)
+  plot.style.height = `${plotH}px`
+  rows.style.height = `${plotH}px`
+  // bands: each row from the middle of the gap above it to the middle of the gap below it
+  rowKeys.forEach((key, i) => {
+    const top = i === 0 ? 0 : gapTop[i] + gapH[i] / 2
+    const bottom = i === rowKeys.length - 1 ? plotH : gapTop[i + 1] + gapH[i + 1] / 2
+    const band = h('div', `band${i % 2 ? ' odd' : ''}`)
+    band.style.top = `${top}px`
+    band.style.height = `${bottom - top}px`
+    plot.prepend(band)
+    const el = cells[i]
+    el.classList.toggle('odd', i % 2 === 1)
+    el.style.top = `${top}px`
+    el.style.height = `${bottom - top}px`
+    el.style.paddingTop = `${rowTop[i] - top + pad - 2}px`
+    el.style.visibility = ''
+  })
+  for (const k of cards.values()) {
+    const offs = laneH[k.row].slice(0, k.lane).reduce((sum, hh) => sum + hh + LANE_GAP, 0)
+    k.y = rowTop[k.row] + pad + offs
+    k.el.style.top = `${k.y}px`
+    k.el.style.visibility = ''
+  }
+  return { gapTop, plotH }
+}
+// tracks of their own for the items {span: [a, b]} that overlap, each item's `track` set; the number of tracks
+function packTracks(items) {
+  items.sort((p, p2) => p.span[0] - p2.span[0] || p.span[1] - p2.span[1])
+  const ends = []
+  for (const r of items) {
+    let t = ends.findIndex((e) => e <= r.span[0])
+    if (t < 0) { t = ends.length; ends.push(0) }
+    ends[t] = r.span[1]
+    r.track = t
+  }
+  return ends.length
 }
 function layout(v) {
   const M = metrics()
@@ -687,6 +866,7 @@ function layout(v) {
     L = null
     return
   }
+  if (CARD) return layoutCard(v)
   const colOf = new Map(cards0.map((c, i) => [c.id, i]))
   const rowKeys = rowsList.map((r) => r.key).filter((k) => cards0.some((c) => rowOfCard.get(c.id) === k))
   const rowIdx = new Map(rowKeys.map((k, i) => [k, i]))
@@ -708,82 +888,20 @@ function layout(v) {
   })
 
   // row cells, measured at the column's width
-  const cells = rowKeys.map((key) => {
-    const r = rowBy.get(key)
-    const el = h('div', 'agent')
-    if (!CARD) el.dataset.anchor = r.own ? `view:${slug}/agent/${r.key}` : `view:${slug}/agent/${r.accounts[0]}`
-    el.dataset.anchorName = r.name
-    const who = h('div', 'who')
-    const nm = h('div', 'nm', r.name)
-    nm.title = r.name
-    who.append(nm)
-    if (group === 'sig' && (r.accounts.length > 1 || r.accounts[0] !== r.key)) {
-      const g = h('div', 'goal', `${r.accounts.length > 1 ? `${r.accounts.length} accounts: ` : 'account '}${r.accounts.join(', ')}`)
-      g.title = r.accounts.join('\n')
-      who.append(g)
-    } else if (r.goal) { const g = h('div', 'goal', r.goal); g.title = r.goal; who.append(g) }
-    if (r.sigs.length) { const sg = h('div', 'sig', `signs as ${r.sigs.join(', ')}`); sg.title = sg.textContent; who.append(sg) }
-    el.append(avatar(r.name), who)
-    el.onmouseenter = () => setHover({ kind: 'row', key })
-    el.onmouseleave = () => setHover(null)
-    el.onclick = () => select({ kind: 'row', key })
-    el.style.top = '0px'
-    el.style.visibility = 'hidden'
-    rows.append(el)
-    return el
-  })
+  const cells = rowKeys.map((key) => { const el = rowCell(key); rows.append(el); return el })
   rows.style.height = '1px'
   const cellH = cells.map((el) => el.offsetHeight)
 
   // cards, measured at their width
   const cards = new Map()
   for (const c of cards0) {
-    const el = h('div', `card${v.ctx.has(c.id) ? ' ctx' : ''}`)
-    el.dataset.anchor = c.ref
-    el.dataset.anchorText = `#${c.id} ${c.line}`
-    el.dataset.id = c.id
-    const hd = h('div', 'hd')
-    hd.dataset.thimbleChrome = ''
-    const colour = cardColour(c)
-    hd.append(h('span', 'no', `#${c.id}`), h('span', 'tag', c.tag))
-    if (labelsOn() && c.m >= 0) { const vv = h('span', 'v', D.marks[c.m].value); vv.style.color = colour; hd.append(vv) }
-    const key = rowOfCard.get(c.id)
-    const as = key !== c.account ? c.account : c.sig && c.sig !== c.account ? `as ${c.sig}` : ''
-    el.append(hd)
-    if (as) { const a = h('div', 'as', group === 'sig' ? `by ${as}` : as); a.title = group === 'sig' ? `Saved by ${c.account}` : `Signed ${c.sig}`; a.dataset.thimbleChrome = ''; el.append(a) }
-    el.append(h('div', 'ac', c.line))
-    el.title = `${c.line}\n${c.account}${c.sig && c.sig !== c.account ? ` (signs ${c.sig})` : ''} · ${whenOf(c.time)}`
-    if (colour) {
-      const tick = h('i', 'tick')
-      tick.style.background = colour
-      el.append(tick)
-      el.style.background = `color-mix(in srgb, ${colour} 13%, var(--surface-card))`
-    } else if (!labelsOn()) hd.querySelector('.tag').style.color = placeColour(c.tag)
-    el.style.width = `${CW}px`
-    el.style.left = `${colX(colOf.get(c.id))}px`
-    el.style.top = '0px'
-    el.style.visibility = 'hidden'
-    el.onmouseenter = () => setHover({ kind: 'card', id: c.id })
-    el.onmouseleave = () => setHover(null)
-    el.onclick = () => { if (!String(getSelection() || '')) select({ kind: 'card', id: c.id }) }
-    el.ondblclick = () => thimble.navigate(c.ref)
+    const x = colX(colOf.get(c.id))
+    const el = cardEl(c, v, x, CW)
     plot.append(el)
-    cards.set(c.id, { el, c, col: colOf.get(c.id), row: rowIdx.get(key), x: colX(colOf.get(c.id)), w: CW, h: 0, lane: 0 })
+    cards.set(c.id, { el, c, col: colOf.get(c.id), row: rowIdx.get(rowOfCard.get(c.id)), x, w: CW, h: 0, lane: 0 })
   }
   for (const k of cards.values()) k.h = k.el.offsetHeight
-
-  // lanes: a card that would overlap the last card of every lane so far starts a lane below them
-  const lanes = rowKeys.map(() => [])
-  const laneH = rowKeys.map(() => [])
-  for (const c of cards0) {
-    const k = cards.get(c.id)
-    const ls = lanes[k.row]
-    let j = ls.findIndex((right) => right + CARD_GAP <= k.x)
-    if (j < 0) { j = ls.length; ls.push(0); laneH[k.row].push(0) }
-    ls[j] = k.x + k.w
-    laneH[k.row][j] = Math.max(laneH[k.row][j], k.h)
-    k.lane = j
-  }
+  const laneH = stackLanes(cards0, cards, rowKeys.length)
 
   // link ends: each card's band holds the vertical runs of its links, spread out, those going left first
   const bandOf = (k) => [k.x + (CW - W) + 6, k.x + W - 6]
@@ -821,55 +939,9 @@ function layout(v) {
   const plotW = right + PAD_R
   grid.style.gridTemplateColumns = `${M.AGW}px ${plotW}px`
   grid.style.gridTemplateRows = `${HEAD_H}px auto`
-  const gapH = gaps.map((list) => {
-    list.sort((p, p2) => p.span[0] - p2.span[0] || p.span[1] - p2.span[1])
-    const ends2 = []
-    for (const r of list) {
-      let t = ends2.findIndex((e) => e <= r.span[0])
-      if (t < 0) { t = ends2.length; ends2.push(0) }
-      ends2[t] = r.span[1]
-      r.track = t
-    }
-    return ends2.length ? 10 + ends2.length * TRACK : GAP_MIN
-  })
+  const gapH = gaps.map((list) => { const n = packTracks(list); return n ? 10 + n * TRACK : GAP_MIN })
 
-  // rows and gaps top to bottom
-  let y = 0
-  const gapTop = [], rowTop = []
-  rowKeys.forEach((key, i) => {
-    gapTop[i] = y
-    y += gapH[i]
-    rowTop[i] = y
-    const inner = laneH[i].reduce((sum, hh) => sum + hh, 0) + LANE_GAP * Math.max(0, laneH[i].length - 1)
-    y += Math.max(cellH[i], inner + 2 * ROW_PAD)
-  })
-  gapTop[rowKeys.length] = y
-  y += gapH[rowKeys.length]
-  const plotH = Math.max(y, 40)
-  plot.style.height = `${plotH}px`
-  rows.style.height = `${plotH}px`
-
-  // bands: each row from the middle of the gap above it to the middle of the gap below it
-  rowKeys.forEach((key, i) => {
-    const top = i === 0 ? 0 : gapTop[i] + gapH[i] / 2
-    const bottom = i === rowKeys.length - 1 ? plotH : gapTop[i + 1] + gapH[i + 1] / 2
-    const band = h('div', `band${i % 2 ? ' odd' : ''}`)
-    band.style.top = `${top}px`
-    band.style.height = `${bottom - top}px`
-    plot.prepend(band)
-    const el = cells[i]
-    el.classList.toggle('odd', i % 2 === 1)
-    el.style.top = `${top}px`
-    el.style.height = `${bottom - top}px`
-    el.style.paddingTop = `${rowTop[i] - top + ROW_PAD - 2}px`
-    el.style.visibility = ''
-  })
-  for (const k of cards.values()) {
-    const offs = laneH[k.row].slice(0, k.lane).reduce((sum, hh) => sum + hh + LANE_GAP, 0)
-    k.y = rowTop[k.row] + ROW_PAD + offs
-    k.el.style.top = `${k.y}px`
-    k.el.style.visibility = ''
-  }
+  const { gapTop, plotH } = placeRows(rowKeys, cells, cellH, laneH, gapH, cards, plot, rows, ROW_PAD)
 
   // the links: out of the source's edge, along the gap next to the target, into the target's edge
   const svg = s('svg', { id: 'links', width: plotW, height: plotH })
@@ -886,14 +958,7 @@ function layout(v) {
     g.append(s('circle', { class: 'end', cx: r.xs, cy: ys, r: 2.6, fill: colour }))
     const dir = r.tSide === 'top' ? 1 : -1
     g.append(s('path', { class: 'end', d: `M${r.xt - 4},${yt - dir * 7}L${r.xt},${yt - dir * 0.5}L${r.xt + 4},${yt - dir * 7}Z`, fill: colour }))
-    const hit = s('path', { class: 'hit', d })
-    const tt = s('title')
-    tt.textContent = r.x.reason
-    hit.append(tt)
-    hit.addEventListener('mouseenter', () => setHover({ kind: 'link', key: r.x.key }))
-    hit.addEventListener('mouseleave', () => setHover(null))
-    hit.addEventListener('click', () => select({ kind: 'link', key: r.x.key }))
-    g.append(hit)
+    g.append(linkHit(d, r.x))
     svg.append(g)
     const lb = h('span', 'lbl', r.label)
     lb.title = r.x.reason
@@ -909,6 +974,218 @@ function layout(v) {
   for (const b of [...plot.querySelectorAll('.band')].reverse()) plot.prepend(b)
   for (const { lb } of linkEls.values()) plot.append(lb)
   L = { cards, cells: new Map(rowKeys.map((k, i) => [k, cells[i]])), linkEls, width: M.AGW + plotW, height: HEAD_H + plotH }
+  applyZoom()
+}
+// a link's hit area, which hover lights and a click shows beside the chart
+function linkHit(d, x) {
+  const hit = s('path', { class: 'hit', d })
+  const tt = s('title')
+  tt.textContent = `${x.from}→${x.to} · ${x.type}${x.reason ? `: ${x.reason}` : ''}`
+  hit.append(tt)
+  hit.addEventListener('mouseenter', () => setHover({ kind: 'link', key: x.key }))
+  hit.addEventListener('mouseleave', () => setHover(null))
+  hit.addEventListener('click', () => select({ kind: 'link', key: x.key }))
+  return hit
+}
+// As a card, the chart fits the card's width. Its records fall into as many columns as fit, in event order, the cards
+// widened to fill the width, and a row's records in one column stack. A row's head sits left of its first card, so rows
+// whose records lie in different columns share a band. Each column has a corridor at its right that no card or head
+// reaches, which carries the vertical runs of the links: a link leaves its source's right side, runs up or down its
+// corridor, along the gap next to its target's band when the target is in another column, and down that column's
+// corridor into its target's right side. The links into one record share their runs and one arrowhead, with their
+// number beside it when there are several.
+function layoutCard(v) {
+  const grid = document.getElementById('grid')
+  const cols = document.getElementById('cols'), rows = document.getElementById('rows'), plot = document.getElementById('plot')
+  const cards0 = v.cards
+  const chart = document.getElementById('chart')
+  const width = (chart.clientWidth || innerWidth) - 2
+  const HEAD = innerWidth < 560 ? C_HEAD_NARROW : C_HEAD
+  const slot = HEAD + C_CORR // a column's head slot and corridor
+  const nCols = Math.max(1, Math.min(cards0.length, Math.floor((width - C_PAD) / (slot + C_CW))))
+  const CW = Math.max(C_CW, Math.min(C_CW_MAX, Math.floor((width - C_PAD) / nCols) - slot))
+  const STEP = slot + CW
+  const colX = (j) => C_PAD + HEAD + j * STEP
+  const corridor = (j) => colX(j) + CW // the corridor's left edge, C_CORR wide
+  const colOf = new Map(cards0.map((c, i) => [c.id, Math.floor((i * nCols) / cards0.length)]))
+  const rowKeys = rowsList.map((r) => r.key).filter((k) => cards0.some((c) => rowOfCard.get(c.id) === k))
+  const rowIdx = new Map(rowKeys.map((k, i) => [k, i]))
+  cols.style.height = `${HEAD_H}px`
+  cols.append(h('span', 'hcap', 'Event order · UTC'))
+  for (let j = 0; j < nCols; j++) {
+    const times = cards0.filter((c) => colOf.get(c.id) === j).map((c) => parseTime(c.time)).filter(Boolean)
+    const col = h('div', `col${times.length ? '' : ' none'}`)
+    col.style.left = `${colX(j)}px`
+    col.style.width = `${CW}px`
+    if (times.length) {
+      const a = times[0], b = times[times.length - 1]
+      col.append(h('div', 'd', dayOf(a) === dayOf(b) ? dayOf(a) : `${dayOf(a)} – ${dayOf(b)}`), h('div', null, hmOf(a) === hmOf(b) ? hmOf(a) : `${hmOf(a)} – ${hmOf(b)}`))
+      col.title = `${whenOf(a.toISOString())} to ${whenOf(b.toISOString())}`
+    } else col.append(h('div', null, 'Time'), h('div', null, 'unknown'))
+    cols.append(col)
+  }
+
+  // cards and row heads, measured at their widths
+  const cards = new Map()
+  for (const c of cards0) {
+    const x = colX(colOf.get(c.id))
+    const el = cardEl(c, v, x, CW)
+    plot.append(el)
+    cards.set(c.id, { el, c, col: colOf.get(c.id), row: rowIdx.get(rowOfCard.get(c.id)), x, w: CW, h: 0, lane: 0 })
+  }
+  for (const k of cards.values()) k.h = k.el.offsetHeight
+  const laneH = stackLanes(cards0, cards, rowKeys.length)
+  const span = rowKeys.map(() => [Infinity, -Infinity])
+  for (const k of cards.values()) { span[k.row][0] = Math.min(span[k.row][0], k.col); span[k.row][1] = Math.max(span[k.row][1], k.col) }
+  const cells = rowKeys.map((key, i) => {
+    const el = rowCell(key)
+    const r = rowBy.get(key)
+    el.classList.add('inl')
+    el.title = [r.name, r.goal, group === 'sig' ? `accounts: ${r.accounts.join(', ')}` : '', r.sigs.length ? `signs as ${r.sigs.join(', ')}` : ''].filter(Boolean).join('\n')
+    el.style.left = `${colX(span[i][0]) - HEAD + 2}px`
+    el.style.width = `${HEAD - 8}px`
+    plot.append(el)
+    return el
+  })
+  const rowH = rowKeys.map((key, i) => laneH[i].reduce((sum, hh) => sum + hh, 0) + LANE_GAP * Math.max(0, laneH[i].length - 1) + 2 * C_ROW_PAD)
+
+  // bands: each row, in order, in the first band where no row reaches its columns
+  const bands = [] // [{taken: [[a, b]], rows: [i]}]
+  const bandOf = []
+  rowKeys.forEach((key, i) => {
+    const [a, b] = span[i]
+    let at = bands.findIndex((bd) => bd.taken.every(([x, y]) => b < x || a > y))
+    if (at < 0) { at = bands.length; bands.push({ taken: [], rows: [] }) }
+    bands[at].taken.push([a, b])
+    bands[at].rows.push(i)
+    bandOf[i] = at
+  })
+  const bandH = bands.map((bd) => Math.max(...bd.rows.map((i) => rowH[i])))
+
+  // routes: up or down the source's corridor, along the gap next to the target's band, down the target's corridor
+  const routes = v.links.map((x) => {
+    const S = cards.get(x.from), T = cards.get(x.to)
+    const sb = bandOf[S.row], tb = bandOf[T.row]
+    return { x, S, T, sb, tb, gap: S.col === T.col ? -1 : sb > tb ? tb + 1 : tb }
+  })
+  const into = new Map() // target id -> its routes
+  for (const r of routes) { if (!into.has(r.T.c.id)) into.set(r.T.c.id, []); into.get(r.T.c.id).push(r) }
+  const mid = (j) => corridor(j) + C_CORR / 2
+  const gaps = Array.from({ length: bands.length + 1 }, () => new Map()) // gap -> target id -> its run
+  for (const r of routes) {
+    if (r.gap < 0) continue
+    const m = gaps[r.gap]
+    const a = Math.min(mid(r.S.col), mid(r.T.col)) - 6, b = Math.max(mid(r.S.col), mid(r.T.col)) + 6
+    const run = m.get(r.T.c.id) || { span: [a, b] }
+    run.span = [Math.min(run.span[0], a), Math.max(run.span[1], b)]
+    m.set(r.T.c.id, run)
+    r.gapRun = run
+  }
+  const gapH = gaps.map((m) => { const n = packTracks([...m.values()]); return n ? 8 + n * C_GAP_TRACK : C_GAP_MIN })
+
+  // bands and gaps top to bottom
+  let y = 0
+  const gapTop = [], bandTop = []
+  bands.forEach((bd, b) => { gapTop[b] = y; y += gapH[b]; bandTop[b] = y; y += bandH[b] })
+  gapTop[bands.length] = y
+  y += gapH[bands.length]
+  const plotH = Math.max(y, 40)
+  const plotW = colX(nCols - 1) + CW + C_CORR
+  grid.style.gridTemplateColumns = `0px ${plotW}px`
+  grid.style.gridTemplateRows = `${HEAD_H}px auto`
+  plot.style.height = `${plotH}px`
+  rows.style.height = '0px'
+  bands.forEach((bd, b) => {
+    const top = b === 0 ? 0 : gapTop[b] + gapH[b] / 2
+    const bottom = b === bands.length - 1 ? plotH : gapTop[b + 1] + gapH[b + 1] / 2
+    const band = h('div', `band${b % 2 ? ' odd' : ''}`)
+    band.style.top = `${top}px`
+    band.style.height = `${bottom - top}px`
+    plot.prepend(band)
+  })
+  rowKeys.forEach((key, i) => {
+    const el = cells[i]
+    el.style.top = `${bandTop[bandOf[i]] + C_ROW_PAD}px`
+    el.style.visibility = ''
+  })
+  for (const k of cards.values()) {
+    const offs = laneH[k.row].slice(0, k.lane).reduce((sum, hh) => sum + hh + LANE_GAP, 0)
+    k.y = bandTop[bandOf[k.row]] + C_ROW_PAD + offs
+    k.el.style.top = `${k.y}px`
+    k.el.style.visibility = ''
+  }
+
+  // ends: one arrowhead per target, near the top of its right side; a source's links leave spread along its right side
+  // below that
+  const yt = (T) => T.y + Math.min(T.h / 2, 16)
+  const outs = new Map()
+  for (const r of routes) { if (!outs.has(r.S.c.id)) outs.set(r.S.c.id, []); outs.get(r.S.c.id).push(r) }
+  for (const list of outs.values()) {
+    list.sort((p, p2) => p.T.y - p2.T.y)
+    const S = list[0].S
+    const top = into.has(S.c.id) ? yt(S) + 8 : S.y + 10
+    list.forEach((r, i) => { r.ys = top + ((S.y + S.h - 6 - top) * (i + 1)) / (list.length + 1) })
+  }
+  for (const r of routes) r.gy = r.gap < 0 ? null : gapTop[r.gap] + 4 + C_GAP_TRACK / 2 + r.gapRun.track * C_GAP_TRACK
+
+  // vertical runs: in each corridor, the runs to one target share a track
+  const vruns = new Map() // corridor -> key -> {span}
+  const vrun = (j, key, a, b) => {
+    if (!vruns.has(j)) vruns.set(j, new Map())
+    const m = vruns.get(j)
+    const run = m.get(key) || { span: [Math.min(a, b), Math.max(a, b)] }
+    run.span = [Math.min(run.span[0], a, b), Math.max(run.span[1], a, b)]
+    m.set(key, run)
+    return run
+  }
+  for (const r of routes) {
+    if (r.gap < 0) r.vt = vrun(r.T.col, `in:${r.T.c.id}`, r.ys, yt(r.T))
+    else {
+      r.vs = vrun(r.S.col, `via:${r.T.c.id}:${r.gap}`, r.ys, r.gy)
+      r.vt = vrun(r.T.col, `in:${r.T.c.id}`, r.gy, yt(r.T))
+    }
+  }
+  const trackX = new Map()
+  for (const [j, m] of vruns) {
+    const list = [...m.values()].map((run) => ({ run, span: [run.span[0] - 3, run.span[1] + 3] }))
+    const n = packTracks(list)
+    const step = n > 1 ? Math.min(C_TRACK, (C_CORR - 10) / (n - 1)) : 0
+    for (const it of list) trackX.set(it.run, corridor(j) + 6 + it.track * step)
+  }
+
+  const svg = s('svg', { id: 'links', width: plotW, height: plotH })
+  const linkEls = new Map()
+  for (const r of routes) {
+    const { S, T } = r
+    const colour = typeColour(r.x.type)
+    const xs = S.x + CW, xr = T.x + CW, t = yt(T)
+    const pts = r.gap < 0
+      ? [[xs, r.ys], [trackX.get(r.vt), r.ys], [trackX.get(r.vt), t], [xr, t]]
+      : [[xs, r.ys], [trackX.get(r.vs), r.ys], [trackX.get(r.vs), r.gy], [trackX.get(r.vt), r.gy], [trackX.get(r.vt), t], [xr, t]]
+    const d = orth(pts, 4)
+    const g = s('g', { 'data-key': r.x.key })
+    g.append(s('path', { class: 'ln', d, stroke: colour, 'stroke-dasharray': C_DASH[r.x.type] || null }))
+    g.append(s('circle', { class: 'end', cx: xs, cy: r.ys, r: 2.4, fill: colour }))
+    g.append(s('path', { class: 'end', d: `M${xr + 7},${t - 4}L${xr + 0.5},${t}L${xr + 7},${t + 4}Z`, fill: colour }))
+    g.append(linkHit(d, r.x))
+    svg.append(g)
+    linkEls.set(r.x.key, { g, lb: null, x: r.x })
+  }
+  plot.prepend(svg)
+  for (const b of [...plot.querySelectorAll('.band')].reverse()) plot.prepend(b)
+  // the number of links into a record that several enter
+  for (const [id, list] of into) {
+    if (list.length < 3) continue
+    const T = cards.get(id)
+    const n = h('span', 'lbl nin', String(list.length))
+    n.title = `${plural(list.length, 'link')} into #${id}`
+    n.style.left = `${T.x + CW + 3}px`
+    n.style.top = `${yt(T) - 20}px`
+    n.onmouseenter = () => setHover({ kind: 'card', id })
+    n.onmouseleave = () => setHover(null)
+    plot.append(n)
+  }
+  L = { cards, cells: new Map(rowKeys.map((k, i) => [k, cells[i]])), linkEls, width: plotW, height: HEAD_H + plotH }
   applyZoom()
 }
 function orth(pts, rad) {
@@ -959,7 +1236,7 @@ function applyFocus() {
     k.el.classList.toggle('lit', n.cardsLit.has(id))
     k.el.classList.toggle('sel', !!sel && sel.kind === 'card' && sel.id === id)
   }
-  for (const [key, { g, lb }] of L.linkEls) { g.classList.toggle('lit', n.linksLit.has(key)); lb.classList.toggle('lit', n.linksLit.has(key)) }
+  for (const [key, { g, lb }] of L.linkEls) { g.classList.toggle('lit', n.linksLit.has(key)); if (lb) lb.classList.toggle('lit', n.linksLit.has(key)) }
   for (const [key, el] of L.cells) {
     el.classList.toggle('lit', n.rowsLit.has(key))
     el.classList.toggle('sel', !!sel && sel.kind === 'row' && sel.key === key)
@@ -1197,6 +1474,7 @@ function refresh() {
     reportSize()
     reportQuery()
     setTimeout(() => afterDrops(false), 60)
+    updateMore()
   }
 }
 // in a card, the call's arguments what the analyst narrowed here would set: {} while it shows what the card stored
@@ -1220,7 +1498,7 @@ function afterDrops(scroll) {
   for (const { g, lb, x } of L.linkEls.values()) {
     const dim = dropped.has(x.from) || dropped.has(x.to)
     g.classList.toggle('dropped', dim)
-    lb.classList.toggle('dropped', dim)
+    if (lb) lb.classList.toggle('dropped', dim)
   }
   const first = scroll && dropped.size ? [...L.cards.values()].find((k) => !dropped.has(k.c.id)) : null
   if (first) revealBox({ x: first.x, y: first.y, w: first.w, h: first.h })
@@ -1248,7 +1526,7 @@ function lightRef(ref) {
   if (k) revealBox({ x: k.x, y: k.y, w: k.w, h: k.h })
 }
 let resizeT = null
-addEventListener('resize', () => { clearTimeout(resizeT); resizeT = setTimeout(() => { if (D) { layout(visible()); applyFocus(); if (CARD) reportSize() } }, 120) })
+addEventListener('resize', () => { clearTimeout(resizeT); resizeT = setTimeout(() => { if (D) { layout(visible()); applyFocus(); if (CARD) { reportSize(); updateMore() } } }, 120) })
 
 function applyTarget(t) {
   if (!t) return
@@ -1263,18 +1541,21 @@ function applyTarget(t) {
     if (p) { F.places = new Set([p.tag]); refresh() }
   }
 }
-// a view opened from a card: the card's arguments choose the records and links, set the grouping and the legend; true
-// when they differ from those the view was last opened with
+// a view opened from a card ({card, title, args}): the card's arguments choose the records and links, set the grouping
+// and the legend; null drops them. True when they differ from those the view was last opened with
 function applyQuery(qy) {
-  const key = JSON.stringify(qy)
+  const key = qy && qy.args ? JSON.stringify(qy) : ''
   if (key === baseKey) return false
   baseKey = key
   base = {}
-  for (const k of ['within', 'accounts', 'places', 'links', 'edges']) if (qy[k] != null) base[k] = qy[k]
-  group = qy.rows === 'signature' ? 'sig' : 'account'
-  only = Array.isArray(qy.only) ? qy.only.filter((o) => o && o.label && o.value).map((o) => ({ label: o.label, value: o.value })) : []
+  const a = (key && qy.args) || {}
+  fromCard = key ? { card: String(qy.card || ''), title: String(qy.title || '') } : null
+  for (const k of ['within', 'accounts', 'places', 'links', 'edges']) if (a[k] != null) base[k] = a[k]
+  group = a.rows === 'signature' ? 'sig' : 'account'
+  only = Array.isArray(a.only) ? a.only.filter((o) => o && o.label && o.value).map((o) => ({ label: o.label, value: o.value })) : []
   offset = 0
   sel = null
+  keepRef = null
   F.row = ''
   F.places.clear()
   return true
@@ -1288,7 +1569,7 @@ async function start() {
 thimble.onOpen(async (place) => {
   const t = (place && place.target) || null
   if (CARD) return t && t.ref && t.pick && D ? pickRef(t.ref) : lightRef(t && t.ref)
-  if (place && place.query && applyQuery(place.query)) {
+  if (place && 'query' in place && applyQuery(place.query)) {
     if (!(await load())) return
     refresh()
     watchRuns()
@@ -1364,6 +1645,7 @@ if (CARD) {
     // the chart opens at its first card a label marks, so the card first shows what its labels found
     const first = labelsOn() && L ? [...L.cards.values()].find((k) => k.c.m >= 0) : null
     if (first) revealBox({ x: first.x, y: first.y, w: first.w, h: first.h }, 'instant')
+    updateMore()
     requestAnimationFrame(() => thimble.settled())
   })
 } else start()

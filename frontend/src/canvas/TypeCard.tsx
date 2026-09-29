@@ -150,7 +150,7 @@ export function TypeCard({ cell, bundle, width, big }: { cell: Cell; bundle: Mim
       data: made.data,
       args: made.args ?? {},
       width,
-      size: big ? FULL_SIZE : made.size,
+      size: big || render ? FULL_SIZE : made.size,
       key: `${stored}:${drawn}`,
     }),
     [cell.id, made, render, big, width, stored, drawn],

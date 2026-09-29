@@ -790,13 +790,13 @@ def _within(spec):
 
 def _reach(index, picked, kinds=None, edges=None):
     """The links among all the chosen records `picked` (in event order), as _links draws them between cards but read
-    from the index: the `edges` given, replies, and the accounts a record names (the latest record of that account
-    before it). {links: [(later ref, earlier ref, type)], counts: {type: n}, pairs: [{from, to, n}]}, the pairs of
-    accounts with the most links first."""
+    from the index: the `edges` given, replies, the accounts a record names (the latest record of that account before
+    it) and the record before it on its place. {links: [(later ref, earlier ref, type)], counts: {type: n}, pairs:
+    [{from, to, n}]}, the pairs of accounts with the most links first."""
     kinds = set(kinds or LINK_TYPES)
     recs = index["recs"]
     order = {ref: i for i, (ref, _got) in enumerate(picked)}
-    links, seen, counts, pairs, last_by = [], set(), {}, {}, {}
+    links, seen, counts, pairs, last_by, last_on = [], set(), {}, {}, {}, {}
 
     def add(a, b, kind):
         if b is None or a == b or recs[a]["account"] == recs[b]["account"] or (a, b) in seen or (b, a) in seen:
@@ -819,39 +819,81 @@ def _reach(index, picked, kinds=None, edges=None):
         if "names" in kinds:
             for who in r.get("named") or ():
                 add(ref, last_by.get(who), "names")
+        if "same place" in kinds:
+            add(ref, last_on.get(r["place"]), "same place")
         last_by[r["account"]] = ref
+        last_on[r["place"]] = ref
     top = sorted(pairs.items(), key=lambda kv: (-kv[1], kv[0]))[:PAIRS_LISTED]
     return {"links": links, "counts": counts, "pairs": [{"from": a, "to": b, "n": n} for (a, b), n in top]}
 
 
+def _quotas(counts, room):
+    """`room` shared among the values in proportion to their records `counts` {value: n}, at least one each while room
+    lasts (largest remainders)."""
+    total = sum(counts.values())
+    if not total:
+        return {}
+    exact = {v: room * n / total for v, n in counts.items()}
+    q = {v: max(1, int(x)) for v, x in exact.items()}
+    for v in sorted(counts, key=lambda v: -(exact[v] - int(exact[v]))):
+        if sum(q.values()) >= room:
+            break
+        q[v] += 1
+    while sum(q.values()) > room:
+        v = max(q, key=lambda v: (q[v], -counts[v]))
+        if q[v] <= 1:
+            break
+        q[v] -= 1
+    return {v: min(n, counts[v]) for v, n in q.items()}
+
+
+def _spread(refs, n):
+    """n of `refs` (in event order) evenly spaced over them."""
+    if n >= len(refs):
+        return list(refs)
+    return [refs[int((i + 0.5) * len(refs) / n)] for i in range(n)]
+
+
 def _most_linked(picked, links, mark_at):
-    """CARDS_MAX of the chosen records, in event order: the most linked record of each label value, then both ends of
-    the links whose ends are most linked, then the rest as the pages take them (_by_turns)."""
+    """CARDS_MAX of the chosen records, in event order, in proportion to each label value's records (_quotas): both ends
+    of the links whose ends are most linked while their values have room, then each value's most linked records, then
+    its others spread over time."""
     got_of = dict(picked)
     order = {ref: i for i, (ref, _got) in enumerate(picked)}
     degree = {}
     for a, b, _kind in links:
         degree[a] = degree.get(a, 0) + 1
         degree[b] = degree.get(b, 0) + 1
-    take = {}
 
     def value(ref):
         return min((mark_at[k] for x in got_of[ref] if (k := (x["label"], x["value"])) in mark_at), default=-1)
 
-    best = {}
+    of_value = {}
     for ref, _got in picked:
-        v = value(ref)
-        if v >= 0 and (v not in best or degree.get(ref, 0) > degree.get(best[v], 0)):
-            best[v] = ref
-    for v in sorted(best):
-        take.setdefault(best[v], True)
+        of_value.setdefault(value(ref), []).append(ref)
+    room = _quotas({v: len(refs) for v, refs in of_value.items()}, CARDS_MAX)
+    take = {}
+
+    def add(ref):
+        if ref not in take:
+            take[ref] = True
+            room[value(ref)] -= 1
+
     for a, b, _kind in sorted(links, key=lambda x: (-(degree[x[0]] + degree[x[1]]), order[x[1]])):
-        room = CARDS_MAX - len(take)
-        if room >= (a not in take) + (b not in take):
-            take.setdefault(a, True)
-            take.setdefault(b, True)
-        if len(take) >= CARDS_MAX:
-            break
+        need = {}
+        for ref in (a, b):
+            if ref not in take:
+                need[value(ref)] = need.get(value(ref), 0) + 1
+        if all(room.get(v, 0) >= n for v, n in need.items()):
+            add(a)
+            add(b)
+    for v, refs in of_value.items():
+        rest = [r for r in refs if r not in take]
+        for ref in sorted((r for r in rest if degree.get(r)), key=lambda r: (-degree[r], order[r]))[:max(0, room[v])]:
+            add(ref)
+        rest = [r for r in rest if r not in take]
+        for ref in _spread(rest, max(0, room[v])):
+            add(ref)
     for ref, _got in _by_turns(picked, mark_at):
         if len(take) >= CARDS_MAX:
             break
