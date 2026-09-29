@@ -1552,9 +1552,22 @@ def stale_install(c: str, slug: str, src: Path) -> bool:
         return False
 
 
-def withdraw(c: str, slug: str, extension: str) -> bool:
-    """Take out the view `slug` that `extension` installed, when nobody changed it since, without counting it deleted:
-    the extension stopped running here. Its `view:` refs keep resolving through key-refs.json. True when it went."""
+def orphaned(c: str) -> list[str]:
+    """The workspace's views that are thimble's install of a viewer or card type it no longer ships (VIEWERS_DIR), with
+    no extension behind them, unchanged since (their proposal's `installed` digest)."""
+    out = []
+    for slug, d in _view_dirs(c).items():
+        prop = read_proposal(c, slug) or {}
+        if (prop.get("installed") and not prop.get("extension") and not (VIEWERS_DIR / slug / VIEW_JSON).is_file()
+                and view_digest(d) == prop["installed"]):
+            out.append(slug)
+    return out
+
+
+def withdraw(c: str, slug: str, extension: str | None) -> bool:
+    """Take out the view `slug` that `extension` installed (thimble, for None), when nobody changed it since, without
+    counting it deleted: the extension stopped running here, or thimble no longer ships it. Its `view:` refs keep
+    resolving through key-refs.json. True when it went."""
     prop = read_proposal(c, slug) or {}
     d = _view_dirs(c).get(slug)
     if prop.get("extension") != extension or d is None or view_digest(d) != prop.get("installed"):

@@ -423,6 +423,32 @@ async def test_the_swarm_extension_installs_its_view_where_it_applies_outside_th
     assert views.read_view("big-swarm", "swarm") is None  # one the analyst deleted is not installed again
 
 
+async def test_thimble_s_own_old_install_of_the_swarm_view_gives_way_to_the_extension(samples, inproc, bound):
+    """A workspace made before Swarm was an extension holds thimble's own install of the Swarm view, whose viewer thimble
+    no longer ships. Unchanged, it goes while the extension is not added, and the extension's view replaces it once it
+    is."""
+    d = samples / "old-swarm"
+    d.mkdir()
+    rows = [{"page": f"p{i % 4}", "user": f"bot{i % 35}", "text": f"Relay from bot{(i + 1) % 35}: the value is {i}."}
+            for i in range(140)]
+    (d / "saves.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows))
+    (d / "manifest.json").write_text(json.dumps({"name": "old-swarm", "description": "a swarm"}))
+
+    def old_install():
+        views.install_viewer("old-swarm", "swarm", _example_dir("swarm"), ["saves.jsonl"], why="", proposed_by="thimble",
+                             orientation=True)
+
+    old_install()
+    assert views.orphaned("old-swarm") == ["swarm"]
+    await extensions.refresh("old-swarm")
+    assert views.read_view("old-swarm", "swarm") is None and views.read_proposal("old-swarm", "swarm") is None
+    old_install()
+    extensions.add("swarm", yes=True, say=lambda _: None)
+    await extensions.refresh("old-swarm")
+    assert views.read_proposal("old-swarm", "swarm")["extension"] == "swarm" and views.orphaned("old-swarm") == []
+    assert views.read_view("old-swarm", "swarm")["ok"]
+
+
 def test_the_swarm_reader_s_shares_print_every_record_once(samples, monkeypatch, capsys):
     """The Swarm reader's shares are cut by size at records, so a place may run over two, and between them they print
     every record once; --from and --count print part of one place."""

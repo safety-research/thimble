@@ -21,6 +21,8 @@ workspaces/<c>/extensions/<name>/, since a kernel sees only the workspace and th
 `show: always` views are installed at once, outside the orientation's four; its `show: proposed` views are the
 orientation's to propose (views.propose_builtins). When it becomes active in a workspace an orientation ran in, its
 orient.md goes to the orientation as one follow-up. When it stops being active, its views that nobody changed go.
+A view thimble installed from a viewer it no longer ships, unchanged since, gives way to an active extension's view
+of its slug, and goes when none gives one.
 
 Two active extensions that give the same view or card type, or replace the same orientation block, lose it both: the
 view, type or block is left out (the block stays thimble's), and Settings and `thimble doctor` name the conflict.
@@ -470,6 +472,8 @@ async def refresh(c: str) -> dict[str, Any]:
         for v in (state["extensions"].get(name) or {}).get("views") or []:
             await asyncio.to_thread(views.withdraw, c, v["slug"], name)
     await asyncio.to_thread(install_views, c)
+    for slug in await asyncio.to_thread(views.orphaned, c):
+        await asyncio.to_thread(views.withdraw, c, slug, None)
     await _orient(c, fresh)
     return new_state
 
@@ -493,18 +497,20 @@ async def connected(c: str) -> None:
 
 def install_views(c: str) -> list[str]:
     """Install each `show: always` view of the active extensions that applies here, unless the workspace has a view or
-    proposal of that slug or the analyst deleted it; a view installed from an older version of the extension that
-    nobody changed is installed again. Returns the slugs installed."""
+    proposal of that slug or the analyst deleted it; a view installed from an older version of the extension, or
+    thimble's install of a viewer it no longer ships (views.orphaned), that nobody changed is replaced. Returns the
+    slugs installed."""
     from . import views  # noqa: PLC0415
 
     made = []
     gone = {str(d.get("slug")) for d in views.deleted_proposals(c)}
+    orphans = set(views.orphaned(c))
     for v in views_of(c, "always"):
         slug, d = v["slug"], Path(v["dir"])
         if not v["claims"] or slug in gone:
             continue
         prop = views.read_proposal(c, slug)
-        if prop is not None or slug in views._view_dirs(c):
+        if (prop is not None or slug in views._view_dirs(c)) and slug not in orphans:
             if not (prop and prop.get("extension") == v["extension"] and views.stale_install(c, slug, d)):
                 continue
         raw = _json(d / views.VIEW_JSON)
