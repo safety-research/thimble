@@ -1561,7 +1561,7 @@ async def start(c: str, key: str, argv: list[str], folder: Path, env: dict[str, 
         from . import tools  # noqa: PLC0415
 
         raise RuntimeError(tools.hint("bg-untrusted", folder=str(folder), workspaces=str(config.WORKSPACES_DIR),
-                                      thimble=str(config.REPO_ROOT / "plugin" / "bin" / "thimble")))
+                                      install=str(config.REPO_ROOT / "scripts" / "install.sh")))
     if code != 0:
         raise RuntimeError(f"`claude --bg` failed (exit {code}): {out.strip()[-400:]}")
     m = BG_ID_RE.search(out)

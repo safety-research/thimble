@@ -95,7 +95,6 @@ FEEDBACK = "feedback"  # /thimble feedback: the problem report (feedback.py)
 REPORT_LINE = ("thimble: to report it, say `/thimble feedback` or run `thimble feedback \"the server did not start\"` in a "
                "shell; either writes a zip with the logs to send the developer.")
 UNINSTALL_SHELL_LINE = "thimble: uninstall is a shell command, not a /thimble action. Run `thimble uninstall` in a terminal; it says what it will remove and asks first."
-TRUST_SHELL_LINE = "thimble: trust is a shell command, not a /thimble action. Run `thimble trust` in a terminal; it asks first."
 # What the analyst sees on the hook and Monitor routes. Each note says why channels are off, what differs on the route
 # used instead, then the fix, in terms of what the analyst sees. On the Monitor route permission prompts stay in the
 # terminal, and after /clear the Monitor is gone, so that note asks for /thimble again. A reason with no fix the analyst
@@ -1922,8 +1921,10 @@ def trust_line(workspaces: Path, commands: bool = True) -> str:
     path = bg_session.claude_json()
     if claude_changes.trusted(workspaces, claude_changes._read(path)):
         return f"Claude Code trusts {workspaces} ({path})"
-    return (f"Claude Code does not trust {workspaces} ({path}), so terminal-first mode is off unless you turn it on, and "
-            "then its background sessions are refused" + ("; `thimble trust` trusts it, after asking" if commands else ""))
+    install = config.REPO_ROOT / "scripts" / "install.sh"
+    return (f"Claude Code does not trust {workspaces} ({path}), so the orientation, its critic and the writers run as "
+            "`claude -p` sessions, not in the terminal's agent tray"
+            + (f"; `bash {install} --trust-workspaces` trusts it" if commands else ""))
 
 
 def human_bytes(n: float) -> str:
@@ -2328,8 +2329,8 @@ def cmd_ensure(args: argparse.Namespace) -> int:
             sys.stdout.write(text)
             return 0
     action = ALIASES.get((args.action or "").strip(), (args.action or "").strip())
-    if action in ("uninstall", "trust"):
-        print(UNINSTALL_SHELL_LINE if action == "uninstall" else TRUST_SHELL_LINE)
+    if action == "uninstall":
+        print(UNINSTALL_SHELL_LINE)
         return 0
     if action == FEEDBACK:  # /thimble feedback: the report needs no server (plugin/bin/thimble runs it before this)
         from . import feedback  # noqa: PLC0415

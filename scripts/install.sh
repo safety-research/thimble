@@ -759,7 +759,7 @@ trust_workspaces() {  # the one entry thimble writes into Claude Code's global c
   step "10/12 Claude Code's trust of thimble's workspaces folder"
   if [ "$dry" = 1 ]; then say "(the answer to the trust question, above: --trust-workspaces adds the entry, --no-trust-workspaces takes back one an earlier yes added)"; return 0; fi
   THIMBLE_HOME="$home" "$dir/backend/.venv/bin/python" -I "$dir/backend/app/claude_changes.py" trust "$dir" $trust \
-    || say "(the trust step failed; \`thimble trust\` runs it again)"
+    || say "(the trust step failed; \`bash $dir/scripts/install.sh --trust-workspaces\` runs it again)"
 }
 
 path_has_local_bin() {  # $HOME/.local/bin (or ~/.local/bin) as a PATH entry, a trailing slash on the entry allowed
