@@ -17,6 +17,7 @@ from typing import Any
 
 from fastapi import HTTPException
 
+from . import headless
 from .report import _collapse, _new_id, plain_text
 
 FILM_W, FILM_H = 1280, 720
@@ -173,6 +174,8 @@ async def tool_screenshot(ctx: Any, slug: str, doc: dict[str, Any], args: dict[s
     with tempfile.TemporaryDirectory(prefix="thimble-film-") as d:
         states = [{"out": Path(d) / f"t{i}.png", "open": {"t": t}} for i, t in enumerate(times)]
         shots = await views.shoot_page(film_document(doc), states, _no_records, width=FILM_W, height=FILM_H)
+        if any(r.get("unavailable") for r in shots):
+            return tools.err(headless.NO_SCREENSHOTS)
         blocks: list[dict[str, Any]] = []
         for t, r in zip(times, shots):
             k = next((n for n, x in enumerate(tm["lines"], 1) if x["start"] <= t < x["end"]), None)

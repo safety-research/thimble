@@ -62,7 +62,7 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
-from . import agents, cc_settings, cli, config, modes, procs, prompts
+from . import agents, cc_settings, cli, config, headless, modes, procs, prompts
 from .cli import SOURCE_CHANGED, home as thimble_home
 from .ledger import atomic_write_text
 from .session import find_transcript
@@ -80,8 +80,6 @@ STACK_UI_PORT = int(os.environ.get("THIMBLE_STACK_UI_PORT", "5301"))
 STACK_ENABLED = os.environ.get("THIMBLE_DEV_STACK", "1").strip().lower() not in ("0", "false", "no", "off")
 STACK_WAIT_S = 90
 SHOT_TIMEOUT_S = 90
-BROWSER_MISSING_RE = re.compile(r"download new browsers|Executable doesn't exist at", re.IGNORECASE)
-BROWSER_MISSING_LINE = "Playwright's Chromium is not installed for this user: run `npx playwright install chromium` in frontend/"
 GATE_TIMEOUT_S = 900
 # The tools a session with no workspace uses without a permission request, since nobody can answer one: its file tools,
 # Bash, skills and workflows (module note, permissions). The session has every tool of a default Claude Code session
@@ -1033,14 +1031,6 @@ async def stop_stack(tid: str | None = None) -> None:
 # ----------------------------------------------------------------------------- screenshots
 
 
-class BrowserMissing(RuntimeError):
-    """ui_shot.mjs could not launch Chromium."""
-
-
-def browser_missing(stderr: str) -> bool:
-    return bool(BROWSER_MISSING_RE.search(stderr or ""))
-
-
 def shot_script() -> Path:
     """The page screenshot script, outside scripts/dev/ since main's `screenshot` tool runs it in every install."""
     return REPO / "scripts" / "ui_shot.mjs"
@@ -1050,7 +1040,10 @@ async def run_shot(url: str, out: Path, selector: str | None = None, *, info_out
                    viewport: str | None = None, scale: float | None = None, storage: dict[str, str] | None = None,
                    press: list[str] | None = None, wait_ms: int | None = None, offline: bool = False) -> int:
     """`node scripts/ui_shot.mjs`: 0 ok, 2 selector not found (the viewport is written instead), 1 error, -1 timeout.
-    Options map to the script's options of the same names."""
+    Options map to the script's options of the same names. headless.Missing when the browser is missing, which stays so
+    for the rest of the server run."""
+    if gone := headless.missing(headless.PAGES):
+        raise headless.Missing(gone)
     cmd = ["node", str(shot_script()), "--url", url, "--out", str(out), *(["--offline"] if offline else [])]
     if selector:
         cmd += ["--selector", selector]
@@ -1076,9 +1069,10 @@ async def run_shot(url: str, out: Path, selector: str | None = None, *, info_out
         return -1
     if proc.returncode not in (0, 2):
         text = err.decode(errors="replace")
+        if gone := headless.why_missing(text):
+            headless.mark_missing(headless.PAGES, gone)
+            raise headless.Missing(gone)
         log.warning("ui_shot exit %s for %s: %s", proc.returncode, url, text[-500:])
-        if browser_missing(text):
-            raise BrowserMissing(BROWSER_MISSING_LINE)
     return proc.returncode if proc.returncode is not None else -1
 
 
@@ -2364,7 +2358,8 @@ async def _run_view(c: str, slug: str, run: Run) -> None:
         rep = await views.gate(c, slug, views._kept_locators(c, slug))
         checks = rep.get("checks") or []
         if not quiet or rep.get("ok"):
-            run_log.stage(f"checks passed: {len(checks)} ref(s), the page loaded" if rep.get("ok")
+            loaded = "the page loaded" if (rep.get("page") or {}).get("ok") else "the page was not loaded"
+            run_log.stage(f"checks passed: {len(checks)} ref(s), {loaded}" if rep.get("ok")
                           else f"checks failed: {views.first_failure(rep) or 'the page did not load'}")
         return rep
 

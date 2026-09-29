@@ -30,7 +30,7 @@ from urllib.parse import urlsplit, urlunsplit
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
-from . import cite, config, frames, prompts
+from . import cite, config, frames, headless, prompts
 
 log = logging.getLogger("thimble.tools")
 router = APIRouter()
@@ -2037,7 +2037,10 @@ async def _shot_page(url: str, selector: str | None) -> ToolResult:
         return _not_available("screenshot", "dev", "run_shot")
     with tempfile.TemporaryDirectory(prefix="thimble-shot-") as d:
         out = Path(d) / "shot.png"
-        code = await _maybe_await(run_shot(url, out, selector))
+        try:
+            code = await _maybe_await(run_shot(url, out, selector))
+        except headless.Missing:
+            return err(headless.NO_SCREENSHOTS)
         if not out.is_file():
             return err(f"screenshot failed (exit {code}): no image was written for {url}")
         data = base64.b64encode(out.read_bytes()).decode("ascii")
@@ -2088,9 +2091,8 @@ async def _shot_card(ctx: Ctx, ref: str) -> ToolResult:
     spec = cite.chart_spec(next((b for _, b in cite.iter_outputs(cell.get("outputs")) if cite.chart_spec(b)), None))
     if spec is None:
         return err(hint("screenshot-none", what=f"card:{cid} shows {_output_shape(cell)}"))
-    missing = [p for p in VEGA_BUILDS if not p.is_file()]
-    if missing:
-        return err(f"screenshot: {missing[0].relative_to(config.REPO_ROOT)} is missing (no npm install here), so the chart cannot be drawn")
+    if not all(p.is_file() for p in VEGA_BUILDS):
+        return err(headless.NO_SCREENSHOTS)
     return await _shot_page_file(cid, chart_page(spec))
 
 
@@ -2122,7 +2124,7 @@ async def _shot_card_in_ui(c: str, cid: str, ui: str) -> ToolResult | None:
     from urllib.parse import urlencode
 
     run_shot = _optional("dev", "run_shot")
-    if run_shot is None:
+    if run_shot is None or headless.missing(headless.PAGES):
         return None
     url = f"{ui}/?{urlencode({'ws': c, 'ref': f'card:{cid}'})}"
     storage = {f"thimble:{c}:layout": json.dumps({"tab": "canvas", "chatOpen": False}),
@@ -2133,7 +2135,9 @@ async def _shot_card_in_ui(c: str, cid: str, ui: str) -> ToolResult | None:
             code = await _maybe_await(run_shot(url, png, f'article.canvas-card[data-cell="{cid}"]', viewport=CARD_SHOT_VIEWPORT,
                                                scale=CARD_SHOT_SCALE, storage=storage, press=["Escape"],
                                                wait_ms=CARD_SHOT_WAIT_MS))
-        except Exception:  # noqa: BLE001 — a missing browser or node is the fallback's case, not an error to the model
+        except headless.Missing:
+            return None
+        except Exception:  # noqa: BLE001 — a missing node is the fallback's case, not an error to the model
             log.warning("card shot in the interface failed for card:%s", cid, exc_info=True)
             return None
         if code != 0 or not png.is_file():
@@ -2205,7 +2209,10 @@ async def _shot_page_file(cid: str, page_html: str) -> ToolResult:
     with tempfile.TemporaryDirectory(prefix="thimble-shot-") as d:
         page, png = Path(d) / "card.html", Path(d) / "card.png"
         page.write_text(page_html, "utf-8")
-        code = await _maybe_await(run_shot(page.as_uri(), png, "#fig", offline=True, wait_ms=FIGURE_SHOT_WAIT_MS))
+        try:
+            code = await _maybe_await(run_shot(page.as_uri(), png, "#fig", offline=True, wait_ms=FIGURE_SHOT_WAIT_MS))
+        except headless.Missing:
+            return err(headless.NO_SCREENSHOTS)
         if not png.is_file() or code not in (0, None):
             return err(f"screenshot: card:{cid}'s figure did not render (exit {code})")
         data = base64.b64encode(png.read_bytes()).decode("ascii")
