@@ -8,111 +8,38 @@
   [hidden] { display: none !important; }
   body { background: var(--surface-card); display: flex; flex-direction: column; overflow: hidden; }
   #bar { flex: none; padding: 10px 16px 8px; border-bottom: 1px solid var(--border-hairline); background: var(--surface-card); }
-  /* as a card (thimble.card) the page has no pager, a top row only at full size, and its bar runs to the card's edges */
-  body.in-card #bar { padding: 0 0 8px; }
-  body.in-card #toprow, body.in-card #pager { display: none; }
-  body.in-card.full #toprow { display: flex; }
-  body.in-card #title { visibility: hidden; }
-  body.in-card #toprow + #threads { margin-top: 0; }
-  body.in-card.full #toprow + #threads { margin-top: 7px; }
   .row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; min-width: 0; }
-  .row + .row { margin-top: 7px; }
   .grow { flex: 1 1 auto; }
-  /* the places keep to one row that scrolls sideways */
-  #threads { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: thin; }
-  #threads > * { flex: none; }
   #title { flex: 1 1 200px; min-width: 0; margin: 0; font: 500 var(--text-sm) / 1.35 var(--font-body); color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   #counts { font: 400 var(--text-xs) / 1.3 var(--font-body); color: var(--text-secondary); font-variant-numeric: tabular-nums; margin-right: 6px; white-space: nowrap; }
   #q { flex: 0 1 190px; min-width: 110px; }
-  .thr { display: inline-flex; align-items: center; gap: 5px; min-width: 0; max-width: 100%; margin-right: 8px; }
-  .thr .chip { font-weight: 600; }
-  .plink { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 260px; font: 400 var(--text-xs) / 1.3 var(--font-body); color: var(--text-secondary); text-decoration: underline; text-decoration-color: rgba(var(--ink-rgb), .3); text-underline-offset: 2px; cursor: pointer; }
-  .plink:hover { color: var(--text-primary); text-decoration-color: currentColor; }
   .chip .n { color: var(--text-tertiary); font: 400 var(--text-mono-sm) / 1 var(--font-mono); font-variant-numeric: tabular-nums; }
   .chip.active .n { color: inherit; opacity: .75; }
   .sw { display: inline-block; flex: none; width: 8px; height: 8px; border-radius: 2px; }
-  select.field { field-sizing: content; max-width: 200px; }
-  #types { gap: 4px; }
   .ico { width: 12px; height: 12px; flex: none; stroke: currentColor; fill: none; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
   .cbtn { gap: 6px; padding: 0 7px 0 9px; }
   .cbtn .k { color: var(--text-tertiary); font-weight: 400; }
   .cbtn .ico { color: var(--text-tertiary); }
-  #pager { display: inline-flex; align-items: center; gap: 4px; font: 400 var(--text-xs) / 1 var(--font-body); color: var(--text-secondary); font-variant-numeric: tabular-nums; }
   #problems { margin: 7px 0 0; font: 400 var(--text-xs) / 1.4 var(--font-body); color: var(--status-warning); overflow-wrap: anywhere; }
   .lg { display: inline-flex; align-items: center; gap: 6px; height: 22px; padding: 0 6px 0 4px; border-radius: var(--radius-chip); font: 400 var(--text-xs) / 1 var(--font-body); color: var(--text-secondary); }
   .lg { cursor: pointer; }
   .lg:hover { background: var(--surface-hover); color: var(--text-primary); }
   .lg .n { color: var(--text-tertiary); font-variant-numeric: tabular-nums; }
-  .lg.off { opacity: .38; }
   .swb { display: inline-grid; place-items: center; width: 16px; height: 16px; margin: 0 -4px; border-radius: 3px; flex: none; cursor: pointer; }
   .swb:hover { background: var(--track-bg); }
 
   main { flex: 1; min-height: 0; display: flex; position: relative; }
-  #chart { flex: 1; min-width: 0; overflow: auto; position: relative; outline: none; }
-  #empty { margin: 48px auto; max-width: 420px; padding: 0 16px; text-align: center; font: 400 var(--text-sm) / 1.5 var(--font-body); color: var(--text-secondary); }
-  #grid { display: grid; width: max-content; min-width: 100%; }
-  #corner { grid-area: 1 / 1; position: sticky; left: 0; top: 0; z-index: 6; background: var(--surface-card); border-right: 1px solid var(--border-hairline); border-bottom: 1px solid var(--border-hairline); box-sizing: border-box; padding: 10px 12px 0 16px; display: flex; flex-direction: column; align-items: flex-start; gap: 6px; }
-  .seg-sm .seg-opt { height: 20px; padding: 0 7px; }
-  #cols { grid-area: 1 / 2; position: sticky; top: 0; z-index: 5; background: var(--surface-card); border-bottom: 1px solid var(--border-hairline); box-sizing: border-box; }
-  #rows { grid-area: 2 / 1; position: sticky; left: 0; z-index: 4; background: var(--surface-card); border-right: 1px solid var(--border-hairline); box-sizing: border-box; }
-  #plot { grid-area: 2 / 2; position: relative; }
-  .hcap { font: 500 10.5px / 1 var(--font-body); letter-spacing: .06em; text-transform: uppercase; color: var(--text-tertiary); white-space: nowrap; }
-  #cols .hcap { position: absolute; left: 16px; top: 10px; }
-  #cols .hcap .note { text-transform: none; letter-spacing: 0; font-weight: 400; }
-  .col { position: absolute; top: 26px; font: 400 10.5px / 1.3 var(--font-mono); font-variant-numeric: tabular-nums; color: var(--text-secondary); white-space: nowrap; }
-  .col .d { color: var(--text-tertiary); }
-  .col.none { color: var(--text-tertiary); }
-  .band { position: absolute; left: 0; right: 0; }
-  .band.odd { background: rgba(var(--ink-rgb), .022); }
 
-  .agent { position: absolute; left: 0; right: 0; box-sizing: border-box; padding: 0 12px 0 16px; display: flex; gap: 10px; align-items: flex-start; cursor: pointer; }
-  .agent:hover .nm, .agent.sel .nm { text-decoration: underline; text-decoration-color: rgba(var(--ink-rgb), .35); text-underline-offset: 2px; }
-  .agent.odd { background: rgba(var(--ink-rgb), .022); }
-  .av { flex: none; width: 28px; height: 28px; border-radius: 7px; background: var(--track-bg); display: block; }
-  .av rect { fill: var(--text-secondary); }
-  .who { min-width: 0; flex: 1; }
-  .who .nm { font: 600 var(--text-ui-sm) / 1.3 var(--font-body); color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .who .goal { margin-top: 1px; font: 400 var(--text-xs) / 1.38 var(--font-body); color: var(--text-secondary); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
-  .who .sig { margin-top: 2px; font: 400 10.5px / 1.35 var(--font-mono); color: var(--text-tertiary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-  .card { position: absolute; box-sizing: border-box; padding: 7px 10px 8px; background: var(--surface-card); border: 1px solid rgba(var(--ink-rgb), .16); border-radius: var(--radius-ui); cursor: pointer; transition: opacity .12s, border-color .12s; }
-  .card:hover { border-color: rgba(var(--ink-rgb), .38); }
-  .card.sel { border-color: var(--text-primary); box-shadow: 0 0 0 1px var(--text-primary); }
-  .card.ctx { border-style: dashed; }
-  .card .hd { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 6px; min-width: 0; font: 400 10.5px / 1.3 var(--font-mono); color: var(--text-tertiary); white-space: nowrap; }
-  .card .hd .tag { font-weight: 600; color: var(--text-primary); }
-  /* a value too long for the rest of the line goes to a line of its own, and wraps there rather than being cut */
-  .card .hd .v { flex: 0 0 auto; max-width: 100%; white-space: normal; overflow-wrap: anywhere; font-weight: 600; font-family: var(--font-body); }
-  /* the name a card's save signs with, or its account, on a line of its own so neither it nor the value is cut */
-  .card .as { margin-top: 1px; font: 400 10.5px / 1.3 var(--font-body); color: var(--text-tertiary); overflow-wrap: anywhere; }
-  .card .ac { margin-top: 3px; font: 500 12.5px / 1.36 var(--font-body); color: var(--text-primary); overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
-  .card .tick { position: absolute; left: -1px; right: -1px; top: -1px; height: 3px; border-radius: var(--radius-ui) var(--radius-ui) 0 0; }
-  #links { position: absolute; left: 0; top: 0; overflow: visible; pointer-events: none; }
-  #links .hit { pointer-events: stroke; stroke: transparent; stroke-width: 10; fill: none; cursor: pointer; }
-  #links .ln { fill: none; stroke-width: 1.6; stroke-linejoin: round; stroke-linecap: round; transition: opacity .12s; }
-  #links .end { transition: opacity .12s; }
-  .lbl { position: absolute; height: 14px; box-sizing: border-box; padding: 0 3px; border-radius: 3px; background: var(--surface-card); font: 500 10.5px / 14px var(--font-mono); white-space: nowrap; cursor: pointer; transition: opacity .12s; }
-  .lbl:hover { text-decoration: underline; }
-  .focus .card:not(.lit), .focus .agent:not(.lit) .who, .focus .agent:not(.lit) .av { opacity: .3; }
-  .focus .lbl:not(.lit), .focus #links g:not(.lit) .ln, .focus #links g:not(.lit) .end { opacity: .1; }
-  .focus #links g.lit .ln { stroke-width: 2.2; }
-  #links g.dropped .ln, #links g.dropped .end, .lbl.dropped { opacity: .25; }
 
   #detail { flex: none; width: 380px; box-sizing: border-box; overflow: auto; border-left: 1px solid var(--border-hairline); background: var(--surface-card); padding: 12px 16px 28px; }
   .d-top { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
   .d-when { margin-top: 8px; font: 400 var(--text-mono-sm) / 1.3 var(--font-mono); color: var(--text-secondary); overflow-wrap: anywhere; }
   .d-h { margin: 10px 0 0; font: 500 var(--text-lg) / 1.35 var(--font-body); color: var(--text-primary); overflow-wrap: anywhere; }
-  .d-agent { display: flex; gap: 10px; align-items: flex-start; margin-top: 12px; cursor: pointer; }
   .d-sec { display: flex; align-items: baseline; gap: 8px; margin: 18px 0 6px; }
   .d-sec .t { font: 500 var(--text-ui-sm) / 1.2 var(--font-body); color: var(--text-primary); }
   .d-sec .n { font: 400 var(--text-mono-sm) / 1 var(--font-mono); color: var(--text-tertiary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .d-sec .grow + .btn { margin: -4px 0; }
-  .lrow { display: grid; grid-template-columns: 8px auto 1fr; column-gap: 8px; row-gap: 2px; align-items: baseline; padding: 6px 6px; margin: 0 -6px; border-radius: var(--radius-ui); cursor: pointer; }
-  .lrow:hover { background: var(--surface-hover); }
-  .lrow .sw { align-self: center; }
-  .lrow .k { font: 500 var(--text-mono-sm) / 1.3 var(--font-mono); white-space: nowrap; }
-  .lrow .o { min-width: 0; font: 400 var(--text-xs) / 1.35 var(--font-body); color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .lrow .r { grid-column: 2 / 4; font: 400 var(--text-xs) / 1.4 var(--font-body); color: var(--text-secondary); overflow-wrap: anywhere; }
   .arow { display: flex; align-items: baseline; gap: 8px; padding: 5px 6px; margin: 0 -6px; border-radius: var(--radius-ui); cursor: pointer; font: 400 var(--text-xs) / 1.35 var(--font-body); }
   .arow:hover { background: var(--surface-hover); }
   .arow .no { flex: none; width: 26px; font: 400 var(--text-mono-sm) / 1.3 var(--font-mono); color: var(--text-tertiary); }
@@ -145,20 +72,7 @@
   .pal { position: fixed; z-index: 60; display: grid; grid-template-columns: repeat(7, 20px); gap: 6px; padding: 10px; border-radius: var(--radius-card); background: var(--raised-bg); box-shadow: var(--raised-ring), 0 10px 28px rgba(var(--ink-rgb), .14); }
   .pal button { width: 20px; height: 20px; padding: 0; border: 0; border-radius: 4px; cursor: pointer; }
   .pal button.cur { box-shadow: 0 0 0 2px var(--surface-card), 0 0 0 3.5px var(--text-primary); }
-  /* as a card the chart fits the card's width (layoutCard), so it has no zoom; a fade with a control at its foot says
      there is more below */
-  body.in-card #corner, body.in-card #rows { display: none; }
-  .agent.inl { right: auto; height: auto; padding: 0; gap: 5px; align-items: center; background: none; }
-  .agent.inl .av { width: 16px; height: 16px; border-radius: 4px; }
-  .agent.inl .nm { font-size: var(--text-xs); }
-  .agent.inl .goal, .agent.inl .sig { display: none; }
-  body.in-card .card { padding: 6px 8px 7px; }
-  body.in-card .card .ac { font-size: 12px; -webkit-line-clamp: 2; }
-  .lbl.nin { height: 15px; padding: 0 4px; border: 1px solid var(--border-hairline); color: var(--text-secondary); font-weight: 400; }
-  #more { position: sticky; left: 0; bottom: 0; z-index: 7; height: 36px; margin-top: -36px; display: flex; align-items: flex-end; justify-content: center; padding-bottom: 3px; box-sizing: border-box; background: linear-gradient(to bottom, rgba(0, 0, 0, 0), var(--surface-card) 80%); pointer-events: none; }
-  #more .btn { pointer-events: auto; }
-  #fromcard { max-width: 280px; }
-  #fromcard .t { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
   @media (max-width: 899px) {
     #detail { position: absolute; top: 0; right: 0; bottom: 0; width: min(380px, 100%); z-index: 20; box-shadow: -8px 0 24px rgba(var(--ink-rgb), .08); }
   }
@@ -166,21 +80,8 @@
     #bar { padding: 8px 12px 6px; }
     #title { flex-basis: 100%; }
     #q { flex: 1 1 110px; }
-    /* so do the filters */
-    #filters { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
-    #filters > * { flex: none; }
-    .plink { max-width: 160px; }
-    #corner { padding-left: 10px; }
-    .agent { padding: 0 6px 0 8px; gap: 6px; }
-    .av { width: 20px; height: 20px; border-radius: 5px; }
-    .who .nm { font-size: var(--text-xs); }
-    .who .goal { font-size: 11px; }
-    .who .sig { display: none; }
     #detail { width: 100%; }
   }
-  /* the overview (the view): the bar's swimlane controls give way to the overview's, and the chart to its rows */
-  body.ov #threads, body.ov #filters, body.ov #chart { display: none; }
-  body:not(.ov) #ovbarrow, body:not(.ov) #ov { display: none; }
   #ovcounts { font: 400 var(--text-xs) / 1.3 var(--font-body); color: var(--text-secondary); font-variant-numeric: tabular-nums; white-space: nowrap; }
   #ovfilters { display: contents; }
   #ovfilters .chip .t { min-width: 0; overflow: hidden; text-overflow: ellipsis; max-width: 240px; }
@@ -213,39 +114,13 @@
 <div id="bar">
   <div class="row" id="toprow">
     <p id="title"></p>
-    <input id="q" class="field" type="search" placeholder="Search cards" aria-label="Search cards" autocomplete="off" spellcheck="false">
+    <input id="q" class="field" type="search" placeholder="Search accounts" aria-label="Search accounts" autocomplete="off" spellcheck="false">
     <button id="cbtn" class="btn btn-secondary btn-sm cbtn" data-anchor-name="Labels"></button>
   </div>
-  <div class="row" id="threads"></div>
-  <div class="row" id="filters">
-    <button id="fromcard" class="chip chip-sans chip-act active" hidden></button>
-    <select id="agent" class="field" aria-label="Account"></select>
-    <div id="types" class="row"></div>
-    <div id="near" class="seg seg-track seg-sm" aria-label="Linked cards">
-      <button class="seg-opt active" data-v="0">Matches</button><button class="seg-opt" data-v="1">With linked</button>
-    </div>
-    <div id="group" class="seg seg-track seg-sm" aria-label="Rows"><button class="seg-opt active" data-v="account">By account</button><button class="seg-opt" data-v="sig">By signature</button></div>
-    <button id="clear" class="btn btn-ghost btn-sm">Clear filters</button>
-    <span class="grow"></span>
-    <span id="pager"><button id="prev" class="btn btn-ghost btn-sm" aria-label="Earlier cards">‹</button><span id="span"></span><button id="next" class="btn btn-ghost btn-sm" aria-label="Later cards">›</button></span>
-  </div>
-  <div class="row" id="ovbarrow"><span id="ovcounts"></span><span id="ovfilters"></span></div>
-  <div class="row" id="legend" hidden></div>
+  <div class="row" id="ovbarrow"><span id="ovcounts"></span><span id="ovfilters"></span><span class="row" id="legend" hidden></span></div>
   <p id="problems" role="status" hidden></p>
 </div>
 <main id="main">
-  <div id="chart" tabindex="0">
-    <p id="empty" hidden></p>
-    <div id="grid">
-      <div id="corner"><span class="hcap" id="rowcap">Account · goal</span>
-        <div id="zoom" class="seg seg-track seg-sm" aria-label="Zoom"><button class="seg-opt" data-v="fit">Fit</button><button class="seg-opt active" data-v="1">100%</button></div>
-      </div>
-      <div id="cols"></div>
-      <div id="rows"></div>
-      <div id="plot"></div>
-    </div>
-    <div id="more" hidden><button id="moreb" class="btn btn-ghost btn-sm" aria-label="Scroll down"></button></div>
-  </div>
   <div id="ov">
     <div class="ovhead"><canvas id="ovaxis"></canvas></div>
     <p id="ovempty" hidden></p>
@@ -261,59 +136,18 @@
 </main>
 <div id="pop"></div>
 <script>
-// Swarm: a row per account (or per name the cards sign with), a card per record the labels that are on mark, in event
-// order, and the links between cards that the records carry, drawn from the reader's chart. Columns follow event
-// order, one card each, so their spacing is no measure of time; each is headed by its card's UTC time, or "Time
-// unknown".
-// As a card (thimble.view.card, a card's code calling thimble.card("swarm", …)), the page draws the chart the card
-// stored, which the bridge's `init` brings, and fetches only a record's detail. Its records and their values are the
-// card's; the legend, grouping, account, places, link types and search narrow what it shows here, and the first four
-// are told to thimble as the call's arguments they would set (thimble.setQuery), which Keep writes into the call. The
-// colours are the labels' as the analyst edits them, and a record a label marked after the card ran takes the colour of
-// its mark as the label runs. A citation hovered in the card's takeaway lights its record, and a click on it opens the
-// record beside the chart. While the Files filter dims records, their links are dimmed too, and the chart scrolls to
-// the first record it keeps. It tells thimble the height it needs, and that it has drawn; `init` again with the same
-// key keeps what the analyst did here. At full size it shows the top row, with search and the Labels menu. Rows and
-// places carry no unit ref in a card, so a ⌘-click on them asks about the card. As a card the chart has a layout of its
-// own that fits the card's width (layoutCard), and a fade at its foot while more of it is below.
-// A view opened from a card (Open as view) gets the card's arguments with `open` (place.query: {card, title, args}) and
-// draws its records by them, live: labels turned on change its records as in any view. A chip names the card while its
-// arguments hold; a click on it, or an `open` whose query is null, drops them.
-// Layout: a card spans more than its column, so cards of one row that would overlap stack in the row's lanes. The part
-// of a card no neighbouring column's card reaches, its band, carries the vertical runs of its links, and each link runs
-// horizontally in the gap between rows next to its target, so no link crosses a card. A gap is as tall as the links it
-// carries need, each on a track of its own with its label beside its source.
-// Filters: account, link type and search narrow the cards; "With linked" adds the cards one link away. Hovering a card,
-// a row, a link or a place lights its neighbourhood. A click shows a card's record, a row, a link or a cited record
-// beside the chart; "Open record" opens it in thimble.
-// Labels: while a label is on it is the colouring: cards take its values' colours, and links are drawn in ink, told
-// apart by dash and label; a click on a value in the legend hides its cards or shows them again, a shift-click keeps
-// only its cards; with none on, each place's tag takes a viz colour and each link type another. Cards carry
-// their record's ref as data-anchor, and rows and places their unit keys, so thimble marks them. A value's colour is
-// looked up in what thimble last sent (onLabels), so a colour the analyst changes shows at once.
+// Swarm: every record the view reads, counted per time bin: totals, a strip per place and a row per account (the
+// busiest, the rest in one row each), shaded by count and coloured by the labels that are on, the filter's dropped
+// records left out of the shade. Drag across the rows to zoom into that time; click a place's name to count the
+// accounts over its records alone, a cell for its records beside the rows, a record for the record. Rows and places
+// carry their unit keys and listed records their refs as data-anchor, so thimble marks them. A value's colour is looked
+// up in what thimble last sent (onLabels), so a colour the analyst changes shows at once.
+// A view opened from a card (Open as view) gets the card's arguments with `open` (place.query: {card, title, args})
+// and counts the records its `within`, `accounts` and `places` choose; a chip names the card while they hold, and a
+// click on it, or an `open` whose query is null, drops them.
 const slug = (thimble.view && thimble.view.slug) || 'swarm'
-const CARD = !!(thimble.view && thimble.view.card)
-if (CARD) document.body.classList.add('in-card')
-const NS = 'http://www.w3.org/2000/svg'
-const TYPE_VIZ = { reply: 1, names: 3, 'same place': 7 } // the viz colour of each link type
-const DASH = { reply: '', names: '', 'same place': '1.5 3.5' }
 const MON = 'Jan Feb Mar Apr May Jun Jul Aug Sep Oct Nov Dec'.split(' ')
-const HEAD_H = 58 // the column header's height
-const ROW_PAD = 10 // above and below a row's cards
-const LANE_GAP = 8 // between a row's lanes
-const GAP_MIN = 14 // a gap between rows that carries no link
-const TRACK = 16 // a link's track in a gap
-const CARD_GAP = 8 // between two cards in one lane
-const PAD_L = 16, PAD_R = 40
-const END_GAP = 8 // between two link ends on one card
-const FIT_MIN = 0.3
-// as a card (layoutCard): a card's least and greatest width, the corridor right of each column, a row's head (narrow:
-// in a narrow frame), the padding left of the chart, the tracks of runs in a corridor and in a gap, a gap that carries
-// none, and the space above and below a row's cards
-const C_CW = 150, C_CW_MAX = 260, C_CORR = 24, C_HEAD = 104, C_HEAD_NARROW = 84, C_PAD = 4, C_TRACK = 4, C_GAP_TRACK = 7, C_GAP_MIN = 8, C_ROW_PAD = 6
-const C_DASH = { reply: '', names: '5 3', 'same place': '1.5 3.5' }
-const RUN_POLL_MS = 3000 // how often the chart is read again while a label that is on runs
-
+const RUN_POLL_MS = 3000 // how often the overview is read again while a label that is on runs
 const token = (n) => getComputedStyle(document.documentElement).getPropertyValue(n).trim()
 const fmt = (n) => Number(n).toLocaleString('en-US')
 const pad2 = (n) => String(n).padStart(2, '0')
@@ -322,11 +156,6 @@ function h(tag, cls, text) {
   const e = document.createElement(tag)
   if (cls) e.className = cls
   if (text != null) e.textContent = text
-  return e
-}
-function s(tag, attrs) {
-  const e = document.createElementNS(NS, tag)
-  for (const k in attrs || {}) if (attrs[k] != null) e.setAttribute(k, attrs[k])
   return e
 }
 function plural(n, one, many) { return `${fmt(n)} ${n === 1 ? one : many || one + 's'}` }
@@ -344,234 +173,15 @@ const dayOf = (d) => `${d.getUTCDate()} ${MON[d.getUTCMonth()]}`
 const hmOf = (d) => `${pad2(d.getUTCHours())}:${pad2(d.getUTCMinutes())}`
 const whenOf = (t) => { const d = parseTime(t); return d ? `${dayOf(d)} ${hmOf(d)}:${pad2(d.getUTCSeconds())} UTC` : 'Time unknown' }
 
-// a small figure for each row, drawn from its name: a 5×5 grid mirrored left to right
-function hash(str) {
-  let x = 2166136261
-  for (let i = 0; i < str.length; i++) { x ^= str.charCodeAt(i); x = Math.imul(x, 16777619) }
-  return x >>> 0
-}
-function avatar(name) {
-  const svg = s('svg', { class: 'av', viewBox: '0 0 7 7', 'aria-hidden': 'true' })
-  let bits = hash(name)
-  for (let y = 0; y < 5; y++) for (let x = 0; x < 3; x++) {
-    if (bits & 1) {
-      svg.append(s('rect', { x: 1 + x, y: 1 + y, width: 1, height: 1 }))
-      if (x < 2) svg.append(s('rect', { x: 5 - x, y: 1 + y, width: 1, height: 1 }))
-    }
-    bits >>>= 1
-  }
-  return svg
-}
-
-// ---------------------------------------------------------------- data
-let D = null // the reader's chart
-let byId = new Map(), rowOfCard = new Map(), rowBy = new Map(), placeBy = new Map(), linksOf = new Map()
-let rowsList = [] // [{key, name, goal, accounts, n}] in order of first card
 let labelState = { labels: [], filter: null, all: null, palette: null }
-const F = { row: '', places: new Set(), types: new Set() }
-let q = ''
-let near = false
-let group = 'account' // 'account' or 'sig'
-let zoom = 1 // 1 or 'fit'
-let offset = 0
-let only = [] // the label values the legend keeps, [{label, value}]; all when empty
-let mode = 'view' // or, in a card's frame, the card's mode: card, full or render
-let drawnKey = null // in a card, the key of what the card stored as it was last drawn
-let stored = null // in a card, the call's arguments the card was made with
-let base = {} // in a view opened from a card, the card's arguments that choose the records and links
-let baseKey = ''
-let fromCard = null // {card, title} of the card the view was opened from while its arguments hold
-let filterKey = 'null'
-let sel = null // {kind: card|row|link|record, id|key|ref}
-let hover = null
-let keepRef = null // the record a citation opened, shown whatever the labels mark
-let target = null // the place thimble.onOpen asked for, applied once the chart is loaded
-let loadSeq = 0
-let failed = false // the first load failed, so the next label change tries again
 const recCache = new Map()
-let L = null // the layout: {cards, cells, linkEls, width, height}
-
-const labelsOn = () => !!(D && D.source !== 'addressed' && D.marks.length)
-function typeColour(t) {
-  if (labelsOn()) return token('--viz-ink-2')
-  return TYPE_VIZ[t] ? token(`--viz-${TYPE_VIZ[t]}`) : token('--viz-ink-2')
-}
-function placeColour(tag) {
-  const i = Number(String(tag).slice(1)) - 1
-  return i >= 0 && i < 6 ? token(`--viz-${[1, 2, 5, 6, 4, 3][i]}`) : token('--viz-ink-3')
-}
-// a label value's colour as thimble last sent it, else the one the chart was drawn with
+// a label value's colour as thimble last sent it, else the one the page was given
 function markColour(m) {
   const label = (labelState.all || labelState.labels || []).find((l) => l.name === m.label)
   const v = label && (label.values || []).find((x) => x.name === m.value)
   return (v && v.colour) || m.colour
 }
-function cardColour(c) {
-  if (!labelsOn()) return null
-  if (c.m >= 0) return markColour(D.marks[c.m])
-  // a record the card's own labels marked after the card ran takes their colour; other labels that are on only mark it
-  const live = CARD && thimble.markOf ? thimble.markOf(c.ref) : null
-  const own = new Set(D.marks.map((m) => m.label))
-  return live && live.bar && (live.names || []).some((n) => own.has(n)) ? live.bar : null
-}
-const types = () => [...new Set(D.links.map((x) => x.type))]
-const rowKey = (c) => (group === 'sig' && c.sig ? c.sig : c.account)
 
-async function load() {
-  if (CARD) {
-    // a card's records are the ones it stored; the legend narrows them here
-    offset = 0
-    return !!D
-  }
-  const seq = ++loadSeq
-  let data
-  try {
-    data = await thimble.fetch({ ...base, op: 'chart', offset, only, keep: keepRef ? [keepRef] : [] })
-  } catch (e) {
-    const p = document.getElementById('problems')
-    p.hidden = false
-    p.textContent = `The records could not be read: ${e.message || e}`
-    failed = !D
-    return false
-  }
-  if (seq !== loadSeq) return false
-  D = data
-  offset = D.offset
-  index()
-  if (sel && sel.kind === 'card' && !byId.has(sel.id)) sel = null
-  if (sel && sel.kind === 'row' && !rowBy.has(sel.key)) sel = null
-  if (sel && sel.kind === 'link' && !D.links.some((x) => x.key === sel.key)) sel = null
-  document.getElementById('problems').hidden = true
-  return true
-}
-// the rows as the grouping keys them: an account, or a name the cards sign with, with the accounts that signed it
-function index() {
-  byId = new Map(D.cards.map((c) => [c.id, c]))
-  placeBy = new Map(D.places.map((p) => [p.tag, p]))
-  linksOf = new Map(D.cards.map((c) => [c.id, []]))
-  for (const x of D.links) { linksOf.get(x.from).push(x); linksOf.get(x.to).push(x) }
-  const goals = new Map(D.rows.map((r) => [r.account, r]))
-  rowBy = new Map()
-  rowOfCard = new Map()
-  for (const c of D.cards) {
-    const key = rowKey(c)
-    rowOfCard.set(c.id, key)
-    if (!rowBy.has(key)) rowBy.set(key, { key, name: key, accounts: [], sigs: [], goal: '', n: 0 })
-    const r = rowBy.get(key)
-    if (!r.accounts.includes(c.account)) r.accounts.push(c.account)
-    if (c.sig && c.sig !== key && !r.sigs.includes(c.sig)) r.sigs.push(c.sig)
-    r.n++
-  }
-  for (const r of rowBy.values()) {
-    const own = goals.get(r.key)
-    r.goal = own ? own.goal : ''
-    r.own = !!own
-  }
-  rowsList = [...rowBy.values()]
-  if (F.row && !rowBy.has(F.row)) F.row = ''
-  for (const t of [...F.places]) if (!placeBy.has(t)) F.places.delete(t)
-}
-
-// ---------------------------------------------------------------- filters
-function hay(c) {
-  const p = placeBy.get(c.tag) || { name: '' }
-  return [`#${c.id}`, c.account, c.sig || '', c.tag, p.name, c.line, D.marks[c.m] ? D.marks[c.m].value : '', c.time || 'time unknown'].join('\n').toLowerCase()
-}
-function matches(c) {
-  if (CARD && only.length && !only.some((o) => c.mb & (1 << D.marks.findIndex((m) => m.label === o.label && m.value === o.value)))) return false
-  if (F.row && rowOfCard.get(c.id) !== F.row) return false
-  if (F.places.size && !F.places.has(c.tag)) return false
-  if (q && !hay(c).includes(q)) return false
-  if (F.types.size && !linksOf.get(c.id).some((x) => F.types.has(x.type))) return false
-  return true
-}
-const filtered = () => !!(F.row || F.places.size || F.types.size || q)
-function visible() {
-  const core = D.cards.filter(matches)
-  const ids = new Set(core.map((c) => c.id))
-  const ctx = new Set()
-  const typeOk = (x) => !F.types.size || F.types.has(x.type)
-  if (near && filtered()) for (const c of core) for (const x of linksOf.get(c.id)) {
-    if (!typeOk(x)) continue
-    const o = x.from === c.id ? x.to : x.from
-    if (!ids.has(o)) ctx.add(o)
-  }
-  for (const o of ctx) ids.add(o)
-  if (sel && sel.kind === 'card' && byId.has(sel.id) && !ids.has(sel.id)) { ids.add(sel.id); ctx.add(sel.id) }
-  return { cards: D.cards.filter((c) => ids.has(c.id)), ctx, links: D.links.filter((x) => ids.has(x.from) && ids.has(x.to) && typeOk(x)) }
-}
-
-// ---------------------------------------------------------------- the bar
-function renderBar(v) {
-  const title = document.getElementById('title')
-  title.textContent = D.title
-  title.title = D.title
-  const shownRows = new Set(v.cards.map((c) => rowOfCard.get(c.id)))
-  const shownPlaces = new Set(v.cards.map((c) => c.tag))
-  const count = (n, total, one, many) => (n === total ? plural(n, one, many) : `${fmt(n)} of ${plural(total, one, many)}`)
-  // a card counts what its code chose, as its listing does; the view counts what it shows of the corpus
-  const counts = (CARD
-    ? [plural(D.total, 'record'), plural(D.accounts_total, 'account'), plural(D.places_total, 'place'), `${count(v.cards.length, D.cards.length, 'card')} shown`, count(v.links.length, D.links.length, 'link')]
-    : [count(shownRows.size, rowsList.length, group === 'sig' ? 'row' : 'account'), count(v.cards.length, D.cards.length, 'card'),
-      count(v.links.length, D.links.length, 'link'), `${fmt(D.counts.records)} records`]).join(' · ')
-  const tr = document.getElementById('threads')
-  tr.innerHTML = ''
-  const cs = h('span', null, counts)
-  cs.id = 'counts'
-  tr.append(cs)
-  for (const p of D.places) {
-    if (!shownPlaces.has(p.tag) && !F.places.has(p.tag)) continue
-    const w = h('span', 'thr')
-    if (!CARD) w.dataset.anchor = `view:${slug}/place/${p.name.replace(/ /g, '%20')}`
-    w.dataset.anchorName = `${p.tag} ${p.name}`
-    const b = h('button', `chip chip-act chip-tone-neutral${F.places.has(p.tag) ? ' active' : ''}`)
-    b.title = `${p.name}: ${plural(p.n, 'record')} by ${plural(p.accounts, 'account')}\nClick: only this place · Shift-click: add it`
-    if (!labelsOn()) { const sw = h('i', 'sw'); sw.style.background = placeColour(p.tag); b.append(sw) }
-    b.append(p.tag)
-    b.onclick = (e) => { toggleSet(F.places, p.tag, e.shiftKey); refresh() }
-    const a = h('a', 'plink', p.title && p.title !== p.name ? `${p.name} · ${p.title}` : p.name)
-    a.title = `Open ${p.ref}`
-    a.onclick = () => thimble.navigate(p.ref)
-    w.append(b, a)
-    w.onmouseenter = () => setHover({ kind: 'place', tag: p.tag })
-    w.onmouseleave = () => setHover(null)
-    tr.append(w)
-  }
-  const rsel = document.getElementById('agent')
-  rsel.innerHTML = `<option value="">${group === 'sig' ? 'All rows' : 'All accounts'}</option>` + rowsList.map((r) => `<option value="${esc(r.key)}">${esc(r.name)} (${r.n})</option>`).join('')
-  rsel.value = F.row
-  const ty = document.getElementById('types')
-  ty.innerHTML = ''
-  for (const t of types()) {
-    const n = D.links.filter((x) => x.type === t).length
-    const b = h('button', `chip chip-act chip-sans chip-tone-neutral${F.types.has(t) ? ' active' : ''}`)
-    const sw = h('i', 'sw')
-    sw.style.background = TYPE_VIZ[t] ? token(`--viz-${TYPE_VIZ[t]}`) : token('--viz-ink-2')
-    b.append(sw, t, h('span', 'n', String(n)))
-    b.title = `${plural(n, `${t} link`)}\nClick: only this type · Shift-click: add it`
-    b.onclick = (e) => { toggleSet(F.types, t, e.shiftKey); refresh() }
-    ty.append(b)
-  }
-  for (const o of document.querySelectorAll('#near .seg-opt')) o.classList.toggle('active', (o.dataset.v === '1') === near)
-  for (const o of document.querySelectorAll('#zoom .seg-opt')) o.classList.toggle('active', String(zoom) === o.dataset.v)
-  for (const o of document.querySelectorAll('#group .seg-opt')) o.classList.toggle('active', o.dataset.v === group)
-  document.getElementById('rowcap').textContent = group === 'sig' ? 'Signed name · accounts' : 'Account · goal'
-  document.getElementById('clear').hidden = !filtered()
-  const fc = document.getElementById('fromcard')
-  fc.hidden = CARD || !fromCard
-  if (fromCard) {
-    fc.innerHTML = `<span class="t">${esc(fromCard.title || `card:${fromCard.card}`)}</span>${CLOSE}`
-    fc.title = `Drawn by the arguments of card:${fromCard.card}\nClick: all records`
-    fc.dataset.anchor = `card:${fromCard.card}`
-  }
-  const pager = document.getElementById('pager')
-  pager.hidden = D.total <= D.page
-  document.getElementById('span').textContent = D.cards.length ? `${fmt(D.offset + 1)}–${fmt(D.offset + D.cards.length)} of ${fmt(D.total)}` : ''
-  document.getElementById('prev').disabled = D.offset <= 0
-  document.getElementById('next').disabled = D.offset + D.cards.length >= D.total
-  renderLabelsButton()
-  renderLegend()
-}
 function renderLabelsButton() {
   const on = labelState.labels
   const cname = on.length ? on.map((l) => l.name).join(', ') : 'none on'
@@ -581,53 +191,6 @@ function renderLabelsButton() {
   const ids = on.map((l) => l.id).filter(Boolean).join(' ')
   if (ids) cb.dataset.label = ids
   else delete cb.dataset.label
-}
-function toggleSet(set, x, add) {
-  if (add) set.has(x) ? set.delete(x) : set.add(x)
-  else if (set.size === 1 && set.has(x)) set.clear()
-  else { set.clear(); set.add(x) }
-}
-// while a label is on: its values with the records each marks, a click hiding that value's cards or showing them again
-// (shift-click keeping only them), a value's swatch opening thimble's palette
-function renderLegend() {
-  const el = document.getElementById('legend')
-  el.hidden = !labelsOn()
-  el.innerHTML = ''
-  if (el.hidden) return
-  const same = (a, b) => a.label === b.label && a.value === b.value
-  const kept = (m) => !only.length || only.some((o) => same(o, m))
-  const held = (m) => !(D.only || []).length || D.only.some((o) => same(o, m))
-  // a card lists only the values it holds records of
-  const shown = D.marks.filter((m, j) => !CARD || ((D.mark_counts || [])[j] && held(m)))
-  const all = CARD ? (D.only || []).slice() : []
-  D.marks.forEach((m, j) => {
-    if (!shown.includes(m)) return
-    const label = (labelState.all || labelState.labels).find((l) => l.name === m.label)
-    const it = h('span', `lg${kept(m) ? '' : ' off'}`)
-    if (label && label.id) it.dataset.label = label.id
-    it.title = kept(m) ? 'Click: hide these cards · Shift-click: only these' : 'Click: show these cards · Shift-click: only these'
-    it.append(swatch(markColour(m), label, m.value), h('span', null, new Set(D.marks.map((x) => x.label)).size > 1 ? `${m.label}: ${m.value}` : m.value), h('span', 'n', fmt((D.mark_counts || [])[j] || 0)))
-    it.onclick = async (e) => {
-      const one = { label: m.label, value: m.value }
-      const cur = shown.filter(kept).map((x) => ({ label: x.label, value: x.value }))
-      let next
-      if (e.shiftKey) next = cur.length === 1 && same(cur[0], one) ? shown : [one]
-      else next = kept(m) ? cur.filter((o) => !same(o, one)) : [...cur, one]
-      if (!next.length) return
-      only = next.length === shown.length ? all : next.map((o) => ({ label: o.label, value: o.value }))
-      offset = 0
-      sel = null
-      if (await load()) refresh()
-    }
-    el.append(it)
-  })
-  if (CARD && D.unmarked) {
-    const it = h('span', 'lg')
-    const sw = h('i', 'sw')
-    sw.style.background = token('--label-none')
-    it.append(sw, h('span', null, 'no highlighted value'), h('span', 'n', fmt(D.unmarked)))
-    el.append(it)
-  }
 }
 function swatch(colour, label, value) {
   const sw = h('i', 'sw')
@@ -643,48 +206,6 @@ function swatch(colour, label, value) {
   b.onclick = (e) => { e.stopPropagation(); openPalette(label.id, value, 'legend') }
   return b
 }
-
-document.getElementById('q').addEventListener('input', (e) => { q = e.target.value.trim().toLowerCase(); refresh() })
-document.getElementById('agent').addEventListener('change', (e) => { F.row = e.target.value; refresh() })
-document.getElementById('near').addEventListener('click', (e) => { const o = e.target.closest('.seg-opt'); if (o) { near = o.dataset.v === '1'; refresh() } })
-document.getElementById('zoom').addEventListener('click', (e) => { const o = e.target.closest('.seg-opt'); if (o) { zoom = o.dataset.v === 'fit' ? 'fit' : 1; refresh() } })
-document.getElementById('group').addEventListener('click', (e) => {
-  const o = e.target.closest('.seg-opt')
-  if (!o || o.dataset.v === group) return
-  group = o.dataset.v
-  F.row = ''
-  if (sel && sel.kind === 'row') sel = null
-  index()
-  refresh()
-})
-document.getElementById('fromcard').addEventListener('click', async () => {
-  if (!applyQuery(null)) return
-  thimble.setQuery(null)
-  if (await load()) { refresh(); watchRuns() }
-})
-document.getElementById('moreb').innerHTML = CARET
-document.getElementById('moreb').addEventListener('click', () => {
-  const chart = document.getElementById('chart')
-  chart.scrollBy({ top: Math.round(chart.clientHeight * 0.8), behavior: 'smooth' })
-})
-document.getElementById('chart').addEventListener('scroll', () => updateMore(), { passive: true })
-// as a card, the fade at the chart's foot shows while there is more of the chart below
-function updateMore() {
-  const chart = document.getElementById('chart')
-  document.getElementById('more').hidden = !CARD || mode === 'render' || !L || chart.scrollHeight - chart.scrollTop - chart.clientHeight <= 8
-}
-document.getElementById('clear').addEventListener('click', () => {
-  F.row = ''; F.places.clear(); F.types.clear(); q = ''
-  document.getElementById('q').value = ''
-  refresh()
-})
-async function page(dir) {
-  offset = Math.max(0, D.offset + dir * D.page)
-  sel = null
-  if (await load()) refresh()
-}
-document.getElementById('prev').addEventListener('click', () => page(-1))
-document.getElementById('next').addEventListener('click', () => page(1))
 
 // ---------------------------------------------------------------- the Labels menu and the palette
 let menu = false
@@ -720,7 +241,7 @@ function renderPop() {
   const pop = document.getElementById('pop')
   const btn = document.getElementById('cbtn')
   if (pal && !(labelState.palette || []).length) pal = null
-  pop.innerHTML = (menu && (D || OV) ? menuHtml() : '') + (pal ? palHtml() : '')
+  pop.innerHTML = (menu ? menuHtml() : '') + (pal ? palHtml() : '')
   const m = document.getElementById('menu')
   if (m) {
     const r = btn.getBoundingClientRect()
@@ -762,634 +283,18 @@ document.addEventListener('click', (e) => {
   if ((menu || pal) && !(el && el.closest('#pop, #cbtn, .swb'))) { menu = false; pal = null; renderPop() }
 }, true)
 
-// ---------------------------------------------------------------- layout
-// Everything is measured at zoom 1 and in CSS pixels of the plot; the zoom is applied to the whole grid afterwards.
-function metrics() {
-  const narrow = innerWidth < 560
-  if (CARD) return { AGW: 0 }
-  return { AGW: narrow ? 124 : 240, W: narrow ? 112 : 120, CW: narrow ? 168 : 184 }
-}
-// a row's head: its figure, its name and goal, or in the signature grouping the accounts that signed with it
-function rowCell(key) {
-  const r = rowBy.get(key)
-  const el = h('div', 'agent')
-  if (!CARD) el.dataset.anchor = r.own ? `view:${slug}/agent/${r.key}` : `view:${slug}/agent/${r.accounts[0]}`
-  el.dataset.anchorName = r.name
-  const who = h('div', 'who')
-  const nm = h('div', 'nm', r.name)
-  nm.title = r.name
-  who.append(nm)
-  if (group === 'sig' && (r.accounts.length > 1 || r.accounts[0] !== r.key)) {
-    const g = h('div', 'goal', `${r.accounts.length > 1 ? `${r.accounts.length} accounts: ` : 'account '}${r.accounts.join(', ')}`)
-    g.title = r.accounts.join('\n')
-    who.append(g)
-  } else if (r.goal) { const g = h('div', 'goal', r.goal); g.title = r.goal; who.append(g) }
-  if (r.sigs.length) { const sg = h('div', 'sig', `signs as ${r.sigs.join(', ')}`); sg.title = sg.textContent; who.append(sg) }
-  el.append(avatar(r.name), who)
-  el.onmouseenter = () => setHover({ kind: 'row', key })
-  el.onmouseleave = () => setHover(null)
-  el.onclick = () => select({ kind: 'row', key })
-  el.style.top = '0px'
-  el.style.visibility = 'hidden'
-  return el
-}
-// one record's card, `cw` wide at `x`
-function cardEl(c, v, x, cw) {
-  const el = h('div', `card${v.ctx.has(c.id) ? ' ctx' : ''}`)
-  el.dataset.anchor = c.ref
-  el.dataset.anchorText = `#${c.id} ${c.line}`
-  el.dataset.id = c.id
-  const hd = h('div', 'hd')
-  hd.dataset.thimbleChrome = ''
-  const colour = cardColour(c)
-  hd.append(h('span', 'no', `#${c.id}`), h('span', 'tag', c.tag))
-  if (labelsOn() && c.m >= 0) { const vv = h('span', 'v', D.marks[c.m].value); vv.style.color = colour; hd.append(vv) }
-  const key = rowOfCard.get(c.id)
-  const as = key !== c.account ? c.account : c.sig && c.sig !== c.account ? `as ${c.sig}` : ''
-  el.append(hd)
-  if (as) { const a = h('div', 'as', group === 'sig' ? `by ${as}` : as); a.title = group === 'sig' ? `Saved by ${c.account}` : `Signed ${c.sig}`; a.dataset.thimbleChrome = ''; el.append(a) }
-  el.append(h('div', 'ac', c.line))
-  el.title = `${c.line}\n${c.account}${c.sig && c.sig !== c.account ? ` (signs ${c.sig})` : ''} · ${whenOf(c.time)}`
-  if (colour) {
-    const tick = h('i', 'tick')
-    tick.style.background = colour
-    el.append(tick)
-    el.style.background = `color-mix(in srgb, ${colour} 13%, var(--surface-card))`
-  } else if (!labelsOn()) hd.querySelector('.tag').style.color = placeColour(c.tag)
-  el.style.width = `${cw}px`
-  el.style.left = `${x}px`
-  el.style.top = '0px'
-  el.style.visibility = 'hidden'
-  el.onmouseenter = () => setHover({ kind: 'card', id: c.id })
-  el.onmouseleave = () => setHover(null)
-  el.onclick = () => { if (!String(getSelection() || '')) select({ kind: 'card', id: c.id }) }
-  el.ondblclick = () => thimble.navigate(c.ref)
-  return el
-}
-// lanes: a card that would overlap the last card of every lane so far in its row starts a lane below them
-function stackLanes(cards0, cards, nRows) {
-  const lanes = Array.from({ length: nRows }, () => [])
-  const laneH = Array.from({ length: nRows }, () => [])
-  for (const c of cards0) {
-    const k = cards.get(c.id)
-    const ls = lanes[k.row]
-    let j = ls.findIndex((right) => right + CARD_GAP <= k.x)
-    if (j < 0) { j = ls.length; ls.push(0); laneH[k.row].push(0) }
-    ls[j] = k.x + k.w
-    laneH[k.row][j] = Math.max(laneH[k.row][j], k.h)
-    k.lane = j
-  }
-  return laneH
-}
-// rows and gaps top to bottom, the bands and row heads placed, the cards placed in their lanes; {gapTop, plotH}
-function placeRows(rowKeys, cells, cellH, laneH, gapH, cards, plot, rows, pad) {
-  let y = 0
-  const gapTop = [], rowTop = []
-  rowKeys.forEach((key, i) => {
-    gapTop[i] = y
-    y += gapH[i]
-    rowTop[i] = y
-    const inner = laneH[i].reduce((sum, hh) => sum + hh, 0) + LANE_GAP * Math.max(0, laneH[i].length - 1)
-    y += Math.max(cellH[i], inner + 2 * pad)
-  })
-  gapTop[rowKeys.length] = y
-  y += gapH[rowKeys.length]
-  const plotH = Math.max(y, 40)
-  plot.style.height = `${plotH}px`
-  rows.style.height = `${plotH}px`
-  // bands: each row from the middle of the gap above it to the middle of the gap below it
-  rowKeys.forEach((key, i) => {
-    const top = i === 0 ? 0 : gapTop[i] + gapH[i] / 2
-    const bottom = i === rowKeys.length - 1 ? plotH : gapTop[i + 1] + gapH[i + 1] / 2
-    const band = h('div', `band${i % 2 ? ' odd' : ''}`)
-    band.style.top = `${top}px`
-    band.style.height = `${bottom - top}px`
-    plot.prepend(band)
-    const el = cells[i]
-    el.classList.toggle('odd', i % 2 === 1)
-    el.style.top = `${top}px`
-    el.style.height = `${bottom - top}px`
-    el.style.paddingTop = `${rowTop[i] - top + pad - 2}px`
-    el.style.visibility = ''
-  })
-  for (const k of cards.values()) {
-    const offs = laneH[k.row].slice(0, k.lane).reduce((sum, hh) => sum + hh + LANE_GAP, 0)
-    k.y = rowTop[k.row] + pad + offs
-    k.el.style.top = `${k.y}px`
-    k.el.style.visibility = ''
-  }
-  return { gapTop, plotH }
-}
-// tracks of their own for the items {span: [a, b]} that overlap, each item's `track` set; the number of tracks
-function packTracks(items) {
-  items.sort((p, p2) => p.span[0] - p2.span[0] || p.span[1] - p2.span[1])
-  const ends = []
-  for (const r of items) {
-    let t = ends.findIndex((e) => e <= r.span[0])
-    if (t < 0) { t = ends.length; ends.push(0) }
-    ends[t] = r.span[1]
-    r.track = t
-  }
-  return ends.length
-}
-function layout(v) {
-  const M = metrics()
-  const grid = document.getElementById('grid')
-  const empty = document.getElementById('empty')
-  grid.style.zoom = ''
-  const cols = document.getElementById('cols'), rows = document.getElementById('rows'), plot = document.getElementById('plot')
-  cols.innerHTML = ''; rows.innerHTML = ''; plot.innerHTML = ''
-  const cards0 = v.cards
-  empty.hidden = cards0.length > 0
-  grid.hidden = !cards0.length
-  if (!cards0.length) {
-    empty.textContent = D.cards.length ? 'No card matches the filters.'
-      : labelsOn() ? `${labelState.labels.map((l) => l.name).join(' and ')} ${labelState.labels.length > 1 ? 'give' : 'gives'} no record the value ${D.marks.map((m) => `“${m.value}”`).join(' or ')}.`
-      : labelState.labels.length ? 'No record of these files takes a highlighted value of the labels that are on.'
-      : 'No record to show.'
-    L = null
-    return
-  }
-  if (CARD) return layoutCard(v)
-  const colOf = new Map(cards0.map((c, i) => [c.id, i]))
-  const rowKeys = rowsList.map((r) => r.key).filter((k) => cards0.some((c) => rowOfCard.get(c.id) === k))
-  const rowIdx = new Map(rowKeys.map((k, i) => [k, i]))
-  const W = M.W, CW = M.CW
-  const colX = (c) => PAD_L + c * W
-  const labelW = labelMeasure()
-  document.getElementById('corner').style.height = `${HEAD_H}px`
-  cols.style.height = `${HEAD_H}px`
-  const cap = h('span', 'hcap', 'Event order · UTC ')
-  cap.append(h('span', 'note', '· spacing is not elapsed time'))
-  cols.append(cap)
-  cards0.forEach((c, i) => {
-    const d = parseTime(c.time)
-    const col = h('div', `col${d ? '' : ' none'}`)
-    col.style.left = `${colX(i)}px`
-    col.style.width = `${W - 8}px`
-    if (d) { col.append(h('div', 'd', dayOf(d)), h('div', null, hmOf(d))); col.title = whenOf(c.time) } else col.append(h('div', null, 'Time'), h('div', null, 'unknown'))
-    cols.append(col)
-  })
-
-  // row cells, measured at the column's width
-  const cells = rowKeys.map((key) => { const el = rowCell(key); rows.append(el); return el })
-  rows.style.height = '1px'
-  const cellH = cells.map((el) => el.offsetHeight)
-
-  // cards, measured at their width
-  const cards = new Map()
-  for (const c of cards0) {
-    const x = colX(colOf.get(c.id))
-    const el = cardEl(c, v, x, CW)
-    plot.append(el)
-    cards.set(c.id, { el, c, col: colOf.get(c.id), row: rowIdx.get(rowOfCard.get(c.id)), x, w: CW, h: 0, lane: 0 })
-  }
-  for (const k of cards.values()) k.h = k.el.offsetHeight
-  const laneH = stackLanes(cards0, cards, rowKeys.length)
-
-  // link ends: each card's band holds the vertical runs of its links, spread out, those going left first
-  const bandOf = (k) => [k.x + (CW - W) + 6, k.x + W - 6]
-  const ends = new Map()
-  const routes = v.links.map((x) => {
-    const S = cards.get(x.from), T = cards.get(x.to)
-    const gap = T.row < S.row ? T.row + 1 : T.row
-    const r = { x, S, T, gap, sSide: gap <= S.row ? 'top' : 'bottom', tSide: gap > T.row ? 'bottom' : 'top' }
-    for (const [card, other] of [[S, T], [T, S]]) {
-      if (!ends.has(card.c.id)) ends.set(card.c.id, [])
-      ends.get(card.c.id).push({ r, other: other.col, own: card === S })
-    }
-    return r
-  })
-  for (const [id, list] of ends) {
-    const k = cards.get(id)
-    const [b0, b1] = bandOf(k)
-    list.sort((p, p2) => p.other - p2.other || (p.own ? 0 : 1) - (p2.own ? 0 : 1))
-    const step = list.length > 1 ? Math.min(END_GAP, (b1 - b0) / (list.length - 1)) : 0
-    const x0 = (b0 + b1) / 2 - (step * (list.length - 1)) / 2
-    list.forEach((e, i) => { if (e.own) e.r.xs = x0 + i * step; else e.r.xt = x0 + i * step })
-  }
-
-  // tracks: each gap's links on tracks of their own, a link's label beside its source's vertical run
-  const gaps = Array.from({ length: rowKeys.length + 1 }, () => [])
-  let right = PAD_L + Math.max(0, cards0.length - 1) * W + CW
-  for (const r of routes) {
-    r.label = `${r.x.from}→${r.x.to} · ${r.x.type}`
-    r.lw = Math.ceil(labelW(r.label)) + 8
-    r.lx = r.xt < r.xs ? r.xs - 5 - r.lw : r.xs + 5
-    r.span = [Math.min(r.xt, r.xs, r.lx) - 4, Math.max(r.xt, r.xs, r.lx + r.lw) + 4]
-    right = Math.max(right, r.span[1])
-    gaps[r.gap].push(r)
-  }
-  const plotW = right + PAD_R
-  grid.style.gridTemplateColumns = `${M.AGW}px ${plotW}px`
-  grid.style.gridTemplateRows = `${HEAD_H}px auto`
-  const gapH = gaps.map((list) => { const n = packTracks(list); return n ? 10 + n * TRACK : GAP_MIN })
-
-  const { gapTop, plotH } = placeRows(rowKeys, cells, cellH, laneH, gapH, cards, plot, rows, ROW_PAD)
-
-  // the links: out of the source's edge, along the gap next to the target, into the target's edge
-  const svg = s('svg', { id: 'links', width: plotW, height: plotH })
-  const linkEls = new Map()
-  for (const r of routes) {
-    const { S, T } = r
-    const ty = gapTop[r.gap] + 5 + TRACK / 2 + r.track * TRACK
-    const ys = r.sSide === 'top' ? S.y : S.y + S.h
-    const yt = r.tSide === 'top' ? T.y : T.y + T.h
-    const colour = typeColour(r.x.type)
-    const g = s('g', { 'data-key': r.x.key })
-    const d = orth([[r.xs, ys], [r.xs, ty], [r.xt, ty], [r.xt, yt]], 5)
-    g.append(s('path', { class: 'ln', d, stroke: colour, 'stroke-dasharray': DASH[r.x.type] || null }))
-    g.append(s('circle', { class: 'end', cx: r.xs, cy: ys, r: 2.6, fill: colour }))
-    const dir = r.tSide === 'top' ? 1 : -1
-    g.append(s('path', { class: 'end', d: `M${r.xt - 4},${yt - dir * 7}L${r.xt},${yt - dir * 0.5}L${r.xt + 4},${yt - dir * 7}Z`, fill: colour }))
-    g.append(linkHit(d, r.x))
-    svg.append(g)
-    const lb = h('span', 'lbl', r.label)
-    lb.title = r.x.reason
-    lb.style.left = `${r.lx}px`
-    lb.style.top = `${ty - 7}px`
-    lb.style.color = colour
-    lb.onmouseenter = () => setHover({ kind: 'link', key: r.x.key })
-    lb.onmouseleave = () => setHover(null)
-    lb.onclick = () => select({ kind: 'link', key: r.x.key })
-    linkEls.set(r.x.key, { g, lb, x: r.x })
-  }
-  plot.prepend(svg)
-  for (const b of [...plot.querySelectorAll('.band')].reverse()) plot.prepend(b)
-  for (const { lb } of linkEls.values()) plot.append(lb)
-  L = { cards, cells: new Map(rowKeys.map((k, i) => [k, cells[i]])), linkEls, width: M.AGW + plotW, height: HEAD_H + plotH }
-  applyZoom()
-}
-// a link's hit area, which hover lights and a click shows beside the chart
-function linkHit(d, x) {
-  const hit = s('path', { class: 'hit', d })
-  const tt = s('title')
-  tt.textContent = `${x.from}→${x.to} · ${x.type}${x.reason ? `: ${x.reason}` : ''}`
-  hit.append(tt)
-  hit.addEventListener('mouseenter', () => setHover({ kind: 'link', key: x.key }))
-  hit.addEventListener('mouseleave', () => setHover(null))
-  hit.addEventListener('click', () => select({ kind: 'link', key: x.key }))
-  return hit
-}
-// As a card, the chart fits the card's width. Its records fall into as many columns as fit, in event order, the cards
-// widened to fill the width, and a row's records in one column stack. A row's head sits left of its first card, so rows
-// whose records lie in different columns share a band. Each column has a corridor at its right that no card or head
-// reaches, which carries the vertical runs of the links: a link leaves its source's right side, runs up or down its
-// corridor, along the gap next to its target's band when the target is in another column, and down that column's
-// corridor into its target's right side. The links into one record share their runs and one arrowhead, with their
-// number beside it when there are several.
-function layoutCard(v) {
-  const grid = document.getElementById('grid')
-  const cols = document.getElementById('cols'), rows = document.getElementById('rows'), plot = document.getElementById('plot')
-  const cards0 = v.cards
-  const chart = document.getElementById('chart')
-  const width = (chart.clientWidth || innerWidth) - 2
-  const HEAD = innerWidth < 560 ? C_HEAD_NARROW : C_HEAD
-  const slot = HEAD + C_CORR // a column's head slot and corridor
-  const nCols = Math.max(1, Math.min(cards0.length, Math.floor((width - C_PAD) / (slot + C_CW))))
-  const CW = Math.max(C_CW, Math.min(C_CW_MAX, Math.floor((width - C_PAD) / nCols) - slot))
-  const STEP = slot + CW
-  const colX = (j) => C_PAD + HEAD + j * STEP
-  const corridor = (j) => colX(j) + CW // the corridor's left edge, C_CORR wide
-  const colOf = new Map(cards0.map((c, i) => [c.id, Math.floor((i * nCols) / cards0.length)]))
-  const rowKeys = rowsList.map((r) => r.key).filter((k) => cards0.some((c) => rowOfCard.get(c.id) === k))
-  const rowIdx = new Map(rowKeys.map((k, i) => [k, i]))
-  cols.style.height = `${HEAD_H}px`
-  cols.append(h('span', 'hcap', 'Event order · UTC'))
-  for (let j = 0; j < nCols; j++) {
-    const times = cards0.filter((c) => colOf.get(c.id) === j).map((c) => parseTime(c.time)).filter(Boolean)
-    const col = h('div', `col${times.length ? '' : ' none'}`)
-    col.style.left = `${colX(j)}px`
-    col.style.width = `${CW}px`
-    if (times.length) {
-      const a = times[0], b = times[times.length - 1]
-      col.append(h('div', 'd', dayOf(a) === dayOf(b) ? dayOf(a) : `${dayOf(a)} – ${dayOf(b)}`), h('div', null, hmOf(a) === hmOf(b) ? hmOf(a) : `${hmOf(a)} – ${hmOf(b)}`))
-      col.title = `${whenOf(a.toISOString())} to ${whenOf(b.toISOString())}`
-    } else col.append(h('div', null, 'Time'), h('div', null, 'unknown'))
-    cols.append(col)
-  }
-
-  // cards and row heads, measured at their widths
-  const cards = new Map()
-  for (const c of cards0) {
-    const x = colX(colOf.get(c.id))
-    const el = cardEl(c, v, x, CW)
-    plot.append(el)
-    cards.set(c.id, { el, c, col: colOf.get(c.id), row: rowIdx.get(rowOfCard.get(c.id)), x, w: CW, h: 0, lane: 0 })
-  }
-  for (const k of cards.values()) k.h = k.el.offsetHeight
-  const laneH = stackLanes(cards0, cards, rowKeys.length)
-  const span = rowKeys.map(() => [Infinity, -Infinity])
-  for (const k of cards.values()) { span[k.row][0] = Math.min(span[k.row][0], k.col); span[k.row][1] = Math.max(span[k.row][1], k.col) }
-  const cells = rowKeys.map((key, i) => {
-    const el = rowCell(key)
-    const r = rowBy.get(key)
-    el.classList.add('inl')
-    el.title = [r.name, r.goal, group === 'sig' ? `accounts: ${r.accounts.join(', ')}` : '', r.sigs.length ? `signs as ${r.sigs.join(', ')}` : ''].filter(Boolean).join('\n')
-    el.style.left = `${colX(span[i][0]) - HEAD + 2}px`
-    el.style.width = `${HEAD - 8}px`
-    plot.append(el)
-    return el
-  })
-  const rowH = rowKeys.map((key, i) => laneH[i].reduce((sum, hh) => sum + hh, 0) + LANE_GAP * Math.max(0, laneH[i].length - 1) + 2 * C_ROW_PAD)
-
-  // bands: each row, in order, in the first band where no row reaches its columns
-  const bands = [] // [{taken: [[a, b]], rows: [i]}]
-  const bandOf = []
-  rowKeys.forEach((key, i) => {
-    const [a, b] = span[i]
-    let at = bands.findIndex((bd) => bd.taken.every(([x, y]) => b < x || a > y))
-    if (at < 0) { at = bands.length; bands.push({ taken: [], rows: [] }) }
-    bands[at].taken.push([a, b])
-    bands[at].rows.push(i)
-    bandOf[i] = at
-  })
-  const bandH = bands.map((bd) => Math.max(...bd.rows.map((i) => rowH[i])))
-
-  // routes: up or down the source's corridor, along the gap next to the target's band, down the target's corridor
-  const routes = v.links.map((x) => {
-    const S = cards.get(x.from), T = cards.get(x.to)
-    const sb = bandOf[S.row], tb = bandOf[T.row]
-    return { x, S, T, sb, tb, gap: S.col === T.col ? -1 : sb > tb ? tb + 1 : tb }
-  })
-  const into = new Map() // target id -> its routes
-  for (const r of routes) { if (!into.has(r.T.c.id)) into.set(r.T.c.id, []); into.get(r.T.c.id).push(r) }
-  const mid = (j) => corridor(j) + C_CORR / 2
-  const gaps = Array.from({ length: bands.length + 1 }, () => new Map()) // gap -> target id -> its run
-  for (const r of routes) {
-    if (r.gap < 0) continue
-    const m = gaps[r.gap]
-    const a = Math.min(mid(r.S.col), mid(r.T.col)) - 6, b = Math.max(mid(r.S.col), mid(r.T.col)) + 6
-    const run = m.get(r.T.c.id) || { span: [a, b] }
-    run.span = [Math.min(run.span[0], a), Math.max(run.span[1], b)]
-    m.set(r.T.c.id, run)
-    r.gapRun = run
-  }
-  const gapH = gaps.map((m) => { const n = packTracks([...m.values()]); return n ? 8 + n * C_GAP_TRACK : C_GAP_MIN })
-
-  // bands and gaps top to bottom
-  let y = 0
-  const gapTop = [], bandTop = []
-  bands.forEach((bd, b) => { gapTop[b] = y; y += gapH[b]; bandTop[b] = y; y += bandH[b] })
-  gapTop[bands.length] = y
-  y += gapH[bands.length]
-  const plotH = Math.max(y, 40)
-  const plotW = colX(nCols - 1) + CW + C_CORR
-  grid.style.gridTemplateColumns = `0px ${plotW}px`
-  grid.style.gridTemplateRows = `${HEAD_H}px auto`
-  plot.style.height = `${plotH}px`
-  rows.style.height = '0px'
-  bands.forEach((bd, b) => {
-    const top = b === 0 ? 0 : gapTop[b] + gapH[b] / 2
-    const bottom = b === bands.length - 1 ? plotH : gapTop[b + 1] + gapH[b + 1] / 2
-    const band = h('div', `band${b % 2 ? ' odd' : ''}`)
-    band.style.top = `${top}px`
-    band.style.height = `${bottom - top}px`
-    plot.prepend(band)
-  })
-  rowKeys.forEach((key, i) => {
-    const el = cells[i]
-    el.style.top = `${bandTop[bandOf[i]] + C_ROW_PAD}px`
-    el.style.visibility = ''
-  })
-  for (const k of cards.values()) {
-    const offs = laneH[k.row].slice(0, k.lane).reduce((sum, hh) => sum + hh + LANE_GAP, 0)
-    k.y = bandTop[bandOf[k.row]] + C_ROW_PAD + offs
-    k.el.style.top = `${k.y}px`
-    k.el.style.visibility = ''
-  }
-
-  // ends: one arrowhead per target, near the top of its right side; a source's links leave spread along its right side
-  // below that
-  const yt = (T) => T.y + Math.min(T.h / 2, 16)
-  const outs = new Map()
-  for (const r of routes) { if (!outs.has(r.S.c.id)) outs.set(r.S.c.id, []); outs.get(r.S.c.id).push(r) }
-  for (const list of outs.values()) {
-    list.sort((p, p2) => p.T.y - p2.T.y)
-    const S = list[0].S
-    const top = into.has(S.c.id) ? yt(S) + 8 : S.y + 10
-    list.forEach((r, i) => { r.ys = top + ((S.y + S.h - 6 - top) * (i + 1)) / (list.length + 1) })
-  }
-  for (const r of routes) r.gy = r.gap < 0 ? null : gapTop[r.gap] + 4 + C_GAP_TRACK / 2 + r.gapRun.track * C_GAP_TRACK
-
-  // vertical runs: in each corridor, the runs to one target share a track
-  const vruns = new Map() // corridor -> key -> {span}
-  const vrun = (j, key, a, b) => {
-    if (!vruns.has(j)) vruns.set(j, new Map())
-    const m = vruns.get(j)
-    const run = m.get(key) || { span: [Math.min(a, b), Math.max(a, b)] }
-    run.span = [Math.min(run.span[0], a, b), Math.max(run.span[1], a, b)]
-    m.set(key, run)
-    return run
-  }
-  for (const r of routes) {
-    if (r.gap < 0) r.vt = vrun(r.T.col, `in:${r.T.c.id}`, r.ys, yt(r.T))
-    else {
-      r.vs = vrun(r.S.col, `via:${r.T.c.id}:${r.gap}`, r.ys, r.gy)
-      r.vt = vrun(r.T.col, `in:${r.T.c.id}`, r.gy, yt(r.T))
-    }
-  }
-  const trackX = new Map()
-  for (const [j, m] of vruns) {
-    const list = [...m.values()].map((run) => ({ run, span: [run.span[0] - 3, run.span[1] + 3] }))
-    const n = packTracks(list)
-    const step = n > 1 ? Math.min(C_TRACK, (C_CORR - 10) / (n - 1)) : 0
-    for (const it of list) trackX.set(it.run, corridor(j) + 6 + it.track * step)
-  }
-
-  const svg = s('svg', { id: 'links', width: plotW, height: plotH })
-  const linkEls = new Map()
-  for (const r of routes) {
-    const { S, T } = r
-    const colour = typeColour(r.x.type)
-    const xs = S.x + CW, xr = T.x + CW, t = yt(T)
-    const pts = r.gap < 0
-      ? [[xs, r.ys], [trackX.get(r.vt), r.ys], [trackX.get(r.vt), t], [xr, t]]
-      : [[xs, r.ys], [trackX.get(r.vs), r.ys], [trackX.get(r.vs), r.gy], [trackX.get(r.vt), r.gy], [trackX.get(r.vt), t], [xr, t]]
-    const d = orth(pts, 4)
-    const g = s('g', { 'data-key': r.x.key })
-    g.append(s('path', { class: 'ln', d, stroke: colour, 'stroke-dasharray': C_DASH[r.x.type] || null }))
-    g.append(s('circle', { class: 'end', cx: xs, cy: r.ys, r: 2.4, fill: colour }))
-    g.append(s('path', { class: 'end', d: `M${xr + 7},${t - 4}L${xr + 0.5},${t}L${xr + 7},${t + 4}Z`, fill: colour }))
-    g.append(linkHit(d, r.x))
-    svg.append(g)
-    linkEls.set(r.x.key, { g, lb: null, x: r.x })
-  }
-  plot.prepend(svg)
-  for (const b of [...plot.querySelectorAll('.band')].reverse()) plot.prepend(b)
-  // the number of links into a record that several enter
-  for (const [id, list] of into) {
-    if (list.length < 3) continue
-    const T = cards.get(id)
-    const n = h('span', 'lbl nin', String(list.length))
-    n.title = `${plural(list.length, 'link')} into #${id}`
-    n.style.left = `${T.x + CW + 3}px`
-    n.style.top = `${yt(T) - 20}px`
-    n.onmouseenter = () => setHover({ kind: 'card', id })
-    n.onmouseleave = () => setHover(null)
-    plot.append(n)
-  }
-  L = { cards, cells: new Map(rowKeys.map((k, i) => [k, cells[i]])), linkEls, width: plotW, height: HEAD_H + plotH }
-  applyZoom()
-}
-function orth(pts, rad) {
-  const p = pts.filter((pt, i) => i === 0 || pt[0] !== pts[i - 1][0] || pt[1] !== pts[i - 1][1])
-  let d = `M${p[0][0]},${p[0][1]}`
-  for (let i = 1; i < p.length - 1; i++) {
-    const [ax, ay] = p[i - 1], [bx, by] = p[i], [cx, cy] = p[i + 1]
-    const r1 = Math.min(rad, Math.hypot(bx - ax, by - ay) / 2, Math.hypot(cx - bx, cy - by) / 2)
-    const ux = Math.sign(bx - ax), uy = Math.sign(by - ay), vx = Math.sign(cx - bx), vy = Math.sign(cy - by)
-    d += `L${bx - ux * r1},${by - uy * r1}Q${bx},${by} ${bx + vx * r1},${by + vy * r1}`
-  }
-  const last = p[p.length - 1]
-  return d + `L${last[0]},${last[1]}`
-}
-let measureCtx = null
-function labelMeasure() {
-  if (!measureCtx) measureCtx = document.createElement('canvas').getContext('2d')
-  measureCtx.font = `500 10.5px ${token('--font-mono') || 'monospace'}`
-  return (t) => measureCtx.measureText(t).width
-}
-// Fit shows the whole chart in both dimensions, down to FIT_MIN
-function applyZoom() {
-  const grid = document.getElementById('grid')
-  const chart = document.getElementById('chart')
-  const z = zoom === 'fit' && L ? Math.max(FIT_MIN, Math.min(1, (chart.clientWidth - 2) / L.width, (chart.clientHeight - 2) / L.height)) : 1
-  grid.style.zoom = z === 1 ? '' : String(z)
-}
-
-// ---------------------------------------------------------------- focus: what hover or the selection lights
-function neighbourhood(f) {
-  const cardsLit = new Set(), linksLit = new Set(), rowsLit = new Set()
-  const addLink = (x) => { linksLit.add(x.key); cardsLit.add(x.from); cardsLit.add(x.to) }
-  if (f.kind === 'card' && byId.has(f.id)) { cardsLit.add(f.id); for (const x of linksOf.get(f.id)) addLink(x) }
-  else if (f.kind === 'link') { const x = D.links.find((y) => y.key === f.key); if (x) addLink(x) }
-  else if (f.kind === 'row') { rowsLit.add(f.key); for (const c of D.cards) if (rowOfCard.get(c.id) === f.key) { cardsLit.add(c.id); for (const x of linksOf.get(c.id)) addLink(x) } }
-  else if (f.kind === 'place') { for (const c of D.cards) if (c.tag === f.tag) cardsLit.add(c.id); for (const x of D.links) if (cardsLit.has(x.from) && cardsLit.has(x.to)) linksLit.add(x.key) }
-  else if (f.kind === 'record') { for (const c of D.cards) if (c.account === f.account) cardsLit.add(c.id) }
-  for (const id of cardsLit) { const c = byId.get(id); if (c) rowsLit.add(rowOfCard.get(id)) }
-  return { cardsLit, linksLit, rowsLit }
-}
-function setHover(f) { hover = f; applyFocus() }
-function applyFocus() {
-  if (!L) return
-  const f = hover || sel
-  document.getElementById('grid').classList.toggle('focus', !!f)
-  const n = f ? neighbourhood(f) : { cardsLit: new Set(), linksLit: new Set(), rowsLit: new Set() }
-  for (const [id, k] of L.cards) {
-    k.el.classList.toggle('lit', n.cardsLit.has(id))
-    k.el.classList.toggle('sel', !!sel && sel.kind === 'card' && sel.id === id)
-  }
-  for (const [key, { g, lb }] of L.linkEls) { g.classList.toggle('lit', n.linksLit.has(key)); if (lb) lb.classList.toggle('lit', n.linksLit.has(key)) }
-  for (const [key, el] of L.cells) {
-    el.classList.toggle('lit', n.rowsLit.has(key))
-    el.classList.toggle('sel', !!sel && sel.kind === 'row' && sel.key === key)
-  }
-}
-
-// ---------------------------------------------------------------- selection and the detail beside the chart
-function select(f, { reveal = true } = {}) {
-  sel = f
-  hover = null
-  applyFocus()
-  renderDetail()
-  if (reveal) revealSel()
-}
-function revealSel() {
-  if (!L || !sel) return
-  let box = null
-  if (sel.kind === 'card' && L.cards.has(sel.id)) { const k = L.cards.get(sel.id); box = { x: k.x, y: k.y, w: k.w, h: k.h } }
-  else if (sel.kind === 'link') {
-    const x = D.links.find((y) => y.key === sel.key)
-    const a = x && L.cards.get(x.from), b = x && L.cards.get(x.to)
-    if (a && b) box = { x: Math.min(a.x, b.x), y: Math.min(a.y, b.y), w: Math.max(a.x + a.w, b.x + b.w) - Math.min(a.x, b.x), h: Math.max(a.y + a.h, b.y + b.h) - Math.min(a.y, b.y) }
-  } else if (sel.kind === 'row') {
-    const own = [...L.cards.values()].filter((k) => rowOfCard.get(k.c.id) === sel.key)
-    if (own.length) box = { x: own[0].x, y: own[0].y, w: own[0].w, h: own[0].h }
-  }
-  revealBox(box)
-}
-function revealBox(box, behavior = 'smooth') {
-  if (!box) return
-  const chart = document.getElementById('chart')
-  const z = parseFloat(document.getElementById('grid').style.zoom || '1') || 1
-  const M = metrics()
-  const det = document.getElementById('detail')
-  const over = !det.hidden && getComputedStyle(det).position === 'absolute' ? Math.min(det.offsetWidth, chart.clientWidth * 0.6) : 0
-  const viewW = Math.max(120, (chart.clientWidth - over) / z - M.AGW), viewH = chart.clientHeight / z - HEAD_H
-  const left = chart.scrollLeft / z, top = chart.scrollTop / z
-  let nx = left, ny = top
-  if (box.x < left + 12 || box.x + Math.min(box.w, viewW) > left + viewW - 12) nx = Math.max(0, box.x - Math.max(24, (viewW - box.w) / 2))
-  if (box.y < top + 12 || box.y + Math.min(box.h, viewH) > top + viewH - 12) ny = Math.max(0, box.y - Math.max(24, (viewH - box.h) / 2))
-  chart.scrollTo({ left: nx * z, top: ny * z, behavior })
-}
+// ---------------------------------------------------------------- a record beside the rows
 async function recordOf(ref) {
   if (recCache.has(ref)) return recCache.get(ref)
   const r = await thimble.fetch({ op: 'record', ref })
   recCache.set(ref, r)
   return r
 }
-function closeDetail() { sel = null; applyFocus(); renderDetail() }
-function detailHead(chips, ref) {
-  const top = h('div', 'd-top')
-  for (const c of chips) top.append(c)
-  top.append(h('span', 'grow'))
-  if (ref) {
-    const open = h('button', 'btn btn-secondary btn-sm')
-    open.innerHTML = `${OPEN}Open record`
-    open.title = `Open ${ref} in thimble`
-    open.onclick = () => thimble.navigate(ref)
-    top.append(open)
-  }
-  const x = h('button', 'btn btn-ghost btn-sm')
-  x.innerHTML = CLOSE
-  x.title = 'Close'
-  x.setAttribute('aria-label', 'Close')
-  x.onclick = closeDetail
-  top.append(x)
-  return top
-}
-function chip(text, cls = 'chip chip-tone-neutral') { return h('span', cls, text) }
 function sec(title, n) {
   const d = h('div', 'd-sec')
   d.append(h('span', 't', title))
   if (n != null) d.append(h('span', 'n', String(n)))
   return d
-}
-function rowBlock(key) {
-  const r = rowBy.get(key) || { key, name: key, goal: '', accounts: [key], sigs: [] }
-  const b = h('div', 'd-agent')
-  if (!CARD) b.dataset.anchor = `view:${slug}/agent/${r.own ? r.key : r.accounts[0]}`
-  const who = h('div', 'who')
-  who.append(h('div', 'nm', r.name))
-  if (r.goal) who.append(h('div', 'goal', r.goal))
-  if (group === 'sig' && r.accounts.length) who.append(h('div', 'sig', `accounts: ${r.accounts.join(', ')}`))
-  if (r.sigs.length) who.append(h('div', 'sig', `signs as ${r.sigs.join(', ')}`))
-  b.append(avatar(r.name), who)
-  b.onclick = () => select({ kind: 'row', key })
-  return b
-}
-function cardRow(c) {
-  const r = h('div', 'arow')
-  r.dataset.anchor = c.ref
-  const tg = h('span', 'tg', c.tag)
-  const col = cardColour(c)
-  if (col) tg.style.color = col
-  r.append(h('span', 'no', `#${c.id}`), tg, h('span', 'x', c.line))
-  r.title = `${c.line}\n${whenOf(c.time)}`
-  r.onclick = () => select({ kind: 'card', id: c.id })
-  return r
-}
-function linkRow(x, from) {
-  const other = byId.get(x.from === from ? x.to : x.from)
-  const r = h('div', 'lrow')
-  const sw = h('i', 'sw')
-  sw.style.background = typeColour(x.type)
-  const k = h('span', 'k', `${x.from}→${x.to} ${x.type}`)
-  k.style.color = typeColour(x.type)
-  r.append(sw, k, h('span', 'o', other ? `#${other.id} ${other.line}` : ''), h('span', 'r', x.reason))
-  r.onclick = () => (other ? select({ kind: 'card', id: other.id }) : select({ kind: 'link', key: x.key }))
-  return r
 }
 function renderRecordInto(box, rec) {
   box.innerHTML = ''
@@ -1429,248 +334,7 @@ function renderRecordInto(box, rec) {
   }
   box.append(dl)
 }
-async function renderDetail() {
-  const box = document.getElementById('detail')
-  box.hidden = !sel
-  box.innerHTML = ''
-  if (!sel) return
-  box.scrollTop = 0
-  const mine = sel
-  if (sel.kind === 'card') {
-    const c = byId.get(sel.id)
-    if (!c) return
-    box.dataset.anchor = c.ref
-    const p = placeBy.get(c.tag)
-    const tg = chip(c.tag)
-    tg.title = p ? p.name : c.tag
-    const chips = [chip(`#${c.id}`), tg]
-    if (labelsOn() && c.m >= 0) { const vv = chip(D.marks[c.m].value); vv.style.color = markColour(D.marks[c.m]); chips.push(vv) }
-    box.append(detailHead(chips, c.ref))
-    box.append(h('div', 'd-when', `${whenOf(c.time)}${p ? ` · ${p.name}` : ''}${c.sig && c.sig !== c.account ? ` · signed ${c.sig}` : ''}`), h('p', 'd-h', c.line), rowBlock(rowOfCard.get(c.id)))
-    const ls = linksOf.get(c.id) || []
-    const out = ls.filter((x) => x.from === c.id), inc = ls.filter((x) => x.to === c.id)
-    if (out.length) { box.append(sec('Links to earlier cards', out.length)); for (const x of out) box.append(linkRow(x, c.id)) }
-    if (inc.length) { box.append(sec('Links from later cards', inc.length)); for (const x of inc) box.append(linkRow(x, c.id)) }
-    const rbox = h('div')
-    rbox.append(h('div', 'skel'))
-    box.append(rbox)
-    try {
-      const rec = await recordOf(c.ref)
-      if (sel === mine) renderRecordInto(rbox, rec)
-    } catch (e) { rbox.textContent = `The record could not be read: ${e.message || e}` }
-  } else if (sel.kind === 'row') {
-    const r = rowBy.get(sel.key)
-    if (!r) return
-    if (CARD) delete box.dataset.anchor
-    else box.dataset.anchor = `view:${slug}/agent/${r.own ? r.key : r.accounts[0]}`
-    const solo = h('button', 'btn btn-ghost btn-sm', F.row === r.key ? 'All rows' : 'Only this row')
-    solo.onclick = () => { F.row = F.row === r.key ? '' : r.key; refresh() }
-    box.append(detailHead([chip(group === 'sig' ? 'Signed name' : 'Account', 'chip chip-sans chip-tone-neutral'), solo], null))
-    box.append(rowBlock(r.key))
-    const own = D.cards.filter((c) => rowOfCard.get(c.id) === r.key)
-    box.append(sec('Cards', own.length))
-    for (const c of own) box.append(cardRow(c))
-  } else if (sel.kind === 'link') {
-    const x = D.links.find((y) => y.key === sel.key)
-    if (!x) return
-    const k = chip(`${x.from}→${x.to} · ${x.type}`)
-    k.style.color = typeColour(x.type)
-    box.append(detailHead([k], null))
-    box.append(h('p', 'd-h', x.reason))
-    box.append(sec('From'), cardRow(byId.get(x.from)), sec('To'), cardRow(byId.get(x.to)))
-  } else if (sel.kind === 'record') {
-    box.dataset.anchor = sel.ref
-    box.append(detailHead([chip(sel.ref)], sel.ref))
-    const rbox = h('div')
-    rbox.append(h('div', 'skel'))
-    box.append(rbox)
-    try {
-      const rec = await recordOf(sel.ref)
-      if (sel === mine) {
-        if (rec.account) box.insertBefore(h('div', 'd-when', [rec.account, rec.place, rec.sig && rec.sig !== rec.account ? `signed ${rec.sig}` : ''].filter(Boolean).join(' · ')), rbox)
-        renderRecordInto(rbox, rec)
-      }
-    } catch (e) { rbox.textContent = `The record could not be read: ${e.message || e}` }
-  }
-}
-
-// arrows step through the shown cards in event order; Escape closes the detail
-document.addEventListener('keydown', (e) => {
-  if (e.target instanceof Element && e.target.closest('input, select, textarea')) return
-  if (e.key === 'Escape') { if (menu || pal) { menu = false; pal = null; renderPop() } else if (sel) closeDetail(); return }
-  if ((e.key === 'ArrowRight' || e.key === 'ArrowLeft') && sel && sel.kind === 'card' && L) {
-    const ids = [...L.cards.keys()]
-    const i = ids.indexOf(sel.id) + (e.key === 'ArrowRight' ? 1 : -1)
-    if (i >= 0 && i < ids.length) { e.preventDefault(); select({ kind: 'card', id: ids[i] }) }
-  }
-})
-
-// ---------------------------------------------------------------- drawing it all
-function refresh() {
-  if (!D) return
-  hover = null
-  const v = visible()
-  renderBar(v)
-  layout(v)
-  applyFocus()
-  renderDetail()
-  if (CARD) {
-    reportSize()
-    reportQuery()
-    setTimeout(() => afterDrops(false), 60)
-    updateMore()
-  }
-}
-// in a card, the call's arguments what the analyst narrowed here would set: {} while it shows what the card stored
-function reportQuery() {
-  if (!stored) return
-  const patch = {}
-  const rows = group === 'sig' ? 'signature' : 'account'
-  if (rows !== (stored.rows || 'account')) patch.rows = rows
-  const key = (xs) => JSON.stringify((xs || []).map((o) => `${o.label}\u0000${o.value}`).sort())
-  if (key(only) !== key(D.only)) patch.only = only.length ? only.map((o) => ({ label: o.label, value: o.value })) : null
-  const r = F.row ? rowBy.get(F.row) : null
-  if (r) patch.accounts = r.accounts.slice()
-  if (F.places.size) patch.places = [...F.places].map((t) => placeBy.get(t)).filter(Boolean).map((p) => p.name)
-  thimble.setQuery(patch)
-}
-// in a card, the links of the records the Files filter dims are dimmed too, and a new filter scrolls the chart to the
-// first record it keeps
-function afterDrops(scroll) {
-  if (!L) return
-  const dropped = new Set([...L.cards.values()].filter((k) => k.el.hasAttribute('data-thimble-drop')).map((k) => k.c.id))
-  for (const { g, lb, x } of L.linkEls.values()) {
-    const dim = dropped.has(x.from) || dropped.has(x.to)
-    g.classList.toggle('dropped', dim)
-    if (lb) lb.classList.toggle('dropped', dim)
-  }
-  const first = scroll && dropped.size ? [...L.cards.values()].find((k) => !dropped.has(k.c.id)) : null
-  if (first) revealBox({ x: first.x, y: first.y, w: first.w, h: first.h })
-}
-// a card's page asks for the height its chart needs; thimble fits the frame to it within the card's range
-function reportSize() {
-  const chart = document.getElementById('chart')
-  const z = parseFloat(document.getElementById('grid').style.zoom || '1') || 1
-  const bar = document.getElementById('bar').offsetHeight
-  const body = L ? Math.ceil(L.height * z) + (L.width * z > chart.clientWidth ? 14 : 2) : document.getElementById('empty').offsetHeight + 96
-  thimble.size(bar + body)
-}
-// in a card, the record a clicked citation names is opened beside the chart
-function pickRef(ref) {
-  const card = D ? D.cards.find((c) => c.ref === ref) : null
-  if (card) select({ kind: 'card', id: card.id })
-  else select({ kind: 'record', ref }, { reveal: false })
-}
-// in a card, the record a hovered citation names is lit and scrolled to
-function lightRef(ref) {
-  const card = ref && D ? D.cards.find((c) => c.ref === ref) : null
-  hover = card ? { kind: 'card', id: card.id } : null
-  applyFocus()
-  const k = card && L ? L.cards.get(card.id) : null
-  if (k) revealBox({ x: k.x, y: k.y, w: k.w, h: k.h })
-}
-let resizeT = null
-addEventListener('resize', () => { clearTimeout(resizeT); resizeT = setTimeout(() => { if (D) { layout(visible()); applyFocus(); if (CARD) { reportSize(); updateMore() } } }, 120) })
-
-function applyTarget(t) {
-  if (!t) return
-  const card = t.ref ? D.cards.find((c) => c.ref === t.ref) : null
-  if (card) select({ kind: 'card', id: card.id })
-  else if (t.ref) select({ kind: 'record', ref: t.ref, account: t.account }, { reveal: false })
-  else if (t.account) {
-    const key = [...rowBy.values()].find((r) => r.accounts.includes(t.account))
-    if (key) select({ kind: 'row', key: key.key })
-  } else if (t.place) {
-    const p = D.places.find((x) => x.name === t.place)
-    if (p) { F.places = new Set([p.tag]); refresh() }
-  }
-}
-// a view opened from a card ({card, title, args}): the card's arguments choose the records and links, set the grouping
-// and the legend; null drops them. True when they differ from those the view was last opened with
-function applyQuery(qy) {
-  const key = qy && qy.args ? JSON.stringify(qy) : ''
-  if (key === baseKey) return false
-  baseKey = key
-  base = {}
-  const a = (key && qy.args) || {}
-  fromCard = key ? { card: String(qy.card || ''), title: String(qy.title || '') } : null
-  for (const k of ['within', 'accounts', 'places', 'links', 'edges']) if (a[k] != null) base[k] = a[k]
-  group = a.rows === 'signature' ? 'sig' : 'account'
-  only = Array.isArray(a.only) ? a.only.filter((o) => o && o.label && o.value).map((o) => ({ label: o.label, value: o.value })) : []
-  offset = 0
-  sel = null
-  keepRef = null
-  F.row = ''
-  F.places.clear()
-  return true
-}
-async function start() {
-  if (!(await load())) return
-  refresh()
-  if (target) { const t = target; target = null; applyTarget(t) }
-  watchRuns()
-}
-thimble.onOpen(async (place) => {
-  if (OV) return ovOpen(place)
-  const t = (place && place.target) || null
-  if (CARD) return t && t.ref && t.pick && D ? pickRef(t.ref) : lightRef(t && t.ref)
-  if (place && 'query' in place && applyQuery(place.query)) {
-    if (!(await load())) return
-    refresh()
-    watchRuns()
-  }
-  const again = t && t.ref && t.ref !== keepRef
-  if (t && t.ref) keepRef = t.ref
-  if (!D) { target = t; return }
-  if (again && !D.cards.some((c) => c.ref === t.ref)) { if (!(await load())) return; refresh() }
-  applyTarget(t)
-})
-thimble.onLabels(async (state) => {
-  const was = JSON.stringify([labelState.labels, labelState.filter, (labelState.all || []).map((l) => [l.id, l.count])])
-  labelState = { labels: state.labels || [], filter: state.filter || null, all: state.all || null, palette: state.palette || null }
-  if (OV) return ovLabels()
-  if (CARD) {
-    // a card's records are fixed; the labels change only their colours, and the filter dims them
-    const fk = JSON.stringify(labelState.filter)
-    const newFilter = fk !== filterKey
-    filterKey = fk
-    if (D) refresh()
-    if (newFilter) setTimeout(() => afterDrops(true), 120)
-    renderPop()
-    return
-  }
-  if (!D) {
-    if (failed) { failed = false; await start() }
-    return
-  }
-  // a label turned on, off or still running (its count moving) changes the cards
-  if (JSON.stringify([labelState.labels, labelState.filter, (labelState.all || []).map((l) => [l.id, l.count])]) === was) { renderPop(); return }
-  offset = 0
-  only = only.filter((o) => labelState.labels.some((l) => l.name === o.label && (l.values || []).some((x) => x.name === o.value)))
-  if (!(await load())) return
-  refresh()
-  renderPop()
-  watchRuns()
-})
-// a label that is on has no count while it runs, and the page hears of no rows until it ends, so the chart is read again
-// meanwhile and drawn again when its cards changed
-let runT = null
-function watchRuns() {
-  clearTimeout(runT)
-  if (!(labelState.all || []).some((l) => l.on && l.count == null)) return
-  runT = setTimeout(async () => {
-    const was = D && JSON.stringify([D.total, D.mark_counts, D.cards.map((c) => c.ref)])
-    if ((await load()) && JSON.stringify([D.total, D.mark_counts, D.cards.map((c) => c.ref)]) !== was) refresh()
-    watchRuns()
-  }, RUN_POLL_MS)
-}
-// ---------------------------------------------------------------- the overview (the view; a card draws the chart above)
-// Every record the view reads, counted per time bin: totals, a strip per place and a row per account (the busiest, the
-// rest in one row each), shaded by count and coloured by the labels that are on, the filter's dropped records left
-// out of the shade. Drag across the rows to zoom into that time; click a place's name to count the accounts over its
-// records alone, a cell for its records beside the rows, a record for the record. Rows and places carry their unit keys
-// and listed records their refs as data-anchor, so thimble marks them.
-const OV = !CARD
+// ---------------------------------------------------------------- the overview
 const OV_CELL = 7 // px a bin gets at least
 const OV_LABEL = 200 // px of the names column
 let O = null // the reader's overview
@@ -2103,59 +767,28 @@ function ovWatchRuns() {
   ovRunT = setTimeout(async () => { if (await ovLoad()) ovRedraw(); ovWatchRuns() }, RUN_POLL_MS)
 }
 let ovQT = null
-if (OV) {
-  document.body.classList.add('ov')
-  const bar = document.getElementById('ovbarrow')
-  bar.append(document.getElementById('legend'))
-  document.getElementById('q').placeholder = 'Search accounts'
-  document.getElementById('q').setAttribute('aria-label', 'Search accounts')
-  document.getElementById('q').addEventListener('input', (e) => {
-    clearTimeout(ovQT)
-    ovQT = setTimeout(async () => { ovq.q = e.target.value.trim(); await ovReload() }, 250)
-  })
-  // a narrower or wider page draws the cells again at once, and reads the overview again when its bins would change
-  let ovResizeT = null
-  new ResizeObserver(() => {
-    if (!O) return
-    ovAxis()
-    for (const cv of document.querySelectorAll('#ov canvas.ovcells')) ovDraw(cv)
-    clearTimeout(ovResizeT)
-    ovResizeT = setTimeout(() => { if (O && Math.abs(ovQuery().bins - O.asked) > O.asked * 0.25) ovReload() }, 250)
-  }).observe(document.getElementById('ov'))
-  document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && ovDetail && !menu && !pal) ovClose() })
-}
+document.getElementById('q').addEventListener('input', (e) => {
+  clearTimeout(ovQT)
+  ovQT = setTimeout(async () => { ovq.q = e.target.value.trim(); await ovReload() }, 250)
+})
+// a narrower or wider page draws the cells again at once, and reads the overview again when its bins would change
+let ovResizeT = null
+new ResizeObserver(() => {
+  if (!O) return
+  ovAxis()
+  for (const cv of document.querySelectorAll('#ov canvas.ovcells')) ovDraw(cv)
+  clearTimeout(ovResizeT)
+  ovResizeT = setTimeout(() => { if (O && Math.abs(ovQuery().bins - O.asked) > O.asked * 0.25) ovReload() }, 250)
+}).observe(document.getElementById('ov'))
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && ovDetail && !menu && !pal) ovClose() })
 
-if (CARD) {
-  let marksT = null
-  thimble.onMarks(() => { if (D && marksT == null) marksT = requestAnimationFrame(() => { marksT = null; refresh() }) })
-  thimble.onInit((init) => {
-    mode = init.mode
-    document.body.classList.toggle('full', mode === 'full')
-    stored = init.args || {}
-    if (D && init.key && init.key === drawnKey) {
-      refresh()
-      requestAnimationFrame(() => thimble.settled())
-      return
-    }
-    drawnKey = init.key
-    D = init.data
-    group = D.rows_by === 'sig' ? 'sig' : 'account'
-    only = (D.only || []).slice()
-    sel = null
-    F.row = ''
-    F.places.clear()
-    F.types.clear()
-    q = ''
-    document.getElementById('q').value = ''
-    index()
-    refresh()
-    // the chart opens at its first card a label marks, so the card first shows what its labels found
-    const first = labelsOn() && L ? [...L.cards.values()].find((k) => k.c.m >= 0) : null
-    if (first) revealBox({ x: first.x, y: first.y, w: first.w, h: first.h }, 'instant')
-    updateMore()
-    requestAnimationFrame(() => thimble.settled())
-  })
-} else ovReload()
+thimble.onOpen((place) => ovOpen(place))
+thimble.onLabels((state) => {
+  labelState = { labels: state.labels || [], filter: state.filter || null, all: state.all || null, palette: state.palette || null }
+  return ovLabels()
+})
+ovReload()
+
 </script>
 </body>
 </html>

@@ -325,17 +325,13 @@ async def test_every_worked_example_s_page_loads_headless_at_its_first_place(nam
     assert not views.unmarked(rep["page"]), "the records a worked example shows carry their file refs, for the labels"
 
 
-async def test_the_swarm_view_draws_as_cards_the_records_a_label_marks_with_the_links_they_carry(samples, inproc, bound):
-    """With no label on, the Swarm view opens on the records where accounts answer or name each other. A question from
-    it is answered with labels, and the chart is what they mark: a regex label over the sample's chat and wiki marks the
-    records about the gain, and once it is on the chart's cards are exactly those records in event order, coloured by
-    the label's value, with a reply the chat carries and the save before on the same page as links; a save that changed
-    one value reads as that change."""
+async def test_the_swarm_overview_colours_the_records_a_label_marks(samples, inproc, bound):
+    """A question from the Swarm view is answered with labels, and the overview colours what they mark: a regex label
+    over the sample's chat and wiki marks the records about the gain, and once it is on the overview counts them under
+    its value and a cell's listing gives each its value; a save that changed one value reads as that change."""
     from app import concepts
 
     slug = _save_example("swarm")
-    first = await views.reader_call("swarm", slug, "records", {"op": "chart"})
-    assert first["source"] == "addressed" and [p["name"] for p in first["places"]] == ["help-desk", "Night-14/Schedule"]
     s = await concepts.apply_scoped("swarm", scope="files", name="gain", kind="regex", text=r"(?i)\bgain\b|1\.84|1\.48",
                                     values=["about the gain", "other"], paths=["chat/*.jsonl", "wiki/pages/**/*.jsonl"],
                                     limit=None, comment=False, filter=False, created_by="test", chat=None, group=None, card=False)
@@ -345,13 +341,11 @@ async def test_the_swarm_view_draws_as_cards_the_records_a_label_marks_with_the_
     marked -= {"chat/help-desk.jsonl#L8"}  # a post sent twice
     concepts.show_concept("swarm", s["concept"], True)
     views._memo.clear()
-    chart = await views.reader_call("swarm", slug, "records", {"op": "chart"})
-    assert chart["source"] == "labels" and {c["ref"] for c in chart["cards"]} == marked
-    assert [c["id"] for c in chart["cards"]] == list(range(1, len(marked) + 1))
-    assert all(c["m"] == 0 for c in chart["cards"]) and chart["marks"][0]["value"] == "about the gain"
-    types = {x["type"] for x in chart["links"]}
-    assert {"reply", "same place"} <= types, chart["links"]
-    assert any(c["line"] == "1.84 → 1.48" for c in chart["cards"]), [c["line"] for c in chart["cards"]]
+    ov = await views.reader_call("swarm", slug, "records", {"op": "overview", "bins": 40})
+    assert ov["marks"][0]["value"] == "about the gain" and ov["mark_counts"][0] == len(marked)
+    gain = await views.reader_call("swarm", slug, "records", {"op": "bin", "places": ["Calibration/Gain"], "from": 0, "to": 1e12})
+    assert {r["ref"] for r in gain["records"] if r["m"] == 0} == {ref for ref in marked if ref.startswith("wiki/pages/Calibration/Gain")}
+    assert any(r["line"] == "1.84 → 1.48" for r in gain["records"]), [r["line"] for r in gain["records"]]
 
 
 async def test_the_swarm_overview_counts_every_record_and_lists_a_cells_records(samples, inproc, bound):
@@ -379,8 +373,7 @@ async def test_the_swarm_overview_counts_every_record_and_lists_a_cells_records(
 
 async def test_a_save_that_only_re_encodes_its_page_changes_nothing_on_the_swarm_view(samples, inproc, bound):
     """A wiki that re-encodes a page's text on each save ("é" read back as "Ã©") changes lines no one edited: such a
-    save reads as changing nothing and names no one, while a save that changes only non-ASCII text reads as that
-    change."""
+    save reads as changing nothing, while a save that changes only non-ASCII text reads as that change."""
     d = samples / "wiki"
     d.mkdir()
     page = ["Plan for the café night", "I will bring the café tests. -- ann"]
@@ -395,11 +388,13 @@ async def test_a_save_that_only_re_encodes_its_page_changes_nothing_on_the_swarm
     views.write_view("wiki", "swarm", reader=(src / "reader.py").read_text("utf-8"), html=(src / "view.html").read_text("utf-8"),
                      **{**{k: raw[k] for k in ("name", "why", "accepts", "declares", "default", "libs")}, "claims": ["pages.jsonl"]})
     refs = [f"pages.jsonl#L{n}" for n in range(1, 5)]
-    chart = await views.reader_call("wiki", "swarm", "records", {"op": "chart", "keep": refs})
-    line = {c["ref"]: c["line"] for c in chart["cards"]}
+    line = {}
+    for q in ({"from": 0, "to": 1e12}, {"untimed": True}):  # the fourth save's hour, 24, is no time
+        got = await views.reader_call("wiki", "swarm", "records", {"op": "bin", "places": ["Plan"], **q})
+        line |= {r["ref"]: r["line"] for r in got["records"]}
+    assert set(line) == set(refs)
     assert line["pages.jsonl#L2"] == "Changed only spacing or encoding", line
     assert line["pages.jsonl#L4"] == "状态：测试已完成 → 状态：测试失败了", line
-    assert not [x for x in chart["links"] if x["type"] == "names"], chart["links"]
 
 
 async def test_the_swarm_extension_installs_its_view_where_it_applies_outside_the_orientations_four(samples, inproc, bound):

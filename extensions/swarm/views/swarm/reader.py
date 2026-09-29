@@ -1,7 +1,6 @@
-# Swarm: many agents acting on shared pages and channels, drawn as a swimlane chart of the records a question picks.
-# A row per account, columns in event order, and as cards the records the labels that are on give a highlighted value,
-# coloured by value, with the links the records themselves carry. The same chart is a card type (card.py): a card's code
-# chooses its records and the labels that colour them.
+# Swarm: many agents acting on shared pages and channels, drawn as an overview of every record: a strip per place and a
+# row per account across time bins, shaded by count and coloured by the labels that are on, with any cell's records a
+# click away. The Swarm extension's card type (cards/swarm) reads its records and links from this reader's index.
 #
 # The records: JSON Lines or CSV files of saves and posts. The reader finds each file's fields by their names:
 #   who     the first actor field with a value (ACTOR_KEYS), else the address of a save made without an account
@@ -36,32 +35,22 @@
 #   - A save that changes only spacing, or only re-encodes lines, changes nothing, and says so: saves are compared line
 #     by line on each line with its mojibake repaired (runs of Latin-1 characters that read as UTF-8, such as "Ã©" for
 #     "é", as a wiki that re-encodes its pages on each save grows them) and its spacing collapsed (_key).
-#   - Text shown on a card or beside the chart has its mojibake repaired and control characters dropped (_clean); the
-#     excerpts that cite the records stay as written.
+#   - Text shown in a listing or beside the rows has its mojibake repaired and control characters dropped (_clean);
+#     the excerpts that cite the records stay as written.
 #
 # The method: the index keeps, per record, only what finding and ordering it needs (its offset, account, place, time,
-# the save before it, the record it replies to), so a corpus of many thousand saves indexes in seconds; a card's text,
+# the save before it, the record it replies to), so a corpus of many thousand saves indexes in seconds; a record's text,
 # what its save changed, the name it signs with and the accounts it names are read back from its line when it is shown.
 #
-# The chart: the cards are the records the labels that are on give a highlighted value (thimble.marked), kept by the
-# label filter (thimble.kept), of the values the page's legend keeps (`only`, all when none), CARDS_MAX at a time in
-# event order, each page taking the values in turn so the first shows them all. With no label on they are the actions
-# that address another account (a reply to another account's record, or what it wrote naming another account that acts
-# on its place) on the PLACES_SHOWN places where they are most and most of what is done (their count times their
-# share). A card's `within` (refs, or the records a label gave a value), `accounts` and `places` choose the records
-# instead, the labels only colouring them. A card asks for the CARDS_MAX records most linked to each other (`pick:
-# linked`, _most_linked) in place of pages: the links among all the chosen records (_reach) are counted from the index,
-# replies and the accounts a record names (`named`), with no text read. Links between cards come from the records,
-# after those a card's code gives (`edges`), of the kinds it asks for:
-#   reply       the card's record answers the other card's record (its reply field)
-#   names       the card's text names the other card's account (the latest card of that account before it)
-#   same place  the card before it on its place, by another account
-# A pair keeps one link, the first of these that holds. A card signs as someone when a line of its text ends with
-# "-- name" (or an em dash); the page can group its rows by that name instead of the account.
+# Links (_reach), for the Swarm extension's card type (cards/swarm/card.py), which names the links it draws and lists
+# those the records themselves carry among its actions, counted from the index with no text read:
+#   reply       the record answers the other record (its reply field)
+#   names       the record names the other record's account (the latest record of that account before it)
+#   same place  the record before it on its place, by another account
+# A pair keeps one link, the first of these that holds.
 #
-# Labels: the cards are what they mark, so a label that is on is the chart's subject and colour: each card carries the
-# marks thimble.marked gives its record (the first as `m`, all of them as bits in `mb`), which the page draws. A row's
-# unit is `agent/<account>` and a place's `place/<place>`, whose refs are their records.
+# Labels: the overview's cells take the colours of the values the labels that are on give their records
+# (thimble.marked). A row's unit is `agent/<account>` and a place's `place/<place>`, whose refs are their records.
 #
 # When it applies (view.json `applies`): thimble proposes this view to an orientation when applies(paths), given the
 # corpus's record files, finds a swarm in them, and claims the files it names (applies).
@@ -92,7 +81,6 @@ ID_KEYS = ("id", "rev_id", "message_id")
 SEQ_KEYS = ("rev", "seq", "revision")
 GOAL_KEYS = ("objective", "goal", "brief", "purpose", "role")
 TITLE_KEYS = ("thread_title", "title", "subject")  # an action's name for its place, when nothing else names it
-CARDS_MAX = 40
 DETECT_FILES = 400  # record files applies() reads, the shallowest first
 DETECT_RECORDS = 20_000  # records it reads of each
 DETECT_BYTES = 64 * 1024 * 1024  # bytes it reads of each
@@ -101,8 +89,7 @@ SWARM_ACCOUNTS = 30  # a swarm's accounts at least
 SWARM_PLACES = 3  # places that three or more of them act on, at least
 SWARM_NAMING = 0.05  # the share of the actions on shared places that name another account acting there, at least
 CLAIMS_LISTED = 12  # the action files of one folder claimed one by one; more are claimed by a glob
-PLACES_SHOWN = 3
-MARKS_MAX = 24  # label values the page tells apart, as bits of one number per card
+MARKS_MAX = 24  # label values the overview and the card type tell apart
 CARD_CHARS = 110
 TEXT_MAX = 60_000  # characters of a record's text the page gets
 FIELD_MAX = 300
@@ -650,7 +637,7 @@ def _swap(old, new):
 
 
 def _did(index, r):
-    """What the action did, as {line, said, before?, hunks?}: `line` the card's words, `said` the text it added or
+    """What the action did, as {line, said, before?, hunks?}: `line` its words in a listing, `said` the text it added or
     posted, whose last "-- name" is its signature and whose words name other accounts."""
     text = _text(index, r["ref"])
     if r["kind"] == "post":
@@ -674,7 +661,7 @@ def _did(index, r):
 
 
 def _gist(lines):
-    """A card's words for the lines a save wrote: the last that ends in a signature, where a note ends, or the line above
+    """The words for the lines a save wrote: the last that ends in a signature, where a note ends, or the line above
     a signature on a line of its own; else the last."""
     if not lines:
         return ""
@@ -693,107 +680,7 @@ def _signature(said):
     return sig
 
 
-# ------------------------------------------------------------------------------------------------ the chart
-
-
-def _chart(index, query):
-    on = thimble.view_labels()
-    marks = [{"label": lab["name"], "value": v["name"], "colour": v["colour"]}
-             for lab in on["labels"] for v in lab["values"]][:MARKS_MAX]
-    mark_at = {(x["label"], x["value"]): i for i, x in enumerate(marks)}
-    keep = {str(r) for r in query.get("keep") or ()}
-    within = _within(query.get("within"))
-    accounts = {str(a).lower() for a in query.get("accounts") or ()}
-    places = {str(p) for p in query.get("places") or ()}
-
-    def kept(ref):
-        return ref in keep or thimble.kept(ref)
-
-    def fits(ref):
-        r = index["recs"][ref]
-        return ref in keep or ((within is None or ref in within) and (not accounts or r["account"].lower() in accounts)
-                               and (not places or r["place"] in places))
-
-    per_mark = [0] * len(marks)
-    if within is not None or (not marks and (accounts or places)):
-        source = "chosen"
-        picked = [(ref, thimble.marked(ref) if marks else []) for ref in index["order"] if fits(ref) and kept(ref)]
-    elif marks:
-        source = "labels"
-        picked = [(ref, got) for ref in index["order"] if ((got := thimble.marked(ref)) or ref in keep) and fits(ref) and kept(ref)]
-    else:
-        ranked = sorted(index["places"], key=lambda p: (-(v := index["places"][p])["addressed"] ** 2 / len(v["refs"]),
-                                                        -len(v["accounts"]), p))
-        source, wanted = "addressed", set(ranked[:PLACES_SHOWN])
-        picked = [(ref, []) for ref in index["order"]
-                  if (r := index["recs"][ref])["place"] in wanted and (r["to"] or ref in keep) and kept(ref)]
-    unmarked = 0
-    only = {(x.get("label"), x.get("value")) for x in query.get("only") or () if isinstance(x, dict)}
-    if marks:
-        for _ref, got in picked:
-            for i in {mark_at[k] for x in got if (k := (x["label"], x["value"])) in mark_at}:
-                per_mark[i] += 1
-        if only:
-            picked = [(ref, got) for ref, got in picked if ref in keep or any((x["label"], x["value"]) in only for x in got)]
-        unmarked = sum(1 for _ref, got in picked if not any((x["label"], x["value"]) in mark_at for x in got))
-    reach = _reach(index, picked, query.get("links"), query.get("edges")) if query.get("pick") == "linked" else None
-    total = len(picked)
-    accounts_of = {index["recs"][ref]["account"] for ref, _got in picked}
-    places_of = {index["recs"][ref]["place"] for ref, _got in picked}
-    if reach is not None and len(picked) > CARDS_MAX:
-        picked = _most_linked(picked, reach["links"], mark_at)
-    elif marks:
-        picked = _by_turns(picked, mark_at)
-    tag_of = {}  # numbered over every page, so a place keeps its tag from page to page
-    for ref, _got in picked:
-        tag_of.setdefault(index["recs"][ref]["place"], f"T{len(tag_of) + 1}")
-    offset = max(0, min(int(query.get("offset") or 0), max(0, len(picked) - 1)))
-    cards, by_ref, said = [], {}, {}
-    for n, (ref, got) in enumerate(picked[offset: offset + CARDS_MAX], offset + 1):
-        r = index["recs"][ref]
-        did = _did(index, r)
-        first, bits = -1, 0
-        for x in got:
-            i = mark_at.get((x["label"], x["value"]))
-            if i is not None:
-                first = i if first < 0 else first
-                bits |= 1 << i
-        c = {"id": n, "ref": ref, "account": r["account"], "sig": _signature(did["said"]), "place": r["place"],
-             "time": _iso(r["t"]) if r["known"] else None, "kind": r["kind"], "line": did["line"], "m": first, "mb": bits}
-        said[n] = did["said"]
-        cards.append(c)
-        by_ref[ref] = c
-    links = _links(index, cards, by_ref, said, query.get("links"), query.get("edges"))
-    tags = {}
-    for c in cards:
-        c["tag"] = tags.setdefault(c["place"], tag_of[c["place"]])
-    rows = [{"account": a, "goal": index["accounts"][a]["goal"], "n": index["accounts"][a]["n"]}
-            for a in dict.fromkeys(c["account"] for c in cards)]
-    places_shown = [{"tag": t, "name": p, "title": index["places"][p]["title"], "ref": index["places"][p]["ref"],
-                     "n": len(index["places"][p]["refs"]), "accounts": len(index["places"][p]["accounts"])}
-                    for p, t in tags.items()]
-    title = ("; ".join(lab["name"] for lab in on["labels"]) if marks and source != "addressed"
-             else "Chosen records" if source == "chosen" else "Where accounts most answer or name each other")
-    return {"title": title, "source": source, "cards": cards, "rows": rows, "places": places_shown, "links": links,
-            "marks": marks, "mark_counts": per_mark, "unmarked": unmarked, "only": [{"label": a, "value": b} for a, b in only],
-            "offset": offset, "total": total, "page": CARDS_MAX, "accounts_total": len(accounts_of), "places_total": len(places_of),
-            **({"shown": "linked" if total > CARDS_MAX else "all", "reach": {"counts": reach["counts"], "pairs": reach["pairs"]}}
-               if reach is not None else {}),
-            "counts": {"records": len(index["order"]), "accounts": len(index["accounts"]), "places": len(index["places"])}}
-
-
-def _by_turns(picked, mark_at):
-    """The cards in pages of CARDS_MAX that take the values in turn, so the first page shows each value; a page keeps event
-    order."""
-    if len(picked) <= CARDS_MAX:
-        return picked
-    seen, turn = {}, []
-    for ref, got in picked:
-        v = min((mark_at[k] for x in got if (k := (x["label"], x["value"])) in mark_at), default=-1)
-        seen[v] = seen.get(v, -1) + 1
-        turn.append(seen[v])
-    order = sorted(range(len(picked)), key=lambda i: (turn[i], i))
-    return [picked[i] for p in range(0, len(order), CARDS_MAX) for i in sorted(order[p: p + CARDS_MAX])]
+# ------------------------------------------------------------------------------------------------ links
 
 
 LINK_TYPES = ("reply", "names", "same place")
@@ -814,9 +701,8 @@ def _within(spec):
 
 
 def _reach(index, picked, kinds=None, edges=None):
-    """The links among all the chosen records `picked` (in event order), as _links draws them between cards but read
-    from the index: the `edges` given, replies, the accounts a record names (the latest record of that account before
-    it) and the record before it on its place. {links: [(later ref, earlier ref, type)], counts: {type: n}, pairs:
+    """The links among the records `picked` (in event order), read from the index: the `edges` given, replies, the
+    accounts a record names (the latest record of that account before it) and the record before it on its place. {links: [(later ref, earlier ref, type)], counts: {type: n}, pairs:
     [{from, to, n}]}, the pairs of accounts with the most links first."""
     kinds = set(kinds or LINK_TYPES)
     recs = index["recs"]
@@ -850,115 +736,6 @@ def _reach(index, picked, kinds=None, edges=None):
         last_on[r["place"]] = ref
     top = sorted(pairs.items(), key=lambda kv: (-kv[1], kv[0]))[:PAIRS_LISTED]
     return {"links": links, "counts": counts, "pairs": [{"from": a, "to": b, "n": n} for (a, b), n in top]}
-
-
-def _quotas(counts, room):
-    """`room` shared among the values in proportion to their records `counts` {value: n}, at least one each while room
-    lasts (largest remainders)."""
-    total = sum(counts.values())
-    if not total:
-        return {}
-    exact = {v: room * n / total for v, n in counts.items()}
-    q = {v: max(1, int(x)) for v, x in exact.items()}
-    for v in sorted(counts, key=lambda v: -(exact[v] - int(exact[v]))):
-        if sum(q.values()) >= room:
-            break
-        q[v] += 1
-    while sum(q.values()) > room:
-        v = max(q, key=lambda v: (q[v], -counts[v]))
-        if q[v] <= 1:
-            break
-        q[v] -= 1
-    return {v: min(n, counts[v]) for v, n in q.items()}
-
-
-def _spread(refs, n):
-    """n of `refs` (in event order) evenly spaced over them."""
-    if n >= len(refs):
-        return list(refs)
-    return [refs[int((i + 0.5) * len(refs) / n)] for i in range(n)]
-
-
-def _most_linked(picked, links, mark_at):
-    """CARDS_MAX of the chosen records, in event order, in proportion to each label value's records (_quotas): both ends
-    of the links whose ends are most linked while their values have room, then each value's most linked records, then
-    its others spread over time."""
-    got_of = dict(picked)
-    order = {ref: i for i, (ref, _got) in enumerate(picked)}
-    degree = {}
-    for a, b, _kind in links:
-        degree[a] = degree.get(a, 0) + 1
-        degree[b] = degree.get(b, 0) + 1
-
-    def value(ref):
-        return min((mark_at[k] for x in got_of[ref] if (k := (x["label"], x["value"])) in mark_at), default=-1)
-
-    of_value = {}
-    for ref, _got in picked:
-        of_value.setdefault(value(ref), []).append(ref)
-    room = _quotas({v: len(refs) for v, refs in of_value.items()}, CARDS_MAX)
-    take = {}
-
-    def add(ref):
-        if ref not in take:
-            take[ref] = True
-            room[value(ref)] -= 1
-
-    for a, b, _kind in sorted(links, key=lambda x: (-(degree[x[0]] + degree[x[1]]), order[x[1]])):
-        need = {}
-        for ref in (a, b):
-            if ref not in take:
-                need[value(ref)] = need.get(value(ref), 0) + 1
-        if all(room.get(v, 0) >= n for v, n in need.items()):
-            add(a)
-            add(b)
-    for v, refs in of_value.items():
-        rest = [r for r in refs if r not in take]
-        for ref in sorted((r for r in rest if degree.get(r)), key=lambda r: (-degree[r], order[r]))[:max(0, room[v])]:
-            add(ref)
-        rest = [r for r in rest if r not in take]
-        for ref in _spread(rest, max(0, room[v])):
-            add(ref)
-    for ref, _got in _by_turns(picked, mark_at):
-        if len(take) >= CARDS_MAX:
-            break
-        take.setdefault(ref, True)
-    return [(ref, got_of[ref]) for ref in sorted(take, key=order.get)]
-
-
-def _links(index, cards, by_ref, said, kinds=None, edges=None):
-    """The links between the cards (the chart note above), of the `kinds` given (all three when none), after the `edges`
-    given as {from, to, type, reason?} between the cards' refs: [{from, to, key, type, reason}], the later card first."""
-    out, seen, last_on, last_by = [], set(), {}, {}
-    kinds = set(kinds or LINK_TYPES)
-    names = {c["account"].lower(): c["account"] for c in cards if not re.fullmatch(r"[\d.:]+", c["account"])}
-
-    def add(a, b, kind, reason):
-        if b is None or b["account"] == a["account"] or (a["id"], b["id"]) in seen:
-            return
-        seen.add((a["id"], b["id"]))
-        out.append({"from": a["id"], "to": b["id"], "key": f"{a['id']}-{b['id']}", "type": kind, "reason": reason})
-
-    for e in edges or ():
-        a, b = by_ref.get(str(e.get("from"))), by_ref.get(str(e.get("to")))
-        if a is not None and b is not None:
-            later, earlier = (a, b) if a["id"] > b["id"] else (b, a)
-            add(later, earlier, str(e.get("type") or "link"), str(e.get("reason") or e.get("type") or ""))
-    for c in cards:
-        reply = index["recs"][c["ref"]]["reply_ref"]
-        if "reply" in kinds and reply in by_ref:
-            add(c, by_ref[reply], "reply", f"Replies to {by_ref[reply]['account']}")
-        if "names" in kinds:
-            for w in dict.fromkeys(WORD.findall(said[c["id"]])):
-                who = names.get(w.lstrip("@").lower())
-                if who in last_by:
-                    add(c, last_by[who], "names", f"Names {who}")
-        b = last_on.get(c["place"])
-        if "same place" in kinds and b is not None:
-            add(c, b, "same place", f"{'Edits' if c['kind'] == 'save' else 'Posts in'} {c['place']} after {b['account']}")
-        last_on[c["place"]] = c
-        last_by[c["account"]] = c
-    return out
 
 
 def _short(v):
@@ -1194,20 +971,14 @@ def problems(index):
 
 
 def records(index, query):
-    """{op: chart, offset?, keep?, only?, within?, accounts?, places?, links?, edges?, pick?}: the chart (_chart), the
-    records whose refs are in `keep` shown whatever the labels and the filter keep, and only the records of the label
-    values in `only` [{label, value}] when it is given; a card (card.py) or a view opened from one chooses its records
-    with `within` (refs, or {label, value?}), `accounts` and `places`, and its links with `links` and `edges`; `pick:
-    linked` shows the records most linked to each other in place of a page. {op: record, ref}: one record in full
-    (_detail)."""
+    """{op: overview, ...}: the overview (_overview); {op: bin, ...}: the records one cell or row counts (_bin); {op:
+    record, ref}: one record in full (_detail)."""
     query = query if isinstance(query, dict) else {}
     if query.get("op") == "record":
         return _detail(index, str(query.get("ref") or ""))
-    if query.get("op") == "overview":
-        return _overview(index, query)
     if query.get("op") == "bin":
         return _bin(index, query)
-    return _chart(index, query)
+    return _overview(index, query)
 
 
 # ------------------------------------------------------------------------------------------------ citations
@@ -1222,8 +993,8 @@ def _first_lines(index, refs, per=2):
 
 
 def resolve(index, locator):
-    """<file>#L<n>: the record on that line, on its card when the chart shows it, else beside the chart; a roster row
-    opens its account. view:<slug>/agent/<account> or place/<place>: that account's or that place's records."""
+    """<file>#L<n>: the record on that line, beside the rows; a roster row opens its account. view:<slug>/agent/<account>
+    or place/<place>: that account's or that place's records."""
     if "key" in locator:
         kind, _, name = str(locator["key"]).partition("/")
         name = name.replace("%20", " ")
