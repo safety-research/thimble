@@ -111,9 +111,9 @@ function colHead(t) {
   return [`${d.getUTCDate()} ${MON[d.getUTCMonth()]}`, `${pad2(d.getUTCHours())}:${pad2(d.getUTCMinutes())}`]
 }
 let measureCtx = null
-function measure(font, text) {
+function measure(font, text, face = '--font-body') {
   if (!measureCtx) measureCtx = document.createElement('canvas').getContext('2d')
-  measureCtx.font = `${font} ${token('--font-body') || 'sans-serif'}`
+  measureCtx.font = `${font} ${token(face) || 'sans-serif'}`
   return measureCtx.measureText(text).width
 }
 const textWidth = (text) => Math.ceil(measure('500 11px', text)) + 12
@@ -317,8 +317,9 @@ function layout() {
     el.style.height = `${k.h}px`
     const hd = h('div', 'hd')
     hd.dataset.thimbleChrome = ''
-    const pl = h('span', 'pl', a.thread)
-    hd.append(h('span', null, `#${a.id}`), h('span', 'tag', a.tag), pl)
+    hd.append(h('span', null, `#${a.id}`), h('span', 'tag', a.tag))
+    // the thread's name when it fits whole; the list above the chart names every thread
+    if (measure('600 10.5px', `#${a.id}  ${a.tag}  ${a.thread}`, '--font-mono') <= CW - 22) hd.append(h('span', 'pl', a.thread))
     el.append(hd, h('div', 'sm', a.summary))
     if (a.m >= 0 && D.marks[a.m]) {
       const colour = markColour(D.marks[a.m])
