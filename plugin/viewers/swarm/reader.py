@@ -262,6 +262,12 @@ def _spread(values_by_path):
     return {v for v, fs in folders.items() if len(fs) > 1}
 
 
+def _placed(path, place, spread):
+    """The place a record of the file at `path` names: in its file's folder when the value is in `spread`."""
+    folder = path.rpartition("/")[0]
+    return f"{folder}/{place}" if place in spread and folder else place
+
+
 def _common_dir(paths):
     parts = [p.split("/")[:-1] for p in paths]
     head = parts[0] if parts else []
@@ -276,9 +282,9 @@ def _common_dir(paths):
 def build_index(paths):
     """{files: {path: {offsets, kind, fields, n}}, recs: {ref: action}, order: [action refs in event order], same:
     {ref of a repeat: ref of the first}, places: {place: {ref, title, refs, accounts, addressed}}, accounts: {account:
-    {n, goal, goal_refs}}, problems: {count, examples: [{ref, why}]}}. An action keeps its account, place, time, kind, the save before
-    it, the record it replies to and whether it addresses another account (_addressing); texts are read back from their
-    lines when shown."""
+    {n, goal, goal_refs}}, problems: {count, examples: [{ref, why}]}}. An action keeps its account, place, time, kind,
+    the save before it, the record it replies to and whether it addresses another account (_addressing); texts are read
+    back from their lines when shown."""
     problems = {"count": 0, "examples": []}
     files, recs, same, actions, places, roster, texts, titles = {}, {}, {}, [], {}, {}, {}, {}
     parsed = {p: _rows(p, problems) for p in sorted(paths)}
@@ -289,7 +295,6 @@ def build_index(paths):
                      if "text" in fields[path] and ("actor" in fields[path] or "anon" in fields[path]))
     for path, rows in parsed.items():
         f = fields[path]
-        folder = path.rpartition("/")[0]
         own_place = path[len(base):].rsplit(".", 1)[0] if path in placeless else None
         kind = ("actions" if ("actor" in f or "anon" in f) and "text" in f
                 else "roster" if "actor" in f and "goal" in f else "other")
@@ -308,7 +313,7 @@ def build_index(paths):
                 _p, place = _first(rec, PLACE_KEYS)
                 _t, title = _first(rec, ("title",))
                 if place and title:
-                    place = f"{folder}/{place}" if place in spread else place
+                    place = _placed(path, place, spread)
                     places.setdefault(place, {"ref": ref, "title": title, "refs": [], "accounts": {}})
                     names_places = True
                 continue
@@ -325,7 +330,7 @@ def build_index(paths):
                 _problem(problems, ref, "left out: no account")
                 continue
             _p, place = _first(rec, PLACE_KEYS)
-            place = (f"{folder}/{place}" if place in spread else place) or own_place or path
+            place = _placed(path, place, spread) or own_place or path
             rid = _first(rec, (f["id"],))[1] if "id" in f else ""
             seq = _first(rec, (f["seq"],))[1] if "seq" in f else ""
             key = ("id", rid) if rid else ("seq", place, seq) if seq else None
@@ -453,7 +458,7 @@ def applies(paths):
     spread = _spread((path, (place for _w, place, _t in got)) for path, got in acts.items())
 
     def where(path, place):
-        return (f"{path.rpartition('/')[0]}/{place}" if place in spread else place) or path[len(base):]
+        return _placed(path, place, spread) or path[len(base):]
 
     places = {}
     for path, got in acts.items():
