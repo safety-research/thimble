@@ -9,6 +9,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { Button } from '../components/Button'
 import { Menu, type MenuItem } from '../components/Menu'
+import { Spinner } from '../components/Spinner'
 import { docsApi } from '../lib/api'
 import { NO_RTC, useFrameFonts, withFrameStyle } from '../lib/frame'
 import { track } from '../lib/telemetry'
@@ -91,9 +92,11 @@ export interface VideoViewProps {
   on: ReadonlySet<string>
   look: CheckLook
   picked: DocComment | null
+  /** its writer still runs: the film shows that it is being written, and playback waits */
+  writing?: boolean
 }
 
-export function VideoView({ ws, slug, doc, comments, on, look, picked }: VideoViewProps) {
+export function VideoView({ ws, slug, doc, comments, on, look, picked, writing = false }: VideoViewProps) {
   const timing = doc?.timing ?? null
   const lines = useMemo(() => doc?.lines ?? [], [doc])
   const windows = timing?.lines ?? []
@@ -233,9 +236,15 @@ export function VideoView({ ws, slug, doc, comments, on, look, picked }: VideoVi
 
   return (
     <div className="wu-view">
-      <div className="wu-videodoc" data-video={slug}>
+      <div className={`wu-videodoc${writing ? ' is-writing' : ''}`} data-video={slug}>
         <div className="wu-videodoc-col">
-          <div className="wu-video-stage" ref={stage} style={{ height: FILM_H * scale }} onClick={toggle}>
+          <div className="wu-video-stage" ref={stage} style={{ height: FILM_H * scale }} onClick={writing ? undefined : toggle}>
+            {writing && (
+              <div className="wu-video-writing" role="status">
+                <Spinner size={14} label="Writing" />
+                The video is still being written
+              </div>
+            )}
             {shown != null && (
               <iframe
                 ref={frame}
@@ -258,7 +267,7 @@ export function VideoView({ ws, slug, doc, comments, on, look, picked }: VideoVi
               ))}
             </p>
           )}
-          <div className="wu-video-controls">
+          <div className="wu-video-controls" inert={writing || undefined}>
             <Button variant="icon" icon="chevron-left" title="Previous line" disabled={!windows.length} onClick={() => go(now - 1)} />
             <Button variant="icon" icon={playing ? 'pause' : 'run'} title={playing ? 'Pause' : 'Play'} disabled={!windows.length} onClick={toggle} />
             <Button variant="icon" icon="chevron-right" title="Next line" disabled={!windows.length} onClick={() => go(now + 1)} />

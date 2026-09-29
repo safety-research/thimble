@@ -62,7 +62,11 @@ export function NewDocMenu({ ws, onMade }: { ws: string; onMade: (t: ReportType)
   const ready = !!name.trim() && !!brief.trim()
   return (
     <>
-      <Menu label="New document" trigger={<button type="button" ref={trigger} className="wu-new" disabled={busy} data-doc-chip="+new">+ New</button>} items={items} />
+      <Menu label="New document" trigger={
+          <Button ref={trigger} icon="plus" className="wu-new" disabled={busy} data-doc-chip="+new">
+            New
+          </Button>
+        } items={items} />
       <Popover anchor={trigger} open={asking} onClose={() => setAsking(false)} label="A document of your own" className="wu-doc-sheet" width={320}>
         <form
           className="wu-doc-form"

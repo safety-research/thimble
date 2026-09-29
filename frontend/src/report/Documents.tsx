@@ -31,6 +31,8 @@ export interface DocumentViewProps {
   /** the page's code drawer is open */
   drawer: boolean
   onSaved: (doc: AnyDoc) => void
+  /** a writer of the document still runs (a video then shows that it is being written) */
+  writing?: boolean
 }
 
 export function DocumentView(props: DocumentViewProps) {
@@ -44,7 +46,7 @@ export function DocumentView(props: DocumentViewProps) {
 const isFrame = (doc: AnyDoc | null): doc is Writeup => !!doc && (doc as Writeup).frame === true
 
 /** The slides, the story, a page or a video beside the sidebar's Checks pane. */
-function Arranged({ ws, slug, renderer, doc, filter, client, drawer, onSaved }: DocumentViewProps) {
+function Arranged({ ws, slug, renderer, doc, filter, client, drawer, onSaved, writing = false }: DocumentViewProps) {
   const side = useSidebar(ws)
   const checks = useChecks(ws)
   const [pickedId, setPickedId] = useState<string | null>(null)
@@ -94,7 +96,7 @@ function Arranged({ ws, slug, renderer, doc, filter, client, drawer, onSaved }: 
   } else if (renderer === 'story') {
     if (doc) view = <StoryEditor ref={story} ws={ws} slug={slug} doc={doc as StoryDoc} client={client} onSaved={onSaved} filter={filter} {...shared} />
   } else if (renderer === 'video') {
-    if (doc) view = <VideoView ws={ws} slug={slug} doc={doc as VideoDoc} {...shared} />
+    if (doc) view = <VideoView ws={ws} slug={slug} doc={doc as VideoDoc} writing={writing} {...shared} />
   } else {
     view = <PageView ws={ws} slug={slug} doc={(doc as PageDoc | null) ?? null} drawer={drawer} onSaved={onSaved} {...shared} />
   }

@@ -92,10 +92,6 @@
   overflow-x: auto;
   scrollbar-width: none;
 }
-.wu-bar .wu-types .tab {
-  flex: none;
-  padding: 0;
-}
 .wu-bar .wu-types::-webkit-scrollbar {
   display: none;
 }
@@ -118,7 +114,10 @@
 .wu-bar > .menu-trigger {
   flex: none;
 }
-.wu-new,
+.wu-new.btn {
+  flex: none;
+  font-weight: 400;
+}
 .wu-export {
   flex: none;
   display: inline-flex;
@@ -135,7 +134,6 @@
   cursor: pointer;
   transition: var(--transition-color);
 }
-.wu-new:hover:not(:disabled),
 .wu-export:hover {
   color: var(--text-primary);
 }
@@ -2745,6 +2743,25 @@ body .bn-mantine .bn-form-popover .mantine-TextInput-input {
   background: var(--bg-sunken);
   cursor: pointer;
 }
+/* while its writer runs the film is not done: a veil over the stage says so, and the controls wait */
+.wu-videodoc.is-writing .wu-video-stage {
+  cursor: default;
+}
+.wu-video-writing {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  background: color-mix(in oklab, var(--bg-sunken) 88%, transparent);
+  font: 400 var(--text-ui-sm) / 1.3 var(--font-body);
+  color: var(--text-secondary);
+}
+.wu-videodoc.is-writing .wu-video-controls {
+  opacity: 0.45;
+}
 /* drawn at the film's own size and scaled to the stage; a click falls through to the stage, which plays or pauses */
 .wu-video-frame {
   position: absolute;
@@ -2906,4 +2923,17 @@ body .bn-mantine .bn-form-popover .mantine-TextInput-input {
   display: flex;
   align-items: center;
   gap: 6px;
+}
+
+/* a document being written shimmers across its whole chip in the type bar, as a building view does in Files' views bar */
+.wu-types .seg-opt.is-updating {
+  background-image: linear-gradient(100deg, transparent 30%, color-mix(in oklab, var(--accent) 16%, transparent) 50%, transparent 70%);
+  background-size: 300% 100%;
+  animation: bcell-shimmer 1.8s linear infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .wu-types .seg-opt.is-updating {
+    animation: none;
+    background-image: linear-gradient(color-mix(in oklab, var(--accent) 8%, transparent), color-mix(in oklab, var(--accent) 8%, transparent));
+  }
 }
