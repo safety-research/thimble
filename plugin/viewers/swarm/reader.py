@@ -103,6 +103,8 @@ WORD = re.compile(r"@?[A-Za-z][\w.-]*\w")
 SENTENCE = re.compile(r"(?<=[.?!])\s+")
 MOJIBAKE = re.compile(r"[\u0080-\u00ff]{2,}")
 CONTROL = re.compile(r"[\x00-\x08\x0b-\x1f\x7f-\x9f]")
+T_MIN = datetime(1, 1, 2, tzinfo=timezone.utc).timestamp()  # the times a datetime can show in any zone
+T_MAX = datetime(9999, 12, 30, tzinfo=timezone.utc).timestamp()
 MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
 
 
@@ -116,11 +118,13 @@ def _first(rec, keys):
 
 
 def _time(v):
-    """Epoch seconds of epoch seconds or milliseconds, or of ISO 8601 with or without a zone (UTC then); None."""
+    """Epoch seconds of epoch seconds or milliseconds, or of ISO 8601 with or without a zone (UTC then), between T_MIN
+    and T_MAX; None."""
     if isinstance(v, bool) or v in (None, ""):
         return None
     if isinstance(v, (int, float)):
-        return v / 1000 if v > 1e11 else float(v)
+        t = v / 1000 if v > 1e11 else float(v)
+        return t if T_MIN <= t <= T_MAX else None
     s = str(v).strip()
     if re.fullmatch(r"\d{9,13}(\.\d+)?", s):
         return _time(float(s))
@@ -128,7 +132,8 @@ def _time(v):
         dt = datetime.fromisoformat(s.replace("Z", "+00:00"))
     except ValueError:
         return None
-    return (dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)).timestamp()
+    t = (dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)).timestamp()
+    return t if T_MIN <= t <= T_MAX else None
 
 
 def _iso(t):
@@ -144,8 +149,12 @@ def _problem(problems, ref, why):
 
 def _rows(path, problems):
     """[(first line, last line, record dict)] of a file: the JSON objects of a JSON Lines file, a CSV's rows by its
-    header."""
-    raw = Path(path).read_bytes()
+    header. A file that cannot be read is reported and has none."""
+    try:
+        raw = Path(path).read_bytes()
+    except OSError as e:
+        _problem(problems, path, f"not read ({e.strerror or e})")
+        return []
     out = []
     if path.endswith(".csv"):
         text = raw.decode("utf-8", "replace")
@@ -197,10 +206,13 @@ def _csv_header(path):
 
 def _offsets(path):
     offs, pos = [], 0
-    with open(path, "rb") as fh:
-        for raw in fh:
-            offs.append(pos)
-            pos += len(raw)
+    try:
+        with open(path, "rb") as fh:
+            for raw in fh:
+                offs.append(pos)
+                pos += len(raw)
+    except OSError:
+        return []
     return offs
 
 
@@ -450,9 +462,12 @@ def _raw(index, ref):
     offs = index["files"].get(path, {}).get("offsets")
     if not offs or not n.isdigit() or not 1 <= int(n) <= len(offs):
         return None
-    with open(path, "rb") as fh:
-        fh.seek(offs[int(n) - 1])
-        return fh.readline().decode("utf-8", "replace").rstrip("\r\n")
+    try:
+        with open(path, "rb") as fh:
+            fh.seek(offs[int(n) - 1])
+            return fh.readline().decode("utf-8", "replace").rstrip("\r\n")
+    except OSError:
+        return None
 
 
 def _record(index, ref):
