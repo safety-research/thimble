@@ -13,7 +13,9 @@ from pathlib import Path
 
 import pytest
 
-from app import cardtypes, cli, config, extensions, orient_session, prompts, views
+from fastapi import HTTPException
+
+from app import card_check, cardtypes, cli, config, extensions, orient_session, prompts, views
 from app.ledger import write_json
 
 FIXTURE = Path(__file__).parent / "fixtures" / "ext-min"
@@ -159,6 +161,39 @@ async def test_two_extensions_that_replace_one_block_leave_thimbles_and_are_name
     assert lines == ["ext-min and other both replace the orientation block 'instructions', so thimble's own is used"]
     assert "conflict: ext-min and other both replace" in extensions.doctor_line()
     assert set(extensions.agent_definitions(CORPUS)) == {"ext-min:counter", "other:counter"}
+
+
+def _tally_card(code: str, **extra) -> dict:
+    """A card of the fixture's `tally` type as a card's cell holds it."""
+    return {"id": "c1", "kind": "plot", "code": code, "outputs": [{cardtypes.CARD_MIME: {"type": "tally", "args": {}}}], **extra}
+
+
+async def test_keep_changes_only_the_arguments_the_type_lets_the_card_change(corpus):
+    _add()
+    await extensions.refresh(CORPUS)
+    await cardtypes.refresh(CORPUS, warm=False)
+    cell = _tally_card('import thimble\nthimble.card("tally", labels=["kind"])')
+    new, patch, written = cardtypes.keep_patch(CORPUS, cell, {"who": ["ana"]})
+    assert new == 'import thimble\nthimble.card("tally", labels=["kind"], who=["ana"])' and patch == {"who": ["ana"]}
+    assert written == []
+    with pytest.raises(HTTPException, match="Keep does not change `labels`"):
+        cardtypes.keep_patch(CORPUS, cell, {"labels": ["other"]})
+    with pytest.raises(HTTPException, match="`who` is a list"):
+        cardtypes.keep_patch(CORPUS, cell, {"who": "ana"})
+
+
+async def test_the_card_check_gives_back_the_arguments_keep_set(corpus):
+    _add()
+    await extensions.refresh(CORPUS)
+    await cardtypes.refresh(CORPUS, warm=False)
+    cell = _tally_card('import thimble\nthimble.card("tally", who=["ana"], labels=["kind"])', kept_args={"who": ["ana"]})
+    revised = 'import thimble\nthimble.card("tally", labels=["kind", "size"])'
+    assert cardtypes.keep_kept(CORPUS, cell, revised) == 'import thimble\nthimble.card("tally", labels=["kind", "size"], who=["ana"])'
+    reverted = {"question": "", "takeaway": "", "code": 'import thimble\nthimble.card("tally", labels=["kind"])'}
+    assert card_check._patch(cell, reverted, None, c=CORPUS) == {}, "a revision that only undoes Keep changes nothing"
+    undone = {**cell, "code": 'import thimble\nthimble.card("tally", labels=["kind"])'}
+    assert cardtypes.kept_in_force(CORPUS, undone) == {} and cardtypes.keep_kept(CORPUS, undone, revised) == revised, (
+        "once an undo took Keep's arguments out of the code, they bind nothing")
 
 
 def test_the_config_keys_of_extensions_are_checked():

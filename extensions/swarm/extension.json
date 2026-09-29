@@ -2,7 +2,7 @@
   "api": 0,
   "name": "swarm",
   "version": "0.1.0",
-  "description": "For corpora where many agents act on shared pages and channels: an orientation that reads every message, the Swarm overview, and the swarm and agent-flow card types.",
+  "description": "For corpora where many agents act on shared pages and channels: an orientation that reads every message, the Swarm overview, and the swarm card type.",
   "applies": "swarm",
   "requires": []
 }

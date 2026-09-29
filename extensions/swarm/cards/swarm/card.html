@@ -1,0 +1,420 @@
+<!doctype html>
+<html>
+<head>
+<style>
+  html, body { margin: 0; }
+  body { background: var(--surface-card); color: var(--text-primary); }
+  [hidden] { display: none !important; }
+  #head { padding: 2px 2px 8px; }
+  #nums { font: 400 var(--text-mono-sm) / 1.3 var(--font-mono); color: var(--text-tertiary); }
+  #threads { display: flex; flex-wrap: wrap; gap: 4px 16px; margin-top: 8px; }
+  .th { display: inline-flex; align-items: baseline; gap: 6px; min-width: 0; max-width: 100%; font: 400 var(--text-xs) / 1.4 var(--font-body); color: var(--text-secondary); }
+  .th b { font: 600 var(--text-mono-sm) / 1.4 var(--font-mono); color: var(--text-primary); }
+  .th .nm { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .th.place .nm { cursor: pointer; text-decoration: underline; text-decoration-color: rgba(var(--ink-rgb), .3); text-underline-offset: 2px; }
+  .th.place .nm:hover { color: var(--text-primary); }
+  #wrap { position: relative; overflow-x: auto; overflow-y: hidden; border-top: 1px solid var(--border-hairline); }
+  #plot { position: relative; }
+  .rowbg { position: absolute; left: 0; right: 0; }
+  .rowbg.odd { background: rgba(var(--ink-rgb), .025); }
+  #heads { position: sticky; left: 0; z-index: 4; }
+  #corner, .agent { position: absolute; left: 0; box-sizing: border-box; background: var(--surface-card); border-right: 1px solid var(--border-hairline); }
+  #corner { top: 0; padding: 12px 12px 0 14px; font: 600 var(--text-mono-sm) / 1.3 var(--font-mono); letter-spacing: .04em; text-transform: uppercase; color: var(--text-secondary); }
+  .agent { display: flex; gap: 10px; align-items: flex-start; padding: 12px 12px 0 14px; }
+  .agent.odd { background: color-mix(in srgb, var(--text-primary) 2.5%, var(--surface-card)); }
+  .av { flex: none; width: 28px; height: 28px; border-radius: 7px; display: block; }
+  .who { min-width: 0; flex: 1; }
+  .who .nm { font: 600 var(--text-ui-sm) / 1.3 var(--font-body); color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .who .goal { margin-top: 2px; font: 400 var(--text-xs) / 1.38 var(--font-body); color: var(--text-secondary); display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
+  #axis { position: absolute; top: 0; }
+  #axis .cap { position: absolute; top: 12px; white-space: nowrap; font: 400 var(--text-xs) / 1.3 var(--font-body); color: var(--text-secondary); }
+  .col { position: absolute; top: 34px; font: 400 10.5px / 1.35 var(--font-mono); font-variant-numeric: tabular-nums; color: var(--text-secondary); white-space: nowrap; }
+  .act { position: absolute; box-sizing: border-box; padding: 7px 10px 8px; background: var(--surface-card); border: 1px solid rgba(var(--ink-rgb), .16); border-radius: var(--radius-ui); box-shadow: 0 1px 2px rgba(var(--ink-rgb), .05); cursor: pointer; z-index: 1; transition: opacity .12s, border-color .12s; }
+  .act:hover { border-color: rgba(var(--ink-rgb), .4); }
+  .act .hd { display: flex; align-items: baseline; gap: 6px; min-width: 0; font: 400 10.5px / 1.3 var(--font-mono); color: var(--text-tertiary); white-space: nowrap; }
+  .act .hd .tag { font-weight: 600; color: var(--text-primary); }
+  .act .hd .pl { min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--text-secondary); }
+  .act .sm { margin-top: 4px; font: 500 12.5px / 1.36 var(--font-body); color: var(--text-primary); overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .act .v { margin-top: 3px; font: 500 10.5px / 1.3 var(--font-body); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .act .tick { position: absolute; left: -1px; right: -1px; top: -1px; height: 3px; border-radius: var(--radius-ui) var(--radius-ui) 0 0; }
+  svg#links { position: absolute; left: 0; top: 0; overflow: visible; pointer-events: none; z-index: 2; }
+  svg#links path { fill: none; stroke-width: 1.6; stroke-linejoin: round; transition: opacity .12s; }
+  svg#links circle, svg#links .arrow { transition: opacity .12s; }
+  .lbl { position: absolute; z-index: 2; box-sizing: border-box; height: 17px; padding: 0 5px; border: 1px solid; border-radius: 4px; background: var(--surface-card); font: 500 10.5px / 15px var(--font-mono); white-space: nowrap; transition: opacity .12s; }
+  .focus .act:not(.lit), .focus .lbl:not(.lit) { opacity: .28; }
+  .focus svg#links g:not(.lit) { opacity: .15; }
+</style>
+</head>
+<body>
+<div id="head"><div id="nums"></div><div id="threads"></div></div>
+<div id="wrap"><div id="plot"></div></div>
+<script>
+// Swarm: a row per account (avatar, name, the goal the call gave), the actions the call chose as cards in event order,
+// one column each, and the typed links between them. A column's spacing is no measure of time. A card spans more than
+// its column, so a card in one row may start a lane below an earlier card of that row it would overlap. The part of a
+// card no neighbouring column's card reaches, its band, carries the vertical runs of its links, and each link runs
+// horizontally in the gap between rows next to its target, so no link crosses a card; a gap is as tall as the links
+// it carries need, each on a track of its own with its label beside its source. Link types take the viz colours in
+// the order they first appear. Cards carry their record's ref as data-anchor, so thimble marks them with the labels
+// that are on; a label the call named colours a card's top edge.
+const NS = 'http://www.w3.org/2000/svg'
+const MON = 'Jan Feb Mar Apr May Jun Jul Aug Sep Oct Nov Dec'.split(' ')
+const VIZ = ['--viz-1', '--viz-6', '--viz-2', '--viz-3', '--viz-4', '--viz-5', '--viz-7']
+const HEAD_H = 76 // the column header
+const STEP = 124, CW = 196, CH = 74 // a column, a card's width and height
+const ROW_PAD = 14, LANE_GAP = 8, AGENT_H = 70 // a row: above and below its cards, between its lanes, at least
+const GAP_MIN = 10, TRACK = 21 // a gap between rows that carries no link, and a link's track in a gap
+const END_GAP = 9 // between two link ends in one band
+const PAD_R = 24
+const token = (n) => getComputedStyle(document.documentElement).getPropertyValue(n).trim()
+const fmt = (n) => Number(n).toLocaleString('en-US')
+const plural = (n, one, many) => `${fmt(n)} ${n === 1 ? one : many || one + 's'}`
+const pad2 = (n) => String(n).padStart(2, '0')
+function h(tag, cls, text) {
+  const e = document.createElement(tag)
+  if (cls) e.className = cls
+  if (text != null) e.textContent = text
+  return e
+}
+function s(tag, attrs) {
+  const e = document.createElementNS(NS, tag)
+  for (const [k, v] of Object.entries(attrs || {})) e.setAttribute(k, v)
+  return e
+}
+function hash(str) {
+  let x = 2166136261
+  for (let i = 0; i < str.length; i++) { x ^= str.charCodeAt(i); x = Math.imul(x, 16777619) }
+  return x >>> 0
+}
+function avatar(name) {
+  const colour = token(VIZ[hash(name) % VIZ.length])
+  const svg = s('svg', { class: 'av', viewBox: '0 0 7 7', 'aria-hidden': 'true' })
+  svg.style.background = `color-mix(in srgb, ${colour} 16%, var(--surface-card))`
+  let bits = hash(name + '·')
+  for (let y = 0; y < 5; y++) for (let x = 0; x < 3; x++) {
+    if (bits & 1) {
+      svg.append(s('rect', { x: 1 + x, y: 1 + y, width: 1, height: 1, fill: colour }))
+      if (x < 2) svg.append(s('rect', { x: 5 - x, y: 1 + y, width: 1, height: 1, fill: colour }))
+    }
+    bits >>>= 1
+  }
+  return svg
+}
+function colHead(t) {
+  const d = t ? new Date(t) : null
+  if (!d || Number.isNaN(d.getTime())) return ['Time', 'unknown']
+  return [`${d.getUTCDate()} ${MON[d.getUTCMonth()]}`, `${pad2(d.getUTCHours())}:${pad2(d.getUTCMinutes())}`]
+}
+let measureCtx = null
+function textWidth(text) {
+  if (!measureCtx) {
+    measureCtx = document.createElement('canvas').getContext('2d')
+    measureCtx.font = `500 10.5px ${token('--font-mono') || 'monospace'}`
+  }
+  return Math.ceil(measureCtx.measureText(text).width) + 12
+}
+
+let D = null
+let labelState = { labels: [], all: null }
+let mode = 'card'
+function markColour(m) {
+  const label = (labelState.all || labelState.labels || []).find((l) => l.name === m.label)
+  const v = label && (label.values || []).find((x) => x.name === m.value)
+  return (v && v.colour) || m.colour
+}
+const typeColour = (t) => token(VIZ[Math.max(0, D.types.indexOf(t)) % VIZ.length])
+
+function renderHead() {
+  const threads = D.threads.length
+  document.getElementById('nums').textContent = [plural(D.rows.length, 'agent'), plural(threads, 'thread'),
+    plural(D.actions.length, 'significant action')].join(' · ')
+  const box = document.getElementById('threads')
+  box.replaceChildren()
+  for (const t of D.threads) {
+    const el = h('span', `th${t.place ? ' place' : ''}`)
+    const nm = h('span', 'nm', t.name)
+    nm.title = t.name
+    if (t.place) {
+      el.dataset.anchor = `view:swarm/place/${t.name.replace(/ /g, '%20')}`
+      nm.onclick = () => thimble.navigate(el.dataset.anchor)
+    }
+    el.append(h('b', null, t.tag), nm)
+    box.append(el)
+  }
+}
+
+// ---------------------------------------------------------------- layout
+function layout() {
+  const plot = document.getElementById('plot')
+  plot.replaceChildren()
+  const width = document.documentElement.clientWidth || 800
+  const headW = width < 700 ? 188 : 244
+  const acts = D.actions
+  const rowOf = new Map(D.rows.map((r, i) => [r.account, i]))
+  const nRows = D.rows.length
+  // lanes: a card that would overlap the last card of every lane so far in its row starts a lane below them
+  const laneEnds = D.rows.map(() => [])
+  const place = new Map()
+  acts.forEach((a, col) => {
+    const r = rowOf.get(a.account)
+    const x = headW + 16 + col * STEP
+    const ends = laneEnds[r]
+    let lane = ends.findIndex((e) => e + 10 <= x)
+    if (lane < 0) { lane = ends.length; ends.push(0) }
+    ends[lane] = x + CW
+    place.set(a.id, { a, col, row: r, lane, x, w: CW, h: CH })
+  })
+  const lanes = laneEnds.map((e) => Math.max(1, e.length))
+  const card = (id) => place.get(id)
+  // a link: its gap (the one next to its target on the source's side), which edges it leaves and enters
+  const routes = D.links.map((x) => {
+    const S = card(x.from), T = card(x.to)
+    const gap = S.row === T.row ? T.row : S.row > T.row ? T.row + 1 : T.row
+    return { x, S, T, gap, sTop: S.row >= T.row, tTop: S.row <= T.row }
+  })
+  // each card's band holds its link ends, ordered by where the other end lies, so fewer runs cross
+  const endsOf = new Map()
+  for (const r of routes) {
+    for (const [me, other, top, role] of [[r.S, r.T, r.sTop, 's'], [r.T, r.S, r.tTop, 't']]) {
+      if (!endsOf.has(me.a.id)) endsOf.set(me.a.id, [])
+      endsOf.get(me.a.id).push({ r, other, top, role })
+    }
+  }
+  for (const [id, ends] of endsOf) {
+    const k = card(id)
+    const lo = k.x + (CW - STEP) + 8, hi = k.x + STEP - 8
+    for (const top of [true, false]) {
+      const side = ends.filter((e) => e.top === top).sort((a, b) => a.other.x - b.other.x || a.other.row - b.other.row)
+      const n = side.length
+      const span = Math.min(hi - lo, (n - 1) * END_GAP)
+      const start = (lo + hi) / 2 - span / 2
+      side.forEach((e, i) => { e.r[e.role === 's' ? 'xs' : 'xt'] = n === 1 ? (lo + hi) / 2 : start + (span * i) / (n - 1) })
+    }
+  }
+  // tracks: in each gap, links whose runs and labels overlap take tracks of their own
+  const gaps = Array.from({ length: nRows + 1 }, () => [])
+  for (const r of routes) {
+    r.text = `${r.x.from}→${r.x.to} · ${r.x.type}`
+    r.lw = textWidth(r.text)
+    const left = r.xt < r.xs
+    r.lx = left ? r.xs - 8 - r.lw : r.xs + 8
+    if (Math.abs(r.xs - r.xt) < r.lw + 16) r.lx = left ? r.xt - 8 - r.lw : r.xt + 8
+    r.lx = Math.max(headW + 4, r.lx)
+    r.lo = Math.min(r.xs, r.xt, r.lx) - 4
+    r.hi = Math.max(r.xs, r.xt, r.lx + r.lw) + 4
+    gaps[r.gap].push(r)
+  }
+  const gapH = gaps.map((rs) => {
+    const tracks = []
+    for (const r of rs.sort((a, b) => a.lo - b.lo)) {
+      let t = tracks.findIndex((end) => end <= r.lo)
+      if (t < 0) { t = tracks.length; tracks.push(0) }
+      tracks[t] = r.hi
+      r.track = t
+    }
+    return tracks.length ? GAP_MIN + tracks.length * TRACK : GAP_MIN
+  })
+  // rows top to bottom: a gap, then the row's lanes
+  let y = HEAD_H
+  const rowTop = [], rowH = [], gapTop = []
+  for (let i = 0; i < nRows; i++) {
+    gapTop[i] = y
+    y += gapH[i]
+    rowTop[i] = y
+    rowH[i] = Math.max(AGENT_H, ROW_PAD * 2 + lanes[i] * CH + (lanes[i] - 1) * LANE_GAP)
+    y += rowH[i]
+  }
+  gapTop[nRows] = y
+  y += gapH[nRows]
+  const height = y + 8
+  const plotW = headW + 16 + (acts.length - 1) * STEP + CW + PAD_R
+  plot.style.width = `${plotW}px`
+  plot.style.height = `${height}px`
+
+  // row shading, the heads and the axis
+  const heads = h('div')
+  heads.id = 'heads'
+  heads.style.width = `${headW}px`
+  heads.style.height = `${height}px`
+  const corner = h('div', null, 'Agent + goal')
+  corner.id = 'corner'
+  corner.style.width = `${headW}px`
+  corner.style.height = `${HEAD_H}px`
+  D.rows.forEach((r, i) => {
+    const top = gapTop[i] + gapH[i] / 2, bottom = i === nRows - 1 ? height : gapTop[i + 1] + gapH[i + 1] / 2
+    const bg = h('div', `rowbg${i % 2 ? ' odd' : ''}`)
+    bg.style.top = `${top}px`
+    bg.style.height = `${bottom - top}px`
+    plot.append(bg)
+    const el = h('div', `agent${i % 2 ? ' odd' : ''}`)
+    el.dataset.anchor = `view:swarm/agent/${r.account}`
+    el.style.top = `${top}px`
+    el.style.height = `${bottom - top}px`
+    el.style.width = `${headW}px`
+    el.style.paddingTop = `${rowTop[i] - top + ROW_PAD - 2}px`
+    const who = h('div', 'who')
+    const nm = h('div', 'nm', r.account)
+    nm.title = r.account
+    who.append(nm)
+    if (r.goal) { const g = h('div', 'goal', r.goal); g.title = r.goal; who.append(g) }
+    el.append(avatar(r.account), who)
+    el.onmouseenter = () => focus({ account: r.account })
+    el.onmouseleave = () => focus(null)
+    heads.append(el)
+  })
+  heads.append(corner)
+  const axis = h('div')
+  axis.id = 'axis'
+  axis.style.left = '0px'
+  axis.style.width = `${plotW}px`
+  const cap = h('div', 'cap', 'Event order → Spacing does not represent elapsed time · dates in UTC')
+  cap.style.left = `${headW + 16}px`
+  axis.append(cap)
+  acts.forEach((a, col) => {
+    const [d, t] = colHead(a.time)
+    const c = h('div', 'col')
+    c.style.left = `${headW + 16 + col * STEP}px`
+    c.append(h('div', null, d), h('div', null, t))
+    axis.append(c)
+  })
+
+  // the cards
+  const cardEls = new Map()
+  for (const k of place.values()) {
+    k.y = rowTop[k.row] + ROW_PAD + k.lane * (CH + LANE_GAP)
+    const a = k.a
+    const el = h('div', 'act')
+    el.dataset.anchor = a.ref
+    el.dataset.anchorText = `#${a.id} ${a.summary}`
+    el.style.left = `${k.x}px`
+    el.style.top = `${k.y}px`
+    el.style.width = `${CW}px`
+    el.style.height = `${CH}px`
+    const hd = h('div', 'hd')
+    hd.dataset.thimbleChrome = ''
+    const pl = h('span', 'pl', a.thread)
+    hd.append(h('span', null, `#${a.id}`), h('span', 'tag', a.tag), pl)
+    el.append(hd, h('div', 'sm', a.summary))
+    if (a.m >= 0 && D.marks[a.m]) {
+      const colour = markColour(D.marks[a.m])
+      const tick = h('i', 'tick')
+      tick.style.background = colour
+      el.append(tick)
+    }
+    const when = a.time ? a.time.replace('T', ' ').replace('Z', ' UTC') : 'Time unknown'
+    el.title = `${a.summary}\n${a.account} · ${when}\n${a.place}`
+    el.onclick = () => { if (!String(getSelection() || '')) thimble.navigate(a.ref) }
+    el.onmouseenter = () => focus({ id: a.id })
+    el.onmouseleave = () => focus(null)
+    plot.append(el)
+    cardEls.set(a.id, el)
+  }
+
+  // the links
+  const svg = s('svg', { id: 'links', width: plotW, height })
+  const defs = s('defs')
+  svg.append(defs)
+  const markers = new Map()
+  const marker = (colour) => {
+    if (markers.has(colour)) return markers.get(colour)
+    const id = `m${markers.size}`
+    const m = s('marker', { id, viewBox: '0 0 10 10', refX: 9, refY: 5, markerWidth: 7, markerHeight: 7, orient: 'auto-start-reverse', markerUnits: 'userSpaceOnUse' })
+    m.append(s('path', { d: 'M0,1 L10,5 L0,9 z', fill: colour, class: 'arrow' }))
+    defs.append(m)
+    markers.set(colour, id)
+    return id
+  }
+  const linkEls = []
+  for (const r of routes) {
+    const colour = typeColour(r.x.type)
+    const S = r.S, T = r.T
+    const ty = gapTop[r.gap] + GAP_MIN / 2 + r.track * TRACK + TRACK / 2 + 2
+    const sy = r.sTop ? S.y : S.y + CH
+    const tEdge = r.tTop ? T.y : T.y + CH
+    const pts = [[r.xs, sy], [r.xs, ty], [r.xt, ty], [r.xt, tEdge + (r.tTop ? -1 : 1)]]
+    const g = s('g')
+    g.append(s('path', { d: roundPath(pts, 5), stroke: colour, 'marker-end': `url(#${marker(colour)})` }))
+    g.append(s('circle', { cx: r.xs, cy: sy, r: 3, fill: colour }))
+    svg.append(g)
+    const lb = h('div', 'lbl', r.text)
+    lb.style.left = `${r.lx}px`
+    lb.style.top = `${ty - 8.5}px`
+    lb.style.color = colour
+    lb.style.borderColor = colour
+    plot.append(lb)
+    linkEls.push({ r, g, lb })
+  }
+  plot.append(svg, axis)
+  plot.prepend(heads)
+  L = { cardEls, linkEls, height, width: plotW }
+  size()
+}
+// a polyline of right angles with rounded corners
+function roundPath(pts, rad) {
+  let d = `M${pts[0][0]},${pts[0][1]}`
+  for (let i = 1; i < pts.length - 1; i++) {
+    const [x0, y0] = pts[i - 1], [x1, y1] = pts[i], [x2, y2] = pts[i + 1]
+    const r = Math.min(rad, Math.hypot(x1 - x0, y1 - y0) / 2, Math.hypot(x2 - x1, y2 - y1) / 2)
+    const a = [x1 - Math.sign(x1 - x0) * r, y1 - Math.sign(y1 - y0) * r]
+    const b = [x1 + Math.sign(x2 - x1) * r, y1 + Math.sign(y2 - y1) * r]
+    d += ` L${a[0]},${a[1]} Q${x1},${y1} ${b[0]},${b[1]}`
+  }
+  const last = pts[pts.length - 1]
+  return d + ` L${last[0]},${last[1]}`
+}
+
+let L = null
+// hovering a card lights it, its links and the cards they reach; hovering an agent lights its cards and their links
+function focus(f) {
+  const plot = document.getElementById('plot')
+  if (!f || !L) { plot.classList.remove('focus'); return }
+  const lit = new Set()
+  for (const a of D.actions) if (f.id === a.id || f.account === a.account) lit.add(a.id)
+  const mine = new Set(lit)
+  for (const { r, g, lb } of L.linkEls) {
+    const on = mine.has(r.x.from) || mine.has(r.x.to)
+    g.classList.toggle('lit', on)
+    lb.classList.toggle('lit', on)
+    if (on) { lit.add(r.x.from); lit.add(r.x.to) }
+  }
+  for (const [id, el] of L.cardEls) el.classList.toggle('lit', lit.has(id))
+  plot.classList.add('focus')
+}
+function size() {
+  const head = document.getElementById('head').offsetHeight
+  const wrap = document.getElementById('wrap')
+  const bar = wrap.scrollWidth > wrap.clientWidth ? 14 : 0
+  if (thimble.size) thimble.size(head + (L ? L.height : 0) + bar + 2)
+}
+function draw() {
+  if (!D) return
+  drawnW = document.documentElement.clientWidth
+  renderHead()
+  layout()
+}
+
+let resizeT = null, drawnW = 0
+new ResizeObserver(() => {
+  const w = document.documentElement.clientWidth
+  if (w === drawnW) return
+  clearTimeout(resizeT)
+  resizeT = setTimeout(draw, 80)
+}).observe(document.documentElement)
+thimble.onLabels((state) => {
+  labelState = { labels: state.labels || [], all: state.all || null }
+  if (D) draw()
+})
+thimble.onInit((init) => {
+  mode = init.mode
+  D = init.data
+  draw()
+  requestAnimationFrame(() => thimble.settled())
+})
+thimble.onOpen((place) => {
+  const t = place && place.target
+  const el = t && t.ref && L ? [...L.cardEls.values()].find((e) => e.dataset.anchor === t.ref) : null
+  if (el) el.scrollIntoView({ block: 'nearest', inline: 'center' })
+})
+</script>
+</body>
+</html>
