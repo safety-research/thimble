@@ -95,7 +95,6 @@ FEEDBACK = "feedback"  # /thimble feedback: the problem report (feedback.py)
 REPORT_LINE = ("thimble: to report it, say `/thimble feedback` or run `thimble feedback \"the server did not start\"` in a "
                "shell; either writes a zip with the logs to send the developer.")
 UNINSTALL_SHELL_LINE = "thimble: uninstall is a shell command, not a /thimble action. Run `thimble uninstall` in a terminal; it says what it will remove and asks first."
-TRUST_SHELL_LINE = "thimble: trust is a shell command, not a /thimble action. Run `thimble trust` in a terminal; it asks first."
 # What the analyst sees on the hook and Monitor routes. Each note says why channels are off, what differs on the route
 # used instead, then the fix, in terms of what the analyst sees. On the Monitor route permission prompts stay in the
 # terminal, and after /clear the Monitor is gone, so that note asks for /thimble again. A reason with no fix the analyst
@@ -578,7 +577,7 @@ def start(p: int | None = None) -> dict[str, Any]:
 
 def start_vite(ui: int, p: int, environ: dict[str, str] | None = None) -> int | None:
     if not (FRONTEND_DIR / "node_modules").is_dir():
-        _log(f"not starting Vite: {FRONTEND_DIR / 'node_modules'} is missing (run `npm ci` in frontend/)")
+        _log(f"not starting Vite: {FRONTEND_DIR / 'node_modules'} is missing")
         return None
     env = dict(environ or _server_environ(resolve_env(), p, ui))
     env["BACKEND_PORT"] = str(p)
@@ -1728,9 +1727,12 @@ def source_changed_text(st: dict[str, Any], up: bool) -> str:
     return text + ("" if off is None else f"; auto-restart disabled ({off})")
 
 
-BROWSER_FETCH = "backend/.venv/bin/python -m playwright install chromium-headless-shell"
 BROWSER_DEPS = "sudo backend/.venv/bin/python -m playwright install-deps chromium-headless-shell"
-PAGES_FETCH = "npx playwright install chromium-headless-shell"  # in frontend/
+
+
+def browser_fix() -> str:
+    """The doctor's fix for a missing headless Chromium: the installer's answer that downloads it."""
+    return f": `bash {config.REPO_ROOT / 'scripts' / 'install.sh'} --browser bundled` downloads it, then `thimble restart`"
 
 
 def playwright_browsers_dir(environ: Mapping[str, str] | None = None, platform_: str | None = None) -> Path:
@@ -1774,7 +1776,7 @@ def harness_line(url: str, up: bool, commands: bool = True) -> str:
     spec = importlib.util.find_spec("playwright")
     fetched = headless_fetched(Path(spec.origin).parent / "driver" / "package" / "browsers.json" if spec and spec.origin
                                else Path("-"))
-    fix = f": run `{BROWSER_FETCH}` in {config.REPO_ROOT}, then `thimble restart`" if commands else ""
+    fix = browser_fix() if commands else ""
     if up:
         status, got = _request("GET", f"{url}/api/render/status")
         if status == 200 and isinstance(got, dict):
@@ -1797,7 +1799,7 @@ def pages_line(commands: bool = True) -> str:
         return "n/a (the frontend's packages are not installed)"
     if headless_fetched(browsers_json):
         return "headless Chromium fetched"
-    fix = f": run `{PAGES_FETCH}` in {FRONTEND_DIR}, then `thimble restart`" if commands else ""
+    fix = browser_fix() if commands else ""
     return f"no headless Chromium in {playwright_browsers_dir()}, so {headless.SKIPPED[headless.PAGES]}{fix}"
 
 
@@ -1922,8 +1924,10 @@ def trust_line(workspaces: Path, commands: bool = True) -> str:
     path = bg_session.claude_json()
     if claude_changes.trusted(workspaces, claude_changes._read(path)):
         return f"Claude Code trusts {workspaces} ({path})"
-    return (f"Claude Code does not trust {workspaces} ({path}), so terminal-first mode is off unless you turn it on, and "
-            "then its background sessions are refused" + ("; `thimble trust` trusts it, after asking" if commands else ""))
+    install = config.REPO_ROOT / "scripts" / "install.sh"
+    return (f"Claude Code does not trust {workspaces} ({path}), so the orientation, its critic and the writers run as "
+            "`claude -p` sessions, not in the terminal's agent tray"
+            + (f"; `bash {install} --trust-workspaces` trusts it" if commands else ""))
 
 
 def human_bytes(n: float) -> str:
@@ -2142,14 +2146,22 @@ def doctor_text(commands: bool = True) -> str:
     # the log's lines come last, so a problem report sent without the logs cuts them all (feedback.DOCTOR_LOG_MARK)
     lines.append(f"  log tail ({log_path()}):")
     recent = _log_lines(LOG_SCAN_BYTES)
-    lines += [f"    {ln}" for ln in (recent[-LOG_TAIL:] if recent is not None else ["(no log yet)"])]
     errors = [ln for ln in recent or [] if _ERROR_LINE.search(ln)][-LOG_ERRORS:]
+    tail = recent[-LOG_TAIL:] if recent is not None else ["(no log yet)"]
+    if not commands:
+        tail, errors = ([LOG_LINE_LEFT_OUT if _INSTALL_COMMAND.search(ln) else ln for ln in part] for part in (tail, errors))
+    lines += [f"    {ln}" for ln in tail]
     lines.append(f"  recent errors in the log ({len(errors)} of its last {human_bytes(LOG_SCAN_BYTES)}):"
                  if errors else f"  recent errors in the log: none in its last {human_bytes(LOG_SCAN_BYTES)}")
     lines += [f"    {ln[:400]}" for ln in errors]
     return "\n".join(lines)
 
 
+# a log line that names a command installing software, which the doctor for a model leaves out
+_INSTALL_COMMAND = re.compile(r"\b(apt(-get)?|brew|dnf|yum|pacman|apk|snap|port|pipx?|pip3|npm|pnpm|yarn|playwright|gem|cargo)"
+                              r" +(install|ci|add|i)\b|\buv +(pip|sync|add|tool)\b|install-deps|\binstall\.sh\b|\bsudo +\S"
+                              r"|`thimble doctor`|\b(curl|wget)\b[^|]*\| *(ba|z)?sh\b", re.I)
+LOG_LINE_LEFT_OUT = "(a line that names an install command, left out here)"
 LOG_SCAN_BYTES = 2_000_000  # how far back from its end the doctor reads the server log
 LOG_ERRORS = 8  # the most recent error lines it lists
 # a thimble logger's ERROR or CRITICAL line, uvicorn's `ERROR:` line, or the last line of a traceback
@@ -2320,8 +2332,8 @@ def cmd_ensure(args: argparse.Namespace) -> int:
             sys.stdout.write(text)
             return 0
     action = ALIASES.get((args.action or "").strip(), (args.action or "").strip())
-    if action in ("uninstall", "trust"):
-        print(UNINSTALL_SHELL_LINE if action == "uninstall" else TRUST_SHELL_LINE)
+    if action == "uninstall":
+        print(UNINSTALL_SHELL_LINE)
         return 0
     if action == FEEDBACK:  # /thimble feedback: the report needs no server (plugin/bin/thimble runs it before this)
         from . import feedback  # noqa: PLC0415

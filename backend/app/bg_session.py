@@ -21,7 +21,7 @@ Start. agent_session builds the `claude -p` command as for any session and hands
 --settings `env`, since the background service starts the session with its own environment. `claude --bg` refuses a
 folder Claude Code does not trust; install.sh asks once to trust thimble's workspaces folder (claude_changes). Without
 that trust (trusted), terminal-first mode is off unless the analyst turns it on (orientation.default_terminal_first), and
-a refusal is reported with the command that does it (the bg-untrusted hint). BgProc stands in for the process agent_session
+a refusal says how the analyst can trust the folder (the bg-untrusted hint). BgProc stands in for the process agent_session
 follows: a run ends when the session is idle, its
 transcript's last turn has ended and it has no background work, while the session itself goes on for the analyst. A
 session whose turn ended while a background shell of its own runs on counts as idle once its transcript has been quiet
@@ -1560,8 +1560,7 @@ async def start(c: str, key: str, argv: list[str], folder: Path, env: dict[str, 
     if code != 0 and UNTRUSTED_RE.search(out):
         from . import tools  # noqa: PLC0415
 
-        raise RuntimeError(tools.hint("bg-untrusted", folder=str(folder), workspaces=str(config.WORKSPACES_DIR),
-                                      thimble=str(config.REPO_ROOT / "plugin" / "bin" / "thimble")))
+        raise RuntimeError(tools.hint("bg-untrusted", folder=str(folder), workspaces=str(config.WORKSPACES_DIR)))
     if code != 0:
         raise RuntimeError(f"`claude --bg` failed (exit {code}): {out.strip()[-400:]}")
     m = BG_ID_RE.search(out)

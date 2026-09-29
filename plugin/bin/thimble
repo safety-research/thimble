@@ -29,8 +29,6 @@
 #   thimble uninstall [--yes] [--keep-home]
 #                                        remove the install: the plugin registration, ~/.local/bin/thimble, $THIMBLE_HOME
 #                                        (bash, below: it needs no venv; a clone folder is left in place)
-#   thimble trust [--remove]             install.sh's trust question for thimble's workspaces folder, asked again on a
-#                                        terminal; --remove takes back the entry it added (bash, below)
 #
 #   thimble status                       one line: the server, the orientation, the queue (`server status`)
 #   thimble help | -h | --help           thimble's usage (usage, below)
@@ -76,8 +74,6 @@ usage: thimble [claude flags...]          start thimble in this folder: a new Cl
        thimble feedback ["what went wrong"] [--no-logs]
                                           write a problem report to send the developer
        thimble update [--from <zip>]      bring the install up to date
-       thimble trust [--remove]           let Claude Code trust thimble's workspaces folder, which terminal-first
-                                          mode needs, after asking; --remove takes that back
        thimble uninstall [--yes] [--keep-home]
 EOF
 }
@@ -120,24 +116,6 @@ feedback() {
     printf 'thimble: %s could not write the report (exit %s)%s\n' "$py" "$rc" "$( [ "$py" = python3 ] || echo '; trying python3' )"
   done
   [ "$skill" = 1 ] && exit 0; exit "$rc"
-}
-
-# trust [--remove]: the trust of thimble's workspaces folder in Claude Code's config, the one entry install.sh asks about
-# (backend/app/claude_changes.py trust_command, which asks on a terminal first), run with python3, else the tree's venv.
-trust() {
-  local tree py usage="usage: thimble trust [--remove]"
-  case "$*" in
-    "" | --remove) ;;
-    -h | --help) printf '%s\n' "$usage" "  asks, then marks thimble's workspaces folder trusted in Claude Code's config" \
-                   "  --remove  takes back the entry thimble added"; exit 0;;
-    *) printf '%s\n' "$usage" >&2; exit 2;;
-  esac
-  tree="$("$here/thimble-app-dir")" || exit 1
-  for py in python3 "$tree/backend/.venv/bin/python"; do
-    command -v "$py" >/dev/null 2>&1 && exec "$py" -I "$tree/backend/app/claude_changes.py" trust-command "$tree" "$@"
-  done
-  printf 'thimble trust: no python3 and no %s to run it with\n' "$tree/backend/.venv/bin/python" >&2
-  exit 1
 }
 
 # thimble uninstall [--yes] [--keep-home]: bash, so it works when the venv is missing or inside the tree being removed.
@@ -404,8 +382,6 @@ case "${1:-}" in
     ;;  # a session: below
   uninstall)
     shift; uninstall "$@";;
-  trust)
-    shift; trust "$@";;
   feedback)
     shift; feedback "$@";;
   status)
