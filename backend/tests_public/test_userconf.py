@@ -82,7 +82,7 @@ def test_the_settings_pane_writes_where_the_value_it_shows_came_from(workspaces_
 
 def test_what_a_session_gets_from_the_config(workspaces_tmp, monkeypatch):
     """Install commands go to the analyst by default, in every mode, including those Claude Code's rules miss; "deny"
-    refuses them and "allow" leaves them to the mode. Memory is passed only when set. The dev agent's Bash goes to the
+    refuses them and "allow" leaves them to the mode, but for a view build with no network, which refuses them. Memory is passed only when set. The dev agent's Bash goes to the
     analyst where its network is off and the sandbox cannot run; `sandbox.enforce` refuses to start a session without
     the sandbox."""
     monkeypatch.setenv("THIMBLE_SANDBOX", "1")
@@ -100,6 +100,9 @@ def test_what_a_session_gets_from_the_config(workspaces_tmp, monkeypatch):
     assert orient.settings()["autoMemoryEnabled"] is False and "WebFetch" in orient.settings()["permissions"]["deny"]
     _write(userconf.global_file(), {"installs": "allow"})
     assert userconf.session(CORPUS, "orientation").verdict("Bash", {"command": "pip install x"}) == ""
+    view_build = userconf.session(CORPUS, "dev")
+    view_build.offline = True
+    assert view_build.verdict("Bash", {"command": "pip install x"}) == "deny"
     monkeypatch.setenv("THIMBLE_SANDBOX", "0")
     assert "Bash" in userconf.session(CORPUS, "dev").settings()["permissions"]["ask"]
     assert "Bash" not in (userconf.session(CORPUS, "orientation").settings()["permissions"].get("ask") or [])

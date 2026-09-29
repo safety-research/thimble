@@ -484,6 +484,7 @@ class Session:
     sandboxed: bool  # its Bash runs in Claude Code's sandbox
     own_bash: list[str] = field(default_factory=list)  # commands it runs unasked in every case (allow_own)
     hosted: bool = True  # False for a session nobody can answer, which is refused what it would ask for
+    offline: bool = False  # a view build whose network is off, whose deny rules refuse every install (dev.view_fence)
 
     @property
     def network(self) -> bool:
@@ -531,13 +532,13 @@ class Session:
 
     def verdict(self, tool: str, inp: Any) -> str:
         """For a Bash call: `deny` or `ask` when the config refuses it or sends it to the analyst whatever the
-        permission mode, an install command by `installs` and, when bash_asks, any other command; `own` for one of the
-        session's own commands then, which runs unasked; '' for any other call."""
+        permission mode: an install command by `installs`, or refused when offline, and, when bash_asks, any other
+        command; `own` for one of the session's own commands then, which runs unasked; '' for any other call."""
         command = inp.get("command") if tool == "Bash" and isinstance(inp, dict) else None
         if not isinstance(command, str):
             return ""
-        if self.installs != "allow" and sandbox_allow.installs(command):
-            return self.installs
+        if (self.offline or self.installs != "allow") and sandbox_allow.installs(command):
+            return "deny" if self.offline else self.installs
         if self.bash_asks:
             return "own" if allow_own(command, self.own_bash) else "ask"
         return ""

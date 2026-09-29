@@ -2367,6 +2367,7 @@ def view_fence(c: str, slug: str, corpus: Path, folder: Path, conf: userconf.Ses
     out = read_only_fence(view_read_only(corpus, folder), outside=(check, f"{check} *"), conf=conf)
     if conf.network:
         return {**out, "env": view_env(slug, offline=False)}
+    conf.offline = True
     perms = dict(out.get("permissions") or {})
     deny = [*(perms.get("deny") or []), *offline_deny()]
     return {**out, "permissions": {**perms, "deny": deny}, "env": view_env(slug)}
