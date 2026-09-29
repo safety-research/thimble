@@ -1898,12 +1898,13 @@ def sandbox_lines(commands: bool = True) -> list[str]:
     except Exception:  # noqa: BLE001
         box = userconf.DEFAULTS["sandbox"]
     if box.get("use") == "never":
-        return ["  bash sandbox: off in thimble's config (sandbox.use \"never\"), so the agents' Bash runs with your "
-                "user's access, limited only by each agent's permission mode"]
+        return ["  bash sandbox: off in thimble's config (sandbox.use \"never\"), so "
+                + ("thimble's config (sandbox.enforce) refuses to start the agents" if box.get("enforce") else
+                   "the agents' Bash runs with your user's access, limited only by each agent's permission mode")]
     if not missing:
-        return ["  bash sandbox: runs (every agent's Bash runs in it, except a code ticket's: no writes outside the "
-                "agent's folder and no network unless the agent's network is \"on\"; Claude Code's sandbox adds an empty "
-                ".claude/.cc-writes/ folder where its commands run, the corpus folder among them)"]
+        return ["  bash sandbox: runs (every agent's Bash runs in it: no writes outside the agent's folder and no "
+                "network unless the agent's network is \"on\"; Claude Code's sandbox adds an empty .claude/.cc-writes/ "
+                "folder where its commands run, the corpus folder among them)"]
     after = ("thimble's config (sandbox.enforce) refuses to start the agents" if box.get("enforce") else
              "the agents' Bash runs outside it, under each agent's permission mode")
     head = "  bash sandbox: off, missing " + ", ".join(missing) + "; " + after

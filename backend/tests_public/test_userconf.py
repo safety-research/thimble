@@ -83,8 +83,8 @@ def test_the_settings_pane_writes_where_the_value_it_shows_came_from(workspaces_
 def test_what_a_session_gets_from_the_config(workspaces_tmp, monkeypatch):
     """Install commands go to the analyst by default, in every mode, including those Claude Code's rules miss; "deny"
     refuses them and "allow" leaves them to the mode, but for a view build with no network, which refuses them. Memory is passed only when set. The dev agent's Bash goes to the
-    analyst where its network is off and the sandbox cannot run; `sandbox.enforce` refuses to start a session without
-    the sandbox."""
+    analyst where its network is off and the sandbox cannot run; `sandbox.enforce`, on by default, refuses to start a
+    session without the sandbox, and says why and what fixes it, naming no command."""
     monkeypatch.setenv("THIMBLE_SANDBOX", "1")
     orient = userconf.session(CORPUS, "orientation")
     perms = orient.settings()["permissions"]
@@ -108,14 +108,20 @@ def test_what_a_session_gets_from_the_config(workspaces_tmp, monkeypatch):
     view_build.offline = True
     assert view_build.verdict("Bash", {"command": "pip install x"}) == "deny"
     monkeypatch.setenv("THIMBLE_SANDBOX", "0")
+    with pytest.raises(userconf.ConfigError, match="THIMBLE_SANDBOX=0 turns it off"):
+        userconf.session(CORPUS, "writer")
+    _write(userconf.global_file(), {"installs": "allow", "sandbox": {"enforce": False}})
     assert "Bash" in userconf.session(CORPUS, "dev").settings()["permissions"]["ask"]
     assert "Bash" not in (userconf.session(CORPUS, "orientation").settings()["permissions"].get("ask") or [])
-    _write(userconf.global_file(), {"agents": {"dev": {"network": "on"}}})
+    _write(userconf.global_file(), {"sandbox": {"enforce": False}, "agents": {"dev": {"network": "on"}}})
     assert not userconf.session(CORPUS, "dev").bash_asks
-    _write(userconf.global_file(), {"sandbox": {"enforce": True}})
-    with pytest.raises(userconf.ConfigError, match="sandbox.enforce"):
-        userconf.session(CORPUS, "writer")
-    monkeypatch.setenv("THIMBLE_SANDBOX", "1")
+    _write(userconf.global_file(), {})
+    monkeypatch.delenv("THIMBLE_SANDBOX")
+    monkeypatch.setattr(userconf, "sandbox_runs", lambda: False)
+    with pytest.raises(userconf.ConfigError, match="can't run on this machine") as e:
+        userconf.session(CORPUS, "orientation")
+    assert "--sandbox-deps" in str(e.value) and "install.sh" not in str(e.value)
+    monkeypatch.setattr(userconf, "sandbox_runs", lambda: True)
     assert userconf.session(CORPUS, "writer").sandboxed
     with pytest.raises(userconf.ConfigError, match="run outside it"):
         userconf.session(CORPUS, "dev", sandbox=False)

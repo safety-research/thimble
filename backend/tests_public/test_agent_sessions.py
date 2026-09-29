@@ -21,7 +21,7 @@ from conftest import print_sessions
 from fastapi import HTTPException
 
 from app import (agent_session, agents, channel, config, hook_auth, ledger, modes, orient_session, permission_hook,
-                 session, tools)
+                 session, tools, userconf)
 
 CORPUS = "mini"
 KEY = orient_session.KEY
@@ -120,7 +120,8 @@ def fake(tmp_path, monkeypatch) -> Path:
     monkeypatch.delenv("FAKE_MODE", raising=False)
     monkeypatch.delenv("FAKE_SLEEP", raising=False)
     print_sessions(monkeypatch)
-    monkeypatch.setenv("THIMBLE_SANDBOX", "0")  # the fence without the sandbox
+    monkeypatch.setenv("THIMBLE_SANDBOX", "0")  # the fence without the sandbox, which the config then does not require
+    monkeypatch.setitem(userconf.DEFAULTS["sandbox"], "enforce", False)
     return out
 
 

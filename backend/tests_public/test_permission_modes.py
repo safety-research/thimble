@@ -17,7 +17,7 @@ import pytest
 from conftest import print_sessions
 from fastapi import HTTPException
 
-from app import agent_session, agents, cc_channel, channel, config, ledger, modes, orient_session, session, tools
+from app import agent_session, agents, cc_channel, channel, config, ledger, modes, orient_session, session, tools, userconf
 
 CORPUS = "mini"
 KEY = orient_session.KEY
@@ -114,7 +114,9 @@ def fake(tmp_path, monkeypatch) -> Path:
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "claude-config"))
     monkeypatch.setenv("THIMBLE_CHANNEL", "plugin:thimble@inline")
     monkeypatch.delenv("FAKE_MODE", raising=False)
-    monkeypatch.setenv("THIMBLE_SANDBOX", "0")  # the fence without the sandbox; the fence's test turns it on
+    # the fence without the sandbox, which the config then does not require; the fence's test turns it on
+    monkeypatch.setenv("THIMBLE_SANDBOX", "0")
+    monkeypatch.setitem(userconf.DEFAULTS["sandbox"], "enforce", False)
     print_sessions(monkeypatch)
     return out
 
