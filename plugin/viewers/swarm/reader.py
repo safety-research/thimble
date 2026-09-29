@@ -429,12 +429,14 @@ def applies(paths):
     them) by SWARM_ACCOUNTS accounts or more, SWARM_PLACES places or more that three or more of them act on, and
     SWARM_NAMING of the actions on shared places naming another account that acts there. `claims` are the files that
     hold the actions, `found` says what was found. It reads DETECT_RECORDS of each of the first DETECT_FILES record
-    files, the shallowest first, while DETECT_BYTES_ALL last."""
-    files = sorted((p for p in paths if p.endswith((".jsonl", ".csv"))), key=lambda p: (p.count("/"), p))[:DETECT_FILES]
-    acts, budget = {}, [DETECT_BYTES_ALL]
-    for path in files:
+    files, the shallowest first, while DETECT_BYTES_ALL last; when that leaves files unread, `found` says so, and a
+    file name that holds actions in two or more sibling folders is claimed in all of them."""
+    candidates = sorted((p for p in paths if p.endswith((".jsonl", ".csv"))), key=lambda p: (p.count("/"), p))
+    acts, budget, read = {}, [DETECT_BYTES_ALL], 0
+    for path in candidates[:DETECT_FILES]:
         if budget[0] <= 0:
             break
+        read += 1
         recs = _head(path, DETECT_RECORDS, budget)
         f = _fields([(0, 0, rec) for rec in recs])
         if not (("actor" in f or "anon" in f) and "text" in f):
@@ -469,17 +471,30 @@ def applies(paths):
     share = naming / on_shared if on_shared else 0.0
     if len(accounts) < SWARM_ACCOUNTS or shared < SWARM_PLACES or share < SWARM_NAMING:
         return None
-    return {"claims": _claims(list(acts)),
+    unread = read < len(candidates)
+    return {"claims": _claims(list(acts), siblings=unread),
             "found": f"{len(accounts):,} accounts act on {shared:,} places that three or more of them share, and "
-                     f"{share:.0%} of what they write there names another account acting on the place."}
+                     f"{share:.0%} of what they write there names another account acting on the place"
+                     + (f" (read from the first {read:,} of {len(candidates):,} record files)." if unread else ".")}
 
 
-def _claims(paths):
-    """The files as claims: each one, or a folder's files by one glob when it holds more than CLAIMS_LISTED."""
+def _claims(paths, siblings=False):
+    """The files as claims: each one, or a folder's files by one glob when it holds more than CLAIMS_LISTED. With
+    `siblings`, a file name that two or more folders under one parent hold is claimed in every folder there
+    (<parent>/*/<name>), for the folders of the same shape that were not read."""
+    out = []
+    if siblings:
+        folders = {}
+        for p in paths:
+            d, _, name = p.rpartition("/")
+            if d:
+                folders.setdefault((d.rpartition("/")[0], name), set()).add(d)
+        wide = {k for k, ds in folders.items() if len(ds) > 1}
+        out += sorted(f"{g + '/' if g else ''}*/{name}" for g, name in wide)
+        paths = [p for p in paths if "/" not in p or (p.rpartition("/")[0].rpartition("/")[0], p.rpartition("/")[2]) not in wide]
     by_dir = {}
     for p in paths:
         by_dir.setdefault(p.rpartition("/")[0], []).append(p)
-    out = []
     for d, ps in sorted(by_dir.items()):
         if len(ps) <= CLAIMS_LISTED:
             out += sorted(ps)
