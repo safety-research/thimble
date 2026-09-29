@@ -19,8 +19,9 @@ wrote in place of ` · `. The workspace's own lines (the statusline, the news) s
 Start. agent_session builds the `claude -p` command as for any session and hands it to start(), which turns it into a
 `claude --bg` command: the first message goes on the command line, and the session's own environment goes in the
 --settings `env`, since the background service starts the session with its own environment. `claude --bg` refuses a
-folder Claude Code does not trust; install.sh asks once to trust thimble's workspaces folder (claude_changes), and a
-refusal is reported with the flag that does it (the bg-untrusted hint). BgProc stands in for the process agent_session
+folder Claude Code does not trust; install.sh asks once to trust thimble's workspaces folder (claude_changes). Without
+that trust (trusted), terminal-first mode is off unless the analyst turns it on (orientation.default_terminal_first), and
+a refusal is reported with the flag that does it (the bg-untrusted hint). BgProc stands in for the process agent_session
 follows: a run ends when the session is idle, its
 transcript's last turn has ended and it has no background work, while the session itself goes on for the analyst. A
 session whose turn ended while a background shell of its own runs on counts as idle once its transcript has been quiet
@@ -168,6 +169,34 @@ def terminal_first(c: str) -> bool:
 def wanted(c: str, kind: str) -> bool:
     """Whether a session of `kind` (orient, writer, critique) runs as a background session in workspace `c`."""
     return terminal_first(c) and kind in PROXY_TYPES
+
+
+def claude_json() -> Path:
+    """Claude Code's global config, which keeps the folders it trusts: .claude.json in the config dir of the Claude Code
+    thimble serves (config.claude_config_env), else ~/.claude.json."""
+    value = config.claude_config_env()
+    return Path(value).expanduser() / ".claude.json" if value else Path.home() / ".claude.json"
+
+
+_trust_read: dict[str, tuple[tuple[int, int], dict[str, Any]]] = {}  # claude_json's path -> ((mtime, size), its data)
+
+
+def trusted(c: str) -> bool:
+    """Whether Claude Code trusts workspace `c`'s folder, below which its background sessions run (module note, start),
+    by the folder's own entry or one above it such as install.sh's for the workspaces folder (claude_changes). The file
+    is parsed again only when it changed, since the statusline asks on each refresh (orientation.terminal_first)."""
+    from . import claude_changes  # noqa: PLC0415
+
+    path = claude_json()
+    try:
+        st = path.stat()
+    except OSError:
+        return False
+    stamp = (st.st_mtime_ns, st.st_size)
+    kept = _trust_read.get(str(path))
+    if kept is None or kept[0] != stamp:
+        kept = _trust_read[str(path)] = (stamp, claude_changes._read(path))
+    return claude_changes.trusted(config.WORKSPACES_DIR / c, kept[1])
 
 
 def kind_of(key: str) -> str:
