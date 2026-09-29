@@ -8,7 +8,7 @@ never belong in the tree. scripts/check.sh and CI run it.
     DIR            the tree to check (default: this repo, its tracked files plus untracked ones git does not ignore);
                    a folder that is not a git checkout is checked whole
     --no-gitleaks  skip the secret scan (CI always runs it)
-    --digest TERM  print the line that adds TERM to TERMS, and exit
+    --digest TERM  print the line that adds TERM to the private list as a digest, and exit
 
 Kinds of hit:
     private     a name that belongs to private material: a corpus, a machine, a home folder, an unreleased name
@@ -19,15 +19,20 @@ Kinds of hit:
                 an import of ./Checks can load checks.ts in place of Checks.tsx, and the two folders are one
     secret      a gitleaks finding
 
-TERMS holds SHA-256 digests rather than the words, so the list does not publish the names it keeps out. A word of a
-line, or two neighbouring words joined with "-", matches when its digest is listed, in its own spelling or in lower
-case: with the digest of "red-kite" listed, "red_kite", "red kite" and "Red-Kite" all match.
+The private and maintainer names are kept out of this repo, which is public. They come from a private list: the
+environment variable THIMBLE_PRIVATE_TERMS (CI sets it from the repository secret of that name), else the file that
+THIMBLE_PRIVATE_TERMS_FILE names, else ~/.config/thimble/private-terms. Without a list those two kinds are not checked,
+and the output says so. Each line of the list is `<kind> <term>`, where kind is private or maintainer and term is a
+word, two words joined with "-", or the SHA-256 digest of one; blank lines and lines starting with # are skipped. A word
+of a line, or two neighbouring words joined with "-", matches a listed term in its own spelling or in lower case: with
+"red-kite" listed, "red_kite", "red kite" and "Red-Kite" all match.
 """
 from __future__ import annotations
 
 import argparse
 import hashlib
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -36,32 +41,12 @@ import tempfile
 from collections import Counter, defaultdict
 from pathlib import Path
 
-TERMS: dict[str, str] = {
-    "84a4b19e19aa4e2a562ae0286b1e188ef4f4f9a98a92b8730d20a1e0f2882523": "maintainer",
-    "edd2916124c93479ced1dd30f618d002478a35eeec25f633c33b9de974e201ad": "maintainer",
-    "ca20bc284dca33ca4a0b37047d96317dcebd8a1159f8eaa8846284cabffa5508": "maintainer",
-    "966cee0ffd2059c07ad04128c6dbe073270254c6cc37194f4af3ac1dae745037": "maintainer",
-    "0765290967c4542befc6ed93b0a69d7254e58dedb1823a3936c0192059a0e7b7": "maintainer",
-    "40faadd855a600fd8e1125f1227cf2f3c7758b514a1b57e9558e25bd6f0d9346": "maintainer",
-    "2269a2f862c3ec36d8e6ff5a9391f7a160b6bef68cca09b61f33aee46b7901da": "maintainer",
-    "9a6285a78267e722658e50cf74550ecb47340dd93cf003c8d23327af2947ee72": "private",
-    "7ff547fd1e7e3c6d57c91ba24966f7e6346be29c98431130b246982ebd4cbbbc": "private",
-    "040e0f2afab838a1bb8917e50104daec7a677cf0d97d219b750052dcf1bbcecd": "private",
-    "78a1b7778633522827c4d4a27776b59922351cddd2203ed65c72272ba0c3bfa1": "private",
-    "3c7a4b6f9fdb74d9892cca93e119bfb25fd3f6ad2517d01ca9c4d87c6e617c8c": "private",
-    "2ff8ddd61f5e0a0c72ad9390b7c448e32b5055707f1be2e65a361b24f2a180ce": "private",
-    "553133ea03bb73bd9d747281fdfc7d1164d8cb59f4d638d198c7443c681c6848": "private",
-    "bfee7d219a3ef750e97b5f573536eb919730559e698210747ece4d19b4a6afa6": "private",
-    "7b8913941bd60ec5fbd1c8c0c1506231973263f3357af5fe7ae5c64e78551289": "private",
-    "11aa2d6d6532859ee020bec416be2ef13c8d96f181086666e7433ce5fece163e": "private",
-    "b2b692d7fbee7c2222f8a7cb43334d6febf135723c1941b461a6aca25d8e2d30": "private",
-    "426e5e34acd037d3c6f4066c81a101fdd0e6bfeb6e06740e3b45fc7104279add": "private",
-    "9fe37cb898d86ea769163a95ac48d5fe5241e40dc4ec9c8b938563d8832f4dbc": "private",
-    "0e420f434786a4e4f6ef9ffc3330fcca43cf37a95cda0b239a8c488448b3f745": "private",
-    "aa033bda2a7c6092d9d81213bfdfc7179f525d8f2801e55eb1252ba22bfb6cb6": "private",
-    "2b61e117ac894f8ac9a777f7298b4952212712f9f3b76a77c54c16cab7d891a8": "private",
-    "1db75045812446d78b988690eee79ba892125fd58edb1554b6d54dc6de2f148e": "private",
-}
+TERMS: dict[str, str] = {}  # digest -> kind, from the private list (load_terms)
+TERMS_VAR = "THIMBLE_PRIVATE_TERMS"
+TERMS_FILE_VAR = "THIMBLE_PRIVATE_TERMS_FILE"
+TERMS_FILE = "~/.config/thimble/private-terms"
+KINDS = ("private", "maintainer")
+DIGEST = re.compile(r"[0-9a-f]{64}")
 # The files that name the maintainer on purpose: the marketplace owner, the contact address and the maintainer notes.
 MAINTAINER_FILES = {".claude-plugin/marketplace.json", "CLAUDE.md", "README.md", "backend/app/feedback.py"}
 # Third-party texts, lockfiles and the built UI (a release's): other people's names, generated hashes and minified
@@ -83,6 +68,31 @@ def digest(term: str) -> str:
     if term not in _digests:
         _digests[term] = hashlib.sha256(term.encode()).hexdigest()
     return _digests[term]
+
+
+def load_terms(env: dict[str, str]) -> tuple[dict[str, str] | None, str]:
+    """The private list as {digest: kind} and where it was read, or None and where it was looked for. Raises
+    ValueError on a line that is not `<kind> <term>` and on a THIMBLE_PRIVATE_TERMS_FILE that does not exist."""
+    if env.get(TERMS_VAR, "").strip():
+        text, source = env[TERMS_VAR], f"${TERMS_VAR}"
+    else:
+        named = env.get(TERMS_FILE_VAR, "")
+        path = Path(named or TERMS_FILE).expanduser()
+        if not path.is_file():
+            if named:
+                raise ValueError(f"{TERMS_FILE_VAR} names {path}, which is not a file")
+            return None, f"${TERMS_VAR}, ${TERMS_FILE_VAR} or {TERMS_FILE}"
+        text, source = path.read_text(), str(path)
+    terms = {}
+    for n, line in enumerate(text.splitlines(), 1):
+        parts = line.split(None, 1)
+        if not parts or parts[0].startswith("#"):
+            continue
+        if len(parts) != 2 or parts[0] not in KINDS:
+            raise ValueError(f"{source}:{n}: expected <{'|'.join(KINDS)}> <term>")
+        kind, term = parts[0], parts[1].strip()
+        terms[term if DIGEST.fullmatch(term) else digest(term)] = kind
+    return terms, source
 
 
 def listed(term: str) -> str | None:
@@ -180,19 +190,30 @@ def main() -> int:
     ap.add_argument("--digest", metavar="TERM")
     a = ap.parse_args()
     if a.digest:
-        print(f'    "{digest(a.digest)}": "private",')
+        print(f"private {digest(a.digest)}")
         return 0
     root = a.dir.resolve()
     if not root.is_dir():
         print(f"check_content: {root} is not a directory", file=sys.stderr)
         return 2
+    try:
+        terms, source = load_terms(dict(os.environ))
+    except (OSError, UnicodeDecodeError, ValueError) as e:
+        print(f"check_content: the private list: {e}", file=sys.stderr)
+        return 2
+    if terms is None:
+        print(f"check_content: no private list ({source}), so private and maintainer names are not checked")
+    else:
+        TERMS.update(terms)
     rels = files_of(root)
     hits = scan(root, rels) + case_clashes(rels) + ([] if a.no_gitleaks else gitleaks(root, rels))
     for rel, n, kind, text in sorted(hits):
         print(f"{rel}:{n}: [{kind}] {text}")
     kinds = ", ".join(f"{k} {v}" for k, v in Counter(h[2] for h in hits).most_common())
     secrets = "without the secret scan" if a.no_gitleaks else "with gitleaks"
-    print(f"check_content: {len(rels)} files, {secrets}: " + (f"{len(hits)} hits ({kinds})" if hits else "no hits"))
+    names = "without the private list" if terms is None else f"with the private list ({len(terms)} terms)"
+    print(f"check_content: {len(rels)} files, {secrets}, {names}: "
+          + (f"{len(hits)} hits ({kinds})" if hits else "no hits"))
     return 1 if hits else 0
 
 
