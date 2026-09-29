@@ -2397,6 +2397,16 @@ def _stop_apply(key: tuple[str, str]) -> asyncio.Task | None:
     return task
 
 
+def stop_workspace(c: str) -> int:
+    """End every apply running for workspace `c` (agents.stop_all), keeping its run records. Returns how many ran."""
+    return sum(_stop_apply(key) is not None for key in [k for k in list(_tasks) if k[0] == c])
+
+
+def workspaces_at_work() -> set[str]:
+    """The workspaces with an apply running."""
+    return {k[0] for k, task in list(_tasks.items()) if not task.done()}
+
+
 def _partial_record(c: str, concept_id: str) -> dict:
     """The run record so far plus `partial: true`, the concept's name, unit and kind and the labels path."""
     ws, concept = load_concept(c, concept_id)

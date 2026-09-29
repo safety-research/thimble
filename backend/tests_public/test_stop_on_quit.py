@@ -5,14 +5,15 @@ from __future__ import annotations
 
 import asyncio
 
-from app import agent_session, agents, bg_session, card_check, checks, cli, dev, notebook, session
+from app import agent_session, agents, bg_session, card_check, checks, cli, concepts, dev, notebook, session
 
 
-def test_stop_all_stops_the_checks_the_builds_the_sessions_the_live_background_sessions_and_the_kernels(monkeypatch):
+def test_stop_all_stops_the_checks_the_builds_the_label_runs_the_sessions_the_live_background_sessions_and_the_kernels(monkeypatch):
     called: list[str] = []
     monkeypatch.setattr(checks, "stop_workspace", lambda c: called.append("report checks") or 0)
     monkeypatch.setattr(card_check, "stop_workspace", lambda c: called.append("card checks") or 0)
     monkeypatch.setattr(dev, "stop_workspace", lambda c: called.append("builds") or 1)
+    monkeypatch.setattr(concepts, "stop_workspace", lambda c: called.append("label runs") or 0)
 
     async def wind_down(c):
         called.append("sessions")
@@ -32,9 +33,34 @@ def test_stop_all_stops_the_checks_the_builds_the_sessions_the_live_background_s
     cli_stops: list[str] = []
     monkeypatch.setattr(bg_session, "stop_cli", cli_stops.append)
     got = asyncio.run(agents.stop_all("w"))
-    assert called == ["report checks", "card checks", "builds", "sessions", "kernels"], "nothing starts a session after its stop"
+    assert called == ["report checks", "card checks", "builds", "label runs", "sessions", "kernels"], "nothing starts a session after its stop"
     assert cli_stops == ["abc"], "only a background session still alive"
     assert got == ["dev build", "Orientation", "thimble:critic · w"]
+
+
+def test_a_workspace_s_label_runs_count_as_at_work_and_stop_with_it():
+    """A label run (concepts.start_apply) keeps its workspace at work, and concepts.stop_workspace ends only that
+    workspace's runs, their cancel flags set and their run records kept."""
+    async def go() -> None:
+        mine = asyncio.create_task(asyncio.sleep(60))
+        theirs = asyncio.create_task(asyncio.sleep(60))
+        concepts._tasks[("w", "k1")], concepts._tasks[("other", "k2")] = mine, theirs
+        concepts._runs[("w", "k1")] = {"status": "running"}
+        try:
+            assert {"w", "other"} <= agents.at_work()
+            assert concepts.stop_workspace("w") == 1
+            await asyncio.sleep(0)
+            assert mine.cancelled() and not theirs.done()
+            assert concepts._cancel_event("w", "k1").is_set() and not concepts._cancel_event("other", "k2").is_set()
+            assert "w" not in concepts.workspaces_at_work() and ("w", "k1") in concepts._runs
+        finally:
+            theirs.cancel()
+            for key in (("w", "k1"), ("other", "k2")):
+                concepts._tasks.pop(key, None)
+                concepts._runs.pop(key, None)
+                concepts._cancels.pop(key, None)
+
+    asyncio.run(go())
 
 
 def test_main_ending_with_no_successor_stops_the_agents(monkeypatch):
