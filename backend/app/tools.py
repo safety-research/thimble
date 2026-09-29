@@ -1246,6 +1246,21 @@ def _kind_mismatch(kind: str, cell: dict) -> str:
     return ""
 
 
+def _card_installs(ctx: Ctx, code: str, tool: str) -> str:
+    """The refusal of card code that installs software or downloads files (sandbox_allow.code_installs), from an agent
+    thimble started, unless thimble's config sets `installs` to "allow"; '' otherwise. Such code runs in the kernel,
+    where no permission prompt can reach the analyst."""
+    from . import sandbox_allow, userconf  # noqa: PLC0415
+
+    if not ctx.session or not code.strip():
+        return ""
+    try:
+        installs = userconf.load(ctx.c)["installs"]
+    except userconf.ConfigError:
+        installs = "ask"
+    return hint("card-installs", tool=tool) if installs != "allow" and sandbox_allow.code_installs(code) else ""
+
+
 async def _h_add_card(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
     """One new card on the canvas. A running kind runs its code and the result is checked against the kind; a data kind
     (example, note, custom) stores its refs, text or html. `group` names the group, else default_group picks. A
@@ -1272,7 +1287,7 @@ async def _h_add_card(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
             return err(problem)
     elif not code.strip():
         return err(_needs_code("add_card", kind, args))
-    elif problem := _content_on_code("add_card", kind, args):
+    elif problem := _content_on_code("add_card", kind, args) or _card_installs(ctx, code, "add_card"):
         return err(problem)
     group = " ".join(str(args.get("group") or "").split())
     request = request_of(group)
@@ -1532,6 +1547,8 @@ async def _h_edit_card(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
     field = next((f for f in CONTENT_FIELDS if _given(args, f)), None)
     if field:  # a note's `text` or an example's `refs` on a card of code, which would be dropped and the code run again
         return err(hint("edit_card-kind", cid=cid, kind=cell.get("kind") or notebook.DEFAULT_KIND, new=FIELD_KINDS[field]))
+    if problem := _card_installs(ctx, str(args.get("code") or ""), "edit_card"):
+        return err(problem)
     # the card moves only once the call is known to be good, so a refused call leaves it where it was
     lines: builtins.list[str] = builtins.list(kept)
     if group:

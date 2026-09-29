@@ -6,8 +6,8 @@ says when it is used. Stdlib only.
 
 What the kernel gets:
   read     the system, a short list of /etc entries (ETC_RO), the backend venv and its interpreter, and the corpus
-  write    the workspace directory except settings.json (an empty file in its place), and telemetry.jsonl and
-           config.json (thimble's config for the workspace), each read-only;
+  write    the workspace directory except settings.json and config.json (thimble's config for the workspace), each an
+           empty read-only file in its place, and telemetry.jsonl, read-only;
            the connection file's directory; a private /tmp and HOME
   network  the host's: the server connects to the kernel's ZMQ ports on 127.0.0.1
 Everything else is absent; `--unshare-all` gives a private pid namespace and /proc, and `--unshare-user
@@ -30,10 +30,11 @@ ETC_RO = ("ld.so.cache", "ld.so.conf", "ld.so.conf.d", "passwd", "group", "nsswi
           "ca-certificates.conf", "pki", "fonts", "alternatives", "mime.types", "magic", "magic.mime", "os-release")
 EXTRA_RO = ("/var/cache/fontconfig",)  # fontconfig's cache, so matplotlib's first import does not rescan the fonts
 UNSET_ENV = ("XDG_CACHE_HOME", "XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_STATE_HOME", "XDG_RUNTIME_DIR")
-SETTINGS_FILE = "settings.json"  # cli.settings_path: the workspace's settings, the `kernel_wrap` switch among them
-EMPTY_FILE = "/dev/null"  # bound over the workspace's settings.json
-# bound read-only over the writable workspace when they exist
-READ_ONLY_FILES = ("telemetry.jsonl", "config.json")
+# the workspace's settings (the `kernel_wrap` switch among them) and thimble's config for it: the server creates each
+# before the kernel starts, and EMPTY_FILE is bound over it, so a cell can neither read nor write it
+HIDDEN_FILES = ("settings.json", "config.json")
+EMPTY_FILE = "/dev/null"
+READ_ONLY_FILES = ("telemetry.jsonl",)  # bound read-only over the writable workspace when it exists
 SIGINT_PREFIX = ("/bin/sh", "-c", 'trap "" INT; exec "$@"', "thimble-kernel-wrap")  # shell prefix that ignores SIGINT in bwrap (module docstring)
 
 
@@ -43,14 +44,11 @@ def _under(p: Path, root: Path) -> bool:
 
 def kernel_wrap_argv(argv: Sequence[str], *, corpus_dir: str | Path, workspace_dir: str | Path,
                      connection_dir: str | Path, venv: str | Path | None, python: str | Path,
-                     bwrap: str = "bwrap", settings_file: bool | None = None) -> list[str]:
+                     bwrap: str = "bwrap") -> list[str]:
     """The kernel's argv wrapped in bubblewrap. `python` is the interpreter's real path; its installation is bound
-    read-only when it lies outside /usr; `venv` None binds no venv. `--ro-bind-try` skips what does not exist. The
-    /dev/null bind over settings.json is emitted only when the file exists, since bwrap would otherwise create an empty
-    settings.json in the real workspace, which json.loads cannot read. `settings_file` None stats the file."""
+    read-only when it lies outside /usr; `venv` None binds no venv. `--ro-bind-try` skips what does not exist. Each of
+    HIDDEN_FILES must exist, or bwrap creates it empty in the real workspace."""
     corpus, ws, conn = Path(corpus_dir), Path(workspace_dir), Path(connection_dir)
-    if settings_file is None:
-        settings_file = (ws / SETTINGS_FILE).is_file()
     out: list[str] = [*SIGINT_PREFIX, bwrap, "--unshare-all", "--share-net", "--unshare-user", "--disable-userns",  # --unshare-user spelled out: --disable-userns checks for it by name (bwrap 0.9.0)
                       "--ro-bind", "/usr", "/usr"]
     for d in SYSTEM_RO[1:]:
@@ -69,9 +67,8 @@ def kernel_wrap_argv(argv: Sequence[str], *, corpus_dir: str | Path, workspace_d
     if venv is not None:
         out += ["--ro-bind", str(venv), str(venv)]
     out += ["--ro-bind", str(corpus), str(corpus), "--bind", str(ws), str(ws), "--bind", str(conn), str(conn)]
-    if settings_file:
-        # over the workspace bind: an empty file where settings.json is
-        out += ["--ro-bind", EMPTY_FILE, str(ws / SETTINGS_FILE)]
+    for name in HIDDEN_FILES:
+        out += ["--ro-bind", EMPTY_FILE, str(ws / name)]
     for name in READ_ONLY_FILES:  # read-only over the workspace bind when the file exists (the server writes from outside)
         out += ["--ro-bind-try", str(ws / name), str(ws / name)]
     out += ["--", *argv]

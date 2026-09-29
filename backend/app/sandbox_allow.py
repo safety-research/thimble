@@ -116,6 +116,61 @@ def installs(command: str, depth: int = 0) -> bool:
         return any(re.search(rf"(^|[\s/;&|(`]){re.escape(n)}(\s|$)", command) for n in names)
 
 
+SHELL_MAGICS = ("system", "sx", "pip", "conda", "mamba", "micromamba", "uv", "npm")
+SHELL_CELLS = ("bash", "sh", "zsh", "script", "system")
+RUNNERS = {("os", "system"), ("os", "popen"), ("subprocess", "run"), ("subprocess", "call"),
+           ("subprocess", "check_call"), ("subprocess", "check_output"), ("subprocess", "Popen"),
+           ("subprocess", "getoutput"), ("subprocess", "getstatusoutput")}
+
+
+def _called(node: "ast.expr") -> str:
+    """A literal command given to a runner: a string, or a list of words where any non-literal word reads as `python`
+    (`[sys.executable, "-m", "pip", "install", x]`)."""
+    import ast  # noqa: PLC0415 — only card code needs it
+
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        return node.value
+    if isinstance(node, (ast.List, ast.Tuple)):
+        return " ".join(shlex.quote(e.value) if isinstance(e, ast.Constant) and isinstance(e.value, str) else "python"
+                        for e in node.elts)
+    return ""
+
+
+def code_installs(code: str) -> bool:
+    """Whether a notebook cell's code installs software or downloads files the ordinary ways: a shell line (`!`, a
+    shell or package magic, a `%%bash` cell) or a literal command given to os.system or subprocess that `installs`
+    matches."""
+    import ast  # noqa: PLC0415
+
+    lines = code.splitlines()
+    first = lines[0].strip() if lines else ""
+    if first.startswith("%%") and first[2:].split(" ", 1)[0] in SHELL_CELLS:
+        return installs("\n".join(lines[1:]))
+    shell: list[str] = []
+    for line in lines:
+        text = line.strip()
+        if text.startswith("!"):
+            shell.append(text.lstrip("!"))
+        elif text.startswith("%") and not text.startswith("%%"):
+            name, _, rest = text[1:].partition(" ")
+            if name in SHELL_MAGICS:
+                shell.append(rest if name in ("system", "sx") else f"{name} {rest}")
+        elif "=" in text and ("!" in text.split("=", 1)[1][:3] or "%sx" in text):
+            shell.append(text.split("=", 1)[1].strip().lstrip("!").removeprefix("%sx"))
+    if any(installs(c) for c in shell):
+        return True
+    try:
+        tree = ast.parse("\n".join("" if ln.strip().startswith(("!", "%")) else ln for ln in lines))
+    except (SyntaxError, ValueError):
+        return False
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call) and node.args and isinstance(node.func, ast.Attribute):
+            owner = node.func.value.id if isinstance(node.func.value, ast.Name) else ""
+            if (owner, node.func.attr) in RUNNERS and installs(_called(node.args[0])):
+                return True
+    return False
+
+
 def _values(argv: list[str], flag: str) -> list[str]:
     return [argv[i + 1] for i, a in enumerate(argv[:-1]) if a == flag and argv[i + 1].strip()]
 

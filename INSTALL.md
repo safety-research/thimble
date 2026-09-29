@@ -5,6 +5,7 @@ your config dir with your user settings (thimble's sessions run in folders of th
 project's `.claude/` settings does not reach them). thimble tells you when `claude` is missing or not logged in.
 
 What thimble's agents may do, and on which models, is set in `~/.thimble/config.json`: [docs/config.md](docs/config.md).
+Card code runs in the notebook kernel with your user's access and network, whatever that file says.
 
 ## Requirements
 
