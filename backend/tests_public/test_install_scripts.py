@@ -262,9 +262,9 @@ def update(tmp_path: Path, *args: str, path: str = "/usr/bin:/bin", **extra: str
 def test_update_from_a_zip_checks_it_against_sha256sums_before_running_its_installer(tmp_path):
     zp = release_zip(tmp_path)
     sums = zp.parent / "SHA256SUMS"
-    r = update(tmp_path, "--from", str(zp))
+    r = update(tmp_path, "--from", str(zp), "--browser", "off", "--no-plugin")
     assert r.returncode == 0 and f"the SHA-256 of {zp.name} matches" in r.stdout, r.stdout + r.stderr
-    assert "the release install.sh ran: --dir" in r.stdout
+    assert f"install.sh ran: --dir {tmp_path / 'inst'} --browser off --no-plugin" in r.stdout, "the answers passed on"
     listed = sums.read_text()
     sums.write_text("0" * 64 + f"  {zp.name}\n")
     r = update(tmp_path, "--from", str(zp))
