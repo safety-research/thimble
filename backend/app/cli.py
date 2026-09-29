@@ -1794,7 +1794,9 @@ def harness_line(url: str, up: bool, commands: bool = True) -> str:
     spec = importlib.util.find_spec("playwright")
     fetched = headless_fetched(Path(spec.origin).parent / "driver" / "package" / "browsers.json" if spec and spec.origin
                                else Path("-"))
-    fix = browser_fix() if commands else ""
+    which, what = _browser_choice()
+    fetched = fetched or which == "system"
+    fix = browser_fix() if commands and what != _browser_off() else ""
     if up:
         status, got = _request("GET", f"{url}/api/render/status")
         if status == 200 and isinstance(got, dict):
@@ -1804,9 +1806,29 @@ def harness_line(url: str, up: bool, commands: bool = True) -> str:
             if commands and why == headless.NO_LIBRARIES:
                 fix = f": run `{BROWSER_DEPS}` in {config.REPO_ROOT}, then `thimble restart`"
             return f"not drawing ({why}); cards are not checked" + ("" if fetched and why != headless.NO_LIBRARIES else fix)
+    if which == "system":
+        return f"the system browser, {what}" + ("" if up else " (the server is down)")
+    if which == "off":
+        return f"no browser ({what}), so cards are not checked{fix}"
     if fetched:
         return "headless Chromium fetched" + ("" if up else " (the server is down)")
     return f"no headless Chromium in {playwright_browsers_dir()}, so cards are not checked{fix}"
+
+
+def _browser_choice() -> tuple[str, str]:
+    """userconf.browser, or Playwright's own Chromium when the config cannot be read (config_line reports that)."""
+    from . import userconf  # noqa: PLC0415
+
+    try:
+        return userconf.browser()
+    except Exception:  # noqa: BLE001 — the doctor reports; it never fails on one of its lines
+        return "bundled", ""
+
+
+def _browser_off() -> str:
+    from . import userconf  # noqa: PLC0415
+
+    return userconf.OFF
 
 
 def config_line(workspaces: Path) -> str:
@@ -1836,9 +1858,14 @@ def pages_line(commands: bool = True) -> str:
     browsers_json = FRONTEND_DIR / "node_modules" / "playwright-core" / "browsers.json"
     if not browsers_json.is_file():
         return "n/a (the frontend's packages are not installed)"
+    which, what = _browser_choice()
+    fix = browser_fix() if commands and what != _browser_off() else ""
+    if which == "system":
+        return f"the system browser, {what}"
+    if which == "off":
+        return f"no browser ({what}), so {headless.SKIPPED[headless.PAGES]}{fix}"
     if headless_fetched(browsers_json):
         return "headless Chromium fetched"
-    fix = browser_fix() if commands else ""
     return f"no headless Chromium in {playwright_browsers_dir()}, so {headless.SKIPPED[headless.PAGES]}{fix}"
 
 
