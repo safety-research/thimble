@@ -138,6 +138,20 @@ def test_doctor_says_what_claude_reports_about_its_login_and_never_a_value(home,
     assert "not logged in" in line(cli.doctor_text(), "auth:")
 
 
+def test_the_doctor_a_model_reads_names_no_install_command_even_when_the_log_does(home, monkeypatch, fake_claude):
+    """`thimble fix` hands doctor_text(commands=False) to an agent whose Bash runs unasked, so none of its lines, the
+    server log's included, names a command that installs software."""
+    monkeypatch.setattr(cli, "healthy", lambda url=None, timeout=1.0: False)
+    monkeypatch.setattr(cli, "listening", lambda p: False)
+    cli.log_path().parent.mkdir(parents=True, exist_ok=True)
+    cli.log_path().write_text("2026-09-29 10:00:00,000 ERROR thimble.notebook: bwrap missing; install bubblewrap (`apt install bubblewrap`)\n"
+                              "2026-09-29 10:00:01,000 INFO thimble.cli: not starting Vite (run `npm ci` in frontend/)\n"
+                              "2026-09-29 10:00:02,000 WARNING thimble.headless: run `sudo playwright install-deps`\n")
+    text = cli.doctor_text(commands=False)
+    assert not cli._INSTALL_COMMAND.search(text), text
+    assert text.count(cli.LOG_LINE_LEFT_OUT) == 4, "three in the tail, one in the errors"
+
+
 SERVER_LIKE = [sys.executable, "-c", "import time; time.sleep(60)", "-m", "uvicorn", "app.main:app", "--host", "127.0.0.1",
                "--port", "8398", "--timeout-graceful-shutdown", "3"]
 

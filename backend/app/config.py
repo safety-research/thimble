@@ -113,7 +113,7 @@ KERNEL_WRAP_DEFAULT = "none"
 KERNEL_WRAP_ENV = "THIMBLE_KERNEL_WRAP"
 KERNEL_WRAP_KEY = "kernel_wrap"  # settings.json: none | bwrap
 KERNEL_WRAP_NONE, KERNEL_WRAP_BWRAP = KERNEL_WRAPS
-NO_BWRAP_HINT = "install bubblewrap (`apt install bubblewrap`) or set kernel_wrap: none"  # in the server log
+NO_BWRAP_HINT = "with kernel_wrap: none the kernel runs without it"  # in the server log
 _KERNEL_WRAP_WARNED: set[str] = set()
 
 

@@ -39,8 +39,7 @@ def why_missing(text: str) -> str:
 def mark_missing(kind: str, why: str) -> None:
     """`kind`'s browser cannot start for the rest of the server run, because `why`; the first time, one warning."""
     if kind not in _missing:
-        log.warning("%s: %s, so %s until the server restarts (`thimble doctor` says how to install it)", kind, why,
-                    SKIPPED[kind])
+        log.warning("%s: %s, so %s until the server restarts", kind, why, SKIPPED[kind])
     _missing[kind] = why
 
 

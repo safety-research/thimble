@@ -578,7 +578,7 @@ def start(p: int | None = None) -> dict[str, Any]:
 
 def start_vite(ui: int, p: int, environ: dict[str, str] | None = None) -> int | None:
     if not (FRONTEND_DIR / "node_modules").is_dir():
-        _log(f"not starting Vite: {FRONTEND_DIR / 'node_modules'} is missing (run `npm ci` in frontend/)")
+        _log(f"not starting Vite: {FRONTEND_DIR / 'node_modules'} is missing")
         return None
     env = dict(environ or _server_environ(resolve_env(), p, ui))
     env["BACKEND_PORT"] = str(p)
@@ -2142,14 +2142,22 @@ def doctor_text(commands: bool = True) -> str:
     # the log's lines come last, so a problem report sent without the logs cuts them all (feedback.DOCTOR_LOG_MARK)
     lines.append(f"  log tail ({log_path()}):")
     recent = _log_lines(LOG_SCAN_BYTES)
-    lines += [f"    {ln}" for ln in (recent[-LOG_TAIL:] if recent is not None else ["(no log yet)"])]
     errors = [ln for ln in recent or [] if _ERROR_LINE.search(ln)][-LOG_ERRORS:]
+    tail = recent[-LOG_TAIL:] if recent is not None else ["(no log yet)"]
+    if not commands:
+        tail, errors = ([LOG_LINE_LEFT_OUT if _INSTALL_COMMAND.search(ln) else ln for ln in part] for part in (tail, errors))
+    lines += [f"    {ln}" for ln in tail]
     lines.append(f"  recent errors in the log ({len(errors)} of its last {human_bytes(LOG_SCAN_BYTES)}):"
                  if errors else f"  recent errors in the log: none in its last {human_bytes(LOG_SCAN_BYTES)}")
     lines += [f"    {ln[:400]}" for ln in errors]
     return "\n".join(lines)
 
 
+# a log line that names a command installing software, which the doctor for a model leaves out
+_INSTALL_COMMAND = re.compile(r"\b(apt(-get)?|brew|dnf|yum|pacman|apk|snap|port|pipx?|pip3|npm|pnpm|yarn|playwright|gem|cargo)"
+                              r" +(install|ci|add|i)\b|\buv +(pip|sync|add|tool)\b|install-deps|\binstall\.sh\b|\bsudo +\S"
+                              r"|`thimble doctor`|\b(curl|wget)\b[^|]*\| *(ba|z)?sh\b", re.I)
+LOG_LINE_LEFT_OUT = "(a line that names an install command, left out here)"
 LOG_SCAN_BYTES = 2_000_000  # how far back from its end the doctor reads the server log
 LOG_ERRORS = 8  # the most recent error lines it lists
 # a thimble logger's ERROR or CRITICAL line, uvicorn's `ERROR:` line, or the last line of a traceback
