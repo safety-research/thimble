@@ -147,8 +147,10 @@ def test_a_pinned_install_falls_back_to_pyproject_s_ranges_only_when_the_index_l
     dest = tmp_path / "home" / ".thimble" / "app"
     log = tmp_path / "uv.log"
 
-    def run(**extra: str) -> tuple[subprocess.CompletedProcess, list[str]]:
+    def run(fresh: bool = True, **extra: str) -> tuple[subprocess.CompletedProcess, list[str]]:
         log.write_text("")
+        if fresh:
+            shutil.rmtree(dest, ignore_errors=True)
         r = install(tree, dest, tmp_path, STUB_LOG=str(log), **extra)
         return r, [ln.split(" --python")[0] for ln in log.read_text().splitlines()]
 
@@ -329,51 +331,75 @@ def test_claude_codes_config_changes_only_on_a_yes_and_uninstall_takes_back_what
     assert not home.exists(), "removed once what it recorded was put back"
 
 
-def test_thimble_trust_asks_on_a_terminal_and_remove_takes_back_only_its_entry(tmp_path):
-    """`thimble trust` writes install.sh's entry only on a yes typed on a terminal, whatever an earlier install answered,
-    and nothing without a terminal; --remove takes back the entry thimble added and leaves one it did not add."""
+SYSTEM_BROWSERS = ("/opt/google/chrome/chrome", "/opt/microsoft/msedge/msedge",
+                   "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+                   "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge")
+
+
+def test_install_sh_asks_before_it_installs_and_downloads_no_browser_without_a_yes(tmp_path):
+    """On a terminal install.sh shows what it installs, then asks about the browser, the plugin and the trust; the
+    browser is downloaded only on a yes, and not again once it is there; a re-run asks nothing. Without a terminal it
+    asks nothing, downloads nothing and writes nothing into Claude Code's config."""
     import pty
 
-    tree = fake_tree(tmp_path / "app")
-    (tree / "backend" / "app").mkdir(parents=True)
+    tree = fake_tree(tmp_path / "release")
+    (tree / "backend" / "app").mkdir()
     shutil.copy(REPO / "backend" / "app" / "claude_changes.py", tree / "backend" / "app")
-    env = env_for(tmp_path)
-    home = Path(env["THIMBLE_HOME"])
-    home.mkdir()
-    cfg = Path(env["HOME"]) / ".claude.json"
-    before = {"projects": {"/x": {"lastCost": 1}}}
-    cfg.write_text(json.dumps(before))
-    folder = str(tree / "workspaces")
-    (home / "trust.json").write_text(json.dumps({"folder": folder, "config": str(cfg), "answer": "no", "added": False}))
+    bin_ = stub_bin(tmp_path)
+    (bin_ / "claude").write_text('#!/bin/sh\ncase "$1 $2" in "--version ") echo 2.1.284;; "plugin list") echo "[]";; esac\n')
+    (bin_ / "claude").chmod(0o755)
+    log, cache = tmp_path / "playwright.log", tmp_path / "cache" / "chromium_headless_shell-1"
 
-    def trust(*args: str, typed: str | None = None) -> subprocess.CompletedProcess:
-        cmd = ["bash", str(tree / "plugin" / "bin" / "thimble"), "trust", *args]
+    def run(*flags: str, typed: str | None = None) -> subprocess.CompletedProcess:
+        venv = tmp_path / "home" / ".thimble" / "app" / "backend" / ".venv" / "bin" / "python"
+        if not venv.exists():  # a backend whose Playwright logs its downloads, and has its browser once it downloaded it
+            venv.parent.mkdir(parents=True)
+            shutil.copytree(tree / "plugin", venv.parents[3] / "plugin")  # an earlier install, which install.sh copies over
+            venv.write_text(f"""#!/bin/sh
+case "$*" in
+  *"playwright install --dry-run"*) printf 'browser: chromium-headless-shell\\n  Install location:    %s\\n' {cache};;
+  *"playwright install"*) echo "$*" >> {log}; mkdir -p {cache}; : > {cache}/INSTALLATION_COMPLETE;;
+  *"import playwright"*) ;;
+  *) exec {os.path.realpath(sys.executable)} -S "$@";;
+esac
+""")
+            venv.chmod(0o755)
+        cmd = ["bash", str(tree / "scripts" / "install.sh"), *flags]
+        env = env_for(tmp_path, PATH=f"{bin_}:/usr/bin:/bin")
         if typed is None:
-            return subprocess.run(cmd, capture_output=True, text=True, env=env, stdin=subprocess.DEVNULL, timeout=30)
+            return subprocess.run(cmd, capture_output=True, text=True, env=env, stdin=subprocess.DEVNULL, timeout=60)
         term, stdin = pty.openpty()
         os.write(term, typed.encode())
         try:
-            return subprocess.run(cmd, capture_output=True, text=True, env=env, stdin=stdin, timeout=30)
+            return subprocess.run(cmd, capture_output=True, text=True, env=env, stdin=stdin, timeout=60)
         finally:
             os.close(term)
             os.close(stdin)
 
-    r = trust()
-    assert r.returncode == 1 and "no terminal" in r.stdout and json.loads(cfg.read_text()) == before, r.stdout + r.stderr
-    r = trust(typed="n\n")
-    assert "Trust thimble's workspaces folder" in r.stdout and json.loads(cfg.read_text()) == before, r.stdout + r.stderr
-    r = trust(typed="y\n")
-    assert r.returncode == 0 and json.loads(cfg.read_text())["projects"] == {**before["projects"],
-                                                                           folder: {"hasTrustDialogAccepted": True}}
-    assert json.loads((home / "trust.json").read_text()) == {"folder": folder, "config": str(cfg), "answer": "yes",
-                                                             "added": True}
-    r = trust("--remove")
-    assert "took back" in r.stdout and json.loads(cfg.read_text()) == before, r.stdout + r.stderr
-    assert "nothing to take back" in trust("--remove").stdout
-    theirs = {"projects": {folder: {"hasTrustDialogAccepted": True}}}
-    cfg.write_text(json.dumps(theirs))
-    r = trust("--remove")
-    assert "did not add" in r.stdout and json.loads(cfg.read_text()) == theirs, r.stdout + r.stderr
+    home = tmp_path / "home"
+    cfg, conf = home / ".claude.json", home / ".thimble" / "config.json"
+    cfg.parent.mkdir(parents=True, exist_ok=True)
+    cfg.write_text(json.dumps({"projects": {}}))
+    r = run()
+    assert r.returncode == 0 and "[y/N]" not in r.stdout and "not asked, with no terminal" in r.stdout, r.stdout + r.stderr
+    assert not log.exists() and not conf.exists() and json.loads(cfg.read_text()) == {"projects": {}}
+    system = any(Path(p).exists() for p in SYSTEM_BROWSERS)
+    r = run(typed=("n\n" if system else "") + "y\nn\ny\n")  # no system browser, download, no plugin, trust
+    out = r.stdout
+    assert r.returncode == 0, out + r.stderr
+    assert out.index("what install.sh installs, and where") < out.index("A browser for screenshots") < out.index("== 2/12")
+    assert out.index("every claude session") < out.index("Trust thimble's workspaces folder") < out.index("== 2/12")
+    assert log.read_text().splitlines() == ["-I -m playwright install chromium-headless-shell"]
+    assert json.loads(conf.read_text()) == {"browser": "bundled"}
+    assert json.loads((home / ".thimble" / "plugin.json").read_text())["answer"] == "no"
+    assert json.loads(cfg.read_text())["projects"] == {str(tree.parents[0] / "home" / ".thimble" / "app" / "workspaces"):
+                                                       {"hasTrustDialogAccepted": True}}
+    r = run(typed="")
+    assert r.returncode == 0 and "[y/N]" not in r.stdout and "[Y/n]" not in r.stdout, r.stdout + r.stderr
+    assert "not fetched again" in r.stdout and len(log.read_text().splitlines()) == 1
+    r = run("--browser", "off", "--no-trust-workspaces")
+    assert r.returncode == 0 and json.loads(conf.read_text()) == {"browser": "off"}, r.stdout + r.stderr
+    assert json.loads(cfg.read_text())["projects"] == {} and len(log.read_text().splitlines()) == 1
 
 
 def test_the_plugin_is_registered_only_on_a_yes_and_uninstall_removes_only_what_install_added(tmp_path):
