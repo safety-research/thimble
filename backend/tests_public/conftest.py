@@ -136,6 +136,7 @@ def _view_tickets_held(monkeypatch):
     monkeypatch.setattr(dev, "_view_runs", {})
     monkeypatch.setattr(dev, "_view_queue", [])
     monkeypatch.setattr(dev, "_view_stopping", {})
+    monkeypatch.setattr(dev, "_parked", set())
     monkeypatch.setattr(dev, "_closing", False)
 
 
