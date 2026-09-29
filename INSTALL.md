@@ -38,27 +38,26 @@ background agents are refused, with a message saying how to trust the folder). `
 `--trust-workspaces` and `--no-trust-workspaces` answer without asking. `install.sh --dry-run` prints every step and
 changes nothing.
 
-## The swarm branch
+## Extensions
 
-The `swarm` branch adds the Swarm view, which draws many agents acting on shared pages and channels, and questions
-typed in a view, which main answers with labels the view draws. To try it, install a clone of it:
+An extension adds views, card types, agents, orientation instructions or report types. Add one from a git URL, a
+folder, or by the name of one thimble ships:
 
 ```bash
-git clone -b swarm https://github.com/safety-research/thimble.git thimble-swarm
-cd thimble-swarm && bash scripts/install.sh
+thimble extension add swarm        # shows what it adds and asks first; --yes for scripts
+thimble extension list
+thimble extension remove swarm
 ```
 
-Then run `thimble` in your corpus folder and press Start. When the corpus looks like a swarm, the orientation proposes
-the Swarm view (Propose views, under Show options, is on by default). Type a question in the view's box, and main
-answers it with labels the view draws.
+An added extension runs in every workspace it applies to, until you remove it or switch it off (Settings > Extensions
+for one workspace, or `"extensions": {"swarm": {"enabled": false}}` in `~/.thimble/config.json`). Its Python runs only
+in thimble's kernels.
 
-A server already running keeps the other install's code until `thimble server restart`. To go back, run
-`bash scripts/install.sh` in the unzipped release, then `thimble server restart`; if you added the plugin, run
-`bash scripts/install.sh --no-plugin` in the clone first and give the release's install `--plugin`. In the clone,
-`thimble update` pulls the swarm branch and ignores `--from`. Known limitations: only an orientation proposes the Swarm
-view, when the first 400 JSON Lines or CSV files (256 MB at most) show 30 or more accounts naming each other on 3 or more shared places;
-in a corpus of several runs, places of the same name (such as thread 1) share one place, and accounts of the same name
-share a row; a "names" link points only to an earlier card; and a large human team chat can pass for a swarm.
+The Swarm extension is for corpora where many agents act on shared pages and channels. On such a corpus it adds the
+Swarm overview of every record, orientation instructions that have every message read, and the `swarm` and
+`agent-flow` card types main answers questions with. It applies when the first 400 JSON Lines or CSV files (256 MB at
+most) show 30 or more accounts naming each other on 3 or more shared places, so a large human team chat can pass for a
+swarm.
 
 ## Update
 
