@@ -302,10 +302,9 @@ p{margin:0 0 14px}
 ul{margin:0 0 14px;padding-left:22px}
 a{color:inherit}
 code{font-family:var(--font-mono);font-size:.88em;background:rgba(var(--ink-rgb),.06);padding:1px 4px;border-radius:4px}
-sup.cite{font-size:.68em;line-height:0;margin-left:1px}
+sup.cite{font-size:.68em;line-height:0;margin-left:1px;color:var(--ink-500)}
 sup.cite a{text-decoration:none;color:var(--ink-500);font-weight:500}
 sup.cite a:hover{color:var(--ink-900)}
-sup.cite+sup.cite::before{content:",";color:var(--ink-500)}
 .lead{font-size:18px;color:var(--ink-900)}
 blockquote{margin:0 0 14px;padding:2px 0 2px 16px;border-left:2px solid var(--ink-300);color:var(--ink-700)}
 blockquote .who{display:block;margin-top:4px;font-size:14px;color:var(--ink-500)}
@@ -387,7 +386,9 @@ def inline_html(text: str) -> str:
 
 
 def _cites_html(ns: list[int]) -> str:
-    return "".join(f'<sup class="cite"><a href="#note-{n}" id="cite-{n}">{n}</a></sup>' for n in ns)
+    if not ns:
+        return ""
+    return '<sup class="cite">' + ",".join(f'<a href="#note-{n}">{n}</a>' for n in ns) + "</sup>"
 
 
 def _sentence_html(s: dict[str, Any]) -> str:
@@ -434,7 +435,7 @@ def _notes_html(m: dict[str, Any]) -> str:
         if r["title"]:
             label += f" “{_esc(r['title'])}”"
         quote = f" <q>{_esc(r['quote'])}</q>" if r["quote"] else ""
-        items.append(f'<li id="note-{r["n"]}">{label}{quote} <a href="#cite-{r["n"]}" aria-label="Back">↩</a></li>')
+        items.append(f'<li id="note-{r["n"]}">{label}{quote}</li>')
     return f'<section class="notes"><h2>Sources</h2><ol>{"".join(items)}</ol></section>'
 
 
@@ -521,12 +522,13 @@ def _card_text(cell: dict[str, Any]) -> tuple[str, str]:
     """(table html, text) of a card shown without a picture."""
     fr = frames.frame_in(cell.get("outputs") or [])
     if fr:
-        cols, _rows, grid = frames.frame_grid(fr, list(range(min(TABLE_ROWS, len(frames.row_labels(fr))))))
-        head = "".join(f"<th>{_esc(x)}</th>" for x in cols)
-        body = "".join("<tr>" + "".join(f"<td>{_esc(v)}</td>" for v in row) + "</tr>" for row in grid)
+        cols, names, grid = frames.frame_grid(fr, list(range(min(TABLE_ROWS, len(fr["rows"])))))
+        head = f"<th>{_esc(frames.corner(fr))}</th>" + "".join(f"<th>{_esc(x)}</th>" for x in cols)
+        body = "".join(f"<tr><td>{_esc(n)}</td>" + "".join(f"<td>{_esc(v)}</td>" for v in row) + "</tr>"
+                       for n, row in zip(names, grid))
         return f"<table><thead><tr>{head}</tr></thead><tbody>{body}</tbody></table>", ""
     texts = [str(b.get("text/plain") or "") for b in cell.get("outputs") or [] if isinstance(b, dict) and b.get("text/plain")]
-    text = "\n".join(t for t in [str(cell.get("takeaway") or "")] + texts if t).strip()
+    text = "\n".join(t for t in [plain_text(str(cell.get("takeaway") or ""))] + texts if t).strip()
     return "", text[:TEXT_CHARS] + ("…" if len(text) > TEXT_CHARS else "")
 
 
@@ -840,6 +842,8 @@ async def _hooked(c: str, slug: str, doc: dict[str, Any], f: dict[str, Any], m: 
         data, vext = await film_export.render_film(got["film"], faces=faces)
         return data, _filename(m["title"], slug, vext), MIME_BY_EXT[vext]
     if isinstance(got.get("html"), str):
+        if not re.search(r"<html[\s>]", got["html"], re.I):  # a fragment takes thimble's page, faces and styles
+            got["html"] = _document(m["title"], faces, BASE_CSS, f"<main>{got['html']}</main>")
         if ext == "pdf":
             try:
                 return await print_pdf(got["html"]), name, MIME_BY_EXT["pdf"]
