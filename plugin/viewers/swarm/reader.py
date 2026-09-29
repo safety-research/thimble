@@ -678,6 +678,9 @@ def _chart(index, query):
         source, wanted = "addressed", set(ranked[:PLACES_SHOWN])
         picked = [(ref, []) for ref in index["order"]
                   if (r := index["recs"][ref])["place"] in wanted and (r["to"] or ref in keep) and kept(ref)]
+    tag_of = {}  # numbered over every page, so a place keeps its tag from page to page
+    for ref, _got in picked:
+        tag_of.setdefault(index["recs"][ref]["place"], f"T{len(tag_of) + 1}")
     offset = max(0, min(int(query.get("offset") or 0), max(0, len(picked) - 1)))
     cards, by_ref, said = [], {}, {}
     for n, (ref, got) in enumerate(picked[offset: offset + CARDS_MAX], offset + 1):
@@ -697,7 +700,7 @@ def _chart(index, query):
     links = _links(index, cards, by_ref, said)
     tags = {}
     for c in cards:
-        c["tag"] = tags.setdefault(c["place"], f"T{len(tags) + 1}")
+        c["tag"] = tags.setdefault(c["place"], tag_of[c["place"]])
     rows = [{"account": a, "goal": index["accounts"][a]["goal"], "n": index["accounts"][a]["n"]}
             for a in dict.fromkeys(c["account"] for c in cards)]
     places = [{"tag": t, "name": p, "title": index["places"][p]["title"], "ref": index["places"][p]["ref"],
