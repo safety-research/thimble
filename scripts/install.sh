@@ -365,6 +365,10 @@ register_plugin() {  # the plugin question's answer: yes registers the tree as a
     else say "registered by an earlier install; kept (install.sh --no-plugin takes it back)"; fi
   fi
   if [ "$answer" = yes ] && [ "$have_claude" = 1 ]; then
+    if [ -n "$plugin_reg" ] && [ "$plugin_reg" != "$mp_name" ]; then  # another tree an earlier install registered
+      { run claude plugin uninstall "thimble@$plugin_reg" && run claude plugin marketplace remove "$plugin_reg"; } \
+        || say "(thimble@$plugin_reg, which an earlier install registered, is still there: claude plugin uninstall thimble@$plugin_reg && claude plugin marketplace remove $plugin_reg takes it back)"
+    fi
     run claude plugin marketplace add "$dir" || die "could not register $dir as marketplace \"$mp_name\". A marketplace of that name may point elsewhere: \`claude plugin marketplace list\`, then \`claude plugin marketplace remove $mp_name\` or re-run with --marketplace-name <other>"
     run claude plugin marketplace update "$mp_name" || say "(marketplace update failed; continuing)"
     run claude plugin install --scope user "thimble@$mp_name" || die "claude plugin install thimble@$mp_name failed"
@@ -413,7 +417,15 @@ finish() {  # doctor, then the one next step (and the PATH line the link needs)
   step "11/12 thimble doctor"
   run "$dir/plugin/bin/thimble" doctor || say "(doctor exited non-zero; see above)"
   step "12/12 next"
-  local cmd="$dir/plugin/bin/thimble" rc
+  local cmd="$dir/plugin/bin/thimble" rc pid repo
+  # a server started from another tree keeps running that tree's code until it is restarted
+  if [ "$dry" = 0 ] && [ -f "$home/server.json" ]; then
+    pid="$(sed -n 's/.*"pid": *\([0-9][0-9]*\).*/\1/p' "$home/server.json" | head -n 1)"
+    repo="$(json_get "$home/server.json" repo)"
+    if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null && [ -n "$repo" ] && [ "$repo" != "$dir" ]; then
+      say "the thimble server (pid $pid) is running the install in $repo: restart it with: thimble server restart"
+    fi
+  fi
   if [ "$cli_linked" = 1 ]; then
     if path_has_local_bin; then
       say "thimble on PATH: ~/.local/bin/thimble"
