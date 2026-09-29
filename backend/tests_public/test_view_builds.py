@@ -43,12 +43,14 @@ def test_a_view_build_s_session_may_read_the_corpus_but_not_change_it(board, mon
     assert box["excludedCommands"] == [check, f"{check} *"] and check.endswith(f"/api/ws/{CORPUS}/views/posts/check")
     assert settings["fastMode"] is True and "Read" in flags[flags.index("--allowedTools") + 1].split(",")
     prompt = dev.build_view_prompt(CORPUS, {"slug": "posts", "name": "Posts", "claims": ["board.jsonl"]}, folder, corpus)
-    assert f"`{check} '<ref>'`" in prompt and "curl" not in prompt
+    assert f"`{check} '<ref>'`" in prompt and "curl" not in prompt and dev.VIEW_NETWORK_LINES["sandboxed"] in prompt
     code = json.loads((c := dev.Sessions()._flags(CORPUS, "thimble ticket 1: x"))[c.index("--settings") + 1])
     assert "sandbox" not in code and not any(r.startswith(f"Edit(/{corpus}") for r in code["permissions"]["deny"]), \
         "a code ticket is not fenced"
     monkeypatch.setenv("THIMBLE_SANDBOX", "0")
     assert "sandbox" not in dev.read_only_fence([corpus]), "no sandbox where it cannot run; the deny stays"
+    assert dev.VIEW_NETWORK_LINES["asked"] in dev.build_view_prompt(CORPUS, {"slug": "posts", "name": "Posts",
+                                                                             "claims": ["board.jsonl"]}, folder, corpus)
     inside = corpus / ".thimble" / "views" / "posts"
     assert dev.view_read_only(corpus, inside) == (views.EXAMPLES_DIR,), "a corpus that holds the view's folder is left out"
 

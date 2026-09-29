@@ -2238,9 +2238,26 @@ def build_view_prompt(c: str, prop: dict[str, Any], folder: Path, corpus: Path) 
 
     values = {"name": str(prop.get("name") or prop["slug"]), "slug": str(prop["slug"]), "why": str(prop.get("why") or ""),
               "claims": ", ".join(prop.get("claims") or []), "spec": views.spec_lines(prop), "folder": str(folder),
-              "corpus": str(corpus), "examples": str(views.EXAMPLES_DIR), "check": view_check_command(c, str(prop["slug"]))}
+              "corpus": str(corpus), "examples": str(views.EXAMPLES_DIR), "check": view_check_command(c, str(prop["slug"])),
+              "network": view_network_line(c)}
     with prompts.custom(userconf.prompt_files(c, "dev")):
         return prompts.render_dev("dev-view", values)
+
+
+VIEW_NETWORK_LINES = {
+    "sandboxed": "There is no network, so nothing can be fetched or installed. ",
+    "asked": "Fetch and install nothing. Every command but the check command waits for the analyst's permission. ",
+    "on": "",
+}
+
+
+def view_network_line(c: str) -> str:
+    """The view-build prompt's line on the network, true of how the build's Bash runs (dev_config)."""
+    try:
+        conf = dev_config(c, sandbox=True)
+    except userconf.ConfigError:
+        return VIEW_NETWORK_LINES["sandboxed"]
+    return VIEW_NETWORK_LINES["on" if conf.network else "sandboxed" if conf.sandboxed else "asked"]
 
 
 def view_check_command(c: str, slug: str) -> str:
