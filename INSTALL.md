@@ -58,6 +58,9 @@ that one and prints each path it deleted. The folder it read and your Claude Cod
 ## Troubleshooting
 
 - `thimble doctor` shows the server, the versions, the auth path and the log's recent errors.
+- Cards are not checked, views are checked without loading their page, or screenshots are unavailable: the headless
+  Chromium was not fetched at install, or the machine lacks its system libraries. thimble never fetches it by itself;
+  `thimble doctor` names the commands that do. Run them, then `thimble restart`.
 - `/thimble` is not recognised in a `claude` session: it works there only after `install.sh --plugin`; then run
   `/reload-plugins`, or start a new session.
 - To report a problem, run `thimble feedback "<what went wrong>"`. It writes a zip of the logs, chats and Claude
