@@ -6,7 +6,7 @@
 // cannot take effect are dimmed with the reason in a tooltip. Every row names its model exactly, never `default`. Under
 // the table, the permission mode of each agent thimble starts (MODE_ROWS): the analyst's pick, else the mode of their
 // Claude Code session, as main's hooks report it (backend modes.py). Then the workspace's switches (SWITCHES), each saved
-// with the rest.
+// with the rest, and the extensions added to thimble, each with its switch for this workspace (ExtensionsSettings).
 import { useEffect, useState } from 'react'
 import { Button } from '../components/Button'
 import { Chip } from '../components/Chip'
@@ -17,8 +17,9 @@ import { Spinner } from '../components/Spinner'
 import { Switch } from '../components/Switch'
 import { useTooltip } from '../components/Tooltip'
 import { api } from '../lib/api'
+import { ExtensionsSettings, changedExtensions } from './ExtensionsSettings'
 import { hasFastMode, invalidateSettings, loadSettings, modelChoices, modelLabel, sameModel } from '../lib/models'
-import { EFFORTS, ROLES, type Attached, type MainEffort, type ModeAgent, type ModelConf, type OrientPermissions, type Settings } from '../lib/types'
+import { EFFORTS, ROLES, type Attached, type Extensions, type MainEffort, type ModeAgent, type ModelConf, type OrientPermissions, type Settings } from '../lib/types'
 import { bus } from '../lib/bus'
 import { EFFORT_CHOICES, FastBolt, MODEL_TIP, NEXT_LAUNCH, effortWord, mainEffort, mainFast, noFastTip } from '../chat/ModelLine'
 import { BYPASS_LINE } from '../chat/ModeSwitch'
@@ -146,15 +147,19 @@ export function SettingsPopover({ ws, anchor, open, onClose }: { ws: string; anc
   const [typing, setTyping] = useState<string | null>(null)
   const [switches, setSwitches] = useState<Record<string, boolean>>({})
   const [modeRows, setModeRows] = useState<Rows>({})
+  const [exts, setExts] = useState<Extensions | null>(null)
+  const [extOn, setExtOn] = useState<Record<string, boolean>>({})
 
   useEffect(() => {
     if (!open) return
     let alive = true
     setSettings(null)
     setError(null)
-    Promise.all([loadSettings(ws, true), api.chat(ws, 'main').catch(() => null)])
-      .then(([s, main]) => {
+    Promise.all([loadSettings(ws, true), api.chat(ws, 'main').catch(() => null), api.extensions(ws).catch(() => null)])
+      .then(([s, main, ex]) => {
         if (!alive) return
+        setExts(ex)
+        setExtOn(Object.fromEntries((ex?.extensions ?? []).map((e) => [e.name, e.on])))
         const a = main?.meta?.attached ?? null
         setSettings(s)
         setSwitches(Object.fromEntries(SWITCHES.map((sw) => [sw.key, s[sw.key] === true])))
@@ -180,6 +185,7 @@ export function SettingsPopover({ ws, anchor, open, onClose }: { ws: string; anc
       const modes = changedModes(settings?.permission_modes, modeRows)
       if (Object.keys(changed).length || Object.keys(flipped).length || Object.keys(modes).length)
         await api.putSettings(ws, { ...(Object.keys(changed).length ? { models: changed } : {}), ...(Object.keys(modes).length ? { permission_modes: modes } : {}), ...flipped })
+      for (const [name, on] of Object.entries(changedExtensions(exts?.extensions ?? [], extOn))) await api.switchExtension(ws, name, on)
       const was = { effort: mainEffort(attached), fast: !!mainFast(attached) }
       const main = models.main
       const effortNow = !!main && !!attached && main.effort !== was.effort
@@ -337,6 +343,7 @@ export function SettingsPopover({ ws, anchor, open, onClose }: { ws: string; anc
             ))}
           </div>
         )}
+        {settings && exts && <ExtensionsSettings data={exts} on={extOn} setOn={(name, v) => setExtOn((cur) => ({ ...cur, [name]: v }))} />}
         {error && <div className="settings-error">{error}</div>}
         <div className="settings-foot">
           <Button variant="ghost" onClick={onClose} disabled={busy}>
