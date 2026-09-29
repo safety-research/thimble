@@ -319,7 +319,7 @@ class _Active:
 _active: dict[tuple[str, str, str], _Active] = {}  # (workspace, check, doc) -> its running run
 _dirty: set[tuple[str, str, str]] = set()  # runs whose document changed while they ran
 _timers: dict[tuple[str, str], asyncio.TimerHandle] = {}  # (workspace, doc) -> its rerun, once quiet
-_tasks: set[asyncio.Task] = set()
+_tasks: dict[asyncio.Task, str] = {}  # the reruns and refreshes that run -> their workspace
 _sem: asyncio.Semaphore | None = None
 
 
@@ -664,10 +664,10 @@ async def refresh(c: str, cid: str) -> list[dict[str, Any]]:
     return out
 
 
-def _spawn(coro: Any) -> None:
+def _spawn(c: str, coro: Any) -> None:
     t = asyncio.ensure_future(coro)
-    _tasks.add(t)
-    t.add_done_callback(_tasks.discard)
+    _tasks[t] = c
+    t.add_done_callback(lambda done: _tasks.pop(done, None))
 
 
 # --------------------------------------------------------------------------- reruns
@@ -689,7 +689,7 @@ def changed(c: str, slug: str) -> None:
     old = _timers.pop((c, slug), None)
     if old is not None:
         old.cancel()
-    _timers[(c, slug)] = loop.call_later(QUIET_S, lambda: (_timers.pop((c, slug), None), _spawn(_rerun(c, slug))))
+    _timers[(c, slug)] = loop.call_later(QUIET_S, lambda: (_timers.pop((c, slug), None), _spawn(c, _rerun(c, slug))))
 
 
 async def _rerun(c: str, slug: str) -> None:
@@ -852,7 +852,7 @@ async def create_route(c: str, body: CheckBody) -> dict[str, Any]:
     _ws(c)
     check = create(c, body.name, body.prompt, created_by="analyst")
     check = edit(c, check["id"], shown=True)
-    _spawn(refresh(c, check["id"]))
+    _spawn(c, refresh(c, check["id"]))
     return check
 
 
@@ -868,7 +868,7 @@ async def edit_route(c: str, cid: str, body: CheckEdit) -> dict[str, Any]:
     if body.shown is False:
         await stop_check(c, cid)
     elif check.get("shown") and (body.shown is True or check.get("version") != before.get("version")):
-        _spawn(refresh(c, cid))
+        _spawn(c, refresh(c, cid))
     return read(c, cid) or check
 
 
@@ -910,6 +910,20 @@ async def stop_route(c: str, cid: str, doc: str) -> dict[str, Any]:
             save(c, check)
             _stream(c, cid, doc, "stopped", str(rec.get("run") or ""), str(rec.get("chat") or ""))
     return read(c, cid) or check
+
+
+def stop_workspace(c: str) -> int:
+    """Main's session ended in workspace `c` (agents.stop_all): its reruns waiting are dropped, and its runs, queued or
+    running, stop. How many runs it stopped."""
+    for key in [k for k in _timers if k[0] == c]:
+        _timers.pop(key).cancel()
+    for t, cc in list(_tasks.items()):
+        if cc == c:
+            t.cancel()
+    acts = [a for (cc, _, _), a in list(_active.items()) if cc == c and a.task is not None and not a.task.done()]
+    for act in acts:
+        act.task.cancel()
+    return len(acts)
 
 
 async def shutdown() -> None:
