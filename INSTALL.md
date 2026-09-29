@@ -38,7 +38,7 @@ background agents are refused, with a message saying how to trust the folder). `
 `--trust-workspaces` and `--no-trust-workspaces` answer without asking. Later, `thimble trust` asks the trust question
 again and `thimble trust --remove` takes the entry back. `install.sh --dry-run` prints every step and changes nothing.
 
-## Package mirrors
+## Package mirrors and your own Python
 
 A Global install uses the package indexes your machine is set up with. It installs the backend's packages with `uv pip`
 from uv's index (`UV_DEFAULT_INDEX`, `uv.toml`), or with pip where pip has an index (`PIP_INDEX_URL`, `pip.conf`) and
@@ -46,6 +46,11 @@ uv has none. Of the frontend's packages it installs only the few thimble loads a
 All are pinned with their hashes. When the index lacks a pinned version, install.sh says so and installs versions within
 the ranges thimble allows; a file whose hash differs from the pinned one stops the install. A Dev install uses
 `uv sync` and `npm ci`.
+
+To use a Python environment you prepared, run `bash scripts/install.sh --python <venv>/bin/python`. install.sh checks
+that it holds the packages `backend/pyproject.toml` asks for at versions it allows, links `backend/.venv` to it and
+installs nothing into it. Updates keep the link and check it again. To go back to thimble's own environment, delete the
+link and run install.sh again.
 
 ## Update
 

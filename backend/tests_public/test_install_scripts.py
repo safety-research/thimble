@@ -2,6 +2,7 @@
 tmp_path with a throwaway HOME: the Python they start never imports a module from the folder they run in."""
 from __future__ import annotations
 
+import importlib.metadata
 import json
 import os
 import shutil
@@ -157,6 +158,51 @@ def test_a_pinned_install_falls_back_to_pyproject_s_ranges_only_when_the_index_l
     assert "installed instead" in r.stdout
     r, calls = run(STUB_SYNC_RC="1", STUB_SYNC_OUT="Hash mismatch for `httpx==0.28.1`")
     assert r.returncode == 1 and "hash is not the one" in r.stderr and len(calls) == 1, r.stdout + r.stderr
+
+
+def test_install_sh_python_links_a_prepared_environment_and_installs_nothing_into_it(tmp_path):
+    """--python checks the environment before anything changes, refuses one that lacks a dependency, or an install whose
+    own backend/.venv is in the way, and links backend/.venv to it; later runs keep the link."""
+    tree = fake_tree(tmp_path / "release")
+    (tree / "backend" / "app").mkdir()
+    shutil.copy(REPO / "backend" / "app" / "env_check.py", tree / "backend" / "app")
+    byo = tmp_path / "byo"
+    subprocess.run([os.path.realpath(sys.executable), "-m", "venv", "--without-pip", str(byo)], check=True, timeout=60)
+    [site] = byo.glob("lib/python3*/site-packages")  # prepared with packaging alone, which the check reads versions with
+    dist = importlib.metadata.distribution("packaging")
+    info = next(f.parts[0] for f in dist.files if f.parts[0].endswith(".dist-info"))
+    for name in ("packaging", info):
+        shutil.copytree(Path(dist.locate_file(name)), site / name)
+    before = sorted(p.relative_to(byo) for p in byo.rglob("*"))
+    dest = tmp_path / "home" / ".thimble" / "app"
+    log = tmp_path / "uv.log"
+    pyproject = tree / "backend" / "pyproject.toml"
+    pyproject.write_text('[project]\nrequires-python = ">=3.12"\ndependencies = ["no-such-package-here>=1"]\n')
+    r = install(tree, dest, tmp_path, "--python", str(byo / "bin" / "python"), STUB_LOG=str(log))
+    assert r.returncode == 1 and "no-such-package-here (not installed)" in r.stderr, r.stdout + r.stderr
+    assert not dest.exists(), "refused before anything changed"
+    pyproject.write_text('[project]\nrequires-python = ">=3.12"\ndependencies = []\n')
+    r = install(tree, dest, tmp_path, "--python", str(byo / "bin" / "python"), STUB_LOG=str(log))
+    venv = dest / "backend" / ".venv"
+    assert r.returncode == 0 and venv.is_symlink() and venv.resolve() == byo.resolve(), r.stdout + r.stderr
+    assert install(tree, dest, tmp_path, STUB_LOG=str(log)).returncode == 0 and venv.is_symlink()
+    assert not log.exists() or log.read_text() == "", "nothing installed"
+    assert sorted(p.relative_to(byo) for p in byo.rglob("*")) == before
+    venv.unlink()
+    venv.mkdir()
+    r = install(tree, dest, tmp_path, "--python", str(byo / "bin" / "python"))
+    assert r.returncode == 1 and "delete it" in r.stderr and venv.is_dir() and not venv.is_symlink()
+
+
+def test_env_check_names_what_an_environment_lacks(tmp_path):
+    from app import env_check
+
+    pyproject = tmp_path / "pyproject.toml"
+    pyproject.write_text('[project]\nrequires-python = ">=3.12"\n'
+                         'dependencies = ["pytest>=8", "pytest>=999", "no-such-package-here", "httpx; python_version < \'3\'"]\n')
+    found = next(ln for ln in env_check.missing(pyproject) if ln.startswith("pytest"))
+    assert env_check.missing(pyproject) == ["no-such-package-here (not installed)", found]
+    assert found.startswith("pytest>=999 (found ")
 
 
 def release_zip(tmp_path: Path, name: str = "thimble-0.0.2-abc1234") -> Path:

@@ -1837,6 +1837,17 @@ def node_line() -> str:
     return out + ("" if modules.is_dir() else f"; {modules} is missing, so custom views cannot build (run `{fix}` again)")
 
 
+def python_line() -> str:
+    """The server's Python: thimble's own backend/.venv, or the environment install.sh --python linked it to, and what
+    that lacks of pyproject.toml's requirements (env_check)."""
+    from . import env_check  # noqa: PLC0415
+
+    venv = BACKEND_DIR / ".venv"
+    whose = f"your environment {venv.resolve()} (install.sh --python)" if venv.is_symlink() else f"{venv}"
+    lacking = env_check.missing()
+    return f"{whose}, Python {platform.python_version()}" + (f"; lacks {', '.join(lacking)}" if lacking else "")
+
+
 def trust_line(workspaces: Path) -> str:
     """Whether Claude Code trusts the workspaces folder, which terminal-first mode's background sessions need
     (bg_session.trusted), and the command that trusts it."""
@@ -2014,6 +2025,7 @@ def doctor_text() -> str:
     lines.append(f"  claude code: {_checked(claude_code_line)}")
     lines.append(f"  turn endings: {_checked(_turn_endings_line)}")
     lines.append(f"  node: {_checked(node_line)}")
+    lines.append(f"  python: {_checked(python_line)}")
     lines.append(f"  port: {_checked(port_line, p, up)}")
     lines.append(f"  server: {'up' if up else 'down'} at {url}; pid {pid or '-'} "
                  f"({'alive' if pid_alive(pid) else 'gone'}); started {st.get('started') or '-'}"

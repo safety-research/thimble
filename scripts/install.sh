@@ -13,11 +13,15 @@
 # Needs: uv (or python3 >= 3.12); node >= 20 for custom views, and to build frontend/dist when it is missing or out of date; the claude CLI to register the plugin.
 # The marketplace name is thimble-local from a release zip and thimble from a checkout (.claude-plugin/marketplace.json).
 #
-#   scripts/install.sh [--dir DIR] [--marketplace-name NAME] [--dev] [--deps-only] [--plugin | --no-plugin]
+#   scripts/install.sh [--dir DIR] [--marketplace-name NAME] [--dev] [--python PATH] [--deps-only] [--plugin | --no-plugin]
 #                      [--trust-workspaces | --no-trust-workspaces] [--dry-run]
 #   --dir DIR                where the tree lives (default: this checkout; $THIMBLE_HOME/app for a release)
 #   --marketplace-name NAME  the name Claude Code registers the tree under (default: the one in marketplace.json)
 #   --dev                    also install the backend's test extras (pytest, pytest-asyncio); a git checkout always does
+#   --python PATH            use the environment of the python at PATH, a virtual environment you prepared, in place of
+#                            creating backend/.venv: install.sh checks that it holds the packages pyproject.toml asks for,
+#                            at versions it allows, links backend/.venv to it and installs nothing into it. Later runs
+#                            and `thimble update` keep the link and check it again
 #   --deps-only              stop after the frontend step: no pointer, no plugin, no doctor
 #   --plugin                 add thimble to ~/.claude/settings.json and ~/.claude/plugins, so it is available in every
 #                            claude session from startup. --no-plugin answers no, and takes back what an earlier yes
@@ -41,12 +45,13 @@ json_get() {  # json_get FILE KEY — a top-level string value (python3 when pre
 parse_args() {
   src="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
   home="${THIMBLE_HOME:-$HOME/.thimble}"
-  dir="" mp_name="" dev=0 deps_only=0 plugin="" dry=0 trust=""
+  dir="" mp_name="" dev=0 deps_only=0 plugin="" dry=0 trust="" byo=""
   while [ $# -gt 0 ]; do
     case "$1" in
       --dir) dir="$2"; shift 2;;
       --marketplace-name) mp_name="$2"; shift 2;;
       --dev) dev=1; shift;;
+      --python) byo="$2"; shift 2;;
       --deps-only) deps_only=1; shift;;
       --plugin) plugin=yes; shift;;
       --no-plugin) plugin=no; shift;;
@@ -122,7 +127,28 @@ uv_index_set() {  # uv is set up with a package index: UV_DEFAULT_INDEX or its k
   sets_key '^[[:space:]]*((index-url|extra-index-url|find-links|no-index)[[:space:]]*=|\[\[index\]\])' "${files[@]}"
 }
 
-check_prerequisites() {  # uv or python >= pyproject's requires-python; node >= 20 unless frontend/dist is built; the claude CLI
+check_byo() {  # --python, before anything changes: the environment it belongs to (sys.prefix) runs its own bin/python, the
+  # path backend/.venv will link to, and holds what pyproject.toml asks for (backend/app/env_check.py)
+  local lacking
+  case "$byo" in /*) ;; */*) byo="$PWD/$byo";; *) byo="$(command -v "$byo" || printf '%s' "$byo")";; esac
+  py_ok "$byo" || die "--python $byo: not a python >= $req_py that runs"
+  byo_prefix="$(cd / && "$byo" -I -c 'import sys; print(sys.prefix)')"
+  [ "$(cd / && "$byo_prefix/bin/python" -I -c 'import sys; print(sys.prefix)' 2>/dev/null)" = "$byo_prefix" ] \
+    || die "--python $byo: its environment $byo_prefix has no bin/python of its own; give the python of a virtual environment (<venv>/bin/python)"
+  if [ -e "$dir/backend/.venv" ] && [ ! -L "$dir/backend/.venv" ] && [ ! "$dir/backend/.venv" -ef "$byo_prefix" ]; then
+    die "$dir/backend/.venv is the environment an earlier install made; to use $byo_prefix in its place, delete it (rm -rf $dir/backend/.venv) and run this again"
+  fi
+  if ! lacking="$(cd / && "$byo_prefix/bin/python" -I -B "$src/backend/app/env_check.py" "$src/backend/pyproject.toml" 2>&1)"; then
+    die "the environment $byo_prefix lacks what thimble's backend needs. Install these into it, then run this again:
+$lacking"
+  fi
+  say "python: $byo_prefix/bin/python, $(cd / && "$byo" -I -c 'import platform; print(platform.python_version())'), holds what backend/pyproject.toml asks for; backend/.venv will link to it"
+  if [ "$dev" = 1 ] && ! lacking="$(cd / && "$byo_prefix/bin/python" -I -B "$src/backend/app/env_check.py" "$src/backend/pyproject.toml" --extra dev 2>&1)"; then
+    say "it lacks the test extras, which only the tests need:"; say "$lacking"
+  fi
+}
+
+check_prerequisites() {  # uv or python >= pyproject's requires-python, or --python's environment; node >= 20 unless frontend/dist is built; the claude CLI
   step "1/12 prerequisites"
   req_py="$(sed -n 's/^requires-python *= *">=\([0-9][0-9.]*\)".*/\1/p' "$src/backend/pyproject.toml")"; req_py="${req_py:-3.12}"
   have_uv=0 py="" pytool=pip
@@ -134,7 +160,9 @@ check_prerequisites() {  # uv or python >= pyproject's requires-python; node >= 
   local uv_v="" py_v=""
   [ "$have_uv" = 0 ] || uv_v="uv $(uv --version 2>/dev/null | sed 's/^uv //')"
   [ -z "$py" ] || py_v="python $("$py" -I -c 'import sys; print("%d.%d.%d" % sys.version_info[:3])') at $py (>= $req_py)"
-  if [ "$checkout" = 1 ] && [ "$have_uv" = 1 ]; then
+  if [ -n "$byo" ]; then
+    check_byo
+  elif [ "$checkout" = 1 ] && [ "$have_uv" = 1 ]; then
     say "$uv_v — creates backend/.venv from uv.lock and fetches Python $req_py itself if the machine has none"
   elif [ "$have_uv" = 0 ] && [ -z "$py" ]; then
     die "neither uv nor a python >= $req_py was found. Install uv (https://docs.astral.sh/uv/getting-started/installation/) or Python $req_py+"
@@ -192,13 +220,22 @@ copy_tree() {  # a release install: the release's entries replace the install's;
   if [ -d "$dir" ]; then dir="$(cd "$dir" && pwd -P)"; fi
 }
 
-make_venv() {  # a checkout's from uv.lock (uv sync, else venv + pip from pyproject); a release's from
-  # backend/requirements.txt (release_venv); a symlinked venv is left alone
+make_venv() {  # --python's environment linked; a linked one kept and checked; a checkout's from uv.lock (uv sync, else
+  # venv + pip from pyproject); a release's from backend/requirements.txt (release_venv)
   step "3/12 backend/.venv (the server's Python and dependencies)"
-  local venv="$dir/backend/.venv"
+  local venv="$dir/backend/.venv" lacking
   extra=(); if [ "$dev" = 1 ]; then extra=(--extra dev); fi
-  if [ -L "$venv" ]; then
-    say "$venv is a symlink → $(readlink "$venv"); shared with another checkout, left alone"
+  if [ -n "$byo" ] && [ "$venv" -ef "$byo_prefix" ]; then
+    say "backend/.venv is $byo_prefix already; used as it is"
+  elif [ -n "$byo" ]; then
+    run ln -sfn "$byo_prefix" "$venv"
+    say "backend/.venv → $byo_prefix: your environment, used as it is; nothing is installed into it"
+  elif [ -L "$venv" ]; then
+    say "backend/.venv → $(readlink "$venv"): an environment of your own (install.sh --python), used as it is"
+    if [ "$dry" = 0 ] && ! lacking="$(cd / && "$venv/bin/python" -I -B "$src/backend/app/env_check.py" "$src/backend/pyproject.toml" 2>&1)"; then
+      say "it lacks what this version of the backend needs; the server may not start until these are installed into it:"
+      say "$lacking"
+    fi
   elif [ "$checkout" = 0 ]; then
     release_venv
   elif [ "$have_uv" = 1 ] && [ -f "$src/backend/uv.lock" ]; then
