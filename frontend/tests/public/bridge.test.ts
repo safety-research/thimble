@@ -96,9 +96,9 @@ describe('the view bridge', () => {
     const doc = dom.window.document
     const seen: unknown[] = []
     win().thimble.onLabels(() => undefined)
-    fromPage({ type: 'thimble:init', mode: 'card', data: { cards: 2 }, args: { rows: 'account' }, width: 692, card: 'c7' })
+    fromPage({ type: 'thimble:init', mode: 'card', data: { cards: 2 }, args: { rows: 'account' }, width: 692, card: 'c7', key: 'k1' })
     win().thimble.onInit((x: unknown) => seen.push(x))
-    expect(seen).toEqual([{ mode: 'card', data: { cards: 2 }, args: { rows: 'account' }, width: 692, card: 'c7' }])
+    expect(seen).toEqual([{ mode: 'card', data: { cards: 2 }, args: { rows: 'account' }, width: 692, card: 'c7', key: 'k1' }])
     expect(win().thimble.card).toMatchObject({ card: 'c7' })
     win().thimble.size(480)
     win().thimble.settled()

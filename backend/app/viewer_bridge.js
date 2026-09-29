@@ -4,14 +4,16 @@
 // URL of an image, audio or video file it claims, for an element's src), so everything else it knows arrives through
 // postMessage calls:
 //   open {locator, quote?} page to frame: show this place (window.thimble.onOpen); with quote {record, text}, a passage
-//                          inside that record, which the bridge highlights and scrolls to (the view shows the record)
+//                          inside that record, which the bridge highlights and scrolls to (the view shows the record).
+//                          In a card's frame its target is {ref, pick}, pick to open the record in full
 //   quoted {found}         frame to page: whether the quoted passage showed in the page
 //   fetch {id, query}      frame to page, answered by result {id, data} from reader.records (window.thimble.fetch)
 //   cite {ref, text, ...}  frame to page: a ⌘-click on an element with data-anchor, or on any other part of the view
 //                          (its legend, a control, the empty page), asked about as the view itself, `view:<slug>`
-//   init {mode, data, args, width, card}
+//   init {mode, data, args, width, card, key}
 //                          page to frame, in a card's frame (cardtypes.py): what the card stored, which the page draws
-//                          with no fetch (window.thimble.onInit); mode is card, full or render, and `card` its id
+//                          with no fetch (window.thimble.onInit); mode is card, full or render, `card` its id, and `key`
+//                          names what it stored, the same key when only the mode or the width changed
 //   navigate {ref}         frame to page: open another place, in this view or anywhere in thimble (window.thimble.navigate)
 //   size {height}          frame to page: the document's height, for a frame that sizes to its content, or the height a
 //                          page says it needs (window.thimble.size), after which the document's own height is not sent
@@ -35,6 +37,8 @@
 //   state {id}             page to frame, answered by state {id, state}: what the analyst is looking at, before a newer
 //                          version of the view is loaded in its place: {ref, scroll, fields, segs} (pageState)
 //   restore {state}        page to frame: that state put back in the newer version's page, as far as it fits (restore)
+// The text of an element marked data-thimble-chrome inside an anchored element is the page's own wording, such as a
+// record's header, which a label's matches never highlight.
 // plus ready (the frame can take `open`), error (an uncaught error or a blocked request, shown with a Raw button) and
 // point {rect} (the element under the pointer while ⌘ is held, so the page's one highlight follows the pointer into the
 // frame).
@@ -198,7 +202,7 @@
       if (d.error) p.reject(new Error(d.error))
       else p.resolve(d.data)
     } else if (d.type === P + 'init') {
-      init = { mode: String(d.mode || 'card'), data: d.data, args: d.args || {}, width: Number(d.width) || 0, card: d.card ? String(d.card) : null }
+      init = { mode: String(d.mode || 'card'), data: d.data, args: d.args || {}, width: Number(d.width) || 0, card: d.card ? String(d.card) : null, key: String(d.key || '') }
       window.thimble.card = init
       for (var n = 0; n < initFns.length; n++) {
         try {
@@ -438,6 +442,8 @@
     for (var n = walk.nextNode(); n; n = walk.nextNode()) {
       var up = n.parentNode && n.parentNode.nodeName
       if (up === 'SCRIPT' || up === 'STYLE') continue
+      var chrome = n.parentElement && n.parentElement.closest('[data-thimble-chrome]')
+      if (chrome && chrome !== el && el.contains(chrome)) continue
       nodes.push(n)
       starts.push(text.length)
       text += n.data

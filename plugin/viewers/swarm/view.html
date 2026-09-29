@@ -93,6 +93,7 @@
   .focus .card:not(.lit), .focus .agent:not(.lit) .who, .focus .agent:not(.lit) .av { opacity: .3; }
   .focus .lbl:not(.lit), .focus #links g:not(.lit) .ln, .focus #links g:not(.lit) .end { opacity: .1; }
   .focus #links g.lit .ln { stroke-width: 2.2; }
+  #links g.dropped .ln, #links g.dropped .end, .lbl.dropped { opacity: .25; }
 
   #detail { flex: none; width: 380px; box-sizing: border-box; overflow: auto; border-left: 1px solid var(--border-hairline); background: var(--surface-card); padding: 12px 16px 28px; }
   .d-top { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
@@ -208,8 +209,10 @@
 // stored, which the bridge's `init` brings, and fetches only a record's detail. Its records and their values are the
 // card's; the legend, grouping, link types and search narrow what it shows here. The colours are the labels' as the
 // analyst edits them, and a record a label marked after the card ran takes the colour of its mark as the label runs. A
-// citation hovered in the card's takeaway lights its record. It tells thimble the height it needs, and that it has
-// drawn.
+// citation hovered in the card's takeaway lights its record, and a click on it opens the record beside the chart. While
+// the Files filter dims records, their links are dimmed too, and the chart scrolls to the first record it keeps. It
+// tells thimble the height it needs, and that it has drawn; `init` again with the same key keeps what the analyst did
+// here. Rows and places carry no unit ref in a card, so a ⌘-click on them asks about the card.
 // Layout: a card spans more than its column, so cards of one row that would overlap stack in the row's lanes. The part
 // of a card no neighbouring column's card reaches, its band, carries the vertical runs of its links, and each link runs
 // horizontally in the gap between rows next to its target, so no link crosses a card. A gap is as tall as the links it
@@ -300,7 +303,8 @@ let group = 'account' // 'account' or 'sig'
 let zoom = 1 // 1 or 'fit'
 let offset = 0
 let only = [] // the label values the legend keeps, [{label, value}]; all when empty
-let mode = 'view' // or, in a card's frame, the card's mode: card, full or render
+let drawnKey = null // in a card, the key of what the card stored as it was last drawn
+let filterKey = 'null'
 let sel = null // {kind: card|row|link|record, id|key|ref}
 let hover = null
 let keepRef = null // the record a citation opened, shown whatever the labels mark
@@ -441,7 +445,7 @@ function renderBar(v) {
   for (const p of D.places) {
     if (!shownPlaces.has(p.tag) && !F.places.has(p.tag)) continue
     const w = h('span', 'thr')
-    w.dataset.anchor = `view:${slug}/place/${p.name.replace(/ /g, '%20')}`
+    if (!CARD) w.dataset.anchor = `view:${slug}/place/${p.name.replace(/ /g, '%20')}`
     w.dataset.anchorName = `${p.tag} ${p.name}`
     const b = h('button', `chip chip-act chip-tone-neutral${F.places.has(p.tag) ? ' active' : ''}`)
     b.title = `${p.name}: ${plural(p.n, 'record')} by ${plural(p.accounts, 'account')}\nClick: only this place · Shift-click: add it`
@@ -504,7 +508,10 @@ function renderLegend() {
   el.innerHTML = ''
   if (el.hidden) return
   const kept = (m) => !only.length || only.some((o) => o.label === m.label && o.value === m.value)
+  const held = (m) => !(D.only || []).length || D.only.some((o) => o.label === m.label && o.value === m.value)
   D.marks.forEach((m, j) => {
+    // a card lists only the values it holds records of
+    if (CARD && (!(D.mark_counts || [])[j] || !held(m))) return
     const label = (labelState.all || labelState.labels).find((l) => l.name === m.label)
     const it = h('span', `lg${kept(m) ? '' : ' off'}`)
     if (label && label.id) it.dataset.label = label.id
@@ -693,7 +700,7 @@ function layout(v) {
   const cells = rowKeys.map((key) => {
     const r = rowBy.get(key)
     const el = h('div', 'agent')
-    el.dataset.anchor = r.own ? `view:${slug}/agent/${r.key}` : `view:${slug}/agent/${r.accounts[0]}`
+    if (!CARD) el.dataset.anchor = r.own ? `view:${slug}/agent/${r.key}` : `view:${slug}/agent/${r.accounts[0]}`
     el.dataset.anchorName = r.name
     const who = h('div', 'who')
     const nm = h('div', 'nm', r.name)
@@ -725,13 +732,14 @@ function layout(v) {
     el.dataset.anchorText = `#${c.id} ${c.line}`
     el.dataset.id = c.id
     const hd = h('div', 'hd')
+    hd.dataset.thimbleChrome = ''
     const colour = cardColour(c)
     hd.append(h('span', 'no', `#${c.id}`), h('span', 'tag', c.tag))
     if (labelsOn() && c.m >= 0) { const vv = h('span', 'v', D.marks[c.m].value); vv.style.color = colour; hd.append(vv) }
     const key = rowOfCard.get(c.id)
     const as = key !== c.account ? c.account : c.sig && c.sig !== c.account ? `as ${c.sig}` : ''
     el.append(hd)
-    if (as) { const a = h('div', 'as', group === 'sig' ? `by ${as}` : as); a.title = group === 'sig' ? `Saved by ${c.account}` : `Signed ${c.sig}`; el.append(a) }
+    if (as) { const a = h('div', 'as', group === 'sig' ? `by ${as}` : as); a.title = group === 'sig' ? `Saved by ${c.account}` : `Signed ${c.sig}`; a.dataset.thimbleChrome = ''; el.append(a) }
     el.append(h('div', 'ac', c.line))
     el.title = `${c.line}\n${c.account}${c.sig && c.sig !== c.account ? ` (signs ${c.sig})` : ''} · ${whenOf(c.time)}`
     if (colour) {
@@ -884,7 +892,7 @@ function layout(v) {
     lb.onmouseenter = () => setHover({ kind: 'link', key: r.x.key })
     lb.onmouseleave = () => setHover(null)
     lb.onclick = () => select({ kind: 'link', key: r.x.key })
-    linkEls.set(r.x.key, { g, lb })
+    linkEls.set(r.x.key, { g, lb, x: r.x })
   }
   plot.prepend(svg)
   for (const b of [...plot.querySelectorAll('.band')].reverse()) plot.prepend(b)
@@ -1019,7 +1027,7 @@ function sec(title, n) {
 function rowBlock(key) {
   const r = rowBy.get(key) || { key, name: key, goal: '', accounts: [key], sigs: [] }
   const b = h('div', 'd-agent')
-  b.dataset.anchor = `view:${slug}/agent/${r.own ? r.key : r.accounts[0]}`
+  if (!CARD) b.dataset.anchor = `view:${slug}/agent/${r.own ? r.key : r.accounts[0]}`
   const who = h('div', 'who')
   who.append(h('div', 'nm', r.name))
   if (r.goal) who.append(h('div', 'goal', r.goal))
@@ -1121,7 +1129,8 @@ async function renderDetail() {
   } else if (sel.kind === 'row') {
     const r = rowBy.get(sel.key)
     if (!r) return
-    box.dataset.anchor = `view:${slug}/agent/${r.own ? r.key : r.accounts[0]}`
+    if (CARD) delete box.dataset.anchor
+    else box.dataset.anchor = `view:${slug}/agent/${r.own ? r.key : r.accounts[0]}`
     const solo = h('button', 'btn btn-ghost btn-sm', F.row === r.key ? 'All rows' : 'Only this row')
     solo.onclick = () => { F.row = F.row === r.key ? '' : r.key; refresh() }
     box.append(detailHead([chip(group === 'sig' ? 'Signed name' : 'Account', 'chip chip-sans chip-tone-neutral'), solo], null))
@@ -1173,7 +1182,23 @@ function refresh() {
   layout(v)
   applyFocus()
   renderDetail()
-  if (CARD) reportSize()
+  if (CARD) {
+    reportSize()
+    setTimeout(() => afterDrops(false), 60)
+  }
+}
+// in a card, the links of the records the Files filter dims are dimmed too, and a new filter scrolls the chart to the
+// first record it keeps
+function afterDrops(scroll) {
+  if (!L) return
+  const dropped = new Set([...L.cards.values()].filter((k) => k.el.hasAttribute('data-thimble-drop')).map((k) => k.c.id))
+  for (const { g, lb, x } of L.linkEls.values()) {
+    const dim = dropped.has(x.from) || dropped.has(x.to)
+    g.classList.toggle('dropped', dim)
+    lb.classList.toggle('dropped', dim)
+  }
+  const first = scroll && dropped.size ? [...L.cards.values()].find((k) => !dropped.has(k.c.id)) : null
+  if (first) revealBox({ x: first.x, y: first.y, w: first.w, h: first.h })
 }
 // a card's page asks for the height its chart needs; thimble fits the frame to it within the card's range
 function reportSize() {
@@ -1182,6 +1207,12 @@ function reportSize() {
   const bar = document.getElementById('bar').offsetHeight
   const body = L ? Math.ceil(L.height * z) + (L.width * z > chart.clientWidth ? 14 : 2) : document.getElementById('empty').offsetHeight + 96
   thimble.size(bar + body)
+}
+// in a card, the record a clicked citation names is opened beside the chart
+function pickRef(ref) {
+  const card = D ? D.cards.find((c) => c.ref === ref) : null
+  if (card) select({ kind: 'card', id: card.id })
+  else select({ kind: 'record', ref }, { reveal: false })
 }
 // in a card, the record a hovered citation names is lit and scrolled to
 function lightRef(ref) {
@@ -1215,7 +1246,7 @@ async function start() {
 }
 thimble.onOpen(async (place) => {
   const t = (place && place.target) || null
-  if (CARD) return lightRef(t && t.ref)
+  if (CARD) return t && t.ref && t.pick && D ? pickRef(t.ref) : lightRef(t && t.ref)
   const again = t && t.ref && t.ref !== keepRef
   if (t && t.ref) keepRef = t.ref
   if (!D) { target = t; return }
@@ -1226,8 +1257,12 @@ thimble.onLabels(async (state) => {
   const was = JSON.stringify([labelState.labels, labelState.filter, (labelState.all || []).map((l) => [l.id, l.count])])
   labelState = { labels: state.labels || [], filter: state.filter || null, all: state.all || null, palette: state.palette || null }
   if (CARD) {
-    // a card's records are fixed; the labels change only their colours
+    // a card's records are fixed; the labels change only their colours, and the filter dims them
+    const fk = JSON.stringify(labelState.filter)
+    const newFilter = fk !== filterKey
+    filterKey = fk
     if (D) refresh()
+    if (newFilter) setTimeout(() => afterDrops(true), 120)
     renderPop()
     return
   }
@@ -1260,11 +1295,21 @@ if (CARD) {
   let marksT = null
   thimble.onMarks(() => { if (D && marksT == null) marksT = requestAnimationFrame(() => { marksT = null; refresh() }) })
   thimble.onInit((init) => {
-    mode = init.mode
+    if (D && init.key && init.key === drawnKey) {
+      refresh()
+      requestAnimationFrame(() => thimble.settled())
+      return
+    }
+    drawnKey = init.key
     D = init.data
     group = D.rows_by === 'sig' ? 'sig' : 'account'
     only = (D.only || []).slice()
     sel = null
+    F.row = ''
+    F.places.clear()
+    F.types.clear()
+    q = ''
+    document.getElementById('q').value = ''
     index()
     refresh()
     // the chart opens at its first card a label marks, so the card first shows what its labels found

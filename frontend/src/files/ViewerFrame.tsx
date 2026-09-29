@@ -20,7 +20,8 @@
 // changes (backend views.VERSIONS_SUBDIR).
 // A card of a card type (`card`, backend cardtypes.py) loads the type's page, which gets `init` with what the card
 // stored once it is ready and says `settled` once it has drawn it; its fetches go to the type's records route under the
-// card's labels, its `open` names the record ref as it is, and its height stays within the type's range.
+// card's labels, its `open` names the record ref as it is (with `pick` to open it in full), and its height stays within
+// the type's range.
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject } from 'react'
 import { api } from '../lib/api'
 import { bus } from '../lib/bus'
@@ -101,10 +102,13 @@ export interface ViewerFrameProps {
   card?: CardFrame
   /** a card's page has drawn what it was given */
   onSettled?: () => void
+  /** in a card, the record `targetRef` names is opened in full rather than lit */
+  targetPick?: boolean
 }
 
 /** A card of a card type drawn in the frame: the card's id, its type, how it is drawn (on the canvas, full size or for
- * the card check's picture), what its code stored, its width and the type's height range. */
+ * the card check's picture), what its code stored, its width and the type's height range. `key` names what it stored:
+ * the page is sent `init` again only when the key, the mode or the width changes. */
 export interface CardFrame {
   id: string
   type: string
@@ -113,6 +117,7 @@ export interface CardFrame {
   args: Record<string, unknown>
   width: number
   size: [number, number]
+  key: string
 }
 
 /** A quoted passage: the record ref it sits in and its text. */
@@ -275,7 +280,7 @@ function useViewLabels(
   return useMemo(() => ({ add, reset, ready }), [add, reset, ready])
 }
 
-export function ViewerFrame({ ws, slug, targetRef, path, title, fit, labels = NO_LABELS, filter = null, filterFiles, byId = NO_CONCEPTS, first, labelActions, onError, className, quote, onQuoteMissing, version, restore, handle, card, onSettled }: ViewerFrameProps) {
+export function ViewerFrame({ ws, slug, targetRef, path, title, fit, labels = NO_LABELS, filter = null, filterFiles, byId = NO_CONCEPTS, first, labelActions, onError, className, quote, onQuoteMissing, version, restore, handle, card, onSettled, targetPick }: ViewerFrameProps) {
   const ref = useRef<HTMLIFrameElement>(null)
   const [page, setPage] = useState<string | null>(null)
   const [height, setHeight] = useState<number | null>(null)
@@ -296,6 +301,8 @@ export function ViewerFrame({ ws, slug, targetRef, path, title, fit, labels = NO
   drawn.current = card
   const settledFn = useRef(onSettled)
   settledFn.current = onSettled
+  const pick = useRef(targetPick)
+  pick.current = targetPick
   const cardType = card?.type
 
   const [fonts, setFonts] = useState<string | null>(null)
@@ -350,11 +357,11 @@ export function ViewerFrame({ ws, slug, targetRef, path, title, fit, labels = NO
   }, [doc, marks])
   const sendInit = () => {
     const c = drawn.current
-    if (c) post({ type: P + 'init', mode: c.mode, data: c.data, args: c.args, width: c.width, card: c.id })
+    if (c) post({ type: P + 'init', mode: c.mode, data: c.data, args: c.args, width: c.width, card: c.id, key: c.key })
   }
   const sendOpen = async (r: string | undefined) => {
     let open: ViewOpen = path ? { ref: null, path } : { ref: null }
-    if (drawn.current) open = r ? ({ ref: r, target: { ref: r } } as ViewOpen) : { ref: null }
+    if (drawn.current) open = r ? ({ ref: r, target: { ref: r, pick: !!pick.current } } as ViewOpen) : { ref: null }
     else if (r) {
       try {
         open = await api.viewOpen(ws, slug, r, version)
@@ -379,12 +386,12 @@ export function ViewerFrame({ ws, slug, targetRef, path, title, fit, labels = NO
   useEffect(() => {
     if (ready.current) void sendOpen(targetRef)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [targetRef, quote?.text])
-  // a card run again, or drawn in another mode: a new `init`, no reload
+  }, [targetRef, quote?.text, targetPick])
+  // a card run again, or drawn in another mode or width: a new `init`, no reload
   useEffect(() => {
     if (ready.current) sendInit()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [card?.data, card?.args, card?.mode, card?.width])
+  }, [card?.key, card?.mode, card?.width])
 
   useEffect(() => {
     const onMessage = async (e: MessageEvent) => {
