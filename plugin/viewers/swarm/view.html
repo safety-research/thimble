@@ -328,8 +328,10 @@ function markColour(m) {
 function cardColour(c) {
   if (!labelsOn()) return null
   if (c.m >= 0) return markColour(D.marks[c.m])
+  // a record the card's own labels marked after the card ran takes their colour; other labels that are on only mark it
   const live = CARD && thimble.markOf ? thimble.markOf(c.ref) : null
-  return live && live.bar ? live.bar : null
+  const own = new Set(D.marks.map((m) => m.label))
+  return live && live.bar && (live.names || []).some((n) => own.has(n)) ? live.bar : null
 }
 const types = () => [...new Set(D.links.map((x) => x.type))]
 const rowKey = (c) => (group === 'sig' && c.sig ? c.sig : c.account)
