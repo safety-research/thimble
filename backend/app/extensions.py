@@ -7,7 +7,8 @@ then on it runs in every workspace it applies to, until it is removed or switche
   views/<slug>/         a view (views.py), with `show` ("always" or "proposed") and `reports` in view.json; a `card`
                         block and card.py make it a card type too (cardtypes.py), and card.md is the type's guide
   cards/<slug>/         a card type of its own: card.json (the keys of a `card` block plus `reader`, the extension's view
-                        whose reader and index it uses), card.py, card.html, card.md
+                        whose reader and index it uses), card.py, card.html, card.md; its slug may be a view's that has
+                        no `card` block
   agents/<name>.md      an agent the orientation's session gets with --agents (agent_definitions)
   report-types/<slug>/  type.md in the preset format plus `default`; export.py for its own exports
   orient.md             added to the orientation's instructions; `replaces` names blocks thimble has a default for
@@ -222,8 +223,8 @@ def read_extension(root: Path, expect: str | None = None) -> dict[str, Any]:
             problems.append(f"its card type {d.name!r} lacks {CARD_JSON}, card.py or {CARD_HTML}")
         elif reader not in slugs:
             problems.append(f"its card type {d.name!r} reads with the view {reader!r}, which it does not have")
-        elif d.name in slugs:
-            problems.append(f"its card type {d.name!r} has the slug of one of its views")
+        elif any(v["slug"] == d.name and v["card"] for v in vs):
+            problems.append(f"its card type {d.name!r} has the slug of one of its views that is a card type")
         else:
             cards.append({"slug": d.name, "reader": reader})
     agents = sorted(p.stem for p in (root / "agents").glob("*.md") if NAME_RE.match(p.stem)) if (root / "agents").is_dir() else []

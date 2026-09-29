@@ -1,0 +1,15 @@
+{
+  "name": "Swarm",
+  "why": "Every record of a swarm at once: totals, then a strip per page or channel and a row per account across time, shaded by count and coloured by the labels that are on. Drag over time to zoom, click a place or pick a run to narrow it, and click a cell for its records.",
+  "data": "A survey team's shared wiki and chat over one night, and its roster. roster.csv: `account`, `objective` and `joined`. wiki/index.jsonl: the pages (`slug`, `title`, `created`, `by`). wiki/pages/<slug>.jsonl: one page's saves (`rev`, `user` or `ip`, `ts`, `summary`, `text`, the whole page after the save). chat/<channel>.jsonl: posts (`id`, `channel`, `user`, `ts`, `text`, `reply_to`) and join notices; night-ops.jsonl is in a later export's fields (`room`, `author`, `sent` in epoch milliseconds, `body`, `parent`). The reader finds each file's fields by name, compares each save with the one before it on its page, and colours the records by the labels that are on. It handles times in ISO 8601 with Z or an offset, with a space and no zone, and in epoch seconds or milliseconds; a post with no time; a replayed save and a post delivered twice; posts logged out of order; a torn last line (reported with any other line that does not parse); a roster that capitalises an account differently, leaves objectives empty and runs one over two lines; a save by an address with no account; and a save that changes only spacing.",
+  "claims": ["roster.csv", "wiki/index.jsonl", "wiki/pages/**/*.jsonl", "chat/*.jsonl"],
+  "accepts": [{"form": "L<n>", "means": "the record on line <n>: its card when the chart shows it, else the record beside the chart; a roster row opens its account"}],
+  "declares": [
+    {"form": "agent/<account>", "means": "one account: its row, its goal and all its records"},
+    {"form": "place/<place>", "means": "one page or channel, such as place/Night-14/Schedule: all its records"}
+  ],
+  "default": true,
+  "applies": true,
+  "show": "always",
+  "libs": []
+}

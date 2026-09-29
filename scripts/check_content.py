@@ -70,8 +70,8 @@ EXEMPT = re.compile(r"^(LICENSE|THIRD_PARTY_NOTICES|backend/app/fonts/OFL-[\w-]+
                     r"frontend/package-lock\.json|frontend/dist/.+)$")
 NEVER = re.compile(r"(^|/)(__pycache__|node_modules|\.venv)(/|$)|^(data|dev|notes|context|experiments|"
                    r"workspaces[^/]*|\.claude|docs/archive|docs/proposals)/|\.(db|sqlite3?|jsonl|pyc)$")
-# the worked examples' invented sample files, in their folders, which are data on purpose
-SAMPLES = re.compile(r"^plugin/viewers/[\w-]+/sample/.+$")
+# the invented sample files of the worked examples and of the extensions' views, in their folders, which are data on purpose
+SAMPLES = re.compile(r"^(plugin/viewers|extensions/[\w-]+/views)/[\w-]+/sample/.+$")
 MAX_BYTES = 2_000_000
 # the extension a module import leaves out, with TypeScript's declaration suffix (types.d.ts is the module ./types)
 EXTENSION = re.compile(r"(?<=.)(\.d)?\.[^.]+$")

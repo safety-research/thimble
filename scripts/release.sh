@@ -6,6 +6,7 @@
 # What it produces: <out>/thimble-<version>-<shortsha>.zip (default out: <repo>/release/, gitignored) whose single
 # top-level folder thimble-<version>-<shortsha>/ holds exactly what an install needs and nothing else:
 #   plugin/               the Claude Code plugin (skill, .mcp.json, bin/) — what the marketplace installs
+#   extensions/           the extensions thimble ships, which `thimble extension add <name>` copies into ~/.thimble/extensions
 #   backend/              the server (app/, tests_public/, pyproject.toml, uv.lock); never .venv or __pycache__
 #   prompts/              read by the server at run time (prompts.py)
 #   frontend/dist/        the built UI (tsc --noEmit -p tsconfig.app.json + vite build here, or --dist DIR), served at /
@@ -69,7 +70,7 @@ version="$(python3 -I -c 'import json,sys; print(json.load(open(sys.argv[1]))["v
 [ -n "$version" ] || die "plugin/.claude-plugin/plugin.json has no version"
 sha="$(git -C "$repo" rev-parse --short HEAD)"
 full_sha="$(git -C "$repo" rev-parse HEAD)"
-allow=(plugin backend prompts .claude-plugin README.md INSTALL.md docs/assets/thimble-banner.svg LICENSE
+allow=(plugin extensions backend prompts .claude-plugin README.md INSTALL.md docs/assets/thimble-banner.svg LICENSE
        scripts/install.sh scripts/update.sh scripts/rebuild_ui.sh scripts/view_shot.mjs scripts/ui_shot.mjs
        frontend/src frontend/public frontend/index.html frontend/package.json
        frontend/package-lock.json frontend/vite.config.ts frontend/tsconfig.json frontend/tsconfig.app.json frontend/tsconfig.node.json)
@@ -165,7 +166,7 @@ $bad"
 for top in "$stage"/* "$stage"/.[!.]*; do
   [ -e "$top" ] || continue
   case "$(basename "$top")" in
-    plugin | backend | prompts | frontend | scripts | .claude-plugin | README.md | INSTALL.md | docs | LICENSE | \
+    plugin | extensions | backend | prompts | frontend | scripts | .claude-plugin | README.md | INSTALL.md | docs | LICENSE | \
       THIRD_PARTY_NOTICES | RELEASE.json) ;;
     *) die "unexpected top-level entry in the staged tree: $(basename "$top")";;
   esac

@@ -1,13 +1,13 @@
-"""app.cardtypes and thimble.card: a viewer folder whose view.json has a `card` block is a card type. On a corpus the
-Swarm viewer applies to, the registry finds it without any view proposal and lists it for main's prompt; a card's code
-draws it with thimble.card, which checks the arguments against the type's schema, runs card.py on the reader's cached
-index under the labels the call names, whatever Files highlights, and shows the data with a listing main reads and
-cites; the card check's page gets the type's frame from the request. Keep writes a patch of the arguments the type lets
-the card change into the card's one thimble.card call. Main hears when a label it ran finishes, and can colour a label's
-values.
+"""app.cardtypes and thimble.card, with the Swarm extension's `swarm` card type. On a corpus the Swarm view applies to,
+the registry finds the type without any view proposal and lists it for main's prompt; a card's code draws it with
+thimble.card, which checks the arguments against the type's schema, runs card.py on the reader's cached index under the
+labels the call names, whatever Files highlights, and shows the data with a listing main reads and cites; the card
+check's page gets the type's frame from the request. Keep writes a patch of the arguments into the card's one
+thimble.card call (its tests with a type that has such arguments are in test_extensions). Main hears when a label it
+ran finishes, and can colour a label's values.
 
-The corpus `crew` is 140 saves of 35 accounts on 4 pages, each naming the next account, which the Swarm viewer's
-applies() reads as a swarm. Reader calls run in this process (views._runner replaced by an exec of the kernel's
+The corpus `crew` is 140 saves of 35 accounts on 4 pages, each naming the next account, which the Swarm extension's
+view reads as a swarm; the extension is added. Reader calls run in this process (views._runner replaced by an exec of the kernel's
 snippet), and thimble.card runs in this process in a module built from kernel_thimble.py, as a kernel builds it."""
 from __future__ import annotations
 
@@ -24,7 +24,7 @@ import pytest
 
 from fastapi import HTTPException
 
-from app import card_check, cardtypes, channel, concepts, config, render, tools, views
+from app import cardtypes, channel, concepts, config, extensions, render, tools, views
 
 CORPUS = "crew"
 ROWS = [{"page": f"p{i % 4}", "user": f"bot{i % 35}", "ts": f"2026-04-14T{i // 60:02d}:{i % 60:02d}:00Z",
@@ -38,7 +38,13 @@ def crew(workspaces_tmp, tmp_path, monkeypatch) -> Path:
     (d / "saves.jsonl").write_text("".join(json.dumps(r) + "\n" for r in ROWS))
     (d / "manifest.json").write_text(json.dumps({"name": CORPUS, "description": "a swarm"}))
     monkeypatch.setattr(config, "DATA_DIR", (tmp_path / "data").resolve())
+    extensions.add("swarm", yes=True, say=lambda _: None)
     return d.resolve()
+
+
+async def _refresh() -> dict:
+    await extensions.refresh(CORPUS)
+    return await cardtypes.refresh(CORPUS, warm=False)
 
 
 async def _inproc_run(c: str, code: str, timeout: float) -> tuple[list[dict], str]:
@@ -89,75 +95,74 @@ async def _label(name: str, pattern: str, values: list[str]) -> str:
     return s["concept"]
 
 
-async def test_the_swarm_type_is_found_without_a_proposal_and_listed_for_main(crew):
-    types_ = await cardtypes.refresh(CORPUS, warm=False)
-    assert list(types_) == ["swarm"] and views.read_view(CORPUS, "swarm") is None
+async def test_the_swarm_extensions_type_is_found_and_listed_for_main_with_its_guide(crew):
+    types_ = await _refresh()
+    assert sorted(types_) == ["swarm"]
     t = types_["swarm"]
-    assert t["claims"] == ["saves.jsonl"] and t["paths"] == ["saves.jsonl"] and Path(t["card"]).is_file()
+    assert t["page"] == "card.html" and t["claims"] == ["saves.jsonl"] and t["paths"] == ["saves.jsonl"]
     assert Path(t["reader"]).is_relative_to(config.workspace_dir(CORPUS)), "a card's kernel sees only the workspace"
     assert cardtypes.read_registry(CORPUS)["swarm"]["fp"] == t["fp"]
     text = cardtypes.prompt_text(CORPUS)
     assert text.startswith("### Card types") and "\n- `swarm`: " in text
-    assert '`rows` "account" or "signature"' in text and 'thimble.card("swarm"' in text
+    assert "`actions` [{ref, summary, thread?}]" in text and 'thimble.card("swarm"' in text
+    assert "Use `swarm` to answer how accounts acted on each other" in text
 
 
-async def test_a_corpus_that_is_no_swarm_lists_no_card_type(crew):
-    (crew / "saves.jsonl").write_text("".join(json.dumps({**r, "user": f"bot{i % 3}"}) + "\n" for i, r in enumerate(ROWS)))
-    assert await cardtypes.refresh(CORPUS, warm=False) == {}
-    assert cardtypes.prompt_text(CORPUS) == ""
-
-
-async def test_a_card_draws_the_records_a_label_kept_coloured_by_another_and_lists_its_numbers(crew, kernel):
-    await cardtypes.refresh(CORPUS, warm=False)
-    await _label("early", r"value is [0-5]?\d\.", ["early", "later"])
+async def test_a_card_draws_the_actions_it_names_in_event_order_with_goals_threads_and_links(crew, kernel):
+    await _refresh()
     colour = await _label("even", r"value is \d*[02468]\.", ["even", "odd"])
-    concepts.show_concept(CORPUS, "even", True, ["odd"])  # Files highlights only "odd", which the card does not follow
-    kernel._LABELS_READ.clear()
-    kernel.card("swarm", labels=["even"], within={"label": "early"}, links=["reply", "names"])
+    kernel.card("swarm", labels=["even"],
+                actions=[{"ref": "saves.jsonl#L9", "summary": "Relayed 8"},
+                         {"ref": "L2", "summary": "Relayed 1", "thread": "the relay"},
+                         {"ref": "./saves.jsonl#L5", "summary": "Relayed 4"}],
+                goals={"BOT1": "Pass the value on"},
+                links=[{"from": "saves.jsonl#L5", "to": "saves.jsonl#L2", "type": "copies"}, {"from": 3, "to": 1, "type": "copies"}])
     bundle = kernel.shown[-1]
     made = bundle[cardtypes.CARD_MIME]
     data = made["data"]
     assert made["type"] == "swarm" and made["labels"] == [{"id": colour, "name": "even"}]
-    assert made["args"]["rows"] == "account", "a default the schema gives is filled in"
-    assert data["source"] == "chosen" and data["total"] == 60, "the records `within` kept, whatever `labels` mark"
-    assert data["mark_counts"] == [30] and data["unmarked"] == 30
-    assert {x["type"] for x in data["links"]} <= {"reply", "names"} and data["links"]
-    assert len(data["cards"]) == 40 and data["shown"] == "linked"
-    assert sum(c["m"] == 0 for c in data["cards"]) == 20, "the records shown are in proportion to each value's records"
-    linked = {c["id"] for x in data["links"] for c in data["cards"] if c["id"] in (x["from"], x["to"])}
-    assert len(linked) >= 30, "and the most linked to each other"
+    assert [(a["id"], a["account"], a["summary"]) for a in data["actions"]] == [
+        (1, "bot1", "Relayed 1"), (2, "bot4", "Relayed 4"), (3, "bot8", "Relayed 8")], "numbered in event order"
+    assert [(a["tag"], a["thread"]) for a in data["actions"]] == [("T1", "the relay"), ("T2", "p0"), ("T2", "p0")], (
+        "a thread is the record's place unless the call names one")
+    assert [a["m"] for a in data["actions"]] == [-1, 0, 0], "a label the call names colours its actions"
+    assert data["rows"][0] == {"account": "bot1", "goal": "Pass the value on", "inferred": True, "n": 4}
+    assert data["links"] == [{"from": 2, "to": 1, "type": "copies"}, {"from": 3, "to": 1, "type": "copies"}]
+    assert data["types"] == ["copies"]
     lines = bundle["text/plain"].split("\n")
-    assert lines[0] == f"swarm: 60 records by 35 accounts on 4 places; 40 shown with {len(data['links'])} links among them"
-    assert lines[1] == "the 40 shown: in proportion to each value's records, the most linked first"
-    assert lines[2] == "even: even 30" and lines[3] == "no highlighted value: 30"
-    assert lines[4] == f"links among all 60 records: names {data['reach']['counts']['names']}", "counted over every record"
-    assert lines[-1].endswith(data["cards"][-1]["ref"]), "a card's line ends in its record's ref"
-    assert {x["id"] for x in kernel._LABELS_READ} >= {colour}, "the card goes stale when its label changes"
-
+    assert lines[0] == "swarm: 3 actions by 3 accounts on 2 threads; 2 links (copies 2)"
+    assert lines[2].startswith("#1 2026-04-14 00:01 bot1 T1: Relayed 1") and lines[2].endswith("saves.jsonl#L2")
+    assert lines[3].endswith("[even]: Relayed 4 saves.jsonl#L5")
+    assert "links: 2→1 copies, 3→1 copies" in lines
     cell = {"id": "c1", "kind": "plot", "status": "ok", "outputs": [bundle]}
     texts, extras = tools._outputs_text(cell, addressed=True)
     assert "chart" in extras and tools._output_shape(cell) == "chart"
     assert texts[0].split("\n")[1] == "L1|" + lines[0], "main cites the listing as card:<id>@out0#L<n>"
+    with pytest.raises(ValueError, match=r"no action on 'saves.jsonl#L999'; a ref is a record's file and line"):
+        kernel.card("swarm", actions=[{"ref": "saves.jsonl#L999", "summary": "x"}])
+    with pytest.raises(ValueError, match=r"links\[0\].to 'saves.jsonl#L3' is none of the actions"):
+        kernel.card("swarm", actions=[{"ref": "saves.jsonl#L2", "summary": "x"}],
+                    links=[{"from": "saves.jsonl#L2", "to": "saves.jsonl#L3", "type": "reply"}])
 
 
 async def test_a_wrong_argument_names_what_the_type_takes(crew, kernel):
-    await cardtypes.refresh(CORPUS, warm=False)
-    with pytest.raises(ValueError, match=r"`rows` is one of 'account', 'signature', not 'accounts'"):
-        kernel.card("swarm", rows="accounts")
-    with pytest.raises(ValueError, match=r"has no `colour`; the keys are within, rows"):
-        kernel.card("swarm", colour="red")
+    await _refresh()
+    with pytest.raises(ValueError, match=r"has no `rows`; the keys are actions, goals, links"):
+        kernel.card("swarm", actions=[{"ref": "saves.jsonl#L2", "summary": "x"}], rows="accounts")
+    with pytest.raises(ValueError, match=r"needs `actions`"):
+        kernel.card("swarm")
     with pytest.raises(ValueError, match=r"no card type 'graph'; the types here are 'swarm'"):
         kernel.card("graph")
     assert not kernel.shown
 
 
 async def test_the_check_s_page_gets_the_type_s_frame_from_the_request(crew, kernel):
-    await cardtypes.refresh(CORPUS, warm=False)
-    kernel.card("swarm")
-    cell = {"id": "c1", "kind": "plot", "status": "ok", "title": "Who names whom?", "outputs": [kernel.shown[-1]]}
+    await _refresh()
+    kernel.card("swarm", actions=[{"ref": "saves.jsonl#L2", "summary": "Relayed 1"}])
+    cell = {"id": "c1", "kind": "plot", "status": "ok", "title": "Who relayed first?", "outputs": [kernel.shown[-1]]}
     req = render.request_for(CORPUS, cell)
     doc = req["frames"]["swarm"]
-    assert "connect-src 'none'" in doc and '"card": true' in doc and 'id="chart"' in doc
+    assert "connect-src 'none'" in doc and '"card": true' in doc and 'id="plot"' in doc
     assert "frames" not in render.request_for(CORPUS, {"id": "c2", "kind": "plot", "outputs": []})
 
 
@@ -181,34 +186,6 @@ def test_keep_rewrites_the_literal_arguments_of_the_one_card_call():
         cardtypes.rewrite_call('thimble.card("swarm", **args)', {"rows": "signature"}, schema)
     with pytest.raises(cardtypes.KeepError, match="calls thimble.card once"):
         cardtypes.rewrite_call('thimble.card("swarm")\nthimble.card("swarm")', {"rows": "signature"}, schema)
-
-
-async def test_keep_changes_only_the_arguments_the_type_lets_the_card_change(crew, kernel):
-    await cardtypes.refresh(CORPUS, warm=False)
-    code = 'import thimble\nthimble.card("swarm", links=["names"])'
-    kernel.card("swarm", links=["names"])
-    cell = {"id": "c1", "kind": "plot", "code": code, "outputs": [kernel.shown[-1]]}
-    new, patch, written = cardtypes.keep_patch(CORPUS, cell, {"rows": "signature"})
-    assert new == 'import thimble\nthimble.card("swarm", links=["names"], rows="signature")' and patch == {"rows": "signature"}
-    assert written == []
-    with pytest.raises(HTTPException, match="Keep does not change `within`"):
-        cardtypes.keep_patch(CORPUS, cell, {"within": {"label": "early"}})
-    with pytest.raises(HTTPException, match="`rows` is one of 'account', 'signature'"):
-        cardtypes.keep_patch(CORPUS, cell, {"rows": "sideways"})
-
-
-async def test_the_card_check_gives_back_the_arguments_keep_set(crew, kernel):
-    await cardtypes.refresh(CORPUS, warm=False)
-    kernel.card("swarm", rows="signature")
-    kept = 'import thimble\nthimble.card("swarm", rows="signature", links=["names"])'
-    cell = {"id": "c1", "kind": "plot", "code": kept, "outputs": [kernel.shown[-1]], "kept_args": {"rows": "signature"}}
-    revised = 'import thimble\nthimble.card("swarm", links=["names", "reply"])'
-    assert cardtypes.keep_kept(CORPUS, cell, revised) == 'import thimble\nthimble.card("swarm", links=["names", "reply"], rows="signature")'
-    reverted = {"question": "", "takeaway": "", "code": 'import thimble\nthimble.card("swarm", links=["names"])'}
-    assert card_check._patch(cell, reverted, None, c=CORPUS) == {}, "a revision that only undoes Keep changes nothing"
-    undone = {**cell, "code": 'import thimble\nthimble.card("swarm", links=["names"])'}
-    assert cardtypes.kept_in_force(CORPUS, undone) == {} and cardtypes.keep_kept(CORPUS, undone, revised) == revised, (
-        "once an undo took Keep's arguments out of the code, they bind nothing")
 
 
 async def test_main_hears_when_a_label_it_ran_finishes_and_can_colour_its_values(crew):

@@ -216,7 +216,8 @@ def read_registry(c: str | None) -> dict[str, dict[str, Any]]:
 
 async def refresh(c: str, *, warm: bool = True) -> dict[str, dict[str, Any]]:
     """The workspace's card types found again and written to REGISTRY_FILE, with each index built on the views kernel in
-    the background (`warm`). An extension's type takes the place of thimble's of the same slug. Returns them by name."""
+    the background (`warm`). An extension's type takes the place of thimble's, and of a workspace view's, of the same
+    slug. Returns them by name."""
     from . import extensions  # noqa: PLC0415
 
     lock = _locks.setdefault(c, asyncio.Lock())
@@ -239,6 +240,8 @@ async def refresh(c: str, *, warm: bool = True) -> dict[str, dict[str, Any]]:
             except OSError as e:
                 log.warning("%s: the card type %s of the extension %s was left out: %s", c, t["slug"], t["extension"], e)
         for slug, d in (await asyncio.to_thread(views._view_dirs, c)).items():
+            if slug in mine:
+                continue
             v = await asyncio.to_thread(views.read_built, c, slug)
             if v is not None and v["ok"] and _is_type(Path(v["dir"])):
                 await asyncio.to_thread(_copy_changed, views.HOST_PY, types_dir(c) / HOST_FILE)

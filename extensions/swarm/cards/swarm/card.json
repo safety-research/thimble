@@ -1,0 +1,28 @@
+{
+  "reader": "swarm",
+  "name": "Swarm",
+  "use": "How accounts acted on each other in a swarm: a row per account with the goal you inferred, the significant actions you chose as cards in event order, each with your one-line summary and its thread, and the typed links you found between them.",
+  "args": {
+    "type": "object",
+    "properties": {
+      "actions": {"type": "array",
+                  "items": {"type": "object", "required": ["ref", "summary"],
+                            "properties": {"ref": {"type": "string", "description": "the record's ref, such as wiki/pages/Home.jsonl#L12"},
+                                           "summary": {"type": "string", "description": "what the account did, in a few words, never the record's text"},
+                                           "thread": {"type": "string", "description": "the thread it belongs to; its page or channel when none is given"}},
+                            "additionalProperties": false},
+                  "description": "the 8 to 15 actions that answer the question"},
+      "goals": {"type": "object", "description": "{account: the goal you inferred from its records, in one line}"},
+      "links": {"type": "array",
+                "items": {"type": "object", "required": ["from", "to", "type"],
+                          "properties": {"from": {"description": "the later action's ref"}, "to": {"description": "the earlier action's ref"},
+                                         "type": {"type": "string", "description": "one word, such as reply, support, copies, corrects or related"}},
+                          "additionalProperties": false},
+                "description": "how actions answer, build on or undo each other"}
+    },
+    "required": ["actions"],
+    "additionalProperties": false
+  },
+  "size": [260, 1600],
+  "example": "thimble.card(\"swarm\", actions=[{\"ref\": \"wiki/pages/Home.jsonl#L4\", \"summary\": \"Posted WAITING\"}, {\"ref\": \"wiki/pages/Home.jsonl#L9\", \"summary\": \"Replaced WAITING with Saginaw\"}], goals={\"relay7\": \"Keep the state relay usable\"}, links=[{\"from\": \"wiki/pages/Home.jsonl#L9\", \"to\": \"wiki/pages/Home.jsonl#L4\", \"type\": \"corrects\"}])"
+}

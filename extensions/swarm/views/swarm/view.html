@@ -1,0 +1,794 @@
+<!doctype html>
+<html>
+<head>
+<style>
+  /* thimble's parts (.field, .chip, .btn, .seg, .table, .list-row) and the theme's tokens come with the frame; this page
+     only lays them out */
+  html, body { margin: 0; height: 100%; }
+  [hidden] { display: none !important; }
+  body { background: var(--surface-card); display: flex; flex-direction: column; overflow: hidden; }
+  #bar { flex: none; padding: 10px 16px 8px; border-bottom: 1px solid var(--border-hairline); background: var(--surface-card); }
+  .row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; min-width: 0; }
+  .grow { flex: 1 1 auto; }
+  #title { flex: 1 1 200px; min-width: 0; margin: 0; font: 500 var(--text-sm) / 1.35 var(--font-body); color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #counts { font: 400 var(--text-xs) / 1.3 var(--font-body); color: var(--text-secondary); font-variant-numeric: tabular-nums; margin-right: 6px; white-space: nowrap; }
+  #q { flex: 0 1 190px; min-width: 110px; }
+  .chip .n { color: var(--text-tertiary); font: 400 var(--text-mono-sm) / 1 var(--font-mono); font-variant-numeric: tabular-nums; }
+  .chip.active .n { color: inherit; opacity: .75; }
+  .sw { display: inline-block; flex: none; width: 8px; height: 8px; border-radius: 2px; }
+  .ico { width: 12px; height: 12px; flex: none; stroke: currentColor; fill: none; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+  .cbtn { gap: 6px; padding: 0 7px 0 9px; }
+  .cbtn .k { color: var(--text-tertiary); font-weight: 400; }
+  .cbtn .ico { color: var(--text-tertiary); }
+  #problems { margin: 7px 0 0; font: 400 var(--text-xs) / 1.4 var(--font-body); color: var(--status-warning); overflow-wrap: anywhere; }
+  .lg { display: inline-flex; align-items: center; gap: 6px; height: 22px; padding: 0 6px 0 4px; border-radius: var(--radius-chip); font: 400 var(--text-xs) / 1 var(--font-body); color: var(--text-secondary); }
+  .lg { cursor: pointer; }
+  .lg:hover { background: var(--surface-hover); color: var(--text-primary); }
+  .lg .n { color: var(--text-tertiary); font-variant-numeric: tabular-nums; }
+  .swb { display: inline-grid; place-items: center; width: 16px; height: 16px; margin: 0 -4px; border-radius: 3px; flex: none; cursor: pointer; }
+  .swb:hover { background: var(--track-bg); }
+
+  main { flex: 1; min-height: 0; display: flex; position: relative; }
+
+
+
+  #detail { flex: none; width: 380px; box-sizing: border-box; overflow: auto; border-left: 1px solid var(--border-hairline); background: var(--surface-card); padding: 12px 16px 28px; }
+  .d-top { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+  .d-when { margin-top: 8px; font: 400 var(--text-mono-sm) / 1.3 var(--font-mono); color: var(--text-secondary); overflow-wrap: anywhere; }
+  .d-h { margin: 10px 0 0; font: 500 var(--text-lg) / 1.35 var(--font-body); color: var(--text-primary); overflow-wrap: anywhere; }
+  .d-sec { display: flex; align-items: baseline; gap: 8px; margin: 18px 0 6px; }
+  .d-sec .t { font: 500 var(--text-ui-sm) / 1.2 var(--font-body); color: var(--text-primary); }
+  .d-sec .n { font: 400 var(--text-mono-sm) / 1 var(--font-mono); color: var(--text-tertiary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .d-sec .grow + .btn { margin: -4px 0; }
+  .arow { display: flex; align-items: baseline; gap: 8px; padding: 5px 6px; margin: 0 -6px; border-radius: var(--radius-ui); cursor: pointer; font: 400 var(--text-xs) / 1.35 var(--font-body); }
+  .arow:hover { background: var(--surface-hover); }
+  .arow .no { flex: none; width: 26px; font: 400 var(--text-mono-sm) / 1.3 var(--font-mono); color: var(--text-tertiary); }
+  .arow .tg { flex: none; font: 600 var(--text-mono-sm) / 1.3 var(--font-mono); }
+  .arow .x { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-primary); }
+  .diff { margin: 0; font: 400 var(--text-mono-sm) / 1.5 var(--font-mono); color: var(--text-primary); border: 1px solid var(--border-hairline); border-radius: var(--radius-ui); overflow: hidden; }
+  .diff .h { padding: 3px 8px; background: rgba(var(--ink-rgb), .03); color: var(--text-tertiary); border-top: 1px solid var(--border-hairline); }
+  .diff .h:first-child { border-top: 0; }
+  .diff .l { display: flex; gap: 8px; padding: 0 8px; }
+  .diff .l .g { flex: none; width: 8px; color: var(--text-tertiary); user-select: none; }
+  .diff .l .t { min-width: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+  .diff .l.del .t { color: var(--text-tertiary); text-decoration: line-through; text-decoration-color: rgba(var(--ink-rgb), .35); }
+  .diff .l.add { background: rgba(var(--ink-rgb), .035); }
+  .text { margin: 0; max-height: 360px; overflow: auto; padding: 8px 10px; border: 1px solid var(--border-hairline); border-radius: var(--radius-ui); font: 400 var(--text-mono-sm) / 1.5 var(--font-mono); white-space: pre-wrap; overflow-wrap: anywhere; }
+  .facts { display: grid; grid-template-columns: minmax(70px, max-content) 1fr; gap: 3px 12px; margin: 0; }
+  .facts dt { font: 400 var(--text-xs) / 1.45 var(--font-body); color: var(--text-tertiary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .facts dd { margin: 0; min-width: 0; font: 400 var(--text-mono-sm) / 1.45 var(--font-mono); color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .skel { height: 60px; border-radius: var(--radius-ui); background: rgba(var(--ink-rgb), .04); }
+  .menu { position: fixed; z-index: 50; min-width: 240px; max-width: 320px; max-height: 70vh; overflow: auto; padding: 4px; border-radius: var(--radius-card); background: var(--raised-bg); box-shadow: var(--raised-ring), 0 10px 28px rgba(var(--ink-rgb), .14); }
+  .mh { padding: 8px 8px 4px; color: var(--text-tertiary); font: 400 10.5px / 1.2 var(--font-body); letter-spacing: .08em; text-transform: uppercase; }
+  .mi { display: flex; align-items: center; gap: 8px; width: 100%; height: 28px; padding: 0 8px; border: 0; border-radius: var(--radius-chip); background: none; color: var(--text-primary); font: 400 var(--text-ui-sm) / 1 var(--font-body); text-align: left; cursor: pointer; }
+  .mi:hover { background: var(--surface-hover); }
+  .mi.sub { padding-left: 30px; color: var(--text-secondary); cursor: default; }
+  .mi .ck { width: 14px; display: inline-grid; place-items: center; flex: none; }
+  .mi .nm { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .mi .n { margin-left: auto; display: inline-flex; gap: 1px; color: var(--text-tertiary); font-size: var(--text-xs); flex: none; }
+  .box { display: inline-block; flex: none; width: 12px; height: 12px; border-radius: 3px; border: 1.5px solid var(--mark); box-sizing: border-box; }
+  .box.on { background: var(--mark); }
+  .msep { height: 1px; margin: 4px 0; background: var(--border-hairline); }
+  .pal { position: fixed; z-index: 60; display: grid; grid-template-columns: repeat(7, 20px); gap: 6px; padding: 10px; border-radius: var(--radius-card); background: var(--raised-bg); box-shadow: var(--raised-ring), 0 10px 28px rgba(var(--ink-rgb), .14); }
+  .pal button { width: 20px; height: 20px; padding: 0; border: 0; border-radius: 4px; cursor: pointer; }
+  .pal button.cur { box-shadow: 0 0 0 2px var(--surface-card), 0 0 0 3.5px var(--text-primary); }
+     there is more below */
+  @media (max-width: 899px) {
+    #detail { position: absolute; top: 0; right: 0; bottom: 0; width: min(380px, 100%); z-index: 20; box-shadow: -8px 0 24px rgba(var(--ink-rgb), .08); }
+  }
+  @media (max-width: 560px) {
+    #bar { padding: 8px 12px 6px; }
+    #title { flex-basis: 100%; }
+    #q { flex: 1 1 110px; }
+    #detail { width: 100%; }
+  }
+  #ovcounts { font: 400 var(--text-xs) / 1.3 var(--font-body); color: var(--text-secondary); font-variant-numeric: tabular-nums; white-space: nowrap; }
+  #ovfilters { display: contents; }
+  #ovfilters .chip .t { min-width: 0; overflow: hidden; text-overflow: ellipsis; max-width: 240px; }
+  #ov { flex: 1; min-width: 0; overflow: auto; position: relative; padding: 4px 16px 24px; box-sizing: border-box; }
+  #ovrows { position: relative; }
+  .ovhead { display: grid; grid-template-columns: 200px minmax(0, 1fr) 56px; column-gap: 10px; position: sticky; top: -4px; z-index: 3; background: var(--surface-card); padding-top: 4px; }
+  #ovaxis { grid-column: 2; width: 100%; height: 22px; display: block; }
+  .ovcap { margin: 14px 0 4px; font: 500 var(--text-ui-sm) / 1.2 var(--font-body); color: var(--text-primary); }
+  .ovrow { display: grid; grid-template-columns: 200px minmax(0, 1fr) 56px; column-gap: 10px; align-items: center; min-height: 26px; }
+  .ovrow + .ovrow { border-top: 1px solid var(--border-hairline); }
+  .ovname { display: flex; flex-direction: column; align-items: flex-start; min-width: 0; padding: 3px 6px; margin: 0 0 0 -6px; border: 0; border-radius: var(--radius-ui); background: none; text-align: left; cursor: pointer; font: inherit; color: inherit; }
+  .ovname:hover { background: var(--surface-hover); }
+  .ovname.active { background: var(--surface-selected); }
+  .ovname .nm { max-width: 100%; font: 500 var(--text-xs) / 1.3 var(--font-body); color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .ovname .sub { max-width: 100%; font: 400 11px / 1.3 var(--font-body); color: var(--text-tertiary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .ovrow.rest .nm { color: var(--text-secondary); font-weight: 400; }
+  .ovcells { width: 100%; height: 18px; display: block; cursor: crosshair; touch-action: none; }
+  .ovn { font: 400 var(--text-mono-sm) / 1 var(--font-mono); color: var(--text-tertiary); text-align: right; font-variant-numeric: tabular-nums; }
+  #ovband { position: absolute; top: 0; bottom: 0; background: rgba(var(--ink-rgb), .08); border-left: 1px solid var(--text-primary); border-right: 1px solid var(--text-primary); pointer-events: none; }
+  #ovempty { margin: 48px auto; max-width: 420px; text-align: center; font: 400 var(--text-sm) / 1.5 var(--font-body); color: var(--text-secondary); }
+  .ovrec .tg { width: 38px; }
+  .ovrec .who { flex: none; max-width: 110px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-secondary); }
+  @media (max-width: 560px) {
+    .ovhead, .ovrow { grid-template-columns: 110px minmax(0, 1fr) 40px; column-gap: 6px; }
+    #ov { padding: 4px 12px 24px; }
+  }
+</style>
+</head>
+<body>
+<div id="bar">
+  <div class="row" id="toprow">
+    <p id="title"></p>
+    <input id="q" class="field" type="search" placeholder="Search accounts" aria-label="Search accounts" autocomplete="off" spellcheck="false">
+    <button id="cbtn" class="btn btn-secondary btn-sm cbtn" data-anchor-name="Labels"></button>
+  </div>
+  <div class="row" id="ovbarrow"><span id="ovcounts"></span><span id="ovfilters"></span><span class="row" id="legend" hidden></span></div>
+  <p id="problems" role="status" hidden></p>
+</div>
+<main id="main">
+  <div id="ov">
+    <div class="ovhead"><canvas id="ovaxis"></canvas></div>
+    <p id="ovempty" hidden></p>
+    <div id="ovrows">
+      <p class="ovcap" id="ovpcap"></p>
+      <div id="ovplaces"></div>
+      <p class="ovcap" id="ovacap"></p>
+      <div id="ovaccounts"></div>
+      <div id="ovband" hidden></div>
+    </div>
+  </div>
+  <aside id="detail" hidden></aside>
+</main>
+<div id="pop"></div>
+<script>
+// Swarm: every record the view reads, counted per time bin: totals, a strip per place and a row per account (the
+// busiest, the rest in one row each), shaded by count and coloured by the labels that are on, the filter's dropped
+// records left out of the shade. Drag across the rows to zoom into that time; click a place's name to count the
+// accounts over its records alone, a cell for its records beside the rows, a record for the record. Rows and places
+// carry their unit keys and listed records their refs as data-anchor, so thimble marks them. A value's colour is looked
+// up in what thimble last sent (onLabels), so a colour the analyst changes shows at once.
+// A view opened from a card (Open as view) gets the card's arguments with `open` (place.query: {card, title, args})
+// and counts the records its `within`, `accounts` and `places` choose; a chip names the card while they hold, and a
+// click on it, or an `open` whose query is null, drops them.
+const slug = (thimble.view && thimble.view.slug) || 'swarm'
+const MON = 'Jan Feb Mar Apr May Jun Jul Aug Sep Oct Nov Dec'.split(' ')
+const RUN_POLL_MS = 3000 // how often the overview is read again while a label that is on runs
+const token = (n) => getComputedStyle(document.documentElement).getPropertyValue(n).trim()
+const fmt = (n) => Number(n).toLocaleString('en-US')
+const pad2 = (n) => String(n).padStart(2, '0')
+const esc = (x) => String(x == null ? '' : x).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c])
+function h(tag, cls, text) {
+  const e = document.createElement(tag)
+  if (cls) e.className = cls
+  if (text != null) e.textContent = text
+  return e
+}
+function plural(n, one, many) { return `${fmt(n)} ${n === 1 ? one : many || one + 's'}` }
+const CARET = '<svg class="ico" viewBox="0 0 12 12"><path d="M3.5 4.75 6 7.25l2.5-2.5"/></svg>'
+const PLUS = '<svg class="ico" viewBox="0 0 12 12"><path d="M6 2.5v7M2.5 6h7"/></svg>'
+const OPEN = '<svg class="ico" viewBox="0 0 12 12"><path d="M5 2.5H2.5v7h7V7M7 2.5h2.5V5M9.5 2.5 5.5 6.5"/></svg>'
+const CLOSE = '<svg class="ico" viewBox="0 0 12 12"><path d="m3 3 6 6M9 3 3 9"/></svg>'
+
+function parseTime(t) {
+  if (!t) return null
+  const d = new Date(t)
+  return Number.isNaN(d.getTime()) ? null : d
+}
+const dayOf = (d) => `${d.getUTCDate()} ${MON[d.getUTCMonth()]}`
+const hmOf = (d) => `${pad2(d.getUTCHours())}:${pad2(d.getUTCMinutes())}`
+const whenOf = (t) => { const d = parseTime(t); return d ? `${dayOf(d)} ${hmOf(d)}:${pad2(d.getUTCSeconds())} UTC` : 'Time unknown' }
+
+let labelState = { labels: [], filter: null, all: null, palette: null }
+const recCache = new Map()
+// a label value's colour as thimble last sent it, else the one the page was given
+function markColour(m) {
+  const label = (labelState.all || labelState.labels || []).find((l) => l.name === m.label)
+  const v = label && (label.values || []).find((x) => x.name === m.value)
+  return (v && v.colour) || m.colour
+}
+
+function renderLabelsButton() {
+  const on = labelState.labels
+  const cname = on.length ? on.map((l) => l.name).join(', ') : 'none on'
+  const sws = on.slice(0, 4).map((l) => `<i class="sw" style="width:5px;border-radius:1px;background:${esc(l.colour)}"></i>`).join('')
+  const cb = document.getElementById('cbtn')
+  cb.innerHTML = `<span class="k">Labels</span><span style="display:inline-flex;gap:2px">${sws}</span>${esc(cname)}${CARET}`
+  const ids = on.map((l) => l.id).filter(Boolean).join(' ')
+  if (ids) cb.dataset.label = ids
+  else delete cb.dataset.label
+}
+function swatch(colour, label, value) {
+  const sw = h('i', 'sw')
+  sw.style.background = colour
+  if (!label || !label.id || !(labelState.palette || []).length || !thimble.setLabelColour) return sw
+  const b = h('span', 'swb')
+  b.setAttribute('role', 'button')
+  b.title = 'Change colour'
+  b.dataset.act = 'palette'
+  b.dataset.id = label.id
+  b.dataset.value = value
+  b.append(sw)
+  b.onclick = (e) => { e.stopPropagation(); openPalette(label.id, value, 'legend') }
+  return b
+}
+
+// ---------------------------------------------------------------- the Labels menu and the palette
+let menu = false
+let pal = null // {id, value, from} while a label value's palette is open
+document.getElementById('cbtn').addEventListener('click', () => { menu = !menu; pal = null; renderPop() })
+function openPalette(id, value, from) {
+  pal = pal && pal.id === id && pal.value === value ? null : { id, value, from }
+  renderPop()
+}
+function menuHtml() {
+  const all = labelState.all || labelState.labels.map((l) => ({ ...l, on: true }))
+  const sw = (l, v) => {
+    const i = `<i class="sw" style="background:${esc(v.colour)}"></i>`
+    return l.id && (labelState.palette || []).length && thimble.setLabelColour
+      ? `<span class="swb" role="button" title="Change colour" data-act="palette" data-id="${esc(l.id)}" data-value="${esc(v.name)}">${i}</span>` : i
+  }
+  const rows = all.map((l) => {
+    const lit = (l.values || []).filter((x) => x.highlight !== false)
+    const box = `<span class="box ${l.on ? 'on' : ''}" style="--mark:${esc(l.colour)}"></span>`
+    const main = `<button class="mi" data-act="label" data-id="${esc(l.id || '')}" data-label="${esc(l.id || '')}" ${l.id && thimble.setLabel ? '' : 'disabled'}><span class="ck">${box}</span><span class="nm">${esc(l.name)}</span><span class="n">${l.count == null ? '' : fmt(l.count)}</span>${lit.length === 1 ? sw(l, lit[0]) : ''}</button>`
+    const subs = l.on && lit.length > 1 ? lit.map((x) => `<div class="mi sub" data-label="${esc(l.id || '')}"><span class="nm">${esc(x.name)}</span><span class="n"></span>${sw(l, x)}</div>`).join('') : ''
+    return main + subs
+  }).join('')
+  const make = thimble.newLabel ? `<div class="msep"></div><button class="mi" data-act="newlabel"><span class="ck">${PLUS}</span>New label…</button>` : ''
+  return `<div class="menu" id="menu" data-anchor-name="Labels menu"><div class="mh">Labels</div>${rows || '<div class="mi sub">No label over these files yet</div>'}${make}</div>`
+}
+function palHtml() {
+  const l = (labelState.all || labelState.labels || []).find((x) => x.id === pal.id)
+  const cur = String((l && ((l.values || []).find((x) => x.name === pal.value) || {}).colour) || '').toLowerCase()
+  return `<div class="pal" id="pal" data-label="${esc(pal.id)}">${labelState.palette.map((c) => `<button data-act="colour" data-colour="${esc(c)}" class="${c.toLowerCase() === cur ? 'cur' : ''}" style="background:${esc(c)}" aria-label="Colour ${esc(c)}"></button>`).join('')}</div>`
+}
+function renderPop() {
+  const pop = document.getElementById('pop')
+  const btn = document.getElementById('cbtn')
+  if (pal && !(labelState.palette || []).length) pal = null
+  pop.innerHTML = (menu ? menuHtml() : '') + (pal ? palHtml() : '')
+  const m = document.getElementById('menu')
+  if (m) {
+    const r = btn.getBoundingClientRect()
+    m.style.left = `${Math.max(8, Math.min(r.right - m.offsetWidth, innerWidth - m.offsetWidth - 8))}px`
+    m.style.top = `${Math.max(8, Math.min(r.bottom + 4, innerHeight - m.offsetHeight - 8))}px`
+  }
+  const p = document.getElementById('pal')
+  if (p) {
+    const q2 = `[data-act="palette"][data-id="${CSS.escape(pal.id)}"][data-value="${CSS.escape(pal.value)}"]`
+    const a = document.querySelector(`${pal.from === 'menu' ? '#menu' : '#legend'} ${q2}`)
+    if (!a) { pal = null; p.remove(); return }
+    const r = a.getBoundingClientRect()
+    const x = pal.from === 'menu' ? r.right + 6 : r.left, y = pal.from === 'menu' ? r.top - 10 : r.bottom + 4
+    p.style.left = `${Math.max(8, Math.min(x, innerWidth - p.offsetWidth - 8))}px`
+    p.style.top = `${Math.max(8, Math.min(y, innerHeight - p.offsetHeight - 8))}px`
+  }
+}
+document.getElementById('pop').addEventListener('click', (e) => {
+  const el = e.target.closest('[data-act]')
+  if (!el) return
+  const act = el.dataset.act
+  const all = labelState.all || labelState.labels.map((x) => ({ ...x, on: true }))
+  if (act === 'label') {
+    const l = all.find((x) => x.id === el.dataset.id)
+    if (l && thimble.setLabel) thimble.setLabel(l.id, !l.on)
+  } else if (act === 'newlabel') {
+    menu = false
+    renderPop()
+    if (thimble.newLabel) thimble.newLabel()
+  } else if (act === 'palette') openPalette(el.dataset.id, el.dataset.value, 'menu')
+  else if (act === 'colour') {
+    if (pal && thimble.setLabelColour) thimble.setLabelColour(pal.id, pal.value, el.dataset.colour)
+    pal = null
+    renderPop()
+  }
+})
+document.addEventListener('click', (e) => {
+  const el = e.target instanceof Element ? e.target : null
+  if ((menu || pal) && !(el && el.closest('#pop, #cbtn, .swb'))) { menu = false; pal = null; renderPop() }
+}, true)
+
+// ---------------------------------------------------------------- a record beside the rows
+async function recordOf(ref) {
+  if (recCache.has(ref)) return recCache.get(ref)
+  const r = await thimble.fetch({ op: 'record', ref })
+  recCache.set(ref, r)
+  return r
+}
+function sec(title, n) {
+  const d = h('div', 'd-sec')
+  d.append(h('span', 't', title))
+  if (n != null) d.append(h('span', 'n', String(n)))
+  return d
+}
+function renderRecordInto(box, rec) {
+  box.innerHTML = ''
+  if (rec.missing) { box.append(h('p', 'd-when', rec.raw ? `This line is not a record: ${rec.raw}` : 'This line is not in the files.')); return }
+  if (rec.hunks && rec.hunks.length) {
+    const added = rec.hunks.reduce((n, x) => n + x.add.filter((l) => l.trim()).length, 0)
+    const hd = sec('Changed in this save', `${plural(added, 'line')} added`)
+    hd.append(h('span', 'grow'))
+    const cmp = h('button', 'btn btn-ghost btn-sm', 'Save before')
+    cmp.title = `Open ${rec.before}, the save before this one`
+    cmp.dataset.anchor = rec.before
+    cmp.onclick = () => thimble.navigate(rec.before)
+    hd.append(cmp)
+    box.append(hd)
+    const pre = h('div', 'diff')
+    const trim = (arr) => { let a = 0, b = arr.length; while (a < b && !arr[a].trim()) a++; while (b > a && !arr[b - 1].trim()) b--; return arr.slice(a, b) }
+    for (const hk of rec.hunks) {
+      const del = trim(hk.del), add = trim(hk.add)
+      if (!del.length && !add.length) continue
+      pre.append(h('div', 'h', `line ${hk.at}`))
+      for (const l of del) { const d = h('div', 'l del'); d.append(h('span', 'g', '−'), h('span', 't', l)); pre.append(d) }
+      for (const l of add) { const d = h('div', 'l add'); d.append(h('span', 'g', '+'), h('span', 't', l)); pre.append(d) }
+    }
+    box.append(pre)
+  } else if (rec.text) {
+    box.append(sec(rec.text_key ? `Text (${rec.text_key})` : 'Text'))
+    const pre = h('pre', 'text', rec.text + (rec.cut ? '\n…' : ''))
+    box.append(pre)
+  }
+  box.append(sec('Record', rec.ref))
+  const dl = h('dl', 'facts')
+  for (const [k, val] of rec.fields) {
+    const dt = h('dt', null, k), dd = h('dd', null, val)
+    dt.title = k
+    dd.title = val
+    dl.append(dt, dd)
+  }
+  box.append(dl)
+}
+// ---------------------------------------------------------------- the overview
+const OV_CELL = 7 // px a bin gets at least
+const OV_LABEL = 200 // px of the names column
+let O = null // the reader's overview
+let ovq = { run: null, from: null, to: null, place: null, q: '', pin: null }
+let ovBase = {} // a card's arguments that choose the records, when the view was opened from one
+let ovBaseKey = ''
+let ovFrom = null // {card, title} of that card
+let ovSeq = 0
+let ovDetail = null // {kind: 'bin', query, title, offset} or {kind: 'record', ref, back}
+let ovRunT = null
+
+function ovQuery() {
+  const plot = document.getElementById('ov').clientWidth - OV_LABEL - 90
+  const bins = Math.max(12, Math.min(480, Math.floor(plot / OV_CELL)))
+  const q = { ...ovBase, op: 'overview', bins }
+  for (const k of ['run', 'from', 'to', 'place', 'q', 'pin']) if (ovq[k] != null && ovq[k] !== '') q[k] = ovq[k]
+  return q
+}
+async function ovLoad() {
+  const seq = ++ovSeq
+  let data
+  const q = ovQuery()
+  try {
+    data = await thimble.fetch(q)
+  } catch (e) {
+    if (seq !== ovSeq) return false
+    const em = document.getElementById('ovempty')
+    em.hidden = false
+    em.textContent = `The overview could not be read: ${e && e.message ? e.message : e}`
+    return false
+  }
+  if (seq !== ovSeq) return false
+  O = { ...data, asked: q.bins }
+  return true
+}
+const ovWhen = (t) => { const d = new Date(t * 1000); return `${dayOf(d)} ${hmOf(d)}` }
+function ovSpanText(a, b) {
+  const da = new Date(a * 1000), db = new Date(b * 1000)
+  return dayOf(da) === dayOf(db) ? `${dayOf(da)} ${hmOf(da)}–${hmOf(db)}` : `${ovWhen(a)} – ${ovWhen(b)}`
+}
+function ovStepText(s) {
+  return s < 60 ? `${s} s` : s < 3600 ? `${s / 60} min` : s < 86400 ? `${s / 3600} h` : `${Math.round(s / 86400)} d`
+}
+
+function ovRenderBar() {
+  document.getElementById('title').textContent = O.run ? `Swarm · ${O.run}` : 'Swarm'
+  const counts = document.getElementById('ovcounts')
+  const c = O.counts
+  const parts = [plural(c.records, 'record'), plural(c.accounts, 'account'), plural(c.places, 'place')]
+  if (O.chosen.records !== c.records) parts.push(`${fmt(O.chosen.records)} chosen`)
+  counts.textContent = parts.join(' · ')
+  const f = document.getElementById('ovfilters')
+  f.replaceChildren()
+  if (ovFrom) {
+    const b = h('button', 'chip chip-sans chip-act active')
+    b.innerHTML = `<span class="t">${esc(ovFrom.title || `card:${ovFrom.card}`)}</span>${CLOSE}`
+    b.title = `The records of card:${ovFrom.card}\nClick: all records`
+    b.dataset.anchor = `card:${ovFrom.card}`
+    b.onclick = async () => { ovApplyQuery(null); thimble.setQuery(null); await ovReload() }
+    f.append(b)
+  }
+  if (O.runs.length > 1) {
+    const sel = h('select', 'field')
+    sel.setAttribute('aria-label', 'Run')
+    sel.append(new Option(`All ${O.runs.length} runs`, ''))
+    for (const r of O.runs) sel.append(new Option(`${r.name} · ${fmt(r.n)}`, r.name))
+    sel.value = O.run || ''
+    sel.onchange = async () => { ovq.run = sel.value || null; ovq.from = ovq.to = null; ovq.place = null; await ovReload() }
+    f.append(sel)
+  }
+  if (O.window) {
+    const w = h('span', 'chip chip-tone-neutral', `${ovSpanText(O.window[0], O.window[1])} · ${ovStepText(O.step)} bins`)
+    f.append(w)
+  }
+  if (O.zoomed) {
+    const b = h('button', 'btn btn-ghost btn-sm', 'All time')
+    b.onclick = async () => { ovq.from = ovq.to = null; await ovReload() }
+    f.append(b)
+  }
+  if (O.place) {
+    const b = h('button', 'chip chip-sans chip-act active')
+    b.innerHTML = `<span class="t">${esc(O.place)}</span>${CLOSE}`
+    b.title = 'Accounts counted over this place alone\nClick: every place'
+    b.dataset.anchor = `view:${slug}/place/${O.place.replace(/ /g, '%20')}`
+    b.onclick = async () => { ovq.place = null; await ovReload() }
+    f.append(b)
+  }
+  renderLabelsButton()
+  ovRenderLegend()
+  const pr = document.getElementById('problems')
+  pr.hidden = true
+}
+function ovRenderLegend() {
+  const el = document.getElementById('legend')
+  el.replaceChildren()
+  el.hidden = !O.marks.length
+  if (el.hidden) return
+  const many = new Set(O.marks.map((m) => m.label)).size > 1
+  O.marks.forEach((m, j) => {
+    const label = (labelState.all || labelState.labels).find((l) => l.name === m.label)
+    const it = h('span', 'lg')
+    if (label && label.id) it.dataset.label = label.id
+    it.append(swatch(markColour(m), label, m.value), h('span', null, many ? `${m.label}: ${m.value}` : m.value), h('span', 'n', fmt(O.mark_counts[j] || 0)))
+    el.append(it)
+  })
+  if (O.unmarked) {
+    const it = h('span', 'lg')
+    const sw = h('i', 'sw')
+    sw.style.background = token('--label-none')
+    it.append(sw, h('span', null, 'no value'), h('span', 'n', fmt(O.unmarked)))
+    el.append(it)
+  }
+}
+
+function ovRow(kind, row, max, rest) {
+  const el = h('div', `ovrow ${kind}${rest ? ' rest' : ''}`)
+  const nm = h('button', 'ovname')
+  if (rest) {
+    nm.append(h('span', 'nm', `${fmt(row.count)} other ${kind === 'place' ? 'places' : 'accounts'}`))
+  } else {
+    nm.dataset.anchor = `view:${slug}/${kind === 'place' ? 'place' : 'agent'}/${row.name.replace(/ /g, '%20')}`
+    nm.append(h('span', 'nm', row.name))
+    const sub = kind === 'place' ? (row.title && row.title !== row.name ? row.title : `${plural(row.accounts, 'account')}`) : row.goal
+    if (sub) nm.append(h('span', 'sub', sub))
+  }
+  nm.title = rest ? 'Click: their records' : kind === 'place' ? `${row.name}\nClick: count the accounts over this place alone` : `${row.name}${row.goal ? `\n${row.goal}` : ''}\nClick: its records`
+  if (kind === 'place' && !rest) nm.classList.toggle('active', O.place === row.name)
+  if (kind === 'account' && O.pin === row.name) nm.classList.add('active')
+  nm.onclick = async () => {
+    if (kind === 'place' && !rest) { ovq.place = O.place === row.name ? null : row.name; await ovReload(); return }
+    ovOpenBin(kind, row, rest, null)
+  }
+  const cv = h('canvas', 'ovcells')
+  cv._row = { kind, row, rest, max }
+  const n = h('span', 'ovn', fmt(labelState.filter ? row.k : row.n))
+  el.append(nm, cv, n)
+  return el
+}
+function ovDraw(cv) {
+  const { row, max } = cv._row
+  const nb = O.bins + (O.untimed && !O.zoomed ? 1 : 0)
+  const w = cv.clientWidth, hh = cv.clientHeight
+  const dpr = devicePixelRatio || 1
+  cv.width = Math.round(w * dpr)
+  cv.height = Math.round(hh * dpr)
+  const g = cv.getContext('2d')
+  g.scale(dpr, dpr)
+  g.clearRect(0, 0, w, hh)
+  const cw = w / Math.max(1, nb)
+  g.fillStyle = token('--track-bg') || 'rgba(0,0,0,.04)'
+  g.fillRect(0, 0, w, hh)
+  const ink = token('--viz-ink-1') || token('--text-primary')
+  const filt = !!labelState.filter
+  for (const c of row.cells) {
+    const v = filt ? c.k : c.n
+    const x = c.b * cw
+    if (!v) {
+      if (c.n) { g.strokeStyle = ink; g.globalAlpha = 0.25; g.strokeRect(x + 0.5, 1.5, Math.max(1, cw - 1.5), hh - 3) }
+      continue
+    }
+    const a = 0.18 + 0.82 * Math.sqrt(v / Math.max(1, max))
+    let col = ink
+    if (c.m && c.m.length) {
+      let best = c.m[0]
+      for (const m of c.m) if (m[1] > best[1]) best = m
+      col = markColour(O.marks[best[0]])
+    }
+    g.globalAlpha = a
+    g.fillStyle = col
+    g.fillRect(x, 1, Math.max(1, cw - (cw > 3 ? 1 : 0)), hh - 2)
+  }
+  g.globalAlpha = 1
+}
+function ovAxis() {
+  const cv = document.getElementById('ovaxis')
+  const w = cv.clientWidth, hh = cv.clientHeight
+  const dpr = devicePixelRatio || 1
+  cv.width = Math.round(w * dpr)
+  cv.height = Math.round(hh * dpr)
+  const g = cv.getContext('2d')
+  g.scale(dpr, dpr)
+  g.clearRect(0, 0, w, hh)
+  if (!O.window) return
+  const nb = O.bins + (O.untimed && !O.zoomed ? 1 : 0)
+  const cw = w / Math.max(1, nb)
+  g.font = `400 10.5px ${token('--font-mono') || 'monospace'}`
+  g.fillStyle = token('--text-tertiary')
+  g.strokeStyle = token('--border-hairline')
+  const every = Math.max(1, Math.ceil(90 / cw))
+  let lastDay = ''
+  for (let b = 0; b < O.bins; b += every) {
+    const t = O.start + b * O.step
+    const d = new Date(t * 1000)
+    const day = dayOf(d)
+    const hm = hmOf(d)
+    const text = day !== lastDay ? (hm === '00:00' ? day : `${day} ${hm}`) : hm
+    lastDay = day
+    g.beginPath()
+    g.moveTo(b * cw + 0.5, hh - 5)
+    g.lineTo(b * cw + 0.5, hh)
+    g.stroke()
+    if (b * cw + 3 + g.measureText(text).width <= w) g.fillText(text, b * cw + 3, hh - 7)
+  }
+  if (nb > O.bins) g.fillText('no time', O.bins * cw + 2, hh - 7)
+}
+function ovRender() {
+  document.getElementById('ovempty').hidden = true
+  ovRenderBar()
+  const places = document.getElementById('ovplaces'), accounts = document.getElementById('ovaccounts')
+  places.replaceChildren()
+  accounts.replaceChildren()
+  const filt = !!labelState.filter
+  const cellMax = (rows) => Math.max(1, ...rows.flatMap((r) => r.cells.map((c) => (filt ? c.k : c.n))))
+  const pRows = [...O.places, ...(O.places_rest ? [O.places_rest] : [])]
+  const aRows = [...O.accounts, ...(O.accounts_rest ? [O.accounts_rest] : [])]
+  const pMax = cellMax(O.places), aMax = cellMax(O.accounts)
+  document.getElementById('ovpcap').textContent = `Places · ${fmt(O.chosen.places)}`
+  document.getElementById('ovacap').textContent = O.place
+    ? `Accounts on ${O.place} · ${fmt(O.chosen.accounts)}` : `Accounts · ${fmt(O.chosen.accounts)}${O.q ? ` · matching “${O.q}”` : ''}`
+  for (const r of pRows) places.append(ovRow('place', r, pMax, r === O.places_rest))
+  for (const r of aRows) accounts.append(ovRow('account', r, aMax, r === O.accounts_rest))
+  if (!O.chosen.records) {
+    const em = document.getElementById('ovempty')
+    em.hidden = false
+    em.textContent = 'No record here.'
+  }
+  requestAnimationFrame(() => { ovAxis(); for (const cv of document.querySelectorAll('#ov canvas.ovcells')) ovDraw(cv) })
+  ovWatchRuns()
+}
+async function ovReload() {
+  if (await ovLoad()) ovRender()
+}
+function ovRedraw() {
+  if (!O) return
+  renderLabelsButton()
+  ovRenderLegend()
+  for (const el of document.querySelectorAll('#ov .ovrow')) {
+    const cv = el.querySelector('canvas')
+    el.querySelector('.ovn').textContent = fmt(labelState.filter ? cv._row.row.k : cv._row.row.n)
+    ovDraw(cv)
+  }
+}
+
+// a drag across the rows zooms into its time; a click opens the cell's records
+let ovDrag = null
+function ovBinAt(cv, clientX) {
+  const r = cv.getBoundingClientRect()
+  const nb = O.bins + (O.untimed && !O.zoomed ? 1 : 0)
+  return Math.max(0, Math.min(nb - 1, Math.floor(((clientX - r.left) / r.width) * nb)))
+}
+document.getElementById('ovrows').addEventListener('pointerdown', (e) => {
+  const cv = e.target.closest && e.target.closest('canvas.ovcells')
+  if (!cv || !O || e.button !== 0) return
+  ovDrag = { cv, x0: e.clientX, b0: ovBinAt(cv, e.clientX), moved: false }
+  cv.setPointerCapture(e.pointerId)
+})
+document.getElementById('ovrows').addEventListener('pointermove', (e) => {
+  const cv = e.target.closest && e.target.closest('canvas.ovcells')
+  if (ovDrag) {
+    if (Math.abs(e.clientX - ovDrag.x0) > 4) ovDrag.moved = true
+    const band = document.getElementById('ovband')
+    const host = document.getElementById('ovrows').getBoundingClientRect()
+    const r = ovDrag.cv.getBoundingClientRect()
+    const a = Math.max(r.left, Math.min(ovDrag.x0, e.clientX)), b = Math.min(r.right, Math.max(ovDrag.x0, e.clientX))
+    band.hidden = !ovDrag.moved
+    band.style.left = `${a - host.left}px`
+    band.style.width = `${b - a}px`
+    return
+  }
+  if (!cv || !O) return
+  const b = ovBinAt(cv, e.clientX)
+  const c = cv._row.row.cells.find((x) => x.b === b)
+  const name = cv._row.rest ? `${fmt(cv._row.row.count)} others` : cv._row.row.name
+  const when = b >= O.bins ? 'no time' : ovSpanText(O.start + b * O.step, O.start + (b + 1) * O.step)
+  cv.title = `${name} · ${when}\n${c ? plural(c.n, 'record') : 'no record'}${c && labelState.filter ? ` · ${fmt(c.k)} kept` : ''}`
+})
+document.getElementById('ovrows').addEventListener('pointerup', async (e) => {
+  if (!ovDrag) return
+  const d = ovDrag
+  ovDrag = null
+  document.getElementById('ovband').hidden = true
+  const b1 = ovBinAt(d.cv, e.clientX)
+  if (d.moved && O.window) {
+    const lo = Math.min(d.b0, b1), hi = Math.min(O.bins - 1, Math.max(d.b0, b1))
+    if (lo >= O.bins) return
+    ovq.from = O.start + lo * O.step
+    ovq.to = O.start + (hi + 1) * O.step
+    await ovReload()
+    return
+  }
+  const { kind, row, rest } = d.cv._row
+  if (row.cells.some((x) => x.b === d.b0)) ovOpenBin(kind, row, rest, d.b0)
+})
+
+// details on demand: a cell's or a row's records, then one record
+function ovBinQuery(kind, row, rest, b) {
+  const q = { ...ovBase, op: 'bin' }
+  for (const k of ['run', 'from', 'to']) if (ovq[k] != null) q[k] = ovq[k]
+  if (O.place && kind === 'account') q.place = O.place
+  const names = (list) => list.map((x) => x.name)
+  if (rest) q[kind === 'place' ? 'except_places' : 'except_accounts'] = names(kind === 'place' ? O.places : O.accounts)
+  else q[kind === 'place' ? 'places' : 'accounts'] = [row.name]
+  if (kind === 'account' && !rest && ovBase.accounts) q.accounts = [row.name]
+  if (b != null && b >= O.bins) q.untimed = true
+  else if (b != null) { q.from = O.start + b * O.step; q.to = O.start + (b + 1) * O.step }
+  return q
+}
+function ovOpenBin(kind, row, rest, b) {
+  const name = rest ? `${fmt(row.count)} other ${kind === 'place' ? 'places' : 'accounts'}` : row.name
+  const when = b == null ? (O.window ? ovSpanText(O.window[0], O.window[1]) : '') : b >= O.bins ? 'no time' : ovSpanText(O.start + b * O.step, O.start + (b + 1) * O.step)
+  ovDetail = { kind: 'bin', query: ovBinQuery(kind, row, rest, b), title: name, when, anchor: rest ? null : `view:${slug}/${kind === 'place' ? 'place' : 'agent'}/${row.name.replace(/ /g, '%20')}`, offset: 0 }
+  ovRenderDetail()
+}
+function ovClose() { ovDetail = null; ovRenderDetail() }
+function ovTop(chips, ref, back) {
+  const top = h('div', 'd-top')
+  if (back) {
+    const bk = h('button', 'btn btn-ghost btn-sm', '‹ Records')
+    bk.onclick = () => { ovDetail = back; ovRenderDetail() }
+    top.append(bk)
+  }
+  for (const c of chips) top.append(c)
+  top.append(h('span', 'grow'))
+  if (ref) {
+    const open = h('button', 'btn btn-secondary btn-sm')
+    open.innerHTML = `${OPEN}Open record`
+    open.title = `Open ${ref} in thimble`
+    open.onclick = () => thimble.navigate(ref)
+    top.append(open)
+  }
+  const x = h('button', 'btn btn-ghost btn-sm')
+  x.innerHTML = CLOSE
+  x.title = 'Close'
+  x.setAttribute('aria-label', 'Close')
+  x.onclick = ovClose
+  top.append(x)
+  return top
+}
+async function ovRenderDetail() {
+  const box = document.getElementById('detail')
+  box.hidden = !ovDetail
+  box.replaceChildren()
+  delete box.dataset.anchor
+  if (!ovDetail) return
+  const mine = ovDetail
+  if (mine.kind === 'bin') {
+    box.append(ovTop([]))
+    const hd = h('p', 'd-h', mine.title)
+    if (mine.anchor) hd.dataset.anchor = mine.anchor
+    box.append(hd, h('p', 'd-when', mine.when))
+    const list = h('div', 'ovlist')
+    list.append(h('div', 'skel'))
+    box.append(list)
+    let data
+    try { data = await thimble.fetch({ ...mine.query, offset: mine.offset }) } catch (e) { list.replaceChildren(h('p', 'd-when', String(e && e.message ? e.message : e))); return }
+    if (ovDetail !== mine) return
+    list.replaceChildren(sec('Records', `${fmt(data.offset + 1)}–${fmt(data.offset + data.records.length)} of ${fmt(data.total)}`))
+    for (const r of data.records) {
+      const row = h('div', 'arow ovrec')
+      row.dataset.anchor = r.ref
+      const tg = h('span', 'tg', r.time ? hmOf(new Date(r.time)) : '—')
+      if (r.m >= 0 && O.marks[r.m]) tg.style.color = markColour(O.marks[r.m])
+      const who = h('span', 'who', mine.query.accounts ? r.place : r.account)
+      row.append(tg, who, h('span', 'x', r.line))
+      row.title = `${r.account} · ${r.place}\n${whenOf(r.time)}\n${r.line}`
+      row.onclick = () => { ovDetail = { kind: 'record', ref: r.ref, back: mine }; ovRenderDetail() }
+      list.append(row)
+    }
+    const pager = h('div', 'd-top')
+    if (data.offset > 0) { const p = h('button', 'btn btn-ghost btn-sm', 'Earlier'); p.onclick = () => { mine.offset = Math.max(0, data.offset - data.records.length); ovRenderDetail() }; pager.append(p) }
+    if (data.offset + data.records.length < data.total) { const n = h('button', 'btn btn-ghost btn-sm', 'Later'); n.onclick = () => { mine.offset = data.offset + data.records.length; ovRenderDetail() }; pager.append(n) }
+    if (pager.childNodes.length) list.append(pager)
+    return
+  }
+  box.dataset.anchor = mine.ref
+  box.append(ovTop([], mine.ref, mine.back))
+  const body = h('div')
+  body.append(h('div', 'skel'))
+  box.append(body)
+  const rec = await recordOf(mine.ref)
+  if (ovDetail !== mine) return
+  if (rec.account || rec.time) {
+    const hd = h('p', 'd-h', rec.account || '')
+    if (rec.account) hd.dataset.anchor = `view:${slug}/agent/${String(rec.account).replace(/ /g, '%20')}`
+    box.insertBefore(hd, body)
+    box.insertBefore(h('p', 'd-when', [whenOf(rec.time), rec.place].filter(Boolean).join(' · ')), body)
+  }
+  renderRecordInto(body, rec)
+}
+
+// a view opened from a card ({card, title, args}) counts the records its arguments choose; null drops them
+function ovApplyQuery(qy) {
+  const key = qy && qy.args ? JSON.stringify(qy) : ''
+  if (key === ovBaseKey) return false
+  ovBaseKey = key
+  ovBase = {}
+  const a = (key && qy.args) || {}
+  ovFrom = key ? { card: String(qy.card || ''), title: String(qy.title || '') } : null
+  for (const k of ['within', 'accounts', 'places']) if (a[k] != null) ovBase[k] = a[k]
+  if (a.account) { ovBase.accounts = [a.account]; ovq.pin = a.account }
+  ovq.from = ovq.to = null
+  ovq.place = null
+  ovDetail = null
+  return true
+}
+async function ovOpen(place) {
+  const t = (place && place.target) || null
+  let again = false
+  if (place && 'query' in place) again = ovApplyQuery(place.query)
+  if (t && t.account && t.account !== ovq.pin) { ovq.pin = t.account; again = true }
+  if (t && t.place && !t.ref && t.place !== ovq.place) { ovq.place = t.place; again = true }
+  if (again || !O) { if (!(await ovLoad())) return; ovRender() }
+  if (t && t.ref) { ovDetail = { kind: 'record', ref: t.ref, back: null }; ovRenderDetail() }
+  else if (t && t.account) {
+    const row = O.accounts.find((r) => r.name === t.account)
+    if (row) ovOpenBin('account', row, false, null)
+  }
+}
+async function ovLabels() {
+  if (!O) return
+  const was = JSON.stringify([O.marks, O.mark_counts])
+  if (!(await ovLoad())) return
+  if (JSON.stringify([O.marks, O.mark_counts]) === was) ovRedraw()
+  else ovRender()
+  renderPop()
+}
+function ovWatchRuns() {
+  clearTimeout(ovRunT)
+  if (!(labelState.all || []).some((l) => l.on && l.count == null)) return
+  ovRunT = setTimeout(async () => { if (await ovLoad()) ovRedraw(); ovWatchRuns() }, RUN_POLL_MS)
+}
+let ovQT = null
+document.getElementById('q').addEventListener('input', (e) => {
+  clearTimeout(ovQT)
+  ovQT = setTimeout(async () => { ovq.q = e.target.value.trim(); await ovReload() }, 250)
+})
+// a narrower or wider page draws the cells again at once, and reads the overview again when its bins would change
+let ovResizeT = null
+new ResizeObserver(() => {
+  if (!O) return
+  ovAxis()
+  for (const cv of document.querySelectorAll('#ov canvas.ovcells')) ovDraw(cv)
+  clearTimeout(ovResizeT)
+  ovResizeT = setTimeout(() => { if (O && Math.abs(ovQuery().bins - O.asked) > O.asked * 0.25) ovReload() }, 250)
+}).observe(document.getElementById('ov'))
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && ovDetail && !menu && !pal) ovClose() })
+
+thimble.onOpen((place) => ovOpen(place))
+thimble.onLabels((state) => {
+  labelState = { labels: state.labels || [], filter: state.filter || null, all: state.all || null, palette: state.palette || null }
+  return ovLabels()
+})
+ovReload()
+
+</script>
+</body>
+</html>
