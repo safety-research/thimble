@@ -130,3 +130,33 @@ def test_a_view_build_runs_on_the_model_of_the_session_that_asked(board, monkeyp
     ledger.put_settings(CORPUS, {config.MODELS_KEY: {"dev": {"model": "claude-opus-5-5", "fast": True}}})
     assert flags({"asked": True}) == {"model": "claude-opus-5-5", "effort": "medium", "fast": True}
     assert flags({"orientation": True}) == {"model": "claude-opus-5-5", "effort": "xhigh", "fast": True}
+
+
+def test_a_resumed_build_keeps_its_fence(board, monkeypatch):
+    """Claude Code keeps none of a stopped session's options, so a resume passes every flag a new session gets."""
+    import asyncio
+
+    corpus, folder = config.corpus_dir(CORPUS), views.views_dir(CORPUS) / "posts"
+    conf = dev.dev_config(CORPUS, sandbox=True)
+    sessions, calls = dev.Sessions(), []
+
+    async def run(args, cwd, env=None):
+        calls.append(args)
+        return 0, "backgrounded · abcd1234"
+
+    async def gone(cwd, short):
+        return False
+
+    async def identify(cwd, short, since):
+        return {"id": short, "session_id": short}
+
+    monkeypatch.setattr(sessions, "_run", run)
+    monkeypatch.setattr(sessions, "_running", gone)
+    monkeypatch.setattr(sessions, "_identify", identify)
+    asyncio.run(sessions.resume(corpus, "0123abcd-x", "go on", name="thimble:view-posts", workspace=CORPUS,
+                                add_dirs=(folder,), fence=dev.view_fence(CORPUS, "posts", corpus, folder, conf),
+                                asking=dev.view_asking(CORPUS, "posts", folder, conf)))
+    argv = calls[-1]
+    assert argv[:3] == ["--bg", "--resume", "0123abcd-x"] and argv[-2:] == ["--", "go on"]
+    assert {"--settings", "--disallowedTools", "--add-dir"} <= set(argv)
+    assert argv[argv.index("-n") + 1] == "thimble:view-posts"

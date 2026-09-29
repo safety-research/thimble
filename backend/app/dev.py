@@ -1374,11 +1374,12 @@ class Sessions:
                      add_dirs: "tuple[Path, ...] | list[Path]" = (),
                      fence: dict[str, Any] | None = None, asking: dict[str, Any] | None = None,
                      models: dict[str, Any] | None = None) -> dict[str, str]:
-        """Wake the session `session_id` with `prompt`, under its own id and saved options. `--resume` on a running
-        session, or with any flag, starts a copy under a new id, so the process is stopped first, and one that still
-        runs is copied with its start options; the caller follows a copy by the returned ids."""
+        """Wake the session `session_id` with `prompt` in a copy under a new id, started with the same flags as a new
+        session (_flags), since Claude Code keeps none of a stopped session's options. A process that still runs is
+        stopped first; the caller follows the copy by the returned ids."""
         short = session_id[:8]
-        flags = self._flags(workspace, name, add_dirs, fence, asking, models) if await self._running(cwd, short) else []
+        await self._running(cwd, short)
+        flags = self._flags(workspace, name, add_dirs, fence, asking, models)
         code, out = await self._run(["--bg", "--resume", session_id, *flags, "--", prompt], cwd, env)
         if code != 0:
             raise SessionError(f"`claude --bg --resume` failed (exit {code}): {out.strip()[-400:]}")
@@ -1645,8 +1646,7 @@ async def _worker_turn(run: Run, run_log: Log, cwd: Path, prompt: str, resume: s
             continue
         break
     tail.read(run_log)
-    # Stopping an idle session frees its process; a follow-up wakes it by its full id (`--resume` on a live session
-    # would start a copy).
+    # Stopping an idle session frees its process; a follow-up starts it again (Sessions.resume).
     await asyncio.to_thread(SESSIONS.stop, run.session)
     if state == "timed out":
         raise SessionError(f"the session had not finished after {_minutes(limit)}, so it was stopped; Retry "

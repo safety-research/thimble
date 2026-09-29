@@ -9,9 +9,8 @@ thimble:critic · <c>, since `claude agents` and ListAgents list the sessions of
 addresses a session by its name alone (its listed ` [ref]` is not the short id). The name, spaces and `·` included, is
 the session's address everywhere: SendMessage's `to` in the proxy's instructions, wait_session's `session`, main's
 messages that relay_check follows. Entry.name is the name `claude agents` listed for the session when it was recorded,
-so a session an earlier build named `thimble:orient` keeps being addressed as that, and keeps that name, which another
-folder's old session may share, until a new session replaces it: a session started again with `claude --bg --resume` is
-passed no `-n`, since a resume with a flag starts a copy under a new id (dev.Sessions.resume). ListAgents writes `  ·  ` between a row's
+so a session an earlier build named `thimble:orient` keeps being addressed as that until it is started again under
+its current name. ListAgents writes `  ·  ` between a row's
 fields, so a name copied from it can lose its workspace; main's instructions give it the whole name to send to. A long
 name has its workspace shortened (config.session_name), and by_name also takes the role before any separator a model
 wrote in place of ` · `. The workspace's own lines (the statusline, the news) show the role alone (config.session_role).
@@ -30,8 +29,9 @@ for LINGER_S (_lingering), since Claude Code lists it as busy for as long as the
 Messages in place. A session that runs is never resumed with `--resume`, which would copy it under a new id: a message
 for it (a follow-up from the browser, a retry after a capacity failure) waits in its outbox (deliver) and is sent with
 SendMessage by the proxy subagent that shows the session in main's agent tray, or, without a live proxy within
-PROXY_WAIT_S, by main. Only a session whose process has gone is started again, with `claude --bg --resume <id>`, which
-keeps its id; a copy under a new id is recorded as the session's new id.
+PROXY_WAIT_S, by main. Only a session whose process has gone is started again, with `claude --bg --resume <id>` and
+all of its start flags, since Claude Code keeps none of a session's options when its process was ended; the copy this
+starts under a new id is recorded as the session's new id.
 
 The proxy. For each session main runs a thin background subagent of the plugin (plugin/agents: thimble:orient,
 thimble:writer, thimble:critic), which reads its instructions from proxy_file and loops on the `wait_session` tool for
@@ -1533,7 +1533,7 @@ def turn_state(session_id: str) -> tuple[bool, str, bool, int | None]:
 async def start(c: str, key: str, argv: list[str], folder: Path, env: dict[str, str], prompt: str,
                 resume: str | None, chat: str, role: str) -> BgProc:
     """The background session for the `claude -p` argv `argv` (module note, start): a new one, the running session
-    `resume` attached to with `prompt` delivered in place (none when empty), or `resume` started again under its id
+    `resume` attached to with `prompt` delivered in place (none when empty), or `resume` started again with its flags
     when its process has gone."""
     bin_ = argv[0]
     if shutil.which(bin_, path=env.get("PATH")) is None:
@@ -1551,7 +1551,8 @@ async def start(c: str, key: str, argv: list[str], folder: Path, env: dict[str, 
             return BgProc(c, key, short, resume, int(running["pid"]), expect=bool(prompt.strip()))
         known = session.find_transcript(resume)
         before = session._size(Path(known)) if known else 0  # where the news of this start begins (record)
-        args = [bin_, "--bg", "--resume", resume, "--", prompt.strip() or _nudge()]
+        args = bg_argv(argv, env, dict(os.environ), name_of(c, key), prompt.strip() or _nudge(), folder)
+        args[2:2] = ["--resume", resume]
         code, out = await asyncio.to_thread(_cli, bin_, args[1:], env, folder, CLI_TIMEOUT_S)
     else:
         before = 0

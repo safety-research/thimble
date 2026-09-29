@@ -1737,7 +1737,7 @@ async def stop_chat(c: str, chat: str) -> bool:
 
 
 async def resume_chat(c: str, chat: str) -> Run:
-    """The Resume of a background session's chat whose process stopped: its session starts again under its id with
+    """The Resume of a background session's chat whose process stopped: its session starts again with
     its conversation, as the chat's next run. RuntimeError when the chat is no such chat or runs."""
     from . import orient_session, write_session  # noqa: PLC0415 — both import this module
 

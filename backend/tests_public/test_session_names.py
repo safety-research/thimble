@@ -212,3 +212,25 @@ def test_a_peer_messages_sender_is_found_in_a_slugged_name(followed):
     assert bg_session.by_origin(CORPUS, "thimble-writer") is new
     assert bg_session.by_origin(CORPUS, "thimble-critic") is old
     assert bg_session.by_origin(CORPUS, "thimble-dev") is None
+
+
+def test_a_session_started_again_keeps_its_start_flags(monkeypatch, tmp_path, workspaces_tmp):
+    """Claude Code keeps none of an ended session's options, so a session started again is passed its whole argv."""
+    import asyncio
+
+    calls: list[list[str]] = []
+    sid = "0123abcd-0000-0000-0000-000000000000"
+
+    def cli(bin_, args, env, cwd=None, timeout=0):
+        calls.append(args)
+        return 0, "backgrounded · 9999ffff"
+
+    monkeypatch.setattr(bg_session.shutil, "which", lambda *a, **k: "/bin/claude")
+    monkeypatch.setattr(bg_session, "_cli", cli)
+    monkeypatch.setattr(bg_session, "listing", lambda *a: [{"id": "9999ffff", "sessionId": "9999ffff-1", "pid": 1}])
+    argv = ["claude", "-p", "--resume", sid, "--disallowedTools", "WebFetch", "--settings", json.dumps({"hooks": {}})]
+    proc = asyncio.run(bg_session.start(CORPUS, "orient", argv, tmp_path, {}, "go on", sid, "chat", "orient"))
+    got = calls[-1]
+    assert got[:3] == ["--bg", "--resume", sid] and got.count("--resume") == 1
+    assert "--settings" in got and got[got.index("--disallowedTools") + 1] == "WebFetch"
+    assert got[got.index("-n") + 1] == bg_session.name_of(CORPUS, "orient") and proc.session_id == "9999ffff-1"
