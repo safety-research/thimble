@@ -8,11 +8,10 @@
   [hidden] { display: none !important; }
   body { background: var(--surface-card); display: flex; flex-direction: column; overflow: hidden; }
   #bar { flex: none; padding: 10px 16px 8px; border-bottom: 1px solid var(--border-hairline); background: var(--surface-card); }
-  /* a card (thimble.card) sits on the card's own paper, its question and controls above it on the card */
-  body.card, body.card #bar, body.card #corner, body.card #cols, body.card #rows, body.card #detail { background: var(--surface-card); }
-  body.card #bar { padding: 0 0 8px; }
-  body.card #toprow, body.card #pager { display: none; }
-  body.card #threads { margin-top: 0; }
+  /* as a card (thimble.card) the page has no top row or pager, and its bar runs to the card's edges */
+  body.in-card #bar { padding: 0 0 8px; }
+  body.in-card #toprow, body.in-card #pager { display: none; }
+  body.in-card #threads { margin-top: 0; }
   .row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; min-width: 0; }
   .row + .row { margin-top: 7px; }
   .grow { flex: 1 1 auto; }
@@ -224,7 +223,7 @@
 // looked up in what thimble last sent (onLabels), so a colour the analyst changes shows at once.
 const slug = (thimble.view && thimble.view.slug) || 'swarm'
 const CARD = !!(thimble.view && thimble.view.card)
-if (CARD) document.body.classList.add('card')
+if (CARD) document.body.classList.add('in-card')
 const NS = 'http://www.w3.org/2000/svg'
 const TYPE_VIZ = { reply: 1, names: 3, 'same place': 7 } // the viz colour of each link type
 const DASH = { reply: '', names: '', 'same place': '1.5 3.5' }
@@ -958,7 +957,7 @@ function revealSel() {
   }
   revealBox(box)
 }
-function revealBox(box) {
+function revealBox(box, behavior = 'smooth') {
   if (!box) return
   const chart = document.getElementById('chart')
   const z = parseFloat(document.getElementById('grid').style.zoom || '1') || 1
@@ -970,7 +969,7 @@ function revealBox(box) {
   let nx = left, ny = top
   if (box.x < left + 12 || box.x + Math.min(box.w, viewW) > left + viewW - 12) nx = Math.max(0, box.x - Math.max(24, (viewW - box.w) / 2))
   if (box.y < top + 12 || box.y + Math.min(box.h, viewH) > top + viewH - 12) ny = Math.max(0, box.y - Math.max(24, (viewH - box.h) / 2))
-  chart.scrollTo({ left: nx * z, top: ny * z, behavior: 'smooth' })
+  chart.scrollTo({ left: nx * z, top: ny * z, behavior })
 }
 async function recordOf(ref) {
   if (recCache.has(ref)) return recCache.get(ref)
@@ -1256,6 +1255,9 @@ if (CARD) {
     sel = null
     index()
     refresh()
+    // the chart opens at its first card a label marks, so the card first shows what its labels found
+    const first = labelsOn() && L ? [...L.cards.values()].find((k) => k.c.m >= 0) : null
+    if (first) revealBox({ x: first.x, y: first.y, w: first.w, h: first.h }, 'instant')
     requestAnimationFrame(() => thimble.settled())
   })
 } else start()
