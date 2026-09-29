@@ -1833,8 +1833,8 @@ async def _apply_prompt(c: str, concept: dict, units: Iterator[Unit], out: Path,
                         files: list[str] | None = None, comment: bool = True) -> tuple[int, int, str | None]:
     """The classifier calls of a prompt label, BATCH_ITEMS units per call and up to CONCURRENCY calls running: a 429 or
     529 halves the calls let run, and each round of answered calls lets one more run again. Rows are committed in the
-    units' order. `cancel` stops new calls; a rate-limited call is retried with backoff; calls that ran on the fallback
-    model are counted in the run's message."""
+    units' order. `cancel` stops new calls; a rate-limited call is retried with backoff; a batch that keeps ending without a
+    usable tool call is asked in halves; calls that ran on the fallback model are counted in the run's message."""
     await asyncio.to_thread(_require_model_access)
     unit = concept["unit"]
     per_call, in_flight = BATCH_ITEMS, CONCURRENCY
@@ -1851,6 +1851,7 @@ async def _apply_prompt(c: str, concept: dict, units: Iterator[Unit], out: Path,
     last_emit = 0.0
     messages: list[str] = []
     fell_back: dict[tuple[str, str], int] = {}  # (refused model, fallback model) -> calls
+    slots = asyncio.Semaphore(in_flight)  # the CLI processes of all calls, a batch's halves included
 
     def note(msg: str | None) -> None:
         if msg and msg not in messages and len(messages) < MESSAGES_KEPT:
@@ -1875,9 +1876,10 @@ async def _apply_prompt(c: str, concept: dict, units: Iterator[Unit], out: Path,
         status."""
         for attempt in range(len(RETRY_DELAYS) + 1):
             since = slowdowns
-            call = await classify_structured(
-                c, concept, items, comment,
-                on_retry=lambda _n, _wait, cls, _e, since=since: slow(since) if cls in ("rate_limited", "overloaded") else None)
+            async with slots:
+                call = await classify_structured(
+                    c, concept, items, comment,
+                    on_retry=lambda _n, _wait, cls, _e, since=since: slow(since) if cls in ("rate_limited", "overloaded") else None)
             if call.refused_by:
                 pair = (call.refused_by, call.model_requested)
                 fell_back[pair] = fell_back.get(pair, 0) + 1
@@ -1896,10 +1898,26 @@ async def _apply_prompt(c: str, concept: dict, units: Iterator[Unit], out: Path,
                 return {}, failure, call.status
         return parse_labels(call.output, concept, len(items), comment), None, call.status
 
+    async def halving(items: list[tuple[str, str]], nums: list[int]) -> tuple[dict[int, dict], str | None]:
+        """The answers to the items numbered `nums` (1-based in `items`) by item number, and why a call failed (None when
+        none did). When the call ends without a usable tool call (no_tool_call or truncated), its items are asked again
+        in two halves, and so on down to single items, so only an item no call can label fails."""
+        got, failure, status = await ask([items[i - 1] for i in nums])
+        res = {nums[j - 1]: r for j, r in got.items()}
+        left = [i for i in nums if i not in res]
+        if len(left) > 1 and status in ("no_tool_call", "truncated") and not cancel.is_set():
+            mid = len(left) // 2
+            halves = await asyncio.gather(halving(items, left[:mid]), halving(items, left[mid:]))
+            for more, _f in halves:
+                res.update(more)
+            failure = next((f for _r, f in halves if f), None)
+        return res, failure
+
     async def one(batch: list[_Item]) -> tuple[list[dict | None], str | None]:
         """Each item's answer ({label, confidence, rationale, spans}; None where it got none) and the problem, if any. The
         items a call left out, and all of them after a call that ended without a usable tool call (no_tool_call or
-        truncated), are asked once more; a call that failed otherwise has had its retries."""
+        truncated), are asked once more, in halves (halving) if that call too makes no usable tool call; a call that
+        failed otherwise has had its retries."""
         answers: list[dict | None] = [None] * len(batch)
         live = [n for n, it in enumerate(batch) if (it.text or "").strip()]
         cause = None
@@ -1912,8 +1930,8 @@ async def _apply_prompt(c: str, concept: dict, units: Iterator[Unit], out: Path,
         res, failure, status = await ask(items)
         missing = [i for i in range(1, len(items) + 1) if i not in res]
         if missing and status in ("ok", "no_tool_call", "truncated") and not cancel.is_set():
-            again, failure, _status = await ask([items[i - 1] for i in missing])
-            res.update({missing[j - 1]: r for j, r in again.items()})
+            again, failure = await halving(items, missing)
+            res.update(again)
         for i, n in enumerate(live, 1):
             if (r := res.get(i)) is not None:
                 answers[n] = {**r, "spans": quoted_span(batch[n].text, r.get("quote", "")) if spans else None}

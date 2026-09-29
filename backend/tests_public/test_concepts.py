@@ -226,6 +226,30 @@ async def _scoped_prompt_label(monkeypatch, *, in_flight: int, wait_s: float) ->
     return s, loop.time() - started[0]
 
 
+async def test_a_prompt_apply_asks_a_batch_cut_off_twice_in_halves_until_only_the_bad_item_fails(api, workspaces_tmp, monkeypatch):
+    """A batch whose call is cut off every time one item is in it is asked again in halves, down to single items: the
+    other 9 are labeled, and only that item fails, with the reason."""
+    monkeypatch.setattr(concepts, "BATCH_ITEMS", 10)
+    bad = "events.jsonl#L7"
+    sizes: list[int] = []
+
+    async def call(c, concept, items, comment=True, on_retry=None):
+        sizes.append(len(items))
+        if any(ref == bad for ref, _t in items):
+            return model_mod.CallResult(status="truncated", detail="the response hit max_tokens before a valid tool call")
+        return _ok(FakeClassify.rule(items))
+
+    monkeypatch.setattr(concepts, "classify_structured", call)
+    k = await _create(api, description="a forge event that claims a PR")
+    s = (await api.post(f"/api/ws/{CORPUS}/concepts/{k['id']}/apply", json={"wait": True, "paths": ["events.jsonl"]})).json()
+    assert s["total"] == 20 and s["labeled"] == 19 and s["failed"] == 1
+    assert s["message"] == "truncated: the response hit max_tokens before a valid tool call"
+    rows = concepts.read_labels(workspaces_tmp / CORPUS, k["id"])
+    assert {r["ref"] for r in rows} == {f"events.jsonl#L{i}" for i in range(1, 21)} - {bad}
+    # L11-L20 in one call; L1-L10 twice, then 1-5 and 6-10, 6-7 and 8-10, 6 and 7
+    assert sorted(sizes) == [1, 1, 2, 3, 5, 5, 10, 10, 10]
+
+
 async def test_a_prompt_label_that_will_not_end_within_the_wait_answers_with_its_first_rows(workspaces_tmp, monkeypatch):
     """Once APPLY_ENOUGH units are labeled and the run's eta is past the wait left, apply_scoped answers with the run so
     far before the wait ends, and the run goes on."""
