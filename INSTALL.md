@@ -38,6 +38,15 @@ background agents are refused, with a message saying how to trust the folder). `
 `--trust-workspaces` and `--no-trust-workspaces` answer without asking. `install.sh --dry-run` prints every step and
 changes nothing.
 
+## Package mirrors
+
+A Global install uses the package indexes your machine is set up with. It installs the backend's packages with `uv pip`
+from uv's index (`UV_DEFAULT_INDEX`, `uv.toml`), or with pip where pip has an index (`PIP_INDEX_URL`, `pip.conf`) and
+uv has none. Of the frontend's packages it installs only the few thimble loads at run time, with npm from its registry.
+All are pinned with their hashes. When the index lacks a pinned version, install.sh says so and installs versions within
+the ranges thimble allows; a file whose hash differs from the pinned one stops the install. A Dev install uses
+`uv sync` and `npm ci`.
+
 ## Update
 
 `thimble update` installs the latest release; in a Dev install it runs `git pull --ff-only` and the install steps,

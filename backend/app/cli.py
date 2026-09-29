@@ -1833,7 +1833,8 @@ def node_line() -> str:
     if v and v[0] < NODE_MIN_MAJOR:
         return f"{out}, too old; {need}"
     modules = FRONTEND_DIR / "node_modules"
-    return out + ("" if modules.is_dir() else f"; {modules} is missing, so custom views cannot build (run `npm ci` in {FRONTEND_DIR})")
+    fix = f"bash {config.REPO_ROOT / 'scripts' / 'install.sh'}"
+    return out + ("" if modules.is_dir() else f"; {modules} is missing, so custom views cannot build (run `{fix}` again)")
 
 
 def human_bytes(n: float) -> str:

@@ -3,8 +3,10 @@ tmp_path with a throwaway HOME: the Python they start never imports a module fro
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -40,19 +42,33 @@ def env_for(tmp_path: Path, **extra: str) -> dict[str, str]:
     return {"PATH": "/usr/bin:/bin", "HOME": str(home), "THIMBLE_HOME": str(home / ".thimble"), **extra}
 
 
+# uv's stand-in: `uv venv DIR` makes DIR/bin/python the base interpreter without site-packages, so it holds no package
+# (and install.sh fetches no browser for one); `uv pip …` is written to $STUB_LOG, and `uv pip sync` prints
+# $STUB_SYNC_OUT and exits with $STUB_SYNC_RC
+UV_STUB = f"""#!/bin/sh
+case "$1" in
+  --version) echo "uv 0.0.0";;
+  venv) for a; do d="$a"; done; mkdir -p "$d/bin"
+        printf '#!/bin/sh\\nexec %s -S "$@"\\n' {os.path.realpath(sys.executable)} > "$d/bin/python"; chmod +x "$d/bin/python";;
+  pip) echo "uv $*" >> "${{STUB_LOG:-/dev/null}}"
+       if [ "$2" = sync ]; then printf '%s\\n' "${{STUB_SYNC_OUT:-}}"; exit "${{STUB_SYNC_RC:-0}}"; fi;;
+esac
+"""
+
+
 def stub_bin(tmp_path: Path) -> Path:
-    """uv that does nothing but name itself, so install.sh runs its steps without creating a venv, and a node too old
-    for the frontend step."""
+    """uv's stand-in (UV_STUB), so install.sh runs its steps without installing anything, and a node too old for the
+    frontend step."""
     bin_ = tmp_path / "bin"
     bin_.mkdir(exist_ok=True)
-    for name, body in {"uv": 'case "$1" in --version) echo "uv 0.0.0";; esac', "node": "echo v18.0.0"}.items():
-        (bin_ / name).write_text(f"#!/bin/sh\n{body}\n")
+    for name, body in {"uv": UV_STUB, "node": "#!/bin/sh\necho v18.0.0\n"}.items():
+        (bin_ / name).write_text(body)
         (bin_ / name).chmod(0o755)
     return bin_
 
 
-def install(tree: Path, dest: Path, tmp_path: Path, *flags: str) -> subprocess.CompletedProcess:
-    env = env_for(tmp_path, PATH=f"{stub_bin(tmp_path)}:/usr/bin:/bin")
+def install(tree: Path, dest: Path, tmp_path: Path, *flags: str, **extra: str) -> subprocess.CompletedProcess:
+    env = env_for(tmp_path, PATH=f"{stub_bin(tmp_path)}:/usr/bin:/bin", **extra)
     return subprocess.run(["bash", str(tree / "scripts" / "install.sh"), "--dir", str(dest), "--deps-only", *flags],
                           capture_output=True, text=True, env=env, timeout=60)
 
@@ -92,6 +108,55 @@ def test_install_sh_copies_only_into_an_empty_folder_or_an_earlier_install(tmp_p
     r = install(tree, empty, tmp_path)
     assert r.returncode == 0, "an earlier install is installed over: " + r.stdout + r.stderr
     assert (empty / "workspaces").is_dir()
+
+
+def pinned_release(tmp_path: Path) -> Path:
+    """A release tree whose backend/requirements.txt pins its one dependency with a hash, as release.sh writes it."""
+    tree = fake_tree(tmp_path / "release")
+    (tree / "backend" / "pyproject.toml").write_text('[project]\nrequires-python = ">=3.12"\ndependencies = ["httpx>=0.27"]\n')
+    (tree / "backend" / "requirements.txt").write_text("httpx==0.28.1 \\\n    --hash=sha256:" + "0" * 64 + "\n")
+    return tree
+
+
+def test_a_release_installs_the_backend_with_the_tool_set_up_with_a_package_index(tmp_path):
+    """uv pip installs the pinned packages from uv's index, and pip from pip's where pip has an index and uv has none
+    (uv sync would fetch the URLs uv.lock names, whatever index is set up)."""
+    tree = pinned_release(tmp_path)
+    dest = tmp_path / "home" / ".thimble" / "app"
+    req = tree / "backend" / "requirements.txt"
+    uv = f"+ uv pip sync --require-hashes {req} --python {dest}/backend/.venv/bin/python"
+    pip = f"-m pip install --quiet --disable-pip-version-check --require-hashes --no-deps -r {req}"
+    pip_conf = tmp_path / "home" / ".config" / "pip" / "pip.conf"
+    for extra, conf, tool in (({}, "", uv), ({"PIP_INDEX_URL": "https://mirror.example/simple"}, "", pip),
+                              ({}, "[global]\nindex-url = https://mirror.example/simple\n", pip),
+                              ({"PIP_INDEX_URL": "https://a.example/simple", "UV_DEFAULT_INDEX": "https://b.example/simple"},
+                               "", uv)):
+        if conf:
+            pip_conf.parent.mkdir(parents=True, exist_ok=True)
+            pip_conf.write_text(conf)
+        r = install(tree, dest, tmp_path, "--dry-run", **extra)
+        pip_conf.unlink(missing_ok=True)
+        assert r.returncode == 0 and tool in r.stdout, (extra, conf, r.stdout + r.stderr)
+        assert "uv sync" not in r.stdout
+
+
+def test_a_pinned_install_falls_back_to_pyproject_s_ranges_only_when_the_index_lacks_a_version(tmp_path):
+    tree = pinned_release(tmp_path)
+    dest = tmp_path / "home" / ".thimble" / "app"
+    log = tmp_path / "uv.log"
+
+    def run(**extra: str) -> tuple[subprocess.CompletedProcess, list[str]]:
+        log.write_text("")
+        r = install(tree, dest, tmp_path, STUB_LOG=str(log), **extra)
+        return r, [ln.split(" --python")[0] for ln in log.read_text().splitlines()]
+
+    r, calls = run()
+    assert r.returncode == 0 and calls == [f"uv pip sync --require-hashes {tree}/backend/requirements.txt"], r.stdout
+    r, calls = run(STUB_SYNC_RC="1", STUB_SYNC_OUT="Because there is no version of httpx==0.28.1 and you require it")
+    assert r.returncode == 0 and len(calls) == 2 and calls[1].startswith("uv pip install -r "), r.stdout + r.stderr
+    assert "installed instead" in r.stdout
+    r, calls = run(STUB_SYNC_RC="1", STUB_SYNC_OUT="Hash mismatch for `httpx==0.28.1`")
+    assert r.returncode == 1 and "hash is not the one" in r.stderr and len(calls) == 1, r.stdout + r.stderr
 
 
 def release_zip(tmp_path: Path, name: str = "thimble-0.0.2-abc1234") -> Path:
