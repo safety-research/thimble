@@ -179,7 +179,8 @@ def _read(c: str, ref: str) -> str:
         if hit.get("kind") == "view" and not hit.get("key"):
             from . import views  # noqa: PLC0415
 
-            text += "\n" + views.records_text(c, str(hit.get("slug")))
+            # as warm() described them, since describing them here would hold the server's loop
+            text += "\n" + views.records_text_kept(c, str(hit.get("slug")))
         return text
     except Exception as e:  # noqa: BLE001 — a ref that does not resolve still opens the thread
         detail = getattr(e, "detail", None) or f"{type(e).__name__}: {e}"

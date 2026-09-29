@@ -3,12 +3,13 @@ and how the records relate. A view's question carries it for the files the view 
 on a view gives it (views.tool_read_ref).
 
 describe(corpus_dir, paths) groups the files whose records have the same fields, such as one page's saves per file, and
-reads each group's records up to SCAN_BYTES. A field's line gives its values with their counts when it has at most
+reads each group's records up to its share of SCAN_BYTES. A field's line gives its values with their counts when it has at most
 ENUM_MAX, else how many it has and the commonest; the span of a time or a number; the length of a long text. Relations:
   saves  records with a sequence and a text field (concepts._save_key) that mostly keep at least half the lines of the
          save before them on their document, which labels read as what each save changed (concepts.change_lines)
-  names  a text field whose values are almost all values of another field that is different on every record
-Each file's description is cached on its size and modification time."""
+  names  a text field whose values are almost all values of another field that is different on every record (judged
+         on NAMES_SAMPLE of its values)
+Each group's description is cached on its files' sizes and modification times."""
 from __future__ import annotations
 
 import csv
@@ -16,12 +17,14 @@ import json
 import re
 import threading
 from collections import Counter
+from itertools import islice
 from pathlib import Path
 from typing import Any
 
 from . import config
 
-SCAN_BYTES = 256 * 1024 * 1024  # of a group's files read for its fields; the rest is left unread, and the text says so
+SCAN_BYTES = 64 * 1024 * 1024  # of all the files read for their fields, split evenly among the groups; the rest is left
+# unread, and the text says so
 ENUM_MAX = 6  # a field with at most this many values lists them all
 EXAMPLES = 2  # values shown of a field with more
 VALUE_CHARS = 60
@@ -29,6 +32,7 @@ LONG_CHARS = 200  # a string longer than this is a text, described by its length
 DISTINCT_MAX = 100_000  # values counted per field
 UNIQUE_MIN = 5  # records a field must be on to count as naming each record
 NAMES_SHARE = 0.9  # of a field's values that must be another's, and of that field's records that must differ, for a name
+NAMES_SAMPLE = 1_000  # values of a field checked for being another's
 SAVES_SHARE = 0.5  # of the pairs of consecutive saves that must keep half the lines for records to save whole documents
 PAIRS_MAX = 2_000  # pairs of consecutive saves compared
 PATHS_SHOWN = 3
@@ -42,21 +46,24 @@ _lock = threading.Lock()
 
 def describe(corpus_dir: Path, paths: list[str]) -> str:
     """The description of the files at `paths` (relative to the corpus), as the module note says; "" for none. Blocking."""
-    groups: dict[tuple, list[tuple[str, Path]]] = {}
+    groups: dict[tuple, list[tuple[str, Path, tuple]]] = {}
     for rel in sorted(dict.fromkeys(paths)):
         try:
             p = config.safe_corpus_path(corpus_dir, rel)
-        except ValueError:
+            st = p.stat()
+        except (ValueError, OSError):
             continue
         if p.is_file():
-            groups.setdefault((p.suffix, _keys(p)), []).append((rel, p))
+            groups.setdefault((p.suffix, _keys(p)), []).append((rel, p, (str(p), st.st_size, st.st_mtime_ns)))
     parts = []
+    share = SCAN_BYTES // max(1, len(groups))
     for (_suffix, keys), files in groups.items():
-        sig = tuple((str(p), p.stat().st_size, p.stat().st_mtime_ns) for _rel, p in files)
+        sig = (share, *(f[2] for f in files))
         with _lock:
             text = _cache.get(sig)
         if text is None:
-            text = _group(files) if keys else _plain(files)
+            named = [(rel, p) for rel, p, _st in files]
+            text = _group(named, share) if keys else _plain(named)
             with _lock:
                 _cache[sig] = text
         parts.append(text)
@@ -72,33 +79,38 @@ def _keys(p: Path) -> tuple[str, ...]:
 
 
 def _records(p: Path, most: int | None = None, budget: list[int] | None = None):
-    """The dicts of a JSON Lines file or a CSV's rows, `most` of them at most, reading while `budget[0]` bytes are left."""
+    """The dicts of a JSON Lines file or a CSV's rows, `most` of them at most, reading while `budget[0]` bytes are left.
+    Reading stops at a file that cannot be read or a CSV row that does not parse, such as one with a cell over
+    csv.field_size_limit."""
     n = 0
-    if p.suffix == ".csv":
-        with open(p, encoding="utf-8", errors="replace", newline="") as f:
-            for row in csv.DictReader(f):
+    try:
+        if p.suffix == ".csv":
+            with open(p, encoding="utf-8", errors="replace", newline="") as f:
+                for row in csv.DictReader(f):
+                    if budget is not None:
+                        budget[0] -= sum(len(str(v)) for v in row.values())
+                    yield {str(k).strip(): v for k, v in row.items() if k is not None}
+                    n += 1
+                    if (most and n >= most) or (budget is not None and budget[0] <= 0):
+                        return
+            return
+        if p.suffix != ".jsonl":
+            return
+        with open(p, "rb") as f:
+            for raw in f:
                 if budget is not None:
-                    budget[0] -= sum(len(str(v)) for v in row.values())
-                yield {str(k).strip(): v for k, v in row.items() if k is not None}
-                n += 1
-                if (most and n >= most) or (budget is not None and budget[0] <= 0):
-                    return
+                    budget[0] -= len(raw)
+                try:
+                    rec = json.loads(raw)
+                except ValueError:
+                    continue
+                if isinstance(rec, dict):
+                    yield rec
+                    n += 1
+                    if (most and n >= most) or (budget is not None and budget[0] <= 0):
+                        return
+    except (OSError, csv.Error):
         return
-    if p.suffix != ".jsonl":
-        return
-    with open(p, "rb") as f:
-        for raw in f:
-            if budget is not None:
-                budget[0] -= len(raw)
-            try:
-                rec = json.loads(raw)
-            except ValueError:
-                continue
-            if isinstance(rec, dict):
-                yield rec
-                n += 1
-                if (most and n >= most) or (budget is not None and budget[0] <= 0):
-                    return
 
 
 def _plain(files: list[tuple[str, Path]]) -> str:
@@ -177,12 +189,13 @@ def _quote(v: Any) -> str:
     return json.dumps(s[:VALUE_CHARS] + ("…" if len(s) > VALUE_CHARS else ""), ensure_ascii=False) if isinstance(v, str) else s
 
 
-def _group(files: list[tuple[str, Path]]) -> str:
-    """One group's lines: its files and records, a line per field, then how its records relate."""
+def _group(files: list[tuple[str, Path]], scan: int) -> str:
+    """One group's lines, from its first `scan` bytes: its files and records, a line per field, then how its records
+    relate."""
     from . import concepts  # noqa: PLC0415 — concepts imports much of the app
 
     fields: dict[str, _Field] = {}
-    budget = [SCAN_BYTES]
+    budget = [scan]
     total = pairs = whole = disorder = 0
     last: dict[tuple, tuple[Any, str]] = {}
     save: tuple[str, str, str] | None = None  # (document field, sequence field, text field) of the saves
@@ -229,8 +242,9 @@ def _group(files: list[tuple[str, Path]]) -> str:
     for k, f in fields.items():
         if f.full or set(f.kinds) != {"text"} or len(f.values) < 3:
             continue
+        sample = list(islice(f.values, NAMES_SAMPLE))
         for u in unique - {k}:
-            if sum(v in fields[u].values for v in f.values) >= NAMES_SHARE * len(f.values):
+            if sum(v in fields[u].values for v in sample) >= NAMES_SHARE * len(sample):
                 lines.append(f"`{k}` names another record by its `{u}`.")
                 break
     return "\n".join(lines)

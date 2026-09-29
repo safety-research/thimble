@@ -592,16 +592,31 @@ def glob_matches(rel_file: str, pattern: str | None) -> bool:
     return fnmatch.fnmatch(rel_file, pattern) or fnmatch.fnmatch(rel_file.rsplit("/", 1)[-1], pattern)
 
 
+_records_texts: dict[tuple[str, str], str] = {}  # (workspace, slug) -> its last records_text
+
+
 def records_text(c: str, slug: str) -> str:
-    """What the records of the files the view claims hold (fields.describe), under a line saying so; "" for no view.
-    Blocking."""
+    """What the records of the files the view claims hold (fields.describe), under a line saying so; "" for no view or
+    files that cannot be described. Blocking, so never on the server's loop, which reads the last one kept
+    (records_text_kept)."""
     from . import fields  # noqa: PLC0415
 
     view = read_built(c, slug)
     if view is None:
         return ""
-    text = fields.describe(config.corpus_dir(c), [f[0] for f in claimed_files(c, view)])
-    return f"The records the view reads:\n{text}" if text else ""
+    try:
+        text = fields.describe(config.corpus_dir(c), [f[0] for f in claimed_files(c, view)])
+    except Exception as e:  # noqa: BLE001 — the view's other lines stand without it
+        log.warning("%s: the records of view %s were not described: %s", c, slug, e)
+        text = ""
+    out = f"The records the view reads:\n{text}" if text else ""
+    _records_texts[(c, slug)] = out
+    return out
+
+
+def records_text_kept(c: str, slug: str) -> str:
+    """The view's last records_text, "" before one ran; reads no file."""
+    return _records_texts.get((c, slug), "")
 
 
 def claims_path(view: dict[str, Any], rel: str) -> bool:
