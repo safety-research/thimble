@@ -3438,10 +3438,18 @@ async def apply_scoped(c: str, *, scope: str, name: str, kind: str, text: str, v
             "unchanged": unchanged, "stale": [x["id"] for x in stale]}
 
 
-def show_concept(c: str, id_or_name: str, on: bool, values: list[str] | None = None) -> dict:
-    """Turn a label over files on or off in Files and the views (`shown`), which never runs it; with `values`, on highlights
-    those values alone. Turning it off drops a Files filter that names it. 404 for no such label, 400 for a label of cards
-    or report sentences or a value it does not have."""
+# the label colours by the names show_label takes (--label-1..12)
+COLOUR_NAMES = {"blue": 1, "orange": 2, "green": 3, "pink": 4, "vermilion": 5, "sky blue": 6, "brown": 7, "slate blue": 8,
+                "wine": 9, "olive": 10, "purple": 11, "red": 12}
+
+
+def show_concept(c: str, id_or_name: str, on: bool | None, values: list[str] | None = None,
+                 colours: dict[str, str] | None = None) -> dict:
+    """Turn a label over files on or off in Files and the views (`shown`), which never runs it, or leave it as it is when
+    `on` is None; with `values`, on highlights those values alone. `colours` gives values colours by name (COLOUR_NAMES),
+    a value that had the colour taking the one it leaves, as the Labels pane's palette does. Turning it off drops a Files
+    filter that names it. 404 for no such label, 400 for a label of cards or report sentences, a value it does not have
+    or a colour with no name here."""
     ws = _ws(c)
     concept = find_concept(ws, id_or_name)
     if concept is None:
@@ -3450,16 +3458,29 @@ def show_concept(c: str, id_or_name: str, on: bool, values: list[str] | None = N
     if concept["unit"] not in FILE_UNITS:
         raise HTTPException(400, f"the label {concept['name']!r} is over {SCOPE_OF_UNIT[concept['unit']]} units, not files")
     wanted = [" ".join(str(v).split()) for v in (values or []) if str(v).strip()]
-    unknown = [v for v in wanted if v not in concept["labels"]]
+    painted = {" ".join(str(v).split()): " ".join(str(n).split()).lower() for v, n in (colours or {}).items()}
+    unknown = [v for v in [*wanted, *painted] if v not in concept["labels"]]
     if unknown:
         raise HTTPException(400, f"the label {concept['name']!r} has no value {', '.join(map(repr, unknown))}; its values are "
                                  f"{', '.join(concept['labels'])}")
-    concept["shown"] = bool(on)
+    nameless = [n for n in painted.values() if n not in COLOUR_NAMES]
+    if nameless:
+        raise HTTPException(400, f"no label colour is named {', '.join(map(repr, nameless))}; the colours are {', '.join(COLOUR_NAMES)}")
+    if on is not None:
+        concept["shown"] = bool(on)
     if on and wanted:
         for cl in concept["classes"]:
             cl["highlight"] = cl["name"] in wanted
-    write_concept(ws, coloured(ws, concept))
-    if not on:
+    concept = coloured(ws, concept)
+    for value, name in painted.items():
+        at = next(cl for cl in concept["classes"] if cl["name"] == value)
+        new, old = COLOUR_NAMES[name], at["color"]
+        for cl in concept["classes"]:
+            if cl is not at and cl["color"] == new:
+                cl["color"] = old
+        at["color"] = new
+    write_concept(ws, concept)
+    if on is False:
         f = read_filters(ws).get("files")
         if f and f["concept"] == concept["id"]:
             clear_filter(c, "files")

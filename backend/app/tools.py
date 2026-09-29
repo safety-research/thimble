@@ -2353,8 +2353,9 @@ async def _h_show_label(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
     on = args.get("on")
     if isinstance(on, str) and on.strip().lower() in ("true", "false"):
         on = on.strip().lower() == "true"
-    if not isinstance(on, bool):
-        return err("show_label: `on` is required, true or false")
+    colours = args.get("colours") if isinstance(args.get("colours"), dict) else None
+    if not isinstance(on, bool) and not (on is None and colours):
+        return err("show_label: `on` is required, true or false, unless it gives `colours`")
     values = args.get("values")
     values = [values] if isinstance(values, str) else values if isinstance(values, builtins.list) else None
     k = concepts.find_concept(ctx.ws, name)
@@ -2363,8 +2364,11 @@ async def _h_show_label(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
         return err(hint("show_label-not-files", label=k["name"], units=f"{UNIT_WORDS.get(k['unit'], k['unit'])}s",
                         where="the canvas" if where == "canvas" else "the report"))
     was = bool(k["shown"]) if k is not None else None
-    k = await asyncio.to_thread(concepts.show_concept, ctx.c, name, on, values)
+    k = await asyncio.to_thread(concepts.show_concept, ctx.c, name, on, values, colours)
     ref = f"[[concept:{k['id']}]]"
+    if on is None:
+        painted = ", ".join(f"{v} {n}" for v, n in colours.items())
+        return ok(f"label {k['name']} {ref} colours {painted}; it is {'on' if k['shown'] else 'off'} in Files and the views.")
     # what it was before, since the analyst may have turned it on or off in Files since the chat last did
     now = f"{'on' if on else 'off'} in Files and the views"
     state = f"was {'on' if was else 'off'} and is now {now}" if was is not None and was != on else f"is {now}, as it was"

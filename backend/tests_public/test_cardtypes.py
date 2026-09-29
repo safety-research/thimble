@@ -2,7 +2,8 @@
 Swarm viewer applies to, the registry finds it without any view proposal and lists it for main's prompt; a card's code
 draws it with thimble.card, which checks the arguments against the type's schema, runs card.py on the reader's cached
 index under the labels the call names, whatever Files highlights, and shows the data with a listing main reads and
-cites; the card check's page gets the type's frame from the request. Main hears when a label it ran finishes.
+cites; the card check's page gets the type's frame from the request. Main hears when a label it ran finishes, and can
+colour a label's values.
 
 The corpus `crew` is 140 saves of 35 accounts on 4 pages, each naming the next account, which the Swarm viewer's
 applies() reads as a swarm. Reader calls run in this process (views._runner replaced by an exec of the kernel's
@@ -19,6 +20,8 @@ import types
 from pathlib import Path
 
 import pytest
+
+from fastapi import HTTPException
 
 from app import cardtypes, channel, concepts, config, render, tools, views
 
@@ -155,7 +158,7 @@ async def test_the_check_s_page_gets_the_type_s_frame_from_the_request(crew, ker
     assert "frames" not in render.request_for(CORPUS, {"id": "c2", "kind": "plot", "outputs": []})
 
 
-async def test_main_hears_when_a_label_it_ran_finishes(crew):
+async def test_main_hears_when_a_label_it_ran_finishes_and_can_colour_its_values(crew):
     q: asyncio.Queue = asyncio.Queue()
     channel._subs.setdefault(CORPUS, set()).add(q)
     try:
@@ -165,3 +168,11 @@ async def test_main_hears_when_a_label_it_ran_finishes(crew):
         assert note["meta"]["kind"] == "label_done" and "label even" in note["content"] and "even 70" in note["content"]
     finally:
         channel._subs.pop(CORPUS, None)
+    concepts.show_concept(CORPUS, "even", None, colours={"odd": "red", "even": "blue"})
+    after = {cl["name"]: cl["color"] for cl in concepts.read_concept(config.workspace_dir(CORPUS), cid)["classes"]}
+    assert after == {"even": 1, "odd": 12}
+    concepts.show_concept(CORPUS, "even", None, colours={"odd": "blue"})
+    swapped = {cl["name"]: cl["color"] for cl in concepts.read_concept(config.workspace_dir(CORPUS), cid)["classes"]}
+    assert swapped == {"even": 12, "odd": 1}, "the value that had the colour takes the one the other left"
+    with pytest.raises(HTTPException, match="no label colour is named 'teal'"):
+        concepts.show_concept(CORPUS, "even", None, colours={"odd": "teal"})
