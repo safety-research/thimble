@@ -59,10 +59,11 @@ esac
 
 def stub_bin(tmp_path: Path) -> Path:
     """uv's stand-in (UV_STUB), so install.sh runs its steps without installing anything, and a node too old for the
-    frontend step."""
+    frontend step ($STUB_NODE names another version; npm then prints $STUB_NPM_OUT and exits with $STUB_NPM_RC)."""
     bin_ = tmp_path / "bin"
     bin_.mkdir(exist_ok=True)
-    for name, body in {"uv": UV_STUB, "node": "#!/bin/sh\necho v18.0.0\n"}.items():
+    for name, body in {"uv": UV_STUB, "node": '#!/bin/sh\necho "${STUB_NODE:-v18.0.0}"\n',
+                       "npm": '#!/bin/sh\necho "${STUB_NPM_OUT:-}"; exit "${STUB_NPM_RC:-0}"\n'}.items():
         (bin_ / name).write_text(body)
         (bin_ / name).chmod(0o755)
     return bin_
@@ -158,6 +159,11 @@ def test_a_pinned_install_falls_back_to_pyproject_s_ranges_only_when_the_index_l
     assert "installed instead" in r.stdout
     r, calls = run(STUB_SYNC_RC="1", STUB_SYNC_OUT="Hash mismatch for `httpx==0.28.1`")
     assert r.returncode == 1 and "hash is not the one" in r.stderr and len(calls) == 1, r.stdout + r.stderr
+    for rel in ("frontend/dist/index.html", "frontend/runtime/package-lock.json"):
+        (tree / rel).parent.mkdir(parents=True, exist_ok=True)
+        (tree / rel).write_text("{}")
+    r, calls = run(STUB_NODE="v22.0.0", STUB_NPM_RC="1", STUB_NPM_OUT="npm error code EINTEGRITY")
+    assert r.returncode == 1 and "frontend/runtime/package-lock.json pins" in r.stderr, "npm's hash mismatch stops it too"
 
 
 def test_install_sh_python_links_a_prepared_environment_and_installs_nothing_into_it(tmp_path):

@@ -9,7 +9,8 @@
 # A release installs from the package indexes the machine is set up with: the backend's packages from backend/requirements.txt (uv.lock's versions,
 # with their hashes) by uv pip, or by pip where pip is set up with an index and uv is not; with its prebuilt frontend/dist, only the frontend packages
 # the server and its scripts load (frontend/runtime, pinned by its own lockfile). Where the index lacks a pinned version, the versions pyproject.toml or
-# frontend/runtime/package.json allow are installed instead, and a file whose hash differs from the pinned one stops the install.
+# frontend/runtime/package.json allow are installed instead. A file whose hash differs from the pinned one stops the install,
+# from either index.
 # Needs: uv (or python3 >= 3.12); node >= 20 for custom views, and to build frontend/dist when it is missing or out of date; the claude CLI to register the plugin.
 # The marketplace name is thimble-local from a release zip and thimble from a checkout (.claude-plugin/marketplace.json).
 #
@@ -371,7 +372,8 @@ install_packages() {  # a release with its UI built: the runtime packages (runti
   # update). Then the headless Chromium of the frontend's Playwright, which a view's checks (scripts/view_shot.mjs) and
   # the dev agent's screenshots load. A symlinked node_modules is left alone. A checkout's node_modules installed without
   # this script is kept while npm's own record of the install (node_modules/.package-lock.json) is newer than
-  # package-lock.json. Returns 1 when npm failed.
+  # package-lock.json. Returns 1 when npm failed; a file whose hash is not the pinned one stops the install
+  # (npm_integrity).
   local fe="$dir/frontend" stamp="$dir/frontend/node_modules/.thimble-package-lock.json"
   if [ -L "$fe/node_modules" ]; then
     say "frontend/node_modules is a symlink → $(readlink "$fe/node_modules"); left alone"
@@ -385,12 +387,19 @@ install_packages() {  # a release with its UI built: the runtime packages (runti
     say "+ cp $fe/package-lock.json $stamp"
     [ "$dry" = 1 ] || cp "$fe/package-lock.json" "$stamp"
   else
-    run_in "$fe" npm ci --no-audit --no-fund || return 1
+    logged "$tmp/npm.log" npm ci --prefix "$fe" --no-audit --no-fund || { npm_integrity package-lock.json; return 1; }
     say "+ cp $fe/package-lock.json $stamp"
     [ "$dry" = 1 ] || cp "$fe/package-lock.json" "$stamp"
   fi
   run_in "$fe" npx playwright install chromium-headless-shell \
     || say "(the frontend's Chromium download failed; a view's checks cannot load its page until this step is run again)"
+}
+
+npm_integrity() {  # npm_integrity LOCKFILE: stop when npm's failure (in $tmp/npm.log) was a file whose hash is not the one
+  # LOCKFILE pins
+  if grep -q EINTEGRITY "$tmp/npm.log" 2>/dev/null; then
+    die "the npm registry served a file whose hash is not the one frontend/$1 pins (above), so nothing more is installed from it"
+  fi
 }
 
 runtime_packages() {  # only the frontend packages the server and its scripts load (frontend/runtime, which release.sh
@@ -406,10 +415,8 @@ runtime_packages() {  # only the frontend packages the server and its scripts lo
   say "the frontend's packages the server loads (frontend/runtime/package.json); the UI is built already"
   if logged "$tmp/npm.log" npm ci --prefix "$rt" --no-audit --no-fund; then
     pinned=1
-  elif grep -q EINTEGRITY "$tmp/npm.log"; then
-    say "the registry served a file whose hash is not the one frontend/runtime/package-lock.json pins (above), so nothing more is installed from it"
-    return 1
   else
+    npm_integrity runtime/package-lock.json
     say "the registry lacks a version frontend/runtime/package-lock.json pins (above), so the versions frontend/runtime/package.json allows are installed instead"
     run npm install --prefix "$rt" --no-audit --no-fund --no-package-lock || return 1
     pinned=0
