@@ -215,7 +215,7 @@ def read_type(c: str, slug: str) -> dict[str, Any] | None:
         renderer = "document"
     prompt_file, rubric_file, component_file = d / "prompt.md", d / "rubric.md", d / "renderer.tsx"
     prompt = prompt_file.read_text("utf-8") if prompt_file.is_file() else ""
-    made_from = preset(str(meta.get("preset") or "")) if meta.get("preset") else None
+    made_from = preset(str(meta.get("preset") or ""), c) if meta.get("preset") else None
     if made_from and not prompt.strip():
         prompt = made_from["prompt"]
     out = {
@@ -293,9 +293,9 @@ def write_type(c: str, slug: str, *, name: str, description: str, renderer: str,
     if create and isinstance(existing, dict):
         raise HTTPException(409, f"a report type {slug!r} already exists")
     from_preset = preset_id or (existing.get("preset") if isinstance(existing, dict) else None)
-    if from_preset and preset(str(from_preset)) is None:
+    if from_preset and preset(str(from_preset), c) is None:
         raise HTTPException(400, f"no preset {from_preset!r}")
-    if from_preset and (prompt or "").strip() == (preset(str(from_preset)) or {}).get("prompt"):
+    if from_preset and (prompt or "").strip() == (preset(str(from_preset), c) or {}).get("prompt"):
         prompt = ""  # the preset's own text, as read_type gave it: the file stays its one source
     if len(rubric or "") > RUBRIC_MAX:
         raise HTTPException(400, f"rubric is longer than {RUBRIC_MAX} characters")
@@ -359,16 +359,34 @@ def delete_type(c: str, slug: str) -> None:
 # --------------------------------------------------------------------------- presets and new documents
 # A preset is a ready-made document type, prompts/types/<id>.md (prompts.TYPES_DIR): name and description as
 # frontmatter, the type's text as the body. A document made from one reads its text from the file each time (read_type).
+# The report types of the workspace's active extensions are presets there too (extensions.report_types).
 
 PRESET_RE = re.compile(r"^[a-z][a-z0-9-]{0,40}$")
 # the kinds of new document besides the presets: a page, and a type of each renderer written from a brief
 NEW_KINDS = ("page", "document", "slides", "story")
 
 
-def preset(pid: str) -> dict[str, Any] | None:
-    """{id, name, description, renderer, prompt} of the preset `pid`; None when there is none."""
-    if not PRESET_RE.match(pid or "") or pid not in prompts.names_in(prompts.TYPES_DIR):
+def _extension_presets(c: str | None) -> list[dict[str, Any]]:
+    if not c:
+        return []
+    from . import extensions  # noqa: PLC0415
+
+    builtin = set(prompts.names_in(prompts.TYPES_DIR))
+    try:
+        return [{k: t[k] for k in ("id", "name", "description", "renderer", "prompt", "extension")}
+                for t in extensions.report_types(c) if PRESET_RE.match(t["id"]) and t["id"] not in builtin]
+    except Exception:  # noqa: BLE001 — a broken extension leaves thimble's own presets
+        log.warning("%s: the extensions' report types could not be read", c, exc_info=True)
+        return []
+
+
+def preset(pid: str, c: str | None = None) -> dict[str, Any] | None:
+    """{id, name, description, renderer, prompt} of the preset `pid`, or of an active extension's report type in
+    workspace `c` (with its `extension`); None when there is none."""
+    if not PRESET_RE.match(pid or ""):
         return None
+    if pid not in prompts.names_in(prompts.TYPES_DIR):
+        return next((t for t in _extension_presets(c) if t["id"] == pid), None)
     try:
         front, body = prompts.frontmatter(f"{prompts.TYPES_DIR}/{pid}")
     except prompts.PromptError:
@@ -380,14 +398,14 @@ def preset(pid: str) -> dict[str, Any] | None:
             "renderer": renderer, "prompt": body}
 
 
-def presets() -> list[dict[str, Any]]:
-    """Every preset, in the order of their files' names."""
-    return [p for p in (preset(pid) for pid in prompts.names_in(prompts.TYPES_DIR)) if p]
+def presets(c: str | None = None) -> list[dict[str, Any]]:
+    """Every preset, in the order of their files' names, then the report types of workspace `c`'s active extensions."""
+    return [p for p in (preset(pid) for pid in prompts.names_in(prompts.TYPES_DIR)) if p] + _extension_presets(c)
 
 
-def new_kinds() -> list[str]:
+def new_kinds(c: str | None = None) -> list[str]:
     """What a new document can be: each preset's id, then NEW_KINDS."""
-    return [p["id"] for p in presets()] + list(NEW_KINDS)
+    return [p["id"] for p in presets(c)] + list(NEW_KINDS)
 
 
 def _free_slug(c: str, base: str) -> str:
@@ -418,9 +436,9 @@ def create_document_type(c: str, kind: str, *, name: str | None = None, brief: s
     or a
     missing brief; 409 when `slug` is taken."""
     kind = (kind or "").strip().lower()
-    made_from = preset(kind) if kind not in NEW_KINDS else None
+    made_from = preset(kind, c) if kind not in NEW_KINDS else None
     if kind not in NEW_KINDS and made_from is None:
-        raise HTTPException(400, f"no kind of document {kind!r}; the kinds are {', '.join(new_kinds())}")
+        raise HTTPException(400, f"no kind of document {kind!r}; the kinds are {', '.join(new_kinds(c))}")
     default = made_from["name"] if made_from else "Page" if kind == "page" else kind.capitalize()
     name = _free_name(c, _collapse(name) or default)
     slug = _check_slug(slug) if slug else _free_slug(c, _fallback_slug(name))
@@ -3076,7 +3094,7 @@ class NewDocBody(BaseModel):
 async def presets_route(c: str) -> list[dict[str, Any]]:
     """The presets + New offers, each {id, name, description, renderer, prompt}."""
     _ws_ok(c)
-    return presets()
+    return presets(c)
 
 
 @router.post("/ws/{c}/report-types/new", status_code=201)

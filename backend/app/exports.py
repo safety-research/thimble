@@ -655,10 +655,8 @@ async def print_pdf(html_text: str, renderer: str = "document") -> bytes:
 
 
 def _extension_types(c: str) -> list[dict[str, Any]]:
-    try:
-        from . import extensions  # noqa: PLC0415
-    except ImportError:
-        return []
+    from . import extensions  # noqa: PLC0415
+
     try:
         return extensions.report_types(c)
     except Exception:  # noqa: BLE001 — a broken extension leaves the built-in formats
@@ -667,9 +665,12 @@ def _extension_types(c: str) -> list[dict[str, Any]]:
 
 
 def hook_of(c: str, slug: str) -> Path | None:
-    """The export.py of the extension report type `slug`, if it ships one."""
+    """The export.py of the extension report type document `slug` was made from, if it ships one."""
+    from . import report_types  # noqa: PLC0415
+
+    made_from = (report_types.read_type(c, slug) or {}).get("preset") or slug
     for t in _extension_types(c):
-        if t.get("id") == slug and t.get("export"):
+        if t.get("id") == made_from and t.get("export"):
             p = Path(str(t["export"]))
             return p if p.is_file() else None
     return None

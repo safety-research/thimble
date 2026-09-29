@@ -15,7 +15,7 @@ import pytest
 
 from fastapi import HTTPException
 
-from app import card_check, cardtypes, cli, config, extensions, orient_session, prompts, views
+from app import card_check, cardtypes, cli, config, extensions, orient_session, prompts, report_types, views
 from app.ledger import write_json
 
 FIXTURE = Path(__file__).parent / "fixtures" / "ext-min"
@@ -104,6 +104,8 @@ async def test_an_added_extension_runs_where_it_applies_with_each_contribution(c
     assert "thimble.onInit" in cardtypes.frame_document(CORPUS, "tally-bars")
 
     assert [r["id"] for r in extensions.report_types(CORPUS)] == ["digest"]
+    assert "digest" in [p["id"] for p in report_types.presets(CORPUS)], "+ New offers the extension's report type"
+    assert report_types.create_document_type(CORPUS, "digest")["preset"] == "digest"
 
     agents = extensions.agent_definitions(CORPUS)
     assert agents["counter"]["tools"] == ["Read", "Grep"] and "WebFetch" in agents["counter"]["disallowedTools"]

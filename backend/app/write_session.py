@@ -166,7 +166,7 @@ async def tool_start_writing(ctx: Any, args: dict[str, Any]) -> Any:
         if not kind:
             names = ", ".join(str(t["slug"]) for t in report_types.list_types(ctx.c))
             return tools.err(tools.hint("start_writing-no-doc", doc=doc or "(none)", docs=names,
-                                        types=", ".join(report_types.new_kinds())))
+                                        types=", ".join(report_types.new_kinds(ctx.c))))
         slug = doc if report_types.SLUG_RE.match(doc) and doc not in report_types.RESERVED else None
         try:
             made = report_types.create_document_type(ctx.c, kind, name=str(args.get("name") or "") or None,
