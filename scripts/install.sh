@@ -18,13 +18,14 @@
 # A release installs from the package indexes the machine is set up with: the backend's packages from backend/requirements.txt
 # (uv.lock's versions, with their hashes) by uv pip, or by pip where pip is set up with an index and uv is not; with its
 # prebuilt frontend/dist, only the frontend packages the server and its scripts load (frontend/runtime, pinned by its own
-# lockfile). Where the index lacks a pinned version, the versions pyproject.toml or frontend/runtime/package.json allow are
-# installed instead. A file whose hash differs from the pinned one stops the install, from either index.
+# lockfile). Where the index lacks a pinned version, the newest versions pyproject.toml or frontend/runtime/package.json
+# allow that the index has are installed instead, and the packages that differ from the pinned versions are listed;
+# --require-pinned stops there instead. A file whose hash differs from the pinned one stops the install, from either index.
 # Needs: uv (or python3 >= 3.12); node >= 20 for custom views, and to build frontend/dist when it is missing or out of date;
 # the claude CLI to register the plugin.
 # The marketplace name is thimble-local from a release zip and thimble from a checkout (.claude-plugin/marketplace.json).
 #
-#   scripts/install.sh [--dir DIR] [--marketplace-name NAME] [--dev] [--python PATH] [--deps-only]
+#   scripts/install.sh [--dir DIR] [--marketplace-name NAME] [--dev] [--python PATH] [--deps-only] [--require-pinned]
 #                      [--browser system|bundled|off] [--plugin | --no-plugin]
 #                      [--trust-workspaces | --no-trust-workspaces] [--dry-run]
 #   --dir DIR                where the tree lives (default: this checkout; $THIMBLE_HOME/app for a release)
@@ -35,6 +36,8 @@
 #                            at versions it allows, links backend/.venv to it and installs nothing into it. Later runs
 #                            and `thimble update` keep the link and check it again
 #   --deps-only              stop after the sandbox step: no pointer, no plugin, no trust, no doctor
+#   --require-pinned         install only pinned versions: stop where the package index lacks one, and where nothing pins
+#                            them (a Dev install without uv or without backend/uv.lock)
 #   --browser system         screenshots with the Chrome or Edge installed on this machine (where Playwright's chrome and
 #                            msedge channels look); nothing is downloaded
 #   --browser bundled        download Playwright's headless Chromium into Playwright's cache folder (about 210 MB to
@@ -64,7 +67,7 @@ json_get() {  # json_get FILE KEY — a top-level string value (python3 when pre
 parse_args() {
   src="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
   home="${THIMBLE_HOME:-$HOME/.thimble}"
-  dir="" mp_name="" dev=0 deps_only=0 plugin="" dry=0 trust="" byo="" browser=""
+  dir="" mp_name="" dev=0 deps_only=0 plugin="" dry=0 trust="" byo="" browser="" require_pinned=0
   while [ $# -gt 0 ]; do
     case "$1" in
       --dir) dir="$2"; shift 2;;
@@ -75,6 +78,7 @@ parse_args() {
       --dev) dev=1; shift;;
       --python) byo="$2"; shift 2;;
       --deps-only) deps_only=1; shift;;
+      --require-pinned) require_pinned=1; shift;;
       --plugin) plugin=yes; shift;;
       --no-plugin) plugin=no; shift;;
       --trust-workspaces) trust=--yes; shift;;
@@ -268,9 +272,11 @@ make_venv() {  # --python's environment linked; a linked one kept and checked; a
   elif [ "$have_uv" = 1 ] && [ -f "$src/backend/uv.lock" ]; then
     run_in "$dir/backend" uv sync --frozen --no-dev --no-install-project ${extra[@]+"${extra[@]}"}
   elif [ "$have_uv" = 1 ]; then
+    [ "$require_pinned" = 0 ] || die "backend/uv.lock is missing, so nothing pins the backend's versions, and --require-pinned installs only pinned ones"
     say "backend/uv.lock is missing: resolving fresh (not the pinned versions)"
     run_in "$dir/backend" uv sync --no-dev --no-install-project ${extra[@]+"${extra[@]}"}
   else
+    [ "$require_pinned" = 0 ] || die "without uv the backend's pinned versions (backend/uv.lock) can't be installed, and --require-pinned installs only pinned ones; install uv (https://docs.astral.sh/uv/getting-started/installation/)"
     [ -x "$venv/bin/python" ] || run "$py" -I -m venv "$venv"
     say "pip from pyproject.toml (the minimum versions, not the pinned ones in uv.lock)"
     run "$venv/bin/python" -I -m pip install --quiet --upgrade pip
@@ -312,8 +318,32 @@ print("\n".join(dev if sys.argv[2] == "dev" else p.get("dependencies", []) + dev
   py_install "$tmp/py.log" "$@" || die "the backend's packages could not be installed (above)"
 }
 
+py_differs() {  # py_differs REQ: the packages in backend/.venv at a version other than the one REQ pins
+  [ "$dry" = 1 ] && return 0
+  "$dir/backend/.venv/bin/python" -I - "$1" <<'PY' || true
+import re, sys
+from importlib import metadata
+
+
+def norm(name):
+    return re.sub(r"[-_.]+", "-", name).lower()
+
+
+text = open(sys.argv[1], encoding="utf-8").read()
+pins = {norm(m[1]): (m[1], m[2]) for m in re.finditer(r"^([A-Za-z0-9][A-Za-z0-9._-]*)==([^\s;\\]+)", text, re.M)}
+have = {norm(d.metadata.get("Name")): d.version for d in metadata.distributions() if d.metadata.get("Name")}
+diff = [f"  {name} {have[key]} (pinned {version})" for key, (name, version) in sorted(pins.items())
+        if key in have and have[key] != version]
+if diff:
+    print("these packages differ from the versions backend/requirements.txt pins:", *diff, sep="\n")
+else:
+    print("every installed package is at the version backend/requirements.txt pins")
+PY
+}
+
 release_venv() {  # the pinned packages of backend/requirements.txt (uv.lock's, with their hashes: release.sh) from the index
-  # uv or pip is set up with (check_prerequisites); where that index lacks a pinned version, the versions pyproject.toml allows
+  # uv or pip is set up with (check_prerequisites); where that index lacks a pinned version, the newest versions
+  # pyproject.toml allows that it has (py_ranges), and the list of those that differ from the pins
   local venv="$dir/backend/.venv" req="$src/backend/requirements.txt" stamp="$dir/backend/.venv/.thimble-requirements.txt" args
   if [ "$dev" = 0 ] && [ -f "$req" ] && cmp -s "$req" "$stamp" && (cd / && "$venv/bin/python" -I -c '') 2>/dev/null; then
     say "backend/.venv holds the packages backend/requirements.txt pins, installed by an earlier run"
@@ -324,6 +354,7 @@ release_venv() {  # the pinned packages of backend/requirements.txt (uv.lock's, 
     run "$venv/bin/python" -I -m ensurepip --quiet  # a venv an earlier install made with uv, which holds no pip
   fi
   if [ ! -f "$req" ]; then
+    [ "$require_pinned" = 0 ] || die "no backend/requirements.txt, so nothing pins the backend's versions, and --require-pinned installs only pinned ones"
     say "no backend/requirements.txt, so nothing pins the versions: those backend/pyproject.toml allows"
     py_ranges all
     return 0
@@ -338,9 +369,12 @@ release_venv() {  # the pinned packages of backend/requirements.txt (uv.lock's, 
     fi
   elif grep -qE 'Hash mismatch|DO NOT MATCH THE HASHES' "$tmp/py.log"; then
     die "the package index served a file whose hash is not the one backend/requirements.txt pins (above), so nothing more is installed from it"
+  elif [ "$require_pinned" = 1 ]; then
+    die "the package index lacks a version backend/requirements.txt pins (above), and --require-pinned installs only pinned versions"
   else
-    say "the package index lacks a version backend/requirements.txt pins (above), so the versions backend/pyproject.toml allows are installed instead"
+    say "the package index lacks a version backend/requirements.txt pins (above), so install.sh installs the newest versions backend/pyproject.toml allows that the index has"
     py_ranges all
+    py_differs "$req"
   fi
 }
 
@@ -533,11 +567,35 @@ npm_integrity() {  # npm_integrity LOCKFILE: stop when npm's failure (in $tmp/np
   fi
 }
 
+npm_differs() {  # the packages in frontend/node_modules at a version other than the one frontend/runtime/package-lock.json pins
+  [ "$dry" = 1 ] && return 0
+  "$dir/backend/.venv/bin/python" -I - "$dir/frontend" <<'PY' || true
+import json, sys
+from pathlib import Path
+
+fe = Path(sys.argv[1])
+diff = []
+for key, entry in sorted(json.loads((fe / "runtime" / "package-lock.json").read_text("utf-8")).get("packages", {}).items()):
+    if not key.startswith("node_modules/"):
+        continue
+    try:
+        have = json.loads((fe / key / "package.json").read_text("utf-8"))["version"]
+    except (OSError, ValueError, KeyError):
+        continue
+    if have != entry.get("version"):
+        diff.append(f"  {key.rsplit('node_modules/', 1)[1]} {have} (pinned {entry.get('version')})")
+if diff:
+    print("these packages differ from the versions frontend/runtime/package-lock.json pins:", *diff, sep="\n")
+else:
+    print("every installed package is at the version frontend/runtime/package-lock.json pins")
+PY
+}
+
 runtime_packages() {  # only the frontend packages the server and its scripts load (frontend/runtime, which release.sh
   # writes: their part of package-lock.json, with each file's hash), from the registry npm is set up with; where it lacks
-  # a pinned version, the versions frontend/runtime/package.json allows. npm installs them in frontend/runtime, and they
-  # move to frontend/node_modules, where the server and the scripts look. The stamp is written only for the pinned ones,
-  # so a later run tries those again
+  # a pinned version, the newest versions frontend/runtime/package.json allows that it has, and the list of those that
+  # differ from the pins (npm_differs). npm installs them in frontend/runtime, and they move to frontend/node_modules,
+  # where the server and the scripts look. The stamp is written only for the pinned ones, so a later run tries those again
   local fe="$dir/frontend" rt="$dir/frontend/runtime" stamp="$dir/frontend/node_modules/.thimble-package-lock.json" pinned
   if [ -f "$stamp" ] && cmp -s "$rt/package-lock.json" "$stamp"; then
     say "frontend/node_modules holds the runtime packages frontend/runtime/package-lock.json pins"
@@ -548,7 +606,8 @@ runtime_packages() {  # only the frontend packages the server and its scripts lo
     pinned=1
   else
     npm_integrity runtime/package-lock.json
-    say "the registry lacks a version frontend/runtime/package-lock.json pins (above), so the versions frontend/runtime/package.json allows are installed instead"
+    [ "$require_pinned" = 0 ] || die "the npm registry lacks a version frontend/runtime/package-lock.json pins (above), and --require-pinned installs only pinned versions"
+    say "the registry lacks a version frontend/runtime/package-lock.json pins (above), so install.sh installs the newest versions frontend/runtime/package.json allows that the registry has"
     run npm install --prefix "$rt" --no-audit --no-fund --no-package-lock || return 1
     pinned=0
   fi
@@ -557,6 +616,8 @@ runtime_packages() {  # only the frontend packages the server and its scripts lo
   if [ "$pinned" = 1 ]; then
     say "+ cp $rt/package-lock.json $stamp"
     [ "$dry" = 1 ] || cp "$rt/package-lock.json" "$stamp"
+  else
+    npm_differs
   fi
 }
 

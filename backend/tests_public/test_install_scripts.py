@@ -143,24 +143,39 @@ def test_a_release_installs_the_backend_with_the_tool_set_up_with_a_package_inde
 
 
 def test_a_pinned_install_falls_back_to_pyproject_s_ranges_only_when_the_index_lacks_a_version(tmp_path):
+    """The newest versions the ranges allow, and the packages that differ from the pins listed; --require-pinned stops
+    there instead, and a hash mismatch always stops."""
     tree = pinned_release(tmp_path)
     dest = tmp_path / "home" / ".thimble" / "app"
     log = tmp_path / "uv.log"
 
-    def run(fresh: bool = True, **extra: str) -> tuple[subprocess.CompletedProcess, list[str]]:
+    def run(fresh: bool = True, extra_flags: tuple[str, ...] = (),
+            **extra: str) -> tuple[subprocess.CompletedProcess, list[str]]:
         log.write_text("")
         if fresh:
             shutil.rmtree(dest, ignore_errors=True)
-        r = install(tree, dest, tmp_path, STUB_LOG=str(log), **extra)
+        r = install(tree, dest, tmp_path, *extra_flags, STUB_LOG=str(log), **extra)
         return r, [ln.split(" --python")[0] for ln in log.read_text().splitlines()]
 
     r, calls = run()
     assert r.returncode == 0 and calls == [f"uv pip sync --require-hashes {tree}/backend/requirements.txt"], r.stdout
     r, calls = run(fresh=False)
     assert r.returncode == 0 and calls == [] and "installed by an earlier run" in r.stdout, "a re-run keeps them"
-    r, calls = run(STUB_SYNC_RC="1", STUB_SYNC_OUT="Because there is no version of httpx==0.28.1 and you require it")
+    missing = {"STUB_SYNC_RC": "1", "STUB_SYNC_OUT": "Because there is no version of httpx==0.28.1 and you require it"}
+    r, calls = run(**missing)
     assert r.returncode == 0 and len(calls) == 2 and calls[1].startswith("uv pip install -r "), r.stdout + r.stderr
-    assert "installed instead" in r.stdout
+    assert "the newest versions backend/pyproject.toml allows that the index has" in r.stdout
+    venv = dest / "backend" / ".venv"  # a real environment holding an older httpx, as the ranges installed it
+    shutil.rmtree(venv)
+    subprocess.run([os.path.realpath(sys.executable), "-m", "venv", "--without-pip", str(venv)], check=True, timeout=60)
+    [site] = venv.glob("lib/python3*/site-packages")
+    (site / "httpx-0.27.2.dist-info").mkdir()
+    (site / "httpx-0.27.2.dist-info" / "METADATA").write_text("Metadata-Version: 2.1\nName: httpx\nVersion: 0.27.2\n")
+    r, calls = run(fresh=False, **missing)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "differ from the versions backend/requirements.txt pins:\n  httpx 0.27.2 (pinned 0.28.1)" in r.stdout
+    r, calls = run(**missing, extra_flags=("--require-pinned",))
+    assert r.returncode == 1 and "--require-pinned" in r.stderr and len(calls) == 1, r.stdout + r.stderr
     r, calls = run(STUB_SYNC_RC="1", STUB_SYNC_OUT="Hash mismatch for `httpx==0.28.1`")
     assert r.returncode == 1 and "hash is not the one" in r.stderr and len(calls) == 1, r.stdout + r.stderr
     for rel in ("frontend/dist/index.html", "frontend/runtime/package-lock.json"):
