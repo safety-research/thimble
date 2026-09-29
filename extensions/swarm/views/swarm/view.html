@@ -142,9 +142,6 @@
 // accounts over its records alone, a cell for its records beside the rows, a record for the record. Rows and places
 // carry their unit keys and listed records their refs as data-anchor, so thimble marks them. A value's colour is looked
 // up in what thimble last sent (onLabels), so a colour the analyst changes shows at once.
-// A view opened from a card (Open as view) gets the card's arguments with `open` (place.query: {card, title, args})
-// and counts the records its `within`, `accounts` and `places` choose; a chip names the card while they hold, and a
-// click on it, or an `open` whose query is null, drops them.
 const slug = (thimble.view && thimble.view.slug) || 'swarm'
 const MON = 'Jan Feb Mar Apr May Jun Jul Aug Sep Oct Nov Dec'.split(' ')
 const RUN_POLL_MS = 3000 // how often the overview is read again while a label that is on runs
@@ -339,9 +336,6 @@ const OV_CELL = 7 // px a bin gets at least
 const OV_LABEL = 200 // px of the names column
 let O = null // the reader's overview
 let ovq = { run: null, from: null, to: null, place: null, q: '', pin: null }
-let ovBase = {} // a card's arguments that choose the records, when the view was opened from one
-let ovBaseKey = ''
-let ovFrom = null // {card, title} of that card
 let ovSeq = 0
 let ovDetail = null // {kind: 'bin', query, title, offset} or {kind: 'record', ref, back}
 let ovRunT = null
@@ -349,7 +343,7 @@ let ovRunT = null
 function ovQuery() {
   const plot = document.getElementById('ov').clientWidth - OV_LABEL - 90
   const bins = Math.max(12, Math.min(480, Math.floor(plot / OV_CELL)))
-  const q = { ...ovBase, op: 'overview', bins }
+  const q = { op: 'overview', bins }
   for (const k of ['run', 'from', 'to', 'place', 'q', 'pin']) if (ovq[k] != null && ovq[k] !== '') q[k] = ovq[k]
   return q
 }
@@ -388,14 +382,6 @@ function ovRenderBar() {
   counts.textContent = parts.join(' · ')
   const f = document.getElementById('ovfilters')
   f.replaceChildren()
-  if (ovFrom) {
-    const b = h('button', 'chip chip-sans chip-act active')
-    b.innerHTML = `<span class="t">${esc(ovFrom.title || `card:${ovFrom.card}`)}</span>${CLOSE}`
-    b.title = `The records of card:${ovFrom.card}\nClick: all records`
-    b.dataset.anchor = `card:${ovFrom.card}`
-    b.onclick = async () => { ovApplyQuery(null); thimble.setQuery(null); await ovReload() }
-    f.append(b)
-  }
   if (O.runs.length > 1) {
     const sel = h('select', 'field')
     sel.setAttribute('aria-label', 'Run')
@@ -631,13 +617,12 @@ document.getElementById('ovrows').addEventListener('pointerup', async (e) => {
 
 // details on demand: a cell's or a row's records, then one record
 function ovBinQuery(kind, row, rest, b) {
-  const q = { ...ovBase, op: 'bin' }
+  const q = { op: 'bin' }
   for (const k of ['run', 'from', 'to']) if (ovq[k] != null) q[k] = ovq[k]
   if (O.place && kind === 'account') q.place = O.place
   const names = (list) => list.map((x) => x.name)
   if (rest) q[kind === 'place' ? 'except_places' : 'except_accounts'] = names(kind === 'place' ? O.places : O.accounts)
   else q[kind === 'place' ? 'places' : 'accounts'] = [row.name]
-  if (kind === 'account' && !rest && ovBase.accounts) q.accounts = [row.name]
   if (b != null && b >= O.bins) q.untimed = true
   else if (b != null) { q.from = O.start + b * O.step; q.to = O.start + (b + 1) * O.step }
   return q
@@ -725,25 +710,9 @@ async function ovRenderDetail() {
   renderRecordInto(body, rec)
 }
 
-// a view opened from a card ({card, title, args}) counts the records its arguments choose; null drops them
-function ovApplyQuery(qy) {
-  const key = qy && qy.args ? JSON.stringify(qy) : ''
-  if (key === ovBaseKey) return false
-  ovBaseKey = key
-  ovBase = {}
-  const a = (key && qy.args) || {}
-  ovFrom = key ? { card: String(qy.card || ''), title: String(qy.title || '') } : null
-  for (const k of ['within', 'accounts', 'places']) if (a[k] != null) ovBase[k] = a[k]
-  if (a.account) { ovBase.accounts = [a.account]; ovq.pin = a.account }
-  ovq.from = ovq.to = null
-  ovq.place = null
-  ovDetail = null
-  return true
-}
 async function ovOpen(place) {
   const t = (place && place.target) || null
   let again = false
-  if (place && 'query' in place) again = ovApplyQuery(place.query)
   if (t && t.account && t.account !== ovq.pin) { ovq.pin = t.account; again = true }
   if (t && t.place && !t.ref && t.place !== ovq.place) { ovq.place = t.place; again = true }
   if (again || !O) { if (!(await ovLoad())) return; ovRender() }

@@ -683,31 +683,13 @@ def _signature(said):
 # ------------------------------------------------------------------------------------------------ links
 
 
-LINK_TYPES = ("reply", "names", "same place")
-PAIRS_LISTED = 3
-
-
-def _within(spec):
-    """The refs `within` names: a list of refs, or {label, value?}, the records that label gave that value (its first
-    when none is given); None for no `within`."""
-    if isinstance(spec, list):
-        return {str(r) for r in spec}
-    if not isinstance(spec, dict) or not spec.get("label"):
-        return None
-    if "value" not in spec:
-        return {str(r) for r in thimble.labels(spec["label"])["ref"]}
-    rows = thimble.labels(spec["label"], negatives=True)
-    return {str(r) for r in rows.loc[rows["effective"] == spec["value"], "ref"]}
-
-
-def _reach(index, picked, kinds=None, edges=None):
-    """The links among the records `picked` (in event order), read from the index: the `edges` given, replies, the
-    accounts a record names (the latest record of that account before it) and the record before it on its place. {links: [(later ref, earlier ref, type)], counts: {type: n}, pairs:
-    [{from, to, n}]}, the pairs of accounts with the most links first."""
-    kinds = set(kinds or LINK_TYPES)
+def _reach(index, picked):
+    """The links among the records `picked` (in event order), read from the index: replies, the accounts a record names
+    (the latest record of that account before it) and the record before it on its place, as [(later ref, earlier ref,
+    type)]."""
     recs = index["recs"]
-    order = {ref: i for i, (ref, _got) in enumerate(picked)}
-    links, seen, counts, pairs, last_by, last_on = [], set(), {}, {}, {}, {}
+    order = {ref: i for i, ref in enumerate(picked)}
+    links, seen, last_by, last_on = [], set(), {}, {}
 
     def add(a, b, kind):
         if b is None or a == b or recs[a]["account"] == recs[b]["account"] or (a, b) in seen or (b, a) in seen:
@@ -715,27 +697,17 @@ def _reach(index, picked, kinds=None, edges=None):
         later, earlier = (a, b) if order[a] > order[b] else (b, a)
         seen.add((later, earlier))
         links.append((later, earlier, kind))
-        counts[kind] = counts.get(kind, 0) + 1
-        key = (recs[later]["account"], recs[earlier]["account"])
-        pairs[key] = pairs.get(key, 0) + 1
 
-    for e in edges or ():
-        a, b = str(e.get("from")), str(e.get("to"))
-        if a in order and b in order:
-            add(a, b, str(e.get("type") or "link"))
-    for ref, _got in picked:
+    for ref in picked:
         r = recs[ref]
-        if "reply" in kinds and r["reply_ref"] in order:
+        if r["reply_ref"] in order:
             add(ref, r["reply_ref"], "reply")
-        if "names" in kinds:
-            for who in r.get("named") or ():
-                add(ref, last_by.get(who), "names")
-        if "same place" in kinds:
-            add(ref, last_on.get(r["place"]), "same place")
+        for who in r.get("named") or ():
+            add(ref, last_by.get(who), "names")
+        add(ref, last_on.get(r["place"]), "same place")
         last_by[r["account"]] = ref
         last_on[r["place"]] = ref
-    top = sorted(pairs.items(), key=lambda kv: (-kv[1], kv[0]))[:PAIRS_LISTED]
-    return {"links": links, "counts": counts, "pairs": [{"from": a, "to": b, "n": n} for (a, b), n in top]}
+    return links
 
 
 def _short(v):
@@ -790,18 +762,9 @@ def _step(width, n):
 
 
 def _chosen(index, query):
-    """The refs, in event order, that the overview's `run`, `within`, `accounts` and `places` choose (a view opened from
-    a card gets the card's), and a test of whether a record's time is in the window [`from`, `to`] (all when neither is
-    given)."""
-    recs = index["recs"]
+    """The refs, in event order, of the overview's `run` (every record when it names none), and that run."""
     run = query.get("run") if query.get("run") in index["runs"] else None
-    within = _within(query.get("within"))
-    accounts = {str(a).lower() for a in query.get("accounts") or ()}
-    places = {str(p) for p in query.get("places") or ()}
-    refs = [ref for ref in index["order"]
-            if (r := recs[ref]) and (not run or r["run"] == run) and (within is None or ref in within)
-            and (not accounts or r["account"].lower() in accounts) and (not places or r["place"] in places)]
-    return refs, run
+    return [ref for ref in index["order"] if not run or index["recs"][ref]["run"] == run], run
 
 
 def _window(index, refs, query):
@@ -927,7 +890,7 @@ def _bin(index, query):
     on = thimble.view_labels()
     marks = [(lab["name"], v["name"]) for lab in on["labels"] for v in lab["values"]][:MARKS_MAX]
     mark_at = {k: i for i, k in enumerate(marks)}
-    refs, _run = _chosen(index, {k: query.get(k) for k in ("run", "within")})
+    refs, _run = _chosen(index, query)
     span, lo, hi = _window(index, refs, query)
     a, b = query.get("from"), query.get("to")
     untimed = bool(query.get("untimed"))

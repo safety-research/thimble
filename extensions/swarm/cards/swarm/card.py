@@ -100,7 +100,7 @@ def card(index, actions, goals=None, links=None):
             drawn.append({"from": a["id"], "to": b["id"], "type": kind})
     kinds = list(dict.fromkeys(x["type"] for x in drawn))
 
-    own = reader._reach(index, [(c["ref"], ()) for c in shown])["links"]
+    own = reader._reach(index, [c["ref"] for c in shown])
     carried = []
     for later, earlier, kind in own:
         a, b = by_ref[later]["id"], by_ref[earlier]["id"]
