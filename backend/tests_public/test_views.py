@@ -323,6 +323,31 @@ async def test_the_swarm_view_draws_as_cards_the_records_a_label_marks_with_the_
     assert any(c["line"] == "1.84 → 1.48" for c in chart["cards"]), [c["line"] for c in chart["cards"]]
 
 
+async def test_a_save_that_only_re_encodes_its_page_changes_nothing_on_the_swarm_view(samples, inproc, bound):
+    """A wiki that re-encodes a page's text on each save ("é" read back as "Ã©") changes lines no one edited: such a
+    save reads as changing nothing and names no one, while a save that changes only non-ASCII text reads as that
+    change."""
+    d = samples / "wiki"
+    d.mkdir()
+    page = ["Plan for the café night", "I will bring the café tests. -- ann"]
+    moji = [s.encode("utf-8").decode("latin-1") for s in page]
+    saves = [("ann", page), ("bo", moji), ("cy", [*moji, "状态：测试已完成"]), ("dee", [*moji, "状态：测试失败了"])]
+    (d / "pages.jsonl").write_text("".join(json.dumps({"page": "Plan", "rev": i, "user": u, "ts": f"2026-04-14T2{i}:00:00Z",
+                                                        "text": "\n".join(t)}, ensure_ascii=False) + "\n"
+                                           for i, (u, t) in enumerate(saves, 1)), "utf-8")
+    (d / "manifest.json").write_text(json.dumps({"name": "wiki", "description": "a wiki"}))
+    src = views.EXAMPLES_DIR / "swarm"
+    raw = json.loads((src / "view.json").read_text("utf-8"))
+    views.write_view("wiki", "swarm", reader=(src / "reader.py").read_text("utf-8"), html=(src / "view.html").read_text("utf-8"),
+                     **{**{k: raw[k] for k in ("name", "why", "accepts", "declares", "default", "libs")}, "claims": ["pages.jsonl"]})
+    refs = [f"pages.jsonl#L{n}" for n in range(1, 5)]
+    chart = await views.reader_call("wiki", "swarm", "records", {"op": "chart", "keep": refs})
+    line = {c["ref"]: c["line"] for c in chart["cards"]}
+    assert line["pages.jsonl#L2"] == "Changed only spacing or encoding", line
+    assert line["pages.jsonl#L4"] == "状态：测试已完成 → 状态：测试失败了", line
+    assert not [x for x in chart["links"] if x["type"] == "names"], chart["links"]
+
+
 async def test_a_viewer_that_applies_is_proposed_to_the_orientation_installed_from_its_files(samples, inproc, bound):
     """The Swarm viewer says when it applies: on a corpus where many accounts act on pages they share and name each
     other, it is installed at once claiming the files that hold their actions, as an orientation's proposal that
