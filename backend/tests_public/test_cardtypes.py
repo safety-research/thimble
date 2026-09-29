@@ -95,6 +95,12 @@ async def test_the_swarm_type_is_found_without_a_proposal_and_listed_for_main(cr
     assert text.startswith("- `swarm`: ") and '`rows` "account" or "signature"' in text and 'thimble.card("swarm"' in text
 
 
+async def test_a_corpus_that_is_no_swarm_lists_no_card_type(crew):
+    (crew / "saves.jsonl").write_text("".join(json.dumps({**r, "user": f"bot{i % 3}"}) + "\n" for i, r in enumerate(ROWS)))
+    assert await cardtypes.refresh(CORPUS, warm=False) == {}
+    assert cardtypes.prompt_text(CORPUS) == ""
+
+
 async def test_a_card_draws_the_records_a_label_kept_coloured_by_another_and_lists_its_numbers(crew, kernel):
     await cardtypes.refresh(CORPUS, warm=False)
     await _label("early", r"value is [0-5]?\d\.", ["early", "later"])
