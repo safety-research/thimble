@@ -78,7 +78,7 @@ Claude Code (tested with 2.1.281), macOS or Linux, and Python 3.12+ ([uv](https:
 ## Security and privacy
 
 - **thimble is a research prototype.** Its server has no login, so any program on your machine can use it, and Claude's code runs in a notebook kernel without a sandbox: treat a corpus like code you are about to run.
-- **Your data stays with you.** The server runs on localhost. What leaves your machine is what Claude Code sends to the model and what Claude's notebook code or Claude Code's web tools reach on the network, as in any Claude Code session. A video's narration is read by a voice on your machine unless you pick one marked online.
+- **Your data stays with you.** The server runs on localhost. What leaves your machine is what Claude Code sends to the model and what Claude's notebook code or Claude Code's web tools reach on the network, as in any Claude Code session. A video's narration is read by a voice on your machine.
 - **Auth and billing work through Claude Code**; thimble doesn't touch them.
 - **Report security issues** privately to [@mjoerke](https://github.com/mjoerke).
 

@@ -161,8 +161,7 @@ export function VideoView({ ws, slug, doc, comments, on, look, picked }: VideoVi
   // the voice and the rate
   const voices = useVoices()
   const [voiceUri, setVoiceUri] = useState<string>(() => readStorage<string>(VOICE_KEY, ''))
-  // an online voice sends the narration to its speech service, so one speaks only when the analyst picks it
-  const voice = useMemo(() => voices.find((v) => v.voiceURI === voiceUri) ?? voices.find((v) => v.localService) ?? null, [voices, voiceUri])
+  const voice = useMemo(() => voices.find((v) => v.voiceURI === voiceUri) ?? voices[0] ?? null, [voices, voiceUri])
   const [rate, setRate] = useState<number>(() => readStorage<number>(RATE_KEY, 1))
   const [captions, setCaptions] = useState<boolean>(() => readStorage<boolean>(CAPTIONS_KEY, true))
   useEffect(() => {
@@ -171,7 +170,7 @@ export function VideoView({ ws, slug, doc, comments, on, look, picked }: VideoVi
   useEffect(() => player.setRate(rate), [player, rate])
   const voiceItems: MenuItem[] = voices.map((v) => ({
     id: v.voiceURI,
-    label: `${v.name} · ${v.lang}${v.localService ? '' : ' · online'}`,
+    label: `${v.name} · ${v.lang}`,
     checked: v.voiceURI === voice?.voiceURI,
     onSelect: () => {
       setVoiceUri(v.voiceURI)
