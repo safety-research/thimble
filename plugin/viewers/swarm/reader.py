@@ -48,8 +48,11 @@
 # event order, each page taking the values in turn so the first shows them all. With no label on they are the actions
 # that address another account (a reply to another account's record, or what it wrote naming another account that acts
 # on its place) on the PLACES_SHOWN places where they are most and most of what is done (their count times their
-# share). A card's `within` (refs), `accounts` and `places` choose the records instead, the labels only colouring
-# them. Links between cards come from the records, after those a card's code gives (`edges`), of the kinds it asks for:
+# share). A card's `within` (refs, or the records a label gave a value), `accounts` and `places` choose the records
+# instead, the labels only colouring them. A card asks for the CARDS_MAX records most linked to each other (`pick:
+# linked`, _most_linked) in place of pages: the links among all the chosen records (_reach) are counted from the index,
+# replies and the accounts a record names (`named`), with no text read. Links between cards come from the records,
+# after those a card's code gives (`edges`), of the kinds it asks for:
 #   reply       the card's record answers the other card's record (its reply field)
 #   names       the card's text names the other card's account (the latest card of that account before it)
 #   same place  the card before it on its place, by another account
@@ -485,7 +488,7 @@ def _claims(paths, siblings=False):
 def _addressing(actions, recs, places, texts):
     """Mark each action that addresses another account (`to`): it replies to another account's record, or what it
     wrote (a save's lines that the save before it on its place lacked) names, as the account is written, another
-    account that acts on its place; count them per place (`addressed`)."""
+    account that acts on its place (`named`, those accounts); count them per place (`addressed`)."""
     who = {p: set(v["accounts"]) for p, v in places.items()}
     last = {}
     for r in actions:
@@ -497,7 +500,8 @@ def _addressing(actions, recs, places, texts):
             last[r["place"]] = text
         others = who[r["place"]] - {r["account"]}
         reply = recs.get(r["reply_ref"]) if r["reply_ref"] else None
-        r["to"] = bool(reply and reply["account"] != r["account"]) or bool(others & {w.lstrip("@") for w in WORD.findall(said)})
+        r["named"] = sorted(others & {w.lstrip("@") for w in WORD.findall(said)})
+        r["to"] = bool(reply and reply["account"] != r["account"]) or bool(r["named"])
         places[r["place"]]["addressed"] = places[r["place"]].get("addressed", 0) + r["to"]
 
 
@@ -673,7 +677,7 @@ def _chart(index, query):
              for lab in on["labels"] for v in lab["values"]][:MARKS_MAX]
     mark_at = {(x["label"], x["value"]): i for i, x in enumerate(marks)}
     keep = {str(r) for r in query.get("keep") or ()}
-    within = {str(r) for r in query["within"]} if isinstance(query.get("within"), list) else None
+    within = _within(query.get("within"))
     accounts = {str(a).lower() for a in query.get("accounts") or ()}
     places = {str(p) for p in query.get("places") or ()}
 
@@ -707,6 +711,13 @@ def _chart(index, query):
         if only:
             picked = [(ref, got) for ref, got in picked if ref in keep or any((x["label"], x["value"]) in only for x in got)]
         unmarked = sum(1 for _ref, got in picked if not any((x["label"], x["value"]) in mark_at for x in got))
+    reach = _reach(index, picked, query.get("links"), query.get("edges")) if query.get("pick") == "linked" else None
+    total = len(picked)
+    accounts_of = {index["recs"][ref]["account"] for ref, _got in picked}
+    places_of = {index["recs"][ref]["place"] for ref, _got in picked}
+    if reach is not None and len(picked) > CARDS_MAX:
+        picked = _most_linked(picked, reach["links"], mark_at)
+    elif marks:
         picked = _by_turns(picked, mark_at)
     tag_of = {}  # numbered over every page, so a place keeps its tag from page to page
     for ref, _got in picked:
@@ -740,9 +751,9 @@ def _chart(index, query):
              else "Chosen records" if source == "chosen" else "Where accounts most answer or name each other")
     return {"title": title, "source": source, "cards": cards, "rows": rows, "places": places_shown, "links": links,
             "marks": marks, "mark_counts": per_mark, "unmarked": unmarked, "only": [{"label": a, "value": b} for a, b in only],
-            "offset": offset, "total": len(picked),
-            "page": CARDS_MAX, "accounts_total": len({index["recs"][ref]["account"] for ref, _ in picked}),
-            "places_total": len(tag_of),
+            "offset": offset, "total": total, "page": CARDS_MAX, "accounts_total": len(accounts_of), "places_total": len(places_of),
+            **({"shown": "linked" if total > CARDS_MAX else "all", "reach": {"counts": reach["counts"], "pairs": reach["pairs"]}}
+               if reach is not None else {}),
             "counts": {"records": len(index["order"]), "accounts": len(index["accounts"]), "places": len(index["places"])}}
 
 
@@ -761,6 +772,91 @@ def _by_turns(picked, mark_at):
 
 
 LINK_TYPES = ("reply", "names", "same place")
+PAIRS_LISTED = 3
+
+
+def _within(spec):
+    """The refs `within` names: a list of refs, or {label, value?}, the records that label gave that value (its first
+    when none is given); None for no `within`."""
+    if isinstance(spec, list):
+        return {str(r) for r in spec}
+    if not isinstance(spec, dict) or not spec.get("label"):
+        return None
+    if "value" not in spec:
+        return {str(r) for r in thimble.labels(spec["label"])["ref"]}
+    rows = thimble.labels(spec["label"], negatives=True)
+    return {str(r) for r in rows.loc[rows["effective"] == spec["value"], "ref"]}
+
+
+def _reach(index, picked, kinds=None, edges=None):
+    """The links among all the chosen records `picked` (in event order), as _links draws them between cards but read
+    from the index: the `edges` given, replies, and the accounts a record names (the latest record of that account
+    before it). {links: [(later ref, earlier ref, type)], counts: {type: n}, pairs: [{from, to, n}]}, the pairs of
+    accounts with the most links first."""
+    kinds = set(kinds or LINK_TYPES)
+    recs = index["recs"]
+    order = {ref: i for i, (ref, _got) in enumerate(picked)}
+    links, seen, counts, pairs, last_by = [], set(), {}, {}, {}
+
+    def add(a, b, kind):
+        if b is None or a == b or recs[a]["account"] == recs[b]["account"] or (a, b) in seen or (b, a) in seen:
+            return
+        later, earlier = (a, b) if order[a] > order[b] else (b, a)
+        seen.add((later, earlier))
+        links.append((later, earlier, kind))
+        counts[kind] = counts.get(kind, 0) + 1
+        key = (recs[later]["account"], recs[earlier]["account"])
+        pairs[key] = pairs.get(key, 0) + 1
+
+    for e in edges or ():
+        a, b = str(e.get("from")), str(e.get("to"))
+        if a in order and b in order:
+            add(a, b, str(e.get("type") or "link"))
+    for ref, _got in picked:
+        r = recs[ref]
+        if "reply" in kinds and r["reply_ref"] in order:
+            add(ref, r["reply_ref"], "reply")
+        if "names" in kinds:
+            for who in r.get("named") or ():
+                add(ref, last_by.get(who), "names")
+        last_by[r["account"]] = ref
+    top = sorted(pairs.items(), key=lambda kv: (-kv[1], kv[0]))[:PAIRS_LISTED]
+    return {"links": links, "counts": counts, "pairs": [{"from": a, "to": b, "n": n} for (a, b), n in top]}
+
+
+def _most_linked(picked, links, mark_at):
+    """CARDS_MAX of the chosen records, in event order: the most linked record of each label value, then both ends of
+    the links whose ends are most linked, then the rest as the pages take them (_by_turns)."""
+    got_of = dict(picked)
+    order = {ref: i for i, (ref, _got) in enumerate(picked)}
+    degree = {}
+    for a, b, _kind in links:
+        degree[a] = degree.get(a, 0) + 1
+        degree[b] = degree.get(b, 0) + 1
+    take = {}
+
+    def value(ref):
+        return min((mark_at[k] for x in got_of[ref] if (k := (x["label"], x["value"])) in mark_at), default=-1)
+
+    best = {}
+    for ref, _got in picked:
+        v = value(ref)
+        if v >= 0 and (v not in best or degree.get(ref, 0) > degree.get(best[v], 0)):
+            best[v] = ref
+    for v in sorted(best):
+        take.setdefault(best[v], True)
+    for a, b, _kind in sorted(links, key=lambda x: (-(degree[x[0]] + degree[x[1]]), order[x[1]])):
+        room = CARDS_MAX - len(take)
+        if room >= (a not in take) + (b not in take):
+            take.setdefault(a, True)
+            take.setdefault(b, True)
+        if len(take) >= CARDS_MAX:
+            break
+    for ref, _got in _by_turns(picked, mark_at):
+        if len(take) >= CARDS_MAX:
+            break
+        take.setdefault(ref, True)
+    return [(ref, got_of[ref]) for ref in sorted(take, key=order.get)]
 
 
 def _links(index, cards, by_ref, said, kinds=None, edges=None):
@@ -829,10 +925,12 @@ def problems(index):
 
 
 def records(index, query):
-    """{op: chart, offset?, keep?, only?, within?, accounts?, places?, links?, edges?}: the chart (_chart), the records
-    whose refs are in `keep` shown whatever the labels and the filter keep, and only the records of the label values in
-    `only` [{label, value}] when it is given; a card (card.py) chooses its records with `within` (refs), `accounts` and
-    `places`, and its links with `links` and `edges`. {op: record, ref}: one record in full (_detail)."""
+    """{op: chart, offset?, keep?, only?, within?, accounts?, places?, links?, edges?, pick?}: the chart (_chart), the
+    records whose refs are in `keep` shown whatever the labels and the filter keep, and only the records of the label
+    values in `only` [{label, value}] when it is given; a card (card.py) or a view opened from one chooses its records
+    with `within` (refs, or {label, value?}), `accounts` and `places`, and its links with `links` and `edges`; `pick:
+    linked` shows the records most linked to each other in place of a page. {op: record, ref}: one record in full
+    (_detail)."""
     query = query if isinstance(query, dict) else {}
     if query.get("op") == "record":
         return _detail(index, str(query.get("ref") or ""))

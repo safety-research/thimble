@@ -1,8 +1,8 @@
 """app.cardtypes and thimble.card: a viewer folder whose view.json has a `card` block is a card type. On a corpus the
 Swarm viewer applies to, the registry finds it without any view proposal and lists it for main's prompt; a card's code
 draws it with thimble.card, which checks the arguments against the type's schema, runs card.py on the reader's cached
-index under the labels the call names, and shows the data with a listing main reads and cites; the card check's page
-gets the type's frame from the request.
+index under the labels the call names, whatever Files highlights, and shows the data with a listing main reads and
+cites; the card check's page gets the type's frame from the request.
 
 The corpus `crew` is 140 saves of 35 accounts on 4 pages, each naming the next account, which the Swarm viewer's
 applies() reads as a swarm. Reader calls run in this process (views._runner replaced by an exec of the kernel's
@@ -105,6 +105,7 @@ async def test_a_card_draws_the_records_a_label_kept_coloured_by_another_and_lis
     await cardtypes.refresh(CORPUS, warm=False)
     await _label("early", r"value is [0-5]?\d\.", ["early", "later"])
     colour = await _label("even", r"value is \d*[02468]\.", ["even", "odd"])
+    concepts.show_concept(CORPUS, "even", True, ["odd"])  # Files highlights only "odd", which the card does not follow
     kernel._LABELS_READ.clear()
     kernel.card("swarm", labels=["even"], within={"label": "early"}, links=["reply", "names"])
     bundle = kernel.shown[-1]
@@ -115,9 +116,13 @@ async def test_a_card_draws_the_records_a_label_kept_coloured_by_another_and_lis
     assert data["source"] == "chosen" and data["total"] == 60, "the records `within` kept, whatever `labels` mark"
     assert data["mark_counts"] == [30] and data["unmarked"] == 30
     assert {x["type"] for x in data["links"]} <= {"reply", "names"} and data["links"]
+    assert len(data["cards"]) == 40 and data["shown"] == "linked"
+    linked = {c["id"] for x in data["links"] for c in data["cards"] if c["id"] in (x["from"], x["to"])}
+    assert len(linked) >= 30, "the records shown are those most linked to each other"
     lines = bundle["text/plain"].split("\n")
-    assert lines[0].startswith("swarm: 60 records by 35 accounts on 4 places; cards 1–40 shown")
+    assert lines[0] == "swarm: 60 records by 35 accounts on 4 places; the 40 most linked to each other shown"
     assert lines[1] == "even: even 30" and lines[2] == "no highlighted value: 30"
+    assert lines[3] == f"links among all 60 records: names {data['reach']['counts']['names']}", "counted over every record"
     assert lines[-1].endswith(data["cards"][-1]["ref"]), "a card's line ends in its record's ref"
     assert {x["id"] for x in kernel._LABELS_READ} >= {colour}, "the card goes stale when its label changes"
 

@@ -123,7 +123,7 @@ def _concepts() -> list:
         out.append({"id": str(k.get("id") or p.stem), "name": str(k.get("name") or p.stem), "kind": k.get("kind"),
                     "unit": k.get("unit"), "values": list(k.get("labels") or []), "n_labeled": int(stats.get("n_labeled") or 0),
                     "superseded_by": k.get("superseded_by"), "ts": str(k.get("ts") or ""), "rev": _rev(k.get("rev")),
-                    "classes": _classes(k), "highlights": _highlights(k)})
+                    "classes": _classes(k)})
     out.sort(key=lambda k: (k["ts"], k["id"]))
     return _fill_colours(out)
 
@@ -148,15 +148,6 @@ def _classes(k: dict) -> list:
             n = None
         out.append([v, n if n is not None and 0 <= n < len(LABEL_COLOURS) else None])
     return out
-
-
-def _highlights(k: dict) -> dict:
-    """{value: whether the analyst highlights it} (concepts.classes_of): the stored class's flag, else every value but
-    the negative one."""
-    classes = _classes(k)
-    stored = {str(c.get("name") or "").strip(): c.get("highlight") for c in k.get("classes") or [] if isinstance(c, dict)}
-    return {v: stored[v] if isinstance(stored.get(v), bool) else not _negative(v, i, len(classes))
-            for i, (v, _n) in enumerate(classes)}
 
 
 def _fill_colours(ks: list) -> list:
@@ -876,11 +867,13 @@ def _card_module(slug: str, path: str):
 
 
 def _card_label(k: dict) -> dict:
-    """A label as a view's labels context holds it (views.labels_context), read from the workspace."""
-    lit = [n for v, n in k["classes"] if k["highlights"].get(v)] or [n for _v, n in k["classes"]]
-    return {"id": k["id"], "name": k["name"], "colour": LABEL_COLOURS[lit[0] if lit and lit[0] is not None else 1],
-            "values": [{"name": v, "colour": LABEL_COLOURS[n or 0], "highlight": bool(k["highlights"].get(v))}
-                       for v, n in k["classes"]],
+    """A label as a view's labels context holds it (views.labels_context), read from the workspace, with every value but
+    the negative one marking its records, whatever the analyst highlights in Files: a card's records follow its code."""
+    n = len(k["classes"])
+    lit = {v: not _negative(v, i, n) for i, (v, _c) in enumerate(k["classes"])}
+    first = next((c for v, c in k["classes"] if lit[v]), None)
+    return {"id": k["id"], "name": k["name"], "colour": LABEL_COLOURS[first if first is not None else 1],
+            "values": [{"name": v, "colour": LABEL_COLOURS[c or 0], "highlight": lit[v]} for v, c in k["classes"]],
             "jsonl": str(_ws() / "labels" / f"{k['id']}.jsonl")}
 
 
