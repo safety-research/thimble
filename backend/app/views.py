@@ -877,7 +877,8 @@ async def _call(c: str, req: dict[str, Any], op: str, arg: Any = None) -> Any:
         raise ReaderError(_kernel_error(outputs))
     if not ans.get("ok"):
         raise ReaderError(str(ans.get("error") or "the reader failed"), str(ans.get("traceback") or ""))
-    _ready.add(key)
+    if op != "applies":  # applies builds no index, so each call gets the time a build does
+        _ready.add(key)
     return ans.get("result")
 
 
@@ -1465,18 +1466,23 @@ async def propose_builtins(c: str) -> list[str]:
     applies(paths) gets the corpus's record files, and when it names claims the viewer is installed from its files with
     them and registered built (write_view), under an orientation proposal that counts toward VIEW_PROPOSALS_MAX and
     is deleted like any. One the workspace has under its slug already, one the analyst deleted, or one past the cap
-    (propose's count, the deleted views included) is left out. Returns the slugs proposed."""
+    (propose's count, the deleted views included) is left out, and a corpus with no .jsonl or .csv file asks no reader.
+    Returns the slugs proposed."""
     from . import corpus  # noqa: PLC0415
 
     made: list[str] = []
+    paths: list[str] | None = None
     for slug in proposable_viewers():
         gone = deleted_proposals(c)
         spent = len(orientation_views(c)) + sum(1 for d in gone if d.get("counted"))
         if (slug in _view_dirs(c) or read_proposal(c, slug) is not None or any(d.get("slug") == slug for d in gone)
                 or spent >= VIEW_PROPOSALS_MAX):
             continue
-        sources = await asyncio.to_thread(corpus.list_sources, config.corpus_dir(c))
-        paths = [s["path"] for s in sources if str(s["path"]).endswith((".jsonl", ".csv"))]
+        if paths is None:
+            sources = await asyncio.to_thread(corpus.list_sources, config.corpus_dir(c))
+            paths = [s["path"] for s in sources if str(s["path"]).endswith((".jsonl", ".csv"))]
+        if not paths:
+            break
         req = {"slug": f"builtin-{slug}", "reader": str((VIEWERS_DIR / slug / READER_PY).resolve()), "fp": "applies",
                "paths": [], "cache": None, "thimble": str(KERNEL_THIMBLE)}
         try:

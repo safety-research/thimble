@@ -16,6 +16,7 @@ import os
 import re
 import shutil
 import sys
+import tracemalloc
 from pathlib import Path
 
 import pytest
@@ -343,3 +344,20 @@ async def test_a_viewer_that_applies_is_proposed_to_the_orientation_installed_fr
     views.delete_proposal("big-swarm", "swarm")
     assert views.read_view("big-swarm", "swarm") is None and views.orientation_views("big-swarm") == []
     assert await views.propose_builtins("big-swarm") == []  # one the analyst deleted is not proposed again
+
+
+async def test_whether_swarm_applies_is_read_from_the_head_of_a_big_csv(samples, inproc, bound):
+    """Deciding whether the Swarm viewer applies reads the first records of each file, so a big CSV that is no swarm
+    costs the orientation's start little memory."""
+    d = samples / "metrics"
+    d.mkdir()
+    with open(d / "metrics.csv", "w") as f:
+        f.write("ts,host,metric,value,status\n" + "2026-05-16T08:00:00Z,web-1,cpu,0.93,ok\n" * 1_000_000)
+    (d / "manifest.json").write_text(json.dumps({"name": "metrics", "description": "metrics"}))
+    tracemalloc.start()
+    try:
+        assert await views.propose_builtins("metrics") == []
+        peak = tracemalloc.get_traced_memory()[1]
+    finally:
+        tracemalloc.stop()
+    assert peak < (d / "metrics.csv").stat().st_size / 2, peak

@@ -78,6 +78,8 @@ TITLE_KEYS = ("thread_title", "title", "subject")  # an action's name for its pl
 CARDS_MAX = 40
 DETECT_FILES = 400  # record files applies() reads, the shallowest first
 DETECT_RECORDS = 20_000  # records it reads of each
+DETECT_BYTES = 64 * 1024 * 1024  # bytes it reads of each
+DETECT_BYTES_ALL = 256 * 1024 * 1024  # bytes it reads of them all; the files after are left unread
 SWARM_ACCOUNTS = 30  # a swarm's accounts at least
 SWARM_PLACES = 3  # places that three or more of them act on, at least
 SWARM_NAMING = 0.05  # the share of the actions on shared places that name another account acting there, at least
@@ -297,21 +299,48 @@ def build_index(paths):
 # ------------------------------------------------------------------------------------------------ when the view applies
 
 
-def _head(path, most):
-    """The first `most` records of a JSON Lines file or a CSV, as _rows gives them."""
-    if path.endswith(".csv"):
-        return _rows(path, [])[:most]
+def _lines(fh, budget):
+    """The lines of a file open in binary while `budget[0]` bytes last, which it spends."""
+    while budget[0] > 0:
+        line = fh.readline(budget[0])
+        if not line:
+            return
+        budget[0] -= len(line)
+        yield line
+
+
+def _head(path, most, budget):
+    """The first `most` records of a JSON Lines file or a CSV as {field: value} dicts, read while `budget[0]` bytes last
+    and DETECT_BYTES at most, which it spends. A file that cannot be read has none."""
+    own = [min(budget[0], DETECT_BYTES)]
     out = []
-    with open(path, "rb") as fh:
-        for n, line in enumerate(fh, 1):
-            if len(out) >= most:
-                break
-            try:
-                rec = json.loads(line.decode("utf-8", "replace"))
-            except ValueError:
-                continue
-            if isinstance(rec, dict):
-                out.append((n, n, rec))
+    try:
+        with open(path, "rb") as fh:
+            lines = _lines(fh, own)
+            if path.endswith(".csv"):
+                header = None
+                for cells in csv.reader(ln.decode("utf-8", "replace").lstrip("\ufeff") for ln in lines):
+                    if len(out) >= most:
+                        break
+                    if not any(c.strip() for c in cells):
+                        continue
+                    if header is None:
+                        header = [c.strip().lower() for c in cells]
+                    else:
+                        out.append({k: v.strip() for k, v in zip(header, cells)})
+            else:
+                for line in lines:
+                    if len(out) >= most:
+                        break
+                    try:
+                        rec = json.loads(line.decode("utf-8", "replace").lstrip("\ufeff"))
+                    except ValueError:
+                        continue
+                    if isinstance(rec, dict):
+                        out.append(rec)
+    except (OSError, csv.Error):
+        pass
+    budget[0] -= min(budget[0], DETECT_BYTES) - own[0]
     return out
 
 
@@ -319,16 +348,19 @@ def applies(paths):
     """{claims, found} when the record files among `paths` record a swarm, else None: actions (as build_index reads
     them) by SWARM_ACCOUNTS accounts or more, SWARM_PLACES places or more that three or more of them act on, and
     SWARM_NAMING of the actions on shared places naming another account that acts there. `claims` are the files that
-    hold the actions, `found` says what was found."""
+    hold the actions, `found` says what was found. It reads DETECT_RECORDS of each of the first DETECT_FILES record
+    files, the shallowest first, while DETECT_BYTES_ALL last."""
     files = sorted((p for p in paths if p.endswith((".jsonl", ".csv"))), key=lambda p: (p.count("/"), p))[:DETECT_FILES]
-    acts = {}
+    acts, budget = {}, [DETECT_BYTES_ALL]
     for path in files:
-        rows = _head(path, DETECT_RECORDS)
-        f = _fields(rows)
+        if budget[0] <= 0:
+            break
+        recs = _head(path, DETECT_RECORDS, budget)
+        f = _fields([(0, 0, rec) for rec in recs])
         if not (("actor" in f or "anon" in f) and "text" in f):
             continue
         got = []
-        for _a, _b, rec in rows:
+        for rec in recs:
             who = _first(rec, ACTOR_KEYS)[1] or _first(rec, ANON_KEYS)[1]
             if who and isinstance(rec.get(f["text"]), str):
                 got.append((who, _first(rec, PLACE_KEYS)[1], rec[f["text"]]))
