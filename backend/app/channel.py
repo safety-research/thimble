@@ -221,6 +221,8 @@ def terminal_line(kind: str, words: str, fields: dict[str, Any]) -> str:
         line = f"view built: {fields.get('view') or ''}"
     elif kind == "card_types":
         line = f"card types: {fields.get('types') or ''}"
+    elif kind == "label_done":
+        line = f"label finished: {fields.get('name') or ''}"
     elif kind == "written":
         line = f"the {fields.get('doc') or 'document'} writer ended"
     elif kind == "checked":

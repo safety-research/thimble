@@ -2,13 +2,14 @@
 Swarm viewer applies to, the registry finds it without any view proposal and lists it for main's prompt; a card's code
 draws it with thimble.card, which checks the arguments against the type's schema, runs card.py on the reader's cached
 index under the labels the call names, whatever Files highlights, and shows the data with a listing main reads and
-cites; the card check's page gets the type's frame from the request.
+cites; the card check's page gets the type's frame from the request. Main hears when a label it ran finishes.
 
 The corpus `crew` is 140 saves of 35 accounts on 4 pages, each naming the next account, which the Swarm viewer's
 applies() reads as a swarm. Reader calls run in this process (views._runner replaced by an exec of the kernel's
 snippet), and thimble.card runs in this process in a module built from kernel_thimble.py, as a kernel builds it."""
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import io
 import json
@@ -19,7 +20,7 @@ from pathlib import Path
 
 import pytest
 
-from app import cardtypes, concepts, config, render, tools, views
+from app import cardtypes, channel, concepts, config, render, tools, views
 
 CORPUS = "crew"
 ROWS = [{"page": f"p{i % 4}", "user": f"bot{i % 35}", "ts": f"2026-04-14T{i // 60:02d}:{i % 60:02d}:00Z",
@@ -92,7 +93,8 @@ async def test_the_swarm_type_is_found_without_a_proposal_and_listed_for_main(cr
     assert Path(t["reader"]).is_relative_to(config.workspace_dir(CORPUS)), "a card's kernel sees only the workspace"
     assert cardtypes.read_registry(CORPUS)["swarm"]["fp"] == t["fp"]
     text = cardtypes.prompt_text(CORPUS)
-    assert text.startswith("- `swarm`: ") and '`rows` "account" or "signature"' in text and 'thimble.card("swarm"' in text
+    assert text.startswith("### Card types") and "\n- `swarm`: " in text
+    assert '`rows` "account" or "signature"' in text and 'thimble.card("swarm"' in text
 
 
 async def test_a_corpus_that_is_no_swarm_lists_no_card_type(crew):
@@ -151,3 +153,15 @@ async def test_the_check_s_page_gets_the_type_s_frame_from_the_request(crew, ker
     doc = req["frames"]["swarm"]
     assert "connect-src 'none'" in doc and '"card": true' in doc and 'id="chart"' in doc
     assert "frames" not in render.request_for(CORPUS, {"id": "c2", "kind": "plot", "outputs": []})
+
+
+async def test_main_hears_when_a_label_it_ran_finishes(crew):
+    q: asyncio.Queue = asyncio.Queue()
+    channel._subs.setdefault(CORPUS, set()).add(q)
+    try:
+        cid = await _label("even", r"value is \d*[02468]\.", ["even", "odd"])
+        concepts.tell_when_done(CORPUS, cid)
+        note = await asyncio.wait_for(q.get(), 10)
+        assert note["meta"]["kind"] == "label_done" and "label even" in note["content"] and "even 70" in note["content"]
+    finally:
+        channel._subs.pop(CORPUS, None)

@@ -26,13 +26,13 @@
                   "description": "the kinds of link drawn, all three when none is given"},
         "edges": {"type": "array", "items": {"type": "object", "required": ["from", "to", "type"],
                                              "properties": {"from": {"type": "string"}, "to": {"type": "string"}, "type": {"type": "string"}, "reason": {"type": "string"}}},
-                  "description": "links your code computed, from a record's ref to an earlier record's, such as copied from"},
+                  "description": "links your code computed, from a record's ref to an earlier record's, such as copied from or followed, which the records themselves do not carry"},
         "only": {"type": "array", "items": {"type": "object", "properties": {"label": {"type": "string"}, "value": {"type": "string"}}, "required": ["label", "value"]},
                  "ui": true, "description": "only the records of these label values"}
       },
       "additionalProperties": false
     },
     "size": [260, 900],
-    "example": "thimble.card(\"swarm\", labels=[\"signal method\"], within={\"label\": \"answer before post\"}, links=[\"names\", \"reply\"])"
+    "example": "thimble.card(\"swarm\", labels=[\"how told\"], within={\"label\": \"names a page\"}, links=[\"names\", \"reply\"])"
   }
 }

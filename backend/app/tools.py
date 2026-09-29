@@ -2293,6 +2293,8 @@ async def _h_apply_label(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
                                     comment=bool(args.get("comment")), filter=bool(args.get("filter")),
                                     created_by=ctx.created_by, chat=ctx.chat, group=target, question=question,
                                     card=not orienting, within=within, show=bool(args.get("show")))
+    if s.get("partial") and not orienting and ctx.session is None:
+        concepts.tell_when_done(ctx.c, str(s["concept"]))
     counts = ", ".join(f"{k} {v}" for k, v in sorted((s.get("counts") or {}).items()))
     unit = UNIT_WORDS.get(str(s.get("unit") or ""), s.get("unit") or "unit")
     line = (f"applied label {s.get('name', name)} [[concept:{s.get('concept')}]] over {s.get('total', 0)} {unit}(s)"
@@ -2313,7 +2315,9 @@ async def _h_apply_label(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
     if s.get("unchanged"):
         line += " " + hint("apply_label-unchanged")
     if s.get("partial"):
-        line += " The run goes on in the background; the counts are final when its card stops spinning."
+        line += (" The run goes on in the background, and a label_done event comes when it finishes."
+                 if not orienting and ctx.session is None else
+                 " The run goes on in the background; the counts are final when its card stops spinning.")
     if s.get("cell"):
         line += f" The label's card is [[card:{s['cell']}]]."
     if s.get("stale"):

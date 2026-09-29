@@ -19,7 +19,8 @@ Where types come from:
                and kept (CLAIMS_FILE); a type whose applies() names none is left out.
   workspace's  a built view of the workspace with a `card` block and card.py.
 refresh() writes REGISTRY_FILE, which thimble.card reads, and builds each type's index on the views kernel ahead of the
-first card. prompt_text() is the {{card_types}} slot of prompts/shared.md."""
+first card. prompt_text() is the {{card_types}} slot of prompts/shared.md: prompts/card-types.md with the types listed, or
+nothing for a workspace with none."""
 from __future__ import annotations
 
 import asyncio
@@ -34,7 +35,7 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 
-from . import config, views
+from . import config, prompts, views
 from .kernel_thimble import CARD_MIME, CARD_TYPES_FILE
 from .ledger import read_json, write_json
 
@@ -48,6 +49,7 @@ CARD_PY = "card.py"
 TYPE_FILES = (views.VIEW_JSON, views.READER_PY, CARD_PY, views.VIEW_HTML)
 SIZE = (240, 900)  # a type's height range when its view.json gives none
 CARD_CALL = "thimble.card("
+PROMPT = "card-types"
 
 _locks: dict[str, asyncio.Lock] = {}
 
@@ -224,7 +226,7 @@ async def announce(c: str) -> None:
     new = {k: v for k, v in types.items() if k not in before}
     if new and channel.reachable(c):
         try:
-            channel.post(c, "card_types", {"text": _lines(new), "types": ", ".join(new)})
+            channel.post(c, "card_types", {"text": _block(new), "types": ", ".join(new)})
         except HTTPException as e:
             log.info("%s: the card types were not announced: %s", c, e.detail)
 
@@ -263,10 +265,14 @@ def _lines(types: dict[str, dict[str, Any]]) -> str:
     return "\n".join(out)
 
 
+def _block(types: dict[str, dict[str, Any]]) -> str:
+    return prompts.render(PROMPT, {"types": _lines(types)}).strip() if types else ""
+
+
 def prompt_text(c: str | None) -> str:
-    """The {{card_types}} slot: each type the workspace has, with its use, its arguments and an example call; '' for
-    none."""
-    return _lines(read_registry(c))
+    """The {{card_types}} slot: how main makes a card of a card type, with each type the workspace has, its use, its
+    arguments and an example call; '' for none."""
+    return _block(read_registry(c))
 
 
 def card_of(bundles: Any) -> dict[str, Any] | None:

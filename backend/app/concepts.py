@@ -3468,7 +3468,45 @@ def show_concept(c: str, id_or_name: str, on: bool, values: list[str] | None = N
 
 
 LABELED_KIND = "labeled"  # the channel event that tells main of a label the analyst ran from the browser (prompts/main.md)
+LABEL_DONE_KIND = "label_done"  # the channel event that tells main a label it ran finished after its call returned
+_watching: set[asyncio.Task] = set()  # the tasks of tell_when_done, held until they end
 SCOPE_OF_UNIT = {**{u: "files" for u in FILE_UNITS}, "cell": "canvas", "span": "report"}
+
+
+def tell_when_done(c: str, concept_id: str) -> None:
+    """Post `label_done` to main once the label's running apply ends: its counts, its card and the cards that read it
+    while it ran (stale_cards), which main runs again. A run that fails or is stopped posts nothing."""
+    from . import channel
+
+    async def watch() -> None:
+        try:
+            summary = await wait_apply(c, concept_id, float("inf"))
+        except HTTPException:
+            return
+        if summary.get("stopped"):
+            return
+        ws = _ws(c)
+        concept = read_concept(ws, concept_id)
+        if concept is None:
+            return
+        stale = await asyncio.to_thread(stale_cards, ws, concept)
+        counts = await asyncio.to_thread(_live_counts, ws, concept_id)
+        cards = await asyncio.to_thread(_label_cards, ws, concept_id)
+        told = ", ".join(f"{v} {n:,}" for v, n in counts.items()) or "no values"
+        text = (f"label {concept['name']} [[concept:{concept_id}]] finished: {told}. "
+                + ("Cards that read it while it ran: " + ", ".join(f"[[card:{x['id']}]]" for x in stale) + "." if stale
+                   else "No card read it while it ran."))
+        payload = {"text": text, "name": concept["name"], "ref": f"concept:{concept_id}",
+                   "card": f"card:{cards[0][1]['id']}" if cards else None,
+                   "stale": ", ".join(f"card:{x['id']}" for x in stale) or None}
+        try:
+            channel.post(c, LABEL_DONE_KIND, payload)
+        except HTTPException as e:
+            log.info("%s: the %s event for concept:%s was not posted: %s", c, LABEL_DONE_KIND, concept_id, e.detail)
+
+    task = asyncio.get_running_loop().create_task(watch(), name=f"thimble-label-done-{concept_id}")
+    _watching.add(task)
+    task.add_done_callback(_watching.discard)
 
 
 def tell_main(c: str, concept: dict, card: dict | None) -> bool:

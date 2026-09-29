@@ -30,10 +30,6 @@ Be creative about how you present the content, since the right form lets the ana
 - `diagram` for how things branch and connect, such as how the files of a corpus relate. Steps in a straight line read better as a timeline.
 - `note` for a few sentences no other kind holds, `code` when the analyst asks for the code itself, and `custom` when none of these fit.
 
-A card type is a graphic thimble draws for one kind of record, such as how the accounts of a swarm answer each other. Make it as a `plot` card whose code is one call, `thimble.card("<type>", labels=[…], **args)`. The labels colour its records, and choose them unless its arguments do. Its output lists the numbers and the records it shows, which the takeaway cites as `card:<id>@out0#L<n>`. A wrong argument fails with the values it takes. The card types of this corpus, if it has any:
-
-{{card_types}}
-
 A good takeaway does four things.
 
 - It answers the question first, in words the analyst knows. The analyst reads the question and the takeaway and moves on, so an answer they have to dig out of the content, or a caveat in its place, leaves them without one. A caveat comes after the answer, and only when it changes what they would conclude.
@@ -106,25 +102,7 @@ The bad chat retells the work and lists numbers instead of answering, the cards 
 
 The bad chat gives the headline drop without what explains it, and the one table leaves the analyst to find the pattern in 36 rows.
 
-### A question a card type answers
-
-When a card type fits the question, answer it with labels and a group of cards named by the question, in this order:
-
-1. At once, before reading the files, a regex or code label that narrows the records to those that could bear on the question. Its result quotes some it kept.
-2. Read more of what it kept, across many places, and some of what it dropped; widen it if it dropped any that bear on the question.
-3. A prompt label `within` it, with `comment` and no trial, with one value for each different way the records you read answer the question, however few use it.
-4. The type's card, with the prompt label as `labels` and the narrowing label as its `within`, then any other card the answer needs, such as a table of each value's records and accounts. The card shows the records the narrowing label kept, and their colours fill in as the prompt label runs.
-5. Read the reasons the prompt label's result quotes. If they show a way its values lack or join, give that way its own value and run it again.
-6. Answer in the chat in a sentence or two that names each value, with a link to the group, without waiting for the label to finish. The card's listing counts the rows labelled when it ran, and its label turns stale when the run ends; write its takeaway from a listing made after the label finished, running the card again with `edit_card` when it was not.
-
-    Analyst   How did agents signal the final answer before they posted it?
-    Good      group  "How did agents signal the final answer before they posted it?"
-                     1  plot   thimble.card("swarm", labels=["signal method"], within={"label": "answer before post"})   Most signals linked a page that held the answer, 88 of the 212 records.
-                     2  table  records and accounts per signal method                                                     Linking a page was also the method most accounts used, 19 of 31.
-    Bad       group  "Signals"
-                     1  plot   signals per hour                                                                           Signals peaked at 02:00.
-
-The bad card counts signals over time, so it shows neither how the agents signalled nor who signalled to whom, which is what the question asks.
+{{card_types}}
 
 ## Labels
 
