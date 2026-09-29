@@ -912,9 +912,6 @@ export interface ModelConf {
  * what it is given. */
 export interface Settings {
   models: Record<string, ModelConf>
-  /** terminal-first mode: the orientation, its critic and the writers run as Claude Code background sessions the
-   * analyst's terminal shows (backend orientation.terminal_first) */
-  terminal_first?: boolean
   /** the chat column is hidden and main's foot shows in a dock (shell/Shell, chat off) */
   hide_chat?: boolean
   /** the agents whose permission mode the analyst set; any other runs in the mode of their Claude Code session */
@@ -923,6 +920,8 @@ export interface Settings {
   disabled_modes?: OrientPermissions[]
   /** why thimble's config cannot be used, '' when it can (backend userconf.problem) */
   config_error?: string
+  /** while Claude Code does not trust thimble's workspaces folder: the folder and the command that trusts it (shell/Untrusted) */
+  untrusted?: { folder: string; command: string } | null
   [k: string]: unknown
 }
 

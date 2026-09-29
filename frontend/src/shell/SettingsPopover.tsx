@@ -22,7 +22,7 @@ import { EFFORTS, ROLES, type Attached, type MainEffort, type ModeAgent, type Mo
 import { bus } from '../lib/bus'
 import { EFFORT_CHOICES, FastBolt, MODEL_TIP, NEXT_LAUNCH, effortWord, mainEffort, mainFast, noFastTip } from '../chat/ModelLine'
 import { BYPASS_LINE } from '../chat/ModeSwitch'
-import { PERMISSION_OPTIONS, TERMINAL_FIRST_NOTE, agentMode, permissionChoice } from '../chat/StartGate'
+import { PERMISSION_OPTIONS, agentMode, permissionChoice } from '../chat/StartGate'
 
 type Models = Record<string, ModelConf>
 
@@ -32,7 +32,6 @@ export const CHAT_OFF_NOTE = "For chatting in your Claude Code terminal. Alerts,
 /** The workspace's switches under the table: the setting each saves, its name and what it does. */
 export const SWITCHES: { key: string; label: string; note: string }[] = [
   { key: 'hide_chat', label: 'Hide the chat', note: CHAT_OFF_NOTE },
-  { key: 'terminal_first', label: 'Terminal-first', note: TERMINAL_FIRST_NOTE },
 ]
 
 /** The agents whose permission modes the settings list, by their names there (backend modes.AGENTS). */

@@ -5,8 +5,8 @@
 // field's text is the orientation's instructions and may stay empty; its model line (ModelLine) edits the orientation
 // role's settings: the model (a menu of lib/models modelChoices, as RoleChip's), the effort and fast mode. Start sends
 // the analyst's session the `start` event with the instructions as its text and the choices as attributes
-// (prompts/main.md); Skip leaves main to the analyst. The gate is the same in terminal-first mode, where the
-// orientation runs as the background session `thimble:orient · <workspace>` with every one of these choices.
+// (prompts/main.md); Skip leaves main to the analyst. The orientation runs as the background session
+// `thimble:orient · <workspace>` with every one of these choices.
 import { useEffect, useRef, useState } from 'react'
 import { Button, Segmented, type SegmentedOption } from '../components/Button'
 import { TextArea } from '../components/Field'
@@ -25,10 +25,6 @@ export const PASSES: { id: OrientPass; label: string }[] = [
   { id: 'critique', label: 'Critique and revise' },
   { id: 'report', label: 'Generate report' },
 ]
-
-/** What terminal-first mode does, where the settings offer it (backend orientation, module note). */
-export const TERMINAL_FIRST_NOTE =
-  "Runs the orientation, its critic and the writers as Claude Code background sessions you can steer from your terminal: each shows in the agent tray at the bottom of it and takes your messages, with the model, effort and permission mode you pick here."
 
 /** The level Ultracode runs at, sent as the `start` event's `effort` beside `ultracode` (cc_settings.ULTRACODE_EFFORT). */
 export const ULTRACODE_LEVEL = 'xhigh'

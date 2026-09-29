@@ -2,7 +2,7 @@
 checks, and `kernel_wrap_argv` narrows the files it sees: in bubblewrap it has no view of the Claude login, thimble's
 settings, another workspace or another process's environment. It is not a security boundary: the kernel shares the
 host's network, so a cell can reach thimble's API on 127.0.0.1 and any other local service. `config.resolve_kernel_wrap`
-says when it is used. Stdlib only.
+says when it is used: by default on Linux wherever `works`. Stdlib only.
 
 What the kernel gets:
   read     the system, a short list of /etc entries (ETC_RO), the backend venv and its interpreter, and the corpus
@@ -20,6 +20,8 @@ a wrapped kernel gets a lease file the server holds an flock on (notebook._WATCH
 """
 from __future__ import annotations
 
+import shutil
+import subprocess
 from pathlib import Path
 from typing import Sequence
 
@@ -36,6 +38,26 @@ HIDDEN_FILES = ("settings.json", "config.json")
 EMPTY_FILE = "/dev/null"
 READ_ONLY_FILES = ("telemetry.jsonl",)  # bound read-only over the writable workspace when it exists
 SIGINT_PREFIX = ("/bin/sh", "-c", 'trap "" INT; exec "$@"', "thimble-kernel-wrap")  # shell prefix that ignores SIGINT in bwrap (module docstring)
+
+
+PROBE_S = 10.0
+_works: dict[str, bool] = {}  # works' answer, probed once per process
+
+
+def works() -> bool:
+    """Whether bubblewrap can make the kernel's namespaces on this machine, probed once: bwrap is on PATH and may create
+    user namespaces (Ubuntu 24.04 lets it only with an AppArmor profile for bwrap)."""
+    if "ok" not in _works:
+        bwrap, ok = shutil.which("bwrap"), False
+        if bwrap:
+            try:
+                ok = subprocess.run([bwrap, "--unshare-all", "--share-net", "--unshare-user", "--disable-userns",
+                                     "--ro-bind", "/", "/", "--dev", "/dev", "--proc", "/proc", "--tmpfs", "/tmp", "true"],
+                                    capture_output=True, timeout=PROBE_S, check=False).returncode == 0
+            except (OSError, subprocess.SubprocessError):
+                ok = False
+        _works["ok"] = ok
+    return _works["ok"]
 
 
 def _under(p: Path, root: Path) -> bool:

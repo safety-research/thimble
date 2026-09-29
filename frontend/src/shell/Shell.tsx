@@ -57,6 +57,7 @@ import { Resizer } from './Resizer'
 import { ServerDown } from './ServerDown'
 import { SessionGone, useSessionGone } from './SessionGone'
 import { Toasts } from './Toasts'
+import { Untrusted } from './Untrusted'
 import { TopBar } from './TopBar'
 
 export const CHAT_WIDTH = { def: 308, min: 280, max: 640 }
@@ -363,6 +364,7 @@ export function Shell({ ws }: { ws: string }) {
       <Toasts />
       <ServerDown />
       <NewVersion />
+      <Untrusted ws={ws} />
       {gone && <SessionGone gone={gone} />}
     </div>
   )

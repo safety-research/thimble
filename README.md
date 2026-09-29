@@ -36,7 +36,7 @@ For a development build, clone the repo and run `bash scripts/install.sh` (requi
 - It starts a Claude Code session there with the thimble plugin loaded and prints the dashboard URL. The session is named `thimble:main · <workspace>` (as `claude agents` and `/resume` list it), and each agent thimble starts is named the same way, such as `thimble:orient · <workspace>`.
 - Each run starts a new conversation on the same workspace (cards, report, labels). `thimble --continue` picks up your last conversation in this folder instead.
 - Quitting the session stops thimble's agents, and its server once no other thimble session runs. An orientation or a writer that was working goes on at your next `thimble`.
-- To chat only in the terminal, with the browser as a dashboard, see [docs/terminal-first.md](docs/terminal-first.md).
+- The orientation, its critic and the writers run as Claude Code background sessions. ↓ at the prompt opens the agent tray, where you can follow and message them, and `claude attach <id>` opens one in another terminal. They need Claude Code to trust thimble's workspaces folder, which install.sh asks about (`--trust-workspaces`).
 
 ### From a running Claude Code session
 

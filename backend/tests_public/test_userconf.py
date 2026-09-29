@@ -83,8 +83,8 @@ def test_the_settings_pane_writes_where_the_value_it_shows_came_from(workspaces_
 def test_what_a_session_gets_from_the_config(workspaces_tmp, monkeypatch):
     """Install commands go to the analyst by default, in every mode, including those Claude Code's rules miss; "deny"
     refuses them and "allow" leaves them to the mode, but for a view build with no network, which refuses them. Memory is passed only when set. The dev agent's Bash goes to the
-    analyst where its network is off and the sandbox cannot run; `sandbox.enforce` refuses to start a session without
-    the sandbox."""
+    analyst where its network is off and the sandbox cannot run; `sandbox.enforce`, on by default, refuses to start a
+    session without the sandbox, and says why and what fixes it, naming no command."""
     monkeypatch.setenv("THIMBLE_SANDBOX", "1")
     orient = userconf.session(CORPUS, "orientation")
     perms = orient.settings()["permissions"]
@@ -108,14 +108,20 @@ def test_what_a_session_gets_from_the_config(workspaces_tmp, monkeypatch):
     view_build.offline = True
     assert view_build.verdict("Bash", {"command": "pip install x"}) == "deny"
     monkeypatch.setenv("THIMBLE_SANDBOX", "0")
+    with pytest.raises(userconf.ConfigError, match="THIMBLE_SANDBOX=0 turns it off"):
+        userconf.session(CORPUS, "writer")
+    _write(userconf.global_file(), {"installs": "allow", "sandbox": {"enforce": False}})
     assert "Bash" in userconf.session(CORPUS, "dev").settings()["permissions"]["ask"]
     assert "Bash" not in (userconf.session(CORPUS, "orientation").settings()["permissions"].get("ask") or [])
-    _write(userconf.global_file(), {"agents": {"dev": {"network": "on"}}})
+    _write(userconf.global_file(), {"sandbox": {"enforce": False}, "agents": {"dev": {"network": "on"}}})
     assert not userconf.session(CORPUS, "dev").bash_asks
-    _write(userconf.global_file(), {"sandbox": {"enforce": True}})
-    with pytest.raises(userconf.ConfigError, match="sandbox.enforce"):
-        userconf.session(CORPUS, "writer")
-    monkeypatch.setenv("THIMBLE_SANDBOX", "1")
+    _write(userconf.global_file(), {})
+    monkeypatch.delenv("THIMBLE_SANDBOX")
+    monkeypatch.setattr(userconf, "sandbox_runs", lambda: False)
+    with pytest.raises(userconf.ConfigError, match="can't run on this machine") as e:
+        userconf.session(CORPUS, "orientation")
+    assert "--sandbox-deps" in str(e.value) and "install.sh" not in str(e.value)
+    monkeypatch.setattr(userconf, "sandbox_runs", lambda: True)
     assert userconf.session(CORPUS, "writer").sandboxed
     with pytest.raises(userconf.ConfigError, match="run outside it"):
         userconf.session(CORPUS, "dev", sandbox=False)
@@ -147,3 +153,27 @@ def test_a_wrapped_kernel_can_neither_read_nor_write_the_workspace_s_config(tmp_
                                         connection_dir=tmp_path / "k", venv=None, python="/usr/bin/python3")
     binds = {argv[i + 2]: argv[i + 1] for i, a in enumerate(argv) if a == "--ro-bind"}
     assert binds[str(tmp_path / "w" / "config.json")] == binds[str(tmp_path / "w" / "settings.json")] == "/dev/null"
+
+
+def test_the_kernel_is_wrapped_by_default_on_linux_where_bubblewrap_works_and_never_on_macos(monkeypatch):
+    """With nothing naming a wrapper, the kernel runs in bubblewrap on Linux where bwrap can make its namespaces, and
+    unwrapped where it cannot or on macOS, which has no wrapper yet and where bwrap is never probed. Claude Code's
+    sandbox on macOS is sandbox-exec, so agents may start there."""
+    from app import cc_settings, config, kernel_wrap
+
+    monkeypatch.delenv(config.KERNEL_WRAP_ENV, raising=False)
+    probed = []
+    monkeypatch.setattr(kernel_wrap, "works", lambda: probed.append(1) or True)
+    monkeypatch.setattr(config.sys, "platform", "linux")
+    assert config.resolve_kernel_wrap({}) == ("bwrap", "default")
+    assert config.resolve_kernel_wrap({"kernel_wrap": "none"}) == ("none", "settings")
+    monkeypatch.setattr(kernel_wrap, "works", lambda: probed.append(1) or False)
+    assert config.resolve_kernel_wrap({}) == ("none", "default")
+    probed.clear()
+    monkeypatch.setattr(config.sys, "platform", "darwin")
+    assert config.resolve_kernel_wrap({}) == ("none", "default") and probed == []
+    monkeypatch.delenv("THIMBLE_SANDBOX", raising=False)
+    monkeypatch.setattr(cc_settings.sys, "platform", "darwin")
+    monkeypatch.setattr(cc_settings, "_sandbox", {})
+    monkeypatch.setattr(cc_settings.Path, "exists", lambda p: str(p) == "/usr/bin/sandbox-exec")
+    assert cc_settings.sandbox_ok() and userconf.session(None, "writer").sandboxed

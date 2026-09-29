@@ -36,9 +36,10 @@ its check command. A session with no workspace (`thimble fix`, while the server 
 UNHOSTED_TOOLS, has no web tools, and is refused what thimble's config would have it ask for.
 
 thimble's config. Code tickets and view builds are the dev agent's sessions, with its `agents.dev` settings
-(userconf.py, dev_config); agent_session's module note says what the config adds. A view build's Bash runs in the
-sandbox where it can run; a code ticket's never does, since it commits into the checkout's git folder and shoots the
-validation stack on loopback. By default the dev agent has no web tools and its network is off.
+(userconf.py, dev_config); agent_session's module note says what the config adds. Their Bash runs in the sandbox
+where it can run. A code ticket's sandbox also writes what a commit in its worktree writes into the checkout's git
+folder (ticket_fence), and cannot reach the validation stack on loopback, so the session takes no shots of its own and
+the server's after shot shows its change. By default the dev agent has no web tools and its network is off.
 
 The offline fence. With the dev agent's network off, a view build's Bash runs in the sandbox with no network where the
 sandbox runs; where it does not, every command but its check goes to the analyst. Deny rules refuse the commands that
@@ -1290,6 +1291,20 @@ def trust_folder(cwd: Path) -> Path:
         return Path(cwd)
 
 
+def ticket_fence(wt: Path, network: bool = False) -> dict[str, Any]:
+    """The --settings of a code ticket's session whose Bash runs in the sandbox: no network unless the dev agent's is
+    on, and writes to the worktree, its session's folder, and to what a commit there writes into the checkout's git
+    folder: the objects, the ticket branch's ref and its log, and the worktree's own git folder. The git folder's hooks
+    and config stay read-only."""
+    common = Path(_git(wt, "rev-parse", "--path-format=absolute", "--git-common-dir"))
+    own = Path(_git(wt, "rev-parse", "--absolute-git-dir"))
+    group = Path(_git(wt, "symbolic-ref", "--short", "HEAD")).parent  # `dev` of dev/<id>
+    box = cc_settings.offline_sandbox(network=network)
+    box["filesystem"] = {"allowWrite": [str(common / "objects"), str(common / "refs" / "heads" / group),
+                                        str(common / "logs" / "refs" / "heads" / group), str(own)]}
+    return {"sandbox": box}
+
+
 class Sessions:
     """Claude Code background sessions through the `claude` CLI: `claude --bg` starts one and prints its short id,
     `claude agents --json --all --cwd` reports its state, `claude --bg --resume <session id>` wakes it with a new
@@ -1681,12 +1696,28 @@ def _target_lines(t: dict[str, Any]) -> str:
     return json.dumps(tg, ensure_ascii=False)[:TARGET_CHARS]
 
 
-def build_prompt(t: dict[str, Any], *, worktree: Path, ui_url: str, api_url: str, before_shot: str | None) -> str:
+def build_prompt(t: dict[str, Any], *, worktree: Path, ui_url: str, api_url: str, before_shot: str | None,
+                 sandboxed: bool = False) -> str:
     with prompts.custom(userconf.prompt_files(t.get("workspace"), "dev")):
-        return _ticket_prompt(t, worktree=worktree, ui_url=ui_url, api_url=api_url, before_shot=before_shot)
+        return _ticket_prompt(t, worktree=worktree, ui_url=ui_url, api_url=api_url, before_shot=before_shot,
+                              sandboxed=sandboxed)
 
 
-def _ticket_prompt(t: dict[str, Any], *, worktree: Path, ui_url: str, api_url: str, before_shot: str | None) -> str:
+# the code-ticket prompt's line on the stack's pages, by whether the session's Bash runs in the sandbox (TICKET_STACK)
+TICKET_STACK_LINES = {
+    False: ("To see a page of the stack, run `node scripts/ui_shot.mjs --url <page> --out <png> --selector '<css>'` and "
+            "open the PNG with Read. Save shots under {shots}. The before shot of the ticket's target is {before}. After "
+            "you commit, take an after shot of the target with the before shot's selector."),
+    True: ("Your Bash runs in Claude Code's sandbox: it changes only this worktree and your commits, and it can't reach "
+           "the stack, so take no shots. The before shot of the ticket's target is {before}; open it with Read. The "
+           "server takes the after shot once its gates pass."),
+}
+
+
+def _ticket_prompt(t: dict[str, Any], *, worktree: Path, ui_url: str, api_url: str, before_shot: str | None,
+                   sandboxed: bool = False) -> str:
+    before = (str(shots_dir(t["id"]) / before_shot) if before_shot else
+              "(none: the stack was not available for a before shot)")
     return prompts.render_dev("dev-ticket", {
         "ticket": str(t["id"]),
         "title": str(t.get("title") or ""),
@@ -1696,8 +1727,7 @@ def _ticket_prompt(t: dict[str, Any], *, worktree: Path, ui_url: str, api_url: s
         "worktree": str(worktree),
         "ui_url": ui_url,
         "api_url": api_url,
-        "shots": str(shots_dir(t["id"])),
-        "before_shot": str(shots_dir(t["id"]) / before_shot) if before_shot else "(none: the stack was not available for a before shot)",
+        "stack": TICKET_STACK_LINES[sandboxed].format(shots=shots_dir(t["id"]), before=before),
     })
 
 
@@ -1802,7 +1832,7 @@ async def run_ticket(t: dict[str, Any], run: Run, *, doctor: str | None = None) 
     """The whole ticket (_run_ticket), its session's permission requests answered on its chat meanwhile, as thimble's
     config asks (dev_config)."""
     try:
-        conf: userconf.Session | str = dev_config(t.get("workspace"), sandbox=False, hosted=bool(t.get("workspace")))
+        conf: userconf.Session | str = dev_config(t.get("workspace"), sandbox=True, hosted=bool(t.get("workspace")))
     except userconf.ConfigError as e:
         conf = str(e)
     if not isinstance(conf, str):
@@ -1847,16 +1877,18 @@ async def _run_ticket(t: dict[str, Any], run: Run, *, doctor: str | None = None,
         ui_url = stack["ui"] if stack else None
         api_url = stack["api"] if stack else f"http://127.0.0.1:{config_port()}"
         before = await _take_shot(t, run_log, "before", ui_url)
+        boxed = isinstance(conf, userconf.Session) and conf.sandboxed
+        fence = await asyncio.to_thread(ticket_fence, wt, conf.network) if boxed else None
         if fixing:
             prompt = build_fix_prompt(t, worktree=wt, doctor=doctor or "")
         else:
             prompt = build_prompt(t, worktree=wt, ui_url=ui_url or "(no validation stack; take no shots)", api_url=api_url,
-                                  before_shot=before)
+                                  before_shot=before, sandboxed=boxed)
         resume = t.get("session_id") if int(t.get("attempts") or 0) > 1 else None
         ok = False
         for attempt in range(1, MAX_ATTEMPTS + 1):
             run_log.stage(f"worker, attempt {attempt}")
-            result_text = await _worker_turn(run, run_log, wt, prompt, resume,
+            result_text = await _worker_turn(run, run_log, wt, prompt, resume, fence=fence,
                                              name=dev_session_name(t.get("workspace")), workspace=t.get("workspace"),
                                              on_session=lambda short, sid: _update(tid, session=short, session_id=sid),
                                              **({"asking": {"key": ticket_key(tid), "allow": own_work(wt, (shots_dir(tid),)),

@@ -1,6 +1,6 @@
 ---
 name: critic
-description: The tray entry of thimble's critic's background session, in terminal-first mode. Start it only when a thimble tool's result or event asks for it, with the prompt that gives.
+description: The tray entry of thimble's critic's background session. Start it only when a thimble tool's result or event asks for it, with the prompt that gives.
 background: true
 effort: low
 omitClaudeMd: true

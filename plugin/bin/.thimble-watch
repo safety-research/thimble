@@ -365,18 +365,19 @@ def mode(inp: dict) -> int:
 
 
 def show_link(session: str) -> None:
-    """The link /thimble left for `session`, printed as the hook's systemMessage and then deleted (module note)."""
+    """The link /thimble left for `session`, and the lines left after it, printed as the hook's systemMessage and then
+    deleted (module note)."""
     name = "".join(ch for ch in session if ch.isalnum() or ch in "-_")
     if not name:
         return
     path = home() / "links" / name
     try:
-        url = path.read_text("utf-8").strip()
+        url, _, notes = path.read_text("utf-8").strip().partition("\n")
         path.unlink()
     except OSError:
         return
     if url:
-        print(json.dumps({"systemMessage": f"thimble: {url}"}))
+        print(json.dumps({"systemMessage": f"thimble: {url}" + (f"\n{notes}" if notes else "")}))
 
 
 def announcements(inp: dict) -> str:

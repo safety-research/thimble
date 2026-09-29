@@ -17,10 +17,11 @@ import urllib.request
 from pathlib import Path
 
 import pytest
+from conftest import print_sessions
 from fastapi import HTTPException
 
 from app import (agent_session, agents, channel, config, hook_auth, ledger, modes, orient_session, permission_hook,
-                 session, tools)
+                 session, tools, userconf)
 
 CORPUS = "mini"
 KEY = orient_session.KEY
@@ -118,9 +119,9 @@ def fake(tmp_path, monkeypatch) -> Path:
     monkeypatch.setenv("THIMBLE_CHANNEL", "plugin:thimble@inline")  # the server's own, inherited from main's session
     monkeypatch.delenv("FAKE_MODE", raising=False)
     monkeypatch.delenv("FAKE_SLEEP", raising=False)
-    # the stand-in is a `claude -p`: the sessions run as thimble's own, not as terminal-first mode's `claude --bg`
-    ledger.put_settings(CORPUS, {"terminal_first": False})
-    monkeypatch.setenv("THIMBLE_SANDBOX", "0")  # the fence without the sandbox
+    print_sessions(monkeypatch)
+    monkeypatch.setenv("THIMBLE_SANDBOX", "0")  # the fence without the sandbox, which the config then does not require
+    monkeypatch.setitem(userconf.DEFAULTS["sandbox"], "enforce", False)
     return out
 
 

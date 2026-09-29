@@ -59,7 +59,7 @@ def _session_agent(web: str) -> dict[str, Any]:
 
 DEFAULTS: dict[str, Any] = {
     "installs": "ask",
-    "sandbox": {"use": "when-available", "enforce": False},
+    "sandbox": {"use": "when-available", "enforce": True},
     "browser": None,
     "agents": {
         "orientation": {**_session_agent("ask"), "subagentModel": None},
@@ -559,18 +559,32 @@ def allow_own(command: str, own: list[str]) -> bool:
     return any(line == o or (line.startswith(o + " ") and not _CONTROL.search(line[len(o):])) for o in own)
 
 
+# why an agent did not start while thimble's config requires the sandbox (session), read by the analyst and by models,
+# so the fix names no command
+NO_SANDBOX = "thimble's agents run only in Claude Code's Bash sandbox (sandbox.enforce), and {why}, so the {agent} agent did not start. {fix}"
+NO_SANDBOX_WHY = {
+    "outside": ("this agent's sessions run outside it", ""),
+    "never": ('thimble\'s config turns it off (sandbox.use "never")',
+              "To run the agents without it, set sandbox.enforce to false in thimble's config as well."),
+    "env": ("THIMBLE_SANDBOX=0 turns it off", "Unset THIMBLE_SANDBOX and restart thimble to use it."),
+    "missing": ("it can't run on this machine",
+                "The analyst installs what it needs by running thimble's installer again in their own terminal with "
+                "--sandbox-deps; `thimble doctor` says what is missing."),
+}
+
+
 def session(c: str | None, agent: str, *, sandbox: bool = True) -> Session:
     """What the config asks of a session of `agent` in workspace `c`; `sandbox` False for a session the caller runs
-    outside the sandbox. ConfigError when the config has an error, or requires the sandbox (`sandbox.enforce`) and
-    the session would run outside it."""
+    outside the sandbox. ConfigError when the config has an error, or requires the sandbox (`sandbox.enforce`, on by
+    default) and the session would run outside it (NO_SANDBOX)."""
     conf = load(c)
     box = conf["sandbox"]
     runs = box["use"] != "never" and sandbox_runs()
     if box["enforce"] and not (sandbox and runs):
-        why = ("this agent's sessions run outside it" if not sandbox else
-               "it is off in thimble's config" if box["use"] == "never" else "it cannot run on this machine")
-        raise ConfigError(f"thimble's config requires Claude Code's sandbox for every agent (sandbox.enforce), and {why}, "
-                          f"so the {agent} agent did not start")
+        key = ("outside" if not sandbox else "never" if box["use"] == "never" else
+               "env" if os.environ.get("THIMBLE_SANDBOX", "").strip() == "0" else "missing")
+        why, fix = NO_SANDBOX_WHY[key]
+        raise ConfigError(NO_SANDBOX.format(why=why, agent=agent, fix=fix).strip())
     return Session(c, agent, conf["agents"][agent], conf["installs"], sandbox and runs)
 
 

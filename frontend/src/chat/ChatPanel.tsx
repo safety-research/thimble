@@ -934,8 +934,8 @@ function AskAgain({ ws, id, detached, onAsked }: { ws: string; id: string; detac
 }
 
 /** The rows of the orientation or a writer as its thread shows them: its whole session less its first message, which
- * is the card's. For an orientation that ran as main's subagent (an earlier build's; terminal-first now runs it as its
- * own background session), its hand-back summary replaces the hand-back call and what followed. Pure. */
+ * is the card's. For an orientation that ran as main's subagent (an earlier build's; it now runs as its own background
+ * session), its hand-back summary replaces the hand-back call and what followed. Pure. */
 export function orientMessages(rows: readonly Row[]): Row[] {
   const first = rows.findIndex((r) => r.kind === 'user')
   const own = rows.filter((_, i) => i !== first)

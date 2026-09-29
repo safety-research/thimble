@@ -14,9 +14,10 @@ import sys
 from pathlib import Path
 
 import pytest
+from conftest import print_sessions
 from fastapi import HTTPException
 
-from app import agent_session, agents, cc_channel, channel, config, ledger, modes, orient_session, session, tools
+from app import agent_session, agents, cc_channel, channel, config, ledger, modes, orient_session, session, tools, userconf
 
 CORPUS = "mini"
 KEY = orient_session.KEY
@@ -113,9 +114,10 @@ def fake(tmp_path, monkeypatch) -> Path:
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "claude-config"))
     monkeypatch.setenv("THIMBLE_CHANNEL", "plugin:thimble@inline")
     monkeypatch.delenv("FAKE_MODE", raising=False)
-    monkeypatch.setenv("THIMBLE_SANDBOX", "0")  # the fence without the sandbox; the fence's test turns it on
-    # the stand-in is a `claude -p`: the sessions run as thimble's own, not as terminal-first mode's `claude --bg`
-    ledger.put_settings(CORPUS, {"terminal_first": False})
+    # the fence without the sandbox, which the config then does not require; the fence's test turns it on
+    monkeypatch.setenv("THIMBLE_SANDBOX", "0")
+    monkeypatch.setitem(userconf.DEFAULTS["sandbox"], "enforce", False)
+    print_sessions(monkeypatch)
     return out
 
 
@@ -186,11 +188,8 @@ async def test_each_agent_runs_in_its_row_else_in_main_s_mode_and_nothing_else_p
         seen.update(chosen=chosen)
 
     monkeypatch.setattr(orient_session, "start", fake_start)
-    for terminal_first in (True, False):  # the orientation is its own session in both modes
-        ledger.put_settings_route(CORPUS, analyst, {"terminal_first": terminal_first})
-        seen.clear()
-        await tools.call(CORPUS, "start_orientation", {"brief": "", "permissions": "bypass"})
-        assert seen["chosen"] == {}, f"a model's call chooses no mode (terminal_first {terminal_first})"
+    await tools.call(CORPUS, "start_orientation", {"brief": "", "permissions": "bypass"})
+    assert seen["chosen"] == {}, "a model's call chooses no mode"
 
     user.write_text(json.dumps({"permissions": {"disableBypassPermissionsMode": "disable"}}))
     with pytest.raises(HTTPException) as e:

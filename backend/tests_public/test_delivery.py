@@ -345,6 +345,9 @@ def test_main_s_stop_hook_shows_the_link_thimble_up_left_once_and_only_as_it_end
         assert _watch(tmp_path, stand.port, {**stop, "hook_event_name": "UserPromptSubmit"}, "--mode").stdout == ""
         assert json.loads(_watch(tmp_path, stand.port, stop, "--mode").stdout) == {"systemMessage": f"thimble: {link}"}
         assert _watch(tmp_path, stand.port, stop, "--mode").stdout == "", "once"
+        (tmp_path / "thome" / "links" / SID).write_text(f"{link}\nthimble: WARNING - a note for the terminal")
+        assert json.loads(_watch(tmp_path, stand.port, stop, "--mode").stdout) == {
+            "systemMessage": f"thimble: {link}\nthimble: WARNING - a note for the terminal"}, "the notes under the link"
     finally:
         stand.close()
 
