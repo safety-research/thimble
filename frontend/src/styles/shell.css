@@ -402,7 +402,7 @@
 }
 .settings-row {
   display: grid;
-  grid-template-columns: 84px minmax(0, 1fr) 96px 40px;
+  grid-template-columns: 84px minmax(0, 1fr) 108px 40px;
   gap: 8px;
   align-items: center;
   min-height: 30px;
