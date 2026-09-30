@@ -5,15 +5,16 @@ your config dir with your user settings (thimble's sessions run in folders of th
 project's `.claude/` settings does not reach them). thimble tells you when `claude` is missing or not logged in.
 
 What thimble's agents may do, and on which models, is set in `~/.thimble/config.json`: [docs/config.md](docs/config.md).
-Card code runs in the notebook kernel with your network, whatever that file says. On Linux, where bubblewrap works,
-the kernel sees only the corpus and the workspace; on macOS it runs with your user's access for now.
+Card code runs in the notebook kernel with your network, whatever that file says. The kernel runs in Anthropic's sandbox
+runtime, which the install sets up with the frontend's packages: it sees only the corpus and the workspace. Without Node
+it runs in bubblewrap on Linux and with your user's access on macOS.
 
 ## Requirements
 
 - [Claude Code](https://docs.anthropic.com/en/docs/claude-code) (tested with 2.1.281), logged in (`claude auth status`).
 - macOS or Linux, and Python 3.12+. [uv](https://docs.astral.sh/uv/getting-started/installation/) is recommended: it
   installs the pinned versions and fetches Python when the machine has none.
-- Node 20+ for a Dev install and for custom views.
+- Node 20+ for a Dev install, for custom views and for the sandbox card code runs in.
 
 ## Global install (recommended)
 
