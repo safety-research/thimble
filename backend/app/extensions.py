@@ -558,7 +558,8 @@ async def _fit(c: str, name: str, v: dict[str, Any], files: list[tuple[Any, ...]
     """Whether extension `name`'s view `v` fits workspace `c`: {fits, reason, by} with `key` for a model's decision,
     {key, error, ts} when its call failed, or {key, pending} while it runs (_start), with the answer before it while
     the files changed since. `files` are the files it claims here; `kept` the decision STATE_FILE holds, which stands
-    while its key does (view_fit.key)."""
+    while its key does (view_fit.key). One check runs per view at a time. An answer to files that changed while it was
+    asked still stands, marked `stale`, and the next check waits RETRY_S after it."""
     from . import view_fit  # noqa: PLC0415
 
     if not files:
@@ -566,16 +567,23 @@ async def _fit(c: str, name: str, v: dict[str, Any], files: list[tuple[Any, ...]
     key = _view_key(name, v["slug"])
     at = view_fit.key(v["description"], files)
     got = _checks(c).get(key)
-    if got is not None and got["key"] == at and got["task"].done():
+    if got is not None and got["task"].done():
         _asking.pop((c, key), None)
         try:
-            return got["task"].result()
+            ans = got["task"].result()
         except Exception as e:  # noqa: BLE001 — a check that failed decides nothing
             log.exception("%s: whether the view %s fits is not known", c, key)
-            return {"key": at, "error": f"{type(e).__name__}: {e}", "ts": _now()}
+            ans = {"key": got["key"], "error": f"{type(e).__name__}: {e}", "ts": _now()}
+        if ans.get("key") == at:
+            return ans
+        kept = {**(ans if "fits" in ans or "fits" not in kept else kept), "stale": True, "ts": ans.get("ts") or _now()}
+        kept.pop("pending", None)
+        got = None
     if kept.get("key") == at and not kept.get("pending") and ("fits" in kept or (kept.get("error") and not _stale(kept))):
         return kept
-    if got is None or got["key"] != at:
+    if got is None and kept.get("stale") and not _stale(kept):
+        return kept
+    if got is None:
         _start(c, key, at, v, files)
     return {"key": at, "pending": True, **({"fits": kept["fits"], "reason": kept.get("reason")} if "fits" in kept else {})}
 
@@ -708,6 +716,11 @@ async def _refresh(c: str) -> dict[str, Any]:
                     for t in info["cards"]:
                         t["here"] = bool(t["claims"]) and bool(
                             await asyncio.to_thread(views.claimed_files, c, {"claims": t["claims"]}))
+            if why:
+                for v in info["views"]:
+                    fit = (before.get(v["slug"]) or {}).get("fit") or {}
+                    if "fits" in fit or fit.get("error"):
+                        v["fit"] = {k: x for k, x in fit.items() if k != "pending"}
             exts[name] = {**{k: v for k, v in info.items() if k != "name"}, "active": not why, "why": why}
         _needs_running(exts)
         clash = conflicts(exts)

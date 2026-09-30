@@ -270,12 +270,41 @@ async def test_a_view_shows_where_its_check_finds_it_fits_and_its_switch_overrid
     await extensions.refresh(CORPUS, wait=10)
     assert len(fit["asked"]) == 3, "a failed check stands a while before it is asked again"
 
+    fit["answer"] = {"status": "ok", "output": {"fits": True, "reason": "Each record says who did a task."}}
+    state = extensions.read_state(CORPUS)
+    state["extensions"]["ext-min"]["views"][0]["fit"]["ts"] = "2000-01-01T00:00:00+00:00"
+    write_json(config.registry_dir(CORPUS) / extensions.STATE_FILE, state)
+    assert (await extensions.refresh(CORPUS, wait=10))["extensions"]["ext-min"]["views"][0]["shown"]
+    extensions.set_enabled(CORPUS, "ext-min", False)
+    await extensions.refresh(CORPUS)
+    extensions.set_enabled(CORPUS, "ext-min", True)
+    e = (await extensions.refresh(CORPUS))["extensions"]["ext-min"]
+    assert e["views"][0]["shown"] and len(fit["asked"]) == 4, "switching it off and on keeps the answer"
+
     shutil.rmtree(corpus / "tally")
     (corpus / "notes.jsonl").write_text('{"x": 1}\n')
     _files_changed()
     e = (await extensions.refresh(CORPUS, wait=10))["extensions"]["ext-min"]
-    assert e["active"] and e["views"][0]["note"] == extensions.NO_FILES and len(fit["asked"]) == 3
+    assert e["active"] and e["views"][0]["note"] == extensions.NO_FILES and len(fit["asked"]) == 4
     assert extensions.public(CORPUS)["extensions"][0]["views"][0]["locked"]
+
+
+async def test_a_view_s_check_lands_while_its_files_keep_changing(corpus, monkeypatch):
+    """An answer to files that changed while it was asked still stands, and the next check waits a while, so a corpus
+    that is still being written shows the view and asks the model once."""
+    asked: list[int] = []
+
+    async def ask(c: str, text: str) -> model.CallResult:
+        asked.append(1)
+        (corpus / "tally" / "a.jsonl").open("a").write('{"who": "ana", "what": "live"}\n')
+        _files_changed()
+        return model.CallResult(status="ok", output={"fits": True, "reason": "Each record says who did a task."})
+
+    monkeypatch.setattr(view_fit, "ask", ask)
+    _add()
+    for _ in range(3):
+        e = (await extensions.refresh(CORPUS, wait=10))["extensions"]["ext-min"]
+    assert e["views"][0]["shown"] and e["views"][0]["fit"]["stale"] and len(asked) == 1
 
 
 async def test_a_big_csv_is_checked_with_a_few_of_its_records(corpus, fit, tmp_path):
