@@ -151,12 +151,15 @@ def test_the_browser_is_the_system_one_when_found_unless_the_config_says_otherwi
 
 
 def test_a_wrapped_kernel_can_neither_read_nor_write_the_workspace_s_config(tmp_path):
+    """...and reads the workspace's views, which main's prompt lists, without writing them."""
     from app import kernel_wrap
 
     argv = kernel_wrap.kernel_wrap_argv(["python"], corpus_dir=tmp_path / "c", workspace_dir=tmp_path / "w",
                                         connection_dir=tmp_path / "k", venv=None, python="/usr/bin/python3")
     binds = {argv[i + 2]: argv[i + 1] for i, a in enumerate(argv) if a == "--ro-bind"}
     assert binds[str(tmp_path / "w" / "config.json")] == binds[str(tmp_path / "w" / "settings.json")] == "/dev/null"
+    views = str(tmp_path / "w" / "views")
+    assert binds[views] == views and argv.index(views) > argv.index(str(tmp_path / "w")), "over the workspace"
 
 
 def test_the_kernel_runs_in_srt_where_it_works_else_in_bubblewrap_on_linux_else_unwrapped(monkeypatch):

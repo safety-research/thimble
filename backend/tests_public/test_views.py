@@ -157,8 +157,8 @@ async def test_a_reader_resolves_a_line_and_a_key_and_its_answer_is_kept(ws, inp
     assert await views.reader_call(CORPUS, "threads", "records", {"thread": "t2"}) == [
         {"ref": "board.jsonl#L2", "author": "bo", "body": "Anyone have the build number?"},
         {"ref": "board.jsonl#L4", "author": "ada", "body": "The build is 3316."}]
-    # the index is cached by the files' fingerprint, beside the view
-    assert list((ws / "views" / "threads" / "cache").glob("*.index.pickle"))
+    # the index is cached by the files' fingerprint, outside the views folder, which a kernel may only read
+    assert list(views.index_dir(CORPUS, "threads").glob("*.index.pickle"))
 
 
 async def test_a_workspace_gets_four_views_from_the_orientation_and_a_deleted_one_stays_deleted(ws, monkeypatch):
