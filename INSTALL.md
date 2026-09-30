@@ -86,20 +86,22 @@ thimble extension list
 thimble extension remove swarm
 ```
 
-An added extension runs in every workspace until you remove it or switch it off (Settings > Extensions for one
-workspace, or `"extensions": {"swarm": {"enabled": false}}` in `~/.thimble/config.json`). Its Python runs only in
+thimble ships three. `video`, the Video document with its video export, comes added. `swarm` and
+`multiagent-swimlane` are added with `thimble extension add`; Settings and `thimble extension list` name them until
+then. An added extension runs in every workspace until you remove it or switch it off (Settings > Extensions for one
+workspace, or `"extensions": {"swarm": {"enabled": false}}` in `~/.thimble/config.json`). One you remove stays removed. Its Python runs only in
 thimble's kernels. Its `extension.json` names the thimble versions it works with and the Python packages and other
 extensions it needs: thimble installs no package, and while one is missing, or thimble is outside that range, the
 extension stays unloaded and `thimble extension list`, `thimble doctor` and Settings say why. `add` adds the extensions
-it needs that thimble ships on the same yes.
+it needs that thimble ships on the same yes, and an extension runs only where those run.
 
 Only its views check whether they fit: once per workspace, and again when their files change, a quick call to the
 labels model reads the view's description and a few records of the files it claims. Settings > Extensions shows each
 view's reason, and its switch there overrides the check.
 
 The Swarm extension is for corpora where many agents act on shared pages and channels and address each other. It adds
-orientation instructions that have every message read, and the `multiagent-swimlane` card type, a swimlane of the
-actions main chose to answer a question.
+orientation instructions that have every message read. It needs `multiagent-swimlane`, the card type that draws a
+swimlane of the actions main chose to answer a question.
 
 ## Update
 
