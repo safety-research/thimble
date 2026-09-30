@@ -614,10 +614,17 @@ def _in_worktrees(cwd: Path) -> bool:
         return False
 
 
+def _own_config(own: Path) -> bool:
+    """Whether the worktree's git folder holds a config.worktree that could set something. Claude Code's sandbox leaves
+    an empty one there, which sets nothing."""
+    cfg = own / "config.worktree"
+    return cfg.is_symlink() or (cfg.exists() and not (cfg.is_file() and cfg.stat().st_size == 0))
+
+
 def _check_worktree(wt: Path) -> tuple[Path, Path]:
     """(the worktree's own git folder, the live checkout's git folder): the checkout's `worktrees/<name>`. GitError
     (WORKTREE_MOVED) unless `wt/.git` names that folder, whose commondir is the checkout's git folder, with no config of
-    its own."""
+    its own (_own_config)."""
     common = Path(subprocess.run(["git", "rev-parse", "--path-format=absolute", "--git-common-dir"], cwd=str(REPO),
                                  capture_output=True, text=True, timeout=60).stdout.strip()).resolve()
     own = common / "worktrees" / Path(wt).name
@@ -627,7 +634,7 @@ def _check_worktree(wt: Path) -> tuple[Path, Path]:
                "its .git names another git folder" if Path(text.removeprefix("gitdir: ")).resolve() != own else
                "its git folder names another commondir"
                if (own / (own / "commondir").read_text("utf-8").strip()).resolve() != common else
-               "its git folder has a config of its own" if (own / "config.worktree").exists() else "")
+               "its git folder has a config of its own" if _own_config(own) else "")
     except OSError as e:
         why = f"{type(e).__name__}: {e}"
     if why:

@@ -141,8 +141,14 @@ def test_the_server_runs_no_git_in_a_worktree_that_points_elsewhere(monkeypatch,
     repo, marker = _repo(tmp_path), tmp_path / "ran-outside"
     monkeypatch.setattr(dev, "REPO", repo)
     wt, _branch, _base = dev.create_worktree("t9")
-    assert dev.touched_files(wt) == []
     pointer = (wt / ".git").read_text()
+    own = Path(pointer.removeprefix("gitdir: ").strip())
+    (own / "config.worktree").write_text("")  # what Claude Code's sandbox leaves there
+    assert dev.touched_files(wt) == []
+    (own / "config.worktree").write_text(f"[core]\n\tfsmonitor = touch {marker}; false\n")
+    with pytest.raises(dev.GitError, match="a config of its own"):
+        dev.touched_files(wt)
+    (own / "config.worktree").unlink()
     evil = wt / ".evil"
     _git(wt, "init", "-q", "--bare", str(evil))
     _git(evil, "config", "core.fsmonitor", f"touch {marker}; false")
@@ -151,7 +157,6 @@ def test_the_server_runs_no_git_in_a_worktree_that_points_elsewhere(monkeypatch,
     with pytest.raises(dev.GitError, match="no longer points"):
         dev.touched_files(wt)
     (wt / ".git").write_text(pointer)
-    own = Path(pointer.removeprefix("gitdir: ").strip())
     (own / "commondir").write_text(str(evil))
     with pytest.raises(dev.GitError, match="another commondir"):
         dev.branch_files(wt, "HEAD")
