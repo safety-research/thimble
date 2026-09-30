@@ -116,6 +116,7 @@ async def test_a_ticket_the_box_cannot_run_asks_before_it_starts_and_again_befor
                                                                                                       tmp_path):
     """Where the box can't run, the ticket's code runs outside the sandbox during the run, so the analyst is asked
     before it starts, and, like any ticket, again before its change reaches thimble's own code."""
+    monkeypatch.setenv("THIMBLE_SANDBOX", "1")
     repo = _repo(tmp_path)
     monkeypatch.setattr(dev, "REPO", repo)
     monkeypatch.setattr(dev, "runner_problem", lambda **_k: "")
