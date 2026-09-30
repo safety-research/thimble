@@ -16,6 +16,8 @@ export interface UserRow {
   event?: string
   /** the orientation's run that message started: 1 for its first follow-up */
   run?: number
+  /** with `by` extension: the extension whose orientation instructions the message is */
+  extension?: string
 }
 export interface TextRow {
   kind: 'text'
@@ -152,7 +154,7 @@ export function foldRecords(records: readonly ChatRecord[], skip?: ReadonlySet<n
     const into = parent ? parent.children : rows
     switch (e.type) {
       case 'user':
-        rows.push({ kind: 'user', index, text: e.text, ts: e.ts, by: e.by, event: e.event, run: e.run })
+        rows.push({ kind: 'user', index, text: e.text, ts: e.ts, by: e.by, event: e.event, run: e.run, extension: e.extension })
         return
       case 'text': {
         // a Claude Code notification the model copied into its reply is harness text, not words for the analyst
@@ -1429,6 +1431,13 @@ export function followUpSummary(rows: readonly Row[]): string {
   }
   walk(rows)
   return changeSummary({ revised: revised.size, added: added.size, deleted: deleted.size, views: views.size, labels: labels.size })
+}
+
+/** A follow-up's message as the card of its run leads with it: an extension's orientation instructions as the line
+ * that names the extension. Pure. */
+export function leadText(m: UserRow): string {
+  if (m.by === 'extension') return m.extension ? `${m.extension} added: its orientation instructions` : 'An extension’s orientation instructions'
+  return m.text.trim()
 }
 
 /** What a follow-up changed, counted, in words: `revised 2 cards, added 1, proposed 1 view`; '' for nothing. The

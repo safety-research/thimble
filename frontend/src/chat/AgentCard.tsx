@@ -27,7 +27,7 @@ import { ApiErrorCard } from './ApiError'
 import { Holds } from './Holds'
 import { ModeSwitch } from './ModeSwitch'
 import { waitingAt } from './waiting'
-import { agentChipName, agentFiles, apiErrorAt, changeSummary, deckCards, durationText, foldRecords, followUpSummary, lastRowTs, madeBy, madeCards, orientMade, orientRuns, orientWriterOf, orientWriters, reviewList, sessionSteps, stripHarness, taskTitle, toolSteps, type Made, type OrientWriter, type Row } from './model'
+import { agentChipName, agentFiles, apiErrorAt, changeSummary, deckCards, durationText, foldRecords, followUpSummary, lastRowTs, leadText, madeBy, madeCards, orientMade, orientRuns, orientWriterOf, orientWriters, reviewList, sessionSteps, stripHarness, taskTitle, toolSteps, type Made, type OrientWriter, type Row } from './model'
 import { openThread, ThreadChip, ThreadsContext } from './Notes'
 import { DocChip, GroupChip, LabelChip } from './SurfaceChips'
 import { ViewChip } from './ViewChip'
@@ -439,7 +439,7 @@ function AgentCardView({ ws, chat, role, title, ts, log, openWhileRunning = fals
   const proposals = useProposals(ws)
   const made = useMemo(() => withoutDropped(role === 'orient' ? orientMade(madeBy(rows)) : madeBy(rows), proposals), [rows, role, proposals])
   const brief = useMemo(
-    () => (followUp ? scoped!.messages.map((m) => m.text.trim()).join('\n\n') : stripHarness(meta?.brief?.trim() || rows.find((r) => r.kind === 'user')?.text.trim() || '') || null),
+    () => (followUp ? scoped!.messages.map(leadText).join('\n\n') : stripHarness(meta?.brief?.trim() || rows.find((r) => r.kind === 'user')?.text.trim() || '') || null),
     [followUp, scoped, meta?.brief, rows],
   )
   // the writer of its report pass, which its Report section carries (the card for a run, that run's; else the latest)

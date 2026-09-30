@@ -4,7 +4,7 @@
 import { readFileSync } from 'node:fs'
 import path from 'node:path'
 import { describe, expect, test } from 'vitest'
-import { foldRecords, madeBy, MCP_PREFIXES } from '../../src/chat/model.ts'
+import { foldRecords, leadText, madeBy, MCP_PREFIXES, type UserRow } from '../../src/chat/model.ts'
 import type { ChatRecord } from '../../src/lib/types.ts'
 
 const ROOT = path.resolve(__dirname, '../../..')
@@ -53,6 +53,12 @@ describe('the fold', () => {
     expect(rows[5].chat).toBe('ag1')
     expect(rows[6].errorKind).toBe('interrupted')
   })
+})
+
+test('an extension\'s orientation instructions lead its follow-up as a line naming the extension', () => {
+  const [row] = foldRecords(records([{ type: 'user', text: 'Read every record in `*.jsonl`.', by: 'extension', extension: 'swarm', run: 1 }]))
+  expect(leadText(row as UserRow)).toBe('swarm added: its orientation instructions')
+  expect(leadText({ kind: 'user', index: 0, text: ' Count them. ', by: 'browser' })).toBe('Count them.')
 })
 
 describe('tool names', () => {

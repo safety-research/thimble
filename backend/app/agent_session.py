@@ -811,7 +811,7 @@ def _reopen(c: str, chat: str, parent: str, run_k: int, *, leads: list[dict[str,
         text = str(lead.get("text") or "").strip()
         if text:
             agents.append(log_path, {"type": "user", "ts": _now(), "text": text, "by": str(lead.get("by") or agents.TERMINAL),
-                                     "run": run_k})
+                                     "run": run_k, **({"extension": str(lead["extension"])} if lead.get("extension") else {})})
     if parent and run_k > 0 and announce:
         _, parent_log = agents.paths(c, parent)
         agents.append(parent_log, {"type": "agent", "ts": _now(), "chat": chat, "role": meta.get("role"),

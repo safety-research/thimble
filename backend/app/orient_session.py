@@ -376,7 +376,9 @@ async def resume(c: str, messages: "list[dict[str, Any]]", call: str | None = No
         orientation.run_started(c, chat, k, messages, pid=run.pid)
 
     return await agent_session.start(c, KEY, prompt=lead, on_start=started, on_end=_ended, on_pid=_moved, resume=sid,
-                                     chat=chat, run_k=k, leads=[{"text": m.get("text"), "by": m.get("by")} for m in messages],
+                                     chat=chat, run_k=k, leads=[{"text": m.get("text"), "by": m.get("by"),
+                                                                    **({"extension": m["extension"]} if m.get("extension") else {})}
+                                                                   for m in messages],
                                      call=call, announce=announce, **args)
 
 

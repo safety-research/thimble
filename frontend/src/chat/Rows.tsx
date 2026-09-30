@@ -23,7 +23,7 @@ import { teleport } from '../lib/teleport'
 import { track } from '../lib/telemetry'
 import { chipIcon, chipPending, docSave, settleChip, settledWord, type Settled } from './chips'
 import { ChatMarkdown, ChipContext, RefText } from './markdown'
-import { API_ERROR_KIND, callLineText, callPieces, capacityNote, corpusRelative, durationText, groupState, groupTools, isRawCall, labelRunName, madeBy, runTools, stripHarness, toolDisplayName, toolMeta, toolSteps, toolSummary, underCorpus, type AgentRow as AgentRowT, type BranchRow, type CallsRow, type ChipRow as ChipRowT, type ErrorRow as ErrorRowT, type Row, type ToolGroup, type ToolRow as ToolRowT, waitText } from './model'
+import { API_ERROR_KIND, callLineText, callPieces, capacityNote, corpusRelative, durationText, groupState, groupTools, isRawCall, labelRunName, leadText, madeBy, runTools, stripHarness, toolDisplayName, toolMeta, toolSteps, toolSummary, underCorpus, type AgentRow as AgentRowT, type BranchRow, type CallsRow, type ChipRow as ChipRowT, type ErrorRow as ErrorRowT, type Row, type ToolGroup, type ToolRow as ToolRowT, waitText } from './model'
 import { Note, ShotCard, ThreadChip, ThreadsContext } from './Notes'
 import { AgentCard, OrientLanding, openLabel } from './AgentCard'
 import { ApiErrorCard } from './ApiError'
@@ -137,6 +137,7 @@ export function Rows({ rows, ws, chat, streaming = false, nested = false, calls,
       {shown.map((r, i) => {
         switch (r.kind) {
           case 'user':
+            if (r.by === 'extension') return <ExtensionLead key={r.index} name={r.extension ?? ''} text={r.text} ws={ws} />
             return (
               <div key={r.index} className="chat-msg chat-user" data-event={r.event}>
                 {r.by === 'main' && <Note className="chat-origin" text="From" chips={<ThreadChip id="main" />} />}
@@ -836,6 +837,38 @@ export const buildWaitNote = (wait: number): string => `thimble retries the buil
 
 /** Why a thread's run ended without a reply, each said in its record's message (backend threads.STOP_TEXT). */
 const THREAD_STOPS: ReadonlySet<string> = new Set(['session-ended', 'unanswered', 'fork-lost'])
+
+/** An extension's orientation instructions, sent to an orientation that had run when the extension was added: a line
+ * naming the extension, the instructions behind the chevron. */
+function ExtensionLead({ name, text, ws }: { name: string; text: string; ws: string }) {
+  const [open, setOpen] = useState(false)
+  const toggle = () => setOpen((o) => !o)
+  return (
+    <div className={`chat-row chat-note chat-extension-lead${open ? ' open' : ''}`}>
+      <span
+        className="chat-note-head chat-note-act"
+        role="button"
+        tabIndex={0}
+        aria-expanded={open}
+        onClick={toggle}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault()
+            toggle()
+          }
+        }}
+      >
+        <span className="chat-row-word">{leadText({ kind: 'user', index: 0, text, by: 'extension', extension: name })}</span>
+        <Icon name="chevron-right" size={10} className="chat-row-caret" />
+      </span>
+      {open && (
+        <div className="chat-row-body">
+          <RefText text={text} workspace={ws} />
+        </div>
+      )}
+    </div>
+  )
+}
 
 /** A reply that stopped or failed, as a quiet line: the ✕ mark and one word (or why a thread's run ended), the detail
  * behind the chevron. An API error is its card instead (ApiErrorCard), with Retry. */
