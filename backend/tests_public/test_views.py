@@ -11,7 +11,6 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import fnmatch
-import importlib.util
 import io
 import json
 import logging
@@ -19,12 +18,11 @@ import os
 import re
 import shutil
 import sys
-import tracemalloc
 from pathlib import Path
 
 import pytest
 
-from app import config, extensions, headless, tools, userconf, views
+from app import config, headless, tools, userconf, views
 
 CORPUS = "boards"
 POSTS = [  # (thread, author, time, body); line n of board.jsonl is POSTS[n-1]
@@ -229,9 +227,9 @@ async def test_no_thread_is_read_as_a_question_from_a_view_s_own_box(ws, inproc,
 # ------------------------------------------------------------------------------------------------- worked examples
 #
 # plugin/viewers/linked-sessions, incident-timeline and repository are the worked examples a view ticket's session reads
-# (prompts/dev-view.md), and the Swarm extension's view (extensions/swarm) is checked as one. Each ships an invented sample of the files it claims under sample/, and passes
-# over it the checks a view a session writes must pass. Each sample is copied into the temp DATA_DIR as a corpus named
-# after its example.
+# (prompts/dev-view.md). Each ships an invented sample of the files it claims under sample/, and passes over it the
+# checks a view a session writes must pass. Each sample is copied into the temp DATA_DIR as a corpus named after its
+# example.
 
 # the example, the slug it is saved under, and a key of each kind it declares
 EXAMPLES = {
@@ -240,12 +238,11 @@ EXAMPLES = {
     "repository": ("repository", ["view:repository/r1/pull/11", "view:repository/r3", "view:repository/r2/issues/6",
                                   "view:repository/r3/discussions/2", "view:repository/r4/agents/moss"]),
     "linked-sessions": ("linked-sessions", ["view:linked-sessions/r1", "view:linked-sessions/a07a4da7"]),
-    "swarm": ("swarm", ["view:swarm/agent/lamplighter", "view:swarm/place/Night-14/Schedule"]),
 }
 
 
 def _example_dir(name: str) -> Path:
-    return extensions.builtin_dir() / "swarm" / "views" / "swarm" if name == "swarm" else views.EXAMPLES_DIR / name
+    return views.EXAMPLES_DIR / name
 
 
 @pytest.fixture()
@@ -276,8 +273,6 @@ BROKEN = {
     "repository": [("runs/r3/export/comments.csv", '4,hazel,2026-05-20T10:00:00,"Repro:\n2 failures"\n', 0),
                    ("runs/r2/manifest.json", "{", 1)],
     "linked-sessions": [("runs/r1/sessions-index.json", "not json", 1)],
-    "swarm": [("roster.csv", 'nightjar,"Watch the\nweather",2026-04-11\n', 0),
-              ("chat/help-desk.jsonl", '{"id": "m109", "te\n', 1)],
 }
 
 
@@ -312,7 +307,7 @@ async def test_every_worked_example_answers_the_checks_over_its_sample(name, sam
     assert problems["count"] == before + sum(n for *_, n in BROKEN[name]), problems
 
 
-@pytest.mark.parametrize("name", ["repository", "swarm"])
+@pytest.mark.parametrize("name", ["repository"])
 async def test_every_worked_example_s_page_loads_headless_at_its_first_place(name, samples, inproc, bound, tmp_path):
     """The whole check a view ticket's session runs, the headless page included, where this machine has Node and the
     frontend's packages with their Chromium (scripts/check.sh install)."""
@@ -327,166 +322,6 @@ async def test_every_worked_example_s_page_loads_headless_at_its_first_place(nam
     assert not views.unmarked(rep["page"]), "the records a worked example shows carry their file refs, for the labels"
 
 
-async def test_the_swarm_overview_colours_the_records_a_label_marks(samples, inproc, bound):
-    """A question from the Swarm view is answered with labels, and the overview colours what they mark: a regex label
-    over the sample's chat and wiki marks the records about the gain, and once it is on the overview counts them under
-    its value and a cell's listing gives each its value; a save that changed one value reads as that change."""
-    from app import concepts
-
-    slug = _save_example("swarm")
-    s = await concepts.apply_scoped("swarm", scope="files", name="gain", kind="regex", text=r"(?i)\bgain\b|1\.84|1\.48",
-                                    values=["about the gain", "other"], paths=["chat/*.jsonl", "wiki/pages/**/*.jsonl"],
-                                    limit=None, comment=False, filter=False, created_by="test", chat=None, group=None, card=False)
-    await concepts.wait_apply("swarm", s["concept"], 60)
-    marked = {r["ref"] for r in concepts.read_labels(config.WORKSPACES_DIR / "swarm", s["concept"]) if r["label"] == "about the gain"}
-    assert "wiki/pages/Calibration/Gain.jsonl#L4" not in marked  # a regex reads a save as what it changed: a replay, nothing
-    marked -= {"chat/help-desk.jsonl#L8"}  # a post sent twice
-    concepts.show_concept("swarm", s["concept"], True)
-    views._memo.clear()
-    ov = await views.reader_call("swarm", slug, "records", {"op": "overview", "bins": 40})
-    assert ov["marks"][0]["value"] == "about the gain" and ov["mark_counts"][0] == len(marked)
-    gain = await views.reader_call("swarm", slug, "records", {"op": "bin", "places": ["Calibration/Gain"], "from": 0, "to": 1e12})
-    assert {r["ref"] for r in gain["records"] if r["m"] == 0} == {ref for ref in marked if ref.startswith("wiki/pages/Calibration/Gain")}
-    assert any(r["line"] == "1.84 → 1.48" for r in gain["records"]), [r["line"] for r in gain["records"]]
-
-
-async def test_the_swarm_overview_counts_every_record_and_lists_a_cells_records(samples, inproc, bound):
-    """The Swarm view's overview counts every record it reads, per account and per place across time bins; a zoomed
-    window counts only its records, and a cell's listing holds the records the cell counts."""
-    slug = _save_example("swarm")
-    ov = await views.reader_call("swarm", slug, "records", {"op": "overview", "bins": 40})
-    total = ov["counts"]["records"]
-    assert ov["chosen"]["shown"] == total and sum(r["n"] for r in ov["accounts"]) + (ov["accounts_rest"] or {"n": 0})["n"] == total
-    assert sum(r["n"] for r in ov["places"]) + (ov["places_rest"] or {"n": 0})["n"] == total
-    row = ov["accounts"][0]
-    cell = max(row["cells"], key=lambda c: c["n"])
-    q = {"op": "bin", "accounts": [row["name"]]}
-    if cell["b"] < ov["bins"]:
-        q |= {"from": ov["start"] + cell["b"] * ov["step"], "to": ov["start"] + (cell["b"] + 1) * ov["step"]}
-    else:
-        q |= {"untimed": True}
-    got = await views.reader_call("swarm", slug, "records", q)
-    assert got["total"] == cell["n"] and {r["account"] for r in got["records"]} == {row["name"]}
-    lo, hi = ov["window"]
-    mid = lo + (hi - lo) / 2
-    zoomed = await views.reader_call("swarm", slug, "records", {"op": "overview", "from": lo, "to": mid})
-    assert zoomed["zoomed"] and 0 < zoomed["chosen"]["shown"] < total
-
-
-async def test_a_save_that_only_re_encodes_its_page_changes_nothing_on_the_swarm_view(samples, inproc, bound):
-    """A wiki that re-encodes a page's text on each save ("é" read back as "Ã©") changes lines no one edited: such a
-    save reads as changing nothing, while a save that changes only non-ASCII text reads as that change."""
-    d = samples / "wiki"
-    d.mkdir()
-    page = ["Plan for the café night", "I will bring the café tests. -- ann"]
-    moji = [s.encode("utf-8").decode("latin-1") for s in page]
-    saves = [("ann", page), ("bo", moji), ("cy", [*moji, "状态：测试已完成"]), ("dee", [*moji, "状态：测试失败了"])]
-    (d / "pages.jsonl").write_text("".join(json.dumps({"page": "Plan", "rev": i, "user": u, "ts": f"2026-04-14T2{i}:00:00Z",
-                                                        "text": "\n".join(t)}, ensure_ascii=False) + "\n"
-                                           for i, (u, t) in enumerate(saves, 1)), "utf-8")
-    (d / "manifest.json").write_text(json.dumps({"name": "wiki", "description": "a wiki"}))
-    src = _example_dir("swarm")
-    raw = json.loads((src / "view.json").read_text("utf-8"))
-    views.write_view("wiki", "swarm", reader=(src / "reader.py").read_text("utf-8"), html=(src / "view.html").read_text("utf-8"),
-                     **{**{k: raw[k] for k in ("name", "why", "accepts", "declares", "default", "libs")}, "claims": ["pages.jsonl"]})
-    refs = [f"pages.jsonl#L{n}" for n in range(1, 5)]
-    line = {}
-    for q in ({"from": 0, "to": 1e12}, {"untimed": True}):  # the fourth save's hour, 24, is no time
-        got = await views.reader_call("wiki", "swarm", "records", {"op": "bin", "places": ["Plan"], **q})
-        line |= {r["ref"]: r["line"] for r in got["records"]}
-    assert set(line) == set(refs)
-    assert line["pages.jsonl#L2"] == "Changed only spacing or encoding", line
-    assert line["pages.jsonl#L4"] == "状态：测试已完成 → 状态：测试失败了", line
-
-
-async def test_the_swarm_extension_installs_its_view_where_it_applies_outside_the_orientations_four(samples, inproc, bound):
-    """The Swarm view is opt-in: thimble proposes it nowhere until the Swarm extension is added. Added, it runs on a
-    corpus where many accounts act on pages they share and name each other, installed at once claiming the files that
-    hold their actions, outside the orientation's four, and once deleted is not installed again; on the worked
-    examples' samples, a small team's, it does not run."""
-    d = samples / "big-swarm"
-    d.mkdir()
-    rows = [{"page": f"p{i % 4}", "user": f"bot{i % 35}", "text": f"Relay from bot{(i + 1) % 35}: the value is {i}."}
-            for i in range(140)]
-    (d / "saves.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows))
-    (d / "manifest.json").write_text(json.dumps({"name": "big-swarm", "description": "a swarm"}))
-    assert await views.propose_builtins("big-swarm") == []
-    assert extensions.add("swarm", yes=True, say=lambda _: None) == "swarm"
-    for name in EXAMPLES:
-        assert not (await extensions.refresh(name))["extensions"]["swarm"]["active"], name
-    assert (await extensions.refresh("big-swarm"))["extensions"]["swarm"]["active"]
-    prop = views.read_proposal("big-swarm", "swarm")
-    assert prop["extension"] == "swarm" and prop["orientation"] is False and prop["claims"] == ["saves.jsonl"]
-    assert "35 accounts" in prop["why"] and views.orientation_views("big-swarm") == []
-    assert views.read_view("big-swarm", "swarm")["ok"]
-    views.delete_proposal("big-swarm", "swarm")
-    await extensions.refresh("big-swarm")
-    assert views.read_view("big-swarm", "swarm") is None  # one the analyst deleted is not installed again
-
-
-async def test_thimble_s_own_old_install_of_the_swarm_view_gives_way_to_the_extension(samples, inproc, bound):
-    """A workspace made before Swarm was an extension holds thimble's own install of the Swarm view, whose viewer thimble
-    no longer ships. Unchanged, it goes while the extension is not added, and the extension's view replaces it once it
-    is."""
-    d = samples / "old-swarm"
-    d.mkdir()
-    rows = [{"page": f"p{i % 4}", "user": f"bot{i % 35}", "text": f"Relay from bot{(i + 1) % 35}: the value is {i}."}
-            for i in range(140)]
-    (d / "saves.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows))
-    (d / "manifest.json").write_text(json.dumps({"name": "old-swarm", "description": "a swarm"}))
-
-    def old_install():
-        views.install_viewer("old-swarm", "swarm", _example_dir("swarm"), ["saves.jsonl"], why="", proposed_by="thimble",
-                             orientation=True)
-
-    old_install()
-    assert views.orphaned("old-swarm") == ["swarm"]
-    await extensions.refresh("old-swarm")
-    assert views.read_view("old-swarm", "swarm") is None and views.read_proposal("old-swarm", "swarm") is None
-    old_install()
-    extensions.add("swarm", yes=True, say=lambda _: None)
-    await extensions.refresh("old-swarm")
-    assert views.read_proposal("old-swarm", "swarm")["extension"] == "swarm" and views.orphaned("old-swarm") == []
-    assert views.read_view("old-swarm", "swarm")["ok"]
-
-
-def test_the_swarm_reader_s_shares_print_every_record_once(samples, monkeypatch, capsys):
-    """The Swarm reader's shares are cut by size at records, so a place may run over two, and between them they print
-    every record once; --from and --count print part of one place."""
-    spec = importlib.util.spec_from_file_location("swarm_reader", _example_dir("swarm") / "reader.py")
-    reader = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(reader)
-    monkeypatch.chdir(samples / "swarm")
-    files = [x for g in json.loads((_example_dir("swarm") / "view.json").read_text())["claims"] for x in ("--files", g)]
-    printed, cut = [], False
-    for k in range(1, 5):
-        reader.main([*files, "--share", f"{k}/4"])
-        out = capsys.readouterr().out
-        printed += re.findall(r"^(\S+#L\d+) ", out, re.M)
-        cut = cut or " of " in out
-    index = reader.build_index(reader._script_files(files[1::2]))
-    assert sorted(printed) == sorted(index["order"]) and cut
-    reader.main([*files, "--place", "Night-14/Schedule", "--from", "2", "--count", "2"])
-    out = capsys.readouterr().out
-    assert "records 2–3 of 4" in out and re.findall(r"^(\S+#L\d+) ", out, re.M) == index["places"]["Night-14/Schedule"]["refs"][1:3]
-
-
-async def test_whether_swarm_applies_is_read_from_the_head_of_a_big_csv(samples, inproc, bound):
-    """Deciding whether the Swarm extension applies reads the first records of each file, so a big CSV that is no swarm
-    costs little memory."""
-    d = samples / "metrics"
-    d.mkdir()
-    with open(d / "metrics.csv", "w") as f:
-        f.write("ts,host,metric,value,status\n" + "2026-05-16T08:00:00Z,web-1,cpu,0.93,ok\n" * 1_000_000)
-    (d / "manifest.json").write_text(json.dumps({"name": "metrics", "description": "metrics"}))
-    extensions.add("swarm", yes=True, say=lambda _: None)
-    tracemalloc.start()
-    try:
-        assert not (await extensions.refresh("metrics"))["extensions"]["swarm"]["active"]
-        peak = tracemalloc.get_traced_memory()[1]
-    finally:
-        tracemalloc.stop()
-    assert peak < (d / "metrics.csv").stat().st_size / 2, peak
 # what Playwright's own error says to run, which never reaches a model
 INSTALL_WORDS = re.compile(r"playwright install|npx|download new browsers|Executable doesn't exist|install\.sh", re.I)
 

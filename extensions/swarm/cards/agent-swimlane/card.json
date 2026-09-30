@@ -1,6 +1,6 @@
 {
-  "reader": "swarm",
   "name": "Agent swimlane",
+  "applies": true,
   "aliases": ["swarm"],
   "use": "How accounts acted on each other in a swarm: a row per account with the goal you inferred, the significant actions you chose as cards in event order, each with your one-line summary and its thread, and the typed links you found between them.",
   "args": {

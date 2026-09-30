@@ -154,14 +154,15 @@ def version_of(d: Path) -> str:
 
 def _ext_entry(c: str, t: dict[str, Any]) -> dict[str, Any]:
     """An extension's type (extensions.card_types) as REGISTRY_FILE holds it, its index shared with the workspace's view
-    of the type's view when the extension installed that view and it reads the same files with the same reader."""
+    of the type's view when the extension installed that view and it reads the same files with the same reader. A type
+    with a reader of its own has `view` None."""
     d, reader = Path(t["dir"]), Path(t["reader"])
     block = card_block({"card": t["block"]}) or {}
     reader_src = reader.read_text("utf-8")
     files = views.claimed_files(c, {"claims": t["claims"]})
     fp = views.fingerprint(files, reader_src)
     cache = Path(t["cache"])
-    view = views.read_built(c, t["view"])
+    view = views.read_built(c, t["view"]) if t["view"] is not None else None
     if view is not None and view["ok"] and view["claims"] == t["claims"]:
         prop = views.read_proposal(c, t["view"]) or {}
         try:
@@ -661,6 +662,8 @@ async def as_view(c: str, cell_id: str) -> dict[str, Any]:
         raise HTTPException(404, f"no such card: {cell_id}")
     made = card_of(cell.get("outputs"))
     t = type_of(c, cell)
+    if t["origin"] == "extension" and t["view"] is None:
+        raise HTTPException(409, f"the {t['slug']} card type has no view")
     if t["origin"] == "extension":
         slug = t["view"]
         v = await asyncio.to_thread(views.read_built, c, slug)

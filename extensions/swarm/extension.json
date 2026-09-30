@@ -1,8 +1,8 @@
 {
   "api": 0,
   "name": "swarm",
-  "version": "0.1.0",
-  "description": "For corpora where many agents act on shared pages and channels: an orientation that reads every message, the Swarm overview, and the agent-swimlane card type.",
-  "applies": "swarm",
+  "version": "0.2.0",
+  "description": "For corpora where many agents act on shared pages and channels: an orientation that reads every message, and the agent-swimlane card type.",
+  "applies": "agent-swimlane",
   "requires": []
 }

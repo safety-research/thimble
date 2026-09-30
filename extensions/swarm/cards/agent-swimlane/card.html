@@ -147,13 +147,10 @@ function renderHead() {
   const box = document.getElementById('threads')
   box.replaceChildren()
   for (const t of D.threads) {
-    const el = h('span', `th${t.place ? ' place' : ''}`)
+    const el = h('span', `th${t.place && t.ref ? ' place' : ''}`)
     const nm = h('span', 'nm', t.name)
     nm.title = t.name
-    if (t.place) {
-      el.dataset.anchor = `view:swarm/place/${t.name.replace(/ /g, '%20')}`
-      nm.onclick = () => thimble.navigate(el.dataset.anchor)
-    }
+    if (t.place && t.ref) nm.onclick = () => thimble.navigate(t.ref)
     el.append(h('b', null, t.tag), nm)
     box.append(el)
   }
@@ -272,7 +269,6 @@ function layout() {
     bg.style.height = `${bottom - top}px`
     plot.append(bg)
     const el = h('div', `agent${i % 2 ? ' odd' : ''}`)
-    el.dataset.anchor = `view:swarm/agent/${r.account}`
     el.style.top = `${top}px`
     el.style.height = `${bottom - top}px`
     el.style.width = `${headW}px`

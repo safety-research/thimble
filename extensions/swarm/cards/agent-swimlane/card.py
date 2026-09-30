@@ -113,6 +113,7 @@ def card(index, actions, goals=None, links=None):
         rows.append({"account": account, "goal": given if given is not None else index["accounts"][account].get("goal", ""),
                      "inferred": given is not None, "n": index["accounts"][account]["n"]})
     threads = [{"tag": t, "name": name, "place": name in index["places"],
+                "ref": next(c["ref"] for c in shown if c["thread"] == name),
                 "n": sum(1 for c in shown if c["thread"] == name)} for name, t in tags.items()]
     return {"actions": shown, "rows": rows, "threads": threads, "links": drawn, "types": kinds, "carried": carried,
             "marks": marks, "counts": {"records": len(index["order"]), "accounts": len(index["accounts"]),

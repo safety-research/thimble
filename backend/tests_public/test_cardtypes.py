@@ -1,22 +1,25 @@
 """app.cardtypes and thimble.card, with the Swarm extension's `agent-swimlane` card type, which was `swarm` before. On a
-corpus the Swarm view applies to, the registry finds the type without any view proposal and lists it for main's prompt;
-a card's code draws it with thimble.card, which checks the arguments against the type's schema, runs card.py on the
-reader's cached index under the labels the call names, whatever Files highlights, and shows the data with a listing main
-reads and cites; the card check's page gets the type's frame from the request. Keep writes a patch of the arguments into
-the card's one thimble.card call (its tests with a type that has such arguments are in test_extensions). Main hears when
-a label it ran finishes, and can colour a label's values.
+corpus the Swarm extension applies to, the registry finds the type without any view proposal and lists it for main's
+prompt; a card's code draws it with thimble.card, which checks the arguments against the type's schema, runs card.py on
+the reader's cached index under the labels the call names, whatever Files highlights, and shows the data with a listing
+main reads and cites; the card check's page gets the type's frame from the request. Keep writes a patch of the arguments
+into the card's one thimble.card call (its tests with a type that has such arguments are in test_extensions). Main hears
+when a label it ran finishes, and can colour a label's values.
 
-The corpus `crew` is 140 saves of 35 accounts on 4 pages, each naming the next account, which the Swarm extension's
-view reads as a swarm; the extension is added. Reader calls run in this process (views._runner replaced by an exec of the
-kernel's snippet), and thimble.card runs in this process in a module built from kernel_thimble.py, as a kernel builds it."""
+The corpus `crew` is 140 saves of 35 accounts on 4 pages, each naming the next account, which the Swarm reader reads as
+a swarm; the extension is added. Reader calls run in this process (views._runner replaced by an exec of the kernel's
+snippet), and thimble.card runs in this process in a module built from kernel_thimble.py, as a kernel builds it."""
 from __future__ import annotations
 
 import asyncio
 import contextlib
+import importlib.util
 import io
 import json
 import os
+import re
 import sys
+import tracemalloc
 import types
 from pathlib import Path
 
@@ -24,7 +27,9 @@ import pytest
 
 from fastapi import HTTPException
 
-from app import card_check, cardtypes, channel, concepts, config, extensions, render, tools, views
+from app import card_check, cardtypes, channel, concepts, config, extensions, notebook, render, tools, views
+
+SWIMLANE = extensions.builtin_dir() / "swarm" / "cards" / "agent-swimlane"
 
 CORPUS = "crew"
 ROWS = [{"page": f"p{i % 4}", "user": f"bot{i % 35}", "ts": f"2026-04-14T{i // 60:02d}:{i % 60:02d}:00Z",
@@ -234,3 +239,74 @@ async def test_main_hears_when_a_label_it_ran_finishes_and_can_colour_its_values
     assert swapped == {"even": 12, "odd": 1}, "the value that had the colour takes the one the other left"
     with pytest.raises(HTTPException, match="no label colour is named 'teal'"):
         concepts.show_concept(CORPUS, "even", None, colours={"odd": "teal"})
+
+
+async def test_the_swarm_extension_ships_no_view_and_takes_back_the_one_it_installed(crew, monkeypatch, tmp_path):
+    """The Swarm extension gives its card type and orientation but no view: on a swarm it runs and nothing is proposed
+    or installed, a card of its type has no view to open, and the Swarm view an earlier version installed goes, as does
+    thimble's own install of it from before Swarm was an extension. On a small team's records it does not run."""
+    old = tmp_path / "old-swarm-view"
+    old.mkdir()
+    for name in ("reader.py", "card.py"):
+        (old / name).write_text((SWIMLANE / name).read_text("utf-8"))
+    (old / "view.html").write_text("<!doctype html><title>Swarm</title>")
+    (old / "view.json").write_text(json.dumps({"name": "Swarm", "claims": ["saves.jsonl"]}))
+    views.install_viewer(CORPUS, "swarm", old, ["saves.jsonl"], why="", proposed_by="extension", orientation=False,
+                         extension="swarm")
+    views.install_viewer(CORPUS, "relay", old, ["saves.jsonl"], why="", proposed_by="thimble", orientation=True)
+    state = await extensions.refresh(CORPUS)
+    assert state["extensions"]["swarm"]["active"] and state["extensions"]["swarm"]["views"] == []
+    assert views.list_proposals(CORPUS) == [] and views.read_view(CORPUS, "swarm") is None
+    types_ = await cardtypes.refresh(CORPUS, warm=False)
+    assert types_["agent-swimlane"]["view"] is None
+    cell = {"id": "c1", "outputs": [{cardtypes.CARD_MIME: {"type": "swarm", "args": {}}}]}
+    monkeypatch.setattr(notebook, "get_cell", lambda c, cid: cell)
+    with pytest.raises(HTTPException, match="the agent-swimlane card type has no view"):
+        await cardtypes.as_view(CORPUS, "c1")
+
+    team = config.DATA_DIR / "team"
+    team.mkdir()
+    (team / "manifest.json").write_text(json.dumps({"name": "team", "description": "a team's chat"}))
+    (team / "chat.jsonl").write_text("".join(json.dumps({"channel": "ops", "user": f"u{i % 4}", "text": f"u{(i + 1) % 4} ok"})
+                                             + "\n" for i in range(40)))
+    assert not (await extensions.refresh("team"))["extensions"]["swarm"]["active"]
+
+
+def test_the_swarm_reader_s_shares_print_every_record_once(monkeypatch, capsys):
+    """The Swarm reader's shares are cut by size at records, so a place may run over two, and between them they print
+    every record once; --from and --count print part of one place. The listing begins with the files it read."""
+    spec = importlib.util.spec_from_file_location("swarm_reader", SWIMLANE / "reader.py")
+    reader = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(reader)
+    monkeypatch.chdir(SWIMLANE / "sample")
+    files = [x for g in ("roster.csv", "wiki/index.jsonl", "wiki/pages/**/*.jsonl", "chat/*.jsonl") for x in ("--files", g)]
+    reader.main(files)
+    assert capsys.readouterr().out.startswith("files: chat/help-desk.jsonl chat/night-ops.jsonl roster.csv")
+    printed, cut = [], False
+    for k in range(1, 5):
+        reader.main([*files, "--share", f"{k}/4"])
+        out = capsys.readouterr().out
+        printed += re.findall(r"^(\S+#L\d+) ", out, re.M)
+        cut = cut or " of " in out
+    index = reader.build_index(reader._script_files(files[1::2]))
+    assert sorted(printed) == sorted(index["order"]) and cut
+    reader.main([*files, "--place", "Night-14/Schedule", "--from", "2", "--count", "2"])
+    out = capsys.readouterr().out
+    assert "records 2–3 of 4" in out and re.findall(r"^(\S+#L\d+) ", out, re.M) == index["places"]["Night-14/Schedule"]["refs"][1:3]
+
+
+async def test_whether_swarm_applies_is_read_from_the_head_of_a_big_csv(crew):
+    """Deciding whether the Swarm extension applies reads the first records of each file, so a big CSV that is no swarm
+    costs little memory."""
+    d = config.DATA_DIR / "metrics"
+    d.mkdir()
+    (d / "manifest.json").write_text(json.dumps({"name": "metrics", "description": "metrics"}))
+    with open(d / "metrics.csv", "w") as f:
+        f.write("ts,host,metric,value,status\n" + "2026-05-16T08:00:00Z,web-1,cpu,0.93,ok\n" * 1_000_000)
+    tracemalloc.start()
+    try:
+        assert not (await extensions.refresh("metrics"))["extensions"]["swarm"]["active"]
+        peak = tracemalloc.get_traced_memory()[1]
+    finally:
+        tracemalloc.stop()
+    assert peak < (d / "metrics.csv").stat().st_size / 2, peak

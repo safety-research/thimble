@@ -1,6 +1,6 @@
-# Swarm: many agents acting on shared pages and channels, drawn as an overview of every record: a strip per place and a
-# row per account across time bins, shaded by count and coloured by the labels that are on, with any cell's records a
-# click away. The Swarm extension's card type (cards/swarm) reads its records and links from this reader's index.
+# Swarm: many agents acting on shared pages and channels. The agent-swimlane card type (card.py) reads its records and
+# links from this reader's index, and the orientation's swarm-reader agents read the records in order by running it as a
+# script (main).
 #
 # The records: JSON Lines or CSV files of saves and posts. The reader finds each file's fields by their names:
 #   who     the first actor field with a value (ACTOR_KEYS), else the address of a save made without an account
@@ -42,23 +42,19 @@
 # the save before it, the record it replies to), so a corpus of many thousand saves indexes in seconds; a record's text,
 # what its save changed, the name it signs with and the accounts it names are read back from its line when it is shown.
 #
-# Links (_reach), for the Swarm extension's card type (cards/swarm/card.py), which names the links it draws and lists
-# those the records themselves carry among its actions, counted from the index with no text read:
+# Links (_reach), for the card type, which names the links it draws and lists those the records themselves carry among
+# its actions, counted from the index with no text read:
 #   reply       the record answers the other record (its reply field)
 #   names       the record names the other record's account (the latest record of that account before it)
 #   same place  the record before it on its place, by another account
 # A pair keeps one link, the first of these that holds.
 #
-# Labels: the overview's cells take the colours of the values the labels that are on give their records
-# (thimble.marked). A row's unit is `agent/<account>` and a place's `place/<place>`, whose refs are their records.
-#
-# When it applies (view.json `applies`): thimble proposes this view to an orientation when applies(paths), given the
-# corpus's record files, finds a swarm in them, and claims the files it names (applies).
+# When it applies (card.json `applies`): the Swarm extension runs where applies(paths), given the corpus's record files,
+# finds a swarm in them, and the card type reads the files it names.
 import csv
 import difflib
 import io
 import json
-import math
 import os
 import re
 import sys
@@ -97,7 +93,6 @@ HUNK_LINES = 400
 HUNK_PAIRS_MAX = 4_000_000  # line pairs a save's diff compares at most; past it the lines are compared as sets
 EXCERPT_LINES = 12
 LINE_MAX = 400
-REFS_MAX = 200
 PROBLEMS_KEPT = 50  # problems the index lists; all are counted
 SIGNATURE = re.compile(r"(?:—|--)\s*([A-Za-z][\w.'-]*(?: [\w.'-]+){0,3})\s*$")
 WORD = re.compile(r"@?[A-Za-z][\w.-]*\w")
@@ -734,197 +729,7 @@ def _detail(index, ref):
     return out
 
 
-# ------------------------------------------------------------------------------------------------ the overview
-
-
-OV_BINS = 120  # time bins the overview gets when the page asks for none
-OV_BINS_MAX = 480
-OV_ACCOUNTS = 40  # account rows; the other accounts share one row
-OV_PLACES = 12  # place strips; the other places share one strip
-BIN_LISTED = 200  # records a bin's listing holds at a time
-STEPS = (1, 2, 5, 10, 15, 30, 60, 120, 300, 600, 900, 1800, 3600, 7200, 10800, 21600, 43200, 86400, 2 * 86400,
-         7 * 86400, 14 * 86400, 30 * 86400, 91 * 86400, 365 * 86400)
-
-
-def _in_runs(index, name):
-    """A place named without its run, as citations written before places carried runs name it: the records of that
-    place in every run; None when no run has it."""
-    hits = [p for key, p in index["places"].items() if p.get("run") and key == f"{p['run']}/{name}"]
-    if not hits:
-        return None
-    refs = sorted((r for p in hits for r in p["refs"]), key=lambda r: (index["recs"][r]["t"], r))
-    return {"ref": refs[0], "title": name, "refs": refs}
-
-
-def _step(width, n):
-    """The bin width: the smallest round step (STEPS) that covers `width` seconds in `n` bins or fewer."""
-    return next((s for s in STEPS if width / s <= n), STEPS[-1])
-
-
-def _chosen(index, query):
-    """The refs, in event order, of the overview's `run` (every record when it names none), and that run."""
-    run = query.get("run") if query.get("run") in index["runs"] else None
-    return [ref for ref in index["order"] if not run or index["recs"][ref]["run"] == run], run
-
-
-def _window(index, refs, query):
-    """(span, lo, hi): the first and last known time of `refs`, and the window the query asks for within them; the whole
-    span when it asks for none. None for each when no record has a time."""
-    times = [index["recs"][ref]["t"] for ref in refs if index["recs"][ref]["known"]]
-    if not times:
-        return None, None, None
-    a, b = min(times), max(times)
-    lo = query.get("from")
-    hi = query.get("to")
-    lo = a if not isinstance(lo, (int, float)) else min(max(float(lo), a), b)
-    hi = b if not isinstance(hi, (int, float)) else min(max(float(hi), lo), b)
-    return (a, b), lo, hi
-
-
-def _overview(index, query):
-    """Every record chosen, counted per time bin: a strip per place (the OV_PLACES busiest, the rest in one strip) and a
-    row per account (the OV_ACCOUNTS busiest of those `q` names, with `pin` always among them, the rest in one row),
-    each cell {b, n, k, m}: its bin, its records, those the label filter keeps, and [[mark, n]] for the labels that are
-    on. A `place` counts the account rows over that place's records alone. Records with no time are counted in a bin
-    of their own after the others while the window is the whole span."""
-    recs = index["recs"]
-    on = thimble.view_labels()
-    marks = [{"label": lab["name"], "value": v["name"], "colour": v["colour"]}
-             for lab in on["labels"] for v in lab["values"]][:MARKS_MAX]
-    mark_at = {(x["label"], x["value"]): i for i, x in enumerate(marks)}
-    refs, run = _chosen(index, query)
-    span, lo, hi = _window(index, refs, query)
-    zoomed = span is not None and (lo > span[0] or hi < span[1])
-    n = max(1, min(int(query.get("bins") or OV_BINS), OV_BINS_MAX))
-    step = _step(max(hi - lo, 1.0), n) if span else 1
-    start = math.floor(lo / step) * step if span else 0
-    nb = int((hi - start) // step) + 1 if span else 0
-    place = str(query.get("place") or "") or None
-    q = str(query.get("q") or "").strip().lower()
-    pin = str(query.get("pin") or "")
-
-    def bin_of(r):
-        if not r["known"]:
-            return None if zoomed else nb
-        return None if r["t"] < lo or r["t"] > hi else min(nb - 1, int((r["t"] - start) // step))
-
-    cells = {}  # (kind, key) -> {bin: [n, kept, {mark: n}]}
-    per_mark, unmarked, shown, untimed = [0] * len(marks), 0, 0, 0
-    for ref in refs:
-        r = recs[ref]
-        b = bin_of(r)
-        if b is None:
-            continue
-        kept = thimble.kept(ref)
-        got = {mark_at[k] for x in thimble.marked(ref) if (k := (x["label"], x["value"])) in mark_at} if marks else set()
-        rows = [("place", r["place"])]
-        if not place or r["place"] == place:
-            rows.append(("account", r["account"]))
-            shown += 1
-            untimed += not r["known"]
-            for i in got:
-                per_mark[i] += 1
-            unmarked += bool(marks) and not got
-        for row in rows:
-            c = cells.setdefault(row, {}).setdefault(b, [0, 0, {}])
-            c[0] += 1
-            c[1] += kept
-            for i in got:
-                c[2][i] = c[2].get(i, 0) + 1
-
-    def total(key):
-        return sum(c[0] for c in cells[key].values())
-
-    def row_of(kind, name, keys):
-        merged = {}
-        for key in keys:
-            for b, c in cells[key].items():
-                m = merged.setdefault(b, [0, 0, {}])
-                m[0] += c[0]
-                m[1] += c[1]
-                for i, k in c[2].items():
-                    m[2][i] = m[2].get(i, 0) + k
-        return {"n": sum(c[0] for c in merged.values()), "k": sum(c[1] for c in merged.values()),
-                "cells": [{"b": b, "n": c[0], "k": c[1], "m": sorted(c[2].items())} for b, c in sorted(merged.items())]}
-
-    place_keys = sorted((k for k in cells if k[0] == "place"), key=lambda k: (-total(k), k[1]))
-    account_keys = sorted((k for k in cells if k[0] == "account"), key=lambda k: (-total(k), k[1].lower()))
-    top_places = place_keys[:OV_PLACES]
-    if place and ("place", place) in cells and ("place", place) not in top_places:
-        top_places = [*top_places[:-1], ("place", place)] if len(top_places) >= OV_PLACES else [*top_places, ("place", place)]
-    wanted = [k for k in account_keys if not q or q in k[1].lower()]
-    top_accounts = wanted[:OV_ACCOUNTS]
-    hit = next((k for k in account_keys if k[1].lower() == pin.lower()), None) if pin else None
-    if hit is not None and hit not in top_accounts:
-        top_accounts = [*top_accounts[: OV_ACCOUNTS - 1], hit]
-    rest_places = [k for k in place_keys if k not in top_places]
-    rest_accounts = [k for k in account_keys if k not in top_accounts]
-    places = []
-    for k in top_places:
-        p = index["places"][k[1]]
-        places.append({"name": k[1], "title": p["title"], "accounts": len(p["accounts"]), **row_of("place", k[1], [k])})
-    accounts = []
-    for k in top_accounts:
-        a = index["accounts"][k[1]]
-        accounts.append({"name": k[1], "goal": a["goal"], **row_of("account", k[1], [k])})
-    return {
-        "counts": {"records": len(index["order"]), "accounts": len(index["accounts"]), "places": len(index["places"])},
-        "chosen": {"records": len(refs), "shown": shown, "accounts": len(account_keys), "places": len(place_keys)},
-        "runs": [{"name": k, "n": v} for k, v in sorted(index["runs"].items())], "run": run,
-        "span": list(span) if span else None, "window": [lo, hi] if span else None, "zoomed": zoomed,
-        "start": start, "step": step, "bins": nb, "untimed": untimed,
-        "places": places, "places_rest": ({"count": len(rest_places), **row_of("place", "", rest_places)} if rest_places else None),
-        "accounts": accounts,
-        "accounts_rest": ({"count": len(rest_accounts), **row_of("account", "", rest_accounts)} if rest_accounts else None),
-        "place": place if place and ("place", place) in cells else None, "q": q, "pin": hit[1] if hit else None,
-        "marks": marks, "mark_counts": per_mark, "unmarked": unmarked, "filter": on.get("filter"),
-    }
-
-
-def _bin(index, query):
-    """The records of one cell or row of the overview, in event order: those the overview's query chooses, in its
-    window (or, with `untimed`, those with no time), of the `accounts` or `places` given, or of all but those in
-    `except_accounts` or `except_places` (a rest row), on the `place` given, from `offset`, BIN_LISTED at a time:
-    {total, offset, records: [{ref, account, place, time, kind, line, m, mb}]}."""
-    recs = index["recs"]
-    on = thimble.view_labels()
-    marks = [(lab["name"], v["name"]) for lab in on["labels"] for v in lab["values"]][:MARKS_MAX]
-    mark_at = {k: i for i, k in enumerate(marks)}
-    refs, _run = _chosen(index, query)
-    span, lo, hi = _window(index, refs, query)
-    a, b = query.get("from"), query.get("to")
-    untimed = bool(query.get("untimed"))
-    only_a = {str(x) for x in query.get("accounts") or ()}
-    only_p = {str(x) for x in query.get("places") or ()}
-    not_a = {str(x) for x in query.get("except_accounts") or ()}
-    not_p = {str(x) for x in query.get("except_places") or ()}
-    place = str(query.get("place") or "") or None
-
-    def fits(r):
-        if untimed:
-            if r["known"]:
-                return False
-        elif not r["known"] or span is None or not lo <= r["t"] <= hi:
-            return False
-        elif (isinstance(a, (int, float)) and r["t"] < a) or (isinstance(b, (int, float)) and r["t"] >= b):
-            return False
-        return ((not only_a or r["account"] in only_a) and r["account"] not in not_a and (not only_p or r["place"] in only_p)
-                and r["place"] not in not_p and (not place or r["place"] == place))
-
-    hits = [ref for ref in refs if fits(recs[ref])]
-    offset = max(0, min(int(query.get("offset") or 0), max(0, len(hits) - 1)))
-    out = []
-    for ref in hits[offset: offset + BIN_LISTED]:
-        r = recs[ref]
-        first, bits = -1, 0
-        for x in thimble.marked(ref) if marks else ():
-            i = mark_at.get((x["label"], x["value"]))
-            if i is not None:
-                first = i if first < 0 else first
-                bits |= 1 << i
-        out.append({"ref": ref, "account": r["account"], "place": r["place"], "time": _iso(r["t"]) if r["known"] else None,
-                    "kind": r["kind"], "line": _did(index, r)["line"], "m": first, "mb": bits})
-    return {"total": len(hits), "offset": offset, "records": out}
+# ------------------------------------------------------------------------------------------------ records
 
 
 def problems(index):
@@ -934,14 +739,11 @@ def problems(index):
 
 
 def records(index, query):
-    """{op: overview, ...}: the overview (_overview); {op: bin, ...}: the records one cell or row counts (_bin); {op:
-    record, ref}: one record in full (_detail)."""
+    """{op: record, ref}: one record in full (_detail), which the card shows beside the chart; None for any other query."""
     query = query if isinstance(query, dict) else {}
     if query.get("op") == "record":
         return _detail(index, str(query.get("ref") or ""))
-    if query.get("op") == "bin":
-        return _bin(index, query)
-    return _overview(index, query)
+    return None
 
 
 # ------------------------------------------------------------------------------------------------ citations
@@ -951,30 +753,8 @@ def _excerpt(lines):
     return "\n".join([s.strip()[:LINE_MAX] for s in lines if s.strip()][:EXCERPT_LINES])
 
 
-def _first_lines(index, refs, per=2):
-    return [s for ref in refs[:6] for s in [x for x in _text(index, ref).splitlines() if x.strip()][:per]]
-
-
 def resolve(index, locator):
-    """<file>#L<n>: the record on that line, beside the rows; a roster row opens its account. view:<slug>/agent/<account>
-    or place/<place>: that account's or that place's records."""
-    if "key" in locator:
-        kind, _, name = str(locator["key"]).partition("/")
-        name = name.replace("%20", " ")
-        if kind == "agent":
-            hit = next((a for a in index["accounts"] if a.lower() == name.lower()), None)
-            if hit is None:
-                return None
-            a = index["accounts"][hit]
-            refs = [r for r in index["order"] if index["recs"][r]["account"] == hit][:REFS_MAX]
-            return {"excerpt": _excerpt(([a["goal"]] if a["goal"] else []) + _first_lines(index, refs)),
-                    "label": f"{hit} · {a['n']} record{'s' * (a['n'] != 1)}"[:40], "refs": (a["goal_refs"] + refs)[:REFS_MAX],
-                    "key": f"agent/{hit}", "target": {"account": hit}}
-        p = (index["places"].get(name) or _in_runs(index, name)) if kind == "place" else None
-        if p is None:
-            return None
-        return {"excerpt": _excerpt(_first_lines(index, p["refs"])), "label": f"{name} · {len(p['refs'])} records"[:40],
-                "refs": p["refs"][:REFS_MAX], "key": f"place/{name.replace(' ', '%20')}", "target": {"place": name}}
+    """<file>#L<n>: the record on that line; a roster row names its account."""
     path, fragment = locator.get("path"), str(locator.get("fragment") or "")
     hit = re.fullmatch(r"L(\d+)", fragment)
     if not path or not hit or path not in index["files"]:
@@ -987,7 +767,7 @@ def resolve(index, locator):
         who = next((a for a, v in index["accounts"].items() if ref in v["goal_refs"]), None)
         if who:
             return {"excerpt": index["accounts"][who]["goal"] or who, "label": f"{who} · roster"[:40], "refs": [ref],
-                    "key": f"agent/{who}", "target": {"account": who, "ref": ref}}
+                    "key": None, "target": {"account": who, "ref": ref}}
         rec = _record(index, ref)
         if rec is None:
             return None
@@ -997,8 +777,8 @@ def resolve(index, locator):
     lines = did["said"].splitlines() if did["said"].strip() else _text(index, ref).splitlines()
     when = datetime.fromtimestamp(r["t"], timezone.utc)
     label = f"{r['account']} · {when.day} {MONTHS[when.month - 1]} {when:%H:%M}" if r["known"] else r["account"]
-    return {"excerpt": _excerpt(lines) or r["account"], "label": label[:40], "refs": cited,
-            "key": f"place/{r['place'].replace(' ', '%20')}", "target": {"ref": ref, "account": r["account"], "place": r["place"]}}
+    return {"excerpt": _excerpt(lines) or r["account"], "label": label[:40], "refs": cited, "key": None,
+            "target": {"ref": ref, "account": r["account"], "place": r["place"]}}
 
 
 # ------------------------------------------------------------------------------------------------ run as a script
@@ -1014,7 +794,8 @@ order, cut at records into N parts of about the same size, so a busy place runs 
 prints that place's records (give it again for more); --from I and --count M print records I to I+M-1 of each. A
 record is headed by its ref, time, account and kind, then a post's text or the lines a save changed from the save
 before it. A place's heading says which of its records follow, and the last line how many records were printed.
---files GLOB reads those files; by default the files the Swarm view claims here (applies)."""
+--files GLOB reads those files; by default the record files applies() finds a swarm in. The listing with no option
+begins with the files it read."""
 
 
 def _script_files(globs):
@@ -1151,6 +932,7 @@ def main(argv):
         _print(index, _share(_blocks(index, ranked), int(k), int(n)), out)
         return 0
     if not names:
+        out.write(f"files: {' '.join(sorted(index['files']))}\n")
         for rank, p in enumerate(ranked, 1):
             v = index["places"][p]
             out.write(f"{rank}\t{len(v['refs'])}\t{len(v['accounts'])}\t{p}\n")

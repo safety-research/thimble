@@ -1,4 +1,0 @@
-[
-  {"name": "Gain", "kind": "regex", "spec": "(?i)\\bgain\\b|1\\.84|1\\.48", "labels": ["about the gain", "other"],
-   "paths": ["chat/*.jsonl", "wiki/pages/**/*.jsonl"]}
-]

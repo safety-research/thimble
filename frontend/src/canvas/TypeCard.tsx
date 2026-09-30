@@ -11,7 +11,7 @@
 // shows once the server says it can write them (a dry POST /cells/{id}/keep); Keep writes them into the call, as
 // literals in place of any code that computed them, which a toast then names, runs the card again and checks it. Undo
 // draws the card as stored again. At full size, Open as view opens the type's live view with the card's labels and
-// arguments. In the harness the frame is as tall as the whole chart (FULL_SIZE), so the check sees every record.
+// arguments, for a type that has a view. In the harness the frame is as tall as the whole chart (FULL_SIZE), so the check sees every record.
 // A type the workspace no longer has (its extension removed or off), or a page that does not load, leaves the card its
 // listing under one line that says so.
 import { useContext, useEffect, useMemo, useState } from 'react'
@@ -31,6 +31,8 @@ import { CanvasContext } from './context'
 /** What thimble.card stored (backend kernel_thimble.card). */
 interface Made {
   type: string
+  /** the view Open as view opens, null for a type that has none */
+  view?: string | null
   args?: Record<string, unknown>
   labels?: { id: string; name: string }[]
   data: unknown
@@ -216,7 +218,7 @@ export function TypeCard({ cell, bundle, width, big }: { cell: Cell; bundle: Mim
         onQuery={setPatch}
         className="bcell-type-frame"
       />
-      {!render && (patch || big) && (
+      {!render && (patch || (big && made.view !== null)) && (
         <div className="bcell-type-actions" onMouseDown={(e) => e.stopPropagation()} onDoubleClick={(e) => e.stopPropagation()}>
           {patch && (
             <>
@@ -230,7 +232,7 @@ export function TypeCard({ cell, bundle, width, big }: { cell: Cell; bundle: Mim
               </Button>
             </>
           )}
-          {big && (
+          {big && made.view !== null && (
             <Button variant="secondary" size="sm" icon="view" className="bcell-type-view" onClick={() => void openAsView()}>
               Open as view
             </Button>
