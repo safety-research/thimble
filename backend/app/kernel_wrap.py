@@ -143,12 +143,26 @@ def srt_rules(*, corpus_dir: str | Path, workspace_dir: str | Path, venv: str | 
         allow_read += [str(venv), os.path.realpath(venv)]  # a venv install.sh --python linked: also where it lies
     if system == "linux":
         allow_read.append(str(Path(srt_dir).joinpath(*SRT_HELPERS)))
+        deny_read = _outermost(deny_read, allow_read)
     return {"filesystem": {
         "denyRead": list(dict.fromkeys(deny_read)),
         "allowRead": list(dict.fromkeys(allow_read)),
         "allowWrite": [str(ws)],
         "denyWrite": [*hidden, *(str(ws / name) for name in READ_ONLY_FILES), *SRT_NO_WRITE[system]],
     }}
+
+
+def _outermost(deny: Sequence[str], allow: Sequence[str]) -> list[str]:
+    """`deny` without the entries another one already hides: each inside a denied folder with nothing in `allow` at or
+    above it inside that folder (the home inside /home). On Linux srt shows a folder link on the interpreter's path
+    (uv's minor-version folder) only when no denied entry but the one the link lies in surrounds the link's target."""
+    real = [Path(os.path.realpath(p)) for p in deny]
+    shown = [Path(os.path.realpath(p)) for p in allow]
+
+    def hidden(p: Path) -> bool:
+        return any(d != p and _under(p, d) and not any(_under(p, a) and _under(a, d) for a in shown) for d in real)
+
+    return [s for s, p in zip(deny, real) if not hidden(p)]
 
 
 def srt_env(env: dict[str, str], *, home: str | Path) -> dict[str, str]:

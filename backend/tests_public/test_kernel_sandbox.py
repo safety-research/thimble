@@ -3,7 +3,9 @@ macOS and Linux, the Seatbelt profile it makes of them on macOS, and what the se
 from __future__ import annotations
 
 import json
+import os
 import subprocess
+import sys
 
 import pytest
 
@@ -11,6 +13,7 @@ from app import config, kernel_wrap, notebook, srt
 
 SRT = srt.package(config.REPO_ROOT)
 NODE = srt.node()
+LINUX = sys.platform.startswith("linux")
 WS, CORPUS, HOME = "/Users/matt/.thimble/workspaces/w", "/Users/matt/corpus", "/Users/matt"
 
 
@@ -80,6 +83,61 @@ def test_srt_makes_a_seatbelt_profile_of_the_rules_that_keeps_the_workspace_conf
     writes = profile[profile.index("; File write"):]
     allowed = writes[writes.index("(allow file-write*"):writes.index("(with message", writes.index("(allow file-write*"))]
     assert f'(subpath "{WS}")' in allowed and HOME + '"' not in allowed and CORPUS not in allowed
+
+
+def test_on_linux_srt_hides_a_folder_inside_a_hidden_one_by_the_outer_rule_unless_something_between_is_shown():
+    """The home inside /home, and thimble's folder inside the home, are hidden by /home's rule alone, which lets srt
+    show uv's minor-version link inside the home; with the corpus being the home, thimble's folder keeps its own rule,
+    and the workspace's config inside the shown workspace always does."""
+    ws = "/home/u/.thimble/workspaces/w"
+
+    def deny(corpus: str) -> set[str]:
+        rules = kernel_wrap.srt_rules(corpus_dir=corpus, workspace_dir=ws, venv=None, python="/usr/bin/python3",
+                                      srt_dir="/srt", hide=["/home/u/.thimble"], home="/home/u", platform="linux")
+        return set(rules["filesystem"]["denyRead"])
+
+    config_files = {f"{ws}/settings.json", f"{ws}/config.json"}
+    assert "/home" in deny("/data/c") and config_files <= deny("/data/c")
+    assert not {"/home/u", "/home/u/.thimble"} & deny("/data/c")
+    assert {"/home/u", "/home/u/.thimble", *config_files} <= deny("/home/u")
+
+
+def _wrap_works(wrap: str) -> bool:
+    if wrap == "srt":
+        return kernel_wrap.srt_works(NODE, SRT)
+    return LINUX and kernel_wrap.works()
+
+
+@pytest.mark.parametrize("wrap", ["srt", "bwrap"])
+def test_on_linux_a_venv_whose_python_goes_through_uv_s_minor_version_folder_runs_wrapped(wrap, tmp_path):
+    """A venv's python that links into uv's minor-version folder (cpython-3.12-… → cpython-3.12.13-…) in the home folder
+    runs in the kernel's sandbox: the link resolves inside it as outside, though the home lies in /tmp, both hidden."""
+    if not (LINUX and _wrap_works(wrap)):
+        pytest.skip(f"{wrap} can't sandbox a process here")
+    home = tmp_path / "home"
+    real = home / ".local" / "share" / "uv" / "python" / "cpython-3.12.13-linux-x86_64-gnu"
+    (real / "bin").mkdir(parents=True)
+    (real / "bin" / "python3.12").symlink_to(os.path.realpath(sys.executable))
+    minor = real.with_name("cpython-3.12-linux-x86_64-gnu")
+    minor.symlink_to(real.name)
+    venv, ws, corpus, conn = (tmp_path / n for n in ("venv", "ws", "corpus", "conn"))
+    (venv / "bin").mkdir(parents=True)
+    (venv / "bin" / "python").symlink_to(minor / "bin" / "python3.12")
+    for d in (ws, corpus, conn):
+        d.mkdir()
+    for name in kernel_wrap.HIDDEN_FILES:
+        (ws / name).write_text("{}\n")
+    py = str(venv / "bin" / "python")
+    cmd = [py, "-c", "print('ran')"]
+    if wrap == "srt":
+        rules = kernel_wrap.srt_rules(corpus_dir=corpus, workspace_dir=ws, venv=venv, python=py, srt_dir=SRT, home=home,
+                                      platform=sys.platform)
+        argv, env = kernel_wrap.srt_argv(cmd, node=NODE, srt_dir=SRT, rules=rules), kernel_wrap.srt_env(dict(os.environ), home=ws)
+    else:
+        argv, env = kernel_wrap.kernel_wrap_argv(cmd, corpus_dir=corpus, workspace_dir=ws, connection_dir=conn, venv=venv,
+                                                 python=py), None
+    r = subprocess.run(argv, capture_output=True, text=True, timeout=60, env=env, cwd=ws, stdin=subprocess.DEVNULL)
+    assert (r.returncode, r.stdout.strip()) == (0, "ran"), r.stderr[-2000:]
 
 
 def test_a_workspace_set_to_srt_never_runs_unwrapped(monkeypatch, workspaces_tmp):
