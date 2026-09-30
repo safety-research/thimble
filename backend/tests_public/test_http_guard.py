@@ -114,3 +114,43 @@ def test_the_app_shell_and_the_api_carry_the_security_headers(dist):
     # a refusal carries them too
     r = c.post("/api/dev/revert", headers={"Origin": "https://evil.example"})
     assert r.status_code == 403 and r.headers["x-content-type-options"] == "nosniff"
+
+
+@pytest.mark.real_write_guard
+def test_a_write_needs_the_browser_cookie_or_the_plugin_proof_so_a_kernel_cannot_reach_the_api(app_prod, plugin_headers):
+    """hook_auth.LocalWriteGuard: a write to the local API must prove the ui_key cookie (the browser) or the token (the
+    plugin or the CLI). A notebook kernel runs model-authored code with the host's network and can open this server on
+    127.0.0.1, but the sandbox hides server.json from it, so it holds neither — and forging a same-origin Origin, which
+    slips past the Origin check, does not help. Reads, the browser's key claim and a view's check poster stay reachable."""
+    from conftest import UI_KEY, _record
+
+    from app import hook_auth
+
+    _record(ui_key=UI_KEY)  # plugin_headers has already recorded the token
+    c = TestClient(app_prod, base_url="http://testserver")
+
+    # the kernel: no cookie, no proof — on several write routes, and even forging the server's own Origin
+    for headers in ({}, {"Origin": "http://testserver"}, {"Sec-Fetch-Site": "same-origin"}):
+        r = c.put(THEME_PATH, json=THEME, headers=headers)
+        assert r.status_code == 403 and r.json()["detail"] == hook_auth.WRITE_REFUSED, headers
+    assert c.delete("/api/ws/mini").status_code == 403
+    assert c.post("/api/ws/mini/orientation/message", json={"text": "impersonated"}).status_code == 403
+    assert c.post("/api/dev/tickets", json={"workspace": "mini", "title": "x", "body": "y", "source": "terminal"}).status_code == 403
+
+    # a local tool proves the token
+    assert c.put(THEME_PATH, json=THEME, headers=plugin_headers()).status_code == 200
+    # a wrong token is no better than none
+    assert c.put(THEME_PATH, json=THEME, headers=hook_auth.headers("wrong-token", "n0nce")).status_code == 403
+
+    # the browser proves the ui_key cookie
+    c.cookies.set(hook_auth.UI_COOKIE, UI_KEY)
+    assert c.put(THEME_PATH, json=THEME).status_code == 200
+    c.cookies.set(hook_auth.UI_COOKIE, "not-the-key")
+    assert c.put(THEME_PATH, json=THEME).status_code == 403
+    c.cookies.delete(hook_auth.UI_COOKIE)
+
+    # reads are untouched, and the routes the guard exempts stay reachable without either proof: the browser's key claim
+    # (which sets the cookie) and a view build's check poster (view_check.py, run in a sandbox that reads no server.json)
+    assert c.get("/api/corpora").status_code == 200
+    assert c.post("/api/ui/key", json={"key": UI_KEY}).status_code == 204
+    assert c.post("/api/ws/mini/views/none/check", json={"locators": []}).json().get("detail") != hook_auth.WRITE_REFUSED

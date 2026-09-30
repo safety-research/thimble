@@ -7,7 +7,7 @@ import { installChunkRecovery } from './lib/chunkRecovery'
 import App from './App'
 import { claimKey } from './lib/api'
 
-claimKey()
+void claimKey()
 installProblemLog()
 installChunkRecovery()
 

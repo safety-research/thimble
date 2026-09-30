@@ -42,11 +42,23 @@ PROOF_HEADER = "x-thimble-proof"
 NONCE_MAX = 128  # characters
 UI_COOKIE = "thimble-ui"
 UI_COOKIE_AGE_S = 400 * 24 * 3600  # the longest a browser keeps a cookie
-# The routes analyst() guards all sit under this path. A cookie is not bound to a port, so the path is what keeps it from
-# the browser's requests to other services on 127.0.0.1, except requests to their own /api/ws/ paths.
-UI_COOKIE_PATH = "/api/ws/"
+# The cookie the browser holds (claim) and analyst() and LocalWriteGuard check. A cookie is not bound to a port, so the
+# path is what keeps it from the browser's requests to other services on 127.0.0.1, except requests to their own /api/
+# paths. It covers the whole API, not just /api/ws/, so a browser proves itself to LocalWriteGuard on every write route.
+UI_COOKIE_PATH = "/api/"
 ANALYST_ONLY = ("open thimble from the link shown under /thimble's reply, or printed by `thimble up` in a shell, to"
                 " answer permission requests or change permission modes")
+
+# A write to the local API (any method but GET/HEAD/OPTIONS) must prove it comes from thimble's own browser (the ui_key
+# cookie) or a local tool that can read server.json (the hook proof). A notebook kernel runs model-authored code with
+# the host's network and can reach this server on 127.0.0.1, but the sandbox hides server.json from it (its token and
+# ui_key), so it can produce neither and is refused. Request headers, including Origin, are forgeable by such a caller,
+# so the Origin check alone is no boundary against it (http_guard).
+SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
+# The one write route a view build's check poster reaches without either proof: it runs in the view session's sandbox,
+# which cannot read server.json, and posts only to its own view's check route (view_check.py, app/dev.py view_fence).
+WRITE_EXEMPT = re.compile(r"/api/ws/[^/]+/views/[^/]+/check")
+WRITE_REFUSED = "this request must come from thimble's own browser or its plugin"
 
 _cache: tuple[tuple[str, int, int], dict] | None = None
 
@@ -142,3 +154,44 @@ class HookAuth:
             await send(message)
 
         await self.app(scope, receive, with_proof)
+
+
+def write_guarded(method: str, path: str) -> bool:
+    """Whether LocalWriteGuard gates this request: a write (not GET/HEAD/OPTIONS) to the local API, but not /api/ui/key
+    (the browser trades the ui_key for the cookie there before it holds one) nor a view's check route (WRITE_EXEMPT)."""
+    if method in SAFE_METHODS or not (path == "/api" or path.startswith("/api/")) or path == "/api/ui/key":
+        return False
+    return WRITE_EXEMPT.fullmatch(path) is None
+
+
+def write_ok(headers: Headers, cookies: dict[str, str]) -> bool:
+    """Whether a write proves it comes from thimble's browser or plugin: a valid hook proof (a local tool that read the
+    token), or the ui_key cookie (the browser from the link). A caller that cannot read server.json has neither."""
+    tok = token()
+    nonce = headers.get(NONCE_HEADER, "")
+    if tok and nonce and len(nonce) <= NONCE_MAX and hmac.compare_digest(
+            headers.get(AUTH_HEADER, ""), sign(tok, "hook", nonce)):
+        return True
+    key = _field("ui_key")
+    return bool(key) and hmac.compare_digest(cookies.get(UI_COOKIE, ""), key)
+
+
+class LocalWriteGuard:
+    """403 for a write to the local API that proves neither the ui_key cookie (the browser) nor the token (the plugin or
+    the CLI). The notebook kernel runs model-authored code with the host's network and can reach this server on
+    127.0.0.1, but the sandbox hides server.json from it, so it can prove neither and changes nothing here. Pure ASGI."""
+
+    def __init__(self, app) -> None:
+        self.app = app
+
+    async def __call__(self, scope, receive, send) -> None:
+        if scope["type"] != "http" or not write_guarded(scope.get("method", ""), scope.get("path", "")):
+            await self.app(scope, receive, send)
+            return
+        if write_ok(Headers(scope=scope), Request(scope).cookies):
+            await self.app(scope, receive, send)
+            return
+        body = json.dumps({"detail": WRITE_REFUSED}).encode()
+        await send({"type": "http.response.start", "status": 403,
+                    "headers": [(b"content-type", b"application/json"), (b"content-length", str(len(body)).encode())]})
+        await send({"type": "http.response.body", "body": body})
