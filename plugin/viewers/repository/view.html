@@ -26,7 +26,7 @@
   .nav button.on > span { color: var(--text-primary); font-weight: 600; }
   .nav button.on::after { content: ''; position: absolute; left: 8px; right: 8px; bottom: -1px; height: 2px; border-radius: 2px; background: var(--accent); }
   .nav .ico { color: var(--text-tertiary); }
-  .count { display: inline-block; min-width: 18px; padding: 1px 6px; border-radius: 999px; background: rgba(var(--ink-rgb), .08); color: var(--text-primary); font: 500 var(--text-xs) / 1.4 var(--font-body); font-weight: 500; text-align: center; font-variant-numeric: tabular-nums; }
+  .nav .chip { height: 18px; padding: 0 6px; }
 
   #body { flex: 1; min-height: 0; display: flex; }
   #main { flex: 1; min-width: 0; overflow: auto; padding: 16px 16px 28px; }
@@ -81,6 +81,7 @@
   .cbtn .ico { color: var(--text-tertiary); }
   .cbtn .sws { display: inline-flex; gap: 2px; }
   .cbtn .cnm { max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .cbtn .cnm[data-derived] { overflow: visible; } /* a field's name is short, and its derived mark sits above the line */
   .lg { display: inline-flex; align-items: center; gap: 5px; height: 22px; padding: 0 6px 0 4px; border-radius: var(--radius-chip); white-space: nowrap; cursor: pointer; }
   .lg:hover { background: var(--surface-hover); color: var(--text-primary); }
   .lg.st { cursor: default; }
@@ -167,13 +168,13 @@
   .lp::before { content: ''; width: 8px; height: 8px; border-radius: 50%; background: var(--c); }
 
   /* avatars: a person's initial on a neutral disc, so the labels keep the colours */
-  .av { position: relative; display: inline-grid; place-items: center; flex: none; width: 20px; height: 20px; border-radius: 50%; background: rgba(var(--ink-rgb), var(--a, .12)); box-shadow: 0 0 0 1.5px var(--surface-card); color: var(--text-primary); font: 600 10px / 1 var(--font-body); text-transform: uppercase; }
-  .av.s16 { width: 16px; height: 16px; font-size: 8.5px; }
-  .av.s32 { width: 32px; height: 32px; font-size: 13px; }
-  .av .v { position: absolute; right: -4px; bottom: -3px; display: grid; place-items: center; width: 12px; height: 12px; border-radius: 50%; background: var(--surface-card); }
-  .av .v .ico { width: 10px; height: 10px; stroke-width: 2; }
+  .avatar { position: relative; width: 20px; height: 20px; box-shadow: 0 0 0 1.5px var(--surface-card); font-size: 10px; }
+  .avatar.s16 { width: 16px; height: 16px; font-size: 8.5px; }
+  .avatar.s32 { width: 32px; height: 32px; font-size: 13px; }
+  .avatar .v { position: absolute; right: -4px; bottom: -3px; display: grid; place-items: center; width: 12px; height: 12px; border-radius: 50%; background: var(--surface-card); }
+  .avatar .v .ico { width: 10px; height: 10px; stroke-width: 2; }
   .avs { display: inline-flex; align-items: center; padding-left: 5px; }
-  .avs .av { margin-left: -5px; }
+  .avs .avatar { margin-left: -5px; }
   .who { display: inline-flex; align-items: center; gap: 6px; }
 
   /* the state of a pull request or an issue: a chip filled with the state's colour, with its icon */
@@ -257,7 +258,7 @@
   .timeline::before { content: ''; position: absolute; left: 15px; top: 8px; bottom: 8px; border-left: 2px solid var(--border-hairline); }
   .it { position: relative; display: grid; grid-template-columns: 32px minmax(0, 1fr); column-gap: 12px; align-items: start; padding: 8px 0; }
   .it.focus { background: var(--surface-selected); border-radius: var(--radius-ui); }
-  .it > .av, .it > .badge { justify-self: center; }
+  .it > .avatar, .it > .badge { justify-self: center; }
   .badge { display: grid; place-items: center; width: 28px; height: 28px; border-radius: 50%; background: var(--bg-sub); box-shadow: 0 0 0 3px var(--surface-card); color: var(--text-secondary); }
   .badge.fill { background: var(--c); color: var(--surface-card); }
   .badge .ico { width: 15px; height: 15px; }
@@ -304,6 +305,7 @@
   .facts section:last-child { border-bottom: 0; }
   .facts .fline { display: flex; align-items: center; gap: 8px; min-height: 24px; }
   .facts .fline .grow { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .facts .fline > .chip { flex: none; }
   .facts .kv { display: grid; grid-template-columns: auto 1fr; gap: 4px 10px; }
   .facts .kv span:nth-child(odd) { color: var(--text-tertiary); }
   .facts .kv span:nth-child(even) { font: 400 var(--text-mono-sm) / 1.5 var(--font-mono); }
@@ -342,11 +344,11 @@
   // one value or several, with the count each value would give, and a drag across the activity narrows it to a time
   // range. Participant and Activity pick records, so with a time range they keep the units where that agent did that
   // in that range. The Colour menu colours the records in the activity, on the strips and on a page by their activity,
-  // who did it, their run, or their unit's state or area, and its legend shows a value alone on a click and hides it on
-  // a shift-click. Compare puts the chosen runs side by side: each run's activity in its row, and below it the pull
-  // requests or issues issue by issue, or the discussions and agents run by run. A row opens its unit's page beside the
-  // list (or in its place in a narrow pane): its conversation, and for a pull request its commits and the files they
-  // changed, as diffs.
+  // who did it, their run, a review's reviewer or verdict, or their unit's author, state, area, close reason, origin or
+  // first flag, and its legend shows a value alone on a click and hides it on a shift-click. Compare puts the chosen
+  // runs side by side: each run's activity in its row, and below it the pull requests or issues issue by issue, or the
+  // discussions and agents run by run. A row opens its unit's page beside the list (or in its place in a narrow pane):
+  // its conversation, and for a pull request its commits and the files they changed, as diffs.
   //
   // Labels: each unit's element carries view:<slug>/<key>, each record on a strip or a page its file ref, and each
   // run's row view:<slug>/<run>, so thimble marks them. A unit whose records a label marks carries its pill, as the
@@ -383,10 +385,16 @@
   // the states in ink on the runs' bars, while the records are coloured by a field whose colours they would repeat
   const STATE_INKS = { open: '--viz-ink-2', merged: '--viz-ink-3', fixed: '--viz-ink-3', closed: '--viz-ink-4' }
   // the fields the Colour menu offers on each tab (reader.py COLOURS), and the viz colours their values take in order
-  const COLOURS = { pulls: ['action', 'actor', 'run', 'state', 'area'], issues: ['action', 'actor', 'run', 'state', 'area'],
+  const COLOURS = { pulls: ['action', 'actor', 'author', 'reviewer', 'verdict', 'run', 'state', 'area', 'reason', 'flag'],
+    issues: ['action', 'actor', 'author', 'run', 'state', 'area', 'origin', 'reason'],
     discussions: ['action', 'actor', 'run'], agents: ['action', 'actor', 'run'] }
-  const FIELD_NAMES = { action: 'Activity', actor: 'Participant', run: 'Run', state: 'State', area: 'Area' }
+  const FIELD_NAMES = { action: 'Activity', actor: 'Participant', author: 'Author', reviewer: 'Reviewer', verdict: 'Review', run: 'Run',
+    state: 'State', area: 'Area', reason: 'Close reason', origin: 'Origin', flag: 'Flag' }
+  const derivedName = (f) => (f === 'flag' ? 'flags' : f) // the name reader.py's derived list gives a field
   const CAT = ['--viz-1', '--viz-2', '--viz-3', '--viz-6', '--viz-5', '--viz-7']
+  // the derived field each sort orders by
+  const SORT_FIELDS = { 'longest to merge': 'to_merge', 'quickest first review': 'first_review', 'most reviews': 'reviews',
+    'most commits': 'commits', 'longest to fix': 'ended', 'most comments': 'comments', 'most posts': 'posts' }
   const AGENT_COLS = [['opened', 'Opened'], ['merged', 'Merged'], ['merges', 'Merges done'], ['approved', 'Approvals'], ['changes', 'Changes req.'], ['comments', 'Comments'], ['posts', 'Posts']]
 
   // what the analyst chose; every change refetches the tab. `filters` holds each filter's chosen values, `colour` the
@@ -455,7 +463,8 @@
   }
   const catIndex = (v) => data.colour.order.indexOf(v)
   function valueColour(f, v) {
-    if (f === 'action') return colourOf(v)
+    if (v === '') return 'var(--viz-ink-4)' // a record without the field is ink, as are the values past the viz colours
+    if (f === 'action' || f === 'verdict') return colourOf(v)
     if (f === 'state') return `var(${STATE_COLOURS[v] || '--viz-ink-3'})`
     const i = catIndex(v)
     return i >= 0 && i < CAT.length ? `var(${CAT[i]})` : 'var(--viz-ink-4)'
@@ -514,7 +523,7 @@
   const ACTION_ICON = { opened: 'pr', pushed: 'commit', approved: 'approved', 'changes requested': 'changes', commented: 'comment', posted: 'comment', merged: 'merged', fixed: 'merged', closed: 'close', reopened: 'pr', 'signed off': 'agent' }
   // a person as the initial of their name on a neutral disc, its shade from the name, so it reads the same everywhere
   function avatar(name, size, verdict) {
-    const a = el('span', 'av' + (size ? ` s${size}` : ''), String(name || '?').replace(/[^a-z0-9]/gi, '').slice(0, 1) || '?')
+    const a = el('span', 'avatar' + (size ? ` s${size}` : ''), String(name || '?').replace(/[^a-z0-9]/gi, '').slice(0, 1) || '?')
     let h = 0
     for (const ch of String(name || '')) h = (h * 31 + ch.charCodeAt(0)) >>> 0
     a.style.setProperty('--a', (0.08 + (h % 5) * 0.04).toFixed(2))
@@ -629,7 +638,7 @@
     box.replaceChildren(...Object.entries(TABS).map(([key, t]) => {
       const btn = el('button', key === S.tab ? 'on' : '')
       const inner = el('span')
-      inner.append(icon(t.icon), t.name, el('span', 'count', String(data.tabs[key])))
+      inner.append(icon(t.icon), t.name, el('span', 'chip chip-tone-neutral', String(data.tabs[key])))
       btn.append(inner)
       btn.onclick = () => {
         if (S.tab === key) return
@@ -952,7 +961,7 @@
     let hiding = false
     if (labelOn()) {
       data.classes.forEach((c, i) => box.append(legendItem(classColour(i), className(i), c.n, classKey(c), S.hide.includes(classKey(c)), labelBy(c.label), c.value)))
-      box.append(legendItem('var(--viz-ink-4)', 'no label', data.none, 'none', S.hide.includes('none')))
+      if (data.none || S.hide.includes('none')) box.append(legendItem('var(--viz-ink-4)', 'no label', data.none, 'none', S.hide.includes('none')))
       hiding = S.hide.length > 0
     } else {
       const f = field(), own = data.colour.filter, chose = own ? S.filters[own] || [] : []
@@ -960,8 +969,10 @@
       const can = f === 'run' || !!own
       const ownColours = f === 'action' || f === 'state'
       const rest = []
+      let none = null // the records without the field, last and never folded into the rest
       for (const [v, n] of data.colour.values) {
-        if (!ownColours && (catIndex(v) < 0 || catIndex(v) >= CAT.length)) rest.push(n)
+        if (v === '') none = legendItem(valueColour(f, v), valueName(f, v), n, v, off(v), null, null, can)
+        else if (!ownColours && (catIndex(v) < 0 || catIndex(v) >= CAT.length)) rest.push(n)
         else box.append(legendItem(valueColour(f, v), valueName(f, v), n, v, off(v), null, null, can))
       }
       if (rest.length) {
@@ -971,6 +982,7 @@
         more.append(sw, `${rest.length} more`, el('span', 'n', String(rest.reduce((a, b) => a + b, 0))))
         box.append(more)
       }
+      if (none) box.append(none)
       hiding = f === 'run' ? !allChosen() : chose.length > 0
     }
     if (hiding) {
@@ -990,7 +1002,7 @@
   function colourButton() {
     const b = el('button', 'btn btn-secondary btn-sm cbtn')
     b.id = 'cbtn'
-    let what = `<span class="cnm" data-field="${field()}">${esc(FIELD_NAMES[field()])}</span>`
+    let what = `<span class="cnm" data-field="${derivedName(field())}">${esc(FIELD_NAMES[field()])}</span>`
     if (labelOn()) {
       const names = [...new Set(data.classes.map((c) => c.label))]
       const sws = data.classes.slice(0, 6).map((_, i) => `<i class="sw" style="background:${classColour(i)}"></i>`).join('')
@@ -1071,6 +1083,7 @@
   }
   function previewColours(f) {
     if (f === 'action') return ['opened', 'approved', 'changes requested', 'merged'].map(colourOf)
+    if (f === 'verdict') return ['approved', 'changes requested', 'commented'].map(colourOf)
     if (f === 'state') return ['open', 'merged', 'closed'].map((st) => `var(${STATE_COLOURS[st]})`)
     return CAT.slice(0, 4).map((c) => `var(${c})`)
   }
@@ -1078,7 +1091,7 @@
     const fields = COLOURS[S.tab].map((f) => {
       const on = !labelOn() && field() === f
       const sws = previewColours(f).map((c) => `<i class="sw" style="width:5px;border-radius:1px;background:${c}"></i>`).join('')
-      return `<button class="mi" data-act="field" data-f="${f}"><span class="ck">${on ? CHECK : ''}</span>${thimble.field(f, FIELD_NAMES[f])}<span class="n">${sws}</span></button>`
+      return `<button class="mi" data-act="field" data-f="${f}"><span class="ck">${on ? CHECK : ''}</span>${thimble.field(derivedName(f), FIELD_NAMES[f])}<span class="n">${sws}</span></button>`
     }).join('')
     // every label over files, as thimble lists them; a click turns one on or off in thimble's Labels pane
     const all = labelState.all || labelState.labels.map((l) => ({ ...l, on: true }))
@@ -1189,6 +1202,7 @@
       const picked = S.filters[name] || []
       const sel = el('select', 'field' + (picked.length ? ' set' : ''))
       sel.setAttribute('aria-label', what)
+      sel.dataset.field = derivedName(name)
       sel.append(new Option(any || `${what}`, ''))
       if (picked.length) {
         const names = picked.join(', ')
@@ -1279,7 +1293,11 @@
     if (t.sorts.length) {
       const sel = el('select', 'field')
       sel.setAttribute('aria-label', 'Sort')
-      for (const [v, text] of t.sorts) sel.append(new Option(`Sort: ${text}`, v, false, (S.sort || t.sorts[0][0]) === v))
+      for (const [v, text] of t.sorts) {
+        const o = new Option(`Sort: ${text}`, v, false, (S.sort || t.sorts[0][0]) === v)
+        if (SORT_FIELDS[v]) o.dataset.field = SORT_FIELDS[v]
+        sel.append(o)
+      }
       sel.onchange = () => {
         S.sort = sel.value
         load()
@@ -1783,14 +1801,22 @@
     e.append(col)
     return e
   }
+  // a section of a unit's facts; its title is [name, the field it shows] where that field is one the reader made
   function factsSection(title, ...content) {
     const s = el('section')
-    s.append(el('h4', null, title), ...content)
+    const [name, fieldName] = Array.isArray(title) ? title : [title]
+    const h = el('h4', null, name)
+    if (fieldName) h.dataset.field = fieldName
+    s.append(h, ...content)
     return s
   }
   function kv(pairs) {
     const box = el('div', 'kv')
-    for (const [k, v] of pairs) box.append(el('span', null, k), el('span', null, v))
+    for (const [k, v, fieldName] of pairs) {
+      const name = el('span', null, k)
+      if (fieldName) name.dataset.field = fieldName
+      box.append(name, el('span', null, v))
+    }
     return box
   }
   function unitChip(p, tab) {
@@ -2010,7 +2036,7 @@
       for (const [key, name, ic, n] of [['conversation', 'Conversation', 'comment', conv], ['commits', 'Commits', 'commit', cs.length], ['files', 'Files changed', 'file', files]]) {
         const b = el('button', S.page === key ? 'on' : '')
         const inner = el('span')
-        inner.append(icon(ic), name, el('span', 'count', String(n)))
+        inner.append(icon(ic), name, el('span', 'chip chip-tone-neutral', String(n)))
         b.append(inner)
         b.onclick = () => {
           S.page = key
@@ -2055,41 +2081,41 @@
         revs.append(line)
       }
       if (!revs.childNodes.length) revs.append(el('span', 'dim', 'No reviews'))
-      facts.append(factsSection('Reviewers', revs))
+      facts.append(factsSection(['Reviewers', 'latest'], revs))
     }
     if (u.tab === 'pulls' || u.tab === 'issues' || (u.marks || []).length) {
       const pills = el('div', 'pills')
       if (u.area) pills.append(areaPill(u.area))
       if (data) for (const i of u.marks || []) if (i < data.classes.length) pills.append(labelPill(i))
       if (!pills.childNodes.length) pills.append(el('span', 'dim', 'None'))
-      facts.append(factsSection('Labels', pills))
+      facts.append(factsSection(['Labels', 'area'], pills))
     }
     if (u.tab === 'pulls') {
       if (u.issue) {
         const line = el('div', 'fline')
         line.append(unitChip(u.issue, 'issues'), el('span', 'grow', u.issue.title))
         line.lastChild.title = u.issue.title
-        facts.append(factsSection('Closes', line))
+        facts.append(factsSection(['Closes', 'issue'], line))
       }
-      facts.append(factsSection('Timing', kv([['opened', since(u.at)], ['first review', u.first_review == null ? '–' : `${dur(u.first_review)} later`],
-        [u.state === 'closed' ? 'closed' : 'merged', u.ended == null ? '–' : since(u.ended)], ['commits', String(u.commits.length)], ['changed', `+${u.plus} −${u.minus} in ${plural(u.paths.length, ['file', 'files'])}`]])))
+      facts.append(factsSection('Timing', kv([['opened', since(u.at), 'time'], ['first review', u.first_review == null ? '–' : `${dur(u.first_review)} later`, 'first_review'],
+        [u.state === 'closed' ? 'closed' : 'merged', u.ended == null ? '–' : since(u.ended), 'ended'], ['commits', String(u.commits.length), 'commits'], ['changed', `+${u.plus} −${u.minus} in ${plural(u.paths.length, ['file', 'files'])}`, 'files']])))
       if (u.flags.length) {
         const f = el('div', 'pills')
         for (const x of u.flags) f.append(el('span', `chip chip-sans ${flagTone()}`, x))
-        facts.append(factsSection('Flags', f))
+        facts.append(factsSection(['Flags', 'flags'], f))
       }
     }
     if (u.tab === 'issues') {
       const prs = el('div', 'pills')
       for (const p of u.pulls) prs.append(unitChip(p, 'pulls'))
       if (!u.pulls.length) prs.append(el('span', 'dim', 'None'))
-      facts.append(factsSection('Pull requests', prs), factsSection('Details', kv([['origin', u.origin], ['comments', String(u.comments)]])))
+      facts.append(factsSection(['Pull requests', 'pulls'], prs), factsSection('Details', kv([['origin', u.origin, 'origin'], ['comments', String(u.comments), 'comments']])))
     }
-    if ((u.tab === 'pulls' || u.tab === 'issues') && u.elsewhere && u.elsewhere.length > 1) facts.append(factsSection('In every run', everyRun(u.elsewhere, u.run)))
+    if ((u.tab === 'pulls' || u.tab === 'issues') && u.elsewhere && u.elsewhere.length > 1) facts.append(factsSection(['In every run', 'elsewhere'], everyRun(u.elsewhere, u.run)))
     if (u.tab === 'discussions') {
       const people = el('div', 'avs')
       for (const n of u.posters) people.append(avatar(n, 20))
-      facts.append(factsSection('Posting', people))
+      facts.append(factsSection(['Posting', 'posters'], people))
       if (Object.keys(links).length) {
         const m = el('div', 'pills')
         for (const [n, key] of Object.entries(links)) {
@@ -2098,7 +2124,7 @@
           b.onclick = () => openKey(key)
           m.append(b)
         }
-        facts.append(factsSection('Mentions', m))
+        facts.append(factsSection(['Mentions', 'mentions'], m))
       }
     }
     if (u.tab === 'agents') {
@@ -2109,11 +2135,11 @@
         const got = u.reviewed_by[n] || [0, 0]
         t.append(el('span', null, n), el('span', null, `gave ${gave[0]}✓ ${gave[1]}✗ · got ${got[0]}✓ ${got[1]}✗`))
       }
-      if (names.length) facts.append(factsSection('Review partners', t))
+      if (names.length) facts.append(factsSection(['Review partners', 'partners'], t))
       if (u.pulls.length) {
         const prs = el('div', 'pills')
         for (const p of u.pulls) prs.append(unitChip(p, 'pulls'))
-        facts.append(factsSection('Pull requests opened', prs))
+        facts.append(factsSection(['Pull requests opened', 'pulls'], prs))
       }
     }
     const body = el('div', 'dbody')

@@ -24,6 +24,7 @@
   #charts { padding: 8px 16px 8px; min-width: 0; }
   #chartbar { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 6px 10px; margin: 2px 0 10px; }
   #chartbar .row + .row { margin-top: 0; }
+  .row.pair { flex-wrap: nowrap; }
   .lchip .box { width: 10px; height: 10px; }
   svg { display: block; overflow: visible; user-select: none; -webkit-user-select: none; }
   svg text { font-family: var(--font-mono); font-size: 10.5px; fill: var(--text-tertiary); font-variant-numeric: tabular-nums; }
@@ -104,11 +105,11 @@
   #tip .r { display: flex; gap: 8px; align-items: center; }
   #tip .r .l { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--font-body); color: var(--text-secondary); }
   #tip .body { margin-top: 4px; font: 400 var(--text-xs) / 1.4 var(--font-body); color: var(--text-primary); white-space: normal; }
-  @media (min-width: 1100px) {
+  @media (min-width: 1280px) {
     html, body { height: 100%; overflow: hidden; }
     body { display: flex; flex-direction: column; }
     #bar { position: static; flex: none; }
-    main { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) minmax(480px, 44%); }
+    main { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) minmax(640px, 44%); }
     #charts { overflow: auto; }
     #records { border-top: 0; border-left: 1px solid var(--border-hairline); display: flex; flex-direction: column; min-height: 0; }
     #listbox { max-height: none; flex: 1 1 50%; min-height: 160px; }
@@ -135,7 +136,7 @@
   <section id="charts">
     <div id="chartbar">
       <span class="cap">Group by</span>
-      <div class="row"><div id="group" class="seg seg-track"></div><span class="grow"></span><span class="cap">Time</span><div id="align" class="seg seg-track"></div></div>
+      <div class="row"><div id="group" class="seg seg-track"></div><span class="grow"></span><span class="row pair"><span class="cap">Time</span><div id="align" class="seg seg-track"></div></span></div>
       <span class="cap">Colour</span>
       <div class="row" id="colour"></div>
     </div>
@@ -280,16 +281,25 @@ let foldLanes = true
 let tableLimit = ROWS
 let sortBy = 't' // the list's order: 't' by time, 'gap' by the time since the record before, 'tk' by the time since the record answered
 
+// the reader sends the overview a page of rows at a time, the first page with the names and marks the rows index into
 async function load() {
   const my = ++loadSeq
-  const data = await thimble.fetch(keepRow != null ? { op: 'overview', keep: [keepRow] } : { op: 'overview' })
-  if (my !== loadSeq) return false
+  const COLS_ = ['r', 't', 'f', 'ln', ...KEYS, 're', 'tk', 'm', 'mb']
+  const c = Object.fromEntries(COLS_.map((k) => [k, []]))
+  let data = null
+  let from = 0
+  do {
+    const page = await thimble.fetch({ op: 'overview', from, ...(keepRow != null ? { keep: [keepRow] } : {}) })
+    if (my !== loadSeq) return false
+    if (!data) data = page
+    for (const k of COLS_) for (const v of page.cols[k] || []) c[k].push(v)
+    from = page.next
+  } while (from != null)
   D = data
   T0 = data.t0
-  const c = data.cols
   N = c.r.length
   C = {}
-  for (const k of ['r', 't', 'f', 'ln', ...KEYS, 're', 'tk', 'm', 'mb']) C[k] = Int32Array.from(c[k] || [])
+  for (const k of COLS_) C[k] = Int32Array.from(c[k])
   rowAt = new Map()
   for (let i = 0; i < N; i++) rowAt.set(C.r[i], i)
   const incNames = data.names.incident || ['']
@@ -489,6 +499,7 @@ function renderSelects() {
   box.replaceChildren(...FIELDS.slice(1).map(([k, name, many]) => {
     const pick = h('select', 'field')
     pick.setAttribute('aria-label', name)
+    pick.dataset.field = k
     const chosen = [...F[k]].sort((a, b) => nameOf(k, a).localeCompare(nameOf(k, b), 'en', { numeric: true }))
     const vals = [...rankOf[k].keys()].filter((v) => v !== 0 || (counts[k].get(0) || 0) > 0 || F[k].has(0))
     vals.sort((a, b) => (counts[k].get(b) || 0) - (counts[k].get(a) || 0) || rankOf[k].get(a) - rankOf[k].get(b))
@@ -527,6 +538,7 @@ function renderSegs() {
   const a = document.getElementById('align')
   a.replaceChildren(...[['clock', 'Clock'], ['start', 'From incident start']].map(([m, name]) => {
     const b = h('button', 'seg-opt' + (mode === m ? ' active' : ''), name)
+    if (m === 'start') b.dataset.field = 'starts'
     b.onclick = () => setMode(m)
     return b
   }))
@@ -714,7 +726,7 @@ function renderFocus() {
   const n = laneValues().shown.length
   const lanes = n * laneHeight(n) + markLanes().length * LANE + 40
   const rest = document.getElementById('chartbar').offsetHeight + Number(document.getElementById('overview').getAttribute('height')) + lanes + 48
-  if (document.body.clientWidth >= 1100) {
+  if (document.body.clientWidth >= 1280) {
     // where the charts have a column of their own, the focus takes the height the lanes leave
     H = Math.max(H, 170, Math.min(360, document.getElementById('charts').clientHeight - rest - top - axis))
   } else {
@@ -770,7 +782,7 @@ function renderLegend(caption, top) {
   let hiding = false
   if (labelsOn()) {
     D.marks.forEach((m, j) => items.push(legendItem(markColour(j), markName(j), markN[j], markKey(j), hide.has(markKey(j)), labelBy(m.label), m.value)))
-    items.push(legendItem(token('--viz-ink-4'), 'no label', noneN, 'none', hide.has('none')))
+    if (noneN || hide.has('none')) items.push(legendItem(token('--viz-ink-4'), 'no label', noneN, 'none', hide.has('none')))
     hiding = hide.size > 0
   } else {
     const k = colourBy, off = (v) => F[k].size > 0 && !F[k].has(v)
@@ -1182,7 +1194,7 @@ async function select(r, opts = {}) {
 }
 // in one column, the list and the details come up under the toolbar, the chosen row second in the list
 function reveal() {
-  if (window.matchMedia('(min-width: 1100px)').matches) return
+  if (window.matchMedia('(min-width: 1280px)').matches) return
   const box = document.getElementById('listbox')
   const tr = document.querySelector(`#tb tr[data-r="${sel}"]`)
   if (tr) box.scrollTop = Math.max(0, tr.offsetTop - document.querySelector('#tbl thead').offsetHeight - tr.offsetHeight)
@@ -1275,12 +1287,16 @@ function renderDetail() {
   const parts = [top, text, facts]
   if (detail.answers) {
     const sec = h('div', 'd-sec')
-    sec.append(h('span', 't', 'Answers'))
+    const name = h('span', 't', 'Answers')
+    name.dataset.field = 're'
+    sec.append(name)
     parts.push(sec, recRow(detail.answers, false))
   }
   if (detail.answered.length) {
     const sec = h('div', 'd-sec')
-    sec.append(h('span', 't', 'Answered by'), h('span', 'n', fmt(detail.answered.length)))
+    const name = h('span', 't', 'Answered by')
+    name.dataset.field = 'answered'
+    sec.append(name, h('span', 'n', fmt(detail.answered.length)))
     parts.push(sec, ...detail.answered.map((b) => recRow(b, false)))
   }
   const sec = h('div', 'd-sec')

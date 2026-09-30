@@ -3,10 +3,11 @@
     backend/.venv/bin/python scripts/dev/examples.py <folder>
 
 For each example in plugin/viewers that has a sample/, this copies the sample to <folder>/<example>, registers the copy
-as a workspace, saves the example as a built view of it, and applies the labels its labels.json defines, turned on in
-Files. The labels are regex labels, so no model is called. A copy an earlier run made is replaced; any other folder of
-that name stops the script before it changes anything. Run it in the environment of the stack it is for
-(THIMBLE_HOME, THIMBLE_DATA_DIR, THIMBLE_WORKSPACES_DIR); a server already running picks the views and labels up.
+as a workspace, saves the example as a built view of it (a file-type viewer thimble ships, such as pdf, is there
+already, in the File browser), and applies the labels its labels.json defines, turned on in Files. The labels are regex
+labels, so no model is called. A copy an earlier run made is replaced; any other folder of that name stops the script
+before it changes anything. Run it in the environment of the stack it is for (THIMBLE_HOME, THIMBLE_DATA_DIR,
+THIMBLE_WORKSPACES_DIR); a server already running picks the views and labels up.
 """
 import asyncio
 import json
@@ -18,14 +19,14 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "backend"))
 
 from app import concepts, config, views
 
-VIEW_KEYS = ("name", "description", "claims", "accepts", "units", "libs")
+VIEW_KEYS = ("name", "description", "claims", "accepts", "units", "derived", "libs")
 MARK = ".thimble-example"  # in each copy, so a later run knows the folder is one it made
 
 
 def save_view(name: str, src: Path) -> None:
     raw = json.loads((src / "view.json").read_text("utf-8"))
     v = views.write_view(name, name, reader=(src / "reader.py").read_text("utf-8"),
-                         html=(src / "view.html").read_text("utf-8"), **{k: raw[k] for k in VIEW_KEYS})
+                         html=(src / "view.html").read_text("utf-8"), **{k: raw.get(k) for k in VIEW_KEYS})
     print(f"{name}: view {v['slug']} built={v['built']} ok={v['ok']}")
 
 
@@ -58,7 +59,8 @@ async def main(folder: Path) -> None:
             shutil.copytree(src / "sample", dst)
             (dst / MARK).touch()
             c = config.register_corpus(dst)["name"]
-            save_view(c, src)
+            if src.name not in views.BUILTIN_VIEWERS:
+                save_view(c, src)
             await apply_labels(c, src)
     finally:
         concepts._pool_shutdown()

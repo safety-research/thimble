@@ -102,7 +102,7 @@
   .rowbg.run { background: var(--bg-sub); border-top: 1px solid var(--border-hairline); }
   .lcol { position: relative; flex: none; }
   .lhead, .lrow { position: relative; display: flex; align-items: center; }
-  .lhead span { position: absolute; }
+  .lhead > span { position: absolute; }
   .cb { position: absolute; left: 2px; width: 14px; height: 14px; border-radius: 3.5px; border: 1px solid var(--border-strong); background: var(--surface-card); display: grid; place-items: center; cursor: pointer; }
   .cb:hover { border-color: var(--text-secondary); }
   .cb.on { background: var(--surface-inverse); border-color: var(--surface-inverse); color: var(--text-on-inverse); }
@@ -271,7 +271,7 @@ const durT = (d) => Math.max(0, Math.min(1, (Math.log10(Math.max(d, 0.05)) + 1) 
 // ------------------------------------------------------------------------------------------------------------ state
 const st = {
   field: 'tool', byField: false, filters: {}, search: '', hide: new Set(), win: null, ticked: [], view: 'overview', collapsed: new Set(),
-  open: null, sel: null, menu: null, pal: null, includeSubs: true, align: 'start', narrow: false,
+  open: null, sel: null, msg: null, menu: null, pal: null, includeSubs: true, align: 'start', narrow: false,
   side: false, compact: false, panelW: 0, leftW: 0, // the open session beside the lanes, and the widths render worked out
 }
 const SIDE_MIN = 760 // the page width from which an open session sits in a panel beside the lanes rather than below them
@@ -438,7 +438,7 @@ function legend() {
       const multi = l && (l.values || []).filter((v) => v.highlight !== false).length > 1
       out.push(`<span class="lg ${st.hide.has(key) ? 'off' : ''}" role="button" data-act="legend" data-v="${esc(key)}" data-label="${esc((l && l.id) || '')}" title="Click: only this · Shift-click: hide">${swatchButton(c.label, c.value, classColour(i))}${esc(multi ? `${c.label}: ${c.value}` : c.label)}<span class="n">${c.n}</span></span>`)
     })
-    out.push(`<span class="lg ${st.hide.has('none') ? 'off' : ''}" role="button" data-act="legend" data-v="none" title="Click: only this · Shift-click: hide"><i class="sw" style="background:${UNMARKED}"></i>no label<span class="n">${ov.none}</span></span>`)
+    if (ov.none || st.hide.has('none')) out.push(`<span class="lg ${st.hide.has('none') ? 'off' : ''}" role="button" data-act="legend" data-v="none" title="Click: only this · Shift-click: hide"><i class="sw" style="background:${UNMARKED}"></i>no label<span class="n">${ov.none}</span></span>`)
     if (st.hide.size) out.push('<button class="btn btn-ghost btn-sm" data-act="showall">Show all</button>')
   } else {
     const hid = st.filters[st.field] || new Set()
@@ -467,8 +467,8 @@ function topBar() {
       <div class="grow"></div><div class="counts"><span><b>${calls.length}</b> of ${ov.total} calls</span><span><b>${files.size}</b> files</span></div></div>
     <div class="r2"><div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">${colourButton()}<div class="legend">${legend()}</div></div>
       <div class="vsep"></div>
-      <div class="legend"><span class="st"><i class="rail" style="background:${NEG}"></i>Error <b>${nErr}</b></span><span class="st"><i class="rail" style="background:${WARN}"></i>Denied <b>${nDen}</b></span>
-        <span class="st">${MK.spawn}Spawned</span><span class="st">${MK.ret}Returned</span><span class="st">${MK.wait}Waiting on subagents</span></div></div>
+      <div class="legend"><span class="st"><i class="rail" style="background:${NEG}"></i>${thimble.field('err', 'Error')} <b>${nErr}</b></span><span class="st"><i class="rail" style="background:${WARN}"></i>${thimble.field('den', 'Denied')} <b>${nDen}</b></span>
+        <span class="st">${MK.spawn}${thimble.field('spawn', 'Spawned')}</span><span class="st">${MK.ret}Returned</span><span class="st">${MK.wait}${thimble.field('waits', 'Waiting on subagents')}</span></div></div>
   </header>`
 }
 function menus() {
@@ -618,7 +618,7 @@ function labelCol(rows, { w, compareCol = true, badges = null, cols }) {
 // the lanes' width, left of an open session's panel; beside a narrow panel the session column drops its counts
 const viewWidth = () => Math.max(st.side ? 300 : 560, st.leftW - 44)
 const labelWidth = () => (st.compact ? 170 : st.narrow ? 250 : 320)
-const COLS = () => (st.compact ? [] : [{ name: 'Calls', r: st.narrow ? 58 : 66, v: (s) => s.n }, { name: 'Errors', r: 6, v: (s) => s.err || '–', cls: (s) => (s.err ? 'err' : 'zero') }])
+const COLS = () => (st.compact ? [] : [{ name: thimble.field('n', 'Calls'), r: st.narrow ? 64 : 74, v: (s) => s.n }, { name: thimble.field('err', 'Errors'), r: 6, v: (s) => s.err || '–', cls: (s) => (s.err ? 'err' : 'zero') }])
 function overview() {
   const rows = []
   for (const run of ov.runs) {
@@ -655,8 +655,9 @@ function overview() {
 // ------------------------------------------------------------------------------------------------------------ the open session
 function transcript(s) {
   return sess.items.map((it) => {
-    if (it.kind === 'prompt') return `<div class="tr" data-anchor="${esc(it.ref)}"><span class="tm">${fmt(it.t)}</span><span class="tl q">Prompt</span><span class="txt q">${esc(it.text)}</span></div>`
-    if (it.kind === 'text' || it.kind === 'result') return `<div class="tr" data-anchor="${esc(it.ref)}"><span class="tm">${fmt(it.t)}</span><span class="tl${it.kind === 'result' ? ' q' : ''}">${it.kind === 'result' ? 'Result' : '<i class="adot"></i>'}</span><span class="txt">${esc(it.text)}</span></div>`
+    const msgAttrs = st.msg && it.ref === st.msg ? 'class="tr sel" id="selrow"' : 'class="tr"'
+    if (it.kind === 'prompt') return `<div ${msgAttrs} data-anchor="${esc(it.ref)}"><span class="tm">${fmt(it.t)}</span><span class="tl q">Prompt</span><span class="txt q">${esc(it.text)}</span></div>`
+    if (it.kind === 'text' || it.kind === 'result') return `<div ${msgAttrs} data-anchor="${esc(it.ref)}"><span class="tm">${fmt(it.t)}</span><span class="tl${it.kind === 'result' ? ' q' : ''}">${it.kind === 'result' ? 'Result' : '<i class="adot"></i>'}</span><span class="txt">${esc(it.text)}</span></div>`
     if (it.kind === 'wait') return `<div class="tr wait"><span class="tm"></span><span class="tl q">Waiting</span><span class="txt">${esc(it.on.map((id) => (S[id] ? agentName(S[id]) : id)).join(' and '))} running · ${fmtd(it.b - it.a)}</span></div>`
     if (it.kind === 'return') {
       const kid = S[it.child]
@@ -664,8 +665,9 @@ function transcript(s) {
     }
     const c = it
     const cols = coloursOf({ ...c, s: s.id })
-    const cl = ['tr', c.out === 'error' ? 'err' : '', c.out === 'denied' ? 'den' : '', c.ref === st.sel ? 'sel' : ''].join(' ')
-    const attrs = `class="${cl}" data-act="sel" data-ref="${esc(c.ref)}" data-anchor="${esc(c.ref)}" ${c.ref === st.sel ? 'id="selrow"' : ''}`
+    const on = c.ref === st.sel && !st.msg
+    const cl = ['tr', c.out === 'error' ? 'err' : '', c.out === 'denied' ? 'den' : '', on ? 'sel' : ''].join(' ')
+    const attrs = `class="${cl}" data-act="sel" data-ref="${esc(c.ref)}" data-anchor="${esc(c.ref)}" ${on ? 'id="selrow"' : ''}`
     const tl = `<span class="tl">${swatch(cols)}${esc(c.tool)}</span>`
     if (c.child) {
       const kid = S[c.child]
@@ -699,12 +701,12 @@ function callDetails(c, s) {
   })
   return `<div data-anchor="${esc(c.ref)}"><div class="cd-head">${swatch(cols, 10)}<span class="tool">${esc(c.tool)}</span>${chip}<div class="grow"></div><span class="mono t3" style="font-size:var(--text-mono-sm)">call ${c.k} of ${sess.n}</span></div>
     <div class="cd-cmd">${esc(c.child ? `${S[c.child] ? agentName(S[c.child]) : c.child}: ${c.input}` : c.input)}</div></div><div>
-    <div class="kv"><div><span class="k">Started</span><span class="v">${fmt(c.t)}</span></div><div><span class="k">Duration</span><span class="v">${fmtd(c.d)}</span></div>
-      ${c.out !== 'ok' ? `<div><span class="k">Result</span><span class="v err" title="${esc(c.result)}">${esc(c.result)}</span></div>` : ''}
-      ${c.again ? `<div><span class="k">Same command next</span><span class="v">${fmt(c.again.t)} · ${esc(c.again.out)}</span></div>` : ''}</div>
+    <div class="kv"><div><span class="k" data-field="t">Started</span><span class="v">${fmt(c.t)}</span></div><div><span class="k" data-field="d">Duration</span><span class="v">${fmtd(c.d)}</span></div>
+      ${c.out !== 'ok' ? `<div><span class="k" data-field="result">Result</span><span class="v err" title="${esc(c.result)}">${esc(c.result)}</span></div>` : ''}
+      ${c.again ? `<div><span class="k" data-field="again">Same command next</span><span class="v">${fmt(c.again.t)} · ${esc(c.again.out)}</span></div>` : ''}</div>
     ${labs ? `<h4 class="cap">Labels</h4><div>${labs}</div>` : ''}
-    <h4 class="cap">${c.child ? 'Returned' : 'Output'}</h4><pre class="out">${output}</pre>
-    ${c.files.length ? `<h4 class="cap">Files</h4><div class="chips">${c.files.map((f) => `<span class="chip chip-act" data-act="searchfor" data-v="${esc(f)}">${esc(f)}</span>`).join('')}</div>` : ''}</div>
+    <h4 class="cap">${c.child ? thimble.field('text', 'Returned') : thimble.field('output', 'Output')}</h4><pre class="out">${output}</pre>
+    ${c.files.length ? `<h4 class="cap">${thimble.field('files', 'Files')}</h4><div class="chips">${c.files.map((f) => `<span class="chip chip-act" data-act="searchfor" data-v="${esc(f)}">${esc(f)}</span>`).join('')}</div>` : ''}</div>
     ${conc.length ? `<h4 class="cap">${esc(runName(s.run))} at ${fmt(c.t)}</h4>${conc.join('')}` : ''}`
 }
 function details() {
@@ -718,9 +720,9 @@ function details() {
   const close = `<button class="btn btn-ghost btn-sm" data-act="closedet" aria-label="Close">${ico.close}</button>`
   return `<section id="det"><div class="dhead" data-anchor="${esc(unitRef(s.key))}">
       <h2>${esc(agentName(s))}<span class="run">${esc(runName(s.run))} · ${esc(run.team)}</span></h2>${st.side ? `${close}<span class="brk"></span>` : ''}
-      ${parent ? `<span class="grp"><span class="lab">Spawned by</span><button class="chip chip-sans chip-act" data-act="open" data-id="${esc(parent.id)}" ${task ? `data-call="${esc(task.ref)}"` : ''}>${ico.parent}${esc(agentName(parent))}${s.spawn != null ? ` · Task <span class="v">${fmt(s.spawn)}</span>` : ''}</button></span>` : ''}
-      ${kids.length ? `<span class="grp"><span class="lab">Subagents</span>${kids.map((k) => `<button class="chip chip-sans chip-act" data-act="open" data-id="${esc(k.id)}">${esc(agentName(k))}${ico.child}</button>`).join('')}</span>` : ''}
-      <span class="dstats"><span><b>${s.n}</b> calls</span><span>ran <b>${fmtd(s.end - s.start)}</b></span><span class="err"><b>${s.err}</b> errors</span></span>
+      ${parent ? `<span class="grp"><span class="lab" data-field="parent">Spawned by</span><button class="chip chip-sans chip-act" data-act="open" data-id="${esc(parent.id)}" ${task ? `data-call="${esc(task.ref)}"` : ''}>${ico.parent}${esc(agentName(parent))}${s.spawn != null ? ` · Task <span class="v">${fmt(s.spawn)}</span>` : ''}</button></span>` : ''}
+      ${kids.length ? `<span class="grp"><span class="lab" data-field="child">Subagents</span>${kids.map((k) => `<button class="chip chip-sans chip-act" data-act="open" data-id="${esc(k.id)}">${esc(agentName(k))}${ico.child}</button>`).join('')}</span>` : ''}
+      <span class="dstats"><span><b>${s.n}</b> ${thimble.field('n', s.n === 1 ? 'call' : 'calls')}</span><span>${thimble.field('ran', 'ran')} <b>${fmtd(s.end - s.start)}</b></span><span class="err"><b>${s.err}</b> ${thimble.field('err', s.err === 1 ? 'error' : 'errors')}</span></span>
       <div class="grow"></div>
       <span class="grp"><button class="btn btn-ghost btn-sm" data-act="err" data-dir="-1">${ico.up}Previous error</button><button class="btn btn-ghost btn-sm" data-act="err" data-dir="1">${ico.down}Next error</button></span>
       ${st.side ? '' : close}</div>
@@ -759,28 +761,28 @@ function compare() {
   const line = () => cells.push('<div class="secline"></div>')
   const maxN = Math.max(1, ...groups.map((g) => g.n))
   if (cls.length) {
-    sec('Labels')
+    sec(thimble.field('classes', 'Labels'))
     cls.forEach((c, i) => barRow(esc(c.label) + (labelBy(c.label) && (labelBy(c.label).values || []).filter((v) => v.highlight !== false).length > 1 ? `: ${esc(c.value)}` : ''), groups.map((g) => g.classes[i]), maxN, classColour(i), (v) => v, `<span class="box on" style="--mark:${classColour(i)};width:10px;height:10px"></span>`))
     line()
   }
-  sec('Calls by tool')
-  barRow('All calls', groups.map((g) => g.n), maxN, `rgba(${inkRgb},.55)`)
+  sec(thimble.field('tools', 'Calls by tool'))
+  barRow(thimble.field('n', 'All calls'), groups.map((g) => g.n), maxN, `rgba(${inkRgb},.55)`)
   for (const t of cmp.tools) barRow(esc(t), groups.map((g) => g.tools[t] || 0), maxN, colourOf('tool', t), (v) => v, `<i class="sw" style="background:${colourOf('tool', t)}"></i>`)
   line()
   sec('Outcomes')
   const maxO = Math.max(1, ...groups.map((g) => Math.max(g.err, g.den))) * 2.5
-  barRow('Error', groups.map((g) => g.err), maxO, NEG, (v) => v, `<i class="rail" style="background:${NEG}"></i>`)
-  barRow('Denied', groups.map((g) => g.den), maxO, WARN, (v) => v, `<i class="rail" style="background:${WARN}"></i>`)
+  barRow(thimble.field('err', 'Error'), groups.map((g) => g.err), maxO, NEG, (v) => v, `<i class="rail" style="background:${NEG}"></i>`)
+  barRow(thimble.field('den', 'Denied'), groups.map((g) => g.den), maxO, WARN, (v) => v, `<i class="rail" style="background:${WARN}"></i>`)
   line()
   sec('Time')
   const maxT = Math.max(1, ...groups.map((g) => Math.max(g.wall, g.summed)))
-  barRow('Wall clock', groups.map((g) => g.wall), maxT, `rgba(${inkRgb},.55)`, fmtd)
-  barRow('Summed over sessions', groups.map((g) => g.summed), maxT, `rgba(${inkRgb},.35)`, fmtd)
-  barRow('In tool calls', groups.map((g) => g.in_tools), maxT, `rgba(${inkRgb},.35)`, fmtd)
-  barRow('Waiting on subagents', groups.map((g) => g.waiting), maxT, `rgba(${inkRgb},.35)`, fmtd)
+  barRow(thimble.field('wall', 'Wall clock'), groups.map((g) => g.wall), maxT, `rgba(${inkRgb},.55)`, fmtd)
+  barRow(thimble.field('summed', 'Summed over sessions'), groups.map((g) => g.summed), maxT, `rgba(${inkRgb},.35)`, fmtd)
+  barRow(thimble.field('in_tools', 'In tool calls'), groups.map((g) => g.in_tools), maxT, `rgba(${inkRgb},.35)`, fmtd)
+  barRow(thimble.field('waiting', 'Waiting on subagents'), groups.map((g) => g.waiting), maxT, `rgba(${inkRgb},.35)`, fmtd)
   line()
   const EDIT = colourOf('tool', 'Edit'), READ = colourOf('tool', 'Read')
-  sec('Files touched', `<span class="fkey"><i class="sq" style="background:${EDIT}"></i>edits<i class="sq hollow" style="border-color:${READ};margin-left:8px"></i>reads</span>`)
+  sec(thimble.field('files', 'Files touched'), `<span class="fkey"><i class="sq" style="background:${EDIT}"></i>edits<i class="sq hollow" style="border-color:${READ};margin-left:8px"></i>reads</span>`)
   const use = (g, f) => ({ e: (g.files[f] || [0, 0])[0], r: (g.files[f] || [0, 0])[1] })
   const glyph = (u) => `<span class="g">${u.e ? `<i class="sq" style="background:${EDIT}"></i>${u.e}` : ''}</span><span class="g">${u.r ? `<i class="sq hollow" style="border-color:${READ}"></i>${u.r}` : ''}</span>`
   cells.push('<div class="ml">Files</div>', ...groups.map((g) => `<div class="mc"><span class="v">${Object.keys(g.files).length}</span></div>`))
@@ -795,7 +797,7 @@ function compare() {
     cells.push(`<div class="own">${own.map(({ f, u }) => `<div class="f"><span class="p" title="${esc(f)}">${esc(f)}</span>${glyph(u)}</div>`).join('') || '<div class="f"><span class="p t3">–</span></div>'}</div>`)
   }
   line()
-  sec('Errors and denials')
+  sec(thimble.field('errors', 'Errors and denials'))
   cells.push('<div></div>')
   for (const g of groups) cells.push(`<div class="errl">${g.errors.map((e) => `<div class="e" data-anchor="${esc(e.ref)}" data-act="opencall" data-ref="${esc(e.ref)}"><span class="tm">+${fmt(e.t)}</span><span class="m ${e.out === 'denied' ? 'den' : ''}">${esc(e.result)}</span><span class="c">${g.sessions.length > 1 ? `<span class="who">${esc(e.agent)}</span>` : ''}${esc(e.tool)} ${esc(e.input)}</span></div>`).join('') || '<span class="t3">–</span>'}</div>`)
   return `<section id="cmp">${head}${lanes}<div class="cgrid" style="grid-template-columns:${st.narrow ? 170 : 300}px repeat(${groups.length}, minmax(0,1fr))">${cells.join('')}</div></section>`
@@ -852,11 +854,16 @@ function counterparts(id) {
   return ov.runs.filter((r) => r.id !== s.run).map((r) => r.sessions.find((x) => S[x].agent === s.agent)).filter(Boolean)
 }
 function firstCallOf(id) { const s = S[id]; return s ? (s.calls.find((c) => c.out !== 'ok') || s.calls[0] || {}).ref || null : null }
-async function openSession(id, call) {
+async function openSession(id, call, message = null) {
   if (!S[id]) return
-  st.open = id; st.sel = call || firstCallOf(id); st.view = 'overview'; render.scrollToSel = true
+  st.open = id; st.sel = call || firstCallOf(id); st.msg = message; st.view = 'overview'; render.scrollToSel = true
   await loadSession()
   if (call) st.sel = call
+  // a cited message is chosen in the transcript, with the call before it (else the one after it) in the details
+  const m = message && sess ? sess.items.find((i) => i.ref === message && i.kind !== 'call') : null
+  const calls = sess ? sess.items.filter((i) => i.kind === 'call') : []
+  if (m) st.sel = (calls.filter((i) => i.t <= m.t).pop() || calls.find((i) => i.t > m.t) || {}).ref || st.sel
+  else st.msg = null
   await loadMoment()
   render()
   // below the lanes, the session is brought into sight when its head is out of it
@@ -943,14 +950,14 @@ document.addEventListener('click', async (e) => {
     case 'open': e.stopPropagation(); await openSession(id, el.dataset.call); return
     case 'opencall': { const c = CALL[el.dataset.ref]; if (c) await openSession(c.s, c.ref); return }
     case 'openmsg': await openSession(el.dataset.s, null); return
-    case 'sel': st.sel = el.dataset.ref; await loadMoment(); break
+    case 'sel': st.sel = el.dataset.ref; st.msg = null; await loadMoment(); break
     case 'err': {
       const calls = sess.items.filter((i) => i.kind === 'call'), errs = calls.filter((c) => c.out !== 'ok'), cur = selCall()
       const nx = +el.dataset.dir > 0 ? errs.find((c) => !cur || c.t > cur.t) : errs.filter((c) => cur && c.t < cur.t).pop()
-      if (nx) { st.sel = nx.ref; render.scrollToSel = true; await loadMoment() }
+      if (nx) { st.sel = nx.ref; st.msg = null; render.scrollToSel = true; await loadMoment() }
       break
     }
-    case 'closedet': st.open = null; st.sel = null; sess = null; break
+    case 'closedet': st.open = null; st.sel = null; st.msg = null; sess = null; break
     case 'subs': st.includeSubs = !st.includeSubs; await loadCompare(); break
     case 'align': st.align = el.dataset.v; break
   }
@@ -1002,14 +1009,21 @@ let resizing = null
 window.addEventListener('resize', () => { clearTimeout(resizing); resizing = setTimeout(render, 60) })
 
 // ------------------------------------------------------------------------------------------------------------ thimble
+// a whole file the analyst opened the view on (Open in, `picked`): a transcript opens its session, a run's index its run
+function targetOfFile(path) {
+  if (!path) return {}
+  if (/(^|\/)sessions-index\.json$/.test(path)) return { run: path.split('/').slice(-2)[0] }
+  const s = ov.sessions.find((x) => x.ref && x.ref.slice(0, x.ref.lastIndexOf('#')) === path)
+  return s ? { session: s.id } : {}
+}
 thimble.onOpen(async (place) => {
-  const opened = (place && place.target) || {}
   if (!(await ensureOverview())) return
+  const opened = (place && place.target) || (place && place.picked ? targetOfFile(place.path) : {})
   if (opened.run && RUN[opened.run]) {
     st.filters.run = new Set(valuesOf('run').filter((v) => v !== opened.run))
     await reload()
   } else if (opened.session) {
-    await openSession(opened.session, opened.call || null)
+    await openSession(opened.session, opened.call || null, opened.message || null)
   } else render()
 })
 thimble.onLabels(async (state) => {

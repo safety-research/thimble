@@ -40,7 +40,7 @@ A label marks records, such as the posts that ask for help. The analyst turns la
 
 ## Worked examples
 
-Three views in {{examples}} show methods on invented data, each described in its `view.json` under `data`. Each sample is several files with the mess a real corpus has, such as renamed fields, mixed time formats, duplicates and a torn last line, and the reader cleans it. A line the reader cannot parse is left out and reported with `problems` (below). Read the one closest to your task. Take the method, not their domain, fields or layout.
+Three views in {{examples}} show methods on invented data, each with its files described at the top of its `reader.py`. Each sample is several files with the mess a real corpus has, such as renamed fields, mixed time formats, duplicates and a torn last line, and the reader cleans it. A line the reader cannot parse is left out and reported with `problems` (below). Read the one closest to your task. Take the method, not their domain, fields or layout.
 
 - `linked-sessions` is for agent transcripts, sessions and subagents: one lane per session with each subagent under the session that spawned it, a session's transcript in a panel beside the lanes, and sessions or runs compared side by side.
 - `incident-timeline` is for events over time from several sources: an overview of the whole span to zoom into, a select for every field, and sources or incidents compared side by side as lanes.

@@ -380,17 +380,18 @@ async def test_no_thread_is_read_as_a_question_from_a_view_s_own_box(ws, inproc,
 # ------------------------------------------------------------------------------------------------- worked examples
 #
 # plugin/viewers/linked-sessions, incident-timeline and repository are the worked examples a view ticket's session reads
-# (prompts/dev-view.md). Each ships an invented sample of the files it claims under sample/, and passes over it the
-# checks a view a session writes must pass. Each sample is copied into the temp DATA_DIR as a corpus named after its
-# example.
+# (prompts/dev-view.md), and pdf the file-type viewer thimble ships. Each ships an invented sample of the files it
+# claims under sample/, and passes over it the checks a view a session writes must pass. Each sample is copied into the
+# temp DATA_DIR as a corpus named after its example.
 
-# the example, the slug it is saved under, and a key of each unit it gives
+# the example, the slug it is saved under, and a key of each unit it gives (for pdf, pages it cites)
 EXAMPLES = {
     "incident-timeline": ("incident-timeline", ["view:incident-timeline/INC-312",
                                                 "view:incident-timeline/2026-05-16T08:00..2026-05-16T09:00"]),
     "repository": ("repository", ["view:repository/r1/pull/11", "view:repository/r3", "view:repository/r2/issues/6",
                                   "view:repository/r3/discussions/2", "view:repository/r4/agents/moss"]),
     "linked-sessions": ("linked-sessions", ["view:linked-sessions/r1", "view:linked-sessions/a07a4da7"]),
+    "pdf": ("pdf", ["reports/harbor-line-safety-2026.pdf#p2", "runs/r2/summary.pdf#p1-p2"]),
 }
 
 
@@ -414,18 +415,28 @@ def _save_example(name: str) -> str:
     raw = json.loads((d / "view.json").read_text("utf-8"))
     slug = EXAMPLES[name][0]
     views.write_view(name, slug, reader=(d / "reader.py").read_text("utf-8"), html=(d / "view.html").read_text("utf-8"),
-                     **{k: raw[k] for k in ("name", "description", "claims", "accepts", "units", "derived", "libs")})
+                     **{k: raw.get(k) for k in ("name", "description", "claims", "accepts", "units", "derived", "libs")})
     return slug
 
 
 # per example, lines a sample file gets appended that its reader must report rather than fail on: (file, text, problems
-# they add)
+# they add); a file that is not there, or a .json or .pdf file, is written whole
 BROKEN = {
     "incident-timeline": [("agents.log", '2026-05-16T05:00:00Z INFO autoheal action=scan result=ok msg="matched \\d+"\n', 1),
-                          ("deploys.csv", '2026-05-16T03:10:00+01:00,dep-90,started,api,1.2.0,ops,,,"two\nlines"\n', 0)],
+                          ("deploys.csv", '2026-05-16T03:10:00+01:00,dep-90,started,api,1.2.0,ops,,,"two\nlines"\n', 0),
+                          ("alerts/monitor-20260516-0431.jsonl", '{"ts": 1778910000000, "state": "firing"}\n', 1),
+                          ("chat/random.json", "[1, 2]", 1)],
     "repository": [("runs/r3/export/comments.csv", '4,hazel,2026-05-20T10:00:00,"Repro:\n2 failures"\n', 0),
-                   ("runs/r2/manifest.json", "{", 1)],
-    "linked-sessions": [("runs/r1/sessions-index.json", "not json", 1)],
+                   ("runs/r2/manifest.json", "{", 1),
+                   ("runs/r1/events.jsonl",
+                    '{"id": "x1", "type": "label.added", "ts": "2026-05-20T10:00:00Z", "number": 11}\n'
+                    '{"id": "x2", "type": "comment", "ts": "yesterday", "actor": "ash", "number": 11}\n', 2)],
+    "linked-sessions": [("runs/r1/sessions-index.json", "not json", 1),
+                        ("runs/r1/36fe6b9d-6e6d-4582-aef9-c97a0fe8f576.jsonl",
+                         '{"type": "user", "uuid": "x9", "timestamp": "2026-09-12T14:50:00Z", "message": {"role": '
+                         '"user", "content": [{"type": "tool_result", "tool_use_id": "toolu_gone", "content": "ok"}]}}\n',
+                         1)],
+    "pdf": [("uploads/half.pdf", "%PDF-1.4\n1 0 obj\n", 1)],
 }
 
 
@@ -441,7 +452,8 @@ async def test_every_worked_example_answers_the_checks_over_its_sample(name, sam
     monkeypatch.setattr(views, "shoot_states", no_page)
     root = samples / name
     files = [p for p in root.rglob("*") if p.is_file()]
-    for label in json.loads((_example_dir(name) / "labels.json").read_text("utf-8")):
+    labels = _example_dir(name) / "labels.json"
+    for label in json.loads(labels.read_text("utf-8")) if labels.is_file() else []:
         pattern = re.compile(label["spec"])
         over = [p for p in files if any(fnmatch.fnmatchcase(p.relative_to(root).as_posix(), g) for g in label["paths"])]
         assert any(pattern.search(line) for p in over for line in p.read_text("utf-8").splitlines()), label["name"]
@@ -449,19 +461,19 @@ async def test_every_worked_example_answers_the_checks_over_its_sample(name, sam
     before = (await views.reader_problems(name, slug))["count"]
     for rel, text, _ in BROKEN[name]:
         path = samples / name / rel
-        old = "" if rel.endswith(".json") else path.read_text("utf-8")
+        old = path.read_text("utf-8") if path.is_file() and not rel.endswith((".json", ".pdf")) else ""
         path.write_text(old + ("\n" if old and not old.endswith("\n") else "") + text, "utf-8")
     rep = await views.check(name, slug, EXAMPLES[name][1], shot_dir=tmp_path)
     assert rep["ok"], views.gate_lines(rep)
     checked = [r["locator"] for r in rep["checks"]]
     assert set(EXAMPLES[name][1]) <= set(checked)
-    assert any(re.search(r"#L\d+$", c) for c in checked), "sampled lines were checked beside the keys"
+    assert name == "pdf" or any(re.search(r"#L\d+$", c) for c in checked), "sampled lines were checked beside the keys"
     problems = await views.reader_problems(name, slug)
     assert problems["count"] == before + sum(n for *_, n in BROKEN[name]), problems
     assert not rep["coverage"]["not_shown"]["count"] and rep["coverage"]["derived"], "every file is read, and what the reader made is listed"
 
 
-@pytest.mark.parametrize("name", ["repository"])
+@pytest.mark.parametrize("name", sorted(EXAMPLES))
 async def test_every_worked_example_s_page_loads_headless_at_its_first_place(name, samples, inproc, bound, tmp_path):
     """The whole check a view ticket's session runs, the headless page included, where this machine has Node and the
     frontend's packages with their Chromium (scripts/check.sh install)."""

@@ -26,7 +26,8 @@
 #   - timestamps come as ISO 8601 with Z or an offset, with or without milliseconds, or as epoch milliseconds;
 #   - a line written twice (the same uuid) counts once, and a session's lines are put in time order;
 #   - a line that is not JSON, such as the last line of a session that was cut off, a line with no time the reader can
-#     read, and an index that is not JSON are left out, and problems() lists them for thimble to show;
+#     read, a tool result for no call before it and an index that is not JSON are left out, and problems() lists them
+#     for thimble to show;
 #   - the files on disk are the sessions: the index only names the team and the agents, and it may miss a session or
 #     list one that is gone;
 #   - r1's harness flags an error with isError and the later ones with is_error, and r3's calls the Task tool Agent;
@@ -258,7 +259,8 @@ def _transcript(path, offs, dups, problems):
 def _session_lines(sid, lines, problems):
     """A session's messages, each {ref, s, at, kind, words, text}, and its calls, each {ref, s, at, id, tool, inp} with
     {res, end, block, tur} once its result came. A user's text is a prompt; the last thing the agent said, when no
-    call follows it, is its result. A line whose blocks are of another shape is a problem."""
+    call follows it, is its result. A line whose blocks are of another shape, or a tool result for no call before it,
+    is a problem."""
     msgs, calls, pending = [], [], {}
     for t, _n, ref, r in lines:
         user = (r.get("type") or _msg_of(r).get("role")) == "user"
@@ -277,6 +279,8 @@ def _session_lines(sid, lines, problems):
                 calls.append(pending[b["id"]])
             elif kind == "tool_result" and b.get("tool_use_id") in pending:
                 pending.pop(b["tool_use_id"]).update(res=ref, end=t, block=b, tur=r.get("toolUseResult"))
+            elif kind == "tool_result":
+                _problem(problems, ref, "a tool result for no call before it in the session")
     said = [m for m in msgs if m["kind"] == "text"]
     if said and not any(c["at"] > said[-1]["at"] for c in calls):
         said[-1]["kind"] = "result"

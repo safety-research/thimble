@@ -48,8 +48,8 @@
 #   duplicates  an alert delivered twice is kept once, and the later line opens the first
 #   order       records are sorted by time, whatever order their file holds them in
 #   bad lines   a line that does not parse whole, such as agents.log's torn last line, a JSON escape a log value gets
-#               wrong or a record with no time the reader can read, is no record, and problems() lists it for
-#               thimble to show
+#               wrong, an alert line with no id or state, a chat file that is not one channel, a ticket with no message
+#               or a record with no time the reader can read, is no record, and problems() lists it for thimble to show
 #   the index   tickets are the files on disk: the index gives their fields, and its rows without a file are ignored
 #   free text   a priority or result with words around it ("Urgent - 2nd double charge") takes the value it names;
 #               a deploy's reason or a chat message that names an incident belongs to it, and a deploy's later events
@@ -62,9 +62,10 @@
 # The method: the index keeps every record as a row of small integers (time, file, line, each field's value as an
 # index into that field's names, the row `re` points at) in time order, with its id, the lines its record spans, and
 # the byte offset of every line. A record's line is the one that holds its text, so a label, which reads a file line
-# by line, marks that line. `records` sends the rows the label filter keeps as columns, so the page zooms, filters,
-# groups and compares without asking again; text, search and a record's details are read back from the files by
-# seeking to the record's lines and parsing them again.
+# by line, marks that line. `records` sends the rows the label filter keeps as columns, OVERVIEW_ROWS rows a fetch, and
+# the page asks for the next page until it has them all, so it zooms, filters, groups and compares without asking
+# again; text, search and a record's details are read back from the files by seeking to the record's lines and parsing
+# them again.
 #
 # Labels: they apply when records are served, never in the index. Every answer keeps only the records thimble.kept(ref)
 # holds for. `marks` lists the values of the labels that are on, in thimble's order, and each row carries the ones
@@ -92,6 +93,7 @@ NEAR = 4  # records before and after the chosen one, across every source
 UNIT_REFS = 200  # refs a unit's citation carries
 EXCERPT_RECORDS = 12  # records whose text a unit's excerpt quotes
 MARKS_MAX = 24  # label values the page tells apart, as bits of one number per record
+OVERVIEW_ROWS = 5000  # rows one overview fetch returns
 MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
 LOG_LINE = re.compile(r"(\d{4}-\d\d-\d\d[T ]\d\d:\d\d:\d\d(?:\.\d+)?(?:Z|[+-]\d\d:?\d\d)?)\s+([A-Z]+)\s+(\S+)\s+(.*)")
 LOG_PAIR = re.compile(r'(\w+)=("(?:[^"\\]|\\.)*"|[^\s"]\S*)')
@@ -192,7 +194,11 @@ def _alerts(lines, fi, ctx):
             if line.strip():
                 _problem(ctx, fi, n, "not a JSON object")
             continue
+        if isinstance(r, dict) and "monitor" in r and not r.get("state"):
+            continue  # the line a monitor writes as it starts
         if not isinstance(r, dict) or not r.get("id") or not r.get("state"):
+            _problem(ctx, fi, n, "not an alert: " + ("not a JSON object" if not isinstance(r, dict)
+                                                     else "no id" if not r.get("id") else "no state"))
             continue
         text = _str(r.get("summary", r.get("msg")))
         service = _str(r.get("service", r.get("svc")))
@@ -247,7 +253,8 @@ def _chat(lines, fi, ctx):
     except ValueError as e:
         _problem(ctx, fi, text.count("\n", 0, e.pos) + 1 if isinstance(e, json.JSONDecodeError) else 1, "not valid JSON")
         return
-    if not isinstance(doc, dict):
+    if not isinstance(doc, dict) or not isinstance(doc.get("messages"), list):
+        _problem(ctx, fi, 1, "not a chat channel: no object with a list of messages")
         return
     starts = [0]
     for _, s in lines:
@@ -256,7 +263,10 @@ def _chat(lines, fi, ctx):
     channel = _str(doc.get("channel")) or PurePosixPath(ctx["files"][fi]).stem
     own = channel.upper() if re.fullmatch(r"inc-\d+", channel, re.I) else ""
     for m, a, b in _json_items(text, "messages"):
-        if not isinstance(m, dict) or m.get("subtype") not in (None, "bot_message"):
+        if not isinstance(m, dict):
+            _problem(ctx, fi, line_of(a), "not a chat message: not a JSON object")
+            continue
+        if m.get("subtype") not in (None, "bot_message"):
             continue
         at = text.find('"text"', a, b)
         body, ts, thread = _str(m.get("text")), _str(m.get("ts")), _str(m.get("thread_ts"))
@@ -296,6 +306,8 @@ def _ticket(lines, fi, ctx):
     num = top.get("ticket") or PurePosixPath(ctx["files"][fi]).stem
     fields = ctx["tickets"].get(num, {})
     starts = [k for k, (_, s) in enumerate(lines) if s.startswith("From:") and k and not lines[k - 1][1].strip()]
+    if not starts and lines:
+        _problem(ctx, fi, 1, "not a ticket: no message, a From: line after a blank line")
     for j, k in enumerate(starts):
         part = lines[k:starts[j + 1] if j + 1 < len(starts) else len(lines)]
         head, body = _message(part)
@@ -494,11 +506,13 @@ def _kept(index, i, keep=()):
     return i in keep or thimble.kept(_ref(index, i))
 
 
-def _overview(index, keep):
-    """Every row the filter keeps, and the rows in `keep` (a citation asked for them), as columns: `r` the row, `t`
-    seconds since `t0`, `f` and `ln` its file and line, a column per field, `re` the row it answers and `tk` the seconds
-    since that row (-1 for none), `m` the index in `marks` of its first mark (-1 for none) and `mb` all its marks as
-    bits. `marks` holds every value of the labels that are on, each {label, value, colour}, marking records or not."""
+def _overview(index, keep, start=0):
+    """The rows the filter keeps, and the rows in `keep` (a citation asked for them), from row `start` on and at most
+    OVERVIEW_ROWS of them, as columns: `r` the row, `t` seconds since `t0`, `f` and `ln` its file and line, a column per
+    field, `re` the row it answers and `tk` the seconds since that row (-1 for none), `m` the index in `marks` of its
+    first mark (-1 for none) and `mb` all its marks as bits; `next` the row the next page starts at, None after the last.
+    The first page also holds `marks`, every value of the labels that are on, each {label, value, colour}, marking
+    records or not, and what the page needs to draw them: `t0`, `span`, `files`, `names` and each incident's start."""
     on = thimble.view_labels()
     rows = index["rows"]
     t0 = rows[0][T] if rows else 0
@@ -506,9 +520,11 @@ def _overview(index, keep):
     marks = [{"label": lab["name"], "value": v["name"], "colour": v["colour"]}
              for lab in on["labels"] for v in lab["values"]][:MARKS_MAX]
     mark_at = {(x["label"], x["value"]): m for m, x in enumerate(marks)}
-    for i, row in enumerate(rows):
-        ref = _ref(index, i)
-        if on["filter"] and i not in keep and not thimble.kept(ref):
+    i = max(0, start)
+    while i < len(rows) and len(cols["r"]) < OVERVIEW_ROWS:
+        row, ref = rows[i], _ref(index, i)
+        i += 1
+        if on["filter"] and i - 1 not in keep and not thimble.kept(ref):
             continue
         first, bits = -1, 0
         for x in thimble.marked(ref) if marks else ():
@@ -517,10 +533,13 @@ def _overview(index, keep):
                 first = m if first < 0 else first
                 bits |= 1 << m
         took = row[T] - rows[row[RE]][T] if row[RE] >= 0 else -1
-        for k, v in zip(cols, (i, row[T] - t0, row[F], row[L], *row[3:RE], row[RE], took, first, bits), strict=True):
+        for k, v in zip(cols, (i - 1, row[T] - t0, row[F], row[L], *row[3:RE], row[RE], took, first, bits), strict=True):
             cols[k].append(v)
-    return {"t0": t0, "span": [0, rows[-1][T] - t0 if rows else 0], "files": index["files"], "names": index["names"],
-            "cols": cols, "marks": marks, "starts": {k: rows[a][T] - t0 for k, (a, _) in index["units"].items()}}
+    page = {"cols": cols, "next": i if i < len(rows) else None}
+    if start <= 0:
+        page.update(t0=t0, span=[0, rows[-1][T] - t0 if rows else 0], files=index["files"], names=index["names"],
+                    marks=marks, starts={k: rows[a][T] - t0 for k, (a, _) in index["units"].items()})
+    return page
 
 
 def _strings(r):
@@ -578,7 +597,8 @@ def _record(index, i, keep):
 
 
 def records(index, query):
-    """{op: overview, keep?}: every kept row as columns (_overview), `keep` rows kept whatever the filter.
+    """{op: overview, from?, keep?}: a page of the kept rows as columns (_overview), from row `from` on, `keep` rows
+    kept whatever the filter.
     {op: texts, rows}: the rows' texts. {op: search, q}: the kept rows holding q. {op: record, r, keep?}: one row in
     full with its neighbours (_record)."""
     query = query or {}
@@ -590,7 +610,8 @@ def records(index, query):
         return _search(index, query.get("q"))
     if op == "record":
         return _record(index, query.get("r"), keep | {query.get("r")})
-    return _overview(index, keep)
+    start = query.get("from")
+    return _overview(index, keep, start if isinstance(start, int) and not isinstance(start, bool) else 0)
 
 
 def _unit(index, found, label, key, target):

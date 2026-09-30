@@ -37,7 +37,10 @@
 #   - Some events were logged late, and the export lists reviews by pull request, so records are put in time order.
 #   - r4's events.jsonl ends in a line cut off when the run stopped. A line or row that does not parse, a manifest that
 #     does not parse, and a timezone the machine does not know (the run's times are then read as UTC) are left out,
-#     and problems() lists them for thimble to show.
+#     and problems() lists them for thimble to show. So does it list an event of a type it does not know, a record
+#     about a number no pull request or issue of the run opens, a record with no time when no line before it has one,
+#     and a time it cannot read, whose record takes the time of the line before it.
+#   - A claimed file whose place in a run's folder is none of the above is left out, and hidden() says why.
 #   - A cell of an export table may run over several lines inside its quotes; its row cites its first line.
 #   - r4's manifest lists an agent that left no transcript: a run's agents are the manifest's and the transcripts', and
 #     one without a transcript has no note.
@@ -60,8 +63,8 @@
 # record) and `action` (what it did) pick records, and a unit stays when one of its records meets all three. Each
 # filter's counts hold every other filter, and the runs' rows hold every filter but the run, so a run that is not chosen
 # still shows what choosing it would give. The activity and the strips key each record by the colour field the page
-# chose (its action, who wrote it, its run, or its unit's state or area), and the colour field's own counts hold every
-# filter but its own, as a legend's do.
+# chose (its action, who wrote it, its run, its unit's author, state, area, close reason, origin or first flag, or for a
+# review its reviewer and verdict), and the colour field's own counts hold every filter but its own, as a legend's do.
 #
 # Labels: they apply when records are served, never in the index. A unit stays when thimble.kept_unit holds for its
 # records, and a record counts in the activity and on a unit's strip when thimble.kept holds for it. While a label is
@@ -87,9 +90,12 @@ MAX_BARS = 40
 ACTION = {"pr": "opened", "issue": "opened", "commit": "pushed", "comment": "commented", "merge": "merged",
           "close": "closed", "reopen": "reopened", "post": "posted", "agent": "signed off"}
 MENTION = re.compile(r"#(\d+)\b")
-# the fields that can colour the records on each tab: a record's action or author, or its unit's run, state or area
-COLOURS = {"pulls": ("action", "actor", "run", "state", "area"), "issues": ("action", "actor", "run", "state", "area"),
+# the fields that can colour the records on each tab: a record's action or who wrote it, a review's reviewer and
+# verdict, or its unit's run, author, state, area, close reason, origin or first flag
+COLOURS = {"pulls": ("action", "actor", "author", "reviewer", "verdict", "run", "state", "area", "reason", "flag"),
+           "issues": ("action", "actor", "author", "run", "state", "area", "origin", "reason"),
            "discussions": ("action", "actor", "run"), "agents": ("action", "actor", "run")}
+UNIT_COLOURS = ("author", "state", "area", "reason", "origin")  # the colour fields a unit's fact gives
 NO_NAME = "unknown"  # the reviewer of a review whose account is gone
 # a record's kind by an event's `type` (schema 2: `event`), and a review's verdict by its `state`, in any case
 KINDS = {"issue.opened": "issue", "pr.opened": "pr", "push": "commit", "review": "review", "comment": "comment",
@@ -105,8 +111,9 @@ TABLES = ("issues", "pulls", "commits", "comments")
 # ------------------------------------------------------------------------------------------------ reading the files
 
 
-def _time(v, tz=None):
-    """Epoch seconds of epoch milliseconds or ISO 8601; a time without an offset is in the zone `tz`, else UTC."""
+def _time(v, tz=None, bad=None):
+    """Epoch seconds of epoch milliseconds or ISO 8601; a time without an offset is in the zone `tz`, else UTC. A time
+    given in another form is None, and noted in the list `bad` when one is passed."""
     if isinstance(v, bool) or v in (None, ""):
         return None
     if isinstance(v, (int, float)):
@@ -114,6 +121,8 @@ def _time(v, tz=None):
     try:
         dt = datetime.fromisoformat(str(v).strip().replace("Z", "+00:00"))
     except ValueError:
+        if bad is not None:
+            bad.append(v)
         return None
     return (dt if dt.tzinfo else dt.replace(tzinfo=ZoneInfo(tz) if tz else timezone.utc)).timestamp()
 
@@ -145,13 +154,13 @@ def _verdict(state):
     return VERDICTS.get(str(state or "commented").lower(), "commented")
 
 
-def _event(r, tz):
-    """An events.jsonl line, in either schema, as records; [] for a type the reader does not use."""
+def _event(r, tz, bad=None):
+    """An events.jsonl line, in either schema, as records; ValueError for a type the reader does not know."""
     kind = KINDS.get(_first(r, "type", "event"))
     if kind is None:
-        return []
+        raise ValueError(f"an event of a type the reader does not know ({_first(r, 'type', 'event')!r})")
     labels = r.get("labels")
-    return [_rec(kind, _time(_first(r, "ts", "time"), tz), id=r.get("id"), author=_first(r, "actor", "user"),
+    return [_rec(kind, _time(_first(r, "ts", "time"), tz, bad), id=r.get("id"), author=_first(r, "actor", "user"),
                  number=_number(r.get("number")), title=r.get("title"),
                  area=labels[0] if isinstance(labels, list) and labels else r.get("area"),
                  closes=_number(_first(r, "fixes", "closes")), sha=r.get("sha"), diff=_first(r, "diff", "patch"),
@@ -159,11 +168,11 @@ def _event(r, tz):
                  text=_first(r, "body", "text", "message"), forced=bool(r.get("forced")), before=r.get("before"))]
 
 
-def _row(shape, c, tz):
+def _row(shape, c, tz, bad=None):
     """A row of an export table, {column: cell}, as records: a pull request's row holds its opening and its merge or
     close."""
     def t(col):
-        return _time(c.get(col), tz)
+        return _time(c.get(col), tz, bad)
 
     n = _number(c.get("number"))
     if shape == "issues":
@@ -190,27 +199,28 @@ def _content(r):
     return msg.get("content") if isinstance(msg, dict) else None
 
 
-def _turn(r, name, note):
+def _turn(r, name, note, bad=None):
     """A transcript line as a record: the agent's sign-off when it is its last words (`note`), else a turn, which the
     agent's unit cites but the page does not show."""
     content = _content(r)
     blocks = [{"text": content}] if isinstance(content, str) else content if isinstance(content, list) else []
     words = [b.get("text") or b.get("content") or (b.get("input") or {}).get("command") for b in blocks
              if isinstance(b, dict)]
-    return [_rec("agent" if note else "turn", _time(r.get("timestamp")), author=name,
+    return [_rec("agent" if note else "turn", _time(r.get("timestamp"), None, bad), author=name,
                  text="\n".join(w for w in words if isinstance(w, str) and w))]
 
 
-def _parse(ctx, n, raw):
+def _parse(ctx, n, raw, bad=None):
     """The records on line `n` of a file whose context (build_index) is `ctx`, a table's row whole however many lines it
-    takes; [] for a line that holds none, ValueError for one that does not parse."""
+    takes; [] for a line that holds none, ValueError for one that does not parse. Times given in a form the reader does
+    not read go in the list `bad`."""
     shape, tz = ctx["shape"], ctx.get("tz")
     text = raw.decode("utf-8", "replace").strip()
     if not text or shape == "manifest" or (shape == "reviews" and text in ("[", "]")):
         return []
     if shape in TABLES:
         try:
-            return [] if n == 1 else _row(shape, dict(zip(ctx["header"], next(csv.reader(io.StringIO(text), strict=True)))), tz)
+            return [] if n == 1 else _row(shape, dict(zip(ctx["header"], next(csv.reader(io.StringIO(text), strict=True)))), tz, bad)
         except csv.Error as e:
             raise ValueError(f"not a CSV row ({e})") from e
     try:
@@ -218,16 +228,16 @@ def _parse(ctx, n, raw):
     except ValueError as e:
         raise ValueError("not a JSON object") from e
     if not isinstance(r, dict):
-        return []
+        raise ValueError("not a JSON object")
     if shape == "events":
-        return _event(r, tz)
+        return _event(r, tz, bad)
     if shape == "board":
-        return [_rec("post", _time(r.get("created_at"), tz), author=r.get("author"), thread=_number(r.get("thread_id")),
+        return [_rec("post", _time(r.get("created_at"), tz, bad), author=r.get("author"), thread=_number(r.get("thread_id")),
                      title=r.get("thread_title"), text=r.get("body"))]
     if shape == "reviews":
-        return [_rec("review", _time(r.get("submitted_at"), tz), author=(r.get("user") or {}).get("login") or NO_NAME,
+        return [_rec("review", _time(r.get("submitted_at"), tz, bad), author=(r.get("user") or {}).get("login") or NO_NAME,
                      number=_number(r.get("pull")), verdict=_verdict(r.get("state")), text=r.get("body"))]
-    return _turn(r, ctx["agent"], n == ctx["note"])
+    return _turn(r, ctx["agent"], n == ctx["note"], bad)
 
 
 def _manifest(path, problems):
@@ -255,7 +265,12 @@ def _manifest(path, problems):
         _problem(problems, f"{path}#L1", "the manifest's team or policy is not of the shape the reader knows")
         team, policy = team if isinstance(team, list) else [], policy if isinstance(policy, dict) else {}
     brief = "brief" if "brief" in m else "prompt"
-    return {"start": _time(_first(m, "started", "started_at"), tz), "tz": tz, "brief": m.get(brief), "line": line(brief),
+    bad = []
+    start = _time(_first(m, "started", "started_at"), tz, bad)
+    if bad:
+        _problem(problems, f"{path}#L{line('started') or line('started_at') or 1}",
+                 f"a start the reader cannot read ({bad[0]!r}); the run starts at its first record")
+    return {"start": start, "tz": tz, "brief": m.get(brief), "line": line(brief),
             "agents": [str(a.get("name")) if isinstance(a, dict) else str(a) for a in team],
             "approvals": _number(_first(m, "approvals", "required_approvals") or policy.get("approvals"))}
 
@@ -324,10 +339,12 @@ def build_index(paths):
     activity). An agent's refs start with its note, then every record it wrote, and its transcript's other lines are
     its `more`; an issue's events include the merge that fixed it."""
     files, offsets, runs, recs, same, by_run = {}, {}, {}, [], {}, {}
-    problems = []
+    problems, unknown = [], []
     for path in sorted(paths):
         if shape := _shape(path):
             by_run.setdefault(path.split("/")[1], []).append((path, shape))
+        else:
+            unknown.append(path)
     for run, found in by_run.items():
         man = next((p for p, s in found if s == "manifest"), None)
         setup = _manifest(man, problems) if man else {"agents": []}
@@ -346,18 +363,23 @@ def build_index(paths):
                     runs[run]["agents"].append(ctx["agent"])
             seen, last = {}, None
             for n, raw in items:
-                ref = f"{path}#L{n}"
+                ref, bad = f"{path}#L{n}", []
                 try:
-                    found = _parse(ctx, n, raw)
+                    found = _parse(ctx, n, raw, bad)
                 except Exception as e:  # noqa: BLE001 — any line the reader cannot read is a problem, never the index's end
                     _problem(problems, ref, str(e) if isinstance(e, ValueError) else "a record of a shape the reader does not know")
                     continue
+                said, told = f"a time the reader cannot read ({bad[0]!r})" if bad else "no time", False
                 for i, r in enumerate(found):
                     if r.get("id") is not None:
                         if r["id"] in seen:
                             same[ref] = seen[r["id"]]
                             break
                         seen[r["id"]] = ref
+                    if r["t"] is None and (bad or last is None) and not told:
+                        _problem(problems, ref, f"{said}, and no line before it has one, so it is left out" if last is None
+                                 else f"{said}; the record takes the time of the line before it")
+                        told = True
                     last = r["t"] if r["t"] is not None else last
                     if last is not None:
                         recs.append((last, ref, i, run, r))
@@ -382,6 +404,9 @@ def build_index(paths):
         elif (run, r.get("number")) in numbered:
             key = numbered[(run, r["number"])]
         else:
+            _problem(problems, ref, "a post with no thread" if kind == "post" else
+                     f"a {kind} with no pull request or issue number" if r.get("number") is None else
+                     f"a {kind} about #{r['number']}, which no pull request or issue of the run opens")
             continue
         line[ref] = key
         if kind == "turn":
@@ -391,7 +416,7 @@ def build_index(paths):
         _add(u, kind, r, who, h, act, [ref, i])
         if ref not in u["refs"]:
             u["refs"].insert(0, ref) if kind == "agent" else u["refs"].append(ref)
-        event = [ref, h, act, who, i, t]
+        event = [ref, h, act, who, i, t, kind]
         u["events"].append(event)
         u["words"].append(" ".join(str(r.get(f) or "") for f in ("title", "text", "reason", "sha")))
         if (run, who) in agents and kind != "agent":
@@ -420,10 +445,11 @@ def build_index(paths):
         if u["state"] == "merged" and issue["state"] == "open":
             issue.update(state="fixed", fixed_by=u["number"], ended=u["ended"])
             merge = next(e for e in u["events"] if e[2] == "merged")
-            issue["events"].append([merge[0], u["ended"], "fixed", merge[3], merge[4], merge[5]])
+            issue["events"].append([merge[0], u["ended"], "fixed", merge[3], merge[4], merge[5], "merge"])
     _agent_facts(units)
+    problems.sort(key=lambda p: (p["ref"].rpartition("#L")[0], int(p["ref"].rpartition("#L")[2] or 0)))
     return {"files": files, "offsets": offsets, "runs": runs, "units": units, "line": line, "same": same,
-            "problems": problems}
+            "problems": problems, "unknown": unknown}
 
 
 def _action(r):
@@ -658,13 +684,18 @@ def _measures(tab, us, index, run):
 
 
 def _colour(field, u, e):
-    """What an event of the unit `u` is under the colour field."""
+    """What an event of the unit `u` is under the colour field: a review's reviewer and verdict, the first of its
+    unit's flags, and "" for none."""
     if field == "actor":
         return e[3]
     if field == "run":
         return u["run"]
-    if field in ("state", "area"):
+    if field in UNIT_COLOURS:
         return str(u.get(field) or "")
+    if field in ("reviewer", "verdict"):
+        return (e[3] if field == "reviewer" else e[2]) if e[6] == "review" else ""
+    if field == "flag":
+        return (u.get("flags") or [""])[0]
     return e[2]
 
 
@@ -776,7 +807,7 @@ def _colour_filter(tab, field):
         return "agent" if tab == "agents" else "actor"
     if field == "action":
         return "action" if "action" in TAB_PICKS.get(tab, ()) else None
-    return field if field in ("state", "area") else None
+    return field if field in (*UNIT_COLOURS, "reviewer", "verdict", "flag") else None
 
 
 def _view(index, query):
@@ -862,8 +893,8 @@ def _view(index, query):
 
 def _colours(tab, field, index, found, chosen, all_runs, ok, picked, labels):
     """The colour field's values: `order`, the order they take their colours in, by records of the chosen runs on the
-    tab whatever else is chosen, so a value keeps its colour while the filters change; `values`, [value, records] of the
-    activity with every filter but the field's own, the run's too for the run."""
+    tab whatever else is chosen, so a value keeps its colour while the filters change, and "" (no value) last; `values`,
+    [value, records] of the activity with every filter but the field's own, the run's too for the run."""
     tally = {}
     for u in index["units"].values():
         if u["tab"] == tab and u["run"] in chosen:
@@ -871,7 +902,7 @@ def _colours(tab, field, index, found, chosen, all_runs, ok, picked, labels):
                 if _active(e):
                     v = _colour(field, u, e)
                     tally[v] = tally.get(v, 0) + 1
-    order = all_runs if field == "run" else sorted(tally, key=lambda v: (-tally[v], v))
+    order = all_runs if field == "run" else sorted(tally, key=lambda v: (v == "", -tally[v], v))
     own = _colour_filter(tab, field)
     counts = {}
     for u in found:
@@ -1050,3 +1081,9 @@ def resolve(index, locator):
 def problems(index):
     """The lines that do not parse, each {ref, why}, which thimble shows beside the page."""
     return index["problems"]
+
+
+def hidden(index):
+    """The claimed files the reader leaves out, each {path, why}: a file whose place in a run's folder it does not know."""
+    return [{"path": p, "why": "not a file of a run's folder that the reader knows: manifest.json, events.jsonl, "
+                               "board.jsonl, agents/<name>.jsonl or an export/ table"} for p in index.get("unknown", [])]
