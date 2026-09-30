@@ -15,7 +15,9 @@ import pytest
 
 from fastapi import HTTPException
 
-from app import card_check, cardtypes, cli, config, extensions, orient_session, prompts, report_types, userconf, views
+from app import (card_check, cardtypes, cli, config, ext_applies, extensions, model, orient_session, prompts,
+                 report_types, userconf, views)
+from app import corpus as corpus_mod
 from app.ledger import write_json
 
 FIXTURE = Path(__file__).parent / "fixtures" / "ext-min"
@@ -152,7 +154,7 @@ async def test_two_extensions_that_replace_one_block_leave_thimbles_and_are_name
     (other / "report-types" / "digest").rename(other / "report-types" / "brief")
     (other / "orient.md").unlink()
     manifest = json.loads((other / "extension.json").read_text())
-    manifest.update(name="other", applies=None)
+    manifest.update(name="other", check=None)
     (other / "extension.json").write_text(json.dumps(manifest))
     _add()
     _add(other)
@@ -226,6 +228,76 @@ async def test_thimble_s_config_switches_extensions_off_and_sets_their_agents(co
     assert (await extensions.refresh(CORPUS))["extensions"]["ext-min"]["why"] == extensions.CONFIG_UNREAD
     _config({})
     assert (await extensions.refresh(CORPUS))["extensions"]["ext-min"]["active"]
+
+
+def _files_changed() -> None:
+    """The listings thimble keeps of the corpus's files forgotten, as they are after a few seconds."""
+    views._folder_cache.clear()
+    corpus_mod.forget_sources()
+
+
+def _described(tmp_path: Path) -> Path:
+    """The fixture with an `applies` description in place of its check."""
+    d = tmp_path / "described"
+    shutil.copytree(FIXTURE, d)
+    manifest = json.loads((d / "extension.json").read_text())
+    manifest.pop("check")
+    manifest["applies"] = "Tallies of who did which task."
+    (d / "extension.json").write_text(json.dumps(manifest))
+    (d / "orient.md").write_text("Read every record of {{files}}.")
+    return d
+
+
+async def test_a_quick_model_call_decides_where_an_extension_applies_and_the_switch_overrides_it(corpus, tmp_path,
+                                                                                                 monkeypatch):
+    """With an `applies` description, one structured call decides whether the extension applies, from the description,
+    the corpus's files and a few records; its claims and reason are kept, and it is asked again only when the corpus's
+    files change. Until it answers, when it says no and when it fails, the extension is off, and Settings says why; the
+    workspace's switch overrides the answer either way."""
+    asked: list[str] = []
+    answer: dict = {"status": "ok", "output": {"applies": True, "claims": ["tally/*.jsonl", "nowhere.csv"],
+                                               "reason": "Each record says who did a task."}}
+
+    async def ask(c: str, text: str) -> model.CallResult:
+        asked.append(text)
+        return model.CallResult(**answer)
+
+    monkeypatch.setattr(ext_applies, "ask", ask)
+    _add(_described(tmp_path))
+    assert (await extensions.refresh(CORPUS))["extensions"]["ext-min"]["why"] == extensions.ASKING
+    e = (await extensions.refresh(CORPUS, wait=10))["extensions"]["ext-min"]
+    assert e["active"] and e["files"] == ["tally/*.jsonl"], "a claim that matches no file is dropped"
+    assert e["decision"]["by"] == "model" and len(asked) == 1
+    assert "Tallies of who did which task." in asked[0] and "tally/a.jsonl  " in asked[0] and '"who": "ana"' in asked[0]
+    assert extensions.public(CORPUS)["extensions"][0]["note"] == "Each record says who did a task."
+    assert orient_session.instructions_of(CORPUS).endswith("Read every record of `tally/*.jsonl`.")
+    assert "tally-bars" in await cardtypes.refresh(CORPUS, warm=False)
+    await extensions.refresh(CORPUS, wait=10)
+    assert len(asked) == 1, "the decision stands while the files do"
+
+    answer["output"] = {"applies": False, "claims": [], "reason": "No one did a task here."}
+    (corpus / "tally" / "b.jsonl").write_text('{"who": "di", "what": "task 9"}\n')
+    _files_changed()
+    e = (await extensions.refresh(CORPUS, wait=10))["extensions"]["ext-min"]
+    assert len(asked) == 2 and not e["active"] and e["why"] == extensions.NOT_HERE
+    row = extensions.public(CORPUS)["extensions"][0]
+    assert row["note"] == "No one did a task here." and row["on"] is False
+    extensions.set_enabled(CORPUS, "ext-min", True)
+    e = (await extensions.refresh(CORPUS, wait=10))["extensions"]["ext-min"]
+    assert e["active"] and e["files"] == ["tally/a.jsonl", "tally/b.jsonl"], "switched on, it reads the record files"
+    assert extensions.public(CORPUS)["extensions"][0]["on"] is True
+    extensions.set_enabled(CORPUS, "ext-min", False)
+    assert (await extensions.refresh(CORPUS, wait=10))["extensions"]["ext-min"]["why"] == "off in this workspace"
+
+    write_json(config.workspace_dir(CORPUS) / extensions.STATE_FILE, {**extensions.read_state(CORPUS), "off": []})
+    answer.update(status="error", output=None, detail="the claude CLI was not found")
+    (corpus / "tally" / "c.jsonl").write_text('{"who": "ed", "what": "task 10"}\n')
+    _files_changed()
+    e = (await extensions.refresh(CORPUS, wait=10))["extensions"]["ext-min"]
+    assert not e["active"] and e["why"] == ("thimble could not tell whether it applies here: the model call ended error "
+                                            "(the claude CLI was not found)")
+    await extensions.refresh(CORPUS, wait=10)
+    assert len(asked) == 3, "a failed decision stands a while before it is asked again"
 
 
 def test_the_extension_command_adds_lists_and_removes(capsys):

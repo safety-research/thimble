@@ -3,6 +3,8 @@
   "name": "ext-min",
   "version": "0.1.0",
   "description": "One of each contribution, for the tests.",
-  "applies": "tally",
-  "replaces": {"instructions": "instructions.md"}
+  "replaces": {
+    "instructions": "instructions.md"
+  },
+  "check": "tally"
 }

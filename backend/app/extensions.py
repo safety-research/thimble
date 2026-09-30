@@ -2,23 +2,30 @@
 `thimble extension add` copies one into $THIMBLE_HOME/extensions/<name>/ after the analyst said yes (cli.py), and from
 then on it runs in every workspace it applies to, until it is removed or switched off. Its folder:
 
-  extension.json        {"api": 0, "name": "<name>", "version", "description", "applies": "<slug>",
-                         "requires": ["<python package>", ...], "replaces": {"<orientation block>": "<file>.md"}}
+  extension.json        {"api": 0, "name": "<name>", "version", "description", "applies": "<the corpora it is for, in
+                         plain words>", "check": "<slug>", "requires": ["<python package>", ...],
+                         "replaces": {"<orientation block>": "<file>.md"}}
   views/<slug>/         a view (views.py), with `show` ("always" or "proposed") and `reports` in view.json; a `card`
                         block and card.py make it a card type too (cardtypes.py), and card.md is the type's guide
   cards/<slug>/         a card type of its own: card.json (the keys of a `card` block, plus `reader`, the extension's
-                        view whose reader and index it uses, or `applies` and `claims` as a view.json has them when the
-                        folder holds a reader.py of its own), card.py, card.html, card.md; its slug may be a view's that
-                        has no `card` block
+                        view whose reader and index it uses, unless the folder holds a reader.py of its own, which reads
+                        the files the extension claims), card.py, card.html, card.md; its slug may be a view's that has
+                        no `card` block
   agents/<name>.md      an agent the orientation's session gets with --agents (agent_definitions)
   report-types/<slug>/  type.md in the preset format plus `default`; export.py for its own exports
-  orient.md             added to the orientation's instructions; `replaces` names blocks thimble has a default for
-                        (orient_session.BLOCKS) that the extension's own files take the place of (orient_blocks)
+  orient.md             added to the orientation's instructions, `{{files}}` in it standing for the files the extension
+                        claims; `replaces` names blocks thimble has a default for (orient_session.BLOCKS) that the
+                        extension's own files take the place of (orient_blocks)
 
-Added means running. An extension is active in a workspace when it loads (read_extension finds no problem), neither
-switch is off (`extensions.<name>.enabled: false` in thimble's config for every workspace, Settings for this one) and
-the view or card type with a reader of its own that its `applies` names finds records here, or it names none.
-refresh() copies an active extension into workspaces/<c>/extensions/<name>/, since a kernel sees only the workspace and
+Added means running. An extension is active in a workspace when it loads (read_extension finds no problem), thimble's
+config does not switch it off (`extensions.<name>.enabled: false`, for every workspace) and it applies here, which the
+analyst's switch in Settings overrides either way. Whether it applies is decided once per workspace and made again when
+the corpus's files change (_decision): with an `applies`, one quick model call decides from that description, the
+corpus's files and a few of its records (ext_applies.py), and names the files it claims. `check` may name one of its
+views, or a card type with a reader of its own, whose reader's applies(paths) is a fast pre-check: None settles that it
+does not apply with no call, and the files it names are the first the call samples, or with no `applies` the files it
+claims. With neither, it applies everywhere and claims the record files. The call runs in the background; until it
+answers, and when it fails, the extension is off here and Settings says why. refresh() copies an active extension into workspaces/<c>/extensions/<name>/, since a kernel sees only the workspace and
 the corpus, and writes STATE_FILE. Its `show: always` views are installed at once, outside the orientation's four; its
 `show: proposed` views are the orientation's to propose (views.propose_builtins). When it becomes active in a workspace
 an orientation ran in, its orient.md goes to the orientation as one follow-up. A view it installed that nobody changed
@@ -68,8 +75,14 @@ SIZE_MAX = 50 * 1024 * 1024  # bytes of an extension's folder
 SKIPPED = ("__pycache__", ".git", "cache", ADDED)
 WEB_TOOLS = userconf.WEB_TOOLS
 CONFIG_UNREAD = "thimble's config cannot be read"
+NOT_HERE = "it does not apply to this corpus"
+ASKING = "thimble is deciding whether it applies here"
+DECIDE_WAIT_S = 180  # what an orientation's start waits for a decision still being made
+RETRY_S = 300  # a failed decision stands this long before a refresh asks again
 
 _locks: dict[str, asyncio.Lock] = {}
+_asking: dict[tuple[str, str], dict[str, Any]] = {}  # (workspace, extension) -> {key, task}
+_waiting: dict[str, int] = {}  # workspace -> refreshes waiting for its decisions (refresh)
 
 
 def home() -> Path:
@@ -199,10 +212,11 @@ def read_extension(root: Path, expect: str | None = None) -> dict[str, Any]:
             front, _ = frontmatter((d / TYPE_MD).read_text("utf-8"))
             reports.append({"slug": d.name, "name": " ".join(str(front.get("name") or d.name).split()),
                             "default": front.get("default") is True, "export": (d / EXPORT_PY).is_file()})
-    applies = str(raw.get("applies") or "") or None
-    if applies and applies not in slugs and not any(t["slug"] == applies and t["reader"] is None for t in cards):
-        problems.append(f"it applies where its view or card type {applies!r} does, and it has no such view, nor such "
-                        f"a card type with a {views.READER_PY} of its own")
+    applies = " ".join(str(raw.get("applies") or "").split()) or None
+    check = str(raw.get("check") or "") or None
+    if check and check not in slugs and not any(t["slug"] == check and t["reader"] is None for t in cards):
+        problems.append(f"its check {check!r} names neither one of its views nor a card type of its own with a "
+                        f"{views.READER_PY}")
     replaces: dict[str, str] = {}
     given = raw.get("replaces") if isinstance(raw.get("replaces"), dict) else {}
     for block, f in given.items():
@@ -216,7 +230,7 @@ def read_extension(root: Path, expect: str | None = None) -> dict[str, Any]:
     shown = name or expect or root.name
     return {"name": shown, "title": " ".join(str(raw.get("title") or shown.replace("-", " ").title()).split()),
             "version": str(raw.get("version") or ""), "description": " ".join(str(raw.get("description") or "").split()),
-            "root": str(root), "applies": applies, "requires": requires, "problems": problems, "views": vs,
+            "root": str(root), "applies": applies, "check": check, "requires": requires, "problems": problems, "views": vs,
             "cards": cards, "agents": agents, "report_types": reports, "orient": (root / ORIENT_MD).is_file(),
             "replaces": replaces, "source": str(_json(root / ADDED).get("source") or "")}
 
@@ -283,8 +297,9 @@ def _state_path(c: str) -> Path:
 
 
 def read_state(c: str | None) -> dict[str, Any]:
-    """{off, oriented, extensions} as refresh() last wrote them: the extensions switched off here, those whose
-    orientation instructions the orientation had, and each extension found, active or not."""
+    """{off, on, oriented, extensions} as refresh() last wrote them: the extensions switched off here, those switched on
+    here whatever the decision says, those whose orientation instructions the orientation had, and each extension
+    found, active or not."""
     got: Any = {}
     if c:
         try:
@@ -293,7 +308,8 @@ def read_state(c: str | None) -> dict[str, Any]:
             got = {}
     got = got if isinstance(got, dict) else {}
     exts = got.get("extensions") if isinstance(got.get("extensions"), dict) else {}
-    return {"off": _words(got.get("off")), "oriented": _words(got.get("oriented")), "extensions": exts}
+    return {"off": _words(got.get("off")), "on": _words(got.get("on")), "oriented": _words(got.get("oriented")),
+            "extensions": exts}
 
 
 def active(c: str | None) -> list[dict[str, Any]]:
@@ -356,34 +372,31 @@ def views_of(c: str, show: str | None = None) -> list[dict[str, Any]]:
     return out
 
 
-def _reader_key(kind: str, slug: str) -> str:
-    """Where STATE_FILE keeps the claims of the reader in `kind`/`slug`: a view's under its slug, a card type's with a
-    reader of its own under cards/<slug>."""
-    return slug if kind == "views" else f"cards/{slug}"
-
-
-def _applies_key(info: dict[str, Any]) -> str | None:
-    """The reader key (_reader_key) of what the extension's `applies` names, None when it names nothing."""
-    target = info.get("applies")
+def _check_folder(info: dict[str, Any]) -> tuple[str, str] | None:
+    """(kind, slug) of the reader the extension's `check` names, None when it names none."""
+    target = info.get("check")
     if not target:
         return None
-    return _reader_key("views" if any(v["slug"] == target for v in info.get("views") or []) else "cards", target)
+    return ("views" if any(v["slug"] == target for v in info.get("views") or []) else "cards"), target
 
 
-async def _claims(c: str, d: Path, manifest: str, paths: list[str], kept: dict[str, Any]) -> dict[str, Any]:
-    """{src, claims, found} of the reader in folder `d` for this corpus: what its applies() names when the folder's
-    `manifest` (view.json or card.json) says `applies`, else the claims of the manifest when they match files here.
-    `kept` is the last answer, reused while the reader's source is the same."""
+async def _claims(c: str, d: Path, paths: list[str], kept: dict[str, Any], check: bool = False) -> dict[str, Any]:
+    """{src, claims, found} of the reader in folder `d` for this corpus: what its applies() names when its view.json
+    says `applies`, or when it is the extension's `check`, else the claims of view.json when they match files here.
+    `kept` is the last answer, reused while the reader's source is the same, and for a check the record files too."""
     from . import views  # noqa: PLC0415
 
-    raw = _json(d / manifest)
+    raw = _json(d / views.VIEW_JSON)
     try:
-        src = hashlib.sha1((d / views.READER_PY).read_bytes()).hexdigest()[:12]
+        h = hashlib.sha1((d / views.READER_PY).read_bytes())
     except OSError:
         return {"src": "", "claims": [], "found": ""}
+    if check:
+        h.update("\0".join(paths).encode())
+    src = h.hexdigest()[:12]
     if kept.get("src") == src and isinstance(kept.get("claims"), list):
         return kept
-    if not raw.get("applies"):
+    if not raw.get("applies") and not check:
         claims = _words(raw.get("claims"))
         hit = await asyncio.to_thread(views.claimed_files, c, {"claims": claims}) if claims else []
         return {"src": src, "claims": claims if hit else [], "found": ""}
@@ -400,10 +413,98 @@ async def _claims(c: str, d: Path, manifest: str, paths: list[str], kept: dict[s
     return {"src": src, "claims": views._str_list(fit.get("claims")), "found": " ".join(str(fit.get("found") or "").split())}
 
 
-async def refresh(c: str) -> dict[str, Any]:
-    """The workspace's extensions found again in extensions_dir(), each active one copied in and its readers' claims
-    found, written to STATE_FILE; then the views no active extension gives any more withdrawn, the always-views
-    installed, and the orientation told of the newly active ones. Returns the state."""
+def _stale(decision: dict[str, Any]) -> bool:
+    """Whether a failed decision has stood RETRY_S, so a refresh asks again."""
+    from datetime import datetime, timezone  # noqa: PLC0415
+
+    try:
+        at = datetime.fromisoformat(str(decision.get("ts") or ""))
+    except ValueError:
+        return True
+    return (datetime.now(timezone.utc) - at).total_seconds() >= RETRY_S
+
+
+def _answered(c: str, entry: dict[str, Any]) -> None:
+    """A decision came back while no refresh waited for it: the workspace finds its extensions again (connected)."""
+    if _waiting.get(c) or entry["task"].cancelled():
+        return
+    asyncio.get_running_loop().create_task(connected(c), name=f"extensions-{c}")
+
+
+def _start(c: str, name: str, at: str, info: dict[str, Any], files: list[tuple[str, int]], first: list[str]) -> None:
+    from . import ext_applies  # noqa: PLC0415
+
+    entry: dict[str, Any] = {"key": at}
+    entry["task"] = asyncio.get_running_loop().create_task(
+        ext_applies.decide(c, info["title"], info["applies"], files, first, at), name=f"extension-applies-{c}-{name}")
+    entry["task"].add_done_callback(lambda _t: _answered(c, entry))
+    _asking[(c, name)] = entry
+
+
+async def _decision(c: str, name: str, info: dict[str, Any], pre: dict[str, Any] | None, paths: list[str],
+                    kept: dict[str, Any]) -> dict[str, Any]:
+    """Whether extension `name` applies to workspace `c`: {applies, claims, reason, by} with `key` for a model's
+    decision, {key, error, ts} when its call failed, or {key, pending} while it runs (_start). `pre` is what its check
+    found ({claims, found}), None without one; `paths` the corpus's record files; `kept` the decision STATE_FILE holds,
+    which stands while its key does (ext_applies.key)."""
+    from . import ext_applies  # noqa: PLC0415
+
+    if pre is not None and not pre.get("claims"):
+        return {"applies": False, "claims": [], "reason": str(pre.get("found") or ""), "by": "check"}
+    if not info["applies"]:
+        return {"applies": True, "claims": list(pre["claims"] if pre else paths), "reason": str((pre or {}).get("found") or ""),
+                "by": "check" if pre else "none"}
+    files = await asyncio.to_thread(ext_applies.files_of, c)
+    first = list((pre or {}).get("claims") or [])
+    at = ext_applies.key(info["applies"], first, files)
+    got = _asking.get((c, name))
+    if got is not None and got["key"] == at and got["task"].done():
+        _asking.pop((c, name), None)
+        try:
+            return got["task"].result()
+        except Exception as e:  # noqa: BLE001 — a decision that failed decides nothing
+            log.exception("%s: whether %s applies is not known", c, name)
+            return {"key": at, "error": f"{type(e).__name__}: {e}", "ts": _now()}
+    if kept.get("key") == at and ("applies" in kept or (kept.get("error") and not _stale(kept))):
+        return kept
+    if got is None or got["key"] != at:
+        _start(c, name, at, info, files, first)
+    return {"key": at, "pending": True}
+
+
+async def refresh(c: str, wait: float = 0.0) -> dict[str, Any]:
+    """The workspace's extensions found again (_refresh). A decision on whether one applies that is still being made
+    (_decision) is waited for up to `wait` seconds, and then the extensions are found again; one that answers while no
+    refresh waits has the workspace find them again itself (_answered). Returns the state."""
+    if wait <= 0:
+        return await _refresh(c)
+    _waiting[c] = _waiting.get(c, 0) + 1
+    try:
+        state = await _refresh(c)
+        running = [e["task"] for (w, _), e in list(_asking.items()) if w == c and not e["task"].done()]
+        if running:
+            await asyncio.wait(running, timeout=wait)
+        if any(w == c and e["task"].done() for (w, _), e in list(_asking.items())):
+            state = await _refresh(c)
+        return state
+    finally:
+        _waiting[c] -= 1
+
+
+async def settle(c: str) -> None:
+    """Before an orientation starts: a decision still being made is waited for, so the orientation starts with the
+    instructions and agents of the extensions that apply, and main hears of their card types."""
+    from . import cardtypes  # noqa: PLC0415
+
+    if any(w == c and not e["task"].done() for (w, _), e in list(_asking.items())):
+        await refresh_quietly(c, wait=DECIDE_WAIT_S)
+        await cardtypes.announce(c)
+
+
+async def _refresh(c: str) -> dict[str, Any]:
+    """The workspace's extensions found again in extensions_dir(), each active one copied in, its views' claims found
+    and whether it applies decided (_decision), written to STATE_FILE; then the views no active extension gives any
+    more withdrawn, the always-views installed, and the orientation told of the newly active ones. Returns the state."""
     from . import corpus, views  # noqa: PLC0415
 
     lock = _locks.setdefault(c, asyncio.Lock())
@@ -419,6 +520,9 @@ async def refresh(c: str) -> dict[str, Any]:
             why = why or config_off(name, off)
             why = why or ("off in this workspace" if name in state["off"] else "")
             claims: dict[str, Any] = {}
+            pre: dict[str, Any] | None = None
+            decision: dict[str, Any] = dict(kept.get("decision") or {})
+            files: list[str] = []
             if not why:
                 dig, size = await asyncio.to_thread(digest, root)
                 if size > SIZE_MAX:
@@ -431,21 +535,26 @@ async def refresh(c: str) -> dict[str, Any]:
                     if paths is None:
                         sources = await asyncio.to_thread(corpus.list_sources, config.corpus_dir(c))
                         paths = [s["path"] for s in sources if str(s["path"]).endswith((".jsonl", ".csv"))]
-                    readers = [("views", v["slug"], views.VIEW_JSON) for v in info["views"]]
-                    readers += [("cards", t["slug"], CARD_JSON) for t in info["cards"] if t["reader"] is None]
-                    for kind, slug, manifest in readers:
-                        key = _reader_key(kind, slug)
-                        claims[key] = await _claims(c, here / kind / slug, manifest, paths,
-                                                    (kept.get("claims") or {}).get(key) or {})
-                    target = _applies_key(info)
-                    if target and not (claims.get(target) or {}).get("claims"):
-                        why = "it does not apply to this corpus"
-            exts[name] = {**{k: v for k, v in info.items() if k != "name"}, "claims": claims, "active": not why,
-                          "why": why}
+                    for v in info["views"]:
+                        claims[v["slug"]] = await _claims(c, here / "views" / v["slug"], paths,
+                                                          (kept.get("claims") or {}).get(v["slug"]) or {})
+                    if (folder := _check_folder(info)) is not None:
+                        pre = await _claims(c, here / folder[0] / folder[1], paths, kept.get("check") or {}, check=True)
+                    decision = await _decision(c, name, info, pre, paths, decision)
+                    forced = name in state["on"]
+                    if decision.get("pending"):
+                        why = "" if forced else ASKING
+                    elif decision.get("error"):
+                        why = "" if forced else f"thimble could not tell whether it applies here: {decision['error']}"
+                    elif not decision.get("applies"):
+                        why = "" if forced else NOT_HERE
+                    files = list(decision.get("claims") or (paths if forced else []))
+            exts[name] = {**{k: v for k, v in info.items() if k != "name"}, "claims": claims, "check": pre,
+                          "decision": decision, "files": files, "active": not why, "why": why}
         now = {n for n, e in exts.items() if e.get("active")}
         oriented = [n for n in state["oriented"] if n in now]
         fresh = sorted(now - set(oriented))
-        new_state = {"off": state["off"], "oriented": sorted({*oriented, *fresh}), "extensions": exts}
+        new_state = {"off": state["off"], "on": state["on"], "oriented": sorted({*oriented, *fresh}), "extensions": exts}
         await asyncio.to_thread(write_json, _state_path(c), new_state)
         for name in sorted(set(state["extensions"]) - set(exts)):
             await asyncio.to_thread(shutil.rmtree, workspace_path(c, name), True)
@@ -457,9 +566,9 @@ async def refresh(c: str) -> dict[str, Any]:
     return new_state
 
 
-async def refresh_quietly(c: str) -> dict[str, Any]:
+async def refresh_quietly(c: str, wait: float = 0.0) -> dict[str, Any]:
     try:
-        return await refresh(c)
+        return await refresh(c, wait)
     except Exception:  # noqa: BLE001 — the extensions stored stay as they were
         log.exception("%s: the extensions were not found", c)
         return read_state(c)
@@ -524,7 +633,7 @@ async def _orient(c: str, names: list[str]) -> None:
 
     exts = read_state(c)["extensions"]
     for name in names:
-        text = _text(source_path(name) / ORIENT_MD) if (exts.get(name) or {}).get("orient") else ""
+        text = _orient_text(exts.get(name) or {}, source_path(name))
         if not text:
             continue
         try:
@@ -536,15 +645,22 @@ async def _orient(c: str, names: list[str]) -> None:
 
 
 def set_enabled(c: str, name: str, on: bool) -> None:
-    """Settings' switch of extension `name` for workspace `c`. Turned off, it leaves the oriented ones, so turning it on
-    again gives the orientation its instructions again."""
+    """Settings' switch of extension `name` for workspace `c`, which overrides the decision on whether it applies either
+    way. Turned off, it leaves the oriented ones, so turning it on again gives the orientation its instructions again."""
     state = read_state(c)
     off = [n for n in state["off"] if n != name] + ([] if on else [name])
+    forced = [n for n in state["on"] if n != name] + ([name] if on else [])
     oriented = state["oriented"] if on else [n for n in state["oriented"] if n != name]
-    write_json(_state_path(c), {**state, "off": sorted(off), "oriented": oriented})
+    write_json(_state_path(c), {**state, "off": sorted(off), "on": sorted(forced), "oriented": oriented})
 
 
 # --------------------------------------------------------------------------- contributions
+
+
+def _orient_text(e: dict[str, Any], src: Path) -> str:
+    """An extension's orient.md, `{{files}}` in it filled with the files it claims in the workspace."""
+    text = _text(src / ORIENT_MD) if e.get("orient") else ""
+    return text.replace("{{files}}", ", ".join(f"`{x}`" for x in _words(e.get("files"))) or "(none)")
 
 
 def orient_blocks(c: str | None) -> dict[str, Any]:
@@ -557,7 +673,7 @@ def orient_blocks(c: str | None) -> dict[str, Any]:
     replaced: dict[str, str] = {}
     for e in active(c):
         src = Path(e["src"])
-        text = _text(src / ORIENT_MD) if e.get("orient") else ""
+        text = _orient_text(e, src)
         if text:
             added_.append((str(e.get("title") or e["name"]), text))
         for block, f in (e.get("replaces") or {}).items():
@@ -611,8 +727,8 @@ def card_types(c: str | None) -> list[dict[str, Any]]:
     """The card types of the active extensions that no other active extension gives too, for cardtypes.refresh: {slug,
     extension, view (the view whose reader and index it uses, None for a type with a reader of its own), dir (its
     folder in the workspace's copy), reader, page (the file its frame draws, None for view.html), name, block (the
-    `card` block's keys), libs, guide (card.md), claims, cache (its index's folder)}. A type whose reader reads no file
-    here is left out."""
+    `card` block's keys), libs, guide (card.md), claims (its view's, or for a reader of its own the files the extension
+    claims), cache (its index's folder)}. A type whose reader reads no file here is left out."""
     from . import views  # noqa: PLC0415
 
     if not c:
@@ -622,11 +738,13 @@ def card_types(c: str | None) -> list[dict[str, Any]]:
     for e in active(c):
         here, src = Path(e["dir"]), Path(e["src"])
         claims = {k: _words((v or {}).get("claims")) for k, v in (e.get("claims") or {}).items()}
+        own = _words(e.get("files"))
         found = [(v["slug"], v["slug"], "views", views.VIEW_JSON, None) for v in e.get("views") or [] if v.get("card")]
         found += [(t["slug"], t["reader"], "cards", CARD_JSON, CARD_HTML) for t in e.get("cards") or []]
         for slug, view, kind, manifest, page in found:
-            key = view if view is not None else _reader_key("cards", slug)
-            if slug in clash or not claims.get(key):
+            key = view if view is not None else f"cards/{slug}"
+            read = claims.get(view) if view is not None else own
+            if slug in clash or not read:
                 continue
             raw = _json(src / kind / slug / manifest)
             block = raw.get("card") if kind == "views" else raw
@@ -636,7 +754,7 @@ def card_types(c: str | None) -> list[dict[str, Any]]:
                         "reader": str(reader / views.READER_PY), "page": page,
                         "name": " ".join(str(raw.get("name") or of_view.get("name") or slug).split()),
                         "block": block if isinstance(block, dict) else {}, "libs": raw.get("libs") or of_view.get("libs"),
-                        "guide": _text(src / kind / slug / GUIDE), "claims": claims[key],
+                        "guide": _text(src / kind / slug / GUIDE), "claims": read,
                         "cache": str(views.views_dir(c) / CACHE_DIR / e["name"] / key)})
     return out
 
@@ -714,7 +832,10 @@ def summary(info: dict[str, Any], how: dict[str, Any]) -> list[str]:
     if info["description"]:
         out.append(f"  {info['description']}")
     if info["applies"]:
-        out.append(f"  Runs in workspaces its {info['applies']!r} reader finds records in.")
+        out.append(f"  Runs in each workspace a quick model call finds it fits: {info['applies']}")
+    if info["check"]:
+        alone = "" if info["applies"] else ", and decides alone"
+        out.append(f"  Its {info['check']} reader checks each corpus first{alone}.")
     for x in info["views"]:
         shown = "shown whenever it applies" if x["show"] == "always" else "proposed by the orientation"
         out.append(f"  view        {x['slug']} ({shown})" + (", also a card type" if x["card"] else ""))
@@ -845,14 +966,20 @@ router = APIRouter()
 
 
 def public(c: str) -> dict[str, Any]:
-    """Settings' extensions: each one added, whether it runs here and why not, whether this workspace's switch is on
-    and whether it cannot run here whatever that switch says (`locked`), and the conflicts among those that run."""
+    """Settings' extensions: each one added, whether it runs here and why not, the reason the decision on whether it
+    applies gave, where its switch stands (switched here, else as that decision says), whether it cannot run here
+    whatever the switch says (`locked`), and the conflicts among those that run. `note` is the line Settings shows: the
+    decision's reason, or why it does not run when that is something else."""
     state = read_state(c)
     off = userconf.extensions_off()
     out = []
     for name, e in sorted(state["extensions"].items()):
+        d = e.get("decision") or {}
+        why, reason = str(e.get("why") or ""), " ".join(str(d.get("reason") or "").split())
         out.append({"name": name, "title": e.get("title") or name, "version": e.get("version") or "",
-                    "active": bool(e.get("active")), "why": e.get("why") or "", "on": name not in state["off"],
+                    "active": bool(e.get("active")), "why": why, "reason": reason,
+                    "note": reason if not why or why == NOT_HERE else why,
+                    "on": name not in state["off"] and (name in state["on"] or bool(d.get("applies"))),
                     "locked": bool(config_off(name, off)) or bool(e.get("problems"))})
     return {"extensions": out, "conflicts": conflict_lines(conflicts(state["extensions"]))}
 

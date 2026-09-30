@@ -27,13 +27,30 @@ import pytest
 
 from fastapi import HTTPException
 
-from app import card_check, cardtypes, channel, concepts, config, extensions, notebook, render, tools, views
+from app import card_check, cardtypes, channel, concepts, config, ext_applies, extensions, model, notebook, render, tools, views
 
 SWIMLANE = extensions.builtin_dir() / "swarm" / "cards" / "agent-swimlane"
 
 CORPUS = "crew"
 ROWS = [{"page": f"p{i % 4}", "user": f"bot{i % 35}", "ts": f"2026-04-14T{i // 60:02d}:{i % 60:02d}:00Z",
          "text": f"Relay from bot{(i + 1) % 35}: the value is {i}."} for i in range(140)]
+
+
+@pytest.fixture(autouse=True)
+def decide(monkeypatch) -> list[str]:
+    """The model call that decides whether Swarm applies, in place: it applies where the prompt's samples show the saves
+    of `crew`, claiming their file. The prompts it got are kept."""
+    asked: list[str] = []
+
+    async def ask(c: str, text: str) -> model.CallResult:
+        asked.append(text)
+        if "Relay from bot" in text:
+            return model.CallResult(status="ok", output={"applies": True, "claims": ["saves.jsonl"],
+                                                         "reason": "35 accounts relay a value on shared pages."})
+        return model.CallResult(status="ok", output={"applies": False, "claims": [], "reason": "No agents here."})
+
+    monkeypatch.setattr(ext_applies, "ask", ask)
+    return asked
 
 
 @pytest.fixture()
@@ -48,7 +65,7 @@ def crew(workspaces_tmp, tmp_path, monkeypatch) -> Path:
 
 
 async def _refresh() -> dict:
-    await extensions.refresh(CORPUS)
+    await extensions.refresh(CORPUS, wait=10)
     return await cardtypes.refresh(CORPUS, warm=False)
 
 
@@ -254,7 +271,7 @@ async def test_the_swarm_extension_ships_no_view_and_takes_back_the_one_it_insta
     views.install_viewer(CORPUS, "swarm", old, ["saves.jsonl"], why="", proposed_by="extension", orientation=False,
                          extension="swarm")
     views.install_viewer(CORPUS, "relay", old, ["saves.jsonl"], why="", proposed_by="thimble", orientation=True)
-    state = await extensions.refresh(CORPUS)
+    state = await extensions.refresh(CORPUS, wait=10)
     assert state["extensions"]["swarm"]["active"] and state["extensions"]["swarm"]["views"] == []
     assert views.list_proposals(CORPUS) == [] and views.read_view(CORPUS, "swarm") is None
     types_ = await cardtypes.refresh(CORPUS, warm=False)
@@ -269,7 +286,7 @@ async def test_the_swarm_extension_ships_no_view_and_takes_back_the_one_it_insta
     (team / "manifest.json").write_text(json.dumps({"name": "team", "description": "a team's chat"}))
     (team / "chat.jsonl").write_text("".join(json.dumps({"channel": "ops", "user": f"u{i % 4}", "text": f"u{(i + 1) % 4} ok"})
                                              + "\n" for i in range(40)))
-    assert not (await extensions.refresh("team"))["extensions"]["swarm"]["active"]
+    assert not (await extensions.refresh("team", wait=10))["extensions"]["swarm"]["active"]
 
 
 def test_the_swarm_reader_s_shares_print_every_record_once(monkeypatch, capsys):
@@ -295,9 +312,9 @@ def test_the_swarm_reader_s_shares_print_every_record_once(monkeypatch, capsys):
     assert "records 2–3 of 4" in out and re.findall(r"^(\S+#L\d+) ", out, re.M) == index["places"]["Night-14/Schedule"]["refs"][1:3]
 
 
-async def test_whether_swarm_applies_is_read_from_the_head_of_a_big_csv(crew):
-    """Deciding whether the Swarm extension applies reads the first records of each file, so a big CSV that is no swarm
-    costs little memory."""
+async def test_whether_swarm_applies_is_asked_with_a_few_records_of_a_big_csv(crew, decide):
+    """Deciding whether the Swarm extension applies sends a few records of each likely file, so a big CSV costs little
+    memory."""
     d = config.DATA_DIR / "metrics"
     d.mkdir()
     (d / "manifest.json").write_text(json.dumps({"name": "metrics", "description": "metrics"}))
@@ -305,8 +322,9 @@ async def test_whether_swarm_applies_is_read_from_the_head_of_a_big_csv(crew):
         f.write("ts,host,metric,value,status\n" + "2026-05-16T08:00:00Z,web-1,cpu,0.93,ok\n" * 1_000_000)
     tracemalloc.start()
     try:
-        assert not (await extensions.refresh("metrics"))["extensions"]["swarm"]["active"]
+        assert not (await extensions.refresh("metrics", wait=10))["extensions"]["swarm"]["active"]
         peak = tracemalloc.get_traced_memory()[1]
     finally:
         tracemalloc.stop()
-    assert peak < (d / "metrics.csv").stat().st_size / 2, peak
+    assert peak < (d / "metrics.csv").stat().st_size / 20, peak
+    assert "metrics.csv  " in decide[-1] and decide[-1].count("web-1,cpu") == 5, "its first record and four through it"

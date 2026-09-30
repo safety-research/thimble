@@ -49,8 +49,8 @@
 #   same place  the record before it on its place, by another account
 # A pair keeps one link, the first of these that holds.
 #
-# When it applies (card.json `applies`): the Swarm extension runs where applies(paths), given the corpus's record files,
-# finds a swarm in them, and the card type reads the files it names.
+# Which files it reads: those the Swarm extension claims in the workspace, which thimble decides with the extension's
+# `applies` description.
 import csv
 import difflib
 import io
@@ -77,14 +77,6 @@ ID_KEYS = ("id", "rev_id", "message_id")
 SEQ_KEYS = ("rev", "seq", "revision")
 GOAL_KEYS = ("objective", "goal", "brief", "purpose", "role")
 TITLE_KEYS = ("thread_title", "title", "subject")  # an action's name for its place, when nothing else names it
-DETECT_FILES = 400  # record files applies() reads, the shallowest first
-DETECT_RECORDS = 20_000  # records it reads of each
-DETECT_BYTES = 64 * 1024 * 1024  # bytes it reads of each
-DETECT_BYTES_ALL = 256 * 1024 * 1024  # bytes it reads of them all; the files after are left unread
-SWARM_ACCOUNTS = 30  # a swarm's accounts at least
-SWARM_PLACES = 3  # places that three or more of them act on, at least
-SWARM_NAMING = 0.05  # the share of the actions on shared places that name another account acting there, at least
-CLAIMS_LISTED = 12  # the action files of one folder claimed one by one; more are claimed by a glob
 MARKS_MAX = 24  # label values the overview and the card type tell apart
 CARD_CHARS = 110
 TEXT_MAX = 60_000  # characters of a record's text the page gets
@@ -368,128 +360,6 @@ def build_index(paths):
     return {"files": files, "recs": recs, "order": [r["ref"] for r in actions], "same": same,
             "places": {k: v for k, v in places.items() if v["refs"]}, "accounts": accounts, "runs": runs,
             "problems": problems}
-
-
-# ------------------------------------------------------------------------------------------------ when the view applies
-
-
-def _lines(fh, budget):
-    """The lines of a file open in binary while `budget[0]` bytes last, which it spends."""
-    while budget[0] > 0:
-        line = fh.readline(budget[0])
-        if not line:
-            return
-        budget[0] -= len(line)
-        yield line
-
-
-def _head(path, most, budget):
-    """The first `most` records of a JSON Lines file or a CSV as {field: value} dicts, read while `budget[0]` bytes last
-    and DETECT_BYTES at most, which it spends. A file that cannot be read has none."""
-    own = [min(budget[0], DETECT_BYTES)]
-    out = []
-    try:
-        with open(path, "rb") as fh:
-            lines = _lines(fh, own)
-            if path.endswith(".csv"):
-                header = None
-                for cells in csv.reader(ln.decode("utf-8", "replace").lstrip("\ufeff") for ln in lines):
-                    if len(out) >= most:
-                        break
-                    if not any(c.strip() for c in cells):
-                        continue
-                    if header is None:
-                        header = [c.strip().lower() for c in cells]
-                    else:
-                        out.append({k: v.strip() for k, v in zip(header, cells)})
-            else:
-                for line in lines:
-                    if len(out) >= most:
-                        break
-                    try:
-                        rec = json.loads(line.decode("utf-8", "replace").lstrip("\ufeff"))
-                    except ValueError:
-                        continue
-                    if isinstance(rec, dict):
-                        out.append(rec)
-    except (OSError, csv.Error):
-        pass
-    budget[0] -= min(budget[0], DETECT_BYTES) - own[0]
-    return out
-
-
-def applies(paths):
-    """{claims, found} when the record files among `paths` record a swarm, else None: actions (as build_index reads
-    them) by SWARM_ACCOUNTS accounts or more, SWARM_PLACES places or more that three or more of them act on, and
-    SWARM_NAMING of the actions on shared places naming another account that acts there. `claims` are the files that
-    hold the actions, `found` says what was found. It reads DETECT_RECORDS of each of the first DETECT_FILES record
-    files, the shallowest first, while DETECT_BYTES_ALL last; when that leaves files unread, `found` says so, and a
-    file name that holds actions in two or more sibling folders is claimed in all of them."""
-    candidates = sorted((p for p in paths if p.endswith((".jsonl", ".csv"))), key=lambda p: (p.count("/"), p))
-    acts, budget, read = {}, [DETECT_BYTES_ALL], 0
-    for path in candidates[:DETECT_FILES]:
-        if budget[0] <= 0:
-            break
-        read += 1
-        recs = _head(path, DETECT_RECORDS, budget)
-        f = _fields([(0, 0, rec) for rec in recs])
-        if not (("actor" in f or "anon" in f) and "text" in f):
-            continue
-        got = []
-        for rec in recs:
-            who = _first(rec, ACTOR_KEYS)[1] or _first(rec, ANON_KEYS)[1]
-            if who and isinstance(rec.get(f["text"]), str):
-                got.append((who, _first(rec, PLACE_KEYS)[1], rec[f["text"]]))
-        if got:
-            acts[path] = got
-    placeless = [p for p, got in acts.items() if not any(place for _w, place, _t in got)]
-    base = _common_dir(placeless) if len(placeless) > 1 else ""
-    places = {}
-    for path, got in acts.items():
-        for who, place, _t in got:
-            places.setdefault(place or path[len(base):], set()).add(who.lower())
-    on_shared = naming = 0
-    for path, got in acts.items():
-        for who, place, text in got:
-            others = places[place or path[len(base):]] - {who.lower()}
-            if others:
-                on_shared += 1
-                naming += bool(others & {w.lstrip("@").lower() for w in WORD.findall(text)})
-    accounts = set().union(*places.values()) if places else set()
-    shared = sum(len(who) >= 3 for who in places.values())
-    share = naming / on_shared if on_shared else 0.0
-    if len(accounts) < SWARM_ACCOUNTS or shared < SWARM_PLACES or share < SWARM_NAMING:
-        return None
-    unread = read < len(candidates)
-    return {"claims": _claims(list(acts), siblings=unread),
-            "found": f"{len(accounts):,} accounts act on {shared:,} places that three or more of them share, and "
-                     f"{share:.0%} of what they write there names another account acting on the place"
-                     + (f" (read from the first {read:,} of {len(candidates):,} record files)." if unread else ".")}
-
-
-def _claims(paths, siblings=False):
-    """The files as claims: each one, or a folder's files by one glob when it holds more than CLAIMS_LISTED. With
-    `siblings`, a file name that two or more folders under one parent hold is claimed in every folder there
-    (<parent>/*/<name>), for the folders of the same shape that were not read."""
-    out = []
-    if siblings:
-        folders = {}
-        for p in paths:
-            d, _, name = p.rpartition("/")
-            if d:
-                folders.setdefault((d.rpartition("/")[0], name), set()).add(d)
-        wide = {k for k, ds in folders.items() if len(ds) > 1}
-        out += sorted(f"{g + '/' if g else ''}*/{name}" for g, name in wide)
-        paths = [p for p in paths if "/" not in p or (p.rpartition("/")[0].rpartition("/")[0], p.rpartition("/")[2]) not in wide]
-    by_dir = {}
-    for p in paths:
-        by_dir.setdefault(p.rpartition("/")[0], []).append(p)
-    for d, ps in sorted(by_dir.items()):
-        if len(ps) <= CLAIMS_LISTED:
-            out += sorted(ps)
-        else:
-            out += sorted({f"{d + '/' if d else ''}*.{p.rsplit('.', 1)[-1]}" for p in ps})
-    return out
 
 
 def _addressing(actions, recs, places, texts):
@@ -794,12 +664,12 @@ order, cut at records into N parts of about the same size, so a busy place runs 
 prints that place's records (give it again for more); --from I and --count M print records I to I+M-1 of each. A
 record is headed by its ref, time, account and kind, then a post's text or the lines a save changed from the save
 before it. A place's heading says which of its records follow, and the last line how many records were printed.
---files GLOB reads those files; by default the record files applies() finds a swarm in. The listing with no option
-begins with the files it read."""
+--files GLOB reads those files; by default every JSON Lines and CSV file under DIR. The listing with no option begins
+with the files it read."""
 
 
 def _script_files(globs):
-    """The files `globs` name, or the record files of the working folder that applies() claims."""
+    """The files `globs` name, or every record file of the working folder."""
     import glob
 
     if not globs:
@@ -807,10 +677,7 @@ def _script_files(globs):
         for root, dirs, names in os.walk("."):
             dirs[:] = sorted(d for d in dirs if not d.startswith("."))
             found += [os.path.relpath(os.path.join(root, n)) for n in names if n.endswith((".jsonl", ".csv"))]
-        fit = applies(found)
-        if not fit:
-            sys.exit("reader.py: no swarm in this folder's record files; give the files with --files")
-        globs = fit["claims"]
+        return sorted(found)
     return sorted({p for g in globs for p in glob.glob(g, recursive=True) if Path(p).is_file()})
 
 

@@ -39,7 +39,7 @@ If the file isn't valid JSON, or a key or value is unknown, no agent starts. The
 - **`writer`**: the report writers
 - **`checks`**: the report checks
 - **`dev`**: code tickets and view builds
-- **`labels`**: the label classifier
+- **`labels`**: the label classifier, and the call that decides whether an extension applies to a corpus
 - **`cardCheck`**: the card check's reading of a card's picture, and a view review's reading of its pictures
 
 `labels` and `cardCheck` are single model calls with no tools, so they take only `model`, `effort`, `fast` and `prompt`.

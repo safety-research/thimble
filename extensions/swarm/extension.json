@@ -3,6 +3,6 @@
   "name": "swarm",
   "version": "0.2.0",
   "description": "For corpora where many agents act on shared pages and channels: an orientation that reads every message, and the agent-swimlane card type.",
-  "applies": "agent-swimlane",
+  "applies": "Corpora where many agents act on shared pages or channels and address each other: dozens or more agents, often AI agents working at once, whose saves, posts or messages each name the agent that made them and the page, channel or thread they went to, and who reply to, name, copy or undo each other's records. It reads those records from JSON Lines or CSV files, not each agent's own transcript or tool log, nor databases. A small team of people, or a few people and bots working one incident, is not a swarm.",
   "requires": []
 }

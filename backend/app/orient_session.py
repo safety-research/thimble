@@ -214,9 +214,13 @@ async def start(c: str, brief: str, passes: "list[str] | tuple[str, ...]" = ("fi
     """Start the orientation session for workspace `c` with the parts `passes` names (PASSES) and follow it, `call`
     being main's start_orientation call (agent_session.start); `chosen` holds the critique choice the call made, over
     Start's, and `proposed` the viewers proposed for it (_note_proposed). RuntimeError when one runs or claude cannot be
-    started."""
+    started. A decision on whether an extension applies that is still being made is waited for first
+    (extensions.settle)."""
+    from . import extensions  # noqa: PLC0415
+
     if running(c):
         raise RuntimeError("an orientation is running")
+    await extensions.settle(c)
     choices = orientation.choices(c)
     own = config.models_for(c)["orient"]
     if (orientation.read_run(c) or {}).get("status") != "requested":

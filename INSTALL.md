@@ -90,11 +90,14 @@ An added extension runs in every workspace it applies to, until you remove it or
 for one workspace, or `"extensions": {"swarm": {"enabled": false}}` in `~/.thimble/config.json`). Its Python runs only
 in thimble's kernels.
 
-The Swarm extension is for corpora where many agents act on shared pages and channels. On such a corpus it adds
-orientation instructions that have every message read, and the `agent-swimlane` card type, a swimlane of the actions
-main chose to answer a question. It applies when the first 400 JSON Lines or CSV files (256 MB at
-most) show 30 or more accounts naming each other on 3 or more shared places, so a large human team chat can pass for a
-swarm.
+Whether an extension applies is decided once per workspace, and again when the corpus's files change, by a quick call
+to the labels model: it reads the extension's description of the corpora it is for, the corpus's file list and a few
+records, and names the files the extension reads. Settings > Extensions shows its reason, and the switch there
+overrides it either way. If the call fails, the extension stays off there and Settings says why.
+
+The Swarm extension is for corpora where many agents act on shared pages and channels and address each other. On such a
+corpus it adds orientation instructions that have every message read, and the `agent-swimlane` card type, a swimlane of
+the actions main chose to answer a question.
 
 ## Update
 

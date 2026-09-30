@@ -1,6 +1,8 @@
 // The settings' Extensions section: a switch per extension added to thimble, for this workspace, saved with the rest.
-// An extension that cannot run here whatever the switch says (switched off in thimble's config, or unable to load) has
-// its switch disabled; one that is not running says why. Conflicts among the running ones are listed under the rows.
+// Each row shows the reason thimble's decision on whether it applies here gave, and its switch stands where that
+// decision put it until the analyst moves it, which overrides it either way. An extension that cannot run here
+// whatever the switch says (switched off in thimble's config, or unable to load) has its switch disabled; one that is
+// not running for another reason says why. Conflicts among the running ones are listed under the rows.
 import { Switch } from '../components/Switch'
 import type { ExtensionRow, Extensions } from '../lib/types'
 
@@ -24,7 +26,7 @@ export function ExtensionsSettings({ data, on, setOn }: { data: Extensions; on: 
               {e.title}
               {e.version && <span className="settings-extension-version"> {e.version}</span>}
             </span>
-            {!e.active && e.why && <span className="settings-switch-note">{e.why}</span>}
+            {e.note && <span className="settings-switch-note">{e.note}</span>}
           </span>
         </div>
       ))}

@@ -955,6 +955,11 @@ export interface ExtensionRow {
   version: string
   active: boolean
   why: string
+  /** the reason thimble's decision on whether it applies here gave, '' before one */
+  reason: string
+  /** the line Settings shows: that reason, or why it does not run when that is something else */
+  note: string
+  /** where its switch stands: switched here, else as the decision says */
   on: boolean
   locked: boolean
 }
