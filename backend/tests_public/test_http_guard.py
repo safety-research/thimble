@@ -250,3 +250,67 @@ def test_a_view_builds_check_proves_the_token_so_its_post_passes(app_prod, plugi
     r = TestClient(app_prod).post("/api/ws/mini/views/none/check", json={"locators": []}, headers=headers)
     assert r.json().get("detail") != hook_auth.WRITE_REFUSED
     assert mod.proof(str(Path(home) / "nowhere")) == {}
+
+
+# the write routes 0.4.0 added: extensions, card types and a card's Keep and Open as view
+EXTENSION_WRITES = [
+    ("PUT", "/api/ws/mini/extensions/video", {"on": False}),
+    ("PUT", "/api/ws/mini/extensions/video/views/none", {"on": False}),
+    ("POST", "/api/extensions/refresh", {}),
+    ("POST", "/api/ws/mini/cardtypes/none/records", {"query": None}),
+    ("POST", "/api/ws/mini/cells/none/keep", {"patch": {}, "dry": True}),
+    ("POST", "/api/ws/mini/cells/none/as-view", None),
+]
+
+
+@pytest.mark.real_write_guard
+@pytest.mark.parametrize(("method", "path", "body"), EXTENSION_WRITES)
+def test_the_extension_routes_take_writes_from_the_browser_and_the_plugin_only(app_prod, plugin_headers, method, path,
+                                                                               body):
+    """Each write route of extensions and card types refuses a caller with neither the ui_key cookie nor the token, as
+    card code is, even with a same-origin Origin; the browser's cookie and the plugin's or the CLI's proof reach it."""
+    from conftest import UI_KEY, _record
+
+    from app import hook_auth
+
+    _record(ui_key=UI_KEY)
+    c = TestClient(app_prod, base_url="http://testserver")
+
+    def detail(**kw):
+        r = c.request(method, path, json=body, **kw)
+        return r.status_code, (r.json() if r.headers.get("content-type") == "application/json" else {}).get("detail")
+
+    assert detail(headers={"Origin": "http://testserver"}) == (403, hook_auth.WRITE_REFUSED)
+    assert detail(headers=plugin_headers())[1] != hook_auth.WRITE_REFUSED
+    c.cookies.set(hook_auth.ui_cookie(), UI_KEY)
+    assert detail()[1] != hook_auth.WRITE_REFUSED
+
+
+@pytest.mark.real_write_guard
+def test_thimble_extension_tells_the_server_with_the_token(app_prod, plugin_headers, monkeypatch):
+    """`thimble extension add` and `remove` post /api/extensions/refresh through cli._request, which proves the token, so
+    the guard lets the change through."""
+    import io
+    import urllib.error
+    import urllib.request
+
+    from app import cli
+
+    plugin_headers()  # records the token in server.json
+    c = TestClient(app_prod, base_url="http://testserver")
+    seen = []
+
+    class Answer(io.BytesIO):
+        status = 200
+
+    def urlopen(req, timeout=None):
+        r = c.request(req.get_method(), req.full_url.removeprefix("http://127.0.0.1:8300"), content=req.data,
+                      headers=dict(req.header_items()))
+        seen.append(r.status_code)
+        if r.status_code >= 400:
+            raise urllib.error.HTTPError(req.full_url, r.status_code, "", {}, io.BytesIO(r.content))
+        return Answer(r.content)
+
+    monkeypatch.setattr(urllib.request, "urlopen", urlopen)
+    status, body = cli._request("POST", "http://127.0.0.1:8300/api/extensions/refresh", {})
+    assert (status, seen) == (200, [200]) and "workspaces" in body

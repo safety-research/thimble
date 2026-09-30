@@ -64,11 +64,11 @@ def test_the_shim_believes_no_answer_without_the_server_s_proof(tmp_path):
     assert not [m for m in out if str(m.get("method", "")).startswith("notifications/claude/channel")]
 
 
-def test_the_analyst_s_cookie_goes_only_to_thimble_s_workspace_routes(analyst):
-    """The page's key is traded for a cookie scoped to /api/ws/, the path of every route it opens, and the trade clears
-    one set for every path, since a browser sends a cookie to every port of its host; another key gets none."""
+def test_the_analyst_s_cookie_goes_only_to_thimble_s_api_routes(analyst):
+    """The page's key is traded for a cookie scoped to /api/, the path of every route the page calls, and the trade
+    clears one set for every path, since a browser sends a cookie to every port of its host; another key gets none."""
     r = hook_auth.claim(UI_KEY)
     cookies = [v.decode() for k, v in r.raw_headers if k == b"set-cookie"]
-    assert any(c.startswith(f"{hook_auth.UI_COOKIE}={UI_KEY};") and "Path=/api/ws/" in c for c in cookies), cookies
+    assert any(c.startswith(f"{hook_auth.ui_cookie()}={UI_KEY};") and "Path=/api/;" in c for c in cookies), cookies
     assert any(c.startswith(f'{hook_auth.UI_COOKIE}="";') and "Path=/;" in c for c in cookies), cookies
     assert hook_auth.claim("another-key").status_code == 403
