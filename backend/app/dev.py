@@ -579,16 +579,16 @@ def view_session_name(c: str, slug: str) -> str:
 
 def running_builds(c: str) -> list[dict[str, Any]]:
     """The code ticket, view builds and view review revisions that run for workspace `c`, for the terminal's list of
-    thimble's agents (bg_session.agent_rows): {name, state, attach?, kind}."""
+    thimble's agents (bg_session.agent_rows): {name, label, state, kind}."""
     rows: list[dict[str, Any]] = []
     t = _get(_current.ticket_id) if _running() and _current is not None and not _current.ticket_id.startswith("view:") else None
     if t is not None and t.get("workspace") in (None, c):
-        rows.append({"name": dev_session_name(t.get("workspace")), "state": "working", "kind": "build",
-                     **({"attach": f"claude attach {_current.session}"} if _current and _current.session else {})})
+        rows.append({"name": dev_session_name(t.get("workspace")), "label": f"dev ticket: {t.get('title') or t['id']}",
+                     "state": "working", "kind": "build"})
     for (cc, slug), run in [*_view_runs.items(), *_review_runs.items()]:
         if cc == c and run.status == "running":
-            rows.append({"name": view_session_name(c, slug), "state": "working", "kind": "build",
-                         **({"attach": f"claude attach {run.session}"} if run.session else {})})
+            rows.append({"name": view_session_name(c, slug), "label": f"view: {run.title or slug}", "state": "working",
+                         "kind": "build"})
     return rows
 
 

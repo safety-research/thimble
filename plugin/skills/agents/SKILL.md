@@ -1,6 +1,6 @@
 ---
 name: agents
-description: List thimble's agents that run now, its background sessions with the command that attaches each, and the threads and subagents of this session.
+description: List thimble's agents that run now and what each is doing.
 disable-model-invocation: true
 ---
 

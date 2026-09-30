@@ -102,12 +102,30 @@ def test_record_keeps_the_name_claude_agents_lists(followed, monkeypatch):
     bg_session._entries.pop((CORPUS, "orient"), None)
 
 
-def test_the_statusline_shows_roles_and_the_listing_whole_names():
-    rows = [{"name": "thimble:writer · mini", "state": "working", "attach": "claude attach ab12cd34"},
+def test_the_statusline_shows_roles_and_the_listing_plain_names():
+    rows = [{"name": "thimble:writer · mini", "label": "writer: story", "state": "working"},
             {"name": "fork(thread:probe)", "state": "idle"}]
     assert bg_session.status_line(rows) == "thimble · ● thimble:writer working · ○ fork(thread:probe) idle"
-    assert bg_session.listing_text(rows).splitlines()[0].startswith("thimble:writer · mini  working")
+    assert bg_session.listing_text(rows).splitlines()[:2] == [f"{'writer: story':<18}  working",
+                                                              "fork(thread:probe)  done"]
+    assert [bg_session.label_of(k) for k in ("orient", "critique:orient", "writer:report", "writer:story")] == [
+        "orientation", "critic", "writer", "writer: story"]
     assert "{label}" not in tools.hint("bg-proxy-start", type="t", session="s", prompt="p", short="x")
+
+
+async def test_the_agents_list_and_the_start_lines_name_each_agent_in_plain_words(followed, monkeypatch):
+    """/thimble:agents and the lines main's terminal prints as a session starts name it by what it does, with no
+    session name, id or command; the statusline keeps the roles."""
+    _new, old = followed
+    old.status, old.waiting_for = "waiting", "permission"
+    monkeypatch.setattr(config, "workspace_for_cwd", lambda cwd: CORPUS)
+    monkeypatch.setattr(bg_session, "_announced", {})
+    monkeypatch.setattr(bg_session, "_announced_loaded", {CORPUS})
+    monkeypatch.setattr(bg_session, "_save_announced", lambda c: None)
+    got = await bg_session.agents_route(bg_session.AgentsQuery(cwd="/work", session="main-1", announce=True))
+    assert got["text"] == "writer  working\ncritic  waiting for you\n\n↓ to follow any of them"
+    assert got["announce"] == "writer started: ↓ to follow it\ncritic started: ↓ to follow it"
+    assert got["line"] == "thimble · ● thimble:writer working · ◐ thimble:critic waiting for a permission"
 
 
 def test_main_name_is_the_workspace_slash_thimble_opens(tmp_path, monkeypatch):
