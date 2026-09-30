@@ -170,7 +170,7 @@ function layout() {
   const plot = document.getElementById('plot')
   plot.replaceChildren()
   const width = document.documentElement.clientWidth || 800
-  const headW = width < 900 ? 176 : 244
+  const headW = width < 1100 ? 176 : 244
   const acts = D.actions
   const room = width - headW - 16 - PAD_R
   STEP = acts.length > 1 ? Math.round(Math.max(STEP_MIN, Math.min(STEP_MAX, room / (acts.length - 1 + CARD_STEPS)))) : STEP_MAX
@@ -322,9 +322,8 @@ function layout() {
     el.style.height = `${k.h}px`
     const hd = h('div', 'hd')
     hd.dataset.thimbleChrome = ''
-    hd.append(h('span', null, `#${a.id}`), h('span', 'tag', a.tag))
-    // the thread's name when it fits whole; the list above the chart names every thread
-    if (measure('600 10.5px', `#${a.id}  ${a.tag}  ${a.thread}`, '--font-mono') <= CW - 22) hd.append(h('span', 'pl', a.thread))
+    // the page it was on, cut to the card's width; the list above the chart names each thread
+    hd.append(h('span', null, `#${a.id}`), h('span', 'tag', a.tag), h('span', 'pl', a.page || a.place))
     el.append(hd, h('div', 'sm', a.summary))
     if (a.m >= 0 && D.marks[a.m]) {
       const colour = markColour(D.marks[a.m])
