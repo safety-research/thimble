@@ -8,10 +8,19 @@ MARKUP = re.compile(r"\[\[([^\[\]|]*)\|[^\[\]]*\]\]|\[\[[^\[\]]*\]\]")
 BEFORE_PUNCT = re.compile(r"\s+([,;:!?)]|\.(?!\w))")
 
 
+UNVERIFIED = "[unverified]"
+
+
 def spoken(sentence):
     """A sentence as the voice says it: each citation read as the text it shows, a bare ref left out."""
     text = " ".join(MARKUP.sub(lambda m: m.group(1) or "", str(sentence.get("text") or "")).split())
     return BEFORE_PUNCT.sub(r"\1", text)
+
+
+def caption(sentence):
+    """A sentence as its caption shows it: as spoken, marked when its check could not verify it."""
+    unverified = "unverified" in (sentence.get("tags") or [])
+    return spoken(sentence) + (f" {UNVERIFIED}" if unverified else "")
 
 
 def export(doc, fmt, ctx):
@@ -20,6 +29,7 @@ def export(doc, fmt, ctx):
     lines = []
     for line in doc.get("lines") or []:
         t = at.get(str(line.get("id")), {})
-        text = " ".join(spoken(s) for s in line.get("sentences") or [] if isinstance(s, dict)).strip()
-        lines.append({"start": t.get("start", 0), "end": t.get("end", 0), "text": text})
+        said = [s for s in line.get("sentences") or [] if isinstance(s, dict)]
+        lines.append({"start": t.get("start", 0), "end": t.get("end", 0),
+                      "text": " ".join(caption(s) for s in said).strip(), "spoken": " ".join(spoken(s) for s in said).strip()})
     return {"film": {"html": str(doc.get("film") or ""), "duration": timing.get("duration"), "lines": lines}}

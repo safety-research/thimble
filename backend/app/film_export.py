@@ -279,10 +279,12 @@ def _video_of(m: dict[str, Any]) -> dict[str, Any]:
 
 async def render_film(film: dict[str, Any], *, faces: str,
                       progress: Callable[[float], None] | None = None) -> tuple[bytes, str]:
-    """A hook's film, {html, duration, lines [{start, end, text}]}, as a video file."""
+    """A hook's film, {html, duration, lines [{start, end, text, spoken?}]}, as a video file: `text` is a line's caption
+    and `spoken` what the voice says, its caption when it gives none."""
     from fastapi import HTTPException  # noqa: PLC0415
 
-    lines = [{"start": float(x.get("start") or 0), "end": float(x.get("end") or 0), "text": str(x.get("text") or "")}
+    lines = [{"start": float(x.get("start") or 0), "end": float(x.get("end") or 0), "text": str(x.get("text") or ""),
+              "spoken": str(x.get("spoken") or x.get("text") or "")}
              for x in film.get("lines") or [] if isinstance(x, dict)]
     duration = float(film.get("duration") or (max((x["end"] for x in lines), default=0) + 1))
     v = {"film_page": film_page(str(film.get("html") or ""), duration, lines), "duration": duration, "lines": lines}

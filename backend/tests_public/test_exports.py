@@ -126,9 +126,11 @@ async def test_the_video_extension_gives_a_video_its_video_file(report, monkeypa
     assert not got["video"]["ok"] and got["video"]["why"] == "Needs ffmpeg to write the video file"
     hook = runpy.run_path(str(extensions.builtin_dir() / "video" / "reports" / "video" / "export.py"))
     doc = {"film": "<p>", "timing": {"duration": 6.0, "lines": [{"id": "a", "start": 0.5, "end": 5.0}]},
-           "lines": [{"id": "a", "sentences": [{"text": "All [[27|card:b2c3d4e5]] came from one account [[card:b2c3d4e5]]."}]}]}
-    assert hook["export"](doc, "video", None) == {
-        "film": {"html": "<p>", "duration": 6.0, "lines": [{"start": 0.5, "end": 5.0, "text": "All 27 came from one account."}]}}
+           "lines": [{"id": "a", "sentences": [{"text": "All [[27|card:b2c3d4e5]] came from one account [[card:b2c3d4e5]]."},
+                                               {"text": "It was ana.", "tags": ["unverified"]}]}]}
+    assert hook["export"](doc, "video", None) == {"film": {"html": "<p>", "duration": 6.0, "lines": [
+        {"start": 0.5, "end": 5.0, "text": "All 27 came from one account. It was ana. [unverified]",
+         "spoken": "All 27 came from one account. It was ana."}]}}
 
 
 async def test_the_report_exports_as_a_video_that_its_writer_writes_first(report, monkeypatch):
