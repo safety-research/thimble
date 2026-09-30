@@ -3,7 +3,7 @@
 //   node scripts/ui_shot.mjs --url <url> --out <png> [--selector <css>] [--wait <ms>]
 //                            [--click <css>]... [--scroll-to <css>] [--viewport <w>x<h>] [--highlight]
 //                            [--element-out <png>] [--info <json path>] [--scale <n>] [--storage <key>=<json>]...
-//                            [--press <key>]... [--offline]
+//                            [--press <key>]... [--offline] [--own-origin]
 // Loads the URL at 1440x900 (or --viewport), at device scale 1 (or --scale: 2 draws every CSS pixel as four, as a
 // high-density screen does), with each --storage key set in the page's localStorage before any of its scripts run, and waits for the page's own requests to go quiet (no request in flight
 // for 500 ms, the SSE streams ignored, hard cap 15 s). Then the actions, in command-line order, each followed by the
@@ -12,7 +12,8 @@
 // --selector is given and found, else the full viewport. --highlight outlines the --selector match; --element-out
 // writes the padded element crop to a second png, and --out is then the full viewport; --info writes the result JSON
 // to a file as well as stdout. --offline refuses every request but the page's own, as for a figure's page whose
-// content a model or a kernel wrote.
+// content a model or a kernel wrote. --own-origin refuses every request and WebSocket that leaves the page's origin, and
+// sends the browser's other traffic to a proxy that isn't there, for an app whose code a dev ticket wrote.
 // Read-only: PUT/POST/DELETE/PATCH to /api/** are answered 204 and never reach the backend, and every request carries
 // `X-Thimble-Peek: 1`, so the files a shot loads are not logged as opened by the analyst.
 // Exit 0 on success, 2 if --selector or an action target was not found (the shot is still written), 1 on error.
@@ -38,7 +39,7 @@ const MUTATING = new Set(['PUT', 'POST', 'DELETE', 'PATCH'])
 const USAGE =
   'usage: node scripts/ui_shot.mjs --url <url> --out <png> [--selector <css>] [--wait <ms>] ' +
   '[--click <css>]... [--scroll-to <css>] [--press <key>]... [--viewport <w>x<h>] [--highlight] [--element-out <png>] ' +
-  '[--info <json path>] [--scale <n>] [--storage <key>=<json>]... [--offline]'
+  '[--info <json path>] [--scale <n>] [--storage <key>=<json>]... [--offline] [--own-origin]'
 
 function parseViewport(v) {
   const m = /^(\d{3,5})x(\d{3,5})$/.exec(String(v).trim())
@@ -47,7 +48,7 @@ function parseViewport(v) {
 }
 
 function parseArgs(argv) {
-  const out = { url: null, out: null, selector: null, wait: 500, actions: [], viewport: null, highlight: false, elementOut: null, info: null, scale: 1, storage: [], offline: false }
+  const out = { url: null, out: null, selector: null, wait: 500, actions: [], viewport: null, highlight: false, elementOut: null, info: null, scale: 1, storage: [], offline: false, ownOrigin: false }
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i]
     const next = () => {
@@ -71,6 +72,7 @@ function parseArgs(argv) {
     else if (a === '--viewport') out.viewport = parseViewport(next())
     else if (a === '--highlight') out.highlight = true
     else if (a === '--offline') out.offline = true
+    else if (a === '--own-origin') out.ownOrigin = true
     else if (a === '--element-out') out.elementOut = next()
     else if (a === '--info') out.info = next()
     else if (a === '-h' || a === '--help') {
@@ -168,7 +170,12 @@ try {
   const viewport = args.viewport ?? VIEWPORT
 
   // the system's Chrome, Edge or Chromium when thimble's config picks it (backend/app/userconf.py)
-  browser = await chromium.launch({ headless: true, executablePath: process.env.THIMBLE_BROWSER_PATH || undefined })
+  // --own-origin: the page's host goes direct, anything else to the discard port, which refuses it
+  if (args.ownOrigin) process.env.PLAYWRIGHT_DISABLE_FORCED_CHROMIUM_PROXIED_LOOPBACK = '1'
+  const fenced = args.ownOrigin
+    ? { proxy: { server: 'http://127.0.0.1:9', bypass: new URL(args.url).hostname }, args: ['--force-webrtc-ip-handling-policy=disable_non_proxied_udp', '--dns-prefetch-disable'] }
+    : {}
+  browser = await chromium.launch({ headless: true, executablePath: process.env.THIMBLE_BROWSER_PATH || undefined, ...fenced })
   const page = await browser.newPage({ viewport, deviceScaleFactor: args.scale })
   if (args.storage.length)
     await page.addInitScript((pairs) => {
@@ -178,6 +185,12 @@ try {
   if (args.offline) {
     const own = new URL(args.url).href
     await page.route('**/*', (route) => (route.request().url() === own ? route.continue() : route.abort()))
+  }
+  if (args.ownOrigin) {
+    const origin = new URL(args.url).origin
+    const wsOrigin = origin.replace(/^http/, 'ws')
+    await page.route('**/*', (route) => (new URL(route.request().url()).origin === origin ? route.continue() : route.abort()))
+    await page.routeWebSocket(/.*/, (ws) => (new URL(ws.url()).origin === wsOrigin ? ws.connectToServer() : ws.close()))
   }
   await page.route('**/api/**', (route) =>
     MUTATING.has(route.request().method()) ? route.fulfill({ status: 204, body: '' }) : route.continue(),

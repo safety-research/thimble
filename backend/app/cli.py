@@ -1902,11 +1902,15 @@ def sandbox_lines(commands: bool = True) -> list[str]:
                 + ("thimble's config (sandbox.enforce) refuses to start the agents" if box.get("enforce") else
                    "the agents' Bash runs with your user's access, limited only by each agent's permission mode")]
     if not missing:
+        from . import ticket_box  # noqa: PLC0415
+
+        why = ticket_box.problem()
+        tickets = ("a code ticket's checks and test server run in thimble's sandbox runtime, and its change reaches "
+                   "thimble's own code only once you allow it" if not why else
+                   f"a code ticket runs its checks and test server outside it, so it asks you before it starts: {why}")
         return ["  bash sandbox: runs (every agent's Bash runs in it: no writes outside the agent's folder and no "
-                "network unless the agent's network is \"on\"; a code ticket, once you allow it, has thimble run its "
-                "edited code outside it, in the ticket's test server, its checks and git, until full containment in "
-                "0.3.1; Claude Code's sandbox adds an empty .claude/.cc-writes/ folder where its commands run, the "
-                "corpus folder among them)"]
+                f"network unless the agent's network is \"on\"; {tickets}; Claude Code's sandbox adds an empty "
+                ".claude/.cc-writes/ folder where its commands run, the corpus folder among them)"]
     after = ("thimble's config (sandbox.enforce) refuses to start the agents" if box.get("enforce") else
              "the agents' Bash runs outside it, under each agent's permission mode")
     head = "  bash sandbox: off, missing " + ", ".join(missing) + "; " + after
@@ -2325,17 +2329,20 @@ def restart(*, keep_vite: bool = False) -> list[str]:
     return lines
 
 
-FIX_NO_TERMINAL = ("thimble fix did not run: it edits thimble's own code, which then runs outside the sandbox, so it "
-                   "asks you first, and only in a terminal. Run `thimble fix` in your own terminal.")
+FIX_NO_TERMINAL = ("thimble fix did not run: it asks you before its change reaches thimble's own code, and only in a "
+                   "terminal. Run `thimble fix` in your own terminal.")
 FIX_DECLINED = "thimble fix did not run: you did not allow it."
 
 
 def fix_refusal() -> str:
-    """'' once the analyst allowed `thimble fix` in the terminal (dev.CODE_QUESTION), else why it did not run."""
+    """'' when `thimble fix` may start, else why it did not: it needs a terminal to ask in, and where its ticket is not
+    contained (dev.fix_contained) the analyst's Allow before it starts (dev.CODE_QUESTION)."""
     from . import dev  # noqa: PLC0415
 
     if not sys.stdin.isatty():
         return FIX_NO_TERMINAL
+    if dev.fix_contained():
+        return ""
     try:
         answer = input(f"thimble fix: {dev.CODE_QUESTION} [y/N] ")
     except EOFError:
@@ -2343,14 +2350,28 @@ def fix_refusal() -> str:
     return "" if answer.strip().lower() in ("y", "yes") else FIX_DECLINED
 
 
-def fix() -> str:
-    """Server down: the ticket runner on prompts/dev-fix.md in the live checkout, once fix_refusal passed. `dev` is
-    imported lazily."""
+async def fix_approve(_t: dict[str, Any], touched: list[str]) -> bool:
+    """The terminal's y/N before `thimble fix`'s change is applied (dev.APPLY_QUESTION)."""
     import asyncio  # noqa: PLC0415
 
     from . import dev  # noqa: PLC0415
 
-    return asyncio.run(dev.fix_offline(doctor_text(commands=False)))
+    try:
+        answer = await asyncio.to_thread(input, f"thimble fix: {dev.APPLY_QUESTION} It changes "
+                                                f"{dev.files_words(touched)}. [y/N] ")
+    except EOFError:
+        answer = ""
+    return answer.strip().lower() in ("y", "yes")
+
+
+def fix() -> str:
+    """Server down: the ticket runner on prompts/dev-fix.md in the live checkout, once fix_refusal passed; its change is
+    applied on the analyst's yes (fix_approve). `dev` is imported lazily."""
+    import asyncio  # noqa: PLC0415
+
+    from . import dev  # noqa: PLC0415
+
+    return asyncio.run(dev.fix_offline(doctor_text(commands=False), fix_approve))
 
 
 def revert() -> dict[str, Any]:
