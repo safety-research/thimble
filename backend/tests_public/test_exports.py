@@ -99,14 +99,17 @@ def test_a_hooks_formats_are_read_without_running_it(tmp_path):
 
 
 async def test_an_extension_report_types_formats_join_the_built_in_ones(report, tmp_path, monkeypatch):
+    """An extension's type adds formats or replaces one; thimble's own types keep theirs whatever an extension names."""
     await _write(report)
     hook = tmp_path / "export.py"
     hook.write_text('FORMATS = [{"id": "csv", "name": "CSV", "ext": "csv"}, {"id": "html", "name": "Web page", "ext": "html"}]\n')
-    monkeypatch.setattr(exports, "_extension_types", lambda c: [{"id": "report", "export": str(hook)}])
+    types = [{"id": i, "export": str(tmp_path / "copy.py"), "export_src": str(hook)} for i in ("digest", "report")]
+    monkeypatch.setattr(exports, "_extension_types", lambda c: types)
     monkeypatch.setattr(exports, "browser", lambda: ("system", "/usr/bin/chromium"))
-    got = {f["id"]: f for f in exports.formats(CORPUS, "report", "document")}
+    got = {f["id"]: f for f in exports.formats(CORPUS, "digest", "document")}
     assert got["csv"] == {"id": "csv", "name": "CSV", "ext": "csv", "ok": True, "hook": True}
     assert got["html"]["name"] == "Web page" and got["html"].get("hook") and not got["markdown"].get("hook")
+    assert not any(f.get("hook") for f in exports.formats(CORPUS, "report", "document"))
 
 
 async def test_the_video_extension_gives_a_video_its_video_file(report, monkeypatch):

@@ -959,27 +959,31 @@ def card_types(c: str | None) -> list[dict[str, Any]]:
 
 def report_types(c: str | None) -> list[dict[str, Any]]:
     """The report types of the active extensions, in the preset form ({id, name, description, renderer, prompt}) plus
-    {extension, dir, export}. `dir` is the type's folder in the workspace's copy, where an `exports` kernel reads
-    export.py."""
+    {extension, dir, export, export_src}, leaving out a name thimble's own types take (report_types.RESERVED). `dir` is
+    the type's folder in the workspace's copy, where an `exports` kernel runs export.py (`export`); `export_src` is that
+    file in the extension's folder, whose FORMATS the server reads."""
+    from . import report_types as thimble_types  # noqa: PLC0415
+
     if not c:
         return []
     out = []
     for e in active(c):
         folder = e.get("reports_dir") if e.get("reports_dir") in REPORT_DIRS else REPORT_DIRS[0]
         for r in _list(e, "reports"):
-            if not NAME_RE.match(r["slug"]):
+            if not NAME_RE.match(r["slug"]) or r["slug"] in thimble_types.RESERVED:
                 continue
             try:
                 front, body = frontmatter((Path(e["src"]) / folder / r["slug"] / TYPE_MD).read_text("utf-8"))
             except OSError:
                 continue
-            d = Path(e["dir"]) / folder / r["slug"]
+            d, src = Path(e["dir"]) / folder / r["slug"], Path(e["src"]) / folder / r["slug"]
             renderer = str(front.get("renderer") or "").strip().lower()
             renderer = renderer if renderer in REPORT_RENDERERS else "document"
             out.append({"id": r["slug"], "name": _one(front.get("name") or r["slug"]),
                         "description": _one(front.get("description")), "renderer": renderer, "prompt": body,
                         "extension": e["name"], "dir": str(d),
-                        "export": str(d / EXPORT_PY) if (d / EXPORT_PY).is_file() else None})
+                        "export": str(d / EXPORT_PY) if (src / EXPORT_PY).is_file() else None,
+                        "export_src": str(src / EXPORT_PY)})
     return out
 
 

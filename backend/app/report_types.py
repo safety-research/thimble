@@ -398,7 +398,8 @@ def _extension_presets(c: str | None) -> list[dict[str, Any]]:
     builtin = set(prompts.names_in(prompts.TYPES_DIR))
     try:
         return [{k: t[k] for k in ("id", "name", "description", "renderer", "prompt", "extension")}
-                for t in extensions.report_types(c) if PRESET_RE.match(t["id"]) and t["id"] not in builtin]
+                for t in extensions.report_types(c)
+                if PRESET_RE.match(t["id"]) and t["id"] not in builtin and t["id"] not in NEW_KINDS]
     except Exception:  # noqa: BLE001 — a broken extension leaves thimble's own presets
         log.warning("%s: the extensions' report types could not be read", c, exc_info=True)
         return []

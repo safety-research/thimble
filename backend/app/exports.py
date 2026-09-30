@@ -639,15 +639,19 @@ def _extension_types(c: str) -> list[dict[str, Any]]:
         return []
 
 
-def hook_of(c: str, slug: str) -> Path | None:
-    """The export.py of the extension report type document `slug` was made from, if it ships one."""
+def hook_of(c: str, slug: str, *, source: bool = False) -> Path | None:
+    """The export.py of the extension report type document `slug` was made from, if it ships one: the workspace's copy,
+    which the exports kernel runs, or with `source` the file in the extension's folder in thimble's home, whose FORMATS
+    the server reads. None for thimble's own types, which keep their exports."""
     from . import report_types  # noqa: PLC0415
 
+    if slug in report_types.BUILTIN_SLUGS:
+        return None
     made_from = (report_types.read_type(c, slug) or {}).get("preset") or slug
     for t in _extension_types(c):
         if t.get("id") == made_from and t.get("export"):
-            p = Path(str(t["export"]))
-            return p if p.is_file() else None
+            p = Path(str(t["export_src" if source else "export"]))
+            return p if p.is_file() and not p.is_symlink() else None
     return None
 
 
@@ -682,7 +686,7 @@ def formats(c: str, slug: str, renderer: str) -> list[dict[str, Any]]:
     kind, why_off = browser()
     out: dict[str, dict[str, Any]] = {i: {"id": i, "name": FORMAT_INFO[i]["name"], "ext": FORMAT_INFO[i]["ext"], "ok": True}
                                       for i in ("markdown", "html", "pdf")}
-    hook = hook_of(c, slug)
+    hook = hook_of(c, slug, source=True)
     for f in hook_formats(hook) if hook else []:
         out[f["id"]] = {**f, "ok": True, "hook": True}
     enc = film_export.encoder()
