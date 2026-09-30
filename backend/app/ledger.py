@@ -211,12 +211,13 @@ def with_features(stored: dict[str, Any], c: str | None = None) -> dict[str, Any
     """The effective settings: SETTINGS_DEFAULTS under `stored` less RETIRED_KEYS, `models` as config.models_for resolves
     them from thimble's config, the permission modes the config sets (modes.rows), `disabled_modes`, those the analyst's
     Claude Code settings turn off, `config_error`, the config's error or '', and `untrusted`, {folder, command} while
-    Claude Code does not trust the workspaces folder, so the background sessions cannot start (bg_session.trusted)."""
-    from . import bg_session, cli, modes, userconf  # noqa: PLC0415 — they import this module
+    Claude Code does not trust the workspaces folder, so the background sessions cannot start (bg_session.trusted);
+    never on a code ticket's test server (dev.STACK_ENABLED off), whose scratch workspaces folder is never trusted."""
+    from . import bg_session, cli, dev, modes, userconf  # noqa: PLC0415 — they import this module
 
     kept = {k: v for k, v in stored.items() if k not in RETIRED_KEYS and k != modes.SETTING}
-    untrusted = None if c is None or bg_session.trusted(c) else {"folder": str(config.WORKSPACES_DIR),
-                                                                  "command": cli.trust_command()}
+    untrusted = None if c is None or not dev.STACK_ENABLED or bg_session.trusted(c) else {
+        "folder": str(config.WORKSPACES_DIR), "command": cli.trust_command()}
     return {**SETTINGS_DEFAULTS, **kept, config.MODELS_KEY: config.models_for(c), modes.SETTING: modes.rows(c) if c else {},
             "disabled_modes": sorted(modes.disabled()), "config_error": userconf.problem(c), "untrusted": untrusted}
 
