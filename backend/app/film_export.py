@@ -1,5 +1,5 @@
 """A video document exported: the film as a video file, as a self-contained HTML player, and as a PDF of one frame per
-line.
+line. The video file is the film an export hook returns (render_film), as the video extension's does.
 
 The video file: the film's page is loaded headless at 1280x720, drawn at each frame's time with `window.seek(t)` and
 shot, and the frames are encoded by ffmpeg. The system's ffmpeg writes an MP4 (H.264 when it has libx264); without one,
@@ -272,16 +272,6 @@ async def render(v: dict[str, Any], *, faces: str, narrate: bool) -> tuple[bytes
 
 def _video_of(m: dict[str, Any]) -> dict[str, Any]:
     return {"film_page": m["film_page"], "duration": m["duration"], "lines": m["lines"]}
-
-
-async def render_video(m: dict[str, Any], *, voice: bool = True) -> tuple[bytes, str]:
-    from .exports import font_faces  # noqa: PLC0415
-    from fastapi import HTTPException  # noqa: PLC0415
-
-    try:
-        return await render(_video_of(m), faces=font_faces(), narrate=voice)
-    except RuntimeError as e:
-        raise HTTPException(409, f"The video could not be made: {e}") from e
 
 
 async def render_film(film: dict[str, Any], *, faces: str) -> tuple[bytes, str]:

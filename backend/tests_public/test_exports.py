@@ -1,5 +1,6 @@
 """A written document exported: Markdown with footnotes, one self-contained HTML file, the formats a report type's
-export.py declares, and PDF and video offered disabled when there is no browser. No model call and no browser."""
+export.py declares, such as the video extension's video file, and PDF and video offered disabled when there is no
+browser. No model call and no browser."""
 from __future__ import annotations
 
 import wave
@@ -9,7 +10,9 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from app import config, exports, film_export, investigation, notebook, report_types, tools
+import runpy
+
+from app import config, exports, extensions, film_export, investigation, notebook, report_types, tools
 
 CORPUS = "mini"
 MAIN = investigation.MAIN
@@ -101,6 +104,25 @@ async def test_an_extension_report_types_formats_join_the_built_in_ones(report, 
     got = {f["id"]: f for f in exports.formats(CORPUS, "report", "document")}
     assert got["csv"] == {"id": "csv", "name": "CSV", "ext": "csv", "ok": True, "hook": True}
     assert got["html"]["name"] == "Web page" and got["html"].get("hook") and not got["markdown"].get("hook")
+
+
+async def test_the_video_extension_gives_a_video_its_video_file(report, monkeypatch):
+    """The video's Video format is its type's export hook, whose film thimble renders with the encoder there is."""
+    extensions.add("video", yes=True, say=lambda _: None)
+    await extensions.refresh(CORPUS)
+    report_types.create_document_type(CORPUS, "video")
+    monkeypatch.setattr(exports, "browser", lambda: ("system", "/usr/bin/chromium"))
+    monkeypatch.setattr(film_export, "encoder", lambda: ("webm", "/pw/ffmpeg"))
+    got = {f["id"]: f for f in exports.formats(CORPUS, "video", "video")}
+    assert list(got) == ["markdown", "html", "pdf", "video"] and got["video"]["hook"] and got["video"]["ext"] == "webm"
+    monkeypatch.setattr(film_export, "encoder", lambda: None)
+    got = {f["id"]: f for f in exports.formats(CORPUS, "video", "video")}
+    assert not got["video"]["ok"] and got["video"]["why"] == "Needs ffmpeg to write the video file"
+    hook = runpy.run_path(str(extensions.builtin_dir() / "video" / "reports" / "video" / "export.py"))
+    doc = {"film": "<p>", "timing": {"duration": 6.0, "lines": [{"id": "a", "start": 0.5, "end": 5.0}]},
+           "lines": [{"id": "a", "sentences": [{"text": "All [[27|card:b2c3d4e5]] came from one account [[card:b2c3d4e5]]."}]}]}
+    assert hook["export"](doc, "video", None) == {
+        "film": {"html": "<p>", "duration": 6.0, "lines": [{"start": 0.5, "end": 5.0, "text": "All 27 came from one account."}]}}
 
 
 def test_the_narration_lays_each_line_at_its_start(tmp_path):

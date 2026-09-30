@@ -422,7 +422,7 @@ Start a writer, in a Claude Code session of its own beside yours, which writes o
 {
   "type": "object",
   "properties": {
-    "doc": {"type": "string", "description": "The document's slug, such as report, story, slides or video, the write event's `doc`."},
+    "doc": {"type": "string", "description": "The document's slug, such as report, story or slides, the write event's `doc`."},
     "request": {"type": "string", "description": "What the analyst asked for, in their words, the write event's text. Empty for the document as its form asks."},
     "after": {"type": "string", "description": "The passage the request is about, the write event's `after`."},
     "type": {"type": "string", "description": "Only for a document that does not exist yet, which is then made: casefile (one document, a section per case, such as an agent, a run or a session), comparison (a page with a grid of the cases against measures), timeline (dated events in phases), page, or document, slides or story for one the request describes."},

@@ -14,8 +14,8 @@
                     `replace: true` in its frontmatter; `{{files}}` in it stands for the files its views and card types,
                     and those of the extensions it needs, claim here. An orient.md beside extension.json, and `replaces`
                     in it, are read too
-  reports/<slug>/   a report type: type.md in the preset format, and export.py for its own exports; report-types/ is read
-                    too
+  reports/<slug>/   a report type: type.md in the preset format, whose renderer may also be `video`, and export.py for
+                    its own exports; report-types/ is read too
 
 An extension loads when read_extension finds no problem: this thimble is in its range, its Python packages import, its
 js names only libraries thimble inlines, and the extensions it needs are added. It is active in a workspace when it
@@ -76,6 +76,7 @@ CARD_JSON, CARD_HTML, GUIDE = "card.json", "card.html", "card.md"
 TYPE_MD, EXPORT_PY = "type.md", "export.py"
 ORIENT_FILES = ("agents/orient.md", "orient.md")  # the first found extends the orientation
 REPORT_DIRS = ("reports", "report-types")  # the first found holds the report types
+REPORT_RENDERERS = ("document", "page", "video")  # a report type's renderer; document when it names none of them
 RECORD_GLOBS = ["*.jsonl", "*.csv"]  # what a card type with a reader of its own reads when its card.json claims nothing
 SIZE_MAX = 50 * 1024 * 1024  # bytes of an extension's folder
 SKIPPED = ("__pycache__", ".git", "cache", ADDED)
@@ -955,7 +956,8 @@ def report_types(c: str | None) -> list[dict[str, Any]]:
             except OSError:
                 continue
             d = Path(e["dir"]) / folder / r["slug"]
-            renderer = "page" if str(front.get("renderer") or "").strip().lower() == "page" else "document"
+            renderer = str(front.get("renderer") or "").strip().lower()
+            renderer = renderer if renderer in REPORT_RENDERERS else "document"
             out.append({"id": r["slug"], "name": _one(front.get("name") or r["slug"]),
                         "description": _one(front.get("description")), "renderer": renderer, "prompt": body,
                         "extension": e["name"], "dir": str(d),

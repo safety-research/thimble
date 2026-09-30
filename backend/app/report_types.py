@@ -1,7 +1,9 @@
 """Documents: their types, storage, frames, the tools that save and check them, and routes.
 
-A type is {slug, name, description, renderer, prompt, rubric}; the built-ins (report, story, slides, video) are backed by
-prompts/report-*.md and custom types live under workspaces/<c>/report-types/<slug>/. A document is stored at
+A type is {slug, name, description, renderer, prompt, rubric}; the built-ins (report, story, slides) are backed by
+prompts/report-*.md and custom types live under workspaces/<c>/report-types/<slug>/. A video is a custom type made from
+the video extension's report type, and one written while the video was built in becomes one when it is first read
+(_migrate_video). A document is stored at
 investigations/<inv>/<slug>.json, its frame at <slug>.frame.json, its earlier generations under <slug>/.
 
 No model runs here. The writer (write_session.py) reads a type's form with read_ref("type:<name>") and saves with
@@ -34,7 +36,8 @@ from .story import StoryBody
 log = logging.getLogger("thimble.report_types")
 
 RENDERERS = ("document", "slides", "story", "custom", "video")
-BUILTIN_SLUGS = ("report", "story", "slides", "video")
+BUILTIN_SLUGS = ("report", "story", "slides")
+LEGACY_VIDEO = "video"  # the slug of the video while it was built in, and the id of the video extension's report type
 RESERVED = set(BUILTIN_SLUGS) | {"brief", "findings", "run", "investigation", "events", "notes", "critiques", "reports",
                                  "types", "draft", "versions", "presets", "new"}
 SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9-]{1,40}$")
@@ -191,9 +194,6 @@ def _builtin(slug: str) -> dict[str, Any]:
     elif slug == "slides":
         prompt, renderer = type_paragraph_text("slides"), "slides"
         desc = "A short narrative slideshow over the report's verified material: one point per slide, with the same citations."
-    elif slug == "video":
-        prompt, renderer = type_paragraph_text("video"), "video"
-        desc = "A short narrated video: cited lines the browser reads aloud over a film drawn in HTML in time with them."
     else:
         prompt, renderer = type_paragraph_text("story"), "story"
         desc = "A scrolling story in the style of a newsroom's interactive graphics: a title, a one-sentence answer, then sections, each a headline with its cited text beside the card that carries it."
@@ -202,10 +202,24 @@ def _builtin(slug: str) -> dict[str, Any]:
     return out
 
 
+def _migrate_video(c: str) -> None:
+    """A workspace's video written while the video was built in: its type is made, from the video extension's report
+    type, so it opens, is written and is exported as any video."""
+    d = _type_dir(c, LEGACY_VIDEO)
+    if (d / "type.json").is_file() or not any((config.workspace_dir(c) / "investigations").glob(f"*/{LEGACY_VIDEO}.json")):
+        return
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "prompt.md").write_text("", "utf-8")
+    write_json(d / "type.json", {"slug": LEGACY_VIDEO, "created_by": "thimble", "ts": _now(), "name": "Video",
+                                 "description": "", "renderer": "video", "preset": LEGACY_VIDEO})
+
+
 def read_type(c: str, slug: str) -> dict[str, Any] | None:
     """A type record with its prompt and rubric text; None when neither a built-in nor a custom type has the slug."""
     if slug in BUILTIN_SLUGS:
         return _builtin(slug)
+    if slug == LEGACY_VIDEO:
+        _migrate_video(c)
     d = _type_dir(c, slug)
     meta = read_json(d / "type.json", None)
     if not isinstance(meta, dict):
@@ -258,6 +272,7 @@ def _require_type(c: str, slug: str) -> dict[str, Any]:
 def list_types(c: str) -> list[dict[str, Any]]:
     """The built-ins in their order, then the workspace's custom types by creation time."""
     out = [_builtin(s) for s in BUILTIN_SLUGS]
+    _migrate_video(c)
     root = types_dir(c)
     customs: list[dict[str, Any]] = []
     for d in sorted(root.iterdir()) if root.is_dir() else ():
@@ -448,7 +463,8 @@ def create_document_type(c: str, kind: str, *, name: str | None = None, brief: s
                        created_by=created_by, create=True, page=True)
     elif made_from:
         page = made_from["renderer"] == "page"
-        t = write_type(c, slug, name=name, description=made_from["description"], renderer="custom" if page else "document",
+        renderer = "custom" if page else "video" if made_from["renderer"] == "video" else "document"
+        t = write_type(c, slug, name=name, description=made_from["description"], renderer=renderer,
                        prompt="", rubric="", created_by=created_by, create=True, page=page, preset_id=kind)
     elif not brief:
         raise HTTPException(400, "a document of your own needs its brief, what it is for")
@@ -542,7 +558,7 @@ def read_doc(c: str, inv_id: str, slug: str) -> dict[str, Any] | None:
         doc.setdefault("title_ok", _title_ok(_collapse(doc.get("title"))))
     elif slug == "slides":
         doc.setdefault("renderer", "slides")
-    elif slug == "video":
+    elif slug == LEGACY_VIDEO:
         doc.setdefault("renderer", "video")
     _legacy_comments(doc)
     return _with_defaults(doc)

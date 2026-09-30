@@ -799,9 +799,9 @@ export function asWriteup(doc: AnyDoc): Writeup {
 // ---- the switcher ----
 
 /** the three document types in the type bar's order */
-export const BUILTIN_SLUGS = ['report', 'slides', 'story', 'video'] as const
-const BUILTIN_RENDERER: Record<string, string> = { report: 'document', story: 'story', slides: 'slides', video: 'video' }
-const BUILTIN_LABEL: Record<string, string> = { report: 'Report', story: 'Story', slides: 'Slides', video: 'Video' }
+export const BUILTIN_SLUGS = ['report', 'slides', 'story'] as const
+const BUILTIN_RENDERER: Record<string, string> = { report: 'document', story: 'story', slides: 'slides' }
+const BUILTIN_LABEL: Record<string, string> = { report: 'Report', story: 'Story', slides: 'Slides' }
 
 /** A document's name on its tab in the type bar: Report, Slides, Story, or a custom type's name (else its slug). */
 export const docLabel = (slug: string, state: TypesState | null | undefined): string => BUILTIN_LABEL[slug] ?? ((state?.[slug]?.name ?? '').trim() || slug)

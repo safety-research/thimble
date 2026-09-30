@@ -1,11 +1,12 @@
-"""A written document exported as a file: Markdown, HTML, PDF or video, and the formats a report type's export.py adds.
+"""A written document exported as a file: Markdown, HTML or PDF, and the formats a report type's export.py adds, such as
+the video extension's video file.
 
 Every format starts from one reading of the document (read_model): its title, lead, units (a report's sections, a
 story's sections, a deck's slides, a video's lines), their figures and the citations, numbered in order of first use;
 a card a sentence names as a noun is written as the card's title (report_types.card_nouns).
 Markdown writes the citations as footnotes; HTML is one self-contained file (fonts, pictures and styles inlined) with
-the citations as numbered notes linked from the text; PDF is that HTML printed by the browser; video renders the film
-(film_export.py).
+the citations as numbered notes linked from the text; PDF is that HTML printed by the browser. A video's HTML is its
+player and its PDF a frame per line (film_export.py).
 
 The browser: the one thimble's config names (userconf.browser): the system's Chrome, Edge or Chromium, else Playwright's
 own Chromium when it is installed. Pictures of cards come from the card harness (render.py); without a browser a card is
@@ -45,7 +46,6 @@ from .report import _collapse, plain_text
 log = logging.getLogger("thimble.exports")
 router = APIRouter()
 
-BUILTIN = ("markdown", "html", "pdf", "video")
 FORMAT_INFO = {
     "markdown": {"name": "Markdown", "ext": "md", "mime": "text/markdown; charset=utf-8"},
     "html": {"name": "HTML", "ext": "html", "mime": "text/html; charset=utf-8"},
@@ -673,25 +673,25 @@ def hook_formats(path: Path) -> list[dict[str, str]]:
 
 
 def formats(c: str, slug: str, renderer: str) -> list[dict[str, Any]]:
-    """The formats the document offers, each {id, name, ext, ok, why?, hook?}: the four that fit its kind, a report
-    type's own added or in place of one, the ones the browser or an encoder is missing for marked not ok."""
+    """The formats the document offers, each {id, name, ext, ok, why?, hook?}: Markdown, HTML and PDF, a report type's
+    own added or in place of one, the ones the browser or an encoder is missing for marked not ok. A video file takes
+    the encoder's extension."""
     from . import film_export  # noqa: PLC0415
 
     kind, why_off = browser()
-    ids = ["markdown", "html", "pdf"] + (["video"] if renderer == "video" else [])
     out: dict[str, dict[str, Any]] = {i: {"id": i, "name": FORMAT_INFO[i]["name"], "ext": FORMAT_INFO[i]["ext"], "ok": True}
-                                      for i in ids}
-    if renderer == "video":
-        enc = film_export.encoder()
-        out["video"]["ext"] = enc[0] if enc else "mp4"
+                                      for i in ("markdown", "html", "pdf")}
     hook = hook_of(c, slug)
     for f in hook_formats(hook) if hook else []:
         out[f["id"]] = {**f, "ok": True, "hook": True}
+    enc = film_export.encoder()
     for f in out.values():
-        needs_browser = f["ext"] == "pdf" or f["id"] == "video" or f["ext"] in ("mp4", "webm")
-        if needs_browser and kind == "off":
+        film = f["id"] == "video" or f["ext"] in ("mp4", "webm")
+        if film and enc:
+            f["ext"] = enc[0]
+        if (f["ext"] == "pdf" or film) and kind == "off":
             f.update(ok=False, why=f"Needs a browser: {why_off}")
-        elif f["id"] == "video" and not f.get("hook") and film_export.encoder() is None:
+        elif film and enc is None:
             f.update(ok=False, why="Needs ffmpeg to write the video file")
     return list(out.values())
 
@@ -776,9 +776,6 @@ async def export(c: str, inv_id: str, slug: str, fmt: str) -> tuple[bytes, str, 
     name = lambda ext: _filename(m["title"], slug, ext)  # noqa: E731
     if fmt == "markdown" and not f.get("hook"):
         return to_markdown(m).encode("utf-8"), name("md"), FORMAT_INFO["markdown"]["mime"]
-    if fmt == "video" and not f.get("hook"):
-        data, ext = await film_export.render_video(m, voice=True)
-        return data, name(ext), MIME_BY_EXT[ext]
     kind, _why = browser()
     cards = [x["card"] for u in m["units"] for x in u["figures"]]
     pics, _ = await card_pictures(c, cards, draw=kind != "off")
