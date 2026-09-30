@@ -545,8 +545,9 @@ def _start(c: str, key: str, at: str, v: dict[str, Any], files: list[tuple[Any, 
 
 async def _fit(c: str, name: str, v: dict[str, Any], files: list[tuple[Any, ...]], kept: dict[str, Any]) -> dict[str, Any]:
     """Whether extension `name`'s view `v` fits workspace `c`: {fits, reason, by} with `key` for a model's decision,
-    {key, error, ts} when its call failed, or {key, pending} while it runs (_start). `files` are the files it claims
-    here; `kept` the decision STATE_FILE holds, which stands while its key does (view_fit.key)."""
+    {key, error, ts} when its call failed, or {key, pending} while it runs (_start), with the answer before it while
+    the files changed since. `files` are the files it claims here; `kept` the decision STATE_FILE holds, which stands
+    while its key does (view_fit.key)."""
     from . import view_fit  # noqa: PLC0415
 
     if not files:
@@ -561,11 +562,11 @@ async def _fit(c: str, name: str, v: dict[str, Any], files: list[tuple[Any, ...]
         except Exception as e:  # noqa: BLE001 — a check that failed decides nothing
             log.exception("%s: whether the view %s fits is not known", c, key)
             return {"key": at, "error": f"{type(e).__name__}: {e}", "ts": _now()}
-    if kept.get("key") == at and ("fits" in kept or (kept.get("error") and not _stale(kept))):
+    if kept.get("key") == at and not kept.get("pending") and ("fits" in kept or (kept.get("error") and not _stale(kept))):
         return kept
     if got is None or got["key"] != at:
         _start(c, key, at, v, files)
-    return {"key": at, "pending": True}
+    return {"key": at, "pending": True, **({"fits": kept["fits"], "reason": kept.get("reason")} if "fits" in kept else {})}
 
 
 def _note(fit: dict[str, Any]) -> str:
@@ -580,14 +581,15 @@ def _note(fit: dict[str, Any]) -> str:
 def _settle_views(name: str, e: dict[str, Any], shown: dict[str, bool], clash: dict[str, dict[str, list[str]]]) -> None:
     """Each view of extension `name` marked `shown` (active, its files here, no other extension giving it, and fitting
     or switched on here) with the `note` Settings shows; then `files`, the claims of the views it shows and of its card
-    types that match files here, which `{{files}}` in its orientation instructions stands for."""
+    types whose claims match files here, which `{{files}}` in its orientation instructions stands for."""
     files: list[str] = []
     for v in _list(e, "views"):
         fit = v.get("fit") or {}
         on = shown.get(_view_key(name, v["slug"]), bool(fit.get("fits")))
         v["shown"] = bool(e.get("active") and v.get("here") and on and v["slug"] not in clash["view"])
         v["note"] = BOTH if e.get("active") and v["slug"] in clash["view"] else _note(fit)
-        if v["shown"]:
+        card = bool(e.get("active") and v.get("card") and v.get("here") and v["slug"] not in clash["card"])
+        if v["shown"] or card:
             files += v["claims"]
     for t in _list(e, "cards"):
         if e.get("active") and t.get("here") and t["slug"] not in clash["card"]:

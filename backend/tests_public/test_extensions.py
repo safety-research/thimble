@@ -188,9 +188,9 @@ async def test_an_added_extension_runs_in_every_workspace_and_its_view_where_it_
 
 
 async def test_a_view_shows_where_its_check_finds_it_fits_and_its_switch_overrides_the_check(corpus, fit):
-    """The check is asked once per view and workspace and again only when the files it claims change. Until it
-    answers, when it says no and when it fails, the view is hidden and Settings says why, while the extension's other
-    contributions run; the view's switch overrides the check either way."""
+    """The check is asked once per view and workspace and again only when the files it claims change, the last answer
+    standing meanwhile. Until it first answers, when it says no and when it fails, the view is hidden and Settings says
+    why, while the extension's other contributions run; the view's switch overrides the check either way."""
     _add()
     first = (await extensions.refresh(CORPUS))["extensions"]["ext-min"]
     assert first["active"] and first["views"][0]["note"] == extensions.CHECKING and not first["views"][0]["shown"]
@@ -202,6 +202,8 @@ async def test_a_view_shows_where_its_check_finds_it_fits_and_its_switch_overrid
     fit["answer"]["output"] = {"fits": False, "reason": "No one did a task here."}
     (corpus / "tally" / "b.jsonl").write_text('{"who": "di", "what": "task 9"}\n')
     _files_changed()
+    e = (await extensions.refresh(CORPUS))["extensions"]["ext-min"]
+    assert e["views"][0]["shown"] and e["views"][0]["note"] == extensions.CHECKING, "the last answer stands meanwhile"
     e = (await extensions.refresh(CORPUS, wait=10))["extensions"]["ext-min"]
     assert len(fit["asked"]) == 2 and e["active"] and not e["views"][0]["shown"]
     assert views.read_proposal(CORPUS, "tally") is None, "its unchanged view is withdrawn"
