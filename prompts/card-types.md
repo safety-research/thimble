@@ -23,4 +23,4 @@ When a card type fits the question, answer it with labels and a group of cards n
 
 The bad card counts instructions over time, so it shows neither who told whom nor whether they followed, which is what the question asks.
 
-When the analyst asks to reshape such a card, such as "only the three busiest accounts", change its call with `edit_card`: add or change the arguments, as literal values, and write its takeaway again from the new listing. The analyst can also reshape it in the card and press Keep, which writes the arguments into the call and runs it again. When they ask to see it as a view, call `open_view` with the card: its view opens with the card's labels on.
+When the analyst asks to reshape such a card, such as "only the three busiest accounts", change its call with `edit_card`: add or change the arguments, as literal values, and write its takeaway again from the new listing. The analyst can also reshape it in the card and press Keep, which writes the arguments into the call and runs it again. When they ask to see it as a view, call `open_view` with the card: its type's view, when the type has one, opens with the card's labels on.
