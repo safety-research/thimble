@@ -22,7 +22,7 @@
   #corner { top: 0; padding: 12px 12px 0 14px; font: 600 var(--text-mono-sm) / 1.3 var(--font-mono); letter-spacing: .04em; text-transform: uppercase; color: var(--text-secondary); }
   .agent { display: flex; gap: 10px; align-items: flex-start; padding: 12px 12px 0 14px; }
   .agent.odd { background: color-mix(in srgb, var(--text-primary) 2.5%, var(--surface-card)); }
-  .av { flex: none; width: 28px; height: 28px; border-radius: 7px; display: block; }
+  .agent .avatar { width: 28px; height: 28px; font-size: 12px; }
   .who { min-width: 0; flex: 1; }
   .who .nm { font: 600 var(--text-ui-sm) / 1.3 var(--font-body); color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .who .goal { margin-top: 2px; font: 400 var(--text-xs) / 1.38 var(--font-body); color: var(--text-secondary); display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
@@ -91,19 +91,12 @@ function hash(str) {
   for (let i = 0; i < str.length; i++) { x ^= str.charCodeAt(i); x = Math.imul(x, 16777619) }
   return x >>> 0
 }
+// thimble's avatar: the name's initial on a neutral disc, its shade from the name
 function avatar(name) {
-  const colour = token(VIZ[hash(name) % VIZ.length])
-  const svg = s('svg', { class: 'av', viewBox: '0 0 7 7', 'aria-hidden': 'true' })
-  svg.style.background = `color-mix(in srgb, ${colour} 16%, var(--surface-card))`
-  let bits = hash(name + '·')
-  for (let y = 0; y < 5; y++) for (let x = 0; x < 3; x++) {
-    if (bits & 1) {
-      svg.append(s('rect', { x: 1 + x, y: 1 + y, width: 1, height: 1, fill: colour }))
-      if (x < 2) svg.append(s('rect', { x: 5 - x, y: 1 + y, width: 1, height: 1, fill: colour }))
-    }
-    bits >>>= 1
-  }
-  return svg
+  const a = h('span', 'avatar', String(name || '?').replace(/[^a-z0-9]/gi, '').slice(0, 1) || '?')
+  a.style.setProperty('--a', (0.08 + (hash(String(name)) % 5) * 0.04).toFixed(2))
+  a.setAttribute('aria-hidden', 'true')
+  return a
 }
 function colHead(t) {
   const d = t ? new Date(t) : null
