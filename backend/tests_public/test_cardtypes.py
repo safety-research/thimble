@@ -134,6 +134,9 @@ async def test_a_card_draws_the_actions_it_names_in_event_order_with_goals_threa
     assert [(a["tag"], a["thread"]) for a in data["actions"]] == [("T1", "the relay"), ("T2", "p0"), ("T2", "p0")], (
         "a thread is the record's place unless the call names one")
     assert [a["m"] for a in data["actions"]] == [-1, 0, 0], "a label the call names colours its actions"
+    assert [(t["name"], t["place"], t["ref"]) for t in data["threads"]] == [
+        ("the relay", "p1", "saves.jsonl#L2"), ("p0", "p0", "saves.jsonl#L1")], "a thread on one page links to it"
+    assert (data["actions"][1]["page"], data["actions"][1]["page_ref"]) == ("p0", "saves.jsonl#L1")
     assert data["rows"][0] == {"account": "bot1", "goal": "Pass the value on", "inferred": True, "n": 4}
     assert data["links"] == [{"from": 2, "to": 1, "type": "copies"}, {"from": 3, "to": 1, "type": "copies"}]
     assert data["types"] == ["copies"]
@@ -268,14 +271,18 @@ async def test_the_swarm_extension_ships_no_view_and_takes_back_the_one_it_insta
 def test_the_swarm_reader_s_shares_print_every_record_once(monkeypatch, capsys, tmp_path):
     """The Swarm reader's shares are cut by size at records, so a place may run over two, and between them they print
     every record once, each line whole; --shares writes them to a folder, and --from and --count print part of one
-    place. The listing begins with the files it read."""
+    place. The listing begins with each file and the records it reads there, or why it reads none."""
     spec = importlib.util.spec_from_file_location("swarm_reader", SWIMLANE / "reader.py")
     reader = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(reader)
     monkeypatch.chdir(SWIMLANE / "sample")
     files = [x for g in ("roster.csv", "wiki/index.jsonl", "wiki/pages/**/*.jsonl", "chat/*.jsonl") for x in ("--files", g)]
     reader.main(files)
-    assert capsys.readouterr().out.startswith("files: chat/help-desk.jsonl chat/night-ops.jsonl roster.csv")
+    out = capsys.readouterr().out
+    assert out.startswith("files:\n  chat/help-desk.jsonl: 8 records (2 left out, 1 repeated)\n  chat/night-ops.jsonl: 5 records\n"
+                          "  roster.csv: 0 records (a roster, the goals of 12 accounts)\n"
+                          "  wiki/index.jsonl: 0 records (it names 5 places)\n")
+    assert out.rstrip().splitlines()[-1].startswith("32 records from 7 files, ")
     printed, cut = [], False
     for k in range(1, 5):
         reader.main([*files, "--share", f"{k}/4"])

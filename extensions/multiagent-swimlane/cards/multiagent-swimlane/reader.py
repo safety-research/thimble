@@ -50,7 +50,8 @@
 # A pair keeps one link, the first of these that holds.
 #
 # Which files it reads: those its card.json claims, every JSON Lines and CSV file; a file whose records have no account
-# and text and name no place is left out, reported, and named apart in the script's listing.
+# and text and name no place is left out and reported, and the script's listing gives each file the records it reads
+# there, or why it reads none.
 import csv
 import difflib
 import io
@@ -258,7 +259,7 @@ def _runs(paths):
 
 
 def build_index(paths):
-    """{files: {path: {offsets, kind, fields, n, run}}, recs: {ref: action}, order: [action refs in event order], same:
+    """{files: {path: {offsets, kind, fields, n, skipped, repeats, goals, names, left?, why?, run}}, recs: {ref: action}, order: [action refs in event order], same:
     {ref of a repeat: ref of the first}, places: {place: {ref, title, refs, accounts, addressed, run}}, accounts:
     {account: {n, goal, goal_refs}}, runs: {run: n}, problems: {count, examples: [{ref, why}]}}. An action keeps its
     account, place, time, kind, run, the save before it, the record it replies to and whether it addresses another
@@ -277,8 +278,8 @@ def build_index(paths):
         own_place = path[len(base):].rsplit(".", 1)[0] if path in placeless else None
         kind = ("actions" if ("actor" in f or "anon" in f) and "text" in f
                 else "roster" if "actor" in f and "goal" in f else "other")
-        files[path] = {"offsets": _offsets(path), "kind": kind, "fields": f, "n": 0, "run": run,
-                       "header": _csv_header(path) if path.endswith(".csv") else None}
+        files[path] = {"offsets": _offsets(path), "kind": kind, "fields": f, "n": 0, "skipped": 0, "repeats": 0,
+                       "goals": 0, "names": 0, "run": run, "header": _csv_header(path) if path.endswith(".csv") else None}
         seen, last, names_places = {}, None, False
         for first, end, rec in rows:
             ref = f"{path}#L{first}"
@@ -287,6 +288,7 @@ def build_index(paths):
                 _g, goal = _first(rec, GOAL_KEYS)
                 if who:
                     roster[who.lower()] = {"goal": goal, "refs": [f"{path}#L{n}" for n in range(first, end + 1)]}
+                    files[path]["goals"] += 1
                 continue
             if kind == "other":
                 _p, place = _first(rec, PLACE_KEYS)
@@ -294,6 +296,7 @@ def build_index(paths):
                 if place and title:
                     places.setdefault(place, {"ref": ref, "title": title, "refs": [], "accounts": {}})
                     names_places = True
+                    files[path]["names"] += 1
                 continue
             _a, who = _first(rec, ACTOR_KEYS)
             if not who:
@@ -303,9 +306,11 @@ def build_index(paths):
                 if other is not None:  # a record with no text field, such as a join notice, is not an action
                     _problem(problems, ref, f"left out: its text is under `{other}`, not `{f['text']}`" if other != f["text"]
                              else f"left out: its `{other}` is not text")
+                files[path]["skipped"] += 1
                 continue
             if not who:
                 _problem(problems, ref, "left out: no account")
+                files[path]["skipped"] += 1
                 continue
             _p, place = _first(rec, PLACE_KEYS)
             place = (f"{run}/{place}" if run else place) if place else own_place or path
@@ -315,6 +320,7 @@ def build_index(paths):
             if key is not None:
                 if key in seen:
                     same[ref] = seen[key]
+                    files[path]["repeats"] += 1
                     continue
                 seen[key] = ref
             _k, when = _first(rec, TIME_KEYS)
@@ -333,6 +339,8 @@ def build_index(paths):
             files[path]["n"] += 1
         if kind == "other" and not names_places:
             files[path]["left"] = True
+            files[path]["why"] = ("no records" if not rows else "no text field" if "actor" in f or "anon" in f
+                                  else "no account field" if "text" in f else "no account or text field")
             if rows:
                 _problem(problems, path, f"left out: no account and text fields ({', '.join(list(rows[0][2])[:6])})")
     actions.sort(key=lambda r: (r["t"], r["ref"]))
@@ -669,8 +677,8 @@ it again for more); --from I and --count M print records I to I+M-1 of each. A r
 account and kind, then a post's text or the lines a save changed from the save before it, each whole: a line longer
 than {LINE_MAX} characters goes on over the lines after it, indented deeper. A place's heading says which of its records
 follow, and the last line how many records were printed. --files GLOB reads those files, a GLOB with no / in any
-folder; by default every JSON Lines and CSV file under DIR. The listing with no option begins with the files whose
-records it read, then those it left out."""
+folder; by default every JSON Lines and CSV file under DIR. The listing with no option begins with each file and the
+records it reads there, or why it reads none."""
 
 
 def _script_files(globs):
@@ -722,6 +730,18 @@ def _block(index, ref):
 
 def _n(n, one, many=None):
     return f"{n:,} {one if n == 1 else many or one + 's'}"
+
+
+def _file_line(f):
+    """What the listing says of one file: the records it reads there, and those it leaves out, or why it reads none."""
+    if f["kind"] == "actions":
+        extra = [x for x in (f["skipped"] and f"{f['skipped']:,} left out", f["repeats"] and f"{f['repeats']:,} repeated") if x]
+        return _n(f["n"], "record") + (f" ({', '.join(extra)})" if extra else "")
+    if f["kind"] == "roster":
+        return f"0 records (a roster, the goals of {_n(f['goals'], 'account')})"
+    if not f.get("left"):
+        return f"0 records (it names {_n(f['names'], 'place')})"
+    return f"0 records ({f.get('why') or 'no account or text field'})"
 
 
 def _heading(index, name, a, b):
@@ -832,10 +852,7 @@ def main(argv):
         _print(index, _share(_blocks(index, ranked), int(k), int(n)), out)
         return 0
     if not names:
-        out.write(f"files: {' '.join(sorted(p for p, f in index['files'].items() if not f.get('left')))}\n")
-        left = sorted(p for p, f in index["files"].items() if f.get("left"))
-        if left:
-            out.write(f"left out, with no account and text: {' '.join(left)}\n")
+        out.write("files:\n" + "".join(f"  {p}: {_file_line(f)}\n" for p, f in sorted(index["files"].items())))
         for rank, p in enumerate(ranked, 1):
             v = index["places"][p]
             out.write(f"{rank}\t{len(v['refs'])}\t{len(v['accounts'])}\t{p}\n")
@@ -844,8 +861,10 @@ def main(argv):
         if into:
             _write_shares(index, blocks, n, into)
         where = f"written to {into} as share-1.txt to share-{n}.txt" if into else f"--share 1/{n} to --share {n}/{n}"
-        out.write(f"{_n(len(index['order']), 'record')}, {sum(b[3] for b in blocks) // 1000:,} KB printed: "
-                  f"{_n(n, 'share')} of about {SHARE_BYTES // 1000} KB, {where}\n")
+        read = [p for p, f in index["files"].items() if f["n"]]
+        out.write(f"{_n(len(index['order']), 'record')} from {read[0] if len(read) == 1 else _n(len(read), 'file')}, "
+                  f"{sum(b[3] for b in blocks) // 1000:,} KB printed: {_n(n, 'share')} of about {SHARE_BYTES // 1000} KB, "
+                  f"{where}\n")
         return 0
     missing = [p for p in names if p not in index["places"]]
     if missing:

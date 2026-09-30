@@ -1,7 +1,8 @@
 # Agent swimlane: the significant actions of a swarm, a row per agent. The call names the actions (a record's ref, a
 # one-line summary, optionally its thread), the accounts' goals and the typed links between actions; this code finds each
 # action's record in the Swarm reader's index (account, time, place) and returns what card.html draws: a row per
-# account in order of its first action, the actions numbered in event order, threads tagged T1… in order of first use.
+# account in order of its first action, the actions numbered in event order, threads tagged T1… in order of first use,
+# each with its place when all its actions are on one.
 import re
 
 import thimble
@@ -75,9 +76,10 @@ def card(index, actions, goals=None, links=None):
         thread = " ".join(str(a.get("thread") or "").split()) or r["place"]
         tag = tags.setdefault(thread, f"T{len(tags) + 1}")
         m = next((mark_at[k] for x in (thimble.marked(ref) if marks else ()) if (k := (x["label"], x["value"])) in mark_at), -1)
+        p = index["places"][r["place"]]
         c = {"id": n, "ref": ref, "account": r["account"], "time": reader._iso(r["t"]) if r["known"] else None,
-             "place": r["place"], "thread": thread, "tag": tag, "summary": " ".join(str(a["summary"]).split()),
-             "kind": r["kind"], "m": m}
+             "place": r["place"], "page": p["title"], "page_ref": p["refs"][0], "thread": thread, "tag": tag,
+             "summary": " ".join(str(a["summary"]).split()), "kind": r["kind"], "m": m}
         shown.append(c)
         by_ref[ref] = c
 
@@ -112,9 +114,13 @@ def card(index, actions, goals=None, links=None):
         given = _goal_of(goals, account)
         rows.append({"account": account, "goal": given if given is not None else index["accounts"][account].get("goal", ""),
                      "inferred": given is not None, "n": index["accounts"][account]["n"]})
-    threads = [{"tag": t, "name": name, "place": name in index["places"],
-                "ref": next(c["ref"] for c in shown if c["thread"] == name),
-                "n": sum(1 for c in shown if c["thread"] == name)} for name, t in tags.items()]
+    threads = []
+    for name, t in tags.items():
+        mine = [c for c in shown if c["thread"] == name]
+        places = {c["place"] for c in mine}
+        place = places.pop() if len(places) == 1 else None
+        threads.append({"tag": t, "name": name, "place": place, "page": mine[0]["page"] if place else None,
+                        "ref": mine[0]["page_ref"] if place else None, "n": len(mine)})
     return {"actions": shown, "rows": rows, "threads": threads, "links": drawn, "types": kinds, "carried": carried,
             "marks": marks, "counts": {"records": len(index["order"]), "accounts": len(index["accounts"]),
                                        "places": len(index["places"])}}
