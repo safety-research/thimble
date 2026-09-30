@@ -34,7 +34,7 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-from . import config, refs, viewlog
+from . import config, hook_auth, refs, viewlog
 
 log = logging.getLogger("thimble.corpus")
 
@@ -595,8 +595,10 @@ def _peeking(request: Request | None) -> bool:
 
 
 def _viewed(c: str, rel: str, request: Request | None = None) -> None:
-    """Record the analyst's read of `rel` in the view log; never fails the request, and skipped when peeking."""
-    if _peeking(request):
+    """Record the analyst's read of `rel` in the view log; never fails the request. Skipped when peeking, and for a
+    request without the analyst's cookie (hook_auth.analyst): card code reads through these routes too, and its reads
+    are not the analyst's."""
+    if _peeking(request) or (request is not None and not hook_auth.analyst(request)):
         return
     try:
         viewlog.record(c, rel, "analyst", viewlog.BROWSER, kind="file")

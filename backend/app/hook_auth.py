@@ -12,9 +12,9 @@ it.
 
 A change of permission modes, and an answer to a permission request, must come from the analyst's browser (analyst).
 The dashboard link carries the `ui_key` of server.json after `#k=`; the page trades it for an HttpOnly, SameSite=Strict
-cookie (claim), which such a request must carry. Only the analyst's terminal shows that link (cli.py leave_link), never
-the model's context, so a process that cannot read server.json, such as a notebook kernel in bubblewrap that the model
-writes cells for, can do neither.
+cookie named for this server's port (claim, ui_cookie), which such a request must carry. Only the analyst's terminal
+shows that link (cli.py leave_link), never the model's context, so a process that cannot read server.json, such as a
+notebook kernel in bubblewrap that the model writes cells for, can do neither.
 """
 from __future__ import annotations
 
@@ -40,12 +40,13 @@ NONCE_HEADER = "x-thimble-nonce"
 AUTH_HEADER = "x-thimble-auth"
 PROOF_HEADER = "x-thimble-proof"
 NONCE_MAX = 128  # characters
-UI_COOKIE = "thimble-ui"
+UI_COOKIE = "thimble-ui"  # the cookie's name before the port was added to it (ui_cookie), which browsers still hold
 UI_COOKIE_AGE_S = 400 * 24 * 3600  # the longest a browser keeps a cookie
 # The cookie the browser holds (claim) and analyst() and LocalWriteGuard check. A cookie is not bound to a port, so the
 # path is what keeps it from the browser's requests to other services on 127.0.0.1, except requests to their own /api/
 # paths. It covers the whole API, not just /api/ws/, so a browser proves itself to LocalWriteGuard on every write route.
 UI_COOKIE_PATH = "/api/"
+LEGACY_COOKIE_PATHS = ("/api/ws/", "/api/")  # where UI_COOKIE was set; claim and a moved cookie delete it there
 ANALYST_ONLY = ("open thimble from the link shown under /thimble's reply, or printed by `thimble up` in a shell, to"
                 " answer permission requests or change permission modes")
 
@@ -55,10 +56,8 @@ ANALYST_ONLY = ("open thimble from the link shown under /thimble's reply, or pri
 # ui_key), so it can produce neither and is refused. Request headers, including Origin, are forgeable by such a caller,
 # so the Origin check alone is no boundary against it (http_guard).
 SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
-# The one write route a view build's check poster reaches without either proof: it runs in the view session's sandbox,
-# which cannot read server.json, and posts only to its own view's check route (view_check.py, app/dev.py view_fence).
-WRITE_EXEMPT = re.compile(r"/api/ws/[^/]+/views/[^/]+/check")
-WRITE_REFUSED = "this request must come from thimble's own browser or its plugin"
+WRITE_REFUSED = ("open thimble from the link shown under /thimble's reply, or printed by `thimble up` in a shell, to"
+                 " make changes")
 
 _cache: tuple[tuple[str, int, int], dict] | None = None
 
@@ -109,21 +108,55 @@ def token() -> str:
     return _field("token")
 
 
+def _same(a: str, b: str) -> bool:
+    """hmac.compare_digest over the UTF-8 bytes, so a value that is not ASCII is unequal rather than a TypeError."""
+    return hmac.compare_digest(a.encode("utf-8", "surrogateescape"), b.encode("utf-8", "surrogateescape"))
+
+
+def ui_cookie() -> str:
+    """This server's cookie name: UI_COOKIE and its port (THIMBLE_PORT), as a browser keeps one cookie per name for
+    127.0.0.1 whatever the port, and two servers on one machine would each overwrite the other's. UI_COOKIE when the
+    port is not known."""
+    port = os.environ.get("THIMBLE_PORT", "").strip()
+    return f"{UI_COOKIE}-{port}" if port.isdigit() else UI_COOKIE
+
+
+def key_cookie(cookies: dict[str, str]) -> tuple[bool, bool]:
+    """(proves, legacy): whether `cookies` hold server.json's ui_key, and whether only under UI_COOKIE, the name a
+    browser that claimed the key before the port was added to it still holds, at /api/ws/ (moved by LocalWriteGuard)."""
+    key = _field("ui_key")
+    if not key:
+        return False, False
+    name = ui_cookie()
+    if _same(cookies.get(name, ""), key):
+        return True, False
+    if name != UI_COOKIE and _same(cookies.get(UI_COOKIE, ""), key):
+        return True, True
+    return False, False
+
+
 def analyst(request: Request) -> bool:
     """Whether `request` carries the cookie claim gave for server.json's ui_key."""
-    key = _field("ui_key")
-    return bool(key) and hmac.compare_digest(request.cookies.get(UI_COOKIE, ""), key)
+    return key_cookie(request.cookies)[0]
+
+
+def set_cookie(r: Response, key: str) -> Response:
+    """`r` with this server's cookie for `key` (ui_cookie, at UI_COOKIE_PATH), and UI_COOKIE deleted where it was
+    set."""
+    r.delete_cookie(UI_COOKIE, path="/")  # and none for every path, which other services' pages would get too
+    if ui_cookie() != UI_COOKIE:
+        for path in LEGACY_COOKIE_PATHS:
+            r.delete_cookie(UI_COOKIE, path=path)
+    r.set_cookie(ui_cookie(), key, max_age=UI_COOKIE_AGE_S, path=UI_COOKIE_PATH, httponly=True, samesite="strict")
+    return r
 
 
 def claim(key: object) -> Response:
     """The cookie for the ui_key `key` from the page's link; 403 for any other key."""
     want = _field("ui_key")
-    if not (want and isinstance(key, str) and hmac.compare_digest(key, want)):
+    if not (want and isinstance(key, str) and _same(key, want)):
         return Response(status_code=403)
-    r = Response(status_code=204)
-    r.delete_cookie(UI_COOKIE, path="/")  # and none for every path, which other services' pages would get too
-    r.set_cookie(UI_COOKIE, want, max_age=UI_COOKIE_AGE_S, path=UI_COOKIE_PATH, httponly=True, samesite="strict")
-    return r
+    return set_cookie(Response(status_code=204), want)
 
 
 class HookAuth:
@@ -157,41 +190,58 @@ class HookAuth:
 
 
 def write_guarded(method: str, path: str) -> bool:
-    """Whether LocalWriteGuard gates this request: a write (not GET/HEAD/OPTIONS) to the local API, but not /api/ui/key
-    (the browser trades the ui_key for the cookie there before it holds one) nor a view's check route (WRITE_EXEMPT)."""
-    if method in SAFE_METHODS or not (path == "/api" or path.startswith("/api/")) or path == "/api/ui/key":
-        return False
-    return WRITE_EXEMPT.fullmatch(path) is None
+    """Whether LocalWriteGuard gates this request: a write (not GET/HEAD/OPTIONS) to the local API, but not /api/ui/key,
+    where the browser trades the ui_key for the cookie before it holds one."""
+    return method not in SAFE_METHODS and _api(path) and path != "/api/ui/key"
 
 
-def write_ok(headers: Headers, cookies: dict[str, str]) -> bool:
-    """Whether a write proves it comes from thimble's browser or plugin: a valid hook proof (a local tool that read the
-    token), or the ui_key cookie (the browser from the link). A caller that cannot read server.json has neither."""
+def _api(path: str) -> bool:
+    return path == "/api" or path.startswith("/api/")
+
+
+def hook_proof(headers: Headers) -> bool:
+    """Whether `headers` carry a valid hook proof: a local tool that read the token (the plugin, the CLI,
+    view_check.py)."""
     tok = token()
     nonce = headers.get(NONCE_HEADER, "")
-    if tok and nonce and len(nonce) <= NONCE_MAX and hmac.compare_digest(
-            headers.get(AUTH_HEADER, ""), sign(tok, "hook", nonce)):
-        return True
-    key = _field("ui_key")
-    return bool(key) and hmac.compare_digest(cookies.get(UI_COOKIE, ""), key)
+    return bool(tok and nonce and len(nonce) <= NONCE_MAX
+                and _same(headers.get(AUTH_HEADER, ""), sign(tok, "hook", nonce)))
 
 
 class LocalWriteGuard:
-    """403 for a write to the local API that proves neither the ui_key cookie (the browser) nor the token (the plugin or
-    the CLI). The notebook kernel runs model-authored code with the host's network and can reach this server on
-    127.0.0.1, but the sandbox hides server.json from it, so it can prove neither and changes nothing here. Pure ASGI."""
+    """403 for a write to the local API that proves neither the ui_key cookie (the browser) nor the token (the plugin,
+    the CLI or a view build's check). The notebook kernel runs model-authored code with the host's network and can reach
+    this server on 127.0.0.1, but the sandbox hides server.json from it, so it can prove neither and changes nothing
+    here.
+
+    A request that proves the key only with UI_COOKIE, the name before the port was added to it, also gets this server's
+    cookie at UI_COOKIE_PATH on its answer, so a browser that claimed the key before holds it on every /api/ path from
+    its next /api/ws/ request on, without the link. Pure ASGI."""
 
     def __init__(self, app) -> None:
         self.app = app
 
     async def __call__(self, scope, receive, send) -> None:
-        if scope["type"] != "http" or not write_guarded(scope.get("method", ""), scope.get("path", "")):
+        if scope["type"] != "http" or not _api(scope.get("path", "")):
             await self.app(scope, receive, send)
             return
-        if write_ok(Headers(scope=scope), Request(scope).cookies):
+        proves, legacy = key_cookie(Request(scope).cookies)
+        guarded = write_guarded(scope.get("method", ""), scope["path"])
+        if guarded and not proves and not hook_proof(Headers(scope=scope)):
+            body = json.dumps({"detail": WRITE_REFUSED}).encode()
+            await send({"type": "http.response.start", "status": 403,
+                        "headers": [(b"content-type", b"application/json"),
+                                    (b"content-length", str(len(body)).encode())]})
+            await send({"type": "http.response.body", "body": body})
+            return
+        if not legacy:
             await self.app(scope, receive, send)
             return
-        body = json.dumps({"detail": WRITE_REFUSED}).encode()
-        await send({"type": "http.response.start", "status": 403,
-                    "headers": [(b"content-type", b"application/json"), (b"content-length", str(len(body)).encode())]})
-        await send({"type": "http.response.body", "body": body})
+        moved = [(k, v) for k, v in set_cookie(Response(), _field("ui_key")).raw_headers if k == b"set-cookie"]
+
+        async def moving(message) -> None:
+            if message["type"] == "http.response.start":
+                message["headers"] = [*message.get("headers", []), *moved]
+            await send(message)
+
+        await self.app(scope, receive, moving)

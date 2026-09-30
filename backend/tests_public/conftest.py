@@ -114,7 +114,7 @@ def analyst():
     from app import hook_auth
 
     _record(ui_key=UI_KEY)
-    return Request({"type": "http", "headers": [(b"cookie", f"{hook_auth.UI_COOKIE}={UI_KEY}".encode())]})
+    return Request({"type": "http", "headers": [(b"cookie", f"{hook_auth.ui_cookie()}={UI_KEY}".encode())]})
 
 
 def pytest_configure(config):

@@ -43,7 +43,7 @@ def test_on_macos_srt_hides_the_home_and_user_data_and_shows_the_kernel_its_own_
     """The kernel under srt on macOS reads neither the home folder, other users' folders, other volumes, the temp
     folders nor thimble's and Claude Code's folders; it reads the corpus, the workspace, the venv, each folder its
     interpreter resolves through and the fonts; it writes only the workspace; the workspace's config stays hidden and
-    read-only inside the workspace, telemetry.jsonl, the registry folder and the views folder read-only."""
+    read-only inside the workspace, telemetry.jsonl, the view log, the registry folder and the views folder read-only."""
     rules, (venv, minor, real) = _rules(tmp_path, "darwin")
     fs = rules["filesystem"]
     hidden = {f"{WS}/settings.json", f"{WS}/config.json"}
@@ -52,8 +52,8 @@ def test_on_macos_srt_hides_the_home_and_user_data_and_shows_the_kernel_its_own_
     assert {CORPUS, WS, str(venv), str(minor), str(real), "/app/backend/app/fonts"} <= set(fs["allowRead"])
     assert not any("sandbox-runtime" in p for p in fs["allowRead"]), "apply-seccomp runs only on Linux"
     assert fs["allowWrite"] == [WS]
-    assert set(fs["denyWrite"]) == {*hidden, f"{WS}/telemetry.jsonl", f"{WS}/registry", f"{WS}/views", "/tmp/claude",
-                                    "/private/tmp/claude"}
+    read_only = {f"{WS}/telemetry.jsonl", f"{WS}/viewed.jsonl", f"{WS}/registry", f"{WS}/views"}
+    assert set(fs["denyWrite"]) == {*hidden, *read_only, "/tmp/claude", "/private/tmp/claude"}
     linux = _rules(tmp_path / "l", "linux")[0]["filesystem"]
     assert {"/home", "/tmp", "/mnt", "/run/user"} <= set(linux["denyRead"]) and "/Users" not in linux["denyRead"]
     assert "/app/frontend/node_modules/@anthropic-ai/sandbox-runtime/vendor/seccomp" in linux["allowRead"]
