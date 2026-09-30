@@ -239,6 +239,32 @@ async def test_the_harness_counts_what_build_index_reads_and_the_checks_fail_on_
     assert not any("(read" in p for p in rep["problems"]), rep["problems"]
 
 
+def test_the_count_is_what_the_reader_takes_not_what_the_buffers_read(tmp_path):
+    """A file counts as read to the end only when the reader took all of it: one line of a small file, or a stop in a
+    file's last buffer, counts as far as the reader got. An unbuffered read counts too."""
+    from app import view_host  # noqa: PLC0415
+
+    small, big = tmp_path / "small.jsonl", tmp_path / "big.jsonl"
+    small.write_text("".join(json.dumps({"n": i}) + "\n" for i in range(200)))
+    big.write_text("".join(json.dumps({"n": i, "pad": "x" * 60}) + "\n" for i in range(3000)))
+    paths = [str(small), str(big)]
+    with view_host._Reads(paths) as seen:
+        with open(small) as f:
+            first = f.readline()
+        with open(big, encoding="utf-8") as f:
+            for n, _ in enumerate(f):
+                if n == 2990:
+                    break
+    counts = seen.counts()
+    assert counts[str(small)] == len(first) and counts[str(big)] < big.stat().st_size
+    with view_host._Reads(paths) as seen:
+        with open(small, "rb", buffering=0) as f:
+            f.read()
+        with open(big) as f:
+            sum(1 for _ in f)
+    assert seen.counts() == {str(small): small.stat().st_size, str(big): big.stat().st_size}
+
+
 async def test_a_field_the_reader_derives_and_the_view_does_not_list_fails_the_gate(ws, inproc, bound, monkeypatch):
     """Once the checks pass, one reading compares reader.py with the derived fields; a field it names that the list
     leaves out fails the gate. The answer is kept for the same reader and list."""

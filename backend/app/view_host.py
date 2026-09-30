@@ -10,8 +10,8 @@ runs with no index. `call` loads reader.py (again when it changed), builds the i
 the files' and reader's fingerprint, runs one operation and prints SENTINEL followed by the JSON answer. A reader that
 raises answers {ok: false, error, traceback}. Only the last fingerprint per view stays in memory.
 
-While build_index runs, `open` counts the bytes it reads of each claimed file (_Reads), so thimble knows which files
-the view read to the end without taking the reader's word for it. The counts are kept beside the index (`reads`)."""
+While build_index runs, `open` counts the bytes it takes of each claimed file (_Reads), so thimble knows which files
+the view read to the end. The counts are kept beside the index (`reads`)."""
 from __future__ import annotations
 
 import builtins
@@ -24,6 +24,8 @@ import sys
 import time
 import traceback
 import types
+import weakref
+from typing import Any
 
 SENTINEL = "\x1ethimble-view\x1e"
 TRACEBACK_MAX = 3000
@@ -57,44 +59,119 @@ def _reader(slug: str, path: str) -> object:
 
 
 class _Counted(io.FileIO):
-    """A claimed file opened for reading, which records each byte range it reads in its _Reads."""
+    """A claimed file opened for reading, which records each byte range it reads and whether a read found its end.
+    When its reader closes it (settle), the part of its last read that the reader had not yet taken from the buffers
+    above it is dropped, unless a read found the end, and its ranges go to its _Reads."""
 
     _reads: "_Reads"
     _path: str
 
-    def _note(self, start: int, n: int) -> None:
+    def _start(self, reads: "_Reads", path: str) -> None:
+        self._reads, self._path = reads, path
+        self._spans: list[list[int]] = []
+        self._eof = self._done = False
+
+    def _note(self, start: int, n: int, asked: int) -> None:
         if n:
-            self._reads.add(self._path, start, start + n)
+            if self._spans and self._spans[-1][1] == start:
+                self._spans[-1][1] = start + n
+                self._last = (start, start + n)
+            else:
+                self._spans.append([start, start + n])
+                self._last = (start, start + n)
+        elif asked:
+            self._eof = True
 
     def readinto(self, b):  # type: ignore[override]
         start = self.tell()
         n = super().readinto(b)
-        self._note(start, n or 0)
+        self._note(start, n or 0, len(memoryview(b)) if n is not None else 0)
         return n
 
     def read(self, size: int = -1):  # type: ignore[override]
         start = self.tell()
         data = super().read(size)
-        self._note(start, len(data or b""))
+        self._note(start, len(data or b""), size if data is not None else 0)
+        if size is None or size < 0:
+            self._eof = True
         return data
 
     def readall(self):  # type: ignore[override]
         start = self.tell()
         data = super().readall()
-        self._note(start, len(data or b""))
+        self._note(start, len(data or b""), 0)
+        self._eof = True
         return data
+
+    def settle(self, pos: int | None) -> None:
+        """Record the ranges read, `pos` being how far the reader had taken the file (None when that is not known)."""
+        if self._done:
+            return
+        self._done = True
+        if self._spans and not self._eof:
+            a, z = self._last
+            cut = a if pos is None or not a <= pos < z else pos
+            self._spans[-1][1] = cut
+        for a, z in self._spans:
+            if z > a:
+                self._reads.add(self._path, a, z)
+
+    def close(self) -> None:
+        if not self.closed:
+            self.settle(self.tell())
+        super().close()
+
+
+class _CountedBuffer(io.BufferedReader):
+    def settle(self) -> None:
+        try:
+            pos = self.tell()
+        except (OSError, ValueError):
+            pos = None
+        self.raw.settle(pos)
+
+    def close(self) -> None:
+        if not self.closed:
+            self.settle()
+        super().close()
+
+
+class _CountedText(io.TextIOWrapper):
+    """Iterates by readline, so tell() stays usable and settle knows how far the reader got."""
+
+    def __next__(self) -> str:
+        line = self.readline()
+        if not line:
+            raise StopIteration
+        return line
+
+    def settle(self) -> None:
+        raw = self.buffer.raw
+        try:
+            pos = self.tell()
+            if pos > os.fstat(raw.fileno()).st_size:  # an opaque position: the decoder holds state
+                pos = None
+        except (OSError, ValueError):
+            pos = None
+        raw.settle(pos)
+
+    def close(self) -> None:
+        if not self.closed:
+            self.settle()
+        super().close()
 
 
 class _Reads:
     """The bytes read of each claimed file while it is active: `open` and `io.open` are replaced by one that gives a
-    claimed file, opened only for reading, through _Counted. A file read by other means (os.open, a library's own C
-    code) counts as unread."""
+    claimed file, opened only for reading, through _Counted. A file read by other means (os.open, os.fdopen, mmap, a
+    library's own C code) counts as unread. The count follows what the reader reads, so a reader can also fake it."""
 
     def __init__(self, paths: list[str]) -> None:
         self.claimed: dict[str, list[str]] = {}
         for p in paths:
             self.claimed.setdefault(os.path.realpath(p), []).append(p)
         self.spans: dict[str, list[tuple[int, int]]] = {}
+        self.handles: list[weakref.ref] = []
         self._open = io.open
 
     def add(self, path: str, start: int, end: int) -> None:
@@ -120,21 +197,23 @@ class _Reads:
     def open(self, file, mode="r", buffering=-1, encoding=None, errors=None, newline=None, closefd=True, opener=None):
         real = None
         if opener is None and closefd and isinstance(file, (str, bytes, os.PathLike)) and set(mode) <= set("rbt") \
-                and "r" in mode and buffering != 0:
+                and "r" in mode:
             try:
                 real = os.path.realpath(os.fsdecode(file))
             except (TypeError, ValueError):
                 real = None
-        if real not in self.claimed:
+        if real not in self.claimed or (buffering == 0 and "b" not in mode):
             return self._open(file, mode, buffering, encoding, errors, newline, closefd, opener)
         raw = _Counted(file, "r")
-        raw._reads, raw._path = self, real
-        buf = io.BufferedReader(raw, buffering if buffering > 1 else io.DEFAULT_BUFFER_SIZE)
-        if "b" in mode:
-            return buf
-        text = io.TextIOWrapper(buf, encoding, errors, newline, line_buffering=buffering == 1)
-        text.mode = mode  # type: ignore[misc]
-        return text
+        raw._start(self, real)
+        top: Any = raw
+        if buffering != 0:
+            top = _CountedBuffer(raw, buffering if buffering > 1 else io.DEFAULT_BUFFER_SIZE)
+            if "b" not in mode:
+                top = _CountedText(top, encoding, errors, newline, line_buffering=buffering == 1)
+                top.mode = mode  # type: ignore[misc]
+        self.handles.append(weakref.ref(top))
+        return top
 
     def __enter__(self) -> "_Reads":
         builtins.open = io.open = self.open  # type: ignore[assignment]
@@ -142,6 +221,10 @@ class _Reads:
 
     def __exit__(self, *exc: object) -> None:
         builtins.open = io.open = self._open  # type: ignore[assignment]
+        for ref in self.handles:
+            f = ref()
+            if f is not None and not f.closed:
+                f.settle() if not isinstance(f, _Counted) else f.settle(f.tell())
 
 
 def _load_reads(path: str | None) -> dict[str, int] | None:
