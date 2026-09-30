@@ -6,7 +6,8 @@ no reading.
 tools.call hands every thimble tool result to after_tool(); an add_card or edit_card result starts a check of its card
 when wants_check() holds and the workspace's automatic check is on (settings.json `card_check`). A new change to the
 card cancels a running check and starts the next. At most READ_CONCURRENCY readings run at once. Each check:
-1. Draw: render.render_card shoots the card with the app's own card face; with no picture the check ends `error`.
+1. Draw: render.render_card shoots the card with the app's own card face; a card that did not draw ends the check
+   `error`. Where no card can be drawn (render.down), no check begins, and one that began is taken off the card.
 2. Critique: the `verify` role's model reads the question, takeaway, resolved links, code, the work that led to the
    card (context.render) and the picture, names what fails each criterion, and gives the replacement card.
 3. Replace: the parts that differ and that the check may change (checkstore.fixable) are tried on a copy of the card
@@ -64,6 +65,7 @@ STOPPED = ""  # the analyst stopped it: the hover says only when
 AUTO_OFF = "the automatic card check was turned off"
 CHANGED = "the card changed while it was checked"
 SERVER_STOPPED = "the server stopped while the check ran"
+SESSION_ENDED = "thimble stopped when its Claude Code session ended"  # a check stop_workspace ended
 FALLBACK_NOTE = "Downgrading {model} to {fallback}"  # the record's `note`
 READ_IDLE_S = 60.0  # a reading with no sign of life this long is stalled (model.structured's idle clock)
 PAUSE_POLL_S = 0.05  # how often a check waiting for a reading slot looks at its clock again (_within)
@@ -184,7 +186,7 @@ def start(c: str, cid: str, author: str, *, again: bool = False) -> _Run | None:
         old.outcome = "superseded"
         old.task.cancel()
     try:
-        if not wants_check(notebook.get_cell(c, cid)):
+        if render.down() or not wants_check(notebook.get_cell(c, cid)):
             checkstore.drop_stale(c, cid)
             return None
         check = checkstore.begin(c, cid, author=author, again=again)
@@ -424,7 +426,7 @@ async def _draw(c: str, cell: dict[str, Any]) -> render.Rendered | None:
     try:
         return await render.render_card(c, cell)
     except render.Unavailable as e:
-        log.info("card check: no picture of card:%s (%s)", cell.get("id"), e)
+        log.debug("card check: no picture of card:%s (%s)", cell.get("id"), e)
         return None
 
 
@@ -441,13 +443,16 @@ async def _check(run: _Run) -> None:
     t0 = time.perf_counter()
     drawn = await _draw(c, cell)
     timing["render_ms"] = _ms(t0)
-    if drawn is None or not drawn.ok:
-        why = drawn.error if drawn is not None else f"no picture can be drawn here ({render.why() or 'the harness is off'})"
-        if not checkstore.stage(c, cid, run.check, "render", {"status": "skipped" if drawn is None else "error",
-                                                              "ms": timing["render_ms"], "message": why}):
+    if drawn is None:
+        run.outcome = "skipped"
+        checkstore.discard(c, cid, run.check)
+        return
+    if not drawn.ok:
+        if not checkstore.stage(c, cid, run.check, "render", {"status": "error", "ms": timing["render_ms"],
+                                                              "message": drawn.error}):
             _gone(run)
             return
-        _end(run, "error", why if drawn is None else f"the card did not draw: {why}")
+        _end(run, "error", f"the card did not draw: {drawn.error}")
         return
     typed = (typed_numbers(str(cell.get("code") or ""), shown_numbers(notebook.get_cell(c, cid, full_outputs=True) or cell))
              if cell.get("code") else [])
@@ -1041,7 +1046,10 @@ async def _read(c: str, cell: dict[str, Any], png: bytes | None,
     """(assessment, the replacement card {question, code, takeaway}, model) from the model's reading of the card's
     picture; why not, as a sentence, when the call failed or its output lacks a part. _Capacity when the API is at
     capacity after model.structured's own retries."""
-    secs = _sections()
+    from . import prompts, userconf  # noqa: PLC0415
+
+    with prompts.custom(userconf.prompt_files(c, "cardCheck")):
+        secs = _sections()
     none = secs.get("none", "")
     code = str(cell.get("code") or "").strip()
     user = _fill(secs["card"], {
@@ -1186,6 +1194,8 @@ async def again_route(c: str, cid: str) -> dict[str, Any]:
         raise HTTPException(404, f"no card {cid}")
     if not enabled():
         raise HTTPException(409, "the card check is off (THIMBLE_CARD_CHECK)")
+    if render.down():
+        raise HTTPException(409, f"no card can be drawn here: {render.why()}")
     if not wants_check(cell):
         raise HTTPException(409, "this card gets no check: it has no takeaway, is a label card, or is the analyst's or locked")
     rec = checkstore.current(c, cid) or {}
@@ -1195,17 +1205,30 @@ async def again_route(c: str, cid: str) -> dict[str, Any]:
     return {"card": cid, "check": run.check}
 
 
-async def shutdown() -> None:
-    """main's lifespan hook: the running checks end with the server, each record ended `error`, so no card keeps the
-    spinner of a check nothing runs any more and its mark offers to run it again."""
+def _end_runs(runs: list["_Run"], reason: str) -> int:
+    """End each running check with `reason`, its record ended `error`, so no card keeps the spinner of a check nothing
+    runs any more and its mark offers to run it again. How many it ended."""
     from . import checkstore  # noqa: PLC0415
 
-    for run in list(_runs.values()):
+    n = 0
+    for run in runs:
         if run.task is not None and not run.task.done():
-            run.outcome, run.reason = "error", SERVER_STOPPED
+            run.outcome, run.reason = "error", reason
             run.task.cancel()
+            n += 1
             try:
-                checkstore.end_pending(run.c, run.cid, "error", SERVER_STOPPED, check_id=run.check)
-            except Exception:  # noqa: BLE001 — a record left pending never stops the server's shutdown
-                log.exception("card check: card:%s left pending at shutdown", run.cid)
+                checkstore.end_pending(run.c, run.cid, "error", reason, check_id=run.check)
+            except Exception:  # noqa: BLE001 — a record left pending never stops the stop
+                log.exception("card check: card:%s left pending at its stop", run.cid)
+    return n
+
+
+def stop_workspace(c: str) -> int:
+    """Main's session ended in workspace `c` (agents.stop_all): its running checks end (_end_runs)."""
+    return _end_runs([r for (cc, _), r in list(_runs.items()) if cc == c], SESSION_ENDED)
+
+
+async def shutdown() -> None:
+    """main's lifespan hook: the running checks end with the server (_end_runs)."""
+    _end_runs(list(_runs.values()), SERVER_STOPPED)
     _runs.clear()

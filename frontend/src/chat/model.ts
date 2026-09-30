@@ -1085,7 +1085,7 @@ export function labelRunName(title: string): string {
 }
 
 /** The summaries an orientation's rows handed back: each SubagentHandback's message (an earlier build's, which ran the
- * orientation as main's subagent; terminal-first now runs it as its own background session) and, once the orientation
+ * orientation as main's subagent; it now runs as its own background session) and, once the orientation
  * has ended, its last message. Claude Code's API error line is no summary, so main's copy of the same line still shows.
  * Pure. */
 export function orientSummaries(rows: readonly Row[], ended = false): string[] {

@@ -29,7 +29,8 @@ view, type or block is left out (the block stays thimble's), and Settings and `t
 
 Extension code runs only in thimble's kernels: readers on the views kernel, card.py in a card's kernel. The server reads
 only its JSON and markdown, from the folder in thimble's home rather than the copy a kernel can write, and its agents
-run inside the orientation's session, under that session's rules and network."""
+run inside the orientation's session, under that session's sandbox and rules, with the settings thimble's config gives
+them (agent_definitions)."""
 from __future__ import annotations
 
 import asyncio
@@ -46,7 +47,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
-from . import config
+from . import config, userconf
 from .ledger import read_json, write_json
 
 log = logging.getLogger("thimble.extensions")
@@ -54,7 +55,7 @@ log = logging.getLogger("thimble.extensions")
 API = 0
 MANIFEST = "extension.json"
 ADDED = ".added.json"  # written by `thimble extension add`: {source, kind, commit?, ts}
-NAME_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,39}$")
+NAME_RE = userconf.EXTENSION_NAME_RE
 RESERVED = ("thimble",)
 WS_DIR = "extensions"  # under the workspace: each active extension's copy
 STATE_FILE = "extensions.json"  # in the workspace
@@ -64,9 +65,8 @@ CARD_JSON, CARD_HTML, GUIDE = "card.json", "card.html", "card.md"
 TYPE_MD, EXPORT_PY, ORIENT_MD = "type.md", "export.py", "orient.md"
 SIZE_MAX = 50 * 1024 * 1024  # bytes of an extension's folder
 SKIPPED = ("__pycache__", ".git", "cache", ADDED)
-WEB_TOOLS = ("WebFetch", "WebSearch")
-AGENT_WEB = ("off", "ask", "allow")
-AGENT_KEYS = ("model", "effort", "web", "prompt")
+WEB_TOOLS = userconf.WEB_TOOLS
+CONFIG_UNREAD = "thimble's config cannot be read"
 
 _locks: dict[str, asyncio.Lock] = {}
 
@@ -123,52 +123,12 @@ def frontmatter(text: str) -> tuple[dict[str, Any], str]:
 # --------------------------------------------------------------------------- thimble's config
 
 
-def user_config() -> dict[str, Any]:
-    """$THIMBLE_HOME/config.json as written; {} when it is missing or does not parse."""
-    return _json(home() / "config.json")
-
-
-def user_off(name: str, conf: dict[str, Any] | None = None) -> bool:
-    ext = ((conf if conf is not None else user_config()).get("extensions") or {}).get(name)
-    return isinstance(ext, dict) and ext.get("enabled") is False
-
-
-def agent_config(ext: str, name: str, conf: dict[str, Any] | None = None) -> dict[str, Any]:
-    """The settings thimble's config gives the extension's agent, `agents."<ext>:<name>"`."""
-    got = ((conf if conf is not None else user_config()).get("agents") or {}).get(f"{ext}:{name}")
-    return got if isinstance(got, dict) else {}
-
-
-def config_problems(data: dict[str, Any]) -> list[str]:
-    """What is wrong with the extensions' keys of thimble's config: `extensions.<name>` takes `enabled`, and an agent
-    `agents."<ext>:<name>"` takes AGENT_KEYS, `web` being one of AGENT_WEB."""
-    out: list[str] = []
-    exts = data.get("extensions")
-    if exts is not None and not isinstance(exts, dict):
-        out.append("extensions must be an object")
-    for name, e in (exts or {}).items() if isinstance(exts, dict) else ():
-        if not isinstance(e, dict):
-            out.append(f"extensions.{name} must be an object")
-            continue
-        for k, v in e.items():
-            if k != "enabled":
-                out.append(f"extensions.{name}.{k} is not a setting; it takes enabled")
-            elif not isinstance(v, bool):
-                out.append(f"extensions.{name}.enabled is {json.dumps(v)}; it takes true or false")
-    for key, a in (data.get("agents") or {}).items() if isinstance(data.get("agents"), dict) else ():
-        if ":" not in key:
-            continue
-        if not isinstance(a, dict):
-            out.append(f"agents.{key} must be an object")
-            continue
-        for k, v in a.items():
-            if k not in AGENT_KEYS:
-                out.append(f"agents.{key}.{k} is not a setting; an extension's agent takes {', '.join(AGENT_KEYS)}")
-            elif k == "web" and v is not None and v not in AGENT_WEB:
-                out.append(f"agents.{key}.web is {json.dumps(v)}; it takes {', '.join(AGENT_WEB)}")
-            elif k != "web" and v is not None and (not isinstance(v, str) or not v.strip()):
-                out.append(f"agents.{key}.{k} must be a string, or null")
-    return out
+def config_off(name: str, off: set[str] | None) -> str:
+    """Why thimble's config keeps extension `name` off in every workspace, '' when it does not; `off` is
+    userconf.extensions_off()."""
+    if off is None:
+        return CONFIG_UNREAD
+    return "off in thimble's config" if name in off else ""
 
 
 # --------------------------------------------------------------------------- reading an extension
@@ -432,14 +392,14 @@ async def refresh(c: str) -> dict[str, Any]:
     async with lock:
         state = read_state(c)
         before = {n for n, e in state["extensions"].items() if e.get("active")}
-        conf = await asyncio.to_thread(user_config)
+        off = await asyncio.to_thread(userconf.extensions_off)
         paths: list[str] | None = None
         exts: dict[str, Any] = {}
         for name, root in (await asyncio.to_thread(added)).items():
             info = await asyncio.to_thread(read_extension, root, name)
             kept = state["extensions"].get(name) or {}
             why = info["problems"][0] if info["problems"] else ""
-            why = why or ("off in thimble's config" if user_off(name, conf) else "")
+            why = why or config_off(name, off)
             why = why or ("off in this workspace" if name in state["off"] else "")
             claims: dict[str, Any] = {}
             if not why:
@@ -574,11 +534,13 @@ def orient_blocks(c: str | None) -> dict[str, Any]:
 
 
 def agent_definitions(c: str | None) -> dict[str, dict[str, Any]]:
-    """The active extensions' agents as `--agents` takes them. Each takes its model and effort from thimble's config
-    (`agents."<ext>:<name>"`), else from its own file, else those Claude Code gives the session's subagents; its web
-    tools are taken away unless the config's `web` is "ask" or "allow"; a config `prompt` file replaces its text. An
-    agent two extensions name is `<ext>:<name>` for both."""
-    conf = user_config()
+    """The active extensions' agents as `--agents` takes them, with thimble's config's settings for each,
+    `agents."<ext>:<name>"` (userconf.extension_agent): its model and effort, else its own file's, else those the
+    orientation's session gives its subagents; a `prompt` file in place of its text; the web tools taken away while its
+    web is off; and Bash taken away while its network is off and the orientation's is on, since the session's sandbox
+    gives all its agents one network. An agent two extensions name is `<ext>:<name>` for both."""
+    conf = userconf.load_or_defaults(c)[0]
+    session_network = conf["agents"]["orientation"].get("network") == "on"
     found: list[tuple[str, str, dict[str, Any]]] = []
     for e in active(c):
         for name in e.get("agents") or []:
@@ -586,8 +548,8 @@ def agent_definitions(c: str | None) -> dict[str, dict[str, Any]]:
                 front, body = frontmatter((Path(e["src"]) / "agents" / f"{name}.md").read_text("utf-8"))
             except OSError:
                 continue
-            mine = agent_config(e["name"], name, conf)
-            if isinstance(mine.get("prompt"), str) and mine["prompt"].strip():
+            mine = userconf.extension_agent(conf, f"{e['name']}:{name}")
+            if mine["prompt"]:
                 try:
                     body = Path(mine["prompt"]).expanduser().read_text("utf-8").strip()
                 except OSError:
@@ -596,11 +558,13 @@ def agent_definitions(c: str | None) -> dict[str, dict[str, Any]]:
             tools = front.get("tools")
             tools = [x.strip() for x in (tools.split(",") if isinstance(tools, str) else tools or []) if str(x).strip()]
             for key in ("model", "effort"):
-                if v := mine.get(key) or front.get(key):
+                if v := mine[key] or front.get(key):
                     agent[key] = str(v)
-            if mine.get("web") not in ("ask", "allow"):
-                agent["disallowedTools"] = list(WEB_TOOLS)
-                tools = [t for t in tools if t not in WEB_TOOLS]
+            taken = [*(WEB_TOOLS if mine["web"] == "off" else ()),
+                     *(("Bash",) if mine["network"] == "off" and session_network else ())]
+            if taken:
+                agent["disallowedTools"] = list(taken)
+                tools = [t for t in tools if t not in taken]
             if tools:
                 agent["tools"] = tools
             found.append((e["name"], name, agent))
@@ -721,8 +685,8 @@ def summary(info: dict[str, Any], how: dict[str, Any]) -> list[str]:
     for x in info["cards"]:
         out.append(f"  card type   {x['slug']} (read by its view {x['reader']})")
     for a in info["agents"]:
-        out.append(f"  agent       {a}, in the orientation's session, without the web unless thimble's config sets "
-                   f"agents.\"{info['name']}:{a}\".web")
+        out.append(f"  agent       {a}, in the orientation's session and its sandbox, without the web unless "
+                   f"thimble's config sets agents.\"{info['name']}:{a}\".web")
     if info["orient"]:
         out.append("  orientation adds its orient.md to the orientation's instructions")
     for block in info["replaces"]:
@@ -789,7 +753,7 @@ def list_lines(workspaces_dir: Path) -> list[str]:
     got = added()
     if not got:
         return ["no extensions added; `thimble extension add <git URL | folder | built-in name>` adds one"]
-    conf = user_config()
+    off = userconf.extensions_off()
     seen: dict[str, list[str]] = {}
     try:
         folders = sorted(d for d in workspaces_dir.iterdir() if (d / STATE_FILE).is_file())
@@ -803,8 +767,7 @@ def list_lines(workspaces_dir: Path) -> list[str]:
     out = []
     for name, root in got.items():
         info = read_extension(root, name)
-        state = ("not loaded: " + info["problems"][0] if info["problems"]
-                 else "off in thimble's config" if user_off(name, conf) else "on")
+        state = "not loaded: " + info["problems"][0] if info["problems"] else config_off(name, off) or "on"
         out.append(f"{name}  {info['version'] or '-'}  {info['source'] or '-'}  {state}")
         out += [f"    {x}" for x in seen.get(name, [])]
     return out
@@ -824,15 +787,15 @@ def doctor_line() -> str:
     got = added()
     if not got:
         return "none added"
-    conf = user_config()
+    off = userconf.extensions_off()
     parts, loadable = [], {}
     for name, root in got.items():
         info = read_extension(root, name)
         v = f" {info['version']}" if info["version"] else ""
         if info["problems"]:
             parts.append(f"{name}{v} (not loaded: {info['problems'][0]})")
-        elif user_off(name, conf):
-            parts.append(f"{name}{v} (off in thimble's config)")
+        elif why := config_off(name, off):
+            parts.append(f"{name}{v} ({why})")
         else:
             parts.append(f"{name}{v}")
             loadable[name] = {**info, "active": True}
@@ -848,12 +811,12 @@ def public(c: str) -> dict[str, Any]:
     """Settings' extensions: each one added, whether it runs here and why not, whether this workspace's switch is on
     and whether it cannot run here whatever that switch says (`locked`), and the conflicts among those that run."""
     state = read_state(c)
-    conf = user_config()
+    off = userconf.extensions_off()
     out = []
     for name, e in sorted(state["extensions"].items()):
         out.append({"name": name, "title": e.get("title") or name, "version": e.get("version") or "",
                     "active": bool(e.get("active")), "why": e.get("why") or "", "on": name not in state["off"],
-                    "locked": user_off(name, conf) or bool(e.get("problems"))})
+                    "locked": bool(config_off(name, off)) or bool(e.get("problems"))})
     return {"extensions": out, "conflicts": conflict_lines(conflicts(state["extensions"]))}
 
 

@@ -5,9 +5,9 @@ One headless Chromium keeps POOL_PAGES pages loaded on `render.html` (frontend/s
 with a stub canvas context. Each request carries everything the page needs (the card, its resolved refs, card and
 label names, cited calls, the theme), so the page never calls the API. The page comes from THIMBLE_RENDER_URL, the
 Vite dev server in dev mode, or the built UI served from memory at RENDER_ORIGIN. A page is replaced after
-RECYCLE_AFTER renders or any failure; without Playwright or its Chromium, available() is False and why() says why.
-A card type's frame that is one flat colour in the picture is shot again twice, then the render fails, so the check
-never reads a card whose graphic did not draw."""
+RECYCLE_AFTER renders or any failure; without Playwright or its Chromium, available() is False, why() says why, and
+the harness stays down until the server restarts (headless.py). A card type's frame that is one flat colour in the
+picture is shot again twice, then the render fails, so the check never reads a card whose graphic did not draw."""
 from __future__ import annotations
 
 import asyncio
@@ -25,7 +25,7 @@ from urllib.parse import urlsplit
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-from . import config
+from . import config, headless
 from .http_guard import APP_CSP
 
 log = logging.getLogger("thimble.render")
@@ -126,6 +126,7 @@ class Pool:
         self.why = ""
         self.launch_ms = 0.0
         self._warned_fonts = False
+        self._warned: set[str] = set()  # the launch failures logged, each once
 
     @property
     def ready(self) -> bool:
@@ -133,24 +134,32 @@ class Pool:
 
     async def start(self) -> bool:
         """Launch the browser and load its pages; False (and `why`) when it cannot. A second call while running is a
-        no-op."""
+        no-op, and so is any call once the browser was found missing (headless.missing)."""
         async with self._lock:
             if self.ready:
                 return True
+            if gone := headless.missing(headless.HARNESS):
+                self.why = gone
+                return False
             await self._close()
             t0 = time.perf_counter()
             try:
                 from playwright.async_api import async_playwright  # noqa: PLC0415 — optional until install.sh ran
             except ImportError:
-                self.why = "Playwright is not installed in backend/.venv (scripts/install.sh installs it)"
+                self.why = headless.NO_PLAYWRIGHT
+                headless.mark_missing(headless.HARNESS, self.why)
                 return False
             url, folder = page_source()
             if folder is not None and _serve_path(folder, url) is None:
                 self.why = f"there is no {RENDER_PAGE} in {folder} (build the UI, or set THIMBLE_RENDER_DIR)"
                 return False
+            path = headless.launch(headless.HARNESS)
+            if path is None:
+                self.why = headless.missing(headless.HARNESS)
+                return False
             try:
                 self._pw = await async_playwright().start()
-                self._browser = await self._pw.chromium.launch(headless=True)
+                self._browser = await self._pw.chromium.launch(headless=True, **({"executable_path": path} if path else {}))
                 self._context = await self._browser.new_context(viewport=VIEWPORT, device_scale_factor=SCALE,
                                                                 reduced_motion="reduce")
                 if folder is not None:
@@ -160,8 +169,14 @@ class Pool:
                 await self._context.route("**/*", _keep_local)
                 pages = await asyncio.gather(*(self._new_page(url) for _ in range(self.size)))
             except Exception as e:  # noqa: BLE001 — a missing browser, a page that did not load: the harness is off
-                self.why = _launch_why(e)
-                log.warning("render: the harness could not start: %s", self.why)
+                if gone := headless.why_missing(str(e)):
+                    self.why = gone
+                    headless.mark_missing(headless.HARNESS, gone)
+                else:
+                    self.why = f"{type(e).__name__}: {str(e).splitlines()[0][:300] if str(e) else ''}"
+                    if self.why not in self._warned:
+                        self._warned.add(self.why)
+                        log.warning("render: the harness could not start: %s", self.why)
                 await self._close()
                 return False
             self._free = asyncio.Queue()
@@ -329,18 +344,6 @@ def _clip(box: dict[str, float]) -> dict[str, float]:
     return {"x": x, "y": y, "width": max(1, w), "height": max(1, h)}
 
 
-def _launch_why(e: Exception) -> str:
-    """Why the browser did not start, with the command that fixes it: the browser was never fetched, or the machine
-    lacks the system libraries it links (a bare Linux server; Playwright names them)."""
-    text = str(e)
-    if "missing dependencies" in text or "install-deps" in text:
-        return ("this machine lacks the system libraries headless Chromium needs: run `sudo backend/.venv/bin/python -m "
-                "playwright install-deps chromium-headless-shell`")
-    if "Executable doesn't exist" in text or "playwright install" in text:
-        return "Playwright's Chromium is not installed: run `backend/.venv/bin/python -m playwright install chromium-headless-shell`"
-    return f"{type(e).__name__}: {text.splitlines()[0][:300] if text else ''}"
-
-
 _pool: Pool | None = None
 
 
@@ -359,7 +362,12 @@ def available() -> bool:
 def why() -> str:
     if not enabled():
         return "THIMBLE_RENDER is off"
-    return pool().why
+    return pool().why or headless.missing(headless.HARNESS)
+
+
+def down() -> bool:
+    """Whether no card can be drawn for the rest of the server run: the harness is off, or its browser is missing."""
+    return not enabled() or bool(headless.missing(headless.HARNESS))
 
 
 async def start() -> bool:

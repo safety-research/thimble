@@ -1,7 +1,8 @@
 """Every package thimble's runtime code imports is a runtime dependency of the backend, not a dev extra. A release
-installs the tree's venv with `uv sync --frozen --no-dev` (scripts/install.sh), while this suite runs in a venv with the
+installs the tree's venv from uv.lock's runtime packages (scripts/install.sh), while this suite runs in a venv with the
 dev extras, so a module only they provide passes every test here and fails in a release (the plugin's MCP shim, for
-one, would die at start and no thimble tool would work).
+one, would die at start and no thimble tool would work). Likewise a release installs only some of the frontend's
+packages beside its built UI (release.sh's runtime_npm), which must hold every one the runtime code loads.
 
 The runtime code is the backend's app/ and the plugin's Python scripts, which run on the tree's venv through
 plugin/bin/thimble-python. Each one's imports are read from its source, stdlib and the tree's own modules left out, and
@@ -70,3 +71,17 @@ def test_every_package_the_runtime_code_imports_is_a_runtime_dependency():
                 missing.append(f"{path.name}: {mod} ({', '.join(dists)})")
     assert missing == [], "imported at run time but a dev extra or absent from the runtime dependencies"
     assert "httpx" in runtime, "the shim's channel stream and permission relay"
+
+
+def test_every_frontend_package_the_runtime_code_loads_is_one_a_release_installs():
+    from app import tools, views
+
+    release = (config.REPO_ROOT / "scripts" / "release.sh").read_text("utf-8")
+    shipped = set(re.search(r"^runtime_npm=\(([^)]*)\)", release, re.M).group(1).split())
+    modules = config.REPO_ROOT / "frontend" / "node_modules"
+    loaded = {p.relative_to(modules).parts[0] for p in (*views.LIBS.values(), *tools.VEGA_BUILDS)}
+    shots = "".join((config.REPO_ROOT / "scripts" / n).read_text("utf-8") for n in ("view_shot.mjs", "ui_shot.mjs"))
+    loaded |= set(re.findall(r"require\('([^']+)'\)", shots))
+    loaded |= {f"@fontsource/{face}" for face in re.findall(r"\['[^']+', '([^']+)', \[", shots)}
+    assert {"vega", "playwright", "@fontsource/geist-mono"} <= loaded
+    assert loaded - shipped == set(), "loaded at run time but not in release.sh's runtime_npm"

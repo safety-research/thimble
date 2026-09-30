@@ -14,9 +14,10 @@ import sys
 from pathlib import Path
 
 import pytest
+from conftest import print_sessions
 from fastapi import HTTPException
 
-from app import agent_session, agents, cc_channel, channel, config, ledger, modes, orient_session, session, tools
+from app import agent_session, agents, cc_channel, channel, config, ledger, modes, orient_session, session, tools, userconf
 
 CORPUS = "mini"
 KEY = orient_session.KEY
@@ -113,9 +114,10 @@ def fake(tmp_path, monkeypatch) -> Path:
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "claude-config"))
     monkeypatch.setenv("THIMBLE_CHANNEL", "plugin:thimble@inline")
     monkeypatch.delenv("FAKE_MODE", raising=False)
-    monkeypatch.setenv("THIMBLE_SANDBOX", "0")  # the fence without the sandbox; the fence's test turns it on
-    # the stand-in is a `claude -p`: the sessions run as thimble's own, not as terminal-first mode's `claude --bg`
-    ledger.put_settings(CORPUS, {"terminal_first": False})
+    # the fence without the sandbox, which the config then does not require; the fence's test turns it on
+    monkeypatch.setenv("THIMBLE_SANDBOX", "0")
+    monkeypatch.setitem(userconf.DEFAULTS["sandbox"], "enforce", False)
+    print_sessions(monkeypatch)
     return out
 
 
@@ -171,9 +173,11 @@ async def test_each_agent_runs_in_its_row_else_in_main_s_mode_and_nothing_else_p
     assert modes.mode_for(CORPUS, "writer") == "manual", "another session's mode is not main's"
     await report("sid-main", "auto")
     assert [modes.mode_for(CORPUS, a) for a in modes.AGENTS] == ["auto"] * len(modes.AGENTS)
-    ledger.put_settings_route(CORPUS, analyst, {modes.SETTING: {"views": "bypass", "writer": "manual"}})
-    assert (modes.mode_for(CORPUS, "views"), modes.mode_for(CORPUS, "writer"), modes.mode_for(CORPUS, "dev")) == \
+    ledger.put_settings_route(CORPUS, analyst, {modes.SETTING: {"checks": "bypass", "writer": "manual"}})
+    assert (modes.mode_for(CORPUS, "checks"), modes.mode_for(CORPUS, "writer"), modes.mode_for(CORPUS, "critic")) == \
         ("bypass", "manual", "auto"), "each row apart"
+    ledger.put_settings_route(CORPUS, analyst, {modes.SETTING: {"views": "manual"}})
+    assert modes.mode_for(CORPUS, "dev") == modes.mode_for(CORPUS, "views") == "manual", "view builds are the dev agent's"
     ledger.put_settings_route(CORPUS, analyst, {modes.SETTING: {"writer": None}})
     assert modes.mode_for(CORPUS, "writer") == "auto", "a row put back follows main again"
 
@@ -184,17 +188,14 @@ async def test_each_agent_runs_in_its_row_else_in_main_s_mode_and_nothing_else_p
         seen.update(chosen=chosen)
 
     monkeypatch.setattr(orient_session, "start", fake_start)
-    for terminal_first in (True, False):  # the orientation is its own session in both modes
-        ledger.put_settings_route(CORPUS, analyst, {"terminal_first": terminal_first})
-        seen.clear()
-        await tools.call(CORPUS, "start_orientation", {"brief": "", "permissions": "bypass"})
-        assert seen["chosen"] == {}, f"a model's call chooses no mode (terminal_first {terminal_first})"
+    await tools.call(CORPUS, "start_orientation", {"brief": "", "permissions": "bypass"})
+    assert seen["chosen"] == {}, "a model's call chooses no mode"
 
     user.write_text(json.dumps({"permissions": {"disableBypassPermissionsMode": "disable"}}))
     with pytest.raises(HTTPException) as e:
         ledger.put_settings_route(CORPUS, analyst, {modes.SETTING: {"orient": "bypass"}})
     assert e.value.status_code == 400 and "Bypass" in e.value.detail
-    assert modes.mode_for(CORPUS, "views") == "auto", "a Bypass turned off is not used"
+    assert modes.mode_for(CORPUS, "checks") == "auto", "a Bypass turned off is not used"
     assert ledger.get_settings(CORPUS)["disabled_modes"] == ["bypass"]
     user.write_text("{}")
     remote = user.parent / "remote-settings.json"
@@ -239,7 +240,7 @@ async def test_auto_is_claude_code_s_auto_mode_and_a_call_it_refuses_waits_for_t
     run = await orient_session.start(CORPUS, "")
     assert run.mode == "auto" and _flag(run.argv) == "auto"
     settings = json.loads(run.argv[run.argv.index("--settings") + 1])
-    assert settings["hooks"]["PreToolUse"] == agent_session.permission_hooks(CORPUS, auto=True)["PreToolUse"]
+    assert settings["hooks"]["PreToolUse"] == agent_session.permission_hooks(CORPUS, auto=True, wait=True)["PreToolUse"]
     assert settings["hooks"]["PermissionDenied"] == agent_session.permission_hooks(CORPUS)["PermissionDenied"]
     inp = {"command": "python3 -c 'print(6*7)'", "description": "Multiply"}
     body = dict(session=KEY, event="PermissionDenied", tool_name="Bash", tool_input=inp, agent_id="a2",
@@ -287,5 +288,24 @@ async def test_the_hook_s_route_answers_for_the_session_its_shim_names(fake, mon
     other = agent_session.PermissionRequestBody(session="writer:report", tool_name="Bash", tool_input={"command": "ls"})
     assert (await agent_session.permission_request_route(CORPUS, other))["behavior"] == "deny", \
         "Bypass grants the orientation's requests, never another session's"
+    await orient_session.stop(CORPUS)
+    await _done()
+
+
+async def test_a_switch_into_auto_keeps_the_config_s_asks_waiting_for_the_analyst(fake, monkeypatch):
+    """A session switched into Auto gets the same waiting hook before each call as one started there, and loses it on
+    the way back."""
+    monkeypatch.setenv("FAKE_MODE", "sleep")
+    _listen()
+    run = await orient_session.start(CORPUS, "")
+    assert run.mode == "manual"
+
+    def pre() -> list | None:
+        return json.loads(run.argv[run.argv.index("--settings") + 1])["hooks"].get("PreToolUse")
+
+    agent_session._set_flag(run, "auto")
+    assert pre() == agent_session.permission_hooks(CORPUS, auto=True, wait=True)["PreToolUse"]
+    agent_session._set_flag(run, "default")
+    assert not pre()
     await orient_session.stop(CORPUS)
     await _done()

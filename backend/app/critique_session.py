@@ -4,11 +4,11 @@ The critic reviews the orientation's whole transcript and cards for coverage and
 drafted deck's claims against the calls that should support them. The machinery shared with other agent sessions is
 agent_session.py; this module holds what is the critique's own.
 
-Start. Only the orientation's session lists `critique`. The server starts `claude -p` in the critic's work folder
-running as the critic agent (prompts/critic.md via `--agents`, shared.md appended), with the `critic` role's model
-settings. It has every tool of a default Claude Code session and, of thimble's, OWN_TOOLS, so it adds no card, and it
-runs in a work folder of its own with the corpus read-only (agent_session, the fence). One critique runs at a time, in
-the critic's row of the permission modes (modes.py).
+Start. Only the orientation's session lists `critique`. The server starts a Claude Code background session in the
+critic's work folder running as the critic agent (prompts/critic.md via `--agents`, shared.md appended), with the
+`critic` role's model settings. It has every tool of a default Claude Code session and, of thimble's, OWN_TOOLS, so it
+adds no card, and it runs in a work folder of its own with the corpus read-only (agent_session, the fence). One critique
+runs at a time, in the critic's row of the permission modes (modes.py).
 
 The transcript. Raw transcripts run to megabytes of JSON and Read cuts lines at 2,000 characters, so the critique
 renders the session's and its agents' transcripts into one digest, each tool call under its ref in the orientation's
@@ -396,7 +396,7 @@ async def start(c: str, caller: agent_session.Run, context: str = "") -> tuple[a
         calls=caller.calls or caller.chat,  # numbered in the orientation's sequence
         agent="critic", patient=caller.patient,
         work=work_dir(c, caller.chat), unasked=True, disallowed=agent_session.not_own(OWN_TOOLS),
-        brief=prompt.split("\n\n", 1)[0], background=caller.bg, **fields)  # the critique-task line that opens the first message
+        brief=prompt.split("\n\n", 1)[0], background=True, **fields)  # the critique-task line that opens the first message
     return run, done
 
 
@@ -421,7 +421,10 @@ agent_session.on_relaunch(tools.CRITIQUE_SESSION, _relaunch)
 def _critic(c: str) -> tuple[str, dict[str, Any], dict[str, Any], str]:
     """(name, definition, role settings, effort) of the critic for workspace `c`: critic.md's agent with the `critic`
     role's model, effort and fast mode (config.models_for)."""
-    agent_name, agent = agent_definition()
+    from . import prompts, userconf  # noqa: PLC0415
+
+    with prompts.custom(userconf.prompt_files(c, "critic")):
+        agent_name, agent = agent_definition()
     conf = config.models_for(c)["critic"]
     agent = agent_session.role_agent(agent, conf)
     return agent_name, agent, conf, str(agent.get("effort") or DEFAULT_EFFORT)

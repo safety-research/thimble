@@ -44,7 +44,9 @@ def test_the_fence_denies_the_whole_corpus_folder_blocks_no_read_and_adds_the_sa
     unasked = agent_session.fence(cwd, work, sandbox=True, unasked=True)
     assert unasked["permissions"]["allow"] == [f"Edit(/{work}/**)"] and unasked["sandbox"]["autoAllowBashIfSandboxed"], \
         "a check's run, which nobody watches, keeps its own allows"
-    assert sandbox["failIfUnavailable"] is False, "the sandbox's absence never blocks the session"
+    assert sandbox["failIfUnavailable"] is False, "without sandbox.enforce, the sandbox's absence never blocks the session"
+    assert agent_session.fence(cwd, work, sandbox=True, required=True)["sandbox"]["failIfUnavailable"] is True, \
+        "with it, Claude Code refuses to start rather than run Bash unsandboxed"
     # Bash stays offline although the session has the web tools, so a script cannot send the corpus anywhere
     assert sandbox["network"] == {"deniedDomains": ["*"]}
     assert "filesystem" not in sandbox, "nothing hides a folder from Bash, so no read needs re-opening"

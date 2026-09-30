@@ -568,6 +568,8 @@ export interface PermissionRequest {
   /** the length of the command or input when the card shows only its start (backend PERMISSION_INPUT_CHARS); such a
    * request offers no "don't ask again" */
   cut?: number
+  /** why thimble itself asks, which the card says in place of the mode's reason (backend dev.CODE_WHY) */
+  why?: string
 }
 
 /** A session held where the browser cannot answer: the model-switch dialog after a safety stop (session.py). */
@@ -603,7 +605,7 @@ export interface StartBody {
 export type OrientPermissions = 'manual' | 'auto' | 'bypass'
 
 /** The agents that each run in a permission mode of their own (backend modes.AGENTS). */
-export type ModeAgent = 'orient' | 'writer' | 'critic' | 'dev' | 'views'
+export type ModeAgent = 'orient' | 'writer' | 'critic' | 'checks' | 'dev'
 
 // ---- documents ----
 
@@ -920,18 +922,20 @@ export interface ModelConf {
   follows?: string
 }
 
-/** `GET /ws/{c}/settings` layers the effective `models` in; a PUT merges what it is given. */
+/** `GET /ws/{c}/settings` layers the effective `models` and permission modes in from thimble's config; a PUT merges
+ * what it is given. */
 export interface Settings {
   models: Record<string, ModelConf>
-  /** terminal-first mode: the orientation, its critic and the writers run as Claude Code background sessions the
-   * analyst's terminal shows (backend orientation.terminal_first) */
-  terminal_first?: boolean
   /** the chat column is hidden and main's foot shows in a dock (shell/Shell, chat off) */
   hide_chat?: boolean
   /** the agents whose permission mode the analyst set; any other runs in the mode of their Claude Code session */
   permission_modes?: Partial<Record<ModeAgent, OrientPermissions>>
   /** the modes the analyst's Claude Code settings turn off */
   disabled_modes?: OrientPermissions[]
+  /** why thimble's config cannot be used, '' when it can (backend userconf.problem) */
+  config_error?: string
+  /** while Claude Code does not trust thimble's workspaces folder: the folder and the command that trusts it (shell/Untrusted) */
+  untrusted?: { folder: string; command: string } | null
   [k: string]: unknown
 }
 

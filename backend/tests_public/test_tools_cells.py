@@ -90,3 +90,26 @@ async def test_add_cell_runs_code_and_reports_the_output(group):
     assert (await call("add_card", group, code="print(1)")).is_error
     assert (await call("add_card", group, kind="md", question="q", code="1")).is_error
     assert (await call("add_card", group, kind="table", question="q")).is_error
+
+
+async def test_an_agent_s_card_code_may_not_install_unless_the_config_allows_it(group, tmp_path, monkeypatch):
+    """Card code runs in the kernel, where no prompt reaches the analyst, so an agent's card that installs or downloads
+    is refused unless `installs` is "allow"; the analyst's own session is not bound by thimble's config."""
+    import json
+
+    from app import userconf
+
+    monkeypatch.setenv("THIMBLE_HOME", str(tmp_path / "home"))
+    code = "import subprocess\nsubprocess.run(['curl', '--version'], capture_output=True)"
+
+    async def add(session):
+        return await tools.call(CORPUS, "add_card", {"kind": "code", "question": "q", "code": code}, actor="analyst",
+                                notebook=group, terminal=False, session=session)
+
+    refused = await add("orient")
+    assert refused.is_error and tools.hint("card-installs", tool="add_card") in refused.text
+    assert not any(c.get("code") == code for c in notebook.load_notebook(CORPUS, group)["cells"])
+    assert "card-installs" not in (await add(None)).text
+    userconf.global_file().parent.mkdir(parents=True, exist_ok=True)
+    userconf.global_file().write_text(json.dumps({"installs": "allow"}))
+    assert tools.hint("card-installs", tool="add_card") not in (await add("orient")).text

@@ -6,7 +6,8 @@ beside it; each revision that passes the view's checks replaces it, with Undo ba
 dev.run_view calls after_built() when a build or a change to a view passes. Each review:
 1. Shots: views.shoot_states in four states, the overview with no label, with the test label on, filtered to it, and
    the first place that resolved (only the first and the last for a view over files without lines, which labels cannot
-   mark). Pictures drawn without thimble's fonts end the review `failed`.
+   mark). Pictures drawn without thimble's fonts end the review `failed`. Without the headless browser there is no
+   review, and a review that finds it missing leaves no trace on the view.
 2. Reading: the `verify` role's model reads the pictures, the proposal, what the shots measured and a sample of the
    records the pages fetched, and names what fails each criterion. A refused reading runs again on the fallback model,
    and the review's note says so (FALLBACK_NOTE). A picture in which the page has controls of its own that name the
@@ -37,7 +38,7 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException
 
-from . import config, retry, views
+from . import config, headless, retry, views
 
 log = logging.getLogger("thimble.view_review")
 
@@ -154,7 +155,7 @@ def after_built(c: str, slug: str) -> None:
     if view is None or view.get("origin") != "workspace" or prop is None:
         return
     _drop_copies(c, slug)
-    if not enabled() or not auto(c):
+    if not enabled() or not auto(c) or headless.missing(headless.PAGES):
         if prop.get("review"):
             views.update_proposal(c, slug, review=None)
         return
@@ -324,6 +325,11 @@ async def _review(run: _Run) -> None:
         files = await asyncio.to_thread(views.claimed_files, c, view)
         lined = views.lined(view, files)
         shots = await shoot(c, slug, view, files, prop, lined, run.round)
+        if any(s.get("unavailable") for s in shots):
+            _settle(run)
+            views.update_proposal(c, slug, review=None)
+            views._emit(c, slug, str(prop.get("status") or "built"), review=None)
+            return
         bad = [s for s in shots if not s.get("ok")]
         if bad:
             why = "; ".join(dict.fromkeys(e for s in bad for e in s.get("errors") or [])) or "the page did not load"

@@ -121,6 +121,28 @@ def test_up_prints_the_url_and_opens_a_sessions_folder(home, data, monkeypatch, 
     assert cli.build_parser().parse_args(["up"]).cmd == "up" and cli.build_parser().parse_args(["ensure"]).cmd == "ensure"
 
 
+def test_without_claude_code_s_trust_thimble_and_slash_thimble_warn_with_the_command(home, data, monkeypatch, capsys,
+                                                                                  claude_global_config):
+    """While Claude Code does not trust the workspaces folder, the launcher and /thimble warn that the orientation, its
+    critic and the writers can't start: the terminal gets the command that trusts it, and the model gets no command."""
+    _healthy_no_process(monkeypatch)
+    monkeypatch.setattr(cli, "_request", lambda m, u, b=None, timeout=5.0: (404, {}))
+    claude_global_config.write_text("{}")
+    warn = cli.UNTRUSTED_LINE.format(folder=Path(os.environ["THIMBLE_WORKSPACES_DIR"]), command=cli.trust_command())
+    assert cli.trust_command() == f"bash {cli.config.REPO_ROOT / 'scripts' / 'install.sh'} --trust-workspaces"
+    assert cli.main(["up", "--cwd", str(data / "mini" / "agents"), "--session", "s9"]) == 0
+    assert capsys.readouterr().out.splitlines() == [cli.LINK_LINE, cli.UNTRUSTED_MODEL_LINE]
+    assert "install.sh" not in cli.UNTRUSTED_MODEL_LINE
+    assert (home / "links" / "s9").read_text().split("\n", 1)[1] == warn, "the Stop hook shows it under the link"
+    monkeypatch.setattr(cli, "launch_args", lambda cwd, resume=False, settings="": "args")
+    monkeypatch.setattr(cli, "claude_code_warning", lambda v: None)
+    assert cli.main(["launch-args", "--cwd", str(data / "mini")]) == 0
+    assert capsys.readouterr().err.strip() == warn
+    claude_global_config.write_text(json.dumps({"projects": {os.environ["THIMBLE_WORKSPACES_DIR"]: {"hasTrustDialogAccepted": True}}}))
+    assert cli.main(["launch-args", "--cwd", str(data / "mini")]) == 0
+    assert capsys.readouterr().err == ""
+
+
 def line(text: str, key: str) -> str:
     """The first line of doctor's text that starts with `key`."""
     return next(ln for ln in text.splitlines() if ln.strip().startswith(key))
@@ -136,6 +158,20 @@ def test_doctor_says_what_claude_reports_about_its_login_and_never_a_value(home,
     assert all(word in line(text, "auth:") for word in ("api_key", "firstParty"))
     fake_claude.write_text(json.dumps({"loggedIn": False, "authMethod": "none"}))
     assert "not logged in" in line(cli.doctor_text(), "auth:")
+
+
+def test_the_doctor_a_model_reads_names_no_install_command_even_when_the_log_does(home, monkeypatch, fake_claude):
+    """`thimble fix` hands doctor_text(commands=False) to an agent whose Bash runs unasked, so none of its lines, the
+    server log's included, names a command that installs software."""
+    monkeypatch.setattr(cli, "healthy", lambda url=None, timeout=1.0: False)
+    monkeypatch.setattr(cli, "listening", lambda p: False)
+    cli.log_path().parent.mkdir(parents=True, exist_ok=True)
+    cli.log_path().write_text("2026-09-29 10:00:00,000 ERROR thimble.notebook: bwrap missing; install bubblewrap (`apt install bubblewrap`)\n"
+                              "2026-09-29 10:00:01,000 INFO thimble.cli: not starting Vite (run `npm ci` in frontend/)\n"
+                              "2026-09-29 10:00:02,000 WARNING thimble.headless: run `sudo playwright install-deps`\n")
+    text = cli.doctor_text(commands=False)
+    assert not cli._INSTALL_COMMAND.search(text), text
+    assert text.count(cli.LOG_LINE_LEFT_OUT) == 4, "three in the tail, one in the errors"
 
 
 SERVER_LIKE = [sys.executable, "-c", "import time; time.sleep(60)", "-m", "uvicorn", "app.main:app", "--host", "127.0.0.1",
@@ -201,6 +237,9 @@ def test_real_up_starts_a_detached_server_idempotently_and_stop_ends_it(home, da
     env.pop("THIMBLE_DEV", None)
     for k in ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_PROFILE"):
         env.pop(k, None)
+    # Claude Code trusts the workspaces folder, so /thimble has no warning to print
+    trust = {"projects": {str(tmp_path / "ws"): {"hasTrustDialogAccepted": True}}}
+    (Path(os.environ["CLAUDE_CONFIG_DIR"]) / ".claude.json").write_text(json.dumps(trust))
     cmd = [sys.executable, "-m", "app.cli", "server", "up", "--cwd", str(data / "mini"), "--session", "it-1"]
     pid = None
     try:
@@ -251,3 +290,56 @@ def test_up_refuses_home_and_root_and_starts_nothing(home, data, monkeypatch, ca
         assert line == [cli.REFUSED_LINE.format(path=folder)] and "http://" not in line[0], folder
     assert started == [] and not cli.server_json().exists()
     assert cli.refused(data / "mini") is False and cli.refused(tmp_path) is False
+
+
+def test_up_in_the_bash_sandbox_prints_what_the_hook_did_outside_it(home, data, monkeypatch, capsys, tmp_path):
+    """/thimble's UserPromptExpansion hook runs `up` outside Claude Code's Bash sandbox and prints nothing; the skill's
+    `up` in the sandbox prints what the hook's did and starts nothing. With no result left for it, it names the
+    exclusions that would run it outside instead (the watcher's too when hooks are off), and a result for other
+    arguments is not taken."""
+    _healthy_no_process(monkeypatch)
+    monkeypatch.setattr(cli, "_request", lambda m, u, b=None, timeout=5.0:
+                        (201, {"name": Path(b["path"]).name}) if m == "POST" else (404, {}))
+    folder = tmp_path / "calls"
+    folder.mkdir()
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(folder))
+    hook = {"session_id": "s7", "cwd": str(folder), "command_name": "thimble:thimble", "command_args": ""}
+    assert cli.hook_up(json.dumps(hook)) == 0 and capsys.readouterr().out == ""
+    started = []
+    monkeypatch.setattr(cli, "ensure_running", lambda wait: started.append(1) or True)
+    monkeypatch.setenv(cli.SANDBOX_ENV, "1")
+    skill = ["server", "up", "--cwd", str(folder), "--session", "s7", "--action", "", "--archive", ""]
+    assert cli.main(skill) == 0 and capsys.readouterr().out.splitlines() == [cli.LINK_LINE]
+    assert cli.main(skill) == 0
+    out = capsys.readouterr().out
+    assert out.startswith("thimble: WARNING") and f'"{cli.sandbox_rule()}"' in out and started == []
+    settings = tmp_path / "claude-home" / "settings.json"
+    settings.write_text(json.dumps({"disableAllHooks": True}))
+    assert cli.main(skill) == 0
+    out = capsys.readouterr().out
+    assert f'"{cli.sandbox_rule()}"' in out and f'"{cli.watch_rule()}"' in out and started == []
+    settings.unlink()
+    monkeypatch.delenv(cli.SANDBOX_ENV)
+    assert cli.hook_up(json.dumps(hook)) == 0 and started == [1]
+    started.clear()
+    monkeypatch.setenv(cli.SANDBOX_ENV, "1")
+    assert cli.main([*skill[:-3], "fresh", "--archive", ""]) == 0
+    assert capsys.readouterr().out.startswith("thimble: WARNING") and started == []
+
+
+def test_the_doctor_s_sandbox_line_follows_the_config(monkeypatch):
+    """Every agent's Bash uses the sandbox where it runs; sandbox.use "never" turns it off, and sandbox.enforce
+    refuses to start the agents where it cannot run."""
+    from app import cc_settings, userconf
+
+    conf = {"sandbox": {"use": "when-available", "enforce": False}}
+    monkeypatch.setattr(userconf, "load_or_defaults", lambda c=None: (conf, ""))
+    monkeypatch.setattr(cc_settings, "sandbox_missing", lambda: [])
+    assert "every agent's Bash runs in it" in cli.sandbox_lines()[0]
+    conf["sandbox"]["use"] = "never"
+    assert "off in thimble's config" in cli.sandbox_lines()[0]
+    conf["sandbox"] = {"use": "when-available", "enforce": True}
+    monkeypatch.setattr(cc_settings, "sandbox_missing", lambda: ["bubblewrap"])
+    monkeypatch.setattr(cc_settings, "sandbox_setup", lambda: ([], ""))
+    assert cli.sandbox_lines() == ["  bash sandbox: off, missing bubblewrap; thimble's config (sandbox.enforce) refuses "
+                                   "to start the agents"]

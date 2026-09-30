@@ -125,6 +125,20 @@ def drop_stale(c: str, cid: str) -> bool:
     return True
 
 
+def discard(c: str, cid: str, check_id: str) -> bool:
+    """Take check `check_id`'s record off card `cid` while it is pending, as if it never began; True when it did."""
+    hit = _locate(c, cid)
+    if hit is None:
+        return False
+    nb, cell = hit
+    rec = cell.get("check") if isinstance(cell.get("check"), dict) else None
+    if rec is None or rec.get("id") != check_id or rec.get("status") != "pending":
+        return False
+    cell.pop("check", None)
+    _save(c, nb, cell)
+    return True
+
+
 def _live(cell: dict, check_id: str) -> dict | None:
     """The card's record when it is check `check_id` and the card is as that check read it, else None (stale)."""
     rec = cell.get("check") if isinstance(cell.get("check"), dict) else None

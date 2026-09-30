@@ -693,6 +693,10 @@
 .shell-down code {
   font-family: var(--font-mono);
 }
+/* Claude Code does not trust the workspaces folder (shell/Untrusted): the same line, its command wrapping anywhere */
+.shell-untrusted code {
+  overflow-wrap: anywhere;
+}
 /* a newer build is served (shell/NewVersion): the same line with a hairline edge and a Reload button */
 .shell-newer {
   align-items: center;

@@ -7,8 +7,8 @@ Markdown writes the citations as footnotes; HTML is one self-contained file (fon
 the citations as numbered notes linked from the text; PDF is that HTML printed by the browser; video renders the film
 (film_export.py).
 
-The browser: the one thimble's config names (userconf.browser, from 0.3.0), else the system's Chrome, Edge or Chromium,
-else Playwright's own Chromium. Pictures of cards come from the card harness (render.py); without a browser a card is
+The browser: the one thimble's config names (userconf.browser): the system's Chrome, Edge or Chromium, else Playwright's
+own Chromium when it is installed. Pictures of cards come from the card harness (render.py); without a browser a card is
 its title, its table or its text, and PDF and video are offered disabled with the reason.
 
 A report type an extension adds may ship export.py beside its type.md:
@@ -33,15 +33,13 @@ import logging
 import os
 import re
 import secrets
-import shutil
-import sys
 from pathlib import Path
 from typing import Any, AsyncIterator
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import Response
 
-from . import config, frames, investigation, refs
+from . import config, frames, headless, investigation, refs, userconf
 from .report import _collapse, plain_text
 
 log = logging.getLogger("thimble.exports")
@@ -64,12 +62,6 @@ KERNEL = "exports"
 EXPORT_PY = "export.py"
 HOOK_TIMEOUT_S = 120.0
 SENTINEL = "\x1ethimble-export:"
-SYSTEM_BROWSERS = {
-    "linux": ("google-chrome", "google-chrome-stable", "chromium", "chromium-browser", "microsoft-edge"),
-    "darwin": ("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
-               "/Applications/Chromium.app/Contents/MacOS/Chromium",
-               "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge"),
-}
 _INLINE_RE = re.compile(r"\*\*(.+?)\*\*|(?<![\w*])\*(?!\s)(.+?)(?<!\s)\*(?![\w*])|`([^`]+)`|\[([^\]]+)\]\((https?://[^)\s]+)\)")
 
 
@@ -570,30 +562,10 @@ def _bundled_installed() -> bool:
     return any(root.glob("chromium_headless_shell-*")) or any(root.glob("chromium-*"))
 
 
-def system_browser() -> str:
-    plat = "linux" if sys.platform.startswith("linux") else sys.platform
-    for name in SYSTEM_BROWSERS.get(plat, ()):
-        if "/" in name:
-            if os.access(name, os.X_OK):
-                return name
-        elif found := shutil.which(name):
-            return found
-    return ""
-
-
 def browser() -> tuple[str, str]:
-    """(kind, path or why): thimble's config's choice (userconf.browser) where there is one, else the system browser,
-    else Playwright's own when installed; `off` with the reason when there is none."""
-    try:
-        from . import userconf  # noqa: PLC0415 — 0.3.0's config
-    except ImportError:
-        userconf = None
-    if userconf is not None:
-        return userconf.browser(_bundled_installed)
-    found = system_browser()
-    if found:
-        return "system", found
-    return ("bundled", "") if _bundled_installed() else ("off", "no browser is installed (Chrome, Edge or Chromium)")
+    """(kind, path or why) of the browser thimble's config names (userconf.browser); `off` with the reason when there is
+    none."""
+    return userconf.browser(_bundled_installed)
 
 
 @contextlib.asynccontextmanager
@@ -607,15 +579,14 @@ async def browser_page(width: int, height: int, *, scale: float = 1) -> AsyncIte
         from playwright.async_api import async_playwright  # noqa: PLC0415
     except ImportError as e:
         raise RuntimeError("Playwright is not installed in backend/.venv") from e
-    from . import render  # noqa: PLC0415
-
     pw = await async_playwright().start()
     b = None
     try:
         try:
             b = await pw.chromium.launch(headless=True, **({"executable_path": what} if kind == "system" else {}))
         except Exception as e:  # noqa: BLE001
-            raise RuntimeError(render._launch_why(e)) from e
+            first = str(e).splitlines()[0][:300] if str(e) else ""
+            raise RuntimeError(headless.why_missing(str(e)) or f"{type(e).__name__}: {first}") from e
         ctx = await b.new_context(viewport={"width": width, "height": height}, device_scale_factor=scale)
         await ctx.route("**/*", _offline)
         page = await ctx.new_page()

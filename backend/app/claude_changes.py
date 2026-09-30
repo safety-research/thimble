@@ -4,8 +4,9 @@
   (`$CLAUDE_CONFIG_DIR/.claude.json`, else `~/.claude.json`). install.sh asks once whether to trust thimble's
   workspaces folder, whose entry covers every work folder below it: before it installs anything when it has python3
   (question), else at its trust step (install_trust), which records the answer in thimble's home (TRUST_FILE), so that
-  an update does not ask again; a later answer of no takes back the entry an earlier yes added. `thimble uninstall`
-  takes back the entries thimble added, an older version's per-folder ones (OLD_TRUST) included (untrust).
+  an update does not ask again; `install.sh --trust-workspaces` or `--no-trust-workspaces` changes it later, and a no
+  takes back the entry an earlier yes added. `thimble uninstall` takes back the entries thimble added, an older
+  version's per-folder ones (OLD_TRUST) included (untrust).
 - Older versions wrote statusLine, CLAUDE_CODE_EFFORT_LEVEL and CLAUDE_CODE_DISABLE_FAST_MODE into folders'
   .claude/settings.local.json and recorded them in thimble's home. cleanup removes each key that still holds thimble's
   value, and the records with it, so it runs once.
@@ -24,15 +25,18 @@ from typing import Any
 TRUST_FILE = "trust.json"  # in thimble's home: {folder, config, answer: yes | no, added}
 TRUST_KEY = "hasTrustDialogAccepted"
 QUESTION = ("Trust thimble's workspaces folder {folder} by adding it to {config}?\n"
-            "thimble needs this to start its background agents without Claude Code stopping to ask. Everything works "
-            "with a no, except Terminal-first mode (a Settings option for chatting in the terminal), whose background "
-            "agents are then refused with a message saying how to trust the folder. `thimble uninstall` removes it.")
+            "The workspaces folder is where thimble keeps each workspace and runs its agents. The orientation, its "
+            "critic and the writers need this: they run as Claude Code background agents, which show in your "
+            "terminal's agent tray, and Claude Code starts those only in a folder it trusts. With a no, they can't "
+            "start until the folder is trusted. `thimble uninstall` takes the entry back.")
+CHANGE = "install.sh --trust-workspaces or --no-trust-workspaces changes it"
+UNTRUSTED = ("the orientation, its critic and the writers can't start until it is; `bash {install} --trust-workspaces` "
+             "trusts it")
 # the records of the keys older versions wrote: file in thimble's home -> the key in a folder's settings.local.json
 # (None: statusLine, recorded as {ours, previous})
 OLD_RECORDS = {"effort-overrides.json": "CLAUDE_CODE_EFFORT_LEVEL", "fast-overrides.json": "CLAUDE_CODE_DISABLE_FAST_MODE",
                "statusline-overrides.json": None}
 OLD_TRUST = "trusted-folders.json"  # an older version's per-folder trust entries: {folder: {config, ...}}
-OLD_FILES = ("terminal-first-consent.json",)
 LOCAL_SETTINGS = Path(".claude") / "settings.local.json"
 
 
@@ -130,9 +134,11 @@ def install_trust(tree: Path, answer: str | None = None) -> str:
     folder, config = workspaces_dir(tree), global_config()
     rec = _read(home() / TRUST_FILE)
     same = rec.get("folder") == str(folder) and rec.get("config") == str(config)
+    untrusted = UNTRUSTED.format(install=tree / "scripts" / "install.sh")
     if answer is None and same and rec.get("answer") in ("yes", "no"):
-        return (f"answered {rec['answer']} at an earlier install; install.sh --trust-workspaces or --no-trust-workspaces "
-                "changes it")
+        if rec["answer"] == "no" and not trusted(folder, _read(config)):
+            return f"answered no at an earlier install, so {folder} is not trusted, and {untrusted}"
+        return f"answered {rec['answer']} at an earlier install; {CHANGE}"
     added = bool(rec.get("added") and rec.get("folder") and rec.get("config"))
     if added and (answer == "no" or not same):  # the entry an earlier yes added: refused now, or for another folder
         try:
@@ -146,8 +152,7 @@ def install_trust(tree: Path, answer: str | None = None) -> str:
         return f"{folder} is trusted in {config}{' by an entry thimble did not add' if answer == 'no' else ''}"
     if answer is None:
         if not sys.stdin.isatty():
-            return (f"not asked (no terminal), so nothing was written. Terminal-first's background sessions need {folder} "
-                    "trusted, which install.sh --trust-workspaces does")
+            return f"not asked (no terminal), so {folder} is not trusted, and {untrusted}"
         try:
             reply = input(QUESTION.format(folder=folder, config=config) + " [y/N] ")
             answer = "yes" if reply.strip().lower() in ("y", "yes") else "no"
@@ -162,7 +167,7 @@ def install_trust(tree: Path, answer: str | None = None) -> str:
     _write(home() / TRUST_FILE, {**record, "answer": answer, "added": answer == "yes"})
     if answer == "yes":
         return f"marked {folder} trusted in {config}"
-    return "not trusted. Terminal-first's background sessions need it, which install.sh --trust-workspaces does"
+    return f"not trusted, so {untrusted}"
 
 
 def untrust() -> list[str]:
@@ -225,8 +230,6 @@ def cleanup() -> list[str]:
             _write(home() / name, left)
         else:
             (home() / name).unlink(missing_ok=True)
-    for name in OLD_FILES:
-        (home() / name).unlink(missing_ok=True)
     return done
 
 
@@ -250,5 +253,6 @@ if __name__ == "__main__":
             failed = True
         sys.exit(1 if failed else 0)
     else:
-        print("usage: claude_changes.py trust <tree> [--yes | --no] | question <tree> | undo", file=sys.stderr)
+        print("usage: claude_changes.py trust <tree> [--yes | --no] | question <tree> | undo",
+              file=sys.stderr)
         sys.exit(2)

@@ -1,6 +1,5 @@
-"""thimble's agents as Claude Code background sessions (`claude --bg`), for a workspace in terminal-first mode: the
-orientation, its critique and the writers. The analyst
-sees each in `claude agents`, in the agent view (←) and at the bottom of main's terminal, and can attach to it, answer
+"""thimble's agents as Claude Code background sessions (`claude --bg`): the orientation, its critique and the writers.
+The analyst sees each in `claude agents`, in the agent view (←) and at the bottom of main's terminal, and can attach to it, answer
 its permission prompts there and message it.
 
 Names. Each session is named for Claude Code as `thimble:<role> · <workspace>` (name_of, config.session_name):
@@ -9,9 +8,8 @@ thimble:critic · <c>, since `claude agents` and ListAgents list the sessions of
 addresses a session by its name alone (its listed ` [ref]` is not the short id). The name, spaces and `·` included, is
 the session's address everywhere: SendMessage's `to` in the proxy's instructions, wait_session's `session`, main's
 messages that relay_check follows. Entry.name is the name `claude agents` listed for the session when it was recorded,
-so a session an earlier build named `thimble:orient` keeps being addressed as that, and keeps that name, which another
-folder's old session may share, until a new session replaces it: a session started again with `claude --bg --resume` is
-passed no `-n`, since a resume with a flag starts a copy under a new id (dev.Sessions.resume). ListAgents writes `  ·  ` between a row's
+so a session an earlier build named `thimble:orient` keeps being addressed as that until it is started again under
+its current name. ListAgents writes `  ·  ` between a row's
 fields, so a name copied from it can lose its workspace; main's instructions give it the whole name to send to. A long
 name has its workspace shortened (config.session_name), and by_name also takes the role before any separator a model
 wrote in place of ` · `. The workspace's own lines (the statusline, the news) show the role alone (config.session_role).
@@ -20,9 +18,8 @@ Start. agent_session builds the `claude -p` command as for any session and hands
 `claude --bg` command: the first message goes on the command line, and the session's own environment goes in the
 --settings `env`, since the background service starts the session with its own environment. `claude --bg` refuses a
 folder Claude Code does not trust; install.sh asks once to trust thimble's workspaces folder (claude_changes). Without
-that trust (trusted), terminal-first mode is off unless the analyst turns it on (orientation.default_terminal_first), and
-a refusal is reported with the flag that does it (the bg-untrusted hint). BgProc stands in for the process agent_session
-follows: a run ends when the session is idle, its
+that trust (trusted) none of these sessions starts, and the refusal says how the analyst can trust the folder (the
+bg-untrusted hint). BgProc stands in for the process agent_session follows: a run ends when the session is idle, its
 transcript's last turn has ended and it has no background work, while the session itself goes on for the analyst. A
 session whose turn ended while a background shell of its own runs on counts as idle once its transcript has been quiet
 for LINGER_S (_lingering), since Claude Code lists it as busy for as long as the shell runs.
@@ -30,8 +27,9 @@ for LINGER_S (_lingering), since Claude Code lists it as busy for as long as the
 Messages in place. A session that runs is never resumed with `--resume`, which would copy it under a new id: a message
 for it (a follow-up from the browser, a retry after a capacity failure) waits in its outbox (deliver) and is sent with
 SendMessage by the proxy subagent that shows the session in main's agent tray, or, without a live proxy within
-PROXY_WAIT_S, by main. Only a session whose process has gone is started again, with `claude --bg --resume <id>`, which
-keeps its id; a copy under a new id is recorded as the session's new id.
+PROXY_WAIT_S, by main. Only a session whose process has gone is started again, with `claude --bg --resume <id>` and
+all of its start flags, since Claude Code keeps none of a session's options when its process was ended; the copy this
+starts under a new id is recorded as the session's new id.
 
 The proxy. For each session main runs a thin background subagent of the plugin (plugin/agents: thimble:orient,
 thimble:writer, thimble:critic), which reads its instructions from proxy_file and loops on the `wait_session` tool for
@@ -39,7 +37,8 @@ the session's life: the tool returns the session's news (below) as one block of 
 reply word for word, one reply per call, and the outbox's messages as tokens. Two plugin hooks keep it reliable: before
 a SendMessage (relay_check) the server swaps a token for its message, prefixes a message the analyst typed in the
 proxy's view, and refuses a message sent twice; when the proxy would stop while its session runs (proxy_stop), the hook
-sends it back to waiting.
+sends it back to waiting. Main is asked to start a proxy again while none runs, unless Claude Code refused its call for
+that session, as auto mode can (proxy_refused).
 
 The news. What the analyst would see of a subagent, read from the session's transcript in its order (_read_news, which
 keeps an offset past the last whole line it read, so no line shows twice): each reply as `<name>: <text>` (NEWS_CHARS, a
@@ -157,18 +156,7 @@ def _plugin() -> str:
     return orientation.PLUGIN
 
 
-# --------------------------------------------------------------------------- which route
-
-
-def terminal_first(c: str) -> bool:
-    from . import orientation  # noqa: PLC0415
-
-    return orientation.terminal_first(c)
-
-
-def wanted(c: str, kind: str) -> bool:
-    """Whether a session of `kind` (orient, writer, critique) runs as a background session in workspace `c`."""
-    return terminal_first(c) and kind in PROXY_TYPES
+# --------------------------------------------------------------------------- trust
 
 
 def claude_json() -> Path:
@@ -184,7 +172,7 @@ _trust_read: dict[str, tuple[tuple[int, int], dict[str, Any]]] = {}  # claude_js
 def trusted(c: str) -> bool:
     """Whether Claude Code trusts workspace `c`'s folder, below which its background sessions run (module note, start),
     by the folder's own entry or one above it such as install.sh's for the workspaces folder (claude_changes). The file
-    is parsed again only when it changed, since the statusline asks on each refresh (orientation.terminal_first)."""
+    is parsed again only when it changed, since the settings ask on each read."""
     from . import claude_changes  # noqa: PLC0415
 
     path = claude_json()
@@ -196,7 +184,8 @@ def trusted(c: str) -> bool:
     kept = _trust_read.get(str(path))
     if kept is None or kept[0] != stamp:
         kept = _trust_read[str(path)] = (stamp, claude_changes._read(path))
-    return claude_changes.trusted(config.WORKSPACES_DIR / c, kept[1])
+    folder = config.WORKSPACES_DIR / c
+    return any(claude_changes.trusted(f, kept[1]) for f in (folder, folder.resolve()))
 
 
 def kind_of(key: str) -> str:
@@ -349,9 +338,11 @@ class Entry:
     tx_seen: int = -1  # the transcript offset _lingering last saw
     tx_grew: float = 0.0  # time.monotonic() when that offset last changed
     tx_ended: bool | None = None  # whether the transcript's last turn had ended at that offset, once read
+    proxy_refused: bool = False  # Claude Code refused main's Agent call that would start its proxy (proxy_refused)
+    ended_state: str = ""  # the state `claude agents` listed for it when its process went away (stopped_in_claude)
 
     KEEP = ("c", "key", "name", "short", "sid", "chat", "role", "folder", "started", "status", "run_open", "result",
-            "ended_at", "proxy_agents", "relayed")
+            "ended_at", "proxy_agents", "relayed", "proxy_refused")
 
     @property
     def shown(self) -> str:
@@ -454,6 +445,13 @@ def alive(e: Entry | None) -> bool:
     return e is not None and (e.status != "stopped" or e.replacing)
 
 
+def stopped_in_claude(c: str, key: str) -> bool:
+    """Whether the session's process went away because Claude Code stopped it, as with `claude stop` or the agent view,
+    which the analyst does, rather than a crash."""
+    e = entry(c, key)
+    return e is not None and e.ended_state == "stopped"
+
+
 def replace(c: str, key: str) -> None:
     """A new session of `key` starts in place of the one that runs: that one is stopped, and its proxy shows the new
     one once it is recorded (record)."""
@@ -486,7 +484,7 @@ def record(c: str, key: str, *, short: str, sid: str, chat: str, role: str, fold
     if old is not None and old is not e:
         e.proxy_agents, e.proxy_seen, e.outbox = old.proxy_agents, old.proxy_seen, old.outbox
     e.sid, e.chat, e.status, e.run_open = sid, chat, status, True
-    e.started, e.misses = time.time(), 0
+    e.started, e.misses, e.ended_state = time.time(), 0, ""
     path = session.find_transcript(sid)
     if old is None or old.short != short:
         e.offset = offset if offset is not None else session._size(Path(path)) if path else 0
@@ -565,6 +563,7 @@ async def _tick(rows: list[dict[str, Any]]) -> None:
             if not _gone(e, hit):
                 continue
             e.status, e.waiting_for, e.pid, e.missing_since = "stopped", "", None, 0.0
+            e.ended_state = str((hit or {}).get("state") or "")
             _news(e, f"{e.shown} has ended.")
             _save(e.c)
             if agent_session.current(e.c, e.key) is None:
@@ -582,7 +581,7 @@ async def _tick(rows: list[dict[str, Any]]) -> None:
                 _news(e, f"{e.shown} waits for a {e.waiting_for or 'reply'}; answer it in the browser or with "
                          f"`claude attach {e.short}`.")
             _changed.set()
-        if not proxy_alive(e) and time.monotonic() - e.proxy_asked > PROXY_ASK_S:
+        if not proxy_alive(e) and not e.proxy_refused and time.monotonic() - e.proxy_asked > PROXY_ASK_S:
             unshown.setdefault(e.c, []).append(e.key)
         if e.status != "idle" and not e.run_open and agent_session.current(e.c, e.key) is None:
             fn = _wake.get(kind_of(e.key))
@@ -1026,7 +1025,7 @@ def ask_main_for_proxy(c: str, *keys: str) -> bool:
     """Ask main, with one `agent` event, to start the proxies of the sessions `keys`; False when no session listens."""
     from . import channel  # noqa: PLC0415
 
-    found = [e for e in (entry(c, k) for k in keys) if e is not None]
+    found = [e for e in (entry(c, k) for k in keys) if e is not None and not e.proxy_refused]
     if not found or not channel.reachable(c):
         return False
     try:
@@ -1073,8 +1072,26 @@ def proxy_started(c: str, agent_type: str, description: str, agent_id: str | Non
     if e is None:
         return None
     e.proxy_seen = time.monotonic()
+    e.proxy_refused = False
     proxy_agent(c, e.key, agent_id)
     return e.key
+
+
+def proxy_refused(c: str, key: str, tool_use_id: str | None) -> None:
+    """Main's Agent call that would start the session's proxy ended in an error: Claude Code refused it (auto mode, a
+    permission rule, the analyst) or could not start it. Main is not asked again for this session, since the same call
+    would be refused again and each ask costs main a turn and the terminal its lines. A refusal of agent_check's own, of
+    a second proxy, changes nothing."""
+    if tool_use_id and tool_use_id in _own_refusals:
+        _own_refusals.discard(tool_use_id)
+        return
+    e = entry(c, key)
+    if e is None or e.proxy_refused:
+        return
+    e.proxy_refused = True
+    e.proxy_seen, e.proxy_starting = 0.0, 0.0
+    log.info("%s: main's call to show %s in the agent tray was refused; main is not asked again", c, e.name)
+    _save(c)
 
 
 def proxy_agent(c: str, key: str, agent_id: str | None) -> None:
@@ -1086,9 +1103,11 @@ def proxy_agent(c: str, key: str, agent_id: str | None) -> None:
 
 
 def new_main(c: str) -> None:
-    """Another session became main: the proxies ran in the one before, so each session is shown anew."""
+    """Another session became main: the proxies ran in the one before, so each session is shown anew, and a session
+    whose proxy the one before refused is asked for again once."""
     for e in entries(c):
         e.proxy_seen, e.proxy_asked, e.proxy_starting, e.owner = 0.0, 0.0, 0.0, None
+        e.proxy_refused = False
 
 
 def proxy_ended(c: str, agent_id: str | None) -> None:
@@ -1096,7 +1115,7 @@ def proxy_ended(c: str, agent_id: str | None) -> None:
     for e in entries(c):
         if agent_id and agent_id in e.proxy_agents and e.owner in (None, agent_id):
             e.proxy_seen, e.proxy_starting, e.owner = 0.0, 0.0, None
-            if alive(e):
+            if alive(e) and not e.proxy_refused:
                 log.info("%s: %s's proxy %s ended while its session runs; main is asked for another", c, e.name, agent_id)
                 ask_main_for_proxy(c, e.key)
 
@@ -1345,14 +1364,16 @@ def proxy_stop(c: str, agent_type: str, agent_path: Path | None, active: bool, a
     return tools.hint("bg-proxy-keep", session=e.name)
 
 
-def agent_check(c: str, tool_input: dict[str, Any]) -> str | None:
-    """Main's Agent call, before it runs: why it must not start (a second proxy of a session whose proxy runs or is
-    starting, a second fork of a thread whose fork runs or is starting), or None to let it start."""
+def agent_check(c: str, tool_input: dict[str, Any], tool_use_id: str | None = None) -> str | None:
+    """Main's Agent call `tool_use_id`, before it runs: why it must not start (a second proxy of a session whose proxy
+    runs or is starting, a second fork of a thread whose fork runs or is starting), or None to let it start."""
     agent_type, description = tool_input.get("subagent_type"), tool_input.get("description")
     e = _by_tray(c, agent_type, description, tool_input.get("prompt"))
     if e is not None:
         now = time.monotonic()
         if proxy_alive(e) or (e.proxy_starting and now - e.proxy_starting < PROXY_ASK_S):
+            if tool_use_id:
+                _own_refusals.add(tool_use_id)
             return f"{e.name} already shows in the agent tray."
         e.proxy_starting = now
         return None
@@ -1369,6 +1390,7 @@ def agent_check(c: str, tool_input: dict[str, Any]) -> str | None:
 
 
 _forking: dict[tuple[str, str], float] = {}  # (workspace, thread) -> time.monotonic() when its fork's Agent call ran
+_own_refusals: set[str] = set()  # the tool_use_ids of the second proxies agent_check refused (proxy_refused)
 
 
 def fork_ended(c: str, thread_id: str) -> None:
@@ -1499,7 +1521,7 @@ def turn_state(session_id: str) -> tuple[bool, str, bool, int | None]:
 async def start(c: str, key: str, argv: list[str], folder: Path, env: dict[str, str], prompt: str,
                 resume: str | None, chat: str, role: str) -> BgProc:
     """The background session for the `claude -p` argv `argv` (module note, start): a new one, the running session
-    `resume` attached to with `prompt` delivered in place (none when empty), or `resume` started again under its id
+    `resume` attached to with `prompt` delivered in place (none when empty), or `resume` started again with its flags
     when its process has gone."""
     bin_ = argv[0]
     if shutil.which(bin_, path=env.get("PATH")) is None:
@@ -1517,7 +1539,8 @@ async def start(c: str, key: str, argv: list[str], folder: Path, env: dict[str, 
             return BgProc(c, key, short, resume, int(running["pid"]), expect=bool(prompt.strip()))
         known = session.find_transcript(resume)
         before = session._size(Path(known)) if known else 0  # where the news of this start begins (record)
-        args = [bin_, "--bg", "--resume", resume, "--", prompt.strip() or _nudge()]
+        args = bg_argv(argv, env, dict(os.environ), name_of(c, key), prompt.strip() or _nudge(), folder)
+        args[2:2] = ["--resume", resume]
         code, out = await asyncio.to_thread(_cli, bin_, args[1:], env, folder, CLI_TIMEOUT_S)
     else:
         before = 0
@@ -1526,8 +1549,7 @@ async def start(c: str, key: str, argv: list[str], folder: Path, env: dict[str, 
     if code != 0 and UNTRUSTED_RE.search(out):
         from . import tools  # noqa: PLC0415
 
-        raise RuntimeError(tools.hint("bg-untrusted", folder=str(folder), workspaces=str(config.WORKSPACES_DIR),
-                                      install=str(config.REPO_ROOT / "scripts" / "install.sh")))
+        raise RuntimeError(tools.hint("bg-untrusted", workspaces=str(config.WORKSPACES_DIR)))
     if code != 0:
         raise RuntimeError(f"`claude --bg` failed (exit {code}): {out.strip()[-400:]}")
     m = BG_ID_RE.search(out)
@@ -1561,7 +1583,7 @@ def _nudge() -> str:
 
 def statusline_command(own: str = "") -> str:
     """The statusline command the launcher passes to main: plugin/bin/thimble-agents, which lists thimble's agents
-    while the workspace is in terminal-first mode (agents_route), chained to the analyst's statusline command `own`."""
+    (agents_route), chained to the analyst's statusline command `own`."""
     import shlex  # noqa: PLC0415
 
     from . import agent_session  # noqa: PLC0415
@@ -1650,8 +1672,7 @@ def _save_announced(c: str) -> None:
 
 @router.post("/agents")
 async def agents_route(body: AgentsQuery) -> dict[str, Any]:
-    """thimble's agents for the folder's workspace: `{rows, line, text}` for the statusline (in terminal-first mode only)
-    and /thimble:agents, and with `announce` the lines main's terminal has not shown yet (the plugin's hooks print them):
+    """thimble's agents for the folder's workspace: `{rows, line, text}` for the statusline and /thimble:agents, and with `announce` the lines main's terminal has not shown yet (the plugin's hooks print them):
     each session's start once, with the command that attaches it, and each run's finish."""
     c = config.workspace_for_cwd(body.cwd)
     if not c:
@@ -1672,8 +1693,7 @@ async def agents_route(body: AgentsQuery) -> dict[str, Any]:
                              ("" if alive(e) else " (its session has ended)"))
         if lines:
             _save_announced(c)
-    line = status_line(rows) if terminal_first(c) else ""
-    return {"rows": rows, "line": line, "text": listing_text(rows), "announce": "\n".join(lines)}
+    return {"rows": rows, "line": status_line(rows), "text": listing_text(rows), "announce": "\n".join(lines)}
 
 
 class RelayBody(BaseModel):
@@ -1709,6 +1729,7 @@ async def relay_route(body: RelayBody) -> dict[str, Any]:
 class AgentCheckBody(BaseModel):
     cwd: str
     agent_id: str | None = None
+    tool_use_id: str | None = None
     tool_input: dict[str, Any] = {}
 
 
@@ -1716,7 +1737,7 @@ class AgentCheckBody(BaseModel):
 async def agent_check_route(body: AgentCheckBody) -> dict[str, Any]:
     """The PreToolUse hook before main's Agent call (agent_check): `{deny, reason}`."""
     c = config.workspace_for_cwd(body.cwd)
-    reason = agent_check(c, body.tool_input) if c and not body.agent_id else None
+    reason = agent_check(c, body.tool_input, body.tool_use_id) if c and not body.agent_id else None
     if reason:
         log.info("%s: an Agent call is refused: %s", c, reason)
     return {"deny": bool(reason), "reason": reason or ""}

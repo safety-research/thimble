@@ -26,8 +26,9 @@ no server, so a process on the recorded port is neither told anything nor believ
 
 The hook long-polls the server for the session's next event (GET /api/channel/pull), writes it to stderr in the
 `<channel …>` form, acknowledges it and exits 2, which makes Claude Code wake the session. It exits 0 in a subagent, when
-another watcher holds the session's lock, when no server listens at first, on 404/409/410 (STOP), and when the
-`claude` process has moved to another session (/clear). A server that has answered once is waited for across restarts.
+another watcher holds the session's lock, when no server listens at first, on 404/409/410 (STOP), when the `claude`
+process has moved to another session (/clear), and when that process has exited. A server that has answered once is
+waited for across restarts.
 
 The permission hook relays the prompt to the server, which shows it in main's chat and answers when the analyst does.
 
@@ -219,6 +220,16 @@ def claude_pid() -> int | None:
     return None
 
 
+def alive(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        pass
+    return True
+
+
 def process_session(pid: int | None) -> str | None:
     """The session the `claude` process `pid` runs now, from Claude Code's record of it, which /clear rewrites (module
     note); None when unknown."""
@@ -240,6 +251,8 @@ def pull(cwd: str, session: str, until: float, pid: int | None = None, *,
     one, and a hook's watcher whose session the process has left (/clear) stops."""
     reached = False
     while time.monotonic() < until:
+        if pid and not alive(pid):
+            return None
         now = process_session(pid)
         if now and now != session:
             if not follow:
@@ -352,18 +365,19 @@ def mode(inp: dict) -> int:
 
 
 def show_link(session: str) -> None:
-    """The link /thimble left for `session`, printed as the hook's systemMessage and then deleted (module note)."""
+    """The link /thimble left for `session`, and the lines left after it, printed as the hook's systemMessage and then
+    deleted (module note)."""
     name = "".join(ch for ch in session if ch.isalnum() or ch in "-_")
     if not name:
         return
     path = home() / "links" / name
     try:
-        url = path.read_text("utf-8").strip()
+        url, _, notes = path.read_text("utf-8").strip().partition("\n")
         path.unlink()
     except OSError:
         return
     if url:
-        print(json.dumps({"systemMessage": f"thimble: {url}"}))
+        print(json.dumps({"systemMessage": f"thimble: {url}" + (f"\n{notes}" if notes else "")}))
 
 
 def announcements(inp: dict) -> str:
@@ -415,7 +429,8 @@ def agent_check(inp: dict) -> int:
     tool_input = inp.get("tool_input") if isinstance(inp.get("tool_input"), dict) else {}
     if inp.get("agent_id") or not tool_input:
         return 0
-    body = {"cwd": folder(inp), "agent_id": None, "tool_input": tool_input}
+    body = {"cwd": folder(inp), "agent_id": None, "tool_use_id": inp.get("tool_use_id") or None,
+            "tool_input": tool_input}
     try:
         status, answer = request("POST", "/api/bg/agent-check", body, timeout=AGENTS_WAIT_S)
     except (OSError, http.client.HTTPException):

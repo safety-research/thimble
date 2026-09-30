@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
 // The model line at a composer's foot (src/chat/ModelLine.tsx): on the Start card the orientation's model is a menu of
 // the models the settings name and the current ones, as a role's is, and a pick is handed to the card's owner to save;
-// the card has one form, which also offers Ultracode, the critique and the permission mode (terminal-first mode runs
-// the orientation as a background session that takes them all). Fast mode's bolt names itself in the
+// the card has one form, which also offers Ultracode, the critique and the permission mode (the orientation runs as a
+// background session that takes them all). Fast mode's bolt names itself in the
 // shared tooltip on hover and on keyboard focus, wherever it is drawn. Every request is answered by a stand-in fetch.
 import { act } from 'react'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'

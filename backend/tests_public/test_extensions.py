@@ -15,7 +15,7 @@ import pytest
 
 from fastapi import HTTPException
 
-from app import card_check, cardtypes, cli, config, extensions, orient_session, prompts, report_types, views
+from app import card_check, cardtypes, cli, config, extensions, orient_session, prompts, report_types, userconf, views
 from app.ledger import write_json
 
 FIXTURE = Path(__file__).parent / "fixtures" / "ext-min"
@@ -198,10 +198,34 @@ async def test_the_card_check_gives_back_the_arguments_keep_set(corpus):
         "once an undo took Keep's arguments out of the code, they bind nothing")
 
 
-def test_the_config_keys_of_extensions_are_checked():
-    assert extensions.config_problems({"extensions": {"a": {"enabled": False}}, "agents": {"a:b": {"web": "off"}}}) == []
-    got = extensions.config_problems({"extensions": {"a": {"on": 1}}, "agents": {"a:b": {"web": "always"}}})
-    assert got == ["extensions.a.on is not a setting; it takes enabled", "agents.a:b.web is \"always\"; it takes off, ask, allow"]
+def _config(data: dict) -> None:
+    userconf.global_file().parent.mkdir(parents=True, exist_ok=True)
+    userconf.global_file().write_text(json.dumps(data))
+
+
+async def test_thimble_s_config_switches_extensions_off_and_sets_their_agents(corpus):
+    """`extensions.<name>.enabled` and `agents."<ext>:<name>"` are keys of thimble's config, checked with the rest; an
+    extension's agent takes the settings a subagent of the orientation's session can have, and its web and network only
+    take away what the orientation's allow. A switch that is off holds while another key has an error."""
+    _add()
+    await extensions.refresh(CORPUS)
+    counter = extensions.agent_definitions(CORPUS)["counter"]
+    assert counter["disallowedTools"] == ["WebFetch", "WebSearch"] and counter["tools"] == ["Read", "Grep"]
+    _config({"agents": {"ext-min:counter": {"web": "ask", "effort": "low"}, "orientation": {"network": "on"}}})
+    assert userconf.problem(CORPUS) == ""
+    counter = extensions.agent_definitions(CORPUS)["counter"]
+    assert counter["tools"] == ["Read", "Grep", "WebFetch"] and counter["effort"] == "low"
+    assert counter["disallowedTools"] == ["Bash"], "its network is off while the session's is on"
+    _config({"extensions": {"ext-min": {"enabled": False, "on": 1}}, "agents": {"ext-min:counter": {"web": "always",
+                                                                                                   "fast": True}}})
+    got = userconf.problem(CORPUS)
+    assert "extensions.ext-min.on is not a setting" in got and 'agents.ext-min:counter.web is "always"' in got
+    assert "agents.ext-min:counter.fast is not a setting; an extension's agent runs in the orientation's session" in got
+    assert (await extensions.refresh(CORPUS))["extensions"]["ext-min"]["why"] == "off in thimble's config"
+    userconf.global_file().write_text("{")
+    assert (await extensions.refresh(CORPUS))["extensions"]["ext-min"]["why"] == extensions.CONFIG_UNREAD
+    _config({})
+    assert (await extensions.refresh(CORPUS))["extensions"]["ext-min"]["active"]
 
 
 def test_the_extension_command_adds_lists_and_removes(capsys):

@@ -2,7 +2,7 @@
   "name": "thimble",
   "displayName": "thimble",
   "description": "A browser workspace beside a Claude Code session for making sense of a corpus of files: chat, files, a canvas of cards and a report. Start it with the `thimble` command, which runs Claude Code with this plugin as a channel: the session is the main thread, the browser mirrors it, and what the analyst asks in the browser reaches the session as channel events, or, where channels are off, through the plugin's hooks (hooks/hooks.json). One MCP server (the thimble tools and the channel), the /thimble and /thimble:orient skills, and the shared skill, which loads thimble's shared guidance for subagents that are not forks, since those get none of their parent's prompt. The orientation, a writer, a critique and each run of a report check are Claude Code sessions of their own, and the dev agent builds each proposed view in a background session.",
-  "version": "0.2.0",
+  "version": "0.4.0",
   "repository": "https://github.com/safety-research/thimble",
   "license": "Apache-2.0",
   "mcpServers": "./.mcp.json",

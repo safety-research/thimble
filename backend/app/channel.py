@@ -725,14 +725,14 @@ async def held_route(body: HeldBody) -> dict[str, Any]:
     """The UserPromptSubmit hook, as a turn of main's begins (a prompt typed in the terminal, or an event the watcher
     wrote out): `{text, terminal}`, the quiet events waiting as MEANWHILE, which the hook adds to the prompt ('' when
     none wait or `session` is not main), and the lines main's terminal shows of the events the session's watcher wrote
-    out and of those quiet events, which it prints. 404 when the folder is no workspace."""
+    out and of those quiet events, which it prints, each line once. 404 when the folder is no workspace."""
     c = config.workspace_for_cwd(body.cwd)
     if not c:
         raise HTTPException(404, f"{body.cwd} is not a thimble workspace")
     main = _main_sid(c)
     riders = pop_held(c) if main and body.session == main else []
     lines = [*_lines.pop((c, body.session or ""), []), _joined(riders)]
-    return {"text": meanwhile(riders), "terminal": "\n".join(x for x in lines if x)}
+    return {"text": meanwhile(riders), "terminal": "\n".join(dict.fromkeys(x for x in lines if x))}
 
 
 class ModeBody(BaseModel):

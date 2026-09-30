@@ -8,6 +8,8 @@
 #   plugin/               the Claude Code plugin (skill, .mcp.json, bin/) — what the marketplace installs
 #   extensions/           the extensions thimble ships, which `thimble extension add <name>` copies into ~/.thimble/extensions
 #   backend/              the server (app/, tests_public/, pyproject.toml, uv.lock); never .venv or __pycache__
+#   backend/requirements.txt  uv.lock's runtime packages with the hashes of their files (uv export), which install.sh
+#                         installs with uv pip or pip from the package index the machine is set up with
 #   prompts/              read by the server at run time (prompts.py)
 #   frontend/dist/        the built UI (tsc --noEmit -p tsconfig.app.json + vite build here, or --dist DIR), served at /
 #                         by the server when THIMBLE_DEV is off (main.py)
@@ -15,14 +17,16 @@
 #                         the UI's source: every install carries the source so the dev agent works everywhere;
 #                         with Node >= 20 install.sh installs its packages from package-lock.json (custom views need
 #                         them) and builds dist when there is none. Never node_modules
+#   frontend/runtime/     package.json and package-lock.json of the frontend packages the server and its scripts load
+#                         (runtime_npm, below), cut from the frontend's own: what install.sh installs beside a built dist
 #   .claude-plugin/       marketplace.json listing ./plugin, its name set to --marketplace-name (default thimble-local,
 #                         so a zip install and the repo-as-marketplace "thimble" can coexist on one machine)
 #   scripts/install.sh scripts/update.sh scripts/rebuild_ui.sh   what an install runs; scripts/dev/ never ships
 #   scripts/view_shot.mjs the headless page of a view's checks (backend/app/views.py runs it)
 #   scripts/ui_shot.mjs   the page screenshots of main's `screenshot` tool and of the dev agent (dev.py runs it)
-#   README.md LICENSE INSTALL.md docs/assets/thimble-banner.svg   the readme, the Apache-2.0 license, the install guide
-#                         and the banner the readme links; a link of the readme to a file the zip does not carry points
-#                         at that file on GitHub, at the release's commit
+#   README.md LICENSE INSTALL.md docs/config.md docs/assets/thimble-banner.svg   the readme, the Apache-2.0 license,
+#                         the install guide, the config's reference it links and the banner the readme links; a link of
+#                         these pages to a file the zip does not carry points at that file on GitHub, at the release's commit
 #   THIRD_PARTY_NOTICES   the licenses of the npm packages and fonts frontend/dist bundles, which ask for their notices
 #                         to travel with it; written by scripts/third_party_notices.py from frontend/node_modules, and
 #                         only when the zip carries frontend/dist
@@ -65,12 +69,16 @@ done
 die() { echo "release.sh: $*" >&2; exit 1; }
 need() { command -v "$1" >/dev/null 2>&1 || die "$1 is required"; }
 need git; need zip; need python3
+# the frontend packages a release loads at run time: vega, vega-lite and vega-embed (a view page's libraries,
+# backend/app/views.py LIBS, and a card's chart in its picture, tools.py VEGA_BUILDS), playwright (the headless page of
+# scripts/view_shot.mjs and scripts/ui_shot.mjs) and the fonts view_shot.mjs gives a view's page
+runtime_npm=(vega vega-lite vega-embed playwright @fontsource/geist-mono @fontsource/hanken-grotesk)
 
 version="$(python3 -I -c 'import json,sys; print(json.load(open(sys.argv[1]))["version"])' "$repo/plugin/.claude-plugin/plugin.json")"
 [ -n "$version" ] || die "plugin/.claude-plugin/plugin.json has no version"
 sha="$(git -C "$repo" rev-parse --short HEAD)"
 full_sha="$(git -C "$repo" rev-parse HEAD)"
-allow=(plugin extensions backend prompts .claude-plugin README.md INSTALL.md docs/assets/thimble-banner.svg LICENSE
+allow=(plugin extensions backend prompts .claude-plugin README.md INSTALL.md docs/config.md docs/assets/thimble-banner.svg LICENSE
        scripts/install.sh scripts/update.sh scripts/rebuild_ui.sh scripts/view_shot.mjs scripts/ui_shot.mjs
        frontend/src frontend/public frontend/index.html frontend/package.json
        frontend/package-lock.json frontend/vite.config.ts frontend/tsconfig.json frontend/tsconfig.app.json frontend/tsconfig.node.json)
@@ -126,6 +134,68 @@ if [ -n "$src_dist" ]; then
   [ -d "$repo/frontend/node_modules" ] || die "frontend/node_modules is missing, and THIRD_PARTY_NOTICES needs the license texts it holds: run npm ci in frontend/"
   python3 -I "$repo/scripts/third_party_notices.py" --root "$repo" --out "$stage/THIRD_PARTY_NOTICES" >&2
 fi
+if [ -f "$stage/backend/uv.lock" ]; then
+  need uv
+  (cd "$stage/backend" && uv export --frozen --no-dev --no-emit-project --quiet) > "$stage/backend/requirements.txt"
+fi
+if [ -f "$stage/frontend/package-lock.json" ]; then
+  python3 -I - "$stage/frontend" "${runtime_npm[@]}" <<'PY' || die "frontend/runtime could not be cut from frontend/package-lock.json (above)"
+import json, os, sys
+
+fe, names = sys.argv[1], sys.argv[2:]
+entries = json.load(open(os.path.join(fe, "package-lock.json")))["packages"]
+
+
+def within_major(version):
+    """Any version of the pinned one's major (of its minor for 0.x): what install.sh's fallback may install where the
+    registry lacks the pin, older versions included."""
+    major, minor = version.split(".")[:2]
+    return f"^{major}.0.0" if major != "0" else f"^0.{minor}.0"
+
+
+
+def find(at, name):
+    """The lock entry Node resolves `name` to from the package at `at`: its own node_modules, then each one above."""
+    while True:
+        path = f"{at}/node_modules/{name}" if at else f"node_modules/{name}"
+        if path in entries:
+            return path
+        if not at:
+            return None
+        at = at[:at.rfind("/node_modules/")] if "/node_modules/" in at else ""
+
+
+keep, todo = {}, [f"node_modules/{n}" for n in names]
+while todo:
+    path = todo.pop()
+    if path in keep:
+        continue
+    entry = dict(entries[path])
+    # the registry npm is set up with serves each file; dev flags would leave packages out of the install
+    for key in ("resolved", "dev", "devOptional"):
+        entry.pop(key, None)
+    if entries[path].get("devOptional"):
+        entry["optional"] = True
+    keep[path] = entry
+    optional = {**entry.get("optionalDependencies", {}),
+                **{d: 1 for d, m in entry.get("peerDependenciesMeta", {}).items() if m.get("optional")}}
+    for field in ("dependencies", "optionalDependencies", "peerDependencies"):
+        for dep in entry.get(field, {}):
+            hit = find(path, dep)
+            if hit:
+                todo.append(hit)
+            elif dep not in optional:
+                sys.exit(f"{path} needs {dep}, which frontend/package-lock.json does not hold")
+root = {"name": "thimble-runtime", "private": True,
+        "dependencies": {n: within_major(entries[f"node_modules/{n}"]["version"]) for n in names}}
+os.makedirs(os.path.join(fe, "runtime"), exist_ok=True)
+with open(os.path.join(fe, "runtime", "package.json"), "w") as f:
+    f.write(json.dumps(root, indent=2) + "\n")
+with open(os.path.join(fe, "runtime", "package-lock.json"), "w") as f:
+    f.write(json.dumps({"name": root["name"], "lockfileVersion": 3, "requires": True,
+                        "packages": {"": root, **dict(sorted(keep.items()))}}, indent=2) + "\n")
+PY
+fi
 python3 -I - "$stage/.claude-plugin/marketplace.json" "$mp_name" <<'PY'
 import json, sys
 p, name = sys.argv[1], sys.argv[2]
@@ -134,19 +204,23 @@ d["name"] = name
 json.dump(d, open(p, "w"), indent=2)
 open(p, "a").write("\n")
 PY
-# the readme's links to files the zip does not carry (CLAUDE.md, docs/) go to GitHub, so none is broken in an install
+# the pages' links to files the zip does not carry (CLAUDE.md, docs/) go to GitHub, so none is broken in an install
 python3 -I - "$stage" "$gh_repo" "$full_sha" <<'PY'
 import os, re, sys
 stage, repo, sha = sys.argv[1:]
-p = os.path.join(stage, "README.md")
-if os.path.isfile(p):
+for rel in ("README.md", "INSTALL.md", "docs/config.md"):
+    p = os.path.join(stage, rel)
+    if not os.path.isfile(p):
+        continue
+    here = os.path.dirname(rel)
     text = open(p, encoding="utf-8").read()
     def fix(m):
         target = m.group(2)
         path = target.split("#", 1)[0]
-        if not path or re.match(r"^[a-z][a-z0-9+.-]*:", target) or os.path.exists(os.path.join(stage, path)):
+        if not path or re.match(r"^[a-z][a-z0-9+.-]*:", target) or os.path.exists(os.path.join(stage, here, path)):
             return m.group(0)
-        return f"{m.group(1)}https://github.com/{repo}/blob/{sha}/{target})"
+        whole = os.path.normpath(os.path.join(here, target)).replace(os.sep, "/")
+        return f"{m.group(1)}https://github.com/{repo}/blob/{sha}/{whole})"
     open(p, "w", encoding="utf-8").write(re.sub(r"(\]\()([^)\s]+)\)", fix, text))
 PY
 python3 -I - "$stage/RELEASE.json" "$version" "$sha" "$full_sha" "$date" "$dirty" "$([ -n "$src_dist" ] && echo true || echo false)" "$gh_repo" <<'PY'

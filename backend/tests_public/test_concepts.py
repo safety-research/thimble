@@ -339,3 +339,29 @@ def test_a_prompt_label_reads_a_save_of_a_whole_page_as_what_it_changed(tmp_path
     assert every["revisions.jsonl#L4"] == picked["revisions.jsonl#L4"] == "All new\ntext here\nand more"
     assert concepts._save_key({"seq": 2, "service": "web-1", "text": "disk full"}) is None
     assert concepts._save_key({"version": "2.1.0", "type": "system", "content": "compacted"}) is None
+async def test_the_server_s_shutdown_ends_the_label_scan_pool_s_workers():
+    """A worker still busy with a chunk when the server stops is ended, not left running after the server exits."""
+    import os
+    import time
+
+    from app import concepts
+
+    life = concepts._lifespan(None)
+    await life.__aenter__()
+    pool = concepts._pool_get()
+    pool.submit(time.sleep, 60)
+    for _ in range(200):
+        if pool._processes:
+            break
+        time.sleep(0.05)
+    pids = list(pool._processes)
+    assert pids
+    started = time.monotonic()
+    await life.__aexit__(None, None, None)
+    assert concepts._pool is None and time.monotonic() - started < 30
+    for pid in pids:
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            continue
+        raise AssertionError(f"the pool's worker {pid} still runs")

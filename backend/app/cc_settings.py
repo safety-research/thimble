@@ -215,11 +215,14 @@ def sandbox_ok(refresh: bool = False) -> bool:
     return ok
 
 
-def offline_sandbox(auto_allow: bool = False) -> dict[str, Any]:
-    """The `sandbox` settings of a session thimble fences (agent_session.fence, view builds): on, with no network and no
-    command run outside it; `auto_allow` lets a command that runs in it skip its permission request."""
-    return {"enabled": True, "failIfUnavailable": False, "autoAllowBashIfSandboxed": auto_allow,
-            "allowUnsandboxedCommands": False, "network": {"deniedDomains": ["*"]}}
+def offline_sandbox(auto_allow: bool = False, network: bool = False, required: bool = False) -> dict[str, Any]:
+    """The `sandbox` settings of a session thimble fences (agent_session.fence, view builds): on, with no network unless
+    `network` (then the analyst's own sandbox settings say where it reaches), and no command run outside it;
+    `auto_allow` lets a command that runs in it skip its permission request; `required` (sandbox.enforce) has Claude
+    Code refuse to start the session when its sandbox can't run, rather than run its commands unsandboxed."""
+    out = {"enabled": True, "failIfUnavailable": required, "autoAllowBashIfSandboxed": auto_allow,
+           "allowUnsandboxedCommands": False}
+    return out if network else {**out, "network": {"deniedDomains": ["*"]}}
 
 
 def sandbox_excluded(cwd: Path) -> list[str]:
@@ -268,9 +271,9 @@ def sandbox_missing() -> list[str]:
     return missing or ["user namespaces for bwrap"]
 
 
-# The root commands that make the sandbox run (sandbox_setup), which install.sh and `thimble doctor` print and never
-# run, since they need root and thimble does not rely on having it. The packages are bubblewrap and socat on every
-# distribution with one of these managers.
+# The root commands that make the sandbox run (sandbox_setup), which `thimble doctor` prints and never runs, since
+# they need root (install.sh runs the same ones on a yes to its sandbox question). The packages are bubblewrap and socat
+# on every distribution with one of these managers.
 PACKAGE_INSTALL = (("apt-get", "apt-get install -y bubblewrap socat"), ("dnf", "dnf install -y bubblewrap socat"),
                    ("zypper", "zypper install -y bubblewrap socat"), ("pacman", "pacman -S --needed bubblewrap socat"),
                    ("apk", "apk add bubblewrap socat"))
@@ -298,7 +301,7 @@ def _apparmor_needed(bwrap: str) -> bool:
 
 def sandbox_setup() -> tuple[list[str], str]:
     """(the root commands that would make the sandbox run on this machine, what they do or why there are none), for
-    install.sh and `thimble doctor`: [] when it runs, off Linux, or when no root command is at hand (not root and no
+    `thimble doctor`: [] when it runs, off Linux, or when no root command is at hand (not root and no
     sudo), the second item then saying what an administrator installs. The commands are printed, never run."""
     if sys.platform != "linux" or sandbox_ok():
         return [], ""

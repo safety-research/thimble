@@ -34,8 +34,8 @@ analyst when its build passed its checks); the report is asked for once no follo
 Restarts. A run a server stop cut short is resumed by the next server with `--resume` in the same chat. A failed first
 run is resumed as run 0 when start_orientation asks for the same orientation again, rather than redoing its work.
 
-Terminal-first mode (orientation module note): the same session runs as the background session `thimble:orient · <c>`
-(agent_session's `background`, bg_session.wanted), which the analyst's terminal shows in its agent tray.
+The session runs as the background session `thimble:orient · <c>` (agent_session's `background`), which the analyst's
+terminal shows in its agent tray.
 
 Follow-ups. Messages from main's `message_orientation` tool or the thread's composer go through message(): a finished
 orientation's session is resumed with the message in `## orient-follow-up`; a message sent while a run goes waits in the
@@ -56,7 +56,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-from . import agent_session, agents, bg_session, cc_settings, config, ledger, orientation, prompts, tools
+from . import agent_session, agents, bg_session, cc_settings, config, ledger, orientation, prompts, tools, userconf
 
 log = logging.getLogger("thimble.orient_session")
 router = APIRouter()
@@ -195,7 +195,8 @@ def _launch(c: str, brief: str, passes: "list[str]", choices: dict[str, Any]) ->
     effort = effort_of(choices)
     ultracode = bool(choices.get("ultracode"))
     parts = parts_of(choices, passes)
-    name, agent = agent_definition(c, brief, parts)
+    with prompts.custom(userconf.prompt_files(c, "orientation")):
+        name, agent = agent_definition(c, brief, parts)
     from . import extensions  # noqa: PLC0415
 
     defined = {**extensions.agent_definitions(c), name: agent}
@@ -204,7 +205,7 @@ def _launch(c: str, brief: str, passes: "list[str]", choices: dict[str, Any]) ->
                 agent_args=["--agents", json.dumps(defined, ensure_ascii=False), "--agent", name], effort=effort,
                 settings=agent_session.settings_json(effort, env, ultracode=ultracode, fastMode=bool(own["fast"])),
                 agent_type=name, append_shared=False, model=own["model"], work=work_dir(c), calls=True,
-                agent="orient", patient=True, disallowed=disallowed(parts), background=bg_session.wanted(c, "orient"))
+                agent="orient", patient=True, disallowed=disallowed(parts), background=True)
 
 
 async def start(c: str, brief: str, passes: "list[str] | tuple[str, ...]" = ("final", "views"),
@@ -448,8 +449,17 @@ def report_cards(c: str) -> set[str]:
 
 def _ended(run: agent_session.Run, status: str, summary: str) -> None:
     """A run of the session ended: its record closes (the first run's reveals its outputs), main hears it, then waiting
-    messages start the next run, or the report pass is asked for."""
+    messages start the next run, or the report pass is asked for. A run the analyst stopped stops the builds of the
+    views the orientation proposed (dev.stop_orientation_views) before main hears what it made."""
     c = run.c
+    if _analyst_stopped(run, status):
+        from . import dev  # noqa: PLC0415 — dev imports the modules that import this one
+
+        try:
+            if stopped := dev.stop_orientation_views(c):
+                log.info("%s: the orientation was stopped, and so were the builds of %s", c, ", ".join(stopped))
+        except Exception:  # noqa: BLE001 — the run ends either way
+            log.exception("%s: the builds of the orientation's views were not stopped", c)
     try:
         if run.k == 0:
             orientation.finished(c, run.chat, status, summary, report=False)
@@ -478,6 +488,14 @@ def _ended(run: agent_session.Run, status: str, summary: str) -> None:
         return
     if status == "done":
         _report(c)
+
+
+def _analyst_stopped(run: agent_session.Run, status: str) -> bool:
+    """Whether the analyst stopped the run: with Stop, or, for a background session, with `claude stop` or the agent
+    view. The server's own stop and a failure are not."""
+    if run.interrupted:
+        return False
+    return status == "stopped" or (run.bg and bg_session.stopped_in_claude(run.c, run.key))
 
 
 def _clear_temp(c: str) -> None:
@@ -544,18 +562,21 @@ agents.on_agent_finished(_writer_finished)
 
 
 VIEW_LINES = {"built": "orient-views-built", "failed": "orient-views-failed", "building": "orient-views-building",
-              "suggested": "orient-views-suggested"}
+              "stopped": "orient-views-stopped", "suggested": "orient-views-suggested"}
 
 
 def view_counts(c: str, since: datetime | None) -> dict[str, int]:
     """The views the orientation proposed since `since`, by where their builds stand (built, failed, building; queued or
-    held count as building), and the viewers for file types it suggested. Proposals main made at the analyst's request,
-    and dropped ones, are not counted."""
-    from . import views  # noqa: PLC0415
+    held count as building; stopped, those the analyst's Stop dropped), and the viewers for file types it suggested.
+    Proposals main made at the analyst's request, and those dropped as they failed, are not counted."""
+    from . import dev, views  # noqa: PLC0415
 
     counts = dict.fromkeys(VIEW_LINES, 0)
     for p in views.list_proposals(c):
-        if p.get("asked") or p.get("status") == "dropped" or (since is not None and ((t := _at(p.get("ts"))) is None or t < since)):
+        if p.get("asked") or (since is not None and ((t := _at(p.get("ts"))) is None or t < since)):
+            continue
+        if p.get("status") == "dropped":
+            counts["stopped"] += p.get("error") == dev.ORIENTATION_STOPPED
             continue
         counts[p["status"] if p.get("status") in ("built", "failed", "suggested") else "building"] += 1
     return counts

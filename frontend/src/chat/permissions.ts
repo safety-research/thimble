@@ -57,6 +57,7 @@ const ASKS_TO: Readonly<Record<string, string>> = {
   WebSearch: 'search the web',
   Agent: 'start an agent',
   Task: 'start an agent',
+  ThimbleCode: "edit thimble's own code",
 }
 
 /** What the request asks to do, in words (run a command); another tool is named (use thimble's add_card). Pure. */
@@ -143,13 +144,14 @@ export function modeChat(ask: PendingAsk, metas: ReadonlyMap<string, ChatMeta>):
 /** The modes an orientation runs in, as its switcher names them. */
 const MODE_NAMES: Readonly<Record<string, string>> = { manual: 'Manual', auto: 'Auto', bypass: 'Bypass' }
 
-/** Why the session asks, in one line: auto mode could not judge the call (and when it is denied unanswered) or left it
- * to the analyst, the session runs in Manual (a writer's or check's request is denied after a minute unanswered, the dev
- * agent's after its wait), or main's prompt also waits in the terminal, where the first answer counts; for a request
- * denied unanswered, that it was. Pure. */
+/** Why the session asks, in one line: thimble's own reason when it gives one (a code ticket's question), auto mode
+ * could not judge the call (and when it is denied unanswered) or left it to the analyst, the session runs in Manual (a
+ * writer's or check's request is denied after a minute unanswered, the dev agent's after its wait), or main's prompt
+ * also waits in the terminal, where the first answer counts; for a request denied unanswered, that it was. Pure. */
 export function askWhy(ask: PendingAsk, metas: ReadonlyMap<string, ChatMeta>): string {
   const p = ask.request
   if (p.expired) return `Nobody answered within ${waitWords(p.wait_s ?? 60)}, so it was denied and the session went on without it.`
+  if (p.why) return p.why
   if (classifierDown(p)) {
     const tries = p.rechecked ? `, all ${p.rechecked + 1} times it was asked` : ''
     const late = p.deny_after_s ? ` Unanswered, it is denied ${denyAfter(p.deny_after_s)}.` : ''
