@@ -1499,10 +1499,15 @@ body .bn-mantine .bn-form-popover .mantine-TextInput-input {
 .wu-fig-chart .outputs-svg {
   width: 100%;
 }
-.wu-fig-chart.wu-fig-table {
+.wu-fig-chart.wu-fig-table,
+.wu-fig-chart.wu-fig-wide {
   width: 100%;
   overflow-x: auto;
   padding-bottom: 4px;
+}
+/* the box scrolls the whole chart, legends too, so the chart has no scroll of its own inside it */
+.wu-fig-chart.wu-fig-wide .outputs-vega {
+  overflow: visible;
 }
 .wu-fig-table .outputs-html {
   display: block;
@@ -1511,8 +1516,8 @@ body .bn-mantine .bn-form-popover .mantine-TextInput-input {
   max-height: none;
   overflow: visible;
 }
-/* a table wider than the card scrolls, and a fade at the right edge (set by the block when scrollWidth > clientWidth)
-   says it continues */
+/* a table wider than the card, or a chart at its narrowest in a narrower column, scrolls, and a fade at the right edge
+   (set by the block when scrollWidth > clientWidth) says it continues */
 .wu-fig-scroll {
   position: relative;
 }

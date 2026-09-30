@@ -10,7 +10,7 @@ import { Button } from '../components/Button'
 import { Card } from '../components/Card'
 import { Chip } from '../components/Chip'
 import { TextArea } from '../components/Field'
-import { chartLabels, Output, outIndex, primaryArtifact } from '../components/Outputs'
+import { chartLabels, isVegaLite, Output, outIndex, pickMime, primaryArtifact } from '../components/Outputs'
 import { GlyphCites } from '../components/RefChip'
 import { Spinner } from '../components/Spinner'
 import { api } from '../lib/api'
@@ -22,6 +22,10 @@ import { useReportCtx } from './context'
 import { figureCandidates, readableText } from './model'
 
 const FIGURE_TABLE_ROWS = 20
+/** The narrowest a figure's chart is laid out, px. In a narrower column (a narrow window, with the margin beside the
+ * text) the chart keeps this width and scrolls in its box, as a wide table does: fitted narrower, its views get too
+ * small to read. */
+const FIGURE_CHART_MIN = 320
 
 export interface FigureBlockProps {
   block: { id: string; props: { cell: string; caption: string } }
@@ -139,6 +143,8 @@ function Figure({ ws, id, cellRef, caption, stored, readOnly, bare = false, onCa
 
   const art = cell ? primaryArtifact(cell.outputs) : null
   const shown = art && art.kind !== 'error' ? art.bundle : null
+  // a bare figure stands in a box its page scales it to fit (a slide's, a scene's)
+  const wide = !bare && shown && width < FIGURE_CHART_MIN && isVegaLite(pickMime(shown) ?? '') ? FIGURE_CHART_MIN : undefined
   const body = pending ? (
     <div className="wu-fig-making">
       <Spinner label="working" /> <span>{stored?.make}</span>
@@ -148,8 +154,8 @@ function Figure({ ws, id, cellRef, caption, stored, readOnly, bare = false, onCa
       <Spinner label="working" />
     </div>
   ) : shown && width > 0 ? (
-    <FigureOutput table={art?.kind === 'table'} out={outIndex(cell?.outputs, shown)}>
-      <Output bundle={shown} fitWidth={width} maxLines={30} maxRows={FIGURE_TABLE_ROWS} labels={chartLabels(cell?.labels, concepts)} />
+    <FigureOutput table={art?.kind === 'table'} wide={wide} out={outIndex(cell?.outputs, shown)}>
+      <Output bundle={shown} fitWidth={wide ?? width} maxLines={30} maxRows={FIGURE_TABLE_ROWS} labels={chartLabels(cell?.labels, concepts)} />
     </FigureOutput>
   ) : cell && !art && width > 0 ? (
     <CardFigure ws={ws} cell={cell} width={width} />
@@ -215,10 +221,11 @@ function CardFigure({ ws, cell, width }: { ws: string; cell: Cell; width: number
 }
 
 /**
- * The chart or table of a figure. A table wider than the column scrolls inside its box, and the box carries
- * `wu-fig-overflow` while it does, so the stylesheet draws a fade at the right edge where the table continues.
+ * The chart or table of a figure. A table wider than the column, or a chart laid out `wide` (px) in a narrower one,
+ * scrolls inside its box, and the box carries `wu-fig-overflow` while it does, so the stylesheet draws a fade at the
+ * right edge where it continues.
  */
-function FigureOutput({ table, out, children }: { table?: boolean; out: number; children: ReactNode }) {
+function FigureOutput({ table, wide, out, children }: { table?: boolean; wide?: number; out: number; children: ReactNode }) {
   const [el, setEl] = useState<HTMLDivElement | null>(null)
   const [overflow, setOverflow] = useState(false)
   useLayoutEffect(() => {
@@ -230,7 +237,7 @@ function FigureOutput({ table, out, children }: { table?: boolean; out: number; 
     for (const kid of Array.from(el.children)) ro.observe(kid)
     return () => ro.disconnect()
   }, [el, children])
-  if (!table)
+  if (!table && !wide)
     return (
       <div className="wu-fig-chart" data-out={out}>
         {children}
@@ -238,8 +245,8 @@ function FigureOutput({ table, out, children }: { table?: boolean; out: number; 
     )
   return (
     <div className={`wu-fig-scroll${overflow ? ' wu-fig-overflow' : ''}`} data-out={out}>
-      <div className="wu-fig-chart wu-fig-table" ref={setEl}>
-        {children}
+      <div className={`wu-fig-chart ${table ? 'wu-fig-table' : 'wu-fig-wide'}`} ref={setEl}>
+        {table ? children : <div style={{ width: wide }}>{children}</div>}
       </div>
     </div>
   )

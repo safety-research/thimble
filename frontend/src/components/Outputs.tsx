@@ -501,7 +501,7 @@ export function scaleWidths(s: Spec, k: number, min: number): Spec {
   }
   const inner = obj(s.spec)
   if (inner) out.spec = scaleWidths(inner, k, min)
-  if (typeof s.width === 'number') out.width = Math.max(min, Math.floor(s.width * k))
+  if (typeof s.width === 'number') Object.assign(out, withViewWidth(out, Math.max(min, Math.floor(s.width * k))))
   const view = (inner && typeof out.spec === 'object' ? (out.spec as Spec).width : out.width) as number | undefined
   if (typeof view === 'number' && typeof s.title === 'string') {
     const lines = wrapTitleText(s.title, Math.max(12, Math.floor(view / TITLE_CHAR_PX)))
@@ -513,6 +513,37 @@ export function scaleWidths(s: Spec, k: number, min: number): Spec {
   const enc = obj(s.encoding)
   const ecol = enc ? obj(enc.column) : null
   if (enc && ecol && typeof view === 'number') out.encoding = { ...enc, column: { ...ecol, header: { labelLimit: view, ...(obj(ecol.header) ?? {}) } } }
+  return out
+}
+
+const POSITION_X = ['x', 'x2']
+
+/** A view at `width` px wide, with every x position it or its layers name in px (`x: {value: 640}`, as a label at the
+ * designed right edge) scaled with it, so a mark at the old right edge stays at the new one. */
+function withViewWidth(s: Spec, width: number): Spec {
+  const from = typeof s.width === 'number' && s.width > 0 ? s.width : null
+  const out: Spec = { ...s, width }
+  return from && from !== width ? scaleXValues(out, width / from) : out
+}
+
+function scaleXValues(s: Spec, k: number): Spec {
+  const out: Spec = { ...s }
+  const enc = obj(s.encoding)
+  if (enc) {
+    let next: Spec | null = null
+    for (const ch of POSITION_X) {
+      const def = obj(enc[ch])
+      if (def && typeof def.value === 'number') (next ??= { ...enc })[ch] = { ...def, value: Math.round(def.value * k) }
+    }
+    if (next) out.encoding = next
+  }
+  const mark = obj(s.mark)
+  if (mark && POSITION_X.some((ch) => typeof mark[ch] === 'number')) {
+    const m: Spec = { ...mark }
+    for (const ch of POSITION_X) if (typeof mark[ch] === 'number') m[ch] = Math.round((mark[ch] as number) * k)
+    out.mark = m
+  }
+  if (Array.isArray(s.layer)) out.layer = s.layer.map((l) => (obj(l) ? scaleXValues(obj(l)!, k) : l))
   return out
 }
 
@@ -530,7 +561,7 @@ export function fitComposite(s: Spec, w: number, root: Spec, min: number = MIN_V
   const child = (c: unknown, width: number): unknown => {
     const cs = obj(c)
     if (!cs) return c
-    return isComposite(cs) ? fitComposite(cs, width, root, min) : { ...cs, width }
+    return isComposite(cs) ? fitComposite(cs, width, root, min) : withViewWidth(cs, width)
   }
   const chrome = (s === root ? CHROME : CHROME_NESTED) + (s === root ? legendRoom : 0)
   const { hconcat, vconcat, concat } = s
@@ -630,8 +661,29 @@ export function measureOverrun(el: HTMLElement): Overrun | null {
       break
     }
   }
-  const b = svg.getBBox()
-  return { svg: Math.ceil(w - box), drawn: Math.ceil(b.x + b.width - w), left: Math.ceil(-b.x), legend }
+  const d = shownExtent(svg)
+  const left = d ? (d.left - sr.left) / k : 0
+  const right = d ? (d.right - sr.left) / k : w
+  return { svg: Math.ceil(w - box), drawn: Math.ceil(right - w), left: Math.ceil(-left), legend }
+}
+
+/** The left and right of what an svg draws, on the page, leaving out what a clip path cuts away: a mark clipped to its
+ * view (a line over a scale whose domain the spec sets) still counts in getBBox wherever its path runs. Null when it
+ * draws nothing. */
+function shownExtent(svg: SVGSVGElement): { left: number; right: number } | null {
+  let out: { left: number; right: number } | null = null
+  const walk = (el: Element) => {
+    if (el.hasAttribute('clip-path') || el.tagName.toLowerCase() === 'defs') return
+    if (el.querySelector('[clip-path]')) {
+      for (const kid of Array.from(el.children)) walk(kid)
+      return
+    }
+    const r = el.getBoundingClientRect()
+    if (r.width <= 0 && r.height <= 0) return
+    out = out ? { left: Math.min(out.left, r.left), right: Math.max(out.right, r.right) } : { left: r.left, right: r.right }
+  }
+  for (const kid of Array.from(svg.children)) walk(kid)
+  return out
 }
 
 /** the room a legend entry takes besides its label: the symbol and its offset */
@@ -886,8 +938,10 @@ function Vega({ spec, fitWidth, card, labels }: { spec: unknown; fitWidth?: numb
       if (over && tries > 0) {
         if (over.legend) return embed(w, { ...fit, ...legendWrap(over.legend) }, tries - 1)
         // a composite whose drawing runs past its svg's right edge (the last tick label of its last view) is embedded
-        // again that much narrower, so the label lands inside
-        if (!container && over.svg <= 0 && over.drawn > 0) return embed((w ?? box) - over.drawn - 2, fit, tries - 1)
+        // again that much narrower, so the label lands inside; never at 0 or less, which would draw the composite at the
+        // widths its spec names
+        const inside = (w ?? box) - over.drawn - 2
+        if (!container && over.svg <= 0 && over.drawn > 0 && inside > 0) return embed(inside, fit, tries - 1)
         // (not one widened on purpose so its x labels fit their columns)
         if (!container && over.svg > 0 && !fit.xLabels?.step) {
           // a composite too wide: its views narrower; when narrowing did nothing, its labels take the room, so they are cut and
@@ -896,7 +950,8 @@ function Vega({ spec, fitWidth, card, labels }: { spec: unknown; fitWidth?: numb
           const gained = step ? step.over - over.svg : 0
           if (step && gained < 1 && fit.axisLabel == null) return embed(fitWidth, { ...fit, ...cutLabels }, tries - 1)
           const gain = step && step.w > cur && gained >= 1 ? Math.min(4, Math.max(1, (step.w - cur) / gained)) : 1
-          return embed(Math.round(cur - over.svg * gain), fit, tries - 1, { w: cur, over: over.svg })
+          const next = Math.round(cur - over.svg * gain)
+          if (next > 0) return embed(next, fit, tries - 1, { w: cur, over: over.svg })
         }
         const plot = container ? Number((r.view as { width: () => unknown }).width()) : NaN
         if (fit.axisLabel == null && plot < box * MIN_PLOT_SHARE) return embed(w, { ...fit, ...cutLabels }, tries - 1)
