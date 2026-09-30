@@ -1,0 +1,374 @@
+"""A code ticket's box: the server runs the ticket's checks and its preview server in Anthropic's sandbox runtime (srt,
+npm @anthropic-ai/sandbox-runtime, installed in frontend/node_modules: Seatbelt on macOS, bubblewrap on Linux), so the
+code the dev agent edited runs in a sandbox until the analyst allows the change into thimble's own code.
+
+What a box allows (Box.settings):
+  read     the system, minus the home folder, thimble's home, the Claude config folder, the live checkout, the live
+           workspaces and the temp folders; of those, only the worktree, the ticket's cache folder, the Python and
+           Node the checks run, the venv and node_modules the worktree links to, and `reads` (the workspace's corpus)
+  write    the worktree and the cache folder (TMPDIR, HOME, the UI build, the preview server's home and workspace copy)
+  network  none: srt's proxy refuses every host
+  env      ENV_KEEP of the server's environment and the caller's names, so no key or login reaches the box
+srt's own settings and sockets live in `host_tmp`, outside the box, where nothing inside can change them.
+
+The preview server (Preview) opens no port inside the box. The host listens on 127.0.0.1 and passes each connection it
+accepts over the server's stdin, a Unix socket (app/handoff_serve.py), so nothing in the box listens or connects, and on
+macOS the Seatbelt profile needs no network rule at all.
+"""
+from __future__ import annotations
+
+import asyncio
+import contextlib
+import json
+import os
+import shutil
+import signal
+import socket
+import subprocess
+import sys
+import tempfile
+import time
+import urllib.request
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any, Sequence
+
+from . import cli, config
+
+SRT_CLI = Path("@anthropic-ai") / "sandbox-runtime" / "dist" / "cli.js"
+NODE_MIN = (20, 11)  # the sandbox runtime's `engines`
+ENV_KEEP = ("PATH", "LANG", "LC_ALL", "LC_CTYPE", "TZ", "USER", "LOGNAME", "TERM")
+PROBE_S = 60.0
+KILL_WAIT_S = 5.0
+HEALTH_WAIT_S = 90.0
+
+NO_NODE = "Node is not installed, and thimble's sandbox runtime needs Node {want} or later"
+OLD_NODE = "Node {have} is too old for thimble's sandbox runtime, which needs Node {want} or later"
+NO_SRT = ("thimble's sandbox runtime (npm @anthropic-ai/sandbox-runtime) is not installed in {where}; run the installer "
+          "again")
+SRT_FAILED = "thimble's sandbox runtime could not start a sandbox: {why}"
+
+_probe: dict[str, str] = {}  # problem()'s answer, probed once per process
+
+
+def node_modules() -> Path:
+    return config.REPO_ROOT / "frontend" / "node_modules"
+
+
+def _node_version(node: str) -> tuple[int, ...] | None:
+    try:
+        out = subprocess.run([node, "--version"], capture_output=True, text=True, timeout=10).stdout.strip()
+        return tuple(int(x) for x in out.lstrip("v").split(".")[:2])
+    except (OSError, subprocess.SubprocessError, ValueError):
+        return None
+
+
+def srt_argv() -> list[str] | None:
+    """The command that runs srt: Node with the package's cli.js from thimble's node_modules; None when either is
+    missing."""
+    node, cli_js = shutil.which("node"), node_modules() / SRT_CLI
+    return [node, str(cli_js)] if node and cli_js.is_file() else None
+
+
+def problem(refresh: bool = False) -> str:
+    """Why a box can't run here, '' when it can: Node, the package, and one sandboxed `true`. Probed once per process."""
+    if "why" in _probe and not refresh:
+        return _probe["why"]
+    want = ".".join(map(str, NODE_MIN))
+    node = shutil.which("node")
+    have = _node_version(node) if node else None
+    if not node:
+        why = NO_NODE.format(want=want)
+    elif have is None or have < NODE_MIN:
+        why = OLD_NODE.format(have=".".join(map(str, have or ())) or "?", want=want)
+    elif srt_argv() is None:
+        why = NO_SRT.format(where=node_modules())
+    else:
+        with tempfile.TemporaryDirectory(prefix="thimble-box-probe-") as d:
+            root = Path(d)
+            for sub in ("tree", "cache", "srt"):
+                (root / sub).mkdir()
+            box = Box(root / "tree", root / "cache", root / "srt")
+            try:
+                done = subprocess.run(box.argv(["true"]), cwd=str(box.tree), env=box.environ(), capture_output=True,
+                                      text=True, timeout=PROBE_S, stdin=subprocess.DEVNULL)
+                tail = (done.stderr or done.stdout).strip().splitlines()
+                why = "" if done.returncode == 0 else SRT_FAILED.format(why=(tail[-1] if tail else f"exit {done.returncode}"))
+            except (OSError, subprocess.SubprocessError) as e:
+                why = SRT_FAILED.format(why=f"{type(e).__name__}: {e}")
+    _probe["why"] = why
+    return why
+
+
+def works() -> bool:
+    return not problem()
+
+
+def _real(p: Path | str) -> Path:
+    return Path(os.path.realpath(p))
+
+
+def _under(p: Path, root: Path) -> bool:
+    return p == root or root in p.parents
+
+
+def denied_roots() -> list[Path]:
+    """The folders a box can't read, but for what Box.settings lets back in (module note)."""
+    home = _real(Path.home())
+    roots = [home, cli.home(), config.claude_config_dir(), config.REPO_ROOT, config.WORKSPACES_DIR, config.DATA_DIR,
+             Path("/tmp"), Path(tempfile.gettempdir())]
+    out: list[Path] = []
+    for r in roots:
+        p = _real(r)
+        if p != Path("/") and p.exists() and not any(_under(p, q) for q in out):
+            out = [q for q in out if not _under(q, p)] + [p]
+    return out
+
+
+def _runtime_reads(tree: Path) -> list[Path]:
+    """What the checks run from outside the worktree: the venv and node_modules it links to, the venv's Python
+    installation (by the name pyvenv.cfg gives and where it really is), Node's bin folder and srt's own package."""
+    out: list[Path] = []
+    venv = tree / "backend" / ".venv"
+    for link in (venv, tree / "frontend" / "node_modules"):
+        if link.exists():
+            out.append(_real(link))
+    home = _real(Path.home())
+    too_wide = {home, home / ".local"}
+    py = venv / "bin" / "python"
+    if py.exists():
+        prefixes = [_real(py).parent.parent]
+        with contextlib.suppress(OSError):
+            for line in (venv / "pyvenv.cfg").read_text("utf-8").splitlines():
+                key, _, value = line.partition("=")
+                if key.strip() == "home" and value.strip():
+                    prefixes += [Path(value.strip()).parent, _real(value.strip()).parent]
+        out += [p for p in prefixes if p not in too_wide]
+    node = shutil.which("node")
+    if node:
+        out.append(_real(node).parent)
+    srt = node_modules() / SRT_CLI.parent.parent
+    if srt.is_dir():  # its seccomp helper runs inside the box
+        out.append(_real(srt))
+    return out
+
+
+@dataclass
+class Box:
+    """One ticket's sandbox (module note). `reads` are extra read-only folders."""
+    tree: Path
+    cache: Path
+    host_tmp: Path
+    reads: tuple[Path, ...] = ()
+
+    def settings(self) -> dict[str, Any]:
+        tree, cache = _real(self.tree), _real(self.cache)
+        reads = [tree, cache, *_runtime_reads(self.tree), *(_real(p) for p in self.reads if Path(p).exists())]
+        return {
+            "network": {"allowedDomains": [], "deniedDomains": []},
+            "filesystem": {"denyRead": [str(p) for p in denied_roots()],
+                           "allowRead": sorted({str(p) for p in reads}),
+                           "allowWrite": [str(tree), str(cache)], "denyWrite": []},
+        }
+
+    def settings_file(self) -> Path:
+        self.host_tmp.mkdir(parents=True, exist_ok=True)
+        p = self.host_tmp / "srt-settings.json"
+        p.write_text(json.dumps(self.settings(), indent=1), "utf-8")
+        return p
+
+    def argv(self, cmd: Sequence[str]) -> list[str]:
+        srt = srt_argv()
+        if srt is None:
+            raise RuntimeError(NO_SRT.format(where=node_modules()))
+        return [*srt, "--settings", str(self.settings_file()), "--", *cmd]
+
+    def environ(self, extra: dict[str, str] | None = None) -> dict[str, str]:
+        """The box's environment: ENV_KEEP, HOME and TMPDIR in the cache folder, and `extra`. srt reads TMPDIR for its
+        own files (host_tmp) and CLAUDE_CODE_TMPDIR for the TMPDIR it gives the command."""
+        for sub in ("home", "tmp"):
+            (self.cache / sub).mkdir(parents=True, exist_ok=True)
+        self.host_tmp.mkdir(parents=True, exist_ok=True)
+        env = {k: os.environ[k] for k in ENV_KEEP if k in os.environ}
+        env.setdefault("LANG", "C.UTF-8")
+        return {**env, "HOME": str(self.cache / "home"), "TMPDIR": str(self.host_tmp),
+                "CLAUDE_CODE_TMPDIR": str(self.cache / "tmp"), "PYTHONDONTWRITEBYTECODE": "1",
+                "VITE_CACHE_DIR": str(self.cache / "vite"), "NO_COLOR": "1", **(extra or {})}
+
+
+def _kill_group(proc: asyncio.subprocess.Process) -> None:
+    with contextlib.suppress(ProcessLookupError, PermissionError):
+        os.killpg(proc.pid, signal.SIGKILL)
+
+
+async def run(box: Box, cmd: Sequence[str], *, cwd: Path, timeout: float,
+              env: dict[str, str] | None = None) -> tuple[int, str]:
+    """`cmd` in the box from `cwd`, its output joined: (exit code, output), -1 on a timeout or when srt can't start."""
+    try:
+        proc = await asyncio.create_subprocess_exec(*box.argv(cmd), cwd=str(cwd), env=box.environ(env),
+                                                    stdin=asyncio.subprocess.DEVNULL, stdout=asyncio.subprocess.PIPE,
+                                                    stderr=asyncio.subprocess.STDOUT, start_new_session=True)
+    except (OSError, RuntimeError) as e:
+        return -1, f"the sandbox runtime could not start: {e}"
+    try:
+        out, _ = await asyncio.wait_for(proc.communicate(), timeout)
+    except asyncio.TimeoutError:
+        _kill_group(proc)
+        await proc.wait()
+        return -1, f"timed out after {timeout:.0f} s"
+    except asyncio.CancelledError:
+        _kill_group(proc)
+        raise
+    return proc.returncode if proc.returncode is not None else -1, out.decode("utf-8", "replace")
+
+
+def fetch(url: str, timeout: float = 5.0) -> bytes:
+    with urllib.request.urlopen(url, timeout=timeout) as r:
+        return r.read()
+
+
+def _health(url: str) -> bool:
+    try:
+        body = json.loads(fetch(f"{url}/api/health", 1.0) or b"{}")
+    except Exception:  # noqa: BLE001
+        return False
+    return isinstance(body, dict) and bool(body.get("ok"))
+
+
+class PreviewError(RuntimeError):
+    """The preview server did not answer; the message ends with its log's tail."""
+
+
+class Preview:
+    """The worktree's server in the box, on http://127.0.0.1:<port> through the host (module note). `port` 0, or a
+    port in use, takes a free one. `env` is the server's environment inside the box."""
+
+    def __init__(self, box: Box, env: dict[str, str], *, port: int = 0, log: Path | None = None) -> None:
+        self.box, self.env, self.port = box, env, port
+        self.log = log or box.cache / "preview.log"
+        self.url = ""
+        self.proc: asyncio.subprocess.Process | None = None
+        self._listener: socket.socket | None = None
+        self._ctl: socket.socket | None = None
+
+    def _listen(self) -> socket.socket:
+        for port in dict.fromkeys((self.port, 0)):
+            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            try:
+                s.bind(("127.0.0.1", port))
+            except OSError:
+                s.close()
+                continue
+            s.listen(64)
+            s.setblocking(False)
+            return s
+        raise PreviewError("no free port on 127.0.0.1")
+
+    def _accept(self) -> None:
+        assert self._listener is not None and self._ctl is not None
+        while True:
+            try:
+                conn, _ = self._listener.accept()
+            except (BlockingIOError, InterruptedError):
+                return
+            except OSError:
+                return
+            with conn:
+                with contextlib.suppress(OSError):  # a server that stops reading loses the connection, never blocks us
+                    socket.send_fds(self._ctl, [b"c"], [conn.fileno()])
+
+    async def start(self, wait_s: float = HEALTH_WAIT_S) -> str:
+        """Start it and wait for /api/health; the URL. PreviewError when it exits or does not answer in time."""
+        self._listener = self._listen()
+        self.port = self._listener.getsockname()[1]
+        self.url = f"http://127.0.0.1:{self.port}"
+        self._ctl, child = socket.socketpair()
+        self._ctl.setblocking(False)
+        py = self.box.tree / "backend" / ".venv" / "bin" / "python"
+        self.log.parent.mkdir(parents=True, exist_ok=True)
+        with self.log.open("ab") as out:
+            try:
+                self.proc = await asyncio.create_subprocess_exec(
+                    *self.box.argv([str(py), "-m", "app.handoff_serve"]), cwd=str(self.box.tree / "backend"),
+                    env=self.box.environ({**self.env, "THIMBLE_PORT": str(self.port)}), stdin=child, stdout=out,
+                    stderr=asyncio.subprocess.STDOUT, start_new_session=True)
+            except (OSError, RuntimeError) as e:
+                child.close()
+                await self.stop()
+                raise PreviewError(f"the sandbox runtime could not start: {e}") from e
+        child.close()
+        asyncio.get_running_loop().add_reader(self._listener.fileno(), self._accept)
+        started = time.monotonic()
+        while time.monotonic() - started < wait_s:
+            if self.proc.returncode is not None:
+                break
+            if await asyncio.to_thread(_health, self.url):
+                return self.url
+            with contextlib.suppress(asyncio.TimeoutError):
+                await asyncio.wait_for(self.proc.wait(), 0.5)
+        why = (f"it exited ({self.proc.returncode}) before it answered" if self.proc.returncode is not None else
+               f"it did not answer /api/health within {wait_s:.0f} s")
+        await self.stop()
+        raise PreviewError(f"{why}\n{self.tail()}".strip())
+
+    def tail(self, chars: int = 3000) -> str:
+        try:
+            return self.log.read_text("utf-8", errors="replace")[-chars:]
+        except OSError:
+            return ""
+
+    async def stop(self) -> None:
+        """Close the host's ends (the server exits on its own), then end its process group."""
+        if self._listener is not None:
+            with contextlib.suppress(Exception):
+                asyncio.get_running_loop().remove_reader(self._listener.fileno())
+            self._listener.close()
+            self._listener = None
+        if self._ctl is not None:
+            self._ctl.close()
+            self._ctl = None
+        proc, self.proc = self.proc, None
+        if proc is None or proc.returncode is not None:
+            return
+        with contextlib.suppress(asyncio.TimeoutError):
+            await asyncio.wait_for(proc.wait(), KILL_WAIT_S)
+            return
+        with contextlib.suppress(ProcessLookupError, PermissionError):
+            os.killpg(proc.pid, signal.SIGTERM)
+        try:
+            await asyncio.wait_for(proc.wait(), KILL_WAIT_S)
+        except asyncio.TimeoutError:
+            _kill_group(proc)
+            await proc.wait()
+
+    async def __aenter__(self) -> "Preview":
+        await self.start()
+        return self
+
+    async def __aexit__(self, *_exc: Any) -> None:
+        await self.stop()
+
+
+def server_env(cache: Path) -> dict[str, str]:
+    """The environment of a thimble server in the box: every folder of its own in the cache folder, no ticket runner,
+    no view builds, no kernel wrapper (the box is one) and no API key."""
+    return {"THIMBLE_SKIP_KEY": "1", "THIMBLE_HOME": str(cache / "server" / "home"),
+            "THIMBLE_WORKSPACES_DIR": str(cache / "server" / "workspaces"),
+            "THIMBLE_DATA_DIR": str(cache / "server" / "data"), "THIMBLE_DEV_DIR": str(cache / "server" / "dev"),
+            "THIMBLE_DEV_STACK": "0", "THIMBLE_VIEW_BUILDS": "0", "THIMBLE_KERNEL_WRAP": "none"}
+
+
+async def boot_check(box: Box, *, port: int = 0) -> dict[str, Any]:
+    """The server-start gate in the box: the tree's server until /api/health answers, then stopped. {name, ok, tail}."""
+    scratch = box.cache / "boot"
+    shutil.rmtree(scratch, ignore_errors=True)
+    started = time.monotonic()
+    preview = Preview(box, server_env(scratch), port=port, log=scratch / "server.log")
+    try:
+        await preview.start()
+    except PreviewError as e:
+        return {"name": "server start", "ok": False, "tail": str(e)}
+    finally:
+        await preview.stop()
+    return {"name": "server start", "ok": True, "tail": f"answered in {time.monotonic() - started:.1f} s"}
+
