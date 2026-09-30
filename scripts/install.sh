@@ -24,7 +24,8 @@
 # lockfile). Where the index lacks a pinned version, the newest versions pyproject.toml or frontend/runtime/package.json
 # allow that the index has are installed instead (uv keeps the backend's other pins), and the packages that differ from
 # the pinned versions are listed; --require-pinned stops there instead. A file whose hash differs from the pinned one stops the install, from either index.
-# Needs: uv (or python3 >= 3.12); node >= 20 for custom views, and to build frontend/dist when it is missing or out of date;
+# Needs: uv (or python3 >= 3.12); node >= 20 for custom views (a checkout: 20.19+, 22.13+ or 24+, which its frontend tests need), for the sandbox runtime card code and code tickets run in
+# (a package of the frontend's), and to build frontend/dist when it is missing or out of date;
 # the claude CLI to register the plugin.
 # The marketplace name is thimble-local from a release zip and thimble from a checkout (.claude-plugin/marketplace.json).
 #
@@ -214,6 +215,13 @@ check_prerequisites() {  # uv or python >= pyproject's requires-python, or --pyt
   node_found="$(command -v node >/dev/null 2>&1 && node -v || echo none)"
   major="$(printf '%s' "$node_found" | sed -n 's/^v\([0-9]*\).*/\1/p')"
   node_ok=0; [ "${major:-0}" -ge 20 ] && node_ok=1
+  # a checkout's frontend tests, which a code ticket's checks run, need more: jsdom and the packages it loads require()
+  # ES modules (their engines: ^20.19.0 || ^22.13.0 || >=24; cli.NODE_TESTS_FLOOR)
+  minor="$(printf '%s' "$node_found" | sed -n 's/^v[0-9]*\.\([0-9]*\).*/\1/p')"
+  if [ "$checkout" = 1 ] && [ "$node_ok" = 1 ] && ! { [ "$major" -ge 24 ] || { [ "$major" = 22 ] && [ "${minor:-0}" -ge 13 ]; } || { [ "$major" = 20 ] && [ "${minor:-0}" -ge 19 ]; }; }; then
+    old_node="node $node_found at $(command -v node) is older than a checkout needs: the frontend's tests, which a code ticket's checks run, need Node 20.19+, 22.13+ or 24+. Upgrade Node and run this script again"
+    if [ "$dry" = 1 ]; then say "install.sh stops here: $old_node"; else die "$old_node"; fi
+  fi
   if [ "$node_ok" = 1 ]; then
     if [ -n "$stale" ]; then
       say "node $node_found >= 20 — step 5 installs the frontend's packages and rebuilds frontend/dist, which is older than frontend/$stale"
@@ -229,6 +237,14 @@ check_prerequisites() {  # uv or python >= pyproject's requires-python, or --pyt
     die "no frontend/dist and no node >= 20 (found: $node_found). Install Node 20+ (https://nodejs.org) and re-run this script, or install from the release zip, which carries the built UI: gh release download --repo $slug --pattern 'thimble-*.zip' --dir ~/Downloads"
   else
     say "no frontend/dist and no node >= 20 (found: $node_found) — the browser UI needs a build (step 5 says how); the rest installs"
+  fi
+  if [ "$node_ok" != 1 ]; then
+    if [ "$(uname -s)" = Darwin ]; then
+      say "without node >= 20 card code gets no sandbox: the notebook kernel runs with your user's access"
+    else
+      say "without node >= 20 card code gets no sandbox runtime: the notebook kernel runs in bubblewrap where that works, else with your user's access"
+    fi
+    say "without node >= 20 a code ticket's checks run outside the sandbox, so thimble asks you before each code ticket starts"
   fi
   have_claude=0
   if command -v claude >/dev/null 2>&1; then have_claude=1; say "claude CLI $(claude --version 2>/dev/null | head -n 1)"; else say "claude CLI not on PATH — the plugin step will print the commands to run"; fi
@@ -422,6 +438,7 @@ probe_browser() {  # sys_starts=1 when the system browser starts headless with r
   [ -n "$sys_path" ] || return 0
   mkdir -p "$profile"
   "$sys_path" --headless=new --no-sandbox --no-first-run --no-default-browser-check --disable-gpu \
+    --use-mock-keychain --password-store=basic \
     --user-data-dir="$profile" --remote-debugging-port=0 about:blank > "$log" 2>&1 &
   pid=$!
   for _ in $(seq 40); do
@@ -788,7 +805,7 @@ build_ui() {  # with node >= 20 the frontend's packages, which custom views need
   else
     say "the browser UI needs a build: install Node 20+ (https://nodejs.org) and re-run this script, or install from a release zip that carries frontend/dist. The MCP tools work without it"
   fi
-  [ "$node_ok" = 1 ] || say "custom views need Node 20+ (https://nodejs.org): install it, then run this script again"
+  [ "$node_ok" = 1 ] || say "custom views and the sandbox card code and code tickets run in need Node 20+ (https://nodejs.org): install it, then run this script again"
 }
 
 write_pointer() {  # $THIMBLE_HOME/app-dir: how the plugin copy in Claude Code's plugin cache finds this tree (plugin/bin/thimble-app-dir)
@@ -857,7 +874,7 @@ show_plan() {  # what the install puts where, before its questions
   elif [ "$checkout" = 1 ] && [ "$have_uv" = 1 ]; then say "  the server's Python packages: $dir/backend/.venv, from backend/uv.lock"
   else say "  the server's Python packages: $dir/backend/.venv, from the package index $pytool is set up with"; fi
   if [ "$node_ok" = 1 ]; then
-    say "  the frontend's packages custom views need: $dir/frontend/node_modules$( [ "$has_dist" = 1 ] || echo ', and the UI built into frontend/dist' )"
+    say "  the frontend's packages custom views and the sandbox for card code and code tickets (Anthropic's sandbox runtime) need: $dir/frontend/node_modules$( [ "$has_dist" = 1 ] || echo ', and the UI built into frontend/dist' )"
   fi
   say "  thimble's settings and state: $home"
   [ "$deps_only" = 1 ] || say "  the \`thimble\` command: a link at ~/.local/bin/thimble"
@@ -878,10 +895,19 @@ show_plan() {  # what the install puts where, before its questions
     if [ "$trust" = --yes ]; then say "  Claude Code's trust of thimble's workspaces folder: $cc_json"
     elif [ -z "$trust" ] && [ -n "$trust_q" ]; then asked+=("Claude Code's trust of thimble's workspaces folder: $cc_json"); fi
   fi
-  [ "${#asked[@]}" -gt 0 ] || return 0
-  say "  and only on a yes to its question:"
-  local a
-  for a in "${asked[@]}"; do say "  - $a"; done
+  local a skipped=()
+  if [ "${#asked[@]}" -gt 0 ]; then
+    say "  and only on a yes to its question:"
+    for a in "${asked[@]}"; do say "  - $a"; done
+  fi
+  [ -n "$browser" ] || [ -z "$browser_skip" ] || skipped+=("the browser: $browser_skip")
+  if [ "$deps_only" = 0 ]; then
+    [ -n "$plugin" ] || [ -z "$plugin_skip" ] || skipped+=("the plugin: $plugin_skip")
+    [ -z "$trust_skip" ] || skipped+=("the trust: $trust_skip")
+  fi
+  [ "${#skipped[@]}" -gt 0 ] || return 0
+  say "  questions install.sh does not ask this time:"
+  for a in "${skipped[@]}"; do say "  - $a"; done
 }
 
 browser_text() {  # the browser question's explanation, after probe_browser
@@ -900,13 +926,28 @@ plugin_text() {  # the plugin question
 }
 
 earlier_answers() {  # what settles each question before it is asked: the browser and plugin answers of an earlier
-  # install, and the trust question when one is due
-  browser_was="$(browser_prev)"
+  # install, and the trust question when one is due; for each question that is not asked, why, naming the folder
+  # (browser_skip, plugin_skip, trust_skip)
+  browser_was="$(browser_prev)" browser_skip="" plugin_prev="" plugin_reg="" plugin_skip="" trust_skip=""
+  if [ -n "$browser_was" ]; then
+    if [ -f "$home/config.json" ] && [ "$(json_get "$home/config.json" browser 2>/dev/null)" = "$browser_was" ]; then
+      browser_skip="answered $browser_was at your earlier install ($home/config.json); --browser changes it"
+    else
+      browser_skip="bundled, since your earlier install in $dir downloaded Playwright's headless Chromium; --browser changes it"
+    fi
+  fi
   [ "$deps_only" = 1 ] || plugin_record
+  if [ -n "$plugin_prev" ]; then
+    local other=--no-plugin
+    [ "$plugin_prev" = yes ] || other=--plugin
+    if [ -f "$home/plugin.json" ]; then plugin_skip="answered $plugin_prev at your earlier install ($home/plugin.json); $other changes it"
+    else plugin_skip="yes, since Claude Code has thimble@$mp_name registered already ($(cc_path plugins)); --no-plugin changes it"; fi
+  fi
   trust_q=""  # the trust question when claude_changes.install_trust would ask it (python3 runs the file before
   # backend/.venv exists; without python3 the trust step asks it)
   if [ "$deps_only" = 0 ] && [ -z "$trust" ] && command -v python3 >/dev/null 2>&1; then
     trust_q="$(THIMBLE_HOME="$home" python3 -I "$src/backend/app/claude_changes.py" question "$dir" 2>/dev/null)" || trust_q=""
+    [ -n "$trust_q" ] || trust_skip="$(THIMBLE_HOME="$home" python3 -I "$src/backend/app/claude_changes.py" skipped "$dir" 2>/dev/null)" || trust_skip=""
   fi
 }
 
@@ -922,7 +963,7 @@ ask() {  # the questions, before anything is installed: the browser, the sandbox
   if [ "$dry" = 1 ]; then
     step "the questions install.sh asks on a terminal, and the flag that gives each answer"
     if [ -n "$browser" ]; then say "1. the browser: answered by --browser $browser"
-    elif [ -n "$browser_was" ]; then say "1. the browser: answered $browser_was earlier; --browser changes it"
+    elif [ -n "$browser_was" ]; then say "1. the browser: $browser_skip"
     else
       probe_browser
       item 1 "$(browser_text)"
@@ -935,12 +976,13 @@ ask() {  # the questions, before anything is installed: the browser, the sandbox
     else item 2 "$(sandbox_text)"; say "   - yes: --sandbox-deps"; say "   - no: --no-sandbox-deps"; fi
     [ "$deps_only" = 0 ] || return 0
     if [ -n "$plugin" ]; then say "3. the plugin: answered by --$( [ "$plugin" = yes ] || echo 'no-' )plugin"
-    elif [ -n "$plugin_prev" ]; then say "3. the plugin: answered $plugin_prev earlier; --plugin or --no-plugin changes it"
+    elif [ -n "$plugin_prev" ]; then say "3. the plugin: $plugin_skip"
     elif [ "$have_claude" = 0 ]; then say "3. the plugin: not asked, since there is no claude CLI"
     else say "3. $(plugin_text)"; say "   - yes: --plugin"; say "   - no: --no-plugin"; fi
     if [ -n "$trust" ]; then say "4. the trust: answered by --$( [ "$trust" = --yes ] || echo 'no-' )trust-workspaces"
     elif [ -n "$trust_q" ]; then item 4 "$trust_q"; say "   - yes: --trust-workspaces"; say "   - no: --no-trust-workspaces"
-    else say "4. the trust: answered earlier, or the folder is trusted already; --trust-workspaces or --no-trust-workspaces changes it"; fi
+    elif [ -n "$trust_skip" ]; then say "4. the trust: $trust_skip"
+    else say "4. the trust: asked at the trust step; --trust-workspaces or --no-trust-workspaces answers it"; fi
     return 0
   fi
   [ -t 0 ] && tty=1

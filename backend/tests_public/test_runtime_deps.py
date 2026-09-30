@@ -74,7 +74,7 @@ def test_every_package_the_runtime_code_imports_is_a_runtime_dependency():
 
 
 def test_every_frontend_package_the_runtime_code_loads_is_one_a_release_installs():
-    from app import tools, views
+    from app import srt, tools, views
 
     release = (config.REPO_ROOT / "scripts" / "release.sh").read_text("utf-8")
     shipped = set(re.search(r"^runtime_npm=\(([^)]*)\)", release, re.M).group(1).split())
@@ -83,5 +83,6 @@ def test_every_frontend_package_the_runtime_code_loads_is_one_a_release_installs
     shots = "".join((config.REPO_ROOT / "scripts" / n).read_text("utf-8") for n in ("view_shot.mjs", "ui_shot.mjs"))
     loaded |= set(re.findall(r"require\('([^']+)'\)", shots))
     loaded |= {f"@fontsource/{face}" for face in re.findall(r"\['[^']+', '([^']+)', \[", shots)}
+    loaded.add("/".join(srt.PACKAGE[2:]))  # the sandbox runtime of the notebook kernel and of code tickets
     assert {"vega", "playwright", "@fontsource/geist-mono"} <= loaded
     assert loaded - shipped == set(), "loaded at run time but not in release.sh's runtime_npm"

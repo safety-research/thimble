@@ -1,7 +1,7 @@
 {
   "name": "thimble-frontend",
   "private": true,
-  "version": "0.3.0",
+  "version": "0.3.1",
   "license": "Apache-2.0",
   "type": "module",
   "scripts": {
@@ -14,6 +14,7 @@
     "check": "npm run typecheck && vitest run && vite build"
   },
   "dependencies": {
+    "@anthropic-ai/sandbox-runtime": "^0.0.77",
     "@blocknote/core": "^0.54.2",
     "@blocknote/mantine": "^0.54.2",
     "@blocknote/react": "^0.54.2",

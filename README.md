@@ -20,13 +20,15 @@ https://github.com/user-attachments/assets/3c21e405-6b8d-4ba6-85a8-24211800596c
 claude "install thimble from https://github.com/safety-research/thimble"
 ```
 
+Instructions for agents installing thimble on the user's behalf are in [CLAUDE.md](CLAUDE.md).
+
 ### Manual
 
 1. Download the zip from the [latest release](https://github.com/safety-research/thimble/releases/latest).
 2. Unzip it.
 3. Run `bash scripts/install.sh` inside the unzipped folder.
 
-For a development build, clone the repo and run `bash scripts/install.sh` (requires Node 20+).
+For a development build, clone the repo and run `bash scripts/install.sh` (requires Node 20.19+, 22.13+ or 24+).
 
 [INSTALL.md](INSTALL.md) covers requirements, updating and troubleshooting.
 
@@ -74,11 +76,11 @@ Type `/thimble` to start the thimble server and print the dashboard URL. A plain
 
 ## Requirements
 
-Claude Code (tested with 2.1.281), macOS or Linux, and Python 3.12+ ([uv](https://docs.astral.sh/uv/) recommended). Node 20+ is needed for custom views (the viewers the dev agent builds for your data) and for a development build. [INSTALL.md](INSTALL.md) has the details.
+Claude Code (tested with 2.1.281), macOS or Linux, and Python 3.12+ ([uv](https://docs.astral.sh/uv/) recommended). Node 20+ is needed for custom views (the viewers the dev agent builds for your data), for the sandbox card code and code tickets run in, and for a development build. [INSTALL.md](INSTALL.md) has the details.
 
 ## Security and privacy
 
-- **thimble is a research prototype.** Its server has no login, so any program on your machine can use it, and Claude's code runs in a notebook kernel without a sandbox: treat a corpus like code you are about to run.
+- **thimble is a research prototype.** Its server has no login, so any program on your machine can use it. Claude's notebook code runs in a sandbox that keeps the network, so it can reach local services, thimble's server among them: treat a corpus like code you are about to run.
 - **Your data stays with you.** The server runs on localhost. What leaves your machine is what Claude Code sends to the model and what Claude's notebook code or Claude Code's web tools reach on the network, as in any Claude Code session. A video's narration is read by a voice on your machine.
 - **Auth and billing work through Claude Code**; thimble doesn't touch them.
 - **Report security issues** privately to [@mjoerke](https://github.com/mjoerke).

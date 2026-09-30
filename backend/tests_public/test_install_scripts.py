@@ -321,7 +321,7 @@ def test_claude_codes_config_changes_only_on_a_yes_and_uninstall_takes_back_what
     cfg = Path(env["HOME"]) / ".claude.json"
     before = json.dumps({"numStartups": 3, "projects": {"/x": {"lastCost": 1}}})
     cfg.write_text(before)
-    ours = {str(tree / "workspaces"): {"hasTrustDialogAccepted": True}}
+    ours = {str(tree): {"hasTrustDialogAccepted": True}}  # the install itself, which holds its workspaces
 
     def trust(*flag: str) -> dict:
         subprocess.run(["python3", "-I", str(tree / "backend" / "app" / "claude_changes.py"), "trust", str(tree), *flag],
@@ -329,13 +329,22 @@ def test_claude_codes_config_changes_only_on_a_yes_and_uninstall_takes_back_what
         rec = home / "trust.json"
         return json.loads(rec.read_text()) if rec.exists() else {}
 
+    def skipped() -> str:  # why install.sh would not ask the trust question
+        cmd = ["python3", "-I", str(tree / "backend" / "app" / "claude_changes.py"), "skipped", str(tree)]
+        return subprocess.run(cmd, capture_output=True, text=True, env=env, timeout=30, check=True).stdout.strip()
+
     assert trust() == {} and cfg.read_text() == before, "nothing is written without a yes"
-    yes = {"folder": str(tree / "workspaces"), "config": str(cfg), "answer": "yes", "added": True}
+    assert skipped() == ""
+    yes = {"folder": str(tree), "config": str(cfg), "answer": "yes", "added": True}
     assert trust("--yes") == yes
+    assert skipped() == (f"already trusted from your earlier install ({tree}); "
+                         "--no-trust-workspaces changes it")
     data = json.loads(cfg.read_text())
     assert data["numStartups"] == 3 and data["projects"] == {"/x": {"lastCost": 1}, **ours}
     assert trust() == yes and json.loads(cfg.read_text()) == data, "asked once"
     assert trust("--no") == {**yes, "answer": "no", "added": False} and json.loads(cfg.read_text()) == json.loads(before)
+    assert skipped() == (f"answered no at your earlier install, so {tree} is not trusted; "
+                         "--trust-workspaces changes it")
     assert trust("--yes") == yes
     old = str(tmp_path / "old-workspace")
     data = json.loads(cfg.read_text())
@@ -451,17 +460,26 @@ esac
     out = r.stdout
     assert r.returncode == 0, out + r.stderr
     assert out.index("what install.sh installs, and where") < out.index("A browser for screenshots") < out.index("== 2/12")
-    assert out.index("every claude session") < out.index("Trust thimble's workspaces folder") < out.index("== 2/12")
+    assert out.index("every claude session") < out.index("Trust thimble's folder") < out.index("== 2/12")
     assert log.read_text().splitlines() == ["-I -m playwright install chromium-headless-shell"]
     assert json.loads(conf.read_text()) == {"browser": "bundled"}
     assert json.loads((home / ".thimble" / "plugin.json").read_text())["answer"] == "no"
-    assert json.loads(cfg.read_text())["projects"] == {str(tree.parents[0] / "home" / ".thimble" / "app" / "workspaces"):
+    assert json.loads(cfg.read_text())["projects"] == {str(tree.parents[0] / "home" / ".thimble" / "app"):
                                                        {"hasTrustDialogAccepted": True}}
     r = run(typed="")
     assert r.returncode == 0 and "[y/N]" not in r.stdout and "[Y/n]" not in r.stdout, r.stdout + r.stderr
     assert "only on a yes" not in r.stdout, "the plan of a re-run lists no question it will not ask"
     assert "a browser for screenshots: Playwright's headless Chromium, downloaded" in r.stdout
     assert "not fetched again" in r.stdout and len(log.read_text().splitlines()) == 1
+    ws = tree.parents[0] / "home" / ".thimble" / "app"  # the release copy, which holds its workspaces
+    trusted = f"the trust: already trusted from your earlier install ({ws}); --no-trust-workspaces changes it"
+    assert "questions install.sh does not ask this time:\n  - the browser: answered bundled" in r.stdout
+    assert f"  - {trusted}" in r.stdout, "the plan says which questions it skips, why, and the folder"
+    r = run("--dry-run")
+    assert f"1. the browser: answered bundled at your earlier install ({conf}); --browser changes it" in r.stdout
+    assert f"3. the plugin: answered no at your earlier install ({home / '.thimble' / 'plugin.json'}); --plugin " \
+           "changes it" in r.stdout
+    assert f"4. {trusted}" in r.stdout, r.stdout
     r = run("--browser", "off", "--no-trust-workspaces")
     assert r.returncode == 0 and json.loads(conf.read_text()) == {"browser": "off"}, r.stdout + r.stderr
     assert json.loads(cfg.read_text())["projects"] == {} and len(log.read_text().splitlines()) == 1
