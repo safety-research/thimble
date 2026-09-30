@@ -162,6 +162,106 @@ async def test_a_reader_resolves_a_line_and_a_key_and_its_answer_is_kept(ws, inp
     assert list((ws / "views" / "threads" / "cache").glob("*.index.pickle"))
 
 
+SOME_READER = '''
+import json
+
+
+def build_index(paths):
+    with open("big.jsonl") as f:
+        first = json.loads(f.readline())
+    board = []
+    if READ_BOARD:
+        with open("board.jsonl", "rb") as f:
+            board = f.read().splitlines()
+    return {"first": first, "board": len(board)}
+
+
+def records(index, query):
+    return [index["first"]]
+
+
+def resolve(index, locator):
+    return None
+
+
+def hidden(index):
+    return [{"path": "notes.md", "why": WHY}] + ([{"path": "big.jsonl", "why": "only its first line is shown"}] if READ_BOARD else [])
+
+
+def derived(index):
+    return [{"field": "day", "from": "time", "how": "the date of the time"}, {"field": "time", "from": "-", "how": "-"}]
+'''
+
+
+async def test_the_harness_counts_what_build_index_reads_and_the_checks_fail_on_a_file_neither_read_nor_hidden(
+        ws, inproc, bound, monkeypatch):
+    """A file build_index read only the start of, or not at all, is not shown, and so is one hidden() lists; the checks
+    fail until each is read to the end or hidden with a why. The counts outlive the kernel with the index. The view's
+    derived fields are view.json's, then those derived() adds, and its page gets them."""
+    async def no_page(c, slug, states, **k):
+        return [{"ok": True, "errors": [], "fetches": 0, "records": 1} for _ in states]
+
+    monkeypatch.setattr(views, "shoot_states", no_page)
+    (config.corpus_dir(CORPUS) / "big.jsonl").write_text("".join(json.dumps({"n": i, "pad": "x" * 60}) + "\n" for i in range(2000)))
+    size = (config.corpus_dir(CORPUS) / "big.jsonl").stat().st_size
+
+    def save(read_board: bool, why: str) -> None:
+        views.write_view(CORPUS, "some", name="Some", description="The first record.", claims=["*.jsonl", "notes.md"],
+                         derived=[{"field": "time", "from": "ts or timestamp", "how": "parsed to UTC"}], html=THREADS_HTML,
+                         reader=f"READ_BOARD = {read_board}\nWHY = {why!r}\n" + SOME_READER)
+
+    save(False, "")
+    out = await views.shown(CORPUS, "some")
+    rows = {r["path"]: r for r in out["not_shown"]["files"]}
+    assert out["files"] == 3 and set(rows) == {"big.jsonl", "board.jsonl", "notes.md"}
+    assert rows["board.jsonl"]["read"] == 0 and 0 < rows["big.jsonl"]["read"] < size
+    assert out["not_shown"]["unexplained"] == 3, "a file hidden with no why is not explained"
+    assert [d["field"] for d in out["derived"]] == ["time", "day"] and out["derived"][0]["how"] == "parsed to UTC"
+    sys.modules.pop("_thimble_views", None)  # a new kernel reads the index and its counts from the cache
+    assert (await views.shown(CORPUS, "some"))["not_shown"] == out["not_shown"]
+    rep = await views.check(CORPUS, "some")
+    assert any("big.jsonl (read" in p and "board.jsonl (read 0 of" in p for p in rep["problems"]), rep["problems"]
+    doc = views.frame_document(views.read_view(CORPUS, "some"), derived=out["derived"])
+    assert '"field": "day"' in doc
+
+    save(True, "an index of the notes, not records")
+    out = await views.shown(CORPUS, "some")
+    assert {r["path"]: r["why"] for r in out["not_shown"]["files"]} == {
+        "big.jsonl": "only its first line is shown", "notes.md": "an index of the notes, not records"}
+    assert out["not_shown"]["unexplained"] == 0
+    rep = await views.check(CORPUS, "some")
+    assert not any("(read" in p for p in rep["problems"]), rep["problems"]
+
+
+async def test_a_field_the_reader_derives_and_the_view_does_not_list_fails_the_gate(ws, inproc, bound, monkeypatch):
+    """Once the checks pass, one reading compares reader.py with the derived fields; a field it names that the list
+    leaves out fails the gate. The answer is kept for the same reader and list."""
+    from app import model, view_review  # noqa: PLC0415
+
+    async def no_page(c, slug, states, **k):
+        return [{"ok": True, "errors": [], "fetches": 0, "records": 1} for _ in states]
+
+    readings = []
+
+    async def reading(c, system, user, tool, images, effort):
+        readings.append(user)
+        found = [] if "- author:" in user else [{"field": "author", "how": "the post's author, lower-cased"}]
+        return model.CallResult(status="ok", output={"undeclared": found})
+
+    monkeypatch.setattr(views, "shoot_states", no_page)
+    monkeypatch.setattr(view_review, "_call", reading)
+    monkeypatch.setenv("THIMBLE_VIEW_REVIEW", "on")
+    for _ in range(2):
+        rep = await views.gate(CORPUS, "threads", ["board.jsonl#L3"])
+        assert not rep["ok"] and any("author (the post's author, lower-cased)" in p for p in rep["problems"]), rep["problems"]
+    assert len(readings) == 1 and "def build_index" in readings[0]
+    views.write_view(CORPUS, "threads", reader=THREADS_READER, html=THREADS_HTML,
+                     **{**VIEW, "derived": [{"field": "author", "from": "author", "how": "lower-cased"}]})
+    rep = await views.gate(CORPUS, "threads", ["board.jsonl#L3"])
+    assert rep["ok"], views.gate_lines(rep)
+    assert len(readings) == 2
+
+
 async def test_a_workspace_gets_four_views_from_the_orientation_and_a_deleted_one_stays_deleted(ws, monkeypatch):
     monkeypatch.setattr(views, "_queue", lambda c, slug: None)
 

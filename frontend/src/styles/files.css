@@ -2095,6 +2095,34 @@
 .view-pane-list-more {
   color: var(--text-tertiary);
 }
+/* a row of the Derived data list, which opens nothing */
+.view-pane-list-row {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  padding: 4px 8px;
+  font: var(--type-ui-sm);
+  overflow-wrap: anywhere;
+}
+.view-pane-list-row .mono {
+  font: var(--type-mono-sm);
+  color: var(--text-primary);
+}
+.view-pane-list-rule {
+  flex: none;
+  margin: 4px 8px;
+  border: 0;
+  border-top: 1px solid var(--border-hairline);
+}
+/* a derived field's name, here and in the view's page (viewer_kit.css [data-derived]) */
+.view-pane-derived::after {
+  content: 'ƒ';
+  margin-left: 2px;
+  font: italic 400 0.8em / 1 var(--font-body);
+  color: var(--text-accent);
+  vertical-align: super;
+}
 .view-pane-list-more {
   padding: 4px 8px;
 }
@@ -2390,6 +2418,16 @@
 /* over a file-type viewer's top right corner, which has no head of its own */
 .reader-viewer {
   position: relative;
+}
+/* thimble's notes on a file-type viewer, above its page (ViewChrome) */
+.reader-viewer-notes {
+  flex: none;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 12px;
+  padding: 6px 14px;
+  box-shadow: inset 0 -1px 0 var(--files-rule);
 }
 .reader-viewer-updated {
   position: absolute;

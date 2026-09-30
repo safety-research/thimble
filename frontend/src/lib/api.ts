@@ -39,6 +39,7 @@ import type {
   ViewOpen,
   ViewQuery,
   ViewProblems,
+  ViewShown,
   Writeup,
 } from './types'
 
@@ -299,6 +300,7 @@ export const api = {
   viewReviewStop: (c: string, slug: string) => j<{ ok: boolean }>(`${ws(c)}/views/${enc(slug)}/review`, { method: 'DELETE' }),
   viewReviewUndo: (c: string, slug: string) => j<{ ok: boolean }>(`${ws(c)}/views/${enc(slug)}/review/undo`, { method: 'POST' }),
   viewProblems: (c: string, slug: string, version?: string) => j<ViewProblems>(`${ws(c)}/views/${enc(slug)}/problems${q({ v: version })}`),
+  viewShown: (c: string, slug: string, version?: string) => j<ViewShown>(`${ws(c)}/views/${enc(slug)}/shown${q({ v: version })}`),
   viewOpen: (c: string, slug: string, ref: string, version?: string) => j<ViewOpen>(`${ws(c)}/views/${enc(slug)}/resolve${q({ ref, v: version })}`),
   /** a card type's page as a card's frame loads it (backend cardtypes.frame_route) */
   cardTypeFrame: async (c: string, type: string): Promise<string> => {

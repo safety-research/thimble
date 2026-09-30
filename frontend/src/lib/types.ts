@@ -456,6 +456,8 @@ export interface View {
   accepts: ViewForm[]
   /** its own citable units, cited as view:<slug>/<key> */
   units: ViewForm[]
+  /** the fields its reader made rather than read, as view.json lists them */
+  derived?: ViewDerived[]
   libs: string[]
   built: string
   /** the digest of its files when it last passed its checks: a page loaded at it keeps it until reloaded */
@@ -487,6 +489,23 @@ export interface TimelineDataset {
 export interface ViewProblems {
   count: number
   examples: { ref: string; why: string }[]
+}
+
+/** A field a view's reader made rather than read as the files hold it. */
+export interface ViewDerived {
+  field: string
+  from: string
+  how: string
+}
+
+/** `GET /ws/{c}/views/{slug}/shown`: of the files a view claims, those it does not show whole, the first 500 of them,
+ * each with why its reader hides it ('' when it gives no why) and how many of its bytes were read; and the fields its
+ * reader derived. */
+export interface ViewShown {
+  files: number
+  not_shown: { count: number; unexplained: number; files: { path: string; size: number; read: number; why: string }[] }
+  derived: ViewDerived[]
+  errors: string[]
 }
 
 /** What a view's page gets as `open` (`GET /ws/{c}/views/{slug}/resolve?ref=`). */

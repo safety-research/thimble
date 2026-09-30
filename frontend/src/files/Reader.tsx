@@ -23,6 +23,7 @@ import { findColumn, ReaderRuler, rulerColumns, useRuler, type LensTick, type Ru
 import { fmtSize } from './Tree'
 import { useFilesFilter, type FilesLabels } from './useLabels'
 import { accepts, slugOf, viewValue } from './viewChoice'
+import { hasNotes, useShownLabels, useViewNotes, ViewNotesLine } from './ViewChrome'
 import { ViewerFrame } from './ViewerFrame'
 import { usePinnedView, ViewUpdated } from './viewVersion'
 import { ProposalOption } from './ViewsBar'
@@ -132,13 +133,22 @@ export function ViewFailed({ name, detail, onRaw }: { name: string; detail: stri
 }
 
 /** A viewer for the file's type as its mode: the view's page in the reader, and what failed with Raw beside it. It keeps
- * the version it opened at, with Updated and Reload over its top right corner once a newer one is there. */
+ * the version it opened at, with Updated and Reload over its top right corner once a newer one is there. Above the
+ * page, thimble's notes on the view (ViewChrome), when there are any; a file or line picked there opens in the File
+ * browser. */
 function ReaderViewer({ ws, view, path, targetRef, labels, onRaw }: { ws: string; view: View; path: string; targetRef?: string; labels: FilesLabels; onRaw: () => void }) {
   const [failure, setFailure] = useState<string | null>(null)
   const filter = useFilesFilter(ws)
   const pin = usePinnedView(ws, view.slug, view.version || undefined)
+  const notes = useViewNotes(ws, view.slug, pin.pinned || undefined)
+  const shownLabels = useShownLabels(labels, view.claims)
   return (
     <div className="reader-main reader-viewer">
+      {hasNotes(notes, shownLabels) && (
+        <div className="reader-viewer-notes">
+          <ViewNotesLine ws={ws} name={view.name} notes={notes} shownLabels={shownLabels} onPick={(ref) => bus.emit('openRef', { ref, browser: true })} />
+        </div>
+      )}
       {failure && <ViewFailed name={view.name} detail={failure} onRaw={onRaw} />}
       {pin.stale && <ViewUpdated onReload={() => (setFailure(null), void pin.reload())} className="reader-viewer-updated" />}
       <ViewerFrame

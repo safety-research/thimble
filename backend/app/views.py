@@ -1,10 +1,12 @@
 """Views: viewers written for how a corpus arranges its records, and the proposals they start as.
 
 A view is three files in `workspaces/<c>/views/<slug>/`, written by the dev agent's session (dev.run_view):
-view.json {name, description, claims, accepts, units, libs, built}, reader.py (the contract in view_host.py), and
-view.html, drawn in a sandboxed frame that loads nothing but the view's media route. `claims` are globs of the files the
-view opens, `accepts` the fragment forms it understands (`L<n>`), `units` its own `view:<slug>/<key>` units; `why` and
-`declares` are read for `description` and `units`.
+view.json {name, description, claims, accepts, units, derived, libs, built}, reader.py (the contract in view_host.py),
+and view.html, drawn in a sandboxed frame that loads nothing but the view's media route. `claims` are globs of the files
+the view opens, `accepts` the fragment forms it understands (`L<n>`), `units` its own `view:<slug>/<key>` units,
+`derived` the fields its reader made rather than read ({field, from, how}); `why` and `declares` are read for
+`description` and `units`. Every claimed file is read to the end by build_index or listed by the reader's hidden(), or
+the browser lists it above the view as not shown (shown); the checks fail on a file that is neither.
 thimble also ships file-type viewers under the same contract (BUILTIN_VIEWERS). Readers run on the workspace's
 `views`
 kernel with a cached index; refs.resolve hands file refs with a fragment to enrich_file_ref, and resolve_sync bridges
@@ -81,6 +83,10 @@ REFS_MAX = 200  # file refs a resolved locator carries
 MEMO_MAX = 5000  # resolved locators kept in memory
 ERROR_MAX = 2000
 PROBLEMS_SHOWN = 20  # the lines a reader could not read that thimble lists beside the view (reader_problems)
+DERIVED_MAX = 100  # the derived fields a view lists
+DERIVED_CHARS = {"field": 80, "from": 300, "how": 300}
+WHY_CHARS = 300  # of why hidden() leaves a file out
+NOT_SHOWN_NAMED = 5  # the files a failed check names that the view neither read whole nor hid
 FILES_LISTED = 500  # the claimed files a view's record lists (_public)
 SOURCE_MAX = 400_000  # chars of reader.py or view.html a view may hold
 # the checks: sample lines per claimed file, files sampled, keys followed, cited records read per key
@@ -240,6 +246,21 @@ def _forms(v: Any) -> list[dict[str, str]]:
     return out
 
 
+def _derived(v: Any) -> list[dict[str, str]]:
+    """[{field, from, how}] from view.json's `derived` or a reader's derived(index): each with a field name, the first
+    entry of a field kept."""
+    out: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for x in v if isinstance(v, list) else []:
+        if not isinstance(x, dict):
+            continue
+        d = {k: " ".join(str(x.get(k) or "").split())[:n] for k, n in DERIVED_CHARS.items()}
+        if d["field"] and d["field"] not in seen:
+            seen.add(d["field"])
+            out.append(d)
+    return out[:DERIVED_MAX]
+
+
 def _libs(v: Any) -> list[str]:
     """The named libraries with what each needs ahead of it, in LIBS order."""
     wanted = set(_str_list(v)) & set(LIBS)
@@ -259,6 +280,7 @@ def _normalize_view(slug: str, raw: Any, *, where: Path | None = None, origin: s
         "claims": _str_list(raw.get("claims")),
         "accepts": _forms(raw.get("accepts")),
         "units": _forms(raw.get("units") if raw.get("units") is not None else raw.get("declares")),
+        "derived": _derived(raw.get("derived")),
         "libs": _libs(raw.get("libs")),
         "built": str(raw.get("built") or ""),
         "version": str(raw.get("version") or ""),
@@ -412,7 +434,7 @@ def source_problems(claims: Any, reader: str, html: str, libs: Any) -> list[str]
 
 
 def write_view(c: str, slug: str, *, name: str, description: str, claims: Any, accepts: Any = None, units: Any = None,
-               libs: Any = None, reader: str, html: str) -> dict[str, Any]:
+               derived: Any = None, libs: Any = None, reader: str, html: str) -> dict[str, Any]:
     """Write or replace a view's three files, validated (source_problems), and register it built (mark_built): a view
     of thimble's own making, as the tests make theirs; a view ticket's session writes the files itself."""
     slug = _check_slug(slug)
@@ -423,6 +445,8 @@ def write_view(c: str, slug: str, *, name: str, description: str, claims: Any, a
         raise HTTPException(400, problems[0])
     stored = {"name": " ".join(str(name or slug).split()) or slug, "description": " ".join(str(description or "").split()),
               "claims": _str_list(claims), "accepts": _forms(accepts), "units": _forms(units), "libs": _libs(libs)}
+    if _derived(derived):
+        stored["derived"] = _derived(derived)
     d = views_dir(c) / slug
     d.mkdir(parents=True, exist_ok=True)
     atomic_write_text(d / READER_PY, reader_src.rstrip("\n") + "\n")
@@ -845,9 +869,16 @@ def _kernel_error(outputs: list[dict]) -> str:
 
 
 def _prepare(c: str, slug: str, version: str | None = None) -> tuple[dict[str, Any], dict[str, Any]]:
-    """(the view, the request without op and arg): the claimed files, their fingerprint and the index cache path; with
-    `version`, the view at that version (read_version). Blocking (the claimed files are stat'ed or the corpus walked);
-    ReaderError for a view that cannot run."""
+    """(the view, the request without op and arg): the claimed files, their fingerprint, the index cache path and where
+    the bytes build_index read are kept; with `version`, the view at that version (read_version). Blocking (the claimed
+    files are stat'ed or the corpus walked); ReaderError for a view that cannot run."""
+    view, req, _ = _prepared(c, slug, version)
+    return view, req
+
+
+def _prepared(c: str, slug: str, version: str | None = None) -> tuple[dict[str, Any], dict[str, Any],
+                                                                       list[tuple[str, int, int]]]:
+    """_prepare's view and request, and the claimed files they were made from."""
     view = read_version(c, slug, version) if version else read_view(c, slug)
     if view is None:
         raise ReaderError(f"no view {slug!r}" + (f" at version {version}; reload it" if version else ""))
@@ -856,9 +887,11 @@ def _prepare(c: str, slug: str, version: str | None = None) -> tuple[dict[str, A
     reader_path = Path(view["dir"]) / READER_PY
     files = claimed_files(c, view)
     fp = fingerprint(files, reader_path.read_text("utf-8"))
+    cache = cache_dir(c, view)
     req = {"slug": slug, "reader": str(reader_path.resolve()), "fp": fp, "paths": [f[0] for f in files],
-           "cache": str((cache_dir(c, view) / f"{fp}.index.pickle").resolve()), "thimble": str(KERNEL_THIMBLE)}
-    return view, req
+           "cache": str((cache / f"{fp}.index.pickle").resolve()), "reads": str((cache / f"{fp}.reads.json").resolve()),
+           "thimble": str(KERNEL_THIMBLE)}
+    return view, req, files
 
 
 async def _call(c: str, req: dict[str, Any], op: str, arg: Any = None) -> Any:
@@ -914,6 +947,53 @@ async def reader_problems(c: str, slug: str, version: str | None = None) -> dict
     """The lines of the claimed files the view's reader could not read (reader.problems), which thimble shows beside
     the view's page."""
     return clean_problems(await reader_call(c, slug, "problems", version=version))
+
+
+def _hidden(raw: Any) -> dict[str, str]:
+    """{path: why} from a reader's hidden(index), [{path, why}]; a path given twice keeps its first why."""
+    out: dict[str, str] = {}
+    for x in raw if isinstance(raw, list) else []:
+        x = x if isinstance(x, dict) else {"path": x}
+        path = str(x.get("path") or "").strip().removeprefix("./")
+        if path and path not in out:
+            out[path] = " ".join(str(x.get("why") or "").split())[:WHY_CHARS]
+    return out
+
+
+def not_shown(files: list[tuple[str, int, int]], reads: dict[str, int], hidden: dict[str, str]) -> list[dict[str, Any]]:
+    """The claimed files the view does not show whole, in path order, each {path, size, read, why}: those build_index
+    did not read to the end, with why hidden() gives ('' when it gives none), and those hidden() lists though read.
+    An image, audio or video file counts as read, since the page shows it whole through thimble.mediaUrl."""
+    out = []
+    for path, size, _ in files:
+        n = int(reads.get(path) or 0)
+        whole = n >= size or Path(path).suffix.lower() in MEDIA_TYPES
+        if not whole or path in hidden:
+            out.append({"path": path, "size": size, "read": min(n, size), "why": hidden.get(path, "")})
+    return out
+
+
+async def shown(c: str, slug: str, version: str | None = None) -> dict[str, Any]:
+    """What thimble draws above the view: {files, not_shown: {count, unexplained, files}, derived, errors}. `files` is
+    the count of claimed files and not_shown the ones the view does not show whole (not_shown), the first FILES_LISTED
+    of them, `unexplained` counting those hidden() gives no why for; derived is view.json's list, then the fields the
+    reader's derived(index) adds; errors say what failed of hidden() and derived()."""
+    view, req, files = await asyncio.to_thread(_prepared, c, slug, version)
+    ans = await _call(c, req, "shown")
+    ans = ans if isinstance(ans, dict) else {}
+    reads = ans.get("reads") if isinstance(ans.get("reads"), dict) else {}
+    errors = []
+    parts = {}
+    for name in ("hidden", "derived"):
+        part = ans.get(name) if isinstance(ans.get(name), dict) else {}
+        if part.get("error"):
+            errors.append(f"{name}() failed: {part['error']}")
+        parts[name] = part.get("result")
+    rows = not_shown(files, reads, _hidden(parts["hidden"]))
+    return {"files": len(files),
+            "not_shown": {"count": len(rows), "unexplained": sum(1 for r in rows if not r["why"]), "files": rows[:FILES_LISTED]},
+            "derived": _derived([*view["derived"], *(parts["derived"] if isinstance(parts["derived"], list) else [])]),
+            "errors": errors}
 
 
 # ----------------------------------------------------------------------------------------------------------
@@ -1482,7 +1562,7 @@ def install_viewer(c: str, slug: str, d: Path, claims: Any, *, why: str, propose
         items.append(prop)
         _save_proposals(c, items)
     write_view(c, slug, name=raw.get("name") or slug, description=v["description"], claims=_str_list(claims),
-               accepts=v["accepts"], units=v["units"], libs=raw.get("libs") if libs is None else libs,
+               accepts=v["accepts"], units=v["units"], derived=v["derived"], libs=raw.get("libs") if libs is None else libs,
                reader=(d / READER_PY).read_text("utf-8"), html=(d / VIEW_HTML).read_text("utf-8"))
     update_proposal(c, slug, installed=view_digest(views_dir(c) / slug))
 
@@ -1881,7 +1961,11 @@ def delete_proposal(c: str, slug: str) -> None:
 async def gate(c: str, slug: str, locators: list[str] | None = None, *, shot_dir: Path | None = None) -> dict[str, Any]:
     """Whether the view in the slug's folder may be registered: its files' own problems (source_problems; view.json
     written by thimble alone once it names `built`), then, when there are none, check() with `locators` beside the
-    sampled lines. The report check() returns, with the files' problems among its `problems`."""
+    sampled lines, and once that passes, the review of its derived fields (view_review.derived_review), where a field
+    its reader derives and does not list fails it. The report check() returns, with the files' problems among its
+    `problems`, and a reading of the derived fields that failed among its `notes`."""
+    from . import view_review  # noqa: PLC0415 — the review imports this module
+
     d = views_dir(c) / slug
     if not (d / VIEW_JSON).is_file():
         return {"ok": False, "view": None, "problems": [f"{d / VIEW_JSON} does not exist yet"], "checks": [], "page": None}
@@ -1897,6 +1981,14 @@ async def gate(c: str, slug: str, locators: list[str] | None = None, *, shot_dir
         return {"ok": False, "view": read_view(c, slug), "problems": problems, "checks": [], "page": None}
     report = await check(c, slug, locators, shot_dir=shot_dir)
     _prune_shots(shot_dir or (d / CACHE_SUBDIR / "shots"))
+    if report.get("ok") and report.get("coverage") and view_review.enabled():
+        found = await view_review.derived_review(c, slug, report["coverage"]["derived"])
+        if isinstance(found, str):
+            report["notes"] = [*report.get("notes", []), _hint("view-derived-unchecked", why=found)]
+        elif found:
+            report["problems"].append(_hint("view-derived-undeclared", fields="; ".join(
+                f"{x['field']} ({x['how']})" if x["how"] else x["field"] for x in found)))
+            report["ok"] = False
     return report
 
 
@@ -1922,6 +2014,11 @@ def gate_lines(report: dict[str, Any]) -> list[str]:
     if (unread := report.get("unread") or {}).get("count"):
         first = unread["examples"][0]
         lines.append(f"unread: {unread['count']} line(s) the reader could not parse, such as {first['ref']}: {first['why']}")
+    if cov := report.get("coverage"):
+        ns = cov["not_shown"]
+        lines.append(f"files: {cov['files'] - ns['count']} of {cov['files']} read to the end, "
+                     f"{ns['count'] - ns['unexplained']} hidden with a why; derived fields: "
+                     + (", ".join(d["field"] for d in cov["derived"]) or "none"))
     for p in report.get("problems") or []:
         lines.append(f"problem: {p}")
     if report.get("traceback"):
@@ -1954,6 +2051,7 @@ def gate_lines(report: dict[str, Any]) -> list[str]:
                                       records=page.get("records") or 0))
     if controls := max([int(s.get("controls") or 0) for s in shots] or [0]):
         lines.append("note: " + _hint("view-label-controls", count=controls))
+    lines += [f"note: {n}" for n in report.get("notes") or []]
     return [ln for ln in lines if ln]
 
 
@@ -2001,16 +2099,20 @@ def _script_text(js: str) -> str:
     return js.replace("</script", "<\\/script").replace("</SCRIPT", "<\\/SCRIPT")
 
 
-def frame_document(view: dict[str, Any], media: str | None = None, *, card: bool = False) -> str:
+def frame_document(view: dict[str, Any], media: str | None = None, *, card: bool = False,
+                   derived: list[dict[str, str]] | None = None) -> str:
     """The view's page as a frame loads it: the policy that blocks every load but the view's media route, the bridge
     (viewer_bridge.js), thimble's parts (viewer_kit.css), the vendored libraries the view names, then view.html, whose
     own styles come after the parts. The browser adds the theme's tokens (ViewerFrame.tsx). `media` is the media
     route's absolute URL (media_url), which the policy allows for images, audio and video and thimble.mediaUrl builds
     on; without it the page loads no URL at all. `card` marks the page as a card's (cardtypes.py), which draws what the
-    bridge's `init` brings; `page` names a page file other than view.html (a card type's own card.html)."""
+    bridge's `init` brings; `page` names a page file other than view.html (a card type's own card.html). `derived` is
+    the view's derived fields (derived_fields), view.json's when not given, which the bridge marks wherever the page
+    names one with data-field."""
     html = (Path(view["dir"]) / (view.get("page") or VIEW_HTML)).read_text("utf-8")
-    who = json.dumps({"slug": view["slug"], "name": view["name"], "media": media, **({"card": True} if card else {})},
-                     ensure_ascii=False)
+    fields = (view.get("derived") or []) if derived is None else derived
+    who = json.dumps({"slug": view["slug"], "name": view["name"], "media": media, **({"card": True} if card else {}),
+                      **({"derived": fields} if fields else {})}, ensure_ascii=False)
     csp = FRAME_CSP.format(media=f" {media}" if media else "")
     head = [f'<meta http-equiv="Content-Security-Policy" content="{csp}">',
             '<meta charset="utf-8">',
@@ -2027,6 +2129,21 @@ def frame_document(view: dict[str, Any], media: str | None = None, *, card: bool
     # view's own <head> content, parsed after this head, still lands in the document's head.
     body = re.sub(r"^\s*<!doctype[^>]*>", "", html, count=1, flags=re.I)
     return "<!doctype html><head>" + "".join(head) + "</head>" + body
+
+
+async def derived_fields(c: str, slug: str, view: dict[str, Any], version: str | None = None) -> list[dict[str, str]]:
+    """The view's derived fields: view.json's, and when reader.py defines derived() those it adds too (shown); only
+    view.json's when the reader fails."""
+    try:
+        src = (Path(view["dir"]) / READER_PY).read_text("utf-8")
+    except (OSError, TypeError):
+        return view.get("derived") or []
+    if not re.search(r"^def derived\s*\(", src, re.M):
+        return view.get("derived") or []
+    try:
+        return (await shown(c, slug, version))["derived"]
+    except ReaderError:
+        return view.get("derived") or []
 
 
 # ----------------------------------------------------------------------------------------------------------
@@ -2117,7 +2234,8 @@ async def shoot_states(c: str, slug: str, states: list[dict[str, Any]], *, width
                     "labels": [str(lab.get("name") or "") for lab in labels_state(ctx)["labels"]],
                     "ids": [str(lab.get("id") or "") for lab in labels_state(ctx)["labels"] if lab.get("id")]}
                    for s, ctx in zip(states, ctxs)]
-    out = await shoot_page(frame_document(view, media), shot_states, answer, width=width, height=height, media=media)
+    doc = frame_document(view, media, derived=await derived_fields(c, slug, view))
+    out = await shoot_page(doc, shot_states, answer, width=width, height=height, media=media)
     for i, r in enumerate(out):
         r["fetched_records"] = len(fetched[i])
         if answers:
@@ -2377,6 +2495,17 @@ async def check(c: str, slug: str, locators: list[str] | None = None, *, shot_di
         report["unread"] = await reader_problems(c, slug)
     except ReaderError as e:
         report["problems"].append(f"problems() failed: {e.message}")
+    try:
+        report["coverage"] = cov = await shown(c, slug)
+    except ReaderError as e:
+        report["problems"].append(f"hidden() or derived() failed: {e.message}")
+    else:
+        report["problems"] += cov["errors"]
+        if cov["not_shown"]["unexplained"]:
+            rows = [r for r in cov["not_shown"]["files"] if not r["why"]]
+            report["problems"].append(_hint("view-not-shown", count=cov["not_shown"]["unexplained"], files="; ".join(
+                f"{r['path']} (read {r['read']:,} of {r['size']:,} bytes)" for r in rows[:NOT_SHOWN_NAMED])
+                + (" and more" if len(rows) > NOT_SHOWN_NAMED else "")))
 
     wanted: list[str] = list(dict.fromkeys(str(x).strip() for x in (locators or []) if str(x).strip()))
     # sampled lines beside the locators, so a view is never checked only on the refs its author chose; a binary file
@@ -2997,7 +3126,8 @@ async def frame_route(c: str, slug: str, request: Request, origin: str | None = 
         media = media_url(origin or f"{request.url.scheme}://{request.url.netloc}", c, slug)
     except ValueError as e:
         raise HTTPException(400, str(e)) from None
-    return HTMLResponse(await asyncio.to_thread(frame_document, view, media))
+    derived = await derived_fields(c, slug, view, v)
+    return HTMLResponse(await asyncio.to_thread(functools.partial(frame_document, view, media, derived=derived)))
 
 
 @router.get("/ws/{c}/views/{slug}/media")
@@ -3040,6 +3170,17 @@ async def problems_route(c: str, slug: str, v: str | None = None) -> dict[str, A
     _view_or_404(c, slug, v)
     try:
         return await reader_problems(c, slug, v)
+    except ReaderError as e:
+        raise HTTPException(502, {"message": e.message, "traceback": e.detail[-ERROR_MAX:]}) from None
+
+
+@router.get("/ws/{c}/views/{slug}/shown")
+async def shown_route(c: str, slug: str, v: str | None = None) -> dict[str, Any]:
+    """What the view does not show and what it derived, the two menus above its page (shown). 502 with the reader's
+    error."""
+    _view_or_404(c, slug, v)
+    try:
+        return await shown(c, slug, v)
     except ReaderError as e:
         raise HTTPException(502, {"message": e.message, "traceback": e.detail[-ERROR_MAX:]}) from None
 

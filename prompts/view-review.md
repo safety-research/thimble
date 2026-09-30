@@ -79,3 +79,59 @@ Return the problems that fail each criterion.
   "required": ["assessment"]
 }
 ```
+
+## derived
+
+# Derived fields
+
+{{include:preamble.md}}
+
+You check a view that thimble's dev agent built, a viewer of the analyst's corpus that they open in the Files tab. Its reader.py reads the corpus's files and hands the view's page its records. Beside the view, thimble lists the fields the reader derived rather than read as the files hold them, and marks those fields wherever the page names them, so the analyst can tell what the files say from what the reader made of them. A derived field the list leaves out reads to the analyst as if the files held it as shown.
+
+Compare reader.py with the list and name each field the reader derives that the list does not name. A field is derived when the value the reader hands the page differs from the value as the file holds it:
+
+- a time parsed, converted or moved to another zone;
+- fields merged, renamed or split, or a default put in for a missing value;
+- a value parsed out of text, or a number read from words;
+- a count, sum, duration, rank, class or other value computed from records.
+
+A record's ref, line number or byte offset is thimble's bookkeeping, and records left out are reported by problems() and hidden(), so neither is a derived field. Text shortened to fit the page, and a value copied as written into another structure, are not derived either. Name nothing the list names, however it words it, and each field once.
+
+## derived-view
+
+The view is {{name}}: {{description}}
+
+The files it reads: {{claims}}
+
+The derived fields it lists:
+{{derived}}
+
+reader.py:
+```python
+{{reader}}
+```
+
+## derived-findings
+
+Return the fields the reader derives that the list does not name.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "undeclared": {
+      "type": "array",
+      "description": "Each field the reader derives that the list does not name. Empty when the list names every one.",
+      "items": {
+        "type": "object",
+        "properties": {
+          "field": {"type": "string", "description": "The field's name as the reader hands it to the page."},
+          "how": {"type": "string", "description": "What the reader does to make it, and from what, in a few words, such as \"parsed from ts or timestamp to UTC\"."}
+        },
+        "required": ["field", "how"]
+      }
+    }
+  },
+  "required": ["undeclared"]
+}
+```

@@ -786,6 +786,18 @@ Screenshots are unavailable on this machine, so the checks did not load the page
 
 The page fetched {fetched} records, but only {records} of its elements carry a record's `<path>#L<n>` as their `data-anchor`, so the labels the analyst turns on show on almost nothing in it. Give each element that shows a record its file ref.
 
+## view-not-shown
+
+{count} claimed files are neither read to the end by build_index nor listed with a why by hidden(index): {files}. The analyst sees each one above the view as not shown. Read each file whole in build_index, with Python's `open()`, or return it from hidden(index) with its `path` and a `why` that says why the view leaves it out.
+
+## view-derived-undeclared
+
+reader.py derives fields that the view's list of derived fields leaves out: {fields}. The analyst sees the list above the view, and each field on it marked where the page names it. Add each field to `derived` in view.json as an object with `field`, `from` and `how`, or return it from the reader's derived(index), and give the element that names it on the page `data-field` with its name.
+
+## view-derived-unchecked
+
+The derived fields were not compared with reader.py: {why}.
+
 ## check-unread
 
 {n} of {total} files were opened by no card and no Read call, {files}.

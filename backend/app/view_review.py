@@ -17,6 +17,10 @@ dev.run_view calls after_built() when a build or a change to a view passes. Each
    checks run after its turns (dev.review_revision). A revision that passes is the view (views.mark_built), and the
    review runs again; one that does not leaves the view at its last version that passed.
 
+Before a view is built, its gate also has one model reading compare reader.py with the view's derived fields
+(derived_review, the `derived` sections of prompts/view-review.md), and a field the reader derives that the list leaves
+out fails the build.
+
 The state rides on the proposal as `review {state, round, ts, revised, left, note, undo}` and goes out with the `view`
 event. views/.reviewed/<slug>/ keeps the view as it was built for Undo until the next build or change passes, and
 <slug>.last the last version that passed, restored when a revision fails or the review stops mid-revision. A review run
@@ -25,6 +29,7 @@ stops its review; a view replaced or deleted stops it with no trace (forget)."""
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import logging
 import os
@@ -39,6 +44,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException
 
 from . import config, headless, retry, views
+from .ledger import write_json
 
 log = logging.getLogger("thimble.view_review")
 
@@ -532,6 +538,77 @@ def _assessment(raw: Any, n: int) -> list[list[str]] | None:
             return None
         out.append([" ".join(p.split()) for p in problems if p.strip()])
     return out
+
+
+# --------------------------------------------------------------------------- the derived fields
+
+DERIVED_FILE = "derived-review.json"  # in the view's cache: {key, undeclared} of the last reading that answered
+READER_CHARS = 120_000  # of reader.py the reading sees
+
+
+def _kept(path: Path) -> Any:
+    try:
+        return json.loads(path.read_text("utf-8"))
+    except (OSError, ValueError):
+        return {}
+
+
+def _keep(path: Path, obj: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    write_json(path, obj)
+
+
+def _derived_key(reader: str, derived: list[dict[str, str]]) -> str:
+    import hashlib  # noqa: PLC0415
+
+    return hashlib.sha1((reader + "\0" + json.dumps(derived, sort_keys=True)).encode("utf-8")).hexdigest()[:20]
+
+
+async def derived_review(c: str, slug: str, derived: list[dict[str, str]]) -> list[dict[str, str]] | str:
+    """The fields reader.py derives that `derived` (the view's list, views.shown) does not name, [{field, how}], from one
+    reading on the `verify` role's model, kept per reader and list so the gate after the session's own check does not
+    ask again; why not, as a line, when the reading failed. Capacity failures wait CAPACITY_WAITS_S."""
+    from . import model, tools  # noqa: PLC0415
+
+    view = views.read_view(c, slug)
+    if view is None:
+        return f"no view {slug!r}"
+    reader = await asyncio.to_thread((Path(view["dir"]) / views.READER_PY).read_text, "utf-8")
+    key = _derived_key(reader, derived)
+    kept_at = views.cache_dir(c, view) / DERIVED_FILE
+    kept = await asyncio.to_thread(_kept, kept_at)
+    if isinstance(kept, dict) and kept.get("key") == key and isinstance(kept.get("undeclared"), list):
+        return kept["undeclared"]
+    secs = _sections()
+    listed = "\n".join(f"- {d['field']}: {d['how']}" + (f" (from {d['from']})" if d.get("from") else "") for d in derived)
+    user = _fill(secs["derived-view"], {"name": view["name"], "description": view["description"] or "-",
+                                        "claims": ", ".join(view["claims"]), "derived": listed or "- none",
+                                        "reader": reader[:READER_CHARS]})
+    desc, schema = tools.split_section(secs["derived-findings"])
+    tool = model.ToolSpec(name="findings", description=desc, input_schema=schema)
+    effort = str(_role(c).get("effort") or config.ROLE_MODELS_DEFAULT["verify"]["effort"])
+    waits = list(CAPACITY_WAITS_S)
+    while True:
+        try:
+            res = await asyncio.wait_for(_call(c, _fill(secs["derived"], {}), user, tool, [], effort),
+                                         READ_TIMEOUT_S.get(effort, 120.0))
+        except asyncio.TimeoutError:
+            return f"the reading ran past {READ_TIMEOUT_S.get(effort, 120.0):.0f} s"
+        if res.status == "ok" and isinstance(res.output, dict) and isinstance(res.output.get("undeclared"), list):
+            named = {d["field"] for d in derived}
+            out = [{"field": " ".join(str(x.get("field") or "").split()), "how": " ".join(str(x.get("how") or "").split())}
+                   for x in res.output["undeclared"] if isinstance(x, dict)]
+            out = [x for x in out if x["field"] and x["field"] not in named]
+            with contextlib.suppress(OSError):
+                await asyncio.to_thread(_keep, kept_at, {"key": key, "undeclared": out})
+            return out
+        cls = "rate_limited" if res.status == "rate_limited" else retry.transient_class(None, res.detail)
+        if cls in CAPACITY and waits:
+            await asyncio.sleep(waits.pop(0))
+            continue
+        if cls in CAPACITY:
+            return CAPACITY_WORDS[cls]
+        return f"the reading ended {res.status}" + (f" ({res.detail})" if res.detail else "")
 
 
 # --------------------------------------------------------------------------- the revision

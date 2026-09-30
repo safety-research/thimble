@@ -10,7 +10,8 @@
      .table            a table of records: caps header, hairline rows, .active on the chosen row
      .list-row         a row of a list: .active on the chosen one
      .avatar           a person or an agent: the initial of its name on a neutral disc, whose shade the page sets
-                       from the name as --a (0.08 to 0.24), so the label colours stay the only colours */
+                       from the name as --a (0.08 to 0.24), so the label colours stay the only colours
+     [data-derived]    a derived field's name, marked by the bridge on an element with data-field */
 
 body {
   font: 400 var(--text-sm) / 1.45 var(--font-body);
@@ -287,4 +288,12 @@ select.field {
   color: var(--text-primary);
   font: 600 11px / 1 var(--font-body);
   text-transform: uppercase;
+}
+
+[data-derived]::after {
+  content: 'ƒ';
+  margin-left: 2px;
+  font: italic 400 0.8em / 1 var(--font-body);
+  color: var(--text-accent);
+  vertical-align: super;
 }
