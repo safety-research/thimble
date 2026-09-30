@@ -3,7 +3,8 @@
 // Raw) and, in red, the lines of them its reader could not read. A view that fails says so with Raw beside it. While a
 // Files label filter is set,
 // the head shows it as a chip that clears it, since the view keeps only the records the filter keeps. At the head's
-// right end, the mark of the review of the view's pictures (ReviewMark).
+// right end, Open in (the other views that claim the file shown, and the File browser), the mode switch and the mark of
+// the review of the view's pictures (ReviewMark).
 // The pane keeps the version of the view it opened (usePinnedView): a newer one, from a change, the review or the
 // orientation, never reloads under the analyst. The head says Updated with Reload, which loads it where they were: the
 // element they picked, the scroll positions, the fields and the label filter. Undo in the review's mark loads at once.
@@ -20,6 +21,7 @@ import { track } from '../lib/telemetry'
 import { hhmm } from '../lib/time'
 import type { ViewProblems, ViewQuery, ViewReview } from '../lib/types'
 import type { SourceKind } from '../lib/types'
+import { OpenIn } from './OpenIn'
 import { inferKind } from './params'
 import { Reader, ViewFailed } from './Reader'
 import { kindIn, useFolderStore } from './Tree'
@@ -114,6 +116,7 @@ export function ViewPane({ ws, view, path, kind, targetRef, quote, onQuoteMissin
         </div>
         {pin.stale && mode === 'view' && <ViewUpdated onReload={reload} className="view-pane-updated" />}
         {filter && filterLabel && <FilterChip concept={filter.concept} name={filterLabel.name} value={filter.value} className="view-pane-filter" onClear={() => void api.deleteFilter(ws, 'files').catch(() => undefined)} />}
+        {path && <OpenIn ws={ws} path={rawAt?.path ?? path} current={view.slug} onOpen={(slug) => bus.emit('openIn', { path: rawAt?.path ?? path, ref: rawAt?.ref ?? targetRef, slug })} />}
         {path && (
           <Segmented
             label="Mode"

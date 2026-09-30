@@ -1,8 +1,9 @@
 // The Files pane: the views bar across the top (File browser first), under it the sidebar (the files tree with the
 // Labels pane pinned to its bottom) and the reader for the open tab, or a picked view with a Labels-only sidebar; the
 // status strip along the bottom. Open files are tabs kept per workspace in browser storage; a workspace with none opens
-// its largest data file beside the README (Tree.defaultTabs). A ref opens where it belongs: in the view that claims its
-// file, else in the File browser. Tree folders are fetched one at a time (Tree.useFolderStore). While the pane has the
+// its largest data file beside the README (Tree.defaultTabs). A ref opens where it belongs: in the view it names, else in
+// the view the analyst last used for its file (kept per workspace), else in the File browser; Open in on the file's
+// panel lists the other views that claim it. Tree folders are fetched one at a time (Tree.useFolderStore). While the pane has the
 // focus, ⌘P focuses the search, ⌘F opens the find bar and Ctrl+G go to line (find.ts findKey).
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
@@ -28,7 +29,8 @@ import { inferKind, TREE } from './params'
 import { Reader, type FindAsk } from './Reader'
 import { baseName, defaultTabs, fmtSize, glyphOf, kindIn, parentOf, Tree, useFolderStore } from './Tree'
 import { useFilesLabels, type FilesLabels } from './useLabels'
-import { chooseView, slugOf, viewPlace } from './viewChoice'
+import { OpenIn } from './OpenIn'
+import { chooseView, viewPlace } from './viewChoice'
 import { ViewPane } from './ViewPane'
 import { useLabelRuns, useLabelSide } from './ViewSide'
 import type { ViewQuote } from './ViewerFrame'
@@ -305,6 +307,9 @@ export function FilesTab({ ws, active, focused = active }: { ws: string; active:
     },
     [openTab],
   )
+  // the view the analyst last used for a file, which a ref into it opens in; null for the File browser
+  const usedFor = useCallback((path: string) => readStorage<string | null>(storageKey(ws, `openIn:${path}`), null), [ws])
+  const used = useCallback((path: string, slug: string | null) => writeStorage(storageKey(ws, `openIn:${path}`), slug), [ws])
 
   useEffect(
     () =>
@@ -331,9 +336,9 @@ export function FilesTab({ ws, active, focused = active }: { ws: string; active:
     [],
   )
 
-  // a ref's place: a view ref in its view (or the File browser when the view is gone); a file ref in the first view that
-  // claims the file and accepts the ref's fragment, or the record a span sits in (viewPlace), else in the File browser.
-  // With `browser` (an example card's address) a file ref always opens in the File browser
+  // a ref's place: a view ref in its view (or the File browser when the view is gone); a file ref in the view the analyst
+  // last used for the file, at the ref's place or the record a span sits in (viewPlace), else in the File browser. With
+  // `browser` (an example card's address) a file ref always opens in the File browser
   const openRef = useCallback(
     async (ref: string, browser = false, from: string | null = null) => {
       const p = parseRef(ref)
@@ -350,26 +355,28 @@ export function FilesTab({ ws, active, focused = active }: { ws: string; active:
           const path = first ? refPath(first) : null
           if (!path) throw new Error(`${ref} names no file line`)
           if (r.meta && (r.meta as { deleted?: boolean }).deleted) toBrowser({ path, ref: first }, from)
-          else toView(p.slug, { path, ref }, from)
+          else {
+            used(path, p.slug)
+            toView(p.slug, { path, ref }, from)
+          }
           return
         }
         const path = refPath(ref)
         if (path == null) return
         if (browser) return toBrowser({ path, ref }, from)
-        const claiming = await api.viewsForFile(ws, path).then((v) => v.filter((x) => x.ok)).catch(() => [])
+        const remembered = usedFor(path)
+        const claiming = remembered ? await api.viewsForFile(ws, path).then((v) => v.filter((x) => x.ok)).catch(() => []) : []
+        const slug = chooseView({ views: claiming, remembered })
+        const view = claiming.find((v) => v.slug === slug)
+        if (!view) return toBrowser({ path, ref }, from)
         const fragment = fragmentIn(ref, path)
-        if (fragment == null) {
-          const slug = slugOf(chooseView({ views: claiming, fragment }))
-          if (slug) toView(slug, { path }, from)
-          else toBrowser({ path, ref }, from)
-          return
-        }
+        if (fragment == null) return toView(view.slug, { path }, from)
         const knows = (s: string, r: string) =>
           api
             .viewOpen(ws, s, r)
             .then((o) => !o.error)
             .catch(() => false)
-        const place = await viewPlace(claiming, path, fragment, knows)
+        const place = await viewPlace([view], path, fragment, knows)
         if (!place) return toBrowser({ path, ref }, from)
         if (place.ref === ref) return toView(place.slug, { path, ref }, from)
         // the view shows the record a quoted span sits in: its page is sent the span's text to highlight
@@ -382,8 +389,20 @@ export function FilesTab({ ws, active, focused = active }: { ws: string; active:
         bus.emit('toast', { text: `Could not open ${ref}. ${(e as Error).message}`, kind: 'error' })
       }
     },
-    [ws, toBrowser, toView],
+    [ws, toBrowser, toView, used, usedFor],
   )
+  // Open in: the file in another view that claims it, at the place shown when that is in the file, or in the File browser
+  const openIn = useCallback(
+    (path: string, ref: string | undefined, slug: string | null) => {
+      used(path, slug)
+      const at = ref && refPath(ref) === path ? ref : undefined
+      track('view-open', { target: slug ? `view:${slug}` : 'panel:files', detail: { from: 'open-in' } })
+      if (slug) toView(slug, { path, ref: at })
+      else toBrowser({ path, ref: at })
+    },
+    [used, toView, toBrowser],
+  )
+  useEffect(() => bus.on('openIn', ({ path, ref, slug }) => openIn(path, ref, slug)), [openIn])
   // a quoted span the view did not show opens in the File browser, which highlights it
   const quoteMissing = useCallback(() => {
     if (viewAt?.quote) openTab({ path: viewAt.path, ref: viewAt.quote.span })
@@ -495,6 +514,12 @@ export function FilesTab({ ws, active, focused = active }: { ws: string; active:
     [sideShown, showSide, tabs, current, closeTab],
   )
 
+  const openPath = open?.path ?? null
+  const openRefAt = open?.ref
+  const openInEnd = useMemo(
+    () => (openPath ? <OpenIn ws={ws} path={openPath} current={null} onOpen={(slug) => openIn(openPath, openRefAt, slug)} /> : null),
+    [ws, openPath, openRefAt, openIn],
+  )
   const viewsBar = (compact: boolean) => <ViewsBar ws={ws} value={shownView ? bar : BROWSER} onChange={pickBar} views={views} proposals={proposals} compact={compact} />
   return (
     <div className="files-tab" data-panel="files" ref={rootRef}>
@@ -557,7 +582,7 @@ export function FilesTab({ ws, active, focused = active }: { ws: string; active:
           )}
           <div className="files-main">
             {open && ready ? (
-              <Reader workspace={ws} path={open.path} kind={kindOf(open.path)} targetRef={open.ref} lead={lead} labels={labels} onMode={setMode} findAsk={findAsk} />
+              <Reader workspace={ws} path={open.path} kind={kindOf(open.path)} targetRef={open.ref} lead={lead} end={openInEnd} labels={labels} onMode={setMode} findAsk={findAsk} />
             ) : (
               <div className="reader">
                 <div className="reader-bar">{lead}</div>

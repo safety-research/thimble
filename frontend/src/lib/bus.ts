@@ -42,6 +42,9 @@ export type Events = {
   /** open a view with a card's arguments (a card type's Open as view, canvas/TypeCard, or main's open_view), or with
    * none (null), in Files or in its own pane */
   openView: { slug: string; query: ViewQuery | null }
+  /** Open in on a file's panel: the file in the view `slug`, or in the File browser for null, kept as the view the
+   * analyst last used for it */
+  openIn: { path: string; ref?: string; slug: string | null }
   /** a layout main asked for with set_layout (the stream's `layout` record): a preset, and the surfaces its panes show
    * in reading order */
   layout: { layout: 'one' | 'columns' | 'rows' | 'three' | 'quadrants'; surfaces: string[] }

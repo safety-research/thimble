@@ -67,6 +67,8 @@ export interface ReaderProps {
   targetRef?: string
   /** what leads the bar: the open files as tabs */
   lead?: ReactNode
+  /** at the bar's end, before the modes: the Open in menu */
+  end?: ReactNode
   labels: FilesLabels
   /** show this built-in view alone, with no mode switch (a view's Raw) */
   only?: string
@@ -321,7 +323,7 @@ export function scrollTopFor(body: HTMLElement, a: number): number | null {
 const sameShown = (x: Shown, y: Shown) =>
   x.top === y.top && x.height === y.height && x.seen.length === y.seen.length && x.seen.every((s, i) => s.line === y.seen[i].line && s.top === y.seen[i].top && s.bottom === y.seen[i].bottom)
 
-function FileReader({ workspace, path, kind, targetRef, lead, labels, only, onMode, findAsk }: ReaderProps) {
+function FileReader({ workspace, path, kind, targetRef, lead, end, labels, only, onMode, findAsk }: ReaderProps) {
   const isDatabase = kind === 'forge'
   const builtins = useBuiltins(workspace, path, kind)
   const memoryKey = storageKey(workspace, `viewOf:${path}`)
@@ -846,6 +848,7 @@ function FileReader({ workspace, path, kind, targetRef, lead, labels, only, onMo
             <span className="reader-spacer" />
             {unread && <span className="reader-fragment mono">#{unread}</span>}
             {!isDatabase && !binary && loaded && !viewer && <Button variant="icon" size="sm" icon="search" title="Find in the file" className="reader-find-open" active={!!finder} onClick={() => (finder ? closeFinder() : openFinder('find'))} />}
+            {end}
             {!only && builtins.loaded && view && (options.length > 1 || offered) && (
               <span className="reader-modes">
                 <Segmented label="Mode" size="md" value={viewer ? viewValue(viewer.slug) : view.type} onChange={onPick} options={options} />
