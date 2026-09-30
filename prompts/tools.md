@@ -772,7 +772,7 @@ The dev agent built the view {view}, so {claims} now open in it. In it {forms}.
 
 ## view-no-forms
 
-no citation resolves, because its `accepts` and `declares` are empty
+no citation resolves, because its `accepts` and `units` are empty
 
 ## view-label-controls
 

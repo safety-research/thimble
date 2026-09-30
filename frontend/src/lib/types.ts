@@ -450,11 +450,12 @@ export interface View {
   /** written for this corpus, or a file-type viewer thimble ships (plugin/viewers) */
   origin: 'workspace' | 'builtin'
   name: string
-  why: string
+  /** what it shows, in a sentence */
+  description: string
   claims: string[]
   accepts: ViewForm[]
-  declares: ViewForm[]
-  default: boolean
+  /** its own citable units, cited as view:<slug>/<key> */
+  units: ViewForm[]
   libs: string[]
   built: string
   /** the digest of its files when it last passed its checks: a page loaded at it keeps it until reloaded */

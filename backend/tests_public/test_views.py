@@ -4,8 +4,8 @@ of them with its page loaded headless, and one on a machine without the headless
 
 A temp DATA_DIR holds the corpus `boards`: `board.jsonl`, one post per line, each {thread, author, time, body}, and
 `notes.md`. The `ws` fixture saves the view `threads`, whose reader (THREADS_READER) groups the posts by thread: it
-accepts `board.jsonl#L<n>` (the post) and declares `view:threads/<thread>` (a whole thread). Most tests run the reader
-in this process (the `inproc` fixture replaces views._runner with an exec of the same snippet the kernel gets)."""
+accepts `board.jsonl#L<n>` (the post) and gives the unit `view:threads/<thread>` (a whole thread). Most tests run the
+reader in this process (the `inproc` fixture replaces views._runner with an exec of the same snippet the kernel gets)."""
 from __future__ import annotations
 
 import asyncio
@@ -80,9 +80,9 @@ thimble.onOpen(async (place) => {
 })
 </script></body></html>"""
 
-VIEW = dict(name="Threads", why="The board's posts grouped by thread.", claims=["board.jsonl"],
-            accepts=[{"form": "L<n>", "means": "one post"}], declares=[{"form": "<thread>", "means": "one whole thread"}],
-            default=True, libs=[])
+VIEW = dict(name="Threads", description="The board's posts grouped by thread.", claims=["board.jsonl"],
+            accepts=[{"form": "L<n>", "means": "one post"}], units=[{"form": "<thread>", "means": "one whole thread"}],
+            libs=[])
 
 
 @pytest.fixture()
@@ -231,7 +231,7 @@ async def test_no_thread_is_read_as_a_question_from_a_view_s_own_box(ws, inproc,
 # checks a view a session writes must pass. Each sample is copied into the temp DATA_DIR as a corpus named after its
 # example.
 
-# the example, the slug it is saved under, and a key of each kind it declares
+# the example, the slug it is saved under, and a key of each unit it gives
 EXAMPLES = {
     "incident-timeline": ("incident-timeline", ["view:incident-timeline/INC-312",
                                                 "view:incident-timeline/2026-05-16T08:00..2026-05-16T09:00"]),
@@ -261,7 +261,7 @@ def _save_example(name: str) -> str:
     raw = json.loads((d / "view.json").read_text("utf-8"))
     slug = EXAMPLES[name][0]
     views.write_view(name, slug, reader=(d / "reader.py").read_text("utf-8"), html=(d / "view.html").read_text("utf-8"),
-                     **{k: raw[k] for k in ("name", "why", "claims", "accepts", "declares", "default", "libs")})
+                     **{k: raw[k] for k in ("name", "description", "claims", "accepts", "units", "libs")})
     return slug
 
 

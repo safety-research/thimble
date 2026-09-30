@@ -488,7 +488,8 @@ async def read(c: str, run: _Run, prop: dict[str, Any], view: dict[str, Any], sh
     n = len(re.findall(r"^- ", secs["review"] + ("\n" + secs["criteria-labels"] if lined else ""), re.M))
     system = _fill(secs["review"], {"pictures": secs["pictures-labels" if lined else "pictures-plain"],
                                     "label_criteria": secs["criteria-labels"] if lined else ""})
-    user = _fill(secs["view"], {"name": str(prop.get("name") or view["name"]), "why": str(prop.get("why") or view["why"]),
+    user = _fill(secs["view"], {"name": str(prop.get("name") or view["name"]),
+                                "description": str(prop.get("why") or view["description"]),
                                 "claims": ", ".join(prop.get("claims") or view["claims"]),
                                 "spec": views.spec_lines(prop), "measured": measured(shots),
                                 "records": records_text(shots) or "-"})

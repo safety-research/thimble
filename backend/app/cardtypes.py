@@ -631,16 +631,16 @@ def install_view(c: str, t: dict[str, Any]) -> None:
     of the analyst's that keeps the digest of the files as installed (`installed`)."""
     d = Path(t["dir"])
     raw = read_json(d / views.VIEW_JSON, {})
+    v = views._normalize_view(t["slug"], raw)
     with views._proposals_lock:
         items = [p for p in views.list_proposals(c) if p.get("slug") != t["slug"]]
         items.append({"slug": t["slug"], "name": views.title_case(raw.get("name") or t["slug"]),
-                      "why": " ".join(str(raw.get("why") or "").split()), "claims": list(t["claims"]), "arrangement": "",
+                      "why": v["description"], "claims": list(t["claims"]), "arrangement": "",
                       "proposed_by": "analyst", "status": "queued", "orientation": False, "ts": views._now()})
         views._save_proposals(c, items)
-    views.write_view(c, t["slug"], name=raw.get("name") or t["slug"], why=raw.get("why") or "", claims=list(t["claims"]),
-                     accepts=raw.get("accepts"), declares=raw.get("declares"), default=bool(raw.get("default")),
-                     libs=raw.get("libs"), reader=(d / views.READER_PY).read_text("utf-8"),
-                     html=(d / views.VIEW_HTML).read_text("utf-8"))
+    views.write_view(c, t["slug"], name=raw.get("name") or t["slug"], description=v["description"],
+                     claims=list(t["claims"]), accepts=v["accepts"], units=v["units"], libs=raw.get("libs"),
+                     reader=(d / views.READER_PY).read_text("utf-8"), html=(d / views.VIEW_HTML).read_text("utf-8"))
     views.update_proposal(c, t["slug"], installed=views.view_digest(views.views_dir(c) / t["slug"]))
 
 

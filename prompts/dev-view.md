@@ -8,7 +8,7 @@ You work in the corpus folder {{corpus}}. Leave its files unchanged, since every
 
 The view {{name}}, whose slug is `{{slug}}`.
 
-- What the analyst sees in it and why that helps: {{why}}
+- What the analyst sees in it and why that helps: {{description}}
 - The files it reads: {{claims}}
 {{spec}}
 
@@ -48,7 +48,7 @@ Three views in {{examples}} show methods on invented data, each described in its
 
 ## The three files
 
-- `view.json` holds `name`, `why`, `claims` (globs relative to the corpus folder), the citation forms `accepts` and `declares` (below), `default` (true opens citations of its files here ahead of another view that claims them) and `libs` (any of `vega`, `vega-lite` and `vega-embed`). thimble adds `built` when the checks pass.
+- `view.json` holds `name`, `description` (what it shows, in a sentence), `claims` (globs relative to the corpus folder), the citation forms `accepts` and `units` (below) and `libs` (any of `vega`, `vega-lite` and `vega-embed`). thimble adds `built` when the checks pass.
 - `reader.py` runs with the corpus folder as its working directory and defines four top-level functions. `build_index(paths)` gets the claimed files' paths and returns the index, which thimble caches. It keeps only what finding a record needs, such as byte offsets and keys, since a file may hold millions of lines. `records(index, query)` answers the page's `thimble.fetch(query)` with JSON, a page of records at a time. `resolve(index, locator)` gets `{"path", "fragment"}` or `{"key"}` and returns None when the view does not know the place, else `excerpt` (the record's text, word for word), `label` (a few words for the citation's chip), `refs` (the `<path>#L<n>` it stands for), `key` (the unit's key, if any) and `target` (what the page needs to show the place). `problems(index)` returns the lines it could not parse, as `[{"ref": "<path>#L<n>", "why": ...}]`, which thimble shows in red above the page, so the page never reports them itself. `import thimble` gives the label calls above, where a mark is `{"label", "value", "colour"}`, and `thimble.view_labels()`, the labels that are on and the filter. For a view built on a label, such as a codebook, `thimble.labels("<name>", negatives=True)` gives its value on every record as a DataFrame.
 - `view.html` is the page, in a sandboxed frame with no network. It gets data from `thimble.fetch(query)`, shows the place `thimble.onOpen(fn)` hands it, opens another with `thimble.navigate(ref)`, and marks elements with `data-anchor`, `data-anchor-text` and `data-anchor-name`. `thimble.mediaUrl(path)` gives a claimed image, audio or video file to `<img>`, `<audio>` or `<video>`.
 
@@ -56,15 +56,15 @@ Give every element the analyst might ask about a `data-anchor`, so a ⌘-click o
 
 ## Citation forms
 
-A view accepts `L<n>` for a line, so citations written before it existed open in it, and declares a key only for a unit that spans records, such as a conversation or a day.
+A view accepts `L<n>` for a line, so citations written before it existed open in it, and gives a unit of its own, cited `view:<slug>/<key>`, only for one that spans records, such as a conversation or a day.
 
     Ticket  Unit: one ticket; tickets with the same customer_id are one conversation, in time order.
     Good    "accepts": [{"form": "L<n>", "means": "the ticket on line <n>, shown in its conversation"}],
-            "declares": [{"form": "<customer_id>", "means": "one customer's whole conversation"}]
+            "units": [{"form": "<customer_id>", "means": "one customer's whole conversation"}]
 
 ## Checking
 
-Check the view with `{{check}} '<ref>'`, each locator one argument, as a command of its own, since in a pipeline it cannot reach the server. Pass as locators the refs sampling may miss, such as a key of each kind the view declares. It checks sampled lines, your locators and each excerpt against the records, and takes two pictures, as the page opens and at the first place that resolved, with a test label that marks about one record in seven. Open them with Read (an mp4 shows a blank player there).
+Check the view with `{{check}} '<ref>'`, each locator one argument, as a command of its own, since in a pipeline it cannot reach the server. Pass as locators the refs sampling may miss, such as a key of each unit the view gives. It checks sampled lines, your locators and each excerpt against the records, and takes two pictures, as the page opens and at the first place that resolved, with a test label that marks about one record in seven. Open them with Read (an mp4 shows a blank player there).
 
 Look at both pictures as the analyst will: all of the data, readable, with the test label's colour on what it marks, charts included, and on nothing else, and details that match records you read, including one whose state changed more than once and one of something that failed.
 

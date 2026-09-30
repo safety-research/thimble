@@ -2344,7 +2344,8 @@ def build_view_prompt(c: str, prop: dict[str, Any], folder: Path, corpus: Path) 
     command's URL."""
     from . import views  # noqa: PLC0415
 
-    values = {"name": str(prop.get("name") or prop["slug"]), "slug": str(prop["slug"]), "why": str(prop.get("why") or ""),
+    values = {"name": str(prop.get("name") or prop["slug"]), "slug": str(prop["slug"]),
+              "description": str(prop.get("why") or ""),
               "claims": ", ".join(prop.get("claims") or []), "spec": views.spec_lines(prop), "folder": str(folder),
               "corpus": str(corpus), "examples": str(views.EXAMPLES_DIR), "check": view_check_command(c, str(prop["slug"])),
               "network": view_network_line(c)}
@@ -2383,7 +2384,7 @@ def build_view_change_prompt(prop: dict[str, Any], folder: Path) -> str:
     request = str(prop.get("change") or "").strip()
     return prompts.render("dev-view-change", {
         "name": str(prop.get("name") or prop["slug"]),
-        "why": str(prop.get("why") or ""),
+        "description": str(prop.get("why") or ""),
         "claims": ", ".join(prop.get("claims") or []),
         "spec": views.spec_lines(prop),
         "request": fenced("the analyst's request", request) if request else "",

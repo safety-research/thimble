@@ -44,7 +44,7 @@ Picture {{picture}}: the page draws {{count}} chips or buttons as rounded pills 
 
 The view is {{name}}.
 
-- What the analyst sees in it and why that helps: {{why}}
+- What the analyst sees in it and why that helps: {{description}}
 - The files it reads: {{claims}}
 {{spec}}
 

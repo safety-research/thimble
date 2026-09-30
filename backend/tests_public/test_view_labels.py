@@ -62,8 +62,8 @@ def resolve(index, locator):
     return None if key is None else {"excerpt": key, "label": key, "refs": [ref], "key": key, "target": {}}
 '''
 HTML = "<!doctype html><html><body><div data-anchor='board.jsonl#L1'>x</div></body></html>"
-VIEW = dict(name="Threads", why="The posts by thread.", claims=["board.jsonl"], accepts=[{"form": "L<n>", "means": "a post"}],
-            declares=[{"form": "<thread>", "means": "a thread"}], default=True, libs=[])
+VIEW = dict(name="Threads", description="The posts by thread.", claims=["board.jsonl"],
+            accepts=[{"form": "L<n>", "means": "a post"}], units=[{"form": "<thread>", "means": "a thread"}], libs=[])
 
 
 @pytest.fixture()

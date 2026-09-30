@@ -1,10 +1,10 @@
 """Views: viewers written for how a corpus arranges its records, and the proposals they start as.
 
 A view is three files in `workspaces/<c>/views/<slug>/`, written by the dev agent's session (dev.run_view):
-view.json {name, why, claims, accepts, declares, default, libs, built}, reader.py (the contract in view_host.py), and
-view.html, drawn in a sandboxed frame that loads nothing but the view's media route. `claims` are globs of the
-files
-the view opens, `accepts` the fragment forms it understands (`L<n>`), `declares` its own `view:<slug>/<key>` units.
+view.json {name, description, claims, accepts, units, libs, built}, reader.py (the contract in view_host.py), and
+view.html, drawn in a sandboxed frame that loads nothing but the view's media route. `claims` are globs of the files the
+view opens, `accepts` the fragment forms it understands (`L<n>`), `units` its own `view:<slug>/<key>` units; `why` and
+`declares` are read for `description` and `units`.
 thimble also ships file-type viewers under the same contract (BUILTIN_VIEWERS). Readers run on the workspace's
 `views`
 kernel with a cached index; refs.resolve hands file refs with a fragment to enrich_file_ref, and resolve_sync bridges
@@ -255,11 +255,10 @@ def _normalize_view(slug: str, raw: Any, *, where: Path | None = None, origin: s
         "origin": origin,  # workspace (written for this corpus) or builtin (a file-type viewer thimble ships)
         "slug": slug,
         "name": " ".join(str(raw.get("name") or slug).split()),
-        "why": " ".join(str(raw.get("why") or raw.get("description") or "").split()),
+        "description": " ".join(str(raw.get("description") or raw.get("why") or "").split()),
         "claims": _str_list(raw.get("claims")),
         "accepts": _forms(raw.get("accepts")),
-        "declares": _forms(raw.get("declares")),
-        "default": bool(raw.get("default")),
+        "units": _forms(raw.get("units") if raw.get("units") is not None else raw.get("declares")),
         "libs": _libs(raw.get("libs")),
         "built": str(raw.get("built") or ""),
         "version": str(raw.get("version") or ""),
@@ -412,8 +411,8 @@ def source_problems(claims: Any, reader: str, html: str, libs: Any) -> list[str]
     return out
 
 
-def write_view(c: str, slug: str, *, name: str, why: str, claims: Any, accepts: Any = None, declares: Any = None,
-               default: bool = False, libs: Any = None, reader: str, html: str) -> dict[str, Any]:
+def write_view(c: str, slug: str, *, name: str, description: str, claims: Any, accepts: Any = None, units: Any = None,
+               libs: Any = None, reader: str, html: str) -> dict[str, Any]:
     """Write or replace a view's three files, validated (source_problems), and register it built (mark_built): a view
     of thimble's own making, as the tests make theirs; a view ticket's session writes the files itself."""
     slug = _check_slug(slug)
@@ -422,9 +421,8 @@ def write_view(c: str, slug: str, *, name: str, why: str, claims: Any, accepts: 
     problems = source_problems(claims, reader_src, html_src, libs)
     if problems:
         raise HTTPException(400, problems[0])
-    stored = {"name": " ".join(str(name or slug).split()) or slug, "why": " ".join(str(why or "").split()),
-              "claims": _str_list(claims), "accepts": _forms(accepts), "declares": _forms(declares), "default": bool(default),
-              "libs": _libs(libs)}
+    stored = {"name": " ".join(str(name or slug).split()) or slug, "description": " ".join(str(description or "").split()),
+              "claims": _str_list(claims), "accepts": _forms(accepts), "units": _forms(units), "libs": _libs(libs)}
     d = views_dir(c) / slug
     d.mkdir(parents=True, exist_ok=True)
     atomic_write_text(d / READER_PY, reader_src.rstrip("\n") + "\n")
@@ -761,15 +759,14 @@ def accepts(view: dict[str, Any], fragment: str) -> bool:
 
 
 def views_for(c: str, path: str, fragment: str | None = None) -> list[dict[str, Any]]:
-    """The working views that claim the file (and accept the fragment, when one is given), in the order a citation
-    opens them: the default view first, then the view built last."""
+    """The working views that claim the file (and accept the fragment, when one is given): the view built last first,
+    and a view written for this corpus before a file-type viewer."""
     try:
         listed = list_views(c)
     except (ValueError, OSError):
         return []
     hit = [v for v in listed if v["ok"] and claims_path(v, path) and (fragment is None or accepts(v, fragment))]
     hit.sort(key=lambda v: v["built"], reverse=True)
-    hit.sort(key=lambda v: not v["default"])
     hit.sort(key=lambda v: v["origin"] == "builtin")  # a view written for this corpus before a file-type viewer
     return hit
 
@@ -1261,7 +1258,7 @@ def resolve_view_ref(corpus_dir: Path, p: dict[str, Any], ref: str) -> dict[str,
     if not key:
         if view is not None:
             return {"ref": ref, "kind": "view", "slug": slug, "key": None, "record": None, "label": view["name"],
-                    "excerpt": view["why"] or view["name"], "refs": [], "meta": {"slug": slug, "name": view["name"]}}
+                    "excerpt": view["description"] or view["name"], "refs": [], "meta": {"slug": slug, "name": view["name"]}}
         prop = read_proposal(c, slug)
         if prop is not None:
             return {"ref": ref, "kind": "view", "slug": slug, "key": None, "record": None, "label": prop["name"],
@@ -1295,7 +1292,7 @@ FORM_PAD = 44  # the width of the description column in shared.md's table of for
 
 
 def view_forms(view: dict[str, Any]) -> list[tuple[str, str]]:
-    """(the form as written in a citation, what it means) for every form the view accepts or declares. A view over one
+    """(the form as written in a citation, what it means) for every form the view accepts and every unit it gives. A view over one
     named file writes it in the form; a view over a glob or several files writes `<file>#<form>`, and its meaning says
     which files (a file-type viewer's meaning names the type)."""
     out: list[tuple[str, str]] = []
@@ -1303,7 +1300,7 @@ def view_forms(view: dict[str, Any]) -> list[tuple[str, str]]:
     one = claims[0] if len(claims) == 1 and not _GLOB_CHARS.search(claims[0]) else None
     for f in view.get("accepts") or []:
         out.append((f"{one or '<file>'}#{f['form']}", f["means"] or f"a place in {', '.join(claims)}"))
-    for f in view.get("declares") or []:
+    for f in view.get("units") or []:
         out.append((f"view:{view['slug']}/{f['form']}", f["means"] or f"a unit of {view['name']}"))
     return out
 
@@ -1474,19 +1471,19 @@ def install_viewer(c: str, slug: str, d: Path, claims: Any, *, why: str, propose
     `orientation` one counts toward VIEW_PROPOSALS_MAX) that keeps the digest of the files as installed (`installed`)
     and the `extension` they came from. `libs`, when given, are the libraries its page gets in place of view.json's."""
     raw = read_json(d / VIEW_JSON, {})
+    v = _normalize_view(slug, raw)
     with _proposals_lock:
         items = [p for p in list_proposals(c) if p.get("slug") != slug]
         prop = {"slug": slug, "name": title_case(raw.get("name") or slug), "why": " ".join(why.split()),
-                "claims": _str_list(claims), "arrangement": " ".join(str(raw.get("why") or "").split()),
+                "claims": _str_list(claims), "arrangement": v["description"],
                 "proposed_by": proposed_by, "status": "queued", "orientation": orientation, "ts": _now()}
         if extension:
             prop["extension"] = extension
         items.append(prop)
         _save_proposals(c, items)
-    write_view(c, slug, name=raw.get("name") or slug, why=raw.get("why") or "", claims=_str_list(claims),
-               accepts=raw.get("accepts"), declares=raw.get("declares"), default=bool(raw.get("default")),
-               libs=raw.get("libs") if libs is None else libs, reader=(d / READER_PY).read_text("utf-8"),
-               html=(d / VIEW_HTML).read_text("utf-8"))
+    write_view(c, slug, name=raw.get("name") or slug, description=v["description"], claims=_str_list(claims),
+               accepts=v["accepts"], units=v["units"], libs=raw.get("libs") if libs is None else libs,
+               reader=(d / READER_PY).read_text("utf-8"), html=(d / VIEW_HTML).read_text("utf-8"))
     update_proposal(c, slug, installed=view_digest(views_dir(c) / slug))
 
 
@@ -1773,7 +1770,7 @@ def revise(c: str, slug: str, request: str, *, why: str | None = None, claims: A
             raise HTTPException(404, f"no such view: {slug}")
         if prop is None:
             items = list_proposals(c)
-            prop = {"slug": slug, "name": view["name"], "why": view["why"], "claims": view["claims"], "arrangement": "",
+            prop = {"slug": slug, "name": view["name"], "why": view["description"], "claims": view["claims"], "arrangement": "",
                     "proposed_by": str(proposed_by or "analyst"), "status": "built", "ts": _now()}
             _save_proposals(c, [*items, prop])
         revision = view is not None or bool(prop.get("revision"))
@@ -2439,7 +2436,7 @@ async def check(c: str, slug: str, locators: list[str] | None = None, *, shot_di
 
     for loc in wanted:
         report["checks"].append(await check_one(loc))
-    if view["declares"]:
+    if view["units"]:
         for key in keys[:CHECK_KEYS]:
             report["checks"].append(await check_one(f"view:{slug}/{key}"))
     if not report["checks"]:
@@ -2579,7 +2576,7 @@ async def tool_read_ref(ctx: Any, args: dict[str, Any]) -> Any:
     view = read_built(ctx.c, p["slug"])
     if not p.get("key"):
         if view is not None:
-            lines = [f"{ref} ({view['name']})", view["why"], f"claims: {', '.join(view['claims'])}"]
+            lines = [f"{ref} ({view['name']})", view["description"], f"claims: {', '.join(view['claims'])}"]
             # the arrangement lives on the proposal it was built from, and a change to the view restates it
             arrangement = str((read_proposal(ctx.c, p["slug"]) or {}).get("arrangement") or "")
             if arrangement:
@@ -2608,8 +2605,8 @@ async def tool_read_ref(ctx: Any, args: dict[str, Any]) -> Any:
 
 
 def opening_view(c: str, ref: str) -> str | None:
-    """The slug of the view a citation of this file ref opens in (views_for's first), None when no view claims the file
-    and accepts the fragment, or the ref is not a file ref with a fragment."""
+    """The slug of the view a screenshot of this file ref shows it in (views_for's first), None when no view claims the
+    file and accepts the fragment, or the ref is not a file ref with a fragment."""
     loc = locator_of(ref)
     if loc is None or "path" not in loc:
         return None
@@ -2965,8 +2962,7 @@ async def delete_proposal_route(c: str, slug: str) -> dict[str, Any]:
 
 @router.get("/ws/{c}/views")
 async def list_views_route(c: str, path: str | None = None) -> list[dict[str, Any]]:
-    """Every view; with `path` (a corpus-relative file) the working views that claim it, in the order a citation into
-    it opens them (views_for)."""
+    """Every view; with `path` (a corpus-relative file) the working views that claim it (views_for)."""
     config.workspace_dir(c)
     _bind_loop()
     _recover(c)
