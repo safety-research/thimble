@@ -55,7 +55,9 @@ from .ledger import atomic_write_bytes, read_json, unlinked, write_json
 log = logging.getLogger("thimble.cardtypes")
 
 REGISTRY_FILE = CARD_TYPES_FILE  # in the workspace's registry folder (config.registry_dir)
-TYPES_DIR = ".cardtypes"  # under the workspace's views folder: thimble's types copied in, and view_host.py
+# under the workspace's views folder: thimble's types copied in, and view_host.py; under its indexes folder
+# (views.indexes_dir): the indexes of thimble's types
+TYPES_DIR = ".cardtypes"
 CLAIMS_FILE = "claims.json"  # in a copied type's folder: {claims, found} of its applies()
 HOST_FILE = "view_host.py"
 CARD_PY = "card.py"
@@ -174,7 +176,7 @@ def _ext_entry(c: str, t: dict[str, Any]) -> dict[str, Any]:
         prop = views.read_proposal(c, t["view"]) or {}
         try:
             if prop.get("extension") == t["extension"] and (Path(view["dir"]) / views.READER_PY).read_text("utf-8") == reader_src:
-                cache = views.cache_dir(c, view)
+                cache = views.index_dir(c, view["slug"])
         except OSError:
             pass
     h = hashlib.sha1()
@@ -199,12 +201,12 @@ def _entry(c: str, slug: str, d: Path, claims: list[str], origin: str) -> dict[s
     reader_src = (d / views.READER_PY).read_text("utf-8")
     files = views.claimed_files(c, {"claims": claims})
     fp = views.fingerprint(files, reader_src)
-    cache = d / views.CACHE_SUBDIR
+    cache = views.index_dir(c, slug) if origin == "workspace" else views.indexes_dir(c) / TYPES_DIR / slug
     view = views.read_built(c, slug)
     if origin == "thimble" and view is not None and view["ok"] and view["claims"] == claims:
         try:
             if (Path(view["dir"]) / views.READER_PY).read_text("utf-8") == reader_src:
-                cache = views.cache_dir(c, view)
+                cache = views.index_dir(c, slug)
         except OSError:
             pass
     return {"name": " ".join(str(raw.get("name") or slug).split()), "slug": slug, "origin": origin, **block,

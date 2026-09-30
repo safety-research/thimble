@@ -56,6 +56,10 @@ CACHE_SUBDIR = "cache"
 PROPOSALS_FILE = "proposals.json"
 DELETED_FILE = "deleted.json"  # the proposals the analyst deleted, [{slug, name, counted, ts}] (delete_proposal)
 KEY_REFS_FILE = "key-refs.json"  # view:<slug>/<key> -> {refs, excerpt, label, name}, kept past the view's deletion
+# under the workspace, beside the views folder, which a kernel may only read (kernel_wrap.READ_ONLY_DIRS): each view's
+# index as the views kernel pickled it and the bytes build_index read of each claimed file, by fingerprint, and the
+# indexes of the card types (cardtypes.py, extensions.card_types)
+INDEXES_SUBDIR = "view-indexes"
 VIEW_JSON, READER_PY, VIEW_HTML = "view.json", "reader.py", "view.html"
 TOOLS_PROMPT = "tools"  # prompts/tools.md, whose lowercase sections are the lines the view tools' results carry
 # a view ticket's status on its proposal row; `dropped` is an orientation proposal that could not be built through its
@@ -396,11 +400,22 @@ def read_builtin(slug: str) -> dict[str, Any] | None:
 
 
 def cache_dir(c: str, view: dict[str, Any]) -> Path:
-    """Where a view's index and check pictures go: beside a workspace view, for each of its versions, and under the
-    workspace's views folder for a built-in one (whose own folder is part of thimble)."""
+    """Where a view's check pictures go, and a built-in viewer's copy of its reader: beside a workspace view, for each of
+    its versions, and under the workspace's views folder for a built-in one (whose own folder is part of thimble). The
+    server writes it; a kernel may only read it."""
     if view.get("origin") == "builtin":
         return views_dir(c) / BUILTIN_CACHE / view["slug"]
     return views_dir(c) / view["slug"] / CACHE_SUBDIR
+
+
+def indexes_dir(c: str) -> Path:
+    """The workspace's folder of indexes (INDEXES_SUBDIR), which the views kernel and a card's kernel write."""
+    return config.workspace_dir(c) / INDEXES_SUBDIR
+
+
+def index_dir(c: str, slug: str) -> Path:
+    """Where the view's index and the bytes its build_index read are kept, by fingerprint."""
+    return indexes_dir(c) / slug
 
 
 def _check_slug(slug: str) -> str:
@@ -529,6 +544,7 @@ def delete_view(c: str, slug: str) -> None:
     _stop_review(c, slug, forget=True)
     shutil.rmtree(d, ignore_errors=True)
     shutil.rmtree(_versions_dir(c, slug), ignore_errors=True)
+    shutil.rmtree(index_dir(c, slug), ignore_errors=True)
     drop_built_copy(c, slug)
     _forget(c, slug)
     items = list_proposals(c)
@@ -911,8 +927,9 @@ def _prepared(c: str, slug: str, version: str | None = None) -> tuple[dict[str, 
         if reader_path.is_symlink() or not reader_path.is_file() or reader_path.read_text("utf-8") != src:
             reader_path.parent.mkdir(parents=True, exist_ok=True)
             atomic_write_text(reader_path, src)
+    index = index_dir(c, slug)
     req = {"slug": slug, "reader": str(reader_path.resolve()), "fp": fp, "paths": [f[0] for f in files],
-           "cache": str((cache / f"{fp}.index.pickle").resolve()), "reads": str((cache / f"{fp}.reads.json").resolve()),
+           "cache": str((index / f"{fp}.index.pickle").resolve()), "reads": str((index / f"{fp}.reads.json").resolve()),
            "thimble": str(KERNEL_THIMBLE)}
     return view, req, files
 
@@ -1805,6 +1822,7 @@ def _stop_build(c: str, slug: str, why: str, force: bool = False) -> None:
     d = views_dir(c) / slug
     if d.is_dir() and (force or not _view_json(d).get("built")):
         shutil.rmtree(d, ignore_errors=True)
+        shutil.rmtree(index_dir(c, slug), ignore_errors=True)
     _forget(c, slug)
 
 
@@ -2000,6 +2018,7 @@ def drop(c: str, slug: str, why: str) -> dict[str, Any] | None:
     d = views_dir(c) / slug
     if d.is_dir() and not _view_json(d).get("built"):
         shutil.rmtree(d, ignore_errors=True)
+        shutil.rmtree(index_dir(c, slug), ignore_errors=True)
     _forget(c, slug)
     _emit(c, slug, "dropped", chat=prop.get("chat"))
     return prop

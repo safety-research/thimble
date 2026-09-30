@@ -78,7 +78,8 @@ NAME_RE = userconf.EXTENSION_NAME_RE
 RESERVED = ("thimble",)
 WS_DIR = "extensions"  # under the workspace: each active extension's copy
 STATE_FILE = "extensions.json"  # in the workspace's registry folder (config.registry_dir)
-CACHE_DIR = ".extensions"  # under the workspace's views folder: extension readers' indexes, by extension and view
+# under the workspace's indexes folder (views.indexes_dir): extension readers' indexes, by extension and view
+CACHE_DIR = ".extensions"
 CARD_JSON, CARD_HTML, GUIDE = "card.json", "card.html", "card.md"
 TYPE_MD, EXPORT_PY = "type.md", "export.py"
 ORIENT_FILES = ("agents/orient.md", "orient.md")  # the first found extends the orientation
@@ -990,7 +991,7 @@ def card_types(c: str | None) -> list[dict[str, Any]]:
                         "block": block if isinstance(block, dict) else {},
                         "libs": _words(e.get("js")) or raw.get("libs") or of_view.get("libs"),
                         "guide": _text(src / kind / slug / GUIDE), "claims": claims,
-                        "cache": str(views.views_dir(c) / CACHE_DIR / e["name"] / (view or f"cards/{slug}"))})
+                        "cache": str(views.indexes_dir(c) / CACHE_DIR / e["name"] / (view or f"cards/{slug}"))})
     return out
 
 
