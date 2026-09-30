@@ -1044,11 +1044,12 @@ def sibling_files(claimed: list[str], every: list[str]) -> list[str]:
 
 
 async def shown(c: str, slug: str, version: str | None = None) -> dict[str, Any]:
-    """What thimble draws above the view: {files, not_shown: {count, unexplained, files}, derived, errors}. `files` is
-    the count of claimed files and not_shown the ones the view does not show whole (not_shown), then the files of
-    folders like the claimed ones that the claims leave out (sibling_files, `claimed` false), the first FILES_LISTED of
-    them, `unexplained` counting those hidden() gives no why for; derived is view.json's list, then the fields the
-    reader's derived(index) adds; errors say what failed of hidden() and derived()."""
+    """What thimble draws above the view: {files, not_shown: {count, unexplained, unclaimed, files}, derived, errors}.
+    `files` is the count of claimed files and not_shown the ones the view does not show whole (not_shown), then the
+    files of folders like the claimed ones that the claims leave out (sibling_files, `claimed` false, counted in
+    `unclaimed`), the first FILES_LISTED of them, `unexplained` counting those hidden() gives no why for; derived is
+    view.json's list, then the fields the reader's derived(index) adds; errors say what failed of hidden() and
+    derived()."""
     view, req, files = await asyncio.to_thread(_prepared, c, slug, version)
     every = await asyncio.to_thread(folder_files, config.corpus_dir(c), "")
     ans = await _call(c, req, "shown")
@@ -1067,7 +1068,8 @@ async def shown(c: str, slug: str, version: str | None = None) -> dict[str, Any]
     rows += [{"path": p, "size": sizes.get(p, 0), "read": 0, "why": hidden.get(p, ""), "claimed": False}
              for p in sibling_files([f[0] for f in files], list(sizes))]
     return {"files": len(files),
-            "not_shown": {"count": len(rows), "unexplained": sum(1 for r in rows if not r["why"]), "files": rows[:FILES_LISTED]},
+            "not_shown": {"count": len(rows), "unexplained": sum(1 for r in rows if not r["why"]),
+                          "unclaimed": sum(1 for r in rows if r.get("claimed") is False), "files": rows[:FILES_LISTED]},
             "derived": _derived([*view["derived"], *(parts["derived"] if isinstance(parts["derived"], list) else [])]),
             "errors": errors}
 
@@ -2094,8 +2096,10 @@ def gate_lines(report: dict[str, Any]) -> list[str]:
         lines.append(f"unread: {unread['count']} line(s) the reader could not parse, such as {first['ref']}: {first['why']}")
     if cov := report.get("coverage"):
         ns = cov["not_shown"]
-        lines.append(f"files: {cov['files'] - ns['count']} of {cov['files']} read to the end, "
-                     f"{ns['count'] - ns['unexplained']} hidden with a why; derived fields: "
+        beside = ns.get("unclaimed", 0)
+        lines.append(f"files: {cov['files'] - (ns['count'] - beside)} of {cov['files']} read to the end, "
+                     + (f"{beside} unclaimed beside them, " if beside else "")
+                     + f"{ns['count'] - ns['unexplained']} hidden with a why; derived fields: "
                      + (", ".join(d["field"] for d in cov["derived"]) or "none"))
     for p in report.get("problems") or []:
         lines.append(f"problem: {p}")
