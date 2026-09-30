@@ -798,13 +798,22 @@ def install_views(c: str) -> list[str]:
 
 async def _orient(c: str, names: list[str]) -> None:
     """Newly active extensions with orientation instructions: an orientation that has run gets each one's as a
-    follow-up; one that has not reads them in its instructions when it starts."""
-    from . import orient_session  # noqa: PLC0415
+    follow-up; one that has not reads them in its instructions when it starts. A replacement of thimble's instructions
+    is sent only where it stands in the prompt: the analyst has no instructions of their own and no other extension
+    replaces them too (orient_session.instructions_of)."""
+    from . import ledger, orient_session  # noqa: PLC0415
 
     exts = read_state(c)["extensions"]
+    if not names:
+        return
+    try:
+        own = ledger.stored_settings(c).get(orient_session.SETTING)
+    except (OSError, ValueError):
+        own = None
+    replacing = not (isinstance(own, str) and own.strip()) and not conflicts(exts)["block"]
     for name in names:
         e = exts.get(name) or {}
-        text = _orient_text(e, source_path(name), e.get("orient") or e.get("replaces"))
+        text = _orient_text(e, source_path(name), e.get("orient") or (e.get("replaces") if replacing else ""))
         if not text:
             continue
         try:

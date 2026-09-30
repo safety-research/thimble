@@ -360,16 +360,35 @@ async def test_an_extension_added_again_or_switched_on_again_gives_the_orientati
     assert len(sent) == 1 and extensions.read_state(CORPUS)["oriented"] == ["ext-min"]
 
 
-async def test_an_orient_md_that_replaces_takes_the_place_of_thimble_s_instructions(corpus, tmp_path):
+async def test_an_orient_md_that_replaces_takes_the_place_of_thimble_s_instructions(corpus, tmp_path, monkeypatch):
     """With `replace: true` the body stands in for thimble's instructions and its tools, model and effort are
-    ignored; the analyst's own instructions win; two extensions that replace them leave thimble's, and are named."""
+    ignored; the analyst's own instructions win; two extensions that replace them leave thimble's, and are named. An
+    oriented workspace is sent a replacement only where it would stand in the prompt."""
+    sent: list[str] = []
+
+    async def message(c, text, by, extension=""):
+        sent.append(extension)
+        return {"status": "resumed"}
+
+    monkeypatch.setattr(orient_session, "message", message)
+    write_json(config.workspace_dir(CORPUS) / "settings.json", {orient_session.SETTING: "My own way."})
+    solo = _copy(tmp_path, "solo")
+    shutil.rmtree(solo / "views")
+    shutil.rmtree(solo / "cards")
+    (solo / "agents" / "orient.md").write_text("---\nreplace: true\n---\nLabel everything.\n")
+    _add(solo)
+    await extensions.refresh(CORPUS)
+    assert sent == [] and orient_session.instructions_of(CORPUS) == "My own way."
+    extensions.remove("solo")
+    write_json(config.workspace_dir(CORPUS) / "settings.json", {})
+
     d = _copy(tmp_path, "mine")
     shutil.rmtree(d / "views")
     shutil.rmtree(d / "cards")
     (d / "agents" / "orient.md").write_text("---\nreplace: true\ntools: Bash\nmodel: haiku\n---\nCount first, then read.\n")
     _add(d)
     await extensions.refresh(CORPUS)
-    assert orient_session.instructions_of(CORPUS) == "Count first, then read."
+    assert sent == ["mine"] and orient_session.instructions_of(CORPUS) == "Count first, then read."
     assert orient_session.instructions_of(CORPUS, "My own way.") == "My own way."
     assert set(extensions.agent_definitions(CORPUS)) == {"counter"}
 
@@ -379,6 +398,7 @@ async def test_an_orient_md_that_replaces_takes_the_place_of_thimble_s_instructi
     (other / "agents" / "orient.md").write_text("---\nreplace: true\n---\nRead first.\n")
     _add(other)
     await extensions.refresh(CORPUS)
+    assert sent == ["mine"], "a replacement two extensions give is sent by neither"
     assert orient_session.instructions_of(CORPUS) == prompts.render(orient_session.INSTRUCTIONS, {}).strip()
     lines = extensions.public(CORPUS)["conflicts"]
     assert lines == ["mine and other both replace the orientation's instructions, so thimble's own are used"]
