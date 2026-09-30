@@ -217,8 +217,7 @@ async def decide(c: str, title: str, description: str, files: list[tuple[str, in
     res = await ask(c, text)
     if res.status != "ok" or not isinstance(res.output, dict):
         log.warning("%s: whether %s applies is not known: %s %s", c, title, res.status, res.detail)
-        return {"key": at, "error": f"the model call ended {res.status.replace('_', ' ')}"
-                                    + (f" ({res.detail})" if res.detail else ""), "ts": ts}
+        return {"key": at, "error": res.detail or f"the model call ended {res.status.replace('_', ' ')}", "ts": ts}
     out = res.output
     reason = " ".join(str(out.get("reason") or "").split())
     claims = await asyncio.to_thread(_matching, c, [str(x) for x in out.get("claims") or []])

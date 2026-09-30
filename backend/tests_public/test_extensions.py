@@ -327,8 +327,7 @@ async def test_a_quick_model_call_decides_where_an_extension_applies_and_the_swi
     (corpus / "tally" / "c.jsonl").write_text('{"who": "ed", "what": "task 10"}\n')
     _files_changed()
     e = (await extensions.refresh(CORPUS, wait=10))["extensions"]["ext-min"]
-    assert not e["active"] and e["why"] == ("thimble could not tell whether it applies here: the model call ended error "
-                                            "(the claude CLI was not found)")
+    assert not e["active"] and e["why"] == "thimble could not tell whether it applies here: the claude CLI was not found"
     await extensions.refresh(CORPUS, wait=10)
     assert len(asked) == 3, "a failed decision stands a while before it is asked again"
 
