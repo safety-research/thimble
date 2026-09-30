@@ -912,7 +912,7 @@ async def start_report_video(c: str) -> dict[str, Any]:
         raise HTTPException(409, "The report is not written yet")
     if not channel.reachable(c):
         raise HTTPException(409, channel.NOT_LISTENING.format(cwd=config.corpus_dir(c)))
-    slug = await asyncio.to_thread(_video_doc, c)
+    slug = _video_doc(c)  # on the event loop: investigation.emit, which tells the browser of a new type, runs only there
     before = _saved_at(c, slug)
     if not write_session.running(c, slug):
         channel.post(c, report_types.WRITE_EVENT, {"doc": slug, "text": VIDEO_REQUEST})

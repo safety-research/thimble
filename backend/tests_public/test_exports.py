@@ -163,6 +163,8 @@ async def test_the_report_exports_as_a_video_that_its_writer_writes_first(report
     monkeypatch.setattr(exports, "VIDEO_POLL_S", 0.01)
     assert (await exports.start_report_video(CORPUS))["stage"] == "writing"
     assert posted == [("write", {"doc": "video", "text": exports.VIDEO_REQUEST})]
+    events = (investigation.inv_dir(CORPUS, MAIN) / "events.jsonl").read_text().splitlines()
+    assert any('"slug": "video", "status": "created"' in e for e in events), "the browser hears of the video's type"
     film = "<!doctype html><script>window.seek = (t) => {}; window.ready = Promise.resolve()</script>"
     text = f"# One account\n\nAll [[27|card:{report}]] deletions came from one account.\n\n```html\n{film}\n```\n"
     r = await tools.call(CORPUS, "write_document", {"doc": "video", "text": text}, actor="analyst")

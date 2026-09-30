@@ -362,7 +362,8 @@ def read_extension(root: Path, expect: str | None = None, have: set[str] | None 
     return {"name": name or expect or root.name, "version": _one(raw.get("version")), "thimble": rng,
             "python": python, "js": js, "needs": needs, "root": str(root), "problems": problems + waits,
             "waits": waits, "views": vs, "cards": cards, "agents": agents, "orient": orient, "replaces": replaces,
-            "reports": reports, "reports_dir": folder, "source": str(_json(root / ADDED).get("source") or "")}
+            "reports": reports, "reports_dir": folder, "source": str(_json(root / ADDED).get("source") or ""),
+            "builtin": _json(root / ADDED).get("kind") == "built-in"}
 
 
 def added() -> dict[str, Path]:
@@ -1016,7 +1017,7 @@ def summary(info: dict[str, Any], how: dict[str, Any]) -> list[str]:
     and where its code runs."""
     v = f" {info['version']}" if info["version"] else ""
     at = f" at {how['commit']}" if how.get("commit") else ""
-    out = [f"{info['name']}{v}, from {how['source']}{at}"]
+    out = [f"{info['name']}{v}, " + ("built in" if how.get("kind") == "built-in" else f"from {how['source']}{at}")]
     root = Path(info["root"])
     for x in info["views"]:
         out.append(_row("view", x["slug"], x["description"]) + (" Also a card type." if x["card"] else ""))
@@ -1191,7 +1192,7 @@ def list_lines(workspaces_dir: Path) -> list[str]:
         info = read_extension(root, name, set(got))
         loads = "not loaded: " + info["problems"][0] if info["problems"] else config_off(name, off) or "loads"
         v = f" {info['version']}" if info["version"] else ""
-        out.append(f"{name}{v}, from {info['source'] or root}: {loads}")
+        out.append(f"{name}{v}, {'built in' if info['builtin'] else 'from ' + (info['source'] or str(root))}: {loads}")
         for d in folders:
             state = states[d.name]
             e = (state.get("extensions") or {}).get(name) if isinstance(state.get("extensions"), dict) else None
