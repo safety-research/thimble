@@ -1,14 +1,14 @@
 // The permission requests waiting for the analyst, as one card pinned above the chat's composer in every chat. It holds
 // every session's requests (chat/permissions.ts pendingRequests), oldest first and those denied unanswered last, one at
-// a time with `1 of 3` paging. Its head names the requesting thread (askThread); the body says who asks, what the call
-// does, every later call that waits on the same answer (scrolled), and why it asks, then Allow, Always allow (where Claude Code
-// offers a rule for the session, or for a web call its site or web search in the workspace; the scope in its tooltip)
-// and Deny, in one row. A request denied unanswered says so, with Dismiss. When auto mode's classifier could not judge
-// a call, the request of a session that is not a background one offers the switch to Manual, and to Bypass unless the
-// analyst's Claude Code settings turn it off. An answer hides the request at once, and Allow covers only the later
-// calls the card listed. A long
-// command wraps and scrolls past 96px. A request too long to show whole says how much of it shows and offers no
-// "don't ask again".
+// a time with paging, whose `1 of 3` counts the requests that still wait, or on one denied unanswered those denied
+// unanswered. Its head names the requesting thread (askThread); the body says who asks, what the call does, every later
+// call that waits on the same answer (scrolled), and why it asks, then Allow, Always allow (where Claude Code offers a
+// rule for the session, or for a web call its site or web search in the workspace; the scope in its tooltip) and Deny,
+// in one row. A request denied unanswered says so, with Dismiss. When auto mode's classifier could not judge a call, the
+// request of a session that is not a background one offers the switch to Manual, and to Bypass unless the analyst's
+// Claude Code settings turn it off. An answer hides the request at once, and Allow covers only the later calls the card
+// listed. A long command wraps and scrolls past 96px. A request too long to show whole says how much of it shows and
+// offers no "don't ask again".
 import { useEffect, useMemo, useState } from 'react'
 import { Button } from '../components/Button'
 import { CodeText } from '../components/Code'
@@ -85,6 +85,7 @@ export function PermissionCard({ ws, asks, metas, labels }: {
   const what = askWhat(p)
   const fields = askFields(p)
   const expired = !!p.expired
+  const alike = shown.filter((a) => !!a.request.expired === expired)
   const also = p.also ?? []
   const cut = cutLine(p)
   const always = cut ? null : alwaysChoice(p)
@@ -120,7 +121,7 @@ export function PermissionCard({ ws, asks, metas, labels }: {
         </span>
         {shown.length > 1 && (
           <span className="chat-perm-pager">
-            <span className="chat-perm-count">{`${i + 1} of ${shown.length}`}</span>
+            {alike.length > 1 && <span className="chat-perm-count">{`${alike.indexOf(ask) + 1} of ${alike.length}`}</span>}
             <TipButton tip="Previous request" className="chat-perm-page" disabled={i === 0} onClick={() => setAt(i - 1)}>
               <Icon name="chevron-left" size={12} />
             </TipButton>

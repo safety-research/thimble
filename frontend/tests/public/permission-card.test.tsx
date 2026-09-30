@@ -78,6 +78,17 @@ describe('the card', () => {
     expect([...el.querySelectorAll('.chat-perm-acts button')].map((b) => b.textContent)).toEqual(['Allow', 'Deny'])
   })
 
+  test('the count is of the requests that still wait, and on one denied unanswered of those denied unanswered', async () => {
+    const live = [req('l1', { since: T(1) }), req('l2', { since: T(2) })]
+    const gone = [1, 2, 3].map((n) => req(`x${n}`, { since: T(0), expired: T(9) }))
+    const el = await mount(<PermissionCard ws="mini" asks={pendingRequests(null, [{ ...ORIENT, permissions: [...gone, ...live] }])} metas={METAS} labels={new Map()} />)
+    expect(el.querySelector('.chat-perm-count')?.textContent).toBe('1 of 2')
+    await click(el.querySelectorAll('.chat-perm-page')[1])
+    await click(el.querySelectorAll('.chat-perm-page')[1])
+    expect(el.querySelector('.chat-perm-title')?.textContent).toBe('Denied unanswered')
+    expect(el.querySelector('.chat-perm-count')?.textContent).toBe('1 of 3')
+  })
+
   test("each answer goes to the session that asked, and the next request takes the card's place", async () => {
     const el = await card()
     await click(el.querySelector('.chat-perm-always'))
