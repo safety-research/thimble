@@ -21,6 +21,7 @@ import asyncio
 import contextlib
 import json
 import os
+import pwd
 import shutil
 import signal
 import socket
@@ -113,10 +114,10 @@ def _under(p: Path, root: Path) -> bool:
 
 
 def denied_roots() -> list[Path]:
-    """The folders a box can't read, but for what Box.settings lets back in (module note)."""
-    home = _real(Path.home())
-    roots = [home, cli.home(), config.claude_config_dir(), config.REPO_ROOT, config.WORKSPACES_DIR, config.DATA_DIR,
-             Path("/tmp"), Path(tempfile.gettempdir())]
+    """The folders a box can't read, but for what Box.settings lets back in (module note). The home folder is HOME's and
+    the account's, where the two differ."""
+    roots = [Path.home(), Path(pwd.getpwuid(os.getuid()).pw_dir), cli.home(), config.claude_config_dir(),
+             config.REPO_ROOT, config.WORKSPACES_DIR, config.DATA_DIR, Path("/tmp"), Path(tempfile.gettempdir())]
     out: list[Path] = []
     for r in roots:
         p = _real(r)
