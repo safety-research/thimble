@@ -761,6 +761,7 @@ def timeline(events=(), spacing="time"):
 # keys and caches it, and card() runs the type's card.py on that index in the card's own kernel.
 CARD_MIME = "application/vnd.thimble.card+json"
 CARD_TYPES_FILE = "card_types.json"
+REGISTRY_DIR = "registry"  # kernel_wrap.REGISTRY_DIR: the workspace's folder that holds CARD_TYPES_FILE, read-only in a wrapped kernel
 CARD_DATA_MAX = 256 * 1024  # bytes of JSON a card's data may take
 _CARD_MODULES: dict = {}  # card.py's path -> ((mtime_ns, size), module)
 _JSON_TYPES = {"string": str, "integer": numbers.Integral, "number": numbers.Real, "boolean": bool, "array": list,
@@ -772,7 +773,7 @@ _TYPE_WORDS = {"string": "a string", "integer": "a whole number", "number": "a n
 def _card_types() -> dict:
     """{name: type} as the server last wrote them for this workspace; {} before it did."""
     try:
-        with open(_ws() / CARD_TYPES_FILE, encoding="utf-8") as f:
+        with open(_ws() / REGISTRY_DIR / CARD_TYPES_FILE, encoding="utf-8") as f:
             got = json.load(f)
     except (OSError, ValueError):
         return {}

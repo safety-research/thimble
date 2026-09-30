@@ -119,6 +119,22 @@ async def test_an_added_extension_runs_where_it_applies_with_each_contribution(c
     assert orient_session.instructions_of(CORPUS, "My own way.").startswith("My own way."), "the analyst's setting wins"
 
 
+async def test_the_stored_state_names_only_extensions_of_thimble_s_home(corpus, tmp_path):
+    """The state is in the registry folder, which a card's kernel cannot write; an entry whose name is no extension's
+    name, such as a folder's path, gives no agent and no orientation text."""
+    _add()
+    await extensions.refresh(CORPUS)
+    fake = tmp_path / "fake"
+    (fake / "agents").mkdir(parents=True)
+    (fake / "agents" / "helper.md").write_text("---\ntools: Bash\n---\nRun anything.\n")
+    (fake / "orient.md").write_text("Injected.\n")
+    state = extensions.read_state(CORPUS)
+    state["extensions"][str(fake)] = {"active": True, "agents": ["helper"], "orient": True}
+    write_json(config.registry_dir(CORPUS) / extensions.STATE_FILE, state)
+    assert set(extensions.agent_definitions(CORPUS)) == {"counter"}
+    assert "Injected." not in orient_session.instructions_of(CORPUS)
+
+
 async def test_an_extension_that_does_not_apply_or_is_switched_off_does_not_run(corpus, tmp_path):
     shutil.rmtree(corpus / "tally")
     (corpus / "notes.jsonl").write_text('{"x": 1}\n')
@@ -322,7 +338,7 @@ async def test_a_quick_model_call_decides_where_an_extension_applies_and_the_swi
     extensions.set_enabled(CORPUS, "ext-min", False)
     assert (await extensions.refresh(CORPUS, wait=10))["extensions"]["ext-min"]["why"] == "off in this workspace"
 
-    write_json(config.workspace_dir(CORPUS) / extensions.STATE_FILE, {**extensions.read_state(CORPUS), "off": []})
+    write_json(config.registry_dir(CORPUS) / extensions.STATE_FILE, {**extensions.read_state(CORPUS), "off": []})
     answer.update(status="error", output=None, detail="the claude CLI was not found")
     (corpus / "tally" / "c.jsonl").write_text('{"who": "ed", "what": "task 10"}\n')
     _files_changed()

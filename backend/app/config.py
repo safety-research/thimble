@@ -720,6 +720,14 @@ def workspace_dir(name: str) -> Path:
     return p
 
 
+def registry_dir(name: str) -> Path:
+    """The workspace's registry folder, created on demand (private_dir): the card types and extensions the server found
+    there, which a wrapped kernel may only read (kernel_wrap.READ_ONLY_DIRS)."""
+    from . import kernel_wrap  # noqa: PLC0415
+
+    return private_dir(workspace_dir(name) / kernel_wrap.REGISTRY_DIR)
+
+
 def safe_corpus_path(corpus: Path, rel: str) -> Path:
     """Resolve a corpus-relative path and refuse anything outside the corpus dir."""
     p = (corpus / rel).resolve()

@@ -22,9 +22,11 @@ Where types come from:
                drawn by its card.html, read by the reader of the extension's view it names); extensions.card_types
                finds them in the workspace's copy of the extension. Its card.md is its guide in main's prompt.
   workspace's  a built view of the workspace with a `card` block and card.py.
-refresh() writes REGISTRY_FILE, which thimble.card reads, and builds each type's index on the views kernel ahead of the
-first card. prompt_text() is the {{card_types}} slot of prompts/shared.md: prompts/card-types.md with the types listed, or
-nothing for a workspace with none.
+refresh() writes REGISTRY_FILE in the workspace's registry folder, which thimble.card reads and a card's kernel cannot
+write (kernel_wrap.READ_ONLY_DIRS), and builds each type's index on the views kernel ahead of the first card. A type of
+thimble's is described by its view.json in thimble, not by the copy a kernel can write. prompt_text() is the
+{{card_types}} slot of prompts/shared.md: prompts/card-types.md with the types listed, or nothing for a workspace with
+none.
 Reshaping: Keep (keep_route) writes a patch of the arguments the type marks `ui` into the card's one thimble.card call
 (rewrite_call), as literals in place of what the code gave, runs the card again and checks it; the card keeps the patch
 as `kept_args`, which the card check gives back as they are (keep_kept). Open as view (as_view, from the card or main's
@@ -52,7 +54,7 @@ from .ledger import read_json, write_json
 
 log = logging.getLogger("thimble.cardtypes")
 
-REGISTRY_FILE = CARD_TYPES_FILE  # in the workspace
+REGISTRY_FILE = CARD_TYPES_FILE  # in the workspace's registry folder (config.registry_dir)
 TYPES_DIR = ".cardtypes"  # under the workspace's views folder: thimble's types copied in, and view_host.py
 CLAIMS_FILE = "claims.json"  # in a copied type's folder: {claims, found} of its applies()
 HOST_FILE = "view_host.py"
@@ -187,7 +189,7 @@ def _entry(c: str, slug: str, d: Path, claims: list[str], origin: str) -> dict[s
     """A type as REGISTRY_FILE holds it: what main reads (use, args, size, example), its files, and its index keyed and
     cached as the views kernel keys it (views._prepare), shared with the workspace's view of that slug when both read the
     same files with the same reader."""
-    raw = read_json(d / views.VIEW_JSON, {})
+    raw = read_json((views.VIEWERS_DIR / slug if origin == "thimble" else d) / views.VIEW_JSON, {})
     block = card_block(raw) or {}
     reader_src = (d / views.READER_PY).read_text("utf-8")
     files = views.claimed_files(c, {"claims": claims})
@@ -230,7 +232,7 @@ def read_registry(c: str | None) -> dict[str, dict[str, Any]]:
     if not c:
         return {}
     try:
-        got = read_json(config.workspace_dir(c) / REGISTRY_FILE, {})
+        got = read_json(config.registry_dir(c) / REGISTRY_FILE, {})
     except (OSError, ValueError, HTTPException):
         return {}
     types = got.get("types") if isinstance(got, dict) else None
@@ -271,7 +273,7 @@ async def refresh(c: str, *, warm: bool = True) -> dict[str, dict[str, Any]]:
                 types[slug] = await asyncio.to_thread(_entry, c, slug, Path(v["dir"]), list(v["claims"]), "workspace")
         for t in types.values():
             t["aliases"] = [a for a in t.get("aliases") or [] if a not in types]
-        await asyncio.to_thread(write_json, config.workspace_dir(c) / REGISTRY_FILE, {"types": types})
+        await asyncio.to_thread(write_json, config.registry_dir(c) / REGISTRY_FILE, {"types": types})
     if warm:
         for t in types.values():
             asyncio.get_running_loop().create_task(_warm(c, t), name=f"cardtype-index-{t['slug']}")

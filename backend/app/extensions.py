@@ -28,7 +28,8 @@ claims. With neither, it applies everywhere and claims the record files. The cal
 answers, and when it fails, the extension is off here and Settings says why.
 
 refresh() copies an active extension into workspaces/<c>/extensions/<name>/, since a kernel sees only the workspace
-and the corpus, and writes STATE_FILE. Its `show: always` views are installed at once, outside the orientation's four;
+and the corpus, and writes STATE_FILE in the workspace's registry folder, which a kernel cannot write
+(kernel_wrap.READ_ONLY_DIRS). Its `show: always` views are installed at once, outside the orientation's four;
 its `show: proposed` views are the orientation's to propose (views.propose_builtins). When it first becomes active in a
 workspace an orientation ran in, its orient.md goes to the orientation as one follow-up; the workspace keeps that mark
 (`oriented`) when the extension is switched off or removed, so switching it on or adding it again starts none. A view
@@ -59,7 +60,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
-from . import config, userconf
+from . import config, kernel_wrap, userconf
 from .ledger import read_json, write_json
 
 log = logging.getLogger("thimble.extensions")
@@ -70,7 +71,7 @@ ADDED = ".added.json"  # written by `thimble extension add`: {source, kind, comm
 NAME_RE = userconf.EXTENSION_NAME_RE
 RESERVED = ("thimble",)
 WS_DIR = "extensions"  # under the workspace: each active extension's copy
-STATE_FILE = "extensions.json"  # in the workspace
+STATE_FILE = "extensions.json"  # in the workspace's registry folder (config.registry_dir)
 CACHE_DIR = ".extensions"  # under the workspace's views folder: extension readers' indexes, by extension and view
 SHOWS = ("always", "proposed")
 CARD_JSON, CARD_HTML, GUIDE = "card.json", "card.html", "card.md"
@@ -297,7 +298,7 @@ def source_path(name: str) -> Path:
 
 
 def _state_path(c: str) -> Path:
-    return config.workspace_dir(c) / STATE_FILE
+    return config.registry_dir(c) / STATE_FILE
 
 
 def read_state(c: str | None) -> dict[str, Any]:
@@ -312,8 +313,8 @@ def read_state(c: str | None) -> dict[str, Any]:
             got = {}
     got = got if isinstance(got, dict) else {}
     exts = got.get("extensions") if isinstance(got.get("extensions"), dict) else {}
-    return {"off": _words(got.get("off")), "on": _words(got.get("on")), "oriented": _words(got.get("oriented")),
-            "extensions": exts}
+    names = {k: [n for n in _words(got.get(k)) if NAME_RE.match(n)] for k in ("off", "on", "oriented")}
+    return {**names, "extensions": {n: e for n, e in exts.items() if NAME_RE.match(n) and isinstance(e, dict)}}
 
 
 def active(c: str | None) -> list[dict[str, Any]]:
@@ -948,7 +949,7 @@ def list_lines(workspaces_dir: Path) -> list[str]:
         folders = sorted(d for d in workspaces_dir.iterdir() if d.is_dir() and config._valid_name(d.name))
     except OSError:
         folders = []
-    states = {d.name: _json(d / STATE_FILE) for d in folders}
+    states = {d.name: _json(d / kernel_wrap.REGISTRY_DIR / STATE_FILE) for d in folders}
     width = max((len(d.name) for d in folders), default=0)
     out = []
     for name, root in got.items():

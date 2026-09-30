@@ -1833,6 +1833,8 @@ def wrapped_argv(argv: list[str], *, workspace: str, corpus: Path, connection_fi
         with contextlib.suppress(FileExistsError):
             with open(_ws_dir(workspace) / name, "x", encoding="utf-8") as f:
                 f.write("{}\n")
+    for name in kernel_wrap.READ_ONLY_DIRS:
+        config.private_dir(_ws_dir(workspace) / name)
     return kernel_wrap.kernel_wrap_argv(argv, corpus_dir=Path(corpus).resolve(), workspace_dir=_ws_dir(workspace).resolve(),
                                         connection_dir=connection_file.parent.resolve(), venv=venv,
                                         python=Path(os.path.realpath(PYTHON)), bwrap=bwrap)
