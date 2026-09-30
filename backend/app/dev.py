@@ -2575,9 +2575,11 @@ def view_network_line(c: str) -> str:
 
 def view_check_command(c: str, slug: str) -> str:
     """The command a view build's session checks its draft with (view_check.py): this server's interpreter without
-    site-packages, the script and the view's check URL. The fence runs it outside the sandbox by this prefix."""
+    site-packages, the script, thimble's home (whose server.json holds the token the post proves; a background session's
+    environment does not name it) and the view's check URL. The fence runs it outside the sandbox by this prefix."""
     url = f"http://127.0.0.1:{config_port()}/api/ws/{c}/views/{slug}/check"
-    return f"{shlex.quote(sys.executable)} -S {shlex.quote(str(VIEW_CHECK))} {url}"
+    home = shlex.quote(str(thimble_home()))
+    return f"{shlex.quote(sys.executable)} -S {shlex.quote(str(VIEW_CHECK))} --home {home} {url}"
 
 
 def build_view_change_prompt(prop: dict[str, Any], folder: Path) -> str:

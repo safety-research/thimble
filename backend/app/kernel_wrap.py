@@ -8,8 +8,10 @@ runs inside one of two wrappers, and `config.resolve_kernel_wrap` says which:
 Both draw the same boundary:
   read     the system, the backend venv and its interpreter, the corpus and the page's fonts and matplotlibrc
   write    the workspace directory, except settings.json and config.json (thimble's config for the workspace), which
-           the kernel can neither read nor write, and telemetry.jsonl, which it can read only. HOME and TMPDIR are
-           fresh at each start: a private /tmp under bwrap, the kernel's kernels/<key>.home folder under srt
+           the kernel can neither read nor write, and telemetry.jsonl, viewed.jsonl (the view log, which the
+           telemetry export merges) and the views folder, which it can read only.
+           HOME and TMPDIR are fresh at each start: a private /tmp under bwrap, the kernel's kernels/<key>.home folder
+           under srt
   hidden   the home folder, thimble's own folders (THIMBLE_HOME, the workspaces, the install tree), Claude Code's config
            and every other workspace
   network  the host's: the server connects to the kernel's ZMQ ports on 127.0.0.1
@@ -50,7 +52,12 @@ UNSET_ENV = ("XDG_CACHE_HOME", "XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_STATE_HO
 # nor write it
 HIDDEN_FILES = ("settings.json", "config.json")
 EMPTY_FILE = "/dev/null"
-READ_ONLY_FILES = ("telemetry.jsonl",)  # read-only over the writable workspace (the server writes from outside)
+# read-only over the writable workspace (the server writes them from outside)
+READ_ONLY_FILES = ("telemetry.jsonl", "viewed.jsonl")
+# the workspace's views (views.py), which the server and the dev agent's view builds write and main's and the
+# orientation's prompts are made from: read-only, as a folder so that what they write later shows inside. The server
+# creates it before the kernel starts.
+READ_ONLY_DIRS = ("views",)
 SIGINT_PREFIX = ("/bin/sh", "-c", 'trap "" INT; exec "$@"', "thimble-kernel-wrap")  # shell prefix that ignores SIGINT in bwrap (module docstring)
 
 SRT_LAUNCHER = Path(__file__).with_name("kernel_srt.mjs")
@@ -143,12 +150,27 @@ def srt_rules(*, corpus_dir: str | Path, workspace_dir: str | Path, venv: str | 
         allow_read += [str(venv), os.path.realpath(venv)]  # a venv install.sh --python linked: also where it lies
     if system == "linux":
         allow_read.append(str(Path(srt_dir).joinpath(*SRT_HELPERS)))
+        deny_read = _outermost(deny_read, allow_read)
+    read_only = [str(ws / name) for name in (*READ_ONLY_FILES, *READ_ONLY_DIRS)]
     return {"filesystem": {
         "denyRead": list(dict.fromkeys(deny_read)),
         "allowRead": list(dict.fromkeys(allow_read)),
         "allowWrite": [str(ws)],
-        "denyWrite": [*hidden, *(str(ws / name) for name in READ_ONLY_FILES), *SRT_NO_WRITE[system]],
+        "denyWrite": [*hidden, *read_only, *SRT_NO_WRITE[system]],
     }}
+
+
+def _outermost(deny: Sequence[str], allow: Sequence[str]) -> list[str]:
+    """`deny` without the entries another one already hides: each inside a denied folder with nothing in `allow` at or
+    above it inside that folder (the home inside /home). On Linux srt shows a folder link on the interpreter's path
+    (uv's minor-version folder) only when no denied entry but the one the link lies in surrounds the link's target."""
+    real = [Path(os.path.realpath(p)) for p in deny]
+    shown = [Path(os.path.realpath(p)) for p in allow]
+
+    def hidden(p: Path) -> bool:
+        return any(d != p and _under(p, d) and not any(_under(p, a) and _under(a, d) for a in shown) for d in real)
+
+    return [s for s, p in zip(deny, real) if not hidden(p)]
 
 
 def srt_env(env: dict[str, str], *, home: str | Path) -> dict[str, str]:
@@ -170,7 +192,7 @@ def kernel_wrap_argv(argv: Sequence[str], *, corpus_dir: str | Path, workspace_d
     """The kernel's argv wrapped in bubblewrap. `python` is the interpreter the kernel runs; each of its installation
     folders (interpreter_dirs) is bound read-only when it lies outside the system folders; `venv` None binds no venv;
     `read` names more paths bound read-only. `--ro-bind-try` skips what does not exist. Each of HIDDEN_FILES must exist,
-    or bwrap creates it empty in the real workspace."""
+    or bwrap creates it empty in the real workspace, and each of READ_ONLY_DIRS, or bwrap fails."""
     corpus, ws, conn = Path(corpus_dir), Path(workspace_dir), Path(connection_dir)
     out: list[str] = [*SIGINT_PREFIX, bwrap, "--unshare-all", "--share-net", "--unshare-user", "--disable-userns",  # --unshare-user spelled out: --disable-userns checks for it by name (bwrap 0.9.0)
                       "--ro-bind", "/usr", "/usr"]
@@ -196,5 +218,7 @@ def kernel_wrap_argv(argv: Sequence[str], *, corpus_dir: str | Path, workspace_d
         out += ["--ro-bind", EMPTY_FILE, str(ws / name)]
     for name in READ_ONLY_FILES:  # read-only over the workspace bind (the server writes from outside)
         out += ["--ro-bind-try", str(ws / name), str(ws / name)]
+    for name in READ_ONLY_DIRS:
+        out += ["--ro-bind", str(ws / name), str(ws / name)]
     out += ["--", *argv]
     return out

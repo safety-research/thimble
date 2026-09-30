@@ -252,9 +252,30 @@ class PreviewError(RuntimeError):
     """The preview server did not answer; the message ends with its log's tail."""
 
 
+def seed_home(home: Path, port: int) -> None:
+    """<home>/server.json for a server no supervisor starts: its address, a new token and the ui_key it held, in a
+    folder only its owner reads, as cli.write_state writes the live server's, so a tool that reads it can write to that
+    server (hook_auth.LocalWriteGuard). No pid, so no `thimble` command takes it for a server of its own."""
+    config.private_dir(home)
+    p = home / "server.json"
+    try:
+        held = json.loads(p.read_text("utf-8"))
+    except (OSError, ValueError):
+        held = {}
+    held = held if isinstance(held, dict) else {}
+    state = {"port": port, "api": f"http://127.0.0.1:{port}", "token": cli.new_token(),
+             "ui_key": held.get("ui_key") or cli.new_token()}
+    tmp = p.with_suffix(".json.tmp")
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        f.write(json.dumps(state, indent=2) + "\n")
+    tmp.replace(p)
+
+
 class Preview:
     """The worktree's server in the box, on http://127.0.0.1:<port> through the host (module note). `port` 0, or a
-    port in use, takes a free one. `env` is the server's environment inside the box."""
+    port in use, takes a free one. `env` is the server's environment inside the box; its THIMBLE_HOME gets a server.json
+    (seed_home)."""
 
     def __init__(self, box: Box, env: dict[str, str], *, port: int = 0, log: Path | None = None) -> None:
         self.box, self.env, self.port = box, env, port
@@ -303,6 +324,8 @@ class Preview:
         self._ctl.setblocking(False)
         py = self.box.tree / "backend" / ".venv" / "bin" / "python"
         self.log.parent.mkdir(parents=True, exist_ok=True)
+        if self.env.get("THIMBLE_HOME"):
+            seed_home(Path(self.env["THIMBLE_HOME"]), self.port)
         with self.log.open("ab") as out:
             try:
                 self.proc = await asyncio.create_subprocess_exec(

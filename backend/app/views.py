@@ -54,6 +54,9 @@ CACHE_SUBDIR = "cache"
 PROPOSALS_FILE = "proposals.json"
 DELETED_FILE = "deleted.json"  # the proposals the analyst deleted, [{slug, name, counted, ts}] (delete_proposal)
 KEY_REFS_FILE = "key-refs.json"  # view:<slug>/<key> -> {refs, excerpt, label, name}, kept past the view's deletion
+# under the workspace, beside the views folder, which a kernel may only read (kernel_wrap.READ_ONLY_DIRS): each view's
+# index as the views kernel pickled it, by fingerprint
+INDEXES_SUBDIR = "view-indexes"
 VIEW_JSON, READER_PY, VIEW_HTML = "view.json", "reader.py", "view.html"
 TOOLS_PROMPT = "tools"  # prompts/tools.md, whose lowercase sections are the lines the view tools' results carry
 # a view ticket's status on its proposal row; `dropped` is an orientation proposal that could not be built through its
@@ -370,11 +373,15 @@ def read_builtin(slug: str) -> dict[str, Any] | None:
 
 
 def cache_dir(c: str, view: dict[str, Any]) -> Path:
-    """Where a view's index and check pictures go: beside a workspace view, for each of its versions, and under the
-    workspace's views folder for a built-in one (whose own folder is part of thimble)."""
+    """Where a view's check pictures go: beside a workspace view, for each of its versions, and under the workspace's
+    views folder for a built-in one (whose own folder is part of thimble)."""
     if view.get("origin") == "builtin":
         return views_dir(c) / BUILTIN_CACHE / view["slug"]
     return views_dir(c) / view["slug"] / CACHE_SUBDIR
+
+
+def index_dir(c: str, slug: str) -> Path:
+    return config.workspace_dir(c) / INDEXES_SUBDIR / slug
 
 
 def _check_slug(slug: str) -> str:
@@ -502,6 +509,7 @@ def delete_view(c: str, slug: str) -> None:
     _stop_review(c, slug, forget=True)
     shutil.rmtree(d, ignore_errors=True)
     shutil.rmtree(_versions_dir(c, slug), ignore_errors=True)
+    shutil.rmtree(index_dir(c, slug), ignore_errors=True)
     drop_built_copy(c, slug)
     _forget(c, slug)
     items = list_proposals(c)
@@ -844,7 +852,7 @@ def _prepare(c: str, slug: str, version: str | None = None) -> tuple[dict[str, A
     files = claimed_files(c, view)
     fp = fingerprint(files, reader_path.read_text("utf-8"))
     req = {"slug": slug, "reader": str(reader_path.resolve()), "fp": fp, "paths": [f[0] for f in files],
-           "cache": str((cache_dir(c, view) / f"{fp}.index.pickle").resolve()), "thimble": str(KERNEL_THIMBLE)}
+           "cache": str((index_dir(c, slug) / f"{fp}.index.pickle").resolve()), "thimble": str(KERNEL_THIMBLE)}
     return view, req
 
 
@@ -1557,6 +1565,7 @@ def _stop_build(c: str, slug: str, why: str, force: bool = False) -> None:
     d = views_dir(c) / slug
     if d.is_dir() and (force or not _view_json(d).get("built")):
         shutil.rmtree(d, ignore_errors=True)
+        shutil.rmtree(index_dir(c, slug), ignore_errors=True)
     _forget(c, slug)
 
 
@@ -1750,6 +1759,7 @@ def drop(c: str, slug: str, why: str) -> dict[str, Any] | None:
     d = views_dir(c) / slug
     if d.is_dir() and not _view_json(d).get("built"):
         shutil.rmtree(d, ignore_errors=True)
+        shutil.rmtree(index_dir(c, slug), ignore_errors=True)
     _forget(c, slug)
     _emit(c, slug, "dropped", chat=prop.get("chat"))
     return prop
@@ -2986,7 +2996,8 @@ class CheckBody(BaseModel):
 async def check_route(c: str, slug: str, request: Request, body: CheckBody | None = None) -> dict[str, Any]:
     """A view ticket's session checking its draft: the gate with `locators` beside the sampled lines, {ok, lines, png}.
     The
-    locators are kept on the proposal for the server's gate after the turn. Loopback only."""
+    locators are kept on the proposal for the server's gate after the turn. Loopback only, and like every write only
+    with the token's proof (view_check.py) or the analyst's cookie (hook_auth.LocalWriteGuard)."""
     from . import dev  # noqa: PLC0415
 
     if not dev._is_loopback(request):

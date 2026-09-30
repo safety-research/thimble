@@ -1844,7 +1844,10 @@ def _kernel_hides() -> list[Path]:
 def _guarded_files(workspace: str) -> None:
     """Each of kernel_wrap.HIDDEN_FILES (`{}`) and READ_ONLY_FILES (empty) made in the workspace when missing: a wrapper
     guards a file that exists, where for a missing one bwrap would guard nothing and srt would leave an empty read-only
-    file in its place while the kernel runs, which the server could not write."""
+    file in its place while the kernel runs, which the server could not write. Each of READ_ONLY_DIRS is made too, since
+    bwrap fails on a missing one."""
+    for name in kernel_wrap.READ_ONLY_DIRS:
+        (_ws_dir(workspace) / name).mkdir(exist_ok=True)
     files = [*((n, "{}\n") for n in kernel_wrap.HIDDEN_FILES), *((n, "") for n in kernel_wrap.READ_ONLY_FILES)]
     for name, text in files:
         p = _ws_dir(workspace) / name

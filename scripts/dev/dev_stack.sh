@@ -8,7 +8,10 @@
 # live checkout recorded in server.json). The environment comes only from <THIMBLE_HOME>/server.json.env, so it runs
 # from a clean shell. THIMBLE_WORKSPACES_DIR points at a snapshot copy of the workspace (--corpus copies
 # <workspaces_dir>/<corpus> into --workspaces once), never at the live workspaces. Pids go to
-# <THIMBLE_HOME>/dev/stack.json and are stopped by pid. THIMBLE_STACK_PORT / THIMBLE_STACK_UI_PORT override 8301/5301;
+# <THIMBLE_HOME>/dev/stack.json and are stopped by pid. The stack's own home, <THIMBLE_HOME>/dev/stack.home, gets a
+# server.json with a token and a ui_key (seed_home), so a local tool that reads it can write to the stack as the plugin
+# and the analyst's browser write to the live server (backend/app/hook_auth.py). THIMBLE_STACK_PORT /
+# THIMBLE_STACK_UI_PORT override 8301/5301;
 # THIMBLE_STACK_VITE_CACHE is handed to Vite as VITE_CACHE_DIR, to keep a worktree's optimizer cache out of a shared
 # node_modules.
 set -euo pipefail
@@ -47,6 +50,29 @@ except Exception:
 for k in sys.argv[2].split("."):
     d = d.get(k) if isinstance(d, dict) else None
 print("" if d is None else d)
+PY
+}
+
+seed_home() {  # seed_home <home> <api port>: <home>/server.json with the API's address, a new token and the ui_key it
+  # held, in a folder only its owner reads, as the supervisor writes the live server's (cli.write_state); no pid, so no
+  # `thimble` command takes the stack for a server of its own to stop or restart
+  python3 -I - "$1" "$2" <<'PY'
+import json, os, secrets, sys
+home, port = sys.argv[1], int(sys.argv[2])
+os.makedirs(home, mode=0o700, exist_ok=True)
+os.chmod(home, 0o700)
+path = os.path.join(home, "server.json")
+try:
+    held = json.load(open(path))
+except Exception:
+    held = {}
+held = held if isinstance(held, dict) else {}
+state = {"port": port, "api": f"http://127.0.0.1:{port}", "token": secrets.token_urlsafe(32),
+         "ui_key": held.get("ui_key") or secrets.token_urlsafe(32)}
+fd = os.open(path + ".tmp", os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+with os.fdopen(fd, "w") as f:
+    json.dump(state, f, indent=2)
+os.replace(path + ".tmp", path)
 PY
 }
 
@@ -154,6 +180,7 @@ do_start() {
     THIMBLE_HOME="$DEV/stack.home" THIMBLE_PLUGIN_DIR="$PLUGIN" THIMBLE_DEV_STACK=0
     VITE_CACHE_DIR="${VITE_CACHE_DIR:-$DEV/vite-cache}")  # frontend/vite.config.ts: never the shared node_modules/.vite of a symlinked checkout
 
+  seed_home "$DEV/stack.home" "$API_PORT"
   local backend_pid vite_pid=""
   backend_pid="$(cd "$WORKTREE/backend" && spawn "$BACKEND_LOG" "${common[@]}" .venv/bin/python -m uvicorn app.main:app \
       --host 127.0.0.1 --port "$API_PORT" --reload --reload-dir app --timeout-graceful-shutdown 3)"

@@ -23,7 +23,7 @@ from starlette.staticfiles import StaticFiles
 from . import config
 from .errors import ErrorLog
 from . import hook_auth
-from .hook_auth import HookAuth
+from .hook_auth import HookAuth, LocalWriteGuard
 from .http_guard import OriginCheck, SecurityHeaders, dev_origins
 
 # every line of thimble's own loggers carries a wall-clock stamp, so the server log can be read against the other logs
@@ -305,7 +305,8 @@ def create_app() -> FastAPI:
     vite = dev_origins(dev_mode())
     if vite:
         app.add_middleware(CORSMiddleware, allow_origins=vite, allow_methods=["*"], allow_headers=["*"])
-    app.add_middleware(HookAuth)  # inside OriginCheck: a page's request is refused as a page's first
+    app.add_middleware(HookAuth)  # inside the write guard: a hook proves the token here too
+    app.add_middleware(LocalWriteGuard)  # inside OriginCheck, outside HookAuth: a forged-Origin write still needs the cookie or the token
     app.add_middleware(OriginCheck, extra_origins=vite)  # after TrustedHost: the Host it compares with is an allowed one
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=ALLOWED_HOSTS)
     app.add_middleware(SecurityHeaders)  # outside the two checks, so their refusals carry the headers too

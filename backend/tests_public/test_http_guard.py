@@ -114,3 +114,139 @@ def test_the_app_shell_and_the_api_carry_the_security_headers(dist):
     # a refusal carries them too
     r = c.post("/api/dev/revert", headers={"Origin": "https://evil.example"})
     assert r.status_code == 403 and r.headers["x-content-type-options"] == "nosniff"
+
+
+@pytest.mark.real_write_guard
+def test_a_write_needs_the_browser_cookie_or_the_plugin_proof_so_a_kernel_cannot_reach_the_api(app_prod, plugin_headers,
+                                                                                                monkeypatch):
+    """hook_auth.LocalWriteGuard: a write to the local API must prove the ui_key cookie (the browser) or the token (the
+    plugin, the CLI or a view build's check). A notebook kernel runs model-authored code with the host's network and can
+    open this server on 127.0.0.1, but the sandbox hides server.json from it, so it holds neither — and forging a
+    same-origin Origin, which slips past the Origin check, does not help. Reads and the browser's key claim stay
+    open."""
+    from conftest import UI_KEY, _record
+
+    from app import hook_auth
+
+    monkeypatch.setenv("THIMBLE_PORT", "8300")
+    _record(ui_key=UI_KEY)  # plugin_headers has already recorded the token
+    c = TestClient(app_prod, base_url="http://testserver")
+
+    # the kernel: no cookie, no proof — on several write routes, and even forging the server's own Origin
+    for headers in ({}, {"Origin": "http://testserver"}, {"Sec-Fetch-Site": "same-origin"}):
+        r = c.put(THEME_PATH, json=THEME, headers=headers)
+        assert r.status_code == 403 and r.json()["detail"] == hook_auth.WRITE_REFUSED, headers
+    assert c.delete("/api/ws/mini").status_code == 403
+    assert c.post("/api/ws/mini/orientation/message", json={"text": "impersonated"}).status_code == 403
+    assert c.post("/api/dev/tickets", json={"workspace": "mini", "title": "x", "body": "y", "source": "terminal"}).status_code == 403
+    # a view's check route too: it would keep the kernel's locators on the proposal the build's gate checks
+    r = c.post("/api/ws/mini/views/none/check", json={"locators": ["events.jsonl#L1"]})
+    assert r.status_code == 403 and r.json()["detail"] == hook_auth.WRITE_REFUSED
+
+    # a local tool proves the token
+    assert c.put(THEME_PATH, json=THEME, headers=plugin_headers()).status_code == 200
+    # a wrong token is no better than none, nor is a proof that is not ASCII
+    assert c.put(THEME_PATH, json=THEME, headers=hook_auth.headers("wrong-token", "n0nce")).status_code == 403
+    not_ascii = {hook_auth.NONCE_HEADER: "n", hook_auth.AUTH_HEADER: "\u00e9".encode("latin-1")}
+    assert c.put(THEME_PATH, json=THEME, headers=not_ascii).status_code == 403
+
+    # the browser proves the ui_key cookie, under this server's name
+    c.cookies.set(hook_auth.ui_cookie(), UI_KEY)
+    assert c.put(THEME_PATH, json=THEME).status_code == 200
+    c.cookies.set(hook_auth.ui_cookie(), "not-the-key")
+    assert c.put(THEME_PATH, json=THEME).status_code == 403
+    c.cookies.clear()
+
+    # reads are untouched, and the browser's key claim stays reachable without either proof
+    assert c.get("/api/corpora").status_code == 200
+    assert c.post("/api/ui/key", json={"key": UI_KEY}).status_code == 204
+
+
+@pytest.mark.real_write_guard
+def test_two_servers_on_one_machine_keep_their_own_cookies(app_prod, monkeypatch):
+    """A cookie is not bound to a port, so each server names its cookie for its port (hook_auth.ui_cookie): the claim of
+    another server's link, which the browser also sends here, neither replaces this server's cookie nor proves anything
+    here."""
+    from conftest import UI_KEY, _record
+
+    from app import hook_auth
+
+    monkeypatch.setenv("THIMBLE_PORT", "8300")
+    _record(ui_key=UI_KEY)
+    c = TestClient(app_prod, base_url="http://testserver")
+    r = c.post("/api/ui/key", json={"key": UI_KEY})
+    assert r.status_code == 204
+    set_cookies = r.headers.get_list("set-cookie")
+    assert any(v.startswith("thimble-ui-8300=") and "Path=/api/" in v and "HttpOnly" in v for v in set_cookies)
+    # the name the cookie had before is deleted where it was set, never set again
+    assert not any(v.startswith("thimble-ui=") and "Max-Age=0" not in v for v in set_cookies)
+    deleted_at = {v.split("Path=")[1].split(";")[0] for v in set_cookies if v.startswith("thimble-ui=")}
+    assert deleted_at >= {"/api/ws/", "/api/"}
+
+    # the other server's cookie, which the browser sends to every port of 127.0.0.1, is not this server's
+    c.cookies.clear()
+    c.cookies.set("thimble-ui-8302", "the-other-servers-key")
+    assert c.put(THEME_PATH, json=THEME).status_code == 403
+    c.cookies.set("thimble-ui-8300", UI_KEY)
+    assert c.put(THEME_PATH, json=THEME).status_code == 200
+
+
+@pytest.mark.real_write_guard
+def test_a_cookie_claimed_before_the_port_was_in_its_name_moves_on_the_next_workspace_request(app_prod, monkeypatch):
+    """A browser that claimed the key before holds it as `thimble-ui` at /api/ws/, where every write it makes still
+    passes, and the first answer under that path gives it this server's cookie at /api/, so writes elsewhere (a ticket's
+    Retry, the SQL box) pass from then on without the link. Another server's key under the old name moves nothing."""
+    from conftest import UI_KEY, _record
+
+    from app import hook_auth
+
+    monkeypatch.setenv("THIMBLE_PORT", "8300")
+    _record(ui_key=UI_KEY)
+    c = TestClient(app_prod, base_url="http://testserver")
+    c.cookies.set(hook_auth.UI_COOKIE, UI_KEY, path="/api/ws/")
+    assert c.post("/api/corpora/register", json={"path": "/nowhere"}).json().get("detail") == hook_auth.WRITE_REFUSED
+    r = c.get("/api/ws/mini/jobs")
+    assert r.status_code == 200
+    set_cookies = r.headers.get_list("set-cookie")
+    assert any(v.startswith(f"thimble-ui-8300={UI_KEY}") and "Path=/api/" in v for v in set_cookies)
+    assert any(v.startswith("thimble-ui=") and "Max-Age=0" in v and "Path=/api/ws/" in v for v in set_cookies)
+    assert c.post("/api/corpora/register", json={"path": "/nowhere"}).json().get("detail") != hook_auth.WRITE_REFUSED
+    assert "set-cookie" not in c.get("/api/ws/mini/jobs").headers
+
+    c2 = TestClient(app_prod, base_url="http://testserver")
+    c2.cookies.set(hook_auth.UI_COOKIE, "the-other-servers-key", path="/api/ws/")
+    r = c2.get("/api/ws/mini/jobs")
+    assert "set-cookie" not in r.headers
+    assert c2.put(THEME_PATH, json=THEME).status_code == 403
+
+
+@pytest.mark.real_write_guard
+def test_a_view_builds_check_proves_the_token_so_its_post_passes(app_prod, plugin_headers, monkeypatch):
+    """view_check.py, the view build's check command, runs outside the session's sandbox and proves the token in the
+    server.json of the home its command names (a background session's environment names none), so its post passes the
+    guard that refuses a kernel's."""
+    import importlib.util
+    import os
+    import shlex
+    from pathlib import Path
+
+    from starlette.datastructures import Headers
+
+    from conftest import _record
+
+    from app import dev, hook_auth, views
+
+    _record(port="8300")  # beside the token plugin_headers recorded, as the supervisor writes them
+    home = os.environ["THIMBLE_HOME"]
+    words = shlex.split(dev.view_check_command("mini", "posts"))
+    assert words[3:5] == ["--home", home] and words[5].endswith("/api/ws/mini/views/posts/check")
+    spec = importlib.util.spec_from_file_location("view_check_t", Path(views.__file__).with_name("view_check.py"))
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    monkeypatch.delenv("THIMBLE_HOME")  # as in a background session's environment
+    headers = mod.proof(home)
+    monkeypatch.setenv("THIMBLE_HOME", home)
+    assert headers and hook_auth.hook_proof(Headers(headers=headers))
+    r = TestClient(app_prod).post("/api/ws/mini/views/none/check", json={"locators": []}, headers=headers)
+    assert r.json().get("detail") != hook_auth.WRITE_REFUSED
+    assert mod.proof(str(Path(home) / "nowhere")) == {}

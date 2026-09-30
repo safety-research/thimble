@@ -115,3 +115,20 @@ def test_register_route_lists_and_serves_a_directory_without_a_manifest(data_tmp
     assert client.post("/api/corpora/register", json={"path": str(run / "agents")}).json()["name"] == "incident-run"
     assert client.post("/api/corpora/register", json={"path": str(data_tmp / "mini" / "agents")}).json()["name"] == "mini"
     assert sorted(p.name for p in data_tmp.glob("*.corpus.json")) == ["incident-run.corpus.json"]
+
+
+def test_a_file_read_counts_as_the_analysts_view_only_with_the_analysts_cookie(monkeypatch):
+    """The view log (viewlog), which the telemetry export merges, records the browser's reads of a file. Card code
+    reads through the same routes without the analyst's cookie (hook_auth.analyst), so its reads are not recorded."""
+    from conftest import UI_KEY, _record
+
+    from app import hook_auth, viewlog
+
+    monkeypatch.setattr(viewlog, "_recent", {})
+    _record(ui_key=UI_KEY)
+    c = TestClient(app)
+    assert c.get("/api/corpora/mini/source", params={"path": "agents/agent-01.jsonl"}).status_code == 200
+    assert viewlog.rows("mini") == []
+    c.cookies.set(hook_auth.ui_cookie(), UI_KEY)
+    assert c.get("/api/corpora/mini/source", params={"path": "agents/agent-01.jsonl"}).status_code == 200
+    assert [(r["actor"], r["path"]) for r in viewlog.rows("mini")] == [("analyst", "agents/agent-01.jsonl")]

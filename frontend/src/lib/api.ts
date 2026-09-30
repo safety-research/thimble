@@ -56,16 +56,51 @@ export function describeDetail(d: unknown): string {
   }
 }
 
-/** Trade the key in the link thimble showed (`#k=`) for the cookie that lets this browser answer permission requests
- * and change permission modes (backend hook_auth.claim), and take it out of the address. */
-export function claimKey(): void {
+let keyReady: Promise<void> | null = null
+const CLAIM_WAITS_MS = [0, 500, 2000] // before each try of the claim while the server does not answer
+
+/** Trade the key in the link thimble showed (`#k=`) for the cookie that proves this browser to the server (permission
+ * answers and mode changes, and every write behind hook_auth.LocalWriteGuard), and take it out of the address once the
+ * server has answered. Memoised: with no key in the link the cookie the browser already holds stands; a claim the server
+ * never answered leaves the key in the address and is tried again by the next call. `j` awaits it, so a write never
+ * races the claim. */
+export function claimKey(): Promise<void> {
+  if (keyReady) return keyReady
+  if (typeof window === 'undefined') return (keyReady = Promise.resolve())
   const key = new URLSearchParams(window.location.hash.slice(1)).get('k')
-  if (!key) return
-  window.history.replaceState(window.history.state, '', window.location.pathname + window.location.search)
-  void fetch(`${BASE}/ui/key`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ key }) }).catch(() => undefined)
+  keyReady = key ? claim(key) : Promise.resolve()
+  return keyReady
+}
+
+async function claim(key: string): Promise<void> {
+  for (const wait of CLAIM_WAITS_MS) {
+    if (wait) await new Promise((r) => setTimeout(r, wait))
+    try {
+      const res = await fetch(`${BASE}/ui/key`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ key }) })
+      // 204 claimed it, 403 names a key that is not this server's: neither changes on another try
+      if (res.status === 204 || res.status === 403) {
+        if (new URLSearchParams(window.location.hash.slice(1)).get('k') === key) window.history.replaceState(window.history.state, '', window.location.pathname + window.location.search)
+        return
+      }
+    } catch {
+      /* no answer: try again */
+    }
+  }
+  keyReady = null
+}
+
+/** A link with a key opened in a tab already on its page changes only the address's hash, and loads nothing. */
+export function claimOnHashChange(): void {
+  if (typeof window === 'undefined') return
+  window.addEventListener('hashchange', () => {
+    if (!new URLSearchParams(window.location.hash.slice(1)).get('k')) return
+    keyReady = null
+    void claimKey()
+  })
 }
 
 async function j<T>(url: string, init?: RequestInit): Promise<T> {
+  await claimKey()
   const res = await fetch(url, { ...init, headers: { 'content-type': 'application/json', ...(init?.headers ?? {}) } })
   if (!res.ok) {
     let detail = res.statusText
