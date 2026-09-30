@@ -59,16 +59,24 @@ export function describeDetail(d: unknown): string {
   }
 }
 
-/** Trade the key in the link thimble showed (`#k=`) for the cookie that lets this browser answer permission requests
- * and change permission modes (backend hook_auth.claim), and take it out of the address. */
-export function claimKey(): void {
+let keyReady: Promise<void> | null = null
+
+/** Trade the key in the link thimble showed (`#k=`) for the cookie that proves this browser to the server (permission
+ * answers and mode changes, and every write behind hook_auth.LocalWriteGuard), and take it out of the address. Memoised:
+ * with no key in the link the cookie the browser already holds stands. `j` awaits it, so a write never races the claim. */
+export function claimKey(): Promise<void> {
+  if (keyReady) return keyReady
+  if (typeof window === 'undefined') return (keyReady = Promise.resolve())
   const key = new URLSearchParams(window.location.hash.slice(1)).get('k')
-  if (!key) return
-  window.history.replaceState(window.history.state, '', window.location.pathname + window.location.search)
-  void fetch(`${BASE}/ui/key`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ key }) }).catch(() => undefined)
+  if (key) window.history.replaceState(window.history.state, '', window.location.pathname + window.location.search)
+  keyReady = key
+    ? fetch(`${BASE}/ui/key`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ key }) }).then(() => undefined).catch(() => undefined)
+    : Promise.resolve()
+  return keyReady
 }
 
 async function j<T>(url: string, init?: RequestInit): Promise<T> {
+  await claimKey()
   const res = await fetch(url, { ...init, headers: { 'content-type': 'application/json', ...(init?.headers ?? {}) } })
   if (!res.ok) {
     let detail = res.statusText

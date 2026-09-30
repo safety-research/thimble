@@ -497,9 +497,16 @@ def sandbox_line(cwd: Path) -> str:
 
 
 def _request(method: str, url: str, body: dict | None = None, timeout: float = 5.0) -> tuple[int, Any]:
-    """(status, parsed json | text). Transport failures are (0, message); an HTTP error is (status, its body)."""
+    """(status, parsed json | text). Transport failures are (0, message); an HTTP error is (status, its body). The
+    request proves the server's token (hook_auth) so its writes pass LocalWriteGuard, which a notebook kernel cannot."""
+    from . import hook_auth  # noqa: PLC0415
+
     data = json.dumps(body).encode() if body is not None else None
-    req = urllib.request.Request(url, data=data, method=method, headers={"Content-Type": "application/json"})
+    headers = {"Content-Type": "application/json"}
+    tok = hook_auth.token()
+    if tok:
+        headers.update(hook_auth.headers(tok, secrets.token_hex(16)))
+    req = urllib.request.Request(url, data=data, method=method, headers=headers)
     try:
         with urllib.request.urlopen(req, timeout=timeout) as r:
             raw = r.read()
