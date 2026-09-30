@@ -1991,7 +1991,7 @@ def _turn_endings_line() -> str:
     return terminal_tools.line()
 
 
-NODE_TESTS_FLOOR = "20.19+, 22.13+ or 24+"  # what the frontend's tests need (install.sh's node_tests_ok)
+NODE_TESTS_FLOOR = "20.19+, 22.13+ or 24+"  # what the frontend's tests need (install.sh's node check)
 
 
 def node_runs_frontend_tests(v: tuple[int, int, int]) -> bool:
@@ -2020,7 +2020,7 @@ def node_line(commands: bool = True) -> str:
     fix = f"bash {config.REPO_ROOT / 'scripts' / 'install.sh'}"
     if v and (modules / ".bin" / "vitest").exists() and not node_runs_frontend_tests(v):
         return (f"{out}, older than the frontend's tests need (Node {NODE_TESTS_FLOOR}), so code tickets' vitest checks "
-                "fail" + (f"; run `{fix} --upgrade-node`, or upgrade Node (https://nodejs.org)" if commands else ""))
+                "fail" + ("; upgrade Node (https://nodejs.org)" if commands else ""))
     return out + ("" if modules.is_dir() else f"; {modules} is missing, so custom views cannot build"
                   + (f" (run `{fix}` again)" if commands else ""))
 
@@ -2763,7 +2763,7 @@ def update_script() -> Path:
 
 # install.sh's answers to its questions, and --require-pinned, which `thimble update` passes on to it through update.sh
 INSTALL_FLAGS = ("--sandbox-deps", "--no-sandbox-deps", "--plugin", "--no-plugin", "--trust-workspaces",
-                 "--no-trust-workspaces", "--upgrade-node", "--no-upgrade-node", "--require-pinned")
+                 "--no-trust-workspaces", "--require-pinned")
 
 
 def _gh_ok(gh: str, *args: str) -> bool:

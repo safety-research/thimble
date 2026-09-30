@@ -28,7 +28,7 @@ Instructions for agents installing thimble on the user's behalf are in [CLAUDE.m
 2. Unzip it.
 3. Run `bash scripts/install.sh` inside the unzipped folder.
 
-For a development build, clone the repo and run `bash scripts/install.sh` (requires Node 20+; its frontend tests, which code tickets run, need 20.19+, 22.13+ or 24+).
+For a development build, clone the repo and run `bash scripts/install.sh` (requires Node 20.19+, 22.13+ or 24+).
 
 [INSTALL.md](INSTALL.md) covers requirements, updating and troubleshooting.
 
@@ -76,7 +76,7 @@ Type `/thimble` to start the thimble server and print the dashboard URL. A plain
 
 ## Requirements
 
-Claude Code (tested with 2.1.281), macOS or Linux, and Python 3.12+ ([uv](https://docs.astral.sh/uv/) recommended). Node 20+ is needed for custom views (the viewers the dev agent builds for your data), for the sandbox card code and code tickets run in, and for a development build, whose frontend tests (a code ticket's checks) need Node 20.19+, 22.13+ or 24+. [INSTALL.md](INSTALL.md) has the details.
+Claude Code (tested with 2.1.281), macOS or Linux, and Python 3.12+ ([uv](https://docs.astral.sh/uv/) recommended). Node 20+ is needed for custom views (the viewers the dev agent builds for your data), for the sandbox card code and code tickets run in, and for a development build. [INSTALL.md](INSTALL.md) has the details.
 
 ## Security and privacy
 

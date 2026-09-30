@@ -4,12 +4,10 @@
 # packages, if wanted) · copy the release into --dir · backend/.venv · the frontend's packages and frontend/dist · a
 # browser for screenshots · the app-dir pointer · `thimble` on PATH (~/.local/bin/thimble → the tree's plugin/bin/thimble) ·
 # thimble's plugin in every Claude Code session, if wanted · the trust of thimble's workspaces folder, if wanted · doctor ·
-# what to do next. In a checkout whose node is older than the frontend's tests need, the frontend step first upgrades
-# Node with Homebrew, if wanted.
-# The questions (the browser; on Linux, the sandbox's system packages while it can't run; the plugin; the trust; in a
-# checkout, a newer Node while its node is older than the frontend's tests need and Homebrew can install one) are asked
+# what to do next.
+# The questions (the browser; on Linux, the sandbox's system packages while it can't run; the plugin; the trust) are asked
 # on a terminal before anything is installed, and the sandbox step runs right after them, so only sudo asks for more (its
-# password). The Node question is asked again at every run while node is too old. The browser, plugin and trust answers are kept in $THIMBLE_HOME (config.json's "browser", plugin.json,
+# password). The browser, plugin and trust answers are kept in $THIMBLE_HOME (config.json's "browser", plugin.json,
 # trust.json), so a re-run or `thimble update` does not ask them again. A flag answers a question without asking.
 # Without a terminal install.sh refuses to run while a question it would ask has no flag, except the browser question
 # when a system Chrome or Edge is found: that browser is then used and nothing is downloaded.
@@ -26,15 +24,14 @@
 # lockfile). Where the index lacks a pinned version, the newest versions pyproject.toml or frontend/runtime/package.json
 # allow that the index has are installed instead (uv keeps the backend's other pins), and the packages that differ from
 # the pinned versions are listed; --require-pinned stops there instead. A file whose hash differs from the pinned one stops the install, from either index.
-# Needs: uv (or python3 >= 3.12); node >= 20 for custom views, for the sandbox runtime card code and code tickets run in
-# (a package of the frontend's), and to build frontend/dist when it is missing or out of date; in a checkout, node
-# 20.19+, 22.13+ or 24+ for the frontend's tests, which a code ticket's checks run (jsdom's engines);
+# Needs: uv (or python3 >= 3.12); node >= 20 for custom views (a checkout: 20.19+, 22.13+ or 24+, which its frontend tests need), for the sandbox runtime card code and code tickets run in
+# (a package of the frontend's), and to build frontend/dist when it is missing or out of date;
 # the claude CLI to register the plugin.
 # The marketplace name is thimble-local from a release zip and thimble from a checkout (.claude-plugin/marketplace.json).
 #
 #   scripts/install.sh [--dir DIR] [--marketplace-name NAME] [--dev] [--python PATH] [--deps-only] [--require-pinned]
 #                      [--browser bundled|system|off] [--sandbox-deps | --no-sandbox-deps] [--plugin | --no-plugin]
-#                      [--trust-workspaces | --no-trust-workspaces] [--upgrade-node | --no-upgrade-node] [--dry-run]
+#                      [--trust-workspaces | --no-trust-workspaces] [--dry-run]
 #   --dir DIR                where the tree lives (default: this checkout; $THIMBLE_HOME/app for a release)
 #   --marketplace-name NAME  the name Claude Code registers the tree under (default: the one in marketplace.json)
 #   --dev                    also install the backend's test extras (pytest, pytest-asyncio); a git checkout always does
@@ -60,11 +57,6 @@
 #   --trust-workspaces       trust thimble's workspaces folder by adding it to ~/.claude.json. The orientation, its critic
 #                            and the writers run as Claude Code background agents, which start only in a trusted folder.
 #                            --no-trust-workspaces answers no, and takes back what an earlier yes added
-#   --upgrade-node           in a checkout whose node is missing or older than the frontend's tests need (20.19+, 22.13+
-#                            or 24+), install a newer one with Homebrew (brew install node, or brew upgrade node when
-#                            Homebrew's is old) and put Homebrew's bin first on PATH for the rest of the run. Without
-#                            Homebrew it only says where to get Node. --no-upgrade-node answers no: code tickets' checks
-#                            fail until Node is upgraded
 #   --dry-run                print what it installs, its questions and every step and command; change nothing
 set -euo pipefail
 
@@ -82,7 +74,7 @@ json_get() {  # json_get FILE KEY — a top-level string value (python3 when pre
 parse_args() {
   src="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
   home="${THIMBLE_HOME:-$HOME/.thimble}"
-  dir="" mp_name="" dev=0 deps_only=0 plugin="" dry=0 trust="" byo="" browser="" sandbox_deps="" require_pinned=0 upgrade_node=""
+  dir="" mp_name="" dev=0 deps_only=0 plugin="" dry=0 trust="" byo="" browser="" sandbox_deps="" require_pinned=0
   while [ $# -gt 0 ]; do
     case "$1" in
       --dir) dir="$2"; shift 2;;
@@ -100,8 +92,6 @@ parse_args() {
       --no-plugin) plugin=no; shift;;
       --trust-workspaces) trust=--yes; shift;;
       --no-trust-workspaces) trust=--no; shift;;
-      --upgrade-node) upgrade_node=yes; shift;;
-      --no-upgrade-node) upgrade_node=no; shift;;
       --dry-run) dry=1; shift;;
       -h|--help) usage; exit 0;;
       *) echo "install.sh: unknown argument $1" >&2; usage >&2; exit 2;;
@@ -225,6 +215,13 @@ check_prerequisites() {  # uv or python >= pyproject's requires-python, or --pyt
   node_found="$(command -v node >/dev/null 2>&1 && node -v || echo none)"
   major="$(printf '%s' "$node_found" | sed -n 's/^v\([0-9]*\).*/\1/p')"
   node_ok=0; [ "${major:-0}" -ge 20 ] && node_ok=1
+  # a checkout's frontend tests, which a code ticket's checks run, need more: jsdom and the packages it loads require()
+  # ES modules (their engines: ^20.19.0 || ^22.13.0 || >=24; cli.NODE_TESTS_FLOOR)
+  minor="$(printf '%s' "$node_found" | sed -n 's/^v[0-9]*\.\([0-9]*\).*/\1/p')"
+  if [ "$checkout" = 1 ] && [ "$node_ok" = 1 ] && ! { [ "$major" -ge 24 ] || { [ "$major" = 22 ] && [ "${minor:-0}" -ge 13 ]; } || { [ "$major" = 20 ] && [ "${minor:-0}" -ge 19 ]; }; }; then
+    old_node="node $node_found at $(command -v node) is older than a checkout needs: the frontend's tests, which a code ticket's checks run, need Node 20.19+, 22.13+ or 24+. Upgrade Node and run this script again"
+    if [ "$dry" = 1 ]; then say "install.sh stops here: $old_node"; else die "$old_node"; fi
+  fi
   if [ "$node_ok" = 1 ]; then
     if [ -n "$stale" ]; then
       say "node $node_found >= 20 — step 5 installs the frontend's packages and rebuilds frontend/dist, which is older than frontend/$stale"
@@ -248,9 +245,6 @@ check_prerequisites() {  # uv or python >= pyproject's requires-python, or --pyt
       say "without node >= 20 card code gets no sandbox runtime: the notebook kernel runs in bubblewrap where that works, else with your user's access"
     fi
     say "without node >= 20 a code ticket's checks run outside the sandbox, so thimble asks you before each code ticket starts"
-  fi
-  if [ "$checkout" = 1 ] && [ "$node_ok" = 1 ] && ! node_tests_ok "$node_found"; then
-    say "node $node_found is older than the frontend's tests need (Node $NODE_TESTS_FLOOR), so a code ticket's checks fail with it"
   fi
   have_claude=0
   if command -v claude >/dev/null 2>&1; then have_claude=1; say "claude CLI $(claude --version 2>/dev/null | head -n 1)"; else say "claude CLI not on PATH — the plugin step will print the commands to run"; fi
@@ -438,9 +432,7 @@ system_browser() {  # sys_channel, sys_name, sys_path: the Chrome or Edge that P
 }
 
 probe_browser() {  # sys_starts=1 when the system browser starts headless with remote debugging on, which is how
-  # Playwright drives it (a policy such as RemoteDebuggingAllowed turns that off); 0 when it does not within 10 s.
-  # --use-mock-keychain and --password-store=basic, as Playwright passes them: a new profile otherwise reads the
-  # browser's key from the macOS keychain (or the Linux keyring), and the keychain asks the user to allow it
+  # Playwright drives it (a policy such as RemoteDebuggingAllowed turns that off); 0 when it does not within 10 s
   local profile="$tmp/browser-probe" log="$tmp/browser-probe.log" pid
   sys_starts=0
   [ -n "$sys_path" ] || return 0
@@ -699,115 +691,6 @@ sandbox_step() {  # the sandbox question's answer, right after the questions so 
   if sandbox_runs; then say "Claude Code's Bash sandbox runs now"; else say "Claude Code's Bash sandbox still doesn't run."; sandbox_later; fi
 }
 
-NODE_TESTS_FLOOR="20.19+, 22.13+ or 24+"  # what the frontend's tests need: node_tests_ok
-
-node_tests_ok() {  # node_tests_ok VERSION: a node of VERSION (v20.19.0) runs the frontend's tests, whose jsdom and the
-  # packages it loads require() ES modules: their engines (frontend/package-lock.json) are ^20.19.0 || ^22.13.0 || >=24
-  local v="${1#v}" ma mi
-  ma="${v%%.*}"; mi="${v#*.}"; mi="${mi%%.*}"
-  case "$ma" in '' | *[!0-9]*) return 1;; esac
-  case "$mi" in '' | *[!0-9]*) mi=0;; esac
-  [ "$ma" -ge 24 ] || { [ "$ma" = 22 ] && [ "$mi" -ge 13 ]; } || { [ "$ma" = 20 ] && [ "$mi" -ge 19 ]; }
-}
-
-node_plan() {  # the Node question: node_old=1 in a checkout (whose frontend's tests a code ticket's checks run) whose node
-  # is missing or older than they need; node_q=1 when Homebrew can give it a newer one, which node_cmd installs (empty
-  # when Homebrew's node is new enough already, and only PATH finds another first); else node_why says why it is not asked
-  node_old=0 node_q=0 node_why="" node_cmd="" brew_bin="" brew_node=""
-  if [ "$checkout" = 0 ] || node_tests_ok "$node_found"; then return 0; fi
-  node_old=1
-  local b
-  b="$(command -v brew)" || { node_why="Homebrew was not found, and install.sh upgrades Node only with Homebrew"; return 0; }
-  brew_bin="$(dirname "$b")"  # Homebrew's bin folder, where brew and the formulas' programs are linked
-  brew_node="$(dirname "$brew_bin")/opt/node/bin/node"
-  if [ -x "$brew_node" ] && node_tests_ok "$("$brew_node" -v 2>/dev/null)"; then node_cmd=""
-  elif [ -x "$brew_node" ]; then node_cmd="brew upgrade node"
-  else node_cmd="brew install node"; fi
-  node_q=1
-}
-
-node_found_at() {  # what node the frontend step would run: "node VERSION at PATH", or "no node"
-  if [ "$node_found" = none ]; then printf 'no node\n'; else printf 'node %s at %s\n' "$node_found" "$(command -v node)"; fi
-}
-
-node_text() {  # the Node question
-  say "Node for the frontend's tests. A code ticket's checks run the frontend's tests, which need Node $NODE_TESTS_FLOOR; this machine has $(node_found_at). Custom views and the sandbox runtime need only Node 20 or later$( [ "$node_ok" = 1 ] && echo ', which it has' )."
-  if [ -n "$node_cmd" ]; then
-    say "With a yes, install.sh runs \`$node_cmd\` (Homebrew) and uses Homebrew's node for the rest of the install."
-  else
-    say "Homebrew's node at $brew_node is $("$brew_node" -v 2>/dev/null), which is new enough; with a yes, install.sh uses it for the rest of the install."
-  fi
-  say "With a no, the install goes on, and code tickets' checks fail until Node is upgraded; \`thimble doctor\` flags it."
-}
-
-node_later() {  # what a node too old for the frontend's tests means, and how to upgrade it later
-  local how="install Node $NODE_TESTS_FLOOR from https://nodejs.org or with nvm (https://github.com/nvm-sh/nvm)"
-  [ -z "$brew_bin" ] || how="run: bash $dir/scripts/install.sh --upgrade-node, or $how"
-  say "Code tickets' checks fail until Node is upgraded, and \`thimble doctor\` flags it. To upgrade, $how."
-}
-
-shell_rc() {  # the startup file of the user's shell
-  case "${SHELL:-}" in */zsh) printf '~/.zshrc\n';; */bash) printf '~/.bashrc\n';; *) printf "your shell's startup file\n";; esac
-}
-
-node_item() {  # node_item N: the Node question as the dry run's question N
-  if [ "$node_old" = 0 ]; then
-    say "$1. Node: not asked, since $( [ "$checkout" = 1 ] && echo "$(node_found_at) meets what the frontend's tests need (Node $NODE_TESTS_FLOOR)" || echo 'a release install has no frontend tests' )"
-  elif [ "$node_q" = 0 ]; then
-    say "$1. Node: not asked, since $(node_found_at) is older than the frontend's tests need (Node $NODE_TESTS_FLOOR), and $node_why; the frontend step says where to get Node"
-  elif [ -n "$upgrade_node" ]; then
-    say "$1. Node: answered by --$( [ "$upgrade_node" = yes ] || echo 'no-' )upgrade-node"
-  else
-    item "$1" "$(node_text)"; say "   - yes: --upgrade-node"; say "   - no: --no-upgrade-node"
-  fi
-}
-
-node_ask() {  # the Node question on a terminal
-  [ "$node_q" = 1 ] && [ -z "$upgrade_node" ] || return 0
-  printf '\n'; node_text
-  if [ -n "$node_cmd" ]; then printf 'Upgrade Node with Homebrew? [Y/n] '; else printf "Use Homebrew's node? [Y/n] "; fi
-  if yes_no y; then upgrade_node=yes; else upgrade_node=no; fi
-}
-
-node_step() {  # the Node question's answer, before the frontend's packages are installed: on a yes, Homebrew's node
-  # (node_cmd installs or upgrades it), with Homebrew's bin first on PATH for the rest of the run
-  [ "$node_old" = 1 ] || return 0
-  local first now
-  if [ "$node_q" = 0 ]; then
-    say "$(node_found_at) is older than the frontend's tests need (Node $NODE_TESTS_FLOOR), and $node_why."
-    node_later
-    return 0
-  fi
-  if [ "$upgrade_node" != yes ]; then
-    if [ "$dry" = 1 ] && [ -z "$upgrade_node" ]; then say "(the answer to the Node question, above)"; return 0; fi
-    say "$(node_found_at) is older than the frontend's tests need (Node $NODE_TESTS_FLOOR), and you answered no to upgrading it."
-    node_later
-    return 0
-  fi
-  if [ -n "$node_cmd" ] && ! run $node_cmd; then say "(that failed, above)"; node_later; return 0; fi
-  say "+ export PATH=\"$brew_bin:\$PATH\""
-  [ "$dry" = 0 ] || return 0
-  PATH="$brew_bin:$PATH"; export PATH; hash -r
-  node_found="$(command -v node >/dev/null 2>&1 && node -v || echo none)"
-  major="$(printf '%s' "$node_found" | sed -n 's/^v\([0-9]*\).*/\1/p')"
-  node_ok=0; [ "${major:-0}" -ge 20 ] && node_ok=1
-  if ! node_tests_ok "$node_found"; then
-    say "the install goes on with $(node_found_at), which is still older than the frontend's tests need (Node $NODE_TESTS_FLOOR)."
-    node_later
-    return 0
-  fi
-  now="$(command -v node)"
-  say "the rest of the install uses node $node_found at $now"
-  first="$(PATH="$start_path"; command -v node || true)"
-  if [ -n "$first" ] && [ "$first" != "$now" ]; then
-    say "Your PATH still finds $first ($("$first" -v 2>/dev/null || echo 'its version unknown')) before it, so a new terminal, and thimble started from one, runs that node, and code tickets' checks still fail. Put Homebrew's bin first: add this line to $(shell_rc) and open a new terminal (or remove $first):"
-    say "  export PATH=\"$brew_bin:\$PATH\""
-  elif [ -z "$first" ]; then
-    say "Your PATH does not hold $brew_bin, so a new terminal finds no node. Add this line to $(shell_rc) and open a new terminal:"
-    say "  export PATH=\"$brew_bin:\$PATH\""
-  fi
-}
-
 dist_stale() {  # dist_stale FRONTEND: the first file frontend/dist is built from that is newer than its index.html (git
   # writes every file a pull or checkout changes, so a changed source is newer than the build), or nothing
   local fe="$1"
@@ -904,7 +787,6 @@ build_ui() {  # with node >= 20 the frontend's packages, which custom views need
   # its sources is rebuilt (scripts/rebuild_ui.sh, which swaps the build in under a running server), any other existing
   # frontend/dist is kept, and without one the typecheck and vite build make it
   step "5/12 frontend"
-  node_step
   if [ "$node_ok" = 1 ] && ! install_packages; then
     [ "$has_dist" = 1 ] || die "npm ci failed in $dir/frontend (above), so the UI cannot be built; fix that and run this script again"
     say "(npm failed, above: custom views need the frontend's packages, so run this script again)"
@@ -1007,11 +889,6 @@ show_plan() {  # what the install puts where, before its questions
     if [ "$sandbox_deps" = yes ]; then say "  the sandbox's system packages: $sb_need"
     elif [ -z "$sandbox_deps" ]; then asked+=("the sandbox's system packages: $sb_need"); fi
   fi
-  if [ "$node_q" = 1 ]; then
-    local newer="a newer Node for the frontend's tests: ${node_cmd:+$node_cmd, }Homebrew's bin ($brew_bin) first on PATH for the rest of the install"
-    if [ "$upgrade_node" = yes ]; then say "  $newer"
-    elif [ -z "$upgrade_node" ]; then asked+=("$newer"); fi
-  fi
   if [ "$deps_only" = 0 ]; then
     if [ "${plugin:-$plugin_prev}" = yes ]; then say "  thimble's plugin in every Claude Code session: $(cc_path settings.json) and $(cc_path plugins)"
     elif [ -z "$plugin$plugin_prev" ] && [ "$have_claude" = 1 ]; then asked+=("thimble's plugin in every Claude Code session: $(cc_path settings.json) and $(cc_path plugins)"); fi
@@ -1079,7 +956,7 @@ item() {  # item N TEXT: TEXT as the dry run's question N, its later lines inden
 }
 
 ask() {  # the questions, before anything is installed: the browser, the sandbox's system packages, the plugin, the
-  # trust, a newer Node. Each is asked on a terminal when neither its flag nor an earlier answer settles it (earlier_answers);
+  # trust. Each is asked on a terminal when neither its flag nor an earlier answer settles it (earlier_answers);
   # --dry-run prints them with their flags instead, and without a terminal install.sh stops while one is unanswered
   local need=()
   tty=0
@@ -1097,7 +974,7 @@ ask() {  # the questions, before anything is installed: the browser, the sandbox
     if [ "${#sb_cmds[@]}" = 0 ]; then say "2. the sandbox's system packages: not asked, since $( [ "$sb_ok" = 1 ] && echo 'the sandbox runs here' || echo "$sb_why" )"
     elif [ -n "$sandbox_deps" ]; then say "2. the sandbox's system packages: answered by --$( [ "$sandbox_deps" = yes ] || echo 'no-' )sandbox-deps"
     else item 2 "$(sandbox_text)"; say "   - yes: --sandbox-deps"; say "   - no: --no-sandbox-deps"; fi
-    if [ "$deps_only" = 1 ]; then node_item 3; return 0; fi
+    [ "$deps_only" = 0 ] || return 0
     if [ -n "$plugin" ]; then say "3. the plugin: answered by --$( [ "$plugin" = yes ] || echo 'no-' )plugin"
     elif [ -n "$plugin_prev" ]; then say "3. the plugin: $plugin_skip"
     elif [ "$have_claude" = 0 ]; then say "3. the plugin: not asked, since there is no claude CLI"
@@ -1106,14 +983,12 @@ ask() {  # the questions, before anything is installed: the browser, the sandbox
     elif [ -n "$trust_q" ]; then item 4 "$trust_q"; say "   - yes: --trust-workspaces"; say "   - no: --no-trust-workspaces"
     elif [ -n "$trust_skip" ]; then say "4. the trust: $trust_skip"
     else say "4. the trust: asked at the trust step; --trust-workspaces or --no-trust-workspaces answers it"; fi
-    node_item 5
     return 0
   fi
   [ -t 0 ] && tty=1
   if [ "$tty" = 0 ]; then
     [ -n "$browser$browser_was$sys_path" ] || need+=("the browser: --browser bundled or --browser off")
     [ "${#sb_cmds[@]}" = 0 ] || [ -n "$sandbox_deps" ] || need+=("the sandbox's system packages: --sandbox-deps or --no-sandbox-deps")
-    [ "$node_q" = 0 ] || [ -n "$upgrade_node" ] || need+=("Node for the frontend's tests: --upgrade-node or --no-upgrade-node")
     if [ "$deps_only" = 0 ]; then
       [ -n "$plugin$plugin_prev" ] || [ "$have_claude" = 0 ] || need+=("the plugin: --plugin or --no-plugin")
       if [ -z "$trust" ] && { [ -n "$trust_q" ] || ! command -v python3 >/dev/null 2>&1; }; then
@@ -1140,7 +1015,7 @@ $again"
     printf 'Install them now? [Y/n] '
     if yes_no y; then sandbox_deps=yes; else sandbox_deps=no; fi
   fi
-  if [ "$deps_only" = 1 ]; then node_ask; return 0; fi
+  [ "$deps_only" = 0 ] || return 0
   if [ -z "$plugin" ] && [ -z "$plugin_prev" ] && [ "$have_claude" = 1 ]; then
     printf '\n%s [y/N] ' "$(plugin_text)"
     if yes_no n; then plugin=yes; else plugin=no; fi
@@ -1149,7 +1024,6 @@ $again"
     printf '\n%s [y/N] ' "$trust_q"
     if yes_no n; then trust=--yes; else trust=--no; fi
   fi
-  node_ask
 }
 
 register_plugin() {  # the plugin question's answer: yes registers the tree as a marketplace and installs thimble from it at
@@ -1255,7 +1129,6 @@ keep_log() {  # the run's output also goes to $home/install.log (the last run on
 }
 
 main() {
-  start_path="$PATH"
   parse_args "$@"
   tmp="$(mktemp -d)"
   trap 'rm -rf "$tmp"' EXIT
@@ -1265,7 +1138,6 @@ main() {
   check_prerequisites
   system_browser
   sandbox_plan
-  node_plan
   earlier_answers
   show_plan
   ask
