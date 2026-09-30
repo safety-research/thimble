@@ -1,5 +1,5 @@
 """A written document exported as a file: Markdown, HTML or PDF, and the formats a report type's export.py adds, such as
-the video extension's video file.
+the video extension's video file. The Report also exports as a video, written from it first (the Report as a video).
 
 Every format starts from one reading of the document (read_model): its title, lead, units (a report's sections, a
 story's sections, a deck's slides, a video's lines), their figures and the citations, numbered in order of first use;
@@ -35,7 +35,7 @@ import os
 import re
 import secrets
 from pathlib import Path
-from typing import Any, AsyncIterator
+from typing import Any, AsyncIterator, Callable
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import Response
@@ -693,6 +693,8 @@ def formats(c: str, slug: str, renderer: str) -> list[dict[str, Any]]:
             f.update(ok=False, why=f"Needs a browser: {why_off}")
         elif film and enc is None:
             f.update(ok=False, why="Needs ffmpeg to write the video file")
+    if slug == REPORT and "video" not in out:
+        out["video"] = report_video(c, (kind, why_off), enc)
     return list(out.values())
 
 
@@ -756,9 +758,10 @@ def _filename(title: str, slug: str, ext: str) -> str:
     return f"{base}.{ext}"
 
 
-async def export(c: str, inv_id: str, slug: str, fmt: str) -> tuple[bytes, str, str]:
-    """(content, file name, mime) of the document in format `fmt`. HTTPException 404 for no document or no such format,
-    409 for a format that cannot run here, with the reason."""
+async def export(c: str, inv_id: str, slug: str, fmt: str,
+                 progress: Callable[[float], None] | None = None) -> tuple[bytes, str, str]:
+    """(content, file name, mime) of the document in format `fmt`, `progress` told how far a video file is. HTTPException
+    404 for no document or no such format, 409 for a format that cannot run here, with the reason."""
     from . import film_export, report_types  # noqa: PLC0415
 
     doc = await asyncio.to_thread(report_types.read_doc, c, inv_id, slug)
@@ -772,6 +775,8 @@ async def export(c: str, inv_id: str, slug: str, fmt: str) -> tuple[bytes, str, 
         raise HTTPException(404, f"{slug} has no export format {fmt!r}")
     if not f["ok"]:
         raise HTTPException(409, f["why"])
+    if f.get("write"):
+        raise HTTPException(409, "the Report's video is written before it is exported (start_report_video)")
     m = await asyncio.to_thread(read_model, c, doc, renderer)
     name = lambda ext: _filename(m["title"], slug, ext)  # noqa: E731
     if fmt == "markdown" and not f.get("hook"):
@@ -780,7 +785,7 @@ async def export(c: str, inv_id: str, slug: str, fmt: str) -> tuple[bytes, str, 
     cards = [x["card"] for u in m["units"] for x in u["figures"]]
     pics, _ = await card_pictures(c, cards, draw=kind != "off")
     if f.get("hook"):
-        return await _hooked(c, slug, doc, f, m, pics)
+        return await _hooked(c, slug, doc, f, m, pics, progress)
     html_text = await asyncio.to_thread(to_html, m, pics)
     if fmt == "html":
         return html_text.encode("utf-8"), name("html"), FORMAT_INFO["html"]["mime"]
@@ -793,7 +798,7 @@ async def export(c: str, inv_id: str, slug: str, fmt: str) -> tuple[bytes, str, 
 
 
 async def _hooked(c: str, slug: str, doc: dict[str, Any], f: dict[str, Any], m: dict[str, Any],
-                  pics: dict[str, dict[str, Any]]) -> tuple[bytes, str, str]:
+                  pics: dict[str, dict[str, Any]], progress: Callable[[float], None] | None = None) -> tuple[bytes, str, str]:
     from . import film_export  # noqa: PLC0415
 
     hook = hook_of(c, slug)
@@ -811,7 +816,7 @@ async def _hooked(c: str, slug: str, doc: dict[str, Any], f: dict[str, Any], m: 
     name = _filename(m["title"], slug, ext)
     mime = str(got.get("mime") or MIME_BY_EXT.get(ext, "application/octet-stream"))
     if isinstance(got.get("film"), dict):
-        data, vext = await film_export.render_film(got["film"], faces=faces)
+        data, vext = await film_export.render_film(got["film"], faces=faces, progress=progress)
         return data, _filename(m["title"], slug, vext), MIME_BY_EXT[vext]
     if isinstance(got.get("html"), str):
         if not re.search(r"<html[\s>]", got["html"], re.I):  # a fragment takes thimble's page, faces and styles
@@ -828,6 +833,142 @@ async def _hooked(c: str, slug: str, doc: dict[str, Any], f: dict[str, Any], m: 
         data = base64.b64decode(got["bytes"]) if got.get("b64") else got["bytes"].encode("utf-8")
         return data, name, mime
     raise HTTPException(500, f"{slug}'s export.py returned none of markdown, html, film or bytes")
+
+
+# --------------------------------------------------------------------------- the Report as a video
+# The Report's Video writes a video from the report, then exports it. A `write` event asks main to start the writer of
+# the workspace's video, the video extension's report type, made when there is none; once the writer has ended with the
+# video saved, it is exported with the video's own Video format. One run per workspace, kept in memory; its file waits in
+# the workspace's scratch folder for the browser to fetch.
+
+REPORT = "report"
+VIDEO_REQUEST = "Write the video from the report, report:report."
+VIDEO_POLL_S = 2.0
+_videos: dict[str, dict[str, Any]] = {}  # workspace -> {stage, doc, progress, error, name, file, task}
+
+
+def _video_type(c: str) -> dict[str, Any] | None:
+    from . import report_types  # noqa: PLC0415
+
+    t = report_types.preset(report_types.LEGACY_VIDEO, c)
+    return t if t and t.get("renderer") == "video" and t.get("extension") else None
+
+
+def report_video(c: str, browser_is: tuple[str, str] | None = None, enc: Any = False) -> dict[str, Any]:
+    """The Report's Video format, {id, name, ext, ok, why?, write}: it needs the video extension running here, a browser
+    and an encoder."""
+    from . import film_export  # noqa: PLC0415
+
+    kind, why_off = browser_is or browser()
+    enc = film_export.encoder() if enc is False else enc
+    f = {"id": "video", "name": FORMAT_INFO["video"]["name"], "ext": enc[0] if enc else "mp4", "ok": True, "write": True}
+    if _video_type(c) is None:
+        f.update(ok=False, why="Needs the video extension, which does not run here")
+    elif kind == "off":
+        f.update(ok=False, why=f"Needs a browser: {why_off}")
+    elif enc is None:
+        f.update(ok=False, why="Needs ffmpeg to write the video file")
+    return f
+
+
+def _video_doc(c: str) -> str:
+    """The video the Report's Video writes: the workspace's first made from the video extension's type, else a new one."""
+    from . import report_types  # noqa: PLC0415
+
+    for t in report_types.list_types(c):
+        if t.get("preset") == report_types.LEGACY_VIDEO and t.get("renderer") == "video":
+            return str(t["slug"])
+    return str(report_types.create_document_type(c, report_types.LEGACY_VIDEO)["slug"])
+
+
+def _saved_at(c: str, slug: str) -> float | None:
+    from . import report_types  # noqa: PLC0415
+
+    try:
+        return report_types.doc_file(c, investigation.MAIN, slug).stat().st_mtime
+    except OSError:
+        return None
+
+
+def video_state(c: str) -> dict[str, Any]:
+    """The workspace's run of the Report's Video: {stage: writing | rendering | done | failed | None, doc, progress,
+    error, name}."""
+    run = _videos.get(c) or {}
+    return {k: run.get(k) for k in ("stage", "doc", "progress", "error", "name")}
+
+
+async def start_report_video(c: str) -> dict[str, Any]:
+    """Start the Report's Video (module note), or answer the run under way. 409 with the reason when it cannot run here,
+    the report is not written, or no session listens for the write."""
+    from . import channel, report_types, write_session  # noqa: PLC0415
+
+    run = _videos.get(c)
+    if run and run["stage"] in ("writing", "rendering"):
+        return video_state(c)
+    f = await asyncio.to_thread(report_video, c)
+    if not f["ok"]:
+        raise HTTPException(409, f["why"])
+    if await asyncio.to_thread(report_types.read_doc, c, investigation.MAIN, REPORT) is None:
+        raise HTTPException(409, "The report is not written yet")
+    if not channel.reachable(c):
+        raise HTTPException(409, channel.NOT_LISTENING.format(cwd=config.corpus_dir(c)))
+    slug = await asyncio.to_thread(_video_doc, c)
+    before = _saved_at(c, slug)
+    if not write_session.running(c, slug):
+        channel.post(c, report_types.WRITE_EVENT, {"doc": slug, "text": VIDEO_REQUEST})
+    old = _videos.get(c) or {}
+    with contextlib.suppress(OSError):
+        if old.get("file"):
+            Path(old["file"]).unlink()
+    run = {"stage": "writing", "doc": slug, "progress": None, "error": None, "name": None, "file": None}
+    run["task"] = asyncio.get_running_loop().create_task(_report_video(c, run, before), name=f"report-video-{c}")
+    _videos[c] = run
+    return video_state(c)
+
+
+async def _report_video(c: str, run: dict[str, Any], before: float | None) -> None:
+    from . import agent_session, agents, report_types, write_session  # noqa: PLC0415
+
+    slug, chat = run["doc"], None
+    try:
+        while report_types.write_pending(c, slug) is not None or write_session.running(c, slug):
+            now = agent_session.current(c, write_session.session_key(slug))
+            chat = now.chat if now is not None else chat
+            await asyncio.sleep(VIDEO_POLL_S)
+        saved = _saved_at(c, slug)
+        meta = (agents.meta_or_none(c, chat) or {}) if chat else {}
+        if saved is None or (saved == before and meta.get("status") != "done"):
+            note = " ".join(str(meta.get("result") or "").split())[:300]
+            raise RuntimeError("The video writer ended without saving the video" + (f": {note}" if note else ""))
+        run.update(stage="rendering", progress=0.0)
+        data, name, _mime = await export(c, investigation.MAIN, slug, "video",
+                                         progress=lambda x: run.update(progress=round(x, 3)))
+        folder = config.workspace_dir(c) / "scratch" / "exports"
+        folder.mkdir(parents=True, exist_ok=True)
+        path = folder / f"report-video-{secrets.token_hex(4)}{Path(name).suffix}"
+        await asyncio.to_thread(path.write_bytes, data)
+        run.update(stage="done", progress=1.0, name=name, file=str(path))
+    except HTTPException as e:
+        run.update(stage="failed", error=str(e.detail))
+    except Exception as e:  # noqa: BLE001 — the run says what failed
+        log.warning("%s: the Report's video failed", c, exc_info=True)
+        run.update(stage="failed", error=str(e) or type(e).__name__)
+
+
+def video_file(c: str) -> tuple[Path, str]:
+    """(path, name) of the Report's Video once done. 404 before."""
+    run = _videos.get(c) or {}
+    path = Path(str(run.get("file") or ""))
+    if run.get("stage") != "done" or not path.is_file():
+        raise HTTPException(404, "no video of the report is ready")
+    return path, str(run.get("name") or path.name)
+
+
+async def shutdown() -> None:
+    for run in _videos.values():
+        task = run.get("task")
+        if task is not None and not task.done():
+            task.cancel()
 
 
 # --------------------------------------------------------------------------- routes
@@ -851,6 +992,29 @@ async def formats_route(c: str, inv_id: str, slug: str) -> dict[str, Any]:
     t = report_types.read_type(c, slug) or {}
     renderer = str((doc or {}).get("renderer") or t.get("renderer") or "document")
     return {"formats": await asyncio.to_thread(formats, c, slug, renderer) if doc else []}
+
+
+@router.post("/ws/{c}/investigations/main/types/report/video")
+async def report_video_start_route(c: str) -> dict[str, Any]:
+    """The Report's Video: write a video from the report, then export it (start_report_video)."""
+    config.workspace_dir(c)
+    return await start_report_video(c)
+
+
+@router.get("/ws/{c}/investigations/main/types/report/video")
+async def report_video_state_route(c: str) -> dict[str, Any]:
+    config.workspace_dir(c)
+    return video_state(c)
+
+
+@router.get("/ws/{c}/investigations/main/types/report/video/file")
+async def report_video_file_route(c: str) -> Response:
+    from fastapi.responses import FileResponse  # noqa: PLC0415
+
+    config.workspace_dir(c)
+    path, name = video_file(c)
+    return FileResponse(path, media_type=MIME_BY_EXT.get(path.suffix.lstrip("."), "application/octet-stream"),
+                        filename=name, headers={"X-Export-Name": name})
 
 
 @router.get("/ws/{c}/investigations/{inv_id}/types/{slug}/export/{fmt}")
