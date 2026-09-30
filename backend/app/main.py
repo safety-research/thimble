@@ -226,6 +226,14 @@ async def _lifespan(app: FastAPI):
         config.private_dir(config.WORKSPACES_DIR)
     except Exception:
         log.exception("making thimble's home and workspaces private failed")
+    # the extensions thimble ships added: those it ships on, on its first run (extensions.ship)
+    try:
+        from . import extensions
+
+        for name in extensions.ship():
+            log.info("extension %s added from thimble's own", name)
+    except Exception:
+        log.exception("adding the extensions thimble ships failed")
     # the records an install tree's data/ holds are brought into the registry once (config.migrate_registry)
     try:
         config.migrate_registry()

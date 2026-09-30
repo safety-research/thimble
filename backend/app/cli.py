@@ -2630,7 +2630,18 @@ def cmd_restart(args: argparse.Namespace) -> int:
     return 0 if healthy() else 1
 
 
+def ship_extensions() -> None:
+    """The built-in extensions thimble ships added on its first run (extensions.ship); a failure is said, never raised."""
+    from . import extensions  # noqa: PLC0415
+
+    try:
+        extensions.ship()
+    except Exception as e:  # noqa: BLE001 — the extensions stay as they were
+        print(f"thimble: the extensions thimble ships were not added: {type(e).__name__}: {e}", file=sys.stderr)
+
+
 def cmd_doctor(_: argparse.Namespace) -> int:
+    ship_extensions()
     print(doctor_text())
     return 0
 
@@ -2798,6 +2809,7 @@ def cmd_extension(args: argparse.Namespace) -> int:
     """`thimble extension add | list | remove`, then every workspace a session has open finds its extensions again."""
     from . import extensions  # noqa: PLC0415
 
+    ship_extensions()
     if args.ext_cmd == "list":
         for ln in extensions.list_lines(Path(resolve_env()["workspaces_dir"])):
             print(ln)
@@ -2807,15 +2819,17 @@ def cmd_extension(args: argparse.Namespace) -> int:
             print("thimble extension add: run it in a terminal to answer its question, or pass --yes", file=sys.stderr)
             return 1
         try:
-            name = extensions.add(args.source, yes=args.yes)
+            names = extensions.add(args.source, yes=args.yes)
         except extensions.AddError as e:
             print(f"thimble extension add: {e}", file=sys.stderr)
             return 1
-        if name is None:
+        if names is None:
             print("Not added.")
             return 0
-        print(f"Added {name}. It runs in every workspace; "
-              f"`\"extensions\": {{\"{name}\": {{\"enabled\": false}}}}` in {home() / 'config.json'} turns it off.")
+        name, *more = names
+        print(f"Added {name}{', with ' + ' and '.join(more) if more else ''}. {'They run' if more else 'It runs'} in "
+              f"every workspace; `\"extensions\": {{\"{name}\": {{\"enabled\": false}}}}` in {home() / 'config.json'} "
+              f"turns {name} off.")
     else:
         if not extensions.remove(args.name):
             print(f"thimble extension remove: no extension {args.name!r} is added", file=sys.stderr)

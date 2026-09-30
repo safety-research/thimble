@@ -71,9 +71,9 @@ def fit(monkeypatch) -> dict:
 
 
 def _add(src: Path = FIXTURE) -> str:
-    name = extensions.add(str(src), yes=True, say=lambda _: None)
-    assert name is not None
-    return name
+    names = extensions.add(str(src), yes=True, say=lambda _: None)
+    assert names is not None
+    return names[0]
 
 
 def _copy(tmp_path: Path, name: str, **manifest) -> Path:
@@ -110,7 +110,7 @@ def test_add_lists_each_contribution_with_its_own_description_and_adds_nothing_w
                  "report type digest: A one-page digest of the tally.", "It works with thimble >=0.4.",
                  "thimble's kernels"):
         assert part in text
-    assert extensions.add(str(FIXTURE), ask=lambda _: "y", say=said.append) == "ext-min"
+    assert extensions.add(str(FIXTURE), ask=lambda _: "y", say=said.append) == ["ext-min"]
     assert (extensions.source_path("ext-min") / "views" / "tally" / "reader.py").is_file()
     assert json.loads((extensions.source_path("ext-min") / extensions.ADDED).read_text())["kind"] == "folder"
     assert extensions.remove("ext-min") and not extensions.source_path("ext-min").exists()
@@ -150,6 +150,34 @@ async def test_what_an_extension_needs_is_checked_and_what_it_waits_for_leaves_i
     extensions.set_enabled(CORPUS, "multiagent-swimlane", False)
     e = (await extensions.refresh(CORPUS))["extensions"]
     assert e["swarm"]["why"] == "it needs the extension multiagent-swimlane, which does not run here"
+
+
+async def test_thimble_adds_the_extensions_it_ships_on_once_and_names_the_others_not_added(corpus, tmp_path, monkeypatch):
+    """video ships added: thimble's first run adds it, it runs and switches off as any other, and once removed it stays
+    removed. swarm and multiagent-swimlane ship off: Settings and the list name them as not added. A built-in whose copy
+    nobody changed follows the version thimble ships."""
+    assert extensions.ship() == ["video"] and extensions.ship() == []
+    assert (await extensions.refresh(CORPUS))["extensions"]["video"]["active"]
+    assert [t["id"] for t in extensions.report_types(CORPUS)] == ["video"]
+    rows = {r["name"]: r for r in extensions.public(CORPUS)["extensions"]}
+    assert rows["video"]["on"] and not rows["video"]["locked"]
+    for n in ("swarm", "multiagent-swimlane"):
+        assert (rows[n]["on"], rows[n]["locked"], rows[n]["note"]) == (False, True, "not added")
+    assert "swarm 0.4.0, built in: not added; `thimble extension add swarm` adds it" in extensions.list_lines(config.WORKSPACES_DIR)
+    extensions.set_enabled(CORPUS, "video", False)
+    assert (await extensions.refresh(CORPUS))["extensions"]["video"]["why"] == "off in this workspace"
+    assert extensions.remove("video") and extensions.ship() == [] and "video" not in extensions.added()
+
+    ships = tmp_path / "ships"
+    shutil.copytree(extensions.builtin_dir(), ships)
+    monkeypatch.setattr(extensions, "builtin_dir", lambda: ships)
+    assert extensions.add("swarm", yes=True, say=lambda _: None) == ["swarm", "multiagent-swimlane"]
+    (ships / "swarm" / "agents" / "orient.md").write_text("---\n---\nRead every record.\n")
+    assert extensions.ship() == ["swarm"]
+    assert (extensions.source_path("swarm") / "agents" / "orient.md").read_text().endswith("Read every record.\n")
+    (extensions.source_path("swarm") / "agents" / "orient.md").write_text("---\n---\nMine.\n")
+    (ships / "swarm" / "agents" / "orient.md").write_text("---\n---\nRead each record.\n")
+    assert extensions.ship() == [] and (extensions.source_path("swarm") / "agents" / "orient.md").read_text().endswith("Mine.\n")
 
 
 async def test_an_added_extension_runs_in_every_workspace_and_its_view_where_it_fits(corpus, fit):

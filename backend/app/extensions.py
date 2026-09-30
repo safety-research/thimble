@@ -39,6 +39,10 @@ goes when none gives one.
 Two active extensions that give the same view or card type, or that both replace the orientation's instructions, lose
 it both (the instructions stay thimble's), and Settings and `thimble doctor` name the conflict.
 
+thimble ships some extensions (builtin_dir()); `add` adds one by name, and those of SHIPPED_ON are added on thimble's
+first run (ship()). A built-in thimble added, or the analyst added by name, follows the version this thimble ships while
+its copy is unchanged.
+
 Extension code runs only in thimble's kernels: readers on the views kernel, card.py in a card's kernel. The server reads
 only its JSON and markdown, from the folder in thimble's home rather than the copy a kernel can write, and its agents
 run inside the orientation's session, under that session's sandbox and rules, with the settings thimble's config gives
@@ -66,7 +70,9 @@ from .ledger import read_json, write_json
 log = logging.getLogger("thimble.extensions")
 
 MANIFEST = "extension.json"
-ADDED = ".added.json"  # written by `thimble extension add`: {source, kind, commit?, ts}
+ADDED = ".added.json"  # written by `thimble extension add`, or by ship(): {source, kind, commit?, digest, ts, shipped?}
+SHIPPED = ".shipped.json"  # in extensions_dir(): {"added": [each built-in ship() added once]}
+SHIPPED_ON = ("video",)  # the built-in extensions thimble ships added
 NAME_RE = userconf.EXTENSION_NAME_RE
 RESERVED = ("thimble",)
 WS_DIR = "extensions"  # under the workspace: each active extension's copy
@@ -82,6 +88,7 @@ SIZE_MAX = 50 * 1024 * 1024  # bytes of an extension's folder
 SKIPPED = ("__pycache__", ".git", "cache", ADDED)
 WEB_TOOLS = userconf.WEB_TOOLS
 CONFIG_UNREAD = "thimble's config cannot be read"
+NOT_ADDED = "not added"
 CHECKING = "thimble is checking whether it fits here"
 NO_FILES = "no file here matches its claims"
 BOTH = "another active extension gives it too"
@@ -1063,17 +1070,16 @@ def _plan(root: Path, how: dict[str, Any], into: Path) -> list[tuple[Path, dict[
     return [(d, h, read_extension(d, None, everyone)) for d, h in found]
 
 
-def add(source: str, *, yes: bool = False, ask: Any = input, say: Any = print) -> str | None:
+def add(source: str, *, yes: bool = False, ask: Any = input, say: Any = print) -> list[str] | None:
     """`thimble extension add`: fetch the extension and the extensions it needs that thimble ships and are not added,
     show what each gives (summary), and copy them into extensions_dir() once the analyst says yes (or `yes`). Returns
-    its name, None when the analyst said no. AddError for an extension that cannot load for a reason of its own
-    folder."""
+    their names, its own first, None when the analyst said no. AddError for an extension that cannot load for a reason
+    of its own folder."""
     import tempfile  # noqa: PLC0415
 
     with tempfile.TemporaryDirectory(prefix="thimble-ext-") as tmp:
         root, how = fetch(source, Path(tmp))
         plan = _plan(root, how, Path(tmp))
-        name = plan[0][2]["name"]
         digests = []
         for d, h, info in plan:
             fatal = [x for x in info["problems"] if x not in info["waits"]]
@@ -1107,7 +1113,52 @@ def add(source: str, *, yes: bool = False, ask: Any = input, say: Any = print) -
             dest = source_path(info["name"])
             copy_tree(d, dest)
             write_json(dest / ADDED, {**h, "digest": dig, "ts": _now()})
-    return name
+    return [info["name"] for _d, _h, info in plan]
+
+
+def builtins() -> dict[str, Path]:
+    """{name: folder} of each extension thimble ships."""
+    return {d.name: d for d in _subdirs(builtin_dir()) if (d / MANIFEST).is_file()}
+
+
+def not_added() -> list[tuple[str, str]]:
+    """[(name, version)] of each extension thimble ships that is not added."""
+    have = added()
+    return [(n, _one(_json(d / MANIFEST).get("version"))) for n, d in builtins().items() if n not in have]
+
+
+def ship() -> list[str]:
+    """Add each built-in of SHIPPED_ON that thimble has not added before, unless the analyst already added it: one the
+    analyst removes stays removed. Then bring each built-in added by name whose copy is unchanged since to the version
+    this thimble ships. Returns the names added or brought up to date."""
+    base = extensions_dir()
+    mark = _json(base / SHIPPED)
+    done = [n for n in _words(mark.get("added")) if NAME_RE.match(n)]
+    ships = builtins()
+    out = []
+    for name in SHIPPED_ON:
+        if name in done or name not in ships:
+            continue
+        dest = source_path(name)
+        if not (dest / MANIFEST).is_file():
+            copy_tree(ships[name], dest)
+            write_json(dest / ADDED, {"source": name, "kind": "built-in", "shipped": True,
+                                      "digest": digest(ships[name])[0], "ts": _now()})
+            out.append(name)
+        done.append(name)
+    for name, dest in added().items():
+        rec = _json(dest / ADDED)
+        if rec.get("kind") != "built-in" or name not in ships or name in out:
+            continue
+        now = digest(ships[name])[0]
+        if now != rec.get("digest") and digest(dest)[0] == rec.get("digest"):
+            copy_tree(ships[name], dest)
+            write_json(dest / ADDED, {**rec, "digest": now, "ts": _now()})
+            out.append(name)
+    if done != _words(mark.get("added")):
+        base.mkdir(parents=True, exist_ok=True)
+        write_json(base / SHIPPED, {"added": done})
+    return out
 
 
 def remove(name: str) -> bool:
@@ -1122,10 +1173,12 @@ def remove(name: str) -> bool:
 def list_lines(workspaces_dir: Path) -> list[str]:
     """`thimble extension list`: a line per added extension (name, version, source, and whether it loads), then a line
     per workspace, on or off there with why it is off or that no session connected there since it was added, and under
-    it a line per view, shown or hidden there with its check's reason."""
+    it a line per view, shown or hidden there with its check's reason. Then a line per extension thimble ships that is
+    not added."""
     got = added()
+    idle = [f"{n}{' ' + v if v else ''}, built in: not added; `thimble extension add {n}` adds it" for n, v in not_added()]
     if not got:
-        return ["no extensions added; `thimble extension add <git URL | folder | built-in name>` adds one"]
+        return ["no extensions added; `thimble extension add <git URL | folder | built-in name>` adds one", *idle]
     off = userconf.extensions_off()
     try:
         folders = sorted(d for d in workspaces_dir.iterdir() if d.is_dir() and config._valid_name(d.name))
@@ -1150,7 +1203,7 @@ def list_lines(workspaces_dir: Path) -> list[str]:
                 note = _one(x.get("note"))
                 out.append(f"  {''.ljust(width)}    view {x['slug']} {'shown' if x.get('shown') else 'hidden'}"
                            + (f": {note}" if note else ""))
-    return out
+    return out + idle
 
 
 def _now() -> str:
@@ -1194,8 +1247,8 @@ def public(c: str) -> dict[str, Any]:
     not, unless its switch here turned it off), where its switch stands, whether it cannot run here whatever the switch
     says (`locked`), and its views: each shown here or not, the line Settings shows
     beside it (`note`), where its switch stands (switched here, else as its check says) and whether that switch can
-    change anything (`locked`: the extension does not run here or no file here matches the view's claims). Then the
-    conflicts among those that run."""
+    change anything (`locked`: the extension does not run here or no file here matches the view's claims). Then each
+    extension thimble ships that is not added, off and locked. Then the conflicts among those that run."""
     state = read_state(c)
     off = userconf.extensions_off()
     out = []
@@ -1208,6 +1261,8 @@ def public(c: str) -> dict[str, Any]:
         out.append({"name": name, "version": _one(e.get("version")), "active": bool(e.get("active")), "why": why,
                     "note": "" if name in state["off"] else why, "on": name not in state["off"],
                     "locked": bool(config_off(name, off)) or bool(e.get("problems")), "views": vs})
+    out += [{"name": n, "version": v, "active": False, "why": NOT_ADDED, "note": NOT_ADDED, "on": False, "locked": True,
+             "views": []} for n, v in not_added() if n not in state["extensions"]]
     return {"extensions": out, "conflicts": conflict_lines(conflicts(state["extensions"]))}
 
 
