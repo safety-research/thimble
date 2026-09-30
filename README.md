@@ -74,7 +74,7 @@ Type `/thimble` to start the thimble server and print the dashboard URL. A plain
 
 ## Requirements
 
-Claude Code (tested with 2.1.281), macOS or Linux, and Python 3.12+ ([uv](https://docs.astral.sh/uv/) recommended). Node 20+ is needed for custom views (the viewers the dev agent builds for your data) and for a development build. [INSTALL.md](INSTALL.md) has the details.
+Claude Code (tested with 2.1.281), macOS or Linux, and Python 3.12+ ([uv](https://docs.astral.sh/uv/) recommended). Node 20+ is needed for custom views (the viewers the dev agent builds for your data), for the sandbox card code runs in, and for a development build. [INSTALL.md](INSTALL.md) has the details.
 
 ## Security and privacy
 

@@ -1570,10 +1570,12 @@ class _Kernel:
         self.key = _kernel_key(name)
         self.record, self.conn, self.log = _kernel_paths(_ws_dir(workspace), self.key)
         self.lease = self.record.with_suffix(".lease")  # a wrapped kernel's liveness file
+        self.home = self.record.with_suffix(".home")  # HOME of a kernel under srt, emptied at each start
         self.lease_fd: int | None = None  # this server's flock on it while held
         self.kc: AsyncKernelClient | None = None  # channels to the process; None while detached or not started
         self.pid: int | None = None
         self.pgid: int | None = None
+        self.wrap: str | None = None  # the wrapper it runs in (config.KERNEL_WRAPS), from its record
         self.lock = asyncio.Lock()
         self.last_reads: dict | None = None  # the READS_MIME record of the last execution (_execute), read by _execute_cell
         self.last_labels: list[str] = []  # the labels the last card run read (_run_card_code, LABELS_EXPR)
@@ -1588,6 +1590,11 @@ class _Kernel:
         return _is_kernel_process(self.pid, self.conn)
 
     def interrupt(self) -> None:
+        """SIGINT to the kernel's process group; under srt, where the kernel is in a session of its own, an
+        interrupt_request on its control channel, which has the kernel send itself SIGINT."""
+        if self.wrap == config.KERNEL_WRAP_SRT and self.kc is not None:
+            self.kc.control_channel.send(self.kc.session.msg("interrupt_request", {}))
+            return
         _signal(self.pid, self.pgid, signal.SIGINT)
 
 
@@ -1812,23 +1819,75 @@ def _ws_settings(workspace: str) -> dict:
     return s if isinstance(s, dict) else {}
 
 
+def _venv() -> Path | None:
+    """backend/.venv when the kernel runs its python (PYTHON), else None."""
+    return _VENV_PYTHON.parent.parent if PYTHON == str(_VENV_PYTHON) else None
+
+
+def _kernel_reads() -> list[Path]:
+    """Files of the backend a wrapped kernel reads: the page's fonts (page_fonts) and thimble's matplotlibrc."""
+    return [page_fonts.FONTS_DIR, MATPLOTLIBRC]
+
+
+def _kernel_hides() -> list[Path]:
+    """What a kernel under srt must not see besides the home folder: thimble's folders (THIMBLE_HOME, the registry, the
+    workspaces, the install tree) and Claude Code's config. The kernel's own paths inside them are shown again."""
+    paths = [_home(), config.DATA_DIR, config.WORKSPACES_DIR, config.REPO_ROOT, config.claude_config_dir()]
+    return list(dict.fromkeys(Path(os.path.realpath(p)) for p in paths))
+
+
+def _guarded_files(workspace: str) -> None:
+    """Each of kernel_wrap.HIDDEN_FILES (`{}`) and READ_ONLY_FILES (empty) made in the workspace when missing: a wrapper
+    guards a file that exists, where for a missing one bwrap would guard nothing and srt would leave an empty read-only
+    file in its place while the kernel runs, which the server could not write."""
+    files = [*((n, "{}\n") for n in kernel_wrap.HIDDEN_FILES), *((n, "") for n in kernel_wrap.READ_ONLY_FILES)]
+    for name, text in files:
+        p = _ws_dir(workspace) / name
+        with contextlib.suppress(FileExistsError):
+            with open(p, "x", encoding="utf-8") as f:
+                f.write(text)
+        with contextlib.suppress(OSError):
+            if not p.is_symlink() and p.stat().st_size == 0 and not os.access(p, os.W_OK):
+                p.chmod(0o600)  # srt's placeholder from a kernel that did not end cleanly
+
+
 def wrapped_argv(argv: list[str], *, workspace: str, corpus: Path, connection_file: Path, source: str = "settings") -> list[str]:
     """`argv` inside bubblewrap (kernel_wrap.kernel_wrap_argv). RuntimeError when bwrap is not on PATH: a workspace set
     to bwrap never runs unwrapped."""
     bwrap = shutil.which("bwrap")
     if bwrap is None:
         log.error("kernel for %s: %s is bwrap (%s) but bwrap is not on PATH; the kernel is not started — %s",
-                  workspace, config.KERNEL_WRAP_KEY, source, config.NO_BWRAP_HINT)
+                  workspace, config.KERNEL_WRAP_KEY, source, config.NO_WRAP_HINT)
 
         raise RuntimeError("the kernel wrap is bwrap but bubblewrap (bwrap) is not installed, so the kernel did not start")
-    venv = _VENV_PYTHON.parent.parent if PYTHON == str(_VENV_PYTHON) else None
-    for name in kernel_wrap.HIDDEN_FILES:
-        with contextlib.suppress(FileExistsError):
-            with open(_ws_dir(workspace) / name, "x", encoding="utf-8") as f:
-                f.write("{}\n")
+    _guarded_files(workspace)
     return kernel_wrap.kernel_wrap_argv(argv, corpus_dir=Path(corpus).resolve(), workspace_dir=_ws_dir(workspace).resolve(),
-                                        connection_dir=connection_file.parent.resolve(), venv=venv,
-                                        python=Path(os.path.realpath(PYTHON)), bwrap=bwrap)
+                                        connection_dir=connection_file.parent.resolve(), venv=_venv(), python=PYTHON,
+                                        read=_kernel_reads(), bwrap=bwrap)
+
+
+def sandboxed_argv(argv: list[str], *, workspace: str, corpus: Path, source: str = "settings") -> list[str]:
+    """`argv` inside Anthropic's sandbox runtime (kernel_wrap.srt_argv with kernel_wrap.srt_rules). RuntimeError when
+    node or the runtime's package is missing: a workspace set to srt never runs unwrapped."""
+    node, srt_dir = kernel_wrap.node(), kernel_wrap.srt_package(config.REPO_ROOT)
+    if node is None or srt_dir is None:
+        missing = ("node is not on PATH" if node is None else
+                   f"the sandbox runtime is not installed in {config.REPO_ROOT.joinpath(*kernel_wrap.SRT_PACKAGE)}")
+        log.error("kernel for %s: %s is srt (%s) but %s; the kernel is not started — %s",
+                  workspace, config.KERNEL_WRAP_KEY, source, missing, config.NO_WRAP_HINT)
+        raise RuntimeError(f"the kernel wrap is srt but {missing}, so the kernel did not start")
+    _guarded_files(workspace)
+    rules = kernel_wrap.srt_rules(corpus_dir=Path(corpus).resolve(), workspace_dir=_ws_dir(workspace).resolve(),
+                                  venv=_venv(), python=PYTHON, srt_dir=srt_dir, read=_kernel_reads(),
+                                  hide=_kernel_hides(), home=Path(os.path.realpath(Path.home())), platform=sys.platform)
+    return kernel_wrap.srt_argv(argv, node=node, srt_dir=srt_dir, rules=rules)
+
+
+def _fresh_home(k: _Kernel) -> None:
+    """The kernel's HOME for srt (k.home), empty, with the TMPDIR kernel_wrap.srt_env puts in it: what a cell left there
+    does not reach the next start."""
+    shutil.rmtree(k.home, ignore_errors=True)
+    (k.home / "tmp").mkdir(parents=True, exist_ok=True)
 
 
 LEASE_TRIES = 20  # _hold_lease: 50 ms apart, so a watchdog's own probe (lock, unlock) never costs the server the lease
@@ -1867,24 +1926,31 @@ async def _launch(k: _Kernel, workspace: str) -> None:
     cwd = await asyncio.to_thread(scratch_dir, workspace, corpus)  # the scratch mirror (module docstring)
     k.record.parent.mkdir(parents=True, exist_ok=True)
     _drop_files(k.record, k.conn)
-    wrap, source = config.resolve_kernel_wrap(_ws_settings(workspace))
-    wrapped = wrap == config.KERNEL_WRAP_BWRAP
+    wrap, source = await asyncio.to_thread(config.resolve_kernel_wrap, _ws_settings(workspace))
+    wrapped = wrap in config.KERNEL_WRAPPED
     argv = kernel_argv(k.conn, k.record, roots=(str(cwd), str(Path(corpus).resolve())), lease=k.lease if wrapped else None,
                        workspace=_ws_dir(workspace).resolve())
-    if wrapped:  # paths only so far: a missing bwrap fails here, before any file is written
+    # paths only so far: a missing wrapper fails here, before any file is written
+    if wrap == config.KERNEL_WRAP_BWRAP:
         argv = wrapped_argv(argv, workspace=workspace, corpus=corpus, connection_file=k.conn, source=source)
+    elif wrap == config.KERNEL_WRAP_SRT:
+        argv = sandboxed_argv(argv, workspace=workspace, corpus=corpus, source=source)
     await asyncio.to_thread(write_connection_file, str(k.conn), ip="127.0.0.1", key=secrets.token_hex(16).encode())
     env = kernel_env()
     env.pop("JPY_PARENT_PID", None)  # no parent poller: the kernel outlives this server
     env.setdefault("MATPLOTLIBRC", str(MATPLOTLIBRC))  # thimble's figure defaults, unless the environment names its own
+    if wrap == config.KERNEL_WRAP_SRT:
+        env = kernel_wrap.srt_env(env, home=k.home)
+        await asyncio.to_thread(_fresh_home, k)
     if wrapped:
         await asyncio.to_thread(_hold_lease, k)  # before the process exists: its watchdog never sees a free lease
     log.info("starting kernel %s for %s in %s (a mirror of %s)%s", k.key, workspace, cwd, corpus,
-             f"; wrapped in bwrap ({source})" if wrapped else "")
+             f"; wrapped in {wrap} ({source})" if wrapped else "")
     with k.log.open("wb") as out:
         proc = subprocess.Popen(argv, cwd=str(cwd), env=env, stdin=subprocess.DEVNULL,
                                 stdout=out, stderr=subprocess.STDOUT, start_new_session=True, close_fds=True)
     k.pid = k.pgid = proc.pid
+    k.wrap = wrap
     _write_record(k, {"name": k.name, "workspace": workspace, "pid": proc.pid, "pgid": proc.pid,
                       "connection_file": str(k.conn), "cwd": str(cwd), "started": _now(), "server_pid": os.getpid(),
                       "home": str(_home()), "attached": _now(), "wrap": wrap})
@@ -1922,8 +1988,9 @@ async def _attach(k: _Kernel) -> bool:
         await _kill(k)
         return False
     k.kc = kc
+    k.wrap = rec.get("wrap")
     _refresh_thimble(k)
-    if rec.get("wrap") == config.KERNEL_WRAP_BWRAP:
+    if k.wrap in config.KERNEL_WRAPPED:
         await asyncio.to_thread(_hold_lease, k)  # a wrapped kernel's watchdog reads this server's presence off it
     _write_record(k, {**rec, "server_pid": os.getpid(), "attached": _now()})
     log.info("reconnected kernel %s of %s (pid %s)", k.key, k.workspace, pid)
@@ -1966,6 +2033,7 @@ async def _kill(k: _Kernel) -> None:
         await asyncio.to_thread(_terminate, pid, pgid or pid, k.conn)
     _release_lease(k, drop=True)
     _drop_files(k.record, k.conn)
+    await asyncio.to_thread(shutil.rmtree, k.home, True)
 
 
 async def shutdown_kernel(workspace: str, kernel: str | None = None) -> None:
@@ -2057,6 +2125,18 @@ def _kill_left_at_exit() -> None:
 atexit.register(_kill_left_at_exit)
 
 
+def _descends(pid: int, roots: set[int], tree: dict[int, int]) -> bool:
+    """`pid` lies below one of `roots` in the process tree `tree` ({pid: parent}, procs.parents)."""
+    seen: set[int] = set()
+    q = tree.get(pid)
+    while q and q not in seen:
+        if q in roots:
+            return True
+        seen.add(q)
+        q = tree.get(q)
+    return False
+
+
 async def reconnect_all() -> dict[str, list[str]]:
     """Server start: reconnect every recorded kernel that answers, kill those that do not, drop stale records, and kill
     unrecorded kernels launched under this WORKSPACES_DIR. Returns {reconnected, reaped}, kept in LAST_RECONNECT."""
@@ -2088,16 +2168,20 @@ async def reconnect_all() -> dict[str, list[str]]:
                 ok = False
         (out["reconnected"] if ok else out["reaped"]).append(f"{c}/{k.key}")
     swept: set[int] = set()  # leaders terminated in this pass: their group went with them
-    for pid, conn, c in await asyncio.to_thread(_kernel_processes, root):
+    found = await asyncio.to_thread(_kernel_processes, root)
+    tree = await asyncio.to_thread(procs.parents) if found else {}
+    for pid, conn, c in found:
         pgid = _proc_pgid(pid)
         claimed = {k.pid for k in [*_kernels.values(), *_exec_kernels.values()] if k.pid}
-        if pid in claimed or pgid in claimed or pgid in swept:
-            continue  # ours, or a member of a wrapped kernel's group: bwrap's init and the kernel inside show the same command line
+        if pid in claimed or pgid in claimed or pgid in swept or _descends(pid, claimed | swept, tree):
+            # ours, or a member of a wrapped kernel: bwrap's init and the kernel inside show the same command line, and
+            # under srt the kernel runs below the launcher in a session of its own
+            continue
         ours = conn.name.endswith(".conn.json") and procs.under(conn, root)  # a connection file this tree owns
         rec = _read_record(conn.with_name(conn.name[: -len(".conn.json")] + ".json")) if ours else None
         rp = _record_pid(rec or {})
-        if rp is not None and rp in (pid, pgid):
-            continue  # a launch in progress claims it (or the group it belongs to)
+        if rp is not None and (rp in (pid, pgid) or _descends(pid, {rp}, tree)):
+            continue  # a launch in progress claims it (or the group or tree it belongs to)
         log.warning("orphan kernel pid %s (%s, workspace %s) has no record; killed", pid, conn, c)
         await asyncio.to_thread(_terminate, pid, pid, conn)
         swept.add(pid)
