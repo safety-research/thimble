@@ -1144,14 +1144,16 @@ def shot_script() -> Path:
 
 async def run_shot(url: str, out: Path, selector: str | None = None, *, info_out: Path | None = None,
                    viewport: str | None = None, scale: float | None = None, storage: dict[str, str] | None = None,
-                   press: list[str] | None = None, wait_ms: int | None = None, offline: bool = False) -> int:
+                   press: list[str] | None = None, wait_ms: int | None = None, offline: bool = False,
+                   own_origin: bool = False) -> int:
     """`node scripts/ui_shot.mjs`: 0 ok, 2 selector not found (the viewport is written instead), 1 error, -1 timeout.
     Options map to the script's options of the same names. headless.Missing when the browser is missing, which stays so
     for the rest of the server run."""
     path = headless.launch(headless.PAGES)
     if path is None or headless.missing(headless.PAGES):
         raise headless.Missing(headless.missing(headless.PAGES))
-    cmd = ["node", str(shot_script()), "--url", url, "--out", str(out), *(["--offline"] if offline else [])]
+    cmd = ["node", str(shot_script()), "--url", url, "--out", str(out), *(["--offline"] if offline else []),
+           *(["--own-origin"] if own_origin else [])]
     if selector:
         cmd += ["--selector", selector]
     if info_out is not None:
@@ -1201,9 +1203,9 @@ def target_selector(target: dict[str, Any] | None) -> str | None:
 
 
 async def _take_shot(t: dict[str, Any], run_log: Log, phase: str, base_url: str | None, *,
-                     offline: bool = False) -> str | None:
-    """The before or after shot of the ticket's target on the stack (`offline` for a page the ticket's code serves,
-    which then reaches nothing but its own server); the file name stored on the ticket, or None."""
+                     own_origin: bool = False) -> str | None:
+    """The before or after shot of the ticket's target on the stack (`own_origin` for a server in the ticket's box,
+    whose page then reaches nothing but that server); the file name stored on the ticket, or None."""
     if not base_url:
         return None
     selector = target_selector(t.get("target"))
@@ -1212,7 +1214,7 @@ async def _take_shot(t: dict[str, Any], run_log: Log, phase: str, base_url: str 
     d.mkdir(parents=True, exist_ok=True)
     out = d / f"{phase}.png"
     try:
-        code = await run_shot(url, out, selector, offline=offline)
+        code = await run_shot(url, out, selector, own_origin=own_origin)
     except Exception as e:  # noqa: BLE001
         run_log.stage(f"{phase} shot failed: {type(e).__name__}: {e}")
         return None
@@ -1955,7 +1957,8 @@ def _seed_preview(t: dict[str, Any], env: dict[str, str]) -> None:
 async def _preview_shot(t: dict[str, Any], run_log: Log, phase: str, box: ticket_box.Box,
                         touched: "list[str] | None" = None) -> str | None:
     """A contained ticket's before or after shot: the UI built in the box (for the after shot only when the ticket
-    changed frontend files), the worktree's server started in it on a copy of the workspace, the shot taken offline."""
+    changed frontend files), the worktree's server started in it on a copy of the workspace, the page kept to that
+    server (run_shot's own_origin)."""
     fe, dist = box.tree / "frontend", box.cache / "dist"
     vite = fe / "node_modules" / ".bin" / "vite"
     if not vite.exists():
@@ -1976,7 +1979,7 @@ async def _preview_shot(t: dict[str, Any], run_log: Log, phase: str, box: ticket
         run_log.stage(f"no {phase} shot: the ticket's server did not start in the sandbox ({last_error_line(str(e))})")
         return None
     try:
-        return await _take_shot(t, run_log, phase, url, offline=True)
+        return await _take_shot(t, run_log, phase, url, own_origin=True)
     finally:
         await preview.stop()
 
