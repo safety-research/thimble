@@ -130,6 +130,8 @@ async def test_what_an_extension_needs_is_checked_and_what_it_waits_for_leaves_i
     said: list[str] = []
     extensions.add(str(_copy(tmp_path, "later", thimble=">=9")), yes=True, say=said.append)
     assert "  It stays unloaded until then: it works with thimble >=9, and this is thimble 0.4.0." in said
+    assert all(extensions._importable(x) for x in ("pyyaml", "PyYAML", "yaml", "pandas>=1", "python-dateutil"))
+    assert not extensions._importable("pandas>=999")
     _add(_copy(tmp_path, "heavy", dependencies={"python": ["no_such_package_xyz"]}))
     e = (await extensions.refresh(CORPUS))["extensions"]
     assert not e["later"]["active"] and e["later"]["why"] == "it works with thimble >=9, and this is thimble 0.4.0"

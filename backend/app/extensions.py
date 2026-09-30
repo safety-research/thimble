@@ -258,9 +258,24 @@ def config_off(name: str, off: set[str] | None) -> str:
 
 
 def _importable(name: str) -> bool:
-    top = re.split(r"[\[<>=!~ ;]", name.strip(), maxsplit=1)[0].replace("-", "_").split(".")[0]
+    """Whether the Python package `name` names, a requirement as pip reads one ("pyyaml>=6") or a module's name
+    ("yaml"), is installed where thimble's kernels run, at a version its specifier allows."""
+    from importlib import metadata  # noqa: PLC0415
+
+    from packaging.requirements import InvalidRequirement, Requirement  # noqa: PLC0415
+
     try:
-        return bool(top) and importlib.util.find_spec(top) is not None
+        req = Requirement(name.strip())
+    except InvalidRequirement:
+        return False
+    if req.marker is not None and not req.marker.evaluate():
+        return True
+    try:
+        return req.specifier.contains(metadata.version(req.name), prereleases=True)
+    except metadata.PackageNotFoundError:
+        pass
+    try:
+        return importlib.util.find_spec(req.name.replace("-", "_").split(".")[0]) is not None
     except (ImportError, ValueError):
         return False
 
