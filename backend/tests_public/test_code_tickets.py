@@ -297,3 +297,18 @@ async def test_a_check_that_times_out_leaves_nothing_in_the_worktree(tmp_path):
     code, out = await ticket_box.run(box, ["sleep", "60"], cwd=tree, timeout=2)
     assert code == -1 and "timed out" in out
     assert sorted(p.name for p in tree.iterdir()) == ["a.txt"]
+
+
+def test_a_preview_server_gets_a_private_server_json_so_a_local_tool_can_write_to_it(tmp_path):
+    """A server no supervisor starts (a box's preview, like the dev stack) still has a token and a ui_key, or
+    hook_auth.LocalWriteGuard would refuse every write to it: ticket_box.seed_home writes them, readable by the owner
+    alone, with no pid, a new token at each start and the ui_key kept."""
+    home = tmp_path / "preview" / "server" / "home"
+    ticket_box.seed_home(home, 8301)
+    first = json.loads((home / "server.json").read_text())
+    assert first["port"] == 8301 and first["api"] == "http://127.0.0.1:8301" and first["token"] and first["ui_key"]
+    assert "pid" not in first
+    assert (home / "server.json").stat().st_mode & 0o077 == 0 and home.stat().st_mode & 0o077 == 0
+    ticket_box.seed_home(home, 8301)
+    again = json.loads((home / "server.json").read_text())
+    assert again["ui_key"] == first["ui_key"] and again["token"] != first["token"]

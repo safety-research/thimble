@@ -8,7 +8,8 @@ runs inside one of two wrappers, and `config.resolve_kernel_wrap` says which:
 Both draw the same boundary:
   read     the system, the backend venv and its interpreter, the corpus and the page's fonts and matplotlibrc
   write    the workspace directory, except settings.json and config.json (thimble's config for the workspace), which
-           the kernel can neither read nor write, and telemetry.jsonl and the views folder, which it can read only.
+           the kernel can neither read nor write, and telemetry.jsonl, viewed.jsonl (the view log, which the
+           telemetry export merges) and the views folder, which it can read only.
            HOME and TMPDIR are fresh at each start: a private /tmp under bwrap, the kernel's kernels/<key>.home folder
            under srt
   hidden   the home folder, thimble's own folders (THIMBLE_HOME, the workspaces, the install tree), Claude Code's config
@@ -51,7 +52,8 @@ UNSET_ENV = ("XDG_CACHE_HOME", "XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_STATE_HO
 # nor write it
 HIDDEN_FILES = ("settings.json", "config.json")
 EMPTY_FILE = "/dev/null"
-READ_ONLY_FILES = ("telemetry.jsonl",)  # read-only over the writable workspace (the server writes from outside)
+# read-only over the writable workspace (the server writes them from outside)
+READ_ONLY_FILES = ("telemetry.jsonl", "viewed.jsonl")
 # the workspace's views (views.py), which the server and the dev agent's view builds write and main's and the
 # orientation's prompts are made from: read-only, as a folder so that what they write later shows inside. The server
 # creates it before the kernel starts.

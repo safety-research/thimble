@@ -1,10 +1,11 @@
 // Report routes with no client in lib/api.ts: the analyst's comment on a passage, resolving a comment, and export.
-import { describeDetail } from '../lib/api'
+import { claimKey, describeDetail } from '../lib/api'
 import type { AnyDoc, WriteupComment } from '../lib/types'
 
 const inv = (ws: string, slug: string) => `/api/ws/${encodeURIComponent(ws)}/investigations/main/types/${encodeURIComponent(slug)}`
 
 async function call<T>(url: string, init?: RequestInit): Promise<T> {
+  await claimKey()
   const res = await fetch(url, { ...init, headers: { 'content-type': 'application/json', ...(init?.headers ?? {}) } })
   if (!res.ok) {
     let detail = res.statusText

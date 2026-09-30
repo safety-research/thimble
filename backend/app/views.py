@@ -2996,7 +2996,8 @@ class CheckBody(BaseModel):
 async def check_route(c: str, slug: str, request: Request, body: CheckBody | None = None) -> dict[str, Any]:
     """A view ticket's session checking its draft: the gate with `locators` beside the sampled lines, {ok, lines, png}.
     The
-    locators are kept on the proposal for the server's gate after the turn. Loopback only."""
+    locators are kept on the proposal for the server's gate after the turn. Loopback only, and like every write only
+    with the token's proof (view_check.py) or the analyst's cookie (hook_auth.LocalWriteGuard)."""
     from . import dev  # noqa: PLC0415
 
     if not dev._is_loopback(request):
