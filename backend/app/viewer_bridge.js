@@ -19,6 +19,8 @@
 //                          change, {} for none, which Keep writes into the call (window.thimble.setQuery); in a view
 //                          opened from a card, null when the page dropped the card's arguments
 //   navigate {ref}         frame to page: open another place, in this view or anywhere in thimble (window.thimble.navigate)
+//   reveal {rect}          frame to page: bring this part of the page into view, which a page as tall as its frame
+//                          cannot scroll to itself (window.thimble.reveal)
 //   size {height}          frame to page: the document's height, for a frame that sizes to its content, or the height a
 //                          page says it needs (window.thimble.size), after which the document's own height is not sent
 //   settled                frame to page: a card's page has drawn what `init` brought (window.thimble.settled)
@@ -180,6 +182,12 @@
     /** open another place: a view ref, a file ref or any other ref thimble knows */
     navigate: function (ref) {
       post({ type: P + 'navigate', ref: String(ref) })
+    },
+    /** bring an element, or a {left, top, width, height} box in the page's coordinates, into view in thimble, whose
+     *  scrolling a page sized to its content cannot do itself */
+    reveal: function (target) {
+      var r = target && target.getBoundingClientRect ? rectOf(target) : target
+      if (r) post({ type: P + 'reveal', rect: { left: +r.left || 0, top: +r.top || 0, width: +r.width || 0, height: +r.height || 0 } })
     },
     /** the URL of an image, audio or video file this view claims (its corpus-relative path), for an <img>, <audio> or
      *  <video> src: thimble streams it with Range requests, so a player can seek (views.media_route) */

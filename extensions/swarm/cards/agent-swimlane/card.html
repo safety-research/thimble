@@ -43,6 +43,16 @@
   .lbl { position: absolute; z-index: 3; box-sizing: border-box; height: 17px; padding: 0 5px; border: 1px solid; border-radius: 4px; background: var(--surface-card); font: 500 11px / 15px var(--font-body); white-space: nowrap; transition: opacity .12s; }
   .focus .act:not(.lit), .focus .lbl:not(.lit) { opacity: .28; }
   .focus svg#links g:not(.lit) { opacity: .15; }
+  .act.open { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
+  #rec { position: absolute; z-index: 6; box-sizing: border-box; padding: 9px 12px 11px; background: var(--surface-card); border-radius: var(--radius-ui); box-shadow: 0 0 0 1px rgba(var(--ink-rgb), .14), 0 10px 28px -14px rgba(var(--ink-rgb), .35); }
+  #rec .rh { display: flex; align-items: center; gap: 8px; min-width: 0; font: 400 10.5px / 1.3 var(--font-mono); color: var(--text-tertiary); }
+  #rec .rh b { font-weight: 600; color: var(--text-primary); }
+  #rec .rh .where { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #rec .rh .btn { margin-left: auto; flex: none; }
+  #rec .said { margin-top: 6px; max-height: 240px; overflow: auto; font: 400 var(--text-xs) / 1.45 var(--font-body); color: var(--text-primary); white-space: pre-wrap; overflow-wrap: anywhere; }
+  #rec .said .del { color: var(--text-tertiary); text-decoration: line-through; }
+  #rec .ref { display: inline-block; margin-top: 7px; font: 400 10.5px / 1.3 var(--font-mono); color: var(--text-secondary); text-decoration: underline; text-decoration-color: rgba(var(--ink-rgb), .3); text-underline-offset: 2px; cursor: pointer; }
+  #rec .ref:hover { color: var(--text-primary); }
 </style>
 </head>
 <body>
@@ -58,6 +68,8 @@
 // crosses a card; a gap is as tall as the links it carries need, each on a track of its own with its label beside its
 // source. Link types take the viz colours in the order they first appear. Cards carry their record's ref as
 // data-anchor, so thimble marks them with the labels that are on; a label the call named colours a card's top edge.
+// A click on a card, or on a citation of its record, opens the record under the card (openRecord): the card and its
+// links stay lit, and thimble scrolls them into view; hovering a citation lights its card.
 const NS = 'http://www.w3.org/2000/svg'
 const MON = 'Jan Feb Mar Apr May Jun Jul Aug Sep Oct Nov Dec'.split(' ')
 const VIZ = ['--viz-1', '--viz-6', '--viz-2', '--viz-3', '--viz-4', '--viz-5', '--viz-7']
@@ -318,7 +330,7 @@ function layout() {
     }
     const when = a.time ? a.time.replace('T', ' ').replace('Z', ' UTC') : 'Time unknown'
     el.title = `${a.summary}\n${a.account} · ${when}\n${a.place}`
-    el.onclick = () => { if (!String(getSelection() || '')) thimble.navigate(a.ref) }
+    el.onclick = () => { if (!String(getSelection() || '')) openRecord(opened && opened.id === a.id ? null : a.id) }
     el.onmouseenter = () => focus({ id: a.id })
     el.onmouseleave = () => focus(null)
     plot.append(el)
@@ -361,8 +373,9 @@ function layout() {
   }
   plot.append(svg, axis)
   plot.prepend(heads)
-  L = { cardEls, linkEls, height, width: plotW }
-  size()
+  L = { cardEls, linkEls, height, width: plotW, place }
+  if (opened) placeRecord()
+  else size()
 }
 // a polyline of right angles with rounded corners
 function roundPath(pts, rad) {
@@ -379,9 +392,11 @@ function roundPath(pts, rad) {
 }
 
 let L = null
-// hovering a card lights it, its links and the cards they reach; hovering an agent lights its cards and their links
+// hovering a card lights it, its links and the cards they reach; hovering an agent lights its cards and their links;
+// with none hovered, the card whose record is opened stays lit
 function focus(f) {
   const plot = document.getElementById('plot')
+  f = f || (opened ? { id: opened.id } : null)
   if (!f || !L) { plot.classList.remove('focus'); return }
   const lit = new Set()
   for (const a of D.actions) if (f.id === a.id || f.account === a.account) lit.add(a.id)
@@ -395,9 +410,76 @@ function focus(f) {
   for (const [id, el] of L.cardEls) el.classList.toggle('lit', lit.has(id))
   plot.classList.add('focus')
 }
+// ---------------------------------------------------------------- an action's record, opened under its card
+let opened = null // {id, data} of the action whose record is open; data null until the reader answers
+let wanted = null // a citation's target that came before the card's data
+function openRecord(id) {
+  const a = id != null && D ? D.actions.find((x) => x.id === id) : null
+  document.getElementById('rec')?.remove()
+  if (L) for (const el of L.cardEls.values()) el.classList.remove('open')
+  opened = a ? { id: a.id, data: null } : null
+  if (!a) { focus(null); size(); return }
+  placeRecord()
+  focus(null)
+  const asked = opened
+  thimble.fetch({ op: 'record', ref: a.ref }).then(
+    (data) => { if (opened === asked) { asked.data = data || {}; placeRecord() } },
+    (err) => { if (opened === asked) { asked.data = { error: String((err && err.message) || err) }; placeRecord() } },
+  )
+}
+function recordBody(data) {
+  const said = h('div', 'said')
+  if (!data) said.textContent = '…'
+  else if (data.error || data.missing) said.textContent = data.error || data.raw || ''
+  else if (data.hunks) {
+    for (const hk of data.hunks.slice(0, 6)) {
+      for (const x of hk.del.filter((t) => t.trim()).slice(0, 8)) said.append(h('div', 'del', x))
+      for (const x of hk.add.filter((t) => t.trim()).slice(0, 8)) said.append(h('div', null, x))
+    }
+    if (!said.childNodes.length) said.textContent = 'No change to the page'
+  } else said.textContent = data.text || ''
+  return said
+}
+// the panel under the opened card, as wide as fits, the chart's frame grown when it runs past the chart's foot; then
+// thimble brings the card and its record into view
+function placeRecord() {
+  const k = opened && L ? L.place.get(opened.id) : null
+  if (!k) {
+    document.getElementById('rec')?.remove()
+    opened = null
+    return size()
+  }
+  const a = k.a, wrap = document.getElementById('wrap')
+  L.cardEls.get(a.id)?.classList.add('open')
+  let box = document.getElementById('rec')
+  if (!box) { box = h('div'); box.id = 'rec'; wrap.append(box) }
+  const rh = h('div', 'rh')
+  const when = a.time ? a.time.replace('T', ' ').slice(0, 16) + ' UTC' : 'Time unknown'
+  rh.append(h('b', null, `#${a.id}`), h('span', 'where', `${a.account} · ${when} · ${a.place}`))
+  const close = h('button', 'btn btn-ghost btn-sm', '×')
+  close.setAttribute('aria-label', 'Close the record')
+  close.onclick = (e) => { e.stopPropagation(); openRecord(null) }
+  rh.append(close)
+  const ref = h('span', 'ref', a.ref)
+  ref.onclick = () => thimble.navigate(a.ref)
+  box.replaceChildren(rh, recordBody(opened.data), ref)
+  const width = Math.min(440, wrap.clientWidth - 16)
+  box.style.width = `${width}px`
+  box.style.left = `${Math.max(8, Math.min(k.x * ZOOM, wrap.clientWidth - width - 8))}px`
+  box.style.top = `${(k.y + k.h) * ZOOM + 6}px`
+  wrap.style.height = `${Math.max(Math.ceil(L.height * ZOOM), box.offsetTop + box.offsetHeight + 8)}px`
+  size()
+  const r1 = L.cardEls.get(a.id).getBoundingClientRect(), r2 = box.getBoundingClientRect()
+  const top = Math.min(r1.top, r2.top), left = Math.min(r1.left, r2.left)
+  if (thimble.reveal) thimble.reveal({ left, top, width: Math.max(r1.right, r2.right) - left, height: Math.max(r1.bottom, r2.bottom) - top })
+}
+addEventListener('keydown', (e) => { if (e.key === 'Escape' && opened) openRecord(null) })
+
 function size() {
   const head = document.getElementById('head').offsetHeight
-  if (thimble.size) thimble.size(head + (L ? Math.ceil(L.height * ZOOM) : 0) + 2)
+  const wrap = document.getElementById('wrap')
+  if (!opened) wrap.style.height = L ? `${Math.ceil(L.height * ZOOM)}px` : ''
+  if (thimble.size) thimble.size(head + wrap.offsetHeight + 2)
 }
 function draw() {
   if (!D) return
@@ -417,16 +499,26 @@ thimble.onLabels((state) => {
   labelState = { labels: state.labels || [], all: state.all || null }
   if (D) draw()
 })
+let drawnKey = null
 thimble.onInit((init) => {
   mode = init.mode
   D = init.data
+  if (init.key !== drawnKey) opened = null
+  drawnKey = init.key
   draw()
+  if (wanted) { openCited(wanted); wanted = null }
   requestAnimationFrame(() => thimble.settled())
 })
+// a citation of an action's record: hovered, it lights the card; clicked (`pick`), it opens the record under it
+function openCited(t) {
+  const a = t && t.ref && D ? D.actions.find((x) => x.ref === t.ref) : null
+  if (a && t.pick) openRecord(a.id)
+  else focus(a ? { id: a.id } : null)
+}
 thimble.onOpen((place) => {
   const t = place && place.target
-  const el = t && t.ref && L ? [...L.cardEls.values()].find((e) => e.dataset.anchor === t.ref) : null
-  if (el) el.scrollIntoView({ block: 'nearest' })
+  if (D) openCited(t)
+  else wanted = t || null
 })
 </script>
 </body>

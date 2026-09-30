@@ -6,6 +6,8 @@
 //   cite      a ⌘-click inside the frame opens the pointer's box on that element
 //   navigate  another place, opened the way a chip opens it (lib/teleport)
 //   size      the height the page needs, used when the frame sizes to its content (`fit`)
+//   reveal    a box of the page to bring into view: the boxes around the frame scroll to it (revealBox), and the
+//             canvas pans to it (bus revealBox)
 //   anchors   the data-anchor refs the page shows, answered with `labels`: the marks of its records (labels.ts
 //             viewMarks, with the filter's keep) and of its units (the view's marks route), the labels that are on,
 //             the Files label filter, every label over files and the palette, which the page hears through
@@ -139,6 +141,20 @@ export interface ViewQuote {
 export function toPage(frame: HTMLIFrameElement, r: { left: number; top: number; width: number; height: number }): DOMRect {
   const f = frame.getBoundingClientRect()
   return new DOMRect(f.left + r.left, f.top + r.top, r.width, r.height)
+}
+
+/** Scroll each scrolling box around `from`, innermost first, so the page box `r` sits in view, a third of the way down
+ * when it has to move (a frame's `reveal`). */
+export function revealBox(from: HTMLElement, r: DOMRect): void {
+  let top = r.top
+  for (let a = from.parentElement; a; a = a.parentElement) {
+    if (!/(auto|scroll)/.test(getComputedStyle(a).overflowY) || a.scrollHeight <= a.clientHeight) continue
+    const box = a.getBoundingClientRect()
+    if (top >= box.top && top + r.height <= box.bottom) continue
+    const before = a.scrollTop
+    a.scrollTop += top - box.top - Math.max(0, (a.clientHeight - r.height) / 3)
+    top -= a.scrollTop - before
+  }
 }
 
 const NO_LABELS: readonly Concept[] = []
@@ -453,6 +469,11 @@ export function ViewerFrame({ ws, slug, targetRef, path, title, fit, labels = NO
         }
         case P + 'point':
           bus.emit('pointHover', { rect: d.rect ? toPage(frame, d.rect) : null })
+          return
+        case P + 'reveal':
+          if (!d.rect) return
+          revealBox(frame, toPage(frame, d.rect))
+          bus.emit('revealBox', { rect: toPage(frame, d.rect), frame })
           return
         case P + 'navigate':
           // the click that asked for it landed in the frame's document, which the shell does not see

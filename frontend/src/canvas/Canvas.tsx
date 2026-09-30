@@ -1277,6 +1277,20 @@ export function Canvas({ ws, active, focused = active }: { ws: string; active: b
     if (at.left >= box.left && at.right <= box.right && at.top >= box.top && at.bottom <= box.bottom) return
     setView((cur) => centerOn(cur, r.x + r.w / 2, r.y + Math.min(r.h, vpSize.h / cur.scale) / 2, vpSize.w, vpSize.h))
   }
+  // a card's page asks to bring a part of it into view (its record opened by a citation): the view pans to that part
+  // when it lies outside the viewport, placing its top a third of the way down when it is taller than the viewport
+  useEffect(
+    () =>
+      bus.on('revealBox', ({ rect, frame }) => {
+        const box = vp.current?.getBoundingClientRect()
+        if (!box || !vp.current?.contains(frame)) return
+        if (rect.left >= box.left && rect.right <= box.right && rect.top >= box.top && rect.bottom <= box.bottom) return
+        const top = rect.height > box.height ? rect.top + box.height / 6 : rect.top + rect.height / 2
+        const c = toPlane(live.current.view, rect.left + rect.width / 2 - box.left, top - box.top)
+        setView((v) => centerOn(v, c.x, c.y, vpSize.w, vpSize.h))
+      }),
+    [vpSize],
+  )
   const onBoardScroll = (e: ReactUIEvent<HTMLDivElement>) => {
     e.currentTarget.scrollTop = 0
     e.currentTarget.scrollLeft = 0
