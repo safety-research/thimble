@@ -81,23 +81,25 @@ An extension adds views, card types, agents, orientation instructions or report 
 folder, or by the name of one thimble ships:
 
 ```bash
-thimble extension add swarm        # shows what it adds and asks first; --yes for scripts
+thimble extension add swarm        # lists what it adds and asks first; --yes for scripts
 thimble extension list
 thimble extension remove swarm
 ```
 
-An added extension runs in every workspace it applies to, until you remove it or switch it off (Settings > Extensions
-for one workspace, or `"extensions": {"swarm": {"enabled": false}}` in `~/.thimble/config.json`). Its Python runs only
-in thimble's kernels.
+An added extension runs in every workspace until you remove it or switch it off (Settings > Extensions for one
+workspace, or `"extensions": {"swarm": {"enabled": false}}` in `~/.thimble/config.json`). Its Python runs only in
+thimble's kernels. Its `extension.json` names the thimble versions it works with and the Python packages and other
+extensions it needs: thimble installs no package, and while one is missing, or thimble is outside that range, the
+extension stays unloaded and `thimble extension list`, `thimble doctor` and Settings say why. `add` adds the extensions
+it needs that thimble ships on the same yes.
 
-Whether an extension applies is decided once per workspace, and again when the corpus's files change, by a quick call
-to the labels model: it reads the extension's description of the corpora it is for, the corpus's file list and a few
-records, and names the files the extension reads. Settings > Extensions shows its reason, and the switch there
-overrides it either way. If the call fails, the extension stays off there and Settings says why.
+Only its views check whether they fit: once per workspace, and again when their files change, a quick call to the
+labels model reads the view's description and a few records of the files it claims. Settings > Extensions shows each
+view's reason, and its switch there overrides the check.
 
-The Swarm extension is for corpora where many agents act on shared pages and channels and address each other. On such a
-corpus it adds orientation instructions that have every message read, and the `multiagent-swimlane` card type, a swimlane of
-the actions main chose to answer a question.
+The Swarm extension is for corpora where many agents act on shared pages and channels and address each other. It adds
+orientation instructions that have every message read, and the `multiagent-swimlane` card type, a swimlane of the
+actions main chose to answer a question.
 
 ## Update
 

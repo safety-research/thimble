@@ -39,12 +39,12 @@ If the file isn't valid JSON, or a key or value is unknown, no agent starts. The
 - **`writer`**: the report writers
 - **`checks`**: the report checks
 - **`dev`**: code tickets and view builds
-- **`labels`**: the label classifier, and the call that decides whether an extension applies to a corpus
+- **`labels`**: the label classifier, and the call that checks whether an extension's view fits a corpus
 - **`cardCheck`**: the card check's reading of a card's picture, and a view review's reading of its pictures
 
 `labels` and `cardCheck` are single model calls with no tools, so they take only `model`, `effort`, `fast` and `prompt`.
 
-An extension's agent has the entry `"<extension>:<agent>"`, such as `"swarm:swarm-reader"`. It runs inside the orientation's session, under its sandbox, permission mode, fast mode and memory, so it takes only `model`, `effort`, `web`, `network` and `prompt`. Its `model` and `effort` default to its agent file's, else the orientation's subagents', and its `web` and `network` default to `"off"`. They can only take away what the orientation's allow. With `web` off it has no web tools. With `network` off while the orientation's is on, it has no Bash, since all agents in a session share one sandbox network. Its `prompt` replaces the extension's agent file. Settings has a row for each agent of the extensions running in the workspace, where its `model` and `effort` can be changed.
+An extension's agent has the entry `"<extension>:<agent>"`, such as `"swarm:swarm-reader"`. It runs inside the orientation's session, under its sandbox, permission mode, fast mode and memory, so it takes only `model`, `effort`, `web`, `network` and `prompt`. Its `model` and `effort` default to its agent file's, else the orientation's subagents', and its `web` and `network` default to `"off"`. They can only take away what the orientation's allow. With `web` off it has no web tools. With `network` off while the orientation's is on, it has no Bash, since all agents in a session share one sandbox network. Its `prompt` replaces the extension's agent file. Settings has a row for each agent of the extensions running in the workspace, where its `model` and `effort` can be changed. An extension's `agents/orient.md` is not an agent: it adds to the orientation's instructions, or replaces them, and the orientation keeps its own settings (`agents.orientation`), whatever the file's `tools`, `model` or `effort` say.
 
 | Key | Values | Default | What it does, and the risk |
 |---|---|---|---|
