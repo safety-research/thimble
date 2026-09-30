@@ -1076,11 +1076,12 @@ def summary(info: dict[str, Any], how: dict[str, Any]) -> list[str]:
         out.append(_row("card type", x["slug"], x["use"]))
     for a in info["agents"]:
         out.append(_row("agent", a, _one(_front(root / "agents" / f"{a}.md")[0].get("description"))))
-    if info["orient"]:
-        out.append(_row("orientation", "", "adds its instructions to the orientation's"))
-    if info["replaces"]:
-        out.append(_row("orientation", "", "replaces thimble's instructions, unless your own setting or another "
-                                           "extension does"))
+    for rel, what in ((info["orient"], "adds to the orientation's instructions"),
+                      (info["replaces"], "replaces thimble's instructions, unless your own setting or another extension "
+                                         "does")):
+        if rel:
+            about = _one(_front(root / rel)[0].get("description")) if rel.endswith(".md") else ""
+            out.append(_row("orientation", "", f"{about} It {what}." if about else f"It {what}."))
     for r in info["reports"]:
         out.append(_row("report type", r["slug"], r["description"]) + (" With its own exports." if r["export"] else ""))
     if info["thimble"]:

@@ -106,7 +106,7 @@ def test_add_lists_each_contribution_with_its_own_description_and_adds_nothing_w
     for part in ("ext-min 0.1.0", "view        tally: Each record of the tally files, counted by who made it. Also a card type.",
                  "card type   tally-bars: The records of one person as bars.",
                  "agent       counter: Counts the tally records of the places it is given.",
-                 "orientation adds its instructions to the orientation's",
+                 "orientation Tally-aware orientation. It adds to the orientation's instructions.",
                  "report type digest: A one-page digest of the tally.", "It works with thimble >=0.4.",
                  "thimble's kernels"):
         assert part in text
