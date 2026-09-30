@@ -26,9 +26,10 @@ def _fresh(workspaces_tmp):
     agent_session._hosted.clear()
 
 
-async def _question(chat: str) -> dict:
+async def _question(chat: str, seen: tuple[str, ...] = ()) -> dict:
     for _ in range(500):
-        live = [p for p in agents.read_meta(CORPUS, chat).get("permissions") or [] if not p.get("expired")]
+        live = [p for p in agents.read_meta(CORPUS, chat).get("permissions") or []
+                if not p.get("expired") and p.get("id") not in seen]
         if live:
             return live[0]
         await asyncio.sleep(0.01)
@@ -51,8 +52,9 @@ def _repo(tmp_path: Path) -> Path:
 
 
 async def test_a_contained_ticket_asks_only_before_its_change_is_applied_in_every_mode(monkeypatch, tmp_path):
-    """A contained ticket starts unasked, runs its gates in its box, then waits on its card, in Bypass too, before the
-    merge: a no leaves the live branch where it was and the change on the ticket's branch; an Allow merges it."""
+    """A contained ticket starts unasked, runs its gates in its box, stops its session, then waits on its card, in
+    Bypass too, before the merge: a no leaves the live branch where it was and the change on the ticket's branch; an
+    Allow merges the commit it named, and nothing when the branch moved after the question."""
     monkeypatch.setenv("THIMBLE_SANDBOX", "1")
     repo = _repo(tmp_path)
     monkeypatch.setattr(dev, "REPO", repo)
@@ -67,6 +69,7 @@ async def test_a_contained_ticket_asks_only_before_its_change_is_applied_in_ever
     async def turn(run, run_log, wt, prompt, resume, **_k):
         (wt / "README.md").write_text("b\n")
         _git(wt, "commit", "-qam", "dev: ticket")
+        run.session = "s1"
         return "done"
 
     async def gates(tree, touched, *, scratch=None, box=None):
@@ -80,22 +83,85 @@ async def test_a_contained_ticket_asks_only_before_its_change_is_applied_in_ever
     monkeypatch.setattr(dev, "_worker_turn", turn)
     monkeypatch.setattr(dev, "run_gates", gates)
     monkeypatch.setattr(dev, "_preview_shot", no_shot)
+    stopped: list = []
+    monkeypatch.setattr(dev.SESSIONS, "stop", stopped.append)
     live = _git(repo, "rev-parse", "HEAD")
-    for allow in (False, True):
+    for answer in ("no", "moved", "yes"):
+        stopped.clear()
         t = dev.file_ticket(CORPUS, "Bigger font", "the labels are small", start=False)
         running = asyncio.ensure_future(dev.run_ticket(t, dev.Run(ticket_id=t["id"], title=t["title"], ts_start="")))
         q = await _question(t["chat"])
         assert (q["tool"], q["what"]) == (dev.CODE_TOOL, dev.APPLY_QUESTION) and "README.md" in q["why"]
-        assert _git(repo, "rev-parse", "HEAD") == live and not running.done()
-        assert agent_session.answer(CORPUS, t["chat"], q["id"], allow)
+        assert _git(repo, "rev-parse", "HEAD") == live and not running.done() and stopped == ["s1"]
+        wt = Path(dev._get(t["id"])["worktree"])
+        if answer == "moved":
+            (wt / "extra.txt").write_text("x\n")
+            _git(wt, "add", "extra.txt")
+            _git(wt, "commit", "-qm", "after the question")
+        assert agent_session.answer(CORPUS, t["chat"], q["id"], answer != "no")
         rec = await running
         branch = f"dev/{t['id']}"
-        if not allow:
+        if answer == "no":
             assert (rec["status"], rec["error"]) == ("stopped", dev.APPLY_NOT_ALLOWED.format(branch=branch))
             assert _git(repo, "rev-parse", "HEAD") == live and _git(repo, "rev-parse", branch) != live
+        elif answer == "moved":
+            assert rec["status"] == "needs manual merge" and dev.BRANCH_MOVED in rec["error"]
+            assert _git(repo, "rev-parse", "HEAD") == live and not (repo / "extra.txt").exists()
         else:
             assert rec["status"] == "applied" and (repo / "README.md").read_text() == "b\n"
     assert boxes and all(isinstance(b, ticket_box.Box) for b in boxes)
+
+
+async def test_a_ticket_the_box_cannot_run_asks_before_it_starts_and_again_before_its_change_is_applied(monkeypatch,
+                                                                                                      tmp_path):
+    """Where the box can't run, the ticket's code runs outside the sandbox during the run, so the analyst is asked
+    before it starts, and, like any ticket, again before its change reaches thimble's own code."""
+    repo = _repo(tmp_path)
+    monkeypatch.setattr(dev, "REPO", repo)
+    monkeypatch.setattr(dev, "runner_problem", lambda **_k: "")
+    monkeypatch.setattr(ticket_box, "works", lambda: False)
+
+    async def turn(run, run_log, wt, prompt, resume, **_k):
+        (wt / "README.md").write_text("b\n")
+        _git(wt, "commit", "-qam", "dev: ticket")
+        return "done"
+
+    async def gates(tree, touched, *, scratch=None, box=None):
+        assert box is None
+        return {"ok": True, "steps": []}
+
+    async def nothing(*_a, **_k):
+        return None
+
+    monkeypatch.setattr(dev, "_worker_turn", turn)
+    monkeypatch.setattr(dev, "run_gates", gates)
+    monkeypatch.setattr(dev, "start_stack", nothing)
+    monkeypatch.setattr(dev, "stop_stack", nothing)
+    t = dev.file_ticket(CORPUS, "Bigger font", "the labels are small", start=False)
+    running = asyncio.ensure_future(dev.run_ticket(t, dev.Run(ticket_id=t["id"], title=t["title"], ts_start="")))
+    asked: list = []
+    for _ in range(2):
+        q = await _question(t["chat"], tuple(a["id"] for a in asked))
+        asked.append(q)
+        assert agent_session.answer(CORPUS, t["chat"], q["id"], True)
+    assert [q["what"] for q in asked] == [dev.CODE_QUESTION, dev.APPLY_QUESTION]
+    assert (await running)["status"] == "applied" and (repo / "README.md").read_text() == "b\n"
+
+
+def test_the_box_reads_nothing_its_worktree_s_links_point_to(tmp_path):
+    """The session can change its worktree's links to the live venv and node_modules: what the box may read is taken
+    from the live checkout, and nothing runs in the box once a link leads elsewhere."""
+    live, tree, elsewhere = tmp_path / "live", tmp_path / "tree", tmp_path / "elsewhere"
+    for d in (live / "backend" / ".venv", live / "frontend" / "node_modules", tree / "backend", tree / "frontend",
+              elsewhere):
+        d.mkdir(parents=True)
+    (tree / "backend" / ".venv").symlink_to(live / "backend" / ".venv")
+    (tree / "frontend" / "node_modules").symlink_to(elsewhere)
+    box = ticket_box.Box(tree, tmp_path / "cache", tmp_path / "srt", live=live)
+    reads = box.settings()["filesystem"]["allowRead"]
+    assert str(live / "frontend" / "node_modules") in reads and not any(r.startswith(str(elsewhere)) for r in reads)
+    assert asyncio.run(ticket_box.run(box, ["true"], cwd=tree, timeout=5)) == (
+        -1, ticket_box.LINK_MOVED.format(link="frontend/node_modules"))
 
 
 async def test_a_ticket_the_box_cannot_run_asks_before_it_starts_and_a_no_stops_it_before_its_worktree(monkeypatch):
@@ -202,10 +268,12 @@ async def test_the_box_s_server_reads_no_home_writes_only_its_tree_and_reaches_n
     (tree / "backend" / "app" / "__init__.py").write_text("")
     shutil.copy(BACKEND / "app" / "handoff_serve.py", tree / "backend" / "app" / "handoff_serve.py")
     (tree / "backend" / ".venv").symlink_to(Path(sys.prefix), target_is_directory=True)
+    (tmp_path / "live" / "backend").mkdir(parents=True)
+    (tmp_path / "live" / "backend" / ".venv").symlink_to(Path(sys.prefix), target_is_directory=True)
     consts = {"HOME": str(home), "OUTSIDE": str(tmp_path / "escaped"), "PORT": listener.getsockname()[1],
               "TREE": str(tree)}
     (tree / "backend" / "app" / "main.py").write_text("".join(f"{k} = {v!r}\n" for k, v in consts.items()) + APP)
-    preview = ticket_box.Preview(ticket_box.Box(tree, tmp_path / "cache", tmp_path / "srt"), {})
+    preview = ticket_box.Preview(ticket_box.Box(tree, tmp_path / "cache", tmp_path / "srt", live=tmp_path / "live"), {})
     try:
         url = await preview.start(wait_s=60)
         body = json.loads(await asyncio.to_thread(ticket_box.fetch, f"{url}/api/health"))

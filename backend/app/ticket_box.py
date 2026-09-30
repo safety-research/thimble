@@ -4,8 +4,11 @@ a sandbox until the analyst allows the change into thimble's own code.
 
 What a box allows (Box.settings):
   read     the system, minus the home folder, thimble's home, the Claude config folder, the live checkout, the live
-           workspaces and the temp folders; of those, only the worktree, the ticket's cache folder, the Python and
-           Node the checks run, the venv and node_modules the worktree links to, and `reads` (the workspace's corpus)
+           workspaces, the temp folders and where user data lives on the system (kernel_wrap.SRT_HIDDEN); of those,
+           only the worktree, the ticket's cache folder, the Python and Node the checks run, the live checkout's venv
+           and node_modules, and `reads` (the workspace's corpus). The worktree links to that venv and node_modules
+           (LINKED), and nothing runs in the box once a link points elsewhere (link_problem): the session can change
+           the links, so what the box may read is never taken from them
   write    the worktree and the cache folder (TMPDIR, HOME, the UI build, the preview server's home and workspace copy)
   network  none: srt's proxy refuses every host
   env      ENV_KEEP of the server's environment and the caller's names, so no key or login reaches the box
@@ -34,7 +37,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Sequence
 
-from . import cli, config, srt
+from . import cli, config, kernel_wrap, srt
 
 ENV_KEEP = ("PATH", "LANG", "LC_ALL", "LC_CTYPE", "TZ", "USER", "LOGNAME", "TERM")
 PROBE_S = 60.0
@@ -42,6 +45,9 @@ KILL_WAIT_S = 5.0
 HEALTH_WAIT_S = 90.0
 
 SRT_FAILED = "thimble's sandbox runtime could not start a sandbox: {why}"
+LINKED = (Path("backend") / ".venv", Path("frontend") / "node_modules")  # the live checkout's, linked into a worktree
+LINK_MOVED = ("the worktree's {link} no longer links to the live checkout's {link}, so thimble ran nothing from it in "
+              "the sandbox")
 
 _probe: dict[str, str] = {}  # problem()'s answer, probed once per process
 
@@ -87,10 +93,12 @@ def _under(p: Path, root: Path) -> bool:
 
 
 def denied_roots() -> list[Path]:
-    """The folders a box can't read, but for what Box.settings lets back in (module note). The home folder is HOME's and
-    the account's, where the two differ."""
+    """The folders a box can't read, but for what Box.settings lets back in (module note): the kernel's (kernel_wrap)
+    and thimble's own. The home folder is HOME's and the account's, where the two differ."""
+    system = "darwin" if sys.platform == "darwin" else "linux"
     roots = [Path.home(), Path(pwd.getpwuid(os.getuid()).pw_dir), cli.home(), config.claude_config_dir(),
-             config.REPO_ROOT, config.WORKSPACES_DIR, config.DATA_DIR, Path("/tmp"), Path(tempfile.gettempdir())]
+             config.REPO_ROOT, config.WORKSPACES_DIR, config.DATA_DIR, Path("/tmp"), Path(tempfile.gettempdir()),
+             *map(Path, kernel_wrap.SRT_HIDDEN[system])]
     out: list[Path] = []
     for r in roots:
         p = _real(r)
@@ -99,19 +107,17 @@ def denied_roots() -> list[Path]:
     return out
 
 
-def _runtime_reads(tree: Path) -> list[Path]:
-    """What the checks run from outside the worktree: the venv and node_modules it links to, the venv's Python
-    installation (by the name pyvenv.cfg gives and where it really is), Node's bin folder and srt's own package."""
-    out: list[Path] = []
-    venv = tree / "backend" / ".venv"
-    for link in (venv, tree / "frontend" / "node_modules"):
-        if link.exists():
-            out.append(_real(link))
+def _runtime_reads(live: Path) -> list[Path]:
+    """What the checks run from outside the worktree, all from the live checkout `live`: its venv and node_modules, the
+    venv's Python installation (each folder on the way to the interpreter, and the one pyvenv.cfg names), Node's bin
+    folder and srt's own package."""
+    out = [_real(live / rel) for rel in LINKED if (live / rel).exists()]
+    venv = live / "backend" / ".venv"
     home = _real(Path.home())
     too_wide = {home, home / ".local"}
     py = venv / "bin" / "python"
     if py.exists():
-        prefixes = [_real(py).parent.parent]
+        prefixes = kernel_wrap.interpreter_dirs(py)
         with contextlib.suppress(OSError):
             for line in (venv / "pyvenv.cfg").read_text("utf-8").splitlines():
                 key, _, value = line.partition("=")
@@ -127,17 +133,35 @@ def _runtime_reads(tree: Path) -> list[Path]:
     return out
 
 
+def link_problem(tree: Path, live: Path) -> str:
+    """'' while each of LINKED in the worktree `tree` is missing or leads to the live checkout's, else why not."""
+    for rel in LINKED:
+        link = tree / rel
+        if (link.exists() or link.is_symlink()) and _real(link) != _real(live / rel):
+            return LINK_MOVED.format(link=rel.as_posix())
+    return ""
+
+
 @dataclass
 class Box:
-    """One ticket's sandbox (module note). `reads` are extra read-only folders."""
+    """One ticket's sandbox (module note). `reads` are extra read-only folders; `live` is the live checkout the
+    worktree's venv and node_modules link to, config.REPO_ROOT when None."""
     tree: Path
     cache: Path
     host_tmp: Path
     reads: tuple[Path, ...] = ()
+    live: Path | None = None
+
+    @property
+    def checkout(self) -> Path:
+        return self.live or config.REPO_ROOT
+
+    def link_problem(self) -> str:
+        return link_problem(self.tree, self.checkout)
 
     def settings(self) -> dict[str, Any]:
         tree, cache = _real(self.tree), _real(self.cache)
-        reads = [tree, cache, *_runtime_reads(self.tree), *(_real(p) for p in self.reads if Path(p).exists())]
+        reads = [tree, cache, *_runtime_reads(self.checkout), *(_real(p) for p in self.reads if Path(p).exists())]
         return {
             "network": {"allowedDomains": [], "deniedDomains": []},
             "filesystem": {"denyRead": [str(p) for p in denied_roots()],
@@ -189,7 +213,10 @@ async def _end_group(proc: asyncio.subprocess.Process) -> None:
 
 async def run(box: Box, cmd: Sequence[str], *, cwd: Path, timeout: float,
               env: dict[str, str] | None = None) -> tuple[int, str]:
-    """`cmd` in the box from `cwd`, its output joined: (exit code, output), -1 on a timeout or when srt can't start."""
+    """`cmd` in the box from `cwd`, its output joined: (exit code, output), -1 on a timeout, when srt can't start or when
+    the worktree's links lead elsewhere (link_problem)."""
+    if why := box.link_problem():
+        return -1, why
     try:
         proc = await asyncio.create_subprocess_exec(*box.argv(cmd), cwd=str(cwd), env=box.environ(env),
                                                     stdin=asyncio.subprocess.DEVNULL, stdout=asyncio.subprocess.PIPE,
@@ -265,7 +292,10 @@ class Preview:
                     socket.send_fds(self._ctl, [b"c"], [conn.fileno()])
 
     async def start(self, wait_s: float = HEALTH_WAIT_S) -> str:
-        """Start it and wait for /api/health; the URL. PreviewError when it exits or does not answer in time."""
+        """Start it and wait for /api/health; the URL. PreviewError when it exits or does not answer in time, or when
+        the worktree's links lead elsewhere (link_problem)."""
+        if why := self.box.link_problem():
+            raise PreviewError(why)
         self._listener = self._listen()
         self.port = self._listener.getsockname()[1]
         self.url = f"http://127.0.0.1:{self.port}"

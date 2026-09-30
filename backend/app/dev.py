@@ -39,10 +39,11 @@ Containment. A code ticket whose session's Bash runs in the sandbox is contained
 (ticket_box): its gates, and the server that shows its before and after shots, run in the ticket's box, with no network,
 no home folder and writes only to the worktree and the ticket's cache folder, and the server's git commands in the
 worktree run hardened (WORKTREE_GIT). Its code first runs outside a sandbox once merged, so thimble asks the analyst,
-in every mode, just before the merge (APPLY_QUESTION, on the card; `thimble fix` in the terminal). Anything but an Allow
-ends the ticket stopped with its branch kept. Where the box can't run, the ticket runs its gates on the validation
-stack, outside the sandbox, so thimble also asks before it starts (CODE_QUESTION); a no stops it before its worktree
-exists.
+in every mode, just before the merge (APPLY_QUESTION, on the card; `thimble fix` in the terminal). The session is
+stopped before the question, and the merge takes the commit the question named, by its id (checked_change). Anything
+but an Allow ends the ticket stopped with its branch kept. Where the box can't run, the ticket runs its gates on the
+validation stack, outside the sandbox, so thimble also asks before it starts (CODE_QUESTION); a no stops it before its
+worktree exists.
 
 thimble's config. Code tickets and view builds are the dev agent's sessions, with its `agents.dev` settings
 (userconf.py, dev_config); agent_session's module note says what the config adds. Their Bash runs in the sandbox
@@ -737,10 +738,14 @@ def touched_files(tree: Path) -> list[str]:
     return sorted(out - _LINKED)
 
 
+def _diff_files(tree: Path, old: str, new: str) -> list[str]:
+    out = _git(tree, "diff", "--name-only", old, new)
+    return sorted({ln.strip() for ln in out.splitlines() if ln.strip()} - _LINKED)
+
+
 def branch_files(tree: Path, base: str) -> list[str]:
     """Paths the commits on `tree`'s branch changed since `base`, relative to its root: what the session committed."""
-    out = _git(tree, "diff", "--name-only", base, "HEAD")
-    return sorted({ln.strip() for ln in out.splitlines() if ln.strip()} - _LINKED)
+    return _diff_files(tree, base, "HEAD")
 
 
 def needs_restart(touched: list[str]) -> bool:
@@ -780,11 +785,17 @@ def _manual_merge(files: list[str], branch: str, detail: str = "") -> str:
             + f"; the change is kept on branch {branch}")
 
 
-def rebase_branch(wt: Path, branch: str, base: str, touched: list[str]) -> dict[str, Any]:
+BRANCH_MOVED = "the ticket's branch changed after its checks"
+
+
+def rebase_branch(wt: Path, branch: str, base: str, touched: list[str], expect: str | None = None) -> dict[str, Any]:
     """Bring the ticket's branch onto the live branch's head before its apply: nothing when the live branch has not
-    moved since `base`, else one rebase in the worktree. Refused on uncommitted live changes in touched files or on a
-    conflict. {ok, rebased, head, error, conflicts}; `head` is the live head the branch now sits on."""
-    result: dict[str, Any] = {"ok": False, "rebased": False, "head": None, "error": None, "conflicts": []}
+    moved since `base`, else one rebase in the worktree. Refused on uncommitted live changes in touched files, on a
+    conflict, when the branch is not at `expect` (the commit the analyst was asked about) or when the rebase changed a
+    file outside `touched`. {ok, rebased, head, commit, error, conflicts}; `head` is the live head the branch now sits on
+    and `commit` the branch's head, the commit to merge."""
+    result: dict[str, Any] = {"ok": False, "rebased": False, "head": None, "commit": None, "error": None,
+                              "conflicts": []}
     dirty = dirty_in_live(touched)
     if dirty:
         result.update(error=_manual_merge(dirty, branch, "uncommitted changes in the live checkout"), conflicts=dirty)
@@ -795,8 +806,12 @@ def rebase_branch(wt: Path, branch: str, base: str, touched: list[str]) -> dict[
         result.update(error=_manual_merge(touched, branch, "the ticket's worktree is no longer on its branch"),
                       conflicts=touched)
         return result
+    tip = _git(wt, "rev-parse", "HEAD", check=False)
+    if expect and tip != expect:
+        result.update(error=_manual_merge(touched, branch, BRANCH_MOVED), conflicts=touched)
+        return result
     if _git_run(wt, ("merge-base", "--is-ancestor", head, "HEAD"), 60).returncode == 0:
-        result["ok"] = True  # the branch already sits on the live head
+        result.update(ok=True, commit=tip)  # the branch already sits on the live head
         return result
     rb = _git_run(wt, ("-c", "user.name=thimble dev", "-c", "user.email=dev@thimble.local", "rebase", head))
     if rb.returncode != 0:
@@ -805,13 +820,18 @@ def rebase_branch(wt: Path, branch: str, base: str, touched: list[str]) -> dict[
         result.update(error=_manual_merge(conflicts or touched, branch, "it conflicts with the live branch"),
                       conflicts=conflicts or touched)
         return result
-    result.update(ok=True, rebased=True)
+    new = _git(wt, "rev-parse", "HEAD")
+    if set(_diff_files(wt, head, new)) - set(touched):
+        result.update(error=_manual_merge(touched, branch, BRANCH_MOVED), conflicts=touched)
+        return result
+    result.update(ok=True, rebased=True, commit=new)
     return result
 
 
-def merge_branch(branch: str, touched: list[str], expect_head: str | None) -> dict[str, Any]:
-    """Fast-forward the live branch to `branch`, which rebase_branch put on `expect_head`. Refused when the live head
-    moved since (the caller rebases and checks again) or on uncommitted live changes in touched files.
+def merge_branch(branch: str, touched: list[str], expect_head: str | None, commit: str) -> dict[str, Any]:
+    """Fast-forward the live branch to `commit`, the head of `branch` that rebase_branch put on `expect_head`, by its id,
+    so that nothing that moves the branch meanwhile reaches the live checkout. Refused when the live head moved since
+    (the caller rebases and checks again) or on uncommitted live changes in touched files.
     {ok, commit, prev_head, moved, error, conflicts}."""
     result: dict[str, Any] = {"ok": False, "commit": None, "prev_head": None, "moved": False, "error": None,
                               "conflicts": []}
@@ -824,7 +844,7 @@ def merge_branch(branch: str, touched: list[str], expect_head: str | None) -> di
     if expect_head and head != expect_head:
         result["moved"] = True
         return result
-    mg = subprocess.run(["git", "merge", "--ff-only", branch], cwd=str(REPO), capture_output=True, text=True, timeout=120)
+    mg = subprocess.run(["git", "merge", "--ff-only", commit], cwd=str(REPO), capture_output=True, text=True, timeout=120)
     if mg.returncode != 0:
         result.update(error=_manual_merge(touched, branch, (mg.stderr or mg.stdout).strip()[:200]), conflicts=touched)
         return result
@@ -839,7 +859,7 @@ def apply_branch(tid: str, wt: Path, branch: str, base: str, touched: list[str])
     if not rb["ok"]:
         return {"ok": False, "commit": None, "prev_head": None, "rebased": False, "error": rb["error"],
                 "conflicts": rb["conflicts"]}
-    mg = merge_branch(branch, touched, rb["head"])
+    mg = merge_branch(branch, touched, rb["head"], rb["commit"])
     if mg["moved"]:
         mg = {**mg, "error": _manual_merge(touched, branch, "the live branch moved during the apply"),
               "conflicts": touched}
@@ -1847,6 +1867,19 @@ class NotAllowed(TicketError):
     stopped."""
 
 
+class BranchMoved(TicketError):
+    """The ticket's branch is not the change its gates checked: it ends `needs manual merge`, with nothing applied."""
+
+
+def checked_change(wt: Path, branch: str, base: str, touched: list[str]) -> str:
+    """The commit the analyst is asked to apply: the head of the ticket's branch, once its session has stopped.
+    BranchMoved when the branch's files since `base` are not `touched`, the files its gates checked."""
+    change = _git(wt, "rev-parse", "HEAD")
+    if _diff_files(wt, base, change) != sorted(touched):
+        raise BranchMoved(_manual_merge(touched, branch, BRANCH_MOVED))
+    return change
+
+
 # the card's tool name for thimble's questions about its own code (frontend chat/permissions.ts ASKS_TO)
 CODE_TOOL = "ThimbleCode"
 APPLY_QUESTION = "Apply this change to thimble's own code?"
@@ -1926,7 +1959,7 @@ def ticket_box_of(t: dict[str, Any], wt: Path) -> ticket_box.Box:
     if t.get("workspace"):
         with contextlib.suppress(ValueError):
             reads = (config.corpus_dir(str(t["workspace"])),)
-    return ticket_box.Box(wt, box_dir(t["id"]), box_host_dir(t["id"]), reads)
+    return ticket_box.Box(wt, box_dir(t["id"]), box_host_dir(t["id"]), reads, live=REPO)
 
 
 def remove_box(tid: str) -> None:
@@ -1997,11 +2030,11 @@ def _kept_worktree(t: dict[str, Any]) -> tuple[Path, str, str] | None:
 
 
 def _merge_and_record(t: dict[str, Any], branch: str, touched: list[str], expect_head: str | None, rebased: bool,
-                      restart: str | None) -> dict[str, Any]:
+                      restart: str | None, commit: str) -> dict[str, Any]:
     """The apply's commit point: the fast-forward, the ticket marked applied and the apply recorded in one call, so a
     server ended right after (uvicorn's reloader) never leaves the two disagreeing; _recover finishes the rest.
     Blocking."""
-    mg = merge_branch(branch, touched, expect_head)
+    mg = merge_branch(branch, touched, expect_head, commit)
     if mg["ok"]:
         _update(t["id"], status="applied", commit=mg["commit"], restart=restart, error=None, touched=touched)
         record_apply({**t, "touched": touched}, {**mg, "rebased": rebased}, restart)
@@ -2012,12 +2045,12 @@ def _merge_and_record(t: dict[str, Any], branch: str, touched: list[str], expect
 
 
 async def _apply(t: dict[str, Any], wt: Path, branch: str, base: str, touched: list[str], restart: str | None,
-                 run_log: Log, box: "ticket_box.Box | None" = None) -> dict[str, Any]:
-    """Rebase the ticket's branch onto the live head, run the gates again (in `box`) when it moved, then fast-forward
-    (_merge_and_record). The live checkout changes only in that last step, after every gate has passed on the commits
-    it receives. {ok, status, error, commit}."""
+                 run_log: Log, box: "ticket_box.Box | None" = None, change: str | None = None) -> dict[str, Any]:
+    """Rebase `change`, the commit the analyst allowed, onto the live head, run the gates again (in `box`) when it
+    moved, then fast-forward to the result (_merge_and_record). The live checkout changes only in that last step, after
+    every gate has passed on the commits it receives. {ok, status, error, commit}."""
     for _ in range(2):
-        rb = await asyncio.to_thread(rebase_branch, wt, branch, base, touched)
+        rb = await asyncio.to_thread(rebase_branch, wt, branch, base, touched, change)
         if not rb["ok"]:
             return {"ok": False, "status": "needs manual merge", "error": rb["error"], "commit": None}
         if rb["rebased"]:
@@ -2029,9 +2062,10 @@ async def _apply(t: dict[str, Any], wt: Path, branch: str, base: str, touched: l
             if not validation["ok"]:
                 return {"ok": False, "status": "failed", "commit": None,
                         "error": "gates failed after the rebase onto the live branch; nothing was applied"}
-        mg = await asyncio.to_thread(_merge_and_record, t, branch, touched, rb["head"], rb["rebased"], restart)
+        mg = await asyncio.to_thread(_merge_and_record, t, branch, touched, rb["head"], rb["rebased"], restart,
+                                     str(rb["commit"]))
         if mg["moved"]:
-            base = str(rb["head"])  # the live branch moved again between the rebase and the merge
+            base, change = str(rb["head"]), rb["commit"]  # the live branch moved again between the rebase and the merge
             continue
         return {"ok": mg["ok"], "status": "applied" if mg["ok"] else "needs manual merge", "error": mg["error"],
                 "commit": mg["commit"]}
@@ -2067,8 +2101,9 @@ async def run_ticket(t: dict[str, Any], run: Run, *, doctor: str | None = None, 
 async def _run_ticket(t: dict[str, Any], run: Run, *, doctor: str | None = None,
                       conf: "userconf.Session | str | None" = None, allowed: bool = False,
                       approve: "Approve | None" = None) -> dict[str, Any]:
-    """The whole ticket: worktree, before shot, the session's turns with gates fed back, after shot, the analyst's Allow
-    (_apply_refusal), apply, UI rebuild (rolled back when it fails), then the restart rules. A contained ticket
+    """The whole ticket: worktree, before shot, the session's turns with gates fed back, the session stopped and its
+    commit taken (checked_change), after shot, the analyst's Allow (_apply_refusal) and the apply of that commit, UI
+    rebuild (rolled back when it fails), then the restart rules. A contained ticket
     (`contained`) runs its gates and shots in its box; an uncontained one asks the analyst first unless `allowed`
     (_code_refusal) and runs them on the validation stack. `doctor` is `thimble fix`'s path: no stack, shots, rebuild or
     restart. A stopped run ends `stopped` or `dismissed`, as does one the analyst did not allow; one a shutdown cuts short
@@ -2143,6 +2178,8 @@ async def _run_ticket(t: dict[str, Any], run: Run, *, doctor: str | None = None,
             error = "gates failed after %d attempt%s" % (attempt, "" if attempt == 1 else "s")
             prompt = build_gates_prompt(_gate_report(validation))
         if ok:
+            await asyncio.to_thread(SESSIONS.stop, run.session)  # from here on only the server moves the branch
+            change = await asyncio.to_thread(checked_change, wt, str(branch), str(base), touched)
             if box is not None:
                 after = None if fixing else await _preview_shot(t, run_log, "after", box, touched)
             else:
@@ -2153,7 +2190,7 @@ async def _run_ticket(t: dict[str, Any], run: Run, *, doctor: str | None = None,
             if why := await _apply_refusal(t, touched, str(branch), approve):
                 raise NotAllowed(why)
             restart = "requested" if needs_restart(touched) and not fixing else None
-            res = await _apply(t, wt, str(branch), str(base), touched, restart, run_log, box)
+            res = await _apply(t, wt, str(branch), str(base), touched, restart, run_log, box, change)
             if res["ok"]:
                 applied = True
                 status, error = "applied", None
@@ -2177,7 +2214,8 @@ async def _run_ticket(t: dict[str, Any], run: Run, *, doctor: str | None = None,
             log.exception("ticket run failed")
             error = f"{type(e).__name__}: {e}"
         if not applied:
-            status = "stopped" if isinstance(e, NotAllowed) else "failed"
+            status = ("stopped" if isinstance(e, NotAllowed) else "needs manual merge" if isinstance(e, BranchMoved)
+                      else "failed")
         run_log.error(error)
     finally:
         try:
