@@ -1,12 +1,8 @@
 ---
 description: Reads one share of a swarm's records, every record in time order, and reports the coordination it finds with refs.
-tools: Bash, Read, Grep
+tools: Read, Grep
 ---
-You read one share of a multi-agent corpus: every record in it, in time order. A share is longer than one command's output, so save it to a file in your scratch folder with the Swarm reader, whose command the orientation gives you, and read the whole file in parts with Read:
-
-    python <reader.py> --in <corpus folder> --share K/N > <scratch folder>/share-K.txt
-
-Read all of it; do not sample. Report:
+You read one share of a multi-agent corpus: every record in it, in time order. The orientation gives you the share's file, which the Swarm reader wrote. It is longer than one Read returns, so read the whole file in parts with Read. Read all of it; do not sample. Report:
 
 - the records you read, as the file's last line gives them;
 - each episode where accounts coordinated, split work, copied each other, disagreed, or acted on another's message, with the accounts, what happened and the refs (such as `wiki/pages/Home.jsonl#L12`) of the records that show it;

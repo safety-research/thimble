@@ -1,6 +1,6 @@
 # Swarm: many agents acting on shared pages and channels. The agent-swimlane card type (card.py) reads its records and
-# links from this reader's index, and the orientation's swarm-reader agents read the records in order by running it as a
-# script (main).
+# links from this reader's index, and run as a script (main) it prints the records in order, as the shares the
+# orientation writes for its swarm-reader agents.
 #
 # The records: JSON Lines or CSV files of saves and posts. The reader finds each file's fields by their names:
 #   who     the first actor field with a value (ACTOR_KEYS), else the address of a save made without an account
@@ -655,17 +655,19 @@ def resolve(index, locator):
 
 SHARE_BYTES = 200_000  # about the output one share holds, which one agent reads whole
 
-USAGE = f"""python reader.py [--in DIR] [--share K/N | --place NAME ... [--from I] [--count M]] [--files GLOB ...]
+USAGE = f"""python reader.py [--in DIR] [--shares OUT | --share K/N | --place NAME ... [--from I] [--count M]]
+                 [--files GLOB ...]
 
 Reads the corpus folder DIR (by default the working folder). With no other option, the places the records are on,
 busiest first, one line each: its rank, records, accounts and name; then how many shares of about {SHARE_BYTES // 1000} KB
-the records make. --share K/N prints the Kth of N shares: every record, busiest place first and each place in time
-order, cut at records into N parts of about the same size, so a busy place runs over several shares. --place NAME
-prints that place's records (give it again for more); --from I and --count M print records I to I+M-1 of each. A
-record is headed by its ref, time, account and kind, then a post's text or the lines a save changed from the save
-before it. A place's heading says which of its records follow, and the last line how many records were printed.
---files GLOB reads those files; by default every JSON Lines and CSV file under DIR. The listing with no option begins
-with the files it read."""
+the records make. --shares OUT also writes those N shares to the folder OUT, as share-1.txt to share-N.txt. --share K/N
+prints the Kth of N shares: every record, busiest place first and each place in time order, cut at records into N
+parts of about the same size, so a busy place runs over several shares. --place NAME prints that place's records (give
+it again for more); --from I and --count M print records I to I+M-1 of each. A record is headed by its ref, time,
+account and kind, then a post's text or the lines a save changed from the save before it, each whole: a line longer
+than {LINE_MAX} characters goes on over the lines after it, indented deeper. A place's heading says which of its records
+follow, and the last line how many records were printed. --files GLOB reads those files; by default every JSON Lines
+and CSV file under DIR. The listing with no option begins with the files it read."""
 
 
 def _script_files(globs):
@@ -681,6 +683,20 @@ def _script_files(globs):
     return sorted({p for g in globs for p in glob.glob(g, recursive=True) if Path(p).is_file()})
 
 
+def _line(prefix, text):
+    """A line of a record as the script prints it, whole: after `prefix`, and past LINE_MAX characters on over the lines
+    after it, indented two deeper, each broken at a space where one falls in its second half."""
+    s, out = _clean(text), []
+    while len(s) > LINE_MAX:
+        cut = s.rfind(" ", LINE_MAX // 2, LINE_MAX)
+        cut = cut if cut > 0 else LINE_MAX
+        out.append(s[:cut])
+        s = s[cut + 1 if s[cut] == " " else cut:]
+    out.append(s)
+    more = " " * (len(prefix) + 2)
+    return "".join(f"{prefix if i == 0 else more}{x}\n" for i, x in enumerate(out))
+
+
 def _block(index, ref):
     """One record as the script prints it: its head line, then a post's text or the lines its save changed."""
     r = index["recs"][ref]
@@ -691,12 +707,12 @@ def _block(index, ref):
     out = [head + "\n"]
     if did.get("hunks") is not None:
         for h in did["hunks"]:
-            out += [f"  - {_clean(x)[:LINE_MAX]}\n" for x in h["del"] if x.strip()]
-            out += [f"  + {_clean(x)[:LINE_MAX]}\n" for x in h["add"] if x.strip()]
+            out += [_line("  - ", x) for x in h["del"] if x.strip()]
+            out += [_line("  + ", x) for x in h["add"] if x.strip()]
         if not did["hunks"]:
             out.append("  (no change)\n")
     else:
-        out += [f"  {_clean(x)[:LINE_MAX]}\n" for x in did["said"].splitlines() if x.strip()]
+        out += [_line("  ", x) for x in did["said"].splitlines() if x.strip()]
     return "".join(out)
 
 
@@ -759,17 +775,30 @@ def _share(blocks, k, n):
     return picked
 
 
+def _write_shares(index, blocks, n, into):
+    """The N shares of `blocks` written to the folder `into` as share-1.txt to share-N.txt, in place of any it held."""
+    os.makedirs(into, exist_ok=True)
+    for old in Path(into).glob("share-*.txt"):
+        old.unlink()
+    for k in range(1, n + 1):
+        with open(os.path.join(into, f"share-{k}.txt"), "w", encoding="utf-8") as f:
+            _print(index, _share(blocks, k, n), f)
+
+
 def main(argv):
-    share, names, globs, first, count, i = None, [], [], 1, None, 0
+    share, into, names, globs, first, count, i = None, None, [], [], 1, None, 0
+    start = os.getcwd()
     while i < len(argv):
         arg = argv[i]
         if arg in ("-h", "--help"):
             print(USAGE)
             return 0
-        if arg in ("--in", "--share", "--place", "--files", "--from", "--count") and i + 1 < len(argv):
+        if arg in ("--in", "--shares", "--share", "--place", "--files", "--from", "--count") and i + 1 < len(argv):
             v = argv[i + 1]
             if arg == "--in":
                 os.chdir(v)
+            elif arg == "--shares":
+                into = os.path.join(start, v)
             elif arg == "--share":
                 share = v
             elif arg == "--place":
@@ -785,8 +814,8 @@ def main(argv):
             i += 2
             continue
         sys.exit(f"reader.py: {arg!r} is no option\n\n{USAGE}")
-    if share and names:
-        sys.exit("reader.py: give --share or --place, not both")
+    if sum(map(bool, (into, share, names))) > 1:
+        sys.exit("reader.py: give one of --shares, --share and --place")
     if (first != 1 or count is not None) and not names:
         sys.exit("reader.py: --from and --count go with --place")
     index = build_index(_script_files(globs))
@@ -805,8 +834,11 @@ def main(argv):
             out.write(f"{rank}\t{len(v['refs'])}\t{len(v['accounts'])}\t{p}\n")
         blocks = _blocks(index, ranked)
         n = _shares(blocks)
+        if into:
+            _write_shares(index, blocks, n, into)
+        where = f"written to {into} as share-1.txt to share-{n}.txt" if into else f"--share 1/{n} to --share {n}/{n}"
         out.write(f"{_n(len(index['order']), 'record')}, {sum(b[3] for b in blocks) // 1000:,} KB printed: "
-                  f"{_n(n, 'share')} of about {SHARE_BYTES // 1000} KB, --share 1/{n} to --share {n}/{n}\n")
+                  f"{_n(n, 'share')} of about {SHARE_BYTES // 1000} KB, {where}\n")
         return 0
     missing = [p for p in names if p not in index["places"]]
     if missing:

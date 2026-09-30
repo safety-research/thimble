@@ -289,9 +289,10 @@ async def test_the_swarm_extension_ships_no_view_and_takes_back_the_one_it_insta
     assert not (await extensions.refresh("team", wait=10))["extensions"]["swarm"]["active"]
 
 
-def test_the_swarm_reader_s_shares_print_every_record_once(monkeypatch, capsys):
+def test_the_swarm_reader_s_shares_print_every_record_once(monkeypatch, capsys, tmp_path):
     """The Swarm reader's shares are cut by size at records, so a place may run over two, and between them they print
-    every record once; --from and --count print part of one place. The listing begins with the files it read."""
+    every record once, each line whole; --shares writes them to a folder, and --from and --count print part of one
+    place. The listing begins with the files it read."""
     spec = importlib.util.spec_from_file_location("swarm_reader", SWIMLANE / "reader.py")
     reader = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(reader)
@@ -310,6 +311,16 @@ def test_the_swarm_reader_s_shares_print_every_record_once(monkeypatch, capsys):
     reader.main([*files, "--place", "Night-14/Schedule", "--from", "2", "--count", "2"])
     out = capsys.readouterr().out
     assert "records 2–3 of 4" in out and re.findall(r"^(\S+#L\d+) ", out, re.M) == index["places"]["Night-14/Schedule"]["refs"][1:3]
+
+    reader.main([*files, "--share", "1/1"])
+    whole = capsys.readouterr().out
+    monkeypatch.setattr(reader, "LINE_MAX", 30)
+    reader.main([*files, "--shares", str(tmp_path / "shares")])
+    assert "1 share of about 200 KB, written to" in capsys.readouterr().out
+    wrapped = (tmp_path / "shares" / "share-1.txt").read_text()
+    assert len(wrapped.splitlines()) > len(whole.splitlines())
+    assert all(len(x) <= 30 + 6 for x in wrapped.splitlines() if x.startswith(" "))
+    assert re.sub(r"\s+", "", wrapped) == re.sub(r"\s+", "", whole), "no line is cut"
 
 
 async def test_whether_swarm_applies_is_asked_with_a_few_records_of_a_big_csv(crew, decide):
