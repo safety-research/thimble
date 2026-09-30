@@ -146,6 +146,32 @@ async def test_switching_an_extension_off_withdraws_its_unchanged_view(corpus):
     assert views.read_proposal(CORPUS, "tally") is not None
 
 
+async def test_an_extension_added_again_or_switched_on_again_gives_the_orientation_no_second_follow_up(corpus,
+                                                                                                        monkeypatch):
+    """An oriented workspace hears an extension's orientation instructions as one follow-up the first time it runs
+    there. It keeps that mark when the extension is removed or switched off, so adding it again or switching it back on
+    restarts nothing."""
+    sent: list[str] = []
+
+    async def message(c, text, by, extension=""):
+        sent.append(extension)
+        return {"status": "resumed"}
+
+    monkeypatch.setattr(orient_session, "message", message)
+    _add()
+    await extensions.refresh(CORPUS)
+    assert sent == ["Ext Min"] and extensions.read_state(CORPUS)["oriented"] == ["ext-min"]
+    assert extensions.remove("ext-min")
+    assert "ext-min" not in (await extensions.refresh(CORPUS))["extensions"]
+    _add()
+    assert (await extensions.refresh(CORPUS))["extensions"]["ext-min"]["active"]
+    extensions.set_enabled(CORPUS, "ext-min", False)
+    await extensions.refresh(CORPUS)
+    extensions.set_enabled(CORPUS, "ext-min", True)
+    assert (await extensions.refresh(CORPUS))["extensions"]["ext-min"]["active"]
+    assert sent == ["Ext Min"] and extensions.read_state(CORPUS)["oriented"] == ["ext-min"]
+
+
 async def test_two_extensions_that_replace_one_block_leave_thimbles_and_are_named(corpus, tmp_path):
     other = tmp_path / "other"
     shutil.copytree(FIXTURE, other)

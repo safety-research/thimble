@@ -25,12 +25,16 @@ corpus's files and a few of its records (ext_applies.py), and names the files it
 views, or a card type with a reader of its own, whose reader's applies(paths) is a fast pre-check: None settles that it
 does not apply with no call, and the files it names are the first the call samples, or with no `applies` the files it
 claims. With neither, it applies everywhere and claims the record files. The call runs in the background; until it
-answers, and when it fails, the extension is off here and Settings says why. refresh() copies an active extension into workspaces/<c>/extensions/<name>/, since a kernel sees only the workspace and
-the corpus, and writes STATE_FILE. Its `show: always` views are installed at once, outside the orientation's four; its
-`show: proposed` views are the orientation's to propose (views.propose_builtins). When it becomes active in a workspace
-an orientation ran in, its orient.md goes to the orientation as one follow-up. A view it installed that nobody changed
-goes when it stops being active or no longer gives that view. A view thimble installed from a viewer it no longer
-ships, unchanged since, gives way to an active extension's view of its slug, and goes when none gives one.
+answers, and when it fails, the extension is off here and Settings says why.
+
+refresh() copies an active extension into workspaces/<c>/extensions/<name>/, since a kernel sees only the workspace
+and the corpus, and writes STATE_FILE. Its `show: always` views are installed at once, outside the orientation's four;
+its `show: proposed` views are the orientation's to propose (views.propose_builtins). When it first becomes active in a
+workspace an orientation ran in, its orient.md goes to the orientation as one follow-up; the workspace keeps that mark
+(`oriented`) when the extension is switched off or removed, so switching it on or adding it again starts none. A view
+it installed that nobody changed goes when it stops being active or no longer gives that view. A view thimble installed
+from a viewer it no longer ships, unchanged since, gives way to an active extension's view of its slug, and goes when
+none gives one.
 
 Two active extensions that give the same view or card type, or replace the same orientation block, lose it both: the
 view, type or block is left out (the block stays thimble's), and Settings and `thimble doctor` name the conflict.
@@ -298,8 +302,8 @@ def _state_path(c: str) -> Path:
 
 def read_state(c: str | None) -> dict[str, Any]:
     """{off, on, oriented, extensions} as refresh() last wrote them: the extensions switched off here, those switched on
-    here whatever the decision says, those whose orientation instructions the orientation had, and each extension
-    found, active or not."""
+    here whatever the decision says, those whose orientation instructions the orientation had or started with, whether
+    or not they run here now, and each extension found, active or not."""
     got: Any = {}
     if c:
         try:
@@ -552,9 +556,9 @@ async def _refresh(c: str) -> dict[str, Any]:
             exts[name] = {**{k: v for k, v in info.items() if k != "name"}, "claims": claims, "check": pre,
                           "decision": decision, "files": files, "active": not why, "why": why}
         now = {n for n, e in exts.items() if e.get("active")}
-        oriented = [n for n in state["oriented"] if n in now]
-        fresh = sorted(now - set(oriented))
-        new_state = {"off": state["off"], "on": state["on"], "oriented": sorted({*oriented, *fresh}), "extensions": exts}
+        fresh = sorted(now - set(state["oriented"]))
+        new_state = {"off": state["off"], "on": state["on"], "oriented": sorted({*state["oriented"], *fresh}),
+                     "extensions": exts}
         await asyncio.to_thread(write_json, _state_path(c), new_state)
         for name in sorted(set(state["extensions"]) - set(exts)):
             await asyncio.to_thread(shutil.rmtree, workspace_path(c, name), True)
@@ -646,12 +650,11 @@ async def _orient(c: str, names: list[str]) -> None:
 
 def set_enabled(c: str, name: str, on: bool) -> None:
     """Settings' switch of extension `name` for workspace `c`, which overrides the decision on whether it applies either
-    way. Turned off, it leaves the oriented ones, so turning it on again gives the orientation its instructions again."""
+    way."""
     state = read_state(c)
     off = [n for n in state["off"] if n != name] + ([] if on else [name])
     forced = [n for n in state["on"] if n != name] + ([name] if on else [])
-    oriented = state["oriented"] if on else [n for n in state["oriented"] if n != name]
-    write_json(_state_path(c), {**state, "off": sorted(off), "on": sorted(forced), "oriented": oriented})
+    write_json(_state_path(c), {**state, "off": sorted(off), "on": sorted(forced)})
 
 
 # --------------------------------------------------------------------------- contributions
