@@ -3092,13 +3092,17 @@ def capacity_failure(text: str | None) -> str:
 FIX_BODY = "thimble's server is down or unhealthy (thimble doctor, below)."
 
 
-def fix_contained() -> bool:
-    """Whether `thimble fix`'s ticket runs contained (`contained`), so the terminal asks only before its change is
-    applied."""
+def ticket_contained(c: str | None) -> bool:
+    """Whether a code ticket of workspace `c` (None: `thimble fix`'s) runs contained (`contained`), so the analyst is
+    asked only before its change is applied. Blocking: the first call probes the box."""
     try:
-        return contained(dev_config(None, sandbox=True, hosted=False))
+        return contained(dev_config(c, sandbox=True, hosted=bool(c)))
     except userconf.ConfigError:
         return False
+
+
+def fix_contained() -> bool:
+    return ticket_contained(None)
 
 
 async def fix_offline(doctor: str, approve: Approve, title: str = "fix: thimble server is down") -> str:
