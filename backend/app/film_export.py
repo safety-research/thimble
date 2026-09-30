@@ -5,13 +5,15 @@ The video file: the film's page is loaded headless at 1280x720, drawn at each fr
 shot, and the frames are encoded by ffmpeg. The system's ffmpeg writes an MP4 (H.264 when it has libx264); without one,
 Playwright's own ffmpeg writes a WebM, which cannot carry sound. The narration is spoken by an on-device voice (`say`,
 `espeak-ng`, `espeak`, or `piper` with THIMBLE_PIPER_MODEL naming its voice) when there is one and the encoder can carry
-sound; otherwise each line is burned in as a caption.
+sound; otherwise each line is burned in as a caption, in a band under the film, which is drawn smaller above it so the
+caption covers none of it (CAPTION_PAGE).
 """
 from __future__ import annotations
 
 import asyncio
 import base64
 import contextlib
+import html
 import json
 import logging
 import os
@@ -33,12 +35,19 @@ READY_WAIT_MS = 8000
 FRAMES_MAX = FPS * 60 * 10  # ten minutes
 VOICES = ("say", "espeak-ng", "espeak", "piper")
 
-CAPTION_SRC = """<style>#thimble-cap{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);max-width:960px;
-padding:8px 18px;border-radius:10px;background:rgba(27,26,24,.8);color:#fffdf8;font:500 24px/1.35 'Hanken Grotesk',sans-serif;
-text-align:center;opacity:0}</style><div id="thimble-cap"></div><script>
-window.__cap = (t) => { const L = window.__capLines || []; const e = document.getElementById('thimble-cap');
-  const k = L.findIndex((x) => x.start <= t && t < x.end + 0.3); e.textContent = k < 0 ? '' : L[k].text; e.style.opacity = k < 0 ? 0 : 1 }
-</script>"""
+BAND = 112  # px under the film that a burned-in caption takes, three lines of it
+_K = (H - BAND) / H
+# The frame of a video with burned-in captions: the film at its own 1280x720 in a frame scaled down to fit above the band,
+# the caption in the band.
+CAPTION_PAGE = f"""<!doctype html><html><head><meta charset="utf-8"><style>\0FACES\0
+html,body{{margin:0;width:{W}px;height:{H}px;overflow:hidden;background:#1b1a18}}
+#film{{position:absolute;left:{(W - W * _K) / 2:.1f}px;top:0;width:{W}px;height:{H}px;border:0;transform:scale({_K:.5f});
+transform-origin:0 0}}
+#thimble-cap{{position:absolute;left:0;right:0;bottom:0;height:{BAND}px;box-sizing:border-box;padding:0 64px;display:flex;
+align-items:center;justify-content:center;overflow:hidden;color:#fffdf8;font:500 22px/1.3 'Hanken Grotesk',sans-serif;text-align:center}}
+</style></head><body><iframe id="film" srcdoc="\0FILM\0"></iframe><div id="thimble-cap"></div><script>window.__capLines = \0LINES\0;
+window.__cap = (t) => {{ const L = window.__capLines; const k = L.findIndex((x) => x.start <= t && t < x.end + 0.3);
+  document.getElementById('thimble-cap').textContent = k < 0 ? '' : L[k].text }}</script></body></html>"""
 
 
 # --------------------------------------------------------------------------- tools on this machine
@@ -179,9 +188,10 @@ def film_page(film_html: str, duration: float, lines: list[dict[str, Any]]) -> s
     return "<!doctype html><head>" + head + "</head>" + body
 
 
-async def _ready(page: Any) -> str:
-    """'' once the film's window.ready settled and its faces loaded, else what is wrong."""
-    return str(await page.evaluate(
+async def _ready(film: Any) -> str:
+    """'' once the film's window.ready settled and its faces loaded, else what is wrong. `film` is the page or frame the
+    film runs in."""
+    return str(await film.evaluate(
         """async (wait) => { const t0 = Date.now(); const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
         while (!window.ready && Date.now() - t0 < wait) await sleep(50);
         try { if (window.ready) await Promise.race([Promise.resolve(window.ready), sleep(wait)]) } catch (e) { return 'window.ready failed: ' + e }
@@ -190,22 +200,27 @@ async def _ready(page: Any) -> str:
         return document.fonts.check('16px "Hanken Grotesk"') ? '' : 'fonts' }""", READY_WAIT_MS))
 
 
-async def _open(page: Any, v: dict[str, Any], faces: str, captions: bool) -> None:
-    extra = f"<style>{faces}</style>"
-    doc = with_head(v["film_page"], extra)
+async def _open(page: Any, v: dict[str, Any], faces: str, captions: bool) -> Any:
+    """The film loaded in `page`, with its captions under it when `captions` (CAPTION_PAGE); the page or frame the film
+    runs in."""
+    doc = with_head(v["film_page"], f"<style>{faces}</style>")
     if captions:
         cap = json.dumps([{"start": x["start"], "end": x["end"], "text": x["text"]} for x in v["lines"]]).replace("<", "\\u003c")
-        doc = doc + CAPTION_SRC + f"<script>window.__capLines = {cap}</script>"
+        parts = {"FACES": faces, "FILM": html.escape(doc, quote=True), "LINES": cap}
+        doc = re.sub("\0(FACES|FILM|LINES)\0", lambda m: parts[m.group(1)], CAPTION_PAGE)
     await page.set_content(doc, wait_until="load")
-    why = await _ready(page)
+    film = page.frames[1] if captions and len(page.frames) > 1 else page
+    why = await _ready(film)
     if why == "fonts":
         log.warning("video export: Hanken Grotesk did not load; the film is drawn in a fallback face")
     elif why:
         raise RuntimeError(why)
+    return film
 
 
-async def _shot(page: Any, t: float, *, kind: str = "jpeg") -> bytes:
-    await page.evaluate("(t) => { window.seek(t); if (window.__cap) window.__cap(t) }", t)
+async def _shot(page: Any, film: Any, t: float, *, kind: str = "jpeg") -> bytes:
+    await film.evaluate("(t) => window.seek(t)", t)
+    await page.evaluate("(t) => { if (window.__cap) window.__cap(t) }", t)
     opts: dict[str, Any] = {"type": kind, "clip": {"x": 0, "y": 0, "width": W, "height": H}, "animations": "disabled"}
     if kind == "jpeg":
         opts["quality"] = JPEG_QUALITY
@@ -232,9 +247,9 @@ async def render(v: dict[str, Any], *, faces: str, narrate: bool) -> tuple[bytes
         assert proc.stdin is not None
         try:
             async with browser_page(W, H) as page:
-                await _open(page, v, faces, captions=audio is None)
+                film = await _open(page, v, faces, captions=audio is None)
                 for i in range(n):
-                    proc.stdin.write(await _shot(page, i / FPS))
+                    proc.stdin.write(await _shot(page, film, i / FPS))
                     await proc.stdin.drain()
         except (ConnectionError, RuntimeError) as e:
             with contextlib.suppress(ProcessLookupError):
@@ -293,9 +308,9 @@ async def frames_pdf(m: dict[str, Any]) -> bytes:
     shots: list[str] = []
     try:
         async with browser_page(W, H) as page:
-            await _open(page, _video_of(m), faces, captions=False)
+            film = await _open(page, _video_of(m), faces, captions=False)
             for ln in m["lines"]:
-                png = await _shot(page, (ln["start"] + ln["end"]) / 2, kind="png")
+                png = await _shot(page, film, (ln["start"] + ln["end"]) / 2, kind="png")
                 shots.append(base64.b64encode(png).decode("ascii"))
     except RuntimeError as e:
         raise HTTPException(409, f"PDF needs a browser: {e}") from e
