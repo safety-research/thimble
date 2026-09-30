@@ -24,7 +24,7 @@ import tempfile
 import wave
 from functools import lru_cache
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 log = logging.getLogger("thimble.film_export")
 
@@ -227,10 +227,9 @@ async def _shot(page: Any, film: Any, t: float, *, kind: str = "jpeg") -> bytes:
     return await page.screenshot(**opts)
 
 
-async def render(v: dict[str, Any], *, faces: str, narrate: bool,
-                 progress: Callable[[float], None] | None = None) -> tuple[bytes, str]:
-    """(the video file, its extension) of `v` ({film_page, duration, lines [{start, end, text, spoken}]}), `progress`
-    told the share of the frames shot. RuntimeError with what is missing."""
+async def render(v: dict[str, Any], *, faces: str, narrate: bool) -> tuple[bytes, str]:
+    """(the video file, its extension) of `v` ({film_page, duration, lines [{start, end, text, spoken}]}).
+    RuntimeError with what is missing."""
     from .exports import browser_page  # noqa: PLC0415
 
     enc = encoder()
@@ -252,8 +251,6 @@ async def render(v: dict[str, Any], *, faces: str, narrate: bool,
                 for i in range(n):
                     proc.stdin.write(await _shot(page, film, i / FPS))
                     await proc.stdin.drain()
-                    if progress is not None and (i + 1) % FPS == 0:
-                        progress((i + 1) / n)
         except (ConnectionError, RuntimeError) as e:
             with contextlib.suppress(ProcessLookupError):
                 proc.kill()
@@ -277,8 +274,7 @@ def _video_of(m: dict[str, Any]) -> dict[str, Any]:
     return {"film_page": m["film_page"], "duration": m["duration"], "lines": m["lines"]}
 
 
-async def render_film(film: dict[str, Any], *, faces: str,
-                      progress: Callable[[float], None] | None = None) -> tuple[bytes, str]:
+async def render_film(film: dict[str, Any], *, faces: str) -> tuple[bytes, str]:
     """A hook's film, {html, duration, lines [{start, end, text, spoken?}]}, as a video file: `text` is a line's caption
     and `spoken` what the voice says, its caption when it gives none."""
     from fastapi import HTTPException  # noqa: PLC0415
@@ -289,7 +285,7 @@ async def render_film(film: dict[str, Any], *, faces: str,
     duration = float(film.get("duration") or (max((x["end"] for x in lines), default=0) + 1))
     v = {"film_page": film_page(str(film.get("html") or ""), duration, lines), "duration": duration, "lines": lines}
     try:
-        return await render(v, faces=faces, narrate=True, progress=progress)
+        return await render(v, faces=faces, narrate=True)
     except RuntimeError as e:
         raise HTTPException(409, f"The video could not be made: {e}") from e
 
