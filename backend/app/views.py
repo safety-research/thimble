@@ -804,6 +804,7 @@ def views_for(c: str, path: str, fragment: str | None = None) -> list[dict[str, 
 # ----------------------------------------------------------------------------------------------------------
 
 _ready: set[tuple[str, str, str]] = set()  # (workspace, slug, fingerprint) whose index a call has built or loaded
+_mirrored: set[tuple[str, str, str]] = set()  # (workspace, slug, fingerprint) the scratch mirror was refreshed for
 _memo: OrderedDict[tuple[str, str, str, str], dict[str, Any] | None] = OrderedDict()  # (c, slug, fp, locator) -> answer
 _memo_lock = threading.Lock()
 
@@ -892,6 +893,12 @@ def _prepared(c: str, slug: str, version: str | None = None) -> tuple[dict[str, 
     files = claimed_files(c, view)
     src = reader_path.read_text("utf-8")
     fp = fingerprint(files, src)
+    if (c, slug, fp) not in _mirrored:
+        from . import notebook  # noqa: PLC0415 — the kernel machinery loads lazily
+
+        # the kernel reads the corpus through its scratch mirror, which must hold a file added since it was made
+        notebook.scratch_dir(c, config.corpus_dir(c), fresh=True)
+        _mirrored.add((c, slug, fp))
     cache = cache_dir(c, view)
     if view["origin"] == "builtin":
         # the kernel's sandbox holds the workspace but not thimble's own folder, so it reads a copy

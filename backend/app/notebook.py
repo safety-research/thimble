@@ -151,13 +151,13 @@ _mirrored: dict[Path, float] = {}  # scratch dir -> when its mirror last ran (mo
 _mirror_lock = threading.Lock()  # kernels that start together wait for one walk
 
 
-def scratch_dir(workspace: str, corpus: Path | None = None) -> Path:
+def scratch_dir(workspace: str, corpus: Path | None = None, *, fresh: bool = False) -> Path:
     """workspaces/<c>/scratch, mirrored over the corpus and returned: every kernel's cwd. Blocking; kernels starting
-    within MIRROR_MEMO_S of the last mirror reuse it rather than walking the corpus again."""
+    within MIRROR_MEMO_S of the last mirror reuse it rather than walking the corpus again, unless `fresh`."""
     scratch = config.workspace_dir(workspace) / SCRATCH_DIR
     with _mirror_lock:
         last = _mirrored.get(scratch)
-        if last is None or time.monotonic() - last >= MIRROR_MEMO_S or not scratch.is_dir():
+        if fresh or last is None or time.monotonic() - last >= MIRROR_MEMO_S or not scratch.is_dir():
             mirror_corpus(corpus if corpus is not None else config.corpus_dir(workspace), scratch)
             _mirrored[scratch] = time.monotonic()
     return scratch
