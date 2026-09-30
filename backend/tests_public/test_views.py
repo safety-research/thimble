@@ -162,6 +162,12 @@ async def test_a_reader_resolves_a_line_and_a_key_and_its_answer_is_kept(ws, inp
     assert list((ws / "views" / "threads" / "cache").glob("*.index.pickle"))
 
 
+def test_the_context_says_what_each_view_is_for(ws):
+    from app import context  # noqa: PLC0415
+
+    assert "- view:threads · Threads · claims board.jsonl\n  The board's posts grouped by thread." in context.views(CORPUS)
+
+
 SOME_READER = '''
 import json
 
