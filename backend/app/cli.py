@@ -1980,9 +1980,19 @@ def _turn_endings_line() -> str:
     return terminal_tools.line()
 
 
+NODE_TESTS_FLOOR = "20.19+, 22.13+ or 24+"  # what the frontend's tests need (install.sh's node_tests_ok)
+
+
+def node_runs_frontend_tests(v: tuple[int, int, int]) -> bool:
+    """Whether a node of version `v` runs the frontend's tests, whose jsdom and the packages it loads require() ES
+    modules: their engines (frontend/package-lock.json) are ^20.19.0 || ^22.13.0 || >=24."""
+    return v[0] >= 24 or (v[0] == 22 and v[1] >= 13) or (v[0] == 20 and v[1] >= 19)
+
+
 def node_line(commands: bool = True) -> str:
     """Node's version, which custom views and the sandbox runtime (app/srt.py) need, and with `commands` what to install
-    when it is missing or too old."""
+    when it is missing or too old. Where the frontend's tests are installed (a code ticket's vitest gate, dev.py), a node
+    older than they need is a problem too."""
     exe = shutil.which("node")
     need = (f"custom views and the sandbox card code and code tickets run in need Node {NODE_MIN_MAJOR}+"
             f"{' (https://nodejs.org)' if commands else ''}; everything else works without it")
@@ -1997,6 +2007,9 @@ def node_line(commands: bool = True) -> str:
         return f"{out}, too old; {need}"
     modules = FRONTEND_DIR / "node_modules"
     fix = f"bash {config.REPO_ROOT / 'scripts' / 'install.sh'}"
+    if v and (modules / ".bin" / "vitest").exists() and not node_runs_frontend_tests(v):
+        return (f"{out}, older than the frontend's tests need (Node {NODE_TESTS_FLOOR}), so code tickets' vitest checks "
+                "fail" + (f"; run `{fix} --upgrade-node`, or upgrade Node (https://nodejs.org)" if commands else ""))
     return out + ("" if modules.is_dir() else f"; {modules} is missing, so custom views cannot build"
                   + (f" (run `{fix}` again)" if commands else ""))
 

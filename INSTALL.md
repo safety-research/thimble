@@ -14,7 +14,8 @@ it runs in bubblewrap on Linux and with your user's access on macOS.
 - [Claude Code](https://docs.anthropic.com/en/docs/claude-code) (tested with 2.1.281), logged in (`claude auth status`).
 - macOS or Linux, and Python 3.12+. [uv](https://docs.astral.sh/uv/getting-started/installation/) is recommended: it
   installs the pinned versions and fetches Python when the machine has none.
-- Node 20+ for a Dev install, for custom views and for the sandbox card code and code tickets run in.
+- Node 20+ for a Dev install, for custom views and for the sandbox card code and code tickets run in. A Dev install's
+  frontend tests, which a code ticket's checks run, need Node 20.19+, 22.13+ or 24+.
 
 ## Global install (recommended)
 
@@ -53,6 +54,12 @@ and where, then asks its questions:
 - **Trust of thimble's workspaces folder**, where thimble keeps each workspace and runs its agents. A yes adds it to
   `~/.claude.json`. The orientation, its critic and the writers need it: they run as Claude Code background agents,
   which Claude Code starts only in a trusted folder. `--trust-workspaces` or `--no-trust-workspaces` answers it.
+- **A newer Node** (Dev install, when node is missing or older than 20.19+, 22.13+ or 24+, and Homebrew is there). A
+  code ticket's checks run the frontend's tests, which need it. A yes runs `brew install node` (or `brew upgrade node`)
+  and puts Homebrew's node first on PATH for the rest of the install; if your PATH still finds the old node first,
+  install.sh says so and how to fix it. With a no, code tickets' checks fail until Node is upgraded, and `thimble doctor`
+  flags it. Without Homebrew it is not asked: get Node from https://nodejs.org or with nvm. `--upgrade-node` or
+  `--no-upgrade-node` answers it, and it is asked again at every run while node is too old.
 
 Without a terminal, install.sh runs only when every question it would ask has its flag, and otherwise lists the
 missing ones; a system Chrome or Edge it finds is used without asking. The browser, plugin and trust answers are kept,

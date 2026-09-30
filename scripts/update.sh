@@ -3,8 +3,8 @@
 #
 #   scripts/update.sh [--dir DIR] [--from ZIP|URL] [--sums FILE] [--marketplace-name NAME] [--dry-run] [INSTALL FLAGS]
 #
-# INSTALL FLAGS are install.sh's answers to its questions (--browser, --sandbox-deps, --plugin, --trust-workspaces and
-# their no- forms) and --require-pinned, passed on to it: without a terminal it runs only with a flag for each question
+# INSTALL FLAGS are install.sh's answers to its questions (--browser, --sandbox-deps, --plugin, --trust-workspaces,
+# --upgrade-node and their no- forms) and --require-pinned, passed on to it: without a terminal it runs only with a flag for each question
 # it would ask.
 # The install: --dir, else the one $THIMBLE_HOME/app-dir names, else the tree this script is in. A git checkout gets
 # `git pull --ff-only` + install.sh in place; a release install needs --from (a release zip, path or https URL), which is
@@ -36,7 +36,7 @@ while [ $# -gt 0 ]; do
     --dry-run) dry=1; shift;;
     --browser) install_flags+=("$1" "${2:-}"); shift $(( $# > 1 ? 2 : 1 ));;
     --browser=* | --sandbox-deps | --no-sandbox-deps | --plugin | --no-plugin | --trust-workspaces | --no-trust-workspaces \
-      | --require-pinned) install_flags+=("$1"); shift;;
+      | --upgrade-node | --no-upgrade-node | --require-pinned) install_flags+=("$1"); shift;;
     -h|--help) usage; exit 0;;
     *) echo "update.sh: unknown argument $1" >&2; usage >&2; exit 2;;
   esac

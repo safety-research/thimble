@@ -4,7 +4,7 @@ Bug reports, suggestions and pull requests are welcome.
 
 ## Set up a checkout
 
-You need Claude Code, macOS or Linux, Python 3.12+ ([uv](https://docs.astral.sh/uv/) recommended) and Node 20+.
+You need Claude Code, macOS or Linux, Python 3.12+ ([uv](https://docs.astral.sh/uv/) recommended) and Node 20.19+, 22.13+ or 24+ (the frontend's tests load jsdom, which needs it).
 
 ```
 git clone https://github.com/safety-research/thimble.git
