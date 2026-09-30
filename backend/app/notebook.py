@@ -39,7 +39,7 @@ from jupyter_client.connect import write_connection_file
 from pydantic import BaseModel, Field
 from sse_starlette import EventSourceResponse, ServerSentEvent
 
-from . import cite, config, frames, kernel_wrap, page_fonts, procs
+from . import cite, config, frames, kernel_wrap, page_fonts, procs, srt
 from .ledger import atomic_write_text, read_json, write_json
 
 log = logging.getLogger("thimble.notebook")
@@ -1869,10 +1869,10 @@ def wrapped_argv(argv: list[str], *, workspace: str, corpus: Path, connection_fi
 def sandboxed_argv(argv: list[str], *, workspace: str, corpus: Path, source: str = "settings") -> list[str]:
     """`argv` inside Anthropic's sandbox runtime (kernel_wrap.srt_argv with kernel_wrap.srt_rules). RuntimeError when
     node or the runtime's package is missing: a workspace set to srt never runs unwrapped."""
-    node, srt_dir = kernel_wrap.node(), kernel_wrap.srt_package(config.REPO_ROOT)
+    node, srt_dir = srt.node(), srt.package(config.REPO_ROOT)
     if node is None or srt_dir is None:
         missing = ("node is not on PATH" if node is None else
-                   f"the sandbox runtime is not installed in {config.REPO_ROOT.joinpath(*kernel_wrap.SRT_PACKAGE)}")
+                   f"the sandbox runtime is not installed in {config.REPO_ROOT.joinpath(*srt.PACKAGE)}")
         log.error("kernel for %s: %s is srt (%s) but %s; the kernel is not started — %s",
                   workspace, config.KERNEL_WRAP_KEY, source, missing, config.NO_WRAP_HINT)
         raise RuntimeError(f"the kernel wrap is srt but {missing}, so the kernel did not start")

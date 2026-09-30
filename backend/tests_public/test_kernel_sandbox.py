@@ -7,10 +7,10 @@ import subprocess
 
 import pytest
 
-from app import config, kernel_wrap, notebook
+from app import config, kernel_wrap, notebook, srt
 
-SRT = kernel_wrap.srt_package(config.REPO_ROOT)
-NODE = kernel_wrap.node()
+SRT = srt.package(config.REPO_ROOT)
+NODE = srt.node()
 WS, CORPUS, HOME = "/Users/matt/.thimble/workspaces/w", "/Users/matt/corpus", "/Users/matt"
 
 
@@ -85,7 +85,7 @@ def test_srt_makes_a_seatbelt_profile_of_the_rules_that_keeps_the_workspace_conf
 def test_a_workspace_set_to_srt_never_runs_unwrapped(monkeypatch, workspaces_tmp):
     """A workspace whose settings name srt gets no kernel when node or the runtime is missing, rather than one that runs
     outside the sandbox."""
-    monkeypatch.setattr(kernel_wrap, "node", lambda: None)
+    monkeypatch.setattr(srt, "node", lambda: None)
     with pytest.raises(RuntimeError, match="node is not on PATH"):
         notebook.sandboxed_argv(["python"], workspace="mini", corpus=config.corpus_dir("mini"))
 

@@ -141,9 +141,9 @@ def resolve_kernel_wrap(settings: Mapping[str, Any] | None = None,
 def default_kernel_wrap() -> str:
     """The kernel wrapper where nothing names one: srt where it works, else bwrap on Linux where bubblewrap works, else
     none. Each probe runs once per process."""
-    from . import kernel_wrap  # noqa: PLC0415
+    from . import kernel_wrap, srt  # noqa: PLC0415
 
-    if kernel_wrap.srt_works(kernel_wrap.node(), kernel_wrap.srt_package(REPO_ROOT)):
+    if kernel_wrap.srt_works(srt.node(), srt.package(REPO_ROOT)):
         return KERNEL_WRAP_SRT
     return KERNEL_WRAP_BWRAP if sys.platform.startswith("linux") and kernel_wrap.works() else KERNEL_WRAP_NONE
 

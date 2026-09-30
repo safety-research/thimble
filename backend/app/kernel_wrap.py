@@ -1,9 +1,8 @@
 """The notebook kernel's sandbox. The kernel runs model-authored code outside Claude Code's permission checks, so it
 runs inside one of two wrappers, and `config.resolve_kernel_wrap` says which:
 
-  srt    Anthropic's sandbox runtime (@anthropic-ai/sandbox-runtime in frontend/node_modules), on macOS (Seatbelt) and
-         on Linux (bubblewrap): kernel_srt.mjs wraps the kernel with the rules `srt_rules` returns and stays its parent.
-         The default wherever `srt_works`.
+  srt    Anthropic's sandbox runtime (app/srt.py), on macOS (Seatbelt) and on Linux (bubblewrap): kernel_srt.mjs
+         wraps the kernel with the rules `srt_rules` returns and stays its parent. The default wherever `srt_works`.
   bwrap  bubblewrap run directly (`kernel_wrap_argv`): the fallback on Linux where srt is missing or does not work.
 
 Both draw the same boundary:
@@ -26,7 +25,7 @@ server restart. `--new-session` is left out because it would leave the process g
 argv starts with `sh -c 'trap "" INT; exec "$@"'` so bwrap ignores SIGINT and the namespace's init passes it to the
 kernel. Under srt the kernel is in a session of its own (srt's bubblewrap runs with --new-session), so the server
 interrupts it with an interrupt_request instead of SIGINT. The in-kernel watchdog cannot see the server's pid in either,
-so a wrapped kernel gets a lease file the server holds an flock on (notebook._WATCHDOG_SRC). Stdlib only.
+so a wrapped kernel gets a lease file the server holds an flock on (notebook._WATCHDOG_SRC).
 """
 from __future__ import annotations
 
@@ -36,6 +35,8 @@ import shutil
 import subprocess
 from pathlib import Path
 from typing import Sequence
+
+from . import srt
 
 SANDBOX_HOME = "/tmp/home"  # HOME inside bwrap: a directory on the private /tmp tmpfs
 SYSTEM_RO = ("/usr", "/lib", "/lib64", "/bin", "/sbin")  # /usr must exist; the rest are bound when present
@@ -52,7 +53,6 @@ EMPTY_FILE = "/dev/null"
 READ_ONLY_FILES = ("telemetry.jsonl",)  # read-only over the writable workspace (the server writes from outside)
 SIGINT_PREFIX = ("/bin/sh", "-c", 'trap "" INT; exec "$@"', "thimble-kernel-wrap")  # shell prefix that ignores SIGINT in bwrap (module docstring)
 
-SRT_PACKAGE = ("frontend", "node_modules", "@anthropic-ai", "sandbox-runtime")  # under the install tree
 SRT_LAUNCHER = Path(__file__).with_name("kernel_srt.mjs")
 SRT_HELPERS = ("vendor", "seccomp")  # srt's apply-seccomp, which runs inside the sandbox on Linux
 # Where user data lives on each system, hidden from the kernel under srt besides srt_rules' `hide`.
@@ -87,35 +87,27 @@ def works() -> bool:
     return _works["ok"]
 
 
-def node() -> str | None:
-    """The `node` that runs kernel_srt.mjs: the one on PATH."""
-    return shutil.which("node")
-
-
-def srt_package(root: Path) -> Path | None:
-    """The sandbox runtime's package folder in the install tree at `root`; None when it is not installed."""
-    p = root.joinpath(*SRT_PACKAGE)
-    return p if (p / "dist" / "index.js").is_file() else None
-
-
 def srt_argv(argv: Sequence[str], *, node: str, srt_dir: Path, rules: dict) -> list[str]:
     """The kernel's argv run by kernel_srt.mjs inside srt with `rules` (srt_rules)."""
     return [node, str(SRT_LAUNCHER), str(srt_dir), json.dumps(rules, separators=(",", ":")), "--", *argv]
 
 
 def srt_works(node: str | None, srt_dir: Path | None) -> bool:
-    """Whether srt can sandbox a process on this machine, probed once per (node, package): kernel_srt.mjs runs `true`
-    in it (on Linux that needs bubblewrap and user namespaces; on macOS /usr/bin/sandbox-exec)."""
+    """Whether srt can sandbox a process on this machine, probed once per (node, package): `node` is recent enough
+    (srt.NODE_MIN) and kernel_srt.mjs runs `true` in it (on Linux that needs bubblewrap and user namespaces; on macOS
+    /usr/bin/sandbox-exec)."""
     if not node or srt_dir is None:
         return False
     key = (node, str(srt_dir))
     if key not in _srt_works:
-        rules = {"filesystem": {"denyRead": [], "allowWrite": [], "denyWrite": []}}
-        try:
-            ok = subprocess.run(srt_argv(["true"], node=node, srt_dir=srt_dir, rules=rules), capture_output=True,
-                                stdin=subprocess.DEVNULL, timeout=SRT_PROBE_S, check=False).returncode == 0
-        except (OSError, subprocess.SubprocessError):
-            ok = False
+        ok = False
+        if (srt.node_version(node) or ()) >= srt.NODE_MIN:
+            rules = {"filesystem": {"denyRead": [], "allowWrite": [], "denyWrite": []}}
+            try:
+                ok = subprocess.run(srt_argv(["true"], node=node, srt_dir=srt_dir, rules=rules), capture_output=True,
+                                    stdin=subprocess.DEVNULL, timeout=SRT_PROBE_S, check=False).returncode == 0
+            except (OSError, subprocess.SubprocessError):
+                ok = False
         _srt_works[key] = ok
     return _srt_works[key]
 

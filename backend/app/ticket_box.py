@@ -1,6 +1,6 @@
-"""A code ticket's box: the server runs the ticket's checks and its preview server in Anthropic's sandbox runtime (srt,
-npm @anthropic-ai/sandbox-runtime, installed in frontend/node_modules: Seatbelt on macOS, bubblewrap on Linux), so the
-code the dev agent edited runs in a sandbox until the analyst allows the change into thimble's own code.
+"""A code ticket's box: the server runs the ticket's checks and its preview server in Anthropic's sandbox runtime
+(app/srt.py: Seatbelt on macOS, bubblewrap on Linux), through its `srt` command, so the code the dev agent edited runs in
+a sandbox until the analyst allows the change into thimble's own code.
 
 What a box allows (Box.settings):
   read     the system, minus the home folder, thimble's home, the Claude config folder, the live checkout, the live
@@ -34,57 +34,30 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Sequence
 
-from . import cli, config
+from . import cli, config, srt
 
-SRT_CLI = Path("@anthropic-ai") / "sandbox-runtime" / "dist" / "cli.js"
-NODE_MIN = (20, 11)  # the sandbox runtime's `engines`
 ENV_KEEP = ("PATH", "LANG", "LC_ALL", "LC_CTYPE", "TZ", "USER", "LOGNAME", "TERM")
 PROBE_S = 60.0
 KILL_WAIT_S = 5.0
 HEALTH_WAIT_S = 90.0
 
-NO_NODE = "Node is not installed, and thimble's sandbox runtime needs Node {want} or later"
-OLD_NODE = "Node {have} is too old for thimble's sandbox runtime, which needs Node {want} or later"
-NO_SRT = ("thimble's sandbox runtime (npm @anthropic-ai/sandbox-runtime) is not installed in {where}; run the installer "
-          "again")
 SRT_FAILED = "thimble's sandbox runtime could not start a sandbox: {why}"
 
 _probe: dict[str, str] = {}  # problem()'s answer, probed once per process
 
 
-def node_modules() -> Path:
-    return config.REPO_ROOT / "frontend" / "node_modules"
-
-
-def _node_version(node: str) -> tuple[int, ...] | None:
-    try:
-        out = subprocess.run([node, "--version"], capture_output=True, text=True, timeout=10).stdout.strip()
-        return tuple(int(x) for x in out.lstrip("v").split(".")[:2])
-    except (OSError, subprocess.SubprocessError, ValueError):
-        return None
-
-
 def srt_argv() -> list[str] | None:
-    """The command that runs srt: Node with the package's cli.js from thimble's node_modules; None when either is
-    missing."""
-    node, cli_js = shutil.which("node"), node_modules() / SRT_CLI
-    return [node, str(cli_js)] if node and cli_js.is_file() else None
+    """The command that runs srt: Node with the package's cli.js; None when either is missing."""
+    node, package = srt.node(), srt.package(config.REPO_ROOT)
+    return [node, str(package / "dist" / "cli.js")] if node and package else None
 
 
 def problem(refresh: bool = False) -> str:
     """Why a box can't run here, '' when it can: Node, the package, and one sandboxed `true`. Probed once per process."""
     if "why" in _probe and not refresh:
         return _probe["why"]
-    want = ".".join(map(str, NODE_MIN))
-    node = shutil.which("node")
-    have = _node_version(node) if node else None
-    if not node:
-        why = NO_NODE.format(want=want)
-    elif have is None or have < NODE_MIN:
-        why = OLD_NODE.format(have=".".join(map(str, have or ())) or "?", want=want)
-    elif srt_argv() is None:
-        why = NO_SRT.format(where=node_modules())
-    else:
+    why = srt.missing(config.REPO_ROOT, srt.node())
+    if not why:
         with tempfile.TemporaryDirectory(prefix="thimble-box-probe-") as d:
             root = Path(d)
             for sub in ("tree", "cache", "srt"):
@@ -145,12 +118,12 @@ def _runtime_reads(tree: Path) -> list[Path]:
                 if key.strip() == "home" and value.strip():
                     prefixes += [Path(value.strip()).parent, _real(value.strip()).parent]
         out += [p for p in prefixes if p not in too_wide]
-    node = shutil.which("node")
+    node = srt.node()
     if node:
         out.append(_real(node).parent)
-    srt = node_modules() / SRT_CLI.parent.parent
-    if srt.is_dir():  # its seccomp helper runs inside the box
-        out.append(_real(srt))
+    package = srt.package(config.REPO_ROOT)
+    if package:  # its seccomp helper runs inside the box
+        out.append(_real(package))
     return out
 
 
@@ -179,10 +152,10 @@ class Box:
         return p
 
     def argv(self, cmd: Sequence[str]) -> list[str]:
-        srt = srt_argv()
-        if srt is None:
-            raise RuntimeError(NO_SRT.format(where=node_modules()))
-        return [*srt, "--settings", str(self.settings_file()), "--", *cmd]
+        argv = srt_argv()
+        if argv is None:
+            raise RuntimeError(srt.missing(config.REPO_ROOT, srt.node()) or "thimble's sandbox runtime is not installed")
+        return [*argv, "--settings", str(self.settings_file()), "--", *cmd]
 
     def environ(self, extra: dict[str, str] | None = None) -> dict[str, str]:
         """The box's environment: ENV_KEEP, HOME and TMPDIR in the cache folder, and `extra`. srt reads TMPDIR for its

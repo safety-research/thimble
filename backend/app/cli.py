@@ -2004,7 +2004,7 @@ def node_line(commands: bool = True) -> str:
 def kernel_line() -> str:
     """The doctor's `card code` line: the sandbox a notebook kernel starts in where its workspace names none
     (config.resolve_kernel_wrap), and why it is not the sandbox runtime when it is not."""
-    from . import kernel_wrap  # noqa: PLC0415
+    from . import srt  # noqa: PLC0415
 
     wrap, source = config.resolve_kernel_wrap({})
     by = f" ({config.KERNEL_WRAP_ENV})" if source == "env" else ""
@@ -2012,10 +2012,7 @@ def kernel_line() -> str:
     if wrap == config.KERNEL_WRAP_SRT:
         engine = "Seatbelt" if sys.platform == "darwin" else "bubblewrap"
         return f"runs in Anthropic's sandbox runtime{by} ({engine}): {bounds}"
-    node, package = kernel_wrap.node(), kernel_wrap.srt_package(config.REPO_ROOT)
-    why = ("" if by else "no node on PATH" if node is None else
-           "the sandbox runtime is not installed: run the installer again" if package is None else
-           "the sandbox runtime can't run here")
+    why = "" if by else srt.missing(config.REPO_ROOT, srt.node()) or "the sandbox runtime can't run here"
     if wrap == config.KERNEL_WRAP_BWRAP:
         return f"runs in bubblewrap{by}{f' ({why})' if why else ''}: {bounds}"
     return f"runs unsandboxed, with your user's access{by}{f' ({why})' if why else ''}"
