@@ -86,7 +86,7 @@ BOTH = "another active extension gives it too"
 DECIDE_WAIT_S = 180  # what an orientation's start waits for a view's check still being made
 RETRY_S = 300  # a failed check stands this long before a refresh asks again
 
-_locks: dict[str, asyncio.Lock] = {}
+_locks: dict[str, tuple[asyncio.AbstractEventLoop, asyncio.Lock]] = {}  # workspace -> (its loop, the lock)
 _asking: dict[tuple[str, str], dict[str, Any]] = {}  # (workspace, "<extension>/<view>") -> {key, task}
 _waiting: dict[str, int] = {}  # workspace -> refreshes waiting for its checks (refresh)
 
@@ -492,6 +492,29 @@ def views_of(c: str) -> list[dict[str, Any]]:
             for e in active(c) for v in _list(e, "views") if v.get("shown")]
 
 
+def _lock(c: str) -> asyncio.Lock:
+    loop = asyncio.get_running_loop()
+    got = _locks.get(c)
+    if got is None or got[0] is not loop:
+        got = _locks[c] = (loop, asyncio.Lock())
+    return got[1]
+
+
+def _checks(c: str) -> dict[str, dict[str, Any]]:
+    """The checks asked for workspace `c` on this event loop, by "<extension>/<view>"; one of another loop, which can
+    never answer here, is forgotten."""
+    loop = asyncio.get_running_loop()
+    out = {}
+    for (w, k), e in list(_asking.items()):
+        if w != c:
+            continue
+        if e["task"].get_loop() is loop:
+            out[k] = e
+        else:
+            _asking.pop((w, k), None)
+    return out
+
+
 def _stale(decision: dict[str, Any]) -> bool:
     """Whether a failed check has stood RETRY_S, so a refresh asks again."""
     from datetime import datetime, timezone  # noqa: PLC0415
@@ -530,7 +553,7 @@ async def _fit(c: str, name: str, v: dict[str, Any], files: list[tuple[Any, ...]
         return {"fits": False, "reason": NO_FILES, "by": "claims"}
     key = _view_key(name, v["slug"])
     at = view_fit.key(v["description"], files)
-    got = _asking.get((c, key))
+    got = _checks(c).get(key)
     if got is not None and got["key"] == at and got["task"].done():
         _asking.pop((c, key), None)
         try:
@@ -581,10 +604,10 @@ async def refresh(c: str, wait: float = 0.0) -> dict[str, Any]:
     _waiting[c] = _waiting.get(c, 0) + 1
     try:
         state = await _refresh(c)
-        running = [e["task"] for (w, _), e in list(_asking.items()) if w == c and not e["task"].done()]
+        running = [e["task"] for e in _checks(c).values() if not e["task"].done()]
         if running:
             await asyncio.wait(running, timeout=wait)
-        if any(w == c and e["task"].done() for (w, _), e in list(_asking.items())):
+        if any(e["task"].done() for e in _checks(c).values()):
             state = await _refresh(c)
         return state
     finally:
@@ -596,7 +619,7 @@ async def settle(c: str) -> None:
     name the files of the views shown, and main hears of the card types."""
     from . import cardtypes  # noqa: PLC0415
 
-    if any(w == c and not e["task"].done() for (w, _), e in list(_asking.items())):
+    if any(not e["task"].done() for e in _checks(c).values()):
         await refresh_quietly(c, wait=DECIDE_WAIT_S)
         await cardtypes.announce(c)
 
@@ -608,8 +631,7 @@ async def _refresh(c: str) -> dict[str, Any]:
     extensions. Returns the state."""
     from . import views  # noqa: PLC0415
 
-    lock = _locks.setdefault(c, asyncio.Lock())
-    async with lock:
+    async with _lock(c):
         state = read_state(c)
         off = await asyncio.to_thread(userconf.extensions_off)
         found = await asyncio.to_thread(added)
@@ -643,9 +665,9 @@ async def _refresh(c: str) -> dict[str, Any]:
         clash = conflicts(exts)
         for name, e in exts.items():
             _settle_views(name, e, state["shown"], clash)
-        for w, k in list(_asking):
-            if w == c and k not in checked and _asking[(w, k)]["task"].done():
-                _asking.pop((w, k))  # an answer for a view removed or switched off meanwhile
+        for k, entry in _checks(c).items():
+            if k not in checked and entry["task"].done():
+                _asking.pop((c, k))  # an answer for a view removed or switched off meanwhile
         now = {n for n, e in exts.items() if e.get("active")}
         fresh = sorted(now - set(state["oriented"]))
         new_state = {"off": state["off"], "shown": state["shown"], "oriented": sorted({*state["oriented"], *fresh}),
