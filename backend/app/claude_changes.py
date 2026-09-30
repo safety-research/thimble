@@ -128,6 +128,27 @@ def question(tree: Path) -> str:
     return "" if trusted(folder, _read(config)) else QUESTION.format(folder=folder, config=config)
 
 
+def skipped(tree: Path) -> str:
+    """Why install.sh does not ask the trust question for the install at `tree`, naming the folder; '' when it asks it
+    (question)."""
+    folder, config = workspaces_dir(tree), global_config()
+    rec = _read(home() / TRUST_FILE)
+    on = trusted(folder, _read(config))
+    if rec.get("folder") == str(folder) and rec.get("config") == str(config) and rec.get("answer") in ("yes", "no"):
+        if rec["answer"] == "no" and not on:
+            return f"answered no at your earlier install, so {folder} is not trusted; --trust-workspaces changes it"
+        if rec["answer"] == "no":
+            return f"answered no at your earlier install, but {config} trusts {folder} by an entry thimble did not add"
+        if not on:
+            return (f"answered yes at your earlier install, but {config} no longer trusts {folder}; --trust-workspaces "
+                    "trusts it again")
+        if rec.get("added"):
+            return f"already trusted from your earlier install ({folder}); --no-trust-workspaces changes it"
+    if on:
+        return f"already trusted in {config} ({folder}), by an entry thimble did not add"
+    return ""
+
+
 def install_trust(tree: Path, answer: str | None = None) -> str:
     """install.sh's trust step for the install at `tree` (module note): `answer` is yes or no from its flags or its
     question, else the recorded one, else asked on a terminal. The line to print."""
@@ -239,6 +260,8 @@ if __name__ == "__main__":
         print(install_trust(Path(args[1]), {"--yes": "yes", "--no": "no"}.get(args[2]) if len(args) == 3 else None))
     elif args[:1] == ["question"] and len(args) == 2:
         print(question(Path(args[1])))
+    elif args[:1] == ["skipped"] and len(args) == 2:
+        print(skipped(Path(args[1])))
     elif args == ["undo"]:
         failed = False
         for step in (cleanup, untrust):
@@ -253,6 +276,6 @@ if __name__ == "__main__":
             failed = True
         sys.exit(1 if failed else 0)
     else:
-        print("usage: claude_changes.py trust <tree> [--yes | --no] | question <tree> | undo",
+        print("usage: claude_changes.py trust <tree> [--yes | --no] | question <tree> | skipped <tree> | undo",
               file=sys.stderr)
         sys.exit(2)

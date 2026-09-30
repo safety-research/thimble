@@ -887,10 +887,19 @@ show_plan() {  # what the install puts where, before its questions
     if [ "$trust" = --yes ]; then say "  Claude Code's trust of thimble's workspaces folder: $cc_json"
     elif [ -z "$trust" ] && [ -n "$trust_q" ]; then asked+=("Claude Code's trust of thimble's workspaces folder: $cc_json"); fi
   fi
-  [ "${#asked[@]}" -gt 0 ] || return 0
-  say "  and only on a yes to its question:"
-  local a
-  for a in "${asked[@]}"; do say "  - $a"; done
+  local a skipped=()
+  if [ "${#asked[@]}" -gt 0 ]; then
+    say "  and only on a yes to its question:"
+    for a in "${asked[@]}"; do say "  - $a"; done
+  fi
+  [ -n "$browser" ] || [ -z "$browser_skip" ] || skipped+=("the browser: $browser_skip")
+  if [ "$deps_only" = 0 ]; then
+    [ -n "$plugin" ] || [ -z "$plugin_skip" ] || skipped+=("the plugin: $plugin_skip")
+    [ -z "$trust_skip" ] || skipped+=("the trust: $trust_skip")
+  fi
+  [ "${#skipped[@]}" -gt 0 ] || return 0
+  say "  questions install.sh does not ask this time:"
+  for a in "${skipped[@]}"; do say "  - $a"; done
 }
 
 browser_text() {  # the browser question's explanation, after probe_browser
@@ -909,13 +918,28 @@ plugin_text() {  # the plugin question
 }
 
 earlier_answers() {  # what settles each question before it is asked: the browser and plugin answers of an earlier
-  # install, and the trust question when one is due
-  browser_was="$(browser_prev)"
+  # install, and the trust question when one is due; for each question that is not asked, why, naming the folder
+  # (browser_skip, plugin_skip, trust_skip)
+  browser_was="$(browser_prev)" browser_skip="" plugin_prev="" plugin_reg="" plugin_skip="" trust_skip=""
+  if [ -n "$browser_was" ]; then
+    if [ -f "$home/config.json" ] && [ "$(json_get "$home/config.json" browser 2>/dev/null)" = "$browser_was" ]; then
+      browser_skip="answered $browser_was at your earlier install ($home/config.json); --browser changes it"
+    else
+      browser_skip="bundled, since your earlier install in $dir downloaded Playwright's headless Chromium; --browser changes it"
+    fi
+  fi
   [ "$deps_only" = 1 ] || plugin_record
+  if [ -n "$plugin_prev" ]; then
+    local other=--no-plugin
+    [ "$plugin_prev" = yes ] || other=--plugin
+    if [ -f "$home/plugin.json" ]; then plugin_skip="answered $plugin_prev at your earlier install ($home/plugin.json); $other changes it"
+    else plugin_skip="yes, since Claude Code has thimble@$mp_name registered already ($(cc_path plugins)); --no-plugin changes it"; fi
+  fi
   trust_q=""  # the trust question when claude_changes.install_trust would ask it (python3 runs the file before
   # backend/.venv exists; without python3 the trust step asks it)
   if [ "$deps_only" = 0 ] && [ -z "$trust" ] && command -v python3 >/dev/null 2>&1; then
     trust_q="$(THIMBLE_HOME="$home" python3 -I "$src/backend/app/claude_changes.py" question "$dir" 2>/dev/null)" || trust_q=""
+    [ -n "$trust_q" ] || trust_skip="$(THIMBLE_HOME="$home" python3 -I "$src/backend/app/claude_changes.py" skipped "$dir" 2>/dev/null)" || trust_skip=""
   fi
 }
 
@@ -931,7 +955,7 @@ ask() {  # the questions, before anything is installed: the browser, the sandbox
   if [ "$dry" = 1 ]; then
     step "the questions install.sh asks on a terminal, and the flag that gives each answer"
     if [ -n "$browser" ]; then say "1. the browser: answered by --browser $browser"
-    elif [ -n "$browser_was" ]; then say "1. the browser: answered $browser_was earlier; --browser changes it"
+    elif [ -n "$browser_was" ]; then say "1. the browser: $browser_skip"
     else
       probe_browser
       item 1 "$(browser_text)"
@@ -944,12 +968,13 @@ ask() {  # the questions, before anything is installed: the browser, the sandbox
     else item 2 "$(sandbox_text)"; say "   - yes: --sandbox-deps"; say "   - no: --no-sandbox-deps"; fi
     [ "$deps_only" = 0 ] || return 0
     if [ -n "$plugin" ]; then say "3. the plugin: answered by --$( [ "$plugin" = yes ] || echo 'no-' )plugin"
-    elif [ -n "$plugin_prev" ]; then say "3. the plugin: answered $plugin_prev earlier; --plugin or --no-plugin changes it"
+    elif [ -n "$plugin_prev" ]; then say "3. the plugin: $plugin_skip"
     elif [ "$have_claude" = 0 ]; then say "3. the plugin: not asked, since there is no claude CLI"
     else say "3. $(plugin_text)"; say "   - yes: --plugin"; say "   - no: --no-plugin"; fi
     if [ -n "$trust" ]; then say "4. the trust: answered by --$( [ "$trust" = --yes ] || echo 'no-' )trust-workspaces"
     elif [ -n "$trust_q" ]; then item 4 "$trust_q"; say "   - yes: --trust-workspaces"; say "   - no: --no-trust-workspaces"
-    else say "4. the trust: answered earlier, or the folder is trusted already; --trust-workspaces or --no-trust-workspaces changes it"; fi
+    elif [ -n "$trust_skip" ]; then say "4. the trust: $trust_skip"
+    else say "4. the trust: asked at the trust step; --trust-workspaces or --no-trust-workspaces answers it"; fi
     return 0
   fi
   [ -t 0 ] && tty=1
