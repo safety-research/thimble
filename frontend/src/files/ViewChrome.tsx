@@ -94,8 +94,8 @@ export function ViewNotesLine({ ws, name, notes, shownLabels, onPick }: LineProp
   )
 }
 
-/** The files the view claims and does not show whole: their count, which a click lists, each with why its reader hides
- * it, else how much of it build_index read. */
+/** The files the view claims and does not show whole, and those of folders like the claimed ones that it does not
+ * claim: their count, which a click lists, each with why its reader hides it, else how much of it build_index read. */
 function NotShown({ shown, name, onPick }: { shown: ViewShown | null; name: string; onPick: (path: string) => void }) {
   const [at, setAt] = useState<HTMLButtonElement | null>(null)
   const [open, setOpen] = useState(false)

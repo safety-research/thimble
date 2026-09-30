@@ -995,12 +995,55 @@ def not_shown(files: list[tuple[str, int, int]], reads: dict[str, int], hidden: 
     return out
 
 
+def _alike(a: str, b: str) -> bool:
+    """Whether two folder names read as two of one kind, such as two runs: the same but for their digits, or sharing a
+    start or an end of three characters or more."""
+    if re.sub(r"\d+", "#", a) == re.sub(r"\d+", "#", b):
+        return True
+    return len(os.path.commonprefix([a, b])) >= 3 or len(os.path.commonprefix([a[::-1], b[::-1]])) >= 3
+
+
+def sibling_files(claimed: list[str], every: list[str]) -> list[str]:
+    """The files the claims leave out of each folder beside a claimed file's folder that holds the same files, such as
+    another run's beside the one run a view claims. Such a folder has a name of the claimed one's kind (_alike) and
+    holds at least half of the paths the claimed files have below the claimed folder; its files returned are those in
+    the same subfolders and of the same types as the claimed ones."""
+    mine = set(claimed)
+    under: dict[tuple[str, str], set[str]] = {}
+    for p in mine:
+        parts = p.split("/")
+        for i in range(len(parts) - 1):
+            under.setdefault(("/".join(parts[:i]), parts[i]), set()).add("/".join(parts[i + 1:]))
+    if not under:
+        return []
+    parents = {q for q, _ in under}
+    kids: dict[str, dict[str, list[str]]] = {}
+    for p in every:
+        parts = p.split("/")
+        for i in range(len(parts) - 1):
+            q = "/".join(parts[:i])
+            if q in parents:
+                kids.setdefault(q, {}).setdefault(parts[i], []).append("/".join(parts[i + 1:]))
+    have = set(every)
+    out: set[str] = set()
+    for (q, r), rests in under.items():
+        kinds = {(os.path.dirname(x), os.path.splitext(x)[1]) for x in rests}
+        for s, theirs in (kids.get(q) or {}).items():
+            base = f"{q}/{s}" if q else s
+            if s == r or not _alike(r, s) or sum(f"{base}/{x}" in have for x in rests) * 2 < len(rests):
+                continue
+            out |= {f"{base}/{x}" for x in theirs if (os.path.dirname(x), os.path.splitext(x)[1]) in kinds}
+    return sorted(out - mine)
+
+
 async def shown(c: str, slug: str, version: str | None = None) -> dict[str, Any]:
     """What thimble draws above the view: {files, not_shown: {count, unexplained, files}, derived, errors}. `files` is
-    the count of claimed files and not_shown the ones the view does not show whole (not_shown), the first FILES_LISTED
-    of them, `unexplained` counting those hidden() gives no why for; derived is view.json's list, then the fields the
+    the count of claimed files and not_shown the ones the view does not show whole (not_shown), then the files of
+    folders like the claimed ones that the claims leave out (sibling_files, `claimed` false), the first FILES_LISTED of
+    them, `unexplained` counting those hidden() gives no why for; derived is view.json's list, then the fields the
     reader's derived(index) adds; errors say what failed of hidden() and derived()."""
     view, req, files = await asyncio.to_thread(_prepared, c, slug, version)
+    every = await asyncio.to_thread(folder_files, config.corpus_dir(c), "")
     ans = await _call(c, req, "shown")
     ans = ans if isinstance(ans, dict) else {}
     reads = ans.get("reads") if isinstance(ans.get("reads"), dict) else {}
@@ -1011,7 +1054,11 @@ async def shown(c: str, slug: str, version: str | None = None) -> dict[str, Any]
         if part.get("error"):
             errors.append(f"{name}() failed: {part['error']}")
         parts[name] = part.get("result")
-    rows = not_shown(files, reads, _hidden(parts["hidden"]))
+    hidden = _hidden(parts["hidden"])
+    rows = not_shown(files, reads, hidden)
+    sizes = {f[0]: f[1] for f in every}
+    rows += [{"path": p, "size": sizes.get(p, 0), "read": 0, "why": hidden.get(p, ""), "claimed": False}
+             for p in sibling_files([f[0] for f in files], list(sizes))]
     return {"files": len(files),
             "not_shown": {"count": len(rows), "unexplained": sum(1 for r in rows if not r["why"]), "files": rows[:FILES_LISTED]},
             "derived": _derived([*view["derived"], *(parts["derived"] if isinstance(parts["derived"], list) else [])]),
@@ -2529,10 +2576,15 @@ async def check(c: str, slug: str, locators: list[str] | None = None, *, shot_di
     else:
         report["problems"] += cov["errors"]
         if cov["not_shown"]["unexplained"]:
-            rows = [r for r in cov["not_shown"]["files"] if not r["why"]]
-            report["problems"].append(_hint("view-not-shown", count=cov["not_shown"]["unexplained"], files="; ".join(
-                f"{r['path']} (read {r['read']:,} of {r['size']:,} bytes)" for r in rows[:NOT_SHOWN_NAMED])
-                + (" and more" if len(rows) > NOT_SHOWN_NAMED else "")))
+            rows = [r for r in cov["not_shown"]["files"] if not r["why"] and r.get("claimed", True)]
+            if rows:
+                report["problems"].append(_hint("view-not-shown", count=len(rows), files="; ".join(
+                    f"{r['path']} (read {r['read']:,} of {r['size']:,} bytes)" for r in rows[:NOT_SHOWN_NAMED])
+                    + (" and more" if len(rows) > NOT_SHOWN_NAMED else "")))
+            beside = [r["path"] for r in cov["not_shown"]["files"] if not r["why"] and not r.get("claimed", True)]
+            if beside:
+                report["problems"].append(_hint("view-not-claimed", count=len(beside), files="; ".join(
+                    beside[:NOT_SHOWN_NAMED]) + (" and more" if len(beside) > NOT_SHOWN_NAMED else "")))
 
     wanted: list[str] = list(dict.fromkeys(str(x).strip() for x in (locators or []) if str(x).strip()))
     # sampled lines beside the locators, so a view is never checked only on the refs its author chose; a binary file

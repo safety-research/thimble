@@ -790,6 +790,10 @@ The page fetched {fetched} records, but only {records} of its elements carry a r
 
 {count} claimed files are neither read to the end by build_index nor listed with a why by hidden(index): {files}. The analyst sees each one above the view as not shown. Read each file whole in build_index, with Python's `open()`, or return it from hidden(index) with its `path` and a `why` that says why the view leaves it out.
 
+## view-not-claimed
+
+{count} files sit in folders beside the ones the view claims and hold the same files, such as another run's: {files}. The analyst sees each one above the view as not shown. Claim them too and show them, with a way to choose among the folders if the page shows one at a time, or claim them and return them from hidden(index) with a `why`.
+
 ## view-derived-undeclared
 
 reader.py derives fields that the view's list of derived fields leaves out: {fields}. The analyst sees the list above the view, and each field on it marked where the page names it. Add each field to `derived` in view.json as an object with `field`, `from` and `how`, or return it from the reader's derived(index), and give the element that names it on the page `data-field` with its name.

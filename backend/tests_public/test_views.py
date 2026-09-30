@@ -239,6 +239,20 @@ async def test_the_harness_counts_what_build_index_reads_and_the_checks_fail_on_
     assert not any("(read" in p for p in rep["problems"]), rep["problems"]
 
 
+def test_a_view_of_one_run_leaves_the_other_runs_files_not_shown():
+    """Folders beside a claimed one that hold the same files, as runs do, have their files counted as not shown; a
+    folder of another kind is left alone though some of its names match."""
+    every = [f"runs/sweep1-{r}/{f}" for r in ("managed", "emergent") for f in ("events.jsonl", "manifest.json",
+                                                                               "agents/a1.jsonl", "agents/a2.jsonl")]
+    every += ["runs/sweep1-emergent/notes.md", "chat/2026-01-01.jsonl", "events/2026-01-01.jsonl"]
+    claimed = [p for p in every if "managed" in p]
+    assert views.sibling_files(claimed, every) == [
+        "runs/sweep1-emergent/agents/a1.jsonl", "runs/sweep1-emergent/agents/a2.jsonl",
+        "runs/sweep1-emergent/events.jsonl", "runs/sweep1-emergent/manifest.json"]
+    assert views.sibling_files(["chat/2026-01-01.jsonl"], every) == []
+    assert views.sibling_files([p for p in every if p.startswith("runs/")], every) == []
+
+
 def test_the_count_is_what_the_reader_takes_not_what_the_buffers_read(tmp_path):
     """A file counts as read to the end only when the reader took all of it: one line of a small file, or a stop in a
     file's last buffer, counts as far as the reader got. An unbuffered read counts too."""
