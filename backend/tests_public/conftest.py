@@ -114,7 +114,25 @@ def analyst():
     from app import hook_auth
 
     _record(ui_key=UI_KEY)
-    return Request({"type": "http", "headers": [(b"cookie", f"{hook_auth.UI_COOKIE}={UI_KEY}".encode())]})
+    return Request({"type": "http", "headers": [(b"cookie", f"{hook_auth.ui_cookie()}={UI_KEY}".encode())]})
+
+
+def pytest_configure(config):
+    config.addinivalue_line(
+        "markers", "real_write_guard: keep hook_auth.LocalWriteGuard on for a test (the suite bypasses it by default)")
+
+
+@pytest.fixture(autouse=True)
+def _write_guard_off(request, monkeypatch):
+    """A test's TestClient stands in for thimble's own browser and plugin, which prove themselves to
+    hook_auth.LocalWriteGuard (the ui_key cookie or the token); the guard would otherwise refuse their writes as it
+    refuses a notebook kernel. Off by default so a route test needs no credential; a test marked `real_write_guard`
+    keeps the real guard."""
+    if "real_write_guard" in request.keywords:
+        return
+    from app import hook_auth
+
+    monkeypatch.setattr(hook_auth, "write_guarded", lambda method, path: False)
 
 
 @pytest.fixture(autouse=True)

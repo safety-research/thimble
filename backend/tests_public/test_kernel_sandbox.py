@@ -3,14 +3,17 @@ macOS and Linux, the Seatbelt profile it makes of them on macOS, and what the se
 from __future__ import annotations
 
 import json
+import os
 import subprocess
+import sys
 
 import pytest
 
-from app import config, kernel_wrap, notebook, srt
+from app import channel, config, kernel_wrap, notebook, srt, views
 
 SRT = srt.package(config.REPO_ROOT)
 NODE = srt.node()
+LINUX = sys.platform.startswith("linux")
 WS, CORPUS, HOME = "/Users/matt/.thimble/workspaces/w", "/Users/matt/corpus", "/Users/matt"
 
 
@@ -40,7 +43,7 @@ def test_on_macos_srt_hides_the_home_and_user_data_and_shows_the_kernel_its_own_
     """The kernel under srt on macOS reads neither the home folder, other users' folders, other volumes, the temp
     folders nor thimble's and Claude Code's folders; it reads the corpus, the workspace, the venv, each folder its
     interpreter resolves through and the fonts; it writes only the workspace; the workspace's config stays hidden and
-    read-only inside the workspace, telemetry.jsonl read-only."""
+    read-only inside the workspace, telemetry.jsonl, the view log and the views folder read-only."""
     rules, (venv, minor, real) = _rules(tmp_path, "darwin")
     fs = rules["filesystem"]
     hidden = {f"{WS}/settings.json", f"{WS}/config.json"}
@@ -49,7 +52,8 @@ def test_on_macos_srt_hides_the_home_and_user_data_and_shows_the_kernel_its_own_
     assert {CORPUS, WS, str(venv), str(minor), str(real), "/app/backend/app/fonts"} <= set(fs["allowRead"])
     assert not any("sandbox-runtime" in p for p in fs["allowRead"]), "apply-seccomp runs only on Linux"
     assert fs["allowWrite"] == [WS]
-    assert set(fs["denyWrite"]) == {*hidden, f"{WS}/telemetry.jsonl", "/tmp/claude", "/private/tmp/claude"}
+    read_only = {f"{WS}/telemetry.jsonl", f"{WS}/viewed.jsonl", f"{WS}/views"}
+    assert set(fs["denyWrite"]) == {*hidden, *read_only, "/tmp/claude", "/private/tmp/claude"}
     linux = _rules(tmp_path / "l", "linux")[0]["filesystem"]
     assert {"/home", "/tmp", "/mnt", "/run/user"} <= set(linux["denyRead"]) and "/Users" not in linux["denyRead"]
     assert "/app/frontend/node_modules/@anthropic-ai/sandbox-runtime/vendor/seccomp" in linux["allowRead"]
@@ -80,6 +84,109 @@ def test_srt_makes_a_seatbelt_profile_of_the_rules_that_keeps_the_workspace_conf
     writes = profile[profile.index("; File write"):]
     allowed = writes[writes.index("(allow file-write*"):writes.index("(with message", writes.index("(allow file-write*"))]
     assert f'(subpath "{WS}")' in allowed and HOME + '"' not in allowed and CORPUS not in allowed
+
+
+def test_on_linux_srt_hides_a_folder_inside_a_hidden_one_by_the_outer_rule_unless_something_between_is_shown():
+    """The home inside /home, and thimble's folder inside the home, are hidden by /home's rule alone, which lets srt
+    show uv's minor-version link inside the home; with the corpus being the home, thimble's folder keeps its own rule,
+    and the workspace's config inside the shown workspace always does."""
+    ws = "/home/u/.thimble/workspaces/w"
+
+    def deny(corpus: str) -> set[str]:
+        rules = kernel_wrap.srt_rules(corpus_dir=corpus, workspace_dir=ws, venv=None, python="/usr/bin/python3",
+                                      srt_dir="/srt", hide=["/home/u/.thimble"], home="/home/u", platform="linux")
+        return set(rules["filesystem"]["denyRead"])
+
+    config_files = {f"{ws}/settings.json", f"{ws}/config.json"}
+    assert "/home" in deny("/data/c") and config_files <= deny("/data/c")
+    assert not {"/home/u", "/home/u/.thimble"} & deny("/data/c")
+    assert {"/home/u", "/home/u/.thimble", *config_files} <= deny("/home/u")
+
+
+def _wrap_works(wrap: str) -> bool:
+    if wrap == "srt":
+        return kernel_wrap.srt_works(NODE, SRT)
+    return LINUX and kernel_wrap.works()
+
+
+@pytest.mark.parametrize("wrap", ["srt", "bwrap"])
+def test_on_linux_a_venv_whose_python_goes_through_uv_s_minor_version_folder_runs_wrapped(wrap, tmp_path):
+    """A venv's python that links into uv's minor-version folder (cpython-3.12-… → cpython-3.12.13-…) in the home folder
+    runs in the kernel's sandbox: the link resolves inside it as outside, though the home lies in /tmp, both hidden."""
+    if not (LINUX and _wrap_works(wrap)):
+        pytest.skip(f"{wrap} can't sandbox a process here")
+    home = tmp_path / "home"
+    real = home / ".local" / "share" / "uv" / "python" / "cpython-3.12.13-linux-x86_64-gnu"
+    (real / "bin").mkdir(parents=True)
+    (real / "bin" / "python3.12").symlink_to(os.path.realpath(sys.executable))
+    minor = real.with_name("cpython-3.12-linux-x86_64-gnu")
+    minor.symlink_to(real.name)
+    venv, ws, corpus, conn = (tmp_path / n for n in ("venv", "ws", "corpus", "conn"))
+    (venv / "bin").mkdir(parents=True)
+    (venv / "bin" / "python").symlink_to(minor / "bin" / "python3.12")
+    for d in (ws, corpus, conn, *(ws / name for name in kernel_wrap.READ_ONLY_DIRS)):
+        d.mkdir()
+    for name in kernel_wrap.HIDDEN_FILES:
+        (ws / name).write_text("{}\n")
+    py = str(venv / "bin" / "python")
+    cmd = [py, "-c", "print('ran')"]
+    if wrap == "srt":
+        rules = kernel_wrap.srt_rules(corpus_dir=corpus, workspace_dir=ws, venv=venv, python=py, srt_dir=SRT, home=home,
+                                      platform=sys.platform)
+        argv, env = kernel_wrap.srt_argv(cmd, node=NODE, srt_dir=SRT, rules=rules), kernel_wrap.srt_env(dict(os.environ), home=ws)
+    else:
+        argv, env = kernel_wrap.kernel_wrap_argv(cmd, corpus_dir=corpus, workspace_dir=ws, connection_dir=conn, venv=venv,
+                                                 python=py), None
+    r = subprocess.run(argv, capture_output=True, text=True, timeout=60, env=env, cwd=ws, stdin=subprocess.DEVNULL)
+    assert (r.returncode, r.stdout.strip()) == (0, "ran"), r.stderr[-2000:]
+
+
+READER = """
+def build_index(paths):
+    return sum(1 for p in paths for _ in open(p))
+
+
+def records(index, query):
+    return index
+
+
+def resolve(index, locator):
+    return None
+"""
+CARD = """
+import json, pathlib
+views = pathlib.Path.cwd().parent / "views"
+said = [json.loads((views / "posts" / "view.json").read_text())["accepts"][0]["means"]]
+forged = {"name": "x", "claims": ["board.jsonl"], "accepts": [{"form": "L<n>", "means": "WRITTEN-BY-A-CARD"}], "built": "x"}
+for path in (views / "posts" / "view.json", views / "planted" / "view.json"):
+    try:
+        path.parent.mkdir(exist_ok=True)
+        path.write_text(json.dumps(forged))
+        said.append("wrote")
+    except OSError:
+        said.append("refused")
+print(*said)
+"""
+
+
+@pytest.mark.parametrize("wrap", ["srt", "bwrap"])
+async def test_card_code_reads_the_views_but_can_t_change_the_forms_main_s_prompt_lists(wrap, monkeypatch, workspaces_tmp):
+    """In the wrapped kernel a card's code reads a view's view.json but can neither change it nor plant a view, so nothing
+    it writes reaches the citation forms of main's prompt; the views kernel still reads the reader and keeps its index."""
+    if not _wrap_works(wrap):
+        pytest.skip(f"{wrap} can't sandbox a process here")
+    monkeypatch.setenv(config.KERNEL_WRAP_ENV, wrap)
+    views.write_view("mini", "posts", name="Posts", why="", claims=["board.jsonl"],
+                     accepts=[{"form": "L<n>", "means": "one post"}], reader=READER, html="<p>posts</p>")
+    try:
+        cell = await notebook.run_code("mini", CARD, "main")
+        assert "".join(b.get("text/plain", "") for b in cell["outputs"]).split() == ["one", "post", "refused", "refused"]
+        prompt = channel.session_prompt(str(config.corpus_dir("mini")))
+        assert "one post (Posts)" in views.forms_text("mini") and "one post" in prompt and "WRITTEN-BY-A-CARD" not in prompt
+        assert await views.reader_call("mini", "posts", "records") == 8
+        assert list(views.index_dir("mini", "posts").glob("*.index.pickle"))
+    finally:
+        await notebook.shutdown_all()
 
 
 def test_a_workspace_set_to_srt_never_runs_unwrapped(monkeypatch, workspaces_tmp):

@@ -5,9 +5,10 @@ import './lib/telemetry'
 import { installProblemLog } from './lib/problemLog'
 import { installChunkRecovery } from './lib/chunkRecovery'
 import App from './App'
-import { claimKey } from './lib/api'
+import { claimKey, claimOnHashChange } from './lib/api'
 
-claimKey()
+void claimKey()
+claimOnHashChange()
 installProblemLog()
 installChunkRecovery()
 
