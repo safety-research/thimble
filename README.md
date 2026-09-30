@@ -20,6 +20,8 @@ https://github.com/user-attachments/assets/3c21e405-6b8d-4ba6-85a8-24211800596c
 claude "install thimble from https://github.com/safety-research/thimble"
 ```
 
+Agents installing thimble for a user: follow the "Installing" section of [CLAUDE.md](CLAUDE.md), and ask the user every question `install.sh` lists.
+
 ### Manual
 
 1. Download the zip from the [latest release](https://github.com/safety-research/thimble/releases/latest).
