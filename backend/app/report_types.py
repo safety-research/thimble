@@ -3,8 +3,8 @@
 A type is {slug, name, description, renderer, prompt, rubric}; the built-ins (report, story, slides) are backed by
 prompts/report-*.md and custom types live under workspaces/<c>/report-types/<slug>/. A video is a custom type made from
 the video extension's report type, and one written while the video was built in becomes one when it is first read
-(_migrate_video). A document is stored at
-investigations/<inv>/<slug>.json, its frame at <slug>.frame.json, its earlier generations under <slug>/.
+(_migrate_video). A document is stored at investigations/<inv>/<slug>.json, its frame at <slug>.frame.json, its earlier
+generations under <slug>/.
 
 No model runs here. The writer (write_session.py) reads a type's form with read_ref("type:<name>") and saves with
 write_document (a whole document in markdown) or edit_document (one passage). Each save runs the citation check
@@ -206,7 +206,8 @@ def _migrate_video(c: str) -> None:
     """A workspace's video written while the video was built in: its type is made, from the video extension's report
     type, so it opens, is written and is exported as any video."""
     d = _type_dir(c, LEGACY_VIDEO)
-    if (d / "type.json").is_file() or not any((config.workspace_dir(c) / "investigations").glob(f"*/{LEGACY_VIDEO}.json")):
+    written = (config.workspace_dir(c) / "investigations").glob(f"*/{LEGACY_VIDEO}.json")
+    if (d / "type.json").is_file() or not any(written):
         return
     d.mkdir(parents=True, exist_ok=True)
     (d / "prompt.md").write_text("", "utf-8")

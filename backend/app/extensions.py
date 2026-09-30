@@ -20,8 +20,9 @@
 An extension loads when read_extension finds no problem: this thimble is in its range, its Python packages import, its
 js names only libraries thimble inlines, and the extensions it needs are added. It is active in a workspace when it
 loads, neither thimble's config (`extensions.<name>.enabled: false`) nor the workspace's switch in Settings turns it
-off, and the extensions it needs are active there. An active extension's agents and orientation instructions join the orientation, its card types join main's prompt
-where their claims match files, and its report types are offered in + New.
+off, and the extensions it needs are active there. An active extension's agents and orientation instructions join the
+orientation, its card types join main's prompt where their claims match files, and its report types are offered in
++ New.
 
 Only its views check whether they fit (_fit): one quick model call per view and workspace, from the view's description
 and a few records of the files it claims (view_fit.py), kept until those files change. Until it answers, and when it
@@ -1183,7 +1184,8 @@ def list_lines(workspaces_dir: Path) -> list[str]:
     it a line per view, shown or hidden there with its check's reason. Then a line per extension thimble ships that is
     not added."""
     got = added()
-    idle = [f"{n}{' ' + v if v else ''}, built in: not added; `thimble extension add {n}` adds it" for n, v in not_added()]
+    idle = [f"{n}{' ' + v if v else ''}, built in: not added; `thimble extension add {n}` adds it"
+            for n, v in not_added()]
     if not got:
         return ["no extensions added; `thimble extension add <git URL | folder | built-in name>` adds one", *idle]
     off = userconf.extensions_off()
@@ -1240,7 +1242,8 @@ def doctor_line() -> str:
             parts.append(f"{name}{v}")
             loadable[name] = {**info, "active": True}
     _needs_running(loadable, "")
-    parts = [p if (e := loadable.get(p.split(" ", 1)[0])) is None or e["active"] else f"{p} ({e['why']})" for p in parts]
+    parts = [p if (e := loadable.get(p.split(" ", 1)[0])) is None or e["active"] else f"{p} ({e['why']})"
+             for p in parts]
     return "; ".join(parts + [f"conflict: {x}" for x in conflict_lines(conflicts(loadable))])
 
 

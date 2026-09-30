@@ -760,8 +760,8 @@ def _filename(title: str, slug: str, ext: str) -> str:
 
 async def export(c: str, inv_id: str, slug: str, fmt: str,
                  progress: Callable[[float], None] | None = None) -> tuple[bytes, str, str]:
-    """(content, file name, mime) of the document in format `fmt`, `progress` told how far a video file is. HTTPException
-    404 for no document or no such format, 409 for a format that cannot run here, with the reason."""
+    """(content, file name, mime) of the document in format `fmt`, `progress` told how far a video file is.
+    HTTPException 404 for no document or no such format, 409 for a format that cannot run here, with the reason."""
     from . import film_export, report_types  # noqa: PLC0415
 
     doc = await asyncio.to_thread(report_types.read_doc, c, inv_id, slug)
@@ -798,7 +798,8 @@ async def export(c: str, inv_id: str, slug: str, fmt: str,
 
 
 async def _hooked(c: str, slug: str, doc: dict[str, Any], f: dict[str, Any], m: dict[str, Any],
-                  pics: dict[str, dict[str, Any]], progress: Callable[[float], None] | None = None) -> tuple[bytes, str, str]:
+                  pics: dict[str, dict[str, Any]],
+                  progress: Callable[[float], None] | None = None) -> tuple[bytes, str, str]:
     from . import film_export  # noqa: PLC0415
 
     hook = hook_of(c, slug)
@@ -838,8 +839,8 @@ async def _hooked(c: str, slug: str, doc: dict[str, Any], f: dict[str, Any], m: 
 # --------------------------------------------------------------------------- the Report as a video
 # The Report's Video writes a video from the report, then exports it. A `write` event asks main to start the writer of
 # the workspace's video, the video extension's report type, made when there is none; once the writer has ended with the
-# video saved, it is exported with the video's own Video format. One run per workspace, kept in memory; its file waits in
-# the workspace's scratch folder for the browser to fetch.
+# video saved, it is exported with the video's own Video format. One run per workspace, kept in memory; its file waits
+# in the workspace's scratch folder for the browser to fetch.
 
 REPORT = "report"
 VIDEO_REQUEST = "Write the video from the report, report:report."
@@ -861,7 +862,8 @@ def report_video(c: str, browser_is: tuple[str, str] | None = None, enc: Any = F
 
     kind, why_off = browser_is or browser()
     enc = film_export.encoder() if enc is False else enc
-    f = {"id": "video", "name": FORMAT_INFO["video"]["name"], "ext": enc[0] if enc else "mp4", "ok": True, "write": True}
+    f = {"id": "video", "name": FORMAT_INFO["video"]["name"], "ext": enc[0] if enc else "mp4", "ok": True,
+         "write": True}
     if _video_type(c) is None:
         f.update(ok=False, why="Needs the video extension, which does not run here")
     elif kind == "off":
@@ -872,7 +874,7 @@ def report_video(c: str, browser_is: tuple[str, str] | None = None, enc: Any = F
 
 
 def _video_doc(c: str) -> str:
-    """The video the Report's Video writes: the workspace's first made from the video extension's type, else a new one."""
+    """The video the Report's Video writes: the workspace's first of the video extension's type, else a new one."""
     from . import report_types  # noqa: PLC0415
 
     for t in report_types.list_types(c):
@@ -912,7 +914,7 @@ async def start_report_video(c: str) -> dict[str, Any]:
         raise HTTPException(409, "The report is not written yet")
     if not channel.reachable(c):
         raise HTTPException(409, channel.NOT_LISTENING.format(cwd=config.corpus_dir(c)))
-    slug = _video_doc(c)  # on the event loop: investigation.emit, which tells the browser of a new type, runs only there
+    slug = _video_doc(c)  # on the event loop: investigation.emit, which tells the browser of the type, runs only there
     before = _saved_at(c, slug)
     if not write_session.running(c, slug):
         channel.post(c, report_types.WRITE_EVENT, {"doc": slug, "text": VIDEO_REQUEST})

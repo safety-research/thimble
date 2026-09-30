@@ -2631,7 +2631,7 @@ def cmd_restart(args: argparse.Namespace) -> int:
 
 
 def ship_extensions() -> None:
-    """The built-in extensions thimble ships added on its first run (extensions.ship); a failure is said, never raised."""
+    """The extensions thimble ships added on its first run (extensions.ship); a failure is said, never raised."""
     from . import extensions  # noqa: PLC0415
 
     try:
