@@ -954,7 +954,6 @@ ask() {  # the questions, before anything is installed: the browser, the sandbox
   tty=0
   if [ "$dry" = 1 ]; then
     step "the questions install.sh asks on a terminal, and the flag that gives each answer"
-    say "an agent installing for someone asks them each question below, in its words and with its answers as the options, answers none itself, and runs install.sh with one flag per answer (CLAUDE.md, Installing)"
     if [ -n "$browser" ]; then say "1. the browser: answered by --browser $browser"
     elif [ -n "$browser_was" ]; then say "1. the browser: $browser_skip"
     else
@@ -992,7 +991,7 @@ ask() {  # the questions, before anything is installed: the browser, the sandbox
     if [ "$src" != "$dir" ] && earlier_install; then
       again="Ask them, then run \`thimble update\` again with a flag for each, which it passes on to install.sh. An install older than 0.3.0 has a \`thimble update\` that takes no flags: unzip the release and run its scripts/install.sh --dir $dir with the flags."
     fi
-    [ "${#need[@]}" = 0 ] || die "there is no terminal to ask on, so each question needs its answer as a flag; an agent installing for someone asks them each one and answers none itself. Not answered:
+    [ "${#need[@]}" = 0 ] || die "there is no terminal to ask on, so each question needs its answer as a flag. Not answered:
 $(printf '  %s\n' "${need[@]}")
 $again"
     return 0
