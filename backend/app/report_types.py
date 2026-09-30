@@ -2871,17 +2871,18 @@ _NOUN_AFTER = frozenset("in on at by of from into with within under see as and o
 
 
 def card_nouns(text: str, cites: _Citations) -> str:
-    """A sentence's bare card refs that it reads as nouns, as each card's title in quotes: one a word follows, or one
-    right after a word such as "in" or "the" (_NOUN_AFTER). plain_text drops the others, which cite."""
+    """A sentence's bare refs to a whole card that it reads as nouns, right after a word such as "in" or "the"
+    (_NOUN_AFTER), as each card's title in quotes. plain_text drops the others, which cite, as does every ref to a line or
+    a cell of a card."""
     def name(m: "re.Match[str]") -> str:
         before = re.search(r"([A-Za-z]+)\s*$", text[: m.start()])
-        noun = bool(re.match(r"\s+[^\W_]", text[m.end():])) or bool(before and before.group(1).lower() in _NOUN_AFTER)
         ref = m.group(1).strip()
         try:
             p = refs.parse_ref(ref)
         except ValueError:
             return m.group(0)
-        if not noun or p.get("kind") != "cell" or not cites.cite(ref):
+        whole = p.get("kind") == "cell" and "out" not in p and "row" not in p
+        if not (whole and before and before.group(1).lower() in _NOUN_AFTER) or not cites.cite(ref):
             return m.group(0)
         cid = str(p["cell_id"])
         meta = (cites._resolve(f"card:{cid}") or {}).get("meta") or {}

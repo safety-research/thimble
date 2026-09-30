@@ -51,12 +51,15 @@ async def test_markdown_numbers_each_citation_once_as_a_footnote(report):
 
 
 async def test_a_card_a_sentence_reads_as_a_noun_is_exported_as_its_title(report):
+    """...a whole card right after a word such as "in"; one that words follow, and a line of one, cite."""
     text = (f"# Deletions\n\n## Where\n\nThe count is laid out in [[card:{report}]]. "
-            f"Every deletion came from one account [[card:{report}]].\n")
+            f"Every deletion came from one account [[card:{report}]]. "
+            f"The first came on May 24, 2026 [[card:{report}@out0#L1]] and the rest by June.\n")
     r = await tools.call(CORPUS, "write_document", {"doc": "report", "text": text}, actor="analyst")
     assert not r.is_error, r.text
     md = exports.to_markdown(_model())
     assert "The count is laid out in “How many deletions?”.[^1] Every deletion came from one account.[^1]" in md
+    assert "The first came on May 24, 2026 and the rest by June.[^2]" in md
 
 
 async def test_html_is_one_file_that_loads_nothing_and_links_each_citation(report):
