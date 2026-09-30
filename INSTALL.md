@@ -14,7 +14,7 @@ it runs in bubblewrap on Linux and with your user's access on macOS.
 - [Claude Code](https://docs.anthropic.com/en/docs/claude-code) (tested with 2.1.281), logged in (`claude auth status`).
 - macOS or Linux, and Python 3.12+. [uv](https://docs.astral.sh/uv/getting-started/installation/) is recommended: it
   installs the pinned versions and fetches Python when the machine has none.
-- Node 20+ for a Dev install, for custom views and for the sandbox card code runs in.
+- Node 20+ for a Dev install, for custom views and for the sandbox card code and code tickets run in.
 
 ## Global install (recommended)
 

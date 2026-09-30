@@ -24,8 +24,8 @@
 # lockfile). Where the index lacks a pinned version, the newest versions pyproject.toml or frontend/runtime/package.json
 # allow that the index has are installed instead (uv keeps the backend's other pins), and the packages that differ from
 # the pinned versions are listed; --require-pinned stops there instead. A file whose hash differs from the pinned one stops the install, from either index.
-# Needs: uv (or python3 >= 3.12); node >= 20 for custom views, for the sandbox runtime card code runs in (a package of the
-# frontend's), and to build frontend/dist when it is missing or out of date;
+# Needs: uv (or python3 >= 3.12); node >= 20 for custom views, for the sandbox runtime card code and code tickets run in
+# (a package of the frontend's), and to build frontend/dist when it is missing or out of date;
 # the claude CLI to register the plugin.
 # The marketplace name is thimble-local from a release zip and thimble from a checkout (.claude-plugin/marketplace.json).
 #
@@ -237,6 +237,7 @@ check_prerequisites() {  # uv or python >= pyproject's requires-python, or --pyt
     else
       say "without node >= 20 card code gets no sandbox runtime: the notebook kernel runs in bubblewrap where that works, else with your user's access"
     fi
+    say "without node >= 20 a code ticket's checks run outside the sandbox, so thimble asks you before each code ticket starts"
   fi
   have_claude=0
   if command -v claude >/dev/null 2>&1; then have_claude=1; say "claude CLI $(claude --version 2>/dev/null | head -n 1)"; else say "claude CLI not on PATH — the plugin step will print the commands to run"; fi
@@ -796,7 +797,7 @@ build_ui() {  # with node >= 20 the frontend's packages, which custom views need
   else
     say "the browser UI needs a build: install Node 20+ (https://nodejs.org) and re-run this script, or install from a release zip that carries frontend/dist. The MCP tools work without it"
   fi
-  [ "$node_ok" = 1 ] || say "custom views and the sandbox card code runs in need Node 20+ (https://nodejs.org): install it, then run this script again"
+  [ "$node_ok" = 1 ] || say "custom views and the sandbox card code and code tickets run in need Node 20+ (https://nodejs.org): install it, then run this script again"
 }
 
 write_pointer() {  # $THIMBLE_HOME/app-dir: how the plugin copy in Claude Code's plugin cache finds this tree (plugin/bin/thimble-app-dir)
@@ -865,7 +866,7 @@ show_plan() {  # what the install puts where, before its questions
   elif [ "$checkout" = 1 ] && [ "$have_uv" = 1 ]; then say "  the server's Python packages: $dir/backend/.venv, from backend/uv.lock"
   else say "  the server's Python packages: $dir/backend/.venv, from the package index $pytool is set up with"; fi
   if [ "$node_ok" = 1 ]; then
-    say "  the frontend's packages custom views and card code's sandbox (Anthropic's sandbox runtime) need: $dir/frontend/node_modules$( [ "$has_dist" = 1 ] || echo ', and the UI built into frontend/dist' )"
+    say "  the frontend's packages custom views and the sandbox for card code and code tickets (Anthropic's sandbox runtime) need: $dir/frontend/node_modules$( [ "$has_dist" = 1 ] || echo ', and the UI built into frontend/dist' )"
   fi
   say "  thimble's settings and state: $home"
   [ "$deps_only" = 1 ] || say "  the \`thimble\` command: a link at ~/.local/bin/thimble"

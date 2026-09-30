@@ -1981,10 +1981,10 @@ def _turn_endings_line() -> str:
 
 
 def node_line(commands: bool = True) -> str:
-    """Node's version, which custom views and the kernel's sandbox runtime need, and with `commands` what to install
+    """Node's version, which custom views and the sandbox runtime (app/srt.py) need, and with `commands` what to install
     when it is missing or too old."""
     exe = shutil.which("node")
-    need = (f"custom views and the sandbox card code runs in need Node {NODE_MIN_MAJOR}+"
+    need = (f"custom views and the sandbox card code and code tickets run in need Node {NODE_MIN_MAJOR}+"
             f"{' (https://nodejs.org)' if commands else ''}; everything else works without it")
     if not exe:
         return f"not found; {need}"
