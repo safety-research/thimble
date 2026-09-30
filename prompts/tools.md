@@ -629,6 +629,10 @@ The takeaway runs to {words} words. Cut it to 40 at most with `edit_card` and `t
 
 The takeaway cites none of the records the card shows. Link the words of each claim to the record that shows them, as in `[[posted the answer|{ref}]]`, with `edit_card` and `takeaway`.
 
+## card-installs
+
+{tool}: this code installs software or downloads files, which card code may not do. Use what is already installed, or tell the analyst what the analysis needs and why.
+
 ## takeaway-reminder
 
 card:{cid}, your last card, still has no takeaway. Write it with `edit_card` and `takeaway`.
@@ -732,6 +736,10 @@ no citation resolves, because its `accepts` and `declares` are empty
 ## view-label-controls
 
 The page has {count} controls of its own that name the test label, such as a toggle, a checkbox or a menu item. Remove them, or make each one thimble's: it calls `thimble.setLabel` or `thimble.setLabelColour` and carries `data-label` with the label's id.
+
+## view-no-screenshots
+
+Screenshots are unavailable on this machine, so the checks did not load the page and took no pictures. Check the page by reading it and what the reader answers, and take no pictures any other way.
 
 ## view-no-record-anchors
 
@@ -991,6 +999,10 @@ The orientation failed: {made}. Its error: {error}
 
 {views} building
 
+## orient-views-stopped
+
+{views} stopped
+
 ## orient-views-suggested
 
 {views} suggested for file types
@@ -1071,7 +1083,7 @@ Your first message is in {path}. Read it whole and follow it.
 
 ## bg-untrusted
 
-Claude Code does not trust {folder}, so the background session could not start there. The analyst can have thimble's workspaces folder ({workspaces}) trusted by running `bash {install} --trust-workspaces`, or run `claude` in {folder} once and accept its trust prompt; then start it again.
+Claude Code does not trust thimble's workspaces folder ({workspaces}), so the orientation, its critic and the writers can't start. The analyst trusts it by running thimble's installer again in their own terminal with `--trust-workspaces`, the command their terminal and thimble's browser show, and then starts it again. Tell them so.
 
 ## bg-carry-on
 

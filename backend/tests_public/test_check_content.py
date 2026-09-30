@@ -1,6 +1,5 @@
-"""scripts/check_content.py, the content step of scripts/check.sh: a listed word is found in any spelling, files of kinds
-that never belong in the tree are refused, gitleaks' findings are reported, and the command fails on a hit. The real
-list is digests, so these tests list words of their own."""
+"""scripts/check_content.py, the content step of scripts/check.sh: files of kinds that never belong in the tree are
+refused, gitleaks' findings are reported, and the command fails on a hit."""
 import importlib.util
 import os
 import random
@@ -16,11 +15,10 @@ SCRIPT = Path(__file__).resolve().parents[2] / "scripts" / "check_content.py"
 
 
 @pytest.fixture()
-def cc(monkeypatch):
+def cc():
     spec = importlib.util.spec_from_file_location("check_content", SCRIPT)
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
-    monkeypatch.setattr(mod, "TERMS", {mod.digest("red-kite"): "private", mod.digest("Alice"): "maintainer"})
     return mod
 
 
@@ -33,11 +31,6 @@ def write(root: Path, files: dict[str, str | bytes]) -> Path:
 
 def hits(cc, root: Path) -> list[tuple[str, int, str, str]]:
     return cc.scan(root, cc.files_of(root))
-
-
-def test_a_listed_word_pair_is_found_in_any_spelling(cc, tmp_path):
-    write(tmp_path, {"a.py": "x = 'red_kite'\n# Red Kite\n# red-kites, redkite\n"})
-    assert [(h[1], h[2]) for h in hits(cc, tmp_path)] == [(1, "private"), (2, "private")]
 
 
 def test_files_of_kinds_that_never_belong_are_refused(cc, tmp_path, monkeypatch):

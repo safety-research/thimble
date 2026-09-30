@@ -30,7 +30,7 @@ from urllib.parse import urlsplit, urlunsplit
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
-from . import cite, config, frames, prompts
+from . import cite, config, frames, headless, prompts
 
 log = logging.getLogger("thimble.tools")
 router = APIRouter()
@@ -1246,6 +1246,21 @@ def _kind_mismatch(kind: str, cell: dict) -> str:
     return ""
 
 
+def _card_installs(ctx: Ctx, code: str, tool: str) -> str:
+    """The refusal of card code that installs software or downloads files (sandbox_allow.code_installs), from an agent
+    thimble started, unless thimble's config sets `installs` to "allow"; '' otherwise. Such code runs in the kernel,
+    where no permission prompt can reach the analyst."""
+    from . import sandbox_allow, userconf  # noqa: PLC0415
+
+    if not ctx.session or not code.strip():
+        return ""
+    try:
+        installs = userconf.load(ctx.c)["installs"]
+    except userconf.ConfigError:
+        installs = "ask"
+    return hint("card-installs", tool=tool) if installs != "allow" and sandbox_allow.code_installs(code) else ""
+
+
 async def _h_add_card(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
     """One new card on the canvas. A running kind runs its code and the result is checked against the kind; a data kind
     (example, note, custom) stores its refs, text or html. `group` names the group, else default_group picks. A
@@ -1272,7 +1287,7 @@ async def _h_add_card(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
             return err(problem)
     elif not code.strip():
         return err(_needs_code("add_card", kind, args))
-    elif problem := _content_on_code("add_card", kind, args):
+    elif problem := _content_on_code("add_card", kind, args) or _card_installs(ctx, code, "add_card"):
         return err(problem)
     group = " ".join(str(args.get("group") or "").split())
     request = request_of(group)
@@ -1532,6 +1547,8 @@ async def _h_edit_card(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
     field = next((f for f in CONTENT_FIELDS if _given(args, f)), None)
     if field:  # a note's `text` or an example's `refs` on a card of code, which would be dropped and the code run again
         return err(hint("edit_card-kind", cid=cid, kind=cell.get("kind") or notebook.DEFAULT_KIND, new=FIELD_KINDS[field]))
+    if problem := _card_installs(ctx, str(args.get("code") or ""), "edit_card"):
+        return err(problem)
     # the card moves only once the call is known to be good, so a refused call leaves it where it was
     lines: builtins.list[str] = builtins.list(kept)
     if group:
@@ -2037,7 +2054,10 @@ async def _shot_page(url: str, selector: str | None) -> ToolResult:
         return _not_available("screenshot", "dev", "run_shot")
     with tempfile.TemporaryDirectory(prefix="thimble-shot-") as d:
         out = Path(d) / "shot.png"
-        code = await _maybe_await(run_shot(url, out, selector))
+        try:
+            code = await _maybe_await(run_shot(url, out, selector))
+        except headless.Missing:
+            return err(headless.NO_SCREENSHOTS)
         if not out.is_file():
             return err(f"screenshot failed (exit {code}): no image was written for {url}")
         data = base64.b64encode(out.read_bytes()).decode("ascii")
@@ -2088,9 +2108,8 @@ async def _shot_card(ctx: Ctx, ref: str) -> ToolResult:
     spec = cite.chart_spec(next((b for _, b in cite.iter_outputs(cell.get("outputs")) if cite.chart_spec(b)), None))
     if spec is None:
         return err(hint("screenshot-none", what=f"card:{cid} shows {_output_shape(cell)}"))
-    missing = [p for p in VEGA_BUILDS if not p.is_file()]
-    if missing:
-        return err(f"screenshot: {missing[0].relative_to(config.REPO_ROOT)} is missing (no npm install here), so the chart cannot be drawn")
+    if not all(p.is_file() for p in VEGA_BUILDS):
+        return err(headless.NO_SCREENSHOTS)
     return await _shot_page_file(cid, chart_page(spec))
 
 
@@ -2122,7 +2141,7 @@ async def _shot_card_in_ui(c: str, cid: str, ui: str) -> ToolResult | None:
     from urllib.parse import urlencode
 
     run_shot = _optional("dev", "run_shot")
-    if run_shot is None:
+    if run_shot is None or headless.missing(headless.PAGES):
         return None
     url = f"{ui}/?{urlencode({'ws': c, 'ref': f'card:{cid}'})}"
     storage = {f"thimble:{c}:layout": json.dumps({"tab": "canvas", "chatOpen": False}),
@@ -2133,7 +2152,9 @@ async def _shot_card_in_ui(c: str, cid: str, ui: str) -> ToolResult | None:
             code = await _maybe_await(run_shot(url, png, f'article.canvas-card[data-cell="{cid}"]', viewport=CARD_SHOT_VIEWPORT,
                                                scale=CARD_SHOT_SCALE, storage=storage, press=["Escape"],
                                                wait_ms=CARD_SHOT_WAIT_MS))
-        except Exception:  # noqa: BLE001 — a missing browser or node is the fallback's case, not an error to the model
+        except headless.Missing:
+            return None
+        except Exception:  # noqa: BLE001 — a missing node is the fallback's case, not an error to the model
             log.warning("card shot in the interface failed for card:%s", cid, exc_info=True)
             return None
         if code != 0 or not png.is_file():
@@ -2205,7 +2226,10 @@ async def _shot_page_file(cid: str, page_html: str) -> ToolResult:
     with tempfile.TemporaryDirectory(prefix="thimble-shot-") as d:
         page, png = Path(d) / "card.html", Path(d) / "card.png"
         page.write_text(page_html, "utf-8")
-        code = await _maybe_await(run_shot(page.as_uri(), png, "#fig", offline=True, wait_ms=FIGURE_SHOT_WAIT_MS))
+        try:
+            code = await _maybe_await(run_shot(page.as_uri(), png, "#fig", offline=True, wait_ms=FIGURE_SHOT_WAIT_MS))
+        except headless.Missing:
+            return err(headless.NO_SCREENSHOTS)
         if not png.is_file() or code not in (0, None):
             return err(f"screenshot: card:{cid}'s figure did not render (exit {code})")
         data = base64.b64encode(png.read_bytes()).decode("ascii")
@@ -2368,12 +2392,27 @@ async def _h_propose_view(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
     claimed = ", ".join(prop.get("claims") or [])
     if status == "suggested":
         return ok(hint("propose_view-suggested", view=prop.get("name"), slug=prop.get("slug"), claims=claimed))
-    # without Node 20+ or the frontend's packages the build fails at once (dev.run_view), and main is told why
-    if why := await asyncio.to_thread(views.build_problem):
+    # without Node 20+ or the frontend's packages, or where thimble's config refuses the dev agent's session (the
+    # sandbox), the build fails at once (dev.run_view), and main is told why
+    if why := await asyncio.to_thread(views.build_problem) or await asyncio.to_thread(_view_refusal, ctx.c):
         return ok(hint("propose_view-cannot-build", view=prop.get("name"), slug=prop.get("slug"), why=why))
     if prop.get("revised") and not prop.get("held"):  # a view built under this name is changed in place (views.revise)
         return ok(hint("view-changing", view=prop.get("name"), slug=prop.get("slug")))
     return ok(hint("propose_view-proposed", view=prop.get("name"), slug=prop.get("slug"), claims=claimed))
+
+
+def _view_refusal(c: str) -> str:
+    """Why thimble's config refuses a view build's session in workspace `c` (dev.dev_config), '' when it doesn't."""
+    config_of = _optional("dev", "dev_config")
+    if config_of is None:
+        return ""
+    from . import userconf  # noqa: PLC0415
+
+    try:
+        config_of(c, sandbox=True)
+    except userconf.ConfigError as e:
+        return str(e)
+    return ""
 
 
 async def _h_file_dev_ticket(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
@@ -2409,7 +2448,8 @@ async def _h_file_dev_ticket(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
     label = f"ticket #{n}" if n else "ticket"
     if isinstance(rec, dict) and rec.get("status") == "failed":
         return ok(hint("file_dev_ticket-cannot-run", label=label, why=rec.get("error") or ""))
-    return ok(f"filed {label}: {title}. The dev agent's row in the chat shows its progress.")
+    return ok(f"filed {label}: {title}. It starts once the analyst allows it on the permission card, since it edits "
+              "thimble's own code. The dev agent's row in the chat shows its progress.")
 
 # --------------------------------------------------------------------------- HTTP
 

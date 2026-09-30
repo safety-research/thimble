@@ -1,12 +1,13 @@
-"""The one way terminal-first mode runs the orientation: start_orientation starts the orientation's own session as the
-background session `thimble:orient · <workspace>` (orient_session._launch's `background`, bg_session.wanted), with the Start card's
-critique, Ultracode and effort, and never asks main to start a subagent; with terminal-first mode off the session is
-thimble's own hidden one. agent_session.start is replaced by a stand-in that records its arguments."""
+"""start_orientation starts the orientation's own session as the background session `thimble:orient · <workspace>`
+(orient_session._launch's `background`), with the Start card's critique, Ultracode and effort, and never asks main to
+start a subagent. agent_session.start is replaced by a stand-in that records its arguments."""
 from __future__ import annotations
+
+import json
 
 import pytest
 
-from app import agent_session, bg_session, ledger, orient_session, orientation, tools
+from app import agent_session, bg_session, cli, config, ledger, orient_session, orientation, tools
 
 CORPUS = "mini"
 
@@ -24,21 +25,38 @@ def launched(workspaces_tmp, monkeypatch) -> list[dict]:
     return calls
 
 
-@pytest.mark.parametrize("terminal_first", [True, False])
-async def test_start_orientation_runs_the_session_in_the_background_exactly_in_terminal_first_mode(launched, terminal_first):
-    if not terminal_first:
-        ledger.put_settings(CORPUS, {"terminal_first": False})
-    assert orientation.terminal_first(CORPUS) is terminal_first
-    assert bg_session.wanted(CORPUS, "orient") is terminal_first
+async def test_start_orientation_runs_the_session_in_the_background(launched):
     orientation.start_requested(CORPUS, {"text": "", "final_notebook": True, "propose_views": True,
                                          "critique": True, "ultracode": True, "effort": "xhigh"}, {"id": "e1"})
     res = await tools.call(CORPUS, "start_orientation", {"brief": ""})
     assert not res.is_error, res
     assert res.text.endswith(tools.hint("start_orientation-started")), "main is never asked to start a subagent"
     [call] = launched
-    assert call["key"] == orient_session.KEY and call["background"] is terminal_first
-    assert call["critique"] is True and call["ultracode"] is True, "Start's critique and Ultracode hold in either mode"
+    assert call["key"] == orient_session.KEY and call["background"] is True
+    assert call["critique"] is True and call["ultracode"] is True
     assert "route" not in (orientation.read_run(CORPUS) or {})
+
+
+async def test_without_claude_code_s_trust_the_orientation_does_not_start_and_the_settings_say_how_to_trust(
+        workspaces_tmp, claude_global_config, monkeypatch):
+    """`claude --bg` refuses a folder Claude Code does not trust. Where the workspaces folder is not trusted (install.sh's
+    trust question answered no), start_orientation starts nothing and its error, which main reads, says the analyst
+    reruns the installer with --trust-workspaces; the settings give the browser the command itself."""
+    started = []
+
+    async def bg_start(*args, **kw):
+        started.append(args)
+
+    monkeypatch.setattr(bg_session, "start", bg_start)
+    claude_global_config.write_text("{}")
+    orientation.start_requested(CORPUS, {"text": "", "final_notebook": True, "propose_views": True}, {"id": "e1"})
+    res = await tools.call(CORPUS, "start_orientation", {"brief": ""})
+    assert res.is_error and "--trust-workspaces" in res.text and "install.sh" not in res.text
+    assert started == [] and not orient_session.running(CORPUS)
+    assert ledger.get_settings(CORPUS)["untrusted"] == {"folder": str(config.WORKSPACES_DIR),
+                                                        "command": cli.trust_command()}
+    claude_global_config.write_text(json.dumps({"projects": {str(config.WORKSPACES_DIR): {"hasTrustDialogAccepted": True}}}))
+    assert ledger.get_settings(CORPUS)["untrusted"] is None
 
 
 def test_an_orientation_an_earlier_build_ran_as_main_s_subagent_ends_its_record_with_its_chat(workspaces_tmp):

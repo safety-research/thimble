@@ -22,15 +22,35 @@ starts a session on prompts/dev-view.md in the corpus folder (which Claude Code 
 folder; the corpus folder and the worked examples are fenced read-only (view_fence). After each turn the server runs the
 view's gate; a failure wakes the session, a pass registers the view. A turn the API ended at capacity is no attempt: the
 build waits and wakes the session again. An orientation's proposal that runs out of attempts gets up to VIEW_REPAIRS new
-sessions, and is then dropped quietly; a view the analyst asked for fails with Retry.
+sessions, and is then dropped quietly; a view the analyst asked for fails with Retry. The orientation's Stop stops the
+builds of the views it proposed (stop_orientation_views). Main's end stops every build of the workspace
+(stop_workspace): a view the analyst asked for fails with Retry, and a session's proposal waits, queued, until a session
+is main again (resume_views).
 
 Permissions. A session of a workspace asks the analyst like the other agents: its --settings carry agent_session's
 permission hook with the session's key (`view:<slug>`, `ticket:<id>`), and the run hosts that key on its chat
-(agent_session.host), so each request shows on the card and is answered by the mode of its row (modes.py: the dev
-agent's for a ticket, view builds' for a view, agent_row), or denied after PERMISSION_WAIT_S unanswered. Allowed
-unasked is only its work in its own folder: edits there, reads of the folders its task names, and Bash in the sandbox
-(sandbox_allow's rule, before each call and on each request) with its check command. A session with no workspace
-(`thimble fix`, while the server is down) has nobody to ask, so it keeps UNHOSTED_TOOLS and has no web tools.
+(agent_session.host), so each request shows on the card and is answered by the mode of the dev agent's row (modes.py),
+or denied after PERMISSION_WAIT_S unanswered. Allowed unasked is only its work in its own folder: edits there, reads of
+the folders its task names, and Bash in the sandbox (sandbox_allow's rule, before each call and on each request) with
+its check command. A session with no workspace (`thimble fix`, while the server is down) has nobody to ask, so it keeps
+UNHOSTED_TOOLS, has no web tools, and is refused what thimble's config would have it ask for.
+
+Before a code ticket starts, thimble asks the analyst on the card, in every mode, whether it may edit thimble's own code
+(CODE_QUESTION), since the validation stack, the gates and the server's git then run that code outside the sandbox;
+`thimble fix` asks in the terminal before it starts. Anything but an Allow stops the ticket before its worktree exists.
+
+thimble's config. Code tickets and view builds are the dev agent's sessions, with its `agents.dev` settings
+(userconf.py, dev_config); agent_session's module note says what the config adds. Their Bash runs in the sandbox
+where it can run. A code ticket's sandbox also writes what a commit in its worktree writes into the checkout's git
+folder (ticket_fence), and cannot reach the validation stack on loopback, so the session takes no shots of its own and
+the server's after shot shows its change. By default the dev agent has no web tools and its network is off.
+
+The offline fence. With the dev agent's network off, a view build's Bash runs in the sandbox with no network where the
+sandbox runs; where it does not, every command but its check goes to the analyst. Deny rules refuse the commands that
+reach the network or install software (offline_deny), and its Bash runs with the package managers offline and a proxy
+that refuses every connection (view_env); these stop a mistake, not a command that means to get round them, which is
+why the sandbox or the analyst decides. A view build runs the model settings of the session that asked for it, unless
+the dev agent's are set (view_models).
 """
 from __future__ import annotations
 
@@ -62,7 +82,7 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
-from . import agents, cc_settings, cli, config, modes, procs, prompts
+from . import agents, cc_settings, cli, config, headless, modes, procs, prompts, userconf
 from .cli import SOURCE_CHANGED, home as thimble_home
 from .ledger import atomic_write_text
 from .session import find_transcript
@@ -80,8 +100,6 @@ STACK_UI_PORT = int(os.environ.get("THIMBLE_STACK_UI_PORT", "5301"))
 STACK_ENABLED = os.environ.get("THIMBLE_DEV_STACK", "1").strip().lower() not in ("0", "false", "no", "off")
 STACK_WAIT_S = 90
 SHOT_TIMEOUT_S = 90
-BROWSER_MISSING_RE = re.compile(r"download new browsers|Executable doesn't exist at", re.IGNORECASE)
-BROWSER_MISSING_LINE = "Playwright's Chromium is not installed for this user: run `npx playwright install chromium` in frontend/"
 GATE_TIMEOUT_S = 900
 # The tools a session with no workspace uses without a permission request, since nobody can answer one: its file tools,
 # Bash, skills and workflows (module note, permissions). The session has every tool of a default Claude Code session
@@ -91,9 +109,30 @@ UNHOSTED_TOOLS = ["Read", "Edit", "Write", "NotebookEdit", "Bash", "Grep", "Glob
 PERMISSION_WAIT_S = float(os.environ.get("THIMBLE_DEV_PERMISSION_WAIT_S", "") or 10 * 60)
 # the thread's line for a request denied unanswered
 EXPIRED_LINE = "nobody answered the request to use {tool} ({what}) within {wait}, so it was denied and the session went on"
+WEB_TOOLS = ("WebFetch", "WebSearch")  # agent_session.WEB_TOOLS
 # Not given to a fenced session, a view build in the corpus folder: EnterWorktree writes a git worktree into the
 # session's own folder, which the fence's denies do not stop, and nobody answers AskUserQuestion or plan mode's approval.
 FENCED_OFF_TOOLS = ("EnterWorktree", "ExitWorktree", "AskUserQuestion", "EnterPlanMode", "ExitPlanMode")
+# The Bash commands a view build's session may not run in any permission mode while the dev agent's network is off
+# (offline_deny): those that reach the network or install software, each by name and at a path, the subcommands that
+# do, the modules that do as `python -m`, and a shell run inside a command, whose own commands no rule would see. Claude
+# Code checks a rule against each command of a line, also after wrappers such as `timeout` and `env`.
+OFFLINE_PROGRAMS = ("curl", "wget", "aria2c", "nc", "ncat", "netcat", "socat", "telnet", "ftp", "sftp", "scp", "ssh",
+                    "rsync", "gh", "pip", "pip3", "pipx", "uv", "uvx", "poetry", "pdm", "conda", "mamba", "micromamba",
+                    "npm", "npx", "pnpm", "pnpx", "yarn", "bun", "bunx", "corepack", "deno", "gem", "cargo", "apt",
+                    "apt-get", "aptitude", "dpkg", "snap", "brew", "port", "yum", "dnf", "zypper", "pacman", "apk",
+                    "nix", "nix-env", "sudo", "playwright")
+OFFLINE_COMMANDS = ("git clone", "git fetch", "git pull", "git push", "git ls-remote", "git submodule", "go get",
+                    "go install", "go mod download", "bash -c", "sh -c", "zsh -c", "eval")
+OFFLINE_MODULES = ("pip", "ensurepip", "playwright", "uv")
+# A view build's environment beside its key (view_env): the package managers and Playwright's browser download offline,
+# and as CLAUDE_ENV_FILE, which Claude Code sources before each Bash command, OFFLINE_ENV_FILE. Neither reaches the
+# session's own calls to the API. It goes in the session's --settings `env`, since Claude Code's background service
+# starts a session with its own environment rather than the environment of the `claude --bg` that asked for it.
+OFFLINE_ENV = {"npm_config_offline": "true", "PIP_NO_INDEX": "1", "UV_OFFLINE": "1",
+               "PLAYWRIGHT_DOWNLOAD_HOST": "http://127.0.0.1:9"}
+OFFLINE_ENV_FILE = Path(__file__).with_name("offline_env.sh")
+ENV_FILE = "CLAUDE_ENV_FILE"
 CLAUDE_BIN = config.CLAUDE_BIN
 VIEW_CHECK = Path(__file__).with_name("view_check.py")  # the command a view build checks its draft with (view_fence)
 CLI_TIMEOUT_S = 60
@@ -554,8 +593,50 @@ class GitError(RuntimeError):
     pass
 
 
+# A ticket's session can write its worktree and the worktree's own git folder (ticket_fence), so the server's git
+# commands there run with no fsmonitor command and no hooks, and only while the worktree still points at the live
+# checkout's git folder (_check_worktree).
+WORKTREE_GIT = ("-c", "core.fsmonitor=", "-c", "core.hooksPath=/dev/null")
+WORKTREE_MOVED = ("the ticket's worktree no longer points at the live checkout's git folder ({why}), so thimble ran no "
+                  "git command in it")
+
+
+def _in_worktrees(cwd: Path) -> bool:
+    try:
+        return Path(cwd).resolve().is_relative_to(worktrees_dir().resolve())
+    except OSError:
+        return False
+
+
+def _check_worktree(wt: Path) -> None:
+    """GitError (WORKTREE_MOVED) unless `wt/.git` names a folder of the live checkout's `worktrees/` whose commondir is
+    the checkout's git folder, with no config of its own."""
+    common = Path(subprocess.run(["git", "rev-parse", "--path-format=absolute", "--git-common-dir"], cwd=str(REPO),
+                                 capture_output=True, text=True, timeout=60).stdout.strip()).resolve()
+    try:
+        text = (Path(wt) / ".git").read_text("utf-8").strip()
+        own = Path(text.removeprefix("gitdir: ")).resolve()
+        why = ("its .git is not a gitdir line" if not text.startswith("gitdir: ") else
+               "its .git names a folder outside the checkout's worktrees" if own.parent != common / "worktrees" else
+               "its git folder names another commondir"
+               if (own / (own / "commondir").read_text("utf-8").strip()).resolve() != common else
+               "its git folder has a config of its own" if (own / "config.worktree").exists() else "")
+    except OSError as e:
+        why = f"{type(e).__name__}: {e}"
+    if why:
+        raise GitError(WORKTREE_MOVED.format(why=why))
+
+
+def _git_argv(cwd: Path, args: "tuple[str, ...] | list[str]") -> list[str]:
+    """`git` with `args` for a command in `cwd`, hardened in a ticket's worktree (WORKTREE_GIT)."""
+    if not _in_worktrees(cwd):
+        return ["git", *args]
+    _check_worktree(cwd)
+    return ["git", *WORKTREE_GIT, *args]
+
+
 def _git(cwd: Path, *args: str, check: bool = True, timeout: int = 120) -> str:
-    out = subprocess.run(["git", *args], cwd=str(cwd), capture_output=True, text=True, timeout=timeout)
+    out = subprocess.run(_git_argv(cwd, args), cwd=str(cwd), capture_output=True, text=True, timeout=timeout)
     if check and out.returncode != 0:
         raise GitError((out.stderr.strip() or out.stdout.strip() or f"git {' '.join(args)} failed")[:800])
     return out.stdout.rstrip()
@@ -693,11 +774,11 @@ def rebase_branch(wt: Path, branch: str, base: str, touched: list[str]) -> dict[
         return result
     head = live_head()
     result["head"] = head
-    if subprocess.run(["git", "merge-base", "--is-ancestor", head, "HEAD"], cwd=str(wt), capture_output=True,
+    if subprocess.run(_git_argv(wt, ("merge-base", "--is-ancestor", head, "HEAD")), cwd=str(wt), capture_output=True,
                       timeout=60).returncode == 0:
         result["ok"] = True  # the branch already sits on the live head
         return result
-    rb = subprocess.run(["git", "-c", "user.name=thimble dev", "-c", "user.email=dev@thimble.local", "rebase", head],
+    rb = subprocess.run(_git_argv(wt, ("-c", "user.name=thimble dev", "-c", "user.email=dev@thimble.local", "rebase", head)),
                         cwd=str(wt), capture_output=True, text=True, timeout=120)
     if rb.returncode != 0:
         conflicts = _git(wt, "diff", "--name-only", "--diff-filter=U", check=False).splitlines()
@@ -1033,14 +1114,6 @@ async def stop_stack(tid: str | None = None) -> None:
 # ----------------------------------------------------------------------------- screenshots
 
 
-class BrowserMissing(RuntimeError):
-    """ui_shot.mjs could not launch Chromium."""
-
-
-def browser_missing(stderr: str) -> bool:
-    return bool(BROWSER_MISSING_RE.search(stderr or ""))
-
-
 def shot_script() -> Path:
     """The page screenshot script, outside scripts/dev/ since main's `screenshot` tool runs it in every install."""
     return REPO / "scripts" / "ui_shot.mjs"
@@ -1050,7 +1123,11 @@ async def run_shot(url: str, out: Path, selector: str | None = None, *, info_out
                    viewport: str | None = None, scale: float | None = None, storage: dict[str, str] | None = None,
                    press: list[str] | None = None, wait_ms: int | None = None, offline: bool = False) -> int:
     """`node scripts/ui_shot.mjs`: 0 ok, 2 selector not found (the viewport is written instead), 1 error, -1 timeout.
-    Options map to the script's options of the same names."""
+    Options map to the script's options of the same names. headless.Missing when the browser is missing, which stays so
+    for the rest of the server run."""
+    path = headless.launch(headless.PAGES)
+    if path is None or headless.missing(headless.PAGES):
+        raise headless.Missing(headless.missing(headless.PAGES))
     cmd = ["node", str(shot_script()), "--url", url, "--out", str(out), *(["--offline"] if offline else [])]
     if selector:
         cmd += ["--selector", selector]
@@ -1066,7 +1143,9 @@ async def run_shot(url: str, out: Path, selector: str | None = None, *, info_out
         cmd += ["--press", key]
     if wait_ms is not None:
         cmd += ["--wait", str(int(wait_ms))]
-    proc = await asyncio.create_subprocess_exec(*cmd, cwd=str(REPO), stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+    env = {**os.environ, **({userconf.BROWSER_ENV: path} if path else {})}
+    proc = await asyncio.create_subprocess_exec(*cmd, cwd=str(REPO), stdout=asyncio.subprocess.PIPE,
+                                                stderr=asyncio.subprocess.PIPE, env=env)
     try:
         _, err = await asyncio.wait_for(proc.communicate(), SHOT_TIMEOUT_S)
     except asyncio.TimeoutError:
@@ -1076,9 +1155,10 @@ async def run_shot(url: str, out: Path, selector: str | None = None, *, info_out
         return -1
     if proc.returncode not in (0, 2):
         text = err.decode(errors="replace")
+        if gone := headless.why_missing(text):
+            headless.mark_missing(headless.PAGES, gone)
+            raise headless.Missing(gone)
         log.warning("ui_shot exit %s for %s: %s", proc.returncode, url, text[-500:])
-        if browser_missing(text):
-            raise BrowserMissing(BROWSER_MISSING_LINE)
     return proc.returncode if proc.returncode is not None else -1
 
 
@@ -1187,25 +1267,36 @@ UNTRUSTED_LINE = ("Claude Code does not trust {folder}, so the dev agent's sessi
                   "{folder} once and accept its trust prompt, then Retry.")
 
 
-def read_only_fence(folders: "tuple[Path, ...] | list[Path]",
-                    outside: "tuple[str, ...] | list[str]" = ()) -> dict[str, Any]:
+def read_only_fence(folders: "tuple[Path, ...] | list[Path]", outside: "tuple[str, ...] | list[str]" = (),
+                    conf: "userconf.Session | None" = None) -> dict[str, Any]:
     """The --settings keys that keep `folders` unchanged by a background session: a deny of Edit in each (which Claude
-    Code's path checks also apply to Bash commands naming those files) and, where the sandbox can run, the Bash sandbox
-    with no network, which turns the deny into a write deny for scripts too, and whose commands run unasked; `outside`
-    commands run outside it. Reads stay allowed. {} for no folders."""
+    Code's path checks also apply to Bash commands naming those files) and, where the session's Bash runs in the
+    sandbox (`conf`, by default where the sandbox can run), the sandbox, with no network unless the config's is on,
+    which turns the deny into a write deny for scripts too, and whose commands run unasked unless the config asks about
+    some; `outside` commands run outside it. Reads stay allowed. {} for no folders."""
     if not folders:
         return {}
     out: dict[str, Any] = {"permissions": {"deny": [f"Edit(/{Path(f)}/**)" for f in folders]}}
-    if cc_settings.sandbox_ok():
-        out["sandbox"] = {**cc_settings.offline_sandbox(auto_allow=True),
-                          **({"excludedCommands": list(outside)} if outside else {})}
+    if conf.sandboxed if conf is not None else cc_settings.sandbox_ok():
+        box = cc_settings.offline_sandbox(auto_allow=not (conf and conf.install_asks()),
+                                          network=bool(conf and conf.network), required=bool(conf and conf.enforced))
+        out["sandbox"] = {**box, **({"excludedCommands": list(outside)} if outside else {})}
     return out
 
 
 def agent_row(key: str) -> str:
-    """The row of the permission modes (modes.AGENTS) a dev session with this key asks by: view builds' for a view,
-    else the dev agent's."""
-    return "views" if key.startswith("view:") else "dev"
+    """The row of the permission modes (modes.AGENTS) a dev session asks by: the dev agent's, for a view build too."""
+    return "dev"
+
+
+def dev_config(workspace: str | None, *, sandbox: bool, hosted: bool = True) -> userconf.Session:
+    """What thimble's config asks of a dev session (userconf.session): `sandbox` for a view build, whose Bash runs in the
+    sandbox where it can; `hosted` False for one nobody can answer (module note, permissions). ConfigError as
+    userconf.session raises it."""
+    conf = userconf.session(workspace, "dev", sandbox=sandbox)
+    if not hosted:
+        conf.hosted = False
+    return conf
 
 
 def own_work(folder: Path, reads: "tuple[Path, ...] | list[Path]" = ()) -> list[str]:
@@ -1227,7 +1318,8 @@ def _host(c: str | None, asking: dict[str, Any], chat: str | None, run_log: "Log
 
     box = asking.get("sandbox")
     agent_session.host(c, str(asking["key"]), chat, agent=agent_row(str(asking["key"])), wait_s=PERMISSION_WAIT_S,
-                       on_expired=expired, sandbox=(list(box[0]), list(box[1])) if box else None)
+                       on_expired=expired, sandbox=(list(box[0]), list(box[1])) if box else None,
+                       conf=asking.get("config"))
 
 
 def _unhost(c: str | None, key: str) -> None:
@@ -1245,6 +1337,20 @@ def trust_folder(cwd: Path) -> Path:
         return Path(cwd)
 
 
+def ticket_fence(wt: Path, network: bool = False, required: bool = False) -> dict[str, Any]:
+    """The --settings of a code ticket's session whose Bash runs in the sandbox: no network unless the dev agent's is
+    on, and writes to the worktree, its session's folder, and to what a commit there writes into the checkout's git
+    folder: the objects, the ticket branch's ref and its log, and the worktree's own git folder. The git folder's hooks
+    and config stay read-only. `required` as cc_settings.offline_sandbox takes it."""
+    common = Path(_git(wt, "rev-parse", "--path-format=absolute", "--git-common-dir"))
+    own = Path(_git(wt, "rev-parse", "--absolute-git-dir"))
+    group = Path(_git(wt, "symbolic-ref", "--short", "HEAD")).parent  # `dev` of dev/<id>
+    box = cc_settings.offline_sandbox(network=network, required=required)
+    box["filesystem"] = {"allowWrite": [str(common / "objects"), str(common / "refs" / "heads" / group),
+                                        str(common / "logs" / "refs" / "heads" / group), str(own)]}
+    return {"sandbox": box}
+
+
 class Sessions:
     """Claude Code background sessions through the `claude` CLI: `claude --bg` starts one and prints its short id,
     `claude agents --json --all --cwd` reports its state, `claude --bg --resume <session id>` wakes it with a new
@@ -1259,58 +1365,65 @@ class Sessions:
         return "" if shutil.which(CLAUDE_BIN, path=_cli_env().get("PATH")) else NO_CLAUDE_LINE.format(bin=CLAUDE_BIN)
 
     def _flags(self, workspace: str | None, name: str, add_dirs: "tuple[Path, ...] | list[Path]" = (),
-               fence: dict[str, Any] | None = None, asking: dict[str, Any] | None = None) -> list[str]:
-        """The session's flags: the dev role's model settings, `--add-dir` folders, the `fence` settings and how it asks
-        (module note, permissions). `asking` names the session's key, {key, allow, sandbox?}, the allow rules of its work
-        in its own folder, and for a session whose Bash runs in the sandbox, sandbox_allow's rule; with it and a
-        workspace, the permission hook answers its requests by its row's mode (agent_row), and a process in Auto runs in
-        auto mode. Without, it keeps UNHOSTED_TOOLS and gets no web tools. It gets no MCP
-        server, since its task needs none of the analyst's, not the tools that schedule a later turn
-        (agent_session.LATER_TOOLS), since the session is stopped once its turn ends, and, when fenced, not
+               fence: dict[str, Any] | None = None, asking: dict[str, Any] | None = None,
+               models: dict[str, Any] | None = None) -> list[str]:
+        """The session's flags: its `models` ({model, effort, fast}, where None leaves one to the analyst's Claude Code
+        settings), else the dev role's, `--add-dir` folders, the `fence` settings, thimble's config for the dev agent and
+        how it asks (module note, permissions). `asking` names the session's key, {key, allow, sandbox?, config?}, the
+        allow rules of its work in its own folder, for a session whose Bash runs in the sandbox, sandbox_allow's rule,
+        and what the config asks of it (dev_config); with it and a workspace, the permission hook answers its requests by
+        the dev agent's mode, and a process in Auto runs in auto mode. Without, it keeps UNHOSTED_TOOLS and gets no web
+        tools. It gets no MCP server, since its task needs none of the analyst's, not the tools that schedule a later
+        turn (agent_session.LATER_TOOLS), since the session is stopped once its turn ends, and, when fenced, not
         FENCED_OFF_TOOLS."""
         from . import agent_session  # noqa: PLC0415 — agent_session is large and this module otherwise needs none of it
 
-        conf = config.models_for(workspace)["dev"]
-        model = conf["model"]
-        denied = [*agent_session.LATER_TOOLS, *(FENCED_OFF_TOOLS if fence else ())]
-        settings: dict[str, Any] = {"fastMode": True} if conf.get("fast") else {}
-        settings.update(fence or {})
+        conf_models = models or config.models_for(workspace)["dev"]
         hosted = bool(workspace and asking and asking.get("key"))
-        mode = modes.flag(modes.mode_for(str(workspace), agent_row(str((asking or {})["key"])))) if hosted else "default"
+        conf = (asking or {}).get("config") or dev_config(workspace, sandbox=bool(fence and "sandbox" in fence),
+                                                           hosted=hosted)
+        denied = [*agent_session.LATER_TOOLS, *(FENCED_OFF_TOOLS if fence else ())]
+        settings: dict[str, Any] = {} if conf_models.get("fast") is None else {"fastMode": bool(conf_models["fast"])}
+        settings.update(fence or {})
+        settings = agent_session.with_config(settings, conf.settings())
+        mode = modes.flag(modes.mode_for(str(workspace), "dev")) if hosted else "default"
         if hosted:
             perms = dict(settings.get("permissions") or {})
             allow = [*(perms.get("allow") or []), *(asking or {}).get("allow", [])]
             settings["permissions"] = {**perms, **({"allow": list(dict.fromkeys(allow))} if allow else {})}
-            settings = agent_session.with_web_asks(settings, mode)
+            if conf.web == "ask":
+                settings = agent_session.with_web_asks(settings, mode)
             hooks = agent_session.permission_hooks(str(workspace), mode == "auto", session=str((asking or {})["key"]),
-                                                   home=str(thimble_home()))
+                                                   home=str(thimble_home()), wait=conf.may_ask())
             box = (asking or {}).get("sandbox")
             if box and "sandbox" in settings:
                 # before a call both hooks run; a request is the permission hook's alone, which applies the same rule
-                pre = agent_session.sandbox_hooks((list(box[0]), list(box[1])))[agent_session.PRE]
+                pre = agent_session.sandbox_hooks((list(box[0]), list(box[1])), conf.install_asks())[agent_session.PRE]
                 hooks[agent_session.PRE] = [*pre, *hooks.get(agent_session.PRE, [])]
             settings["hooks"] = hooks
-        else:
+        if not hosted or conf.web == "off":
             denied += agent_session.WEB_TOOLS
         allowed = [] if hosted else ["--allowedTools", ",".join(UNHOSTED_TOOLS)]
-        flags = ["-n", name, "--model", str(model), *allowed, "--disallowedTools", ",".join(denied), "--strict-mcp-config",
-                 "--permission-mode", mode]
+        flags = ["-n", name, *(["--model", str(conf_models["model"])] if conf_models.get("model") else []), *allowed,
+                 "--disallowedTools", ",".join(dict.fromkeys(denied)), "--strict-mcp-config", "--permission-mode", mode]
         for d in add_dirs:
             flags += ["--add-dir", str(d)]
-        if conf.get("effort"):
-            flags += ["--effort", str(conf["effort"])]
+        if conf_models.get("effort"):
+            flags += ["--effort", str(conf_models["effort"])]
         if settings:
             flags += ["--settings", json.dumps(settings)]
         return flags
 
     async def start(self, cwd: Path, prompt: str, *, name: str, workspace: str | None,
                     add_dirs: "tuple[Path, ...] | list[Path]" = (), env: dict[str, str] | None = None,
-                    fence: dict[str, Any] | None = None, asking: dict[str, Any] | None = None) -> dict[str, str]:
+                    fence: dict[str, Any] | None = None, asking: dict[str, Any] | None = None,
+                    models: dict[str, Any] | None = None) -> dict[str, str]:
         """A new background session in `cwd` whose first message is `prompt`, with `env` over the CLI's environment, the
-        settings `fence` and how it asks, `asking` (_flags). {id, session_id}; RuntimeError when the CLI could not start
-        one."""
+        settings `fence`, how it asks, `asking`, and its `models` (_flags). {id, session_id}; RuntimeError when the CLI
+        could not start one."""
         since = time.time() * 1000 - 5000
-        code, out = await self._run(["--bg", *self._flags(workspace, name, add_dirs, fence, asking), "--", prompt], cwd, env)
+        flags = self._flags(workspace, name, add_dirs, fence, asking, models)
+        code, out = await self._run(["--bg", *flags, "--", prompt], cwd, env)
         if code != 0 and UNTRUSTED_RE.search(out):
             raise SessionError(UNTRUSTED_LINE.format(folder=trust_folder(cwd)))
         if code != 0:
@@ -1320,12 +1433,14 @@ class Sessions:
     async def resume(self, cwd: Path, session_id: str, prompt: str, *, env: dict[str, str] | None = None,
                      name: str = "", workspace: str | None = None,
                      add_dirs: "tuple[Path, ...] | list[Path]" = (),
-                     fence: dict[str, Any] | None = None, asking: dict[str, Any] | None = None) -> dict[str, str]:
-        """Wake the session `session_id` with `prompt`, under its own id and saved options. `--resume` on a running
-        session, or with any flag, starts a copy under a new id, so the process is stopped first, and one that still
-        runs is copied with its start options; the caller follows a copy by the returned ids."""
+                     fence: dict[str, Any] | None = None, asking: dict[str, Any] | None = None,
+                     models: dict[str, Any] | None = None) -> dict[str, str]:
+        """Wake the session `session_id` with `prompt` in a copy under a new id, started with the same flags as a new
+        session (_flags), since Claude Code keeps none of a stopped session's options. A process that still runs is
+        stopped first; the caller follows the copy by the returned ids."""
         short = session_id[:8]
-        flags = self._flags(workspace, name, add_dirs, fence, asking) if await self._running(cwd, short) else []
+        await self._running(cwd, short)
+        flags = self._flags(workspace, name, add_dirs, fence, asking, models)
         code, out = await self._run(["--bg", "--resume", session_id, *flags, "--", prompt], cwd, env)
         if code != 0:
             raise SessionError(f"`claude --bg --resume` failed (exit {code}): {out.strip()[-400:]}")
@@ -1513,18 +1628,20 @@ async def _worker_turn(run: Run, run_log: Log, cwd: Path, prompt: str, resume: s
                        workspace: str | None, on_session: Callable[[str, str], Any],
                        add_dirs: "tuple[Path, ...] | list[Path]" = (), env: dict[str, str] | None = None,
                        answered: bool = True, fence: dict[str, Any] | None = None,
-                       turn_timeout_s: float | None = None, asking: dict[str, Any] | None = None) -> str:
+                       turn_timeout_s: float | None = None, asking: dict[str, Any] | None = None,
+                       models: dict[str, Any] | None = None) -> str:
     """One turn of a ticket's background session, started with `prompt` or woken with it when `resume` names the
     session, then watched until the turn ends, its transcript copied into the chat. `on_session(short id, full id)`
     records the session. Returns the session's report; SessionError when it ended any way but done, ran past
     TURN_TIMEOUT_S, or waited ASK_TIMEOUT_S on a question (the session is then stopped). With `answered` False, a
     `blocked` session whose transcript shows its turn ended counts as ended, since Claude Code lists a finished turn
     `blocked` when its last message reads as a question. A turn that ended on an API error is not a question: a view
-    ticket's turn returns the error text, a code ticket's raises it. `asking` is how it asks (Sessions._flags); while
-    one of its permission requests waits on the card, it is no question."""
+    ticket's turn returns the error text, a code ticket's raises it. `asking` is how it asks and `models` its model
+    settings (Sessions._flags); while one of its permission requests waits on the card, it is no question."""
     from . import agent_session  # noqa: PLC0415
 
-    fenced = {**({"fence": fence} if fence else {}), **({"asking": asking} if asking else {})}
+    fenced = {**({"fence": fence} if fence else {}), **({"asking": asking} if asking else {}),
+              **({"models": models} if models else {})}
     key = str((asking or {}).get("key") or "")
     if resume:
         tail = Tail(resume, _size(SESSIONS.transcript(resume)))
@@ -1590,8 +1707,7 @@ async def _worker_turn(run: Run, run_log: Log, cwd: Path, prompt: str, resume: s
             continue
         break
     tail.read(run_log)
-    # Stopping an idle session frees its process; a follow-up wakes it by its full id (`--resume` on a live session
-    # would start a copy).
+    # Stopping an idle session frees its process; a follow-up starts it again (Sessions.resume).
     await asyncio.to_thread(SESSIONS.stop, run.session)
     if state == "timed out":
         raise SessionError(f"the session had not finished after {_minutes(limit)}, so it was stopped; Retry "
@@ -1626,7 +1742,28 @@ def _target_lines(t: dict[str, Any]) -> str:
     return json.dumps(tg, ensure_ascii=False)[:TARGET_CHARS]
 
 
-def build_prompt(t: dict[str, Any], *, worktree: Path, ui_url: str, api_url: str, before_shot: str | None) -> str:
+def build_prompt(t: dict[str, Any], *, worktree: Path, ui_url: str, api_url: str, before_shot: str | None,
+                 sandboxed: bool = False) -> str:
+    with prompts.custom(userconf.prompt_files(t.get("workspace"), "dev")):
+        return _ticket_prompt(t, worktree=worktree, ui_url=ui_url, api_url=api_url, before_shot=before_shot,
+                              sandboxed=sandboxed)
+
+
+# the code-ticket prompt's line on the stack's pages, by whether the session's Bash runs in the sandbox (TICKET_STACK)
+TICKET_STACK_LINES = {
+    False: ("To see a page of the stack, run `node scripts/ui_shot.mjs --url <page> --out <png> --selector '<css>'` and "
+            "open the PNG with Read. Save shots under {shots}. The before shot of the ticket's target is {before}. After "
+            "you commit, take an after shot of the target with the before shot's selector."),
+    True: ("Your Bash runs in Claude Code's sandbox: it changes only this worktree and your commits, and it can't reach "
+           "the stack, so take no shots. The before shot of the ticket's target is {before}; open it with Read. The "
+           "server takes the after shot once its gates pass."),
+}
+
+
+def _ticket_prompt(t: dict[str, Any], *, worktree: Path, ui_url: str, api_url: str, before_shot: str | None,
+                   sandboxed: bool = False) -> str:
+    before = (str(shots_dir(t["id"]) / before_shot) if before_shot else
+              "(none: the stack was not available for a before shot)")
     return prompts.render_dev("dev-ticket", {
         "ticket": str(t["id"]),
         "title": str(t.get("title") or ""),
@@ -1636,19 +1773,15 @@ def build_prompt(t: dict[str, Any], *, worktree: Path, ui_url: str, api_url: str
         "worktree": str(worktree),
         "ui_url": ui_url,
         "api_url": api_url,
-        "shots": str(shots_dir(t["id"])),
-        "before_shot": str(shots_dir(t["id"]) / before_shot) if before_shot else "(none: the stack was not available for a before shot)",
+        "stack": TICKET_STACK_LINES[sandboxed].format(shots=shots_dir(t["id"]), before=before),
     })
 
 
 def build_fix_prompt(t: dict[str, Any], *, worktree: Path, doctor: str) -> str:
-    return prompts.render_dev("dev-fix", {
-        "ticket": str(t["id"]),
-        "title": str(t.get("title") or ""),
-        "body": fenced("ticket", str(t.get("body") or "")),
-        "worktree": str(worktree),
-        "doctor": fenced("thimble doctor", doctor),
-    })
+    values = {"ticket": str(t["id"]), "title": str(t.get("title") or ""), "body": fenced("ticket", str(t.get("body") or "")),
+              "worktree": str(worktree), "doctor": fenced("thimble doctor", doctor)}
+    with prompts.custom(userconf.prompt_files(None, "dev")):
+        return prompts.render_dev("dev-fix", values)
 
 
 def build_gates_prompt(report: str) -> str:
@@ -1676,6 +1809,32 @@ async def _check(wt: Path, base: str, run_log: Log) -> tuple[list[str], dict[str
 
 class TicketError(RuntimeError):
     """A ticket that cannot go on, with a message written for the analyst (runner_problem's lines)."""
+
+
+class NotAllowed(TicketError):
+    """The analyst did not allow the ticket to edit thimble's own code (module note, permissions): it ends stopped."""
+
+
+# the card's tool name for the question (frontend chat/permissions.ts ASKS_TO)
+CODE_TOOL = "ThimbleCode"
+CODE_QUESTION = ("This edits thimble's own code, which then runs outside the sandbox (its test server, its checks and "
+                 "git). Allow?")
+CODE_WHY = ("thimble asks this before every code ticket, in every permission mode. Unanswered, the ticket is cancelled "
+            "after {wait}.")
+CODE_NOT_ALLOWED = "the analyst did not allow it to edit thimble's own code, so it did not start"
+CODE_NOBODY = ("it has no workspace, so no permission card could ask the analyst whether it may edit thimble's own code, "
+               "and it did not start")
+
+
+async def _code_refusal(t: dict[str, Any]) -> str:
+    """'' once the analyst allowed the ticket on its chat's card (CODE_QUESTION), else why it did not start."""
+    from . import agent_session  # noqa: PLC0415
+
+    if not t.get("workspace") or not t.get("chat"):
+        return CODE_NOBODY
+    got = await agent_session.ask(str(t["workspace"]), ticket_key(t["id"]), CODE_TOOL, {"description": CODE_QUESTION},
+                                  force=True, why=CODE_WHY.format(wait=agent_session.wait_words(PERMISSION_WAIT_S)))
+    return "" if got.get("behavior") == "allow" else CODE_NOT_ALLOWED
 
 
 def _kept_worktree(t: dict[str, Any]) -> tuple[Path, str, str] | None:
@@ -1741,20 +1900,28 @@ def ticket_key(tid: str) -> str:
     return f"ticket:{tid}"
 
 
-async def run_ticket(t: dict[str, Any], run: Run, *, doctor: str | None = None) -> dict[str, Any]:
-    """The whole ticket (_run_ticket), its session's permission requests answered on its chat meanwhile."""
-    _host(t.get("workspace"), {"key": ticket_key(t["id"])}, t.get("chat"), _log_for(t))
+async def run_ticket(t: dict[str, Any], run: Run, *, doctor: str | None = None, allowed: bool = False) -> dict[str, Any]:
+    """The whole ticket (_run_ticket), its session's permission requests answered on its chat meanwhile, as thimble's
+    config asks (dev_config); `allowed` when the analyst already allowed it to edit thimble's code (`thimble fix`)."""
     try:
-        return await _run_ticket(t, run, doctor=doctor)
+        conf: userconf.Session | str = dev_config(t.get("workspace"), sandbox=True, hosted=bool(t.get("workspace")))
+    except userconf.ConfigError as e:
+        conf = str(e)
+    if not isinstance(conf, str):
+        _host(t.get("workspace"), {"key": ticket_key(t["id"]), "config": conf}, t.get("chat"), _log_for(t))
+    try:
+        return await _run_ticket(t, run, doctor=doctor, conf=conf, allowed=allowed)
     finally:
         _unhost(t.get("workspace"), ticket_key(t["id"]))
 
 
-async def _run_ticket(t: dict[str, Any], run: Run, *, doctor: str | None = None) -> dict[str, Any]:
-    """The whole ticket: worktree, stack and before shot, the session's turns with gates fed back, after shot, apply, UI
-    rebuild (rolled back when it fails), then the restart rules. `doctor` is `thimble fix`'s path: no stack, rebuild or
-    restart. A stopped run ends `stopped` or `dismissed`; one a shutdown cuts short is queued again up to REQUEUE_MAX
-    times. Returns the ticket's record."""
+async def _run_ticket(t: dict[str, Any], run: Run, *, doctor: str | None = None,
+                      conf: "userconf.Session | str | None" = None, allowed: bool = False) -> dict[str, Any]:
+    """The whole ticket: the analyst's Allow unless `allowed` (_code_refusal), worktree, stack and before shot, the
+    session's turns with gates fed back, after shot, apply, UI rebuild (rolled back when it fails), then the restart
+    rules. `doctor` is `thimble fix`'s path: no stack, rebuild or restart. A stopped run ends `stopped` or `dismissed`, as
+    does one the analyst did not allow; one a shutdown cuts short is queued again up to REQUEUE_MAX times. Returns the
+    ticket's record."""
     tid = t["id"]
     fixing = doctor is not None
     run_log = _log_for(t)
@@ -1767,8 +1934,10 @@ async def _run_ticket(t: dict[str, Any], run: Run, *, doctor: str | None = None)
     applied = False  # the commit point passed (_merge_and_record)
     requeue = False  # a shutdown cut the run short and it runs again at the next start
     try:
-        if why := runner_problem(fixing=fixing):
+        if why := runner_problem(fixing=fixing) or (conf if isinstance(conf, str) else ""):
             raise TicketError(why)
+        if not allowed and (why := await _code_refusal(t)):
+            raise NotAllowed(why)
         kept = await asyncio.to_thread(_kept_worktree, t)
         if kept is not None:
             wt, branch, base = kept
@@ -1783,19 +1952,22 @@ async def _run_ticket(t: dict[str, Any], run: Run, *, doctor: str | None = None)
         ui_url = stack["ui"] if stack else None
         api_url = stack["api"] if stack else f"http://127.0.0.1:{config_port()}"
         before = await _take_shot(t, run_log, "before", ui_url)
+        boxed = isinstance(conf, userconf.Session) and conf.sandboxed
+        fence = await asyncio.to_thread(ticket_fence, wt, conf.network, conf.enforced) if boxed else None
         if fixing:
             prompt = build_fix_prompt(t, worktree=wt, doctor=doctor or "")
         else:
             prompt = build_prompt(t, worktree=wt, ui_url=ui_url or "(no validation stack; take no shots)", api_url=api_url,
-                                  before_shot=before)
+                                  before_shot=before, sandboxed=boxed)
         resume = t.get("session_id") if int(t.get("attempts") or 0) > 1 else None
         ok = False
         for attempt in range(1, MAX_ATTEMPTS + 1):
             run_log.stage(f"worker, attempt {attempt}")
-            result_text = await _worker_turn(run, run_log, wt, prompt, resume,
+            result_text = await _worker_turn(run, run_log, wt, prompt, resume, fence=fence,
                                              name=dev_session_name(t.get("workspace")), workspace=t.get("workspace"),
                                              on_session=lambda short, sid: _update(tid, session=short, session_id=sid),
-                                             **({"asking": {"key": ticket_key(tid), "allow": own_work(wt, (shots_dir(tid),))}}
+                                             **({"asking": {"key": ticket_key(tid), "allow": own_work(wt, (shots_dir(tid),)),
+                                                            **({"config": conf} if conf is not None else {})}}
                                                 if t.get("workspace") else {}))
             resume = run.session_id
             touched, validation = await _check(wt, base, run_log)
@@ -1839,7 +2011,7 @@ async def _run_ticket(t: dict[str, Any], run: Run, *, doctor: str | None = None)
             log.exception("ticket run failed")
             error = f"{type(e).__name__}: {e}"
         if not applied:
-            status = "failed"
+            status = "stopped" if isinstance(e, NotAllowed) else "failed"
         run_log.error(error)
     finally:
         try:
@@ -2010,6 +2182,7 @@ def _recover() -> None:
 _view_runs: dict[tuple[str, str], Run] = {}  # (workspace, slug) -> the build running
 _view_queue: list[tuple[str, str]] = []  # (workspace, slug) waiting for room in the pool, in the order queued
 _view_stopping: dict[tuple[str, str], Run] = {}  # builds stop_view cancelled whose tasks have not ended yet
+_parked: set[tuple[str, str]] = set()  # a session's view tickets main's end stopped, until a session is main again
 _closing = False  # the server is shutting down: a build that ends starts no other
 
 
@@ -2017,6 +2190,7 @@ def queue_view(c: str, slug: str) -> None:
     """Queue the view ticket of the proposal `slug` and start what the pool has room for (views.propose, views.retry,
     recover_views). A ticket already queued or running is left as it is."""
     key = (c, slug)
+    _parked.discard(key)
     if key not in _view_queue and key not in _view_runs:
         _view_queue.append(key)
     _start_views()
@@ -2096,15 +2270,47 @@ async def stop_views(c: str) -> None:
         await asyncio.gather(*tasks, return_exceptions=True)
 
 
+# why the builds of the views an orientation proposed stopped (stop_orientation_views)
+ORIENTATION_STOPPED = "the orientation was stopped"
+
+
+def stop_orientation_views(c: str) -> list[str]:
+    """The analyst stopped the orientation: the builds of the views it proposed stop, queued or running, and so do the
+    reviews of its views, so none of its builds starts after the Stop. A new view is dropped, and a change to a built
+    view leaves the view as it was. Views and changes the analyst asked for go on. The slugs stopped."""
+    from . import view_review, views  # noqa: PLC0415
+
+    stopped: list[str] = []
+    for p in views.list_proposals(c):
+        if not p.get("orientation") or p.get("asked"):
+            continue
+        slug = str(p["slug"])
+        reviewed = view_review.stop(c, slug)
+        if p.get("status") not in views.PENDING:
+            if reviewed:
+                stopped.append(slug)
+            continue
+        if p.get("revision"):
+            # a running build puts the view back itself once its session has stopped (run_view)
+            if not stop_view(c, slug, ORIENTATION_STOPPED):
+                views.end_revision(c, slug)
+        else:
+            stop_view(c, slug, ORIENTATION_STOPPED)
+            views.drop(c, slug, ORIENTATION_STOPPED)
+        stopped.append(slug)
+    return stopped
+
+
 def recover_views(c: str) -> None:
     """Queue again the workspace's view tickets that are queued or building with no build, queue entry or winding-down
     run in this process (after a restart or an archive restore). A building one's session is stopped first so its run
-    resumes it."""
+    resumes it. One main's end stopped waits for resume_views."""
     from . import views  # noqa: PLC0415
 
     for p in views.list_proposals(c):
         key = (c, str(p["slug"]))
-        if p.get("status") not in views.PENDING or key in _view_runs or key in _view_queue or key in _view_stopping:
+        if (p.get("status") not in views.PENDING or key in _view_runs or key in _view_queue or key in _view_stopping
+                or key in _parked):
             continue
         if p.get("status") == "building" and p.get("session"):
             SESSIONS.stop(str(p["session"]))
@@ -2138,17 +2344,28 @@ def build_view_prompt(c: str, prop: dict[str, Any], folder: Path, corpus: Path) 
     command's URL."""
     from . import views  # noqa: PLC0415
 
-    return prompts.render_dev("dev-view", {
-        "name": str(prop.get("name") or prop["slug"]),
-        "slug": str(prop["slug"]),
-        "why": str(prop.get("why") or ""),
-        "claims": ", ".join(prop.get("claims") or []),
-        "spec": views.spec_lines(prop),
-        "folder": str(folder),
-        "corpus": str(corpus),
-        "examples": str(views.EXAMPLES_DIR),
-        "check": view_check_command(c, str(prop["slug"])),
-    })
+    values = {"name": str(prop.get("name") or prop["slug"]), "slug": str(prop["slug"]), "why": str(prop.get("why") or ""),
+              "claims": ", ".join(prop.get("claims") or []), "spec": views.spec_lines(prop), "folder": str(folder),
+              "corpus": str(corpus), "examples": str(views.EXAMPLES_DIR), "check": view_check_command(c, str(prop["slug"])),
+              "network": view_network_line(c)}
+    with prompts.custom(userconf.prompt_files(c, "dev")):
+        return prompts.render_dev("dev-view", values)
+
+
+VIEW_NETWORK_LINES = {
+    "sandboxed": "There is no network, so nothing can be fetched or installed. ",
+    "asked": "Fetch and install nothing. Every command but the check command waits for the analyst's permission. ",
+    "on": "",
+}
+
+
+def view_network_line(c: str) -> str:
+    """The view-build prompt's line on the network, true of how the build's Bash runs (dev_config)."""
+    try:
+        conf = dev_config(c, sandbox=True)
+    except userconf.ConfigError:
+        return VIEW_NETWORK_LINES["sandboxed"]
+    return VIEW_NETWORK_LINES["on" if conf.network else "sandboxed" if conf.sandboxed else "asked"]
 
 
 def view_check_command(c: str, slug: str) -> str:
@@ -2250,11 +2467,58 @@ def view_read_only(corpus: Path, folder: Path) -> tuple[Path, ...]:
     return tuple(out)
 
 
-def view_fence(c: str, slug: str, corpus: Path, folder: Path) -> dict[str, Any]:
-    """The settings that fence a view build's session: the view_read_only folders read-only, and its check command run
-    outside the sandbox, where it can reach this server."""
+def view_fence(c: str, slug: str, corpus: Path, folder: Path, conf: userconf.Session) -> dict[str, Any]:
+    """The settings that fence a view build's session: the view_read_only folders read-only, its check command run
+    outside the sandbox, where it can reach this server, and while the dev agent's network is off (`conf`),
+    offline_deny and the offline environment (view_env)."""
     check = view_check_command(c, slug)
-    return read_only_fence(view_read_only(corpus, folder), outside=(check, f"{check} *"))
+    out = read_only_fence(view_read_only(corpus, folder), outside=(check, f"{check} *"), conf=conf)
+    if conf.network:
+        return {**out, "env": view_env(slug, offline=False)}
+    conf.offline = True
+    perms = dict(out.get("permissions") or {})
+    deny = [*(perms.get("deny") or []), *offline_deny()]
+    return {**out, "permissions": {**perms, "deny": deny}, "env": view_env(slug)}
+
+
+def offline_deny() -> list[str]:
+    """The deny rules of a view build whose network is off, in every permission mode: Bash commands by OFFLINE_PROGRAMS,
+    OFFLINE_COMMANDS and OFFLINE_MODULES."""
+    return [*(r for p in OFFLINE_PROGRAMS for r in (f"Bash({p}:*)", f"Bash(*/{p} *)")),
+            *(f"Bash({cmd}:*)" for cmd in OFFLINE_COMMANDS), *(f"Bash(* -m {m} *)" for m in OFFLINE_MODULES)]
+
+
+def view_models(c: str, prop: dict[str, Any]) -> dict[str, Any]:
+    """The model, effort and fast mode of a view build's session: each the analyst chose for the dev agent in Settings
+    (config.chosen), else the one of the session that asked for the view (asker_models)."""
+    dev, mine, asker = config.models_for(c)["dev"], config.chosen(c, "dev"), asker_models(c, prop)
+    out = {k: dev[k] if k in mine else asker.get(k) for k in ("model", "effort", "fast")}
+    if out["fast"] and out["model"] and not config.has_fast_mode(out["model"]):
+        out["fast"] = False
+    return out
+
+
+def asker_models(c: str, prop: dict[str, Any]) -> dict[str, Any]:
+    """The model settings of the session that asked for the view `prop`. For the orientation's proposals the
+    orientation's: its model without the 1M tag, as its subagents run it, the effort it runs at and its fast mode. For
+    the analyst's, main's as its replies report them (session._note_model); before main's first reply, the model and
+    fast mode are left to the analyst's Claude Code settings (None) and the effort is main's launch effort."""
+    from . import orient_session, orientation  # noqa: PLC0415
+
+    if prop.get("orientation"):
+        own, run = config.models_for(c)["orient"], orientation.read_run(c)
+        effort = orient_session.effort_of(run) if run else cc_settings.level_of(own["effort"])
+        return {"model": config.base_model(own["model"]), "effort": effort, "fast": bool(own["fast"])}
+    held = (agents.meta_or_none(c, agents.MAIN_ID) or {}).get("attached") or {}
+    effort = held.get("effort") if held.get("effort") in cc_settings.EFFORTS else None
+    return {"model": held.get("model") or None,
+            "effort": effort or cc_settings.main_effort_flag(config.corpus_dir(c)) or None,
+            "fast": held["fast"] if isinstance(held.get("fast"), bool) else None}
+
+
+def view_env(slug: str, offline: bool = True) -> dict[str, str]:
+    """A view build's session's environment: its key, and when `offline`, OFFLINE_ENV and OFFLINE_ENV_FILE."""
+    return {SESSION_ENV: view_key(slug), **({**OFFLINE_ENV, ENV_FILE: str(OFFLINE_ENV_FILE)} if offline else {})}
 
 
 def view_key(slug: str) -> str:
@@ -2262,15 +2526,17 @@ def view_key(slug: str) -> str:
     return f"view:{slug}"
 
 
-def view_asking(c: str, slug: str, folder: Path) -> dict[str, Any]:
-    """How a view build's session asks (Sessions._flags): its key, and allowed unasked its edits in the view's folder,
-    reads of the worked examples, its check command, and Bash in the sandbox where the sandbox runs."""
+def view_asking(c: str, slug: str, folder: Path, conf: userconf.Session) -> dict[str, Any]:
+    """How a view build's session asks (Sessions._flags): its key, what thimble's config asks of it (`conf`), and allowed
+    unasked its edits in the view's folder, reads of the worked examples, its check command, and Bash in the sandbox
+    where its Bash runs there, but for the commands the config asks about."""
     from . import agent_session, views  # noqa: PLC0415
 
     check = view_check_command(c, slug)
-    out: dict[str, Any] = {"key": view_key(slug),
+    conf.own_bash = [check]
+    out: dict[str, Any] = {"key": view_key(slug), "config": conf,
                            "allow": [*own_work(folder, (views.EXAMPLES_DIR,)), f"Bash({check})", f"Bash({check} *)"]}
-    if cc_settings.sandbox_ok():
+    if conf.sandboxed:
         names, asks = agent_session.sandbox_rule(config.corpus_dir(c))
         out["sandbox"] = [names, asks]
     return out
@@ -2329,8 +2595,14 @@ async def _run_view(c: str, slug: str, run: Run) -> None:
         return
     revision = bool(prop.get("revision"))
     change = bool(prop.get("changed"))
-    # without Node or the frontend's packages no session could pass the checks, so the build ends at once
-    if why := await asyncio.to_thread(views.build_problem):
+    conf, why = None, ""
+    try:
+        conf = dev_config(c, sandbox=True)
+    except userconf.ConfigError as e:
+        why = str(e)
+    # without Node or the frontend's packages, or with an error in thimble's config, no session could pass the checks,
+    # so the build ends at once
+    if why := why or await asyncio.to_thread(views.build_problem):
         run.status = "failed"
         if revision:
             views.end_revision(c, slug, why, failed_change=str(prop.get("change") or ""))
@@ -2347,10 +2619,9 @@ async def _run_view(c: str, slug: str, run: Run) -> None:
                                  attempts=int(prop.get("attempts") or 0) + 1) or prop
     views._emit(c, slug, "building", chat=chat)
     run_log = Log(agents.Recorder(c, chat)) if chat else Log(None)
-    asking = view_asking(c, slug, folder)
+    asking = view_asking(c, slug, folder, conf)
     _host(c, asking, chat, run_log)
     resume = prop.get("session_id")
-    env = {SESSION_ENV: view_key(slug)}
     report: dict[str, Any] | None = None
     built, error, result_text = False, "", ""
     capacity = ""  # why the last turn ended, when the API ended it (capacity_failure)
@@ -2364,7 +2635,8 @@ async def _run_view(c: str, slug: str, run: Run) -> None:
         rep = await views.gate(c, slug, views._kept_locators(c, slug))
         checks = rep.get("checks") or []
         if not quiet or rep.get("ok"):
-            run_log.stage(f"checks passed: {len(checks)} ref(s), the page loaded" if rep.get("ok")
+            loaded = "the page loaded" if (rep.get("page") or {}).get("ok") else "the page was not loaded"
+            run_log.stage(f"checks passed: {len(checks)} ref(s), {loaded}" if rep.get("ok")
                           else f"checks failed: {views.first_failure(rep) or 'the page did not load'}")
         return rep
 
@@ -2407,8 +2679,8 @@ async def _run_view(c: str, slug: str, run: Run) -> None:
                 # working directory they would receive the sandbox's `.claude/.cc-writes/`
                 result_text = await _worker_turn(run, run_log, corpus, prompt, resume, name=view_session_name(c, slug),
                                                  workspace=c, on_session=on_session, add_dirs=(folder,),
-                                                 env=env, answered=False, fence=view_fence(c, slug, corpus, folder),
-                                                 asking=asking)
+                                                 answered=False, fence=view_fence(c, slug, corpus, folder, conf),
+                                                 asking=asking, models=view_models(c, prop))
             except RuntimeError as e:
                 error, result_text = str(e), ""
             capacity = capacity_failure(error) or capacity_failure(result_text)
@@ -2451,10 +2723,13 @@ async def _run_view(c: str, slug: str, run: Run) -> None:
                           else build_gates_prompt("\n".join(views.gate_lines(report))))
     except asyncio.CancelledError:
         await asyncio.to_thread(SESSIONS.stop, run.session)
+        if run.status == MAIN_ENDED:
+            _view_failed(c, slug, MAIN_ENDED, chat)
+            raise
         why = run.status if run.status not in ("running",) else "server shut down during the run"
         if chat:
             _close_chat({"workspace": c, "chat": chat}, "stopped", why)
-        if revision and run.status == "dismissed":
+        if revision and run.status in ("dismissed", ORIENTATION_STOPPED):
             views.end_revision(c, slug)  # its session has stopped, so nothing writes into the folder any more
         raise
     if built:
@@ -2522,9 +2797,14 @@ async def review_revision(c: str, slug: str, message: str) -> tuple[bool, str]:
     if chat and chat != prop.get("chat"):
         views.update_proposal(c, slug, chat=chat)
     run_log = Log(agents.Recorder(c, chat)) if chat else Log(None)
+    try:
+        conf = dev_config(c, sandbox=True)
+    except userconf.ConfigError as e:
+        run_log.error(str(e))
+        return False, str(e)
     run = Run(ticket_id=f"view-review:{slug}", title=str(prop.get("name") or slug), ts_start=_now())
     _review_runs[(c, slug)] = run
-    asking = view_asking(c, slug, folder)
+    asking = view_asking(c, slug, folder, conf)
     _host(c, asking, chat, run_log)
     resume = prop.get("session_id")
     prompt = message if resume else f"{build_view_prompt(c, prop, folder, corpus)}\n\n{message}"
@@ -2541,9 +2821,9 @@ async def review_revision(c: str, slug: str, message: str) -> tuple[bool, str]:
             try:
                 result_text = await _worker_turn(run, run_log, corpus, prompt, resume, name=view_session_name(c, slug),
                                                  workspace=c, on_session=on_session, add_dirs=(folder,),
-                                                 env={SESSION_ENV: view_key(slug)}, answered=False,
-                                                 fence=view_fence(c, slug, corpus, folder),
-                                                 turn_timeout_s=REVIEW_TURN_TIMEOUT_S, asking=asking)
+                                                 answered=False, fence=view_fence(c, slug, corpus, folder, conf),
+                                                 turn_timeout_s=REVIEW_TURN_TIMEOUT_S, asking=asking,
+                                                 models=view_models(c, prop))
             except RuntimeError as e:
                 why = str(e)
                 run_log.error(why)
@@ -2609,11 +2889,12 @@ FIX_BODY = "thimble's server is down or unhealthy (thimble doctor, below)."
 
 async def fix_offline(doctor: str, title: str = "fix: thimble server is down") -> str:
     """`thimble fix`: one ticket on prompts/dev-fix.md, run by a background session in a worktree without a stack and
-    fast-forwarded into the live checkout; the caller restarts the server."""
+    fast-forwarded into the live checkout; the caller restarts the server, and has asked the analyst's Allow
+    (CODE_QUESTION) in the terminal."""
     t = file_ticket(None, title, FIX_BODY, "terminal", start=False)
     run = Run(ticket_id=t["id"], title=t["title"], ts_start=_now())
     _update(t["id"], status="running", attempts=1, runner=os.getpid(), finished=False)
-    rec = await run_ticket({**t, "attempts": 1}, run, doctor=doctor)
+    rec = await run_ticket({**t, "attempts": 1}, run, doctor=doctor, allowed=True)
     return f"fix ticket {rec.get('status')}: {rec.get('error') or (rec.get('result') or '')[:600]}"
 
 
@@ -3029,19 +3310,54 @@ def _stop_run(tid: str, why: str) -> bool:
     return True
 
 
+# why the build of a view the analyst asked for stopped when main's session ended (stop_workspace), its Retry's line
+MAIN_ENDED = "thimble stopped when its Claude Code session ended"
+
+
 def stop_workspace(c: str) -> int:
     """Stop what runs for workspace `c` here, main's session having ended (agents.stop_all): its code ticket, which ends
-    `stopped` (Retry runs it again), and its view builds and review revisions. Returns how many were stopped."""
+    `stopped` (Retry runs it again), its view builds, queued or running, and the reviews of its views. A view the analyst
+    asked for fails with MAIN_ENDED and Retry; a session's proposal waits for resume_views. Returns how many were
+    stopped."""
+    from . import view_review, views  # noqa: PLC0415
+
     n = 0
     t = _get(_current.ticket_id) if _current is not None and not _current.ticket_id.startswith("view:") else None
     if t is not None and t.get("workspace") == c and _stop_run(_current.ticket_id, "stopped"):
         n += 1
-    for (cc, _slug), run in [*_view_runs.items(), *_review_runs.items()]:
-        if cc == c and run.status == "running" and run.task is not None and not run.task.done():
-            run.stop_reason = "stopped"
+    for key in [k for k in [*_view_queue, *_view_runs] if k[0] == c]:
+        asked = bool((views.read_proposal(*key) or {}).get("asked"))
+        if key in _view_queue:
+            _view_queue.remove(key)
+            if asked:
+                _view_failed(*key, MAIN_ENDED)
+        run = _view_runs.get(key)
+        if run is not None and run.task is not None and not run.task.done():
+            run.status = MAIN_ENDED if asked else "stopped"
             run.task.cancel()
             n += 1
+        if not asked:
+            _parked.add(key)
+    for p in views.list_proposals(c):
+        if view_review.stop(c, str(p["slug"])):
+            n += 1
     return n
+
+
+def workspaces_at_work() -> set[str]:
+    """The workspaces this server runs a code ticket, a view build or a view review for, or has view tickets queued for."""
+    from . import view_review  # noqa: PLC0415
+
+    t = _get(_current.ticket_id) if _running() and _current is not None and not _current.ticket_id.startswith("view:") else None
+    return ({c for c, _ in [*_view_queue, *_view_runs]} | {c for c, _ in view_review._runs}
+            | ({str(t["workspace"])} if t is not None and t.get("workspace") else set()))
+
+
+def resume_views(c: str) -> None:
+    """A session is main in workspace `c`: the view tickets stop_workspace left waiting, and those a previous server
+    left, are queued again (recover_views)."""
+    _parked.difference_update({k for k in _parked if k[0] == c})
+    recover_views(c)
 
 
 @router.post("/dev/tickets/{tid}/stop", status_code=202)

@@ -126,6 +126,40 @@ def test_the_held_hook_prints_what_the_analyst_wrote_once_its_event_is_written_o
     assert not asyncio.run(channel.held_route(channel.HeldBody(cwd=_cwd(), session=SID)))["terminal"], "printed once"
 
 
+def test_a_tray_entry_claude_code_refuses_is_asked_for_once_and_its_line_prints_once(monkeypatch):
+    """Claude Code may refuse main's Agent call that shows a background session in the agent tray, as auto mode can:
+    thimble then asks main no more for that session, while its own refusal of a second tray entry is no such refusal.
+    Asks that wait for the same turn print their line once."""
+    from app import bg_session
+
+    _subscribe(SID, cc_channel.HOOK)
+    lv = session.attach(CORPUS, SID, _cwd(), None)
+    monkeypatch.setattr(bg_session, "_save", lambda c: None)
+    e = bg_session.Entry(CORPUS, "orient", bg_session.name_of(CORPUS, "orient"), "ab12cd34", "sid-o", "chat-o", "orient",
+                         "/work/o")
+    monkeypatch.setitem(bg_session._entries, (CORPUS, "orient"), e)
+    monkeypatch.setattr(bg_session, "_loaded", {CORPUS})
+    call = {"subagent_type": "thimble:orient", "description": e.name, "run_in_background": True,
+            "prompt": str(bg_session.proxy_file(CORPUS, "orient"))}
+    assert bg_session.ask_main_for_proxy(CORPUS, "orient") and bg_session.ask_main_for_proxy(CORPUS, "orient")
+
+    async def deliver() -> None:
+        for _ in range(2):
+            got = await channel.pull_route(Req(), cwd=_cwd(), session=SID, wait=1)
+            await channel.ack_route(channel.AckBody(cwd=_cwd(), session=SID, id=got["id"], terminal=True))
+
+    asyncio.run(deliver())
+    said = asyncio.run(channel.held_route(channel.HeldBody(cwd=_cwd(), session=SID)))["terminal"]
+    assert said == f"agent: {e.name}"
+    assert bg_session.agent_check(CORPUS, call, "tu-1") is None
+    assert bg_session.agent_check(CORPUS, call, "tu-2"), "a second tray entry while the first starts"
+    for tid, words in (("tu-2", f"{e.name} already shows in the agent tray."), ("tu-1", "Permission denied")):
+        session._tool_use(lv, tid, "Agent", call)
+        session._tool_result(lv, tid, words, is_error=True)
+        assert e.proxy_refused is (tid == "tu-1")
+    assert not bg_session.ask_main_for_proxy(CORPUS, "orient") and channel.pending(CORPUS) == 0
+
+
 # ----------------------------------------------------------------------------- the server: the permission hook
 
 
@@ -311,6 +345,9 @@ def test_main_s_stop_hook_shows_the_link_thimble_up_left_once_and_only_as_it_end
         assert _watch(tmp_path, stand.port, {**stop, "hook_event_name": "UserPromptSubmit"}, "--mode").stdout == ""
         assert json.loads(_watch(tmp_path, stand.port, stop, "--mode").stdout) == {"systemMessage": f"thimble: {link}"}
         assert _watch(tmp_path, stand.port, stop, "--mode").stdout == "", "once"
+        (tmp_path / "thome" / "links" / SID).write_text(f"{link}\nthimble: WARNING - a note for the terminal")
+        assert json.loads(_watch(tmp_path, stand.port, stop, "--mode").stdout) == {
+            "systemMessage": f"thimble: {link}\nthimble: WARNING - a note for the terminal"}, "the notes under the link"
     finally:
         stand.close()
 

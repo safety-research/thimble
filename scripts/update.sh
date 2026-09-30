@@ -1,8 +1,11 @@
 #!/usr/bin/env bash
 # scripts/update.sh — bring a thimble install up to date, then run its scripts/install.sh over it.
 #
-#   scripts/update.sh [--dir DIR] [--from ZIP|URL] [--sums FILE] [--marketplace-name NAME] [--dry-run]
+#   scripts/update.sh [--dir DIR] [--from ZIP|URL] [--sums FILE] [--marketplace-name NAME] [--dry-run] [INSTALL FLAGS]
 #
+# INSTALL FLAGS are install.sh's answers to its questions (--browser, --sandbox-deps, --plugin, --trust-workspaces and
+# their no- forms) and --require-pinned, passed on to it: without a terminal it runs only with a flag for each question
+# it would ask.
 # The install: --dir, else the one $THIMBLE_HOME/app-dir names, else the tree this script is in. A git checkout gets
 # `git pull --ff-only` + install.sh in place; a release install needs --from (a release zip, path or https URL), which is
 # unpacked and installed over it with ITS install.sh (backend/.venv, frontend/node_modules, workspaces/ and data/ kept).
@@ -23,6 +26,7 @@ from=""
 sums=""
 mp_name=""
 dry=0
+install_flags=()
 while [ $# -gt 0 ]; do
   case "$1" in
     --dir) dir="$2"; shift 2;;
@@ -30,6 +34,9 @@ while [ $# -gt 0 ]; do
     --sums) sums="$2"; shift 2;;
     --marketplace-name) mp_name="$2"; shift 2;;
     --dry-run) dry=1; shift;;
+    --browser) install_flags+=("$1" "${2:-}"); shift $(( $# > 1 ? 2 : 1 ));;
+    --browser=* | --sandbox-deps | --no-sandbox-deps | --plugin | --no-plugin | --trust-workspaces | --no-trust-workspaces \
+      | --require-pinned) install_flags+=("$1"); shift;;
     -h|--help) usage; exit 0;;
     *) echo "update.sh: unknown argument $1" >&2; usage >&2; exit 2;;
   esac
@@ -75,6 +82,7 @@ old_version="$(json_get "$dir/plugin/.claude-plugin/plugin.json" version)"
 installed_args=()
 [ -n "$mp_name" ] && installed_args+=(--marketplace-name "$mp_name")
 [ "$dry" = 1 ] && installed_args+=(--dry-run)
+installed_args+=(${install_flags[@]+"${install_flags[@]}"})
 [ "$dry" = 1 ] && say "update.sh --dry-run: printing the steps; nothing changes"
 
 if [ -e "$dir/.git" ]; then

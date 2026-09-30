@@ -167,7 +167,8 @@ try {
   if (elementOutPath) mkdirSync(dirname(elementOutPath), { recursive: true })
   const viewport = args.viewport ?? VIEWPORT
 
-  browser = await chromium.launch({ headless: true })
+  // the system's Chrome, Edge or Chromium when thimble's config picks it (backend/app/userconf.py)
+  browser = await chromium.launch({ headless: true, executablePath: process.env.THIMBLE_BROWSER_PATH || undefined })
   const page = await browser.newPage({ viewport, deviceScaleFactor: args.scale })
   if (args.storage.length)
     await page.addInitScript((pairs) => {
@@ -230,7 +231,8 @@ try {
   if (args.info) writeFileSync(resolve(args.info), JSON.stringify(result) + '\n')
   console.log(JSON.stringify(result))
 } catch (e) {
-  console.error(`ui_shot: ${String(e?.stack ?? e?.message ?? e)}`)
+  // without the boxed notice Playwright adds to a failed launch, which names an install command
+  console.error(`ui_shot: ${String(e?.stack ?? e?.message ?? e).split('\n').filter((l) => !/^[╔║╚]/.test(l)).join('\n')}`)
   console.log(JSON.stringify({ ok: false, error: String(e?.message ?? e).split('\n')[0] }))
   code = 1
 } finally {

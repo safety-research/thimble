@@ -61,6 +61,21 @@ def _workspaces_off_the_checkout(tmp_path, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def claude_global_config(tmp_path, tmp_path_factory, monkeypatch) -> Path:
+    """Claude Code's global config is the test's own, which trusts the test's tmp dir, where its workspaces live, so no
+    test reads the user's ~/.claude.json and the background sessions may start (bg_session.trusted). The file lives
+    outside that dir, which some tests scan. A test of an untrusted workspace rewrites it."""
+    import json
+
+    from app import bg_session
+
+    path = tmp_path_factory.mktemp("claude-config") / ".claude.json"
+    path.write_text(json.dumps({"projects": {str(tmp_path): {"hasTrustDialogAccepted": True}}}))
+    monkeypatch.setattr(bg_session, "claude_json", lambda: path)
+    return path
+
+
+@pytest.fixture(autouse=True)
 def _thimble_home_off_the_user(tmp_path, monkeypatch):
     """Every test's thimble home is its own tmp dir, so what the server records there never reaches the user's. A test's
     own THIMBLE_HOME still wins."""
@@ -121,6 +136,7 @@ def _view_tickets_held(monkeypatch):
     monkeypatch.setattr(dev, "_view_runs", {})
     monkeypatch.setattr(dev, "_view_queue", [])
     monkeypatch.setattr(dev, "_view_stopping", {})
+    monkeypatch.setattr(dev, "_parked", set())
     monkeypatch.setattr(dev, "_closing", False)
 
 
@@ -230,6 +246,20 @@ def data(tmp_path, monkeypatch):
     monkeypatch.setenv("THIMBLE_DATA_DIR", str(d))
     monkeypatch.setenv("THIMBLE_WORKSPACES_DIR", str(tmp_path / "ws"))
     return d
+
+
+def print_sessions(monkeypatch) -> None:
+    """Every session agent_session.start starts runs as `claude -p`, for a stand-in `claude` that speaks only --print:
+    the orientation's, its critic's and the writers' too, which otherwise run as `claude --bg`. The permission flow a
+    test checks is the same in both."""
+    from app import agent_session
+
+    real = agent_session.start
+
+    async def start(*args, **kw):
+        return await real(*args, **{**kw, "background": False})
+
+    monkeypatch.setattr(agent_session, "start", start)
 
 
 def fake_claude_bin(folder: Path, status: dict) -> Path:

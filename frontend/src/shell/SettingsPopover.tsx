@@ -1,7 +1,7 @@
 // The settings gear's popover: a table with a row per role that runs a model (model, effort, fast mode), saved with
 // Save. main's model is read-only (only /model in the terminal changes it); its effort and fast mode are kept for its
-// next launch through PUT session/effort and session/fast. Other roles are settings.models, resolved with defaults by
-// GET /settings; a save
+// next launch through PUT session/effort and session/fast. Other roles are thimble's config (backend userconf.py),
+// resolved with defaults by GET /settings, which also names the config's error; a save
 // sends only the changed fields so defaults stay defaults, and applies to the next session or subagent. Choices that
 // cannot take effect are dimmed with the reason in a tooltip. Every row names its model exactly, never `default`. Under
 // the table, the permission mode of each agent thimble starts (MODE_ROWS): the analyst's pick, else the mode of their
@@ -22,7 +22,7 @@ import { EFFORTS, ROLES, type Attached, type MainEffort, type ModeAgent, type Mo
 import { bus } from '../lib/bus'
 import { EFFORT_CHOICES, FastBolt, MODEL_TIP, NEXT_LAUNCH, effortWord, mainEffort, mainFast, noFastTip } from '../chat/ModelLine'
 import { BYPASS_LINE } from '../chat/ModeSwitch'
-import { PERMISSION_OPTIONS, TERMINAL_FIRST_NOTE, agentMode, permissionChoice } from '../chat/StartGate'
+import { PERMISSION_OPTIONS, agentMode, permissionChoice } from '../chat/StartGate'
 
 type Models = Record<string, ModelConf>
 
@@ -32,16 +32,15 @@ export const CHAT_OFF_NOTE = "For chatting in your Claude Code terminal. Alerts,
 /** The workspace's switches under the table: the setting each saves, its name and what it does. */
 export const SWITCHES: { key: string; label: string; note: string }[] = [
   { key: 'hide_chat', label: 'Hide the chat', note: CHAT_OFF_NOTE },
-  { key: 'terminal_first', label: 'Terminal-first', note: TERMINAL_FIRST_NOTE },
 ]
 
 /** The agents whose permission modes the settings list, by their names there (backend modes.AGENTS). */
 export const MODE_ROWS: { agent: ModeAgent; label: string }[] = [
   { agent: 'orient', label: 'Orientation' },
   { agent: 'writer', label: 'Writers' },
-  { agent: 'critic', label: 'Critic and checks' },
+  { agent: 'critic', label: 'Critic' },
+  { agent: 'checks', label: 'Checks' },
   { agent: 'dev', label: 'Dev agent' },
-  { agent: 'views', label: 'View builds' },
 ]
 const MODE_NAME: Record<OrientPermissions, string> = { manual: 'Manual', auto: 'Auto', bypass: 'Bypass' }
 
@@ -337,7 +336,7 @@ export function SettingsPopover({ ws, anchor, open, onClose }: { ws: string; anc
             ))}
           </div>
         )}
-        {error && <div className="settings-error">{error}</div>}
+        {(error || settings?.config_error) && <div className="settings-error">{error || settings?.config_error}</div>}
         <div className="settings-foot">
           <Button variant="ghost" onClick={onClose} disabled={busy}>
             Cancel

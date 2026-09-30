@@ -68,7 +68,7 @@ async def _lifespan(app: Any):
     try:
         yield
     finally:
-        _pool_shutdown()
+        _pool_shutdown(end=True)
 
 
 router = APIRouter(lifespan=_lifespan)
@@ -1237,18 +1237,27 @@ def _pool_get() -> ProcessPoolExecutor:
     return _pool
 
 
-def _pool_shutdown() -> None:
+def _pool_shutdown(end: bool = False) -> None:
+    """Drop the scan pool, its queued chunks cancelled. `end`, for the server's shutdown, also ends its workers and
+    waits for them: uvicorn exits by SIGTERM right after, which would leave a worker running."""
     global _pool
     pool, _pool = _pool, None
-    if pool is not None:
-        pool.shutdown(wait=False, cancel_futures=True)
+    if pool is None:
+        return
+    if end:
+        for proc in list((getattr(pool, "_processes", None) or {}).values()):
+            try:
+                proc.terminate()
+            except (OSError, ValueError):
+                pass
+    pool.shutdown(wait=end, cancel_futures=True)
 
 
 def _pool_reset(broken: ProcessPoolExecutor) -> ProcessPoolExecutor:
     """A fresh pool after `broken` raised BrokenProcessPool; a second run finding the fresh one keeps it."""
     if _pool is broken:
         log.warning("scan pool: a worker stopped; the pool is rebuilt and the chunks in flight re-submitted")
-        _pool_shutdown()
+        _pool_shutdown(end=True)
     return _pool_get()
 
 
@@ -1399,7 +1408,10 @@ async def classify_structured(c: str, concept: dict, items: list[tuple[str, str]
     `model` when it names one, else the labels role's."""
     from . import model
 
-    system, user = build_classify_prompt(concept, items, comment)
+    from . import prompts, userconf  # noqa: PLC0415
+
+    with prompts.custom(userconf.prompt_files(c, "labels")):
+        system, user = build_classify_prompt(concept, items, comment)
     model_name, effort = labels_model(c)
     if concept.get("model"):
         model_name = concept["model"]
@@ -2392,6 +2404,16 @@ def _stop_apply(key: tuple[str, str]) -> asyncio.Task | None:
     else:
         task.get_loop().call_soon_threadsafe(task.cancel)
     return task
+
+
+def stop_workspace(c: str) -> int:
+    """End every apply running for workspace `c` (agents.stop_all), keeping its run records. Returns how many ran."""
+    return sum(_stop_apply(key) is not None for key in [k for k in list(_tasks) if k[0] == c])
+
+
+def workspaces_at_work() -> set[str]:
+    """The workspaces with an apply running."""
+    return {k[0] for k, task in list(_tasks.items()) if not task.done()}
 
 
 def _partial_record(c: str, concept_id: str) -> dict:

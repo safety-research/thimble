@@ -5,7 +5,8 @@ A session attaches when its MCP shim subscribes to the channel naming it or when
 session is main per workspace, kept in `workspaces/<c>/sessions.json` with the tail's cursor and each subagent's place,
 so a restarted server reads on where it stopped. The channel subscription is the session's liveness: with no
 subscriber for GRACE_S the session detaches. /clear and /resume switch sessions in the same process, and main follows
-the new id by pid (_follow).
+the new id by pid (_follow). When main's session ends and none takes over, everything thimble runs for the workspace
+stops (agents.stop_all), and once no workspace has a main session the server stops itself (cli.stop_self).
 
 The tail translates transcript records into main's log (`by: terminal`): the analyst's lines (not /thimble's own turn
 or local commands such as /model), channel events, task notifications, peer messages, tool calls and results, text,
@@ -424,6 +425,7 @@ def attach(c: str, sid: Any, cwd: Any, transcript_path: str | None = None, pid: 
     if not restored:
         with contextlib.suppress(Exception):
             _bg().new_main(c)
+    _resume_work(c)
     log.info("%s: session %s attached (%s)", c, sid, "restored" if restored else "new")
     return lv
 
@@ -678,19 +680,50 @@ def disconnected(c: str, sid: str | None) -> None:
 
 def _stop_agents(c: str) -> None:
     """Main's session ended and none took over: every agent of the workspace stops (agents.stop_all), so nothing works
-    on after the analyst quit. A /clear or /resume in the same process is no end (the session follows), nor is a
-    session replaced by another that runs (_hand_back)."""
-    from . import agents  # noqa: PLC0415
-
+    on after the analyst quit, and the server stops when no workspace has a main session (_stop_server). A /clear or
+    /resume in the same process is no end (the session follows), nor is a session replaced by another that runs
+    (_hand_back)."""
     async def run() -> None:
         stopped = await agents.stop_all(c)
         if stopped:
             log.info("%s: main's session ended; stopped %s", c, ", ".join(stopped))
+        if _live.get(c) is not None:  # a session became main while the agents stopped
+            _resume_work(c)
+        elif not _live:
+            await _stop_server()
 
     try:
         asyncio.get_running_loop().create_task(run(), name=f"stop-agents:{c}")
     except RuntimeError:  # no loop (a test's synchronous call): nothing runs to stop
         pass
+
+
+def _resume_work(c: str) -> None:
+    """A session is main in workspace `c`: the work main's end left waiting there goes on (agent_session.resume_parked,
+    dev.resume_views)."""
+    from . import agent_session, dev  # noqa: PLC0415 — both import this module
+
+    for fn in (agent_session.resume_parked, dev.resume_views):
+        try:
+            fn(c)
+        except Exception:  # noqa: BLE001 — the session is main either way
+            log.exception("%s: the work left waiting did not go on", c)
+
+
+async def _stop_server() -> None:
+    """No workspace has a main session: what still runs in any workspace stops as main's end stops it, the kernels end,
+    and the server stops itself (cli.stop_self)."""
+    from . import cli, notebook  # noqa: PLC0415
+
+    for c in sorted(agents.at_work()):
+        with contextlib.suppress(Exception):
+            await agents.stop_all(c)
+    if _live or _shutting_down():
+        return
+    with contextlib.suppress(Exception):
+        await notebook.shutdown_all()
+    log.info("no workspace has a main session any more; the server stops")
+    await asyncio.to_thread(cli.stop_self)
 
 
 def may_return(c: str, sid: str) -> bool:
@@ -1057,6 +1090,8 @@ def _tool_result(lv: Live, tool_use_id: str, content: Any, is_error: bool = Fals
         lv.forked.discard(tid)
         threads.fork_lost(lv.c, tid)
     sub = _sub_by(lv, tool_use_id=tool_use_id)
+    if sub is not None and sub.proxy and is_error and sub.report:
+        _bg().proxy_refused(lv.c, sub.report, tool_use_id)
     if sub is not None and name in AGENT_TOOLS:
         _agent_result(lv, sub, content, is_error)
     elif sub is not None and sub.workflow:

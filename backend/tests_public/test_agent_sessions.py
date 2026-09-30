@@ -1,7 +1,7 @@
 """The Claude Code sessions thimble starts beside main (agent_session.py, orient_session.py) and their permissions:
 every session asks through the PermissionRequest hook and no prompt tool, and the hook hands each request to the server
 and prints its decision. Manual waits for the analyst, while a writer's request is denied after a minute; Bypass grants,
-and a card's switch holds for its session's later runs.
+and a card's switch holds for its session's later runs. Main's end parks the orientation for the next main session.
 
 A stand-in for the CLI (FAKE, run as agent_session.CLAUDE_BIN) records its argv, its environment and what it read on
 stdin, and writes what Claude Code writes for such a session: the transcript under the config dir's projects/, a
@@ -17,10 +17,11 @@ import urllib.request
 from pathlib import Path
 
 import pytest
+from conftest import print_sessions
 from fastapi import HTTPException
 
 from app import (agent_session, agents, channel, config, hook_auth, ledger, modes, orient_session, permission_hook,
-                 session, tools)
+                 session, tools, userconf)
 
 CORPUS = "mini"
 KEY = orient_session.KEY
@@ -118,9 +119,9 @@ def fake(tmp_path, monkeypatch) -> Path:
     monkeypatch.setenv("THIMBLE_CHANNEL", "plugin:thimble@inline")  # the server's own, inherited from main's session
     monkeypatch.delenv("FAKE_MODE", raising=False)
     monkeypatch.delenv("FAKE_SLEEP", raising=False)
-    # the stand-in is a `claude -p`: the sessions run as thimble's own, not as terminal-first mode's `claude --bg`
-    ledger.put_settings(CORPUS, {"terminal_first": False})
-    monkeypatch.setenv("THIMBLE_SANDBOX", "0")  # the fence without the sandbox
+    print_sessions(monkeypatch)
+    monkeypatch.setenv("THIMBLE_SANDBOX", "0")  # the fence without the sandbox, which the config then does not require
+    monkeypatch.setitem(userconf.DEFAULTS["sandbox"], "enforce", False)
     return out
 
 
@@ -251,6 +252,59 @@ async def test_bypass_grants_every_request_and_switches_with_manual_while_the_se
     assert ledger.get_settings(CORPUS)[modes.SETTING] == {"orient": "bypass"}
     await orient_session.stop(CORPUS)
     await _done()
+
+
+async def test_a_switch_to_bypass_leaves_the_config_s_asks_waiting_for_the_analyst(fake, monkeypatch):
+    """A switch to Bypass grants what waits on the card, but not an install command thimble's config sent there: that
+    one waits for the analyst's own answer."""
+    monkeypatch.setenv("FAKE_MODE", "sleep")
+    _listen()
+    run = await orient_session.start(CORPUS, "")
+    assert run.mode == "manual" and run.config is not None
+    install = {"command": "bash -c 'pip install requests'"}
+    assert run.config.verdict("Bash", install) == "ask"
+    held = _ask("Bash", install)
+    plain = _ask("Bash", {"command": "rm -r out"})
+    pending = await _pending(run.chat, 2)
+    agent_session.set_mode(CORPUS, run.chat, "bypass")
+    assert (await plain)["behavior"] == "allow"
+    await asyncio.sleep(0.1)
+    assert not held.done(), "the install still waits"
+    rid = next(p["id"] for p in pending if "pip install" in p.get("command", ""))
+    assert agent_session.answer(CORPUS, run.chat, rid, False)
+    assert (await held)["behavior"] == "deny"
+    await orient_session.stop(CORPUS)
+    await _done()
+
+
+async def test_main_s_end_parks_the_orientation_and_the_next_main_session_resumes_it(fake, monkeypatch):
+    """Main's end (agent_session.wind_down) ends the orientation's process as the server's stop does: its chat stays
+    running, marked parked, and no Stop reaches its record. The next session that is main resumes it in the same chat
+    with `## session-restarted`."""
+    from app import orientation, procs
+
+    monkeypatch.setenv("FAKE_MODE", "sleep")
+    run = await orient_session.start(CORPUS, "")
+    pid = run.pid
+    for _ in range(100):  # the session has begun its transcript
+        if session.find_transcript(run.sid):
+            break
+        await asyncio.sleep(0.05)
+    assert len(await agent_session.wind_down(CORPUS)) == 1
+    assert not procs.alive(pid) and agent_session.current(CORPUS, KEY) is None
+    meta = agents.read_meta(CORPUS, run.chat)
+    assert (meta["status"], meta["parked"], meta["pid"]) == ("running", True, None)
+    assert orientation.read_run(CORPUS)["status"] == "running"
+    monkeypatch.delenv("FAKE_MODE")
+    agent_session.resume_parked(CORPUS)
+    for _ in range(100):
+        if agent_session.current(CORPUS, KEY) is not None:
+            break
+        await asyncio.sleep(0.05)
+    await _done()
+    assert tools.hint(agent_session.RESTARTED_PROMPT, stopped="")[:40] in (fake / "stdin.txt").read_text()
+    meta = agents.read_meta(CORPUS, run.chat)
+    assert meta["status"] == "done" and not meta.get("parked")
 
 
 RULE = {"type": "addRules", "rules": [{"toolName": "Bash", "ruleContent": "npm test *"}], "behavior": "allow",

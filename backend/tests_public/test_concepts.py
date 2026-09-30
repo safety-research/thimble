@@ -150,3 +150,31 @@ async def test_prompt_apply_batches_rows(api, workspaces_tmp, fake_classify, mon
     assert {r["ref"]: r["label"] for r in rows} == expected  # 'YES' is coerced to the concept's 'yes'
     assert s["counts"] == {"yes": sum(v == "yes" for v in expected.values()), "no": sum(v == "no" for v in expected.values())}
     assert (await api.get(f"/api/ws/{CORPUS}/concepts/{k['id']}")).json()["applications"][-1]["created_by"] == "chat:ab12"
+
+
+async def test_the_server_s_shutdown_ends_the_label_scan_pool_s_workers():
+    """A worker still busy with a chunk when the server stops is ended, not left running after the server exits."""
+    import os
+    import time
+
+    from app import concepts
+
+    life = concepts._lifespan(None)
+    await life.__aenter__()
+    pool = concepts._pool_get()
+    pool.submit(time.sleep, 60)
+    for _ in range(200):
+        if pool._processes:
+            break
+        time.sleep(0.05)
+    pids = list(pool._processes)
+    assert pids
+    started = time.monotonic()
+    await life.__aexit__(None, None, None)
+    assert concepts._pool is None and time.monotonic() - started < 30
+    for pid in pids:
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            continue
+        raise AssertionError(f"the pool's worker {pid} still runs")

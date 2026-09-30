@@ -21,11 +21,10 @@ the same session, and its changes land in place, one Undo reverting them all.
 `query` is only ever the analyst's own words typed with Start. A run with a `final` group uses it as its deck. `status`
 is the latest run's, so start_orientation refuses while any run goes.
 
-Terminal-first mode (the workspace's `terminal_first` setting, on by default): the orientation's session runs as the
-Claude Code background session `thimble:orient · <workspace>` (bg_session), which the analyst sees in the agent tray of
-their own terminal through its tray entry (plugin/agents/orient-tray.md) and can attach to and message. It is the same
-session as with the mode off, with everything Start chooses: the orientation role's model, effort and Ultracode, fast
-mode, its permission mode, the critique, the work-folder fence and the editable instructions.
+The orientation's session runs as the Claude Code background session `thimble:orient · <workspace>` (bg_session), which
+the analyst sees in the agent tray of their own terminal through its tray entry (plugin/agents/orient-tray.md) and can
+attach to and message, with everything Start chooses: the orientation role's model, effort and Ultracode, fast mode, its
+permission mode, the critique, the work-folder fence and the editable instructions.
 
 When run 0 ends, the held proposals appear, and the orientation's chat gets chips for them. A failed run 0
 runs again in its session when a start asks for the same orientation. When the report was asked for, orient_session
@@ -48,7 +47,6 @@ from .ledger import read_json, write_json
 log = logging.getLogger("thimble.orientation")
 
 AGENT = "thimble-orient"  # prompts/orient.md's name, the agent its session runs as
-TERMINAL_FIRST_KEY = "terminal_first"  # settings.json: terminal-first mode (module note)
 PLUGIN = "thimble"  # the plugin's name (plugin/.claude-plugin/plugin.json), the scope of its agents and skills
 AGENT_FILE = config.REPO_ROOT / "prompts" / "orient.md"
 EFFORTS = ("low", "medium", "high", "xhigh", "max")  # Start's effort menu below Ultracode, its highest choice
@@ -122,20 +120,6 @@ def _emit(c: str, status: str, **fields: Any) -> None:
         investigation.emit(c, investigation.MAIN, {"type": "orient", "status": status, **fields})
     except Exception:  # noqa: BLE001 — the stream is a courtesy; run.json is the record
         log.warning("orientation %s: could not emit %s", c, status, exc_info=True)
-
-
-def terminal_first(c: str) -> bool:
-    """Whether the workspace runs in terminal-first mode (TERMINAL_FIRST_KEY), where the orientation, its critique and
-    the writers run as background sessions (bg_session.wanted): what settings.json stores, else the default
-    (ledger.SETTINGS_DEFAULTS, on)."""
-    from .ledger import SETTINGS_DEFAULTS, stored_settings  # noqa: PLC0415
-
-    default = SETTINGS_DEFAULTS[TERMINAL_FIRST_KEY] is True
-    try:
-        value = stored_settings(c).get(TERMINAL_FIRST_KEY, default)
-    except Exception:  # noqa: BLE001 — a workspace whose settings cannot be read runs the default mode
-        return default
-    return value is True
 
 
 def effort(value: Any) -> str:

@@ -42,6 +42,10 @@ const MEDIA_WHOLE_MAX = 32 * 1024 * 1024 // a request without Range (an <img>) g
 const CONTROL_TEXT_MAX = 60
 const CONTROLS = 'button, select, option, input, label, summary, [role=button], [role=checkbox], [role=switch], [role=menuitemcheckbox], [role=option], [role=tab]'
 
+// An error's message without the boxed notice Playwright adds to a failed launch, which names an install command: the
+// server hands these messages to models.
+const plain = (e) => String(e && e.message ? e.message : e).split('\n').filter((l) => !/^[╔║╚]/.test(l)).join('\n')
+
 // The page's own controls whose short text names one of `names`, such as a toggle, a checkbox or a menu item for a
 // label; a <label> counts only when it labels a form control. A control inside an element whose data-label names one of
 // `ids`, a label thimble sent, is thimble's: it calls thimble.setLabel or setLabelColour. Runs in the frame.
@@ -341,14 +345,16 @@ async function main() {
   const opt = args(process.argv.slice(2))
   const doc = readFileSync(opt.frame, 'utf8')
   const states = JSON.parse(readFileSync(opt.states, 'utf8') || '[]')
-  const browser = await chromium.launch()
+  // the system's Chrome, Edge or Chromium when thimble's config picks it (backend/app/userconf.py)
+  const executablePath = process.env.THIMBLE_BROWSER_PATH || undefined
+  const browser = await chromium.launch({ executablePath })
   const out = []
   try {
     for (let i = 0; i < states.length; i++) {
       try {
         out.push(await shootState(browser, opt, doc, states[i], i))
       } catch (e) {
-        out.push({ ok: false, errors: [String(e && e.message ? e.message : e)] })
+        out.push({ ok: false, errors: [plain(e)] })
       }
     }
   } finally {
@@ -358,6 +364,6 @@ async function main() {
 }
 
 main().catch((e) => {
-  say({ done: true, states: [], error: String(e && e.message ? e.message : e) })
+  say({ done: true, states: [], error: plain(e) })
   process.exit(1)
 })
