@@ -182,7 +182,7 @@ GRANT_TTL_S = 600.0
 # auto mode's reason when its classifier gave no verdict on a call, the waits before each time the call goes back to
 # auto mode, and how long the card that then asks waits for a patient session before it denies the call (module note,
 # auto mode). Claude Code reads only `retry` from a PermissionDenied hook, so a deny carries no message to the model.
-CLASSIFIER_DOWN = re.compile(r"\bclassifier\b.*\bunavailable\b", re.I)
+CLASSIFIER_DOWN = re.compile(r"\bclassifier\b.*\bunavailable\b|\bno safety verdict\b", re.I)
 CLASSIFIER_WAITS_S = (10.0, 30.0, 90.0)
 CLASSIFIER_ASK_S = 600.0
 BYPASS = "bypass"

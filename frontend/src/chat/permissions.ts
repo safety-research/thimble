@@ -120,7 +120,7 @@ export function askingAgent(p: Pick<PermissionRequest, 'agent_id' | 'agent_type'
 }
 
 /** Claude Code's reason when auto mode's classifier gave no verdict on a call (backend agent_session.CLASSIFIER_DOWN). */
-const CLASSIFIER_DOWN = /\bclassifier\b.*\bunavailable\b/i
+const CLASSIFIER_DOWN = /\bclassifier\b.*\bunavailable\b|\bno safety verdict\b/i
 
 /** Whether auto mode left the call to the analyst only because its classifier gave no verdict. Pure. */
 export function classifierDown(p: Pick<PermissionRequest, 'refused'>): boolean {

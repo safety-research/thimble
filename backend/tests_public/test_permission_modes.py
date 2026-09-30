@@ -277,6 +277,30 @@ async def test_auto_is_claude_code_s_auto_mode_and_a_call_it_refuses_waits_for_t
     await _done()
 
 
+async def test_a_call_auto_mode_gave_no_safety_verdict_on_goes_back_to_it_then_waits_a_while(fake, monkeypatch):
+    """Both ways Claude Code says auto mode gave no verdict are no refusal: the call goes back to auto mode, and only
+    then does the card ask, denying it unanswered after CLASSIFIER_ASK_S rather than waiting for good."""
+    monkeypatch.setenv("FAKE_MODE", "sleep")
+    monkeypatch.setattr(agent_session, "CLASSIFIER_WAITS_S", (0.01,))
+    monkeypatch.setattr(agent_session, "CLASSIFIER_ASK_S", 0.2)
+    _listen()
+    ledger.put_settings(CORPUS, {modes.SETTING: {"orient": "auto"}})
+    run = await orient_session.start(CORPUS, "")
+    reasons = ("Classifier unavailable", "Auto mode unavailable — stopped after repeated responses with no safety verdict")
+    for i, reason in enumerate(reasons, 1):
+        body = agent_session.PermissionRequestBody(session=KEY, event="PermissionDenied", tool_name="Bash",
+                                                   tool_input={"command": f"ls {i}"}, agent_id="a3",
+                                                   tool_use_id=f"toolu_c{i}", reason=reason)
+        assert (await agent_session.permission_request_route(CORPUS, body))["behavior"] == "allow", "back to auto mode"
+        assert f"toolu_c{i}" in session._not_run
+        call = asyncio.ensure_future(agent_session.permission_request_route(CORPUS, body))
+        p = (await _pending(run.chat, i))[-1]
+        assert p["refused"] == reason and p["deny_after_s"] == 0.2
+        assert (await asyncio.wait_for(call, 5))["behavior"] == "deny"
+    await orient_session.stop(CORPUS)
+    await _done()
+
+
 async def test_the_hook_s_route_answers_for_the_session_its_shim_names(fake, monkeypatch):
     monkeypatch.setenv("FAKE_MODE", "sleep")
     _listen()
