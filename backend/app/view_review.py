@@ -558,28 +558,28 @@ def _keep(path: Path, obj: dict[str, Any]) -> None:
     write_json(path, obj)
 
 
-def _derived_key(reader: str, derived: list[dict[str, str]]) -> str:
+def _derived_key(reader: str, derived: list[dict[str, str]], prompt: str) -> str:
     import hashlib  # noqa: PLC0415
 
-    return hashlib.sha1((reader + "\0" + json.dumps(derived, sort_keys=True)).encode("utf-8")).hexdigest()[:20]
+    return hashlib.sha1("\0".join((reader, json.dumps(derived, sort_keys=True), prompt)).encode("utf-8")).hexdigest()[:20]
 
 
 async def derived_review(c: str, slug: str, derived: list[dict[str, str]]) -> list[dict[str, str]] | str:
     """The fields reader.py derives that `derived` (the view's list, views.shown) does not name, [{field, how}], from one
-    reading on the `verify` role's model, kept per reader and list so the gate after the session's own check does not
-    ask again; why not, as a line, when the reading failed. Capacity failures wait CAPACITY_WAITS_S."""
+    reading on the `verify` role's model, kept per reader, list and prompt so the gate after the session's own check
+    does not ask again; why not, as a line, when the reading failed. Capacity failures wait CAPACITY_WAITS_S."""
     from . import model, tools  # noqa: PLC0415
 
     view = views.read_view(c, slug)
     if view is None:
         return f"no view {slug!r}"
     reader = await asyncio.to_thread((Path(view["dir"]) / views.READER_PY).read_text, "utf-8")
-    key = _derived_key(reader, derived)
+    secs = _sections()
+    key = _derived_key(reader, derived, secs["derived"] + secs["derived-view"])
     kept_at = views.cache_dir(c, view) / DERIVED_FILE
     kept = await asyncio.to_thread(_kept, kept_at)
     if isinstance(kept, dict) and kept.get("key") == key and isinstance(kept.get("undeclared"), list):
         return kept["undeclared"]
-    secs = _sections()
     listed = "\n".join(f"- {d['field']}: {d['how']}" + (f" (from {d['from']})" if d.get("from") else "") for d in derived)
     user = _fill(secs["derived-view"], {"name": view["name"], "description": view["description"] or "-",
                                         "claims": ", ".join(view["claims"]), "derived": listed or "- none",

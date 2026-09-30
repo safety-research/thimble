@@ -7,5 +7,12 @@
     {"form": "p<n>-p<m>", "means": "pages <n> to <m> of a PDF"}
   ],
   "units": [],
+  "derived": [
+    {"field": "text", "from": "a page's text layer", "how": "extracted by pypdf, the white space around it trimmed; empty on a scanned page"},
+    {"field": "first", "from": "text", "how": "the page's first line that is not blank"},
+    {"field": "chars", "from": "text", "how": "how many characters the page's text holds"},
+    {"field": "pages", "from": "the PDF", "how": "how many pages pypdf finds in it"},
+    {"field": "error", "from": "pypdf", "how": "why a PDF did not open, as the error pypdf raised"}
+  ],
   "libs": []
 }

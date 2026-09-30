@@ -520,6 +520,7 @@ function renderSegs() {
   const g = document.getElementById('group')
   g.replaceChildren(...FIELDS.map(([k, name]) => {
     const b = h('button', 'seg-opt' + (group === k ? ' active' : ''), name)
+    b.dataset.field = k
     b.onclick = () => { if (group !== k) { group = k; foldLanes = true; refresh() } }
     return b
   }))
@@ -848,6 +849,7 @@ function renderColour() {
   const seg = h('div', 'seg seg-track')
   seg.append(...FIELDS.map(([k, name]) => {
     const b = h('button', 'seg-opt' + (!labelsOn() && colourBy === k ? ' active' : ''), name)
+    b.dataset.field = k
     b.onclick = () => {
       colourBy = k
       byField = true
@@ -1069,6 +1071,8 @@ function drawChosen() {
 const COLS = [['t', 'Time', 84], ['gap', 'Gap', 70], ['tk', 'Took', 66], ['s', 'Source', 76], ['k', 'Kind', 100],
   ['a', 'Actor', 94], ['sv', 'Service', 90], ['x', 'Text', null]]
 const WIDE = 900
+// the reader's field a column shows
+const COL_FIELD = { t: 'time', tk: 'took', s: 'source', k: 'kind', a: 'actor', sv: 'service', x: 'text' }
 let tableSeq = 0
 let listed = [] // the list's records in the order it shows them, which Earlier, Later and the arrow keys step through
 async function renderTable() {
@@ -1082,6 +1086,7 @@ async function renderTable() {
   const sortable = (k) => k === 't' || k === 'tk' || (k === 'gap' && mode === 'clock')
   document.getElementById('heads').replaceChildren(...used.map(([k, name]) => {
     const th = h('th', k + (sortable(k) ? ' sort' : ''), head(k, name) + (sortBy === k && k !== 't' ? ' ↓' : ''))
+    if (COL_FIELD[k] && !(mode === 'start' && k === 't')) th.dataset.field = COL_FIELD[k]
     if (sortable(k)) th.onclick = () => { sortBy = k; tableLimit = ROWS; renderTable() }
     return th
   }))
@@ -1226,11 +1231,13 @@ function renderDetail() {
   top.append(prev, next)
   const text = h('div', 'd-text' + ((r.text || '').length > 140 ? ' long' : ''), r.text || '')
   const facts = h('dl', 'facts')
-  const fact = (name, content) => {
+  const fact = (name, content, field) => {
     const f = h('div', 'fact')
     const dd = h('dd')
+    const dt = h('dt', null, name)
+    if (field) dt.dataset.field = field
     dd.append(content)
-    f.append(h('dt', null, name), dd)
+    f.append(dt, dd)
     facts.append(f)
   }
   for (const [k, name] of FIELDS.slice(1)) {
@@ -1244,9 +1251,9 @@ function renderDetail() {
       chip.dataset.anchor = `view:${slug}/${value}`
       chip.dataset.anchorName = `the incident ${value}`
     }
-    fact(name, chip)
+    fact(name, chip, k)
   }
-  if (r.id) fact('Id', String(r.id))
+  if (r.id) fact('Id', String(r.id), 'id')
   // the labels that mark it, outside the record's element so that thimble's highlight of the marked words stays on the
   // record's own text
   const labs = h('dl', 'facts')

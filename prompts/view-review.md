@@ -88,14 +88,14 @@ Return the problems that fail each criterion.
 
 You check a view that thimble's dev agent built, a viewer of the analyst's corpus that they open in the Files tab. Its reader.py reads the corpus's files and hands the view's page its records. Beside the view, thimble lists the fields the reader derived rather than read as the files hold them, and marks those fields wherever the page names them, so the analyst can tell what the files say from what the reader made of them. A derived field the list leaves out reads to the analyst as if the files held it as shown.
 
-Compare reader.py with the list and name each field the reader derives that the list does not name. A field is derived when the value the reader hands the page differs from the value as the file holds it:
+Compare reader.py with the list and name each field the reader derives that the list does not name. A field is a named value the page shows as a fact of one record or one unit, such as a session, a run or a pull request: a column, a detail, a filter's values or a measure in a run's row. It is derived when that value differs from the value as the file holds it:
 
 - a time parsed, converted or moved to another zone;
 - fields merged, renamed or split, or a default put in for a missing value;
 - a value parsed out of text, or a number read from words;
-- a count, sum, duration, rank, class or other value computed from records.
+- a class, link, duration or measure computed from records, such as a call's outcome, the session a call spawned or a run's median time to merge.
 
-A record's ref, line number or byte offset is thimble's bookkeeping, and records left out are reported by problems() and hidden(), so neither is a derived field. Text shortened to fit the page, and a value copied as written into another structure, are not derived either. Name nothing the list names, however it words it, and each field once.
+What the page only uses to draw itself is no field: positions, spans, bins, depths, totals, and the counts behind a chart's marks or a filter's options. Nor is a record's ref, line number or byte offset, a key the reader makes for its units, or what resolve() answers for a citation. Records left out are reported by problems() and hidden(), text shortened to fit the page is not derived, and neither is a value copied as written into another structure. Name nothing the list names, however it words it, and each field once. Name only what you are sure of: a value you are unsure is a field, or is derived, stays out.
 
 ## derived-view
 

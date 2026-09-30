@@ -361,7 +361,7 @@ def _save_example(name: str) -> str:
     raw = json.loads((d / "view.json").read_text("utf-8"))
     slug = EXAMPLES[name][0]
     views.write_view(name, slug, reader=(d / "reader.py").read_text("utf-8"), html=(d / "view.html").read_text("utf-8"),
-                     **{k: raw[k] for k in ("name", "description", "claims", "accepts", "units", "libs")})
+                     **{k: raw[k] for k in ("name", "description", "claims", "accepts", "units", "derived", "libs")})
     return slug
 
 
@@ -405,6 +405,7 @@ async def test_every_worked_example_answers_the_checks_over_its_sample(name, sam
     assert any(re.search(r"#L\d+$", c) for c in checked), "sampled lines were checked beside the keys"
     problems = await views.reader_problems(name, slug)
     assert problems["count"] == before + sum(n for *_, n in BROKEN[name]), problems
+    assert not rep["coverage"]["not_shown"]["count"] and rep["coverage"]["derived"], "every file is read, and what the reader made is listed"
 
 
 @pytest.mark.parametrize("name", ["repository"])

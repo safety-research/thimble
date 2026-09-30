@@ -714,29 +714,29 @@
   const RUN_COLS = {
     pulls: [
       { head: 'Pull requests', cell: stateBar(['merged', 'closed', 'open']) },
-      { head: 'To merge', cell: num('to_merge', dur), num: true },
-      { head: 'First review', cell: num('first_review', dur), num: true, cls: 'wide1' },
-      { head: 'Reviews each', cell: num('reviews', (v) => v.toFixed(1)), num: true, cls: 'wide1' },
+      { head: 'To merge', field: 'to_merge', cell: num('to_merge', dur), num: true },
+      { head: 'First review', field: 'first_review', cell: num('first_review', dur), num: true, cls: 'wide1' },
+      { head: 'Reviews each', field: 'reviews', cell: num('reviews', (v) => v.toFixed(1)), num: true, cls: 'wide1' },
       { head: 'Self-merged', flag: 'merged by its author', num: true, cls: 'wide2' },
       { head: 'Merged over changes', flag: 'merged over a change request', num: true, cls: 'wide2' },
       { head: 'Pushed after approval', flag: 'pushed after its last approval', num: true, cls: 'wide2' },
     ],
     issues: [
       { head: 'Issues', cell: stateBar(['fixed', 'closed', 'open']) },
-      { head: 'To fix', cell: num('to_fix', dur), num: true },
+      { head: 'To fix', field: 'to_fix', cell: num('to_fix', dur), num: true },
       { head: 'Found in run', filter: ['origin', 'found during the run'], key: 'found', num: true, cls: 'wide1' },
       { head: 'Several PRs', key: 'several', num: true, cls: 'wide1' },
     ],
     discussions: [
       { head: 'Discussions', cell: (r) => countWords(r.n, r.marked) },
-      { head: 'Posts', cell: num('posts'), num: true },
-      { head: 'Posting', cell: (r) => `${r.posters} of ${r.team}`, num: true },
+      { head: 'Posts', field: 'posts', cell: num('posts'), num: true },
+      { head: 'Posting', field: 'posters', cell: (r) => `${r.posters} of ${r.team}`, num: true },
     ],
     agents: [
-      { head: 'Reviews by agent', cell: (r) => spread(r.spread) },
-      { head: 'Top share', cell: num('top', (v) => `${Math.round(v * 100)}%`), num: true },
-      { head: 'Merges', cell: num('merges'), num: true, cls: 'wide1' },
-      { head: 'Approved each other', cell: (r) => `${r.mutual} pair${r.mutual === 1 ? '' : 's'}`, num: true, cls: 'wide1' },
+      { head: 'Reviews by agent', field: 'spread', cell: (r) => spread(r.spread) },
+      { head: 'Top share', field: 'top', cell: num('top', (v) => `${Math.round(v * 100)}%`), num: true },
+      { head: 'Merges', field: 'merges', cell: num('merges'), num: true, cls: 'wide1' },
+      { head: 'Approved each other', field: 'mutual', cell: (r) => `${r.mutual} pair${r.mutual === 1 ? '' : 's'}`, num: true, cls: 'wide1' },
     ],
   }
   function countWords(n, marked) {
@@ -765,7 +765,12 @@
     const table = el('table', 'table runs')
     const head = el('tr')
     head.append(el('th', null, 'Run'), el('th', null, 'Setup'))
-    for (const c of cols) head.append(el('th', [c.num ? 'num' : '', c.cls || ''].join(' ').trim(), c.head))
+    for (const c of cols) {
+      const th = el('th', [c.num ? 'num' : '', c.cls || ''].join(' ').trim(), c.head)
+      const f = c.field || c.key || c.flag
+      if (f) th.dataset.field = f
+      head.append(th)
+    }
     if (S.compare) head.append(el('th', null, `Activity, per ${data.activity.bin} min`))
     const thead = el('thead')
     thead.append(head)
@@ -985,7 +990,7 @@
   function colourButton() {
     const b = el('button', 'btn btn-secondary btn-sm cbtn')
     b.id = 'cbtn'
-    let what = `<span class="cnm">${esc(FIELD_NAMES[field()])}</span>`
+    let what = `<span class="cnm" data-field="${field()}">${esc(FIELD_NAMES[field()])}</span>`
     if (labelOn()) {
       const names = [...new Set(data.classes.map((c) => c.label))]
       const sws = data.classes.slice(0, 6).map((_, i) => `<i class="sw" style="background:${classColour(i)}"></i>`).join('')
@@ -1073,7 +1078,7 @@
     const fields = COLOURS[S.tab].map((f) => {
       const on = !labelOn() && field() === f
       const sws = previewColours(f).map((c) => `<i class="sw" style="width:5px;border-radius:1px;background:${c}"></i>`).join('')
-      return `<button class="mi" data-act="field" data-f="${f}"><span class="ck">${on ? CHECK : ''}</span>${FIELD_NAMES[f]}<span class="n">${sws}</span></button>`
+      return `<button class="mi" data-act="field" data-f="${f}"><span class="ck">${on ? CHECK : ''}</span>${thimble.field(f, FIELD_NAMES[f])}<span class="n">${sws}</span></button>`
     }).join('')
     // every label over files, as thimble lists them; a click turns one on or off in thimble's Labels pane
     const all = labelState.all || labelState.labels.map((l) => ({ ...l, on: true }))
@@ -1446,6 +1451,7 @@
     for (const [k, text] of AGENT_COLS) {
       const th = el('th', 'n' + (k === 'comments' || k === 'posts' ? ' opt' : ''))
       const b = el('button', S.agentSort === k ? 'on' : '', text + (S.agentSort === k ? ' ↓' : ''))
+      b.dataset.field = k
       b.onclick = () => {
         S.agentSort = k
         load()
@@ -1610,6 +1616,7 @@
     for (const [k, text] of MINI) {
       const th = el('th', 'n')
       const b = el('button', S.agentSort === k ? 'on' : '', text + (S.agentSort === k ? ' ↓' : ''))
+      b.dataset.field = k
       b.onclick = () => {
         S.agentSort = k
         load()
