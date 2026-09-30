@@ -437,7 +437,7 @@ def legacy_patch(models: dict[str, Any], rows: dict[str, Any]) -> dict[str, Any]
 
 def pane_patch(models: dict[str, Any] | None, rows: dict[str, Any] | None) -> dict[str, Any]:
     """The Settings pane's changes as settings of this file: `models` {role: {model?, effort?, fast?}} (main's left
-    out, '' for back to the default) and `rows` {row of modes.AGENTS: mode, None for main's}, `views` being the dev
+    out, '' for back to the default; an extension's agent, "<ext>:<name>", takes its model and effort only) and `rows` {row of modes.AGENTS: mode, None for main's}, `views` being the dev
     agent's row of earlier builds."""
     by_role = {role: name for name, role in ROLES.items()}
     agents: dict[str, dict[str, Any]] = {}
@@ -449,8 +449,13 @@ def pane_patch(models: dict[str, Any] | None, rows: dict[str, Any] | None) -> di
                 agents.setdefault("orientation", {})["subagentModel"] = str(conf["model"] or "").strip() or None
             continue
         name = by_role.get(role)
+        if name is None and EXTENSION_AGENT_RE.match(role):
+            for k in ("model", "effort"):
+                if k in conf:
+                    agents.setdefault(role, {})[k] = str(conf[k] or "").strip() or None
+            continue
         if name is None:
-            raise ConfigError(f"no role {role!r}; one of {', '.join(by_role)}")
+            raise ConfigError(f"no role {role!r}; one of {', '.join(by_role)}, or an extension's agent")
         for k in ("model", "effort", "fast"):
             if k in conf:
                 v = conf[k]

@@ -8,6 +8,7 @@ import contextlib
 import io
 import json
 import os
+import re
 import shutil
 from pathlib import Path
 
@@ -15,7 +16,7 @@ import pytest
 
 from fastapi import HTTPException
 
-from app import (card_check, cardtypes, cli, config, ext_applies, extensions, model, orient_session, prompts,
+from app import (card_check, cardtypes, cli, config, ext_applies, extensions, ledger, model, orient_session, prompts,
                  report_types, userconf, views)
 from app import corpus as corpus_mod
 from app.ledger import write_json
@@ -244,6 +245,12 @@ async def test_thimble_s_config_switches_extensions_off_and_sets_their_agents(co
     counter = extensions.agent_definitions(CORPUS)["counter"]
     assert counter["tools"] == ["Read", "Grep", "WebFetch"] and counter["effort"] == "low"
     assert counter["disallowedTools"] == ["Bash"], "its network is off while the session's is on"
+    row = ledger.with_features({}, CORPUS)["models"]["ext-min:counter"]
+    assert row == {"model": "claude-sonnet-5", "effort": "low", "fast": False, "extension": "ext-min"}, "a Settings row"
+    ledger.put_settings(CORPUS, {"models": {"ext-min:counter": {"model": "claude-opus-5-5", "effort": ""}}})
+    assert json.loads(userconf.global_file().read_text())["agents"]["ext-min:counter"] == {"web": "ask",
+                                                                                           "model": "claude-opus-5-5"}
+    assert extensions.agent_definitions(CORPUS)["counter"]["model"] == "claude-opus-5-5"
     _config({"extensions": {"ext-min": {"enabled": False, "on": 1}}, "agents": {"ext-min:counter": {"web": "always",
                                                                                                    "fast": True}}})
     got = userconf.problem(CORPUS)
@@ -326,10 +333,21 @@ async def test_a_quick_model_call_decides_where_an_extension_applies_and_the_swi
     assert len(asked) == 3, "a failed decision stands a while before it is asked again"
 
 
-def test_the_extension_command_adds_lists_and_removes(capsys):
+async def test_the_extension_command_adds_lists_and_removes(corpus, capsys, monkeypatch):
+    """`thimble extension list` says per workspace whether each extension runs there."""
+    monkeypatch.setenv("THIMBLE_WORKSPACES_DIR", str(config.WORKSPACES_DIR))
+    (config.WORKSPACES_DIR / "later").mkdir(parents=True)
     assert cli.main(["extension", "add", str(FIXTURE), "--yes"]) == 0
     assert "Added ext-min." in capsys.readouterr().out
+    await extensions.refresh(CORPUS)
     assert cli.main(["extension", "list"]) == 0
-    assert capsys.readouterr().out.startswith(f"ext-min  0.1.0  {FIXTURE.resolve()}  on")
+    out = capsys.readouterr().out
+    assert out.startswith(f"ext-min 0.1.0, from {FIXTURE.resolve()}: loads\n")
+    assert re.search(r"^  later +not checked yet: no session connected here since it was added$", out, re.M)
+    assert re.search(r"^  tallies +on   1 tally files$", out, re.M)
+    extensions.set_enabled(CORPUS, "ext-min", False)
+    await extensions.refresh(CORPUS)
+    assert cli.main(["extension", "list"]) == 0
+    assert re.search(r"^  tallies +off  off in this workspace$", capsys.readouterr().out, re.M)
     assert cli.main(["extension", "remove", "ext-min"]) == 0
     assert cli.main(["extension", "remove", "ext-min"]) == 1

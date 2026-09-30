@@ -1,4 +1,5 @@
-// The settings gear's popover: a table with a row per role that runs a model (model, effort, fast mode), saved with
+// The settings gear's popover: a table with a row per role that runs a model (model, effort, fast mode), and one per
+// agent of the extensions running here (`<extension>:<agent>`, model and effort, at the orientation's speed), saved with
 // Save. main's model is read-only (only /model in the terminal changes it); its effort and fast mode are kept for its
 // next launch through PUT session/effort and session/fast. Other roles are thimble's config (backend userconf.py),
 // resolved with defaults by GET /settings, which also names the config's error; a save
@@ -70,6 +71,10 @@ export const rolesOf = (s: Settings | null): string[] => {
 
 /** A role's name in the table where its id alone would not say what it is. */
 export const ROLE_LABEL: Record<string, string> = { subagents: 'orientation subagents' }
+/** An extension's agent, whose row is keyed `<extension>:<agent>` as thimble's config keys it. */
+const isExtensionAgent = (role: string): boolean => role.includes(':')
+/** A row's name in the table: an extension's agent by its own name. Pure. */
+export const roleLabel = (role: string): string => ROLE_LABEL[role] ?? (isExtensionAgent(role) ? role.slice(role.indexOf(':') + 1) : role)
 /** The orientation subagents' model while they follow the orientation's. */
 export const SAME_AS_ORIENT = 'Same as orientation'
 /** A subagent: its effort may be its session's (''). */
@@ -83,7 +88,7 @@ const SESSION_ROLE: Record<string, string> = { subagents: 'orient' }
 export function roleEfforts(role: string): string[] {
   if (role === 'main') return [...EFFORT_CHOICES]
   if (role === 'orient') return [...EFFORTS, 'ultracode']
-  return SUBAGENT_ROLES.has(role) ? ['', ...EFFORTS] : [...EFFORTS]
+  return SUBAGENT_ROLES.has(role) || isExtensionAgent(role) ? ['', ...EFFORTS] : [...EFFORTS]
 }
 
 /** Why a role's cell cannot be changed here, or null when it can. Pure. */
@@ -93,6 +98,7 @@ export function lockedWhy(role: string, cell: 'model' | 'effort' | 'fast', conf:
     return main.attached ? null : 'No Claude Code session is attached to main'
   }
   if (role === 'subagents' && cell !== 'model') return `Orientation subagents run at the orientation's ${cell === 'fast' ? 'speed' : 'effort'}`
+  if (isExtensionAgent(role) && cell === 'fast') return "An extension's agent runs at the orientation's speed"
   if (cell === 'fast' && conf.model && !hasFastMode(conf.model)) return noFastTip(conf.model)
   return null
 }
@@ -235,7 +241,7 @@ export function SettingsPopover({ ws, anchor, open, onClose }: { ws: string; anc
               const fastOn = session ? !!session.fast : !!conf.fast && (!conf.model || hasFastMode(conf.model))
               return (
                 <div className="settings-row" role="row" key={role} data-role={role}>
-                  <span className="settings-role">{ROLE_LABEL[role] ?? role}</span>
+                  <span className="settings-role">{roleLabel(role)}</span>
                   {why('model') ? (
                     <LockedChip why={why('model')!} label={`${role} model`}>
                       {role === 'main' && !attached ? 'no session' : model ? modelLabel(model) : 'not known yet'}

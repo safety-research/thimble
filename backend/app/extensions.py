@@ -726,6 +726,27 @@ def agent_definitions(c: str | None) -> dict[str, dict[str, Any]]:
     return {(name if counts[name] == 1 else f"{ext}:{name}"): agent for ext, name, agent in found}
 
 
+def agent_models(c: str | None) -> dict[str, dict[str, Any]]:
+    """The Settings rows of the active extensions' agents, by config key ("<ext>:<name>"): the model and effort each
+    runs at, as agent_definitions resolves them (the config's, else its file's, else the orientation's subagents'
+    model and its session's effort, ''), `fast` False since it runs at its session's speed, and `extension`."""
+    conf = userconf.load_or_defaults(c)[0]
+    subagents = config.models_for(c)["subagents"]["model"]
+    out: dict[str, dict[str, Any]] = {}
+    for e in active(c):
+        for name in e.get("agents") or []:
+            try:
+                front, _ = frontmatter((Path(e["src"]) / "agents" / f"{name}.md").read_text("utf-8"))
+            except OSError:
+                continue
+            key = f"{e['name']}:{name}"
+            mine = userconf.extension_agent(conf, key)
+            model = str(mine["model"] or front.get("model") or "")
+            out[key] = {"model": config.exact_model(model) if model else subagents,
+                        "effort": str(mine["effort"] or front.get("effort") or ""), "fast": False, "extension": e["name"]}
+    return out
+
+
 def card_types(c: str | None) -> list[dict[str, Any]]:
     """The card types of the active extensions that no other active extension gives too, for cardtypes.refresh: {slug,
     extension, view (the view whose reader and index it uses, None for a type with a reader of its own), dir (its
@@ -910,27 +931,38 @@ def remove(name: str) -> bool:
 
 def list_lines(workspaces_dir: Path) -> list[str]:
     """`thimble extension list`: a line per added extension (name, version, source, and whether it loads), then a line
-    per workspace that found it, saying whether it runs there and why not."""
+    per workspace: on or off there, with the reason thimble's decision on whether it applies gave, or why it is off, or
+    that no session connected there since it was added."""
     got = added()
     if not got:
         return ["no extensions added; `thimble extension add <git URL | folder | built-in name>` adds one"]
     off = userconf.extensions_off()
-    seen: dict[str, list[str]] = {}
     try:
-        folders = sorted(d for d in workspaces_dir.iterdir() if (d / STATE_FILE).is_file())
+        folders = sorted(d for d in workspaces_dir.iterdir() if d.is_dir() and config._valid_name(d.name))
     except OSError:
         folders = []
-    for d in folders:
-        exts = _json(d / STATE_FILE).get("extensions") or {}
-        for n, e in exts.items() if isinstance(exts, dict) else ():
-            if isinstance(e, dict):
-                seen.setdefault(n, []).append(f"{d.name}: {'on' if e.get('active') else 'off (' + str(e.get('why') or '') + ')'}")
+    states = {d.name: _json(d / STATE_FILE) for d in folders}
+    width = max((len(d.name) for d in folders), default=0)
     out = []
     for name, root in got.items():
         info = read_extension(root, name)
-        state = "not loaded: " + info["problems"][0] if info["problems"] else config_off(name, off) or "on"
-        out.append(f"{name}  {info['version'] or '-'}  {info['source'] or '-'}  {state}")
-        out += [f"    {x}" for x in seen.get(name, [])]
+        loads = "not loaded: " + info["problems"][0] if info["problems"] else config_off(name, off) or "loads"
+        v = f" {info['version']}" if info["version"] else ""
+        out.append(f"{name}{v}, from {info['source'] or root}: {loads}")
+        for d in folders:
+            state = states[d.name]
+            e = (state.get("extensions") or {}).get(name) if isinstance(state.get("extensions"), dict) else None
+            if not isinstance(e, dict):
+                line = "not checked yet: no session connected here since it was added"
+            else:
+                why = str(e.get("why") or "")
+                reason = " ".join(str((e.get("decision") or {}).get("reason") or "").split())
+                if e.get("active"):
+                    switched = " (switched on here)" if name in _words(state.get("on")) else ""
+                    line = f"on{switched}" + (f"   {reason}" if reason else "")
+                else:
+                    line = f"off  {why}" + (f": {reason}" if why == NOT_HERE and reason else "")
+            out.append(f"  {d.name.ljust(width)}  {line}")
     return out
 
 
