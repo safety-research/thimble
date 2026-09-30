@@ -88,6 +88,7 @@ DERIVED_CHARS = {"field": 80, "from": 300, "how": 600}
 WHY_CHARS = 300  # of why hidden() leaves a file out
 NOT_SHOWN_NAMED = 5  # the files a failed check names that the view neither read whole nor hid
 FILES_LISTED = 500  # the claimed files a view's record lists (_public)
+SIBLING_SAMPLE = 200  # of a claimed folder's paths, those looked for in a folder beside it (sibling_files)
 SOURCE_MAX = 400_000  # chars of reader.py or view.html a view may hold
 # the checks: sample lines per claimed file, files sampled, keys followed, cited records read per key
 CHECK_LINES, CHECK_FILES, CHECK_KEYS, CHECK_KEY_REFS = 3, 3, 3, 30
@@ -1006,8 +1007,8 @@ def _alike(a: str, b: str) -> bool:
 def sibling_files(claimed: list[str], every: list[str]) -> list[str]:
     """The files the claims leave out of each folder beside a claimed file's folder that holds the same files, such as
     another run's beside the one run a view claims. Such a folder has a name of the claimed one's kind (_alike) and
-    holds at least half of the paths the claimed files have below the claimed folder; its files returned are those in
-    the same subfolders and of the same types as the claimed ones."""
+    holds at least half of the paths the claimed files have below the claimed folder (of SIBLING_SAMPLE of them); its
+    files returned are those in the same subfolders and of the same types as the claimed ones."""
     mine = set(claimed)
     under: dict[tuple[str, str], set[str]] = {}
     for p in mine:
@@ -1017,23 +1018,29 @@ def sibling_files(claimed: list[str], every: list[str]) -> list[str]:
     if not under:
         return []
     parents = {q for q, _ in under}
-    kids: dict[str, dict[str, list[str]]] = {}
+    left: dict[str, dict[tuple[str, str], dict[str, list[str]]]] = {}  # parent -> kind -> folder -> unclaimed rests
     for p in every:
+        if p in mine:
+            continue
         parts = p.split("/")
         for i in range(len(parts) - 1):
             q = "/".join(parts[:i])
             if q in parents:
-                kids.setdefault(q, {}).setdefault(parts[i], []).append("/".join(parts[i + 1:]))
+                rest = "/".join(parts[i + 1:])
+                kind = (os.path.dirname(rest), os.path.splitext(rest)[1])
+                left.setdefault(q, {}).setdefault(kind, {}).setdefault(parts[i], []).append(rest)
     have = set(every)
     out: set[str] = set()
     for (q, r), rests in under.items():
         kinds = {(os.path.dirname(x), os.path.splitext(x)[1]) for x in rests}
-        for s, theirs in (kids.get(q) or {}).items():
+        by_kind = left.get(q) or {}
+        sample = sorted(rests)[:SIBLING_SAMPLE]
+        for s in {s for k in kinds for s in by_kind.get(k, {})} - {r}:
             base = f"{q}/{s}" if q else s
-            if s == r or not _alike(r, s) or sum(f"{base}/{x}" in have for x in rests) * 2 < len(rests):
+            if not _alike(r, s) or sum(f"{base}/{x}" in have for x in sample) * 2 < len(sample):
                 continue
-            out |= {f"{base}/{x}" for x in theirs if (os.path.dirname(x), os.path.splitext(x)[1]) in kinds}
-    return sorted(out - mine)
+            out |= {f"{base}/{x}" for k in kinds for x in by_kind.get(k, {}).get(s, [])}
+    return sorted(out)
 
 
 async def shown(c: str, slug: str, version: str | None = None) -> dict[str, Any]:
