@@ -7,6 +7,7 @@ import logging
 import os
 import re
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
@@ -118,6 +119,17 @@ KERNEL_WRAP_NONE, KERNEL_WRAP_BWRAP, KERNEL_WRAP_SRT = KERNEL_WRAPS
 KERNEL_WRAPPED = (KERNEL_WRAP_BWRAP, KERNEL_WRAP_SRT)
 NO_WRAP_HINT = "with kernel_wrap: none the kernel runs without it"  # in the server log
 _KERNEL_WRAP_WARNED: set[str] = set()
+
+
+def linked(path: Path) -> bool:
+    """Whether the file at `path` is a symbolic link or has more than one hard link, so that another name can change it.
+    A workspace's settings.json and config.json are hidden from the kernel by name (kernel_wrap.HIDDEN_FILES), so the
+    server reads no settings from such a file."""
+    try:
+        st = os.lstat(path)
+    except OSError:
+        return False
+    return stat.S_ISLNK(st.st_mode) or st.st_nlink > 1
 
 
 def resolve_kernel_wrap(settings: Mapping[str, Any] | None = None,

@@ -1811,9 +1811,14 @@ async def _wait_ready(k: _Kernel, kc: AsyncKernelClient, timeout: float, *, cont
 
 
 def _ws_settings(workspace: str) -> dict:
-    """workspaces/<c>/settings.json as a dict ({} for none or a broken one): what config.resolve_kernel_wrap reads."""
+    """workspaces/<c>/settings.json as a dict ({} for none, a broken one or one another name can change, config.linked):
+    what config.resolve_kernel_wrap reads."""
+    path = _ws_dir(workspace) / "settings.json"
+    if config.linked(path):
+        log.warning("%s: %s is a link or has another name, so its %s is ignored", workspace, path, config.KERNEL_WRAP_KEY)
+        return {}
     try:
-        s = read_json(_ws_dir(workspace) / "settings.json", {})
+        s = read_json(path, {})
     except (OSError, ValueError):
         return {}
     return s if isinstance(s, dict) else {}

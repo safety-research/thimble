@@ -96,3 +96,20 @@ def test_the_start_up_sweep_leaves_a_sandboxed_kernel_s_processes_alone():
     tree = {40: 30, 30: 20, 20: 10, 99: 1}
     assert notebook._descends(40, {10}, tree) and notebook._descends(30, {20}, tree)
     assert not notebook._descends(99, {10}, tree) and not notebook._descends(10, {40}, tree)
+
+
+def test_the_server_reads_no_settings_from_a_workspace_file_another_name_can_change(workspaces_tmp):
+    """The kernel can't reach settings.json or config.json by name. Should it reach one by another name (a hard link),
+    the server ignores that settings.json's kernel_wrap and starts no agent on that config.json."""
+    from app import userconf
+
+    ws = workspaces_tmp / "w"
+    ws.mkdir()
+    (ws / "settings.json").write_text(json.dumps({config.KERNEL_WRAP_KEY: "none"}))
+    (ws / "config.json").write_text("{}")
+    assert notebook._ws_settings("w") == {config.KERNEL_WRAP_KEY: "none"} and userconf.load("w")
+    for name in ("settings.json", "config.json"):
+        (ws / f"{name}.other").hardlink_to(ws / name)
+    assert notebook._ws_settings("w") == {}
+    with pytest.raises(userconf.ConfigError, match="another name"):
+        userconf.load("w")
