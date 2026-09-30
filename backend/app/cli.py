@@ -304,11 +304,22 @@ def api_url(p: int | None = None) -> str:
 STATE_ENV_KEYS = ("data_dir", "workspaces_dir", "plugin_dir", "home")
 
 
+def _same_tree(a: Any, b: Path) -> bool:
+    try:
+        return isinstance(a, str) and Path(a).expanduser().resolve() == Path(b).expanduser().resolve()
+    except OSError:
+        return False
+
+
 def resolve_env() -> dict[str, Any]:
-    """The names the server runs with: the caller's THIMBLE_* first, then the last server.json, then the defaults."""
-    st = read_state().get("env") or {}
+    """The names the server runs with: the caller's THIMBLE_* first, then the last server.json, then the defaults. A
+    workspaces folder server.json recorded counts only when a server of this install wrote it, so a new install beside
+    an earlier one never keeps that one's folder (claude_changes.workspaces_dir asks the same)."""
+    state = read_state()
+    st = state.get("env") or {}
     data_dir = os.environ.get("THIMBLE_DATA_DIR") or st.get("data_dir") or str(config.default_data_dir())
-    ws_dir = os.environ.get("THIMBLE_WORKSPACES_DIR") or st.get("workspaces_dir") or str(config.WORKSPACES_DIR)
+    ours = _same_tree(state.get("repo"), config.REPO_ROOT)
+    ws_dir = os.environ.get("THIMBLE_WORKSPACES_DIR") or (st.get("workspaces_dir") if ours else None) or str(config.WORKSPACES_DIR)
     # dev mode is the environment's alone, never server.json's, so a later /thimble from any session never spawns Vite
     # unasked
     dev = (os.environ.get("THIMBLE_DEV") or "").strip().lower() in ("1", "true", "yes", "on")
@@ -1903,11 +1914,15 @@ def sandbox_lines(commands: bool = True) -> list[str]:
                 + ("thimble's config (sandbox.enforce) refuses to start the agents" if box.get("enforce") else
                    "the agents' Bash runs with your user's access, limited only by each agent's permission mode")]
     if not missing:
+        from . import ticket_box  # noqa: PLC0415
+
+        why = ticket_box.problem()
+        tickets = ("a code ticket's checks and test server run in thimble's sandbox runtime, and its change reaches "
+                   "thimble's own code only once you allow it" if not why else
+                   f"a code ticket runs its checks and test server outside it, so it asks you before it starts: {why}")
         return ["  bash sandbox: runs (every agent's Bash runs in it: no writes outside the agent's folder and no "
-                "network unless the agent's network is \"on\"; a code ticket, once you allow it, has thimble run its "
-                "edited code outside it, in the ticket's test server, its checks and git, until full containment in "
-                "0.3.1; Claude Code's sandbox adds an empty .claude/.cc-writes/ folder where its commands run, the "
-                "corpus folder among them)"]
+                f"network unless the agent's network is \"on\"; {tickets}; Claude Code's sandbox adds an empty "
+                ".claude/.cc-writes/ folder where its commands run, the corpus folder among them)"]
     after = ("thimble's config (sandbox.enforce) refuses to start the agents" if box.get("enforce") else
              "the agents' Bash runs outside it, under each agent's permission mode")
     head = "  bash sandbox: off, missing " + ", ".join(missing) + "; " + after
@@ -1977,11 +1992,22 @@ def _turn_endings_line() -> str:
     return terminal_tools.line()
 
 
+NODE_TESTS_FLOOR = "20.19+, 22.13+ or 24+"  # what the frontend's tests need (install.sh's node check)
+
+
+def node_runs_frontend_tests(v: tuple[int, int, int]) -> bool:
+    """Whether a node of version `v` runs the frontend's tests, whose jsdom and the packages it loads require() ES
+    modules: their engines (frontend/package-lock.json) are ^20.19.0 || ^22.13.0 || >=24."""
+    return v[0] >= 24 or (v[0] == 22 and v[1] >= 13) or (v[0] == 20 and v[1] >= 19)
+
+
 def node_line(commands: bool = True) -> str:
-    """Node's version, which only custom views need, and with `commands` what to install when it is missing or too
-    old."""
+    """Node's version, which custom views and the sandbox runtime (app/srt.py) need, and with `commands` what to install
+    when it is missing or too old. Where the frontend's tests are installed (a code ticket's vitest gate, dev.py), a node
+    older than they need is a problem too."""
     exe = shutil.which("node")
-    need = f"custom views need Node {NODE_MIN_MAJOR}+{' (https://nodejs.org)' if commands else ''}; everything else works without it"
+    need = (f"custom views and the sandbox card code and code tickets run in need Node {NODE_MIN_MAJOR}+"
+            f"{' (https://nodejs.org)' if commands else ''}; everything else works without it")
     if not exe:
         return f"not found; {need}"
     try:
@@ -1993,8 +2019,28 @@ def node_line(commands: bool = True) -> str:
         return f"{out}, too old; {need}"
     modules = FRONTEND_DIR / "node_modules"
     fix = f"bash {config.REPO_ROOT / 'scripts' / 'install.sh'}"
+    if v and (modules / ".bin" / "vitest").exists() and not node_runs_frontend_tests(v):
+        return (f"{out}, older than the frontend's tests need (Node {NODE_TESTS_FLOOR}), so code tickets' vitest checks "
+                "fail" + ("; upgrade Node (https://nodejs.org)" if commands else ""))
     return out + ("" if modules.is_dir() else f"; {modules} is missing, so custom views cannot build"
                   + (f" (run `{fix}` again)" if commands else ""))
+
+
+def kernel_line() -> str:
+    """The doctor's `card code` line: the sandbox a notebook kernel starts in where its workspace names none
+    (config.resolve_kernel_wrap), and why it is not the sandbox runtime when it is not."""
+    from . import srt  # noqa: PLC0415
+
+    wrap, source = config.resolve_kernel_wrap({})
+    by = f" ({config.KERNEL_WRAP_ENV})" if source == "env" else ""
+    bounds = "it reads the corpus and the workspace, writes only the workspace, and keeps the network"
+    if wrap == config.KERNEL_WRAP_SRT:
+        engine = "Seatbelt" if sys.platform == "darwin" else "bubblewrap"
+        return f"runs in Anthropic's sandbox runtime{by} ({engine}): {bounds}"
+    why = "" if by else srt.missing(config.REPO_ROOT, srt.node()) or "the sandbox runtime can't run here"
+    if wrap == config.KERNEL_WRAP_BWRAP:
+        return f"runs in bubblewrap{by}{f' ({why})' if why else ''}: {bounds}"
+    return f"runs unsandboxed, with your user's access{by}{f' ({why})' if why else ''}"
 
 
 def python_line() -> str:
@@ -2242,6 +2288,7 @@ def doctor_text(commands: bool = True) -> str:
     lines.append(f"  delivery (a session `thimble` starts in {caller}): {_checked(delivery_line, caller)}")
     lines.append(f"  config: {_checked(config_line, Path(env['workspaces_dir']))}")
     lines.append(f"  browser: {_checked(browser_line)}")
+    lines.append(f"  card code: {_checked(kernel_line)}")
     lines.append(f"  card harness: {harness_line(url, up, commands)}")
     lines.append(f"  views and screenshots: {_checked(pages_line, commands)}")
     lines += sandbox_lines(commands)
@@ -2311,17 +2358,20 @@ def restart(*, keep_vite: bool = False) -> list[str]:
     return lines
 
 
-FIX_NO_TERMINAL = ("thimble fix did not run: it edits thimble's own code, which then runs outside the sandbox, so it "
-                   "asks you first, and only in a terminal. Run `thimble fix` in your own terminal.")
+FIX_NO_TERMINAL = ("thimble fix did not run: it asks you before its change reaches thimble's own code, and only in a "
+                   "terminal. Run `thimble fix` in your own terminal.")
 FIX_DECLINED = "thimble fix did not run: you did not allow it."
 
 
 def fix_refusal() -> str:
-    """'' once the analyst allowed `thimble fix` in the terminal (dev.CODE_QUESTION), else why it did not run."""
+    """'' when `thimble fix` may start, else why it did not: it needs a terminal to ask in, and where its ticket is not
+    contained (dev.fix_contained) the analyst's Allow before it starts (dev.CODE_QUESTION)."""
     from . import dev  # noqa: PLC0415
 
     if not sys.stdin.isatty():
         return FIX_NO_TERMINAL
+    if dev.fix_contained():
+        return ""
     try:
         answer = input(f"thimble fix: {dev.CODE_QUESTION} [y/N] ")
     except EOFError:
@@ -2329,14 +2379,28 @@ def fix_refusal() -> str:
     return "" if answer.strip().lower() in ("y", "yes") else FIX_DECLINED
 
 
-def fix() -> str:
-    """Server down: the ticket runner on prompts/dev-fix.md in the live checkout, once fix_refusal passed. `dev` is
-    imported lazily."""
+async def fix_approve(_t: dict[str, Any], touched: list[str]) -> bool:
+    """The terminal's y/N before `thimble fix`'s change is applied (dev.APPLY_QUESTION)."""
     import asyncio  # noqa: PLC0415
 
     from . import dev  # noqa: PLC0415
 
-    return asyncio.run(dev.fix_offline(doctor_text(commands=False)))
+    try:
+        answer = await asyncio.to_thread(input, f"thimble fix: {dev.APPLY_QUESTION} It changes "
+                                                f"{dev.files_words(touched)}. [y/N] ")
+    except EOFError:
+        answer = ""
+    return answer.strip().lower() in ("y", "yes")
+
+
+def fix() -> str:
+    """Server down: the ticket runner on prompts/dev-fix.md in the live checkout, once fix_refusal passed; its change is
+    applied on the analyst's yes (fix_approve). `dev` is imported lazily."""
+    import asyncio  # noqa: PLC0415
+
+    from . import dev  # noqa: PLC0415
+
+    return asyncio.run(dev.fix_offline(doctor_text(commands=False), fix_approve))
 
 
 def revert() -> dict[str, Any]:

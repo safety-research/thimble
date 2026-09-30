@@ -5,11 +5,11 @@ dev/tickets/<id>/shots/. Filing opens a dev agent chat (the ticket's thread) and
 at a time, urgent first.
 
 The worker is a Claude Code background session (`claude --bg`), so the analyst can attach to it. A run cuts a git
-worktree from the live branch, starts the validation stack, takes a before shot, then starts the session with
-prompts/dev.md. The server polls until the turn is done and copies the transcript into the chat, then runs the gates
-over what the branch changed; a failure wakes the session with the output, up to MAX_ATTEMPTS turns. Then an after shot,
-a fast-forward of the live branch (rebasing once if it moved), a UI rebuild, and a restart when backend or plugin files
-changed, deferred while an orientation runs. Only a supervised server (`thimble server up`) restarts itself.
+worktree from the live branch, takes a before shot, then starts the session with prompts/dev.md. The server polls until
+the turn is done and copies the transcript into the chat, then runs the gates over what the branch changed; a failure
+wakes the session with the output, up to MAX_ATTEMPTS turns. Then an after shot, the analyst's Allow, a fast-forward of
+the live branch (rebasing once if it moved), a UI rebuild, and a restart when backend or plugin files changed, deferred
+while an orientation runs. Only a supervised server (`thimble server up`) restarts itself.
 `fix_offline` is `thimble fix`, `revert_last_apply` is `thimble revert`.
 
 Recovery. The live checkout changes only in the fast-forward, after every gate passed. A restart runs under
@@ -35,15 +35,21 @@ the folders its task names, and Bash in the sandbox (sandbox_allow's rule, befor
 its check command. A session with no workspace (`thimble fix`, while the server is down) has nobody to ask, so it keeps
 UNHOSTED_TOOLS, has no web tools, and is refused what thimble's config would have it ask for.
 
-Before a code ticket starts, thimble asks the analyst on the card, in every mode, whether it may edit thimble's own code
-(CODE_QUESTION), since the validation stack, the gates and the server's git then run that code outside the sandbox;
-`thimble fix` asks in the terminal before it starts. Anything but an Allow stops the ticket before its worktree exists.
+Containment. A code ticket whose session's Bash runs in the sandbox is contained where thimble's sandbox runtime works
+(ticket_box): its gates, and the server that shows its before and after shots, run in the ticket's box, with no network,
+no home folder and writes only to the worktree and the ticket's cache folder, and the server's git commands in the
+worktree run hardened (WORKTREE_GIT). Its code first runs outside a sandbox once merged, so thimble asks the analyst,
+in every mode, just before the merge (APPLY_QUESTION, on the card; `thimble fix` in the terminal). The session is
+stopped before the question, and the merge takes the commit the question named, by its id (checked_change). Anything
+but an Allow ends the ticket stopped with its branch kept. Where the box can't run, the ticket runs its gates on the
+validation stack, outside the sandbox, so thimble also asks before it starts (CODE_QUESTION); a no stops it before its
+worktree exists.
 
 thimble's config. Code tickets and view builds are the dev agent's sessions, with its `agents.dev` settings
 (userconf.py, dev_config); agent_session's module note says what the config adds. Their Bash runs in the sandbox
 where it can run. A code ticket's sandbox also writes what a commit in its worktree writes into the checkout's git
-folder (ticket_fence), and cannot reach the validation stack on loopback, so the session takes no shots of its own and
-the server's after shot shows its change. By default the dev agent has no web tools and its network is off.
+folder (ticket_fence), and reaches no server on loopback, so the session takes no shots of its own and the server's
+after shot shows its change. By default the dev agent has no web tools and its network is off.
 
 The offline fence. With the dev agent's network off, a view build's Bash runs in the sandbox with no network where the
 sandbox runs; where it does not, every command but its check goes to the analyst. Deny rules refuse the commands that
@@ -82,7 +88,7 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
-from . import agents, cc_settings, cli, config, headless, modes, procs, prompts, userconf
+from . import agents, cc_settings, cli, config, headless, modes, procs, prompts, ticket_box, userconf
 from .cli import SOURCE_CHANGED, home as thimble_home
 from .ledger import atomic_write_text
 from .session import find_transcript
@@ -573,16 +579,16 @@ def view_session_name(c: str, slug: str) -> str:
 
 def running_builds(c: str) -> list[dict[str, Any]]:
     """The code ticket, view builds and view review revisions that run for workspace `c`, for the terminal's list of
-    thimble's agents (bg_session.agent_rows): {name, state, attach?, kind}."""
+    thimble's agents (bg_session.agent_rows): {name, label, state, kind}."""
     rows: list[dict[str, Any]] = []
     t = _get(_current.ticket_id) if _running() and _current is not None and not _current.ticket_id.startswith("view:") else None
     if t is not None and t.get("workspace") in (None, c):
-        rows.append({"name": dev_session_name(t.get("workspace")), "state": "working", "kind": "build",
-                     **({"attach": f"claude attach {_current.session}"} if _current and _current.session else {})})
+        rows.append({"name": dev_session_name(t.get("workspace")), "label": f"dev ticket: {t.get('title') or t['id']}",
+                     "state": "working", "kind": "build"})
     for (cc, slug), run in [*_view_runs.items(), *_review_runs.items()]:
         if cc == c and run.status == "running":
-            rows.append({"name": view_session_name(c, slug), "state": "working", "kind": "build",
-                         **({"attach": f"claude attach {run.session}"} if run.session else {})})
+            rows.append({"name": view_session_name(c, slug), "label": f"view: {run.title or slug}", "state": "working",
+                         "kind": "build"})
     return rows
 
 
@@ -594,8 +600,9 @@ class GitError(RuntimeError):
 
 
 # A ticket's session can write its worktree and the worktree's own git folder (ticket_fence), so the server's git
-# commands there run with no fsmonitor command and no hooks, and only while the worktree still points at the live
-# checkout's git folder (_check_worktree).
+# commands there run with no fsmonitor command and no hooks, with the git folders named from the live checkout's side
+# (GIT_DIR, GIT_COMMON_DIR, GIT_WORK_TREE) so that no `.git` file or commondir the session wrote is read, and only while
+# the worktree still points where it should (_check_worktree).
 WORKTREE_GIT = ("-c", "core.fsmonitor=", "-c", "core.hooksPath=/dev/null")
 WORKTREE_MOVED = ("the ticket's worktree no longer points at the live checkout's git folder ({why}), so thimble ran no "
                   "git command in it")
@@ -608,35 +615,46 @@ def _in_worktrees(cwd: Path) -> bool:
         return False
 
 
-def _check_worktree(wt: Path) -> None:
-    """GitError (WORKTREE_MOVED) unless `wt/.git` names a folder of the live checkout's `worktrees/` whose commondir is
-    the checkout's git folder, with no config of its own."""
+def _own_config(own: Path) -> bool:
+    """Whether the worktree's git folder holds a config.worktree that could set something. Claude Code's sandbox leaves
+    an empty one there, which sets nothing."""
+    cfg = own / "config.worktree"
+    return cfg.is_symlink() or (cfg.exists() and not (cfg.is_file() and cfg.stat().st_size == 0))
+
+
+def _check_worktree(wt: Path) -> tuple[Path, Path]:
+    """(the worktree's own git folder, the live checkout's git folder): the checkout's `worktrees/<name>`. GitError
+    (WORKTREE_MOVED) unless `wt/.git` names that folder, whose commondir is the checkout's git folder, with no config of
+    its own (_own_config)."""
     common = Path(subprocess.run(["git", "rev-parse", "--path-format=absolute", "--git-common-dir"], cwd=str(REPO),
                                  capture_output=True, text=True, timeout=60).stdout.strip()).resolve()
+    own = common / "worktrees" / Path(wt).name
     try:
         text = (Path(wt) / ".git").read_text("utf-8").strip()
-        own = Path(text.removeprefix("gitdir: ")).resolve()
         why = ("its .git is not a gitdir line" if not text.startswith("gitdir: ") else
-               "its .git names a folder outside the checkout's worktrees" if own.parent != common / "worktrees" else
+               "its .git names another git folder" if Path(text.removeprefix("gitdir: ")).resolve() != own else
                "its git folder names another commondir"
                if (own / (own / "commondir").read_text("utf-8").strip()).resolve() != common else
-               "its git folder has a config of its own" if (own / "config.worktree").exists() else "")
+               "its git folder has a config of its own" if _own_config(own) else "")
     except OSError as e:
         why = f"{type(e).__name__}: {e}"
     if why:
         raise GitError(WORKTREE_MOVED.format(why=why))
+    return own, common
 
 
-def _git_argv(cwd: Path, args: "tuple[str, ...] | list[str]") -> list[str]:
-    """`git` with `args` for a command in `cwd`, hardened in a ticket's worktree (WORKTREE_GIT)."""
-    if not _in_worktrees(cwd):
-        return ["git", *args]
-    _check_worktree(cwd)
-    return ["git", *WORKTREE_GIT, *args]
+def _git_run(cwd: Path, args: "tuple[str, ...] | list[str]", timeout: int = 120) -> subprocess.CompletedProcess:
+    """`git` with `args` in `cwd`, hardened in a ticket's worktree (WORKTREE_GIT and the git folders above)."""
+    argv, env = ["git", *args], None
+    if _in_worktrees(cwd):
+        own, common = _check_worktree(cwd)
+        argv = ["git", *WORKTREE_GIT, *args]
+        env = {**os.environ, "GIT_DIR": str(own), "GIT_COMMON_DIR": str(common), "GIT_WORK_TREE": str(cwd)}
+    return subprocess.run(argv, cwd=str(cwd), capture_output=True, text=True, timeout=timeout, env=env)
 
 
 def _git(cwd: Path, *args: str, check: bool = True, timeout: int = 120) -> str:
-    out = subprocess.run(_git_argv(cwd, args), cwd=str(cwd), capture_output=True, text=True, timeout=timeout)
+    out = _git_run(cwd, args, timeout)
     if check and out.returncode != 0:
         raise GitError((out.stderr.strip() or out.stdout.strip() or f"git {' '.join(args)} failed")[:800])
     return out.stdout.rstrip()
@@ -720,10 +738,14 @@ def touched_files(tree: Path) -> list[str]:
     return sorted(out - _LINKED)
 
 
+def _diff_files(tree: Path, old: str, new: str) -> list[str]:
+    out = _git(tree, "diff", "--name-only", old, new)
+    return sorted({ln.strip() for ln in out.splitlines() if ln.strip()} - _LINKED)
+
+
 def branch_files(tree: Path, base: str) -> list[str]:
     """Paths the commits on `tree`'s branch changed since `base`, relative to its root: what the session committed."""
-    out = _git(tree, "diff", "--name-only", base, "HEAD")
-    return sorted({ln.strip() for ln in out.splitlines() if ln.strip()} - _LINKED)
+    return _diff_files(tree, base, "HEAD")
 
 
 def needs_restart(touched: list[str]) -> bool:
@@ -763,36 +785,53 @@ def _manual_merge(files: list[str], branch: str, detail: str = "") -> str:
             + f"; the change is kept on branch {branch}")
 
 
-def rebase_branch(wt: Path, branch: str, base: str, touched: list[str]) -> dict[str, Any]:
+BRANCH_MOVED = "the ticket's branch changed after its checks"
+
+
+def rebase_branch(wt: Path, branch: str, base: str, touched: list[str], expect: str | None = None) -> dict[str, Any]:
     """Bring the ticket's branch onto the live branch's head before its apply: nothing when the live branch has not
-    moved since `base`, else one rebase in the worktree. Refused on uncommitted live changes in touched files or on a
-    conflict. {ok, rebased, head, error, conflicts}; `head` is the live head the branch now sits on."""
-    result: dict[str, Any] = {"ok": False, "rebased": False, "head": None, "error": None, "conflicts": []}
+    moved since `base`, else one rebase in the worktree. Refused on uncommitted live changes in touched files, on a
+    conflict, when the branch is not at `expect` (the commit the analyst was asked about) or when the rebase changed a
+    file outside `touched`. {ok, rebased, head, commit, error, conflicts}; `head` is the live head the branch now sits on
+    and `commit` the branch's head, the commit to merge."""
+    result: dict[str, Any] = {"ok": False, "rebased": False, "head": None, "commit": None, "error": None,
+                              "conflicts": []}
     dirty = dirty_in_live(touched)
     if dirty:
         result.update(error=_manual_merge(dirty, branch, "uncommitted changes in the live checkout"), conflicts=dirty)
         return result
     head = live_head()
     result["head"] = head
-    if subprocess.run(_git_argv(wt, ("merge-base", "--is-ancestor", head, "HEAD")), cwd=str(wt), capture_output=True,
-                      timeout=60).returncode == 0:
-        result["ok"] = True  # the branch already sits on the live head
+    if _git(wt, "symbolic-ref", "HEAD", check=False) != f"refs/heads/{branch}":
+        result.update(error=_manual_merge(touched, branch, "the ticket's worktree is no longer on its branch"),
+                      conflicts=touched)
         return result
-    rb = subprocess.run(_git_argv(wt, ("-c", "user.name=thimble dev", "-c", "user.email=dev@thimble.local", "rebase", head)),
-                        cwd=str(wt), capture_output=True, text=True, timeout=120)
+    tip = _git(wt, "rev-parse", "HEAD", check=False)
+    if expect and tip != expect:
+        result.update(error=_manual_merge(touched, branch, BRANCH_MOVED), conflicts=touched)
+        return result
+    if _git_run(wt, ("merge-base", "--is-ancestor", head, "HEAD"), 60).returncode == 0:
+        result.update(ok=True, commit=tip)  # the branch already sits on the live head
+        return result
+    rb = _git_run(wt, ("-c", "user.name=thimble dev", "-c", "user.email=dev@thimble.local", "rebase", head))
     if rb.returncode != 0:
         conflicts = _git(wt, "diff", "--name-only", "--diff-filter=U", check=False).splitlines()
         _git(wt, "rebase", "--abort", check=False)
         result.update(error=_manual_merge(conflicts or touched, branch, "it conflicts with the live branch"),
                       conflicts=conflicts or touched)
         return result
-    result.update(ok=True, rebased=True)
+    new = _git(wt, "rev-parse", "HEAD")
+    if set(_diff_files(wt, head, new)) - set(touched):
+        result.update(error=_manual_merge(touched, branch, BRANCH_MOVED), conflicts=touched)
+        return result
+    result.update(ok=True, rebased=True, commit=new)
     return result
 
 
-def merge_branch(branch: str, touched: list[str], expect_head: str | None) -> dict[str, Any]:
-    """Fast-forward the live branch to `branch`, which rebase_branch put on `expect_head`. Refused when the live head
-    moved since (the caller rebases and checks again) or on uncommitted live changes in touched files.
+def merge_branch(branch: str, touched: list[str], expect_head: str | None, commit: str) -> dict[str, Any]:
+    """Fast-forward the live branch to `commit`, the head of `branch` that rebase_branch put on `expect_head`, by its id,
+    so that nothing that moves the branch meanwhile reaches the live checkout. Refused when the live head moved since
+    (the caller rebases and checks again) or on uncommitted live changes in touched files.
     {ok, commit, prev_head, moved, error, conflicts}."""
     result: dict[str, Any] = {"ok": False, "commit": None, "prev_head": None, "moved": False, "error": None,
                               "conflicts": []}
@@ -805,7 +844,7 @@ def merge_branch(branch: str, touched: list[str], expect_head: str | None) -> di
     if expect_head and head != expect_head:
         result["moved"] = True
         return result
-    mg = subprocess.run(["git", "merge", "--ff-only", branch], cwd=str(REPO), capture_output=True, text=True, timeout=120)
+    mg = subprocess.run(["git", "merge", "--ff-only", commit], cwd=str(REPO), capture_output=True, text=True, timeout=120)
     if mg.returncode != 0:
         result.update(error=_manual_merge(touched, branch, (mg.stderr or mg.stdout).strip()[:200]), conflicts=touched)
         return result
@@ -820,7 +859,7 @@ def apply_branch(tid: str, wt: Path, branch: str, base: str, touched: list[str])
     if not rb["ok"]:
         return {"ok": False, "commit": None, "prev_head": None, "rebased": False, "error": rb["error"],
                 "conflicts": rb["conflicts"]}
-    mg = merge_branch(branch, touched, rb["head"])
+    mg = merge_branch(branch, touched, rb["head"], rb["commit"])
     if mg["moved"]:
         mg = {**mg, "error": _manual_merge(touched, branch, "the live branch moved during the apply"),
               "conflicts": touched}
@@ -930,12 +969,13 @@ def _tests_for(touched: list[str], tree: Path) -> list[str]:
     return sorted(tests)
 
 
-def _frontend_tests(fe: Path) -> tuple[str, list[str]] | None:
+def _frontend_tests(fe: Path, boxed: bool = False) -> tuple[str, list[str]] | None:
     """The frontend tests' gate as (name, command): vitest over tests/public, the suite CI runs; None when vitest is not
-    installed or the checkout has no tests there."""
+    installed or the checkout has no tests there. `boxed` names vitest's own file, with its config read in memory, since
+    a box can't write node_modules."""
     vitest = fe / "node_modules" / ".bin" / "vitest"
     if vitest.exists() and any((fe / "tests" / "public").glob("*.test.ts*")):
-        return "vitest", ["npx", "vitest", "run"]
+        return "vitest", [str(vitest), "run", "--configLoader", "runner"] if boxed else ["npx", "vitest", "run"]
     return None
 
 
@@ -1014,22 +1054,28 @@ async def boot_check(tree: Path) -> dict[str, Any]:
     return {"name": "server start", "ok": False, "tail": f"{why}\n{tail}".strip()}
 
 
-async def run_gates(tree: Path, touched: list[str], *, scratch: Path | None = None) -> dict[str, Any]:
+async def run_gates(tree: Path, touched: list[str], *, scratch: Path | None = None,
+                    box: "ticket_box.Box | None" = None) -> dict[str, Any]:
     """The gates for what a ticket touched: tsc and frontend tests for frontend files, pytest, an import and boot_check
-    for backend modules, `prompts.load` for prompt files, each without THIMBLE_* env. {ok, steps: [{name, ok, tail}]}.
-    Seam for tests."""
+    for backend modules, `prompts.load` for prompt files, each without THIMBLE_* env, and each in `box` when given (a
+    contained ticket: ticket_box). {ok, steps: [{name, ok, tail}]}. Seam for tests."""
+    async def run(cmd: list[str], cwd: Path, timeout: float, env: dict[str, str] | None = None) -> tuple[int, str]:
+        if box is not None:
+            return await ticket_box.run(box, cmd, cwd=cwd, timeout=timeout, env=env)
+        return await _run(cmd, cwd=cwd, timeout=timeout, environ=_gate_environ(env))
+
     steps: list[dict[str, Any]] = []
     frontend = [p for p in touched if p.startswith("frontend/")]
     backend = [p for p in touched if p.startswith("backend/")]
     prompt_files = [p for p in touched if p.startswith("prompts/") and p.endswith(".md")]
     fe = tree / "frontend"
     if frontend and (fe / "node_modules").exists():
-        checks = [("tsc", ["npx", "tsc", "--noEmit", "-p", "tsconfig.app.json"])]
-        fe_tests = _frontend_tests(fe)
+        tsc = [str(fe / "node_modules" / ".bin" / "tsc")] if box is not None else ["npx", "tsc"]
+        checks = [("tsc", [*tsc, "--noEmit", "-p", "tsconfig.app.json"])]
+        fe_tests = _frontend_tests(fe, box is not None)
         if fe_tests:
             checks.append(fe_tests)
-        results = await asyncio.gather(*(_run(cmd, cwd=fe, timeout=GATE_TIMEOUT_S, environ=_gate_environ())
-                                         for _, cmd in checks), return_exceptions=True)
+        results = await asyncio.gather(*(run(cmd, fe, GATE_TIMEOUT_S) for _, cmd in checks), return_exceptions=True)
         for (name, _), res in zip(checks, results):
             if isinstance(res, BaseException):
                 steps.append({"name": name, "ok": False, "tail": f"{type(res).__name__}: {res}"[-3000:]})
@@ -1042,10 +1088,9 @@ async def run_gates(tree: Path, touched: list[str], *, scratch: Path | None = No
         tests = _tests_for(touched, tree)
         py = tree / "backend" / ".venv" / "bin" / "python"
         if tests and py.exists():
-            environ = _gate_environ({"THIMBLE_SKIP_KEY": "1",
-                                     "THIMBLE_WORKSPACES_DIR": str(scratch or (tree / ".gate-workspaces"))})
-            code, out = await _run([str(py), "-m", "pytest", *tests, "-q", "-p", "no:cacheprovider"],
-                                   cwd=tree / "backend", timeout=GATE_TIMEOUT_S, environ=environ)
+            ws = scratch or (box.cache / "gate-workspaces" if box is not None else tree / ".gate-workspaces")
+            code, out = await run([str(py), "-m", "pytest", *tests, "-q", "-p", "no:cacheprovider"], tree / "backend",
+                                  GATE_TIMEOUT_S, {"THIMBLE_SKIP_KEY": "1", "THIMBLE_WORKSPACES_DIR": str(ws)})
             steps.append({"name": f"pytest {' '.join(tests)}", "ok": code == 0, "tail": out[-3000:]})
         elif not py.exists():
             steps.append({"name": "pytest", "ok": False, "tail": "backend/.venv is missing in the worktree"})
@@ -1055,19 +1100,17 @@ async def run_gates(tree: Path, touched: list[str], *, scratch: Path | None = No
         mods = [p for p in backend if p.startswith("backend/app/") and p.endswith(".py") and (tree / p).is_file()]
         if mods and py.exists():
             names = ", ".join(f"app.{Path(p).stem}" for p in mods)
-            code, out = await _run([str(py), "-c", f"import {names}"], cwd=tree / "backend", timeout=120,
-                                   environ=_gate_environ({"THIMBLE_SKIP_KEY": "1"}))
+            code, out = await run([str(py), "-c", f"import {names}"], tree / "backend", 120, {"THIMBLE_SKIP_KEY": "1"})
             steps.append({"name": f"import {names}", "ok": code == 0, "tail": out[-2000:]})
         if any(p.startswith(BOOT_PREFIXES) for p in backend) and py.exists():
-            steps.append(await boot_check(tree))
+            steps.append(await (ticket_box.boot_check(box, port=STACK_API_PORT) if box is not None else boot_check(tree)))
     if prompt_files:
         py = tree / "backend" / ".venv" / "bin" / "python"
         names = [p[len("prompts/"):-3] for p in prompt_files if (tree / p).exists()]
         if names and py.exists():
-            code, out = await _run([str(py), "-c", "import sys; from app import prompts\n"
-                                    "for n in sys.argv[1:]: prompts.load(n)\nprint('ok')", *names],
-                                   cwd=tree / "backend", timeout=60,
-                                   environ=_gate_environ({"THIMBLE_PROMPTS_DIR": str(tree / "prompts")}))
+            code, out = await run([str(py), "-c", "import sys; from app import prompts\n"
+                                   "for n in sys.argv[1:]: prompts.load(n)\nprint('ok')", *names], tree / "backend", 60,
+                                  {"THIMBLE_PROMPTS_DIR": str(tree / "prompts")})
             steps.append({"name": "prompts load", "ok": code == 0, "tail": out[-2000:]})
     return {"ok": all(s["ok"] for s in steps), "steps": steps}
 
@@ -1121,14 +1164,16 @@ def shot_script() -> Path:
 
 async def run_shot(url: str, out: Path, selector: str | None = None, *, info_out: Path | None = None,
                    viewport: str | None = None, scale: float | None = None, storage: dict[str, str] | None = None,
-                   press: list[str] | None = None, wait_ms: int | None = None, offline: bool = False) -> int:
+                   press: list[str] | None = None, wait_ms: int | None = None, offline: bool = False,
+                   own_origin: bool = False) -> int:
     """`node scripts/ui_shot.mjs`: 0 ok, 2 selector not found (the viewport is written instead), 1 error, -1 timeout.
     Options map to the script's options of the same names. headless.Missing when the browser is missing, which stays so
     for the rest of the server run."""
     path = headless.launch(headless.PAGES)
     if path is None or headless.missing(headless.PAGES):
         raise headless.Missing(headless.missing(headless.PAGES))
-    cmd = ["node", str(shot_script()), "--url", url, "--out", str(out), *(["--offline"] if offline else [])]
+    cmd = ["node", str(shot_script()), "--url", url, "--out", str(out), *(["--offline"] if offline else []),
+           *(["--own-origin"] if own_origin else [])]
     if selector:
         cmd += ["--selector", selector]
     if info_out is not None:
@@ -1177,8 +1222,10 @@ def target_selector(target: dict[str, Any] | None) -> str | None:
     return str(t.get("stable_selector") or t.get("selector") or "") or None
 
 
-async def _take_shot(t: dict[str, Any], run_log: Log, phase: str, base_url: str | None) -> str | None:
-    """The before or after shot of the ticket's target on the stack; the file name stored on the ticket, or None."""
+async def _take_shot(t: dict[str, Any], run_log: Log, phase: str, base_url: str | None, *,
+                     own_origin: bool = False) -> str | None:
+    """The before or after shot of the ticket's target on the stack (`own_origin` for a server in the ticket's box,
+    whose page then reaches nothing but that server); the file name stored on the ticket, or None."""
     if not base_url:
         return None
     selector = target_selector(t.get("target"))
@@ -1187,7 +1234,7 @@ async def _take_shot(t: dict[str, Any], run_log: Log, phase: str, base_url: str 
     d.mkdir(parents=True, exist_ok=True)
     out = d / f"{phase}.png"
     try:
-        code = await run_shot(url, out, selector)
+        code = await run_shot(url, out, selector, own_origin=own_origin)
     except Exception as e:  # noqa: BLE001
         run_log.stage(f"{phase} shot failed: {type(e).__name__}: {e}")
         return None
@@ -1751,12 +1798,13 @@ def build_prompt(t: dict[str, Any], *, worktree: Path, ui_url: str, api_url: str
 
 # the code-ticket prompt's line on the stack's pages, by whether the session's Bash runs in the sandbox (TICKET_STACK)
 TICKET_STACK_LINES = {
-    False: ("To see a page of the stack, run `node scripts/ui_shot.mjs --url <page> --out <png> --selector '<css>'` and "
-            "open the PNG with Read. Save shots under {shots}. The before shot of the ticket's target is {before}. After "
-            "you commit, take an after shot of the target with the before shot's selector."),
-    True: ("Your Bash runs in Claude Code's sandbox: it changes only this worktree and your commits, and it can't reach "
-           "the stack, so take no shots. The before shot of the ticket's target is {before}; open it with Read. The "
-           "server takes the after shot once its gates pass."),
+    False: ("The validation stack, UI {ui_url} and API {api_url}, reloads on your edits. To see a page of it, run "
+            "`node scripts/ui_shot.mjs --url <page> --out <png> --selector '<css>'` and open the PNG with Read. Save "
+            "shots under {shots}. The before shot of the ticket's target is {before}. After you commit, take an after "
+            "shot of the target with the before shot's selector."),
+    True: ("Your Bash runs in Claude Code's sandbox: it changes only this worktree and your commits, and there is no "
+           "server for you to reach, so take no shots. The before shot of the ticket's target is {before}; open it with "
+           "Read. The server takes the after shot once its gates pass."),
 }
 
 
@@ -1773,7 +1821,8 @@ def _ticket_prompt(t: dict[str, Any], *, worktree: Path, ui_url: str, api_url: s
         "worktree": str(worktree),
         "ui_url": ui_url,
         "api_url": api_url,
-        "stack": TICKET_STACK_LINES[sandboxed].format(shots=shots_dir(t["id"]), before=before),
+        "stack": TICKET_STACK_LINES[sandboxed].format(shots=shots_dir(t["id"]), before=before, ui_url=ui_url,
+                                                      api_url=api_url),
     })
 
 
@@ -1790,15 +1839,17 @@ def build_gates_prompt(report: str) -> str:
     return prompts.render("dev-gates", {"report": fenced("gate output", report)})
 
 
-async def _check(wt: Path, base: str, run_log: Log) -> tuple[list[str], dict[str, Any] | None]:
-    """What the session's branch changed since `base`, and the gates over it with a failed `commit` step for changes it
-    left uncommitted (None when it committed nothing and left nothing: there is nothing to check)."""
+async def _check(wt: Path, base: str, run_log: Log,
+                 box: "ticket_box.Box | None" = None) -> tuple[list[str], dict[str, Any] | None]:
+    """What the session's branch changed since `base`, and the gates over it (in `box` when given) with a failed
+    `commit` step for changes it left uncommitted (None when it committed nothing and left nothing: there is nothing to
+    check)."""
     touched = await asyncio.to_thread(branch_files, wt, base)
     left = await asyncio.to_thread(touched_files, wt)
     if not touched and not left:
         return [], None
     run_log.stage("gates over " + ", ".join(sorted(set(touched) | set(left))))
-    validation = await run_gates(wt, sorted(set(touched) | set(left)))
+    validation = await run_gates(wt, sorted(set(touched) | set(left)), box=box)
     if left:
         validation = {"ok": False, "steps": [*validation["steps"], {"name": "commit", "ok": False,
                                                                      "tail": "uncommitted changes: " + ", ".join(left)}]}
@@ -1812,29 +1863,158 @@ class TicketError(RuntimeError):
 
 
 class NotAllowed(TicketError):
-    """The analyst did not allow the ticket to edit thimble's own code (module note, permissions): it ends stopped."""
+    """The analyst did not allow the ticket's change into thimble's own code (module note, permissions): it ends
+    stopped."""
 
 
-# the card's tool name for the question (frontend chat/permissions.ts ASKS_TO)
+class BranchMoved(TicketError):
+    """The ticket's branch is not the change its gates checked: it ends `needs manual merge`, with nothing applied."""
+
+
+def checked_change(wt: Path, branch: str, base: str, touched: list[str]) -> str:
+    """The commit the analyst is asked to apply: the head of the ticket's branch, once its session has stopped.
+    BranchMoved when the branch's files since `base` are not `touched`, the files its gates checked."""
+    change = _git(wt, "rev-parse", "HEAD")
+    if _diff_files(wt, base, change) != sorted(touched):
+        raise BranchMoved(_manual_merge(touched, branch, BRANCH_MOVED))
+    return change
+
+
+# the card's tool name for thimble's questions about its own code (frontend chat/permissions.ts ASKS_TO)
 CODE_TOOL = "ThimbleCode"
+APPLY_QUESTION = "Apply this change to thimble's own code?"
+APPLY_WHY = ("It changes {files}. thimble asks this before any change reaches its own code, in every permission mode. "
+             "Unanswered, it is not applied after {wait}, and it stays on branch {branch}.")
+APPLY_NOT_ALLOWED = ("the analyst did not allow the change into thimble's own code, so it was not applied; it stays on "
+                     "branch {branch}")
+# where the ticket's checks can't run in a box (ticket_box.problem), the question comes before the ticket starts too
 CODE_QUESTION = ("This edits thimble's own code, which then runs outside the sandbox (its test server, its checks and "
                  "git). Allow?")
-CODE_WHY = ("thimble asks this before every code ticket, in every permission mode. Unanswered, the ticket is cancelled "
-            "after {wait}.")
+CODE_WHY = ("The ticket's checks can't run in a sandbox here ({why}), so thimble asks this before every code ticket, in "
+            "every permission mode. Unanswered, the ticket is cancelled after {wait}.")
 CODE_NOT_ALLOWED = "the analyst did not allow it to edit thimble's own code, so it did not start"
-CODE_NOBODY = ("it has no workspace, so no permission card could ask the analyst whether it may edit thimble's own code, "
-               "and it did not start")
+CODE_NOBODY = ("it has no workspace, so no permission card could ask the analyst about thimble's own code, and it did "
+               "not start")
+FILES_SHOWN = 8
+
+
+def contained(conf: "userconf.Session | str | None") -> bool:
+    """Whether a code ticket with the dev agent's config `conf` is contained: its session's Bash runs in the sandbox and
+    its checks and preview server in a box (ticket_box)."""
+    return isinstance(conf, userconf.Session) and conf.sandboxed and ticket_box.works()
 
 
 async def _code_refusal(t: dict[str, Any]) -> str:
-    """'' once the analyst allowed the ticket on its chat's card (CODE_QUESTION), else why it did not start."""
+    """'' once the analyst allowed an uncontained ticket on its chat's card (CODE_QUESTION), else why it did not start."""
     from . import agent_session  # noqa: PLC0415
 
     if not t.get("workspace") or not t.get("chat"):
         return CODE_NOBODY
+    why = CODE_WHY.format(why=ticket_box.problem() or "Claude Code's sandbox is off for the dev agent",
+                          wait=agent_session.wait_words(PERMISSION_WAIT_S))
     got = await agent_session.ask(str(t["workspace"]), ticket_key(t["id"]), CODE_TOOL, {"description": CODE_QUESTION},
-                                  force=True, why=CODE_WHY.format(wait=agent_session.wait_words(PERMISSION_WAIT_S)))
+                                  force=True, why=why)
     return "" if got.get("behavior") == "allow" else CODE_NOT_ALLOWED
+
+
+def files_words(touched: list[str]) -> str:
+    shown = ", ".join(touched[:FILES_SHOWN])
+    return shown + (f" and {len(touched) - FILES_SHOWN} more" if len(touched) > FILES_SHOWN else "") or "no files"
+
+
+Approve = Callable[[dict[str, Any], list[str]], Awaitable[bool]]
+
+
+async def _apply_refusal(t: dict[str, Any], touched: list[str], branch: str, approve: "Approve | None" = None) -> str:
+    """'' once the analyst allowed the ticket's change into thimble's own code (APPLY_QUESTION), by `approve` when given
+    (`thimble fix`, in the terminal), else on the ticket's card in every mode; else why it was not applied."""
+    from . import agent_session  # noqa: PLC0415
+
+    if approve is not None:
+        allowed = await approve(t, touched)
+    elif not t.get("workspace") or not t.get("chat"):
+        return CODE_NOBODY
+    else:
+        why = APPLY_WHY.format(files=files_words(touched), wait=agent_session.wait_words(PERMISSION_WAIT_S),
+                               branch=branch)
+        got = await agent_session.ask(str(t["workspace"]), ticket_key(t["id"]), CODE_TOOL,
+                                      {"description": APPLY_QUESTION, "files": touched}, force=True, why=why)
+        allowed = got.get("behavior") == "allow"
+    return "" if allowed else APPLY_NOT_ALLOWED.format(branch=branch)
+
+
+def box_dir(tid: str) -> Path:
+    """A contained ticket's cache folder, which its box writes (ticket_box)."""
+    return worktrees_dir() / f"{tid}.box"
+
+
+def box_host_dir(tid: str) -> Path:
+    """The sandbox runtime's own folder for the ticket's box, outside it."""
+    return worktrees_dir() / f"{tid}.srt"
+
+
+def ticket_box_of(t: dict[str, Any], wt: Path) -> ticket_box.Box:
+    """The ticket's box over its worktree, reading its workspace's corpus besides (for the preview server)."""
+    reads: tuple[Path, ...] = ()
+    if t.get("workspace"):
+        with contextlib.suppress(ValueError):
+            reads = (config.corpus_dir(str(t["workspace"])),)
+    return ticket_box.Box(wt, box_dir(t["id"]), box_host_dir(t["id"]), reads, live=REPO)
+
+
+def remove_box(tid: str) -> None:
+    shutil.rmtree(box_dir(tid), ignore_errors=True)
+    shutil.rmtree(box_host_dir(tid), ignore_errors=True)
+
+
+def _seed_preview(t: dict[str, Any], env: dict[str, str]) -> None:
+    """The preview server's copy of the ticket's workspace (its kernels left out) and the record of its corpus, once."""
+    c = t.get("workspace")
+    if not c:
+        return
+    ws, data = Path(env["THIMBLE_WORKSPACES_DIR"]), Path(env["THIMBLE_DATA_DIR"])
+    src = config.workspace_path(str(c))
+    if src.is_dir() and not (ws / str(c)).exists():
+        ws.mkdir(parents=True, exist_ok=True)
+        shutil.copytree(src, ws / str(c), symlinks=True, ignore=shutil.ignore_patterns("kernels"))
+    try:
+        corpus = config.corpus_dir(str(c))
+    except ValueError:
+        return
+    rec = config.read_sidecar(str(c)) or {"name": c, "path": str(corpus), "root": str(corpus),
+                                          "manifest": config.corpus_manifest(str(c))}
+    data.mkdir(parents=True, exist_ok=True)
+    (data / f"{c}{config.SIDECAR_SUFFIX}").write_text(json.dumps(rec), "utf-8")
+
+
+async def _preview_shot(t: dict[str, Any], run_log: Log, phase: str, box: ticket_box.Box,
+                        touched: "list[str] | None" = None) -> str | None:
+    """A contained ticket's before or after shot: the UI built in the box (for the after shot only when the ticket
+    changed frontend files), the worktree's server started in it on a copy of the workspace, the page kept to that
+    server (run_shot's own_origin)."""
+    fe, dist = box.tree / "frontend", box.cache / "dist"
+    vite = fe / "node_modules" / ".bin" / "vite"
+    if not vite.exists():
+        run_log.stage(f"no {phase} shot: frontend/node_modules is missing in the worktree")
+        return None
+    if phase == "before" or needs_ui_build(touched or []) or not (dist / "index.html").is_file():
+        code, out = await ticket_box.run(box, [str(vite), "build", "--configLoader", "runner", "--outDir", str(dist),
+                                               "--emptyOutDir"], cwd=fe, timeout=UI_BUILD_TIMEOUT_S)
+        if code != 0:
+            run_log.stage(f"no {phase} shot: the UI did not build in the sandbox ({last_error_line(out) or out[-300:]})")
+            return None
+    env = {**ticket_box.server_env(box.cache / "preview"), "THIMBLE_FRONTEND_DIST": str(dist)}
+    await asyncio.to_thread(_seed_preview, t, env)
+    preview = ticket_box.Preview(box, env, port=STACK_API_PORT)
+    try:
+        url = await preview.start()
+    except ticket_box.PreviewError as e:
+        run_log.stage(f"no {phase} shot: the ticket's server did not start in the sandbox ({last_error_line(str(e))})")
+        return None
+    try:
+        return await _take_shot(t, run_log, phase, url, own_origin=True)
+    finally:
+        await preview.stop()
 
 
 def _kept_worktree(t: dict[str, Any]) -> tuple[Path, str, str] | None:
@@ -1850,11 +2030,11 @@ def _kept_worktree(t: dict[str, Any]) -> tuple[Path, str, str] | None:
 
 
 def _merge_and_record(t: dict[str, Any], branch: str, touched: list[str], expect_head: str | None, rebased: bool,
-                      restart: str | None) -> dict[str, Any]:
+                      restart: str | None, commit: str) -> dict[str, Any]:
     """The apply's commit point: the fast-forward, the ticket marked applied and the apply recorded in one call, so a
     server ended right after (uvicorn's reloader) never leaves the two disagreeing; _recover finishes the rest.
     Blocking."""
-    mg = merge_branch(branch, touched, expect_head)
+    mg = merge_branch(branch, touched, expect_head, commit)
     if mg["ok"]:
         _update(t["id"], status="applied", commit=mg["commit"], restart=restart, error=None, touched=touched)
         record_apply({**t, "touched": touched}, {**mg, "rebased": rebased}, restart)
@@ -1865,26 +2045,27 @@ def _merge_and_record(t: dict[str, Any], branch: str, touched: list[str], expect
 
 
 async def _apply(t: dict[str, Any], wt: Path, branch: str, base: str, touched: list[str], restart: str | None,
-                 run_log: Log) -> dict[str, Any]:
-    """Rebase the ticket's branch onto the live head, run the gates again when it moved, then fast-forward
-    (_merge_and_record). The live checkout changes only in that last step, after every gate has passed on the commits
-    it receives. {ok, status, error, commit}."""
+                 run_log: Log, box: "ticket_box.Box | None" = None, change: str | None = None) -> dict[str, Any]:
+    """Rebase `change`, the commit the analyst allowed, onto the live head, run the gates again (in `box`) when it
+    moved, then fast-forward to the result (_merge_and_record). The live checkout changes only in that last step, after
+    every gate has passed on the commits it receives. {ok, status, error, commit}."""
     for _ in range(2):
-        rb = await asyncio.to_thread(rebase_branch, wt, branch, base, touched)
+        rb = await asyncio.to_thread(rebase_branch, wt, branch, base, touched, change)
         if not rb["ok"]:
             return {"ok": False, "status": "needs manual merge", "error": rb["error"], "commit": None}
         if rb["rebased"]:
             run_log.stage("rebased onto the live branch; gates again")
-            validation = await run_gates(wt, touched)
+            validation = await run_gates(wt, touched, box=box)
             _update(t["id"], validation=validation)
             for s in validation["steps"]:
                 run_log.stage(f"gate {s['name']}: {'ok' if s['ok'] else 'failed'}")
             if not validation["ok"]:
                 return {"ok": False, "status": "failed", "commit": None,
                         "error": "gates failed after the rebase onto the live branch; nothing was applied"}
-        mg = await asyncio.to_thread(_merge_and_record, t, branch, touched, rb["head"], rb["rebased"], restart)
+        mg = await asyncio.to_thread(_merge_and_record, t, branch, touched, rb["head"], rb["rebased"], restart,
+                                     str(rb["commit"]))
         if mg["moved"]:
-            base = str(rb["head"])  # the live branch moved again between the rebase and the merge
+            base, change = str(rb["head"]), rb["commit"]  # the live branch moved again between the rebase and the merge
             continue
         return {"ok": mg["ok"], "status": "applied" if mg["ok"] else "needs manual merge", "error": mg["error"],
                 "commit": mg["commit"]}
@@ -1900,9 +2081,11 @@ def ticket_key(tid: str) -> str:
     return f"ticket:{tid}"
 
 
-async def run_ticket(t: dict[str, Any], run: Run, *, doctor: str | None = None, allowed: bool = False) -> dict[str, Any]:
+async def run_ticket(t: dict[str, Any], run: Run, *, doctor: str | None = None, allowed: bool = False,
+                     approve: "Approve | None" = None) -> dict[str, Any]:
     """The whole ticket (_run_ticket), its session's permission requests answered on its chat meanwhile, as thimble's
-    config asks (dev_config); `allowed` when the analyst already allowed it to edit thimble's code (`thimble fix`)."""
+    config asks (dev_config). `allowed` when the analyst already allowed an uncontained ticket to start, and `approve`
+    asks the analyst before the change is applied (`thimble fix`, in the terminal; the ticket's card otherwise)."""
     try:
         conf: userconf.Session | str = dev_config(t.get("workspace"), sandbox=True, hosted=bool(t.get("workspace")))
     except userconf.ConfigError as e:
@@ -1910,24 +2093,28 @@ async def run_ticket(t: dict[str, Any], run: Run, *, doctor: str | None = None, 
     if not isinstance(conf, str):
         _host(t.get("workspace"), {"key": ticket_key(t["id"]), "config": conf}, t.get("chat"), _log_for(t))
     try:
-        return await _run_ticket(t, run, doctor=doctor, conf=conf, allowed=allowed)
+        return await _run_ticket(t, run, doctor=doctor, conf=conf, allowed=allowed, approve=approve)
     finally:
         _unhost(t.get("workspace"), ticket_key(t["id"]))
 
 
 async def _run_ticket(t: dict[str, Any], run: Run, *, doctor: str | None = None,
-                      conf: "userconf.Session | str | None" = None, allowed: bool = False) -> dict[str, Any]:
-    """The whole ticket: the analyst's Allow unless `allowed` (_code_refusal), worktree, stack and before shot, the
-    session's turns with gates fed back, after shot, apply, UI rebuild (rolled back when it fails), then the restart
-    rules. `doctor` is `thimble fix`'s path: no stack, rebuild or restart. A stopped run ends `stopped` or `dismissed`, as
-    does one the analyst did not allow; one a shutdown cuts short is queued again up to REQUEUE_MAX times. Returns the
-    ticket's record."""
+                      conf: "userconf.Session | str | None" = None, allowed: bool = False,
+                      approve: "Approve | None" = None) -> dict[str, Any]:
+    """The whole ticket: worktree, before shot, the session's turns with gates fed back, the session stopped and its
+    commit taken (checked_change), after shot, the analyst's Allow (_apply_refusal) and the apply of that commit, UI
+    rebuild (rolled back when it fails), then the restart rules. A contained ticket
+    (`contained`) runs its gates and shots in its box; an uncontained one asks the analyst first unless `allowed`
+    (_code_refusal) and runs them on the validation stack. `doctor` is `thimble fix`'s path: no stack, shots, rebuild or
+    restart. A stopped run ends `stopped` or `dismissed`, as does one the analyst did not allow; one a shutdown cuts short
+    is queued again up to REQUEUE_MAX times. Returns the ticket's record."""
     tid = t["id"]
     fixing = doctor is not None
     run_log = _log_for(t)
     wt: Path | None = None
     branch = base = None
     stack: dict[str, str] | None = None
+    box: ticket_box.Box | None = None
     status, error, result_text = "failed", None, ""
     touched: list[str] = []
     restart: str | None = None
@@ -1936,7 +2123,11 @@ async def _run_ticket(t: dict[str, Any], run: Run, *, doctor: str | None = None,
     try:
         if why := runner_problem(fixing=fixing) or (conf if isinstance(conf, str) else ""):
             raise TicketError(why)
-        if not allowed and (why := await _code_refusal(t)):
+        if approve is None and not (t.get("workspace") and t.get("chat")):
+            raise NotAllowed(CODE_NOBODY)
+        boxed = isinstance(conf, userconf.Session) and conf.sandboxed
+        in_box = boxed and await asyncio.to_thread(ticket_box.works)
+        if not in_box and not allowed and (why := await _code_refusal(t)):
             raise NotAllowed(why)
         kept = await asyncio.to_thread(_kept_worktree, t)
         if kept is not None:
@@ -1946,13 +2137,18 @@ async def _run_ticket(t: dict[str, Any], run: Run, *, doctor: str | None = None,
             wt, branch, base = await asyncio.to_thread(create_worktree, tid)
             run_log.stage(f"worktree ready on {branch}")
         _update(tid, worktree=str(wt), branch=branch, base=base)
-        if not fixing:
+        if in_box:
+            box = ticket_box_of(t, wt)
+            run_log.stage("the checks and the ticket's server run in thimble's sandbox runtime")
+        elif not fixing:
             stack = await start_stack(tid, wt, t.get("workspace"))
             run_log.stage(f"validation stack {'up at ' + stack['ui'] if stack else 'not available'}")
         ui_url = stack["ui"] if stack else None
         api_url = stack["api"] if stack else f"http://127.0.0.1:{config_port()}"
-        before = await _take_shot(t, run_log, "before", ui_url)
-        boxed = isinstance(conf, userconf.Session) and conf.sandboxed
+        if box is not None:
+            before = None if fixing else await _preview_shot(t, run_log, "before", box)
+        else:
+            before = await _take_shot(t, run_log, "before", ui_url)
         fence = await asyncio.to_thread(ticket_fence, wt, conf.network, conf.enforced) if boxed else None
         if fixing:
             prompt = build_fix_prompt(t, worktree=wt, doctor=doctor or "")
@@ -1970,7 +2166,7 @@ async def _run_ticket(t: dict[str, Any], run: Run, *, doctor: str | None = None,
                                                             **({"config": conf} if conf is not None else {})}}
                                                 if t.get("workspace") else {}))
             resume = run.session_id
-            touched, validation = await _check(wt, base, run_log)
+            touched, validation = await _check(wt, base, run_log, box)
             _update(tid, touched=touched, validation=validation)
             if validation is None:
                 error = "the session committed no change"
@@ -1982,12 +2178,19 @@ async def _run_ticket(t: dict[str, Any], run: Run, *, doctor: str | None = None,
             error = "gates failed after %d attempt%s" % (attempt, "" if attempt == 1 else "s")
             prompt = build_gates_prompt(_gate_report(validation))
         if ok:
-            after = await _take_shot(t, run_log, "after", ui_url)
+            await asyncio.to_thread(SESSIONS.stop, run.session)  # from here on only the server moves the branch
+            change = await asyncio.to_thread(checked_change, wt, str(branch), str(base), touched)
+            if box is not None:
+                after = None if fixing else await _preview_shot(t, run_log, "after", box, touched)
+            else:
+                after = await _take_shot(t, run_log, "after", ui_url)
             if before and after:
                 differ = (shots_dir(tid) / before).read_bytes() != (shots_dir(tid) / after).read_bytes()
                 _update(tid, shots_differ=differ)
+            if why := await _apply_refusal(t, touched, str(branch), approve):
+                raise NotAllowed(why)
             restart = "requested" if needs_restart(touched) and not fixing else None
-            res = await _apply(t, wt, str(branch), str(base), touched, restart, run_log)
+            res = await _apply(t, wt, str(branch), str(base), touched, restart, run_log, box, change)
             if res["ok"]:
                 applied = True
                 status, error = "applied", None
@@ -2011,15 +2214,17 @@ async def _run_ticket(t: dict[str, Any], run: Run, *, doctor: str | None = None,
             log.exception("ticket run failed")
             error = f"{type(e).__name__}: {e}"
         if not applied:
-            status = "stopped" if isinstance(e, NotAllowed) else "failed"
+            status = ("stopped" if isinstance(e, NotAllowed) else "needs manual merge" if isinstance(e, BranchMoved)
+                      else "failed")
         run_log.error(error)
     finally:
         try:
             await asyncio.to_thread(SESSIONS.stop, run.session)  # before its worktree goes
-            if not fixing:
+            if not fixing and box is None:
                 await stop_stack(tid)
             if wt is not None and not requeue:
                 await asyncio.to_thread(remove_worktree, wt)
+                await asyncio.to_thread(remove_box, tid)
             if branch and status in ("applied", "dismissed"):
                 await asyncio.to_thread(delete_branch, branch)
         except Exception:  # noqa: BLE001
@@ -2888,14 +3093,27 @@ def capacity_failure(text: str | None) -> str:
 FIX_BODY = "thimble's server is down or unhealthy (thimble doctor, below)."
 
 
-async def fix_offline(doctor: str, title: str = "fix: thimble server is down") -> str:
+def ticket_contained(c: str | None) -> bool:
+    """Whether a code ticket of workspace `c` (None: `thimble fix`'s) runs contained (`contained`), so the analyst is
+    asked only before its change is applied. Blocking: the first call probes the box."""
+    try:
+        return contained(dev_config(c, sandbox=True, hosted=bool(c)))
+    except userconf.ConfigError:
+        return False
+
+
+def fix_contained() -> bool:
+    return ticket_contained(None)
+
+
+async def fix_offline(doctor: str, approve: Approve, title: str = "fix: thimble server is down") -> str:
     """`thimble fix`: one ticket on prompts/dev-fix.md, run by a background session in a worktree without a stack and
-    fast-forwarded into the live checkout; the caller restarts the server, and has asked the analyst's Allow
-    (CODE_QUESTION) in the terminal."""
+    fast-forwarded into the live checkout once `approve` says yes; the caller restarts the server, and has asked the
+    analyst's Allow (CODE_QUESTION) in the terminal first where the ticket is not contained (fix_contained)."""
     t = file_ticket(None, title, FIX_BODY, "terminal", start=False)
     run = Run(ticket_id=t["id"], title=t["title"], ts_start=_now())
     _update(t["id"], status="running", attempts=1, runner=os.getpid(), finished=False)
-    rec = await run_ticket({**t, "attempts": 1}, run, doctor=doctor, allowed=True)
+    rec = await run_ticket({**t, "attempts": 1}, run, doctor=doctor, allowed=True, approve=approve)
     return f"fix ticket {rec.get('status')}: {rec.get('error') or (rec.get('result') or '')[:600]}"
 
 

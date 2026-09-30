@@ -343,7 +343,7 @@ Only for a tray entry of thimble's background sessions, as its instructions file
 
 ## list_agents
 
-List thimble's agents that run now: its background sessions, each with the command that attaches it, and the threads and subagents of this session. Call it for /thimble:agents.
+List thimble's agents that run now and what each is doing. Call it for /thimble:agents.
 
 ```json
 {
@@ -1231,7 +1231,7 @@ No agent of thimble's runs now.
 
 ## agents-help
 
-↓ at the prompt shows the tray entries and threads of this session, and `claude attach <id>` opens a background session in another terminal.
+↓ to follow any of them
 
 ## agents-print
 
