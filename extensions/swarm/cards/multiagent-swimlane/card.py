@@ -131,7 +131,7 @@ def listing(data):
     by_type = {}
     for x in links:
         by_type[x["type"]] = by_type.get(x["type"], 0) + 1
-    out = [f"agent-swimlane: {_n(len(acts), 'action')} by {_n(len(data['rows']), 'account')} on {_n(len(data['threads']), 'thread')}; "
+    out = [f"multiagent-swimlane: {_n(len(acts), 'action')} by {_n(len(data['rows']), 'account')} on {_n(len(data['threads']), 'thread')}; "
            + (f"{_n(len(links), 'link')} ({', '.join(f'{k} {n}' for k, n in by_type.items())})" if links else "no link")]
     out.append("threads: " + ", ".join(f"{t['tag']} {t['name']}" for t in data["threads"]))
     for c in acts:

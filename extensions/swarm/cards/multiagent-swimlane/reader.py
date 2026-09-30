@@ -1,4 +1,4 @@
-# Swarm: many agents acting on shared pages and channels. The agent-swimlane card type (card.py) reads its records and
+# Swarm: many agents acting on shared pages and channels. The multiagent-swimlane card type (card.py) reads its records and
 # links from this reader's index, and run as a script (main) it prints the records in order, as the shares the
 # orientation writes for its swarm-reader agents.
 #

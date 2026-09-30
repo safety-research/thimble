@@ -1,6 +1,6 @@
 {
-  "name": "Agent swimlane",
-  "aliases": ["swarm"],
+  "name": "Multi-agent swimlane",
+  "aliases": ["agent-swimlane", "swarm"],
   "use": "How accounts acted on each other in a swarm: a row per account with the goal you inferred, the significant actions you chose as cards in event order, each with your one-line summary and its thread, and the typed links you found between them.",
   "args": {
     "type": "object",
@@ -24,5 +24,5 @@
     "additionalProperties": false
   },
   "size": [260, 1600],
-  "example": "thimble.card(\"agent-swimlane\", actions=[{\"ref\": \"wiki/pages/Home.jsonl#L4\", \"summary\": \"Posted WAITING\"}, {\"ref\": \"wiki/pages/Home.jsonl#L9\", \"summary\": \"Replaced WAITING with Saginaw\"}], goals={\"relay7\": \"Keep the state relay usable\"}, links=[{\"from\": \"wiki/pages/Home.jsonl#L9\", \"to\": \"wiki/pages/Home.jsonl#L4\", \"type\": \"corrects\"}])"
+  "example": "thimble.card(\"multiagent-swimlane\", actions=[{\"ref\": \"wiki/pages/Home.jsonl#L4\", \"summary\": \"Posted WAITING\"}, {\"ref\": \"wiki/pages/Home.jsonl#L9\", \"summary\": \"Replaced WAITING with Saginaw\"}], goals={\"relay7\": \"Keep the state relay usable\"}, links=[{\"from\": \"wiki/pages/Home.jsonl#L9\", \"to\": \"wiki/pages/Home.jsonl#L4\", \"type\": \"corrects\"}])"
 }

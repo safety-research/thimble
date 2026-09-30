@@ -96,7 +96,7 @@ records, and names the files the extension reads. Settings > Extensions shows it
 overrides it either way. If the call fails, the extension stays off there and Settings says why.
 
 The Swarm extension is for corpora where many agents act on shared pages and channels and address each other. On such a
-corpus it adds orientation instructions that have every message read, and the `agent-swimlane` card type, a swimlane of
+corpus it adds orientation instructions that have every message read, and the `multiagent-swimlane` card type, a swimlane of
 the actions main chose to answer a question.
 
 ## Update
