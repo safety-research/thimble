@@ -1,5 +1,5 @@
-"""app.cardtypes and thimble.card, with the Swarm extension's `multiagent-swimlane` card type, which was `swarm` and then
-`agent-swimlane` before. On a corpus of JSON Lines records, the registry finds the type without any view
+"""app.cardtypes and thimble.card, with the `multiagent-swimlane` card type, which the Swarm extension gave as `swarm` and
+then `agent-swimlane` before. On a corpus of JSON Lines records, the registry finds the type without any view
 proposal and lists it for main's prompt; a card's code draws it with thimble.card, which checks the arguments against the
 type's schema, runs card.py on the reader's cached index under the labels the call names, whatever Files highlights, and
 shows the data with a listing main reads and cites; the card check's page gets the type's frame from the request. Keep
@@ -7,7 +7,7 @@ writes a patch of the arguments into the card's one thimble.card call (its tests
 in test_extensions). Main hears when a label it ran finishes, and can colour a label's values.
 
 The corpus `crew` is 140 saves of 35 accounts on 4 pages, each naming the next account, which the Swarm reader reads as
-a swarm; the extension is added. Reader calls run in this process (views._runner replaced by an exec of the kernel's
+a swarm; Swarm is added, and with it multiagent-swimlane. Reader calls run in this process (views._runner replaced by an exec of the kernel's
 snippet), and thimble.card runs in this process in a module built from kernel_thimble.py, as a kernel builds it."""
 from __future__ import annotations
 
@@ -28,7 +28,7 @@ from fastapi import HTTPException
 
 from app import card_check, cardtypes, channel, concepts, config, extensions, notebook, render, tools, views
 
-SWIMLANE = extensions.builtin_dir() / "swarm" / "cards" / "multiagent-swimlane"
+SWIMLANE = extensions.builtin_dir() / "multiagent-swimlane" / "cards" / "multiagent-swimlane"
 
 CORPUS = "crew"
 ROWS = [{"page": f"p{i % 4}", "user": f"bot{i % 35}", "ts": f"2026-04-14T{i // 60:02d}:{i % 60:02d}:00Z",
@@ -242,7 +242,7 @@ async def test_main_hears_when_a_label_it_ran_finishes_and_can_colour_its_values
 
 
 async def test_the_swarm_extension_ships_no_view_and_takes_back_the_one_it_installed(crew, monkeypatch, tmp_path):
-    """The Swarm extension gives its card type and orientation but no view: on a swarm it runs and nothing is proposed
+    """Swarm and multiagent-swimlane give a card type and orientation but no view: on a swarm they run and nothing is proposed
     or installed, a card of its type has no view to open, and the Swarm view an earlier version installed goes, as does
     thimble's own install of it from before Swarm was an extension."""
     old = tmp_path / "old-swarm-view"

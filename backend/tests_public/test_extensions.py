@@ -120,7 +120,8 @@ def test_add_lists_each_contribution_with_its_own_description_and_adds_nothing_w
 async def test_what_an_extension_needs_is_checked_and_what_it_waits_for_leaves_it_unloaded_and_named(corpus, tmp_path):
     """A library thimble does not inline stops the add; a thimble outside its range, a Python package that is not
     installed and an extension that is not added leave it added but unloaded, and Settings, the list and doctor say
-    why. An extension it needs that thimble ships is listed and added on the same yes."""
+    why. An extension it needs that thimble ships is listed and added on the same yes, and it runs only where that one
+    runs."""
     with pytest.raises(extensions.AddError, match="thimble inlines only vega, vega-lite, vega-embed"):
         _add(_copy(tmp_path, "d3ish", dependencies={"js": ["d3"]}))
     with pytest.raises(extensions.AddError, match="no folder, git URL or built-in"):
@@ -145,6 +146,10 @@ async def test_what_an_extension_needs_is_checked_and_what_it_waits_for_leaves_i
     assert "  It stays unloaded until then: it needs the extension nope, which is not added." in said
     e = (await extensions.refresh(CORPUS))["extensions"]
     assert e["swarm"]["active"] and e["needy"]["why"] == "it needs the extension nope, which is not added"
+    assert e["multiagent-swimlane"]["active"] and e["swarm"]["files"] == ["*.jsonl", "*.csv"]
+    extensions.set_enabled(CORPUS, "multiagent-swimlane", False)
+    e = (await extensions.refresh(CORPUS))["extensions"]
+    assert e["swarm"]["why"] == "it needs the extension multiagent-swimlane, which does not run here"
 
 
 async def test_an_added_extension_runs_in_every_workspace_and_its_view_where_it_fits(corpus, fit):

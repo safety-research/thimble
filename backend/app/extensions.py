@@ -11,15 +11,16 @@
                     card.md
   agents/<name>.md  an agent the orientation's session gets with --agents (agent_definitions)
   agents/orient.md  added to the orientation's instructions under the extension's name, or in place of thimble's with
-                    `replace: true` in its frontmatter; `{{files}}` in it stands for the files its views and card types
-                    claim here. An orient.md beside extension.json, and `replaces` in it, are read too
+                    `replace: true` in its frontmatter; `{{files}}` in it stands for the files its views and card types,
+                    and those of the extensions it needs, claim here. An orient.md beside extension.json, and `replaces`
+                    in it, are read too
   reports/<slug>/   a report type: type.md in the preset format, and export.py for its own exports; report-types/ is read
                     too
 
 An extension loads when read_extension finds no problem: this thimble is in its range, its Python packages import, its
 js names only libraries thimble inlines, and the extensions it needs are added. It is active in a workspace when it
-loads and neither thimble's config (`extensions.<name>.enabled: false`) nor the workspace's switch in Settings turns it
-off. An active extension's agents and orientation instructions join the orientation, its card types join main's prompt
+loads, neither thimble's config (`extensions.<name>.enabled: false`) nor the workspace's switch in Settings turns it
+off, and the extensions it needs are active there. An active extension's agents and orientation instructions join the orientation, its card types join main's prompt
 where their claims match files, and its report types are offered in + New.
 
 Only its views check whether they fit (_fit): one quick model call per view and workspace, from the view's description
@@ -597,6 +598,36 @@ def _settle_views(name: str, e: dict[str, Any], shown: dict[str, bool], clash: d
     e["files"] = list(dict.fromkeys(files))
 
 
+def _needs_running(exts: dict[str, dict[str, Any]], here: str = " here") -> None:
+    """Each active extension that needs one that does not run stops running too, with why."""
+    changed = True
+    while changed:
+        changed = False
+        for e in exts.values():
+            if not e.get("active"):
+                continue
+            off = [n for n in _words(e.get("needs")) if not (exts.get(n) or {}).get("active")]
+            if off:
+                e.update(active=False, why=f"it needs the {_several(len(off), 'extension', 'extensions')} "
+                                           f"{', '.join(off)}, which {_several(len(off), 'does', 'do')} not run{here}")
+                changed = True
+
+
+def _needed_files(exts: dict[str, dict[str, Any]]) -> None:
+    """`files` of each active extension followed by those of the extensions it needs, however deep."""
+    def of(name: str, seen: set[str]) -> list[str]:
+        e = exts.get(name) or {}
+        out = list(_words(e.get("files")))
+        for n in _words(e.get("needs")):
+            if n not in seen and (exts.get(n) or {}).get("active"):
+                out += of(n, seen | {n})
+        return out
+
+    got = {n: list(dict.fromkeys(of(n, {n}))) for n, e in exts.items() if e.get("active")}
+    for n, files in got.items():
+        exts[n]["files"] = files
+
+
 async def refresh(c: str, wait: float = 0.0) -> dict[str, Any]:
     """The workspace's extensions found again (_refresh). A view's check still being made (_fit) is waited for up to
     `wait` seconds, and then the extensions are found again; one that answers while no refresh waits has the workspace
@@ -664,9 +695,11 @@ async def _refresh(c: str) -> dict[str, Any]:
                         t["here"] = bool(t["claims"]) and bool(
                             await asyncio.to_thread(views.claimed_files, c, {"claims": t["claims"]}))
             exts[name] = {**{k: v for k, v in info.items() if k != "name"}, "active": not why, "why": why}
+        _needs_running(exts)
         clash = conflicts(exts)
         for name, e in exts.items():
             _settle_views(name, e, state["shown"], clash)
+        _needed_files(exts)
         for k, entry in _checks(c).items():
             if k not in checked and entry["task"].done():
                 _asking.pop((c, k))  # an answer for a view removed or switched off meanwhile
@@ -1144,6 +1177,8 @@ def doctor_line() -> str:
         else:
             parts.append(f"{name}{v}")
             loadable[name] = {**info, "active": True}
+    _needs_running(loadable, "")
+    parts = [p if (e := loadable.get(p.split(" ", 1)[0])) is None or e["active"] else f"{p} ({e['why']})" for p in parts]
     return "; ".join(parts + [f"conflict: {x}" for x in conflict_lines(conflicts(loadable))])
 
 
