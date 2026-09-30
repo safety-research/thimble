@@ -10,13 +10,13 @@
 // kernel with an interrupt_request on its control channel).
 import { spawn } from 'node:child_process';
 import { constants } from 'node:os';
-import { dirname, join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const args = process.argv.slice(2);
 const print = args[0] === '--print';
-const [srtDir, rulesJson, sep, ...argv] = print ? args.slice(1) : args;
-if (!srtDir || !rulesJson || sep !== '--' || argv.length === 0) {
+const [srtArg, rulesJson, sep, ...argv] = print ? args.slice(1) : args;
+if (!srtArg || !rulesJson || sep !== '--' || argv.length === 0) {
   console.error('usage: node kernel_srt.mjs [--print] <srt package dir> <rules JSON> -- <command...>');
   process.exit(2);
 }
@@ -29,6 +29,7 @@ process.on('SIGINT', () => {});
 // them, which would show in the kernel's working directory. So srt works from this file's folder, which the kernel
 // cannot write, and the kernel starts where this process was started.
 const cwd = process.cwd();
+const srtDir = resolve(srtArg);
 process.chdir(dirname(fileURLToPath(import.meta.url)));
 
 let wrapped;

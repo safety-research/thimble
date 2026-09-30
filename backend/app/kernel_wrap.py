@@ -60,6 +60,9 @@ SRT_HIDDEN = {
     "linux": ("/home", "/root", "/mnt", "/media", "/srv", "/tmp", "/var/tmp", "/run/user"),
     "darwin": ("/Users", "/Volumes", "/private/tmp", "/private/var/tmp", "/private/var/folders"),
 }
+# srt lets every sandboxed process write /tmp/claude, the temp folder of Claude Code's own sandbox. On macOS the kernel
+# could create it there, so it is denied; on Linux /tmp is a private tmpfs, and srt binds it only where it exists.
+SRT_NO_WRITE = {"linux": (), "darwin": ("/tmp/claude", "/private/tmp/claude")}
 
 
 PROBE_S = 10.0
@@ -152,7 +155,7 @@ def srt_rules(*, corpus_dir: str | Path, workspace_dir: str | Path, venv: str | 
         "denyRead": list(dict.fromkeys(deny_read)),
         "allowRead": list(dict.fromkeys(allow_read)),
         "allowWrite": [str(ws)],
-        "denyWrite": [*hidden, *(str(ws / name) for name in READ_ONLY_FILES)],
+        "denyWrite": [*hidden, *(str(ws / name) for name in READ_ONLY_FILES), *SRT_NO_WRITE[system]],
     }}
 
 

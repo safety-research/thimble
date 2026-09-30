@@ -49,7 +49,7 @@ def test_on_macos_srt_hides_the_home_and_user_data_and_shows_the_kernel_its_own_
     assert {CORPUS, WS, str(venv), str(minor), str(real), "/app/backend/app/fonts"} <= set(fs["allowRead"])
     assert not any("sandbox-runtime" in p for p in fs["allowRead"]), "apply-seccomp runs only on Linux"
     assert fs["allowWrite"] == [WS]
-    assert set(fs["denyWrite"]) == {*hidden, f"{WS}/telemetry.jsonl"}
+    assert set(fs["denyWrite"]) == {*hidden, f"{WS}/telemetry.jsonl", "/tmp/claude", "/private/tmp/claude"}
     linux = _rules(tmp_path / "l", "linux")[0]["filesystem"]
     assert {"/home", "/tmp", "/mnt", "/run/user"} <= set(linux["denyRead"]) and "/Users" not in linux["denyRead"]
     assert "/app/frontend/node_modules/@anthropic-ai/sandbox-runtime/vendor/seccomp" in linux["allowRead"]
