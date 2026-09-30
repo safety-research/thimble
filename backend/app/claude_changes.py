@@ -1,8 +1,10 @@
 """The two places thimble changes Claude Code's files, which are the user's.
 
 - Trust. `claude --bg` starts only in a folder Claude Code trusts, and trust is kept in Claude Code's global config
-  (`$CLAUDE_CONFIG_DIR/.claude.json`, else `~/.claude.json`). install.sh asks once whether to trust thimble's
-  workspaces folder, whose entry covers every work folder below it: before it installs anything when it has python3
+  (`$CLAUDE_CONFIG_DIR/.claude.json`, else `~/.claude.json`). install.sh asks once whether to trust thimble's folder
+  (trust_folder): the install itself when its workspaces folder is inside it, as in a checkout or a release copy, since
+  a code ticket's worktree counts as the checkout it was cut from, else the workspaces folder; its entry covers every
+  work folder below it: before it installs anything when it has python3
   (question), else at its trust step (install_trust), which records the answer in thimble's home (TRUST_FILE), so that
   an update does not ask again; `install.sh --trust-workspaces` or `--no-trust-workspaces` changes it later, and a no
   takes back the entry an earlier yes added. `thimble uninstall` takes back the entries thimble added, an older
@@ -24,14 +26,14 @@ from typing import Any
 
 TRUST_FILE = "trust.json"  # in thimble's home: {folder, config, answer: yes | no, added}
 TRUST_KEY = "hasTrustDialogAccepted"
-QUESTION = ("Trust thimble's workspaces folder {folder} by adding it to {config}?\n"
-            "The workspaces folder is where thimble keeps each workspace and runs its agents. The orientation, its "
-            "critic and the writers need this: they run as Claude Code background agents, which show in your "
-            "terminal's agent tray, and Claude Code starts those only in a folder it trusts. With a no, they can't "
-            "start until the folder is trusted. `thimble uninstall` takes the entry back.")
+QUESTION = ("Trust thimble's folder {folder} by adding it to {config}?\n"
+            "It holds thimble's workspaces, where its agents run, and the code the dev agent changes. The orientation, "
+            "its critic, the writers and code tickets need this: they run as Claude Code background agents, which show "
+            "in your terminal's agent tray, and Claude Code starts those only in a folder it trusts. With a no, they "
+            "can't start until the folder is trusted. `thimble uninstall` takes the entry back.")
 CHANGE = "install.sh --trust-workspaces or --no-trust-workspaces changes it"
-UNTRUSTED = ("the orientation, its critic and the writers can't start until it is; `bash {install} --trust-workspaces` "
-             "trusts it")
+UNTRUSTED = ("the orientation, its critic, the writers and code tickets can't start until it is; "
+             "`bash {install} --trust-workspaces` trusts it")
 # the records of the keys older versions wrote: file in thimble's home -> the key in a folder's settings.local.json
 # (None: statusLine, recorded as {ours, previous})
 OLD_RECORDS = {"effort-overrides.json": "CLAUDE_CODE_EFFORT_LEVEL", "fast-overrides.json": "CLAUDE_CODE_DISABLE_FAST_MODE",
@@ -81,10 +83,27 @@ def global_config() -> Path:
 
 def workspaces_dir(tree: Path) -> Path:
     """The workspaces folder the server of the install at `tree` uses, as cli.resolve_env finds it:
-    THIMBLE_WORKSPACES_DIR, else the one server.json recorded, else <tree>/workspaces."""
-    recorded = (_read(home() / "server.json").get("env") or {}).get("workspaces_dir")
+    THIMBLE_WORKSPACES_DIR, else the one server.json recorded when a server of this install wrote it (not an earlier
+    install's, whose folder may be gone), else <tree>/workspaces."""
+    st = _read(home() / "server.json")
+    recorded = (st.get("env") or {}).get("workspaces_dir") if _same(st.get("repo"), tree) else None
     raw = os.environ.get("THIMBLE_WORKSPACES_DIR") or (recorded if isinstance(recorded, str) else "") or str(tree / "workspaces")
     return Path(raw).expanduser().resolve()
+
+
+def _same(a: Any, b: Path) -> bool:
+    try:
+        return isinstance(a, str) and Path(a).expanduser().resolve() == Path(b).expanduser().resolve()
+    except OSError:
+        return False
+
+
+def trust_folder(tree: Path) -> Path:
+    """The folder install.sh asks to trust for the install at `tree` (module note): the install itself when its
+    workspaces folder is inside it, since that one entry also covers a code ticket's worktree, else the workspaces
+    folder."""
+    ws, root = workspaces_dir(tree), Path(tree).expanduser().resolve()
+    return root if ws.is_relative_to(root) else ws
 
 
 def trusted(folder: Path, data: dict[str, Any]) -> bool:
@@ -121,7 +140,7 @@ def _set_trust(folder: Path, config: Path, on: bool) -> None:
 def question(tree: Path) -> str:
     """The trust question for the install at `tree`, which install.sh asks before it installs anything (module note);
     '' when install_trust would not ask it: an answer for this folder and config is recorded, or the folder is trusted."""
-    folder, config = workspaces_dir(tree), global_config()
+    folder, config = trust_folder(tree), global_config()
     rec = _read(home() / TRUST_FILE)
     if rec.get("folder") == str(folder) and rec.get("config") == str(config) and rec.get("answer") in ("yes", "no"):
         return ""
@@ -131,7 +150,7 @@ def question(tree: Path) -> str:
 def skipped(tree: Path) -> str:
     """Why install.sh does not ask the trust question for the install at `tree`, naming the folder; '' when it asks it
     (question)."""
-    folder, config = workspaces_dir(tree), global_config()
+    folder, config = trust_folder(tree), global_config()
     rec = _read(home() / TRUST_FILE)
     on = trusted(folder, _read(config))
     if rec.get("folder") == str(folder) and rec.get("config") == str(config) and rec.get("answer") in ("yes", "no"):
@@ -152,7 +171,7 @@ def skipped(tree: Path) -> str:
 def install_trust(tree: Path, answer: str | None = None) -> str:
     """install.sh's trust step for the install at `tree` (module note): `answer` is yes or no from its flags or its
     question, else the recorded one, else asked on a terminal. The line to print."""
-    folder, config = workspaces_dir(tree), global_config()
+    folder, config = trust_folder(tree), global_config()
     rec = _read(home() / TRUST_FILE)
     same = rec.get("folder") == str(folder) and rec.get("config") == str(config)
     untrusted = UNTRUSTED.format(install=tree / "scripts" / "install.sh")

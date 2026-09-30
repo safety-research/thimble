@@ -303,11 +303,22 @@ def api_url(p: int | None = None) -> str:
 STATE_ENV_KEYS = ("data_dir", "workspaces_dir", "plugin_dir", "home")
 
 
+def _same_tree(a: Any, b: Path) -> bool:
+    try:
+        return isinstance(a, str) and Path(a).expanduser().resolve() == Path(b).expanduser().resolve()
+    except OSError:
+        return False
+
+
 def resolve_env() -> dict[str, Any]:
-    """The names the server runs with: the caller's THIMBLE_* first, then the last server.json, then the defaults."""
-    st = read_state().get("env") or {}
+    """The names the server runs with: the caller's THIMBLE_* first, then the last server.json, then the defaults. A
+    workspaces folder server.json recorded counts only when a server of this install wrote it, so a new install beside
+    an earlier one never keeps that one's folder (claude_changes.workspaces_dir asks the same)."""
+    state = read_state()
+    st = state.get("env") or {}
     data_dir = os.environ.get("THIMBLE_DATA_DIR") or st.get("data_dir") or str(config.default_data_dir())
-    ws_dir = os.environ.get("THIMBLE_WORKSPACES_DIR") or st.get("workspaces_dir") or str(config.WORKSPACES_DIR)
+    ours = _same_tree(state.get("repo"), config.REPO_ROOT)
+    ws_dir = os.environ.get("THIMBLE_WORKSPACES_DIR") or (st.get("workspaces_dir") if ours else None) or str(config.WORKSPACES_DIR)
     # dev mode is the environment's alone, never server.json's, so a later /thimble from any session never spawns Vite
     # unasked
     dev = (os.environ.get("THIMBLE_DEV") or "").strip().lower() in ("1", "true", "yes", "on")
@@ -2752,7 +2763,7 @@ def update_script() -> Path:
 
 # install.sh's answers to its questions, and --require-pinned, which `thimble update` passes on to it through update.sh
 INSTALL_FLAGS = ("--sandbox-deps", "--no-sandbox-deps", "--plugin", "--no-plugin", "--trust-workspaces",
-                 "--no-trust-workspaces", "--require-pinned")
+                 "--no-trust-workspaces", "--upgrade-node", "--no-upgrade-node", "--require-pinned")
 
 
 def _gh_ok(gh: str, *args: str) -> bool:
