@@ -215,3 +215,16 @@ async def test_the_box_s_server_reads_no_home_writes_only_its_tree_and_reaches_n
     # a write outside is refused, or on Linux lands in the empty folder the box shows there, which the host never sees
     assert body == {"ok": True, "home": False, "network": False, "tree": True}
     assert not (tmp_path / "escaped").exists() and (tree / "ok").exists()
+
+
+@pytest.mark.skipif(not ticket_box.works(), reason=f"thimble's sandbox runtime can't run here: {ticket_box.problem()}")
+async def test_a_check_that_times_out_leaves_nothing_in_the_worktree(tmp_path):
+    """srt puts empty stand-ins for dotfiles such as .bashrc and .mcp.json in the box's working directory while a check
+    runs; a check stopped at its timeout must still leave the worktree as it was."""
+    tree = tmp_path / "tree"
+    tree.mkdir()
+    (tree / "a.txt").write_text("a")
+    box = ticket_box.Box(tree, tmp_path / "cache", tmp_path / "srt")
+    code, out = await ticket_box.run(box, ["sleep", "60"], cwd=tree, timeout=2)
+    assert code == -1 and "timed out" in out
+    assert sorted(p.name for p in tree.iterdir()) == ["a.txt"]

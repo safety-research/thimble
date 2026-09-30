@@ -170,9 +170,21 @@ class Box:
                 "VITE_CACHE_DIR": str(self.cache / "vite"), "NO_COLOR": "1", **(extra or {})}
 
 
-def _kill_group(proc: asyncio.subprocess.Process) -> None:
-    with contextlib.suppress(ProcessLookupError, PermissionError):
-        os.killpg(proc.pid, signal.SIGKILL)
+def _signal_group(proc: asyncio.subprocess.Process, sig: int) -> None:
+    if proc.returncode is None:
+        with contextlib.suppress(ProcessLookupError, PermissionError):
+            os.killpg(proc.pid, sig)
+
+
+async def _end_group(proc: asyncio.subprocess.Process) -> None:
+    """SIGTERM to the process group, then SIGKILL after KILL_WAIT_S. srt removes the empty files it puts in the working
+    directory for the box's run only when it gets to exit, so a SIGKILL first would leave them in the worktree."""
+    _signal_group(proc, signal.SIGTERM)
+    try:
+        await asyncio.wait_for(proc.wait(), KILL_WAIT_S)
+    except asyncio.TimeoutError:
+        _signal_group(proc, signal.SIGKILL)
+        await proc.wait()
 
 
 async def run(box: Box, cmd: Sequence[str], *, cwd: Path, timeout: float,
@@ -187,11 +199,11 @@ async def run(box: Box, cmd: Sequence[str], *, cwd: Path, timeout: float,
     try:
         out, _ = await asyncio.wait_for(proc.communicate(), timeout)
     except asyncio.TimeoutError:
-        _kill_group(proc)
-        await proc.wait()
+        await _end_group(proc)
         return -1, f"timed out after {timeout:.0f} s"
     except asyncio.CancelledError:
-        _kill_group(proc)
+        _signal_group(proc, signal.SIGTERM)
+        asyncio.get_running_loop().call_later(KILL_WAIT_S, _signal_group, proc, signal.SIGKILL)
         raise
     return proc.returncode if proc.returncode is not None else -1, out.decode("utf-8", "replace")
 
@@ -308,13 +320,7 @@ class Preview:
         with contextlib.suppress(asyncio.TimeoutError):
             await asyncio.wait_for(proc.wait(), KILL_WAIT_S)
             return
-        with contextlib.suppress(ProcessLookupError, PermissionError):
-            os.killpg(proc.pid, signal.SIGTERM)
-        try:
-            await asyncio.wait_for(proc.wait(), KILL_WAIT_S)
-        except asyncio.TimeoutError:
-            _kill_group(proc)
-            await proc.wait()
+        await _end_group(proc)
 
     async def __aenter__(self) -> "Preview":
         await self.start()
