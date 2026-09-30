@@ -41,7 +41,6 @@ import hashlib
 import json
 import logging
 import re
-import shutil
 from pathlib import Path
 from typing import Any
 
@@ -51,7 +50,7 @@ from pydantic import BaseModel
 
 from . import config, prompts, views
 from .kernel_thimble import CARD_MIME, CARD_TYPES_FILE, _checked
-from .ledger import read_json, write_json
+from .ledger import atomic_write_bytes, read_json, unlinked, write_json
 
 log = logging.getLogger("thimble.cardtypes")
 
@@ -97,18 +96,23 @@ def types_dir(c: str) -> Path:
     return views.views_dir(c) / TYPES_DIR
 
 
-def _copy_changed(src: Path, dst: Path) -> None:
-    if not dst.is_file() or dst.read_bytes() != src.read_bytes():
+def _copy_changed(c: str, src: Path, dst: Path) -> None:
+    """`src` copied to `dst` in workspace `c` when they differ. A symlink a kernel left at `dst` is replaced, and one
+    among its folders refuses the copy (ledger.unlinked)."""
+    unlinked(config.workspace_dir(c), dst)
+    data = src.read_bytes()
+    if dst.is_symlink() or not dst.is_file() or dst.read_bytes() != data:
         dst.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copyfile(src, dst)
+        unlinked(config.workspace_dir(c), dst)
+        atomic_write_bytes(dst, data)
 
 
 def install_own(c: str, slug: str) -> Path:
     """thimble's type `slug` copied into the workspace, file by file where it changed; its folder there."""
     d = types_dir(c) / slug
     for name in TYPE_FILES:
-        _copy_changed(views.VIEWERS_DIR / slug / name, d / name)
-    _copy_changed(views.HOST_PY, types_dir(c) / HOST_FILE)
+        _copy_changed(c, views.VIEWERS_DIR / slug / name, d / name)
+    _copy_changed(c, views.HOST_PY, types_dir(c) / HOST_FILE)
     return d
 
 
@@ -259,7 +263,7 @@ async def refresh(c: str, *, warm: bool = True) -> dict[str, dict[str, Any]]:
             if claims:
                 types[slug] = await asyncio.to_thread(_entry, c, slug, d, claims, "thimble")
         if ext_types:
-            await asyncio.to_thread(_copy_changed, views.HOST_PY, types_dir(c) / HOST_FILE)
+            await asyncio.to_thread(_copy_changed, c, views.HOST_PY, types_dir(c) / HOST_FILE)
         for t in ext_types:
             try:
                 types[t["slug"]] = await asyncio.to_thread(_ext_entry, c, t)
@@ -270,7 +274,7 @@ async def refresh(c: str, *, warm: bool = True) -> dict[str, dict[str, Any]]:
                 continue
             v = await asyncio.to_thread(views.read_built, c, slug)
             if v is not None and v["ok"] and _is_type(Path(v["dir"])):
-                await asyncio.to_thread(_copy_changed, views.HOST_PY, types_dir(c) / HOST_FILE)
+                await asyncio.to_thread(_copy_changed, c, views.HOST_PY, types_dir(c) / HOST_FILE)
                 types[slug] = await asyncio.to_thread(_entry, c, slug, Path(v["dir"]), list(v["claims"]), "workspace")
         for t in types.values():
             t["aliases"] = [a for a in t.get("aliases") or [] if a not in types]
@@ -376,8 +380,22 @@ def frame_document(c: str, name: str) -> str:
     t = find(c, name)
     if t is None:
         raise HTTPException(404, f"no card type {name!r} in this workspace")
-    view = {"dir": t["dir"], "slug": t["slug"], "name": t["name"], "libs": t.get("libs") or [], "page": t.get("page")}
+    view = {"dir": str(page_dir(t)), "slug": t["slug"], "name": t["name"], "libs": t.get("libs") or [],
+            "page": t.get("page")}
     return views.frame_document(view, card=True)
+
+
+def page_dir(t: dict[str, Any]) -> Path:
+    """The folder the server reads a type's page from: thimble's own folder for a type thimble ships, the extension's
+    folder in thimble's home for an extension's, rather than the copies in the workspace a kernel can write; the
+    workspace's view for a type of the workspace."""
+    from . import extensions  # noqa: PLC0415
+
+    if t.get("origin") == "thimble":
+        return views.VIEWERS_DIR / str(t["slug"])
+    if t.get("origin") == "extension":
+        return extensions.source_path(str(t["extension"])) / ("cards" if t.get("page") else "views") / str(t["slug"])
+    return Path(t["dir"])
 
 
 router = APIRouter()

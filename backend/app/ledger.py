@@ -67,16 +67,35 @@ def _own_tmp(path: Path) -> Path:
     return Path(tmp)
 
 
-def atomic_write_text(path: Path, text: str) -> None:
+def atomic_write_bytes(path: Path, data: bytes) -> None:
     """Write-to-temp + os.replace: a reader sees the old file or the new one, never a torn one; concurrent writers both
-    land whole and the later wins; a failed write leaves no temp."""
+    land whole and the later wins; a failed write leaves no temp. A symlink at `path` is replaced, not followed."""
     tmp = _own_tmp(path)
     try:
-        tmp.write_text(text, "utf-8")
+        tmp.write_bytes(data)
         os.replace(tmp, path)
     except BaseException:
         tmp.unlink(missing_ok=True)
         raise
+
+
+def atomic_write_text(path: Path, text: str) -> None:
+    atomic_write_bytes(path, text.encode("utf-8"))
+
+
+def unlinked(base: Path, path: Path) -> Path:
+    """`path`, which must lie under `base` with no symlink among the folders between them, so that a write or removal
+    there stays under `base` (a kernel can plant symlinks in a workspace); ValueError otherwise."""
+    try:
+        rel = path.relative_to(base)
+    except ValueError:
+        raise ValueError(f"{path} is not under {base}") from None
+    at = base
+    for part in rel.parts[:-1]:
+        at = at / part
+        if at.is_symlink():
+            raise ValueError(f"{at} is a symlink")
+    return path
 
 
 def write_json(path: Path, obj: Any) -> None:

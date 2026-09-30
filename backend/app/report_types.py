@@ -27,7 +27,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, ConfigDict, Field
 
 from . import cite, config, investigation, notebook, prompts, refs, slides, undo
-from .ledger import read_json, write_json
+from .ledger import atomic_write_text, read_json, unlinked, write_json
 from .report import (_Refs, _collapse, _cut, _new_id, _put_text, _replace_text, _title_ok, plain_text, reopen_comment,
                      settle_carried_comment)
 from .schemas import CELL_REF, SENTENCE_TEXT, TAGS
@@ -209,8 +209,13 @@ def _migrate_video(c: str) -> None:
     written = (config.workspace_dir(c) / "investigations").glob(f"*/{LEGACY_VIDEO}.json")
     if (d / "type.json").is_file() or not any(written):
         return
+    try:
+        unlinked(config.workspace_dir(c), d / "type.json")
+    except ValueError as e:
+        log.warning("%s: the video's type was not made: %s", c, e)
+        return
     d.mkdir(parents=True, exist_ok=True)
-    (d / "prompt.md").write_text("", "utf-8")
+    atomic_write_text(d / "prompt.md", "")
     write_json(d / "type.json", {"slug": LEGACY_VIDEO, "created_by": "thimble", "ts": _now(), "name": "Video",
                                  "description": "", "renderer": "video", "preset": LEGACY_VIDEO})
 
@@ -327,6 +332,10 @@ def write_type(c: str, slug: str, *, name: str, description: str, renderer: str,
             component = (d / "renderer.tsx").read_text("utf-8")
         if not (component or "").strip():
             raise HTTPException(400, "a custom renderer needs its component source")
+    try:
+        unlinked(config.workspace_dir(c), d / "type.json")
+    except ValueError as e:
+        raise HTTPException(409, f"the type's folder cannot be written: {e}") from None
     d.mkdir(parents=True, exist_ok=True)
     meta = dict(existing) if isinstance(existing, dict) else {"slug": slug, "created_by": created_by, "ts": _now()}
     meta.update(name=_collapse(name) or slug, description=(description or "").strip(), renderer=renderer, updated=_now())
@@ -342,11 +351,10 @@ def write_type(c: str, slug: str, *, name: str, description: str, renderer: str,
         meta.pop("page", None)
     if from_preset:
         meta["preset"] = from_preset
-    (d / "prompt.md").write_text(_clean_prompt(prompt) if not from_preset or (prompt or "").strip() else "", "utf-8")
-    (d / "rubric.md").write_text((rubric or "").replace("\r\n", "\n").strip() + "\n", "utf-8")
+    atomic_write_text(d / "prompt.md", _clean_prompt(prompt) if not from_preset or (prompt or "").strip() else "")
+    atomic_write_text(d / "rubric.md", (rubric or "").replace("\r\n", "\n").strip() + "\n")
     if renderer == "custom" and component is not None:
-        src = component.replace("\r\n", "\n")
-        (d / "renderer.tsx").write_text(src, "utf-8")
+        atomic_write_text(d / "renderer.tsx", component.replace("\r\n", "\n"))
     write_json(d / "type.json", meta)
     return read_type(c, slug) or meta
 

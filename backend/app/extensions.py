@@ -66,7 +66,7 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
 from . import config, kernel_wrap, userconf
-from .ledger import read_json, write_json
+from .ledger import read_json, unlinked, write_json
 
 log = logging.getLogger("thimble.extensions")
 
@@ -686,16 +686,20 @@ async def _refresh(c: str) -> dict[str, Any]:
             why = info["problems"][0] if info["problems"] else ""
             why = why or config_off(name, off)
             why = why or ("off in this workspace" if name in state["off"] else "")
+            before = {v["slug"]: v for v in _list(kept, "views")}
             if not why:
                 dig, size = await asyncio.to_thread(digest, root)
+                here = workspace_path(c, name)
+                try:
+                    unlinked(config.workspace_dir(c), here / MANIFEST)
+                except ValueError as e:
+                    why = f"its copy in this workspace cannot be written: {e}"
                 if size > SIZE_MAX:
                     why = f"its folder holds {size:,} bytes, and thimble copies {SIZE_MAX:,} at most"
-                else:
-                    here = workspace_path(c, name)
+                elif not why:
                     if dig != kept.get("digest") or not here.is_dir() or (await asyncio.to_thread(digest, here))[0] != dig:
                         await asyncio.to_thread(copy_tree, root, here)
                     info["digest"] = dig
-                    before = {v["slug"]: v for v in _list(kept, "views")}
                     for v in info["views"]:
                         files = await asyncio.to_thread(views.claimed_files, c, {"claims": v["claims"]}) if v["claims"] else []
                         v["here"] = bool(files)
@@ -719,7 +723,12 @@ async def _refresh(c: str) -> dict[str, Any]:
                      "extensions": exts}
         await asyncio.to_thread(write_json, _state_path(c), new_state)
         for name in sorted(set(state["extensions"]) - set(exts)):
-            await asyncio.to_thread(shutil.rmtree, workspace_path(c, name), True)
+            try:
+                gone = unlinked(config.workspace_dir(c), workspace_path(c, name))
+            except ValueError as e:
+                log.warning("%s: the copy of the removed extension %s was left: %s", c, name, e)
+                continue
+            await asyncio.to_thread(shutil.rmtree, gone, True)
     await asyncio.to_thread(_withdraw_given_up, c, exts)
     await asyncio.to_thread(install_views, c)
     for slug in await asyncio.to_thread(views.orphaned, c):

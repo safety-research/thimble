@@ -41,6 +41,7 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import Response
 
 from . import config, frames, headless, investigation, refs, userconf
+from .ledger import atomic_write_bytes, atomic_write_text, unlinked
 from .report import _collapse, plain_text
 
 log = logging.getLogger("thimble.exports")
@@ -701,16 +702,26 @@ def formats(c: str, slug: str, renderer: str) -> list[dict[str, Any]]:
 # --------------------------------------------------------------------------- the hook
 
 
+def _scratch(c: str) -> Path:
+    """The workspace's folder for export files; RuntimeError when a folder on its way is a symlink (ledger.unlinked)."""
+    d = config.workspace_dir(c) / "scratch" / "exports"
+    try:
+        unlinked(config.workspace_dir(c), d / "x")
+    except ValueError as e:
+        raise RuntimeError(f"the export folder cannot be written: {e}") from None
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
 async def run_hook(c: str, path: Path, doc: dict[str, Any], fmt: str, ctx: dict[str, Any]) -> dict[str, Any]:
     """export() of `path` on the workspace's exports kernel with the document, the format and the context's values;
     RuntimeError with the hook's error."""
     from . import notebook  # noqa: PLC0415
 
-    tmp = config.workspace_dir(c) / "scratch" / "exports"
-    tmp.mkdir(parents=True, exist_ok=True)
+    tmp = _scratch(c)
     tag = secrets.token_hex(6)
     req, res = tmp / f"{tag}.in.json", tmp / f"{tag}.out.json"
-    req.write_text(json.dumps({"doc": doc, "fmt": fmt, "ctx": ctx}, ensure_ascii=False, default=str), "utf-8")
+    atomic_write_text(req, json.dumps({"doc": doc, "fmt": fmt, "ctx": ctx}, ensure_ascii=False, default=str))
     code = HOOK_SRC.format(req=str(req), res=str(res), path=str(path), sentinel=SENTINEL)
     try:
         outputs, _n, status = await notebook.execute_on(c, KERNEL, code, timeout_s=HOOK_TIMEOUT_S)
@@ -719,6 +730,8 @@ async def run_hook(c: str, path: Path, doc: dict[str, Any], fmt: str, ctx: dict[
             err = next((f"{e.get('ename', 'Error')}: {e.get('evalue', '')}" for b in outputs
                         if isinstance(e := b.get("application/vnd.thimble.error+json"), dict)), "")
             raise RuntimeError(err or "the export hook printed no result")
+        if res.is_symlink():
+            raise RuntimeError("the export hook's result is a symlink")
         return json.loads(res.read_text("utf-8"))
     finally:
         for p in (req, res):
@@ -945,10 +958,8 @@ async def _report_video(c: str, run: dict[str, Any], before: float | None) -> No
         run.update(stage="rendering", progress=0.0)
         data, name, _mime = await export(c, investigation.MAIN, slug, "video",
                                          progress=lambda x: run.update(progress=round(x, 3)))
-        folder = config.workspace_dir(c) / "scratch" / "exports"
-        folder.mkdir(parents=True, exist_ok=True)
-        path = folder / f"report-video-{secrets.token_hex(4)}{Path(name).suffix}"
-        await asyncio.to_thread(path.write_bytes, data)
+        path = _scratch(c) / f"report-video-{secrets.token_hex(4)}{Path(name).suffix}"
+        await asyncio.to_thread(atomic_write_bytes, path, data)
         run.update(stage="done", progress=1.0, name=name, file=str(path))
     except HTTPException as e:
         run.update(stage="failed", error=str(e.detail))

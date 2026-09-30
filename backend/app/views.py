@@ -46,7 +46,7 @@ from fastapi.responses import FileResponse, HTMLResponse
 from pydantic import BaseModel
 
 from . import config, headless, investigation, prompts, refs, userconf
-from .ledger import atomic_write_text, read_json, write_json
+from .ledger import atomic_write_text, read_json, unlinked, write_json
 
 log = logging.getLogger("thimble.views")
 
@@ -492,7 +492,7 @@ def _publish(c: str, slug: str, version: str) -> None:
         shutil.rmtree(tmp, ignore_errors=True)
         tmp.mkdir(parents=True)
         for f in (views_dir(c) / slug).iterdir():
-            if f.is_file():
+            if f.is_file() and not f.is_symlink():
                 shutil.copy2(f, tmp / f.name)
         os.replace(tmp, dst)
     os.utime(dst)
@@ -903,7 +903,11 @@ def _prepared(c: str, slug: str, version: str | None = None) -> tuple[dict[str, 
     if view["origin"] == "builtin":
         # the kernel's sandbox holds the workspace but not thimble's own folder, so it reads a copy
         reader_path = cache / READER_PY
-        if not reader_path.is_file() or reader_path.read_text("utf-8") != src:
+        try:
+            unlinked(config.workspace_dir(c), reader_path)
+        except ValueError as e:
+            raise ReaderError(f"the reader's copy cannot be written: {e}") from None
+        if reader_path.is_symlink() or not reader_path.is_file() or reader_path.read_text("utf-8") != src:
             reader_path.parent.mkdir(parents=True, exist_ok=True)
             atomic_write_text(reader_path, src)
     req = {"slug": slug, "reader": str(reader_path.resolve()), "fp": fp, "paths": [f[0] for f in files],
@@ -1779,10 +1783,10 @@ def _keep_built(c: str, slug: str) -> None:
         return
     dst.mkdir(parents=True, exist_ok=True)
     for p in src.iterdir():
-        if p.name == CACHE_SUBDIR:
+        if p.name == CACHE_SUBDIR or p.is_symlink():
             continue
         if p.is_dir():
-            shutil.copytree(p, dst / p.name)
+            shutil.copytree(p, dst / p.name, symlinks=True)
         else:
             shutil.copy2(p, dst / p.name)
 
@@ -1799,7 +1803,9 @@ def restore_built(c: str, slug: str) -> bool:
             continue
         shutil.rmtree(p, ignore_errors=True) if p.is_dir() else p.unlink(missing_ok=True)
     for p in src.iterdir():
-        shutil.copytree(p, dst / p.name) if p.is_dir() else shutil.copy2(p, dst / p.name)
+        if p.is_symlink():
+            continue
+        shutil.copytree(p, dst / p.name, symlinks=True) if p.is_dir() else shutil.copy2(p, dst / p.name)
     shutil.rmtree(src, ignore_errors=True)
     _forget(c, slug)
     return True
@@ -2127,7 +2133,10 @@ def frame_document(view: dict[str, Any], media: str | None = None, *, card: bool
     bridge's `init` brings; `page` names a page file other than view.html (a card type's own card.html). `derived` is
     the view's derived fields (derived_fields), view.json's when not given, which the bridge marks wherever the page
     names one with data-field."""
-    html = (Path(view["dir"]) / (view.get("page") or VIEW_HTML)).read_text("utf-8")
+    page = Path(view["dir"]) / (view.get("page") or VIEW_HTML)
+    if page.is_symlink() or Path(view["dir"]).is_symlink():
+        raise HTTPException(404, f"the page of {view['slug']!r} is a symlink")
+    html = page.read_text("utf-8")
     fields = (view.get("derived") or []) if derived is None else derived
     who = json.dumps({"slug": view["slug"], "name": view["name"], "media": media, **({"card": True} if card else {}),
                       **({"derived": fields} if fields else {})}, ensure_ascii=False)
@@ -2285,11 +2294,11 @@ async def shoot_page(doc: str, states: list[dict[str, Any]], answer: Any, *, wid
     first = Path(states[0]["out"])
     first.parent.mkdir(parents=True, exist_ok=True)
     frame_file = first.with_suffix(".html")
-    frame_file.write_text(doc, "utf-8")
+    atomic_write_text(frame_file, doc)
     states_file = first.with_suffix(".states.json")
     for s in states:
         Path(s["out"]).parent.mkdir(parents=True, exist_ok=True)
-    states_file.write_text(json.dumps([{**s, "out": str(s["out"])} for s in states], default=str), "utf-8")
+    atomic_write_text(states_file, json.dumps([{**s, "out": str(s["out"])} for s in states], default=str))
     cmd = ["node", str(SHOT_SCRIPT), "--frame", str(frame_file), "--states", str(states_file), "--viewport",
            f"{width}x{height}", *(["--media", media] if media else [])]
     try:

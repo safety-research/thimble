@@ -444,6 +444,35 @@ def _tally_card(code: str, **extra) -> dict:
     return {"id": "c1", "kind": "plot", "code": code, "outputs": [{cardtypes.CARD_MIME: {"type": "tally", "args": {}}}], **extra}
 
 
+async def test_the_server_neither_writes_nor_serves_through_a_symlink_a_kernel_leaves(corpus, tmp_path):
+    """A kernel writes the workspace, so a symlink it leaves where the server copies a file is replaced rather than
+    written through, and a card type's page is read from the extension's folder in thimble's home."""
+    secret = tmp_path / "outside" / "secret.txt"
+    secret.parent.mkdir()
+    secret.write_text("KEEP")
+    _add()
+    await extensions.refresh(CORPUS, wait=10)
+    await cardtypes.refresh(CORPUS, warm=False)
+    host = cardtypes.types_dir(CORPUS) / cardtypes.HOST_FILE
+    host.unlink()
+    host.symlink_to(secret)
+    t = (await cardtypes.refresh(CORPUS, warm=False))["tally-bars"]
+    assert secret.read_text() == "KEEP" and not host.is_symlink()
+    page = Path(t["dir"]) / "card.html"
+    page.unlink()
+    page.symlink_to(secret)
+    assert "KEEP" not in cardtypes.frame_document(CORPUS, "tally-bars")
+
+    inv = config.workspace_dir(CORPUS) / "investigations" / "main"
+    inv.mkdir(parents=True, exist_ok=True)
+    (inv / "video.json").write_text("{}")
+    d = report_types.types_dir(CORPUS) / "video"
+    d.mkdir(parents=True)
+    (d / "prompt.md").symlink_to(secret)
+    report_types.list_types(CORPUS)
+    assert secret.read_text() == "KEEP" and not (d / "prompt.md").is_symlink()
+
+
 async def test_keep_changes_only_the_arguments_the_type_lets_the_card_change(corpus):
     _add()
     await extensions.refresh(CORPUS, wait=10)
