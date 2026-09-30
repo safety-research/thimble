@@ -284,6 +284,13 @@ async def test_a_workspace_gets_four_views_from_the_orientation_and_a_deleted_on
     assert [p["name"] for p in views.list_proposals(CORPUS)] == ["Two", "Three", "Four", "One"]
 
 
+def test_a_viewer_thimble_ships_runs_from_a_copy_in_the_workspace(ws):
+    """The views kernel's sandbox holds the workspace, not thimble's own folder."""
+    _, req = views._prepare(CORPUS, "pdf")
+    assert Path(req["reader"]).is_relative_to(ws.resolve())
+    assert Path(req["reader"]).read_text("utf-8") == (views.VIEWERS_DIR / "pdf" / "reader.py").read_text("utf-8")
+
+
 def test_the_frame_document_blocks_every_host_before_any_script(ws):
     doc = views.frame_document(views.read_view(CORPUS, "threads"))
     assert doc.lower().startswith("<!doctype html>")

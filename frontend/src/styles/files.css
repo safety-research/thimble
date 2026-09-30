@@ -2109,6 +2109,9 @@
   font: var(--type-mono-sm);
   color: var(--text-primary);
 }
+.view-pane-list-how {
+  color: var(--text-secondary);
+}
 .view-pane-list-rule {
   flex: none;
   margin: 4px 8px;

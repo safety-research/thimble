@@ -143,8 +143,11 @@ function DerivedData({ ws, shown, labels, name }: { ws: string; shown: ViewShown
       <Popover anchor={at} open={open} onClose={() => setOpen(false)} label={`What ${name} derived`} className="view-pane-list">
         {fields.map((d) => (
           <div key={d.field} className="view-pane-list-row">
-            <span className="mono view-pane-derived">{d.field}</span>
-            <span className="view-pane-list-why">{[d.how, d.from && `from ${d.from}`].filter(Boolean).join(', ')}</span>
+            <span>
+              <span className="mono view-pane-derived">{d.field}</span>
+              {d.from && <span className="view-pane-list-why"> from {d.from}</span>}
+            </span>
+            {d.how && <span className="view-pane-list-how">{d.how}</span>}
           </div>
         ))}
         {fields.length > 0 && labels.length > 0 && <hr className="view-pane-list-rule" />}

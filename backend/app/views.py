@@ -84,7 +84,7 @@ MEMO_MAX = 5000  # resolved locators kept in memory
 ERROR_MAX = 2000
 PROBLEMS_SHOWN = 20  # the lines a reader could not read that thimble lists beside the view (reader_problems)
 DERIVED_MAX = 100  # the derived fields a view lists
-DERIVED_CHARS = {"field": 80, "from": 300, "how": 300}
+DERIVED_CHARS = {"field": 80, "from": 300, "how": 600}
 WHY_CHARS = 300  # of why hidden() leaves a file out
 NOT_SHOWN_NAMED = 5  # the files a failed check names that the view neither read whole nor hid
 FILES_LISTED = 500  # the claimed files a view's record lists (_public)
@@ -246,6 +246,10 @@ def _forms(v: Any) -> list[dict[str, str]]:
     return out
 
 
+def _cut(text: str, n: int) -> str:
+    return text if len(text) <= n else text[: n - 1].rstrip() + "…"
+
+
 def _derived(v: Any) -> list[dict[str, str]]:
     """[{field, from, how}] from view.json's `derived` or a reader's derived(index): each with a field name, the first
     entry of a field kept."""
@@ -254,7 +258,7 @@ def _derived(v: Any) -> list[dict[str, str]]:
     for x in v if isinstance(v, list) else []:
         if not isinstance(x, dict):
             continue
-        d = {k: " ".join(str(x.get(k) or "").split())[:n] for k, n in DERIVED_CHARS.items()}
+        d = {k: _cut(" ".join(str(x.get(k) or "").split()), n) for k, n in DERIVED_CHARS.items()}
         if d["field"] and d["field"] not in seen:
             seen.add(d["field"])
             out.append(d)
@@ -886,8 +890,15 @@ def _prepared(c: str, slug: str, version: str | None = None) -> tuple[dict[str, 
         raise ReaderError(f"the view {slug!r} has no reader.py, view.html or claims")
     reader_path = Path(view["dir"]) / READER_PY
     files = claimed_files(c, view)
-    fp = fingerprint(files, reader_path.read_text("utf-8"))
+    src = reader_path.read_text("utf-8")
+    fp = fingerprint(files, src)
     cache = cache_dir(c, view)
+    if view["origin"] == "builtin":
+        # the kernel's sandbox holds the workspace but not thimble's own folder, so it reads a copy
+        reader_path = cache / READER_PY
+        if not reader_path.is_file() or reader_path.read_text("utf-8") != src:
+            reader_path.parent.mkdir(parents=True, exist_ok=True)
+            atomic_write_text(reader_path, src)
     req = {"slug": slug, "reader": str(reader_path.resolve()), "fp": fp, "paths": [f[0] for f in files],
            "cache": str((cache / f"{fp}.index.pickle").resolve()), "reads": str((cache / f"{fp}.reads.json").resolve()),
            "thimble": str(KERNEL_THIMBLE)}
