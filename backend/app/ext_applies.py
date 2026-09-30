@@ -122,8 +122,7 @@ def _size(n: int) -> str:
 
 def listing(gs: list[dict[str, Any]]) -> str:
     """The file listing the prompt shows: a line per pattern with its files and size, GROUPS_MAX at most."""
-    lines = [f"{g['pattern']}  {g['n']:,} files, {_size(g['bytes'])}" if g["n"] > 1 else f"{g['pattern']}  {_size(g['bytes'])}"
-             for g in gs[:GROUPS_MAX]]
+    lines = [f"{g['pattern']}  " + (f"{g['n']:,} files, " if g["n"] > 1 else "") + _size(g["bytes"]) for g in gs[:GROUPS_MAX]]
     if len(gs) > GROUPS_MAX:
         lines.append(f"… and {len(gs) - GROUPS_MAX:,} more patterns")
     return "\n".join(lines) or "(no files)"
@@ -202,7 +201,8 @@ async def ask(c: str, text: str) -> Any:
 
 
 def _matching(c: str, claims: list[str]) -> list[str]:
-    return [x for x in dict.fromkeys(" ".join(str(v).split()) for v in claims) if x and views.claimed_files(c, {"claims": [x]})]
+    named = dict.fromkeys(" ".join(str(v).split()) for v in claims)
+    return [x for x in named if x and views.claimed_files(c, {"claims": [x]})]
 
 
 async def decide(c: str, title: str, description: str, files: list[tuple[str, int]], first: list[str],

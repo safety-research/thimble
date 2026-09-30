@@ -234,8 +234,8 @@ def read_extension(root: Path, expect: str | None = None) -> dict[str, Any]:
     shown = name or expect or root.name
     return {"name": shown, "title": " ".join(str(raw.get("title") or shown.replace("-", " ").title()).split()),
             "version": str(raw.get("version") or ""), "description": " ".join(str(raw.get("description") or "").split()),
-            "root": str(root), "applies": applies, "check": check, "requires": requires, "problems": problems, "views": vs,
-            "cards": cards, "agents": agents, "report_types": reports, "orient": (root / ORIENT_MD).is_file(),
+            "root": str(root), "applies": applies, "check": check, "requires": requires, "problems": problems,
+            "views": vs, "cards": cards, "agents": agents, "report_types": reports, "orient": (root / ORIENT_MD).is_file(),
             "replaces": replaces, "source": str(_json(root / ADDED).get("source") or "")}
 
 
@@ -456,8 +456,8 @@ async def _decision(c: str, name: str, info: dict[str, Any], pre: dict[str, Any]
     if pre is not None and not pre.get("claims"):
         return {"applies": False, "claims": [], "reason": str(pre.get("found") or ""), "by": "check"}
     if not info["applies"]:
-        return {"applies": True, "claims": list(pre["claims"] if pre else paths), "reason": str((pre or {}).get("found") or ""),
-                "by": "check" if pre else "none"}
+        return {"applies": True, "claims": list(pre["claims"] if pre else paths),
+                "reason": str((pre or {}).get("found") or ""), "by": "check" if pre else "none"}
     files = await asyncio.to_thread(ext_applies.files_of, c)
     first = list((pre or {}).get("claims") or [])
     at = ext_applies.key(info["applies"], first, files)
@@ -517,6 +517,7 @@ async def _refresh(c: str) -> dict[str, Any]:
         off = await asyncio.to_thread(userconf.extensions_off)
         paths: list[str] | None = None
         exts: dict[str, Any] = {}
+        decided: set[str] = set()
         for name, root in (await asyncio.to_thread(added)).items():
             info = await asyncio.to_thread(read_extension, root, name)
             kept = state["extensions"].get(name) or {}
@@ -545,6 +546,7 @@ async def _refresh(c: str) -> dict[str, Any]:
                     if (folder := _check_folder(info)) is not None:
                         pre = await _claims(c, here / folder[0] / folder[1], paths, kept.get("check") or {}, check=True)
                     decision = await _decision(c, name, info, pre, paths, decision)
+                    decided.add(name)
                     forced = name in state["on"]
                     if decision.get("pending"):
                         why = "" if forced else ASKING
@@ -555,6 +557,9 @@ async def _refresh(c: str) -> dict[str, Any]:
                     files = list(decision.get("claims") or (paths if forced else []))
             exts[name] = {**{k: v for k, v in info.items() if k != "name"}, "claims": claims, "check": pre,
                           "decision": decision, "files": files, "active": not why, "why": why}
+        for w, n in list(_asking):
+            if w == c and n not in decided and _asking[(w, n)]["task"].done():
+                _asking.pop((w, n))  # an answer for an extension removed or switched off meanwhile
         now = {n for n, e in exts.items() if e.get("active")}
         fresh = sorted(now - set(state["oriented"]))
         new_state = {"off": state["off"], "on": state["on"], "oriented": sorted({*state["oriented"], *fresh}),
@@ -743,7 +748,8 @@ def agent_models(c: str | None) -> dict[str, dict[str, Any]]:
             mine = userconf.extension_agent(conf, key)
             model = str(mine["model"] or front.get("model") or "")
             out[key] = {"model": config.exact_model(model) if model else subagents,
-                        "effort": str(mine["effort"] or front.get("effort") or ""), "fast": False, "extension": e["name"]}
+                        "effort": str(mine["effort"] or front.get("effort") or ""), "fast": False,
+                        "extension": e["name"]}
     return out
 
 
@@ -777,7 +783,8 @@ def card_types(c: str | None) -> list[dict[str, Any]]:
             out.append({"slug": slug, "extension": e["name"], "view": view, "dir": str(here / kind / slug),
                         "reader": str(reader / views.READER_PY), "page": page,
                         "name": " ".join(str(raw.get("name") or of_view.get("name") or slug).split()),
-                        "block": block if isinstance(block, dict) else {}, "libs": raw.get("libs") or of_view.get("libs"),
+                        "block": block if isinstance(block, dict) else {},
+                        "libs": raw.get("libs") or of_view.get("libs"),
                         "guide": _text(src / kind / slug / GUIDE), "claims": read,
                         "cache": str(views.views_dir(c) / CACHE_DIR / e["name"] / key)})
     return out

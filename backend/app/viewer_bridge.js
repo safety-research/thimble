@@ -187,7 +187,8 @@
      *  scrolling a page sized to its content cannot do itself */
     reveal: function (target) {
       var r = target && target.getBoundingClientRect ? rectOf(target) : target
-      if (r) post({ type: P + 'reveal', rect: { left: +r.left || 0, top: +r.top || 0, width: +r.width || 0, height: +r.height || 0 } })
+      if (!r) return
+      post({ type: P + 'reveal', rect: { left: +r.left || 0, top: +r.top || 0, width: +r.width || 0, height: +r.height || 0 } })
     },
     /** the URL of an image, audio or video file this view claims (its corpus-relative path), for an <img>, <audio> or
      *  <video> src: thimble streams it with Range requests, so a player can seek (views.media_route) */

@@ -437,8 +437,8 @@ def legacy_patch(models: dict[str, Any], rows: dict[str, Any]) -> dict[str, Any]
 
 def pane_patch(models: dict[str, Any] | None, rows: dict[str, Any] | None) -> dict[str, Any]:
     """The Settings pane's changes as settings of this file: `models` {role: {model?, effort?, fast?}} (main's left
-    out, '' for back to the default; an extension's agent, "<ext>:<name>", takes its model and effort only) and `rows` {row of modes.AGENTS: mode, None for main's}, `views` being the dev
-    agent's row of earlier builds."""
+    out, '' for back to the default; an extension's agent, "<ext>:<name>", takes its model and effort only) and `rows`
+    {row of modes.AGENTS: mode, None for main's}, `views` being the dev agent's row of earlier builds."""
     by_role = {role: name for name, role in ROLES.items()}
     agents: dict[str, dict[str, Any]] = {}
     for role, conf in (models or {}).items():

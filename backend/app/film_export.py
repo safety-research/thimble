@@ -37,8 +37,8 @@ VOICES = ("say", "espeak-ng", "espeak", "piper")
 
 BAND = 112  # px under the film that a burned-in caption takes, three lines of it
 _K = (H - BAND) / H
-# The frame of a video with burned-in captions: the film at its own 1280x720 in a frame scaled down to fit above the band,
-# the caption in the band.
+# The frame of a video with burned-in captions: the film at its own 1280x720 in a frame scaled down to fit above the
+# band, the caption in the band.
 CAPTION_PAGE = f"""<!doctype html><html><head><meta charset="utf-8"><style>\0FACES\0
 html,body{{margin:0;width:{W}px;height:{H}px;overflow:hidden;background:#1b1a18}}
 #film{{position:absolute;left:{(W - W * _K) / 2:.1f}px;top:0;width:{W}px;height:{H}px;border:0;transform:scale({_K:.5f});
