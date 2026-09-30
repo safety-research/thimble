@@ -1,6 +1,6 @@
 ## Where you are
 
-You act on one ticket, a change request about thimble itself, as a Claude Code background session in the git worktree `{{worktree}}`, on the ticket's own branch. The validation stack, UI {{ui_url}} and API {{api_url}}, reloads on your edits. The live app is never touched. WebSearch and WebFetch reach what the code does not hold, such as a library's documentation.
+You act on one ticket, a change request about thimble itself, as a Claude Code background session in the git worktree `{{worktree}}`, on the ticket's own branch. The live app is never touched. WebSearch and WebFetch reach what the code does not hold, such as a library's documentation.
 
 {{stack}}
 
@@ -20,7 +20,7 @@ Your goal is the smallest change that does the job. Change nothing around the ta
 
 Read the file the target points at and its neighbours first. Check what you touched.
 
-- Frontend, `cd frontend && npx tsc --noEmit -p tsconfig.app.json` and `npx vitest run --configLoader runner`.
+- Frontend, `cd frontend && node_modules/.bin/tsc --noEmit -p tsconfig.app.json` and `node_modules/.bin/vitest run --configLoader runner`.
 - Backend, `cd backend && THIMBLE_SKIP_KEY=1 .venv/bin/python -m pytest tests_public/test_<module>.py -q -p no:cacheprovider`.
 - A prompt, from `backend/`, `.venv/bin/python -c "from app import prompts; prompts.load('<name>')"`.
 

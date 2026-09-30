@@ -45,13 +45,12 @@ subagent. As a turn ends it also shows, once, as its systemMessage, the dashboar
 permission modes, and a systemMessage reaches the analyst's terminal but not the model's context.
 
 The agents hook asks the server (POST /api/agents) for the lines main's terminal has not shown about thimble's
-background sessions, each one's start with the command that attaches it and its finish, and prints them as the hook's
-systemMessage. The held hook prints them too. The relay hook hands a SendMessage bound for a background session to the
-server (POST /api/bg/relay), which answers with the message to send in its place, or refuses one sent already. The
-proxy-stop hook asks the server (POST /api/bg/proxy-stop) whether a tray entry's session still runs, and if so tells
-Claude Code to keep the entry going. The agent-check hook asks the server (POST /api/bg/agent-check) whether main's
-Agent call would start a second tray entry of a session or a second fork of a thread, and refuses such a call. Each
-prints nothing when no server answers.
+background sessions, each one's start and its finish, and prints them as the hook's systemMessage. The held hook prints
+them too. The relay hook hands a SendMessage bound for a background session to the server (POST /api/bg/relay), which
+answers with the message to send in its place, or refuses one sent already. The proxy-stop hook asks the server (POST
+/api/bg/proxy-stop) whether a tray entry's session still runs, and if so tells Claude Code to keep the entry going. The
+agent-check hook asks the server (POST /api/bg/agent-check) whether main's Agent call would start a second tray entry of
+a session or a second fork of a thread, and refuses such a call. Each prints nothing when no server answers.
 
 The stream writes each event as one block of lines. Claude Code truncates Monitor output at 500 characters per line and
 about 3,000 per event, so lines are wrapped under LINE_CHARS and a longer event is cut and saved whole under

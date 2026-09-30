@@ -69,10 +69,10 @@ describe('the card', () => {
 
   test("a code ticket's question says what it asks and why thimble asks, in Bypass too, with Allow and Deny", async () => {
     const dev = chat('d1', { role: 'dev', title: 'ticket #3: Fix the chart', permission_mode: 'bypass' })
-    const what = "This edits thimble's own code, which then runs outside the sandbox (its test server, its checks and git). Allow?"
-    const q = req('q1', { tool: 'ThimbleCode', what, input: JSON.stringify({ description: what }), why: 'thimble asks this before every code ticket, in every permission mode.' })
+    const what = "Apply this change to thimble's own code?"
+    const q = req('q1', { tool: 'ThimbleCode', what, input: JSON.stringify({ description: what, files: ['frontend/src/App.css'] }), why: 'It changes frontend/src/App.css. thimble asks this before any change reaches its own code, in every permission mode.' })
     const el = await mount(<PermissionCard ws="mini" asks={[{ chat: 'd1', request: q }]} metas={new Map([['d1', dev]])} labels={new Map()} />)
-    expect(el.querySelector('.chat-perm-who')?.textContent).toBe("dev · ticket #3asks to edit thimble's own code")
+    expect(el.querySelector('.chat-perm-who')?.textContent).toBe("dev · ticket #3asks to change thimble's own code")
     expect(el.querySelector('.chat-perm-what')?.textContent).toBe(what)
     expect(el.querySelector('.chat-perm-why')?.textContent).toBe(q.why)
     expect([...el.querySelectorAll('.chat-perm-acts button')].map((b) => b.textContent)).toEqual(['Allow', 'Deny'])

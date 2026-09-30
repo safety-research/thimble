@@ -203,6 +203,14 @@ def name_of(c: str, key: str) -> str:
     return config.session_name(role, c)
 
 
+def label_of(key: str) -> str:
+    """The session of `key` as /thimble:agents lists it: orientation, critic, writer (the report's), writer: <doc>."""
+    kind, _, rest = key.partition(":")
+    if kind == "writer":
+        return "writer" if rest in ("", "report") else f"writer: {rest}"
+    return {"orient": "orientation", "critique": "critic"}.get(kind, kind)
+
+
 def proxy_type(key: str) -> str:
     """The plugin agent that shows the session in the agent tray, as main's Agent call names it."""
     return f"{_plugin()}:{PROXY_TYPES.get(kind_of(key), 'orient')}"
@@ -1594,15 +1602,15 @@ def statusline_command(own: str = "") -> str:
 
 def agent_rows(c: str) -> list[dict[str, Any]]:
     """Every thimble agent running in the workspace, for the statusline and /thimble:agents: background sessions, the
-    code ticket and view builds (dev.py), and the subagents and threads of main (session.py), each {name, state,
-    attach?, kind}."""
+    code ticket and view builds (dev.py), and the subagents and threads of main (session.py), each {name, label?,
+    state, kind}: `name` as Claude Code knows it, `label` as /thimble:agents lists it (by `name` without one)."""
     from . import dev  # noqa: PLC0415 — dev imports the views module, which imports this one's callers
 
     rows: list[dict[str, Any]] = []
     for e in entries(c):
         if not alive(e):
             continue
-        rows.append({"name": e.name, "state": state_words(e), "attach": f"claude attach {e.short}", "kind": "session"})
+        rows.append({"name": e.name, "label": label_of(e.key), "state": state_words(e), "kind": "session"})
     with contextlib.suppress(Exception):
         rows.extend(dev.running_builds(c))
     rows.extend(session.running_agents(c))
@@ -1628,13 +1636,22 @@ def status_line(rows: list[dict[str, Any]], chars: int = STATUS_CHARS) -> str:
     return "\n".join([*lines, cur])
 
 
+def plain_state(state: str) -> str:
+    """A row's state as /thimble:agents lists it: working, waiting for you, done or restarting."""
+    first = state.split()[0].rstrip(",") if state else ""
+    if first == "waiting":
+        return "waiting for you"
+    return {"done": "done", "idle": "done", "ended": "done", "restarting": "restarting"}.get(first, "working")
+
+
 def listing_text(rows: list[dict[str, Any]]) -> str:
     from . import tools  # noqa: PLC0415
 
     if not rows:
         return tools.hint("agents-none")
-    width = max(len(r["name"]) for r in rows)
-    lines = [f"{r['name']:<{width}}  {r['state']:<24}  {r.get('attach') or ''}".rstrip() for r in rows]
+    labels = [str(r.get("label") or r["name"]) for r in rows]
+    width = max(len(label) for label in labels)
+    lines = [f"{label:<{width}}  {plain_state(r['state'])}" for label, r in zip(labels, rows)]
     return "\n".join(lines + ["", tools.hint("agents-help")])
 
 
@@ -1673,7 +1690,7 @@ def _save_announced(c: str) -> None:
 @router.post("/agents")
 async def agents_route(body: AgentsQuery) -> dict[str, Any]:
     """thimble's agents for the folder's workspace: `{rows, line, text}` for the statusline and /thimble:agents, and with `announce` the lines main's terminal has not shown yet (the plugin's hooks print them):
-    each session's start once, with the command that attaches it, and each run's finish."""
+    each session's start once and each run's finish."""
     c = config.workspace_for_cwd(body.cwd)
     if not c:
         return {"rows": [], "line": "", "text": "", "announce": ""}
@@ -1685,12 +1702,11 @@ async def agents_route(body: AgentsQuery) -> dict[str, Any]:
             if alive(e) and e.short not in started:
                 started.add(e.short)
                 finished.setdefault(e.short, e.ended_at if not e.run_open else 0.0)
-                lines.append(f"{e.name} runs as a background session: ↓ at the prompt shows it, and `claude attach "
-                             f"{e.short}` opens it in another terminal")
+                lines.append(f"{label_of(e.key)} started: ↓ to follow it")
             elif e.short in started and e.ended_at and finished.get(e.short) != e.ended_at and not e.run_open:
                 finished[e.short] = e.ended_at
-                lines.append(f"{e.name} finished" + (f": {cite.prose(e.result)[:200]}" if e.result else "") +
-                             ("" if alive(e) else " (its session has ended)"))
+                lines.append(f"{label_of(e.key)} finished" + (f": {cite.prose(e.result)[:200]}" if e.result else "") +
+                             ("" if alive(e) else " (it has stopped)"))
         if lines:
             _save_announced(c)
     return {"rows": rows, "line": status_line(rows), "text": listing_text(rows), "announce": "\n".join(lines)}

@@ -7,6 +7,7 @@ import logging
 import os
 import re
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
@@ -102,25 +103,39 @@ NO_CLAUDE = f"{NO_CLAUDE_FOUND}: install Claude Code, or name its path with THIM
 # --------------------------------------------------------------------------- the kernel wrapper
 #
 #   none    the kernel runs backend/.venv's python in the server's scrubbed environment
-#   bwrap   the kernel runs inside bubblewrap (kernel_wrap.kernel_wrap_argv): the system, the venv and the corpus
-#           read-only, the workspace and a private /tmp writable, the host's
-#           network shared, so it narrows what a cell sees but is not a security boundary. When bwrap is not on PATH
-#           the kernel does not start, so a workspace set to bwrap never runs unwrapped unnoticed.
+#   srt     the kernel runs inside Anthropic's sandbox runtime (kernel_wrap.srt_rules, kernel_srt.mjs), on macOS and
+#           Linux: it reads the system, the venv and the corpus, writes only the workspace, and keeps the host's network
+#   bwrap   the kernel runs inside bubblewrap directly (kernel_wrap.kernel_wrap_argv), on Linux: the same boundary
+# A wrapper narrows what a cell sees but is not a boundary against the network. When the one a workspace names cannot
+# run (no bwrap on PATH; no node or no sandbox runtime package), the kernel does not start, so a workspace set to a
+# wrapper never runs unwrapped unnoticed.
 # Resolution, first hit wins: THIMBLE_KERNEL_WRAP, then the workspace's settings.json `kernel_wrap`, then the default:
-# bwrap on Linux where bubblewrap works (kernel_wrap.works), else none, as on macOS, which has no wrapper yet. A value
-# that names no wrapper is ignored.
-KERNEL_WRAPS = ("none", "bwrap")
+# srt where it works (kernel_wrap.srt_works), else bwrap on Linux where bubblewrap works (kernel_wrap.works), else none.
+# A value that names no wrapper is ignored.
+KERNEL_WRAPS = ("none", "bwrap", "srt")
 KERNEL_WRAP_ENV = "THIMBLE_KERNEL_WRAP"
-KERNEL_WRAP_KEY = "kernel_wrap"  # settings.json: none | bwrap
-KERNEL_WRAP_NONE, KERNEL_WRAP_BWRAP = KERNEL_WRAPS
-NO_BWRAP_HINT = "with kernel_wrap: none the kernel runs without it"  # in the server log
+KERNEL_WRAP_KEY = "kernel_wrap"  # settings.json: none | bwrap | srt
+KERNEL_WRAP_NONE, KERNEL_WRAP_BWRAP, KERNEL_WRAP_SRT = KERNEL_WRAPS
+KERNEL_WRAPPED = (KERNEL_WRAP_BWRAP, KERNEL_WRAP_SRT)
+NO_WRAP_HINT = "with kernel_wrap: none the kernel runs without it"  # in the server log
 _KERNEL_WRAP_WARNED: set[str] = set()
+
+
+def linked(path: Path) -> bool:
+    """Whether the file at `path` is a symbolic link or has more than one hard link, so that another name can change it.
+    A workspace's settings.json and config.json are hidden from the kernel by name (kernel_wrap.HIDDEN_FILES), so the
+    server reads no settings from such a file."""
+    try:
+        st = os.lstat(path)
+    except OSError:
+        return False
+    return stat.S_ISLNK(st.st_mode) or st.st_nlink > 1
 
 
 def resolve_kernel_wrap(settings: Mapping[str, Any] | None = None,
                         environ: Mapping[str, str] | None = None) -> tuple[str, str]:
     """(wrap, source) of the kernel wrapper: source is `env` (THIMBLE_KERNEL_WRAP), `settings` (the workspace's
-    settings.json, passed in as a dict) or `default`."""
+    settings.json, passed in as a dict) or `default`. The default may probe the machine (default_kernel_wrap)."""
     src = os.environ if environ is None else environ
     raw = str(src.get(KERNEL_WRAP_ENV, "") or "").strip().lower()
     if raw in KERNEL_WRAPS:
@@ -136,9 +151,12 @@ def resolve_kernel_wrap(settings: Mapping[str, Any] | None = None,
 
 
 def default_kernel_wrap() -> str:
-    """The kernel wrapper where nothing names one: bwrap on Linux where bubblewrap works (kernel_wrap.works), else none."""
-    from . import kernel_wrap  # noqa: PLC0415
+    """The kernel wrapper where nothing names one: srt where it works, else bwrap on Linux where bubblewrap works, else
+    none. Each probe runs once per process."""
+    from . import kernel_wrap, srt  # noqa: PLC0415
 
+    if kernel_wrap.srt_works(srt.node(), srt.package(REPO_ROOT)):
+        return KERNEL_WRAP_SRT
     return KERNEL_WRAP_BWRAP if sys.platform.startswith("linux") and kernel_wrap.works() else KERNEL_WRAP_NONE
 
 

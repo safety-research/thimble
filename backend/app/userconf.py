@@ -106,8 +106,15 @@ def workspace_file(c: str) -> Path:
 _lock = threading.RLock()
 
 
+LINKED_FILE = ("thimble's config {path} is a link or has another name in the workspace, where card code could change "
+               "it, so thimble does not read it; replace it with a plain file")
+
+
 def _raw(path: Path) -> dict[str, Any]:
-    """The file's object as written, {} when there is none; ConfigError when it cannot be read or is not an object."""
+    """The file's object as written, {} when there is none; ConfigError when it cannot be read or is not an object, or
+    is a workspace's file that another name can change (config.linked)."""
+    if path.parent.parent == config.WORKSPACES_DIR and config.linked(path):
+        raise ConfigError(LINKED_FILE.format(path=path))
     try:
         text = path.read_text("utf-8")
     except FileNotFoundError:

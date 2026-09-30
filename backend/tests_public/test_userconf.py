@@ -159,23 +159,29 @@ def test_a_wrapped_kernel_can_neither_read_nor_write_the_workspace_s_config(tmp_
     assert binds[str(tmp_path / "w" / "config.json")] == binds[str(tmp_path / "w" / "settings.json")] == "/dev/null"
 
 
-def test_the_kernel_is_wrapped_by_default_on_linux_where_bubblewrap_works_and_never_on_macos(monkeypatch):
-    """With nothing naming a wrapper, the kernel runs in bubblewrap on Linux where bwrap can make its namespaces, and
-    unwrapped where it cannot or on macOS, which has no wrapper yet and where bwrap is never probed. Claude Code's
-    sandbox on macOS is sandbox-exec, so agents may start there."""
+def test_the_kernel_runs_in_srt_where_it_works_else_in_bubblewrap_on_linux_else_unwrapped(monkeypatch):
+    """With nothing naming a wrapper, the kernel runs in Anthropic's sandbox runtime on Linux and macOS where it can
+    sandbox a process, else in bubblewrap directly on Linux where bwrap can make its namespaces, else unwrapped; bwrap
+    is never probed on macOS, and a workspace's settings.json still names its own. Claude Code's sandbox on macOS is
+    sandbox-exec, so agents may start there."""
     from app import cc_settings, config, kernel_wrap
 
     monkeypatch.delenv(config.KERNEL_WRAP_ENV, raising=False)
-    probed = []
+    srt, probed = [True], []
+    monkeypatch.setattr(kernel_wrap, "srt_works", lambda node, package: srt[0])
     monkeypatch.setattr(kernel_wrap, "works", lambda: probed.append(1) or True)
+    for platform in ("linux", "darwin"):
+        monkeypatch.setattr(config.sys, "platform", platform)
+        assert config.resolve_kernel_wrap({}) == ("srt", "default")
+        assert config.resolve_kernel_wrap({"kernel_wrap": "bwrap"}) == ("bwrap", "settings")
+    srt[0] = False
+    assert config.resolve_kernel_wrap({}) == ("none", "default") and probed == []
     monkeypatch.setattr(config.sys, "platform", "linux")
     assert config.resolve_kernel_wrap({}) == ("bwrap", "default")
     assert config.resolve_kernel_wrap({"kernel_wrap": "none"}) == ("none", "settings")
-    monkeypatch.setattr(kernel_wrap, "works", lambda: probed.append(1) or False)
+    monkeypatch.setattr(kernel_wrap, "works", lambda: False)
     assert config.resolve_kernel_wrap({}) == ("none", "default")
-    probed.clear()
     monkeypatch.setattr(config.sys, "platform", "darwin")
-    assert config.resolve_kernel_wrap({}) == ("none", "default") and probed == []
     monkeypatch.delenv("THIMBLE_SANDBOX", raising=False)
     monkeypatch.setattr(cc_settings.sys, "platform", "darwin")
     monkeypatch.setattr(cc_settings, "_sandbox", {})

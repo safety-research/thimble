@@ -7,7 +7,7 @@ import json
 
 import pytest
 
-from app import agent_session, bg_session, cli, config, ledger, orient_session, orientation, tools
+from app import agent_session, bg_session, cli, config, dev, ledger, orient_session, orientation, tools
 
 CORPUS = "mini"
 
@@ -41,7 +41,8 @@ async def test_without_claude_code_s_trust_the_orientation_does_not_start_and_th
         workspaces_tmp, claude_global_config, monkeypatch):
     """`claude --bg` refuses a folder Claude Code does not trust. Where the workspaces folder is not trusted (install.sh's
     trust question answered no), start_orientation starts nothing and its error, which main reads, says the analyst
-    reruns the installer with --trust-workspaces; the settings give the browser the command itself."""
+    reruns the installer with --trust-workspaces; the settings give the browser the command itself, except on a code
+    ticket's test server, whose workspaces folder is never trusted."""
     started = []
 
     async def bg_start(*args, **kw):
@@ -56,6 +57,9 @@ async def test_without_claude_code_s_trust_the_orientation_does_not_start_and_th
     assert ledger.get_settings(CORPUS)["untrusted"] == {"folder": str(config.WORKSPACES_DIR),
                                                         "command": cli.trust_command()}
     claude_global_config.write_text(json.dumps({"projects": {str(config.WORKSPACES_DIR): {"hasTrustDialogAccepted": True}}}))
+    assert ledger.get_settings(CORPUS)["untrusted"] is None
+    claude_global_config.write_text("{}")
+    monkeypatch.setattr(dev, "STACK_ENABLED", False)
     assert ledger.get_settings(CORPUS)["untrusted"] is None
 
 

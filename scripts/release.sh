@@ -70,8 +70,9 @@ need() { command -v "$1" >/dev/null 2>&1 || die "$1 is required"; }
 need git; need zip; need python3
 # the frontend packages a release loads at run time: vega, vega-lite and vega-embed (a view page's libraries,
 # backend/app/views.py LIBS, and a card's chart in its picture, tools.py VEGA_BUILDS), playwright (the headless page of
-# scripts/view_shot.mjs and scripts/ui_shot.mjs) and the fonts view_shot.mjs gives a view's page
-runtime_npm=(vega vega-lite vega-embed playwright @fontsource/geist-mono @fontsource/hanken-grotesk)
+# scripts/view_shot.mjs and scripts/ui_shot.mjs), the fonts view_shot.mjs gives a view's page, and Anthropic's sandbox
+# runtime, which the notebook kernel runs in (backend/app/kernel_wrap.py)
+runtime_npm=(vega vega-lite vega-embed playwright @fontsource/geist-mono @fontsource/hanken-grotesk @anthropic-ai/sandbox-runtime)
 
 version="$(python3 -I -c 'import json,sys; print(json.load(open(sys.argv[1]))["version"])' "$repo/plugin/.claude-plugin/plugin.json")"
 [ -n "$version" ] || die "plugin/.claude-plugin/plugin.json has no version"
@@ -147,8 +148,11 @@ entries = json.load(open(os.path.join(fe, "package-lock.json")))["packages"]
 
 def within_major(version):
     """Any version of the pinned one's major (of its minor for 0.x): what install.sh's fallback may install where the
-    registry lacks the pin, older versions included."""
-    major, minor = version.split(".")[:2]
+    registry lacks the pin, older versions included. A 0.0.x pin allows only itself and later 0.0.x versions (the
+    sandbox runtime's), since each of those may change what it enforces."""
+    major, minor, patch = version.split("-")[0].split(".")[:3]
+    if major == "0" and minor == "0":
+        return f">={version} <0.1.0"
     return f"^{major}.0.0" if major != "0" else f"^0.{minor}.0"
 
 

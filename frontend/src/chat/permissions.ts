@@ -57,7 +57,7 @@ const ASKS_TO: Readonly<Record<string, string>> = {
   WebSearch: 'search the web',
   Agent: 'start an agent',
   Task: 'start an agent',
-  ThimbleCode: "edit thimble's own code",
+  ThimbleCode: "change thimble's own code",
 }
 
 /** What the request asks to do, in words (run a command); another tool is named (use thimble's add_card). Pure. */

@@ -2448,8 +2448,14 @@ async def _h_file_dev_ticket(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
     label = f"ticket #{n}" if n else "ticket"
     if isinstance(rec, dict) and rec.get("status") == "failed":
         return ok(hint("file_dev_ticket-cannot-run", label=label, why=rec.get("error") or ""))
-    return ok(f"filed {label}: {title}. It starts once the analyst allows it on the permission card, since it edits "
-              "thimble's own code. The dev agent's row in the chat shows its progress.")
+    contained = _optional("dev", "ticket_contained")
+    if contained is not None and await asyncio.to_thread(contained, ctx.c):
+        when = ("It runs now, its checks in a sandbox, and the analyst is asked on its permission card before its change "
+                "reaches thimble's own code.")
+    else:
+        when = ("It starts once the analyst allows it on the permission card, since its checks can't run in a sandbox "
+                "here, and the analyst is asked again before its change reaches thimble's own code.")
+    return ok(f"filed {label}: {title}. {when} The dev agent's row in the chat shows its progress.")
 
 # --------------------------------------------------------------------------- HTTP
 
