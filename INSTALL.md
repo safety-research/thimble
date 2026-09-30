@@ -91,7 +91,7 @@ for one workspace, or `"extensions": {"swarm": {"enabled": false}}` in `~/.thimb
 in thimble's kernels.
 
 The Swarm extension is for corpora where many agents act on shared pages and channels. On such a corpus it adds the
-Swarm overview of every record, orientation instructions that have every message read, and the `swarm` card type,
+Swarm overview of every record, orientation instructions that have every message read, and the `agent-swimlane` card type,
 a swimlane of the actions main chose to answer a question. It applies when the first 400 JSON Lines or CSV files (256 MB at
 most) show 30 or more accounts naming each other on 3 or more shared places, so a large human team chat can pass for a
 swarm.

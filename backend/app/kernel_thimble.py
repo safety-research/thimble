@@ -883,7 +883,8 @@ def card(type, labels=None, **args):
     alone: labels turned on later and the Files filter mark and dim what the card drew, they choose nothing."""
     global _view_ctx
     types = _card_types()
-    t = types.get(type) if isinstance(type, str) else None
+    t = (types.get(type) or next((x for x in types.values() if type in (x.get("aliases") or [])), None)
+         if isinstance(type, str) else None)
     if t is None:
         raise ValueError(f"thimble.card: no card type {type!r}; the types here are {', '.join(map(repr, types)) or 'none yet'}")
     if isinstance(labels, str):
@@ -912,7 +913,7 @@ def card(type, labels=None, **args):
     if size > CARD_DATA_MAX:
         raise ValueError(f"thimble.card({type!r}): the card's data is {size:,} bytes, and a card holds {CARD_DATA_MAX:,} "
                          f"at most; narrow its records")
-    _show({CARD_MIME: {"type": type, "version": str(t.get("version") or ""), "args": args, "size": t.get("size"),
+    _show({CARD_MIME: {"type": t["slug"], "version": str(t.get("version") or ""), "args": args, "size": t.get("size"),
                        "labels": [{"id": k["id"], "name": k["name"]} for k in ks], "data": data},
            "text/plain": "\n".join(lines)})
 

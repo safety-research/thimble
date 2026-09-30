@@ -805,8 +805,11 @@ async def _not_kept(run: _Run, cand: dict[str, Any] | None, typed: str = "") -> 
         return "it could not be applied"
     if str(cand.get("status") or "ok") != "ok":
         return "its code did not run clean: " + _run_error(cand)
-    if typed and _type_of(cand) != typed:
-        return f"it drew no {typed} card"
+    from . import cardtypes  # noqa: PLC0415
+
+    c = run.c if run is not None else None
+    if typed and cardtypes.canonical(c, _type_of(cand)) != cardtypes.canonical(c, typed):
+        return f"it drew no {cardtypes.canonical(c, typed)} card"
     after = await _draw(run.c, cand)
     if after is None:
         return "no picture could show the replaced card"
@@ -1060,7 +1063,7 @@ async def _read(c: str, cell: dict[str, Any], png: bytes | None,
         "citations": await asyncio.to_thread(_citations_text, c, cell) or none,
         "code": f"```python\n{code[:CODE_CHARS]}\n```" if code else none,
         "context": await asyncio.to_thread(_context_text, c, cell, run.author) or none,
-        "typed": _typed_text(cell, secs),
+        "typed": _typed_text(c, cell, secs),
         "kept": await asyncio.to_thread(_kept_text, c, cell, secs),
     })
     images = [(await asyncio.to_thread(fit_image, png), "image/png")] if png else []
@@ -1103,10 +1106,12 @@ def _type_of(cell: dict[str, Any] | None) -> str:
     return str(made.get("type") or "") if made else ""
 
 
-def _typed_text(cell: dict[str, Any], secs: dict[str, str]) -> str:
+def _typed_text(c: str, cell: dict[str, Any], secs: dict[str, str]) -> str:
     """The `typed` section of the reading's card, for a card of a card type; '' for any other."""
+    from . import cardtypes  # noqa: PLC0415
+
     t = _type_of(cell)
-    return "\n" + _fill(secs["typed"], {"type": t}).strip() if t else ""
+    return "\n" + _fill(secs["typed"], {"type": cardtypes.canonical(c, t)}).strip() if t else ""
 
 
 def _kept_text(c: str, cell: dict[str, Any], secs: dict[str, str]) -> str:

@@ -1,14 +1,14 @@
-"""app.cardtypes and thimble.card, with the Swarm extension's `swarm` card type. On a corpus the Swarm view applies to,
-the registry finds the type without any view proposal and lists it for main's prompt; a card's code draws it with
-thimble.card, which checks the arguments against the type's schema, runs card.py on the reader's cached index under the
-labels the call names, whatever Files highlights, and shows the data with a listing main reads and cites; the card
-check's page gets the type's frame from the request. Keep writes a patch of the arguments into the card's one
-thimble.card call (its tests with a type that has such arguments are in test_extensions). Main hears when a label it
-ran finishes, and can colour a label's values.
+"""app.cardtypes and thimble.card, with the Swarm extension's `agent-swimlane` card type, which was `swarm` before. On a
+corpus the Swarm view applies to, the registry finds the type without any view proposal and lists it for main's prompt;
+a card's code draws it with thimble.card, which checks the arguments against the type's schema, runs card.py on the
+reader's cached index under the labels the call names, whatever Files highlights, and shows the data with a listing main
+reads and cites; the card check's page gets the type's frame from the request. Keep writes a patch of the arguments into
+the card's one thimble.card call (its tests with a type that has such arguments are in test_extensions). Main hears when
+a label it ran finishes, and can colour a label's values.
 
 The corpus `crew` is 140 saves of 35 accounts on 4 pages, each naming the next account, which the Swarm extension's
-view reads as a swarm; the extension is added. Reader calls run in this process (views._runner replaced by an exec of the kernel's
-snippet), and thimble.card runs in this process in a module built from kernel_thimble.py, as a kernel builds it."""
+view reads as a swarm; the extension is added. Reader calls run in this process (views._runner replaced by an exec of the
+kernel's snippet), and thimble.card runs in this process in a module built from kernel_thimble.py, as a kernel builds it."""
 from __future__ import annotations
 
 import asyncio
@@ -96,22 +96,25 @@ async def _label(name: str, pattern: str, values: list[str]) -> str:
 
 
 async def test_the_swarm_extensions_type_is_found_and_listed_for_main_with_its_guide(crew):
+    """The type is `agent-swimlane`; a card made while it was `swarm` still draws it."""
     types_ = await _refresh()
-    assert sorted(types_) == ["swarm"]
-    t = types_["swarm"]
+    assert sorted(types_) == ["agent-swimlane"]
+    t = types_["agent-swimlane"]
     assert t["page"] == "card.html" and t["claims"] == ["saves.jsonl"] and t["paths"] == ["saves.jsonl"]
     assert Path(t["reader"]).is_relative_to(config.workspace_dir(CORPUS)), "a card's kernel sees only the workspace"
-    assert cardtypes.read_registry(CORPUS)["swarm"]["fp"] == t["fp"]
+    assert cardtypes.read_registry(CORPUS)["agent-swimlane"]["fp"] == t["fp"]
     text = cardtypes.prompt_text(CORPUS)
-    assert text.startswith("### Card types") and "\n- `swarm`: " in text
-    assert "`actions` [{ref, summary, thread?}]" in text and 'thimble.card("swarm"' in text
-    assert "Use `swarm` to answer how accounts acted on each other" in text
+    assert text.startswith("### Card types") and "\n- `agent-swimlane`: " in text and "`swarm`" not in text
+    assert "`actions` [{ref, summary, thread?}]" in text and 'thimble.card("agent-swimlane"' in text
+    assert "Use `agent-swimlane` to answer how accounts acted on each other" in text
+    assert cardtypes.find(CORPUS, "swarm") == t and cardtypes.canonical(CORPUS, "swarm") == "agent-swimlane"
+    assert 'id="plot"' in cardtypes.frame_document(CORPUS, "swarm")
 
 
 async def test_a_card_draws_the_actions_it_names_in_event_order_with_goals_threads_and_links(crew, kernel):
     await _refresh()
     colour = await _label("even", r"value is \d*[02468]\.", ["even", "odd"])
-    kernel.card("swarm", labels=["even"],
+    kernel.card("agent-swimlane", labels=["even"],
                 actions=[{"ref": "saves.jsonl#L9", "summary": "Relayed 8"},
                          {"ref": "L2", "summary": "Relayed 1", "thread": "the relay"},
                          {"ref": "./saves.jsonl#L5", "summary": "Relayed 4"}],
@@ -120,7 +123,7 @@ async def test_a_card_draws_the_actions_it_names_in_event_order_with_goals_threa
     bundle = kernel.shown[-1]
     made = bundle[cardtypes.CARD_MIME]
     data = made["data"]
-    assert made["type"] == "swarm" and made["labels"] == [{"id": colour, "name": "even"}]
+    assert made["type"] == "agent-swimlane" and made["labels"] == [{"id": colour, "name": "even"}]
     assert [(a["id"], a["account"], a["summary"]) for a in data["actions"]] == [
         (1, "bot1", "Relayed 1"), (2, "bot4", "Relayed 4"), (3, "bot8", "Relayed 8")], "numbered in event order"
     assert [(a["tag"], a["thread"]) for a in data["actions"]] == [("T1", "the relay"), ("T2", "p0"), ("T2", "p0")], (
@@ -130,7 +133,7 @@ async def test_a_card_draws_the_actions_it_names_in_event_order_with_goals_threa
     assert data["links"] == [{"from": 2, "to": 1, "type": "copies"}, {"from": 3, "to": 1, "type": "copies"}]
     assert data["types"] == ["copies"]
     lines = bundle["text/plain"].split("\n")
-    assert lines[0] == "swarm: 3 actions by 3 accounts on 2 threads; 2 links (copies 2)"
+    assert lines[0] == "agent-swimlane: 3 actions by 3 accounts on 2 threads; 2 links (copies 2)"
     assert lines[2].startswith("#1 2026-04-14 00:01 bot1 T1: Relayed 1") and lines[2].endswith("saves.jsonl#L2")
     assert lines[3].endswith("[even]: Relayed 4 saves.jsonl#L5")
     assert "links: 2→1 copies, 3→1 copies" in lines
@@ -139,29 +142,31 @@ async def test_a_card_draws_the_actions_it_names_in_event_order_with_goals_threa
     assert "chart" in extras and tools._output_shape(cell) == "chart"
     assert texts[0].split("\n")[1] == "L1|" + lines[0], "main cites the listing as card:<id>@out0#L<n>"
     with pytest.raises(ValueError, match=r"no action on 'saves.jsonl#L999'; a ref is a record's file and line"):
-        kernel.card("swarm", actions=[{"ref": "saves.jsonl#L999", "summary": "x"}])
+        kernel.card("agent-swimlane", actions=[{"ref": "saves.jsonl#L999", "summary": "x"}])
     with pytest.raises(ValueError, match=r"links\[0\].to 'saves.jsonl#L3' is none of the actions"):
-        kernel.card("swarm", actions=[{"ref": "saves.jsonl#L2", "summary": "x"}],
+        kernel.card("agent-swimlane", actions=[{"ref": "saves.jsonl#L2", "summary": "x"}],
                     links=[{"from": "saves.jsonl#L2", "to": "saves.jsonl#L3", "type": "reply"}])
 
 
 async def test_a_wrong_argument_names_what_the_type_takes(crew, kernel):
     await _refresh()
     with pytest.raises(ValueError, match=r"has no `rows`; the keys are actions, goals, links"):
-        kernel.card("swarm", actions=[{"ref": "saves.jsonl#L2", "summary": "x"}], rows="accounts")
+        kernel.card("agent-swimlane", actions=[{"ref": "saves.jsonl#L2", "summary": "x"}], rows="accounts")
     with pytest.raises(ValueError, match=r"needs `actions`"):
-        kernel.card("swarm")
-    with pytest.raises(ValueError, match=r"no card type 'graph'; the types here are 'swarm'"):
+        kernel.card("agent-swimlane")
+    with pytest.raises(ValueError, match=r"no card type 'graph'; the types here are 'agent-swimlane'"):
         kernel.card("graph")
     assert not kernel.shown
+    kernel.card("swarm", actions=[{"ref": "saves.jsonl#L2", "summary": "x"}])
+    assert kernel.shown[-1][cardtypes.CARD_MIME]["type"] == "agent-swimlane", "a card's code under the old name draws it"
 
 
 async def test_the_check_s_page_gets_the_type_s_frame_from_the_request(crew, kernel):
     await _refresh()
-    kernel.card("swarm", actions=[{"ref": "saves.jsonl#L2", "summary": "Relayed 1"}])
+    kernel.card("agent-swimlane", actions=[{"ref": "saves.jsonl#L2", "summary": "Relayed 1"}])
     cell = {"id": "c1", "kind": "plot", "status": "ok", "title": "Who relayed first?", "outputs": [kernel.shown[-1]]}
     req = render.request_for(CORPUS, cell)
-    doc = req["frames"]["swarm"]
+    doc = req["frames"]["agent-swimlane"]
     assert "connect-src 'none'" in doc and '"card": true' in doc and 'id="plot"' in doc
     assert req["width"] == render.TYPE_W, "the check sees a card type's page at full width"
     assert "frames" not in render.request_for(CORPUS, {"id": "c2", "kind": "plot", "outputs": []})
@@ -186,7 +191,7 @@ def test_a_card_type_frame_shot_blank_is_found():
 
 async def test_the_card_check_keeps_no_replacement_that_draws_another_kind_of_card():
     table = {"status": "ok", "outputs": [{"text/plain": "a table"}]}
-    assert await card_check._not_kept(None, table, "swarm") == "it drew no swarm card"
+    assert await card_check._not_kept(None, table, "agent-swimlane") == "it drew no agent-swimlane card"
 
 
 def test_keep_rewrites_the_literal_arguments_of_the_one_card_call():

@@ -4,7 +4,8 @@
 The folder's files as a card type uses them:
   view.json  the view's manifest plus `card`: `use`, the one line main reads when it picks a type; `args`, a JSON Schema of
              the call's keywords (`ui: true` on those the card's own controls may change); `size`, the [min, max] height
-             of the card's graphic in px; `example`, one call, for main's prompt
+             of the card's graphic in px; `example`, one call, for main's prompt; `aliases`, slugs the type had before,
+             which the cards made under them still draw it by (lookup)
   card.py    card(index, **args), the data the page draws (kernel_thimble.CARD_DATA_MAX at most), and listing(data), the
              lines main reads and cites as card:<id>@out<i>#L<n>; thimble.card sets `reader`, the type's reader module,
              on it before each call
@@ -66,15 +67,18 @@ _locks: dict[str, asyncio.Lock] = {}
 
 
 def card_block(raw: Any) -> dict[str, Any] | None:
-    """view.json's `card` block normalised as {use, args, size, example}; None for a view that is no card type."""
+    """view.json's `card` block normalised as {use, args, size, example, aliases}; None for a view that is no card type.
+    `aliases` are slugs the type had before, which cards made under them still draw it by."""
     block = raw.get("card") if isinstance(raw, dict) else None
     if not isinstance(block, dict) or not str(block.get("use") or "").strip():
         return None
     args = block.get("args") if isinstance(block.get("args"), dict) else {"type": "object", "properties": {}}
     size = block.get("size")
     lo, hi = (size if isinstance(size, list) and len(size) == 2 and all(isinstance(x, int) for x in size) else SIZE)
+    aliases = block.get("aliases") if isinstance(block.get("aliases"), list) else []
     return {"use": " ".join(str(block["use"]).split()), "args": args, "size": [min(lo, hi), max(lo, hi)],
-            "example": " ".join(str(block.get("example") or "").split())}
+            "example": " ".join(str(block.get("example") or "").split()),
+            "aliases": [a for a in aliases if isinstance(a, str) and views.SLUG_RE.match(a)]}
 
 
 def _is_type(d: Path) -> bool:
@@ -202,6 +206,24 @@ def _entry(c: str, slug: str, d: Path, claims: list[str], origin: str) -> dict[s
             "host": str((types_dir(c) / HOST_FILE).resolve())}
 
 
+def lookup(types: dict[str, dict[str, Any]], name: Any) -> dict[str, Any] | None:
+    """The type `name` names among `types`: the one of that slug, else the one that keeps it as an alias; None."""
+    if not isinstance(name, str):
+        return None
+    return types.get(name) or next((t for t in types.values() if name in (t.get("aliases") or [])), None)
+
+
+def find(c: str | None, name: Any) -> dict[str, Any] | None:
+    """The workspace's type `name` names, by its slug or an alias (lookup); None."""
+    return lookup(read_registry(c), name)
+
+
+def canonical(c: str | None, name: str) -> str:
+    """The slug of the type `name` names in workspace `c`, `name` itself when it names none."""
+    t = find(c, name)
+    return str(t["slug"]) if t else name
+
+
 def read_registry(c: str | None) -> dict[str, dict[str, Any]]:
     """{name: type} as refresh() last wrote them; {} before it ran."""
     if not c:
@@ -246,6 +268,8 @@ async def refresh(c: str, *, warm: bool = True) -> dict[str, dict[str, Any]]:
             if v is not None and v["ok"] and _is_type(Path(v["dir"])):
                 await asyncio.to_thread(_copy_changed, views.HOST_PY, types_dir(c) / HOST_FILE)
                 types[slug] = await asyncio.to_thread(_entry, c, slug, Path(v["dir"]), list(v["claims"]), "workspace")
+        for t in types.values():
+            t["aliases"] = [a for a in t.get("aliases") or [] if a not in types]
         await asyncio.to_thread(write_json, config.workspace_dir(c) / REGISTRY_FILE, {"types": types})
     if warm:
         for t in types.values():
@@ -345,7 +369,7 @@ def card_of(bundles: Any) -> dict[str, Any] | None:
 def frame_document(c: str, name: str) -> str:
     """The page of the type `name` as a card's frame loads it (views.frame_document, marked as a card's), with no media
     route."""
-    t = read_registry(c).get(name)
+    t = find(c, name)
     if t is None:
         raise HTTPException(404, f"no card type {name!r} in this workspace")
     view = {"dir": t["dir"], "slug": t["slug"], "name": t["name"], "libs": t.get("libs") or [], "page": t.get("page")}
@@ -373,7 +397,7 @@ async def records_route(c: str, name: str, body: RecordsBody) -> dict[str, Any]:
     from . import notebook  # noqa: PLC0415
 
     config.workspace_dir(c)
-    t = read_registry(c).get(name)
+    t = find(c, name)
     if t is None:
         raise HTTPException(404, f"no card type {name!r} in this workspace")
     cell = await asyncio.to_thread(notebook.get_cell, c, body.card) if body.card else None
@@ -492,7 +516,7 @@ def type_of(c: str, cell: dict[str, Any]) -> dict[str, Any]:
     made = card_of(cell.get("outputs"))
     if not made:
         raise HTTPException(400, f"card:{cell.get('id')} draws no card type")
-    t = read_registry(c).get(str(made.get("type")))
+    t = find(c, made.get("type"))
     if t is None:
         raise HTTPException(404, f"no card type {made.get('type')!r} in this workspace")
     return t
