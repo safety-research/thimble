@@ -162,8 +162,8 @@ function DerivedData({ ws, shown, labels, name }: { ws: string; shown: ViewShown
   )
 }
 
-/** The lines of a view's files its reader could not read and left out, in red: their count, which a click lists the
- * first of, each with why; a line picked there opens in Raw. */
+/** The lines of a view's files its reader could not read, in red: their count, which a click lists the first of, each
+ * with the reader's why; a line picked there opens in Raw. */
 function ReaderProblems({ problems, onPick }: { problems: ViewProblems | null; onPick: (ref: string) => void }) {
   const [at, setAt] = useState<HTMLButtonElement | null>(null)
   const [open, setOpen] = useState(false)
@@ -176,9 +176,6 @@ function ReaderProblems({ problems, onPick }: { problems: ViewProblems | null; o
         {lines} could not be read
       </button>
       <Popover anchor={at} open={open} onClose={() => setOpen(false)} label="Lines the view could not read" className="view-pane-list">
-        <span className="view-pane-list-head">
-          {lines} of the data could not be read and {count === 1 ? 'is' : 'are'} left out of the view
-        </span>
         {examples.map((x, i) => (
           <button
             key={`${x.ref}:${i}`}

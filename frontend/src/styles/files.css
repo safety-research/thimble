@@ -2064,10 +2064,6 @@
   flex-direction: column;
   max-height: min(360px, calc(100vh - 16px));
 }
-.view-pane-list-head {
-  padding: 4px 8px 6px;
-  color: var(--status-negative);
-}
 .view-pane-list-item {
   display: flex;
   flex-direction: column;
@@ -2080,6 +2076,7 @@
   color: var(--text-primary);
   font: var(--type-ui-sm);
   text-align: left;
+  white-space: normal;
   overflow-wrap: anywhere;
   cursor: pointer;
 }
