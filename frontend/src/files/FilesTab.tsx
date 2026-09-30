@@ -539,6 +539,7 @@ export function FilesTab({ ws, active, focused = active }: { ws: string; active:
             ws={ws}
             view={shownView}
             path={shownPath}
+            picked={!!viewAt?.path}
             kind={shownPath ? kindOf(shownPath) : 'text'}
             targetRef={viewAt?.ref}
             quote={viewAt?.quote}

@@ -163,19 +163,20 @@ function DerivedData({ ws, shown, labels, name }: { ws: string; shown: ViewShown
 }
 
 /** The lines of a view's files its reader could not read, in red: their count, which a click lists the first of, each
- * with the reader's why; a line picked there opens in Raw. */
+ * with the reader's why; a line picked there opens in Raw. A reader of whole files, such as PDFs, names files. */
 function ReaderProblems({ problems, onPick }: { problems: ViewProblems | null; onPick: (ref: string) => void }) {
   const [at, setAt] = useState<HTMLButtonElement | null>(null)
   const [open, setOpen] = useState(false)
   if (!problems?.count) return null
   const { count, examples } = problems
-  const lines = `${count.toLocaleString()} ${count === 1 ? 'line' : 'lines'}`
+  const files = examples.length > 0 && examples.every((x) => x.ref && !x.ref.includes('#'))
+  const lines = `${count.toLocaleString()} ${files ? (count === 1 ? 'file' : 'files') : count === 1 ? 'line' : 'lines'}`
   return (
     <>
       <button ref={setAt} type="button" className="view-pane-problems" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
         {lines} could not be read
       </button>
-      <Popover anchor={at} open={open} onClose={() => setOpen(false)} label="Lines the view could not read" className="view-pane-list">
+      <Popover anchor={at} open={open} onClose={() => setOpen(false)} label={files ? 'Files the view could not read' : 'Lines the view could not read'} className="view-pane-list">
         {examples.map((x, i) => (
           <button
             key={`${x.ref}:${i}`}

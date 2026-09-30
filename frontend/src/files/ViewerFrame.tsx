@@ -76,6 +76,8 @@ export interface ViewerFrameProps {
   targetRef?: string
   /** the file the view was opened on, sent as `open`'s path when no ref names a place in it */
   path?: string
+  /** the analyst opened the view on `path` (Open in), sent as `open`'s picked */
+  pathPicked?: boolean
   title: string
   /** the frame is as tall as its page (a card) rather than filling its box (Files) */
   fit?: boolean
@@ -305,7 +307,7 @@ function useViewLabels(
   return useMemo(() => ({ add, reset, ready }), [add, reset, ready])
 }
 
-export function ViewerFrame({ ws, slug, targetRef, path, title, fit, labels = NO_LABELS, filter = null, filterFiles, byId = NO_CONCEPTS, first, labelActions, onError, onNoPage, className, quote, onQuoteMissing, version, restore, handle, card, onSettled, onQuery, targetPick, query }: ViewerFrameProps) {
+export function ViewerFrame({ ws, slug, targetRef, path, pathPicked, title, fit, labels = NO_LABELS, filter = null, filterFiles, byId = NO_CONCEPTS, first, labelActions, onError, onNoPage, className, quote, onQuoteMissing, version, restore, handle, card, onSettled, onQuery, targetPick, query }: ViewerFrameProps) {
   const ref = useRef<HTMLIFrameElement>(null)
   const [page, setPage] = useState<string | null>(null)
   const [height, setHeight] = useState<number | null>(null)
@@ -392,7 +394,7 @@ export function ViewerFrame({ ws, slug, targetRef, path, title, fit, labels = NO
     if (c) post({ type: P + 'init', mode: c.mode, data: c.data, args: c.args, width: c.width, card: c.id, key: c.key })
   }
   const sendOpen = async (r: string | undefined) => {
-    let open: ViewOpen = path ? { ref: null, path } : { ref: null }
+    let open: ViewOpen = path ? { ref: null, path, ...(pathPicked ? { picked: true } : {}) } : { ref: null }
     if (drawn.current) open = r ? ({ ref: r, target: { ref: r, pick: !!pick.current } } as ViewOpen) : { ref: null }
     else if (r) {
       try {
@@ -419,7 +421,7 @@ export function ViewerFrame({ ws, slug, targetRef, path, title, fit, labels = NO
   useEffect(() => {
     if (ready.current) void sendOpen(targetRef)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [targetRef, quote?.text, targetPick, queryKey])
+  }, [targetRef, quote?.text, targetPick, queryKey, path, pathPicked])
   // a card run again, or drawn in another mode or width: a new `init`, no reload
   useEffect(() => {
     if (ready.current) sendInit()

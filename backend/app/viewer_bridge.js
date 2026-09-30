@@ -6,7 +6,9 @@
 //   open {locator, quote?} page to frame: show this place (window.thimble.onOpen); with quote {record, text}, a passage
 //                          inside that record, which the bridge highlights and scrolls to (the view shows the record).
 //                          In a card's frame its target is {ref, pick}, pick to open the record in full; in a view,
-//                          `query` is {card, title, args} of the card it was opened from, or null
+//                          `query` is {card, title, args} of the card it was opened from, or null. With no ref, `path`
+//                          is the file the view opened on, and `picked` holds when the analyst chose it (Open in)
+//                          rather than thimble opening the view on its first file
 //   quoted {found}         frame to page: whether the quoted passage showed in the page
 //   fetch {id, query}      frame to page, answered by result {id, data} from reader.records (window.thimble.fetch)
 //   cite {ref, text, ...}  frame to page: a ⌘-click on an element with data-anchor, or on any other part of the view

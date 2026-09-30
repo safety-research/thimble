@@ -37,6 +37,8 @@ interface Props {
   view: BuiltView
   /** the file Raw shows: the one a ref named, else the first the view claims */
   path: string | null
+  /** the analyst opened the view on `path` (Open in), rather than thimble on its first file */
+  picked?: boolean
   /** the file's kind, from the folder listing */
   kind: SourceKind
   targetRef?: string
@@ -58,7 +60,7 @@ interface Props {
   onClearQuery?: () => void
 }
 
-export function ViewPane({ ws, view, path, kind, targetRef, quote, onQuoteMissing, labels, onMode, lead, first, onNewLabel, query, onClearQuery }: Props) {
+export function ViewPane({ ws, view, path, picked, kind, targetRef, quote, onQuoteMissing, labels, onMode, lead, first, onNewLabel, query, onClearQuery }: Props) {
   const [mode, setMode] = useState<'view' | 'raw'>('view')
   // a file or line picked in the head, which Raw shows in place of `path`
   const [rawAt, setRawAt] = useState<{ path: string; ref?: string } | null>(null)
@@ -147,7 +149,7 @@ export function ViewPane({ ws, view, path, kind, targetRef, quote, onQuoteMissin
         ) : (
           <>
             {failure && <ViewFailed name={view.name} detail={failure} onRaw={path ? () => pick('raw') : undefined} />}
-            <ViewerFrame key={`${view.slug}:${pin.pinned ?? ''}`} ws={ws} slug={view.slug} version={pin.pinned || undefined} restore={pin.restore} handle={pin.frame} targetRef={targetRef} path={path ?? undefined} title={view.name} labels={labels.on} filter={filter} filterFiles={filter ? labels.presence.get(filter.concept) : undefined} byId={labels.byId} first={first} labelActions={labelActions} onError={setFailure} quote={quote} onQuoteMissing={onQuoteMissing} query={query} onQuery={(p) => !p && onClearQuery?.()} className="view-pane-frame" />
+            <ViewerFrame key={`${view.slug}:${pin.pinned ?? ''}`} ws={ws} slug={view.slug} version={pin.pinned || undefined} restore={pin.restore} handle={pin.frame} targetRef={targetRef} path={path ?? undefined} pathPicked={picked} title={view.name} labels={labels.on} filter={filter} filterFiles={filter ? labels.presence.get(filter.concept) : undefined} byId={labels.byId} first={first} labelActions={labelActions} onError={setFailure} quote={quote} onQuoteMissing={onQuoteMissing} query={query} onQuery={(p) => !p && onClearQuery?.()} className="view-pane-frame" />
           </>
         )}
       </div>

@@ -520,6 +520,8 @@ export interface ViewQuery {
 export interface ViewOpen {
   ref: string | null
   path?: string
+  /** `path` is a file the analyst opened the view on (Open in), not the first file thimble opens a view on */
+  picked?: boolean
   fragment?: string
   key?: string | null
   target?: unknown
