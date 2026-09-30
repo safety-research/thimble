@@ -155,7 +155,7 @@ async def test_what_an_extension_needs_is_checked_and_what_it_waits_for_leaves_i
 async def test_thimble_adds_the_extensions_it_ships_on_once_and_names_the_others_not_added(corpus, tmp_path, monkeypatch):
     """video ships added: thimble's first run adds it, it runs and switches off as any other, and once removed it stays
     removed. swarm and multiagent-swimlane ship off: Settings and the list name them as not added. A built-in whose copy
-    nobody changed follows the version thimble ships."""
+    nobody changed follows the version thimble ships, with the built-ins that version needs."""
     assert extensions.ship() == ["video"] and extensions.ship() == []
     assert (await extensions.refresh(CORPUS))["extensions"]["video"]["active"]
     assert [t["id"] for t in extensions.report_types(CORPUS)] == ["video"]
@@ -178,6 +178,15 @@ async def test_thimble_adds_the_extensions_it_ships_on_once_and_names_the_others
     (extensions.source_path("swarm") / "agents" / "orient.md").write_text("---\n---\nMine.\n")
     (ships / "swarm" / "agents" / "orient.md").write_text("---\n---\nRead each record.\n")
     assert extensions.ship() == [] and (extensions.source_path("swarm") / "agents" / "orient.md").read_text().endswith("Mine.\n")
+    for n in ("swarm", "multiagent-swimlane"):
+        extensions.remove(n)
+    old = tmp_path / "old-ships"
+    shutil.copytree(ships / "swarm", old / "swarm")
+    (old / "swarm" / "extension.json").write_text('{"name": "swarm", "version": "0.3.0"}')
+    monkeypatch.setattr(extensions, "builtin_dir", lambda: old)
+    assert extensions.add("swarm", yes=True, say=lambda _: None) == ["swarm"]
+    monkeypatch.setattr(extensions, "builtin_dir", lambda: ships)
+    assert extensions.ship() == ["swarm", "multiagent-swimlane"], "a new version's needs are added with it"
 
 
 async def test_an_added_extension_runs_in_every_workspace_and_its_view_where_it_fits(corpus, fit):

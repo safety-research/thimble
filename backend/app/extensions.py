@@ -1131,7 +1131,7 @@ def not_added() -> list[tuple[str, str]]:
 def ship() -> list[str]:
     """Add each built-in of SHIPPED_ON that thimble has not added before, unless the analyst already added it: one the
     analyst removes stays removed. Then bring each built-in added by name whose copy is unchanged since to the version
-    this thimble ships. Returns the names added or brought up to date."""
+    this thimble ships, adding the built-ins that version needs. Returns the names added or brought up to date."""
     base = extensions_dir()
     mark = _json(base / SHIPPED)
     done = [n for n in _words(mark.get("added")) if NAME_RE.match(n)]
@@ -1156,6 +1156,12 @@ def ship() -> list[str]:
             copy_tree(ships[name], dest)
             write_json(dest / ADDED, {**rec, "digest": now, "ts": _now()})
             out.append(name)
+            for need in read_extension(dest, name)["needs"]:
+                if need in ships and not (source_path(need) / MANIFEST).is_file():
+                    copy_tree(ships[need], source_path(need))
+                    write_json(source_path(need) / ADDED, {"source": need, "kind": "built-in",
+                                                           "digest": digest(ships[need])[0], "ts": _now()})
+                    out.append(need)
     if done != _words(mark.get("added")):
         base.mkdir(parents=True, exist_ok=True)
         write_json(base / SHIPPED, {"added": done})
