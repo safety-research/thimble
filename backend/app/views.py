@@ -10,9 +10,6 @@ thimble also ships file-type viewers under the same contract (BUILTIN_VIEWERS). 
 kernel with a cached index; refs.resolve hands file refs with a fragment to enrich_file_ref, and resolve_sync bridges
 synchronous callers to the kernel on the server's loop.
 
-A viewer thimble ships may say when it applies (view.json `applies`, reader.py's applies(paths)): an orientation of a
-corpus it fits proposes it, installed from its files with the claims applies() names (propose_builtins).
-
 A proposal is a view ticket in `views/proposals.json` that starts building as soon as it is proposed. Until the
 server
 stamps `built` into view.json the view is a draft that nothing lists or opens. After each session turn the server
@@ -1471,58 +1468,11 @@ def _counted(p: dict[str, Any]) -> bool:
             and not offered_type_viewer(p.get("claims")))
 
 
-def proposable_viewers() -> list[str]:
-    """The viewers thimble ships that say when they apply (view.json `applies`)."""
-    return sorted(d.name for d in VIEWERS_DIR.iterdir() if d.is_dir() and read_json(d / VIEW_JSON, {}).get("applies"))
-
-
-async def propose_builtins(c: str) -> list[str]:
-    """Propose to the orientation each viewer that applies to the corpus: thimble's (proposable_viewers), whose reader's
-    applies(paths) gets the corpus's record files, and the active extensions' `show: proposed` views, with the claims
-    extensions.refresh found. One that names claims is installed from its files with them and registered built
-    (install_viewer), under an orientation proposal that counts toward VIEW_PROPOSALS_MAX and is deleted like any. One
-    the workspace has under its slug already, one the analyst deleted, or one past the cap (propose's count, the deleted
-    views included) is left out, and a corpus with no .jsonl or .csv file asks no reader. Returns the slugs proposed."""
-    from . import corpus, extensions  # noqa: PLC0415
-
-    made: list[str] = []
-    paths: list[str] | None = None
-    offers: list[tuple[str, Path, str | None]] = [(s, VIEWERS_DIR / s, None) for s in proposable_viewers()]
-    offers += [(v["slug"], Path(v["dir"]), v["extension"]) for v in extensions.views_of(c, "proposed")]
-    for slug, d, ext in offers:
-        gone = deleted_proposals(c)
-        spent = len(orientation_views(c)) + sum(1 for x in gone if x.get("counted"))
-        if (slug in _view_dirs(c) or read_proposal(c, slug) is not None or any(x.get("slug") == slug for x in gone)
-                or spent >= VIEW_PROPOSALS_MAX):
-            continue
-        if ext is not None:
-            fit = {"claims": extensions.view_claims(c, ext, slug)}
-        else:
-            if paths is None:
-                sources = await asyncio.to_thread(corpus.list_sources, config.corpus_dir(c))
-                paths = [s["path"] for s in sources if str(s["path"]).endswith((".jsonl", ".csv"))]
-            if not paths:
-                continue
-            req = {"slug": f"builtin-{slug}", "reader": str((d / READER_PY).resolve()), "fp": "applies",
-                   "paths": [], "cache": None, "thimble": str(KERNEL_THIMBLE)}
-            try:
-                fit = await _call(c, req, "applies", paths)
-            except ReaderError as e:
-                log.warning("%s: whether the viewer %s applies is not known: %s", c, slug, e)
-                continue
-        if isinstance(fit, dict) and _str_list(fit.get("claims")):
-            raw = read_json(d / VIEW_JSON, {})
-            await asyncio.to_thread(install_viewer, c, slug, d, fit["claims"], why=str(fit.get("found") or raw.get("why") or ""),
-                                    proposed_by="extension" if ext else "thimble", orientation=True, extension=ext)
-            made.append(slug)
-    return made
-
-
 def install_viewer(c: str, slug: str, d: Path, claims: Any, *, why: str, proposed_by: str, orientation: bool,
-                   extension: str | None = None) -> None:
+                   extension: str | None = None, libs: Any = None) -> None:
     """The viewer in folder `d` as the workspace's view `slug` claiming `claims`, under a built proposal (an
     `orientation` one counts toward VIEW_PROPOSALS_MAX) that keeps the digest of the files as installed (`installed`)
-    and the `extension` they came from."""
+    and the `extension` they came from. `libs`, when given, are the libraries its page gets in place of view.json's."""
     raw = read_json(d / VIEW_JSON, {})
     with _proposals_lock:
         items = [p for p in list_proposals(c) if p.get("slug") != slug]
@@ -1535,7 +1485,8 @@ def install_viewer(c: str, slug: str, d: Path, claims: Any, *, why: str, propose
         _save_proposals(c, items)
     write_view(c, slug, name=raw.get("name") or slug, why=raw.get("why") or "", claims=_str_list(claims),
                accepts=raw.get("accepts"), declares=raw.get("declares"), default=bool(raw.get("default")),
-               libs=raw.get("libs"), reader=(d / READER_PY).read_text("utf-8"), html=(d / VIEW_HTML).read_text("utf-8"))
+               libs=raw.get("libs") if libs is None else libs, reader=(d / READER_PY).read_text("utf-8"),
+               html=(d / VIEW_HTML).read_text("utf-8"))
     update_proposal(c, slug, installed=view_digest(views_dir(c) / slug))
 
 

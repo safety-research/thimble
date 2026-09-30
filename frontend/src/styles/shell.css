@@ -503,6 +503,19 @@
 .settings-extension-version {
   color: var(--text-tertiary);
 }
+.settings-extension {
+  border-bottom: 1px solid var(--border-hairline);
+}
+.settings-extension:last-of-type {
+  border-bottom: 0;
+}
+.settings-extension .settings-switch {
+  border-bottom: 0;
+}
+/* a view of the extension above it, indented under its name */
+.settings-extension-view {
+  padding-left: 46px;
+}
 .settings-error {
   color: var(--status-negative);
   font: var(--type-body-sm);

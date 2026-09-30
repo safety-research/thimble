@@ -19,8 +19,9 @@ Where types come from:
                workspace's view of the same slug, else what its reader's applies() names, asked once on the views kernel
                and kept (CLAIMS_FILE); a type whose applies() names none is left out.
   extension's  a view of an active extension with a `card` block and card.py, or a card-only type of one (cards/<slug>/,
-               drawn by its card.html, read by the reader of the extension's view it names); extensions.card_types
-               finds them in the workspace's copy of the extension. Its card.md is its guide in main's prompt.
+               drawn by its card.html, read by the reader of the extension's view it names, or by its own reader.py
+               over the files its card.json claims); extensions.card_types finds those whose claims match files here in
+               the workspace's copy of the extension. Its card.md is its guide in main's prompt.
   workspace's  a built view of the workspace with a `card` block and card.py.
 refresh() writes REGISTRY_FILE in the workspace's registry folder, which thimble.card reads and a card's kernel cannot
 write (kernel_wrap.READ_ONLY_DIRS), and builds each type's index on the views kernel ahead of the first card. A type of
@@ -112,7 +113,7 @@ def install_own(c: str, slug: str) -> Path:
 
 
 async def _applies(c: str, slug: str, reader: Path) -> dict[str, Any] | None:
-    """What the reader's applies() says of the corpus's record files, as views.propose_builtins asks it."""
+    """What the reader's applies() says of the corpus's record files."""
     from . import corpus  # noqa: PLC0415
 
     sources = await asyncio.to_thread(corpus.list_sources, config.corpus_dir(c))

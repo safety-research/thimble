@@ -1,10 +1,10 @@
 {
-  "api": 0,
   "name": "ext-min",
   "version": "0.1.0",
-  "description": "One of each contribution, for the tests.",
-  "replaces": {
-    "instructions": "instructions.md"
-  },
-  "check": "tally"
+  "thimble": ">=0.4",
+  "dependencies": {
+    "python": [],
+    "js": [],
+    "extensions": []
+  }
 }

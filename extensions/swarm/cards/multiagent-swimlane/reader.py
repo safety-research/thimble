@@ -49,8 +49,8 @@
 #   same place  the record before it on its place, by another account
 # A pair keeps one link, the first of these that holds.
 #
-# Which files it reads: those the Swarm extension claims in the workspace, which thimble decides with the extension's
-# `applies` description.
+# Which files it reads: those its card.json claims, every JSON Lines and CSV file; a file whose records have no account
+# and text and name no place is left out, reported, and named apart in the script's listing.
 import csv
 import difflib
 import io
@@ -331,8 +331,10 @@ def build_index(paths):
             titles[ref] = _first(rec, TITLE_KEYS)[1]
             actions.append(r)
             files[path]["n"] += 1
-        if kind == "other" and rows and not names_places:
-            _problem(problems, path, f"left out: no account and text fields ({', '.join(list(rows[0][2])[:6])})")
+        if kind == "other" and not names_places:
+            files[path]["left"] = True
+            if rows:
+                _problem(problems, path, f"left out: no account and text fields ({', '.join(list(rows[0][2])[:6])})")
     actions.sort(key=lambda r: (r["t"], r["ref"]))
     last_save, by_id, accounts, runs = {}, {}, {}, {}
     for r in actions:
@@ -666,12 +668,14 @@ parts of about the same size, so a busy place runs over several shares. --place 
 it again for more); --from I and --count M print records I to I+M-1 of each. A record is headed by its ref, time,
 account and kind, then a post's text or the lines a save changed from the save before it, each whole: a line longer
 than {LINE_MAX} characters goes on over the lines after it, indented deeper. A place's heading says which of its records
-follow, and the last line how many records were printed. --files GLOB reads those files; by default every JSON Lines
-and CSV file under DIR. The listing with no option begins with the files it read."""
+follow, and the last line how many records were printed. --files GLOB reads those files, a GLOB with no / in any
+folder; by default every JSON Lines and CSV file under DIR. The listing with no option begins with the files whose
+records it read, then those it left out."""
 
 
 def _script_files(globs):
-    """The files `globs` name, or every record file of the working folder."""
+    """The files `globs` name, a glob with no slash matching names in any folder as thimble's claims do, or every record
+    file of the working folder."""
     import glob
 
     if not globs:
@@ -680,7 +684,7 @@ def _script_files(globs):
             dirs[:] = sorted(d for d in dirs if not d.startswith("."))
             found += [os.path.relpath(os.path.join(root, n)) for n in names if n.endswith((".jsonl", ".csv"))]
         return sorted(found)
-    return sorted({p for g in globs for p in glob.glob(g, recursive=True) if Path(p).is_file()})
+    return sorted({p for g in globs for p in glob.glob(g if "/" in g else f"**/{g}", recursive=True) if Path(p).is_file()})
 
 
 def _line(prefix, text):
@@ -828,7 +832,10 @@ def main(argv):
         _print(index, _share(_blocks(index, ranked), int(k), int(n)), out)
         return 0
     if not names:
-        out.write(f"files: {' '.join(sorted(index['files']))}\n")
+        out.write(f"files: {' '.join(sorted(p for p, f in index['files'].items() if not f.get('left')))}\n")
+        left = sorted(p for p, f in index["files"].items() if f.get("left"))
+        if left:
+            out.write(f"left out, with no account and text: {' '.join(left)}\n")
         for rank, p in enumerate(ranked, 1):
             v = index["places"][p]
             out.write(f"{rank}\t{len(v['refs'])}\t{len(v['accounts'])}\t{p}\n")

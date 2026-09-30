@@ -947,21 +947,30 @@ export interface SettingsPatch {
   [k: string]: unknown
 }
 
+/** One view an extension gives, as this workspace finds it (backend extensions.public): whether it shows here, the
+ * check's reason, where its switch stands (switched here, else as the check says), and whether that switch can change
+ * anything (`locked`: the extension does not run here, or no file here matches the view's claims). */
+export interface ExtensionViewRow {
+  slug: string
+  name: string
+  shown: boolean
+  note: string
+  on: boolean
+  locked: boolean
+}
+
 /** One extension added to thimble, as this workspace finds it (backend extensions.public): whether it runs here and
- * why not, this workspace's switch, and whether it cannot run here whatever that switch says (`locked`). */
+ * why not, this workspace's switch, whether it cannot run here whatever that switch says (`locked`), and its views. */
 export interface ExtensionRow {
   name: string
-  title: string
   version: string
   active: boolean
   why: string
-  /** the reason thimble's decision on whether it applies here gave, '' before one */
-  reason: string
-  /** the line Settings shows: that reason, or why it does not run when that is something else */
+  /** the line Settings shows: why it does not run, unless this workspace's switch turned it off */
   note: string
-  /** where its switch stands: switched here, else as the decision says */
   on: boolean
   locked: boolean
+  views: ExtensionViewRow[]
 }
 
 /** `GET /ws/{c}/extensions`: the extensions added, and the conflicts among those that run here, in words. */

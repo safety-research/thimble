@@ -1,5 +1,5 @@
 """app.cardtypes and thimble.card, with the Swarm extension's `multiagent-swimlane` card type, which was `swarm` and then
-`agent-swimlane` before. On a corpus the Swarm extension applies to, the registry finds the type without any view
+`agent-swimlane` before. On a corpus of JSON Lines records, the registry finds the type without any view
 proposal and lists it for main's prompt; a card's code draws it with thimble.card, which checks the arguments against the
 type's schema, runs card.py on the reader's cached index under the labels the call names, whatever Files highlights, and
 shows the data with a listing main reads and cites; the card check's page gets the type's frame from the request. Keep
@@ -19,7 +19,6 @@ import json
 import os
 import re
 import sys
-import tracemalloc
 import types
 from pathlib import Path
 
@@ -27,30 +26,13 @@ import pytest
 
 from fastapi import HTTPException
 
-from app import card_check, cardtypes, channel, concepts, config, ext_applies, extensions, model, notebook, render, tools, views
+from app import card_check, cardtypes, channel, concepts, config, extensions, notebook, render, tools, views
 
 SWIMLANE = extensions.builtin_dir() / "swarm" / "cards" / "multiagent-swimlane"
 
 CORPUS = "crew"
 ROWS = [{"page": f"p{i % 4}", "user": f"bot{i % 35}", "ts": f"2026-04-14T{i // 60:02d}:{i % 60:02d}:00Z",
          "text": f"Relay from bot{(i + 1) % 35}: the value is {i}."} for i in range(140)]
-
-
-@pytest.fixture(autouse=True)
-def decide(monkeypatch) -> list[str]:
-    """The model call that decides whether Swarm applies, in place: it applies where the prompt's samples show the saves
-    of `crew`, claiming their file. The prompts it got are kept."""
-    asked: list[str] = []
-
-    async def ask(c: str, text: str) -> model.CallResult:
-        asked.append(text)
-        if "Relay from bot" in text:
-            return model.CallResult(status="ok", output={"applies": True, "claims": ["saves.jsonl"],
-                                                         "reason": "35 accounts relay a value on shared pages."})
-        return model.CallResult(status="ok", output={"applies": False, "claims": [], "reason": "No agents here."})
-
-    monkeypatch.setattr(ext_applies, "ask", ask)
-    return asked
 
 
 @pytest.fixture()
@@ -122,7 +104,7 @@ async def test_the_swarm_extensions_type_is_found_and_listed_for_main_with_its_g
     types_ = await _refresh()
     assert sorted(types_) == ["multiagent-swimlane"]
     t = types_["multiagent-swimlane"]
-    assert t["page"] == "card.html" and t["claims"] == ["saves.jsonl"] and t["paths"] == ["saves.jsonl"]
+    assert t["page"] == "card.html" and t["claims"] == ["*.jsonl", "*.csv"] and t["paths"] == ["saves.jsonl"]
     assert Path(t["reader"]).is_relative_to(config.workspace_dir(CORPUS)), "a card's kernel sees only the workspace"
     assert cardtypes.read_registry(CORPUS)["multiagent-swimlane"]["fp"] == t["fp"]
     text = cardtypes.prompt_text(CORPUS)
@@ -262,7 +244,7 @@ async def test_main_hears_when_a_label_it_ran_finishes_and_can_colour_its_values
 async def test_the_swarm_extension_ships_no_view_and_takes_back_the_one_it_installed(crew, monkeypatch, tmp_path):
     """The Swarm extension gives its card type and orientation but no view: on a swarm it runs and nothing is proposed
     or installed, a card of its type has no view to open, and the Swarm view an earlier version installed goes, as does
-    thimble's own install of it from before Swarm was an extension. On a small team's records it does not run."""
+    thimble's own install of it from before Swarm was an extension."""
     old = tmp_path / "old-swarm-view"
     old.mkdir()
     for name in ("reader.py", "card.py"):
@@ -281,13 +263,6 @@ async def test_the_swarm_extension_ships_no_view_and_takes_back_the_one_it_insta
     monkeypatch.setattr(notebook, "get_cell", lambda c, cid: cell)
     with pytest.raises(HTTPException, match="the multiagent-swimlane card type has no view"):
         await cardtypes.as_view(CORPUS, "c1")
-
-    team = config.DATA_DIR / "team"
-    team.mkdir()
-    (team / "manifest.json").write_text(json.dumps({"name": "team", "description": "a team's chat"}))
-    (team / "chat.jsonl").write_text("".join(json.dumps({"channel": "ops", "user": f"u{i % 4}", "text": f"u{(i + 1) % 4} ok"})
-                                             + "\n" for i in range(40)))
-    assert not (await extensions.refresh("team", wait=10))["extensions"]["swarm"]["active"]
 
 
 def test_the_swarm_reader_s_shares_print_every_record_once(monkeypatch, capsys, tmp_path):
@@ -322,21 +297,3 @@ def test_the_swarm_reader_s_shares_print_every_record_once(monkeypatch, capsys, 
     assert len(wrapped.splitlines()) > len(whole.splitlines())
     assert all(len(x) <= 30 + 6 for x in wrapped.splitlines() if x.startswith(" "))
     assert re.sub(r"\s+", "", wrapped) == re.sub(r"\s+", "", whole), "no line is cut"
-
-
-async def test_whether_swarm_applies_is_asked_with_a_few_records_of_a_big_csv(crew, decide):
-    """Deciding whether the Swarm extension applies sends a few records of each likely file, so a big CSV costs little
-    memory."""
-    d = config.DATA_DIR / "metrics"
-    d.mkdir()
-    (d / "manifest.json").write_text(json.dumps({"name": "metrics", "description": "metrics"}))
-    with open(d / "metrics.csv", "w") as f:
-        f.write("ts,host,metric,value,status\n" + "2026-05-16T08:00:00Z,web-1,cpu,0.93,ok\n" * 1_000_000)
-    tracemalloc.start()
-    try:
-        assert not (await extensions.refresh("metrics", wait=10))["extensions"]["swarm"]["active"]
-        peak = tracemalloc.get_traced_memory()[1]
-    finally:
-        tracemalloc.stop()
-    assert peak < (d / "metrics.csv").stat().st_size / 20, peak
-    assert "metrics.csv  " in decide[-1] and decide[-1].count("web-1,cpu") == 5, "its first record and four through it"

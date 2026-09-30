@@ -1,7 +1,8 @@
-"""app.extensions: `thimble extension add` shows what an extension gives and copies it into thimble's home once the
-analyst says yes; from then on it runs in every workspace it applies to, until it is removed or switched off. The
-fixture extension ext-min gives one of each contribution: a view that is also a card type, a card-only type, an agent,
-a report type, orientation instructions and a replaced orientation block. Reader calls run in this process."""
+"""app.extensions: `thimble extension add` lists each contribution of an extension and copies it into thimble's home
+once the analyst says yes; from then on it runs in every workspace until it is removed or switched off, and only its
+views check whether they fit a corpus. The fixture extension ext-min gives one of each contribution: a view that is
+also a card type, a card-only type, an agent, a report type and orientation instructions. Reader calls run in this
+process, and the quick model call that checks whether a view fits answers from `fit`."""
 from __future__ import annotations
 
 import contextlib
@@ -10,14 +11,15 @@ import json
 import os
 import re
 import shutil
+import tracemalloc
 from pathlib import Path
 
 import pytest
 
 from fastapi import HTTPException
 
-from app import (card_check, cardtypes, cli, config, ext_applies, extensions, ledger, model, orient_session, prompts,
-                 report_types, userconf, views)
+from app import (card_check, cardtypes, cli, config, extensions, ledger, model, orient_session, prompts, report_types,
+                 userconf, view_fit, views)
 from app import corpus as corpus_mod
 from app.ledger import write_json
 
@@ -55,19 +57,58 @@ def inproc(monkeypatch):
     views._ready.clear()
 
 
+@pytest.fixture(autouse=True)
+def fit(monkeypatch) -> dict:
+    """The check on whether a view fits, in place: it answers `answer`, and keeps the prompts it got in `asked`."""
+    got: dict = {"asked": [], "answer": {"status": "ok", "output": {"fits": True, "reason": "Each record says who did a task."}}}
+
+    async def ask(c: str, text: str) -> model.CallResult:
+        got["asked"].append(text)
+        return model.CallResult(**got["answer"])
+
+    monkeypatch.setattr(view_fit, "ask", ask)
+    return got
+
+
 def _add(src: Path = FIXTURE) -> str:
     name = extensions.add(str(src), yes=True, say=lambda _: None)
     assert name is not None
     return name
 
 
-def test_add_shows_what_the_extension_gives_and_adds_nothing_without_a_yes():
+def _copy(tmp_path: Path, name: str, **manifest) -> Path:
+    d = tmp_path / name
+    shutil.copytree(FIXTURE, d)
+    raw = json.loads((d / "extension.json").read_text())
+    raw.update(name=name, **manifest)
+    (d / "extension.json").write_text(json.dumps(raw))
+    return d
+
+
+def _files_changed() -> None:
+    """The listings thimble keeps of the corpus's files forgotten, as they are after a few seconds."""
+    views._folder_cache.clear()
+    corpus_mod.forget_sources()
+
+
+def test_a_thimble_range_reads_as_package_json_s_engines():
+    cases = {">=0.4": True, ">=0.5": False, "^0.4": True, "^0.3": False, "~0.4.0": True, "0.4.x": True, "0.4": True,
+             ">0.4": False, "<=0.4": True, ">=0.3 <0.4": False, "<0.4 || >=0.4.0": True, "0.3 - 0.4": True, "*": True}
+    assert {r: extensions.in_range("0.4.0", r) for r in cases} == cases
+    assert extensions.in_range("0.4.0", "newest") is None
+
+
+def test_add_lists_each_contribution_with_its_own_description_and_adds_nothing_without_a_yes():
     said: list[str] = []
     assert extensions.add(str(FIXTURE), ask=lambda _: "n", say=said.append) is None
     assert not extensions.source_path("ext-min").exists()
     text = "\n".join(said)
-    for part in ("ext-min 0.1.0", "view        tally", "card type   tally-bars", "agent       counter",
-                 "adds its orient.md", "replaces the block 'instructions'", "report type digest", "thimble's kernels"):
+    for part in ("ext-min 0.1.0", "view        tally: Each record of the tally files, counted by who made it. Also a card type.",
+                 "card type   tally-bars: The records of one person as bars.",
+                 "agent       counter: Counts the tally records of the places it is given.",
+                 "orientation adds its instructions to the orientation's",
+                 "report type digest: A one-page digest of the tally.", "It works with thimble >=0.4.",
+                 "thimble's kernels"):
         assert part in text
     assert extensions.add(str(FIXTURE), ask=lambda _: "y", say=said.append) == "ext-min"
     assert (extensions.source_path("ext-min") / "views" / "tally" / "reader.py").is_file()
@@ -76,26 +117,51 @@ def test_add_shows_what_the_extension_gives_and_adds_nothing_without_a_yes():
     assert not extensions.remove("ext-min")
 
 
-def test_an_extension_that_cannot_load_is_not_added(tmp_path):
-    bad = tmp_path / "bad"
-    shutil.copytree(FIXTURE, bad)
-    (bad / "extension.json").write_text(json.dumps({"api": 7, "name": "bad"}))
-    with pytest.raises(extensions.AddError, match="API 7"):
-        extensions.add(str(bad), yes=True, say=lambda _: None)
+async def test_what_an_extension_needs_is_checked_and_what_it_waits_for_leaves_it_unloaded_and_named(corpus, tmp_path):
+    """A library thimble does not inline stops the add; a thimble outside its range, a Python package that is not
+    installed and an extension that is not added leave it added but unloaded, and Settings, the list and doctor say
+    why. An extension it needs that thimble ships is listed and added on the same yes."""
+    with pytest.raises(extensions.AddError, match="thimble inlines only vega, vega-lite, vega-embed"):
+        _add(_copy(tmp_path, "d3ish", dependencies={"js": ["d3"]}))
     with pytest.raises(extensions.AddError, match="no folder, git URL or built-in"):
         extensions.add("no-such-thing", yes=True, say=lambda _: None)
 
+    said: list[str] = []
+    extensions.add(str(_copy(tmp_path, "later", thimble=">=9")), yes=True, say=said.append)
+    assert "  It stays unloaded until then: it works with thimble >=9, and this is thimble 0.4.0." in said
+    _add(_copy(tmp_path, "heavy", dependencies={"python": ["no_such_package_xyz"]}))
+    e = (await extensions.refresh(CORPUS))["extensions"]
+    assert not e["later"]["active"] and e["later"]["why"] == "it works with thimble >=9, and this is thimble 0.4.0"
+    assert e["heavy"]["why"] == "it needs the Python package no_such_package_xyz, which thimble does not install"
+    assert "heavy 0.1.0 (not loaded: it needs the Python package no_such_package_xyz" in extensions.doctor_line()
+    row = next(x for x in extensions.public(CORPUS)["extensions"] if x["name"] == "later")
+    assert row["locked"] and row["why"].startswith("it works with thimble >=9")
+    for n in ("later", "heavy"):
+        extensions.remove(n)
 
-async def test_an_added_extension_runs_where_it_applies_with_each_contribution(corpus):
+    said = []
+    extensions.add(str(_copy(tmp_path, "needy", dependencies={"extensions": ["swarm", "nope"]})), yes=True, say=said.append)
+    assert "It needs swarm, which is added with it:" in said and extensions.source_path("swarm").is_dir()
+    assert "  It stays unloaded until then: it needs the extension nope, which is not added." in said
+    e = (await extensions.refresh(CORPUS))["extensions"]
+    assert e["swarm"]["active"] and e["needy"]["why"] == "it needs the extension nope, which is not added"
+
+
+async def test_an_added_extension_runs_in_every_workspace_and_its_view_where_it_fits(corpus, fit):
     _add()
-    state = await extensions.refresh(CORPUS)
+    state = await extensions.refresh(CORPUS, wait=10)
     e = state["extensions"]["ext-min"]
     assert e["active"] and e["why"] == ""
     assert (extensions.workspace_path(CORPUS, "ext-min") / "views" / "tally" / "card.py").is_file()
+    assert len(fit["asked"]) == 1 and "Each record of the tally files, counted by who made it." in fit["asked"][0]
+    assert "tally/a.jsonl  " in fit["asked"][0] and '"who": "ana"' in fit["asked"][0]
 
     prop = views.read_proposal(CORPUS, "tally")
     assert prop["extension"] == "ext-min" and prop["orientation"] is False, "outside the orientation's four"
     assert views.read_built(CORPUS, "tally")["ok"]
+    row = extensions.public(CORPUS)["extensions"][0]
+    assert row["views"] == [{"slug": "tally", "name": "Tally", "shown": True, "note": "Each record says who did a task.",
+                             "on": True, "locked": False}]
 
     types = await cardtypes.refresh(CORPUS, warm=False)
     assert {"tally", "tally-bars"} <= set(types)
@@ -111,55 +177,112 @@ async def test_an_added_extension_runs_where_it_applies_with_each_contribution(c
     assert report_types.create_document_type(CORPUS, "digest")["preset"] == "digest"
 
     agents = extensions.agent_definitions(CORPUS)
+    assert set(agents) == {"counter"}, "agents/orient.md is no agent"
     assert agents["counter"]["tools"] == ["Read", "Grep"] and "WebFetch" in agents["counter"]["disallowedTools"]
     assert agents["counter"]["model"] == "sonnet"
 
+    default = prompts.render(orient_session.INSTRUCTIONS, {}).strip()
     instructions = orient_session.instructions_of(CORPUS)
-    assert instructions.startswith("Count first, then read.") and instructions.endswith("Read every tally record before you draft.")
+    assert instructions == f"{default}\n\n#### ext-min\n\nRead every tally record in `tally/*.jsonl` before you draft."
     assert orient_session.instructions_of(CORPUS, "My own way.").startswith("My own way."), "the analyst's setting wins"
+
+
+async def test_a_view_shows_where_its_check_finds_it_fits_and_its_switch_overrides_the_check(corpus, fit):
+    """The check is asked once per view and workspace and again only when the files it claims change. Until it
+    answers, when it says no and when it fails, the view is hidden and Settings says why, while the extension's other
+    contributions run; the view's switch overrides the check either way."""
+    _add()
+    first = (await extensions.refresh(CORPUS))["extensions"]["ext-min"]
+    assert first["active"] and first["views"][0]["note"] == extensions.CHECKING and not first["views"][0]["shown"]
+    assert views.read_proposal(CORPUS, "tally") is None and "counter" in extensions.agent_definitions(CORPUS)
+    await extensions.refresh(CORPUS, wait=10)
+    await extensions.refresh(CORPUS, wait=10)
+    assert len(fit["asked"]) == 1 and views.read_proposal(CORPUS, "tally") is not None, "the answer stands while the files do"
+
+    fit["answer"]["output"] = {"fits": False, "reason": "No one did a task here."}
+    (corpus / "tally" / "b.jsonl").write_text('{"who": "di", "what": "task 9"}\n')
+    _files_changed()
+    e = (await extensions.refresh(CORPUS, wait=10))["extensions"]["ext-min"]
+    assert len(fit["asked"]) == 2 and e["active"] and not e["views"][0]["shown"]
+    assert views.read_proposal(CORPUS, "tally") is None, "its unchanged view is withdrawn"
+    assert "tally-bars" in await cardtypes.refresh(CORPUS, warm=False), "a card type joins where its claims match files"
+    view = extensions.public(CORPUS)["extensions"][0]["views"][0]
+    assert view["note"] == "No one did a task here." and view["on"] is False
+    extensions.set_view(CORPUS, "ext-min", "tally", True)
+    e = (await extensions.refresh(CORPUS, wait=10))["extensions"]["ext-min"]
+    assert e["views"][0]["shown"] and views.read_proposal(CORPUS, "tally") is not None
+    assert extensions.public(CORPUS)["extensions"][0]["views"][0]["on"] is True
+
+    write_json(config.registry_dir(CORPUS) / extensions.STATE_FILE, {**extensions.read_state(CORPUS), "shown": {}})
+    fit["answer"] = {"status": "error", "output": None, "detail": "the claude CLI was not found"}
+    (corpus / "tally" / "c.jsonl").write_text('{"who": "ed", "what": "task 10"}\n')
+    _files_changed()
+    e = (await extensions.refresh(CORPUS, wait=10))["extensions"]["ext-min"]
+    assert not e["views"][0]["shown"]
+    assert e["views"][0]["note"] == "thimble could not tell whether it fits here: the claude CLI was not found"
+    await extensions.refresh(CORPUS, wait=10)
+    assert len(fit["asked"]) == 3, "a failed check stands a while before it is asked again"
+
+    shutil.rmtree(corpus / "tally")
+    (corpus / "notes.jsonl").write_text('{"x": 1}\n')
+    _files_changed()
+    e = (await extensions.refresh(CORPUS, wait=10))["extensions"]["ext-min"]
+    assert e["active"] and e["views"][0]["note"] == extensions.NO_FILES and len(fit["asked"]) == 3
+    assert extensions.public(CORPUS)["extensions"][0]["views"][0]["locked"]
+
+
+async def test_a_big_csv_is_checked_with_a_few_of_its_records(corpus, fit, tmp_path):
+    """The check sends a few records of each likely file, so a big CSV costs little memory."""
+    d = _copy(tmp_path, "metrics")
+    raw = json.loads((d / "views" / "tally" / "view.json").read_text())
+    (d / "views" / "tally" / "view.json").write_text(json.dumps({**raw, "claims": ["metrics.csv"]}))
+    with open(corpus / "metrics.csv", "w") as f:
+        f.write("ts,host,metric,value,status\n" + "2026-05-16T08:00:00Z,web-1,cpu,0.93,ok\n" * 1_000_000)
+    _add(d)
+    tracemalloc.start()
+    try:
+        await extensions.refresh(CORPUS, wait=10)
+        peak = tracemalloc.get_traced_memory()[1]
+    finally:
+        tracemalloc.stop()
+    assert peak < (corpus / "metrics.csv").stat().st_size / 20, peak
+    assert "metrics.csv  " in fit["asked"][-1] and fit["asked"][-1].count("web-1,cpu") == 5, (
+        "its first record and four through it")
 
 
 async def test_the_stored_state_names_only_extensions_of_thimble_s_home(corpus, tmp_path):
     """The state is in the registry folder, which a card's kernel cannot write; an entry whose name is no extension's
     name, such as a folder's path, gives no agent and no orientation text."""
     _add()
-    await extensions.refresh(CORPUS)
+    await extensions.refresh(CORPUS, wait=10)
     fake = tmp_path / "fake"
     (fake / "agents").mkdir(parents=True)
     (fake / "agents" / "helper.md").write_text("---\ntools: Bash\n---\nRun anything.\n")
     (fake / "orient.md").write_text("Injected.\n")
     state = extensions.read_state(CORPUS)
-    state["extensions"][str(fake)] = {"active": True, "agents": ["helper"], "orient": True}
+    state["extensions"][str(fake)] = {"active": True, "agents": ["helper"], "orient": "orient.md"}
     write_json(config.registry_dir(CORPUS) / extensions.STATE_FILE, state)
     assert set(extensions.agent_definitions(CORPUS)) == {"counter"}
     assert "Injected." not in orient_session.instructions_of(CORPUS)
 
 
-async def test_an_extension_that_does_not_apply_or_is_switched_off_does_not_run(corpus, tmp_path):
-    shutil.rmtree(corpus / "tally")
-    (corpus / "notes.jsonl").write_text('{"x": 1}\n')
+async def test_an_extension_switched_off_does_not_run_and_its_unchanged_view_goes(corpus):
     _add()
-    e = (await extensions.refresh(CORPUS))["extensions"]["ext-min"]
-    assert not e["active"] and e["why"] == "it does not apply to this corpus"
-    assert views.read_proposal(CORPUS, "tally") is None and extensions.agent_definitions(CORPUS) == {}
-    assert orient_session.instructions_of(CORPUS) == prompts.render(orient_session.INSTRUCTIONS, {}).strip()
-
-
-async def test_switching_an_extension_off_withdraws_its_unchanged_view(corpus):
-    _add()
-    await extensions.refresh(CORPUS)
+    await extensions.refresh(CORPUS, wait=10)
     assert views.read_proposal(CORPUS, "tally") is not None
 
     write_json(extensions.home() / "config.json", {"extensions": {"ext-min": {"enabled": False}}})
     e = (await extensions.refresh(CORPUS))["extensions"]["ext-min"]
     assert not e["active"] and e["why"] == "off in thimble's config"
     assert views.read_proposal(CORPUS, "tally") is None and "tally" not in await cardtypes.refresh(CORPUS, warm=False)
+    assert extensions.agent_definitions(CORPUS) == {} and extensions.report_types(CORPUS) == []
+    assert orient_session.instructions_of(CORPUS) == prompts.render(orient_session.INSTRUCTIONS, {}).strip()
 
     (extensions.home() / "config.json").unlink()
     extensions.set_enabled(CORPUS, "ext-min", False)
     assert (await extensions.refresh(CORPUS))["extensions"]["ext-min"]["why"] == "off in this workspace"
     extensions.set_enabled(CORPUS, "ext-min", True)
-    assert (await extensions.refresh(CORPUS))["extensions"]["ext-min"]["active"]
+    assert (await extensions.refresh(CORPUS, wait=10))["extensions"]["ext-min"]["active"]
     assert views.read_proposal(CORPUS, "tally") is not None
 
 
@@ -168,16 +291,17 @@ async def test_an_extension_added_again_or_switched_on_again_gives_the_orientati
     """An oriented workspace hears an extension's orientation instructions as one follow-up the first time it runs
     there. It keeps that mark when the extension is removed or switched off, so adding it again or switching it back on
     restarts nothing."""
-    sent: list[str] = []
+    sent: list[tuple[str, str]] = []
 
     async def message(c, text, by, extension=""):
-        sent.append(extension)
+        sent.append((extension, text))
         return {"status": "resumed"}
 
     monkeypatch.setattr(orient_session, "message", message)
     _add()
     await extensions.refresh(CORPUS)
-    assert sent == ["Ext Min"] and extensions.read_state(CORPUS)["oriented"] == ["ext-min"]
+    assert sent == [("ext-min", "Read every tally record in `tally/*.jsonl` before you draft.")]
+    assert extensions.read_state(CORPUS)["oriented"] == ["ext-min"]
     assert extensions.remove("ext-min")
     assert "ext-min" not in (await extensions.refresh(CORPUS))["extensions"]
     _add()
@@ -186,28 +310,89 @@ async def test_an_extension_added_again_or_switched_on_again_gives_the_orientati
     await extensions.refresh(CORPUS)
     extensions.set_enabled(CORPUS, "ext-min", True)
     assert (await extensions.refresh(CORPUS))["extensions"]["ext-min"]["active"]
-    assert sent == ["Ext Min"] and extensions.read_state(CORPUS)["oriented"] == ["ext-min"]
+    assert len(sent) == 1 and extensions.read_state(CORPUS)["oriented"] == ["ext-min"]
 
 
-async def test_two_extensions_that_replace_one_block_leave_thimbles_and_are_named(corpus, tmp_path):
-    other = tmp_path / "other"
-    shutil.copytree(FIXTURE, other)
-    shutil.rmtree(other / "views" / "tally")
+async def test_an_orient_md_that_replaces_takes_the_place_of_thimble_s_instructions(corpus, tmp_path):
+    """With `replace: true` the body stands in for thimble's instructions and its tools, model and effort are
+    ignored; the analyst's own instructions win; two extensions that replace them leave thimble's, and are named."""
+    d = _copy(tmp_path, "mine")
+    shutil.rmtree(d / "views")
+    shutil.rmtree(d / "cards")
+    (d / "agents" / "orient.md").write_text("---\nreplace: true\ntools: Bash\nmodel: haiku\n---\nCount first, then read.\n")
+    _add(d)
+    await extensions.refresh(CORPUS)
+    assert orient_session.instructions_of(CORPUS) == "Count first, then read."
+    assert orient_session.instructions_of(CORPUS, "My own way.") == "My own way."
+    assert set(extensions.agent_definitions(CORPUS)) == {"counter"}
+
+    other = _copy(tmp_path, "other")
+    shutil.rmtree(other / "views")
     shutil.rmtree(other / "cards")
-    (other / "report-types" / "digest").rename(other / "report-types" / "brief")
-    (other / "orient.md").unlink()
-    manifest = json.loads((other / "extension.json").read_text())
-    manifest.update(name="other", check=None)
-    (other / "extension.json").write_text(json.dumps(manifest))
-    _add()
+    (other / "agents" / "orient.md").write_text("---\nreplace: true\n---\nRead first.\n")
     _add(other)
     await extensions.refresh(CORPUS)
-    default = prompts.render(orient_session.INSTRUCTIONS, {}).strip()
-    assert orient_session.instructions_of(CORPUS).startswith(default)
+    assert orient_session.instructions_of(CORPUS) == prompts.render(orient_session.INSTRUCTIONS, {}).strip()
     lines = extensions.public(CORPUS)["conflicts"]
-    assert lines == ["ext-min and other both replace the orientation block 'instructions', so thimble's own is used"]
-    assert "conflict: ext-min and other both replace" in extensions.doctor_line()
-    assert set(extensions.agent_definitions(CORPUS)) == {"ext-min:counter", "other:counter"}
+    assert lines == ["mine and other both replace the orientation's instructions, so thimble's own are used"]
+    assert "conflict: mine and other both replace" in extensions.doctor_line()
+    assert set(extensions.agent_definitions(CORPUS)) == {"mine:counter", "other:counter"}
+
+
+async def test_an_extension_written_before_the_spec_settled_still_loads(corpus, tmp_path, fit):
+    """The old keys are read: `requires` as dependencies.python, `replaces` as orientation instructions in place of
+    thimble's, orient.md beside extension.json, report-types/ with `default`, and a view.json with `why`, `declares`,
+    `applies`, `show` and `reports`. `api`, `title`, `description`, `applies` and `check` are left alone. A card type
+    with a reader of its own and no claims reads the JSON Lines and CSV files."""
+    d = tmp_path / "old"
+    shutil.copytree(FIXTURE, d)
+    (d / "extension.json").write_text(json.dumps({
+        "api": 0, "name": "old", "version": "0.0.9", "title": "Old", "description": "An old one.", "applies": "Tallies.",
+        "check": "tally", "requires": ["json"], "replaces": {"instructions": "instructions.md"}}))
+    (d / "instructions.md").write_text("Count first, then read.")
+    (d / "agents" / "orient.md").rename(d / "orient.md")
+    (d / "reports").rename(d / "report-types")
+    (d / "report-types" / "digest" / "type.md").write_text("---\nname: Digest\ndefault: false\n---\nWrite a digest.\n")
+    raw = json.loads((d / "views" / "tally" / "view.json").read_text())
+    raw["why"] = raw.pop("description")
+    raw.update(applies=True, show="proposed", reports=["digest"], declares=[{"form": "<who>", "means": "one person"}])
+    (d / "views" / "tally" / "view.json").write_text(json.dumps(raw))
+    own = d / "cards" / "tally-own"
+    shutil.copytree(d / "cards" / "tally-bars", own)
+    shutil.copy(d / "views" / "tally" / "reader.py", own / "reader.py")
+    card = json.loads((own / "card.json").read_text())
+    card.pop("reader")
+    (own / "card.json").write_text(json.dumps(card))
+    _add(d)
+    e = (await extensions.refresh(CORPUS, wait=10))["extensions"]["old"]
+    assert e["active"] and e["python"] == ["json"] and e["views"][0]["shown"]
+    assert "Each record of the tally files" in fit["asked"][0], "the view's `why` is its description"
+    assert orient_session.instructions_of(CORPUS) == ("Count first, then read.\n\n#### old\n\n"
+                                                      "Read every tally record in `tally/*.jsonl`, `*.jsonl`, `*.csv` "
+                                                      "before you draft.")
+    assert [r["id"] for r in extensions.report_types(CORPUS)] == ["digest"]
+    types = await cardtypes.refresh(CORPUS, warm=False)
+    assert types["tally-own"]["claims"] == ["*.jsonl", "*.csv"] and types["tally-own"]["view"] is None
+    assert views.read_built(CORPUS, "tally")["ok"]
+
+
+async def test_a_card_type_with_a_reader_of_its_own_reads_the_files_its_card_json_claims(corpus, tmp_path):
+    d = _copy(tmp_path, "own")
+    shutil.rmtree(d / "views")
+    bars = d / "cards" / "tally-bars"
+    shutil.copy(FIXTURE / "views" / "tally" / "reader.py", bars / "reader.py")
+    card = json.loads((bars / "card.json").read_text())
+    card.pop("reader")
+    (bars / "card.json").write_text(json.dumps({**card, "claims": ["tally/*.jsonl"]}))
+    _add(d)
+    e = (await extensions.refresh(CORPUS))["extensions"]["own"]
+    assert e["files"] == ["tally/*.jsonl"]
+    types = await cardtypes.refresh(CORPUS, warm=False)
+    assert types["tally-bars"]["claims"] == ["tally/*.jsonl"] and types["tally-bars"]["paths"] == ["tally/a.jsonl"]
+    (bars / "card.json").write_text(json.dumps({**card, "claims": ["nowhere/*.csv"]}))
+    _add(d)
+    await extensions.refresh(CORPUS)
+    assert "tally-bars" not in await cardtypes.refresh(CORPUS, warm=False), "no file here matches its claims"
 
 
 def _tally_card(code: str, **extra) -> dict:
@@ -217,7 +402,7 @@ def _tally_card(code: str, **extra) -> dict:
 
 async def test_keep_changes_only_the_arguments_the_type_lets_the_card_change(corpus):
     _add()
-    await extensions.refresh(CORPUS)
+    await extensions.refresh(CORPUS, wait=10)
     await cardtypes.refresh(CORPUS, warm=False)
     cell = _tally_card('import thimble\nthimble.card("tally", labels=["kind"])')
     new, patch, written = cardtypes.keep_patch(CORPUS, cell, {"who": ["ana"]})
@@ -231,7 +416,7 @@ async def test_keep_changes_only_the_arguments_the_type_lets_the_card_change(cor
 
 async def test_the_card_check_gives_back_the_arguments_keep_set(corpus):
     _add()
-    await extensions.refresh(CORPUS)
+    await extensions.refresh(CORPUS, wait=10)
     await cardtypes.refresh(CORPUS, warm=False)
     cell = _tally_card('import thimble\nthimble.card("tally", who=["ana"], labels=["kind"])', kept_args={"who": ["ana"]})
     revised = 'import thimble\nthimble.card("tally", labels=["kind", "size"])'
@@ -279,87 +464,18 @@ async def test_thimble_s_config_switches_extensions_off_and_sets_their_agents(co
     assert (await extensions.refresh(CORPUS))["extensions"]["ext-min"]["active"]
 
 
-def _files_changed() -> None:
-    """The listings thimble keeps of the corpus's files forgotten, as they are after a few seconds."""
-    views._folder_cache.clear()
-    corpus_mod.forget_sources()
-
-
-def _described(tmp_path: Path) -> Path:
-    """The fixture with an `applies` description in place of its check."""
-    d = tmp_path / "described"
-    shutil.copytree(FIXTURE, d)
-    manifest = json.loads((d / "extension.json").read_text())
-    manifest.pop("check")
-    manifest["applies"] = "Tallies of who did which task."
-    (d / "extension.json").write_text(json.dumps(manifest))
-    (d / "orient.md").write_text("Read every record of {{files}}.")
-    return d
-
-
-async def test_a_quick_model_call_decides_where_an_extension_applies_and_the_switch_overrides_it(corpus, tmp_path,
-                                                                                                 monkeypatch):
-    """With an `applies` description, one structured call decides whether the extension applies, from the description,
-    the corpus's files and a few records; its claims and reason are kept, and it is asked again only when the corpus's
-    files change. Until it answers, when it says no and when it fails, the extension is off, and Settings says why; the
-    workspace's switch overrides the answer either way."""
-    asked: list[str] = []
-    answer: dict = {"status": "ok", "output": {"applies": True, "claims": ["tally/*.jsonl", "nowhere.csv"],
-                                               "reason": "Each record says who did a task."}}
-
-    async def ask(c: str, text: str) -> model.CallResult:
-        asked.append(text)
-        return model.CallResult(**answer)
-
-    monkeypatch.setattr(ext_applies, "ask", ask)
-    _add(_described(tmp_path))
-    assert (await extensions.refresh(CORPUS))["extensions"]["ext-min"]["why"] == extensions.ASKING
-    e = (await extensions.refresh(CORPUS, wait=10))["extensions"]["ext-min"]
-    assert e["active"] and e["files"] == ["tally/*.jsonl"], "a claim that matches no file is dropped"
-    assert e["decision"]["by"] == "model" and len(asked) == 1
-    assert "Tallies of who did which task." in asked[0] and "tally/a.jsonl  " in asked[0] and '"who": "ana"' in asked[0]
-    assert extensions.public(CORPUS)["extensions"][0]["note"] == "Each record says who did a task."
-    assert orient_session.instructions_of(CORPUS).endswith("Read every record of `tally/*.jsonl`.")
-    assert "tally-bars" in await cardtypes.refresh(CORPUS, warm=False)
-    await extensions.refresh(CORPUS, wait=10)
-    assert len(asked) == 1, "the decision stands while the files do"
-
-    answer["output"] = {"applies": False, "claims": [], "reason": "No one did a task here."}
-    (corpus / "tally" / "b.jsonl").write_text('{"who": "di", "what": "task 9"}\n')
-    _files_changed()
-    e = (await extensions.refresh(CORPUS, wait=10))["extensions"]["ext-min"]
-    assert len(asked) == 2 and not e["active"] and e["why"] == extensions.NOT_HERE
-    row = extensions.public(CORPUS)["extensions"][0]
-    assert row["note"] == "No one did a task here." and row["on"] is False
-    extensions.set_enabled(CORPUS, "ext-min", True)
-    e = (await extensions.refresh(CORPUS, wait=10))["extensions"]["ext-min"]
-    assert e["active"] and e["files"] == ["tally/a.jsonl", "tally/b.jsonl"], "switched on, it reads the record files"
-    assert extensions.public(CORPUS)["extensions"][0]["on"] is True
-    extensions.set_enabled(CORPUS, "ext-min", False)
-    assert (await extensions.refresh(CORPUS, wait=10))["extensions"]["ext-min"]["why"] == "off in this workspace"
-
-    write_json(config.registry_dir(CORPUS) / extensions.STATE_FILE, {**extensions.read_state(CORPUS), "off": []})
-    answer.update(status="error", output=None, detail="the claude CLI was not found")
-    (corpus / "tally" / "c.jsonl").write_text('{"who": "ed", "what": "task 10"}\n')
-    _files_changed()
-    e = (await extensions.refresh(CORPUS, wait=10))["extensions"]["ext-min"]
-    assert not e["active"] and e["why"] == "thimble could not tell whether it applies here: the claude CLI was not found"
-    await extensions.refresh(CORPUS, wait=10)
-    assert len(asked) == 3, "a failed decision stands a while before it is asked again"
-
-
 async def test_the_extension_command_adds_lists_and_removes(corpus, capsys, monkeypatch):
-    """`thimble extension list` says per workspace whether each extension runs there."""
+    """`thimble extension list` says per workspace whether each extension runs there, and whether each view shows."""
     monkeypatch.setenv("THIMBLE_WORKSPACES_DIR", str(config.WORKSPACES_DIR))
     (config.WORKSPACES_DIR / "later").mkdir(parents=True)
     assert cli.main(["extension", "add", str(FIXTURE), "--yes"]) == 0
     assert "Added ext-min." in capsys.readouterr().out
-    await extensions.refresh(CORPUS)
+    await extensions.refresh(CORPUS, wait=10)
     assert cli.main(["extension", "list"]) == 0
     out = capsys.readouterr().out
     assert out.startswith(f"ext-min 0.1.0, from {FIXTURE.resolve()}: loads\n")
     assert re.search(r"^  later +not checked yet: no session connected here since it was added$", out, re.M)
-    assert re.search(r"^  tallies +on   1 tally files$", out, re.M)
+    assert re.search(r"^  tallies +on\n +view tally shown: Each record says who did a task\.$", out, re.M)
     extensions.set_enabled(CORPUS, "ext-min", False)
     await extensions.refresh(CORPUS)
     assert cli.main(["extension", "list"]) == 0

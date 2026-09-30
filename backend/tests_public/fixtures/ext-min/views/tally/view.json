@@ -1,10 +1,7 @@
 {
   "name": "Tally",
-  "why": "Each record of the tally files, counted by who made it.",
+  "description": "Each record of the tally files, counted by who made it.",
   "claims": ["tally/*.jsonl"],
-  "applies": true,
-  "show": "always",
-  "reports": ["digest"],
   "card": {
     "use": "How many records each person made.",
     "args": {"type": "object", "properties": {"who": {"type": "array", "items": {"type": "string"}, "ui": true, "description": "only these people"}}, "additionalProperties": false},

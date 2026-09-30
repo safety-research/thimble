@@ -1,29 +1,25 @@
-"""Whether an extension applies to a workspace's corpus, as one quick model call decides it (decide).
+"""Whether an extension's view fits a workspace's corpus, as one quick model call decides it (decide).
 
-An extension's `applies` says in plain words which corpora it is for. thimble sends that description, the corpus's files
-folded into patterns (groups) and a few records of the files likeliest to hold what it reads (samples) to the labels
-role's model at its effort (low unless thimble's config sets another), as one structured call on the user's own
-`claude` with no tools (model.structured). The answer is {applies, claims, reason}: whether it applies, the files or
-patterns of the listing that hold those records, and one sentence the analyst reads in Settings. Only the claims that
-match files here are kept, and an answer that says it applies and claims none is a failure.
-
-A call that fails decides nothing: the extension stays off here, and the reason says why."""
+thimble sends the view's description, the files it claims folded into patterns (groups) and a few records of the files
+likeliest to hold records (samples) to the labels role's model at its effort (low unless thimble's config sets
+another), as one structured call on the user's own `claude` with no tools (model.structured). The answer is {fits,
+reason}: whether the view fits, and one sentence the analyst reads in Settings. A call that fails decides nothing: the
+view stays hidden here, and the reason says why."""
 from __future__ import annotations
 
 import asyncio
 import hashlib
-import json
 import logging
 import re
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 from typing import Any
 
-from . import capture, config, prompts, views
+from . import capture, config, prompts
 
-log = logging.getLogger("thimble.ext_applies")
+log = logging.getLogger("thimble.view_fit")
 
-PROMPT = "extension-applies"
+PROMPT = "view-fit"
 FOLD = 3  # sibling folders, or file names, of one shape that are folded into one pattern from this many
 MANY = 12  # names of one extension in a folder pattern past which they are all folded into `*<ext>`
 GROUPS_MAX = 150  # lines of the file listing
@@ -38,28 +34,19 @@ TOOL_NAME = "decision"
 SCHEMA = {
     "type": "object",
     "properties": {
-        "applies": {"type": "boolean", "description": "whether the records show what the extension is for"},
-        "claims": {"type": "array", "items": {"type": "string"},
-                   "description": "the files or patterns of the listing, as it writes them, that hold those records; "
-                                  "[] when none do"},
+        "fits": {"type": "boolean", "description": "whether the records are the ones the view shows"},
         "reason": {"type": "string", "description": "one sentence naming what in the records decided it"},
     },
-    "required": ["applies", "claims", "reason"],
+    "required": ["fits", "reason"],
     "additionalProperties": False,
 }
 
 
-def files_of(c: str) -> list[tuple[str, int]]:
-    """(corpus-relative path, size) of every file of the corpus, dot-files left out (views.folder_files)."""
-    return [(p, size) for p, size, _ in views.folder_files(config.corpus_dir(c), "")]
-
-
-def key(description: str, first: list[str], files: list[tuple[str, int]]) -> str:
-    """What a decision is made from, as a digest: the description, the files a pre-check named, and the corpus's files
-    with their sizes. A decision is made again when it changes."""
+def key(description: str, files: list[tuple[Any, ...]]) -> str:
+    """What a decision is made from, as a digest: the view's description and the files it claims with their sizes
+    ((path, size, ...), as views.claimed_files gives them). A decision is made again when it changes."""
     h = hashlib.sha1(description.encode())
-    h.update(json.dumps(sorted(first)).encode())
-    for p, size in files:
+    for p, size, *_ in files:
         h.update(f"\0{p}\0{size}".encode())
     return h.hexdigest()[:16]
 
@@ -68,13 +55,13 @@ def _shape(name: str) -> str:
     return re.sub(r"\d+", "#", name)
 
 
-def groups(files: list[tuple[str, int]]) -> list[dict[str, Any]]:
+def groups(files: list[tuple[Any, ...]]) -> list[dict[str, Any]]:
     """The files folded into patterns, by path. FOLD or more sibling folders whose names differ only in their digits,
     or that hold the same names, become `*`, as runs of one experiment do; FOLD or more names in a folder pattern that
     differ only in their digits become one name with `*` for the digits, and past MANY other names of one extension
     those become `*<ext>`. Each {pattern, n, bytes, largest}."""
     children: dict[str, set[str]] = {}
-    for path, _ in files:
+    for path, *_ in files:
         parts = path.split("/")
         for i in range(len(parts)):
             children.setdefault("/".join(parts[:i]), set()).add(parts[i])
@@ -87,7 +74,7 @@ def groups(files: list[tuple[str, int]]) -> list[dict[str, Any]]:
                 by.setdefault(key(k), []).append(k)
             folded |= {f"{parent}/{k}".lstrip("/") for ks in by.values() if len(ks) >= FOLD for k in ks}
     placed, names = [], {}
-    for path, size in files:
+    for path, size, *_ in files:
         parts = path.split("/")
         folder = "/".join("*" if "/".join(parts[: i + 1]) in folded else p for i, p in enumerate(parts[:-1]))
         ext = PurePosixPath(parts[-1]).suffix.lower()
@@ -128,16 +115,13 @@ def listing(gs: list[dict[str, Any]]) -> str:
     return "\n".join(lines) or "(no files)"
 
 
-def _likeliest(gs: list[dict[str, Any]], first: list[str]) -> list[dict[str, Any]]:
-    """The patterns the samples come from: those holding the files a pre-check named, then files of records, then text,
-    each largest first."""
+def _likeliest(gs: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """The patterns the samples come from: files of records, then text, each largest first."""
     def rank(g: dict[str, Any]) -> tuple[int, int]:
-        named = any(views.glob_matches(g["largest"], f) for f in first)
         ext = PurePosixPath(g["largest"]).suffix.lower()
-        kind = 0 if named else 1 if ext in RECORD_EXTS else 2 if ext in TEXT_EXTS else 3
-        return kind, -g["bytes"]
+        return (0 if ext in RECORD_EXTS else 1 if ext in TEXT_EXTS else 2), -g["bytes"]
 
-    return [g for g in sorted(gs, key=rank) if rank(g)[0] < 3][:SAMPLE_FILES]
+    return [g for g in sorted(gs, key=rank) if rank(g)[0] < 2][:SAMPLE_FILES]
 
 
 def _cut(line: str) -> str:
@@ -169,11 +153,11 @@ def _records(path: Path) -> list[tuple[str, str]]:
         return []
 
 
-def samples(c: str, gs: list[dict[str, Any]], first: list[str]) -> str:
+def samples(c: str, gs: list[dict[str, Any]]) -> str:
     """The prompt's samples: for each likeliest pattern (_likeliest), a few records of its largest file."""
     corpus = config.corpus_dir(c)
     parts = []
-    for g in _likeliest(gs, first):
+    for g in _likeliest(gs):
         recs = _records(corpus / g["largest"])
         if not recs:
             continue
@@ -182,10 +166,10 @@ def samples(c: str, gs: list[dict[str, Any]], first: list[str]) -> str:
     return "\n\n".join(parts) or "(no file holds records thimble can show)"
 
 
-def prompt(c: str, title: str, description: str, files: list[tuple[str, int]], first: list[str]) -> str:
+def prompt(c: str, name: str, description: str, files: list[tuple[Any, ...]]) -> str:
     gs = groups(files)
-    return prompts.render(PROMPT, {"name": title, "applies": description, "files": listing(gs),
-                                   "samples": samples(c, gs, first)})
+    return prompts.render(PROMPT, {"name": name, "description": description or name, "files": listing(gs),
+                                   "samples": samples(c, gs)})
 
 
 async def ask(c: str, text: str) -> Any:
@@ -193,35 +177,24 @@ async def ask(c: str, text: str) -> Any:
     from . import model  # noqa: PLC0415
 
     role = config.models_for(c)["labels"]
-    tool = model.ToolSpec(name=TOOL_NAME, description="Your decision on whether the extension applies to this corpus.",
+    tool = model.ToolSpec(name=TOOL_NAME, description="Your decision on whether the view fits this corpus.",
                           input_schema=SCHEMA)
-    with capture.scope("extension applies", keep=True):
+    with capture.scope("view fit", keep=True):
         return await model.structured(text, tool=tool, model=str(role["model"]), effort=role.get("effort") or None,
                                       cwd=config.corpus_dir(c), speed="fast" if role.get("fast") else "standard")
 
 
-def _matching(c: str, claims: list[str]) -> list[str]:
-    named = dict.fromkeys(" ".join(str(v).split()) for v in claims)
-    return [x for x in named if x and views.claimed_files(c, {"claims": [x]})]
-
-
-async def decide(c: str, title: str, description: str, files: list[tuple[str, int]], first: list[str],
-                 at: str) -> dict[str, Any]:
-    """The decision on one extension in workspace `c`: {key, applies, claims, reason, by: "model", ts} or, when the call
-    failed, {key, error, ts}. `at` is the key it is made for (key)."""
+async def decide(c: str, name: str, description: str, files: list[tuple[Any, ...]], at: str) -> dict[str, Any]:
+    """The decision on one view in workspace `c`: {key, fits, reason, by: "model", ts} or, when the call failed, {key,
+    error, ts}. `files` are the files it claims here, `at` the key it is made for (key)."""
     ts = datetime.now(timezone.utc).isoformat(timespec="seconds")
     try:
-        text = await asyncio.to_thread(prompt, c, title, description, files, first)
+        text = await asyncio.to_thread(prompt, c, name, description, files)
     except (OSError, ValueError, prompts.PromptError) as e:
         return {"key": at, "error": f"its prompt could not be made ({e})", "ts": ts}
     res = await ask(c, text)
     if res.status != "ok" or not isinstance(res.output, dict):
-        log.warning("%s: whether %s applies is not known: %s %s", c, title, res.status, res.detail)
+        log.warning("%s: whether the view %s fits is not known: %s %s", c, name, res.status, res.detail)
         return {"key": at, "error": res.detail or f"the model call ended {res.status.replace('_', ' ')}", "ts": ts}
-    out = res.output
-    reason = " ".join(str(out.get("reason") or "").split())
-    claims = await asyncio.to_thread(_matching, c, [str(x) for x in out.get("claims") or []])
-    if out.get("applies") is True and not claims:
-        return {"key": at, "error": "the answer says it applies and claims no file of this corpus", "ts": ts}
-    return {"key": at, "applies": out.get("applies") is True, "claims": claims, "reason": reason, "by": "model",
-            "ts": ts}
+    reason = " ".join(str(res.output.get("reason") or "").split())
+    return {"key": at, "fits": res.output.get("fits") is True, "reason": reason, "by": "model", "ts": ts}

@@ -2814,7 +2814,7 @@ def cmd_extension(args: argparse.Namespace) -> int:
         if name is None:
             print("Not added.")
             return 0
-        print(f"Added {name}. It runs in every workspace it applies to; "
+        print(f"Added {name}. It runs in every workspace, and its views where they fit; "
               f"`\"extensions\": {{\"{name}\": {{\"enabled\": false}}}}` in {home() / 'config.json'} turns it off.")
     else:
         if not extensions.remove(args.name):

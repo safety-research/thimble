@@ -209,13 +209,11 @@ def _launch(c: str, brief: str, passes: "list[str]", choices: dict[str, Any]) ->
 
 
 async def start(c: str, brief: str, passes: "list[str] | tuple[str, ...]" = ("final", "views"),
-                call: str | None = None, chosen: "dict[str, Any] | None" = None,
-                proposed: "list[str] | None" = None) -> agent_session.Run:
+                call: str | None = None, chosen: "dict[str, Any] | None" = None) -> agent_session.Run:
     """Start the orientation session for workspace `c` with the parts `passes` names (PASSES) and follow it, `call`
     being main's start_orientation call (agent_session.start); `chosen` holds the critique choice the call made, over
-    Start's, and `proposed` the viewers proposed for it (_note_proposed). RuntimeError when one runs or claude cannot be
-    started. A decision on whether an extension applies that is still being made is waited for first
-    (extensions.settle)."""
+    Start's. RuntimeError when one runs or claude cannot be started. A check on whether an extension's view fits that
+    is still being made is waited for first (extensions.settle)."""
     from . import extensions  # noqa: PLC0415
 
     if running(c):
@@ -236,7 +234,6 @@ async def start(c: str, brief: str, passes: "list[str] | tuple[str, ...]" = ("fi
 
     def started(run: agent_session.Run) -> None:
         orientation.started(c, run.chat, session=run.sid, pid=run.pid, passes=passes)
-        _note_proposed(c, run.chat, proposed or [])
         orientation.record(c, effort=choices.get("effort"), ultracode=bool(choices.get("ultracode")),
                            critique=bool(choices.get("critique", True)))
 
@@ -724,36 +721,11 @@ async def tool_start_orientation(ctx: Any, args: dict[str, Any]) -> Any:
     if running(ctx.c) or orientation.active(ctx.c):
         return tools.err(tools.hint("start_orientation-running"))
     passes = [p for p, on in (("final", final), ("views", views), ("report", report)) if on]
-    # before the prompt is rendered, so its forms list the viewers proposed
-    proposed = await _propose_builtins(ctx.c) if views else []
     try:
-        await start(ctx.c, brief, passes, call=ctx.tool_use_id, chosen=chosen, proposed=proposed)
+        await start(ctx.c, brief, passes, call=ctx.tool_use_id, chosen=chosen)
     except RuntimeError as e:
         return tools.err(f"start_orientation: {e}")
     return tools.ok(tools.hint("start_orientation-started"))
-
-
-async def _propose_builtins(c: str) -> list[str]:
-    """views.propose_builtins, whose failure the orientation starts without."""
-    from . import views  # noqa: PLC0415
-
-    try:
-        return await views.propose_builtins(c)
-    except Exception:  # noqa: BLE001
-        log.exception("%s: the viewers that apply were not proposed", c)
-        return []
-
-
-def _note_proposed(c: str, chat: str, slugs: "list[str]") -> None:
-    """A `view` chip in the orientation's chat for each viewer proposed as it started, so its card lists them among the
-    views it proposed."""
-    from . import views  # noqa: PLC0415
-
-    for slug in slugs:
-        prop = views.read_proposal(c, slug)
-        if prop is not None:
-            agents.append(agents.paths(c, chat)[1], {"type": "chip", "ts": _now(), "kind": "view", "text": prop["name"],
-                                                     "ref": f"view:{slug}"})
 
 
 async def tool_message_orientation(ctx: Any, args: dict[str, Any]) -> Any:
