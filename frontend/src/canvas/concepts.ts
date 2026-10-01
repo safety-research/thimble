@@ -140,7 +140,7 @@ export function changedSince(k: Pick<Concept, 'rev' | 'changes'>, rev: number): 
 }
 
 /**
- * The labels a card read at an older revision than theirs, by id, each with what changed since: the tags that turn red.
+ * The labels a card read at an older revision than theirs, by id, each with what changed since.
  * Only a card whose run kept the revisions it read (`label_revs`) can be stale. Pure.
  */
 export function staleLabels(cell: Pick<Cell, 'label_revs'>, concepts: Map<string, Pick<Concept, 'rev' | 'changes'>>): Map<string, string> {

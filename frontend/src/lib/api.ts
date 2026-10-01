@@ -293,9 +293,6 @@ export const api = {
   addCell: (c: string, nb: string, body: NewCellBody) => j<Cell>(`${ws(c)}/notebooks/${enc(nb)}/cells`, { method: 'POST', body: JSON.stringify(body) }),
   updateCell: (c: string, id: string, patch: CellPatch) => j<Cell>(`${ws(c)}/cells/${enc(id)}`, { method: 'PUT', body: JSON.stringify(patch) }),
   runCell: (c: string, id: string) => j<Cell>(`${ws(c)}/cells/${enc(id)}/run`, { method: 'POST' }),
-  /** `POST …/cells/{id}/regenerate`: run the card again on its labels as they are now, then let the card check read
-   * it (backend notebook.regenerate_cell); the Regenerate of a card whose label changed. */
-  regenerateCell: (c: string, id: string) => j<Cell>(`${ws(c)}/cells/${enc(id)}/regenerate`, { method: 'POST' }),
   /** `POST …/cells/{id}/fixes/{fix}/undo`: restore the card from before a check's fix (backend checkstore.undo_fix); the
      * fix is marked undone and is not applied again. */
   undoCardFix: (c: string, id: string, fix: string) => j<Cell>(`${ws(c)}/cells/${enc(id)}/fixes/${enc(fix)}/undo`, { method: 'POST' }),

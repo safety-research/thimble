@@ -2,7 +2,8 @@
 // in the card's own box. The board's CellCard (Cell.tsx) adds hover chrome around it, and the card harness
 // (render.tsx) mounts it alone, so the image a check reads is the card the canvas draws. The face also shows the card
 // check's state: a shimmer while it runs, its replacement faded in once confirmed, and a mark at the takeaway's corner.
-// The body shimmers the same way while the card's code runs, as when an edit_card call is changing it.
+// The body shimmers the same way while the card's code runs, as when an edit_card call is changing it, and the card
+// shimmers as in a check while thimble runs it again because a label it read changed.
 import { useContext, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type CSSProperties, type KeyboardEvent, type MouseEvent, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { ChatMarkdown } from '../chat/markdown'
@@ -15,21 +16,19 @@ import { Popover } from '../components/Menu'
 import { GlyphCites } from '../components/RefChip'
 import { Spinner } from '../components/Spinner'
 import { placeTip, TipButton, useTooltip } from '../components/Tooltip'
-import { draftProblem, LabelSheet, patchOf, withSavedColours } from '../files/LabelCard'
+import { LabelSheet } from '../files/LabelCard'
 import { classesOf, isFilesLabel, isMultiClass, mainColour } from '../files/labels'
 import { addAgentZone, tintElement } from '../lib/agentKey'
-import { api, labelApi } from '../lib/api'
 import { bus } from '../lib/bus'
 import { checkable, checkLine, checkOf, typedLine, type CardCheck } from '../lib/cardCheck'
 import { conceptLabel, ensureConceptName, hasConceptName, onCellNames } from '../lib/cellName'
-import { track } from '../lib/telemetry'
 import { teleport } from '../lib/teleport'
 import type { Cell, Concept } from '../lib/types'
 import { CardBody, LabelHead, asksQuestion } from './bodies'
 import { conceptName, labelsShown, staleLabels, type ConceptDetailState } from './concepts'
 import { CanvasContext } from './context'
 import { editedLabels, labelDraft, setLabelDraft, useLabelDrafts } from './labelDrafts'
-import { isRunnable, kindOf } from './layout'
+import { kindOf } from './layout'
 import { RefEditor } from './RefEditor'
 
 export type CardField = 'title' | 'takeaway'
@@ -87,6 +86,7 @@ function Face(p: CardFaceProps) {
   const swapped = useSwap(check?.fix?.id ?? null)
   const cls = ['canvas-card']
   if (check?.state === 'running') cls.push('is-checking')
+  if ((cell.regenerating_for ?? []).length > 0) cls.push('is-regenerating')
   if (running) cls.push('is-running')
   if (swapped) cls.push('is-swapped')
   return (
@@ -177,13 +177,23 @@ function useSwap(stamp: string | null): boolean {
   return on
 }
 
+/** The tooltip of a label tag on a card, null for none: a label the card is running again for (`regenerating_for`), a
+ * label with unrun edits in its sheet, or one that changed since the card ran. Pure. */
+export function labelTagTip(id: string, regenerating: ReadonlySet<string>, edited: ReadonlyMap<string, string[]>, stale: ReadonlyMap<string, string>): string | null {
+  if (regenerating.has(id)) return 'Stale label: card regenerating…'
+  if (edited.has(id)) return `Edited, not run yet: ${edited.get(id)!.join('; ')}`
+  if (stale.has(id)) return 'Stale label'
+  return null
+}
+
 /** The labels the card uses (concepts.labelsShown), in a row under its question, each a tag in the label's colour. A
- * click opens the label's edit card in a popover. A label with unrun edits or that changed since the card ran turns
- * red and offers Regenerate Card; nothing re-runs by itself. */
+ * click opens the label's edit card in a popover. thimble runs a card again by itself once a label it read changes; a
+ * label that changed and is not being run again for shows its tag in ink. */
 export function CardLabels({ cell }: { cell: Cell }) {
   const ctx = useContext(CanvasContext)
   const ids = labelsShown(cell, ctx.concepts)
   const stale = staleLabels(cell, ctx.concepts)
+  const regenerating = new Set(cell.regenerating_for ?? [])
   useLabelDrafts()
   const edited = editedLabels(ctx.ws, cell, ctx.concepts)
   // a label the board's list does not name yet takes its name from the workspace's labels
@@ -193,86 +203,25 @@ export function CardLabels({ cell }: { cell: Cell }) {
     for (const id of key.split(' ').filter(Boolean)) if (!ctx.concepts.get(id)?.name && !hasConceptName(id)) void ensureConceptName(ctx.ws, id)
   }, [ctx.ws, ctx.concepts, key])
   if (!ids.length) return null
-  const regenerate = (stale.size > 0 || edited.size > 0) && isRunnable(cell)
   return (
     <div className="bcell-labels">
       <span className="bcell-labels-key">Labels:</span>
       {ids.map((id) => (
-        <LabelTag
-          key={id}
-          id={id}
-          label={ctx.concepts.get(id) ?? null}
-          ws={ctx.ws}
-          why={edited.has(id) ? `Edited, not run yet: ${edited.get(id)!.join('; ')}` : stale.has(id) ? `Changed since this card ran: ${stale.get(id)}` : null}
-          regenerate={regenerate ? <RegenerateCard cell={cell} primary /> : undefined}
-        />
+        <LabelTag key={id} id={id} label={ctx.concepts.get(id) ?? null} ws={ctx.ws} why={labelTagTip(id, regenerating, edited, stale)} ink={stale.has(id) && !regenerating.has(id)} />
       ))}
-      {regenerate && <RegenerateCard cell={cell} />}
     </div>
   )
 }
 
-/**
- * Save the unrun edits of each label `cell` uses, then ask the server to run the card again on its labels as they are
- * now (POST /cells/{id}/regenerate). Throws the first problem, with the label's name, before anything is saved.
- */
-export async function regenerateCard(ws: string, cell: Cell, concepts: ReadonlyMap<string, Concept>): Promise<void> {
-  const edits = [...editedLabels(ws, cell, concepts).keys()].map((id) => {
-    const k = concepts.get(id)!
-    const draft = labelDraft(ws, id)!
-    const classes = withSavedColours(k, draft)
-    const problem = draftProblem(draft, classes)
-    if (problem) throw new Error(`${k.name}: ${problem}`)
-    return { k, draft, patch: patchOf(draft, classes) }
-  })
-  for (const { k, draft, patch } of edits) {
-    await labelApi.update(ws, k.id, patch)
-    setLabelDraft(ws, k.id, null)
-    track('label-apply', { target: `concept:${k.id}`, detail: { over: draft.over, marks: draft.over === 'files' ? draft.marks : null, kind: draft.kind, created: false, from: `cell:${cell.id}` } })
-  }
-  await api.regenerateCell(ws, cell.id)
-}
-
-/** The Regenerate Card of a card whose label has edits or changed (CardLabels): a ghost button at the end of the Labels
- * row, or with `primary` the popover's own. It turns while a label it waits for runs and while the card runs. */
-function RegenerateCard({ cell, primary }: { cell: Cell; primary?: boolean }) {
-  const ctx = useContext(CanvasContext)
-  const [busy, setBusy] = useState(false)
-  const running = cell.status === 'running' || (cell.labels ?? []).some((id) => ctx.concepts.get(id)?.run?.status === 'running')
-  const go = async () => {
-    setBusy(true)
-    try {
-      await regenerateCard(ctx.ws, cell, ctx.concepts)
-      ctx.refresh()
-    } catch (e) {
-      bus.emit('toast', { text: (e as Error)?.message || String(e), kind: 'error' })
-    } finally {
-      setBusy(false)
-    }
-  }
-  return (
-    <Button
-      variant={primary ? 'primary' : 'ghost'}
-      size="sm"
-      icon="refresh"
-      busy={busy || running}
-      className={primary ? 'label-sheet-regen' : 'bcell-regen'}
-      onMouseDown={(e) => e.stopPropagation()}
-      onClick={() => void go()}
-    >
-      Regenerate Card
-    </Button>
-  )
-}
-
 /** One label's tag in the Labels row, and the popover its click opens (LabelSheet, edits kept in labelDrafts). A label
- * the board's list does not hold yet opens its card on the canvas instead. `why` is what makes the tag red. */
-function LabelTag({ id, label: k, ws, why, regenerate }: { id: string; label: Concept | null; ws: string; why: string | null; regenerate?: ReactNode }) {
+ * the board's list does not hold yet opens its card on the canvas instead. `why` is the tag's tooltip, and `ink` draws
+ * the tag in ink rather than the label's colour. */
+function LabelTag({ id, label: k, ws, why, ink }: { id: string; label: Concept | null; ws: string; why: string | null; ink: boolean }) {
   const [el, setEl] = useState<HTMLButtonElement | null>(null)
   const [open, setOpen] = useState(false)
   const { props: tipProps, tip } = useTooltip(why && !open ? why : null)
   const name = k?.name || conceptLabel(id) || 'a label'
-  const colour = k && isFilesLabel(k) && !isMultiClass(classesOf(k)) ? mainColour(k) : null
+  const colour = !ink && k && isFilesLabel(k) && !isMultiClass(classesOf(k)) ? mainColour(k) : null
   const openInFiles = () => {
     setOpen(false)
     bus.emit('showTab', { tab: 'files' })
@@ -288,7 +237,7 @@ function LabelTag({ id, label: k, ws, why, regenerate }: { id: string; label: Co
       <button
         type="button"
         ref={setEl}
-        className={'bcell-tag' + (colour ? '' : ' is-plain') + (why ? ' is-stale' : '')}
+        className={'bcell-tag' + (colour ? '' : ' is-plain')}
         style={colour ? ({ '--c': colour } as CSSProperties) : undefined}
         aria-expanded={k ? open : undefined}
         data-anchor={`concept:${id}`}
@@ -313,7 +262,6 @@ function LabelTag({ id, label: k, ws, why, regenerate }: { id: string; label: Co
               onClose={() => setOpen(false)}
               onOpen={openInFiles}
               onReview={review}
-              regenerate={regenerate}
             />
           </div>
         </Popover>

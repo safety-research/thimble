@@ -177,6 +177,9 @@ export interface Cell {
   /** the revision of each label in `labels` as the card's last run read it (backend concepts.py, Revisions); a card
      * whose label has a later revision is stale (canvas/concepts staleLabels). Absent is taken as current. */
   label_revs?: Record<string, number> | null
+  /** the labels thimble is running the card again for, since they changed after its last run; set while that run
+   * lasts */
+  regenerating_for?: string[] | null
   verification?: unknown
   code?: string
   outputs?: MimeBundle[]

@@ -274,25 +274,6 @@ body[data-cmd] .board-stage * {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-/* a label with edits not run yet or changed since the card ran: the tag turns red on the negative's soft tint, and
-   the row ends in Regenerate Card */
-.bcell-tag.is-stale,
-.bcell-tag.is-stale.is-plain {
-  background: var(--status-negative-soft);
-  color: var(--status-negative);
-}
-.bcell-tag.is-stale:hover,
-.bcell-tag.is-stale[aria-expanded='true'] {
-  background: color-mix(in oklab, var(--status-negative) 20%, transparent);
-}
-.bcell-tag.is-stale .bcell-tag-icon {
-  color: var(--status-negative);
-}
-.bcell-regen.btn {
-  height: var(--h-chip);
-  padding: 0 6px;
-  color: var(--text-secondary);
-}
 .bcell.is-selected .bcell-q,
 .bcell.is-selected .bcell-take {
   cursor: text;
@@ -551,8 +532,8 @@ body[data-cmd] .board-stage * {
   margin-top: 4px;
 }
 /* -------- the card check on the face (canvas/CardFace, lib/cardCheck) -------- */
-/* while a card is checked its body and citations shimmer faintly with an accent sweep (a static tint under reduced
-   motion); while its code runs (an edit changing it) its body does */
+/* while a card is checked, or run again because a label it read changed, its body and citations shimmer faintly with
+   an accent sweep (a static tint under reduced motion); while its code runs (an edit changing it) its body does */
 .bcell-body {
   position: relative;
   display: flex;
@@ -568,6 +549,7 @@ body[data-cmd] .board-stage * {
   overflow: hidden;
 }
 .canvas-card.is-checking .bcell-body::after,
+.canvas-card.is-regenerating .bcell-body::after,
 .canvas-card.is-running .bcell-body::after {
   content: '';
   position: absolute;
@@ -580,7 +562,9 @@ body[data-cmd] .board-stage * {
   animation: bcell-shimmer 1.8s linear infinite;
 }
 .canvas-card.is-checking .bcell-take .refchip,
-.canvas-card.is-checking .bcell-take .refchip.refchip-value {
+.canvas-card.is-checking .bcell-take .refchip.refchip-value,
+.canvas-card.is-regenerating .bcell-take .refchip,
+.canvas-card.is-regenerating .bcell-take .refchip.refchip-value {
   background-image: linear-gradient(100deg, transparent 30%, color-mix(in oklab, var(--accent) 12%, transparent) 50%, transparent 70%);
   background-size: 300% 100%;
   box-decoration-break: clone;
@@ -597,9 +581,12 @@ body[data-cmd] .board-stage * {
 }
 @media (prefers-reduced-motion: reduce) {
   .canvas-card.is-checking .bcell-body::after,
+  .canvas-card.is-regenerating .bcell-body::after,
   .canvas-card.is-running .bcell-body::after,
   .canvas-card.is-checking .bcell-take .refchip,
-  .canvas-card.is-checking .bcell-take .refchip.refchip-value {
+  .canvas-card.is-checking .bcell-take .refchip.refchip-value,
+  .canvas-card.is-regenerating .bcell-take .refchip,
+  .canvas-card.is-regenerating .bcell-take .refchip.refchip-value {
     animation: none;
     background-image: none;
     background-color: color-mix(in oklab, var(--accent) 5%, transparent);
