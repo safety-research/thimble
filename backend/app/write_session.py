@@ -18,7 +18,7 @@ from typing import Any
 
 from fastapi import HTTPException
 
-from . import agent_session, agents, bg_session, config, context, report_types, tools
+from . import agent_session, agents, bg_session, config, context, report_types, tools, work_files
 
 log = logging.getLogger("thimble.write_session")
 
@@ -155,7 +155,8 @@ async def _resume_left(c: str, meta: dict[str, Any], prompt: str) -> agent_sessi
 
 def _ended(run: agent_session.Run, status: str, summary: str) -> None:
     """The session ended: main hears the writer's last message (report_types.writer_finished has ended the write), once
-    a session listens (agent_session.tell_main)."""
+    a session listens (agent_session.tell_main), and its work folder lets go of what it no longer needs (work_files)."""
+    work_files.clear_soon(run.c, work_dir(run.c, run.key.split(":", 1)[-1]))
     agent_session.tell_main(run.c, WRITTEN_KIND, {"text": summary or "", "status": status,
                                                   "doc": run.key.split(":", 1)[-1]})
 

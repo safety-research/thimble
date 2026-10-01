@@ -8,7 +8,8 @@ Start. Only the orientation's session lists `critique`. The server starts a Clau
 critic's work folder running as the critic agent (prompts/critic.md via `--agents`, shared.md appended), with the
 `critic` role's model settings. It has every tool of a default Claude Code session and, of thimble's, OWN_TOOLS, so it
 adds no card, and it runs in a work folder of its own with the corpus read-only (agent_session, the fence). One critique
-runs at a time, in the critic's row of the permission modes (modes.py).
+runs at a time, in the critic's row of the permission modes (modes.py). When it ends, its subagents' `tmp_*` folders and
+the large files no card or document uses are deleted from its work folder (work_files).
 
 The transcript. Raw transcripts run to megabytes of JSON and Read cuts lines at 2,000 characters, so the critique
 renders the session's and its agents' transcripts into one digest, each tool call under its ref in the orientation's
@@ -32,7 +33,7 @@ import textwrap
 from pathlib import Path
 from typing import Any
 
-from . import agent_session, agents, config, orient_checks, orientation, session, tools
+from . import agent_session, agents, config, orient_checks, orientation, session, tools, work_files
 
 log = logging.getLogger("thimble.critique_session")
 
@@ -384,6 +385,7 @@ async def start(c: str, caller: agent_session.Run, context: str = "") -> tuple[a
     done: asyncio.Future = asyncio.get_running_loop().create_future()
 
     def ended(run: agent_session.Run, status: str, summary: str) -> None:
+        work_files.clear_soon(c, work_dir(c, caller.chat))
         if not done.done():
             done.set_result((status, agent_session.with_earlier(run, summary)))
 
@@ -498,6 +500,7 @@ async def program_critique(c: str, caller: agent_session.Run, part: Any, context
     done: asyncio.Future = asyncio.get_running_loop().create_future()
 
     def ended(_run: Any, status: str, summary: str) -> None:
+        work_files.clear_soon(c, work_dir(c, caller.chat))
         if not done.done():
             done.set_result((status, summary))
 

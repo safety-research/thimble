@@ -17,7 +17,8 @@ Tools. orient.md names no tools, so the session has every tool the analyst's Cla
 the thimble tools that are not the orientation's (ORIENT_TOOLS) and those of each part switched off (PART_TOOLS).
 
 The fence. The session writes only into `workspaces/<c>/orient/work/`; where Claude Code's Bash sandbox runs, Bash runs
-there with no network and no write into the corpus. When a run ends (unless it failed) its `tmp_*` files are deleted.
+there with no network and no write into the corpus. When a run ends (unless it failed) its subagents' `tmp_*` folders
+and the large files no card or document uses are deleted (work_files).
 
 Permissions. The session runs in the orientation's row of the permission modes (modes.py), which Start's switcher shows
 and edits. Manual and Bypass pass `--permission-mode default` (requests wait on the card, or are granted at once); Auto
@@ -48,7 +49,6 @@ import asyncio
 import json
 import logging
 import re
-import shutil
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -56,7 +56,8 @@ from typing import Any
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-from . import agent_session, agents, bg_session, cc_settings, config, ledger, orientation, prompts, tools, userconf
+from . import (agent_session, agents, bg_session, cc_settings, config, ledger, orientation, prompts, tools, userconf,
+               work_files)
 
 log = logging.getLogger("thimble.orient_session")
 router = APIRouter()
@@ -80,7 +81,6 @@ ORIENT_TOOLS = ("read_ref", "list_cards", "add_card", "edit_card", "delete_card"
 PART_TOOLS = {"final": ("add_card", "edit_card", "delete_card", "apply_label"), "views": ("propose_view",),
               "critique": ("critique",)}
 WORK_DIR = "work"  # orient/work: the one folder outside the corpus the session writes into
-TEMP_GLOB = "tmp_*"  # what in the work folder is deleted when a run ends (_clear_temp)
 INSTRUCTIONS = "orient-instructions"  # prompts/orient-instructions.md, thimble's default instructions
 SETTING = "orient_instructions"  # settings.json: the analyst's own instructions, which replace the defaults (instructions_of)
 # The blocks of the prompt thimble gives a default for, which an extension may replace (extensions.orient_blocks), by
@@ -549,7 +549,7 @@ def _ended(run: agent_session.Run, status: str, summary: str) -> None:
         made = {}
     _tell_main(c, status, run.k, made, error=summary if status == "failed" else "")
     if status != "failed":  # a failed run is resumed with its work folder as it left it
-        _clear_temp(c)
+        work_files.clear_soon(c, work_dir(c))
     rec = orientation.read_run(c) or {}
     queue = [m for m in rec.get("queue") or [] if isinstance(m, dict)]
     if queue:
@@ -570,19 +570,6 @@ def _analyst_stopped(run: agent_session.Run, status: str) -> bool:
     if run.interrupted:
         return False
     return status == "stopped" or (run.bg and bg_session.stopped_in_claude(run.c, run.key))
-
-
-def _clear_temp(c: str) -> None:
-    """Delete the `tmp_*` files and folders in the session's work folder once a run ends, so large intermediates are not
-    kept in an archive. The rest stays, since a card's code may read a cleaned copy the session made there."""
-    for path in work_dir(c).glob(TEMP_GLOB):
-        try:
-            if path.is_dir() and not path.is_symlink():
-                shutil.rmtree(path)
-            else:
-                path.unlink()
-        except OSError as e:
-            log.info("%s: the orientation's temporary %s was not deleted (%s)", c, path.name, e)
 
 
 async def _resume_queued(c: str, queue: "list[dict[str, Any]]") -> None:
