@@ -73,6 +73,8 @@ export type Events = {
   citeHover: { card: string; ref: string | null }
   /** ⌘ went down or up: a view's frame shows the ⌘ arrow (`cursor`, a CSS cursor value) while it is held */
   cmdHeld: { on: boolean; cursor: string }
+  /** run the product tour again (Settings' Take the tour) */
+  tour: Record<string, never>
 }
 
 type Handler<T> = (payload: T) => void

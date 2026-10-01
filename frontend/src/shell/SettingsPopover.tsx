@@ -344,6 +344,17 @@ export function SettingsPopover({ ws, anchor, open, onClose }: { ws: string; anc
         )}
         {(error || settings?.config_error) && <div className="settings-error">{error || settings?.config_error}</div>}
         <div className="settings-foot">
+          {/* the product tour again, from its first step (shell/TourHost) */}
+          <Button
+            variant="ghost"
+            className="settings-tour"
+            onClick={() => {
+              onClose()
+              window.setTimeout(() => bus.emit('tour', {}), 250)
+            }}
+          >
+            Take the tour
+          </Button>
           <Button variant="ghost" onClick={onClose} disabled={busy}>
             Cancel
           </Button>
