@@ -1,5 +1,7 @@
 // The files tree: folders first, then files, alphabetical. Each folder's entries are fetched the first time it is shown
 // (useFolderStore) and only the rows in view are rendered (windowOf), so a very large corpus scrolls like a small one.
+// Every WATCH_MS, and when a folder opens, the tree asks for the stamps of the folders it shows and lists again those
+// that changed on disk (useFolderWatch), such as a folder where an agent just wrote a file.
 // At the right of a row, a dot per label that is on and marks something in the file; a file label that is on draws a
 // stripe left of the glyph instead (labels.ts presenceOf). A collapsed folder shows a dot for each label that marks
 // something under it. The guide lines show only while the pointer is over the tree. Every file row carries
@@ -16,6 +18,8 @@ import { isJsonlFile } from './views/common'
 export const ROW_HEIGHT = 24
 /** rows rendered above and below the visible window */
 export const OVERSCAN = 8
+/** ms between the tree's checks for folders that changed on disk */
+export const WATCH_MS = 4000
 /** px, the label glyph's box among a row's marks: its outline (16 of the 24 units and a stroke of 2) comes out 6.75px,
  * the size of the 7px dot beside it (`.files-dot`), and an odd box centres on the dot's centre at whole pixels */
 const MARK_TAG_PX = 9
@@ -172,6 +176,8 @@ export interface FolderStoreHandle {
   ensure: (path: string) => void
   /** drop everything and fetch again (a working-directory change) */
   reset: () => void
+  /** list again those of these listed folders whose stamp on disk is no longer their listing's */
+  refreshChanged: (paths: readonly string[]) => Promise<void>
 }
 
 /** The folders fetched so far for a workspace, one request per folder, shared by the tree and the reader's kind lookup. */
@@ -200,8 +206,75 @@ export function useFolderStore(ws: string): FolderStoreHandle {
     inflight.current.clear()
     setStore(new Map())
   }, [])
+  // a listing is replaced only once its new one arrives, so the rows stay put meanwhile
+  const refreshChanged = useCallback(
+    async (paths: readonly string[]) => {
+      const listed = paths.filter((p) => {
+        const st = storeRef.current.get(p)
+        return st?.state === 'ok' && st.listing.stamp != null && !inflight.current.has(p)
+      })
+      if (!listed.length) return
+      const my = gen.current
+      let stamps: Record<string, string | null>
+      try {
+        stamps = (await scaleApi.stamps(ws, listed)).stamps
+      } catch {
+        return
+      }
+      if (my !== gen.current) return
+      for (const p of listed) {
+        const st = storeRef.current.get(p)
+        const now = stamps[p]
+        if (now == null || st?.state !== 'ok' || st.listing.stamp === now || inflight.current.has(p)) continue
+        inflight.current.add(p)
+        scaleApi
+          .folder(ws, p)
+          .then((listing) => my === gen.current && setStore((s) => new Map(s).set(p, { state: 'ok', listing })))
+          .catch(() => undefined)
+          .finally(() => inflight.current.delete(p))
+      }
+    },
+    [ws],
+  )
   useEffect(() => reset, [ws, reset])
-  return useMemo(() => ({ store, ensure, reset }), [store, ensure, reset])
+  return useMemo(() => ({ store, ensure, reset, refreshChanged }), [store, ensure, reset, refreshChanged])
+}
+
+/** The folders a tree shows: the root and each expanded folder whose folders above are all expanded. */
+export function shownFolders(expanded: ReadonlySet<string>): string[] {
+  return ['', ...[...expanded].filter((p) => ancestors(p).every((a) => expanded.has(a)))]
+}
+
+/** Calls `check` with the folders `paths` every `everyMs` while `visible()` holds and the page is not hidden, when the
+ * page shows again, and at once when the folders change, since a folder opened again may hold an old listing. */
+export function useFolderWatch(check: (paths: readonly string[]) => Promise<void>, paths: readonly string[], visible: () => boolean, everyMs = WATCH_MS): void {
+  const latest = useRef({ paths, visible })
+  latest.current = { paths, visible }
+  const busy = useRef(false)
+  const tick = useCallback(async () => {
+    if (busy.current || document.visibilityState === 'hidden' || !latest.current.visible()) return
+    busy.current = true
+    try {
+      await check(latest.current.paths)
+    } finally {
+      busy.current = false
+    }
+  }, [check])
+  useEffect(() => {
+    const timer = window.setInterval(() => void tick(), everyMs)
+    const onShow = () => {
+      if (document.visibilityState === 'visible') void tick()
+    }
+    document.addEventListener('visibilitychange', onShow)
+    return () => {
+      window.clearInterval(timer)
+      document.removeEventListener('visibilitychange', onShow)
+    }
+  }, [tick, everyMs])
+  const key = paths.join('\n')
+  useEffect(() => {
+    void tick()
+  }, [key, tick])
 }
 
 interface Props {
@@ -255,6 +328,9 @@ export function Tree({ folders, error, activePath, onOpen, marksOf, folderDotsOf
   }, [activePath])
 
   const rows = useMemo(() => rowsOf(store, expanded), [store, expanded])
+  const shown = useMemo(() => shownFolders(expanded), [expanded])
+  const inView = useCallback(() => !!treeRef.current?.isConnected && treeRef.current.offsetParent !== null, [])
+  useFolderWatch(folders.refreshChanged, shown, inView)
 
   // the viewport: its height for the window, its scroll position
   useEffect(() => {

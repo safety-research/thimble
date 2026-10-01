@@ -179,24 +179,48 @@ def forget_sources(corpus: Path | None = None) -> None:
     corpus_tree.forget(corpus)
 
 
-def folder_listing(corpus: Path, rel: str, include_hidden: bool = False) -> dict[str, Any] | None:
-    """`GET /sources?path=<rel>&depth=1`: the folder's own files and subfolders, read from that folder alone. A
-    subfolder is a run (`is_run`) when it holds an `agents/` folder or a `manifest.json`. The counts of files at any
-    depth (`n_files`, the folder's own and each subfolder's) and a subfolder's `n_folders` are given only where earlier
-    walks of the corpus's folder tree know them (corpus_tree.Tree.counts). None for a folder that is not there, or one
-    the listing leaves out: under a dot name without `include_hidden`, or reached through a symlinked folder."""
-    rel = rel.strip("/")
-    hidden_here = _is_hidden(rel) if rel else False
-    if hidden_here and not include_hidden:
+def _listed_folder(corpus: Path, rel: str, include_hidden: bool) -> str | None:
+    """The path of corpus folder `rel` (stripped of slashes) as folder_listing reads it, or None for one it leaves out:
+    under a dot name without `include_hidden`, or reached through a symlinked folder."""
+    if rel and _is_hidden(rel) and not include_hidden:
         return None
     d = f"{corpus}/{rel}" if rel else str(corpus)
     if rel and (os.path.normpath(rel) != rel or os.path.realpath(d) != os.path.join(os.path.realpath(corpus), rel)):
         return None
+    return d
+
+
+def folder_stamp(corpus: Path, rel: str, include_hidden: bool = False) -> str | None:
+    """The folder's modification time in nanoseconds, which an entry added, removed or renamed in it changes, as a
+    string; None for a folder that is not there or that folder_listing leaves out."""
+    d = _listed_folder(corpus, rel.strip("/"), include_hidden)
     try:
+        return str(os.stat(d).st_mtime_ns) if d is not None else None
+    except OSError:
+        return None
+
+
+def folder_listing(corpus: Path, rel: str, include_hidden: bool = False) -> dict[str, Any] | None:
+    """`GET /sources?path=<rel>&depth=1`: the folder's own files and subfolders, read from that folder alone, with its
+    `stamp` (folder_stamp) as of before the read, so a later change shows as another stamp. A subfolder is a run
+    (`is_run`) when it holds an `agents/` folder or a `manifest.json`. The counts of files at any depth (`n_files`, the
+    folder's own and each subfolder's) and a subfolder's `n_folders` are given only where earlier walks of the corpus's
+    folder tree know them (corpus_tree.Tree.counts). None for a folder that is not there, or one the listing leaves out:
+    under a dot name without `include_hidden`, or reached through a symlinked folder."""
+    rel = rel.strip("/")
+    hidden_here = _is_hidden(rel) if rel else False
+    d = _listed_folder(corpus, rel, include_hidden)
+    if d is None:
+        return None
+    try:
+        mtime = os.stat(d).st_mtime_ns
         with os.scandir(d) as it:
             entries = list(it)
     except OSError:
         return None
+    # a folder changed within its modification time's resolution may change again under the same time, so a listing
+    # read that soon carries a stamp no folder_stamp equals, and the tree lists it once more
+    stamp = f"{mtime}~" if 0 <= time.time_ns() - mtime < corpus_tree.RACY_NS else str(mtime)
     files: list[dict[str, Any]] = []
     subs: list[tuple[str, str, bool, str]] = []
     for e in entries:
@@ -231,7 +255,7 @@ def folder_listing(corpus: Path, rel: str, include_hidden: bool = False) -> dict
         if hidden:
             entry["hidden"] = True
         folders.append(entry)
-    out: dict[str, Any] = {"path": rel, "files": files, "folders": folders}
+    out: dict[str, Any] = {"path": rel, "files": files, "folders": folders, "stamp": stamp}
     known = counts.get(rel)
     if known is not None:
         out["n_files"] = known[0]
@@ -1070,6 +1094,27 @@ def get_sources(c: str, include_hidden: int = 0, path: str | None = None, depth:
             raise HTTPException(404, f"no such folder: {rel!r}")
         listing = {"path": rel, "files": [], "folders": [], "n_files": 0}
     return listing
+
+
+STAMPS_MAX = 2000  # folders one POST /sources/stamps asks about
+
+
+class StampsBody(BaseModel):
+    paths: list[str]
+
+
+@router.post("/corpora/{c}/sources/stamps")
+def post_stamps(c: str, body: StampsBody, include_hidden: int = 0) -> dict[str, Any]:
+    """The `stamp` (folder_stamp) of each folder the Files tree shows, so it lists again only the folders that changed;
+    null for a folder that is gone or not listed. 400 past STAMPS_MAX folders."""
+    corpus = _corpus(c)
+    if len(body.paths) > STAMPS_MAX:
+        raise HTTPException(400, f"at most {STAMPS_MAX} folders at a time")
+    out: dict[str, str | None] = {}
+    for path in body.paths:
+        rel = str(path).strip().strip("/")
+        out[path] = folder_stamp(corpus, "" if rel == "." else rel, bool(include_hidden))
+    return {"stamps": out}
 
 
 @router.get("/corpora/{c}/source")

@@ -1724,6 +1724,8 @@ export interface FolderListing {
   files: SourceInfo[]
   folders: FolderEntry[]
   n_files?: number
+  /** the folder's modification time when it was read, which `POST /sources/stamps` compares (backend folder_stamp) */
+  stamp?: string
 }
 
 /** `GET /concepts/{id}/rows` with `next`, the rowid cursor for the page after this one (null at the end). */
