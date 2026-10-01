@@ -330,6 +330,20 @@ async def test_a_workspace_gets_four_views_from_the_orientation_and_a_deleted_on
     assert [p["name"] for p in views.list_proposals(CORPUS)] == ["Two", "Three", "Four", "One"]
 
 
+def test_a_viewer_thimble_ships_runs_from_a_copy_in_the_workspace(ws, tmp_path, monkeypatch):
+    """The views kernel's sandbox holds the workspace, not thimble's own folder."""
+    shipped = tmp_path / "viewers" / "board"
+    shipped.mkdir(parents=True)
+    (shipped / "view.json").write_text(json.dumps({**VIEW, "name": "Board"}), "utf-8")
+    (shipped / "reader.py").write_text(THREADS_READER, "utf-8")
+    (shipped / "view.html").write_text(THREADS_HTML, "utf-8")
+    monkeypatch.setattr(views, "VIEWERS_DIR", shipped.parent)
+    monkeypatch.setattr(views, "BUILTIN_VIEWERS", ("board",))
+    _, req = views._prepare(CORPUS, "board")
+    assert Path(req["reader"]).is_relative_to(ws.resolve())
+    assert Path(req["reader"]).read_text("utf-8") == THREADS_READER
+
+
 def test_the_frame_document_blocks_every_host_before_any_script(ws):
     doc = views.frame_document(views.read_view(CORPUS, "threads"))
     assert doc.lower().startswith("<!doctype html>")
