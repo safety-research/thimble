@@ -1248,6 +1248,39 @@
   border-radius: 1.5px;
   background: var(--c);
 }
+/* the labels on a PDF's pages, each with the pages it marks, which open the PDF there */
+.reader-pagelabels {
+  flex-wrap: wrap;
+  height: auto;
+  min-height: 30px;
+  padding: 4px 14px;
+}
+.reader-pagelabel {
+  height: auto;
+  min-height: 22px;
+  flex-wrap: wrap;
+  white-space: normal;
+}
+.reader-pagelabel-name {
+  margin-right: 2px;
+}
+.reader-pagelabel-page {
+  padding: 0 4px;
+  border: 0;
+  border-radius: var(--radius-chip);
+  background: none;
+  color: var(--text-secondary);
+  font: var(--type-mono-sm);
+  cursor: pointer;
+}
+.reader-pagelabel-page:hover {
+  color: var(--text-primary);
+  background: rgba(var(--ink-rgb), 0.06);
+}
+.reader-pagelabel-page[aria-current='page'] {
+  color: var(--text-primary);
+  background: rgba(var(--ink-rgb), 0.1);
+}
 .reader-main {
   flex: 1;
   min-height: 0;

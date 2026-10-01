@@ -13,7 +13,7 @@ import { mediaOf, mediaUrl, type MediaRef } from '../lib/media'
 import { refreshProposals } from '../lib/proposals'
 import { fragmentIn, nearestLine, parseRef } from '../lib/refs'
 import { track } from '../lib/telemetry'
-import type { Proposal, SourceKind, SourcePage, SourceRecord, TranscriptHint, View } from '../lib/types'
+import type { LabelsForPath, Proposal, SourceKind, SourcePage, SourceRecord, TranscriptHint, View } from '../lib/types'
 import { readStorage, storageKey, writeStorage } from '../lib/workspace'
 import { failureText, ReportProblemButton } from '../shell/ProblemReport'
 import { clearMatches, firstMatchFrom, lineAsked, markMatches, markSpots, matchCount, matchNumber, stepInLine, stepMatch, unfoldAt, type MatchAt } from './find'
@@ -247,6 +247,76 @@ function FileLabels({ items }: { items: { id: string; name: string; colour: stri
   )
 }
 
+export interface PageMarks {
+  key: string
+  name: string
+  colour: string
+  pages: number[]
+}
+
+/** The pages of a PDF that each label over records that is on marks with a highlighted value, one entry per label and
+ * value (the value's name after the label's when it has more than two), asked again when the labels on or their runs
+ * change. */
+function usePdfPageLabels(ws: string, labels: FilesLabels, path: string): PageMarks[] {
+  const [rows, setRows] = useState<LabelsForPath[]>([])
+  const onKey = labels.on.map((k) => k.id).join(',')
+  useEffect(() => {
+    if (!onKey) {
+      setRows([])
+      return
+    }
+    let alive = true
+    api
+      .labelsForPath(ws, path)
+      .then((r) => alive && setRows(r))
+      .catch(() => alive && setRows([]))
+    return () => {
+      alive = false
+    }
+  }, [ws, path, onKey, labels.presence])
+  return useMemo(() => pdfPageMarks(labels.on, rows, path), [labels.on, rows, path])
+}
+
+/** Per label over records that is on and value it highlights, the pages of the PDF at `path` its rows mark. Pure. */
+export function pdfPageMarks(on: FilesLabels['on'], rows: LabelsForPath[], path: string): PageMarks[] {
+  return on
+    .filter((k) => marksOf(k) !== 'file')
+    .flatMap((k) => {
+      const got = rows.find((r) => r.concept_id === k.id)
+      const classes = classesOf(k)
+      return classes
+        .filter((c) => c.highlight)
+        .map((c) => ({
+          key: `${k.id}:${c.name}`,
+          name: classes.length > 2 ? `${k.name} · ${c.name}` : k.name,
+          colour: colourVar(c.color),
+          pages: [...new Set((got?.rows ?? []).filter((r) => valueOf(r) === c.name).map((r) => pdfPage(r.ref, path)).filter((n): n is number => n != null))].sort((a, b) => a - b),
+        }))
+        .filter((m) => m.pages.length)
+    })
+}
+
+/** The labels on a PDF's pages, which the browser's own viewer cannot draw: each label with its colour and the pages it
+ * marks, a click on one opening the PDF there. */
+function PdfPageLabels({ items, page, onPage, path }: { items: PageMarks[]; page: number | null; onPage: (n: number) => void; path: string }) {
+  if (!items.length) return null
+  return (
+    <div className="reader-filelabels reader-pagelabels">
+      {items.map((m) => (
+        <span key={m.key} className="reader-filelabel reader-pagelabel" style={{ '--c': m.colour } as CSSProperties}>
+          <span className="reader-filelabel-bar" />
+          <span className="reader-pagelabel-name">{m.name}</span>
+          {m.pages.map((n) => (
+            <button key={n} type="button" className="reader-pagelabel-page" aria-current={n === page ? 'page' : undefined} data-anchor={`${path}#p${n}`} onClick={() => onPage(n)}>
+              p. {n}
+            </button>
+          ))}
+        </span>
+      ))}
+    </div>
+  )
+}
+
 /** Where the File browser keeps the mode picked for a file: a built-in view's type, or `v:<slug>` for a file viewer. */
 export const pickKey = (workspace: string, path: string): string => storageKey(workspace, `viewOf:${path}`)
 
@@ -295,7 +365,10 @@ function useViewerDelete(ws: string, pickedSlug: string | null, forgetPick: () =
  * when it opens the file. A browser that would only download it gets a line saying so and a link to the file in place
  * of the frame. */
 function PdfReader({ workspace, path, targetRef, lead, end, labels, only, onMode }: ReaderProps) {
-  const page = pdfPage(targetRef, path)
+  const asked = pdfPage(targetRef, path)
+  // a page picked from the labels' pages, until another ref is asked for
+  const [picked, setPicked] = useState<{ n: number; ref: string | undefined } | null>(null)
+  const page = picked && picked.ref === targetRef ? picked.n : asked
   const src = api.pdfUrl(workspace, path, page)
   const inPage = pdfInPage()
   const memoryKey = pickKey(workspace, path)
@@ -320,6 +393,7 @@ function PdfReader({ workspace, path, targetRef, lead, end, labels, only, onMode
     writeStorage(memoryKey, null)
   }
   const fileLabels = useFileLabels(labels, path)
+  const pageLabels = usePdfPageLabels(workspace, labels, path)
   const { removable, confirmDelete } = useViewerDelete(workspace, pickedSlug, forgetPick)
   const { offered, dismiss } = useOffered(workspace, types.proposal, !only && !viewer)
   const options = [{ value: PDF_MODE, label: 'PDF' }, ...(only ? [] : types.viewers.map((v) => ({ value: viewValue(v.slug), label: v.name, ...removable(v) })))]
@@ -340,6 +414,7 @@ function PdfReader({ workspace, path, targetRef, lead, end, labels, only, onMode
         </div>
       )}
       <FileLabels items={fileLabels} />
+      {!viewer && <PdfPageLabels items={pageLabels} page={page} path={path} onPage={(n) => setPicked({ n, ref: targetRef })} />}
       {viewer ? (
         <ReaderViewer key={viewer.slug} ws={workspace} view={viewer} path={path} targetRef={fragment != null && accepts(viewer, fragment) ? targetRef : undefined} labels={labels} />
       ) : inPage ? (
