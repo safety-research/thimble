@@ -91,6 +91,8 @@ ROUTER_MODULES = [
     "render", "card_check", "checkstore",
     # the review of a built view's pictures, which sends what it finds back to the view's build session
     "view_review",
+    # whether the product tour was offered on this install's first launch
+    "tour",
 ]
 
 # The backend binds to 127.0.0.1, but a DNS-rebinding page can still reach it as same-origin unless the Host
