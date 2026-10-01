@@ -70,6 +70,21 @@ def test_a_folder_keeps_its_newest_fingerprints_and_the_one_just_built(tmp_path)
     assert not old[1].exists()
 
 
+def test_a_folder_keeps_the_index_a_built_view_used_last_beside_newer_drafts(tmp_path):
+    d = tmp_path / "v"
+    page = _pickle(d, "page", 10, 7200)
+    view_indexes.used(page, built=True)
+    os.utime(page, (time.time() - 7200,) * 2)
+    old = _pickle(d, "older", 10, 9000)
+    (d / "older.built").touch()
+    os.utime(d / "older.built", (time.time() - 9000,) * 2)
+    drafts = [_pickle(d, f"draft{i}", 10, 600 * (4 - i)) for i in range(4)]
+    view_indexes.prune_dir(d)
+    assert page.exists(), "the index of the version a page is on stays while a change's checks build new ones"
+    assert not old.exists() and not (d / "older.built").exists()
+    assert [p.exists() for p in drafts] == [False, False, True, True]
+
+
 def test_the_cap_deletes_the_least_recently_used_but_none_in_use(workspaces_tmp, monkeypatch):
     a = workspaces_tmp / "a" / view_indexes.INDEXES_SUBDIR
     b = workspaces_tmp / "b" / view_indexes.INDEXES_SUBDIR
@@ -102,9 +117,9 @@ async def test_a_new_fingerprint_prunes_its_folder_and_the_start_drops_deleted_v
     built = []
     real = view_indexes.built
 
-    def note(c, pickle):
+    def note(c, pickle, *rest):
         built.append(pickle)
-        real(c, pickle)
+        real(c, pickle, *rest)
 
     monkeypatch.setattr(view_indexes, "built", note)
     for i in range(4):  # each edit of reader.py is a new fingerprint, and a new pickle

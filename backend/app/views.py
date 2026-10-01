@@ -957,7 +957,7 @@ def _prepared(c: str, slug: str, version: str | None = None) -> tuple[dict[str, 
     index = index_dir(c, slug)
     req = {"slug": slug, "reader": str(reader_path.resolve()), "fp": fp, "paths": [f[0] for f in files],
            "cache": str((index / f"{fp}.index.pickle").resolve()), "reads": str((index / f"{fp}.reads.json").resolve()),
-           "thimble": str(KERNEL_THIMBLE)}
+           "thimble": str(KERNEL_THIMBLE), "built": not view["draft"]}
     return view, req, files
 
 
@@ -967,7 +967,8 @@ async def _call(c: str, req: dict[str, Any], op: str, arg: Any = None, *, call: 
     awaiting task interrupts the call."""
     _bind_loop()
     key = (c, req["slug"], req["fp"])
-    req = {**req, "memory": view_calls.memory_budget()}
+    by_built = bool(req.get("built"))  # a built view's request (_prepared): pruning keeps its index longest
+    req = {**{k: x for k, x in req.items() if k != "built"}, "memory": view_calls.memory_budget()}
     if call is not None:
         req["progress"] = str(view_calls.progress_path(indexes_dir(c), call).resolve())
     token = view_calls.REQUEST.set({"slug": req["slug"], "fp": req["fp"], "cache": req.get("cache"), "call": call})
@@ -983,9 +984,9 @@ async def _call(c: str, req: dict[str, Any], op: str, arg: Any = None, *, call: 
     if ans is None:
         raise ReaderError(_kernel_error(outputs))
     if ans.get("built") and req.get("cache"):
-        view_indexes.built(c, Path(req["cache"]))
+        view_indexes.built(c, Path(req["cache"]), by_built)
     elif req.get("cache"):
-        view_indexes.used(Path(req["cache"]))
+        view_indexes.used(Path(req["cache"]), by_built)
     if not ans.get("ok"):
         raise ReaderError(str(ans.get("error") or "the reader failed"), str(ans.get("traceback") or ""))
     if op != "applies":
