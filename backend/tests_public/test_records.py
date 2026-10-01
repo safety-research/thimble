@@ -191,6 +191,21 @@ def test_records_resolve_with_their_lines_and_line_refs_keep_working(corpus):
     assert refs.span_of_quote(corpus, "report.pdf", "Average rest between shifts") == "report.pdf#p2"
 
 
+def test_the_table_view_learns_the_number_of_each_csv_row_it_shows(corpus):
+    from fastapi.testclient import TestClient
+
+    from app import corpus as corpus_mod
+
+    a = FastAPI()
+    a.include_router(corpus_mod.router, prefix="/api")
+    client = TestClient(a)
+    got = client.get(f"/api/corpora/{CORPUS}/csv-rows", params={"path": "orders.csv", "lines": "1-6"})
+    assert got.status_code == 200 and got.json() == {"rows": [[2, 1], [4, 2], [6, 3]]}, "row 1 spans lines 2 and 3"
+    assert client.get(f"/api/corpora/{CORPUS}/csv-rows", params={"path": "orders.csv", "lines": "3-5"}).json() == {"rows": [[4, 2]]}
+    assert client.get(f"/api/corpora/{CORPUS}/csv-rows", params={"path": "notes.jsonl", "lines": "1-2"}).status_code == 400
+    assert client.get(f"/api/corpora/{CORPUS}/csv-rows", params={"path": "../x.csv", "lines": "1-2"}).status_code == 400
+
+
 # --------------------------------------------------------------------------- labels
 
 

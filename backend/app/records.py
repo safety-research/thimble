@@ -26,6 +26,7 @@ caches of a bounded size; a PDF's page texts are read and kept by pdfs.page_text
 """
 from __future__ import annotations
 
+import bisect
 import contextlib
 import csv
 import json
@@ -564,6 +565,18 @@ def csv_index(path: Path, rel: str) -> _CsvIndex:
         idx = _build_csv(path, rel)
         _CSV.put(path, key, idx, idx.nbytes)
         return idx
+
+
+def row_starts(path: Path, rel: str, first: int, last: int) -> list[list[int]]:
+    """[[line, n], ...]: the rows of a CSV or TSV file that start on lines first..last, each with its number (`#row=<n>`)."""
+    idx = csv_index(path, rel)
+    lines = idx.lines
+    out: list[list[int]] = []
+    for i in range(bisect.bisect_left(lines, first), len(lines)):
+        if lines[i] > last:
+            break
+        out.append([int(lines[i]), i + 1])
+    return out
 
 
 def _row_record(header: list[str], cells: list[str]) -> dict[str, str]:

@@ -199,6 +199,9 @@ export const api = {
   forgeQuery: (c: string, path: string, sql: string) =>
     j<{ columns: string[]; rows: any[][]; truncated: boolean }>(`${BASE}/corpora/${enc(c)}/forge/query${q({ path })}`, { method: 'POST', body: JSON.stringify({ sql }) }),
   resolveRef: (c: string, ref: string) => j<ResolvedRef>(`${BASE}/corpora/${enc(c)}/ref${q({ ref })}`),
+  /** `GET /corpora/{c}/csv-rows?path=&lines=a-b`: the rows of a CSV or TSV file that start on lines a..b, [line, n] each,
+   * n the number a row is cited by (`<path>#row=<n>`). */
+  csvRows: (c: string, path: string, a: number, b: number) => j<{ rows: [number, number][] }>(`${BASE}/corpora/${enc(c)}/csv-rows${q({ path, lines: `${a}-${b}` })}`),
 
   // ---- chats ----
   chats: (c: string) => j<ChatMeta[]>(`${ws(c)}/chats`),

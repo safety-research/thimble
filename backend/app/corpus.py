@@ -1200,6 +1200,25 @@ def forge_query(c: str, body: QueryBody, request: Request, path: str = "forge.db
     return {"columns": columns, "rows": [[jsonable(v) for v in r] for r in rows[:QUERY_LIMIT]], "truncated": truncated}
 
 
+CSV_ROWS_SPAN = 5000  # lines one csv-rows request covers at most
+
+
+@router.get("/corpora/{c}/csv-rows")
+def get_csv_rows(c: str, path: str, lines: str) -> dict[str, Any]:
+    """`?path=&lines=a-b`: {rows: [[line, n], ...]}, the rows of a CSV or TSV file that start on lines a..b with the
+    number each is cited by (`<path>#row=<n>`), so the Table view cites a row whole. 400 for another file."""
+    from . import records  # noqa: PLC0415 — records imports this module
+
+    if not records.is_delimited(path):
+        raise HTTPException(400, f"not a CSV or TSV file: {path!r}")
+    m = re.fullmatch(r"(\d+)-(\d+)", lines.strip())
+    if not m or int(m[1]) < 1 or int(m[2]) < int(m[1]):
+        raise HTTPException(400, "lines must be a-b, from 1")
+    a = int(m[1])
+    b = min(int(m[2]), a + CSV_ROWS_SPAN - 1)
+    return {"rows": records.row_starts(_file(_corpus(c), path), path, a, b)}
+
+
 @router.get("/corpora/{c}/ref")
 def get_ref(c: str, ref: str) -> dict[str, Any]:
     try:
