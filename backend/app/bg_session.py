@@ -38,8 +38,8 @@ lines, which the proxy copies into its reply word for word, one reply per call, 
 Two plugin hooks keep it reliable: before a SendMessage (relay_check) the server swaps a token for its message, prefixes
 a message the analyst typed in the proxy's view, and refuses a message sent twice; when the proxy would stop while its
 session works (proxy_stop), the hook sends it back to waiting. Main is asked to start a proxy again while none runs and
-the session has not finished its task, unless Claude Code refused its call for that session, as auto mode can
-(proxy_refused). A finished session shows in the tray again once it starts another turn.
+the session has a task (not resting), unless Claude Code refused its call for that session, as auto mode can
+(proxy_refused). A resting session shows in the tray again once it starts another turn.
 
 The news. What the analyst would see of a subagent, read from the session's transcript in its order (_read_news, which
 keeps an offset past the last whole line it read, so no line shows twice): each reply as `<name>: <text>` (NEWS_CHARS, a
@@ -463,13 +463,17 @@ def alive(e: Entry | None) -> bool:
     return e is not None and (e.status != "stopped" or e.replacing)
 
 
+def resting(e: Entry | None) -> bool:
+    """Whether a session that runs has no task now: Claude Code keeps a background session's process after its last
+    turn, idle, so a session listed idle, with no run of thimble's following it and no message waiting for it, rests
+    until it starts another turn (_tick). Main is not asked to show it in the tray."""
+    return alive(e) and not e.replacing and e.status == "idle" and not e.run_open and not _pending_out(e)
+
+
 def finished(e: Entry | None) -> bool:
-    """Whether a session that runs has finished its task: Claude Code keeps a background session's process after its
-    last turn, idle, so a session listed idle, with no run of thimble's following it for FINISHED_AFTER_S and no message
-    waiting for it, counts as finished until it starts another turn (_tick). Its tray entry ends, and main is not asked
-    for another."""
-    return (alive(e) and not e.replacing and e.status == "idle" and not e.run_open and not _pending_out(e)
-            and time.time() - e.ended_at >= FINISHED_AFTER_S)
+    """Whether a resting session has finished its task: it has rested for FINISHED_AFTER_S since its run ended, so a run
+    that follows at once keeps its tray entry. Its tray entry ends."""
+    return resting(e) and time.time() - e.ended_at >= FINISHED_AFTER_S
 
 
 def stopped_in_claude(c: str, key: str) -> bool:
@@ -640,7 +644,7 @@ async def _tick(rows: list[dict[str, Any]]) -> None:
                 _news(e, f"{e.shown} waits for a {e.waiting_for or 'reply'}; answer it in the browser or with "
                          f"`claude attach {e.short}`.")
             _changed.set()
-        if (not proxy_alive(e) and not e.proxy_refused and not finished(e)
+        if (not proxy_alive(e) and not e.proxy_refused and not resting(e)
                 and time.monotonic() - e.proxy_asked > PROXY_ASK_S):
             unshown.setdefault(e.c, []).append(e.key)
         if e.status != "idle" and not e.run_open and agent_session.current(e.c, e.key) is None:
@@ -1171,11 +1175,11 @@ def new_main(c: str) -> None:
 
 
 def proxy_ended(c: str, agent_id: str | None) -> None:
-    """A proxy's task ended: while its session runs and has not finished its task, main is asked for a new one."""
+    """A proxy's task ended: while its session runs and has a task (not resting), main is asked for a new one."""
     for e in entries(c):
         if agent_id and agent_id in e.proxy_agents and e.owner in (None, agent_id):
             e.proxy_seen, e.proxy_starting, e.owner = 0.0, 0.0, None
-            if alive(e) and not finished(e) and not e.proxy_refused:
+            if alive(e) and not resting(e) and not e.proxy_refused:
                 log.info("%s: %s's proxy %s ended while its session runs; main is asked for another", c, e.name, agent_id)
                 ask_main_for_proxy(c, e.key)
 

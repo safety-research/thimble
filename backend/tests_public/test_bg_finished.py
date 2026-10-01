@@ -83,6 +83,23 @@ async def test_a_finished_session_s_tray_entry_ends_and_main_is_not_asked_for_an
     assert asked == [(KEY,)], "a session that works again shows in the tray again"
 
 
+async def test_a_tray_entry_that_ends_on_the_news_of_the_run_s_end_is_not_started_again(bg, monkeypatch):
+    """A tray entry may end as soon as it copies "… finished its task", before the session counts as finished: main is
+    not asked for another while the session rests, and is asked once a follow-up run makes it work again."""
+    e, _path, asked = bg
+    monkeypatch.setattr(bg_session, "_wake", {})
+    e.status = "idle"
+    bg_session.run_ended(CORPUS, KEY, "Six problems with the orientation's cards.")
+    assert bg_session.resting(e) and not bg_session.finished(e)
+    bg_session.proxy_ended(CORPUS, "a1")
+    e.proxy_asked = 0.0
+    await bg_session._tick([_row(e, "idle")])
+    assert asked == [], "a resting session gets no new tray entry"
+    e.run_open = True  # thimble resumes it with a follow-up
+    await bg_session._tick([_row(e, "busy")])
+    assert asked == [(KEY,)]
+
+
 async def test_a_session_that_still_works_keeps_its_tray_entry(bg, tmp_path):
     e, path, asked = bg
     e.status, e.run_open = "working", True
