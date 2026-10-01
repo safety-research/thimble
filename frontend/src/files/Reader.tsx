@@ -24,7 +24,7 @@ import { FIND_MARK, findColumn, ReaderRuler, rulerColumns, useRuler, type LensTi
 import { fmtSize } from './Tree'
 import { useFilesFilter, type FilesLabels } from './useLabels'
 import { accepts, slugOf, viewValue } from './viewChoice'
-import { fileLineShows, ResidueList, useResidueOpen, useShownLabels, useViewNotes, ViewFilter, ViewHeadLine } from './ViewChrome'
+import { fileLineShows, ResidueList, useLabelsOfFile, useResidueOpen, useViewNotes, ViewFilter, ViewHeadLine } from './ViewChrome'
 import { ViewerFrame } from './ViewerFrame'
 import { usePinnedView, ViewUpdated } from './viewVersion'
 import { DeleteViewConfirm, ProposalOption } from './ViewsBar'
@@ -150,8 +150,7 @@ function ReaderViewer({ ws, view, path, targetRef, labels, onRaw }: { ws: string
   const filter = useFilesFilter(ws)
   const pin = usePinnedView(ws, view.slug, view.version || undefined)
   const notes = useViewNotes(ws, view.slug, pin.pinned || undefined, path)
-  const own = useMemo(() => [path], [path])
-  const shownLabels = useShownLabels(labels, own)
+  const shownLabels = useLabelsOfFile(labels, path)
   const [residueOpen, toggleResidue] = useResidueOpen(ws, view.slug)
   const filterLabel = filter ? labels.byId.get(filter.concept) : undefined
   const [hidden, setHidden] = useState<number | null>(null)

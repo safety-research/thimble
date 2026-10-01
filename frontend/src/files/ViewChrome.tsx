@@ -49,6 +49,12 @@ export function useShownLabels(labels: FilesLabels, claims: readonly string[] | 
   return useMemo(() => on.filter((k) => Object.keys(presence.get(k.id) ?? {}).some((p) => (claims ?? []).some((g) => globMatches(p, g)))), [on, presence, claims])
 }
 
+/** The labels on in Files that mark the one file a file viewer shows, matched by its path as it is, not as a glob. */
+export function useLabelsOfFile(labels: FilesLabels, path: string): Concept[] {
+  const { on, presence } = labels
+  return useMemo(() => on.filter((k) => Object.prototype.hasOwnProperty.call(presence.get(k.id) ?? {}, path)), [on, presence, path])
+}
+
 /** The label filter a view keeps its records to, as the chip that clears it, and how many of the view's records it
  * hides once that count is exact (ViewerFrame onHidden). */
 export function ViewFilter({ ws, filter, name, hidden, className }: { ws: string; filter: LabelFilter; name: string; hidden: number | null; className?: string }) {
