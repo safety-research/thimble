@@ -6,8 +6,8 @@
 // sends only the changed fields so defaults stay defaults, and applies to the next session or subagent. Choices that
 // cannot take effect are dimmed with the reason in a tooltip. Every row names its model exactly, never `default`. Under
 // the table, the permission mode of each agent thimble starts (MODE_ROWS): the analyst's pick, else the mode of their
-// Claude Code session, as main's hooks report it (backend modes.py). Then the workspace's switches (SWITCHES), each saved
-// with the rest, and the extensions added to thimble, each with its switch for this workspace (ExtensionsSettings).
+// Claude Code session, as main's hooks report it (backend modes.py). Then the extensions added to thimble, each with its
+// switch for this workspace (ExtensionsSettings).
 import { useEffect, useState } from 'react'
 import { Button } from '../components/Button'
 import { Chip } from '../components/Chip'
@@ -15,7 +15,6 @@ import { TextInput } from '../components/Field'
 import { Menu, type MenuItem } from '../components/Menu'
 import { Popover } from '../components/Menu'
 import { Spinner } from '../components/Spinner'
-import { Switch } from '../components/Switch'
 import { useTooltip } from '../components/Tooltip'
 import { api } from '../lib/api'
 import { ExtensionsSettings, changedExtensions, changedViews, viewKey } from './ExtensionsSettings'
@@ -27,14 +26,6 @@ import { BYPASS_LINE } from '../chat/ModeSwitch'
 import { PERMISSION_OPTIONS, agentMode, permissionChoice } from '../chat/StartGate'
 
 type Models = Record<string, ModelConf>
-
-/** What the chat off does, where the settings offer it (shell/Shell). */
-export const CHAT_OFF_NOTE = "For chatting in your Claude Code terminal. Alerts, permission requests, the orientation's progress and its Start show in a dock, and a ⌘-click answers in place."
-
-/** The workspace's switches under the table: the setting each saves, its name and what it does. */
-export const SWITCHES: { key: string; label: string; note: string }[] = [
-  { key: 'hide_chat', label: 'Hide the chat', note: CHAT_OFF_NOTE },
-]
 
 /** The agents whose permission modes the settings list, by their names there (backend modes.AGENTS). */
 export const MODE_ROWS: { agent: ModeAgent; label: string }[] = [
@@ -53,13 +44,6 @@ type Rows = Settings['permission_modes']
 export function changedModes(loaded: Rows, now: Rows): Partial<Record<ModeAgent, OrientPermissions | null>> {
   const out: Partial<Record<ModeAgent, OrientPermissions | null>> = {}
   for (const { agent } of MODE_ROWS) if ((loaded?.[agent] ?? null) !== (now?.[agent] ?? null)) out[agent] = now?.[agent] ?? null
-  return out
-}
-
-/** What a save sends for the switches: each whose state differs from the loaded settings. Pure. */
-export function changedSwitches(loaded: Settings | null, now: Record<string, boolean>): Record<string, boolean> {
-  const out: Record<string, boolean> = {}
-  for (const s of SWITCHES) if (s.key in now && now[s.key] !== (loaded?.[s.key] === true)) out[s.key] = now[s.key]
   return out
 }
 
@@ -150,7 +134,6 @@ export function SettingsPopover({ ws, anchor, open, onClose }: { ws: string; anc
   const [busy, setBusy] = useState(false)
   // the role whose model is being typed rather than picked
   const [typing, setTyping] = useState<string | null>(null)
-  const [switches, setSwitches] = useState<Record<string, boolean>>({})
   const [modeRows, setModeRows] = useState<Rows>({})
   const [exts, setExts] = useState<Extensions | null>(null)
   const [extOn, setExtOn] = useState<Record<string, boolean>>({})
@@ -169,7 +152,6 @@ export function SettingsPopover({ ws, anchor, open, onClose }: { ws: string; anc
         setViewOn(Object.fromEntries((ex?.extensions ?? []).flatMap((e) => (e.views ?? []).map((v) => [viewKey(e.name, v.slug), v.on]))))
         const a = main?.meta?.attached ?? null
         setSettings(s)
-        setSwitches(Object.fromEntries(SWITCHES.map((sw) => [sw.key, s[sw.key] === true])))
         setModeRows(s.permission_modes ?? {})
         setAttached(a)
         const fast = mainFast(a)
@@ -188,10 +170,9 @@ export function SettingsPopover({ ws, anchor, open, onClose }: { ws: string; anc
     setError(null)
     try {
       const changed = changedRoles(settings?.models ?? {}, models)
-      const flipped = changedSwitches(settings, switches)
       const modes = changedModes(settings?.permission_modes, modeRows)
-      if (Object.keys(changed).length || Object.keys(flipped).length || Object.keys(modes).length)
-        await api.putSettings(ws, { ...(Object.keys(changed).length ? { models: changed } : {}), ...(Object.keys(modes).length ? { permission_modes: modes } : {}), ...flipped })
+      if (Object.keys(changed).length || Object.keys(modes).length)
+        await api.putSettings(ws, { ...(Object.keys(changed).length ? { models: changed } : {}), ...(Object.keys(modes).length ? { permission_modes: modes } : {}) })
       for (const [name, on] of Object.entries(changedExtensions(exts?.extensions ?? [], extOn))) await api.switchExtension(ws, name, on)
       for (const [name, slug, on] of changedViews(exts?.extensions ?? [], viewOn)) await api.switchExtensionView(ws, name, slug, on)
       const was = { effort: mainEffort(attached), fast: !!mainFast(attached) }
@@ -334,21 +315,6 @@ export function SettingsPopover({ ws, anchor, open, onClose }: { ws: string; anc
                 {BYPASS_LINE}
               </p>
             )}
-          </div>
-        )}
-        {settings && (
-          <div className="settings-switches" role="group" aria-label="Workspace">
-            {SWITCHES.map((sw) => (
-              <div className="settings-switch" key={sw.key} data-setting={sw.key}>
-                <Switch checked={!!switches[sw.key]} onChange={(v) => setSwitches((cur) => ({ ...cur, [sw.key]: v }))} aria-labelledby={`settings-${sw.key}`} />
-                <span className="settings-switch-text">
-                  <span className="settings-switch-label" id={`settings-${sw.key}`}>
-                    {sw.label}
-                  </span>
-                  <span className="settings-switch-note">{sw.note}</span>
-                </span>
-              </div>
-            ))}
           </div>
         )}
         {settings && exts && (
