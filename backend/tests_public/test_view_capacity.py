@@ -90,6 +90,20 @@ def test_a_build_the_api_stops_before_it_writes_a_view_is_told_to_go_on_not_what
     assert seen["gates"] == [True], "no gate runs on a folder the session has not written yet"
 
 
+def test_a_build_run_again_on_its_session_before_it_wrote_a_view_is_told_to_go_on(board, turns):
+    """Retry after the API stopped a build through every wait, or a server restart mid-build, runs the ticket again on
+    its session: with no view written yet, the session is told to go on, not sent the gate's report on a missing file."""
+    seen, script = turns
+    slug = views.propose(CORPUS, "Posts", "to read the board", ["board.jsonl"], "one row per post", asked=True)["slug"]
+    views.update_proposal(CORPUS, slug, session_id="sid-1")
+    script += [_write]
+    run = dev.Run(ticket_id=f"view:{slug}", title="Posts", ts_start="")
+    asyncio.run(dev._run_view(CORPUS, slug, run))
+    assert run.status == "built"
+    assert seen["prompts"] == [tools.hint("session-resumed", stopped="")]
+    assert seen["gates"] == [True]
+
+
 def test_a_build_the_api_stops_twice_on_one_report_gets_the_report_once(board, turns, monkeypatch):
     """A report the session was sent and could not act on, since the API stopped its turns, is not sent again."""
     seen, script = turns

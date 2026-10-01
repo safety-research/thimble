@@ -2793,7 +2793,8 @@ async def run_view(c: str, slug: str, run: Run) -> None:
 async def _run_view(c: str, slug: str, run: Run) -> None:
     """The whole view ticket: the chat, the session's turns with the gate fed back, then the view registered and main
     told, or the build's failure. An orientation's proposal first gets VIEW_REPAIRS new sessions. A run over a proposal
-    that has a session runs the gate first, since an interrupted build may have finished. A change (`changed`) wakes the
+    that has a session runs the gate first when the session wrote a view, since an interrupted build may have finished,
+    and otherwise tells the session to go on. A change (`changed`) wakes the
     session with what changed; a change to a built view (`revision`) is built only when its files differ, and on failure
     or dismissal the view goes back to how it was."""
     from . import agent_session, session, tools, view_review, views  # noqa: PLC0415
@@ -2853,10 +2854,12 @@ async def _run_view(c: str, slug: str, run: Run) -> None:
             asked_change = build_view_change_prompt(prop, folder)
             prompt = asked_change if resume else f"{build_view_prompt(c, prop, folder, corpus)}\n\n{asked_change}"
             run_log.stage("the change asked for: " + _one_line(str(prop.get("change") or prop.get("arrangement") or ""))[:CHANGE_CHARS])
-        elif resume:
+        elif resume and (folder / views.VIEW_JSON).is_file():
             report = await gate()
             built = bool(report["ok"])
             prompt = build_gates_prompt("\n".join(views.gate_lines(report)))
+        elif resume:
+            prompt = tools.hint(agent_session.RESUMED_PROMPT, stopped="")
         else:
             prompt = build_view_prompt(c, prop, folder, corpus)
         told = prompt  # the last gate report the session was sent
