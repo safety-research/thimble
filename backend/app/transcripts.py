@@ -655,7 +655,8 @@ def parse_turns(path: Path, rel: str) -> dict[str, Any]:
 
 def turns_page(path: Path, rel: str, start: int = 0, count: int = 100, line: int | None = None) -> dict[str, Any]:
     """A page of parse_turns: `count` turns from index `start`, or, given a `line`, from a few turns before the last
-    one standing at or before it. Each turn's text is cut at TURN_TEXT_MAX (`cut` says so)."""
+    one standing at or before it. Each turn's text is cut at TURN_TEXT_MAX (`cut` says so). `groups` holds the
+    conversations the page's turns belong to, by index, and `n_groups` how many the file holds."""
     parsed = parse_turns(path, rel)
     turns = parsed["turns"]
     if line is not None:
@@ -678,7 +679,10 @@ def turns_page(path: Path, rel: str, start: int = 0, count: int = 100, line: int
             if k in t:
                 item[k] = t[k]
         page.append(item)
-    return {"path": rel, "total": len(turns), "start": start, "turns": page, "groups": parsed["groups"]}
+    groups = parsed["groups"]
+    touched = sorted({t["group"] for t in page if "group" in t})
+    return {"path": rel, "total": len(turns), "start": start, "turns": page, "n_groups": len(groups),
+            "groups": {str(g): groups[g] for g in touched}}
 
 
 @router.get("/corpora/{c}/source/turns")

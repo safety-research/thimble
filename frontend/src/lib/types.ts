@@ -1077,8 +1077,10 @@ export interface SourceTurns {
   total: number
   start: number
   turns: SourceTurn[]
-  /** the conversations the turns belong to, each with its title and first turn */
-  groups: { title: string; first: number }[]
+  /** the conversations the page's turns belong to, by index, each with its title and first turn */
+  groups: Record<string, { title: string; first: number }>
+  /** how many conversations the file holds */
+  n_groups: number
 }
 
 export interface SourcePage {

@@ -158,7 +158,8 @@ def test_the_turns_of_whole_file_json_transcripts(chats):
 
     gpt = turns("chatgpt.json")
     assert [(t["speaker"], t["text"]) for t in gpt["turns"]] == [(r, t) for r, t in LINES], "the current branch, in order"
-    assert gpt["groups"] == [{"title": "Nightly build", "first": 0}] and gpt["turns"][0]["time"] == "2023-11-14T22:13:20Z"
+    assert gpt["groups"] == {"0": {"title": "Nightly build", "first": 0}} and gpt["n_groups"] == 1
+    assert gpt["turns"][0]["time"] == "2023-11-14T22:13:20Z"
     claude = turns("claude-export.json")
     assert [t["role"] for t in claude["turns"]] == ["user", "assistant", "user", "assistant"]
     ev = turns("eval.json")
@@ -168,8 +169,9 @@ def test_the_turns_of_whole_file_json_transcripts(chats):
     lines = turns("lines.json")
     assert [(t["line"], t["speaker"]) for t in lines["turns"]] == [(1, "dana"), (2, "bot"), (3, "dana")]
     assert lines["turns"][0]["time"] == "2023-11-14T22:13:20Z"
-    assert turns("discord.json")["groups"][0]["title"] == "general"
-    assert turns("sharegpt.jsonl")["total"] == 6
+    assert turns("discord.json")["groups"]["0"]["title"] == "general"
+    share = turns("sharegpt.jsonl", start=2, count=2)
+    assert share["total"] == 6 and share["n_groups"] == 3 and list(share["groups"]) == ["1"]
     page = turns("slack.json", start=2, count=1)
     assert page["total"] == 4 and [t["i"] for t in page["turns"]] == [2]
     assert client.get(f"{CHATS}/source/turns", params={"path": "logs/config.json"}).status_code == 415

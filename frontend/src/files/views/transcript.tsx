@@ -1,8 +1,8 @@
-// The Transcript view, for any file the server's sniff (backend transcripts.py) reads as close to a transcript: a Claude
-// Code stream as cards by record, the system records behind a toggle; messages (JSON lines, a CSV or TSV file's rows)
-// as posts with their authors and times; a text or markdown chat log as one card per turn, a turn's lines under its
-// speaker; and a whole-file JSON transcript (a chat export, an eval log), or JSON lines in a file read as text, as the
-// turns the server parses from it, a page at a time. While system records are hidden, a long run of them
+// The Transcript view, for any file the server's sniff (backend transcripts.py) reads as close to a transcript: a
+// Claude Code stream as cards by record, the system records behind a toggle; messages (JSON lines, a CSV or TSV file's
+// rows) as posts with their authors and times; a text or markdown chat log as one card per turn, a turn's lines under
+// its speaker; and a whole-file JSON transcript (a chat export, an eval log), or JSON lines in a file read as text, as
+// the turns the server parses from it, a page at a time. While system records are hidden, a long run of them
 // (HIDDEN_RUN_NOTE or more) says in one line how many it hides, so the view is never blank while the reader pages past
 // them.
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
@@ -307,12 +307,14 @@ export function shownLines(recs: SourceRecord[], turn: ChatTurn | null): SourceR
 }
 
 const TURNS_PAGE = 200
+/** turns kept in memory; past it, the ones at the far end from the reader's move are let go */
+const TURNS_CAP = 2000
 
 /** A whole-file JSON transcript (a chat export, an eval log, conversations one per line), or JSON lines in a file the
  * server reads as text, as the turns the server parses from it (GET /source/turns): a page at a time from the start, or
- * around a cited line, more as the reader nears either end. Each turn stands on the line of the file that holds its
- * words, so a label or a citation of that line finds it; the words are the parsed text, which span labels do not
- * mark. */
+ * around a cited line, more as the reader nears either end, up to TURNS_CAP at a time. Each turn stands on the line of
+ * the file that holds its words, so a label or a citation of that line finds it; the words are the parsed text, which
+ * span labels do not mark. */
 function TurnsTranscript({ workspace, path, targetRef }: ViewProps) {
   const asked = useMemo(() => targetOf(targetRef, path), [targetRef, path])
   const [data, setData] = useState<SourceTurns | null>(null)
@@ -344,7 +346,11 @@ function TurnsTranscript({ workspace, path, targetRef }: ViewProps) {
         .then((p) =>
           setData((cur) => {
             if (!cur) return p
-            return dir === 'earlier' ? { ...p, start: p.start, turns: [...p.turns, ...cur.turns] } : { ...cur, total: p.total, turns: [...cur.turns, ...p.turns] }
+            const groups = { ...cur.groups, ...p.groups }
+            if (dir === 'earlier') return { ...p, groups, turns: [...p.turns, ...cur.turns].slice(0, TURNS_CAP) }
+            const turns = [...cur.turns, ...p.turns]
+            const drop = Math.max(0, turns.length - TURNS_CAP)
+            return { ...cur, groups, total: p.total, start: cur.start + drop, turns: turns.slice(drop) }
           }),
         )
         .catch((e) => setError(errMsg(e)))
@@ -373,10 +379,10 @@ function TurnsTranscript({ workspace, path, targetRef }: ViewProps) {
         <Spinner size={14} label="Loading" />
       </div>
     )
-  const titled = data.groups.length > 1 || data.groups.some((g) => g.title)
+  const titled = data.n_groups > 1 || Object.values(data.groups).some((g) => g.title)
   const out: ReactNode[] = []
   turns.forEach((t, k) => {
-    const g = t.group != null ? data.groups[t.group] : undefined
+    const g = t.group != null ? data.groups[String(t.group)] : undefined
     if (titled && g && (k === 0 || turns[k - 1].group !== t.group))
       out.push(
         <div key={`g${t.i}`} className="reader-session">

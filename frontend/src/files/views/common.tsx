@@ -268,7 +268,8 @@ interface BlockElProps {
   target: Target | null
   hit: boolean
   className?: string
-  /** show the text from this offset on (a chat line's words after its speaker); anchors keep the whole text's offsets */
+  /** show the text from this offset on (a chat line's words after its speaker); anchors keep the whole text's
+   * offsets */
   from?: number
 }
 
