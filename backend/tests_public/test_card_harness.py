@@ -1,5 +1,6 @@
 """The card harness (app/render.py) on a machine without its headless Chromium: it says so plainly, warns once and does
-not try again, and no card check begins, or stays on a card when it began before the harness knew."""
+not try again, and no card check begins, or stays on a card when it began before the harness knew. With a browser (a
+fake one here), the browser closes once no card was drawn for a while and is launched again by the next card."""
 from __future__ import annotations
 
 import logging
@@ -59,3 +60,97 @@ async def test_without_its_browser_the_harness_warns_once_and_no_card_check_is_l
     assert [r.name for r in caplog.records] == ["thimble.headless"], [r.getMessage() for r in caplog.records]
     assert card_check.start(CORPUS, cid, card_check.MAIN) is None
     assert "check" not in notebook.get_cell(CORPUS, cid)
+
+
+class _FakePage:
+    def __init__(self, delay: float = 0) -> None:
+        self.delay = delay
+
+    async def goto(self, url, **kw):
+        return None
+
+    async def wait_for_function(self, js, **kw):
+        return None
+
+    async def evaluate(self, js, req=None):
+        import asyncio  # noqa: PLC0415
+
+        await asyncio.sleep(self.delay)
+        return {"box": {"x": 0, "y": 0, "width": 10, "height": 10}, "frames": [], "fonts": True}
+
+    async def screenshot(self, **kw):
+        return b"png"
+
+    async def close(self):
+        return None
+
+
+class _FakeBrowser:
+    """A headless Chromium as the pool drives it, which records its launches and closes."""
+
+    def __init__(self, log: list[str], delay: float) -> None:
+        self.log, self.delay, self.up = log, delay, True
+
+    def is_connected(self) -> bool:
+        return self.up
+
+    async def new_context(self, **kw):
+        browser = self
+
+        class Context:
+            async def route(self, *a, **kw):
+                return None
+
+            async def new_page(self):
+                return _FakePage(browser.delay)
+
+            async def close(self):
+                return None
+
+        return Context()
+
+    async def close(self):
+        self.up = False
+        self.log.append("close")
+
+
+def _fake_playwright(log: list[str], delay: float = 0):
+    class Chromium:
+        async def launch(self, **kw):
+            log.append("launch")
+            return _FakeBrowser(log, delay)
+
+    class Playwright:
+        chromium = Chromium()
+
+        async def stop(self):
+            log.append("stop")
+
+    class Starter:
+        async def start(self):
+            return Playwright()
+
+    return lambda: Starter()
+
+
+async def test_the_browser_closes_when_no_card_was_drawn_for_a_while_and_comes_back_for_the_next(no_browser, monkeypatch):
+    import asyncio  # noqa: PLC0415
+
+    log: list[str] = []
+    delay = {"s": 0.0}
+    monkeypatch.setattr(playwright.async_api, "async_playwright", lambda: _fake_playwright(log, delay["s"])())
+    monkeypatch.setattr(headless, "launch", lambda kind: "")
+    monkeypatch.setattr(render, "IDLE_S", 0.3)
+    pool = render.Pool(pages=1)
+    try:
+        assert (await pool.render({})).ok and log == ["launch"]
+        await asyncio.sleep(0.6)
+        assert log == ["launch", "close", "stop"] and not pool.ready
+        delay["s"] = 0.6  # a render that runs past IDLE_S keeps the browser up
+        assert (await pool.render({})).ok and log[3:] == ["launch"]
+        await asyncio.sleep(0.15)
+        assert pool.ready and log[4:] == []
+        await asyncio.sleep(0.5)
+        assert log[4:] == ["close", "stop"]
+    finally:
+        await pool.stop()
