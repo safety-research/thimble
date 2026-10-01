@@ -177,15 +177,22 @@ export function PermissionCard({ ws, asks, metas, labels }: {
       })
       .finally(() => setSending((cur) => minus(cur, rid)))
   }
+  // focus that was on the card stays there, where Tab reaches the next request's buttons, rather than on a button that
+  // leaves; with no request `left` it goes to the composer below the card
+  const keepFocus = (left: number) => {
+    const card = root.current
+    if (!card?.contains(document.activeElement)) return
+    const composer = left ? null : card.closest('.chat-foot')?.querySelector<HTMLTextAreaElement>('textarea:not(:disabled)')
+    ;(composer ?? card).focus({ preventScroll: true })
+  }
   const reply = (allow: boolean, always = false) => {
     if (!ready) return
-    // focus stays on the card, where Tab reaches the next request's buttons, rather than on a button that leaves
-    if (root.current?.contains(document.activeElement)) root.current.focus({ preventScroll: true })
+    keepFocus(shown.length - 1)
     send(ask, allow, always)
   }
   const dismissAll = () => {
     if (!ready) return
-    if (root.current?.contains(document.activeElement)) root.current.focus({ preventScroll: true })
+    keepFocus(shown.length - alike.length)
     for (const a of alike) send(a, false)
   }
   const gate = { 'aria-disabled': !ready || undefined }

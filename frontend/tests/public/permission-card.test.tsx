@@ -233,6 +233,25 @@ describe('several requests at once', () => {
     expect(shownId(el)).toBe('b')
   })
 
+  test('focus on the card stays there while a request is left, then goes to the composer below it', async () => {
+    const el = await mount(
+      <div className="chat-foot">
+        <Live initial={[ask('d1', 'a', 1), ask('d2', 'b', 2)]} />
+        <textarea />
+      </div>,
+    )
+    const allow = () => el.querySelector('.chat-perm-allow') as HTMLButtonElement
+    await armed()
+    allow().focus()
+    await click(allow())
+    expect(document.activeElement).toBe(el.querySelector('.chat-perm'))
+    await armed()
+    allow().focus()
+    await click(allow())
+    expect(el.querySelector('.chat-perm')).toBeNull()
+    expect(document.activeElement).toBe(el.querySelector('textarea'))
+  })
+
   test('several requests declined unanswered are dismissed at once, and the card says why they were declined', async () => {
     const gone = [ask('d1', 'x1', 1, { expired: T(11) }), ask('d2', 'x2', 2, { expired: T(12) }), ask('d3', 'x3', 3, { expired: T(13) })]
     const el = await mount(<Live initial={gone} />)
