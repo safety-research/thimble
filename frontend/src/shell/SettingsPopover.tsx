@@ -46,21 +46,21 @@ export const MODE_ROWS: { agent: ModeAgent; label: string }[] = [
 ]
 const MODE_NAME: Record<OrientPermissions, string> = { manual: 'Manual', auto: 'Auto', bypass: 'Bypass' }
 
-const DATA_WORDS: Record<AgentRow['data'], string> = { ask: 'asks before editing data', allow: 'may edit data', off: 'never edits data' }
+const DATA_WORDS: Record<AgentRow['data'], string> = { ask: 'asks to edit data', allow: 'may edit data', off: 'never edits data' }
 const DATA_TIP: Record<AgentRow['data'], string> = {
   ask: 'It asks you before it changes a file of your data.',
   allow: 'It may change files of your data without asking.',
   off: 'It never changes a file of your data.',
 }
 
-/** Who runs an agent, in a few words: thimble's own, or the extension and how. Pure. */
+/** Who runs an agent, in a few words: thimble, or the extension and how. Pure. */
 export function runsWords(row: AgentRow): string {
-  if (row.conflict.length) return `thimble's, since ${row.conflict.join(' and ')} both replace it`
+  if (row.conflict.length) return `thimble, since ${row.conflict.join(' and ')} both replace it`
   const added = row.additions.length ? ` + ${row.additions.join(', ')}` : ''
-  if (row.way === 'sdk') return `${row.extension}'s Agent SDK program`
-  if (row.way === 'command') return `${row.extension}'s program`
+  if (row.way === 'sdk') return `${row.extension}, Agent SDK`
+  if (row.way === 'command') return `${row.extension}, own program`
   if (row.way === 'prompt') return `${row.extension}'s prompt${added}`
-  return `thimble's${added}`
+  return `thimble${added}`
 }
 
 /** An agent's line under its permission mode: who runs it and what it may do, from thimble's config. Pure. */
@@ -69,18 +69,23 @@ export function agentLine(row: AgentRow): string {
   return [runsWords(row), box, `network ${row.network}`, DATA_WORDS[row.data]].join(' · ')
 }
 
-/** What an agent's line means, for its tooltip. Pure. */
+/** What an agent's line means, one sentence per line, for its tooltip. Pure. */
 export function agentTip(row: AgentRow): string {
+  const who = row.conflict.length ? `thimble runs it, since ${row.conflict.join(' and ')} both replace it.`
+    : row.way === 'sdk' ? `${row.extension} runs it with an Agent SDK program.`
+    : row.way === 'command' ? `${row.extension} runs it with its own program.`
+    : row.way === 'prompt' ? `thimble runs it with ${row.extension}'s prompt.`
+    : 'thimble runs it.'
   const box = row.sandbox === 'off' ? 'Sandbox off: its commands can write anywhere you can.'
     : row.sandbox_runs ? 'Sandbox on: its commands write only in its own folder.'
     : 'The sandbox cannot run on this machine.'
   const net = row.network === 'on' ? 'Network on: it can reach the internet.' : 'Network off: it reaches no host.'
-  const added = row.additions.length ? ` ${row.additions.join(', ')} add${row.additions.length > 1 ? '' : 's'} to its prompt.` : ''
-  return `${box} ${net} ${DATA_TIP[row.data]}${added} It never reads thimble's key. Change these under ${row.config} in thimble's config.`
+  const added = row.additions.length ? [`${row.additions.join(', ')} add${row.additions.length > 1 ? '' : 's'} to its prompt.`] : []
+  return [who, ...added, box, net, DATA_TIP[row.data], "It never reads thimble's key.", `Change these under ${row.config} in thimble's config.`].join('\n')
 }
 
 function AgentLine({ row }: { row: AgentRow }) {
-  const { props, tip } = useTooltip(agentTip(row), undefined, 'start')
+  const { props, tip } = useTooltip(agentTip(row), 'tip-lines', 'start')
   return (
     <>
       <span className="settings-agent-line" data-way={row.way} tabIndex={0} {...props}>
