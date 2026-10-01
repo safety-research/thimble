@@ -4,4 +4,4 @@ A reviewer looked at the view the way the analyst will see it and found the prob
 
 {{findings}}
 
-Fix each problem in the view's files in {{folder}} and check the view again. The reviewer saw the pictures but not the records, so when a problem misreads the data, leave that part as it is and say why in your report.
+Fix each problem in the view's files in {{folder}} and check the view again. The reviewer saw the pictures and only a sample of the records, so when a problem misreads the data, leave that part as it is and say why in your report.

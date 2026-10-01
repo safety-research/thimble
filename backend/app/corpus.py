@@ -527,14 +527,16 @@ def records_from_lines(lines: list[bytes], rel: str, kind: str, start: int) -> l
 # --------------------------------------------------------------------------- databases (sqlite, read-only)
 
 
-def connect_ro(db: Path) -> sqlite3.Connection:
-    return sqlite3.connect(f"file:{quote(str(db), safe='/')}?mode=ro", uri=True)
+def connect_ro(db: Path, any_thread: bool = False) -> sqlite3.Connection:
+    """A read-only connection; with `any_thread`, one a generator may go on using from another thread, one at a time."""
+    return sqlite3.connect(f"file:{quote(str(db), safe='/')}?mode=ro", uri=True, check_same_thread=not any_thread)
 
 
-def open_database(db: Path) -> sqlite3.Connection:
+def open_database(db: Path, any_thread: bool = False) -> sqlite3.Connection:
     """Read-only connection to a sqlite file, checked against the file header up front (sqlite opens lazily, so a
-    garbage file would otherwise fail on the first query). Raises sqlite3.Error; an empty file is an empty database."""
-    con = connect_ro(db)
+    garbage file would otherwise fail on the first query). Raises sqlite3.Error; an empty file is an empty database.
+    `any_thread` as connect_ro."""
+    con = connect_ro(db, any_thread)
     try:
         con.execute("SELECT 1 FROM sqlite_master LIMIT 1").fetchall()
     except sqlite3.Error:
@@ -1196,6 +1198,25 @@ def forge_query(c: str, body: QueryBody, request: Request, path: str = "forge.db
     truncated = len(rows) > QUERY_LIMIT
     _viewed(c, path, request)
     return {"columns": columns, "rows": [[jsonable(v) for v in r] for r in rows[:QUERY_LIMIT]], "truncated": truncated}
+
+
+CSV_ROWS_SPAN = 5000  # lines one csv-rows request covers at most
+
+
+@router.get("/corpora/{c}/csv-rows")
+def get_csv_rows(c: str, path: str, lines: str) -> dict[str, Any]:
+    """`?path=&lines=a-b`: {rows: [[line, n], ...]}, the rows of a CSV or TSV file that start on lines a..b with the
+    number each is cited by (`<path>#row=<n>`), so the Table view cites a row whole. 400 for another file."""
+    from . import records  # noqa: PLC0415 — records imports this module
+
+    if not records.is_delimited(path):
+        raise HTTPException(400, f"not a CSV or TSV file: {path!r}")
+    m = re.fullmatch(r"(\d+)-(\d+)", lines.strip())
+    if not m or int(m[1]) < 1 or int(m[2]) < int(m[1]):
+        raise HTTPException(400, "lines must be a-b, from 1")
+    a = int(m[1])
+    b = min(int(m[2]), a + CSV_ROWS_SPAN - 1)
+    return {"rows": records.row_starts(_file(_corpus(c), path), path, a, b)}
 
 
 @router.get("/corpora/{c}/ref")

@@ -102,13 +102,13 @@ Define a category, apply it to every unit of a scope, and get the counts per val
     "predicate": {
       "type": "object",
       "properties": {
-        "kind": {"type": "string", "enum": ["prompt", "regex", "code"], "description": "A model judges each unit, a regex matches its text, or code defines label(unit) returning (value, confidence), where a unit is a JSONL record as its dict, a text line or a sentence a dict with its words in unit['text'], and a card a dict with its text, kind, question, takeaway, group and groups, the titles of the frames around it. A record that saves a whole document again, such as a wiki page's revision, is read by a model or a regex as what it changed from the save before, and by code whole."},
+        "kind": {"type": "string", "enum": ["prompt", "regex", "code"], "description": "A model judges each unit, a regex matches its text, or code defines label(unit) returning (value, confidence), where a unit is a JSONL record as its dict, a text line or a sentence a dict with its words in unit['text'], a row of a database or a CSV file a dict of its columns, a record of a JSON document its value, a PDF page a dict with its page and text, and a card a dict with its text, kind, question, takeaway, group and groups, the titles of the frames around it. A record that saves a whole document again, such as a wiki page's revision, is read by a model or a regex as what it changed from the save before, and by code whole."},
         "text": {"type": "string", "description": "The description, pattern or function."}
       },
       "required": ["kind", "text"]
     },
     "values": {"type": "array", "items": {"type": "string"}, "description": "Positive first. Default yes and no."},
-    "paths": {"type": "array", "items": {"type": "string"}, "description": "Globs, for files."},
+    "paths": {"type": "array", "items": {"type": "string"}, "description": "Globs, for files. A record of a file is a line of text, a row of a database's table, a page of a PDF, a value of a JSON document or a row of a CSV file. A glob followed by a record's place, such as `runs/*/forge.db#prs` for a table or `results.json#/runs`, keeps the records there."},
     "limit": {"type": "integer", "description": "Units to label, for a trial."},
     "within": {
       "type": "object",
@@ -756,7 +756,7 @@ The dev agent is changing the view {view} (view:{slug}) now. When its checks pas
 
 ## view-no-anchors
 
-The page shows no element whose `data-anchor` names a record (`<path>#L<n>`) or one of its units (`view:{slug}/<key>`), so no label the analyst turns on can show in it. Give each element that shows a record its file ref, and each unit's element its key.
+The page shows no element whose `data-anchor` names a record (its citation form, such as `<path>#L<n>` or `<db>#<table>/<key>`) or one of its units (`view:{slug}/<key>`), so no label the analyst turns on can show in it. Give each element that shows a record its file ref, and each unit's element its key.
 
 ## file_dev_ticket-no-view
 
@@ -778,17 +778,69 @@ The dev agent built the view {view}, so {claims} now open in it. In it {forms}.
 
 no citation resolves, because its `accepts` and `units` are empty
 
-## view-label-controls
-
-The page has {count} controls of its own that name the test label, such as a toggle, a checkbox or a menu item. Remove them, or make each one thimble's: it calls `thimble.setLabel` or `thimble.setLabelColour` and carries `data-label` with the label's id.
-
 ## view-no-screenshots
 
 Screenshots are unavailable on this machine, so the checks did not load the page and took no pictures. Check the page by reading it and what the reader answers, and take no pictures any other way.
 
-## view-no-record-anchors
+## view-few-anchors
 
-The page fetched {fetched} records, but only {records} of its elements carry a record's `<path>#L<n>` as their `data-anchor`, so the labels the analyst turns on show on almost nothing in it. Give each element that shows a record its file ref.
+The reader handed the page {fetched} records, but only {records} shown elements carry a record's citation form, such as `<path>#L<n>`, as their `data-anchor`, so the labels the analyst turns on show on almost nothing in it. Give each element that shows a record its file ref.
+
+## view-marks-missing
+
+In the {state} state, {missing} of the {due} shown records or units the test label marks do not show its mark. thimble draws a mark on the outermost visible element whose `data-anchor` names the record, but not on a canvas: draw records as HTML or SVG elements, or put the `data-anchor` on an element beside the canvas drawing.
+
+## view-filter-unkept
+
+Filtered to the test label, the page shows {records} records, and the filter keeps the line that anchors {unkept} of them. That is right for a record the page draws for several lines, one of which the label marks. Otherwise keep only the records for which `thimble.kept(ref)` holds in the reader's answers and fetch again in `thimble.onLabels`, or leave the filtering to thimble by registering no `onLabels`.
+
+## view-missing
+
+The claims expect files the corpus lacks, which the analyst sees above the view as missing: {files}.
+
+## view-robust-reader
+
+With {what}, the reader failed: {error}. A real corpus can lack a file or hold a line cut short, so read what is there, and report each line you cannot parse with problems().
+
+## view-robust-torn
+
+thimble added a line cut short at {ref}, and problems() does not report it. Report each line the reader cannot parse with problems(), so the analyst sees it above the view.
+
+## view-robust-page
+
+With {what}, the page failed: {errors}. One missing file or bad line must leave the rest of the view working.
+
+## view-robust-empty
+
+With {what}, the page shows no record, though over the whole corpus it shows records. One missing file or bad line must leave the rest of the view working.
+
+## view-layout
+
+The page {where}: {parts}.
+
+## view-layout-overlap
+
+text overlaps other text in {places}, such as {pairs}
+
+## view-layout-cut
+
+{n} run past a box that hides them without an ellipsis, such as {texts}
+
+## view-layout-sideways
+
+{n} scroll sideways, such as the one that starts {texts}
+
+## view-layout-outside
+
+{n} of the {of} records and units it draws are out of view until the analyst scrolls
+
+## view-layout-overflow
+
+it is {px} px wider than its pane, so it scrolls sideways
+
+## view-layout-empty
+
+its text and graphics span {used} of its {width} px, so the rest of the pane is empty
 
 ## view-not-shown
 
@@ -796,15 +848,11 @@ The page fetched {fetched} records, but only {records} of its elements carry a r
 
 ## view-not-claimed
 
-{count} files sit in folders beside the ones the view claims and hold the same files, such as another run's: {files}. The analyst sees each one above the view as not shown. Claim them too and show them, with a way to choose among the folders if the page shows one at a time, or claim them and return them from hidden(index) with a `why`.
+{count} files sit in folders beside the ones the view claims and hold the same files, such as another run's: {files}. The analyst sees each one above the view as not read. If the view is for all of them, claim them and let the analyst choose among the folders.
 
-## view-derived-undeclared
+## view-derived-unlisted
 
-reader.py derives fields that the view's list of derived fields leaves out: {fields}. The analyst sees the list above the view, and each field on it marked where the page names it. Add each field to `derived` in view.json as an object with `field`, `from` and `how`, or return it from the reader's derived(index), and give the element that names it on the page `data-field` with its name.
-
-## view-derived-unchecked
-
-The derived fields were not compared with reader.py: {why}.
+Fields of the records the reader answered hold values that the lines they cite do not, and `derived` does not list them: {fields}. The analyst counts on that list to tell what the files say from what the reader made of them. List each of these fields in `derived` in view.json, with `from` and `how`, `"kind": "inferred"` for a value the files do not state, and `key` when the analyst knows the field by another name, or return it from the reader's derived(index).
 
 ## check-unread
 

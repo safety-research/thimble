@@ -1,0 +1,43 @@
+<!doctype html>
+<html>
+<head>
+<style>
+  body { margin: 0; padding: 16px; font: 13px/1.5 "Hanken Grotesk", system-ui, sans-serif; color: #1f1f1f; }
+  table { border-collapse: collapse; width: 100%; }
+  th, td { text-align: left; padding: 6px 10px; border-bottom: 1px solid #e6e4df; }
+  th { font-weight: 500; color: #6b6963; }
+  td.n { font-variant-numeric: tabular-nums; text-align: right; }
+  tr[data-anchor] { cursor: pointer; }
+  tr[data-anchor]:hover { background: #f4f3ef; }
+</style>
+</head>
+<body>
+<table>
+  <thead><tr><th>File</th><th>Records</th><th>Not JSON</th><th>Kinds</th></tr></thead>
+  <tbody id="rows"></tbody>
+</table>
+<script>
+  const rows = document.getElementById('rows')
+  async function draw() {
+    const files = await thimble.fetch({})
+    rows.textContent = ''
+    for (const f of files) {
+      const tr = document.createElement('tr')
+      tr.dataset.anchor = f.ref
+      const cells = [f.path, f.records, f.bad, f.kinds.map((k) => `${k[0]} ${k[1]}`).join(', ')]
+      cells.forEach((v, i) => {
+        const td = document.createElement('td')
+        td.textContent = String(v)
+        if (i === 1 || i === 2) td.className = 'n'
+        if (i === 1) td.dataset.field = 'records'
+        if (i === 3) td.dataset.field = 'kinds'
+        tr.appendChild(td)
+      })
+      tr.onclick = () => thimble.navigate(f.ref)
+      rows.appendChild(tr)
+    }
+  }
+  thimble.onOpen(() => draw())
+</script>
+</body>
+</html>

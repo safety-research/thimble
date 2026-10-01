@@ -340,6 +340,8 @@ export interface LabelRow {
   analyst?: string | null
   /** the texts of the record a span label marks */
   spans?: string[]
+  /** the line a record whose ref names none starts on (a CSV row, a JSON document's record) */
+  line?: number
 }
 
 export interface LabelRowsResponse {
@@ -427,6 +429,8 @@ export interface ViewReview {
   left?: string[]
   note?: string
   undo?: boolean
+  /** the pictures the review took */
+  shots?: number
 }
 
 /** `GET /ws/{c}/views/suggestions?path=`: whether a viewer may be proposed for the type of a file opened in the File
@@ -496,19 +500,25 @@ export interface ViewProblems {
   examples: { ref: string; why: string }[]
 }
 
-/** A field a view's reader made rather than read as the files hold it. */
+/** A field a view's reader made rather than read as the files hold it, `kind` "inferred" for a value the files do not
+ * state (a join, an estimate, a classification), `key` the key the reader's records hold it under where that differs. */
 export interface ViewDerived {
   field: string
   from: string
   how: string
+  kind?: 'inferred' | ''
+  key?: string
 }
 
 /** `GET /ws/{c}/views/{slug}/shown`: of the files a view claims, those it does not show whole, the first 500 of them,
- * each with why its reader hides it ('' when it gives no why) and how many of its bytes were read; and the fields its
- * reader derived. */
+ * each with why its reader hides it ('' when it gives no why) and how many of its bytes were read, with `claimed`
+ * false for a file of a folder beside the claimed ones; what the claims expect and the corpus lacks; the records its
+ * reader could not place; and the fields its reader derived, the inferred ones first. */
 export interface ViewShown {
   files: number
-  not_shown: { count: number; unexplained: number; files: { path: string; size: number; read: number; why: string }[] }
+  not_shown: { count: number; unexplained: number; files: { path: string; size: number; read: number; why: string; claimed?: boolean }[] }
+  missing?: { path: string; why: string }[]
+  unplaced?: ViewProblems
   derived: ViewDerived[]
   errors: string[]
 }

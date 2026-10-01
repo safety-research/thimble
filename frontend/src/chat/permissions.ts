@@ -58,6 +58,7 @@ const ASKS_TO: Readonly<Record<string, string>> = {
   Agent: 'start an agent',
   Task: 'start an agent',
   ThimbleCode: "change thimble's own code",
+  ThimblePackage: 'install a package',
 }
 
 /** What the request asks to do, in words (run a command); another tool is named (use thimble's add_card). Pure. */

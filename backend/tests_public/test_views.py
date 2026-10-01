@@ -38,14 +38,22 @@ import json
 
 
 def build_index(paths):
-    threads, lines = {}, {}
+    threads, lines, bad = {}, {}, []
     for path in paths:
         with open(path) as f:
             for n, line in enumerate(f, 1):
-                r = json.loads(line)
+                try:
+                    r = json.loads(line)
+                except ValueError:
+                    bad.append({"ref": f"{path}#L{n}", "why": "not JSON"})
+                    continue
                 threads.setdefault(r["thread"], []).append([path, n, r["author"], r["body"]])
                 lines[f"{path}#L{n}"] = r["thread"]
-    return {"threads": threads, "lines": lines}
+    return {"threads": threads, "lines": lines, "bad": bad}
+
+
+def problems(index):
+    return index["bad"]
 
 
 def records(index, query):
@@ -336,33 +344,220 @@ def test_the_count_is_what_the_reader_takes_not_what_the_buffers_read(tmp_path):
     assert seen.counts() == {str(small): small.stat().st_size, str(big): big.stat().st_size}
 
 
-async def test_a_field_the_reader_derives_and_the_view_does_not_list_fails_the_gate(ws, inproc, bound, monkeypatch):
-    """Once the checks pass, one reading compares reader.py with the derived fields; a field it names that the list
-    leaves out fails the gate. The answer is kept for the same reader and list."""
-    from app import model, view_review  # noqa: PLC0415
+DERIVING_READER = THREADS_READER.replace(
+    '[{"ref": f"{p}#L{n}", "author": a, "body": b}',
+    '[{"ref": f"{p}#L{n}", "author": a.upper(), "body": b, "score": len(b) * 1.5, "replies": 7, "thread_key": "k" + a,'
+    ' "mood": "unknown"}')
 
-    async def no_page(c, slug, states, **k):
-        return [{"ok": True, "errors": [], "fetches": 0, "records": 1} for _ in states]
 
-    readings = []
+async def test_a_field_whose_values_the_cited_lines_do_not_hold_fails_the_checks_until_the_view_lists_it(
+        ws, inproc, bound, monkeypatch):
+    """The checks compare the records the reader hands the page with the lines they cite, by code: every field whose
+    values are not in those lines and that `derived` does not list is named in one problem, with no model call, and a
+    listed one is not."""
+    async def page(c, slug, states, **k):
+        answer = await views.reader_call(c, slug, "records", {"thread": "t1"})
+        return [{"ok": True, "errors": [], "fetches": 1, "answers": [answer], "shown": {"records": 3, "due": 0}}
+                for _ in states]
 
-    async def reading(c, system, user, tool, images, effort):
-        readings.append(user)
-        found = [] if "- author:" in user else [{"field": "author", "how": "the post's author, lower-cased"}]
-        return model.CallResult(status="ok", output={"undeclared": found})
+    monkeypatch.setattr(views, "shoot_states", page)
+    views.write_view(CORPUS, "threads", reader=DERIVING_READER, html=THREADS_HTML, **VIEW)
+    rep = await views.gate(CORPUS, "threads", ["board.jsonl#L3"])
+    assert not rep["ok"], views.gate_lines(rep)
+    noted = [n for n in rep["problems"] if "`derived`" in n]
+    assert len(noted) == 1 and "author ('ADA' on board.jsonl#L1)" in noted[0] and "score (" in noted[0], noted
+    for field in ("body", "replies", "thread_key", "mood"):
+        assert f"{field} (" not in noted[0], f"{field}: a raw value, a count, a key or a default needs no entry"
+    views.write_view(CORPUS, "threads", reader=DERIVING_READER, html=THREADS_HTML,
+                     **{**VIEW, "derived": [{"field": "author", "from": "author", "how": "upper-cased"},
+                                            {"field": "score", "from": "body", "how": "its length", "kind": "inferred"}]})
+    rep = await views.gate(CORPUS, "threads", ["board.jsonl#L3"])
+    assert rep["ok"] and not [n for n in rep["problems"] + rep["notes"] if "`derived`" in n], views.gate_lines(rep)
+    assert [d["field"] for d in rep["coverage"]["derived"]] == ["score", "author"], "an inferred field comes first"
+    assert views._exempt("files", 3) and views._exempt("n_calls", 2), "a count needs no entry"
+    assert not views._exempt("ts", 1781741180000) and not views._exempt("status", 200), "a short or singular name is no count"
 
-    monkeypatch.setattr(views, "shoot_states", no_page)
-    monkeypatch.setattr(view_review, "_call", reading)
-    monkeypatch.setenv("THIMBLE_VIEW_REVIEW", "on")
-    for _ in range(2):
-        rep = await views.gate(CORPUS, "threads", ["board.jsonl#L3"])
-        assert not rep["ok"] and any("author (the post's author, lower-cased)" in p for p in rep["problems"]), rep["problems"]
-    assert len(readings) == 1 and "def build_index" in readings[0]
-    views.write_view(CORPUS, "threads", reader=THREADS_READER, html=THREADS_HTML,
-                     **{**VIEW, "derived": [{"field": "author", "from": "author", "how": "lower-cased"}]})
+
+def test_a_file_one_folder_lacks_beside_the_others_is_missing():
+    """A claim of a file in each of several folders names the file a folder lacks that holds other claimed files."""
+    claimed = ["runs/r1/events.jsonl", "runs/r1/manifest.json", "runs/r2/events.jsonl", "runs/r2/manifest.json",
+               "runs/r3/events.jsonl", "runs/r3/agents/a1.jsonl"]
+    out = views.missing_files(["runs/*/events.jsonl", "runs/*/manifest.json", "runs/*/agents/*.jsonl", "notes/*.md"], claimed)
+    paths = [m["path"] for m in out]
+    assert "runs/r3/manifest.json" in paths and "notes/*.md" in paths
+    assert "runs/r1/manifest.json" not in paths and not any("agents" in x for x in paths), "one run's agents set no rule"
+    assert views.missing_files(["**/*.jsonl", "docs/*.md"], ["a/x.jsonl", "b/y.jsonl", "docs/r.md"]) == [], \
+        "a claim of any file of a type in any folder names nothing a folder lacks"
+
+
+def test_files_beside_a_claimed_folder_are_named_only_where_the_view_reads_their_like():
+    """In a folder beside a claimed one, a file is named when a claimed file has its path below the claimed folder, or
+    when the claimed folder holds only claimed files of its subfolder and type; other files of that type are not."""
+    every = ["P7/transcript.md", "P7/return/events.jsonl", "P7/return/hooks.jsonl", "P7/return/dialogs.jsonl",
+             "P8/transcript.md", "P8/return/events.jsonl", "P8/return/hooks.jsonl", "P8/return/dialogs.jsonl"]
+    assert views.sibling_files(["P7/transcript.md", "P7/return/events.jsonl"], every) == [
+        "P8/return/events.jsonl", "P8/transcript.md"]
+    assert views.sibling_files(["P7/transcript.md", *[p for p in every if p.startswith("P7/return/")]], every) == [
+        "P8/return/dialogs.jsonl", "P8/return/events.jsonl", "P8/return/hooks.jsonl", "P8/transcript.md"]
+
+
+async def test_the_checks_run_the_view_on_a_copy_with_a_file_missing_and_a_line_cut_short(ws, inproc, bound, monkeypatch):
+    """The gate runs the reader on a copy of the corpus with one claimed file left out and a torn line after the last
+    of a JSON lines file: a reader that fails there, or does not report the torn line, fails the gate."""
+    pages = []
+
+    async def page(c, slug, states, **k):
+        pages.append(k.get("prepared"))
+        return [{"ok": True, "errors": [], "fetches": 1, "shown": {"records": 3, "due": 0}} for _ in states]
+
+    monkeypatch.setattr(views, "shoot_states", page)
+    corpus = config.corpus_dir(CORPUS)
+    (corpus / "more.jsonl").write_text((corpus / "board.jsonl").read_text())
+    view = {**VIEW, "claims": ["*.jsonl"]}
+    views.write_view(CORPUS, "threads", reader=THREADS_READER, html=THREADS_HTML, **view)
     rep = await views.gate(CORPUS, "threads", ["board.jsonl#L3"])
     assert rep["ok"], views.gate_lines(rep)
-    assert len(readings) == 2
+    copy = pages[-1]
+    assert copy and copy["root"].endswith("/robust/corpus") and len(copy["paths"]) == 1
+    assert not (views.index_dir(CORPUS, "threads") / views.ROBUST_SUBDIR).exists(), "the copy is removed after"
+    strict = THREADS_READER.replace("                try:\n                    r = json.loads(line)\n                except ValueError:\n"
+                                    "                    bad.append({\"ref\": f\"{path}#L{n}\", \"why\": \"not JSON\"})\n"
+                                    "                    continue\n", "                r = json.loads(line)\n")
+    assert strict != THREADS_READER
+    views.write_view(CORPUS, "threads", reader=strict, html=THREADS_HTML, **view)
+    rep = await views.gate(CORPUS, "threads", ["board.jsonl#L3"])
+    assert not rep["ok"] and any("missing and a torn line at" in p and "the reader failed" in p for p in rep["problems"]), rep["problems"]
+    quiet = THREADS_READER.replace("    return index[\"bad\"]", "    return []")
+    views.write_view(CORPUS, "threads", reader=quiet, html=THREADS_HTML, **view)
+    rep = await views.gate(CORPUS, "threads", ["board.jsonl#L3"])
+    assert not rep["ok"] and any("does not report it" in p for p in rep["problems"]), rep["problems"]
+
+    (corpus / "a-small.jsonl").write_text('{"thread": "t1", "author": "a", "body": "b"}\n')
+    (corpus / "a-skipped.jsonl").write_text('{"thread": "t9", "author": "x", "body": "an export of last year"}\n')
+    skipping = THREADS_READER.replace("    for path in paths:\n", "    for path in [p for p in paths if 'skipped' not in p]:\n") \
+        + "\n\ndef hidden(index):\n    return [{\"path\": \"a-skipped.jsonl\", \"why\": \"an old export\"}]\n"
+    views.write_view(CORPUS, "threads", reader=skipping, html=THREADS_HTML, **view)
+    rep = await views.gate(CORPUS, "threads", ["board.jsonl#L3"])
+    assert rep["ok"], "the torn line goes in a file the reader reads, not one it hides: " + "; ".join(views.gate_lines(rep))
+
+    planted = views.index_dir(CORPUS, "threads") / views.ROBUST_SUBDIR
+    outside = config.workspace_dir(CORPUS).parent / "outside"
+    outside.mkdir()
+    planted.symlink_to(outside)
+    v = views.read_view(CORPUS, "threads")
+    copy = views.robust_copy(CORPUS, "threads", v, views.claimed_files(CORPUS, v))
+    assert copy and not list(outside.iterdir()) and not planted.is_symlink(), "a symlink a reader left is not followed"
+
+
+def test_the_test_label_answers_thimble_labels_as_a_label_would(tmp_path):
+    """Under the test label, thimble.labels() lists it and thimble.labels("test label") gives the lines it marks of the
+    view's files, every line with negatives."""
+    from app import kernel_thimble as kt  # noqa: PLC0415
+
+    path = tmp_path / "board.jsonl"
+    path.write_text("".join(f'{{"n": {i}}}\n' for i in range(1, 16)))
+    kt._view_ctx, kt._view_paths = views.probe_context(), [str(path)]
+    try:
+        assert list(kt.labels()["name"]) == [kt.PROBE_NAME]
+        df = kt.labels(kt.PROBE_NAME)
+        assert list(df["line"]) == [7, 14] and set(df["effective"]) == {kt.PROBE_NAME}
+        assert len(kt.labels(kt.PROBE_NAME, negatives=True)) == 15
+    finally:
+        kt._view_ctx, kt._view_paths = None, []
+
+
+def _shot(state: str, **shown) -> dict:
+    return {"ok": True, "state": state, "fetched_records": shown.pop("fetched", 0), "shown": shown}
+
+
+def test_the_checks_fail_a_page_whose_records_do_not_show_the_test_label():
+    """What the test label's states show decides by code: no anchored record, too few of those fetched, or a marked record
+    drawn without its mark fail; records shown under the filter whose anchor it does not keep are a note."""
+    view = {"slug": "threads"}
+    files = [("board.jsonl", 100, 0)]
+
+    def run(*shots):
+        return views.label_problems(view, files, list(shots))
+
+    good = (_shot("overview", records=40, units=0, due=6, drawn=6, fetched=40),
+            _shot("filtered", records=6, units=0, due=6, drawn=6, unkept=0),
+            _shot("detail", records=5, units=1, due=1, drawn=1))
+    assert run(*good) == ([], [])
+    assert "no element" in run(_shot("overview", records=0, units=0, fetched=40))[0][0]
+    assert "only 2 shown elements" in run(_shot("overview", records=2, units=0, due=0, fetched=400))[0][0]
+    assert run(_shot("overview", records=2, units=3, fetched=400)) == ([], []), "a view may anchor units instead"
+    assert "3 of the 6" in run(_shot("overview", records=40, due=6, drawn=3, fetched=40))[0][0]
+    problems, notes = run(good[0], _shot("filtered", records=10, unkept=8), good[2])
+    assert not problems and "anchors 8 of them" in notes[0] and "shows 10 records" in notes[0]
+    assert run(*good[:1]) == ([], []) and views.label_problems(view, [("talk.mp4", 9, 0)], [_shot("overview")]) == ([], [])
+    assert views.label_problems(view, [("doc.pdf", 9, 0)], [_shot("overview")])[0], "a PDF's pages are records labels mark"
+
+
+async def test_a_claim_that_matches_no_file_is_listed_as_missing(ws, inproc, bound, monkeypatch):
+    """A claim that matches no file shows above the view as missing, and the checks say so without failing."""
+    async def no_page(c, slug, states, **k):
+        return [{"ok": True, "errors": [], "fetches": 0} for _ in states]
+
+    monkeypatch.setattr(views, "shoot_states", no_page)
+    views.write_view(CORPUS, "two", name="Two", description="Posts and a log.", claims=["board.jsonl", "logs/*.log"],
+                     accepts=VIEW["accepts"], reader=THREADS_READER, html=THREADS_HTML)
+    assert (await views.shown(CORPUS, "two"))["missing"] == [{"path": "logs/*.log", "why": "no file matches it"}]
+    rep = await views.check(CORPUS, "two", ["board.jsonl#L3"])
+    assert rep["ok"] and any("logs/*.log" in n for n in rep["notes"]), views.gate_lines(rep)
+
+
+async def test_the_review_reads_one_picture_asks_for_more_and_sends_its_problems_for_a_revision(ws, bound, monkeypatch):
+    """The review starts from one picture of the view as it opens; the reading may ask for other states, which are shot
+    and read once more with the first, and that reading's problems go to a revision. The view revised, it is reviewed
+    again from one picture, and a reading with no problems ends it."""
+    from app import card_check, model, view_review  # noqa: PLC0415
+
+    monkeypatch.setattr(views, "_queue", lambda c, slug: None)
+    views.propose(CORPUS, "Threads", "The posts by thread.", ["board.jsonl"], "Unit: a post", asked=True)
+    views.mark_built(CORPUS, "threads")
+    taken: list[list[str]] = []
+    asked: list[tuple] = []
+
+    async def shoot_states(c, slug, states, **k):
+        taken.append([("filtered" if (st.get("labels") or {}).get("filter") else "on" if (st.get("labels") or {}).get("probe")
+                       else "plain") for st in states])
+        asked.extend((st.get("size"), st.get("actions")) for st in states)
+        for st in states:
+            Path(st["out"]).parent.mkdir(parents=True, exist_ok=True)
+            Path(st["out"]).write_bytes(b"png")
+        return [{"ok": True, "errors": [], "fonts": True, "png": str(st["out"]), "answers": [[{"ref": "board.jsonl#L1"}]]}
+                for st in states]
+
+    answers = [{"problems": ["picture 1: the list is cut off"],
+                "more": [{"state": "filtered", "why": "the filter"}, {"state": "control", "controls": ["Day"], "why": "days"},
+                         {"state": "control", "why": "names no control"}]},
+               {"problems": ["picture 2: the filter keeps every post"]},
+               {"problems": [], "more": []}]
+    readings: list[tuple[int, bool, str]] = []
+
+    async def reading(c, system, user, tool, images, effort):
+        readings.append((len(images), "more" in tool.input_schema["properties"], user))
+        return model.CallResult(status="ok", output=answers[len(readings) - 1])
+
+    revisions: list[list[str]] = []
+
+    async def revise(c, slug, prop, problems, shots):
+        revisions.append(problems)
+        return True, "fixed"
+
+    monkeypatch.setattr(views, "shoot_states", shoot_states)
+    monkeypatch.setattr(view_review, "_call", reading)
+    monkeypatch.setattr(view_review, "revise", revise)
+    monkeypatch.setattr(card_check, "fit_image", lambda b: b)
+    await view_review._review(view_review._Run(CORPUS, "threads"))
+    assert taken == [["plain"], ["filtered", "plain"], ["plain"]]
+    assert asked[:3] == [(views.PANE_SIZE, None), (views.PANE_NARROW, None), (views.PANE_SIZE, ["Day"])]
+    assert [(n, more) for n, more, _ in readings] == [(1, True), (3, False), (1, True)]
+    assert "3: the overview after clicking nothing" in readings[1][2], "the stub clicked nothing"
+    assert f"2: the overview filtered to the test label, {views.PANE_NARROW[0]} px wide (asked for: the filter)" in readings[1][2]
+    assert revisions == [["picture 2: the filter keeps every post"]]
+    review = views.read_proposal(CORPUS, "threads")["review"]
+    assert review["state"] == "done" and review["revised"] == revisions[0] and review["shots"] == 4 and not review["left"]
 
 
 async def test_a_workspace_gets_four_views_from_the_orientation_and_a_deleted_one_stays_deleted(ws, monkeypatch):
@@ -556,11 +751,144 @@ async def test_every_worked_example_s_page_loads_headless_at_its_first_place(nam
             pytest.fail(why)  # CI installs them, so there the page is always loaded
         pytest.skip(why)
     slug = _save_example(name)
-    rep = await views.check(name, slug, EXAMPLES[name][1], shot_dir=tmp_path)
+    rep = await views.check(name, slug, EXAMPLES[name][1], shot_dir=tmp_path, picture=True)
     assert rep["ok"], views.gate_lines(rep)
     assert rep["page"]["fetches"] >= 1 and Path(rep["page"]["png"]).is_file()
-    assert not views.unmarked(rep["page"]), "the records a worked example shows carry their file refs, for the labels"
+    assert [s["state"] for s in rep["shots"]] == list(views.CHECK_STATES)
+    assert [s["state"] for s in rep["shots"] if s.get("png")] == ["opened"], "only the picture asked for is taken"
+    if name != "pdf":
+        shown = rep["shots"][0]["shown"]
+        assert shown["due"] and shown["drawn"] == shown["due"], "the test label shows on the records a worked example shows"
 
+
+async def test_a_check_run_where_it_cannot_reach_the_server_leaves_its_request_in_the_view_s_folder(ws, monkeypatch):
+    """view_check.py run inside the sandbox reaches neither the server nor server.json: it leaves its request as a file
+    in the view's folder, which the server watches while the session runs, and prints the answer written beside it."""
+    import importlib.util  # noqa: PLC0415
+
+    spec = importlib.util.spec_from_file_location("view_check_t", Path(views.__file__).with_name("view_check.py"))
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    asked: list[tuple] = []
+
+    async def answer(c, slug, locators, picture):
+        asked.append((c, slug, locators, picture))
+        return {"ok": True, "lines": ["page: loaded"], "png": None}
+
+    monkeypatch.setattr(views, "check_answer", answer)
+    monkeypatch.setattr(views, "CHECK_POLL_S", 0.05)
+    monkeypatch.setattr(mod, "POLL_S", 0.05)
+    folder = views.views_dir(CORPUS) / "threads"
+    out = io.StringIO()
+    monkeypatch.setattr(sys, "stdout", out)
+    watch = views.watch_checks(CORPUS, "threads")
+    try:
+        code = await asyncio.to_thread(mod.main, ["--home", str(folder / "nowhere"), "--folder", str(folder),
+                                                  "http://127.0.0.1:9/api/ws/boards/views/threads/check", "board.jsonl#L3",
+                                                  "--picture"])
+    finally:
+        watch.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await watch
+    assert code == 0 and json.loads(out.getvalue())["lines"] == ["page: loaded"]
+    assert asked == [(CORPUS, "threads", ["board.jsonl#L3"], True)]
+    assert not (folder / views.CHECK_DROP).exists(), "the folder goes when the session's watch ends"
+    monkeypatch.setattr(mod, "PICKUP_S", 0.2)
+    code = await asyncio.to_thread(mod.main, ["--folder", str(folder), "http://127.0.0.1:9/api/ws/boards/views/threads/check"])
+    assert code == 1 and not list((folder / views.CHECK_DROP).glob("*.json")), "with no server watching it gives up"
+    elsewhere = folder.parent / "elsewhere"
+    elsewhere.mkdir()
+    (elsewhere / "0123abcd.json").write_text("{}")
+    shutil.rmtree(folder / views.CHECK_DROP, ignore_errors=True)
+    (folder / views.CHECK_DROP).symlink_to(elsewhere)
+    assert views._drop_requests(folder / views.CHECK_DROP) == [], "a drop folder that is a symlink is not read"
+    (folder / views.CHECK_DROP).unlink()
+    (folder / views.CHECK_DROP).mkdir()
+    (folder / views.CHECK_DROP / "4567abcd.json").symlink_to(elsewhere / "0123abcd.json")
+    assert views._drop_requests(folder / views.CHECK_DROP) == [], "nor a request that is a symlink"
+
+
+FIT_HTML = """<!doctype html><html><head><style>body{font:13px sans-serif;margin:8px}</style></head><body>
+<div style="position:relative;height:40px"><span style="position:absolute;left:0;top:0">Overlapping label one</span>
+<span style="position:absolute;left:12px;top:2px">Second label here</span></div>
+<div style="width:60px;overflow:hidden;white-space:nowrap">A text far too long for its box</div>
+<div style="width:300px">Narrow column</div>
+<div style="width:120px;overflow-x:auto;white-space:nowrap">Lanes that run on past their box</div>
+<button id="more">Show more</button><div id="extra" hidden data-anchor="board.jsonl#L2">bo: Anyone have the build number?</div>
+<div style="height:2000px"></div><div data-anchor="board.jsonl#L3">cy: Confirmed</div>
+<script>
+document.getElementById('more').onclick = () => { document.getElementById('extra').hidden = false }
+thimble.onOpen(() => {})
+</script></body></html>"""
+
+
+async def test_the_headless_page_measures_how_its_text_fits_and_clicks_a_control_a_state_names(ws, inproc, bound):
+    """The checks' page reports text drawn over other text, text its box cuts off and how much of a wide pane the page
+    uses, lists its controls by their text, and a state's actions click a control by its text before it is measured."""
+    if why := views.build_problem():
+        if os.environ.get("CI") == "true":
+            pytest.fail(why)
+        pytest.skip(why)
+    views.write_view(CORPUS, "fit", reader=THREADS_READER, html=FIT_HTML, **{**VIEW, "name": "Fit"})
+    plain, clicked = await views.shoot_states(CORPUS, "fit", [
+        {"open": {}, "size": views.PANE_WIDE}, {"open": {}, "actions": ["Show more", "No such control"]}])
+    assert plain["ok"] and clicked["ok"], (plain["errors"], clicked["errors"])
+    lay = plain["layout"]
+    assert lay["overlaps"] == 1 and lay["pairs"][0] == ["Overlapping label one", "Second label here"], lay
+    assert lay["cut"] == 1 and lay["cuts"] == ["A text far too long for its box"], lay
+    assert lay["width"] == views.PANE_WIDE[0] and lay["used"] < views.WIDE_USED * lay["width"] and not lay["overflow"]
+    assert lay["sideways"] == 1 and lay["wide"] == ["Lanes that run on past their box"], lay
+    assert (lay["anchored"], lay["outside"]) == (1, 1), "the record far below the pane is out of view"
+    assert "Show more" in plain["controls"]
+    assert plain["shown"]["records"] == 1 and clicked["shown"]["records"] == 2, "the click showed the hidden record"
+    assert clicked["actions"] == [{"control": "Show more", "found": True}, {"control": "No such control", "found": False}]
+    notes = views.layout_notes([{**plain, "state": "wide"}])
+    assert len(notes) == 1 and "overlaps other text in 1 place," in notes[0] and "rest of the pane is empty" in notes[0]
+
+
+
+async def test_the_headless_page_waits_for_a_slow_answer_and_its_run_gets_the_time_the_answer_took(ws, inproc, bound,
+                                                                                                monkeypatch):
+    """A view's data call has no time limit, so a fetch the reader takes long to answer is waited for: the run's own
+    time grows by the time its answers take, and the page is measured once the answer is in."""
+    if why := views.build_problem():
+        if os.environ.get("CI") == "true":
+            pytest.fail(why)
+        pytest.skip(why)
+    views.write_view(CORPUS, "threads", reader=THREADS_READER, html=THREADS_HTML, **VIEW)
+    real = views.reader_call
+
+    async def slow(*a, **k):
+        await asyncio.sleep(8)
+        return await real(*a, **k)
+
+    monkeypatch.setattr(views, "reader_call", slow)
+    monkeypatch.setattr(views, "SHOT_TIMEOUT_S", 4.0)
+    monkeypatch.setattr(views, "SHOT_STATE_S", 1.0)
+    (s,) = await views.shoot_states(CORPUS, "threads", [{"open": {}}])
+    assert s["ok"] and s["fetches"] == 1, s["errors"]
+
+
+UNMARKED_HTML = """<!doctype html><html><head><style>body{font:13px sans-serif;margin:8px}</style></head><body>
+<div data-anchor="board.jsonl#L7" style="padding-left:8px">seven</div>
+<div data-anchor="board.jsonl#L14" data-anchor-unmarked style="padding-left:8px">fourteen, in the label's colour</div>
+<div data-anchor="board.jsonl#L3" style="padding-left:8px">three</div>
+<div data-anchor="notes.pdf#p2" style="padding-left:8px">a page</div>
+<script>thimble.onOpen(() => {})</script></body></html>"""
+
+
+async def test_a_record_the_page_marks_itself_is_not_held_to_thimble_s_mark(ws, inproc, bound):
+    """An element with data-anchor-unmarked draws the labels' colours itself, so the bridge gives it no bar and the
+    checks count its record as shown but do not look for the bar on it. A record of a file other than a line, such as
+    a PDF's page, counts as shown too."""
+    if why := views.build_problem():
+        if os.environ.get("CI") == "true":
+            pytest.fail(why)
+        pytest.skip(why)
+    views.write_view(CORPUS, "unmarked", reader=THREADS_READER, html=UNMARKED_HTML, **{**VIEW, "name": "Unmarked"})
+    (s,) = await views.shoot_states(CORPUS, "unmarked", [{"open": {}, "labels": views.probe_context()}])
+    assert s["ok"], s["errors"]
+    assert s["shown"]["records"] == 4 and s["shown"]["due"] == s["shown"]["drawn"] >= 1, s["shown"]
 
 # what Playwright's own error says to run, which never reaches a model
 INSTALL_WORDS = re.compile(r"playwright install|npx|download new browsers|Executable doesn't exist|install\.sh", re.I)

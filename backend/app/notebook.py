@@ -39,7 +39,7 @@ from jupyter_client.connect import write_connection_file
 from pydantic import BaseModel, Field
 from sse_starlette import EventSourceResponse, ServerSentEvent
 
-from . import cite, config, frames, kernel_wrap, page_fonts, procs, srt
+from . import cite, config, frames, kernel_wrap, page_fonts, procs, srt, view_calls
 from .ledger import atomic_write_text, read_json, unlinked, write_json
 
 log = logging.getLogger("thimble.notebook")
@@ -2192,6 +2192,7 @@ async def shutdown_workspace(workspace: str) -> None:
     names = {None, *[name for w, name in _exec_kernels if w == workspace], *recorded_kernels(workspace)}
     for name in sorted(names, key=lambda n: (n is not None, n or "")):
         await shutdown_kernel(workspace, kernel=name)
+    view_calls.forget_workspace(workspace)
 
 
 async def shutdown_all() -> None:

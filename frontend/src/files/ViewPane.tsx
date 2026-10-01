@@ -1,10 +1,10 @@
 // A view picked in the views bar: the corpus's view drawing its files in its sandboxed frame (ViewerFrame) at the place a
 // ref names, with Raw one click away when it reads one file. Under the name, the files it reads (a click lists them, and
-// a file picked opens in Raw), then thimble's notes on the view (ViewChrome): the files it does not show, what it
-// derived and, in red, the lines of its files its reader could not read. A view that fails says so with Raw beside it.
-// While a Files label filter is set, the head shows it as a chip that clears it, since the view keeps only the records
-// the filter keeps. At the head's right end, for a view of one file, Open in (the other views that claim the file shown,
-// and the File browser) and the mode switch, then the mark of the review of the view's pictures (ReviewMark).
+// a file picked opens in Raw), then thimble's notes on the view (ViewChrome): what it leaves out, a line that opens the
+// list of it under the head, and what it derived. A view that fails says so with Raw beside it. While a Files label
+// filter is set, the head shows it as a chip that clears it, since the view keeps only the records the filter keeps. At
+// the head's right end, for a view of one file, Open in (the other views that claim the file shown, and the File
+// browser) and the mode switch, then the mark of the review of the view's pictures (ReviewMark).
 // The pane keeps the version of the view it opened (usePinnedView): a newer one, from a change, the review or the
 // orientation, never reloads under the analyst. The head says Updated with Reload, which loads it where they were: the
 // element they picked, the scroll positions, the fields and the label filter. Undo in the review's mark loads at once.
@@ -26,7 +26,7 @@ import { inferKind } from './params'
 import { Reader, ViewFailed } from './Reader'
 import { kindIn, useFolderStore } from './Tree'
 import { useFilesFilter, type FilesLabels } from './useLabels'
-import { useShownLabels, useViewNotes, ViewNotesLine } from './ViewChrome'
+import { ResidueList, useResidueOpen, useShownLabels, useViewNotes, ViewNotesLine } from './ViewChrome'
 import { ViewerFrame, type ViewLabelActions, type ViewQuote } from './ViewerFrame'
 import { usePinnedView, ViewUpdated } from './viewVersion'
 import type { BuiltView } from './ViewsBar'
@@ -110,6 +110,7 @@ export function ViewPane({ ws, view, path, picked, kind, targetRef, quote, onQuo
   const rawKind = rawAt ? (kindIn(folders.store, rawAt.path) ?? inferKind(rawAt.path)) : kind
   const notes = useViewNotes(ws, view.slug, pin.pinned || undefined)
   const shownLabels = useShownLabels(labels, view.claims)
+  const [residueOpen, toggleResidue] = useResidueOpen(ws, view.slug)
   const pickRef = (ref: string) => {
     const p = refPath(ref) ?? ref
     showRaw(p === ref ? { path: p } : { path: p, ref })
@@ -123,7 +124,7 @@ export function ViewPane({ ws, view, path, picked, kind, targetRef, quote, onQuo
           <span className="view-pane-sub">
             <ViewFiles view={view} current={mode === 'raw' ? rawPath : null} onPick={(f) => showRaw({ path: f })} />
             {mode === 'raw' && rawPath && (view.n_files ?? 0) > 1 && <span className="view-pane-file mono">{rawPath}</span>}
-            <ViewNotesLine ws={ws} name={view.name} notes={notes} shownLabels={shownLabels} onPick={pickRef} />
+            <ViewNotesLine ws={ws} name={view.name} notes={notes} shownLabels={shownLabels} residueOpen={residueOpen} onResidue={toggleResidue} />
           </span>
         </div>
         {pin.stale && mode === 'view' && <ViewUpdated onReload={reload} className="view-pane-updated" />}
@@ -143,6 +144,7 @@ export function ViewPane({ ws, view, path, picked, kind, targetRef, quote, onQuo
         )}
         {view.review && <ReviewMark ws={ws} slug={view.slug} review={view.review} onUndo={pin.follow} />}
       </div>
+      {residueOpen && <ResidueList notes={notes} onPick={pickRef} />}
       <div className="view-pane-body">
         {mode === 'raw' && rawPath ? (
           <div className="view-pane-raw">

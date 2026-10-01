@@ -60,6 +60,7 @@
 #                            and the writers run as Claude Code background agents, which start only in a trusted folder.
 #                            --no-trust-workspaces answers no, and takes back what an earlier yes added
 #   --dry-run                print what it installs, its questions and every step and command; change nothing
+# THIMBLE_BIN_DIR, when set, is the folder the `thimble` link goes into in place of ~/.local/bin.
 set -euo pipefail
 
 usage()  { sed -n '2,/^set -euo/p' "$0" | sed '$d' | sed 's/^# \{0,1\}//'; }
@@ -76,6 +77,7 @@ json_get() {  # json_get FILE KEY — a top-level string value (python3 when pre
 parse_args() {
   src="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
   home="${THIMBLE_HOME:-$HOME/.thimble}"
+  bin_dir="${THIMBLE_BIN_DIR:-$HOME/.local/bin}"
   dir="" mp_name="" dev=0 deps_only=0 plugin="" dry=0 trust="" byo="" browser="" sandbox_deps="" require_pinned=0
   while [ $# -gt 0 ]; do
     case "$1" in
@@ -263,7 +265,7 @@ copy_tree() {  # a release install: the release's entries replace the install's;
   fi
   say "copying the release into $dir (kept there if present: backend/.venv, frontend/node_modules, workspaces/, data/, dev/)"
   run mkdir -p "$dir"
-  for entry in plugin backend prompts frontend .claude-plugin scripts README.md INSTALL.md docs LICENSE THIRD_PARTY_NOTICES RELEASE.json; do
+  for entry in plugin extensions backend prompts frontend .claude-plugin scripts README.md INSTALL.md docs LICENSE THIRD_PARTY_NOTICES RELEASE.json; do
     [ -e "$src/$entry" ] || continue
     keep=""; case "$entry" in backend) keep=.venv;; frontend) keep=node_modules;; esac
     say "+ replace $dir/$entry${keep:+/* except $keep}"
@@ -822,7 +824,7 @@ link_cli() {  # ~/.local/bin/thimble → <tree>/plugin/bin/thimble, so `thimble`
   # says whether it is). What cli_plan found there decides: a link into another install stays unless a yes switched it,
   # and anything else that is not a link into a thimble tree (another program) is left alone
   step "8/12 thimble on PATH"
-  local bin="$HOME/.local/bin" target="$dir/plugin/bin/thimble"
+  local bin="$bin_dir" target="$dir/plugin/bin/thimble"
   cli_linked=0
   case "$cli_state" in
     foreign)
@@ -908,7 +910,7 @@ other_plugin() {  # the line naming another install's thimble plugin
 cli_plan() {  # what ~/.local/bin/thimble is now (cli_state): new (nothing there), ours (a link to this install's command),
   # gone (a link into a thimble tree that is no longer there), other (a link into another thimble install, cli_other) or
   # foreign (anything else). It is replaced when new, ours or gone, and when other only on a yes asked on a terminal
-  cli_link="$HOME/.local/bin/thimble" cli_other="" cli_switch=""
+  cli_link="$bin_dir/thimble" cli_other="" cli_switch=""
   local target="$dir/plugin/bin/thimble" existing=""
   [ ! -L "$cli_link" ] || existing="$(readlink "$cli_link")"
   if [ ! -e "$cli_link" ] && [ ! -L "$cli_link" ]; then cli_state=new
@@ -917,7 +919,7 @@ cli_plan() {  # what ~/.local/bin/thimble is now (cli_state): new (nothing there
   else
     case "$existing" in
       */plugin/bin/thimble)
-        case "$existing" in /*) cli_other="${existing%/plugin/bin/thimble}";; *) cli_other="$HOME/.local/bin/${existing%/plugin/bin/thimble}";; esac
+        case "$existing" in /*) cli_other="${existing%/plugin/bin/thimble}";; *) cli_other="$bin_dir/${existing%/plugin/bin/thimble}";; esac
         if [ -e "$cli_link" ]; then cli_state=other; else cli_state=gone; fi;;
       *) cli_state=foreign;;
     esac
@@ -1204,7 +1206,7 @@ trust_workspaces() {  # the one entry thimble writes into Claude Code's global c
 }
 
 path_has_local_bin() {  # $HOME/.local/bin (or ~/.local/bin) as a PATH entry, a trailing slash on the entry allowed
-  case ":$(printf '%s' "$PATH" | sed 's#/*:#:#g; s#/*$##'):" in *":$HOME/.local/bin:"* | *":~/.local/bin:"*) return 0;; esac; return 1
+  case ":$(printf '%s' "$PATH" | sed 's#/*:#:#g; s#/*$##'):" in *":$bin_dir:"* | *":~/.local/bin:"*) return 0;; esac; return 1
 }
 
 finish() {  # doctor, then the one next step (and the PATH line the link needs)

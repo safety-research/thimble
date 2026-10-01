@@ -29,7 +29,8 @@ with its file and line. The folder:
   checks/<slug>/      a report check: check.json and check.md
 
 An extension loads when read_extension finds no problem: its files check, this thimble is in its range, its Python
-packages import, its js names only libraries thimble inlines, and the extensions it needs are added. It is active in a
+packages import, its js names thimble's own libraries or npm packages its views hold in their lib folders (view_libs),
+and the extensions it needs are added. It is active in a
 workspace when it loads, neither thimble's config (`extensions.<name>.enabled: false`, which `thimble extension off`
 writes) nor the workspace's switch in Settings turns it off, and the extensions it needs are active there. An active
 extension's agents and orientation instructions join the orientation, its card types join main's prompt where their
@@ -358,7 +359,7 @@ def read_extension(root: Path, expect: str | None = None, have: set[str] | None 
     are those an added extension waits out (a thimble outside its range, a Python package or an extension it needs);
     `expect` is the name its folder gives it, `have` the extensions added (added()). The problems of its files come
     first, each with the file and line it is on (extension_manifest.check)."""
-    from . import views  # noqa: PLC0415
+    from . import view_libs, views  # noqa: PLC0415
 
     raw = _json(root / MANIFEST)
     name = str(raw.get("name") or "")
@@ -381,9 +382,10 @@ def read_extension(root: Path, expect: str | None = None, have: set[str] | None 
     js = _words(deps.get("js"))
     needs = [n for n in _words(raw["needs"] if "needs" in raw else deps.get("extensions")) if n != name]
     scope = _words(raw.get("scope"))
-    unknown = [x for x in js if x not in views.LIBS]
+    unknown = [x for x in js if x not in views.LIBS and view_libs.parse(x) is None]
     if unknown:
-        problems.append(f"its dependencies.js names {', '.join(unknown)}. thimble inlines only {', '.join(views.LIBS)}")
+        problems.append(f"its dependencies.js names {', '.join(unknown)}, which is neither one of "
+                        f"{', '.join(views.LIBS)} nor an npm package as name@version")
     if missing := [x for x in python if not _importable(x)]:
         waits.append(f"it needs the Python {_several(len(missing), 'package', 'packages')} {', '.join(missing)}, "
                      f"which thimble does not install")
@@ -399,6 +401,12 @@ def read_extension(root: Path, expect: str | None = None, have: set[str] | None 
         if not (d / views.READER_PY).is_file():
             problems.append(f"its view {d.name!r} has no {views.READER_PY}, which thimble needs to read its files")
             continue
+        missing = [x for x in (*js, *view_libs.entries(v.get("libs")))
+                   if view_libs.parse(x) is not None and view_libs.vendored(d, x) is None]
+        if missing:
+            problems.append(f"its view {d.name!r} loads {', '.join(dict.fromkeys(missing))}, which its "
+                            f"{view_libs.LIB_DIR} folder does not hold. Build the view in a workspace, where thimble "
+                            "installs packages once the analyst allows them, and copy its folder")
         card = v.get("card") if isinstance(v.get("card"), dict) and (d / "card.py").is_file() else None
         vs.append({"slug": d.name, "name": _one(v.get("name") or d.name),
                    "description": _one(v.get("description") or v.get("why")),
@@ -412,6 +420,12 @@ def read_extension(root: Path, expect: str | None = None, have: set[str] | None 
         reader = None if own else str(c.get("reader") or "")
         if not c or not (d / CARD_HTML).is_file():
             continue
+        missing = [x for x in (*js, *view_libs.entries(c.get("libs")))
+                   if view_libs.parse(x) is not None and view_libs.vendored(d, x) is None]
+        if missing:
+            problems.append(f"its card type {d.name!r} loads {', '.join(dict.fromkeys(missing))}, which its "
+                            f"{view_libs.LIB_DIR} folder does not hold. Build it in a workspace, where thimble "
+                            "installs packages once the analyst allows them, and copy its folder")
         if not (d / "card.py").is_file():
             problems.append(f"its card type {d.name!r} has no card.py, which thimble needs to draw it")
         elif not own and not reader:

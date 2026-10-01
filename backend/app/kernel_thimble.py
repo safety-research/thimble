@@ -24,6 +24,9 @@ it with `WS` (the workspace directory) set and registers it as `thimble`.
                               and none is in such a file, False when it has no records)
     thimble.view_labels()     in a view's reader: {labels, filter}, the labels that are on with their highlighted values,
                               and the filter {label, value, colour} or None
+    thimble.progress(done=None, total=None, note=None)
+                              in a view's reader: how far the call has got, which the page can show while it waits;
+                              nothing outside a view's call
     thimble.timeline(events, spacing="time")
                               events on a time axis: (time, label[, lane]) or {time, label, lane, end}; TIMELINE_MIME
                               with a text/plain listing. Clock times ("HH:MM[:SS]") are read on CLOCK_DAY, rolling over
@@ -43,16 +46,19 @@ Rows come from labels/<id>.sqlite when it reflects the labels file, else from la
 A cover over a range of records supplies their negative value. Only the standard library at import; pandas is imported
 when a DataFrame is made.
 """
+import io
 import json
 import math
+import os
 import numbers
 import re
 import sqlite3
+import zlib
 from pathlib import Path
 
 WS = globals().get("WS")  # the workspace directory, set by the injector (notebook.kernel_argv)
 
-__all__ = ["labels", "colours", "marked", "kept", "view_labels", "diagram", "timeline", "card"]
+__all__ = ["labels", "colours", "marked", "kept", "view_labels", "progress", "diagram", "timeline", "card"]
 
 FRAME_ROWS = 500  # rows of a table card's DataFrame the card keeps and shows (frames.ROWS_MAX)
 
@@ -342,7 +348,7 @@ def _jsonl_parts(jsonl: Path):
                 except (TypeError, ValueError):
                     continue
                 if r.get("clear"):
-                    for ref in [ref for ref in model if _ref_parts(ref)[0] == where and a <= (_ref_parts(ref)[1] or 0) <= b]:
+                    for ref in [ref for ref, m in model.items() if _ref_parts(ref)[0] == where and a <= (_row_line(ref, m)[1] or 0) <= b]:
                         del model[ref]
                 covers = _trim(covers, where, a, b)
                 if r.get("cover") and r.get("value") is not None:
@@ -356,13 +362,23 @@ def _jsonl_parts(jsonl: Path):
     out = []
     for ref, r in model.items():
         a = analyst.get(ref)
-        path, line = _ref_parts(ref)
+        path, line = _row_line(ref, r)
         out.append((path, line, r.get("label"), r.get("source"), a.get("label") if a else None, r.get("confidence"), ref))
     for ref, a in analyst.items():
         if ref not in model:
-            path, line = _ref_parts(ref)
+            path, line = _row_line(ref, a)
             out.append((path, line, None, None, a.get("label"), None, ref))
     return out, covers
+
+
+def _row_line(ref: str, row: dict):
+    """_ref_parts, with the line a row names (`line`) for a record whose ref carries none, such as a CSV row
+    (labels_store.row_line)."""
+    path, line = _ref_parts(ref)
+    given = row.get("line")
+    if line is None and path is not None and isinstance(given, int) and not isinstance(given, bool) and given >= 1:
+        line = given
+    return path, line
 
 
 def labels(name=None, negatives=False):
@@ -370,6 +386,8 @@ def labels(name=None, negatives=False):
     negatives=True)."""
     import pandas as pd
 
+    if (_view_ctx or {}).get("probe") and (name is None or name == PROBE_NAME):
+        return _probe_labels(pd, name, negatives)
     if name is None:
         ks = [k for k in _concepts() if not k["superseded_by"]]
         return pd.DataFrame([{"name": k["name"], "id": k["id"], "kind": k["kind"], "unit": k["unit"], "values": k["values"],
@@ -417,6 +435,7 @@ def colours(name, values=None):
 # probe {"probe": n, "filter": bool}, a test label that marks every record whose line is a multiple of n. Outside a
 # view's call it is None, and marked() and kept() answer as if no label were on.
 _view_ctx = None
+_view_paths: list = []  # the claimed files of the view whose reader call is running
 PROBE_NAME = "test label"
 PROBE_ID = "test-label"
 # the colour the analyst's first label takes (--label-1), so the pictures show a view's own colour that clashes with a
@@ -449,12 +468,17 @@ def _members(jsonl) -> tuple:
     rows, covers = _store_parts(db) if _store_fresh(jsonl, db) else _jsonl_parts(jsonl)
     values = {}
     paths = set()
-    for path, _line, label, _source, verdict, _confidence, ref in rows:
+    starts = {}  # a record of a CSV or a JSON document by the line it starts on, as a view that reads its lines names it
+    for path, line, label, _source, verdict, _confidence, ref in rows:
         v = verdict if verdict is not None else label
         if v is not None:
             values[str(ref)] = str(v)
             if path is not None:
                 paths.add(str(path))
+                if line is not None and _ref_parts(str(ref))[1] is None:
+                    starts.setdefault(f"{path}#L{int(line)}", str(v))
+    for ref, v in starts.items():
+        values.setdefault(ref, v)
     spans: dict = {}
     for c in covers:
         if c[3] is not None:
@@ -477,6 +501,8 @@ def _value_of(label: dict, ref: str):
     """The label's effective value on the record `ref`: its row's, else the value of the cover that holds its line."""
     values, spans, _paths = _label_members(label)
     v = values.get(ref)
+    if v is None:
+        v = values.get(_canon(ref))
     if v is not None:
         return v
     path, line = _ref_parts(ref)
@@ -485,13 +511,78 @@ def _value_of(label: dict, ref: str):
     return next((value for a, b, value in spans.get(path, ()) if a <= line <= b), None)
 
 
+_PDF_PAGE = re.compile(r"^(.+\.[Pp][Dd][Ff])#(?:p|page=?)(\d+)$")
+
+
+def _canon(ref: str) -> str:
+    """A record's ref as label rows key it (records.canon): a PDF's `#page=<n>` as `#p<n>`."""
+    m = _PDF_PAGE.match(ref)
+    return f"{m[1]}#p{int(m[2])}" if m else ref
+
+
+_LINES: dict = {}  # path -> ((mtime_ns, size), line count)
+
+
+def _line_count(path: str) -> int:
+    try:
+        st = os.stat(path)
+    except OSError:
+        return 0
+    sig = (st.st_mtime_ns, st.st_size)
+    hit = _LINES.get(path)
+    if hit is not None and hit[0] == sig:
+        return hit[1]
+    n = 0
+    with io.open(path, "rb") as f:
+        head = f.read(4096)
+        if b"\0" in head:
+            n = 0
+        else:
+            f.seek(0)
+            last = b""
+            for block in iter(lambda: f.read(1 << 20), b""):
+                n += block.count(b"\n")
+                last = block
+            if last and not last.endswith(b"\n"):
+                n += 1
+    _LINES[path] = (sig, n)
+    return n
+
+
+def _probe_labels(pd, name, negatives):
+    """thimble.labels() under the test label: the list holds it alone, and its matches are the lines of the view's
+    claimed files whose number is a multiple of the probe's, with every other line under negatives=True."""
+    every = int(_view_ctx["probe"])
+    if name is None:
+        return pd.DataFrame([{"name": PROBE_NAME, "id": PROBE_ID, "kind": "regex", "unit": "line", "values": [PROBE_NAME],
+                              "n_labeled": None}], columns=["name", "id", "kind", "unit", "values", "n_labeled"])
+    out = []
+    for path in _view_paths:
+        for line in range(1, _line_count(path) + 1):
+            hit = line % every == 0
+            if hit or negatives:
+                value = PROBE_NAME if hit else None
+                out.append((path, line, value, value, "probe", None, None, f"{path}#L{line}"))
+    df = pd.DataFrame(out, columns=_COLUMNS, dtype=object)
+    df["line"] = pd.array(df["line"].tolist(), dtype="Int64")
+    df["confidence"] = pd.to_numeric(df["confidence"], errors="coerce")
+    return df
+
+
 def _probed(ref: str, every) -> bool:
+    """Whether the test label marks the record: a line whose number is a multiple of `every`, or a record of another
+    reader (a database row, a page, a JSON value, a CSV row) whose ref's checksum is."""
     _path, line = _ref_parts(ref)
-    return bool(line) and line % int(every) == 0
+    if line:
+        return line % int(every) == 0
+    if "#" not in ref or ref.startswith(("view:", "card:", "cell:")):
+        return False
+    return zlib.crc32(_canon(ref).encode("utf-8")) % int(every) == 0
 
 
 def marked(ref):
-    """The marks of the labels that are on for the record `ref` (`<path>#L<n>`): each {label, value, colour} whose value
+    """The marks of the labels that are on for the record `ref` (`<path>#L<n>`, or the ref of a record of another reader
+    such as `<db>#<table>/<key>` or `<pdf>#p<n>`): each {label, value, colour} whose value
     the record takes and the analyst highlights, in the labels' order. [] outside a view's reader call."""
     return _marked(_view_ctx, ref)
 
@@ -508,6 +599,24 @@ def kept_unit(refs):
     the label takes the filter's value on one of its records in a file it ran over. Records of other files never keep a
     unit, since kept holds for all of them."""
     return _kept_unit(_view_ctx, refs)
+
+
+# A view's reader call sets _progress (view_host) to the function that records its progress.
+_progress = None
+
+
+def progress(done=None, total=None, note=None):
+    """Report how far a view's reader call has got: `done` of `total` steps, and a few words of what it does."""
+    fn = _progress
+    if fn is None:
+        return
+    fields = {}
+    for k, v in (("done", done), ("total", total)):
+        if isinstance(v, numbers.Real) and not isinstance(v, bool) and math.isfinite(v):
+            fields[k] = v
+    if note is not None:
+        fields["note"] = " ".join(str(note).split())[:120]
+    fn(**fields)
 
 
 def view_labels():

@@ -3,9 +3,11 @@
 // shoot_states), and a video's film for the frames the writer looks at (backend/app/video.py), in the headless Chromium
 // of the frontend's Playwright (frontend/node_modules, which scripts/install.sh installs).
 //   node scripts/view_shot.mjs --frame <html> --states <json> [--viewport <w>x<h>] [--media <url>]
-// --states names a JSON list of states, [{out, open, labels, ids}], each shot on a fresh page of one browser: `open` is
-// the place the page is sent once the frame is ready, `out` the PNG written, `labels` the names of the labels that are
-// on and `ids` their ids.
+// --states names a JSON list of states, [{out, open, actions?, viewport?}], each loaded on a fresh page of one browser,
+// PAGES_AT_ONCE at a time:
+// `open` is the place the page is sent once the frame is ready, `actions` the controls clicked in turn once it is quiet,
+// each named by the text it shows (findControl), `viewport` {width, height} the state's own size in place of
+// --viewport, and `out` the PNG written (none without it).
 // The page plays the part frontend/src/files/ViewerFrame.tsx plays in the browser: it puts the frame document (the view
 // page with the bridge, views.frame_document) in a sandboxed iframe with the theme's tokens and the app's two faces, and
 // asks the server over stdin and stdout, one JSON line each way, for what the page needs:
@@ -16,14 +18,14 @@
 //                                             request to the --media URL (thimble.mediaUrl) names, served from here,
 //                                             a Range request with the bytes it asks for (at most MEDIA_CHUNK)
 // Every other request the page makes is refused, so a view that reaches for the network fails here as it would in the
-// browser. A state is shot when its page has been quiet (no fetch or marks request in flight) for QUIET_MS after
-// `open`, or HARD_MS has passed. One line ends the run: {"done": true, "states": [{ok, errors, fetches, height, refs,
-// records, units, marked, hidden, controls, pills, fonts}]}: `refs` the distinct data-anchor refs the page reported, `records`
-// those naming a record (`<path>#L<n>`), `units` those naming one of the view's units (`view:<slug>/<key>`), `marked`
-// the elements carrying a label's mark in the shot, `hidden` those the bridge hid or dimmed for the filter, `controls`
-// the page's own controls whose short text names a label that is on (labelControls), `pills` the chips and buttons it
-// drew as rounded pills of its own rather than with thimble's parts (ownPills), and `fonts` whether Hanken Grotesk was
-// loaded in the frame.
+// browser. A state is measured when its page has been quiet (no fetch or marks request in flight) for QUIET_MS after
+// `open`, or HARD_MS has passed with no request in flight, and again after each action. One line ends the run:
+// {"done": true, "states": [{ok, errors, fetches, height, refs, records, units, marked, hidden, shown, layout, controls,
+// actions, fonts}]}: `refs` the distinct data-anchor refs the page reported, `records` those naming a record of a file
+// (RECORD_REF: `<path>#L<n>`, `<db>#<table>/<key>`, `<pdf>#p<n>`, any `<path>#<fragment>`), `units` those naming one of
+// the view's units (`view:<slug>/<key>`), `marked` the elements carrying a label's mark, `hidden` those the bridge hid or dimmed for the filter, `shown` what is on screen at the end
+// (shownCounts), `layout` how its text fits (layoutCounts), `controls` the controls it shows (controlList), `actions`
+// each action with whether its control was found, and `fonts` whether Hanken Grotesk was loaded in the frame.
 import { createRequire } from 'node:module'
 import { readFileSync } from 'node:fs'
 import { open } from 'node:fs/promises'
@@ -35,60 +37,285 @@ const { chromium } = require('playwright')
 const QUIET_MS = 900
 const MIN_MS = 1200
 const HARD_MS = 25_000
+// a fetch or marks request still unanswered at HARD_MS is waited for this long, since a view's data calls have no time
+// limit (backend views.ANSWER_WAIT_S)
+const ANSWER_MS = 600_000
 const READY_MS = 10_000
+const PAGES_AT_ONCE = 3 // states loaded side by side, each on its own page
 const MEDIA_CHUNK = 4 * 1024 * 1024 // bytes of one Range answer
 const MEDIA_WHOLE_MAX = 32 * 1024 * 1024 // a request without Range (an <img>) gets a file up to this size whole
-// A control's text longer than this is a row or a card that shows a label's mark, not a control for the label.
-const CONTROL_TEXT_MAX = 60
-const CONTROLS = 'button, select, option, input, label, summary, [role=button], [role=checkbox], [role=switch], [role=menuitemcheckbox], [role=option], [role=tab]'
+// a ref naming one record of a file: a line of any file, or a fragment of a file whose name has an extension (backend
+// records.is_record_ref)
+const RECORD_REF = /^(?!(?:view|card|cell|concept|report|chat|call|group|ui):)[^\s#][^#\n]*(?:#L[1-9]\d*|\.[A-Za-z0-9]{1,8}#\S+)$/
 
 // An error's message without the boxed notice Playwright adds to a failed launch, which names an install command: the
 // server hands these messages to models.
 const plain = (e) => String(e && e.message ? e.message : e).split('\n').filter((l) => !/^[╔║╚]/.test(l)).join('\n')
 
-// The page's own controls whose short text names one of `names`, such as a toggle, a checkbox or a menu item for a
-// label; a <label> counts only when it labels a form control. A control inside an element whose data-label names one of
-// `ids`, a label thimble sent, is thimble's: it calls thimble.setLabel or setLabelColour. Runs in the frame.
-function labelControls({ names, ids, sel, max }) {
-  const want = names.map((n) => String(n).toLowerCase()).filter(Boolean)
-  if (!want.length) return 0
-  const bound = (el) => {
-    const at = el.closest('[data-label]')
-    return !!at && String(at.getAttribute('data-label')).split(/\s+/).some((id) => id && ids.includes(id))
-  }
-  let n = 0
-  for (const el of document.querySelectorAll(sel)) {
-    if (el.tagName === 'LABEL' && !el.control) continue
-    if (bound(el)) continue
-    const own = [el.getAttribute('aria-label'), el.getAttribute('title'), el.tagName === 'INPUT' ? el.value : el.textContent]
-    const text = own.filter(Boolean).join(' ').replace(/\s+/g, ' ').trim().toLowerCase()
-    if (text && text.length <= max && want.some((w) => text.includes(w))) n++
-  }
-  return n
-}
-// thimble's parts that draw as boxes (backend/app/viewer_kit.css): the chips, buttons and controls in the app's style.
-const KIT = '.chip, .btn, .seg, .field'
-// A pill's text longer than this is a card or a row, not a chip or a button.
-const PILL_TEXT_MAX = 40
-
-// The elements with a short text drawn as a rounded pill, a filled or edged box whose corners are at least half its
-// height, outside thimble's parts: a chip or a button the page styled itself. Runs in the frame.
-function ownPills({ kit, max }) {
-  let n = 0
-  for (const el of document.body ? document.body.querySelectorAll('*') : []) {
-    if (el instanceof SVGElement || el.closest(kit)) continue
+// What the page shows at the end, counted once per ref on the outermost visible element that carries it (not a canvas,
+// which takes no mark, and not one the bridge hid or dimmed for the filter): `records` and `units` anchored, `due` the
+// refs whose `marks` entry has a bar, other than those whose outermost element is data-anchor-unmarked (the page draws
+// the labels' colours on it itself), `drawn` those of them whose element carries the bridge's mark, and `unkept` the
+// records shown that the filter does not keep, other than those inside a unit it keeps. Runs in the frame.
+function shownCounts({ marks, record }) {
+  const RECORD = new RegExp(record)
+  const UNIT = /^view:[^/]+\/.+/
+  const seen = new Map()
+  for (const el of document.querySelectorAll('[data-anchor]')) {
+    const ref = el.getAttribute('data-anchor')
+    if (!ref || el.tagName === 'CANVAS' || el.closest('[data-thimble-drop]')) continue
+    if (!RECORD.test(ref) && !UNIT.test(ref)) continue
     const r = el.getBoundingClientRect()
-    if (r.height < 12 || r.height > 36 || r.width < r.height * 1.2) continue
-    const text = (el.textContent || '').trim()
-    if (!text || text.length > max) continue
+    if (r.width <= 0 || r.height <= 0) continue
     const cs = getComputedStyle(el)
-    if ((parseFloat(cs.borderTopLeftRadius) || 0) < r.height / 2 - 1) continue
-    const filled = !/^(transparent|rgba\(0, 0, 0, 0\))$/.test(cs.backgroundColor)
-    const edged = parseFloat(cs.borderTopWidth) > 0 && cs.borderTopStyle !== 'none'
-    if (filled || edged) n++
+    if (cs.visibility === 'hidden' || cs.display === 'none') continue
+    let top = el
+    let held = false
+    for (let a = el.parentElement; a; a = a.parentElement) {
+      const up = a.getAttribute('data-anchor')
+      if (up === ref) top = a
+      else if (up && UNIT.test(up) && marks[up] && marks[up].keep) held = true
+    }
+    const was = seen.get(ref)
+    seen.set(ref, {
+      drawn: (was && was.drawn) || top.hasAttribute('data-thimble-label'),
+      held: (!was || was.held) && held,
+      own: (!was || was.own) && top.hasAttribute('data-anchor-unmarked'),
+    })
   }
-  return n
+  const out = { records: 0, units: 0, due: 0, drawn: 0, unkept: 0 }
+  for (const [ref, { drawn, held, own }] of seen) {
+    const record = RECORD.test(ref)
+    if (record) out.records++
+    else out.units++
+    const m = marks[ref]
+    if (m && typeof m.bar === 'string' && m.bar && !own) {
+      out.due++
+      if (drawn) out.drawn++
+    }
+    if (record && !held && !(m && m.keep)) out.unkept++
+  }
+  return out
 }
+// How the page's text fits its pane at the end: `overlaps`, the places where visible text is drawn over other visible
+// text (not under an opaque element, as below a sticky header), with up to EXAMPLES of their pairs of texts; `cut`, the
+// elements whose own text runs past a box that hides it without an ellipsis; `sideways`, the boxes that scroll sideways,
+// with the start of their text; `overflow`, how many px the page is wider than its pane; `used`, the px across that its
+// text and graphics span, of `width`; and `anchored`, the records and units it draws, of which `outside` are out of
+// view until the analyst scrolls. Runs in the frame.
+function layoutCounts() {
+  const EXAMPLES = 5
+  const ITEMS_MAX = 3000
+  const W = document.documentElement.clientWidth
+  const H = Math.max(window.innerHeight, document.documentElement.scrollHeight)
+  const clips = new Map()
+  const clipOf = (el) => {
+    if (!el || el === document.documentElement || el === document.body) return { l: 0, t: 0, r: W, b: H }
+    if (clips.has(el)) return clips.get(el)
+    let box = clipOf(el.parentElement)
+    const cs = getComputedStyle(el)
+    if (cs.overflowX !== 'visible' || cs.overflowY !== 'visible') {
+      const r = el.getBoundingClientRect()
+      box = { l: Math.max(box.l, r.left), t: Math.max(box.t, r.top), r: Math.min(box.r, r.right), b: Math.min(box.b, r.bottom) }
+    }
+    clips.set(el, box)
+    return box
+  }
+  const shown = new Map()
+  const visible = (el) => {
+    if (shown.has(el)) return shown.get(el)
+    let ok = true
+    for (let a = el; a && a !== document.documentElement && ok; a = a.parentElement) {
+      const cs = getComputedStyle(a)
+      if (cs.display === 'none' || cs.visibility === 'hidden' || cs.visibility === 'collapse' || Number(cs.opacity) === 0) ok = false
+      if (a !== el && shown.has(a)) {
+        ok = ok && shown.get(a)
+        break
+      }
+    }
+    shown.set(el, ok)
+    return ok
+  }
+  const items = []
+  let minL = Infinity
+  let maxR = -Infinity
+  const range = document.createRange()
+  const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT)
+  for (let t = walker.nextNode(); t && items.length < ITEMS_MAX; t = walker.nextNode()) {
+    const text = (t.nodeValue || '').trim()
+    const el = t.parentElement
+    if (!text || !el || el.closest('script,style,noscript,template,title,option,datalist,select,textarea')) continue
+    if (!visible(el)) continue
+    const clip = clipOf(el)
+    range.selectNodeContents(t)
+    for (const r of range.getClientRects()) {
+      const l = Math.max(r.left, clip.l)
+      const top = Math.max(r.top, clip.t)
+      const right = Math.min(r.right, clip.r)
+      const b = Math.min(r.bottom, clip.b)
+      if (right - l < 2 || b - top < 2) continue
+      items.push({ l, t: top, r: right, b, el, node: t, text })
+      minL = Math.min(minL, l)
+      maxR = Math.max(maxR, right)
+    }
+  }
+  for (const el of document.querySelectorAll('img,canvas,svg,video')) {
+    if (el.parentElement && el.parentElement.closest('svg')) continue
+    const r = el.getBoundingClientRect()
+    if (r.width < 4 || r.height < 4 || !visible(el)) continue
+    minL = Math.min(minL, Math.max(0, r.left))
+    maxR = Math.max(maxR, Math.min(W, r.right))
+  }
+  const CELL = 64
+  const grid = new Map()
+  const opaque = (el) => {
+    const tag = el.tagName
+    if (tag === 'IMG' || tag === 'CANVAS' || tag === 'VIDEO') return true
+    const m = /rgba?\(([^)]+)\)/.exec(getComputedStyle(el).backgroundColor || '')
+    if (!m) return false
+    const parts = m[1].split(',').map(Number)
+    return parts.length < 4 || parts[3] >= 0.5
+  }
+  const covered = (a, b) => {
+    const cx = (Math.max(a.l, b.l) + Math.min(a.r, b.r)) / 2
+    const cy = (Math.max(a.t, b.t) + Math.min(a.b, b.b)) / 2
+    if (cx < 0 || cy < 0 || cx >= W || cy >= window.innerHeight) return false
+    const stack = document.elementsFromPoint(cx, cy)
+    const ia = stack.findIndex((x) => x === a.el || a.el.contains(x))
+    const ib = stack.findIndex((x) => x === b.el || b.el.contains(x))
+    if (ia < 0 || ib < 0) return false
+    const [low, at] = ia > ib ? [a.el, ia] : [b.el, ib]
+    return stack.slice(0, at).some((x) => !x.contains(low) && opaque(x))
+  }
+  let overlaps = 0
+  const pairs = []
+  for (let i = 0; i < items.length; i++) {
+    const a = items[i]
+    const near = new Set()
+    for (let gx = Math.floor(a.l / CELL); gx <= Math.floor(a.r / CELL); gx++)
+      for (let gy = Math.floor(a.t / CELL); gy <= Math.floor(a.b / CELL); gy++) {
+        const k = gx + ':' + gy
+        for (const j of grid.get(k) || []) near.add(j)
+        if (!grid.has(k)) grid.set(k, [])
+        grid.get(k).push(i)
+      }
+    for (const j of near) {
+      const b = items[j]
+      if (b.node === a.node) continue
+      const ix = Math.min(a.r, b.r) - Math.max(a.l, b.l)
+      const iy = Math.min(a.b, b.b) - Math.max(a.t, b.t)
+      if (ix <= 2 || iy <= 2) continue
+      if (ix * iy < 0.25 * Math.min((a.r - a.l) * (a.b - a.t), (b.r - b.l) * (b.b - b.t))) continue
+      if (covered(a, b)) continue
+      overlaps++
+      if (pairs.length < EXAMPLES) pairs.push([b.text.slice(0, 40), a.text.slice(0, 40)])
+    }
+  }
+  let cut = 0
+  const cuts = []
+  for (const el of document.body.querySelectorAll('*')) {
+    if (![...el.childNodes].some((n) => n.nodeType === 3 && n.nodeValue.trim())) continue
+    const cs = getComputedStyle(el)
+    if (!['hidden', 'clip'].includes(cs.overflowX) || cs.textOverflow === 'ellipsis') continue
+    if (el.scrollWidth <= el.clientWidth + 2 || !visible(el)) continue
+    cut++
+    if (cuts.length < EXAMPLES) cuts.push(el.textContent.replace(/\s+/g, ' ').trim().slice(0, 40))
+  }
+  let sideways = 0
+  const wide = []
+  for (const el of document.body.querySelectorAll('*')) {
+    const cs = getComputedStyle(el)
+    if (!['auto', 'scroll'].includes(cs.overflowX) || el.scrollWidth <= el.clientWidth + 20 || el.clientWidth < 100 || !visible(el)) continue
+    if (el.parentElement && el.parentElement.closest('[data-thimble-sideways]')) continue
+    el.setAttribute('data-thimble-sideways', '')
+    sideways++
+    if (wide.length < EXAMPLES) wide.push(el.textContent.replace(/\s+/g, ' ').trim().slice(0, 40))
+  }
+  for (const el of document.querySelectorAll('[data-thimble-sideways]')) el.removeAttribute('data-thimble-sideways')
+  let anchored = 0
+  let outside = 0
+  const seen = new Set()
+  for (const el of document.querySelectorAll('[data-anchor]')) {
+    const ref = el.getAttribute('data-anchor')
+    if (!ref || seen.has(ref) || (el.parentElement && el.parentElement.closest(`[data-anchor="${CSS.escape(ref)}"]`))) continue
+    const r = el.getBoundingClientRect()
+    if (r.width <= 0 || r.height <= 0 || !visible(el)) continue
+    seen.add(ref)
+    anchored++
+    const clip = clipOf(el.parentElement)
+    const view = { l: Math.max(clip.l, 0), t: Math.max(clip.t, 0), r: Math.min(clip.r, W), b: Math.min(clip.b, window.innerHeight) }
+    if (Math.min(r.right, view.r) - Math.max(r.left, view.l) <= 0 || Math.min(r.bottom, view.b) - Math.max(r.top, view.t) <= 0) outside++
+  }
+  const overflow = Math.max(0, document.documentElement.scrollWidth - W)
+  return { overlaps, pairs, cut, cuts, sideways, wide, overflow, used: maxR > minL ? Math.round(maxR - minL) : 0, width: W, anchored, outside }
+}
+
+const CONTROLS = 'button,[role=button],[role=tab],[role=radio],[role=switch],[role=checkbox],[role=menuitem],[role=option],select,input[type=checkbox],input[type=radio],summary,.seg-opt,a[href]'
+const CONTROLS_MAX = 60
+
+// The controls the page shows, each as the text it reads: a select as `<its chosen text> (select: <its options>)`. Runs
+// in the frame.
+function controlList({ sel, max }) {
+  const name = (el) => (el.getAttribute('aria-label') || el.textContent || el.getAttribute('title') || el.value || '').replace(/\s+/g, ' ').trim().slice(0, 60)
+  const out = []
+  const seen = new Set()
+  for (const el of document.querySelectorAll(sel)) {
+    if (out.length >= max) break
+    const r = el.getBoundingClientRect()
+    const cs = getComputedStyle(el)
+    if (r.width < 2 || r.height < 2 || cs.visibility !== 'visible' || cs.display === 'none') continue
+    let text
+    if (el.tagName === 'SELECT') {
+      const opts = [...el.options].map((o) => o.text.replace(/\s+/g, ' ').trim()).filter(Boolean)
+      text = `${(el.selectedOptions[0] && el.selectedOptions[0].text.trim()) || ''} (select: ${opts.slice(0, 12).join(', ')}${opts.length > 12 ? ', …' : ''})`
+    } else if (el.tagName === 'INPUT') {
+      text = el.labels && el.labels[0] ? el.labels[0].textContent.replace(/\s+/g, ' ').trim().slice(0, 60) : name(el)
+    } else text = name(el)
+    if (!text || seen.has(text)) continue
+    seen.add(text)
+    out.push(text)
+  }
+  return out
+}
+
+// Mark the control an action names for a click, or pick the option it names in its select: the first visible control
+// whose text is the name, then an option of a select, then a control whose text holds it, then the smallest visible
+// element whose text is the name. 'click', 'select' or '' when none is found. Runs in the frame.
+function findControl({ want, sel }) {
+  const norm = (s) => String(s || '').replace(/\s+/g, ' ').trim().toLowerCase()
+  const w = norm(want)
+  for (const el of document.querySelectorAll('[data-thimble-act]')) el.removeAttribute('data-thimble-act')
+  const seen = (el) => {
+    const r = el.getBoundingClientRect()
+    const cs = getComputedStyle(el)
+    return r.width >= 2 && r.height >= 2 && cs.visibility === 'visible' && cs.display !== 'none'
+  }
+  const text = (el) => norm(el.getAttribute('aria-label') || el.textContent || el.getAttribute('title') || el.value)
+  const controls = [...document.querySelectorAll(sel)].filter(seen)
+  let hit = controls.find((el) => el.tagName !== 'SELECT' && text(el) === w)
+  if (!hit) {
+    for (const s of document.querySelectorAll('select')) {
+      const o = [...s.options].find((x) => norm(x.text) === w || norm(x.value) === w)
+      if (o && seen(s)) {
+        s.setAttribute('data-thimble-act', o.value)
+        return 'select'
+      }
+    }
+    hit = controls.find((el) => el.tagName !== 'SELECT' && w && text(el).includes(w))
+  }
+  if (!hit) {
+    let best = null
+    for (const el of document.body.querySelectorAll('*')) {
+      if (norm(el.textContent) !== w || !seen(el)) continue
+      if (!best || best.contains(el)) best = el
+    }
+    hit = best
+  }
+  if (!hit) return ''
+  hit.setAttribute('data-thimble-act', '')
+  return 'click'
+}
+
 // The tokens a view's page reads: frontend/src/lib/frame.ts VIEW_TOKENS, which this list follows.
 const VIEW_TOKENS = [
   '--text-primary', '--text-secondary', '--text-tertiary', '--surface-card', '--bg-sub', '--bg-sunken', '--border-subtle', '--accent', '--font-body', '--font-mono',
@@ -198,7 +425,7 @@ async function shootState(browser, opt, doc, state, i) {
   let fetches = 0
   let inflight = 0
   let lastActivity = Date.now()
-  const page = await browser.newPage({ viewport: opt.viewport })
+  const page = await browser.newPage({ viewport: state.viewport || opt.viewport })
   try {
     // no WebRTC in any frame, the page's own nested ones too, since no policy covers it and page.route never sees it
     await page.addInitScript(() => {
@@ -265,12 +492,14 @@ async function shootState(browser, opt, doc, state, i) {
         window.__height = null
         window.__refs = new Set()
         let marks = {}
+        window.__marks = marks
         let state = { on: [], filter: null }
         const post = (msg) => f.contentWindow.postMessage(msg, '*')
         const labels = () => post({ type: 'thimble:labels', marks, on: state.on, filter: state.filter })
         const ask = async (refs) => {
           const got = await window.thimbleMarks(refs)
           marks = { ...marks, ...(got.marks || {}) }
+          window.__marks = marks
           state = { on: got.on || [], filter: got.filter || null }
           labels()
         }
@@ -302,15 +531,34 @@ async function shootState(browser, opt, doc, state, i) {
     while (!(await page.evaluate(() => window.__ready)) && Date.now() - t0 < READY_MS) await page.waitForTimeout(50)
     const ready = await page.evaluate(() => window.__ready)
     if (!ready) errors.push('the page never said it was ready (the bridge did not load, or a script stopped it)')
-    const opened = Date.now()
-    lastActivity = opened
-    while (Date.now() - t0 < HARD_MS) {
-      await page.waitForTimeout(100)
-      if (inflight === 0 && Date.now() - lastActivity > QUIET_MS && Date.now() - opened > MIN_MS) break
+    // until the page has been quiet for QUIET_MS, at least `min` ms after `from`, or HARD_MS after `from` with no
+    // request unanswered, or ANSWER_MS after it
+    const settle = async (from, min) => {
+      lastActivity = Math.max(lastActivity, from)
+      for (;;) {
+        await page.waitForTimeout(100)
+        const t = Date.now() - from
+        if (inflight === 0 && Date.now() - lastActivity > QUIET_MS && t > min) break
+        if ((t >= HARD_MS && inflight === 0) || t >= ANSWER_MS) break
+      }
     }
-    if (inflight > 0) errors.push(`${inflight} request(s) still unanswered after ${HARD_MS / 1000} s`)
+    await settle(Date.now(), MIN_MS)
     const el = await page.$('#f')
     const frame = await el.contentFrame()
+    const actions = []
+    for (const want of ready ? state.actions || [] : []) {
+      const how = await frame.evaluate(findControl, { want: String(want), sel: CONTROLS }).catch(() => '')
+      const target = frame.locator('[data-thimble-act]').first()
+      try {
+        if (how === 'select') await target.selectOption(await target.getAttribute('data-thimble-act'), { timeout: 3000 })
+        else if (how === 'click') await target.click({ timeout: 3000 }).catch(() => target.evaluate((x) => x.click()))
+      } catch {
+        // a control that would not take the action counts as not found
+      }
+      actions.push({ control: String(want), found: !!how })
+      if (how) await settle(Date.now(), QUIET_MS)
+    }
+    if (inflight > 0) errors.push(`${inflight} request(s) still unanswered after ${ANSWER_MS / 1000} s`)
     const fonts = await frame
       .evaluate(async () => {
         await document.fonts.ready
@@ -318,9 +566,10 @@ async function shootState(browser, opt, doc, state, i) {
         return document.fonts.check('13px "Hanken Grotesk"')
       })
       .catch(() => false)
-    await el.screenshot({ path: state.out })
+    if (state.out) await el.screenshot({ path: state.out })
     const height = await page.evaluate(() => window.__height)
     const refs = await page.evaluate(() => [...window.__refs])
+    const marks = await page.evaluate(() => window.__marks || {})
     const count = (sel) => frame.evaluate((s) => document.querySelectorAll(s).length, sel).catch(() => 0)
     return {
       ok: ready && errors.length === 0,
@@ -328,12 +577,14 @@ async function shootState(browser, opt, doc, state, i) {
       fetches,
       height,
       refs: refs.length,
-      records: refs.filter((r) => /^.+#L[1-9]\d*$/.test(r)).length,
+      records: refs.filter((r) => RECORD_REF.test(r)).length,
       units: refs.filter((r) => /^view:[^/]+\/.+/.test(r)).length,
       marked: await count('[data-thimble-label]'),
       hidden: await count('[data-thimble-drop]'),
-      controls: await frame.evaluate(labelControls, { names: state.labels || [], ids: state.ids || [], sel: CONTROLS, max: CONTROL_TEXT_MAX }).catch(() => 0),
-      pills: await frame.evaluate(ownPills, { kit: KIT, max: PILL_TEXT_MAX }).catch(() => 0),
+      shown: await frame.evaluate(shownCounts, { marks, record: RECORD_REF.source }).catch(() => null),
+      layout: await frame.evaluate(layoutCounts).catch(() => null),
+      controls: await frame.evaluate(controlList, { sel: CONTROLS, max: CONTROLS_MAX }).catch(() => []),
+      actions,
       fonts,
     }
   } finally {
@@ -348,15 +599,20 @@ async function main() {
   // the system's Chrome, Edge or Chromium when thimble's config picks it (backend/app/userconf.py)
   const executablePath = process.env.THIMBLE_BROWSER_PATH || undefined
   const browser = await chromium.launch({ executablePath })
-  const out = []
-  try {
-    for (let i = 0; i < states.length; i++) {
+  const out = new Array(states.length)
+  let next = 0
+  const worker = async () => {
+    while (next < states.length) {
+      const i = next++
       try {
-        out.push(await shootState(browser, opt, doc, states[i], i))
+        out[i] = await shootState(browser, opt, doc, states[i], i)
       } catch (e) {
-        out.push({ ok: false, errors: [plain(e)] })
+        out[i] = { ok: false, errors: [plain(e)] }
       }
     }
+  }
+  try {
+    await Promise.all(Array.from({ length: Math.min(PAGES_AT_ONCE, states.length) }, worker))
   } finally {
     await browser.close()
   }

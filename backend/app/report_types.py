@@ -2839,6 +2839,8 @@ class _Citations:
             return base + self._record_label(self._resolve(ref))
         if k == "row":
             return f"{p.get('path') or 'forge.db'}#{p['table']}/{p['pk']}"
+        if k in ("page", "pointer", "csvrow"):
+            return refs.format_ref(p) + self._record_label(self._resolve(ref))
         if k == "table":
             return f"{p.get('path') or 'forge.db'}#{p['table']}"
         if k == "path":

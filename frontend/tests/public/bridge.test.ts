@@ -1,7 +1,9 @@
 // The frame half of a view's bridge (backend/app/viewer_bridge.js), which a custom view's page loads first and which is
 // the only way the view, sandboxed with no network, talks to thimble. Run in a jsdom window of its own: the bridge says
 // it is ready and reports each data-anchor once; window.thimble.fetch posts a query and resolves with the page's answer
-// to that id; a message from anywhere but the parent page is ignored; with a label filter on, what the filter drops is
+// to that id, a newer fetch with its key or its signal drops it and has its call cancelled, its progress reaches the
+// page's onProgress or else thimble's box at the corner, and thimble.lib gives the packages the view bundled; a message
+// from anywhere but the parent page is ignored; with a label filter on, what the filter drops is
 // hidden; and in a card's frame the page draws what `init` brings, says the height it needs, and has what the filter
 // drops dimmed while it filters its own records.
 import { readFileSync } from 'node:fs'
@@ -57,6 +59,59 @@ describe('the view bridge', () => {
     fromPage({ type: 'thimble:result', id: q1.id, data: [{ n: 1 }] })
     await expect(got).resolves.toEqual([{ n: 1 }])
     await expect(bad).rejects.toThrow('no such page')
+  })
+
+  test('a newer fetch with the same key, or the signal, drops a fetch: it rejects as aborted and its call is cancelled', async () => {
+    const first = win().thimble.fetch({ run: 1 }, { key: 'runs' })
+    const other = win().thimble.fetch({ page: 1 }, { key: 'pages' })
+    const second = win().thimble.fetch({ run: 2 }, { key: 'runs' })
+    const [q1, q2, q3] = of('fetch')
+    expect(of('cancel')).toEqual([{ type: 'thimble:cancel', id: q1.id }])
+    await expect(first).rejects.toMatchObject({ name: 'AbortError' })
+    const ctrl = new (win().AbortController)()
+    const third = win().thimble.fetch({ run: 3 }, { signal: ctrl.signal })
+    ctrl.abort()
+    await expect(third).rejects.toMatchObject({ name: 'AbortError' })
+    expect(of('cancel')).toHaveLength(2)
+    fromPage({ type: 'thimble:result', id: q1.id, data: 'late' })
+    fromPage({ type: 'thimble:result', id: q2.id, data: 'pages' })
+    fromPage({ type: 'thimble:result', id: q3.id, data: 'run 2' })
+    await expect(other).resolves.toBe('pages')
+    await expect(second).resolves.toBe('run 2')
+    await wait()
+    expect(of('error')).toEqual([])
+  })
+
+  test("a fetch's progress reaches onProgress, and a fetch without it shows thimble's box, whose Cancel drops it", async () => {
+    const heard: unknown[] = []
+    const got = win().thimble.fetch({ heavy: true }, { onProgress: (p: unknown) => heard.push(p) })
+    const [q] = of('fetch')
+    expect(q).toMatchObject({ progress: true })
+    fromPage({ type: 'thimble:progress', id: q.id, seconds: 2, phase: 'call', done: 3, total: 10, note: 'counting' })
+    expect(heard).toEqual([{ seconds: 2, phase: 'call', done: 3, total: 10, note: 'counting' }])
+    fromPage({ type: 'thimble:result', id: q.id, data: 'done' })
+    await expect(got).resolves.toBe('done')
+
+    const doc = dom.window.document
+    const slow = win().thimble.fetch({ heavy: true })
+    const [, q2] = of('fetch')
+    await wait(30)
+    expect(doc.querySelector('.thimble-wait')).toBeNull()
+    await wait(1300)
+    fromPage({ type: 'thimble:progress', id: q2.id, seconds: 1, phase: 'index' })
+    const box = doc.querySelector('.thimble-wait') as HTMLElement
+    expect(box.style.display).toBe('')
+    expect(box.textContent).toMatch(/^Reading the files · 1 sCancel$/)
+    ;(box.querySelector('button') as HTMLButtonElement).click()
+    await expect(slow).rejects.toMatchObject({ name: 'AbortError' })
+    expect(of('cancel').at(-1)).toMatchObject({ id: q2.id })
+    expect(box.style.display).toBe('none')
+  })
+
+  test('thimble.lib gives a package the view bundled, and names one it did not', async () => {
+    ;(win() as any).__thimbleLibs = { 'd3-force': { forceSimulation: 1 } }
+    expect(win().thimble.lib('d3-force')).toEqual({ forceSimulation: 1 })
+    expect(() => win().thimble.lib('three')).toThrow('the view loads no library three')
   })
 
   test('a message from anything but the parent page is ignored', async () => {

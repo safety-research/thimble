@@ -111,7 +111,7 @@
           "items": {"type": "object", "required": ["form", "means"], "properties": {"form": {"type": "string"}, "means": {"type": "string"}}, "additionalProperties": false},
           "description": "Citation forms beyond line refs, each a row of main's table of citation forms."
         },
-        "libs": {"$ref": "#/$defs/strings", "description": "Libraries thimble inlines into the page."},
+        "libs": {"$ref": "#/$defs/strings", "description": "The libraries the page loads, in order: vega, vega-lite or vega-embed, or an npm package as name@version, or a file inside one, held in the view's lib folder."},
         "compare": {"type": "boolean", "description": "Whether picked units can be shown side by side."},
         "claims": {"deprecated": true, "$ref": "#/$defs/globs"},
         "units": {"deprecated": true},
