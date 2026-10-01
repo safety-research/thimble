@@ -151,6 +151,15 @@ def test_an_object_whose_arrays_hold_no_objects_splits_into_its_entries(corpus):
     assert [r["ref"] for r in _all(corpus, "grid.json")] == ["grid.json#/rows/0", "grid.json#/rows/1"]
 
 
+def test_a_document_with_too_many_values_reads_as_lines(corpus, monkeypatch):
+    monkeypatch.setattr(records, "JSON_RECORDS_MAX", 3)
+    (corpus / "many.json").write_text(json.dumps({"a": [{"i": i} for i in range(2)], "b": [{"i": i} for i in range(2)]}, indent=1))
+    assert records.json_index(corpus / "many.json") is None, "four values one level down, past the cap"
+    assert [r["ref"] for r in _all(corpus, "many.json")][:2] == ["many.json#L1", "many.json#L2"]
+    (corpus / "few.json").write_text(json.dumps([{"i": i, "j": i, "k": i} for i in range(3)], indent=1))
+    assert len(_all(corpus, "few.json")) == 3, "the fields inside a value are not counted"
+
+
 # --------------------------------------------------------------------------- refs
 
 

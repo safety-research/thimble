@@ -13,7 +13,8 @@
     pdf      .pdf                                    a page                                      <path>#p<n>
 
 `n` counts from 1 in every form, and `#page=<n>` reads as `#p<n>` (canon). A .json file whose lines each hold a value
-reads as lines, as does a document larger than JSON_INDEX_MAX_BYTES. Another binary file has no records. A view's reader
+reads as lines, as does a document larger than JSON_INDEX_MAX_BYTES or with more than JSON_RECORDS_MAX values at its
+top or one level down. Another binary file has no records. A view's reader
 may split any other file into records named `<path>#<locator>` in its own notation; labels and marks key those by their
 ref as they key these.
 
@@ -43,6 +44,7 @@ from . import corpus, pdfs, refs
 CHUNK = 500  # lines read per corpus.load_records call
 JSON_SNIFF_BYTES = 64 * 1024
 JSON_INDEX_MAX_BYTES = 1024 * 1024 * 1024  # a larger .json file reads as lines
+JSON_RECORDS_MAX = 1_000_000  # values at a document's top or one level down that its index holds at most, else it reads as lines
 POINTER_PARSE_MAX_BYTES = 64 * 1024 * 1024  # a pointer to a value no record holds is looked up in a document this size at most
 CACHE_MAX_FILES = 32
 CACHE_MAX_BYTES = 256 * 1024 * 1024
@@ -236,13 +238,14 @@ class _JsonIndex:
 
     @property
     def nbytes(self) -> int:
-        return 40 * len(self.pointers) + sum(len(p) for p in self.pointers)
+        return 200 * len(self.pointers) + sum(len(p) for p in self.pointers)  # a pointer's str, its entry in `at` and 4 offsets
 
 
 def _scan_json(mm: Any) -> tuple[int | None, list, dict] | None:
     """The structure of a document: (the opening byte of its top value or None for a scalar, its children as (key,
     start, end), the elements of each child whose value is an array as {child index: [(start, end), ...]}). Spans hold
-    the value and the white space around it. None when the bytes hold more than one value or end inside one."""
+    the value and the white space around it. None when the bytes hold more than one value or end inside one, or hold
+    more than JSON_RECORDS_MAX values at the top or one level down (so the index stays small; the file reads as lines)."""
     stack = bytearray()
     top: int | None = None
     children: list[tuple[Any, int, int]] = []
@@ -259,9 +262,12 @@ def _scan_json(mm: Any) -> tuple[int | None, list, dict] | None:
         if start1 is not None and filled(start1, end):
             children.append((len(children) if top == _OPEN_A else key, start1, end))
 
+    nested = [0]
+
     def close2(end: int) -> None:
         if in_array is not None and start2 is not None and filled(start2, end):
             arrays[in_array].append((start2, end))
+            nested[0] += 1
 
     for m in _TOKENS.finditer(mm):
         a, b = m.span()
@@ -284,9 +290,13 @@ def _scan_json(mm: Any) -> tuple[int | None, list, dict] | None:
             if d == 1:
                 close1(a)
                 start1 = b if top == _OPEN_A else None
+                if len(children) > JSON_RECORDS_MAX:
+                    return None
             elif d == 2 and in_array is not None and stack[-1] == _OPEN_A:
                 close2(a)
                 start2 = b
+                if nested[0] > JSON_RECORDS_MAX:
+                    return None
             continue
         if c in (_OPEN_A, _OPEN_O):
             if d == 0:
@@ -314,7 +324,7 @@ def _scan_json(mm: Any) -> tuple[int | None, list, dict] | None:
             close2(a)
             start2 = None
             in_array = None
-    if stack:
+    if stack or len(children) > JSON_RECORDS_MAX or nested[0] > JSON_RECORDS_MAX:
         return None
     if top is None:
         return (None, [], {}) if not filled(0, len(mm)) or _scalar(mm) else None
