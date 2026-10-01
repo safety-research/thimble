@@ -9,7 +9,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent } from 'react'
 import { Icon, type IconName } from '../components/Icon'
 import { Spinner } from '../components/Spinner'
-import { scaleApi } from '../lib/api'
+import { scaleApi, STAMPS_AT_ONCE } from '../lib/api'
 import type { FolderEntry, FolderListing, SourceInfo } from '../lib/types'
 import type { Presence } from './labels'
 import { isJsonlFile } from './views/common'
@@ -215,9 +215,9 @@ export function useFolderStore(ws: string): FolderStoreHandle {
       })
       if (!listed.length) return
       const my = gen.current
-      let stamps: Record<string, string | null>
+      const stamps: Record<string, string | null> = {}
       try {
-        stamps = (await scaleApi.stamps(ws, listed)).stamps
+        for (let i = 0; i < listed.length; i += STAMPS_AT_ONCE) Object.assign(stamps, (await scaleApi.stamps(ws, listed.slice(i, i + STAMPS_AT_ONCE))).stamps)
       } catch {
         return
       }

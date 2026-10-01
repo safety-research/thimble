@@ -38,7 +38,7 @@ from pathlib import Path
 from typing import Any, Callable, Iterator
 from urllib.parse import quote
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
@@ -1096,24 +1096,21 @@ def get_sources(c: str, include_hidden: int = 0, path: str | None = None, depth:
     return listing
 
 
-STAMPS_MAX = 2000  # folders one POST /sources/stamps asks about
+STAMPS_MAX = 200  # folders one GET /sources/stamps asks about
 
 
-class StampsBody(BaseModel):
-    paths: list[str]
-
-
-@router.post("/corpora/{c}/sources/stamps")
-def post_stamps(c: str, body: StampsBody, include_hidden: int = 0) -> dict[str, Any]:
-    """The `stamp` (folder_stamp) of each folder the Files tree shows, so it lists again only the folders that changed;
-    null for a folder that is gone or not listed. 400 past STAMPS_MAX folders."""
+@router.get("/corpora/{c}/sources/stamps")
+def get_stamps(c: str, path: list[str] = Query(default=[]), include_hidden: int = 0) -> dict[str, Any]:
+    """`?path=<folder>&path=...`: the `stamp` (folder_stamp) of each folder the Files tree shows, so it lists again only
+    the folders that changed; null for a folder that is gone or not listed ('' or '.' is the root). 400 past STAMPS_MAX
+    folders."""
     corpus = _corpus(c)
-    if len(body.paths) > STAMPS_MAX:
+    if len(path) > STAMPS_MAX:
         raise HTTPException(400, f"at most {STAMPS_MAX} folders at a time")
     out: dict[str, str | None] = {}
-    for path in body.paths:
-        rel = str(path).strip().strip("/")
-        out[path] = folder_stamp(corpus, "" if rel == "." else rel, bool(include_hidden))
+    for p in path:
+        rel = p.strip().strip("/")
+        out[p] = folder_stamp(corpus, "" if rel == "." else rel, bool(include_hidden))
     return {"stamps": out}
 
 

@@ -95,14 +95,14 @@ def test_a_folder_reached_through_a_symlink_is_not_listed(tree_corpus):
 
 
 def test_the_tree_asks_which_folders_changed_by_their_stamps_and_lists_only_those_again(tree_corpus):
-    """A listing carries its folder's stamp, and POST /sources/stamps answers the stamps of the folders the tree shows
+    """A listing carries its folder's stamp, and GET /sources/stamps answers the stamps of the folders the tree shows
     with no listing read: a file added to a folder changes that folder's stamp alone, and a folder gone or left out
     has none. A listing read within the time's resolution of a change carries a stamp no later answer equals."""
     _age(tree_corpus)
     root, runs = _folder("."), _folder("runs")
 
     def stamps(*paths: str) -> dict:
-        r = client.post(f"/api/corpora/{NAME}/sources/stamps", json={"paths": list(paths)})
+        r = client.get(f"/api/corpora/{NAME}/sources/stamps", params={"path": list(paths)})
         assert r.status_code == 200, r.text
         return r.json()["stamps"]
 
@@ -116,7 +116,7 @@ def test_the_tree_asks_which_folders_changed_by_their_stamps_and_lists_only_thos
     assert fresh["stamp"] != stamps(".")["."], "a folder changed just now is listed once more"
     _age(tree_corpus)
     assert _folder(".")["stamp"] == stamps(".")["."]
-    assert client.post(f"/api/corpora/{NAME}/sources/stamps", json={"paths": ["x"] * 2001}).status_code == 400
+    assert client.get(f"/api/corpora/{NAME}/sources/stamps", params={"path": ["x"] * 201}).status_code == 400
 
 
 def test_the_source_list_is_stamped_when_its_walk_ends(tree_corpus, monkeypatch):

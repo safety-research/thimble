@@ -560,13 +560,16 @@ export const docsApi = {
 // --- scale: one folder at a time for the tree, one page of labels for the reader ---
 import type { FolderListing, LabelRowsPage } from './types'
 
+/** folders one stamps request asks about (backend corpus.STAMPS_MAX is 200) */
+export const STAMPS_AT_ONCE = 100
+
 export const scaleApi = {
   /** `GET /corpora/{c}/sources?path=<folder>&depth=1`: the folder's own files and subfolders ('' is the root). */
   folder: (c: string, path: string) => j<FolderListing>(`${BASE}/corpora/${enc(c)}/sources${q({ path: path || '.', depth: 1 })}`),
-  /** `POST /corpora/{c}/sources/stamps`: each folder's stamp now, null for one that is gone, so the tree lists again only
-   * the folders whose stamp is not their listing's. */
+  /** `GET /corpora/{c}/sources/stamps?path=…`: each folder's stamp now, null for one that is gone, so the tree lists
+   * again only the folders whose stamp is not their listing's; at most STAMPS_AT_ONCE folders. */
   stamps: (c: string, paths: readonly string[]) =>
-    j<{ stamps: Record<string, string | null> }>(`${BASE}/corpora/${enc(c)}/sources/stamps`, { method: 'POST', body: JSON.stringify({ paths }) }),
+    j<{ stamps: Record<string, string | null> }>(`${BASE}/corpora/${enc(c)}/sources/stamps?${Array.from(paths, (p) => `path=${encodeURIComponent(p)}`).join('&')}`),
   /** `GET /ws/{c}/labels?path=&lines=a-b`: every concept's rows on lines a..b of one file, plus its whole-file rows. */
   labelsForLines: (c: string, path: string, a: number, b: number) => j<LabelsForPath[]>(`${ws(c)}/labels${q({ path, lines: `${a}-${b}` })}`),
   /** `POST /ws/{c}/labels/refs`: every concept's rows on these records that are no lines (a database row, a PDF page, a

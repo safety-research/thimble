@@ -1724,7 +1724,7 @@ export interface FolderListing {
   files: SourceInfo[]
   folders: FolderEntry[]
   n_files?: number
-  /** the folder's modification time when it was read, which `POST /sources/stamps` compares (backend folder_stamp) */
+  /** the folder's modification time when it was read, which `GET /sources/stamps` compares (backend folder_stamp) */
   stamp?: string
 }
 
