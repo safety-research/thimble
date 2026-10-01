@@ -1,7 +1,6 @@
 {
   "name": "Linked sessions",
   "description": "Runs of agent teams read as their sessions on one clock: any runs picked or compared side by side, one lane per session with each subagent under the session that spawned it, every tool call a mark coloured by the labels or by any field, filters on every field and on time, and a session's calls beside the lanes with the file they come from.",
-  "unit": "run",
   "claims": [
     "runs/*.jsonl",
     "runs/*/sessions-index.json"
@@ -26,163 +25,170 @@
     {
       "record": "call",
       "field": "run",
-      "kind": "cleaned",
       "from": "the folder a transcript is in",
       "how": "runs/<run>/"
     },
     {
       "record": "call",
-      "field": "session",
-      "kind": "cleaned",
+      "field": "s",
       "from": "the transcript's file name",
-      "how": "its name without .jsonl, and agent-<id> read as <id>"
+      "how": "the session the call is in: its transcript's name without .jsonl, and agent-<id> read as <id>"
     },
     {
       "record": "call",
       "field": "time",
-      "kind": "cleaned",
       "from": "timestamp",
       "how": "ISO 8601 or epoch milliseconds read as seconds since the run's first line; a time without an offset is UTC"
     },
     {
       "record": "call",
       "field": "tool",
-      "kind": "cleaned",
       "from": "a tool_use block's name",
       "how": "Agent read as Task"
     },
     {
       "record": "call",
       "field": "input",
-      "kind": "cleaned",
       "from": "the tool_use's input",
       "how": "the one value that names the call: a path, a command, a Grep's pattern with its path and mode, a query or a Task's description"
     },
     {
       "record": "call",
       "field": "result",
-      "kind": "cleaned",
       "from": "the tool_result's text",
       "how": "its first line, a denial's or an error's prefix and an Exit code line dropped"
     },
     {
       "record": "call",
       "field": "exit",
-      "kind": "cleaned",
       "from": "the tool_result's text",
       "how": "the number after Exit code"
     },
     {
       "record": "call",
       "field": "matches",
-      "kind": "cleaned",
       "from": "a Grep's toolUseResult filenames, else its result's lines",
       "how": "the files a Grep matched"
     },
     {
       "record": "call",
       "field": "duration",
-      "kind": "computed",
       "from": "the tool_use's and the tool_result's timestamps",
-      "how": "the seconds between them"
+      "how": "the seconds between them",
+      "kind": "inferred"
     },
     {
       "record": "call",
       "field": "outcome",
-      "kind": "computed",
       "from": "the tool_result's is_error or isError, and its text",
-      "how": "denied when the result says permission was denied, error when it is flagged, else ok"
+      "how": "denied when the result says permission was denied, error when it is flagged, else ok",
+      "kind": "inferred"
     },
     {
       "record": "call",
       "field": "files",
-      "kind": "computed",
       "from": "the call's file_path, else a Bash command's text and its result",
-      "how": "the paths with a folder and an extension"
+      "how": "the paths with a folder and an extension",
+      "kind": "inferred"
     },
     {
       "record": "call",
       "field": "file type",
-      "kind": "computed",
       "from": "files",
-      "how": "the first file's extension, as test <ext> for a file under tests/ or named test_*"
+      "how": "the first file's extension, as test <ext> for a file under tests/ or named test_*",
+      "kind": "inferred"
     },
     {
       "record": "call",
       "field": "spawned",
-      "kind": "computed",
       "from": "the Task call's toolUseResult agentId, else its result's agentId: <id> line, else the prompt a session got",
-      "how": "the session a Task call spawned"
+      "how": "the session a Task call spawned",
+      "kind": "inferred"
     },
     {
       "record": "call",
       "field": "same command next",
-      "kind": "computed",
       "from": "the session's later Bash calls",
-      "how": "the time and outcome of the next call that ran the same command"
+      "how": "the time and outcome of the next call that ran the same command",
+      "kind": "inferred"
     },
     {
       "record": "message",
       "field": "kind",
-      "kind": "computed",
       "from": "a message's type and place",
-      "how": "prompt for a user's text, result for a session's last text, else text"
+      "how": "prompt for a user's text, result for a session's last text, else text",
+      "kind": "inferred"
+    },
+    {
+      "record": "session",
+      "field": "id",
+      "from": "the transcript's file name",
+      "how": "its name without .jsonl, and agent-<id> read as <id>"
     },
     {
       "record": "session",
       "field": "agent",
-      "kind": "cleaned",
       "from": "a Task call's subagent_type, else the run's index",
       "how": "the subagent's type, else the name the index gives, else lead or agent-<id>"
     },
     {
       "record": "session",
-      "field": "spawned by",
-      "kind": "computed",
+      "field": "parent",
       "from": "the Task call whose toolUseResult names the subagent's agentId, else whose result says agentId: <id>, else whose prompt it got",
-      "how": "the session whose call spawned it"
+      "how": "the session whose call spawned it",
+      "kind": "inferred"
     },
     {
       "record": "session",
-      "field": "start and end",
-      "kind": "cleaned",
-      "from": "a session's first and last lines",
-      "how": "their times on the run's clock"
+      "field": "spawn",
+      "kind": "inferred",
+      "from": "parent",
+      "how": "the time of the Task call that spawned it, on the run's clock"
+    },
+    {
+      "record": "session",
+      "field": "start",
+      "from": "a session's first line",
+      "how": "its time on the run's clock"
+    },
+    {
+      "record": "session",
+      "field": "end",
+      "from": "a session's last line",
+      "how": "its time on the run's clock"
     },
     {
       "record": "session",
       "field": "returned",
-      "kind": "cleaned",
       "from": "a subagent's last message, else its Task call's result",
       "how": "what the subagent returned, the Exit code and agentId lines dropped"
     },
     {
       "record": "session",
       "field": "waiting",
-      "kind": "computed",
       "from": "the Task calls it waited on",
-      "how": "the spans it waited on its subagents, overlapping spans merged"
+      "how": "the spans it waited on its subagents, overlapping spans merged",
+      "kind": "inferred"
     },
     {
       "record": "session",
       "field": "calls and errors",
-      "kind": "computed",
       "from": "the calls that pass the filters",
-      "how": "how many calls a session has, and how many ended in an error"
+      "how": "how many calls a session has, and how many ended in an error",
+      "kind": "inferred"
     },
     {
       "record": "run",
       "field": "started",
-      "kind": "cleaned",
       "from": "the run's first line",
       "how": "its time in UTC"
     },
     {
       "record": "run",
       "field": "task",
-      "kind": "computed",
       "from": "the leads' first prompts",
-      "how": "the prompt every run's lead got, when they all got the same one"
+      "how": "the prompt every run's lead got, when they all got the same one",
+      "kind": "inferred"
     }
   ]
 }

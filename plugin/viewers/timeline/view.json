@@ -1,7 +1,6 @@
 {
   "name": "Timeline",
   "description": "A ferry operator's alerts, deploys, chat, support tickets and automated agents' actions on one time axis over any days picked, with any window, incident, source or other field narrowed to, the events laid out in lanes by a field, and each event's details beside the event it answers and those that answer it.",
-  "unit": "day",
   "claims": [
     "agents.log",
     "alerts/*.jsonl",
@@ -34,93 +33,85 @@
     {
       "record": "event",
       "field": "time",
-      "kind": "cleaned",
       "from": "ts, time, Date, a chat message's ts and each agents.log line's time",
       "how": "every clock read in UTC; a time without an offset is UTC+1 in deploys.csv and UTC in agents.log"
     },
     {
       "record": "event",
       "field": "source",
-      "kind": "cleaned",
       "from": "the file the event is in",
       "how": "alert, deploy, chat, ticket or agent"
     },
     {
       "record": "event",
       "field": "kind",
-      "kind": "cleaned",
       "from": "state, event, a ticket message's place and Status, and action",
       "how": "fired or resolved, started, finished or rollback, message, opened, updated or closed, or the agent's action; the monitor's state in any case"
     },
     {
       "record": "event",
       "field": "actor",
-      "kind": "cleaned",
       "from": "the monitor, by, user, From and the agent",
       "how": "a login or chat id as chat/users.json names it, a guest by their profile's name"
     },
     {
       "record": "event",
       "field": "service",
-      "kind": "computed",
       "from": "svc or service, the summary, tickets/index.csv",
-      "how": "svc read as service; a null service takes the one its summary starts with, and a ticket's comes from tickets/index.csv"
+      "how": "svc read as service; a null service takes the one its summary starts with, and a ticket's comes from tickets/index.csv",
+      "kind": "inferred"
     },
     {
       "record": "event",
       "field": "severity",
-      "kind": "cleaned",
       "from": "an alert's severity, or a ticket's priority in tickets/index.csv",
       "how": "a priority with words around it takes the value it names"
     },
     {
       "record": "event",
       "field": "outcome",
-      "kind": "cleaned",
       "from": "result",
       "how": "ok, failed or held, the words around it dropped"
     },
     {
       "record": "event",
       "field": "incident",
-      "kind": "computed",
       "from": "incident, an inc- channel's name, or an incident a deploy's reason or a message names",
-      "how": "a deploy's later events take its incident"
+      "how": "a deploy's later events take its incident",
+      "kind": "inferred"
     },
     {
       "record": "event",
       "field": "id",
-      "kind": "cleaned",
       "from": "an alert's or a deploy's id, a chat message's channel and ts, a ticket's number",
       "how": "<channel>/<ts> for a message and <ticket>.<n> for a ticket's nth message"
     },
     {
       "record": "event",
       "field": "text",
-      "kind": "cleaned",
       "from": "msg or summary, a message's text, a ticket message's body",
       "how": "msg read as summary"
     },
     {
       "record": "event",
       "field": "answers",
-      "kind": "computed",
       "from": "resolves, a deploy's id, thread_ts, a ticket's earlier message, and alert, ticket or via",
-      "how": "the event this one answers"
+      "how": "the event this one answers",
+      "kind": "inferred"
     },
     {
       "record": "event",
       "field": "answered by",
-      "kind": "computed",
       "from": "answers",
-      "how": "the events that answer this one"
+      "how": "the events that answer this one",
+      "kind": "inferred"
     },
     {
       "record": "event",
       "field": "took",
-      "kind": "computed",
       "from": "time and answers",
-      "how": "the time since the event it answers"
+      "how": "the time since the event it answers",
+      "kind": "inferred"
     }
   ]
 }

@@ -1,7 +1,6 @@
 {
   "name": "Repository",
   "description": "Several agent runs on one small library, read as a code forge shows them: any runs picked or compared issue by issue, pull requests, issues, discussions and agents in tabs filtered on every field, and a pull request's whole story with its commits, diffs, reviews and the file of each entry.",
-  "unit": "run",
   "claims": [
     "runs/*.json",
     "runs/*.jsonl",
@@ -39,217 +38,203 @@
     {
       "record": "pull request",
       "field": "run",
-      "kind": "cleaned",
       "from": "the folder a file is in, and the manifest's run or id",
       "how": "runs/<run>/"
     },
     {
       "record": "pull request",
       "field": "number",
-      "kind": "cleaned",
       "from": "number, a commit's or review's pull",
       "how": "the first number in it"
     },
     {
       "record": "pull request",
       "field": "author",
-      "kind": "cleaned",
       "from": "actor, user, author",
       "how": "user read as actor"
     },
     {
       "record": "pull request",
       "field": "opened",
-      "kind": "cleaned",
       "from": "ts, time, created_at, timestamp",
       "how": "ISO 8601, epoch milliseconds or local time read as hours since the run started; a time without an offset is in the manifest's timezone, else UTC"
     },
     {
       "record": "pull request",
       "field": "merged by",
-      "kind": "cleaned",
       "from": "the merge's actor or user, or merged_by in pulls.csv",
       "how": "who merged it"
     },
     {
       "record": "pull request",
       "field": "closes",
-      "kind": "cleaned",
       "from": "fixes, closes or linked_issue",
       "how": "the first number, where it is free text"
     },
     {
       "record": "pull request",
       "field": "lines added and removed",
-      "kind": "cleaned",
       "from": "a push's diff or a commit's patch",
       "how": "the lines it adds and removes"
     },
     {
       "record": "pull request",
       "field": "area",
-      "kind": "computed",
       "from": "labels or area, else the issue it fixes",
-      "how": "the first label"
+      "how": "the first label",
+      "kind": "inferred"
     },
     {
       "record": "pull request",
       "field": "state",
-      "kind": "computed",
       "from": "its merge, close and reopen records",
-      "how": "open, merged or closed"
+      "how": "open, merged or closed",
+      "kind": "inferred"
     },
     {
       "record": "pull request",
       "field": "reviews",
-      "kind": "computed",
       "from": "each reviewer's last verdict that is not a comment",
-      "how": "how many approved and how many asked for changes"
+      "how": "how many approved and how many asked for changes",
+      "kind": "inferred"
     },
     {
       "record": "pull request",
       "field": "time to merge",
-      "kind": "computed",
       "from": "its opening and its merge",
-      "how": "hours"
+      "how": "hours",
+      "kind": "inferred"
     },
     {
       "record": "pull request",
       "field": "flags",
-      "kind": "computed",
       "from": "its merge, reviews and pushes",
-      "how": "merged by its author, merged over a change request, pushed after its last approval, or waiting for approvals"
+      "how": "merged by its author, merged over a change request, pushed after its last approval, or waiting for approvals",
+      "kind": "inferred"
     },
     {
       "record": "issue",
       "field": "reason",
-      "kind": "cleaned",
       "from": "reason or state_reason",
       "how": "closed where there is none"
     },
     {
       "record": "issue",
       "field": "state",
-      "kind": "computed",
       "from": "its close records and the pull requests that fix it",
-      "how": "fixed when a pull request that fixes it is merged"
+      "how": "fixed when a pull request that fixes it is merged",
+      "kind": "inferred"
     },
     {
       "record": "issue",
       "field": "origin",
-      "kind": "computed",
       "from": "its opening time and the run's start",
-      "how": "backlog when it was opened before the run started, else found during the run"
+      "how": "backlog when it was opened before the run started, else found during the run",
+      "kind": "inferred"
     },
     {
       "record": "issue",
       "field": "fixed by",
-      "kind": "computed",
       "from": "the pull requests' closes",
-      "how": "the merged pull request that fixes it"
+      "how": "the merged pull request that fixes it",
+      "kind": "inferred"
     },
     {
       "record": "issue",
       "field": "same issue in other runs",
-      "kind": "computed",
       "from": "the issue's number and title",
-      "how": "the issue in each other run, with its state and pull requests"
+      "how": "the issue in each other run, with its state and pull requests",
+      "kind": "inferred"
     },
     {
       "record": "event",
       "field": "kind",
-      "kind": "cleaned",
       "from": "type or event, else the export table a row is in",
       "how": "commit, review, comment, merge, close or reopen"
     },
     {
       "record": "event",
+      "field": "action",
+      "from": "type or event, and a review's state",
+      "how": "opened, pushed, commented, merged, closed, reopened, posted or signed off, and a review by its verdict"
+    },
+    {
+      "record": "event",
       "field": "actor",
-      "kind": "cleaned",
       "from": "actor, user, author, user.login in reviews.json",
       "how": "user read as actor; a review from a gone account is unknown"
     },
     {
       "record": "event",
-      "field": "time",
-      "kind": "cleaned",
+      "field": "hours",
       "from": "ts, committed_at, submitted_at, merged_at, closed_at",
       "how": "as for opened; a post with no time takes the time of the line before it"
     },
     {
       "record": "event",
       "field": "verdict",
-      "kind": "cleaned",
       "from": "a review's state",
       "how": "approved, changes requested or commented, in lower case"
     },
     {
       "record": "event",
       "field": "text",
-      "kind": "cleaned",
       "from": "body, text or message",
       "how": "text read as body"
     },
     {
       "record": "post",
       "field": "thread",
-      "kind": "cleaned",
       "from": "thread_id",
       "how": "its first number"
     },
     {
       "record": "post",
       "field": "title",
-      "kind": "cleaned",
       "from": "the first post's thread_title",
       "how": "the discussion's title"
     },
     {
       "record": "post",
       "field": "mentions",
-      "kind": "computed",
       "from": "the body",
-      "how": "the #<n> numbers it names"
+      "how": "the #<n> numbers it names",
+      "kind": "inferred"
     },
     {
       "record": "agent",
       "field": "name",
-      "kind": "cleaned",
       "from": "the manifest's agents or team, and the agents/ transcripts",
       "how": "the names in either"
     },
     {
       "record": "agent",
       "field": "note",
-      "kind": "cleaned",
       "from": "its transcript",
       "how": "its last assistant text"
     },
     {
       "record": "agent",
       "field": "review partners",
-      "kind": "computed",
       "from": "the reviews",
-      "how": "per author it reviewed, its approvals and change requests"
+      "how": "per author it reviewed, its approvals and change requests",
+      "kind": "inferred"
     },
     {
       "record": "run",
       "field": "started",
-      "kind": "cleaned",
       "from": "the manifest's started, else the first record",
       "how": "UTC"
     },
     {
       "record": "run",
       "field": "team size",
-      "kind": "cleaned",
       "from": "the manifest's agents or team",
       "how": "how many agents"
     },
     {
       "record": "run",
       "field": "approvals needed",
-      "kind": "cleaned",
       "from": "approvals, required_approvals or policy.approvals",
       "how": "the first number, where it is written as free text"
     }
