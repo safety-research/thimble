@@ -267,7 +267,11 @@ async def _lifespan(app: FastAPI):
     except Exception:
         log.exception("moving the workspaces' views into their local extensions failed")
     await _startup()
+    from . import loop_watch
+
+    loop_watch.start(asyncio.get_running_loop())
     yield
+    loop_watch.stop()
     # shutdown: modules that own subprocesses expose `shutdown()`, so a restart never leaves an orphan running
     for name in ROUTER_MODULES:
         fn = getattr(sys.modules.get(f"app.{name}"), "shutdown", None)

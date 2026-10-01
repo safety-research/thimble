@@ -288,3 +288,32 @@ def test_lines_read_from_a_chunk_are_the_lines_a_whole_split_gives(tmp_path):
             a = rnd.randint(-1, len(idx) + 2)
             b = a + rnd.randint(-1, 300)
             assert corpus._index_lines(idx, path, a, b) == split_read(idx, path, a, b), (k, a, b)
+
+
+def test_a_held_loop_is_logged_with_where_its_thread_was(monkeypatch, caplog):
+    """server.log names how long the event loop went without a turn and where its thread was meanwhile, so a report
+    of a slow server says what held it."""
+    import asyncio
+    import logging
+    import time
+
+    from app import loop_watch
+
+    monkeypatch.setattr(loop_watch, "STALL_S", 0.3)
+    monkeypatch.setattr(loop_watch, "CHECK_S", 0.05)
+    monkeypatch.setattr(loop_watch, "SAMPLE_S", 0.05)
+
+    def hold_the_loop() -> None:
+        time.sleep(0.9)
+
+    async def main() -> None:
+        loop_watch.start(asyncio.get_running_loop())
+        await asyncio.sleep(0.2)
+        hold_the_loop()
+        await asyncio.sleep(0.3)
+        loop_watch.stop()
+
+    with caplog.at_level(logging.WARNING, logger="thimble.loop"):
+        asyncio.run(main())
+    lines = [r.getMessage() for r in caplog.records if r.name == "thimble.loop"]
+    assert len(lines) == 1 and "hold_the_loop" in lines[0] and "without a turn" in lines[0], lines
