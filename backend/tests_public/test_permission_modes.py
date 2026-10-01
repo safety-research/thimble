@@ -281,7 +281,7 @@ async def test_auto_is_claude_code_s_auto_mode_and_a_call_it_refuses_waits_for_t
     inp = {"command": "python3 -c 'print(6*7)'", "description": "Multiply"}
     body = dict(session=KEY, event="PermissionDenied", tool_name="Bash", tool_input=inp, agent_id="a2",
                 tool_use_id="toolu_r1", reason="Runs code the analyst did not ask for")
-    call = asyncio.ensure_future(agent_session.permission_request_route(CORPUS, agent_session.PermissionRequestBody(**body)))
+    call = asyncio.ensure_future(agent_session.hook_request(CORPUS, agent_session.PermissionRequestBody(**body)))
     [p] = await _pending(run.chat)
     assert p["refused"] == "Runs code the analyst did not ask for" and p["agent_id"] == "a2"
     assert "rechecked" not in p and "deny_after_s" not in p, "a refusal waits for the analyst for good"
@@ -295,19 +295,19 @@ async def test_auto_is_claude_code_s_auto_mode_and_a_call_it_refuses_waits_for_t
         return agent_session.PermissionRequestBody(session=KEY, event="PreToolUse", tool_name="Bash", tool_input=i,
                                                    agent_id=agent)
 
-    assert await agent_session.permission_request_route(CORPUS, pre({"command": inp["command"]}, agent=None)) == {}, \
+    assert await agent_session.hook_request(CORPUS, pre({"command": inp["command"]}, agent=None)) == {}, \
         "another agent"
     again = {**inp, "description": "Multiply six by seven"}
-    assert await agent_session.permission_request_route(CORPUS, pre(again)) == {"behavior": "allow",
+    assert await agent_session.hook_request(CORPUS, pre(again)) == {"behavior": "allow",
                                                                                "message": agent_session.ALLOWED_LINE}
-    assert await agent_session.permission_request_route(CORPUS, pre(again)) == {}, "once"
-    call = asyncio.ensure_future(agent_session.permission_request_route(
+    assert await agent_session.hook_request(CORPUS, pre(again)) == {}, "once"
+    call = asyncio.ensure_future(agent_session.hook_request(
         CORPUS, agent_session.PermissionRequestBody(**{**body, "tool_use_id": "toolu_r2"})))
     [p] = await _pending(run.chat)
     agent_session.answer(CORPUS, run.chat, p["id"], False)
     assert (await call) == {"behavior": "deny", "message": agent_session.DENIED_LINE}
     assert "toolu_r2" not in session._not_run, "a denied call stays refused"
-    assert await agent_session.permission_request_route(CORPUS, pre(inp)) == {"behavior": "deny",
+    assert await agent_session.hook_request(CORPUS, pre(inp)) == {"behavior": "deny",
                                                                              "message": agent_session.DENIED_LINE}
     await orient_session.stop(CORPUS)
     await _done()
@@ -315,10 +315,10 @@ async def test_auto_is_claude_code_s_auto_mode_and_a_call_it_refuses_waits_for_t
 
 async def test_a_call_auto_mode_gave_no_safety_verdict_on_goes_back_to_it_then_waits_a_while(fake, monkeypatch):
     """Both ways Claude Code says auto mode gave no verdict are no refusal: the call goes back to auto mode, and only
-    then does the card ask, denying it unanswered after CLASSIFIER_ASK_S rather than waiting for good."""
+    then does the card ask, denying it unanswered after PATIENT_WAIT_S rather than waiting for good."""
     monkeypatch.setenv("FAKE_MODE", "sleep")
     monkeypatch.setattr(agent_session, "CLASSIFIER_WAITS_S", (0.01,))
-    monkeypatch.setattr(agent_session, "CLASSIFIER_ASK_S", 0.2)
+    monkeypatch.setattr(agent_session, "PATIENT_WAIT_S", 0.2)
     _listen()
     ledger.put_settings(CORPUS, {modes.SETTING: {"orient": "auto"}})
     run = await orient_session.start(CORPUS, "")
@@ -327,9 +327,9 @@ async def test_a_call_auto_mode_gave_no_safety_verdict_on_goes_back_to_it_then_w
         body = agent_session.PermissionRequestBody(session=KEY, event="PermissionDenied", tool_name="Bash",
                                                    tool_input={"command": f"ls {i}"}, agent_id="a3",
                                                    tool_use_id=f"toolu_c{i}", reason=reason)
-        assert (await agent_session.permission_request_route(CORPUS, body))["behavior"] == "allow", "back to auto mode"
+        assert (await agent_session.hook_request(CORPUS, body))["behavior"] == "allow", "back to auto mode"
         assert f"toolu_c{i}" in session._not_run
-        call = asyncio.ensure_future(agent_session.permission_request_route(CORPUS, body))
+        call = asyncio.ensure_future(agent_session.hook_request(CORPUS, body))
         p = (await _pending(run.chat, i))[-1]
         assert p["refused"] == reason and p["deny_after_s"] == 0.2
         assert (await asyncio.wait_for(call, 5))["behavior"] == "deny"
@@ -343,10 +343,10 @@ async def test_the_hook_s_route_answers_for_the_session_its_shim_names(fake, mon
     ledger.put_settings(CORPUS, {modes.SETTING: {"orient": "bypass"}})
     await orient_session.start(CORPUS, "")
     body = agent_session.PermissionRequestBody(session=KEY, tool_name="Bash", tool_input={"command": "ls"}, agent_id="a9")
-    assert await agent_session.permission_request_route(CORPUS, body) == {"behavior": "allow",
+    assert await agent_session.hook_request(CORPUS, body) == {"behavior": "allow",
                                                                          "updatedInput": {"command": "ls"}}
     other = agent_session.PermissionRequestBody(session="writer:report", tool_name="Bash", tool_input={"command": "ls"})
-    assert (await agent_session.permission_request_route(CORPUS, other))["behavior"] == "deny", \
+    assert (await agent_session.hook_request(CORPUS, other))["behavior"] == "deny", \
         "Bypass grants the orientation's requests, never another session's"
     await orient_session.stop(CORPUS)
     await _done()

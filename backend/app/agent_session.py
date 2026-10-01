@@ -20,9 +20,11 @@ used rather than --permission-prompt-tool because the prompt tool never hears ba
 Each session runs in the mode of its agent's row (modes.py, the caller's `agent`), or in the mode a card switched it to
 (set_mode), which its later runs keep while this server runs (`_switched`); a continued background session keeps the
 mode its chat's meta records, since Claude Code keeps its flags (BG_AUTO_LINE). In Bypass ask allows at once; a patient
-session's request (the orientation's) waits for the analyst, any other is denied after PERMISSION_WAIT_S. A request
-denied unanswered stays on the card, marked `expired`, until the analyst dismisses it or the session ends. thimble's
-own tools and skills are always allowed (own_rules).
+session's request (the orientation's) is denied after PATIENT_WAIT_S unanswered, any other after PERMISSION_WAIT_S, so
+no request waits for good. A request denied unanswered stays on the card, marked `expired`, until the analyst dismisses
+it or the session ends. A request nothing waits on any more leaves the card: one whose hook went away (its process was
+killed), one a previous server left on the chat's meta (recover), and one the analyst answers after its wait ended.
+thimble's own tools and skills are always allowed (own_rules).
 
 Hosted sessions. The dev agent's background sessions (dev.py) are not followed here, yet ask answers their hook's
 requests the same way: host registers one on its chat for the length of its run, with its agent's mode and its wait
@@ -46,8 +48,7 @@ PermissionDenied: the card asks the analyst, and an allow answers `retry` and is
 GRANT_TTL_S) so a PreToolUse hook (before_call) lets the call made again run. The model may reword the call, so an allow
 also covers the same agent's next call of that tool within GRANT_TTL_S. A refusal only because the classifier was
 unavailable (CLASSIFIER_DOWN) is no verdict: after each of CLASSIFIER_WAITS_S the hook answers `retry` with nothing
-remembered, so auto mode judges the call made again, and only then does the card ask; for a patient session that card
-denies the call after CLASSIFIER_ASK_S unanswered, so the session never waits on it for good.
+remembered, so auto mode judges the call made again, and only then does the card ask.
 
 Mode switch. Between Manual and Bypass the switch is instant (both run Claude Code's manual mode). Into or out of Auto,
 the process's --permission-mode must change, so the follower pauses the process when it is quiet (no call without its
@@ -156,9 +157,11 @@ STEP_ROLE = agents.STEP_ROLE  # a subagent or workflow agent of the session
 STEP_TITLE = "agent"  # a step whose meta names nothing
 POLL_S = 0.5
 STOP_WAIT_S = 4.0  # after SIGINT, then again after SIGTERM, before the next signal
-# an unanswered permission request is denied after this long, unless its session is patient (the orientation's) or
-# hosted with a wait of its own (module note, permissions)
+# an unanswered permission request is denied after this long, unless its session is patient (the orientation's), when
+# it is PATIENT_WAIT_S, or hosted with a wait of its own (module note, permissions)
 PERMISSION_WAIT_S = 60.0
+PATIENT_WAIT_S = 600.0
+HOOK_POLL_S = 1.0  # how often a waiting request checks that its hook is still there
 STDERR_TAIL = 800  # chars of the session's stderr kept as a failed run's error
 # of a request's input the card shows, scrolled; past it the entry's `cut` is the input's length and the card offers
 # no "don't ask again"
@@ -172,6 +175,7 @@ CONFIG_DENIED_LINE = "thimble's config refuses this command."  # userconf: `inst
 TIMED_OUT_LINE = ("Nobody answered in thimble's browser within {wait}, so the call was denied. Carry on without it, "
                   "or find a way that needs no permission.")
 GONE_LINE = "The session ended before it was answered."
+NOBODY_WAITS = "none: nothing waits on it any more"  # the permission log's word for a request taken off unanswered
 NO_ONE_LINE = ("Nobody can answer this session's requests, since the program that started it has no thread in "
                "thimble's browser, so the call was denied. Carry on without it.")
 ALLOWED_LINE = "Allowed in thimble's browser."  # a refused call made again, once allowed (module note, auto mode)
@@ -187,12 +191,11 @@ REQUEST, DENIED, PRE = permission_hook.REQUEST, permission_hook.DENIED, permissi
 # how long the analyst's answer to a call auto mode refused waits for the model to make that call again (module note,
 # auto mode)
 GRANT_TTL_S = 600.0
-# auto mode's reason when its classifier gave no verdict on a call, the waits before each time the call goes back to
-# auto mode, and how long the card that then asks waits for a patient session before it denies the call (module note,
-# auto mode). Claude Code reads only `retry` from a PermissionDenied hook, so a deny carries no message to the model.
+# auto mode's reason when its classifier gave no verdict on a call, and the waits before each time the call goes back to
+# auto mode (module note, auto mode). Claude Code reads only `retry` from a PermissionDenied hook, so a deny carries no
+# message to the model.
 CLASSIFIER_DOWN = re.compile(r"\bclassifier\b.*\bunavailable\b|\bno safety verdict\b", re.I)
 CLASSIFIER_WAITS_S = (10.0, 30.0, 90.0)
-CLASSIFIER_ASK_S = 600.0
 BYPASS = "bypass"
 AUTO = "auto"
 # a background session keeps its --permission-mode, in every run of its chat: bg_session.start sends a running one the
@@ -346,7 +349,7 @@ class Run:
     # calls the analyst allowed on the card before they ran (module note, the config), by grant_key: when
     cleared: dict[tuple[str | None, str, str], float] = field(default_factory=dict)
     mode: str = "manual"  # the mode it runs in, one of modes.MODES (module note, permissions)
-    patient: bool = False  # a request waits until the analyst answers, else `wait_s` (module note, permissions)
+    patient: bool = False  # a request waits PATIENT_WAIT_S, else `wait_s` (module note, permissions)
     wait_s: float | None = None  # None for PERMISSION_WAIT_S
     on_expired: Callable[["Run", dict[str, Any]], None] | None = None  # told of each request denied unanswered
     groups: dict[str, str] = field(default_factory=dict)  # web rule -> the id of the request waiting for it (module note, the web)
@@ -1971,7 +1974,10 @@ async def recover() -> tuple[list[str], list[str]]:
         c = folder.name
         try:
             _load_unheard(c)
-            metas = [m for m in agents.list_chats(c) if _left_running(c, m)]
+            every = agents.list_chats(c)
+            if gone := _clear_left(c, every):
+                log.info("%s: permission requests a previous server left waiting, taken off: %s", c, ", ".join(gone))
+            metas = [m for m in every if _left_running(c, m)]
         except Exception:  # noqa: BLE001 — a workspace whose corpus is gone, or one that cannot be read
             log.debug("%s: its sessions were not checked at start", c, exc_info=True)
             continue
@@ -2328,8 +2334,8 @@ async def ask(c: str, key: str | None, tool_name: str, inp: Any, agent_id: str |
     call auto mode refused for `reason`; the answer as Claude Code reads it. In Bypass it is allowed at once, as is a
     Bash call the sandbox rule allows and a web call the workspace's kept rules allow; during a switch pause it is denied
     at once; a call auto mode gave no verdict on goes back to it first (_recheck); a web call joins a waiting request for
-    the same site or for search; otherwise it waits on the chat until the analyst answers (or the session's `wait_s`,
-    unless it is patient, and CLASSIFIER_ASK_S for a call auto mode never judged). `suggestions` become the card's "don't
+    the same site or for search; otherwise it waits on the chat until the analyst answers or its wait passes (the
+    session's `wait_s`, PATIENT_WAIT_S for a patient one). `suggestions` become the card's "don't
     ask again" choice, and a web call's is the site's rule, or web search's, for the workspace. `force` asks the analyst
     in every mode, as a call thimble's config sends to them, with `why` as the card's reason, and nothing noted when it
     is denied unanswered (dev's code-ticket question)."""
@@ -2383,14 +2389,14 @@ async def ask(c: str, key: str | None, tool_name: str, inp: Any, agent_id: str |
     command = _command(tool_name, inp)
     cut = _cut(tool_name, inp, whole)
     updates = [] if cut else web_offer(web) if web else offer(suggestions) if event == REQUEST else []
-    limit = CLASSIFIER_ASK_S if unjudged and run.patient else None if run.patient else run.wait_s or PERMISSION_WAIT_S
+    limit = PATIENT_WAIT_S if run.patient else run.wait_s or PERMISSION_WAIT_S
     entry = {"id": rid, "tool": tool_name, "what": _what(tool_name, inp), "input": whole[:PERMISSION_INPUT_CHARS],
              "since": _now(), **command, **({"cut": cut} if cut else {}),
              **(_asker(run, agent_id, agent_type) if agent_id else {}),
              **({"refused": " ".join(reason.split())[:200] or "no reason given"} if event == DENIED else {}),
              **({"rechecked": len(CLASSIFIER_WAITS_S)} if unjudged else {}),
-             **({"deny_after_s": limit} if unjudged and limit is not None else {}),
-             **_offered(updates), **({"wait_s": limit} if limit else {}), **({"why": why} if why else {}),
+             **({"deny_after_s": limit} if unjudged else {}),
+             **_offered(updates), "wait_s": limit, **({"why": why} if why else {}),
              **({"asked_by": run.config.ask_cause(tool_name, inp)} if verdict == "ask" and not force
                 and run.config is not None else {}),
              "mode": run.mode}
@@ -2650,12 +2656,38 @@ def with_rules(argv: list[str], rules: list[dict[str, Any]]) -> list[str]:
 
 
 def dismiss(c: str, chat: str, request_id: str) -> bool:
-    """Take a request that was denied unanswered off the card of the chat `chat`; False when there is none by that id."""
+    """Take a request no session waits on off the card of the chat `chat`: True for one denied unanswered, False for one
+    whose wait is gone (module note, permissions), which no answer reaches, and for none by that id."""
     pending = _pending(c, chat)
-    if not any(p.get("id") == request_id and p.get("expired") for p in pending):
+    hit = next((p for p in pending if p.get("id") == request_id), None)
+    if hit is None:
         return False
     agents.update_agent(c, chat, permissions=[p for p in pending if p.get("id") != request_id])
-    return True
+    if not hit.get("expired"):
+        agents.log_permission(c, "answered", id=request_id, chat=chat, answer=NOBODY_WAITS)
+    return bool(hit.get("expired"))
+
+
+def _clear_left(c: str, metas: "list[dict[str, Any]]") -> list[str]:
+    """Take the requests a previous server left waiting off the chats `metas` of workspace `c` (module note,
+    permissions): their hooks lost the connection, so Claude Code went on without an answer. A request a session of
+    this server waits on stays. Returns their ids."""
+    live = {rid for r in [*_runs.values(), *_hosted.values()] for rid in r.waits}
+    gone: list[str] = []
+    for meta in metas:
+        if not any(isinstance(p, dict) and not p.get("expired") for p in meta.get("permissions") or []):
+            continue
+        chat = str(meta["id"])
+        pending = _pending(c, chat)
+        left = [p for p in pending if p.get("expired") or p.get("id") in live]
+        if len(left) == len(pending):
+            continue
+        agents.update_agent(c, chat, permissions=left)
+        for p in pending:
+            if p not in left:
+                gone.append(str(p.get("id")))
+                agents.log_permission(c, "answered", id=p.get("id"), chat=chat, answer=NOBODY_WAITS)
+    return gone
 
 
 def _add_rules(run: Run, updates: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -2777,8 +2809,8 @@ def _cleared(run: Run, agent_id: str | None, tool_name: str, inp: Any) -> bool:
 def answer(c: str, chat: str, request_id: str, allow: bool, always: bool = False, shown: int = 0) -> bool:
     """The analyst's answer to a pending request of the session whose chat is `chat`, `always` for the card's "don't
     ask again", which allows it with the updates offered for it (module note, don't ask again), covering the first
-    `shown` calls that joined it (module note, the web); for a request denied unanswered, its dismissal from the card.
-    False when there is none by that id."""
+    `shown` calls that joined it (module note, the web); for a request no session waits on, its removal from the card
+    (dismiss). False when no session waits on a request by that id."""
     run = _by_chat(c, chat)
     fut = run.waits.get(request_id) if run is not None else None
     if run is None or fut is None or fut.done():
@@ -3090,10 +3122,26 @@ class PermissionRequestBody(BaseModel):
 
 
 @router.post("/ws/{c}/sessions/permission")
-async def permission_request_route(c: str, body: PermissionRequestBody) -> dict[str, Any]:
-    """A session's permission hook (permission_hook.py), for the session its THIMBLE_SESSION names: a request or a call
-    auto mode refused, answered by ask however long the analyst takes, or a call about to run, answered by before_call
-    at once."""
+async def permission_request_route(c: str, body: PermissionRequestBody, request: Request) -> dict[str, Any]:
+    """A session's permission hook (permission_hook.py): hook_request. A hook that goes away while its request waits
+    (its process was killed) takes the request off the card, as the session's end does."""
+    task = asyncio.ensure_future(hook_request(c, body))
+    try:
+        while not (await asyncio.wait({task}, timeout=HOOK_POLL_S))[0]:
+            if await request.is_disconnected():
+                task.cancel()
+                with contextlib.suppress(asyncio.CancelledError, Exception):
+                    await task
+                return {"behavior": "deny", "message": GONE_LINE}
+        return task.result()
+    finally:
+        task.cancel()
+
+
+async def hook_request(c: str, body: PermissionRequestBody) -> dict[str, Any]:
+    """A permission hook's event, for the session its THIMBLE_SESSION names: a request or a call auto mode refused,
+    answered by ask once the analyst answers or its wait passes, or a call about to run, answered by before_call at
+    once."""
     if body.event == PRE:
         got = before_call(c, body.session, body.tool_name, body.tool_input, body.agent_id)
         run = asker(c, body.session)
