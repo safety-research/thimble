@@ -3,9 +3,8 @@
 // shoot_states), and a video's film for the frames the writer looks at (backend/app/video.py), in the headless Chromium
 // of the frontend's Playwright (frontend/node_modules, which scripts/install.sh installs).
 //   node scripts/view_shot.mjs --frame <html> --states <json> [--viewport <w>x<h>] [--media <url>]
-// --states names a JSON list of states, [{out, open, labels, ids}], each shot on a fresh page of one browser: `open` is
-// the place the page is sent once the frame is ready, `out` the PNG written, `labels` the names of the labels that are
-// on and `ids` their ids.
+// --states names a JSON list of states, [{out, open}], each loaded on a fresh page of one browser: `open` is the place
+// the page is sent once the frame is ready, and `out` the PNG written (none without it).
 // The page plays the part frontend/src/files/ViewerFrame.tsx plays in the browser: it puts the frame document (the view
 // page with the bridge, views.frame_document) in a sandboxed iframe with the theme's tokens and the app's two faces, and
 // asks the server over stdin and stdout, one JSON line each way, for what the page needs:
@@ -16,14 +15,12 @@
 //                                             request to the --media URL (thimble.mediaUrl) names, served from here,
 //                                             a Range request with the bytes it asks for (at most MEDIA_CHUNK)
 // Every other request the page makes is refused, so a view that reaches for the network fails here as it would in the
-// browser. A state is shot when its page has been quiet (no fetch or marks request in flight) for QUIET_MS after
+// browser. A state is measured when its page has been quiet (no fetch or marks request in flight) for QUIET_MS after
 // `open`, or HARD_MS has passed. One line ends the run: {"done": true, "states": [{ok, errors, fetches, height, refs,
-// records, units, marked, hidden, controls, pills, fonts}]}: `refs` the distinct data-anchor refs the page reported, `records`
+// records, units, marked, hidden, shown, fonts}]}: `refs` the distinct data-anchor refs the page reported, `records`
 // those naming a record (`<path>#L<n>`), `units` those naming one of the view's units (`view:<slug>/<key>`), `marked`
-// the elements carrying a label's mark in the shot, `hidden` those the bridge hid or dimmed for the filter, `controls`
-// the page's own controls whose short text names a label that is on (labelControls), `pills` the chips and buttons it
-// drew as rounded pills of its own rather than with thimble's parts (ownPills), and `fonts` whether Hanken Grotesk was
-// loaded in the frame.
+// the elements carrying a label's mark, `hidden` those the bridge hid or dimmed for the filter, `shown` what is on
+// screen at the end (shownCounts), and `fonts` whether Hanken Grotesk was loaded in the frame.
 import { createRequire } from 'node:module'
 import { readFileSync } from 'node:fs'
 import { open } from 'node:fs/promises'
@@ -38,56 +35,50 @@ const HARD_MS = 25_000
 const READY_MS = 10_000
 const MEDIA_CHUNK = 4 * 1024 * 1024 // bytes of one Range answer
 const MEDIA_WHOLE_MAX = 32 * 1024 * 1024 // a request without Range (an <img>) gets a file up to this size whole
-// A control's text longer than this is a row or a card that shows a label's mark, not a control for the label.
-const CONTROL_TEXT_MAX = 60
-const CONTROLS = 'button, select, option, input, label, summary, [role=button], [role=checkbox], [role=switch], [role=menuitemcheckbox], [role=option], [role=tab]'
 
 // An error's message without the boxed notice Playwright adds to a failed launch, which names an install command: the
 // server hands these messages to models.
 const plain = (e) => String(e && e.message ? e.message : e).split('\n').filter((l) => !/^[╔║╚]/.test(l)).join('\n')
 
-// The page's own controls whose short text names one of `names`, such as a toggle, a checkbox or a menu item for a
-// label; a <label> counts only when it labels a form control. A control inside an element whose data-label names one of
-// `ids`, a label thimble sent, is thimble's: it calls thimble.setLabel or setLabelColour. Runs in the frame.
-function labelControls({ names, ids, sel, max }) {
-  const want = names.map((n) => String(n).toLowerCase()).filter(Boolean)
-  if (!want.length) return 0
-  const bound = (el) => {
-    const at = el.closest('[data-label]')
-    return !!at && String(at.getAttribute('data-label')).split(/\s+/).some((id) => id && ids.includes(id))
-  }
-  let n = 0
-  for (const el of document.querySelectorAll(sel)) {
-    if (el.tagName === 'LABEL' && !el.control) continue
-    if (bound(el)) continue
-    const own = [el.getAttribute('aria-label'), el.getAttribute('title'), el.tagName === 'INPUT' ? el.value : el.textContent]
-    const text = own.filter(Boolean).join(' ').replace(/\s+/g, ' ').trim().toLowerCase()
-    if (text && text.length <= max && want.some((w) => text.includes(w))) n++
-  }
-  return n
-}
-// thimble's parts that draw as boxes (backend/app/viewer_kit.css): the chips, buttons and controls in the app's style.
-const KIT = '.chip, .btn, .seg, .field'
-// A pill's text longer than this is a card or a row, not a chip or a button.
-const PILL_TEXT_MAX = 40
-
-// The elements with a short text drawn as a rounded pill, a filled or edged box whose corners are at least half its
-// height, outside thimble's parts: a chip or a button the page styled itself. Runs in the frame.
-function ownPills({ kit, max }) {
-  let n = 0
-  for (const el of document.body ? document.body.querySelectorAll('*') : []) {
-    if (el instanceof SVGElement || el.closest(kit)) continue
+// What the page shows at the end, counted once per ref on the outermost visible element that carries it (not a canvas,
+// which takes no mark, and not one the bridge hid or dimmed for the filter): `records` and `units` anchored, `due` the
+// refs whose `marks` entry has a bar, `drawn` those of them whose element carries the bridge's mark, and `unkept` the
+// records shown that the filter does not keep, other than those inside a unit it keeps. Runs in the frame.
+function shownCounts({ marks }) {
+  const RECORD = /^.+#L[1-9]\d*$/
+  const UNIT = /^view:[^/]+\/.+/
+  const seen = new Map()
+  for (const el of document.querySelectorAll('[data-anchor]')) {
+    const ref = el.getAttribute('data-anchor')
+    if (!ref || el.tagName === 'CANVAS' || el.closest('[data-thimble-drop]')) continue
+    if (!RECORD.test(ref) && !UNIT.test(ref)) continue
     const r = el.getBoundingClientRect()
-    if (r.height < 12 || r.height > 36 || r.width < r.height * 1.2) continue
-    const text = (el.textContent || '').trim()
-    if (!text || text.length > max) continue
+    if (r.width <= 0 || r.height <= 0) continue
     const cs = getComputedStyle(el)
-    if ((parseFloat(cs.borderTopLeftRadius) || 0) < r.height / 2 - 1) continue
-    const filled = !/^(transparent|rgba\(0, 0, 0, 0\))$/.test(cs.backgroundColor)
-    const edged = parseFloat(cs.borderTopWidth) > 0 && cs.borderTopStyle !== 'none'
-    if (filled || edged) n++
+    if (cs.visibility === 'hidden' || cs.display === 'none') continue
+    let top = el
+    let held = false
+    for (let a = el.parentElement; a; a = a.parentElement) {
+      const up = a.getAttribute('data-anchor')
+      if (up === ref) top = a
+      else if (up && UNIT.test(up) && marks[up] && marks[up].keep) held = true
+    }
+    const was = seen.get(ref)
+    seen.set(ref, { drawn: (was && was.drawn) || top.hasAttribute('data-thimble-label'), held: (!was || was.held) && held })
   }
-  return n
+  const out = { records: 0, units: 0, due: 0, drawn: 0, unkept: 0 }
+  for (const [ref, { drawn, held }] of seen) {
+    const record = RECORD.test(ref)
+    if (record) out.records++
+    else out.units++
+    const m = marks[ref]
+    if (m && typeof m.bar === 'string' && m.bar) {
+      out.due++
+      if (drawn) out.drawn++
+    }
+    if (record && !held && !(m && m.keep)) out.unkept++
+  }
+  return out
 }
 // The tokens a view's page reads: frontend/src/lib/frame.ts VIEW_TOKENS, which this list follows.
 const VIEW_TOKENS = [
@@ -265,12 +256,14 @@ async function shootState(browser, opt, doc, state, i) {
         window.__height = null
         window.__refs = new Set()
         let marks = {}
+        window.__marks = marks
         let state = { on: [], filter: null }
         const post = (msg) => f.contentWindow.postMessage(msg, '*')
         const labels = () => post({ type: 'thimble:labels', marks, on: state.on, filter: state.filter })
         const ask = async (refs) => {
           const got = await window.thimbleMarks(refs)
           marks = { ...marks, ...(got.marks || {}) }
+          window.__marks = marks
           state = { on: got.on || [], filter: got.filter || null }
           labels()
         }
@@ -318,9 +311,10 @@ async function shootState(browser, opt, doc, state, i) {
         return document.fonts.check('13px "Hanken Grotesk"')
       })
       .catch(() => false)
-    await el.screenshot({ path: state.out })
+    if (state.out) await el.screenshot({ path: state.out })
     const height = await page.evaluate(() => window.__height)
     const refs = await page.evaluate(() => [...window.__refs])
+    const marks = await page.evaluate(() => window.__marks || {})
     const count = (sel) => frame.evaluate((s) => document.querySelectorAll(s).length, sel).catch(() => 0)
     return {
       ok: ready && errors.length === 0,
@@ -332,8 +326,7 @@ async function shootState(browser, opt, doc, state, i) {
       units: refs.filter((r) => /^view:[^/]+\/.+/.test(r)).length,
       marked: await count('[data-thimble-label]'),
       hidden: await count('[data-thimble-drop]'),
-      controls: await frame.evaluate(labelControls, { names: state.labels || [], ids: state.ids || [], sel: CONTROLS, max: CONTROL_TEXT_MAX }).catch(() => 0),
-      pills: await frame.evaluate(ownPills, { kit: KIT, max: PILL_TEXT_MAX }).catch(() => 0),
+      shown: await frame.evaluate(shownCounts, { marks }).catch(() => null),
       fonts,
     }
   } finally {

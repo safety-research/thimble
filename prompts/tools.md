@@ -774,17 +774,25 @@ The dev agent built the view {view}, so {claims} now open in it. In it {forms}.
 
 no citation resolves, because its `accepts` and `units` are empty
 
-## view-label-controls
-
-The page has {count} controls of its own that name the test label, such as a toggle, a checkbox or a menu item. Remove them, or make each one thimble's: it calls `thimble.setLabel` or `thimble.setLabelColour` and carries `data-label` with the label's id.
-
 ## view-no-screenshots
 
 Screenshots are unavailable on this machine, so the checks did not load the page and took no pictures. Check the page by reading it and what the reader answers, and take no pictures any other way.
 
-## view-no-record-anchors
+## view-few-anchors
 
-The page fetched {fetched} records, but only {records} of its elements carry a record's `<path>#L<n>` as their `data-anchor`, so the labels the analyst turns on show on almost nothing in it. Give each element that shows a record its file ref.
+The reader handed the page {fetched} records, but only {records} shown elements carry a record's `<path>#L<n>` as their `data-anchor`, so the labels the analyst turns on show on almost nothing in it. Give each element that shows a record its file ref.
+
+## view-marks-missing
+
+In the {state} state, {missing} of the {due} shown records or units the test label marks do not show its mark. thimble draws a mark on the outermost visible element whose `data-anchor` names the record, but not on a canvas: draw records as HTML or SVG elements, or put the `data-anchor` on an element beside the canvas drawing.
+
+## view-filter-unkept
+
+Filtered to the test label, the page shows {records} records, and the filter keeps the line that anchors {unkept} of them. That is right for a record the page draws for several lines, one of which the label marks. Otherwise keep only the records for which `thimble.kept(ref)` holds in the reader's answers and fetch again in `thimble.onLabels`, or leave the filtering to thimble by registering no `onLabels`.
+
+## view-missing
+
+These claims match no file of the corpus, which the analyst sees above the view as missing: {claims}.
 
 ## view-not-shown
 
@@ -794,13 +802,9 @@ The page fetched {fetched} records, but only {records} of its elements carry a r
 
 {count} files sit in folders beside the ones the view claims and hold the same files, such as another run's: {files}. The analyst sees each one above the view as not shown. Claim them too and show them, with a way to choose among the folders if the page shows one at a time, or claim them and return them from hidden(index) with a `why`.
 
-## view-derived-undeclared
+## view-derived-unlisted
 
-reader.py derives fields that the view's list of derived fields leaves out: {fields}. The analyst sees the list above the view, and each field on it marked where the page names it. Add each field to `derived` in view.json as an object with `field`, `from` and `how`, or return it from the reader's derived(index), and give the element that names it on the page `data-field` with its name.
-
-## view-derived-unchecked
-
-The derived fields were not compared with reader.py: {why}.
+Fields of the records the reader answered hold values that the lines they cite do not, and `derived` does not list them: {fields}. The analyst counts on that list to tell what the files say from what the reader made of them. List each field the reader made in `derived` in view.json, with `from` and `how`, or from the reader's derived(index).
 
 ## check-unread
 

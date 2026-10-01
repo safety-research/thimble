@@ -279,33 +279,71 @@ def test_the_count_is_what_the_reader_takes_not_what_the_buffers_read(tmp_path):
     assert seen.counts() == {str(small): small.stat().st_size, str(big): big.stat().st_size}
 
 
-async def test_a_field_the_reader_derives_and_the_view_does_not_list_fails_the_gate(ws, inproc, bound, monkeypatch):
-    """Once the checks pass, one reading compares reader.py with the derived fields; a field it names that the list
-    leaves out fails the gate. The answer is kept for the same reader and list."""
-    from app import model, view_review  # noqa: PLC0415
+DERIVING_READER = THREADS_READER.replace(
+    '[{"ref": f"{p}#L{n}", "author": a, "body": b}',
+    '[{"ref": f"{p}#L{n}", "author": a.upper(), "body": b, "words": len(b.split()) * 1000}')
 
-    async def no_page(c, slug, states, **k):
-        return [{"ok": True, "errors": [], "fetches": 0, "records": 1} for _ in states]
 
-    readings = []
+async def test_a_field_whose_values_the_cited_lines_do_not_hold_is_noted_until_the_view_lists_it(
+        ws, inproc, bound, monkeypatch):
+    """The checks compare the records the reader hands the page with the lines they cite, by code: a field whose values
+    are not in those lines and that `derived` does not list is noted, with no model call, and a listed one is not."""
+    async def page(c, slug, states, **k):
+        answer = await views.reader_call(c, slug, "records", {"thread": "t1"})
+        return [{"ok": True, "errors": [], "fetches": 1, "answers": [answer], "shown": {"records": 3, "due": 0}}
+                for _ in states]
 
-    async def reading(c, system, user, tool, images, effort):
-        readings.append(user)
-        found = [] if "- author:" in user else [{"field": "author", "how": "the post's author, lower-cased"}]
-        return model.CallResult(status="ok", output={"undeclared": found})
-
-    monkeypatch.setattr(views, "shoot_states", no_page)
-    monkeypatch.setattr(view_review, "_call", reading)
-    monkeypatch.setenv("THIMBLE_VIEW_REVIEW", "on")
-    for _ in range(2):
-        rep = await views.gate(CORPUS, "threads", ["board.jsonl#L3"])
-        assert not rep["ok"] and any("author (the post's author, lower-cased)" in p for p in rep["problems"]), rep["problems"]
-    assert len(readings) == 1 and "def build_index" in readings[0]
-    views.write_view(CORPUS, "threads", reader=THREADS_READER, html=THREADS_HTML,
-                     **{**VIEW, "derived": [{"field": "author", "from": "author", "how": "lower-cased"}]})
+    monkeypatch.setattr(views, "shoot_states", page)
+    views.write_view(CORPUS, "threads", reader=DERIVING_READER, html=THREADS_HTML, **VIEW)
     rep = await views.gate(CORPUS, "threads", ["board.jsonl#L3"])
     assert rep["ok"], views.gate_lines(rep)
-    assert len(readings) == 2
+    noted = [n for n in rep["notes"] if "derived" in n]
+    assert len(noted) == 1 and "author ('ADA' on board.jsonl#L1)" in noted[0] and "words (" in noted[0], noted
+    assert "body" not in noted[0], "a field the line holds is no derived field"
+    views.write_view(CORPUS, "threads", reader=DERIVING_READER, html=THREADS_HTML,
+                     **{**VIEW, "derived": [{"field": "author", "from": "author", "how": "upper-cased"},
+                                            {"field": "words", "from": "body", "how": "its words, in thousands"}]})
+    rep = await views.gate(CORPUS, "threads", ["board.jsonl#L3"])
+    assert rep["ok"] and not [n for n in rep["notes"] if "derived" in n], views.gate_lines(rep)
+
+
+def _shot(state: str, **shown) -> dict:
+    return {"ok": True, "state": state, "fetched_records": shown.pop("fetched", 0), "shown": shown}
+
+
+def test_the_checks_fail_a_page_whose_records_do_not_show_the_test_label():
+    """What the test label's states show decides by code: no anchored record, too few of those fetched, or a marked record
+    drawn without its mark fail; records shown under the filter whose anchor it does not keep are a note."""
+    view = {"slug": "threads"}
+    files = [("board.jsonl", 100, 0)]
+
+    def run(*shots):
+        return views.label_problems(view, files, list(shots))
+
+    good = (_shot("overview", records=40, units=0, due=6, drawn=6, fetched=40),
+            _shot("filtered", records=6, units=0, due=6, drawn=6, unkept=0),
+            _shot("detail", records=5, units=1, due=1, drawn=1))
+    assert run(*good) == ([], [])
+    assert "no element" in run(_shot("overview", records=0, units=0, fetched=40))[0][0]
+    assert "only 2 shown elements" in run(_shot("overview", records=2, units=0, due=0, fetched=400))[0][0]
+    assert run(_shot("overview", records=2, units=3, fetched=400)) == ([], []), "a view may anchor units instead"
+    assert "3 of the 6" in run(_shot("overview", records=40, due=6, drawn=3, fetched=40))[0][0]
+    problems, notes = run(good[0], _shot("filtered", records=10, unkept=8), good[2])
+    assert not problems and "anchors 8 of them" in notes[0] and "shows 10 records" in notes[0]
+    assert run(*good[:1]) == ([], []) and views.label_problems(view, [("doc.pdf", 9, 0)], [_shot("overview")]) == ([], [])
+
+
+async def test_a_claim_that_matches_no_file_is_listed_as_missing(ws, inproc, bound, monkeypatch):
+    """A claim that matches no file shows above the view as missing, and the checks say so without failing."""
+    async def no_page(c, slug, states, **k):
+        return [{"ok": True, "errors": [], "fetches": 0} for _ in states]
+
+    monkeypatch.setattr(views, "shoot_states", no_page)
+    views.write_view(CORPUS, "two", name="Two", description="Posts and a log.", claims=["board.jsonl", "logs/*.log"],
+                     accepts=VIEW["accepts"], reader=THREADS_READER, html=THREADS_HTML)
+    assert (await views.shown(CORPUS, "two"))["missing"] == ["logs/*.log"]
+    rep = await views.check(CORPUS, "two", ["board.jsonl#L3"])
+    assert rep["ok"] and any("logs/*.log" in n for n in rep["notes"]), views.gate_lines(rep)
 
 
 async def test_a_workspace_gets_four_views_from_the_orientation_and_a_deleted_one_stays_deleted(ws, monkeypatch):
@@ -482,10 +520,14 @@ async def test_every_worked_example_s_page_loads_headless_at_its_first_place(nam
             pytest.fail(why)  # CI installs them, so there the page is always loaded
         pytest.skip(why)
     slug = _save_example(name)
-    rep = await views.check(name, slug, EXAMPLES[name][1], shot_dir=tmp_path)
+    rep = await views.check(name, slug, EXAMPLES[name][1], shot_dir=tmp_path, picture=True)
     assert rep["ok"], views.gate_lines(rep)
     assert rep["page"]["fetches"] >= 1 and Path(rep["page"]["png"]).is_file()
-    assert not views.unmarked(rep["page"]), "the records a worked example shows carry their file refs, for the labels"
+    assert [s["state"] for s in rep["shots"]] == list(views.CHECK_STATES)
+    assert [s for s in rep["shots"] if s.get("png")] == rep["shots"][:1], "only the picture asked for is taken"
+    if name != "pdf":
+        shown = rep["shots"][0]["shown"]
+        assert shown["due"] and shown["drawn"] == shown["due"], "the test label shows on the records a worked example shows"
 
 
 # what Playwright's own error says to run, which never reaches a model

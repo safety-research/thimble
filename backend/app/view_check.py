@@ -8,9 +8,9 @@ URL or write files; this script only posts to a view's check route on 127.0.0.1 
 holds the token in the server.json of thimble's home `--home` (app/call_ref.py's server) as the plugin's hooks do, since
 the server refuses a write that proves neither the token nor the analyst's cookie (hook_auth.LocalWriteGuard).
 
-Usage: `python -S view_check.py --home <thimble home> <check URL> [<locator>...]`. Standard library only. Exit 0 with
-the answer on stdout, 1 when the route errored or did not answer, 2 for a URL that is not a view's check route on
-127.0.0.1."""
+Usage: `python -S view_check.py --home <thimble home> <check URL> [--picture] [<locator>...]`, `--picture` asking for a
+picture of the page as it opens. Standard library only. Exit 0 with the answer on stdout, 1 when the route errored or
+did not answer, 2 for a URL that is not a view's check route on 127.0.0.1."""
 from __future__ import annotations
 
 import importlib.util
@@ -51,9 +51,11 @@ def main(argv: list[str]) -> int:
         home, argv = argv[1], argv[2:]
     if not argv or not URL_RE.match(argv[0]):
         sys.stderr.write("usage: view_check.py --home <thimble home> <a view's check URL on 127.0.0.1>"
-                         " [<locator>...]\n")
+                         " [--picture] [<locator>...]\n")
         return 2
-    body = json.dumps({"locators": argv[1:]}).encode("utf-8")
+    rest = argv[1:]
+    picture = "--picture" in rest
+    body = json.dumps({"locators": [a for a in rest if a != "--picture"], "picture": picture}).encode("utf-8")
     req = urllib.request.Request(argv[0], data=body, method="POST",
                                  headers={"Content-Type": "application/json", **proof(home)})
     opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))  # the server is local: never a proxy

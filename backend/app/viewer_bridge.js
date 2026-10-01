@@ -46,9 +46,8 @@
 //                          version of the view is loaded in its place: {ref, scroll, fields, segs} (pageState)
 //   restore {state}        page to frame: that state put back in the newer version's page, as far as it fits (restore)
 // The text of an element marked data-thimble-chrome inside an anchored element is the page's own wording, such as a
-// record's header, which a label's matches never highlight. An element with data-field="<name>" names a field; when the
-// view lists that field as derived (window.__thimbleView.derived) it gets data-derived, which thimble's parts draw as a
-// small mark, and a title saying how it was made.
+// record's header, which a label's matches never highlight. window.thimble.derived lists the fields the view's reader
+// made rather than read (window.__thimbleView.derived), which thimble lists above the view; nothing in the page is marked.
 // plus ready (the frame can take `open`), error (an uncaught error or a blocked request, shown with a Raw button) and
 // point {rect} (the element under the pointer while ⌘ is held, so the page's one highlight follows the pointer into the
 // frame).
@@ -100,21 +99,6 @@
     return String(v).replace(/[&<>"']/g, function (ch) {
       return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]
     })
-  }
-  // data-derived and a title on an element that names a derived field, taken off one that no longer does
-  function markField(el) {
-    var name = el.getAttribute('data-field')
-    var d = Object.prototype.hasOwnProperty.call(derivedBy, name) ? derivedBy[name] : null
-    if (d) {
-      if (!el.hasAttribute('data-derived')) el.setAttribute('data-derived', '')
-      if (!el.hasAttribute('title')) el.setAttribute('title', 'Derived: ' + [d.how, d.from ? 'from ' + d.from : ''].filter(Boolean).join(', '))
-    } else if (el.hasAttribute('data-derived')) el.removeAttribute('data-derived')
-  }
-  function markFields(node) {
-    if (!derivedList.length || !node || node.nodeType !== 1) return
-    if (node.hasAttribute('data-field')) markField(node)
-    var all = node.querySelectorAll('[data-field]')
-    for (var i = 0; i < all.length; i++) markField(all[i])
   }
   window.thimble = {
     /** the view this page belongs to: {slug, name}, for the view:<slug>/<key> refs it writes */
@@ -223,8 +207,7 @@
     isDerived: function (name) {
       return Object.prototype.hasOwnProperty.call(derivedBy, String(name))
     },
-    /** HTML for a field's name, `text` (the name by default) in an element with data-field, which thimble marks when the
-     *  field is derived */
+    /** HTML for a field's name, `text` (the name by default) in an element with data-field */
     field: function (name, text) {
       return '<span data-field="' + escapeHtml(name) + '">' + escapeHtml(text == null ? name : text) + '</span>'
     },
@@ -773,10 +756,6 @@
       var r = records[i]
       if (sheet && (r.target === sheet || (r.addedNodes.length === 1 && r.addedNodes[0] === sheet))) continue
       if (r.type === 'attributes') {
-        if (r.attributeName === 'data-field') {
-          markFields(r.target)
-          continue
-        }
         if (r.attributeName === 'class') {
           if (r.target.hasAttribute('data-thimble-label')) changed = true
           continue
@@ -787,14 +766,13 @@
         continue
       }
       for (var j = 0; j < r.addedNodes.length; j++) {
-        markFields(r.addedNodes[j])
         if (collect(r.addedNodes[j])) changed = true
       }
       if (!changed && r.target.closest && r.target.closest('[data-thimble-label]')) changed = true
     }
     if (unsent.length && sendTimer == null) sendTimer = setTimeout(sendAnchors, 30)
     if (changed && (hasMarks() || dropping()) && paintTimer == null) paintTimer = setTimeout(paint, 30)
-  }).observe(document.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: ['data-anchor', 'class', 'data-field'] })
+  }).observe(document.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: ['data-anchor', 'class'] })
 
   // What the analyst is looking at, for a newer version of the view loaded in this page's place: `ref` the element they
   // last clicked since the last `open`, `scroll` the scroll positions of the page and of each box scrolled, `fields`
@@ -918,7 +896,6 @@
     size()
     if (window.ResizeObserver && document.body) new ResizeObserver(size).observe(document.body)
     post({ type: P + 'ready' })
-    markFields(document.documentElement)
     collect(document.documentElement)
     sendAnchors()
   }

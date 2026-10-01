@@ -1,12 +1,17 @@
 """Views: viewers written for how a corpus arranges its records, and the proposals they start as.
 
 A view is three files in `workspaces/<c>/views/<slug>/`, written by the dev agent's session (dev.run_view):
-view.json {name, description, claims, accepts, units, derived, libs, built}, reader.py (the contract in view_host.py),
-and view.html, drawn in a sandboxed frame that loads nothing but the view's media route. `claims` are globs of the files
-the view opens, `accepts` the fragment forms it understands (`L<n>`), `units` its own `view:<slug>/<key>` units,
-`derived` the fields its reader made rather than read ({field, from, how}); `why` and `declares` are read for
-`description` and `units`. Every claimed file is read to the end by build_index or listed by the reader's hidden(), or
-the browser lists it above the view as not shown (shown); the checks fail on a file that is neither.
+view.json {name, description, claims, unit, accepts, units, derived, libs, built}, reader.py (the contract in
+view_host.py), and view.html, drawn in a sandboxed frame that loads nothing but the view's media route. `claims` are globs
+of the files the view opens, `unit` "file" for a viewer of one file at a time (a mode of the File browser), `accepts`
+the fragment forms it understands (`L<n>`), `units` its own `view:<slug>/<key>` units, `derived` the fields its reader
+made rather than read ({field, from, how}); `why` and `declares` are read for `description` and `units`.
+
+Code holds every view to three things the analyst can always see above it. Its residue (shown): each claimed file is
+read to the end by build_index or listed by the reader's hidden() with a why, a claim that matches no file is missing,
+and the lines the reader could not parse are its problems(); the checks fail on a file neither read nor hidden. Its
+derived fields, counted above the view. Its labels: the checks load the page with a test label and fail when the marks
+do not show on the records it shows (label_problems).
 thimble also ships file-type viewers under the same contract (BUILTIN_VIEWERS). Readers run on the workspace's
 `views`
 kernel with a cached index; refs.resolve hands file refs with a fragment to enrich_file_ref, and resolve_sync bridges
@@ -34,6 +39,7 @@ import os
 import re
 import shutil
 import subprocess
+import tempfile
 import threading
 import time
 from collections import OrderedDict
@@ -270,6 +276,14 @@ def _derived(v: Any) -> list[dict[str, str]]:
     return out[:DERIVED_MAX]
 
 
+def _unit(v: Any) -> Any:
+    """view.json's `unit`: "file" for a viewer of one file at a time, else what the view picks among (a name or an
+    object), '' when it names none."""
+    if isinstance(v, str):
+        return " ".join(v.split()).lower() if v.strip().lower() == "file" else " ".join(v.split())
+    return v if isinstance(v, dict) and v else ""
+
+
 def _libs(v: Any) -> list[str]:
     """The named libraries with what each needs ahead of it, in LIBS order."""
     wanted = set(_str_list(v)) & set(LIBS)
@@ -287,6 +301,7 @@ def _normalize_view(slug: str, raw: Any, *, where: Path | None = None, origin: s
         "name": " ".join(str(raw.get("name") or slug).split()),
         "description": " ".join(str(raw.get("description") or raw.get("why") or "").split()),
         "claims": _str_list(raw.get("claims")),
+        "unit": _unit(raw.get("unit")),
         "accepts": _forms(raw.get("accepts")),
         "units": _forms(raw.get("units") if raw.get("units") is not None else raw.get("declares")),
         "derived": _derived(raw.get("derived")),
@@ -1061,12 +1076,12 @@ def sibling_files(claimed: list[str], every: list[str]) -> list[str]:
 
 
 async def shown(c: str, slug: str, version: str | None = None) -> dict[str, Any]:
-    """What thimble draws above the view: {files, not_shown: {count, unexplained, unclaimed, files}, derived, errors}.
-    `files` is the count of claimed files and not_shown the ones the view does not show whole (not_shown), then the
-    files of folders like the claimed ones that the claims leave out (sibling_files, `claimed` false, counted in
-    `unclaimed`), the first FILES_LISTED of them, `unexplained` counting those hidden() gives no why for; derived is
-    view.json's list, then the fields the reader's derived(index) adds; errors say what failed of hidden() and
-    derived()."""
+    """What thimble draws above the view: {files, not_shown: {count, unexplained, unclaimed, files}, missing, derived,
+    errors}. `files` is the count of claimed files and not_shown the ones the view does not show whole (not_shown),
+    then the files of folders like the claimed ones that the claims leave out (sibling_files, `claimed` false, counted
+    in `unclaimed`), the first FILES_LISTED of them, `unexplained` counting those hidden() gives no why for; missing is
+    the claims that match no file; derived is view.json's list, then the fields the reader's derived(index) adds;
+    errors say what failed of hidden() and derived()."""
     view, req, files = await asyncio.to_thread(_prepared, c, slug, version)
     every = await asyncio.to_thread(folder_files, config.corpus_dir(c), "")
     ans = await _call(c, req, "shown")
@@ -1087,6 +1102,7 @@ async def shown(c: str, slug: str, version: str | None = None) -> dict[str, Any]
     return {"files": len(files),
             "not_shown": {"count": len(rows), "unexplained": sum(1 for r in rows if not r["why"]),
                           "unclaimed": sum(1 for r in rows if r.get("claimed") is False), "files": rows[:FILES_LISTED]},
+            "missing": [g for g in view["claims"] if not any(glob_matches(f[0], g) for f in files)],
             "derived": _derived([*view["derived"], *(parts["derived"] if isinstance(parts["derived"], list) else [])]),
             "errors": errors}
 
@@ -2057,14 +2073,12 @@ def delete_proposal(c: str, slug: str) -> None:
 # ----------------------------------------------------------------------------------------------------------
 
 
-async def gate(c: str, slug: str, locators: list[str] | None = None, *, shot_dir: Path | None = None) -> dict[str, Any]:
+async def gate(c: str, slug: str, locators: list[str] | None = None, *, shot_dir: Path | None = None,
+               picture: bool = False) -> dict[str, Any]:
     """Whether the view in the slug's folder may be registered: its files' own problems (source_problems; view.json
     written by thimble alone once it names `built`), then, when there are none, check() with `locators` beside the
-    sampled lines, and once that passes, the review of its derived fields (view_review.derived_review), where a field
-    its reader derives and does not list fails it. The report check() returns, with the files' problems among its
-    `problems`, and a reading of the derived fields that failed among its `notes`."""
-    from . import view_review  # noqa: PLC0415 — the review imports this module
-
+    sampled lines. The report check() returns, with the files' problems among its `problems`. With `picture` the page
+    as it opens is pictured for the session."""
     d = views_dir(c) / slug
     if not (d / VIEW_JSON).is_file():
         return {"ok": False, "view": None, "problems": [f"{d / VIEW_JSON} does not exist yet"], "checks": [], "page": None}
@@ -2078,16 +2092,9 @@ async def gate(c: str, slug: str, locators: list[str] | None = None, *, shot_dir
         problems.append("view.json names `built`, which thimble adds when the view passes; remove it")
     if problems:
         return {"ok": False, "view": read_view(c, slug), "problems": problems, "checks": [], "page": None}
-    report = await check(c, slug, locators, shot_dir=shot_dir)
-    _prune_shots(shot_dir or (d / CACHE_SUBDIR / "shots"))
-    if report.get("ok") and report.get("coverage") and view_review.enabled():
-        found = await view_review.derived_review(c, slug, report["coverage"]["derived"])
-        if isinstance(found, str):
-            report["notes"] = [*report.get("notes", []), _hint("view-derived-unchecked", why=found)]
-        elif found:
-            report["problems"].append(_hint("view-derived-undeclared", fields="; ".join(
-                f"{x['field']} ({x['how']})" if x["how"] else x["field"] for x in found)))
-            report["ok"] = False
+    report = await check(c, slug, locators, shot_dir=shot_dir, picture=picture)
+    if picture:
+        _prune_shots(shot_dir or (d / CACHE_SUBDIR / "shots"))
     return report
 
 
@@ -2118,8 +2125,9 @@ def gate_lines(report: dict[str, Any]) -> list[str]:
         beside = ns.get("unclaimed", 0)
         lines.append(f"files: {cov['files'] - (ns['count'] - beside)} of {cov['files']} read to the end, "
                      + (f"{beside} unclaimed beside them, " if beside else "")
-                     + f"{ns['count'] - ns['unexplained']} hidden with a why; derived fields: "
-                     + (", ".join(d["field"] for d in cov["derived"]) or "none"))
+                     + f"{ns['count'] - ns['unexplained']} hidden with a why"
+                     + (f", claims matching no file: {', '.join(cov['missing'])}" if cov.get("missing") else "")
+                     + "; derived fields: " + (", ".join(d["field"] for d in cov["derived"]) or "none"))
     for p in report.get("problems") or []:
         lines.append(f"problem: {p}")
     if report.get("traceback"):
@@ -2136,8 +2144,12 @@ def gate_lines(report: dict[str, Any]) -> list[str]:
         lines.append("note: " + _hint("view-no-screenshots"))
     for s in shots:
         if s.get("ok"):
-            lines.append(f"page: {s.get('state')}, {int(s.get('records') or 0)} records and {int(s.get('units') or 0)} units "
-                         f"anchored, {int(s.get('marked') or 0)} marked by the test label")
+            x = s.get("shown") or {}
+            lines.append(f"page: {s.get('state')}, {int(x.get('records') or 0)} records and {int(x.get('units') or 0)} "
+                         f"units shown, {int(x.get('drawn') or 0)} of the {int(x.get('due') or 0)} the test label marks "
+                         "drawn marked"
+                         + (f", {int(x.get('unkept') or 0)} records shown that the filter drops"
+                            if s.get("state") == "filtered" else ""))
         else:
             lines.append(f"page: {s.get('state')}: " + "; ".join(s.get("errors") or ["did not load"]))
         if s.get("png"):
@@ -2147,20 +2159,8 @@ def gate_lines(report: dict[str, Any]) -> list[str]:
             lines.append(f"page: loaded, {page.get('fetches', 0)} fetch(es), no errors")
         else:
             lines.append("page: " + "; ".join(page.get("errors") or ["did not load"]))
-    if page.get("ok") and unmarked(page):
-        lines.append("note: " + _hint("view-no-record-anchors", fetched=page.get("fetched_records") or 0,
-                                      records=page.get("records") or 0))
-    if controls := max([int(s.get("controls") or 0) for s in shots] or [0]):
-        lines.append("note: " + _hint("view-label-controls", count=controls))
     lines += [f"note: {n}" for n in report.get("notes") or []]
     return [ln for ln in lines if ln]
-
-
-def unmarked(page: dict[str, Any]) -> bool:
-    """Whether a page anchors few of the records it fetched: fewer than one in ANCHORED_SHARE of the record refs in its
-    reader's answers carry a data-anchor, so labels would show on almost nothing. The gate notes it and still passes."""
-    fetched = int(page.get("fetched_records") or 0)
-    return fetched > 0 and int(page.get("records") or 0) < max(1, fetched // ANCHORED_SHARE)
 
 
 def first_failure(report: dict[str, Any]) -> str:
@@ -2297,9 +2297,9 @@ async def shoot_states(c: str, slug: str, states: list[dict[str, Any]], *, width
     """Load the view's page headless once per state (shoot_page), each state {out, open, labels}: send it `open`,
     answer its fetches from the reader and its marks requests under the state's labels context (NO_LABELS, a
     probe_context or labels_context), serve its media requests with the file media_file names, and write a picture of it
-    to `out`. Returns one result per state, {ok, errors, fetches, height, refs, records, units, marked, hidden, controls,
-    fonts, fetched_records, png?}, and with `answers` the first that many reader answers each state's page got; without
-    Node or the frontend's packages each has build_problem's line as its one error."""
+    to `out`, when it names one. Returns one result per state, {ok, errors, fetches, height, refs, records, units,
+    marked, hidden, shown, fonts, fetched_records, png?}, and with `answers` the first that many reader answers each
+    state's page got; without Node or the frontend's packages each has build_problem's line as its one error."""
     view = read_view(c, slug)
     if view is None:
         return [{"ok": False, "errors": [f"no view {slug!r}"], "fetches": 0} for _ in states]
@@ -2334,10 +2334,7 @@ async def shoot_states(c: str, slug: str, states: list[dict[str, Any]], *, width
         except (HTTPException, OSError) as e:
             return {"error": str(getattr(e, "detail", e))}
 
-    shot_states = [{"out": s["out"], "open": s.get("open") or {},
-                    "labels": [str(lab.get("name") or "") for lab in labels_state(ctx)["labels"]],
-                    "ids": [str(lab.get("id") or "") for lab in labels_state(ctx)["labels"] if lab.get("id")]}
-                   for s, ctx in zip(states, ctxs)]
+    shot_states = [{"out": s.get("out"), "open": s.get("open") or {}} for s in states]
     doc = frame_document(view, media, derived=await derived_fields(c, slug, view))
     out = await shoot_page(doc, shot_states, answer, width=width, height=height, media=media)
     for i, r in enumerate(out):
@@ -2350,7 +2347,7 @@ async def shoot_states(c: str, slug: str, states: list[dict[str, Any]], *, width
 async def shoot_page(doc: str, states: list[dict[str, Any]], answer: Any, *, width: int, height: int,
                      media: str | None = None) -> list[dict[str, Any]]:
     """Load a frame document headless once per state (scripts/view_shot.mjs, in the frontend's Playwright Chromium),
-    each state {out, open, labels?, ids?}, send it `open` once it says ready, and write a picture of it to `out`. Every
+    each state {out, open}, send it `open` once it says ready, and write a picture of it to `out` when it names one. Every
     request the page makes, `fetch`, `marks` or `media`, is answered by `await answer(kind, state index, message)`, a
     dict of the answer's fields. Returns one result per state, {ok, errors, fetches, fonts, png?, ...} as view_shot.mjs
     reports it; without Node or the frontend's packages each has build_problem's line as its one error, and without the
@@ -2368,14 +2365,27 @@ async def shoot_page(doc: str, states: list[dict[str, Any]], answer: Any, *, wid
         return unavailable()
     if not states:
         return []
-    first = Path(states[0]["out"])
-    first.parent.mkdir(parents=True, exist_ok=True)
-    frame_file = first.with_suffix(".html")
+    with tempfile.TemporaryDirectory(prefix="thimble-view-") as work:
+        return await _shoot_in(Path(work), doc, states, answer, path, width=width, height=height, media=media)
+
+
+async def _shoot_in(work: Path, doc: str, states: list[dict[str, Any]], answer: Any, path: str | None, *, width: int,
+                    height: int, media: str | None) -> list[dict[str, Any]]:
+    """shoot_page's run, with the frame document and the states written to `work`."""
+    def failed(why: str) -> list[dict[str, Any]]:
+        return [{"ok": False, "errors": [why], "fetches": 0} for _ in states]
+
+    def unavailable() -> list[dict[str, Any]]:
+        return [{"ok": False, "unavailable": True, "errors": [headless.NO_SCREENSHOTS], "fetches": 0} for _ in states]
+
+    frame_file = work / "frame.html"
     atomic_write_text(frame_file, doc)
-    states_file = first.with_suffix(".states.json")
+    states_file = work / "states.json"
     for s in states:
-        Path(s["out"]).parent.mkdir(parents=True, exist_ok=True)
-    atomic_write_text(states_file, json.dumps([{**s, "out": str(s["out"])} for s in states], default=str))
+        if s.get("out"):
+            Path(s["out"]).parent.mkdir(parents=True, exist_ok=True)
+    atomic_write_text(states_file, json.dumps([{**s, "out": str(s["out"]) if s.get("out") else None} for s in states],
+                                              default=str))
     cmd = ["node", str(SHOT_SCRIPT), "--frame", str(frame_file), "--states", str(states_file), "--viewport",
            f"{width}x{height}", *(["--media", media] if media else [])]
     try:
@@ -2450,7 +2460,7 @@ async def shoot_page(doc: str, states: list[dict[str, Any]], answer: Any, *, wid
         r = dict(results[i]) if i < len(results) and isinstance(results[i], dict) else {"ok": False, "errors": ["the state was not shot"]}
         r.setdefault("errors", [])
         r.setdefault("fetches", 0)
-        if Path(s["out"]).is_file():
+        if s.get("out") and Path(s["out"]).is_file():
             r["png"] = str(s["out"])
         out.append(r)
     return out
@@ -2571,15 +2581,19 @@ def _is_line_form(form: str) -> bool:
     return bool(re.fullmatch(r"L<[^<>]+>", form.strip()))
 
 
-async def check(c: str, slug: str, locators: list[str] | None = None, *, shot_dir: Path | None = None) -> dict[str, Any]:
-    """A view's checks: the index builds, locators and sampled lines round-trip (the answer cites the line back and its
-    excerpt is literal source), declared keys resolve, and the page loads headless without errors. Without the headless
-    browser the page is not loaded (its `page` is `unavailable`) and the other checks decide. Returns {ok, view, index,
-    checks, page}."""
+async def check(c: str, slug: str, locators: list[str] | None = None, *, shot_dir: Path | None = None,
+                picture: bool = False) -> dict[str, Any]:
+    """A view's checks, all by code: the index builds, every claimed file is read or hidden with a why, locators and
+    sampled lines round-trip (the answer cites the line back and its excerpt is literal source), declared keys resolve,
+    the page loads headless without errors, and the test label's marks show on the records it shows (label_problems).
+    Fields of the fetched records that the lines they cite do not hold and `derived` does not list are noted
+    (unlisted_derived). Without the headless browser the page is not loaded (its `page` is `unavailable`) and the other
+    checks decide. With `picture` the page as it opens is pictured. Returns {ok, view, index, checks, page, shots,
+    coverage, unread, problems, notes}."""
     view = read_view(c, slug)
     if view is None:
         return {"ok": False, "view": None, "problems": [f"no view {slug!r}"], "checks": [], "page": None}
-    report: dict[str, Any] = {"ok": False, "view": view, "problems": [], "checks": [], "page": None}
+    report: dict[str, Any] = {"ok": False, "view": view, "problems": [], "notes": [], "checks": [], "page": None}
     if not view["ok"]:
         report["problems"].append("the view has no reader.py, no view.html or no claims")
         return report
@@ -2615,6 +2629,8 @@ async def check(c: str, slug: str, locators: list[str] | None = None, *, shot_di
             if beside:
                 report["problems"].append(_hint("view-not-claimed", count=len(beside), files="; ".join(
                     beside[:NOT_SHOWN_NAMED]) + (" and more" if len(beside) > NOT_SHOWN_NAMED else "")))
+        if cov["missing"]:
+            report["notes"].append(_hint("view-missing", claims=", ".join(cov["missing"])))
 
     wanted: list[str] = list(dict.fromkeys(str(x).strip() for x in (locators or []) if str(x).strip()))
     # sampled lines beside the locators, so a view is never checked only on the refs its author chose; a binary file
@@ -2681,22 +2697,28 @@ async def check(c: str, slug: str, locators: list[str] | None = None, *, shot_di
         report["problems"].append("no locator was checked: pass `locators` with refs the view should open")
 
     base = shot_dir or (cache_dir(c, view) / "shots")
-    shots = await shoot_checks(c, slug, view, files, report["checks"], base, f"check-{int(time.time())}")
+    shots = await shoot_checks(c, slug, view, files, report["checks"], base, f"check-{int(time.time())}", picture=picture)
     if shots and all(s.get("unavailable") for s in shots):
         report["shots"], report["page"] = [], {"ok": False, "unavailable": True, "errors": [], "fetches": 0}
     else:
         report["shots"], report["page"] = shots, _page_of(shots)
-    if anchorless(view, files, shots):
-        report["problems"].append(_hint("view-no-anchors", slug=slug))
+    problems, notes = label_problems(view, files, shots)
+    report["problems"] += problems
+    report["notes"] += notes
+    declared = {d["field"] for d in (report.get("coverage") or {}).get("derived") or view["derived"]}
+    if unlisted := await asyncio.to_thread(unlisted_derived, c, shots, declared):
+        report["notes"].append(_hint("view-derived-unlisted", fields="; ".join(
+            f"{x['field']} ({x['value']!r} on {x['ref']})" for x in unlisted)))
     page = report["page"]
     report["ok"] = (not report["problems"] and all(r["ok"] for r in report["checks"])
                     and bool(page.get("ok") or page.get("unavailable")))
     return report
 
 
-# the states the checks shoot, both with the test label on: the page as the Views bar opens it, and at the first place
-# that resolved
-CHECK_STATES = ("overview", "detail")
+# the states the checks load the page in, with the test label on: the page as the Views bar opens it, the same filtered
+# to the test label, and the first place that resolved
+CHECK_STATES = ("overview", "filtered", "detail")
+ANSWERS_KEPT = 2  # reader answers per state the checks keep, for unlisted_derived and the review
 
 
 async def first_place(c: str, slug: str, checks: list[dict[str, Any]]) -> dict[str, Any] | None:
@@ -2711,14 +2733,16 @@ async def first_place(c: str, slug: str, checks: list[dict[str, Any]]) -> dict[s
 
 
 async def shoot_checks(c: str, slug: str, view: dict[str, Any], files: list[tuple[str, int, int]],
-                       checks: list[dict[str, Any]], base: Path, stem: str) -> list[dict[str, Any]]:
-    """The checks' two pictures, each with the test label on: the overview, the page opened on its first claimed file
-    as the Views bar opens it, and the detail, the first place that resolved. Each result carries its `state` name."""
+                       checks: list[dict[str, Any]], base: Path, stem: str, *, picture: bool = False) -> list[dict[str, Any]]:
+    """The page loaded in CHECK_STATES with the test label on: the overview, opened on its first claimed file as the
+    Views bar opens it, the same filtered to the test label, and the detail, the first place that resolved. Only with
+    `picture` is anything pictured: the overview. Each result carries its `state` name."""
     overview = {"ref": None, "path": files[0][0]} if files else {"ref": None}
     detail = await first_place(c, slug, checks) or overview
-    states = [{"out": base / f"{stem}-overview.png", "open": overview, "labels": probe_context()},
-              {"out": base / f"{stem}-detail.png", "open": detail, "labels": probe_context()}]
-    shots = await shoot_states(c, slug, states)
+    states = [{"out": base / f"{stem}-overview.png" if picture else None, "open": overview, "labels": probe_context()},
+              {"out": None, "open": overview, "labels": probe_context(True)},
+              {"out": None, "open": detail, "labels": probe_context()}]
+    shots = await shoot_states(c, slug, states, answers=ANSWERS_KEPT)
     return [{**s, "state": name} for s, name in zip(shots, CHECK_STATES)]
 
 
@@ -2743,12 +2767,125 @@ def lined(view: dict[str, Any], files: list[tuple[str, int, int]]) -> bool:
     return any(Path(f[0]).suffix.lower() not in BINARY_SUFFIXES for f in files)
 
 
-def anchorless(view: dict[str, Any], files: list[tuple[str, int, int]], shots: list[dict[str, Any]]) -> bool:
-    """Whether no label could show in the page: it claims files with lines, its shots loaded, and neither anchored a
-    record or a unit."""
-    loaded = [s for s in shots if s.get("ok")]
-    return bool(loaded) and lined(view, files) and not any(int(s.get("records") or 0) + int(s.get("units") or 0)
-                                                            for s in loaded)
+def label_problems(view: dict[str, Any], files: list[tuple[str, int, int]],
+                   shots: list[dict[str, Any]]) -> tuple[list[str], list[str]]:
+    """(problems, notes) of labels in the page, from what each loaded state shows at its end (view_shot.mjs `shown`),
+    for a view of files with lines. It fails when no record or unit is shown anchored; when fewer than one in
+    ANCHORED_SHARE of the records the reader answered are shown anchored and no unit is; and when a record or unit the
+    test label marks is shown without its mark. Records shown, filtered to the test label, whose anchor the filter does
+    not keep are noted, since a record the page draws for several lines is anchored by one of them."""
+    if not lined(view, files):
+        return [], []
+    loaded = {str(s.get("state")): s.get("shown") for s in shots if s.get("ok") and isinstance(s.get("shown"), dict)}
+    seen = [(name, x) for name, x in loaded.items() if name != "filtered"]
+    if not seen:
+        return [], []
+    problems: list[str] = []
+    notes: list[str] = []
+    records = max(int(x.get("records") or 0) for _, x in seen)
+    units = max(int(x.get("units") or 0) for _, x in seen)
+    if not records and not units:
+        return [_hint("view-no-anchors", slug=view["slug"])], []
+    fetched = max(int(s.get("fetched_records") or 0) for s in shots if s.get("state") != "filtered")
+    if not units and records < max(1, fetched // ANCHORED_SHARE):
+        problems.append(_hint("view-few-anchors", fetched=fetched, records=records))
+    for name, x in seen:
+        due, drawn = int(x.get("due") or 0), int(x.get("drawn") or 0)
+        if drawn < due:
+            problems.append(_hint("view-marks-missing", state=name, due=due, missing=due - drawn))
+            break
+    if (f := loaded.get("filtered")) is not None and (unkept := int(f.get("unkept") or 0)):
+        notes.append(_hint("view-filter-unkept", unkept=unkept, records=int(f.get("records") or 0)))
+    return problems, notes
+
+
+DERIVED_SAMPLE = 30  # records of the checks' reader answers compared with the lines they cite
+DERIVED_NAMED = 6  # unlisted fields a note names
+_POSITION_KEYS = {"ref", "refs", "line", "lines", "path", "file", "key", "anchor", "offset", "index", "idx", "n"}
+
+
+def _answer_records(v: Any, out: dict[str, dict[str, Any]]) -> None:
+    """The objects in a reader's answer that cite one record, by the record ref (`<path>#L<n>`) among their values."""
+    if len(out) >= DERIVED_SAMPLE:
+        return
+    if isinstance(v, dict):
+        ref = next((x for x in v.values() if isinstance(x, str) and _RECORD_REF.match(x)), None)
+        if ref is not None and ref not in out:
+            out[ref] = v
+        for x in v.values():
+            if isinstance(x, (dict, list)):
+                _answer_records(x, out)
+    elif isinstance(v, list):
+        for x in v:
+            _answer_records(x, out)
+
+
+def _scalars(v: Any, out: list[str]) -> None:
+    if isinstance(v, dict):
+        for x in v.values():
+            _scalars(x, out)
+    elif isinstance(v, list):
+        for x in v:
+            _scalars(x, out)
+    elif isinstance(v, str):
+        out.append(v)
+    elif isinstance(v, (int, float)) and not isinstance(v, bool):
+        out.append(json.dumps(v))
+
+
+def _held(value: Any, text: str, numbers: set[float]) -> bool:
+    """Whether a field's value is in the text of the line it cites: a string, without an ellipsis it was cut at, or its
+    first 80 characters; a number as written or equal to one of the line's."""
+    if isinstance(value, (int, float)):
+        return json.dumps(value) in text or float(value) in numbers
+    v = _squeeze(value).rstrip("…").removesuffix("...").strip()
+    return not v or v[:80] in text
+
+
+def unlisted_derived(c: str, shots: list[dict[str, Any]], declared: set[str]) -> list[dict[str, str]]:
+    """Fields of the records the checks' reader answers handed the page whose values the line each record cites does not
+    hold, for at least two records and most of those that have the field, and that `declared` does not name:
+    [{field, value, ref}], each with one such value, DERIVED_NAMED at most. A record is an object of an answer with a
+    record ref among its values; positions such as its ref, line or path, and values that are lists or objects, are left
+    out. Blocking."""
+    recs: dict[str, dict[str, Any]] = {}
+    for s in shots:
+        for a in s.get("answers") or []:
+            _answer_records(a, recs)
+    seen: dict[str, int] = {}
+    missed: dict[str, list[tuple[Any, str]]] = {}
+    for ref, rec in recs.items():
+        try:
+            res = refs.resolve_base(config.corpus_dir(c), ref)
+        except (refs.RefError, ValueError):
+            continue
+        if (res.get("meta") or {}).get("binary"):
+            continue
+        parts: list[str] = []
+        for r in res.get("records") or ([{"record": res.get("record")}] if res.get("record") is not None else []):
+            _scalars(r.get("record"), parts)
+        if not parts:
+            continue
+        text = _squeeze("\n".join(parts))
+        numbers: set[float] = set()
+        for x in parts:
+            with contextlib.suppress(ValueError):
+                numbers.add(float(x))
+        line = refs.parse_ref(ref).get("line")
+        for k, v in rec.items():
+            if k in declared or k.lower() in _POSITION_KEYS or v is None or isinstance(v, (bool, dict, list)):
+                continue
+            if v == ref or v == line or (isinstance(v, str) and (len(v.strip()) < 2 or _RECORD_REF.match(v))):
+                continue
+            seen[k] = seen.get(k, 0) + 1
+            if not _held(v, text, numbers):
+                missed.setdefault(k, []).append((v, ref))
+    out = []
+    for k, xs in missed.items():
+        if len(xs) >= 2 and len(xs) * 2 > seen[k]:
+            v, ref = xs[0]
+            out.append({"field": k, "value": _cut(str(v), 60), "ref": ref})
+    return out[:DERIVED_NAMED]
 
 
 async def open_place(c: str, slug: str, ref: str | None, locator: dict[str, Any] | None,
@@ -2912,7 +3049,10 @@ def type_suffix(glob: str) -> str | None:
 
 
 def file_type_viewer(view: dict[str, Any]) -> bool:
-    """Whether the view is a viewer for file types: every claim one extension's glob."""
+    """Whether the view is a viewer of one file at a time, a mode of the File browser: its `unit` is "file", or, with no
+    unit, every claim is one extension's glob."""
+    if view.get("unit"):
+        return view["unit"] == "file"
     claims = view.get("claims") or []
     return bool(claims) and all(type_suffix(g) for g in claims)
 
@@ -3322,14 +3462,15 @@ async def resolve_route(c: str, slug: str, ref: str, v: str | None = None) -> di
 
 class CheckBody(BaseModel):
     locators: list[str] | None = None
+    picture: bool = False
 
 
 @router.post("/ws/{c}/views/{slug}/check")
 async def check_route(c: str, slug: str, request: Request, body: CheckBody | None = None) -> dict[str, Any]:
-    """A view ticket's session checking its draft: the gate with `locators` beside the sampled lines, {ok, lines, png}.
-    The
-    locators are kept on the proposal for the server's gate after the turn. Loopback only, and like every write only
-    with the token's proof (view_check.py) or the analyst's cookie (hook_auth.LocalWriteGuard)."""
+    """A view ticket's session checking its draft: the gate with `locators` beside the sampled lines, {ok, lines, png},
+    `png` the picture of the page as it opens when `picture` asks for one. The locators are kept on the proposal for the
+    server's gate after the turn. Loopback only, and like every write only with the token's proof (view_check.py) or
+    the analyst's cookie (hook_auth.LocalWriteGuard)."""
     from . import dev  # noqa: PLC0415
 
     if not dev._is_loopback(request):
@@ -3340,9 +3481,8 @@ async def check_route(c: str, slug: str, request: Request, body: CheckBody | Non
     locators = [str(x).strip() for x in (body.locators if body and body.locators else []) if str(x).strip()]
     if locators and read_proposal(c, slug) is not None:
         update_proposal(c, slug, locators=locators)
-    report = await gate(c, slug, locators or _kept_locators(c, slug))
-    return {"ok": bool(report.get("ok")), "lines": gate_lines(report), "png": (report.get("page") or {}).get("png"),
-            "pngs": [s["png"] for s in report.get("shots") or [] if s.get("png")]}
+    report = await gate(c, slug, locators or _kept_locators(c, slug), picture=bool(body and body.picture))
+    return {"ok": bool(report.get("ok")), "lines": gate_lines(report), "png": (report.get("page") or {}).get("png")}
 
 
 def _kept_locators(c: str, slug: str) -> list[str] | None:
