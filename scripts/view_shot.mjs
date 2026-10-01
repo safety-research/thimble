@@ -702,6 +702,10 @@ async function shootState(browser, opt, doc, state, i) {
       if (how) await settle(Date.now(), QUIET_MS)
       await page.evaluate(() => (window.__acting = false))
     }
+    // a request the page sent after the last wait ended, such as the next page of data it loads, is waited for before
+    // it counts as unanswered
+    const until = Date.now() + ANSWER_MS
+    while (inflight > 0 && Date.now() < until) await settle(Date.now(), 0)
     if (inflight > 0) errors.push(`${inflight} request(s) still unanswered after ${ANSWER_MS / 1000} s`)
     const fonts = await frame
       .evaluate(async () => {
