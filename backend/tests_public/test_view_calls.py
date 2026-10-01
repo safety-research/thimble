@@ -7,6 +7,7 @@ its next step, as SIGINT does in a kernel."""
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import io
 import json
 import os
@@ -400,11 +401,17 @@ def test_a_kernel_keeps_the_indexes_it_used_last_within_its_memory():
     view_host._sizes.clear()
 
 
+def _taken(name: str) -> int:
+    """A kernel's resident size that is just what its indexes take."""
+    w = next(w for w in view_calls._pools[CORPUS] if w.name == name)
+    return view_calls.KERNEL_BASE + sum(w.holds.values())
+
+
 async def test_a_kernel_above_its_memory_that_holds_several_indexes_is_restarted(ws, kernels, monkeypatch):
-    monkeypatch.setattr(view_calls, "_rss", lambda c, name: 10 * 1024**3)
-    monkeypatch.setattr(view_calls, "rss_max", lambda: 1024**3)
+    monkeypatch.setattr(view_calls, "_rss", lambda c, name: _taken(name))
+    monkeypatch.setattr(view_calls, "rss_max", lambda: 1024)
     await views.reader_call(CORPUS, "count", "records", {})
-    assert kernels.stopped == [], "one index alone is kept, however large"
+    assert kernels.stopped == [], "one index alone is kept when the kernel's memory is what it takes, however large"
     await views.reader_call(CORPUS, "other", "records", {})
     for _ in range(20):
         if kernels.stopped:
@@ -412,3 +419,118 @@ async def test_a_kernel_above_its_memory_that_holds_several_indexes_is_restarted
         await asyncio.sleep(0.05)
     assert kernels.stopped == ["views"]
     assert view_calls._pools[CORPUS] == []
+
+
+async def test_a_kernel_far_above_what_its_one_index_takes_is_restarted(ws, kernels, monkeypatch):
+    """Building an index or answering a call can leave a kernel holding gigabytes its index does not need, which the
+    system never gets back: once free it is restarted, and its index is loaded again from the pickle."""
+    monkeypatch.setattr(view_calls, "_rss", lambda c, name: 10 * 1024**3)
+    monkeypatch.setattr(view_calls, "rss_max", lambda: 1024**3)
+    assert await views.reader_call(CORPUS, "count", "records", {}) == {"n": 5, "steps": 0}
+    for _ in range(20):
+        if kernels.stopped:
+            break
+        await asyncio.sleep(0.05)
+    assert kernels.stopped == ["views"]
+    assert await views.reader_call(CORPUS, "count", "records", {}) == {"n": 5, "steps": 0}
+
+
+def _answer(held: list, **more) -> list[dict]:
+    from app.view_host import SENTINEL  # noqa: PLC0415
+
+    return [{"_stream": "stdout", "text/plain": SENTINEL + json.dumps({"ok": True, "held": held, **more}) + "\n"}]
+
+
+def test_a_kernel_holding_an_index_with_no_pickle_is_not_restarted(monkeypatch):
+    """An index that does not pickle would be built again from the corpus after a restart, which can take far longer
+    than the memory is worth."""
+    monkeypatch.setattr(view_calls, "_rss", lambda c, name: 10 * 1024**3)
+    monkeypatch.setattr(view_calls, "rss_max", lambda: 1024**3)
+    w = view_calls.Worker(CORPUS, "views")
+    view_calls._note_answer(w, _answer([["count", "fp", 1000]], unpickled=True))
+    assert not w.restart and w.unpickled
+    view_calls._note_answer(w, _answer([["count", "fp", 1000]]))
+    assert w.restart
+
+
+def test_the_kernels_memory_limits_stay_within_bounds_on_any_machine(monkeypatch):
+    """The limits are shares of the machine's memory, so a laptop keeps room for everything else, and fixed bounds keep
+    a machine with hundreds of gigabytes from letting the views' kernels take tens of them."""
+    gb = 1024**3
+    for env in ("THIMBLE_VIEW_MEMORY_MB", "THIMBLE_VIEW_RSS_MB", "THIMBLE_VIEW_TOTAL_RSS_MB"):
+        monkeypatch.delenv(env, raising=False)
+    for phys, want in ((16 * gb, (1 * gb, 2 * gb, 4 * gb)), (256 * gb, (2 * gb, 6 * gb, 12 * gb)),
+                       (4 * gb, (256 * 1024**2, 1 * gb, 2 * gb))):
+        monkeypatch.setattr(view_calls, "physical_memory", lambda phys=phys: phys)
+        assert (view_calls.memory_budget(), view_calls.rss_max(), view_calls.total_rss_max()) == want, phys
+    monkeypatch.setenv("THIMBLE_VIEW_RSS_MB", "20000")
+    assert view_calls.rss_max() == 20000 * 1024**2
+
+
+def test_a_wrapped_kernels_memory_is_its_python_process(monkeypatch):
+    """Under the sandbox the process thimble starts is the wrapper, a few megabytes; the memory that matters is the
+    kernel's process inside it."""
+    import subprocess  # noqa: PLC0415
+
+    from app import notebook, procs  # noqa: PLC0415
+
+    if not procs.HAVE_PROC:
+        pytest.skip("reads /proc")
+    child = "x = bytearray(120 * 1024 * 1024); import time; time.sleep(30)"
+    wrapper = subprocess.Popen(["/bin/sh", "-c", f'"{sys.executable}" -c "{child}" & wait'])
+    kernel = type("K", (), {"pid": wrapper.pid})()
+    notebook._exec_kernels[(CORPUS, "views")] = kernel
+    try:
+        got = 0
+        for _ in range(100):
+            view_calls._inner.pop(wrapper.pid, None)
+            got = view_calls._rss(CORPUS, "views")
+            if got > 100 * 1024**2:
+                break
+            time.sleep(0.05)
+        assert got > 100 * 1024**2 > procs.rss(wrapper.pid)
+    finally:
+        notebook._exec_kernels.pop((CORPUS, "views"), None)
+        for pid in procs.descendants(wrapper.pid):
+            with contextlib.suppress(OSError):
+                os.kill(pid, 9)
+        wrapper.kill()
+        wrapper.wait()
+
+
+def test_an_index_counts_what_loading_it_took_and_says_when_it_has_no_pickle(tmp_path, monkeypatch):
+    """A kernel's budget counts an index by the memory it took, at least its pickle's size, and an index that does
+    not pickle is named, so the pool never restarts the kernel that holds it."""
+    reader = tmp_path / "reader.py"
+    reader.write_text("def build_index(paths):\n    return {'f': (lambda: 1) if paths else 1, 'big': list(range(10))}\n"
+                      "def records(index, query):\n    return 1\n"
+                      "def resolve(index, locator):\n    return None\n")
+    steps = iter([100, 100, 100 + 50 * 1024**2, 100 + 50 * 1024**2, 200, 200, 200, 200])  # call, before, after, end
+    monkeypatch.setattr(view_host, "_rss", lambda: next(steps))
+    view_host._indexes.clear()
+    view_host._sizes.clear()
+    view_host._unpickled.clear()
+    try:
+        out = view_host.answer({"slug": "s", "reader": str(reader), "fp": "a", "paths": ["x"],
+                                "cache": str(tmp_path / "a.pickle"), "op": "records"})
+        assert out["ok"] and out["unpickled"] is True and out["held"] == [["s", "a", 50 * 1024**2]]
+        out = view_host.answer({"slug": "t", "reader": str(reader), "fp": "b", "paths": [],
+                                "cache": str(tmp_path / "b.pickle"), "op": "records"})
+        assert out["ok"] and (tmp_path / "b.pickle").is_file()
+        assert out["held"][-1] == ["t", "b", (tmp_path / "b.pickle").stat().st_size], "at least the pickle's size"
+    finally:
+        view_host._indexes.clear()
+        view_host._sizes.clear()
+        view_host._unpickled.clear()
+
+
+async def test_deleting_a_view_lets_go_of_the_kernel_that_holds_its_index(ws, kernels):
+    await views.reader_call(CORPUS, "count", "records", {})
+    assert [w.name for w in view_calls._pools[CORPUS]] == ["views"]
+    views.delete_view(CORPUS, "count")
+    for _ in range(20):
+        if kernels.stopped:
+            break
+        await asyncio.sleep(0.05)
+    assert kernels.stopped == ["views"] and view_calls._pools[CORPUS] == []
+    assert await views.reader_call(CORPUS, "other", "records", {}) == {"n": 3, "steps": 0}

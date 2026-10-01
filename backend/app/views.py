@@ -845,6 +845,7 @@ def delete_view(c: str, slug: str) -> None:
     shutil.rmtree(index_dir(c, slug), ignore_errors=True)
     drop_built_copy(c, slug)
     _forget(c, slug)
+    view_calls.forget_view(c, slug)
     _write_off(c, slug, True)
     if old_link(c, slug).is_symlink():
         old_link(c, slug).unlink()
