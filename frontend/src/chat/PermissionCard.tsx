@@ -9,10 +9,10 @@
 // classifier could not judge a call, the request of a session that is not a background one offers the switch to
 // Manual, and to Bypass unless the analyst's Claude Code settings turn it off. An answer takes its request off the card
 // at once and the next request can be answered while it is sent; one that fails puts its request back, and one whose
-// request had already ended leaves it off. A request that just took the card's place ignores clicks and keys for
-// ARM_MS, so a double click never answers the next request unread. Allow covers only the later calls the card listed.
-// A long command wraps and scrolls past 96px. A request too long to show whole says how much of it shows and offers no
-// "don't ask again".
+// request had already ended leaves it off. A request that just took the card's place, or was just declined, ignores
+// clicks and keys for ARM_MS, so a double click never answers the next request unread. Allow covers only the later
+// calls the card listed. A long command wraps and scrolls past 96px. A request too long to show whole says how much of
+// it shows and offers no "don't ask again".
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Button } from '../components/Button'
 import { CodeText } from '../components/Code'
@@ -76,7 +76,7 @@ export function PermissionCard({ ws, asks, metas, labels }: {
   const [slow, setSlow] = useState(false)
   // the request the card shows, and where it stood, for the request that takes its place once it goes
   const [at, setAt] = useState<{ id: string | null; i: number }>({ id: null, i: 0 })
-  // the request whose buttons take clicks (ARM_MS after it took the card's place)
+  // the request whose buttons take clicks (ARM_MS after it took the card's place), as `face` names it
   const [armed, setArmed] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const root = useRef<HTMLDivElement>(null)
@@ -100,15 +100,17 @@ export function PermissionCard({ ws, asks, metas, labels }: {
   const i = found >= 0 ? found : Math.min(at.i, Math.max(0, shown.length - 1))
   const ask = shown[i] ?? null
   const id = ask?.request.id ?? null
+  // the request shown, and whether it is declined: a request that turns declined under a click ignores it as a new one
+  const face = id && `${id}${ask?.request.expired ? ':declined' : ''}`
   useEffect(() => {
     if (id !== at.id || i !== at.i) setAt({ id, i })
   }, [id, i, at])
   useEffect(() => {
-    if (!id) return
-    const timer = window.setTimeout(() => setArmed(id), ARM_MS)
+    if (!face) return
+    const timer = window.setTimeout(() => setArmed(face), ARM_MS)
     return () => window.clearTimeout(timer)
-  }, [id])
-  const ready = id != null && armed === id
+  }, [face])
+  const ready = !!face && armed === face
   useEffect(() => {
     if (!sending.size) {
       setSlow(false)

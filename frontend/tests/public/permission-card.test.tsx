@@ -183,6 +183,20 @@ describe('several requests at once', () => {
     expect(posted).toEqual([['/api/ws/mini/chats/d2/permission', { id: 'b', allow: true, shown: 0 }]])
   })
 
+  test('a click as the request shown is declined does not dismiss it unread', async () => {
+    const a = ask('d1', 'a', 1)
+    const el = await mount(<Live initial={[a, ask('d2', 'b', 2)]} />)
+    await armed()
+    await act(async () => setAsks([ask('d2', 'b', 2), { ...a, request: { ...a.request, expired: T(9) } }]))
+    expect(shownId(el)).toBe('a')
+    expect(el.querySelector('.chat-perm-title')?.textContent).toBe(DECLINED_TITLE)
+    await click(el.querySelector('.chat-perm-dismiss'))
+    expect(posted).toEqual([])
+    await armed()
+    await click(el.querySelector('.chat-perm-dismiss'))
+    expect(posted).toEqual([['/api/ws/mini/chats/d1/permission', { id: 'a', allow: false, shown: 0 }]])
+  })
+
   test('an answer takes its request off at once, and the next can be answered while the first is still on its way', async () => {
     const held: (() => void)[] = []
     reply = (_url, body) => (body.id === 'a' ? new Promise((r) => held.push(() => r(ok()))) : Promise.resolve(ok()))
