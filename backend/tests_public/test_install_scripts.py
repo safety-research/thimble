@@ -134,6 +134,16 @@ def test_a_release_install_carries_the_files_the_readme_links(tmp_path):
         assert (dest / rel).read_text() == (tree / rel).read_text(), rel
 
 
+def test_a_release_install_carries_the_extensions_thimble_ships(tmp_path):
+    tree = fake_tree(tmp_path / "release")
+    (tree / "extensions" / "video").mkdir(parents=True)
+    (tree / "extensions" / "video" / "extension.json").write_text('{"name": "video"}\n')
+    dest = tmp_path / "home" / ".thimble" / "app"
+    r = install(tree, dest, tmp_path)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert (dest / "extensions" / "video" / "extension.json").read_text() == '{"name": "video"}\n'
+
+
 def test_install_sh_copies_only_into_an_empty_folder_or_an_earlier_install(tmp_path):
     tree = fake_tree(tmp_path / "release")
     home = tmp_path / "home"
