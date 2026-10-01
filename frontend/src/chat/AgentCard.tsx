@@ -524,7 +524,7 @@ function useOrientReport(ws: string, since: string | null | undefined): string |
   useEffect(() => {
     if (!since) return
     let alive = true
-    // the frame route answers the document once it is written and a frame before, where the document's answers 404
+    // the written document, or its frame before a write
     const look = () =>
       api
         .frame(ws, 'report')

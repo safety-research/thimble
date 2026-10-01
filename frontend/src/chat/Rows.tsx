@@ -805,7 +805,7 @@ function useChipSettled(ws: string, item: ChipRowT): Settled | null {
     })
     const p = parseRef(ref)
     if (p?.kind === 'report') {
-      // the frame route answers the document once it is written and a frame before, where the document's answers 404
+      // the written document, or its frame before a write
       api
         .frame(ws, p.slug)
         .then((d) => {
