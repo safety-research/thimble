@@ -2916,9 +2916,10 @@ def cmd_extension(args: argparse.Namespace) -> int:
         except extensions.SwitchError as e:
             print(f"thimble extension {args.ext_cmd}: {e}", file=sys.stderr)
             return 1
-        print(f"{args.name} is {args.ext_cmd} in every workspace.")
         if args.ext_cmd == "on" and got["off_in"]:
-            print(f"Its switch in Settings keeps it off in {', '.join(got['off_in'])}.")
+            print(f"{args.name} is on, except where its switch in Settings keeps it off: {', '.join(got['off_in'])}.")
+        else:
+            print(f"{args.name} is {args.ext_cmd} in every workspace.")
         if args.ext_cmd == "on" and got["orients"]:
             print(ORIENT_HINT.format(name=args.name))
     else:

@@ -121,7 +121,7 @@ def _say(err: Any) -> list[tuple[list[Any], str]]:
         return [(path, f"{what} must be {word}")]
     if v in ("enum", "const"):
         allowed = err.validator_value if v == "enum" else [err.validator_value]
-        return [(path, f"{what} is {json.dumps(err.instance)}; it takes {', '.join(json.dumps(x) for x in allowed)}")]
+        return [(path, f"{what} is {json.dumps(err.instance)}. It takes {', '.join(json.dumps(x) for x in allowed)}")]
     if v in ("minLength", "minItems"):
         return [(path, f"{what} is empty")]
     return [(path, f"{what}: {err.message}")]
@@ -229,7 +229,7 @@ def _placeholders(root: Path, f: Path) -> list[Problem]:
         if word in PLACEHOLDERS or (word.startswith("default#") and word[len("default#"):].strip()):
             continue
         out.append(Problem(str(f.relative_to(root)), text.count("\n", 0, m.start()) + 1,
-                           f"{{{{{word}}}}} is no placeholder; they are {{{{default}}}}, {{{{default#<heading>}}}}, "
+                           f"{{{{{word}}}}} is no placeholder. They are {{{{default}}}}, {{{{default#<heading>}}}}, "
                            f"{{{{dir}}}} and {{{{files}}}}"))
     return out
 
@@ -270,7 +270,7 @@ def check(root: Path, expect: str | None = None) -> list[Problem]:
         if expect and isinstance(raw.get("name"), str) and raw["name"] != expect:
             out.append(Problem(MANIFEST, _line(text, ["name"]), f'names it "{raw["name"]}", and its folder is "{expect}"'))
         if "needs" in raw and "dependencies" in raw:
-            out.append(Problem(MANIFEST, _line(text, ["dependencies"]), 'has both "needs" and "dependencies"; keep needs'))
+            out.append(Problem(MANIFEST, _line(text, ["dependencies"]), 'has both "needs" and "dependencies". Keep needs'))
         scope = raw.get("scope") or None
     for folder, (defn, file) in PARTS.items():
         base = root / folder
@@ -279,10 +279,10 @@ def check(root: Path, expect: str | None = None) -> list[Problem]:
         for d in _subdirs(base):
             rel_dir = f"{folder}/{d.name}"
             if folder == "agents" and d.name not in ROLES:
-                out.append(Problem(rel_dir, 0, f"is no role; the roles are {', '.join(ROLES)}"))
+                out.append(Problem(rel_dir, 0, f"is no role. The roles are {', '.join(ROLES)}"))
                 continue
             if folder == "tasks" and d.name not in TASKS:
-                out.append(Problem(rel_dir, 0, f"is no task; the tasks are {', '.join(TASKS)}"))
+                out.append(Problem(rel_dir, 0, f"is no task. The tasks are {', '.join(TASKS)}"))
                 continue
             out += _name_problem(rel_dir, d.name, "the folder")
             out += _part(root, d, folder, defn, file, scope)

@@ -1664,8 +1664,8 @@ def _changes(what: str, r: dict[str, Any]) -> str:
 
 def _settings_words(a: dict[str, Any], data: bool = True) -> str:
     network = "network" if a.get("network") == "on" else "no network"
-    web = {"allow": "web", "ask": "web asks", "off": "no web"}.get(str(a.get("web")), "")
-    edits = ({"allow": "corpus edits allowed", "ask": "corpus edits ask", "off": "no corpus edits"}.get(
+    web = {"allow": "web", "ask": "web asks first", "off": "no web"}.get(str(a.get("web")), "")
+    edits = ({"allow": "corpus edits allowed", "ask": "corpus edits ask first", "off": "no corpus edits"}.get(
         str(a.get("data")), "corpus read-only") if data else "")
     return ", ".join(x for x in (network, web, edits) if x)
 
@@ -1817,7 +1817,7 @@ async def orientation_route(c: str, name: str, body: OrientBody, request: Reques
         try:
             status = (await run_orientation(c, name))["status"]
         except orient_session.NoOrientation:
-            raise HTTPException(409, "no orientation has run here yet; it reads the extension when it starts") from None
+            raise HTTPException(409, "No orientation has run here yet. It reads the extension when it starts.") from None
         except (orient_session.Gone, RuntimeError, ValueError) as err:
             raise HTTPException(409, f"the orientation could not be sent {name}'s instructions: {err}") from None
     else:

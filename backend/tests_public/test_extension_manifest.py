@@ -50,7 +50,7 @@ def test_a_problem_names_its_file_and_line_and_the_nearest_known_key(tmp_path):
     _write(root, "extension.json", {"name": "tally", "version": "0.1.0", "scope": ["tally/*.jsonl"]})
     _write(root, "views/tally/view.json", {"description": "Each tally line.",
                                            "records": [{"name": "entry", "fields": [{"name": "who", "type": "word"}]}]})
-    assert _problems(root) == ['views/tally/view.json:9  "records[0].fields[0].type" is "word"; it takes "text", '
+    assert _problems(root) == ['views/tally/view.json:9  "records[0].fields[0].type" is "word". It takes "text", '
                                '"category", "number", "time", "ref", "list"']
     (root / "extension.json").write_text('{"name": "tally",\n "version": 1,}')
     assert _problems(root)[0].startswith("extension.json:2  is not JSON")
@@ -80,8 +80,8 @@ def test_an_agent_or_task_is_defined_one_way_with_files_of_its_own(tmp_path):
     assert any("the subagent \"reader\" names 'r.md'" in x for x in got)
     assert any(x.startswith("agents/orientation/prompt.md:1  {{nope}} is no placeholder") for x in got)
     assert len([x for x in got if x.startswith("agents/orientation/prompt.md")]) == 1
-    assert "agents/planner  is no role; the roles are main, orientation, critic, writer, dev" in got
-    assert "tasks/summaries  is no task; the tasks are labels, label-draft, card-check, view-review, view-fit, " \
+    assert "agents/planner  is no role. The roles are main, orientation, critic, writer, dev" in got
+    assert "tasks/summaries  is no task. The tasks are labels, label-draft, card-check, view-review, view-fit, " \
            "file-viewer, checks" in got
     assert any(x.startswith("tasks/labels/fixtures/one.json:1  is not JSON") for x in got)
     assert not any(x.startswith("tasks/labels/task.json") for x in got), "a command names no file of its own"
@@ -148,7 +148,7 @@ def test_the_new_layout_gives_roles_tasks_subagents_and_report_types(tmp_path, c
     assert brief["prompt"] == "Lead with the answer.\n\nA one-page brief." and brief["renderer"] == "document"
     row = next(r for r in extensions.public(c)["extensions"] if r["name"] == "kit")
     assert row["description"] == "A kit." and "reader agent" in row["parts"]
-    assert row["consent"] == "orientation and critic: no network, web asks, corpus read-only. reader: no network, no web."
+    assert row["consent"] == "orientation and critic: no network, web asks first, corpus read-only. reader: no network, no web."
 
 
 def await_refresh(c: str) -> None:

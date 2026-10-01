@@ -648,7 +648,7 @@ async def test_the_extension_command_adds_lists_and_removes(corpus, capsys, monk
     assert (await extensions.refresh(CORPUS))["extensions"]["ext-min"]["why"] == "off in thimble's config"
     assert cli.main(["extension", "on", "ext-min"]) == 0
     out = capsys.readouterr().out
-    assert out.startswith("ext-min is on in every workspace.\nIts switch in Settings keeps it off in tallies.\n")
+    assert out.startswith("ext-min is on, except where its switch in Settings keeps it off: tallies.\n")
     assert "ext-min adds to the orientation." in out
     assert json.loads(userconf.global_file().read_text()) == {}
     assert cli.main(["extension", "off", "no-such"]) == 1
