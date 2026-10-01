@@ -891,3 +891,51 @@ async def shutdown() -> None:
         await _stop_all(run)
         hook_auth.revoke(run.token_id)
 
+
+LEFT_LINE = "thimble stopped while the program ran"
+
+
+def mark_left() -> list[str]:
+    """Server start: each program's chat a previous server left running ends stopped, and so does the orientation's
+    record it holds, since a program never outlives the server that ran it. Returns `<workspace>/<chat>` per chat."""
+    from . import orientation  # noqa: PLC0415 — orientation imports the tools
+
+    closed: list[str] = []
+    root = config.WORKSPACES_DIR
+    for folder in sorted(root.iterdir()) if root.is_dir() else []:
+        if not folder.is_dir() or folder.name.startswith("."):
+            continue
+        c = folder.name
+        try:
+            metas = [m for m in agents.list_chats(c) if m.get("status") == "running" and m.get("way") in roles.CODE_WAYS]
+        except Exception:  # noqa: BLE001 — a workspace whose corpus is gone, or one that cannot be read
+            log.debug("%s: its programs' chats were not checked at start", c, exc_info=True)
+            continue
+        for meta in metas:
+            chat = str(meta["id"])
+            try:
+                agents.finish_agent(c, chat, "stopped", LEFT_LINE)
+                rec = orientation.read_run(c) or {}
+                if rec.get("status") == "running" and (rec.get("chats") or {}).get(orientation.ROLE) == chat:
+                    orientation.finished(c, chat, "stopped", LEFT_LINE, report=False)
+                closed.append(f"{c}/{chat}")
+            except Exception:  # noqa: BLE001 — never fails the start
+                log.exception("%s: program chat %s, left running, was not closed", c, chat)
+    return closed
+
+
+@contextlib.asynccontextmanager
+async def _lifespan(app: Any):
+    """The router's lifespan: the programs' chats a previous server left running end before the first request
+    (mark_left)."""
+    try:
+        closed = await asyncio.to_thread(mark_left)
+        if closed:
+            log.info("program chats left running by the previous server, ended stopped: %s", ", ".join(closed))
+    except Exception:  # noqa: BLE001 — never fails the start
+        log.exception("closing the program chats left running failed")
+    yield
+
+
+router.lifespan_context = _lifespan
+

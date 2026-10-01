@@ -677,3 +677,25 @@ async def run(input):
     assert init["agents"]["helper"].get("permissionMode") is None and init["agents"]["helper"]["prompt"] == "Help."
     assert not any(q["subtype"] == "set_permission_mode" for q in reqs)
     assert any(q["subtype"].startswith("set_permission_mode, which thimble refuses") for q in reqs)
+
+
+def test_a_program_s_chat_a_previous_server_left_running_ends_stopped_and_frees_the_orientation(data_tmp,
+                                                                                                workspaces_tmp):
+    from app import agents
+
+    prog = agents.new_agent(CORPUS, orientation.ROLE, "Orientation", way="sdk", extension="x", announce=False)
+    orientation.started(CORPUS, prog["id"], passes=["final"])
+    own = agents.new_agent(CORPUS, "writer", "Write d", announce=False)
+    assert orientation.active(CORPUS)
+    from fastapi.testclient import TestClient
+
+    from app.main import app
+
+    with TestClient(app):
+        assert agents.read_meta(CORPUS, prog["id"])["status"] == "stopped", "the server's start closes it"
+    agents.update_agent(CORPUS, prog["id"], status="running")
+    orientation.started(CORPUS, prog["id"], passes=["final"])
+    assert harness.mark_left() == [f"{CORPUS}/{prog['id']}"]
+    assert agents.read_meta(CORPUS, prog["id"])["status"] == "stopped"
+    assert agents.read_meta(CORPUS, own["id"])["status"] == "running", "thimble's own sessions recover their own way"
+    assert orientation.read_run(CORPUS)["status"] == "stopped" and not orientation.active(CORPUS)
