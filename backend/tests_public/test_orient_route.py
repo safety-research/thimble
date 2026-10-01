@@ -95,3 +95,34 @@ def test_an_orientation_an_earlier_build_ran_as_main_s_subagent_ends_its_record_
     write_json(orientation.run_file(CORPUS), {"status": "running", "session": "s1", "chats": {"orient": "chat-o"}})
     session._old_orientation_ended(lv, sub, "stopped", None)
     assert (orientation.read_run(CORPUS) or {})["status"] == "running", "this build's own session ends by its own run"
+
+
+async def test_a_second_start_orientation_while_one_starts_or_runs_starts_nothing(workspaces_tmp, monkeypatch):
+    """Two start_orientation calls at once, as main can make in one turn, start one orientation: the second is refused
+    with a line that tells main the orientation runs and to write nothing unless the analyst asked for a new one. A call
+    once it runs is refused the same way."""
+    import asyncio
+
+    calls: list[str] = []
+    gate = asyncio.Event()
+
+    async def slow_start(c, key, **kw):
+        calls.append(key)
+        await gate.wait()  # `claude --bg` takes a while
+
+    monkeypatch.setattr(agent_session, "start", slow_start)
+    orientation.start_requested(CORPUS, {"text": "", "final_notebook": True, "propose_views": True}, {"id": "e1"})
+    first = asyncio.ensure_future(tools.call(CORPUS, "start_orientation", {"brief": ""}))
+    while not calls:
+        await asyncio.sleep(0.01)
+    second = asyncio.ensure_future(tools.call(CORPUS, "start_orientation", {}))
+    await asyncio.wait([second], timeout=2)
+    gate.set()
+    assert not (await first).is_error
+    assert calls == [orient_session.KEY], "one orientation starts"
+    second = await second
+    assert second.is_error and second.text.endswith(tools.hint("start_orientation-running")), second.text
+    monkeypatch.setattr(orient_session, "running", lambda c: True)
+    third = await tools.call(CORPUS, "start_orientation", {"brief": "again"})
+    assert third.is_error and third.text.endswith(tools.hint("start_orientation-running"))
+    assert calls == [orient_session.KEY]

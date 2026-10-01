@@ -399,7 +399,7 @@ Get a picture of what the analyst sees in the browser, such as a card as the can
 
 ## start_orientation
 
-Start an orientation, a broad analysis of the corpus that helps the analyst understand it, in a Claude Code session of its own beside yours, which shows the analyst when it finishes the outputs its switches turn on. The browser shows it as a thread, and an `orient` event tells you when it ends. Call it for a `start` event with the event's switches, or when the analyst asks for a new orientation, which adds to the cards the earlier ones left, and `message_orientation` to explore further within one that has finished.
+Start an orientation, a broad analysis of the corpus that helps the analyst understand it, in a Claude Code session of its own beside yours, which shows the analyst when it finishes the outputs its switches turn on. The browser shows it as a thread, and an `orient` event tells you when it ends. Call it once for a `start` event with the event's switches, or when the analyst asks for a new orientation, which adds to the cards the earlier ones left, and `message_orientation` to explore further within one that has finished. One orientation runs at a time, so while one runs the call starts nothing.
 
 ```json
 {
@@ -884,7 +884,7 @@ The orientation has started in its own session, and the browser shows it, so thi
 
 ## start_orientation-running
 
-An orientation is running already. Tell the analyst so in one line.
+An orientation runs already, so this call started none: one orientation runs at a time. The browser shows the one that runs, so write nothing about it, unless the analyst asked for a new orientation in this turn: then tell them in one line that one runs and that they can stop it in its thread first.
 
 ## start_writing-started
 
@@ -1247,7 +1247,7 @@ Stop only when `wait_session` tells you to end your turn, never because of what 
 
 ## bg-proxy-start
 
-A background session of thimble's, {session}, runs for this workspace (`claude attach {short}`). Show it in the agent tray now: call the Agent tool with `subagent_type` "{type}", `run_in_background` true, `description` "{session}" and `{prompt}` as the whole prompt, then end the turn on that call, with no text after it. The tray entry follows the session by itself, so call nothing else for it.
+A background session of thimble's, {session}, runs for this workspace (`claude attach {short}`). Show it in the agent tray now with one call of the Agent tool, with `subagent_type` "{type}", `run_in_background` true, `description` "{session}" and `{prompt}` as the whole prompt, and end the turn on that call. The terminal shows the call, so write nothing before it or after it. The session runs already and the tray entry follows it by itself, so start nothing else for it.
 
 ## bg-proxy-keep
 

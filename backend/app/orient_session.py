@@ -218,16 +218,33 @@ def _launch(c: str, brief: str, passes: "list[str]", choices: dict[str, Any]) ->
                 agent="orient", patient=True, disallowed=disallowed(parts), background=True)
 
 
+_starting: set[str] = set()  # the workspaces whose orientation is starting now (start)
+
+
+def starting(c: str) -> bool:
+    return c in _starting
+
+
 async def start(c: str, brief: str, passes: "list[str] | tuple[str, ...]" = ("final", "views"),
                 call: str | None = None, chosen: "dict[str, Any] | None" = None) -> agent_session.Run:
     """Start the orientation session for workspace `c` with the parts `passes` names (PASSES) and follow it, `call`
     being main's start_orientation call (agent_session.start); `chosen` holds the critique choice the call made, over
-    Start's. RuntimeError when one runs or claude cannot be started. A check on whether an extension's view fits that
-    is still being made is waited for first (extensions.settle). The prompt is rendered off the event loop."""
+    Start's. RuntimeError when one runs or is starting, or claude cannot be started. A check on whether an extension's
+    view fits that is still being made is waited for first (extensions.settle). The prompt is rendered off the event
+    loop."""
+    if running(c) or starting(c):
+        raise RuntimeError("an orientation is running")
+    _starting.add(c)
+    try:
+        return await _start(c, brief, passes, call, chosen)
+    finally:
+        _starting.discard(c)
+
+
+async def _start(c: str, brief: str, passes: "list[str] | tuple[str, ...]", call: str | None,
+                 chosen: "dict[str, Any] | None") -> agent_session.Run:
     from . import extensions  # noqa: PLC0415
 
-    if running(c):
-        raise RuntimeError("an orientation is running")
     await extensions.settle(c)
     choices = orientation.choices(c)
     own = config.models_for(c)["orient"]
@@ -809,7 +826,7 @@ async def tool_start_orientation(ctx: Any, args: dict[str, Any]) -> Any:
     chosen: dict[str, Any] = {}
     if args.get("critique") is not None:
         chosen["critique"] = orientation.flag(args["critique"], True)
-    if running(ctx.c) or orientation.active(ctx.c):
+    if running(ctx.c) or starting(ctx.c) or orientation.active(ctx.c):
         return tools.err(tools.hint("start_orientation-running"))
     passes = [p for p, on in (("final", final), ("views", views), ("report", report)) if on]
     try:
