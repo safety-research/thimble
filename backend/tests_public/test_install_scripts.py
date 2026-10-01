@@ -71,6 +71,49 @@ def stub_bin(tmp_path: Path) -> Path:
 
 ANSWERS = ("--browser", "off", "--no-sandbox-deps")  # install.sh's questions --deps-only asks, answered
 
+# Claude Code's stand-in for the plugin commands: the marketplaces (name → folder) and the installed plugins are kept in
+# $CLAUDE_STATE, and each command is appended to $STUB_LOG
+CLAUDE_STUB = """#!{python} -I
+import json, os, sys
+path, args = os.environ["CLAUDE_STATE"], sys.argv[1:]
+state = json.load(open(path)) if os.path.exists(path) else {"marketplaces": {}, "plugins": []}
+with open(os.environ.get("STUB_LOG", os.devnull), "a") as log:
+    log.write(" ".join(args) + "\\n")
+words = [a for a in args if a not in ("--json", "--scope", "user")]
+if args[:1] == ["--version"]:
+    print("2.1.286 (Claude Code)")
+elif words[:2] == ["plugin", "list"]:
+    print(json.dumps([{"id": p, "version": "0.0.1", "scope": "user", "enabled": True} for p in state["plugins"]]))
+elif words[:3] == ["plugin", "marketplace", "list"]:
+    print(json.dumps([{"name": n, "source": "directory", "path": f, "installLocation": f}
+                      for n, f in state["marketplaces"].items()]))
+elif words[:3] == ["plugin", "marketplace", "add"]:
+    folder = os.path.abspath(words[3])
+    name = json.load(open(os.path.join(folder, ".claude-plugin", "marketplace.json")))["name"]
+    if state["marketplaces"].get(name, folder) != folder:
+        sys.exit(f"marketplace {name} is registered from another folder")
+    state["marketplaces"][name] = folder
+elif words[:3] == ["plugin", "marketplace", "remove"]:
+    state["marketplaces"].pop(words[3], None)
+elif words[:2] == ["plugin", "install"]:
+    if words[2].split("@")[1] not in state["marketplaces"]:
+        sys.exit("no such marketplace")
+    state["plugins"] = sorted(set(state["plugins"]) | {words[2]})
+elif words[:2] == ["plugin", "uninstall"]:
+    state["plugins"] = [p for p in state["plugins"] if p != words[2]]
+json.dump(state, open(path, "w"))
+"""
+
+
+def claude_stub(bin_: Path) -> None:
+    (bin_ / "claude").write_text(CLAUDE_STUB.replace("{python}", os.path.realpath(sys.executable)))
+    (bin_ / "claude").chmod(0o755)
+
+
+def plugin_changes(log: Path) -> list[str]:
+    """The `claude plugin` commands in the stand-in's log that change something (every one but the listings)."""
+    return [c for c in log.read_text().splitlines() if c.startswith("plugin ") and not c.endswith("list --json")]
+
 
 def install(tree: Path, dest: Path, tmp_path: Path, *flags: str, **extra: str) -> subprocess.CompletedProcess:
     env = env_for(tmp_path, PATH=f"{stub_bin(tmp_path)}:/usr/bin:/bin", **extra)
@@ -498,18 +541,16 @@ def test_the_plugin_is_registered_only_on_a_yes_and_uninstall_removes_only_what_
     tree = fake_tree(tmp_path / "release")
     dest = tmp_path / "home" / ".thimble" / "app"
     bin_ = stub_bin(tmp_path)
-    (bin_ / "claude").write_text('#!/bin/sh\necho "$*" >> "$STUB_LOG"\n'
-                                 'case "$1 $2" in "--version ") echo 2.1.284;; "plugin list") echo "[]";; esac\n')
-    (bin_ / "claude").chmod(0o755)
+    claude_stub(bin_)
     log = tmp_path / "claude.log"
-    env = env_for(tmp_path, PATH=f"{bin_}:/usr/bin:/bin", STUB_LOG=str(log))
+    env = env_for(tmp_path, PATH=f"{bin_}:/usr/bin:/bin", STUB_LOG=str(log), CLAUDE_STATE=str(tmp_path / "claude.json"))
     record = Path(env["THIMBLE_HOME"]) / "plugin.json"
 
     def run(cmd: list[str]) -> list[str]:
         log.write_text("")
         r = subprocess.run(cmd, capture_output=True, text=True, env=env, stdin=subprocess.DEVNULL, timeout=60)
         assert r.returncode == 0, r.stdout + r.stderr
-        return [c for c in log.read_text().splitlines() if c.startswith("plugin ") and c != "plugin list --json"]
+        return plugin_changes(log)
 
     def install(flag: str) -> list[str]:
         return run(["bash", str(tree / "scripts" / "install.sh"), "--dir", str(dest), *ANSWERS, flag,
@@ -526,3 +567,109 @@ def test_the_plugin_is_registered_only_on_a_yes_and_uninstall_removes_only_what_
     assert install("--no-plugin") == taken_back and json.loads(record.read_text())["registered"] == ""
     install("--plugin")
     assert run(uninstall) == taken_back and not record.exists()
+
+
+def two_checkouts(tmp_path: Path) -> tuple[Path, Path, dict[str, str]]:
+    """A first checkout whose plugin Claude Code has registered (marketplace "thimble") and which ~/.local/bin/thimble
+    runs, and a second checkout with its own THIMBLE_HOME under the same HOME; the second's environment."""
+    first, second = (fake_tree(tmp_path / d / "thimble", checkout=True) for d in ("dev", "clone"))
+    for tree in (first, second):
+        (tree / ".claude-plugin" / "marketplace.json").write_text(json.dumps({"name": "thimble"}))
+    (second / "frontend" / "dist").mkdir(parents=True)
+    (second / "frontend" / "dist" / "index.html").write_text("<!doctype html>\n")
+    bin_ = stub_bin(tmp_path)
+    claude_stub(bin_)
+    (tmp_path / "claude.json").write_text(json.dumps({"marketplaces": {"thimble": str(first)},
+                                                      "plugins": ["thimble@thimble"]}))
+    env = env_for(tmp_path, PATH=f"{bin_}:/usr/bin:/bin", CLAUDE_STATE=str(tmp_path / "claude.json"),
+                  STUB_LOG=str(tmp_path / "claude.log"), THIMBLE_HOME=str(tmp_path / "second-home"))
+    link = Path(env["HOME"]) / ".local" / "bin" / "thimble"
+    link.parent.mkdir(parents=True)
+    link.symlink_to(first / "plugin" / "bin" / "thimble")
+    return first, second, env
+
+
+def test_install_sh_leaves_another_installs_plugin_and_command_as_they_are(tmp_path):
+    """A second install under the same HOME finds Claude Code's thimble plugin registered from the first install's folder
+    and ~/.local/bin/thimble linked into it. Neither is its own: --no-plugin uninstalls nothing, --plugin adds no second
+    plugin beside it, and the link stays; install.sh names the first install's folder and the command that would switch
+    the link, and its dry run shows the same. On a terminal it asks before switching either. A THIMBLE_HOME shared with
+    the first install, whose record names that registration, does not make it the second's either."""
+    import pty
+
+    first, second, env = two_checkouts(tmp_path)
+    state, log = Path(env["CLAUDE_STATE"]), Path(env["STUB_LOG"])
+    link = Path(env["HOME"]) / ".local" / "bin" / "thimble"
+    registered, linked = state.read_text(), str(first / "plugin" / "bin" / "thimble")
+    record = Path(env["THIMBLE_HOME"]) / "plugin.json"
+    switch_link = f"ln -sfn {second}/plugin/bin/thimble {link}"
+
+    def run(*flags: str, typed: str | None = None) -> tuple[subprocess.CompletedProcess, list[str]]:
+        log.write_text("")
+        cmd = ["bash", str(second / "scripts" / "install.sh"), *ANSWERS, "--no-trust-workspaces", *flags]
+        if typed is None:
+            r = subprocess.run(cmd, capture_output=True, text=True, env=env, stdin=subprocess.DEVNULL, timeout=60)
+        else:
+            term, stdin = pty.openpty()
+            os.write(term, typed.encode())
+            try:
+                r = subprocess.run(cmd, capture_output=True, text=True, env=env, stdin=stdin, timeout=60)
+            finally:
+                os.close(term)
+                os.close(stdin)
+        assert r.returncode == 0, r.stdout + r.stderr
+        return r, plugin_changes(log)
+
+    def untouched() -> bool:
+        return state.read_text() == registered and os.readlink(link) == linked
+
+    for flags in (("--plugin",), ("--no-plugin",), ("--plugin", "--dry-run"), ("--no-plugin", "--dry-run")):
+        r, changes = run(*flags)
+        assert changes == [] and untouched(), (flags, changes, r.stdout)
+        assert f"thimble@thimble, from {first}" in r.stdout and switch_link in r.stdout, r.stdout
+        assert "+ ln -sfn" not in r.stdout and "[y/N]" not in r.stdout
+    assert json.loads(record.read_text()) == {"answer": "no", "registered": ""}
+    r, changes = run("--plugin", typed="n\nn\n")
+    assert r.stdout.count("[y/N]") == 2 and changes == [] and untouched(), r.stdout
+    assert json.loads(record.read_text()) == {"answer": "yes", "registered": ""}
+    r, changes = run("--plugin", typed="y\ny\n")
+    assert changes == ["plugin uninstall thimble@thimble", "plugin marketplace remove thimble",
+                       f"plugin marketplace add {second}", "plugin marketplace update thimble",
+                       "plugin install --scope user thimble@thimble", "plugin update --scope user thimble@thimble"]
+    assert json.loads(state.read_text())["marketplaces"] == {"thimble": str(second)}
+    assert os.readlink(link) == f"{second}/plugin/bin/thimble"
+    # the first install's own record, in a THIMBLE_HOME both installs share
+    state.write_text(registered)
+    link.unlink()
+    link.symlink_to(linked)
+    record.write_text(json.dumps({"answer": "yes", "registered": "thimble"}))
+    for flags in (("--no-plugin",), ("--plugin",)):
+        r, changes = run(*flags)
+        assert changes == [] and untouched(), (flags, changes, r.stdout)
+
+
+def test_uninstall_removes_the_plugin_only_when_it_is_registered_from_this_install(tmp_path):
+    """thimble uninstall removes thimble@<name> only when Claude Code has it from this install's folder: another
+    checkout's registration under the same name stays, as does the link into that checkout, whether or not a record
+    (here one the other install wrote into a THIMBLE_HOME both share) names it."""
+    first, second, env = two_checkouts(tmp_path)
+    state, log, home = Path(env["CLAUDE_STATE"]), Path(env["STUB_LOG"]), Path(env["THIMBLE_HOME"])
+    link = Path(env["HOME"]) / ".local" / "bin" / "thimble"
+    registered = state.read_text()
+
+    def uninstall() -> list[str]:
+        home.mkdir(exist_ok=True)
+        (home / "app-dir").write_text(f"{second}\n")
+        log.write_text("")
+        r = subprocess.run(["bash", str(second / "plugin" / "bin" / "thimble"), "uninstall", "--yes"],
+                           capture_output=True, text=True, env=env, stdin=subprocess.DEVNULL, timeout=60)
+        assert r.returncode == 0, r.stdout + r.stderr
+        return plugin_changes(log)
+
+    assert uninstall() == [] and state.read_text() == registered
+    assert os.readlink(link) == str(first / "plugin" / "bin" / "thimble")
+    home.mkdir()
+    (home / "plugin.json").write_text(json.dumps({"answer": "yes", "registered": "thimble"}))
+    assert uninstall() == [] and state.read_text() == registered
+    state.write_text(json.dumps({"marketplaces": {"thimble": str(second)}, "plugins": ["thimble@thimble"]}))
+    assert uninstall() == ["plugin uninstall thimble@thimble", "plugin marketplace remove thimble"]

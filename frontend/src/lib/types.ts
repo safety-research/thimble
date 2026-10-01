@@ -982,10 +982,13 @@ export interface ExtensionViewRow {
 }
 
 /** One extension added to thimble, as this workspace finds it (backend extensions.public): whether it runs here and
- * why not, this workspace's switch, whether it cannot run here whatever that switch says (`locked`), and its views. */
+ * why not, this workspace's switch, whether it cannot run here whatever that switch says (`locked`), what it gives,
+ * the settings it runs under, its orientation instructions and the offer to run them, and its views. */
 export interface ExtensionRow {
   name: string
   version: string
+  /** what it is, from its extension.json */
+  description?: string
   active: boolean
   why: string
   /** the line Settings shows: why it does not run, unless this workspace's switch turned it off */
@@ -993,12 +996,22 @@ export interface ExtensionRow {
   on: boolean
   locked: boolean
   views: ExtensionViewRow[]
+  /** what it gives, each in a few words */
+  parts?: string[]
+  /** the settings of the agents it changes and whether its code runs sandboxed, in words */
+  consent?: string
+  /** whether it gives the orientation instructions */
+  orients?: boolean
+  /** whether Settings offers to run those instructions now: it came on after an orientation ran here */
+  offer?: boolean
 }
 
-/** `GET /ws/{c}/extensions`: the extensions added, and the conflicts among those that run here, in words. */
+/** `GET /ws/{c}/extensions`: the extensions added, the conflicts among those that run here, in words, and whether an
+ * orientation ran here. */
 export interface Extensions {
   extensions: ExtensionRow[]
   conflicts: string[]
+  orientation_ran?: boolean
 }
 
 // ---- the corpus (backend corpus.py) ----
