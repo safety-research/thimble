@@ -576,11 +576,19 @@ def set_view_on(c: str, slug: str, on: bool) -> None:
     browser and the agents' prompts, its files and proposal kept; on, it is back. 404 for any other view."""
     if slug not in {v["slug"] for v in local_extension(c)["views"]}:
         raise HTTPException(404, f"no view {slug!r} was built for this workspace")
+    _write_off(c, slug, on)
+    _emit(c, slug, "built")
+
+
+def _write_off(c: str, slug: str, on: bool) -> None:
+    """`slug` taken out of OFF_FILE (`on`) or put in it."""
     with _proposals_lock:
-        off = (views_off(c) - {slug}) | (set() if on else {slug})
+        was = views_off(c)
+        off = (was - {slug}) | (set() if on else {slug})
+        if off == was:
+            return
         state_dir(c).mkdir(parents=True, exist_ok=True)
         write_json(state_dir(c) / OFF_FILE, sorted(off))
-    _emit(c, slug, "built")
 
 
 def held_slugs(c: str) -> set[str]:
@@ -755,6 +763,7 @@ def delete_view(c: str, slug: str) -> None:
     shutil.rmtree(index_dir(c, slug), ignore_errors=True)
     drop_built_copy(c, slug)
     _forget(c, slug)
+    _write_off(c, slug, True)
     items = list_proposals(c)
     if any(p.get("slug") == slug for p in items):
         _save_proposals(c, [p for p in items if p.get("slug") != slug])
@@ -2258,6 +2267,7 @@ def delete_proposal(c: str, slug: str) -> None:
     if slug in _view_dirs(c):
         delete_view(c, slug)
     else:
+        _write_off(c, slug, True)
         _emit(c, slug, "deleted")
 
 
@@ -3429,15 +3439,16 @@ class OnBody(BaseModel):
 
 @router.put("/ws/{c}/views/{slug}/on")
 async def view_on_route(c: str, slug: str, body: OnBody, request: Request) -> dict[str, Any]:
-    """Settings' switch of a view built for this workspace (set_view_on), which only the analyst's browser may turn.
-    Returns the workspace's local extension."""
-    from . import hook_auth  # noqa: PLC0415
+    """Settings' switch of a view built for this workspace (set_view_on), which only the analyst's browser may turn;
+    a card type the view makes goes and comes back with it. Returns the workspace's local extension."""
+    from . import cardtypes, hook_auth  # noqa: PLC0415
 
     config.workspace_dir(c)
     if not hook_auth.analyst(request):
         raise HTTPException(403, hook_auth.ANALYST_ONLY)
     _bind_loop()
     await asyncio.to_thread(set_view_on, c, slug, body.on)
+    await cardtypes.announce(c)
     return await asyncio.to_thread(local_extension, c)
 
 
