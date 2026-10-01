@@ -95,6 +95,7 @@ ERROR_MAX = 2000
 PROBLEMS_SHOWN = 20  # the lines a reader could not read that thimble lists beside the view (reader_problems)
 DERIVED_MAX = 100  # the derived fields a view lists
 DERIVED_CHARS = {"field": 80, "from": 300, "how": 600}
+INFERRED_KINDS = ("inferred", "computed")  # a derived field's `kind` for a value the files do not state
 WHY_CHARS = 300  # of why hidden() leaves a file out
 NOT_SHOWN_NAMED = 5  # the files a failed check names that the view neither read whole nor hid
 FILES_LISTED = 500  # the claimed files a view's record lists (_public)
@@ -264,14 +265,15 @@ def _cut(text: str, n: int) -> str:
 def _derived(v: Any) -> list[dict[str, str]]:
     """[{field, from, how, kind}] from view.json's `derived` or a reader's derived(index): each with a field name, the
     first entry of a field kept, `kind` "inferred" for a value the files do not state (a join, an estimate, a
-    classification) and "" otherwise. The inferred fields come first, each list in its own order."""
+    classification), given as "inferred" or "computed", and "" otherwise. The inferred fields come first, each list in
+    its own order."""
     out: list[dict[str, str]] = []
     seen: set[str] = set()
     for x in v if isinstance(v, list) else []:
         if not isinstance(x, dict):
             continue
         d = {k: _cut(" ".join(str(x.get(k) or "").split()), n) for k, n in DERIVED_CHARS.items()}
-        d["kind"] = "inferred" if str(x.get("kind") or "").strip().lower() == "inferred" else ""
+        d["kind"] = "inferred" if str(x.get("kind") or "").strip().lower() in INFERRED_KINDS else ""
         if d["field"] and d["field"] not in seen:
             seen.add(d["field"])
             out.append(d)
