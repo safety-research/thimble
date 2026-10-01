@@ -1197,7 +1197,7 @@
   background-color: var(--hl-bg);
 }
 ::highlight(reader-find-current) {
-  background-color: color-mix(in oklab, var(--accent) 38%, transparent);
+  background-color: var(--hl-bg-strong);
 }
 .reader-fragment {
   align-self: center;
@@ -1724,14 +1724,15 @@
   flex: 1;
   border-top: 1px solid var(--border-hairline);
 }
-/* the record a followed ref points at: a wash that fades out by 1.5 s (views/common.tsx HIT_MS), leaving no edge */
+/* the record a followed ref points at: the evidence highlight, fading out by 1.5 s (views/common.tsx HIT_MS), leaving
+   no edge */
 .reader-card.reader-hit::after,
 .reader-block.reader-hit::after {
   content: '';
   position: absolute;
   inset: 0;
   border-radius: inherit;
-  background: var(--accent-soft);
+  background: var(--hl-bg);
   pointer-events: none;
   animation: hit-fade 1.5s var(--ease-out) forwards;
 }
@@ -1948,7 +1949,7 @@
 @keyframes hit-cell-fade {
   0%,
   30% {
-    box-shadow: inset 0 0 0 100vmax var(--accent-soft);
+    box-shadow: inset 0 0 0 100vmax var(--hl-bg);
   }
   100% {
     box-shadow: inset 0 0 0 100vmax transparent;

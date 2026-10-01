@@ -712,7 +712,7 @@ export function ChipRow({ item, ws }: { item: ChipRowT; ws: string }) {
             ) : target?.kind === 'group' ? (
               <GroupChip name={item.text} className="chat-chip-link" onClick={go} />
             ) : (
-              <Chip kind="ref" icon={chipIcon(item.chip, item.ref)} face="sans" className="chat-chip-link" onClick={go}>
+              <Chip kind="ref" tone="accent" icon={chipIcon(item.chip, item.ref)} face="sans" className="chat-chip-link" onClick={go}>
                 {item.text}
               </Chip>
             )}

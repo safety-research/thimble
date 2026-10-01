@@ -2642,7 +2642,7 @@ body .bn-mantine .bn-form-popover .mantine-TextInput-input {
   opacity: 0.3;
 }
 .wu-step .canvas-diagram-node.wu-step-on rect {
-  stroke: var(--accent);
+  stroke: var(--hl-edge);
   stroke-width: 2;
 }
 .wu-step-callout {

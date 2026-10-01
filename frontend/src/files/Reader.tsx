@@ -19,7 +19,7 @@ import { clearMatches, firstMatchFrom, lineAsked, markMatches, markSpots, matchC
 import { countsOf, FindBar, useSourceFind } from './FindBar'
 import { classesOf, colourVar, laneTags, litClass, marksOf, valueOf } from './labels'
 import { ReaderLabelsContext, useReaderLabels } from './marks'
-import { findColumn, ReaderRuler, rulerColumns, useRuler, type LensTick, type RulerTick, type Seen, type Shown } from './Ruler'
+import { FIND_MARK, findColumn, ReaderRuler, rulerColumns, useRuler, type LensTick, type RulerTick, type Seen, type Shown } from './Ruler'
 import { fmtSize } from './Tree'
 import { useFilesFilter, type FilesLabels } from './useLabels'
 import { accepts, slugOf, viewValue } from './viewChoice'
@@ -733,8 +733,8 @@ function FileReader({ workspace, path, kind, targetRef, lead, end, labels, only,
       if (col.id === 'find') {
         for (const s of shown.seen) {
           const places = spots.get(s.line)
-          if (places?.length) for (const p of places) ticks.push({ line: s.line, top: s.top + p * (s.bottom - s.top), bottom: s.top + p * (s.bottom - s.top), colour: 'var(--accent)', hit: true })
-          else if (foundLines.has(s.line)) ticks.push({ ...s, colour: 'var(--accent)' })
+          if (places?.length) for (const p of places) ticks.push({ line: s.line, top: s.top + p * (s.bottom - s.top), bottom: s.top + p * (s.bottom - s.top), colour: FIND_MARK, hit: true })
+          else if (foundLines.has(s.line)) ticks.push({ ...s, colour: FIND_MARK })
         }
       } else if (fileLanes.has(col.id)) {
         // a label over files marks every record of the file with the file's value, its lane's one mark

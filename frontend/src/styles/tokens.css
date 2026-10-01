@@ -208,11 +208,19 @@
   --accent-wash: color-mix(in oklab, var(--accent) 22%, transparent);
   /* the word under the ⌘ pointer */
   --accent-tint: color-mix(in oklab, var(--accent) 20%, transparent);
-  /* the one chip: the accent's edge at 28%, a 6% tint over the cell, the accent as text */
+  /* the accent chip, for what the agent made (a card, a group, a label, a thread, a document, a view): the accent's
+     edge at 28%, a 6% tint over the cell, the accent as text */
   --chip-edge: color-mix(in oklab, var(--accent) 28%, transparent);
   --chip-bg: color-mix(in oklab, var(--accent) 6%, var(--surface-card));
   --chip-edge-hover: color-mix(in oklab, var(--accent) 45%, transparent);
   --chip-bg-hover: color-mix(in oklab, var(--accent) 11%, var(--surface-card));
+  /* the evidence chip, for the data (a file, a record, a table's cell, printed lines): a hairline on the cell and the
+     secondary text, the primary on hover */
+  --chip-evidence-edge: rgba(var(--ink-rgb), 0.18);
+  --chip-evidence-edge-hover: rgba(var(--ink-rgb), 0.3);
+  --chip-evidence-bg: var(--surface-card);
+  --chip-evidence-text: var(--text-secondary);
+  --chip-evidence-text-hover: var(--text-primary);
   --ai-mark: var(--accent);
 
   --status-positive-soft: color-mix(in oklab, var(--status-positive) 12%, transparent);
@@ -222,9 +230,11 @@
   --status-info-soft: var(--paper-1);
   --status-neutral: var(--ink-500);
   --status-neutral-soft: var(--paper-1);
-  /* the highlight of a span inside a longer text (.hl in base.css), lighter than the selection's wash so the two read
-     apart */
-  --hl-bg: color-mix(in oklab, var(--accent) 16%, transparent);
+  /* the highlight of the evidence, in ink on every accent: a span inside a longer text (.hl in base.css), a cited
+     table cell or output line with its edge, and the stronger wash of the find's current match */
+  --hl-bg: rgba(var(--ink-rgb), 0.08);
+  --hl-bg-strong: rgba(var(--ink-rgb), 0.18);
+  --hl-edge: rgba(var(--ink-rgb), 0.4);
   --hl-unverified: var(--status-warning-soft);
   --hl-unverified-ink: var(--status-warning);
 
@@ -369,6 +379,10 @@
   --text-on-inverse: var(--paper-2);
   /* Dark's ink is light, so its scrim darkens with black instead */
   --scrim: rgba(0, 0, 0, 0.6);
+  /* a light ink over a dark cell needs more of it to read as the same step */
+  --hl-bg: rgba(var(--ink-rgb), 0.14);
+  --hl-bg-strong: rgba(var(--ink-rgb), 0.26);
+  --hl-edge: rgba(var(--ink-rgb), 0.5);
   /* the code colours lightened toward Dark's text ink */
   --code-keyword: color-mix(in oklab, var(--viz-5) 70%, var(--ink-900));
   --code-string: color-mix(in oklab, var(--viz-3) 64%, var(--ink-900));

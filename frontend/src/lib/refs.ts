@@ -377,3 +377,16 @@ export function surfaceOf(ref: string): Surface | null {
       return null
   }
 }
+
+/** The ref kinds that name the data: a file or a place in it, a database's table or row, a call's output. */
+const EVIDENCE_KINDS: ReadonlySet<ParsedRef['kind']> = new Set(['call', 'table', 'row', 'record', 'range', 'block', 'span', 'path'])
+
+/** True when a ref points at the data (EVIDENCE_KINDS, or a card's table cell or printed lines), whose chip is the
+ * evidence chip; false for what the agent made (a whole card, a group, a label, a thread, a document, a view, a part
+ * of the UI), whose chip is the accent chip. A ref that does not parse is shown as a file, so it counts as data. */
+export function isEvidenceRef(ref: string): boolean {
+  const p = parseRef(ref)
+  if (!p) return true
+  if (p.kind === 'cell') return p.col != null || p.line != null
+  return EVIDENCE_KINDS.has(p.kind)
+}

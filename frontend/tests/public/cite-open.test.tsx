@@ -86,6 +86,8 @@ describe('the chip that heads a citation\'s hover label', () => {
     const chip = await hovered(ref, '46')
     expect(document.body.querySelector('.refchip-lines')?.textContent).toContain('agents (46)')
     expect(chip.tagName).toBe('BUTTON')
+    // printed lines are the data, so the head chip is the evidence chip
+    expect(chip.classList.contains('chip-tone-evidence')).toBe(true)
     const seen = opened()
     await act(async () => chip.click())
     seen.off()

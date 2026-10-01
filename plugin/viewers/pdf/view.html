@@ -20,7 +20,7 @@
   .page .text { white-space: pre-wrap; overflow-wrap: anywhere; }
   .none { color: var(--text-tertiary); }
   main > .none { padding: 16px 12px; }
-  mark { background: var(--accent-soft); color: inherit; border-radius: 2px; }
+  mark { background: var(--hl-bg, var(--accent-soft)); color: inherit; border-radius: 2px; }
   /* a second PDF beside the first, page by page */
   .pair { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); column-gap: 16px; }
   .pair .page { max-width: none; min-width: 0; }

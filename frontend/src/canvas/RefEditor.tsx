@@ -5,7 +5,7 @@
 import { useEffect, useLayoutEffect, useRef, type ClipboardEvent, type KeyboardEvent } from 'react'
 import { BARE_SRC } from '../chat/markdown'
 import { Icon, type IconName } from '../components/Icon'
-import { compactLabel, kindIcon } from '../components/RefChip'
+import { compactLabel, kindIcon, refTone } from '../components/RefChip'
 import { parseRef, splitValueRef } from '../lib/refs'
 
 const BRACKET_SRC = String.raw`\[\[((?:[^\[\]\n]|\[[^\[\]\n]*\])+?)\]\]`
@@ -57,7 +57,7 @@ function glyph(tpl: HTMLElement | null, name: IconName): Node | null {
 }
 
 /** A token's element: a cited number as the card draws it (the number itself, underlined as a citation), a bare ref
- * as the accent chip. */
+ * as its chip (RefChip refTone). */
 function tokenEl(part: Extract<RefPart, { raw: string }>, tpl: HTMLElement | null): HTMLElement {
   const el = document.createElement('span')
   el.contentEditable = 'false'
@@ -68,7 +68,7 @@ function tokenEl(part: Extract<RefPart, { raw: string }>, tpl: HTMLElement | nul
     el.className = 'refedit-token refchip refchip-value refchip-citation'
     el.append(part.value)
   } else {
-    el.className = 'refedit-token chip chip-ref chip-tone-accent'
+    el.className = `refedit-token chip chip-ref chip-tone-${refTone(part.ref)}`
     const g = glyph(tpl, icon) as Element | null
     if (g) {
       g.classList.add('chip-ico')
