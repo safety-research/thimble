@@ -867,6 +867,26 @@ async def test_the_headless_page_waits_for_a_slow_answer_and_its_run_gets_the_ti
     (s,) = await views.shoot_states(CORPUS, "threads", [{"open": {}}])
     assert s["ok"] and s["fetches"] == 1, s["errors"]
 
+
+UNMARKED_HTML = """<!doctype html><html><head><style>body{font:13px sans-serif;margin:8px}</style></head><body>
+<div data-anchor="board.jsonl#L7" style="padding-left:8px">seven</div>
+<div data-anchor="board.jsonl#L14" data-anchor-unmarked style="padding-left:8px">fourteen, in the label's colour</div>
+<div data-anchor="board.jsonl#L3" style="padding-left:8px">three</div>
+<script>thimble.onOpen(() => {})</script></body></html>"""
+
+
+async def test_a_record_the_page_marks_itself_is_not_held_to_thimble_s_mark(ws, inproc, bound):
+    """An element with data-anchor-unmarked draws the labels' colours itself, so the bridge gives it no bar and the
+    checks count its record as shown but do not look for the bar on it."""
+    if why := views.build_problem():
+        if os.environ.get("CI") == "true":
+            pytest.fail(why)
+        pytest.skip(why)
+    views.write_view(CORPUS, "unmarked", reader=THREADS_READER, html=UNMARKED_HTML, **{**VIEW, "name": "Unmarked"})
+    (s,) = await views.shoot_states(CORPUS, "unmarked", [{"open": {}, "labels": views.probe_context()}])
+    assert s["ok"], s["errors"]
+    assert (s["shown"]["records"], s["shown"]["due"], s["shown"]["drawn"]) == (3, 1, 1), s["shown"]
+
 # what Playwright's own error says to run, which never reaches a model
 INSTALL_WORDS = re.compile(r"playwright install|npx|download new browsers|Executable doesn't exist|install\.sh", re.I)
 

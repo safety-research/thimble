@@ -20,12 +20,12 @@
 // Every other request the page makes is refused, so a view that reaches for the network fails here as it would in the
 // browser. A state is measured when its page has been quiet (no fetch or marks request in flight) for QUIET_MS after
 // `open`, or HARD_MS has passed with no request in flight, and again after each action. One line ends the run:
-// {"done": true, "states": [{ok, errors, fetches, height, refs, records, units, marked, hidden, shown, layout, controls, actions, fonts}]}: `refs` the
-// distinct data-anchor refs the page reported, `records` those naming a record (`<path>#L<n>`), `units` those naming
-// one of the view's units (`view:<slug>/<key>`), `marked` the elements carrying a label's mark, `hidden` those the
-// bridge hid or dimmed for the filter, `shown` what is on screen at the end (shownCounts), `layout` how its text fits
-// (layoutCounts), `controls` the controls it shows (controlList), `actions` each action with whether its control was
-// found, and `fonts` whether Hanken Grotesk was loaded in the frame.
+// {"done": true, "states": [{ok, errors, fetches, height, refs, records, units, marked, hidden, shown, layout, controls,
+// actions, fonts}]}: `refs` the distinct data-anchor refs the page reported, `records` those naming a record
+// (`<path>#L<n>`), `units` those naming one of the view's units (`view:<slug>/<key>`), `marked` the elements carrying a
+// label's mark, `hidden` those the bridge hid or dimmed for the filter, `shown` what is on screen at the end
+// (shownCounts), `layout` how its text fits (layoutCounts), `controls` the controls it shows (controlList), `actions`
+// each action with whether its control was found, and `fonts` whether Hanken Grotesk was loaded in the frame.
 import { createRequire } from 'node:module'
 import { readFileSync } from 'node:fs'
 import { open } from 'node:fs/promises'
@@ -51,7 +51,8 @@ const plain = (e) => String(e && e.message ? e.message : e).split('\n').filter((
 
 // What the page shows at the end, counted once per ref on the outermost visible element that carries it (not a canvas,
 // which takes no mark, and not one the bridge hid or dimmed for the filter): `records` and `units` anchored, `due` the
-// refs whose `marks` entry has a bar, `drawn` those of them whose element carries the bridge's mark, and `unkept` the
+// refs whose `marks` entry has a bar, other than those whose outermost element is data-anchor-unmarked (the page draws
+// the labels' colours on it itself), `drawn` those of them whose element carries the bridge's mark, and `unkept` the
 // records shown that the filter does not keep, other than those inside a unit it keeps. Runs in the frame.
 function shownCounts({ marks }) {
   const RECORD = /^.+#L[1-9]\d*$/
@@ -73,15 +74,19 @@ function shownCounts({ marks }) {
       else if (up && UNIT.test(up) && marks[up] && marks[up].keep) held = true
     }
     const was = seen.get(ref)
-    seen.set(ref, { drawn: (was && was.drawn) || top.hasAttribute('data-thimble-label'), held: (!was || was.held) && held })
+    seen.set(ref, {
+      drawn: (was && was.drawn) || top.hasAttribute('data-thimble-label'),
+      held: (!was || was.held) && held,
+      own: (!was || was.own) && top.hasAttribute('data-anchor-unmarked'),
+    })
   }
   const out = { records: 0, units: 0, due: 0, drawn: 0, unkept: 0 }
-  for (const [ref, { drawn, held }] of seen) {
+  for (const [ref, { drawn, held, own }] of seen) {
     const record = RECORD.test(ref)
     if (record) out.records++
     else out.units++
     const m = marks[ref]
-    if (m && typeof m.bar === 'string' && m.bar) {
+    if (m && typeof m.bar === 'string' && m.bar && !own) {
       out.due++
       if (drawn) out.drawn++
     }
