@@ -141,13 +141,15 @@ def test_the_event_log_is_read_on_from_where_it_was_left(workspaces_tmp, monkeyp
     asyncio.run(emit_some(30))
     assert len(tails) == 0, "records of this process alone read no tail"
     log = investigation.inv_dir(c, investigation.MAIN) / "events.jsonl"
+    other = json.loads(log.read_text().splitlines()[-1])["seq"] + 50
     pos = log.stat().st_size
+    line = json.dumps({"type": "chat", "chat": "other", "seq": other})
     with log.open("a") as f:
-        f.write(json.dumps({"type": "chat", "chat": "other", "seq": 100}) + "\n" + '{"type": "chat", "se')
+        f.write(line + "\n" + '{"type": "chat", "se')
     fresh, end = investigation._read_jsonl_after(log, pos)
-    assert [e["seq"] for e in fresh] == [100] and end == pos + len(json.dumps({"type": "chat", "chat": "other", "seq": 100})) + 1
+    assert [e["seq"] for e in fresh] == [other] and end == pos + len(line) + 1
     asyncio.run(emit_some(1))
-    assert len(tails) == 1 and json.loads(log.read_text().splitlines()[-1])["seq"] == 101, \
+    assert len(tails) == 1 and json.loads(log.read_text().splitlines()[-1])["seq"] == other + 1, \
         "a record another process wrote is seen, and the next seq follows it"
     assert investigation._read_jsonl_after(log, log.stat().st_size + 10)[1] == log.stat().st_size, \
         "a log written again is read from its start"
