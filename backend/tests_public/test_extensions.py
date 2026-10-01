@@ -118,12 +118,14 @@ def test_add_lists_each_contribution_with_its_own_description_and_adds_nothing_w
 
 
 async def test_what_an_extension_needs_is_checked_and_what_it_waits_for_leaves_it_unloaded_and_named(corpus, tmp_path):
-    """A library thimble does not inline stops the add; a thimble outside its range, a Python package that is not
-    installed and an extension that is not added leave it added but unloaded, and Settings, the list and doctor say
-    why. An extension it needs that thimble ships is listed and added on the same yes, and it runs only where that one
-    runs."""
-    with pytest.raises(extensions.AddError, match="thimble inlines only vega, vega-lite, vega-embed"):
+    """An npm package its views do not hold stops the add, as does a library that is no package; a thimble outside its
+    range, a Python package that is not installed and an extension that is not added leave it added but unloaded, and
+    Settings, the list and doctor say why. An extension it needs that thimble ships is listed and added on the same yes,
+    and it runs only where that one runs."""
+    with pytest.raises(extensions.AddError, match="loads d3, which its lib folder does not hold"):
         _add(_copy(tmp_path, "d3ish", dependencies={"js": ["d3"]}))
+    with pytest.raises(extensions.AddError, match="neither one of vega, vega-lite, vega-embed nor an npm package"):
+        _add(_copy(tmp_path, "badlib", dependencies={"js": ["not a package!"]}))
     with pytest.raises(extensions.AddError, match="no folder, git URL or built-in"):
         extensions.add("no-such-thing", yes=True, say=lambda _: None)
 

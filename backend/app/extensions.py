@@ -2,7 +2,7 @@
 `thimble extension add` copies one into $THIMBLE_HOME/extensions/<name>/ after the analyst said yes (cli.py). Its folder:
 
   extension.json    {"name", "version", "thimble": "<the thimble versions it works with, written as package.json's
-                    engines writes them>", "dependencies": {"python": [<package>], "js": [<a library thimble inlines>],
+                    engines writes them>", "dependencies": {"python": [<package>], "js": [<a library its pages load>],
                     "extensions": [<extension>]}}; `requires` is read as dependencies.python
   views/<slug>/     a view (views.py); a `card` block and card.py make it a card type too (cardtypes.py), and card.md is
                     the type's guide
@@ -18,7 +18,8 @@
                     its own exports; report-types/ is read too
 
 An extension loads when read_extension finds no problem: this thimble is in its range, its Python packages import, its
-js names only libraries thimble inlines, and the extensions it needs are added. It is active in a workspace when it
+js names thimble's own libraries or npm packages its views hold in their lib folders (view_libs), and the extensions it
+needs are added. It is active in a workspace when it
 loads, neither thimble's config (`extensions.<name>.enabled: false`) nor the workspace's switch in Settings turns it
 off, and the extensions it needs are active there. An active extension's agents and orientation instructions join the
 orientation, its card types join main's prompt where their claims match files, and its report types are offered in
@@ -298,7 +299,7 @@ def read_extension(root: Path, expect: str | None = None, have: set[str] | None 
     """What the extension in folder `root` is and gives, with `problems`, the reasons it cannot load, of which `waits`
     are those an added extension waits out (a thimble outside its range, a Python package or an extension it needs);
     `expect` is the name its folder gives it, `have` the extensions added (added())."""
-    from . import views  # noqa: PLC0415
+    from . import view_libs, views  # noqa: PLC0415
 
     raw = _json(root / MANIFEST)
     name = str(raw.get("name") or "")
@@ -323,9 +324,10 @@ def read_extension(root: Path, expect: str | None = None, have: set[str] | None 
     python = _words(deps.get("python")) if "python" in deps else _words(raw.get("requires"))
     js = _words(deps.get("js"))
     needs = [n for n in _words(deps.get("extensions")) if n != name]
-    unknown = [x for x in js if x not in views.LIBS]
+    unknown = [x for x in js if x not in views.LIBS and view_libs.parse(x) is None]
     if unknown:
-        problems.append(f"its dependencies.js names {', '.join(unknown)}; thimble inlines only {', '.join(views.LIBS)}")
+        problems.append(f"its dependencies.js names {', '.join(unknown)}, which is neither one of "
+                        f"{', '.join(views.LIBS)} nor an npm package as name@version")
     if bad := [n for n in needs if not NAME_RE.match(n)]:
         problems.append(f"its dependencies.extensions names {', '.join(map(repr, bad))}, which is no extension's name")
     if missing := [x for x in python if not _importable(x)]:
@@ -341,6 +343,12 @@ def read_extension(root: Path, expect: str | None = None, have: set[str] | None 
         if not v or not (d / views.READER_PY).is_file() or not (d / views.VIEW_HTML).is_file():
             problems.append(f"its view {d.name!r} lacks {views.VIEW_JSON}, {views.READER_PY} or {views.VIEW_HTML}")
             continue
+        missing = [x for x in (*js, *view_libs.entries(v.get("libs")))
+                   if view_libs.parse(x) is not None and view_libs.vendored(d, x) is None]
+        if missing:
+            problems.append(f"its view {d.name!r} loads {', '.join(dict.fromkeys(missing))}, which its "
+                            f"{view_libs.LIB_DIR} folder does not hold; build the view in a workspace, where thimble "
+                            "installs packages once the analyst allows them, and copy its folder")
         card = v.get("card") if isinstance(v.get("card"), dict) and (d / "card.py").is_file() else None
         vs.append({"slug": d.name, "name": _one(v.get("name") or d.name),
                    "description": _one(v.get("description") or v.get("why")), "claims": _words(v.get("claims")),

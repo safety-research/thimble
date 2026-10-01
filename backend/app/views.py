@@ -45,7 +45,7 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse
 from pydantic import BaseModel
 
-from . import config, headless, investigation, prompts, refs, userconf, view_calls, view_indexes
+from . import config, headless, investigation, prompts, refs, userconf, view_calls, view_indexes, view_libs
 from .ledger import atomic_write_text, read_json, unlinked, write_json
 
 log = logging.getLogger("thimble.views")
@@ -92,7 +92,6 @@ WHY_CHARS = 300  # of why hidden() leaves a file out
 NOT_SHOWN_NAMED = 5  # the files a failed check names that the view neither read whole nor hid
 FILES_LISTED = 500  # the claimed files a view's record lists (_public)
 SIBLING_SAMPLE = 200  # of a claimed folder's paths, those looked for in a folder beside it (sibling_files)
-SOURCE_MAX = 400_000  # chars of reader.py or view.html a view may hold
 # the checks: sample lines per claimed file, files sampled, keys followed, cited records read per key
 CHECK_LINES, CHECK_FILES, CHECK_KEYS, CHECK_KEY_REFS = 3, 3, 3, 30
 SHOT_TIMEOUT_S, SHOT_STATE_S = 30.0, 30.0  # a headless run's time: the browser's start, then each state's
@@ -104,8 +103,9 @@ FETCHED_SCAN_MAX = 200_000
 _RECORD_REF = re.compile(r"^[^\s#][^#\n]*#L[1-9]\d*$")  # a record ref, `<path>#L<n>` (frontend files/labels recordRef)
 FOLDER_CACHE_S = 5.0
 _NODE_MODULES = config.REPO_ROOT / "frontend" / "node_modules"
-# The libraries a view page may use, served by thimble and inlined into the page. vega-embed needs vega and vega-lite
-# before it, so a view that names it gets all three in this order.
+# thimble's own builds of the libraries a view page may name, inlined into the page; any other library is an npm
+# package vendored into the view's folder (view_libs). vega-embed needs vega and vega-lite before it, so a view that
+# names it gets all three in this order.
 LIBS: dict[str, Path] = {
     "vega": _NODE_MODULES / "vega" / "build" / "vega.min.js",
     "vega-lite": _NODE_MODULES / "vega-lite" / "build" / "vega-lite.min.js",
@@ -295,11 +295,13 @@ def _derived(v: Any) -> list[dict[str, str]]:
 
 
 def _libs(v: Any) -> list[str]:
-    """The named libraries with what each needs ahead of it, in LIBS order."""
-    wanted = set(_str_list(v)) & set(LIBS)
+    """The libraries a page loads: thimble's own it names, with what each needs ahead of it, in LIBS order, then the
+    npm packages it names (view_libs), in its order."""
+    named = view_libs.entries(v)
+    wanted = set(named) & set(LIBS)
     for name in list(wanted):
         wanted.update(LIB_NEEDS.get(name, ()))
-    return [n for n in LIBS if n in wanted]
+    return [n for n in LIBS if n in wanted] + [n for n in named if view_libs.parse(n) is not None]
 
 
 def _normalize_view(slug: str, raw: Any, *, where: Path | None = None, origin: str = "workspace") -> dict[str, Any]:
@@ -452,16 +454,14 @@ def _check_slug(slug: str) -> str:
 
 
 def source_problems(claims: Any, reader: str, html: str, libs: Any) -> list[str]:
-    """What makes a view's files unable to run, as lines for whoever wrote them: no claims, an empty or oversized reader
-    or page, a reader that does not parse or lacks one of its three functions, a library thimble does not have."""
+    """What makes a view's files unable to run, as lines for whoever wrote them: no claims, an empty reader or page, a
+    reader that does not parse or lacks one of its three functions, a library that is no package."""
     out: list[str] = []
     if not _str_list(claims):
         out.append("a view claims at least one file: give `claims` in view.json as corpus-relative globs")
     for label, text in ((READER_PY, reader), (VIEW_HTML, html)):
         if not text.strip():
             out.append(f"{label} is empty")
-        elif len(text) > SOURCE_MAX:
-            out.append(f"{label} is {len(text):,} characters; the most a view holds is {SOURCE_MAX:,}")
     if reader.strip():
         try:
             compile(reader, READER_PY, "exec")
@@ -471,9 +471,7 @@ def source_problems(claims: Any, reader: str, html: str, libs: Any) -> list[str]
             missing = [fn for fn in ("build_index", "records", "resolve") if not re.search(rf"^def {fn}\s*\(", reader, re.M)]
             if missing:
                 out.append(f"{READER_PY} defines no {', '.join(f'{m}()' for m in missing)} at its top level")
-    unknown = sorted(set(_str_list(libs)) - set(LIBS))
-    if unknown:
-        out.append(f"no library {', '.join(unknown)}; a view may use {', '.join(LIBS)}")
+    out += view_libs.problems(libs)
     return out
 
 
@@ -534,6 +532,7 @@ def _publish(c: str, slug: str, version: str) -> None:
         for f in (views_dir(c) / slug).iterdir():
             if f.is_file() and not f.is_symlink():
                 shutil.copy2(f, tmp / f.name)
+        view_libs.copy_lib(views_dir(c) / slug, tmp)
         os.replace(tmp, dst)
     os.utime(dst)
     kept = sorted((x for x in root.iterdir() if x.is_dir() and VERSION_RE.match(x.name)),
@@ -1688,6 +1687,7 @@ def install_viewer(c: str, slug: str, d: Path, claims: Any, *, why: str, propose
             prop["extension"] = extension
         items.append(prop)
         _save_proposals(c, items)
+    view_libs.copy_lib(d, views_dir(c) / slug)
     write_view(c, slug, name=raw.get("name") or slug, description=v["description"], claims=_str_list(claims),
                accepts=v["accepts"], units=v["units"], derived=v["derived"], libs=raw.get("libs") if libs is None else libs,
                reader=(d / READER_PY).read_text("utf-8"), html=(d / VIEW_HTML).read_text("utf-8"))
@@ -1922,11 +1922,14 @@ def drop_built_copy(c: str, slug: str) -> None:
 
 
 def view_digest(d: Path) -> str:
-    """A digest of the view's files in `d`: the files at the folder's top level, view.json read without the `built`
-    and `version` stamps; subfolders (the cache, Python's bytecode) are left out."""
+    """A digest of the view's files in `d`: the files at the folder's top level and its vendored packages (view_libs),
+    view.json read without the `built` and `version` stamps; other subfolders (the cache, Python's bytecode) are left
+    out."""
     h = hashlib.sha256()
     try:
         files = sorted(p for p in d.iterdir() if p.is_file())
+        lib = d / view_libs.LIB_DIR
+        files += sorted(p for p in lib.iterdir() if p.is_file()) if lib.is_dir() and not lib.is_symlink() else []
     except OSError:
         return ""
     for p in files:
@@ -1938,7 +1941,7 @@ def view_digest(d: Path) -> str:
                     raw.pop("built", None)
                     raw.pop("version", None)
                 data = json.dumps(raw, sort_keys=True).encode()
-        h.update(p.name.encode() + b"\0" + hashlib.sha256(data).digest())
+        h.update(p.relative_to(d).as_posix().encode() + b"\0" + hashlib.sha256(data).digest())
     return h.hexdigest()
 
 
@@ -2110,7 +2113,13 @@ async def gate(c: str, slug: str, locators: list[str] | None = None, *, shot_dir
         problems.append("view.json names `built`, which thimble adds when the view passes; remove it")
     if problems:
         return {"ok": False, "view": read_view(c, slug), "problems": problems, "checks": [], "page": None}
+    vendored = await view_libs.ensure(c, slug, d, raw.get("libs"))
+    if vendored["problems"]:
+        return {"ok": False, "view": read_view(c, slug), "problems": vendored["problems"], "checks": [], "page": None,
+                "notes": vendored["notes"]}
     report = await check(c, slug, locators, shot_dir=shot_dir)
+    if vendored["notes"]:
+        report["notes"] = [*vendored["notes"], *report.get("notes", [])]
     _prune_shots(shot_dir or (d / CACHE_SUBDIR / "shots"))
     if report.get("ok") and report.get("coverage") and view_review.enabled():
         found = await view_review.derived_review(c, slug, report["coverage"]["derived"])
@@ -2232,6 +2241,11 @@ def _script_text(js: str) -> str:
     return js.replace("</script", "<\\/script").replace("</SCRIPT", "<\\/SCRIPT")
 
 
+def _style_text(css: str) -> str:
+    """Style text safe inside an inline <style>."""
+    return re.sub(r"</(style)", r"<\\/\1", css, flags=re.I)
+
+
 def frame_document(view: dict[str, Any], media: str | None = None, *, card: bool = False,
                    derived: list[dict[str, str]] | None = None) -> str:
     """The view's page as a frame loads it: the policy that blocks every load but the view's media route, the bridge
@@ -2257,8 +2271,12 @@ def frame_document(view: dict[str, Any], media: str | None = None, *, card: bool
             f"<style>{KIT_CSS.read_text('utf-8')}</style>"]
     for name in view.get("libs") or []:
         p = LIBS.get(name)
-        if p is not None and p.is_file():
-            head.append(f"<script>{_script_text(p.read_text('utf-8'))}</script>")
+        got = ("js", p.read_text("utf-8")) if p is not None and p.is_file() else \
+            view_libs.vendored(Path(view["dir"]), name) if p is None else None
+        if got is not None and got[0] == "css":
+            head.append(f"<style>{_style_text(got[1])}</style>")
+        elif got is not None:
+            head.append(f"<script>{_script_text(got[1])}</script>")
         else:
             head.append(f"<script>console.error({json.dumps(f'the library {name} is not installed here')})</script>")
     # the policy comes first, before any markup of the view: a meta policy only governs what is parsed after it. The
