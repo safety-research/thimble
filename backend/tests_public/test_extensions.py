@@ -247,6 +247,27 @@ async def test_an_added_extension_runs_in_every_workspace_and_its_view_where_it_
     assert orient_session.instructions_of(CORPUS, "My own way.").startswith("My own way."), "the analyst's setting wins"
 
 
+async def test_a_view_json_in_the_schema_s_form_keeps_its_scope_and_derived_fields_when_installed(corpus, tmp_path):
+    """A view.json written the way extension.schema.json documents it, with `scope` and the derived fields in
+    `records`, is installed with its records kept, and the view header's derived fields are those it declares."""
+    d = _copy(tmp_path, "schema-form")
+    vj = d / "views" / "tally" / "view.json"
+    raw = json.loads(vj.read_text())
+    del raw["claims"]
+    raw.update(scope=["tally/*.jsonl"], compare=True, records=[{"name": "row", "fields": [
+        {"name": "who", "type": "category"},
+        {"name": "person", "type": "text", "derived": "cleaned", "from": "who", "how": "title-cased"},
+        {"name": "busy", "type": "category", "derived": "computed", "from": "each person's rows", "how": "more than one"}]}])
+    vj.write_text(json.dumps(raw))
+    _add(d)
+    await extensions.refresh(CORPUS, wait=10)
+    v = views.read_built(CORPUS, "tally")
+    assert v["ok"] and v["claims"] == ["tally/*.jsonl"] and v["compare"] is True
+    assert [(x["field"], x["kind"]) for x in v["derived"]] == [("busy", "inferred"), ("person", "")]
+    assert json.loads((Path(v["dir"]) / "view.json").read_text())["records"] == raw["records"]
+    assert [x["field"] for x in await views.derived_fields(CORPUS, "tally", v)] == ["busy", "person"]
+
+
 async def test_a_view_shows_where_its_check_finds_it_fits_and_its_switch_overrides_the_check(corpus, fit):
     """The check is asked once per view and workspace and again only when the files it claims change, the last answer
     standing meanwhile. Until it first answers, when it says no and when it fails, the view is hidden and Settings says

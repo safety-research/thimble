@@ -504,19 +504,34 @@ def _libs(v: Any) -> list[str]:
     return [n for n in LIBS if n in wanted] + [n for n in named if view_libs.parse(n) is not None]
 
 
+def _declared(raw: dict[str, Any]) -> list[Any]:
+    """A view.json's derived fields as `derived` entries: its `derived` list, then each field of its `records` that is
+    `derived` "cleaned" or "computed", a computed one inferred."""
+    out = list(raw.get("derived")) if isinstance(raw.get("derived"), list) else []
+    for rec in raw.get("records") if isinstance(raw.get("records"), list) else []:
+        for f in rec.get("fields") if isinstance(rec, dict) and isinstance(rec.get("fields"), list) else []:
+            if isinstance(f, dict) and f.get("derived") in ("cleaned", "computed") and f.get("name"):
+                out.append({"field": f["name"], "from": f.get("from") or "", "how": f.get("how") or "",
+                            "kind": "inferred" if f["derived"] == "computed" else ""})
+    return out
+
+
 def _normalize_view(slug: str, raw: Any, *, where: Path | None = None, origin: str = "workspace") -> dict[str, Any]:
     raw = raw if isinstance(raw, dict) else {}
     d = where
+    claims = _str_list(raw.get("claims") if raw.get("claims") is not None else raw.get("scope"))
     return {
         "origin": origin,  # workspace (written for this corpus) or builtin (a file-type viewer thimble ships)
         "slug": slug,
         "name": " ".join(str(raw.get("name") or slug).split()),
         "description": " ".join(str(raw.get("description") or raw.get("why") or "").split()),
-        "claims": _str_list(raw.get("claims")),
+        "claims": claims,
         "accepts": _forms(raw.get("accepts")),
         "units": _forms(raw.get("units") if raw.get("units") is not None else raw.get("declares")),
         "unit": _unit(raw.get("unit")),
-        "derived": _derived(raw.get("derived")),
+        "derived": _derived(_declared(raw)),
+        "records": raw["records"] if isinstance(raw.get("records"), list) else [],
+        "compare": raw.get("compare") is True,
         "libs": _libs(raw.get("libs")),
         "built": str(raw.get("built") or ""),
         "version": str(raw.get("version") or ""),
@@ -524,7 +539,7 @@ def _normalize_view(slug: str, raw: Any, *, where: Path | None = None, origin: s
         # checks read (module note); a file-type viewer thimble ships is never one
         "draft": origin == "workspace" and not raw.get("built"),
         # a view whose reader or page is missing is listed so it can be deleted, and never opens a citation
-        "ok": bool(d is not None and (d / READER_PY).is_file() and (d / VIEW_HTML).is_file() and _str_list(raw.get("claims"))),
+        "ok": bool(d is not None and (d / READER_PY).is_file() and (d / VIEW_HTML).is_file() and claims),
         "dir": str(d) if d else None,
     }
 
@@ -727,7 +742,8 @@ def source_problems(claims: Any, reader: str, html: str, libs: Any) -> list[str]
 
 
 def write_view(c: str, slug: str, *, name: str, description: str, claims: Any, accepts: Any = None, units: Any = None,
-               derived: Any = None, libs: Any = None, reader: str, html: str, unit: Any = None) -> dict[str, Any]:
+               derived: Any = None, libs: Any = None, reader: str, html: str, unit: Any = None, records: Any = None,
+               compare: bool = False) -> dict[str, Any]:
     """Write or replace a view's three files, validated (source_problems), and register it built (mark_built): a view
     of thimble's own making, as the tests make theirs; a view ticket's session writes the files itself."""
     slug = _check_slug(slug)
@@ -740,6 +756,10 @@ def write_view(c: str, slug: str, *, name: str, description: str, claims: Any, a
               "claims": _str_list(claims), "accepts": _forms(accepts), "units": _forms(units), "libs": _libs(libs)}
     if _derived(derived):
         stored["derived"] = _derived(derived)
+    if isinstance(records, list) and records:
+        stored["records"] = records
+    if compare:
+        stored["compare"] = True
     if (u := _unit(unit)) is not None:
         stored["unit"] = u
     ensure_local(config.workspace_dir(c))
@@ -2159,7 +2179,8 @@ def install_viewer(c: str, slug: str, d: Path, claims: Any, *, why: str, propose
         _save_proposals(c, items)
     view_libs.copy_lib(d, views_dir(c) / slug)
     write_view(c, slug, name=raw.get("name") or slug, description=v["description"], claims=_str_list(claims),
-               accepts=v["accepts"], units=v["units"], derived=v["derived"], libs=raw.get("libs") if libs is None else libs,
+               accepts=v["accepts"], units=v["units"], derived=_derived(raw.get("derived")), records=v["records"],
+               compare=v["compare"], libs=raw.get("libs") if libs is None else libs,
                reader=(d / READER_PY).read_text("utf-8"), html=(d / VIEW_HTML).read_text("utf-8"), unit=v["unit"])
     update_proposal(c, slug, installed=view_digest(views_dir(c) / slug))
 
