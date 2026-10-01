@@ -560,16 +560,41 @@ export const docsApi = {
 // --- scale: one folder at a time for the tree, one page of labels for the reader ---
 import type { FolderListing, LabelRowsPage } from './types'
 
-/** folders one stamps request asks about (backend corpus.STAMPS_MAX is 200) */
-export const STAMPS_AT_ONCE = 100
+/** folders one stamps request asks about (backend corpus.STAMPS_MAX is 200), and the characters of their paths in its
+ * URL, well under the 16 KB a server takes for a request line */
+const STAMPS_AT_ONCE = 100
+const STAMPS_URL_CHARS = 6000
+
+/** `paths` as the `path=` parts of stamps requests, each within STAMPS_AT_ONCE folders and STAMPS_URL_CHARS. */
+export function stampQueries(paths: readonly string[]): string[] {
+  const out: string[] = []
+  let parts: string[] = []
+  let chars = 0
+  for (const p of paths) {
+    const part = `path=${encodeURIComponent(p)}`
+    if (parts.length && (parts.length >= STAMPS_AT_ONCE || chars + part.length > STAMPS_URL_CHARS)) {
+      out.push(parts.join('&'))
+      parts = []
+      chars = 0
+    }
+    parts.push(part)
+    chars += part.length + 1
+  }
+  if (parts.length) out.push(parts.join('&'))
+  return out
+}
 
 export const scaleApi = {
   /** `GET /corpora/{c}/sources?path=<folder>&depth=1`: the folder's own files and subfolders ('' is the root). */
   folder: (c: string, path: string) => j<FolderListing>(`${BASE}/corpora/${enc(c)}/sources${q({ path: path || '.', depth: 1 })}`),
   /** `GET /corpora/{c}/sources/stamps?path=…`: each folder's stamp now, null for one that is gone, so the tree lists
-   * again only the folders whose stamp is not their listing's; at most STAMPS_AT_ONCE folders. */
-  stamps: (c: string, paths: readonly string[]) =>
-    j<{ stamps: Record<string, string | null> }>(`${BASE}/corpora/${enc(c)}/sources/stamps?${Array.from(paths, (p) => `path=${encodeURIComponent(p)}`).join('&')}`),
+   * again only the folders whose stamp is not their listing's; as many requests as stampQueries makes. */
+  stamps: async (c: string, paths: readonly string[]) => {
+    const stamps: Record<string, string | null> = {}
+    for (const query of stampQueries(paths))
+      Object.assign(stamps, (await j<{ stamps: Record<string, string | null> }>(`${BASE}/corpora/${enc(c)}/sources/stamps?${query}`)).stamps)
+    return { stamps }
+  },
   /** `GET /ws/{c}/labels?path=&lines=a-b`: every concept's rows on lines a..b of one file, plus its whole-file rows. */
   labelsForLines: (c: string, path: string, a: number, b: number) => j<LabelsForPath[]>(`${ws(c)}/labels${q({ path, lines: `${a}-${b}` })}`),
   /** `POST /ws/{c}/labels/refs`: every concept's rows on these records that are no lines (a database row, a PDF page, a

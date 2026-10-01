@@ -205,8 +205,9 @@ def folder_listing(corpus: Path, rel: str, include_hidden: bool = False) -> dict
     `stamp` (folder_stamp) as of before the read, so a later change shows as another stamp. A subfolder is a run
     (`is_run`) when it holds an `agents/` folder or a `manifest.json`. The counts of files at any depth (`n_files`, the
     folder's own and each subfolder's) and a subfolder's `n_folders` are given only where earlier walks of the corpus's
-    folder tree know them (corpus_tree.Tree.counts). None for a folder that is not there, or one the listing leaves out:
-    under a dot name without `include_hidden`, or reached through a symlinked folder."""
+    folder tree know them (corpus_tree.Tree.counts), after the tree checks this folder again (Tree.recheck), and the
+    folder's own only when the tree holds its entries as read. None for a folder that is not there, or one the listing
+    leaves out: under a dot name without `include_hidden`, or reached through a symlinked folder."""
     rel = rel.strip("/")
     hidden_here = _is_hidden(rel) if rel else False
     d = _listed_folder(corpus, rel, include_hidden)
@@ -244,7 +245,9 @@ def folder_listing(corpus: Path, rel: str, include_hidden: bool = False) -> dict
             rec["hidden"] = True
         files.append(rec)
     files.sort(key=lambda s: (KIND_ORDER[s["kind"]], s["path"]))
-    counts = corpus_tree.tree(corpus).counts(include_hidden)
+    tree = corpus_tree.tree(corpus)
+    current = tree.recheck(rel, mtime)
+    counts = tree.counts(include_hidden)
     folders = []
     for name, path, hidden, full in sorted(subs):
         is_run = os.path.isfile(f"{full}/manifest.json") or os.path.isdir(f"{full}/agents") and not os.path.islink(f"{full}/agents")
@@ -256,7 +259,7 @@ def folder_listing(corpus: Path, rel: str, include_hidden: bool = False) -> dict
             entry["hidden"] = True
         folders.append(entry)
     out: dict[str, Any] = {"path": rel, "files": files, "folders": folders, "stamp": stamp}
-    known = counts.get(rel)
+    known = counts.get(rel) if current else None
     if known is not None:
         out["n_files"] = known[0]
     return out

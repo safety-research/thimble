@@ -88,6 +88,23 @@ def test_a_folder_listing_counts_what_a_walk_already_read(tree_corpus):
     assert _folder(".", include_hidden=1).get("n_files") is None  # the dot folders were never read
 
 
+def test_a_folder_listed_again_counts_a_file_added_to_it_or_gives_no_count(tree_corpus):
+    """A folder listing checks that folder in the tree again, so the tree's count holds a file an agent just wrote there,
+    and the root's count a file written in a subfolder listed before it. While a walk holds the tree, a folder that
+    changed gets no count, since the one the tree holds is no longer exact."""
+    corpus.list_sources(tree_corpus)
+    _write(tree_corpus, "NOTES.md")
+    assert _folder(".")["n_files"] == 12
+    _write(tree_corpus, "runs/r3/more.txt")
+    assert _folder("runs/r3")["n_files"] == 2 and _folder(".")["n_files"] == 13
+    tree = corpus_tree.tree(tree_corpus)
+    with tree.lock:
+        _write(tree_corpus, "LATER.md")
+        os.utime(tree_corpus, ns=(OLD_NS, OLD_NS))
+        assert "n_files" not in _folder(".")
+    assert _folder(".")["n_files"] == 14
+
+
 def test_a_folder_reached_through_a_symlink_is_not_listed(tree_corpus):
     os.symlink(tree_corpus / "runs", tree_corpus / "linked")
     assert "linked" not in [d["name"] for d in _folder(".")["folders"]]

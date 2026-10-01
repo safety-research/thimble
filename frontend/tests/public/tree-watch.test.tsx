@@ -4,7 +4,7 @@
 import { act, useState } from 'react'
 import { afterEach, describe, expect, test, vi } from 'vitest'
 import { shownFolders, useFolderStore, useFolderWatch, type FolderStoreHandle } from '../../src/files/Tree.tsx'
-import { scaleApi } from '../../src/lib/api.ts'
+import { scaleApi, stampQueries } from '../../src/lib/api.ts'
 import type { FolderListing } from '../../src/lib/types.ts'
 import { mount, settle, unmountAll } from './mount.tsx'
 
@@ -48,6 +48,20 @@ describe('the tree lists a folder again', () => {
     expect(folder).toHaveBeenLastCalledWith('ws', '')
     const root = handle!.store.get('')
     expect(root?.state === 'ok' && root.listing.files.map((f) => f.path)).toEqual(['NOTES.md', 'README.md'])
+    disk.runs = listing('runs', ['runs/a.jsonl', 'runs/b.jsonl'], '8')
+    await act(() => handle!.refreshChanged(['', 'runs']))
+    await settle()
+    expect(folder.mock.calls.slice(3).map((c) => c[1]), 'the root last, since its count covers the folder').toEqual(['runs', ''])
+  })
+
+  test('asks for the stamps in requests of at most 100 folders, each with a short URL', () => {
+    expect(stampQueries([''])).toEqual(['path='])
+    expect(stampQueries(Array.from({ length: 250 }, (_, i) => `f${i}`)).map((q) => q.split('&').length)).toEqual([100, 100, 50])
+    const deep = Array.from({ length: 60 }, (_, i) => `runs/${'x'.repeat(200)}/${i}`)
+    const queries = stampQueries(deep)
+    expect(queries.length).toBe(3)
+    expect(queries.every((q) => q.length <= 6000)).toBe(true)
+    expect(queries.join('&').split('&').map((q) => decodeURIComponent(q.slice('path='.length)))).toEqual(deep)
   })
 
   test('for the folders it shows, on a timer and at once when a folder opens', async () => {

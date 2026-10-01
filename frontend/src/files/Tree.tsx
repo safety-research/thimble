@@ -9,7 +9,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent } from 'react'
 import { Icon, type IconName } from '../components/Icon'
 import { Spinner } from '../components/Spinner'
-import { scaleApi, STAMPS_AT_ONCE } from '../lib/api'
+import { scaleApi } from '../lib/api'
 import type { FolderEntry, FolderListing, SourceInfo } from '../lib/types'
 import type { Presence } from './labels'
 import { isJsonlFile } from './views/common'
@@ -206,7 +206,8 @@ export function useFolderStore(ws: string): FolderStoreHandle {
     inflight.current.clear()
     setStore(new Map())
   }, [])
-  // a listing is replaced only once its new one arrives, so the rows stay put meanwhile
+  // a listing is replaced only once its new one arrives, so the rows stay put meanwhile. When any folder changed the
+  // root is listed again last, since its file count covers the folders below it.
   const refreshChanged = useCallback(
     async (paths: readonly string[]) => {
       const listed = paths.filter((p) => {
@@ -215,24 +216,32 @@ export function useFolderStore(ws: string): FolderStoreHandle {
       })
       if (!listed.length) return
       const my = gen.current
-      const stamps: Record<string, string | null> = {}
+      let stamps: Record<string, string | null>
       try {
-        for (let i = 0; i < listed.length; i += STAMPS_AT_ONCE) Object.assign(stamps, (await scaleApi.stamps(ws, listed.slice(i, i + STAMPS_AT_ONCE))).stamps)
+        stamps = (await scaleApi.stamps(ws, listed)).stamps
       } catch {
         return
       }
       if (my !== gen.current) return
-      for (const p of listed) {
+      const changed = listed.filter((p) => {
         const st = storeRef.current.get(p)
         const now = stamps[p]
-        if (now == null || st?.state !== 'ok' || st.listing.stamp === now || inflight.current.has(p)) continue
+        return now != null && st?.state === 'ok' && st.listing.stamp !== now && !inflight.current.has(p)
+      })
+      if (!changed.length) return
+      const relist = async (p: string) => {
         inflight.current.add(p)
-        scaleApi
-          .folder(ws, p)
-          .then((listing) => my === gen.current && setStore((s) => new Map(s).set(p, { state: 'ok', listing })))
-          .catch(() => undefined)
-          .finally(() => inflight.current.delete(p))
+        try {
+          const listing = await scaleApi.folder(ws, p)
+          if (my === gen.current) setStore((s) => new Map(s).set(p, { state: 'ok', listing }))
+        } catch {
+          // the next check asks again
+        } finally {
+          inflight.current.delete(p)
+        }
       }
+      await Promise.all(changed.filter((p) => p !== '').map(relist))
+      if (my === gen.current && storeRef.current.get('')?.state === 'ok' && !inflight.current.has('')) await relist('')
     },
     [ws],
   )
