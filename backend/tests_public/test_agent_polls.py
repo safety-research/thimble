@@ -170,7 +170,7 @@ async def test_a_dev_turn_waiting_for_an_answer_keeps_its_wait_while_the_transcr
             await asyncio.sleep(0.15)  # a line now and then while the session still waits on its question
             f.write(json.dumps({"type": "attachment", "attachment": {"type": "hook_progress"}}) + "\n")
             f.flush()
-    with pytest.raises(dev.SessionError, match="for an answer"):
+    with pytest.raises(dev.SessionError, match="nobody answered"):
         await asyncio.wait_for(turn, 1)
     assert time.monotonic() - began < 1.5, "each line restarted the wait for an answer"
     assert sum("waiting for an answer" in s for s in stages) == 1

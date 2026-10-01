@@ -1972,6 +1972,17 @@ def sandbox_lines(commands: bool = True) -> list[str]:
     return [f"{head}. To turn it on, run these, which {what}, then `thimble restart`:", *(f"    {c}" for c in cmds)]
 
 
+def own_sandbox_line(cwd: Path) -> str:
+    """The doctor's line on the analyst's own Claude Code sandbox for a session in `cwd` (cc_settings.own_sandbox): main's
+    Bash runs in that session, so with it on Claude Code adds an empty .claude/.cc-writes/ folder to `cwd`."""
+    from . import cc_settings  # noqa: PLC0415
+
+    if not cc_settings.own_sandbox(cwd):
+        return "off"
+    return (f"on, so main's Bash adds an empty .claude/.cc-writes/ folder to {cwd}. That is Claude Code's sandbox in "
+            "your own session, which thimble leaves as it is")
+
+
 # ----------------------------------------------------------------------------- versions and the machine
 #
 # What the doctor, the startup line of server.log and a failed `server up` say about the machine: the versions in play,
@@ -2328,6 +2339,7 @@ def doctor_text(commands: bool = True) -> str:
     lines.append(f"  network: {_checked(network_line, status)}")
     caller = Path(os.environ.get("THIMBLE_CALLER_CWD") or os.getcwd())
     lines.append(f"  delivery (a session `thimble` starts in {caller}): {_checked(delivery_line, caller)}")
+    lines.append(f"  your session's bash sandbox: {_checked(own_sandbox_line, caller)}")
     lines.append(f"  config: {_checked(config_line, Path(env['workspaces_dir']))}")
     lines.append(f"  browser: {_checked(browser_line)}")
     lines.append(f"  card code: {_checked(kernel_line)}")

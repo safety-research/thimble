@@ -21,8 +21,9 @@ The first message names what to review, the drafts, the digest, the orientation'
 findings, and ends with the analyst's conversation with main.
 
 The chat is a step of the orientation's chat titled `critique`. The critic's last message is returned whole as the
-tool's result. A critique that fails, is stopped, or runs past CRITIQUE_LIMIT_S of active time returns `##
-critique-ended` with whatever it wrote; a call the caller abandons stops the critique with it.
+tool's result. A critique has no time limit: its chat says when it shows no activity (agent_session.wait_done), and the
+analyst's Stop ends it. A critique that fails or is stopped returns `## critique-ended` with whatever it wrote; a call
+the caller abandons stops the critique with it.
 """
 from __future__ import annotations
 
@@ -40,9 +41,6 @@ log = logging.getLogger("thimble.critique_session")
 AGENT = "critic"  # prompts/critic.md, the agent the session runs as
 TITLE = "critique"  # its step's title, so the browser names it `<caller>/critique`
 DEFAULT_EFFORT = "high"  # when critic.md names none
-# The most active time a critique may take, by effort. The orientation waits inside one tool call, so a hanging critic
-# is stopped past the limit and the orientation hears `## critique-ended`.
-CRITIQUE_LIMIT_S = {"low": 1200.0, "medium": 1200.0, "high": 1800.0, "xhigh": 2700.0, "max": 3600.0}
 DIGEST_DIR = "critique"  # the one folder outside the corpus the critic may read
 WORK_DIR = "work"  # critique/<chat>/work, the critic's own folder, where it may write
 OWN_TOOLS = ("read_ref", "list_cards")  # the critic's thimble tools
@@ -435,14 +433,9 @@ def _critic(c: str) -> tuple[str, dict[str, Any], dict[str, Any], str]:
     return agent_name, agent, conf, str(agent.get("effort") or DEFAULT_EFFORT)
 
 
-def critique_limit(effort: str) -> float:
-    """CRITIQUE_LIMIT_S for a critique at `effort`; the longest for a level the table does not name."""
-    return CRITIQUE_LIMIT_S.get(effort, max(CRITIQUE_LIMIT_S.values()))
-
-
 async def tool_critique(ctx: Any, args: dict[str, Any]) -> Any:
     """The `critique` tool: start the critique of the calling orientation's analysis and wait for the critic's report,
-    which it returns whole. A critique past CRITIQUE_LIMIT_S of active time is stopped and returns `## critique-ended`.
+    which it returns whole, for as long as the critique runs.
 
     When this call is cancelled (the shim's request dropped, the orientation stopped, or the server stopping), the
     checks' child and the critic's session end with it.
@@ -459,20 +452,14 @@ async def tool_critique(ctx: Any, args: dict[str, Any]) -> Any:
         run, done = await start(ctx.c, caller, str(args.get("context") or ""))
     except RuntimeError as e:
         return tools.err(str(e))
-    limit = critique_limit(_critic(ctx.c)[3])
-    waiting = asyncio.ensure_future(agent_session.wait_active(run, done, limit))
+    waiting = asyncio.ensure_future(agent_session.wait_done(run, done))
     gone = asyncio.ensure_future(_caller_ended(caller))
     try:
         await asyncio.wait({waiting, gone}, return_when=asyncio.FIRST_COMPLETED)
-        if not waiting.done():
+        if not done.done():
             log.info("%s: the orientation's session %s ended during its critique, which is stopped", ctx.c, caller.sid)
             await asyncio.shield(agent_session.stop_run(run))
             return tools.err(tools.hint("critique-ended", status="stopped", text="nothing"))
-        if not waiting.result():
-            await agent_session.stop_run(run)
-            _, summary = done.result() if done.done() else ("stopped", "")
-            return tools.err(tools.hint("critique-ended", status=f"after running past its {limit / 60:.0f}-minute limit",
-                                        text=str(summary or "").strip() or "nothing"))
         status, summary = done.result()
     except asyncio.CancelledError:
         # shielded, so a second cancellation (the server's last sweep of its tasks) cannot cut the stop short
@@ -488,7 +475,7 @@ async def tool_critique(ctx: Any, args: dict[str, Any]) -> Any:
 
 async def program_critique(c: str, caller: agent_session.Run, part: Any, context: str = "") -> Any:
     """The critique run by an extension's program (harness.py): its input is the digest thimble's critic reads, and
-    what it returns is the report, which the orientation's call gets whole. It is stopped past CRITIQUE_LIMIT_S."""
+    what it returns is the report, which the orientation's call gets whole. It runs until it ends or is stopped."""
     from . import harness  # noqa: PLC0415
 
     key = session_key(caller.key)
@@ -512,13 +499,8 @@ async def program_critique(c: str, caller: agent_session.Run, part: Any, context
         harness.start(job, part, on_end=ended)
     except RuntimeError as e:
         return tools.err(str(e))
-    limit = critique_limit(_critic(c)[3])
     try:
-        status, summary = await asyncio.wait_for(asyncio.shield(done), limit)
-    except asyncio.TimeoutError:
-        await harness.stop(c, key)
-        return tools.err(tools.hint("critique-ended", status=f"after running past its {limit / 60:.0f}-minute limit",
-                                    text="nothing"))
+        status, summary = await asyncio.shield(done)
     except asyncio.CancelledError:
         await asyncio.shield(harness.stop(c, key))
         raise

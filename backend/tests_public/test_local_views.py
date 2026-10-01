@@ -88,11 +88,11 @@ def test_a_view_built_for_a_workspace_is_its_local_extension_and_no_other_worksp
     assert (ws / "views" / "proposals.json").is_file() and (ws / "views" / ".versions" / "posts" / v["version"]).is_dir()
     assert not (ws / "views" / "posts").exists()
     assert views.list_proposals(CORPUS)[0]["status"] == "built"
-    assert views.local_extension(CORPUS) == {"name": CORPUS, "views": [{"slug": "posts", "name": "Posts",
-                                                                        "file_viewer": False, "on": True}]}
+    row = {"slug": "posts", "name": "Posts", "description": "each post", "file_viewer": False, "on": True}
+    assert views.local_extension(CORPUS) == {"name": CORPUS, "views": [row]}
     assert views.read_built(OTHER, "posts") is None and views.local_extension(OTHER)["views"] == []
     got = asyncio.run(extensions.list_route(CORPUS))
-    assert got["local"]["views"] == [{"slug": "posts", "name": "Posts", "file_viewer": False, "on": True}]
+    assert got["local"]["views"] == [row]
 
 
 def test_a_view_an_extension_installed_is_not_the_workspace_s_own(corpora, tmp_path):
@@ -119,8 +119,8 @@ def test_unit_places_a_view_in_the_file_browser_or_the_views_bar(corpora):
     _write(CORPUS, "posts", unit="file")
     v = views.read_built(CORPUS, "posts")
     assert v["unit"] == "file" and views._public(v, CORPUS)["file_type"]
-    assert views.local_extension(CORPUS)["views"] == [{"slug": "posts", "name": "Posts", "file_viewer": True,
-                                                       "on": True}]
+    assert views.local_extension(CORPUS)["views"] == [{"slug": "posts", "name": "Posts", "description": "each post",
+                                                       "file_viewer": True, "on": True}]
 
 
 def test_an_older_workspace_s_views_move_into_its_local_extension_once(corpora):
@@ -249,7 +249,8 @@ def test_a_view_built_for_a_workspace_switches_off_and_on_in_settings_from_the_a
     assert e.value.status_code == 403 and views.views_off(CORPUS) == set()
 
     got = asyncio.run(views.view_on_route(CORPUS, "posts", views.OnBody(on=False), analyst))
-    assert got["views"] == [{"slug": "posts", "name": "Posts", "file_viewer": False, "on": False}]
+    assert got["views"] == [{"slug": "posts", "name": "Posts", "description": "each post", "file_viewer": False,
+                             "on": False}]
     assert [v["slug"] for v in views.list_views(CORPUS) if v["origin"] == "workspace"] == []
     assert views.views_for(CORPUS, "board.jsonl") == [] and "one post" not in views.forms_text(CORPUS)
     assert views.read_built(CORPUS, "posts") is not None and views.list_proposals(CORPUS)[0]["status"] == "built"

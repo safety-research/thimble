@@ -327,6 +327,22 @@ def test_up_in_the_bash_sandbox_prints_what_the_hook_did_outside_it(home, data, 
     assert capsys.readouterr().out.startswith("thimble: WARNING") and started == []
 
 
+def test_the_doctor_says_when_the_analyst_s_own_sandbox_makes_a_folder_in_the_corpus(tmp_path, monkeypatch):
+    """main's Bash runs in the analyst's own session, so with their Claude Code sandbox on it adds .claude/.cc-writes/
+    to the folder `thimble` starts in; thimble leaves that session's settings alone and the doctor says so."""
+    from app import cc_settings
+
+    monkeypatch.setattr(cc_settings, "config_dir", lambda: tmp_path / "cc")
+    corpus = tmp_path / "corpus"
+    (corpus / ".claude").mkdir(parents=True)
+    assert cli.own_sandbox_line(corpus) == "off"
+    (tmp_path / "cc").mkdir()
+    (tmp_path / "cc" / "settings.json").write_text(json.dumps({"sandbox": {"enabled": True}}))
+    assert ".claude/.cc-writes/" in cli.own_sandbox_line(corpus) and str(corpus) in cli.own_sandbox_line(corpus)
+    (corpus / ".claude" / "settings.local.json").write_text(json.dumps({"sandbox": {"enabled": False}}))
+    assert cli.own_sandbox_line(corpus) == "off", "a later settings file turns it off"
+
+
 def test_the_doctor_s_sandbox_line_follows_the_config(monkeypatch):
     """Every agent's Bash uses the sandbox where it runs; sandbox.use "never" turns it off, and sandbox.enforce
     refuses to start the agents where it cannot run."""
