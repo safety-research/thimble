@@ -1,26 +1,20 @@
-// The scope header thimble draws above every corpus view (the same code for every view): the unit picker, Combined |
-// Compare, the files the view reads, its derived data per record type, and the lines it could not read, which a click
-// lists under the header as thimble's own view head does (ResidueList). A view gives its unit, files, schema and
-// labels, and may add a lead before the strip (`side`, markup or a function of none) and parts after it (`tail`, wired
-// by `wire(host)` once drawn); the header sends the unit's selection back to the view (thimble.onScope).
+// The head thimble draws above every corpus view (the same code for every view), as the app's view pane draws it: the
+// view's name over one quiet line of the files it reads, the lines it could not read, which a click lists under the
+// head as the app does (ResidueList), and its derived data per record type, apart by dots. The view draws its own label
+// controls, so the head has none. A view gives its name, files, schema and labels, and may add parts at the head's right
+// end (`tail`, wired by `wire(host)` once drawn).
 ;(function () {
   const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c])
   const svg = (d, size = 14) => `<svg class="icon" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="${d}"></path></svg>`
-  const I = { down: 'M6 9l6 6 6-6', right: 'M9 6l6 6-6 6', check: 'M5 12.5l4.5 4.5L19 7', file: 'M8 3h6l5 5v11a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2zM14 3v5h5' }
+  const I = { right: 'M9 6l6 6-6 6', file: 'M8 3h6l5 5v11a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2zM14 3v5h5' }
   const plural = (n, one, many) => `${n} ${n === 1 ? one : many || one + 's'}`
 
   function mount(o) {
-    const keysAll = o.unit.options.map((u) => u.key)
-    const S = { keys: (o.unit.initial || keysAll).slice(), compare: false, open: null, residue: false }
+    const S = { open: null, residue: false }
     const host = o.host
     let pop = null,
       list = null
 
-    const unitValue = () => {
-      if (!o.unit.multi) return o.unit.options.find((u) => u.key === S.keys[0]).title
-      if (S.keys.length === keysAll.length) return `All ${keysAll.length}`
-      return S.keys.length <= 3 ? S.keys.join(', ') : `${S.keys.length} ${o.unit.label.toLowerCase()}`
-    }
     const derivedText = () => {
       const n = o.derived.records.reduce((s, r) => s + r.fields.filter((f) => f.derived).length, 0)
       const parts = [n ? plural(n, 'field') : 'no fields']
@@ -29,21 +23,15 @@
     }
 
     function render() {
-      const files = o.files(S.keys), bad = o.problems(S.keys)
-      let h = `<button type="button" class="btn btn-secondary btn-sm sh-unit" data-pop="units" aria-haspopup="dialog" aria-expanded="${S.open === 'units'}"><span class="k">${esc(o.unit.label)}</span><b>${esc(unitValue())}</b>${svg(I.down, 12)}</button>`
-      if (o.compare && o.unit.multi && S.keys.length >= 2) {
-        h += `<span class="seg seg-md" role="radiogroup" aria-label="Combined or compared">` + ['Combined', 'Compare'].map((n, i) =>
-          `<button type="button" role="radio" aria-checked="${S.compare === !!i}" class="seg-opt${S.compare === !!i ? ' active' : ''}" data-compare="${i}"><span class="seg-label">${n}</span></button>`).join('') + '</span>'
-      }
-      h += `<span class="sh-dot">·</span><button type="button" class="view-pane-files" data-pop="files" aria-expanded="${S.open === 'files'}">${plural(files.count, 'file')}</button>`
-      h += `<span class="sh-dot">·</span><button type="button" class="view-pane-files" data-pop="derived" aria-expanded="${S.open === 'derived'}">${derivedText()}</button>`
-      // the lines (or, for a reader of whole files, the files) it could not read, in the strip's ink
+      const files = o.files(), bad = o.problems()
+      const dot = '<span class="view-pane-dot" aria-hidden="true">·</span>'
+      const items = [`<button type="button" class="view-pane-files" data-pop="files" aria-expanded="${S.open === 'files'}">${bad.length ? plural(files.count, 'file') : `All ${files.count} files read`}</button>`]
+      // the lines (or, for a reader of whole files, the files) it could not read, in the line's ink
       const what = bad.length > 0 && bad.every((p) => p.ref && !p.ref.includes('#')) ? 'file' : 'line'
-      if (bad.length) h += `<span class="sh-dot">·</span><button type="button" class="view-pane-files view-pane-residue" aria-expanded="${S.residue}">${bad.length} unreadable ${bad.length === 1 ? what : what + 's'}</button>`
-      if (o.tail) h += o.tail()
-      host.innerHTML = `${(typeof o.side === 'function' ? o.side() : o.side) || ''}<div class="sh">${h}</div>`
+      if (bad.length) items.push(`<button type="button" class="view-pane-files view-pane-residue" aria-expanded="${S.residue}">${bad.length} unreadable ${bad.length === 1 ? what : what + 's'}</button>`)
+      items.push(`<button type="button" class="view-pane-files" data-pop="derived" aria-expanded="${S.open === 'derived'}">${derivedText()}</button>`)
+      host.innerHTML = `<div class="view-pane-title"><span class="view-pane-name">${esc(o.name)}</span><span class="view-pane-sub">${items.join(dot)}</span></div>${o.tail ? o.tail() : ''}`
       for (const b of host.querySelectorAll('[data-pop]')) b.onclick = (e) => { e.stopPropagation(); toggle(b.dataset.pop) }
-      for (const b of host.querySelectorAll('[data-compare]')) b.onclick = () => { S.compare = b.dataset.compare === '1'; render(); tell() }
       const res = host.querySelector('.view-pane-residue')
       if (res) res.onclick = (e) => { e.stopPropagation(); S.residue = !S.residue; render() }
       residueList(bad)
@@ -62,7 +50,6 @@
       list.innerHTML = `<section><h4>Unreadable</h4>${bad.map((p) => `<button type="button" class="view-pane-list-item" data-file="${esc(p.ref.split('#')[0])}"><span class="mono">${esc(p.ref)}</span><span class="view-pane-list-why">${esc(p.why)}</span></button>`).join('')}</section>`
       for (const f of list.querySelectorAll('[data-file]')) f.onclick = () => o.onFile && o.onFile(f.dataset.file)
     }
-    const tell = () => o.onScope && o.onScope(S.keys.slice(), S.compare && S.keys.length >= 2)
 
     // ------------------------------------------------------------------------------------------------ popovers
     function close() { pop?.remove(); pop = null; if (S.open) { S.open = null; render() } }
@@ -73,28 +60,21 @@
       render()
       const trigger = host.querySelector(`[data-pop="${name}"]`)
       pop = document.createElement('div')
-      pop.className = `popover sh-pop sh-${name}` + (name === 'units' ? ' menu' : '')
+      pop.className = `popover sh-pop sh-${name}`
       pop.setAttribute('role', 'dialog')
-      pop.innerHTML = ({ units: unitsPop, files: filesPop, derived: derivedPop })[name]()
+      pop.innerHTML = ({ files: filesPop, derived: derivedPop })[name]()
       document.body.append(pop)
       const r = trigger.getBoundingClientRect()
       pop.style.top = `${r.bottom + 6}px`
-      pop.style.left = `${Math.max(8, Math.min(r.left - (name === 'units' ? 0 : 8), innerWidth - pop.offsetWidth - 12))}px`
+      pop.style.left = `${Math.max(8, Math.min(r.left - 8, innerWidth - pop.offsetWidth - 12))}px`
       pop.onclick = (e) => e.stopPropagation()
       wire(name)
     }
     document.addEventListener('click', () => { if (pop) close() })
     document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && pop) close() })
 
-    const tick = (on) => `<span class="sh-tick${on ? ' on' : ''}">${svg(I.check, 10)}</span>`
-    function unitsPop() {
-      let h = o.unit.note ? `<div class="sh-sum">${esc(o.unit.note)}</div>` : ''
-      if (o.unit.multi) h += `<button type="button" class="menu-item all" data-unit="*">${tick(S.keys.length === keysAll.length)}<span class="sh-unit-text"><b>All ${esc(o.unit.label.toLowerCase())}</b></span><span class="menu-item-note">${keysAll.length}</span></button><div class="menu-sep"></div>`
-      for (const u of o.unit.options) h += `<button type="button" class="menu-item" data-unit="${esc(u.key)}">${tick(S.keys.includes(u.key))}<span class="sh-unit-text"><b>${esc(u.title)}</b>${u.sub ? `<span>${esc(u.sub)}</span>` : ''}</span><span class="menu-item-note">${u.note || ''}</span></button>`
-      return h
-    }
     function filesPop() {
-      const f = o.files(S.keys)
+      const f = o.files()
       let h = `<div class="sh-sum">${esc(f.summary)}</div>`
       f.groups.forEach((g, i) => {
         h += `<button type="button" class="sh-group" data-g="${i}" aria-expanded="${!g.collapsed}">${svg(I.right, 12)}${esc(g.title)}<span class="n">${esc(g.note)}</span></button><div class="sh-rows" data-rows="${i}"${g.collapsed ? ' hidden' : ''}>`
@@ -127,16 +107,6 @@
       return h
     }
     function wire(name) {
-      if (name === 'units') for (const b of pop.querySelectorAll('[data-unit]')) b.onclick = (e) => {
-        e.stopPropagation()
-        const k = b.dataset.unit
-        if (!o.unit.multi) S.keys = [k]
-        else if (k === '*') S.keys = keysAll.slice()
-        else if (S.keys.includes(k)) { if (S.keys.length > 1) S.keys = S.keys.filter((x) => x !== k) }
-        else S.keys = keysAll.filter((x) => x === k || S.keys.includes(x))
-        if (S.keys.length < 2) S.compare = false
-        pop.innerHTML = unitsPop(); wire('units'); render(); tell()
-      }
       if (name === 'files') for (const g of pop.querySelectorAll('.sh-group')) g.onclick = () => {
         const rows = pop.querySelector(`[data-rows="${g.dataset.g}"]`)
         rows.hidden = !rows.hidden; g.setAttribute('aria-expanded', String(!rows.hidden))
@@ -148,12 +118,10 @@
     render()
     return {
       render,
-      setScope(keys, compare = false) { S.keys = keys.slice(); S.compare = compare; render(); tell() },
       open(name) { toggle(name) },
       close,
       expand(rec) { pop?.querySelector(`.dg[data-rec="${rec}"]`)?.classList.add('open') },
       collapse(rec) { pop?.querySelector(`.dg[data-rec="${rec}"]`)?.classList.remove('open') },
-      get keys() { return S.keys.slice() },
     }
   }
   window.ScopeHead = { mount, plural }

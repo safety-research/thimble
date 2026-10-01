@@ -12,10 +12,11 @@
 //     orientation does, and its Start only shows the started state;
 //   - step 5: the wheel scrolls the labels' transcript in steps with every record moving by exactly the scroll, its
 //     height, the cutout and the Labels pane still and the ruler's thumb following, and the wheel over the ruler too;
-//   - step 6: inside the example view the wheel and a click work and reach nothing else; in its header strip no item
-//     meets another or anything of the view, nothing of the tour (a badge, the popover, the views bar) meets it, the
-//     label control counts the labels on, the unreadable line is counted in the strip's ink, and the page's Only these
-//     shows as thimble's filter chip with how many events it hides, which the chip clears;
+//   - step 6: inside the example view the wheel and a click work and reach nothing else; in its head no item meets
+//     another or anything of the view, nothing of the tour (a badge, the popover, the views bar) meets it, there is no
+//     label control (the page draws its own), the line under the name starts where the name does, the unreadable line
+//     is counted in the line's ink, and the page's Only these shows as thimble's filter chip with how many events it
+//     hides, which the chip clears;
 //   - step 7: the card is in plain words; on its first entry the demo plays once the card is in place, comes to rest on
 //     08:04 as its source shows and the card holds still, also with the Canvas drawn 1.5 s late; a real hover on a value
 //     shows its source, and a hover that stops the demo leaves the ⌘ demo to play at once on step 8;
@@ -399,11 +400,11 @@ const CUE = async () => {
   return out
 }
 
-/** The example view's header, the strip thimble draws above every view, inside the example's frame: none of its items
- * meets another, nothing else of the view meets them, the item drawn at each item's centre is the item itself, the
- * label control is level with the strip's first row, and nothing of the tour (a badge, the popover, the views bar)
- * meets the strip. Also its label control's words, its
- * residue's words and ink against the ink of its files, and a filter's chip with what it hides. */
+/** The example view's head, which thimble draws above every view, inside the example's frame: none of its items meets
+ * another, nothing else of the view meets them, the item drawn at each item's centre is the item itself, the line under
+ * the name starts where the name's text does, and nothing of the tour (a badge, the popover, the views bar) meets the
+ * head. Also whether it holds a label control (it should not), its residue's words and ink against the ink of its files,
+ * and a filter's chip with what it hides. */
 async function viewHead(page: Page) {
   const hf = page.frames().find((f) => f.url().includes('/tour/timeline/view.html'))
   if (!hf) return { ok: false, why: 'no view header' } as const
@@ -420,7 +421,7 @@ async function viewHead(page: Page) {
       return { l: b.left, t: b.top, r: b.right, b: b.bottom, n: name(e) }
     }
     const meet = (a: ReturnType<typeof R>, b: ReturnType<typeof R>) => Math.min(a.r, b.r) - Math.max(a.l, b.l) > 0.5 && Math.min(a.b, b.b) - Math.max(a.t, b.t) > 0.5
-    const items = [...h.querySelectorAll('button, .sh-dot, .seg, .view-pane-hidden')].filter((e) => vis(e) && !e.parentElement!.closest('.seg'))
+    const items = [...h.querySelectorAll('button, .view-pane-name, .view-pane-dot, .view-pane-hidden')].filter(vis)
     const ri = items.map(R)
     const bad: string[] = []
     for (let i = 0; i < ri.length; i++) for (let j = i + 1; j < ri.length; j++) if (meet(ri[i], ri[j])) bad.push(`${ri[i].n} / ${ri[j].n}`)
@@ -445,12 +446,16 @@ async function viewHead(page: Page) {
       bad: bad.slice(0, 6),
       n: ri.length,
       u: { l: Math.min(...all.map((r) => r.l)), t: Math.min(...all.map((r) => r.t)), r: Math.max(...all.map((r) => r.r)), b: Math.max(...all.map((r) => r.b)) },
-      lead: h.querySelector('.view-pane-side-show')?.textContent?.trim() ?? null,
-      // the label control's centre against the strip's first item's, in px
+      lead: h.querySelector('.btn .icon-label, .view-pane-side-show')?.closest('button')?.textContent?.trim() ?? null,
+      name: h.querySelector('.view-pane-name')?.textContent ?? null,
+      // the left of the name's text against the left of the line's first item's text, in px
       level: (() => {
-        const a = h.querySelector('.view-pane-side-show')!.getBoundingClientRect(),
-          b = h.querySelector('.sh-unit')!.getBoundingClientRect()
-        return Math.round(Math.abs(a.top + a.height / 2 - (b.top + b.height / 2)) * 10) / 10
+        const range = document.createRange()
+        const left = (e: Element) => {
+          range.selectNodeContents(e)
+          return range.getBoundingClientRect().left
+        }
+        return Math.round(Math.abs(left(h.querySelector('.view-pane-name')!) - left(h.querySelector('.view-pane-sub')!.firstElementChild!)) * 10) / 10
       })(),
       residueText: res?.textContent?.trim() ?? null,
       residue: res ? getComputedStyle(res).color : null,
@@ -483,7 +488,7 @@ async function viewHead(page: Page) {
     return bad.slice(0, 6)
   }, H)
   const residueOk = /^(1 unreadable (line|file)|\d+ unreadable (lines|files))$/.test(inner.residueText || '') && inner.residue === inner.ink && inner.residue !== inner.negative
-  return { ok: !inner.bad.length && !outer.length && inner.n >= 5 && residueOk && inner.level <= 1, inner: inner.bad, outer, items: inner.n, lead: inner.lead, level: inner.level, residueText: inner.residueText, residue: inner.residue, ink: inner.ink, filter: inner.filter, hidden: inner.hidden }
+  return { ok: !inner.bad.length && !outer.length && inner.n >= 5 && residueOk && inner.level <= 0.5 && inner.lead === null && inner.name === 'Timeline', inner: inner.bad, outer, items: inner.n, lead: inner.lead, name: inner.name, level: inner.level, residueText: inner.residueText, residue: inner.residue, ink: inner.ink, filter: inner.filter, hidden: inner.hidden }
 }
 
 // in the page: the report example's inner width, its text column's width, and whether its comment margin shows
@@ -745,17 +750,10 @@ async function walk(page: Page, tag: string, folds?: boolean, send = false) {
   assert.equal(await view.evaluate(() => (window as any).__clicks), 1, `${tag} 6: a click reaches the example view`)
   assert.deepEqual(await probe(page), [], `${tag} 6: nothing reached the app`)
   assert.equal((await state(page))!.title, 'Views', `${tag} 6: still on Views`)
-  // the view's header strip: nothing in it meets anything, its label control says how many labels are on, and the
-  // line the reader could not read is counted in the strip's ink
+  // the view's head: nothing in it meets anything, it has no label control, and the line the reader could not read is
+  // counted in the line's ink
   let hv = await viewHead(page)
-  assert.ok(hv.ok && hv.lead === '2 labels on' && hv.residueText === '1 unreadable line' && !hv.filter, `${tag} 6: the view's header ${JSON.stringify(hv)}`)
-  // a label switched off in the page's colour menu leaves one on
-  await view.evaluate(() => document.querySelector<HTMLElement>('.th-colour-by')!.click())
-  await view.evaluate(() => document.querySelector<HTMLElement>('.th-item[data-lab="Charged twice"]')!.click())
-  await sleep(200)
-  assert.equal((await viewHead(page)).lead, '1 label on', `${tag} 6: one label on`)
-  await view.evaluate(() => document.querySelector<HTMLElement>('.th-item[data-lab="Charged twice"]')!.click())
-  await view.evaluate(() => document.body.dispatchEvent(new MouseEvent('mousedown', { bubbles: true })))
+  assert.ok(hv.ok && hv.residueText === '1 unreadable line' && !hv.filter, `${tag} 6: the view's header ${JSON.stringify(hv)}`)
   // the page's Only these shows as thimble's filter chip with how many events it hides, beside the strip's items, and
   // the chip clears it
   await view.evaluate(() => document.querySelector<HTMLElement>('.th-lg[data-k="Database connections"] .th-lname')!.click())
@@ -763,7 +761,7 @@ async function walk(page: Page, tag: string, folds?: boolean, send = false) {
   await sleep(300)
   hv = await viewHead(page)
   const lacking = await view.evaluate(() => (window as any).DATA.events.filter((e: { marks: string[] }) => !e.marks.includes('Database connections')).length)
-  assert.ok(hv.ok && hv.lead === '2 labels on' && hv.filter === 'Database connections · connections' && hv.hidden === `${lacking} hidden`, `${tag} 6: the filter in the view's header ${JSON.stringify(hv)}`)
+  assert.ok(hv.ok && hv.filter === 'Database connections · connections' && hv.hidden === `${lacking} hidden`, `${tag} 6: the filter in the view's header ${JSON.stringify(hv)}`)
   const hf = page.frames().find((f) => f.url().includes('/tour/timeline/view.html'))!
   await hf.evaluate(() => document.querySelector<HTMLElement>('.view-pane-filter')!.click())
   await sleep(200)
@@ -775,7 +773,7 @@ async function walk(page: Page, tag: string, folds?: boolean, send = false) {
   await sleep(200)
   const rl = await hf.evaluate(() => {
     const list = document.querySelector('.view-pane-residue-list'),
-      head = Math.max(...[...document.querySelectorAll('.scope-head .sh, .scope-head .view-pane-side-show')].map((e) => e.getBoundingClientRect().bottom)),
+      head = Math.max(...[...document.querySelectorAll('.scope-head .view-pane-title')].map((e) => e.getBoundingClientRect().bottom)),
       body = document.querySelector('.view-pane-body')!.getBoundingClientRect()
     if (!list) return null
     const b = list.getBoundingClientRect(),

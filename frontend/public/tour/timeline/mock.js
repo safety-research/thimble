@@ -1,7 +1,7 @@
 'use strict'
-// The Timeline view's side of thimble's scope header (shared/scope-head.js): its unit (a day), the files it reads by
-// folder, its schema and labels. Before the strip, thimble's label control says how many labels are on in the page;
-// after it, the page's Only these shows as thimble's filter chip with how many events it hides, and the chip clears it.
+// The Timeline view's side of thimble's head (scope-head.js): its name, the files it reads by folder, its schema and
+// labels. The page draws its own label controls. At the head's right end the page's Only these shows as thimble's
+// filter chip with how many events it hides, and the chip clears it.
 ;(() => {
   const D = window.DATA
   const plural = window.ScopeHead.plural
@@ -28,9 +28,7 @@
   const LABEL = 'M4 4h8l8 8-8 8-8-8zM8 8h.01', X = 'M6 6l12 12M18 6L6 18'
   const page = document.querySelector('.view-pane-frame')
   const pageApi = () => { try { return page.contentWindow.mock || null } catch { return null } }
-  let on = D.labels.length
   let filter = null
-  const side = () => `<button type="button" class="btn btn-ghost btn-sm view-pane-side-show" title="Show labels">${icon('label', LABEL, 14, 'btn-ico')}<span class="btn-label">${on ? `${plural(on, 'label')} on` : 'Labels'}</span></button>`
   const tail = () => {
     if (!filter) return ''
     const l = D.labels.find((x) => x.name === filter)
@@ -53,24 +51,11 @@
     filter = e.data.label
     head.render()
   })
-  // the page's labels as they are switched on and off, heard once its page has loaded
-  let heard = null
-  const hear = () => {
-    const m = pageApi()
-    if (!m || heard === m) return
-    heard = m
-    const count = () => { const n = m.thimble.labels().length; if (n !== on) { on = n; head.render() } }
-    m.thimble.onColour(count)
-    count()
-  }
-  page.addEventListener('load', hear)
   const head = window.ScopeHead.mount({
     host: document.querySelector('.view-pane-head.scope-head'),
-    side,
+    name: 'Timeline',
     tail,
     wire,
-    unit: { label: 'Day', multi: false, options: [{ key: '2026-05-16', title: '16 May 2026', sub: '01:40–13:40 UTC', note: `${plural(D.events.length, 'event')}<br>${plural(D.files.length, 'file')}` }] },
-    compare: false,
     files,
     problems: () => D.problems,
     derived: {
@@ -80,6 +65,5 @@
       labelsOn: 'on each event',
     },
   })
-  hear()
   window.mockHead = head
 })()

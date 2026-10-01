@@ -1,36 +1,8 @@
-/* The scope header thimble draws above every corpus view, the same in every view: the unit picker, Combined | Compare,
-   the files, the derived data, the lines not read, and a label filter's chip with what it hides. Built from the app's
-   own parts (.btn, .seg, .popover, .menu-item, .chip, .view-pane-files, .view-pane-hidden). */
-.view-pane-head.scope-head { flex-wrap: nowrap; align-items: center; justify-content: flex-start; gap: 10px; min-height: 28px; padding-bottom: 12px; }
-/* thimble's label control stays level with the strip's first row when the strip wraps */
-.scope-head .view-pane-side-show.btn { flex: none; align-self: flex-start; margin: 2px -2px 0 -8px; }
-.sh { flex: 1; min-width: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; font: var(--type-ui-sm); }
-.sh .sh-dot { color: var(--text-placeholder, var(--text-tertiary)); }
-.sh-unit.btn { gap: 6px; padding: 0 8px 0 10px; font-weight: 400; color: var(--text-primary); }
-.sh-unit .k { color: var(--text-tertiary); }
-.sh-unit b { font-weight: 500; }
-.sh-unit .icon { color: var(--text-tertiary); }
-.sh-unit[aria-expanded='true'] { background: var(--surface-hover); }
-.sh .seg { flex: none; }
-.sh .view-pane-files { white-space: nowrap; line-height: 28px; }
-.sh .view-pane-files { color: var(--text-secondary); }
-
-/* popovers, under their trigger */
+/* The head thimble draws above every corpus view, the same in every view, from the app's own parts (.view-pane-head,
+   .view-pane-name, .view-pane-sub, .view-pane-files, .popover, .chip, .view-pane-hidden): its popovers, each under its
+   trigger. */
 .sh-pop.popover { position: fixed; z-index: 1000; max-width: calc(100vw - 16px); max-height: min(700px, calc(100vh - 170px)); overflow: auto; padding: 4px; }
 .sh-sum { padding: 6px 8px 4px; color: var(--text-secondary); font: var(--type-ui-sm); }
-.sh-tick { flex: none; display: inline-grid; place-items: center; box-sizing: border-box; width: 14px; height: 14px; border: 1px solid var(--border-strong); border-radius: 4px; background: var(--surface-card); color: transparent; }
-.sh-tick.on { border-color: var(--surface-inverse); background: var(--surface-inverse); color: var(--text-on-inverse); }
-.sh-tick svg { width: 10px; height: 10px; }
-
-/* the unit: a checklist (runs) or a pick of one (a day), each with what it holds */
-.sh-units { width: 420px; }
-.sh-units .menu-item { justify-content: flex-start; gap: 10px; min-height: 44px; padding: 5px 8px; white-space: normal; }
-.sh-units .menu-item.all { min-height: 30px; }
-.sh-unit-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
-.sh-unit-text b { font-weight: 500; }
-.sh-unit-text span { color: var(--text-tertiary); font-size: var(--text-xs); }
-.sh-units .menu-item-note { align-self: flex-start; margin-top: 1px; text-align: right; font-variant-numeric: tabular-nums; }
-.sh-units .sh-sum { padding-bottom: 6px; }
 
 /* the files, grouped by run or folder */
 .sh-files { width: 460px; }
