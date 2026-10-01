@@ -104,46 +104,122 @@ SCRATCH_DIR = "scratch"  # workspace-relative: the kernels' cwd, a symlink mirro
 VCS_DIR = ".git"  # left out of the mirror (mirror_corpus)
 
 
+MIRRORS_DIR = "mirrors"  # under thimble's home, which no kernel reads or writes: each scratch mirror's manifest
+
+
+def _mirror_manifest(scratch: Path) -> Path:
+    return _home() / MIRRORS_DIR / f"{hashlib.sha1(str(scratch.resolve()).encode()).hexdigest()[:16]}.json"
+
+
+def _dir_mtime_ns(path: Path, follow: bool = False) -> int | None:
+    try:
+        st = os.stat(path, follow_symlinks=follow)
+    except OSError:
+        return None
+    return st.st_mtime_ns if stat.S_ISDIR(st.st_mode) else None
+
+
+def _drop_dangling(p: Path) -> None:
+    if os.path.islink(p) and not os.path.exists(p):
+        with contextlib.suppress(OSError):
+            p.unlink()
+
+
+def _mirror_folder(src: Path, dest: Path, names: list[str], links: frozenset[str]) -> None:
+    """One folder of the mirror: a link in `dest` to each of `names` in `src` (`links`, the names that are links in the
+    corpus, only while their target exists), re-pointed when it points elsewhere, and the links in `dest` whose target
+    is gone removed. A real entry under a corpus name is the kernel's and stays."""
+    have: dict[str, bool] = {}  # name in dest -> whether it is a link
+    with contextlib.suppress(OSError), os.scandir(dest) as it:
+        for e in it:
+            have[e.name] = e.is_symlink()
+    for name in names:
+        target = src / name
+        if name in links and not os.path.exists(target):
+            continue
+        is_link = have.get(name)
+        if is_link is False:
+            continue  # a real file the kernel wrote under a corpus file's name: left as it is
+        link = dest / name
+        if is_link:
+            try:
+                if os.readlink(link) == str(target):
+                    continue
+                link.unlink()
+            except OSError:
+                continue
+        try:
+            os.symlink(target, link)
+        except OSError:
+            log.exception("scratch mirror: could not link %s", link)
+    wanted = set(names) - links
+    for name, is_link in have.items():
+        if is_link and name not in wanted:
+            _drop_dangling(dest / name)
+
+
 def mirror_corpus(corpus: Path, scratch: Path) -> None:
     """Make `scratch` mirror the tree under `corpus`: every corpus directory a real directory, every file a symlink, so
     a kernel with `scratch` as cwd reads the corpus by the same relative paths and writes only into `scratch`.
     Idempotent: entries the kernel created are left alone, dangling symlinks removed, moved targets re-pointed.
-    Blocking."""
+
+    The corpus's folders come from corpus_walk, and a manifest under thimble's home keeps, for each folder mirrored,
+    its mtime and its scratch folder's mtime as they were right after: a folder whose two mtimes are unchanged is
+    skipped without reading either, so mirroring an unchanged corpus costs two stats per folder. Blocking."""
+    from . import corpus_walk  # noqa: PLC0415
+
     corpus = corpus.resolve()
     scratch.mkdir(parents=True, exist_ok=True)
-    for root, dirs, files in os.walk(corpus):  # followlinks=False: a symlinked directory in the corpus mirrors as a link
-        rel = Path(root).relative_to(corpus)
-        dest = scratch if rel == Path(".") else scratch / rel
-        if dest != scratch:
-            if dest.is_symlink() or dest.is_file():
-                dirs[:] = []  # a kernel-made file where the corpus has a directory: the kernel's entry wins
+    manifest = _mirror_manifest(scratch)
+    try:
+        saved = read_json(manifest, None)
+    except (OSError, ValueError):
+        saved = None
+    done: dict[str, list[int]] = {}
+    if isinstance(saved, dict) and saved.get("corpus") == str(corpus) and isinstance(saved.get("dirs"), dict):
+        done = {k: v for k, v in saved["dirs"].items() if isinstance(v, list) and len(v) == 2}
+    # a corpus that is a git repository keeps its objects under .git, never data for a card
+    tree = corpus_walk.walk(corpus, frozenset({VCS_DIR}))
+    kept: dict[str, list[int]] = {}
+    skipped: set[str] = set()
+    for rel, folder in tree.items():
+        if rel and rel.rpartition("/")[0] in skipped:
+            skipped.add(rel)
+            continue
+        dest = scratch / rel if rel else scratch
+        now: int | None = None
+        try:
+            st = os.stat(dest, follow_symlinks=not rel)
+        except FileNotFoundError:
+            dest.mkdir()
+        else:
+            if not stat.S_ISDIR(st.st_mode):
+                skipped.add(rel)  # a kernel-made file where the corpus has a directory: the kernel's entry wins
                 continue
-            dest.mkdir(exist_ok=True)
-        # a corpus that is a git repository keeps its objects under .git, never data for a card
-        files = [n for n in files if n != VCS_DIR]
-        dirs[:] = [d for d in dirs if d != VCS_DIR]
-        linked = [n for n in files] + [d for d in dirs if (Path(root) / d).is_symlink()]
-        dirs[:] = [d for d in dirs if not (Path(root) / d).is_symlink()]
-        for name in linked:
-            link, target = dest / name, Path(root) / name
-            if link.is_symlink():
-                if os.readlink(link) == str(target):
-                    continue
-                link.unlink()
-            elif link.exists():
-                continue  # a real file the kernel wrote under a corpus file's name: left as it is
-            try:
-                os.symlink(target, link)
-            except OSError:
-                log.exception("scratch mirror: could not link %s", link)
-    for root, dirs, files in os.walk(scratch):
-        for name in [*files, *dirs]:
-            p = Path(root) / name
-            if p.is_symlink() and not p.exists():  # dangling: the corpus file is gone
-                try:
-                    p.unlink()
-                except OSError:
-                    pass
+            now = st.st_mtime_ns
+        was = done.get(rel)
+        if was is not None and not folder.racy and was == [folder.mtime_ns, now]:
+            kept[rel] = was
+            continue
+        _mirror_folder(corpus / rel if rel else corpus, dest, folder.file_names(), folder.link_names())
+        for sub in folder.dirs:  # made now, so that the mtime kept below is the one the next pass finds
+            with contextlib.suppress(FileExistsError):
+                (dest / sub).mkdir()
+        after = _dir_mtime_ns(dest, follow=not rel)
+        if not folder.racy and after is not None:
+            kept[rel] = [folder.mtime_ns, after]
+    gone = set(done) - set(tree)
+    for rel in gone:
+        parts = rel.split("/")
+        if not any("/".join(parts[:i]) in gone for i in range(1, len(parts))):
+            for root, dirs, files in os.walk(scratch / rel):  # the corpus folder is gone, and so are its files
+                for name in [*files, *dirs]:
+                    _drop_dangling(Path(root) / name)
+    try:
+        manifest.parent.mkdir(parents=True, exist_ok=True)
+        atomic_write_text(manifest, json.dumps({"corpus": str(corpus), "dirs": kept}, separators=(",", ":")))
+    except OSError:
+        log.warning("scratch mirror: its manifest %s could not be written", manifest)
 
 
 MIRROR_MEMO_S = 30.0  # a mirror this recent serves the next kernel's start too
