@@ -1915,6 +1915,49 @@
   border-left: 2px solid var(--border-subtle);
   color: var(--text-secondary);
 }
+/* a markdown file's front matter, folded above the document: a button, and when opened its fields one per row, the key
+   in the tertiary ink */
+.reader-md-meta {
+  margin: 0 0 12px;
+}
+.reader-md-meta-toggle.btn {
+  margin-left: -8px;
+  color: var(--text-secondary);
+}
+.reader-md-meta-toggle .dim {
+  margin-left: 6px;
+}
+.reader-md-meta-fields {
+  display: grid;
+  grid-template-columns: minmax(0, max-content) minmax(0, 1fr);
+  column-gap: 16px;
+  row-gap: 4px;
+  margin: 6px 0 0;
+  padding: 8px 0 8px 12px;
+  border-left: 2px solid var(--border-subtle);
+  font: var(--type-ui-sm);
+}
+.reader-md-meta-field {
+  display: contents;
+}
+.reader-md-meta-fields dt {
+  color: var(--text-tertiary);
+  overflow-wrap: anywhere;
+}
+.reader-md-meta-fields dd {
+  margin: 0;
+  min-width: 0;
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+.reader-md .reader-md-meta-fields pre {
+  margin: 0;
+  padding: 0;
+  background: none;
+  font: var(--type-mono);
+  color: var(--text-secondary);
+  white-space: pre-wrap;
+}
 
 /* -------- text lines, raw lines: the code's own ink (the primary), syntax colours from styles/code.css -------- */
 .reader-lines {

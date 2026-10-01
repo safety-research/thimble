@@ -1,15 +1,18 @@
 // @vitest-environment jsdom
 // Transcript for anything close to a transcript, and a PDF as itself: the server's sniff decides the mode, a text chat
-// log reads as turns whose lines keep their own records, and a PDF ref opens at its page
-// (src/files/views/transcript.tsx, src/files/views/registry.ts, src/files/Reader.tsx).
+// log reads as turns whose lines keep their own records, and a PDF ref opens at its page; records that are objects
+// offer the Table, and a markdown file's front matter shows folded (src/files/views/transcript.tsx, table.tsx, text.tsx,
+// src/files/views/registry.ts, src/files/Reader.tsx).
 import { act } from 'react'
 import { afterEach, describe, expect, test, vi } from 'vitest'
 import { pdfPage, Reader } from '../../src/files/Reader.tsx'
 import { ReaderLabelsContext, type ReaderLabels } from '../../src/files/marks.tsx'
 import type { FilesLabels } from '../../src/files/useLabels.ts'
 import { segmentsFor, segmentsFrom } from '../../src/files/views/common.tsx'
-import { pickView, scoreViews } from '../../src/files/views/registry.ts'
-import transcript, { chatTurns, conversationTurns, nameOf, parsedLines, pick, shownLines, textOf, timeOf } from '../../src/files/views/transcript.tsx'
+import { pickView, scoreViews, viewByType } from '../../src/files/views/registry.ts'
+import { OBJECTS_SCORE, tableScore } from '../../src/files/views/table.tsx'
+import { frontMatterLines, metaFields } from '../../src/files/views/text.tsx'
+import transcript, { chatTurns, conversationTurns, nameOf, parsedLines, pick, shownLines, textOf, timeOf, unwrapStream } from '../../src/files/views/transcript.tsx'
 import { api } from '../../src/lib/api.ts'
 import type { Concept, SourcePage, SourceRecord, TranscriptHint, View } from '../../src/lib/types.ts'
 import { mount, settle, unmountAll } from './mount.tsx'
@@ -41,6 +44,15 @@ describe('which mode a file opens in', () => {
     expect(md.find((s) => s.def.type === 'transcript')!.score).toBeGreaterThan(0)
     const csv = scoreViews('chats/tickets.csv', 'text', text(['speaker,message', 'customer,hi']), { format: 'csv', score: 0.95, keys: { speaker: 'speaker', text: 'message' } })
     expect(pickView(csv).type).toBe('transcript')
+  })
+  test('records that are objects offer the Table under Raw when they are not flat, and flat ones open in it', () => {
+    const turns = [1, 2, 3].map((i) => ({ id: `t${i}`, session_id: 's', agent_action: { command: `click ${i}` }, error: null, created_at: '2026-07-10 17:00' }))
+    expect(tableScore(turns)).toBe(OBJECTS_SCORE)
+    const scored = scoreViews('computer_use_turns.jsonl', 'text', turns, null)
+    expect(pickView(scored).type).toBe('raw')
+    expect(scored.find((s) => s.def.type === 'table')!.score).toBeGreaterThan(0)
+    expect(tableScore([{ a: 1, b: 'x' }, { a: 2, b: 'y' }])).toBe(0.85)
+    expect(tableScore([{ a: 1 }, 'a line'])).toBe(0)
   })
   test('without a sniff, a file is no transcript unless its records read as messages', () => {
     expect(scoreViews('notes.txt', 'text', text(['just prose']), null).find((s) => s.def.type === 'transcript')!.score).toBe(0)
@@ -136,6 +148,40 @@ describe('messages in any shape', () => {
 
 describe('JSON lines', () => {
   const View = transcript.component
+  test('who speaks is the first of the keys the sniff names that a record holds', async () => {
+    const records: SourceRecord[] = [
+      { speakerName: 'host', content: 'Welcome.', timestamp: '2026-04-02T17:47:10Z' },
+      { agentName: 'Agent A', goal: 'Look up charities', timestamp: '2026-04-02T17:48:02Z' },
+    ].map((r, i) => ({ line: i + 1, record: r, blocks: [{ kind: 'text', text: String(r.content ?? '') }], meta: {} }))
+    expect(pick(records[1].record, 'speakerName|agentName')).toBe('Agent A')
+    expect(pick({ speakerName: '', agentName: 'b' }, 'speakerName|agentName')).toBe('b')
+    const hint: TranscriptHint = { format: 'messages', score: 0.95, keys: { speaker: 'speakerName|agentName', text: 'content', time: 'timestamp' } }
+    const page: SourcePage = { path: 'village.jsonl', kind: 'text', total_lines: 2, start: 1, records }
+    const el = await mount(<View workspace="w" path="village.jsonl" kind="text" page={page} loadMore={() => undefined} transcript={hint} />)
+    expect([...el.querySelectorAll('.reader-record-head')].map((h) => h.textContent)).toEqual(['host · 2026-04-02 17:47', 'Agent A · 2026-04-02 17:48'])
+  })
+  test('a stream nested under a key in each record shows the nested records, their time the row’s', async () => {
+    const rows = [
+      { id: 'c1', created_at: '2026-03-24 20:51:20', content: { type: 'system', subtype: 'status', session_id: 's1' } },
+      { id: 'c2', created_at: '2026-03-24 20:51:25', content: { type: 'assistant', session_id: 's1', message: { role: 'assistant', content: [{ type: 'text', text: 'I will list the files.' }, { type: 'tool_use', name: 'Bash', input: { command: 'ls' } }, { type: 'thinking', thinking: '' }] } } },
+      { id: 'c3', created_at: '2026-03-24 20:51:27', content: { type: 'user', session_id: 's1', message: { role: 'user', content: [{ type: 'tool_result', content: [{ type: 'text', text: 'notes.txt' }] }] } } },
+    ]
+    const records: SourceRecord[] = rows.map((r, i) => ({ line: i + 1, record: r, blocks: [{ kind: 'raw', text: JSON.stringify(r) }], meta: {} }))
+    const open = unwrapStream(records, 'content')
+    expect(open[1].blocks).toEqual([
+      { kind: 'text', text: 'I will list the files.' },
+      { kind: 'tool_use', text: 'Bash\n{\n  "command": "ls"\n}' },
+    ])
+    expect(open[2].blocks).toEqual([{ kind: 'tool_result', text: 'notes.txt' }])
+    expect(open[1].meta.timestamp).toBe('2026-03-24 20:51:25')
+    const page: SourcePage = { path: 'sdk.jsonl', kind: 'text', total_lines: 3, start: 1, records }
+    const el = await mount(<View workspace="w" path="sdk.jsonl" kind="text" page={page} loadMore={() => undefined} transcript={{ format: 'stream', score: 1, wrap: 'content' }} />)
+    const cards = [...el.querySelectorAll('.reader-card')]
+    expect(cards.map((c) => c.getAttribute('data-line'))).toEqual(['2', '3'])
+    expect(cards[0].querySelector('.reader-record-head')?.textContent).toBe('assistant · 2026-03-24 20:51')
+    expect(cards[0].textContent).toContain('I will list the files.')
+    expect(el.querySelector('.reader-syschip')?.textContent).toContain('1')
+  })
   test('lines that each hold a conversation show one card per line, its turns inside', async () => {
     const records: SourceRecord[] = [1, 2].map((n) => ({
       line: n,
@@ -170,6 +216,35 @@ describe('JSON lines', () => {
     const heads = [...el.querySelectorAll('.reader-record-head')].map((h) => h.textContent)
     expect(heads).toEqual(['user', '(unsigned)', 'assistant'])
     expect(el.querySelector('.reader-card[data-line="3"]')?.textContent).toContain('a missing key')
+  })
+})
+
+describe('a markdown file’s front matter', () => {
+  const doc = ['---', 'pretty_name: Toy village', 'license: "other"', 'tags:', '  - agents', '  - logs', 'summary: >-', '  A few agents', '  and their logs.', 'configs:', '  - config_name: events', '    data_files: events.jsonl.gz', '---', '', '# Toy village', '', 'Logs of a few agents.']
+  test('is found between its fences, and its fields read one per row', () => {
+    expect(frontMatterLines(doc)).toBe(13)
+    expect(frontMatterLines(['# Title', '---'])).toBe(0)
+    expect(frontMatterLines(['---', 'no end'])).toBe(0)
+    expect(frontMatterLines(['+++', 'title = "x"', '+++'])).toBe(3)
+    expect(metaFields(doc.slice(1, 12))).toEqual([
+      { key: 'pretty_name', value: 'Toy village' },
+      { key: 'license', value: 'other' },
+      { key: 'tags', value: 'agents, logs' },
+      { key: 'summary', value: 'A few agents and their logs.' },
+      { key: 'configs', block: '- config_name: events\n  data_files: events.jsonl.gz' },
+    ])
+  })
+  test('shows folded above the rendered document, which starts after it', async () => {
+    const page: SourcePage = { path: 'README.md', kind: 'text', total_lines: doc.length, start: 1, records: doc.map((t, i) => line(i + 1, t)) }
+    const View = viewByType('text')!.component
+    const el = await mount(<View workspace="w" path="README.md" kind="text" page={page} loadMore={() => undefined} />)
+    const toggle = el.querySelector('.reader-md-meta-toggle') as HTMLElement
+    expect(toggle.textContent).toBe('Metadata5 fields')
+    expect(el.querySelector('.reader-md-meta-fields')).toBeNull()
+    expect(el.querySelector('.reader-md h1')?.getAttribute('data-anchor')).toBe('README.md#L15')
+    expect(el.textContent).not.toContain('pretty_name')
+    await act(async () => toggle.click())
+    expect([...el.querySelectorAll('.reader-md-meta-fields dt')].map((d) => d.textContent)).toEqual(['pretty_name', 'license', 'tags', 'summary', 'configs'])
   })
 })
 
