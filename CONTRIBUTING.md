@@ -50,8 +50,8 @@ synthetic data; a test does not pin wording, copy or layout.
 
 Before a release, `bash scripts/e2e_release.sh --ref <branch>` installs a fresh clone of the branch into a new
 THIMBLE_HOME and walks the UI in headless Chromium on a copy of a synthetic corpus. It writes a report with a screenshot
-of each step (`--help` lists its options). It uses your own Claude login, and it leaves your Claude Code settings and
-your `thimble` command as they were.
+of each step (`--help` lists its options). It uses your own Claude login for its one model call, a one-turn `claude -p`,
+and it leaves your Claude Code settings and your `thimble` command as they were.
 
 ## Layout
 
