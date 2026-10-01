@@ -87,6 +87,14 @@
   --viz-ink-2: #b8b5ad;
   --viz-ink-3: #85827a;
   --viz-ink-4: #4d4b47;
+  /* the nominal hues (below) stepped for Dark */
+  --viz-1: #2275e8;
+  --viz-2: #da7306;
+  --viz-3: #17a973;
+  --viz-4: #0c9edc;
+  --viz-5: #9e8901;
+  --viz-6: #0b9a9e;
+  --viz-7: #ab691c;
 }
 
 /* -------- the accent: one of seven, iris by default. --accent is the fill, --accent-on the text on it (white or ink,
@@ -186,12 +194,12 @@
      at 6:1 or more on every ground. */
   --code-text: var(--ink-900);
   --code-comment: var(--ink-500);
-  --code-keyword: color-mix(in oklab, var(--viz-5) 56%, var(--ink-900));
-  --code-string: color-mix(in oklab, var(--viz-3) 60%, var(--ink-900));
+  --code-keyword: color-mix(in oklab, #cc79a7 56%, var(--ink-900));
+  --code-string: color-mix(in oklab, #009e73 60%, var(--ink-900));
   --code-number: color-mix(in oklab, #d55e00 65%, var(--ink-900));
-  --code-function: color-mix(in oklab, var(--viz-2) 47%, var(--ink-900));
+  --code-function: color-mix(in oklab, #e69f00 47%, var(--ink-900));
   --code-type: color-mix(in oklab, #56b4e9 48%, var(--ink-900));
-  --code-property: color-mix(in oklab, var(--viz-1) 80%, var(--ink-900));
+  --code-property: color-mix(in oklab, #0072b2 80%, var(--ink-900));
   --code-added: var(--status-positive);
   --code-removed: var(--status-negative);
 
@@ -228,16 +236,17 @@
   --hl-unverified: var(--status-warning-soft);
   --hl-unverified-ink: var(--status-warning);
 
-  /* data: the ink ramp for ordered series; for nominal groups and label colours Okabe–Ito with series 4 a red
-     (#d62728) and series 6 a violet (#8c65e8), since sky blue and vermillion are hard to tell from their neighbours.
-     #a09c93 is "no match". The accent is never a series. */
-  --viz-1: #0072b2;
-  --viz-2: #e69f00;
-  --viz-3: #009e73;
-  --viz-4: #d62728;
-  --viz-5: #cc79a7;
-  --viz-6: #8c65e8;
-  --viz-7: #8a6d3b;
+  /* data: the ink ramp for ordered series; for nominal groups seven hues with no red, which reads as an error, and no
+     purple, which is the agents' colour: blue, orange, green, sky, gold, teal, brown. Each reads at 3:1 or more on
+     every paper, neighbours stay apart under protan and deutan vision, and the first three stay apart pairwise. Dark
+     has its own steps of the same hues. The accent is never a series. */
+  --viz-1: #025ac3;
+  --viz-2: #d0750a;
+  --viz-3: #08632f;
+  --viz-4: #1392d4;
+  --viz-5: #897301;
+  --viz-6: #009c85;
+  --viz-7: #844500;
   --viz-8: var(--viz-ink-1);
   --viz-9: var(--viz-ink-3);
   /* a label's colour, in the order the analyst's labels take them, and the colour of "no match". 9 to 12 give a label
@@ -370,12 +379,12 @@
   /* Dark's ink is light, so its scrim darkens with black instead */
   --scrim: rgba(0, 0, 0, 0.6);
   /* the code colours lightened toward Dark's text ink */
-  --code-keyword: color-mix(in oklab, var(--viz-5) 70%, var(--ink-900));
-  --code-string: color-mix(in oklab, var(--viz-3) 64%, var(--ink-900));
+  --code-keyword: color-mix(in oklab, #cc79a7 70%, var(--ink-900));
+  --code-string: color-mix(in oklab, #009e73 64%, var(--ink-900));
   --code-number: color-mix(in oklab, #d55e00 59%, var(--ink-900));
-  --code-function: color-mix(in oklab, var(--viz-2) 95%, var(--ink-900));
+  --code-function: color-mix(in oklab, #e69f00 95%, var(--ink-900));
   --code-type: color-mix(in oklab, #56b4e9 93%, var(--ink-900));
-  --code-property: color-mix(in oklab, var(--viz-1) 49%, var(--ink-900));
+  --code-property: color-mix(in oklab, #0072b2 49%, var(--ink-900));
 }
 :root[data-paper='dark'][data-accent='graphite'] {
   --text-accent: color-mix(in oklab, var(--accent) 45%, white);

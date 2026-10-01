@@ -170,6 +170,63 @@ async def test_a_reader_resolves_a_line_and_a_key_and_its_answer_is_kept(ws, inp
     assert list(views.index_dir(CORPUS, "threads").glob("*.index.pickle"))
 
 
+ANY_KEY_READER = '''
+def build_index(paths):
+    for path in paths:
+        open(path).read()
+    return {}
+
+
+def records(index, query):
+    return []
+
+
+def resolve(index, locator):
+    if "key" not in locator:
+        return None
+    n = int(locator["key"][1:])
+    return {"excerpt": f"unit {n}", "label": f"unit {n}", "refs": [f"board.jsonl#L{n + 1}"], "key": locator["key"],
+            "target": {}}
+'''
+
+
+async def test_marking_many_units_writes_their_kept_answers_once_and_off_the_event_loop(ws, inproc, monkeypatch):
+    """With a label on, the marks of a page's units resolve them all at once, and their answers are kept in
+    key-refs.json in one read and one write, made off the event loop, so the server answers other requests meanwhile."""
+    views.write_view(CORPUS, "units", reader=ANY_KEY_READER, html=THREADS_HTML,
+                     **{**VIEW, "name": "Units", "units": [{"form": "k<n>", "means": "one unit"}]})
+    reads, writes = [], []
+    real_read, real_write = views.key_refs, views.write_json
+
+    def on_loop() -> bool:
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            return False
+        return True
+
+    def counted_read(c):
+        reads.append(on_loop())
+        return real_read(c)
+
+    def counted_write(path, obj):
+        if Path(path).name == views.KEY_REFS_FILE:
+            writes.append(on_loop())
+        real_write(path, obj)
+
+    monkeypatch.setattr(views, "key_refs", counted_read)
+    monkeypatch.setattr(views, "write_json", counted_write)
+    units = [f"view:units/k{n}" for n in range(300)]
+    marks = await views.marks_for(CORPUS, "units", units, views.probe_context())
+    assert marks, "the test label marks some of the units"
+    assert reads == [False] and writes == [False]
+    kept = real_read(CORPUS)
+    assert len(kept) == 300 and kept["view:units/k7"]["refs"] == ["board.jsonl#L8"]
+    views._memo.clear()
+    await views.marks_for(CORPUS, "units", units, views.probe_context())
+    assert writes == [False], "answers it already holds are not written again"
+
+
 def test_the_context_says_what_each_view_is_for(ws):
     from app import context  # noqa: PLC0415
 

@@ -4,7 +4,7 @@
 // is such a line carrying its `call:` ref, so it can be cited and, open, shows its whole stored output with numbered
 // lines. Other runs of one kind of call are one card (Cards · 2 steps · 31s). Everything else is a quiet note with the
 // chips of what it points at. Label runs in a row are one Label card, a step per label.
-import { createContext, useContext, useEffect, useRef, useState, type DragEvent, type ReactNode } from 'react'
+import { createContext, useContext, useEffect, useRef, useState, type DragEvent } from 'react'
 import { Chip } from '../components/Chip'
 import { CodeText } from '../components/Code'
 import { Icon } from '../components/Icon'
@@ -124,10 +124,9 @@ export const CallFocusContext = createContext<CallFocus | null>(null)
  * The rows of one log level. `streaming` marks the last text row as still growing. `chat` is the log's chat id: every
  * message body carries `data-anchor="chat:<id>#<index>"`, so a ⌘-click starts a thread there. `calls` names the
  * orientation whose calls these rows hold: every call is then a chip line with its `call:` ref. `retry` names the error
- * row whose Retry sends the analyst's message again, and `note` its line. `working` stands where the next row will land
- * while `streaming` and no call runs, the spinner unless given.
+ * row whose Retry sends the analyst's message again, and `note` its line.
  */
-export function Rows({ rows, ws, chat, streaming = false, nested = false, calls, live = false, retry, working }: { rows: readonly (Row | BranchRow)[]; ws: string; chat?: string; streaming?: boolean; nested?: boolean; calls?: string; live?: boolean; retry?: ErrorRetry; working?: ReactNode }) {
+export function Rows({ rows, ws, chat, streaming = false, nested = false, calls, live = false, retry }: { rows: readonly (Row | BranchRow)[]; ws: string; chat?: string; streaming?: boolean; nested?: boolean; calls?: string; live?: boolean; retry?: ErrorRetry }) {
   const lastText = streaming ? [...rows].reverse().find((r): r is Extract<Row, { kind: 'text' }> => r.kind === 'text') : undefined
   const lastRow = rows[rows.length - 1]
   const toolPending = lastRow?.kind === 'tool' && !lastRow.result
@@ -198,7 +197,7 @@ export function Rows({ rows, ws, chat, streaming = false, nested = false, calls,
             return <ErrorRow key={r.index} item={r} retry={retry && retry.index === r.index ? retry : undefined} />
         }
       })}
-      {streaming && !toolPending && (working ?? <Working />)}
+      {streaming && !toolPending && <Working />}
     </ChipContext.Provider>
   )
 }

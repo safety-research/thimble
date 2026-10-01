@@ -20,7 +20,8 @@ it with `WS` (the workspace directory) set and registers it as `thimble`.
                               {label, value, colour}, [] outside a view's call
     thimble.kept(ref)         in a view's reader: whether the record passes the analyst's label filter (True with none)
     thimble.kept_unit(refs)   in a view's reader: whether a unit that gathers the records `refs` passes that filter,
-                              judged by its records in the files the filter's label ran over (True when there are none)
+                              judged by its records in the files the filter's label ran over (True when it has records
+                              and none is in such a file, False when it has no records)
     thimble.view_labels()     in a view's reader: {labels, filter}, the labels that are on with their highlighted values,
                               and the filter {label, value, colour} or None
     thimble.timeline(events, spacing="time")
@@ -556,9 +557,10 @@ def kept(ref):
 
 
 def kept_unit(refs):
-    """Whether a unit that gathers the records `refs` passes the analyst's label filter: True with no filter or when the
-    filter's label left no value in any of their files, else whether the label takes the filter's value on one of its
-    records in a file it ran over. Records of other files never keep a unit, since kept holds for all of them."""
+    """Whether a unit that gathers the records `refs` passes the analyst's label filter: True with no filter; with one,
+    False for a unit with no records, True when the filter's label left no value in any of their files, else whether
+    the label takes the filter's value on one of its records in a file it ran over. Records of other files never keep a
+    unit, since kept holds for all of them."""
     return _kept_unit(_view_ctx, refs)
 
 
@@ -605,6 +607,8 @@ def _kept_unit(ctx, refs) -> bool:
     if not f:
         return True
     refs = [str(r) for r in refs]
+    if not refs:
+        return False
     if ctx.get("probe"):
         return any(_probed(r, ctx["probe"]) for r in refs)
     k = next((x for x in ctx.get("labels") or [] if x.get("id") == f.get("id")), None)

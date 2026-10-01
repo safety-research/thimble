@@ -956,8 +956,6 @@ export interface ModelConf {
  * what it is given. */
 export interface Settings {
   models: Record<string, ModelConf>
-  /** the chat column is hidden and main's foot shows in a dock (shell/Shell, chat off) */
-  hide_chat?: boolean
   /** the agents whose permission mode the analyst set; any other runs in the mode of their Claude Code session */
   permission_modes?: Partial<Record<ModeAgent, OrientPermissions>>
   /** the modes the analyst's Claude Code settings turn off */

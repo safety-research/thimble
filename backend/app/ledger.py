@@ -26,12 +26,12 @@ log = logging.getLogger("thimble.ledger")
 router = APIRouter()
 
 # GET /settings layers these under what the file stores (tools.RESULT_LINES_KEY: lines of each output a card's result
-# shows). hide_chat: the browser shows no chat column, only a dock (frontend shell/Shell)
-SETTINGS_DEFAULTS: dict[str, Any] = {"run_cell_result_lines": 40, "hide_chat": False}
+# shows).
+SETTINGS_DEFAULTS: dict[str, Any] = {"run_cell_result_lines": 40}
 # Settings earlier builds stored that nothing reads any more: GET leaves them out, a PUT that sends one (a tab still
-# running an earlier build) is taken with the key dropped, and the next PUT removes it from the file. Each picked how
-# an earlier build ran the orientation.
-RETIRED_KEYS = frozenset({"orient_route", "terminal_first"})
+# running an earlier build) is taken with the key dropped, and the next PUT removes it from the file. orient_route and
+# terminal_first picked how the orientation ran, hide_chat hid the browser's chat column.
+RETIRED_KEYS = frozenset({"orient_route", "terminal_first", "hide_chat"})
 
 
 # --------------------------------------------------------------------------- plain-file helpers
@@ -248,10 +248,10 @@ def get_settings(c: str) -> dict[str, Any]:
     return with_features(stored_settings(c), c)
 
 
-# The keys PUT /settings may change: the settings the browser's settings panel and switches save, and the rows of the
-# permission modes, which only the analyst's browser may change (hook_auth.analyst). The models and the permission modes
-# are written to thimble's config (userconf.save), the rest to the workspace's settings.json. Every other key is the
-# server's own or the analyst's to edit in the file (kernel_wrap, orient_instructions), since a kernel cell or a
+# The keys PUT /settings may change: SETTINGS_DEFAULTS, the models the browser's settings panel saves, and the rows of
+# the permission modes, which only the analyst's browser may change (hook_auth.analyst). The models and the permission
+# modes are written to thimble's config (userconf.save), the rest to the workspace's settings.json. Every other key is
+# the server's own or the analyst's to edit in the file (kernel_wrap, orient_instructions), since a kernel cell or a
 # session's command can reach the route on loopback. RETIRED_KEYS are taken too, and dropped.
 PUT_KEYS = frozenset({*SETTINGS_DEFAULTS, config.MODELS_KEY, "permission_modes", *RETIRED_KEYS})
 
