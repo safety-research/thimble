@@ -534,3 +534,40 @@ async def test_deleting_a_view_lets_go_of_the_kernel_that_holds_its_index(ws, ke
         await asyncio.sleep(0.05)
     assert kernels.stopped == ["views"] and view_calls._pools[CORPUS] == []
     assert await views.reader_call(CORPUS, "other", "records", {}) == {"n": 3, "steps": 0}
+
+
+def test_a_reader_version_whose_index_is_let_go_is_let_go_with_what_its_globals_hold(tmp_path):
+    """A reader that caches its state in a module global (an object that keeps the index) would hold that index long
+    after the kernel let it go, once for every version of the reader a build tried: its module goes with its index."""
+    import gc  # noqa: PLC0415
+    import weakref  # noqa: PLC0415
+
+    src = ("_CACHE = {}\n"
+           "class Index(dict):\n    pass\n"
+           "def build_index(paths):\n    return Index(n=len(paths))\n"
+           "def records(index, query):\n    _CACHE['last'] = index\n    return index['n']\n"
+           "def resolve(index, locator):\n    return None\n")
+    view_host._indexes.clear()
+    view_host._sizes.clear()
+    view_host._readers.clear()
+    view_host._reader_of.clear()
+    try:
+        first = tmp_path / "v1" / "reader.py"
+        first.parent.mkdir()
+        first.write_text(src)
+        out = view_host.answer({"slug": "s", "reader": str(first), "fp": "a", "paths": [], "op": "records"})
+        assert out["ok"]
+        old = weakref.ref(view_host._indexes[("s", "a")])
+        for i, fp in enumerate(("b", "c"), 2):
+            again = tmp_path / f"v{i}" / "reader.py"
+            again.parent.mkdir()
+            again.write_text(src)
+            assert view_host.answer({"slug": "s", "reader": str(again), "fp": fp, "paths": [], "op": "records"})["ok"]
+        gc.collect()
+        assert str(first) not in view_host._readers and len(view_host._readers) == 2
+        assert old() is None, "the first version's module and the index its global kept are gone"
+    finally:
+        view_host._indexes.clear()
+        view_host._sizes.clear()
+        view_host._readers.clear()
+        view_host._reader_of.clear()

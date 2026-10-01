@@ -10,7 +10,8 @@ ships may also define applies(paths) -> {claims, found} or None, whether it fits
 runs with no index. `call` loads reader.py (again when it changed), builds the index or loads it from a pickle keyed by
 the files' and reader's fingerprint, runs one operation and prints SENTINEL followed by the JSON answer. A reader that
 raises answers {ok: false, error, traceback}. The indexes in memory are the most recently used, at most
-INDEXES_PER_VIEW per view and at most the request's `memory` bytes in all; the one in use always stays. An index's
+INDEXES_PER_VIEW per view and at most the request's `memory` bytes in all; the one in use always stays, and so does
+the reader.py module of each index kept, while the others are let go with what their globals hold. An index's
 bytes are what the kernel's resident memory grew by while it was built or loaded, at least its pickle's size. After a
 call that built or loaded an index, or grew the kernel's memory by more than TRIM_GROWTH, the kernel collects its
 garbage and hands the freed memory back to the system (_trim).
@@ -45,6 +46,7 @@ _indexes: "OrderedDict[tuple[str, str], object]" = OrderedDict()  # (slug, finge
 _sizes: dict[tuple[str, str], int] = {}  # (slug, fingerprint) -> bytes of its pickle (0 when it has none)
 _read_counts: dict[tuple[str, str], dict[str, int]] = {}  # (slug, fingerprint) -> {claimed path: bytes build_index read}
 _unpickled: set[tuple[str, str]] = set()  # the indexes in memory that have no pickle, which a restart would build again
+_reader_of: dict[tuple[str, str], str] = {}  # (slug, fingerprint) -> the reader.py that built or loaded it
 # a page still on a view's version before a change reads its index beside the new version's
 INDEXES_PER_VIEW = 2
 PROGRESS_EVERY_S = 0.2  # the least time between two writes of a call's progress
@@ -289,6 +291,7 @@ def _index(slug: str, mod: object, fp: str, paths: list[str], cache: str | None,
     """(the index for this fingerprint, whether it was built now): from memory, else the pickle, else build_index. With
     `reads`, the path the byte counts are kept at, a pickle without them is built again."""
     key = (slug, fp)
+    _reader_of[key] = getattr(mod, "__file__", None) or ""
     if key in _indexes:
         _indexes.move_to_end(key)
         return _indexes[key], False
@@ -346,8 +349,9 @@ def _file_size(path: str | None) -> int:
 
 
 def _evict(key: tuple[str, str], memory: int | None) -> list[str]:
-    """Drop the least recently used indexes but `key`'s: beyond INDEXES_PER_VIEW of one view, then while the pickles of
-    those kept come to more than `memory` bytes. The fingerprints dropped, as `<slug>/<fp>`."""
+    """Drop the least recently used indexes but `key`'s: beyond INDEXES_PER_VIEW of one view, then while those kept
+    come to more than `memory` bytes; then the reader modules no index kept was made by. The fingerprints dropped, as
+    `<slug>/<fp>`."""
     dropped = []
     mine = [k for k in _indexes if k[0] == key[0] and k != key]
     gone = mine[: max(0, len(mine) - INDEXES_PER_VIEW + 1)]
@@ -364,7 +368,13 @@ def _evict(key: tuple[str, str], memory: int | None) -> list[str]:
         _sizes.pop(k, None)
         _read_counts.pop(k, None)
         _unpickled.discard(k)
+        _reader_of.pop(k, None)
         dropped.append(f"{k[0]}/{k[1]}")
+    for k in [k for k in _reader_of if k not in _indexes and k != key]:
+        del _reader_of[k]
+    live = set(_reader_of.values())
+    for path in [p for p in _readers if p not in live]:
+        del _readers[path]
     return dropped
 
 
