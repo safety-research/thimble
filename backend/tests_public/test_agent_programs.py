@@ -699,3 +699,20 @@ def test_a_program_s_chat_a_previous_server_left_running_ends_stopped_and_frees_
     assert agents.read_meta(CORPUS, prog["id"])["status"] == "stopped"
     assert agents.read_meta(CORPUS, own["id"])["status"] == "running", "thimble's own sessions recover their own way"
     assert orientation.read_run(CORPUS)["status"] == "stopped" and not orientation.active(CORPUS)
+
+
+def test_a_subagent_the_manifest_check_accepts_reaches_the_role_s_session(tmp_path, workspaces_tmp, active):
+    """A critic's subagent with the fields extension.schema.json allows is used, not dropped as broken; an MCP server
+    given whole stays out, since it would start outside the session's sandbox."""
+    from app import extension_manifest
+
+    sub = {"description": "Checks dates.", "prompt": "dates.md", "maxTurns": 5, "skills": ["x"], "color": "blue",
+           "mcpServers": ["named", {"inline": {"command": "cat"}}]}
+    folder = _extension(tmp_path, "dates", {"critic": {"description": "Dates.", "prompt": "p.md",
+                                                       "subagents": {"dates": sub}}},
+                        {"agents/critic/p.md": "Check the dates.", "agents/critic/dates.md": "Check each date."})
+    assert extension_manifest.check(folder) == []
+    active.append(folder)
+    got = roles.subagents(CORPUS, "critic")["dates-dates"]
+    assert got["maxTurns"] == 5 and got["skills"] == ["x"] and got["mcpServers"] == ["named"]
+    assert got["prompt"] == "Check each date."

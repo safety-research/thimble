@@ -42,7 +42,10 @@ CODE_WAYS = ("sdk", "command")
 AGENT_JSON = "agent.json"
 FIELDS = ("description", "prompt", "replace", "subagents", "sdk", "command", "model", "effort", "tools",
           "disallowedTools")
-SUBAGENT_FIELDS = ("description", "prompt", "tools", "disallowedTools", "model", "effort")
+# a subagent's fields, as extension.schema.json takes them; mcpServers reaches a session by server names only, since
+# a server given whole would start outside the session's sandbox
+SUBAGENT_FIELDS = ("description", "prompt", "tools", "disallowedTools", "model", "effort", "mcpServers", "maxTurns",
+                   "skills", "color")
 NAME_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,39}$")
 # the prompt file under prompts/ each role's prompt is built from (userconf.PROMPT_FILES); main's is main.md
 PROMPT_FILES = {"main": "main", "orientation": "orient", "critic": "critic", "writer": "writer", "dev": "dev"}
@@ -348,7 +351,11 @@ def subagents(c: str | None, role: str) -> dict[str, dict[str, Any]]:
     for part in found:
         for name, sub in (part.spec.get("subagents") or {}).items():
             prompt = _fill(_body(part, sub.get("prompt")), part, "", role)
-            entry = {k: v for k, v in sub.items() if k in SUBAGENT_FIELDS and k != "prompt"}
+            entry = {k: v for k, v in sub.items() if k in SUBAGENT_FIELDS and k not in ("prompt", "mcpServers")}
+            names = [n for n in sub.get("mcpServers") or [] if isinstance(n, str)] \
+                if isinstance(sub.get("mcpServers"), list) else []
+            if names:
+                entry["mcpServers"] = names
             entry["prompt"] = prompt
             entry.setdefault("description", name)
             out[f"{part.extension}-{name}"] = entry
