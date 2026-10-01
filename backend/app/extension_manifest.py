@@ -320,7 +320,7 @@ def _part(root: Path, d: Path, folder: str, defn: str, file: str, scope: Any) ->
     elif folder == "cards":
         if not (raw.get("description") or raw.get("use")):
             out.append(Problem(rel, 1, 'needs "description"'))
-        if "example" not in raw:
+        if "example" not in raw and "use" not in raw:
             out.append(Problem(rel, 1, 'needs "example"'))
     elif folder in ("agents", "tasks"):
         out += _kind_problems(root, d, rel, raw, text, d.name if folder == "agents" else "")

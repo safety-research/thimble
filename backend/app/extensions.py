@@ -383,7 +383,7 @@ def read_extension(root: Path, expect: str | None = None, have: set[str] | None 
     scope = _words(raw.get("scope"))
     unknown = [x for x in js if x not in views.LIBS]
     if unknown:
-        problems.append(f"its dependencies.js names {', '.join(unknown)}; thimble inlines only {', '.join(views.LIBS)}")
+        problems.append(f"its dependencies.js names {', '.join(unknown)}. thimble inlines only {', '.join(views.LIBS)}")
     if missing := [x for x in python if not _importable(x)]:
         waits.append(f"it needs the Python {_several(len(missing), 'package', 'packages')} {', '.join(missing)}, "
                      f"which thimble does not install")
@@ -414,6 +414,8 @@ def read_extension(root: Path, expect: str | None = None, have: set[str] | None 
             continue
         if not (d / "card.py").is_file():
             problems.append(f"its card type {d.name!r} has no card.py, which thimble needs to draw it")
+        elif not own and not reader:
+            problems.append(f"its card type {d.name!r} has no {views.READER_PY}, which thimble needs to read its files")
         elif not own and reader not in slugs:
             problems.append(f"its card type {d.name!r} has no {views.READER_PY} and reads with the view {reader!r}, "
                             f"which it does not have")

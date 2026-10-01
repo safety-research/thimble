@@ -101,6 +101,23 @@ def test_add_refuses_an_extension_with_problems_and_lists_them_all(tmp_path, wor
     assert not extensions.source_path("broken").exists()
 
 
+def test_a_card_json_written_before_the_spec_settled_needs_no_example(tmp_path):
+    """A card.json in today's layout (`use`) still loads without an example; one in the new layout needs one, and a card
+    type with neither a reader of its own nor a view to read with says it lacks the reader."""
+    root = tmp_path / "cards"
+    _write(root, "extension.json", {"name": "cards", "version": "1", "scope": ["*.jsonl"]})
+    _write(root, "cards/old/card.json", {"use": "How many records each person made."})
+    _write(root, "cards/new/card.json", {"description": "How many records each person made."})
+    for d in ("old", "new"):
+        _write(root, f"cards/{d}/card.html", "<div></div>")
+        _write(root, f"cards/{d}/card.py", "def card(**args):\n    return args\n")
+    assert _problems(root) == ['cards/new/card.json:1  needs "example"']
+    _write(root, "cards/new/card.json", {"description": "How many records each person made.", "example": {}})
+    assert _problems(root) == []
+    assert "its card type 'old' has no reader.py, which thimble needs to read its files" in \
+        extensions.read_extension(root, "cards", set())["problems"]
+
+
 @pytest.fixture()
 def corpus(workspaces_tmp, tmp_path, monkeypatch) -> str:
     d = tmp_path / "data" / "kitws"
