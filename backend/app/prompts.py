@@ -19,7 +19,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 
 # Where the prompt files live. THIMBLE_PROMPTS_DIR overrides it (tests point it at fixtures) and is read again on every
 # call, so a monkeypatched environment works without reloading this module.
-PROMPTS_DIR = Path(os.environ.get("THIMBLE_PROMPTS_DIR", REPO_ROOT / "prompts")).resolve()
+PROMPTS_DIR = Path(os.environ.get("THIMBLE_PROMPTS_DIR") or REPO_ROOT / "prompts").resolve()
 
 # The files a model call sends as they are rendered: main (the analyst session's system-prompt append), shared (rules
 # main's and the orientation's prompts include), tools, dev, labels (the label classifier's system prompt), context

@@ -76,8 +76,8 @@ def build(
     persist: bool = True,
 ) -> ClaudeAgentOptions:
     """The one constructor of ClaudeAgentOptions (module note). `tools` are the MCP tool names the call may use; `env` is
-    added to the server's environment; `speed` switches on fast mode where the model has it; `persist` False writes no
-    transcript."""
+    added to the server's environment, where every THIMBLE_* variable is "" (config.launch_environ says why); `speed`
+    switches on fast mode where the model has it; `persist` False writes no transcript."""
     _bind_sdk()
     return ClaudeAgentOptions(
         cwd=str(cwd),
@@ -94,7 +94,7 @@ def build(
         include_partial_messages=True,
         setting_sources=["user"],
         strict_mcp_config=True,
-        env={**SHELL_LEVEL_ENV, **(env or {})},
+        env={**SHELL_LEVEL_ENV, **{k: "" for k in os.environ if k.startswith(config.OWN_PREFIX)}, **(env or {})},
         extra_args={"safe-mode": None, **({} if persist else {"no-session-persistence": None})},
     )
 

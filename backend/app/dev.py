@@ -90,7 +90,7 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
-from . import agents, cc_settings, cli, config, headless, modes, procs, prompts, ticket_box, userconf
+from . import agents, cc_settings, cli, config, headless, hook_auth, modes, procs, prompts, ticket_box, userconf
 from .cli import SOURCE_CHANGED, home as thimble_home
 from .ledger import atomic_write_text
 from .session import find_transcript
@@ -102,8 +102,8 @@ router = APIRouter()
 REPO = config.REPO_ROOT  # the live checkout; tests point it at a scratch git repository
 # Tickets live here. A scratch stack sets THIMBLE_DEV_DIR so what it files does not land in the checkout's dev/.
 DEV_DIR = Path(os.environ.get("THIMBLE_DEV_DIR") or config.REPO_ROOT / "dev")
-STACK_API_PORT = int(os.environ.get("THIMBLE_STACK_PORT", "8301"))
-STACK_UI_PORT = int(os.environ.get("THIMBLE_STACK_UI_PORT", "5301"))
+STACK_API_PORT = int(os.environ.get("THIMBLE_STACK_PORT") or "8301")
+STACK_UI_PORT = int(os.environ.get("THIMBLE_STACK_UI_PORT") or "5301")
 # off: this server is itself a stack (dev_stack.sh) and neither starts one nor runs a ticket
 STACK_ENABLED = os.environ.get("THIMBLE_DEV_STACK", "1").strip().lower() not in ("0", "false", "no", "off")
 STACK_WAIT_S = 90
@@ -169,6 +169,7 @@ REQUEUE_MAX = 1
 VIEW_POOL = max(0, int(os.environ.get("THIMBLE_VIEW_BUILDS", "3") or "3"))
 # set on a view ticket's session so the plugin's watcher exits at once there (plugin/bin/.thimble-watch)
 SESSION_ENV = "THIMBLE_SESSION"
+SESSION_KEY = "dev"  # the THIMBLE_SESSION of a session with no key of its own (`thimble fix`)
 SOURCES = ("ui", "analyst", "terminal")
 STATUSES = ("queued", "running", "applied", "applied, restart pending", "failed", "needs manual merge", "reverted",
             "rolled back", "stopped", "dismissed")
@@ -1301,10 +1302,10 @@ def _result_text(content: Any) -> str:
 
 
 def _cli_env() -> dict[str, str]:
-    """The environment the `claude` commands run with: this server's, less an inherited Claude Code session identity
-    (config.passes: it would make the new session look nested) and THIMBLE_*, with the analyst's CLAUDE_CONFIG_DIR
-    (config.claude_env)."""
-    return config.claude_env({k: v for k, v in config.passed_environ().items() if not k.startswith("THIMBLE_")})
+    """The environment the `claude` commands run with (config.launch_environ): this server's, less an inherited Claude
+    Code session identity (config.passes: it would make the new session look nested) and THIMBLE_*, with the analyst's
+    CLAUDE_CONFIG_DIR (config.claude_env). A session's own variables go in its --settings `env` (Sessions._flags)."""
+    return config.launch_environ()
 
 
 class SessionError(RuntimeError):
@@ -1409,8 +1410,8 @@ class Sessions:
     message, and `claude stop` ends its process while keeping the conversation. Tests replace dev.SESSIONS with a fake.
     """
 
-    async def _run(self, args: list[str], cwd: Path, env: dict[str, str] | None = None) -> tuple[int, str]:
-        return await _run([CLAUDE_BIN, *args], cwd=cwd, timeout=CLI_TIMEOUT_S, env=None, environ={**_cli_env(), **(env or {})})
+    async def _run(self, args: list[str], cwd: Path) -> tuple[int, str]:
+        return await _run([CLAUDE_BIN, *args], cwd=cwd, timeout=CLI_TIMEOUT_S, env=None, environ=_cli_env())
 
     def problem(self) -> str:
         """Why no session can start here, '' when the CLI is on the PATH (runner_problem)."""
@@ -1418,10 +1419,12 @@ class Sessions:
 
     def _flags(self, workspace: str | None, name: str, add_dirs: "tuple[Path, ...] | list[Path]" = (),
                fence: dict[str, Any] | None = None, asking: dict[str, Any] | None = None,
-               models: dict[str, Any] | None = None) -> list[str]:
+               models: dict[str, Any] | None = None, env: dict[str, str] | None = None) -> list[str]:
         """The session's flags: its `models` ({model, effort, fast}, where None leaves one to the analyst's Claude Code
         settings), else the dev role's, `--add-dir` folders, the `fence` settings, thimble's config for the dev agent and
-        how it asks (module note, permissions). `asking` names the session's key, {key, allow, sandbox?, config?}, the
+        how it asks (module note, permissions). Its environment goes in the settings' `env` (config.session_env, without
+        this server's THIMBLE_* values): the fence's, `env`, and its key as THIMBLE_SESSION with the token that proves it
+        (hook_auth.session_token). `asking` names the session's key, {key, allow, sandbox?, config?}, the
         allow rules of its work in its own folder, for a session whose Bash runs in the sandbox, sandbox_allow's rule,
         and what the config asks of it (dev_config); with it and a workspace, the permission hook answers its requests by
         the dev agent's mode, and a process in Auto runs in auto mode. Without, it keeps UNHOSTED_TOOLS and gets no web
@@ -1455,6 +1458,10 @@ class Sessions:
             settings["hooks"] = hooks
         if not hosted or conf.web == "off":
             denied += agent_session.WEB_TOOLS
+        key = str((asking or {}).get("key") or SESSION_KEY)
+        own = {**(settings.get("env") or {}), **(env or {}), SESSION_ENV: key,
+               hook_auth.SESSION_TOKEN_ENV: hook_auth.session_token(str(workspace or ""), key)}
+        settings["env"] = config.session_env(own, stack=False)
         allowed = [] if hosted else ["--allowedTools", ",".join(UNHOSTED_TOOLS)]
         flags = ["-n", name, *(["--model", str(conf_models["model"])] if conf_models.get("model") else []), *allowed,
                  "--disallowedTools", ",".join(dict.fromkeys(denied)), "--strict-mcp-config", "--permission-mode", mode]
@@ -1462,20 +1469,19 @@ class Sessions:
             flags += ["--add-dir", str(d)]
         if conf_models.get("effort"):
             flags += ["--effort", str(conf_models["effort"])]
-        if settings:
-            flags += ["--settings", json.dumps(settings)]
+        flags += ["--settings", json.dumps(settings)]
         return flags
 
     async def start(self, cwd: Path, prompt: str, *, name: str, workspace: str | None,
                     add_dirs: "tuple[Path, ...] | list[Path]" = (), env: dict[str, str] | None = None,
                     fence: dict[str, Any] | None = None, asking: dict[str, Any] | None = None,
                     models: dict[str, Any] | None = None) -> dict[str, str]:
-        """A new background session in `cwd` whose first message is `prompt`, with `env` over the CLI's environment, the
+        """A new background session in `cwd` whose first message is `prompt`, with `env` in its environment, the
         settings `fence`, how it asks, `asking`, and its `models` (_flags). {id, session_id}; RuntimeError when the CLI
         could not start one."""
         since = time.time() * 1000 - 5000
-        flags = self._flags(workspace, name, add_dirs, fence, asking, models)
-        code, out = await self._run(["--bg", *flags, "--", prompt], cwd, env)
+        flags = self._flags(workspace, name, add_dirs, fence, asking, models, env)
+        code, out = await self._run(["--bg", *flags, "--", prompt], cwd)
         if code != 0 and UNTRUSTED_RE.search(out):
             raise SessionError(UNTRUSTED_LINE.format(folder=trust_folder(cwd)))
         if code != 0:
@@ -1492,8 +1498,8 @@ class Sessions:
         stopped first; the caller follows the copy by the returned ids."""
         short = session_id[:8]
         await self._running(cwd, short)
-        flags = self._flags(workspace, name, add_dirs, fence, asking, models)
-        code, out = await self._run(["--bg", "--resume", session_id, *flags, "--", prompt], cwd, env)
+        flags = self._flags(workspace, name, add_dirs, fence, asking, models, env)
+        code, out = await self._run(["--bg", "--resume", session_id, *flags, "--", prompt], cwd)
         if code != 0:
             raise SessionError(f"`claude --bg --resume` failed (exit {code}): {out.strip()[-400:]}")
         return await self._identify(cwd, _bg_id(out) or short, 0)

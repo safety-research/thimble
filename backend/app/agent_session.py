@@ -9,7 +9,10 @@ Claude Code session less the session's --disallowedTools: LATER_TOOLS and the th
 (not_own). shared.md is appended with --append-system-prompt, since Claude Code applies an agent's `skills` to
 subagents only. The session inherits the analyst's settings; thimble layers on the role's model, effort (also as
 CLAUDE_CODE_EFFORT_LEVEL) and fast mode. THIMBLE_SESSION names the session for its shim (`orient`, `writer:<doc>`,
-`critique:orient`, `check:<id>:<doc>`).
+`critique:orient`, `check:<id>:<doc>`), and THIMBLE_SESSION_TOKEN proves that name to the server (hook_auth). These and
+the rest of the session's own environment go in its --settings `env` (settings_env), never in the environment of its
+process, since Claude Code's background service keeps the environment of the process that started it for the user's
+later sessions (config.launch_environ).
 
 Permissions. A --print session has no terminal, so a PermissionRequest hook (permission_hook.py) hands each request of
 the session, its subagents and workflow agents to ask, which shows it on the chat's card with Allow and Deny. A hook is
@@ -134,8 +137,8 @@ from urllib.parse import urlsplit
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
-from . import (agents, bg_session, calls as calls_store, cc_settings, config, modes, orientation, permission_hook,
-               procs, retry, sandbox_allow, session, tools, userconf)
+from . import (agents, bg_session, calls as calls_store, cc_settings, config, hook_auth, modes, orientation,
+               permission_hook, procs, retry, sandbox_allow, session, tools, userconf)
 from .ledger import atomic_write_text
 
 log = logging.getLogger("thimble.agent_session")
@@ -515,17 +518,20 @@ def command(agent_args: list[str], sid: str, effort: str, settings: str, cwd: Pa
             *append, *mode, "--allowedTools", *own_rules(), *deny]
 
 
-def environ(key: str, extra: dict[str, str] | None = None) -> dict[str, str]:
-    """The session's environment: the server's, less the Claude Code session identity it may carry (config.passes),
-    with main's CLAUDE_CONFIG_DIR (config.claude_env), THIMBLE_SESSION, no ceiling on --print's background wait
-    (BG_WAIT_ENV), a 4 h idle limit on a thimble call (IDLE_TIMEOUT_ENV), and `extra` on top."""
-    env = config.claude_env(config.passed_environ())
-    env.pop("THIMBLE_CHANNEL", None)  # the session hears no browser events; main does
-    env[SESSION_ENV] = key
-    env[BG_WAIT_ENV] = BG_WAIT_MS
-    env[IDLE_TIMEOUT_ENV] = IDLE_TIMEOUT_MS
-    env.update(extra or {})
-    return env
+def environ() -> dict[str, str]:
+    """The environment of the session's `claude` process: config.launch_environ, the server's less the Claude Code
+    session identity it may carry and thimble's own variables, with main's CLAUDE_CONFIG_DIR. Nothing of the session's
+    own goes here, since Claude Code's background service may keep it for other sessions (settings_env)."""
+    return config.launch_environ()
+
+
+def settings_env(c: str, key: str, extra: dict[str, str] | None = None) -> dict[str, str]:
+    """The --settings `env` of the session `key` of workspace `c` (config.session_env): the server's THIMBLE_* values,
+    `key` as THIMBLE_SESSION with a token that proves it (hook_auth.session_token), no THIMBLE_CHANNEL, since the session
+    hears no browser events, no ceiling on --print's background wait (BG_WAIT_ENV), a 4 h idle limit on a thimble call
+    (IDLE_TIMEOUT_ENV), and `extra` on top."""
+    return config.session_env({SESSION_ENV: key, hook_auth.SESSION_TOKEN_ENV: hook_auth.session_token(c, key),
+                               BG_WAIT_ENV: BG_WAIT_MS, IDLE_TIMEOUT_ENV: IDLE_TIMEOUT_MS, **(extra or {})})
 
 
 def _venv() -> Path:
@@ -664,10 +670,18 @@ def permission_hooks(c: str, auto: bool = False, session: str = "", home: str = 
     return out
 
 
-def call_hooks(c: str) -> dict[str, Any]:
+def session_hooks(c: str, key: str, auto: bool = False, wait: bool = False) -> dict[str, Any]:
+    """permission_hooks for the session `key` of workspace `c`, which its hook's command line names, with thimble's
+    home."""
+    return permission_hooks(c, auto, session=key, home=str(hook_auth.home()), wait=wait)
+
+
+def call_hooks(c: str, session: str = "") -> dict[str, Any]:
     """The `hooks` that tell a session's model the ref of each call it made (module note, calls): call_ref.py after
-    every call, failed ones included, run by this server's interpreter without site-packages."""
+    every call, failed ones included, run by this server's interpreter without site-packages, told the session's key
+    `session` on its command line."""
     command = f"{shlex.quote(sys.executable)} -S {shlex.quote(str(CALL_REF_HOOK))} --ws {shlex.quote(c)}"
+    command += f" --session {shlex.quote(session)}" if session else ""
     hook = [{"matcher": "*", "hooks": [{"type": "command", "command": command, "timeout": CALL_REF_TIMEOUT_S}]}]
     return {event: hook for event in CALL_REF_EVENTS}
 
@@ -714,6 +728,7 @@ async def start(c: str, key: str, *, role: str, title: str, agent_args: list[str
     mode = start_mode(c, agent, chat=chat if resume else None, background=background)
     permission_mode = modes.flag(mode)
     extra_env: dict[str, str] = {}
+    asked = settings  # the caller's, which a later start of the session builds on again (_launches)
     given = json.loads(settings)
     hooks: dict[str, Any] = {}
     rule: tuple[list[str], list[str]] | None = None
@@ -734,24 +749,25 @@ async def start(c: str, key: str, *, role: str, title: str, agent_args: list[str
         given = with_web_asks(given, permission_mode)
     elif conf.web == "off":
         disallowed = [*disallowed, *WEB_TOOLS]
-    for event, entries in permission_hooks(c, permission_mode == "auto", wait=conf.may_ask()).items():
+    for event, entries in session_hooks(c, key, permission_mode == "auto", wait=conf.may_ask()).items():
         # the permission hook alone answers a request, since ask applies the sandbox rule itself; before a call
         # both hooks run
         hooks[event] = [*hooks.get(event, []), *entries] if event == PRE else entries
     if calls:
-        hooks.update(call_hooks(c))
+        hooks.update(call_hooks(c, key))
     if hooks:
         given = {**given, "hooks": {**(given.get("hooks") or {}), **hooks}}
+    given["env"] = {**await asyncio.to_thread(settings_env, c, key, extra_env), **(given.get("env") or {})}
     settings = json.dumps(given)
     argv = await asyncio.to_thread(command, agent_args, sid, effort, settings, cwd, append_shared, model,
                                    resume=bool(resume), permission_mode=permission_mode, disallowed=disallowed,
                                    add_dirs=[cwd] if work is not None else [])
     rules = kept_rules(c, chat) if resume else []  # module note, don't ask again
     argv = with_rules(argv, rules)
-    env = environ(key, extra_env)
+    env = environ()
     if background:
         _launches[(c, key)] = {"role": role, "title": title, "agent_args": agent_args, "effort": effort,
-                               "settings": settings, "agent_type": agent_type, "on_end": on_end, "append_shared": append_shared,
+                               "settings": asked, "agent_type": agent_type, "on_end": on_end, "append_shared": append_shared,
                                "parent": parent, "model": model, "work": work, "calls": calls, "agent": agent,
                                "disallowed": disallowed, "patient": patient, "unasked": unasked, "on_pid": on_pid,
                                "background": True, **fields}
@@ -2779,8 +2795,8 @@ def _set_flag(run: Run, flag: str) -> None:
     at = argv.index("--settings") + 1
     given = with_web_asks(json.loads(argv[at]), argv[argv.index("--permission-mode") + 1])
     hooks = dict(given.get("hooks") or {})
-    ours = permission_hooks(run.c, auto=True, wait=bool(run.config and run.config.may_ask()))[PRE]
-    either = [*permission_hooks(run.c, auto=True)[PRE], *permission_hooks(run.c, auto=True, wait=True)[PRE]]
+    ours = session_hooks(run.c, run.key, auto=True, wait=bool(run.config and run.config.may_ask()))[PRE]
+    either = [*session_hooks(run.c, run.key, auto=True)[PRE], *session_hooks(run.c, run.key, auto=True, wait=True)[PRE]]
     kept = [e for e in hooks.get(PRE) or [] if e not in either] + (ours if flag == "auto" else [])
     if kept:
         hooks[PRE] = kept
@@ -3028,8 +3044,6 @@ async def retry_route(c: str, chat: str) -> dict[str, Any]:
 async def permission_route(c: str, chat: str, body: PermissionAnswer, request: Request) -> dict[str, Any]:
     """The analyst's answer on a session's card: answer. 403 for a request that is not the analyst's browser's
     (hook_auth.analyst), 404 when no such request waits."""
-    from . import hook_auth  # noqa: PLC0415
-
     if not hook_auth.analyst(request):
         raise HTTPException(403, hook_auth.ANALYST_ONLY)
     if not answer(c, chat, body.id, body.allow, body.always, body.shown):
@@ -3081,8 +3095,6 @@ async def mode_route(c: str, chat: str, body: ModeBody, request: Request) -> dic
     """A session card's mode switcher: set_mode. 403 for a request that is not the analyst's browser's
     (hook_auth.analyst), 404 when no session runs for the chat, 400 for a mode that cannot be chosen, 409 for a switch
     the session cannot make."""
-    from . import hook_auth  # noqa: PLC0415
-
     if not hook_auth.analyst(request):
         raise HTTPException(403, hook_auth.ANALYST_ONLY)
     try:
