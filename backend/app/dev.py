@@ -142,7 +142,10 @@ ENV_FILE = "CLAUDE_ENV_FILE"
 CLAUDE_BIN = config.CLAUDE_BIN
 VIEW_CHECK = Path(__file__).with_name("view_check.py")  # the command a view build checks its draft with (view_fence)
 CLI_TIMEOUT_S = 60
-POLL_S = float(os.environ.get("THIMBLE_DEV_POLL_S", "3") or "3")  # between two looks at the session's state
+POLL_S = float(os.environ.get("THIMBLE_DEV_POLL_S", "3") or "3")  # between two reads of the session's transcript
+# the longest gap between two looks at `claude agents` while the session's transcript is quiet and it is listed working
+# or blocked: each look starts a `claude` process, and a growing transcript says the session works without one
+STATE_GAP_MAX_S = float(os.environ.get("THIMBLE_DEV_STATE_GAP_S", "30") or "30")
 UNLISTED_POLLS = 10  # polls a session just started may be missing from `claude agents` before the run gives up on it
 LOOPBACK = {"127.0.0.1", "::1", "localhost", "testclient"}
 MAX_ATTEMPTS = max(1, int(os.environ.get("THIMBLE_DEV_MAX_ATTEMPTS", "3") or "3"))
@@ -1678,8 +1681,10 @@ async def _worker_turn(run: Run, run_log: Log, cwd: Path, prompt: str, resume: s
                        turn_timeout_s: float | None = None, asking: dict[str, Any] | None = None,
                        models: dict[str, Any] | None = None) -> str:
     """One turn of a ticket's background session, started with `prompt` or woken with it when `resume` names the
-    session, then watched until the turn ends, its transcript copied into the chat. `on_session(short id, full id)`
-    records the session. Returns the session's report; SessionError when it ended any way but done, ran past
+    session, then watched until the turn ends, its transcript copied into the chat. The transcript is read every POLL_S;
+    while it grows the session works, and once it is quiet `claude agents` is asked for the session's state, at gaps that
+    double up to STATE_GAP_MAX_S while that state stays working or blocked. `on_session(short id, full id)` records the
+    session. Returns the session's report; SessionError when it ended any way but done, ran past
     TURN_TIMEOUT_S, or waited ASK_TIMEOUT_S on a question (the session is then stopped). With `answered` False, a
     `blocked` session whose transcript shows its turn ended counts as ended, since Claude Code lists a finished turn
     `blocked` when its last message reads as a question. A turn that ended on an API error is not a question: a view
@@ -1710,8 +1715,10 @@ async def _worker_turn(run: Run, run_log: Log, cwd: Path, prompt: str, resume: s
     started = time.monotonic()
     limit = TURN_TIMEOUT_S if turn_timeout_s is None else turn_timeout_s
     asked_at = 0.0
+    gap, looked = POLL_S, 0.0  # between two looks at the session's state, which doubles while it stays the same
     while True:
         await asyncio.sleep(POLL_S)
+        pos = tail.pos
         tail.read(run_log)
         if time.monotonic() - started > limit:
             state = "timed out"
@@ -1719,7 +1726,16 @@ async def _worker_turn(run: Run, run_log: Log, cwd: Path, prompt: str, resume: s
         if waiting and time.monotonic() - asked_at > ASK_TIMEOUT_S:
             state = "unanswered"
             break
+        if tail.pos != pos and not tail.turn_ended:
+            unlisted, gap = 0, POLL_S
+            if not waiting:
+                continue  # the transcript grew: the session works
+            looked = 0.0  # it grew while the session waited for an answer: its state says whether it still waits
+        if not tail.turn_ended and time.monotonic() - looked < gap:
+            continue
         state = await SESSIONS.state(cwd, run.session)
+        looked = time.monotonic()
+        gap = min(gap * 2, STATE_GAP_MAX_S) if state in ("working", "blocked") else POLL_S
         if state == "working":
             waiting, unlisted = False, 0
             continue

@@ -2,10 +2,10 @@
 // views.file_type_viewer) are modes of the files they claim, and a viewer proposed for the file's type, such as one
 // the orientation suggests, shows beside Raw until it is built.
 import { useEffect, useState } from 'react'
-import { api } from '../lib/api'
 import { bus } from '../lib/bus'
 import { useProposals } from '../lib/proposals'
 import type { Proposal, View } from '../lib/types'
+import { viewsForFile } from '../lib/views'
 
 const TYPE_GLOB = /^(?:\*\*\/)?\*(\.[A-Za-z0-9_+-]{1,16})$/
 
@@ -47,8 +47,7 @@ export function useTypeViewers(ws: string, path: string, on: boolean, offer: boo
     if (!on) return setViewers([])
     let alive = true
     const read = () =>
-      api
-        .viewsForFile(ws, path)
+      viewsForFile(ws, path)
         .then((list) => alive && setViewers(Array.isArray(list) ? list.filter((v) => v.ok && v.file_type) : []))
         .catch(() => undefined)
     read()

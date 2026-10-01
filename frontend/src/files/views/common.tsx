@@ -5,10 +5,10 @@ import { useEffect, useMemo, useRef, useState, type ComponentType, type CSSPrope
 import { Button } from '../../components/Button'
 import { Tipped } from '../../components/Tooltip'
 import { parseRef } from '../../lib/refs'
-import type { Block, SourceKind, SourcePage, SourceRecord } from '../../lib/types'
+import type { Block, SourceKind, SourcePage, SourceRecord, TranscriptHint } from '../../lib/types'
 import { UNFOLD_EVENT } from '../find'
 import { cellFill, markSegments, type LaneCell, type LaneTag, type RecordMarks, type Segment, type SpanMark } from '../labels'
-import { useMarksAt } from '../marks'
+import { useMarksAt, useMarksOver } from '../marks'
 import { LabelMark } from '../LabelMark'
 
 export interface ViewProps {
@@ -19,13 +19,15 @@ export interface ViewProps {
   loadMore: (dir: 'earlier' | 'later') => void
   /** scroll to and highlight when it changes: a ref pointing into `path` */
   targetRef?: string
+  /** the server's sniff, when the file reads as a transcript */
+  transcript?: TranscriptHint | null
 }
 
 export interface ViewDef {
   type: string
   title: string
-  /** 0..1 how well the view fits: the path, the kind, up to 20 sample records */
-  match: (path: string, kind: SourceKind, sample: any[]) => number
+  /** 0..1 how well the view fits: the path, the kind, up to 20 sample records, the server's transcript sniff */
+  match: (path: string, kind: SourceKind, sample: any[], transcript?: TranscriptHint | null) => number
   component: ComponentType<ViewProps>
 }
 
@@ -130,6 +132,8 @@ interface RecordProps {
   /** the record's text for a thread's anchor_text (data-anchor-text), so a ⌘-click quotes the record, not its head */
   text?: string
   children?: ReactNode
+  /** the last line of the records the card stands for (a chat turn's lines), whose labels its gutter shows too */
+  end?: number
 }
 
 /** The tint of a highlighted value with nothing to mark, as style. */
@@ -176,9 +180,9 @@ export const LANE_GLYPH_PX = 13
 
 /** One record as a row: the label gutter, the line number, the head in mono, the blocks under it; a highlighted value
  * with nothing to mark as a tint behind the text. */
-export function RecordCard({ path, line, target, hit, className, header, text, children }: RecordProps) {
+export function RecordCard({ path, line, target, hit, className, header, text, children, end }: RecordProps) {
   const isT = isTargetLine(target, line)
-  const marks = useMarksAt(path, line)
+  const marks = useMarksOver(path, line, end ?? line)
   const cls = ['reader-card', 'reader-record', className, isT && 'reader-target', isT && hit && 'reader-hit', marks.cells.length && 'has-gutter', marks.tint && 'has-tint'].filter(Boolean).join(' ')
   return (
     <div className={cls} data-line={line} data-anchor={`${path}#L${line}`} data-anchor-text={text || undefined} style={markStyle(marks)}>
@@ -247,6 +251,17 @@ export function segmentsFor(block: Block, hl: [number, number] | null, marks: re
   return out.length ? out : [{ text, start: 0 }]
 }
 
+/** The segments from offset `from` on: those before it dropped, the one it falls in cut at it. Pure. */
+export function segmentsFrom(segs: Seg[], from: number): Seg[] {
+  const out: Seg[] = []
+  for (const s of segs) {
+    const end = s.start + s.text.length
+    if (end <= from) continue
+    out.push(s.start >= from ? s : { ...s, text: s.text.slice(from - s.start), start: from })
+  }
+  return out
+}
+
 interface BlockElProps {
   block: Block
   path?: string
@@ -255,6 +270,9 @@ interface BlockElProps {
   target: Target | null
   hit: boolean
   className?: string
+  /** show the text from this offset on (a chat line's words after its speaker); anchors keep the whole text's
+   * offsets */
+  from?: number
 }
 
 /** A piece of text a label marks: the focused label's colour at 24% behind it, another label's colour as a thin
@@ -269,11 +287,11 @@ export function SpanEl({ seg, anchor, children }: { seg: Seg; anchor?: string; c
 }
 
 /** One element per block, the text verbatim, with the texts the labels that are on mark highlighted. */
-export function BlockEl({ block, path, line, index, target, hit, className }: BlockElProps) {
+export function BlockEl({ block, path, line, index, target, hit, className, from = 0 }: BlockElProps) {
   const isT = !!target && target.line === line && target.block === index
   const hl: [number, number] | null = isT && target!.start != null && target!.end != null ? [target!.start, target!.end] : null
   const marks = useMarksAt(path ?? '', path ? line : 0)
-  const segs = segmentsFor(block, hl, path ? marks.spans : [])
+  const segs = from > 0 ? segmentsFrom(segmentsFor(block, hl, path ? marks.spans : []), from) : segmentsFor(block, hl, path ? marks.spans : [])
   const cls = ['reader-block', `reader-${block.kind}`, className, isT && 'reader-target', isT && hit && 'reader-hit'].filter(Boolean).join(' ')
   return (
     <div className={cls} data-line={line} data-block={index}>

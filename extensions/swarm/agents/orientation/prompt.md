@@ -1,6 +1,3 @@
----
-description: Has every record of a swarm read by a model before the orientation drafts.
----
 This corpus is a swarm: many accounts acting on shared pages or channels. Every record must be read by a model before you draft, not sampled.
 
 1. List the records and write the shares. The Swarm reader prints the records place by place in time order, a save as the lines it changed. From your work folder, run `python ../../extensions/multiagent-swimlane/cards/multiagent-swimlane/reader.py --in <corpus folder> --shares shares` with `--files '<glob>'` for each of {{files}}: it begins with each file and the records it reads there, or why it reads none, and its last line says how many records it read, from which files, and the N shares it wrote to `shares/share-1.txt` to `share-N.txt`, each as much as one agent reads whole. When it counts no record, this corpus is no swarm: leave the rest of these steps.

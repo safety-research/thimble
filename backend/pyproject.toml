@@ -17,7 +17,7 @@ dependencies = [
   "pandas>=2.2",
   "matplotlib>=3.9",
   "altair>=5.3",
-  # the kernels read workbooks (pandas.read_excel), and the built-in PDF viewer reads PDF pages (plugin/viewers/pdf)
+  # the kernels read workbooks (pandas.read_excel), and a citation of a PDF page resolves to its text (app/pdfs.py)
   "openpyxl>=3.1",
   "pypdf>=5.0",
   # the card harness (app/render.py) draws every card offscreen in a headless Chromium, which install.sh fetches for

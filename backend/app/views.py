@@ -584,6 +584,7 @@ def delete_view(c: str, slug: str) -> None:
 
 _folder_cache: dict[tuple[Path, str], dict[str, Any]] = {}  # (corpus, folder) -> {ts, files}
 _folder_lock = threading.Lock()
+_folder_walks: dict[tuple[Path, str], threading.Lock] = {}  # one walk at a time per (corpus, folder)
 
 
 def folder_path(corpus: Path, rel: str) -> Path:
@@ -634,18 +635,27 @@ def _walk_folder(corpus: Path, rel: str) -> list[tuple[str, int, int]]:
 
 
 def folder_files(corpus: Path, rel: str) -> list[tuple[str, int, int]]:
-    """_walk_folder, cached FOLDER_CACHE_S per (corpus, folder): the list is shared, so callers never mutate it. A
-    404 for a missing folder is raised on every call (the walk is not cached for it)."""
+    """_walk_folder, cached FOLDER_CACHE_S per (corpus, folder): the list is shared, so callers never mutate it. Callers
+    that come while a walk of the same folder runs wait for it and share its list. A 404 for a missing folder is raised
+    on every call (the walk is not cached for it)."""
     key = (corpus, (rel or "").strip("/"))
-    now = time.monotonic()
+
+    def cached() -> list[tuple[str, int, int]] | None:
+        with _folder_lock:
+            hit = _folder_cache.get(key)
+            return hit["files"] if hit is not None and time.monotonic() - hit["ts"] < FOLDER_CACHE_S else None
+
+    if (files := cached()) is not None:
+        return files
     with _folder_lock:
-        hit = _folder_cache.get(key)
-        if hit is not None and now - hit["ts"] < FOLDER_CACHE_S:
-            return hit["files"]
-    files = _walk_folder(corpus, rel)
-    with _folder_lock:
-        _folder_cache[key] = {"ts": time.monotonic(), "files": files}
-    return files
+        walk = _folder_walks.setdefault(key, threading.Lock())
+    with walk:
+        if (files := cached()) is not None:
+            return files
+        files = _walk_folder(corpus, rel)
+        with _folder_lock:
+            _folder_cache[key] = {"ts": time.monotonic(), "files": files}
+        return files
 
 
 def glob_matches(rel_file: str, pattern: str | None) -> bool:
