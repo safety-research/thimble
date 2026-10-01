@@ -527,14 +527,16 @@ def records_from_lines(lines: list[bytes], rel: str, kind: str, start: int) -> l
 # --------------------------------------------------------------------------- databases (sqlite, read-only)
 
 
-def connect_ro(db: Path) -> sqlite3.Connection:
-    return sqlite3.connect(f"file:{quote(str(db), safe='/')}?mode=ro", uri=True)
+def connect_ro(db: Path, any_thread: bool = False) -> sqlite3.Connection:
+    """A read-only connection; with `any_thread`, one a generator may go on using from another thread, one at a time."""
+    return sqlite3.connect(f"file:{quote(str(db), safe='/')}?mode=ro", uri=True, check_same_thread=not any_thread)
 
 
-def open_database(db: Path) -> sqlite3.Connection:
+def open_database(db: Path, any_thread: bool = False) -> sqlite3.Connection:
     """Read-only connection to a sqlite file, checked against the file header up front (sqlite opens lazily, so a
-    garbage file would otherwise fail on the first query). Raises sqlite3.Error; an empty file is an empty database."""
-    con = connect_ro(db)
+    garbage file would otherwise fail on the first query). Raises sqlite3.Error; an empty file is an empty database.
+    `any_thread` as connect_ro."""
+    con = connect_ro(db, any_thread)
     try:
         con.execute("SELECT 1 FROM sqlite_master LIMIT 1").fetchall()
     except sqlite3.Error:

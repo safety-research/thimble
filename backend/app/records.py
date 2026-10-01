@@ -727,7 +727,8 @@ def _all_records(path: Path, rel: str, kind: str, wants: tuple[str, ...]) -> Ite
                        "line": idx.lines[i], "end_line": idx.end_lines[i]}
     elif reader == "sqlite":
         try:
-            con = corpus.open_database(path)
+            # a label run reads a batch of records per worker thread, so the rows go on in another thread
+            con = corpus.open_database(path, any_thread=True)
         except sqlite3.Error:
             return
         with closing(con):

@@ -253,6 +253,13 @@ async def test_a_regex_label_runs_over_the_records_of_every_reader(api, corpus, 
     assert r.status_code == 200 and r.json()["row"]["line"] == 4
 
 
+async def test_a_database_s_rows_stream_across_the_batches_of_a_run(api, corpus, workspaces_tmp, monkeypatch):
+    monkeypatch.setattr(concepts, "REGEX_BATCH", 2)
+    k = await _label(api, name="merged", kind="regex", spec=r"state: merged", labels=["merged", "no"])
+    s = await _apply(api, k, ["forge.db#prs", "orders.csv"])
+    assert s["status"] == "done" and s["failed"] == 0 and s["labeled"] == 5 + 3, "each batch read in another thread"
+
+
 async def test_a_trial_and_a_label_within_another_pick_records_of_any_reader(api, corpus, workspaces_tmp):
     k = await _label(api, name="refund", kind="regex", spec=r"(?i)refund|state: merged")
     await _apply(api, k, ["forge.db#prs"])
