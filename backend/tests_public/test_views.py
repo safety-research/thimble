@@ -818,6 +818,20 @@ def test_every_worked_example_s_view_json_is_in_the_schema_s_form():
         assert raw.get("scope") and raw.get("records"), name
 
 
+def test_a_derived_field_is_listed_for_each_kind_of_record_that_holds_it():
+    """A field name two kinds of record share, such as a pull request's state and an issue's, is listed for each, under
+    its record, the records in view.json's order and the computed fields first in each."""
+    raw = json.loads((_example_dir("repository") / "view.json").read_text("utf-8"))
+    declared = [(r["name"], f["name"], f["derived"]) for r in raw["records"] for f in r["fields"] if f.get("derived")]
+    got = views._normalize_view("repository", raw)["derived"]
+    assert sorted((d["record"], d["field"]) for d in got) == sorted((r, f) for r, f, _ in declared)
+    assert len({d["field"] for d in got}) < len(got), "the example has a name two kinds share"
+    assert list(dict.fromkeys(d["record"] for d in got)) == [r["name"] for r in raw["records"]]
+    for rec in raw["records"]:
+        kinds = [d["kind"] for d in got if d["record"] == rec["name"]]
+        assert kinds == sorted(kinds, key=lambda k: k != "inferred"), rec["name"]
+
+
 def test_the_worked_examples_are_never_views_of_a_workspace(samples):
     """A corpus that holds an example's own sample gets none of the examples as views: none is listed, none opens a
     citation of its files, and none adds a citation form to main's table."""
