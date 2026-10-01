@@ -830,6 +830,9 @@ def test_a_derived_field_is_listed_for_each_kind_of_record_that_holds_it():
     for rec in raw["records"]:
         kinds = [d["kind"] for d in got if d["record"] == rec["name"]]
         assert kinds == sorted(kinds, key=lambda k: k != "inferred"), rec["name"]
+    again = views._derived([*got, {"field": "state", "from": "a reader's derived()", "how": "again"},
+                            {"field": "busy", "from": "a reader's derived()", "how": "new"}])
+    assert again[:-1] == got and again[-1]["field"] == "busy", "a field a record has is not listed again without one"
 
 
 def test_the_worked_examples_are_never_views_of_a_workspace(samples):

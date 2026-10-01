@@ -469,18 +469,22 @@ def _cut(text: str, n: int) -> str:
 def _derived(v: Any) -> list[dict[str, str]]:
     """[{record, field, key, from, how, kind}] from view.json's `derived` or a reader's derived(index): each with a
     field name, `record` the kind of record that holds it ('' when none is given), the first entry of a field of a
-    record kept, `key` the key the field has in the reader's records where it differs ('' else), `kind` "inferred" for
-    a value the files do not state (a join, an estimate, a classification), given as "inferred" or "computed", and ""
-    otherwise. The fields are grouped by record in the order the records first appear, the inferred ones first in each
-    group."""
+    record kept and one that names no record left out where a record has the field, `key` the key the field has in the
+    reader's records where it differs ('' else), `kind` "inferred" for a value the files do not state (a join, an
+    estimate, a classification), given as "inferred" or "computed", and "" otherwise. The fields are grouped by record
+    in the order the records first appear, the inferred ones first in each group."""
+    given = []
+    for x in v if isinstance(v, list) else []:
+        if isinstance(x, dict):
+            d = {k: _cut(" ".join(str(x.get(k) or "").split()), n) for k, n in DERIVED_CHARS.items()}
+            d["kind"] = "inferred" if str(x.get("kind") or "").strip().lower() in INFERRED_KINDS else ""
+            if d["field"]:
+                given.append(d)
+    named = {d["field"] for d in given if d["record"]}
     out: list[dict[str, str]] = []
     seen: set[tuple[str, str]] = set()
-    for x in v if isinstance(v, list) else []:
-        if not isinstance(x, dict):
-            continue
-        d = {k: _cut(" ".join(str(x.get(k) or "").split()), n) for k, n in DERIVED_CHARS.items()}
-        d["kind"] = "inferred" if str(x.get("kind") or "").strip().lower() in INFERRED_KINDS else ""
-        if d["field"] and (d["record"], d["field"]) not in seen:
+    for d in given:
+        if (d["record"], d["field"]) not in seen and (d["record"] or d["field"] not in named):
             seen.add((d["record"], d["field"]))
             out.append(d)
     order = {r: i for i, r in enumerate(dict.fromkeys(d["record"] for d in out))}
