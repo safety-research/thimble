@@ -48,6 +48,11 @@ and Claude Code session. The tests cover what must not break, not every feature:
 security boundaries, the permission flow, the analysis loop and views. A change to one of these comes with a test on
 synthetic data; a test does not pin wording, copy or layout.
 
+Before a release, `bash scripts/e2e_release.sh --ref <branch>` installs a fresh clone of the branch into a new
+THIMBLE_HOME and walks the UI in headless Chromium on a copy of a synthetic corpus. It writes a report with a screenshot
+of each step (`--help` lists its options). It uses your own Claude login, and it leaves your Claude Code settings and
+your `thimble` command as they were.
+
 ## Layout
 
 | what | where |

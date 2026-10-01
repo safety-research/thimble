@@ -13,12 +13,13 @@ from pathlib import Path
 
 TITLES = {
     "clone": "A fresh clone of the ref",
-    "install": "install.sh, non-interactive, into a throwaway HOME and THIMBLE_HOME",
-    "plugin": "The plugin registered in the throwaway Claude Code config",
+    "zip": "The release zip",
+    "install": "install.sh, non-interactive, into a fresh THIMBLE_HOME with the caller's HOME and Claude login",
     "doctor": "thimble doctor",
     "corpus": "A copy of the corpus, with the files the UI steps open",
     "server": "The server up and the corpus copy opened as a workspace",
     "cleanup": "Every process the run started is stopped",
+    "claude-files": "The caller's Claude Code plugins, trust entries and ~/.local/bin/thimble are as they were",
 }
 
 
@@ -61,7 +62,7 @@ def main() -> int:
         out.append(f"| {i} | {title} | {result} | {detail} | {shots} |")
     if "now passes" in marks:
         out += ["", "A step marked as waiting now passes: its pending mark in scripts/e2e/release.mjs can go."]
-    out += ["", "Logs are in logs/: install.log, doctor.txt, server-up.log, ui.log, standin.log, stop.log."]
+    out += ["", "Logs are in logs/: install-plan.log, install.log, doctor.txt, server-up.log, workspace.log, ui.log, standin.log, stop.log."]
     Path(a.report).write_text("\n".join(out) + "\n", "utf-8")
     return 1 if failed else 0
 

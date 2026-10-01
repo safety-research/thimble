@@ -3,30 +3,36 @@
 # in a headless browser on a copy of a corpus, with a screenshot and a pass or fail for each step.
 #
 #   scripts/e2e_release.sh [--ref REF] [--repo PATH] [--zip | --zip-file ZIP] [--out DIR] [--port N] [--corpus DIR]
-#                          [--no-plugin] [--own-caches] [--strict] [--keep-install]
+#                          [--own-caches] [--strict] [--keep-install]
 #
 #   --ref REF        the branch or commit to clone (default: the branch this checkout has out)
 #   --repo PATH      the git repository to clone it from (default: this checkout)
 #   --zip            install the release zip scripts/release.sh builds from the clone, as a Global install into the
-#                    throwaway THIMBLE_HOME/app, in place of installing the clone itself (a Dev install)
+#                    run's THIMBLE_HOME/app, in place of installing the clone itself (a Dev install)
 #   --zip-file ZIP   install this release zip as a Global install; nothing is cloned
-#   --out DIR        where the run goes: report.md, shots/, logs/, and the clone, home and corpus copy it installs
-#                    and runs on (default: a new folder under $TMPDIR). It must be empty or missing
+#   --out DIR        where the run goes: report.md, shots/, logs/, and the clone, THIMBLE_HOME and corpus copy it
+#                    installs and runs on (default: a new folder under $TMPDIR). It must be empty or missing
 #   --port N         the server's port (default 8470); N+1 is its UI port, which only dev mode listens on
 #   --corpus DIR     the folder to copy and open (default: the synthetic corpus scripts/dev/make_toy_corpus.py writes)
-#   --no-plugin      answer no to install.sh's plugin question (default: yes when `claude` is on PATH)
-#   --own-caches     download into the throwaway home too (uv, npm, Playwright's browsers); by default those caches
-#                    are the caller's, so packages and the browser already downloaded are not fetched again
+#   --own-caches     download into <out>/caches (uv, npm, Playwright's browsers); by default those caches are the
+#                    caller's, so packages and the browser already downloaded are not fetched again
 #   --strict         count a failing step that waits for unmerged work (`pending` in the report) as a failure
-#   --keep-install   leave the clone and the throwaway home in --out (the report, shots and logs always stay)
+#   --keep-install   leave the clone and THIMBLE_HOME in --out (the report, shots and logs always stay)
 #
-# Steps: clone REF into <out>/clone; install it (or the zip) with install.sh's flags, non-interactive, into a throwaway
-# HOME and THIMBLE_HOME (<out>/home, never the caller's ~/.claude or ~/.thimble); `thimble doctor`; copy the corpus to
-# <out>/corpus, add a few files the UI steps open (a chat log in Markdown, one in CSV, a PDF) and a fixture view;
+# Steps: clone REF into <out>/clone; install it (or the zip) with install.sh's flags, non-interactive, into a fresh
+# THIMBLE_HOME (<out>/thimble-home) with --no-plugin --no-trust-workspaces; `thimble doctor`; copy the corpus to
+# <out>/corpus, add a few files the UI steps open (chat logs in Markdown, CSV and SQLite, a PDF) and a fixture view;
 # start the server and a stand-in for the analyst's Claude Code session (scripts/e2e/standin_session.py: no model runs);
 # walk the UI (scripts/e2e/release.mjs): the first-launch welcome and the tour, the File browser, a transcript, a PDF, the
 # fixture view, Settings > Extensions, then `thimble extension add` of scripts/e2e/fixture-extension switched off and on
 # from the CLI and from Settings. Every process it started is stopped on exit, and <out>/report.md lists each step.
+#
+# The run keeps the caller's HOME, so thimble and claude use the caller's own Claude login and config, and it leaves
+# them as they were: before installing, it records in the fresh THIMBLE_HOME that this install registered no plugin
+# (else install.sh --no-plugin would take back a thimble plugin another install registered), puts the `thimble` link in
+# <out>/bin (THIMBLE_BIN_DIR) in place of ~/.local/bin, and installs only when install.sh --dry-run plans no `claude
+# plugin` command and no write to ~/.local/bin/thimble. The last step checks that Claude Code's plugins and
+# marketplaces, its trust entries and ~/.local/bin/thimble are as they were before the run.
 #
 # A step marked pending waits for work that is not merged yet: its failure is reported as expected and does not fail the
 # run (unless --strict), and once it passes the report says so. Exit 0 when no step failed, 1 otherwise.
@@ -38,7 +44,7 @@ die() { printf 'e2e_release.sh: %s\n' "$*" >&2; exit 2; }
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 src="$(cd "$here/.." && pwd -P)"
-ref="" repo="" out="" port=8470 corpus="" plugin="" own_caches=0 strict=0 keep_install=0 zip=0 zip_file=""
+ref="" repo="" out="" port=8470 corpus="" own_caches=0 strict=0 keep_install=0 zip=0 zip_file=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --ref) ref="$2"; shift 2;;
@@ -48,7 +54,6 @@ while [ $# -gt 0 ]; do
     --out) out="$2"; shift 2;;
     --port) port="$2"; shift 2;;
     --corpus) corpus="$2"; shift 2;;
-    --no-plugin) plugin=no; shift;;
     --own-caches) own_caches=1; shift;;
     --strict) strict=1; shift;;
     --keep-install) keep_install=1; shift;;
@@ -78,15 +83,16 @@ for p in "$port" $((port + 1)); do
   if (exec 3<>"/dev/tcp/127.0.0.1/$p") 2>/dev/null; then die "port $p is in use; pick another with --port"; fi
 done
 
-clone="$out/clone" home="$out/home" logs="$out/logs" shots="$out/shots" results="$out/results.jsonl"
+clone="$out/clone" thome="$out/thimble-home" bin="$out/bin" logs="$out/logs" shots="$out/shots" results="$out/results.jsonl"
 # the tree thimble runs from: the clone itself, or the Global install a zip makes
 tree="$clone"
-if [ "$zip" = 1 ] || [ -n "$zip_file" ]; then tree="$home/.thimble/app"; fi
-mkdir -p "$home" "$logs" "$shots"
+if [ "$zip" = 1 ] || [ -n "$zip_file" ]; then tree="$thome/app"; fi
+mkdir -p "$thome" "$bin" "$logs" "$shots"
+chmod 700 "$thome"
 : > "$results"
 started="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 t0=$SECONDS
-standin_pid=""
+standin_pid="" walk_pid=""
 
 # record STEP STATUS DETAIL [SHOT]: one line of results.jsonl (scripts/e2e/report.py reads them)
 record() {
@@ -95,36 +101,37 @@ record() {
   say "$1: $2${3:+ ($3)}"
 }
 
-# the throwaway environment: nothing of the caller's but PATH, the locale and, unless --own-caches, its download caches
+# the run's environment: the caller's, with its HOME and Claude config, less thimble's variables and those that name the
+# Claude Code session it runs in; a fresh THIMBLE_HOME, this run's ports, and <out>/bin first on PATH
+unset_vars=()
+while IFS= read -r v; do
+  case "$v" in THIMBLE_* | CLAUDECODE | CLAUDE_PID | CLAUDE_EFFORT | CLAUDE_CODE_ENTRYPOINT | CLAUDE_CODE_EXECPATH \
+    | CLAUDE_CODE_SESSION_* | CLAUDE_CODE_CHILD_SESSION | CLAUDE_CODE_MESSAGING_* | CLAUDE_CODE_BRIDGE_*) unset_vars+=(-u "$v");; esac
+done < <(compgen -e)
 caches=()
-if [ "$own_caches" = 0 ]; then
-  if command -v uv >/dev/null; then
-    caches+=("UV_CACHE_DIR=$(uv cache dir 2>/dev/null)" "UV_PYTHON_INSTALL_DIR=$(uv python dir 2>/dev/null)")
-  fi
-  if command -v npm >/dev/null; then caches+=("npm_config_cache=$(npm config get cache 2>/dev/null)"); fi
-  pw="${PLAYWRIGHT_BROWSERS_PATH:-}"
-  if [ -z "$pw" ]; then
-    case "$(uname -s)" in Darwin) pw="$HOME/Library/Caches/ms-playwright";; *) pw="${XDG_CACHE_HOME:-$HOME/.cache}/ms-playwright";; esac
-  fi
-  caches+=("PLAYWRIGHT_BROWSERS_PATH=$pw")
+if [ "$own_caches" = 1 ]; then
+  caches=("UV_CACHE_DIR=$out/caches/uv" "npm_config_cache=$out/caches/npm" "PLAYWRIGHT_BROWSERS_PATH=$out/caches/ms-playwright")
 fi
-envs=(env -i "PATH=$home/.local/bin:$PATH" "HOME=$home" "THIMBLE_HOME=$home/.thimble" "THIMBLE_PORT=$port"
-      "THIMBLE_UI_PORT=$((port + 1))" "LANG=${LANG:-C.UTF-8}" "TERM=dumb" "SHELL=${SHELL:-/bin/sh}"
-      "TMPDIR=${TMPDIR:-/tmp}" ${caches[@]+"${caches[@]}"})
+envs=(env ${unset_vars[@]+"${unset_vars[@]}"} "PATH=$bin:$PATH" "THIMBLE_HOME=$thome" "THIMBLE_BIN_DIR=$bin"
+      "THIMBLE_PORT=$port" "THIMBLE_UI_PORT=$((port + 1))" ${caches[@]+"${caches[@]}"})
 in_env() { "${envs[@]}" "$@"; }
 
 ours() {  # the processes this run started that may still run: the server's session (it starts as its own session
-  # leader) and anything running from the clone, the unzipped release or the throwaway home
+  # leader), the UI walk's process group, and anything running from the clone, the unzipped release or THIMBLE_HOME
   local sid="$1"
   { [ -z "$sid" ] || ps -eo pid=,sid= | awk -v s="$sid" '$2 == s {print $1}'
-    pgrep -f -- "$clone/" || true; pgrep -f -- "$home/" || true; pgrep -f -- "$out/release/" || true; } | sort -u | grep -vx "$$" || true
+    [ -z "$walk_pid" ] || ps -eo pid=,pgid= | awk -v g="$walk_pid" '$2 == g {print $1}'
+    pgrep -f -- "$clone/" || true; pgrep -f -- "$thome/" || true; pgrep -f -- "$out/release/" || true; } | sort -u | grep -vx "$$" || true
 }
 
+claude_files() { python3 -I "$here/e2e/claude_files.py" "$out"; }
+
+files_before=""
 cleanup() {
-  local rc=$? left pid sid=""
+  local rc=$? left pid sid="" files_after
   set +e
   if [ -n "$standin_pid" ]; then kill "$standin_pid" 2>/dev/null; wait "$standin_pid" 2>/dev/null; fi
-  sid="$(sed -n 's/.*"pid": *\([0-9][0-9]*\).*/\1/p' "$home/.thimble/server.json" 2>/dev/null | head -n 1)"
+  sid="$(sed -n 's/.*"pid": *\([0-9][0-9]*\).*/\1/p' "$thome/server.json" 2>/dev/null | head -n 1)"
   if [ -x "$tree/plugin/bin/thimble" ]; then
     (cd "$out" && in_env "$tree/plugin/bin/thimble" server stop --yes) > "$logs/stop.log" 2>&1
   fi
@@ -135,7 +142,12 @@ cleanup() {
   left="$(ours "$sid" | tr '\n' ' ')"
   if [ -z "${left// /}" ]; then record cleanup pass "no process of this run is left"
   else record cleanup fail "still running: $left"; fi
-  if [ "$keep_install" = 0 ]; then rm -rf "$clone" "$home" "$out/release"; fi
+  if [ -n "$files_before" ]; then
+    files_after="$(claude_files 2>&1)"
+    if [ "$files_after" = "$files_before" ]; then record claude-files pass "Claude Code's plugins, marketplaces and trust entries and ~/.local/bin/thimble as before the run"
+    else record claude-files fail "changed during the run: before $files_before, after $files_after"; fi
+  fi
+  if [ "$keep_install" = 0 ]; then rm -rf "$clone" "$thome" "$bin" "$out/release"; fi
   python3 -I "$here/e2e/report.py" "$results" "$out/report.md" --ref "$ref" --commit "$commit" --started "$started" \
     --seconds "$((SECONDS - t0))" $([ "$strict" = 1 ] && echo --strict)
   local verdict=$?
@@ -173,21 +185,26 @@ if [ -n "$zip_file" ]; then
   src_tree="$(ls -d "$out"/release/unzipped/thimble-* | head -n 1)"
 fi
 
-# 2. install.sh, every question answered by its flag
-if [ -z "$plugin" ]; then if command -v claude >/dev/null; then plugin=yes; else plugin=no; fi; fi
-flags=(--browser bundled --no-sandbox-deps --trust-workspaces "--$([ "$plugin" = yes ] && echo plugin || echo no-plugin)")
+# 2. install.sh, every question answered by its flag, once its dry run shows it leaves the caller's files alone
+files_before="$(claude_files 2>&1)" || { record claude-files fail "could not read Claude Code's files: $files_before"; files_before=""; exit 1; }
+printf '{"answer": "no", "registered": ""}\n' > "$thome/plugin.json"
+flags=(--browser bundled --no-sandbox-deps --no-plugin --no-trust-workspaces)
+if ! (cd "$src_tree" && in_env bash scripts/install.sh "${flags[@]}" --dry-run) < /dev/null > "$logs/install-plan.log" 2>&1; then
+  record install fail "install.sh --dry-run exited non-zero; see logs/install-plan.log"; exit 1
+fi
+planned="$(grep -E '^\+ claude plugin ' "$logs/install-plan.log" || true)"
+planned="$planned$(grep -F -- "$HOME/.local/bin/thimble" "$logs/install-plan.log" | grep -E '^\+ ' || true)"
+if [ -n "$planned" ]; then
+  record install fail "not installed: install.sh's dry run plans changes to the caller's files: $(printf '%s' "$planned" | head -n 3 | tr '\n' ';')"; exit 1
+fi
 if (cd "$src_tree" && in_env bash scripts/install.sh "${flags[@]}") < /dev/null > "$logs/install.log" 2>&1; then
-  if [ -L "$home/.local/bin/thimble" ] && [ -f "$tree/frontend/dist/index.html" ] && [ -x "$tree/backend/.venv/bin/python" ]; then
-    record install pass "install.sh ${flags[*]}$([ "$tree" = "$clone" ] && echo ', a Dev install of the clone' || echo ", a Global install at home/.thimble/app")"
+  if [ -L "$bin/thimble" ] && [ -f "$tree/frontend/dist/index.html" ] && [ -x "$tree/backend/.venv/bin/python" ]; then
+    record install pass "install.sh ${flags[*]}$([ "$tree" = "$clone" ] && echo ', a Dev install of the clone' || echo ", a Global install at thimble-home/app")"
   else
-    record install fail "install.sh exited 0 without ~/.local/bin/thimble, frontend/dist or backend/.venv; see logs/install.log"; exit 1
+    record install fail "install.sh exited 0 without bin/thimble, frontend/dist or backend/.venv; see logs/install.log"; exit 1
   fi
 else
   record install fail "install.sh exited non-zero; see logs/install.log"; exit 1
-fi
-if [ "$plugin" = yes ]; then
-  if grep -q '"thimble@thimble' "$home/.claude/settings.json" 2>/dev/null; then record plugin pass "thimble's plugin in the throwaway ~/.claude/settings.json"
-  else record plugin fail "install.sh --plugin left no thimble plugin in the throwaway ~/.claude/settings.json"; fi
 fi
 
 # 3. thimble doctor
@@ -195,7 +212,7 @@ if (cd "$out" && in_env thimble doctor) > "$logs/doctor.txt" 2>&1; then
   missing=""
   grep -q "^  versions: thimble " "$logs/doctor.txt" || missing="$missing versions"
   grep -q "^  ui: .*the built UI at $tree/frontend/dist" "$logs/doctor.txt" || missing="$missing ui"
-  grep -q "^  home: $home/.thimble (THIMBLE_HOME)" "$logs/doctor.txt" || missing="$missing home"
+  grep -q "^  home: $thome (THIMBLE_HOME)" "$logs/doctor.txt" || missing="$missing home"
   grep -q "^  python: $tree/backend/.venv" "$logs/doctor.txt" || missing="$missing python"
   if [ -z "$missing" ]; then record doctor pass "logs/doctor.txt; $(grep -m1 '^  auth:' "$logs/doctor.txt" | sed 's/^ *//')"
   else record doctor fail "doctor's lines missing or wrong:$missing (logs/doctor.txt)"; fi
@@ -228,7 +245,11 @@ standin_pid=$!
 
 # 6. the UI, the extension commands among its steps
 ui=0
-(cd "$out" && in_env THIMBLE_E2E_TREE="$tree" THIMBLE_E2E_CORPUS="$work" THIMBLE_E2E_WS="$ws" \
+walk=(node "$here/e2e/release.mjs")
+if command -v setsid >/dev/null; then walk=(setsid "${walk[@]}"); fi  # its own process group, so cleanup finds its browser
+(cd "$out" && exec "${envs[@]}" THIMBLE_E2E_TREE="$tree" THIMBLE_E2E_CORPUS="$work" THIMBLE_E2E_WS="$ws" \
   THIMBLE_E2E_SHOTS="$shots" THIMBLE_E2E_RESULTS="$results" THIMBLE_E2E_FIXTURE="$here/e2e/fixture-extension" \
-  node "$here/e2e/release.mjs") > "$logs/ui.log" 2>&1 || ui=$?
+  "${walk[@]}") > "$logs/ui.log" 2>&1 &
+walk_pid=$!
+wait "$walk_pid" || ui=$?
 [ "$ui" = 0 ] || say "the UI walk exited $ui (logs/ui.log)"
