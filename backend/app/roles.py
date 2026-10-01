@@ -18,7 +18,9 @@ Placeholders in an extension's prompt: {{default}} is thimble's own prompt for t
 
 The prompt way works through the prompt files: prompt_file renders a role's replacement or additions into a file in
 the workspace (PROMPTS_DIR), which userconf.prompt_files hands to prompts.custom, so every place that builds the role's
-prompt reads it. Main's additions join its prompt in channel.render_prompts.
+prompt reads it. Main's additions join its prompt in channel.render_prompts. The orientation's prompt way is
+extensions.py's: its prompt adds to the orientation's instructions or replaces them, and its subagents join the
+orientation's session (extensions.agent_definitions), so prompt_text and subagents leave it out.
 """
 from __future__ import annotations
 
@@ -45,6 +47,7 @@ NAME_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,39}$")
 # the prompt file under prompts/ each role's prompt is built from (userconf.PROMPT_FILES); main's is main.md
 PROMPT_FILES = {"main": "main", "orientation": "orient", "critic": "critic", "writer": "writer", "dev": "dev"}
 PROMPTS_DIR = "agents"  # in the workspace: each role's prompt as its extensions change it (prompt_file)
+PROMPT_ELSEWHERE = ("main", "orientation")  # whose prompt way channel.py and extensions.py apply (module note)
 FRONT_RE = re.compile(r"\A---\n.*?\n---\n", re.S)
 ADDED_HEADING = "## From the {name} extension"
 
@@ -296,7 +299,7 @@ def prompt_text(c: str | None, role: str) -> str | None:
     """The text of the prompt file `role` runs with in workspace `c` when its extensions change it: thimble's file
     with an extension's replacement in place of its body and the additions after it; None when no extension changes
     it, or when an SDK program or a command runs the role."""
-    if role == "main":
+    if role in PROMPT_ELSEWHERE:
         return None
     agent = agent_for(c, role)
     if agent.code or (agent.replacing is None and not agent.additions):
@@ -337,6 +340,8 @@ def main_additions(c: str | None) -> str:
 def subagents(c: str | None, role: str) -> dict[str, dict[str, Any]]:
     """The subagents the extensions give `role`'s session, as `--agents` takes them, each named
     `<extension>-<name>`, with its prompt file read."""
+    if role in PROMPT_ELSEWHERE:
+        return {}
     agent = agent_for(c, role)
     found = ([agent.replacing] if agent.replacing is not None and agent.way == "prompt" else []) + agent.additions
     out: dict[str, dict[str, Any]] = {}

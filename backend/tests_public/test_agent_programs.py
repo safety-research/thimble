@@ -139,22 +139,25 @@ def test_a_prompt_addition_or_replacement_reaches_the_role_s_prompt_and_the_conf
     assert userconf.prompt_files(CORPUS, "critic") == {"critic": mine}
 
 
-def test_a_replacing_orientation_prompt_keeps_thimble_s_slots_and_needs_none_of_its_parts(tmp_path, data_tmp,
-                                                                                         workspaces_tmp, active):
-    """A replacement may use the slots thimble's own prompt for the role fills ({{request}}); any other double brace
-    is literal, and a prompt without the parts Start's switches leave out still renders."""
-    from app import orient_session
+def test_a_replacing_prompt_keeps_thimble_s_slots_and_leaves_other_braces_as_written(tmp_path, data_tmp,
+                                                                                     workspaces_tmp, active):
+    """A replacement may use the slots thimble's own prompt for the role fills (dev.md's {{task}}); any other double
+    brace is literal. The orientation's prompt way is the extensions module's, which adds it to the orientation's
+    instructions, so the role's prompt file is left as it is."""
+    from app import dev
 
-    active.append(_extension(tmp_path, "lean", {"orientation": {"description": "Lean.", "prompt": "p.md",
-                                                                "replace": True}},
-                             {"agents/orientation/p.md": "Survey {{files}} for this request: {{request}}. "
-                                                         "Keep {{braces}} as they are."}))
-    from app import prompts
-
-    with prompts.custom(userconf.prompt_files(CORPUS, "orientation")):
-        text = orient_session.system_prompt(CORPUS, "count the runs", ["final"])
-    assert text.startswith("Survey `runs/r1.jsonl` for this request: count the runs.")
-    assert "{ {braces} }" in text
+    active.append(_extension(tmp_path, "lean", {"dev": {"description": "Lean.", "prompt": "p.md", "replace": True},
+                                                "orientation": {"description": "Adds.", "prompt": "o.md",
+                                                                "subagents": {"reader": {"description": "Reads.",
+                                                                                         "prompt": "r.md"}}}},
+                             {"agents/dev/p.md": "Build views of {{files}}. Keep {{braces}} as they are.\n\n{{task}}",
+                              "agents/orientation/o.md": "Count the runs first.",
+                              "agents/orientation/r.md": "Read one run."}))
+    prop = {"slug": "runs", "name": "Runs", "why": "to read the runs", "claims": ["runs/r1.jsonl"]}
+    text = dev.build_view_prompt(CORPUS, prop, tmp_path / "views" / "runs", config.corpus_dir(CORPUS))
+    assert text.startswith("Build views of `runs/r1.jsonl`. Keep { {braces} } as they are.")
+    assert "{{task}}" not in text and len(text) > 500
+    assert roles.prompt_text(CORPUS, "orientation") is None and roles.subagents(CORPUS, "orientation") == {}
 
 
 # --------------------------------------------------------------------------- guardrails for every agent

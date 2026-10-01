@@ -205,9 +205,7 @@ def _launch(c: str, brief: str, passes: "list[str]", choices: dict[str, Any]) ->
         name, agent = agent_definition(c, brief, parts)
     from . import extensions  # noqa: PLC0415
 
-    from . import roles  # noqa: PLC0415
-
-    defined = {**extensions.agent_definitions(c), **roles.subagents(c, "orientation"), name: agent}
+    defined = {**extensions.agent_definitions(c), name: agent}
     env = {config.SUBAGENT_MODEL_ENV: subagents["model"]} if subagents["model"] else None
     return dict(role=orientation.ROLE, title=orientation.TITLE,
                 agent_args=["--agents", json.dumps(defined, ensure_ascii=False), "--agent", name], effort=effort,
