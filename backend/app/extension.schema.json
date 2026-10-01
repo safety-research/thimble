@@ -1,0 +1,244 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/safety-research/thimble/extension.schema.json",
+  "title": "thimble extension",
+  "description": "The JSON files of a thimble extension. extension.json is the folder's manifest; each part has its own JSON file in its own folder: views/<name>/view.json, cards/<name>/card.json, reports/<name>/report.json, agents/<role>/agent.json, tasks/<task>/task.json, checks/<name>/check.json. Prose a model reads (prompts, guides, forms) goes in Markdown files that these name. Properties marked deprecated are older names thimble still reads; new extensions leave them out.",
+  "$ref": "#/$defs/extension",
+  "$defs": {
+    "name": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9-]{0,39}$",
+      "description": "Lower-case letters, digits and hyphens, at most 40."
+    },
+    "names": {"type": "array", "items": {"$ref": "#/$defs/name"}},
+    "strings": {"type": "array", "items": {"type": "string", "minLength": 1}},
+    "globs": {
+      "type": "array",
+      "items": {"type": "string", "minLength": 1},
+      "description": "Globs relative to the corpus folder, such as \"runs/*/events.jsonl\"."
+    },
+    "file": {
+      "type": "string",
+      "minLength": 1,
+      "description": "A file of the part's folder, by a path relative to it."
+    },
+    "command": {
+      "type": "array",
+      "items": {"type": "string", "minLength": 1},
+      "minItems": 1,
+      "description": "The program and its arguments, run in the part's folder, such as [\"python\", \"labels.py\"]."
+    },
+    "model": {"type": "string", "minLength": 1, "description": "A default the analyst's config overrides."},
+    "effort": {"type": "string", "minLength": 1, "description": "A default the analyst's config overrides."},
+
+    "extension": {
+      "title": "extension.json",
+      "type": "object",
+      "required": ["name", "version"],
+      "properties": {
+        "name": {"$ref": "#/$defs/name", "description": "The extension's name, the same as its folder's."},
+        "version": {"type": "string", "minLength": 1},
+        "description": {"type": "string", "description": "What it adds, in a sentence or two. Settings and `thimble extension add` show it."},
+        "scope": {"$ref": "#/$defs/globs", "description": "The files it is about. A view or card type that sets no scope of its own uses these."},
+        "thimble": {"type": "string", "description": "The thimble versions it works with, as package.json's engines writes them, such as \">=0.4\"."},
+        "python": {"$ref": "#/$defs/strings", "description": "Python packages its code needs, as pip reads them. thimble does not install them; the extension waits until they import."},
+        "needs": {"$ref": "#/$defs/names", "description": "Other extensions it needs. One that thimble ships is added with it."},
+        "dependencies": {
+          "deprecated": true,
+          "type": "object",
+          "properties": {
+            "python": {"$ref": "#/$defs/strings"},
+            "js": {"$ref": "#/$defs/strings"},
+            "extensions": {"$ref": "#/$defs/names"}
+          },
+          "additionalProperties": false
+        },
+        "requires": {"deprecated": true, "$ref": "#/$defs/strings"},
+        "replaces": {
+          "deprecated": true,
+          "type": "object",
+          "properties": {"instructions": {"type": "string"}},
+          "additionalProperties": false
+        },
+        "api": {"deprecated": true},
+        "title": {"deprecated": true, "type": "string"},
+        "applies": {"deprecated": true},
+        "check": {"deprecated": true}
+      },
+      "additionalProperties": false
+    },
+
+    "field": {
+      "type": "object",
+      "required": ["name", "type"],
+      "properties": {
+        "name": {"type": "string", "minLength": 1},
+        "type": {"enum": ["text", "category", "number", "time", "ref", "list"]},
+        "derived": {"enum": ["cleaned", "computed"], "description": "cleaned: the file's value renamed, parsed or put in UTC. computed: a value the files do not hold."},
+        "from": {"type": "string", "description": "What a derived field comes from."},
+        "how": {"type": "string", "description": "How a derived field is made."}
+      },
+      "additionalProperties": false
+    },
+    "record": {
+      "type": "object",
+      "required": ["name", "fields"],
+      "properties": {
+        "name": {"type": "string", "minLength": 1},
+        "one": {"type": "string", "description": "What one row is, such as \"one tally line\"."},
+        "fields": {"type": "array", "items": {"$ref": "#/$defs/field"}}
+      },
+      "additionalProperties": false
+    },
+    "view": {
+      "title": "views/<name>/view.json",
+      "type": "object",
+      "properties": {
+        "name": {"type": "string", "description": "The tab's name; the folder's name when left out."},
+        "description": {"type": "string", "description": "What the view shows. The check on whether it fits a corpus reads it."},
+        "scope": {"$ref": "#/$defs/globs", "description": "The files it reads. The extension's scope when left out."},
+        "unit": {
+          "description": "\"file\" makes a mode of each matching file in the File browser. An object makes a corpus view whose picker lists folders ({\"name\", \"path\": \"runs/{run}/\"}) or days of a time field ({\"name\", \"field\", \"bin\": \"day\"}). Left out, a corpus view over its whole scope.",
+          "oneOf": [
+            {"const": "file"},
+            {"type": "object", "required": ["name", "path"], "properties": {"name": {"type": "string"}, "path": {"type": "string"}}, "additionalProperties": false},
+            {"type": "object", "required": ["name", "field"], "properties": {"name": {"type": "string"}, "field": {"type": "string"}, "bin": {"enum": ["hour", "day", "week", "month"]}}, "additionalProperties": false}
+          ]
+        },
+        "records": {"type": "array", "items": {"$ref": "#/$defs/record"}, "description": "Each record type and its fields, raw or derived."},
+        "accepts": {
+          "type": "array",
+          "items": {"type": "object", "required": ["form", "means"], "properties": {"form": {"type": "string"}, "means": {"type": "string"}}, "additionalProperties": false},
+          "description": "Citation forms beyond line refs, each a row of main's table of citation forms."
+        },
+        "libs": {"$ref": "#/$defs/strings", "description": "Libraries thimble inlines into the page."},
+        "compare": {"type": "boolean", "description": "Whether picked units can be shown side by side."},
+        "claims": {"deprecated": true, "$ref": "#/$defs/globs"},
+        "units": {"deprecated": true},
+        "derived": {"deprecated": true},
+        "declares": {"deprecated": true},
+        "why": {"deprecated": true, "type": "string"},
+        "card": {"deprecated": true, "type": "object"},
+        "applies": {"deprecated": true},
+        "show": {"deprecated": true},
+        "reports": {"deprecated": true},
+        "examples": {"deprecated": true},
+        "version": {"deprecated": true}
+      },
+      "additionalProperties": false
+    },
+
+    "card": {
+      "title": "cards/<name>/card.json",
+      "type": "object",
+      "properties": {
+        "name": {"type": "string"},
+        "description": {"type": "string", "description": "What main reads to pick this type."},
+        "example": {"description": "One call's arguments, which main's prompt shows as a call. A string is read as the call itself."},
+        "args": {"type": "object", "description": "A JSON Schema of the call's keywords."},
+        "use": {"deprecated": true, "type": "string"},
+        "reader": {"deprecated": true, "type": "string"},
+        "claims": {"deprecated": true, "$ref": "#/$defs/globs"},
+        "size": {"deprecated": true},
+        "aliases": {"deprecated": true},
+        "libs": {"deprecated": true},
+        "scope": {"deprecated": true},
+        "view": {"deprecated": true}
+      },
+      "additionalProperties": false
+    },
+
+    "report": {
+      "title": "reports/<name>/report.json",
+      "type": "object",
+      "required": ["name", "description", "viewer"],
+      "properties": {
+        "name": {"type": "string", "minLength": 1},
+        "description": {"type": "string", "minLength": 1},
+        "viewer": {"enum": ["document", "slides", "story", "page", "video"], "description": "The built-in viewer, used where the folder has no report.html."}
+      },
+      "additionalProperties": false
+    },
+
+    "subagent": {
+      "type": "object",
+      "required": ["description", "prompt"],
+      "properties": {
+        "description": {"type": "string", "minLength": 1},
+        "prompt": {"$ref": "#/$defs/file", "description": "The subagent's prompt, a Markdown file."},
+        "tools": {"$ref": "#/$defs/strings"},
+        "disallowedTools": {"$ref": "#/$defs/strings"},
+        "model": {"$ref": "#/$defs/model"},
+        "effort": {"$ref": "#/$defs/effort"},
+        "mcpServers": {},
+        "maxTurns": {"type": "integer", "minimum": 1},
+        "skills": {"$ref": "#/$defs/strings"},
+        "color": {"type": "string"}
+      },
+      "additionalProperties": false
+    },
+    "agent": {
+      "title": "agents/<role>/agent.json",
+      "description": "Changes one of the five roles (main, orientation, critic, writer, dev) in one of three ways: a prompt, an Agent SDK program (sdk) or a program of your own (command). main takes a prompt addition only; dev takes a prompt only.",
+      "type": "object",
+      "required": ["description"],
+      "properties": {
+        "description": {"type": "string", "minLength": 1, "description": "Shown in Settings and by `thimble extension add`."},
+        "prompt": {"$ref": "#/$defs/file", "description": "A Markdown file added to thimble's prompt for the role, or replacing it with replace."},
+        "replace": {"type": "boolean", "description": "With prompt: the file replaces thimble's prompt for the role; {{default}} pulls thimble's back in."},
+        "subagents": {
+          "type": "object",
+          "propertyNames": {"$ref": "#/$defs/name"},
+          "additionalProperties": {"$ref": "#/$defs/subagent"},
+          "description": "With prompt: Claude Code subagents the role can call, in the fields of Claude Code's --agents JSON, each prompt in its own file."
+        },
+        "sdk": {"$ref": "#/$defs/file", "description": "A Python file whose async run(input) thimble calls."},
+        "command": {"$ref": "#/$defs/command", "description": "A program thimble starts; it reads the input as JSON lines on stdin and writes its output on stdout."},
+        "model": {"$ref": "#/$defs/model"},
+        "effort": {"$ref": "#/$defs/effort"},
+        "tools": {"$ref": "#/$defs/strings", "description": "Can only narrow the tools the role has."},
+        "disallowedTools": {"$ref": "#/$defs/strings"}
+      },
+      "oneOf": [
+        {"required": ["prompt"], "not": {"anyOf": [{"required": ["sdk"]}, {"required": ["command"]}]}},
+        {"required": ["sdk"], "not": {"anyOf": [{"required": ["prompt"]}, {"required": ["command"]}, {"required": ["replace"]}, {"required": ["subagents"]}]}},
+        {"required": ["command"], "not": {"anyOf": [{"required": ["prompt"]}, {"required": ["sdk"]}, {"required": ["replace"]}, {"required": ["subagents"]}]}}
+      ],
+      "additionalProperties": false
+    },
+
+    "task": {
+      "title": "tasks/<task>/task.json",
+      "description": "Changes one of the seven fixed jobs (labels, label-draft, card-check, view-review, view-fit, file-viewer, checks) in one of the three ways an agent takes. Test inputs go in fixtures/*.json.",
+      "type": "object",
+      "required": ["description"],
+      "properties": {
+        "description": {"type": "string", "minLength": 1},
+        "prompt": {"$ref": "#/$defs/file"},
+        "replace": {"type": "boolean"},
+        "sdk": {"$ref": "#/$defs/file"},
+        "command": {"$ref": "#/$defs/command"},
+        "model": {"$ref": "#/$defs/model"},
+        "effort": {"$ref": "#/$defs/effort"}
+      },
+      "oneOf": [
+        {"required": ["prompt"], "not": {"anyOf": [{"required": ["sdk"]}, {"required": ["command"]}]}},
+        {"required": ["sdk"], "not": {"anyOf": [{"required": ["prompt"]}, {"required": ["command"]}, {"required": ["replace"]}]}},
+        {"required": ["command"], "not": {"anyOf": [{"required": ["prompt"]}, {"required": ["sdk"]}, {"required": ["replace"]}]}}
+      ],
+      "additionalProperties": false
+    },
+
+    "check": {
+      "title": "checks/<name>/check.json",
+      "description": "A report check. Its instruction is check.md beside it.",
+      "type": "object",
+      "required": ["name"],
+      "properties": {
+        "name": {"type": "string", "minLength": 1},
+        "colour": {"type": "string"}
+      },
+      "additionalProperties": false
+    }
+  }
+}
