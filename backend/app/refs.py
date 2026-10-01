@@ -10,6 +10,10 @@
                                   <db> is any path ending in .db, .sqlite or .sqlite3, forge.db included,
                                   e.g. `forge.db#prs/12`, `<run>/forge.db#prs/12`, `runs/x/ehr.db#patients/12`
     <db>#<table>                  a whole table of such a database file
+    <pdf>#page=<n>                page n (1-based) of a file ending in .pdf; `#p<n>` reads the same (records.canon)
+    <json>#/<pointer>             a value of a JSON document (a file ending in .json) by its JSON pointer (RFC 6901), such
+                                  as one record of it (records.py), e.g. `runs.json#/runs/3`
+    <csv>#row=<n>                 row n (1-based, after the header line) of a file ending in .csv or .tsv
     card:<cell_id>[@<exec>]       a card (searched across every group of the workspace); `cell:` is read the same
                                   way (cite.CARD_PREFIXES), and format_ref writes `card:`
     card:<cell_id>#<col>/<row>    the <td> at column header <col> / row label <row> of a text/html table output of the card;
@@ -86,6 +90,10 @@ _FP_NO_COLON = r"[^#\s:](?:[^#\n:]*[^#\s:])?"
 _FILE_LIKE = re.compile(r"/|\.[A-Za-z0-9]{1,8}$")
 # a database file is any path ending in .db/.sqlite/.sqlite3 (corpus.DB_SUFFIXES); frontend lib/refs.ts must accept the same
 _DATABASE = re.compile(r"^(" + _FP + r"\.(?:db|sqlite|sqlite3))#([A-Za-z_][A-Za-z0-9_]*)(?:/(.+))?$")
+# the records of the other built-in readers (records.py); frontend lib/refs.ts reads the same forms
+_PAGE = re.compile(r"^(" + _FP + r"\.[Pp][Dd][Ff])#(?:page=|p)(\d+)$")
+_POINTER = re.compile(r"^(" + _FP + r"\.[Jj][Ss][Oo][Nn])#(/[^\n]*)$")
+_CSV_ROW = re.compile(r"^(" + _FP + r"\.(?:[Cc][Ss][Vv]|[Tt][Ss][Vv]))#row=(\d+)$")
 _SPAN = re.compile(r"^(" + _FP + r")#L(\d+)\.b(\d+):c(\d+)-(\d+)$")
 _BLOCK = re.compile(r"^(" + _FP + r")#L(\d+)\.b(\d+)$")
 _RANGE = re.compile(r"^(" + _FP + r")#L(\d+)-L(\d+)$")
@@ -158,6 +166,12 @@ def parse_ref(ref: str) -> dict[str, Any]:
         if m[3]:
             return {"kind": "row", "path": m[1], "table": m[2], "pk": m[3]}
         return {"kind": "table", "path": m[1], "table": m[2]}
+    if (m := _PAGE.match(ref)) and int(m[2]) >= 1:
+        return {"kind": "page", "path": m[1], "page": int(m[2])}
+    if m := _POINTER.match(ref):
+        return {"kind": "pointer", "path": m[1], "pointer": m[2]}
+    if (m := _CSV_ROW.match(ref)) and int(m[2]) >= 1:
+        return {"kind": "csvrow", "path": m[1], "row": int(m[2])}
     if line := _file_line(ref):
         return line
     if (m := _PATH.match(ref)) and (" " not in m[1] or _FILE_LIKE.search(m[1])):
@@ -220,6 +234,12 @@ def format_ref(p: dict[str, Any]) -> str:
         return f"{p.get('path') or 'forge.db'}#{p['table']}"
     if k == "row":
         return f"{p.get('path') or 'forge.db'}#{p['table']}/{p['pk']}"
+    if k == "page":
+        return f"{p['path']}#page={p['page']}"
+    if k == "pointer":
+        return f"{p['path']}#{p['pointer']}"
+    if k == "csvrow":
+        return f"{p['path']}#row={p['row']}"
     if k == "record":
         return f"{p['path']}#L{p['line']}"
     if k == "range":
@@ -386,7 +406,8 @@ def _resolve_report(corpus_dir: Path | str, p: dict[str, Any], ref: str) -> dict
     return {"kind": "report", "ref": ref, "excerpt": str(u.get("heading") or ""), "meta": meta}
 
 
-FILE_KINDS = ("record", "range", "block", "span", "path", "table", "row")
+FILE_KINDS = ("record", "range", "block", "span", "path", "table", "row", "page", "pointer", "csvrow")
+RECORD_KINDS = ("record", "row", "page", "pointer", "csvrow")  # the kinds that name one record of a file (records.py)
 
 
 def resolve(corpus_dir: Path, ref: str) -> dict[str, Any]:
@@ -431,6 +452,8 @@ def resolve_base(corpus_dir: Path, ref: str) -> dict[str, Any]:
         return critique_session.resolve_chat(_workspace_of(corpus_dir), p, ref.strip())
     if kind in ("table", "row"):
         return _resolve_database(corpus_dir, p, ref)
+    if kind in ("page", "pointer", "csvrow"):
+        return _resolve_record(corpus_dir, p, ref)
     if kind in ("record", "range", "block", "span"):
         return _resolve_lines(corpus_dir, p, ref)
     if kind == "path":
@@ -501,6 +524,8 @@ def span_of_quote(corpus_dir: Path, ref: str, quote: str) -> str:
         return _quote_in_view(corpus_dir, ref.strip(), quote)
     if p["kind"] == "path":
         return _quote_in_file(corpus_dir, p["path"], ref.strip(), quote)
+    if p["kind"] in ("row", "page", "pointer", "csvrow"):
+        return _quote_in_record(corpus_dir, p, ref.strip(), quote)
     if p["kind"] not in ("record", "block", "range"):
         raise RefError(f"a quote is looked up in a record or lines of a file, or a unit of a view, not in {ref!r}", 400)
     out = resolve_base(corpus_dir, ref)
@@ -548,13 +573,21 @@ def _quote_in_file(corpus_dir: Path, rel: str, ref: str, quote: str) -> str:
     file, 404 when no line holds it."""
     from . import corpus  # lazy (import cycle)
 
+    from . import records  # lazy (import cycle)
+
     path, rel = _locate(corpus_dir, rel)
     if not path.is_file():
         raise RefError(f"no such file: {rel!r}", 404)
     size = path.stat().st_size
+    q = quote.strip()
+    if records.reader_of(path, rel) in ("sqlite", "pdf") and size <= QUOTE_SCAN_MAX_BYTES:
+        # a file with no lines: the first of its records whose text holds the quote
+        for rec in records.iter_records(path, rel) if q else ():
+            if q in rec["text"] or (size <= QUOTE_LOOSE_MAX_BYTES and _find_quote(rec["text"], q)):
+                return rec["ref"]
+        raise RefError(f"the quote is not in {ref}", 404)
     if corpus.source_kind(rel) == "forge" or _is_binary(path) or size > QUOTE_SCAN_MAX_BYTES:
         raise RefError(f"a quote is looked up in a record or lines of a file, not in {ref!r}", 400)
-    q = quote.strip()
     if not q:
         raise RefError(f"the quote is not in {ref}", 404)
     needles = [n.encode("utf-8") for n in (q, json.dumps(q, ensure_ascii=False)[1:-1])]
@@ -566,6 +599,20 @@ def _quote_in_file(corpus_dir: Path, rel: str, ref: str, quote: str) -> str:
                     return span_of_quote(corpus_dir, f"{rel}#L{n}", quote)
                 except RefError:
                     continue  # the line holds the words, but in no block its record shows (a field left out)
+    raise RefError(f"the quote is not in {ref}", 404)
+
+
+def _quote_in_record(corpus_dir: Path, p: dict[str, Any], ref: str, quote: str) -> str:
+    """`ref` itself when the record it names (a database row, a PDF page, a JSON value, a CSV row) holds `quote`, in its
+    text or its JSON. RefError 404 when the record or the quote is not there."""
+    from . import records  # lazy (import cycle)
+
+    path, rel = _locate(corpus_dir, p["path"])
+    rec = records.read(path, rel, format_ref(p).partition("#")[2]) if path.is_file() else None
+    if rec is None:
+        raise RefError(f"no such record: {ref!r}", 404)
+    if any(_find_quote(t, quote) for t in (rec["text"], _dumps(rec["record"]))):
+        return ref
     raise RefError(f"the quote is not in {ref}", 404)
 
 
@@ -760,6 +807,42 @@ def _resolve_lines(corpus_dir: Path, p: dict[str, Any], ref: str) -> dict[str, A
     return out
 
 
+NO_TEXT_LAYER = "(no text on this page: a scan or an image)"
+
+
+def _resolve_record(corpus_dir: Path, p: dict[str, Any], ref: str) -> dict[str, Any]:
+    """A PDF's page, a JSON document's value or a CSV's row (records.read): {ref, kind, path, record, blocks, excerpt,
+    meta}. meta holds the record's place `n` and, in a file of text, the lines it spans (`line`..`end_line`), where the
+    File browser opens it. A row reads as its fields, so it has no blocks."""
+    from . import records  # lazy (import cycle)
+
+    path, rel = _locate(corpus_dir, p["path"])
+    if not path.is_file():
+        raise RefError(f"no such file: {rel!r}", 404)
+    if p["kind"] == "pointer" and (records.reader_of(path, rel) != "json" or records.json_index(path) is None):
+        raise RefError(f"{rel!r} does not hold one JSON document, so its records are its lines: <path>#L<n>", 400)
+    fragment = format_ref(p).partition("#")[2]
+    try:
+        rec = records.read(path, rel, fragment)
+    except (OSError, ValueError, sqlite3.Error) as e:
+        raise RefError(f"{rel!r} could not be read: {e}", 400)
+    if rec is None:
+        raise RefError(f"{rel} has no record #{fragment}", 404)
+    kind = p["kind"]
+    if kind == "csvrow":
+        blocks: list[dict[str, str]] = []
+    elif kind == "page":
+        blocks = [{"kind": "text", "text": rec["text"]}]
+    else:
+        blocks = record_blocks(rec["record"])
+    meta: dict[str, Any] = {k: rec[k] for k in ("n", "line", "end_line") if rec.get(k) is not None}
+    if kind == "page":
+        meta["pages"] = len(records.pdf_pages(path))
+    excerpt = rec["text"] or (NO_TEXT_LAYER if kind == "page" else _dumps(rec["record"]))
+    return {"ref": ref, "kind": kind, "path": rel, "record": rec["record"], "blocks": blocks, "excerpt": excerpt[:EXCERPT_MAX],
+            "meta": meta}
+
+
 def _resolve_database(corpus_dir: Path, p: dict[str, Any], ref: str) -> dict[str, Any]:
     """`<db>#<table>` / `<db>#<table>/<pk>` against any database file under the corpus (corpus.open_database)."""
     from . import corpus
@@ -790,14 +873,30 @@ def _resolve_database(corpus_dir: Path, p: dict[str, Any], ref: str) -> dict[str
             key = int(key)
         try:
             row = con.execute(f'SELECT {select} FROM "{table}" WHERE {where}', (key,)).fetchone()
+            n = _row_place(con, table, pk, key) if row is not None else None
         except sqlite3.Error as e:
             raise RefError(f"sqlite: {e}", 400)
     if row is None:
         raise RefError(f"no row {table}/{p['pk']}", 404)
     record = dict(zip(columns, (corpus.jsonable(v) for v in row)))
+    meta: dict[str, Any] = {"table": table, "pk_column": pk or "rowid"}
+    if n is not None:
+        meta["n"] = n
     return {"ref": ref, "kind": "row", "path": rel, "table": table, "pk": p["pk"], "record": record,
-            "excerpt": json.dumps(record, ensure_ascii=False, separators=(",", ":"))[:EXCERPT_MAX],
-            "meta": {"table": table, "pk_column": pk or "rowid"}}
+            "excerpt": json.dumps(record, ensure_ascii=False, separators=(",", ":"))[:EXCERPT_MAX], "meta": meta}
+
+
+def _row_place(con: sqlite3.Connection, table: str, pk: str | None, key: Any) -> int | None:
+    """Where a row stands (from 1) in its table read in storage order, as the Database view pages it: by rowid, else
+    by its primary key in a table without one."""
+    try:
+        got = con.execute(f'SELECT COUNT(*) FROM "{table}" WHERE rowid < (SELECT rowid FROM "{table}" WHERE '
+                          + ("rowid" if pk is None else f'"{pk}"') + " = ?)", (key,)).fetchone()
+    except sqlite3.Error:
+        if pk is None:
+            return None
+        got = con.execute(f'SELECT COUNT(*) FROM "{table}" WHERE "{pk}" < ?', (key,)).fetchone()
+    return int(got[0]) + 1 if got else None
 
 
 _BARE_REPR_RE = re.compile(r"^\s*<[^<>]*>\s*$")  # e.g. '<Figure size 600x400 with 1 Axes>' next to an image/png
