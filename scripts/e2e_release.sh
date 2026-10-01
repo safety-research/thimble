@@ -130,11 +130,11 @@ ours() {  # the processes this run started that may still run: the server's sess
     pgrep -f -- "$clone/" || true; pgrep -f -- "$thome/" || true; pgrep -f -- "$out/release/" || true; } | sort -u | grep -vx "$$" || true
 }
 
-claude_files() { python3 -I "$here/e2e/claude_files.py" "$out"; }
+claude_files() { python3 -I "$here/e2e/claude_files.py" "$out" "$@"; }
 
-files_before=""
+files_before=""  # the file holding what claude_files.py printed before the install
 cleanup() {
-  local rc=$? left pid sid="" files_after
+  local rc=$? left pid sid="" changed
   set +e
   if [ -n "$standin_pid" ]; then kill "$standin_pid" 2>/dev/null; wait "$standin_pid" 2>/dev/null; fi
   sid="$(sed -n 's/.*"pid": *\([0-9][0-9]*\).*/\1/p' "$thome/server.json" 2>/dev/null | head -n 1)"
@@ -149,9 +149,9 @@ cleanup() {
   if [ -z "${left// /}" ]; then record cleanup pass "no process of this run is left"
   else record cleanup fail "still running: $left"; fi
   if [ -n "$files_before" ]; then
-    files_after="$(claude_files 2>&1)"
-    if [ "$files_after" = "$files_before" ]; then record claude-files pass "Claude Code's plugins, marketplaces and trust entries and ~/.local/bin/thimble as before the run"
-    else record claude-files fail "changed during the run: before $files_before, after $files_after"; fi
+    if changed="$(claude_files --against "$files_before" 2>&1)"; then
+      record claude-files pass "Claude Code's plugins, marketplaces and trusted folders and ~/.local/bin/thimble as before the run"
+    else record claude-files fail "changed during the run: $changed"; fi
   fi
   if [ "$keep_install" = 0 ]; then rm -rf "$clone" "$thome" "$bin" "$out/release"; fi
   python3 -I "$here/e2e/report.py" "$results" "$out/report.md" --ref "$ref" --commit "$commit" --started "$started" \
@@ -192,7 +192,10 @@ if [ -n "$zip_file" ]; then
 fi
 
 # 2. install.sh, every question answered by its flag, once its dry run shows it leaves the caller's files alone
-files_before="$(claude_files 2>&1)" || { record claude-files fail "could not read Claude Code's files: $files_before"; files_before=""; exit 1; }
+if ! claude_files > "$logs/claude-files-before.json" 2>&1; then
+  record claude-files fail "could not read Claude Code's files: $(tail -n 1 "$logs/claude-files-before.json")"; exit 1
+fi
+files_before="$logs/claude-files-before.json"
 printf '{"answer": "no", "registered": ""}\n' > "$thome/plugin.json"
 flags=(--browser bundled --no-sandbox-deps --no-plugin --no-trust-workspaces)
 if ! (cd "$src_tree" && in_env bash scripts/install.sh "${flags[@]}" --dry-run) < /dev/null > "$logs/install-plan.log" 2>&1; then
