@@ -1,13 +1,15 @@
 // What thimble draws above every view's page, outside its frame: the view's residue, a line that opens the list of what
-// it leaves out (ResidueList) under the head, which says so when nothing is, and the count of the fields its reader
-// derived and the labels it shows (DerivedData), which a click lists.
+// it leaves out (ResidueList) under the head, which says so when nothing is, the count of the fields its reader
+// derived and the labels it shows (DerivedData), which a click lists, and the label filter with how many records it
+// hides (ViewFilter).
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { LabelChip } from '../chat/SurfaceChips'
+import { FilterChip } from '../components/FilterChip'
 import { Popover } from '../components/Menu'
 import { api } from '../lib/api'
 import type { Concept, ViewProblems, ViewShown } from '../lib/types'
 import { readStorage, storageKey, writeStorage } from '../lib/workspace'
-import { globMatches } from './labels'
+import { globMatches, type LabelFilter } from './labels'
 import { fmtSize } from './Tree'
 import type { FilesLabels } from './useLabels'
 
@@ -43,6 +45,21 @@ export function useViewNotes(ws: string, slug: string, version?: string): ViewNo
 export function useShownLabels(labels: FilesLabels, claims: readonly string[] | undefined): Concept[] {
   const { on, presence } = labels
   return useMemo(() => on.filter((k) => Object.keys(presence.get(k.id) ?? {}).some((p) => (claims ?? []).some((g) => globMatches(p, g)))), [on, presence, claims])
+}
+
+/** The label filter a view keeps its records to, as the chip that clears it, and how many of the view's records it
+ * hides once that count is exact (ViewerFrame onHidden). */
+export function ViewFilter({ ws, filter, name, hidden, className }: { ws: string; filter: LabelFilter; name: string; hidden: number | null; className?: string }) {
+  return (
+    <>
+      <FilterChip concept={filter.concept} name={name} value={filter.value} className={className} onClear={() => void api.deleteFilter(ws, 'files').catch(() => undefined)} />
+      {!!hidden && (
+        <span className="view-pane-hidden" title={`Records of this view the filter ${name} · ${filter.value} hides`}>
+          {hidden.toLocaleString()} hidden
+        </span>
+      )}
+    </>
+  )
 }
 
 /** Whether ViewNotesLine draws anything: once the view's notes have come, it always says what the view leaves out. */

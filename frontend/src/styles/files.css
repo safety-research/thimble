@@ -2482,7 +2482,8 @@
   box-shadow: 0 0 0 2px var(--overlay-bg), 0 0 0 3.5px var(--text-primary);
 }
 /* the Files label filter beside a view's mode switch, which clears it */
-.view-pane-filter {
+.view-pane-filter,
+.reader-viewer-filter {
   flex: none;
   align-self: center;
 }

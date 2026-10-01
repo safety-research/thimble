@@ -24,7 +24,7 @@ import { findColumn, ReaderRuler, rulerColumns, useRuler, type LensTick, type Ru
 import { fmtSize } from './Tree'
 import { useFilesFilter, type FilesLabels } from './useLabels'
 import { accepts, slugOf, viewValue } from './viewChoice'
-import { hasNotes, ResidueList, useResidueOpen, useShownLabels, useViewNotes, ViewNotesLine } from './ViewChrome'
+import { hasNotes, ResidueList, useResidueOpen, useShownLabels, useViewNotes, ViewFilter, ViewNotesLine } from './ViewChrome'
 import { ViewerFrame } from './ViewerFrame'
 import { usePinnedView, ViewUpdated } from './viewVersion'
 import { DeleteViewConfirm, ProposalOption } from './ViewsBar'
@@ -135,8 +135,8 @@ export function ViewFailed({ name, detail, onRaw }: { name: string; detail: stri
 
 /** A viewer for the file's type as its mode: the view's page in the reader, and what failed with Raw beside it when the
  * file has a Raw. It keeps the version it opened at, with Updated and Reload over its top right corner once a newer one
- * is there. Above the page, thimble's notes on the view (ViewChrome), when there are any; a file or line picked there
- * opens in the File browser. */
+ * is there. Above the page, thimble's notes on the view (ViewChrome), when there are any, and the label filter with how
+ * many records it hides; a file or line picked there opens in the File browser. */
 function ReaderViewer({ ws, view, path, targetRef, labels, onRaw }: { ws: string; view: View; path: string; targetRef?: string; labels: FilesLabels; onRaw?: () => void }) {
   const [failure, setFailure] = useState<string | null>(null)
   const filter = useFilesFilter(ws)
@@ -144,12 +144,17 @@ function ReaderViewer({ ws, view, path, targetRef, labels, onRaw }: { ws: string
   const notes = useViewNotes(ws, view.slug, pin.pinned || undefined)
   const shownLabels = useShownLabels(labels, view.claims)
   const [residueOpen, toggleResidue] = useResidueOpen(ws, view.slug)
+  const filterLabel = filter ? labels.byId.get(filter.concept) : undefined
+  const [hidden, setHidden] = useState<number | null>(null)
+  useEffect(() => setHidden(null), [pin.pinned])
+  const noted = hasNotes(notes, shownLabels)
   const pick = (ref: string) => bus.emit('openRef', { ref, browser: true })
   return (
     <div className="reader-main reader-viewer">
-      {hasNotes(notes, shownLabels) && (
+      {(noted || (filter && filterLabel)) && (
         <div className="reader-viewer-notes">
-          <ViewNotesLine ws={ws} name={view.name} notes={notes} shownLabels={shownLabels} residueOpen={residueOpen} onResidue={toggleResidue} />
+          {noted && <ViewNotesLine ws={ws} name={view.name} notes={notes} shownLabels={shownLabels} residueOpen={residueOpen} onResidue={toggleResidue} />}
+          {filter && filterLabel && <ViewFilter ws={ws} filter={filter} name={filterLabel.name} hidden={hidden} className="reader-viewer-filter" />}
         </div>
       )}
       {residueOpen && <ResidueList notes={notes} onPick={pick} />}
@@ -169,6 +174,7 @@ function ReaderViewer({ ws, view, path, targetRef, labels, onRaw }: { ws: string
         filter={filter}
         filterFiles={filter ? labels.presence.get(filter.concept) : undefined}
         byId={labels.byId}
+        onHidden={setHidden}
         onError={setFailure}
       />
     </div>

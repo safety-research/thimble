@@ -11,7 +11,6 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { Button, Segmented } from '../components/Button'
 import { CheckMark } from '../components/CheckMark'
-import { FilterChip } from '../components/FilterChip'
 import { Popover } from '../components/Menu'
 import { api } from '../lib/api'
 import { bus } from '../lib/bus'
@@ -26,7 +25,7 @@ import { inferKind } from './params'
 import { Reader, ViewFailed } from './Reader'
 import { kindIn, useFolderStore } from './Tree'
 import { useFilesFilter, type FilesLabels } from './useLabels'
-import { ResidueList, useResidueOpen, useShownLabels, useViewNotes, ViewNotesLine } from './ViewChrome'
+import { ResidueList, useResidueOpen, useShownLabels, useViewNotes, ViewFilter, ViewNotesLine } from './ViewChrome'
 import { ViewerFrame, type ViewLabelActions, type ViewQuote } from './ViewerFrame'
 import { usePinnedView, ViewUpdated } from './viewVersion'
 import type { BuiltView } from './ViewsBar'
@@ -133,12 +132,7 @@ export function ViewPane({ ws, view, path, picked, kind, targetRef, quote, onQuo
           </span>
         </div>
         {pin.stale && mode === 'view' && <ViewUpdated onReload={reload} className="view-pane-updated" />}
-        {filter && filterLabel && <FilterChip concept={filter.concept} name={filterLabel.name} value={filter.value} className="view-pane-filter" onClear={() => void api.deleteFilter(ws, 'files').catch(() => undefined)} />}
-        {filter && filterLabel && mode === 'view' && !!hidden && (
-          <span className="view-pane-hidden" title={`Records of this view the filter ${filterLabel.name} · ${filter.value} hides`}>
-            {hidden.toLocaleString()} hidden
-          </span>
-        )}
+        {filter && filterLabel && <ViewFilter ws={ws} filter={filter} name={filterLabel.name} hidden={mode === 'view' ? hidden : null} className="view-pane-filter" />}
         {path && oneFile && <OpenIn ws={ws} path={rawAt?.path ?? path} current={view.slug} onOpen={(slug) => bus.emit('openIn', { path: rawAt?.path ?? path, ref: rawAt?.ref ?? targetRef, slug })} />}
         {path && (oneFile || mode === 'raw') && (
           <Segmented
