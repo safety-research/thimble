@@ -501,11 +501,15 @@ def _files(base: Path) -> list[Path]:
 
 
 def digest(base: Path) -> tuple[str, int]:
-    h, size = hashlib.sha1(), 0
-    for f in _files(base):
-        data = f.read_bytes()
-        size += len(data)
-        h.update(str(f.relative_to(base)).encode() + b"\0" + data + b"\0")
+    """(a hash of the files of `base`, how many bytes they hold); the hash is '' for a folder of more than SIZE_MAX
+    bytes, whose files are not read."""
+    files = _files(base)
+    size = sum(f.stat().st_size for f in files)
+    if size > SIZE_MAX:
+        return "", size
+    h = hashlib.sha1()
+    for f in files:
+        h.update(str(f.relative_to(base)).encode() + b"\0" + f.read_bytes() + b"\0")
     return h.hexdigest()[:16], size
 
 

@@ -118,6 +118,21 @@ def test_a_card_json_written_before_the_spec_settled_needs_no_example(tmp_path):
         extensions.read_extension(root, "cards", set())["problems"]
 
 
+def test_a_folder_over_the_size_limit_is_refused_without_being_read(tmp_path, workspaces_tmp, monkeypatch):
+    d = tmp_path / "big"
+    shutil.copytree(FIXTURE, d)
+    raw = json.loads((d / "extension.json").read_text())
+    (d / "extension.json").write_text(json.dumps({**raw, "name": "big"}))
+    (d / "sample.bin").write_bytes(b"x" * 4096)
+    monkeypatch.setattr(extensions, "SIZE_MAX", 2048)
+    read: list[Path] = []
+    real = Path.read_bytes
+    monkeypatch.setattr(Path, "read_bytes", lambda self: read.append(self) or real(self))
+    assert extensions.digest(d)[0] == "" and read == []
+    with pytest.raises(extensions.AddError, match="an extension may hold 2,048"):
+        extensions.add(str(d), yes=True, say=lambda _: None)
+
+
 @pytest.fixture()
 def corpus(workspaces_tmp, tmp_path, monkeypatch) -> str:
     d = tmp_path / "data" / "kitws"
