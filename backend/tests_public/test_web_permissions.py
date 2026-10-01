@@ -103,3 +103,16 @@ async def test_an_unanswered_request_is_denied_after_the_wait_and_its_card_says_
     assert _card(chat) == [] and await _request("Bash", {"command": "ls"}) == {"behavior": "deny", "message": agent_session.GONE_LINE}
     assert agent_session.web_rule("WebFetch", {"url": "https://evil.example\\@docs.python.org/"}) is None, \
         "Claude Code would fetch evil.example"
+
+
+def test_a_kept_web_rule_lives_where_a_kernel_cannot_write_it():
+    """The analyst's "don't ask again" for a site is kept in the workspace's registry folder, which a kernel's cells
+    may only read, and a web_rules.json a cell writes beside it is not read."""
+    from app import kernel_wrap
+
+    agent_session.keep_web_rule(CORPUS, "WebFetch(domain:vega.github.io)")
+    kept = config.registry_dir(CORPUS) / agent_session.WEB_RULES_FILE
+    assert json.loads(kept.read_text())["allow"] == ["WebFetch(domain:vega.github.io)"]
+    assert kernel_wrap.REGISTRY_DIR in kernel_wrap.READ_ONLY_DIRS and kept.parent.name == kernel_wrap.REGISTRY_DIR
+    (config.workspace_dir(CORPUS) / agent_session.WEB_RULES_FILE).write_text(json.dumps({"allow": ["WebSearch"]}))
+    assert agent_session.web_rules(CORPUS) == ["WebFetch(domain:vega.github.io)"]

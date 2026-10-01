@@ -28,7 +28,8 @@ before an unanswered request is denied.
 The web. WebFetch and WebSearch follow the mode in every session: in manual mode an `ask` rule sends each call to ask
 (web_asks), over the analyst's own allow rules and Claude Code's list of documentation sites it fetches unasked, and in
 auto mode the classifier judges them. The card offers "don't ask again" for the site, or for web search, kept for the
-workspace in WEB_RULES_FILE, which every session's later request of it meets (web_rules). While a request waits, the
+workspace in WEB_RULES_FILE in its registry folder, which a kernel cannot write, and which every session's later
+request of it meets (web_rules). While a request waits, the
 session's later requests for the same site or for search wait on the same card (`groups`), each listed on it whole,
 up to WEB_ALSO_MAX. The card's answer says how many it listed (`shown`); a later one it did not list is asked on its own
 once the answer comes.
@@ -2251,7 +2252,7 @@ def web_offer(rule: str) -> list[dict[str, Any]]:
 def web_rules(c: str) -> list[str]:
     """The web rules the analyst kept for workspace `c`."""
     try:
-        data = json.loads((config.workspace_dir(c) / WEB_RULES_FILE).read_text("utf-8"))
+        data = json.loads((config.registry_dir(c) / WEB_RULES_FILE).read_text("utf-8"))
     except (OSError, ValueError):
         return []
     rules = data.get("allow") if isinstance(data, dict) else None
@@ -2262,7 +2263,7 @@ def keep_web_rule(c: str, rule: str) -> None:
     """Keep `rule` for workspace `c`, so no session of it asks for it again."""
     rules = web_rules(c)
     if rule not in rules:
-        atomic_write_text(config.workspace_dir(c) / WEB_RULES_FILE, json.dumps({"allow": [*rules, rule]}, indent=1) + "\n")
+        atomic_write_text(config.registry_dir(c) / WEB_RULES_FILE, json.dumps({"allow": [*rules, rule]}, indent=1) + "\n")
 
 
 def wait_words(seconds: float) -> str:
