@@ -226,6 +226,25 @@ def test_a_count_of_what_the_filter_left_out_is_given_only_when_exact():
     views._left_out.clear()
     assert views.note_left_out(CORPUS, "v", None, {"filter_key": key, "left_out": ["a#L1", "a#L2"], "left_out_n": 2}) == 2
     assert views.note_left_out(CORPUS, "v", None, {"filter_key": key, "left_out": ["a#L2", "a#L3"], "left_out_n": 2}) == 3
-    assert views.note_left_out(CORPUS, "v", None, {"filter_key": key, "left_out": ["a#L4"], "left_out_n": 5}) is None
+    assert views.note_left_out(CORPUS, "v", None, {"filter_key": key, "left_out_n": 5}) is None
     other = ("asks-id", "other", (1, 2))
     assert views.note_left_out(CORPUS, "v", None, {"filter_key": other, "left_out": ["a#L9"], "left_out_n": 1}) == 1
+
+
+def test_the_count_is_of_what_the_frame_shows_now():
+    """A fetch with a key replaces what its last call left out, as the page replaces what it showed (a run picked in
+    place of another), while fetches without one add up, as pages of a list do. Another file shown starts the count
+    afresh, a call from before that changes nothing, and each frame counts on its own."""
+    key = ("asks-id", "asks", (1, 2))
+    views._left_out.clear()
+
+    def note(refs, **kw):
+        return views.note_left_out(CORPUS, "v", None, {"filter_key": key, "left_out": refs, "left_out_n": len(refs)}, **kw)
+
+    assert note(["run1#L1", "run1#L2"], frame="f", part="runs") == 2
+    assert note(["run2#L1"], frame="f", part="runs") == 1, "the run picked in place of the first"
+    assert note(["page#L1"], frame="f") == 2
+    assert note(["page#L2"], frame="f") == 3, "a second page adds to the first"
+    assert note(["other#L1"], frame="f", turn=1) == 1, "another file shown"
+    assert note(["late#L1", "late#L2"], frame="f", turn=0) == 1, "a call from before the file changed"
+    assert note(["run1#L1"], frame="g") == 1

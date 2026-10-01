@@ -1261,7 +1261,7 @@ async def _call(c: str, req: dict[str, Any], op: str, arg: Any = None, *, call: 
         _ready.add(key)
     if sink is not None:
         refused = ans.get("left_out")
-        sink["left_out"] = [str(r) for r in refused] if isinstance(refused, list) else []
+        sink["left_out"] = refused if isinstance(refused, list) else []
         n = ans.get("left_out_n")
         sink["left_out_n"] = n if isinstance(n, int) and not isinstance(n, bool) else len(sink["left_out"])
     return ans.get("result")
@@ -1450,11 +1450,16 @@ async def shown(c: str, slug: str, version: str | None = None) -> dict[str, Any]
 # labels in views: what is on and the filter, and the marks of records and units
 # ----------------------------------------------------------------------------------------------------------
 
-# What a view's reader left out for the label filter, by (workspace, slug, version): the filter's key (filter_key) and
-# the refs thimble.kept refused in every records call under it, which the view's head counts as hidden. `exact` turns
-# false once a call refused more refs than its answer could list. At most LEFT_OUT_VIEWS views are kept.
-_left_out: "OrderedDict[tuple[str, str, str], dict[str, Any]]" = OrderedDict()
-LEFT_OUT_VIEWS = 64
+# What a view's reader left out for the label filter, by (workspace, slug, version, frame), which the view's head counts
+# as hidden: the filter's key (filter_key), the frame's `turn` (it steps when the frame shows another file) and, per part
+# of what the page shows, the refs thimble.kept refused. A part is the page's fetch key, whose newest call replaces the
+# last, or "" for its fetches without one, which add up, as pages of a list do. A part is None once its refs cannot be
+# counted exactly: a call refused more than its answer could list, or the part outgrew LEFT_OUT_MAX. At most
+# LEFT_OUT_FRAMES frames and LEFT_OUT_PARTS parts a frame are kept.
+_left_out: "OrderedDict[tuple[str, str, str, str], dict[str, Any]]" = OrderedDict()
+LEFT_OUT_FRAMES = 16
+LEFT_OUT_PARTS = 64
+LEFT_OUT_MAX = 200_000  # as view_host's, which lists no more refs than that in an answer
 
 
 def filter_key(ctx: dict[str, Any] | None) -> tuple[Any, ...] | None:
@@ -1472,22 +1477,40 @@ def filter_key(ctx: dict[str, Any] | None) -> tuple[Any, ...] | None:
     return (f.get("id"), f.get("value"), sig)
 
 
-def note_left_out(c: str, slug: str, version: str | None, sink: dict[str, Any]) -> int | None:
-    """Add what one records call left out for the filter (_call's sink) to what the view's earlier calls under the
-    same filter left out, and answer how many distinct refs that is; None once it cannot be counted exactly."""
-    key = (c, slug, version or "")
+def _short(name: str) -> str:
+    """A page's name for its frame or fetch key as a short key: itself, or its digest when long."""
+    return name if len(name) <= 200 else hashlib.sha256(name.encode("utf-8", "replace")).hexdigest()
+
+
+def note_left_out(c: str, slug: str, version: str | None, sink: dict[str, Any], *, frame: str | None = None,
+                  turn: int = 0, part: str | None = None) -> int | None:
+    """Put what one records call left out for the filter (_call's sink) in its part of what the frame shows, and answer
+    how many distinct refs all its parts hold; None when that cannot be counted exactly. A new filter or a later turn
+    starts the frame afresh, and a call from an earlier turn changes nothing."""
+    key = (c, slug, version or "", _short(frame or ""))
     have = _left_out.get(key)
-    if have is None or have["filter"] != sink["filter_key"]:
-        have = {"filter": sink["filter_key"], "refs": set(), "exact": True}
+    if have is None or have["filter"] != sink["filter_key"] or turn > have["turn"]:
+        have = {"filter": sink["filter_key"], "turn": turn, "parts": {}}
     _left_out[key] = have
     _left_out.move_to_end(key)
-    while len(_left_out) > LEFT_OUT_VIEWS:
+    while len(_left_out) > LEFT_OUT_FRAMES:
         _left_out.popitem(last=False)
-    refs = sink.get("left_out") or []
-    have["refs"].update(refs)
-    if int(sink.get("left_out_n") or 0) > len(refs):
-        have["exact"] = False
-    return len(have["refs"]) if have["exact"] else None
+    parts: dict[str, set[str] | None] = have["parts"]
+    if turn == have["turn"]:
+        listed = sink.get("left_out")
+        refs = {str(r) for r in listed} if isinstance(listed, list) else set()
+        got: set[str] | None = refs if int(sink.get("left_out_n") or 0) <= len(refs) else None
+        p = _short(part or "")
+        before = parts.get(p, set())
+        if got is not None and not p and before is not None:
+            got = before | got
+        parts[p] = got if got is None or len(got) <= LEFT_OUT_MAX else None
+        if len(parts) > LEFT_OUT_PARTS:
+            parts[""] = None
+    if any(x is None for x in parts.values()):
+        return None
+    union: set[str] = set().union(*parts.values())
+    return len(union) if len(union) <= LEFT_OUT_MAX else None
 
 
 def _label_colour(n: Any) -> str:
@@ -4155,6 +4178,10 @@ async def card_media_route(c: str, path: str) -> FileResponse:
 class RecordsBody(BaseModel):
     query: Any = None
     call: str | None = None
+    # what the page shows, for the count of what the filter hides (note_left_out): its fetch key, its frame, its turn
+    key: str | None = None
+    frame: str | None = None
+    turn: int = 0
 
 
 @router.post("/ws/{c}/views/{slug}/records")
@@ -4179,7 +4206,7 @@ async def records_route(c: str, slug: str, body: RecordsBody, request: Request, 
             raise HTTPException(409, {"message": "the page dropped the call", "cancelled": True})
         out = {"data": work.result()}
         if sink.get("filter_key") is not None:
-            out["hidden"] = note_left_out(c, slug, v, sink)
+            out["hidden"] = note_left_out(c, slug, v, sink, frame=body.frame, turn=body.turn, part=body.key)
         return out
     except ReaderError as e:
         raise HTTPException(502, {"message": e.message, "traceback": e.detail[-ERROR_MAX:]}) from None

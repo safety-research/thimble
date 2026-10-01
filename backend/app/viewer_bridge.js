@@ -10,9 +10,10 @@
 //                          is the file the view opened on, and `picked` holds when the analyst chose it (Open in)
 //                          rather than thimble opening the view on its first file
 //   quoted {found}         frame to page: whether the quoted passage showed in the page
-//   fetch {id, query, progress}
+//   fetch {id, query, progress, key}
 //                          frame to page, answered by result {id, data} from reader.records (window.thimble.fetch), with
-//                          no time limit; `progress` when the page shows the wait itself (onProgress)
+//                          no time limit; `progress` when the page shows the wait itself (onProgress), `key` the fetch's
+//                          key or null
 //   cancel {id}            frame to page: the page dropped that fetch (a newer one with its key, or its signal), so
 //                          thimble cancels the reader's call
 //   progress {id, seconds, phase, done?, total?, note?}
@@ -312,7 +313,7 @@
         var onProgress = typeof opts.onProgress === 'function' ? opts.onProgress : null
         pending[id] = { resolve: resolve, reject: reject, key: key, onProgress: onProgress, started: Date.now(), progress: null }
         if (opts.signal && opts.signal.addEventListener) opts.signal.addEventListener('abort', function () { dropFetch(id) })
-        post({ type: P + 'fetch', id: id, query: query === undefined ? null : query, progress: !!onProgress })
+        post({ type: P + 'fetch', id: id, query: query === undefined ? null : query, progress: !!onProgress, key: key })
         if (!onProgress) watchWait()
       })
     },

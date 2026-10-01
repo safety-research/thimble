@@ -443,6 +443,8 @@ export function ViewerFrame({ ws, slug, targetRef, path, pathPicked, title, fit,
     hiddenFn.current?.(filtering.current && h.page != null && h.reader != null ? h.page + h.reader : null)
   }
   const filterKey = filter ? `${filter.concept}\n${filter.value}` : ''
+  // what the page shows, stepped with each new page and each file shown, which its records calls carry (note_left_out)
+  const turn = useRef(0)
   const filterNow = useRef(filterKey)
   filterNow.current = filterKey
   useEffect(() => {
@@ -474,6 +476,7 @@ export function ViewerFrame({ ws, slug, targetRef, path, pathPicked, title, fit,
     stopCalls()
     pageKey.current = callKey()
     hidden.current = { page: null, reader: 0 }
+    turn.current += 1
   }, [doc, marks, stopCalls])
   const sendInit = () => {
     const c = drawn.current
@@ -503,6 +506,13 @@ export function ViewerFrame({ ws, slug, targetRef, path, pathPicked, title, fit,
     post({ type: P + 'restore', state: st })
   }
 
+  // another file shown is a new turn of what the page shows, whose records answers count what the filter hides afresh
+  const shownPath = useRef(path)
+  useEffect(() => {
+    if (shownPath.current === path) return
+    shownPath.current = path
+    turn.current += 1
+  }, [path])
   // a new ref (or a new passage in the same record) for a page that is already up: a new `open`, no reload
   useEffect(() => {
     if (ready.current) void sendOpen(targetRef)
@@ -544,6 +554,7 @@ export function ViewerFrame({ ws, slug, targetRef, path, pathPicked, title, fit,
           const c = drawn.current
           const f = { ctrl: new AbortController(), call: `${frameId}-${++callSeq.current}`, view: !c, timer: null as number | null }
           const askedUnder = filterNow.current
+          const askedTurn = turn.current
           calls.current.set(id, f)
           if (!c)
             f.timer = window.setInterval(() => {
@@ -553,10 +564,11 @@ export function ViewerFrame({ ws, slug, targetRef, path, pathPicked, title, fit,
                 .catch(() => {})
             }, PROGRESS_MS)
           try {
-            const res = c ? await api.cardTypeRecords(ws, c.type, c.id, d.query) : await api.viewRecords(ws, slug, d.query, version, { call: f.call, signal: f.ctrl.signal })
+            const key = typeof d.key === 'string' ? d.key : undefined
+            const res = c ? await api.cardTypeRecords(ws, c.type, c.id, d.query) : await api.viewRecords(ws, slug, d.query, version, { call: f.call, signal: f.ctrl.signal, key, frame: frameId, turn: askedTurn })
             if (calls.current.get(id) === f) post({ type: P + 'result', id: d.id, data: res.data })
             const left = 'hidden' in res ? res.hidden : undefined
-            if (!c && left !== undefined && askedUnder === filterNow.current && left !== hidden.current.reader) {
+            if (!c && left !== undefined && askedUnder === filterNow.current && askedTurn === turn.current && left !== hidden.current.reader) {
               hidden.current.reader = typeof left === 'number' ? left : null
               tellHidden()
             }
