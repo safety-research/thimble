@@ -795,7 +795,7 @@ export function EditableCell({ className, label, text, onCommit, onBlur, childre
           className="wu-cell-field"
           aria-label={label}
           value={editing}
-          spellCheck
+          spellCheck={false}
           onChange={(e) => setEditing(e.target.value)}
           onKeyDown={(e) => {
             if (e.key === 'Escape') {
@@ -863,7 +863,7 @@ function TextField({ className, label, value, onChange, onBlur }: { className: s
     t.style.height = '0px'
     t.style.height = `${t.scrollHeight}px`
   }, [value])
-  return <textarea ref={el} className={`wu-tpl ${className}${value.trim() ? '' : ' wu-tpl-empty'}`} value={value} rows={1} aria-label={label} spellCheck onChange={(e) => onChange(e.target.value)} onBlur={onBlur} />
+  return <textarea ref={el} className={`wu-tpl ${className}${value.trim() ? '' : ' wu-tpl-empty'}`} value={value} rows={1} aria-label={label} spellCheck={false} onChange={(e) => onChange(e.target.value)} onBlur={onBlur} />
 }
 
 /** The cards a deck shows as figures, for the sidebar's ✓. */
