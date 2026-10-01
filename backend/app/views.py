@@ -859,10 +859,19 @@ def folder_files(corpus: Path, rel: str) -> list[tuple[str, int, int]]:
 
 def glob_matches(rel_file: str, pattern: str | None) -> bool:
     """`pattern` against the file's corpus-relative path and its basename, so a claim may name a file type anywhere
-    (`*.jsonl`) or a path from the corpus root (`boards/*.jsonl`); '' or '*' matches everything."""
+    (`*.jsonl`) or a path from the corpus root (`boards/*.jsonl`); a `**/` may also stand for no folder, so `**/*.vtt`
+    names the files at the corpus root too; '' or '*' matches everything."""
     if not pattern or pattern == "*":
         return True
-    return fnmatch.fnmatch(rel_file, pattern) or fnmatch.fnmatch(rel_file.rsplit("/", 1)[-1], pattern)
+    name = rel_file.rsplit("/", 1)[-1]
+    return any(fnmatch.fnmatch(rel_file, p) or fnmatch.fnmatch(name, p) for p in _glob_forms(pattern))
+
+
+@functools.lru_cache(maxsize=512)
+def _glob_forms(pattern: str) -> tuple[str, ...]:
+    """`pattern`, and it with each `**/` taken out when it has one."""
+    bare = re.sub(r"(^|/)\*\*/", r"\1", pattern)
+    return (pattern,) if bare == pattern else (pattern, bare)
 
 
 def records_text(c: str, slug: str) -> str:

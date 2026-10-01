@@ -288,3 +288,18 @@ def test_a_view_switched_off_takes_its_card_type_with_it_and_a_deleted_one_leave
     _propose(CORPUS)
     _write(CORPUS)
     assert [v["slug"] for v in views.list_views(CORPUS) if v["origin"] == "workspace"] == ["posts"]
+
+
+def test_a_file_viewer_s_extension_glob_names_the_files_at_the_corpus_root_too(corpora):
+    """A `**` folder in a claim may stand for no folder, so a file viewer claiming `**/*.vtt` opens a subtitle file at
+    the corpus root as well as one in a folder, and propose_view finds files for it."""
+    root = config.corpus_dir(CORPUS)
+    (root / "talk.vtt").write_text("WEBVTT\n")
+    (root / "talks").mkdir()
+    (root / "talks" / "standup.vtt").write_text("WEBVTT\n")
+    assert views.glob_matches("talk.vtt", "**/*.vtt") and views.glob_matches("talks/standup.vtt", "**/*.vtt")
+    assert views.glob_matches("talks/standup.vtt", "talks/**/standup.vtt")
+    assert not views.glob_matches("board.jsonl", "**/*.vtt")
+    assert views.unmatched_claims(CORPUS, ["**/*.vtt"]) == {}
+    views._folder_cache.clear()
+    assert [f[0] for f in views.claimed_files(CORPUS, {"claims": ["**/*.vtt"]})] == ["talk.vtt", "talks/standup.vtt"]
