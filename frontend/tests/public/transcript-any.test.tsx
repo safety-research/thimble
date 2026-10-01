@@ -226,6 +226,8 @@ describe('a markdown file’s front matter', () => {
     expect(frontMatterLines(['# Title', '---'])).toBe(0)
     expect(frontMatterLines(['---', 'no end'])).toBe(0)
     expect(frontMatterLines(['+++', 'title = "x"', '+++'])).toBe(3)
+    expect(frontMatterLines(['---', '', 'An intro set between two rules.', '', '---', '# Title'])).toBe(0)
+    expect(frontMatterLines(['---', '# a comment', '_draft: true', '---'])).toBe(4)
     expect(metaFields(doc.slice(1, 12))).toEqual([
       { key: 'pretty_name', value: 'Toy village' },
       { key: 'license', value: 'other' },

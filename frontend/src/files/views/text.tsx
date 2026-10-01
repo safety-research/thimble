@@ -44,10 +44,16 @@ export function rehypeBlockAnchors(path: string, lines: number[]) {
 /** lines a front matter may take before its closing fence (backend transcripts.FRONT_MATTER_MAX) */
 const FRONT_MATTER_MAX = 400
 
-/** How many of a file's first lines its front matter takes, both fences counted; 0 for a file with none. Pure. */
+/** the first line of a front matter: a YAML `key:`, a TOML `key =` or a TOML `[table]` (backend transcripts._FRONT_KEY) */
+const FRONT_KEY = /^(?:["']?[\p{L}_][\p{L}\p{N}_ .-]*["']?\s*(?::(?=\s|$)|=)|\[[^\]\n]+\]\s*$)/u
+
+/** How many of a file's first lines its front matter takes, both fences counted; 0 for a file with none, or whose first
+ * line inside is no key, as a paragraph between two rules. Pure. */
 export function frontMatterLines(lines: string[]): number {
   const fence = lines[0]?.replace(/^\uFEFF/, '').trim()
   if (fence !== '---' && fence !== '+++') return 0
+  const first = lines.slice(1, FRONT_MATTER_MAX).find((l) => l.trim() && !l.trimStart().startsWith('#')) ?? ''
+  if (!FRONT_KEY.test(first)) return 0
   for (let i = 1; i < Math.min(lines.length, FRONT_MATTER_MAX); i++) {
     const t = lines[i].trim()
     if (t === fence || (fence === '---' && t === '...')) return i + 1

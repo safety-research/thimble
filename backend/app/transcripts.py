@@ -792,12 +792,19 @@ def _speaker_ok(speaker: str) -> bool:
     return bool(low) and low not in NOT_SPEAKERS and len(low.split()) <= 4 and not low.startswith(("http", "www."))
 
 
+# the first line of a front matter: a YAML `key:`, a TOML `key =` or a TOML `[table]`
+_FRONT_KEY = re.compile(r"""^(?:["']?[^\W\d][\w .-]*["']?\s*(?::(?=\s|$)|=)|\[[^\]\n]+\]\s*$)""")
+
+
 def front_matter_lines(lines: list[str]) -> int:
     """How many of a file's first lines its front matter takes (YAML between `---` lines, TOML between `+++` lines),
-    both fences counted; 0 for a file with none."""
+    both fences counted; 0 for a file with none, or whose first line inside is no key, as a paragraph between two rules."""
     if not lines or lines[0].lstrip("\ufeff").strip() not in ("---", "+++"):
         return 0
     fence = lines[0].lstrip("\ufeff").strip()
+    first = next((ln for ln in lines[1:FRONT_MATTER_MAX] if ln.strip() and not ln.lstrip().startswith("#")), "")
+    if not _FRONT_KEY.match(first):
+        return 0
     for i in range(1, min(len(lines), FRONT_MATTER_MAX)):
         if lines[i].strip() == fence or (fence == "---" and lines[i].strip() == "..."):
             return i + 1

@@ -105,6 +105,7 @@ FIXTURES = {
     "camel.jsonl": (jsonl([{"Speaker-Name": n, "messageText": t, "sentAt": f"2026-01-01T10:0{i}:00Z"}
                            for i, (n, t) in enumerate([("amy", "hi"), ("ben", "yo"), ("amy", "ok")])]), "messages"),
     "indented.txt": ("  alice: hi there\n  bob: hello\n  alice: how are you\n  bob: fine\n", "text"),
+    "rules.md": ("---\n\nAn intro set between two rules.\n\n---\n\nUser: hi\nAssistant: hello\nUser: a joke\nAssistant: no\n", "text"),
     # not transcripts
     "service.log": ("2026-09-01 10:00:00 [INFO] started\n2026-09-01 10:00:05 [WARN] slow\n2026-09-01 10:01:00 [INFO] done\n", None),
     "quotes.md": ("# Notes\n\n> a quote\n\nSome text.\n\n> another quote\n\n> a third\n", None),
