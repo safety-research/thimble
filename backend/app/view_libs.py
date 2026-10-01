@@ -407,8 +407,8 @@ async def ensure(c: str, slug: str, folder: Path, libs: Any, *, ask: "Ask | None
         if not approved(e.name, version):
             setting = _installs(c)
             if setting == "deny":
-                out["problems"].append(f"thimble's settings refuse installs, so {e.name} {version} was not installed; "
-                                       "draw the page without it and take it out of libs")
+                out["problems"].append(f"thimble's settings refuse installs, so {e.name} {version} was not installed. "
+                                       "Draw the page without it and take it out of libs")
                 continue
             more, extra = await needs(info["deps"])
             total = info["bytes"] + sum(int(x.get("bytes") or 0) for x in more)
@@ -426,7 +426,7 @@ async def ensure(c: str, slug: str, folder: Path, libs: Any, *, ask: "Ask | None
                                            "since no build of this view is running, so it was not installed")
                     continue
                 if not allowed:
-                    out["problems"].append(f"the analyst did not allow the package {e.name} {version}; draw the page "
+                    out["problems"].append(f"the analyst did not allow the package {e.name} {version}, so draw the page "
                                            "without it and take it out of libs")
                     continue
             approve(e.name, version, total)

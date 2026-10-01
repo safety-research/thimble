@@ -124,7 +124,7 @@ async def test_a_refused_package_or_installs_turned_off_leave_a_problem_and_noth
     folder = tmp_path / "v"
     folder.mkdir()
     got = await view_libs.ensure("ws", "v", folder, ["tiny-queue@1"], ask=no)
-    assert got["problems"] == ["the analyst did not allow the package tiny-queue 1.4.2; draw the page without it and "
+    assert got["problems"] == ["the analyst did not allow the package tiny-queue 1.4.2, so draw the page without it and "
                                "take it out of libs"]
     assert view_libs.approvals() == {} and not (folder / view_libs.LIB_DIR / "tiny-queue@1.4.2.js").exists()
     assert not [c for c in npm if c[1] == "install"]

@@ -405,7 +405,7 @@ def read_extension(root: Path, expect: str | None = None, have: set[str] | None 
                    if view_libs.parse(x) is not None and view_libs.vendored(d, x) is None]
         if missing:
             problems.append(f"its view {d.name!r} loads {', '.join(dict.fromkeys(missing))}, which its "
-                            f"{view_libs.LIB_DIR} folder does not hold; build the view in a workspace, where thimble "
+                            f"{view_libs.LIB_DIR} folder does not hold. Build the view in a workspace, where thimble "
                             "installs packages once the analyst allows them, and copy its folder")
         card = v.get("card") if isinstance(v.get("card"), dict) and (d / "card.py").is_file() else None
         vs.append({"slug": d.name, "name": _one(v.get("name") or d.name),
@@ -424,7 +424,7 @@ def read_extension(root: Path, expect: str | None = None, have: set[str] | None 
                    if view_libs.parse(x) is not None and view_libs.vendored(d, x) is None]
         if missing:
             problems.append(f"its card type {d.name!r} loads {', '.join(dict.fromkeys(missing))}, which its "
-                            f"{view_libs.LIB_DIR} folder does not hold; build it in a workspace, where thimble "
+                            f"{view_libs.LIB_DIR} folder does not hold. Build it in a workspace, where thimble "
                             "installs packages once the analyst allows them, and copy its folder")
         if not (d / "card.py").is_file():
             problems.append(f"its card type {d.name!r} has no card.py, which thimble needs to draw it")
