@@ -388,9 +388,10 @@ const scrollTo = (api: Api, el: Element | null | undefined, above = 120, smooth 
 }
 const inReport = (api: Api, sel: string) => (api.els.root as HTMLElement | undefined)?.querySelector<HTMLElement>(sel) ?? null
 
-/** The tour, for a pointer key written `key` (⌘ on a Mac, Ctrl elsewhere). */
-export function tourSteps(key: string): Step[] {
-  return [
+/** The tour, for a pointer key written `key` (⌘ on a Mac, Ctrl elsewhere). Without the chat column (`chat` false) the
+ * steps about the chat are left out. */
+export function tourSteps(key: string, chat = true): Step[] {
+  const steps: Step[] = [
     {
       tab: 'files', needsChat: true, example: sessionExample, anchor: chatContent, place: 'right', align: 'start', pad: 0, radius: 12,
       title: 'Your Claude Code session',
@@ -417,7 +418,7 @@ export function tourSteps(key: string): Step[] {
     {
       tab: 'files', example: filesExample, anchor: filesPanel, place: 'left', align: 'start', pad: 0, radius: 12,
       title: 'Files',
-      body: 'In the meantime, you can explore the files and views. The files browser exposes global views on the corpus.',
+      body: `${chat ? 'In the meantime, you can explore the files and views. ' : ''}The files browser exposes global views on the corpus.`,
     },
     {
       tab: 'files', example: labelsExample, place: 'left', align: 'end', pad: 0, radius: 0,
@@ -624,4 +625,5 @@ export function tourSteps(key: string): Step[] {
       },
     },
   ]
+  return steps.filter((s) => chat || !s.needsChat)
 }

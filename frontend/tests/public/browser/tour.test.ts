@@ -6,7 +6,8 @@
 //     thimble's own state (POST /api/tour/seen); a page loaded after that offers nothing; Settings' Take the tour
 //     replays the tour from step 1;
 //   - every step: each cutout lies inside the window, everything an example shows in a cutout lies inside that cutout,
-//     the popover lies inside the window, covers no cutout, and its caret points at the first cutout;
+//     the popover lies inside the window, covers no cutout wherever the window has room for it beside the first, and its
+//     caret points at the first cutout;
 //   - step 1's example sits 8 px or more inside its cutout, which lies inside the chat panel; the orientation's Start
 //     only shows the started state; the labels' transcript and the report scroll under the wheel; a real ⌘-drag on the
 //     example card picks only the words dragged over and its ask box lies inside the cutout; the report shows no check
@@ -86,7 +87,6 @@ const GET: Record<string, unknown> = {
   [`/api/ws/${WS}/concepts`]: [],
   [`/api/ws/${WS}/views`]: [],
   [`/api/ws/${WS}/views/proposals`]: [],
-  [`/api/ws/${WS}/settings`]: SETTINGS,
   [`/api/corpora/${WS}/sources`]: FILES,
   [`/api/ws/${WS}/labels`]: [],
   [`/api/ws/${WS}/labels/presence`]: [],
@@ -106,11 +106,13 @@ interface Server {
   writes: string[]
   /** the telemetry the page sent */
   telemetry: { kind: string; detail?: { label?: string } }[]
+  /** the workspace's settings */
+  settings: typeof SETTINGS
 }
 
 /** A page on the made-up origin, answered by this file: the app, the tour's example view, the workspace's API. */
-async function open(opts: { W: number; H: number; dpr?: number; chat?: number; seen?: boolean }): Promise<{ page: Page; server: Server; close: () => Promise<void> }> {
-  const server: Server = { seen: !!opts.seen, writes: [], telemetry: [] }
+async function open(opts: { W: number; H: number; dpr?: number; chat?: number; seen?: boolean; hideChat?: boolean }): Promise<{ page: Page; server: Server; close: () => Promise<void> }> {
+  const server: Server = { seen: !!opts.seen, writes: [], telemetry: [], settings: { ...SETTINGS, hide_chat: !!opts.hideChat } }
   const ctx = await browser.newContext({ viewport: { width: opts.W, height: opts.H }, deviceScaleFactor: opts.dpr ?? 1 })
   await ctx.addInitScript(
     ({ ws, chat }) => {
@@ -157,6 +159,7 @@ function answer(route: Route, server: Server) {
     if (p === `/api/corpora/${WS}/sources` && url.searchParams.get('depth') === '1') return json(folder(url.searchParams.get('path') ?? ''))
     if (p === `/api/corpora/${WS}/source`) return json(sourcePage(url.searchParams.get('path') ?? 'README.md'))
     if (p === `/api/ws/${WS}/labels/ruler`) return json({ path: url.searchParams.get('path') ?? '', total: 3, bins: 400, labels: [] })
+    if (method === 'GET' && p === `/api/ws/${WS}/settings`) return json(server.settings)
     if (method === 'GET' && p in GET) return json(GET[p])
     if (method === 'PUT' && p === `/api/ws/${WS}/render/theme`) return json({ paper: 'warm', accent: 'iris' })
     if (method === 'POST' && p === `/api/ws/${WS}/telemetry`) return json({ recorded: 1 }, 201)
@@ -239,11 +242,19 @@ async function measure(page: Page, label: string) {
   })
   const p = g.pop
   assert.ok(p && p.x >= -0.5 && p.y >= -0.5 && p.x + p.w <= vw + 0.5 && p.y + p.h <= vh + 0.5, `${label}: the popover lies inside the window ${JSON.stringify(p)}`)
-  g.holes.forEach((h: { x: number; y: number; w: number; h: number }, k: number) => {
-    const w = Math.min(p.x + p.w, h.x + h.w) - Math.max(p.x, h.x),
-      ht = Math.min(p.y + p.h, h.y + h.h) - Math.max(p.y, h.y)
-    assert.ok(w <= 1 || ht <= 1, `${label}: the popover covers cutout ${k} (${Math.round(w)} x ${Math.round(ht)}px)`)
-  })
+  // the popover covers no cutout, unless the cutouts leave it no free place: then no place beside the first cutout, on any
+  // side and kept inside the window, would cover less
+  type B = { x: number; y: number; w: number; h: number }
+  const cover = (q: { x: number; y: number }) =>
+    g.holes.reduce((a: number, h: B) => a + Math.max(0, Math.min(q.x + p.w, h.x + h.w) - Math.max(q.x, h.x)) * Math.max(0, Math.min(q.y + p.h, h.y + h.h) - Math.max(q.y, h.y)), 0)
+  const now = cover(p)
+  if (now > 1 && g.holes[0]) {
+    const h0: B = g.holes[0]
+    const clamp = (x: number, y: number) => ({ x: Math.max(12, Math.min(vw - p.w - 12, x)), y: Math.max(12, Math.min(vh - p.h - 12, y)) })
+    const places = [clamp(h0.x + h0.w + 14, p.y), clamp(h0.x - 14 - p.w, p.y), clamp(p.x, h0.y + h0.h + 14), clamp(p.x, h0.y - 14 - p.h)]
+    const least = Math.min(...places.map(cover))
+    assert.ok(now <= least + 1, `${label}: the popover covers ${Math.round(now)}px² of the cutouts where ${Math.round(least)}px² was possible`)
+  }
   if (g.caret && g.holes[0]) {
     const h = g.holes[0],
       c = { x: g.caret.x + g.caret.w / 2, y: g.caret.y + g.caret.h / 2 }
@@ -563,6 +574,21 @@ test('Settings’ Take the tour replays the tour from step 1, without the welcom
     await page.keyboard.press('Escape')
     await sleep(400)
     assert.equal(await page.$('.tour-root'), null, 'Esc closes the tour')
+  } finally {
+    await close()
+  }
+}, 60_000)
+
+test('with the chat off the tour leaves out its three chat steps and starts on Files, without In the meantime', async () => {
+  const { page, close } = await open({ W: 1440, H: 900, hideChat: true })
+  try {
+    await page.waitForSelector('.tour-pop.tour-welcome', { timeout: 20000 })
+    await page.click('.tour-pop [data-tour="begin"]')
+    await onStep(page, 1, 'Files')
+    assert.equal((await state(page))!.total, 7)
+    assert.equal(await body(page), 'The files browser exposes global views on the corpus.', 'no orientation to wait for')
+    await measure(page, 'chat off 1')
+    assert.deepEqual(await buttons(page), ['skip', 'next'])
   } finally {
     await close()
   }

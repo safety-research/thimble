@@ -16,7 +16,7 @@ export interface RunOptions extends Pick<StartOptions, 'showTab' | 'onEnd'> {
 
 export function runTour(o: RunOptions): Tour {
   tour ??= createTour(snaps as Snaps)
-  const steps = tourSteps(isMacPlatform() ? '⌘' : 'Ctrl').filter((s) => o.chat || !s.needsChat)
+  const steps = tourSteps(isMacPlatform() ? '⌘' : 'Ctrl', o.chat)
   tour.start(steps, { welcome: o.welcome, replay: !o.welcome, showTab: o.showTab, onEnd: o.onEnd })
   return tour
 }
