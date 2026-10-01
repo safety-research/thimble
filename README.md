@@ -72,6 +72,8 @@ Type `/thimble` to start the thimble server and print the dashboard URL. A plain
 | `thimble purge <id>... [-y] [--dry-run]` | delete workspaces or archived runs by id and print what was deleted (`--dry-run` only shows what would go); never your data folder or Claude Code's transcripts |
 | `thimble feedback ["<what went wrong>"]` | write a problem report (a zip) and say where to send it; the top bar's bug icon does the same |
 | `thimble revert` | undo the last change thimble's dev agent applied |
+| `thimble extension add <folder\|git URL>` | show what an extension gives, ask, then add it and switch it on |
+| `thimble extension on\|off\|remove <name>`, `thimble extension list` | switch an extension on or off in every workspace, remove it, or list them |
 | `thimble uninstall` | uninstall the package |
 
 ## Requirements
