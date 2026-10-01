@@ -23,7 +23,7 @@ afterEach(() => {
 
 const label = { id: 'k1', name: 'mentions dse', unit: 'record', kind: 'regex', spec: 'dse', labels: ['yes', 'no'], rev: 3, changes: [{ rev: 3, what: 'prompt', text: 'its prompt' }] } as unknown as Concept
 
-const cell = (over: Partial<Cell>): Cell => ({ id: 'c1', title: 'How many runs mention dse?', created_by: 'main', ts: '2026-10-01T00:00:00Z', labels: ['k1'], label_revs: { k1: 3 }, code: 'x = 1', outputs: [], status: 'done', ...over }) as Cell
+const cell = (over: Partial<Cell>): Cell => ({ id: 'c1', title: 'How many runs mention dse?', created_by: 'main', ts: '2026-10-01T00:00:00Z', labels: ['k1'], label_revs: { k1: 3 }, code: 'x = 1', outputs: [], status: 'ok', ...over }) as Cell
 
 const face = (c: Cell) =>
   mount(
@@ -61,12 +61,12 @@ test('a card run again for a changed label shimmers and its tag says why, with n
 })
 
 test('once the run ends the tag is normal, and a card still stale shows its tag in ink, with no button', async () => {
-  let el = await face(cell({ status: 'done', regenerating_for: null }))
+  let el = await face(cell({ status: 'ok', regenerating_for: null }))
   expect(el.querySelector('.canvas-card')!.classList.contains('is-regenerating')).toBe(false)
   expect(await tipOf(el)).toBeNull()
   unmountAll()
   vi.useRealTimers()
-  el = await face(cell({ status: 'done', label_revs: { k1: 2 } }))
+  el = await face(cell({ status: 'ok', label_revs: { k1: 2 } }))
   expect(el.querySelector('.canvas-card')!.classList.contains('is-regenerating')).toBe(false)
   expect(el.querySelector('.bcell-tag')!.classList.contains('is-plain')).toBe(true)
   expect(el.textContent).not.toContain('Regenerate Card')
