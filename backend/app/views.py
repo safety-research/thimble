@@ -104,6 +104,9 @@ SOURCE_MAX = 400_000  # chars of reader.py or view.html a view may hold
 # the checks: sample lines per claimed file, files sampled, keys followed, cited records read per key
 CHECK_LINES, CHECK_FILES, CHECK_KEYS, CHECK_KEY_REFS = 3, 3, 3, 30
 SHOT_TIMEOUT_S, SHOT_STATE_S = 30.0, 30.0  # a headless run's time: the browser's start, then each state's
+# a request of the headless page still unanswered is waited for this long (scripts/view_shot.mjs ANSWER_MS), and the
+# run's time grows by the time its requests take to answer
+ANSWER_WAIT_S = 600.0
 # the view's pane: in a 1440×900 window beside the chat, as it opens and with the Labels pane open beside it, and in a
 # 1920×1080 window as it opens
 PANE_SIZE, PANE_NARROW, PANE_WIDE = (1048, 676), (798, 676), (1528, 856)
@@ -2485,6 +2488,7 @@ async def _shoot_in(work: Path, doc: str, states: list[dict[str, Any]], answer: 
         return failed(f"the headless browser could not start: {e}")
     results: list[dict[str, Any]] | None = None
     launch_error = ""  # the run's own error when the browser did not start
+    answering = [0.0, 0]  # seconds spent answering the page's requests, and the requests being answered now
 
     async def reply(obj: dict[str, Any]) -> None:
         assert proc.stdin is not None
@@ -2511,7 +2515,14 @@ async def _shoot_in(work: Path, doc: str, states: list[dict[str, Any]], answer: 
                 continue
             kind = next((k for k in ("fetch", "marks", "media") if k in msg), None)
             if kind is not None:
-                await reply({"id": msg[kind], **await answer(kind, state_of(msg), msg)})
+                t = time.monotonic()
+                answering[1] += 1
+                try:
+                    got = await answer(kind, state_of(msg), msg)
+                finally:
+                    answering[0] += time.monotonic() - t
+                    answering[1] -= 1
+                await reply({"id": msg[kind], **got})
             elif msg.get("done"):
                 results = list(msg.get("states") or [])
                 if msg.get("error") and not results:
@@ -2520,14 +2531,23 @@ async def _shoot_in(work: Path, doc: str, states: list[dict[str, Any]], answer: 
                 return
 
     limit = SHOT_TIMEOUT_S + SHOT_STATE_S * len(states)
+    talk = asyncio.ensure_future(converse())
+    start = time.monotonic()
+    timed_out = ""
     try:
-        await asyncio.wait_for(converse(), limit)
-    except asyncio.TimeoutError:
-        results = None
-        timed_out = f"the headless page did not finish in {limit:g} s"
-    else:
-        timed_out = ""
+        while not talk.done():
+            left = start + limit + answering[0] - time.monotonic()
+            if left <= 0 and not answering[1]:
+                talk.cancel()
+                results = None
+                timed_out = f"the headless page did not finish in {time.monotonic() - start:.0f} s"
+                break
+            await asyncio.wait({talk}, timeout=max(left, 1.0))
+        if talk.done() and not talk.cancelled():
+            talk.result()
     finally:
+        if not talk.done():
+            talk.cancel()
         with contextlib.suppress(Exception):
             proc.stdin.close()  # type: ignore[union-attr]
         try:

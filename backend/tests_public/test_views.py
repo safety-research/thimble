@@ -808,6 +808,28 @@ async def test_the_headless_page_measures_how_its_text_fits_and_clicks_a_control
     assert len(notes) == 1 and "overlaps other text in 1 place," in notes[0] and "rest of the pane is empty" in notes[0]
 
 
+
+async def test_the_headless_page_waits_for_a_slow_answer_and_its_run_gets_the_time_the_answer_took(ws, inproc, bound,
+                                                                                                monkeypatch):
+    """A view's data call has no time limit, so a fetch the reader takes long to answer is waited for: the run's own
+    time grows by the time its answers take, and the page is measured once the answer is in."""
+    if why := views.build_problem():
+        if os.environ.get("CI") == "true":
+            pytest.fail(why)
+        pytest.skip(why)
+    views.write_view(CORPUS, "threads", reader=THREADS_READER, html=THREADS_HTML, **VIEW)
+    real = views.reader_call
+
+    async def slow(*a, **k):
+        await asyncio.sleep(8)
+        return await real(*a, **k)
+
+    monkeypatch.setattr(views, "reader_call", slow)
+    monkeypatch.setattr(views, "SHOT_TIMEOUT_S", 4.0)
+    monkeypatch.setattr(views, "SHOT_STATE_S", 1.0)
+    (s,) = await views.shoot_states(CORPUS, "threads", [{"open": {}}])
+    assert s["ok"] and s["fetches"] == 1, s["errors"]
+
 # what Playwright's own error says to run, which never reaches a model
 INSTALL_WORDS = re.compile(r"playwright install|npx|download new browsers|Executable doesn't exist|install\.sh", re.I)
 

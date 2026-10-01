@@ -19,8 +19,8 @@
 //                                             a Range request with the bytes it asks for (at most MEDIA_CHUNK)
 // Every other request the page makes is refused, so a view that reaches for the network fails here as it would in the
 // browser. A state is measured when its page has been quiet (no fetch or marks request in flight) for QUIET_MS after
-// `open`, or HARD_MS has passed, and again after each action. One line ends the run: {"done": true, "states": [{ok,
-// errors, fetches, height, refs, records, units, marked, hidden, shown, layout, controls, actions, fonts}]}: `refs` the
+// `open`, or HARD_MS has passed with no request in flight, and again after each action. One line ends the run:
+// {"done": true, "states": [{ok, errors, fetches, height, refs, records, units, marked, hidden, shown, layout, controls, actions, fonts}]}: `refs` the
 // distinct data-anchor refs the page reported, `records` those naming a record (`<path>#L<n>`), `units` those naming
 // one of the view's units (`view:<slug>/<key>`), `marked` the elements carrying a label's mark, `hidden` those the
 // bridge hid or dimmed for the filter, `shown` what is on screen at the end (shownCounts), `layout` how its text fits
@@ -37,6 +37,9 @@ const { chromium } = require('playwright')
 const QUIET_MS = 900
 const MIN_MS = 1200
 const HARD_MS = 25_000
+// a fetch or marks request still unanswered at HARD_MS is waited for this long, since a view's data calls have no time
+// limit (backend views.ANSWER_WAIT_S)
+const ANSWER_MS = 600_000
 const READY_MS = 10_000
 const PAGES_AT_ONCE = 3 // states loaded side by side, each on its own page
 const MEDIA_CHUNK = 4 * 1024 * 1024 // bytes of one Range answer
@@ -520,12 +523,15 @@ async function shootState(browser, opt, doc, state, i) {
     while (!(await page.evaluate(() => window.__ready)) && Date.now() - t0 < READY_MS) await page.waitForTimeout(50)
     const ready = await page.evaluate(() => window.__ready)
     if (!ready) errors.push('the page never said it was ready (the bridge did not load, or a script stopped it)')
-    // until the page has been quiet for QUIET_MS, at least `min` ms after `from`, or HARD_MS after `from`
+    // until the page has been quiet for QUIET_MS, at least `min` ms after `from`, or HARD_MS after `from` with no
+    // request unanswered, or ANSWER_MS after it
     const settle = async (from, min) => {
       lastActivity = Math.max(lastActivity, from)
-      while (Date.now() - from < HARD_MS) {
+      for (;;) {
         await page.waitForTimeout(100)
-        if (inflight === 0 && Date.now() - lastActivity > QUIET_MS && Date.now() - from > min) break
+        const t = Date.now() - from
+        if (inflight === 0 && Date.now() - lastActivity > QUIET_MS && t > min) break
+        if ((t >= HARD_MS && inflight === 0) || t >= ANSWER_MS) break
       }
     }
     await settle(Date.now(), MIN_MS)
@@ -544,7 +550,7 @@ async function shootState(browser, opt, doc, state, i) {
       actions.push({ control: String(want), found: !!how })
       if (how) await settle(Date.now(), QUIET_MS)
     }
-    if (inflight > 0) errors.push(`${inflight} request(s) still unanswered after ${HARD_MS / 1000} s`)
+    if (inflight > 0) errors.push(`${inflight} request(s) still unanswered after ${ANSWER_MS / 1000} s`)
     const fonts = await frame
       .evaluate(async () => {
         await document.fonts.ready
