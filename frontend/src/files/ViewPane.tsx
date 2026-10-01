@@ -2,7 +2,7 @@
 // ref names, with Raw one click away when it reads one file. Under the name, the files it reads (a click lists them, and
 // a file picked opens in Raw), then thimble's notes on the view (ViewChrome): what it leaves out, a line that opens the
 // list of it under the head, and what it derived. A view that fails says so with Raw beside it. While a Files label
-// filter is set, the head shows it as a chip that clears it, since the view keeps only the records the filter keeps. At
+// filter is set, the head shows it as a chip that clears it, with how many records the filter hides in the view. At
 // the head's right end, for a view of one file, Open in (the other views that claim the file shown, and the File
 // browser) and the mode switch, then the mark of the review of the view's pictures (ReviewMark).
 // The pane keeps the version of the view it opened (usePinnedView): a newer one, from a change, the review or the
@@ -47,19 +47,21 @@ interface Props {
   onQuoteMissing?: () => void
   labels: FilesLabels
   onMode?: (title: string) => void
-  /** before the name: the button that shows the hidden Labels sidebar */
+  /** before the name: thimble's own label control while the Labels sidebar is hidden (LabelsLead) */
   lead?: ReactNode
   /** the labels that mark the view's files, which its page lists first */
   first?: ReadonlySet<string>
-  /** open the new-label prompt in the Labels sidebar beside the view */
-  onNewLabel?: () => void
+  /** open the label editor in the Labels sidebar beside the view, on a label or on a new one with null */
+  onEditLabel?: (id: string | null) => void
+  /** whether the view's page shows label controls of its own */
+  onLabelControls?: (on: boolean) => void
   /** the card the view was opened from and its arguments (a card type's Open as view) */
   query?: ViewQuery
   /** the view dropped them */
   onClearQuery?: () => void
 }
 
-export function ViewPane({ ws, view, path, picked, kind, targetRef, quote, onQuoteMissing, labels, onMode, lead, first, onNewLabel, query, onClearQuery }: Props) {
+export function ViewPane({ ws, view, path, picked, kind, targetRef, quote, onQuoteMissing, labels, onMode, lead, first, onEditLabel, onLabelControls, query, onClearQuery }: Props) {
   const [mode, setMode] = useState<'view' | 'raw'>('view')
   // a file or line picked in the head, which Raw shows in place of `path`
   const [rawAt, setRawAt] = useState<{ path: string; ref?: string } | null>(null)
@@ -78,15 +80,18 @@ export function ViewPane({ ws, view, path, picked, kind, targetRef, quote, onQuo
         toggle(id)
       },
       setColour,
-      create: onNewLabel,
+      edit: onEditLabel,
     }),
-    [byId, toggle, setFocus, setColour, onNewLabel],
+    [byId, toggle, setFocus, setColour, onEditLabel],
   )
+  // how many records the label filter hides in the view, null while there is no filter or no exact count yet
+  const [hidden, setHidden] = useState<number | null>(null)
   useEffect(() => {
     setMode('view')
     setFailure(null)
     setRawAt(null)
   }, [view.slug, targetRef])
+  useEffect(() => setHidden(null), [view.slug, pin.pinned])
   const reload = () => {
     track('view-open', { target: `view:${view.slug}`, detail: { from: 'view-pane', to: 'reload' } })
     setFailure(null)
@@ -129,6 +134,11 @@ export function ViewPane({ ws, view, path, picked, kind, targetRef, quote, onQuo
         </div>
         {pin.stale && mode === 'view' && <ViewUpdated onReload={reload} className="view-pane-updated" />}
         {filter && filterLabel && <FilterChip concept={filter.concept} name={filterLabel.name} value={filter.value} className="view-pane-filter" onClear={() => void api.deleteFilter(ws, 'files').catch(() => undefined)} />}
+        {filter && filterLabel && mode === 'view' && !!hidden && (
+          <span className="view-pane-hidden" title={`Records of this view the filter ${filterLabel.name} · ${filter.value} hides`}>
+            {hidden.toLocaleString()} hidden
+          </span>
+        )}
         {path && oneFile && <OpenIn ws={ws} path={rawAt?.path ?? path} current={view.slug} onOpen={(slug) => bus.emit('openIn', { path: rawAt?.path ?? path, ref: rawAt?.ref ?? targetRef, slug })} />}
         {path && (oneFile || mode === 'raw') && (
           <Segmented
@@ -153,7 +163,7 @@ export function ViewPane({ ws, view, path, picked, kind, targetRef, quote, onQuo
         ) : (
           <>
             {failure && <ViewFailed name={view.name} detail={failure} onRaw={path ? () => pick('raw') : undefined} />}
-            <ViewerFrame key={`${view.slug}:${pin.pinned ?? ''}`} ws={ws} slug={view.slug} version={pin.pinned || undefined} restore={pin.restore} handle={pin.frame} targetRef={targetRef} path={path ?? undefined} pathPicked={picked} title={view.name} labels={labels.on} filter={filter} filterFiles={filter ? labels.presence.get(filter.concept) : undefined} byId={labels.byId} first={first} labelActions={labelActions} onError={setFailure} quote={quote} onQuoteMissing={onQuoteMissing} query={query} onQuery={(p) => !p && onClearQuery?.()} className="view-pane-frame" />
+            <ViewerFrame key={`${view.slug}:${pin.pinned ?? ''}`} ws={ws} slug={view.slug} version={pin.pinned || undefined} restore={pin.restore} handle={pin.frame} targetRef={targetRef} path={path ?? undefined} pathPicked={picked} title={view.name} labels={labels.on} filter={filter} filterFiles={filter ? labels.presence.get(filter.concept) : undefined} byId={labels.byId} first={first} labelActions={labelActions} onHidden={setHidden} onLabelControls={onLabelControls} onError={setFailure} quote={quote} onQuoteMissing={onQuoteMissing} query={query} onQuery={(p) => !p && onClearQuery?.()} className="view-pane-frame" />
           </>
         )}
       </div>

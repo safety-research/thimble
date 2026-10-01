@@ -2045,7 +2045,7 @@
   gap: 2px;
   min-width: 0;
 }
-/* with the Labels sidebar hidden, the button that shows it stands before the view's name */
+/* with the Labels sidebar hidden, thimble's label control that shows it stands before the view's name */
 .view-pane-side-show.btn {
   flex: none;
   margin: -1px -4px 0 -8px;
@@ -2473,6 +2473,14 @@
 .view-pane-filter {
   flex: none;
   align-self: center;
+}
+/* how many of the view's records the label filter hides, beside its chip */
+.view-pane-hidden {
+  flex: none;
+  align-self: center;
+  font: var(--type-ui-sm);
+  color: var(--text-secondary);
+  white-space: nowrap;
 }
 /* a newer version of the view than the one shown (files/viewVersion.tsx): the accent dot, Updated and Reload, quiet,
    in the head beside the mode switch */

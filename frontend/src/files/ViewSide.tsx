@@ -155,9 +155,24 @@ export function useLabelSide(p: LabelSideProps): { pane: ReactNode; card: ReactN
   return { pane, card, resizer }
 }
 
-/** A view in a pane of its own with its Labels sidebar: shown while labels are on or the analyst opened it, with the
- * Labels pane, the edit card and the seam as Files has them beside a view. */
-export function useViewSide(ws: string, view: BuiltView, labels: FilesLabels): { side: ReactNode; card: ReactNode; lead: ReactNode; first?: ReadonlySet<string>; newLabel: () => void } {
+/** thimble's own label control in a view's head while the Labels sidebar is hidden: how many labels are on, and a click
+ * shows the sidebar. A view may draw label controls of its own, but this one is always there. */
+export function LabelsLead({ on, onShow }: { on: number; onShow: () => void }) {
+  return (
+    <Button variant="ghost" size="sm" icon="label" className="view-pane-side-show" aria-label="Show labels" onClick={onShow}>
+      {on ? `${on.toLocaleString()} ${on === 1 ? 'label' : 'labels'} on` : 'Labels'}
+    </Button>
+  )
+}
+
+/** A view in a pane of its own with its Labels sidebar: shown while labels are on or the analyst opened it, unless the
+ * view draws label controls of its own, with the Labels pane, the edit card and the seam as Files has them beside a
+ * view. */
+export function useViewSide(
+  ws: string,
+  view: BuiltView,
+  labels: FilesLabels,
+): { side: ReactNode; card: ReactNode; lead: ReactNode; first?: ReadonlySet<string>; editLabel: (id: string | null) => void; setOwnControls: (on: boolean) => void } {
   const runs = useLabelRuns(ws, labels)
   const [choice, setChoice] = useState<boolean | null>(null)
   const [open, setOpen] = useState(true)
@@ -168,7 +183,9 @@ export function useViewSide(ws: string, view: BuiltView, labels: FilesLabels): {
     const w = readStorage<unknown>(widthKey, TREE.def)
     return typeof w === 'number' && Number.isFinite(w) ? Math.min(TREE.max, Math.max(TREE.min, w)) : TREE.def
   })
-  const shown = choice ?? labels.on.length > 0
+  const [ownControls, setOwnControls] = useState(false)
+  useEffect(() => setOwnControls(false), [view.slug])
+  const shown = choice ?? (labels.on.length > 0 && !ownControls)
   const first = useMemo(() => (view.claims ? viewLabels(labels.all, labels.presence, view.claims) : undefined), [view.claims, labels.all, labels.presence])
   const edit = useCallback((id: string | 'new' | null) => {
     setEditing(id)
@@ -207,11 +224,14 @@ export function useViewSide(ws: string, view: BuiltView, labels: FilesLabels): {
       {parts.resizer}
     </>
   ) : null
-  const lead = shown ? null : <Button variant="icon" size="sm" icon="sidebar" title="Show labels" aria-label="Show labels" className="view-pane-side-show" onClick={() => setChoice(true)} />
-  const newLabel = useCallback(() => {
-    setChoice(true)
-    setOpen(true)
-    edit('new')
-  }, [edit])
-  return { side, card: shown ? parts.card : null, lead, first, newLabel }
+  const lead = shown ? null : <LabelsLead on={labels.on.length} onShow={() => setChoice(true)} />
+  const editLabel = useCallback(
+    (id: string | null) => {
+      setChoice(true)
+      setOpen(true)
+      edit(id ?? 'new')
+    },
+    [edit],
+  )
+  return { side, card: shown ? parts.card : null, lead, first, editLabel, setOwnControls }
 }

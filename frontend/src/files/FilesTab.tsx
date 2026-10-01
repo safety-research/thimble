@@ -33,7 +33,7 @@ import { useFilesLabels, type FilesLabels } from './useLabels'
 import { OpenIn } from './OpenIn'
 import { chooseView, viewPlace, viewValue } from './viewChoice'
 import { ViewPane } from './ViewPane'
-import { useLabelRuns, useLabelSide } from './ViewSide'
+import { LabelsLead, useLabelRuns, useLabelSide } from './ViewSide'
 import type { ViewQuote } from './ViewerFrame'
 import { BROWSER, slugOfKey, useViews, viewKey, ViewsBar, type BuiltView } from './ViewsBar'
 import { markOpened, useOpenAskedViews } from './viewReady'
@@ -196,11 +196,13 @@ export function FilesTab({ ws, active, focused = active }: { ws: string; active:
   const searchRef = useRef<HTMLInputElement>(null)
   const [findAsk, setFindAsk] = useState<FindAsk>({ mode: 'find', n: 0 })
   // Sidebars (shell/dock.tsx) dock only while the body holds them beside the view or reader at a readable width. A
-  // view's Labels sidebar starts hidden and shows while a label is on, until the analyst hides or shows it for the tab's
-  // session; when it cannot dock it lies over the view's left edge. The File browser's sidebar folds to its show button
-  // when it cannot dock.
+  // view's Labels sidebar starts hidden and shows while a label is on, unless the view draws label controls of its own,
+  // until the analyst hides or shows it for the tab's session; when it cannot dock it lies over the view's left edge.
+  // The File browser's sidebar folds to its show button when it cannot dock.
   const dock = useDock(sideWidth)
-  const viewSideOpen = viewSideChoice ?? labels.on.length > 0
+  const [ownControls, setOwnControls] = useState<{ slug: string; on: boolean } | null>(null)
+  const ownControlsOn = !!ownControls?.on && ownControls.slug === slugOfKey(bar)
+  const viewSideOpen = viewSideChoice ?? (labels.on.length > 0 && !ownControlsOn)
   const viewSideOver = viewSideOpen && !dock.docks
   const side = useFoldingSide(dock.docks, sideOpen, setSideOpen)
   const root = folders.store.get('')
@@ -488,12 +490,15 @@ export function FilesTab({ ws, active, focused = active }: { ws: string; active:
   useViewDefaults(ws, shownView, labels)
   // beside a view: the labels that mark its files come first
   const marking = useMemo(() => (shownView?.claims ? viewLabels(labels.all, labels.presence, shownView.claims) : null), [shownView, labels.all, labels.presence])
-  // a view's New label… opens the prompt in the Labels sidebar beside it
-  const newLabel = useCallback(() => {
-    setViewSideChoice(true)
-    setLabelsOpen(true)
-    edit('new')
-  }, [setViewSideChoice, setLabelsOpen, edit])
+  // a view's label controls open the editor, on a label or on a new one, in the Labels sidebar beside it
+  const editLabel = useCallback(
+    (id: string | null) => {
+      setViewSideChoice(true)
+      setLabelsOpen(true)
+      edit(id ?? 'new')
+    },
+    [setViewSideChoice, setLabelsOpen, edit],
+  )
   const fillNew = useCallback((draft: LabelDraft) => {
     setEditing('new')
     setDrafted(draft)
@@ -572,10 +577,9 @@ export function FilesTab({ ws, active, focused = active }: { ws: string; active:
             labels={labels}
             onMode={setMode}
             first={marking ?? undefined}
-            onNewLabel={newLabel}
-            lead={
-              !viewSideOpen && <Button variant="icon" size="sm" icon="sidebar" title="Show labels" aria-label="Show labels" className="view-pane-side-show" onClick={() => setViewSideChoice(true)} />
-            }
+            onEditLabel={editLabel}
+            onLabelControls={(on) => setOwnControls({ slug: shownView.slug, on })}
+            lead={!viewSideOpen && <LabelsLead on={labels.on.length} onShow={() => setViewSideChoice(true)} />}
           />
           {viewSideOpen && labelCard}
         </div>
