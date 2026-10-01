@@ -412,6 +412,8 @@ export function ViewerFrame({ ws, slug, targetRef, path, pathPicked, title, fit,
     hiddenFn.current?.(filtering.current && h.page != null && h.reader != null ? h.page + h.reader : null)
   }
   const filterKey = filter ? `${filter.concept}\n${filter.value}` : ''
+  const filterNow = useRef(filterKey)
+  filterNow.current = filterKey
   useEffect(() => {
     hidden.current.reader = 0
     tellHidden()
@@ -510,6 +512,7 @@ export function ViewerFrame({ ws, slug, targetRef, path, pathPicked, title, fit,
           const id = Number(d.id)
           const c = drawn.current
           const f = { ctrl: new AbortController(), call: `${frameId}-${++callSeq.current}`, view: !c, timer: null as number | null }
+          const askedUnder = filterNow.current
           calls.current.set(id, f)
           if (!c)
             f.timer = window.setInterval(() => {
@@ -522,7 +525,7 @@ export function ViewerFrame({ ws, slug, targetRef, path, pathPicked, title, fit,
             const res = c ? await api.cardTypeRecords(ws, c.type, c.id, d.query) : await api.viewRecords(ws, slug, d.query, version, { call: f.call, signal: f.ctrl.signal })
             if (calls.current.get(id) === f) post({ type: P + 'result', id: d.id, data: res.data })
             const left = 'hidden' in res ? res.hidden : undefined
-            if (!c && left !== undefined && left !== hidden.current.reader) {
+            if (!c && left !== undefined && askedUnder === filterNow.current && left !== hidden.current.reader) {
               hidden.current.reader = typeof left === 'number' ? left : null
               tellHidden()
             }
