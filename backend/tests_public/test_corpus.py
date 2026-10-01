@@ -187,3 +187,42 @@ def test_the_content_search_route_streams_its_lines_and_a_closing_line():
     assert lines[-1]["done"] is True and lines[-1]["complete"] is True
     assert any(x.get("path") == AGENT for x in lines)
     assert client.get(f"{MINI}/sources/grep", params={"q": " "}).status_code == 400
+
+
+def test_a_folder_opened_through_a_symlink_shows_the_path_the_analyst_used(data_tmp, tmp_path):
+    """The registry keeps the folder's real path, and beside it the symlink the analyst opened it by, which the
+    dashboard shows; a path that is not another way to the same folder is not kept, and null clears it."""
+    real = tmp_path / "store" / "village"
+    (real / "logs").mkdir(parents=True)
+    (real / "logs" / "a.jsonl").write_text("{}\n")
+    link = tmp_path / "home" / "village"
+    link.parent.mkdir()
+    link.symlink_to(real)
+    rec = client.post("/api/corpora/register", json={"path": str(link), "exact": True, "shown": str(link)}).json()
+    assert rec["path"] == str(real.resolve()) and rec["shown"] == str(link)
+    row = next(r for r in client.get("/api/corpora").json() if r["name"] == rec["name"])
+    assert row["path"] == str(real.resolve()) and row["shown"] == str(link)
+    again = client.post("/api/corpora/register", json={"path": str(real), "exact": True}).json()
+    assert again["shown"] == str(link), "a registration that does not say keeps the path"
+    other = client.post("/api/corpora/register", json={"path": str(real), "exact": True, "shown": str(tmp_path)}).json()
+    assert "shown" not in other
+    client.post("/api/corpora/register", json={"path": str(real), "exact": True, "shown": str(link)})
+    cleared = client.post("/api/corpora/register", json={"path": str(real), "exact": True, "shown": None}).json()
+    assert "shown" not in cleared
+
+
+def test_the_cli_tells_the_symlink_only_when_the_callers_folder_is_the_corpus(tmp_path, monkeypatch):
+    from app import cli
+
+    real = tmp_path / "store" / "village"
+    (real / "logs").mkdir(parents=True)
+    link = tmp_path / "village-link"
+    link.symlink_to(real)
+    monkeypatch.setenv("THIMBLE_CALLER_CWD", str(link))
+    assert cli.caller_alias(real) == (True, str(link))
+    monkeypatch.setenv("THIMBLE_CALLER_CWD", str(real))
+    assert cli.caller_alias(real) == (True, None)
+    monkeypatch.setenv("THIMBLE_CALLER_CWD", str(link / "logs"))
+    assert cli.caller_alias(real) == (False, None), "main's shell in another folder tells nothing"
+    monkeypatch.delenv("THIMBLE_CALLER_CWD")
+    assert cli.caller_alias(real) == (False, None)

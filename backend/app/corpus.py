@@ -1028,13 +1028,17 @@ def list_corpora() -> list[dict[str, Any]]:
     for rec in config.registered_corpora():
         if rec["name"] in seen:
             continue
-        out.append({"name": rec["name"], "manifest": rec["manifest"], "path": rec["path"], "registered": True})
+        row = {"name": rec["name"], "manifest": rec["manifest"], "path": rec["path"], "registered": True}
+        if rec.get("shown"):
+            row["shown"] = rec["shown"]
+        out.append(row)
     return out
 
 
 class RegisterBody(BaseModel):
     path: str
     exact: bool = False  # register this folder even inside a registered one
+    shown: str | None = None  # the folder as the analyst named it, through a symlink; null clears it, absent keeps it
 
 
 @router.post("/corpora/register", status_code=201)
@@ -1042,8 +1046,9 @@ def register_corpus(body: RegisterBody) -> dict[str, Any]:
     """Register a directory as a corpus: writes the sidecar DATA_DIR/<name>.corpus.json, never into the directory. 400
     for a non-directory. A taken basename gets the next free name (`logs-2`); a path inside a corpus returns that corpus
     unless `exact`."""
+    shown = body.shown if "shown" in body.model_fields_set else config.KEEP_SHOWN
     try:
-        return config.register_corpus(body.path, exact=body.exact)
+        return config.register_corpus(body.path, exact=body.exact, shown=shown)
     except ValueError as e:
         raise HTTPException(400, str(e))
 

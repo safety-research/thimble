@@ -1088,6 +1088,8 @@ export interface CorpusInfo {
   manifest: Manifest
   /** the folder the corpus was opened from */
   path?: string
+  /** the same folder as the analyst named it, through a symlink, which the dashboard shows in place of `path` */
+  shown?: string
 }
 
 export type SourceKind = 'agent' | 'board' | 'events' | 'forge' | 'prompt' | 'text' | 'dir'
