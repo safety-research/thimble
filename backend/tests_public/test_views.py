@@ -1104,6 +1104,11 @@ MARK_PAGES = {  # name: (style, extra attribute on each row, script), and whethe
     "rows with no left padding at the pane's edge": ("body{margin:0} td{padding:4px 4px 4px 0}", "", "", True),
     "the page turns the bar off": ("td{padding:10px} #t tr,#t td{box-shadow:none!important}", "", "", False),
     "rows that draw no colour of their own": ("td{padding:10px}", " data-anchor-unmarked", "", False),
+    "rows that scroll under a sticky header, which are not in view": (
+        "body{margin:0} .wrap{height:400px;overflow:auto} td{height:20px;padding:0 0 0 8px}"
+        " th{position:sticky;top:0;height:60px;background:#fff}", "",
+        "const h = document.getElementById('t').createTHead().insertRow(); h.innerHTML = '<th>post</th><th>by</th>';"
+        " document.querySelector('.wrap').scrollTop = 150", True),
     "rows that draw the label's colour themselves": (
         "td{padding:10px}", " data-anchor-unmarked",
         "const paint = () => { for (const r of document.querySelectorAll('tr')) { const m = thimble.markOf(r.dataset.anchor);"
@@ -1115,7 +1120,8 @@ MARK_PAGES = {  # name: (style, extra attribute on each row, script), and whethe
 async def test_the_checks_look_for_the_label_s_colour_in_a_picture_of_the_page(name, ws, inproc, bound):
     """The checks count a mark only where a picture of the page shows the test label's colour on the record: a bar a
     box hiding overflow would cut is drawn inside the row, and a page that turns the bar off, or an element marked
-    data-anchor-unmarked that draws no colour, fails."""
+    data-anchor-unmarked that draws no colour, fails. A row the list scrolls under a sticky header is not in view, so
+    it is not looked at."""
     if why := views.build_problem():
         if os.environ.get("CI") == "true":
             pytest.fail(why)

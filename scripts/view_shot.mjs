@@ -119,7 +119,13 @@ function markTargets({ marks, record, bar, max, scroll }) {
     let box = body
     if (svg) box = cut({ l: r.left - 4, t: r.top - 4, r: r.right + 4, b: r.bottom + 4 })
     else if (!own) box = cut({ l: r.left - bar - 1, t: r.top, r: r.left + bar + 1, b: r.bottom })
-    const inView = r.right > 0 && r.left < W && r.bottom > 0 && r.top < H
+    // in view where a part of it is left by the boxes that clip it and no other element, such as a sticky header the
+    // list scrolls under, covers that part's centre
+    let inView = body.r - body.l > 1 && body.b - body.t > 1
+    if (inView) {
+      const hit = document.elementFromPoint((body.l + body.r) / 2, (body.t + body.b) / 2)
+      inView = !hit || hit === el || el.contains(hit) || hit.contains(el)
+    }
     list.push({ ref, own, svg, record: RECORD.test(ref), box, body, rgb: rgbOf(colour), inView, el })
   }
   probe.remove()
