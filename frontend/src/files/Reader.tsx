@@ -26,7 +26,7 @@ import { accepts, slugOf, viewValue } from './viewChoice'
 import { hasNotes, useShownLabels, useViewNotes, ViewNotesLine } from './ViewChrome'
 import { ViewerFrame } from './ViewerFrame'
 import { usePinnedView, ViewUpdated } from './viewVersion'
-import { ProposalOption } from './ViewsBar'
+import { DeleteViewConfirm, ProposalOption } from './ViewsBar'
 import { useTypeViewers } from './typeViewers'
 import { errMsg, LaneHead, targetOf, type ViewDef, type ViewProps } from './views/common'
 import { withoutEscapes } from './views/raw'
@@ -817,6 +817,20 @@ function FileReader({ workspace, path, kind, targetRef, lead, end, labels, only,
     setPick(null)
     writeStorage(memoryKey, null)
   }
+  // a file viewer built for the workspace shows × on hover in the modes, which deletes it once confirmed, as the views
+  // bar's × does a corpus view
+  const [removing, setRemoving] = useState<{ slug: string; name: string; at: HTMLElement } | null>(null)
+  const removeViewer = async ({ slug, name }: { slug: string; name: string }) => {
+    setRemoving(null)
+    track('view-dismiss', { target: `view:${slug}` })
+    if (pickedSlug === slug) forgetPick()
+    try {
+      await api.deleteView(workspace, slug)
+      await refreshProposals(workspace)
+    } catch (e) {
+      bus.emit('toast', { text: `Could not delete ${name}. ${(e as Error).message}`, kind: 'error' })
+    }
+  }
   const [dismissed, setDismissed] = useState<string | null>(null)
   const offered = !only && !viewer && types.proposal && types.proposal.slug !== dismissed ? types.proposal : null
   const dismiss = (p: Proposal) => {
@@ -850,7 +864,13 @@ function FileReader({ workspace, path, kind, targetRef, lead, end, labels, only,
   const builtinOptions = builtins.listed.map((v) => ({ value: v.type, label: v.title }))
   const options = [
     ...builtinOptions.filter((o) => o.value !== 'raw'),
-    ...(only ? [] : types.viewers.map((v) => ({ value: viewValue(v.slug), label: v.name }))),
+    ...(only
+      ? []
+      : types.viewers.map((v) => ({
+          value: viewValue(v.slug),
+          label: v.name,
+          ...(v.origin === 'builtin' ? {} : { removeLabel: `Delete ${v.name}`, onRemove: (at: HTMLElement) => setRemoving({ slug: v.slug, name: v.name, at }) }),
+        }))),
     ...builtinOptions.filter((o) => o.value === 'raw'),
   ]
   return (
@@ -867,6 +887,7 @@ function FileReader({ workspace, path, kind, targetRef, lead, end, labels, only,
               <span className="reader-modes">
                 <Segmented label="Mode" size="md" value={viewer ? viewValue(viewer.slug) : view.type} onChange={onPick} options={options} />
                 {offered && <ProposalOption ws={workspace} p={offered} size="md" onDismiss={() => dismiss(offered)} onAccept={forgetPick} />}
+                <DeleteViewConfirm asked={removing} onClose={() => setRemoving(null)} onDelete={() => removing && void removeViewer(removing)} />
               </span>
             )}
           </div>

@@ -1,6 +1,6 @@
-// Viewers for a file type in the File browser: the views whose claims are all extension globs (backend
-// views.file_type_viewer) are modes of the files they claim, and a viewer proposed for the file's type, such as one
-// the orientation suggests, shows beside Raw until it is built.
+// File viewers in the File browser: the views whose unit is "file", or with no unit whose claims are all extension
+// globs (backend views.file_type_viewer), are modes of the files they claim, and a viewer proposed for the file's type,
+// such as one the orientation suggests, shows beside Raw until it is built.
 import { useEffect, useState } from 'react'
 import { api } from '../lib/api'
 import { bus } from '../lib/bus'
