@@ -624,7 +624,7 @@ The takeaway of its card card:{cid} was written for the run before; write it aga
 
 ## apply_label-stale
 
-{cards} read this label before it changed, so each shows its older result. `edit_card` with only the card runs one again on the label as it is now, once its counts are final. Then tell the analyst in a sentence which of them changed.
+{cards} read this label before it changed. Once its counts are final, thimble runs each of them again on the label as it is now, so leave them as they are.
 
 ## show_label-not-files
 

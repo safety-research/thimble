@@ -21,8 +21,11 @@ on the concept), such as a prompt label over the few records a regex or code lab
 The analyst's labels: a label run from the browser gets a card and main hears of it (`labeled`, tell_main) once per
 version. A label that ran before without a card (such as the orientation's) keeps having none.
 Revisions: `rev` counts changes to a label's rows (redefinition, correction, a finished run; note_change). A card that
-read an older revision than the label's is stale (stale_in) and offers Regenerate Card; bring_current reruns labels
-whose rows were made under another definition before such a card runs.
+read an older revision than the label's is stale (stale_in). When a run of a label ends, not stopped, or a moment after
+the analyst's last correction of it (rerun_after_verdicts), thimble runs every card that read it again (rerun_readers),
+and main hears which of them it should write a takeaway for again
+(`rerun`, or inside `label_done`). bring_current reruns labels whose rows were made under another definition before a
+card runs on POST .../regenerate.
 """
 from __future__ import annotations
 
@@ -2991,6 +2994,8 @@ async def run_apply(c: str, concept_id: str, paths: list[str] | None = None, lim
             _progress(c, concept_id, status="error", message=msg, eta_s=None, phase=None)
             raise HTTPException(502, f"apply failed: {msg}") from e
     _notify(c, concept_id, "applied")
+    if not summary["stopped"]:
+        _start_reruns(c, concept_id)
     return summary
 
 
@@ -3153,6 +3158,10 @@ async def cancel_workspace(c: str) -> list[str]:
             except (asyncio.CancelledError, Exception):  # noqa: BLE001
                 pass
         out.append(key[1])
+    for key in [k for k in list(_reruns) if k[0] == c]:
+        _reruns.pop(key).cancel()
+    for key in [k for k in list(_verdict_timers) if k[0] == c]:
+        _verdict_timers.pop(key).cancel()
     for table in (_runs, _cancels, _locks):
         for key in [k for k in list(table) if k[0] == c]:
             table.pop(key, None)
@@ -3842,45 +3851,161 @@ def show_concept(c: str, id_or_name: str, on: bool | None, values: list[str] | N
 
 LABELED_KIND = "labeled"  # the channel event that tells main of a label the analyst ran from the browser (prompts/main.md)
 LABEL_DONE_KIND = "label_done"  # the channel event that tells main a label it ran finished after its call returned
+RERUN_KIND = "rerun"  # the channel event that tells main which cards thimble ran again because a label they read changed
 _watching: set[asyncio.Task] = set()  # the tasks of tell_when_done, held until they end
+_reruns: dict[tuple[str, str], asyncio.Task] = {}  # (workspace, label id) -> the reruns of its readers after its last run
+_told_in_label_done: set[tuple[str, str]] = set()  # labels whose reruns label_done reports, so no `rerun` event goes
+VERDICT_RERUN_DELAY_S = 2.0  # quiet after the analyst's last verdict on a label before the cards that read it run again
+_verdict_timers: dict[tuple[str, str], asyncio.TimerHandle] = {}  # (workspace, label id) -> its pending rerun_after_verdicts
+RERUN_OUTPUT_CHARS = 1500  # of each card's new output in what main hears of a rerun
 SCOPE_OF_UNIT = {**{u: "files" for u in FILE_UNITS}, "cell": "canvas", "span": "report"}
 
 
-def tell_when_done(c: str, concept_id: str) -> None:
-    """Post `label_done` to main once the label's running apply ends: its counts, its card and the cards that read it
-    while it ran (stale_cards), which main runs again. A run that fails or is stopped posts nothing."""
+def _start_reruns(c: str, concept_id: str) -> None:
+    key = (c, concept_id)
+    task = asyncio.get_running_loop().create_task(rerun_readers(c, concept_id), name=f"thimble-rerun-{concept_id}")
+    _reruns[key] = task
+
+
+def rerun_after_verdicts(c: str, concept_id: str) -> None:
+    """Run the cards that read the label again (rerun_readers) VERDICT_RERUN_DELAY_S after the analyst's last verdict on
+    it, so a burst of corrections reruns each card once. While the label runs or its readers are running again it waits
+    for them to end. Callable from a sync route's worker thread. Never raises."""
+    key = (c, concept_id)
+
+    def arm() -> None:
+        if (old := _verdict_timers.pop(key, None)) is not None:
+            old.cancel()
+        _verdict_timers[key] = asyncio.get_running_loop().call_later(VERDICT_RERUN_DELAY_S, fire)
+
+    def fire() -> None:
+        _verdict_timers.pop(key, None)
+        if running_apply(c, concept_id) or ((task := _reruns.get(key)) is not None and not task.done()):
+            arm()
+            return
+        _start_reruns(c, concept_id)
+
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        loop = _loop
+        if loop is not None and loop.is_running() and not loop.is_closed():
+            loop.call_soon_threadsafe(arm)
+        return
+    arm()
+
+
+async def rerun_readers(c: str, concept_id: str) -> list[dict]:
+    """Run every card that read the label at an older revision again (notebook.rerun_on_labels), one after another, then
+    tell main of those whose takeaway its new output left stale or that failed: in `label_done` when tell_when_done waits
+    for this label, else in a `rerun` event. Where no session hears it, the card check brings those takeaways up to date
+    when it is on. Returns the cards it tells of, as stored. Never raises."""
+    from . import notebook
+
+    ws = _ws(c)
+    told: list[dict] = []
+    try:
+        concept = read_concept(ws, concept_id)
+        if concept is None:
+            return []
+        for cell in await asyncio.to_thread(stale_cards, ws, concept):
+            try:
+                ran = await notebook.rerun_on_labels(c, str(cell["id"]))
+            except Exception:  # noqa: BLE001 — the other cards still run
+                log.exception("%s: card:%s did not run again after label %s changed", c, cell.get("id"), concept_id)
+                continue
+            if ran is not None:
+                told.append(ran)
+        told = [x for x in (notebook.get_cell(c, str(r["id"])) for r in told)
+                if x and (x.get("status") != "ok" or x.get(notebook.TAKEAWAY_STALE))]
+        if told and (c, concept_id) not in _told_in_label_done and not _post_rerun(c, concept, told):
+            _check_takeaways(c, told)
+    except Exception:  # noqa: BLE001 — a background task
+        log.exception("%s: the reruns after label %s changed failed", c, concept_id)
+    return told
+
+
+def rerun_text(c: str, cards: list[dict]) -> str:
+    """What main hears of cards thimble ran again: each card's ref and question, then its new output or its error."""
+    from . import notebook
+
+    ws = _ws(c)
+    parts = []
+    for cell in cards:
+        out = notebook.outputs_text(notebook.hydrate_outputs(ws, cell.get("outputs")), RERUN_OUTPUT_CHARS)
+        state = "failed" if cell.get("status") != "ok" else "its output now"
+        parts.append(f"[[card:{cell['id']}]] {cell.get('title') or ''}, {state}:\n{out}")
+    return "\n\n".join(parts)
+
+
+def _post_rerun(c: str, concept: dict, cards: list[dict]) -> bool:
     from . import channel
+
+    text = (f"thimble ran these cards again since label {concept['name']} [[concept:{concept['id']}]] changed.\n\n"
+            + rerun_text(c, cards))
+    try:
+        channel.post(c, RERUN_KIND, {"text": text, "name": concept["name"], "ref": f"concept:{concept['id']}",
+                                     "cards": ", ".join(f"card:{x['id']}" for x in cards)})
+    except HTTPException as e:
+        log.info("%s: the %s event for concept:%s was not posted: %s", c, RERUN_KIND, concept["id"], e.detail)
+        return False
+    return True
+
+
+def _check_takeaways(c: str, cards: list[dict]) -> None:
+    from . import card_check, checkstore
+
+    if not (card_check.enabled() and card_check.auto(c)):
+        return
+    for cell in cards:
+        if cell.get("status") == "ok":
+            rec = checkstore.current(c, str(cell["id"])) or {}
+            card_check.start(c, str(cell["id"]), str(rec.get("author") or card_check.MAIN))
+
+
+def tell_when_done(c: str, concept_id: str) -> None:
+    """Post `label_done` to main once the label's running apply ends and thimble ran the cards that read it again
+    (rerun_readers): its counts, its card, and those cards whose takeaway is stale or that failed, with their new output.
+    A run that fails or is stopped posts nothing."""
+    from . import channel
+
+    key = (c, concept_id)
+    _told_in_label_done.add(key)
 
     async def watch() -> None:
         try:
-            summary = await wait_apply(c, concept_id, float("inf"))
-        except HTTPException:
-            return
-        if summary.get("stopped"):
-            return
+            try:
+                summary = await wait_apply(c, concept_id, float("inf"))
+            except HTTPException:
+                return
+            if summary.get("stopped"):
+                return
+            reran = await asyncio.shield(task) if (task := _reruns.get(key)) is not None else []
+        finally:
+            _told_in_label_done.discard(key)
         ws = _ws(c)
         concept = read_concept(ws, concept_id)
         if concept is None:
             return
-        stale = await asyncio.to_thread(stale_cards, ws, concept)
         counts = await asyncio.to_thread(_live_counts, ws, concept_id)
         cards = await asyncio.to_thread(_label_cards, ws, concept_id)
         told = ", ".join(f"{v} {n:,}" for v, n in counts.items()) or "no values"
         text = (f"label {concept['name']} [[concept:{concept_id}]] finished: {told}. "
                 + (f"Its card is [[card:{cards[0][1]['id']}]]. " if cards else "")
-                + ("Cards that read it while it ran: " + ", ".join(f"[[card:{x['id']}]]" for x in stale) + "." if stale
-                   else "No card read it while it ran."))
+                + ("thimble ran the cards that read it again, and these need you:\n\n" + rerun_text(c, reran) if reran
+                   else "No card that read it needs you."))
         payload = {"text": text, "name": concept["name"], "ref": f"concept:{concept_id}",
                    "card": f"card:{cards[0][1]['id']}" if cards else None,
-                   "stale": ", ".join(f"card:{x['id']}" for x in stale) or None}
+                   "cards": ", ".join(f"card:{x['id']}" for x in reran) or None}
         try:
             channel.post(c, LABEL_DONE_KIND, payload)
         except HTTPException as e:
             log.info("%s: the %s event for concept:%s was not posted: %s", c, LABEL_DONE_KIND, concept_id, e.detail)
+            _check_takeaways(c, reran)
 
-    task = asyncio.get_running_loop().create_task(watch(), name=f"thimble-label-done-{concept_id}")
-    _watching.add(task)
-    task.add_done_callback(_watching.discard)
+    task_ = asyncio.get_running_loop().create_task(watch(), name=f"thimble-label-done-{concept_id}")
+    _watching.add(task_)
+    task_.add_done_callback(_watching.discard)
 
 
 def tell_main(c: str, concept: dict, card: dict | None) -> bool:
@@ -4176,6 +4301,7 @@ def verdict_route(c: str, concept_id: str, body: VerdictBody) -> dict:
     ws, concept = load_concept(c, concept_id)
     row, concept = record_verdict(ws, concept, body.ref, body.label, body.note)
     _notify(c, concept_id, "changed")  # its revision stepped, so the cards that count by it show they are stale
+    rerun_after_verdicts(c, concept_id)
     out = {"row": row, "calibration": concept["calibration"]}
     if index_building(ws, concept_id):
         out["building"] = True

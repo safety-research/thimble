@@ -241,6 +241,8 @@ def terminal_line(kind: str, words: str, fields: dict[str, Any]) -> str:
         line = f"card types: {fields.get('types') or ''}"
     elif kind == "label_done":
         line = f"label finished: {fields.get('name') or ''}"
+    elif kind == "rerun":
+        line = f"cards run again: label {fields.get('name') or ''} changed"
     elif kind == "written":
         line = f"the {fields.get('doc') or 'document'} writer ended"
     elif kind == "checked":

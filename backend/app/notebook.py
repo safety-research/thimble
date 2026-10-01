@@ -328,6 +328,9 @@ DATA_KINDS = ("example", "note", "label", "custom")  # carry a payload
 DEFAULT_KIND = "code"
 KEPT_ARGS = "kept_args"  # a card type's call arguments Keep set, which the card check gives back as they are
 TAKEAWAY_STALE = "takeaway_stale"  # the takeaway was written before the card's last run changed its outputs
+# while thimble runs a card again because labels it read changed (rerun_on_labels), those label ids; gone when the
+# run ends
+REGENERATING_FOR = "regenerating_for"
 # the payload key per data shape; a diagram or a timeline without code carries a dataset
 PAYLOAD_KEYS = {"example": "refs", "note": "text", "label": "concept", "custom": "html", "diagram": "dataset", "timeline": "dataset"}
 # The canvas layout fields. A group's `pos` {x, y} is on the board for a root group, inside its parent's frame for a
@@ -890,6 +893,7 @@ def mark_interrupted_cells(root: Path | None = None) -> list[str]:
             if cell.get("status") != "running":
                 continue
             cell.update(status="error", outputs=[_error_bundle(INTERRUPTED_ENAME, INTERRUPTED_EVALUE)], ts=_now())
+            cell.pop(REGENERATING_FOR, None)
             changed = True
             marked.append(f"{p.parent.parent.name}/{p.stem}/{cell.get('id')}")
         if changed:
@@ -2612,6 +2616,7 @@ async def _execute_cell(workspace: str, nb: dict, cell: dict, kernel: str | None
     stored = bound_outputs(ws, cell["id"], outputs, fresh=True)
     target.update(outputs=stored, exec_count=exec_count, status=status, ts=_now(),
                   duration_s=round(duration, 3), labels=labels, label_revs=revs)
+    target.pop(REGENERATING_FOR, None)
     if reads is not None:
         target["reads"] = reads["reads"]
         if reads["n"] > len(reads["reads"]):
@@ -2812,6 +2817,10 @@ async def edit_and_run(workspace: str, nb_id: str, cell_id: str, code: str, *, b
         cell["kind"] = kind
     if changed:
         cell.setdefault("edited", []).append({"by": by, "ts": _now()})
+    if not changed and (live := _label_reruns.get((workspace, cell_id))) is not None:
+        rerun = await asyncio.shield(live)
+        if rerun is not None:
+            return dict(rerun)
     kept = "" if changed else str(cell.get("takeaway") or "").strip()
     before = outputs_text(hydrate_outputs(_ws(workspace), cell.get("outputs"))) if kept else ""
     if not kept:
@@ -2825,6 +2834,58 @@ async def edit_and_run(workspace: str, nb_id: str, cell_id: str, code: str, *, b
         write_notebook(_ws(workspace), nb)
         _emit(workspace, cell)
     return dict(full)  # a copy: the stored cell is the cached object
+
+
+# Each card's reruns for changed labels run one at a time, and the run under way is held here so that an unchanged
+# edit_card made meanwhile takes its result rather than running the card a second time.
+_label_rerun_locks: dict[tuple[str, str], asyncio.Lock] = {}
+_label_reruns: dict[tuple[str, str], asyncio.Future] = {}
+RERUN_POLL_S = 0.5  # how often rerun_on_labels looks whether a run of the card already under way has ended
+
+
+async def rerun_on_labels(workspace: str, cell_id: str) -> dict | None:
+    """Run a card again because labels it read changed since its run (concepts.stale_in), with its code as it is. While
+    it runs the card has REGENERATING_FOR, those labels' ids, and its `label_revs` already name their revisions now, so
+    it no longer counts as stale. The takeaway stays, marked TAKEAWAY_STALE when the outputs' text changed. A run of
+    the card already under way is waited for first, and nothing runs when the card is current after it, is locked or
+    gone, or reads a label still running (that run's end reruns it). Returns the card with complete outputs, or None
+    when nothing ran."""
+    from . import concepts  # noqa: PLC0415 — concepts imports this module
+
+    key = (workspace, cell_id)
+    ws = _ws(workspace)
+    async with _label_rerun_locks.setdefault(key, asyncio.Lock()):
+        while True:
+            hit = _locate(ws, cell_id)
+            if hit is None or not runnable(hit[1]) or hit[1].get("locked") is True:
+                return None
+            nb, cell = hit
+            read = {cid: k for cid in cell.get("label_revs") or {} if (k := concepts.read_concept(ws, str(cid)))}
+            stale = concepts.stale_in(cell, read)
+            if not stale or any(concepts.running_apply(workspace, str(cid)) for cid in cell.get("labels") or []):
+                return None
+            if cell.get("status") != "running":
+                break
+            await asyncio.sleep(RERUN_POLL_S)
+        cell[REGENERATING_FOR] = sorted(stale)
+        cell["label_revs"] = {**cell["label_revs"], **{cid: int(read[cid].get("rev") or 0) for cid in stale}}
+        kept = str(cell.get("takeaway") or "").strip()
+        before = outputs_text(hydrate_outputs(ws, cell.get("outputs"))) if kept else ""
+        live = asyncio.get_running_loop().create_future()
+        _label_reruns[key] = live
+        full = None
+        try:
+            _, full = await _execute_cell(workspace, nb, cell)
+            after = _locate(ws, cell_id)
+            if after is not None and kept and outputs_text(full.get("outputs") or []) != before:
+                after[1][TAKEAWAY_STALE] = True
+                full = {**full, TAKEAWAY_STALE: True}
+                write_notebook(ws, after[0])
+                _emit(workspace, after[1])
+        finally:
+            _label_reruns.pop(key, None)
+            live.set_result(full)
+        return dict(full)
 
 
 # ----------------------------------------------------------------------------------------------------------
