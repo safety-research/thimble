@@ -778,3 +778,16 @@ def test_shipping_leaves_a_folder_used_in_place_alone(corpus, tmp_path, monkeypa
     (ships / "video" / "reports" / "video" / "report.md").write_text("A newer form.\n")
     assert extensions.ship() == []
     assert extensions.linked("video") and (mine / "reports" / "video" / "report.md").read_text() != "A newer form.\n"
+
+
+def test_an_orientation_counts_as_run_only_with_the_thread_a_follow_up_resumes(corpus):
+    """Settings offers Run now only where a follow-up can reach the orientation: its record names a session and a
+    thread, and the thread is there (orient_session._chat_of)."""
+    from app import agents
+
+    run = config.workspace_dir(CORPUS) / "orient" / "run.json"
+    run.parent.mkdir(parents=True, exist_ok=True)
+    write_json(run, {"session": "s-1", "chats": {"orient": "orient-1"}})
+    assert not extensions.orientation_ran(CORPUS)
+    agents.write_meta(CORPUS, {"id": "orient-1", "kind": "agent", "role": "orient"})
+    assert extensions.orientation_ran(CORPUS)
