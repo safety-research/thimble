@@ -47,7 +47,29 @@ FIXTURES = {
     # a pretty-printed document whose last message sits on one line of its own is still read whole
     "pretty.json": ('{\n  "messages": [\n    {\n      "role": "user",\n      "content": "hi"\n    },\n'
                     '    {"role": "assistant", "content": "hello"}\n  ]\n}\n', "json"),
+    "cc-export.txt": ("╭────────────────────────────╮\n│ ✻ Welcome to Claude Code!  │\n╰────────────────────────────╯\n\n"
+                      "> Why does the nightly build fail?\n\n⏺ I'll read the log.\n\n⏺ Bash(tail ci.log)\n  ⎿  1 failed\n\n"
+                      "⏺ The groupby test drops the NaN key.\n\n> Draft a fix.\n\n⏺ Done, with a test.\n", "text"),
+    ".aider.chat.history.md": ("\n# aider chat started at 2026-09-01 10:00:00\n\n> Aider v0.60.0\n> Main model: m\n\n"
+                               "#### Why does the nightly build fail?\n\nThe groupby test drops the NaN key.\nIt started with the patch.\n\n"
+                               "#### Draft a fix.\n#### Keep it small.\n\nDone, with a test.\n\n> Applied edit to groupby.py\n", "text"),
+    "rollout.jsonl": ("\n".join(json.dumps(x) for x in [
+        {"timestamp": "2026-09-01T10:00:00Z", "type": "session_meta", "payload": {"id": "s"}},
+        {"timestamp": "2026-09-01T10:00:01Z", "type": "response_item",
+         "payload": {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "Why does it fail?"}]}},
+        {"timestamp": "2026-09-01T10:00:02Z", "type": "response_item", "payload": {"type": "reasoning", "summary": []}},
+        {"timestamp": "2026-09-01T10:00:03Z", "type": "response_item", "payload": {"type": "function_call", "name": "shell"}},
+        {"timestamp": "2026-09-01T10:00:04Z", "type": "response_item", "payload": {"type": "function_call_output", "output": "x"}},
+        {"timestamp": "2026-09-01T10:00:05Z", "type": "response_item",
+         "payload": {"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "The NaN key."}]}},
+        {"timestamp": "2026-09-01T10:00:06Z", "type": "event_msg", "payload": {"type": "token_count"}}]) + "\n", "messages"),
+    "langchain.jsonl": ("\n".join(json.dumps({"type": "human" if r == "user" else "ai", "data": {"content": t}}) for r, t in LINES)
+                        + "\n", "messages"),
+    "tagged.log": ("".join(f"2026-09-01 10:0{i}:00 [{r}] {t.splitlines()[0]}\n" for i, (r, t) in enumerate(LINES)), "text"),
     # not transcripts
+    "service.log": ("2026-09-01 10:00:00 [INFO] started\n2026-09-01 10:00:05 [WARN] slow\n2026-09-01 10:01:00 [INFO] done\n", None),
+    "quotes.md": ("# Notes\n\n> a quote\n\nSome text.\n\n> another quote\n\n> a third\n", None),
+    "guide.md": ("# Guide\n\n#### Install\n\nrun it\n\n#### Usage\n\nuse it\n\n#### Notes\n\nmore\n", None),
     "notes.md": ("# Notes\n\nNote: slow.\n\n## Plan\n\n- fix\n\nWarning: check.\n\nname: x\nversion: 2\n", None),
     "prices.csv": ("id,price,qty\n1,2,3\n4,5,6\n", None),
     "config.json": (json.dumps({"name": "x", "version": "1", "scripts": {"a": "b"}}, indent=2), None),
@@ -181,10 +203,28 @@ def test_the_turns_of_whole_file_json_transcripts(chats):
     assert client.get(f"{CHATS}/source/turns", params={"path": "../x.json"}).status_code == 400
 
 
-def test_a_json_file_too_large_to_parse_is_refused(chats, monkeypatch):
-    monkeypatch.setattr(transcripts, "JSON_MAX_BYTES", 10)
-    r = client.get(f"{CHATS}/source/turns", params={"path": "logs/eval.json"})
-    assert r.status_code == 413
+def test_a_chat_export_larger_than_the_sniff_s_head_is_offered_transcript_and_read_whole(chats):
+    """An export is judged by its head, whatever its size, and its turns are read from the whole file."""
+    convs = [{"uuid": f"c{i}", "name": f"Chat {i}", "chat_messages": [
+        {"sender": "human" if r == "user" else "assistant", "text": f"{t} ({i})", "created_at": "2026-09-01T10:00:00Z"}
+        for r, t in LINES]} for i in range(3000)]
+    big = chats / "logs" / "conversations.json"
+    big.write_text(json.dumps(convs))
+    assert big.stat().st_size > 2 * transcripts.HEAD_BYTES
+    assert transcripts.sniff(big, "logs/conversations.json") == {"format": "json", "score": transcripts.STRONG}
+    page = client.get(f"{CHATS}/source/turns", params={"path": "logs/conversations.json", "start": 11996}).json()
+    assert page["total"] == 12000 and page["n_groups"] == 3000 and page["turns"][-1]["text"] == "Done, with a test. (2999)"
+
+
+def test_the_turns_of_other_tools_chat_logs(chats):
+    """Claude Code's /export and aider's chat history start a turn at each prompt and each reply."""
+    def speakers(name):
+        page = client.get(f"{CHATS}/source", params={"path": f"logs/{name}"}).json()
+        return [r["meta"]["turn"]["speaker"] for r in page["records"] if r["meta"].get("turn")]
+
+    assert speakers("cc-export.txt") == ["User", "Claude", "Claude", "Claude", "User", "Claude"]
+    assert speakers(".aider.chat.history.md") == ["Aider", "User", "Assistant", "User", "Assistant", "Aider"]
+    assert transcripts.sniff(chats / "logs" / "langchain.jsonl", "logs/langchain.jsonl")["score"] == transcripts.STRONG
 
 
 def test_the_pdf_route_serves_the_file_for_the_browsers_viewer(chats):
@@ -281,12 +321,6 @@ def test_the_sniff_says_where_line_records_keep_their_turns(chats):
     assert stream["format"] == "stream" and stream["lines"] and stream["keys"]["text"] == "message.content"
     log = sniff("app.log", FIXTURES["messages.jsonl"][0])
     assert log["format"] == "messages" and log["lines"] and log["keys"] == {"speaker": "role", "text": "content"}
-
-
-def test_a_whole_json_file_too_large_to_parse_is_not_offered_transcript(chats, monkeypatch):
-    monkeypatch.setattr(transcripts, "JSON_MAX_BYTES", 10)
-    assert transcripts.sniff(chats / "logs" / "eval.json", "logs/eval.json") is None
-    assert transcripts.sniff(chats / "logs" / "sharegpt.jsonl", "logs/sharegpt.jsonl")["format"] == "conversations"
 
 
 def test_markdown_quoting_an_example_exchange_keeps_rendered_first(chats):

@@ -4,7 +4,7 @@ sniff(path, rel) reads only the head of one file (HEAD_BYTES) and answers whethe
 in any format: a Claude Code stream, JSON lines of messages or of whole conversations, a JSON file holding message lists
 (a chat export, an eval log, a plain list of messages), a CSV or TSV file with a speaker column and a text column, or a
 text or markdown chat log whose lines start turns (`User: …`, `**Assistant:** …`, `[10:32] alice: …`, `<bob> …`,
-`## Human`). The answer is kept per path while its size and mtime_ns stay the same, so the File browser asks on every
+`## Human`, `2026-09-01 10:00 [user] …`, Claude Code's /export with `> ` and `⏺ `, aider's chat history). The answer is kept per path while its size and mtime_ns stay the same, so the File browser asks on every
 open and no corpus is walked. A false positive costs one more mode beside Raw, so the rules are lenient.
 
 The answer, or None:
@@ -19,7 +19,7 @@ A score of STRONG makes Transcript the file's first mode; WEAK only offers it.
 
 JSON lines are shown from the records the File browser pages; parse_turns() parses a whole-file JSON transcript into
 turns, each with the line of the file it stands on, for the Transcript mode to page through: GET
-/corpora/{c}/source/turns. A whole-file JSON past JSON_MAX_BYTES is not offered Transcript.
+/corpora/{c}/source/turns. A whole-file JSON of any size is offered Transcript; its turns are parsed off the event loop.
 
 turn_of(line, style) reads one line of a text chat log: who speaks, when, and where the words start.
 """
@@ -44,7 +44,6 @@ TEXT_HEAD_LINES = 400  # non-empty lines of a text file's head the sniff looks a
 JSONL_HEAD_LINES = 60
 STRONG = 0.95
 WEAK = 0.5
-JSON_MAX_BYTES = 64 * 1024 * 1024  # the largest file turns() parses whole
 TURN_TEXT_MAX = 20_000  # characters of one turn's text a page carries
 TURNS_PAGE_MAX = 500
 SNIFF_CACHE_MAX = 4096
@@ -58,6 +57,9 @@ SPEAKER_KEYS = ("role", "speaker", "sender", "author", "from", "user", "username
 WEAK_SPEAKER_KEYS = ("name", "user_name", "editor", "label", "agent")
 TEXT_KEYS = ("content", "text", "message", "body", "value", "parts", "utterance", "msg", "change_summary")
 TIME_KEYS = ("timestamp", "ts", "time", "created_at", "create_time", "date", "datetime", "sent_at", "created")
+# keys whose value names who speaks only when it is a role word, such as LangChain's {"type": "human", "data": {...}}
+ROLE_TYPE_KEYS = ("type", "role", "kind")
+WRAP_KEYS = ("message", "data", "msg", "payload")  # where a record nests its message (payload: Codex CLI's logs)
 TITLE_KEYS = ("title", "name", "subject", "channel", "topic", "thread_title", "id", "uuid")
 LIST_KEYS = ("messages", "chat_messages", "conversation", "conversations", "turns", "dialogue", "dialog", "chat",
              "history", "utterances", "transcript", "thread", "replies")
@@ -97,8 +99,17 @@ STYLES: list[tuple[str, re.Pattern[str]]] = [
     ("clock-name", re.compile(rf"^\(?(?P<time>{_CLOCK})\)?\s+[-–]?\s*(?P<speaker>{_NAME}):\s")),
     ("name-clock", re.compile(rf"^(?P<speaker>{_NAME})\s*[(\[](?P<time>{_CLOCK})[)\]]\s*:?\s*")),
     ("slack", re.compile(rf"^(?P<speaker>{_NAME})\s{{2,}}(?P<time>{_CLOCK})\s*$")),
+    ("tagged", re.compile(rf"^(?:(?P<time>{_DATE}[ T]{_CLOCK}\S*)\s+)?\[(?P<speaker>{_NAME})\]:?\s")),
+    ("cc", re.compile(r"^(?P<mark>[>⏺●])\s(?=\S)")),
+    ("aider", re.compile(r"^(?P<mark>####)\s")),
     ("colon", re.compile(rf"^\s*(?:>\s*)?(?P<speaker>{_NAME})\s*:(?:\s+|$)")),
 ]
+# who a mark that starts a turn stands for: Claude Code's /export (`> ` the user's prompt, `⏺ ` or `● ` Claude's reply)
+# and aider's chat history (`#### ` the user's message)
+MARKS = {">": "User", "⏺": "Claude", "●": "Claude", "####": "User"}
+AIDER_HEAD = "# aider chat started at"
+AIDER_OUTPUT = "Aider"  # who speaks a run of aider's own `> ` lines
+AIDER_REPLY = "Assistant"
 _STYLE = dict(STYLES)
 # the styles that a line of prose or of a document's headings rarely has, so many turns in them make a strong case
 # without role words
@@ -172,16 +183,20 @@ def message_keys(obj: Any) -> dict[str, str] | None:
     None when it holds none."""
     if not isinstance(obj, dict):
         return None
-    for wrap in ("message", "data", "msg"):
+    for wrap in WRAP_KEYS:
         inner = obj.get(wrap)
         if isinstance(inner, dict):
             got = message_keys(inner)
             if got:
                 out = {k: f"{wrap}.{v}" for k, v in got.items()}
-                if "time" not in out and (t := _first(obj, TIME_KEYS)):
-                    out["time"] = t
-                return out
-    text = next((k for k in TEXT_KEYS if k in obj and _text_of(obj[k]) is not None), None)
+            elif (text := _text_key(inner)) and (role := _role_key(obj)):
+                out = {"speaker": role, "text": f"{wrap}.{text}"}
+            else:
+                continue
+            if "time" not in out and (t := _first(obj, TIME_KEYS)):
+                out["time"] = t
+            return out
+    text = _text_key(obj)
     if text is None:
         return None
     time = _first(obj, TIME_KEYS)
@@ -189,11 +204,22 @@ def message_keys(obj: Any) -> dict[str, str] | None:
     if speaker is None and time:
         speaker = next((k for k in WEAK_SPEAKER_KEYS if k != text and _name_of(obj.get(k))), None)
     if speaker is None:
+        speaker = _role_key(obj)
+    if speaker is None:
         return None
     out = {"speaker": speaker, "text": text}
     if time:
         out["time"] = time
     return out
+
+
+def _text_key(obj: dict[str, Any]) -> str | None:
+    return next((k for k in TEXT_KEYS if k in obj and _text_of(obj[k]) is not None), None)
+
+
+def _role_key(obj: dict[str, Any]) -> str | None:
+    """The key of ROLE_TYPE_KEYS whose value is a role word, such as `"type": "human"`."""
+    return next((k for k in ROLE_TYPE_KEYS if isinstance(obj.get(k), str) and obj[k].strip().lower() in ROLE_WORDS), None)
 
 
 def _get(obj: Any, dotted: str) -> Any:
@@ -339,8 +365,6 @@ def sniff(path: Path, rel: str) -> dict[str, Any] | None:
         got = sniff_bytes(head, rel, complete=key[0] <= len(head))
     except Exception:  # noqa: BLE001 — a file the sniff cannot read is no transcript
         got = None
-    if got is not None and got["format"] == "json" and key[0] > JSON_MAX_BYTES:
-        got = None
     with _lock:
         _SNIFFS[k] = (key, got)
         _SNIFFS.move_to_end(k)
@@ -400,10 +424,10 @@ def _sniff_jsonl(text: str, parsed: bool) -> dict[str, Any] | None:
     if convs * 2 >= n:
         found = [k for k in map(_conversation_keys, objs) if k]
         return {"format": "conversations", "score": STRONG, **lines, **(_commonest(found) if found else {})}
-    if len(keyed) * 2 >= n:
+    if len(keyed) * 2 >= n or (len(keyed) >= 2 and len(keyed) * 5 >= n):
         best = _commonest(keyed)
         speaker_leaf = best["speaker"].rsplit(".", 1)[-1]
-        strong = len(keyed) * 10 >= n * 7 and speaker_leaf in SPEAKER_KEYS
+        strong = len(keyed) * 10 >= n * 7 and (speaker_leaf in SPEAKER_KEYS or speaker_leaf in ROLE_TYPE_KEYS)
         return {"format": "messages", "score": STRONG if strong else WEAK, "keys": best, **lines}
     return None
 
@@ -504,7 +528,8 @@ def turn_of(line: str, style: str) -> dict[str, Any] | None:
     m = rx.match(line) if rx else None
     if not m:
         return None
-    speaker = (m.group("speaker") if "speaker" in rx.groupindex else None) or (m.groupdict().get("speaker2"))
+    groups = m.groupdict()
+    speaker = MARKS.get(groups.get("mark") or "") or groups.get("speaker") or groups.get("speaker2")
     speaker = (speaker or "").strip()
     if not _speaker_ok(speaker):
         return None
@@ -544,6 +569,10 @@ def sniff_text(text: str, markdown: bool = False) -> dict[str, Any] | None:
             counts[low] = counts.get(low, 0) + 1
         if turns < 2 or len(counts) < 1:
             continue
+        if name == "cc" and len(counts) < 2:
+            continue  # a prompt and a reply, so quoted lines alone are no export
+        if name == "aider" and not any(ln.startswith(AIDER_HEAD) for ln in lines):
+            continue
         roles = sum(n for s, n in counts.items() if s in ROLE_WORDS or re.fullmatch(r"(speaker|person|participant|agent)[ _-]?\w{1,3}", s))
         repeated = max(counts.values()) >= 2
         few = len(counts) <= max(2, turns * 0.6)
@@ -558,9 +587,10 @@ def sniff_text(text: str, markdown: bool = False) -> dict[str, Any] | None:
         return None
     _, name, turns, counts = best
     roles = sum(n for s, n in counts.items() if s in ROLE_WORDS)
-    strong = (roles >= 2 or (name in DISTINCT_STYLES and turns >= 4)) and (not markdown or turns * 5 >= len(lines))
+    strong = name in ("cc", "aider") or (
+        (roles >= 2 or (name in DISTINCT_STYLES and turns >= 4)) and (not markdown or turns * 5 >= len(lines)))
     out: dict[str, Any] = {"format": "text", "score": STRONG if strong else WEAK, "style": name}
-    if name not in DISTINCT_STYLES:
+    if name not in DISTINCT_STYLES and name != "aider":
         # a heading, a bold label or a `Word:` line starts a turn only for a speaker the head shows taking turns
         out["speakers"] = sorted(s for s, n in counts.items() if n >= 2 or s in ROLE_WORDS)
     return out
@@ -652,7 +682,7 @@ def _role(speaker: str) -> str:
 def parse_turns(path: Path, rel: str) -> dict[str, Any]:
     """Every turn of a whole-file JSON transcript, or of JSON lines the server pages as text, with the groups
     (conversations) they belong to; kept for the last few files read, and read once however many ask for it at the same
-    time. Raises HTTPException 413 past JSON_MAX_BYTES, 415 when the file holds no turns."""
+    time. Raises HTTPException 415 when the file holds no turns."""
     k = str(path)
     with _lock:
         busy = _PARSING.get(k)
@@ -675,8 +705,6 @@ def _parse_turns(path: Path, rel: str) -> dict[str, Any]:
         if hit is not None and hit[0] == key:
             _TURNS.move_to_end(k)
             return hit[1]
-    if key[0] > JSON_MAX_BYTES:
-        raise HTTPException(413, f"{rel} is {key[0]:,} bytes, more than the {JSON_MAX_BYTES:,} a transcript is read from")
     raw = path.read_bytes().decode("utf-8", "replace")
     groups: list[dict[str, Any]] = []
     turns: list[dict[str, Any]] = []
@@ -762,11 +790,37 @@ def turns_page(path: Path, rel: str, start: int = 0, count: int = 100, line: int
 
 @router.get("/corpora/{c}/source/turns")
 def get_turns(c: str, path: str, start: int = 0, count: int = 100, line: int | None = None) -> dict[str, Any]:
-    """A page of the turns of a JSON transcript (turns_page): 413 for a file too large, 415 for one with no turns."""
+    """A page of the turns of a JSON transcript (turns_page): 415 for one with no turns."""
     from . import corpus  # noqa: PLC0415 — corpus imports nothing from here
 
     p = corpus._file(corpus._corpus(c), path)
     return turns_page(p, path, start, count, line)
+
+
+def _aider_turns(records: list[dict[str, Any]]) -> None:
+    """aider's chat history as turns: a run of `#### ` lines is the user's message, a run of `> ` lines aider's own
+    output, and the first other line after either starts the model's reply."""
+    prev = ""
+    for rec in records:
+        text = rec.get("record", {}).get("text") if isinstance(rec.get("record"), dict) else None
+        if not isinstance(text, str) or not text.strip():
+            continue
+        kind, turn = "reply", None
+        if text.startswith(AIDER_HEAD):
+            kind = "head"
+        elif text.startswith("#### "):
+            kind = "user"
+            if prev != "user":
+                turn = {"speaker": MARKS["####"], "at": 5}
+        elif text.startswith(">"):
+            kind = "aider"
+            if prev != "aider":
+                turn = {"speaker": AIDER_OUTPUT, "at": 2 if text.startswith("> ") else 1}
+        elif prev in ("user", "aider"):
+            turn = {"speaker": AIDER_REPLY, "at": 0}
+        if turn is not None:
+            rec.setdefault("meta", {})["turn"] = turn
+        prev = kind
 
 
 def dress(page: dict[str, Any], path: Path, rel: str) -> dict[str, Any]:
@@ -777,7 +831,9 @@ def dress(page: dict[str, Any], path: Path, rel: str) -> dict[str, Any]:
     if hint is None:
         return page
     page["transcript"] = hint
-    if hint["format"] == "text":
+    if hint["format"] == "text" and hint.get("style") == "aider":
+        _aider_turns(page.get("records") or [])
+    elif hint["format"] == "text":
         speakers = set(hint["speakers"]) if "speakers" in hint else None
         for rec in page.get("records") or []:
             text = rec.get("record", {}).get("text") if isinstance(rec.get("record"), dict) else None
