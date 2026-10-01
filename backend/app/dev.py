@@ -3049,7 +3049,6 @@ async def review_revision(c: str, slug: str, message: str) -> tuple[bool, str]:
     _review_runs[(c, slug)] = run
     asking = view_asking(c, slug, folder, conf)
     _host(c, asking, chat, run_log)
-    checks = views.watch_checks(c, slug)
     resume = prop.get("session_id")
     prompt = message if resume else f"{build_view_prompt(c, prop, folder, corpus)}\n\n{message}"
     run_log.stage(REVIEW_LINE)
@@ -3060,6 +3059,7 @@ async def review_revision(c: str, slug: str, message: str) -> tuple[bool, str]:
 
     waits, waited = view_capacity_waits(), 0.0
     attempt = 0
+    checks = views.watch_checks(c, slug)
     try:
         while attempt < MAX_ATTEMPTS:
             attempt += 1
