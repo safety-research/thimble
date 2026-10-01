@@ -8,6 +8,28 @@
 <link rel="stylesheet" href="assets/frame-base.css">
 <link rel="stylesheet" href="assets/kit.css">
 <link rel="stylesheet" href="assets/thimble-parts.css">
+<script>
+// the workbench's paper and accent, as thimble gives a view's frame its theme: the tour's own value of every token the
+// captured light theme above sets
+;(() => {
+  try {
+    const top = window.top.document.documentElement
+    const cs = getComputedStyle(top), root = document.documentElement
+    for (const sheet of document.styleSheets)
+      for (const rule of sheet.cssRules)
+        if (rule.selectorText === ':root')
+          for (const name of rule.style) {
+            const v = name.startsWith('--') ? cs.getPropertyValue(name).trim() : ''
+            if (v) root.style.setProperty(name, v)
+          }
+    const scheme = top.getAttribute('data-theme') === 'dark' ? 'dark' : 'light'
+    root.setAttribute('data-theme', scheme)
+    root.style.colorScheme = scheme
+  } catch {
+    // opened on its own: the captured light theme stays
+  }
+})()
+</script>
 <style>
   /* the page's own layout: one control row, the strip and the lanes, the list */
   html, body { margin: 0; height: 100%; }

@@ -127,11 +127,12 @@ interface Server {
 }
 
 /** A page on the made-up origin, answered by this file: the app, the tour's example view, the workspace's API. */
-async function open(opts: { W: number; H: number; dpr?: number; chat?: number; seen?: boolean; folded?: boolean }): Promise<{ page: Page; server: Server; close: () => Promise<void> }> {
+async function open(opts: { W: number; H: number; dpr?: number; chat?: number; seen?: boolean; folded?: boolean; paper?: string }): Promise<{ page: Page; server: Server; close: () => Promise<void> }> {
   const server: Server = { seen: !!opts.seen, writes: [], telemetry: [], settings: { ...SETTINGS } }
   const ctx = await browser.newContext({ viewport: { width: opts.W, height: opts.H }, deviceScaleFactor: opts.dpr ?? 1 })
   await ctx.addInitScript(
-    ({ ws, chat, open }) => {
+    ({ ws, chat, open, paper }) => {
+      if (paper) localStorage.setItem('thimble:paper', paper)
       // a Mac, so ⌘ is the pointer's key
       Object.defineProperty(Navigator.prototype, 'platform', { get: () => 'MacIntel' })
       Object.defineProperty(Navigator.prototype, 'userAgentData', { get: () => undefined })
@@ -145,7 +146,7 @@ async function open(opts: { W: number; H: number; dpr?: number; chat?: number; s
           if (!(e.target instanceof Element && e.target.closest('.tour-root, .tour-host'))) (window as any).__probe.push(`${t}:${(e as KeyboardEvent).key || ''}`)
         })
     },
-    { ws: WS, chat: opts.chat ?? 308, open: !opts.folded },
+    { ws: WS, chat: opts.chat ?? 308, open: !opts.folded, paper: opts.paper },
   )
   const page = await ctx.newPage()
   page.on('pageerror', (e) => console.warn('page error:', e.message))
@@ -658,7 +659,7 @@ async function walk(page: Page, tag: string, folds?: boolean, send = false) {
     return !!f?.contentDocument?.querySelector<HTMLIFrameElement>('.view-pane-frame')?.contentDocument?.getElementById('list')
   })
   // inside the example view the wheel scrolls its list and a click reaches its page; the app sees none of it
-  const view = page.frames().find((f) => f.url().endsWith('/tour/timeline/page.html'))!
+  const view = page.frames().find((f) => new URL(f.url()).pathname.endsWith('/tour/timeline/page.html'))!
   const listTop = () => view.evaluate(() => document.getElementById('list')!.scrollTop)
   const top0 = await listTop()
   await view.evaluate(() => {
@@ -1018,26 +1019,59 @@ for (const cfg of [
   }, 150_000)
 }
 
+/** From the welcome to step 6, Views, with the orientation's Start pressed on step 3. */
+async function toViews(page: Page) {
+  await page.waitForSelector('.tour-pop.tour-welcome', { timeout: 20000 })
+  await page.click('.tour-pop [data-tour="begin"]')
+  await onStep(page, 1)
+  await next(page)
+  await onStep(page, 2)
+  await next(page)
+  await onStep(page, 3)
+  const sb = await page.evaluate(() => {
+    const b = [...document.querySelectorAll('.tour-ex-gate button')].find((x) => x.textContent?.trim() === 'Start')!.getBoundingClientRect()
+    return { x: b.x + b.width / 2, y: b.y + b.height / 2 }
+  })
+  await page.mouse.click(sb.x, sb.y)
+  await page.waitForFunction(() => document.querySelector('.tour-body')?.textContent?.startsWith('The orientation has started'), null, { timeout: 3000 })
+  for (const n of [4, 5, 6]) {
+    await next(page)
+    await onStep(page, n)
+  }
+}
+
+test('on the Dark paper the example view and its page take the workbench’s colours', async () => {
+  const { page, close } = await open({ W: 1440, H: 900, paper: 'dark' })
+  try {
+    await toViews(page)
+    await page.waitForFunction(() => !!document.querySelector<HTMLIFrameElement>('.tour-ex-viewbody iframe')?.contentDocument?.querySelector<HTMLIFrameElement>('.view-pane-frame')?.contentDocument?.getElementById('list'))
+    // in each document: its theme, its card ground and text ink, and the colour of the first label
+    const colours = () => {
+      const ink = (prop: string, v: string) => {
+        const probe = document.createElement('span')
+        probe.style.setProperty(prop, `var(${v})`)
+        document.body.append(probe)
+        const c = getComputedStyle(probe).getPropertyValue(prop)
+        probe.remove()
+        return c
+      }
+      return { theme: document.documentElement.getAttribute('data-theme'), card: ink('background-color', '--surface-card'), text: ink('color', '--text-primary'), label: ink('color', '--label-1') }
+    }
+    const app = await page.evaluate(colours)
+    const view = page.frames().find((f) => new URL(f.url()).pathname.endsWith('/tour/timeline/page.html'))!
+    const got = { ...(await view.evaluate(colours)), body: await view.evaluate(() => getComputedStyle(document.body).backgroundColor) }
+    assert.ok(app.theme === 'dark' && got.theme === 'dark' && got.body === app.card && got.card === app.card && got.text === app.text && got.label === app.label, `the example's page in the workbench's dark colours ${JSON.stringify({ app, got })}`)
+    const hv = await viewHead(page)
+    assert.ok(hv.ok && hv.residueText === '1 unreadable line', `the view's header on the Dark paper ${JSON.stringify(hv)}`)
+  } finally {
+    await close()
+  }
+}, 90_000)
+
 test('the cards demo waits for a Canvas drawn late, and a hover that stops it leaves the ⌘ demo to play at once', async () => {
   const { page, close } = await open({ W: 1440, H: 900 })
   try {
-    await page.waitForSelector('.tour-pop.tour-welcome', { timeout: 20000 })
-    await page.click('.tour-pop [data-tour="begin"]')
-    await onStep(page, 1)
-    await next(page)
-    await onStep(page, 2)
-    await next(page)
-    await onStep(page, 3)
-    const sb = await page.evaluate(() => {
-      const b = [...document.querySelectorAll('.tour-ex-gate button')].find((x) => x.textContent?.trim() === 'Start')!.getBoundingClientRect()
-      return { x: b.x + b.width / 2, y: b.y + b.height / 2 }
-    })
-    await page.mouse.click(sb.x, sb.y)
-    await page.waitForFunction(() => document.querySelector('.tour-body')?.textContent?.startsWith('The orientation has started'), null, { timeout: 3000 })
-    for (const n of [4, 5, 6]) {
-      await next(page)
-      await onStep(page, n)
-    }
+    await toViews(page)
     // the Canvas panel shows only 1.5 s after Next, as a slow first draw would
     await page.evaluate(() => {
       const st = document.createElement('style')
