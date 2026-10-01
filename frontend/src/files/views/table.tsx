@@ -5,7 +5,7 @@
 // when the mark would fall past what it shows), and the pinned line-number column holds a slot per label that is on,
 // under the label's mark (LabelMark). Only rows near the view are drawn, with spacer rows for the rest; hidden width
 // holders in the header keep column widths stable.
-import { memo, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type RefObject } from 'react'
+import { Fragment, memo, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type RefObject } from 'react'
 import { flushSync } from 'react-dom'
 import { Tipped } from '../../components/Tooltip'
 import { api } from '../../lib/api'
@@ -471,13 +471,13 @@ const TableRow = memo(function TableRow({ path, rec, row, cols, wide, dots, targ
           const quoted = cited && cited.col === c ? cited.at : null
           return (
             <td key={c} className={cellClass(v, wide.has(c)) + (quoted ? ' cited' : '')} title={titleOf(v)}>
-              <span className="reader-table-clip">{quoted ? <Quoted text={cell(v)} at={quoted} /> : <Marked text={cell(v)} spans={marks.spans} />}</span>
+              <span className="reader-table-clip">{quoted ? <Quoted text={cell(v)} at={quoted} spans={marks.spans} /> : <Marked text={cell(v)} spans={marks.spans} />}</span>
             </td>
           )
         })
       ) : (
         <td className={'reader-table-cell mono' + (cited ? ' cited' : '')} colSpan={cols.length} title={titleOf(r)}>
-          <span className="reader-table-clip">{cited ? <Quoted text={cell(r)} at={cited.at} /> : <Marked text={cell(r)} spans={marks.spans} />}</span>
+          <span className="reader-table-clip">{cited ? <Quoted text={cell(r)} at={cited.at} spans={marks.spans} /> : <Marked text={cell(r)} spans={marks.spans} />}</span>
         </td>
       )}
     </tr>
@@ -535,9 +535,9 @@ const QUOTE_LEAD = 60
 /** characters shown after them, which the cell's few lines may cut */
 const QUOTE_TAIL = 240
 
-/** A cited cell's text around the words a followed ref quotes, the words highlighted (.hl): from a word a little
- * before them, after an ellipsis, so its few lines hold them. */
-function Quoted({ text, at }: { text: string; at: [number, number] }) {
+/** A cited cell's text around the words a followed ref quotes, the words highlighted (.hl) and the spans the labels
+ * that are on mark kept: from a word a little before them, after an ellipsis, so its few lines hold them. */
+function Quoted({ text, at, spans }: { text: string; at: [number, number]; spans: SpanMark[] }) {
   const [a, b] = at
   let from = 0
   if (a > QUOTE_LEAD) {
@@ -545,12 +545,27 @@ function Quoted({ text, at }: { text: string; at: [number, number] }) {
     from = a - QUOTE_LEAD + (space >= 0 ? space + 1 : 0)
   }
   const to = Math.min(text.length, b + QUOTE_TAIL)
+  const segs = markSegments(text, spans)
+  const piece = (lo: number, hi: number) =>
+    segs.map((g, i) => {
+      const s = Math.max(g.start, lo)
+      const e = Math.min(g.start + g.text.length, hi)
+      if (s >= e) return null
+      const t = text.slice(s, e)
+      return g.mark ? (
+        <SpanEl key={i} seg={{ ...g, text: t }}>
+          {t}
+        </SpanEl>
+      ) : (
+        <Fragment key={i}>{t}</Fragment>
+      )
+    })
   return (
     <>
       {from > 0 && '…'}
-      {text.slice(from, a)}
-      <span className="hl">{text.slice(a, b)}</span>
-      {text.slice(b, to)}
+      {piece(from, a)}
+      <span className="hl">{piece(a, b)}</span>
+      {piece(b, to)}
       {to < text.length && '…'}
     </>
   )
