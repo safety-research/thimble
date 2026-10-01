@@ -59,8 +59,7 @@ def refused(mode: Any) -> str | None:
 
 
 def session_mode(c: str) -> str:
-    """The mode main runs in, as its hooks last reported it to this server (session.main_mode); Manual before any
-    report."""
+    """The mode main runs in, as its hooks last reported it (session.main_mode); Manual before any report."""
     from . import session  # noqa: PLC0415 — session imports this module
 
     return OF_CLAUDE.get(session.main_mode(c) or "", "manual")

@@ -227,6 +227,9 @@ def test_a_server_restarted_under_main_follows_its_last_reported_mode_until_main
     session.attach(CORPUS, "sid-main", cwd)
     assert [modes.mode_for(CORPUS, a) for a in modes.AGENTS] == ["auto"] * len(modes.AGENTS), "the kept report"
     assert agents.read_meta(CORPUS, agents.MAIN_ID)["attached"]["permission_mode"] == "auto"
+    kept = userconf.main_modes_file()
+    assert kept.is_file() and f"Edit(/{kept})" in userconf.session(CORPUS, "orientation").settings()["permissions"]["deny"], \
+        "no agent edits the mode the rows follow"
     session.note_mode(CORPUS, "sid-main", "default")
     assert modes.mode_for(CORPUS, "orient") == "manual", "main's next report wins"
     restart()
