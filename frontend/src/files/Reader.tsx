@@ -467,11 +467,12 @@ export function scrollTopFor(body: HTMLElement, a: number): number | null {
 }
 
 /** The lines a record of another reader spans in its file of text (a JSON document's value, a CSV row), as the server
- * resolves its ref, so the reader opens it there; null until the answer comes, and for any other ref. */
-export function useRecordLines(ws: string, ref: string | undefined, path: string): { line: number; endLine: number } | null {
+ * resolves its ref, so the reader opens it there: `at` null until the answer comes, and for any other ref; `pending`
+ * while the answer is awaited. */
+export function useRecordLines(ws: string, ref: string | undefined, path: string): { at: { line: number; endLine: number } | null; pending: boolean } {
   const p = ref ? parseRef(ref) : null
   const asks = !!ref && !!p && (p.kind === 'pointer' || p.kind === 'csvrow') && p.path === path
-  const [got, setGot] = useState<{ ref: string; line: number; endLine: number } | null>(null)
+  const [got, setGot] = useState<{ ref: string; at: { line: number; endLine: number } | null } | null>(null)
   useEffect(() => {
     if (!asks || !ref) return
     let alive = true
@@ -479,15 +480,17 @@ export function useRecordLines(ws: string, ref: string | undefined, path: string
       .resolveRef(ws, ref)
       .then((r) => {
         const meta = (r.meta ?? {}) as { line?: unknown; end_line?: unknown }
-        if (!alive || typeof meta.line !== 'number') return
-        setGot({ ref, line: meta.line, endLine: typeof meta.end_line === 'number' ? meta.end_line : meta.line })
+        if (!alive) return
+        const line = typeof meta.line === 'number' ? meta.line : null
+        setGot({ ref, at: line == null ? null : { line, endLine: typeof meta.end_line === 'number' ? meta.end_line : line } })
       })
-      .catch(() => undefined)
+      .catch(() => alive && setGot({ ref, at: null }))
     return () => {
       alive = false
     }
   }, [ws, ref, asks])
-  return asks && got?.ref === ref ? { line: got.line, endLine: got.endLine } : null
+  const mine = asks && got?.ref === ref ? got : null
+  return { at: mine?.at ?? null, pending: asks && !mine }
 }
 
 const sameShown = (x: Shown, y: Shown) =>
@@ -534,7 +537,7 @@ function FileReader({ workspace, path, kind, targetRef, lead, end, labels, only,
   const dryAfter = useRef<number | null>(null)
   // the line the ref names, or where the record it names starts; a fragment no view understands opens the file at the
   // line it starts with, if any
-  const recordAt = useRecordLines(workspace, targetRef, path)
+  const { at: recordAt, pending: recordPending } = useRecordLines(workspace, targetRef, path)
   const targetLine = useMemo(() => targetOf(targetRef, path)?.line ?? recordAt?.line ?? nearestLine(fragment), [targetRef, path, fragment, recordAt])
   const wantLine = jumpLine ?? targetLine
 
@@ -969,7 +972,7 @@ function FileReader({ workspace, path, kind, targetRef, lead, end, labels, only,
   // bytes read as text would be noise
   const noViewReason: string | null = isDatabase || !loaded || loading ? null : error && records.length === 0 ? `Could not read it. ${error}` : binary ? binaryReason(binarySize ?? builtins.binarySize) : null
   // the fragment is named when nothing here reads it (a sheet cell of a spreadsheet no view claims)
-  const unread = fragment != null && targetOf(targetRef, path) == null && !recordAt ? fragment : null
+  const unread = fragment != null && targetOf(targetRef, path) == null && !recordAt && !recordPending ? fragment : null
   const page: SourcePage = useMemo(() => ({ path, kind, total_lines: total ?? 0, start: first ?? 1, records }), [path, kind, total, first, records])
   const ViewComponent = view?.component
   // a record the server placed on lines is shown to the view as those lines, which it scrolls to and flashes
