@@ -1121,9 +1121,13 @@ export interface SourceRecord {
 export interface TranscriptHint {
   format: 'stream' | 'messages' | 'conversations' | 'json' | 'csv' | 'text'
   score: number
+  /** where a message keeps who speaks, its words and its time: dotted keys into a record (`message.author`), and for
+   * who speaks, alternatives the first of which a record holds counts (`speakerName|agentName`) */
   keys?: { speaker: string; text: string; time?: string; list?: string }
   pair?: [string, string]
   lines?: boolean
+  /** a stream whose records each nest a Claude Code stream record under this key */
+  wrap?: string
   style?: string
   /** who may start a turn in a text chat log, when the style alone would take any heading or `Word:` line */
   speakers?: string[]

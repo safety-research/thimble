@@ -1,7 +1,8 @@
 // The built-in file views, scored per file over a sample of its records and the server's transcript sniff. The scores
 // order the defaults: a database file and a Claude Code stream score 1, a file the sniff is sure reads as a transcript
 // 0.95 and one it only offers it for 0.5, a markdown file 0.9 (rendered), flat records that share their keys 0.85 or 0.7
-// (table), and Raw 0.1, so it stands when nothing else fits. The switcher lists every view with a positive score.
+// (table), Raw 0.1, so it stands when nothing else fits, and records that are objects but not flat 0.05 (table, offered
+// under Raw). The switcher lists every view with a positive score.
 import type { SourceKind, TranscriptHint } from '../../lib/types'
 import type { ViewDef } from './common'
 import forge from './forge'

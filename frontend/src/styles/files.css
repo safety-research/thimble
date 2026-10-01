@@ -1118,6 +1118,8 @@
   margin: 0 6px 0 10px;
   color: var(--text-tertiary);
 }
+/* tabs that do not fit narrow to their min-width, names cut with an ellipsis, all but the open one, whose name shows up
+   to its max-width; past that the strip scrolls, its edge faded where tabs are hidden (FilesTab ReaderTabs sets data-more-left/right) */
 .reader-tabs {
   display: flex;
   align-items: stretch;
@@ -1125,16 +1127,28 @@
   overflow-x: auto;
   scrollbar-width: none;
 }
+.reader-tabs[data-more-right] {
+  mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent);
+}
+.reader-tabs[data-more-left] {
+  mask-image: linear-gradient(to left, #000 calc(100% - 28px), transparent);
+}
+.reader-tabs[data-more-left][data-more-right] {
+  mask-image: linear-gradient(to right, transparent, #000 28px, #000 calc(100% - 28px), transparent);
+}
 .reader-tab {
   display: inline-flex;
   align-items: center;
-  flex: none;
+  flex: 0 1 auto;
+  min-width: 104px;
   gap: 2px;
   padding: 0 10px 0 12px;
   box-shadow: inset -1px 0 0 var(--border-hairline);
   color: var(--text-tertiary);
 }
 .reader-tab.active {
+  flex-shrink: 0;
+  max-width: 320px;
   background: var(--surface-card);
   box-shadow: inset 1px 0 0 var(--files-rule), inset -1px 0 0 var(--files-rule);
   color: var(--text-primary);
@@ -1143,6 +1157,7 @@
   display: inline-flex;
   align-items: center;
   gap: 8px;
+  min-width: 0;
   height: 100%;
   padding: 0;
   border: 0;
@@ -1153,10 +1168,17 @@
   cursor: pointer;
 }
 .reader-tab-glyph {
+  flex: none;
   color: var(--text-tertiary);
+}
+.reader-tab-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .reader-tab-x {
   display: grid;
+  flex: none;
   place-items: center;
   width: 16px;
   height: 16px;
@@ -1747,6 +1769,16 @@
 .reader-msg-empty {
   color: var(--text-tertiary);
 }
+/* a post with no words (an action among talk): its other fields on one line, each name in the tertiary ink */
+.reader-msg-fields {
+  display: flex;
+  flex-wrap: wrap;
+  column-gap: 14px;
+}
+.reader-msg-field {
+  color: var(--text-tertiary);
+  font-size: var(--text-mono-sm);
+}
 .reader-record.has-tint .reader-record-body,
 .reader-line.has-tint {
   background: color-mix(in oklab, var(--tint) 16%, transparent);
@@ -1959,6 +1991,49 @@
   padding-left: 12px;
   border-left: 2px solid var(--border-subtle);
   color: var(--text-secondary);
+}
+/* a markdown file's front matter, folded above the document: a button, and when opened its fields one per row, the key
+   in the tertiary ink */
+.reader-md-meta {
+  margin: 0 0 12px;
+}
+.reader-md-meta-toggle.btn {
+  margin-left: -8px;
+  color: var(--text-secondary);
+}
+.reader-md-meta-toggle .dim {
+  margin-left: 6px;
+}
+.reader-md-meta-fields {
+  display: grid;
+  grid-template-columns: minmax(0, max-content) minmax(0, 1fr);
+  column-gap: 16px;
+  row-gap: 4px;
+  margin: 6px 0 0;
+  padding: 8px 0 8px 12px;
+  border-left: 2px solid var(--border-subtle);
+  font: var(--type-ui-sm);
+}
+.reader-md-meta-field {
+  display: contents;
+}
+.reader-md-meta-fields dt {
+  color: var(--text-tertiary);
+  overflow-wrap: anywhere;
+}
+.reader-md-meta-fields dd {
+  margin: 0;
+  min-width: 0;
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+.reader-md .reader-md-meta-fields pre {
+  margin: 0;
+  padding: 0;
+  background: none;
+  font: var(--type-mono);
+  color: var(--text-secondary);
+  white-space: pre-wrap;
 }
 
 /* -------- text lines, raw lines: the code's own ink (the primary), syntax colours from styles/code.css -------- */
