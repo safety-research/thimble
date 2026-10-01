@@ -326,6 +326,8 @@ export const api = {
   /** build a suggested viewer */
   acceptProposal: (c: string, slug: string) => j<Proposal>(`${ws(c)}/views/proposals/${enc(slug)}/accept`, { method: 'POST' }),
   retryProposal: (c: string, slug: string) => j<Proposal>(`${ws(c)}/views/proposals/${enc(slug)}/retry`, { method: 'POST' }),
+  /** Stop the proposal's build (backend views.stop_build): it then fails, with Retry. */
+  stopViewBuild: (c: string, slug: string) => j<{ ok: boolean }>(`${ws(c)}/views/proposals/${enc(slug)}/stop`, { method: 'POST' }),
   /** A message typed in a view build's thread: logged there and queued as a change to the view, whose run goes on in
    * that thread (views.message); answers the proposal. */
   messageView: (c: string, slug: string, text: string) => j<Proposal>(`${ws(c)}/views/proposals/${enc(slug)}/message`, { method: 'POST', body: JSON.stringify({ text }) }),
