@@ -104,7 +104,7 @@ labels model reads the view's description and a few records of the files in its 
 view's reason, and its switch there overrides the check.
 
 The views thimble builds for a workspace are that workspace's own extension, in `workspaces/<workspace>/extension/`.
-No other workspace shows them. Settings > Extensions lists them under This workspace, each with its switch.
+No other workspace shows them. Settings > Extensions lists them under This workspace's views, each with its switch.
 
 The Swarm extension is for corpora where many agents act on shared pages and channels and address each other. It adds
 orientation instructions that have every message read. It needs `multiagent-swimlane`, the card type that draws a

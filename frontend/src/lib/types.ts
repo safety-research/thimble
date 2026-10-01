@@ -1051,6 +1051,8 @@ export interface ExtensionRow {
   version: string
   /** what it is, from its extension.json */
   description?: string
+  /** one thimble ships, whose version is thimble's */
+  builtin?: boolean
   active: boolean
   why: string
   /** the line Settings shows: why it does not run, unless this workspace's switch turned it off */
@@ -1060,20 +1062,26 @@ export interface ExtensionRow {
   views: ExtensionViewRow[]
   /** what it gives, each in a few words */
   parts?: string[]
-  /** the settings of the agents it changes and whether its code runs sandboxed, in words */
+  /** the settings of the agents it changes or adds, in words */
   consent?: string
+  /** whether its code runs in a sandbox; null for one with no code */
+  sandboxed?: boolean | null
   /** whether Run now can run its orientation here once it is on: its instructions, or its own orientation program */
   orients?: boolean
   /** whether Settings offers to run its orientation now: it came on after an orientation ran here */
   offer?: boolean
   /** an extension thimble ships that is not added: turning its switch on adds it */
   addable?: boolean
+  /** for one not added: the extensions thimble ships that adding it adds with it */
+  needs?: string[]
 }
 
 /** One view built for this workspace, in its local extension (backend views.local_extension). */
 export interface LocalViewRow {
   slug: string
   name: string
+  /** what it shows, from its view.json */
+  description?: string
   /** a file viewer, which opens in the File browser */
   file_viewer: boolean
   /** its switch in Settings: off, it leaves the views bar and the File browser */
