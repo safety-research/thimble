@@ -53,11 +53,42 @@ async def test_the_quiet_time_starts_again_when_the_transcript_grows_or_a_reques
     run.waits["r1"] = asyncio.get_running_loop().create_future()  # a permission request on the card
     await asyncio.sleep(0.5)
     run.waits.clear()
-    run.pid = None  # a retry's wait for capacity
+    run.retrying = True  # a retry's wait for capacity
+    await asyncio.sleep(0.5)
+    run.retrying = False
+    run.held = True  # a wait for the analyst after auto mode ended the session
     await asyncio.sleep(0.5)
     assert _quiet_lines(run) == []
     done.set_result("done")
     await asyncio.wait_for(waiting, 1)
+
+
+async def test_a_background_session_with_no_pid_gets_the_quiet_line_too(run, monkeypatch):
+    """A background session (the orientation's, its critique's, a writer's) is followed with no pid of its own."""
+    monkeypatch.setattr(agent_session, "QUIET_NOTE_S", 0.2)
+    run.pid, run.bg = None, True
+    done: asyncio.Future = asyncio.get_running_loop().create_future()
+    waiting = asyncio.ensure_future(agent_session.wait_done(run, done, poll_s=0.02))
+    await asyncio.sleep(0.3)
+    assert _quiet_lines(run) == ["· no activity for 0 s"]
+    done.set_result("done")
+    await asyncio.wait_for(waiting, 1)
+
+
+async def test_a_retry_s_wait_starts_the_quiet_time_again(run, monkeypatch):
+    seen: list[bool] = []
+
+    async def respawn(r, hint=agent_session.RETRY_PROMPT, **values):
+        seen.append(r.retrying)
+
+    monkeypatch.setattr(agent_session, "capacity", lambda r: "overloaded")
+    monkeypatch.setattr(agent_session, "_respawn", respawn)
+    monkeypatch.setattr(agent_session, "retry_wait", lambda n: 0.3)
+    run.spawned = time.monotonic()
+    retry = asyncio.ensure_future(agent_session._retry(run))
+    await asyncio.sleep(0.1)
+    assert run.retrying, "the quiet time does not run while the retry waits"
+    assert await asyncio.wait_for(retry, 2) and seen == [False] and not run.retrying
 
 
 async def test_a_session_at_capacity_is_started_again_however_many_times_it_failed(run, monkeypatch):

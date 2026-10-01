@@ -384,6 +384,7 @@ class Run:
     api_status: int | None = None  # the `api_error_status` of the last `result` line, when it gave one
     spawned: float = 0.0  # time.monotonic() when the process started
     retries: int = 0  # the retries of the current streak of capacity failures
+    retrying: bool = False  # a retry's wait for capacity runs (_retry)
     wake: asyncio.Event = field(default_factory=asyncio.Event)  # set by Retry now and Stop to end a retry's wait
     nudge: str = ""  # a retry's stdin prompt, whose copy in the transcript the follower leaves out
     on_pid: Callable[["Run"], None] | None = None  # told when the process changes: None during a retry's wait, then the new one
@@ -1105,8 +1106,12 @@ async def _retry(run: Run) -> bool:
     log.info("%s: session %s (%s) failed at capacity (%s: %s); retry %d in %.0f s", run.c, run.key, run.sid, cls,
              failure_line(run.result or run.stderr)[:200], run.retries, wait)
     run.wake.clear()
-    with contextlib.suppress(asyncio.TimeoutError):
-        await asyncio.wait_for(run.wake.wait(), wait)
+    run.retrying = True
+    try:
+        with contextlib.suppress(asyncio.TimeoutError):
+            await asyncio.wait_for(run.wake.wait(), wait)
+    finally:
+        run.retrying = False
     with contextlib.suppress(Exception):
         agents.update_agent(run.c, run.chat, alert=None)
     run.alerted = False
@@ -1322,8 +1327,8 @@ def _activity(run: Run) -> tuple[int, ...]:
 
 async def wait_done(run: Run, done: asyncio.Future, poll_s: float | None = None) -> None:
     """Wait for `done`, with no time limit (module note, quiet): while the session shows no activity, its chat gets
-    QUIET_LINE at QUIET_NOTE_S and each time that quiet time doubles. Time while a permission request waits on the analyst
-    or a retry waits for capacity (no process) starts the quiet time again."""
+    QUIET_LINE at QUIET_NOTE_S and each time that quiet time doubles. Time while a permission request waits on the analyst,
+    a retry waits for capacity or the run waits for a mode switch (_hold) starts the quiet time again."""
     poll = QUIET_POLL_S if poll_s is None else poll_s
     seen, active, note = _activity(run), time.monotonic(), QUIET_NOTE_S
     while not done.done():
@@ -1332,7 +1337,7 @@ async def wait_done(run: Run, done: asyncio.Future, poll_s: float | None = None)
         if done.done():
             return
         now, grown = time.monotonic(), _activity(run)
-        if grown != seen or run.pid is None or run.waits:
+        if grown != seen or run.retrying or run.held or run.waits:
             seen, active, note = grown, now, QUIET_NOTE_S
         elif now - active >= note:
             if run.main is not None and run.main.rec is not None:
