@@ -24,6 +24,9 @@ from websockets.sync.client import connect
 
 PATH = "/api/agent/claude"
 CHUNK = 65536
+OFFLINE = ("the agent's network is off in thimble's config, so its program reaches thimble only on its stdin and "
+           "stdout, where thimble.session() starts a session. Its network setting (agents.<agent>.network) lets the "
+           "Agent SDK's own sessions through")
 
 
 def main(argv: list[str]) -> int:
@@ -36,10 +39,11 @@ def main(argv: list[str]) -> int:
     proof = hmac.new(token.encode(), f"hook:{nonce}".encode(), hashlib.sha256).hexdigest()
     headers = {"x-thimble-agent": token.split(".", 1)[0], "x-thimble-nonce": nonce, "x-thimble-auth": proof}
     url = "ws" + api[len("http"):] + PATH if api.startswith("http") else api + PATH
-    try:
-        ws = connect(url, additional_headers=headers, max_size=None, open_timeout=30)
+    try:  # connect() opens the connection when entered, which the `with ws` below then closes
+        ws = connect(url, additional_headers=headers, max_size=None, open_timeout=30).__enter__()
     except Exception as e:  # noqa: BLE001 — any failure to connect ends the session with its reason
-        print(f"thimble's claude: could not reach thimble at {api}: {e}", file=sys.stderr)
+        why = OFFLINE if os.environ.get("THIMBLE_NETWORK") == "off" else str(e)
+        print(f"thimble's claude: could not reach thimble at {api}: {why}", file=sys.stderr)
         return 1
     code = 1
     with ws:

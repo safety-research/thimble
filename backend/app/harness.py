@@ -215,7 +215,7 @@ def program_env(run: Run) -> dict[str, str]:
         "THIMBLE_ROLE": job.role, "THIMBLE_WORKSPACE": job.c, "THIMBLE_WORK": str(job.work),
         "THIMBLE_CORPUS": str(corpus or ""), "THIMBLE_INPUT": str(job.work / INPUT_FILE),
         "THIMBLE_AGENT_DIR": str(part.folder), "THIMBLE_CLAUDE": str(SHIM), "THIMBLE_PYTHON": sys.executable,
-        "THIMBLE_KIT_JS": str(KIT_JS),
+        "THIMBLE_KIT_JS": str(KIT_JS), "THIMBLE_NETWORK": "on" if run.conf.network else "off",
         "CLAUDE_AGENT_SDK_SKIP_VERSION_CHECK": "1", "TMPDIR": str(job.work / TMP_DIR),
         "XDG_CACHE_HOME": str(job.work / CACHE_DIR),
     })
