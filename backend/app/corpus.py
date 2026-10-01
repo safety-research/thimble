@@ -1365,7 +1365,7 @@ def grep_files(corpus: Path, paths: list[str], q: str, *, files_max: int = GREP_
     """The Files search's content half: each file of `paths` whose bytes hold `q` as {path, total, complete, matches},
     a {progress: true, scanned, of} line at most every `progress_s` seconds while it reads, then one closing
     {done: true, ...}. Databases, media, packed and binary files are skipped. It has no time limit: it stops after
-    `files_max` files or once `stop()` is true, with `complete` false."""
+    `files_max` files or once `stop()` is true, with `complete` false and `scanned` the files it read whole."""
     files = hits = scanned = 0
     complete = True
     told = time.monotonic()
@@ -1395,6 +1395,7 @@ def grep_files(corpus: Path, paths: list[str], q: str, *, files_max: int = GREP_
             yield {"path": path, "total": found["matches"], "complete": found["complete"],
                    "matches": [{"line": n, **snip} for n, snip in zip(found["lines"], found["snippets"])]}
         if not found["complete"]:
+            scanned -= 1  # stopped inside this file: it was not read whole
             complete = False
             break
     yield {"done": True, "files": files, "hits": hits, "scanned": scanned, "of": len(paths), "complete": complete}
@@ -1403,9 +1404,9 @@ def grep_files(corpus: Path, paths: list[str], q: str, *, files_max: int = GREP_
 @router.get("/corpora/{c}/sources/grep")
 async def grep_sources(c: str, q: str = "") -> StreamingResponse:
     """Content search over the files the tree lists, streamed as JSON lines: one per matching file, progress lines,
-    and a closing `done` line. It runs in a thread of its own and stops when the browser drops the stream (the
-    analyst's Stop, or a new search) or a newer search of the same corpus starts. An empty or multi-line query is
-    400."""
+    and a closing `done` line. The search's id is the X-Search header, which POST /sources/grep/stop takes. It runs in
+    a thread of its own and stops when it is asked to, when the browser drops the stream, or when a newer search of the
+    same corpus starts. An empty or multi-line query is 400."""
     corpus = _corpus(c)
     if not q.strip() or "\n" in q:
         raise HTTPException(400, "q must be text on one line")
@@ -1426,14 +1427,30 @@ async def grep_sources(c: str, q: str = "") -> StreamingResponse:
             loop.call_soon_threadsafe(items.put_nowait, None)
 
     async def lines() -> AsyncIterator[str]:
-        loop.run_in_executor(None, run)
+        threading.Thread(target=run, name=f"grep:{c}", daemon=True).start()
         try:
             while (item := await items.get()) is not None:
                 yield json.dumps(item, ensure_ascii=False) + "\n"
         finally:
             dropped.set()
 
-    return StreamingResponse(lines(), media_type="application/x-ndjson")
+    return StreamingResponse(lines(), media_type="application/x-ndjson", headers={"X-Search": str(gen)})
+
+
+class GrepStopBody(BaseModel):
+    search: int  # the X-Search header of the search's stream
+
+
+@router.post("/corpora/{c}/sources/grep/stop")
+def stop_grep(c: str, body: GrepStopBody) -> dict[str, bool]:
+    """Stop the content search `search` of corpus c if it still runs: its stream ends with its `done` line, which says
+    how many files it read. {stopped: false} when that search has ended or a newer one took its place."""
+    _corpus(c)
+    with _grep_lock:
+        stopped = _grep_gen.get(c) == body.search
+        if stopped:
+            _grep_gen[c] = body.search + 1
+    return {"stopped": stopped}
 
 
 @router.get("/corpora/{c}/source/find")

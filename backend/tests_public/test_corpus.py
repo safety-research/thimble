@@ -180,13 +180,38 @@ def test_the_content_search_has_no_time_limit_says_how_far_it_read_and_stops_whe
     assert stopped[-1]["done"] and not stopped[-1]["complete"] and stopped[-1]["scanned"] < len(paths)
 
 
+def test_a_content_search_stopped_inside_a_file_counts_only_the_files_it_read_whole():
+    from app import config, corpus
+
+    root = config.corpus_dir("mini")
+    asked: list[int] = []
+    items = list(corpus.grep_files(root, [AGENT], "the", stop=lambda: (asked.append(1), len(asked) > 1)[1]))
+    done = items[-1]
+    assert len(asked) == 2, "asked once before the file and once inside it"
+    assert done["done"] and not done["complete"] and done["scanned"] == 0
+    assert all(not i["complete"] for i in items if "path" in i)
+
+
 def test_the_content_search_route_streams_its_lines_and_a_closing_line():
     import json
 
-    lines = [json.loads(x) for x in client.get(f"{MINI}/sources/grep", params={"q": "the build"}).text.splitlines() if x]
+    r = client.get(f"{MINI}/sources/grep", params={"q": "the build"})
+    lines = [json.loads(x) for x in r.text.splitlines() if x]
     assert lines[-1]["done"] is True and lines[-1]["complete"] is True
     assert any(x.get("path") == AGENT for x in lines)
+    assert r.headers["x-search"].isdigit()
     assert client.get(f"{MINI}/sources/grep", params={"q": " "}).status_code == 400
+
+
+def test_the_stop_route_stops_only_the_search_it_names(monkeypatch):
+    from app import corpus
+
+    monkeypatch.setitem(corpus._grep_gen, "mini", 7)
+    assert client.post(f"{MINI}/sources/grep/stop", json={"search": 6}).json() == {"stopped": False}
+    assert corpus._grep_gen["mini"] == 7, "a search that a newer one replaced is left alone"
+    assert client.post(f"{MINI}/sources/grep/stop", json={"search": 7}).json() == {"stopped": True}
+    assert corpus._grep_gen["mini"] != 7
+    assert client.post("/api/corpora/nope/sources/grep/stop", json={"search": 1}).status_code == 404
 
 
 def test_a_folder_opened_through_a_symlink_shows_the_path_the_analyst_used(data_tmp, tmp_path):

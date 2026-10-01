@@ -175,7 +175,8 @@ export const api = {
   /** `GET /corpora/{c}/sources/find`: the files whose path holds every word of `text`, best first. */
   findFiles: (c: string, text: string, signal?: AbortSignal) => j<FileFind>(`${BASE}/corpora/${enc(c)}/sources/find${q({ q: text })}`, { signal }),
   /** `GET /corpora/{c}/sources/grep`: the files whose text holds `text`, each handed to `onFile` as the server finds it,
-   * then the closing line to `onDone`. Resolves when the stream ends; rejects on a refusal or an abort. */
+   * how many files it has read to `onProgress`, then the closing line to `onDone`. `onSearch` hears the search's id,
+   * which stopGrep takes, as the stream opens. Resolves when the stream ends; rejects on a refusal or an abort. */
   grepFiles: async (
     c: string,
     text: string,
@@ -183,6 +184,7 @@ export const api = {
     onDone: (d: GrepDone) => void,
     signal?: AbortSignal,
     onProgress?: (p: GrepProgress) => void,
+    onSearch?: (id: number) => void,
   ): Promise<void> => {
     const res = await fetch(`${BASE}/corpora/${enc(c)}/sources/grep${q({ q: text })}`, { signal })
     if (!res.ok || !res.body) {
@@ -194,6 +196,8 @@ export const api = {
       }
       throw new Error(`${res.status} ${detail}`)
     }
+    const id = Number(res.headers.get('x-search'))
+    if (Number.isInteger(id) && id > 0) onSearch?.(id)
     const reader = res.body.getReader()
     const decoder = new TextDecoder()
     let rest = ''
@@ -211,6 +215,10 @@ export const api = {
       if (done) break
     }
   },
+  /** `POST /corpora/{c}/sources/grep/stop`: stop the content search `search` (grepFiles' onSearch); its stream then
+   * ends with its closing line. */
+  stopGrep: (c: string, search: number) =>
+    j<{ stopped: boolean }>(`${BASE}/corpora/${enc(c)}/sources/grep/stop`, { method: 'POST', body: JSON.stringify({ search }) }),
   forgeTables: (c: string, path: string) => j<{ name: string; row_count: number }[]>(`${BASE}/corpora/${enc(c)}/forge/tables${q({ path })}`),
   forgeRows: (c: string, path: string, table: string, offset = 0, limit = 100, order?: string, where?: string) =>
     j<{ table: string; columns: string[]; rows: any[][]; pk: string; total: number }>(`${BASE}/corpora/${enc(c)}/forge/rows${q({ path, table, offset, limit, order, where })}`),

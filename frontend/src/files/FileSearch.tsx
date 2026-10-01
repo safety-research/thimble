@@ -51,16 +51,27 @@ interface Grepped {
   files: GrepFile[]
   progress: GrepProgress | null
   done: GrepDone | null
-  /** the analyst stopped the search */
+  /** the server's id of the search, once its stream opened */
+  search: number | null
+  /** the analyst stopped the search, and it had not read every file */
   stopped: boolean
+  /** the stream was dropped before its closing line */
+  cut: boolean
   error: string | null
 }
 
+const fresh = (text: string): Grepped => ({ text, files: [], progress: null, done: null, search: null, stopped: false, cut: false, error: null })
+
+/** ms Stop waits for the stopped search's closing line before it drops the stream */
+const STOP_WAIT_MS = 5000
+
 /** The files whose text holds `text`, as the server's stream hands them over, and how many files it has read; a new
- * text drops the stream before it, and so does `stop`, which keeps what was found and how far it read. `loading`
- * until the stream for this text has closed. */
-export function useFileGrep(ws: string, text: string): Omit<Grepped, 'text'> & { loading: boolean; stop: () => void } {
-  const [got, setGot] = useState<Grepped>({ text: '', files: [], progress: null, done: null, stopped: false, error: null })
+ * text drops the stream before it. `stop` asks the server to stop the search, whose closing line then says how many
+ * files it read; a search that has not answered yet is dropped. `loading` until the stream for this text has closed. */
+export function useFileGrep(ws: string, text: string): Omit<Grepped, 'text' | 'search' | 'cut'> & { loading: boolean; stop: () => void } {
+  const [got, setGot] = useState<Grepped>(() => fresh(''))
+  const gotRef = useRef(got)
+  gotRef.current = got
   const ctlRef = useRef<AbortController | null>(null)
   const on = text.length >= GREP_MIN
   useEffect(() => {
@@ -70,15 +81,16 @@ export function useFileGrep(ws: string, text: string): Omit<Grepped, 'text'> & {
     const mineOnly = (f: (g: Grepped) => Grepped) => !ctl.signal.aborted && setGot((g) => (g.text === text ? f(g) : g))
     const t = window.setTimeout(() => {
       if (ctl.signal.aborted) return
-      setGot({ text, files: [], progress: null, done: null, stopped: false, error: null })
+      setGot(fresh(text))
       api
         .grepFiles(
           ws,
           text,
           (f) => mineOnly((g) => ({ ...g, files: [...g.files, f] })),
-          (d) => mineOnly((g) => ({ ...g, done: d })),
+          (d) => mineOnly((g) => ({ ...g, done: d, stopped: g.stopped && !d.complete })),
           ctl.signal,
           (p) => mineOnly((g) => ({ ...g, progress: p })),
+          (id) => mineOnly((g) => ({ ...g, search: id })),
         )
         .catch((e: Error) => !ctl.signal.aborted && setGot((g) => ({ ...g, text, error: e.message })))
     }, GREP_DEBOUNCE_MS)
@@ -88,11 +100,21 @@ export function useFileGrep(ws: string, text: string): Omit<Grepped, 'text'> & {
     }
   }, [ws, text, on])
   const stop = useCallback(() => {
-    ctlRef.current?.abort()
-    setGot((g) =>
-      g.text !== text ? { text, files: [], progress: null, done: null, stopped: true, error: null } : !g.done && !g.error ? { ...g, stopped: true } : g,
-    )
-  }, [text])
+    const ctl = ctlRef.current
+    const g = gotRef.current
+    const drop = () => {
+      ctl?.abort()
+      setGot((x) => (x.text !== text ? { ...fresh(text), stopped: true, cut: true } : x.done || x.error ? x : { ...x, stopped: true, cut: true }))
+    }
+    if (g.text !== text || g.search == null) return drop()
+    if (g.done || g.error) return
+    setGot((x) => (x.text === text ? { ...x, stopped: true } : x))
+    api.stopGrep(ws, g.search).catch(drop)
+    window.setTimeout(() => {
+      const now = gotRef.current
+      if (now.text === text && now.search === g.search && !now.done && !now.error) drop()
+    }, STOP_WAIT_MS)
+  }, [ws, text])
   const mine = on && got.text === text
   return {
     files: mine ? got.files : [],
@@ -100,19 +122,24 @@ export function useFileGrep(ws: string, text: string): Omit<Grepped, 'text'> & {
     done: mine ? got.done : null,
     stopped: mine && got.stopped,
     error: mine ? got.error : null,
-    loading: on && (!mine || (!got.done && !got.error && !got.stopped)),
+    loading: on && (!mine || (!got.done && !got.error && !got.cut)),
     stop,
   }
 }
 
-/** What the row under the results says of the text search: how many files it has read while it runs, and where the
- * analyst stopped it; null when there is nothing to say. Pure. */
-export function grepStatus(grep: { loading: boolean; stopped: boolean; progress: GrepProgress | null }): string | null {
+const filesRead = (n: number, of: number) => `${n.toLocaleString()} of ${of.toLocaleString()} files`
+
+/** What the row under the results says of the text search: how many files it has read while it runs, and once the
+ * analyst stopped it, how many it read, which the search's closing line gives; null when there is nothing to say.
+ * Pure. */
+export function grepStatus(grep: { loading: boolean; stopped: boolean; progress: GrepProgress | null; done: GrepDone | null }): string | null {
   const p = grep.progress
-  const read = p ? `${p.scanned.toLocaleString()} of ${p.of.toLocaleString()} files` : null
-  if (grep.stopped) return read ? `Stopped after ${read}` : 'Stopped'
+  if (grep.stopped) {
+    if (grep.done) return `Stopped after ${filesRead(grep.done.scanned, grep.done.of)}`
+    return grep.loading ? 'Stopping' : 'Stopped'
+  }
   if (!grep.loading || !p) return null
-  return p.scanned ? `Searched ${read}` : `Searching ${p.of.toLocaleString()} ${p.of === 1 ? 'file' : 'files'}`
+  return p.scanned ? `Searched ${filesRead(p.scanned, p.of)}` : `Searching ${p.of.toLocaleString()} ${p.of === 1 ? 'file' : 'files'}`
 }
 
 interface Props {
@@ -240,7 +267,7 @@ export function FileSearch({ ws, inputRef, onOpen, children }: Props) {
             <div className="files-found-status">
               {grep.loading && <Spinner size={10} label="Searching" />}
               {status && <span className="files-found-status-text">{status}</span>}
-              {grep.loading && (
+              {grep.loading && !grep.stopped && (
                 <button type="button" className="files-found-stop" onClick={grep.stop}>
                   Stop
                 </button>
