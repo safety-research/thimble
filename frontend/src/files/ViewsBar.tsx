@@ -3,7 +3,7 @@
 // still warning dot while its session waits for permission, a warning icon and Retry on failure); then New view, a
 // field that asks main for one. A view or a proposal shows × on hover, which deletes it once confirmed. A row across
 // the top of Files, or, while Files shows in a pane beside another, in that pane's head (`compact`, portalled by
-// FilesTab), where what does not fit goes in a ⋯ menu (viewsFit.ts). Refetches on bus `view`.
+// FilesTab), where what does not fit goes in a ⋯ menu (viewsFit.ts). The views list is the shared one (lib/views.ts).
 import { useEffect, useLayoutEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
 import { openThread } from '../chat/Notes'
 import { Button, Segmented } from '../components/Button'
@@ -16,6 +16,7 @@ import { pendingAsks, useChatMetas } from '../chat/waiting'
 import { api } from '../lib/api'
 import { bus } from '../lib/bus'
 import { refreshProposals, useProposals } from '../lib/proposals'
+import { useViewList } from '../lib/views'
 import { startSurfaceDrag } from '../lib/surfaces'
 import { track } from '../lib/telemetry'
 import type { Proposal, View, ViewReview } from '../lib/types'
@@ -25,6 +26,37 @@ import { fitViews } from './viewsFit'
 export const BROWSER = 'browser'
 /** What the New view field says while it is empty: what to type, and where it goes. */
 export const NEW_VIEW_PLACEHOLDER = 'Describe a view; Enter asks main'
+
+/** The confirm of a view's or a proposal's delete, by the option whose × asked for it (`at`). It takes the focus, and
+ * gives it back to that × when it closes, unless the focus has moved elsewhere. */
+export function DeleteViewConfirm({ asked, onClose, onDelete }: { asked: { name: string; at: HTMLElement } | null; onClose: () => void; onDelete: () => void }) {
+  const cancelRef = useRef<HTMLButtonElement>(null)
+  useEffect(() => {
+    if (!asked) return
+    const x = asked.at.querySelector<HTMLElement>('.seg-remove')
+    requestAnimationFrame(() => cancelRef.current?.focus())
+    return () => {
+      if (x?.isConnected && (!document.activeElement || document.activeElement === document.body)) x.focus()
+    }
+  }, [asked])
+  return (
+    <Popover anchor={asked?.at} open={!!asked} onClose={onClose} label={asked ? `Delete ${asked.name}` : 'Delete'} className="files-views-delete" width={280}>
+      {asked && (
+        <div className="files-views-delete-body">
+          <p>Delete {asked.name}? It will not be proposed again.</p>
+          <div className="files-views-delete-actions">
+            <Button size="sm" ref={cancelRef} onClick={onClose}>
+              Cancel
+            </Button>
+            <Button size="sm" variant="secondary" className="files-views-delete-go" onClick={onDelete}>
+              Delete
+            </Button>
+          </div>
+        </div>
+      )}
+    </Popover>
+  )
+}
 
 /** The views bar's value for a view. */
 export const viewKey = (slug: string): string => `v:${slug}`
@@ -57,28 +89,14 @@ export function listedAsView(p: Proposal, known: ReadonlySet<string>): boolean {
   return (p.status === 'queued' || p.status === 'building') && !p.held && (!!p.revision || known.has(p.slug))
 }
 
-/** The views the bar lists and the proposals not yet built, read and kept fresh. */
-export function useViews(ws: string): { views: BuiltView[]; proposals: Proposal[] } {
-  const proposals = useProposals(ws) ?? []
-  const [views, setViews] = useState<View[]>([])
-  useEffect(() => {
-    let alive = true
-    const read = () => {
-      api
-        .views(ws)
-        // a file-type viewer thimble ships is listed where the corpus holds a file it opens
-        .then((v) => alive && setViews(v.filter((x) => x.ok && (x.origin !== 'builtin' || !!x.first_file))))
-        .catch(() => {
-          /* no views */
-        })
-    }
-    read()
-    const off = bus.on('view', () => read())
-    return () => {
-      alive = false
-      off()
-    }
-  }, [ws])
+/** The views the bar lists and the proposals not yet built, from the views list and the proposals. A file viewer
+ * (`file_type`) is a mode of the File browser, so the bar leaves it and its proposal out, as it leaves out a view
+ * switched off in Settings. Pure. */
+export function barList(list: readonly View[], all: readonly Proposal[]): { views: BuiltView[]; proposals: Proposal[] } {
+  const fileViewers = new Set(list.filter((x) => x.file_type).map((x) => x.slug))
+  // a file-type viewer thimble ships is listed where the corpus holds a file it opens
+  const views = list.filter((x) => x.ok && !x.file_type && (x.origin !== 'builtin' || !!x.first_file))
+  const proposals = all.filter((p) => !fileViewers.has(p.slug) && !p.off)
   const known = new Map(views.map((v) => [v.slug, v]))
   const slugs = new Set(known.keys())
   const listed = proposals.filter((p) => listedAsView(p, slugs))
@@ -95,6 +113,12 @@ export function useViews(ws: string): { views: BuiltView[]; proposals: Proposal[
   // a viewer the File browser suggests for a file type shows there alone until it is accepted, and an orientation's
   // view appears once it is built
   return { views: built, proposals: proposals.filter((p) => !listed.includes(p) && p.status !== 'built' && p.status !== 'dropped' && p.status !== 'suggested' && !p.held) }
+}
+
+/** The views the bar lists and the proposals not yet built, read and kept fresh (barList). */
+export function useViews(ws: string): { views: BuiltView[]; proposals: Proposal[] } {
+  const proposals = useProposals(ws) ?? []
+  return barList(useViewList(ws) ?? [], proposals)
 }
 
 /** The spinner's words for a proposal's build: queued, building, or waiting for permission while a request of its
@@ -213,17 +237,6 @@ export function ViewsBar({ ws, value, onChange, views, proposals, compact = fals
   useEffect(() => {
     if (asking) requestAnimationFrame(() => askInput.current?.focus())
   }, [asking])
-  // the delete confirm takes focus, and gives it back to its × when it closes, unless focus has moved elsewhere
-  const cancelRef = useRef<HTMLButtonElement>(null)
-  useEffect(() => {
-    if (!removing) return
-    const x = removing.at.querySelector<HTMLElement>('.seg-remove')
-    requestAnimationFrame(() => cancelRef.current?.focus())
-    return () => {
-      if (x?.isConnected && (!document.activeElement || document.activeElement === document.body)) x.focus()
-    }
-  }, [removing])
-
   const hide = (slug: string, on: boolean) =>
     setGone((prev) => {
       const next = new Set(prev)
@@ -315,23 +328,7 @@ export function ViewsBar({ ws, value, onChange, views, proposals, compact = fals
     ...hiddenProposals.map((p) => ({ id: `p:${p.slug}`, label: p.name, icon: 'view' as const, note: askingFor(p) ? 'waiting for permission' : STATE_NOTE[p.status], disabled: !p.chat, onSelect: () => openBuild(p) })),
   ]
 
-  const confirm = (
-    <Popover anchor={removing?.at} open={!!removing} onClose={() => setRemoving(null)} label={removing ? `Delete ${removing.name}` : 'Delete'} className="files-views-delete" width={280}>
-      {removing && (
-        <div className="files-views-delete-body">
-          <p>Delete {removing.name}? It will not be proposed again.</p>
-          <div className="files-views-delete-actions">
-            <Button size="sm" ref={cancelRef} onClick={() => setRemoving(null)}>
-              Cancel
-            </Button>
-            <Button size="sm" variant="secondary" className="files-views-delete-go" onClick={() => void remove(removing)}>
-              Delete
-            </Button>
-          </div>
-        </div>
-      )}
-    </Popover>
-  )
+  const confirm = <DeleteViewConfirm asked={removing} onClose={() => setRemoving(null)} onDelete={() => removing && void remove(removing)} />
   const newView = (
     <Popover anchor={askAt} open={asking} onClose={() => setAsking(false)} label="New view" className="files-views-ask">
       <form

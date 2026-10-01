@@ -18,6 +18,7 @@ import { fragmentIn, parseRef, refPath } from '../lib/refs'
 import { pressedPane, surfaceShown, useFilesViewsSlot, useShownSurfaces } from '../lib/surfaces'
 import { track } from '../lib/telemetry'
 import type { ConceptRun, LabelDraft, SourceKind, ViewQuery } from '../lib/types'
+import { findView } from '../lib/views'
 import { readSession, readStorage, storageKey, writeSession, writeStorage } from '../lib/workspace'
 import { ReadProbe, useDock, useFoldingSide } from '../shell/dock'
 import { viewSurface } from '../shell/panes'
@@ -26,11 +27,11 @@ import { findKey } from './find'
 import { FileSearch } from './FileSearch'
 import { folderPresence, presenceOf, viewDefaults, viewLabels, type Presence } from './labels'
 import { inferKind, TREE } from './params'
-import { Reader, type FindAsk } from './Reader'
+import { pickKey, Reader, type FindAsk } from './Reader'
 import { baseName, defaultTabs, fmtSize, glyphOf, kindIn, parentOf, Tree, useFolderStore } from './Tree'
 import { useFilesLabels, type FilesLabels } from './useLabels'
 import { OpenIn } from './OpenIn'
-import { chooseView, viewPlace } from './viewChoice'
+import { chooseView, viewPlace, viewValue } from './viewChoice'
 import { ViewPane } from './ViewPane'
 import { useLabelRuns, useLabelSide } from './ViewSide'
 import type { ViewQuote } from './ViewerFrame'
@@ -150,6 +151,16 @@ function useFlag(ws: string, name: string, def: boolean): [boolean, (v: boolean)
     [key],
   )
   return [v, set]
+}
+
+/** Why a ref to the view `slug` opens nothing: the view is switched off in Settings (its proposal's `off`), or there is
+ * none. */
+async function missingView(ws: string, slug: string): Promise<string> {
+  const p = await api
+    .proposals(ws)
+    .then((all) => all.find((x) => x.slug === slug))
+    .catch(() => undefined)
+  return p?.off ? `${p.name} is switched off in Settings.` : `there is no view ${slug}`
 }
 
 export function FilesTab({ ws, active, focused = active }: { ws: string; active: boolean; focused?: boolean }) {
@@ -307,6 +318,15 @@ export function FilesTab({ ws, active, focused = active }: { ws: string; active:
     },
     [openTab],
   )
+  // a file viewer is a mode of the File browser: a ref to it opens the file there, in that mode
+  const toFileViewer = useCallback(
+    (slug: string, at: Open, from?: string | null) => {
+      writeStorage(pickKey(ws, at.path), viewValue(slug))
+      toBrowser({ path: at.path, ref: at.ref }, from)
+      bus.emit('fileMode', { path: at.path, mode: viewValue(slug) })
+    },
+    [ws, toBrowser],
+  )
   // the view the analyst last used for a file, which a ref into it opens in; null for the File browser
   const usedFor = useCallback((path: string) => readStorage<string | null>(storageKey(ws, `openIn:${path}`), null), [ws])
   const used = useCallback((path: string, slug: string | null) => writeStorage(storageKey(ws, `openIn:${path}`), slug), [ws])
@@ -315,16 +335,15 @@ export function FilesTab({ ws, active, focused = active }: { ws: string; active:
     () =>
       bus.on('openView', ({ slug, query }) => {
         const from = pressedPane()
-        api
-          .views(ws)
-          .then((all) => {
-            const v = all.find((x) => x.slug === slug)
-            if (!v?.first_file) throw new Error(`there is no view ${slug}`)
-            toView(slug, { path: v.first_file, query: query ?? undefined }, from)
+        findView(ws, slug)
+          .then(async (v) => {
+            if (!v?.first_file) throw new Error(v ? `there is no view ${slug}` : await missingView(ws, slug))
+            if (v.file_type) toFileViewer(slug, { path: v.first_file }, from)
+            else toView(slug, { path: v.first_file, query: query ?? undefined }, from)
           })
           .catch((e: Error) => bus.emit('toast', { text: `Could not open the view. ${e.message}`, kind: 'error' }))
       }),
-    [ws, toView],
+    [ws, toView, toFileViewer],
   )
   useEffect(
     () =>
@@ -344,17 +363,20 @@ export function FilesTab({ ws, active, focused = active }: { ws: string; active:
       const p = parseRef(ref)
       try {
         if (p?.kind === 'view') {
+          const v = await findView(ws, p.slug)
           if (!p.key) {
-            const v = await api.views(ws).then((all) => all.find((x) => x.slug === p.slug))
-            if (!v) throw new Error(`there is no view ${p.slug}`)
-            toView(p.slug, v.first_file ? { path: v.first_file } : null, from)
+            if (!v) throw new Error(await missingView(ws, p.slug))
+            if (v.file_type && v.first_file) toFileViewer(p.slug, { path: v.first_file }, from)
+            else toView(p.slug, v.first_file ? { path: v.first_file } : null, from)
             return
           }
           const r = await api.resolveRef(ws, ref)
           const first = (r.refs ?? [])[0]
           const path = first ? refPath(first) : null
           if (!path) throw new Error(`${ref} names no file line`)
-          if (r.meta && (r.meta as { deleted?: boolean }).deleted) toBrowser({ path, ref: first }, from)
+          // a view that is gone or switched off in Settings leaves its refs to the File browser
+          if (!v || (r.meta && (r.meta as { deleted?: boolean }).deleted)) toBrowser({ path, ref: first }, from)
+          else if (v.file_type) toFileViewer(p.slug, { path, ref: first }, from)
           else {
             used(path, p.slug)
             toView(p.slug, { path, ref }, from)
@@ -369,6 +391,7 @@ export function FilesTab({ ws, active, focused = active }: { ws: string; active:
         const slug = chooseView({ views: claiming, remembered })
         const view = claiming.find((v) => v.slug === slug)
         if (!view) return toBrowser({ path, ref }, from)
+        if (view.file_type) return toFileViewer(view.slug, { path, ref }, from)
         const fragment = fragmentIn(ref, path)
         if (fragment == null) return toView(view.slug, { path }, from)
         const knows = (s: string, r: string) =>
@@ -389,7 +412,7 @@ export function FilesTab({ ws, active, focused = active }: { ws: string; active:
         bus.emit('toast', { text: `Could not open ${ref}. ${(e as Error).message}`, kind: 'error' })
       }
     },
-    [ws, toBrowser, toView, used, usedFor],
+    [ws, toBrowser, toView, toFileViewer, used, usedFor],
   )
   // Open in: the file in another view that claims it, at the place shown when that is in the file, or in the File browser
   const openIn = useCallback(

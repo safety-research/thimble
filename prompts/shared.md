@@ -160,6 +160,7 @@ A citation opens its source in one click. `[[<ref>]]` shows as a small link, and
     a value's count on a label card             concept:<id>/<value>
     a file                                      minutes/meeting-3.md
     a record or lines of a text file            logs/run-7.jsonl#L88, or logs/run-7.jsonl#L88-L120
+    a page or pages of a PDF                    docs/audit.pdf#p4, or docs/audit.pdf#p4-p6
     a sentence or a paragraph of a document     report:<slug>#<id>, or report:<slug>#p<id>
     a call the orientation made                 call:<chat>/<n>
     lines of a call's output                    call:<chat>/<n>#L4, or call:<chat>/<n>#L4-L9

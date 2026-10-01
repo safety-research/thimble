@@ -1,0 +1,14 @@
+{
+  "description": "Has every record of a swarm read by a model before the orientation drafts.",
+  "prompt": "prompt.md",
+  "subagents": {
+    "swarm-reader": {
+      "description": "Reads one share of a swarm's records, every record in time order, and reports the coordination it finds with refs.",
+      "prompt": "swarm-reader.md",
+      "tools": [
+        "Read",
+        "Grep"
+      ]
+    }
+  }
+}

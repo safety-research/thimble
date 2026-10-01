@@ -49,11 +49,12 @@ def test_an_earlier_build_s_models_and_modes_move_to_the_workspace_s_file(worksp
     runs as it did; main's model settings and the rest stay. The critic's row of old covered the checks, and view builds'
     row the dev agent's, the stricter one winning."""
     settings = workspaces_tmp / CORPUS / "settings.json"
-    _write(settings, {"hide_chat": True, "models": {"main": {"effort": "low"}, "orient": {"effort": "high", "model": ""},
-                                                    "subagents": {"model": "claude-sonnet-5"}, "verify": {"fast": False}},
+    _write(settings, {"run_cell_result_lines": 20,
+                      "models": {"main": {"effort": "low"}, "orient": {"effort": "high", "model": ""},
+                                 "subagents": {"model": "claude-sonnet-5"}, "verify": {"fast": False}},
                       "permission_modes": {"critic": "auto", "views": "manual", "dev": "bypass"}})
     assert config.models_for(CORPUS)["orient"]["effort"] == "high"
-    assert json.loads(settings.read_text()) == {"hide_chat": True, "models": {"main": {"effort": "low"}}}
+    assert json.loads(settings.read_text()) == {"run_cell_result_lines": 20, "models": {"main": {"effort": "low"}}}
     assert json.loads(userconf.workspace_file(CORPUS).read_text()) == {"agents": {
         "orientation": {"effort": "high", "subagentModel": "claude-sonnet-5"}, "cardCheck": {"fast": False},
         "critic": {"permissionMode": "auto"}, "checks": {"permissionMode": "auto"}, "dev": {"permissionMode": "manual"}}}
