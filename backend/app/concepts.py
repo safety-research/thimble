@@ -3791,8 +3791,8 @@ async def apply_scoped(c: str, *, scope: str, name: str, kind: str, text: str, v
 
 
 # the label colours by the names show_label takes (--label-1..12)
-COLOUR_NAMES = {"blue": 1, "orange": 2, "green": 3, "pink": 4, "vermilion": 5, "sky blue": 6, "brown": 7, "slate blue": 8,
-                "wine": 9, "olive": 10, "purple": 11, "red": 12}
+COLOUR_NAMES = {"blue": 1, "orange": 2, "green": 3, "sky blue": 4, "olive": 5, "teal": 6, "brown": 7, "navy": 8,
+                "grass green": 9, "cerulean": 10, "chestnut": 11, "cyan": 12}
 
 
 def show_concept(c: str, id_or_name: str, on: bool | None, values: list[str] | None = None,

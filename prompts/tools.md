@@ -139,7 +139,7 @@ Turn a label over files on or off in Files and the views, where it marks the rec
     "name": {"type": "string", "description": "The label's name or id."},
     "on": {"type": "boolean", "description": "Left out, the label stays on or off as it is."},
     "values": {"type": "array", "items": {"type": "string"}, "description": "The values to highlight while it is on, when not the ones it highlights now."},
-    "colours": {"type": "object", "additionalProperties": {"type": "string", "enum": ["blue", "orange", "green", "pink", "vermilion", "sky blue", "brown", "slate blue", "wine", "olive", "purple", "red"]}, "description": "A colour for each value named, which every card, view and Files show. A value that had the colour takes the one the other leaves."}
+    "colours": {"type": "object", "additionalProperties": {"type": "string", "enum": ["blue", "orange", "green", "sky blue", "olive", "teal", "brown", "navy", "grass green", "cerulean", "chestnut", "cyan"]}, "description": "A colour for each value named, which every card, view and Files show. A value that had the colour takes the one the other leaves."}
   },
   "required": ["name"]
 }
