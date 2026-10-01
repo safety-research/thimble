@@ -5,12 +5,16 @@ in any format: a Claude Code stream, JSON lines of messages or of whole conversa
 (a chat export, an eval log, a plain list of messages), a CSV or TSV file with a speaker column and a text column, or a
 text or markdown chat log whose lines start turns (`User: …`, `**Assistant:** …`, `[10:32] alice: …`, `<bob> …`,
 `## Human`, `2026-09-01 10:00 [user] …`, Claude Code's /export with `> ` and `⏺ `, aider's chat history). The answer is kept per path while its size and mtime_ns stay the same, so the File browser asks on every
-open and no corpus is walked. A false positive costs one more mode beside Raw, so the rules are lenient.
+open and no corpus is walked. A false positive costs one more mode beside Raw, so the rules are lenient: a key names
+who speaks in any case style and nesting (`speakerName`, `agent_speaker_id`, `data.speakerId`), but JSON lines read as
+messages only when several of them take turns (_takes_turns), and a markdown file's front matter is never a chat log.
 
 The answer, or None:
     {"format": "stream" | "messages" | "conversations" | "json" | "csv" | "text", "score": 0..1,
-     "keys"?: {"speaker", "text", "time"}   where a message keeps them (dotted paths into a record, or CSV columns),
-                                             and for whole conversations, "list": the key of their list of messages,
+     "keys"?: {"speaker", "text", "time"}   where a message keeps them (dotted paths into a record, or CSV columns;
+                                             "a|b" for who speaks under either key), and for whole conversations,
+                                             "list": the key of their list of messages,
+     "wrap"?: str                            a stream whose records each nest a stream record under this key,
      "pair"?: [str, str]                     for conversations that are a prompt and its response, their two keys,
      "lines"?: true                          JSON lines in a file the server pages as text (not named .jsonl),
      "style"?: str, "speakers"?: [str]       a text chat log's style of turn line, and who may start a turn in it,
@@ -41,6 +45,7 @@ router = APIRouter()
 
 HEAD_BYTES = 256 * 1024  # of a file's head that the sniff reads
 TEXT_HEAD_LINES = 400  # non-empty lines of a text file's head the sniff looks at
+FRONT_MATTER_MAX = 400  # lines a front matter may take before its closing fence
 JSONL_HEAD_LINES = 60
 STRONG = 0.95
 WEAK = 0.5
@@ -52,14 +57,27 @@ PARSING_MAX = 64
 
 SPEAKER_KEYS = ("role", "speaker", "sender", "author", "from", "user", "username", "participant", "character", "who",
                 "nick", "persona")
-# keys that name who speaks only in a record that also carries a time, since without one a record with a `name` and a
-# `body` is as likely a page as a post
-WEAK_SPEAKER_KEYS = ("name", "user_name", "editor", "label", "agent")
+# A key names who speaks when one of its words (speakerName, agent_speaker_id, Author-Name) is a speaker word and its
+# last word is a speaker word or one of SPEAKER_TAILS. A key whose speaker words are all weak names who speaks only in
+# a record that also carries a time, since without one a record with a `name` and a `body` is as likely a page as a post.
+SPEAKER_WORDS = frozenset(SPEAKER_KEYS) | {"nickname", "poster", "writer"}
+WEAK_SPEAKER_WORDS = frozenset({"name", "editor", "label", "agent"})
+SPEAKER_TAILS = SPEAKER_WORDS | WEAK_SPEAKER_WORDS | {"handle", "login", "display", "id", "uuid", "type", "kind"}
+# words that make a key name someone other than who speaks, or something about them
+NOT_SPEAKER_WORDS = frozenset({"to", "recipient", "recipients", "receiver", "target", "reply", "replied", "mention",
+                               "mentions", "mentioned", "parent", "count", "num", "number", "is", "has", "last", "next"})
 TEXT_KEYS = ("content", "text", "message", "body", "value", "parts", "utterance", "msg", "change_summary")
+TEXT_TAILS = frozenset({"text", "content", "body", "message", "msg", "utterance"})  # of a compound text key (messageText)
 TIME_KEYS = ("timestamp", "ts", "time", "created_at", "create_time", "date", "datetime", "sent_at", "created")
+TIME_TAILS = frozenset({"time", "timestamp", "ts", "date", "datetime"})  # of a compound time key (createdTime)
+TIME_AT = frozenset({"created", "sent", "posted", "published", "written", "updated"})  # of `<word>_at` (sentAt)
 # keys whose value names who speaks only when it is a role word, such as LangChain's {"type": "human", "data": {...}}
 ROLE_TYPE_KEYS = ("type", "role", "kind")
 WRAP_KEYS = ("message", "data", "msg", "payload")  # where a record nests its message (payload: Codex CLI's logs)
+# where a record that holds no message of its own may nest one, or nest a Claude Code stream record (the Agent SDK's
+# messages kept under `content` beside a database row's own columns)
+MORE_WRAPS = ("content", "record", "event", "entry", "item")
+MIN_TURNS = 3  # turn-like records a head needs when its speakers are not role words
 TITLE_KEYS = ("title", "name", "subject", "channel", "topic", "thread_title", "id", "uuid")
 LIST_KEYS = ("messages", "chat_messages", "conversation", "conversations", "turns", "dialogue", "dialog", "chat",
              "history", "utterances", "transcript", "thread", "replies")
@@ -67,6 +85,7 @@ PAIR_KEYS = (("prompt", "response"), ("prompt", "completion"), ("question", "ans
              ("input", "output"))
 STREAM_TYPES = {"assistant", "user", "system", "tool_progress", "result"}
 NAME_FIELDS = ("name", "display_name", "username", "real_name", "role", "id")
+NAME_NORMS = frozenset({"name", "displayname", "username", "realname", "fullname", "nickname", "nick", "handle", "login"})
 
 ROLE_WORDS = {"user", "assistant", "human", "ai", "system", "bot", "claude", "chatgpt", "gpt", "model", "agent", "me",
               "you", "interviewer", "interviewee", "q", "a", "question", "answer", "customer", "support", "operator",
@@ -102,7 +121,7 @@ STYLES: list[tuple[str, re.Pattern[str]]] = [
     ("tagged", re.compile(rf"^(?:(?P<time>{_DATE}[ T]{_CLOCK}\S*)\s+)?\[(?P<speaker>{_NAME})\]:?\s")),
     ("cc", re.compile(r"^(?P<mark>[>⏺●])\s(?=\S)")),
     ("aider", re.compile(r"^(?P<mark>####)\s")),
-    ("colon", re.compile(rf"^\s*(?:>\s*)?(?P<speaker>{_NAME})\s*:(?:\s+|$)")),
+    ("colon", re.compile(rf"^ ?(?:>\s*)?(?P<speaker>{_NAME})\s*:(?:\s+|$)")),
 ]
 # who a mark that starts a turn stands for: Claude Code's /export (`> ` the user's prompt, `⏺ ` or `● ` Claude's reply)
 # and aider's chat history (`#### ` the user's message)
@@ -125,15 +144,78 @@ _PARSING: dict[str, threading.Lock] = {}  # per file, so a file asked for twice 
 
 
 def _name_of(v: Any) -> str | None:
-    """Who a speaker value names: a short string, or a person object's name."""
+    """Who a speaker value names: a short one-line string, a number (an id), or a person object's name."""
     if isinstance(v, str):
         s = v.strip()
-        return s if 0 < len(s) <= 80 else None
+        return s if 0 < len(s) <= 80 and "\n" not in s else None
+    if isinstance(v, int) and not isinstance(v, bool):
+        return str(v)
     if isinstance(v, dict):
         for k in NAME_FIELDS:
             got = _name_of(v.get(k))
             if got:
                 return got
+        for k, x in v.items():
+            if isinstance(k, str) and _norm(k) in NAME_NORMS:
+                got = _name_of(x)
+                if got:
+                    return got
+    return None
+
+
+def _key_words(key: str) -> list[str]:
+    """A key's words, in any case style: `agent_speaker_id`, `speakerName`, `Speaker-Type`, `userID`."""
+    s = re.sub(r"([a-z0-9])([A-Z])", r"\1 \2", key)
+    s = re.sub(r"([A-Z]+)([A-Z][a-z])", r"\1 \2", s)
+    return re.findall(r"[a-z0-9]+", s.lower())
+
+
+def _speaker_rank(key: str) -> tuple[int, int, int, int] | None:
+    """How surely a key's name says it holds who speaks, lower first: (weak, tail, compound, order), the tail 0 for a
+    name, 1 for an id, 2 for a type, or a role beside another word (`speaker_type`); None for a key that names no
+    speaker."""
+    words = _key_words(key)
+    if not words or len(words) > 4 or words[-1] not in SPEAKER_TAILS or "".join(words) == "useragent":
+        return None
+    if any(w in NOT_SPEAKER_WORDS for w in words):
+        return None
+    strong = any(w in SPEAKER_WORDS for w in words)
+    if not strong and not any(w in WEAK_SPEAKER_WORDS for w in words):
+        return None
+    tail = words[-1]
+    rank = 1 if tail in ("id", "uuid") else 2 if tail in ("type", "kind") or (tail == "role" and len(words) > 1) else 0
+    single = len(words) == 1
+    order = SPEAKER_KEYS.index(words[0]) if single and words[0] in SPEAKER_KEYS else len(SPEAKER_KEYS)
+    return (0 if strong else 1, rank, 0 if single else 1, order)
+
+
+def _speaker_key(obj: dict[str, Any], skip: str | None, timed: bool) -> str | None:
+    """The key of `obj` that most surely holds who speaks (_speaker_rank) and holds a name; a weak one only when the
+    record carries a time (`timed`)."""
+    best: tuple[tuple[int, int, int, int], str] | None = None
+    for k, v in obj.items():
+        if not isinstance(k, str) or k == skip:
+            continue
+        rank = _speaker_rank(k)
+        if rank is None or (rank[0] and not timed) or not _name_of(v):
+            continue
+        if best is None or rank < best[0]:
+            best = (rank, k)
+    return best[1] if best else None
+
+
+def _time_key(obj: dict[str, Any]) -> str | None:
+    """The key of a record's time: one of TIME_KEYS, else a key whose last word says it is one (`createdTime`,
+    `sentAt`)."""
+    got = _first(obj, TIME_KEYS)
+    if got:
+        return got
+    for k, v in obj.items():
+        if not isinstance(k, str) or v in (None, "") or isinstance(v, (dict, list, bool)):
+            continue
+        words = _key_words(k)
+        if words and (words[-1] in TIME_TAILS or (len(words) == 2 and words[1] == "at" and words[0] in TIME_AT)):
+            return k
     return None
 
 
@@ -178,33 +260,45 @@ def _first(obj: dict[str, Any], keys: tuple[str, ...]) -> str | None:
     return next((k for k in keys if obj.get(k) not in (None, "", [], {})), None)
 
 
-def message_keys(obj: Any) -> dict[str, str] | None:
-    """The keys of a record that hold a message (dotted for a nested `message` or `data`): {speaker, text, time?}, or
-    None when it holds none."""
-    if not isinstance(obj, dict):
+def message_keys(obj: Any, timed: bool = False, depth: int = 0) -> dict[str, str] | None:
+    """The keys of a record that hold a message (dotted for a nested one, as `message.author`): {speaker, text, time?},
+    or None when it holds none. `timed` when a record around it carries the time."""
+    if not isinstance(obj, dict) or depth > 3:
         return None
+    outer_time = _time_key(obj)
     for wrap in WRAP_KEYS:
         inner = obj.get(wrap)
         if isinstance(inner, dict):
-            got = message_keys(inner)
+            got = message_keys(inner, timed or bool(outer_time), depth + 1)
             if got:
                 out = {k: f"{wrap}.{v}" for k, v in got.items()}
             elif (text := _text_key(inner)) and (role := _role_key(obj)):
                 out = {"speaker": role, "text": f"{wrap}.{text}"}
             else:
                 continue
-            if "time" not in out and (t := _first(obj, TIME_KEYS)):
-                out["time"] = t
+            if "time" not in out and outer_time:
+                out["time"] = outer_time
             return out
+    got = _own_message_keys(obj, timed)
+    if got is not None or depth:
+        return got
+    for wrap in MORE_WRAPS:
+        inner = obj.get(wrap)
+        if isinstance(inner, dict) and (got := message_keys(inner, bool(outer_time), depth + 1)):
+            out = {k: f"{wrap}.{v}" for k, v in got.items()}
+            if "time" not in out and outer_time:
+                out["time"] = outer_time
+            return out
+    return None
+
+
+def _own_message_keys(obj: dict[str, Any], timed: bool) -> dict[str, str] | None:
+    """message_keys among a record's own keys, nested ones aside."""
     text = _text_key(obj)
     if text is None:
         return None
-    time = _first(obj, TIME_KEYS)
-    speaker = next((k for k in SPEAKER_KEYS if k != text and _name_of(obj.get(k))), None)
-    if speaker is None and time:
-        speaker = next((k for k in WEAK_SPEAKER_KEYS if k != text and _name_of(obj.get(k))), None)
-    if speaker is None:
-        speaker = _role_key(obj)
+    time = _time_key(obj)
+    speaker = _speaker_key(obj, text, timed or bool(time)) or _role_key(obj)
     if speaker is None:
         return None
     out = {"speaker": speaker, "text": text}
@@ -214,7 +308,17 @@ def message_keys(obj: Any) -> dict[str, str] | None:
 
 
 def _text_key(obj: dict[str, Any]) -> str | None:
-    return next((k for k in TEXT_KEYS if k in obj and _text_of(obj[k]) is not None), None)
+    """The key of a record's words: one of TEXT_KEYS, else a key of a string whose last word says it holds words
+    (`messageText`, `body_text`)."""
+    got = next((k for k in TEXT_KEYS if k in obj and _text_of(obj[k]) is not None), None)
+    if got:
+        return got
+    for k, v in obj.items():
+        if isinstance(k, str) and isinstance(v, str):
+            words = _key_words(k)
+            if 2 <= len(words) <= 3 and words[-1] in TEXT_TAILS:
+                return k
+    return None
 
 
 def _role_key(obj: dict[str, Any]) -> str | None:
@@ -223,6 +327,13 @@ def _role_key(obj: dict[str, Any]) -> str | None:
 
 
 def _get(obj: Any, dotted: str) -> Any:
+    """A record's value at a dotted key; for `a|b`, the first of the keys that holds a value."""
+    if "|" in dotted:
+        for alt in dotted.split("|"):
+            v = _get(obj, alt)
+            if v not in (None, "", [], {}):
+                return v
+        return None
     for part in dotted.split("."):
         if not isinstance(obj, dict):
             return None
@@ -297,6 +408,18 @@ def _chatgpt_turns(conv: dict[str, Any], mapping: dict[str, Any]) -> list[dict[s
 def is_stream(obj: Any) -> bool:
     return isinstance(obj, dict) and obj.get("type") in STREAM_TYPES and (
         isinstance(obj.get("message"), dict) or isinstance(obj.get("session_id"), str) or isinstance(obj.get("uuid"), str))
+
+
+def stream_wrap(obj: Any) -> str | None:
+    """Where a record holds a Claude Code stream record: "" for one that is one, the key of one it nests (MORE_WRAPS,
+    WRAP_KEYS), else None."""
+    if is_stream(obj):
+        return ""
+    if isinstance(obj, dict):
+        for k in (*MORE_WRAPS, *WRAP_KEYS):
+            if is_stream(obj.get(k)):
+                return k
+    return None
 
 
 def _title_of(obj: Any) -> str:
@@ -416,23 +539,88 @@ def _sniff_jsonl(text: str, parsed: bool) -> dict[str, Any] | None:
         return None
     lines = {} if parsed else {"lines": True}
     n = len(objs)
-    keyed = [k for k in map(message_keys, objs) if k]
-    if sum(1 for r in objs if is_stream(r)) * 5 >= n * 3:
-        # a stream in a file paged as text shows as posts, under the keys its messages keep
-        return {"format": "stream", "score": 1.0, **lines, **({"keys": _commonest(keyed)} if lines and keyed else {})}
+    wraps = [w for w in map(stream_wrap, objs) if w is not None]
+    if len(wraps) * 5 >= n * 3:
+        # a stream in a file paged as text shows as posts, under the keys its messages keep; one nested in each record
+        # says under which key (`wrap`)
+        keyed = [k for k in map(message_keys, objs) if k]
+        wrap = _commonest(wraps)
+        return {"format": "stream", "score": 1.0, **({"wrap": wrap} if wrap else {}), **lines,
+                **({"keys": _commonest(keyed)} if lines and keyed else {})}
     convs = sum(1 for r in objs if conversation_of(r))
     if convs * 2 >= n:
         found = [k for k in map(_conversation_keys, objs) if k]
         return {"format": "conversations", "score": STRONG, **lines, **(_commonest(found) if found else {})}
-    if len(keyed) * 2 >= n or (len(keyed) >= 2 and len(keyed) * 5 >= n):
-        best = _commonest(keyed)
-        speaker_leaf = best["speaker"].rsplit(".", 1)[-1]
-        strong = len(keyed) * 10 >= n * 7 and (speaker_leaf in SPEAKER_KEYS or speaker_leaf in ROLE_TYPE_KEYS)
-        return {"format": "messages", "score": STRONG if strong else WEAK, "keys": best, **lines}
-    return None
+    keyed_objs = [(r, k) for r in objs if (k := message_keys(r))]
+    if not (len(keyed_objs) * 2 >= n or (len(keyed_objs) >= 2 and len(keyed_objs) * 5 >= n)):
+        return None
+    best = _commonest([k for _, k in keyed_objs])
+    speakers = [s for r, _ in keyed_objs if (s := _name_of(_get(r, best["speaker"])))]
+    if not _takes_turns(speakers):
+        return None
+    others = _other_speakers(objs, best)
+    if others:
+        best = {**best, "speaker": "|".join([best["speaker"], *others])}
+    with_speaker = sum(1 for r in objs if _name_of(_get(r, best["speaker"])))
+    words = _key_words(best["speaker"].split("|")[0].rsplit(".", 1)[-1])
+    sure_key = any(w in SPEAKER_WORDS for w in words) or (len(words) == 1 and words[0] in ROLE_TYPE_KEYS)
+    strong = (len(keyed_objs) * 2 >= n and with_speaker * 10 >= n * 7 and sure_key
+              and _in_time_order([_get(r, best["time"]) for r in objs] if "time" in best else []))
+    return {"format": "messages", "score": STRONG if strong else WEAK, "keys": best, **lines}
 
 
-def _commonest(items: list[dict[str, Any]]) -> dict[str, Any]:
+def _takes_turns(speakers: list[str]) -> bool:
+    """Whether the speakers of a head's turn-like records take turns: role words (a user and an assistant) in at least
+    two, else MIN_TURNS or more in which some speaker speaks again and most do not speak only once, so a file of
+    documents each by its own author is no transcript."""
+    if len(speakers) < 2:
+        return False
+    counts: dict[str, int] = {}
+    for s in speakers:
+        counts[s.lower()] = counts.get(s.lower(), 0) + 1
+    if sum(c for s, c in counts.items() if s in ROLE_WORDS) * 2 >= len(speakers):
+        return True
+    return len(speakers) >= MIN_TURNS and max(counts.values()) >= 2 and len(counts) <= max(2, len(speakers) * 0.8)
+
+
+def _other_speakers(objs: list[dict[str, Any]], keys: dict[str, str]) -> list[str]:
+    """The keys that hold who speaks in the records where `keys["speaker"]` holds no one (a village's agents' actions
+    beside its people's talk), most used first, at most three, beside it in the same nested record."""
+    prefix, _, _ = keys["speaker"].rpartition(".")
+    counts: dict[str, int] = {}
+    for r in objs:
+        if _name_of(_get(r, keys["speaker"])):
+            continue
+        inner = _get(r, prefix) if prefix else r
+        if isinstance(inner, dict) and (k := _speaker_key(inner, keys.get("text", "").rsplit(".", 1)[-1], "time" in keys)):
+            counts[k] = counts.get(k, 0) + 1
+    ranked = sorted(counts, key=lambda k: -counts[k])[:3]
+    return [f"{prefix}.{k}" if prefix else k for k in ranked]
+
+
+_ISO = re.compile(r"\d{4}-\d{2}-\d{2}")
+
+
+def _in_time_order(values: list[Any]) -> bool:
+    """Whether a head's records follow their times, forward or back (a transcript reads in order; rows of a table in
+    any order read better as the table): true when at most a fifth of the steps between times go the other way, and
+    when too few times compare (ISO stamps or numbers) to tell."""
+    keys: list[Any] = []
+    for v in values:
+        if isinstance(v, str) and _ISO.match(v.strip()):
+            keys.append(v.strip()[:10] + " " + v.strip()[11:])
+        elif isinstance(v, (int, float)) and not isinstance(v, bool):
+            keys.append(float(v))
+    keys = [k for k in keys if type(k) is type(keys[0])] if keys else []
+    if len(keys) < 3:
+        return True
+    steps = list(zip(keys, keys[1:]))
+    up = sum(1 for a, b in steps if b >= a)
+    down = sum(1 for a, b in steps if b <= a)
+    return max(up, down) * 5 >= len(steps) * 4
+
+
+def _commonest(items: list[Any]) -> Any:
     counts: dict[str, int] = {}
     for it in items:
         k = json.dumps(it, sort_keys=True)
@@ -471,7 +659,7 @@ def _sniff_json(text: str, complete: bool) -> dict[str, Any] | None:
                 return {"format": "json", "score": STRONG if n >= 2 else WEAK}
             return None
     roles = len(re.findall(r'"(?:role|sender|speaker|author|from)"\s*:\s*(?:\{[^{}]{0,200}?"role"\s*:\s*)?"(?:user|assistant|system|human|ai|tool|model|bot|gpt|claude)"', text, re.I))
-    speakers = len(re.findall(r'"(?:role|sender|speaker|author|from|user|username)"\s*:\s*[\{"]', text))
+    speakers = len(re.findall(r'"(?:role|sender|speaker|author|from|user|username|[A-Za-z_]*(?:[Ss]peaker|[Aa]uthor|[Ss]ender)[A-Za-z_]*)"\s*:\s*[\{"]', text))
     texts = len(re.findall(r'"(?:content|text|message|body|parts|value|utterance)"\s*:', text))
     marker = re.search(r'"(?:messages|chat_messages|conversation|conversations|mapping|turns|dialogue|transcript)"\s*:\s*[\[{]', text)
     if roles >= 2 and texts >= 2:
@@ -549,11 +737,25 @@ def _speaker_ok(speaker: str) -> bool:
     return bool(low) and low not in NOT_SPEAKERS and len(low.split()) <= 4 and not low.startswith(("http", "www."))
 
 
+def front_matter_lines(lines: list[str]) -> int:
+    """How many of a file's first lines its front matter takes (YAML between `---` lines, TOML between `+++` lines),
+    both fences counted; 0 for a file with none."""
+    if not lines or lines[0].lstrip("\ufeff").strip() not in ("---", "+++"):
+        return 0
+    fence = lines[0].lstrip("\ufeff").strip()
+    for i in range(1, min(len(lines), FRONT_MATTER_MAX)):
+        if lines[i].strip() == fence or (fence == "---" and lines[i].strip() == "..."):
+            return i + 1
+    return 0
+
+
 def sniff_text(text: str, markdown: bool = False) -> dict[str, Any] | None:
     """A text or markdown chat log: the style whose turn lines recur most in the head, with at least two speakers who
     take turns, one of them more than once. In markdown, which reads well rendered, the sniff is sure only when turn
-    lines are at least a fifth of the head's lines, so a document quoting an example exchange keeps Rendered first."""
-    lines = [ln for ln in text.split("\n") if ln.strip()][:TEXT_HEAD_LINES]
+    lines are at least a fifth of the head's lines, so a document quoting an example exchange keeps Rendered first. A
+    front matter's lines are no turns, nor is an indented `Word:` line (a YAML key)."""
+    raw = text.split("\n")
+    lines = [ln for ln in raw[front_matter_lines(raw):] if ln.strip()][:TEXT_HEAD_LINES]
     if len(lines) < 2:
         return None
     best: tuple[float, str, int, dict[str, int]] | None = None
