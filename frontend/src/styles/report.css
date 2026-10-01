@@ -95,6 +95,23 @@
 .wu-bar .wu-types::-webkit-scrollbar {
   display: none;
 }
+/* the sheet Revise opens under it before a writer starts (WriteAction) */
+.wu-revise-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+}
+.wu-revise-body p {
+  margin: 0;
+  font: 400 var(--text-ui-sm) / 1.45 var(--font-body);
+  color: var(--text-primary);
+}
+.wu-revise-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+}
 .wu-type {
   display: inline-flex;
   align-items: center;

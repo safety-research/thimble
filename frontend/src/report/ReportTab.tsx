@@ -1,8 +1,8 @@
 // The Report tab: the type bar, then the document in its arrangement. The bar holds the types as chips with an icon,
 // drawn as the Files views bar draws its views (Segmented), + New
 // (DocMenus.tsx), Export (ExportMenu.tsx), the story's Read, the lock note (LockNote.tsx), History (History.tsx) and the primary action,
-// Write or Revise, which asks the analyst's session for the document (a `write` channel event; `report` stream events
-// follow it). A failed write stays on its document (writeFailures.ts) with Retry until dismissed or written. A document
+// Write or Revise (WriteAction.tsx, where Revise asks first), which asks the analyst's session for the document (a
+// `write` channel event; `report` stream events follow it). A failed write stays on its document (writeFailures.ts) with Retry until dismissed or written. A document
 // not written yet is its frame (GET …/frame). The views' module (Documents.tsx) is imported once in an effect rather than
 // with React.lazy, whose Suspense retry can stall; documents are kept by slug so a switch never shows an empty body.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
@@ -28,7 +28,8 @@ import { DraftDiff, HistoryMenu, PastDraft } from './History'
 import type { HistoryRow, HistoryView } from './historyModel'
 import { LockNote } from './LockNote'
 import { ExportMenu } from './ExportMenu'
-import { docKey, labelReadDocument, ownType, rendererOf, reportFilterSets, SLUG, switcherItems } from './model'
+import { docKey, docLabel, labelReadDocument, ownType, rendererOf, reportFilterSets, SLUG, switcherItems } from './model'
+import { WriteAction } from './WriteAction'
 import { failedDetail, failedReport, failedText, useWriteFailures, WRITE_RETRY_NOTE } from './writeFailures'
 import { ApiErrorCard } from '../chat/ApiError'
 import { failureText, loadChunk } from '../lib/chunkRecovery'
@@ -376,9 +377,14 @@ export function ReportTab({ ws, active }: { ws: string; active: boolean }) {
         {written && <ExportMenu ws={ws} slug={slug} page={isPage} />}
         {isPage && load.state !== 'loading' && <Button variant="icon" icon="code" title="Code" aria-label="Code" active={drawer || load.state === 'none'} disabled={load.state === 'none'} onClick={() => setDrawer((d) => !d)} />}
         {written && <LockNote doc={bodyDoc} root={root} />}
-        <Button variant="primary" busy={busy} disabled={(load.state === 'loading' && !held) || load.state === 'error'} onClick={() => void write()}>
-          {busy ? 'Writing' : written ? 'Revise' : 'Write'}
-        </Button>
+        <WriteAction
+          name={ownType(slug) ? docLabel(slug, types) : docLabel(slug, types).toLowerCase()}
+          written={written}
+          busy={busy}
+          disabled={(load.state === 'loading' && !held) || load.state === 'error'}
+          history={!isPage && !isVideo}
+          onWrite={() => void write()}
+        />
       </div>
       {failure && !busy && (
         <div className="wu-failed" data-failed={slug}>
