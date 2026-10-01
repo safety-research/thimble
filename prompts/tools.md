@@ -796,7 +796,7 @@ In the {state} state, a picture of the page does not show the test label's colou
 
 ## view-no-label-controls
 
-With the test label on, no element of the page has `data-label` naming it, so the page draws no label controls. thimble draws none above a view, so the page shows the labels `thimble.onLabels` lists in `all`, each in a control such as a legend entry or a switch that carries `data-label` with the label's id, and keeps that element in the page while a menu that holds it is closed.
+With the test label on, no element of the page has `data-label` naming it, so the page draws no label controls. thimble draws none above a view, so the page lists the labels `thimble.onLabels` gives in `all`, each with a switch and its colours, and shows each label that is on in view, such as in a legend, each such element carrying `data-label` with the label's id.
 
 ## view-labels-by-itself
 

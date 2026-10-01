@@ -775,7 +775,7 @@
       const sws = previewColours(f).map((c) => `<i class="sw" style="width:5px;border-radius:1px;background:${c}"></i>`).join('')
       return `<button class="mi" data-act="field" data-f="${f}"><span class="ck">${on ? CHECK : ''}</span>${esc(FIELD_NAMES[f])}<span class="n">${sws}</span></button>`
     }).join('')
-    // every label over files, as thimble lists them; a click turns one on or off in thimble's Labels pane
+    // every label over files, as thimble lists them; a click turns one on or off
     const all = labelState.all || labelState.labels.map((l) => ({ ...l, on: true }))
     const sw = (l, v) => {
       const i = `<i class="sw" style="background:${esc(v.colour)}"></i>`
