@@ -110,7 +110,8 @@ CONTROL_KEPT = ("initialize", "interrupt", "set_model", "set_max_thinking_tokens
 STDIN_DROPPED = ("update_environment_variables",)  # messages on a session's stdin that never reach it
 # claude answers a request of a subtype it does not know with an error naming the subtype, so a refused request is
 # sent on under this subtype
-CONTROL_REFUSED = "{subtype}, which thimble refuses since the permission mode, settings, plugins and login are the analyst's"
+CONTROL_REFUSED = ("{subtype}, which thimble refuses since the permission mode, settings, plugins and login are the "
+                   "analyst's")
 
 
 class HarnessError(RuntimeError):
