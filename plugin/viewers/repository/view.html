@@ -1423,16 +1423,16 @@
     const b = el('span', 'badge')
     const ic = icon(x.kind === 'issue' ? 'issue' : fixes ? 'fixed' : ACTION_ICON[x.action] || 'comment')
     b.append(ic)
-    const unmarked = labelOn() && x.part < 0
+    const unmarked = labelOn() && x.colour_key < 0
     if (!unmarked && !(field() === 'action' && !labelOn() && ['pushed', 'commented', 'opened', 'posted'].includes(x.action))) {
       b.classList.add('fill')
-      b.style.setProperty('--c', partColour(x.part))
+      b.style.setProperty('--c', partColour(x.colour_key))
     }
     return b
   }
   // the label value that marks a record, as its pill on the conversation's line
   function markOf(x) {
-    return labelOn() && x.part >= 0 ? labelPill(x.part) : null
+    return labelOn() && x.colour_key >= 0 ? labelPill(x.colour_key) : null
   }
   // a record's file and line, which opens in the File browser at that line
   function fileChip(ref) {
@@ -1781,7 +1781,7 @@
           n.append(note.text)
           main.append(n)
         }
-        main.append(strip(u.records.filter((x) => x.kind !== 'agent').map((x) => [x.ref, x.hours, x.action, x.part]), 420, 18))
+        main.append(strip(u.records.filter((x) => x.kind !== 'agent').map((x) => [x.ref, x.hours, x.action, x.colour_key]), 420, 18))
         main.lastChild.classList.add('dstrip')
       }
       const tl = el('div', 'timeline')

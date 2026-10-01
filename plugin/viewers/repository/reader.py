@@ -939,8 +939,8 @@ def _iso(t):
 
 
 def _texts(index, events, part=None):
-    """The records of the events as a page shows them: [{ref, kind, action, author, at, hours, text, ..., part}], `at`
-    in UTC, `part` the event's under the callable `part` when given."""
+    """The records of the events as a page shows them: [{ref, kind, action, author, at, hours, text, ..., colour_key}],
+    `at` in UTC, `colour_key` the event's under the callable `part` when given."""
     read = _read(index, [e[0] for e in events])
     out = []
     for e in events:
@@ -952,7 +952,7 @@ def _texts(index, events, part=None):
              "hours": e[1], **{f: r[f] for f in ("number", "title", "text", "sha", "diff", "verdict", "reason",
                                                  "closes", "thread", "forced", "before") if r.get(f) is not None}}
         if part:
-            x["part"] = part(e)
+            x["colour_key"] = part(e)
         out.append(x)
     return out
 
@@ -978,8 +978,8 @@ def _elsewhere(index, u):
 
 
 def _detail(index, key, field="action", hide=(), colours=True):
-    """One unit's page: its facts and its records with their text, in time order, each with its part (_part) under the
-    colour field `field`, or the labels while one is on and `colours` holds."""
+    """One unit's page: its facts and its records with their text, in time order, each with its colour_key (_part)
+    under the colour field `field`, or the labels while one is on and `colours` holds."""
     u = index["units"].get(key)
     if u is None:
         return None
