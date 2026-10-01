@@ -1385,7 +1385,7 @@ class Installed(NamedTuple):
 def _claude_json(claude: str, args: list[str], cwd: Path) -> list[Any]:
     """The list a `claude ... --json` listing prints, [] when it fails or prints something else."""
     r = subprocess.run([claude, *args, "--json"], cwd=cwd, capture_output=True, text=True,
-                       timeout=PLUGIN_LIST_TIMEOUT_S, stdin=subprocess.DEVNULL, check=False)
+                       timeout=PLUGIN_LIST_TIMEOUT_S, stdin=subprocess.DEVNULL, check=False, env=config.launch_environ())
     out = json.loads(r.stdout) if r.returncode == 0 and r.stdout.strip() else []
     return out if isinstance(out, list) else []
 
@@ -1965,7 +1965,7 @@ def claude_code_version() -> str | None:
     if not exe:
         return None
     try:
-        out = subprocess.run([exe, "--version"], capture_output=True, text=True, timeout=10)
+        out = subprocess.run([exe, "--version"], capture_output=True, text=True, timeout=10, env=config.launch_environ())
     except (OSError, subprocess.SubprocessError):
         return None
     v = version_tuple(out.stdout or out.stderr)
