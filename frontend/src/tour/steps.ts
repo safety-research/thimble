@@ -1,6 +1,7 @@
 // The tour's steps (the shape engine.ts takes): which surface each needs, what it points at, where its popover sits,
-// what it says and what it brings. Every example is the tour's own (examples.json, captured from real thimble markup
-// and marked Example); a step that asks the analyst to act acts only on that example, so nothing reaches the server.
+// what it says and what it brings. Every example is the tour's own (examples.json, captured from real thimble markup;
+// all but the views step's are marked Example); a step that asks the analyst to act acts only on that example, so
+// nothing reaches the server.
 import { setMarkup, type Api, type Example, type Step } from './engine'
 import reportFigs from './report-figs.json'
 
@@ -181,7 +182,6 @@ const viewsExample = (api: Api): Example => {
     }
   }
   frame.addEventListener('load', () => escape(frame.contentWindow))
-  // no Example badge on the view: the step's text says it is an example, and a badge would sit on the view's header
   api.ex.append(bar, body)
   const layout = () => {
     const B = api.rectOf(realBar()),
