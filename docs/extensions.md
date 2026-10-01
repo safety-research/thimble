@@ -76,8 +76,9 @@ gets and how it answers. Permission modes and hooks are yours, and an extension 
 ```json
 {"description": "Has every record of a swarm read by a model before the orientation drafts.",
  "prompt": "prompt.md",
- "subagents": {"swarm-reader": {"description": "Reads one share of a swarm's records.",
-                                "prompt": "swarm-reader.md", "tools": ["Read", "Grep"]}}}
+ "subagents": {"swarm-reader": {
+   "description": "Reads one share of a swarm's records, every record in time order, and reports the coordination it finds with refs.",
+   "prompt": "swarm-reader.md", "tools": ["Read", "Grep"]}}}
 ```
 
 Prompts can use `{{default}}` or `{{default#<heading>}}` (thimble's own prompt, or one section of it), `{{dir}}` (the
