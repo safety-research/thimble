@@ -2572,6 +2572,14 @@
   align-self: center;
   margin: 0;
 }
+.view-review-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.view-review-more {
+  color: var(--text-secondary);
+}
 /* while a newer version of a view builds or its review runs, its whole chip in the views bar shimmers, as a card does
    while it is checked (over the chip's own background colour, so a chosen chip keeps its fill) */
 .files-views .seg-opt.is-updating {

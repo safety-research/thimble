@@ -205,6 +205,19 @@ export function reviewLine(r: ViewReview): string {
   return at ? `Checked at ${at}` : 'Checked'
 }
 
+/** The review's problems under a title, one per line, the first three and how many more. */
+function ReviewList({ title, items }: { title: string; items: string[] }) {
+  return (
+    <span className="view-review-list">
+      <span className="bcell-check-label">{title}</span>
+      {items.slice(0, 3).map((x, i) => (
+        <span key={i}>{x}</span>
+      ))}
+      {items.length > 3 && <span className="view-review-more">and {items.length - 3} more</span>}
+    </span>
+  )
+}
+
 /** The review of a view's pictures as the card check's mark: a spinner while it runs (a click stops it), a check glyph
  * when it is done, a flag when problems are left, and a run-again glyph when it failed or was stopped. Whenever it
  * revised the view and is not running, its hover offers Undo, and `onUndo` runs before it is sent. */
@@ -233,18 +246,8 @@ function ReviewMark({ ws, slug, review: r, onUndo }: { ws: string; slug: string;
       {(close) => (
         <>
           <span className="bcell-check-when">{line}</span>
-          {revised.length > 0 && (
-            <span className="bcell-check-what">
-              Revised: {revised.slice(0, 3).join('; ')}
-              {revised.length > 3 ? ` and ${revised.length - 3} more` : ''}
-            </span>
-          )}
-          {r.state === 'done' && left.length > 0 && (
-            <span className="bcell-check-what">
-              Left: {left.slice(0, 3).join('; ')}
-              {left.length > 3 ? ` and ${left.length - 3} more` : ''}
-            </span>
-          )}
+          {revised.length > 0 && <ReviewList title="Revised" items={revised} />}
+          {r.state === 'done' && left.length > 0 && <ReviewList title="Left" items={left} />}
           {r.state === 'done' && r.note && <span className="bcell-check-what">{r.note}</span>}
           {r.state === 'done' && !revised.length && !left.length && !r.undo && <span className="bcell-check-what">Nothing to fix.</span>}
           {(running || ended || revised.length > 0) && (
