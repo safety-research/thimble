@@ -41,38 +41,34 @@ def main(argv: list[str]) -> int:
     except Exception as e:  # noqa: BLE001 — any failure to connect ends the session with its reason
         print(f"thimble's claude: could not reach thimble at {api}: {e}", file=sys.stderr)
         return 1
-    ws.send(json.dumps({"argv": argv, "cwd": os.getcwd()}))
-
-    def feed() -> None:
-        try:
-            while True:
-                data = os.read(0, CHUNK)
-                if not data:
-                    break
-                ws.send(data)
-            ws.send(json.dumps({"eof": True}))
-        except (OSError, ConnectionClosed):
-            pass
-
-    threading.Thread(target=feed, daemon=True).start()
     code = 1
-    try:
-        for frame in ws:
-            if isinstance(frame, bytes):
-                out = sys.stdout.buffer if frame[:1] == b"o" else sys.stderr.buffer
-                out.write(frame[1:])
-                out.flush()
-            else:
-                msg = json.loads(frame)
-                if "exit" in msg:
-                    code = int(msg["exit"])
-                    break
-    except ConnectionClosed:
-        pass
-    finally:
+    with ws:
+        ws.send(json.dumps({"argv": argv, "cwd": os.getcwd()}))
+
+        def feed() -> None:
+            try:
+                while True:
+                    data = os.read(0, CHUNK)
+                    if not data:
+                        break
+                    ws.send(data)
+                ws.send(json.dumps({"eof": True}))
+            except (OSError, ConnectionClosed):
+                pass
+
+        threading.Thread(target=feed, daemon=True).start()
         try:
-            ws.close()
-        except Exception:  # noqa: BLE001
+            for frame in ws:
+                if isinstance(frame, bytes):
+                    out = sys.stdout.buffer if frame[:1] == b"o" else sys.stderr.buffer
+                    out.write(frame[1:])
+                    out.flush()
+                else:
+                    msg = json.loads(frame)
+                    if "exit" in msg:
+                        code = int(msg["exit"])
+                        break
+        except ConnectionClosed:
             pass
     return code
 

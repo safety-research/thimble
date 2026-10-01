@@ -376,6 +376,9 @@ def read_extension(root: Path, expect: str | None = None, have: set[str] | None 
             front, _ = _front(d / TYPE_MD)
             reports.append({"slug": d.name, "name": _one(front.get("name") or d.name),
                             "description": _one(front.get("description")), "export": (d / EXPORT_PY).is_file()})
+    from . import roles  # noqa: PLC0415
+
+    problems += [p for part in roles.extension_parts(root, name) for p in part.problems]
     return {"name": name or expect or root.name, "version": _one(raw.get("version")), "thimble": rng,
             "python": python, "js": js, "needs": needs, "root": str(root), "problems": problems + waits,
             "waits": waits, "views": vs, "cards": cards, "agents": agents, "orient": orient, "replaces": replaces,
@@ -1064,6 +1067,11 @@ def _row(kind: str, name: str, about: str) -> str:
     return f"  {kind.ljust(12)}" + (f"{name}: {about}" if name and about else name or about)
 
 
+ROLE_WAYS = {"prompt": "Its prompt {what} goes to the agent{replace}.",
+             "sdk": "It runs the agent with its Agent SDK program {what}, in the agent's sandbox.",
+             "command": "It runs the agent with its own program, `{what}`, in the agent's sandbox."}
+
+
 def summary(info: dict[str, Any], how: dict[str, Any]) -> list[str]:
     """What `thimble extension add` shows before it asks: each contribution with its own description, what it needs,
     and where its code runs."""
@@ -1085,6 +1093,12 @@ def summary(info: dict[str, Any], how: dict[str, Any]) -> list[str]:
             out.append(_row("orientation", "", f"{about} It {what}." if about else f"It {what}."))
     for r in info["reports"]:
         out.append(_row("report type", r["slug"], r["description"]) + (" With its own exports." if r["export"] else ""))
+    from . import roles  # noqa: PLC0415 — roles reads agents/<role>/agent.json
+
+    for part in roles.extension_parts(root, info["name"]):
+        out.append(_row("agent", part.role, part.description) + " " + ROLE_WAYS[part.way].format(
+            what=part.spec.get(part.way) if part.way != "command" else " ".join(part.spec["command"]),
+            replace=" in place of thimble's" if part.spec.get("replace") else ""))
     if info["thimble"]:
         out.append(f"  It works with thimble {info['thimble']}.")
     if info["js"]:
