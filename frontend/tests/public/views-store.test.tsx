@@ -103,3 +103,26 @@ test('callers that ask for the views of a file in the same task share one read, 
   await viewsForFile('ws-file', 'b.jsonl')
   expect(forFile).toHaveBeenCalledTimes(3)
 })
+
+const pending = (slug: string) => ({ slug, name: slug, ok: true, origin: 'workspace', first_file: null, files_pending: true }) as unknown as View
+
+test('while the corpus walk has not reached a view its list is read again, and a lookup waits for the walk', async () => {
+  const views = vi.spyOn(api, 'views').mockImplementation(async (_ws: string, wait?: boolean) => [wait ? view('pdfs') : pending('pdfs')])
+  vi.useFakeTimers()
+  try {
+    function Lister() {
+      useViewList('ws-pending')
+      return null
+    }
+    await mount(<Lister />)
+    await vi.advanceTimersByTimeAsync(0)
+    expect(views).toHaveBeenCalledTimes(1)
+    await vi.advanceTimersByTimeAsync(1100)
+    expect(views).toHaveBeenCalledTimes(2)
+  } finally {
+    vi.useRealTimers()
+  }
+  const found = await findView('ws-pending', 'pdfs')
+  expect(found?.first_file).toBe('a.jsonl')
+  expect(views).toHaveBeenLastCalledWith('ws-pending', true)
+})
