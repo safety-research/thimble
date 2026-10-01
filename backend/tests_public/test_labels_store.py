@@ -1,6 +1,6 @@
 """app.labels_store's size: a store keeps no index another one covers, a large rebuild goes into place compacted, and a
-store of the schema before is brought to the new one. The labels are invented: a code label over the lines of two
-files, with a cover over a third."""
+store made with that index is read as it is and drops it at its next write. The labels are invented: a code label over
+the lines of two files, with a cover over a third."""
 from __future__ import annotations
 
 import json
@@ -46,16 +46,16 @@ def test_a_rebuilt_store_keeps_no_index_another_covers_and_a_large_one_is_compac
     assert want[0]["label"] == "gui" and want[0]["analyst"] == "shell" and want[3]["label"] == "quiet"
 
 
-def test_a_store_of_the_schema_before_is_brought_to_the_new_one(tmp_path):
+def test_a_store_made_before_is_read_as_it_is_and_drops_the_covered_index_at_its_next_write(tmp_path):
+    """A store made with the index on path alone stays fresh, so an update reads it with no rebuild, and its next write
+    drops that index."""
     jsonl = _labels(tmp_path / "k.jsonl", n=50)
     st = labels_store.Store(jsonl)
     st.rebuild()
     conn = sqlite3.connect(str(st.db))
     conn.execute("CREATE INDEX current_path ON current(path)")
-    conn.execute("UPDATE meta SET value = '5' WHERE key = 'schema'")
     conn.commit()
     conn.close()
-    assert st.state()[0] == "stale", "a reader rebuilds a store of the schema before"
+    assert st.state()[0] == "fresh", "no rebuild"
     st.connect(write=True).close()
-    assert "current_path" not in _indexes(st.db)
-    assert st.meta()["schema"] == labels_store.SCHEMA
+    assert "current_path" not in _indexes(st.db) and st.state()[0] == "fresh"

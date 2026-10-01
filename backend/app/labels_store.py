@@ -15,9 +15,10 @@ A torn last line is handled at both ends: `meta.parsed` is the offset after the 
 writer calls mend_tail before its first append.
 
 Size. A label over millions of records makes a store of hundreds of megabytes, mostly the rows and their indexes, so
-the store keeps no index another one covers, and a rebuild of more than COMPACT_BYTES is copied compacted
-(`VACUUM INTO`), its indexes written in order rather than grown row by row. Nothing here imports concepts, so a scan-pool worker can rebuild a store
-with this module alone.
+the store keeps no index another one covers (_COVERED_INDEX), and a rebuild of more than COMPACT_BYTES is copied
+compacted (`VACUUM INTO`), its indexes written in order rather than grown row by row.
+
+Nothing here imports concepts, so a scan-pool worker can rebuild a store with this module alone.
 """
 from __future__ import annotations
 
@@ -32,7 +33,7 @@ from typing import Any, Iterable, Iterator
 
 log = logging.getLogger("thimble.labels_store")
 
-SCHEMA = 6
+SCHEMA = 5
 COMPACT_BYTES = 64 * 1024 * 1024  # a rebuilt store larger than this is copied compacted before it goes into place
 SYNC_INLINE_BYTES = 16 * 1024 * 1024  # a jsonl, or its unread tail, up to this size is ingested by the reader that finds it behind
 BATCH = 5_000                         # rows per transaction when ingesting a file
@@ -61,6 +62,7 @@ CREATE TABLE IF NOT EXISTS current (
 );
 CREATE TABLE IF NOT EXISTS covers (path TEXT, first INTEGER, last INTEGER, value TEXT, source TEXT, ts TEXT);
 """
+_COVERED_INDEX = "current_path"  # on path alone, which current_path_line covers: a store that has it drops it when written
 _INDEX_SQL = """
 CREATE INDEX IF NOT EXISTS current_path_line ON current(path, line);
 CREATE INDEX IF NOT EXISTS current_label ON current(label);
@@ -231,11 +233,8 @@ def implicit_row(path: str, line: int, value: str, source: str | None, ts: str |
 
 
 def _migrate(conn: sqlite3.Connection, have: str) -> None:
-    """A store of an older schema opened for write: add and fill `effective`, add `spans` and the covers table, drop
-    the index on `path` alone (the one on path and line serves its queries), and stamp the schema; connect creates the
-    indexes after this."""
-    if have in ("0", "1", "2", "3", "4", "5"):
-        conn.execute("DROP INDEX IF EXISTS current_path")
+    """A store of an older schema opened for write: add and fill `effective`, add `spans` and the covers table, and
+    stamp the schema; connect creates the indexes after this."""
     if have in ("0", "1", "2", "3", "4"):
         cols = {r[1] for r in conn.execute("PRAGMA table_info(current)")}
         if "effective" not in cols:
@@ -245,7 +244,6 @@ def _migrate(conn: sqlite3.Connection, have: str) -> None:
             conn.execute("UPDATE current SET effective = COALESCE(analyst, label)")
         if "spans" not in cols:
             conn.execute("ALTER TABLE current ADD COLUMN spans TEXT")
-    if have in ("0", "1", "2", "3", "4", "5"):
         conn.execute("INSERT OR REPLACE INTO meta (key, value) VALUES ('schema', ?)", (str(SCHEMA),))
 
 
@@ -316,6 +314,7 @@ class Store:
                     conn.execute("INSERT OR REPLACE INTO meta (key, value) VALUES ('schema', ?), ('size', '0'), ('mtime_ns', '0')", (str(SCHEMA),))
                 elif str(have[0]) != str(SCHEMA):
                     _migrate(conn, str(have[0]))
+                conn.execute(f"DROP INDEX IF EXISTS {_COVERED_INDEX}")
                 conn.executescript(_INDEX_SQL)
             else:
                 conn.execute("PRAGMA query_only=1")
