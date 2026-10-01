@@ -148,6 +148,7 @@
   .tr .sub { grid-column: 3 / 5; font: 400 var(--text-mono-sm) / 1.5 var(--font-mono); color: var(--text-tertiary); margin-top: 1px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .tr .sub.prose { white-space: normal; font-family: var(--font-body); font-size: var(--text-xs); color: var(--text-secondary); }
   .tr .sub .chip { margin: 2px 4px 0 0; }
+  .tr .sub.fl { display: flex; flex-wrap: wrap; white-space: normal; overflow: visible; }
   .tr .rt { font: 400 var(--text-mono-sm) / 1.5 var(--font-mono); color: var(--text-tertiary); white-space: nowrap; text-align: right; font-variant-numeric: tabular-nums; }
   .tr .rt .o-err { color: var(--status-negative); margin-right: 8px; }
   .tr .rt .o-den { color: var(--status-warning); margin-right: 8px; }
@@ -779,11 +780,11 @@ function transcript(s) {
       return `<div ${attrs}><span class="tm">${fmt(c.time)}</span>${tl}<span class="arg"><span class="lnk" data-act="open" data-id="${esc(c.child)}">${esc(kid ? agentName(kid) : c.child)}${ico.child}</span> <span style="font-family:var(--font-body);font-size:var(--text-sm);color:var(--text-secondary);margin-left:4px">${esc(c.input)}</span></span><span class="rt">spawned</span></div>`
     }
     const outc = c.outcome === 'error' ? `<span class="o-err">error${c.exit != null ? ' · exit ' + esc(c.exit) : ''}</span>` : c.outcome === 'denied' ? '<span class="o-den">denied</span>' : ''
-    const chips = (fs) => `<span style="margin-left:8px">${fs.map((f) => `<span class="chip chip-tone-neutral chip-act" data-act="searchfor" data-v="${esc(f)}" title="${esc(f)}">${esc(f.split('/').pop())}</span>`).join('')}</span>`
+    const chips = (fs) => `<span class="sub fl">${fs.map((f) => `<span class="chip chip-tone-neutral chip-act" data-act="searchfor" data-v="${esc(f)}" title="${esc(f)}">${esc(f.split('/').pop())}</span>`).join('')}</span>`
     let sub = ''
     if (c.new != null) sub = `<span class="sub diff">${c.old ? `<span class="del">− ${esc(c.old)}</span>&nbsp;&nbsp;&nbsp;` : ''}<span class="add">+ ${esc(c.new)}</span></span>`
-    else if (c.matches.length) sub = `<span class="sub">${esc(c.result)}${chips(c.matches)}</span>`
-    else if (c.tool !== 'Read' && c.tool !== 'Edit' && c.files.length && c.result) sub = `<span class="sub">${esc(c.result)}${chips(c.files)}</span>`
+    else if (c.matches.length) sub = `<span class="sub">${esc(c.result)}</span>${chips(c.matches)}`
+    else if (c.tool !== 'Read' && c.tool !== 'Edit' && c.files.length && c.result) sub = `<span class="sub">${esc(c.result)}</span>${chips(c.files)}`
     else if (c.tool !== 'Read' && c.tool !== 'Edit' && c.result) sub = `<span class="sub">${esc(c.result)}</span>`
     const size = c.tool === 'Read' && c.result ? esc(c.result) + ' · ' : ''
     return `<div ${attrs}><span class="tm">${fmt(c.time)}</span>${tl}<span class="arg" title="${esc(c.input)}">${esc(c.input)}</span><span class="rt">${outc}${size}${fmtd(c.duration)}</span>${sub}</div>`
