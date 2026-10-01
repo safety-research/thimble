@@ -525,12 +525,15 @@ def _own_views(c: str) -> list[dict[str, Any]]:
 
 
 def local_extension(c: str) -> dict[str, Any]:
-    """Settings' entry for the workspace's local extension: its name and the views built for this workspace, each with
-    whether it is a file viewer (file_type_viewer), which opens in the File browser. A view an extension or thimble
-    installed here (its proposal's `installed`) is left out, and so is a held one (list_views)."""
-    installed = {p["slug"] for p in list_proposals(c) if p.get("installed")}
-    vs = [{"slug": v["slug"], "name": v["name"], "file_viewer": file_type_viewer(v)}
-          for v in list_views(c) if v["origin"] == "workspace" and v["ok"] and v["slug"] not in installed]
+    """Settings' entry for the workspace's local extension: its name and the views built for this workspace, each by the
+    name the views bar gives it (its proposal's) with whether it is a file viewer (file_type_viewer), which opens in the
+    File browser. A view an extension or thimble installed here (its proposal's `installed`) is left out, and so is a
+    held one (list_views)."""
+    props = {p["slug"]: p for p in list_proposals(c)}
+    vs = [{"slug": v["slug"], "name": str((props.get(v["slug"]) or {}).get("name") or v["name"]),
+           "file_viewer": file_type_viewer(v)}
+          for v in list_views(c)
+          if v["origin"] == "workspace" and v["ok"] and not (props.get(v["slug"]) or {}).get("installed")]
     try:
         raw = json.loads((local_dir(c) / LOCAL_MANIFEST).read_text("utf-8"))
     except (OSError, ValueError):

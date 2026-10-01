@@ -14,7 +14,7 @@ from pathlib import Path
 
 import pytest
 
-from app import config, extensions, views
+from app import config, extensions, ledger, views
 from app.kernel_thimble import CARD_TYPES_FILE
 
 CORPUS, OTHER = "boards", "notes"
@@ -178,3 +178,15 @@ def test_a_link_left_where_the_local_extension_goes_is_replaced_by_a_folder(corp
     (ws / "extension" / "views" / "planted").symlink_to(outside, target_is_directory=True)
     views.ensure_local(ws)
     assert not (ws / "extension" / "views" / "planted").exists()
+
+
+def test_an_archive_an_older_thimble_made_has_its_views_moved_in_when_it_is_restored(corpora):
+    """`/thimble restore` of an archive whose views are in views/ moves them into the local extension."""
+    _propose(CORPUS)
+    v = _write(CORPUS)
+    ws = config.workspace_dir(CORPUS)
+    os.replace(v["dir"], ws / "views" / "posts")
+    archived = asyncio.run(ledger.archive_workspace(CORPUS))["archived"]
+    asyncio.run(ledger.restore_workspace(CORPUS, {"archive": Path(archived).name}))
+    assert views.read_built(CORPUS, "posts")["dir"] == str(ws / "extension" / "views" / "posts")
+    assert views.list_proposals(CORPUS)[0]["status"] == "built"
