@@ -571,3 +571,34 @@ def test_a_reader_version_whose_index_is_let_go_is_let_go_with_what_its_globals_
         view_host._sizes.clear()
         view_host._readers.clear()
         view_host._reader_of.clear()
+
+
+def test_an_index_pickled_by_one_reader_version_loads_with_that_versions_classes(tmp_path):
+    """Two versions of a view's reader share one module name. A pickle of the first's index, read while the second was
+    loaded last, is made of the first's classes."""
+    import pickle  # noqa: PLC0415
+
+    def src(tag: str) -> str:
+        return (f"class Index(dict):\n    tag = {tag!r}\n"
+                "def build_index(paths):\n    return Index(n=len(paths))\n"
+                "def records(index, query):\n    return type(index).tag\n"
+                "def resolve(index, locator):\n    return None\n")
+
+    for k in ("_indexes", "_sizes", "_readers", "_reader_of"):
+        getattr(view_host, k).clear()
+    try:
+        old, new = tmp_path / "v1" / "reader.py", tmp_path / "v2" / "reader.py"
+        for p, tag in ((old, "v1"), (new, "v2")):
+            p.parent.mkdir()
+            p.write_text(src(tag))
+        assert view_host.answer({"slug": "s", "reader": str(old), "fp": "a", "paths": [], "op": "records"})["result"] == "v1"
+        pickled = tmp_path / "b.pickle"
+        with open(pickled, "wb") as f:
+            pickle.dump(view_host._indexes[("s", "a")], f)
+        assert view_host.answer({"slug": "s", "reader": str(new), "fp": "c", "paths": [], "op": "records"})["result"] == "v2"
+        out = view_host.answer({"slug": "s", "reader": str(old), "fp": "b", "paths": ["x"], "cache": str(pickled),
+                                "op": "records"})
+        assert out["ok"] and out["built"] is False and out["result"] == "v1", out
+    finally:
+        for k in ("_indexes", "_sizes", "_readers", "_reader_of"):
+            getattr(view_host, k).clear()

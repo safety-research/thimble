@@ -86,13 +86,15 @@ def _trim() -> None:
 
 
 def _reader(slug: str, path: str) -> object:
-    """reader.py as a module, loaded again when the file's mtime or size changed."""
+    """reader.py as a module, loaded again when the file's mtime or size changed. It is the module under the view's
+    name while it runs, so a pickle of its index finds its own classes, not another version's."""
     st = os.stat(path)
     sig = (st.st_mtime_ns, st.st_size)
     hit = _readers.get(path)
-    if hit is not None and hit[0] == sig:
-        return hit[1]
     name = "thimble_view_" + slug.replace("-", "_")
+    if hit is not None and hit[0] == sig:
+        sys.modules[name] = hit[1]  # type: ignore[assignment]
+        return hit[1]
     spec = importlib.util.spec_from_file_location(name, path)
     if spec is None or spec.loader is None:
         raise ImportError(f"cannot load {path}")
