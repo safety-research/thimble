@@ -20,7 +20,7 @@ thimble starts the program in the role's folder (`agents/<role>/`). The input ar
 
 | role | input | its thimble tools | what it returns |
 |---|---|---|---|
-| orientation | `request`, `outputs`, `follow_up`, `choices`, `cards`, `corpus`, `tools` | `read_ref`, `list_cards`, `add_card`, `edit_card`, `delete_card`, `apply_label`, `propose_view`, `screenshot`, `critique` (as `outputs` allows) | the line main hears |
+| orientation | `request`, `outputs`, `follow_up`, `choices`, `cards`, `corpus`, `tools` | `read_ref`, `list_cards`, `add_card`, `edit_card`, `delete_card`, `apply_label`, `propose_view`, `screenshot` (as `outputs` allows) | the line main hears |
 | critic | `digest` (what thimble's critic reads), `transcript`, `context` | `read_ref`, `list_cards` | the report the orientation's critique call gets |
 | writer | `doc`, `type`, `request`, `after`, `context` | `read_ref`, `list_cards`, `add_card`, `edit_card`, `delete_card`, `screenshot`, `write_document`, `edit_document` | the line main hears |
 | dev | one turn of a view build: `slug`, `name`, `description`, `scope`, `spec`, `change`, `folder`, `corpus`, `examples`, `message` | `read_ref` | the turn's reply; thimble then checks the view's files in `folder` and runs the program again with what failed in `message` |

@@ -265,8 +265,9 @@ async def start_program(c: str, part: Any, brief: str, passes: "list[str]", choi
 
     listed = await tools.call(c, "list_cards", {"group": "all"}, session=KEY)
     parts = parts_of(choices, passes)
-    own = tuple(n for n in ORIENT_TOOLS if n not in {t for p, names in PART_TOOLS.items() if p not in parts
-                                                      for t in names})
+    # critique reads the transcript of thimble's own orientation session, which a program has none of
+    own = tuple(n for n in ORIENT_TOOLS if n != "critique" and n not in {
+        t for p, names in PART_TOOLS.items() if p not in parts for t in names})
     job = harness.Job(c, "orientation", KEY, orientation.TITLE,
                       {"request": brief.strip(), "outputs": list(passes), "follow_up": follow_up,
                        "choices": {"effort": effort_of(choices), "critique": bool(choices.get("critique", True))},

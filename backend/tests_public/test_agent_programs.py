@@ -263,6 +263,7 @@ HARNESS = '''import thimble
 
 async def run(input):
     thimble.log("reading " + input["corpus"])
+    thimble.log("tools: " + " ".join(input["tools"]))
     print("a stray print goes to stderr")
     listed = await thimble.tool("list_cards", {"group": "all"})
     try:
@@ -292,6 +293,7 @@ async def test_a_command_harness_runs_the_orientation_through_thimble_s_tools(tm
     chat = rec["chats"][orientation.ROLE]
     log_text = (config.workspace_dir(CORPUS) / "chats" / f"{chat}.jsonl").read_text()
     assert "reading " in log_text and "refused: propose_view is not one of" in log_text
+    assert "tools: read_ref list_cards add_card" in log_text and "critique" not in log_text.split("tools: ")[1][:200]
     assert "a stray print" not in log_text
     meta = json.loads((config.workspace_dir(CORPUS) / "chats" / f"{chat}.meta.json").read_text())
     assert meta["status"] == "done" and meta["way"] == "command" and meta["extension"] == "harn"
