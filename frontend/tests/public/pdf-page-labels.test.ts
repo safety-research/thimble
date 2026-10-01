@@ -7,7 +7,7 @@ const label = (id: string, name: string, labels: string[], extra: Partial<Concep
 test('a label over records lists the pages of the PDF its highlighted value marks, and a verdict wins', () => {
   const refunds = label('k1', 'Refund pages', ['refund', 'other'])
   const tone = label('k2', 'Tone', ['calm', 'angry', 'neutral'])
-  const whole = label('k3', 'Whole file', ['yes', 'no'], { unit: 'file' } as Partial<Concept>)
+  const whole = label('k3', 'Whole file', ['yes', 'no'], { marks: 'file' } as unknown as Partial<Concept>)
   const rows: LabelsForPath[] = [
     { concept_id: 'k1', name: 'Refund pages', labels: ['refund', 'other'], unit: 'record', rows: [
       { ref: 'docs/report.pdf#p7', label: 'refund', confidence: 1, source: 'regex' },
