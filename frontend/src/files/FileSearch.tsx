@@ -69,6 +69,7 @@ export function useFileGrep(ws: string, text: string): Omit<Grepped, 'text'> & {
     ctlRef.current = ctl
     const mineOnly = (f: (g: Grepped) => Grepped) => !ctl.signal.aborted && setGot((g) => (g.text === text ? f(g) : g))
     const t = window.setTimeout(() => {
+      if (ctl.signal.aborted) return
       setGot({ text, files: [], progress: null, done: null, stopped: false, error: null })
       api
         .grepFiles(
@@ -88,7 +89,9 @@ export function useFileGrep(ws: string, text: string): Omit<Grepped, 'text'> & {
   }, [ws, text, on])
   const stop = useCallback(() => {
     ctlRef.current?.abort()
-    setGot((g) => (g.text === text && !g.done && !g.error ? { ...g, stopped: true } : g))
+    setGot((g) =>
+      g.text !== text ? { text, files: [], progress: null, done: null, stopped: true, error: null } : !g.done && !g.error ? { ...g, stopped: true } : g,
+    )
   }, [text])
   const mine = on && got.text === text
   return {
