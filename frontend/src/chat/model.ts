@@ -427,6 +427,7 @@ export function toolSummary(name: string, input: unknown, ws = ''): string {
     case 'WebSearch':
       return str(inp.url ?? inp.query)
     default: {
+      if (!Object.keys(inp).length) return ''
       try {
         return JSON.stringify(input).slice(0, 120)
       } catch {
@@ -1318,7 +1319,8 @@ export function isFeedbackChip(e: ChatRecord): boolean {
  * The records of main's log its transcript leaves out, by index: Agent or Workflow calls whose agents show as their own
  * card or thread (with their results), text that repeats a summary the orientation handed back, label runs a subagent
  * or a call in main started, view chips the orientation proposed, the orientation's report writer's start and saves
- * (isOrientWriterRecord), session lines (isSessionLine) and feedback chips (isFeedbackChip). Pure.
+ * (isOrientWriterRecord), main's look at the agent tray (list_agents), session lines (isSessionLine) and feedback chips
+ * (isFeedbackChip). Pure.
  */
 export function mainSkips(records: readonly ChatRecord[], ctx: MainContext): Set<number> {
   const skip = new Set<number>()
@@ -1346,8 +1348,9 @@ export function mainSkips(records: readonly ChatRecord[], ctx: MainContext): Set
           hidden.add(e.id)
           skip.add(i)
         }
-        // main's call that starts the orientation's or a writer's session: that session's own note in main stands for it
-        if ((name === 'start_orientation' || name === 'start_writing') && !e.parent_tool_use_id) {
+        // main's call that starts the orientation's or a writer's session: that session's own note in main stands for it.
+        // Its look at the agent tray is bookkeeping, which the tray itself shows
+        if ((name === 'start_orientation' || name === 'start_writing' || name === 'list_agents') && !e.parent_tool_use_id) {
           hidden.add(e.id)
           skip.add(i)
         }

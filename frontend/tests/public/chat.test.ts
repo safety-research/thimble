@@ -4,7 +4,7 @@
 import { readFileSync } from 'node:fs'
 import path from 'node:path'
 import { describe, expect, test } from 'vitest'
-import { callTarget, foldRecords, leadText, madeBy, MCP_PREFIXES, type UserRow } from '../../src/chat/model.ts'
+import { callLineText, callTarget, foldRecords, leadText, madeBy, mainSkips, MCP_PREFIXES, type UserRow } from '../../src/chat/model.ts'
 import type { ChatRecord } from '../../src/lib/types.ts'
 
 const ROOT = path.resolve(__dirname, '../../..')
@@ -83,5 +83,18 @@ describe('a cited call', () => {
     ]
     expect(named).toEqual(['agents/agent-01.jsonl', 'search for “escalat” in tickets', 'Count refund tickets', 'wc -l notes.jsonl', 'Reviews per agent', 'the critic’s report', 'an agent’s report', 'step 10'])
     for (const n of named) expect(n).not.toMatch(/[{}]|StructuredOutput|critique|Bash|Grep|Read/)
+  })
+})
+
+describe("main's look at the agent tray", () => {
+  test('a list_agents call and its result are left out of main, and a call with no input never reads as {}', () => {
+    const log = records([
+      { type: 'user', ts: '2026-08-30T14:00:00Z', text: 'What is running?' },
+      { type: 'tool_use', ts: '2026-08-30T14:00:01Z', id: 'l1', name: `${P}list_agents`, input: {} },
+      { type: 'tool_result', ts: '2026-08-30T14:00:02Z', id: 'l1', summary: 'orientation: running' },
+      { type: 'text', delta: 'The orientation is running.' },
+    ])
+    expect([...mainSkips(log, { spawned: new Set(), summaries: [], runs: [] })].sort()).toEqual([1, 2])
+    expect(callLineText(`${P}some_new_tool`, {}, '')).toBe('some_new_tool')
   })
 })
