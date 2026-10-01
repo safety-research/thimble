@@ -66,7 +66,7 @@ def any_file_label(name: str, kind: str, path: str, spec: str) -> dict:
     status, rows = cli._request("GET", f"{base}/{made['id']}/rows?value=hit&limit=10")
     if status != 200 or not isinstance(rows, dict):
         return {**out, "error": f"rows → {status} {str(rows)[:200]}"}
-    refs = [str(r.get("ref")) for r in rows.get("rows") or []]
+    refs = [str(r["ref"]) for r in rows.get("rows") or [] if isinstance(r, dict) and r.get("ref")]
     return {**out, "ok": True, "refs": refs, "counts": run.get("counts") if isinstance(run, dict) else None}
 
 

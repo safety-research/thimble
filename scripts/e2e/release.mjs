@@ -533,8 +533,10 @@ async function main() {
       const seen = []
       for (const r of got) {
         const refs = r.refs || []
+        const whole = refs.filter((x) => !x.startsWith(`${r.path}#`))
         if (!r.ok) problems.push(`${r.kind}: ${r.error}`)
         else if (!refs.length) problems.push(`${r.kind}: no record of ${r.path} matched`)
+        else if (whole.length) problems.push(`${r.kind}: refs that name no record inside ${r.path} (${whole.slice(0, 2).join(', ')})`)
         else if (r.kind !== 'CSV rows' && refs.every((x) => /#L\d+(-L?\d+)?$/.test(x))) problems.push(`${r.kind}: matched by lines of the raw file (${refs.slice(0, 2).join(', ')})`)
         seen.push(`${r.kind}: ${refs.slice(0, 2).join(', ') || 'none'}`)
       }
