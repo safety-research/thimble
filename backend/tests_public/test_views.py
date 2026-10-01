@@ -438,17 +438,21 @@ async def test_the_review_reads_one_picture_asks_for_more_and_sends_its_problems
     views.propose(CORPUS, "Threads", "The posts by thread.", ["board.jsonl"], "Unit: a post", asked=True)
     views.mark_built(CORPUS, "threads")
     taken: list[list[str]] = []
+    asked: list[tuple] = []
 
     async def shoot_states(c, slug, states, **k):
         taken.append([("filtered" if (st.get("labels") or {}).get("filter") else "on" if (st.get("labels") or {}).get("probe")
                        else "plain") for st in states])
+        asked.extend((st.get("size"), st.get("actions")) for st in states)
         for st in states:
             Path(st["out"]).parent.mkdir(parents=True, exist_ok=True)
             Path(st["out"]).write_bytes(b"png")
         return [{"ok": True, "errors": [], "fonts": True, "png": str(st["out"]), "answers": [[{"ref": "board.jsonl#L1"}]]}
                 for st in states]
 
-    answers = [{"problems": ["picture 1: the list is cut off"], "more": [{"state": "filtered", "why": "the filter"}]},
+    answers = [{"problems": ["picture 1: the list is cut off"],
+                "more": [{"state": "filtered", "why": "the filter"}, {"state": "control", "controls": ["Day"], "why": "days"},
+                         {"state": "control", "why": "names no control"}]},
                {"problems": ["picture 2: the filter keeps every post"]},
                {"problems": [], "more": []}]
     readings: list[tuple[int, bool, str]] = []
@@ -468,12 +472,14 @@ async def test_the_review_reads_one_picture_asks_for_more_and_sends_its_problems
     monkeypatch.setattr(view_review, "revise", revise)
     monkeypatch.setattr(card_check, "fit_image", lambda b: b)
     await view_review._review(view_review._Run(CORPUS, "threads"))
-    assert taken == [["plain"], ["filtered"], ["plain"]]
-    assert [(n, more) for n, more, _ in readings] == [(1, True), (2, False), (1, True)]
+    assert taken == [["plain"], ["filtered", "plain"], ["plain"]]
+    assert asked[:3] == [(views.PANE_SIZE, None), (views.PANE_NARROW, None), (views.PANE_SIZE, ["Day"])]
+    assert [(n, more) for n, more, _ in readings] == [(1, True), (3, False), (1, True)]
+    assert "3: the overview after clicking nothing" in readings[1][2], "the stub clicked nothing"
     assert f"2: the overview filtered to the test label, {views.PANE_NARROW[0]} px wide (asked for: the filter)" in readings[1][2]
     assert revisions == [["picture 2: the filter keeps every post"]]
     review = views.read_proposal(CORPUS, "threads")["review"]
-    assert review["state"] == "done" and review["revised"] == revisions[0] and review["shots"] == 3 and not review["left"]
+    assert review["state"] == "done" and review["revised"] == revisions[0] and review["shots"] == 4 and not review["left"]
 
 
 async def test_a_workspace_gets_four_views_from_the_orientation_and_a_deleted_one_stays_deleted(ws, monkeypatch):
@@ -658,6 +664,40 @@ async def test_every_worked_example_s_page_loads_headless_at_its_first_place(nam
     if name != "pdf":
         shown = rep["shots"][0]["shown"]
         assert shown["due"] and shown["drawn"] == shown["due"], "the test label shows on the records a worked example shows"
+
+
+FIT_HTML = """<!doctype html><html><head><style>body{font:13px sans-serif;margin:8px}</style></head><body>
+<div style="position:relative;height:40px"><span style="position:absolute;left:0;top:0">Overlapping label one</span>
+<span style="position:absolute;left:12px;top:2px">Second label here</span></div>
+<div style="width:60px;overflow:hidden;white-space:nowrap">A text far too long for its box</div>
+<div style="width:300px">Narrow column</div>
+<button id="more">Show more</button><div id="extra" hidden data-anchor="board.jsonl#L2">bo: Anyone have the build number?</div>
+<script>
+document.getElementById('more').onclick = () => { document.getElementById('extra').hidden = false }
+thimble.onOpen(() => {})
+</script></body></html>"""
+
+
+async def test_the_headless_page_measures_how_its_text_fits_and_clicks_a_control_a_state_names(ws, inproc, bound):
+    """The checks' page reports text drawn over other text, text its box cuts off and how much of a wide pane the page
+    uses, lists its controls by their text, and a state's actions click a control by its text before it is measured."""
+    if why := views.build_problem():
+        if os.environ.get("CI") == "true":
+            pytest.fail(why)
+        pytest.skip(why)
+    views.write_view(CORPUS, "fit", reader=THREADS_READER, html=FIT_HTML, **{**VIEW, "name": "Fit"})
+    plain, clicked = await views.shoot_states(CORPUS, "fit", [
+        {"open": {}, "size": views.PANE_WIDE}, {"open": {}, "actions": ["Show more", "No such control"]}])
+    assert plain["ok"] and clicked["ok"], (plain["errors"], clicked["errors"])
+    lay = plain["layout"]
+    assert lay["overlaps"] == 1 and lay["pairs"][0] == ["Overlapping label one", "Second label here"], lay
+    assert lay["cut"] == 1 and lay["cuts"] == ["A text far too long for its box"], lay
+    assert lay["width"] == views.PANE_WIDE[0] and lay["used"] < views.WIDE_USED * lay["width"] and not lay["overflow"]
+    assert "Show more" in plain["controls"]
+    assert plain["shown"]["records"] == 0 and clicked["shown"]["records"] == 1, "the click showed the hidden record"
+    assert clicked["actions"] == [{"control": "Show more", "found": True}, {"control": "No such control", "found": False}]
+    notes = views.layout_notes([{**plain, "state": "wide"}])
+    assert len(notes) == 1 and "overlaps other text in 1 place," in notes[0] and "rest of the pane is empty" in notes[0]
 
 
 # what Playwright's own error says to run, which never reaches a model

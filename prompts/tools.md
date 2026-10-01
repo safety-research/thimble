@@ -816,11 +816,11 @@ The page {where}: {parts}.
 
 ## view-layout-overlap
 
-text overlaps other text in {n} places, such as {pairs}
+text overlaps other text in {places}, such as {pairs}
 
 ## view-layout-cut
 
-{n} texts run past a box that hides them without an ellipsis, such as {texts}
+{n} run past a box that hides them without an ellipsis, such as {texts}
 
 ## view-layout-overflow
 

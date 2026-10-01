@@ -2914,15 +2914,19 @@ def layout_parts(lay: dict[str, Any], wide: bool = False) -> list[str]:
     parts = []
     if n := int(lay.get("overlaps") or 0):
         pairs = "; ".join(f"{a!r} and {b!r}" for a, b in (lay.get("pairs") or [])[:LAYOUT_NAMED])
-        parts.append(_hint("view-layout-overlap", n=n, pairs=pairs))
+        parts.append(_hint("view-layout-overlap", places=_plural(n, "place"), pairs=pairs))
     if n := int(lay.get("cut") or 0):
-        parts.append(_hint("view-layout-cut", n=n, texts="; ".join(repr(t) for t in (lay.get("cuts") or [])[:LAYOUT_NAMED])))
+        parts.append(_hint("view-layout-cut", n=_plural(n, "text"), texts="; ".join(repr(t) for t in (lay.get("cuts") or [])[:LAYOUT_NAMED])))
     if px := int(lay.get("overflow") or 0):
         parts.append(_hint("view-layout-overflow", px=px))
     used = int(lay.get("used") or 0)
     if wide and width and 0 < used < WIDE_USED * width:
         parts.append(_hint("view-layout-empty", used=used, width=width))
     return parts
+
+
+def _plural(n: int, word: str) -> str:
+    return f"{n:,} {word}" + ("" if n == 1 else "s")
 
 
 def layout_notes(shots: list[dict[str, Any]]) -> list[str]:
