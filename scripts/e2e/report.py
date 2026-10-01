@@ -19,7 +19,7 @@ TITLES = {
     "corpus": "A copy of the corpus, with the files the UI steps open",
     "server": "The server up and the corpus copy opened as a workspace",
     "cleanup": "Every process the run started is stopped",
-    "claude-files": "The caller's Claude Code plugins, trust entries and ~/.local/bin/thimble are as they were",
+    "claude-files": "The caller's Claude Code plugins, marketplaces, trusted folders and ~/.local/bin/thimble are as they were",
 }
 
 

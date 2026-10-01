@@ -11,6 +11,7 @@ import { execFile, spawnSync } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import { appendFileSync, existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
+import { homedir } from 'node:os'
 import { basename, dirname, join, relative } from 'node:path'
 import { promisify } from 'node:util'
 
@@ -321,7 +322,8 @@ async function switchOnAndLook(page, name) {
 
 /** A Claude Code session with a transcript, as an orientation leaves one: one `claude -p` turn in a folder of the run,
  * on the caller's own login, loading no user settings, plugins or MCP servers. Claude Code keeps its transcript where it
- * keeps every session's. Tried again after a failure, with a new session id each time. {sid} or {error}. */
+ * keeps every session's (forgetSession removes it). Tried again after a failure, with a new session id each time.
+ * {sid} or {error}. */
 async function claudeSession() {
   const cwd = join(OUT, 'standin-orientation')
   mkdirSync(cwd, { recursive: true })
@@ -333,10 +335,28 @@ async function claudeSession() {
     const args = ['-p', 'Reply with the single word ok.', '--setting-sources', 'project', '--strict-mcp-config', '--session-id', sid, '--max-turns', '1']
     const r = await execFileP('claude', args, { cwd, env: clean, timeout: 180_000 }).then(() => null, (e) => e)
     if (!r) return { sid }
+    forgetSession(sid)
     error = `${r.stderr || r.stdout || r.message || ''}`.trim().split('\n')[0].slice(0, 200)
     if (r.code === 'ENOENT') break
   }
   return { error: error || 'claude failed' }
+}
+
+/** Remove what Claude Code keeps of a stand-in session (claudeSession): its transcript, and the project folder named
+ * for <out>/standin-orientation once that holds nothing else. Returns whether its transcript was found. */
+function forgetSession(sid) {
+  const projects = join(env.CLAUDE_CONFIG_DIR || join(homedir(), '.claude'), 'projects')
+  let found = false
+  for (const d of existsSync(projects) ? readdirSync(projects) : []) {
+    const dir = join(projects, d)
+    if (!d.endsWith('-standin-orientation') || !existsSync(join(dir, `${sid}.jsonl`))) continue
+    found = true
+    rmSync(join(dir, `${sid}.jsonl`), { force: true })
+    rmSync(join(dir, sid), { recursive: true, force: true })
+    const left = readdirSync(dir).filter((n) => !(n === 'memory' && readdirSync(join(dir, n)).length === 0))
+    if (!left.length) rmSync(dir, { recursive: true, force: true })
+  }
+  return found
 }
 
 async function waitShell(page) {
@@ -916,19 +936,22 @@ async function main() {
         mkdirSync(dirname(chat), { recursive: true })
         writeFileSync(chat, JSON.stringify({ id: 'e2e-standin', kind: 'agent', role: 'orient', title: 'Orientation', status: 'done' }))
       }
+      let sid = ''
       try {
         plant(randomUUID())
         const without = await switchOnAndLook(page, 'ext-orient-no-transcript')
         if (without.shown) throw new StepError('Settings offered Run now for an orientation whose transcript Claude Code does not keep', [without.shot])
         const real = await claudeSession()
         if (real.error) return { skip: true, detail: `no offer without a transcript, as it should be; the offer itself was not checked, since no Claude Code session could stand in for the orientation: ${real.error}`, shots: [without.shot] }
-        plant(real.sid)
+        sid = real.sid
+        plant(sid)
         const withIt = await switchOnAndLook(page, 'ext-orient-offer')
         if (!withIt.shown) throw new StepError('switching it on in Settings offered no run of its orientation instructions', [without.shot, withIt.shot])
-        return { detail: `no offer while Claude Code keeps no transcript of the orientation; with one (a one-turn \`claude -p\` session, ${real.sid}), Settings asks whether to run its orientation now; answered Not now`, shots: [without.shot, withIt.shot] }
+        return { detail: `no offer while Claude Code keeps no transcript of the orientation; with one (a one-turn \`claude -p\` session, whose transcript is removed after), Settings asks whether to run its orientation now; answered Not now`, shots: [without.shot, withIt.shot] }
       } finally {
         rmSync(run, { force: true })
         rmSync(chat, { force: true })
+        if (sid && !forgetSession(sid)) console.log(`ext-orient-offer: no transcript of ${sid} found to remove`)
       }
     }, 600_000)
 
