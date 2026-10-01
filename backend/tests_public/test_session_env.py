@@ -348,3 +348,28 @@ def test_a_session_s_call_from_its_workspace_folder_runs_in_that_workspace(monke
         old = post()
         assert old["is_error"] and "did not run" in old["content"][0]["text"]
     assert seen == [(CORPUS, "orient")]
+
+
+async def test_a_structured_call_runs_no_claude_with_thimble_s_variables(tmp_path, monkeypatch):
+    """The Agent SDK checks the version with a `claude -v` that gets this process's whole environment: it runs none, and
+    the call's own `claude` gets every THIMBLE_* variable empty."""
+    from claude_agent_sdk import query
+
+    from app import sdk
+
+    fake = Path(__file__).parent / "fixtures" / "agents" / "fake_sdk_claude.py"
+    exe = tmp_path / "claude"
+    exe.write_text(f"#!{sys.executable}\n{fake.read_text()}")
+    exe.chmod(0o755)
+    log = tmp_path / "starts.jsonl"
+    monkeypatch.setenv("FAKE_CLAUDE_LOG", str(log))
+    monkeypatch.setenv("THIMBLE_HOME", str(tmp_path / "home"))
+    monkeypatch.setenv(sdk.SKIP_VERSION_CHECK_ENV, "")
+    monkeypatch.delenv(sdk.SKIP_VERSION_CHECK_ENV)
+    monkeypatch.setattr(config, "CLI_PATH", str(exe))
+    options = sdk.build(cwd=tmp_path, tools=[], mcp_servers={}, system_append="", model=None, effort=None, env=None)
+    async for _ in query(prompt="hello", options=options):
+        pass
+    starts = [json.loads(line) for line in log.read_text().splitlines()]
+    assert [s["argv"] for s in starts] == [s["argv"] for s in starts if s["argv"][:1] != ["-v"]] != []
+    assert options.env["THIMBLE_HOME"] == ""
