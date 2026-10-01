@@ -221,3 +221,18 @@ async def test_main_hears_at_once_when_the_sandbox_refuses_a_view_build(board, m
                                                     **spec}, actor="analyst")
     text = " ".join(b.get("text", "") for b in res.content)
     assert "cannot be built" in text and "sandbox.enforce" in text and "building it now" not in text
+
+
+def test_a_view_build_reads_thimble_s_view_code_unasked_but_never_server_json(board, monkeypatch, tmp_path):
+    """A view build's session reads the code its view runs against (the kernel's thimble module, the page's bridge, the
+    checks) without a permission card, and still cannot read server.json in thimble's home."""
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "cc"))
+    corpus, folder = config.corpus_dir(CORPUS), views.views_dir(CORPUS) / "posts"
+    conf = dev.dev_config(CORPUS, sandbox=True)
+    fence, asking = dev.view_fence(CORPUS, "posts", corpus, folder, conf), dev.view_asking(CORPUS, "posts", folder, conf)
+    flags = dev.Sessions()._flags(CORPUS, "thimble view: Posts", (folder,), fence, asking)
+    perms = json.loads(flags[flags.index("--settings") + 1])["permissions"]
+    assert f"Read(/{config.REPO_ROOT / 'backend' / 'app'}/**)" in perms["allow"]
+    assert f"Read(/{config.REPO_ROOT / 'scripts' / 'view_shot.mjs'})" in perms["allow"]
+    assert not any(r.startswith("Read(") and str(config.REPO_ROOT / "workspaces") in r for r in perms["allow"])
+    assert any("server.json" in r for r in perms["deny"]), perms["deny"]

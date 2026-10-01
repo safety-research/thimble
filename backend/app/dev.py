@@ -2777,6 +2777,11 @@ def view_env(slug: str, offline: bool = True) -> dict[str, str]:
     return {SESSION_ENV: view_key(slug), **({**OFFLINE_ENV, ENV_FILE: str(OFFLINE_ENV_FILE)} if offline else {})}
 
 
+# The thimble code a view's reader and page run against, which a view build's session reads unasked: the kernel's
+# `thimble` module, the page's bridge and styles, the checks, and the rest of the server's code beside them.
+VIEW_CODE = ("backend/app/", "scripts/view_shot.mjs")
+
+
 def view_key(slug: str) -> str:
     """A view build's session key, which its permission hook names (module note, permissions)."""
     return f"view:{slug}"
@@ -2784,14 +2789,17 @@ def view_key(slug: str) -> str:
 
 def view_asking(c: str, slug: str, folder: Path, conf: userconf.Session) -> dict[str, Any]:
     """How a view build's session asks (Sessions._flags): its key, what thimble's config asks of it (`conf`), and allowed
-    unasked its edits in the view's folder, reads of the worked examples, its check command, and Bash in the sandbox
-    where its Bash runs there, but for the commands the config asks about."""
+    unasked its edits in the view's folder, reads of the worked examples and of the thimble code a view runs against
+    (VIEW_CODE), its check command, and Bash in the sandbox where its Bash runs there, but for the commands the config
+    asks about."""
     from . import agent_session, views  # noqa: PLC0415
 
     check = view_check_command(c, slug)
     conf.own_bash = [check]
+    code = [f"Read(/{config.REPO_ROOT / rel}{'/**' if rel.endswith('/') else ''})" for rel in VIEW_CODE]
     out: dict[str, Any] = {"key": view_key(slug), "config": conf,
-                           "allow": [*own_work(folder, (views.EXAMPLES_DIR,)), f"Bash({check})", f"Bash({check} *)"]}
+                           "allow": [*own_work(folder, (views.EXAMPLES_DIR,)), *code, f"Bash({check})",
+                                     f"Bash({check} *)"]}
     if conf.sandboxed:
         names, asks = agent_session.sandbox_rule(config.corpus_dir(c))
         out["sandbox"] = [names, asks]
