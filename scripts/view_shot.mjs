@@ -21,10 +21,11 @@
 // browser. A state is measured when its page has been quiet (no fetch or marks request in flight) for QUIET_MS after
 // `open`, or HARD_MS has passed with no request in flight, and again after each action. One line ends the run:
 // {"done": true, "states": [{ok, errors, fetches, height, refs, records, units, marked, hidden, shown, layout, controls,
-// actions, fonts}]}: `refs` the distinct data-anchor refs the page reported, `records` those naming a record of a file
+// painted, actions, fonts}]}: `refs` the distinct data-anchor refs the page reported, `records` those naming a record of a file
 // (RECORD_REF: `<path>#L<n>`, `<db>#<table>/<key>`, `<pdf>#p<n>`, any `<path>#<fragment>`), `units` those naming one of
 // the view's units (`view:<slug>/<key>`), `marked` the elements carrying a label's mark, `hidden` those the bridge hid or dimmed for the filter, `shown` what is on screen at the end
-// (shownCounts), `layout` how its text fits (layoutCounts), `controls` the controls it shows (controlList), `actions`
+// (shownCounts), `layout` how its text fits (layoutCounts), `controls` the controls it shows (controlList), `painted`
+// how many of the marked records in view show the label's colour in a picture of the frame (paintedMarks), `actions`
 // each action with whether its control was found, `fonts` whether Hanken Grotesk was loaded in the frame, and
 // `self_labels` the ops of the label calls the page made by itself, outside the actions (the bridge's labelRefused, or
 // a labelCall while no action was clicked), which the page answers as refused.
@@ -53,6 +54,133 @@ const RECORD_REF = /^(?!(?:view|card|cell|concept|report|chat|call|group|ui):)[^
 // An error's message without the boxed notice Playwright adds to a failed launch, which names an install command: the
 // server hands these messages to models.
 const plain = (e) => String(e && e.message ? e.message : e).split('\n').filter((l) => !/^[╔║╚]/.test(l)).join('\n')
+
+const BAR = 3 // px, the bridge's label bar (viewer_bridge.js BAR)
+const PAINT_MAX = 40 // marked elements in view whose pixels are looked at
+const PAINT_TOL = 64 // how far, summed over r, g and b, a pixel may be from the label's colour and still show it
+
+// The marked elements in the frame's view whose pixels show whether the label's mark can be seen, as the outermost
+// visible element per ref: {due, list: [{ref, own, svg, record, box: {l, t, r, b}, body, rgb}]}, `due` the refs whose
+// `marks` entry has a bar, data-anchor-unmarked ones included, `box` the part of the frame where thimble's mark shows
+// and `body` the element, each cut to the view and to the boxes that hide overflow around it. `box` is the strip along
+// the left edge where the bridge draws its bar, the element and the halo around it for SVG, and the element itself for
+// data-anchor-unmarked, which draws the label's colour itself. With `scroll`, when none is in view, the first is scrolled into view and {retry: true} comes back.
+// Runs in the frame.
+function markTargets({ marks, record, bar, max, scroll }) {
+  const RECORD = new RegExp(record)
+  const UNIT = /^view:[^/]+\/.+/
+  const W = document.documentElement.clientWidth
+  const H = window.innerHeight
+  const clips = new Map()
+  const clipOf = (el) => {
+    if (!el || el === document.documentElement || el === document.body) return { l: 0, t: 0, r: W, b: H }
+    if (clips.has(el)) return clips.get(el)
+    let box = clipOf(el.parentElement)
+    const cs = getComputedStyle(el)
+    if (cs.overflowX !== 'visible' || cs.overflowY !== 'visible') {
+      const r = el.getBoundingClientRect()
+      box = { l: Math.max(box.l, r.left), t: Math.max(box.t, r.top), r: Math.min(box.r, r.right), b: Math.min(box.b, r.bottom) }
+    }
+    clips.set(el, box)
+    return box
+  }
+  const probe = document.createElement('span')
+  probe.style.display = 'none'
+  document.body.appendChild(probe)
+  const rgbOf = (colour) => {
+    probe.style.color = ''
+    probe.style.color = colour
+    const m = /rgba?\(([^)]+)\)/.exec(getComputedStyle(probe).color || '')
+    return m ? m[1].split(',').slice(0, 3).map((x) => Math.round(Number(x))) : null
+  }
+  const tops = new Map()
+  for (const el of document.querySelectorAll('[data-anchor]')) {
+    const ref = el.getAttribute('data-anchor')
+    if (!ref || tops.has(ref) || el.tagName === 'CANVAS' || el.closest('[data-thimble-drop]')) continue
+    if (!RECORD.test(ref) && !UNIT.test(ref)) continue
+    const m = marks[ref]
+    if (!m || typeof m.bar !== 'string' || !m.bar) continue
+    let top = el
+    for (let a = el.parentElement; a; a = a.parentElement) if (a.getAttribute('data-anchor') === ref) top = a
+    const r = top.getBoundingClientRect()
+    const cs = getComputedStyle(top)
+    if (r.width <= 0 || r.height <= 0 || cs.visibility === 'hidden' || cs.display === 'none') continue
+    tops.set(ref, { el: top, r, colour: m.bar })
+  }
+  const list = []
+  for (const [ref, { el, r, colour }] of tops) {
+    const own = el.hasAttribute('data-anchor-unmarked')
+    const svg = el instanceof SVGElement
+    const c = clipOf(el.parentElement)
+    const cut = (x) => ({ l: Math.max(x.l, c.l, 0), t: Math.max(x.t, c.t, 0), r: Math.min(x.r, c.r, W), b: Math.min(x.b, c.b, H) })
+    const body = cut({ l: r.left, t: r.top, r: r.right, b: r.bottom })
+    let box = body
+    if (svg) box = cut({ l: r.left - 4, t: r.top - 4, r: r.right + 4, b: r.bottom + 4 })
+    else if (!own) box = cut({ l: r.left - bar - 1, t: r.top, r: r.left + bar + 1, b: r.bottom })
+    const inView = r.right > 0 && r.left < W && r.bottom > 0 && r.top < H
+    list.push({ ref, own, svg, record: RECORD.test(ref), box, body, rgb: rgbOf(colour), inView, el })
+  }
+  probe.remove()
+  const due = list.length
+  const shown = list.filter((x) => x.inView)
+  if (!shown.length && list.length && scroll) {
+    list[0].el.scrollIntoView({ block: 'center', inline: 'center' })
+    return { retry: true }
+  }
+  return { due, list: shown.slice(0, max).map(({ el, inView, ...x }) => x) }
+}
+
+// How many of the targets show their label's mark, from two PNGs of the frame (base64, one pixel per CSS px), `on` as
+// it is and `off` with the bridge's label styles switched off: {checked, seen, unseen: [ref...]}. A target shows it
+// where pixels of its `box` move towards the label's colour (by MOVE, summed over r, g and b) when the styles are on,
+// as many as the bar's strip is high, up to 24, for a bar, and 6 for the halo of an SVG mark; or where the page draws
+// the colour itself, 8 pixels of its `body` within `tol` of it. An element marked data-anchor-unmarked that names a
+// unit is excused when a record in view shows its mark, since a unit's mark is its records'. Runs in the page.
+async function paintedCount({ on, off, targets, tol }) {
+  const MOVE = 30
+  const pixels = async (png) => {
+    const img = new Image()
+    img.src = 'data:image/png;base64,' + png
+    await img.decode()
+    const cv = document.createElement('canvas')
+    cv.width = img.naturalWidth
+    cv.height = img.naturalHeight
+    const g = cv.getContext('2d', { willReadFrequently: true })
+    g.drawImage(img, 0, 0)
+    return { w: cv.width, h: cv.height, d: g.getImageData(0, 0, cv.width, cv.height).data }
+  }
+  const a = await pixels(on)
+  const b = await pixels(off)
+  const dist = (d, i, c) => Math.abs(d[i] - c[0]) + Math.abs(d[i + 1] - c[1]) + Math.abs(d[i + 2] - c[2])
+  const out = { checked: 0, seen: 0, unseen: [] }
+  const units = []
+  let records = 0
+  for (const t of targets) {
+    const l = Math.max(0, Math.floor(t.box.l))
+    const top = Math.max(0, Math.floor(t.box.t))
+    const r = Math.min(a.w, Math.ceil(t.box.r))
+    const btm = Math.min(a.h, Math.ceil(t.box.b))
+    let moved = 0
+    for (let y = top; t.rgb && !t.own && b.w === a.w && y < btm; y++)
+      for (let x = l; x < r; x++) {
+        const i = (y * a.w + x) * 4
+        if (dist(a.d, i, t.rgb) + MOVE <= dist(b.d, i, t.rgb)) moved++
+      }
+    let drawn = 0
+    const [bl, bt, br, bb] = [Math.max(0, Math.floor(t.body.l)), Math.max(0, Math.floor(t.body.t)), Math.min(a.w, Math.ceil(t.body.r)), Math.min(a.h, Math.ceil(t.body.b))]
+    for (let y = bt; t.rgb && y < bb && drawn < 8; y++)
+      for (let x = bl; x < br && drawn < 8; x++) if (dist(a.d, (y * a.w + x) * 4, t.rgb) <= tol) drawn++
+    out.checked++
+    if ((!t.own && moved >= (t.svg ? 6 : Math.max(3, Math.min(24, btm - top)))) || drawn >= 8) {
+      out.seen++
+      if (t.record) records++
+    } else if (t.own && !t.record) units.push(t.ref)
+    else out.unseen.push(t.ref)
+  }
+  if (records) out.seen += units.length
+  else out.unseen.push(...units)
+  return out
+}
 
 // What the page shows at the end, counted once per ref on the outermost visible element that carries it (not a canvas,
 // which takes no mark, and not one the bridge hid or dimmed for the filter): `records` and `units` anchored, `due` the
@@ -587,6 +715,10 @@ async function shootState(browser, opt, doc, state, i) {
     const refs = await page.evaluate(() => [...window.__refs])
     const marks = await page.evaluate(() => window.__marks || {})
     const count = (sel) => frame.evaluate((s) => document.querySelectorAll(s).length, sel).catch(() => 0)
+    const shown = await frame.evaluate(shownCounts, { marks, record: RECORD_REF.source }).catch(() => null)
+    const layout = await frame.evaluate(layoutCounts).catch(() => null)
+    const controls = await frame.evaluate(controlList, { sel: CONTROLS, max: CONTROLS_MAX }).catch(() => [])
+    const painted = ready ? await paintedMarks(page, el, frame, marks).catch((e) => ({ error: plain(e) })) : null
     return {
       ok: ready && errors.length === 0,
       errors,
@@ -597,9 +729,10 @@ async function shootState(browser, opt, doc, state, i) {
       units: refs.filter((r) => /^view:[^/]+\/.+/.test(r)).length,
       marked: await count('[data-thimble-label]'),
       hidden: await count('[data-thimble-drop]'),
-      shown: await frame.evaluate(shownCounts, { marks, record: RECORD_REF.source }).catch(() => null),
-      layout: await frame.evaluate(layoutCounts).catch(() => null),
-      controls: await frame.evaluate(controlList, { sel: CONTROLS, max: CONTROLS_MAX }).catch(() => []),
+      shown,
+      layout,
+      controls,
+      painted,
       actions,
       fonts,
       self_labels: await page.evaluate(() => window.__selfLabels),
@@ -607,6 +740,34 @@ async function shootState(browser, opt, doc, state, i) {
   } finally {
     await page.close()
   }
+}
+
+// Whether the label marks in the frame's view can be seen, from pictures of the frame with the bridge's label styles on
+// and off: {due, checked, seen, unseen} (markTargets, paintedCount), null when no shown record is marked. It runs last,
+// since it may scroll the page.
+async function paintedMarks(page, el, frame, marks) {
+  if (!Object.values(marks).some((m) => m && typeof m.bar === 'string' && m.bar)) return null
+  const want = { marks, record: RECORD_REF.source, bar: BAR, max: PAINT_MAX }
+  let got = await frame.evaluate(markTargets, { ...want, scroll: true })
+  if (got.retry) {
+    await page.waitForTimeout(300)
+    got = await frame.evaluate(markTargets, { ...want, scroll: false })
+  }
+  if (!got.due) return null
+  if (!got.list.length) return { due: got.due, checked: 0, seen: 0, unseen: [] }
+  const on = (await el.screenshot()).toString('base64')
+  const styles = (off) =>
+    frame.evaluate((x) => {
+      for (const s of document.querySelectorAll('style[data-thimble="labels"]')) s.disabled = x
+    }, off)
+  await styles(true)
+  let off
+  try {
+    off = (await el.screenshot()).toString('base64')
+  } finally {
+    await styles(false)
+  }
+  return { due: got.due, ...(await page.evaluate(paintedCount, { on, off, targets: got.list, tol: PAINT_TOL })) }
 }
 
 async function main() {

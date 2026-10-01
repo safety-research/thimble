@@ -879,8 +879,9 @@ UNMARKED_HTML = """<!doctype html><html><head><style>body{font:13px sans-serif;m
 
 async def test_a_record_the_page_marks_itself_is_not_held_to_thimble_s_mark(ws, inproc, bound):
     """An element with data-anchor-unmarked draws the labels' colours itself, so the bridge gives it no bar and the
-    checks count its record as shown but do not look for the bar on it. A record of a file other than a line, such as
-    a PDF's page, counts as shown too."""
+    checks count its record as shown but do not look for the bar on it; the picture then looks for the label's colour
+    on the element, which this page does not draw. A record of a file other than a line, such as a PDF's page, counts
+    as shown too."""
     if why := views.build_problem():
         if os.environ.get("CI") == "true":
             pytest.fail(why)
@@ -889,6 +890,49 @@ async def test_a_record_the_page_marks_itself_is_not_held_to_thimble_s_mark(ws, 
     (s,) = await views.shoot_states(CORPUS, "unmarked", [{"open": {}, "labels": views.probe_context()}])
     assert s["ok"], s["errors"]
     assert s["shown"]["records"] == 4 and s["shown"]["due"] == s["shown"]["drawn"] >= 1, s["shown"]
+    assert s["painted"]["unseen"] == ["board.jsonl#L14"] and s["painted"]["seen"] == 1, s["painted"]
+
+
+ROWS = "".join(f'<tr data-anchor="board.jsonl#L{n}"{{own}}><td>post {n}</td><td>by someone</td></tr>' for n in range(1, 30))
+MARK_PAGES = {  # name: (style, extra attribute on each row, script), and whether the test label's colour shows
+    "compact table in a box that scrolls sideways, at the pane's edge": (
+        "body{margin:0} .wrap{overflow-x:auto} td{padding:4px}", "", "", True),
+    "rows with no left padding at the pane's edge": ("body{margin:0} td{padding:4px 4px 4px 0}", "", "", True),
+    "the page turns the bar off": ("td{padding:10px} #t tr,#t td{box-shadow:none!important}", "", "", False),
+    "rows that draw no colour of their own": ("td{padding:10px}", " data-anchor-unmarked", "", False),
+    "rows that draw the label's colour themselves": (
+        "td{padding:10px}", " data-anchor-unmarked",
+        "const paint = () => { for (const r of document.querySelectorAll('tr')) { const m = thimble.markOf(r.dataset.anchor);"
+        " r.firstChild.style.background = m ? m.bar : '' } }; thimble.onMarks(paint); paint()", True),
+}
+
+
+@pytest.mark.parametrize("name", sorted(MARK_PAGES))
+async def test_the_checks_look_for_the_label_s_colour_in_a_picture_of_the_page(name, ws, inproc, bound):
+    """The checks count a mark only where a picture of the page shows the test label's colour on the record: a bar a
+    box hiding overflow would cut is drawn inside the row, and a page that turns the bar off, or an element marked
+    data-anchor-unmarked that draws no colour, fails."""
+    if why := views.build_problem():
+        if os.environ.get("CI") == "true":
+            pytest.fail(why)
+        pytest.skip(why)
+    style, own, script, seen = MARK_PAGES[name]
+    html = (f"<!doctype html><html><head><style>body{{font:13px sans-serif}} table{{border-collapse:collapse}} {style}"
+            f"</style></head><body><div class=wrap><table id=t>{ROWS.replace('{own}', own)}</table></div>"
+            f"<script>thimble.onOpen(() => {{}}); {script}</script></body></html>")
+    views.write_view(CORPUS, "rows", reader=THREADS_READER, html=html, **{**VIEW, "name": "Rows"})
+    (s,) = await views.shoot_states(CORPUS, "rows", [{"open": {}, "labels": views.probe_context(), "size": views.PANE_NARROW}])
+    assert s["ok"], s["errors"]
+    view = views.read_view(CORPUS, "rows")
+    problems, _ = views.label_problems(view, [("board.jsonl", 100, 0)], [{**s, "state": "overview"}])
+    p = s["painted"]
+    assert p["due"] == 4 and p["checked"] >= 2, p
+    if seen:
+        assert p["seen"] == p["checked"] and problems == [], (p, problems)
+    else:
+        n = p["checked"]
+        assert p["seen"] == 0 and len(problems) == 1, (p, problems)
+        assert f"does not show the test label's colour on {n} of the {n}" in problems[0], problems
 
 SELF_LABEL_HTML = """<!doctype html><html><head><style>body{font:13px sans-serif;margin:8px}</style></head><body>
 <button id="on" data-label="asks">Turn on asks</button><div data-anchor="board.jsonl#L1">one</div>

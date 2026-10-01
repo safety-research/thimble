@@ -69,8 +69,8 @@
 //                          version of the view is loaded in its place: {ref, scroll, fields, segs} (pageState)
 //   restore {state}        page to frame: that state put back in the newer version's page, as far as it fits (restore)
 // An anchored element with data-anchor-unmarked takes no mark, where the page draws the labels' colours on it itself,
-// such as a lane whose marks carry them, so the checks never count it as a mark drawn; a ⌘-click on it still asks about
-// its ref.
+// such as a lane whose marks carry them; the checks then look for the label's colour on the element. A ⌘-click on it
+// still asks about its ref.
 // The text of an element marked data-thimble-chrome inside an anchored element is the page's own wording, such as a
 // record's header, which a label's matches never highlight. window.thimble.derived lists the fields the view's reader
 // made rather than read (window.__thimbleView.derived), which thimble lists above the view; nothing in the page is marked.
@@ -598,8 +598,8 @@
   // The labels the analyst turns on, drawn over the records the view shows: every data-anchor that appears is reported
   // (anchors), and the page answers with the marks of those records (labels). A marked element gets data-thimble-label
   // and a bar in the first label's colour along its left edge, drawn as a box-shadow added to the view's own
-  // (data-thimble-own): inset when the left padding has room, else just outside. Only the outermost element carrying a
-  // record's ref takes the bar. Span labels are highlighted with the CSS Custom Highlight API, leaving the DOM as it is.
+  // (data-thimble-own): inset when the left padding has room or when a box that hides overflow, or the frame's edge,
+  // would cut a bar outside it; else just outside. Only the outermost element carrying a record's ref takes the bar. Span labels are highlighted with the CSS Custom Highlight API, leaving the DOM as it is.
   var marks = {}
   var reported = {}
   var unsent = []
@@ -748,6 +748,21 @@
     var box = el.tagName === 'TR' && el.cells && el.cells.length ? el.cells[0] : el
     return parseFloat(getComputedStyle(box).paddingLeft) >= 2 * BAR
   }
+  // the left edge, in the frame's viewport, of what the element's ancestors that hide overflow let show; `cut` caches
+  // it per ancestor for one paint
+  function clipLeft(el, cut) {
+    var a = el.parentElement
+    if (!a || a === document.documentElement || a === document.body) return 0
+    if (cut.has(a)) return cut.get(a)
+    var left = clipLeft(a, cut)
+    if (getComputedStyle(a).overflowX !== 'visible') left = Math.max(left, a.getBoundingClientRect().left + a.clientLeft)
+    cut.set(a, left)
+    return left
+  }
+  function edgeOf(el, cut) {
+    if (room(el)) return 'in'
+    return el.getBoundingClientRect().left - BAR >= clipLeft(el, cut) ? 'out' : 'in'
+  }
   function paint() {
     paintTimer = null
     for (var i = 0; i < marked.length; i++) {
@@ -774,6 +789,7 @@
       // after, so the page's styles are worked out once rather than once per element
       var els = document.querySelectorAll('[data-anchor]')
       var todo = []
+      var cut = new Map()
       for (var j = 0; j < els.length; j++) {
         var el = els[j]
         var ref = el.getAttribute('data-anchor')
@@ -787,7 +803,7 @@
           continue
         }
         var own = getComputedStyle(el).boxShadow
-        todo.push([el, m, room(el) ? 'in' : 'out', own && own !== 'none' && SHADOW.test(own) ? own : null])
+        todo.push([el, m, edgeOf(el, cut), own && own !== 'none' && SHADOW.test(own) ? own : null])
       }
       for (var d = 0; d < todo.length; d++) {
         var el2 = todo[d][0]

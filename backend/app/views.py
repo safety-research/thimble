@@ -2667,10 +2667,13 @@ def gate_lines(report: dict[str, Any]) -> list[str]:
     for s in shots:
         if s.get("ok"):
             x = s.get("shown") or {}
+            p = s.get("painted") if isinstance(s.get("painted"), dict) else {}
             lines.append(f"page: {s.get('state')}, {int(x.get('records') or 0)} records and {int(x.get('units') or 0)} "
                          "units shown"
                          + (f", {int(x.get('drawn') or 0)} of the {int(x.get('due') or 0)} the test label marks drawn marked"
                             if s.get("state", "overview") in LABELLED_STATES else "")
+                         + (f", its colour seen on {int(p.get('seen') or 0)} of the {int(p.get('checked') or 0)} in view"
+                            if s.get("state", "overview") in LABELLED_STATES and p.get("checked") else "")
                          + (f", {int(x.get('unkept') or 0)} records shown that the filter drops"
                             if s.get("state") == "filtered" else ""))
         else:
@@ -3372,8 +3375,11 @@ def label_problems(view: dict[str, Any], files: list[tuple[str, int, int]],
                    shots: list[dict[str, Any]]) -> tuple[list[str], list[str]]:
     """(problems, notes) of labels in the page, from what each loaded state shows at its end (view_shot.mjs `shown`),
     for a view of files that split into records (lined). It fails when no record or unit is shown anchored; when fewer
-    than one in ANCHORED_SHARE of the records the reader answered are shown anchored and no unit is; and when a record or
-    unit the test label marks is shown without its mark. Records shown, filtered to the test label, whose anchor the filter does
+    than one in ANCHORED_SHARE of the records the reader answered are shown anchored and no unit is; when a record or
+    unit the test label marks is shown without its mark; and when a picture of the page shows the label's colour on
+    fewer of the marked records in view than it checked (view_shot.mjs `painted`), as when a box that hides overflow
+    cuts the bar, or for an element with data-anchor-unmarked that draws no colour of its own. Records shown, filtered
+    to the test label, whose anchor the filter does
     not keep are noted, since a record the page draws for several lines is anchored by one of them."""
     if not lined(view, files):
         return [], []
@@ -3397,6 +3403,15 @@ def label_problems(view: dict[str, Any], files: list[tuple[str, int, int]],
         if drawn < due:
             problems.append(_hint("view-marks-missing", state=name, due=due, missing=due - drawn))
             break
+    else:
+        for s in shots:
+            name = str(s.get("state", "overview"))
+            p = s.get("painted") if s.get("ok") and name in LABELLED_STATES and name != "filtered" else None
+            if isinstance(p, dict) and int(p.get("seen") or 0) < int(p.get("checked") or 0):
+                unseen = [str(r) for r in p.get("unseen") or []]
+                problems.append(_hint("view-marks-unseen", state=name, unseen=len(unseen), checked=int(p["checked"]),
+                                      refs=", ".join(f"`{r}`" for r in unseen[:3])))
+                break
     if (f := loaded.get("filtered")) is not None and (unkept := int(f.get("unkept") or 0)):
         notes.append(_hint("view-filter-unkept", unkept=unkept, records=int(f.get("records") or 0)))
     return problems, notes
