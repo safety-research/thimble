@@ -553,12 +553,17 @@ class Store:
                         path, line = ref_parts(ref) if ref not in got else (None, None)
                         if path is not None and line is not None:
                             lines.setdefault(path, set()).add(line)
-                    starts: dict[tuple[str, int], dict] = {}
+                    # the first labelled row on each line, picked here: an ORDER BY in the query makes SQLite walk every
+                    # row of the path instead of searching the (path, line) index
+                    first: dict[tuple[str, int], tuple] = {}
                     for path, ns in lines.items():
                         marks = ",".join("?" * len(ns))
-                        for r in conn.execute(f"SELECT {_MERGED_COLS} FROM current WHERE path = ? AND line IN ({marks}) "
-                                              "ORDER BY rowid", (path, *ns)):
-                            starts.setdefault((path, int(r[-1])), _merged(r))
+                        for r in conn.execute(f"SELECT rowid, {_MERGED_COLS} FROM current WHERE path = ? AND line IN ({marks})",
+                                              (path, *ns)):
+                            k = (path, int(r[-1]))
+                            if k not in first or r[0] < first[k][0]:
+                                first[k] = r
+                    starts = {k: _merged(r[1:]) for k, r in first.items()}
                     for ref in part:
                         if ref in got:
                             out.append(got[ref])
