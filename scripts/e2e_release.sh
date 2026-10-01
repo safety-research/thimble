@@ -29,11 +29,10 @@
 # from the CLI and from Settings. Every process it started is stopped on exit, and <out>/report.md lists each step.
 #
 # The run keeps the caller's HOME, so thimble and claude use the caller's own Claude login and config, and it leaves
-# them as they were: before installing, it records in the fresh THIMBLE_HOME that this install registered no plugin
-# (else install.sh --no-plugin would take back a thimble plugin another install registered), puts the `thimble` link in
-# <out>/bin (THIMBLE_BIN_DIR) in place of ~/.local/bin, and installs only when install.sh --dry-run plans no `claude
-# plugin` command and no write to ~/.local/bin/thimble. The last step checks that Claude Code's plugins and
-# marketplaces, its trust entries and ~/.local/bin/thimble are as they were before the run.
+# them as they were: it puts the `thimble` link in <out>/bin (THIMBLE_BIN_DIR) in place of ~/.local/bin, and installs
+# only when install.sh --dry-run plans no `claude plugin` command and no write to ~/.local/bin/thimble. The last step
+# checks that Claude Code's plugins and marketplaces, its trusted folders and ~/.local/bin/thimble are as they were
+# before the run.
 #
 # A step marked pending waits for work that is not merged yet: its failure is reported as expected and does not fail the
 # run (unless --strict), and once it passes the report says so. Exit 0 when no step failed, 1 otherwise.
@@ -196,7 +195,6 @@ if ! claude_files > "$logs/claude-files-before.json" 2>&1; then
   record claude-files fail "could not read Claude Code's files: $(tail -n 1 "$logs/claude-files-before.json")"; exit 1
 fi
 files_before="$logs/claude-files-before.json"
-printf '{"answer": "no", "registered": ""}\n' > "$thome/plugin.json"
 flags=(--browser bundled --no-sandbox-deps --no-plugin --no-trust-workspaces)
 if ! (cd "$src_tree" && in_env bash scripts/install.sh "${flags[@]}" --dry-run) < /dev/null > "$logs/install-plan.log" 2>&1; then
   record install fail "install.sh --dry-run exited non-zero; see logs/install-plan.log"; exit 1
