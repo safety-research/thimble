@@ -149,6 +149,60 @@ async def test_a_ticket_the_box_cannot_run_asks_before_it_starts_and_again_befor
     assert (await running)["status"] == "applied" and (repo / "README.md").read_text() == "b\n"
 
 
+async def test_a_ticket_whose_session_shows_no_activity_runs_on_until_the_analyst_stops_it(monkeypatch, tmp_path):
+    """A turn has no time limit: a session that shows no activity gets a line in the ticket's thread and runs on, and
+    the analyst's Stop ends the ticket `stopped` with its session stopped."""
+    monkeypatch.setenv("THIMBLE_SANDBOX", "1")
+    repo = _repo(tmp_path)
+    monkeypatch.setattr(dev, "REPO", repo)
+    monkeypatch.setattr(dev, "runner_problem", lambda **_k: "")
+    monkeypatch.setattr(ticket_box, "works", lambda: True)
+    tx = tmp_path / "s1-0000.jsonl"
+    tx.write_text("")
+    stopped: list = []
+
+    class Sessions:
+        async def start(self, cwd, prompt, **_k):
+            return {"id": "s1", "session_id": "s1-0000"}
+
+        async def state(self, cwd, short):
+            return "working"
+
+        def transcript(self, session_id):
+            return tx
+
+        def stop(self, short):
+            stopped.append(short)
+
+    async def no_shot(*_a, **_k):
+        return None
+
+    monkeypatch.setattr(dev, "SESSIONS", Sessions())
+    monkeypatch.setattr(dev, "_preview_shot", no_shot)
+    monkeypatch.setattr(dev, "POLL_S", 0.01)
+    monkeypatch.setattr(dev, "QUIET_NOTE_S", 0.1)
+    t = dev.file_ticket(CORPUS, "Bigger font", "the labels are small", start=False)
+    rec = dev._claim(t["id"])
+    run = dev.Run(ticket_id=t["id"], title=t["title"], ts_start="")
+    monkeypatch.setattr(dev, "_current", run)
+    run.task = asyncio.ensure_future(dev._run_task(run, rec))
+
+    def thread() -> str:
+        events = agents.read_events(agents.paths(CORPUS, t["chat"])[1])
+        return "".join(str(e.get("delta") or e.get("text") or "") for e in events)
+
+    for _ in range(300):
+        if thread().count("no activity for") >= 2:
+            break
+        await asyncio.sleep(0.01)
+    assert dev.QUIET_LINE.format(minutes=dev._minutes(0.1)) in thread()
+    assert dev.QUIET_LINE.format(minutes=dev._minutes(0.2)) in thread()
+    assert not run.task.done() and dev._get(t["id"])["status"] == "running"
+    assert (await dev.stop_ticket(t["id"]))["ok"]
+    await asyncio.wait_for(run.task, 10)
+    assert dev._get(t["id"])["status"] == "stopped" and "s1" in stopped
+
+
 def test_the_box_reads_nothing_its_worktree_s_links_point_to(tmp_path):
     """The session can change its worktree's links to the live venv and node_modules: what the box may read is taken
     from the live checkout, and nothing runs in the box once a link leads elsewhere."""
