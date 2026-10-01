@@ -1,14 +1,16 @@
-"""app.cardtypes and thimble.card, with the `multiagent-swimlane` card type, which the Swarm extension gave as `swarm` and
-then `agent-swimlane` before. On a corpus of JSON Lines records, the registry finds the type without any view
-proposal and lists it for main's prompt; a card's code draws it with thimble.card, which checks the arguments against the
-type's schema, runs card.py on the reader's cached index under the labels the call names, whatever Files highlights, and
-shows the data with a listing main reads and cites; the card check's page gets the type's frame from the request. Keep
-writes a patch of the arguments into the card's one thimble.card call (its tests with a type that has such arguments are
-in test_extensions). Main hears when a label it ran finishes, and can colour a label's values.
+"""app.cardtypes and thimble.card, with the `multiagent-swimlane` card type, which the swarm extension (now
+swarm-orient) gave as `swarm` and then `agent-swimlane` before. On a corpus of JSON Lines records, the registry finds
+the type without any view proposal and lists it for main's prompt; a card's code draws it with thimble.card, which
+checks the arguments against the type's schema, runs card.py on the reader's cached index under the labels the call
+names, whatever Files highlights, and shows the data with a listing main reads and cites; the card check's page gets the
+type's frame from the request. Keep writes a patch of the arguments into the card's one thimble.card call (its tests
+with a type that has such arguments are in test_extensions). Main hears when a label it ran finishes, and can colour a
+label's values.
 
 The corpus `crew` is 140 saves of 35 accounts on 4 pages, each naming the next account, which the Swarm reader reads as
-a swarm; Swarm is added, and with it multiagent-swimlane. Reader calls run in this process (views._runner replaced by an exec of the kernel's
-snippet), and thimble.card runs in this process in a module built from kernel_thimble.py, as a kernel builds it."""
+a swarm; swarm-orient is added, and with it multiagent-swimlane. Reader calls run in this process (views._runner
+replaced by an exec of the kernel's snippet), and thimble.card runs in this process in a module built from
+kernel_thimble.py, as a kernel builds it."""
 from __future__ import annotations
 
 import asyncio
@@ -42,7 +44,7 @@ def crew(workspaces_tmp, tmp_path, monkeypatch) -> Path:
     (d / "saves.jsonl").write_text("".join(json.dumps(r) + "\n" for r in ROWS))
     (d / "manifest.json").write_text(json.dumps({"name": CORPUS, "description": "a swarm"}))
     monkeypatch.setattr(config, "DATA_DIR", (tmp_path / "data").resolve())
-    extensions.add("swarm", yes=True, say=lambda _: None)
+    extensions.add("swarm-orient", yes=True, say=lambda _: None)
     return d.resolve()
 
 
@@ -246,10 +248,11 @@ async def test_main_hears_when_a_label_it_ran_finishes_and_can_colour_its_values
     assert named == list(concepts.COLOUR_NAMES) and sorted(concepts.COLOUR_NAMES.values()) == list(range(1, concepts.PALETTE + 1))
 
 
-async def test_the_swarm_extension_ships_no_view_and_takes_back_the_one_it_installed(crew, monkeypatch, tmp_path):
-    """Swarm and multiagent-swimlane give a card type and orientation but no view: on a swarm they run and nothing is proposed
-    or installed, a card of its type has no view to open, and the Swarm view an earlier version installed goes, as does
-    thimble's own install of it from before Swarm was an extension."""
+async def test_swarm_orient_ships_no_view_and_takes_back_the_one_it_installed(crew, monkeypatch, tmp_path):
+    """swarm-orient and multiagent-swimlane give a card type and orientation but no view: on a swarm they run and
+    nothing is proposed or installed, a card of its type has no view to open, and the Swarm view an earlier version
+    installed when the extension was called swarm goes, as does thimble's own install of it from before it was an
+    extension."""
     old = tmp_path / "old-swarm-view"
     old.mkdir()
     for name in ("reader.py", "card.py"):
@@ -260,7 +263,7 @@ async def test_the_swarm_extension_ships_no_view_and_takes_back_the_one_it_insta
                          extension="swarm")
     views.install_viewer(CORPUS, "relay", old, ["saves.jsonl"], why="", proposed_by="thimble", orientation=True)
     state = await extensions.refresh(CORPUS, wait=10)
-    assert state["extensions"]["swarm"]["active"] and state["extensions"]["swarm"]["views"] == []
+    assert state["extensions"]["swarm-orient"]["active"] and state["extensions"]["swarm-orient"]["views"] == []
     assert views.list_proposals(CORPUS) == [] and views.read_view(CORPUS, "swarm") is None
     types_ = await cardtypes.refresh(CORPUS, warm=False)
     assert types_["multiagent-swimlane"]["view"] is None

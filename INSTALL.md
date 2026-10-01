@@ -83,14 +83,14 @@ An extension adds views, card types, report types or changes to thimble's agents
 URL, or one thimble ships by name. Adding it switches it on:
 
 ```bash
-thimble extension add swarm        # checks it, lists what it adds and asks first; --yes for scripts
-thimble extension off swarm        # in every workspace; Settings > Extensions switches it for one workspace
-thimble extension on swarm
+thimble extension add swarm-orient     # checks it, lists what it adds and asks first; --yes for scripts
+thimble extension off swarm-orient     # in every workspace; Settings > Extensions switches it for one workspace
+thimble extension on swarm-orient
 thimble extension list
-thimble extension remove swarm     # a folder used in place stays where it is
+thimble extension remove swarm-orient  # a folder used in place stays where it is
 ```
 
-thimble ships three. `video`, the Video document with its video export, comes added. `swarm` and
+thimble ships three. `video`, the Video document with its video export, comes added. `swarm-orient` and
 `multiagent-swimlane` are added with `thimble extension add`; Settings and `thimble extension list` name them until
 then. One you remove stays removed. Its Python runs only in thimble's kernels. Its `extension.json` names the thimble
 versions it works with and the Python packages and other extensions it needs: thimble installs no package, and while
@@ -106,9 +106,11 @@ view's reason, and its switch there overrides the check.
 The views thimble builds for a workspace are that workspace's own extension, in `workspaces/<workspace>/extension/`.
 No other workspace shows them. Settings > Extensions lists them under This workspace's views, each with its switch.
 
-The Swarm extension is for corpora where many agents act on shared pages and channels and address each other. It adds
-orientation instructions that have every message read. It needs `multiagent-swimlane`, the card type that draws a
-swimlane of the actions main chose to answer a question.
+`swarm-orient` adds to the orientation for corpora where many agents act on shared pages and channels and address
+each other. Many swarm-reader agents read every record, a coordination label marks each one, the counts are checked,
+and the episodes are drawn as `multiagent-swimlane` cards, the card type that draws a swimlane of the actions main
+chose. Test builds called it `swarm`: the commands still take that name for this release, and what was set for it
+carries over.
 
 ## Update
 

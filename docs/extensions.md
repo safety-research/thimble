@@ -70,7 +70,8 @@ Both files take `description` (shown by `add` and Settings), `model` and `effort
 `agent.json` also takes `tools` and `disallowedTools`, which can only narrow what the role has, and with `prompt`,
 `subagents`: Claude Code subagents the role can call, in the fields of Claude Code's `--agents` JSON, each prompt in
 its own file. main takes a prompt addition only. [agents.md](agents.md) says what a program that runs a role or a task
-gets and how it answers. Permission modes and hooks are yours, and an extension cannot set them.
+gets and how it answers. Permission modes and hooks are yours, and an extension cannot set them. The orientation's
+`agent.json` of `swarm-orient`, which thimble ships:
 
 ```json
 {"description": "Has every record of a swarm read by a model before the orientation drafts.",
