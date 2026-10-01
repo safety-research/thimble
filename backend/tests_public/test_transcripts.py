@@ -317,3 +317,12 @@ def test_a_citation_of_a_pdf_page_reads_only_that_page(chats, monkeypatch):
     assert len(read) == 1, "a page is read once"
     span = client.get(f"{CHATS}/ref", params={"ref": "docs/long.pdf#p10-p40"}).json()
     assert span["meta"]["last_page"] == 40 and span["excerpt"].startswith("Page 10") and len(read) == 1 + pdfs.SPAN_PAGES_READ
+
+
+def test_a_role_that_first_speaks_past_the_head_still_starts_a_turn(chats, monkeypatch):
+    monkeypatch.setattr(transcripts, "TEXT_HEAD_LINES", 4)
+    log = "Note: a heading-like line\nUser: hi\nAssistant: hello\nUser: again\nAssistant: yes\nSystem: the session ended\n"
+    (chats / "logs" / "late.md").write_text(log)
+    page = client.get(f"{CHATS}/source", params={"path": "logs/late.md"}).json()
+    assert page["transcript"]["speakers"] == ["assistant", "user"]
+    assert [r["meta"].get("turn", {}).get("speaker") for r in page["records"]] == [None, "User", "Assistant", "User", "Assistant", "System"]

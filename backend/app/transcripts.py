@@ -772,7 +772,7 @@ def get_turns(c: str, path: str, start: int = 0, count: int = 100, line: int | N
 def dress(page: dict[str, Any], path: Path, rel: str) -> dict[str, Any]:
     """A page of a file's records with what the Transcript mode needs: the sniff (`transcript`) when the file reads as
     one, and for a text chat log each record that starts a turn its `meta.turn` (turn_of), only for the speakers the
-    sniff names when it names them."""
+    sniff names when it names them, or a role such as `System` that first speaks past the head."""
     hint = sniff(path, rel)
     if hint is None:
         return page
@@ -782,6 +782,6 @@ def dress(page: dict[str, Any], path: Path, rel: str) -> dict[str, Any]:
         for rec in page.get("records") or []:
             text = rec.get("record", {}).get("text") if isinstance(rec.get("record"), dict) else None
             t = turn_of(text, hint["style"]) if isinstance(text, str) else None
-            if t is not None and (speakers is None or t["speaker"].lower() in speakers):
+            if t is not None and (speakers is None or t["speaker"].lower() in speakers or t["speaker"].lower() in ROLE_WORDS):
                 rec.setdefault("meta", {})["turn"] = t
     return page
