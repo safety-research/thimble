@@ -53,8 +53,9 @@ own: Settings offers to run them now (offered), and Run now sends them as one fo
 returns each time the extension is switched on again. A view thimble installed from a viewer it no longer ships,
 unchanged since, gives way to an active extension's view of its slug, and goes when none gives one.
 
-Two active extensions that give the same view or card type, or that both replace the orientation's instructions, lose
-it both (the instructions stay thimble's), and Settings and `thimble doctor` name the conflict.
+Two active extensions that give the same view or card type, or that both replace the orientation's instructions or one
+role, lose it both (the instructions and the role stay thimble's), and `add`, Settings and `thimble doctor` name the
+conflict. Settings also says when another extension's program runs a role, so an addition to it is not used.
 
 thimble ships some extensions (builtin_dir()); `add` adds one by name, and those of SHIPPED_ON are added on thimble's
 first run (ship()). A built-in thimble added, or the analyst added by name, follows the version this thimble ships while
@@ -604,8 +605,9 @@ def _list(e: dict[str, Any], key: str) -> list[dict[str, Any]]:
 
 def conflicts(exts: dict[str, dict[str, Any]]) -> dict[str, dict[str, list[str]]]:
     """{kind: {slug: [extension, ...]}} of what two or more of the active extensions `exts` give: `view` and `card`
-    slugs, and the orientation's `instructions` they replace (block)."""
-    seen: dict[str, dict[str, list[str]]] = {"view": {}, "card": {}, "block": {}}
+    slugs, the orientation's `instructions` they replace (block), and the roles they replace with a prompt or a
+    program (`role`), each of which then runs thimble's own."""
+    seen: dict[str, dict[str, list[str]]] = {"view": {}, "card": {}, "block": {}, "role": {}}
     for n, e in sorted(exts.items()):
         if not e.get("active"):
             continue
@@ -617,6 +619,9 @@ def conflicts(exts: dict[str, dict[str, Any]]) -> dict[str, dict[str, list[str]]
             seen["card"].setdefault(t["slug"], []).append(n)
         if isinstance(e.get("replaces"), str) and e["replaces"]:
             seen["block"].setdefault("instructions", []).append(n)
+        for r in e.get("roles") or []:
+            if isinstance(r, dict) and r.get("role") and (r.get("kind") != "prompt" or r.get("replace")):
+                seen["role"].setdefault(str(r["role"]), []).append(n)
     return {k: {s: ns for s, ns in m.items() if len(ns) > 1} for k, m in seen.items()}
 
 
@@ -628,6 +633,8 @@ def conflict_lines(clash: dict[str, dict[str, list[str]]]) -> list[str]:
             both = ", ".join(names[:-1]) + f" and {names[-1]}"
             if kind == "block":
                 out.append(f"{both} both replace the orientation's instructions, so thimble's own are used")
+            elif kind == "role":
+                out.append(f"{both} both replace {ROLE_NAMES.get(slug, 'the ' + slug)}, so thimble's own runs")
             else:
                 out.append(f"{both} both give the {'view' if kind == 'view' else 'card type'} {slug!r}, so neither "
                            f"is used")
@@ -1748,20 +1755,26 @@ router = APIRouter()
 CONFIG_AGENT = {"orientation": "orientation", "critic": "critic", "writer": "writer", "dev": "dev"}
 
 
-def parts(e: dict[str, Any]) -> list[str]:
-    """What the extension `e` gives, each in a few words, for Settings."""
+def parts(e: dict[str, Any], unused: dict[str, str] | None = None) -> list[str]:
+    """What the extension `e` gives, each in a few words, for Settings. `unused` {role: why} says why its change to a
+    role is not used here: another extension replaces the same role, or another's program runs it."""
+    unused = unused or {}
+
+    def but(role: str, words: str) -> str:
+        return f"{words}, not used, since {unused[role]}" if role in unused else words
+
     out = [f"{v.get('name') or v['slug']} view" for v in _list(e, "views")]
     out += [f"{t.get('name') or t['slug']} card type" for t in _list(e, "cards")]
     out += [f"{r.get('name') or r['slug']} report type" for r in _list(e, "reports")]
     roles = {r["role"]: r for r in e.get("roles") or [] if isinstance(r, dict) and r.get("role")}
     for role, r in roles.items():
-        out.append(_changes(ROLE_NAMES.get(role, f"the {role}"), r))
+        out.append(but(role, _changes(ROLE_NAMES.get(role, f"the {role}"), r)))
     if "orientation" not in roles:
         if e.get("orient"):
-            out.append("adds to the orientation")
+            out.append(but("orientation", "adds to the orientation"))
         elif e.get("replaces"):
-            out.append("replaces the orientation's instructions")
-    out += [f"{a} agent" for a in _words(e.get("agents"))]
+            out.append(but("orientation", "replaces the orientation's instructions"))
+    out += [but("orientation", f"{a} agent") for a in _words(e.get("agents"))]
     for t in e.get("tasks") or []:
         if isinstance(t, dict) and t.get("task"):
             out.append(_changes(f"the {t['task']} task", t) + ", not used yet")
@@ -1837,6 +1850,7 @@ def public(c: str) -> dict[str, Any]:
     replacing = _replacing(c, state["extensions"])
     wrapped = kernels_wrapped(c)
     out = []
+    clash = conflicts(state["extensions"])
     for name, e in sorted(state["extensions"].items()):
         vs = [{"slug": v["slug"], "name": _one(v.get("name") or v["slug"]), "shown": bool(v.get("shown")),
                "note": _one(v.get("note")),
@@ -1847,7 +1861,8 @@ def public(c: str) -> dict[str, Any]:
                     "active": bool(e.get("active")), "why": why,
                     "note": "" if name in state["off"] else why, "on": name not in state["off"],
                     "locked": bool(config_off(name, off)) or bool(e.get("problems")), "views": vs,
-                    "parts": parts(e), "consent": consent({**e, "name": name}, conf, wrapped),
+                    "parts": parts(e, _unused(c, name, clash) if e.get("active") else None),
+                    "consent": consent({**e, "name": name}, conf, wrapped),
                     "orients": runs_orientation(e, replacing), "offer": name in offers})
     for n, v in not_added():
         if n in state["extensions"]:
@@ -1856,8 +1871,46 @@ def public(c: str) -> dict[str, Any]:
         out.append({"name": n, "version": v, "description": info["description"], "active": False, "why": NOT_ADDED,
                     "note": NOT_ADDED, "on": False, "locked": True, "views": [], "parts": parts(info),
                     "consent": "", "orients": orients(info), "offer": False})
-    return {"extensions": out, "conflicts": conflict_lines(conflicts(state["extensions"])),
-            "orientation_ran": orientation_ran(c)}
+    return {"extensions": out, "conflicts": conflict_lines(clash), "orientation_ran": orientation_ran(c)}
+
+
+def _unused(c: str, name: str, clash: dict[str, dict[str, list[str]]]) -> dict[str, str]:
+    """{role: why} for each role whose change by extension `name` is not used in workspace `c`: another active
+    extension replaces the same role, so thimble's own runs, or another's program runs the role, which gets no
+    prompt additions or subagents."""
+    from . import roles  # noqa: PLC0415
+
+    out: dict[str, str] = {}
+    for role, names in clash.get("role", {}).items():
+        if name in names:
+            others = [n for n in names if n != name]
+            out[role] = f"{' and '.join(others)} {'replace' if len(others) > 1 else 'replaces'} it too"
+    for role in extension_manifest.ROLES:
+        if role in out:
+            continue
+        ag = roles.agent_for(c, role)
+        if ag.code and ag.extension != name:
+            out[role] = f"{ag.extension}'s program runs {ROLE_NAMES.get(role, 'the ' + role)}"
+    return out
+
+
+def dependents(name: str) -> list[str]:
+    """The added extensions that need extension `name`."""
+    got = added()
+    return sorted(n for n, root in got.items() if n != name and name in read_extension(root, n, set(got)).get("needs", []))
+
+
+def conflicts_with(name: str) -> list[str]:
+    """The conflicts (conflict_lines) between extension `name` and the other added extensions that load, as `thimble
+    extension add` names them."""
+    got = added()
+    loadable = {}
+    for n, root in got.items():
+        info = read_extension(root, n, set(got))
+        if not info["problems"]:
+            loadable[n] = {**info, "active": True}
+    clash = conflicts(loadable)
+    return conflict_lines({k: {s: ns for s, ns in m.items() if name in ns} for k, m in clash.items()})
 
 
 @router.get("/ws/{c}/extensions")

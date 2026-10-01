@@ -880,3 +880,49 @@ def test_an_orientation_counts_as_run_only_with_the_thread_a_follow_up_resumes(c
     assert extensions.orientation_ran(CORPUS)
     kept.clear()
     assert not extensions.orientation_ran(CORPUS), "a follow-up could not resume it"
+
+
+def _role_ext(root: Path, name: str, agents: dict[str, dict], files: dict[str, str] | None = None, **manifest) -> Path:
+    folder = root / name
+    folder.mkdir(parents=True)
+    (folder / "extension.json").write_text(json.dumps({"name": name, "version": "0.1.0", **manifest}))
+    for role, spec in agents.items():
+        (folder / "agents" / role).mkdir(parents=True)
+        (folder / "agents" / role / "agent.json").write_text(json.dumps(spec))
+    for rel, text in (files or {}).items():
+        (folder / rel).parent.mkdir(parents=True, exist_ok=True)
+        (folder / rel).write_text(text)
+    return folder
+
+
+async def test_settings_add_and_doctor_name_what_another_extension_keeps_from_running(corpus, tmp_path, capsys,
+                                                                                     monkeypatch):
+    """Two extensions that replace one role both leave it to thimble, and add, doctor and Settings say so; another's
+    program running the orientation leaves an extension's addition to it unused, and Settings says that too. Removing
+    an extension another needs names the one that stops running."""
+    monkeypatch.setenv("THIMBLE_WORKSPACES_DIR", str(config.WORKSPACES_DIR))
+    program = {"description": "Its own critic.", "command": ["python3", "c.py"]}
+    for name in ("roleswap", "roleswap2"):
+        _add(_role_ext(tmp_path, name, {"critic": program}, {"agents/critic/c.py": "print('{}')\n"}))
+    assert "conflict: roleswap and roleswap2 both replace the critic, so thimble's own runs" in extensions.doctor_line()
+    assert cli.main(["extension", "add", str(tmp_path / "roleswap2"), "--yes"]) == 0
+    assert "Conflict: roleswap and roleswap2 both replace the critic, so thimble's own runs." in capsys.readouterr().out
+    await extensions.refresh(CORPUS)
+    got = extensions.public(CORPUS)
+    assert "roleswap and roleswap2 both replace the critic, so thimble's own runs" in got["conflicts"]
+    rows = {r["name"]: r for r in got["extensions"]}
+    assert rows["roleswap"]["parts"] == ["its own critic, a program, not used, since roleswap2 replaces it too"]
+
+    _add(_role_ext(tmp_path, "orientswap", {"orientation": {"description": "Its own.", "command": ["python3", "o.py"]}},
+                   {"agents/orientation/o.py": "print('{}')\n"}))
+    _add()
+    await extensions.refresh(CORPUS, wait=10)
+    rows = {r["name"]: r for r in extensions.public(CORPUS)["extensions"]}
+    assert "adds to the orientation, not used, since orientswap's program runs the orientation" in rows["ext-min"]["parts"]
+    assert "counter agent, not used, since orientswap's program runs the orientation" in rows["ext-min"]["parts"]
+
+    _add(_role_ext(tmp_path, "needy", {}, needs=["ext-min"]))
+    capsys.readouterr()
+    assert cli.main(["extension", "remove", "ext-min"]) == 0
+    out = capsys.readouterr().out
+    assert "Removed ext-min.\nneedy needs it, so it does not run until ext-min is added again" in out

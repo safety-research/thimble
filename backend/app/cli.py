@@ -2912,6 +2912,8 @@ def cmd_extension(args: argparse.Namespace) -> int:
                 print(f"{n} stays off where its switch in Settings keeps it off: {', '.join(kept)}.")
             if extensions.orients(extensions.read_extension(extensions.source_path(n), n)):
                 print(ORIENT_HINT.format(name=n))
+        for line in extensions.conflicts_with(name):
+            print(f"Conflict: {line}.")
     elif args.ext_cmd in ("on", "off"):
         try:
             got = extensions.switch(args.name, args.ext_cmd == "on", workspaces)
@@ -2927,10 +2929,15 @@ def cmd_extension(args: argparse.Namespace) -> int:
         elif args.ext_cmd == "on" and got["orients"]:
             print(ORIENT_HINT.format(name=args.name))
     else:
+        needing = extensions.dependents(args.name)
         if not extensions.remove(args.name):
             print(f"thimble extension remove: no extension {args.name!r} is added", file=sys.stderr)
             return 1
         print(f"Removed {args.name}.")
+        if needing:
+            print(f"{' and '.join(needing)} {'need' if len(needing) > 1 else 'needs'} it, so "
+                  f"{'they do' if len(needing) > 1 else 'it does'} not run until {args.name} is added again: "
+                  f"`thimble extension add {args.name}`.")
     url = api_url(int(read_state().get("port") or port()))
     if healthy(url):
         status, body = _request("POST", f"{url}/api/extensions/refresh", {}, timeout=60)
