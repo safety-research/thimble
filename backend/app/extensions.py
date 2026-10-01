@@ -94,7 +94,7 @@ STATE_FILE = "extensions.json"  # in the workspace's registry folder (config.reg
 CACHE_DIR = ".extensions"
 CARD_JSON, CARD_HTML, GUIDE = "card.json", "card.html", "card.md"
 TYPE_MD, EXPORT_PY = "type.md", "export.py"
-REPORT_JSON, REPORT_MD, REPORT_PY, WRITER_MD = "report.json", "report.md", "report.py", "writer.md"
+REPORT_JSON, REPORT_MD, WRITER_MD = "report.json", "report.md", "writer.md"
 AGENT_JSON, TASK_JSON = "agent.json", "task.json"
 ORIENT_FILES = ("agents/orient.md", "orient.md")  # the first found extends the orientation
 REPORT_DIRS = ("reports", "report-types")  # the first found holds the report types
@@ -444,7 +444,7 @@ def read_extension(root: Path, expect: str | None = None, have: set[str] | None 
             r = _json(d / REPORT_JSON)
             reports.append({"slug": d.name, "name": _one(r.get("name") or d.name), "description": _one(r.get("description")),
                             "viewer": _one(r.get("viewer")) or "document",
-                            "export": (d / EXPORT_PY).is_file() or (d / REPORT_PY).is_file()})
+                            "export": (d / EXPORT_PY).is_file()})
         elif (d / TYPE_MD).is_file():
             front, _ = _front(d / TYPE_MD)
             reports.append({"slug": d.name, "name": _one(front.get("name") or d.name),
@@ -1272,20 +1272,28 @@ def _thimbles_copy(d: Path) -> bool:
 
 
 def _row(kind: str, name: str, about: str) -> str:
-    return f"  {kind.ljust(12)}" + (f"{name}: {about}" if name and about else name or about)
+    return f"  {kind.ljust(12) if len(kind) < 12 else kind + ' '}" + (f"{name}: {about}" if name and about else name or about)
 
 
-WAYS = {"prompt": "adds to its prompt", "replace": "replaces its prompt", "sdk": "runs it as an Agent SDK program",
-        "command": "runs it as a program of its own"}
+WAYS = {"prompt": "adds to the {who}'s prompt", "replace": "replaces the {who}'s prompt",
+        "sdk": "runs the {who} as an Agent SDK program", "command": "runs the {who} as a program of its own"}
+NOT_RUN = "This thimble does not run {what} yet, so it is not used."  # tasks and report checks are read, never run
 
 
 def _way(r: dict[str, Any]) -> str:
     """How an extension changes a role or task (_roles, _tasks), in words."""
+    who = r.get("role") or f"{r.get('task')} task"
     if r["kind"] == "prompt":
-        return WAYS["replace" if r.get("replace") else "prompt"]
+        return WAYS["replace" if r.get("replace") else "prompt"].format(who=who)
     if r["kind"] == "command":
-        return f"{WAYS['command']} ({' '.join(r.get('command') or [])})"
-    return f"{WAYS['sdk']} ({Path(r.get('file') or '').name})"
+        return f"{WAYS['command'].format(who=who)} ({' '.join(r.get('command') or [])})"
+    return f"{WAYS['sdk'].format(who=who)} ({Path(r.get('file') or '').name})"
+
+
+def has_code(e: dict[str, Any]) -> bool:
+    """Whether the extension `e` (read_extension, or a workspace's entry) has Python that thimble's kernels run: a
+    view's reader, a card type's code or a report type's export.py."""
+    return bool(_list(e, "views") or _list(e, "cards") or any(r.get("export") for r in _list(e, "reports")))
 
 
 def _subagent_fields(root: Path, e: dict[str, Any], name: str) -> dict[str, Any]:
@@ -1346,11 +1354,12 @@ def summary(info: dict[str, Any], how: dict[str, Any]) -> list[str]:
                 about = _one(_front(root / rel)[0].get("description")) if rel.endswith(".md") else ""
                 out.append(_row("orientation", "", f"{about} It {what}." if about else f"It {what}."))
     for t in info.get("tasks") or []:
-        out.append(_row("task", t["task"], f"{t['description']} It {_way(t)}." if t["description"] else f"It {_way(t)}."))
+        about = f"{t['description']} It {_way(t)}." if t["description"] else f"It {_way(t)}."
+        out.append(_row("task", t["task"], f"{about} {NOT_RUN.format(what='tasks')}"))
     for r in info["reports"]:
         out.append(_row("report type", r["slug"], r["description"]) + (" With its own exports." if r["export"] else ""))
     for k in info.get("checks") or []:
-        out.append(_row("report check", k["slug"], k["name"]))
+        out.append(_row("report check", k["slug"], f"{k['name']}. {NOT_RUN.format(what='report checks')}"))
     if info["thimble"]:
         out.append(f"  It works with thimble {info['thimble']}.")
     if info["js"]:
@@ -1364,11 +1373,11 @@ def summary(info: dict[str, Any], how: dict[str, Any]) -> list[str]:
     if info["agents"]:
         out.append("  Its agents run in the orientation's session and its sandbox, without the web unless thimble's "
                    f"config sets agents.\"{info['name']}:<agent>\".web.")
-    if any(r["kind"] != "prompt" for r in [*roles.values(), *(info.get("tasks") or [])]):
-        out.append("  Its programs run in place of thimble's own for the roles and tasks above, with the same consent "
-                   "rules.")
-    out.append("  Its Python (readers, card code, export hooks) runs in thimble's kernels, with the same sandbox and "
-               "network as cells.")
+    if any(r["kind"] != "prompt" for r in roles.values()):
+        out.append("  Its programs run in place of thimble's own for the roles above, with the same consent rules.")
+    if has_code(info):
+        out.append("  Its Python (readers, card code, export hooks) runs in thimble's kernels, with the same sandbox and "
+                   "network as cells.")
     return out
 
 
@@ -1632,9 +1641,8 @@ def doctor_line() -> str:
 router = APIRouter()
 
 
-# the agent of thimble's config whose settings a role or task of an extension runs under
-CONFIG_AGENT = {"orientation": "orientation", "critic": "critic", "writer": "writer", "dev": "dev", "checks": "checks",
-                "labels": "labels", "card-check": "cardCheck"}
+# the agent of thimble's config whose settings a role of an extension runs under
+CONFIG_AGENT = {"orientation": "orientation", "critic": "critic", "writer": "writer", "dev": "dev"}
 
 
 def parts(e: dict[str, Any]) -> list[str]:
@@ -1651,8 +1659,10 @@ def parts(e: dict[str, Any]) -> list[str]:
         elif e.get("replaces"):
             out.append("replaces the orientation's instructions")
     out += [f"{a} agent" for a in _words(e.get("agents"))]
-    out += [_changes(f"the {t['task']} task", t) for t in e.get("tasks") or [] if isinstance(t, dict) and t.get("task")]
-    out += [f"{k.get('name') or k['slug']} report check" for k in _list(e, "checks")]
+    for t in e.get("tasks") or []:
+        if isinstance(t, dict) and t.get("task"):
+            out.append(_changes(f"the {t['task']} task", t) + ", not used yet")
+    out += [f"{k.get('name') or k['slug']} report check, not used yet" for k in _list(e, "checks")]
     return out
 
 
@@ -1673,9 +1683,9 @@ def _settings_words(a: dict[str, Any], data: bool = True) -> str:
 
 
 def consent(e: dict[str, Any], conf: dict[str, Any], wrapped: bool | None = None) -> str:
-    """The settings what the extension `e` runs runs under, in words: those of thimble's config for each agent it changes
-    or adds to, the MCP servers its agents start, then whether its code runs in a sandbox, as `wrapped` says
-    (left out when None). '' for an extension that runs neither."""
+    """The settings what the extension `e` runs runs under, in words: those of thimble's config for each role it changes
+    or adds to and each agent it adds, the MCP servers its agents start, then whether its code runs in a sandbox, as
+    `wrapped` says (left out when None). '' for an extension that runs neither."""
     agents_conf = conf.get("agents") if isinstance(conf.get("agents"), dict) else {}
     used: dict[str, str] = {}
     roles = [r["role"] for r in e.get("roles") or [] if isinstance(r, dict) and r.get("role")]
@@ -1686,10 +1696,6 @@ def consent(e: dict[str, Any], conf: dict[str, Any], wrapped: bool | None = None
             used["main"] = "your own settings"
         elif (a := agents_conf.get(CONFIG_AGENT.get(role, ""))) and isinstance(a, dict):
             used[role] = _settings_words(a)
-    for t in e.get("tasks") or []:
-        name = t.get("task") if isinstance(t, dict) else None
-        if name and isinstance(a := agents_conf.get(CONFIG_AGENT.get(name, "")), dict) and "network" in a:
-            used[name] = _settings_words(a)
     root = source_path(str(e.get("name") or ""))
     for name in _words(e.get("agents")):
         words = _settings_words(userconf.extension_agent(conf, f"{e.get('name')}:{name}"), data=False)
@@ -1700,8 +1706,7 @@ def consent(e: dict[str, Any], conf: dict[str, Any], wrapped: bool | None = None
     for who, words in used.items():
         groups.setdefault(words, []).append(who)
     lines = [f"{' and '.join(who)}: {words}." for words, who in groups.items()]
-    if wrapped is not None and (_list(e, "views") or _list(e, "cards")
-                                or any(r.get("export") for r in _list(e, "reports"))):
+    if wrapped is not None and has_code(e):
         lines.append("Its code runs in a sandbox." if wrapped else "Its code runs without a sandbox.")
     return " ".join(lines)
 

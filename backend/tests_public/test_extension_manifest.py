@@ -126,6 +126,8 @@ def test_the_new_layout_gives_roles_tasks_subagents_and_report_types(tmp_path, c
     _write(root, "reports/one-pager/report.json", {"name": "One pager", "description": "One page.", "viewer": "document"})
     _write(root, "reports/one-pager/report.md", "A one-page brief.")
     _write(root, "reports/one-pager/writer.md", "Lead with the answer.")
+    _write(root, "checks/tone/check.json", {"name": "Tone"})
+    _write(root, "checks/tone/check.md", "Flag a sentence that overstates.")
     info = extensions.read_extension(root, "kit", set())
     assert info["problems"] == [] and info["python"] == ["json"] and info["description"] == "A kit."
     assert info["orient"] == "agents/orientation/prompt.md" and info["agents"] == ["reader"]
@@ -133,10 +135,15 @@ def test_the_new_layout_gives_roles_tasks_subagents_and_report_types(tmp_path, c
     assert info["tasks"] == [{"task": "labels", "kind": "command", "description": "Three models vote.", "file": "",
                               "command": ["python", "labels.py"], "replace": False}]
     assert extensions.parts(info) == ["One pager report type", "adds to the orientation", "its own critic, an Agent SDK program",
-                                      "reader agent", "its own labels task, a program"]
+                                      "reader agent", "its own labels task, a program, not used yet",
+                                      "Tone report check, not used yet"]
     lines = "\n".join(extensions.summary(info, {"source": str(root), "kind": "folder"}))
-    assert "critic      Two critics. It runs it as an Agent SDK program (critic.py)." in lines
-    assert "task        labels: Three models vote. It runs it as a program of its own (python labels.py)." in lines
+    assert "orientation Reads all. It adds to the orientation's prompt." in lines
+    assert "critic      Two critics. It runs the critic as an Agent SDK program (critic.py)." in lines
+    assert ("task        labels: Three models vote. It runs the labels task as a program of its own (python labels.py). "
+            "This thimble does not run tasks yet, so it is not used.") in lines
+    assert "report check tone: Tone. This thimble does not run report checks yet, so it is not used." in lines
+    assert "kernels" not in lines, "it has no Python for the kernels to run"
 
     assert extensions.add(str(root), yes=True, say=lambda _: None) == ["kit"]
     c = corpus
