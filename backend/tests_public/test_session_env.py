@@ -295,8 +295,8 @@ def test_every_variable_a_session_s_own_code_reads_is_set_for_it():
     root = config.REPO_ROOT
     files = [*(root / "plugin" / "bin").iterdir(),
              *(root / "backend" / "app" / f"{m}.py" for m in ("permission_hook", "call_ref", "sandbox_allow", "scratch_hook",
-                                                              "view_check", "hook_auth", "cc_channel", "prompts", "config",
-                                                              "tools"))]
+                                                              "work_budget", "view_check", "hook_auth", "cc_channel",
+                                                              "prompts", "config", "tools"))]
     names = {n for f in files if f.is_file() for n in re.findall(r"\bTHIMBLE_[A-Z][A-Z0-9_]*", f.read_text("utf-8"))}
     # a constant's name, and the server's fallback model, which no session's code uses
     names -= {"THIMBLE_PREFIXES", "THIMBLE_FALLBACK_MODEL"}

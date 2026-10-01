@@ -26,6 +26,7 @@ import subprocess
 import sys
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
@@ -72,6 +73,8 @@ EXEC_TIMEOUT = 120.0  # seconds a cell may run before the kernel is interrupted;
 # The default allowance for a cell a chat runs, passed as `default_timeout_s` and never stored on the cell.
 CHAT_EXEC_TIMEOUT = 30.0
 STARTUP_TIMEOUT = 60.0
+MSG_INLINE_BYTES = 64 * 1024  # a kernel message up to this size is unpacked on the event loop, a larger one in a thread
+MSG_THREADS = 4
 PANDAS_COLWIDTH = 200  # the widest value a DataFrame shows before it cuts it (kernel_argv)
 ERROR_MIME = "application/vnd.thimble.error+json"
 
@@ -2388,6 +2391,31 @@ def positive_timeout(value: Any) -> float | None:
     return t
 
 
+_msg_pool: ThreadPoolExecutor | None = None
+
+
+def _unpack_msg(session: Any, frames: list) -> dict:
+    """A kernel message from its frames: its signature checked and its parts parsed (jupyter_client's Session)."""
+    _, parts = session.feed_identities(frames, copy=False)
+    return session.deserialize(parts, content=True, copy=False)
+
+
+async def _kernel_msg(channel: Any, timeout: float) -> dict:
+    """The next message on a kernel client's channel, as its get_msg gives it; Empty after `timeout` seconds. The frames
+    are read on the event loop, and a message larger than MSG_INLINE_BYTES is unpacked in a thread of its own pool, so
+    checking the signature over a large output and parsing it never holds the loop."""
+    global _msg_pool
+    sock = channel.socket
+    if not await sock.poll(int(timeout * 1000)):
+        raise Empty
+    frames = await sock.recv_multipart(copy=False)
+    if sum(len(f) for f in frames) <= MSG_INLINE_BYTES:
+        return _unpack_msg(channel.session, frames)
+    if _msg_pool is None:
+        _msg_pool = ThreadPoolExecutor(MSG_THREADS, thread_name_prefix="thimble-kernel-msg")
+    return await asyncio.get_running_loop().run_in_executor(_msg_pool, _unpack_msg, channel.session, frames)
+
+
 async def _execute(k: _Kernel, code: str, timeout: float | None = None,
                    user_expressions: dict[str, str] | None = None) -> tuple[list[dict], int | None, str]:
     """Run code on the kernel and collect iopub output into mime bundles. Returns (outputs, exec_count, status).
@@ -2432,7 +2460,7 @@ async def _execute(k: _Kernel, code: str, timeout: float | None = None,
             deadline = time.monotonic() + 10
             continue
         try:
-            msg = await kc.get_iopub_msg(timeout=min(1.0, remaining))
+            msg = await _kernel_msg(kc.iopub_channel, min(1.0, remaining))
         except Empty:
             if not k.alive():
                 dead = True
@@ -2497,7 +2525,7 @@ async def _execute(k: _Kernel, code: str, timeout: float | None = None,
     reply_deadline = time.monotonic() + 5
     while time.monotonic() < reply_deadline:
         try:
-            reply = await kc.get_shell_msg(timeout=1)
+            reply = await _kernel_msg(kc.shell_channel, 1)
         except Empty:
             continue
         except asyncio.CancelledError:

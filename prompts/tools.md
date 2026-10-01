@@ -1387,6 +1387,10 @@ It could not be resumed: {why}
 
 Your own scratch folder is {folder}. Put the files you make for your own work there, such as a script or an intermediate result, rather than in $TMPDIR or /tmp, which the session's other agents share.
 
+## work-budget
+
+The session's work folder {folder} now holds {size}, more than {budget}. Delete the extracts and copies there that you no longer need, and read the corpus in place rather than copying it.
+
 ## session-mode-switching
 
 This call did not run, because the analyst is switching your permission mode, which pauses your session. Once it has resumed, make this call again if you still need it.
