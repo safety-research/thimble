@@ -374,6 +374,8 @@ async def test_a_field_whose_values_the_cited_lines_do_not_hold_fails_the_checks
     rep = await views.gate(CORPUS, "threads", ["board.jsonl#L3"])
     assert rep["ok"] and not [n for n in rep["problems"] + rep["notes"] if "`derived`" in n], views.gate_lines(rep)
     assert [d["field"] for d in rep["coverage"]["derived"]] == ["score", "author"], "an inferred field comes first"
+    assert views._exempt("files", 3) and views._exempt("n_calls", 2), "a count needs no entry"
+    assert not views._exempt("ts", 1781741180000) and not views._exempt("status", 200), "a short or singular name is no count"
 
 
 def test_a_file_one_folder_lacks_beside_the_others_is_missing():

@@ -3169,9 +3169,15 @@ def _exempt(field: str, value: Any) -> bool:
     low = field.lower()
     if low in _POSITION_KEYS or low.endswith(_KEY_SUFFIXES):
         return True
-    if isinstance(value, int) and (_COUNT_NAME.search(field) or (low.endswith("s") and not low.endswith("ss"))):
+    if isinstance(value, int) and (_COUNT_NAME.search(field) or _plural_name(low)):
         return True
     return isinstance(value, str) and value.strip().lower() in _DEFAULTS
+
+
+def _plural_name(name: str) -> bool:
+    """Whether a field's name reads as a plural, a count of things such as `files` or `calls`: not a short name such as
+    `ts` or `ms`, nor one ending as a singular does, such as `status` or `address`."""
+    return len(name) > 3 and name.endswith("s") and not name.endswith(("ss", "us", "is"))
 
 
 def unlisted_derived(c: str, shots: list[dict[str, Any]], declared: set[str]) -> list[dict[str, str]]:
