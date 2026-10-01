@@ -23,7 +23,7 @@ import { findColumn, ReaderRuler, rulerColumns, useRuler, type LensTick, type Ru
 import { fmtSize } from './Tree'
 import { useFilesFilter, type FilesLabels } from './useLabels'
 import { accepts, slugOf, viewValue } from './viewChoice'
-import { hasNotes, useShownLabels, useViewNotes, ViewNotesLine } from './ViewChrome'
+import { hasNotes, ResidueList, useResidueOpen, useShownLabels, useViewNotes, ViewNotesLine } from './ViewChrome'
 import { ViewerFrame } from './ViewerFrame'
 import { usePinnedView, ViewUpdated } from './viewVersion'
 import { ProposalOption } from './ViewsBar'
@@ -142,13 +142,16 @@ function ReaderViewer({ ws, view, path, targetRef, labels, onRaw }: { ws: string
   const pin = usePinnedView(ws, view.slug, view.version || undefined)
   const notes = useViewNotes(ws, view.slug, pin.pinned || undefined)
   const shownLabels = useShownLabels(labels, view.claims)
+  const [residueOpen, toggleResidue] = useResidueOpen(ws, view.slug)
+  const pick = (ref: string) => bus.emit('openRef', { ref, browser: true })
   return (
     <div className="reader-main reader-viewer">
       {hasNotes(notes, shownLabels) && (
         <div className="reader-viewer-notes">
-          <ViewNotesLine ws={ws} name={view.name} notes={notes} shownLabels={shownLabels} onPick={(ref) => bus.emit('openRef', { ref, browser: true })} />
+          <ViewNotesLine ws={ws} name={view.name} notes={notes} shownLabels={shownLabels} residueOpen={residueOpen} onResidue={toggleResidue} />
         </div>
       )}
+      {residueOpen && <ResidueList notes={notes} onPick={pick} />}
       {failure && <ViewFailed name={view.name} detail={failure} onRaw={onRaw} />}
       {pin.stale && <ViewUpdated onReload={() => (setFailure(null), void pin.reload())} className="reader-viewer-updated" />}
       <ViewerFrame

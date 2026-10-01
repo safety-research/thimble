@@ -2051,8 +2051,44 @@
   text-decoration: underline;
   text-underline-offset: 2px;
 }
-.view-pane-problems {
+.view-pane-problems,
+.view-pane-residue-failed {
   color: var(--status-negative);
+}
+.view-pane-residue-none {
+  font: var(--type-ui-sm);
+  color: var(--text-tertiary);
+}
+/* what a view leaves out, listed under its head by kind; it scrolls past a few rows so the page keeps the pane */
+.view-pane-residue-list {
+  flex: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 24px;
+  max-height: 200px;
+  margin: -6px 0 14px;
+  padding: 6px 0;
+  overflow-y: auto;
+  border-top: 1px solid var(--border-hairline);
+  border-bottom: 1px solid var(--border-hairline);
+}
+.view-pane-residue-list section {
+  flex: 1 1 240px;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.view-pane-residue-list h4 {
+  margin: 2px 8px 2px;
+  font: var(--type-label);
+  letter-spacing: var(--tracking-label);
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+}
+.reader-viewer > .view-pane-residue-list {
+  margin: 0;
+  padding: 6px 14px;
+  border-top: 0;
 }
 .view-pane-problems:hover,
 .view-pane-problems[aria-expanded='true'] {
@@ -2116,14 +2152,6 @@
   margin: 4px 8px;
   border: 0;
   border-top: 1px solid var(--border-hairline);
-}
-/* a derived field's name, here and in the view's page (viewer_kit.css [data-derived]) */
-.view-pane-derived::after {
-  content: 'ƒ';
-  margin-left: 2px;
-  font: italic 400 0.8em / 1 var(--font-body);
-  color: var(--text-accent);
-  vertical-align: super;
 }
 .view-pane-list-more {
   padding: 4px 8px;

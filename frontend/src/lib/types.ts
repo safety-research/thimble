@@ -425,6 +425,8 @@ export interface ViewReview {
   left?: string[]
   note?: string
   undo?: boolean
+  /** the pictures the review took */
+  shots?: number
 }
 
 /** `GET /ws/{c}/views/suggestions?path=`: whether a viewer may be proposed for the type of a file opened in the File
@@ -499,11 +501,13 @@ export interface ViewDerived {
 }
 
 /** `GET /ws/{c}/views/{slug}/shown`: of the files a view claims, those it does not show whole, the first 500 of them,
- * each with why its reader hides it ('' when it gives no why) and how many of its bytes were read; and the fields its
- * reader derived. */
+ * each with why its reader hides it ('' when it gives no why) and how many of its bytes were read, with `claimed`
+ * false for a file of a folder beside the claimed ones; the claims that match no file; and the fields its reader
+ * derived. */
 export interface ViewShown {
   files: number
-  not_shown: { count: number; unexplained: number; files: { path: string; size: number; read: number; why: string }[] }
+  not_shown: { count: number; unexplained: number; files: { path: string; size: number; read: number; why: string; claimed?: boolean }[] }
+  missing?: string[]
   derived: ViewDerived[]
   errors: string[]
 }
