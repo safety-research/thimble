@@ -168,11 +168,12 @@ class _Tally:
     """What has been read of one chat log: up to `offset`, the end of its last whole line, whose last bytes are `tail`;
     the counts _stats gives, and in `lines`, when kept, the text of each record for the chat's route."""
 
-    __slots__ = ("ino", "offset", "tail", "n", "last", "lines")
+    __slots__ = ("ino", "offset", "tail", "n", "last", "lines", "seen")
 
     def __init__(self, ino: int, keep: bool) -> None:
         self.ino, self.offset, self.tail, self.n, self.last = ino, 0, b"", 0, None
         self.lines: list[bytes] | None = [] if keep else None
+        self.seen: tuple[int, int, int] | None = None  # the log's (inode, size, mtime) when it was last read
 
 
 _tallies: dict[str, _Tally] = {}
@@ -188,10 +189,19 @@ def _read_on(log_path: Path, keep: bool = False) -> _Tally | None:
     start. With `keep` the records' text is kept too."""
     key = str(log_path)
     with _tallies_lock:
+        t = _tallies.get(key)
+        try:
+            st = os.stat(log_path)
+        except OSError:
+            _tallies.pop(key, None)
+            return None
+        if t is not None and t.seen == (st.st_ino, st.st_size, st.st_mtime_ns) and not (keep and t.lines is None):
+            if keep and key in _kept:
+                _kept.move_to_end(key)
+            return t
         try:
             with log_path.open("rb") as f:
                 st = os.fstat(f.fileno())
-                t = _tallies.get(key)
                 if t is not None and (t.ino != st.st_ino or st.st_size < t.offset or (keep and t.lines is None)):
                     t = None
                 if t is not None and t.tail:
@@ -226,6 +236,7 @@ def _read_on(log_path: Path, keep: bool = False) -> _Tally | None:
         if whole:
             t.tail = (t.tail + whole)[-TALLY_TAIL:]
             t.offset += len(whole)
+        t.seen = (st.st_ino, st.st_size, st.st_mtime_ns)
         _tallies[key] = t
         if t.lines is not None:
             _kept[key] = None
@@ -376,16 +387,40 @@ def _title_from(anchor: str | None, text: str | None) -> str:
     return {"cell": "card"}.get(a, a) or "thread"  # a card's anchor may be written as `cell:`
 
 
+_meta_texts: dict[str, tuple[tuple[int, int, int], str]] = {}  # meta file -> ((inode, mtime_ns, size), its text)
+META_SUFFIX = ".meta.json"
+
+
+def _meta_text(path: str) -> str:
+    """A meta file's text, read again only when the file changed (write_meta replaces it whole)."""
+    st = os.stat(path)
+    key = (st.st_ino, st.st_mtime_ns, st.st_size)
+    hit = _meta_texts.get(path)
+    if hit is not None and hit[0] == key:
+        return hit[1]
+    with open(path, encoding="utf-8") as f:
+        text = f.read()
+    _meta_texts[path] = (key, text)
+    return text
+
+
 def list_chats(c: str) -> list[dict]:
     ensure_main(c)
     out: list[dict] = []
-    for p in chats_dir(c).glob("*.meta.json"):
+    d = str(chats_dir(c))
+    try:
+        with os.scandir(d) as it:
+            names = [e.name for e in it if e.name.endswith(META_SUFFIX)]
+    except OSError:
+        names = []
+    for name in names:
+        p = f"{d}/{name}"
         try:
-            meta = _defaults(json.loads(p.read_text("utf-8")))
-        except (json.JSONDecodeError, OSError):
+            meta = _defaults(json.loads(_meta_text(p)))
+        except (ValueError, OSError):
             log.warning("bad meta file %s", p)
             continue
-        n, last = _stats(p.with_suffix("").with_suffix(".jsonl"))
+        n, last = _stats(Path(f"{d}/{name[:-len(META_SUFFIX)]}.jsonl"))
         meta["n_messages"] = n
         meta["last_ts"] = last or meta.get("created_at")
         meta["running"] = _running(c, meta["id"])
