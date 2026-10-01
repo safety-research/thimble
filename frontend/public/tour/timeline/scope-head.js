@@ -1,20 +1,20 @@
 // The scope header thimble draws above every corpus view (the same code for every view): the unit picker, Combined |
-// Compare, the files the view reads, its derived data per record type, and the lines it could not read. A view gives
-// its unit, files, schema and labels, and may add a lead before the strip (`side`, markup or a function of none) and
-// parts after it (`tail`, wired by `wire(host)` once drawn); the header sends the unit's selection back to the view
-// (thimble.onScope).
+// Compare, the files the view reads, its derived data per record type, and the lines it could not read, which a click
+// lists under the header as thimble's own view head does (ResidueList). A view gives its unit, files, schema and
+// labels, and may add a lead before the strip (`side`, markup or a function of none) and parts after it (`tail`, wired
+// by `wire(host)` once drawn); the header sends the unit's selection back to the view (thimble.onScope).
 ;(function () {
   const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c])
   const svg = (d, size = 14) => `<svg class="icon" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="${d}"></path></svg>`
   const I = { down: 'M6 9l6 6 6-6', right: 'M9 6l6 6-6 6', check: 'M5 12.5l4.5 4.5L19 7', file: 'M8 3h6l5 5v11a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2zM14 3v5h5' }
   const plural = (n, one, many) => `${n} ${n === 1 ? one : many || one + 's'}`
-  const cap = (s) => s.charAt(0).toUpperCase() + s.slice(1)
 
   function mount(o) {
     const keysAll = o.unit.options.map((u) => u.key)
-    const S = { keys: (o.unit.initial || keysAll).slice(), compare: false, open: null }
+    const S = { keys: (o.unit.initial || keysAll).slice(), compare: false, open: null, residue: false }
     const host = o.host
-    let pop = null
+    let pop = null,
+      list = null
 
     const unitValue = () => {
       if (!o.unit.multi) return o.unit.options.find((u) => u.key === S.keys[0]).title
@@ -39,12 +39,28 @@
       h += `<span class="sh-dot">·</span><button type="button" class="view-pane-files" data-pop="derived" aria-expanded="${S.open === 'derived'}">${derivedText()}</button>`
       // the lines (or, for a reader of whole files, the files) it could not read, in the strip's ink
       const what = bad.length > 0 && bad.every((p) => p.ref && !p.ref.includes('#')) ? 'file' : 'line'
-      if (bad.length) h += `<span class="sh-dot">·</span><button type="button" class="view-pane-files view-pane-residue" data-pop="bad" aria-expanded="${S.open === 'bad'}">${bad.length} unreadable ${bad.length === 1 ? what : what + 's'}</button>`
+      if (bad.length) h += `<span class="sh-dot">·</span><button type="button" class="view-pane-files view-pane-residue" aria-expanded="${S.residue}">${bad.length} unreadable ${bad.length === 1 ? what : what + 's'}</button>`
       if (o.tail) h += o.tail()
       host.innerHTML = `${(typeof o.side === 'function' ? o.side() : o.side) || ''}<div class="sh">${h}</div>`
       for (const b of host.querySelectorAll('[data-pop]')) b.onclick = (e) => { e.stopPropagation(); toggle(b.dataset.pop) }
       for (const b of host.querySelectorAll('[data-compare]')) b.onclick = () => { S.compare = b.dataset.compare === '1'; render(); tell() }
+      const res = host.querySelector('.view-pane-residue')
+      if (res) res.onclick = (e) => { e.stopPropagation(); S.residue = !S.residue; render() }
+      residueList(bad)
       if (o.wire) o.wire(host)
+    }
+    // the lines it could not read, listed under the header while its residue item is open; a line picked opens its file
+    function residueList(bad) {
+      if (!S.residue || !bad.length) { list?.remove(); list = null; return }
+      if (!list) {
+        list = document.createElement('div')
+        list.className = 'view-pane-residue-list'
+        list.setAttribute('role', 'region')
+        list.setAttribute('aria-label', 'What the view leaves out')
+        host.after(list)
+      }
+      list.innerHTML = `<section><h4>Unreadable</h4>${bad.map((p) => `<button type="button" class="view-pane-list-item" data-file="${esc(p.ref.split('#')[0])}"><span class="mono">${esc(p.ref)}</span><span class="view-pane-list-why">${esc(p.why)}</span></button>`).join('')}</section>`
+      for (const f of list.querySelectorAll('[data-file]')) f.onclick = () => o.onFile && o.onFile(f.dataset.file)
     }
     const tell = () => o.onScope && o.onScope(S.keys.slice(), S.compare && S.keys.length >= 2)
 
@@ -59,7 +75,7 @@
       pop = document.createElement('div')
       pop.className = `popover sh-pop sh-${name}` + (name === 'units' ? ' menu' : '')
       pop.setAttribute('role', 'dialog')
-      pop.innerHTML = ({ units: unitsPop, files: filesPop, derived: derivedPop, bad: badPop })[name]()
+      pop.innerHTML = ({ units: unitsPop, files: filesPop, derived: derivedPop })[name]()
       document.body.append(pop)
       const r = trigger.getBoundingClientRect()
       pop.style.top = `${r.bottom + 6}px`
@@ -109,12 +125,6 @@
         h += '</div></div>'
       }
       return h
-    }
-    function badPop() {
-      return o.problems(S.keys).map((p) => {
-        const [path, line] = p.ref.split('#L')
-        return `<button type="button" class="sh-file" data-file="${esc(path)}" title="Open ${esc(path)} at line ${line}"><span class="ok">${svg(I.file, 12)}</span><span class="p">${esc(path)} <span class="dir">line ${line}</span></span><span class="gives"></span><span class="why">${esc(cap(p.why))}</span>${p.text ? `<code>${esc(p.text)}</code>` : ''}</button>`
-      }).join('')
     }
     function wire(name) {
       if (name === 'units') for (const b of pop.querySelectorAll('[data-unit]')) b.onclick = (e) => {

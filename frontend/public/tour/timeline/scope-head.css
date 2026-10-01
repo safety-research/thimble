@@ -46,7 +46,7 @@
 .sh-file .p { font: var(--type-mono-sm); overflow-wrap: anywhere; }
 .sh-file .p .dir { color: var(--text-tertiary); }
 .sh-file .gives { color: var(--text-tertiary); font: var(--type-ui-sm); white-space: nowrap; }
-.sh-file .bad { grid-column: 2 / 4; color: var(--status-negative); font: var(--type-ui-sm); }
+.sh-file .bad { grid-column: 2 / 4; color: var(--text-tertiary); font: var(--type-ui-sm); }
 
 /* derived data, per record type */
 .sh-derived { width: 720px; }
@@ -71,9 +71,3 @@
 .dl .sw { width: 10px; height: 10px; border-radius: 2px; }
 .dl .h { overflow: hidden; color: var(--text-secondary); text-overflow: ellipsis; white-space: nowrap; }
 .dl .n { color: var(--text-tertiary); font-variant-numeric: tabular-nums; white-space: nowrap; }
-
-/* the lines not read */
-.sh-bad { width: 460px; }
-.sh-bad .sh-file { padding-left: 8px; }
-.sh-bad .why { grid-column: 2 / 4; color: var(--status-negative); font: var(--type-ui-sm); }
-.sh-bad code { grid-column: 2 / 4; display: block; margin: 3px 0 2px; padding: 4px 6px; border-radius: 4px; background: var(--track-bg); font: var(--type-mono-sm); color: var(--text-secondary); white-space: pre-wrap; overflow-wrap: anywhere; }

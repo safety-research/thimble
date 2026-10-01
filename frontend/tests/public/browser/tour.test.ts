@@ -437,7 +437,7 @@ async function viewHead(page: Page) {
         top = document.elementFromPoint(b.left + b.width / 2, b.top + b.height / 2)
       if (top && !e.contains(top) && !top.contains(e)) bad.push(`${name(e)} under ${name(top)}`)
     }
-    const res = h.querySelector('[data-pop="bad"]'),
+    const res = h.querySelector('.view-pane-residue'),
       files = h.querySelector('[data-pop="files"]')!
     const all = ri.concat([R(h)])
     return {
@@ -716,6 +716,41 @@ async function walk(page: Page, tag: string, folds?: boolean, send = false) {
   await sleep(200)
   hv = await viewHead(page)
   assert.ok(hv.ok && !hv.filter && !hv.hidden && (await view.evaluate(() => (window as any).mock.thimble.state.iso)) === null, `${tag} 6: the chip clears the filter ${JSON.stringify(hv)}`)
+  // the unreadable line opens thimble's list of it under the header's items, in neutral ink, above the page, and closes
+  // again
+  await hf.evaluate(() => document.querySelector<HTMLElement>('.view-pane-residue')!.click())
+  await sleep(200)
+  const rl = await hf.evaluate(() => {
+    const list = document.querySelector('.view-pane-residue-list'),
+      head = Math.max(...[...document.querySelectorAll('.scope-head .sh, .scope-head .view-pane-side-show')].map((e) => e.getBoundingClientRect().bottom)),
+      body = document.querySelector('.view-pane-body')!.getBoundingClientRect()
+    if (!list) return null
+    const b = list.getBoundingClientRect(),
+      why = list.querySelector('.view-pane-list-why')!
+    const ink = (v: string) => {
+      const probe = document.createElement('span')
+      probe.style.color = `var(${v})`
+      document.body.append(probe)
+      const c = getComputedStyle(probe).color
+      probe.remove()
+      return c
+    }
+    return {
+      items: [...list.querySelectorAll('.view-pane-list-item')].map((x) => x.textContent),
+      between: b.top >= head - 0.5 && b.bottom <= body.top + 0.5 && b.left >= 0 && b.right <= innerWidth + 0.5,
+      why: getComputedStyle(why).color,
+      tertiary: ink('--text-tertiary'),
+      negative: ink('--status-negative'),
+      expanded: document.querySelector('.view-pane-residue')!.getAttribute('aria-expanded'),
+    }
+  })
+  assert.ok(
+    rl && rl.items.length === 1 && rl.items[0]!.startsWith('agents.log#L29') && rl.between && rl.why === rl.tertiary && rl.why !== rl.negative && rl.expanded === 'true',
+    `${tag} 6: the unreadable line listed under the header ${JSON.stringify(rl)}`,
+  )
+  await hf.evaluate(() => document.querySelector<HTMLElement>('.view-pane-residue')!.click())
+  await sleep(200)
+  assert.equal(await hf.evaluate(() => !!document.querySelector('.view-pane-residue-list')), false, `${tag} 6: the list closes`)
   assert.equal((await state(page))!.title, 'Views', `${tag} 6: still on Views`)
   await page.evaluate(LOG7)
   await next(page)
