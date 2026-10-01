@@ -2557,8 +2557,8 @@ async def call_route(name: str, body: CallBody, request: Request) -> dict[str, A
     """Run one tool for the shim: {content, is_error}. 404 for a tool the registry does not have, 400 when the caller's
     directory belongs to no corpus; everything else the model should read is an is_error result, never an HTTP error.
     A tool marked drop_stops is cancelled when the shim drops the request (until_dropped). The call runs as the session
-    it names only with a token that proves it (hook_auth.session_proven): without one it runs as the analyst's, and
-    with a wrong one it does not run."""
+    it names only with a token that proves it (hook_auth.session_proven): without one it runs as the analyst's, unless
+    it comes from a workspace's own folder, and with a wrong one it does not run."""
     if not known(name):
         raise HTTPException(404, f"no such tool: {name}")
     from . import harness, hook_auth  # noqa: PLC0415 — harness imports agent_session's helpers lazily
@@ -2570,11 +2570,12 @@ async def call_route(name: str, body: CallBody, request: Request) -> dict[str, A
     if run is not None:  # a program's call runs as its role's session, in its workspace and its thread (harness.py)
         return await harness.tool_call(run, {"name": name, "args": body.args})
     # a session thimble starts in its workspace's own folder (the orientation's, which runs in its work folder so the
-    # corpus folder can be denied to Bash whole) reaches its workspace from that folder
+    # corpus folder can be denied to Bash whole) reaches its workspace from that folder, before any corpus that holds it
     session = body.session or None
-    c = body.workspace or workspace_for_cwd(body.cwd)
-    if not c and session and body.session_token:
-        c = config.workspace_for_folder(body.cwd)
+    folder = config.workspace_for_folder(body.cwd) if session else None
+    if folder and not body.session_token:  # a session there without a token, as one an earlier thimble started
+        return err(hint("session-unproven", tool=name)).as_dict()
+    c = body.workspace or folder or workspace_for_cwd(body.cwd)
     if not c:
         raise HTTPException(400, f"{body.cwd or '(no cwd)'} is not inside a corpus thimble knows; say /thimble to register it")
     if session and not hook_auth.session_proven(c, session, body.session_token or ""):

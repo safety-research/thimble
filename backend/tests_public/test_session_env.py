@@ -314,3 +314,37 @@ def test_the_plugin_runs_in_the_environment_a_session_gets(tmp_path, stack):
                  [bin_ / "thimble", "prompt", "preamble", "--cwd", str(tmp_path)]):
         done = subprocess.run([str(a) for a in argv], env=env, cwd=tmp_path, capture_output=True, text=True, timeout=120)
         assert done.returncode == 0 and done.stdout.strip(), (argv, done.stderr[-2000:])
+
+
+def test_a_session_s_call_from_its_workspace_folder_runs_in_that_workspace(monkeypatch, tmp_path, data_tmp,
+                                                                           plugin_headers):
+    """The orientation runs in its work folder inside the workspace's own folder. Its calls run in that workspace even
+    when another corpus's folder holds thimble's workspaces folder, as a corpus opened on the home folder does. A call
+    from there that names a session without a token, as a session an earlier thimble started makes, does not run."""
+    from fastapi.testclient import TestClient
+
+    from app.main import app
+
+    outer = tmp_path / "outer"
+    monkeypatch.setattr(config, "WORKSPACES_DIR", (outer / "workspaces").resolve())
+    work = config.workspace_dir(CORPUS) / "orient" / "work"
+    work.mkdir(parents=True)
+    assert config.register_corpus(outer)["name"] != CORPUS
+    seen: list = []
+
+    async def call(c, name, args, **kw):
+        seen.append((c, kw["session"]))
+        return tools.ok("done")
+
+    monkeypatch.setattr(tools, "call", call)
+    body = {"args": {"group": "all"}, "cwd": str(work), "session": "orient"}
+    with TestClient(app) as client:
+        def post(**extra) -> dict:
+            r = client.post("/api/tools/list_cards", json={**body, **extra}, headers=plugin_headers())
+            assert r.status_code == 200, r.text
+            return r.json()
+
+        assert not post(session_token=hook_auth.session_token(CORPUS, "orient"))["is_error"]
+        old = post()
+        assert old["is_error"] and "did not run" in old["content"][0]["text"]
+    assert seen == [(CORPUS, "orient")]
