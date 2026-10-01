@@ -299,14 +299,14 @@ export function RefChip({ ref, value, compact, workspace, broken, brokenWhy, qui
   }
 
   // the record behind an inline citation, kept from its hover, so a click can open it at the words the citation quotes
-  const resolved = useRef<ResolvedRef | null>(null)
+  const resolved = useRef<{ ref: string; r: ResolvedRef } | null>(null)
   /** Where a click opens: the span of the words in quotation marks in the citation's text (else of its whole text)
    * inside the record it cites, when the record holds them; the ref itself otherwise. */
   const clickTarget = async (): Promise<string> => {
     if (!value || parsed?.kind !== 'record' || !ws) return ref
     try {
-      resolved.current ??= await api.resolveRef(ws, ref)
-      return quoteSpanRef(resolved.current, value) ?? ref
+      if (resolved.current?.ref !== ref) resolved.current = { ref, r: await api.resolveRef(ws, ref) }
+      return quoteSpanRef(resolved.current.r, value) ?? ref
     } catch {
       return ref
     }
@@ -357,7 +357,7 @@ export function RefChip({ ref, value, compact, workspace, broken, brokenWhy, qui
     }
     try {
       const r = await api.resolveRef(ws, ref)
-      resolved.current = r
+      resolved.current = { ref, r }
       if (seq !== reqSeq.current) return
       if (parsed.kind === 'cell' && parsed.col != null && parsed.row != null) {
         // a table's cell: the table around it, never its column and row in words
