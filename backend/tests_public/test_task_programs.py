@@ -379,7 +379,7 @@ async def test_run_now_runs_an_orientation_program_again_with_the_cards_as_they_
     row = next(r for r in extensions.public(CORPUS)["extensions"] if r["name"] == "again")
     assert row["orients"] and row["offer"] and extensions.offered(CORPUS) == ["again"]
     got = await extensions.orientation_route(CORPUS, "again", extensions.OrientBody(run=True), analyst)
-    assert got["status"] == "resumed"
+    assert got["status"] == "rerun"
     rec = await _until(lambda: (r := orientation.read_run(CORPUS)) and r.get("status") in ("done", "failed")
                        and r["chats"][orientation.ROLE] != chat and r, what="the program to end")
     assert rec["status"] == "done" and rec["program"] == "again", rec
@@ -389,3 +389,27 @@ async def test_run_now_runs_an_orientation_program_again_with_the_cards_as_they_
               for c in (notebook.read_notebook(ws, nb["id"]) or {}).get("cells") or []]
     assert "What does the corpus hold?" in titles and "What did the second look add?" in titles
     assert extensions.offered(CORPUS) == []
+
+
+async def test_an_orientation_program_s_start_marks_only_its_own_extension_as_oriented(tmp_path, data_tmp,
+                                                                                    workspaces_tmp, unboxed):
+    """The program does not read the other extensions' orientation instructions, so once it ran they are offered, as a
+    follow-up it runs again with, and the program's own extension is not offered again right away."""
+    from app import orient_session
+
+    chat = agents.new_agent(CORPUS, orientation.ROLE, orientation.TITLE, announce=False, brief="")["id"]
+    orientation.started(CORPUS, chat, passes=["final"])
+    orientation.finished(CORPUS, chat, "done", "Three runs.", report=False)
+    agents.finish_agent(CORPUS, chat, "done", "Three runs.")
+    prog = _extension(tmp_path, "looker", {"agents/orientation": {"description": "Looks.", "command": ["python", "o.py"]}},
+                      {"agents/orientation/o.py": "import thimble\nthimble.serve(lambda i: 'Looked.')\n"})
+    notes = _extension(tmp_path, "notes", {"agents/orientation": {"description": "Notes.", "prompt": "prompt.md"}},
+                       {"agents/orientation/prompt.md": "Read the notes first."})
+    for folder in (prog, notes):
+        assert extensions.add(str(folder), yes=True, say=lambda _: None) == [folder.name]
+    await extensions.refresh(CORPUS)
+    assert extensions.offered(CORPUS) == ["looker"], "thimble's own session that ran is gone, so no follow-up reaches it"
+    await orient_session.start(CORPUS, "count the runs", ("final",))
+    await _until(lambda: (r := orientation.read_run(CORPUS)) and r.get("program") == "looker"
+                 and r.get("status") in ("done", "failed"), what="the program to end")
+    assert extensions.offered(CORPUS) == ["notes"]

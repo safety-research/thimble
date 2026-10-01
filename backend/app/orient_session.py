@@ -241,7 +241,7 @@ async def start(c: str, brief: str, passes: "list[str] | tuple[str, ...]" = ("fi
     agent = roles.agent_for(c, "orientation")
     if agent.code and agent.replacing is not None:
         program = await start_program(c, agent.replacing, brief, passes, choices, call=call)
-        await extensions.mark_oriented(c)
+        await extensions.mark_oriented(c, [agent.replacing.extension])
         return program
     failed = _failed_first_run(c, brief, passes)
     if failed is not None:
@@ -432,7 +432,7 @@ async def run_program_now(c: str, name: str) -> dict[str, Any]:
     if not agent.code or agent.replacing is None or agent.extension != name:
         raise RuntimeError(f"{name}'s program does not run the orientation here")
     if running(c) or orientation.running(c):
-        raise RuntimeError("the orientation is running. Run it again once it ends")
+        raise RuntimeError("the orientation is running. Choose Run now again once it ends")
     rec = orientation.read_run(c) or {}
     chat = str((rec.get("chats") or {}).get(orientation.ROLE) or "")
     meta = agents.meta_or_none(c, chat) if chat else None

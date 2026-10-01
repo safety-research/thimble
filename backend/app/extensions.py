@@ -1132,10 +1132,12 @@ def runs_orientation(e: dict[str, Any], replacing: bool) -> bool:
 
 
 async def mark_oriented(c: str, names: list[str] | None = None) -> None:
-    """The orientation starts with the active extensions' instructions in its prompt, or was sent those of `names`."""
+    """thimble's own orientation starts with the active extensions' instructions in its prompt, or the orientation had
+    those of `names`, or ran their program."""
     async with _lock(c):
         state = read_state(c)
-        names = [n for n, e in state["extensions"].items() if e.get("active") and orients(e)] if names is None else names
+        names = [n for n, e in state["extensions"].items()
+                 if e.get("active") and (e.get("orient") or e.get("replaces"))] if names is None else names
         got = sorted({*state["oriented"], *names})
         if got != state["oriented"]:
             await asyncio.to_thread(write_json, _state_path(c), {**state, "oriented": got})
@@ -1163,15 +1165,15 @@ async def run_orientation(c: str, name: str) -> dict[str, Any]:
     """Run now: an extension whose program runs the orientation runs it again as a follow-up, with the earlier request
     and the cards as they stand, so it adds to them (orient_session.run_program_now); any other extension's
     instructions are sent to the orientation as a follow-up, resumed or queued behind the run going
-    (orient_session.message). {status: resumed | queued | nothing}; NoOrientation, Gone or RuntimeError when it cannot
-    run."""
+    (orient_session.message). {status: rerun | resumed | queued | nothing}, rerun for a program; NoOrientation, Gone
+    or RuntimeError when it cannot run."""
     from . import orient_session  # noqa: PLC0415
 
     exts = read_state(c)["extensions"]
     if orient_program(exts.get(name) or {}):
-        got = await orient_session.run_program_now(c, name)
+        await orient_session.run_program_now(c, name)
         await mark_oriented(c, [name])
-        return {"status": str(got.get("status") or "resumed")}
+        return {"status": "rerun"}
     text = _instructions(c, name, exts)
     if not text:
         return {"status": "nothing"}

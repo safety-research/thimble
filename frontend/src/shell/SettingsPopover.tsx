@@ -250,6 +250,7 @@ export function SettingsPopover({ ws, anchor, open, onClose }: { ws: string; anc
       // last, so an orientation that cannot be sent the instructions leaves the other settings saved
       for (const [name, run] of exts ? answeredRuns(exts, extOn, runAnswers) : []) {
         const { status } = await api.answerExtensionOrientation(ws, name, run)
+        if (status === 'rerun') bus.emit('toast', { text: `${name} is running the orientation again.`, kind: 'info' })
         if (status === 'resumed') bus.emit('toast', { text: `The orientation is running ${name}'s instructions.`, kind: 'info' })
         if (status === 'queued') bus.emit('toast', { text: `${name}'s instructions run when the orientation's run ends.`, kind: 'info' })
       }
