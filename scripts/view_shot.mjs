@@ -3,7 +3,8 @@
 // shoot_states), and a video's film for the frames the writer looks at (backend/app/video.py), in the headless Chromium
 // of the frontend's Playwright (frontend/node_modules, which scripts/install.sh installs).
 //   node scripts/view_shot.mjs --frame <html> --states <json> [--viewport <w>x<h>] [--media <url>]
-// --states names a JSON list of states, [{out, open, actions?, viewport?}], each loaded on a fresh page of one browser:
+// --states names a JSON list of states, [{out, open, actions?, viewport?}], each loaded on a fresh page of one browser,
+// PAGES_AT_ONCE at a time:
 // `open` is the place the page is sent once the frame is ready, `actions` the controls clicked in turn once it is quiet,
 // each named by the text it shows (findControl), `viewport` {width, height} the state's own size in place of
 // --viewport, and `out` the PNG written (none without it).
@@ -38,6 +39,7 @@ const QUIET_MS = 900
 const MIN_MS = 1200
 const HARD_MS = 25_000
 const READY_MS = 10_000
+const PAGES_AT_ONCE = 3 // states loaded side by side, each on its own page
 const MEDIA_CHUNK = 4 * 1024 * 1024 // bytes of one Range answer
 const MEDIA_WHOLE_MAX = 32 * 1024 * 1024 // a request without Range (an <img>) gets a file up to this size whole
 
@@ -573,15 +575,20 @@ async function main() {
   // the system's Chrome, Edge or Chromium when thimble's config picks it (backend/app/userconf.py)
   const executablePath = process.env.THIMBLE_BROWSER_PATH || undefined
   const browser = await chromium.launch({ executablePath })
-  const out = []
-  try {
-    for (let i = 0; i < states.length; i++) {
+  const out = new Array(states.length)
+  let next = 0
+  const worker = async () => {
+    while (next < states.length) {
+      const i = next++
       try {
-        out.push(await shootState(browser, opt, doc, states[i], i))
+        out[i] = await shootState(browser, opt, doc, states[i], i)
       } catch (e) {
-        out.push({ ok: false, errors: [plain(e)] })
+        out[i] = { ok: false, errors: [plain(e)] }
       }
     }
+  }
+  try {
+    await Promise.all(Array.from({ length: Math.min(PAGES_AT_ONCE, states.length) }, worker))
   } finally {
     await browser.close()
   }
