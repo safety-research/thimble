@@ -149,3 +149,33 @@ def test_the_event_log_is_read_on_from_where_it_was_left(workspaces_tmp, monkeyp
         "a record another process wrote is seen, and the next seq follows it"
     assert investigation._read_jsonl_after(log, log.stat().st_size + 10)[1] == log.stat().st_size, \
         "a log written again is read from its start"
+
+
+def test_a_chat_read_again_is_not_parsed_again(workspaces_tmp, monkeypatch):
+    """The browser reads the open chat again on each of its records: the route answers the log's records as read_events
+    reads them, NaN as null, and a reload parses only the records added since the last."""
+    import json
+
+    from fastapi.testclient import TestClient
+
+    from app import agents
+    from app.main import app
+
+    c = "mini"
+    agents.ensure_main(c)
+    _, log_path = agents.paths(c, agents.MAIN_ID)
+    for i in range(300):
+        agents.append(log_path, {"type": "text", "ts": f"t{i}", "text": f"reply {i} ü", "n": i})
+    agents.append(log_path, {"type": "text", "ts": "nan", "score": float("nan")})
+    with TestClient(app, base_url="http://127.0.0.1") as client:
+        got = client.get(f"/api/ws/{c}/chats/{agents.MAIN_ID}").json()
+        want = agents.read_events(log_path)
+        want[-1]["score"] = None
+        assert got["events"] == want and got["meta"]["id"] == agents.MAIN_ID
+        parsed = []
+        loads = json.loads
+        monkeypatch.setattr(agents.json, "loads", lambda s, *a, **k: parsed.append(1) or loads(s, *a, **k))
+        agents.append(log_path, {"type": "user", "ts": "last", "text": "one more"})
+        got = client.get(f"/api/ws/{c}/chats/{agents.MAIN_ID}").json()
+    assert got["events"][-1]["text"] == "one more" and len(got["events"]) == 302
+    assert len(parsed) < 10, "the records read before are not parsed again"

@@ -17,11 +17,12 @@ import os
 import re
 import secrets
 import threading
+from collections import OrderedDict
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Awaitable, Callable
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Response
 from pydantic import BaseModel
 
 from . import config, investigation, tools
@@ -164,51 +165,58 @@ def read_events(log_path: Path) -> list[dict]:
 
 
 class _Tally:
-    """What _stats has counted of one log: up to `offset`, the end of its last whole line, whose last bytes are `tail`."""
+    """What has been read of one chat log: up to `offset`, the end of its last whole line, whose last bytes are `tail`;
+    the counts _stats gives, and in `lines`, when kept, the text of each record for the chat's route."""
 
-    __slots__ = ("ino", "offset", "tail", "n", "last")
+    __slots__ = ("ino", "offset", "tail", "n", "last", "lines")
 
-    def __init__(self, ino: int) -> None:
+    def __init__(self, ino: int, keep: bool) -> None:
         self.ino, self.offset, self.tail, self.n, self.last = ino, 0, b"", 0, None
+        self.lines: list[bytes] | None = [] if keep else None
 
 
 _tallies: dict[str, _Tally] = {}
+_kept: OrderedDict[str, None] = OrderedDict()  # the logs whose tallies keep their records' text, least recent first
 _tallies_lock = threading.Lock()
 TALLY_TAIL = 64  # bytes before a tally's offset it compares, to tell a log that grew from one written again
+KEPT_LOGS = 16  # chat logs whose records' text is kept for the chat route
 
 
-def _stats(log_path: Path) -> tuple[int, str | None]:
-    """(records that are the analyst's messages or the model's replies, the last timestamp). A chat's log only grows,
-    so each call reads on from where the last one stopped; a log that is shorter, another file, or changed before that
-    point is read from its start."""
+def _read_on(log_path: Path, keep: bool = False) -> _Tally | None:
+    """The log's tally brought up to date (None when it cannot be read). A chat's log only grows, so the read goes on
+    from where the last one stopped; a log that is shorter, another file, or changed before that point is read from its
+    start. With `keep` the records' text is kept too."""
     key = str(log_path)
     with _tallies_lock:
         try:
             with log_path.open("rb") as f:
                 st = os.fstat(f.fileno())
                 t = _tallies.get(key)
-                if t is not None and (t.ino != st.st_ino or st.st_size < t.offset):
+                if t is not None and (t.ino != st.st_ino or st.st_size < t.offset or (keep and t.lines is None)):
                     t = None
                 if t is not None and t.tail:
                     f.seek(t.offset - len(t.tail))
                     if f.read(len(t.tail)) != t.tail:
                         t = None
                 if t is None:
-                    t = _Tally(st.st_ino)
+                    t = _Tally(st.st_ino, keep)
                 f.seek(t.offset)
                 data = f.read(max(0, st.st_size - t.offset))
         except OSError:
             _tallies.pop(key, None)
-            return 0, None
+            return None
         whole = data[:data.rfind(b"\n") + 1]
         for line in whole.splitlines():
-            if not line.strip():
+            line = line.strip()
+            if not line:
                 continue
             try:
                 r = json.loads(line)
             except ValueError:
                 log.warning("skipping a bad line in %s", log_path)
                 continue
+            if t.lines is not None:
+                t.lines.append(_strict(line, r))
             if not isinstance(r, dict):
                 continue
             if r.get("type") in ("user", "done", "chip", "agent"):
@@ -219,7 +227,52 @@ def _stats(log_path: Path) -> tuple[int, str | None]:
             t.tail = (t.tail + whole)[-TALLY_TAIL:]
             t.offset += len(whole)
         _tallies[key] = t
-        return t.n, t.last
+        if t.lines is not None:
+            _kept[key] = None
+            _kept.move_to_end(key)
+            while len(_kept) > KEPT_LOGS:
+                old = _tallies.get(_kept.popitem(last=False)[0])
+                if old is not None:
+                    old.lines = None
+        return t
+
+
+def _finite(v: Any) -> Any:
+    if isinstance(v, float) and (v != v or v in (float("inf"), float("-inf"))):
+        return None
+    if isinstance(v, dict):
+        return {k: _finite(x) for k, x in v.items()}
+    if isinstance(v, list):
+        return [_finite(x) for x in v]
+    return v
+
+
+def _strict(line: bytes, record: Any) -> bytes:
+    """A record's text as strict JSON, which a browser parses: as the log holds it, unless it may hold a NaN or an
+    infinity, which Python writes and reads but JSON has not, and which then read as null."""
+    if b"NaN" not in line and b"Infinity" not in line:
+        return line
+    return json.dumps(_finite(record), ensure_ascii=False).encode("utf-8")
+
+
+def _stats(log_path: Path) -> tuple[int, str | None]:
+    """(records that are the analyst's messages or the model's replies, the last timestamp)."""
+    t = _read_on(log_path)
+    return (t.n, t.last) if t is not None else (0, None)
+
+
+def events_json(log_path: Path) -> bytes:
+    """The log's records as a JSON array, as read_events reads them, each record's text as the log holds it."""
+    t = _read_on(log_path, keep=True)
+    lines = t.lines if t is not None and t.lines is not None else []
+    return b"[" + b",".join(lines) + b"]"
+
+
+def chat_response(meta: dict, log_path: Path) -> Response:
+    """{meta, events}, the chat route's answer, made from the log's records as it holds them: the browser reads a chat
+    again on every record it gets, and a long chat parsed and encoded again each time held the event loop."""
+    body = b'{"meta":' + json.dumps(meta, ensure_ascii=False).encode("utf-8") + b',"events":' + events_json(log_path) + b"}"
+    return Response(content=body, media_type="application/json")
 
 
 # the /thimble skill's own line in main (the mirror writes a slash command as its command line, `/thimble:thimble`)
@@ -691,12 +744,12 @@ async def instance_route(c: str) -> dict:
 
 
 @router.get("/ws/{c}/chats/main")
-async def main_route(c: str) -> dict:
+async def main_route(c: str) -> Response:
     meta = ensure_main(c)
     meta["running"] = _running(c, MAIN_ID)
     meta["orientation"] = _orientation_status(c)
     _, log_path = paths(c, MAIN_ID)
-    return {"meta": meta, "events": read_events(log_path)}
+    return chat_response(meta, log_path)
 
 
 @router.post("/ws/{c}/chats", status_code=201)
@@ -726,13 +779,13 @@ async def create_route(c: str, body: NewThread) -> dict:
 
 
 @router.get("/ws/{c}/chats/{chat_id}")
-async def get_route(c: str, chat_id: str) -> dict:
+async def get_route(c: str, chat_id: str) -> Response:
     meta = ensure_main(c) if chat_id == MAIN_ID else read_meta(c, chat_id)
     _, log_path = paths(c, chat_id)
     meta["running"] = _running(c, chat_id)
     if chat_id == MAIN_ID:
         meta["orientation"] = _orientation_status(c)
-    return {"meta": meta, "events": read_events(log_path)}
+    return chat_response(meta, log_path)
 
 
 @router.put("/ws/{c}/chats/{chat_id}")
