@@ -4,11 +4,12 @@
 import { useEffect, useMemo, useRef, useState, type ComponentType, type CSSProperties, type ReactNode, type RefObject } from 'react'
 import { Button } from '../../components/Button'
 import { Tipped } from '../../components/Tooltip'
+import { findQuote } from '../../lib/quoteFind'
 import { parseRef } from '../../lib/refs'
-import type { Block, SourceKind, SourcePage, SourceRecord } from '../../lib/types'
+import type { Block, SourceKind, SourcePage, SourceRecord, TranscriptHint } from '../../lib/types'
 import { UNFOLD_EVENT } from '../find'
 import { cellFill, markSegments, type LaneCell, type LaneTag, type RecordMarks, type Segment, type SpanMark } from '../labels'
-import { useMarksAt } from '../marks'
+import { useMarksAt, useMarksOver } from '../marks'
 import { LabelMark } from '../LabelMark'
 
 export interface ViewProps {
@@ -19,13 +20,15 @@ export interface ViewProps {
   loadMore: (dir: 'earlier' | 'later') => void
   /** scroll to and highlight when it changes: a ref pointing into `path` */
   targetRef?: string
+  /** the server's sniff, when the file reads as a transcript */
+  transcript?: TranscriptHint | null
 }
 
 export interface ViewDef {
   type: string
   title: string
-  /** 0..1 how well the view fits: the path, the kind, up to 20 sample records */
-  match: (path: string, kind: SourceKind, sample: any[]) => number
+  /** 0..1 how well the view fits: the path, the kind, up to 20 sample records, the server's transcript sniff */
+  match: (path: string, kind: SourceKind, sample: any[], transcript?: TranscriptHint | null) => number
   component: ComponentType<ViewProps>
 }
 
@@ -54,6 +57,24 @@ export function targetOf(ref: string | undefined, path: string): Target | null {
   }
 }
 
+/** The words a span ref quotes, from its record's blocks as the server sent them; null for any other ref, a record the
+ * records do not hold, or a span of white space alone. Pure. */
+export function citedQuote(records: readonly SourceRecord[], target: Target | null): string | null {
+  if (!target || target.start == null || target.end == null || target.end <= target.start) return null
+  const rec = records.find((r) => r.line === target.line)
+  const quote = rec?.blocks?.[target.block ?? 0]?.text?.slice(target.start, target.end) ?? ''
+  return quote.trim() ? quote : null
+}
+
+/** The target for a block of the cited record whose text the view made itself (a post's words, a field, a nested
+ * record's blocks), so its offsets are not the cited block's: the quoted words' place in `text`, or the line alone when
+ * the text does not hold them. Null for another record's block. Pure. */
+export function quoteTarget(target: Target | null, line: number, index: number, text: string, quote: string | null): Target | null {
+  if (!target || target.line !== line) return null
+  const at = quote ? findQuote(text, quote) : null
+  return at ? { line, block: index, start: at[0], end: at[1] } : { line }
+}
+
 export function isTargetLine(t: Target | null, line: number): boolean {
   return !!t && line >= t.line && line <= (t.endLine ?? t.line)
 }
@@ -78,6 +99,14 @@ export function recordExcerpt(rec: SourceRecord): string {
   return text.slice(0, 500)
 }
 
+/** The nearest box around `el` that scrolls it vertically. */
+function scrollBox(el: HTMLElement): HTMLElement | null {
+  for (let p = el.parentElement; p; p = p.parentElement) {
+    if (/(auto|scroll)/.test(getComputedStyle(p).overflowY) && p.scrollHeight > p.clientHeight) return p
+  }
+  return null
+}
+
 /** How long a followed ref's record keeps its highlight (.reader-hit in files.css fades over the same time). */
 export const HIT_MS = 1500
 
@@ -95,8 +124,14 @@ export function useTarget(targetRef: string | undefined, path: string, rootRef: 
     if (!card) return
     const blockEl = target.block != null ? card.querySelector<HTMLElement>(`.reader-block[data-block="${target.block}"]`) : null
     // centre a span's highlight rather than its block, which may be much taller than the view; a view that draws no
-        // blocks (Raw) marks the span in the record's line itself
-    const place = () => ((blockEl ?? card).querySelector<HTMLElement>('.hl') ?? blockEl ?? card).scrollIntoView({ block: 'center' })
+    // blocks (Raw), or draws the words elsewhere in the record (a post's field), marks the span outside the block. A
+    // record taller than the view shows from its start, where its number is.
+    const place = () => {
+      const hl = blockEl?.querySelector<HTMLElement>('.hl') ?? card.querySelector<HTMLElement>('.hl')
+      const el = hl ?? blockEl ?? card
+      const room = scrollBox(el)?.clientHeight ?? window.innerHeight
+      el.scrollIntoView({ block: !hl && el.getBoundingClientRect().height > room ? 'start' : 'center' })
+    }
     place()
     // a record drawn again after the scroll (a long line's syntax colours arriving) moves the place: it is centred again
     // while the highlight lasts
@@ -130,6 +165,8 @@ interface RecordProps {
   /** the record's text for a thread's anchor_text (data-anchor-text), so a ⌘-click quotes the record, not its head */
   text?: string
   children?: ReactNode
+  /** the last line of the records the card stands for (a chat turn's lines), whose labels its gutter shows too */
+  end?: number
 }
 
 /** The tint of a highlighted value with nothing to mark, as style. */
@@ -176,9 +213,9 @@ export const LANE_GLYPH_PX = 13
 
 /** One record as a row: the label gutter, the line number, the head in mono, the blocks under it; a highlighted value
  * with nothing to mark as a tint behind the text. */
-export function RecordCard({ path, line, target, hit, className, header, text, children }: RecordProps) {
+export function RecordCard({ path, line, target, hit, className, header, text, children, end }: RecordProps) {
   const isT = isTargetLine(target, line)
-  const marks = useMarksAt(path, line)
+  const marks = useMarksOver(path, line, end ?? line)
   const cls = ['reader-card', 'reader-record', className, isT && 'reader-target', isT && hit && 'reader-hit', marks.cells.length && 'has-gutter', marks.tint && 'has-tint'].filter(Boolean).join(' ')
   return (
     <div className={cls} data-line={line} data-anchor={`${path}#L${line}`} data-anchor-text={text || undefined} style={markStyle(marks)}>
@@ -247,6 +284,17 @@ export function segmentsFor(block: Block, hl: [number, number] | null, marks: re
   return out.length ? out : [{ text, start: 0 }]
 }
 
+/** The segments from offset `from` on: those before it dropped, the one it falls in cut at it. Pure. */
+export function segmentsFrom(segs: Seg[], from: number): Seg[] {
+  const out: Seg[] = []
+  for (const s of segs) {
+    const end = s.start + s.text.length
+    if (end <= from) continue
+    out.push(s.start >= from ? s : { ...s, text: s.text.slice(from - s.start), start: from })
+  }
+  return out
+}
+
 interface BlockElProps {
   block: Block
   path?: string
@@ -255,6 +303,9 @@ interface BlockElProps {
   target: Target | null
   hit: boolean
   className?: string
+  /** show the text from this offset on (a chat line's words after its speaker); anchors keep the whole text's
+   * offsets */
+  from?: number
 }
 
 /** A piece of text a label marks: the focused label's colour at 24% behind it, another label's colour as a thin
@@ -269,11 +320,11 @@ export function SpanEl({ seg, anchor, children }: { seg: Seg; anchor?: string; c
 }
 
 /** One element per block, the text verbatim, with the texts the labels that are on mark highlighted. */
-export function BlockEl({ block, path, line, index, target, hit, className }: BlockElProps) {
+export function BlockEl({ block, path, line, index, target, hit, className, from = 0 }: BlockElProps) {
   const isT = !!target && target.line === line && target.block === index
   const hl: [number, number] | null = isT && target!.start != null && target!.end != null ? [target!.start, target!.end] : null
   const marks = useMarksAt(path ?? '', path ? line : 0)
-  const segs = segmentsFor(block, hl, path ? marks.spans : [])
+  const segs = from > 0 ? segmentsFrom(segmentsFor(block, hl, path ? marks.spans : []), from) : segmentsFor(block, hl, path ? marks.spans : [])
   const cls = ['reader-block', `reader-${block.kind}`, className, isT && 'reader-target', isT && hit && 'reader-hit'].filter(Boolean).join(' ')
   return (
     <div className={cls} data-line={line} data-block={index}>

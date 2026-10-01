@@ -1,17 +1,13 @@
 // The pointer box: the overlay beside the highlight, never over it, holding only the input ("Ask about this…"); its
 // accessible label names what was picked. A span of text or a tab takes the box under its last line (or over it); a
 // region takes it to its right, or its left when that stays inside the region's pane, else under; a region inside a
-// cell takes it beside the cell. ↵ sends, esc closes; the caller releases the highlight on close. With `children` (the
-// thread a send opened, answered in place while the chat is off) the box is wider, shows them above the field and keeps
-// its place as they grow.
-import { useEffect, useLayoutEffect, useRef, type ReactNode, type RefObject } from 'react'
+// cell takes it beside the cell. ↵ sends, esc closes; the caller releases the highlight on close.
+import { useEffect, useLayoutEffect, useRef, type RefObject } from 'react'
 import { createPortal } from 'react-dom'
 import { TextArea } from '../components/Field'
 import type { Box } from './anchors'
 
 export const BOX_WIDTH = 236
-/** The box's width while it holds a thread's answer. */
-export const ANSWER_WIDTH = 340
 /** What the box's field says while it is empty; its accessible label names what was picked. */
 export const ASK_PLACEHOLDER = 'Ask about this…'
 /** The box stays this far (px) inside the viewport. */
@@ -93,13 +89,9 @@ export interface PointerBoxProps {
   ref?: RefObject<HTMLElement | null>
   /** data attributes on the box */
   attrs?: Record<string, string | number | undefined>
-  /** the thread a send opened, shown above the field (module note) */
-  children?: ReactNode
-  /** that thread's name, which the field names as where a reply goes */
-  replyTo?: string
 }
 
-export function PointerBox({ rect, place, label, draft, onDraft, busy = false, onSubmit, onClose, className, ref, attrs, children, replyTo = 'the thread' }: PointerBoxProps) {
+export function PointerBox({ rect, place, label, draft, onDraft, busy = false, onSubmit, onClose, className, ref, attrs }: PointerBoxProps) {
   const own = useRef<HTMLElement>(null)
   const boxEl = ref ?? own
   const taRef = useRef<HTMLTextAreaElement>(null)
@@ -116,27 +108,19 @@ export function PointerBox({ rect, place, label, draft, onDraft, busy = false, o
     return () => document.removeEventListener('keydown', onKey)
   }, [onClose])
 
-  // beside the rect, never on it (boxPlace), placed again as an answer grows
-  const answering = children != null
+  // beside the rect, never on it (boxPlace)
   useLayoutEffect(() => {
     const el = boxEl.current
     if (!el) return
-    const put = () => {
-      const vw = window.innerWidth
-      const vh = window.innerHeight
-      const w = Math.min(answering ? ANSWER_WIDTH : BOX_WIDTH, vw - 2 * MARGIN)
-      el.style.width = `${w}px`
-      const { left, top } = boxPlace(rect, w, el.offsetHeight, vw, vh, place)
-      el.style.left = `${left}px`
-      el.style.top = `${top}px`
-    }
-    put()
+    const vw = window.innerWidth
+    const vh = window.innerHeight
+    const w = Math.min(BOX_WIDTH, vw - 2 * MARGIN)
+    el.style.width = `${w}px`
+    const { left, top } = boxPlace(rect, w, el.offsetHeight, vw, vh, place)
+    el.style.left = `${left}px`
+    el.style.top = `${top}px`
     taRef.current?.focus()
-    if (!answering || typeof ResizeObserver === 'undefined') return
-    const ro = new ResizeObserver(put)
-    ro.observe(el)
-    return () => ro.disconnect()
-  }, [rect, place, boxEl, answering])
+  }, [rect, place, boxEl])
 
   return createPortal(
     <div
@@ -150,7 +134,6 @@ export function PointerBox({ rect, place, label, draft, onDraft, busy = false, o
       data-panel="pointer"
       {...attrs}
     >
-      {answering && <div className="pointer-box-answer">{children}</div>}
       <TextArea
         ref={taRef}
         bare
@@ -161,7 +144,7 @@ export function PointerBox({ rect, place, label, draft, onDraft, busy = false, o
         value={draft}
         onChange={onDraft}
         aria-label={label}
-        placeholder={answering ? `Reply in ${replyTo}…` : ASK_PLACEHOLDER}
+        placeholder={ASK_PLACEHOLDER}
         disabled={busy}
         onKeyDown={(e) => {
           if (e.key === 'Escape') {

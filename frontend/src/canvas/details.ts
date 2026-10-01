@@ -28,7 +28,7 @@ export function bundleKind(b: MimeBundle | null | undefined): BundleKind {
 export type DetailBlock =
   | { kind: 'shell'; index: number; stream: 'stdout' | 'stderr'; text: string; truncated: OutputTruncation | null }
   | { kind: 'error'; index: number; ename: string; evalue: string; traceback: string }
-  | { kind: 'text'; index: number; text: string }
+  | { kind: 'text'; index: number; text: string; plain: boolean }
   | { kind: 'artifact'; index: number; label: BundleKind; bundle: MimeBundle }
 
 /** The `@out<i>` index a bundle answers to (the backend's cite.output_index): its `_out` when it carries one, else its position. */
@@ -67,7 +67,7 @@ export function detailBlocks(outputs: readonly MimeBundle[] | null | undefined):
         const mime = pickMime(b)
         const raw = mime ? b[mime] : ''
         const text = kind === 'json' && typeof raw !== 'string' ? JSON.stringify(raw, null, 2) : asText(raw)
-        if (text) blocks.push({ kind: 'text', index, text })
+        if (text) blocks.push({ kind: 'text', index, text, plain: mime === 'text/plain' })
         return
       }
       default:
@@ -185,27 +185,30 @@ export const otherValues = (values: readonly string[], value: string | null | un
 export const effectiveValue = (row: Pick<LabelRow, 'label' | 'analyst'>): string | null => row.analyst ?? row.label ?? null
 
 export interface CoverageGroups {
-  /** the files with rows, by path */
+  /** the first files with rows, by path */
   covered: CoverageFile[]
-  /** the paths with none, sorted */
+  /** a page of the paths with none, sorted */
   notCovered: string[]
   /** rows over every covered file */
   rows: number
-  /** files in the corpus (forge aside) */
+  /** files in the corpus */
   total: number
+  /** files with rows */
+  nCovered: number
+  /** files with none */
+  nNotCovered: number
 }
 
-/** Paths in code-point order, as the backend sorts them. */
-const byPath = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0)
+/** The paths of the files with no rows a coverage answer lists at a time (backend concepts.COVERAGE_PAGE). */
+export const COVERAGE_PAGE = 200
 
-/** The coverage route's files grouped for APPLIED TO; null (no coverage yet, or a cell or span unit) groups to nothing. */
-export function groupCoverage(cov: Pick<ConceptCoverage, 'files' | 'not_covered'> | null | undefined): CoverageGroups {
-  const files = Array.isArray(cov?.files) ? cov.files.filter((f): f is CoverageFile => !!f && typeof f.path === 'string') : []
-  const covered = files.filter((f) => f.covered || f.rows > 0).sort((a, b) => byPath(a.path, b.path))
-  const fromFiles = files.filter((f) => !(f.covered || f.rows > 0)).map((f) => f.path)
-  const listed = Array.isArray(cov?.not_covered) ? cov.not_covered.filter((p): p is string => typeof p === 'string') : []
-  const notCovered = Array.from(new Set([...listed, ...fromFiles])).sort(byPath)
-  return { covered, notCovered, rows: covered.reduce((n, f) => n + (f.rows > 0 ? f.rows : 0), 0), total: files.length }
+const count = (n: unknown): number => (typeof n === 'number' && Number.isFinite(n) && n >= 0 ? n : 0)
+
+/** The coverage route's answer for APPLIED TO; null (no coverage yet, or a cell or span unit) groups to nothing. */
+export function groupCoverage(cov: Partial<ConceptCoverage> | null | undefined): CoverageGroups {
+  const covered = Array.isArray(cov?.files) ? cov.files.filter((f): f is CoverageFile => !!f && typeof f.path === 'string') : []
+  const notCovered = Array.isArray(cov?.not_covered) ? cov.not_covered.filter((p): p is string => typeof p === 'string') : []
+  return { covered, notCovered, rows: count(cov?.rows), total: count(cov?.n_files), nCovered: count(cov?.n_covered), nNotCovered: count(cov?.n_not_covered) }
 }
 
 /** The word for a unit, singular or plural: `record` → `records`, `cell` → `cards`, `span` → `sentences`, `agent` → `files`, `run` → `runs`. */

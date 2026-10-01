@@ -74,12 +74,12 @@ def test_every_package_the_runtime_code_imports_is_a_runtime_dependency():
 
 
 def test_every_frontend_package_the_runtime_code_loads_is_one_a_release_installs():
-    from app import srt, tools, views
+    from app import srt, tools, view_libs, views
 
     release = (config.REPO_ROOT / "scripts" / "release.sh").read_text("utf-8")
     shipped = set(re.search(r"^runtime_npm=\(([^)]*)\)", release, re.M).group(1).split())
     modules = config.REPO_ROOT / "frontend" / "node_modules"
-    loaded = {p.relative_to(modules).parts[0] for p in (*views.LIBS.values(), *tools.VEGA_BUILDS)}
+    loaded = {p.relative_to(modules).parts[0] for p in (*views.LIBS.values(), *tools.VEGA_BUILDS, view_libs.ESBUILD)}
     shots = "".join((config.REPO_ROOT / "scripts" / n).read_text("utf-8") for n in ("view_shot.mjs", "ui_shot.mjs"))
     loaded |= set(re.findall(r"require\('([^']+)'\)", shots))
     loaded |= {f"@fontsource/{face}" for face in re.findall(r"\['[^']+', '([^']+)', \[", shots)}

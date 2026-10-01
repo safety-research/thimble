@@ -151,16 +151,31 @@ def _file_records(path: Path, rel: str, kind: str) -> Iterator[dict]:
         yield from corpus.records_from_lines([ln[:-1] if ln.endswith(b"\r") else ln for ln in batch], rel, kind, start)
 
 
+def group_texts(path: Path, rel: str, kind: str) -> Iterator[tuple[str, str]]:
+    """(ref, text) of each part of a file as an agent or run unit reads it: its lines, a database's rows or a PDF's pages
+    (records.py); nothing of another binary file."""
+    from . import records  # noqa: PLC0415 — records imports corpus, as this module does
+
+    reader = records.reader_of(path, rel)
+    if reader in ("sqlite", "pdf"):
+        for r in records.iter_records(path, rel, kind):
+            yield r["ref"], r["text"]
+    elif reader is not None:
+        for rec in _file_records(path, rel, kind):
+            yield f"{rel}#L{rec['line']}", _text_of(rec)
+
+
 def scan_group(corpus_root: str, ref: str, files: list[tuple[str, str]], pattern: str, pos_label: str, neg_label: str) -> dict:
-    """An agent or run unit (blocking; a worker): the unit's files' records in order until the first match; one row for
-    the unit, its rationale `<path>#L<n>: <matched text>`. Returns {units: 1, hits, rows: JSONL bytes, records: [the row]}."""
+    """An agent or run unit (blocking; a worker): the unit's files' records in order until the first match (group_texts);
+    one row for the unit, its rationale `<record ref>: <matched text>`. Returns {units: 1, hits, rows: JSONL bytes,
+    records: [the row]}."""
     rx = re.compile(pattern)
     hit: str | None = None
     for rel, kind in files:
-        for rec in _file_records(Path(corpus_root) / rel, rel, kind):
-            m = rx.search(_text_of(rec))
+        for at, text in group_texts(Path(corpus_root) / rel, rel, kind):
+            m = rx.search(text)
             if m:
-                hit = f"{rel}#L{rec['line']}: {m.group(0)[:RATIONALE_MAX]}"
+                hit = f"{at}: {m.group(0)[:RATIONALE_MAX]}"
                 break
         if hit is not None:
             break

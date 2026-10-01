@@ -140,7 +140,7 @@ class _Refs:
             return p["cell_id"] in self.cells
         if k == "concept":
             return p["concept_id"] in self.concepts
-        if k in ("record", "range", "block", "span", "path", "table", "row"):
+        if k in refs.FILE_KINDS:
             return self._exists(p["path"])
         return False
 

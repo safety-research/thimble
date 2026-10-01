@@ -1,10 +1,16 @@
 // The Labels sidebar beside a view, shared by Files (a view picked in its views bar) and a view in a pane of its own
 // (ViewSurface): the Labels pane, the label's edit card at the sidebar's edge and the seam that resizes it. Beside a
-// view a label's row sets or clears the Files label filter, which the view keeps its records by. useLabelRuns keeps the
-// runs of the labels' applies, polled while they run, and Retry.
-import { useCallback, useEffect, useMemo, useState, type CSSProperties, type ReactNode } from 'react'
+// view a label's row sets or clears the Files label filter, which the view keeps its records by. A view draws its own
+// label controls and thimble draws none in its head, so the sidebar opens beside it when the view's controls open a
+// label's editor; beside a view built without label controls it also opens while a label is on or a label marks the
+// view's files, with the offer to add them (AddLabelControls). useLabelRuns keeps the runs of the labels' applies,
+// polled while they run, and Retry.
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import { Button } from '../components/Button'
+import { Spinner } from '../components/Spinner'
 import { api, labelApi } from '../lib/api'
+import { bus } from '../lib/bus'
+import { refreshProposals } from '../lib/proposals'
 import { track } from '../lib/telemetry'
 import type { ConceptRun, LabelDraft } from '../lib/types'
 import { readStorage, storageKey, writeStorage } from '../lib/workspace'
@@ -107,6 +113,8 @@ export interface LabelSideProps {
   first?: ReadonlySet<string>
   /** beside a view: keep only the records that take a label's value (the Files label filter) */
   filterable?: boolean
+  /** at the pane's top, under its head (AddLabelControls) */
+  note?: ReactNode
 }
 
 /** The sidebar's three parts, which the caller places: the Labels pane, the edit card at the sidebar's edge and the
@@ -132,6 +140,7 @@ export function useLabelSide(p: LabelSideProps): { pane: ReactNode; card: ReactN
       first={p.first}
       onFilter={p.filterable ? onFilter : undefined}
       filter={filter}
+      note={p.note}
     />
   )
   // the card stands at the sidebar's edge (--side-w, files.css); the width is set on the card's slot alone, since a
@@ -155,9 +164,64 @@ export function useLabelSide(p: LabelSideProps): { pane: ReactNode; card: ReactN
   return { pane, card, resizer }
 }
 
-/** A view in a pane of its own with its Labels sidebar: shown while labels are on or the analyst opened it, with the
- * Labels pane, the edit card and the seam as Files has them beside a view. */
-export function useViewSide(ws: string, view: BuiltView, labels: FilesLabels): { side: ReactNode; card: ReactNode; lead: ReactNode; first?: ReadonlySet<string>; newLabel: () => void } {
+/** The change a view built without label controls is asked for (AddLabelControls), in the analyst's words. */
+export const ADD_LABEL_CONTROLS = 'Add label controls to this view: the labels over its files, each with a switch to turn it on or off and its colours.'
+
+/** Beside a view whose page draws no label controls of its own, as views built before they were required: one quiet
+ * line that asks the dev agent to add them, as a change to the view, which then builds as any change does. */
+export function AddLabelControls({ ws, view }: { ws: string; view: BuiltView }) {
+  const [asked, setAsked] = useState(false)
+  // whether the change asked for has started building, so its end, with no label controls yet, offers it again
+  const building = useRef(false)
+  useEffect(() => {
+    setAsked(false)
+    building.current = false
+  }, [view.slug])
+  useEffect(() => {
+    if (!asked) return
+    if (view.updating) building.current = true
+    else if (building.current) {
+      building.current = false
+      setAsked(false)
+    }
+  }, [asked, view.updating])
+  const ask = () => {
+    setAsked(true)
+    track('view-build', { target: `view:${view.slug}`, detail: { change: 'label controls' } })
+    api
+      .messageView(ws, view.slug, ADD_LABEL_CONTROLS)
+      .then(() => refreshProposals(ws))
+      .catch((e: Error) => {
+        setAsked(false)
+        bus.emit('toast', { text: `Could not ask for label controls. ${e.message}`, kind: 'error' })
+      })
+  }
+  // while another change to the view builds, its chip in the views bar says so, and the offer waits
+  if (view.updating && !asked) return null
+  return (
+    <div className="files-labels-note">
+      {asked ? (
+        <span className="files-labels-note-busy">
+          <Spinner />
+          Adding label controls to the view
+        </span>
+      ) : (
+        <Button variant="ghost" size="sm" onClick={ask}>
+          Add label controls to the view
+        </Button>
+      )}
+    </div>
+  )
+}
+
+/** A view in a pane of its own with its Labels sidebar: shown when the view's controls open a label's editor, and, for
+ * a view built without label controls, while labels are on or a label marks its files, until the analyst hides it; with
+ * the Labels pane, the edit card and the seam as Files has them beside a view. */
+export function useViewSide(
+  ws: string,
+  view: BuiltView,
+  labels: FilesLabels,
+): { side: ReactNode; card: ReactNode; first?: ReadonlySet<string>; editLabel: (id: string | null) => void } {
   const runs = useLabelRuns(ws, labels)
   const [choice, setChoice] = useState<boolean | null>(null)
   const [open, setOpen] = useState(true)
@@ -168,8 +232,8 @@ export function useViewSide(ws: string, view: BuiltView, labels: FilesLabels): {
     const w = readStorage<unknown>(widthKey, TREE.def)
     return typeof w === 'number' && Number.isFinite(w) ? Math.min(TREE.max, Math.max(TREE.min, w)) : TREE.def
   })
-  const shown = choice ?? labels.on.length > 0
   const first = useMemo(() => (view.claims ? viewLabels(labels.all, labels.presence, view.claims) : undefined), [view.claims, labels.all, labels.presence])
+  const shown = choice ?? (!view.label_controls && (labels.on.length > 0 || !!first?.size))
   const edit = useCallback((id: string | 'new' | null) => {
     setEditing(id)
     setDrafted(null)
@@ -198,6 +262,7 @@ export function useViewSide(ws: string, view: BuiltView, labels: FilesLabels): {
     onHide: () => setChoice(false),
     first,
     filterable: true,
+    note: view.label_controls || view.builtin ? undefined : <AddLabelControls ws={ws} view={view} />,
   })
   const side = shown ? (
     <>
@@ -207,11 +272,13 @@ export function useViewSide(ws: string, view: BuiltView, labels: FilesLabels): {
       {parts.resizer}
     </>
   ) : null
-  const lead = shown ? null : <Button variant="icon" size="sm" icon="sidebar" title="Show labels" aria-label="Show labels" className="view-pane-side-show" onClick={() => setChoice(true)} />
-  const newLabel = useCallback(() => {
-    setChoice(true)
-    setOpen(true)
-    edit('new')
-  }, [edit])
-  return { side, card: shown ? parts.card : null, lead, first, newLabel }
+  const editLabel = useCallback(
+    (id: string | null) => {
+      setChoice(true)
+      setOpen(true)
+      edit(id ?? 'new')
+    },
+    [edit],
+  )
+  return { side, card: shown ? parts.card : null, first, editLabel }
 }

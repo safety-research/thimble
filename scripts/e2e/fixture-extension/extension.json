@@ -1,0 +1,6 @@
+{
+  "name": "e2e-fixture",
+  "version": "0.0.1",
+  "thimble": ">=0.4",
+  "description": "A fixture for thimble's end-to-end test: a report type and a line of orientation instructions."
+}

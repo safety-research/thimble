@@ -53,7 +53,7 @@ plugin="$(cd "$here/.." && pwd -P)"
 
 # the supervisor's subcommands (backend/app/cli.py build_parser) plus the `server` group; `up` is an alias of `ensure`.
 # `uninstall` is the bash function below, so it works with backend/.venv missing or broken.
-SUPERVISOR_COMMANDS=" server up ensure stop restart doctor fix revert update list purge launch-args prompt "
+SUPERVISOR_COMMANDS=" server up ensure stop restart doctor fix revert update list purge extension launch-args prompt "
 
 # usage: what `thimble help` prints; the header above has the details.
 usage() {
@@ -73,6 +73,8 @@ usage: thimble [claude flags...]          start thimble in this folder: a new Cl
                                           delete workspaces or archived runs by id, after asking
        thimble feedback ["what went wrong"] [--no-logs]
                                           write a problem report to send the developer
+       thimble extension add <folder | git URL | name> [--yes] | on <name> | off <name> | list | remove <name>
+                                          add, switch on or off, list or remove extensions
        thimble update [--from <zip>]      bring the install up to date
        thimble uninstall [--yes] [--keep-home]
 EOF
@@ -80,11 +82,12 @@ EOF
 
 # rendered_prompts NAME… [--cwd P]: `prompt` in a session thimble started in a work folder of its own. The server has
 # rendered the prompts for the session's corpus into $THIMBLE_RENDERED_PROMPTS/<name>.md; print them from there.
-# Returns 1 with nothing printed (so the supervisor answers) when the variable is unset, a name has no file, or another
-# option is given.
+# Returns 1 with nothing printed (so the supervisor answers) when the variable is unset, the session has no
+# THIMBLE_SESSION_TOKEN (a variable Claude Code's background service handed on from another session), a name has no
+# file, or another option is given.
 rendered_prompts() {
   local dir="${THIMBLE_RENDERED_PROMPTS:-}" names="" n sep=""
-  [ -n "$dir" ] || return 1
+  [ -n "$dir" ] && [ -n "${THIMBLE_SESSION_TOKEN:-}" ] || return 1
   while [ "$#" -gt 0 ]; do
     case "$1" in
       --cwd) [ "$#" -ge 2 ] || return 1; shift 2;;
@@ -148,7 +151,7 @@ uninstall() {
   local home_raw="${THIMBLE_HOME:-}" home home_note="" home_state=0 link="$HOME/.local/bin/thimble" tree="" kind="" name="" name_note=""
   local inside=0 pid="" port="" pid_note="" conf="" planned="" pport="" link_ours=0 link_why="" stop_how="" have_claude=0 ans cwd rc
   local nsteps=0 ndone=0 nleft=0 left="" id_ok=0 id_conf="" id_note="" changed=0 undo=0 undo_py="" undo_cmd="" undone=1
-  local reg="" reg_ok=1
+  local reg="" reg_ok=1 reg_from="" reg_other=""
   case "$home_raw" in *[![:space:]]*) ;; *) home_raw="$HOME/.thimble";; esac   # unset or blank: the default
   home="${home_raw%/}"; [ -n "$home" ] || home=/
   enable -n kill 2>/dev/null || true   # `kill` is the program on PATH, not the builtin: the `+ kill …` line names what ran, and a test can stand a failing one in for it
@@ -237,10 +240,25 @@ uninstall() {
   ! command -v claude >/dev/null 2>&1 || have_claude=1
   # the plugin registration, removed only when install.sh added it: $home/plugin.json names the marketplace it registered
   # thimble under, "" after a no. Without that record (an install older than its question, which registered the plugin
-  # unasked) it goes when Claude Code lists it, or, with no claude to ask, the commands are printed
+  # unasked) it goes when Claude Code lists it, or, with no claude to ask, the commands are printed. Either way it stays
+  # when Claude Code has that marketplace from a folder other than this tree: it is another install's
   if [ -f "$home/plugin.json" ]; then reg="$(json_get "$home/plugin.json" registered || true)"
   elif [ "$have_claude" = 0 ]; then reg="$name"
   else case "$(claude plugin list --json 2>/dev/null || true)" in *"\"thimble@$name\""*) reg="$name";; esac; fi
+  if [ -n "$reg" ] && [ -n "$tree" ] && [ "$have_claude" = 1 ] && command -v python3 >/dev/null 2>&1; then
+    reg_from="$(claude plugin marketplace list --json 2>/dev/null | python3 -I -c 'import json, os, sys
+try:
+    rows = json.load(sys.stdin)
+except ValueError:
+    rows = []
+for m in rows if isinstance(rows, list) else []:
+    if isinstance(m, dict) and m.get("name") == sys.argv[1]:
+        src = m.get("source")
+        kind, path = (src.get("source"), src.get("path")) if isinstance(src, dict) else (src, m.get("path"))
+        print(os.path.realpath(path) if kind == "directory" and isinstance(path, str) and path else kind or "an unknown source")
+        break' "$reg" || true)"
+    if [ -n "$reg_from" ] && [ "$reg_from" != "$tree" ]; then reg_other="$reg"; reg=""; fi
+  fi
   # the link: ours when it ends at this tree's plugin/bin/thimble, or is a thimble link (…/plugin/bin/thimble) whose target
   # is gone or lies inside $THIMBLE_HOME — it would dangle after the rm
   if [ -L "$link" ]; then
@@ -281,7 +299,9 @@ uninstall() {
     if [ -n "$undo_py" ]; then step "put back what thimble changed in Claude Code's files: the trust of its workspaces folder, if install.sh added it"
     else printf "  what thimble changed in Claude Code's files cannot be put back here (no thimble tree with a Python to run it); run this yourself:\n    %s\n" "$undo_cmd"; fi
   fi
-  if [ -z "$reg" ] && [ -f "$home/plugin.json" ]; then
+  if [ -n "$reg_other" ]; then
+    printf "  thimble's plugin: thimble@%s is another install's, from %s, so it is left as it is\n" "$reg_other" "$reg_from"
+  elif [ -z "$reg" ] && [ -f "$home/plugin.json" ]; then
     printf "  thimble's plugin: install.sh did not register it (answered no), so nothing is removed there\n"
   elif [ -z "$reg" ]; then
     printf "  thimble's plugin: Claude Code does not list thimble@%s, so nothing is removed there\n" "$name"

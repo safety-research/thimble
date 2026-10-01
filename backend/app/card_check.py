@@ -459,14 +459,14 @@ async def _check(run: _Run) -> None:
     if typed:
         timing["typed"] = len(typed)
         log.info("card check: card:%s shows numbers its code types in: %s", cid, ", ".join(typed))
+    kept = _keep(c, cid, f"{run.check}-card.png", drawn.png)
     if not checkstore.stage(c, cid, run.check, "render", {
-            "status": "ok", "ms": timing["render_ms"],
-            **({"image": p} if (p := _keep(c, cid, f"{run.check}-card.png", drawn.png)) else {}),
+            "status": "ok", "ms": timing["render_ms"], **({"image": kept} if kept else {}),
             **({"typed": typed} if typed else {})}):
         _gone(run)
         return
     tr = time.perf_counter()
-    reading = await _read(c, cell, drawn.png, run)
+    reading = await _read(c, cell, drawn.png, run, str(config.workspace_dir(c) / kept) if kept else None)
     timing["critique_ms"] = _ms(tr)
     if isinstance(reading, str):
         if not checkstore.stage(c, cid, run.check, "critique", {"status": "error", "ms": timing["critique_ms"],
@@ -483,7 +483,7 @@ async def _check(run: _Run) -> None:
                                                             "model": model_used}):
         _gone(run)  # the card changed while the model read it; a change by a tool began the next check
         return
-    patch = _patch(cell, card, notebook.get_cell(c, cid, full_outputs=True))
+    patch = _patch(cell, card, notebook.get_cell(c, cid, full_outputs=True), c=c)
     if patch and not failed:
         # a card that meets every criterion stays as it is: the prompt asks for changes only to what fails one
         log.info("card check: card:%s failed no criterion, so its replacement's changes to %s were not applied", cid,
@@ -713,17 +713,24 @@ def _lines(code: str) -> str:
     return "\n".join(line.rstrip() for line in code.strip().splitlines())
 
 
-def _patch(cell: dict[str, Any], card: dict[str, str], full: dict[str, Any] | None = None) -> dict[str, Any]:
+def _patch(cell: dict[str, Any], card: dict[str, str], full: dict[str, Any] | None = None, *,
+           c: str | None = None) -> dict[str, Any]:
     """The parts of the replacement card that differ from `cell` and that the check may change (checkstore.fixable), as cell
     fields: `title`, `code` (only when the reading saw the whole code) and `takeaway`, the takeaway compared as it would be
-    stored (its values linked against `full`). An empty part leaves the card's own."""
-    from . import checkstore  # noqa: PLC0415
+    stored (its values linked against `full`). An empty part leaves the card's own. The arguments the analyst set with
+    Keep on a card of a card type in workspace `c` are written back into the replacement's code as they were
+    (cardtypes.keep_kept); a code they cannot be written into is no part of the replacement."""
+    from . import cardtypes, checkstore  # noqa: PLC0415
 
     patch: dict[str, Any] = {}
     title = " ".join(card["question"].split())
     if title and title != " ".join(str(cell.get("title") or "").split()):
         patch["title"] = title
     code, old = card["code"], str(cell.get("code") or "")
+    if code.strip() and c is not None and cell.get("kept_args"):
+        code = cardtypes.keep_kept(c, cell, code) or ""
+        if cardtypes.same_code(code, old):
+            code = old
     if code.strip() and len(old.strip()) <= CODE_CHARS and _lines(code) != _lines(old):
         patch["code"] = code
     take, own = card["takeaway"].strip(), str(cell.get("takeaway") or "").strip()
@@ -765,7 +772,7 @@ async def _replace(run: _Run, cell: dict[str, Any], patch: dict[str, Any], faile
     tid = str((cand or {}).get("trial") or "")
     keep, settled = False, False
     try:
-        why = await _not_kept(run, cand)
+        why = await _not_kept(run, cand, _type_of(cell))
         timing["replace_ms"] = _ms(t0)
         if why:
             timing["replacement"] = "rejected"
@@ -791,12 +798,18 @@ async def _replace(run: _Run, cell: dict[str, Any], patch: dict[str, Any], faile
             _spawn(_settle_now(c, cid, tid, keep))
 
 
-async def _not_kept(run: _Run, cand: dict[str, Any] | None) -> str:
-    """Why a replacement is not kept, '' when it is: its code must run clean and the replaced card must draw."""
+async def _not_kept(run: _Run, cand: dict[str, Any] | None, typed: str = "") -> str:
+    """Why a replacement is not kept, '' when it is: its code must run clean, a card of type `typed` must still draw
+    that type, and the replaced card must draw."""
     if not cand:
         return "it could not be applied"
     if str(cand.get("status") or "ok") != "ok":
         return "its code did not run clean: " + _run_error(cand)
+    from . import cardtypes  # noqa: PLC0415
+
+    c = run.c if run is not None else None
+    if typed and cardtypes.canonical(c, _type_of(cand)) != cardtypes.canonical(c, typed):
+        return f"it drew no {cardtypes.canonical(c, typed)} card"
     after = await _draw(run.c, cand)
     if after is None:
         return "no picture could show the replaced card"
@@ -1001,15 +1014,17 @@ def read_effort(c: str) -> str:
     return str(_role(c).get("effort") or config.ROLE_MODELS_DEFAULT["verify"]["effort"])
 
 
-async def _call(c: str, system: str, user: str, tool: Any, images: list[tuple[bytes, str]], *, effort: str) -> Any:
-    """The reading: one model.structured call on the `verify` role's model and fast mode at `effort`. Retry waits and a
-    refused reading before the fallback are left out of the check's time (_on_retry, _on_fallback)."""
-    from . import model  # noqa: PLC0415
+async def _call(c: str, system: str, user: str, tool: Any, images: list[tuple[bytes, str]], *, effort: str,
+                model: str | None = None) -> Any:
+    """The reading: one model.structured call on `model`, else the `verify` role's model, and that role's fast mode at
+    `effort`. Retry waits and a refused reading before the fallback are left out of the check's time (_on_retry,
+    _on_fallback)."""
+    from . import model as model_mod  # noqa: PLC0415
 
     role = _role(c)
     run = _current.get()
-    return await model.structured(
-        user, tool=tool, model=role.get("model") or config.ROLE_MODELS_DEFAULT["verify"]["model"],
+    return await model_mod.structured(
+        user, tool=tool, model=model or role.get("model") or config.ROLE_MODELS_DEFAULT["verify"]["model"],
         effort=effort or None,
         system_append=system, cwd=config.corpus_dir(c),
         speed="fast" if role.get("fast") else "standard", images=images, idle_timeout_s=READ_IDLE_S,
@@ -1031,33 +1046,71 @@ def _assessment(raw: Any) -> list[dict[str, Any]] | None:
     return out
 
 
-async def _read(c: str, cell: dict[str, Any], png: bytes | None,
-                run: _Run) -> tuple[list[dict[str, Any]], dict[str, str], str] | str:
-    """(assessment, the replacement card {question, code, takeaway}, model) from the model's reading of the card's
-    picture; why not, as a sentence, when the call failed or its output lacks a part. _Capacity when the API is at
-    capacity after model.structured's own retries."""
+async def card_input(c: str, cell: dict[str, Any], run: _Run, picture: str | None,
+                     secs: dict[str, str]) -> dict[str, Any]:
+    """The card-check task's input (tasks.py): the card's id, kind, question, takeaway, citations, code and the
+    context it was made in, each '' for none; the `typed` and `kept` parts of the reading's card (_typed_text,
+    _kept_text); the path of its picture, None when it was not drawn; and the effort the check reads at."""
+    code = str(cell.get("code") or "").strip()
+    return {"card": {"id": run.cid, "kind": str(cell.get("kind") or "code"), "question": str(cell.get("title") or ""),
+                     "takeaway": str(cell.get("takeaway") or "").strip(),
+                     "citations": await asyncio.to_thread(_citations_text, c, cell) or "",
+                     "code": code[:CODE_CHARS], "context": await asyncio.to_thread(_context_text, c, cell, run.author) or "",
+                     "typed": _typed_text(c, cell, secs), "kept": await asyncio.to_thread(_kept_text, c, cell, secs)},
+            "picture": picture, "effort": run.effort or await asyncio.to_thread(read_effort, c)}
+
+
+async def check_task(c: str, inp: dict[str, Any], *, model: str | None = None) -> Any:
+    """thimble's own card-check task (tasks.py): the model reads the card and its picture against card-check.md's
+    criteria, on `model` when given, and returns its assessment and a replacement card (the `critique` tool). Never
+    raises; read the CallResult's status."""
     from . import prompts, userconf  # noqa: PLC0415
 
     with prompts.custom(userconf.prompt_files(c, "cardCheck")):
         secs = _sections()
     none = secs.get("none", "")
-    code = str(cell.get("code") or "").strip()
+    card = inp.get("card") if isinstance(inp.get("card"), dict) else {}
+    code = str(card.get("code") or "").strip()
     user = _fill(secs["card"], {
-        "card": run.cid,
-        "kind": str(cell.get("kind") or "code"),
-        "question": str(cell.get("title") or ""),
-        "takeaway": str(cell.get("takeaway") or "").strip() or none,
-        "citations": await asyncio.to_thread(_citations_text, c, cell) or none,
-        "code": f"```python\n{code[:CODE_CHARS]}\n```" if code else none,
-        "context": await asyncio.to_thread(_context_text, c, cell, run.author) or none,
+        "card": str(card.get("id") or ""), "kind": str(card.get("kind") or "code"),
+        "question": str(card.get("question") or ""),
+        "takeaway": str(card.get("takeaway") or "").strip() or none,
+        "citations": str(card.get("citations") or "") or none,
+        "code": f"```python\n{code}\n```" if code else none,
+        "context": str(card.get("context") or "") or none,
+        "typed": str(card.get("typed") or ""), "kept": str(card.get("kept") or ""),
     })
-    images = [(await asyncio.to_thread(fit_image, png), "image/png")] if png else []
-    effort = run.effort or await asyncio.to_thread(read_effort, c)
+    images = []
+    if isinstance(inp.get("picture"), str) and inp["picture"]:
+        try:
+            png = await asyncio.to_thread(Path(inp["picture"]).read_bytes)
+            images = [(await asyncio.to_thread(fit_image, png), "image/png")]
+        except OSError:
+            log.warning("card check: the picture %s could not be read", inp["picture"])
+    effort = str(inp.get("effort") or "") or await asyncio.to_thread(read_effort, c)
+    return await _call(c, _fill(secs["check"], {}), user, _tool(secs, "critique"), images, effort=effort, model=model)
+
+
+async def _read(c: str, cell: dict[str, Any], png: bytes | None, run: _Run,
+                picture: str | None = None) -> tuple[list[dict[str, Any]], dict[str, str], str] | str:
+    """(assessment, the replacement card {question, code, takeaway}, model) from the card-check task's reading of the
+    card's picture (tasks.call: an extension's program, else check_task); why not, as a sentence, when the call failed
+    or its output lacks a part. _Capacity when the API is at capacity after model.structured's own retries. `picture`
+    is where `png` is kept."""
+    from . import prompts, tasks, userconf  # noqa: PLC0415
+
+    with prompts.custom(userconf.prompt_files(c, "cardCheck")):
+        secs = _sections()
+    if png and not picture:
+        picture = str(_shot_path(c, run.cid, f"{run.check}-card.png"))
+        await asyncio.to_thread(Path(picture).write_bytes, png)
+    inp = await card_input(c, cell, run, picture, secs)
+    effort = str(inp["effort"])
     t0, outcome = time.perf_counter(), "stopped"  # stopped: the check ran past its time, or the card changed
     try:
         async with _slot(run):
             t0 = time.perf_counter()
-            res = await _call(c, _fill(secs["check"], {}), user, _tool(secs, "critique"), images, effort=effort)
+            res = await tasks.call(c, "card-check", inp, schema=_tool(secs, "critique").input_schema)
         outcome = res.status
     finally:
         log.info("card check: the reading of card:%s at %s effort ended %s after %.1f s (the check's limit %.0f s)",
@@ -1081,6 +1134,34 @@ async def _read(c: str, cell: dict[str, Any], png: bytes | None,
         log.warning("card check: the reading of card:%s gave no whole assessment and card", run.cid)
         return "the model's reading gave no whole assessment and card"
     return assessment, card, str(res.model_used or res.model_requested or "")
+
+
+def _type_of(cell: dict[str, Any] | None) -> str:
+    """The card type a card draws, '' for a card of no type."""
+    from . import cardtypes  # noqa: PLC0415
+
+    made = cardtypes.card_of((cell or {}).get("outputs"))
+    return str(made.get("type") or "") if made else ""
+
+
+def _typed_text(c: str, cell: dict[str, Any], secs: dict[str, str]) -> str:
+    """The `typed` section of the reading's card, for a card of a card type; '' for any other."""
+    from . import cardtypes  # noqa: PLC0415
+
+    t = _type_of(cell)
+    return "\n" + _fill(secs["typed"], {"type": cardtypes.canonical(c, t)}).strip() if t else ""
+
+
+def _kept_text(c: str, cell: dict[str, Any], secs: dict[str, str]) -> str:
+    """The `kept` section of the reading's card, naming the arguments the analyst set with Keep that the code still
+    gives as they set them; '' for none."""
+    from . import cardtypes  # noqa: PLC0415
+
+    kept = cardtypes.kept_in_force(c, cell)
+    if not kept:
+        return ""
+    words = ", ".join(f"`{k}={cardtypes._py(v)}`" if v is not None else f"no `{k}`" for k, v in kept.items())
+    return "\n" + _fill(secs["kept"], {"kept": words}).strip()
 
 
 def _read_failure(status: str, detail: str) -> str:

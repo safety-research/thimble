@@ -1,0 +1,5 @@
+{
+  "name": "Video",
+  "description": "A short narrated video, cited lines read aloud over a film drawn in HTML in time with them.",
+  "viewer": "video"
+}

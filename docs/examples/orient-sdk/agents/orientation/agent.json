@@ -1,0 +1,4 @@
+{
+  "description": "One Claude session surveys the corpus. The program files the survey as a note card and tells main its first line. Run again, it surveys what the cards so far leave out.",
+  "sdk": "orient.py"
+}

@@ -249,3 +249,20 @@ def test_a_tool_call_carries_the_id_claude_code_gave_it(tmp_path, server):
            until=lambda: len(server.calls) >= 2)
     got = {body["args"]["message"]: (name, body["tool_use_id"]) for name, body in server.calls}  # the two calls may land in either order
     assert got == {"more": ("message_orientation", "toolu_01abc"), "again": ("message_orientation", None)}
+
+
+def test_a_session_name_counts_only_with_its_token(tmp_path, server):
+    """THIMBLE_SESSION without THIMBLE_SESSION_TOKEN is what Claude Code's background service can hand on from one of
+    thimble's sessions to the user's own: the shim then calls as the analyst's session. With the token both go to the
+    server, which checks it (app/hook_auth.py)."""
+    from app import tools
+
+    both = {t["name"] for t in tools.list(tools.ANALYST, session=None)} & \
+        {t["name"] for t in tools.list(tools.ANALYST, session="orient")}
+    name = sorted(both)[0]
+    call = {"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": name, "arguments": {}}}
+    _run(tmp_path, server.port, channel=False, wait_s=15, send=[call], until=lambda: bool(server.calls),
+         extra={"THIMBLE_SESSION": "orient"})
+    _run(tmp_path, server.port, channel=False, wait_s=15, send=[call], until=lambda: len(server.calls) >= 2,
+         extra={"THIMBLE_SESSION": "orient", "THIMBLE_SESSION_TOKEN": "n.m"})
+    assert [(body["session"], body["session_token"]) for _, body in server.calls] == [(None, None), ("orient", "n.m")]

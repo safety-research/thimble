@@ -198,13 +198,12 @@ def _chat_record(c: str, chat_id: str, index: int) -> str:
     return f"{ref} ({rec.get('type')})\n{str(rec.get('text') or rec.get('message') or '').strip()}".strip()
 
 
-async def warm(c: str, anchor: str | None) -> None:
+async def warm(c: str, meta: dict) -> None:
     """Resolve the anchor's view refs once in a worker thread, so the thread's first event, built on the server's loop,
-    finds
-    them in the views memo (views.resolve_sync cannot run a reader on that loop). Waits WARM_S at most."""
+    finds them in the views memo (views.resolve_sync cannot run a reader on that loop). Waits WARM_S at most."""
     from . import refs  # noqa: PLC0415
 
-    wanted = [a for a in _anchors({"anchor": anchor}) if a.startswith("view:") or _file_ref(a) and "#" in a]
+    wanted = [a for a in _anchors(meta) if a.startswith("view:") or _file_ref(a) and "#" in a]
     if not wanted:
         return
     corpus = config.corpus_dir(c)
@@ -218,7 +217,7 @@ async def warm(c: str, anchor: str | None) -> None:
     try:
         await asyncio.wait_for(asyncio.gather(*(one(r) for r in wanted[:WARM_MAX])), WARM_S)
     except asyncio.TimeoutError:
-        log.info("%s: the anchor %s did not resolve within %.0f s", c, anchor, WARM_S)
+        log.info("%s: the anchor %s did not resolve within %.0f s", c, meta.get("anchor"), WARM_S)
 
 
 def content(c: str, meta: dict) -> str:

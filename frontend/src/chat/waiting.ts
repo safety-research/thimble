@@ -1,15 +1,16 @@
 // Which of thimble's sessions wait for the analyst. A session thimble starts beside main has no terminal, so a call
 // that needs permission puts its request on the session's chat meta (`permissions`, backend agent_session.ask) until
-// the analyst answers or its wait passes; one denied unanswered stays there, marked `expired`, until dismissed. Every
+// the analyst answers or its wait passes; one declined unanswered stays there, marked `expired`, until dismissed. Every
 // request waits on PermissionCard.
 import { useEffect, useState } from 'react'
 import { api } from '../lib/api'
 import { bus } from '../lib/bus'
+import { newest, STALE } from '../lib/newest'
 import type { ChatMeta, PermissionRequest } from '../lib/types'
 
 const REFETCH_DEBOUNCE_MS = 150
 
-/** A chat's permission requests on the card while it runs, those denied unanswered among them; none once it has
+/** A chat's permission requests on the card while it runs, those declined unanswered among them; none once it has
  * ended. Pure. */
 export function cardAsks(m: Pick<ChatMeta, 'status' | 'permissions'> | null | undefined): readonly PermissionRequest[] {
   return m && m.status === 'running' ? m.permissions ?? [] : []
@@ -59,10 +60,10 @@ export function useChatMetas(ws: string, enabled = true): ChatMeta[] {
     }
     let alive = true
     let timer: number | null = null
+    const fresh = newest<ChatMeta[]>()
     const load = () =>
-      api
-        .chats(ws)
-        .then((l) => alive && setMetas(Array.isArray(l) ? l : []))
+      fresh(api.chats(ws))
+        .then((l) => alive && l !== STALE && setMetas(Array.isArray(l) ? l : []))
         .catch(() => undefined)
     void load()
     const off = bus.on('chat', () => {

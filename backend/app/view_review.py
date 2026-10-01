@@ -1,27 +1,30 @@
-"""The view review: once a view the dev agent built passes its checks, its page is shot headless in four states, one
-model reading of the pictures assesses it against seven criteria (prompts/view-review.md), and the problems it finds go
-back to the view's build session to fix, up to ROUNDS times. The view reaches the analyst at once and the review runs
-beside it; each revision that passes the view's checks replaces it, with Undo back to the view as it was built.
+"""The view review: once a view the dev agent built passes its checks, which code runs without pictures (views.check),
+one picture of its page as it opens in its pane (views.PANE_SIZE) goes to one model reading (prompts/view-review.md),
+with what the checks found, how the page's text fits (views.layout_notes) and the controls it shows. The reading names
+the problems it sees and may ask for up to EXTRA_SHOTS pictures of other states (EXTRA_STATES), such as a control
+clicked or another pane width, which are taken and read once more with the first. The problems go back to the view's build session to fix, up to ROUNDS times. The view reaches the
+analyst at once and the review runs beside it; each revision that passes the view's checks replaces it, with Undo back
+to the view as it was built.
 
-dev.run_view calls after_built() when a build or a change to a view passes. Each review:
-1. Shots: views.shoot_states in four states, the overview with no label, with the test label on, filtered to it, and
-   the first place that resolved (only the first and the last for a view over files without lines, which labels cannot
-   mark). Pictures drawn without thimble's fonts end the review `failed`. Without the headless browser there is no
-   review, and a review that finds it missing leaves no trace on the view.
-2. Reading: the `verify` role's model reads the pictures, the proposal, what the shots measured and a sample of the
-   records the pages fetched, and names what fails each criterion. A refused reading runs again on the fallback model,
-   and the review's note says so (FALLBACK_NOTE). A picture in which the page has controls of its own that name the
-   test label adds a problem to the last criterion (label_controls), and one with chips or buttons drawn as rounded
-   pills of the page's own a problem to the formatting criterion (own_pills).
+dev.run_view calls after_built() when a build or a change to a view passes. Each round:
+1. The picture: views.shoot_states with no label, the view as the Views bar opens it. Pictures drawn without thimble's
+   fonts end the review `failed`. Without the headless browser there is no review, and a review that finds it missing
+   leaves no trace on the view.
+2. The reading: the `verify` role's model reads the picture, the proposal, what the checks found (views.gate_notes) and
+   a sample of the records the page fetched, and returns its problems and the extra states it wants to see. Those are
+   shot and read with the first picture once more, whose problems stand. A refused reading runs again on the fallback
+   model, and the review's note says so (FALLBACK_NOTE). While the API is at capacity the reading waits and runs again,
+   for as long as that lasts.
 3. Revision: with problems left and rounds to go, the build session gets prompts/dev-view-review.md and the view's
    checks run after its turns (dev.review_revision). A revision that passes is the view (views.mark_built), and the
    review runs again; one that does not leaves the view at its last version that passed.
 
-The state rides on the proposal as `review {state, round, ts, revised, left, note, undo}` and goes out with the `view`
-event. views/.reviewed/<slug>/ keeps the view as it was built for Undo until the next build or change passes, and
-<slug>.last the last version that passed, restored when a revision fails or the review stops mid-revision. A review run
-again keeps what the review before it revised, so Undo still reaches the view as it was built. A new change to the view
-stops its review; a view replaced or deleted stops it with no trace (forget)."""
+The state rides on the proposal as `review {state, round, ts, revised, left, note, undo, shots}` and goes out with the
+`view` event, `shots` counting the pictures the review took. views/.reviewed/<slug>/ keeps the view as it was built for
+Undo until the next build or change passes, and <slug>.last the last version that passed, restored when a revision
+fails or the review stops mid-revision. A review run again keeps what the review before it revised, so Undo still
+reaches the view as it was built. A new change to the view stops its review; a view replaced or deleted stops it with
+no trace (forget)."""
 from __future__ import annotations
 
 import asyncio
@@ -47,10 +50,13 @@ REVISION_PROMPT = "dev-view-review"
 ROUNDS = 2  # revisions a review may make
 # How long a reading may take, by the effort it runs at; waits for API capacity are left out.
 READ_TIMEOUT_S = {"low": 60.0, "medium": 60.0, "high": 120.0, "xhigh": 180.0, "max": 240.0}
-CAPACITY_WAITS_S = (30.0, 60.0, 120.0)  # after model.structured's own retries, the waits before reading again
+# after model.structured's own retries, the wait before reading again, doubling up to CAPACITY_WAIT_MAX_S for as long as
+# the API stays at capacity
+CAPACITY_WAIT_S = 30.0
+CAPACITY_WAIT_MAX_S = 300.0
 CAPACITY = ("overloaded", "rate_limited")
 CAPACITY_WORDS = {"overloaded": "Anthropic's API is overloaded", "rate_limited": "Anthropic's API rate limit was reached"}
-REVIEW_TOTAL_S = 25 * 60.0
+_capacity_sleep = asyncio.sleep  # tests replace it
 REVIEW_CONCURRENCY = max(1, int(os.environ.get("THIMBLE_VIEW_REVIEW_CONCURRENCY", "2") or "2"))
 READ_IDLE_S = 60.0
 RECORDS_CHARS = 6000  # of the reader's answers the reading sees
@@ -63,12 +69,17 @@ FALLBACK_NOTE = "Downgrading {model} to {fallback}"
 FONTS_NOTE = "The view's pictures were drawn without thimble's fonts"
 SHOTS_NOTE = "The view's pictures could not be taken: {why}"
 REVISION_FAILED_NOTE = "A revision did not pass the view's checks, so the view is as it was before it."
-PAST_TIME_NOTE = "The review ran past {minutes} minutes, so the view is at its last version that passed its checks."
 STOPPED_NOTE = "The review was stopped."
 CHANGED_NOTE = "The view changed while it was reviewed."
-# the four states a view over files with lines is shot in, by name, and the two of a view over binary files only
-LINED_STATES = ("overview", "labels on", "filtered", "detail")
-PLAIN_STATES = ("overview", "detail")
+# the states the reading may ask to see beside the overview, each with its pane: the overview with the test label on and
+# filtered to it, beside the Labels pane; the first place a citation opens and the place a ref names, with the test
+# label on; the overview in the pane of a 1920 px window and beside the Labels pane; and the overview after clicking
+# the controls it names
+EXTRA_STATES = {"labels": views.PANE_NARROW, "filtered": views.PANE_NARROW, "detail": views.PANE_NARROW,
+                "open": views.PANE_NARROW, "wide": views.PANE_WIDE, "narrow": views.PANE_NARROW,
+                "control": views.PANE_SIZE}
+EXTRA_SHOTS = 3
+CONTROLS_CLICKED = 3  # controls one `control` state clicks in turn
 
 _runs: dict[tuple[str, str], "_Run"] = {}
 _sem: asyncio.Semaphore | None = None
@@ -85,6 +96,7 @@ class _Run:
     reason: str = ""  # why the review was cancelled: STOPPED_NOTE or CHANGED_NOTE
     revising: bool = False  # a revision's session may be writing the view's files
     note: str = ""
+    shots: int = 0  # pictures taken
     forget: bool = False  # the view was replaced or deleted: the review writes nothing more and keeps no copies
     restart: bool = False  # a build passed while the review was being stopped: a fresh review starts once it ends
 
@@ -180,7 +192,7 @@ def start(c: str, slug: str, again: bool = False) -> _Run | None:
         before = (views.read_proposal(c, slug) or {}).get("review")
         run.revised = [str(x) for x in (before.get("revised") or [])] if isinstance(before, dict) else []
     _runs[(c, slug)] = run
-    _set(c, slug, state="running", round=0, revised=run.revised, left=[], note="", undo=False)
+    _set(c, slug, state="running", round=0, revised=run.revised, left=[], note="", undo=False, shots=0)
     run.task = loop.create_task(_guarded(run), name=f"view-review:{c}:{slug}")
     return run
 
@@ -231,7 +243,7 @@ async def shutdown() -> None:
 
 
 def _reviewed_dir(c: str, slug: str, last: bool = False) -> Path:
-    return views.views_dir(c) / REVIEWED_SUBDIR / (f"{slug}.last" if last else slug)
+    return views.state_dir(c) / REVIEWED_SUBDIR / (f"{slug}.last" if last else slug)
 
 
 def _copy_view(src: Path, dst: Path) -> None:
@@ -286,11 +298,7 @@ def undo(c: str, slug: str) -> dict[str, Any]:
 async def _guarded(run: _Run) -> None:
     c, slug = run.c, run.slug
     try:
-        await asyncio.wait_for(_review(run), REVIEW_TOTAL_S)
-    except asyncio.TimeoutError:
-        _settle(run)
-        _set(c, slug, run, state="failed", note=PAST_TIME_NOTE.format(minutes=round(REVIEW_TOTAL_S / 60)),
-             revised=run.revised)
+        await _review(run)
     except asyncio.CancelledError:
         _settle(run)
         _set(c, slug, run, state="stopped", note=run.reason or STOPPED_NOTE, revised=run.revised)
@@ -323,46 +331,47 @@ async def _review(run: _Run) -> None:
         if view is None:
             return
         files = await asyncio.to_thread(views.claimed_files, c, view)
-        lined = views.lined(view, files)
-        shots = await shoot(c, slug, view, files, prop, lined, run.round)
+        shots = await shoot(c, slug, view, files, [{"state": "overview"}], run)
         if any(s.get("unavailable") for s in shots):
             _settle(run)
             views.update_proposal(c, slug, review=None)
             views._emit(c, slug, str(prop.get("status") or "built"), review=None)
             return
-        bad = [s for s in shots if not s.get("ok")]
-        if bad:
-            why = "; ".join(dict.fromkeys(e for s in bad for e in s.get("errors") or [])) or "the page did not load"
-            _set(c, slug, run, state="failed", note=SHOTS_NOTE.format(why=why[:400]), revised=run.revised)
+        if why := _unusable(shots):
+            _set(c, slug, run, state="failed", note=why, revised=run.revised, shots=run.shots)
             return
-        if not all(s.get("fonts") for s in shots):
-            _set(c, slug, run, state="failed", note=FONTS_NOTE, revised=run.revised)
-            return
-        got = await read(c, run, prop, view, shots, lined)
+        got = await read(c, run, prop, view, shots, ask=True)
         if isinstance(got, str):
-            _set(c, slug, run, state="failed", note=got, revised=run.revised)
+            _set(c, slug, run, state="failed", note=got, revised=run.revised, shots=run.shots)
             return
-        got[2] += [p for p in own_pills(shots) if p not in got[2]]
-        if lined:
-            got[-1] += [p for p in label_controls(shots) if p not in got[-1]]
-        problems = [p for crit in got for p in crit]
+        problems, more = got
+        if more:
+            extra = await shoot(c, slug, view, files, more, run)
+            if not any(s.get("unavailable") for s in extra) and not _unusable(extra):
+                shots += extra
+                got = await read(c, run, prop, view, shots, ask=False)
+                if isinstance(got, str):
+                    _set(c, slug, run, state="failed", note=got, revised=run.revised, shots=run.shots)
+                    return
+                problems = got[0]
         if not problems:
-            _set(c, slug, run, state="done", left=[], revised=run.revised, note=run.note)
+            _set(c, slug, run, state="done", left=[], revised=run.revised, note=run.note, shots=run.shots)
             return
         if run.round >= ROUNDS:
-            _set(c, slug, run, state="done", left=[_phrase(p) for p in problems], revised=run.revised, note=run.note)
+            _set(c, slug, run, state="done", left=[_phrase(p) for p in problems], revised=run.revised, note=run.note,
+                 shots=run.shots)
             return
         d = views.views_dir(c) / slug
         if not _reviewed_dir(c, slug).is_dir():
             await asyncio.to_thread(_copy_view, d, _reviewed_dir(c, slug))
         await asyncio.to_thread(_copy_view, d, _reviewed_dir(c, slug, last=True))
-        _set(c, slug, run, state="running", round=run.round + 1, revised=run.revised)
+        _set(c, slug, run, state="running", round=run.round + 1, revised=run.revised, shots=run.shots)
         run.revising = True
-        ok, why = await revise(c, slug, prop, got, shots)
+        ok, why = await revise(c, slug, prop, problems, shots)
         if not ok:
             _settle(run)
             _set(c, slug, run, state="done", left=[_phrase(p) for p in problems], revised=run.revised,
-                 note=REVISION_FAILED_NOTE)
+                 note=REVISION_FAILED_NOTE, shots=run.shots)
             return
         run.revising = False
         views.mark_built(c, slug)
@@ -370,26 +379,51 @@ async def _review(run: _Run) -> None:
         run.round += 1
 
 
-async def shoot(c: str, slug: str, view: dict[str, Any], files: list[tuple[str, int, int]], prop: dict[str, Any],
-                lined: bool, rnd: int) -> list[dict[str, Any]]:
-    """The review's pictures, each result with its state's name: four states for a view over files with lines, else
-    the overview and the detail with no label."""
+def _unusable(shots: list[dict[str, Any]]) -> str:
+    """Why pictures cannot be read, as the review's note: a page that did not load, or one drawn without thimble's fonts;
+    '' when they can."""
+    bad = [s for s in shots if not s.get("ok")]
+    if bad:
+        why = "; ".join(dict.fromkeys(e for s in bad for e in s.get("errors") or [])) or "the page did not load"
+        return SHOTS_NOTE.format(why=why[:400])
+    if not all(s.get("fonts") for s in shots):
+        return FONTS_NOTE
+    return ""
+
+
+async def shoot(c: str, slug: str, view: dict[str, Any], files: list[tuple[str, int, int]], wanted: list[dict[str, Any]],
+                run: _Run) -> list[dict[str, Any]]:
+    """Pictures of the states `wanted`, each {state, ref?, controls?, why?}: `overview` with no label, as the Views bar
+    opens the view in its pane, or one of EXTRA_STATES in its pane. Each result carries its state, ref, controls, the
+    reading's why and the pane's size."""
     base = views.cache_dir(c, view) / "review"
     overview = {"ref": None, "path": files[0][0]} if files else {"ref": None}
-    locs = views._kept_locators(c, slug) or []
-    checks = [{"ok": True, "locator": loc} for loc in locs]
-    if not checks and files and any(views._is_line_form(f["form"]) for f in view.get("accepts") or []):
-        checks = [{"ok": True, "locator": f"{files[0][0]}#L1"}]
-    detail = (await views.first_place(c, slug, checks) if checks else None) or overview
-    stem = f"round-{rnd}-{int(time.time())}"
-    if lined:
-        states = [(LINED_STATES[0], overview, views.NO_LABELS), (LINED_STATES[1], overview, views.probe_context()),
-                  (LINED_STATES[2], overview, views.probe_context(True)), (LINED_STATES[3], detail, views.probe_context())]
-    else:
-        states = [(PLAIN_STATES[0], overview, views.NO_LABELS), (PLAIN_STATES[1], detail, views.NO_LABELS)]
-    shots = await views.shoot_states(c, slug, [{"out": base / f"{stem}-{i + 1}.png", "open": place, "labels": ctx}
-                                               for i, (_, place, ctx) in enumerate(states)], answers=ANSWERS_PER_STATE)
-    return [{**s, "state": name} for s, (name, _, _) in zip(shots, states)]
+    stem = f"round-{run.round}-{int(time.time())}"
+    states: list[dict[str, Any]] = []
+    for i, w in enumerate(wanted):
+        state, out = str(w.get("state")), base / f"{stem}-{run.shots + i + 1}.png"
+        st: dict[str, Any] = {"out": out, "open": overview, "labels": views.NO_LABELS,
+                              "size": EXTRA_STATES.get(state, views.PANE_SIZE)}
+        if state == "labels":
+            st["labels"] = views.probe_context()
+        elif state == "filtered":
+            st["labels"] = views.probe_context(True)
+        elif state == "detail":
+            locs = views._kept_locators(c, slug) or ([f"{files[0][0]}#L1"] if files else [])
+            place = await views.first_place(c, slug, [{"ok": True, "locator": loc} for loc in locs]) if locs else None
+            st.update(open=place or overview, labels=views.probe_context())
+        elif state == "open":
+            ref = str(w.get("ref") or "")
+            place = await views.open_place(c, slug, ref, views.locator_of(ref)) if views.locator_of(ref) else overview
+            st.update(open=place, labels=views.probe_context())
+        elif state == "control":
+            st["actions"] = list(w.get("controls") or [])[:CONTROLS_CLICKED]
+        states.append(st)
+    got = await views.shoot_states(c, slug, states, answers=ANSWERS_PER_STATE) if states else []
+    results = [{**r, "state": w.get("state"), "ref": w.get("ref"), "controls": w.get("controls"), "why": w.get("why"),
+                "size": st["size"]} for w, st, r in zip(wanted, states, got)]
+    run.shots += sum(1 for r in results if r.get("png"))
+    return results
 
 
 # --------------------------------------------------------------------------- the reading
@@ -410,39 +444,36 @@ def _fill(template: str, values: dict[str, str]) -> str:
     return prompts._fill(template, values, f"{PROMPT}.md")
 
 
-def measured(shots: list[dict[str, Any]]) -> str:
-    """One line per picture: what it anchored, what the test label marked and what thimble hid for the filter."""
-    lines = []
-    for i, s in enumerate(shots, 1):
-        line = (f"{i} {s.get('state')}: {int(s.get('records') or 0)} records and {int(s.get('units') or 0)} units "
-                f"anchored, {int(s.get('marked') or 0)} marked, fonts {'ok' if s.get('fonts') else 'missing'}")
-        if s.get("state") == "filtered":
-            hidden = int(s.get("hidden") or 0)
-            line += f", {hidden} hidden by thimble" + ("" if hidden else " (the page filters in its reader)")
-        if int(s.get("controls") or 0):
-            line += f", {int(s['controls'])} controls of the page's own naming the test label"
-        if int(s.get("pills") or 0):
-            line += f", {int(s['pills'])} chips or buttons drawn as rounded pills of the page's own"
-        lines.append(line)
+def pictures_text(shots: list[dict[str, Any]]) -> str:
+    """One line per picture: its number, its state and pane, the ref it opened or the controls it clicked, why the
+    reading asked for it, and how its text fits as layout_notes words it; then the controls the first picture shows."""
+    return _pictures_lines([_about(s) for s in shots], shots[0].get("controls") if shots else None)
+
+
+def _pictures_lines(about: list[str], controls: Any) -> str:
+    lines = [f"{i}: {a}" for i, a in enumerate(about, 1)]
+    if controls:
+        lines.append("The controls picture 1 shows, by their text: " + "; ".join(str(x) for x in controls))
     return "\n".join(lines)
 
 
-def label_controls(shots: list[dict[str, Any]]) -> list[str]:
-    """A problem for the first picture in which the page has controls of its own naming the test label (the shot's
-    `controls`); [] when no picture has any."""
-    for i, s in enumerate(shots, 1):
-        if n := int(s.get("controls") or 0):
-            return [_fill(_sections()["label-controls"], {"picture": str(i), "count": str(n)})]
-    return []
-
-
-def own_pills(shots: list[dict[str, Any]]) -> list[str]:
-    """A problem for the first picture in which the page drew chips or buttons as rounded pills of its own rather than
-    with thimble's parts (the shot's `pills`); [] when no picture has any."""
-    for i, s in enumerate(shots, 1):
-        if n := int(s.get("pills") or 0):
-            return [_fill(_sections()["own-pills"], {"picture": str(i), "count": str(n)})]
-    return []
+def _about(s: dict[str, Any]) -> str:
+    """One picture's line of pictures_text, without its number."""
+    words = {"overview": "the view as it opens, with no label on", "labels": "the overview with the test label on",
+             "filtered": "the overview filtered to the test label", "detail": "the place the first citation opens",
+             "open": "the place {ref} opens, with the test label on", "wide": "the view as it opens",
+             "narrow": "the view as it opens, with no label on", "control": "the overview after clicking {controls}"}
+    clicked = [a for a in s.get("actions") or [] if isinstance(a, dict)]
+    controls = ", then ".join(repr(a.get("control")) + ("" if a.get("found") else " (not found)") for a in clicked)
+    what = words.get(str(s.get("state")), words["overview"]).format(ref=s.get("ref") or "the ref",
+                                                                     controls=controls or "nothing")
+    lay = s.get("layout") if isinstance(s.get("layout"), dict) else {}
+    size = s.get("size") or views.PANE_SIZE
+    line = f"{what}, {size[0]} px wide" + (f" (asked for: {s['why']})" if s.get("why") else "")
+    fit = views.layout_parts(lay, wide=s.get("state") == "wide") if s.get("ok") else []
+    if (n := int(lay.get("outside") or 0)) and s.get("ok"):
+        fit.append(views._hint("view-layout-outside", n=f"{n:,}", of=f"{int(lay.get('anchored') or 0):,}"))
+    return line + (f". Measured: {'; '.join(fit)}" if fit else "")
 
 
 def records_text(shots: list[dict[str, Any]]) -> str:
@@ -467,41 +498,93 @@ def _semaphore() -> asyncio.Semaphore:
     return _sem
 
 
-async def _call(c: str, system: str, user: str, tool: Any, images: list[tuple[bytes, str]], effort: str) -> Any:
-    """The reading: one model.structured call on the `verify` role's model at `effort`. Tests replace it."""
-    from . import model  # noqa: PLC0415
+async def _call(c: str, system: str, user: str, tool: Any, images: list[tuple[bytes, str]], effort: str,
+                model: str | None = None) -> Any:
+    """The reading: one model.structured call on `model`, else the `verify` role's model, at `effort`. Tests replace
+    it."""
+    from . import model as model_mod  # noqa: PLC0415
 
     role = _role(c)
-    return await model.structured(
-        user, tool=tool, model=role.get("model") or config.ROLE_MODELS_DEFAULT["verify"]["model"], effort=effort or None,
+    return await model_mod.structured(
+        user, tool=tool, model=model or role.get("model") or config.ROLE_MODELS_DEFAULT["verify"]["model"],
+        effort=effort or None,
         system_append=system, cwd=config.corpus_dir(c),
         speed="fast" if role.get("fast") else "standard", images=images, idle_timeout_s=READ_IDLE_S)
 
 
-async def read(c: str, run: _Run, prop: dict[str, Any], view: dict[str, Any], shots: list[dict[str, Any]],
-               lined: bool) -> list[list[str]] | str:
-    """The problems that fail each criterion, from one reading of the pictures; why not, as the note the check mark
-    shows, when the reading failed. Capacity failures wait CAPACITY_WAITS_S outside the reading slots."""
-    from . import card_check, model, tools  # noqa: PLC0415
+def review_input(c: str, prop: dict[str, Any], view: dict[str, Any], shots: list[dict[str, Any]], ask: bool) -> dict[str, Any]:
+    """The view-review task's input (tasks.py): the view (its name, description, the files it claims, its spec and
+    what its checks found), each picture's path and what it shows (_about), the controls the first picture shows, the
+    first records the pages fetched, and `ask`, whether the reading may ask for more pictures."""
+    return {"view": {"slug": str(view["slug"]), "name": str(prop.get("name") or view["name"]),
+                     "description": str(prop.get("why") or view["description"]),
+                     "claims": [str(x) for x in prop.get("claims") or view["claims"]], "spec": views.spec_lines(prop),
+                     "checks": list(views.gate_notes(c, view["slug"]))},
+            "pictures": [{"path": str(s["png"]), "about": _about(s)} for s in shots if s.get("png")],
+            "controls": [str(x) for x in (shots[0].get("controls") or [])] if shots else [],
+            "records": records_text(shots), "ask": ask}
 
-    secs = _sections()
-    n = len(re.findall(r"^- ", secs["review"] + ("\n" + secs["criteria-labels"] if lined else ""), re.M))
-    system = _fill(secs["review"], {"pictures": secs["pictures-labels" if lined else "pictures-plain"],
-                                    "label_criteria": secs["criteria-labels"] if lined else ""})
-    user = _fill(secs["view"], {"name": str(prop.get("name") or view["name"]), "why": str(prop.get("why") or view["why"]),
-                                "claims": ", ".join(prop.get("claims") or view["claims"]),
-                                "spec": views.spec_lines(prop), "measured": measured(shots),
-                                "records": records_text(shots) or "-"})
+
+def findings_tool(c: str, ask: bool) -> Any:
+    """The reading's output as a model.ToolSpec: its problems and, with `ask`, the extra states it asks to see."""
+    from . import model, prompts, tasks, tools  # noqa: PLC0415
+
+    with prompts.custom(tasks.files(c, PROMPT)):
+        secs = _sections()
     desc, schema = tools.split_section(secs["findings"])
-    schema["properties"]["assessment"]["minItems"] = schema["properties"]["assessment"]["maxItems"] = n
-    tool = model.ToolSpec(name="findings", description=desc, input_schema=schema)
-    images = [(await asyncio.to_thread(card_check.fit_image, Path(s["png"]).read_bytes()), "image/png") for s in shots]
+    if not ask:
+        schema["properties"].pop("more", None)
+    return model.ToolSpec(name="findings", description=desc, input_schema=schema)
+
+
+async def review_task(c: str, inp: dict[str, Any], *, model: str | None = None) -> Any:
+    """thimble's own view-review task (tasks.py): the `verify` role's model, or `model`, reads the pictures and returns
+    the problems it sees and, when the input's `ask` allows, the extra states it wants pictures of (findings_tool).
+    Never raises; read the CallResult's status."""
+    from . import card_check, prompts, tasks  # noqa: PLC0415
+
+    with prompts.custom(tasks.files(c, PROMPT)):
+        secs = _sections()
+    view = inp.get("view") if isinstance(inp.get("view"), dict) else {}
+    pictures = [x for x in inp.get("pictures") or [] if isinstance(x, dict)]
+    ask = bool(inp.get("ask"))
+    user = _fill(secs["view"], {"name": str(view.get("name") or ""), "description": str(view.get("description") or ""),
+                                "claims": ", ".join(str(x) for x in view.get("claims") or []),
+                                "spec": str(view.get("spec") or ""),
+                                "checks": "\n".join(str(x) for x in view.get("checks") or []) or "-",
+                                "pictures": _pictures_lines([str(x.get("about") or "") for x in pictures],
+                                                            inp.get("controls")),
+                                "records": str(inp.get("records") or "") or "-"})
+    user += "\n\n" + secs["ask" if ask else "final"]
+    images = []
+    for x in pictures:
+        try:
+            png = await asyncio.to_thread(Path(str(x.get("path") or "")).read_bytes)
+        except OSError:
+            continue
+        images.append((await asyncio.to_thread(card_check.fit_image, png), "image/png"))
     effort = str(_role(c).get("effort") or config.ROLE_MODELS_DEFAULT["verify"]["effort"])
-    waits = list(CAPACITY_WAITS_S)
+    kw = {"model": model} if model else {}
+    return await _call(c, _fill(secs["review"], {}), user, findings_tool(c, ask), images, effort, **kw)
+
+
+async def read(c: str, run: _Run, prop: dict[str, Any], view: dict[str, Any], shots: list[dict[str, Any]], *,
+               ask: bool) -> tuple[list[str], list[dict[str, Any]]] | str:
+    """(problems, the extra states it asks to see, EXTRA_SHOTS at most and none unless `ask`) from one reading of the
+    pictures, the view-review task (tasks.call: an extension's program, else review_task); why not, as the note the
+    check mark shows, when the reading failed. While the API is at capacity it waits, outside the reading slots, and
+    reads again, for as long as that lasts."""
+    from . import tasks  # noqa: PLC0415
+
+    inp = review_input(c, prop, view, shots, ask)
+    schema = findings_tool(c, ask).input_schema
+    effort = str(_role(c).get("effort") or config.ROLE_MODELS_DEFAULT["verify"]["effort"])
+    wait = CAPACITY_WAIT_S
     while True:
         async with _semaphore():
             try:
-                res = await asyncio.wait_for(_call(c, system, user, tool, images, effort), READ_TIMEOUT_S.get(effort, 120.0))
+                res = await asyncio.wait_for(tasks.call(c, "view-review", inp, schema=schema),
+                                             READ_TIMEOUT_S.get(effort, 120.0))
             except asyncio.TimeoutError:
                 return f"The review did not finish: the reading ran past {READ_TIMEOUT_S.get(effort, 120.0):.0f} s"
         if res.refused_by:
@@ -509,44 +592,50 @@ async def read(c: str, run: _Run, prop: dict[str, Any], view: dict[str, Any], sh
 
             run.note = FALLBACK_NOTE.format(model=model_label(res.refused_by), fallback=model_label(res.model_requested))
         if res.status == "ok" and isinstance(res.output, dict):
-            out = _assessment(res.output.get("assessment"), n)
-            return out if out is not None else "The review did not finish: the reading gave no whole assessment"
+            out = _findings(res.output, ask)
+            return out if out is not None else "The review did not finish: the reading gave no list of problems"
         cls = "rate_limited" if res.status == "rate_limited" else retry.transient_class(None, res.detail)
-        if cls in CAPACITY and waits:
-            await asyncio.sleep(waits.pop(0))
-            continue
         if cls in CAPACITY:
-            return f"The review did not finish: {CAPACITY_WORDS[cls]}"
+            log.info("view review %s/%s: %s, so it reads again in %.0f s", c, view["slug"], CAPACITY_WORDS[cls], wait)
+            await _capacity_sleep(wait)
+            wait = min(wait * 2, CAPACITY_WAIT_MAX_S)
+            continue
         return f"The review did not finish: the reading ended {res.status}" + (f" ({res.detail})" if res.detail else "")
 
 
-def _assessment(raw: Any, n: int) -> list[list[str]] | None:
-    """The reading's assessment as n lists of problem sentences; None for another number of items or a malformed one."""
-    if not isinstance(raw, list) or len(raw) != n:
+def _findings(raw: dict[str, Any], ask: bool) -> tuple[list[str], list[dict[str, Any]]] | None:
+    """The reading's problems as sentences and, with `ask`, the extra states it asks for, each {state, ref?, controls?,
+    why} of EXTRA_STATES (an `open` with a ref, a `control` with the controls to click), EXTRA_SHOTS at most; None for a
+    malformed answer."""
+    problems = raw.get("problems")
+    if not isinstance(problems, list) or not all(isinstance(p, str) for p in problems):
         return None
-    out = []
-    for a in raw:
-        problems = a.get("problems") if isinstance(a, dict) else None
-        if not isinstance(problems, list) or not all(isinstance(p, str) for p in problems):
-            return None
-        out.append([" ".join(p.split()) for p in problems if p.strip()])
-    return out
+    more: list[dict[str, Any]] = []
+    for m in raw.get("more") or [] if ask else []:
+        if not isinstance(m, dict) or m.get("state") not in EXTRA_STATES or (m["state"] == "open" and not m.get("ref")):
+            continue
+        controls = [" ".join(str(x).split()) for x in m.get("controls") or [] if str(x).strip()][:CONTROLS_CLICKED]
+        if m["state"] == "control" and not controls:
+            continue
+        more.append({"state": m["state"], "ref": str(m.get("ref") or "") or None, "controls": controls or None,
+                     "why": " ".join(str(m.get("why") or "").split())})
+    return [" ".join(p.split()) for p in problems if p.strip()], more[:EXTRA_SHOTS]
 
 
 # --------------------------------------------------------------------------- the revision
 
 
-def revision_prompt(c: str, slug: str, problems: list[list[str]], shots: list[dict[str, Any]]) -> str:
-    """The message the build session gets: the pictures by path and the problems, one bullet each, in criterion order."""
+def revision_prompt(c: str, slug: str, problems: list[str], shots: list[dict[str, Any]]) -> str:
+    """The message the build session gets: the pictures by path and the problems, one bullet each."""
     from . import prompts  # noqa: PLC0415
 
-    pics = ", ".join(f"{s.get('state')} {s['png']}" for s in shots if s.get("png"))
-    findings = "\n".join(f"- {p}" for crit in problems for p in crit)
+    pics = ", ".join(f"{i} ({s.get('state')}) {s['png']}" for i, s in enumerate(shots, 1) if s.get("png"))
+    findings = "\n".join(f"- {p}" for p in problems)
     return prompts.render(REVISION_PROMPT, {"pictures": pics, "findings": findings,
                                             "folder": str(views.views_dir(c) / slug)})
 
 
-async def revise(c: str, slug: str, prop: dict[str, Any], problems: list[list[str]],
+async def revise(c: str, slug: str, prop: dict[str, Any], problems: list[str],
                  shots: list[dict[str, Any]]) -> tuple[bool, str]:
     """One revision by the view's build session (dev.review_revision): whether the view passed its checks after it."""
     from . import dev  # noqa: PLC0415

@@ -19,15 +19,16 @@ REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 
 # Where the prompt files live. THIMBLE_PROMPTS_DIR overrides it (tests point it at fixtures) and is read again on every
 # call, so a monkeypatched environment works without reloading this module.
-PROMPTS_DIR = Path(os.environ.get("THIMBLE_PROMPTS_DIR", REPO_ROOT / "prompts")).resolve()
+PROMPTS_DIR = Path(os.environ.get("THIMBLE_PROMPTS_DIR") or REPO_ROOT / "prompts").resolve()
 
 # The files a model call sends as they are rendered: main (the analyst session's system-prompt append), shared (rules
 # main's and the orientation's prompts include), tools, dev, labels (the label classifier's system prompt), context
 # (what the context engine renders for writers, checks and critiques), card-check (card_check.py's calls), view-review
-# (view_review.py's reading), dev-view-review (what a view's build session gets from the review) and file-viewer (the
-# proposal of a viewer for a file type, views.suggest).
+# (view_review.py's reading), dev-view-review (what a view's build session gets from the review), file-viewer (the
+# proposal of a viewer for a file type, views.suggest) and view-fit (whether an extension's view fits a corpus,
+# view_fit.py).
 PROMPT_NAMES = ("main", "shared", "tools", "dev", "labels", "context", "card-check", "view-review", "dev-view-review",
-                "file-viewer")
+                "file-viewer", "view-fit")
 # Agent definitions, in a plugin agent's form, that Claude Code gets with --agents instead of from plugin/agents/, where
 # main would also see them: the writer, the orientation, the critic and the report check. orient.md's body is a template
 # the server renders before Claude Code gets it (orient_session.system_prompt).
@@ -294,10 +295,11 @@ def agent_prompt(name: str, values: dict[str, str]) -> str:
 _HEADING_RE = re.compile(r"^(#{1,4}) (.+?)[ \t]*$")
 
 
-def without(text: str, headings: Iterable[str], lines: Iterable[str] = ()) -> str:
+def without(text: str, headings: Iterable[str], lines: Iterable[str] = (), strict: bool = True) -> str:
     """`text` without each `### ` or `#### <heading>` part (up to the next heading of its level or higher, outside code
     fences) and without the one line holding each of `lines`, for template parts a caller's switches turn off. A missing
-    heading, or a line not found exactly once, raises PromptError, so a renamed part cannot slip through."""
+    heading, or a line not found exactly once, raises PromptError, so a renamed part cannot slip through; with `strict`
+    False, for a text that replaces thimble's, what is not there is left as it is."""
     drop = set(headings)
     held = list(lines)
     out: list[str] = []
@@ -320,6 +322,8 @@ def without(text: str, headings: Iterable[str], lines: Iterable[str] = ()) -> st
             hits[s] += 1
         if not level and not found:
             out.append(line)
+    if not strict:
+        return "".join(out)
     if drop - seen:
         raise PromptError(f"no part {sorted(drop - seen)} to leave out: each is a `### ` or `#### ` heading of the text")
     if bad := {s: k for s, k in hits.items() if k != 1}:

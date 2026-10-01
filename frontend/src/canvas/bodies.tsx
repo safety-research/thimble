@@ -5,8 +5,8 @@ import { useContext, useEffect, useLayoutEffect, useRef, useState, type CSSPrope
 import { ChatMarkdown } from '../chat/markdown'
 import { Chip } from '../components/Chip'
 import { CodeText } from '../components/Code'
-import { chartLabels, Output, outIndex, primaryArtifact } from '../components/Outputs'
-import { kindIcon } from '../components/RefChip'
+import { CARD_MIME, chartLabels, Output, outIndex, primaryArtifact } from '../components/Outputs'
+import { refIcon, refTone } from '../components/RefChip'
 import { Icon } from '../components/Icon'
 import { Spinner } from '../components/Spinner'
 import { useTooltip } from '../components/Tooltip'
@@ -15,7 +15,7 @@ import { api, labelApi } from '../lib/api'
 import { bus } from '../lib/bus'
 import { mediaOf, mediaUrl, type MediaRef } from '../lib/media'
 import { loadSettings, modelLabel } from '../lib/models'
-import { addressLabel, hiddenPath, parseRef } from '../lib/refs'
+import { addressLabel, hiddenPath } from '../lib/refs'
 import { teleport } from '../lib/teleport'
 import { track } from '../lib/telemetry'
 import type { Cell, ConceptDetail, LabelRowText, ResolvedRef } from '../lib/types'
@@ -27,6 +27,7 @@ import { resolvedOf } from './excerpts'
 import { FACT_KINDS, recordFacts } from './facts'
 import { filterIs, kindOf, scopeForUnit } from './layout'
 import { QuoteParts, RecordFacts } from './Quote'
+import { TypeCard } from './TypeCard'
 import { jsonRecordParts, plainMarkdown, quoteLine, quoteParts } from './quotes'
 
 const fail = (e: unknown) => bus.emit('toast', { text: (e as Error)?.message || String(e), kind: 'error' })
@@ -59,6 +60,12 @@ export function CardBody({ cell, width, label, big = false }: { cell: Cell; widt
     default: {
       if ((kind === 'timeline' || kind === 'diagram') && !cell.code && payload.dataset != null) return <DatasetView kind={kind} dataset={payload.dataset} fitWidth={width} />
       const art = primaryArtifact(cell.outputs)
+      if (art && CARD_MIME in art.bundle)
+        return (
+          <div className="bcell-output bcell-output-chart" data-out={outIndex(cell.outputs, art.bundle)}>
+            <TypeCard cell={cell} bundle={art.bundle} width={width} big={big} />
+          </div>
+        )
       const output = art ? (
         <div className={`bcell-output bcell-output-${art.kind}`} data-out={outIndex(cell.outputs, art.bundle)}>
           <Output bundle={art.bundle} maxLines={big ? 80 : 24} maxRows={big ? 40 : 12} fitWidth={width} card labels={chartLabels(cell.labels, concepts)} />
@@ -207,12 +214,12 @@ function ExampleBody({ refs, ws, big }: { refs: string[]; ws: string; big: boole
   )
 }
 
-/** Where an example's record is: the accent chip with the file's glyph and the record's full address, which opens it in
- * Files at the quoted passage. Unlike other links inside a card, an example keeps its full address. */
+/** Where an example's record is: the evidence chip with the file's glyph and the record's full address, which opens it
+ * in Files at the quoted passage. Unlike other links inside a card, an example keeps its full address. */
 function Address({ r, onOpen }: { r: string; onOpen: (r: string) => void }) {
   const { props, tip } = useTooltip(hiddenPath(r))
   return (
-    <Chip kind="ref" icon={kindIcon(parseRef(r)?.kind)} className="bcell-address" data-anchor={r} aria-label={`Open ${addressLabel(r)} in Files`} onMouseDown={(e) => e.stopPropagation()} onClick={() => onOpen(r)} {...props}>
+    <Chip kind="ref" tone={refTone(r)} icon={refIcon(r)} className="bcell-address" data-anchor={r} aria-label={`Open ${addressLabel(r)} in Files`} onMouseDown={(e) => e.stopPropagation()} onClick={() => onOpen(r)} {...props}>
       {addressLabel(r)}
       {tip}
     </Chip>

@@ -17,7 +17,9 @@ Tools. orient.md names no tools, so the session has every tool the analyst's Cla
 the thimble tools that are not the orientation's (ORIENT_TOOLS) and those of each part switched off (PART_TOOLS).
 
 The fence. The session writes only into `workspaces/<c>/orient/work/`; where Claude Code's Bash sandbox runs, Bash runs
-there with no network and no write into the corpus. When a run ends (unless it failed) its `tmp_*` files are deleted.
+there with no network and no write into the corpus. When a run finishes, its subagents' `tmp_*` folders and the large
+files no card or document uses are deleted; a run that goes on (stopped, or with a message waiting) loses only the
+`tmp_*` folders, and a failed one keeps its folder as it left it (work_files).
 
 Permissions. The session runs in the orientation's row of the permission modes (modes.py), which Start's switcher shows
 and edits. Manual and Bypass pass `--permission-mode default` (requests wait on the card, or are granted at once); Auto
@@ -41,6 +43,9 @@ Follow-ups. Messages from main's `message_orientation` tool or the thread's comp
 orientation's session is resumed with the message in `## orient-follow-up`; a message sent while a run goes waits in the
 record's `queue`. A follow-up's cards land in place as one undo batch; when it changes a card the report cites, the
 report pass runs again as a revision. When Claude Code has deleted the session's transcript, message() raises Gone.
+An orientation an extension's program runs takes a follow-up by running again with it (_program_follow_up); Settings'
+Run now for an extension whose program runs the orientation runs it again with the latest orientation's request and
+the cards as they stand (run_program_now).
 """
 from __future__ import annotations
 
@@ -48,7 +53,6 @@ import asyncio
 import json
 import logging
 import re
-import shutil
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -56,7 +60,8 @@ from typing import Any
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-from . import agent_session, agents, bg_session, cc_settings, config, ledger, orientation, prompts, tools, userconf
+from . import (agent_session, agents, bg_session, cc_settings, config, ledger, orientation, prompts, tools, userconf,
+               work_files)
 
 log = logging.getLogger("thimble.orient_session")
 router = APIRouter()
@@ -80,13 +85,16 @@ ORIENT_TOOLS = ("read_ref", "list_cards", "add_card", "edit_card", "delete_card"
 PART_TOOLS = {"final": ("add_card", "edit_card", "delete_card", "apply_label"), "views": ("propose_view",),
               "critique": ("critique",)}
 WORK_DIR = "work"  # orient/work: the one folder outside the corpus the session writes into
-TEMP_GLOB = "tmp_*"  # what in the work folder is deleted when a run ends (_clear_temp)
 INSTRUCTIONS = "orient-instructions"  # prompts/orient-instructions.md, thimble's default instructions
 SETTING = "orient_instructions"  # settings.json: the analyst's own instructions, which replace the defaults (instructions_of)
+# The blocks of the prompt thimble gives a default for, which an extension may replace (extensions.orient_blocks), by
+# name: each one's default prompt file.
+BLOCKS = {"instructions": INSTRUCTIONS}
 # What stands in each slot the analyst's text fills until the parts are left out (system_prompt).
 _MARKS = {"request": "\x00request\x00", "instructions": "\x00instructions\x00"}
 BROWSER = "browser"  # `by` of a message typed in the orientation's thread
 MAIN = "main"  # `by` of a message main's message_orientation sent
+EXTENSION = "extension"  # `by` of an extension's orientation instructions, sent when it starts running here
 
 
 class NoOrientation(RuntimeError):
@@ -102,11 +110,15 @@ def current(c: str) -> agent_session.Run | None:
 
 
 def running(c: str) -> bool:
-    return agent_session.running(c, KEY)
+    from . import harness  # noqa: PLC0415
+
+    return agent_session.running(c, KEY) or harness.running(c, KEY)
 
 
 async def stop(c: str) -> bool:
-    return await agent_session.stop(c, KEY)
+    from . import harness  # noqa: PLC0415
+
+    return await agent_session.stop(c, KEY) or await harness.stop(c, KEY)
 
 
 def work_dir(c: str) -> Path:
@@ -132,23 +144,34 @@ def parts_of(choices: dict[str, Any], passes: "list[str] | tuple[str, ...]") -> 
 
 def instructions_of(c: str, own: "str | None" = None) -> str:
     """The instructions part of workspace `c`'s prompt: `own` when given, else the workspace's SETTING; either one, when
-    it holds text, replaces thimble's defaults (INSTRUCTIONS) rather than adding to them."""
+    it holds text, replaces thimble's defaults (INSTRUCTIONS) rather than adding to them. Without it, an active
+    extension's replacement of the block stands in for the defaults. Each active extension's orient.md follows, under its
+    name."""
+    from . import extensions  # noqa: PLC0415
+
     if own is None:
         stored = ledger.stored_settings(c).get(SETTING)
         own = stored if isinstance(stored, str) else ""
-    return own.strip() or prompts.render(INSTRUCTIONS, {}).strip()
+    blocks = extensions.orient_blocks(c)
+    text = own.strip() or blocks["replaced"].get("instructions") or prompts.render(INSTRUCTIONS, {}).strip()
+    for title, added in blocks["added"]:
+        text += f"\n\n#### {title}\n\n{added}"
+    return text
 
 
 def system_prompt(c: str, brief: str, parts: "list[str] | tuple[str, ...]", instructions: "str | None" = None) -> str:
     """orient.md's body rendered for workspace `c`: the prefix with shared.md (with the workspace's view citation forms)
     and the request, the instructions, and the suffix with each part not in `parts` left out (and OUTPUT_LINES when no
     output is on, VIEWS_LINES when the views are off)."""
-    from . import views  # noqa: PLC0415 — views imports refs, which the rest of this module does not need
+    from . import cardtypes, views  # noqa: PLC0415 — views imports refs, which the rest of this module does not need
 
-    values = {"workdir": str(config.corpus_dir(c)), "workfolder": str(work_dir(c)), "forms": views.forms_text(c), **_MARKS}
+    values = {"workdir": str(config.corpus_dir(c)), "workfolder": str(work_dir(c)), "forms": views.forms_text(c),
+              "card_types": cardtypes.prompt_text(c), **_MARKS}
     lines = [s for p, s in LINES.items() if p not in parts] + ([] if any(p in parts for p in PARTS) else list(OUTPUT_LINES))
     lines += [] if "views" in parts else list(VIEWS_LINES)
-    text = prompts.without(prompts.agent_prompt(PROMPT, values), [h for p, h in PARTS.items() if p not in parts], lines)
+    replaced = bool(userconf.prompt_files(c, "orientation"))  # a prompt that replaces thimble's may lack its parts
+    text = prompts.without(prompts.agent_prompt(PROMPT, values), [h for p, h in PARTS.items() if p not in parts], lines,
+                           strict=not replaced)
     # The request and the instructions go in after the parts are left out, so a heading in either cannot cut the
     # analyst's own text or a part of the suffix.
     fills = {"request": brief.strip() or tools.hint("orient-no-request"), "instructions": instructions_of(c, instructions)}
@@ -184,21 +207,45 @@ def _launch(c: str, brief: str, passes: "list[str]", choices: dict[str, Any]) ->
     parts = parts_of(choices, passes)
     with prompts.custom(userconf.prompt_files(c, "orientation")):
         name, agent = agent_definition(c, brief, parts)
+    from . import extensions  # noqa: PLC0415
+
+    defined = {**extensions.agent_definitions(c), name: agent}
     env = {config.SUBAGENT_MODEL_ENV: subagents["model"]} if subagents["model"] else None
     return dict(role=orientation.ROLE, title=orientation.TITLE,
-                agent_args=["--agents", json.dumps({name: agent}, ensure_ascii=False), "--agent", name], effort=effort,
+                agent_args=["--agents", json.dumps(defined, ensure_ascii=False), "--agent", name], effort=effort,
                 settings=agent_session.settings_json(effort, env, ultracode=ultracode, fastMode=bool(own["fast"])),
                 agent_type=name, append_shared=False, model=own["model"], work=work_dir(c), calls=True,
-                agent="orient", patient=True, disallowed=disallowed(parts), background=True)
+                agent="orient", disallowed=disallowed(parts), background=True)
+
+
+_starting: set[str] = set()  # the workspaces whose orientation is starting now (start)
+
+
+def starting(c: str) -> bool:
+    return c in _starting
 
 
 async def start(c: str, brief: str, passes: "list[str] | tuple[str, ...]" = ("final", "views"),
                 call: str | None = None, chosen: "dict[str, Any] | None" = None) -> agent_session.Run:
     """Start the orientation session for workspace `c` with the parts `passes` names (PASSES) and follow it, `call`
     being main's start_orientation call (agent_session.start); `chosen` holds the critique choice the call made, over
-    Start's. RuntimeError when one runs or claude cannot be started."""
-    if running(c):
+    Start's. RuntimeError when one runs or is starting, or claude cannot be started. The workspace's extensions are
+    found first when it never found them, and a refresh or a check on whether an extension's view fits that is still
+    being made is waited for (extensions.settle). The prompt is rendered off the event loop."""
+    if running(c) or starting(c):
         raise RuntimeError("an orientation is running")
+    _starting.add(c)
+    try:
+        return await _start(c, brief, passes, call, chosen)
+    finally:
+        _starting.discard(c)
+
+
+async def _start(c: str, brief: str, passes: "list[str] | tuple[str, ...]", call: str | None,
+                 chosen: "dict[str, Any] | None") -> agent_session.Run:
+    from . import extensions  # noqa: PLC0415
+
+    await extensions.settle(c)
     choices = orientation.choices(c)
     own = config.models_for(c)["orient"]
     if (orientation.read_run(c) or {}).get("status") != "requested":
@@ -207,20 +254,67 @@ async def start(c: str, brief: str, passes: "list[str] | tuple[str, ...]" = ("fi
         choices = {**choices, "ultracode": on, "effort": choices.get("effort") if on else own["effort"]}
     choices = {**choices, **(chosen or {})}
     passes = [p for p in PASSES if p in passes]
+    from . import roles  # noqa: PLC0415
+
+    agent = roles.agent_for(c, "orientation")
+    if agent.code and agent.replacing is not None:
+        program = await start_program(c, agent.replacing, brief, passes, choices, call=call)
+        await extensions.mark_oriented(c, [agent.replacing.extension])
+        return program
     failed = _failed_first_run(c, brief, passes)
     if failed is not None:
         return await _restart(c, *failed, call=call)
-    args = _launch(c, brief, passes, choices)
+    args = await asyncio.to_thread(_launch, c, brief, passes, choices)
+    if running(c):  # a second start that began while this one rendered
+        raise RuntimeError("an orientation is running")
 
     def started(run: agent_session.Run) -> None:
         orientation.started(c, run.chat, session=run.sid, pid=run.pid, passes=passes)
         orientation.record(c, effort=choices.get("effort"), ultracode=bool(choices.get("ultracode")),
                            critique=bool(choices.get("critique", True)))
 
-    return await agent_session.start(
+    run = await agent_session.start(
         c, KEY, prompt=tools.hint("orient-start"), on_start=started, on_end=_ended, on_pid=_moved,
         ultracode=bool(choices.get("ultracode")), critique=bool(choices.get("critique", True)), brief=brief.strip(),
         call=call, **args)
+    await extensions.mark_oriented(c)
+    return run
+
+
+async def start_program(c: str, part: Any, brief: str, passes: "list[str]", choices: dict[str, Any],
+                        call: str | None = None, follow_up: bool = False) -> Any:
+    """Start the orientation as an extension's program (harness.py) with the request `brief`, the outputs `passes` and
+    Start's `choices`; `follow_up` for a message to a finished one, which runs the program again with it. Its cards,
+    labels and proposals come through its tools; what it returns is the line main hears."""
+    from . import harness  # noqa: PLC0415
+
+    listed = await tools.call(c, "list_cards", {"group": "all"}, session=KEY)
+    parts = parts_of(choices, passes)
+    # critique reads the transcript of thimble's own orientation session, which a program has none of
+    own = tuple(n for n in ORIENT_TOOLS if n != "critique" and n not in {
+        t for p, names in PART_TOOLS.items() if p not in parts for t in names})
+    job = harness.Job(c, "orientation", KEY, orientation.TITLE,
+                      {"request": brief.strip(), "outputs": list(passes), "follow_up": follow_up,
+                       "choices": {"effort": effort_of(choices), "critique": bool(choices.get("critique", True))},
+                       "cards": listed.text, "corpus": str(config.corpus_dir(c)), "tools": list(own)},
+                      own, work_dir(c), chat_role=orientation.ROLE,
+                      fields={"brief": brief.strip(), **({"tool_use_id": call} if call else {})})
+
+    def started(run: Any) -> None:
+        orientation.started(c, run.chat, passes=passes)
+        orientation.record(c, effort=choices.get("effort"), ultracode=bool(choices.get("ultracode")),
+                           critique=bool(choices.get("critique", True)), program=part.extension)
+
+    def ended(run: Any, status: str, summary: str) -> None:
+        try:
+            orientation.finished(c, run.chat, status, summary, report=False)
+        except Exception:  # noqa: BLE001
+            log.exception("%s: the orientation's record was not closed", c)
+        _tell_main(c, status, 0, {}, error=summary if status == "failed" else "")
+        if status == "done":
+            _report(c)
+
+    return harness.start(job, part, on_start=started, on_end=ended)
 
 
 def _failed_first_run(c: str, brief: str, passes: "list[str]") -> tuple[dict[str, Any], str, str] | None:
@@ -249,7 +343,7 @@ async def _restart(c: str, rec: dict[str, Any], chat: str, sid: str, call: str |
     choices = {"effort": rec.get("effort") or meta.get("effort") or orientation.DEFAULT_EFFORT,
                "ultracode": rec.get("ultracode"), "critique": rec.get("critique", True)}
     passes = [p for p in PASSES if p in (rec.get("passes") or [])]
-    args = _launch(c, str(meta.get("brief") or ""), passes, choices)
+    args = await asyncio.to_thread(_launch, c, str(meta.get("brief") or ""), passes, choices)
     log.info("%s: the orientation's first run failed (%s); resuming its session %s", c,
              agent_session.failure_line(rec.get("error"))[:200], sid)
 
@@ -284,7 +378,10 @@ def _lead(messages: "list[dict[str, Any]]") -> str:
     """The follow-up's stdin prompt, `## orient-follow-up` with each message after the line that says who sent it."""
     parts = []
     for m in messages:
-        who = tools.hint("orient-from-main" if m.get("by") == MAIN else "orient-from-analyst")
+        if m.get("by") == EXTENSION:
+            who = tools.hint("orient-from-extension", extension=m.get("extension") or "")
+        else:
+            who = tools.hint("orient-from-main" if m.get("by") == MAIN else "orient-from-analyst")
         parts.append(f"{who}\n\n{str(m.get('text') or '').strip()}")
     return tools.hint("orient-follow-up", messages="\n\n".join(parts))
 
@@ -300,15 +397,21 @@ def _chat_of(c: str) -> tuple[dict[str, Any], str, str]:
     return rec, chat, sid
 
 
-async def message(c: str, text: str, by: str = MAIN, call: str | None = None) -> dict[str, Any]:
-    """The one server function a follow-up goes through: `text` from `by` (MAIN or BROWSER) resumes the finished
-    orientation, {status: resumed, chat, run}, or waits for the run going, {status: queued, chat, queued}. `call` is
-    main's message_orientation call. ValueError for an empty message, NoOrientation, Gone."""
+async def message(c: str, text: str, by: str = MAIN, call: str | None = None, extension: str = "") -> dict[str, Any]:
+    """The one server function a follow-up goes through: `text` from `by` (MAIN, BROWSER or EXTENSION, whose title is
+    `extension`) resumes the finished orientation, {status: resumed, chat, run}, or waits for the run going, {status:
+    queued, chat, queued}. `call` is main's message_orientation call. ValueError for an empty message, NoOrientation,
+    Gone."""
     text = str(text or "").strip()
     if not text:
         raise ValueError("the message is empty")
+    program = await _program_follow_up(c, text, call)
+    if program is not None:
+        return program
     rec, chat, sid = _chat_of(c)
-    entry = {"text": text, "by": by if by in (MAIN, BROWSER) else MAIN, "ts": _now()}
+    entry = {"text": text, "by": by if by in (MAIN, BROWSER, EXTENSION) else MAIN, "ts": _now()}
+    if entry["by"] == EXTENSION:
+        entry["extension"] = extension
     if running(c) or orientation.running(c):
         queue = [*(rec.get("queue") or []), entry]
         orientation.record(c, queue=queue)
@@ -316,6 +419,47 @@ async def message(c: str, text: str, by: str = MAIN, call: str | None = None) ->
         return {"status": "queued", "chat": chat, "queued": len(queue)}
     run = await resume(c, [entry], call=call)
     return {"status": "resumed", "chat": chat, "run": run.k}
+
+
+async def _program_follow_up(c: str, text: str, call: str | None) -> dict[str, Any] | None:
+    """A message to an orientation an extension's program ran: the program runs again with it, {status: resumed,
+    chat, run: 0}; None when the latest orientation was thimble's own. RuntimeError while it runs."""
+    from . import harness, roles  # noqa: PLC0415
+
+    rec = orientation.read_run(c) or {}
+    agent = roles.agent_for(c, "orientation")
+    if not rec.get("program") or not agent.code or agent.replacing is None:
+        return None
+    if harness.running(c, KEY) or orientation.running(c):
+        raise RuntimeError("the orientation is running")
+    passes = [p for p in PASSES if p in (rec.get("passes") or [])]
+    choices = {"effort": rec.get("effort"), "critique": rec.get("critique", True)}
+    run = await start_program(c, agent.replacing, text, passes, choices, call=call, follow_up=True)
+    return {"status": "resumed", "chat": run.chat, "run": 0}
+
+
+async def run_program_now(c: str, name: str) -> dict[str, Any]:
+    """Settings' Run now for extension `name`, whose program runs the orientation here: the program runs again as a
+    follow-up of the latest orientation, thimble's own or a program's, with that orientation's request, outputs and
+    choices and the cards as they stand, so it adds to them rather than starting over. {status: resumed, chat, run: 0};
+    NoOrientation when no orientation ran here, RuntimeError while one runs or when another agent runs the
+    orientation."""
+    from . import roles  # noqa: PLC0415
+
+    agent = roles.agent_for(c, "orientation")
+    if not agent.code or agent.replacing is None or agent.extension != name:
+        raise RuntimeError(f"{name}'s program does not run the orientation here")
+    if running(c) or orientation.running(c):
+        raise RuntimeError("the orientation is running. Choose Run now again once it ends")
+    rec = orientation.read_run(c) or {}
+    chat = str((rec.get("chats") or {}).get(orientation.ROLE) or "")
+    meta = agents.meta_or_none(c, chat) if chat else None
+    if meta is None:
+        raise NoOrientation("no orientation has run in this workspace")
+    passes = [p for p in PASSES if p in (rec.get("passes") or [])]
+    choices = {"effort": rec.get("effort"), "critique": rec.get("critique", True)}
+    run = await start_program(c, agent.replacing, str(meta.get("brief") or ""), passes, choices, follow_up=True)
+    return {"status": "resumed", "chat": run.chat, "run": 0}
 
 
 def _show_queue(c: str, chat: str, queue: "list[dict[str, Any]]") -> None:
@@ -343,14 +487,16 @@ async def resume(c: str, messages: "list[dict[str, Any]]", call: str | None = No
     if choices["effort"] is None:  # a record without stored choices: the ones its chat names
         choices["effort"] = meta.get("effort") or orientation.DEFAULT_EFFORT
     passes = [p for p in PASSES if p in (rec.get("passes") or [])]
-    args = _launch(c, str(meta.get("brief") or ""), passes, choices)
+    args = await asyncio.to_thread(_launch, c, str(meta.get("brief") or ""), passes, choices)
     lead = _lead(messages) if messages else ""
 
     def started(run: agent_session.Run) -> None:
         orientation.run_started(c, chat, k, messages, pid=run.pid)
 
     return await agent_session.start(c, KEY, prompt=lead, on_start=started, on_end=_ended, on_pid=_moved, resume=sid,
-                                     chat=chat, run_k=k, leads=[{"text": m.get("text"), "by": m.get("by")} for m in messages],
+                                     chat=chat, run_k=k, leads=[{"text": m.get("text"), "by": m.get("by"),
+                                                                    **({"extension": m["extension"]} if m.get("extension") else {})}
+                                                                   for m in messages],
                                      call=call, announce=announce, **args)
 
 
@@ -427,7 +573,8 @@ def _ended(run: agent_session.Run, status: str, summary: str) -> None:
     messages start the next run, or the report pass is asked for. A run the analyst stopped stops the builds of the
     views the orientation proposed (dev.stop_orientation_views) before main hears what it made."""
     c = run.c
-    if _analyst_stopped(run, status):
+    stopped = _analyst_stopped(run, status)
+    if stopped:
         from . import dev  # noqa: PLC0415 — dev imports the modules that import this one
 
         try:
@@ -449,10 +596,10 @@ def _ended(run: agent_session.Run, status: str, summary: str) -> None:
         log.exception("%s: the orientation's record was not closed", c)
         made = {}
     _tell_main(c, status, run.k, made, error=summary if status == "failed" else "")
-    if status != "failed":  # a failed run is resumed with its work folder as it left it
-        _clear_temp(c)
     rec = orientation.read_run(c) or {}
     queue = [m for m in rec.get("queue") or [] if isinstance(m, dict)]
+    # a run stopped by the analyst, or that a waiting message resumes, goes on with its extracts
+    work_files.after_run(c, work_dir(c), "stopped" if status != "failed" and (stopped or queue) else status)
     if queue:
         orientation.record(c, queue=[])
         _show_queue(c, run.chat, [])
@@ -471,19 +618,6 @@ def _analyst_stopped(run: agent_session.Run, status: str) -> bool:
     if run.interrupted:
         return False
     return status == "stopped" or (run.bg and bg_session.stopped_in_claude(run.c, run.key))
-
-
-def _clear_temp(c: str) -> None:
-    """Delete the `tmp_*` files and folders in the session's work folder once a run ends, so large intermediates are not
-    kept in an archive. The rest stays, since a card's code may read a cleaned copy the session made there."""
-    for path in work_dir(c).glob(TEMP_GLOB):
-        try:
-            if path.is_dir() and not path.is_symlink():
-                shutil.rmtree(path)
-            else:
-                path.unlink()
-        except OSError as e:
-            log.info("%s: the orientation's temporary %s was not deleted (%s)", c, path.name, e)
 
 
 async def _resume_queued(c: str, queue: "list[dict[str, Any]]") -> None:
@@ -645,7 +779,7 @@ async def _resume_left(c: str, meta: dict[str, Any], prompt: str) -> agent_sessi
     choices = {"effort": rec.get("effort") or meta.get("effort") or orientation.DEFAULT_EFFORT,
                "ultracode": rec.get("ultracode"), "critique": rec.get("critique", True)}
     passes = [p for p in PASSES if p in (rec.get("passes") or [])]
-    args = _launch(c, str(meta.get("brief") or ""), passes, choices)
+    args = await asyncio.to_thread(_launch, c, str(meta.get("brief") or ""), passes, choices)
     return await agent_session.start(c, KEY, prompt=prompt, on_start=_moved, on_end=_ended, on_pid=_moved,
                                      resume=str(meta.get("session") or ""), chat=chat, run_k=k, restarted=True, **args)
 
@@ -692,7 +826,7 @@ async def tool_start_orientation(ctx: Any, args: dict[str, Any]) -> Any:
     chosen: dict[str, Any] = {}
     if args.get("critique") is not None:
         chosen["critique"] = orientation.flag(args["critique"], True)
-    if running(ctx.c) or orientation.active(ctx.c):
+    if running(ctx.c) or starting(ctx.c) or orientation.active(ctx.c):
         return tools.err(tools.hint("start_orientation-running"))
     passes = [p for p, on in (("final", final), ("views", views), ("report", report)) if on]
     try:

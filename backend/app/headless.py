@@ -8,7 +8,10 @@ run: the log warns once, and whatever needs that browser is skipped. The words h
 unavailable and never how to install it; `thimble doctor` names the commands."""
 from __future__ import annotations
 
+import asyncio
+import json
 import logging
+import os
 import re
 
 log = logging.getLogger("thimble.headless")
@@ -24,6 +27,8 @@ SKIPPED = {HARNESS: "cards are not checked",
 _LIBRARIES_RE = re.compile(r"missing dependencies|install-deps", re.I)
 _NOT_INSTALLED_RE = re.compile(r"Executable doesn't exist|download new browsers", re.I)
 _missing: dict[str, str] = {}
+PROBE_TIMEOUT_S = 30.0
+_plays: dict[str, bool | None] = {}
 
 
 class Missing(RuntimeError):
@@ -60,3 +65,32 @@ def launch(kind: str) -> str | None:
         mark_missing(kind, what)
         return None
     return what
+
+
+async def plays_recordings(path: str) -> bool | None:
+    """Whether the pages' browser at `path` ('' for Playwright's own Chromium) plays H.264 video and AAC audio, which
+    most screen recordings hold: scripts/media_probe.mjs, once per path in a server run. None when the probe could not
+    tell."""
+    if path in _plays:
+        return _plays[path]
+    from . import config, userconf  # noqa: PLC0415
+
+    got: bool | None = None
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "node", str(config.REPO_ROOT / "scripts" / "media_probe.mjs"), cwd=str(config.REPO_ROOT),
+            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL,
+            env={**os.environ, **({userconf.BROWSER_ENV: path} if path else {})})
+        try:
+            out, _ = await asyncio.wait_for(proc.communicate(), PROBE_TIMEOUT_S)
+        except asyncio.TimeoutError:
+            proc.kill()
+            await proc.wait()
+            out = b""
+        ans = json.loads(out.decode("utf-8", "replace").strip().splitlines()[-1]) if out.strip() else None
+        if isinstance(ans, dict):
+            got = bool(ans.get("h264")) and bool(ans.get("aac"))
+    except (OSError, ValueError) as e:
+        log.info("the media probe of %s failed: %s", path or "Playwright's Chromium", e)
+    _plays[path] = got
+    return got

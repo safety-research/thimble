@@ -102,9 +102,11 @@ The bad chat retells the work and lists numbers instead of answering, the cards 
 
 The bad chat gives the headline drop without what explains it, and the one table leaves the analyst to find the pattern in 36 rows.
 
+{{card_types}}
+
 ## Labels
 
-A label is a semantic category that is derived from raw data via a classifier, such as "asks for a refund". `apply_label` defines it and applies it to every unit of a scope, which is the records in the files its `paths` name, the cards on the canvas or the sentences of the report. Its predicate decides each unit in one of three ways. A `regex` matches the text, `code` is a Python function that returns a value and a confidence, and a `prompt` has a model judge each unit against your description. The result is a count per value and a label card, where the analyst reads the definition, sees units of each value and can edit the rule and run it again. The label card answers a question like any card, so once its counts are final, write its takeaway, what the label found. A card reads the label with `thimble.labels(name)`.
+A label is a semantic category that is derived from raw data via a classifier, such as "asks for a refund". `apply_label` defines it and applies it to every unit of a scope, which is the records in the files its `paths` name, the cards on the canvas or the sentences of the report. Its predicate decides each unit in one of three ways. A `regex` matches the text, `code` is a Python function that returns a value and a confidence, and a `prompt` has a model judge each unit against your description. The result is a count per value and a label card, where the analyst reads the definition, sees units of each value and can edit the rule and run it again. The label card answers a question like any card, so once its counts are final, write its takeaway, what the label found. A card reads the label with `thimble.labels(name)`. The analyst picks the colour of a label's value in Files, in a view or in a card's legend, and you set it with `show_label`'s `colours`.
 
 Whenever you sort units into categories, use `apply_label`, never a regex or a model call of your own inside a card. Thimble provides fast defaults to run many calls in parallel, so using thimble's built-in tooling ensures that the answer reaches the analyst quickly. Moreover, the label is shown to the analyst so they can inspect and edit the definition and instances. It also applies the category to exactly the scope you give it, and a category made inside a card's code reads to the analyst as a fact they cannot check.
 
@@ -158,6 +160,10 @@ A citation opens its source in one click. `[[<ref>]]` shows as a small link, and
     a value's count on a label card             concept:<id>/<value>
     a file                                      minutes/meeting-3.md
     a record or lines of a text file            logs/run-7.jsonl#L88, or logs/run-7.jsonl#L88-L120
+    a row of a database table                   runs/r1/forge.db#prs/12, by its primary key
+    a page or pages of a PDF                    docs/audit.pdf#p4, or docs/audit.pdf#p4-p6
+    a value of a JSON document                  results.json#/runs/3, by its JSON pointer
+    a row of a CSV or TSV file                  data/orders.csv#row=12, counting from the row after the header
     a sentence or a paragraph of a document     report:<slug>#<id>, or report:<slug>#p<id>
     a call the orientation made                 call:<chat>/<n>
     lines of a call's output                    call:<chat>/<n>#L4, or call:<chat>/<n>#L4-L9

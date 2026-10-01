@@ -1,22 +1,25 @@
 // The Files pane: the views bar across the top (File browser first), under it the sidebar (the files tree with the
 // Labels pane pinned to its bottom) and the reader for the open tab, or a picked view with a Labels-only sidebar; the
 // status strip along the bottom. Open files are tabs kept per workspace in browser storage; a workspace with none opens
-// its largest data file beside the README (Tree.defaultTabs). A ref opens where it belongs: in the view that claims its
-// file, else in the File browser. Tree folders are fetched one at a time (Tree.useFolderStore). While the pane has the
+// its README, with its largest data file in the tab beside it (Tree.defaultTabs). A ref opens where it belongs: in the view it names, else in
+// the view the analyst last used for its file (kept per workspace), else in the File browser; Open in on the file's
+// panel lists the other views that claim it. Tree folders are fetched one at a time (Tree.useFolderStore). While the pane has the
 // focus, ⌘P focuses the search, ⌘F opens the find bar and Ctrl+G go to line (find.ts findKey).
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { createPortal } from 'react-dom'
 import { Button } from '../components/Button'
 import { Icon } from '../components/Icon'
+import { Menu } from '../components/Menu'
 import { PaneStatus } from '../components/PaneStatus'
-import { TipButton } from '../components/Tooltip'
+import { TipButton, useTooltip } from '../components/Tooltip'
 import { api } from '../lib/api'
 import { bus } from '../lib/bus'
 import { mediaOf } from '../lib/media'
 import { fragmentIn, parseRef, refPath } from '../lib/refs'
 import { pressedPane, surfaceShown, useFilesViewsSlot, useShownSurfaces } from '../lib/surfaces'
 import { track } from '../lib/telemetry'
-import type { ConceptRun, LabelDraft, SourceKind } from '../lib/types'
+import type { ConceptRun, LabelDraft, SourceKind, ViewQuery } from '../lib/types'
+import { findView } from '../lib/views'
 import { readSession, readStorage, storageKey, writeSession, writeStorage } from '../lib/workspace'
 import { ReadProbe, useDock, useFoldingSide } from '../shell/dock'
 import { viewSurface } from '../shell/panes'
@@ -25,15 +28,18 @@ import { findKey } from './find'
 import { FileSearch } from './FileSearch'
 import { folderPresence, presenceOf, viewDefaults, viewLabels, type Presence } from './labels'
 import { inferKind, TREE } from './params'
-import { Reader, type FindAsk } from './Reader'
+import { pickKey, Reader, type FindAsk } from './Reader'
 import { baseName, defaultTabs, fmtSize, glyphOf, kindIn, parentOf, Tree, useFolderStore } from './Tree'
 import { useFilesLabels, type FilesLabels } from './useLabels'
-import { chooseView, slugOf, viewPlace } from './viewChoice'
+import { OpenIn } from './OpenIn'
+import { chooseView, viewPlace, viewValue } from './viewChoice'
 import { ViewPane } from './ViewPane'
-import { useLabelRuns, useLabelSide } from './ViewSide'
+import { FolderPane } from './FolderPane'
+import { AddLabelControls, useLabelRuns, useLabelSide } from './ViewSide'
 import type { ViewQuote } from './ViewerFrame'
 import { BROWSER, slugOfKey, useViews, viewKey, ViewsBar, type BuiltView } from './ViewsBar'
 import { markOpened, useOpenAskedViews } from './viewReady'
+import { fitTabs } from './viewsFit'
 
 interface Open {
   path: string
@@ -41,6 +47,8 @@ interface Open {
   /** in a view: a passage inside the record `ref` names, and the span ref the File browser opens when the view does not
    * show it */
   quote?: ViewQuote & { span: string }
+  /** in a view: the card it was opened from and its arguments (a card type's Open as view) */
+  query?: ViewQuery
 }
 
 /** The open tabs a workspace keeps: their paths and the one shown. */
@@ -63,27 +71,135 @@ interface TabsProps {
   current: string | null
   onPick: (path: string) => void
   onClose: (path: string) => void
+  /** whether a tab's path is a folder, which its glyph shows */
+  isDir: (path: string) => boolean
 }
 
-/** The open files as square tabs, VS Code's way: the open one on the cell's paper between hairlines with its ×. */
-function ReaderTabs({ tabs, current, onPick, onClose }: TabsProps) {
+/** px: the narrowest a tab other than the open one is drawn, its glyph and about twelve characters of its name */
+export const TAB_MIN_PX = 132
+/** px: the widest the open tab is drawn (files.css .reader-tab.active) */
+export const TAB_MAX_PX = 320
+
+/** The open files as square tabs, VS Code's way: the open one on the cell's paper between hairlines with its ×, the
+ * others with theirs on hover, over the end of the name. Tabs that do not fit narrow, their names cut with an ellipsis,
+ * all but the open one, down to TAB_MIN_PX; past that the last ones go in a menu at the strip's end (viewsFit
+ * fitTabs), the open tab always shown whole. Each tab's width is read from a hidden copy of the strip. */
+export function ReaderTabs({ tabs, current, onPick, onClose, isDir }: TabsProps) {
+  const wrap = useRef<HTMLSpanElement>(null)
+  const measureRef = useRef<HTMLSpanElement>(null)
+  const [fit, setFit] = useState<{ shown: number[]; mins: number[]; room: number; more: number } | null>(null)
+  const active = tabs.findIndex((t) => t.path === current)
+  const key = tabs.map((t) => t.path).join('\n')
+  useLayoutEffect(() => {
+    const box = wrap.current
+    const row = measureRef.current
+    if (!box || !row) return
+    const measure = () => {
+      // a strip not laid out (hidden, or no layout at all) shows every tab
+      if (!box.clientWidth) return setFit(null)
+      const kids = [...row.children] as HTMLElement[]
+      const moreEl = kids.pop()!
+      const mcs = getComputedStyle(moreEl)
+      const more = moreEl.offsetWidth + (parseFloat(mcs.marginLeft) || 0) + (parseFloat(mcs.marginRight) || 0)
+      const widths = kids.map((k, i) => (i === active ? Math.min(k.offsetWidth, TAB_MAX_PX) : k.offsetWidth))
+      const mins = widths.map((w, i) => (i === active ? w : Math.min(w, TAB_MIN_PX)))
+      const room = box.clientWidth
+      const shown = fitTabs({ widths, mins, room, more, active })
+      setFit((cur) =>
+        cur && cur.room === room && cur.more === more && cur.shown.join() === shown.join() && cur.mins.join() === mins.join() ? cur : { shown, mins, room, more },
+      )
+    }
+    measure()
+    const ro = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(measure) : null
+    ro?.observe(box)
+    ro?.observe(row)
+    return () => ro?.disconnect()
+  }, [key, active])
+  const shows = (i: number) => !fit || fit.shown.includes(i)
+  const hidden = tabs.filter((_, i) => !shows(i))
+  // the open tab gives up its name's end only in a strip too narrow for it beside the menu's button
+  const activeMax = fit ? Math.max(0, Math.min(TAB_MAX_PX, fit.room - (hidden.length ? fit.more : 0))) : undefined
   return (
-    <span className="reader-tabs" role="tablist" aria-label="Open files">
-      {tabs.map((t) => {
-        const active = t.path === current
-        const name = baseName(t.path)
-        return (
-          <span key={t.path} className={'reader-tab' + (active ? ' active' : '')}>
-            <button type="button" role="tab" aria-selected={active} className="reader-tab-pick" onClick={() => onPick(t.path)} data-anchor={t.path} data-anchor-text={t.path}>
-              <Icon name={glyphOf(name)} size={13} className="reader-tab-glyph" />
-              <span className="reader-tab-name">{name}</span>
-            </button>
-            <TipButton tip="Close" className="reader-tab-x" aria-label={`Close ${name}`} onClick={() => onClose(t.path)}>
-              <Icon name="x" size={12} />
-            </TipButton>
+    <span ref={wrap} className="reader-tabs-wrap">
+      {/* the strip as it would be with every tab whole, out of sight, where the widths are read */}
+      <span ref={measureRef} className="reader-tabs-measure" aria-hidden="true" inert>
+        {tabs.map((t, i) => (
+          <span key={t.path} className={'reader-tab' + (i === active ? ' active' : '')}>
+            <span className="reader-tab-pick">
+              <Icon name={isDir(t.path) ? 'folder' : glyphOf(baseName(t.path))} size={13} className="reader-tab-glyph" />
+              <span className="reader-tab-name">{baseName(t.path)}</span>
+            </span>
+            {i === active && <span className="reader-tab-x" />}
           </span>
-        )
-      })}
+        ))}
+        <Button size="sm" className="reader-tabs-more" tabIndex={-1}>{`${tabs.length} more`}</Button>
+      </span>
+      <span className="reader-tabs" role="tablist" aria-label="Open files">
+        {tabs.map((t, i) =>
+          shows(i) ? (
+            <ReaderTab
+              key={t.path}
+              path={t.path}
+              active={i === active}
+              folder={isDir(t.path)}
+              onPick={onPick}
+              onClose={onClose}
+              style={i === active ? { maxWidth: activeMax } : fit ? { minWidth: fit.mins[i] } : undefined}
+            />
+          ) : null,
+        )}
+      </span>
+      {hidden.length > 0 && (
+        <Menu
+          label="More tabs"
+          align="end"
+          items={hidden.map((t) => ({ id: t.path, label: baseName(t.path), note: parentOf(t.path) || undefined, icon: isDir(t.path) ? ('folder' as const) : glyphOf(baseName(t.path)), onSelect: () => onPick(t.path) }))}
+          trigger={<Button size="sm" className="reader-tabs-more">{`${hidden.length} more`}</Button>}
+        />
+      )}
+    </span>
+  )
+}
+
+/** One tab: the file's or folder's glyph and name, and its ×; a name cut short shows the path in the tooltip. */
+function ReaderTab({
+  path,
+  active,
+  folder,
+  onPick,
+  onClose,
+  style,
+}: {
+  path: string
+  active: boolean
+  folder: boolean
+  onPick: (path: string) => void
+  onClose: (path: string) => void
+  style?: CSSProperties
+}) {
+  const nameRef = useRef<HTMLSpanElement>(null)
+  const [cut, setCut] = useState(false)
+  useEffect(() => {
+    const el = nameRef.current
+    if (!el || typeof ResizeObserver === 'undefined') return
+    const ro = new ResizeObserver(() => setCut(el.scrollWidth > el.clientWidth + 1))
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [])
+  const { props: tipProps, tip } = useTooltip(cut ? path : null)
+  const name = baseName(path)
+  return (
+    <span className={'reader-tab' + (active ? ' active' : '')} style={style}>
+      <button type="button" role="tab" aria-selected={active} className="reader-tab-pick" onClick={() => onPick(path)} data-anchor={path} data-anchor-text={path} {...tipProps}>
+        <Icon name={folder ? 'folder' : glyphOf(name)} size={13} className="reader-tab-glyph" />
+        <span ref={nameRef} className="reader-tab-name">
+          {name}
+        </span>
+      </button>
+      {tip}
+      <TipButton tip="Close" className="reader-tab-x" aria-label={`Close ${name}`} onClick={() => onClose(path)}>
+        <Icon name="x" size={12} />
+      </TipButton>
     </span>
   )
 }
@@ -108,7 +224,7 @@ function useSessionChoice(ws: string, name: string): [boolean | null, (v: boolea
 
 /** A view's labels by default: the first time the analyst opens a view (per workspace), while no label marking its
  * files is on, the orientation's labels over those files are turned on (labels.viewDefaults), so the view opens
- * coloured with its Labels sidebar as the legend. */
+ * coloured, its own label controls as the legend. */
 function useViewDefaults(ws: string, view: BuiltView | null, labels: FilesLabels) {
   const [orient, setOrient] = useState<Set<string> | null>(null)
   useEffect(() => {
@@ -148,6 +264,16 @@ function useFlag(ws: string, name: string, def: boolean): [boolean, (v: boolean)
   return [v, set]
 }
 
+/** Why a ref to the view `slug` opens nothing: the view is switched off in Settings (its proposal's `off`), or there is
+ * none. */
+async function missingView(ws: string, slug: string): Promise<string> {
+  const p = await api
+    .proposals(ws)
+    .then((all) => all.find((x) => x.slug === slug))
+    .catch(() => undefined)
+  return p?.off ? `${p.name} is switched off in Settings.` : `there is no view ${slug}`
+}
+
 export function FilesTab({ ws, active, focused = active }: { ws: string; active: boolean; focused?: boolean }) {
   const folders = useFolderStore(ws)
   const labels = useFilesLabels(ws)
@@ -161,7 +287,8 @@ export function FilesTab({ ws, active, focused = active }: { ws: string; active:
   // whether the tabs are the analyst's yet: kept ones, a file opened, or the defaults once the root is listed
   const [seeded, setSeeded] = useState(kept.tabs.length > 0)
   const [sideOpen, setSideOpen] = useFlag(ws, 'filesSide', true)
-  const [viewSideChoice, setViewSideChoice] = useSessionChoice(ws, 'viewSide')
+  const [ownSideChoice, setOwnSideChoice] = useSessionChoice(ws, 'viewSide')
+  const [fallbackSideChoice, setFallbackSideChoice] = useSessionChoice(ws, 'viewSideFallback')
   const [treeOpen, setTreeOpen] = useFlag(ws, 'filesTree', true)
   const [labelsOpen, setLabelsOpen] = useFlag(ws, 'filesLabels', true)
   const [editing, setEditing] = useState<string | 'new' | null>(null)
@@ -181,18 +308,26 @@ export function FilesTab({ ws, active, focused = active }: { ws: string; active:
   const searchRef = useRef<HTMLInputElement>(null)
   const [findAsk, setFindAsk] = useState<FindAsk>({ mode: 'find', n: 0 })
   // Sidebars (shell/dock.tsx) dock only while the body holds them beside the view or reader at a readable width. A
-  // view's Labels sidebar starts hidden and shows while a label is on, until the analyst hides or shows it for the tab's
-  // session; when it cannot dock it lies over the view's left edge. The File browser's sidebar folds to its show button
-  // when it cannot dock.
+  // view draws its own label controls, so its Labels sidebar starts hidden and shows when those controls open a label's
+  // editor; beside a view built without label controls it also shows while a label is on or a label marks the view's
+  // files, so turning the last label off there keeps it. The analyst's hide or show holds for the tab's session, apart
+  // for views with label controls and views without, so hiding it beside one kind leaves the other's as it was. When it
+  // cannot dock it lies over the view's left edge. The File browser's sidebar folds to its show button when it cannot
+  // dock.
   const dock = useDock(sideWidth)
-  const viewSideOpen = viewSideChoice ?? labels.on.length > 0
+  const shownView = slugOfKey(bar) ? views.find((v) => v.slug === slugOfKey(bar)) ?? null : null
+  const fallbackSide = !!shownView && !shownView.label_controls
+  const viewSideChoice = fallbackSide ? fallbackSideChoice : ownSideChoice
+  const setViewSideChoice = fallbackSide ? setFallbackSideChoice : setOwnSideChoice
+  // beside a view: the labels that mark its files, which come first
+  const marking = useMemo(() => (shownView?.claims ? viewLabels(labels.all, labels.presence, shownView.claims) : null), [shownView, labels.all, labels.presence])
+  const viewSideOpen = viewSideChoice ?? (fallbackSide && (labels.on.length > 0 || !!marking?.size))
   const viewSideOver = viewSideOpen && !dock.docks
   const side = useFoldingSide(dock.docks, sideOpen, setSideOpen)
   const root = folders.store.get('')
   const error = root?.state === 'error' ? root.message : null
   const open = tabs.find((t) => t.path === current) ?? null
   const listing = root?.state === 'ok' ? root.listing : null
-  const shownView = slugOfKey(bar) ? views.find((v) => v.slug === slugOfKey(bar)) ?? null : null
   // a view the analyst asked for opens by itself once built, and one shown here waits for them no longer
   useOpenAskedViews(ws, new Map([...proposals, ...views].map((v) => [v.slug, v.name])))
   const shownSlug = shownView?.slug ?? null
@@ -207,7 +342,7 @@ export function FilesTab({ ws, active, focused = active }: { ws: string; active:
   const ownPane = !!shownSlug && panesShow.includes(viewSurface(shownSlug))
   useEffect(() => {
     if (!ownPane || !shownSlug) return
-    if (viewAt) bus.emit('openInView', { slug: shownSlug, path: viewAt.path, ref: viewAt.ref, quote: viewAt.quote })
+    if (viewAt) bus.emit('openInView', { slug: shownSlug, path: viewAt.path, ref: viewAt.ref, quote: viewAt.quote, query: viewAt.query })
     bus.emit('showTab', { tab: viewSurface(shownSlug) })
     setBar(BROWSER)
     setViewAt(null)
@@ -216,7 +351,8 @@ export function FilesTab({ ws, active, focused = active }: { ws: string; active:
 
   // the Files view's shortcuts, while its pane has the focus; a field outside Files keeps its keys
   const showSide = side.show
-  const canFind = !shownView && !!open && !mediaOf(open.path)
+  const openIsDir = !!open && kindIn(folders.store, open.path) === 'dir'
+  const canFind = !shownView && !!open && !openIsDir && !mediaOf(open.path)
   useEffect(() => {
     if (!focused) return
     const onKey = (e: KeyboardEvent) => {
@@ -287,7 +423,7 @@ export function FilesTab({ ws, active, focused = active }: { ws: string; active:
   const toView = useCallback(
     (slug: string, at: Open | null, from?: string | null) => {
       if (surfaceShown(viewSurface(slug))) {
-        if (at) bus.emit('openInView', { slug, path: at.path, ref: at.ref, quote: at.quote })
+        if (at) bus.emit('openInView', { slug, path: at.path, ref: at.ref, quote: at.quote, query: at.query })
         bus.emit('showTab', { tab: viewSurface(slug), from })
         return
       }
@@ -303,7 +439,33 @@ export function FilesTab({ ws, active, focused = active }: { ws: string; active:
     },
     [openTab],
   )
+  // a file viewer is a mode of the File browser: a ref to it opens the file there, in that mode
+  const toFileViewer = useCallback(
+    (slug: string, at: Open, from?: string | null) => {
+      writeStorage(pickKey(ws, at.path), viewValue(slug))
+      toBrowser({ path: at.path, ref: at.ref }, from)
+      bus.emit('fileMode', { path: at.path, mode: viewValue(slug) })
+    },
+    [ws, toBrowser],
+  )
+  // the view the analyst last used for a file, which a ref into it opens in; null for the File browser
+  const usedFor = useCallback((path: string) => readStorage<string | null>(storageKey(ws, `openIn:${path}`), null), [ws])
+  const used = useCallback((path: string, slug: string | null) => writeStorage(storageKey(ws, `openIn:${path}`), slug), [ws])
 
+  useEffect(
+    () =>
+      bus.on('openView', ({ slug, query }) => {
+        const from = pressedPane()
+        findView(ws, slug)
+          .then(async (v) => {
+            if (!v?.first_file) throw new Error(v ? `there is no view ${slug}` : await missingView(ws, slug))
+            if (v.file_type) toFileViewer(slug, { path: v.first_file }, from)
+            else toView(slug, { path: v.first_file, query: query ?? undefined }, from)
+          })
+          .catch((e: Error) => bus.emit('toast', { text: `Could not open the view. ${e.message}`, kind: 'error' }))
+      }),
+    [ws, toView, toFileViewer],
+  )
   useEffect(
     () =>
       bus.on('openRef', (e) => {
@@ -314,45 +476,52 @@ export function FilesTab({ ws, active, focused = active }: { ws: string; active:
     [],
   )
 
-  // a ref's place: a view ref in its view (or the File browser when the view is gone); a file ref in the first view that
-  // claims the file and accepts the ref's fragment, or the record a span sits in (viewPlace), else in the File browser.
-  // With `browser` (an example card's address) a file ref always opens in the File browser
+  // a ref's place: a view ref in its view (or the File browser when the view is gone); a file ref in the view the analyst
+  // last used for the file, at the ref's place or the record a span sits in (viewPlace), else in the File browser. With
+  // `browser` (an example card's address) a file ref always opens in the File browser
   const openRef = useCallback(
     async (ref: string, browser = false, from: string | null = null) => {
       const p = parseRef(ref)
       try {
         if (p?.kind === 'view') {
+          const v = await findView(ws, p.slug)
           if (!p.key) {
-            const v = await api.views(ws).then((all) => all.find((x) => x.slug === p.slug))
-            if (!v) throw new Error(`there is no view ${p.slug}`)
-            toView(p.slug, v.first_file ? { path: v.first_file } : null, from)
+            if (!v) throw new Error(await missingView(ws, p.slug))
+            if (v.file_type && v.first_file) toFileViewer(p.slug, { path: v.first_file }, from)
+            else toView(p.slug, v.first_file ? { path: v.first_file } : null, from)
             return
           }
           const r = await api.resolveRef(ws, ref)
           const first = (r.refs ?? [])[0]
           const path = first ? refPath(first) : null
           if (!path) throw new Error(`${ref} names no file line`)
-          if (r.meta && (r.meta as { deleted?: boolean }).deleted) toBrowser({ path, ref: first }, from)
-          else toView(p.slug, { path, ref }, from)
+          // a view that is gone or switched off in Settings leaves its refs to the File browser
+          if (!v || (r.meta && (r.meta as { deleted?: boolean }).deleted)) toBrowser({ path, ref: first }, from)
+          else if (v.file_type) toFileViewer(p.slug, { path, ref: first }, from)
+          else {
+            used(path, p.slug)
+            toView(p.slug, { path, ref }, from)
+          }
           return
         }
-        const path = refPath(ref)
-        if (path == null) return
+        // a folder may be named with a trailing slash (`agents/`)
+        const path = refPath(ref)?.replace(/\/+$/, '')
+        if (!path) return
         if (browser) return toBrowser({ path, ref }, from)
-        const claiming = await api.viewsForFile(ws, path).then((v) => v.filter((x) => x.ok)).catch(() => [])
+        const remembered = usedFor(path)
+        const claiming = remembered ? await api.viewsForFile(ws, path).then((v) => v.filter((x) => x.ok)).catch(() => []) : []
+        const slug = chooseView({ views: claiming, remembered })
+        const view = claiming.find((v) => v.slug === slug)
+        if (!view) return toBrowser({ path, ref }, from)
+        if (view.file_type) return toFileViewer(view.slug, { path, ref }, from)
         const fragment = fragmentIn(ref, path)
-        if (fragment == null) {
-          const slug = slugOf(chooseView({ views: claiming, fragment }))
-          if (slug) toView(slug, { path }, from)
-          else toBrowser({ path, ref }, from)
-          return
-        }
+        if (fragment == null) return toView(view.slug, { path }, from)
         const knows = (s: string, r: string) =>
           api
             .viewOpen(ws, s, r)
             .then((o) => !o.error)
             .catch(() => false)
-        const place = await viewPlace(claiming, path, fragment, knows)
+        const place = await viewPlace([view], path, fragment, knows)
         if (!place) return toBrowser({ path, ref }, from)
         if (place.ref === ref) return toView(place.slug, { path, ref }, from)
         // the view shows the record a quoted span sits in: its page is sent the span's text to highlight
@@ -365,12 +534,26 @@ export function FilesTab({ ws, active, focused = active }: { ws: string; active:
         bus.emit('toast', { text: `Could not open ${ref}. ${(e as Error).message}`, kind: 'error' })
       }
     },
-    [ws, toBrowser, toView],
+    [ws, toBrowser, toView, toFileViewer, used, usedFor],
   )
+  // Open in: the file in another view that claims it, at the place shown when that is in the file, or in the File browser
+  const openIn = useCallback(
+    (path: string, ref: string | undefined, slug: string | null) => {
+      used(path, slug)
+      const at = ref && refPath(ref) === path ? ref : undefined
+      track('view-open', { target: slug ? `view:${slug}` : 'panel:files', detail: { from: 'open-in' } })
+      if (slug) toView(slug, { path, ref: at })
+      else toBrowser({ path, ref: at })
+    },
+    [used, toView, toBrowser],
+  )
+  useEffect(() => bus.on('openIn', ({ path, ref, slug }) => openIn(path, ref, slug)), [openIn])
   // a quoted span the view did not show opens in the File browser, which highlights it
   const quoteMissing = useCallback(() => {
     if (viewAt?.quote) openTab({ path: viewAt.path, ref: viewAt.quote.span })
   }, [viewAt, openTab])
+  // the view dropped the arguments of the card it was opened from
+  const clearQuery = useCallback(() => setViewAt((v) => (v?.query ? { ...v, query: undefined } : v)), [])
   useEffect(() => {
     if (!pendingRef) return
     void openRef(pendingRef.ref, !!pendingRef.browser, pendingRef.from)
@@ -386,6 +569,10 @@ export function FilesTab({ ws, active, focused = active }: { ws: string; active:
   // the reader waits for the open path's folder: a listing in flight may still say the path is a folder or a database
   const parentState = open ? folders.store.get(parentOf(open.path)) : undefined
   const ready = !!open && parentState !== undefined && parentState.state !== 'loading'
+  useEffect(() => {
+    if (open && ready && openIsDir) folders.ensure(open.path)
+  }, [open, ready, openIsDir, folders])
+  const isDir = useCallback((path: string) => kindIn(folders.store, path) === 'dir', [folders.store])
 
   const marksOf = useCallback((path: string) => presenceOf(labels.on, labels.presence, path), [labels.on, labels.presence])
   const folderDots = useMemo(() => folderPresence(labels.on, labels.presence), [labels.on, labels.presence])
@@ -409,6 +596,7 @@ export function FilesTab({ ws, active, focused = active }: { ws: string; active:
   const totals = useMemo(() => {
     if (!listing) return ''
     const n = listing.n_files
+    if (n == null) return ''
     const size = listing.folders.length ? null : listing.files.reduce((a, f) => a + (f.size_bytes || 0), 0)
     return `${n.toLocaleString()} ${n === 1 ? 'file' : 'files'}${size != null ? ` · ${fmtSize(size)}` : ''}`
   }, [listing])
@@ -425,14 +613,15 @@ export function FilesTab({ ws, active, focused = active }: { ws: string; active:
   // what a new label applies to: the files the view in front claims, else the file open in the reader
   const appliesTo = useMemo(() => (shownView ? shownView.claims ?? (shownPath ? [shownPath] : []) : open?.path ? [open.path] : []), [shownView, shownPath, open?.path])
   useViewDefaults(ws, shownView, labels)
-  // beside a view: the labels that mark its files come first
-  const marking = useMemo(() => (shownView?.claims ? viewLabels(labels.all, labels.presence, shownView.claims) : null), [shownView, labels.all, labels.presence])
-  // a view's New label… opens the prompt in the Labels sidebar beside it
-  const newLabel = useCallback(() => {
-    setViewSideChoice(true)
-    setLabelsOpen(true)
-    edit('new')
-  }, [setViewSideChoice, setLabelsOpen, edit])
+  // a view's label controls open the editor, on a label or on a new one, in the Labels sidebar beside it
+  const editLabel = useCallback(
+    (id: string | null) => {
+      setViewSideChoice(true)
+      setLabelsOpen(true)
+      edit(id ?? 'new')
+    },
+    [setViewSideChoice, setLabelsOpen, edit],
+  )
   const fillNew = useCallback((draft: LabelDraft) => {
     setEditing('new')
     setDrafted(draft)
@@ -462,6 +651,7 @@ export function FilesTab({ ws, active, focused = active }: { ws: string; active:
     onHide: shownView ? () => setViewSideChoice(false) : undefined,
     first: marking ?? undefined,
     filterable: !!shownView,
+    note: shownView && !shownView.label_controls && !shownView.builtin ? <AddLabelControls ws={ws} view={shownView} /> : undefined,
   })
   // the bar's lead keeps its identity while the sidebar is dragged, so the reader (a memo) is not rendered again on
   // each move of the drag
@@ -470,12 +660,18 @@ export function FilesTab({ ws, active, focused = active }: { ws: string; active:
     () => (
       <>
         {!sideShown && <Button variant="icon" size="sm" icon="sidebar" title="Show sidebar" className="reader-side-show" onClick={showSide} />}
-        <ReaderTabs tabs={tabs} current={current} onPick={setCurrent} onClose={closeTab} />
+        <ReaderTabs tabs={tabs} current={current} onPick={setCurrent} onClose={closeTab} isDir={isDir} />
       </>
     ),
-    [sideShown, showSide, tabs, current, closeTab],
+    [sideShown, showSide, tabs, current, closeTab, isDir],
   )
 
+  const openPath = open?.path ?? null
+  const openRefAt = open?.ref
+  const openInEnd = useMemo(
+    () => (openPath ? <OpenIn ws={ws} path={openPath} current={null} onOpen={(slug) => openIn(openPath, openRefAt, slug)} /> : null),
+    [ws, openPath, openRefAt, openIn],
+  )
   const viewsBar = (compact: boolean) => <ViewsBar ws={ws} value={shownView ? bar : BROWSER} onChange={pickBar} views={views} proposals={proposals} compact={compact} />
   return (
     <div className="files-tab" data-panel="files" ref={rootRef}>
@@ -495,17 +691,17 @@ export function FilesTab({ ws, active, focused = active }: { ws: string; active:
             ws={ws}
             view={shownView}
             path={shownPath}
+            picked={!!viewAt?.path}
             kind={shownPath ? kindOf(shownPath) : 'text'}
             targetRef={viewAt?.ref}
             quote={viewAt?.quote}
+            query={viewAt?.query}
+            onClearQuery={clearQuery}
             onQuoteMissing={quoteMissing}
             labels={labels}
             onMode={setMode}
             first={marking ?? undefined}
-            onNewLabel={newLabel}
-            lead={
-              !viewSideOpen && <Button variant="icon" size="sm" icon="sidebar" title="Show labels" aria-label="Show labels" className="view-pane-side-show" onClick={() => setViewSideChoice(true)} />
-            }
+            onEditLabel={editLabel}
           />
           {viewSideOpen && labelCard}
         </div>
@@ -535,8 +731,10 @@ export function FilesTab({ ws, active, focused = active }: { ws: string; active:
             </>
           )}
           <div className="files-main">
-            {open && ready ? (
-              <Reader workspace={ws} path={open.path} kind={kindOf(open.path)} targetRef={open.ref} lead={lead} labels={labels} onMode={setMode} findAsk={findAsk} />
+            {open && ready && openIsDir ? (
+              <FolderPane state={folders.store.get(open.path)} lead={lead} onOpen={(path) => openTab({ path })} />
+            ) : open && ready ? (
+              <Reader workspace={ws} path={open.path} kind={kindOf(open.path)} targetRef={open.ref} lead={lead} end={openInEnd} labels={labels} onMode={setMode} findAsk={findAsk} />
             ) : (
               <div className="reader">
                 <div className="reader-bar">{lead}</div>
@@ -546,7 +744,7 @@ export function FilesTab({ ws, active, focused = active }: { ws: string; active:
           {side.shown && labelCard}
         </div>
       )}
-      <PaneStatus name="Files" meta={shownView ? `view · ${shownView.name}${mode === 'Raw' ? ' · Raw' : ''}` : open ? [baseName(open.path), mode].filter(Boolean).join(' · ') : ''} totals={totals} />
+      <PaneStatus name="Files" meta={shownView ? `view · ${shownView.name}${mode === 'Raw' ? ' · Raw' : ''}` : open ? [baseName(open.path), openIsDir ? '' : mode].filter(Boolean).join(' · ') : ''} totals={totals} />
     </div>
   )
 }

@@ -34,10 +34,10 @@ DATA_DIR = Path(os.environ.get("THIMBLE_DATA_DIR") or default_data_dir()).resolv
 # The install tree's data/: a legacy registry location and where a checkout's own corpora sit as directories
 # data/<c>/manifest.json. migrate_registry brings the records it holds into DATA_DIR at server start.
 LEGACY_DATA_DIR = REPO_ROOT / "data"
-WORKSPACES_DIR = Path(os.environ.get("THIMBLE_WORKSPACES_DIR", REPO_ROOT / "workspaces")).resolve()
+WORKSPACES_DIR = Path(os.environ.get("THIMBLE_WORKSPACES_DIR") or REPO_ROOT / "workspaces").resolve()
 # The built UI (frontend/dist). main.py serves it at / when the server is not in dev mode (a release install has no
 # Vite); cli.py's ensure and doctor print NO_UI_BUILD_HINT when it is missing. Tests point FRONTEND_DIST at a scratch dir.
-FRONTEND_DIST = Path(os.environ.get("THIMBLE_FRONTEND_DIST", REPO_ROOT / "frontend" / "dist")).resolve()
+FRONTEND_DIST = Path(os.environ.get("THIMBLE_FRONTEND_DIST") or REPO_ROOT / "frontend" / "dist").resolve()
 NO_UI_BUILD_HINT = "no frontend build: run scripts/release.sh or npm run build, or start with THIMBLE_DEV=1"
 
 
@@ -200,14 +200,14 @@ AUTH_STATUS_TIMEOUT_S = 20.0
 
 def auth_status(env: Mapping[str, str] | None = None, cwd: str | Path | None = None) -> dict[str, Any] | None:
     """What `claude auth status --json` reports for the login a `claude` thimble starts would use (`env`, default
-    claude_env(passed_environ())), in the folder `cwd` (a temporary one when it is none): loggedIn, authMethod,
+    launch_environ()), in the folder `cwd` (a temporary one when it is none): loggedIn, authMethod,
     apiKeySource, apiProvider and the like. None when `claude` is missing, the command fails to print an object, or
     under THIMBLE_SKIP_KEY. loggedIn means a login is configured, not that it works."""
     if _skip() or not CLI_PATH:
         return None
     try:
         r = subprocess.run([CLI_PATH, "auth", "status", "--json"], capture_output=True, text=True,
-                           env=dict(env) if env is not None else claude_env(passed_environ()),
+                           env=dict(env) if env is not None else launch_environ(),
                            cwd=str(cwd) if cwd and Path(cwd).is_dir() else tempfile.gettempdir(),
                            stdin=subprocess.DEVNULL, timeout=AUTH_STATUS_TIMEOUT_S)
         d = json.loads(r.stdout)
@@ -291,6 +291,50 @@ def claude_env(env: dict[str, str]) -> dict[str, str]:
         out[CONFIG_DIR_ENV] = value
     else:
         out.pop(CONFIG_DIR_ENV, None)
+    return out
+
+
+# Claude Code's background service is shared by every session of the user's: the first `claude` that needs it starts
+# it, and it gives the environment of that process to every background session it runs later, the user's own
+# included. So a `claude` thimble runs has none of thimble's variables in its own environment (launch_environ), and a
+# session thimble starts gets them in its --settings `env` (session_env), which reaches that session alone. There every
+# name below that the session does not set is given this server's value or "", so a value the service kept from
+# another session or another thimble never reaches it.
+# The names thimble sets for one session: a THIMBLE_* one is "" unless the session sets it; another is the server's
+# own value, else "".
+SESSION_VARS = ("THIMBLE_SESSION", "THIMBLE_SESSION_TOKEN", "THIMBLE_RENDERED_PROMPTS", "THIMBLE_AGENT_TOKEN",
+                "THIMBLE_API", "THIMBLE_CHANNEL", "THIMBLE_CALLER_CWD", "THIMBLE_CWD", "XDG_CACHE_HOME", "MPLCONFIGDIR",
+                "CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD")
+# The names that place a stack and tune its plugin and hooks, which the code a session runs reads: the server's value
+# in a session that talks to this server (session_env's `stack`), else "". Every reader takes "" as unset.
+STACK_VARS = ("THIMBLE_HOME", "THIMBLE_PORT", "THIMBLE_UI_PORT", "THIMBLE_WORKSPACES_DIR", "THIMBLE_DATA_DIR",
+              "THIMBLE_DEV_DIR", "THIMBLE_APP_DIR", "THIMBLE_PLUGIN_ROOT", "THIMBLE_FRONTEND_URL",
+              "THIMBLE_FRONTEND_DIST", "THIMBLE_DEV", "THIMBLE_SUPERVISED", "THIMBLE_STACK_PORT",
+              "THIMBLE_STACK_UI_PORT", "THIMBLE_CLAUDE_BIN", "THIMBLE_SKIP_KEY", "THIMBLE_PROMPTS_DIR",
+              "THIMBLE_PROMPT_CAPTURE", "THIMBLE_KERNEL_WRAP", "THIMBLE_MODEL_SPEED", "THIMBLE_MCP_PROGRESS_S",
+              "THIMBLE_MCP_RETRY_S", "THIMBLE_BROWSER_PATH", "THIMBLE_INDEX_CACHE_MB")
+OWN_PREFIX = "THIMBLE_"
+
+
+def launch_environ(environ: Mapping[str, str] | None = None) -> dict[str, str]:
+    """The environment of every `claude` thimble runs: `environ` (default this process's) with only the variables that
+    pass (passes), none of thimble's own, and the served CLAUDE_CONFIG_DIR (claude_env)."""
+    return claude_env({k: v for k, v in passed_environ(environ).items() if not k.startswith(OWN_PREFIX)})
+
+
+def session_env(own: Mapping[str, str], *, stack: bool = True,
+                environ: Mapping[str, str] | None = None) -> dict[str, str]:
+    """The --settings `env` of a session thimble starts: `own`, its own values, over every name of SESSION_VARS and
+    STACK_VARS as the note above says. With `stack` the session also gets this process's other THIMBLE_* values."""
+    env = os.environ if environ is None else environ
+    out: dict[str, str] = {}
+    if stack:
+        out.update({k: v for k, v in env.items() if k.startswith(OWN_PREFIX) and k not in SESSION_VARS})
+    for name in STACK_VARS:
+        out[name] = env.get(name, "") if stack else ""
+    for name in SESSION_VARS:
+        out[name] = "" if name.startswith(OWN_PREFIX) else env.get(name, "")
+    out.update(own)
     return out
 
 
@@ -565,8 +609,24 @@ def free_name(base: str, data_dir: Path | None = None) -> str:
         n += 1
 
 
-def register_corpus(path: str | Path, *, exact: bool = False) -> dict:
-    """Register a directory as a corpus and return its record {name, root, path, registered_at, manifest}.
+KEEP_SHOWN = object()  # register_corpus: leave the record's `shown` as it is
+
+
+def shown_alias(shown: object, p: Path) -> str | None:
+    """`shown` when it is another absolute path to the folder `p` (through a symlink), else None."""
+    if not isinstance(shown, str) or not os.path.isabs(shown):
+        return None
+    alias = os.path.normpath(shown)
+    try:
+        return alias if alias != str(p) and Path(alias).resolve() == p else None
+    except OSError:
+        return None
+
+
+def register_corpus(path: str | Path, *, exact: bool = False, shown: object = KEEP_SHOWN) -> dict:
+    """Register a directory as a corpus and return its record {name, root, path, registered_at, manifest, shown?}.
+    `shown` is the folder as the analyst named it when that was another path to it, through a symlink (shown_alias),
+    which the dashboard shows in place of `path`: a string records it, None clears it, KEEP_SHOWN leaves it.
 
     A path inside DATA_DIR/<c> is corpus c: nothing written. A path inside (not at) a registered directory is that
     directory's corpus unless `exact`, which registers the folder itself. Exactly a registered working directory refreshes
@@ -601,6 +661,9 @@ def register_corpus(path: str | Path, *, exact: bool = False) -> dict:
     root = str(_sidecar_bases(prev).get("root", p)) if prev is not None else str(p)
     rec = {"name": name, "root": root, "path": str(p), "registered_at": (prev or {}).get("registered_at") or _now(),
            "manifest": _scan_manifest(p)}
+    alias = shown_alias((prev or {}).get("shown"), p) if shown is KEEP_SHOWN else shown_alias(shown, p)
+    if alias:
+        rec["shown"] = alias
     _write_sidecar(rec)
     log.info("registered corpus %r at %s (sidecar %s)", name, p, sidecar_path(name))
     return rec
@@ -736,6 +799,14 @@ def workspace_dir(name: str) -> Path:
         private_dir(WORKSPACES_DIR)
         p.mkdir(mode=0o700, exist_ok=True)
     return p
+
+
+def registry_dir(name: str) -> Path:
+    """The workspace's registry folder, created on demand (private_dir): the card types and extensions the server found
+    there, which a wrapped kernel may only read (kernel_wrap.READ_ONLY_DIRS)."""
+    from . import kernel_wrap  # noqa: PLC0415
+
+    return private_dir(workspace_dir(name) / kernel_wrap.REGISTRY_DIR)
 
 
 def safe_corpus_path(corpus: Path, rel: str) -> Path:

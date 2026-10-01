@@ -906,7 +906,7 @@ function BlockField({ block, caret }: { block: StoryBlock; caret: Caret }) {
         aria-label={KINDS.find((k) => k.type === block.type)?.label ?? 'Text'}
         value={block.text}
         rows={1}
-        spellCheck
+        spellCheck={false}
         onChange={(e) => {
           const v = e.target.value
           set(v)
@@ -1104,7 +1104,7 @@ function TextField({ className, label, value, onChange, onBlur, onKeyDown, field
       value={value}
       rows={1}
       aria-label={label}
-      spellCheck
+      spellCheck={false}
       onChange={(e) => onChange(e.target.value)}
       onBlur={onBlur}
       onKeyDown={onKeyDown}

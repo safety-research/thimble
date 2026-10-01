@@ -2,7 +2,7 @@
 // code for a card that runs code (editable; Run or ⌘↵ saves and runs it again), the output and what it printed, the
 // takeaway (editable with RefEditor), and the card's history. What the analyst types is saved when the field is left.
 // LabelPanel is the same panel for a label with no card of its own.
-import { useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore, type KeyboardEvent, type MouseEvent } from 'react'
+import { useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore, type KeyboardEvent, type MouseEvent, type RefObject } from 'react'
 import { ChatMarkdown } from '../chat/markdown'
 import { Button } from '../components/Button'
 import { Chip } from '../components/Chip'
@@ -10,12 +10,13 @@ import { CodeArea } from '../components/Code'
 import { TextArea } from '../components/Field'
 import { Kbd } from '../components/Marks'
 import { Icon } from '../components/Icon'
-import { chartLabels, Output } from '../components/Outputs'
+import { chartLabels, lineOmitted, Output, OutputText } from '../components/Outputs'
 import { GlyphCites } from '../components/RefChip'
 import { Spinner } from '../components/Spinner'
 import { api } from '../lib/api'
 import { bus } from '../lib/bus'
 import { cellLabel, displayName, onCellNames } from '../lib/cellName'
+import { revealLines, scrollWithin } from '../lib/tableCell'
 import { teleport } from '../lib/teleport'
 import { track } from '../lib/telemetry'
 import type { Cell } from '../lib/types'
@@ -34,7 +35,16 @@ const PANEL_ROOM = 420 - 2 * 16
 /** the rows of a table the panel shows before its Show all */
 const PANEL_ROWS = 40
 
-export function DetailPanel({ cell, onClose }: { cell: Cell; onClose: () => void }) {
+/** Lines of one of the card's outputs (`card:<id>@out<i>#L<n>`) a click on a citation opened the panel at (Canvas): the
+ * panel scrolls to them and marks them. `seq` tells one click from the next. */
+export interface OutputCite {
+  out: number
+  line: number
+  end?: number
+  seq: number
+}
+
+export function DetailPanel({ cell, cite = null, onClose }: { cell: Cell; cite?: OutputCite | null; onClose: () => void }) {
   const ctx = useContext(CanvasContext)
   const { ws } = ctx
   const kind = kindOf(cell)
@@ -174,7 +184,7 @@ export function DetailPanel({ cell, onClose }: { cell: Cell; onClose: () => void
                 <Spinner size={10} label="running" />
               </div>
             ) : (
-              blocks.map((b) => <Block key={b.index} block={b} cell={cell} />)
+              blocks.map((b) => <Block key={b.index} block={b} cell={cell} cite={cite?.out === b.index ? cite : null} />)
             )}
           </section>
         )}
@@ -268,13 +278,30 @@ function CodeBox({ value, onChange, onKeyDown }: { value: string; onChange: (v: 
   )
 }
 
-function Block({ block, cell }: { block: DetailBlock; cell: Cell }) {
+/** The cited lines of the output drawn in `box` brought into view in the panel and marked (lib/tableCell revealLines),
+ * or the output flashed when it does not draw them; once per citation, and not while `wait` holds. */
+function useCite(box: RefObject<HTMLElement | null>, cite: OutputCite | null, wait = false): void {
+  const shown = useRef(-1)
+  useEffect(() => {
+    const el = box.current
+    if (!cite || wait || !el || shown.current === cite.seq) return
+    shown.current = cite.seq
+    const stop = el.closest<HTMLElement>('.bdetail-body') ?? el
+    if (revealLines(el, cite.line, cite.end, stop)) return
+    scrollWithin(el, stop, false)
+    el.classList.add('anchor-flash')
+    window.setTimeout(() => el.classList.remove('anchor-flash'), 1600)
+  })
+}
+
+function Block({ block, cell, cite }: { block: DetailBlock; cell: Cell; cite: OutputCite | null }) {
   const { concepts } = useContext(CanvasContext)
-  switch (block.kind) {
-    case 'shell':
-      return <ShellBlock block={block} cell={cell} />
-    case 'error':
-      return (
+  const box = useRef<HTMLDivElement>(null)
+  useCite(box, block.kind === 'shell' ? null : cite)
+  if (block.kind === 'shell') return <ShellBlock block={block} cell={cell} cite={cite} />
+  return (
+    <div ref={box} className="bdetail-out" data-out={block.index}>
+      {block.kind === 'error' ? (
         <pre className="bdetail-shell bdetail-error">
           <span className="bdetail-error-head">
             {block.ename}
@@ -282,17 +309,16 @@ function Block({ block, cell }: { block: DetailBlock; cell: Cell }) {
           </span>
           {block.traceback ? '\n' + block.traceback : ''}
         </pre>
-      )
-    case 'text':
-      return <pre className="bdetail-shell">{block.text}</pre>
-    case 'artifact':
-      // the artifact itself, as the card draws it: the table (its first rows, then Show all), the chart at the panel's width
-      return (
+      ) : block.kind === 'text' ? (
+        <pre className="bdetail-shell">{block.plain ? <OutputText text={block.text} /> : block.text}</pre>
+      ) : (
+        // the artifact itself, as the card draws it: the table (its first rows, then Show all), the chart at the panel's width
         <div className={`bdetail-artifact bdetail-artifact-${block.label}`}>
           <Output bundle={block.bundle} maxRows={PANEL_ROWS} fitWidth={PANEL_ROOM} labels={chartLabels(cell.labels, concepts)} />
         </div>
-      )
-  }
+      )}
+    </div>
+  )
 }
 
 /**
@@ -337,11 +363,14 @@ function Inputs({ reads, more }: { reads: string[]; more: number }) {
   )
 }
 
-/** A stream as a shell block; a truncated one carries a chip with its size that loads the complete text in place. */
-function ShellBlock({ block, cell }: { block: Extract<DetailBlock, { kind: 'shell' }>; cell: Cell }) {
+/** A stream as a shell block; a truncated one carries a chip with its size that loads the complete text in place, and
+ * loads it by itself when a citation names a line its stored text left out. */
+function ShellBlock({ block, cell, cite }: { block: Extract<DetailBlock, { kind: 'shell' }>; cell: Cell; cite: OutputCite | null }) {
   const { ws } = useContext(CanvasContext)
+  const box = useRef<HTMLDivElement>(null)
   const [full, setFull] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
+  const omitted = !!cite && full == null && lineOmitted(block.truncated, cite.line)
   // a new run's text drops the complete text loaded for the old one
   useEffect(() => setFull(null), [block.text])
   const load = async () => {
@@ -355,9 +384,16 @@ function ShellBlock({ block, cell }: { block: Extract<DetailBlock, { kind: 'shel
       setLoading(false)
     }
   }
+  useEffect(() => {
+    if (omitted) void load()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [omitted, cite?.seq])
+  useCite(box, cite, omitted)
   return (
-    <div className="bdetail-block">
-      <pre className={block.stream === 'stderr' ? 'bdetail-shell bdetail-stderr' : 'bdetail-shell'}>{full ?? block.text}</pre>
+    <div ref={box} className="bdetail-block" data-out={block.index}>
+      <pre className={block.stream === 'stderr' ? 'bdetail-shell bdetail-stderr' : 'bdetail-shell'}>
+        <OutputText text={full ?? block.text} truncated={full == null ? block.truncated : null} />
+      </pre>
       {block.truncated && full == null && (
         <Chip kind="value" icon="expand" disabled={loading} onClick={() => void load()}>
           {loading ? <Spinner size={10} label="loading" /> : null}

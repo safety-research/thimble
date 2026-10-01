@@ -20,13 +20,21 @@ it with `WS` (the workspace directory) set and registers it as `thimble`.
                               {label, value, colour}, [] outside a view's call
     thimble.kept(ref)         in a view's reader: whether the record passes the analyst's label filter (True with none)
     thimble.kept_unit(refs)   in a view's reader: whether a unit that gathers the records `refs` passes that filter,
-                              judged by its records in the files the filter's label ran over (True when there are none)
+                              judged by its records in the files the filter's label ran over (True when it has records
+                              and none is in such a file, False when it has no records)
     thimble.view_labels()     in a view's reader: {labels, filter}, the labels that are on with their highlighted values,
                               and the filter {label, value, colour} or None
+    thimble.progress(done=None, total=None, note=None)
+                              in a view's reader: how far the call has got, which the page can show while it waits;
+                              nothing outside a view's call
     thimble.timeline(events, spacing="time")
                               events on a time axis: (time, label[, lane]) or {time, label, lane, end}; TIMELINE_MIME
                               with a text/plain listing. Clock times ("HH:MM[:SS]") are read on CLOCK_DAY, rolling over
                               midnight when a time goes backwards
+    thimble.card(type, labels=None, **args)
+                              a card of a card type (the workspace's CARD_TYPES_FILE): the arguments checked against the
+                              type's schema, the type's card.py run on its reader's index with `labels` as the labels
+                              that mark the records, shown as CARD_MIME with the type's listing as text/plain
 
 Each list may also be a DataFrame or a dict of (key, value) pairs; anything else raises a TypeError naming the forms.
 
@@ -38,15 +46,20 @@ Rows come from labels/<id>.sqlite when it reflects the labels file, else from la
 A cover over a range of records supplies their negative value. Only the standard library at import; pandas is imported
 when a DataFrame is made.
 """
+import io
 import json
+import math
+import os
 import numbers
 import re
 import sqlite3
+import threading
+import zlib
 from pathlib import Path
 
 WS = globals().get("WS")  # the workspace directory, set by the injector (notebook.kernel_argv)
 
-__all__ = ["labels", "colours", "marked", "kept", "view_labels", "diagram", "timeline"]
+__all__ = ["labels", "colours", "marked", "kept", "view_labels", "progress", "diagram", "timeline", "card"]
 
 FRAME_ROWS = 500  # rows of a table card's DataFrame the card keeps and shows (frames.ROWS_MAX)
 
@@ -59,11 +72,41 @@ _COLUMNS = ["path", "line", "effective", "label", "source", "verdict", "confiden
 
 # A label class's colour by index (concepts.PALETTE): 0 is --label-none, the grey of a negative class; 1..12 are
 # --label-1..12 (styles/tokens.css).
-LABEL_COLOURS = ["#a09c93", "#0072b2", "#e69f00", "#009e73", "#cc79a7", "#d55e00", "#56b4e9", "#8a6d3b", "#6a5acd", "#aa3377", "#999933",
-                 "#6a3d9a", "#d62728"]
+LABEL_COLOURS = ["#a09c93", "#025ac3", "#d0750a", "#08632f", "#1392d4", "#897301", "#009c85", "#844500", "#013c77", "#2aa02b", "#025a7c",
+                 "#622b01", "#0389a0"]
 # A value a label does not define: --viz-ink-1, -2 and -4 in turn (the third step is the label grey's near twin).
 NEUTRAL_COLOURS = ["#1b1a18", "#6b675f", "#cfcbc2"]
 _QUIET = frozenset({"no", "none", "other", "no match", "not", "neither", "n/a", "unknown"})  # concepts.QUIET_VALUES
+_LEFTOVER = frozenset({"no", "not", "none", "neither", "nothing", "other", "unrelated", "irrelevant"})  # concepts.LEFTOVER_WORDS
+
+
+def _negative(value: str, index: int, n: int) -> bool:
+    """concepts.is_negative: a quiet word, the second of two, or a last value of more that starts with a leftover word."""
+    v = value.strip().lower()
+    return v in _QUIET or (n == 2 and index == 1) or (n > 2 and index == n - 1 and v.split(" ", 1)[0] in _LEFTOVER)
+
+
+def _oklab(hex_colour: str) -> tuple:
+    """A colour's place in OKLab, where distance is how different two colours look."""
+    def lin(x: int) -> float:
+        c = x / 255
+        return c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4
+
+    r, g, b = (lin(int(hex_colour[i:i + 2], 16)) for i in (1, 3, 5))
+    lms = [(0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * b) ** (1 / 3),
+           (0.2119034982 * r + 0.6806995451 * g + 0.1073969566 * b) ** (1 / 3),
+           (0.0883024619 * r + 0.2817188376 * g + 0.6299787005 * b) ** (1 / 3)]
+    return tuple(sum(w * x for w, x in zip(row, lms)) for row in ((0.2104542553, 0.7936177850, -0.0040720468),
+                                                                  (1.9779984951, -2.4285922050, 0.4505937099),
+                                                                  (0.0259040371, 0.7827717662, -0.8086757660)))
+
+
+_LAB = [_oklab(h) for h in LABEL_COLOURS]
+
+
+def most_distinct(taken, candidates) -> int:
+    """The candidate colour index that looks most unlike the nearest of `taken`; the lowest index on a tie."""
+    return max(candidates, key=lambda m: (min((math.dist(_LAB[m], _LAB[t]) for t in taken), default=0.0), -m))
 
 
 def _ws() -> Path:
@@ -117,9 +160,9 @@ def _classes(k: dict) -> list:
 
 def _fill_colours(ks: list) -> list:
     """Give every class without a colour the one concepts.fill_colours gives it, in place: while a colour is free, one no
-    class of any label has, a label's first class takes the first free one and a further class the first free one from
-    its place after its label's first colour; else a first class takes the colours in turn and a further class the one
-    at its place. A negative class takes the grey, and a label's classes do not repeat a colour while one remains."""
+    class of any label has, a label's first class takes the first free one; else the colours in turn. A further class
+    takes the free colour, else any, that looks most unlike its label's colours (most_distinct). A negative class takes
+    the grey, and a label's classes do not repeat a colour while one remains."""
     n_colours = len(LABEL_COLOURS) - 1
     used = {c[1] for k in ks for c in k["classes"] if c[1]}
 
@@ -141,9 +184,8 @@ def _fill_colours(ks: list) -> list:
         taken = {base} if cs[0][1] else set()
         for i, c in enumerate(cs[1:], 1):
             if c[1] is None:
-                negative = c[0].lower() in _QUIET or (len(cs) == 2 and i == 1)
-                at = (base - 1 + i) % n_colours + 1
-                c[1] = 0 if negative else free(at) or at
+                mine = [m for m in range(1, n_colours + 1) if m not in taken]
+                c[1] = 0 if _negative(c[0], i, len(cs)) else most_distinct(taken, [m for m in mine if m not in used] or mine or [base])
             if c[1] and c[1] in taken:
                 c[1] = next((m for m in ((c[1] - 1 + j) % n_colours + 1 for j in range(1, n_colours)) if m not in taken), c[1])
             if c[1]:
@@ -256,6 +298,30 @@ def _store_parts(db: Path):
     return rows, covers
 
 
+def _store_rows(db: Path):
+    """_store_parts with the rows as an iterator over the query, so a large label is never held as a list of rows."""
+    conn = sqlite3.connect(f"file:{db}?mode=ro", uri=True, timeout=5.0)
+    try:
+        try:
+            covers = conn.execute("SELECT path, first, last, value, source FROM covers ORDER BY rowid").fetchall()
+        except sqlite3.Error:  # a store without covers
+            covers = []
+        cur = conn.execute("SELECT path, line, label, source, analyst, confidence, ref FROM current "
+                           "WHERE label IS NOT NULL OR analyst IS NOT NULL ORDER BY rowid")
+    except BaseException:
+        conn.close()
+        raise
+
+    def rows():
+        try:
+            while batch := cur.fetchmany(10_000):
+                yield from batch
+        finally:
+            conn.close()
+
+    return rows(), covers
+
+
 def _rows_from_store(db: Path, negatives: bool = False):
     return _with_covers(*_store_parts(db), negatives)
 
@@ -281,10 +347,12 @@ def _rows_from_jsonl(jsonl: Path, negatives: bool = False):
 
 
 def _jsonl_parts(jsonl: Path):
-    """(rows, covers) of the labels file, as _store_parts gives them for the store."""
+    """(rows, covers) of the labels file, as _store_parts gives them for the store. A clear line finds the rows on its
+    lines through `at`, so a run written as many cleared blocks reads in one pass."""
     model = {}
     analyst = {}
     covers: list = []
+    at: dict = {}  # path -> {line: the ref, or a list of the refs, of the classifier rows there}
     try:
         f = open(jsonl, "r", encoding="utf-8")
     except OSError:
@@ -306,9 +374,14 @@ def _jsonl_parts(jsonl: Path):
                     a, b = int(r.get("from") or 1), (2**62 if r.get("to") is None else int(r["to"]))
                 except (TypeError, ValueError):
                     continue
-                if r.get("clear"):
-                    for ref in [ref for ref in model if _ref_parts(ref)[0] == where and a <= (_ref_parts(ref)[1] or 0) <= b]:
-                        del model[ref]
+                if r.get("clear") and (got := at.get(where)):
+                    span = range(a, b + 1) if b - a < len(got) else [n for n in got if a <= n <= b]
+                    for n in span:
+                        slot = got.pop(n, None)
+                        for ref in ([slot] if isinstance(slot, str) else slot or ()):
+                            m = model.get(ref)
+                            if m is not None and m[0] == where and m[1] == n:
+                                del model[ref]
                 covers = _trim(covers, where, a, b)
                 if r.get("cover") and r.get("value") is not None:
                     covers.append((where, a, b, str(r["value"]), r.get("source")))
@@ -317,17 +390,39 @@ def _jsonl_parts(jsonl: Path):
                 continue
             ref = str(r["ref"])
             ref = "card:" + ref[len("cell:"):] if ref.startswith("cell:") else ref  # `cell:` prefix read as `card:` (labels_store.canon_ref)
-            (analyst if r.get("source") == "analyst" else model)[ref] = r
+            path, n = _row_line(ref, r)
+            if r.get("source") == "analyst":
+                analyst[ref] = (path, n, r.get("label"))
+                continue
+            model[ref] = (path, n, r.get("label"), r.get("source"), r.get("confidence"))
+            if path is not None and n:
+                got = at.setdefault(path, {})
+                slot = got.get(n)
+                if slot is None:
+                    got[n] = ref
+                elif isinstance(slot, str):
+                    if slot != ref:
+                        got[n] = [slot, ref]
+                elif ref not in slot:
+                    slot.append(ref)
     out = []
-    for ref, r in model.items():
+    for ref, (path, n, label, source, confidence) in model.items():
         a = analyst.get(ref)
-        path, line = _ref_parts(ref)
-        out.append((path, line, r.get("label"), r.get("source"), a.get("label") if a else None, r.get("confidence"), ref))
-    for ref, a in analyst.items():
+        out.append((path, n, label, source, a[2] if a else None, confidence, ref))
+    for ref, (path, n, label) in analyst.items():
         if ref not in model:
-            path, line = _ref_parts(ref)
-            out.append((path, line, None, None, a.get("label"), None, ref))
+            out.append((path, n, None, None, label, None, ref))
     return out, covers
+
+
+def _row_line(ref: str, row: dict):
+    """_ref_parts, with the line a row names (`line`) for a record whose ref carries none, such as a CSV row
+    (labels_store.row_line)."""
+    path, line = _ref_parts(ref)
+    given = row.get("line")
+    if line is None and path is not None and isinstance(given, int) and not isinstance(given, bool) and given >= 1:
+        line = given
+    return path, line
 
 
 def labels(name=None, negatives=False):
@@ -335,6 +430,8 @@ def labels(name=None, negatives=False):
     negatives=True)."""
     import pandas as pd
 
+    if (_view_ctx or {}).get("probe") and (name is None or name == PROBE_NAME):
+        return _probe_labels(pd, name, negatives)
     if name is None:
         ks = [k for k in _concepts() if not k["superseded_by"]]
         return pd.DataFrame([{"name": k["name"], "id": k["id"], "kind": k["kind"], "unit": k["unit"], "values": k["values"],
@@ -382,12 +479,144 @@ def colours(name, values=None):
 # probe {"probe": n, "filter": bool}, a test label that marks every record whose line is a multiple of n. Outside a
 # view's call it is None, and marked() and kept() answer as if no label were on.
 _view_ctx = None
+_view_paths: list = []  # the claimed files of the view whose reader call is running, but those it shows whole
+# During a view's records call (view_host) a set of the refs kept() and kept_unit() refused, which thimble counts above
+# the view as hidden by the filter; None outside one.
+_left_out = None
 PROBE_NAME = "test label"
 PROBE_ID = "test-label"
 # the colour the analyst's first label takes (--label-1), so the pictures show a view's own colour that clashes with a
 # label where the analyst would see it
 PROBE_COLOUR = LABEL_COLOURS[1]
-_MEMBERS: dict = {}  # labels file -> (the files' signature, ({ref: value}, {path: [(first, last, value)]}, {path}))
+# labels file -> (the files' signature, (_Values, {path: [(first, last, value)]}, {path})), the most recently used last
+_MEMBERS: dict = {}
+# above the labels any context holds: labels that do not all fit here are read again on every call
+MEMBERS_KEPT = 64
+_MEMBERS_LOCK = threading.Lock()  # guards _MEMBERS and _READING
+_READING: dict = {}  # labels file -> the lock held while one thread reads its members, which the others wait for
+DENSE_MIN = 1 / 16  # a file's line refs fill at least this share of its lines up to the last: one code per line
+
+
+class _Values:
+    """{ref: value} of one label, kept small: the values of `<path>#L<n>` refs as one code per line of each file (bytes
+    indexed by line where they are dense, else sorted line numbers beside their codes), every other ref in a dict. Reads
+    as a read-only mapping of the refs to their values."""
+
+    def __init__(self) -> None:
+        self._names: list = [None]  # code -> value; code 0 is none
+        self._codes: dict = {}
+        self._pending: dict = {}  # path -> (lines, codes, whether a line that has a code keeps it), in the order added
+        self._lines: dict = {}  # path -> codes indexed by line, or (lines ascending, their codes)
+        self._other: dict = {}
+        self._n = 0
+
+    def _code(self, value) -> int:
+        c = self._codes.get(value)
+        if c is None:
+            c = self._codes[value] = len(self._names)
+            self._names.append(value)
+        return c
+
+    def add(self, ref: str, value, keep: bool = False) -> None:
+        """Give the ref its value, a later call winning, or with `keep` only when it has none yet; seal() packs them."""
+        path, line = _ref_parts(ref)
+        if line is None or path is None or ref != f"{path}#L{line}":
+            if not keep or ref not in self._other:
+                self._other[ref] = value
+            return
+        self.add_line(path, line, value, keep)
+
+    def add_line(self, path: str, line: int, value, keep: bool = False) -> None:
+        """add() for the ref `<path>#L<line>`."""
+        got = self._pending.get(path)
+        if got is None:
+            from array import array
+
+            got = self._pending[path] = (array("Q"), array("I"), bytearray())
+        got[0].append(line)
+        got[1].append(self._code(value))
+        got[2].append(1 if keep else 0)
+
+    def seal(self) -> "_Values":
+        from array import array
+
+        wide = len(self._names) > 256
+        for path, (lines, codes, keeps) in self._pending.items():
+            top = max(lines)
+            if len(lines) >= top * DENSE_MIN:
+                out = array("I", bytes(4 * (top + 1))) if wide else bytearray(top + 1)
+                for n, c, k in zip(lines, codes, keeps):
+                    if not k or not out[n]:
+                        out[n] = c
+                self._lines[path] = out if wide else bytes(out)
+                self._n += (top + 1) - out.count(0)
+            else:
+                last: dict = {}
+                for n, c, k in zip(lines, codes, keeps):
+                    if not k or n not in last:
+                        last[n] = c
+                order = sorted(last)
+                self._lines[path] = (array("Q", order), array("I", (last[n] for n in order)))
+                self._n += len(order)
+        self._pending = {}
+        self._n += len(self._other)
+        return self
+
+    def _line_code(self, path: str, line: int) -> int:
+        got = self._lines.get(path)
+        if got is None:
+            return 0
+        if isinstance(got, tuple):
+            from bisect import bisect_left
+
+            order, codes = got
+            i = bisect_left(order, line)
+            return codes[i] if i < len(order) and order[i] == line else 0
+        return got[line] if 0 < line < len(got) else 0
+
+    def get(self, ref, default=None):
+        ref = str(ref)
+        path, sep, tail = ref.rpartition("#L")
+        if sep and tail.isascii() and tail.isdigit() and tail[0] != "0":
+            c = self._line_code(path, int(tail))
+            if c:
+                return self._names[c]
+        return self._other.get(ref, default)
+
+    def __getitem__(self, ref):
+        v = self.get(ref, _ABSENT)
+        if v is _ABSENT:
+            raise KeyError(ref)
+        return v
+
+    def __contains__(self, ref) -> bool:
+        return self.get(ref, _ABSENT) is not _ABSENT
+
+    def __len__(self) -> int:
+        return self._n
+
+    def items(self):
+        for path, got in self._lines.items():
+            if isinstance(got, tuple):
+                for n, c in zip(*got):
+                    yield f"{path}#L{n}", self._names[c]
+            else:
+                for n, c in enumerate(got):
+                    if c:
+                        yield f"{path}#L{n}", self._names[c]
+        yield from self._other.items()
+
+    def __iter__(self):
+        return (ref for ref, _ in self.items())
+
+    def keys(self):
+        return iter(self)
+
+    def values(self):
+        return (v for _, v in self.items())
+
+
+_ABSENT = object()
 
 
 def _signature(*paths: Path) -> tuple:
@@ -404,28 +633,55 @@ def _signature(*paths: Path) -> tuple:
 def _members(jsonl) -> tuple:
     """({ref: effective value}, {path: [(first, last, value)]}, {path}) of one label: its rows' values, its covers, and
     the files it left a value on. Read from its store when that is fresh, else its labels file, and kept until either
-    file changes, so a reader's lookups cost a dict access each."""
+    file changes (at most MEMBERS_KEPT labels), so a reader's lookups cost a lookup each. Threads that ask for the same
+    label at once wait for the first one's read."""
     jsonl = Path(jsonl)
-    db = jsonl.with_suffix(".sqlite")
-    sig = _signature(jsonl, db)
-    hit = _MEMBERS.get(str(jsonl))
-    if hit is not None and hit[0] == sig:
-        return hit[1]
-    rows, covers = _store_parts(db) if _store_fresh(jsonl, db) else _jsonl_parts(jsonl)
-    values = {}
+    key = str(jsonl)
+    with _MEMBERS_LOCK:
+        reading = _READING.setdefault(key, threading.Lock())
+    with reading:
+        db = jsonl.with_suffix(".sqlite")
+        sig = _signature(jsonl, db)
+        with _MEMBERS_LOCK:
+            hit = _MEMBERS.pop(key, None)
+            if hit is not None and hit[0] == sig:
+                _MEMBERS[key] = hit
+                return hit[1]
+        members = _read_members(jsonl, db)
+        with _MEMBERS_LOCK:
+            _MEMBERS[key] = (sig, members)
+            while len(_MEMBERS) > MEMBERS_KEPT:
+                _READING.pop(gone := next(iter(_MEMBERS)), None)
+                del _MEMBERS[gone]
+        return members
+
+
+def _read_members(jsonl: Path, db: Path) -> tuple:
+    rows, covers = _store_rows(db) if _store_fresh(jsonl, db) else _jsonl_parts(jsonl)
+    values = _Values()
     paths = set()
-    for path, _line, label, _source, verdict, _confidence, ref in rows:
+    starts = []  # a record of a CSV or a JSON document by the line it starts on, as a view that reads its lines names it
+    for path, line, label, _source, verdict, _confidence, ref in rows:
         v = verdict if verdict is not None else label
         if v is not None:
-            values[str(ref)] = str(v)
+            ref = str(ref)
+            if path is not None and line is not None and ref == f"{path}#L{line}":
+                values.add_line(path, line, str(v))
+            else:
+                values.add(ref, str(v))
             if path is not None:
                 paths.add(str(path))
+                if line is not None and _ref_parts(str(ref))[1] is None:
+                    starts.append((f"{path}#L{int(line)}", str(v)))
+    rows = None
+    for ref, v in starts:
+        values.add(ref, v, keep=True)
+    values.seal()
     spans: dict = {}
     for c in covers:
         if c[3] is not None:
             spans.setdefault(c[0], []).append((int(c[1]), int(c[2]), str(c[3])))
             paths.add(str(c[0]))
-    _MEMBERS[str(jsonl)] = (sig, (values, spans, paths))
     return values, spans, paths
 
 
@@ -442,6 +698,8 @@ def _value_of(label: dict, ref: str):
     """The label's effective value on the record `ref`: its row's, else the value of the cover that holds its line."""
     values, spans, _paths = _label_members(label)
     v = values.get(ref)
+    if v is None:
+        v = values.get(_canon(ref))
     if v is not None:
         return v
     path, line = _ref_parts(ref)
@@ -450,13 +708,78 @@ def _value_of(label: dict, ref: str):
     return next((value for a, b, value in spans.get(path, ()) if a <= line <= b), None)
 
 
+_PDF_PAGE = re.compile(r"^(.+\.[Pp][Dd][Ff])#(?:p|page=?)(\d+)$")
+
+
+def _canon(ref: str) -> str:
+    """A record's ref as label rows key it (records.canon): a PDF's `#page=<n>` as `#p<n>`."""
+    m = _PDF_PAGE.match(ref)
+    return f"{m[1]}#p{int(m[2])}" if m else ref
+
+
+_LINES: dict = {}  # path -> ((mtime_ns, size), line count)
+
+
+def _line_count(path: str) -> int:
+    try:
+        st = os.stat(path)
+    except OSError:
+        return 0
+    sig = (st.st_mtime_ns, st.st_size)
+    hit = _LINES.get(path)
+    if hit is not None and hit[0] == sig:
+        return hit[1]
+    n = 0
+    with io.open(path, "rb") as f:
+        head = f.read(4096)
+        if b"\0" in head:
+            n = 0
+        else:
+            f.seek(0)
+            last = b""
+            for block in iter(lambda: f.read(1 << 20), b""):
+                n += block.count(b"\n")
+                last = block
+            if last and not last.endswith(b"\n"):
+                n += 1
+    _LINES[path] = (sig, n)
+    return n
+
+
+def _probe_labels(pd, name, negatives):
+    """thimble.labels() under the test label: the list holds it alone, and its matches are the lines of the view's
+    claimed files whose number is a multiple of the probe's, with every other line under negatives=True."""
+    every = int(_view_ctx["probe"])
+    if name is None:
+        return pd.DataFrame([{"name": PROBE_NAME, "id": PROBE_ID, "kind": "regex", "unit": "line", "values": [PROBE_NAME],
+                              "n_labeled": None}], columns=["name", "id", "kind", "unit", "values", "n_labeled"])
+    out = []
+    for path in _view_paths:
+        for line in range(1, _line_count(path) + 1):
+            hit = line % every == 0
+            if hit or negatives:
+                value = PROBE_NAME if hit else None
+                out.append((path, line, value, value, "probe", None, None, f"{path}#L{line}"))
+    df = pd.DataFrame(out, columns=_COLUMNS, dtype=object)
+    df["line"] = pd.array(df["line"].tolist(), dtype="Int64")
+    df["confidence"] = pd.to_numeric(df["confidence"], errors="coerce")
+    return df
+
+
 def _probed(ref: str, every) -> bool:
+    """Whether the test label marks the record: a line whose number is a multiple of `every`, or a record of another
+    reader (a database row, a page, a JSON value, a CSV row) whose ref's checksum is."""
     _path, line = _ref_parts(ref)
-    return bool(line) and line % int(every) == 0
+    if line:
+        return line % int(every) == 0
+    if "#" not in ref or ref.startswith(("view:", "card:", "cell:")):
+        return False
+    return zlib.crc32(_canon(ref).encode("utf-8")) % int(every) == 0
 
 
 def marked(ref):
-    """The marks of the labels that are on for the record `ref` (`<path>#L<n>`): each {label, value, colour} whose value
+    """The marks of the labels that are on for the record `ref` (`<path>#L<n>`, or the ref of a record of another reader
+    such as `<db>#<table>/<key>` or `<pdf>#p<n>`): each {label, value, colour} whose value
     the record takes and the analyst highlights, in the labels' order. [] outside a view's reader call."""
     return _marked(_view_ctx, ref)
 
@@ -464,14 +787,40 @@ def marked(ref):
 def kept(ref):
     """Whether the record `ref` passes the analyst's label filter: True with no filter or when the filter's label left
     no value in the record's file, else whether the label takes the filter's value on it."""
-    return _kept(_view_ctx, ref)
+    out = _kept(_view_ctx, ref)
+    if not out and _left_out is not None:
+        _left_out.add(str(ref))
+    return out
 
 
 def kept_unit(refs):
-    """Whether a unit that gathers the records `refs` passes the analyst's label filter: True with no filter or when the
-    filter's label left no value in any of their files, else whether the label takes the filter's value on one of its
-    records in a file it ran over. Records of other files never keep a unit, since kept holds for all of them."""
-    return _kept_unit(_view_ctx, refs)
+    """Whether a unit that gathers the records `refs` passes the analyst's label filter: True with no filter; with one,
+    False for a unit with no records, True when the filter's label left no value in any of their files, else whether
+    the label takes the filter's value on one of its records in a file it ran over. Records of other files never keep a
+    unit, since kept holds for all of them."""
+    refs = [str(r) for r in refs]
+    out = _kept_unit(_view_ctx, refs)
+    if not out and _left_out is not None:
+        _left_out.update(refs)
+    return out
+
+
+# A view's reader call sets _progress (view_host) to the function that records its progress.
+_progress = None
+
+
+def progress(done=None, total=None, note=None):
+    """Report how far a view's reader call has got: `done` of `total` steps, and a few words of what it does."""
+    fn = _progress
+    if fn is None:
+        return
+    fields = {}
+    for k, v in (("done", done), ("total", total)):
+        if isinstance(v, numbers.Real) and not isinstance(v, bool) and math.isfinite(v):
+            fields[k] = v
+    if note is not None:
+        fields["note"] = " ".join(str(note).split())[:120]
+    fn(**fields)
 
 
 def view_labels():
@@ -517,6 +866,8 @@ def _kept_unit(ctx, refs) -> bool:
     if not f:
         return True
     refs = [str(r) for r in refs]
+    if not refs:
+        return False
     if ctx.get("probe"):
         return any(_probed(r, ctx["probe"]) for r in refs)
     k = next((x for x in ctx.get("labels") or [] if x.get("id") == f.get("id")), None)
@@ -719,6 +1070,170 @@ def timeline(events=(), spacing="time"):
     lines = [f"timeline: {len(evs)} events" + (", evenly spaced" if spacing == "even" else "")]
     lines += [f"{t}  {ev['label']}" + (f" [{ev['lane']}]" if ev.get("lane") else "") for t, ev in zip(given, evs)]
     _show({TIMELINE_MIME: {"events": evs, **({"spacing": "even"} if spacing == "even" else {})},
+           "text/plain": "\n".join(lines)})
+
+
+# Card types (backend cardtypes.py): a viewer folder whose view.json has a `card` block. The server writes the types a
+# workspace has to CARD_TYPES_FILE, each with its argument schema, its files and its reader's index as the views kernel
+# keys and caches it, and card() runs the type's card.py on that index in the card's own kernel.
+CARD_MIME = "application/vnd.thimble.card+json"
+CARD_TYPES_FILE = "card_types.json"
+REGISTRY_DIR = "registry"  # kernel_wrap.REGISTRY_DIR: the workspace's folder that holds CARD_TYPES_FILE, read-only in a wrapped kernel
+CARD_DATA_MAX = 256 * 1024  # bytes of JSON a card's data may take
+_CARD_MODULES: dict = {}  # card.py's path -> ((mtime_ns, size), module)
+_JSON_TYPES = {"string": str, "integer": numbers.Integral, "number": numbers.Real, "boolean": bool, "array": list,
+               "object": dict}
+_TYPE_WORDS = {"string": "a string", "integer": "a whole number", "number": "a number", "boolean": "True or False",
+               "array": "a list", "object": "a dict"}
+
+
+def _card_types() -> dict:
+    """{name: type} as the server last wrote them for this workspace; {} before it did."""
+    try:
+        with open(_ws() / REGISTRY_DIR / CARD_TYPES_FILE, encoding="utf-8") as f:
+            got = json.load(f)
+    except (OSError, ValueError):
+        return {}
+    types = got.get("types") if isinstance(got, dict) else None
+    return types if isinstance(types, dict) else {}
+
+
+def _allowed(schema: dict) -> str:
+    """What a schema allows, in words, for an error."""
+    if "enum" in schema:
+        return "one of " + ", ".join(repr(v) for v in schema["enum"])
+    t = schema.get("type")
+    if t == "array" and isinstance(schema.get("items"), dict):
+        return f"a list, each {_allowed(schema['items'])}"
+    if t == "object" and schema.get("properties"):
+        need = set(schema.get("required") or [])
+        return "a dict of " + ", ".join(k if k in need else f"{k} (optional)" for k in schema["properties"])
+    return _TYPE_WORDS.get(t, "any value")
+
+
+def _checked(schema: dict, value, where: str):
+    """`value` checked against a JSON Schema subset (type, enum, items, properties, required, additionalProperties,
+    default), each object's missing properties that have a default filled in; ValueError saying at `where` what is
+    allowed. A tuple, a set or anything with tolist() (a pandas Series) is read as a list."""
+    t = schema.get("type")
+    if t == "array" and not isinstance(value, (str, bytes, dict)):
+        if isinstance(value, (tuple, set, frozenset)):
+            value = list(value)
+        elif callable(getattr(value, "tolist", None)):
+            value = value.tolist()
+    if t in _JSON_TYPES and (not isinstance(value, _JSON_TYPES[t]) or (t in ("integer", "number") and isinstance(value, bool))):
+        raise ValueError(f"{where} is {_allowed(schema)}, not {value!r}")
+    if "enum" in schema and value not in schema["enum"]:
+        raise ValueError(f"{where} is {_allowed(schema)}, not {value!r}")
+    if t == "array":
+        return [_checked(schema.get("items") or {}, v, f"{where}[{i}]") for i, v in enumerate(value)]
+    if t == "object":
+        props = schema.get("properties") or {}
+        out = {}
+        for k, v in value.items():
+            if k not in props and schema.get("additionalProperties") is False:
+                raise ValueError(f"{where} has no `{k}`; the keys are {', '.join(props) or 'none'}")
+            out[k] = _checked(props.get(k) or {}, v, f"`{k}`" if where == "the arguments" else f"{where}.{k}")
+        for k in schema.get("required") or []:
+            if k not in out:
+                raise ValueError(f"{where} needs `{k}`")
+        for k, p in props.items():
+            if k not in out and isinstance(p, dict) and "default" in p:
+                out[k] = p["default"]
+        return out
+    return value
+
+
+def _views_host(path: str):
+    """view_host.py (the reader contract's loader and index cache) as the module `_thimble_views`, loaded again when
+    its source changed, versioned as views.snippet versions it."""
+    import hashlib
+    import sys
+    import types
+
+    src = Path(path).read_text("utf-8")
+    version = hashlib.sha1(src.encode("utf-8")).hexdigest()[:12]
+    mod = sys.modules.get("_thimble_views")
+    if getattr(mod, "VERSION", None) != version:
+        mod = types.ModuleType("_thimble_views")
+        exec(src, mod.__dict__)  # noqa: S102 — thimble's own module source
+        mod.VERSION = version
+        sys.modules["_thimble_views"] = mod
+    return mod
+
+
+def _card_module(slug: str, path: str):
+    """A type's card.py as a module, loaded again when the file's mtime or size changed."""
+    import importlib.util
+    import os
+
+    st = os.stat(path)
+    sig = (st.st_mtime_ns, st.st_size)
+    hit = _CARD_MODULES.get(path)
+    if hit is not None and hit[0] == sig:
+        return hit[1]
+    spec = importlib.util.spec_from_file_location("thimble_card_" + slug.replace("-", "_"), path)
+    if spec is None or spec.loader is None:
+        raise ImportError(f"cannot load {path}")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    for fn in ("card", "listing"):
+        if not callable(getattr(mod, fn, None)):
+            raise AttributeError(f"{path} defines no function {fn}()")
+    _CARD_MODULES[path] = (sig, mod)
+    return mod
+
+
+def _card_label(k: dict) -> dict:
+    """A label as a view's labels context holds it (views.labels_context), read from the workspace, with every value but
+    the negative one marking its records, whatever the analyst highlights in Files: a card's records follow its code."""
+    n = len(k["classes"])
+    lit = {v: not _negative(v, i, n) for i, (v, _c) in enumerate(k["classes"])}
+    first = next((c for v, c in k["classes"] if lit[v]), None)
+    return {"id": k["id"], "name": k["name"], "colour": LABEL_COLOURS[first if first is not None else 1],
+            "values": [{"name": v, "colour": LABEL_COLOURS[c or 0], "highlight": lit[v]} for v, c in k["classes"]],
+            "jsonl": str(_ws() / "labels" / f"{k['id']}.jsonl")}
+
+
+def card(type, labels=None, **args):
+    """Show a card of the card type `type`, whose records `labels` (label names) mark and colour, with the type's own
+    keyword arguments. Returns nothing, so the card shows the graphic once. The labels context holds the named labels
+    alone: labels turned on later and the Files filter mark and dim what the card drew, they choose nothing."""
+    global _view_ctx
+    types = _card_types()
+    t = (types.get(type) or next((x for x in types.values() if type in (x.get("aliases") or [])), None)
+         if isinstance(type, str) else None)
+    if t is None:
+        raise ValueError(f"thimble.card: no card type {type!r}; the types here are {', '.join(map(repr, types)) or 'none yet'}")
+    if isinstance(labels, str):
+        labels = [labels]
+    ks = [_find(n) for n in (labels or [])]
+    try:
+        args = _checked(t.get("args") or {"type": "object"}, args, "the arguments")
+    except ValueError as e:
+        raise ValueError(f"thimble.card({type!r}): {e}") from None
+    for k in ks:
+        if all(x["id"] != k["id"] for x in _LABELS_READ):
+            _LABELS_READ.append({"id": k["id"], "rev": k["rev"]})
+    host = _views_host(t["host"])
+    reader = host._reader(t["slug"], t["reader"])
+    index, _built = host._index(t["slug"], reader, t["fp"], t["paths"], t["cache"])
+    mod = _card_module(t["slug"], t["card"])
+    mod.reader = reader
+    before = _view_ctx
+    _view_ctx = {"labels": [_card_label(k) for k in ks], "filter": None}
+    try:
+        data = json.loads(json.dumps(mod.card(index, **args), ensure_ascii=False, default=str))
+        lines = [" ".join(str(x).split()) for x in mod.listing(data)]
+    finally:
+        _view_ctx = before
+    size = len(json.dumps(data, ensure_ascii=False).encode("utf-8"))
+    if size > CARD_DATA_MAX:
+        raise ValueError(f"thimble.card({type!r}): the card's data is {size:,} bytes, and a card holds {CARD_DATA_MAX:,} "
+                         f"at most; narrow its records")
+    _show({CARD_MIME: {"type": t["slug"], "view": t.get("view", t["slug"]), "version": str(t.get("version") or ""),
+                       "args": args, "size": t.get("size"),
+                       "labels": [{"id": k["id"], "name": k["name"]} for k in ks], "data": data},
            "text/plain": "\n".join(lines)})
 
 

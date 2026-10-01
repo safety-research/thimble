@@ -2,7 +2,7 @@
 // feedback.py writes them to browser-log.jsonl). An in-memory ring buffer of the last MAX_ENTRIES, fed by console.error,
 // uncaught errors, unhandled rejections and failed fetches (status 400+). Nothing leaves the tab until the analyst
 // prepares a report, and the backend removes anything that looks like a key or token.
-import { errorText } from './telemetry'
+import { benignError, errorText } from './telemetry'
 
 export type ProblemKind = 'console' | 'error' | 'rejection' | 'request'
 
@@ -120,6 +120,7 @@ export function installProblemLog(win: Win = window as unknown as Win): boolean 
   }
   win.addEventListener('error', (e) => {
     try {
+      if (benignError(e?.message)) return
       recordProblem({ kind: 'error', text: errorText(e?.message, e?.error) ?? 'uncaught error' })
     } catch {
       /* never */

@@ -18,6 +18,7 @@ import json
 import os
 import re
 import shutil
+import stat
 import sys
 import time
 from dataclasses import dataclass
@@ -98,17 +99,30 @@ def registrations(data: Path) -> dict[str, tuple[str, Path | None, Path | None]]
 
 
 def last_used(path: Path) -> float | None:
-    """The newest modification time of `path` or anything under it; None when it cannot be read."""
+    """The newest modification time of `path` or anything under it; None when it cannot be read. Links are not
+    stat'ed: a link is made with its folder's mtime and keeps it, and the folder is counted. A workspace's scratch
+    mirror holds a link for every corpus file."""
     try:
         newest = path.stat().st_mtime
     except OSError:
         return None
-    for top, subdirs, files in os.walk(path):
-        for n in (*subdirs, *files):
-            try:
-                newest = max(newest, os.lstat(os.path.join(top, n)).st_mtime)
-            except OSError:
-                pass
+    stack = [str(path)]
+    while stack:
+        try:
+            it = os.scandir(stack.pop())
+        except OSError:
+            continue
+        with it:
+            for e in it:
+                try:
+                    if e.is_symlink():
+                        continue
+                    st = e.stat(follow_symlinks=False)
+                except OSError:
+                    continue
+                newest = max(newest, st.st_mtime)
+                if stat.S_ISDIR(st.st_mode):
+                    stack.append(e.path)
     return newest
 
 

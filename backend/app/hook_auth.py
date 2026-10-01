@@ -10,6 +10,18 @@ proof with 401. A hook or shim that finds no server.json, no token in it, or no 
 nothing or believes nothing, so a process that holds the recorded port learns nothing from the plugin and cannot answer
 it.
 
+A program thimble runs for one of its agents (harness.py) cannot read server.json. It gets a token of its own instead,
+`<id>.<secret>`, valid while it runs and only on the routes its grant allows (grant): its requests carry AGENT_HEADER
+with the id and prove the whole token the same way, and the answer proves it back. The request's scope then holds the
+id under AGENT_SCOPE, so a route acts for that agent alone.
+
+A session thimble starts tells its tool calls apart from main's by THIMBLE_SESSION, which its shim sends with each
+call. Claude Code's background service hands one session's environment on to others (config.session_env), so that
+name alone proves nothing: each session also gets THIMBLE_SESSION_TOKEN in its --settings `env`, a nonce and its
+HMAC-SHA256 under SESSION_KEY with the workspace and the session's key (session_token), and the server believes the
+name only with a token it signed for that workspace (session_proven). The key is a file in thimble's home that no agent
+may read (userconf.private_paths), and it outlives a restart, as the background sessions do.
+
 A change of permission modes, and an answer to a permission request, must come from the analyst's browser (analyst).
 The dashboard link carries the `ui_key` of server.json after `#k=`; the page trades it for an HttpOnly, SameSite=Strict
 cookie named for this server's port (claim, ui_cookie), which such a request must carry. Only the analyst's terminal
@@ -18,12 +30,17 @@ notebook kernel in bubblewrap that the model writes cells for, can do neither.
 """
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import hmac
 import json
 import os
 import re
+import secrets
+import tempfile
+import threading
 from pathlib import Path
+from typing import Callable
 
 from starlette.datastructures import Headers, MutableHeaders
 from starlette.requests import Request
@@ -37,9 +54,14 @@ SHIM_PATHS = frozenset({"/api/channel", "/api/channel/permission"})
 TOOL_PREFIX = "/api/tools/"  # POST /api/tools/<name>; GET /api/tools/holdings is the CLI's and stays open
 SESSION_HOOK_PATHS = re.compile(r"/api/ws/[^/]+/(sessions/permission|calls/ref)")
 NONCE_HEADER = "x-thimble-nonce"
+AGENT_HEADER = "x-thimble-agent"  # the id of an agent's token (module note)
+AGENT_SCOPE = "thimble_agent"  # where a request proven with an agent's token keeps its id, in the ASGI scope's state
 AUTH_HEADER = "x-thimble-auth"
 PROOF_HEADER = "x-thimble-proof"
 NONCE_MAX = 128  # characters
+SESSION_KEY = "session.key"  # in thimble's home: the secret session tokens are signed with (module note)
+SESSION_TOKEN_ENV = "THIMBLE_SESSION_TOKEN"
+_secret_lock = threading.Lock()
 UI_COOKIE = "thimble-ui"  # the cookie's name before the port was added to it (ui_cookie), which browsers still hold
 UI_COOKIE_AGE_S = 400 * 24 * 3600  # the longest a browser keeps a cookie
 # The cookie the browser holds (claim) and analyst() and LocalWriteGuard check. A cookie is not bound to a port, so the
@@ -60,6 +82,32 @@ WRITE_REFUSED = ("open thimble from the link shown under /thimble's reply, or pr
                  " make changes")
 
 _cache: tuple[tuple[str, int, int], dict] | None = None
+# the tokens of the programs thimble runs, by id: (the whole token, whether its grant allows a method and path)
+_agents: dict[str, tuple[str, Callable[[str, str], bool]]] = {}
+
+
+def grant(token_id: str, token: str, allows: Callable[[str, str], bool]) -> None:
+    """Accept the agent token `token` (`<token_id>.<secret>`) on the requests `allows(method, path)` lets through."""
+    _agents[token_id] = (token, allows)
+
+
+def revoke(token_id: str) -> None:
+    _agents.pop(token_id, None)
+
+
+def _token_for(headers: Headers, method: str, path: str) -> tuple[str, str]:
+    """(the token a request must prove, the agent's id or ''): server.json's, or the token of the agent the request
+    names when its grant allows the request, else ''."""
+    aid = headers.get(AGENT_HEADER, "")
+    if not aid:
+        return token(), ""
+    got = _agents.get(aid)
+    return (got[0], aid) if got is not None and got[1](method, path) else ("", aid)
+
+
+def agent_of(scope: dict) -> str:
+    """The id of the agent token a request was proven with, '' for any other request."""
+    return str((scope.get("state") or {}).get(AGENT_SCOPE) or "")
 
 
 def sign(token: str, role: str, nonce: str) -> str:
@@ -81,7 +129,7 @@ def guarded(method: str, path: str) -> bool:
 def _state() -> dict:
     """<home>/server.json, read again whenever the file changes; {} when there is none."""
     global _cache
-    p = Path(os.environ.get("THIMBLE_HOME") or "~/.thimble").expanduser() / "server.json"
+    p = home() / "server.json"
     try:
         st = p.stat()
     except OSError:
@@ -106,6 +154,67 @@ def _field(name: str) -> str:
 def token() -> str:
     """The token in <home>/server.json ('' when there is none)."""
     return _field("token")
+
+
+def home() -> Path:
+    return Path(os.environ.get("THIMBLE_HOME") or "~/.thimble").expanduser()
+
+
+def _read_secret(path: Path) -> bytes:
+    try:
+        return path.read_bytes().strip()
+    except OSError:
+        return b""
+
+
+def _session_secret(create: bool) -> bytes:
+    """The bytes of <home>/SESSION_KEY; b"" when there is none. With `create` and no key, fresh random bytes go in place
+    whole, readable by their owner alone, unless another start put a key there first, which is then the one used."""
+    path = home() / SESSION_KEY
+    got = _read_secret(path)
+    if got or not create:
+        return got
+    with _secret_lock:
+        got = _read_secret(path)
+        if got:
+            return got
+        path.parent.mkdir(parents=True, exist_ok=True)
+        fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=f".{SESSION_KEY}.")
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                f.write(secrets.token_hex(32))
+            try:
+                os.link(tmp, path)
+            except FileExistsError:
+                if not _read_secret(path):  # an empty or unreadable file in its place
+                    os.replace(tmp, path)
+        finally:
+            with contextlib.suppress(OSError):
+                os.unlink(tmp)
+        return _read_secret(path)
+
+
+def ensure_session_key() -> None:
+    """Write <home>/SESSION_KEY when there is none, so the sessions' sandbox hides a file that is in place and the first
+    sessions to start find one key."""
+    _session_secret(True)
+
+
+def _session_mac(secret: bytes, c: str, key: str, nonce: str) -> str:
+    return hmac.new(secret, f"session\n{c}\n{key}\n{nonce}".encode("utf-8"), hashlib.sha256).hexdigest()
+
+
+def session_token(c: str, key: str) -> str:
+    """A new THIMBLE_SESSION_TOKEN for the session `key` of workspace `c` (module note): `<nonce>.<mac>`."""
+    nonce = secrets.token_hex(8)
+    return f"{nonce}.{_session_mac(_session_secret(True), c, key, nonce)}"
+
+
+def session_proven(c: str, key: str, token: str) -> bool:
+    """Whether `token` is one session_token gave for the session `key` of workspace `c`."""
+    nonce, _, mac = (token or "").partition(".")
+    secret = _session_secret(False)
+    return bool(secret and nonce and mac and key) and _same(mac, _session_mac(secret, c, key, nonce))
 
 
 def _same(a: str, b: str) -> bool:
@@ -171,7 +280,7 @@ class HookAuth:
             return
         h = Headers(scope=scope)
         nonce = h.get(NONCE_HEADER, "")
-        tok = token()
+        tok, aid = _token_for(h, scope.get("method", ""), scope.get("path", ""))
         if not tok or not nonce or len(nonce) > NONCE_MAX or not hmac.compare_digest(
                 h.get(AUTH_HEADER, ""), sign(tok, "hook", nonce)):
             body = json.dumps({"detail": "only thimble's plugin may call this route"}).encode()
@@ -180,6 +289,8 @@ class HookAuth:
             await send({"type": "http.response.body", "body": body})
             return
         proof = sign(tok, "server", nonce)
+        if aid:
+            scope.setdefault("state", {})[AGENT_SCOPE] = aid
 
         async def with_proof(message) -> None:
             if message["type"] == "http.response.start":
@@ -199,10 +310,10 @@ def _api(path: str) -> bool:
     return path == "/api" or path.startswith("/api/")
 
 
-def hook_proof(headers: Headers) -> bool:
+def hook_proof(headers: Headers, method: str = "", path: str = "") -> bool:
     """Whether `headers` carry a valid hook proof: a local tool that read the token (the plugin, the CLI,
-    view_check.py)."""
-    tok = token()
+    view_check.py), or an agent's token on a request its grant allows."""
+    tok = _token_for(headers, method, path)[0]
     nonce = headers.get(NONCE_HEADER, "")
     return bool(tok and nonce and len(nonce) <= NONCE_MAX
                 and _same(headers.get(AUTH_HEADER, ""), sign(tok, "hook", nonce)))
@@ -227,7 +338,7 @@ class LocalWriteGuard:
             return
         proves, legacy = key_cookie(Request(scope).cookies)
         guarded = write_guarded(scope.get("method", ""), scope["path"])
-        if guarded and not proves and not hook_proof(Headers(scope=scope)):
+        if guarded and not proves and not hook_proof(Headers(scope=scope), scope.get("method", ""), scope["path"]):
             body = json.dumps({"detail": WRITE_REFUSED}).encode()
             await send({"type": "http.response.start", "status": 403,
                         "headers": [(b"content-type", b"application/json"),

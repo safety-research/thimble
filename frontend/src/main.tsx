@@ -1,3 +1,5 @@
+// first, so that the tour's freeze sees every input before the app's own listeners do
+import './tour/freeze'
 import React from 'react'
 import ReactDOM from 'react-dom/client'
 import './styles/index.css'

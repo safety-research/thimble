@@ -15,8 +15,8 @@ let browser: Browser
 let page: Page
 
 // a view as a dev agent writes one: a unit with a key of its own, records inside it anchored by file ref, one of them a
-// table row whose text starts at its edge, a marked word split over two elements, and a canvas whose data-anchor is
-// the drawn mark under the pointer
+// table row whose text starts at its edge, a marked word split over two elements, a canvas whose data-anchor is the
+// drawn mark under the pointer, and a lane of another unit that draws its labels' colours itself
 const VIEW = `<!doctype html><html><head>
 <style>:root{--label-2:#e69f00;--label-6:#56b4e9} article{padding-left:12px} td{padding:2px 8px 2px 0}</style>
 <script>${BRIDGE.replace(/<\/script/g, '<\\/script')}</script></head><body>
@@ -26,12 +26,14 @@ const VIEW = `<!doctype html><html><head>
   <article id="five" data-anchor="a.jsonl#L5">nothing marks this</article>
   <canvas width="40" height="10" data-anchor="a.jsonl#L2"></canvas>
 </section>
+<div id="lane" data-anchor="view:board/p2" data-anchor-unmarked style="padding-left:12px">lane</div>
 </body></html>`
 
 const MARKS = {
   'a.jsonl#L1': { bar: 'var(--label-2)', names: ['coord'], spans: [{ text: 'deadline', colour: 'var(--label-2)' }] },
   'a.jsonl#L2': { bar: 'var(--label-6)', names: ['lang', 'coord'], spans: [] },
   'a.jsonl#L3': { bar: 'var(--label-6)', names: ['lang'], spans: [] },
+  'view:board/p2': { bar: 'var(--label-6)', names: ['lang'], spans: [] },
 }
 
 beforeAll(async () => {
@@ -61,7 +63,7 @@ const state = () =>
     const hl = [...CSS.highlights.keys()].filter((k) => k.startsWith('thimble-label-'))
     return {
       labels: [...document.querySelectorAll('[data-thimble-label]')].map((e) => [e.getAttribute('data-anchor'), e.getAttribute('data-thimble-label')]),
-      shadow: { one: getComputedStyle(el('one')).boxShadow, two: getComputedStyle(el('two')).boxShadow, five: getComputedStyle(el('five')).boxShadow },
+      shadow: { one: getComputedStyle(el('one')).boxShadow, two: getComputedStyle(el('two')).boxShadow, five: getComputedStyle(el('five')).boxShadow, lane: getComputedStyle(el('lane')).boxShadow },
       ranges: hl.flatMap((k) => [...CSS.highlights.get(k)!].map((r) => [k, r.toString()])),
       html: el('one').innerHTML,
     }
@@ -72,10 +74,36 @@ test('labels draws a bar in the label colour and highlights the marked text with
   await send(MARKS)
   await frame().waitForFunction(() => document.querySelectorAll('[data-thimble-label]').length === 2)
   const s = await state()
-  assert.deepEqual(s.labels, [['a.jsonl#L1', 'coord'], ['a.jsonl#L2', 'lang, coord']], 'no bar across a whole canvas')
+  assert.deepEqual(s.labels, [['a.jsonl#L1', 'coord'], ['a.jsonl#L2', 'lang, coord']], 'no bar across a whole canvas, and no mark on a lane that draws its own')
   assert.match(s.shadow.one, /rgb\(230, 159, 0\) 3px 0px 0px 0px inset/, 'the bar of --label-2 inside the left edge, in the padding')
   assert.match(s.shadow.two, /rgb\(86, 180, 233\) -6px 0px 0px -3px/, 'a table row whose text starts at its edge: the bar just outside it')
   assert.equal(s.shadow.five, 'none', 'a record no label marks')
+  assert.equal(s.shadow.lane, 'none', 'an element marked data-anchor-unmarked')
   assert.deepEqual(s.ranges, [['thimble-label-0', 'deadline'], ['thimble-label-0', 'deadline']], 'both occurrences, one across two elements')
   assert.equal(s.html, before, "the view's own DOM is as it wrote it")
+})
+
+test('the anchors report names the records in view, and a scroll names those it brings into view', async () => {
+  const tall = await browser.newPage()
+  const rows = Array.from({ length: 200 }, (_, i) => `<div style="height:40px" data-anchor="b.jsonl#L${i + 1}">record ${i + 1}</div>`).join('')
+  const doc = `<!doctype html><html><head><script>${BRIDGE.replace(/<\/script/g, '<\\/script')}</script></head><body style="margin:0">${rows}</body></html>`
+  await tall.setContent('<!doctype html><html><body><iframe id="f" sandbox="allow-scripts" style="border:0;width:600px;height:400px"></iframe></body></html>')
+  await tall.evaluate((d) => {
+    const got: { type: string; refs: string[]; seen?: string[] }[] = ((window as any).__got = [])
+    addEventListener('message', (e) => {
+      const m = (e.data || {}) as { type?: string; refs?: string[]; seen?: string[] }
+      if (m.type === 'thimble:anchors' || m.type === 'thimble:seen') got.push(m as (typeof got)[number])
+    })
+    ;(document.getElementById('f') as HTMLIFrameElement).srcdoc = d
+  }, doc)
+  await tall.waitForFunction(() => (window as any).__got.length > 0)
+  const first = await tall.evaluate(() => (window as any).__got[0])
+  assert.equal(first.refs.length, 200, 'every anchored record is reported')
+  assert.deepEqual(first.seen, Array.from({ length: 10 }, (_, i) => `b.jsonl#L${i + 1}`), 'the ten in the 400 px frame are in view')
+  const inner = tall.frames().find((f) => f !== tall.mainFrame())!
+  await inner.evaluate(() => window.scrollTo(0, 4000))
+  await tall.waitForFunction(() => (window as any).__got.some((m: { type: string }) => m.type === 'thimble:seen'))
+  const seen = await tall.evaluate(() => (window as any).__got.find((m: { type: string }) => m.type === 'thimble:seen').refs)
+  assert.deepEqual(seen, Array.from({ length: 10 }, (_, i) => `b.jsonl#L${i + 101}`), 'the records the scroll brought into view, once')
+  await tall.close()
 })

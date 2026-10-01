@@ -39,7 +39,7 @@ export type ChipKind = 'say' | 'filter' | 'label' | 'ticket' | 'artifact' | 'vie
 
 /** One line of `chats/<id>.jsonl`; its index in the log is its id. */
 export type ChatRecord =
-  | { type: 'user'; ts?: string; text: string; by?: RecordBy | 'main'; event?: string; run?: number }
+  | { type: 'user'; ts?: string; text: string; by?: RecordBy | 'main' | 'extension'; event?: string; run?: number; extension?: string }
   | { type: 'text'; delta: string; parent_tool_use_id?: string; reply?: boolean; by?: RecordBy }
   | { type: 'tool_use'; ts?: string; id: string; name: string; input: unknown; parent_tool_use_id?: string; n?: number }
   | { type: 'tool_result'; ts?: string; id: string; summary: string; is_error?: boolean; not_run?: boolean; cell_id?: string; label_card?: string; notebook?: string; parent_tool_use_id?: string }
@@ -108,7 +108,7 @@ export type WsEvent = { ts?: string; seq?: number } & (
   | { type: 'report'; slug: string; status: 'generating' | 'generated' | 'failed' | 'verified' | 'figures' | 'rewritten' | string; span?: string; run?: string }
   | { type: 'view'; slug: string; status: 'queued' | 'building' | 'built' | 'failed' | 'deleted' | string; path?: string; chat?: string; version?: string }
   | { type: 'ticket'; id: string; n: number; status: string }
-  | { type: 'concepts'; concept: string; what: 'defined' | 'applied' | 'deleted' | string }
+  | { type: 'concepts'; concept: string; what: 'defined' | 'applied' | 'deleted' | string; rows?: boolean }
   | { type: 'filter'; scope: FilterScope; concept?: string; value?: string }
   | { type: 'check'; id: string; doc: string; status: CheckRunStatus | string; run?: string; chat?: string }
   | { type: 'job'; status: string }
@@ -167,6 +167,8 @@ export interface Cell {
   slug?: string | null
   takeaway?: string
   takeaway_author?: string
+  /** the takeaway was written before the card's last run changed its outputs (backend notebook.TAKEAWAY_STALE) */
+  takeaway_stale?: boolean
   created_by: string
   created_at_event?: number | null
   created_ts?: string
@@ -175,6 +177,9 @@ export interface Cell {
   /** the revision of each label in `labels` as the card's last run read it (backend concepts.py, Revisions); a card
      * whose label has a later revision is stale (canvas/concepts staleLabels). Absent is taken as current. */
   label_revs?: Record<string, number> | null
+  /** the labels thimble is running the card again for, since they changed after its last run; set while that run
+   * lasts */
+  regenerating_for?: string[] | null
   verification?: unknown
   code?: string
   outputs?: MimeBundle[]
@@ -256,6 +261,10 @@ export interface Concept {
   version?: number
   counts?: Record<string, number>
   n_labeled?: number
+  /** the records the analyst gave a value by hand that the label's run labelled too */
+  n_reviewed?: number
+  /** every record the analyst gave a value by hand */
+  n_marked?: number
   /** a label over files: what it marks; null for a label of cards or report sentences */
   marks?: LabelMarks | null
   /** what it applies to: comma-separated globs */
@@ -338,6 +347,8 @@ export interface LabelRow {
   analyst?: string | null
   /** the texts of the record a span label marks */
   spans?: string[]
+  /** the line a record whose ref names none starts on (a CSV row, a JSON document's record) */
+  line?: number
 }
 
 export interface LabelRowsResponse {
@@ -400,6 +411,8 @@ export interface Proposal {
   asked?: boolean
   /** an orientation's proposal whose view has not passed its checks yet: its card shows the build, the views bar not */
   held?: boolean
+  /** its view is switched off in Settings (backend views.views_off): the views bar leaves it out */
+  off?: boolean
   status: ProposalStatus
   ts: string
   error?: string
@@ -423,6 +436,8 @@ export interface ViewReview {
   left?: string[]
   note?: string
   undo?: boolean
+  /** the pictures the review took */
+  shots?: number
 }
 
 /** `GET /ws/{c}/views/suggestions?path=`: whether a viewer may be proposed for the type of a file opened in the File
@@ -448,11 +463,14 @@ export interface View {
   /** written for this corpus, or a file-type viewer thimble ships (plugin/viewers) */
   origin: 'workspace' | 'builtin'
   name: string
-  why: string
+  /** what it shows, in a sentence */
+  description: string
   claims: string[]
   accepts: ViewForm[]
-  declares: ViewForm[]
-  default: boolean
+  /** its own citable units, cited as view:<slug>/<key> */
+  units: ViewForm[]
+  /** the fields its reader made rather than read, as view.json lists them */
+  derived?: ViewDerived[]
   libs: string[]
   built: string
   /** the digest of its files when it last passed its checks: a page loaded at it keeps it until reloaded */
@@ -466,7 +484,14 @@ export interface View {
   /** the files it claims, the first 500 of them, and how many there are */
   files?: string[]
   n_files?: number
-  /** every claim is one extension's glob: a viewer for a file type, a mode of the File browser for the files it claims */
+  /** its claims are globs and the corpus has not been walked yet: no files are known (the list read again shortly) */
+  files_pending?: boolean
+  /** "file" for a file viewer; what one unit of a corpus view is otherwise, as view.json gives it */
+  unit?: string | Record<string, string> | null
+  /** a file viewer, a mode of the File browser for the files it claims rather than a view in the views bar: its unit is
+   * "file", or with no unit every claim is one extension's glob (backend views.file_type_viewer) */
+  /** its page draws label controls of its own (elements with data-label) */
+  label_controls?: boolean
   file_type?: boolean
 }
 
@@ -482,14 +507,50 @@ export interface TimelineDataset {
 
 /** `GET /ws/{c}/views/{slug}/problems`: the lines of its files a view's reader could not read, the first few of them. */
 export interface ViewProblems {
-  count: number
+  /** null for one file's when the reader did not list them all, so the file's count is not known */
+  count: number | null
   examples: { ref: string; why: string }[]
 }
 
+/** A field a view's reader made rather than read as the files hold it, `kind` "inferred" for a value the files do not
+ * state (a join, an estimate, a classification), shown as computed, `key` the key the reader's records hold it under
+ * where that differs, `record` the kind of record that holds it ('' or absent when the view names none). */
+export interface ViewDerived {
+  record?: string
+  field: string
+  from: string
+  how: string
+  kind?: 'inferred' | ''
+  key?: string
+}
+
+/** `GET /ws/{c}/views/{slug}/shown`: of the files a view claims, those it does not show whole, the first 500 of them,
+ * each with why its reader hides it ('' when it gives no why) and how many of its bytes were read, with `claimed`
+ * false for a file of a folder beside the claimed ones; what the claims expect and the corpus lacks; the records its
+ * reader could not place; and the fields its reader derived, by kind of record, the inferred ones first in each. */
+export interface ViewShown {
+  files: number
+  not_shown: { count: number; unexplained: number; files: { path: string; size: number; read: number; why: string; claimed?: boolean }[] }
+  missing?: { path: string; why: string }[]
+  unplaced?: ViewProblems
+  derived: ViewDerived[]
+  errors: string[]
+}
+
 /** What a view's page gets as `open` (`GET /ws/{c}/views/{slug}/resolve?ref=`). */
+/** A view opened from a card of a card type (Open as view): the card, its question and the arguments of its call, which
+ * choose the view's records. */
+export interface ViewQuery {
+  card: string
+  title: string
+  args: Record<string, unknown>
+}
+
 export interface ViewOpen {
   ref: string | null
   path?: string
+  /** `path` is a file the analyst opened the view on (Open in), not the first file thimble opens a view on */
+  picked?: boolean
   fragment?: string
   key?: string | null
   target?: unknown
@@ -497,6 +558,8 @@ export interface ViewOpen {
   excerpt?: string
   refs?: string[]
   error?: string
+  /** in a view: the card it is drawn from, or null for none */
+  query?: ViewQuery | null
 }
 
 // ---- orientation ----
@@ -540,12 +603,13 @@ export interface PermissionRequest {
   refused?: string
   /** how many times thimble sent the call back to auto mode after its classifier gave no verdict, before asking */
   rechecked?: number
-  /** how long the request waits unanswered before the call is denied, in seconds; absent when it waits for good */
+  /** how long a request auto mode could not judge waits unanswered before it is declined, in seconds */
   deny_after_s?: number
-  /** when nobody answered it in time and it was denied: it stays on the card until dismissed (backend agent_session,
+  /** when nobody answered it in time and it was declined: it stays on the card until dismissed (backend agent_session,
    * permissions) */
   expired?: string
-  /** the seconds it waits before it is denied unanswered, when it does not wait for the analyst however long */
+  /** the seconds it waits before it is declined unanswered; absent for main's, which Claude Code also asks in the
+   * terminal */
   wait_s?: number
   /** the mode of the session that asks (manual, auto, bypass) */
   mode?: string
@@ -558,6 +622,9 @@ export interface PermissionRequest {
   cut?: number
   /** why thimble itself asks, which the card says in place of the mode's reason (backend dev.CODE_WHY) */
   why?: string
+  /** what in thimble's config sends the call to the analyst in every permission mode: an edit of the corpus, an
+   * install, or any command (backend userconf.Session.ask_cause) */
+  asked_by?: 'data' | 'installs' | 'commands'
 }
 
 /** A session held where the browser cannot answer: the model-switch dialog after a safety stop (session.py). */
@@ -914,8 +981,6 @@ export interface ModelConf {
  * what it is given. */
 export interface Settings {
   models: Record<string, ModelConf>
-  /** the chat column is hidden and main's foot shows in a dock (shell/Shell, chat off) */
-  hide_chat?: boolean
   /** the agents whose permission mode the analyst set; any other runs in the mode of their Claude Code session */
   permission_modes?: Partial<Record<ModeAgent, OrientPermissions>>
   /** the modes the analyst's Claude Code settings turn off */
@@ -924,7 +989,43 @@ export interface Settings {
   config_error?: string
   /** while Claude Code does not trust thimble's workspaces folder: the folder and the command that trusts it (shell/Untrusted) */
   untrusted?: { folder: string; command: string } | null
+  /** who runs each agent thimble starts and what it may do, by its permission-mode row (backend ledger.agent_rows) */
+  agents?: Partial<Record<ModeAgent | CallAgent, AgentRow>> & { main?: { additions: string[] } }
+  /** who runs each of thimble's seven tasks (backend ledger.task_rows) */
+  tasks?: TaskRow[]
   [k: string]: unknown
+}
+
+/** One of thimble's tasks in the settings (backend tasks.public): thimble's own or an extension's prompt, Agent SDK
+ * program or command, the extensions adding to its prompt, and those that all replace it. */
+export interface TaskRow {
+  task: string
+  way: AgentRow['way']
+  extension: string
+  additions: string[]
+  conflict: string[]
+}
+
+/** The agents of thimble's config that are one model call each, unless an extension's program runs their tasks (backend
+ * userconf.CALLS). */
+export type CallAgent = 'labels' | 'cardCheck'
+
+/** One agent's row in the settings (backend ledger.agent_rows): thimble's own agent or an extension's (its prompt in
+ * place of thimble's, an Agent SDK program or a command), the extensions adding to its prompt, two that both replace
+ * it, and its consent settings from thimble's config. */
+export interface AgentRow {
+  way: 'thimble' | 'prompt' | 'sdk' | 'command'
+  /** labels and cardCheck only: the tasks whose programs run under its settings (backend tasks.TASKS) */
+  tasks?: string[]
+  extension: string
+  additions: string[]
+  conflict: string[]
+  sandbox: 'on' | 'off'
+  sandbox_runs: boolean
+  network: 'on' | 'off'
+  web: 'ask' | 'off' | 'allow'
+  data: 'ask' | 'allow' | 'off'
+  config: string
 }
 
 /** `PUT /ws/{c}/settings`: `models` merges per role and within a role, so a role's patch names only what changes;
@@ -933,6 +1034,78 @@ export interface SettingsPatch {
   models?: Record<string, Partial<ModelConf>>
   permission_modes?: Partial<Record<ModeAgent, OrientPermissions | null>>
   [k: string]: unknown
+}
+
+/** One view an extension gives, as this workspace finds it (backend extensions.public): whether it shows here, the
+ * check's reason, where its switch stands (switched here, else as the check says), and whether that switch can change
+ * anything (`locked`: the extension does not run here, or no file here matches the view's claims). */
+export interface ExtensionViewRow {
+  slug: string
+  name: string
+  shown: boolean
+  note: string
+  on: boolean
+  locked: boolean
+}
+
+/** One extension added to thimble, as this workspace finds it (backend extensions.public): whether it runs here and
+ * why not, this workspace's switch, whether it cannot run here whatever that switch says (`locked`), what it gives,
+ * the settings it runs under, its orientation instructions and the offer to run them, and its views. */
+export interface ExtensionRow {
+  name: string
+  version: string
+  /** what it is, from its extension.json */
+  description?: string
+  /** one thimble ships, whose version is thimble's */
+  builtin?: boolean
+  active: boolean
+  why: string
+  /** the line Settings shows: why it does not run, unless this workspace's switch turned it off */
+  note: string
+  on: boolean
+  locked: boolean
+  views: ExtensionViewRow[]
+  /** what it gives, each in a few words */
+  parts?: string[]
+  /** the settings of the agents it changes or adds, in words */
+  consent?: string
+  /** whether its code runs in a sandbox; null for one with no code */
+  sandboxed?: boolean | null
+  /** whether Run now can run its orientation here once it is on: its instructions, or its own orientation program */
+  orients?: boolean
+  /** whether Settings offers to run its orientation now: it came on after an orientation ran here */
+  offer?: boolean
+  /** an extension thimble ships that is not added: turning its switch on adds it */
+  addable?: boolean
+  /** for one not added: the extensions thimble ships that adding it adds with it */
+  needs?: string[]
+}
+
+/** One view built for this workspace, in its local extension (backend views.local_extension). */
+export interface LocalViewRow {
+  slug: string
+  name: string
+  /** what it shows, from its view.json */
+  description?: string
+  /** a file viewer, which opens in the File browser */
+  file_viewer: boolean
+  /** its switch in Settings: off, it leaves the views bar and the File browser */
+  on: boolean
+}
+
+/** The workspace's local extension: the views built for this workspace, which no other workspace shows. */
+export interface LocalExtension {
+  name: string
+  views: LocalViewRow[]
+}
+
+/** `GET /ws/{c}/extensions`: the extensions added, the conflicts among those that run here, in words, whether an
+ * orientation ran here, and the workspace's local extension. */
+export interface Extensions {
+  extensions: ExtensionRow[]
+  conflicts: string[]
+  orientation_ran?: boolean
+  local?: LocalExtension | null
 }
 
 // ---- the corpus (backend corpus.py) ----
@@ -948,6 +1121,8 @@ export interface CorpusInfo {
   manifest: Manifest
   /** the folder the corpus was opened from */
   path?: string
+  /** the same folder as the analyst named it, through a symlink, which the dashboard shows in place of `path` */
+  shown?: string
 }
 
 export type SourceKind = 'agent' | 'board' | 'events' | 'forge' | 'prompt' | 'text' | 'dir'
@@ -972,15 +1147,79 @@ export interface SourceRecord {
   meta: Record<string, any>
 }
 
+/** The server's sniff of a file that reads as a transcript (backend transcripts.sniff): its format, how sure it is
+ * (0.95 makes Transcript the first mode, 0.5 only offers it), and where a message keeps who speaks, the words and the
+ * time (dotted keys into a record, or a CSV's columns); for whole conversations, `keys.list` is the key of their list of
+ * messages and `pair` the keys of a prompt and its response. `lines`: JSON lines in a file the server pages as text. */
+export interface TranscriptHint {
+  format: 'stream' | 'messages' | 'conversations' | 'json' | 'csv' | 'text'
+  score: number
+  /** where a message keeps who speaks, its words and its time: dotted keys into a record (`message.author`), and for
+   * who speaks, alternatives the first of which a record holds counts (`speakerName|agentName`) */
+  keys?: { speaker: string; text: string; time?: string; list?: string }
+  pair?: [string, string]
+  lines?: boolean
+  /** a stream whose records each nest a Claude Code stream record under this key */
+  wrap?: string
+  style?: string
+  /** who may start a turn in a text chat log, when the style alone would take any heading or `Word:` line */
+  speakers?: string[]
+  delimiter?: string
+}
+
+/** A text chat log's line that starts a turn (`meta.turn`): who speaks, when, and the UTF-16 offset of the words. */
+export interface ChatTurn {
+  speaker: string
+  time?: string
+  at: number
+}
+
+/** One turn of a whole-file JSON transcript (`GET /corpora/{c}/source/turns`), with the line it stands on. */
+export interface SourceTurn {
+  i: number
+  line: number
+  speaker: string
+  role: 'user' | 'assistant' | 'system' | 'tool' | 'other'
+  text: string
+  time?: string
+  group?: number
+  /** the turn's whole length when its text was cut */
+  cut?: number
+}
+
+export interface SourceTurns {
+  path: string
+  total: number
+  start: number
+  turns: SourceTurn[]
+  /** the conversations the page's turns belong to, by index, each with its title and first turn */
+  groups: Record<string, { title: string; first: number }>
+  /** how many conversations the file holds */
+  n_groups: number
+}
+
 export interface SourcePage {
   path: string
   kind: SourceKind
   total_lines: number
+  /** `total_lines` is an estimate: the file is big and its line index is still being built (GET /source/lines) */
+  total_estimated?: boolean
   start: number
   records: SourceRecord[]
+  /** the file reads as a transcript */
+  transcript?: TranscriptHint
   /** the file is binary, judged from its first bytes: no records, and its size */
   binary?: boolean
   size_bytes?: number
+}
+
+/** `GET /corpora/{c}/source/lines`: a file's line count; while a big file's line index is being built, an estimate and
+ * the share of the file indexed so far. */
+export interface SourceLines {
+  path: string
+  total_lines: number
+  estimated: boolean
+  indexed: number
 }
 
 /** `GET /corpora/{c}/source/find`: the lines of a file that hold the text, the first 5,000 of them listed; `complete`
@@ -1016,6 +1255,13 @@ export interface GrepFile {
   /** false when the search stopped inside this file, so its count is a floor */
   complete: boolean
   matches: { line: number; text: string; hit: [number, number] }[]
+}
+
+/** A line of that stream while it reads: how many of the files it has read. */
+export interface GrepProgress {
+  progress: true
+  scanned: number
+  of: number
 }
 
 /** The closing line of that stream: how many files matched and how many lines, and how far the search read. */
@@ -1181,7 +1427,8 @@ export interface ConceptDetail extends Concept {
   run?: ConceptRun | null
 }
 
-/** GET /concepts/{id}/coverage: which corpus files the label's rows cover (file units; a cell or span unit has none). */
+/** GET /concepts/{id}/coverage?offset=: how many corpus files the label's rows cover, with a page of each group (file
+ * units; a cell or span unit has none). */
 export interface CoverageFile {
   path: string
   covered: boolean
@@ -1189,8 +1436,17 @@ export interface CoverageFile {
 }
 export interface ConceptCoverage {
   unit: ConceptUnit | string
+  /** the files the Files tree lists */
+  n_files: number
+  /** the files the label has rows on, and its rows over them */
+  n_covered: number
+  rows: number
+  /** the first covered files, by path */
   files: CoverageFile[]
+  /** a page of the files with no rows, by path, from `offset` */
   not_covered: string[]
+  n_not_covered: number
+  offset: number
 }
 
 /** POST /concepts/{id}/apply */
@@ -1427,6 +1683,9 @@ export interface SessionEnded {
   at: string
 }
 export interface ChatMeta {
+  /** a thread: the fork of main that answers it, once main forked it (backend threads.fork_started); `ended` once it
+   * cannot be reached, and the next question forks anew */
+  fork?: { agent_id?: string | null; ended?: string | null } | null
   /** main only: the Claude Code session that is main, null or absent when none is attached */
   attached?: Attached | null
   /** main only: the session that was main last, while none is attached */
@@ -1458,6 +1717,9 @@ export interface ChatMeta {
   /** a session thimble started: its agent's row of the permission modes (backend modes.AGENTS), which a pick its card
    * cannot make while it runs saves to (ModeSwitch) */
   mode_agent?: ModeAgent
+  /** the agent a session or a program runs as: an extension's program's is `<extension>:<role or task>` (backend
+   * harness.start) */
+  agent_type?: string | null
   /** the orientation's session: whether it runs with Ultracode, and its critique */
   ultracode?: boolean
   critique?: boolean
@@ -1503,22 +1765,26 @@ export type RecordBy = 'terminal' | 'browser'
 
 // ---- scale: the tree fetches one folder at a time; the rows route pages by cursor ----
 
-/** A subfolder in `GET /corpora/{c}/sources?path=&depth=1`: the files under it at any depth, its direct subfolders, the tree's run mark. */
+/** A subfolder in `GET /corpora/{c}/sources?path=&depth=1`: the files under it at any depth and its direct subfolders
+ * (where the server knows them already), the tree's run mark. */
 export interface FolderEntry {
   path: string
   name: string
-  n_files: number
-  n_folders: number
+  n_files?: number
+  n_folders?: number
   is_run: boolean
   hidden?: boolean
 }
 
-/** One folder's own entries (`path` '' is the corpus root): its files as SourceInfo and its subfolders with counts. */
+/** One folder's own entries (`path` '' is the corpus root): its files as SourceInfo and its subfolders, and the files
+ * under it at any depth where the server knows them already. */
 export interface FolderListing {
   path: string
   files: SourceInfo[]
   folders: FolderEntry[]
-  n_files: number
+  n_files?: number
+  /** the folder's modification time when it was read, which `GET /sources/stamps` compares (backend folder_stamp) */
+  stamp?: string
 }
 
 /** `GET /concepts/{id}/rows` with `next`, the rowid cursor for the page after this one (null at the end). */

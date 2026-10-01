@@ -30,7 +30,7 @@ export function ThreadChip({ id, label }: { id: string; label?: string }) {
   const { labels } = useContext(ThreadsContext)
   const name = label ?? labels.get(id) ?? 'thread'
   return (
-    <Chip kind="ref" icon="thread" face="sans" className="chat-thread-chip" data-thread={id} onClick={(e) => (e.stopPropagation(), openThread(id))}>
+    <Chip kind="ref" tone="accent" icon="thread" face="sans" className="chat-thread-chip" data-thread={id} onClick={(e) => (e.stopPropagation(), openThread(id))}>
       {name}
     </Chip>
   )

@@ -14,6 +14,8 @@ import { newDocItems } from './model'
 /** + New and its sheet for a document of the analyst's own; `onMade` gets the new type. */
 export function NewDocMenu({ ws, onMade }: { ws: string; onMade: (t: ReportType) => void }) {
   const [presets, setPresets] = useState<DocPreset[]>([])
+  // counts the menu's openings: the presets are read again at each, since switching an extension changes them
+  const [opened, setOpened] = useState(0)
   const [busy, setBusy] = useState(false)
   const [asking, setAsking] = useState(false)
   const [name, setName] = useState('')
@@ -31,7 +33,7 @@ export function NewDocMenu({ ws, onMade }: { ws: string; onMade: (t: ReportType)
     return () => {
       live = false
     }
-  }, [ws])
+  }, [ws, opened])
   useEffect(() => {
     if (!asking) return
     const id = window.requestAnimationFrame(() => nameField.current?.focus())
@@ -66,7 +68,7 @@ export function NewDocMenu({ ws, onMade }: { ws: string; onMade: (t: ReportType)
           <Button ref={trigger} icon="plus" className="wu-new" disabled={busy} data-doc-chip="+new">
             New
           </Button>
-        } items={items} />
+        } items={items} onOpenChange={(open) => open && setOpened((n) => n + 1)} />
       <Popover anchor={trigger} open={asking} onClose={() => setAsking(false)} label="A document of your own" className="wu-doc-sheet" width={320}>
         <form
           className="wu-doc-form"

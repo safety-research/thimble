@@ -28,21 +28,19 @@ Instructions for agents installing thimble on the user's behalf are in [CLAUDE.m
 2. Unzip it.
 3. Run `bash scripts/install.sh` inside the unzipped folder.
 
-For a development build, clone the repo and run `bash scripts/install.sh` (requires Node 20.19+, 22.13+ or 24+).
+For a development build, clone the repo and run `bash scripts/install.sh`. 
 
 [INSTALL.md](INSTALL.md) covers requirements, updating and troubleshooting.
 
 ## Usage
 
 - Run `thimble` in a directory, just as you would run `claude` 
-- It starts a Claude Code session there with the thimble plugin loaded and prints the dashboard URL. The session is named `thimble:main · <workspace>` (as `claude agents` and `/resume` list it), and each agent thimble starts is named the same way, such as `thimble:orient · <workspace>`.
+- It starts a Claude Code session there with the thimble plugin loaded and prints the dashboard URL. 
 - Each run starts a new conversation on the same workspace (cards, report, labels). `thimble --continue` picks up your last conversation in this folder instead.
-- Quitting the session stops thimble's agents, and its server once no other thimble session runs. An orientation or a writer that was working goes on at your next `thimble`.
-- The orientation, its critic and the writers run as Claude Code background sessions. ↓ at the prompt opens the agent tray, where you can follow and message them, and `claude attach <id>` opens one in another terminal. They need Claude Code to trust thimble's workspaces folder, which install.sh asks about (`--trust-workspaces`).
 
 ### From a running Claude Code session
 
-Type `/thimble` to start the thimble server and print the dashboard URL. A plain `claude` session has `/thimble` only if you answered yes to install.sh's plugin question (`--plugin`); in one started before that, run `/reload-plugins`.
+Type `/thimble` to start the thimble server and print the dashboard URL. If `/thimble` is not recognised, run `/reload-plugins`.
 
 > **Please note:** thimble connects the browser to your Claude Code session through [channels](https://code.claude.com/docs/en/channels). While thimble is under development, a Claude Code session needs to be started with `--dangerously-load-development-channels` (`thimble` from the CLI handles this for you) and a warning screen will appear before starting your Claude Code session (this warning is expected). Without this flag, or if channels are disabled by your org, thimble connects through the plugin's hooks instead and `/thimble` prints a note with the exact command.
 
@@ -72,6 +70,8 @@ Type `/thimble` to start the thimble server and print the dashboard URL. A plain
 | `thimble purge <id>... [-y] [--dry-run]` | delete workspaces or archived runs by id and print what was deleted (`--dry-run` only shows what would go); never your data folder or Claude Code's transcripts |
 | `thimble feedback ["<what went wrong>"]` | write a problem report (a zip) and say where to send it; the top bar's bug icon does the same |
 | `thimble revert` | undo the last change thimble's dev agent applied |
+| `thimble extension add <folder\|git URL>` | add an extension and switch it on, after showing what it gives |
+| `thimble extension list\|on\|off\|remove [<name>]` | list the extensions, switch one on or off everywhere, or remove it |
 | `thimble uninstall` | uninstall the package |
 
 ## Requirements

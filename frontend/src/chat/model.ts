@@ -1,6 +1,6 @@
 // The fold of a chat log into rows the panel renders. `index` is the record's position in the log.
 import type { StepState, ToolState, ToolStep } from '../components/ToolCard'
-import { parseRef } from '../lib/refs'
+import { parseRef, refLabel } from '../lib/refs'
 import type { ChatRecord } from '../lib/types'
 import { shortStepNames, stepParts } from './threads'
 
@@ -16,6 +16,8 @@ export interface UserRow {
   event?: string
   /** the orientation's run that message started: 1 for its first follow-up */
   run?: number
+  /** with `by` extension: the extension whose orientation instructions the message is */
+  extension?: string
 }
 export interface TextRow {
   kind: 'text'
@@ -126,6 +128,9 @@ export function wholeMessage(rec: { by?: string; reply?: boolean }): boolean {
   return !!(rec.by || rec.reply)
 }
 
+/** The stage line of a session that has shown no activity for a while (backend dev.QUIET_LINE, agent_session.QUIET_LINE). */
+export const QUIET_RE = /^no activity for \d+ (min|s)$/
+
 /** A stage line a server-run task writes between the session's messages (dev.py's `Log.stage`: a line of its own that
  * starts with `· `): its text, else null. Pure. */
 export function stageLine(delta: string): string | null {
@@ -152,7 +157,7 @@ export function foldRecords(records: readonly ChatRecord[], skip?: ReadonlySet<n
     const into = parent ? parent.children : rows
     switch (e.type) {
       case 'user':
-        rows.push({ kind: 'user', index, text: e.text, ts: e.ts, by: e.by, event: e.event, run: e.run })
+        rows.push({ kind: 'user', index, text: e.text, ts: e.ts, by: e.by, event: e.event, run: e.run, extension: e.extension })
         return
       case 'text': {
         // a Claude Code notification the model copied into its reply is harness text, not words for the analyst
@@ -250,6 +255,75 @@ export function underCorpus(text: string, ws: string): string {
 export function callLineText(name: string, input: unknown, ws: string): string {
   const target = underCorpus(toolSummary(name, input, ws), ws)
   return target ? `${toolDisplayName(name)} ${target}` : toolDisplayName(name)
+}
+
+/** The tools that read or write one file, and the input keys that name it. */
+const FILE_TOOLS: Record<string, string[]> = {
+  Read: ['file_path', 'path'],
+  Edit: ['file_path', 'path'],
+  MultiEdit: ['file_path', 'path'],
+  Write: ['file_path', 'path'],
+  NotebookEdit: ['notebook_path', 'file_path'],
+}
+
+/** The file a call read or wrote, relative to the corpus; '' for a call of another kind. Pure. */
+export function callFile(name: string, input: unknown, ws = ''): string {
+  const keys = FILE_TOOLS[toolDisplayName(name)]
+  const inp = (input && typeof input === 'object' ? input : {}) as Record<string, unknown>
+  const key = keys?.find((k) => typeof inp[k] === 'string' && inp[k])
+  return key ? underCorpus(corpusRelative(str(inp[key])), ws) : ''
+}
+
+/** What a cited call points at, in plain words, as a citation's chip names it: the file it read or wrote, the search it
+ * ran, what its command did, the card it made, the task it handed on, the critic's report. Never a tool's name or its
+ * input as JSON: a call none of these fit reads as its step number `n`. Pure. */
+export function callTarget(name: string, input: unknown, n: number, ws = ''): string {
+  const inp = (input && typeof input === 'object' ? input : {}) as Record<string, unknown>
+  const file = callFile(name, input, ws)
+  if (file) return file
+  const step = `step ${n}`
+  const where = inp.path ? ` in ${underCorpus(corpusRelative(str(inp.path)), ws)}` : ''
+  switch (toolDisplayName(name)) {
+    case 'Grep':
+      return inp.pattern ? `search for “${oneLine(str(inp.pattern), 60)}”${where}` : step
+    case 'Glob':
+      return inp.pattern ? `files matching ${oneLine(str(inp.pattern), 60)}${where}` : step
+    case 'Bash':
+      return oneLine(str(inp.description)) || oneLine(underCorpus(str(inp.command), ws)) || step
+    case 'add_card':
+    case 'edit_card':
+      return oneLine(str(inp.question ?? inp.title)) || 'a card'
+    case 'Agent':
+    case 'Task':
+      return oneLine(str(inp.description)) || 'a subagent’s task'
+    case 'Workflow':
+      return workflowTitle(inp) || 'a workflow'
+    case 'WebFetch':
+      return str(inp.url) || step
+    case 'WebSearch':
+      return inp.query ? `web search for “${oneLine(str(inp.query), 60)}”` : step
+    case 'read_ref': {
+      const ref = str(inp.ref ?? inp.span)
+      return ref && parseRef(ref) ? refLabel(ref) : step
+    }
+    case 'apply_label':
+    case 'show_label':
+      return inp.name ? `label “${oneLine(str(inp.name), 60)}”` : step
+    case 'critique':
+      return 'the critic’s report'
+    case 'StructuredOutput':
+      return 'an agent’s report'
+    default:
+      return step
+  }
+}
+
+/** What a citation's hover adds under a cited call's name: the command behind a shell call, which the chip names by what
+ * it did; undefined for a call of another kind. Pure. */
+export function callDetail(name: string, input: unknown, ws = ''): string | undefined {
+  if (toolDisplayName(name) !== 'Bash') return undefined
+  const inp = (input && typeof input === 'object' ? input : {}) as Record<string, unknown>
+  return oneLine(underCorpus(str(inp.command), ws), 240) || undefined
 }
 
 /** The SDK's Read paths are absolute; show them relative to the corpus root. */
@@ -353,6 +427,7 @@ export function toolSummary(name: string, input: unknown, ws = ''): string {
     case 'WebSearch':
       return str(inp.url ?? inp.query)
     default: {
+      if (!Object.keys(inp).length) return ''
       try {
         return JSON.stringify(input).slice(0, 120)
       } catch {
@@ -607,6 +682,12 @@ export function refWords(ref: string, questions: ReadonlyMap<string, string>): s
     case 'table':
     case 'row':
       return `${corpusRelative(p.path)}, table ${p.table}`
+    case 'page':
+      return `${corpusRelative(p.path)} page ${p.page}`
+    case 'csvrow':
+      return `${corpusRelative(p.path)} row ${p.row}`
+    case 'pointer':
+      return `${corpusRelative(p.path)} ${p.pointer}`
     case 'record':
     case 'range':
     case 'block':
@@ -827,6 +908,8 @@ const groupPart = (g: unknown): string => groupName(g).toLowerCase()
 
 /** The slug a propose_view result names (`Proposed the view Inbox (view:inbox) over …`). */
 const VIEW_REF_RE = /\(view:([a-z0-9][a-z0-9-]{0,39})\)/
+/** A view's own ref, `view:<slug>`, as a chip names it. */
+const VIEW_KEY_RE = /^view:([a-z0-9][a-z0-9-]{0,39})$/
 
 /** The calls whose `group` places a card, and so names a group of the canvas. */
 const PLACING = new Set(['add_card', 'edit_card', 'apply_label'])
@@ -840,6 +923,13 @@ export function madeBy(rows: readonly Row[]): Made {
   }
   const walk = (list: readonly Row[]) => {
     for (const r of list) {
+      // a viewer thimble proposed for the run as it started (backend orient_session._note_proposed)
+      if (r.kind === 'chip' && r.chip === 'view') {
+        add(out.views, r.text)
+        const slug = VIEW_KEY_RE.exec(r.ref ?? '')?.[1]
+        if (slug) out.viewSlugs = { ...out.viewSlugs, [r.text]: slug }
+        continue
+      }
       if (r.kind !== 'tool') continue
       const inp = (r.input && typeof r.input === 'object' ? r.input : {}) as Record<string, unknown>
       const ok = !!r.result && !r.result.is_error
@@ -1229,7 +1319,8 @@ export function isFeedbackChip(e: ChatRecord): boolean {
  * The records of main's log its transcript leaves out, by index: Agent or Workflow calls whose agents show as their own
  * card or thread (with their results), text that repeats a summary the orientation handed back, label runs a subagent
  * or a call in main started, view chips the orientation proposed, the orientation's report writer's start and saves
- * (isOrientWriterRecord), session lines (isSessionLine) and feedback chips (isFeedbackChip). Pure.
+ * (isOrientWriterRecord), main's look at the agent tray (list_agents), session lines (isSessionLine) and feedback chips
+ * (isFeedbackChip). Pure.
  */
 export function mainSkips(records: readonly ChatRecord[], ctx: MainContext): Set<number> {
   const skip = new Set<number>()
@@ -1257,8 +1348,9 @@ export function mainSkips(records: readonly ChatRecord[], ctx: MainContext): Set
           hidden.add(e.id)
           skip.add(i)
         }
-        // main's call that starts the orientation's or a writer's session: that session's own note in main stands for it
-        if ((name === 'start_orientation' || name === 'start_writing') && !e.parent_tool_use_id) {
+        // main's call that starts the orientation's or a writer's session: that session's own note in main stands for it.
+        // Its look at the agent tray is bookkeeping, which the tray itself shows
+        if ((name === 'start_orientation' || name === 'start_writing' || name === 'list_agents') && !e.parent_tool_use_id) {
           hidden.add(e.id)
           skip.add(i)
         }
@@ -1420,6 +1512,13 @@ export function followUpSummary(rows: readonly Row[]): string {
   }
   walk(rows)
   return changeSummary({ revised: revised.size, added: added.size, deleted: deleted.size, views: views.size, labels: labels.size })
+}
+
+/** A follow-up's message as the card of its run leads with it: an extension's orientation instructions as the line
+ * that names the extension. Pure. */
+export function leadText(m: UserRow): string {
+  if (m.by === 'extension') return m.extension ? `${m.extension} added: its orientation instructions` : 'An extension’s orientation instructions'
+  return m.text.trim()
 }
 
 /** What a follow-up changed, counted, in words: `revised 2 cards, added 1, proposed 1 view`; '' for nothing. The

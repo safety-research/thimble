@@ -1,12 +1,13 @@
-"""Open the worked examples of custom views, each on its own sample with its sample labels on.
+"""Open the worked examples of custom views, each on its own sample with its sample labels on, to look at them.
 
     backend/.venv/bin/python scripts/dev/examples.py <folder>
 
-For each example in plugin/viewers that has a sample/, this copies the sample to <folder>/<example>, registers the copy
-as a workspace, saves the example as a built view of it, and applies the labels its labels.json defines, turned on in
-Files. The labels are regex labels, so no model is called. A copy an earlier run made is replaced; any other folder of
-that name stops the script before it changes anything. Run it in the environment of the stack it is for
-(THIMBLE_HOME, THIMBLE_DATA_DIR, THIMBLE_WORKSPACES_DIR); a server already running picks the views and labels up.
+The examples are few-shot examples for the dev agent, which thimble never installs as views. For each example in
+plugin/viewers this copies its sample to <folder>/<example>, registers the copy as a workspace, saves the example as a
+built view of it, and applies the labels its labels.json defines, turned on in Files. The labels are regex
+labels, so no model is called. A copy an earlier run made is replaced; any other folder of that name stops the script
+before it changes anything. Run it in the environment of the stack it is for (THIMBLE_HOME, THIMBLE_DATA_DIR,
+THIMBLE_WORKSPACES_DIR); a server already running picks the views and labels up.
 """
 import asyncio
 import json
@@ -18,14 +19,14 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "backend"))
 
 from app import concepts, config, views
 
-VIEW_KEYS = ("name", "why", "claims", "accepts", "declares", "default", "libs")
+VIEW_KEYS = ("name", "description", "scope", "records", "accepts", "units", "libs")
 MARK = ".thimble-example"  # in each copy, so a later run knows the folder is one it made
 
 
 def save_view(name: str, src: Path) -> None:
     raw = json.loads((src / "view.json").read_text("utf-8"))
     v = views.write_view(name, name, reader=(src / "reader.py").read_text("utf-8"),
-                         html=(src / "view.html").read_text("utf-8"), **{k: raw[k] for k in VIEW_KEYS})
+                         html=(src / "view.html").read_text("utf-8"), **{k: raw.get(k) for k in VIEW_KEYS})
     print(f"{name}: view {v['slug']} built={v['built']} ok={v['ok']}")
 
 

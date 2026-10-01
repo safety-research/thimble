@@ -132,3 +132,162 @@ def test_a_file_read_counts_as_the_analysts_view_only_with_the_analysts_cookie(m
     c.cookies.set(hook_auth.ui_cookie(), UI_KEY)
     assert c.get("/api/corpora/mini/source", params={"path": "agents/agent-01.jsonl"}).status_code == 200
     assert [(r["actor"], r["path"]) for r in viewlog.rows("mini")] == [("analyst", "agents/agent-01.jsonl")]
+
+
+# --------------------------------------------------------------------------- the Files search
+
+
+def test_the_name_search_reads_the_folder_tree_and_stats_only_the_files_it_lists(data_tmp, monkeypatch):
+    """A search by name matches the paths of the corpus's folder tree, so a large corpus is not listed whole with every
+    file stat'ed first; a dot folder stays out, as it does in the tree."""
+    import os
+
+    from app import corpus
+
+    mini = data_tmp / "mini"
+    (mini / ".hidden").mkdir()
+    (mini / ".hidden" / "agent-99.jsonl").write_text("{}\n")
+    corpus.forget_sources()
+    monkeypatch.setattr(corpus, "list_sources", lambda *a, **k: pytest.fail("the name search listed the corpus"))
+    size = (mini / AGENT).stat().st_size
+    stats: list[str] = []
+    real = os.stat
+    monkeypatch.setattr(corpus.os, "stat", lambda p, *a, **k: (stats.append(str(p)), real(p, *a, **k))[1])
+    body = client.get(f"{MINI}/sources/find", params={"q": "agent-01"}).json()
+    assert [f["path"] for f in body["files"]] == [AGENT] and body["total"] == 1
+    assert [s for s in stats if s.endswith(".jsonl")] == [f"{mini}/{AGENT}"]
+    assert body["files"][0]["kind"] == "agent" and body["files"][0]["size_bytes"] == size
+    assert client.get(f"{MINI}/sources/find", params={"q": "agent-99"}).json()["total"] == 0
+    fuzzy = client.get(f"{MINI}/sources/find", params={"q": "agnt01"}).json()
+    assert AGENT in [f["path"] for f in fuzzy["files"]]
+
+
+def test_the_content_search_has_no_time_limit_says_how_far_it_read_and_stops_when_asked():
+    from app import config, corpus
+
+    root = config.corpus_dir("mini")
+    paths = corpus.search_paths(root).ordered
+    items = list(corpus.grep_files(root, paths, "the", progress_s=0.0))
+    done = items[-1]
+    assert done["done"] and done["complete"] and done["scanned"] == done["of"] == len(paths)
+    progress = [i for i in items if i.get("progress")]
+    assert progress and all(p["of"] == len(paths) for p in progress)
+    assert [p["scanned"] for p in progress] == sorted(p["scanned"] for p in progress)
+    found = [i for i in items if "path" in i]
+    assert found and done["files"] == len(found)
+    asked: list[int] = []
+    stopped = list(corpus.grep_files(root, paths, "the", stop=lambda: (asked.append(1), len(asked) > 2)[1]))
+    assert stopped[-1]["done"] and not stopped[-1]["complete"] and stopped[-1]["scanned"] < len(paths)
+
+
+def test_a_content_search_stopped_inside_a_file_counts_only_the_files_it_read_whole():
+    from app import config, corpus
+
+    root = config.corpus_dir("mini")
+    asked: list[int] = []
+    items = list(corpus.grep_files(root, [AGENT], "the", stop=lambda: (asked.append(1), len(asked) > 1)[1]))
+    done = items[-1]
+    assert len(asked) == 2, "asked once before the file and once inside it"
+    assert done["done"] and not done["complete"] and done["scanned"] == 0
+    assert all(not i["complete"] for i in items if "path" in i)
+
+
+def test_the_content_search_route_streams_its_lines_and_a_closing_line():
+    import json
+
+    r = client.get(f"{MINI}/sources/grep", params={"q": "the build"})
+    lines = [json.loads(x) for x in r.text.splitlines() if x]
+    assert lines[-1]["done"] is True and lines[-1]["complete"] is True
+    assert any(x.get("path") == AGENT for x in lines)
+    assert r.headers["x-search"].isdigit()
+    assert client.get(f"{MINI}/sources/grep", params={"q": " "}).status_code == 400
+
+
+def test_the_stop_route_stops_only_the_search_it_names(monkeypatch):
+    from app import corpus
+
+    monkeypatch.setitem(corpus._grep_gen, "mini", 7)
+    assert client.post(f"{MINI}/sources/grep/stop", json={"search": 6}).json() == {"stopped": False}
+    assert corpus._grep_gen["mini"] == 7, "a search that a newer one replaced is left alone"
+    assert client.post(f"{MINI}/sources/grep/stop", json={"search": 7}).json() == {"stopped": True}
+    assert corpus._grep_gen["mini"] != 7
+    assert client.post("/api/corpora/nope/sources/grep/stop", json={"search": 1}).status_code == 404
+
+
+def test_a_folder_opened_through_a_symlink_shows_the_path_the_analyst_used(data_tmp, tmp_path):
+    """The registry keeps the folder's real path, and beside it the symlink the analyst opened it by, which the
+    dashboard shows; a path that is not another way to the same folder is not kept, and null clears it."""
+    real = tmp_path / "store" / "village"
+    (real / "logs").mkdir(parents=True)
+    (real / "logs" / "a.jsonl").write_text("{}\n")
+    link = tmp_path / "home" / "village"
+    link.parent.mkdir()
+    link.symlink_to(real)
+    rec = client.post("/api/corpora/register", json={"path": str(link), "exact": True, "shown": str(link)}).json()
+    assert rec["path"] == str(real.resolve()) and rec["shown"] == str(link)
+    row = next(r for r in client.get("/api/corpora").json() if r["name"] == rec["name"])
+    assert row["path"] == str(real.resolve()) and row["shown"] == str(link)
+    again = client.post("/api/corpora/register", json={"path": str(real), "exact": True}).json()
+    assert again["shown"] == str(link), "a registration that does not say keeps the path"
+    other = client.post("/api/corpora/register", json={"path": str(real), "exact": True, "shown": str(tmp_path)}).json()
+    assert "shown" not in other
+    client.post("/api/corpora/register", json={"path": str(real), "exact": True, "shown": str(link)})
+    cleared = client.post("/api/corpora/register", json={"path": str(real), "exact": True, "shown": None}).json()
+    assert "shown" not in cleared
+
+
+def test_the_cli_tells_the_symlink_only_when_the_callers_folder_is_the_corpus(tmp_path, monkeypatch):
+    from app import cli
+
+    real = tmp_path / "store" / "village"
+    (real / "logs").mkdir(parents=True)
+    link = tmp_path / "village-link"
+    link.symlink_to(real)
+    monkeypatch.setenv("THIMBLE_CALLER_CWD", str(link))
+    assert cli.caller_alias(real) == (True, str(link))
+    monkeypatch.setenv("THIMBLE_CALLER_CWD", str(real))
+    assert cli.caller_alias(real) == (True, None)
+    monkeypatch.setenv("THIMBLE_CALLER_CWD", str(link / "logs"))
+    assert cli.caller_alias(real) == (False, None), "main's shell in another folder tells nothing"
+    monkeypatch.delenv("THIMBLE_CALLER_CWD")
+    assert cli.caller_alias(real) == (False, None)
+
+
+def test_the_cli_registers_a_folder_again_only_when_the_path_the_analyst_used_changed(tmp_path, monkeypatch):
+    """/thimble in a folder thimble knows asks the server to record the path the analyst used (or to clear it) only
+    when the record says otherwise; main's shell in a folder below, or no server, sends nothing."""
+    import json
+
+    from app import cli
+
+    real = (tmp_path / "store" / "village").resolve()
+    (real / "logs").mkdir(parents=True)
+    link = tmp_path / "village-link"
+    link.symlink_to(real)
+    data = tmp_path / "data"
+    data.mkdir()
+    sidecar = data / "village.corpus.json"
+    sidecar.write_text(json.dumps({"name": "village", "path": str(real)}))
+    sent: list[dict] = []
+
+    def request(method, url, body=None, timeout=5.0):
+        sent.append(body)
+        rec = {"name": "village", "path": body["path"], **({"shown": body["shown"]} if body.get("shown") else {})}
+        sidecar.write_text(json.dumps(rec))
+        return 201, rec
+
+    monkeypatch.setattr(cli, "_request", request)
+
+    def opened(cwd: Path) -> tuple[str | None, bool]:
+        monkeypatch.setenv("THIMBLE_CALLER_CWD", str(cwd))
+        return cli.open_workspace(cwd, data, "http://127.0.0.1:1")
+
+    assert opened(link) == ("village", False)
+    assert sent == [{"path": str(real), "shown": str(link)}]
+    assert opened(link) == ("village", False) and len(sent) == 1, "the record says it already"
+    assert opened(link / "logs") == ("village", False) and len(sent) == 1, "main's shell in a folder below"
+    monkeypatch.setenv("THIMBLE_CALLER_CWD", str(real))
+    assert cli.open_workspace(real, data, None) == ("village", False) and len(sent) == 1, "no server"
+    assert opened(real) == ("village", False)
+    assert sent[-1] == {"path": str(real), "shown": None}
+    assert "shown" not in json.loads(sidecar.read_text())

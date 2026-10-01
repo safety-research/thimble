@@ -14,7 +14,7 @@ import sys
 from pathlib import Path
 
 import pytest
-from conftest import print_sessions
+from conftest import card_wait, print_sessions
 from fastapi import HTTPException
 
 from app import agent_session, agents, cc_channel, channel, config, ledger, modes, orient_session, session, tools, userconf
@@ -184,7 +184,7 @@ async def test_each_agent_runs_in_its_row_else_in_main_s_mode_and_nothing_else_p
     assert "permissions" not in tools.schema_of("start_orientation")["properties"]
     seen: dict = {}
 
-    async def fake_start(c, brief, passes, call=None, chosen=None):
+    async def fake_start(c, brief, passes, call=None, chosen=None, **_):
         seen.update(chosen=chosen)
 
     monkeypatch.setattr(orient_session, "start", fake_start)
@@ -208,6 +208,42 @@ async def test_each_agent_runs_in_its_row_else_in_main_s_mode_and_nothing_else_p
     (managed / "managed-settings.json").write_text(json.dumps({"permissions": {"disableBypassPermissionsMode": "disable"}}))
     (managed / "managed-settings.d" / "auto.json").write_text(json.dumps({"permissions": {"disableAutoMode": "disable"}}))
     assert modes.disabled() == {"auto", "bypass"}, "the managed file with its drop-ins"
+
+
+def test_a_server_restarted_under_main_follows_its_last_reported_mode_until_main_reports_again(fake):
+    """Main's reported mode is kept in thimble's home, not in memory alone: a server restarted under the same session
+    gives each row that follows main that mode, and main's meta shows it, until main reports again. A new session, or one
+    resumed after its end, starts from Manual, whatever it or an earlier session ran in."""
+    cwd = str(config.corpus_dir(CORPUS))
+
+    def restart() -> None:
+        session._live.clear()
+        session._modes.clear()
+
+    session.attach(CORPUS, "sid-main", cwd)
+    session.note_mode(CORPUS, "sid-main", "auto")
+    assert modes.mode_for(CORPUS, "orient") == "auto"
+    restart()
+    session.attach(CORPUS, "sid-main", cwd)
+    assert [modes.mode_for(CORPUS, a) for a in modes.AGENTS] == ["auto"] * len(modes.AGENTS), "the kept report"
+    assert agents.read_meta(CORPUS, agents.MAIN_ID)["attached"]["permission_mode"] == "auto"
+    kept = userconf.main_modes_file()
+    assert kept.is_file() and f"Edit(/{kept})" in userconf.session(CORPUS, "orientation").settings()["permissions"]["deny"], \
+        "no agent edits the mode the rows follow"
+    session.note_mode(CORPUS, "sid-main", "default")
+    assert modes.mode_for(CORPUS, "orient") == "manual", "main's next report wins"
+    restart()
+    session.attach(CORPUS, "sid-main", cwd)
+    assert modes.mode_for(CORPUS, "orient") == "manual", "the newer report is the one kept"
+    session.note_mode(CORPUS, "sid-main", "bypassPermissions")
+    session.detach(CORPUS, "sid-main", "ended")
+    session.attach(CORPUS, "sid-main", cwd)
+    assert modes.mode_for(CORPUS, "orient") == "manual", "a session resumed after its end reports its mode again"
+    session.detach(CORPUS, "sid-main", "ended")
+    restart()
+    session.attach(CORPUS, "sid-next", cwd)
+    assert modes.mode_for(CORPUS, "orient") == "manual", "another session's mode is not main's"
+    assert "permission_mode" not in agents.read_meta(CORPUS, agents.MAIN_ID)["attached"]
 
 
 def test_a_continued_background_session_keeps_the_mode_it_runs_in(fake, monkeypatch):
@@ -240,15 +276,16 @@ async def test_auto_is_claude_code_s_auto_mode_and_a_call_it_refuses_waits_for_t
     run = await orient_session.start(CORPUS, "")
     assert run.mode == "auto" and _flag(run.argv) == "auto"
     settings = json.loads(run.argv[run.argv.index("--settings") + 1])
-    assert settings["hooks"]["PreToolUse"] == agent_session.permission_hooks(CORPUS, auto=True, wait=True)["PreToolUse"]
-    assert settings["hooks"]["PermissionDenied"] == agent_session.permission_hooks(CORPUS)["PermissionDenied"]
+    assert settings["hooks"]["PreToolUse"] == agent_session.session_hooks(CORPUS, KEY, auto=True, wait=True)["PreToolUse"]
+    assert settings["hooks"]["PermissionDenied"] == agent_session.session_hooks(CORPUS, KEY)["PermissionDenied"]
     inp = {"command": "python3 -c 'print(6*7)'", "description": "Multiply"}
     body = dict(session=KEY, event="PermissionDenied", tool_name="Bash", tool_input=inp, agent_id="a2",
                 tool_use_id="toolu_r1", reason="Runs code the analyst did not ask for")
-    call = asyncio.ensure_future(agent_session.permission_request_route(CORPUS, agent_session.PermissionRequestBody(**body)))
+    call = asyncio.ensure_future(agent_session.hook_request(CORPUS, agent_session.PermissionRequestBody(**body)))
     [p] = await _pending(run.chat)
     assert p["refused"] == "Runs code the analyst did not ask for" and p["agent_id"] == "a2"
-    assert "rechecked" not in p and "deny_after_s" not in p, "a refusal waits for the analyst for good"
+    assert "rechecked" not in p and "deny_after_s" not in p, "a refusal auto mode judged is asked at once"
+    assert p["wait_s"] == 600, "the orientation's request waits the card wait, ten minutes by default"
     await asyncio.sleep(0.2)
     assert not call.done(), "it waits for the analyst"
     agent_session.answer(CORPUS, run.chat, p["id"], True)
@@ -259,20 +296,44 @@ async def test_auto_is_claude_code_s_auto_mode_and_a_call_it_refuses_waits_for_t
         return agent_session.PermissionRequestBody(session=KEY, event="PreToolUse", tool_name="Bash", tool_input=i,
                                                    agent_id=agent)
 
-    assert await agent_session.permission_request_route(CORPUS, pre({"command": inp["command"]}, agent=None)) == {}, \
+    assert await agent_session.hook_request(CORPUS, pre({"command": inp["command"]}, agent=None)) == {}, \
         "another agent"
     again = {**inp, "description": "Multiply six by seven"}
-    assert await agent_session.permission_request_route(CORPUS, pre(again)) == {"behavior": "allow",
+    assert await agent_session.hook_request(CORPUS, pre(again)) == {"behavior": "allow",
                                                                                "message": agent_session.ALLOWED_LINE}
-    assert await agent_session.permission_request_route(CORPUS, pre(again)) == {}, "once"
-    call = asyncio.ensure_future(agent_session.permission_request_route(
+    assert await agent_session.hook_request(CORPUS, pre(again)) == {}, "once"
+    call = asyncio.ensure_future(agent_session.hook_request(
         CORPUS, agent_session.PermissionRequestBody(**{**body, "tool_use_id": "toolu_r2"})))
     [p] = await _pending(run.chat)
     agent_session.answer(CORPUS, run.chat, p["id"], False)
     assert (await call) == {"behavior": "deny", "message": agent_session.DENIED_LINE}
     assert "toolu_r2" not in session._not_run, "a denied call stays refused"
-    assert await agent_session.permission_request_route(CORPUS, pre(inp)) == {"behavior": "deny",
+    assert await agent_session.hook_request(CORPUS, pre(inp)) == {"behavior": "deny",
                                                                              "message": agent_session.DENIED_LINE}
+    await orient_session.stop(CORPUS)
+    await _done()
+
+
+async def test_a_call_auto_mode_gave_no_safety_verdict_on_goes_back_to_it_then_waits_a_while(fake, monkeypatch):
+    """Both ways Claude Code says auto mode gave no verdict are no refusal: the call goes back to auto mode, and only
+    then does the card ask, denying it unanswered after the card wait rather than waiting for good."""
+    monkeypatch.setenv("FAKE_MODE", "sleep")
+    monkeypatch.setattr(agent_session, "CLASSIFIER_WAITS_S", (0.01,))
+    assert card_wait(0.004) == 0.24
+    _listen()
+    ledger.put_settings(CORPUS, {modes.SETTING: {"orient": "auto"}})
+    run = await orient_session.start(CORPUS, "")
+    reasons = ("Classifier unavailable", "Auto mode unavailable — stopped after repeated responses with no safety verdict")
+    for i, reason in enumerate(reasons, 1):
+        body = agent_session.PermissionRequestBody(session=KEY, event="PermissionDenied", tool_name="Bash",
+                                                   tool_input={"command": f"ls {i}"}, agent_id="a3",
+                                                   tool_use_id=f"toolu_c{i}", reason=reason)
+        assert (await agent_session.hook_request(CORPUS, body))["behavior"] == "allow", "back to auto mode"
+        assert f"toolu_c{i}" in session._not_run
+        call = asyncio.ensure_future(agent_session.hook_request(CORPUS, body))
+        p = (await _pending(run.chat, i))[-1]
+        assert p["refused"] == reason and p["deny_after_s"] == 0.24
+        assert (await asyncio.wait_for(call, 5))["behavior"] == "deny"
     await orient_session.stop(CORPUS)
     await _done()
 
@@ -283,10 +344,10 @@ async def test_the_hook_s_route_answers_for_the_session_its_shim_names(fake, mon
     ledger.put_settings(CORPUS, {modes.SETTING: {"orient": "bypass"}})
     await orient_session.start(CORPUS, "")
     body = agent_session.PermissionRequestBody(session=KEY, tool_name="Bash", tool_input={"command": "ls"}, agent_id="a9")
-    assert await agent_session.permission_request_route(CORPUS, body) == {"behavior": "allow",
+    assert await agent_session.hook_request(CORPUS, body) == {"behavior": "allow",
                                                                          "updatedInput": {"command": "ls"}}
     other = agent_session.PermissionRequestBody(session="writer:report", tool_name="Bash", tool_input={"command": "ls"})
-    assert (await agent_session.permission_request_route(CORPUS, other))["behavior"] == "deny", \
+    assert (await agent_session.hook_request(CORPUS, other))["behavior"] == "deny", \
         "Bypass grants the orientation's requests, never another session's"
     await orient_session.stop(CORPUS)
     await _done()
@@ -304,7 +365,7 @@ async def test_a_switch_into_auto_keeps_the_config_s_asks_waiting_for_the_analys
         return json.loads(run.argv[run.argv.index("--settings") + 1])["hooks"].get("PreToolUse")
 
     agent_session._set_flag(run, "auto")
-    assert pre() == agent_session.permission_hooks(CORPUS, auto=True, wait=True)["PreToolUse"]
+    assert pre() == agent_session.session_hooks(CORPUS, KEY, auto=True, wait=True)["PreToolUse"]
     agent_session._set_flag(run, "default")
     assert not pre()
     await orient_session.stop(CORPUS)

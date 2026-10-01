@@ -1,8 +1,9 @@
 """Corpora, sources, jsonl/text paging, database (sqlite) browsing and the ref endpoint.
 
-Everything reads raw corpus files lazily. Two per-process caches keep a large corpus cheap: a sparse line index per
-opened file (LineIndex, in an LRU), so a page seeks to the nearest mark and scans one chunk; and a SOURCES_MEMO_S memo
-of each corpus's source list with a per-folder view for `GET /sources?path=&depth=1`.
+Everything reads raw corpus files lazily. Per-process caches keep a large corpus cheap: a sparse line index per opened
+file (LineIndex, in an LRU), so a page seeks to the nearest mark and scans one chunk; each corpus's folder tree by name
+(corpus_tree), which a walk reads again only where a folder changed; and a SOURCES_MEMO_S memo of each corpus's source
+list. `GET /sources?path=&depth=1` reads only the folder asked for.
 
 A file ending in .db, .sqlite or .sqlite3 is a database (internal kind 'forge'): the /forge/* routes open it read-only
 and it is never paged as text. A binary file (sniff_binary) pages as no records. Serving a file or database page records
@@ -10,15 +11,24 @@ the analyst's view of it (viewlog.record). The Files view's name, in-file and cr
 
 The one write: `PUT /corpora/{c}/source?path=…` replaces an existing .txt / .md / .markdown file atomically, keeping its
 line ending and trailing-newline convention.
+
+A big file's line index (INDEX_BIG and up) is built in a background thread and kept on disk in thimble's home, keyed by
+path, size and mtime, so a restarted server reads it back. Until it is ready a page is read on from the nearest mark the
+build has made (the file's start at once), with the line count estimated (`total_estimated`); `GET /source/lines` says
+when it is exact.
 """
 from __future__ import annotations
 
+import asyncio
+import hashlib
 import json
 import logging
 import os
 import re
 import shutil
 import sqlite3
+import stat
+import sys
 import tempfile
 import threading
 import time
@@ -27,14 +37,14 @@ from bisect import bisect_right
 from collections import OrderedDict
 from contextlib import closing
 from pathlib import Path
-from typing import Any, Callable, Iterator
+from typing import Any, AsyncIterator, Callable, Iterator
 from urllib.parse import quote
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-from . import config, hook_auth, refs, viewlog
+from . import config, corpus_tree, hook_auth, refs, transcripts, viewlog
 
 log = logging.getLogger("thimble.corpus")
 
@@ -53,9 +63,7 @@ EDITABLE_SUFFIXES = (".txt", ".md", ".markdown")  # the files PUT /source may re
 # --------------------------------------------------------------------------- sources
 
 
-DB_SUFFIXES = (".db", ".sqlite", ".sqlite3")  # a file so named is a database (kind 'forge'), forge.db included
-SIDE_SUFFIXES = ("-wal", "-shm", "-journal")  # sqlite side files of a database opened read-write elsewhere
-SKIPPED_SUFFIXES = tuple(db + side for db in DB_SUFFIXES for side in SIDE_SUFFIXES)
+DB_SUFFIXES, SIDE_SUFFIXES, SKIPPED_SUFFIXES = corpus_tree.DB_SUFFIXES, corpus_tree.SIDE_SUFFIXES, corpus_tree.SKIPPED_SUFFIXES
 
 
 def source_kind(rel: str) -> str:
@@ -104,74 +112,38 @@ _sources_walks: dict[tuple[Path, bool], threading.Lock] = {}  # one walk at a ti
 
 
 class _Listing:
-    """One walk of a corpus: its sources as list_sources returns them and the per-folder view built alongside
-    (`folders`: folder path, '' the root -> {"files": [source, ...], "subs": {name: files under that subfolder}};
-    only folders with a file somewhere under them, as the tree derived them from the paths)."""
+    """One walk of a corpus: its sources as list_sources returns them, and when the walk ended."""
 
-    __slots__ = ("ts", "sources", "folders")
+    __slots__ = ("ts", "sources")
 
-    def __init__(self, ts: float, sources: list[dict[str, Any]], folders: dict[str, dict[str, Any]]) -> None:
+    def __init__(self, ts: float, sources: list[dict[str, Any]]) -> None:
         self.ts = ts
         self.sources = sources
-        self.folders = folders
 
 
-def _walk_sources(corpus: Path, include_hidden: bool) -> tuple[list[dict[str, Any]], dict[str, dict[str, Any]]]:
-    """One scandir pass over the corpus. Symlinked files are listed, symlinked directories are not entered; dot
-    directories are pruned unless `include_hidden`. Returns the sorted sources and the folder view."""
+def _is_hidden(rel: str) -> bool:
+    return rel.startswith(".") or "/." in rel
+
+
+def _walk_sources(corpus: Path, include_hidden: bool) -> list[dict[str, Any]]:
+    """Every file of the corpus, sorted, from its folder tree (corpus_tree: a folder is read again only when it changed)
+    with each file stat'ed for its size. Symlinked files are listed, symlinked directories are not entered; dot names
+    are left out unless `include_hidden`."""
+    _, paths = corpus_tree.tree(corpus).walk(links=False, hidden=include_hidden, skip=SKIPPED_SUFFIXES)
+    base = str(corpus)
     out: list[dict[str, Any]] = []
-    folders: dict[str, dict[str, Any]] = {"": {"files": [], "subs": {}}}
-    order: list[str] = [""]  # folders in visiting order, parents before children
-    stack = [(corpus, "", False)]
-    while stack:
-        d, prefix, hidden_dir = stack.pop()
-        me = prefix[:-1] if prefix else ""
-        here = folders[me]
+    for rel in paths:
         try:
-            entries = list(os.scandir(d))
+            size = os.stat(f"{base}/{rel}").st_size
         except OSError:
             continue
-        for e in entries:
-            name = e.name
-            hidden = hidden_dir or name.startswith(".")
-            if hidden and not include_hidden:
-                continue
-            rel = f"{prefix}{name}"
-            try:
-                if e.is_dir(follow_symlinks=False):
-                    folders[rel] = {"files": [], "subs": {}}
-                    order.append(rel)
-                    here["subs"][name] = 0
-                    stack.append((Path(e.path), rel + "/", hidden))
-                    continue
-                if not e.is_file():
-                    continue
-                size = e.stat().st_size
-            except OSError:
-                continue
-            if rel.endswith(SKIPPED_SUFFIXES):
-                continue
-            kind = source_kind(rel)
-            rec: dict[str, Any] = {"path": rel, "kind": kind, "size_bytes": size, "title": source_title(rel, kind)}
-            if hidden:
-                rec["hidden"] = True
-            out.append(rec)
-            here["files"].append(rec)
-    # totals bottom-up (children were visited after their parents), then folders with nothing under them go
-    totals: dict[str, int] = {}
-    for rel in reversed(order):
-        f = folders[rel]
-        n = len(f["files"]) + sum(totals.get(f"{rel}/{name}" if rel else name, 0) for name in f["subs"])
-        totals[rel] = n
-        f["subs"] = {name: totals[f"{rel}/{name}" if rel else name] for name in sorted(f["subs"]) if totals.get(f"{rel}/{name}" if rel else name, 0)}
-    key = lambda s: (KIND_ORDER[s["kind"]], s["path"])  # noqa: E731
-    for rel in order:
-        if rel and not totals.get(rel):
-            folders.pop(rel, None)
-        else:
-            folders[rel]["files"].sort(key=key)
-    out.sort(key=key)
-    return out, folders
+        kind = source_kind(rel)
+        rec: dict[str, Any] = {"path": rel, "kind": kind, "size_bytes": size, "title": source_title(rel, kind)}
+        if include_hidden and _is_hidden(rel):
+            rec["hidden"] = True
+        out.append(rec)
+    out.sort(key=lambda s: (KIND_ORDER[s["kind"]], s["path"]))
+    return out
 
 
 def _listing(corpus: Path, include_hidden: bool) -> _Listing:
@@ -187,7 +159,8 @@ def _listing(corpus: Path, include_hidden: bool) -> _Listing:
             hit = _SOURCES.get(key)
             if hit is not None and time.monotonic() - hit.ts < SOURCES_MEMO_S:
                 return hit
-        listing = _Listing(time.monotonic(), *_walk_sources(corpus, include_hidden))
+        sources = _walk_sources(corpus, include_hidden)
+        listing = _Listing(time.monotonic(), sources)  # timed at the walk's end, so a long walk is not stored expired
         with _sources_lock:
             _SOURCES[key] = listing
         return listing
@@ -199,37 +172,135 @@ def list_sources(corpus: Path, include_hidden: bool = False) -> list[dict[str, A
     return _listing(corpus, include_hidden).sources
 
 
+def source_of(corpus: Path, rel: str) -> dict[str, Any] | None:
+    """The record list_sources gives the regular file at `rel`, read from that file alone, without walking the corpus;
+    None for a path it may list otherwise or not at all: one that is not a regular file, under a dot name, reached
+    through a symlinked folder, or one of SKIPPED_SUFFIXES."""
+    if not rel or _is_hidden(rel) or rel.endswith(SKIPPED_SUFFIXES) or os.path.normpath(rel) != rel or rel.startswith("/"):
+        return None
+    here = str(corpus)
+    for part in rel.split("/")[:-1]:
+        here = f"{here}/{part}"
+        try:
+            if not stat.S_ISDIR(os.lstat(here).st_mode):
+                return None
+        except OSError:
+            return None
+    try:
+        st = os.stat(f"{corpus}/{rel}")
+    except OSError:
+        return None
+    if not stat.S_ISREG(st.st_mode):
+        return None
+    kind = source_kind(rel)
+    return {"path": rel, "kind": kind, "size_bytes": st.st_size, "title": source_title(rel, kind)}
+
+
 def forget_sources(corpus: Path | None = None) -> None:
-    """Drop the source-list memo of one corpus (every corpus when None): a saved file, a working-directory change."""
+    """Drop the source-list memo of one corpus (every corpus when None), and have the next walk of its folder tree check
+    every folder: a saved file, a working-directory change."""
     with _sources_lock:
         for key in [k for k in _SOURCES if corpus is None or k[0] == corpus]:
             _SOURCES.pop(key, None)
+    corpus_tree.forget(corpus)
 
 
-def _is_run(folder: dict[str, Any]) -> bool:
-    """The Files tree's rule for a run folder: it holds an `agents/` folder or a `manifest.json`."""
-    return "agents" in folder["subs"] or any(f["path"].rsplit("/", 1)[-1] == "manifest.json" for f in folder["files"])
+def _listed_folder(corpus: Path, rel: str, include_hidden: bool) -> str | None:
+    """The path of corpus folder `rel` (stripped of slashes) as folder_listing reads it, or None for one it leaves out:
+    under a dot name without `include_hidden`, or reached through a symlinked folder."""
+    if rel and _is_hidden(rel) and not include_hidden:
+        return None
+    d = f"{corpus}/{rel}" if rel else str(corpus)
+    if rel and (os.path.normpath(rel) != rel or os.path.realpath(d) != os.path.join(os.path.realpath(corpus), rel)):
+        return None
+    return d
+
+
+COUNT_CHECK_S = 10.0  # how long a folder's check in the tree stands before a stamps request has it checked again
+
+
+def folder_stamp(corpus: Path, rel: str, include_hidden: bool = False) -> str | None:
+    """The folder's modification time in nanoseconds, which an entry added, removed or renamed in it changes, then, after
+    a `/`, the count of files under it at any depth where the corpus's folder tree knows it (corpus_tree.Tree.counts,
+    no file system access), which a change in any folder below it changes once the tree has checked that folder; None
+    for a folder that is not there or that folder_listing leaves out."""
+    d = _listed_folder(corpus, rel.strip("/"), include_hidden)
+    try:
+        mtime = os.stat(d).st_mtime_ns if d is not None else None
+    except OSError:
+        return None
+    if mtime is None:
+        return None
+    return _stamp(str(mtime), corpus_tree.tree(corpus).counts(include_hidden).get(rel.strip("/")))
+
+
+def _stamp(mtime: str, known: tuple[int, int] | None) -> str:
+    return f"{mtime}/{known[0]}" if known is not None else mtime
 
 
 def folder_listing(corpus: Path, rel: str, include_hidden: bool = False) -> dict[str, Any] | None:
-    """`GET /sources?path=<rel>&depth=1`: the folder's own files and subfolders (with counts and run mark) from the
-    memoised listing. None when the listing knows no such folder."""
-    listing = _listing(corpus, include_hidden)
-    folders = listing.folders
+    """`GET /sources?path=<rel>&depth=1`: the folder's own files and subfolders, read from that folder alone, with its
+    `stamp` (folder_stamp) as of before the read, so a later change shows as another stamp. A subfolder is a run
+    (`is_run`) when it holds an `agents/` folder or a `manifest.json`. The counts of files at any depth (`n_files`, the
+    folder's own and each subfolder's) and a subfolder's `n_folders` are given only where earlier walks of the corpus's
+    folder tree know them (corpus_tree.Tree.counts), after the tree checks this folder again (Tree.recheck), and the
+    folder's own only when the tree holds its entries as read. None for a folder that is not there, or one the listing
+    leaves out: under a dot name without `include_hidden`, or reached through a symlinked folder."""
     rel = rel.strip("/")
-    me = folders.get(rel)
-    if me is None:
+    hidden_here = _is_hidden(rel) if rel else False
+    d = _listed_folder(corpus, rel, include_hidden)
+    if d is None:
         return None
-    hidden_here = any(part.startswith(".") for part in rel.split("/")) if rel else False
-    subs = []
-    for name, n_files in sorted(me["subs"].items()):
-        sub_path = f"{rel}/{name}" if rel else name
-        entry: dict[str, Any] = {"path": sub_path, "name": name, "n_files": n_files, "n_folders": len(folders[sub_path]["subs"]),
-                                 "is_run": _is_run(folders[sub_path])}
-        if hidden_here or name.startswith("."):
+    try:
+        mtime = os.stat(d).st_mtime_ns
+        with os.scandir(d) as it:
+            entries = list(it)
+    except OSError:
+        return None
+    # a folder changed within its modification time's resolution may change again under the same time, so a listing
+    # read that soon carries a stamp no folder_stamp equals, and the tree lists it once more
+    racy = 0 <= time.time_ns() - mtime < corpus_tree.RACY_NS
+    files: list[dict[str, Any]] = []
+    subs: list[tuple[str, str, bool, str]] = []
+    for e in entries:
+        name = e.name
+        hidden = hidden_here or name.startswith(".")
+        if hidden and not include_hidden:
+            continue
+        path = f"{rel}/{name}" if rel else name
+        try:
+            if e.is_dir(follow_symlinks=False):
+                subs.append((name, path, hidden, e.path))
+                continue
+            if not e.is_file() or name.endswith(SKIPPED_SUFFIXES):
+                continue
+            size = e.stat().st_size
+        except OSError:
+            continue
+        kind = source_kind(path)
+        rec: dict[str, Any] = {"path": path, "kind": kind, "size_bytes": size, "title": source_title(path, kind)}
+        if hidden:
+            rec["hidden"] = True
+        files.append(rec)
+    files.sort(key=lambda s: (KIND_ORDER[s["kind"]], s["path"]))
+    tree = corpus_tree.tree(corpus)
+    current = tree.recheck(rel, mtime)
+    counts = tree.counts(include_hidden)
+    folders = []
+    for name, path, hidden, full in sorted(subs):
+        is_run = os.path.isfile(f"{full}/manifest.json") or os.path.isdir(f"{full}/agents") and not os.path.islink(f"{full}/agents")
+        entry: dict[str, Any] = {"path": path, "name": name, "is_run": is_run}
+        known = counts.get(path)
+        if known is not None:
+            entry["n_files"], entry["n_folders"] = known
+        if hidden:
             entry["hidden"] = True
-        subs.append(entry)
-    return {"path": rel, "files": list(me["files"]), "folders": subs, "n_files": len(me["files"]) + sum(me["subs"].values())}
+        folders.append(entry)
+    known = counts.get(rel) if current else None
+    out: dict[str, Any] = {"path": rel, "files": files, "folders": folders, "stamp": _stamp(f"{mtime}~" if racy else str(mtime), known)}
+    if known is not None:
+        out["n_files"] = known[0]
+    return out
 
 
 # --------------------------------------------------------------------------- line access
@@ -237,10 +308,19 @@ def folder_listing(corpus: Path, rel: str, include_hidden: bool = False) -> dict
 INDEX_MAX_FILES = 64                 # line indexes kept, least recently used out first
 INDEX_MAX_BYTES = 256 * 1024 * 1024  # ... or until their marks add up to this
 INDEX_BUF = 8 * 1024 * 1024          # bytes read at a time while marking
+INDEX_BIG = 32 * 1024 * 1024         # a file this large is indexed in the background, and its index is kept on disk
+INDEX_BUILDS = 2                     # background index builds at a time
+INDEX_DISK_MAX = 256                 # indexes kept on disk, least recently used out first
+INDEX_DIR = "line-index"             # in thimble's home
+INDEX_MAGIC = b"thimble line index 1\n"
+FORWARD_BUF = 1024 * 1024            # bytes read at a time by a page read before its file's index is ready
+FORWARD_SKIP = 16 * 1024 * 1024      # ... and the most it reads past the nearest mark before its first line
 _INDEX: "OrderedDict[Path, LineIndex]" = OrderedDict()  # path -> its sparse index; test hooks read `p in _INDEX`
 _COUNTS: dict[Path, tuple[tuple[int, int], int]] = {}  # path -> ((size, mtime_ns), line count): filled by line_offsets and remember_line_count
 _index_lock = threading.Lock()
 _index_builds: dict[Path, threading.Lock] = {}  # one build at a time per file; a second reader waits for it
+_builds: dict[Path, "_Build"] = {}  # a big file's index being built in the background
+_build_slots = threading.BoundedSemaphore(INDEX_BUILDS)
 
 
 class LineIndex:
@@ -301,10 +381,14 @@ class LineIndex:
         raise TypeError("a LineIndex holds marks, not every line start: use offset(path, line_no) or read_lines")
 
 
-def build_index(path: Path) -> LineIndex:
+Progress = Callable[[array, array, int, int], None]
+
+
+def build_index(path: Path, progress: Progress | None = None) -> LineIndex:
     """One pass over the file: the marks concept_scan.index_file makes and the line count, without a Python step per
     line. Newlines are counted with bytes.count over a window sized from the average line so far; a line longer than the
-    window falls to the byte rule."""
+    window falls to the byte rule. `progress(mark_lines, mark_offsets, lines, bytes)` is called after each buffer with
+    the marks so far and the lines and bytes the scan has passed."""
     from . import concept_scan  # lazy: concept_scan imports this module
 
     chunk_lines, chunk_bytes = concept_scan.CHUNK_LINES, concept_scan.CHUNK_BYTES
@@ -324,6 +408,8 @@ def build_index(path: Path) -> LineIndex:
                 if not buf:
                     break
                 b0 += len(buf)
+                if progress is not None:
+                    progress(mark_lines, mark_offsets, n, b0)
                 buf = f.read(INDEX_BUF)
                 rel = 0
                 if not buf:
@@ -384,6 +470,54 @@ def build_index(path: Path) -> LineIndex:
     return LineIndex((size, st.st_mtime_ns), n, mark_lines, mark_offsets)
 
 
+class _Build:
+    """A big file's line index being built in a background thread. Until it is done, the marks the scan has made so far
+    (`n_marks` of them) and the lines and bytes it has passed are published as it goes, so a page can be read from the
+    nearest mark before its first line."""
+
+    __slots__ = ("key", "cond", "mark_lines", "mark_offsets", "n_marks", "lines", "passed", "index", "error")
+
+    def __init__(self, key: tuple[int, int]) -> None:
+        self.key = key
+        self.cond = threading.Condition()
+        self.mark_lines: array = array("q")
+        self.mark_offsets: array = array("q")
+        self.n_marks = 0
+        self.lines = 0
+        self.passed = 0
+        self.index: LineIndex | None = None
+        self.error: BaseException | None = None
+
+    def progress(self, mark_lines: array, mark_offsets: array, lines: int, passed: int) -> None:
+        with self.cond:
+            self.mark_lines, self.mark_offsets = mark_lines, mark_offsets
+            self.n_marks = len(mark_lines)
+            self.lines, self.passed = lines, passed
+            self.cond.notify_all()
+
+    def finish(self, index: LineIndex | None, error: BaseException | None = None) -> None:
+        with self.cond:
+            self.index, self.error = index, error
+            self.cond.notify_all()
+
+    def done(self) -> bool:
+        return self.index is not None or self.error is not None
+
+    def mark_before(self, line: int) -> tuple[int, int]:
+        """(line, byte offset) of the last published mark at or before `line`; line 1 at byte 0 before the first. Under
+        `cond`."""
+        i = bisect_right(self.mark_lines, line, 0, self.n_marks) - 1
+        return (self.mark_lines[i], self.mark_offsets[i]) if i >= 0 else (1, 0)
+
+    def wait(self) -> LineIndex:
+        with self.cond:
+            self.cond.wait_for(self.done)
+        if self.error is not None:
+            raise self.error
+        assert self.index is not None
+        return self.index
+
+
 def _index_trim() -> None:
     """Least recently used indexes out until INDEX_MAX_FILES and INDEX_MAX_BYTES hold (under _index_lock)."""
     total = sum(idx.nbytes for idx in _INDEX.values())
@@ -392,11 +526,133 @@ def _index_trim() -> None:
         total -= gone.nbytes
 
 
+def _keep(path: Path, idx: LineIndex) -> None:
+    """The index into the LRU and its count into _COUNTS (under _index_lock)."""
+    _INDEX[path] = idx
+    _INDEX.move_to_end(path)
+    _COUNTS[path] = (idx.key, idx.lines)
+    _index_trim()
+
+
+def _index_home() -> Path:
+    return Path(os.environ.get("THIMBLE_HOME") or "~/.thimble").expanduser() / INDEX_DIR
+
+
+def _index_file(path: Path) -> Path:
+    return _index_home() / (hashlib.sha256(os.fsencode(path)).hexdigest()[:32] + ".idx")
+
+
+def _index_header(path: Path, idx: LineIndex) -> dict[str, Any]:
+    from . import concept_scan  # lazy: concept_scan imports this module
+
+    return {"path": str(path), "size": idx.key[0], "mtime_ns": idx.key[1], "lines": idx.lines, "marks": idx.n_marks,
+            "chunk": [concept_scan.CHUNK_LINES, concept_scan.CHUNK_BYTES], "order": sys.byteorder}
+
+
+def save_index(path: Path, idx: LineIndex) -> None:
+    """Keep a big file's index on disk in thimble's home, so a restarted server reads it in place of a pass over the
+    file; the least recently used past INDEX_DISK_MAX go. Never fails."""
+    folder = _index_home()
+    tmp = None
+    try:
+        config.private_dir(folder.parent)
+        config.private_dir(folder)
+        fd, tmp = tempfile.mkstemp(dir=folder, suffix=".tmp")
+        with os.fdopen(fd, "wb") as f:
+            f.write(INDEX_MAGIC + json.dumps(_index_header(path, idx)).encode() + b"\n")
+            f.write(idx.mark_lines.tobytes())
+            f.write(idx.mark_offsets.tobytes())
+        os.replace(tmp, _index_file(path))
+        tmp = None
+        kept = sorted(folder.glob("*.idx"), key=lambda p: p.stat().st_mtime)
+        for old in kept[:max(0, len(kept) - INDEX_DISK_MAX)]:
+            old.unlink(missing_ok=True)
+    except OSError as e:
+        log.warning("line index: could not keep the index of %s: %s", path, e)
+    finally:
+        if tmp is not None:
+            Path(tmp).unlink(missing_ok=True)
+
+
+def load_index(path: Path, key: tuple[int, int]) -> LineIndex | None:
+    """The index save_index kept for this file at this (size, mtime_ns), else None."""
+    f = _index_file(path)
+    try:
+        data = f.read_bytes()
+    except OSError:
+        return None
+    try:
+        if not data.startswith(INDEX_MAGIC):
+            return None
+        nl = data.index(b"\n", len(INDEX_MAGIC))
+        head = json.loads(data[len(INDEX_MAGIC):nl])
+        n = head["marks"]
+        body = data[nl + 1:]
+        mark_lines, mark_offsets = array("q"), array("q")
+        mark_lines.frombytes(body[:8 * n])
+        mark_offsets.frombytes(body[8 * n:])
+        idx = LineIndex(key, head["lines"], mark_lines, mark_offsets)
+        if head != _index_header(path, idx) or len(mark_offsets) != n:
+            return None
+    except (ValueError, KeyError, TypeError):
+        return None
+    try:
+        os.utime(f)  # recently used
+    except OSError:
+        pass
+    return idx
+
+
+def _run_build(path: Path, b: _Build) -> None:
+    with _build_slots:
+        try:
+            idx = build_index(path, b.progress)
+        except Exception as e:  # noqa: BLE001 — handed to every reader waiting on the build
+            with _index_lock:
+                if _builds.get(path) is b:
+                    del _builds[path]
+            b.finish(None, e)
+            return
+    with _index_lock:
+        if _builds.get(path) in (b, None):
+            _keep(path, idx)
+        if _builds.get(path) is b:
+            del _builds[path]
+    save_index(path, idx)
+    b.finish(idx)
+
+
+def _big_index(path: Path, key: tuple[int, int]) -> "LineIndex | _Build":
+    """A big file's index from memory or disk, else its background build (started now when none runs)."""
+    with _index_lock:
+        hit = _INDEX.get(path)
+        if hit is not None and hit.key == key:
+            _INDEX.move_to_end(path)
+            return hit
+        b = _builds.get(path)
+        if b is not None and b.key == key:
+            return b
+    idx = load_index(path, key)
+    with _index_lock:
+        if idx is not None:
+            _keep(path, idx)
+            return idx
+        b = _builds.get(path)
+        if b is not None and b.key == key:
+            return b
+        b = _builds[path] = _Build(key)
+    threading.Thread(target=_run_build, args=(path, b), name="line-index", daemon=True).start()
+    return b
+
+
 def line_offsets(path: Path) -> LineIndex:
     """The file's sparse line index, built on first access and kept in an LRU keyed on (size, mtime_ns) so a changed
-    file is indexed again."""
+    file is indexed again. A big file's (INDEX_BIG) is built in the background and kept on disk; this waits for it."""
     st = path.stat()
     key = (st.st_size, st.st_mtime_ns)
+    if st.st_size >= INDEX_BIG:
+        got = _big_index(path, key)
+        return got if isinstance(got, LineIndex) else got.wait()
     with _index_lock:
         hit = _INDEX.get(path)
         if hit is not None and hit.key == key:
@@ -411,10 +667,7 @@ def line_offsets(path: Path) -> LineIndex:
                 return hit
         idx = build_index(path)
         with _index_lock:
-            _INDEX[path] = idx
-            _INDEX.move_to_end(path)
-            _COUNTS[path] = (idx.key, idx.lines)
-            _index_trim()
+            _keep(path, idx)
             _index_builds.pop(path, None)
         return idx
 
@@ -431,7 +684,8 @@ def remember_line_count(path: Path, key: tuple[int, int], n: int) -> None:
 
 def line_count(path: Path) -> int:
     """The number of lines of a file: from the line index or a remembered count when either matches the file's (size,
-    mtime), else one counting pass (cached as a count only, so counting many files leaves no index behind)."""
+    mtime); a big file's from its line index (built once, in the background, and shared with the pages read meanwhile);
+    else one counting pass (cached as a count only, so counting many files leaves no index behind)."""
     st = path.stat()
     key = (st.st_size, st.st_mtime_ns)
     with _index_lock:
@@ -441,6 +695,8 @@ def line_count(path: Path) -> int:
     known = _COUNTS.get(path)
     if known is not None and known[0] == key:
         return known[1]
+    if st.st_size >= INDEX_BIG:
+        return len(line_offsets(path))
     n = 0
     last = b""
     with open(path, "rb") as f:
@@ -453,17 +709,9 @@ def line_count(path: Path) -> int:
     return n
 
 
-def _split_lines(buf: bytes) -> list[bytes]:
-    lines = buf.split(b"\n")
-    if lines and lines[-1] == b"":
-        lines.pop()
-    return [ln[:-1] if ln.endswith(b"\r") else ln for ln in lines]
-
-
-def read_lines(path: Path, start: int, end: int) -> list[bytes]:
-    """Raw lines start..end (1-based, inclusive), without terminators; bounds are clamped. Seeks to the chunk holding
-    `start` and reads through the chunk holding `end`, never the whole file."""
-    idx = line_offsets(path)
+def _index_lines(idx: LineIndex, path: Path, start: int, end: int) -> list[bytes]:
+    """Lines start..end of the chunks that hold them, found a newline at a time rather than by splitting the chunk (up
+    to 8 MB), which holds the interpreter, and so every other thread, for as long as the split runs."""
     n = len(idx)
     start, end = max(1, start), min(end, n)
     if start > end:
@@ -472,8 +720,120 @@ def read_lines(path: Path, start: int, end: int) -> list[bytes]:
     with open(path, "rb") as f:
         f.seek(begin)
         buf = f.read(stop - begin)
-    lines = _split_lines(buf)
-    return lines[start - first:end - first + 1]
+    pos = 0
+    for _ in range(start - first):
+        pos = buf.find(b"\n", pos) + 1
+        if pos == 0:
+            return []
+    out: list[bytes] = []
+    for _ in range(end - start + 1):
+        if pos >= len(buf):
+            break
+        nl = buf.find(b"\n", pos)
+        line = buf[pos:] if nl < 0 else buf[pos:nl]
+        out.append(line[:-1] if line.endswith(b"\r") else line)
+        if nl < 0:
+            break
+        pos = nl + 1
+    return out
+
+
+def read_lines(path: Path, start: int, end: int) -> list[bytes]:
+    """Raw lines start..end (1-based, inclusive), without terminators; bounds are clamped. Seeks to the chunk holding
+    `start` and reads through the chunk holding `end`, never the whole file."""
+    return _index_lines(line_offsets(path), path, start, end)
+
+
+def _read_on(path: Path, size: int, mark: tuple[int, int], start: int, end: int,
+             skip_max: int | None) -> tuple[list[bytes], int, int, int | None] | None:
+    """Lines start..end read on from a line start (`mark`: line, byte offset; its line <= start). Returns (those lines,
+    the bytes and the whole lines read from the mark, the file's line count when the read reached its end, else None);
+    None when more than `skip_max` bytes lie between the mark and line `start`."""
+    mark_line, mark_off = mark
+    want = end - mark_line + 1  # lines through line `end`
+    skip = start - mark_line    # of them, the lines before `start`
+    data = bytearray()
+    found = 0
+    with open(path, "rb") as f:
+        f.seek(mark_off)
+        while found < want:
+            buf = f.read(FORWARD_BUF)
+            if not buf:
+                break
+            data += buf
+            found += buf.count(b"\n")
+            if skip_max is not None and found < skip and len(data) > skip_max:
+                return None
+    parts = bytes(data).split(b"\n", want)
+    if len(parts) > want or (parts and parts[-1] == b""):  # the bytes after line `end`, or after the last newline
+        parts.pop()
+    total = None
+    if mark_off + len(data) >= size:  # the read reached the file's end
+        total = mark_line - 1 + found + (bool(data) and not data.endswith(b"\n"))
+    lines = [ln[:-1] if ln.endswith(b"\r") else ln for ln in parts[skip:]]
+    return lines, data.rfind(b"\n") + 1, found, total
+
+
+def _estimate(size: int, rates: list[tuple[int, int]], at_least: int) -> int:
+    """The line count of a file of `size` bytes from the largest (bytes, lines) sample, never under `at_least`."""
+    used, lines = max(rates)
+    return max(at_least, round(size * lines / used)) if used and lines else at_least
+
+
+def page_lines(path: Path, start: int, end: int) -> tuple[list[bytes], int, bool]:
+    """read_lines for a page, with the file's line count and whether that count is an estimate. A big file whose index
+    is not ready is read on from the nearest mark its background build has published (line 1 before the first), so a
+    page near its start, or anywhere the build has passed, needs no wait; its count is then estimated from the bytes per
+    line read so far."""
+    start = max(1, start)
+    st = path.stat()
+    key = (st.st_size, st.st_mtime_ns)
+    got: LineIndex | _Build = line_offsets(path) if st.st_size < INDEX_BIG else _big_index(path, key)
+    while isinstance(got, _Build):
+        b = got
+        with b.cond:
+            if b.index is not None:
+                got = b.index
+                break
+            if b.error is not None:
+                raise b.error
+            mark = b.mark_before(start)
+            passed = b.lines >= start
+            scan = (b.passed, b.lines)
+        read = _read_on(path, st.st_size, mark, start, max(start, end), None if passed else FORWARD_SKIP)
+        if read is None:  # the line lies past what the build has passed: wait until it gets there
+            with b.cond:
+                b.cond.wait_for(lambda: b.done() or b.lines >= start, timeout=1.0)
+            continue
+        lines, used, n_read, total = read
+        lines = lines[:max(0, end - start + 1)]
+        if total is not None:
+            return lines, total, False
+        at_least = max(max(start, end) + 1, mark[0] - 1 + n_read, scan[1] + (scan[0] < st.st_size))
+        return lines, _estimate(st.st_size, [scan, (used, n_read)], at_least), True
+    return _index_lines(got, path, start, end), len(got), False
+
+
+def line_total(path: Path) -> tuple[int, bool, float]:
+    """(the file's line count, whether it is an estimate, the share of the file indexed so far). A big file whose index
+    is not ready gets its count estimated as page_lines does, without waiting."""
+    st = path.stat()
+    if st.st_size < INDEX_BIG:
+        return len(line_offsets(path)), False, 1.0
+    got = _big_index(path, (st.st_size, st.st_mtime_ns))
+    if isinstance(got, _Build):
+        with got.cond:
+            idx, error, scan = got.index, got.error, (got.passed, got.lines)
+        if error is not None:
+            raise error
+        if idx is None:
+            if not scan[1]:  # the scan has not reported yet: the bytes per line of the file's start
+                with open(path, "rb") as f:
+                    head = f.read(FORWARD_BUF)
+                scan = (head.rfind(b"\n") + 1, head.count(b"\n"))
+            return _estimate(st.st_size, [scan], scan[1] + 1), True, round(got.passed / st.st_size, 3)
+        got = idx
+    return len(got), False, 1.0
 
 
 def record_meta(record: Any, rel: str, kind: str) -> dict[str, Any]:
@@ -527,14 +887,16 @@ def records_from_lines(lines: list[bytes], rel: str, kind: str, start: int) -> l
 # --------------------------------------------------------------------------- databases (sqlite, read-only)
 
 
-def connect_ro(db: Path) -> sqlite3.Connection:
-    return sqlite3.connect(f"file:{quote(str(db), safe='/')}?mode=ro", uri=True)
+def connect_ro(db: Path, any_thread: bool = False) -> sqlite3.Connection:
+    """A read-only connection; with `any_thread`, one a generator may go on using from another thread, one at a time."""
+    return sqlite3.connect(f"file:{quote(str(db), safe='/')}?mode=ro", uri=True, check_same_thread=not any_thread)
 
 
-def open_database(db: Path) -> sqlite3.Connection:
+def open_database(db: Path, any_thread: bool = False) -> sqlite3.Connection:
     """Read-only connection to a sqlite file, checked against the file header up front (sqlite opens lazily, so a
-    garbage file would otherwise fail on the first query). Raises sqlite3.Error; an empty file is an empty database."""
-    con = connect_ro(db)
+    garbage file would otherwise fail on the first query). Raises sqlite3.Error; an empty file is an empty database.
+    `any_thread` as connect_ro."""
+    con = connect_ro(db, any_thread)
     try:
         con.execute("SELECT 1 FROM sqlite_master LIMIT 1").fetchall()
     except sqlite3.Error:
@@ -681,7 +1043,11 @@ def binary_page(p: Path, rel: str, kind: str, start: int) -> dict[str, Any]:
             "size_bytes": p.stat().st_size}
 
 
-def _page(corpus: Path, rel: str, start: int, end: int, clip: int = 0) -> dict[str, Any]:
+def _page(corpus: Path, rel: str, start: int, end: int, clip: int = 0,
+          around: tuple[int, bool] | None = None) -> dict[str, Any]:
+    """A page of lines start..end; `total_estimated` when page_lines estimated the count (a big file whose line index is
+    being built). With `around` (line, clamp), the page /source/around answers: 404 when the file has no such line,
+    unless `clamp` moves a line past the end to the file's last lines."""
     p = _file(corpus, rel)
     kind = source_kind(rel)
     if kind == "forge":  # never page sqlite bytes as text
@@ -690,11 +1056,21 @@ def _page(corpus: Path, rel: str, start: int, end: int, clip: int = 0) -> dict[s
         raise HTTPException(400, f"{rel!r} is a sqlite side file ({'/'.join(SIDE_SUFFIXES)}) of a database, not text")
     if sniff_binary(p):
         return binary_page(p, rel, kind, start)
-    total = len(line_offsets(p))
-    records = load_records(p, rel, kind, start, end)
+    lines, total, estimated = page_lines(p, start, end)
+    if around is not None:
+        line, clamp = around
+        if line < 1 or (not estimated and line > total):
+            if not (clamp and line > total > 0):
+                raise HTTPException(404, f"line {line} out of range ({rel} has {total} lines)")
+            start, end = max(1, total - (line - start)), total
+            lines, total, estimated = page_lines(p, start, end)
+    records = records_from_lines(lines, rel, kind, start)
     if clip > 0:
         records = clip_records(records, max(CLIP_MIN, clip))
-    return {"path": rel, "kind": kind, "total_lines": total, "start": start, "records": records}
+    page = {"path": rel, "kind": kind, "total_lines": total, "start": start, "records": records}
+    if estimated:
+        page["total_estimated"] = True
+    return transcripts.dress(page, p, rel)
 
 
 # --------------------------------------------------------------------------- routes
@@ -725,13 +1101,17 @@ def list_corpora() -> list[dict[str, Any]]:
     for rec in config.registered_corpora():
         if rec["name"] in seen:
             continue
-        out.append({"name": rec["name"], "manifest": rec["manifest"], "path": rec["path"], "registered": True})
+        row = {"name": rec["name"], "manifest": rec["manifest"], "path": rec["path"], "registered": True}
+        if rec.get("shown"):
+            row["shown"] = rec["shown"]
+        out.append(row)
     return out
 
 
 class RegisterBody(BaseModel):
     path: str
     exact: bool = False  # register this folder even inside a registered one
+    shown: str | None = None  # the folder as the analyst named it, through a symlink; null clears it, absent keeps it
 
 
 @router.post("/corpora/register", status_code=201)
@@ -739,8 +1119,9 @@ def register_corpus(body: RegisterBody) -> dict[str, Any]:
     """Register a directory as a corpus: writes the sidecar DATA_DIR/<name>.corpus.json, never into the directory. 400
     for a non-directory. A taken basename gets the next free name (`logs-2`); a path inside a corpus returns that corpus
     unless `exact`."""
+    shown = body.shown if "shown" in body.model_fields_set else config.KEEP_SHOWN
     try:
-        return config.register_corpus(body.path, exact=body.exact)
+        return config.register_corpus(body.path, exact=body.exact, shown=shown)
     except ValueError as e:
         raise HTTPException(400, str(e))
 
@@ -770,6 +1151,26 @@ def get_sources(c: str, include_hidden: int = 0, path: str | None = None, depth:
     return listing
 
 
+STAMPS_MAX = 200  # folders one GET /sources/stamps asks about
+
+
+@router.get("/corpora/{c}/sources/stamps")
+def get_stamps(c: str, path: list[str] = Query(default=[]), include_hidden: int = 0) -> dict[str, Any]:
+    """`?path=<folder>&path=...`: the `stamp` (folder_stamp) of each folder the Files tree shows, so it lists again only
+    the folders that changed, the root too when a file was added or removed in a folder it does not show; null for a
+    folder that is gone or not listed ('' or '.' is the root). 400 past STAMPS_MAX folders."""
+    corpus = _corpus(c)
+    if len(path) > STAMPS_MAX:
+        raise HTTPException(400, f"at most {STAMPS_MAX} folders at a time")
+    out: dict[str, str | None] = {}
+    for p in path:
+        rel = p.strip().strip("/")
+        out[p] = folder_stamp(corpus, "" if rel == "." else rel, bool(include_hidden))
+    # the folders the tree does not show are checked meanwhile, so a later stamp of a shown folder counts their changes
+    corpus_tree.tree(corpus).check_in_background(hidden=bool(include_hidden), max_age=COUNT_CHECK_S)
+    return {"stamps": out}
+
+
 @router.get("/corpora/{c}/source")
 def get_source(c: str, path: str, request: Request, start: int = 1, count: int = PAGE_DEFAULT, clip: int = 0) -> dict[str, Any]:
     """A page of a file's records; `clip` > 0 cuts every string longer than that many characters (clip_records)."""
@@ -782,20 +1183,31 @@ def get_source(c: str, path: str, request: Request, start: int = 1, count: int =
 
 @router.get("/corpora/{c}/source/around")
 def get_source_around(c: str, path: str, line: int, request: Request, before: int = 50, after: int = 50,
-                      clip: int = 0) -> dict[str, Any]:
+                      clip: int = 0, clamp: int = 0) -> dict[str, Any]:
+    """The page around one line: 404 for a line the file does not have, unless `clamp`, which answers a line past the
+    end with the file's last lines (the reader's own moves, made while its line count is an estimate)."""
     corpus = _corpus(c)
     p = _file(corpus, path)
     if source_kind(path) != "forge" and not path.endswith(SKIPPED_SUFFIXES) and sniff_binary(p):
         _viewed(c, path, request)
         return binary_page(p, path, source_kind(path), 1)
-    total = len(line_offsets(p))
-    if line < 1 or line > total:
-        raise HTTPException(404, f"line {line} out of range ({path} has {total} lines)")
     before = max(0, min(before, AROUND_MAX))
     after = max(0, min(after, AROUND_MAX))
-    page = _page(corpus, path, max(1, line - before), line + after, clip)
+    page = _page(corpus, path, max(1, line - before), line + after, clip, around=(line, bool(clamp)))
     _viewed(c, path, request)
     return page
+
+
+@router.get("/corpora/{c}/source/lines")
+def get_source_lines(c: str, path: str) -> dict[str, Any]:
+    """{path, total_lines, estimated, indexed}: a file's line count. While a big file's line index is built in the
+    background the count is an estimate and `indexed` the share of the file the build has passed; the reader asks again
+    until it is exact."""
+    p = _file(_corpus(c), path)
+    if source_kind(path) == "forge" or path.endswith(SKIPPED_SUFFIXES) or sniff_binary(p):
+        return {"path": path, "total_lines": 0, "estimated": False, "indexed": 1.0}
+    total, estimated, indexed = line_total(p)
+    return {"path": path, "total_lines": total, "estimated": estimated, "indexed": indexed}
 
 
 # --------------------------------------------------------------------------- find: files by name, text in a file
@@ -809,36 +1221,85 @@ SNIP_BEFORE = 48             # bytes of a matching line a snippet keeps before t
 SNIP_AFTER = 120             # and after it
 GREP_FILES_MAX = 100         # files with a match one content search lists; it stops there
 GREP_SHOWN = 5               # matching lines listed per file (its count goes on past them)
-GREP_SCAN_S = 15.0           # a content search stops after this long and says how far it read
+GREP_PROGRESS_S = 0.5        # how often a content search says how many files it has read
 GREP_SKIP = (".pdf", ".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".ico", ".tif", ".tiff", ".mp4", ".mov", ".webm",
              ".mkv", ".avi", ".mp3", ".wav", ".m4a", ".ogg", ".flac", ".zip", ".gz", ".tgz", ".tar", ".bz2", ".xz", ".7z",
              ".zst", ".whl", ".parquet", ".feather", ".arrow", ".xlsx", ".xls", ".docx")  # media and packed files: no text lines
 
 
-def find_files(sources: list[dict[str, Any]], query: str, limit: int = FIND_FILES_MAX) -> tuple[list[dict[str, Any]], int]:
-    """The files whose path holds every word of `query` (case-insensitive), best match first, falling back to fuzzy
-    in-order letter matches. Returns the first `limit` and how many matched."""
+class _SearchPaths:
+    """The corpus's files as the Files search reads them, for one version of its folder tree: their corpus-relative
+    paths sorted and (made when first asked for) the same in the listing's order, kind first."""
+
+    __slots__ = ("version", "paths", "_ordered")
+
+    def __init__(self, version: int, paths: list[str]) -> None:
+        self.version = version
+        self.paths = paths
+        self._ordered: list[str] | None = None
+
+    @property
+    def ordered(self) -> list[str]:
+        if self._ordered is None:
+            self._ordered = sorted(self.paths, key=lambda rel: (KIND_ORDER[source_kind(rel)], rel))
+        return self._ordered
+
+
+_search_memo: dict[Path, _SearchPaths] = {}
+
+
+def search_paths(corpus: Path) -> _SearchPaths:
+    """The files the Files tree lists, from the corpus's folder tree (corpus_tree) with no file stat'ed, so a search
+    over a large corpus costs one pass over its paths; folders read less than SOURCES_MEMO_S ago are taken as read."""
+    version, paths = corpus_tree.tree(corpus).walk(links=False, hidden=False, skip=SKIPPED_SUFFIXES, max_age=SOURCES_MEMO_S)
+    with _sources_lock:
+        hit = _search_memo.get(corpus)
+    if hit is not None and hit.version == version and hit.paths is paths:
+        return hit
+    made = _SearchPaths(version, paths)
+    with _sources_lock:
+        _search_memo[corpus] = made
+    return made
+
+
+def source_record(corpus: Path, rel: str) -> dict[str, Any] | None:
+    """One file as the Files tab lists it ({path, kind, size_bytes, title}), None when it is gone."""
+    try:
+        size = os.stat(f"{corpus}/{rel}").st_size
+    except OSError:
+        return None
+    kind = source_kind(rel)
+    return {"path": rel, "kind": kind, "size_bytes": size, "title": source_title(rel, kind)}
+
+
+def find_paths(paths: list[str], query: str, limit: int = FIND_FILES_MAX) -> tuple[list[str], int]:
+    """The paths that hold every word of `query` (case-insensitive), best match first, falling back to fuzzy in-order
+    letter matches. Returns the first `limit` and how many matched."""
     q = query.strip().lower()
     if not q:
         return [], 0
     words = q.split()
-    ranked: list[tuple[int, int, str, dict[str, Any]]] = []
-    for s in sources:
-        low = s["path"].lower()
+    ranked: list[tuple[int, int, str, str]] = []
+    for path in paths:
+        low = path.lower()
         if not all(w in low for w in words):
             continue
         name = low.rsplit("/", 1)[-1]
         rank = 0 if name == q else 1 if name.startswith(q) else 2 if q in name else 3 if all(w in name for w in words) else 4
-        ranked.append((rank, len(low), low, s))
+        ranked.append((rank, len(low), low, path))
     if not ranked:
-        letters = re.compile(".*?".join(re.escape(ch) for ch in q.replace(" ", "")))
-        for s in sources:
-            low = s["path"].lower()
+        letters = q.replace(" ", "")
+        fuzzy = re.compile(".*?".join(re.escape(ch) for ch in letters))
+        need = set(letters)
+        for path in paths:
+            low = path.lower()
+            if not need.issubset(low):
+                continue
             name = low.rsplit("/", 1)[-1]
-            if letters.search(name):
-                ranked.append((5, len(low), low, s))
-            elif letters.search(low):
-                ranked.append((6, len(low), low, s))
+            if fuzzy.search(name):
+                ranked.append((5, len(low), low, path))
+            elif fuzzy.search(low):
+                ranked.append((6, len(low), low, path))
     ranked.sort(key=lambda r: r[:3])
     return [r[3] for r in ranked[:limit]], len(ranked)
 
@@ -978,9 +1439,11 @@ def find_lines(path: Path, needles: list[bytes], after: int = 0, limit: int = FI
 
 @router.get("/corpora/{c}/sources/find")
 def find_sources(c: str, q: str = "", limit: int = FIND_FILES_MAX) -> dict[str, Any]:
-    """The Files tree's name search: {q, files, total}, over the memoised listing without dot entries."""
+    """The Files tree's name search: {q, files, total}, over the paths of the corpus's folder tree without dot entries
+    (search_paths); only the files it lists are stat'ed."""
     corpus = _corpus(c)
-    files, total = find_files(list_sources(corpus), q, max(1, min(limit, FIND_FILES_MAX)))
+    found, total = find_paths(search_paths(corpus).paths, q, max(1, min(limit, FIND_FILES_MAX)))
+    files = [r for r in (source_record(corpus, rel) for rel in found) if r is not None]
     return {"q": q, "files": files, "total": total}
 
 
@@ -989,20 +1452,24 @@ _grep_gen: dict[str, int] = {}
 _grep_lock = threading.Lock()
 
 
-def grep_files(corpus: Path, sources: list[dict[str, Any]], q: str, *, files_max: int = GREP_FILES_MAX,
-               shown: int = GREP_SHOWN, budget_s: float = GREP_SCAN_S,
-               stop: Callable[[], bool] | None = None) -> Iterator[dict[str, Any]]:
-    """The Files search's content half: each file of `sources` whose bytes hold `q` as {path, total, complete, matches},
-    then one closing {done: true, ...}. Databases, media, packed and binary files are skipped. Stops after `files_max`
-    files, `budget_s` seconds or `stop()`, with `complete` false."""
-    deadline = time.monotonic() + budget_s
+def grep_files(corpus: Path, paths: list[str], q: str, *, files_max: int = GREP_FILES_MAX,
+               shown: int = GREP_SHOWN, stop: Callable[[], bool] | None = None,
+               progress_s: float = GREP_PROGRESS_S) -> Iterator[dict[str, Any]]:
+    """The Files search's content half: each file of `paths` whose bytes hold `q` as {path, total, complete, matches},
+    a {progress: true, scanned, of} line at most every `progress_s` seconds while it reads, then one closing
+    {done: true, ...}. Databases, media, packed and binary files are skipped. It has no time limit: it stops after
+    `files_max` files or once `stop()` is true, with `complete` false and `scanned` the files it read whole."""
     files = hits = scanned = 0
     complete = True
-    for src in sources:
-        if files >= files_max or time.monotonic() > deadline or (stop is not None and stop()):
+    told = time.monotonic()
+    yield {"progress": True, "scanned": 0, "of": len(paths)}
+    for path in paths:
+        if files >= files_max or (stop is not None and stop()):
             complete = False
             break
-        path = src["path"]
+        if time.monotonic() - told >= progress_s:
+            told = time.monotonic()
+            yield {"progress": True, "scanned": scanned, "of": len(paths)}
         scanned += 1
         kind = source_kind(path)
         if kind == "forge" or path.lower().endswith(GREP_SKIP):
@@ -1014,34 +1481,69 @@ def grep_files(corpus: Path, sources: list[dict[str, Any]], q: str, *, files_max
         if not p.is_file() or sniff_binary(p):
             continue
         jsonl = kind in ("agent", "board", "events") or path.endswith(".jsonl")
-        found = find_lines(p, find_needles(q, jsonl), 0, shown, max(0.0, deadline - time.monotonic()), snippets=True, stop=stop)
+        found = find_lines(p, find_needles(q, jsonl), 0, shown, float("inf"), snippets=True, stop=stop)
         if found["total"]:
             files += 1
             hits += found["matches"]
             yield {"path": path, "total": found["matches"], "complete": found["complete"],
                    "matches": [{"line": n, **snip} for n, snip in zip(found["lines"], found["snippets"])]}
         if not found["complete"]:
+            scanned -= 1  # stopped inside this file: it was not read whole
             complete = False
             break
-    yield {"done": True, "files": files, "hits": hits, "scanned": scanned, "of": len(sources), "complete": complete}
+    yield {"done": True, "files": files, "hits": hits, "scanned": scanned, "of": len(paths), "complete": complete}
 
 
 @router.get("/corpora/{c}/sources/grep")
-def grep_sources(c: str, q: str = "") -> StreamingResponse:
-    """Content search over the files the tree lists, streamed as JSON lines, one per matching file and a closing `done`
-    line. A newer search of the same corpus stops this one. An empty or multi-line query is 400."""
+async def grep_sources(c: str, q: str = "") -> StreamingResponse:
+    """Content search over the files the tree lists, streamed as JSON lines: one per matching file, progress lines,
+    and a closing `done` line. The search's id is the X-Search header, which POST /sources/grep/stop takes. It runs in
+    a thread of its own and stops when it is asked to, when the browser drops the stream, or when a newer search of the
+    same corpus starts. An empty or multi-line query is 400."""
     corpus = _corpus(c)
     if not q.strip() or "\n" in q:
         raise HTTPException(400, "q must be text on one line")
     with _grep_lock:
         gen = _grep_gen[c] = _grep_gen.get(c, 0) + 1
-    sources = list_sources(corpus)
+    dropped = threading.Event()
+    loop = asyncio.get_running_loop()
+    items: asyncio.Queue[dict[str, Any] | None] = asyncio.Queue()
 
-    def lines() -> Iterator[str]:
-        for item in grep_files(corpus, sources, q, stop=lambda: _grep_gen.get(c) != gen):
-            yield json.dumps(item, ensure_ascii=False) + "\n"
+    def run() -> None:
+        try:
+            paths = search_paths(corpus).ordered
+            for item in grep_files(corpus, paths, q, stop=lambda: dropped.is_set() or _grep_gen.get(c) != gen):
+                loop.call_soon_threadsafe(items.put_nowait, item)
+        except Exception:  # noqa: BLE001
+            log.exception("content search of %s failed", c)
+        finally:
+            loop.call_soon_threadsafe(items.put_nowait, None)
 
-    return StreamingResponse(lines(), media_type="application/x-ndjson")
+    async def lines() -> AsyncIterator[str]:
+        threading.Thread(target=run, name=f"grep:{c}", daemon=True).start()
+        try:
+            while (item := await items.get()) is not None:
+                yield json.dumps(item, ensure_ascii=False) + "\n"
+        finally:
+            dropped.set()
+
+    return StreamingResponse(lines(), media_type="application/x-ndjson", headers={"X-Search": str(gen)})
+
+
+class GrepStopBody(BaseModel):
+    search: int  # the X-Search header of the search's stream
+
+
+@router.post("/corpora/{c}/sources/grep/stop")
+def stop_grep(c: str, body: GrepStopBody) -> dict[str, bool]:
+    """Stop the content search `search` of corpus c if it still runs: its stream ends with its `done` line, which says
+    how many files it read. {stopped: false} when that search has ended or a newer one took its place."""
+    _corpus(c)
+    with _grep_lock:
+        stopped = _grep_gen.get(c) == body.search
+        if stopped:
+            _grep_gen[c] = body.search + 1
+    return {"stopped": stopped}
 
 
 @router.get("/corpora/{c}/source/find")
@@ -1195,6 +1697,25 @@ def forge_query(c: str, body: QueryBody, request: Request, path: str = "forge.db
     truncated = len(rows) > QUERY_LIMIT
     _viewed(c, path, request)
     return {"columns": columns, "rows": [[jsonable(v) for v in r] for r in rows[:QUERY_LIMIT]], "truncated": truncated}
+
+
+CSV_ROWS_SPAN = 5000  # lines one csv-rows request covers at most
+
+
+@router.get("/corpora/{c}/csv-rows")
+def get_csv_rows(c: str, path: str, lines: str) -> dict[str, Any]:
+    """`?path=&lines=a-b`: {rows: [[line, n], ...]}, the rows of a CSV or TSV file that start on lines a..b with the
+    number each is cited by (`<path>#row=<n>`), so the Table view cites a row whole. 400 for another file."""
+    from . import records  # noqa: PLC0415 — records imports this module
+
+    if not records.is_delimited(path):
+        raise HTTPException(400, f"not a CSV or TSV file: {path!r}")
+    m = re.fullmatch(r"(\d+)-(\d+)", lines.strip())
+    if not m or int(m[1]) < 1 or int(m[2]) < int(m[1]):
+        raise HTTPException(400, "lines must be a-b, from 1")
+    a = int(m[1])
+    b = min(int(m[2]), a + CSV_ROWS_SPAN - 1)
+    return {"rows": records.row_starts(_file(_corpus(c), path), path, a, b)}
 
 
 @router.get("/corpora/{c}/ref")

@@ -8,9 +8,9 @@
   }
 }
 
-/* -------- Chip: 20px, the 10px icon and the name in mono 11px, radius 4. What points somewhere is the accent chip; a
-   value or a word is the neutral chip, ink on the cell with a hairline. An active filter chip is inverted to ink.
-   -------- */
+/* -------- Chip: 20px, the 10px icon and the name in mono 11px, radius 4. What points at the data is the evidence
+   chip, a hairline with the secondary text; what points at the agent's work is the accent chip; a value or a word is
+   the neutral chip, ink on the cell with a hairline. An active filter chip is inverted to ink. -------- */
 .chip {
   display: inline-flex;
   align-items: center;
@@ -82,6 +82,12 @@
   background: var(--surface-card);
   color: var(--text-primary);
 }
+/* the evidence chip: a file, a record, a table's cell, printed lines */
+.chip-tone-evidence {
+  border-color: var(--chip-evidence-edge);
+  background: var(--chip-evidence-bg);
+  color: var(--chip-evidence-text);
+}
 .chip-tone-positive {
   border-color: var(--status-positive);
   background: var(--surface-card);
@@ -114,6 +120,11 @@
 .chip-tone-info.chip-act:hover {
   border-color: rgba(var(--ink-rgb), 0.3);
   background: var(--surface-card);
+}
+.chip-tone-evidence.chip-act:hover {
+  border-color: var(--chip-evidence-edge-hover);
+  background: var(--chip-evidence-bg);
+  color: var(--chip-evidence-text-hover);
 }
 .chip-tone-positive.chip-act:hover,
 .chip-tone-warning.chip-act:hover,

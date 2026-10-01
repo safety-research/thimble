@@ -225,6 +225,17 @@ def offline_sandbox(auto_allow: bool = False, network: bool = False, required: b
     return out if network else {**out, "network": {"deniedDomains": ["*"]}}
 
 
+def own_sandbox(cwd: Path) -> bool:
+    """Whether the analyst's own Claude Code sandbox is on for a session in `cwd`: `sandbox.enabled` of the last
+    settings file that sets it (sources)."""
+    on = False
+    for path in sources(cwd):
+        box = _read(path).get("sandbox")
+        if isinstance(box, dict) and isinstance(box.get("enabled"), bool):
+            on = box["enabled"]
+    return on
+
+
 def sandbox_excluded(cwd: Path) -> list[str]:
     """The command names the analyst's settings for a session in `cwd` run outside the sandbox
     (`sandbox.excludedCommands` of every settings file, each entry's first word, such as `docker` for `docker *`)."""

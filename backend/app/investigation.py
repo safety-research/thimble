@@ -13,6 +13,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import re
 from datetime import datetime, timezone
 from pathlib import Path
@@ -21,7 +22,7 @@ from fastapi import APIRouter, HTTPException, Request
 from sse_starlette import EventSourceResponse, ServerSentEvent
 
 from . import config
-from .ledger import append_jsonl, write_json_once
+from .ledger import write_json_once
 
 log = logging.getLogger("thimble.investigation")
 router = APIRouter()
@@ -98,11 +99,45 @@ def _read_jsonl(path: Path) -> list[dict]:
     return out
 
 
+def _read_jsonl_after(path: Path, pos: int) -> tuple[list[dict], int]:
+    """The parseable object lines after byte `pos` that end in a newline, and the offset after the last of them: what
+    was appended since a reader stopped at `pos`. A file shorter than `pos`, written again, is read from its start."""
+    try:
+        with open(path, "rb") as f:
+            size = os.fstat(f.fileno()).st_size
+            if size < pos:
+                pos = 0
+            f.seek(pos)
+            data = f.read(size - pos)
+    except OSError:
+        return [], pos
+    whole = data[:data.rfind(b"\n") + 1]
+    out: list[dict] = []
+    for line in whole.splitlines():
+        if not line.strip():
+            continue
+        try:
+            rec = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(rec, dict):
+            out.append(rec)
+    return out, pos + len(whole)
+
+
+def _size(path: Path) -> int:
+    try:
+        return path.stat().st_size
+    except OSError:
+        return 0
+
+
 # --- progress events ---------------------------------------------------------------------------------------
 
 _subscribers: dict[tuple[str, str], set[asyncio.Queue]] = {}  # (workspace, investigation id) -> queues
 EVENTS_POLL_S = 3.0  # how often an idle SSE subscriber re-reads events.jsonl for another process's events
 _seq: dict[tuple[str, str], int] = {}  # next seq per investigation; recounted from events.jsonl when unknown
+_left: dict[tuple[str, str], int] = {}  # the offset just after this process's last record in events.jsonl
 _RESET = object()  # queued to a subscriber when the workspace's log was replaced (reset_streams)
 
 
@@ -120,6 +155,7 @@ def reset_streams(c: str, inv_id: str = MAIN) -> None:
     """The workspace's log was replaced: forget its seq counter and tell every open stream to start over."""
     key = (c, inv_id)
     _seq.pop(key, None)
+    _left.pop(key, None)
     for q in _subscribers.get(key, ()):
         q.put_nowait(_RESET)
 
@@ -156,25 +192,26 @@ def _next_seq(key: tuple[str, str], path: Path) -> int:
         # could collide with a stored seq and the SSE replay dedupe would drop the new event.
         seqs = [e["seq"] for e in _read_jsonl(path) if isinstance(e.get("seq"), int)]
         n = max(seqs) + 1 if seqs else 0
-    else:
+    elif _size(path) != _left.get(key):
         n = max(n, _last_stored_seq(path) + 1)  # never below what another process already wrote
     _seq[key] = n + 1
     return n
 
 
-def _append_line(path: Path, obj: dict) -> None:
-    """append_jsonl, healing a torn tail first, so a new record is not glued onto a fragment left by a crash mid-append.
-    """
+def _append_line(path: Path, obj: dict) -> int:
+    """The record appended as append_jsonl writes it, after a newline when the file ends in a torn line (a crash
+    mid-append), so it is not glued onto that fragment. Returns the offset just after the record: the file's size unless
+    another process appended after it."""
     try:
         with open(path, "rb") as f:
             f.seek(-1, 2)
             torn = f.read(1) != b"\n"
     except OSError:  # no file yet, or an empty one (seek(-1) past the start): nothing to heal
         torn = False
-    if torn:
-        with open(path, "ab") as f:
-            f.write(b"\n")
-    append_jsonl(path, obj)
+    with open(path, "ab") as f:
+        f.write((b"\n" if torn else b"") + (json.dumps(obj, ensure_ascii=False) + "\n").encode("utf-8"))
+        f.flush()
+        return os.lseek(f.fileno(), 0, os.SEEK_CUR)
 
 
 def emit(c: str, inv_id: str, event: dict) -> None:
@@ -184,7 +221,7 @@ def emit(c: str, inv_id: str, event: dict) -> None:
     d = _existing(c, inv_id)
     key = (c, inv_id)
     ev = {**event, "ts": _now(), "seq": _next_seq(key, d / "events.jsonl")}
-    _append_line(d / "events.jsonl", ev)
+    _left[key] = _append_line(d / "events.jsonl", ev)
     for q in _subscribers.get(key, ()):
         q.put_nowait(ev)
 
@@ -216,6 +253,7 @@ async def _stream(c: str, inv_id: str, request: Request, after: int | None = Non
     key = (c, inv_id)
     q: asyncio.Queue = asyncio.Queue()
     _subscribers.setdefault(key, set()).add(q)  # subscribe BEFORE reading the file: no event can fall in the gap
+    pos = _size(d / "events.jsonl")  # before the read: what lands between the two is read again, and skipped by seq
     stored = _read_jsonl(d / "events.jsonl")
     moved = (after is not None and after > _top(stored)) or bool(log and log != log_id(c, inv_id))
 
@@ -228,6 +266,7 @@ async def _stream(c: str, inv_id: str, request: Request, after: int | None = Non
         yield {"event": "live", "data": json.dumps({"log": log_id(c, inv_id)})}
 
     async def gen():
+        nonlocal pos
         last = -1 if after is None or moved else after
         # A comment first, so a proxy (Vite's in dev mode) passes the headers on at once and EventSource opens now.
         yield {"comment": "open"}
@@ -242,12 +281,14 @@ async def _stream(c: str, inv_id: str, request: Request, after: int | None = Non
                     ev = await asyncio.wait_for(q.get(), timeout=EVENTS_POLL_S)
                 except asyncio.TimeoutError:
                     # nothing from this process: tail the file for events another process wrote
-                    for ev in _read_jsonl(d / "events.jsonl"):
+                    fresh, pos = _read_jsonl_after(d / "events.jsonl", pos)
+                    for ev in fresh:
                         if isinstance(ev.get("seq"), int) and ev["seq"] > last:
                             last = ev["seq"]
                             yield {"data": json.dumps(ev, ensure_ascii=False), "id": str(ev["seq"])}
                     continue
                 if ev is _RESET:  # the log was replaced under this stream: start over on the new one
+                    pos = _size(d / "events.jsonl")
                     fresh = _read_jsonl(d / "events.jsonl")
                     yield {"event": "reset", "data": "{}"}
                     for rec in history(fresh, -1):

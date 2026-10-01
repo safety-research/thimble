@@ -14,8 +14,12 @@ import { purifySvg } from './sanitize'
 const SANS_FIRST = /^\s*['"]?(?:DejaVu Sans|Bitstream Vera Sans|Hanken Grotesk|Arial|Helvetica|sans-serif)['"]?\s*(?:,|$)/i
 const MONO_FIRST = /^\s*['"]?(?:DejaVu Sans Mono|Bitstream Vera Sans Mono|Geist Mono|monospace)['"]?\s*(?:,|$)/i
 
+/** matplotlibrc's colour cycle (the light paper's --viz-1 to --viz-7), in order */
+export const MPL_CYCLE = ['#025ac3', '#d0750a', '#08632f', '#1392d4', '#897301', '#009c85', '#844500']
+
 /** thimble's matplotlibrc colours and matplotlib's own black and white, by the token each becomes. */
 const COLOURS: Record<string, { fill: string; stroke: string }> = {
+  ...Object.fromEntries(MPL_CYCLE.map((hex, i) => [hex, { fill: `var(--viz-${i + 1})`, stroke: `var(--viz-${i + 1})` }])),
   '#64625b': { fill: 'var(--viz-label)', stroke: 'var(--viz-label)' },
   '#a19d94': { fill: 'var(--viz-ink-3)', stroke: 'var(--viz-axis)' },
   '#cfcbc2': { fill: 'var(--viz-ink-4)', stroke: 'var(--viz-grid)' },

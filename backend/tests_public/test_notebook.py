@@ -6,6 +6,7 @@ second or two, so timeouts are generous."""
 from __future__ import annotations
 
 import json
+import threading
 
 import httpx
 import pytest
@@ -103,3 +104,25 @@ def test_kernel_env_drops_secrets(monkeypatch):
               "CLAUDE_CODE_OAUTH_TOKEN", "CLAUDE_CONFIG_DIR"):
         assert k not in env
     assert env["HARMLESS"] == "1" and "PATH" in env
+
+
+async def test_a_large_output_is_unpacked_off_the_event_loop(corpus, monkeypatch):
+    """A call whose output is tens of megabytes, as a view's reader can return: the kernel's message is unpacked, its
+    signature checked over every byte and its JSON parsed, in a thread, so the server's loop keeps turning."""
+    from jupyter_client.session import Session
+
+    loop_thread = threading.get_ident()
+    seen: list[tuple[int, bool]] = []
+    deserialize = Session.deserialize
+
+    def spy(self, msg_list, content=True, copy=True):
+        seen.append((sum(len(m) for m in msg_list), threading.get_ident() == loop_thread))
+        return deserialize(self, msg_list, content, copy)
+
+    monkeypatch.setattr(Session, "deserialize", spy)
+    outputs, _, status = await notebook.execute_on(
+        corpus, "big", "from IPython.display import publish_display_data\n"
+                       "publish_display_data({'text/plain': 'x' * 80_000_000})")
+    assert status == "ok" and len(outputs[0]["text/plain"]) == 80_000_000
+    large = [on_loop for size, on_loop in seen if size > notebook.MSG_INLINE_BYTES]
+    assert large and not any(large), "a large message was unpacked on the event loop"

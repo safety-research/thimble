@@ -380,9 +380,17 @@ export function errorText(message: unknown, error: unknown): string | null {
   return line ? capJsonBytes(line, ERROR_TEXT_MAX_BYTES) : null
 }
 
+/** The browser's notice that a ResizeObserver callback changed layout again within one frame. The browser delivers the
+ * rest in the next frame, so nothing is lost and it is no error. */
+const BENIGN_ERROR_RE = /^ResizeObserver loop (completed with undelivered notifications|limit exceeded)/
+
+/** Whether an uncaught error event's message is a notice that is no error (BENIGN_ERROR_RE). Pure. */
+export const benignError = (message: unknown): boolean => typeof message === 'string' && BENIGN_ERROR_RE.test(message)
+
 export function wireErrors(win: Pick<Window, 'addEventListener'>, report: (text: string) => void): void {
   win.addEventListener('error', (e) => {
     try {
+      if (benignError(e?.message)) return
       const t = errorText(e?.message, e?.error)
       if (t) report(t)
     } catch {
@@ -454,11 +462,17 @@ const queue = makeQueue({
   },
 })
 
+let held = false
+/** While held (the product tour runs), nothing is recorded: what the page does then is not the analyst's work. */
+export function hold(on: boolean): void {
+  held = on
+}
+
 /** Record one action of the analyst in the current workspace. Never throws; nothing when the page names no workspace. */
 export function track(kind: TelemetryKind, opts: { target?: string | null; detail?: Detail | null; duration_ms?: number | null; ts?: string } = {}): void {
   try {
     const ws = workspaceFromUrl()
-    if (!ws) return
+    if (!ws || held) return
     noteWorkspace(ws)
     const record: TelemetryRecord = { kind, ts: opts.ts ?? new Date().toISOString(), session: SESSION, seq: nextSeq++ }
     if (opts.target !== undefined) record.target = opts.target
@@ -495,7 +509,8 @@ function observeRequest(input: RequestInfo | URL, init: RequestInit | undefined)
 
 function onClick(e: MouseEvent): void {
   const el = e.target instanceof Element ? e.target : null
-  if (!el) return
+  // the product tour's own popover and examples (src/tour) are not the analyst's work
+  if (!el || el.closest('.tour-root, .tour-host')) return
   const g = classifyGeneric(gatherGeneric(el))
   if (g) track(g.kind, { target: g.target, detail: g.detail })
 }

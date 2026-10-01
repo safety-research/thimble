@@ -1,21 +1,28 @@
 // The files tree: folders first, then files, alphabetical. Each folder's entries are fetched the first time it is shown
 // (useFolderStore) and only the rows in view are rendered (windowOf), so a very large corpus scrolls like a small one.
+// Every WATCH_MS, and when a folder opens, the tree asks for the stamps of the folders it shows and lists again those
+// that changed on disk (useFolderWatch), such as a folder where an agent just wrote a file.
 // At the right of a row, a dot per label that is on and marks something in the file; a file label that is on draws a
 // stripe left of the glyph instead (labels.ts presenceOf). A collapsed folder shows a dot for each label that marks
 // something under it. The guide lines show only while the pointer is over the tree. Every file row carries
 // `data-anchor`.
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent } from 'react'
-import { Icon, type IconName } from '../components/Icon'
+import { Icon } from '../components/Icon'
 import { Spinner } from '../components/Spinner'
 import { scaleApi } from '../lib/api'
 import type { FolderEntry, FolderListing, SourceInfo } from '../lib/types'
 import type { Presence } from './labels'
 import { isJsonlFile } from './views/common'
+import { glyphOf } from '../lib/fileGlyph'
+
+export { glyphOf }
 
 /** px, the height of `.files-row` (styles/files.css); the window is computed from it */
 export const ROW_HEIGHT = 24
 /** rows rendered above and below the visible window */
 export const OVERSCAN = 8
+/** ms between the tree's checks for folders that changed on disk */
+export const WATCH_MS = 4000
 /** px, the label glyph's box among a row's marks: its outline (16 of the 24 units and a stroke of 2) comes out 6.75px,
  * the size of the 7px dot beside it (`.files-dot`), and an odd box centres on the dot's centre at whole pixels */
 const MARK_TAG_PX = 9
@@ -27,8 +34,10 @@ export type FolderStore = ReadonlyMap<string, FolderState>
 /** What the tree says when the root holds no files: an empty folder is most often the wrong one, so it says where
  * thimble looks. Null otherwise. */
 export function emptyFolderNote(root: FolderState | undefined): string | null {
-  if (root?.state !== 'ok' || root.listing.n_files > 0) return null
-  return 'This folder has no files. thimble shows the folder it was started in; to look at another folder, run thimble there.'
+  if (root?.state !== 'ok') return null
+  const { n_files: n, files, folders } = root.listing
+  if (n != null ? n > 0 : files.length > 0 || folders.length > 0) return null
+  return 'This folder has no files. thimble shows the folder it was started in. To look at another folder, run thimble there.'
 }
 
 export interface DirNode {
@@ -71,41 +80,14 @@ export function fmtSize(n: number): string {
   return `${(mb / 1024).toFixed(1)} GB`
 }
 
-/** The files a workspace opens with when it keeps no tabs: the largest file of records at the corpus root, then its
- * README; else the root's first file. The first is the one shown. */
+/** The files a workspace opens with when it keeps no tabs: the corpus root's README, shown, and its largest file of
+ * records beside it; a root without a README opens none, and the tree's root listing is what shows. */
 export function defaultTabs(files: readonly SourceInfo[]): string[] {
   const shown = files.filter((f) => !f.hidden)
-  const data = shown.filter((f) => isJsonlFile(f.path, f.kind)).sort((a, b) => (b.size_bytes || 0) - (a.size_bytes || 0))[0]
   const readme = shown.find((f) => /^readme(\.|$)/i.test(baseName(f.path)))
-  const out = [data?.path, readme?.path].filter((p): p is string => !!p)
-  if (out.length) return out
-  const first = [...shown].sort((a, b) => cmpName(baseName(a.path), baseName(b.path)))[0]
-  return first ? [first.path] : []
-}
-
-// A file's kind by its name, the glyph each kind takes: the first pattern that matches wins.
-const GLYPHS: [RegExp, IconName][] = [
-  [/\.(jsonl?|ndjson|geojson|jsonc)$/i, 'braces'],
-  [/\.(csv|tsv|xlsx?|parquet|feather|arrow)$/i, 'table'],
-  [/\.(db|sqlite3?|duckdb)$/i, 'forge'],
-  [/\.(md|markdown|mdx)$/i, 'markdown'],
-  [/\.(sh|bash|zsh|fish)$/i, 'terminal'],
-  [/\.ipynb$/i, 'notebook'],
-  [/\.(png|jpe?g|gif|webp|svg|bmp|ico|tiff?)$/i, 'image'],
-  [/\.(zip|gz|tgz|tar|bz2|xz|7z|whl|zst)$/i, 'archive'],
-  [/\.(ya?ml|toml|ini|cfg|conf|env|lock|properties)$|^(dockerfile|makefile|\.gitignore|\.env|\.editorconfig)$/i, 'sliders'],
-  [/\.(py|pyi|js|mjs|cjs|jsx|ts|tsx|go|rs|java|kt|c|h|cc|cpp|hpp|rb|php|swift|scala|r|jl|lua|pl|sql|html?|css|scss|xml|vue|svelte)$/i, 'code'],
-  [/\.(txt|text|rst|log|pdf|rtf|tex|docx?)$/i, 'doc'],
-]
-
-/** The glyph of a file, by its kind as its name says (VS Code's way): braces for JSON and
- * JSON lines, a grid for tables, a cylinder for databases, the markdown mark, a terminal for a shell script, a notebook,
- * a picture, an archive, sliders for configuration, angle brackets for source code, a page with lines for text, and a
- * bare page for anything else. */
-export function glyphOf(name: string): IconName {
-  const base = name.slice(name.lastIndexOf('/') + 1)
-  for (const [re, glyph] of GLYPHS) if (re.test(base)) return glyph
-  return 'page'
+  if (!readme) return []
+  const data = shown.filter((f) => isJsonlFile(f.path, f.kind)).sort((a, b) => (b.size_bytes || 0) - (a.size_bytes || 0))[0]
+  return [readme.path, ...(data ? [data.path] : [])]
 }
 
 export interface Row {
@@ -172,6 +154,8 @@ export interface FolderStoreHandle {
   ensure: (path: string) => void
   /** drop everything and fetch again (a working-directory change) */
   reset: () => void
+  /** list again those of these listed folders whose stamp on disk is no longer their listing's */
+  refreshChanged: (paths: readonly string[]) => Promise<void>
 }
 
 /** The folders fetched so far for a workspace, one request per folder, shared by the tree and the reader's kind lookup. */
@@ -200,8 +184,84 @@ export function useFolderStore(ws: string): FolderStoreHandle {
     inflight.current.clear()
     setStore(new Map())
   }, [])
+  // a listing is replaced only once its new one arrives, so the rows stay put meanwhile. When any folder changed the
+  // root is listed again last, since its file count covers the folders below it.
+  const refreshChanged = useCallback(
+    async (paths: readonly string[]) => {
+      const listed = paths.filter((p) => {
+        const st = storeRef.current.get(p)
+        return st?.state === 'ok' && st.listing.stamp != null && !inflight.current.has(p)
+      })
+      if (!listed.length) return
+      const my = gen.current
+      let stamps: Record<string, string | null>
+      try {
+        stamps = (await scaleApi.stamps(ws, listed)).stamps
+      } catch {
+        return
+      }
+      if (my !== gen.current) return
+      const changed = listed.filter((p) => {
+        const st = storeRef.current.get(p)
+        const now = stamps[p]
+        return now != null && st?.state === 'ok' && st.listing.stamp !== now && !inflight.current.has(p)
+      })
+      if (!changed.length) return
+      const relist = async (p: string) => {
+        inflight.current.add(p)
+        try {
+          const listing = await scaleApi.folder(ws, p)
+          if (my === gen.current) setStore((s) => new Map(s).set(p, { state: 'ok', listing }))
+        } catch {
+          // the next check asks again
+        } finally {
+          inflight.current.delete(p)
+        }
+      }
+      await Promise.all(changed.filter((p) => p !== '').map(relist))
+      if (my === gen.current && storeRef.current.get('')?.state === 'ok' && !inflight.current.has('')) await relist('')
+    },
+    [ws],
+  )
   useEffect(() => reset, [ws, reset])
-  return useMemo(() => ({ store, ensure, reset }), [store, ensure, reset])
+  return useMemo(() => ({ store, ensure, reset, refreshChanged }), [store, ensure, reset, refreshChanged])
+}
+
+/** The folders a tree shows: the root and each expanded folder whose folders above are all expanded. */
+export function shownFolders(expanded: ReadonlySet<string>): string[] {
+  return ['', ...[...expanded].filter((p) => ancestors(p).every((a) => expanded.has(a)))]
+}
+
+/** Calls `check` with the folders `paths` every `everyMs` while `visible()` holds and the page is not hidden, when the
+ * page shows again, and at once when the folders change, since a folder opened again may hold an old listing. */
+export function useFolderWatch(check: (paths: readonly string[]) => Promise<void>, paths: readonly string[], visible: () => boolean, everyMs = WATCH_MS): void {
+  const latest = useRef({ paths, visible })
+  latest.current = { paths, visible }
+  const busy = useRef(false)
+  const tick = useCallback(async () => {
+    if (busy.current || document.visibilityState === 'hidden' || !latest.current.visible()) return
+    busy.current = true
+    try {
+      await check(latest.current.paths)
+    } finally {
+      busy.current = false
+    }
+  }, [check])
+  useEffect(() => {
+    const timer = window.setInterval(() => void tick(), everyMs)
+    const onShow = () => {
+      if (document.visibilityState === 'visible') void tick()
+    }
+    document.addEventListener('visibilitychange', onShow)
+    return () => {
+      window.clearInterval(timer)
+      document.removeEventListener('visibilitychange', onShow)
+    }
+  }, [tick, everyMs])
+  const key = paths.join('\n')
+  useEffect(() => {
+    void tick()
+  }, [key, tick])
 }
 
 interface Props {
@@ -255,6 +315,9 @@ export function Tree({ folders, error, activePath, onOpen, marksOf, folderDotsOf
   }, [activePath])
 
   const rows = useMemo(() => rowsOf(store, expanded), [store, expanded])
+  const shown = useMemo(() => shownFolders(expanded), [expanded])
+  const inView = useCallback(() => !!treeRef.current?.isConnected && treeRef.current.offsetParent !== null, [])
+  useFolderWatch(folders.refreshChanged, shown, inView)
 
   // the viewport: its height for the window, its scroll position
   useEffect(() => {

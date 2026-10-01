@@ -167,9 +167,9 @@ export type Scrolled = { el: HTMLElement; left: number; top: number; fixed: bool
 
 /**
  * Scroll every box between `el` and `stop` that cuts it off so `el` is centred where possible, innermost first; nothing
- * past `stop` moves. Returns the previous offsets.
+ * past `stop` moves; with `across` false only up and down. Returns the previous offsets.
  */
-export function scrollWithin(el: HTMLElement, stop: HTMLElement): Scrolled[] {
+export function scrollWithin(el: HTMLElement, stop: HTMLElement, across = true): Scrolled[] {
   const before: Scrolled[] = []
   for (let box = el.parentElement; box && box !== stop.parentElement; box = box.parentElement) {
     const can = scrolls(box)
@@ -178,7 +178,7 @@ export function scrollWithin(el: HTMLElement, stop: HTMLElement): Scrolled[] {
     const b = box.getBoundingClientRect()
     const r = el.getBoundingClientRect()
     // a box it already shows in whole stays where it is
-    const x = can.x && (r.left < b.left || r.right > b.right)
+    const x = across && can.x && (r.left < b.left || r.right > b.right)
     const y = can.y && (r.top < b.top || r.bottom > b.bottom)
     if (x || y) before.push({ el: box, left: box.scrollLeft, top: box.scrollTop, fixed: can.fixed })
     if (x) box.scrollLeft += (r.left + r.width / 2 - (b.left + b.width / 2)) / k
@@ -228,10 +228,31 @@ export async function revealCell(home: HTMLElement, col: string, row: string, se
     if (!hit) return null
   }
   scrollWithin(hit.td, home)
-  const td = hit.td
-  td.classList.remove(CITED_FLASH)
-  void td.offsetWidth
-  td.classList.add(CITED_FLASH)
-  window.setTimeout(() => td.classList.remove(CITED_FLASH), FLASH_MS)
-  return td
+  flashCited(hit.td)
+  return hit.td
+}
+
+/** Mark `el` cited for FLASH_MS, then let the mark fade (refchip.css), from the start when it was marked already. */
+function flashCited(el: HTMLElement): void {
+  el.classList.remove(CITED_FLASH)
+  void el.offsetWidth
+  el.classList.add(CITED_FLASH)
+  window.setTimeout(() => el.classList.remove(CITED_FLASH), FLASH_MS)
+}
+
+/**
+ * Bring the lines `line` to `end` of the printed output drawn in `box` (components/Outputs OutputText) into view inside
+ * `stop`, scrolling only up and down so a long line still reads from its start, and flash them as a cited cell is.
+ * Returns the first, or null when `box` does not draw the line.
+ */
+export function revealLines(box: ParentNode, line: number, end: number | undefined, stop: HTMLElement): HTMLElement | null {
+  const first = box.querySelector<HTMLElement>(`[data-line="${line}"]`)
+  if (!first) return null
+  scrollWithin(first, stop, false)
+  const last = Math.max(line, end ?? line)
+  for (const el of box.querySelectorAll<HTMLElement>('[data-line]')) {
+    const n = Number(el.dataset.line)
+    if (n >= line && n <= last) flashCited(el)
+  }
+  return first
 }

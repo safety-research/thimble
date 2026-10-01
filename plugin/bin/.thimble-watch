@@ -1,11 +1,12 @@
 #!/bin/sh
-''''[ -n "${THIMBLE_SESSION:-}" ] && exit 0; exec "$(dirname "$0")/thimble-python" -S "$0" "$@" # '''
+''''[ -n "${THIMBLE_SESSION:-}" ] && [ -n "${THIMBLE_SESSION_TOKEN:-}" ] && exit 0; exec "$(dirname "$0")/thimble-python" -S "$0" "$@" # '''
 """thimble's watcher: how browser events reach a Claude Code session whose channel is off. The plugin's hooks
 (plugin/hooks/hooks.json) run it, and on the Monitor route main's Monitor does.
 
 The first two lines make this file both a shell script and a Python program, as in bin/thimble-mcp; the shell line
-exits at once in a session thimble starts itself (THIMBLE_SESSION set). Python runs with -S, since the file uses only
-the standard library and runs on every tool call.
+exits at once in a session thimble starts itself, which has THIMBLE_SESSION and the THIMBLE_SESSION_TOKEN that proves it
+(app/hook_auth.py), since Claude Code's background service can hand the name alone on to the user's own sessions.
+Python runs with -S, since the file uses only the standard library and runs on every tool call.
 
     .thimble-watch                      the asyncRewake hook (SessionStart, Stop, PreToolUse, UserPromptSubmit)
     .thimble-watch --permission         the PermissionRequest hook

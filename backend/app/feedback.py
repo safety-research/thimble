@@ -387,8 +387,10 @@ def claude_version() -> str:
     exe = cfg.CLI_PATH if cfg is not None else shutil.which("claude")
     if not exe:
         return "not found"
+    env = cfg.launch_environ() if cfg is not None else {k: v for k, v in os.environ.items()
+                                                         if not k.startswith("THIMBLE_")}
     try:
-        out = subprocess.run([exe, "--version"], capture_output=True, text=True, timeout=CLAUDE_TIMEOUT_S)
+        out = subprocess.run([exe, "--version"], capture_output=True, text=True, timeout=CLAUDE_TIMEOUT_S, env=env)
     except (OSError, subprocess.SubprocessError) as e:
         return f"? ({type(e).__name__})"
     lines = (out.stdout or out.stderr).strip().splitlines()
@@ -853,7 +855,7 @@ def _views(b: Bundle, ws: Path) -> None:
     if props:
         room -= b.rows("workspace/views.jsonl", [trimmed(r) for r in props], min(STATE_MAX, room),
                        "the view proposals and their builds")
-    d = ws / "views"
+    d = ws / "extension" / "views"  # the workspace's local extension (views.views_dir)
     files, views = 0, set()
     for p in sorted(d.glob("*/*")) if d.is_dir() else []:
         if p.suffix not in VIEW_SUFFIXES or not _own_file(p, ws):

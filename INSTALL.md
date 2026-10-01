@@ -35,8 +35,9 @@ bash scripts/install.sh
 ```
 
 Either install links the `thimble` command into `~/.local/bin` (and prints the line to add to your shell startup file
-when that folder is not on your PATH) and runs `thimble doctor`. Before it installs anything, it shows what it installs
-and where, then asks its questions:
+when that folder is not on your PATH) and runs `thimble doctor`. A `thimble` command or Claude Code plugin that another
+thimble install set up stays as it is unless you agree, on a terminal, to switch it. Before it installs anything, it
+shows what it installs and where, then asks its questions:
 
 - **A browser for screenshots.** thimble takes screenshots of the cards and views it draws, to check and improve them.
   For the best experience, download Playwright's headless Chromium (about 210 MB, 650 MB on disk). With a no, thimble
@@ -51,8 +52,8 @@ and where, then asks its questions:
 - **thimble in every Claude Code session.** A yes adds thimble to `~/.claude/settings.json` and `~/.claude/plugins`.
   The `thimble` command works either way. `--plugin` or `--no-plugin` answers it.
 - **Trust of thimble's workspaces folder**, where thimble keeps each workspace and runs its agents. A yes adds it to
-  `~/.claude.json`. The orientation, its critic and the writers need it: they run as Claude Code background agents,
-  which Claude Code starts only in a trusted folder. `--trust-workspaces` or `--no-trust-workspaces` answers it.
+  `~/.claude.json`. The orientation, its critic, the writers and view builds need it: they run as Claude Code
+  background agents, which Claude Code starts only in a trusted folder. `--trust-workspaces` or `--no-trust-workspaces` answers it.
 
 Without a terminal, install.sh runs only when every question it would ask has its flag, and otherwise lists the
 missing ones; a system Chrome or Edge it finds is used without asking. The browser, plugin and trust answers are kept,
@@ -76,6 +77,41 @@ that it holds the packages `backend/pyproject.toml` asks for at versions it allo
 installs nothing into it. Updates keep the link and check it again. To go back to thimble's own environment, delete the
 link and run install.sh again.
 
+## Extensions
+
+An extension adds views, card types, report types or changes to thimble's agents. Add a folder (used in place), a git
+URL, or one thimble ships by name. Adding it switches it on:
+
+```bash
+thimble extension add swarm-orient     # checks it, lists what it adds and asks first; --yes for scripts
+thimble extension off swarm-orient     # in every workspace; Settings > Extensions switches it for one workspace
+thimble extension on swarm-orient
+thimble extension list
+thimble extension remove swarm-orient  # a folder used in place stays where it is
+```
+
+thimble ships three. `video`, the Video document with its video export, comes added. `swarm-orient` and
+`multiagent-swimlane` are added with `thimble extension add`; Settings and `thimble extension list` name them until
+then. One you remove stays removed. Its Python runs only in thimble's kernels. Its `extension.json` names the thimble
+versions it works with and the Python packages and other extensions it needs: thimble installs no package, and while
+one is missing, or thimble is outside that range, the extension stays unloaded and `thimble extension list`, `thimble
+doctor` and Settings say why. `add` adds the extensions it needs that thimble ships on the same yes, and an extension
+runs only where those run. Switching on one that adds to the orientation, where the orientation already ran, makes
+Settings ask whether to run it now. To write your own, see [docs/extensions.md](docs/extensions.md).
+
+Only its views check whether they fit: once per workspace, and again when their files change, a quick call to the
+labels model reads the view's description and a few records of the files in its scope. Settings > Extensions shows each
+view's reason, and its switch there overrides the check.
+
+The views thimble builds for a workspace are that workspace's own extension, in `workspaces/<workspace>/extension/`.
+No other workspace shows them. Settings > Extensions lists them under This workspace's views, each with its switch.
+
+`swarm-orient` adds to the orientation for corpora where many agents act on shared pages and channels and address each
+other. Many swarm-reader agents read every record, a label that fits the analyst's request marks each one, the counts
+are checked, and the episodes are drawn as `multiagent-swimlane` cards, the card type that draws a swimlane of the
+actions main chose. Test builds called it `swarm`: the commands still take that name for this release, and what was
+set for it carries over.
+
 ## Update
 
 `thimble update` installs the latest release; in a Dev install it runs `git pull --ff-only` and the install steps,
@@ -98,9 +134,13 @@ that one and prints each path it deleted. The folder it read and your Claude Cod
 - `thimble doctor` shows the server, the versions, the auth path and the log's recent errors.
 - thimble's agents don't start because Claude Code's sandbox can't run: `thimble doctor` says what is missing, and on
   Linux `install.sh --sandbox-deps` installs it.
-- thimble warns that Claude Code does not trust its workspaces folder: the orientation, its critic and the writers
-  can't start until it does, while your own session keeps working. Run the command the warning gives,
-  `bash <install dir>/scripts/install.sh --trust-workspaces`.
+- An empty `.claude/.cc-writes/` folder appears in the folder you start `thimble` in: Claude Code's sandbox is on in
+  your own settings, and it makes that folder for main's Bash, which runs in your session. thimble leaves your
+  session's settings as they are, and `thimble doctor` says when that sandbox is on.
+- thimble warns that Claude Code does not trust its workspaces folder: the orientation, its critic, the writers and
+  view builds can't start until it does, while your own session keeps working. Run the command the warning gives,
+  `bash <install dir>/scripts/install.sh --trust-workspaces`. Claude Code reads trust only up to the root of a git
+  clone, so a trusted folder above a Dev install's clone doesn't count.
 - Cards are not checked, views are checked without loading their page, or screenshots are unavailable: there is no
   browser (the install's answer, or no Chrome or Edge found), or the machine lacks the headless Chromium's system
   libraries. thimble never downloads a browser by itself. `install.sh --browser system` or `--browser bundled` sets one

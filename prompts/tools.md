@@ -40,7 +40,7 @@ Add a card to the canvas, with its question and its content in one call. thimble
   "properties": {
     "question": {"type": "string", "description": "The one question the card answers."},
     "kind": {"type": "string", "enum": ["example", "table", "code", "diagram", "plot", "timeline", "note", "custom"], "description": "table, code, diagram, plot and timeline run `code`, example shows `refs`, note `text`, custom `html`. Default code."},
-    "code": {"type": "string", "description": "Python run in the corpus root. A table ends in a DataFrame of a few short columns indexed by what names each row, a plot in an Altair or matplotlib chart, its colours left to thimble's theme, and after import thimble a diagram in thimble.diagram(nodes, edges), each edge a (source, target, label), and a timeline in thimble.timeline(events), each event a (time, label). Name nodes, edges and events in a few words; an edge label over 36 characters becomes a numbered note under the diagram. In matplotlib, colour a label's values with thimble.colours(label, values), a {value: colour} dict."},
+    "code": {"type": "string", "description": "Python run in the corpus root. A table ends in a DataFrame of a few short columns indexed by what names each row, a plot in an Altair or matplotlib chart, its colours left to thimble's theme, and after import thimble a diagram in thimble.diagram(nodes, edges), each edge a (source, target, label), and a timeline in thimble.timeline(events), each event a (time, label). Name nodes, edges and events in a few words; an edge label over 36 characters becomes a numbered note under the diagram. In matplotlib, colour a label's values with thimble.colours(label, values), a {value: colour} dict. A plot can also be a card type's graphic, thimble.card(type, labels=[...], **args), from the card types under Cards."},
     "refs": {"type": "array", "items": {"anyOf": [{"type": "string"}, {"type": "object", "properties": {"ref": {"type": "string"}, "quote": {"type": "string"} } } ] }, "description": "The records an example card shows, usually about three, adding one only when it shows something the others don't. Each is a ref, a moment of a video as <path>#t=<m:ss>, or {ref, quote} to highlight one passage of a long record, quoted exactly."},
     "text": {"type": "string", "description": "The markdown a note card shows."},
     "html": {"type": "string", "description": "The page a custom card shows, for what no other kind can show. Scripts run, the network does not."},
@@ -102,15 +102,25 @@ Define a category, apply it to every unit of a scope, and get the counts per val
     "predicate": {
       "type": "object",
       "properties": {
-        "kind": {"type": "string", "enum": ["prompt", "regex", "code"], "description": "A model judges each unit, a regex matches its text, or code defines label(unit) returning (value, confidence), where a unit is a JSONL record as its dict, a text line or a sentence a dict with its words in unit['text'], and a card a dict with its text, kind, question, takeaway, group and groups, the titles of the frames around it."},
+        "kind": {"type": "string", "enum": ["prompt", "regex", "code"], "description": "A model judges each unit, a regex matches its text, or code defines label(unit) returning (value, confidence), where a unit is a JSONL record as its dict, a text line or a sentence a dict with its words in unit['text'], a row of a database or a CSV file a dict of its columns, a record of a JSON document its value, a PDF page a dict with its page and text, and a card a dict with its text, kind, question, takeaway, group and groups, the titles of the frames around it. A record that saves a whole document again, such as a wiki page's revision, is read by a model or a regex as what it changed from the save before, and by code whole."},
         "text": {"type": "string", "description": "The description, pattern or function."}
       },
       "required": ["kind", "text"]
     },
     "values": {"type": "array", "items": {"type": "string"}, "description": "Positive first. Default yes and no."},
-    "paths": {"type": "array", "items": {"type": "string"}, "description": "Globs, for files."},
+    "paths": {"type": "array", "items": {"type": "string"}, "description": "Globs, for files. A record of a file is a line of text, a row of a database's table, a page of a PDF, a value of a JSON document or a row of a CSV file. A glob followed by a record's place, such as `runs/*/forge.db#prs` for a table or `results.json#/runs`, keeps the records there."},
     "limit": {"type": "integer", "description": "Units to label, for a trial."},
+    "within": {
+      "type": "object",
+      "properties": {
+        "label": {"type": "string"},
+        "value": {"type": "string", "description": "Default its first."}
+      },
+      "required": ["label"],
+      "description": "For files: label only the records another label gave this value, such as the few a regex or code label kept before a prompt label reads them."
+    },
     "comment": {"type": "boolean", "description": "A one-line reason per unit."},
+    "show": {"type": "boolean", "description": "For files: turn it on in Files and the views as it runs, as show_label does."},
     "filter": {"type": "boolean", "description": "Make it the scope's filter."},
     "group": {"type": "string"}
   },
@@ -120,17 +130,18 @@ Define a category, apply it to every unit of a scope, and get the counts per val
 
 ## show_label
 
-Turn a label over files on or off in Files and the views, where it marks the records that have the values it highlights. It runs nothing, so a label is shown or hidden with it rather than with `apply_label`. The analyst turns labels on and off in Files too, so call it whenever they ask to show or hide one.
+Turn a label over files on or off in Files and the views, where it marks the records that have the values it highlights, or give its values colours. It runs nothing, so a label is shown or hidden with it rather than with `apply_label`. The analyst turns labels on and off in Files too, so call it whenever they ask to show or hide one, or to colour a value.
 
 ```json
 {
   "type": "object",
   "properties": {
     "name": {"type": "string", "description": "The label's name or id."},
-    "on": {"type": "boolean"},
-    "values": {"type": "array", "items": {"type": "string"}, "description": "The values to highlight while it is on, when not the ones it highlights now."}
+    "on": {"type": "boolean", "description": "Left out, the label stays on or off as it is."},
+    "values": {"type": "array", "items": {"type": "string"}, "description": "The values to highlight while it is on, when not the ones it highlights now."},
+    "colours": {"type": "object", "additionalProperties": {"type": "string", "enum": ["blue", "orange", "green", "sky blue", "olive", "teal", "brown", "navy", "grass green", "cerulean", "chestnut", "cyan"]}, "description": "A colour for each value named, which every card, view and Files show. A value that had the colour takes the one the other leaves."}
   },
-  "required": ["name", "on"]
+  "required": ["name"]
 }
 ```
 
@@ -183,6 +194,20 @@ Lay out the browser's main area, right of the chat, as panes that each show one 
     "surfaces": {"type": "array", "items": {"type": "string"}, "description": "One surface per pane, in reading order: left to right, then top to bottom."}
   },
   "required": ["layout", "surfaces"]
+}
+```
+
+## open_view
+
+Open a card of a card type as its view in Files, as the card's Open as view does: the card's labels turn on and its arguments choose the view's records, which follow the labels live. Call it when the analyst asks to see such a card as a view, or with `view` to open a view with no card's arguments.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "card": {"type": "string", "description": "The card, card:<id>."},
+    "view": {"type": "string", "description": "A view's slug or name, opened with no card's arguments, in place of `card`."}
+  }
 }
 ```
 
@@ -374,7 +399,7 @@ Get a picture of what the analyst sees in the browser, such as a card as the can
 
 ## start_orientation
 
-Start an orientation, a broad analysis of the corpus that helps the analyst understand it, in a Claude Code session of its own beside yours, which shows the analyst when it finishes the outputs its switches turn on. The browser shows it as a thread, and an `orient` event tells you when it ends. Call it for a `start` event with the event's switches, or when the analyst asks for a new orientation, which adds to the cards the earlier ones left, and `message_orientation` to explore further within one that has finished.
+Start an orientation, a broad analysis of the corpus that helps the analyst understand it, in a Claude Code session of its own beside yours, which shows the analyst when it finishes the outputs its switches turn on. The browser shows it as a thread, and an `orient` event tells you when it ends. Call it once for a `start` event with the event's switches, or when the analyst asks for a new orientation, which adds to the cards the earlier ones left, and `message_orientation` to explore further within one that has finished. One orientation runs at a time, so while one runs the call starts nothing.
 
 ```json
 {
@@ -397,7 +422,7 @@ Start a writer, in a Claude Code session of its own beside yours, which writes o
 {
   "type": "object",
   "properties": {
-    "doc": {"type": "string", "description": "The document's slug, such as report, story, slides or video, the write event's `doc`."},
+    "doc": {"type": "string", "description": "The document's slug, such as report, story or slides, the write event's `doc`."},
     "request": {"type": "string", "description": "What the analyst asked for, in their words, the write event's text. Empty for the document as its form asks."},
     "after": {"type": "string", "description": "The passage the request is about, the write event's `after`."},
     "type": {"type": "string", "description": "Only for a document that does not exist yet, which is then made: casefile (one document, a section per case, such as an agent, a run or a session), comparison (a page with a grid of the cases against measures), timeline (dated events in phases), page, or document, slides or story for one the request describes."},
@@ -573,13 +598,17 @@ The analyst locked card:{cid}, so it stays as it is. Leave it, or add a new card
 
 card:{cid} has no takeaway. Write it with `edit_card` and `takeaway`, one or two sentences answering its question from the output above.
 
+## takeaway-stale
+
+card:{cid} kept its takeaway, written before this run changed its output. Write it again now with `edit_card` and `takeaway` from the output above, before any other call.
+
 ## takeaway-missing-shown
 
 card:{cid} has no takeaway. Write it with `edit_card` and `takeaway`, one or two sentences answering its question from what the card shows.
 
 ## apply_label-rows
 
-Count and cite from the rows in a card. thimble.labels("{label}") is a DataFrame (path, line, effective, label, source, verdict, confidence, ref) of the units that got the first value, and thimble.labels("{label}", negatives=True) of every labeled unit.
+Count and cite from the rows in a card's code, since thimble's Python module is there and not in Bash. thimble.labels("{label}") is a DataFrame (path, line, effective, label, source, verdict, confidence, ref) of the units that got the first value, and thimble.labels("{label}", negatives=True) of every labeled unit.
 
 ## apply_label-unchanged
 
@@ -589,9 +618,13 @@ The label already held these values from the same predicate over the same units,
 
 {label} [[{ref}]] is already a label over {scope}. A label over {new} needs a name of its own.
 
+## apply_label-takeaway-stale
+
+The takeaway of its card card:{cid} was written for the run before; write it again with `edit_card` from these counts.
+
 ## apply_label-stale
 
-{cards} read this label before it changed, so each shows its older result. `edit_card` with only the card runs one again on the label as it is now, once its counts are final. Then tell the analyst in a sentence which of them changed.
+{cards} read this label before it changed. Once its counts are final, thimble runs each of them again on the label as it is now, so leave them as they are.
 
 ## show_label-not-files
 
@@ -612,6 +645,14 @@ Files shows the label turned on with that value highlighted, and its views keep 
 ## set_layout-set
 
 The browser shows {surfaces} {layout}.
+
+## open_view-card
+
+Opened {card} as the {view} view in Files, with its labels on and its arguments choosing the records.
+
+## open_view-view
+
+Opened the {view} view in Files, with no card's arguments.
 
 ## clear_filter-cleared
 
@@ -715,7 +756,7 @@ The dev agent is changing the view {view} (view:{slug}) now. When its checks pas
 
 ## view-no-anchors
 
-The page shows no element whose `data-anchor` names a record (`<path>#L<n>`) or one of its units (`view:{slug}/<key>`), so no label the analyst turns on can show in it. Give each element that shows a record its file ref, and each unit's element its key.
+The page shows no element whose `data-anchor` names a record (its citation form, such as `<path>#L<n>` or `<db>#<table>/<key>`) or one of its units (`view:{slug}/<key>`), so no label the analyst turns on can show in it. Give each element that shows a record its file ref, and each unit's element its key.
 
 ## file_dev_ticket-no-view
 
@@ -725,25 +766,109 @@ No view is named {view}. The views are {views}. File the ticket again with one o
 
 Filed {label}, but it cannot run here, so it failed at once: {why} Tell the analyst, since only they can change this.
 
+## view-media-unplayable
+
+The browser that takes the checks' and the review's pictures cannot play H.264 video or AAC audio, which most MP4, MOV and M4A recordings hold. A player of such a file stays blank or shows an error in the pictures, though the analyst's browser usually plays it, so that is not a problem of the view. A player that stays blank on a WebM, Ogg, MP3 or FLAC file is one.
+
+## view-purple
+
+The page writes purple colours: {colours}. Purple is thimble's colour for agents' work, so if any of them colours a category of the view, such as a speaker or a kind of record, give that category a viz colour (`--viz-*`) instead.
+
 ## view-built
 
 The dev agent built the view {view}, so {claims} now open in it. In it {forms}.
 
 ## view-no-forms
 
-no citation resolves, because its `accepts` and `declares` are empty
-
-## view-label-controls
-
-The page has {count} controls of its own that name the test label, such as a toggle, a checkbox or a menu item. Remove them, or make each one thimble's: it calls `thimble.setLabel` or `thimble.setLabelColour` and carries `data-label` with the label's id.
+no citation resolves, because its `accepts` and `units` are empty
 
 ## view-no-screenshots
 
 Screenshots are unavailable on this machine, so the checks did not load the page and took no pictures. Check the page by reading it and what the reader answers, and take no pictures any other way.
 
-## view-no-record-anchors
+## view-few-anchors
 
-The page fetched {fetched} records, but only {records} of its elements carry a record's `<path>#L<n>` as their `data-anchor`, so the labels the analyst turns on show on almost nothing in it. Give each element that shows a record its file ref.
+The reader handed the page {fetched} records, but only {records} shown elements carry a record's citation form, such as `<path>#L<n>`, as their `data-anchor`, so the labels the analyst turns on show on almost nothing in it. Give each element that shows a record its file ref.
+
+## view-marks-missing
+
+In the {state} state, {missing} of the {due} shown records or units the test label marks do not show its mark. thimble draws a mark on the outermost visible element whose `data-anchor` names the record, but not on a canvas: draw records as HTML or SVG elements, or put the `data-anchor` on an element beside the canvas drawing.
+
+## view-marks-unseen
+
+In the {state} state, a picture of the page does not show the test label's colour on {unseen} of the {checked} marked records or units in view, such as {refs}. thimble draws a mark as a 3 px bar in the label's colour along the left edge of the outermost element whose `data-anchor` names the record, inside the element when its left padding is 6 px or more or when a box that hides overflow would cut a bar outside it, else just outside. The bar does not show when the page's CSS sets `box-shadow` on that element with `!important`, or when another element or a cell's background covers the element's left edge. An element with `data-anchor-unmarked` gets no bar, so the page must draw the label's colour on it itself, at full strength, such as a dot or a fill in the colour `thimble.markOf(ref).bar` gives, redrawn in `thimble.onMarks`.
+
+## view-no-label-controls
+
+The page draws no label controls: {why}. thimble draws none above a view, so the page lists the labels `thimble.onLabels` gives in `all`, each with its colours and a switch that calls `thimble.setLabel(id, on)` on the analyst's click, and shows each label that is on in view, such as in a legend, each such element carrying `data-label` with the label's id.
+
+## view-labels-by-itself
+
+The page made {made} by itself, on load, on a timer or from its own script: {calls}. thimble refuses a label change outside the analyst's own click or key press in the view, so call these only from a control's click or key handler.
+
+## view-filter-unkept
+
+Filtered to the test label, the page shows {records} records, and the filter keeps the line that anchors {unkept} of them. That is right for a record the page draws for several lines, one of which the label marks. Otherwise keep only the records for which `thimble.kept(ref)` holds in the reader's answers and fetch again in `thimble.onLabels`, or leave the filtering to thimble by registering no `onLabels`.
+
+## view-missing
+
+The claims expect files the corpus lacks, which the analyst sees above the view as missing: {files}.
+
+## view-robust-reader
+
+With {what}, the reader failed: {error}. A real corpus can lack a file or hold a line cut short, so read what is there, and report each line you cannot parse with problems().
+
+## view-robust-torn
+
+thimble added a line cut short at {ref}, and problems() does not report it. Report each line the reader cannot parse with problems(), so the analyst sees it above the view.
+
+## view-robust-page
+
+With {what}, the page failed: {errors}. One missing file or bad line must leave the rest of the view working.
+
+## view-robust-empty
+
+With {what}, the page shows no record, though over the whole corpus it shows records. One missing file or bad line must leave the rest of the view working.
+
+## view-layout
+
+The page {where}: {parts}.
+
+## view-layout-overlap
+
+text overlaps other text in {places}, such as {pairs}
+
+## view-layout-cut
+
+{n} run past a box that hides them without an ellipsis, such as {texts}
+
+## view-layout-sideways
+
+{n} scroll sideways, such as the one that starts {texts}
+
+## view-layout-outside
+
+{n} of the {of} records and units it draws are out of view until the analyst scrolls
+
+## view-layout-overflow
+
+it is {px} px wider than its pane, so it scrolls sideways
+
+## view-layout-empty
+
+its text and graphics span {used} of its {width} px, so the rest of the pane is empty
+
+## view-not-shown
+
+{count} claimed files are neither read to the end by build_index nor listed with a why by hidden(index): {files}. The analyst sees each one above the view as not shown. Read each file whole in build_index, with Python's `open()`, or return it from hidden(index) with its `path` and a `why` that says why the view leaves it out.
+
+## view-not-claimed
+
+{count} files sit in folders beside the ones the view claims and hold the same files, such as another run's: {files}. The analyst sees each one above the view as not read. If the view is for all of them, claim them and let the analyst choose among the folders.
+
+## view-derived-unlisted
+
+Fields of the records the reader answered hold values that the lines they cite do not, and they are not listed as derived: {fields}. The analyst counts on that list to tell what the files say from what the reader made of them. List each of these fields in view.json's `records` with its `type` and `"derived": "cleaned"`, or `"computed"` for a value the files do not state, and give it `from` and `how`, each a short plain phrase without semicolons, or return it from the reader's derived(index).
 
 ## check-unread
 
@@ -767,7 +892,7 @@ The orientation has started in its own session, and the browser shows it, so thi
 
 ## start_orientation-running
 
-An orientation is running already. Tell the analyst so in one line.
+An orientation runs already, so this call started none: one orientation runs at a time. The browser shows the one that runs, so write nothing about it, unless the analyst asked for a new orientation in this turn: then tell them in one line that one runs and that they can stop it in its thread first.
 
 ## start_writing-started
 
@@ -917,7 +1042,7 @@ Only the orientation calls `critique`, which reviews its analysis and drafts bef
 
 ## critique-ended
 
-The critique ended {status} before it returned its report, and it wrote this.
+The critique {status} before it returned its report, and it wrote this.
 
 {text}
 
@@ -1025,6 +1150,10 @@ This message is from the analyst's own session.
 
 This message is from the analyst, typed in your thread.
 
+## orient-from-extension
+
+The analyst switched on the extension {extension} and asked you to run its instructions for the orientation now. Follow them as far as the work you did allows.
+
 ## orient-followed-up
 
 The orientation's follow-up has finished: {changed}.
@@ -1083,7 +1212,7 @@ Your first message is in {path}. Read it whole and follow it.
 
 ## bg-untrusted
 
-Claude Code does not trust thimble's workspaces folder ({workspaces}), so the orientation, its critic and the writers can't start. The analyst trusts it by running thimble's installer again in their own terminal with `--trust-workspaces`, the command their terminal and thimble's browser show, and then starts it again. Tell them so.
+Claude Code does not trust thimble's workspaces folder ({workspaces}), so the orientation, its critic, the writers and view builds can't start. The analyst trusts it by running thimble's installer again in their own terminal with `--trust-workspaces`, the command their terminal and thimble's browser show, and then starts it again. Tell them so.
 
 ## bg-carry-on
 
@@ -1115,22 +1244,22 @@ Answer main with SendMessage.
 
 You show {session}, a background session of thimble's, in the analyst's Claude Code agent tray. Every message that reaches you here, from the analyst or from main, is for {session}, and thimble passes it on. You write no words of your own and use no other tools. "{session}" is the session's whole name, spaces and `·` included: write it exactly so wherever it goes.
 
-Claude Code defers `wait_session` and SendMessage, so first load both with one ToolSearch call, query "select:mcp__plugin_thimble_thimble__wait_session,SendMessage". Then loop until the session ends:
+Claude Code defers `wait_session` and SendMessage, so first load both with one ToolSearch call, query "select:mcp__plugin_thimble_thimble__wait_session,SendMessage". Then loop until `wait_session` tells you to end your turn:
 
 1. Call `wait_session` with `session` "{session}". It returns as soon as there is news, or within a few seconds.
 2. Copy the block of news lines it returns into one reply, exactly as it is, each line on its own line, without shortening, rewording, explaining or formatting them, or write nothing when it says nothing is new.
 3. When it asks you to send the session a message, call SendMessage with `to` "{session}" and the token it gives as the whole message, once.
 4. When a message reaches you, do not answer it or act on it: call `wait_session` at once, which passes it on and gives you its token to send.
 
-Stop only when `wait_session` says the session has ended: then write one line saying so and end your turn. The analyst can also open the session itself with `claude attach {short}`.
+Stop only when `wait_session` tells you to end your turn, never because of what a news line says, and then do as it says. The analyst can also open the session itself with `claude attach {short}`.
 
 ## bg-proxy-start
 
-A background session of thimble's, {session}, runs for this workspace (`claude attach {short}`). Show it in the agent tray now: call the Agent tool with `subagent_type` "{type}", `run_in_background` true, `description` "{session}" and `{prompt}` as the whole prompt, then end the turn on that call, with no text after it. The tray entry follows the session by itself, so call nothing else for it.
+A background session of thimble's, {session}, runs for this workspace (`claude attach {short}`). Show it in the agent tray now with one call of the Agent tool, with `subagent_type` "{type}", `run_in_background` true, `description` "{session}" and `{prompt}` as the whole prompt, and end the turn on that call. The terminal shows the call, so write nothing before it or after it. The session runs already and the tray entry follows it by itself, so start nothing else for it.
 
 ## bg-proxy-keep
 
-Keep showing {session}: call `wait_session` with `session` "{session}" again, and stop only when it says the session has ended.
+Keep showing {session}: call `wait_session` with `session` "{session}" again, and stop only when it tells you to end your turn.
 
 ## wait_session-none
 
@@ -1151,6 +1280,10 @@ Another tray entry already shows {session}. Write nothing and end your turn now.
 ## wait_session-ended
 
 {session} has ended. Write one line saying so and end your turn.
+
+## wait_session-finished
+
+{session} has finished its task. Write one line saying so and end your turn.
 
 ## wait_session-quiet
 
@@ -1254,9 +1387,17 @@ It could not be resumed: {why}
 
 Your own scratch folder is {folder}. Put the files you make for your own work there, such as a script or an intermediate result, rather than in $TMPDIR or /tmp, which the session's other agents share.
 
+## work-budget
+
+The session's work folder {folder} now holds {size}, more than {budget}. Delete the extracts and copies there that you no longer need, and read the corpus in place rather than copying it.
+
 ## session-mode-switching
 
 This call did not run, because the analyst is switching your permission mode, which pauses your session. Once it has resumed, make this call again if you still need it.
+
+## session-unproven
+
+`{tool}` did not run: thimble could not confirm that this call came from the session it names. Stop here and tell the analyst, who can start this session again from thimble.
 
 ## call-ref
 

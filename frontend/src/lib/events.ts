@@ -7,7 +7,7 @@ import { useEffect } from 'react'
 import { api } from './api'
 import { bus } from './bus'
 import { openStream } from './sse'
-import type { WsEvent } from './types'
+import type { ViewQuery, WsEvent } from './types'
 
 let replaying = false
 
@@ -61,7 +61,7 @@ function fanOut(ev: WsEvent): void {
       bus.emit('ticket', { id: String(rest.id ?? ''), n: Number(rest.n ?? 0), status: String(rest.status ?? '') })
       return
     case 'concepts':
-      bus.emit('concepts', { concept: String(rest.concept ?? ''), what: String(rest.what ?? '') })
+      bus.emit('concepts', { concept: String(rest.concept ?? ''), what: String(rest.what ?? ''), rows: rest.rows !== false })
       return
     case 'check':
       if (typeof rest.id === 'string')
@@ -76,12 +76,25 @@ function fanOut(ev: WsEvent): void {
       if (name) bus.emit('layout', { layout: name, surfaces: Array.isArray(rest.surfaces) ? rest.surfaces.filter((x): x is string => typeof x === 'string') : [] })
       return
     }
+    case 'open-view':
+      // a view main opened with open_view (backend cardtypes.tool_open_view); the history the stream replays is not
+      // opened again
+      if (!replaying && typeof rest.slug === 'string') bus.emit('openView', { slug: rest.slug, query: viewQuery(rest.query) })
+      return
     case 'filter':
       bus.emit('filter',{ scope: rest.scope as 'files' | 'canvas' | 'report', concept: typeof rest.concept === 'string' ? rest.concept : undefined, value: typeof rest.value === 'string' ? rest.value : undefined })
       return
     default:
       return
   }
+}
+
+/** A stream record's `query` as a view takes it: {card, title, args}, else null. */
+function viewQuery(q: unknown): ViewQuery | null {
+  if (!q || typeof q !== 'object') return null
+  const o = q as Record<string, unknown>
+  if (typeof o.card !== 'string' || !o.args || typeof o.args !== 'object') return null
+  return { card: o.card, title: typeof o.title === 'string' ? o.title : '', args: o.args as Record<string, unknown> }
 }
 
 interface Sub {

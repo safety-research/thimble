@@ -1,0 +1,439 @@
+/* The product tour (./engine.ts, ./steps.ts): the dim with its cutouts, the popover, the examples it lays over the page
+   and the demos' pointer, key badge and ripple. */
+:root {
+  --tour-dim: rgba(var(--ink-rgb), 0.44);
+}
+:root[data-paper='dark'] {
+  --tour-dim: rgba(0, 0, 0, 0.6);
+}
+.tour-root {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-scrim);
+  pointer-events: none;
+}
+.tour-dim {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+.tour-dim-fill {
+  fill: var(--tour-dim);
+}
+.tour-block {
+  position: absolute;
+  inset: 0;
+  pointer-events: auto;
+}
+.tour-ex,
+.tour-fx {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+.tour-host {
+  position: fixed;
+  inset: 0;
+  z-index: calc(var(--z-popover) - 1);
+  pointer-events: none;
+}
+.tour-selecting,
+.tour-selecting * {
+  user-select: text !important;
+  -webkit-user-select: text !important;
+}
+.tour-selecting ::selection {
+  background: var(--accent-wash);
+}
+.tour-ex-report .wu-cm {
+  transition: opacity 400ms ease-out;
+}
+/* the example report's badge in the empty middle of its bar, which never scrolls, kept at least as wide as the badge */
+.tour-ex-report .wu-bar-spacer {
+  display: flex;
+  flex: 1 0 auto;
+  align-items: center;
+  justify-content: center;
+  padding: 0 8px;
+}
+.tour-ex-report .wu-bar-spacer > .tour-tag {
+  position: static;
+}
+.tour-checks-hidden .wu-cm {
+  opacity: 0;
+  visibility: hidden;
+}
+.tour-checks-hidden .wu-flag,
+.tour-checks-hidden .wu-flag * {
+  background: transparent !important;
+  box-shadow: none !important;
+}
+.tour-checks-hidden img.reader-ruler-marks {
+  visibility: hidden;
+}
+.tour-host > *,
+.tour-ex > * {
+  position: absolute;
+  pointer-events: auto;
+  box-sizing: border-box;
+}
+.tour-fx > * {
+  position: absolute;
+  pointer-events: none;
+}
+.tour-fx > .tour-live,
+.tour-fx > [data-src]:not([data-demo]) {
+  pointer-events: auto;
+}
+.tour-fx .pointer-hl,
+.tour-fx .pointer-box {
+  position: absolute;
+  z-index: auto;
+}
+.tour-fx .refchip-pop {
+  position: absolute !important;
+  z-index: auto;
+}
+.tour-fx > .tour-cursor,
+.tour-fx > .tour-key,
+.tour-fx > .tour-ripple {
+  z-index: 3;
+}
+/* a step's cue: a label in the inverse ink with an arrow pointing at a spot of the example */
+.tour-fx > .tour-cue {
+  left: 0;
+  top: 0;
+  z-index: 2;
+}
+.tour-cue-in {
+  display: flex;
+  align-items: center;
+  animation: tour-cue-nudge 1.8s ease-in-out infinite;
+}
+.tour-cue-arrow {
+  position: relative;
+  height: 0;
+  border-top: 1.5px solid var(--text-primary);
+}
+.tour-cue-arrow::before {
+  content: '';
+  position: absolute;
+  left: -1px;
+  top: -5.75px;
+  border-style: solid;
+  border-width: 5px 7px 5px 0;
+  border-color: transparent var(--text-primary) transparent transparent;
+}
+.tour-cue-label {
+  padding: 4px 9px;
+  border-radius: var(--radius-ui);
+  font: var(--type-ui-sm);
+  line-height: 1.35;
+  white-space: nowrap;
+  color: var(--text-on-inverse);
+  background: var(--surface-inverse);
+  box-shadow: var(--shadow-popover);
+}
+@keyframes tour-cue-nudge {
+  0%,
+  55%,
+  100% {
+    transform: translateX(0);
+  }
+  27% {
+    transform: translateX(-4px);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .tour-cue-in {
+    animation: none;
+  }
+}
+.tour-tag {
+  position: absolute;
+  z-index: 5;
+  top: 8px;
+  right: 10px;
+  padding: 0 8px;
+  border-radius: 999px;
+  font: var(--type-caption);
+  line-height: 17px;
+  color: var(--text-secondary);
+  background: var(--overlay-bg);
+  box-shadow: var(--overlay-ring);
+  pointer-events: none;
+}
+.tour-cursor {
+  left: 0;
+  top: 0;
+  width: 32px;
+  height: 32px;
+  will-change: transform;
+}
+.tour-key {
+  left: 0;
+  top: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px 6px 6px;
+  border-radius: 10px;
+  font: var(--type-body-sm);
+  color: var(--text-secondary);
+  background: var(--overlay-bg);
+  box-shadow: var(--shadow-popover);
+  white-space: nowrap;
+}
+.tour-key b {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 34px;
+  height: 34px;
+  padding: 0 8px;
+  box-sizing: border-box;
+  border-radius: 7px;
+  font: 500 20px/1 var(--font-body);
+  color: var(--text-primary);
+  background: var(--surface-card);
+  border: 1px solid var(--border-strong, rgba(0, 0, 0, 0.18));
+  box-shadow: 0 1px 0 rgba(0, 0, 0, 0.18);
+  transform: translateY(2px);
+}
+.tour-ripple {
+  width: 30px;
+  height: 30px;
+  margin: -15px 0 0 -15px;
+  border-radius: 50%;
+  border: 2px solid var(--accent);
+  animation: tour-ripple 560ms var(--ease-out) forwards;
+}
+@keyframes tour-ripple {
+  from {
+    transform: scale(0.3);
+    opacity: 0.9;
+  }
+  to {
+    transform: scale(1.5);
+    opacity: 0;
+  }
+}
+.tour-in {
+  animation: tour-in var(--dur-fast) var(--ease-out) both;
+}
+@keyframes tour-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+.tour-pop {
+  position: absolute;
+  pointer-events: auto;
+  box-sizing: border-box;
+  width: 280px;
+  padding: 14px 16px 12px;
+  background: var(--overlay-bg);
+  border-radius: var(--radius-card);
+  box-shadow: var(--shadow-popover);
+  color: var(--text-primary);
+  font: var(--type-body);
+}
+.tour-caret {
+  position: absolute;
+  width: 10px;
+  height: 10px;
+  background: var(--overlay-bg);
+  box-shadow: var(--overlay-ring);
+  clip-path: polygon(0 0, 100% 0, 0 100%);
+}
+.tour-head {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  margin-bottom: 6px;
+}
+.tour-title {
+  flex: 1;
+  font: var(--type-subheading);
+  letter-spacing: var(--tracking-title);
+}
+.tour-count {
+  font: var(--type-mono-sm);
+  color: var(--text-tertiary);
+  font-variant-numeric: tabular-nums;
+}
+.tour-body {
+  margin: 0;
+  color: var(--text-secondary);
+}
+.tour-after {
+  color: var(--text-primary);
+  animation: tour-in var(--dur-fast) var(--ease-out) both;
+}
+.tour-note {
+  margin: 8px 0 0;
+  font: var(--type-caption);
+  color: var(--text-tertiary);
+}
+.tour-foot {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 14px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border-hairline);
+}
+.tour-foot .tour-skip {
+  margin-left: -6px;
+}
+.tour-spacer {
+  flex: 1;
+}
+.tour-pop .kbd {
+  margin: 0 1px;
+}
+.tour-pop.tour-welcome {
+  width: 340px;
+  padding: 18px 20px 14px;
+}
+.tour-welcome .tour-title {
+  font: var(--type-heading, var(--type-subheading));
+}
+.tour-welcome .tour-foot {
+  border-top: 0;
+  padding-top: 0;
+  margin-top: 16px;
+}
+body[data-cmd] .tour-ex .tour-try {
+  cursor: var(--cmd-cursor, pointer);
+}
+.tour-ex .refchip-value {
+  cursor: pointer;
+}
+.refchip-value.tour-hot {
+  background: var(--accent-soft);
+  border-radius: 2px;
+}
+
+/* the example transcript lays out every record, so its height holds still while the wheel scrolls it */
+.tour-ex-reader .reader-record,
+.tour-ex-reader .reader-line {
+  content-visibility: visible;
+  contain-intrinsic-size: none;
+}
+
+/* The chat and terminal steps: an example exchange in the chat's own markup, and a Claude Code terminal window that
+   slides in from the right. The terminal keeps its own dark palette whatever the theme. */
+.tour-term {
+  border-radius: 10px;
+  overflow: hidden;
+  background: #161616;
+  color: #e8e8e8;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.45), 0 0 0 1px rgba(255, 255, 255, 0.08);
+  font-family: var(--font-mono, ui-monospace), ui-monospace, monospace;
+  font-size: clamp(12px, 0.62vw, 15px);
+  line-height: 1.5;
+  transition: transform 560ms cubic-bezier(0.2, 0.8, 0.2, 1), opacity 300ms ease-out;
+}
+.tour-term .tour-tag {
+  top: 7px;
+  right: 10px;
+  background: #3a3a3a;
+  color: #d0d0d0;
+  box-shadow: none;
+}
+.tour-term-bar {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  height: 32px;
+  padding: 0 12px;
+  background: #262626;
+}
+.tour-term-bar i {
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  background: #ff5f57;
+}
+.tour-term-bar i:nth-child(2) {
+  background: #febc2e;
+}
+.tour-term-bar i:nth-child(3) {
+  background: #28c840;
+}
+.tour-term-bar span {
+  flex: 1;
+  text-align: center;
+  margin-right: 50px;
+  color: #d0d0d0;
+  font-family: var(--font-sans, system-ui);
+  font-size: 0.95em;
+}
+.tour-term-body {
+  padding: 12px 14px 12px;
+}
+.tour-term .t-line {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.tour-term .t-gap {
+  height: 0.75em;
+}
+.tour-term .t-logo {
+  color: #d7875f;
+}
+.tour-term .t-dim {
+  color: #949494;
+}
+.tour-term b {
+  font-weight: 700;
+  color: #fff;
+}
+.tour-term .t-you {
+  background: #3a3a3a;
+  color: #fff;
+  padding: 1px 4px;
+  margin: 0 -4px;
+}
+.tour-term .t-caret {
+  color: #8a8a8a;
+}
+.tour-term .t-caret2 {
+  color: #bcbcbc;
+}
+.tour-term .t-hang {
+  padding-left: 2ch;
+  text-indent: -2ch;
+}
+.tour-term .t-out {
+  padding-left: 2ch;
+}
+.tour-term .t-rule {
+  height: 1px;
+  margin: 0.6em 0 0.3em;
+  background: #585858;
+}
+.tour-term .t-cursor {
+  display: inline-block;
+  width: 0.6em;
+  height: 1.1em;
+  vertical-align: -0.2em;
+  background: #bcbcbc;
+}
+.tour-ex-chat {
+  overflow: hidden;
+}
+.tour-ex-chat .chat-list {
+  overflow: hidden;
+}
+.tour-ex-chat .tour-tag {
+  position: static;
+  display: inline-block;
+  margin: 0 0 8px 0;
+}

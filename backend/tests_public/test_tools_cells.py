@@ -75,6 +75,14 @@ async def test_add_cell_runs_code_and_reports_the_output(group):
     await call("edit_card", group, cell=_cid(r2), takeaway="Four.")
     r3 = await call("edit_card", group, cell=_cid(r2), code="print(5)")
     assert tools.hint("takeaway-missing", cid=_cid(r2)) in r3.text  # a new run clears the stale takeaway, so it is asked for again
+    same = "import builtins\nbuiltins.runs = getattr(builtins, 'runs', 0) + 1\nprint(min(builtins.runs, 2))"
+    await call("edit_card", group, cell=_cid(r2), code=same, takeaway="One run.")
+    r5 = await call("edit_card", group, cell=_cid(r2), code=same)
+    cell = notebook.get_cell(CORPUS, _cid(r2))
+    assert cell["takeaway"] == "One run." and cell["takeaway_stale"] is True, "a run of the same code keeps its takeaway, stale"
+    assert tools.hint("takeaway-stale", cid=_cid(r2)) in r5.text
+    await call("edit_card", group, cell=_cid(r2), takeaway="Two runs.")
+    assert "takeaway_stale" not in notebook.get_cell(CORPUS, _cid(r2))
     r4 = await call("add_card", group, question="Errors?", code="raise ValueError('x')")
     assert "takeaway-missing" not in r4.text and tools.hint("takeaway-missing", cid=_cid(r4)) not in r4.text
     # `title` is the alias of `question`; an empty question or an unknown kind is refused before anything runs

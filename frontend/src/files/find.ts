@@ -69,10 +69,11 @@ const plural = (n: number, one: string, many = `${one}s`) => `${n.toLocaleString
 /** The search's rows, VS Code's quick open and search in one list: the files whose names hold the words first (at
  * most NAMES_SHOWN of them unless `allNames`, then a row for the rest), then the files whose text holds them, each
  * followed by its matching lines. Each part has a heading with its count; a part with nothing found is left out, and
- * the text's part says how far its search read while it has not read every file. Pure. */
+ * the text's part says how far its search read when it stopped at the most files it lists (the row under the results
+ * says it when the analyst stopped it), its count marked + once it stopped early. Pure. */
 export function resultRows(
   names: { files: readonly { path: string }[]; total: number } | null,
-  grep: { files: readonly GrepFile[]; done: GrepDone | null },
+  grep: { files: readonly GrepFile[]; done: GrepDone | null; stopped?: boolean },
   allNames: boolean,
 ): ResultRow[] {
   const out: ResultRow[] = []
@@ -85,7 +86,8 @@ export function resultRows(
   if (grep.files.length) {
     const hits = grep.files.reduce((n, f) => n + f.total, 0)
     const d = grep.done
-    const note = `${plural(hits, 'match', 'matches')}${grep.files.some((f) => !f.complete) || (d && !d.complete) ? '+' : ''} in ${plural(grep.files.length, 'file')}${d && !d.complete ? ` · searched ${d.scanned.toLocaleString()} of ${d.of.toLocaleString()} files` : ''}`
+    const more = grep.stopped || grep.files.some((f) => !f.complete) || (d && !d.complete)
+    const note = `${plural(hits, 'match', 'matches')}${more ? '+' : ''} in ${plural(grep.files.length, 'file')}${d && !d.complete && !grep.stopped ? ` · searched ${d.scanned.toLocaleString()} of ${d.of.toLocaleString()} files` : ''}`
     out.push({ kind: 'head', key: 'h:text', text: 'In files', note })
     for (const f of grep.files) {
       out.push({ kind: 'file', key: `f:${f.path}`, path: f.path, line: f.matches[0]?.line ?? 1, total: f.total, complete: f.complete })

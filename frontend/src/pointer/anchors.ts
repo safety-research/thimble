@@ -258,6 +258,18 @@ export function clipBox(b: Box, clip: Box | null): Box | null {
 }
 
 /**
+ * Screen pixels per layout pixel of an element, on each axis: its box on screen over its layout box. The client sizes
+ * and offsets are layout pixels, which a CSS transform (the canvas's zoom) does not scale; getBoundingClientRect is
+ * on screen. 1 on an axis the element has no size on.
+ */
+export function screenScale(el: Element, r: { width: number; height: number }, s: CSSStyleDeclaration): { x: number; y: number } {
+  const html = el instanceof HTMLElement
+  const w = html ? el.offsetWidth : el.clientWidth + el.clientLeft + (parseFloat(s.borderRightWidth) || 0)
+  const h = html ? el.offsetHeight : el.clientHeight + el.clientTop + (parseFloat(s.borderBottomWidth) || 0)
+  return { x: w > 0 && r.width > 0 ? r.width / w : 1, y: h > 0 && r.height > 0 ? r.height / h : 1 }
+}
+
+/**
  * The part of the viewport where an element's content shows: its padding box on each axis its overflow clips, cut by
  * every ancestor's; null when nothing clips it. The body, the root and a fixed element's ancestors are left out.
  * `memo` caches boxes across the text nodes of one range.
@@ -274,9 +286,10 @@ export function visibleBox(el: Element | null, memo: Map<Element, Box | null> = 
   let out = outer
   if (x || y) {
     const r = el.getBoundingClientRect()
-    const left = r.left + el.clientLeft
-    const top = r.top + el.clientTop
-    const own = { left: x ? left : -Infinity, top: y ? top : -Infinity, right: x ? left + el.clientWidth : Infinity, bottom: y ? top + el.clientHeight : Infinity }
+    const k = screenScale(el, r, s)
+    const left = r.left + el.clientLeft * k.x
+    const top = r.top + el.clientTop * k.y
+    const own = { left: x ? left : -Infinity, top: y ? top : -Infinity, right: x ? left + el.clientWidth * k.x : Infinity, bottom: y ? top + el.clientHeight * k.y : Infinity }
     out = outer ? { left: Math.max(own.left, outer.left), top: Math.max(own.top, outer.top), right: Math.min(own.right, outer.right), bottom: Math.min(own.bottom, outer.bottom) } : own
   }
   memo.set(el, out)

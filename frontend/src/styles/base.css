@@ -27,7 +27,8 @@ body {
   background: var(--accent-wash);
   color: var(--text-primary);
 }
-/* a span highlighted inside a longer text (--hl-bg): the words a quote card or a citation points at */
+/* a span highlighted inside a longer text (--hl-bg, ink on every accent): the words a quote card or a citation points
+   at */
 .hl {
   background: var(--hl-bg);
   color: var(--text-primary);

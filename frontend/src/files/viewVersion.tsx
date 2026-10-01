@@ -10,19 +10,23 @@ import { holdShown, markOpened } from './viewReady'
  * passed its checks; `reload` asks the page what the analyst is looking at and loads the newer version with it; after
  * `follow`, the next newer version loads at once (the analyst's own Undo). The pane holds the view as shown meanwhile. */
 export function usePinnedView(ws: string, slug: string, version: string | undefined) {
-  const [pinned, setPinned] = useState(version)
+  // the version is kept with the view it belongs to, so the first render after a switch never pairs the new view with
+  // the old view's version
+  const key = `${ws}\n${slug}`
+  const [pin, setPin] = useState<{ key: string; version: string | undefined }>({ key, version })
+  const pinned = pin.key === key ? pin.version : version
   const [restore, setRestore] = useState<ViewState | null>(null)
   const frame = useRef<ViewerFrameHandle | null>(null)
   const following = useRef(false)
   useEffect(() => {
-    setPinned(version)
+    setPin({ key, version })
     setRestore(null)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ws, slug])
+  }, [key])
   // a version the views list had not read yet when the pane opened
   useEffect(() => {
-    if (!pinned && version) setPinned(version)
-  }, [pinned, version])
+    if (!pinned && version) setPin({ key, version })
+  }, [key, pinned, version])
   useEffect(() => {
     markOpened(ws, slug)
     return holdShown(ws, slug)
@@ -30,8 +34,8 @@ export function usePinnedView(ws: string, slug: string, version: string | undefi
   const reload = useCallback(async () => {
     const st = (await frame.current?.state()) ?? null
     setRestore(st)
-    setPinned(version)
-  }, [version])
+    setPin({ key, version })
+  }, [key, version])
   useEffect(() => {
     if (following.current && version && version !== pinned) {
       following.current = false

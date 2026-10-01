@@ -1,7 +1,8 @@
 // The mark of a check thimble runs on something it made, shared by the card check (canvas/CardFace) and the review of a
 // view's pictures (files/ViewPane): a spinner while the check runs, a check glyph when it is done, a flag when it left
 // problems, a run-again glyph when it failed or was stopped. Its hover card, on the page rather than inside the thing
-// checked (which may clip it), explains the state; a click stops a running check or runs a finished one again.
+// checked (which may clip it), explains the state. A click does what `onClick` does, such as running a finished check
+// again; without one it opens the hover card.
 import { useEffect, useLayoutEffect, useRef, useState, type MouseEvent, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { Icon } from './Icon'
@@ -20,7 +21,8 @@ export interface CheckMarkProps {
   label: string
   /** the hover card's accessible name */
   popLabel: string
-  /** stop a running check, or run a finished one again */
+  /** what a click on the mark does, such as stop a running check or run a finished one again; without it a click opens
+   * the hover card */
   onClick?: () => void
   /** the hover card's content; `close` hides it, as an action in it does */
   children: (close: () => void) => ReactNode
@@ -49,12 +51,13 @@ export function CheckMark({ state, phase, flagged, label, popLabel, onClick, chi
         type="button"
         className={`bcell-check-mark is-${state}${phase ? ` is-${phase}` : ''}${flagged ? ' is-flagged' : ''}`}
         aria-label={label}
-        aria-disabled={!onClick || undefined}
+        aria-haspopup={onClick ? undefined : 'dialog'}
         onFocus={enter}
         onBlur={leave}
         onClick={() => {
+          if (!onClick) return enter()
           setOpen(false)
-          onClick?.()
+          onClick()
         }}
       >
         {running ? <Spinner size={10} /> : <Icon name={ended ? 'refresh' : flagged ? 'flag' : 'check'} size={12} />}

@@ -10,6 +10,8 @@
     thimble purge <id>… [--dry-run]        (delete workspaces or archived runs by id; runs.py)
     thimble launch-args --cwd <path>       (the launcher's: channel entry, allowed tools, main's effort and settings, turn tools, main's name, main's prompt)
     thimble prompt <name>… [--cwd <path>]  (prompt files rendered for a session in <path>, for skills and hooks)
+    thimble extension add <folder | git URL | built-in name> [--yes] | on <name> | off <name> | list | remove <name>
+                                                                                              (extensions.py)
 
 `server up` (alias `ensure`) is the one starter: `GET /api/health`, then under `flock <home>/server.lock` spawn uvicorn
 on THIMBLE_PORT (8300) as its own session leader (plus Vite on 5300 when THIMBLE_DEV is on), wait for health, map the
@@ -133,11 +135,12 @@ LINKS_DIR = "links"  # under <home>: the link each session's Stop hook shows onc
 # while Claude Code does not trust thimble's workspaces folder (untrusted): the line for the analyst's terminal, with the
 # command that trusts it, and the line for a model, which leaves that command to the analyst
 UNTRUSTED_LINE = ("thimble: WARNING - Claude Code does not trust thimble's workspaces folder {folder}, so the orientation, "
-                  "its critic and the writers can't start. To trust it, run this in a terminal:\n  {command}")
+                  "its critic, the writers and view builds can't start. To trust it, run this in a terminal:\n"
+                  "  {command}")
 UNTRUSTED_MODEL_LINE = ("thimble: WARNING - Claude Code does not trust thimble's workspaces folder, so the orientation, "
-                        "its critic and the writers can't start. The analyst trusts it by running thimble's installer "
-                        "again in their own terminal with --trust-workspaces, the command their terminal and thimble's "
-                        "browser show.")
+                        "its critic, the writers and view builds can't start. The analyst trusts it by running "
+                        "thimble's installer again in their own terminal with --trust-workspaces, the command their "
+                        "terminal and thimble's browser show.")
 FRESH_LINE = ("thimble: Cleared the session at {cwd}. The last run is archived at {path}. To bring it back, run: "
               "/thimble restore {name}")
 NOTHING_ARCHIVED_LINE = "thimble: this folder had no workspace to archive"
@@ -559,11 +562,16 @@ def spawn(cmd: list[str], *, cwd: Path, env: dict[str, str], log_file: Path) -> 
     return proc.pid
 
 
+# The server's event loop: Python's own, which starts a child process with vfork. uvloop forks the whole server for each
+# child, which holds the loop for as long as the kernel takes to copy the server's memory map.
+SERVER_LOOP = "asyncio"
+
+
 def backend_cmd(p: int, dev: bool = False) -> list[str]:
     """In dev mode the backend reloads on edits to app/, as Vite does for the frontend; THIMBLE_NO_AUTORESTART turns
     it off."""
     cmd = [sys.executable, "-m", "uvicorn", "app.main:app", "--host", "127.0.0.1", "--port", str(p),
-           "--timeout-graceful-shutdown", "3"]
+           "--loop", SERVER_LOOP, "--timeout-graceful-shutdown", "3"]
     return cmd + ["--reload", "--reload-dir", "app"] if dev else cmd
 
 
@@ -1198,21 +1206,48 @@ def workspace_for(cwd: Path, data_dir: Path, url: str | None, *, here: bool = Fa
     return open_workspace(cwd, data_dir, url, here=here)[0]
 
 
+def caller_alias(cwd: Path) -> tuple[bool, str | None]:
+    """How the analyst named the folder `cwd`: (whether thimble can tell, the path they used when it is another path to
+    the folder, through a symlink). plugin/bin/thimble passes the caller's logical working directory ($PWD, which keeps
+    the symlink a shell went through) as THIMBLE_CALLER_CWD; when that is not the folder (main's shell moved on), thimble
+    cannot tell."""
+    raw = os.environ.get("THIMBLE_CALLER_CWD") or ""
+    if not os.path.isabs(raw):
+        return False, None
+    try:
+        same = Path(raw).resolve() == cwd.resolve()
+    except OSError:
+        return False, None
+    return (True, config.shown_alias(raw, cwd.resolve())) if same else (False, None)
+
+
+def _sidecar_shown(data_dir: Path, name: str) -> str | None:
+    rec = config.read_sidecar(name, data_dir)
+    return rec.get("shown") if rec else None
+
+
 def open_workspace(cwd: Path, data_dir: Path, url: str | None, *, here: bool = False) -> tuple[str | None, bool]:
-    """workspace_for with whether the folder was opened anew: (name, registered just now)."""
+    """workspace_for with whether the folder was opened anew: (name, registered just now). A registered folder the
+    analyst opened through a symlink, or no longer through one, is registered again so that the dashboard shows the path
+    they used (caller_alias)."""
+    told, alias = caller_alias(cwd)
     cwd = cwd.resolve()
     data_dir = data_dir.resolve()
     known = known_corpus(cwd, data_dir)
     if known is not None and (known[1] == cwd or not here or known[1].parent == data_dir):
-        return known[0], False
+        stale = told and known[1] == cwd and known[1].parent != data_dir and _sidecar_shown(data_dir, known[0]) != alias
+        if not (stale and url):
+            return known[0], False
     if not url:
         return (known[0] if known else None), False
     body: dict[str, Any] = {"path": str(cwd)}
     if here:
         body["exact"] = True
+    if told:
+        body["shown"] = alias
     status, resp = _request("POST", f"{url}/api/corpora/register", body)
     if status in (200, 201) and isinstance(resp, dict) and resp.get("name"):
-        return str(resp["name"]), True
+        return str(resp["name"]), known is None or known[0] != str(resp["name"])
     _log(f"register {cwd} → {status} {str(resp)[:200]}")
     return None, False
 
@@ -1383,7 +1418,7 @@ class Installed(NamedTuple):
 def _claude_json(claude: str, args: list[str], cwd: Path) -> list[Any]:
     """The list a `claude ... --json` listing prints, [] when it fails or prints something else."""
     r = subprocess.run([claude, *args, "--json"], cwd=cwd, capture_output=True, text=True,
-                       timeout=PLUGIN_LIST_TIMEOUT_S, stdin=subprocess.DEVNULL, check=False)
+                       timeout=PLUGIN_LIST_TIMEOUT_S, stdin=subprocess.DEVNULL, check=False, env=config.launch_environ())
     out = json.loads(r.stdout) if r.returncode == 0 and r.stdout.strip() else []
     return out if isinstance(out, list) else []
 
@@ -1903,7 +1938,7 @@ def sandbox_lines(commands: bool = True) -> list[str]:
     """The doctor's `bash sandbox` line: whether Claude Code's Bash sandbox can run (cc_settings.sandbox_ok), which the
     agents' Bash then uses unless thimble's config says `sandbox.use` "never", and, when it cannot run, what it lacks and
     with `commands` the root commands that install it. Where it runs, the line names the empty `.claude/.cc-writes/`
-    folder Claude Code creates in the folder a sandboxed command runs in."""
+    folder Claude Code creates in the folder a sandboxed command starts in, which is the agent's own folder."""
     from . import cc_settings, userconf  # noqa: PLC0415
 
     try:
@@ -1928,13 +1963,24 @@ def sandbox_lines(commands: bool = True) -> list[str]:
                    f"a code ticket runs its checks and test server outside it, so it asks you before it starts: {why}")
         return ["  bash sandbox: runs (every agent's Bash runs in it: no writes outside the agent's folder and no "
                 f"network unless the agent's network is \"on\"; {tickets}; Claude Code's sandbox adds an empty "
-                ".claude/.cc-writes/ folder where its commands run, the corpus folder among them)"]
+                ".claude/.cc-writes/ folder to the agent's own folder, where its commands start)"]
     after = ("thimble's config (sandbox.enforce) refuses to start the agents" if box.get("enforce") else
              "the agents' Bash runs outside it, under each agent's permission mode")
     head = "  bash sandbox: off, missing " + ", ".join(missing) + "; " + after
     if not cmds or not commands:
         return [head + (f"; {what}" if what else "")]
     return [f"{head}. To turn it on, run these, which {what}, then `thimble restart`:", *(f"    {c}" for c in cmds)]
+
+
+def own_sandbox_line(cwd: Path) -> str:
+    """The doctor's line on the analyst's own Claude Code sandbox for a session in `cwd` (cc_settings.own_sandbox): main's
+    Bash runs in that session, so with it on Claude Code adds an empty .claude/.cc-writes/ folder to `cwd`."""
+    from . import cc_settings  # noqa: PLC0415
+
+    if not cc_settings.own_sandbox(cwd):
+        return "off"
+    return (f"on, so main's Bash adds an empty .claude/.cc-writes/ folder to {cwd}. That is Claude Code's sandbox in "
+            "your own session, which thimble leaves as it is")
 
 
 # ----------------------------------------------------------------------------- versions and the machine
@@ -1963,7 +2009,7 @@ def claude_code_version() -> str | None:
     if not exe:
         return None
     try:
-        out = subprocess.run([exe, "--version"], capture_output=True, text=True, timeout=10)
+        out = subprocess.run([exe, "--version"], capture_output=True, text=True, timeout=10, env=config.launch_environ())
     except (OSError, subprocess.SubprocessError):
         return None
     v = version_tuple(out.stdout or out.stderr)
@@ -2066,24 +2112,25 @@ def trust_command() -> str:
 
 
 def untrusted(workspaces: Path) -> Path | None:
-    """The workspaces folder when Claude Code does not trust it, by its own entry or one above it, so the background
-    sessions of the orientation, its critic and the writers cannot start (bg_session.trusted); None when it does."""
+    """The workspaces folder when Claude Code does not trust it, by the rule `claude --bg` applies
+    (claude_changes.trusted), so the background sessions of the orientation, its critic, the writers and view builds
+    cannot start (bg_session.trusted); None when it does."""
     from . import bg_session, claude_changes  # noqa: PLC0415
 
     data = claude_changes._read(bg_session.claude_json())
-    return None if any(claude_changes.trusted(f, data) for f in (workspaces, workspaces.resolve())) else workspaces
+    return None if claude_changes.trusted(workspaces, data) else workspaces
 
 
 def trust_line(workspaces: Path, commands: bool = True) -> str:
-    """Whether Claude Code trusts the workspaces folder, which the orientation's, its critic's and the writers'
-    background sessions need (untrusted), and with `commands` the command that trusts it."""
+    """Whether Claude Code trusts the workspaces folder, which the background sessions of the orientation, its critic,
+    the writers and view builds need (untrusted), and with `commands` the command that trusts it."""
     from . import bg_session  # noqa: PLC0415
 
     path = bg_session.claude_json()
     if not untrusted(workspaces):
         return f"Claude Code trusts {workspaces} ({path})"
-    return (f"Claude Code does not trust {workspaces} ({path}), so the orientation, its critic and the writers can't "
-            "start" + (f"; `{trust_command()}` trusts it" if commands else ""))
+    return (f"Claude Code does not trust {workspaces} ({path}), so the orientation, its critic, the writers and view "
+            "builds can't start" + (f"; `{trust_command()}` trusts it" if commands else ""))
 
 
 def human_bytes(n: float) -> str:
@@ -2239,6 +2286,12 @@ def validation_ports() -> tuple[int, int]:
 
 # feedback.doctor_summary reads the server, auth, network and card harness lines and the recent errors line by their
 # labels, for the one line a problem report's new issue carries.
+def extensions_line() -> str:
+    from . import extensions  # noqa: PLC0415
+
+    return extensions.doctor_line()
+
+
 def doctor_text(commands: bool = True) -> str:
     """What `thimble doctor` prints. Without `commands` its lines name no command that installs anything, for a model
     to read (`thimble fix`, `/thimble fix`)."""
@@ -2286,12 +2339,14 @@ def doctor_text(commands: bool = True) -> str:
     lines.append(f"  network: {_checked(network_line, status)}")
     caller = Path(os.environ.get("THIMBLE_CALLER_CWD") or os.getcwd())
     lines.append(f"  delivery (a session `thimble` starts in {caller}): {_checked(delivery_line, caller)}")
+    lines.append(f"  your session's bash sandbox: {_checked(own_sandbox_line, caller)}")
     lines.append(f"  config: {_checked(config_line, Path(env['workspaces_dir']))}")
     lines.append(f"  browser: {_checked(browser_line)}")
     lines.append(f"  card code: {_checked(kernel_line)}")
     lines.append(f"  card harness: {harness_line(url, up, commands)}")
     lines.append(f"  views and screenshots: {_checked(pages_line, commands)}")
     lines += sandbox_lines(commands)
+    lines.append(f"  extensions: {_checked(extensions_line)}")
     lines.append("  validation stack: "
                  + ", ".join(f"{q} {'busy' if listening(q) else 'free'}" for q in validation_ports())
                  + f"; env from server.json: {'yes' if st.get('env') else 'no (defaults)'}")
@@ -2693,7 +2748,18 @@ def cmd_restart(args: argparse.Namespace) -> int:
     return 0 if healthy() else 1
 
 
+def ship_extensions() -> None:
+    """The extensions thimble ships added on its first run (extensions.ship); a failure is said, never raised."""
+    from . import extensions  # noqa: PLC0415
+
+    try:
+        extensions.ship()
+    except Exception as e:  # noqa: BLE001 — the extensions stay as they were
+        print(f"thimble: the extensions thimble ships were not added: {type(e).__name__}: {e}", file=sys.stderr)
+
+
 def cmd_doctor(_: argparse.Namespace) -> int:
+    ship_extensions()
     print(doctor_text())
     return 0
 
@@ -2857,6 +2923,91 @@ def cmd_feedback(args: argparse.Namespace) -> int:
     return feedback.run(" ".join(args.description), cwd=cwd, logs=not args.no_logs)
 
 
+ORIENT_HINT = ("{name} {does}. Where an orientation already ran, Settings > Extensions asks whether to run it there "
+               "now.")
+
+
+def orient_hint(name: str, program: bool) -> str:
+    """The line `add` and `on` print for an extension that changes the orientation (extensions.orients): `program`
+    when its own program runs the orientation."""
+    does = "runs the orientation with its own program" if program else "adds to the orientation"
+    return ORIENT_HINT.format(name=name, does=does)
+
+
+def cmd_extension(args: argparse.Namespace) -> int:
+    """`thimble extension add | on | off | list | remove`, then every workspace a session has open finds its extensions
+    again. The old name of a built-in thimble renamed names the new one (extensions.renamed)."""
+    from . import extensions  # noqa: PLC0415
+
+    def now_called(name: str) -> str:
+        new = extensions.renamed(name)
+        if new != name:
+            print(f"{name} is now called {new}.")
+        return new
+
+    ship_extensions()
+    workspaces = Path(resolve_env()["workspaces_dir"])
+    if getattr(args, "name", None):
+        args.name = now_called(args.name)
+    if args.ext_cmd == "add" and not Path(args.source).expanduser().exists():
+        args.source = now_called(args.source)
+    if args.ext_cmd == "list":
+        for ln in extensions.list_lines(workspaces):
+            print(ln)
+        return 0
+    if args.ext_cmd == "add":
+        if not args.yes and not sys.stdin.isatty():
+            print("thimble extension add: run it in a terminal to answer its question, or pass --yes", file=sys.stderr)
+            return 1
+        try:
+            names = extensions.add(args.source, yes=args.yes)
+        except extensions.AddError as e:
+            print(f"thimble extension add: {e}", file=sys.stderr)
+            return 1
+        if names is None:
+            print("Not added.")
+            return 0
+        name, *more = names
+        print(f"{name}{' and ' + ' and '.join(more) if more else ''} {'are' if more else 'is'} on. "
+              f"`thimble extension off {name}` switches it off.")
+        for n in names:
+            if kept := extensions.off_in(n, workspaces):
+                print(f"{n} stays off where its switch in Settings keeps it off: {', '.join(kept)}.")
+            info = extensions.read_extension(extensions.source_path(n), n)
+            if extensions.orients(info):
+                print(orient_hint(n, extensions.orient_program(info)))
+    elif args.ext_cmd in ("on", "off"):
+        try:
+            got = extensions.switch(args.name, args.ext_cmd == "on", workspaces)
+        except extensions.SwitchError as e:
+            print(f"thimble extension {args.ext_cmd}: {e}", file=sys.stderr)
+            return 1
+        if args.ext_cmd == "on" and got["off_in"]:
+            print(f"{args.name} is on, except where its switch in Settings keeps it off: {', '.join(got['off_in'])}.")
+        else:
+            print(f"{args.name} is {args.ext_cmd} in every workspace.")
+        if args.ext_cmd == "on" and got["problem"]:
+            print(f"It does not run until this is fixed: {got['problem']}")
+        elif args.ext_cmd == "on" and got["orients"]:
+            print(orient_hint(args.name, got["orient_program"]))
+    else:
+        needing = extensions.dependents(args.name)
+        if not extensions.remove(args.name):
+            print(f"thimble extension remove: no extension {args.name!r} is added", file=sys.stderr)
+            return 1
+        print(f"Removed {args.name}.")
+        if needing:
+            print(f"{' and '.join(needing)} {'need' if len(needing) > 1 else 'needs'} it, so "
+                  f"{'they do' if len(needing) > 1 else 'it does'} not run until {args.name} is added again: "
+                  f"`thimble extension add {args.name}`.")
+    url = api_url(int(read_state().get("port") or port()))
+    if healthy(url):
+        status, body = _request("POST", f"{url}/api/extensions/refresh", {}, timeout=60)
+        if status != 200:
+            print(f"thimble: the server did not take the change yet ({body}); it will when a session next connects")
+    return 0
+
+
 def cmd_list(_: argparse.Namespace) -> int:
     from . import runs  # noqa: PLC0415
 
@@ -2971,6 +3122,19 @@ def build_parser() -> argparse.ArgumentParser:
     pg.add_argument("-y", "--yes", action="store_true", help="accepted and ignored (purge does not ask)")
     pg.add_argument("--dry-run", action="store_true", help="print what would be deleted; delete nothing")
     pg.set_defaults(fn=cmd_purge)
+    ex = sub.add_parser("extension", help="add, switch on or off, list or remove extensions (views, card types, agents, "
+                                          "report types)")
+    exs = ex.add_subparsers(dest="ext_cmd", required=True)
+    ea = exs.add_parser("add", help="check an extension, show what it gives, ask, then add it and switch it on")
+    ea.add_argument("source", help="a local folder (used in place), a git URL, or the name of an extension thimble ships")
+    ea.add_argument("-y", "--yes", action="store_true", help="add it without asking")
+    for word, what in (("on", "switch an added extension on in every workspace"),
+                       ("off", "switch an added extension off in every workspace")):
+        exs.add_parser(word, help=what).add_argument("name")
+    exs.add_parser("list", help="the extensions added, and whether each runs in each workspace")
+    er = exs.add_parser("remove", help="remove an added extension (a folder used in place stays where it is)")
+    er.add_argument("name")
+    ex.set_defaults(fn=cmd_extension)
     u = sub.add_parser("update", help="bring the install up to date: the latest GitHub release via gh, or --from <zip>")
     u.add_argument("--from", dest="from_", metavar="ZIP", help="a downloaded release zip (thimble-<version>-<sha>.zip)")
     u.add_argument("--dry-run", action="store_true", help="print update.sh's steps; change nothing")

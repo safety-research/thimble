@@ -4,10 +4,13 @@ cached: a passage whose text did not change, or that is locked, is not checked a
 
 A check is `workspaces/<c>/checks/<id>.json` = {id, name, prompt, colour, shown, builtin, created_by, ts, version,
 runs: {doc: Run}}. The built-ins (`unverified`, `verified`, `judgment`) are prompts/checks/<id>.md, read from the
-prompt file until first changed. A run is a Claude Code session of its own (agent_session.start) running as the check
+prompt file until first changed. An active extension's report checks, checks/<slug>/check.json (its name and colour)
+and check.md (its prompt) in its folder, follow the built-ins as `<extension>-<slug>`, off and read from the extension
+until first changed, as the built-ins are. A run is a Claude Code session of its own (agent_session.start) running as the check
 agent (prompts/check.md) with the corpus read-only and a work folder of its own; its first message is the context
 engine's (context.render) plus the document, the check's prompt and the passages it covers. At most MAX_SESSIONS run
-at once; a session past RUN_LIMIT_S of active time is stopped and the run ends `failed`.
+at once. A run has no time limit: its chat says when its session shows no activity (agent_session.wait_done), and the
+analyst's Stop ends it.
 
 The cache: a passage (paragraph, heading, slide, beat or free sentence) is fingerprinted by the sentence_key of its
 words. A run covers only passages whose fingerprint its check has not seen on that document; a run that ends `done`
@@ -33,7 +36,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
-from . import agent_session, config, investigation, prompts, tools, userconf
+from . import agent_session, config, investigation, prompts, tools, userconf, work_files
 from .ledger import read_json, write_json
 
 log = logging.getLogger("thimble.checks")
@@ -53,10 +56,6 @@ QUIET_S = float(os.environ.get("THIMBLE_CHECK_QUIET_S", "20") or "20")  # after 
 WRITER_POLL_S = 2.0  # while a writer of the document runs, how often a rerun looks again
 WAITING_WRITER = "writer"  # a run's `waiting` while it is queued behind the document's writer
 MAX_SESSIONS = 3  # runs whose sessions run at once
-# The most active time a run's session may take, by its effort (agent_session.wait_active: its process alive and no
-# permission request waiting, so a retry's wait for capacity does not count). A run past it is stopped and ends
-# `failed` saying so, so a session that hangs cannot hold one of the MAX_SESSIONS places for ever.
-RUN_LIMIT_S = {"low": 900.0, "medium": 900.0, "high": 1200.0, "xhigh": 1800.0, "max": 2400.0}
 INTERRUPTED = "the server stopped while this run ran"  # a run the previous server left running (mark_interrupted)
 CHANGED = ("generated", "rewritten", "edited")  # the `report` statuses of a save that changes text
 CHECKED_KIND = "checked"  # the channel event that tells main a run it started ended (prompts/main.md)
@@ -105,22 +104,53 @@ def builtin(cid: str) -> dict[str, Any] | None:
             "created_by": "thimble", "ts": "", "version": 1, "runs": {}}
 
 
+def from_extensions(c: str) -> dict[str, dict[str, Any]]:
+    """{id: check} of the report checks of the active extensions in workspace `c`, each off and never run, by
+    `<extension>-<slug>`; one whose check.md is empty or missing is left out."""
+    from . import extensions  # noqa: PLC0415 — extensions imports the views module
+
+    out: dict[str, dict[str, Any]] = {}
+    for e in extensions.active(c):
+        for k in e.get("checks") or []:
+            slug = str(k.get("slug") or "") if isinstance(k, dict) else ""
+            cid = f"{e['name']}-{slug}"
+            folder = Path(str(e["src"])) / "checks" / slug
+            try:
+                prompt = (folder / "check.md").read_text("utf-8").strip()[:PROMPT_CHARS]
+            except OSError:
+                prompt = ""
+            raw = read_json(folder / "check.json", {})
+            raw = raw if isinstance(raw, dict) else {}
+            colour = raw.get("colour")
+            colour = int(colour) if isinstance(colour, (int, str)) and str(colour).isdigit() else None
+            if not slug or not prompt or not ID_RE.match(cid) or cid in BUILTINS:
+                continue
+            out[cid] = {"id": cid, "name": _collapse(raw.get("name") or slug)[:NAME_CHARS], "prompt": prompt,
+                        "colour": colour if colour in COLOURS else COLOURS[len(out) % len(COLOURS)], "shown": False,
+                        "builtin": True, "created_by": str(e["name"]), "ts": "", "version": 1, "runs": {}}
+    return out
+
+
 def read(c: str, cid: str) -> dict[str, Any] | None:
-    """The check `cid`: its workspace file, else the built-in of that id; None when neither exists."""
+    """The check `cid`: its workspace file, else the built-in of that id, else an active extension's; None when none
+    exists."""
     stored = read_json(_path(c, cid), None)
     if isinstance(stored, dict):
         stored.setdefault("runs", {})
         return stored
-    return builtin(cid)
+    return builtin(cid) or from_extensions(c).get(cid)
 
 
 def list_checks(c: str) -> list[dict[str, Any]]:
-    """Every check, the built-ins first in their order, then the others in the order they were made."""
+    """Every check, the built-ins first in their order, then the active extensions' checks, then the others in the
+    order they were made."""
     out = [x for cid in BUILTINS if (x := read(c, cid)) is not None]
+    theirs = from_extensions(c)
+    out += [x for cid in theirs if (x := read(c, cid)) is not None]
     d = _dir(c)
     others = []
     for p in sorted(d.glob("*.json")) if d.is_dir() else []:
-        if p.stem in BUILTINS:
+        if p.stem in BUILTINS or p.stem in theirs:
             continue
         x = read_json(p, None)
         if isinstance(x, dict) and x.get("id") == p.stem:
@@ -310,10 +340,9 @@ class _Active:
     after_writer: bool = False  # queued until the document's writer ends, what it covers read then
     task: asyncio.Task | None = None
     session: agent_session.Run | None = None
+    program: bool = False  # an extension's program runs the checks task (tasks.program), in harness.py
     comments: int = 0
     ended: bool = False
-    effort: str = ""
-    timed_out: float = 0.0  # the limit a run ran past (RUN_LIMIT_S), which ends it `failed`
 
 
 _active: dict[tuple[str, str, str], _Active] = {}  # (workspace, check, doc) -> its running run
@@ -337,11 +366,6 @@ def _of_session(c: str, key: str | None) -> _Active | None:
 
 def running(c: str, cid: str, doc: str) -> bool:
     return (c, cid, doc) in _active
-
-
-def run_limit(effort: str) -> float:
-    """RUN_LIMIT_S for a run at `effort`; the longest for a level the table does not name."""
-    return RUN_LIMIT_S.get(effort, max(RUN_LIMIT_S.values()))
 
 
 def mark_interrupted(root: Path | None = None) -> list[str]:
@@ -470,6 +494,7 @@ async def _go(act: _Active) -> None:
     done: asyncio.Future = asyncio.get_running_loop().create_future()
 
     def ended(run: agent_session.Run, status: str, summary: str) -> None:
+        work_files.after_run(c, work_dir(c, act.check, act.doc), status)
         _finish(act, status, summary)
         if not done.done():
             done.set_result(status)
@@ -493,6 +518,12 @@ async def _go(act: _Active) -> None:
             effort = str(agent.get("effort") or DEFAULT_EFFORT)
             if act.ended:
                 return
+            from . import tasks  # noqa: PLC0415 — tasks reads the extensions
+
+            part = tasks.program(c, "checks")
+            if part is not None:
+                await _program(act, check, cover or [], prompt, part, done)
+                return
             try:
                 run = await agent_session.start(
                     c, session_key(act.check, act.doc), role=ROLE, title=str(check["name"]),
@@ -507,23 +538,78 @@ async def _go(act: _Active) -> None:
                 _finish(act, "failed", str(e))
                 return
             act.session = run
-            act.effort = effort
             _chat(act, run.chat)
-            limit = run_limit(effort)
-            if not await agent_session.wait_active(run, done, limit):
-                act.timed_out = limit
-                await agent_session.stop_run(run)
-                if not act.ended:  # a follower that did not end the run after Stop
-                    _finish(act, "stopped", "")
+            await agent_session.wait_done(run, done)
     except asyncio.CancelledError:
         if act.session is not None and not act.ended:
             with contextlib.suppress(Exception):
                 await agent_session.stop_run(act.session)
+        if act.program and not act.ended:
+            from . import harness  # noqa: PLC0415
+
+            with contextlib.suppress(Exception):
+                await harness.stop(c, session_key(act.check, act.doc))
         _finish(act, "stopped", "")
         raise
     except Exception as e:  # noqa: BLE001 — a run that cannot start is failed, never left running
         log.exception("%s: the run of check %s on %s failed", c, act.check, act.doc)
         _finish(act, "failed", f"{type(e).__name__}: {e}")
+
+
+def check_input(check: dict[str, Any], doc: str, cover: list[dict[str, Any]], context: str) -> dict[str, Any]:
+    """The checks task's input (tasks.py): the check (its id, name and prompt), the document, the passages the run
+    covers ({ref, kind, anchor}, the id a comment on the whole passage goes on) and the run's first message, which
+    holds the document and the context engine's part."""
+    return {"check": {"id": str(check["id"]), "name": str(check["name"]), "prompt": str(check.get("prompt") or "").strip()},
+            "doc": doc, "passages": [{"ref": p["ref"], "kind": p["kind"], "anchor": p["anchor"]} for p in cover],
+            "context": context}
+
+
+async def check_task(c: str, inp: dict[str, Any], *, model: str | None = None, program: Any = None) -> Any:
+    """thimble's own checks task (tasks.py), lent to a program that runs it: a Claude Code session as the check agent
+    (prompts/check.md) on the input's `context`, run as the program's run (harness.session_call), which comments
+    with add_comment as thimble's own run does. A model.CallResult whose output is the session's last reply."""
+    from . import harness, model as model_mod  # noqa: PLC0415
+
+    if program is None:
+        return model_mod.CallResult(status="error", detail="the checks task runs only in a program's run")
+    with prompts.custom(userconf.prompt_files(c, "checks")):
+        _, agent = agent_definition()
+    conf = config.models_for(c)[MODEL_ROLE]
+    agent = agent_session.role_agent(agent, conf)
+    payload = {"prompt": str(inp.get("context") or ""), "system": str(agent.get("prompt") or ""),
+               "model": model or str(agent.get("model") or ""), "effort": str(agent.get("effort") or DEFAULT_EFFORT)}
+    try:
+        reply = await harness.session_call(program, payload)
+    except harness.HarnessError as e:
+        return model_mod.CallResult(status="error", detail=str(e))
+    return model_mod.CallResult(status="ok", output=reply)
+
+
+async def _program(act: _Active, check: dict[str, Any], cover: list[dict[str, Any]], prompt: str, part: Any,
+                   done: asyncio.Future) -> None:
+    """The run as an extension's program of the checks task, in an agent chat of its own; it comments through
+    add_comment as the run's session, and what it returns is the run's summary. It runs until it ends or is stopped."""
+    from . import harness  # noqa: PLC0415
+
+    c = act.c
+    job = harness.task_job(c, "checks", check_input(check, act.doc, cover, prompt), key=session_key(act.check, act.doc),
+                           title=str(check["name"]), work=work_dir(c, act.check, act.doc), chat_role=ROLE,
+                           fields={"check": act.check, "doc": act.doc, "run_id": act.run})
+
+    def ended(run: harness.Run, status: str, summary: str) -> None:
+        _finish(act, status, summary)
+        if not done.done():
+            done.set_result(status)
+
+    try:
+        run = harness.start(job, part, on_end=ended)
+    except RuntimeError as e:
+        _finish(act, "failed", str(e))
+        return
+    act.program = True
+    _chat(act, run.chat)
+    await asyncio.shield(done)
 
 
 async def _after_writer(act: _Active) -> bool:
@@ -585,10 +671,6 @@ def _finish(act: _Active, status: str, summary: str) -> None:
         _active.pop((c, act.check, act.doc), None)
     status = status if status in ("done", "failed", "stopped") else "failed"
     last = next((ln.strip() for ln in reversed(str(summary or "").strip().splitlines()) if ln.strip()), "")
-    if act.timed_out:
-        status = "failed"
-        last = (f"It ran past its {act.timed_out / 60:.0f} minutes at {act.effort or DEFAULT_EFFORT} effort and was "
-                f"stopped; its comments so far stay.")
     check = read(c, act.check)
     rec = ((check or {}).get("runs") or {}).get(act.doc)
     if check is None or rec is None or rec.get("run") != act.run:
@@ -623,9 +705,13 @@ def _finish(act: _Active, status: str, summary: str) -> None:
 
 
 async def stop(act: _Active) -> None:
-    """Stop a run: its session when it has one, which ends it as stopped, else its place in the queue."""
+    """Stop a run: its session or program when it has one, which ends it as stopped, else its place in the queue."""
     if act.session is not None and not act.ended:
         await agent_session.stop_run(act.session)
+    elif act.program and not act.ended:
+        from . import harness  # noqa: PLC0415
+
+        await harness.stop(act.c, session_key(act.check, act.doc))
     elif act.task is not None and not act.task.done():
         act.task.cancel()
         with contextlib.suppress(asyncio.CancelledError, Exception):

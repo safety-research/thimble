@@ -1,0 +1,6 @@
+{
+  "name": "video",
+  "version": "0.4.0",
+  "description": "A report type for a short narrated video, with its own MP4 export.",
+  "thimble": ">=0.4"
+}

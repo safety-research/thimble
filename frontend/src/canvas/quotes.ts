@@ -400,8 +400,8 @@ function rawParts(r: ResolvedRef): QuotePart[] {
     return lines.flatMap((bs) => bs.flatMap((b) => blockParts(b, kind)))
   }
   if (blocks.length) return blocks.flatMap((b) => blockParts(b, kind))
-  // a database row reads as a record's fields, never as the JSON its excerpt is
-  if (r.kind === 'row' && r.record && typeof r.record === 'object' && !Array.isArray(r.record)) return recordParts(r.record)
+  // a database row or a CSV row reads as a record's fields, never as the JSON its excerpt is
+  if ((r.kind === 'row' || r.kind === 'csvrow') && r.record && typeof r.record === 'object' && !Array.isArray(r.record)) return recordParts(r.record)
   // a whole file, a media file's note: the excerpt as the backend wrote it
   if (!r.excerpt) return []
   if (kind === 'code') return [{ kind: 'code', text: r.excerpt }]

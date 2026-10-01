@@ -5,7 +5,7 @@
 # order, label-grey chrome with hairline axes and a faint y grid. 7.2 in fills a card body at the default card width.
 # Text is written as SVG text in the page's faces (page_fonts.py), with matplotlib's defaults after them.
 
-axes.prop_cycle: cycler('color', ['0072b2', 'e69f00', '009e73', 'd62728', 'cc79a7', '8c65e8', '8a6d3b'])
+axes.prop_cycle: cycler('color', ['025ac3', 'd0750a', '08632f', '1392d4', '897301', '009c85', '844500'])
 image.cmap: cividis
 
 figure.figsize: 7.2, 4.0
