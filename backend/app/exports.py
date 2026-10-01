@@ -12,7 +12,7 @@ The browser: the one thimble's config names (userconf.browser): the system's Chr
 own Chromium when it is installed. Pictures of cards come from the card harness (render.py); without a browser a card is
 its title, its table or its text, and PDF and video are offered disabled with the reason.
 
-A report type an extension adds may ship export.py beside its type.md:
+A report type an extension adds may ship export.py in its folder:
 
     FORMATS = [{"id": "csv", "name": "CSV", "ext": "csv"}]   # adds to the four; an id among them replaces that one
     def export(doc, fmt, ctx): ...                          # -> {"markdown"|"html"|"film"|"bytes": ..., "mime"?: ...}

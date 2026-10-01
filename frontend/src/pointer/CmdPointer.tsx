@@ -4,15 +4,9 @@
 // anchors it touches. Report blocks (`data-anchor-cell`) are taken whole (anchors.ts cellOf); inside a card
 // (`data-anchor-parts`) the innermost part is taken (parts.ts). The click also captures a picture (capture.ts), and
 // Enter posts a thread to the analyst's Claude Code session. A view's frame sends its own hover and click through the bus
-// (pointHover, pointAt, cmdHeld). Off a Mac, Ctrl does what ⌘ does (lib/platform). The send lets go of the highlight.
-// With `inline` (the chat off, Shell) the box stays open after the send and answers in place: the thread's rows show in
-// it as the fork writes them, with main's own edits of the card asked about (chat/ThreadRows) and, while it works, a
-// line saying where the question is (chat/threadStatus), and a reply typed there goes to the same thread.
-import { useEffect, useMemo, useRef, useState } from 'react'
-import { Note } from '../chat/Notes'
-import { ThreadRows } from '../chat/ThreadRows'
-import { mainEdits, STAGE_TEXT, threadStage } from '../chat/threadStatus'
-import { useChat } from '../chat/useChat'
+// (pointHover, pointAt, cmdHeld). Off a Mac, Ctrl does what ⌘ does (lib/platform). The send lets go of the highlight
+// and opens the thread in the chat column.
+import { useEffect, useRef, useState } from 'react'
 import { api } from '../lib/api'
 import { bus } from '../lib/bus'
 import { isMacPlatform, isPointKey, pointKeyHeld } from '../lib/platform'
@@ -62,17 +56,10 @@ const BESIDE: Place = { under: false }
 
 const cmdOn = () => document.body.hasAttribute('data-cmd')
 
-export function CmdPointer({ ws, inline = false }: { ws: string; inline?: boolean }) {
+export function CmdPointer({ ws }: { ws: string }) {
   const [box, setBox] = useState<Ask | null>(null)
   const [draft, setDraft] = useState('')
   const [busy, setBusy] = useState(false)
-  // the thread the box's send opened, answered in place (`inline`)
-  const [answer, setAnswer] = useState<string | null>(null)
-  const thread = useChat(ws, answer)
-  // main's log while the box answers, for main's own edits of the card asked about
-  const main = useChat(ws, answer ? 'main' : null)
-  const edits = useMemo(() => (answer && box ? mainEdits(thread.records, main.rows, box.anchors) : new Map()), [answer, box, thread.records, main.rows])
-  const stage = threadStage(thread.meta, thread.running)
   const boxEl = useRef<HTMLElement>(null)
   // a ⌘-press in flight: where it started, the panel it started in, `dragged` once it moved far enough
   const press = useRef<{ x: number; y: number; root: ParentNode; dragged: boolean } | null>(null)
@@ -99,7 +86,6 @@ export function CmdPointer({ ws, inline = false }: { ws: string; inline?: boolea
     }
     const openBox = (b: Ask) => {
       setDraft('')
-      setAnswer(null)
       setBox(b)
     }
     const inBox = (t: EventTarget | null) => !!boxEl.current?.contains(t as Node)
@@ -274,28 +260,17 @@ export function CmdPointer({ ws, inline = false }: { ws: string; inline?: boolea
 
   const close = () => {
     setBox(null)
-    setAnswer(null)
     highlight.release()
   }
   const submit = async () => {
     const text = draft.trim()
     if (!box || !text || busy) return
     setBusy(true)
-    track('pointer-send', { target: box.anchor, detail: { text, range: box.anchors.length, inline, followUp: !!answer } })
+    track('pointer-send', { target: box.anchor, detail: { text, range: box.anchors.length } })
     try {
-      if (answer) {
-        // a follow-up in the box: the same thread, as its composer would send it
-        if (await thread.send(text)) setDraft('')
-        return
-      }
       const image = await box.image
       const meta = await api.createThread(ws, { anchor: box.anchor, anchor_text: box.text || null, ...box.info, image, parent: box.parent ?? null, text })
       setDraft('')
-      if (inline) {
-        highlight.release()
-        setAnswer(meta.id)
-        return
-      }
       bus.emit('openChat', { chatId: meta.id })
       close()
     } catch (e) {
@@ -318,11 +293,8 @@ export function CmdPointer({ ws, inline = false }: { ws: string; inline?: boolea
           busy={busy}
           onSubmit={() => void submit()}
           onClose={close}
-          attrs={{ 'data-anchors': box.anchors.length, 'data-thread': answer ?? undefined }}
-          replyTo={thread.meta?.name || thread.meta?.title || undefined}
-        >
-          {answer ? <ThreadRows rows={thread.rows} edits={edits} ws={ws} chat={answer} streaming={thread.running || thread.streaming} working={stage ? <Note className="chat-thread-stage" spin text={STAGE_TEXT[stage]} /> : undefined} /> : undefined}
-        </PointerBox>
+          attrs={{ 'data-anchors': box.anchors.length }}
+        />
       )}
     </>
   )

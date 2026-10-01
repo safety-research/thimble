@@ -3,7 +3,7 @@
 // still warning dot while its session waits for permission, a warning icon and Retry on failure); then New view, a
 // field that asks main for one. A view or a proposal shows × on hover, which deletes it once confirmed. A row across
 // the top of Files, or, while Files shows in a pane beside another, in that pane's head (`compact`, portalled by
-// FilesTab), where what does not fit goes in a ⋯ menu (viewsFit.ts). Refetches on bus `view`.
+// FilesTab), where what does not fit goes in a ⋯ menu (viewsFit.ts). The views list is the shared one (lib/views.ts).
 import { useEffect, useLayoutEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
 import { openThread } from '../chat/Notes'
 import { Button, Segmented } from '../components/Button'
@@ -16,6 +16,7 @@ import { pendingAsks, useChatMetas } from '../chat/waiting'
 import { api } from '../lib/api'
 import { bus } from '../lib/bus'
 import { refreshProposals, useProposals } from '../lib/proposals'
+import { useViewList } from '../lib/views'
 import { startSurfaceDrag } from '../lib/surfaces'
 import { track } from '../lib/telemetry'
 import type { Proposal, View, ViewReview } from '../lib/types'
@@ -117,25 +118,7 @@ export function barList(list: readonly View[], all: readonly Proposal[]): { view
 /** The views the bar lists and the proposals not yet built, read and kept fresh (barList). */
 export function useViews(ws: string): { views: BuiltView[]; proposals: Proposal[] } {
   const proposals = useProposals(ws) ?? []
-  const [list, setList] = useState<View[]>([])
-  useEffect(() => {
-    let alive = true
-    const read = () => {
-      api
-        .views(ws)
-        .then((v) => alive && setList(v))
-        .catch(() => {
-          /* no views */
-        })
-    }
-    read()
-    const off = bus.on('view', () => read())
-    return () => {
-      alive = false
-      off()
-    }
-  }, [ws])
-  return barList(list, proposals)
+  return barList(useViewList(ws) ?? [], proposals)
 }
 
 /** The spinner's words for a proposal's build: queued, building, or waiting for permission while a request of its
