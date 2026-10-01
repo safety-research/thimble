@@ -9,6 +9,7 @@ import contextlib
 import io
 import json
 import os
+import shutil
 import sys
 from pathlib import Path
 
@@ -182,6 +183,13 @@ def test_a_link_left_where_the_local_extension_goes_is_replaced_by_a_folder(corp
     views.ensure_local(ws)
     assert not (ws / "extension" / "views" / "planted").exists()
 
+    from app import notebook
+
+    shutil.rmtree(ws / "extension")
+    (ws / "extension").write_text("")
+    notebook._guarded_files(CORPUS)
+    assert (ws / "extension").is_dir(), "a kernel starts with the folder read-only, not with a file in its place"
+
 
 def test_an_archive_an_older_thimble_made_has_its_views_moved_in_when_it_is_restored(corpora):
     """`/thimble restore` of an archive whose views are in views/ moves them into the local extension."""
@@ -243,3 +251,29 @@ def test_a_view_built_for_a_workspace_switches_off_and_on_in_settings_from_the_a
     with pytest.raises(HTTPException) as e:
         asyncio.run(views.view_on_route(CORPUS, "pdf", views.OnBody(on=False), analyst))
     assert e.value.status_code == 404
+
+
+def test_a_view_switched_off_takes_its_card_type_with_it_and_a_deleted_one_leaves_no_switch_behind(corpora, analyst):
+    """A workspace view that makes a card type leaves the card types while it is off and is back when it is on. A view
+    deleted while off leaves nothing off behind, so a new view built under its slug is on."""
+    from app import cardtypes
+
+    _propose(CORPUS)
+    v = _write(CORPUS)
+    d = Path(v["dir"])
+    (d / "card.py").write_text("def card(index, args):\n    return index\n")
+    (d / "view.json").write_text(json.dumps({**json.loads((d / "view.json").read_text()), "card": {"use": "a post"}}))
+    views.mark_built(CORPUS, "posts")
+    assert "posts" in asyncio.run(cardtypes.refresh(CORPUS, warm=False))
+
+    asyncio.run(views.view_on_route(CORPUS, "posts", views.OnBody(on=False), analyst))
+    assert "posts" not in cardtypes.read_registry(CORPUS)
+    asyncio.run(views.view_on_route(CORPUS, "posts", views.OnBody(on=True), analyst))
+    assert "posts" in cardtypes.read_registry(CORPUS)
+
+    asyncio.run(views.view_on_route(CORPUS, "posts", views.OnBody(on=False), analyst))
+    views.delete_proposal(CORPUS, "posts")
+    assert views.views_off(CORPUS) == set()
+    _propose(CORPUS)
+    _write(CORPUS)
+    assert [v["slug"] for v in views.list_views(CORPUS) if v["origin"] == "workspace"] == ["posts"]
