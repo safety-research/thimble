@@ -470,7 +470,7 @@ function TurnsTranscript({ workspace, path, targetRef }: ViewProps) {
           <span>{g.title || `Conversation ${t.group! + 1}`}</span>
         </div>,
       )
-    out.push(<TurnCard key={t.i} path={path} turn={t} target={holder?.i === t.i ? target : null} hit={hit} />)
+    out.push(<TurnCard key={t.i} path={path} turn={t} end={Math.max(t.line, (turns[k + 1]?.line ?? t.line) - 1)} target={holder?.i === t.i ? target : null} hit={hit} />)
   })
   return (
     <div className="reader-transcript reader-turns" ref={rootRef}>
@@ -487,11 +487,13 @@ function TurnsTranscript({ workspace, path, targetRef }: ViewProps) {
   )
 }
 
-function TurnCard({ path, turn, target, hit }: { path: string; turn: SourceTurn; target: Target | null; hit: boolean }) {
+/** One turn of a whole-file JSON transcript, whose gutter shows the labels of its line and of the lines up to the next
+ * turn's (`end`). */
+function TurnCard({ path, turn, end, target, hit }: { path: string; turn: SourceTurn; end: number; target: Target | null; hit: boolean }) {
   const header = [turn.speaker || turn.role, turn.time ? timeOf(turn.time) : null].filter(Boolean).join(' · ')
   const block: Block = { kind: 'text', text: turn.text }
   return (
-    <RecordCard path={path} line={turn.line} target={target} hit={hit} className={`reader-msg reader-turn-${turn.role}`} header={header} text={turn.text.slice(0, 500)}>
+    <RecordCard path={path} line={turn.line} end={end} target={target} hit={hit} className={`reader-msg reader-turn-${turn.role}`} header={header} text={turn.text.slice(0, 500)}>
       {turn.text.trim() ? <BlockEl block={block} line={turn.line} index={0} target={null} hit={false} /> : <div className="reader-msg-empty">(empty)</div>}
       {turn.cut != null && <div className="reader-msg-empty">Cut at {turn.text.length.toLocaleString()} of {turn.cut.toLocaleString()} characters. Raw shows all of it.</div>}
     </RecordCard>

@@ -173,6 +173,43 @@ describe('JSON lines', () => {
   })
 })
 
+describe('a whole-file JSON transcript', () => {
+  test('a turn’s card shows the labels of the lines up to the next turn', async () => {
+    vi.spyOn(api, 'sourceTurns').mockResolvedValue({
+      path: 'e.json',
+      total: 2,
+      start: 0,
+      n_groups: 1,
+      groups: { '0': { title: '', first: 0 } },
+      turns: [
+        { i: 0, line: 3, speaker: 'user', role: 'user', text: 'why does it fail?', group: 0 },
+        { i: 1, line: 9, speaker: 'assistant', role: 'assistant', text: 'a missing key', group: 0 },
+      ],
+    })
+    const flagged = { id: 'k1', name: 'Asks why', unit: 'record', labels: ['yes', 'no'], classes: [] } as unknown as Concept
+    const ctx: ReaderLabels = {
+      path: 'e.json',
+      on: [flagged],
+      lanes: [flagged],
+      focus: 'k1',
+      rows: new Map([['e.json#L5', new Map([['k1', { ref: 'e.json#L5', label: 'yes', confidence: null, source: null }]])]]),
+      want: () => undefined,
+    }
+    const page: SourcePage = { path: 'e.json', kind: 'text', total_lines: 12, start: 1, records: [] }
+    const View = transcript.component
+    const el = await mount(
+      <ReaderLabelsContext.Provider value={ctx}>
+        <View workspace="w" path="e.json" kind="text" page={page} loadMore={() => undefined} transcript={{ format: 'json', score: 0.95 }} />
+      </ReaderLabelsContext.Provider>,
+    )
+    await settle()
+    const lit = (line: string) => !!el.querySelector(`.reader-card[data-line="${line}"] > .reader-gutter .reader-gutter-cell.is-lit`)
+    expect([...el.querySelectorAll('.reader-card')].map((c) => c.getAttribute('data-line'))).toEqual(['3', '9'])
+    expect(lit('3')).toBe(true)
+    expect(lit('9')).toBe(false)
+  })
+})
+
 describe('a PDF ref', () => {
   test('opens at the page it names', () => {
     expect(pdfPage('docs/a.pdf#p4', 'docs/a.pdf')).toBe(4)
