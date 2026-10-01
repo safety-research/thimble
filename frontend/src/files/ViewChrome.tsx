@@ -78,15 +78,17 @@ export function hasNotes(notes: ViewNotes, shownLabels: readonly Concept[]): boo
 type ResidueFile = ViewShown['not_shown']['files'][number]
 
 /** What a view leaves out, by kind: the claimed files and those beside them it neither read to the end nor hid, those
- * its reader hid with a why, the claims that match no file, and the lines its reader could not parse. */
+ * its reader hid with a why, what the claims expect and the corpus lacks, the lines its reader could not parse and the
+ * records it could not place. */
 export interface Residue {
   /** the files listed, and how many there are in all, which the server counts beyond those it lists */
   unread: ResidueFile[]
   unreadCount: number
   hidden: ResidueFile[]
   hiddenCount: number
-  missing: string[]
+  missing: { path: string; why: string }[]
   problems: ViewProblems | null
+  unplaced: ViewProblems | null
 }
 
 export function residueOf(notes: ViewNotes): Residue {
@@ -99,11 +101,12 @@ export function residueOf(notes: ViewNotes): Residue {
     hiddenCount: (ns?.count ?? 0) - (ns?.unexplained ?? 0),
     missing: notes.shown?.missing ?? [],
     problems: notes.problems?.count ? notes.problems : null,
+    unplaced: notes.shown?.unplaced?.count ? notes.shown.unplaced : null,
   }
 }
 
 export function hasResidue(r: Residue): boolean {
-  return !!(r.unreadCount || r.hiddenCount || r.missing.length || r.problems)
+  return !!(r.unreadCount || r.hiddenCount || r.missing.length || r.problems || r.unplaced)
 }
 
 /** Whether the problems name whole files, as a reader of PDFs does, rather than lines. */
@@ -150,7 +153,8 @@ export function ViewNotesLine({ ws, name, notes, shownLabels, residueOpen, onRes
 }
 
 /** What the view leaves out, in a few words, which a click opens as the list under the head: the files not read, those
- * hidden, the claims with no file, and in red the lines that could not be parsed; "All read" when there is none. */
+ * hidden, those missing, the records not placed, and in red the lines that could not be parsed. With none it says how
+ * many files it read, once that count is known. */
 function ResidueLine({ notes, open, onToggle }: { notes: ViewNotes; open: boolean; onToggle: () => void }) {
   if (!notes.shown && !notes.problems?.count) return null
   const r = residueOf(notes)
@@ -158,8 +162,12 @@ function ResidueLine({ notes, open, onToggle }: { notes: ViewNotes; open: boolea
   if (r.unreadCount) parts.push(`${count(r.unreadCount, 'file', 'files')} not read`)
   if (r.hiddenCount) parts.push(`${r.hiddenCount.toLocaleString()} hidden`)
   if (r.missing.length) parts.push(`${r.missing.length.toLocaleString()} missing`)
+  if (r.unplaced) parts.push(`${count(r.unplaced.count, 'record', 'records')} not placed`)
   const failed = r.problems ? `${count(r.problems.count, wholeFiles(r.problems) ? 'file' : 'line', wholeFiles(r.problems) ? 'files' : 'lines')} not parsed` : ''
-  if (!hasResidue(r)) return <span className="view-pane-residue-none">All read</span>
+  if (!hasResidue(r) && notes.shown) {
+    const n = notes.shown.files
+    return <span className="view-pane-residue-none">{n === 1 ? '1 file read' : `All ${n.toLocaleString()} files read`}</span>
+  }
   return (
     <button type="button" className="view-pane-files view-pane-residue" aria-expanded={open} onClick={onToggle}>
       {parts.join(' · ')}
@@ -200,12 +208,24 @@ export function ResidueList({ notes, onPick }: { notes: ViewNotes; onPick: (ref:
       {r.missing.length > 0 && (
         <section>
           <h4>Missing</h4>
-          {r.missing.map((g) => (
-            <div key={g} className="view-pane-list-row">
-              <span className="mono">{g}</span>
-              <span className="view-pane-list-why">matches no file</span>
+          {r.missing.map((m) => (
+            <div key={m.path} className="view-pane-list-row">
+              <span className="mono">{m.path}</span>
+              <span className="view-pane-list-why">{m.why}</span>
             </div>
           ))}
+        </section>
+      )}
+      {r.unplaced && (
+        <section>
+          <h4>Not placed</h4>
+          {r.unplaced.examples.map((x, i) => (
+            <button key={`${x.ref}:${i}`} type="button" className="view-pane-list-item" disabled={!x.ref} onClick={() => onPick(x.ref)}>
+              <span className="mono">{x.ref}</span>
+              <span className="view-pane-list-why">{x.why}</span>
+            </button>
+          ))}
+          {r.unplaced.count > r.unplaced.examples.length && <span className="view-pane-list-more">and {(r.unplaced.count - r.unplaced.examples.length).toLocaleString()} more</span>}
         </section>
       )}
       {r.problems && (
@@ -224,24 +244,27 @@ export function ResidueList({ notes, onPick }: { notes: ViewNotes; onPick: (ref:
   )
 }
 
-/** "Derived data" with how many fields the view's reader made rather than read and how many labels it shows, which a
- * click lists: each field with how and from what, then each label with its description. */
+/** "Derived data" with how many fields the view's reader made rather than read, how many of them are inferred, and how
+ * many labels it shows, which a click lists: the inferred fields first, each field with how and from what, then each
+ * label with its description. */
 function DerivedData({ ws, shown, labels, name }: { ws: string; shown: ViewShown | null; labels: readonly Concept[]; name: string }) {
   const [at, setAt] = useState<HTMLButtonElement | null>(null)
   const [open, setOpen] = useState(false)
   const fields = shown?.derived ?? []
   if (!fields.length && !labels.length) return null
-  const counts = [fields.length ? count(fields.length, 'field', 'fields') : '', labels.length ? count(labels.length, 'label', 'labels') : ''].filter(Boolean)
+  const inferred = fields.filter((d) => d.kind === 'inferred').length
+  const counts = [fields.length ? count(fields.length, 'field', 'fields') : '', inferred ? `${inferred.toLocaleString()} inferred` : '', labels.length ? count(labels.length, 'label', 'labels') : ''].filter(Boolean)
   return (
     <>
       <button ref={setAt} type="button" className="view-pane-files" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
         Derived data: {counts.join(', ')}
       </button>
       <Popover anchor={at} open={open} onClose={() => setOpen(false)} label={`What ${name} derived`} className="view-pane-list">
-        {fields.map((d) => (
+        {[...fields].sort((a, b) => Number(b.kind === 'inferred') - Number(a.kind === 'inferred')).map((d) => (
           <div key={d.field} className="view-pane-list-row">
             <span>
               <span className="mono">{d.field}</span>
+              {d.kind === 'inferred' && <span className="view-pane-list-kind"> inferred</span>}
               {d.from && <span className="view-pane-list-why"> from {d.from}</span>}
             </span>
             {d.how && <span className="view-pane-list-how">{d.how}</span>}

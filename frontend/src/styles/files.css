@@ -2055,6 +2055,10 @@
 .view-pane-residue-failed {
   color: var(--status-negative);
 }
+.view-pane-list-kind {
+  color: var(--text-secondary);
+  font-style: italic;
+}
 .view-pane-residue-none {
   font: var(--type-ui-sm);
   color: var(--text-tertiary);
