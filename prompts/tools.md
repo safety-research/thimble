@@ -792,7 +792,7 @@ In the {state} state, {missing} of the {due} shown records or units the test lab
 
 ## view-labels-by-itself
 
-The page made {count} label calls by itself, on load, on a timer or from its own script: {calls}. thimble refused them, since a label change takes effect only during the analyst's own click or key press in the view. Call these only from a control's click or key handler.
+The page made {made} by itself, on load, on a timer or from its own script: {calls}. thimble refuses a label change outside the analyst's own click or key press in the view, so call these only from a control's click or key handler.
 
 ## view-filter-unkept
 

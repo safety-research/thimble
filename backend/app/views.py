@@ -3341,7 +3341,8 @@ def self_label_problems(shots: list[dict[str, Any]]) -> list[str]:
     if not ops:
         return []
     calls = ", ".join(dict.fromkeys(f"`{LABEL_CALLS.get(o, o)}`" for o in ops))
-    return [_hint("view-labels-by-itself", count=len(ops), calls=calls)]
+    made = "1 label call" if len(ops) == 1 else f"{len(ops)} label calls"
+    return [_hint("view-labels-by-itself", made=made, calls=calls)]
 
 
 # how layout_notes names each state it measures, at the pane's width {w}
