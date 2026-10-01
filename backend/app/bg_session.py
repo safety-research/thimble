@@ -32,13 +32,14 @@ all of its start flags, since Claude Code keeps none of a session's options when
 starts under a new id is recorded as the session's new id.
 
 The proxy. For each session main runs a thin background subagent of the plugin (plugin/agents: thimble:orient,
-thimble:writer, thimble:critic), which reads its instructions from proxy_file and loops on the `wait_session` tool for
-the session's life: the tool returns the session's news (below) as one block of lines, which the proxy copies into its
-reply word for word, one reply per call, and the outbox's messages as tokens. Two plugin hooks keep it reliable: before
-a SendMessage (relay_check) the server swaps a token for its message, prefixes a message the analyst typed in the
-proxy's view, and refuses a message sent twice; when the proxy would stop while its session runs (proxy_stop), the hook
-sends it back to waiting. Main is asked to start a proxy again while none runs, unless Claude Code refused its call for
-that session, as auto mode can (proxy_refused).
+thimble:writer, thimble:critic), which reads its instructions from proxy_file and loops on the `wait_session` tool
+until the session ends or finishes its task (finished): the tool returns the session's news (below) as one block of
+lines, which the proxy copies into its reply word for word, one reply per call, and the outbox's messages as tokens.
+Two plugin hooks keep it reliable: before a SendMessage (relay_check) the server swaps a token for its message, prefixes
+a message the analyst typed in the proxy's view, and refuses a message sent twice; when the proxy would stop while its
+session works (proxy_stop), the hook sends it back to waiting. Main is asked to start a proxy again while none runs and
+the session has not finished its task, unless Claude Code refused its call for that session, as auto mode can
+(proxy_refused). A finished session shows in the tray again once it starts another turn.
 
 The news. What the analyst would see of a subagent, read from the session's transcript in its order (_read_news, which
 keeps an offset past the last whole line it read, so no line shows twice): each reply as `<name>: <text>` (NEWS_CHARS, a
@@ -459,6 +460,13 @@ def alive(e: Entry | None) -> bool:
     return e is not None and (e.status != "stopped" or e.replacing)
 
 
+def finished(e: Entry | None) -> bool:
+    """Whether a session that runs has finished its task: Claude Code keeps a background session's process after its
+    last turn, idle, so a session listed idle with no run of thimble's following it and no message waiting for it counts
+    as finished until it starts another turn (_tick). Its tray entry ends, and main is not asked for another."""
+    return alive(e) and not e.replacing and e.status == "idle" and not e.run_open and not _pending_out(e)
+
+
 def stopped_in_claude(c: str, key: str) -> bool:
     """Whether the session's process went away because Claude Code stopped it, as with `claude stop` or the agent view,
     which the analyst does, rather than a crash."""
@@ -627,7 +635,8 @@ async def _tick(rows: list[dict[str, Any]]) -> None:
                 _news(e, f"{e.shown} waits for a {e.waiting_for or 'reply'}; answer it in the browser or with "
                          f"`claude attach {e.short}`.")
             _changed.set()
-        if not proxy_alive(e) and not e.proxy_refused and time.monotonic() - e.proxy_asked > PROXY_ASK_S:
+        if (not proxy_alive(e) and not e.proxy_refused and not finished(e)
+                and time.monotonic() - e.proxy_asked > PROXY_ASK_S):
             unshown.setdefault(e.c, []).append(e.key)
         if e.status != "idle" and not e.run_open and agent_session.current(e.c, e.key) is None:
             fn = _wake.get(kind_of(e.key))
@@ -1157,11 +1166,11 @@ def new_main(c: str) -> None:
 
 
 def proxy_ended(c: str, agent_id: str | None) -> None:
-    """A proxy's task ended: while its session runs, main is asked for a new one."""
+    """A proxy's task ended: while its session runs and has not finished its task, main is asked for a new one."""
     for e in entries(c):
         if agent_id and agent_id in e.proxy_agents and e.owner in (None, agent_id):
             e.proxy_seen, e.proxy_starting, e.owner = 0.0, 0.0, None
-            if alive(e) and not e.proxy_refused:
+            if alive(e) and not finished(e) and not e.proxy_refused:
                 log.info("%s: %s's proxy %s ended while its session runs; main is asked for another", c, e.name, agent_id)
                 ask_main_for_proxy(c, e.key)
 
@@ -1211,7 +1220,8 @@ async def wait(c: str, name: str, agent_id: str | None = None, path: Path | None
     so that the lines which come together (a call and its result) come in one answer. One answer holds the oldest
     lines up to NEWS_RETURN_CHARS (at least one); the rest wait for the next call, which returns them at once. The
     messages this proxy, or an earlier one of the session that ended, got for the session go to the outbox first
-    (_capture). A second proxy of a session whose proxy is alive is told to stop."""
+    (_capture). A second proxy of a session whose proxy is alive is told to stop, and the proxy of a session that ended
+    or finished its task is told to end once it has all the news."""
     from . import tools  # noqa: PLC0415
 
     e = by_name(c, name)
@@ -1230,7 +1240,7 @@ async def wait(c: str, name: str, agent_id: str | None = None, path: Path | None
     e.blocks = 0
     carried = bool(e.news)  # lines an earlier answer left, which go out without waiting for more
     deadline = time.monotonic() + WAIT_S
-    while alive(e) and not _closing:
+    while alive(e) and not finished(e) and not _closing:
         _read_news(e)
         if e.news or _pending_out(e):
             break
@@ -1258,6 +1268,9 @@ async def wait(c: str, name: str, agent_id: str | None = None, path: Path | None
         out.append(tools.hint("wait_session-send", session=e.name, token=item["token"]))
     if not alive(e):
         out.append(tools.hint("wait_session-ended", session=e.name))
+        return "\n\n".join(out)
+    if finished(e) and not e.news:
+        out.append(tools.hint("wait_session-finished", session=e.name))
         return "\n\n".join(out)
     if not out:
         out.append(tools.hint("wait_session-quiet", session=e.name, state=state_words(e)))
@@ -1392,8 +1405,8 @@ def _chat_line(e: Entry, text: str, by: str | None) -> None:
 
 
 def proxy_stop(c: str, agent_type: str, agent_path: Path | None, active: bool, agent_id: str | None = None) -> str | None:
-    """The SubagentStop hook of a proxy: the reason to keep it going while its session runs or a message it got waits
-    to be passed on, or None to let it stop."""
+    """The SubagentStop hook of a proxy: the reason to keep it going while its session works or has news left for it,
+    or a message it got waits to be passed on, or None to let it stop."""
     from . import tools  # noqa: PLC0415
 
     if not agent_type.startswith(f"{_plugin()}:") or agent_path is None:
@@ -1401,7 +1414,7 @@ def proxy_stop(c: str, agent_type: str, agent_path: Path | None, active: bool, a
     e = proxy_of(c, agent_id, agent_path)
     if e is None or (agent_id and e.owner and agent_id != e.owner and proxy_alive(e)):
         return None
-    if not alive(e) and not _fresh(e, agent_path):
+    if (not alive(e) or (finished(e) and not e.news)) and not _fresh(e, agent_path):
         return None
     e.blocks += 1
     if e.blocks > BLOCKS_MAX:
@@ -1420,7 +1433,7 @@ def agent_check(c: str, tool_input: dict[str, Any], tool_use_id: str | None = No
         if proxy_alive(e) or (e.proxy_starting and now - e.proxy_starting < PROXY_ASK_S):
             if tool_use_id:
                 _own_refusals.add(tool_use_id)
-            return f"{e.name} already shows in the agent tray."
+            return f"{e.name} already shows in the agent tray, so this call is not needed. End the turn with no text."
         e.proxy_starting = now
         return None
     if str(agent_type or "") != "fork":
