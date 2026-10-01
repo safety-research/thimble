@@ -1143,7 +1143,9 @@ def dress(page: dict[str, Any], path: Path, rel: str) -> dict[str, Any]:
 
 # --------------------------------------------------------------------------- speakers' names
 
-NAMES_FILE_MAX = 8 * 1024 * 1024  # bytes of a file read for the names it gives ids
+NAMES_FILE_MAX = 8 * 1024 * 1024  # bytes of a file named for the speakers (agents.jsonl) read for their names
+NAMES_OTHER_MAX = 1024 * 1024  # bytes of any other file read for them
+NAMES_FILES = 16  # files of each kind, per folder, read for them
 NAMES_SCAN_MAX = 2000  # entries of a folder looked at for such files
 NAMES_PER_FILE = 100_000  # ids one file's names are kept for
 NAMES_IDS_MAX = 200  # ids one request asks names for
@@ -1230,15 +1232,19 @@ def _id_names(path: Path) -> dict[str, str]:
     return out
 
 
-def _name_files(corpus: Path, rel: str) -> list[Path]:
-    """The small JSON lines, JSON and CSV files beside the file `rel` and at the corpus's top, inside the corpus."""
+def _name_files(corpus: Path, rel: str, words: set[str]) -> tuple[list[Path], list[Path]]:
+    """The JSON lines, JSON and CSV files beside the file `rel` and at the corpus's top, inside the corpus, that may
+    name its speakers: (those named for what one of `words` names, the others of at most NAMES_OTHER_MAX bytes), up to
+    NAMES_FILES of each, by name."""
     folder = rel.rsplit("/", 1)[0] if "/" in rel else ""
-    out: list[Path] = []
+    related: list[Path] = []
+    others: list[Path] = []
     for sub in dict.fromkeys([folder, ""]):
+        names: list[str] = []
+        room = {True: NAMES_FILES, False: NAMES_FILES}
         try:
             base = config.safe_corpus_path(corpus, sub) if sub else corpus
             with os.scandir(base) as it:
-                names = []
                 for i, e in enumerate(it):
                     if i >= NAMES_SCAN_MAX:
                         break
@@ -1247,13 +1253,19 @@ def _name_files(corpus: Path, rel: str) -> list[Path]:
         except (OSError, ValueError):
             continue
         for name in sorted(names):
+            stem = _split_key(os.path.splitext(name)[0])
+            mine = bool(stem) and _singular(stem[-1]) in words
+            if not room[mine]:
+                continue
             try:
                 p = config.safe_corpus_path(corpus, f"{sub}/{name}".lstrip("/"))
-            except ValueError:
+                size = p.stat().st_size if p.is_file() else -1
+            except (OSError, ValueError):
                 continue
-            if p.is_file():
-                out.append(p)
-    return out
+            if 0 <= size <= (NAMES_FILE_MAX if mine else NAMES_OTHER_MAX):
+                (related if mine else others).append(p)
+                room[mine] -= 1
+    return related, others
 
 
 def speaker_names(corpus: Path, rel: str, key: str, ids: list[str]) -> dict[str, str]:
@@ -1262,9 +1274,7 @@ def speaker_names(corpus: Path, rel: str, key: str, ids: list[str]) -> dict[str,
     what a word of the key names (agents.jsonl for `agent_speaker_id`, not agent_goals.jsonl) answers for any id, any
     other file only for a distinct id (DISTINCT_ID), since a small number or a short word is an id in many tables."""
     words = {_singular(w) for alt in key.split("|") for w in _key_words(alt.rsplit(".", 1)[-1])} - GENERIC_KEY_WORDS
-    files = _name_files(corpus, rel)
-    related = [p for p in files if _split_key(p.stem) and _singular(_split_key(p.stem)[-1]) in words]
-    others = [p for p in files if p not in related]
+    related, others = _name_files(corpus, rel, words)
     out: dict[str, str] = {}
     for ident in ids:
         for p in related + (others if DISTINCT_ID.fullmatch(ident) else []):
