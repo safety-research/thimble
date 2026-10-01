@@ -47,8 +47,9 @@
 //   state {id}             page to frame, answered by state {id, state}: what the analyst is looking at, before a newer
 //                          version of the view is loaded in its place: {ref, scroll, fields, segs} (pageState)
 //   restore {state}        page to frame: that state put back in the newer version's page, as far as it fits (restore)
-// An anchored element with data-anchor-unmarked carries its marks' labels but no bar, where the page draws the labels'
-// colours on it itself, such as a lane whose marks carry them; a ⌘-click on it still asks about its ref.
+// An anchored element with data-anchor-unmarked takes no mark, where the page draws the labels' colours on it itself,
+// such as a lane whose marks carry them, so the checks never count it as a mark drawn; a ⌘-click on it still asks about
+// its ref.
 // The text of an element marked data-thimble-chrome inside an anchored element is the page's own wording, such as a
 // record's header, which a label's matches never highlight. An element with data-field="<name>" names a field; when the
 // view lists that field as derived (window.__thimbleView.derived) it gets data-derived, which thimble's parts draw as a
@@ -567,14 +568,10 @@
         var el = els[j]
         var ref = el.getAttribute('data-anchor')
         var m = marks[ref]
-        if (!m || el.tagName === 'CANVAS' || typeof m.bar !== 'string' || !COLOUR.test(m.bar)) continue
+        if (!m || el.tagName === 'CANVAS' || el.hasAttribute('data-anchor-unmarked') || typeof m.bar !== 'string' || !COLOUR.test(m.bar)) continue
         var inner = false
         for (var a = el.parentElement; a && !inner; a = a.parentElement) inner = a.getAttribute('data-anchor') === ref
         if (inner) continue
-        if (el.hasAttribute('data-anchor-unmarked')) {
-          todo.push([el, m, 'none', null])
-          continue
-        }
         if (el instanceof SVGElement) {
           todo.push([el, m, 'svg', null])
           continue
