@@ -190,6 +190,21 @@ def test_the_new_layout_gives_roles_tasks_subagents_and_report_types(tmp_path, c
     assert row["consent"] == "orientation and critic: no network, web asks first, corpus read-only. reader: no network, no web."
 
 
+def test_files_in_a_prompt_lists_the_extension_s_scope_where_it_matches(tmp_path, corpus):
+    """An extension that gives only orientation instructions fills {{files}} with its own scope where it matches files,
+    rather than "(none)"."""
+    root = tmp_path / "notes"
+    _write(root, "extension.json", {"name": "notes", "version": "1", "scope": ["notes.jsonl", "nowhere/*.csv"]})
+    _write(root, "agents/orientation/agent.json", {"description": "Counts notes.", "prompt": "prompt.md"})
+    _write(root, "agents/orientation/prompt.md", "Count the notes in {{files}}.")
+    assert extensions.add(str(root), yes=True, say=lambda _: None) == ["notes"]
+    await_refresh(corpus)
+    assert extensions.orient_blocks(corpus)["added"] == [("notes", "Count the notes in `notes.jsonl`, `nowhere/*.csv`.")]
+    _write(root, "extension.json", {"name": "notes", "version": "1", "scope": ["nowhere/*.csv"]})
+    await_refresh(corpus)
+    assert extensions.orient_blocks(corpus)["added"] == [("notes", "Count the notes in (none).")]
+
+
 def await_refresh(c: str) -> None:
     import asyncio
 

@@ -73,7 +73,7 @@ extension cannot set them.
 ```
 
 Prompts can use `{{default}}` or `{{default#<heading>}}` (thimble's own prompt, or one section of it), `{{dir}}` (the
-extension's folder, read-only) and `{{files}}` (the files its views and card types cover in the workspace).
+extension's folder, read-only) and `{{files}}` (the files its scope, views and card types cover in the workspace).
 
 Switching on an extension that adds to the orientation, in a workspace where the orientation already ran, makes
 Settings ask whether to run it there now.

@@ -18,8 +18,8 @@ with its file and line. The folder:
   agents/<role>/      agent.json for one of the five roles (extension_manifest.ROLES), by a prompt, an Agent SDK program
                       or a command (_roles). The orientation's prompt adds to its instructions, or takes their place
                       with `replace`, and its `subagents` join the orientation's session with --agents (agent_definitions).
-                      `{{files}}` in it stands for the files its views and card types, and those of the extensions it
-                      needs, claim here, and `{{dir}}` for its copy in the workspace. agents/<name>.md is read as a
+                      `{{files}}` in it stands for the files its scope, views and card types, and those of the
+                      extensions it needs, claim here, and `{{dir}}` for its copy in the workspace. agents/<name>.md is read as a
                       subagent of the orientation, and agents/orient.md, or orient.md beside extension.json, as an
                       addition to its instructions, or in their place with `replace: true` in its frontmatter
   tasks/<task>/       task.json for one of the seven tasks (extension_manifest.TASKS), defined the same three ways
@@ -717,8 +717,9 @@ def _note(fit: dict[str, Any]) -> str:
 
 def _settle_views(name: str, e: dict[str, Any], shown: dict[str, bool], clash: dict[str, dict[str, list[str]]]) -> None:
     """Each view of extension `name` marked `shown` (active, its files here, no other extension giving it, and fitting
-    or switched on here) with the `note` Settings shows; then `files`, the claims of the views it shows and of its card
-    types whose claims match files here, which `{{files}}` in its orientation instructions stands for."""
+    or switched on here) with the `note` Settings shows; then `files`, the claims of the views it shows, of its card
+    types whose claims match files here and its own scope where it matches files here, which `{{files}}` in its
+    orientation instructions stands for."""
     files: list[str] = []
     for v in _list(e, "views"):
         fit = v.get("fit") or {}
@@ -731,6 +732,8 @@ def _settle_views(name: str, e: dict[str, Any], shown: dict[str, bool], clash: d
     for t in _list(e, "cards"):
         if e.get("active") and t.get("here") and t["slug"] not in clash["card"]:
             files += t.get("claims") or []
+    if e.get("active") and e.get("scope_here"):
+        files += _words(e.get("scope"))
     e["files"] = list(dict.fromkeys(files))
 
 
@@ -834,6 +837,8 @@ async def _refresh(c: str) -> dict[str, Any]:
                     for t in info["cards"]:
                         t["here"] = bool(t["claims"]) and bool(
                             await asyncio.to_thread(views.claimed_files, c, {"claims": t["claims"]}))
+                    info["scope_here"] = bool(info["scope"]) and bool(
+                        await asyncio.to_thread(views.claimed_files, c, {"claims": info["scope"]}))
             if why:
                 for v in info["views"]:
                     fit = (before.get(v["slug"]) or {}).get("fit") or {}

@@ -39,7 +39,7 @@
         "name": {"$ref": "#/$defs/name", "description": "The extension's name, the same as its folder's."},
         "version": {"type": "string", "minLength": 1},
         "description": {"type": "string", "description": "What it adds, in a sentence or two. Settings and `thimble extension add` show it."},
-        "scope": {"$ref": "#/$defs/globs", "description": "The files it is about. A view or card type that sets no scope of its own uses these."},
+        "scope": {"$ref": "#/$defs/globs", "description": "The files it is about. A view or card type that sets no scope of its own uses these, and {{files}} in its prompts lists them where they match files."},
         "thimble": {"type": "string", "description": "The thimble versions it works with, as package.json's engines writes them, such as \">=0.4\"."},
         "python": {"$ref": "#/$defs/strings", "description": "Python packages its code needs, as pip reads them. thimble does not install them; the extension waits until they import."},
         "needs": {"$ref": "#/$defs/names", "description": "Other extensions it needs. One that thimble ships is added with it."},
