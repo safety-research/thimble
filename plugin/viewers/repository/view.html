@@ -49,7 +49,6 @@
   .cbtn .ico { color: var(--text-tertiary); }
   .cbtn .sws { display: inline-flex; gap: 2px; }
   .cbtn .cnm { max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .cbtn .cnm[data-derived] { overflow: visible; } /* a field's name is short, and its derived mark sits above the line */
   .lg { display: inline-flex; align-items: center; gap: 5px; height: 22px; padding: 0 6px 0 4px; border-radius: var(--radius-chip); white-space: nowrap; cursor: pointer; }
   .lg:hover { background: var(--surface-hover); color: var(--text-primary); }
   .lg.st { cursor: default; }
@@ -365,11 +364,7 @@
     discussions: ['action', 'actor', 'run'], agents: ['action', 'actor', 'run'] }
   const FIELD_NAMES = { action: 'Activity', actor: 'Participant', author: 'Author', reviewer: 'Reviewer', verdict: 'Review', run: 'Run',
     state: 'State', area: 'Area', reason: 'Close reason', origin: 'Origin', flag: 'Flag' }
-  const derivedName = (f) => (f === 'flag' ? 'flags' : f) // the name reader.py's derived list gives a field
   const CAT = ['--viz-1', '--viz-2', '--viz-3', '--viz-4', '--viz-5', '--viz-6', '--viz-7']
-  // the derived field each sort orders by
-  const SORT_FIELDS = { 'longest to merge': 'to_merge', 'quickest first review': 'first_review', 'most reviews': 'reviews',
-    'most commits': 'commits', 'longest to fix': 'ended', 'most comments': 'comments', 'most posts': 'posts' }
   const AGENT_COLS = [['opened', 'Opened'], ['merged', 'Merged'], ['merges', 'Merges done'], ['approved', 'Approvals'], ['changes', 'Changes req.'], ['comments', 'Comments'], ['posts', 'Posts']]
 
   // what the analyst chose; every change refetches the tab. `filters` holds each filter's chosen values, `colour` the

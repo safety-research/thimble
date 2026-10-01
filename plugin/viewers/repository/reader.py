@@ -1,6 +1,6 @@
 # Repository: a code forge's log of several agent runs on one library, read the way its GitHub pages read.
 #
-# The data: one folder per run, runs/<run>/, which the claims runs/*.json, runs/*.jsonl and runs/*.csv match. Each run
+# The data: one folder per run, runs/<run>/, which the scope runs/*.json, runs/*.jsonl and runs/*.csv matches. Each run
 # is a team of agents working the same backlog of one library, so issue #3 of one run is issue #3 of another, and runs
 # compare issue by issue. The files and their fields:
 #   manifest.json        the run's setup, whose keys changed between runs: its id (`run` or `id`), its start (`started`
@@ -40,7 +40,7 @@
 #     and problems() lists them for thimble to show. So does it list an event of a type it does not know, a record
 #     about a number no pull request or issue of the run opens, a record with no time when no line before it has one,
 #     and a time it cannot read, whose record takes the time of the line before it.
-#   - A claimed file whose place in a run's folder is none of the above is left out, and hidden() says why.
+#   - A file in scope whose place in a run's folder is none of the above is left out, and hidden() says why.
 #   - A cell of an export table may run over several lines inside its quotes; its row cites its first line.
 #   - r4's manifest lists an agent that left no transcript: a run's agents are the manifest's and the transcripts', and
 #     one without a transcript has no note.
@@ -1107,6 +1107,6 @@ def problems(index):
 
 
 def hidden(index):
-    """The claimed files the reader leaves out, each {path, why}: a file whose place in a run's folder it does not know."""
+    """The files in scope the reader leaves out, each {path, why}: a file whose place in a run's folder it does not know."""
     return [{"path": p, "why": "not a file of a run's folder that the reader knows: manifest.json, events.jsonl, "
                                "board.jsonl, agents/<name>.jsonl or an export/ table"} for p in index.get("unknown", [])]
