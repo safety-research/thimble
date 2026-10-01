@@ -74,7 +74,7 @@
       "properties": {
         "name": {"type": "string", "minLength": 1},
         "type": {"enum": ["text", "category", "number", "time", "ref", "list"]},
-        "derived": {"enum": ["cleaned", "computed"], "description": "cleaned: the file's value renamed, parsed or put in UTC. computed: a value the files do not hold."},
+        "derived": {"enum": ["cleaned", "computed"], "description": "cleaned: the file's value parsed, normalised or put in UTC. computed: a value the files do not hold."},
         "from": {"type": "string", "description": "What a derived field comes from."},
         "how": {"type": "string", "description": "How a derived field is made."}
       },
