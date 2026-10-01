@@ -13,6 +13,8 @@ import sys
 from pathlib import Path
 
 import pytest
+from fastapi import HTTPException
+from starlette.requests import Request
 
 from app import config, extensions, ledger, views
 from app.kernel_thimble import CARD_TYPES_FILE
@@ -86,10 +88,10 @@ def test_a_view_built_for_a_workspace_is_its_local_extension_and_no_other_worksp
     assert not (ws / "views" / "posts").exists()
     assert views.list_proposals(CORPUS)[0]["status"] == "built"
     assert views.local_extension(CORPUS) == {"name": CORPUS, "views": [{"slug": "posts", "name": "Posts",
-                                                                        "file_viewer": False}]}
+                                                                        "file_viewer": False, "on": True}]}
     assert views.read_built(OTHER, "posts") is None and views.local_extension(OTHER)["views"] == []
     got = asyncio.run(extensions.list_route(CORPUS))
-    assert got["local"]["views"] == [{"slug": "posts", "name": "Posts", "file_viewer": False}]
+    assert got["local"]["views"] == [{"slug": "posts", "name": "Posts", "file_viewer": False, "on": True}]
 
 
 def test_a_view_an_extension_installed_is_not_the_workspace_s_own(corpora, tmp_path):
@@ -116,7 +118,8 @@ def test_unit_places_a_view_in_the_file_browser_or_the_views_bar(corpora):
     _write(CORPUS, "posts", unit="file")
     v = views.read_built(CORPUS, "posts")
     assert v["unit"] == "file" and views._public(v, CORPUS)["file_type"]
-    assert views.local_extension(CORPUS)["views"] == [{"slug": "posts", "name": "Posts", "file_viewer": True}]
+    assert views.local_extension(CORPUS)["views"] == [{"slug": "posts", "name": "Posts", "file_viewer": True,
+                                                       "on": True}]
 
 
 def test_an_older_workspace_s_views_move_into_its_local_extension_once(corpora):
@@ -211,3 +214,30 @@ def test_a_first_build_a_restart_cut_off_in_a_moved_folder_starts_a_new_session(
     assert "session_id" not in kept["drafting"] and "session" not in kept["drafting"]
     assert kept["posts"]["session_id"] == "id-posts" and kept["changing"]["session_id"] == "id-changing"
     assert [p["slug"] for p in kept.values()] == ["drafting", "posts", "changing"]
+
+
+def test_a_view_built_for_a_workspace_switches_off_and_on_in_settings_from_the_analyst_s_browser_only(corpora, analyst):
+    """Off, a view built for the workspace leaves the views list, and so the views bar, the File browser and the
+    prompts, with its files and its proposal kept; on, it is back. Only the analyst's browser turns the switch, and only
+    for a view built for the workspace."""
+    _propose(CORPUS)
+    _write(CORPUS, accepts=[{"form": "L<n>", "means": "one post"}])
+    assert "one post" in views.forms_text(CORPUS)
+    stranger = Request({"type": "http", "headers": []})
+    with pytest.raises(HTTPException) as e:
+        asyncio.run(views.view_on_route(CORPUS, "posts", views.OnBody(on=False), stranger))
+    assert e.value.status_code == 403 and views.views_off(CORPUS) == set()
+
+    got = asyncio.run(views.view_on_route(CORPUS, "posts", views.OnBody(on=False), analyst))
+    assert got["views"] == [{"slug": "posts", "name": "Posts", "file_viewer": False, "on": False}]
+    assert [v["slug"] for v in views.list_views(CORPUS) if v["origin"] == "workspace"] == []
+    assert views.views_for(CORPUS, "board.jsonl") == [] and "one post" not in views.forms_text(CORPUS)
+    assert views.read_built(CORPUS, "posts") is not None and views.list_proposals(CORPUS)[0]["status"] == "built"
+    assert views.read_built(OTHER, "posts") is None and views.views_off(OTHER) == set()
+
+    asyncio.run(views.view_on_route(CORPUS, "posts", views.OnBody(on=True), analyst))
+    assert [v["slug"] for v in views.list_views(CORPUS) if v["origin"] == "workspace"] == ["posts"]
+    assert "one post" in views.forms_text(CORPUS)
+    with pytest.raises(HTTPException) as e:
+        asyncio.run(views.view_on_route(CORPUS, "pdf", views.OnBody(on=False), analyst))
+    assert e.value.status_code == 404

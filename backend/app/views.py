@@ -63,6 +63,7 @@ LOCAL_VERSION = "local"
 CACHE_SUBDIR = "cache"  # in a view's folder: its check pictures, which an extension's copy leaves out
 PROPOSALS_FILE = "proposals.json"
 DELETED_FILE = "deleted.json"  # the proposals the analyst deleted, [{slug, name, counted, ts}] (delete_proposal)
+OFF_FILE = "off.json"  # the workspace's own views switched off in Settings, [slug] (set_view_on)
 KEY_REFS_FILE = "key-refs.json"  # view:<slug>/<key> -> {refs, excerpt, label, name}, kept past the view's deletion
 # under the workspace, beside the views folder, which a kernel may only read (kernel_wrap.READ_ONLY_DIRS): each view's
 # index as the views kernel pickled it and the bytes build_index read of each claimed file, by fingerprint, and the
@@ -526,9 +527,10 @@ def _as_built(c: str, slug: str, live: dict[str, Any]) -> dict[str, Any] | None:
 
 
 def list_views(c: str) -> list[dict[str, Any]]:
-    """The workspace's views as read_built reads them, the views of held proposals left out (held_slugs), then the
-    built-in viewers they do not override. A draft does not override a built-in viewer of its slug."""
-    held = held_slugs(c)
+    """The workspace's views as read_built reads them, the views of held proposals (held_slugs) and those switched off
+    in Settings (views_off) left out, then the built-in viewers they do not override. A draft does not override a
+    built-in viewer of its slug."""
+    held = held_slugs(c) | views_off(c)
     mine = [v for v in _own_views(c) if v["slug"] not in held]
     have = {v["slug"] for v in mine}
     return [*mine, *(v for s in BUILTIN_VIEWERS if s not in have and (v := read_builtin(s)) is not None)]
@@ -542,20 +544,43 @@ def _own_views(c: str) -> list[dict[str, Any]]:
 
 def local_extension(c: str) -> dict[str, Any]:
     """Settings' entry for the workspace's local extension: its name and the views built for this workspace, each by the
-    name the views bar gives it (its proposal's) with whether it is a file viewer (file_type_viewer), which opens in the
-    File browser. A view an extension or thimble installed here (its proposal's `installed`) is left out, and so is a
-    held one (list_views)."""
+    name the views bar gives it (its proposal's), with whether it is a file viewer (file_type_viewer), which opens in
+    the File browser, and whether it is on (views_off). A view an extension or thimble installed here (its proposal's
+    `installed`) is left out, and so is a held one (held_slugs)."""
     props = {p["slug"]: p for p in list_proposals(c)}
+    held, off = held_slugs(c), views_off(c)
     vs = [{"slug": v["slug"], "name": str((props.get(v["slug"]) or {}).get("name") or v["name"]),
-           "file_viewer": file_type_viewer(v)}
-          for v in list_views(c)
-          if v["origin"] == "workspace" and v["ok"] and not (props.get(v["slug"]) or {}).get("installed")]
+           "file_viewer": file_type_viewer(v), "on": v["slug"] not in off}
+          for v in _own_views(c)
+          if v["ok"] and v["slug"] not in held and not (props.get(v["slug"]) or {}).get("installed")]
     try:
         raw = json.loads((local_dir(c) / LOCAL_MANIFEST).read_text("utf-8"))
     except (OSError, ValueError):
         raw = {}
     name = raw.get("name") if isinstance(raw, dict) and isinstance(raw.get("name"), str) else ""
     return {"name": " ".join(name.split()) or local_name(c), "views": vs}
+
+
+def views_off(c: str) -> set[str]:
+    """The slugs of the workspace's own views switched off in Settings (set_view_on)."""
+    p = state_dir(c) / OFF_FILE
+    try:
+        raw = read_json(p, []) if p.is_file() and not p.is_symlink() else []
+    except (OSError, ValueError):
+        return set()
+    return {x for x in raw if isinstance(x, str)} if isinstance(raw, list) else set()
+
+
+def set_view_on(c: str, slug: str, on: bool) -> None:
+    """Settings' switch of a view built for this workspace (local_extension): off, it leaves the views bar, the File
+    browser and the agents' prompts, its files and proposal kept; on, it is back. 404 for any other view."""
+    if slug not in {v["slug"] for v in local_extension(c)["views"]}:
+        raise HTTPException(404, f"no view {slug!r} was built for this workspace")
+    with _proposals_lock:
+        off = (views_off(c) - {slug}) | (set() if on else {slug})
+        state_dir(c).mkdir(parents=True, exist_ok=True)
+        write_json(state_dir(c) / OFF_FILE, sorted(off))
+    _emit(c, slug, "built")
 
 
 def held_slugs(c: str) -> set[str]:
@@ -3394,6 +3419,24 @@ async def list_views_route(c: str, path: str | None = None) -> list[dict[str, An
     if path is None:
         return await asyncio.to_thread(lambda: [_public(v, c) for v in list_views(c)])
     return [_public(v) for v in views_for(c, path.strip().strip("/"))]
+
+
+class OnBody(BaseModel):
+    on: bool
+
+
+@router.put("/ws/{c}/views/{slug}/on")
+async def view_on_route(c: str, slug: str, body: OnBody, request: Request) -> dict[str, Any]:
+    """Settings' switch of a view built for this workspace (set_view_on), which only the analyst's browser may turn.
+    Returns the workspace's local extension."""
+    from . import hook_auth  # noqa: PLC0415
+
+    config.workspace_dir(c)
+    if not hook_auth.analyst(request):
+        raise HTTPException(403, hook_auth.ANALYST_ONLY)
+    _bind_loop()
+    await asyncio.to_thread(set_view_on, c, slug, body.on)
+    return await asyncio.to_thread(local_extension, c)
 
 
 @router.get("/ws/{c}/views/{slug}")

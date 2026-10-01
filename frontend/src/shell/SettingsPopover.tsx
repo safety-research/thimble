@@ -18,7 +18,7 @@ import { Spinner } from '../components/Spinner'
 import { Switch } from '../components/Switch'
 import { useTooltip } from '../components/Tooltip'
 import { api } from '../lib/api'
-import { ExtensionsSettings, changedExtensions, changedViews, viewKey } from './ExtensionsSettings'
+import { ExtensionsSettings, changedExtensions, changedLocalViews, changedViews, viewKey } from './ExtensionsSettings'
 import { hasFastMode, invalidateSettings, loadSettings, modelChoices, modelLabel, sameModel } from '../lib/models'
 import { EFFORTS, ROLES, type Attached, type Extensions, type MainEffort, type ModeAgent, type ModelConf, type OrientPermissions, type Settings } from '../lib/types'
 import { bus } from '../lib/bus'
@@ -155,6 +155,7 @@ export function SettingsPopover({ ws, anchor, open, onClose }: { ws: string; anc
   const [exts, setExts] = useState<Extensions | null>(null)
   const [extOn, setExtOn] = useState<Record<string, boolean>>({})
   const [viewOn, setViewOn] = useState<Record<string, boolean>>({})
+  const [localOn, setLocalOn] = useState<Record<string, boolean>>({})
 
   useEffect(() => {
     if (!open) return
@@ -167,6 +168,7 @@ export function SettingsPopover({ ws, anchor, open, onClose }: { ws: string; anc
         setExts(ex)
         setExtOn(Object.fromEntries((ex?.extensions ?? []).map((e) => [e.name, e.on])))
         setViewOn(Object.fromEntries((ex?.extensions ?? []).flatMap((e) => (e.views ?? []).map((v) => [viewKey(e.name, v.slug), v.on]))))
+        setLocalOn(Object.fromEntries((ex?.local?.views ?? []).map((v) => [v.slug, v.on])))
         const a = main?.meta?.attached ?? null
         setSettings(s)
         setSwitches(Object.fromEntries(SWITCHES.map((sw) => [sw.key, s[sw.key] === true])))
@@ -194,6 +196,7 @@ export function SettingsPopover({ ws, anchor, open, onClose }: { ws: string; anc
         await api.putSettings(ws, { ...(Object.keys(changed).length ? { models: changed } : {}), ...(Object.keys(modes).length ? { permission_modes: modes } : {}), ...flipped })
       for (const [name, on] of Object.entries(changedExtensions(exts?.extensions ?? [], extOn))) await api.switchExtension(ws, name, on)
       for (const [name, slug, on] of changedViews(exts?.extensions ?? [], viewOn)) await api.switchExtensionView(ws, name, slug, on)
+      for (const [slug, on] of changedLocalViews(exts?.local?.views ?? [], localOn)) await api.switchLocalView(ws, slug, on)
       const was = { effort: mainEffort(attached), fast: !!mainFast(attached) }
       const main = models.main
       const effortNow = !!main && !!attached && main.effort !== was.effort
@@ -358,6 +361,8 @@ export function SettingsPopover({ ws, anchor, open, onClose }: { ws: string; anc
             setOn={(name, v) => setExtOn((cur) => ({ ...cur, [name]: v }))}
             viewOn={viewOn}
             setViewOn={(key, v) => setViewOn((cur) => ({ ...cur, [key]: v }))}
+            localOn={localOn}
+            setLocalOn={(slug, v) => setLocalOn((cur) => ({ ...cur, [slug]: v }))}
           />
         )}
         {(error || settings?.config_error) && <div className="settings-error">{error || settings?.config_error}</div>}

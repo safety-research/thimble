@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { changedExtensions, changedViews } from '../../src/shell/ExtensionsSettings'
+import { changedExtensions, changedLocalViews, changedViews } from '../../src/shell/ExtensionsSettings'
 
 const view = { name: 'Tally', shown: true, note: '', locked: false }
 const row = { version: '', active: true, why: '', note: '', locked: false }
@@ -17,5 +17,15 @@ describe('changedExtensions', () => {
 describe('changedViews', () => {
   it('sends only the view switches that moved, by extension and view', () => {
     expect(changedViews(loaded, { 'a/tally': true, 'b/tally': true })).toEqual([['b', 'tally', true]])
+  })
+})
+
+describe('changedLocalViews', () => {
+  it("sends only the switches of the workspace's own views that moved", () => {
+    const local = [
+      { slug: 'timeline', name: 'Timeline', file_viewer: false, on: true },
+      { slug: 'pages', name: 'Pages', file_viewer: true, on: false },
+    ]
+    expect(changedLocalViews(local, { timeline: false, pages: false })).toEqual([['timeline', false]])
   })
 })

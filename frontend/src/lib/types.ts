@@ -1004,6 +1004,8 @@ export interface LocalViewRow {
   name: string
   /** a file viewer, which opens in the File browser */
   file_viewer: boolean
+  /** its switch in Settings: off, it leaves the views bar and the File browser */
+  on: boolean
 }
 
 /** The workspace's local extension: the views built for this workspace, which no other workspace shows. */
