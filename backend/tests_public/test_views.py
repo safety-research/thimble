@@ -395,7 +395,8 @@ async def test_a_field_whose_values_the_cited_lines_do_not_hold_fails_the_checks
     assert rep["ok"], views.gate_lines(rep)
     assert [d["field"] for d in rep["coverage"]["derived"]] == ["score", "flagged", "topics", "author"]
     assert [d["kind"] for d in rep["coverage"]["derived"]] == ["inferred"] * 3 + [""]
-    assert views._exempt("files", 3) and views._exempt("n_calls", 2), "a count needs no entry"
+    assert views._exempt("files", 3) and views._exempt("n_calls", 2) and views._exempt("call count", 18), \
+        "a count needs no entry"
     assert not views._exempt("ts", 1781741180000) and not views._exempt("status", 200), "a short or singular name is no count"
 
 

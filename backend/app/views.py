@@ -3659,7 +3659,8 @@ DERIVED_NAMED = 40  # unlisted fields a note names
 _POSITION_KEYS = {"ref", "refs", "line", "lines", "path", "file", "key", "anchor", "offset", "index", "idx", "n", "id",
                   "uid", "row", "pos", "position", "order", "rank", "i", "k", "seq"}
 _KEY_SUFFIXES = ("_key", "_idx", "_index", "_pos", "_row", "_order", "_rank")
-_COUNT_NAME = re.compile(r"(^|_)(n|num|count|counts|total|totals|size|len|length)(_|$)|^n[A-Z]|Count$|^(num|count)[A-Z]")
+_COUNT_NAME = re.compile(r"(^|[_\s-])(n|num|count|counts|total|totals|size|len|length)([_\s-]|$)"
+                         r"|^n[A-Z]|Count$|^(num|count)[A-Z]")
 # values a reader puts in for a missing one
 _DEFAULTS = {"", "-", "?", "—", "unknown", "none", "null", "n/a", "na", "other", "missing", "(none)", "(unknown)"}
 
