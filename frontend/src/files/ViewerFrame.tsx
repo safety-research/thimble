@@ -481,7 +481,7 @@ export function ViewerFrame({ ws, slug, targetRef, path, pathPicked, title, fit,
           // the click that asked for it landed in the frame's document, which the shell does not see
           if (typeof d.ref !== 'string' || !d.ref) return
           notePress(frame)
-          teleport(d.ref)
+          teleport(d.ref, { browser: d.browser === true })
           return
         case P + 'error':
           report.current?.(String(d.message ?? 'the view failed'))

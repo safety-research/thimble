@@ -707,7 +707,7 @@ document.getElementById('tb').addEventListener('click', (ev) => {
   const go = ev.target.closest('[data-go]')
   if (go) return pick(+go.dataset.go, true)
   const fc = ev.target.closest('[data-file]')
-  if (fc) return thimble.navigate(fc.dataset.file)
+  if (fc) return thimble.navigate(fc.dataset.file, { browser: true })
   const rw = ev.target.closest('[data-raw]')
   if (rw) { S.raw = rw.dataset.raw === '1'; return renderList() }
   if (ev.target.closest('tr.det')) return
