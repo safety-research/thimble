@@ -1223,13 +1223,14 @@ finish() {  # doctor, then the one next step (and the PATH line the link needs)
     fi
   fi
   if [ "$cli_linked" = 1 ]; then
+    local shown_bin="${bin_dir/#$HOME/\~}"
     if path_has_local_bin; then
-      say "thimble on PATH: ~/.local/bin/thimble"
+      say "thimble on PATH: $shown_bin/thimble"
       cmd=thimble
     else
       case "${SHELL:-}" in */zsh) rc='~/.zshrc';; */bash) rc='~/.bashrc';; *) rc="your shell's startup file";; esac
-      say "~/.local/bin is not on your PATH, so typing thimble will not work yet. Add this line to $rc and open a new terminal:"
-      say '  export PATH="$HOME/.local/bin:$PATH"'
+      say "$shown_bin is not on your PATH, so typing thimble will not work yet. Add this line to $rc and open a new terminal:"
+      say "  export PATH=\"${bin_dir/#$HOME/\$HOME}:\$PATH\""
     fi
   fi
   if [ "$custom_home" = 1 ]; then
