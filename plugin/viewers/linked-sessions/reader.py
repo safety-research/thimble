@@ -451,15 +451,19 @@ def _key(label, value):
 
 class Selection:
     """The page's selection over the index: `filters` {field: [hidden values]}, `search` (words a call's or a message's
-    text holds), `hide`, the label values whose calls are hidden (`label\\nvalue`, or "none" for the calls no label
-    that is on marks), and `win`, the time window the counts keep to. Each call's marks and the label filter's verdict
-    on it are looked up once."""
+    text holds), `range` [from, to], the seconds a call took, `files`, words a path the call touched holds, `hide`, the
+    label values whose calls are hidden (`label\\nvalue`, or "none" for the calls no label that is on marks), and
+    `win`, the time window the counts keep to. Each call's marks and the label filter's verdict on it are looked up
+    once."""
 
     def __init__(self, index, query):
         q = query or {}
         self.index = index
         self.hidden = {f: set(v or []) for f, v in (q.get("filters") or {}).items() if f in FIELDS and v}
         self.search = str(q.get("search") or "").strip().lower()
+        rng = q.get("range")
+        self.range = (float(rng[0]), float(rng[1])) if isinstance(rng, list) and len(rng) == 2 else None
+        self.files = str(q.get("files") or "").strip().lower()
         self.hide = set(q.get("hide") or [])
         win = q.get("win")
         self.win = (float(win[0]), float(win[1])) if isinstance(win, list) and len(win) == 2 else None
@@ -472,10 +476,15 @@ class Selection:
             self.kept[c["i"]] = thimble.kept_unit(c["refs"])
 
     def fields(self, c, but=None):
-        """Whether a call passes the field filters, all or all but the field `but`, and the search."""
+        """Whether a call passes the field filters, all or all but the field `but`, the search, the range of seconds and
+        the paths."""
         for f, hid in self.hidden.items():
             if f != but and _value(self.index, c, f) in hid:
                 return False
+        if self.range and not self.range[0] <= c["d"] <= self.range[1]:
+            return False
+        if self.files and not any(self.files in p.lower() for p in c["files"]):
+            return False
         return not self.search or self.search in c["words"]
 
     def labelled(self, c):
@@ -604,7 +613,7 @@ def _session(index, query):
             continue
         r = _call(ix, c)
         again = next((ix["calls"][j] for j in s["calls"][k + 1:] if ix["calls"][j]["tool"] == c["tool"] == "Bash" and ix["calls"][j]["input"] == c["input"]), None)
-        items.append({"kind": "call", "ref": c["ref"], "t": c["t"], "d": c["d"], "tool": c["tool"], "out": c["out"], "k": k + 1,
+        items.append({"kind": "call", "ref": c["ref"], "refs": c["refs"], "t": c["t"], "d": c["d"], "tool": c["tool"], "out": c["out"], "k": k + 1,
                       "input": r["input"], "result": r["result"], "exit": r["exit"],
                       "files": c["files"], "matches": r["matches"], "old": r["old"], "new": r["new"],
                       "output": r["output"], "child": c["child"], "m": sel.marks.get(c["i"], []),
@@ -704,9 +713,29 @@ def _compare(index, query):
     return {"groups": groups, "classes": sel.classes, "tools": ix["values"]["tool"]}
 
 
+RAW_LINES, RAW_CHARS = 4, 6000
+
+
+def _raw(index, query):
+    """The lines a call or a message stands for, as the transcript holds them: [{ref, text}] for the refs asked."""
+    out = []
+    for ref in [r for r in query.get("refs") or [] if isinstance(r, str)][:RAW_LINES]:
+        path, _, frag = ref.partition("#L")
+        offs = index["offsets"].get(path)
+        if not offs or not frag.isdigit() or not 0 < int(frag) <= len(offs):
+            continue
+        with open(path, "rb") as fh:
+            fh.seek(offs[int(frag) - 1])
+            text = fh.readline().decode("utf-8", "replace").rstrip("\r\n")
+        out.append({"ref": ref, "text": text if len(text) <= RAW_CHARS else text[:RAW_CHARS] + "…"})
+    return out
+
+
 def records(index, query):
     q = query or {}
     op = q.get("op", "overview")
+    if op == "raw":
+        return _raw(index, q)
     if op == "session":
         return _session(index, q)
     if op == "moment":
