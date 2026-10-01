@@ -325,8 +325,16 @@ export const api = {
     if (!res.ok) throw new Error(`${res.status} ${res.statusText}`)
     return res.text()
   },
-  /** reader.records(index, query), for the page's thimble.fetch */
-  viewRecords: (c: string, slug: string, query: unknown, version?: string) => j<{ data: unknown }>(`${ws(c)}/views/${enc(slug)}/records${q({ v: version })}`, { method: 'POST', body: JSON.stringify({ query }) }),
+  /** reader.records(index, query), for the page's thimble.fetch, with no time limit: `call` names it for viewCall and
+   * viewCancel, and `signal` drops the request */
+  viewRecords: (c: string, slug: string, query: unknown, version?: string, opts?: { call?: string; signal?: AbortSignal }) =>
+    j<{ data: unknown }>(`${ws(c)}/views/${enc(slug)}/records${q({ v: version })}`, { method: 'POST', body: JSON.stringify({ query, call: opts?.call }), signal: opts?.signal }),
+  /** how far the page's call has got: seconds since it started, whether the reader reads the files (`index`), waits for
+   * a kernel (`wait`) or answers (`call`), and what it reported; {running: false} once it is over */
+  viewCall: (c: string, slug: string, call: string) =>
+    j<{ running: boolean; seconds?: number; phase?: string; done?: number; total?: number; note?: string }>(`${ws(c)}/views/${enc(slug)}/calls/${enc(call)}`),
+  /** cancel the page's call: the reader's kernel is interrupted */
+  viewCancel: (c: string, slug: string, call: string) => j<{ cancelled: boolean }>(`${ws(c)}/views/${enc(slug)}/calls/${enc(call)}/cancel`, { method: 'POST' }),
   /** the `open` message for a ref in the view */
   /** the marks of the labels that are on for refs a view's page shows, its units' above all: {ref: {bar, names, spans, keep?}} */
   viewMarks: (c: string, slug: string, refs: string[], version?: string) => j<Record<string, { bar?: string; names?: string[]; spans?: { text: string; colour: string }[]; keep?: boolean }>>(`${ws(c)}/views/${enc(slug)}/marks${q({ v: version })}`, { method: 'POST', body: JSON.stringify({ refs }) }),
