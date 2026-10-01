@@ -284,7 +284,8 @@ async def test_auto_is_claude_code_s_auto_mode_and_a_call_it_refuses_waits_for_t
     call = asyncio.ensure_future(agent_session.hook_request(CORPUS, agent_session.PermissionRequestBody(**body)))
     [p] = await _pending(run.chat)
     assert p["refused"] == "Runs code the analyst did not ask for" and p["agent_id"] == "a2"
-    assert "rechecked" not in p and "deny_after_s" not in p, "a refusal waits for the analyst for good"
+    assert "rechecked" not in p and "deny_after_s" not in p, "a refusal auto mode judged is asked at once"
+    assert p["wait_s"] == agent_session.PATIENT_WAIT_S, "the orientation's request waits ten minutes"
     await asyncio.sleep(0.2)
     assert not call.done(), "it waits for the analyst"
     agent_session.answer(CORPUS, run.chat, p["id"], True)
