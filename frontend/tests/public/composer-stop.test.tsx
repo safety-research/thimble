@@ -11,6 +11,7 @@ import { ComposerFrame } from '../../src/components/Composer.tsx'
 import { AgentCard, stopSession } from '../../src/chat/AgentCard.tsx'
 import { buildStatus, composerStopOf, stopRun, viewBuildParts } from '../../src/chat/ChatPanel.tsx'
 import type { Row } from '../../src/chat/model.ts'
+import { shownRows } from '../../src/chat/Rows.tsx'
 import { TicketStatus, WAITING_LINE } from '../../src/chat/TicketStatus.tsx'
 import { bus } from '../../src/lib/bus.ts'
 import type { ChatMeta, Proposal, Ticket } from '../../src/lib/types.ts'
@@ -103,6 +104,17 @@ describe('what the composer stops (composerStopOf)', () => {
     expect(composerStopOf('step', meta('s1', 'running'), null, parent('running'))).toEqual({ kind: 'session', chat: 'o1', role: 'orient', label: 'Stop the orientation' })
     expect(composerStopOf('step', meta('s1', 'running'), null, parent('done'))).toBeNull()
     expect(composerStopOf('step', meta('s1', 'running'), null, null)).toBeNull()
+  })
+
+  test('the critique: its own Stop, also in a step of the critic, so the orientation goes on without it', () => {
+    const critique = (status: string, how: Partial<ChatMeta> = { mode_agent: 'critic' }) => ({ id: 'k1', status, role: 'step', ...how }) as ChatMeta
+    const stop = { kind: 'session', chat: 'k1', role: 'critic', label: 'Stop the critique' }
+    const orient = { id: 'o1', status: 'running', role: 'orient' } as ChatMeta
+    expect(composerStopOf('step', critique('running'), null, orient)).toEqual(stop)
+    expect(composerStopOf('step', critique('running', { agent_type: 'mine:critic' }), null, orient)).toEqual(stop)
+    expect(composerStopOf('step', critique('done'), null, orient)).toBeNull()
+    expect(composerStopOf('step', meta('s1', 'running'), null, critique('running'))).toEqual(stop)
+    expect(composerStopOf('step', meta('s1', 'running'), null, critique('done'))).toBeNull()
   })
 })
 
@@ -197,6 +209,20 @@ describe("a view build's status line while its session shows no activity", () =>
     expect(viewBuildParts([...quiet, note(3, 'no activity for 20 min')])[0].stages).toEqual(['the session writes the view', 'no activity for 20 min'])
     expect(label([...quiet, said(3)])).toBe('Writing the view')
     expect(label([...quiet, note(3, 'checks passed: 2 ref(s), the page loaded')])).toBe('Checks passed')
+  })
+})
+
+describe("a session's thread while it shows no activity", () => {
+  const note = (index: number, text: string): Row => ({ kind: 'note', index, text })
+  const said = (index: number): Row => ({ kind: 'text', index, text: 'reading the transcript' })
+  const notes = (rows: Row[]) => shownRows(rows).flatMap((r) => (r.kind === 'note' ? [r.text] : []))
+
+  test('says so until its next row, one line however long the quiet lasts', () => {
+    const quiet = [said(0), note(1, 'no activity for 10 min')]
+    expect(notes(quiet)).toEqual(['no activity for 10 min'])
+    expect(notes([...quiet, note(2, 'no activity for 20 min')])).toEqual(['no activity for 20 min'])
+    expect(shownRows([...quiet, said(2)]).map((r) => r.index)).toEqual([0, 2])
+    expect(notes([...quiet, note(2, 'checks passed: 2 ref(s), the page loaded')])).toEqual(['checks passed: 2 ref(s), the page loaded'])
   })
 })
 

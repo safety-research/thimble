@@ -128,6 +128,9 @@ export function wholeMessage(rec: { by?: string; reply?: boolean }): boolean {
   return !!(rec.by || rec.reply)
 }
 
+/** The stage line of a session that has shown no activity for a while (backend dev.QUIET_LINE, agent_session.QUIET_LINE). */
+export const QUIET_RE = /^no activity for \d+ (min|s)$/
+
 /** A stage line a server-run task writes between the session's messages (dev.py's `Log.stage`: a line of its own that
  * starts with `· `): its text, else null. Pure. */
 export function stageLine(delta: string): string | null {

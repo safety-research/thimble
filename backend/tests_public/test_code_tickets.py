@@ -233,6 +233,10 @@ async def test_a_ticket_the_box_cannot_run_asks_before_it_starts_and_a_no_stops_
     denied = asyncio.ensure_future(dev._code_refusal(t))
     assert agent_session.answer(CORPUS, t["chat"], (await _question(t["chat"]))["id"], False)
     assert await denied == dev.CODE_NOT_ALLOWED
+    monkeypatch.setattr(dev, "PERMISSION_WAIT_S", 0.3)
+    agent_session.host(CORPUS, dev.ticket_key(t["id"]), t["chat"], agent="dev", wait_s=dev.PERMISSION_WAIT_S)
+    assert await dev._code_refusal(t) == dev.CODE_UNANSWERED.format(wait=agent_session.wait_words(0.3)), \
+        "a question nobody answers says so, not that the analyst refused"
 
     async def no(_t):
         return dev.CODE_NOT_ALLOWED

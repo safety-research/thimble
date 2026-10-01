@@ -254,7 +254,7 @@ def test_settings_name_each_role_s_agent_and_its_consent_settings(tmp_path, work
     assert (rows["orient"]["network"], rows["orient"]["data"], rows["orient"]["sandbox"]) == ("on", "ask", "on")
     assert (rows["critic"]["network"], rows["critic"]["data"], rows["critic"]["sandbox"]) == ("off", "off", "off")
     assert rows["critic"]["way"] == "thimble" and rows["critic"]["config"] == "agents.critic"
-    assert set(rows) == {"main", *userconf.MODE_ROWS.values()}
+    assert set(rows) == {"main", *userconf.MODE_ROWS.values(), *userconf.CALLS}
 
 
 # --------------------------------------------------------------------------- programs

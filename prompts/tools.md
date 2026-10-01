@@ -1034,7 +1034,7 @@ Only the orientation calls `critique`, which reviews its analysis and drafts bef
 
 ## critique-ended
 
-The critique ended {status} before it returned its report, and it wrote this.
+The critique {status} before it returned its report, and it wrote this.
 
 {text}
 

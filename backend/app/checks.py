@@ -9,7 +9,8 @@ and check.md (its prompt) in its folder, follow the built-ins as `<extension>-<s
 until first changed, as the built-ins are. A run is a Claude Code session of its own (agent_session.start) running as the check
 agent (prompts/check.md) with the corpus read-only and a work folder of its own; its first message is the context
 engine's (context.render) plus the document, the check's prompt and the passages it covers. At most MAX_SESSIONS run
-at once; a session past RUN_LIMIT_S of active time is stopped and the run ends `failed`.
+at once. A run has no time limit: its chat says when its session shows no activity (agent_session.wait_done), and the
+analyst's Stop ends it.
 
 The cache: a passage (paragraph, heading, slide, beat or free sentence) is fingerprinted by the sentence_key of its
 words. A run covers only passages whose fingerprint its check has not seen on that document; a run that ends `done`
@@ -55,10 +56,6 @@ QUIET_S = float(os.environ.get("THIMBLE_CHECK_QUIET_S", "20") or "20")  # after 
 WRITER_POLL_S = 2.0  # while a writer of the document runs, how often a rerun looks again
 WAITING_WRITER = "writer"  # a run's `waiting` while it is queued behind the document's writer
 MAX_SESSIONS = 3  # runs whose sessions run at once
-# The most active time a run's session may take, by its effort (agent_session.wait_active: its process alive and no
-# permission request waiting, so a retry's wait for capacity does not count). A run past it is stopped and ends
-# `failed` saying so, so a session that hangs cannot hold one of the MAX_SESSIONS places for ever.
-RUN_LIMIT_S = {"low": 900.0, "medium": 900.0, "high": 1200.0, "xhigh": 1800.0, "max": 2400.0}
 INTERRUPTED = "the server stopped while this run ran"  # a run the previous server left running (mark_interrupted)
 CHANGED = ("generated", "rewritten", "edited")  # the `report` statuses of a save that changes text
 CHECKED_KIND = "checked"  # the channel event that tells main a run it started ended (prompts/main.md)
@@ -346,8 +343,6 @@ class _Active:
     program: bool = False  # an extension's program runs the checks task (tasks.program), in harness.py
     comments: int = 0
     ended: bool = False
-    effort: str = ""
-    timed_out: float = 0.0  # the limit a run ran past (RUN_LIMIT_S), which ends it `failed`
 
 
 _active: dict[tuple[str, str, str], _Active] = {}  # (workspace, check, doc) -> its running run
@@ -371,11 +366,6 @@ def _of_session(c: str, key: str | None) -> _Active | None:
 
 def running(c: str, cid: str, doc: str) -> bool:
     return (c, cid, doc) in _active
-
-
-def run_limit(effort: str) -> float:
-    """RUN_LIMIT_S for a run at `effort`; the longest for a level the table does not name."""
-    return RUN_LIMIT_S.get(effort, max(RUN_LIMIT_S.values()))
 
 
 def mark_interrupted(root: Path | None = None) -> list[str]:
@@ -532,7 +522,7 @@ async def _go(act: _Active) -> None:
 
             part = tasks.program(c, "checks")
             if part is not None:
-                await _program(act, check, cover or [], prompt, part, done, effort)
+                await _program(act, check, cover or [], prompt, part, done)
                 return
             try:
                 run = await agent_session.start(
@@ -548,14 +538,8 @@ async def _go(act: _Active) -> None:
                 _finish(act, "failed", str(e))
                 return
             act.session = run
-            act.effort = effort
             _chat(act, run.chat)
-            limit = run_limit(effort)
-            if not await agent_session.wait_active(run, done, limit):
-                act.timed_out = limit
-                await agent_session.stop_run(run)
-                if not act.ended:  # a follower that did not end the run after Stop
-                    _finish(act, "stopped", "")
+            await agent_session.wait_done(run, done)
     except asyncio.CancelledError:
         if act.session is not None and not act.ended:
             with contextlib.suppress(Exception):
@@ -603,9 +587,9 @@ async def check_task(c: str, inp: dict[str, Any], *, model: str | None = None, p
 
 
 async def _program(act: _Active, check: dict[str, Any], cover: list[dict[str, Any]], prompt: str, part: Any,
-                   done: asyncio.Future, effort: str) -> None:
+                   done: asyncio.Future) -> None:
     """The run as an extension's program of the checks task, in an agent chat of its own; it comments through
-    add_comment as the run's session, and what it returns is the run's summary. Held to the run's limit."""
+    add_comment as the run's session, and what it returns is the run's summary. It runs until it ends or is stopped."""
     from . import harness  # noqa: PLC0415
 
     c = act.c
@@ -624,16 +608,8 @@ async def _program(act: _Active, check: dict[str, Any], cover: list[dict[str, An
         _finish(act, "failed", str(e))
         return
     act.program = True
-    act.effort = effort
     _chat(act, run.chat)
-    limit = run_limit(effort)
-    try:
-        await asyncio.wait_for(asyncio.shield(done), limit)
-    except asyncio.TimeoutError:
-        act.timed_out = limit
-        await harness.stop(c, session_key(act.check, act.doc))
-        if not act.ended:
-            _finish(act, "stopped", "")
+    await asyncio.shield(done)
 
 
 async def _after_writer(act: _Active) -> bool:
@@ -695,10 +671,6 @@ def _finish(act: _Active, status: str, summary: str) -> None:
         _active.pop((c, act.check, act.doc), None)
     status = status if status in ("done", "failed", "stopped") else "failed"
     last = next((ln.strip() for ln in reversed(str(summary or "").strip().splitlines()) if ln.strip()), "")
-    if act.timed_out:
-        status = "failed"
-        last = (f"It ran past its {act.timed_out / 60:.0f} minutes at {act.effort or DEFAULT_EFFORT} effort and was "
-                f"stopped; its comments so far stay.")
     check = read(c, act.check)
     rec = ((check or {}).get("runs") or {}).get(act.doc)
     if check is None or rec is None or rec.get("run") != act.run:

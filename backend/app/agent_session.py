@@ -86,7 +86,13 @@ End. The last `result` line on stdout is the summary; the caller's `on_end` hear
 process group and also kills the processes below it, since Claude Code runs each Bash command in a group of its own.
 
 Retry. A session that exits because the API is at capacity (CAPACITY) is started again with `--resume` and
-`## session-retry` after waits from retry_waits, until RETRY_BUDGET_S is spent.
+`## session-retry` after a wait from retry_wait, for as long as the API stays at capacity. Retry now and Stop end the
+wait.
+
+Quiet. A caller that waits for a session's end with wait_done gets QUIET_LINE in the session's chat once neither its
+transcript nor its steps' have grown for QUIET_NOTE_S, and again each time that time doubles. Time while a permission
+request waits on the analyst or a retry waits for capacity does not count. The session runs on until it ends or the
+analyst stops it.
 
 Background work. --print's wait for background agents is uncapped (BG_WAIT_ENV) and the tools that schedule a later turn
 are disallowed (LATER_TOOLS). A process that exits with background work unreported is resumed with
@@ -240,10 +246,9 @@ ALERT_DIALOG = "This session is waiting on a dialog it cannot show. Stop it, or 
 CAPACITY = ("overloaded", "rate_limited")
 RETRY_BASE_S = 30.0
 RETRY_MAX_S = 300.0
-RETRY_BUDGET_S = 1800.0
+RETRY_MIN_S = 1.0  # the shortest base RETRY_BASE_ENV may set, so a long streak never restarts the process at once
 RETRY_JITTER = 0.2
 RETRY_BASE_ENV = "THIMBLE_SESSION_RETRY_BASE_S"
-RETRY_BUDGET_ENV = "THIMBLE_SESSION_RETRY_BUDGET_S"
 RETRY_PROMPT = "session-retry"  # prompts/tools.md: the stdin prompt of a session started again after the wait
 RETRY_REASONS = {"overloaded": "Anthropic's API is overloaded", "rate_limited": "Anthropic's API rate limit was reached"}
 FAILURE_CHARS = 400  # of a failure's text in the one line that says why (failure_line)
@@ -379,6 +384,7 @@ class Run:
     api_status: int | None = None  # the `api_error_status` of the last `result` line, when it gave one
     spawned: float = 0.0  # time.monotonic() when the process started
     retries: int = 0  # the retries of the current streak of capacity failures
+    retrying: bool = False  # a retry's wait for capacity runs (_retry)
     wake: asyncio.Event = field(default_factory=asyncio.Event)  # set by Retry now and Stop to end a retry's wait
     nudge: str = ""  # a retry's stdin prompt, whose copy in the transcript the follower leaves out
     on_pid: Callable[["Run"], None] | None = None  # told when the process changes: None during a retry's wait, then the new one
@@ -959,8 +965,7 @@ async def _read_stderr(run: Run) -> None:
 
 async def _follow(run: Run) -> None:
     """Follow the session until it ends, starting it again after a mode-switch pause, after auto mode ended its turn, on the
-    fallback model after a refusal, after each capacity exit while the schedule allows, and after a clean exit that left
-    background work running."""
+    fallback model after a refusal, after each capacity exit, and after a clean exit that left background work running."""
     try:
         while True:
             await _watch(run)
@@ -1018,32 +1023,25 @@ async def _watch(run: Run) -> None:
 # --------------------------------------------------------------------------- retry
 
 
-def retry_waits(base_s: float = RETRY_BASE_S, max_s: float = RETRY_MAX_S, budget_s: float = RETRY_BUDGET_S) -> list[float]:
-    """The waits before each retry of a streak, without jitter (module note, retry): doubling from `base_s`, each at
-    most `max_s`, for as long as their sum stays within `budget_s`; empty when `base_s` or `budget_s` is 0."""
-    out: list[float] = []
-    if base_s <= 0 or budget_s <= 0:
-        return out
-    wait = base_s
-    while sum(out) + min(wait, max_s) <= budget_s:
-        out.append(min(wait, max_s))
-        wait *= 2
-    return out
-
-
-def retry_knobs(environ_: "dict[str, str] | None" = None) -> list[float]:
-    """retry_waits with RETRY_BASE_ENV and RETRY_BUDGET_ENV where they are set, read when a retry is due; a value
-    that is not a number is the default, with a log line."""
+def retry_base(environ_: "dict[str, str] | None" = None) -> float:
+    """The first wait of a streak (module note, retry): RETRY_BASE_ENV where it is set, at least RETRY_MIN_S, else
+    RETRY_BASE_S; a value that is not a number is the default, with a log line."""
     src = os.environ if environ_ is None else environ_
-    knob = {RETRY_BASE_ENV: RETRY_BASE_S, RETRY_BUDGET_ENV: RETRY_BUDGET_S}
-    for name in knob:
-        raw = str(src.get(name, "") or "").strip()
-        if raw:
-            try:
-                knob[name] = max(0.0, float(raw))
-            except ValueError:
-                log.warning("%s=%r is not a number; using %g", name, raw, knob[name])
-    return retry_waits(knob[RETRY_BASE_ENV], RETRY_MAX_S, knob[RETRY_BUDGET_ENV])
+    raw = str(src.get(RETRY_BASE_ENV, "") or "").strip()
+    if not raw:
+        return RETRY_BASE_S
+    try:
+        return max(RETRY_MIN_S, float(raw))
+    except ValueError:
+        log.warning("%s=%r is not a number; using %g", RETRY_BASE_ENV, raw, RETRY_BASE_S)
+        return RETRY_BASE_S
+
+
+def retry_wait(n: int, base_s: float | None = None, max_s: float = RETRY_MAX_S) -> float:
+    """The wait before retry `n` (from 0) of a streak, without jitter: doubling from `base_s` (retry_base when None),
+    each at most `max_s`. The schedule has no end."""
+    base = retry_base() if base_s is None else base_s
+    return min(base * 2 ** min(n, 32), max_s)
 
 
 def capacity(run: Run) -> str | None:
@@ -1087,34 +1085,33 @@ def _set_pid(run: Run, pid: int | None) -> None:
 
 
 async def _retry(run: Run) -> bool:
-    """After the process exited: when it failed at capacity and the schedule has a wait left, wait with the alert on
-    the chat (Retry now and Stop end the wait) and start the process again; True when a new process runs."""
+    """After the process exited: when it failed at capacity, wait with the alert on the chat (Retry now and Stop end
+    the wait) and start the process again; True when a new process runs."""
     cls = capacity(run)
     if cls is None:
         return False
     if time.monotonic() - run.spawned > RETRY_MAX_S:
         run.retries = 0  # it worked a while before this failure: a new streak
-    waits = retry_knobs()
-    if run.retries >= len(waits):
-        log.warning("%s: session %s (%s) failed at capacity (%s) after %d retries; it ends failed", run.c, run.key,
-                    run.sid, cls, run.retries)
-        return False
-    wait = waits[run.retries] * (1 + random.uniform(-RETRY_JITTER, RETRY_JITTER))
+    wait = retry_wait(run.retries) * (1 + random.uniform(-RETRY_JITTER, RETRY_JITTER))
     run.retries += 1
     for sub in run.steps.values():
         _finish_step(run, sub, "failed")  # its agents ended with the process
     reason = RETRY_REASONS[cls]
     until = datetime.now(timezone.utc) + timedelta(seconds=wait)
-    alert = {"kind": "retry", "text": f"{reason}; retrying in {wait_text(wait)}.", "reason": reason,
+    alert = {"kind": "retry", "text": f"{reason}. Retrying in {wait_text(wait)}.", "reason": reason,
              "until": until.isoformat(timespec="seconds"), "since": _now(), "attempt": run.retries}
     _set_pid(run, None)
     with contextlib.suppress(Exception):
         agents.update_agent(run.c, run.chat, alert=alert, permissions=[])
-    log.info("%s: session %s (%s) failed at capacity (%s: %s); retry %d/%d in %.0f s", run.c, run.key, run.sid, cls,
-             failure_line(run.result or run.stderr)[:200], run.retries, len(waits), wait)
+    log.info("%s: session %s (%s) failed at capacity (%s: %s); retry %d in %.0f s", run.c, run.key, run.sid, cls,
+             failure_line(run.result or run.stderr)[:200], run.retries, wait)
     run.wake.clear()
-    with contextlib.suppress(asyncio.TimeoutError):
-        await asyncio.wait_for(run.wake.wait(), wait)
+    run.retrying = True
+    try:
+        with contextlib.suppress(asyncio.TimeoutError):
+            await asyncio.wait_for(run.wake.wait(), wait)
+    finally:
+        run.retrying = False
     with contextlib.suppress(Exception):
         agents.update_agent(run.c, run.chat, alert=None)
     run.alerted = False
@@ -1311,25 +1308,42 @@ async def retry_now(c: str, chat: str) -> bool:
     return True
 
 
-ACTIVE_POLL_S = 5.0  # how often wait_active counts a session's active time
+QUIET_POLL_S = 5.0  # how often wait_done looks for signs of the session's activity
+# a session quiet this long gets QUIET_LINE in its chat, and again each time its quiet time doubles (module note, quiet)
+QUIET_NOTE_S = max(1.0, float(os.environ.get("THIMBLE_QUIET_NOTE_S", "") or 10 * 60))
+QUIET_LINE = "no activity for {minutes}"  # the frontend's chat/model.ts QUIET_RE reads it
 
 
-async def wait_active(run: Run, done: asyncio.Future, limit_s: float, poll_s: float | None = None) -> bool:
-    """Wait for `done` while the session has run for at most `limit_s` seconds of active time (process alive and no permission
-    request waiting). True once `done` is set; False once past the limit, which the caller then stops."""
-    poll = ACTIVE_POLL_S if poll_s is None else poll_s
-    active, last = 0.0, time.monotonic()
+def quiet_minutes(seconds: float) -> str:
+    """A quiet time in QUIET_LINE's words: whole minutes from one minute on, else seconds."""
+    return f"{seconds / 60:.0f} min" if seconds >= 60 else f"{seconds:.0f} s"
+
+
+def _activity(run: Run) -> tuple[int, ...]:
+    """What grows while the session works: the sizes of its transcript and of its steps' transcripts."""
+    subs = [run.main, *run.steps.values()]
+    return tuple(session._size(s.path) if s is not None and s.path is not None else -1 for s in subs)
+
+
+async def wait_done(run: Run, done: asyncio.Future, poll_s: float | None = None) -> None:
+    """Wait for `done`, with no time limit (module note, quiet): while the session shows no activity, its chat gets
+    QUIET_LINE at QUIET_NOTE_S and each time that quiet time doubles. Time while a permission request waits on the analyst,
+    a retry waits for capacity or the run waits for a mode switch (_hold) starts the quiet time again."""
+    poll = QUIET_POLL_S if poll_s is None else poll_s
+    seen, active, note = _activity(run), time.monotonic(), QUIET_NOTE_S
     while not done.done():
         with contextlib.suppress(asyncio.TimeoutError):
             await asyncio.wait_for(asyncio.shield(done), poll)
-        now = time.monotonic()
-        if run.pid is not None and not run.waits:
-            active += now - last
-        last = now
-        if not done.done() and active > limit_s:
-            log.warning("%s: session %s (%s) ran past %.0f s of active time", run.c, run.key, run.sid, limit_s)
-            return False
-    return True
+        if done.done():
+            return
+        now, grown = time.monotonic(), _activity(run)
+        if grown != seen or run.retrying or run.held or run.waits:
+            seen, active, note = grown, now, QUIET_NOTE_S
+        elif now - active >= note:
+            if run.main is not None and run.main.rec is not None:
+                run.main.rec.text(f"\n· {QUIET_LINE.format(minutes=quiet_minutes(note))}\n")
+            log.info("%s: session %s (%s) has shown no activity for %.0f s", run.c, run.key, run.sid, note)
+            note *= 2
 
 
 def follow_once(run: Run) -> None:
@@ -2318,6 +2332,12 @@ def wait_words(seconds: float) -> str:
 def timed_out_line(seconds: float) -> str:
     """TIMED_OUT_LINE for a wait of `seconds`."""
     return TIMED_OUT_LINE.format(wait=wait_words(seconds))
+
+
+def timed_out(answer: dict[str, Any]) -> bool:
+    """Whether `answer`, what ask returned, denies the call because nobody answered in time (TIMED_OUT_LINE)."""
+    head = TIMED_OUT_LINE.split("{wait}", 1)[0]
+    return answer.get("behavior") == "deny" and str(answer.get("message") or "").startswith(head)
 
 
 async def ask(c: str, key: str | None, tool_name: str, inp: Any, agent_id: str | None = None,

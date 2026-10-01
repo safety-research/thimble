@@ -104,7 +104,7 @@ labels model reads the view's description and a few records of the files in its 
 view's reason, and its switch there overrides the check.
 
 The views thimble builds for a workspace are that workspace's own extension, in `workspaces/<workspace>/extension/`.
-No other workspace shows them. Settings > Extensions lists them under This workspace, each with its switch.
+No other workspace shows them. Settings > Extensions lists them under This workspace's views, each with its switch.
 
 The Swarm extension is for corpora where many agents act on shared pages and channels and address each other. It adds
 orientation instructions that have every message read. It needs `multiagent-swimlane`, the card type that draws a
@@ -132,6 +132,9 @@ that one and prints each path it deleted. The folder it read and your Claude Cod
 - `thimble doctor` shows the server, the versions, the auth path and the log's recent errors.
 - thimble's agents don't start because Claude Code's sandbox can't run: `thimble doctor` says what is missing, and on
   Linux `install.sh --sandbox-deps` installs it.
+- An empty `.claude/.cc-writes/` folder appears in the folder you start `thimble` in: Claude Code's sandbox is on in
+  your own settings, and it makes that folder for main's Bash, which runs in your session. thimble leaves your
+  session's settings as they are, and `thimble doctor` says when that sandbox is on.
 - thimble warns that Claude Code does not trust its workspaces folder: the orientation, its critic, the writers and
   view builds can't start until it does, while your own session keeps working. Run the command the warning gives,
   `bash <install dir>/scripts/install.sh --trust-workspaces`.
