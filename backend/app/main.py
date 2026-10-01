@@ -237,7 +237,7 @@ async def _lifespan(app: FastAPI):
         from . import extensions
 
         for name in extensions.ship():
-            log.info("extension %s added from thimble's own", name)
+            log.info("extension %s added, renamed or updated from thimble's own", name)
     except Exception:
         log.exception("adding the extensions thimble ships failed")
     # the records an install tree's data/ holds are brought into the registry once (config.migrate_registry)
