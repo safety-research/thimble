@@ -3,6 +3,7 @@
 // at 3:1 on the paper's grounds, and neighbours stay apart, also under protan and deutan vision.
 import { readFileSync } from 'node:fs'
 import { describe, expect, test } from 'vitest'
+import { MPL_CYCLE, restyle } from '../../src/lib/svg.ts'
 
 const CSS = readFileSync(new URL('../../src/styles/tokens.css', import.meta.url), 'utf8')
 const SLOTS = ['--viz-1', '--viz-2', '--viz-3', '--viz-4', '--viz-5', '--viz-6', '--viz-7']
@@ -76,6 +77,16 @@ const chromaHue = (hex: string): [number, number] => {
   const [, a, b] = oklab(linear(hex))
   return [Math.hypot(a, b), ((Math.atan2(b, a) * 180) / Math.PI + 360) % 360]
 }
+
+test("matplotlib's colour cycle is the light paper's chart colours, and an inlined figure takes each as its token", () => {
+  const rc = readFileSync(new URL('../../../backend/app/matplotlibrc', import.meta.url), 'utf8')
+  const cycle = [...(/axes\.prop_cycle:.*/.exec(rc)?.[0] ?? '').matchAll(/'([0-9a-fA-F]{6})'/g)].map((m) => `#${m[1].toLowerCase()}`)
+  expect(cycle).toEqual(SLOTS.map((s) => BASE[s]))
+  expect(MPL_CYCLE).toEqual(cycle)
+  cycle.forEach((hex, i) => {
+    expect(restyle(`fill: ${hex}; stroke: ${hex.toUpperCase()}`)).toBe(` fill: var(--viz-${i + 1}); stroke: var(--viz-${i + 1})`)
+  })
+})
 
 describe.each(Object.keys(PAPERS))('the chart colours on the %s paper', (paper) => {
   const t = PAPERS[paper]
