@@ -3,9 +3,9 @@
 import { useEffect, useState } from 'react'
 import { Button } from '../components/Button'
 import { Menu, type MenuItem } from '../components/Menu'
-import { api } from '../lib/api'
 import { bus } from '../lib/bus'
 import type { View } from '../lib/types'
+import { viewsForFile } from '../lib/views'
 
 /** The menu's items: each view but `current`, then the File browser when `current` is a view. Pure. */
 export function openInItems(views: Pick<View, 'slug' | 'name'>[], current: string | null, onOpen: (slug: string | null) => void): MenuItem[] {
@@ -28,8 +28,7 @@ export function OpenIn({ ws, path, current, onOpen }: Props) {
   useEffect(() => {
     let alive = true
     const read = () =>
-      api
-        .viewsForFile(ws, path)
+      viewsForFile(ws, path)
         .then((list) => alive && setViews(Array.isArray(list) ? list.filter((v) => v.ok && !v.file_type) : []))
         .catch(() => undefined)
     read()

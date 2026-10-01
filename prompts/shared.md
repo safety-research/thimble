@@ -161,7 +161,7 @@ A citation opens its source in one click. `[[<ref>]]` shows as a small link, and
     a file                                      minutes/meeting-3.md
     a record or lines of a text file            logs/run-7.jsonl#L88, or logs/run-7.jsonl#L88-L120
     a row of a database table                   runs/r1/forge.db#prs/12, by its primary key
-    a page of a PDF                             docs/audit.pdf#page=4
+    a page or pages of a PDF                    docs/audit.pdf#p4, or docs/audit.pdf#p4-p6
     a value of a JSON document                  results.json#/runs/3, by its JSON pointer
     a row of a CSV or TSV file                  data/orders.csv#row=12, counting from the row after the header
     a sentence or a paragraph of a document     report:<slug>#<id>, or report:<slug>#p<id>

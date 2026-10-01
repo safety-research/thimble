@@ -56,8 +56,10 @@ transcript every NEWS_POLL_S and returns once there is news, so a tool call show
 NEWS_GATHER_S and the proxy's turn; one answer holds at most NEWS_RETURN_CHARS of news, the rest coming with the next. The session
 itself, as Claude Code draws it, shows with `claude attach <id>`.
 
-The watcher. One task per server lists `claude agents` every POLL_S for every session known here (REGISTRY_FILE keeps
-them across restarts): a session whose process has gone ends stopped; one that starts a turn with no run of thimble's (a
+The watcher. One task per server lists `claude agents` for every session known here (REGISTRY_FILE keeps them across
+restarts), every POLL_S while one needs following (_hot: it works, started lately, has a run of thimble's open, a message
+waiting or a missed listing), else at gaps that double up to IDLE_POLL_S, cut short when a session's transcript grows or
+one is recorded: a session whose process has gone ends stopped; one that starts a turn with no run of thimble's (a
 message typed in its terminal or in the proxy's view, or main's SendMessage) is followed again as a new run of its chat
 (on_wake); it reads the session's transcript for the news too, and its state becomes the proxy's news, the statusline's
 line and the /thimble:agents list (agents_route).
@@ -90,6 +92,9 @@ router = APIRouter()
 REGISTRY_FILE = "bg-sessions.json"  # in the workspace: the background sessions thimble started
 PROXY_DIR = "bg"  # in the workspace: each proxy's instructions (proxy_file)
 POLL_S = 1.5
+# the longest wait between two listings while no session needs following (_hot): an idle session's turn begins with a
+# line in its transcript, which the watcher looks for every POLL_S without starting a `claude` process
+IDLE_POLL_S = 30.0
 # the longest a wait_session call waits for news; a message typed in the tray entry's view reaches it only after that
 # call returns, so this bounds how long such a message waits
 WAIT_S = 6.0
@@ -366,6 +371,7 @@ _entries: dict[tuple[str, str], Entry] = {}  # (workspace, key) -> the session
 _loaded: set[str] = set()
 _wake: dict[str, Callable[[str, Entry], Awaitable[Any]]] = {}  # kind -> the caller that follows a woken session
 _changed = asyncio.Event()  # set on each news line, state change and outbox message, for wait_session
+_poked = False  # a session was recorded since the watcher's last listing began: it lists again within POLL_S
 _task: asyncio.Task | None = None
 _closing = False  # the server is going down: waits return at once
 
@@ -534,15 +540,46 @@ def _news(e: Entry, line: str) -> None:
 
 
 def _ensure_watcher() -> None:
-    global _task
+    global _task, _poked
+    _poked = True
     if _task is not None and not _task.done():
         return
     with contextlib.suppress(RuntimeError):
         _task = asyncio.get_running_loop().create_task(_watch(), name="bg-sessions")
 
 
+def _hot() -> bool:
+    """Whether a session needs a listing every POLL_S: one listed working, started or attached to in the last
+    START_GRACE_S, being replaced, missing from the last listing, followed by a run of thimble's, or with a message in
+    its outbox that is neither sent nor handed to main."""
+    now = time.time()
+    return any(alive(e) and (e.status == "working" or e.run_open or e.replacing or e.misses
+                             or now - e.started < START_GRACE_S
+                             or any(not i["sent"] and not i["main_asked"] for i in e.outbox))
+               for e in entries())
+
+
+def _sizes() -> dict[tuple[str, str], int]:
+    """The sizes of the transcripts of the sessions alive, found already: a turn begins with a line there."""
+    return {(e.c, e.key): session._size(Path(e.tx_path)) for e in entries() if alive(e) and e.tx_path}
+
+
+async def _quiet(wait: float, sizes: dict[tuple[str, str], int]) -> None:
+    """Wait up to `wait`, looking every POLL_S for a reason to list sooner: a session that needs following, a transcript
+    that is no longer of its size in `sizes` (taken before the last listing) or a session recorded since that
+    listing began."""
+    end = time.monotonic() + wait
+    while (left := end - time.monotonic()) > 0:
+        await asyncio.sleep(min(left, POLL_S))
+        if _poked or _hot() or _sizes() != sizes:
+            return
+
+
 async def _watch() -> None:
+    global _poked
+    wait = POLL_S
     while any(alive(e) for e in entries()):
+        sizes, _poked = _sizes(), False
         try:
             rows = await asyncio.to_thread(listing)
             await _tick(rows)
@@ -550,7 +587,8 @@ async def _watch() -> None:
             raise
         except Exception:  # noqa: BLE001 — the watcher never stops for one bad pass
             log.exception("the background sessions' watcher failed a pass")
-        await asyncio.sleep(POLL_S)
+        wait = POLL_S if _hot() else min(wait * 2, IDLE_POLL_S)
+        await _quiet(wait, sizes)
 
 
 async def _tick(rows: list[dict[str, Any]]) -> None:

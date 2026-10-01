@@ -1,6 +1,9 @@
 {
   "name": "swarm",
   "version": "0.4.0",
+  "description": "A custom orientation agent for swarms: a model reads every record before the orientation drafts, and the coordination it finds is drawn as swimlanes.",
   "thimble": ">=0.4",
-  "dependencies": {"extensions": ["multiagent-swimlane"]}
+  "needs": [
+    "multiagent-swimlane"
+  ]
 }

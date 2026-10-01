@@ -10,7 +10,8 @@
     thimble purge <id>… [--dry-run]        (delete workspaces or archived runs by id; runs.py)
     thimble launch-args --cwd <path>       (the launcher's: channel entry, allowed tools, main's effort and settings, turn tools, main's name, main's prompt)
     thimble prompt <name>… [--cwd <path>]  (prompt files rendered for a session in <path>, for skills and hooks)
-    thimble extension add <git URL | folder | built-in name> [--yes] | list | remove <name>   (extensions.py)
+    thimble extension add <folder | git URL | built-in name> [--yes] | on <name> | off <name> | list | remove <name>
+                                                                                              (extensions.py)
 
 `server up` (alias `ensure`) is the one starter: `GET /api/health`, then under `flock <home>/server.lock` spawn uvicorn
 on THIMBLE_PORT (8300) as its own session leader (plus Vite on 5300 when THIMBLE_DEV is on), wait for health, map the
@@ -2876,13 +2877,19 @@ def cmd_feedback(args: argparse.Namespace) -> int:
     return feedback.run(" ".join(args.description), cwd=cwd, logs=not args.no_logs)
 
 
+ORIENT_HINT = ("{name} adds to the orientation. Where an orientation already ran, Settings > Extensions asks whether "
+               "to run it there now.")
+
+
 def cmd_extension(args: argparse.Namespace) -> int:
-    """`thimble extension add | list | remove`, then every workspace a session has open finds its extensions again."""
+    """`thimble extension add | on | off | list | remove`, then every workspace a session has open finds its extensions
+    again."""
     from . import extensions  # noqa: PLC0415
 
     ship_extensions()
+    workspaces = Path(resolve_env()["workspaces_dir"])
     if args.ext_cmd == "list":
-        for ln in extensions.list_lines(Path(resolve_env()["workspaces_dir"])):
+        for ln in extensions.list_lines(workspaces):
             print(ln)
         return 0
     if args.ext_cmd == "add":
@@ -2898,9 +2905,27 @@ def cmd_extension(args: argparse.Namespace) -> int:
             print("Not added.")
             return 0
         name, *more = names
-        print(f"Added {name}{', with ' + ' and '.join(more) if more else ''}. {'They run' if more else 'It runs'} in "
-              f"every workspace; `\"extensions\": {{\"{name}\": {{\"enabled\": false}}}}` in {home() / 'config.json'} "
-              f"turns {name} off.")
+        print(f"{name}{' and ' + ' and '.join(more) if more else ''} {'are' if more else 'is'} on. "
+              f"`thimble extension off {name}` switches it off.")
+        for n in names:
+            if kept := extensions.off_in(n, workspaces):
+                print(f"{n} stays off where its switch in Settings keeps it off: {', '.join(kept)}.")
+            if extensions.orients(extensions.read_extension(extensions.source_path(n), n)):
+                print(ORIENT_HINT.format(name=n))
+    elif args.ext_cmd in ("on", "off"):
+        try:
+            got = extensions.switch(args.name, args.ext_cmd == "on", workspaces)
+        except extensions.SwitchError as e:
+            print(f"thimble extension {args.ext_cmd}: {e}", file=sys.stderr)
+            return 1
+        if args.ext_cmd == "on" and got["off_in"]:
+            print(f"{args.name} is on, except where its switch in Settings keeps it off: {', '.join(got['off_in'])}.")
+        else:
+            print(f"{args.name} is {args.ext_cmd} in every workspace.")
+        if args.ext_cmd == "on" and got["problem"]:
+            print(f"It does not run until this is fixed: {got['problem']}")
+        elif args.ext_cmd == "on" and got["orients"]:
+            print(ORIENT_HINT.format(name=args.name))
     else:
         if not extensions.remove(args.name):
             print(f"thimble extension remove: no extension {args.name!r} is added", file=sys.stderr)
@@ -3028,13 +3053,17 @@ def build_parser() -> argparse.ArgumentParser:
     pg.add_argument("-y", "--yes", action="store_true", help="accepted and ignored (purge does not ask)")
     pg.add_argument("--dry-run", action="store_true", help="print what would be deleted; delete nothing")
     pg.set_defaults(fn=cmd_purge)
-    ex = sub.add_parser("extension", help="add, list or remove extensions (views, card types, agents, report types)")
+    ex = sub.add_parser("extension", help="add, switch on or off, list or remove extensions (views, card types, agents, "
+                                          "report types)")
     exs = ex.add_subparsers(dest="ext_cmd", required=True)
-    ea = exs.add_parser("add", help="show what an extension gives, ask, then add it")
-    ea.add_argument("source", help="a git URL, a local folder, or the name of an extension thimble ships")
+    ea = exs.add_parser("add", help="check an extension, show what it gives, ask, then add it and switch it on")
+    ea.add_argument("source", help="a local folder (used in place), a git URL, or the name of an extension thimble ships")
     ea.add_argument("-y", "--yes", action="store_true", help="add it without asking")
+    for word, what in (("on", "switch an added extension on in every workspace"),
+                       ("off", "switch an added extension off in every workspace")):
+        exs.add_parser(word, help=what).add_argument("name")
     exs.add_parser("list", help="the extensions added, and whether each runs in each workspace")
-    er = exs.add_parser("remove", help="delete an added extension")
+    er = exs.add_parser("remove", help="remove an added extension (a folder used in place stays where it is)")
     er.add_argument("name")
     ex.set_defaults(fn=cmd_extension)
     u = sub.add_parser("update", help="bring the install up to date: the latest GitHub release via gh, or --from <zip>")
