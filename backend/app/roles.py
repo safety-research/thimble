@@ -155,11 +155,6 @@ def read_part(name: str, root: Path, role: str, files: list[str] | None = None) 
                 problems(spec, role, folder, root))
 
 
-def extension_parts(root: Path, name: str = "") -> list[Part]:
-    """Every role's agent.json in the extension folder `root`, for `thimble extension add` and its checks."""
-    return [p for role in ROLES if (p := read_part(name or root.name, root, role)) is not None]
-
-
 def parts(c: str | None, role: str) -> list[Part]:
     """The agent.json of `role` of each active extension in workspace `c` that has one and no problem in it."""
     if not c:
