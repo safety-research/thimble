@@ -22,7 +22,7 @@ from pathlib import Path
 
 import pytest
 
-from app import config, headless, tools, userconf, views
+from app import config, dev, headless, tools, userconf, views
 
 CORPUS = "boards"
 POSTS = [  # (thread, author, time, body); line n of board.jsonl is POSTS[n-1]
@@ -615,8 +615,12 @@ async def test_a_workspace_gets_four_views_from_the_orientation_and_a_deleted_on
     assert e.value.status_code == 409
     assert propose("Two", orientation=True)["slug"] == first[1]["slug"], "one of the four is improved under its name"
     # the analyst deletes a proposal and a view: neither frees a place or comes back, and their own asks still build
+    for slug in (first[0]["slug"], "threads"):
+        dev.view_work_dir(CORPUS, slug).mkdir(parents=True, exist_ok=True)
+        (dev.view_work_dir(CORPUS, slug) / "sample.jsonl").write_text("{}\n")
     views.delete_proposal(CORPUS, first[0]["slug"])
     views.delete_view(CORPUS, "threads")
+    assert not any(dev.view_work_dir(CORPUS, s).exists() for s in (first[0]["slug"], "threads")), "the builds' folders go"
     for name in ("One", "Threads", "Five"):
         with pytest.raises(views.HTTPException) as e:
             propose(name, orientation=True)

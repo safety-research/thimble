@@ -843,6 +843,7 @@ def delete_view(c: str, slug: str) -> None:
     shutil.rmtree(d, ignore_errors=True)
     shutil.rmtree(_versions_dir(c, slug), ignore_errors=True)
     shutil.rmtree(index_dir(c, slug), ignore_errors=True)
+    shutil.rmtree(dev.view_work_dir(c, slug), ignore_errors=True)
     drop_built_copy(c, slug)
     _forget(c, slug)
     _write_off(c, slug, True)
@@ -2346,9 +2347,12 @@ def _stop_build(c: str, slug: str, why: str, force: bool = False) -> None:
 
     dev.stop_view(c, slug, why)
     d = views_dir(c) / slug
-    if d.is_dir() and (force or not _view_json(d).get("built")):
+    built = d.is_dir() and bool(_view_json(d).get("built"))
+    if d.is_dir() and (force or not built):
         shutil.rmtree(d, ignore_errors=True)
         shutil.rmtree(index_dir(c, slug), ignore_errors=True)
+    if force or not built:
+        shutil.rmtree(dev.view_work_dir(c, slug), ignore_errors=True)
     _forget(c, slug)
 
 
