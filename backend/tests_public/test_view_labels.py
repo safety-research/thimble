@@ -270,3 +270,75 @@ async def test_the_views_list_says_which_pages_draw_label_controls_of_their_own(
     views.write_view(CORPUS, "menu", reader=READER, html=menu, **{**VIEW, "name": "Menu"})
     got = {v["slug"]: v["label_controls"] for v in (await app.get(f"/api/ws/{CORPUS}/views")).json()}
     assert got == {"threads": False, "menu": True}
+
+
+def _old_members(rows: list[tuple]) -> dict[str, str]:
+    """A label's {ref: value} as a dict, from rows (path, line, label, source, verdict, confidence, ref)."""
+    values: dict[str, str] = {}
+    starts: dict[str, str] = {}
+    for path, line, label, _source, verdict, _confidence, ref in rows:
+        v = verdict if verdict is not None else label
+        if v is not None:
+            values[str(ref)] = str(v)
+            if path is not None and line is not None and kernel_thimble._ref_parts(str(ref))[1] is None:
+                starts.setdefault(f"{path}#L{int(line)}", str(v))
+    for ref, v in starts.items():
+        values.setdefault(ref, v)
+    return values
+
+
+@pytest.mark.parametrize("fresh_store", [True, False])
+def test_a_labels_members_are_kept_compact_and_read_as_every_row_says(tmp_path, fresh_store):
+    """A label over every line of a large file keeps one code per line rather than a ref per record, and a sparse one
+    keeps its lines alone, while every lookup, the listing and the count read as the rows say: the analyst's verdict
+    over the classifier's, a record of another reader by its own ref and by the line it starts on, a ref written
+    another way under its own spelling, and the covers apart."""
+    from app import labels_store  # noqa: PLC0415
+
+    big = 20_000
+    rows = [{"ref": f"turns.jsonl#L{n}", "label": ("shell" if n % 3 else "gui"), "source": "code", "confidence": 1.0,
+             "ts": "t"} for n in range(1, big + 1)]
+    rows += [{"ref": "turns.jsonl#L7", "label": "gui", "source": "analyst", "ts": "t"},
+             {"ref": "notes.jsonl#L5", "label": "shell", "source": "code"},
+             {"ref": "notes.jsonl#L900000", "label": "other", "source": "code"},
+             {"ref": "table.csv#row=4", "line": 12, "label": "gui", "source": "code"},
+             {"ref": "table.csv#L12", "label": "shell", "source": "code"},
+             {"ref": "table.csv#row=9", "line": 30, "label": "gui", "source": "code"},
+             {"ref": "turns.jsonl#L012", "label": "odd", "source": "code"},
+             {"ref": "card:abc", "label": "gui", "source": "analyst"},
+             labels_store.cover_row("other.jsonl", 1, 50, "quiet", "regex", "t")]
+    jsonl = tmp_path / "k.jsonl"
+    jsonl.write_text("".join(json.dumps(r) + "\n" for r in rows))
+    if fresh_store:
+        labels_store.rebuild_file(str(jsonl))
+        assert kernel_thimble._store_fresh(jsonl, jsonl.with_suffix(".sqlite"))
+    kernel_thimble._MEMBERS.clear()
+    values, spans, paths = kernel_thimble._members(jsonl)
+    want = _old_members(kernel_thimble._jsonl_parts(jsonl)[0])
+    assert dict(values.items()) == want and len(values) == len(want)
+    assert values.get("turns.jsonl#L7") == "gui" and values["turns.jsonl#L3"] == "gui" and values["turns.jsonl#L4"] == "shell"
+    assert values.get("turns.jsonl#L012") == "odd" and values.get("turns.jsonl#L12") == "gui"
+    assert values.get("table.csv#L12") == "shell", "a line's own row over the record that starts on it"
+    assert values.get("table.csv#L30") == "gui" and values.get("table.csv#row=9") == "gui"
+    assert values.get("notes.jsonl#L900000") == "other" and "notes.jsonl#L6" not in values
+    assert values.get("turns.jsonl#L0") is None and values.get(f"turns.jsonl#L{big + 1}") is None
+    assert spans == {"other.jsonl": [(1, 50, "quiet")]} and {"turns.jsonl", "notes.jsonl", "other.jsonl"} <= paths
+    assert isinstance(values._lines["turns.jsonl"], bytes), "a dense file: one byte per line"
+    assert isinstance(values._lines["notes.jsonl"], tuple), "a sparse file: its lines alone"
+    assert kernel_thimble._value_of({"_members": (values, spans, paths)}, "other.jsonl#L9") == "quiet"
+
+
+def test_the_kernel_keeps_the_members_of_a_few_labels_at_once(tmp_path, monkeypatch):
+    """The members of the labels read most recently stay, at most MEMBERS_KEPT of them, so a workspace with many labels
+    does not keep them all in memory."""
+    monkeypatch.setattr(kernel_thimble, "MEMBERS_KEPT", 2)
+    kernel_thimble._MEMBERS.clear()
+    files = []
+    for i in range(3):
+        p = tmp_path / f"{i}.jsonl"
+        p.write_text(json.dumps({"ref": f"a.jsonl#L{i + 1}", "label": "x", "source": "code"}) + "\n")
+        files.append(p)
+    for p in (files[0], files[1], files[0], files[2]):
+        kernel_thimble._members(p)
+    assert list(kernel_thimble._MEMBERS) == [str(files[0]), str(files[2])]
+    kernel_thimble._MEMBERS.clear()
