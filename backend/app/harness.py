@@ -909,7 +909,7 @@ async def run_task(c: str, task: str, part: roles.Part, input: dict[str, Any]) -
         await asyncio.to_thread(shutil.rmtree, job.work, True)
 
 
-async def _run(run: Run, argv: list[str]) -> str:
+async def _run(run: Run, argv: list[str]) -> Any:
     from . import agent_session  # noqa: PLC0415
 
     job = run.job
