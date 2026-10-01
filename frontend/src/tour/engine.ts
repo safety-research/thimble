@@ -47,7 +47,9 @@ export interface Step {
   clip?: string
   pad?: number
   radius?: number
-  place?: Place
+  /** where the popover sits beside the first cutout; a list is tried in order, and the first side where the popover
+   * fits in the window without covering a cutout wins (else the first, kept inside the window) */
+  place?: Place | Place[]
   align?: 'start' | 'center' | 'end'
   title: string
   body: string | ((api: Api) => string)
@@ -263,6 +265,12 @@ const textRows = (rects: Iterable<DOMRect>) => {
   return rows
 }
 
+/** The tour's one way to draw markup: its own strings and the examples bundled with it (examples.json), never anything
+ * the server, a model or the corpus wrote. */
+export function setMarkup(el: Element, markup: string): void {
+  el.innerHTML = markup
+}
+
 /** A tour bound to the bundled snapshots. One runs at a time. */
 export function createTour(snaps: Snaps): Tour {
   let root: HTMLDivElement | null = null
@@ -338,7 +346,7 @@ export function createTour(snaps: Snaps): Tour {
     const pad = s.pad ?? 6,
       rad = s.radius ?? 8
     const boxes = rs.map((r) => ({ x: r.x - pad, y: r.y - pad, w: r.width + 2 * pad, h: r.height + 2 * pad }))
-    mask.innerHTML = FULL + boxes.map((b) => `<rect x="${b.x}" y="${b.y}" width="${b.w}" height="${b.h}" rx="${rad}" ry="${rad}" fill="#000"/>`).join('')
+    setMarkup(mask, FULL + boxes.map((b) => `<rect x="${b.x}" y="${b.y}" width="${b.w}" height="${b.h}" rx="${rad}" ry="${rad}" fill="#000"/>`).join(''))
     drawn = { holes: boxes, targets: rs.map((r) => ({ x: r.x, y: r.y, w: r.width, h: r.height })), pad }
     // the block takes every click, except over an opening: a frame the analyst may use, an allowed element, or a try
     // step's cutout, where the guard lets only a ⌘-click through
@@ -358,7 +366,7 @@ export function createTour(snaps: Snaps): Tour {
         ${s.gateNext && !run?.tried ? '' : btn(lastStep ? 'done' : 'next', 'btn-primary', lastStep ? 'Done' : 'Next')}</div>`
     if (pop.dataset.html !== html) {
       const focused = pop.contains(document.activeElement)
-      pop.innerHTML = html
+      setMarkup(pop, html)
       pop.dataset.html = html
       if (focused || pop.dataset.focusFor !== String(i)) {
         pop.dataset.focusFor = String(i)
@@ -378,18 +386,19 @@ export function createTour(snaps: Snaps): Tour {
       caret.style.display = 'none'
       return
     }
-    const place = s.place || 'right',
-      align = s.align || 'start'
-    let px: number, py: number
-    if (place === 'right' || place === 'left') {
-      px = place === 'right' ? box.x + box.w + gap : box.x - gap - pw
-      py = align === 'center' ? box.y + box.h / 2 - ph / 2 : align === 'end' ? box.y + box.h - ph : box.y
-    } else {
-      py = place === 'bottom' ? box.y + box.h + gap : box.y - gap - ph
-      px = align === 'center' ? box.x + box.w / 2 - pw / 2 : align === 'end' ? box.x + box.w - pw : box.x
+    const align = s.align || 'start'
+    const at = (side: Place) => {
+      const x = side === 'right' ? box.x + box.w + gap : side === 'left' ? box.x - gap - pw : align === 'center' ? box.x + box.w / 2 - pw / 2 : align === 'end' ? box.x + box.w - pw : box.x
+      const y = side === 'bottom' ? box.y + box.h + gap : side === 'top' ? box.y - gap - ph : align === 'center' ? box.y + box.h / 2 - ph / 2 : align === 'end' ? box.y + box.h - ph : box.y
+      return { x: Math.max(M, Math.min(vw - pw - M, x)), y: Math.max(M, Math.min(vh - ph - M, y)), fits: x >= M && x + pw <= vw - M }
     }
-    px = Math.max(M, Math.min(vw - pw - M, px))
-    py = Math.max(M, Math.min(vh - ph - M, py))
+    const covers = (q: { x: number; y: number }) => boxes.some((b) => q.x < b.x + b.w - 1 && q.x + pw > b.x + 1 && q.y < b.y + b.h - 1 && q.y + ph > b.y + 1)
+    const sides = ([] as Place[]).concat(s.place ?? 'right')
+    const place = sides.find((side) => {
+      const q = at(side)
+      return q.fits && !covers(q)
+    }) ?? sides[0]
+    const { x: px, y: py } = at(place)
     Object.assign(pop.style, { left: `${px}px`, top: `${py}px` })
     const cy = Math.max(14, Math.min(ph - 24, (Math.max(box.y, py) + Math.min(box.y + box.h, py + ph)) / 2 - py - 5))
     const cx = Math.max(14, Math.min(pw - 24, (Math.max(box.x, px) + Math.min(box.x + box.w, px + pw)) / 2 - px - 5))
@@ -404,7 +413,7 @@ export function createTour(snaps: Snaps): Tour {
 
   // the welcome: centred over the whole page, dimmed; not a numbered step
   const drawWelcome = () => {
-    mask.innerHTML = FULL
+    setMarkup(mask, FULL)
     block.style.clipPath = ''
     open = null
     pop.classList.add('tour-welcome')
@@ -412,7 +421,7 @@ export function createTour(snaps: Snaps): Tour {
       <p class="tour-body">Would you like a product tour?</p>
       <div class="tour-foot">${btn('skip', 'btn-ghost tour-skip', 'Skip to the workbench')}<span class="tour-spacer"></span>${btn('begin', 'btn-primary', 'Take the tour')}</div>`
     if (pop.dataset.html !== html) {
-      pop.innerHTML = html
+      setMarkup(pop, html)
       pop.dataset.html = html
       pop.querySelector<HTMLElement>('.btn-primary')?.focus({ preventScroll: true })
     }
@@ -528,7 +537,7 @@ export function createTour(snaps: Snaps): Tour {
           el.dataset.demo = '1'
           fx.append(el)
         }
-        el.innerHTML = cursorSvg(cmd)
+        setMarkup(el, cursorSvg(cmd))
         x = nx
         y = ny
         put()
@@ -553,12 +562,12 @@ export function createTour(snaps: Snaps): Tour {
       cmd(on, at = null) {
         cmd = on
         keyAt = at
-        if (el) el.innerHTML = cursorSvg(on)
+        if (el) setMarkup(el, cursorSvg(on))
         if (on && !key) {
           key = document.createElement('div')
           key.className = 'tour-key tour-in'
           key.dataset.demo = '1'
-          key.innerHTML = `<b>${MAC ? '⌘' : 'Ctrl'}</b><span>held down</span>`
+          setMarkup(key, `<b>${MAC ? '⌘' : 'Ctrl'}</b><span>held down</span>`)
           fx.append(key)
         }
         if (!on && key) {
@@ -594,7 +603,7 @@ export function createTour(snaps: Snaps): Tour {
     const w = document.createElement('div')
     if (wrapCls) w.className = wrapCls
     const own = name ? snaps[name] : ''
-    w.innerHTML = raw ?? (typeof own === 'string' ? own : '')
+    setMarkup(w, raw ?? (typeof own === 'string' ? own : ''))
     for (const el of keepAnchors ? [] : w.querySelectorAll('*')) {
       for (const a of [...el.attributes]) {
         if (RENAME.has(a.name)) {
@@ -784,7 +793,7 @@ export function createTour(snaps: Snaps): Tour {
     if (run && !run.ready) {
       if (last !== 'pending') {
         last = 'pending'
-        mask.innerHTML = FULL
+        setMarkup(mask, FULL)
         pop.style.visibility = 'hidden'
         block.style.clipPath = ''
         open = null
@@ -1018,11 +1027,13 @@ export function createTour(snaps: Snaps): Tour {
     root = document.createElement('div')
     root.className = 'tour-root'
     // the examples sit under the dim, like the page, so only the cutouts show them in full
-    root.innerHTML =
+    setMarkup(
+      root,
       '<div class="tour-ex"></div><svg class="tour-dim" aria-hidden="true"><defs><mask id="tour-mask" maskUnits="userSpaceOnUse"></mask></defs>' +
       '<rect class="tour-dim-fill" x="0" y="0" width="100%" height="100%" mask="url(#tour-mask)"/></svg>' +
       '<div class="tour-block"></div><div class="tour-fx"></div>' +
-      '<div class="tour-pop" role="dialog" aria-label="thimble tour"></div>'
+      '<div class="tour-pop" role="dialog" aria-label="thimble tour"></div>',
+    )
     mask = root.querySelector('mask')!
     block = root.querySelector('.tour-block')!
     ex = root.querySelector('.tour-ex')!

@@ -1,7 +1,7 @@
 // The tour's steps (the shape engine.ts takes): which surface each needs, what it points at, where its popover sits,
 // what it says and what it brings. Every example is the tour's own (examples.json, captured from real thimble markup
 // and marked Example); a step that asks the analyst to act acts only on that example, so nothing reaches the server.
-import type { Api, Example, Step } from './engine'
+import { setMarkup, type Api, type Example, type Step } from './engine'
 
 const canvasPanel = '[data-panel="canvas"].shell-panel'
 const filesPanel = '[data-panel="files"].shell-panel'
@@ -51,13 +51,15 @@ const sessionExample = (api: Api): Example => {
   // its background covers the real chat beneath, under the dim, below the cutout too
   ex.dataset.ground = '1'
   ex.style.background = api.groundOf(list)
-  ex.insertAdjacentHTML('beforeend', `<div class="chat-list" style="margin: 0; padding: 14px 12px 12px; overflow: hidden"></div>`)
-  const inner = ex.firstElementChild as HTMLElement
-  api.tag(inner)
-  inner.insertAdjacentHTML('beforeend', chatHtml)
+  const inner = document.createElement('div')
+  inner.className = 'chat-list'
+  inner.style.cssText = 'margin: 0; padding: 14px 12px 12px; overflow: hidden'
+  setMarkup(inner, chatHtml)
+  inner.prepend(api.tag(inner))
+  ex.append(inner)
   const term = document.createElement('div')
   term.className = 'tour-term'
-  term.innerHTML = termHtml
+  setMarkup(term, termHtml)
   api.tag(term.querySelector<HTMLElement>('.tour-term-bar')!)
   Object.assign(term.style, { visibility: 'hidden', opacity: '0' })
   api.ex.append(ex, term)
@@ -257,8 +259,13 @@ const labelsExample = (api: Api): Example => {
         sd = api.rectOf(api.q('.files-side'))
       if (p && sd) r = { x: sd.x + sd.width, y: sd.y, width: p.x + p.width - sd.x - sd.width, height: sd.height }
     }
-    if (r) Object.assign(rd.style, { left: `${r.x}px`, top: `${r.y}px`, width: `${r.width}px`, height: `${r.height}px` })
+    // in a narrow Files panel thimble hides its sidebar: the example's Labels pane then takes the reader's left 250 px
     const L = api.rectOf(api.q('.files-labels'))
+    if (r && !L) {
+      Object.assign(lab.style, { left: `${r.x}px`, width: '250px', top: `${r.y + r.height - lab.offsetHeight}px` })
+      r = { x: r.x + 251, y: r.y, width: r.width - 251, height: r.height }
+    }
+    if (r) Object.assign(rd.style, { left: `${r.x}px`, top: `${r.y}px`, width: `${r.width}px`, height: `${r.height}px` })
     if (L) Object.assign(lab.style, { left: `${L.x}px`, width: `${L.width}px`, top: `${L.y + L.height - lab.offsetHeight}px` })
     // opened a little way down, where both labels show
     if (scrolled < 30) {
@@ -300,8 +307,10 @@ const reportExample = (api: Api): Example => {
     ]
     const table = fig.querySelector('table')
     if (table)
-      table.innerHTML =
-        '<thead><tr><th>When</th><th>Connections in use</th><th>Version running</th></tr></thead><tbody>' + rows.map(([a, b, c]) => `<tr><th>${a}</th><td>${b}</td><td>${c}</td></tr>`).join('') + '</tbody>'
+      setMarkup(
+        table,
+        '<thead><tr><th>When</th><th>Connections in use</th><th>Version running</th></tr></thead><tbody>' + rows.map(([a, b, c]) => `<tr><th>${a}</th><td>${b}</td><td>${c}</td></tr>`).join('') + '</tbody>',
+      )
     const cap = fig.querySelector<HTMLElement & { value?: string }>('.wu-fig-caption')
     const text = 'The database came close to its limit only while version 4.12.0 was running.'
     if (cap) {
@@ -388,7 +397,7 @@ export function tourSteps(key: string): Step[] {
       body: 'This chat is your Claude Code session: ask it anything about the files.',
     },
     {
-      tab: 'files', needsChat: true, terminal: true, example: sessionExample, place: 'left', align: 'start', pad: 0, radius: 10,
+      tab: 'files', needsChat: true, terminal: true, example: sessionExample, place: ['left', 'bottom'], align: 'start', pad: 0, radius: 10,
       anchor: (api) => [api.els.term, chatContent(api)],
       title: 'Your terminal',
       body: 'The session also runs in the terminal where you started thimble. It shows the same conversation, and you can type in either.',
@@ -533,7 +542,7 @@ export function tourSteps(key: string): Step[] {
       },
     },
     {
-      sub: true, tab: 'canvas', try: true, nextWhenGone: true, backOnEsc: true, place: 'right', align: 'center', pad: 6,
+      sub: true, tab: 'canvas', try: true, nextWhenGone: true, backOnEsc: true, place: ['right', 'left', 'bottom', 'top'], align: 'center', pad: 6,
       noSend: () => true,
       // the card with its highlight and the ask box the page's own pointer drew on it
       anchor: (api) => {
