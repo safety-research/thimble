@@ -14,7 +14,7 @@ import { TipButton } from '../components/Tooltip'
 import { teleport } from '../lib/teleport'
 import { hhmm } from '../lib/time'
 import type { Concept, ConceptRun } from '../lib/types'
-import { classesOf, colourVar, isFilesLabel, isMultiClass, labelStatus, laneTags, mainColour, outcomeText, progressText, type LabelFilter, type LabelStatus } from './labels'
+import { classesOf, colourVar, isFilesLabel, isMultiClass, labelStatus, laneTags, mainColour, outcomeText, progressText, unitWord, type LabelFilter, type LabelStatus } from './labels'
 import { LabelMark } from './LabelMark'
 import { LabelPalette } from './LabelPalette'
 import type { FilesLabels } from './useLabels'
@@ -147,7 +147,7 @@ function LabelRow({ label: k, on, n, focused, marked, editing, status, labels, o
         <Button variant="icon" size="sm" icon="more-horizontal" title="Edit label" aria-label={`Edit ${k.name}`} className="files-label-edit" active={editing} onClick={() => onEdit(editing ? null : k.id)} />
       </div>
       {files && <LabelPalette label={k} anchor={paletteAt} open={picking} onClose={() => setPicking(false)} onPick={(value, n) => labels.setColour(k.id, value, n)} />}
-      {status && <LabelStatusLine status={status} name={k.name} onRetry={() => onRetry(k.id)} />}
+      {status && <LabelStatusLine status={status} name={k.name} marked={k.n_reviewed ?? 0} onRetry={() => onRetry(k.id)} />}
       {files && on && classes.length > 2 && (
         <div className="files-label-classes">
           {classes.map((c, i) => (
@@ -179,8 +179,9 @@ function FilterButton({ pressed, label, onClick }: { pressed: boolean; label: st
   return <Button variant="icon" size="sm" icon="filter" title={pressed ? 'Show all records' : 'Show only these records'} aria-label={label} active={pressed} className="files-label-filter" onClick={onClick} />
 }
 
-/** The line under a label's name: the run's progress, its outcome, or its failure with Retry. */
-function LabelStatusLine({ status: s, name, onRetry }: { status: LabelStatus; name: string; onRetry: () => Promise<void> }) {
+/** The line under a label's name: the run's progress, its outcome with how many records the analyst marked by hand (in
+ * a view, the Files reader or the label's card), or its failure with Retry. */
+function LabelStatusLine({ status: s, name, marked, onRetry }: { status: LabelStatus; name: string; marked: number; onRetry: () => Promise<void> }) {
   const [retrying, setRetrying] = useState(false)
   if (s.state === 'running') {
     const share = s.total ? Math.min(1, s.done / s.total) : null
@@ -224,6 +225,11 @@ function LabelStatusLine({ status: s, name, onRetry }: { status: LabelStatus; na
             {hhmm(s.ts)}
           </time>
         </>
+      )}
+      {marked > 0 && (
+        <span className="files-label-marked">
+          {marked.toLocaleString()} {unitWord(s.unit, marked)} marked by hand
+        </span>
       )}
     </div>
   )

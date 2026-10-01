@@ -258,6 +258,8 @@ export interface Concept {
   version?: number
   counts?: Record<string, number>
   n_labeled?: number
+  /** the records the analyst gave a value by hand that the label's run labelled too */
+  n_reviewed?: number
   /** a label over files: what it marks; null for a label of cards or report sentences */
   marks?: LabelMarks | null
   /** what it applies to: comma-separated globs */
