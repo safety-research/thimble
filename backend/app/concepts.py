@@ -4396,8 +4396,13 @@ async def draft_task(c: str, inp: dict, *, model: str | None = None) -> Any:
 
 
 def _call_failed(call: Any) -> HTTPException:
-    """A labels call that gave no output, as the error the bar shows: 429 at capacity, else 502 with its detail."""
+    """A labels call that gave no output, as the error the bar shows: 429 at capacity, else 502 with its detail, which
+    names the extension's program when one ran the task (tasks.call)."""
+    from . import tasks  # noqa: PLC0415
+
     status = 429 if call.status == "rate_limited" else 502
+    if tasks.by_program(call):
+        return HTTPException(status, f"{call.model_requested} gave no label: {call.detail or 'no detail'}")
     return HTTPException(status, f"the labels model gave no label ({call.status}): {call.detail or 'no detail'}")
 
 

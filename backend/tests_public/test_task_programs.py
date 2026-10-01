@@ -151,7 +151,7 @@ def test_the_example_vote_labels_program_runs_the_labels_task_once_per_model(tmp
 
 PROBE = '''import json, os, sys, thimble
 def run(input):
-    kind = input.get("kind")
+    kind = input.get("kind") or ("fail" if "description" in input else "")
     if kind == "env":
         return {"labels": [{"i": 1, "label": os.environ["THIMBLE_TASK"] + "/" + os.environ["THIMBLE_ROLE"],
                             "confidence": 1}]}
@@ -181,6 +181,10 @@ async def test_a_task_program_s_output_is_checked_and_a_failing_one_fails_the_ca
     assert refused.status == "error" and "add_card is not one of" in refused.detail
     work = config.workspace_dir(CORPUS).joinpath(*harness.TASK_WORK)
     assert not work.is_dir() or not any(work.iterdir()), "each run's work folder goes when it ends"
+    active[:] = [_program(tmp_path / "draft", "probe", "label-draft", PROBE)]
+    with pytest.raises(concepts.HTTPException) as got:
+        await concepts.draft_route(CORPUS, concepts.DraftBody(text="curt messages", paths=["*.jsonl"]))
+    assert got.value.detail.startswith("probe's label-draft program gave no label: "), got.value.detail
 
 
 DEFAULT = '''import thimble

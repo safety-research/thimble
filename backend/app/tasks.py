@@ -164,6 +164,14 @@ def output_problem(output: Any, schema: dict[str, Any] | None) -> str:
     return f"{err.message}" + (f" at {at}" if at else "")
 
 
+PROGRAM_WHO = "{extension}'s {task} program"  # a program's CallResult's model_requested
+
+
+def by_program(res: Any) -> bool:
+    """Whether a CallResult of call() came from an extension's program."""
+    return str(getattr(res, "model_requested", "") or "").endswith(" program")
+
+
 async def call(c: str, task: str, input: dict[str, Any], *, schema: dict[str, Any] | None = None,  # noqa: A002
                **kw: Any) -> Any:
     """Run `task` on `input` in workspace `c`: the program that replaces it here (program()), else thimble's own with
@@ -174,7 +182,7 @@ async def call(c: str, task: str, input: dict[str, Any], *, schema: dict[str, An
     part = program(c, task)
     if part is None:
         return await default(c, task, input, **kw)
-    who = f"{part.extension}'s {task} program"
+    who = PROGRAM_WHO.format(extension=part.extension, task=task)
     try:
         out = await harness.run_task(c, task, part, input)
     except (harness.HarnessError, RuntimeError, OSError) as e:
