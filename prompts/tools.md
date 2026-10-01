@@ -860,7 +860,7 @@ its text and graphics span {used} of its {width} px, so the rest of the pane is 
 
 ## view-derived-unlisted
 
-Fields of the records the reader answered hold values that the lines they cite do not, and `derived` does not list them: {fields}. The analyst counts on that list to tell what the files say from what the reader made of them. List each of these fields in `derived` in view.json, with `from` and `how`, `"kind": "inferred"` for a value the files do not state, and `key` when the analyst knows the field by another name, or return it from the reader's derived(index).
+Fields of the records the reader answered hold values that the lines they cite do not, and they are not listed as derived: {fields}. The analyst counts on that list to tell what the files say from what the reader made of them. Mark each of these fields in view.json's `records` with `"derived": "cleaned"`, or `"computed"` for a value the files do not state, and give it `from` and `how`, each a short plain phrase without semicolons, or return it from the reader's derived(index).
 
 ## check-unread
 

@@ -365,7 +365,7 @@ async def test_a_field_whose_values_the_cited_lines_do_not_hold_fails_the_checks
     views.write_view(CORPUS, "threads", reader=DERIVING_READER, html=THREADS_HTML, **VIEW)
     rep = await views.gate(CORPUS, "threads", ["board.jsonl#L3"])
     assert not rep["ok"], views.gate_lines(rep)
-    noted = [n for n in rep["problems"] if "`derived`" in n]
+    noted = [n for n in rep["problems"] if "listed as derived" in n]
     assert len(noted) == 1 and "author ('ADA' on board.jsonl#L1)" in noted[0] and "score (" in noted[0], noted
     assert "flagged (" in noted[0] and "topics (" in noted[0], "a true or false and a list the lines do not hold"
     for field in ("body", "replies", "thread_key", "mood", "words"):
@@ -376,8 +376,25 @@ async def test_a_field_whose_values_the_cited_lines_do_not_hold_fails_the_checks
                                             {"field": "flagged", "from": "body", "how": "a classifier", "kind": "inferred"},
                                             {"field": "topics", "from": "body", "how": "a classifier", "kind": "inferred"}]})
     rep = await views.gate(CORPUS, "threads", ["board.jsonl#L3"])
-    assert rep["ok"] and not [n for n in rep["problems"] + rep["notes"] if "`derived`" in n], views.gate_lines(rep)
+    assert rep["ok"] and not [n for n in rep["problems"] + rep["notes"] if "listed as derived" in n], views.gate_lines(rep)
     assert [d["field"] for d in rep["coverage"]["derived"]] == ["score", "flagged", "topics", "author"], "inferred first"
+    # the schema's form: `scope`, and each derived field marked in `records`
+    d = views.views_dir(CORPUS) / "threads"
+    old = json.loads((d / "view.json").read_text())
+    (d / "view.json").write_text(json.dumps({
+        "name": old["name"], "description": old["description"], "scope": old["claims"], "accepts": old["accepts"],
+        "units": old["units"], "libs": [],
+        "records": [{"name": "post", "one": "one post", "fields": [
+            {"name": "ref", "type": "ref"}, {"name": "body", "type": "text"},
+            {"name": "author", "type": "category", "derived": "cleaned", "from": "author", "how": "upper-cased"},
+            {"name": "score", "type": "number", "derived": "computed", "from": "body", "how": "its length"},
+            {"name": "flagged", "type": "category", "derived": "computed", "from": "body", "how": "a classifier"},
+            {"name": "topics", "type": "list", "derived": "computed", "from": "body", "how": "a classifier"}]}]}))
+    views._memo.clear()
+    rep = await views.gate(CORPUS, "threads", ["board.jsonl#L3"])
+    assert rep["ok"], views.gate_lines(rep)
+    assert [d["field"] for d in rep["coverage"]["derived"]] == ["score", "flagged", "topics", "author"]
+    assert [d["kind"] for d in rep["coverage"]["derived"]] == ["inferred"] * 3 + [""]
     assert views._exempt("files", 3) and views._exempt("n_calls", 2), "a count needs no entry"
     assert not views._exempt("ts", 1781741180000) and not views._exempt("status", 200), "a short or singular name is no count"
 

@@ -724,7 +724,7 @@ def source_problems(claims: Any, reader: str, html: str, libs: Any) -> list[str]
     reader that does not parse or lacks one of its three functions, a library that is no package."""
     out: list[str] = []
     if not _str_list(claims):
-        out.append("a view claims at least one file: give `claims` in view.json as corpus-relative globs")
+        out.append("a view reads at least one file: give `scope` in view.json as corpus-relative globs")
     for label, text in ((READER_PY, reader), (VIEW_HTML, html)):
         if not text.strip():
             out.append(f"{label} is empty")
@@ -2608,7 +2608,8 @@ async def _gate(c: str, slug: str, locators: list[str] | None, *, shot_dir: Path
         return {"ok": False, "view": None, "problems": [f"{d / VIEW_JSON} does not exist yet"], "checks": [], "page": None}
     raw = _view_json(d)
     text = {n: (d / n).read_text("utf-8", errors="replace") if (d / n).is_file() else "" for n in (READER_PY, VIEW_HTML)}
-    problems = source_problems(raw.get("claims"), text[READER_PY], text[VIEW_HTML], raw.get("libs"))
+    problems = source_problems(raw.get("claims") if raw.get("claims") is not None else raw.get("scope"),
+                               text[READER_PY], text[VIEW_HTML], raw.get("libs"))
     # a change to a built view starts from files that carry thimble's own stamp, so it is no sign of a session's
     # writing there (a session that removes it is fine too; mark_built stamps the view again)
     if raw.get("built") and (prop := read_proposal(c, slug)) is not None and prop.get("status") != "built" \
