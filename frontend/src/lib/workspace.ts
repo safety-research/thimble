@@ -146,12 +146,12 @@ export function syncInstance(ws: string, stamp: string | null): boolean {
   return cleared
 }
 
-/** A folder as the top bar prints it: the home folder as ~. Pure. */
 /** The folder a corpus shows as: the path the analyst opened it by (`shown`, through a symlink), else its folder. */
 export function shownPath(c: { path?: string; shown?: string } | null | undefined): string | null {
   return c?.shown || c?.path || null
 }
 
+/** A folder as the top bar prints it: the home folder as ~. Pure. */
 export function shortPath(path: string): string {
   const m = /^\/(?:home|Users)\/[^/]+(\/.*)?$/.exec(path)
   return m ? `~${m[1] ?? ''}` : path

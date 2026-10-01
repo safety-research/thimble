@@ -251,3 +251,43 @@ def test_the_cli_tells_the_symlink_only_when_the_callers_folder_is_the_corpus(tm
     assert cli.caller_alias(real) == (False, None), "main's shell in another folder tells nothing"
     monkeypatch.delenv("THIMBLE_CALLER_CWD")
     assert cli.caller_alias(real) == (False, None)
+
+
+def test_the_cli_registers_a_folder_again_only_when_the_path_the_analyst_used_changed(tmp_path, monkeypatch):
+    """/thimble in a folder thimble knows asks the server to record the path the analyst used (or to clear it) only
+    when the record says otherwise; main's shell in a folder below, or no server, sends nothing."""
+    import json
+
+    from app import cli
+
+    real = (tmp_path / "store" / "village").resolve()
+    (real / "logs").mkdir(parents=True)
+    link = tmp_path / "village-link"
+    link.symlink_to(real)
+    data = tmp_path / "data"
+    data.mkdir()
+    sidecar = data / "village.corpus.json"
+    sidecar.write_text(json.dumps({"name": "village", "path": str(real)}))
+    sent: list[dict] = []
+
+    def request(method, url, body=None, timeout=5.0):
+        sent.append(body)
+        rec = {"name": "village", "path": body["path"], **({"shown": body["shown"]} if body.get("shown") else {})}
+        sidecar.write_text(json.dumps(rec))
+        return 201, rec
+
+    monkeypatch.setattr(cli, "_request", request)
+
+    def opened(cwd: Path) -> tuple[str | None, bool]:
+        monkeypatch.setenv("THIMBLE_CALLER_CWD", str(cwd))
+        return cli.open_workspace(cwd, data, "http://127.0.0.1:1")
+
+    assert opened(link) == ("village", False)
+    assert sent == [{"path": str(real), "shown": str(link)}]
+    assert opened(link) == ("village", False) and len(sent) == 1, "the record says it already"
+    assert opened(link / "logs") == ("village", False) and len(sent) == 1, "main's shell in a folder below"
+    monkeypatch.setenv("THIMBLE_CALLER_CWD", str(real))
+    assert cli.open_workspace(real, data, None) == ("village", False) and len(sent) == 1, "no server"
+    assert opened(real) == ("village", False)
+    assert sent[-1] == {"path": str(real), "shown": None}
+    assert "shown" not in json.loads(sidecar.read_text())
