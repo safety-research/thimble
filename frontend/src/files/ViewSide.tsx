@@ -173,7 +173,7 @@ export function AddLabelControls({ ws, view }: { ws: string; view: BuiltView }) 
   useEffect(() => setAsked(false), [view.slug])
   const ask = () => {
     setAsked(true)
-    track('view-open', { target: `view:${view.slug}`, detail: { from: 'labels-side', to: 'add-label-controls' } })
+    track('view-build', { target: `view:${view.slug}`, detail: { change: 'label controls' } })
     api
       .messageView(ws, view.slug, ADD_LABEL_CONTROLS)
       .then(() => refreshProposals(ws))
