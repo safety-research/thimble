@@ -927,13 +927,14 @@ def install_views(c: str) -> list[str]:
 
 
 def orientation_ran(c: str) -> bool:
-    """Whether an orientation has a session and a thread in workspace `c`, which a follow-up can resume
-    (orient_session._chat_of)."""
-    from . import agents, orientation  # noqa: PLC0415
+    """Whether an orientation has a session, a thread and a transcript in workspace `c`, which a follow-up can resume
+    (orient_session._chat_of and resume)."""
+    from . import agents, orientation, session  # noqa: PLC0415
 
     rec = orientation.read_run(c) or {}
     chat = str((rec.get("chats") or {}).get(orientation.ROLE) or "")
-    return bool(rec.get("session") and chat and agents.meta_or_none(c, chat) is not None)
+    sid = str(rec.get("session") or "")
+    return bool(sid and chat and agents.meta_or_none(c, chat) is not None and session.find_transcript(sid))
 
 
 def offered(c: str, state: dict[str, Any] | None = None) -> list[str]:
