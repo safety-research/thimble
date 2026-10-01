@@ -173,3 +173,31 @@ async def test_a_dev_turn_waiting_for_an_answer_keeps_its_wait_while_the_transcr
         await asyncio.wait_for(turn, 1)
     assert time.monotonic() - began < 1.5, "each line restarted the wait for an answer"
     assert sum("waiting for an answer" in s for s in stages) == 1
+
+
+async def test_a_dev_turn_s_time_limit_leaves_out_the_time_its_requests_wait_on_the_card(tmp_path, monkeypatch):
+    from app import agent_session
+
+    tx = tmp_path / "ab12cd34-0000.jsonl"
+    tx.write_text("")
+    fake = _Sessions(tx)
+    monkeypatch.setattr(dev, "SESSIONS", fake)
+    monkeypatch.setattr(dev, "POLL_S", 0.01)
+    monkeypatch.setattr(dev, "STATE_GAP_MAX_S", 0.04)
+    card = {"on": True}
+    monkeypatch.setattr(agent_session, "asking", lambda c, key: card["on"] and key == "ticket:t1")
+    run = dev.Run("t1", "a ticket", "now")
+    turn = asyncio.get_running_loop().create_task(dev._worker_turn(run, dev.Log(None), tmp_path, "do it", None,
+                                                                    name="thimble:dev", workspace=CORPUS,
+                                                                    on_session=lambda a, b: None,
+                                                                    turn_timeout_s=0.3, asking={"key": "ticket:t1"}))
+    await asyncio.sleep(0.6)  # the analyst takes longer to answer than the turn may run
+    assert not turn.done(), "the time on the card counted toward the turn's limit"
+    card["on"] = False
+    with tx.open("a") as f:
+        f.write(json.dumps({"type": "assistant", "message": {"content": [{"type": "text", "text": "done"}]}}) + "\n")
+    await asyncio.sleep(0.1)
+    fake.now = "idle"
+    with tx.open("a") as f:
+        f.write(json.dumps({"type": "system", "subtype": "turn_duration"}) + "\n")
+    assert await asyncio.wait_for(turn, 2) == "done"

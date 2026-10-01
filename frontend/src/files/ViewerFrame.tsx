@@ -654,7 +654,6 @@ export function ViewerFrame({ ws, slug, targetRef, path, pathPicked, title, fit,
       className={'viewer-frame' + (className ? ` ${className}` : '')}
       sandbox="allow-scripts"
       allow="fullscreen"
-      allowFullScreen
       srcDoc={doc}
       title={title}
       style={fit && height ? { height } : undefined}
