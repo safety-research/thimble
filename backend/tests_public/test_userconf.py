@@ -23,7 +23,7 @@ def test_the_workspace_s_file_overrides_the_home_s_key_by_key_and_errors_name_th
     _write(userconf.workspace_file(CORPUS), {"agents": {"dev": {"web": "allow"}}})
     conf = userconf.load(CORPUS)
     assert conf["installs"] == "deny" and conf["agents"]["dev"]["model"] == "claude-opus-4-8"
-    assert conf["agents"]["dev"]["web"] == "allow" and conf["agents"]["dev"]["network"] == "off"
+    assert conf["agents"]["dev"]["web"] == "allow" and conf["agents"]["dev"]["network"] == "on"
     assert config.models_for(CORPUS)["dev"]["model"] == "claude-opus-4-8"
     _write(userconf.global_file(), {"installs": "alow", "agents": {"labels": {"web": "off"}, "dev": {"effort": "huge"}}})
     with pytest.raises(userconf.ConfigError) as e:
@@ -111,7 +111,7 @@ def test_what_a_session_gets_from_the_config(workspaces_tmp, monkeypatch):
     monkeypatch.setenv("THIMBLE_SANDBOX", "0")
     with pytest.raises(userconf.ConfigError, match="THIMBLE_SANDBOX=0 turns it off"):
         userconf.session(CORPUS, "writer")
-    _write(userconf.global_file(), {"installs": "allow", "sandbox": {"enforce": False}})
+    _write(userconf.global_file(), {"installs": "allow", "sandbox": {"enforce": False}, "agents": {"dev": {"network": "off"}}})
     assert "Bash" in userconf.session(CORPUS, "dev").settings()["permissions"]["ask"]
     assert "Bash" not in (userconf.session(CORPUS, "orientation").settings()["permissions"].get("ask") or [])
     _write(userconf.global_file(), {"sandbox": {"enforce": False}, "agents": {"dev": {"network": "on"}}})

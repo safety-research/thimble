@@ -27,9 +27,12 @@ def board(tmp_path, monkeypatch, workspaces_tmp) -> Path:
 def test_a_view_build_s_session_may_read_the_corpus_and_asks_before_it_changes_it(board, monkeypatch):
     """The session runs in the corpus folder with Edit and Bash allowed, so its flags deny edits in the worked examples,
     ask about each edit in the corpus as the dev agent's `data` says by default (and keep its sandboxed Bash from writing
-    there), and put Bash in the sandbox with no network where it can run, beside the dev role's fast mode, with its
-    check command the one command run outside the sandbox; the prompt names that same command."""
+    there), and put Bash in the sandbox, with no network when its network is off, beside the dev role's fast mode, with
+    its check command the one command run outside the sandbox; the prompt names that same command."""
     monkeypatch.setenv("THIMBLE_SANDBOX", "1")
+    offline = {"agents": {"dev": {"network": "off"}}}
+    userconf.global_file().parent.mkdir(parents=True, exist_ok=True)
+    userconf.global_file().write_text(json.dumps(offline))
     monkeypatch.setattr(config, "models_for", lambda c=None: {"dev": {"model": "claude-opus-4-8", "fast": True}})
     corpus = config.corpus_dir(CORPUS)
     folder = views.views_dir(CORPUS) / "posts"
@@ -42,12 +45,10 @@ def test_a_view_build_s_session_may_read_the_corpus_and_asks_before_it_changes_i
     box = settings["sandbox"]
     assert str(corpus) in box["filesystem"]["denyWrite"]
     assert conf.verdict("Write", {"file_path": str(corpus / "board.jsonl")}) == "ask"
-    _config_data = {"agents": {"dev": {"data": "off"}}}
-    userconf.global_file().parent.mkdir(parents=True, exist_ok=True)
-    userconf.global_file().write_text(json.dumps(_config_data))
+    userconf.global_file().write_text(json.dumps({"agents": {"dev": {"data": "off", "network": "off"}}}))
     off = dev.view_fence(CORPUS, "posts", corpus, folder, dev.dev_config(CORPUS, sandbox=True))
     assert off["permissions"]["deny"][:2] == [f"Edit(/{corpus}/**)", f"Edit(/{views.EXAMPLES_DIR}/**)"]
-    userconf.global_file().unlink()
+    userconf.global_file().write_text(json.dumps(offline))
     assert box["network"] == {"deniedDomains": ["*"]} and not box["allowUnsandboxedCommands"]
     check = dev.view_check_command(CORPUS, "posts")
     assert box["excludedCommands"] == [check, f"{check} *"] and check.endswith(f"/api/ws/{CORPUS}/views/posts/check")
@@ -64,7 +65,8 @@ def test_a_view_build_s_session_may_read_the_corpus_and_asks_before_it_changes_i
 
 
 def test_a_code_ticket_s_session_runs_in_the_sandbox_writing_its_worktree_and_its_commits(board, monkeypatch, tmp_path):
-    """A code ticket's Bash runs in the sandbox with no network. Beside its worktree it writes only what a commit there
+    """A code ticket's Bash runs in the sandbox, with no network when the dev agent's is off. Beside its worktree it
+    writes only what a commit there
     writes into the checkout's git folder: the objects, the ticket branch's ref and log, and the worktree's own git
     folder, so the git folder's hooks and config stay read-only. It cannot reach the stack, so its prompt asks for no
     shots."""
@@ -81,6 +83,8 @@ def test_a_code_ticket_s_session_runs_in_the_sandbox_writing_its_worktree_and_it
     git("add", "a.txt")
     git("commit", "-qm", "a")
     git("worktree", "add", "-q", "-b", "dev/7", str(wt))
+    userconf.global_file().parent.mkdir(parents=True, exist_ok=True)
+    userconf.global_file().write_text(json.dumps({"agents": {"dev": {"network": "off"}}}))
     conf = dev.dev_config(CORPUS, sandbox=True)
     fence = dev.ticket_fence(wt, conf.network)
     box, common = fence["sandbox"], (repo / ".git").resolve()
@@ -98,15 +102,15 @@ def test_a_code_ticket_s_session_runs_in_the_sandbox_writing_its_worktree_and_it
 
 @pytest.mark.parametrize("sandbox", ["1", "0"])
 def test_a_view_build_stays_off_the_network_in_every_mode(board, monkeypatch, tmp_path, sandbox):
-    """With the dev agent's network off, as by default, a view build's session has no web tools, and deny rules, which
+    """With the dev agent's network off in thimble's config, a view build's session has no web tools, and deny rules, which
     hold in every permission mode, refuse the commands that reach the network or install software: by name, at a path,
     as a module and in a nested shell. Its Bash commands find the package managers offline and every connection refused
     but loopback's. Where the sandbox cannot run and the config lets the agents run without it, every Bash command but
     its check goes to the analyst, in Bypass too, and so does every Bash command of a code ticket's session."""
     monkeypatch.setenv("THIMBLE_SANDBOX", sandbox)
-    if sandbox == "0":
-        userconf.global_file().parent.mkdir(parents=True, exist_ok=True)
-        userconf.global_file().write_text(json.dumps({"sandbox": {"enforce": False}}))
+    userconf.global_file().parent.mkdir(parents=True, exist_ok=True)
+    off = {"agents": {"dev": {"network": "off"}}}
+    userconf.global_file().write_text(json.dumps({**off, "sandbox": {"enforce": False}} if sandbox == "0" else off))
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "cc"))
     corpus, folder = config.corpus_dir(CORPUS), views.views_dir(CORPUS) / "posts"
     conf = dev.dev_config(CORPUS, sandbox=True)

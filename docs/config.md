@@ -14,7 +14,7 @@ thimble changes none of Claude Code's settings. Your own Claude Code settings st
   "agents": {
     "orientation": { "model": "claude-opus-5-5", "effort": "ultracode" },
     "writer": { "data": "off" },
-    "dev": { "web": "off", "network": "off" }
+    "dev": { "web": "off" }
   }
 }
 ```
@@ -54,7 +54,7 @@ An extension's agent has the entry `"<extension>:<agent>"`, such as `"swarm:swar
 | `fast` | `true`, `false` | per agent | Fast mode, on models that have it. |
 | `permissionMode` | `"manual"`, `"auto"`, `"bypass"` | `null`: your Claude Code session's mode | Manual asks you about each call that isn't already allowed. Auto lets Claude Code's classifier decide. Bypass allows every call that would otherwise ask you, except the ones `installs` and `network` send to you. The permission-mode rows in Settings edit this key. |
 | `web` | `"ask"`, `"off"`, `"allow"` | `"ask"`; `"off"` for `dev` | WebFetch and WebSearch. `"ask"` follows the permission mode: in Manual each fetch or search goes to you, except for sites you allowed for the workspace. `"off"` removes both tools. `"allow"` runs them unasked in every mode, so the agent can send text from your corpus to any website. |
-| `network` | `"off"`, `"on"` | `"on"`; `"off"` for `dev` | Network access for the agent's Bash, and for an extension's program that runs the agent. With `"off"`, Bash has no network where the sandbox runs. Where it doesn't run (see `sandbox`), the dev agent's commands go to you first in every mode, and the other agents' Bash follows their permission mode, so in Auto or Bypass it can reach the network. With `"off"`, view builds also refuse network and install tools and run with package managers set offline; these rules catch mistakes, but they can't stop a command written to get around them. `"on"` lets Bash reach the network, as far as your own Claude Code sandbox settings allow. |
+| `network` | `"off"`, `"on"` | `"on"` | Network access for the agent's Bash, and for an extension's program that runs the agent. With `"off"`, Bash has no network where the sandbox runs. Where it doesn't run (see `sandbox`), the dev agent's commands go to you first in every mode, and the other agents' Bash follows their permission mode, so in Auto or Bypass it can reach the network. With `"off"`, view builds also refuse network and install tools and run with package managers set offline; these rules catch mistakes, but they can't stop a command written to get around them. `"on"` lets Bash reach the network, as far as your own Claude Code sandbox settings allow. |
 | `sandbox` | `"on"`, `"off"` | `"on"` | `"off"` runs this agent's Bash, and an extension's program that runs it, outside the sandbox, so they can write anywhere you can. `sandbox.enforce` then doesn't stop the agent. |
 | `data` | `"ask"`, `"allow"`, `"off"` | `"ask"` | Edits of files in the corpus. `"ask"` sends each one to you in every permission mode, Bypass and Auto included. `"allow"` leaves them to the permission mode, and in the sandbox Bash can write the corpus too. `"off"` refuses them. |
 | `env` | a list of environment variable names, such as `["OPENAI_API_KEY"]` | `[]` | Variables of thimble's server that an extension's program running this agent gets, such as the API key of a harness that brings its own model. A program gets no other variable of yours. |

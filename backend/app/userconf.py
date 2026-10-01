@@ -72,7 +72,7 @@ DEFAULTS: dict[str, Any] = {
         "critic": _session_agent("ask"),
         "writer": _session_agent("ask"),
         "checks": _session_agent("ask"),
-        "dev": _session_agent("off", network="off"),
+        "dev": _session_agent("off"),
         **{a: {"model": None, "effort": None, "fast": None, "prompt": None} for a in CALLS},
     },
 }

@@ -96,7 +96,7 @@ its own included.
 
 - **Sandbox** (`sandbox`, on by default): the program runs in Anthropic's sandbox runtime and writes only its own
   folder (and, for the dev agent, the view's folder). Off, it writes anywhere you can.
-- **Network** (`network`, on by default, off for dev): off, the program reaches no host and talks to thimble only on
+- **Network** (`network`, on by default): off, the program reaches no host and talks to thimble only on
   stdin and stdout, so `session` and `ask` work and the Agent SDK's own sessions do not.
 - **Your data** (`data`, `ask` by default): an edit of a file in the corpus goes to you first in every permission mode.
   `allow` leaves it to the permission mode, and `off` refuses it. The program itself can't ask, so in its sandbox it
