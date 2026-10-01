@@ -102,15 +102,16 @@ def test_a_tray_entry_s_hand_back_shows_nothing_in_main_s_chat_and_a_session_s_m
     agents.ensure_main(CORPUS)
     lv = session.Live(CORPUS, "sid-main", "/tmp", None, None)
 
-    def peer(body: str, **origin) -> str:
+    def peer(body: str, sender: str, name: str) -> str:
         return json.dumps({"type": "user", "isMeta": True, "message": {"role": "user", "content": f"Another Claude "
-                           f"session sent a message:\n<agent-message from=\"a1\">\n{body}\n</agent-message>"},
-                           "origin": {"kind": "peer", "from": "a1", "body": body, **origin}})
+                           f"session sent a message:\n<agent-message from=\"{sender}\">\n{body}\n</agent-message>"},
+                           "origin": {"kind": "peer", "from": sender, "senderTaskId": sender, "name": name,
+                                      "body": body}})
 
-    session.translate(lv, peer(FRAME + "  thimble:critic · mini finished its task.", name="thimble:critic",
-                               handback=True))
-    session.translate(lv, peer(FRAME + "  The critic is idle.", name="thimble:critic"))
-    session.translate(lv, peer("The cards' numbers check out.", name=e.name))
+    session.translate(lv, peer(FRAME + "  thimble:critic · mini finished its task.", "a1", "thimble:critic"))
+    session.translate(lv, peer(FRAME + "  The critic is idle.", "a9", "thimble:critic"))
+    session.translate(lv, peer("thimble:critic · mini has finished its task.", "a1", "thimble:critic"))
+    session.translate(lv, peer("The cards' numbers check out.", "s1", e.name))
     _, log_path = agents.paths(CORPUS, agents.MAIN_ID)
     chips = [r["text"] for r in agents.read_events(log_path) if r.get("type") == "chip"]
     assert chips == [f"{e.shown} to main: The cards' numbers check out."], chips

@@ -984,13 +984,15 @@ def _child_finished(lv: Live, text: str) -> None:
 def _peer(lv: Live, *, mid_turn: bool, origin: Any = None) -> None:
     """A message another session sent main (module note), a subagent's hand-back among them: no row of its own, since
     it is neither the analyst's line nor main's, except a message from a background session of thimble's, which main's
-    chat shows as a chip naming it. A hand-back, such as a tray entry's last words, shows nothing: the session's own chat
-    has its end, and the harness's frame around it is not for the analyst. On its own record it opens main's turn."""
+    chat shows as a chip naming it. A hand-back, and any message of a tray entry, which writes no words of its own,
+    shows nothing: the session's own chat has its end, and the harness's frame around it is not for the analyst. On its
+    own record it opens main's turn."""
     if not mid_turn:
         _open_turn(lv)
     o = origin if isinstance(origin, dict) else {}
     raw = str(o.get("body") or "")
-    if o.get("handback") or raw.lstrip().startswith(HANDBACK_LEAD):
+    sender = str(o.get("from") or o.get("senderTaskId") or "")
+    if raw.lstrip().startswith(HANDBACK_LEAD) or (sender and _bg().proxy_of(lv.c, sender, None) is not None):
         return
     name, body = str(o.get("name") or ""), " ".join(cite.prose(raw).split())
     e = _bg().by_origin(lv.c, name) if name.startswith("thimble") else None
