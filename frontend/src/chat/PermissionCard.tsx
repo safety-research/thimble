@@ -31,6 +31,9 @@ function alwaysChoice(p: PermissionRequest): { label: string; tip: string } | nu
   return null
 }
 
+/** The title of a request denied because nobody answered it in time. */
+export const EXPIRED_TITLE = 'Not answered in time'
+
 /** The line a request the card shows only the start of carries: how much shows, and that Allow approves all of it. */
 export function cutLine(p: Pick<PermissionRequest, 'cut' | 'command' | 'input'>): string | null {
   if (!p.cut) return null
@@ -111,10 +114,10 @@ export function PermissionCard({ ws, asks, metas, labels }: {
       .finally(() => setBusy(false))
   }
   return (
-    <div className={`chat-perm${shown.length > 1 ? ' chat-perm-stack' : ''}`} role="alertdialog" aria-label={expired ? 'Denied unanswered' : 'Permission needed'} data-chat={ask.chat} data-request={p.id} data-count={shown.length} data-expired={expired || undefined}>
+    <div className={`chat-perm${shown.length > 1 ? ' chat-perm-stack' : ''}`} role="alertdialog" aria-label={expired ? EXPIRED_TITLE : 'Permission needed'} data-chat={ask.chat} data-request={p.id} data-count={shown.length} data-expired={expired || undefined}>
       <div className="chat-perm-head">
         <Icon name="warning" size={13} className="chat-perm-ico" />
-        <span className="chat-perm-title">{expired ? 'Denied unanswered' : 'Permission needed'}</span>
+        <span className="chat-perm-title">{expired ? EXPIRED_TITLE : 'Permission needed'}</span>
         <span className="chat-perm-from">
           <span className="chat-perm-from-word">from</span>
           <ThreadChip id={askThread(ask, metas, labels)} />
