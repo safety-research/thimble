@@ -4152,10 +4152,29 @@ def labels_route(c: str, concept_id: str, path: str | None = None, lines: str | 
 
 
 @router.get("/ws/{c}/concepts/{concept_id}/coverage")
-async def coverage_route(c: str, concept_id: str) -> dict:
+async def coverage_route(c: str, concept_id: str) -> Response:
     """{unit, files: [{path, covered, rows}], not_covered}: which corpus files the label's rows cover (file units)."""
     ws, concept = load_concept(c, concept_id)
-    return await asyncio.to_thread(coverage, ws, concept)
+    return Response(await asyncio.to_thread(_coverage_json, ws, concept), media_type="application/json")
+
+
+JSON_CHUNK = 5_000  # items json.dumps encodes at a time, so a long list lets the other threads run between parts
+
+
+def _coverage_json(ws: Path, concept: dict) -> bytes:
+    """coverage() as JSON, made a part at a time: a corpus of a million files makes a list of 160 MB, which one
+    json.dumps would make while every other thread, the event loop's too, waits for the interpreter."""
+    cov = coverage(ws, concept)
+    out = [b'{"unit":', json.dumps(cov["unit"]).encode()]
+    for key in ("files", "not_covered"):
+        items = cov[key]
+        out.append(f',"{key}":['.encode())
+        for i in range(0, len(items), JSON_CHUNK):
+            out.append((b"," if i else b"") + json.dumps(items[i:i + JSON_CHUNK], ensure_ascii=False, separators=(",", ":"))[1:-1].encode())
+            time.sleep(0)
+        out.append(b"]")
+    out.append(b"}")
+    return b"".join(out)
 
 
 @router.get("/ws/{c}/concepts/{concept_id}/rows")
