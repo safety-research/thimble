@@ -34,7 +34,7 @@
       "record": "event",
       "field": "time",
       "from": "ts, time, Date, a chat message's ts and each agents.log line's time",
-      "how": "every clock read in UTC; a time without an offset is UTC+1 in deploys.csv and UTC in agents.log"
+      "how": "every clock read in UTC, a time without an offset as UTC+1 in deploys.csv and as UTC in agents.log"
     },
     {
       "record": "event",
@@ -46,7 +46,7 @@
       "record": "event",
       "field": "kind",
       "from": "state, event, a ticket message's place and Status, and action",
-      "how": "fired or resolved, started, finished or rollback, message, opened, updated or closed, or the agent's action; the monitor's state in any case"
+      "how": "fired or resolved, started, finished or rollback, message, opened, updated or closed, or the agent's action, the monitor's state in any case"
     },
     {
       "record": "event",
@@ -58,7 +58,7 @@
       "record": "event",
       "field": "service",
       "from": "svc or service, the summary, tickets/index.csv",
-      "how": "svc read as service; a null service takes the one its summary starts with, and a ticket's comes from tickets/index.csv",
+      "how": "svc read as service, a null service as the one its summary starts with, and a ticket's from tickets/index.csv",
       "kind": "inferred"
     },
     {

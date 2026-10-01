@@ -9,7 +9,7 @@
   "accepts": [
     {
       "form": "L<n>",
-      "means": "the record on line <n> of a run's file, shown in its pull request, issue, discussion or agent; a manifest's line opens its run"
+      "means": "the record on line <n> of a run's file, shown in its pull request, issue, discussion or agent, or a manifest's line, which opens its run"
     }
   ],
   "units": [
@@ -57,7 +57,7 @@
       "record": "pull request",
       "field": "opened",
       "from": "ts, time, created_at, timestamp",
-      "how": "ISO 8601, epoch milliseconds or local time read as hours since the run started; a time without an offset is in the manifest's timezone, else UTC"
+      "how": "ISO 8601, epoch milliseconds or local time read as hours since the run started, a time without an offset in the manifest's timezone, else in UTC"
     },
     {
       "record": "pull request",
@@ -162,13 +162,13 @@
       "record": "event",
       "field": "actor",
       "from": "actor, user, author, user.login in reviews.json",
-      "how": "user read as actor; a review from a gone account is unknown"
+      "how": "user read as actor, and a review from a gone account as unknown"
     },
     {
       "record": "event",
       "field": "hours",
       "from": "ts, committed_at, submitted_at, merged_at, closed_at",
-      "how": "as for opened; a post with no time takes the time of the line before it"
+      "how": "as for opened, and a post with no time at the time of the line before it"
     },
     {
       "record": "event",

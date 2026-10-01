@@ -8,7 +8,7 @@
   "accepts": [
     {
       "form": "L<n>",
-      "means": "the line <n>: in a transcript, a call (its tool_use or its tool_result line) or a message shown in its session's transcript; in a run's index, the run"
+      "means": "the line <n>: a call (its tool_use or its tool_result line) or a message shown in its session's transcript, or in a run's index the run"
     }
   ],
   "units": [
