@@ -40,6 +40,7 @@
 # A step marked pending waits for work that is not merged yet: its failure is reported as expected and does not fail the
 # run (unless --strict), and once it passes the report says so. Exit 0 when no step failed, 1 otherwise.
 set -euo pipefail
+{  # the whole script is read before it runs, so a change to this file during a run does not reach it
 
 usage() { sed -n '2,/^set -euo/p' "$0" | sed '$d' | sed 's/^# \{0,1\}//'; }
 say() { printf 'e2e: %s\n' "$*"; }
@@ -263,3 +264,4 @@ if command -v setsid >/dev/null; then walk=(setsid "${walk[@]}"); fi  # its own 
 walk_pid=$!
 wait "$walk_pid" || ui=$?
 [ "$ui" = 0 ] || say "the UI walk exited $ui (logs/ui.log)"
+}
