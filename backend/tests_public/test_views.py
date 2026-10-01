@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import fnmatch
+import functools
 import io
 import json
 import logging
@@ -22,7 +23,7 @@ from pathlib import Path
 
 import pytest
 
-from app import config, dev, headless, tools, userconf, views
+from app import config, dev, extension_manifest, headless, tools, userconf, views
 
 CORPUS = "boards"
 POSTS = [  # (thread, author, time, body); line n of board.jsonl is POSTS[n-1]
@@ -395,7 +396,8 @@ async def test_a_field_whose_values_the_cited_lines_do_not_hold_fails_the_checks
     assert rep["ok"], views.gate_lines(rep)
     assert [d["field"] for d in rep["coverage"]["derived"]] == ["score", "flagged", "topics", "author"]
     assert [d["kind"] for d in rep["coverage"]["derived"]] == ["inferred"] * 3 + [""]
-    assert views._exempt("files", 3) and views._exempt("n_calls", 2), "a count needs no entry"
+    assert views._exempt("files", 3) and views._exempt("n_calls", 2) and views._exempt("call count", 18), \
+        "a count needs no entry"
     assert not views._exempt("ts", 1781741180000) and not views._exempt("status", 200), "a short or singular name is no count"
 
 
@@ -780,7 +782,7 @@ def _save_example(name: str) -> str:
     raw = json.loads((d / "view.json").read_text("utf-8"))
     slug = EXAMPLES[name][0]
     views.write_view(name, slug, reader=(d / "reader.py").read_text("utf-8"), html=(d / "view.html").read_text("utf-8"),
-                     **{k: raw.get(k) for k in ("name", "description", "claims", "accepts", "units", "derived", "libs")})
+                     **{k: raw.get(k) for k in ("name", "description", "scope", "records", "accepts", "units", "libs")})
     return slug
 
 
@@ -802,6 +804,35 @@ BROKEN = {
                          '"user", "content": [{"type": "tool_result", "tool_use_id": "toolu_gone", "content": "ok"}]}}\n',
                          1)],
 }
+
+
+def test_every_worked_example_s_view_json_is_in_the_schema_s_form():
+    """The examples teach view.json as the dev agent's prompt does: they follow the extension schema and use none of the
+    older names thimble still reads."""
+    for name in EXAMPLES:
+        text = (_example_dir(name) / "view.json").read_text("utf-8")
+        raw = json.loads(text)
+        assert not extension_manifest._validate(raw, text, f"{name}/view.json", "view"), name
+        old = {k for k, v in extension_manifest.schema()["$defs"]["view"]["properties"].items() if v.get("deprecated")}
+        assert not old & set(raw), (name, old & set(raw))
+        assert raw.get("scope") and raw.get("records"), name
+
+
+def test_a_derived_field_is_listed_for_each_kind_of_record_that_holds_it():
+    """A field name two kinds of record share, such as a pull request's state and an issue's, is listed for each, under
+    its record, the records in view.json's order and the computed fields first in each."""
+    raw = json.loads((_example_dir("repository") / "view.json").read_text("utf-8"))
+    declared = [(r["name"], f["name"], f["derived"]) for r in raw["records"] for f in r["fields"] if f.get("derived")]
+    got = views._normalize_view("repository", raw)["derived"]
+    assert sorted((d["record"], d["field"]) for d in got) == sorted((r, f) for r, f, _ in declared)
+    assert len({d["field"] for d in got}) < len(got), "the example has a name two kinds share"
+    assert list(dict.fromkeys(d["record"] for d in got)) == [r["name"] for r in raw["records"]]
+    for rec in raw["records"]:
+        kinds = [d["kind"] for d in got if d["record"] == rec["name"]]
+        assert kinds == sorted(kinds, key=lambda k: k != "inferred"), rec["name"]
+    again = views._derived([*got, {"field": "state", "from": "a reader's derived()", "how": "again"},
+                            {"field": "busy", "from": "a reader's derived()", "how": "new"}])
+    assert again[:-1] == got and again[-1]["field"] == "busy", "a field a record has is not listed again without one"
 
 
 def test_the_worked_examples_are_never_views_of_a_workspace(samples):
@@ -847,6 +878,43 @@ async def test_every_worked_example_answers_the_checks_over_its_sample(name, sam
     problems = await views.reader_problems(name, slug)
     assert problems["count"] == before + sum(n for *_, n in BROKEN[name]), problems
     assert not rep["coverage"]["not_shown"]["count"] and rep["coverage"]["derived"], "every file is read, and what the reader made is listed"
+
+
+async def _every_answer(name: str, slug: str) -> list:
+    """What the example's page fetches, over every place: each Timeline event in full, each session's transcript and
+    the runs and sessions compared, each Repository tab and unit."""
+    call = functools.partial(views.reader_call, name, slug, "records")
+    if name == "timeline":
+        rows = (await call({"op": "overview"}))["cols"]["r"]
+        return [{"ref": got["ref"], **got["record"]} for got in [await call({"op": "record", "r": r}) for r in rows]]
+    if name == "linked-sessions":
+        ov = await call({"op": "overview"})
+        out = [await call({"op": "session", "id": s["id"]}) for s in ov["sessions"]]
+        for s in ov["sessions"]:
+            out += [await call({"op": "moment", "run": s["run"], "t": c["time"], "session": s["id"]})
+                    for c in ov["calls"] if c["session"] == s["id"]][:3]
+        return [*out, ov, await call({"op": "compare", "ids": [r["id"] for r in ov["runs"]]}),
+                await call({"op": "compare", "ids": [s["id"] for s in ov["sessions"]][:6]})]
+    out = []
+    for tab in ("pulls", "issues", "discussions", "agents"):
+        got = await call({"op": "view", "tab": tab, "runs": ["r1", "r2", "r3", "r4"], "compare": True})
+        out += [got, *[await call({"op": "unit", "key": it["key"]}) for it in got["items"]]]
+    return out
+
+
+@pytest.mark.parametrize("name", sorted(EXAMPLES))
+async def test_every_record_a_worked_example_serves_lists_the_fields_its_lines_do_not_hold(name, samples, inproc, bound,
+                                                                                         monkeypatch):
+    """The derived check over every record the example's reader answers, not only the checks' sample: each field whose
+    values the cited lines do not hold is in view.json's records."""
+    monkeypatch.setattr(views, "DERIVED_SAMPLE", 100_000)
+    slug = _save_example(name)
+    declared = {k for d in views.read_view(name, slug)["derived"] for k in (d["field"], d.get("key")) if k}
+    answers = await _every_answer(name, slug)
+    seen: dict = {}
+    views._answer_records(answers, seen)
+    assert len(seen) > 100, "the answers hold the example's records"
+    assert not views.unlisted_derived(name, [{"answers": answers}], declared)
 
 
 @pytest.mark.parametrize("name", sorted(EXAMPLES))

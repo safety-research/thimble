@@ -50,10 +50,12 @@ answers or check one.
 | checks | `check` (`id`, `name`, `prompt`), `doc`, `passages` (`ref`, `kind`, `anchor`), `context` | `read_ref`, `list_cards`, `add_comment` | the run's summary line; its comments go through `add_comment` |
 
 A task's program runs under the settings of an agent in thimble's config: `labels` for labels, label-draft and
-view-fit, `cardCheck` for card-check and view-review, `dev` for file-viewer and `checks` for checks. Where that agent
-has no `sandbox` or `network` of its own, the sandbox and the network are on. Only the checks task's program has a
-thread, so nobody can answer what another task's program would ask: it never edits the corpus unless that agent's
-`data` is `allow`, its sessions use the web only when its `web` is `allow`, and any other permission request is denied.
+view-fit, `cardCheck` for card-check and view-review, `dev` for file-viewer and `checks` for checks. It takes that
+agent's `network`, `data`, `env` and `sandbox` ([config.md](config.md)), with the network and the sandbox on by
+default. `labels` and `cardCheck` have no `sandbox` or `web` of their own, so their programs keep the sandbox on and
+their sessions never use the web. Only the checks task's program has a thread, so nobody can answer what another
+task's program would ask: it never edits the corpus unless that agent's `data` is `allow`, its sessions use the web
+only when its `web` is `allow`, and any other permission request is denied.
 
 The environment:
 

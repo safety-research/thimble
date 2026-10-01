@@ -19,7 +19,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "backend"))
 
 from app import concepts, config, views
 
-VIEW_KEYS = ("name", "description", "claims", "accepts", "units", "derived", "libs")
+VIEW_KEYS = ("name", "description", "scope", "records", "accepts", "units", "libs")
 MARK = ".thimble-example"  # in each copy, so a later run knows the folder is one it made
 
 

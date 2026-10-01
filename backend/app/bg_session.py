@@ -64,8 +64,10 @@ restarts), every POLL_S while one needs following (_hot: it works, started latel
 waiting or a missed listing), else at gaps that double up to IDLE_POLL_S, cut short when a session's transcript grows or
 one is recorded: a session whose process has gone ends stopped; one that starts a turn with no run of thimble's (a
 message typed in its terminal or in the proxy's view, or main's SendMessage) is followed again as a new run of its chat
-(on_wake); it reads the session's transcript for the news too, and its state becomes the proxy's news, the statusline's
-line and the /thimble:agents list (agents_route).
+(on_wake). A turn starts with a line in the transcript (Entry.new_turn): a session listed busy with no such line since
+its run ended runs only background shells and rests, after a server restart too (recover). The watcher reads the
+session's transcript for the news too, and its state becomes the proxy's news, the statusline's line and the
+/thimble:agents list (agents_route).
 """
 from __future__ import annotations
 
@@ -353,6 +355,9 @@ class Entry:
     tx_ended: bool | None = None  # whether the transcript's last turn had ended at that offset, once read
     proxy_refused: bool = False  # Claude Code refused main's Agent call that would start its proxy (proxy_refused)
     ended_state: str = ""  # the state `claude agents` listed for it when its process went away (stopped_in_claude)
+    # a prompt or a reply was read from its transcript since its last run ended, or since this server loaded it: a turn
+    # began
+    new_turn: bool = False
 
     KEEP = ("c", "key", "name", "short", "sid", "chat", "role", "folder", "started", "status", "run_open", "result",
             "ended_at", "proxy_agents", "relayed", "proxy_refused")
@@ -461,9 +466,11 @@ def alive(e: Entry | None) -> bool:
 
 def resting(e: Entry | None) -> bool:
     """Whether a session that runs has no task now: Claude Code keeps a background session's process after its last
-    turn, idle, so a session listed idle, with no run of thimble's following it and no message waiting for it, rests
-    until it starts another turn (_tick). Main is not asked to show it in the tray."""
-    return alive(e) and not e.replacing and e.status == "idle" and not e.run_open and not _pending_out(e)
+    turn, idle, so a session with no run of thimble's following it and no message waiting for it rests until it starts
+    another turn (_tick): one listed idle, or one listed busy whose transcript shows no turn since its run ended, which
+    runs only background shells. Main is not asked to show it in the tray."""
+    return (alive(e) and not e.replacing and not e.run_open and not _pending_out(e)
+            and (e.status == "idle" or not e.new_turn))
 
 
 def finished(e: Entry | None) -> bool:
@@ -526,7 +533,7 @@ def run_ended(c: str, key: str, summary: str) -> None:
     e = entry(c, key)
     if e is None:
         return
-    e.run_open = False
+    e.run_open, e.new_turn = False, False
     e.result = " ".join(str(summary or "").split())[:400]
     e.ended_at = time.time()
     said = cite.to_links(e.result)
@@ -562,11 +569,11 @@ def _ensure_watcher() -> None:
 
 
 def _hot() -> bool:
-    """Whether a session needs a listing every POLL_S: one listed working, started or attached to in the last
-    START_GRACE_S, being replaced, missing from the last listing, followed by a run of thimble's, or with a message in
-    its outbox that is neither sent nor handed to main."""
+    """Whether a session needs a listing every POLL_S: one listed working that does not rest, started or attached to in
+    the last START_GRACE_S, being replaced, missing from the last listing, followed by a run of thimble's, or with a
+    message in its outbox that is neither sent nor handed to main."""
     now = time.time()
-    return any(alive(e) and (e.status == "working" or e.run_open or e.replacing or e.misses
+    return any(alive(e) and ((e.status == "working" and not resting(e)) or e.run_open or e.replacing or e.misses
                              or now - e.started < START_GRACE_S
                              or any(not i["sent"] and not i["main_asked"] for i in e.outbox))
                for e in entries())
@@ -643,7 +650,7 @@ async def _tick(rows: list[dict[str, Any]]) -> None:
         if (not proxy_alive(e) and not e.proxy_refused and not resting(e)
                 and time.monotonic() - e.proxy_asked > PROXY_ASK_S):
             unshown.setdefault(e.c, []).append(e.key)
-        if e.status != "idle" and not e.run_open and agent_session.current(e.c, e.key) is None:
+        if e.status != "idle" and not e.run_open and e.new_turn and agent_session.current(e.c, e.key) is None:
             fn = _wake.get(kind_of(e.key))
             if fn is not None:
                 e.run_open = True
@@ -680,12 +687,20 @@ def _gone(e: Entry, hit: dict[str, Any] | None) -> bool:
     return time.monotonic() - e.missing_since >= RESTART_WAIT_S
 
 
-async def _woken(fn: Callable[[str, Entry], Awaitable[Any]], e: Entry) -> None:
+async def _woken(fn: Callable[[str, Entry], Awaitable[Any]], e: Entry) -> bool:
+    """Follow the session again with its caller's `fn`; False when no run follows it, which leaves it resting until its
+    transcript shows another turn."""
     try:
-        await fn(e.c, e)
+        run = await fn(e.c, e)
     except Exception:  # noqa: BLE001
-        e.run_open = False
         log.exception("%s: background session %s could not be followed again", e.c, e.name)
+        run = None
+    if run is None:
+        e.run_open, e.new_turn = False, False
+        log.info("%s: background session %s (%s) is not followed again; it rests until its transcript shows another "
+                 "turn", e.c, e.name, e.short)
+        return False
+    return True
 
 
 def _stopped_while_idle(e: Entry) -> None:
@@ -760,6 +775,8 @@ def _news_lines(e: Entry, line: bytes) -> list[str]:
     if rec.get("isSidechain"):
         return []
     t = rec.get("type")
+    if t in ("user", "assistant"):
+        e.new_turn = True
     if t == "assistant":
         return _said(e, rec)
     if t == "user":
@@ -1293,7 +1310,7 @@ def state_words(e: Entry) -> str:
         return "restarting"
     if e.status == "waiting":
         return f"waiting for a {e.waiting_for or 'reply'}"
-    if e.status == "idle":
+    if e.status == "idle" or resting(e):
         return "done, idle" if not e.run_open else "idle"
     return "working"
 
@@ -1867,15 +1884,14 @@ async def recover() -> list[str]:
         if fn is None or agent_session.current(e.c, e.key) is not None:
             continue
         meta = agents.meta_or_none(e.c, e.chat) or {}
-        if meta.get("status") != "running" and _status(hit) == "idle":
-            continue  # its last run ended: the watcher follows it again when it starts a turn
+        if meta.get("status") != "running":
+            if _status(hit) == "idle" or (await asyncio.to_thread(turn_state, e.sid))[0]:
+                # its last run ended, and it is idle or runs only background shells: the watcher follows it again when
+                # its transcript shows another turn
+                continue
         e.run_open = True
-        try:
-            await fn(e.c, e)
+        if await _woken(fn, e):
             found.append(f"{e.c}/{e.name}")
-        except Exception:  # noqa: BLE001
-            e.run_open = False
-            log.exception("%s: background session %s was not followed again", e.c, e.name)
     _ensure_watcher()
     return found
 

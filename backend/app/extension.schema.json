@@ -74,9 +74,18 @@
       "properties": {
         "name": {"type": "string", "minLength": 1},
         "type": {"enum": ["text", "category", "number", "time", "ref", "list"]},
-        "derived": {"enum": ["cleaned", "computed"], "description": "cleaned: the file's value renamed, parsed or put in UTC. computed: a value the files do not hold."},
+        "derived": {"enum": ["cleaned", "computed"], "description": "cleaned: the file's value parsed, normalised or put in UTC. computed: a value the files do not hold."},
         "from": {"type": "string", "description": "What a derived field comes from."},
         "how": {"type": "string", "description": "How a derived field is made."}
+      },
+      "additionalProperties": false
+    },
+    "form": {
+      "type": "object",
+      "required": ["form", "means"],
+      "properties": {
+        "form": {"type": "string", "minLength": 1, "description": "The form with its parts in angle brackets, such as L<n> or <run>/pull/<n>."},
+        "means": {"type": "string", "minLength": 1, "description": "What a citation of the form opens, in words."}
       },
       "additionalProperties": false
     },
@@ -108,13 +117,13 @@
         "records": {"type": "array", "items": {"$ref": "#/$defs/record"}, "description": "Each record type and its fields, raw or derived."},
         "accepts": {
           "type": "array",
-          "items": {"type": "object", "required": ["form", "means"], "properties": {"form": {"type": "string"}, "means": {"type": "string"}}, "additionalProperties": false},
-          "description": "Citation forms beyond line refs, each a row of main's table of citation forms."
+          "items": {"$ref": "#/$defs/form"},
+          "description": "Fragment forms of the files it reads, each cited <file>#<form>, such as {\"form\": \"L<n>\", \"means\": \"the ticket on line <n>\"}. Each is a row of main's table of citation forms."
         },
         "units": {
           "type": "array",
-          "items": {"anyOf": [{"type": "string"}, {"type": "object", "required": ["form"], "properties": {"form": {"type": "string"}, "means": {"type": "string"}}, "additionalProperties": false}]},
-          "description": "Citation forms of the view's own units, each cited view:<slug>/<form>, only for a unit that spans records, such as a conversation or a day."
+          "items": {"$ref": "#/$defs/form"},
+          "description": "Forms of the view's own units, each cited view:<slug>/<form>, only for a unit that spans records, such as {\"form\": \"<customer_id>\", \"means\": \"one customer's whole conversation\"}. Each is a row of main's table of citation forms, and reader.py's resolve gets the key in place of the form."
         },
         "libs": {"$ref": "#/$defs/strings", "description": "The libraries the page loads, in order: vega, vega-lite or vega-embed, or an npm package as name@version, or a file inside one, held in the view's lib folder."},
         "compare": {"type": "boolean", "description": "Whether picked units can be shown side by side."},

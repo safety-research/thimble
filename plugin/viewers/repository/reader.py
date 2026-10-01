@@ -1,6 +1,6 @@
 # Repository: a code forge's log of several agent runs on one library, read the way its GitHub pages read.
 #
-# The data: one folder per run, runs/<run>/, which the claims runs/*.json, runs/*.jsonl and runs/*.csv match. Each run
+# The data: one folder per run, runs/<run>/, which the scope runs/*.json, runs/*.jsonl and runs/*.csv matches. Each run
 # is a team of agents working the same backlog of one library, so issue #3 of one run is issue #3 of another, and runs
 # compare issue by issue. The files and their fields:
 #   manifest.json        the run's setup, whose keys changed between runs: its id (`run` or `id`), its start (`started`
@@ -40,7 +40,7 @@
 #     and problems() lists them for thimble to show. So does it list an event of a type it does not know, a record
 #     about a number no pull request or issue of the run opens, a record with no time when no line before it has one,
 #     and a time it cannot read, whose record takes the time of the line before it.
-#   - A claimed file whose place in a run's folder is none of the above is left out, and hidden() says why.
+#   - A file in scope whose place in a run's folder is none of the above is left out, and hidden() says why.
 #   - A cell of an export table may run over several lines inside its quotes; its row cites its first line.
 #   - r4's manifest lists an agent that left no transcript: a run's agents are the manifest's and the transcripts', and
 #     one without a transcript has no note.
@@ -939,8 +939,8 @@ def _iso(t):
 
 
 def _texts(index, events, part=None):
-    """The records of the events as a page shows them: [{ref, kind, action, author, at, hours, text, ..., part}], `at`
-    in UTC, `part` the event's under the callable `part` when given."""
+    """The records of the events as a page shows them: [{ref, kind, action, author, at, hours, text, ..., colour_key}],
+    `at` in UTC, `colour_key` the event's under the callable `part` when given."""
     read = _read(index, [e[0] for e in events])
     out = []
     for e in events:
@@ -952,7 +952,7 @@ def _texts(index, events, part=None):
              "hours": e[1], **{f: r[f] for f in ("number", "title", "text", "sha", "diff", "verdict", "reason",
                                                  "closes", "thread", "forced", "before") if r.get(f) is not None}}
         if part:
-            x["part"] = part(e)
+            x["colour_key"] = part(e)
         out.append(x)
     return out
 
@@ -978,8 +978,8 @@ def _elsewhere(index, u):
 
 
 def _detail(index, key, field="action", hide=(), colours=True):
-    """One unit's page: its facts and its records with their text, in time order, each with its part (_part) under the
-    colour field `field`, or the labels while one is on and `colours` holds."""
+    """One unit's page: its facts and its records with their text, in time order, each with its colour_key (_part)
+    under the colour field `field`, or the labels while one is on and `colours` holds."""
     u = index["units"].get(key)
     if u is None:
         return None
@@ -1107,6 +1107,6 @@ def problems(index):
 
 
 def hidden(index):
-    """The claimed files the reader leaves out, each {path, why}: a file whose place in a run's folder it does not know."""
+    """The files in scope the reader leaves out, each {path, why}: a file whose place in a run's folder it does not know."""
     return [{"path": p, "why": "not a file of a run's folder that the reader knows: manifest.json, events.jsonl, "
                                "board.jsonl, agents/<name>.jsonl or an export/ table"} for p in index.get("unknown", [])]

@@ -156,6 +156,30 @@ def test_the_dev_agent_s_network_and_web_on_lift_the_fence(board, monkeypatch, t
     assert "WebFetch" not in flags[flags.index("--disallowedTools") + 1] and "WebFetch" in settings["permissions"]["ask"]
 
 
+def test_a_view_build_reads_and_writes_its_own_temp_folder_unasked(board, monkeypatch):
+    """A view build's Bash gets a private temp folder of its own as TMPDIR, in the sandbox and outside it, and the
+    session reads and edits there unasked, so it can look at the screenshots it takes itself; another build's folder is
+    another, and the folder goes when the build's turns end."""
+    monkeypatch.setenv("THIMBLE_SANDBOX", "1")
+    corpus, folder = config.corpus_dir(CORPUS), views.views_dir(CORPUS) / "posts"
+    conf = dev.dev_config(CORPUS, sandbox=True)
+    flags = dev.Sessions()._flags(CORPUS, "thimble view: Posts", (folder,), dev.view_fence(CORPUS, "posts", corpus, folder, conf),
+                                  dev.view_asking(CORPUS, "posts", folder, conf))
+    settings = json.loads(flags[flags.index("--settings") + 1])
+    tmp = Path(settings["env"]["CLAUDE_CODE_TMPDIR"])
+    try:
+        assert settings["env"]["TMPDIR"] == str(tmp) and tmp.is_dir() and tmp.stat().st_mode & 0o777 == 0o700
+        assert len(str(tmp)) < 50, "a socket in it keeps under the path limit"
+        assert {f"Read(/{tmp}/**)", f"Edit(/{tmp}/**)"} <= set(settings["permissions"]["allow"])
+        other = dev.view_tmp_dir(CORPUS, "threads")
+        assert other != tmp
+        dev.clear_view_tmp(CORPUS, "posts")
+        assert not tmp.exists() and other.is_dir()
+    finally:
+        dev.clear_view_tmp(CORPUS, "posts")
+        dev.clear_view_tmp(CORPUS, "threads")
+
+
 def test_a_view_build_runs_on_the_model_of_the_session_that_asked(board, monkeypatch, tmp_path):
     """An orientation's proposal is built on the orientation's model, without the 1M tag, at the effort and speed it runs
     at; one the analyst asked for on main's model, effort and speed as its replies report them, and before main's first
