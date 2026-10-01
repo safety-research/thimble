@@ -333,11 +333,15 @@ export function scrollTopFor(body: HTMLElement, a: number): number | null {
 const sameShown = (x: Shown, y: Shown) =>
   x.top === y.top && x.height === y.height && x.seen.length === y.seen.length && x.seen.every((s, i) => s.line === y.seen[i].line && s.top === y.seen[i].top && s.bottom === y.seen[i].bottom)
 
+/** Where the File browser keeps the mode picked for a file: a built-in view's type, or `v:<slug>` for a file viewer. */
+export const pickKey = (workspace: string, path: string): string => storageKey(workspace, `viewOf:${path}`)
+
 function FileReader({ workspace, path, kind, targetRef, lead, end, labels, only, onMode, findAsk }: ReaderProps) {
   const isDatabase = kind === 'forge'
   const builtins = useBuiltins(workspace, path, kind)
-  const memoryKey = storageKey(workspace, `viewOf:${path}`)
+  const memoryKey = pickKey(workspace, path)
   const [pick, setPick] = useState<string | null>(() => readStorage<string | null>(memoryKey, null))
+  useEffect(() => bus.on('fileMode', (e) => e.path === path && setPick(e.mode)), [path])
   const fragment = fragmentIn(targetRef, path)
   const [records, setRecords] = useState<SourceRecord[]>([])
   const [total, setTotal] = useState<number | null>(null)
