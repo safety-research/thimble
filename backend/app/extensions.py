@@ -1862,11 +1862,25 @@ def parts(e: dict[str, Any], unused: dict[str, str] | None = None) -> list[str]:
         elif e.get("replaces"):
             out.append(but("orientation", "replaces the orientation's instructions"))
     out += [but("orientation", f"{a} agent") for a in _words(e.get("agents"))]
+    same: dict[tuple[str, bool, str], list[str]] = {}  # the tasks it changes the same way, named together
     for t in e.get("tasks") or []:
         if isinstance(t, dict) and t.get("task"):
-            out.append(but(f"task:{t['task']}", _changes(f"the {t['task']} task", t)))
+            key = (str(t.get("kind")), bool(t.get("replace")), unused.get(f"task:{t['task']}", ""))
+            same.setdefault(key, []).append(str(t["task"]))
+    for (kind, replace, why), names in same.items():
+        words = _changes(f"the {names[0]} task", {"kind": kind, "replace": replace}) if len(names) == 1 else \
+            _changes_all(names, kind, replace)
+        out.append(f"{words}, not used, since {why}" if why else words)
     out += [f"{k.get('name') or k['slug']} report check" for k in _list(e, "checks")]
     return out
+
+
+def _changes_all(tasks: list[str], kind: str, replace: bool) -> str:
+    """How an extension changes several tasks the same way, in a few words: "its own labels and checks tasks, programs"."""
+    names = f"{', '.join(tasks[:-1])} and {tasks[-1]}"
+    if kind == "prompt":
+        return f"replaces the {names} tasks' prompts" if replace else f"adds to the {names} tasks"
+    return f"its own {names} tasks, " + ("Agent SDK programs" if kind == "sdk" else "programs")
 
 
 def _changes(what: str, r: dict[str, Any]) -> str:

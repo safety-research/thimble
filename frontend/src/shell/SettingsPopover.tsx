@@ -60,10 +60,14 @@ export function agentLine(row: AgentRow): string {
   return [runsWords(row), box, `network ${row.network}`, DATA_WORDS[row.data]].join(' · ')
 }
 
-/** The tasks an extension changes, each with who runs it; '' when thimble runs every task as it ships. Pure. */
+/** The tasks an extension changes, with who runs them, the tasks one runner runs named together; '' when thimble runs
+ * every task as it ships. Pure. */
 export function tasksLine(rows: TaskRow[] | undefined): string {
   const changed = (rows ?? []).filter((t) => t.way !== 'thimble' || t.additions.length || t.conflict.length)
-  return changed.map((t) => `${t.task} by ${runsWords(t)}`).join(' · ')
+  const by = new Map<string, string[]>()
+  for (const t of changed) by.set(runsWords(t), [...(by.get(runsWords(t)) ?? []), t.task])
+  const names = (ts: string[]) => (ts.length > 1 ? `${ts.slice(0, -1).join(', ')} and ${ts[ts.length - 1]}` : ts[0])
+  return [...by].map(([who, ts]) => `${names(ts)} by ${who}`).join(' · ')
 }
 
 /** What an agent's line means, one sentence per line, for its tooltip. Pure. */
