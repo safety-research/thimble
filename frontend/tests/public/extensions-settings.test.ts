@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { answeredRuns, asksToRun, changedExtensions, changedLocalViews, changedViews, extensionCalls } from '../../src/shell/ExtensionsSettings'
+import { answeredRuns, asksToRun, changedExtensions, changedLocalViews, changedViews, extensionCalls, extensionDetails, extensionLine, extensionVersion } from '../../src/shell/ExtensionsSettings'
 
 const view = { name: 'Tally', shown: true, note: '', locked: false }
 const row = { version: '', active: true, why: '', note: '', locked: false }
@@ -54,6 +54,30 @@ describe('asksToRun', () => {
   it('sends only the answers of rows that still ask', () => {
     const data = { extensions: [swarm, { ...swarm, name: 'other' }], conflicts: [], orientation_ran: true }
     expect(answeredRuns(data, { swarm: true, other: false }, { swarm: true, other: true })).toEqual([['swarm', true]])
+  })
+})
+
+describe('an extension row', () => {
+  const ext = { ...row, name: 'tally', on: true, views: [], description: 'Who did each task.', parts: ['Tally view'], consent: 'critic: network.' }
+  it('shows its description under its name, and what it gives and runs under only in its details', () => {
+    expect(extensionLine(ext)).toBe(ext.description)
+    const keys = extensionDetails({ ...ext, sandboxed: true }).map(([k]) => k)
+    expect(keys).toHaveLength(3)
+    expect(new Set(keys).size).toBe(3)
+    expect(extensionDetails({ ...ext, sandboxed: null })).toHaveLength(2)
+  })
+  it('shows why it does not run in place of its description, which moves into its details', () => {
+    const broken = { ...ext, note: 'its manifest has an unknown key', locked: true }
+    expect(extensionLine(broken)).toBe(broken.note)
+    expect(extensionDetails(broken).some(([, words]) => words === ext.description)).toBe(true)
+  })
+  it('reads as simply off when thimble ships it and it is not added', () => {
+    const swarm = { ...ext, on: false, addable: true, builtin: true, note: 'Not added', why: 'not added' }
+    expect(extensionLine(swarm)).toBe(ext.description)
+  })
+  it('shows a version only for an extension thimble does not ship', () => {
+    expect(extensionVersion({ ...ext, version: '1.2.0', builtin: false })).toBe('1.2.0')
+    expect(extensionVersion({ ...ext, version: '0.4.0', builtin: true })).toBe('')
   })
 })
 

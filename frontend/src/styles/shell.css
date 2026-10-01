@@ -470,74 +470,150 @@
   color: var(--status-warning);
   font: var(--type-body-sm);
 }
-/* a group of switches under the tables (ExtensionsSettings): the switch, then its name and what it does */
+/* the Extensions section under the tables (ExtensionsSettings): a group under each heading, each row its name and one
+   line on the left and its switch at the right, every switch in one column; headings and hairlines as the tables' */
 .settings-switches {
   display: flex;
   flex-direction: column;
   border-top: 1px solid var(--border-subtle);
 }
-.settings-switch {
-  display: grid;
-  grid-template-columns: 32px minmax(0, 1fr);
-  gap: 8px;
-  align-items: start;
-  padding: 8px 6px;
-  border-bottom: 1px solid var(--border-hairline);
-}
-.settings-switch:last-child {
-  border-bottom: 0;
-}
-.settings-switch .switch {
-  margin-top: 1px;
-}
-.settings-switch-text {
+.settings-ext-group {
   display: flex;
   flex-direction: column;
-  gap: 2px;
-  min-width: 0;
 }
-.settings-switch-label {
+.settings-ext-group + .settings-ext-group {
+  border-top: 1px solid var(--border-subtle);
+}
+.settings-ext-head {
+  display: flex;
+  align-items: center;
+  min-height: 24px;
+  margin: 0;
+  padding: 0 6px 2px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+.settings-ext-group > .settings-ext-row,
+.settings-ext {
+  border-bottom: 1px solid var(--border-hairline);
+}
+.settings-ext-group > :last-child {
+  border-bottom: 0;
+}
+.settings-ext-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  column-gap: 16px;
+  align-items: center;
+  min-height: 30px;
+  padding: 6px;
+}
+.settings-ext-name {
+  display: inline-flex;
+  grid-column: 1;
+  grid-row: 1;
+  justify-self: start;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  min-width: 0;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: none;
   color: var(--text-primary);
   font: var(--type-ui-sm);
+  text-align: left;
+  white-space: nowrap;
 }
-.settings-switch-note {
+button.settings-ext-name:hover,
+button.settings-ext-name:active {
+  background: none;
+  color: var(--text-primary);
+}
+.settings-ext-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.settings-ext-version {
+  flex: none;
+  color: var(--text-tertiary);
+}
+.settings-ext-caret {
+  flex: none;
+  color: var(--text-tertiary);
+  transition: transform var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
+}
+button.settings-ext-name:hover .settings-ext-caret {
+  color: var(--text-secondary);
+}
+.settings-ext-name.open .settings-ext-caret {
+  transform: rotate(180deg);
+}
+.settings-ext-switch {
+  display: flex;
+  grid-column: 2;
+  grid-row: 1;
+  align-items: center;
+}
+.settings-ext-line,
+.settings-ext-more,
+.settings-ext-ask {
+  grid-column: 1;
+  min-width: 0;
   color: var(--text-secondary);
   font: var(--type-body-sm);
 }
-.settings-extensions-head {
-  padding: 8px 6px 0;
+/* the line under a name, cut to one line until its details open; a reason it shows in full */
+.settings-ext-line {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
-.settings-extension-version {
+.settings-ext-line.open,
+.settings-ext-line.wrap {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+/* an extension's details: its description, then each fact beside its key in the tertiary ink, the keys in one column */
+.settings-ext-more {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 4px;
+}
+.settings-ext-more p {
+  margin: 0;
+}
+.settings-ext-facts {
+  display: grid;
+  grid-template-columns: minmax(52px, max-content) minmax(0, 1fr);
+  gap: 4px 12px;
+  margin: 0;
+}
+.settings-ext-facts div {
+  display: contents;
+}
+.settings-ext-facts dt {
   color: var(--text-tertiary);
 }
-.settings-extension {
-  border-bottom: 1px solid var(--border-hairline);
+.settings-ext-facts dd {
+  margin: 0;
+  overflow-wrap: anywhere;
 }
-.settings-extension:last-of-type {
-  border-bottom: 0;
-}
-.settings-extension .settings-switch {
-  border-bottom: 0;
-}
-/* what an extension gives and the settings it runs under, quieter than its note */
-.settings-extension-parts,
-.settings-extension-consent {
-  color: var(--text-tertiary);
-}
-/* the question whether to run an extension's orientation now, under its name */
-.settings-extension-ask {
+/* the question whether to run an extension's orientation now, under its line */
+.settings-ext-ask {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 6px;
-  padding: 0 6px 8px 46px;
+  gap: 8px;
+  margin-top: 6px;
 }
-.settings-extension-ask .settings-switch-note {
-  margin-right: 2px;
-}
-/* a view of the extension above it, indented under its name */
-.settings-extension-view {
-  padding-left: 46px;
+/* a view of the extension above it: its name set in under the extension's, its switch in the same column */
+.settings-ext-row-extension-view {
+  padding-top: 0;
+  padding-left: 20px;
 }
 .settings-error {
   color: var(--status-negative);

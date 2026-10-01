@@ -1045,6 +1045,8 @@ export interface ExtensionRow {
   version: string
   /** what it is, from its extension.json */
   description?: string
+  /** one thimble ships, whose version is thimble's */
+  builtin?: boolean
   active: boolean
   why: string
   /** the line Settings shows: why it does not run, unless this workspace's switch turned it off */
@@ -1054,8 +1056,10 @@ export interface ExtensionRow {
   views: ExtensionViewRow[]
   /** what it gives, each in a few words */
   parts?: string[]
-  /** the settings of the agents it changes and whether its code runs sandboxed, in words */
+  /** the settings of the agents it changes or adds, in words */
   consent?: string
+  /** whether its code runs in a sandbox; null for one with no code */
+  sandboxed?: boolean | null
   /** whether Run now can run its orientation here once it is on: its instructions, or its own orientation program */
   orients?: boolean
   /** whether Settings offers to run its orientation now: it came on after an orientation ran here */
