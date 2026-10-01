@@ -72,6 +72,8 @@ export interface Step {
   allow?: (api: Api) => Element | null
   /** an element the wheel scrolls */
   scroll?: (api: Api) => HTMLElement | null
+  /** the element the wheel must be over to scroll `scroll` (else `scroll` itself) */
+  scrollOver?: (api: Api) => Element | null
   /** a frame that takes the pointer and the wheel */
   interact?: (api: Api) => Element | null
   /** the cutout takes a ⌘-click or ⌘-drag */
@@ -1005,11 +1007,11 @@ export function createTour(snaps: Snaps): Tour {
     if (SCROLLS.has(ev.type)) {
       if ((inTour && t instanceof Node && pop.contains(t)) || inAllowed) return
       const sc = s.scroll ? s.scroll(api) : null
-      const r = sc && rectOf(sc)
+      const r = sc && rectOf(s.scrollOver?.(api) || sc)
       stop(ev)
       const we = ev as WheelEvent
       if (sc && r && ev.type === 'wheel' && we.clientX >= r.x && we.clientX <= r.x + r.width && we.clientY >= r.y && we.clientY <= r.y + r.height) {
-        const k = r.height / (sc.clientHeight || r.height) || 1
+        const k = sc.getBoundingClientRect().height / (sc.clientHeight || 1) || 1
         sc.scrollBy({ top: (we.deltaY * (we.deltaMode === 1 ? 16 : we.deltaMode === 2 ? sc.clientHeight : 1)) / k })
       }
       return

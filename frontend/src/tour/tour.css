@@ -258,6 +258,13 @@ body[data-cmd] .tour-ex .tour-try {
   border-radius: 2px;
 }
 
+/* the example transcript lays out every record, so its height holds still while the wheel scrolls it */
+.tour-ex-reader .reader-record,
+.tour-ex-reader .reader-line {
+  content-visibility: visible;
+  contain-intrinsic-size: none;
+}
+
 /* The chat and terminal steps: an example exchange in the chat's own markup, and a Claude Code terminal window that
    slides in from the right. The terminal keeps its own dark palette whatever the theme. */
 .tour-term {

@@ -9,12 +9,12 @@
 //     the popover lies inside the window, covers no cutout wherever the window has room for it beside the first, and its
 //     caret points at the first cutout;
 //   - step 1's example sits 8 px or more inside its cutout, which lies inside the chat panel; the orientation's Start
-//     only shows the started state; the labels' transcript and the report scroll under the wheel; inside the example
-//     view the wheel and a click work and reach nothing else; the card demo shows a value's source and the card is in
-//     plain words; in the ⌘-click demo the key badge stands inside the card and over none of its text; a real ⌘-drag on
-//     the example card picks only the words dragged over and its ask box lies inside the cutout; the report's first
-//     figure is the small table and it shows no check comment until the demo makes the check, and then each comment
-//     card stands 8 px above its passage, or below the card above it, before and after the report scrolls;
+//     only shows the started state; the wheel scrolls the labels' transcript, steadily, and the report; inside the
+//     example view the wheel and a click work and reach nothing else; the card demo shows a value's source and the card
+//     is in plain words; in the ⌘-click demo the key badge stands inside the card and over none of its text; a real
+//     ⌘-drag on the example card picks only the words dragged over and its ask box lies inside the cutout; the report's
+//     first figure is the small table and it shows no check comment until the demo makes the check, and then each
+//     comment card stands 8 px above its passage, or below the card above it, before and after the report scrolls;
 //   - the page is frozen: clicks, keys and the wheel reach nothing, the tour writes nothing but the offer, and telemetry
 //     records nothing while it runs; Enter in the page's ask box sends nothing, and an ask box left open closes when
 //     the tour starts.
@@ -375,6 +375,17 @@ async function walk(page: Page, tag: string, folds?: boolean, send = false) {
   await sleep(500)
   const rdTop = await page.evaluate(() => document.querySelector('.tour-ex-reader .reader-body')!.scrollTop)
   assert.ok(rdTop > rd.top + 100, `${tag} 5: the wheel scrolls the transcript (${rd.top} to ${rdTop})`)
+  // in small steps the transcript scrolls steadily: its height holds still and it never jumps back
+  const steps: { top: number; h: number }[] = []
+  for (let k = 0; k < 12; k++) {
+    await page.mouse.wheel(0, 80)
+    await sleep(60)
+    steps.push(await page.evaluate(() => {
+      const e = document.querySelector('.tour-ex-reader .reader-body')!
+      return { top: e.scrollTop, h: e.scrollHeight }
+    }))
+  }
+  assert.ok(new Set(steps.map((x) => x.h)).size === 1 && steps.every((x, k) => !k || x.top > steps[k - 1].top), `${tag} 5: the transcript scrolls steadily ${JSON.stringify(steps)}`)
   assert.deepEqual(await probe(page), [], `${tag} 5: the wheel reached nothing else`)
   await next(page)
   // 6 Views: the example view takes the pointer

@@ -251,7 +251,9 @@ const labelsExample = (api: Api): Example => {
   lab.style.background = api.groundOf(api.q('.files-labels'))
   Object.assign(api.tag(lab).style, { right: '40px' })
   api.ex.append(rd, lab)
-  let scrolled = 0
+  // the transcript opens at line 22 and stays there while the panel's size changes, until anything else scrolls it
+  let pinned = true,
+    setTo: number | null = null
   const layout = () => {
     let r = api.rectOf(realReader())
     if (!r) {
@@ -267,14 +269,23 @@ const labelsExample = (api: Api): Example => {
     }
     if (r) Object.assign(rd.style, { left: `${r.x}px`, top: `${r.y}px`, width: `${r.width}px`, height: `${r.height}px` })
     if (L) Object.assign(lab.style, { left: `${L.x}px`, width: `${L.width}px`, top: `${L.y + L.height - lab.offsetHeight}px` })
-    // opened a little way down, where both labels show
-    if (scrolled < 30) {
-      const sc = rd.querySelector<HTMLElement>('.reader-body'),
-        row = rd.querySelector('[data-line="22"]')
-      if (sc && row && sc.clientHeight) {
+    const sc = rd.querySelector<HTMLElement>('.reader-body')
+    if (!sc || !sc.clientHeight) return
+    if (pinned && setTo != null && Math.abs(sc.scrollTop - setTo) > 1) pinned = false
+    if (pinned) {
+      const row = rd.querySelector('[data-line="22"]')
+      if (row) {
         sc.scrollTop += row.getBoundingClientRect().top - sc.getBoundingClientRect().top - 6
-        scrolled++
+        setTo = sc.scrollTop
       }
+    }
+    // the ruler's thumb frames the span on screen, as thimble's does
+    const bar = rd.querySelector<HTMLElement>('.reader-ruler-bar'),
+      thumb = rd.querySelector<HTMLElement>('.reader-ruler-thumb')
+    if (bar && thumb) {
+      const span = sc.scrollHeight - sc.clientHeight
+      const h = Math.max(32, (bar.clientHeight * sc.clientHeight) / sc.scrollHeight)
+      Object.assign(thumb.style, { height: `${h}px`, transform: `translateY(${span > 0 ? ((bar.clientHeight - h) * sc.scrollTop) / span : 0}px)` })
     }
   }
   return { els: { reader: rd, labels: lab }, layout }
@@ -424,6 +435,7 @@ export function tourSteps(key: string, chat = true): Step[] {
       tab: 'files', example: labelsExample, place: 'left', align: 'end', pad: 0, radius: 0,
       anchor: (api) => [api.els.labels, api.els.reader],
       scroll: (api) => api.els.reader?.querySelector('.reader-body') ?? null,
+      scrollOver: (api) => api.els.reader?.querySelector('.reader-main') ?? null,
       title: 'Labels',
       body: 'Labels are custom classifiers that are applied to files.',
     },
