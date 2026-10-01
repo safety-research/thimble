@@ -485,6 +485,8 @@ export interface View {
   unit?: string | Record<string, string> | null
   /** a file viewer, a mode of the File browser for the files it claims rather than a view in the views bar: its unit is
    * "file", or with no unit every claim is one extension's glob (backend views.file_type_viewer) */
+  /** its page draws label controls of its own (elements with data-label) */
+  label_controls?: boolean
   file_type?: boolean
 }
 

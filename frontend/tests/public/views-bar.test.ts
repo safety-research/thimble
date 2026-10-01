@@ -18,6 +18,11 @@ describe('barList', () => {
     expect(got.proposals).toEqual([])
   })
 
+  it('says which views draw label controls of their own, built from a proposal or not', () => {
+    const got = barList([view('board', { label_controls: true }), view('plain'), view('mine', { label_controls: true })], [built('board'), built('plain')])
+    expect(Object.fromEntries(got.views.map((v) => [v.slug, !!v.label_controls]))).toEqual({ board: true, plain: false, mine: true })
+  })
+
   it('leaves out a view switched off in Settings', () => {
     const got = barList([view('board')], [{ ...built('timeline'), off: true }, built('board')])
     expect(got.views.map((v) => v.slug)).toEqual(['board'])

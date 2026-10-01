@@ -81,6 +81,8 @@ export interface BuiltView {
   review?: ViewReview
   /** a newer version of it builds (a change, the orientation's improvement or a dev ticket) */
   updating?: boolean
+  /** its page draws label controls of its own (elements with data-label), so the Labels sidebar does not open by itself */
+  label_controls?: boolean
 }
 
 /** Whether a proposal is a view the bar lists: built, or built before and being changed now. Pure. */
@@ -104,11 +106,11 @@ export function barList(list: readonly View[], all: readonly Proposal[]): { view
   const built: BuiltView[] = [
     ...listed.map((p) => {
       const v = known.get(p.slug)
-      return { slug: p.slug, name: p.name, first_file: v?.first_file, files: v?.files, n_files: v?.n_files, claims: v?.claims, built: v?.built, version: v?.version, review: p.review, ...(p.status !== 'built' ? { updating: true } : {}) }
+      return { slug: p.slug, name: p.name, first_file: v?.first_file, files: v?.files, n_files: v?.n_files, claims: v?.claims, built: v?.built, version: v?.version, label_controls: v?.label_controls, review: p.review, ...(p.status !== 'built' ? { updating: true } : {}) }
     }),
     ...views
       .filter((v) => !proposals.some((p) => p.slug === v.slug))
-      .map((v) => ({ slug: v.slug, name: v.name, first_file: v.first_file, files: v.files, n_files: v.n_files, claims: v.claims, built: v.built, version: v.version, builtin: v.origin === 'builtin' })),
+      .map((v) => ({ slug: v.slug, name: v.name, first_file: v.first_file, files: v.files, n_files: v.n_files, claims: v.claims, built: v.built, version: v.version, label_controls: v.label_controls, builtin: v.origin === 'builtin' })),
   ]
   // a viewer the File browser suggests for a file type shows there alone until it is accepted, and an orientation's
   // view appears once it is built

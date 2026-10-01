@@ -260,3 +260,13 @@ async def test_every_record_the_analyst_marks_counts_as_marked_by_hand(app, corp
         assert r.status_code == 200, r.text
         got = (await app.get(f"/api/ws/{CORPUS}/concepts/{k['id']}")).json()
         assert (got["n_marked"], got["n_reviewed"]) == (n_marked, n_reviewed), (ref, got)
+
+
+async def test_the_views_list_says_which_pages_draw_label_controls_of_their_own(app):
+    """A page whose source gives an element `data-label`, even one only a menu shows, draws label controls of its own,
+    so the Labels sidebar need not open beside it; the list says so from the source, before the page loads."""
+    menu = HTML.replace("</body>", "<script>const item = (id) => `<button data-label=\"${id}\">on</button>`</script></body>")
+    views.write_view(CORPUS, "threads", reader=READER, html=HTML, **VIEW)
+    views.write_view(CORPUS, "menu", reader=READER, html=menu, **{**VIEW, "name": "Menu"})
+    got = {v["slug"]: v["label_controls"] for v in (await app.get(f"/api/ws/{CORPUS}/views")).json()}
+    assert got == {"threads": False, "menu": True}

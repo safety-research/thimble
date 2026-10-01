@@ -52,15 +52,13 @@ interface Props {
   first?: ReadonlySet<string>
   /** open the label editor in the Labels sidebar beside the view, on a label or on a new one with null */
   onEditLabel?: (id: string | null) => void
-  /** whether the view's page shows label controls of its own */
-  onLabelControls?: (on: boolean) => void
   /** the card the view was opened from and its arguments (a card type's Open as view) */
   query?: ViewQuery
   /** the view dropped them */
   onClearQuery?: () => void
 }
 
-export function ViewPane({ ws, view, path, picked, kind, targetRef, quote, onQuoteMissing, labels, onMode, lead, first, onEditLabel, onLabelControls, query, onClearQuery }: Props) {
+export function ViewPane({ ws, view, path, picked, kind, targetRef, quote, onQuoteMissing, labels, onMode, lead, first, onEditLabel, query, onClearQuery }: Props) {
   const [mode, setMode] = useState<'view' | 'raw'>('view')
   // a file or line picked in the head, which Raw shows in place of `path`
   const [rawAt, setRawAt] = useState<{ path: string; ref?: string } | null>(null)
@@ -157,7 +155,7 @@ export function ViewPane({ ws, view, path, picked, kind, targetRef, quote, onQuo
         ) : (
           <>
             {failure && <ViewFailed name={view.name} detail={failure} onRaw={path ? () => pick('raw') : undefined} />}
-            <ViewerFrame key={`${view.slug}:${pin.pinned ?? ''}`} ws={ws} slug={view.slug} version={pin.pinned || undefined} restore={pin.restore} handle={pin.frame} targetRef={targetRef} path={path ?? undefined} pathPicked={picked} title={view.name} labels={labels.on} filter={filter} filterFiles={filter ? labels.presence.get(filter.concept) : undefined} byId={labels.byId} first={first} labelActions={labelActions} onHidden={setHidden} onLabelControls={onLabelControls} onError={setFailure} quote={quote} onQuoteMissing={onQuoteMissing} query={query} onQuery={(p) => !p && onClearQuery?.()} className="view-pane-frame" />
+            <ViewerFrame key={`${view.slug}:${pin.pinned ?? ''}`} ws={ws} slug={view.slug} version={pin.pinned || undefined} restore={pin.restore} handle={pin.frame} targetRef={targetRef} path={path ?? undefined} pathPicked={picked} title={view.name} labels={labels.on} filter={filter} filterFiles={filter ? labels.presence.get(filter.concept) : undefined} byId={labels.byId} first={first} labelActions={labelActions} onHidden={setHidden} onError={setFailure} quote={quote} onQuoteMissing={onQuoteMissing} query={query} onQuery={(p) => !p && onClearQuery?.()} className="view-pane-frame" />
           </>
         )}
       </div>

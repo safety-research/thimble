@@ -5,9 +5,9 @@
 // page's onProgress or else thimble's box at the corner, and thimble.lib gives the packages the view bundled; a message
 // from anywhere but the parent page is ignored; with a label filter on, what the filter drops is hidden and the page hears
 // how many; in a card's frame the page draws what `init` brings, says the height it needs, and has what the filter
-// drops dimmed while it filters its own records; a label call with no gesture in the frame is refused there, the key
-// for label calls reaches the bridge alone, and the page hears whether the view shows label controls of its own. The
-// label calls with a real gesture are tests/public/browser/view-label-calls.test.ts.
+// drops dimmed while it filters its own records; a label call with no gesture in the frame is refused there, and the
+// key for label calls reaches the bridge alone. The label calls with a real gesture are
+// tests/public/browser/view-label-calls.test.ts.
 import { readFileSync } from 'node:fs'
 import path from 'node:path'
 import { JSDOM } from 'jsdom'
@@ -227,15 +227,4 @@ describe('the view bridge', () => {
     expect(of('hidden').at(-1)).toMatchObject({ n: 0, self: false })
   })
 
-  test('the page says once that it shows label controls of its own, and a menu of them closing does not take it back', async () => {
-    expect(of('labelControls')).toEqual([])
-    const b = dom.window.document.createElement('button')
-    b.setAttribute('data-label', 'asks')
-    dom.window.document.body.appendChild(b)
-    await wait(300)
-    expect(of('labelControls')).toEqual([{ type: 'thimble:labelControls', on: true }])
-    b.remove()
-    await wait(300)
-    expect(of('labelControls')).toHaveLength(1)
-  })
 })

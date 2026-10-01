@@ -3997,13 +3997,41 @@ def _view_or_404(c: str, slug: str, version: str | None = None) -> dict[str, Any
     return v
 
 
+# whether a view's page draws label controls of its own, by its view.html's (path, mtime_ns, size)
+_controls_seen: dict[tuple[str, int, int], bool] = {}
+
+
+def label_controls(v: dict[str, Any]) -> bool:
+    """Whether the view's page draws label controls of its own: its view.html gives an element `data-label`
+    (prompts/dev-view.md), even one only a menu shows, so thimble's Labels sidebar need not open beside it."""
+    d = v.get("dir")
+    if not d:
+        return False
+    page = Path(d) / VIEW_HTML
+    try:
+        st = page.stat()
+    except OSError:
+        return False
+    key = (str(page), st.st_mtime_ns, st.st_size)
+    if key not in _controls_seen:
+        if len(_controls_seen) > 256:
+            _controls_seen.clear()
+        try:
+            _controls_seen[key] = "data-label" in page.read_text("utf-8", "replace")
+        except OSError:
+            return False
+    return _controls_seen[key]
+
+
 def _public(v: dict[str, Any], c: str | None = None) -> dict[str, Any]:
-    """A view record for a route's answer: everything but the on-disk directory, with its forms, and with `c` the files
-    it claims, `files` (the first FILES_LISTED) and `n_files`, and the first of them (what Raw shows of a view opened on
-    its own). Blocking when a claim is a glob (the corpus walk)."""
+    """A view record for a route's answer: everything but the on-disk directory, with its forms, whether its page draws
+    label controls of its own (label_controls), and with `c` the files it claims, `files` (the first FILES_LISTED) and
+    `n_files`, and the first of them (what Raw shows of a view opened on its own). Blocking when a claim is a glob (the
+    corpus walk)."""
     out = {k: x for k, x in v.items() if k != "dir"}
     out["forms"] = [{"form": f, "means": m} for f, m in view_forms(v)]
     out["file_type"] = file_type_viewer(v)
+    out["label_controls"] = label_controls(v)
     if c is not None:
         try:
             files = claimed_files(c, v) if v["ok"] else []

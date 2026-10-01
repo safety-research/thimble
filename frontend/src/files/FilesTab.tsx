@@ -200,16 +200,14 @@ export function FilesTab({ ws, active, focused = active }: { ws: string; active:
   // until the analyst hides or shows it for the tab's session; when it cannot dock it lies over the view's left edge.
   // The File browser's sidebar folds to its show button when it cannot dock.
   const dock = useDock(sideWidth)
-  const [ownControls, setOwnControls] = useState<{ slug: string; on: boolean } | null>(null)
-  const ownControlsOn = !!ownControls?.on && ownControls.slug === slugOfKey(bar)
-  const viewSideOpen = viewSideChoice ?? (labels.on.length > 0 && !ownControlsOn)
+  const shownView = slugOfKey(bar) ? views.find((v) => v.slug === slugOfKey(bar)) ?? null : null
+  const viewSideOpen = viewSideChoice ?? (labels.on.length > 0 && !shownView?.label_controls)
   const viewSideOver = viewSideOpen && !dock.docks
   const side = useFoldingSide(dock.docks, sideOpen, setSideOpen)
   const root = folders.store.get('')
   const error = root?.state === 'error' ? root.message : null
   const open = tabs.find((t) => t.path === current) ?? null
   const listing = root?.state === 'ok' ? root.listing : null
-  const shownView = slugOfKey(bar) ? views.find((v) => v.slug === slugOfKey(bar)) ?? null : null
   // a view the analyst asked for opens by itself once built, and one shown here waits for them no longer
   useOpenAskedViews(ws, new Map([...proposals, ...views].map((v) => [v.slug, v.name])))
   const shownSlug = shownView?.slug ?? null
@@ -578,7 +576,6 @@ export function FilesTab({ ws, active, focused = active }: { ws: string; active:
             onMode={setMode}
             first={marking ?? undefined}
             onEditLabel={editLabel}
-            onLabelControls={(on) => setOwnControls({ slug: shownView.slug, on })}
             lead={!viewSideOpen && <LabelsLead on={labels.on.length} onShow={() => setViewSideChoice(true)} />}
           />
           {viewSideOpen && labelCard}

@@ -21,8 +21,6 @@
 //             analyst's own gesture in the frame; labelRefused says the bridge refused one for want of a gesture
 //   hidden    how many anchored refs the bridge hides for the label filter, which with what the reader left out for
 //             it (the records answers' `hidden`) is the count the view's head shows (onHidden)
-//   labelControls
-//             whether the page shows label controls of its own (onLabelControls)
 //   state     what the analyst is looking at (the element they picked, scroll positions, fields), asked for through
 //             `handle` before a newer version replaces the page, and sent back as `restore` once that version is ready
 // plus ready, error, point and cmd (for the ⌘ pointer). A new ref is sent as a new `open` without reloading the page.
@@ -98,8 +96,6 @@ export interface ViewerFrameProps {
   /** with a label filter on, how many anchored refs the page and its reader leave out for it; null without a filter or
    * until the page has said */
   onHidden?: (n: number | null) => void
-  /** whether the page shows label controls of its own */
-  onLabelControls?: (on: boolean) => void
   onError?: (message: string) => void
   /** the page itself did not load, in place of onError */
   onNoPage?: (message: string) => void
@@ -347,7 +343,7 @@ function useViewLabels(
   return useMemo(() => ({ add, reset, ready }), [add, reset, ready])
 }
 
-export function ViewerFrame({ ws, slug, targetRef, path, pathPicked, title, fit, labels = NO_LABELS, filter = null, filterFiles, byId = NO_CONCEPTS, first, labelActions, onHidden, onLabelControls, onError, onNoPage, className, quote, onQuoteMissing, version, restore, handle, card, onSettled, onQuery, targetPick, query }: ViewerFrameProps) {
+export function ViewerFrame({ ws, slug, targetRef, path, pathPicked, title, fit, labels = NO_LABELS, filter = null, filterFiles, byId = NO_CONCEPTS, first, labelActions, onHidden, onError, onNoPage, className, quote, onQuoteMissing, version, restore, handle, card, onSettled, onQuery, targetPick, query }: ViewerFrameProps) {
   const ref = useRef<HTMLIFrameElement>(null)
   const [page, setPage] = useState<string | null>(null)
   const [height, setHeight] = useState<number | null>(null)
@@ -431,8 +427,6 @@ export function ViewerFrame({ ws, slug, targetRef, path, pathPicked, title, fit,
   const pageKey = useRef('')
   const hiddenFn = useRef(onHidden)
   hiddenFn.current = onHidden
-  const controlsFn = useRef(onLabelControls)
-  controlsFn.current = onLabelControls
   const filtering = useRef(!!filter)
   filtering.current = !!filter
   // what the bridge hid in the page (null until it said) and what the reader left out (null when the server could not
@@ -641,9 +635,6 @@ export function ViewerFrame({ ws, slug, targetRef, path, pathPicked, title, fit,
         case P + 'hidden':
           hidden.current.page = typeof d.n === 'number' && Number.isFinite(d.n) ? d.n : null
           tellHidden()
-          return
-        case P + 'labelControls':
-          controlsFn.current?.(!!d.on)
           return
       }
     }

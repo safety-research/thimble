@@ -172,7 +172,7 @@ export function useViewSide(
   ws: string,
   view: BuiltView,
   labels: FilesLabels,
-): { side: ReactNode; card: ReactNode; lead: ReactNode; first?: ReadonlySet<string>; editLabel: (id: string | null) => void; setOwnControls: (on: boolean) => void } {
+): { side: ReactNode; card: ReactNode; lead: ReactNode; first?: ReadonlySet<string>; editLabel: (id: string | null) => void } {
   const runs = useLabelRuns(ws, labels)
   const [choice, setChoice] = useState<boolean | null>(null)
   const [open, setOpen] = useState(true)
@@ -183,9 +183,7 @@ export function useViewSide(
     const w = readStorage<unknown>(widthKey, TREE.def)
     return typeof w === 'number' && Number.isFinite(w) ? Math.min(TREE.max, Math.max(TREE.min, w)) : TREE.def
   })
-  const [ownControls, setOwnControls] = useState(false)
-  useEffect(() => setOwnControls(false), [view.slug])
-  const shown = choice ?? (labels.on.length > 0 && !ownControls)
+  const shown = choice ?? (labels.on.length > 0 && !view.label_controls)
   const first = useMemo(() => (view.claims ? viewLabels(labels.all, labels.presence, view.claims) : undefined), [view.claims, labels.all, labels.presence])
   const edit = useCallback((id: string | 'new' | null) => {
     setEditing(id)
@@ -233,5 +231,5 @@ export function useViewSide(
     },
     [edit],
   )
-  return { side, card: shown ? parts.card : null, lead, first, editLabel, setOwnControls }
+  return { side, card: shown ? parts.card : null, lead, first, editLabel }
 }

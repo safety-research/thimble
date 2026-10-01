@@ -1,8 +1,9 @@
 // @vitest-environment jsdom
 // thimble's own label control beside a view (src/files/ViewSide.tsx useViewSide): the Labels sidebar shows while a
-// label is on, and once the view says it draws label controls of its own the sidebar no longer opens by itself, but the
-// head keeps a compact Labels control with how many labels are on, so the label state is always one click away.
-import { act, useEffect } from 'react'
+// label is on, and for a view whose page draws label controls of its own (views' label_controls) it does not open by
+// itself, but the head keeps a compact Labels control with how many labels are on, so the label state is always one
+// click away.
+import { act } from 'react'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 import type { FilesLabels } from '../../src/files/useLabels.ts'
 import { useViewSide } from '../../src/files/ViewSide.tsx'
@@ -30,9 +31,7 @@ function labelsWith(on: Concept[]): FilesLabels {
 const VIEW: BuiltView = { slug: 'board', name: 'Board', claims: ['board.jsonl'] }
 
 function Side({ own, labels }: { own: boolean; labels: FilesLabels }) {
-  const side = useViewSide('w', VIEW, labels)
-  const { setOwnControls } = side
-  useEffect(() => setOwnControls(own), [own, setOwnControls])
+  const side = useViewSide('w', { ...VIEW, label_controls: own }, labels)
   return (
     <div>
       <div data-test="head">{side.lead}</div>

@@ -63,8 +63,6 @@
 //   hidden {n, self}       frame to page: how many anchored refs the bridge hides or dims for the label filter, null
 //                          while thimble has not answered for every anchored ref, and whether the page filters its
 //                          records itself (it registered onLabels)
-//   labelControls {on}     frame to page: the page has shown label controls of its own (elements with data-label),
-//                          sent once
 //   cmd {on, cursor}       page to frame: ⌘ went down or up, and the page's ⌘ arrow as a CSS cursor value, which this
 //                          page shows while ⌘ is held so the pointer over the frame is the same one pointer
 //   state {id}             page to frame, answered by state {id, state}: what the analyst is looking at, before a newer
@@ -684,18 +682,6 @@
     hiddenKey = key
     post({ type: P + 'hidden', n: n, self: self })
   }
-  // whether the page has shown label controls of its own, told to thimble once: a menu that holds them may close again
-  var ownControls = false
-  var controlsTimer = null
-  function sendControls() {
-    if (ownControls || !document.querySelector('[data-label]')) return
-    ownControls = true
-    post({ type: P + 'labelControls', on: true })
-  }
-  function checkControls() {
-    controlsTimer = null
-    sendControls()
-  }
   function note(el) {
     var ref = el.getAttribute('data-anchor')
     if (!ref || reported[ref]) return
@@ -1020,8 +1006,7 @@
     }
     if (unsent.length && sendTimer == null) sendTimer = setTimeout(sendAnchors, 30)
     if (changed && (hasMarks() || dropping()) && paintTimer == null) paintTimer = setTimeout(paint, 30)
-    if (!ownControls && controlsTimer == null) controlsTimer = setTimeout(checkControls, 200)
-  }).observe(document.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: ['data-anchor', 'class', 'data-label'] })
+  }).observe(document.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: ['data-anchor', 'class'] })
 
   // What the analyst is looking at, for a newer version of the view loaded in this page's place: `ref` the element they
   // last clicked since the last `open`, `scroll` the scroll positions of the page and of each box scrolled, `fields`
@@ -1145,7 +1130,6 @@
     size()
     if (window.ResizeObserver && document.body) new ResizeObserver(size).observe(document.body)
     post({ type: P + 'ready' })
-    sendControls()
     collect(document.documentElement)
     sendAnchors()
   }

@@ -47,7 +47,7 @@ beforeAll(async () => {
     `const actions = { setOn: (id, on) => w.__acts.push(['on', id, on]), setColour: (id, v, c) => w.__acts.push(['colour', id, v, c]), edit: (id) => w.__acts.push(['edit', id]) }`,
     `const root = document.body.appendChild(document.createElement('div'))`,
     `root.style.cssText = 'width:600px;height:400px'`,
-    `createRoot(root).render(createElement(ViewerFrame, { ws: 'w', slug: 'board', title: 'Board', byId: new Map([[k.id, k]]), labels: [], labelActions: actions, onLabelControls: (on) => w.__acts.push(['controls', on]) }))`,
+    `createRoot(root).render(createElement(ViewerFrame, { ws: 'w', slug: 'board', title: 'Board', byId: new Map([[k.id, k]]), labels: [], labelActions: actions }))`,
   ])
   browser = await launch()
   page = await browser.newPage({ viewport: { width: 900, height: 700 } })
@@ -89,9 +89,8 @@ test('a label change the page makes on load or on a timer is refused, and so is 
     const l = await logOf(what)
     assert.deepEqual([l.ok, l.error], [false, NO_GESTURE], what)
   }
-  assert.deepEqual((await acts()).filter((a) => a[0] !== 'controls'), [], 'no label was turned on or off')
+  assert.deepEqual(await acts(), [], 'no label was turned on or off')
   assert.deepEqual((await apiCalls()).filter((c) => c.method !== 'GET'), [], 'nothing was stored and no filter set')
-  assert.ok((await acts()).some((a) => a[0] === 'controls' && a[1] === true), 'the page said it draws label controls of its own')
 })
 
 test("the analyst's click in the view turns a label on, stores a mark, sets the filter and opens the editor", async () => {
