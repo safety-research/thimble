@@ -1,7 +1,8 @@
 // The settings' Extensions section: a switch per extension added to thimble, for this workspace, with what it gives and
 // the settings it runs under, and under it a switch per view it gives, saved with the rest. An extension runs in every
 // workspace until its switch turns it off; one that cannot run here whatever the switch says (switched off in
-// thimble's config, or unable to load) has its switch disabled, drawn off, and says why. A view's switch stands where
+// thimble's config, or unable to load) has its switch disabled, drawn off, and says why. An extension thimble ships
+// that is not added has its switch off, and turning it on adds it on Save. A view's switch stands where
 // the check on whether it fits put it until the analyst moves it, which overrides the check either way; beside it is
 // the check's reason. An extension with orientation instructions that comes on where an orientation ran asks whether
 // to run them now; the answer is sent with the rest on Save. Conflicts among the running extensions are listed under
@@ -23,6 +24,15 @@ export function changedExtensions(loaded: ExtensionRow[], now: Record<string, bo
   const out: Record<string, boolean> = {}
   for (const e of loaded) if (e.name in now && now[e.name] !== e.on) out[e.name] = now[e.name]
   return out
+}
+
+/** What a save does for each extension whose switch moved: adds one thimble ships that is not added and was turned on,
+ * and switches any other for this workspace. Pure. */
+export function extensionCalls(loaded: ExtensionRow[], now: Record<string, boolean>): [string, 'add' | 'on' | 'off'][] {
+  const addable = new Set(loaded.filter((e) => e.addable).map((e) => e.name))
+  return Object.entries(changedExtensions(loaded, now)).flatMap(([name, on]): [string, 'add' | 'on' | 'off'][] =>
+    addable.has(name) ? (on ? [[name, 'add']] : []) : [[name, on ? 'on' : 'off']],
+  )
 }
 
 /** The view switches a save sends, [extension, view, on] for each whose switch differs from the loaded one. Pure. */

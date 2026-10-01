@@ -177,7 +177,8 @@ async def test_thimble_adds_the_extensions_it_ships_on_once_and_names_the_others
     rows = {r["name"]: r for r in extensions.public(CORPUS)["extensions"]}
     assert rows["video"]["on"] and not rows["video"]["locked"]
     for n in ("swarm", "multiagent-swimlane"):
-        assert (rows[n]["on"], rows[n]["locked"], rows[n]["note"]) == (False, True, "not added")
+        assert (rows[n]["on"], rows[n]["locked"], rows[n]["addable"]) == (False, False, True)
+        assert rows[n]["note"] == "Not added. Turn it on to add it."
     assert "swarm 0.4.0, built in, not added. `thimble extension add swarm` adds it." in extensions.list_lines(config.WORKSPACES_DIR)
     extensions.set_enabled(CORPUS, "video", False)
     assert (await extensions.refresh(CORPUS))["extensions"]["video"]["why"] == "off in this workspace"
@@ -205,6 +206,27 @@ async def test_thimble_adds_the_extensions_it_ships_on_once_and_names_the_others
     assert extensions.ship() == ["swarm"] and "multiagent-swimlane" not in extensions.added()
     assert (await extensions.refresh(CORPUS))["extensions"]["swarm"]["why"] == (
         "it needs the extension multiagent-swimlane, which is not added")
+
+
+async def test_settings_adds_an_extension_thimble_ships_when_its_switch_is_turned_on(corpus, analyst, tmp_path,
+                                                                                    monkeypatch):
+    """Turning on the switch of an extension thimble ships that is not added adds it, with those it needs, for the
+    analyst's browser only; nothing else can be added that way."""
+    from starlette.requests import Request
+
+    ships = tmp_path / "ships"
+    shutil.copytree(extensions.builtin_dir(), ships)
+    monkeypatch.setattr(extensions, "builtin_dir", lambda: ships)
+    with pytest.raises(HTTPException) as refused:
+        await extensions.add_route(CORPUS, "swarm", Request({"type": "http", "headers": []}))
+    assert refused.value.status_code == 403 and "swarm" not in extensions.added()
+    with pytest.raises(HTTPException) as unknown:
+        await extensions.add_route(CORPUS, "no-such", analyst)
+    assert unknown.value.status_code == 404
+    got = await extensions.add_route(CORPUS, "swarm", analyst)
+    assert {"swarm", "multiagent-swimlane"} <= set(extensions.added())
+    rows = {r["name"]: r for r in got["extensions"]}
+    assert rows["swarm"]["active"] and rows["swarm"]["on"] and not rows["swarm"].get("addable")
 
 
 async def test_an_added_extension_runs_in_every_workspace_and_its_view_where_it_fits(corpus, fit):

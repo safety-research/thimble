@@ -1043,6 +1043,8 @@ export interface ExtensionRow {
   orients?: boolean
   /** whether Settings offers to run those instructions now: it came on after an orientation ran here */
   offer?: boolean
+  /** an extension thimble ships that is not added: turning its switch on adds it */
+  addable?: boolean
 }
 
 /** One view built for this workspace, in its local extension (backend views.local_extension). */

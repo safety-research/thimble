@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { answeredRuns, asksToRun, changedExtensions, changedLocalViews, changedViews } from '../../src/shell/ExtensionsSettings'
+import { answeredRuns, asksToRun, changedExtensions, changedLocalViews, changedViews, extensionCalls } from '../../src/shell/ExtensionsSettings'
 
 const view = { name: 'Tally', shown: true, note: '', locked: false }
 const row = { version: '', active: true, why: '', note: '', locked: false }
@@ -11,6 +11,14 @@ const loaded = [
 describe('changedExtensions', () => {
   it('sends only the switches that moved', () => {
     expect(changedExtensions(loaded, { a: true, b: true })).toEqual({ b: true })
+  })
+})
+
+describe('extensionCalls', () => {
+  it('adds an extension thimble ships when its switch goes on, and switches the others', () => {
+    const swarm = { ...row, name: 'swarm', on: false, views: [], addable: true }
+    expect(extensionCalls([...loaded, swarm], { a: false, b: true, swarm: true })).toEqual([['a', 'off'], ['b', 'on'], ['swarm', 'add']])
+    expect(extensionCalls([swarm], { swarm: false })).toEqual([])
   })
 })
 

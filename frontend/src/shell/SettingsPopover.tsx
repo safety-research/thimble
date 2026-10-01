@@ -17,7 +17,7 @@ import { Popover } from '../components/Menu'
 import { Spinner } from '../components/Spinner'
 import { useTooltip } from '../components/Tooltip'
 import { api } from '../lib/api'
-import { ExtensionsSettings, answeredRuns, changedExtensions, changedLocalViews, changedViews, viewKey } from './ExtensionsSettings'
+import { ExtensionsSettings, answeredRuns, changedLocalViews, changedViews, extensionCalls, viewKey } from './ExtensionsSettings'
 import { hasFastMode, invalidateSettings, loadSettings, modelChoices, modelLabel, sameModel } from '../lib/models'
 import { EFFORTS, ROLES, type AgentRow, type Attached, type Extensions, type MainEffort, type ModeAgent, type ModelConf, type OrientPermissions, type Settings } from '../lib/types'
 import { bus } from '../lib/bus'
@@ -228,7 +228,10 @@ export function SettingsPopover({ ws, anchor, open, onClose }: { ws: string; anc
       const modes = changedModes(settings?.permission_modes, modeRows)
       if (Object.keys(changed).length || Object.keys(modes).length)
         await api.putSettings(ws, { ...(Object.keys(changed).length ? { models: changed } : {}), ...(Object.keys(modes).length ? { permission_modes: modes } : {}) })
-      for (const [name, on] of Object.entries(changedExtensions(exts?.extensions ?? [], extOn))) await api.switchExtension(ws, name, on)
+      for (const [name, how] of extensionCalls(exts?.extensions ?? [], extOn)) {
+        if (how === 'add') await api.addExtension(ws, name)
+        else await api.switchExtension(ws, name, how === 'on')
+      }
       for (const [name, slug, on] of changedViews(exts?.extensions ?? [], viewOn)) await api.switchExtensionView(ws, name, slug, on)
       for (const [slug, on] of changedLocalViews(exts?.local?.views ?? [], localOn)) await api.switchLocalView(ws, slug, on)
       const was = { effort: mainEffort(attached), fast: !!mainFast(attached) }

@@ -436,6 +436,8 @@ export const api = {
   extensions: (c: string) => j<Extensions>(`${ws(c)}/extensions`),
   /** this workspace's switch of one extension; the analyst's browser alone may turn it */
   switchExtension: (c: string, name: string, on: boolean) => j<Extensions>(`${ws(c)}/extensions/${enc(name)}`, { method: 'PUT', body: JSON.stringify({ on }) }),
+  /** adds an extension thimble ships, as `thimble extension add <name>` does */
+  addExtension: (c: string, name: string) => j<Extensions>(`${ws(c)}/extensions/${enc(name)}/add`, { method: 'POST' }),
   /** this workspace's switch of one extension's view, which overrides the check on whether it fits */
   switchExtensionView: (c: string, name: string, slug: string, on: boolean) =>
     j<Extensions>(`${ws(c)}/extensions/${enc(name)}/views/${enc(slug)}`, { method: 'PUT', body: JSON.stringify({ on }) }),

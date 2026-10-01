@@ -112,6 +112,7 @@ WEB_TOOLS = userconf.WEB_TOOLS
 SUBAGENT_PASSED = ("mcpServers", "maxTurns", "skills", "color")
 CONFIG_UNREAD = "thimble's config cannot be read"
 NOT_ADDED = "not added"
+ADD_NOTE = "Not added. Turn it on to add it."  # Settings' line beside an extension thimble ships that is not added
 CHECKING = "thimble is checking whether it fits here"
 NO_FILES = "no file here is in its scope"
 BOTH = "another active extension gives it too"
@@ -1869,7 +1870,7 @@ def public(c: str) -> dict[str, Any]:
             continue
         info = read_extension(builtins()[n], n, set())
         out.append({"name": n, "version": v, "description": info["description"], "active": False, "why": NOT_ADDED,
-                    "note": NOT_ADDED, "on": False, "locked": True, "views": [], "parts": parts(info),
+                    "note": ADD_NOTE, "on": False, "locked": False, "addable": True, "views": [], "parts": parts(info),
                     "consent": "", "orients": orients(info), "offer": False})
     return {"extensions": out, "conflicts": conflict_lines(clash), "orientation_ran": orientation_ran(c)}
 
@@ -1994,6 +1995,29 @@ async def orientation_route(c: str, name: str, body: OrientBody, request: Reques
     else:
         await decline(c, name)
     return {"status": status, **await asyncio.to_thread(public, c)}
+
+
+@router.post("/ws/{c}/extensions/{name}/add")
+async def add_route(c: str, name: str, request: Request) -> dict[str, Any]:
+    """Settings' switch turned on for an extension thimble ships that is not added: it is added, as `thimble extension
+    add <name>` adds it, with the extensions it needs, and every connected workspace finds its extensions again. The
+    analyst's browser alone may add one, and only one thimble ships. {extensions, conflicts, orientation_ran}."""
+    from . import cardtypes, hook_auth  # noqa: PLC0415
+
+    config.workspace_dir(c)
+    if not hook_auth.analyst(request):
+        raise HTTPException(403, hook_auth.ANALYST_ONLY)
+    if name not in builtins():
+        raise HTTPException(404, f"thimble ships no extension {name!r}")
+    if name not in added():
+        try:
+            await asyncio.to_thread(add, name, yes=True, say=lambda _line: None)
+        except AddError as e:
+            raise HTTPException(409, str(e)) from None
+    await refresh_route()
+    await refresh_quietly(c)
+    await cardtypes.announce(c)
+    return await asyncio.to_thread(public, c)
 
 
 @router.post("/extensions/refresh")
