@@ -2,17 +2,18 @@
 // Stop in the composer, as in Claude (src/components/Composer.tsx, src/chat/ChatPanel.tsx composerStopOf): while an
 // agent the browser can stop runs, the send square is its stop square while the field is empty and the send square
 // again once there is text; a step's thread carries its running parent's Stop. The Stop goes out through stopRun (a
-// session's through stopSession, a ticket's through dev.stop_ticket) and says in a toast when it could not stop; in an
-// agent's own thread its card leaves Stop to the composer (AgentCard stopHere). The transcript of a running dev ticket
-// carries no Stop of its own (src/chat/TicketStatus.tsx).
+// session's through stopSession, a ticket's through dev.stop_ticket, a view's build or review through its own route)
+// and says in a toast when it could not stop; in an agent's own thread its card leaves Stop to the composer (AgentCard
+// stopHere). The transcript of a running dev ticket carries no Stop of its own (src/chat/TicketStatus.tsx).
 import { act } from 'react'
 import { afterEach, describe, expect, test, vi } from 'vitest'
 import { ComposerFrame } from '../../src/components/Composer.tsx'
 import { AgentCard, stopSession } from '../../src/chat/AgentCard.tsx'
-import { composerStopOf, stopRun } from '../../src/chat/ChatPanel.tsx'
+import { buildStatus, composerStopOf, stopRun, viewBuildParts } from '../../src/chat/ChatPanel.tsx'
+import type { Row } from '../../src/chat/model.ts'
 import { TicketStatus, WAITING_LINE } from '../../src/chat/TicketStatus.tsx'
 import { bus } from '../../src/lib/bus.ts'
-import type { ChatMeta, Ticket } from '../../src/lib/types.ts'
+import type { ChatMeta, Proposal, Ticket } from '../../src/lib/types.ts'
 import { mount, settle, unmountAll } from './mount.tsx'
 
 afterEach(() => {
@@ -87,6 +88,16 @@ describe('what the composer stops (composerStopOf)', () => {
     expect(composerStopOf('thread', meta('th1', 'running'), null)).toBeNull()
   })
 
+  test("a view's thread: the build while it is queued or building, else the review while it runs", () => {
+    const view = (status: string, review?: string, chat = 'v1') => ({ slug: 'posts', status, chat, ...(review ? { review: { state: review } } : {}) }) as Pick<Proposal, 'slug' | 'status' | 'chat' | 'review'>
+    expect(composerStopOf('dev', meta('v1', 'running'), null, null, view('building'))).toEqual({ kind: 'view', slug: 'posts', review: false, label: 'Stop the build' })
+    expect(composerStopOf('dev', meta('v1', 'running'), null, null, view('queued'))?.label).toBe('Stop the build')
+    expect(composerStopOf('dev', meta('v1', 'running'), null, null, view('built', 'running'))).toEqual({ kind: 'view', slug: 'posts', review: true, label: 'Stop the review' })
+    expect(composerStopOf('dev', meta('v1', 'running'), null, null, view('built', 'done'))).toBeNull()
+    expect(composerStopOf('dev', meta('v1', 'done'), null, null, view('building'))).toBeNull()
+    expect(composerStopOf('dev', meta('v1', 'running'), null, null, view('building', undefined, 'v2'))).toBeNull()
+  })
+
   test("a step: its parent's Stop while the parent runs, since its composer sends to the parent", () => {
     const parent = (status: string, role = 'orient') => ({ id: 'o1', status, role }) as Pick<ChatMeta, 'id' | 'status' | 'role'>
     expect(composerStopOf('step', meta('s1', 'running'), null, parent('running'))).toEqual({ kind: 'session', chat: 'o1', role: 'orient', label: 'Stop the orientation' })
@@ -152,6 +163,40 @@ describe('the Stop sent', () => {
     expect(await stopRun('mini', { kind: 'ticket', ticket: 't1', label: 'Stop ticket #3' }, () => undefined)).toBe(false)
     expect(t.seen.map((x) => [x.kind, x.text.startsWith('Could not stop the ticket: ')])).toEqual([['error', true]])
     t.off()
+  })
+})
+
+describe("a view's build or review stopped", () => {
+  test('goes to its own route, and a failure says what could not be stopped', async () => {
+    const sent: string[] = []
+    vi.stubGlobal('fetch', async (url: string, init?: RequestInit) => {
+      sent.push(`${init?.method ?? 'GET'} ${url}`)
+      return new Response(JSON.stringify(url.includes('/proposals?') || url.endsWith('/proposals') ? [] : { ok: true }), { status: 200, headers: { 'content-type': 'application/json' } })
+    })
+    expect(await stopRun('mini', { kind: 'view', slug: 'posts', review: false, label: 'Stop the build' }, () => undefined)).toBe(true)
+    expect(await stopRun('mini', { kind: 'view', slug: 'posts', review: true, label: 'Stop the review' }, () => undefined)).toBe(true)
+    expect(sent.filter((x) => !x.startsWith('GET'))).toEqual(['POST /api/ws/mini/views/proposals/posts/stop', 'DELETE /api/ws/mini/views/posts/review'])
+    const seen: { text: string; kind?: string }[] = []
+    const off = bus.on('toast', (t) => seen.push(t))
+    vi.stubGlobal('fetch', async () => new Response(JSON.stringify({ detail: 'the view is built' }), { status: 409, headers: { 'content-type': 'application/json' } }))
+    expect(await stopRun('mini', { kind: 'view', slug: 'posts', review: false, label: 'Stop the build' }, () => undefined)).toBe(false)
+    expect(seen.map((x) => [x.kind, x.text.startsWith('Could not stop the build: ')])).toEqual([['error', true]])
+    off()
+  })
+})
+
+describe("a view build's status line while its session shows no activity", () => {
+  const note = (index: number, text: string): Row => ({ kind: 'note', index, text })
+  const said = (index: number): Row => ({ kind: 'text', index, text: 'reading the board' })
+  const label = (rows: Row[]) => buildStatus(viewBuildParts(rows)[0].stages, true)?.label
+
+  test('says so until the session shows activity again, one line however long the quiet lasts', () => {
+    const quiet = [note(0, 'the session writes the view'), said(1), note(2, 'no activity for 10 min')]
+    expect(label(quiet)).toBe('No activity for 10 min')
+    expect(label([...quiet, note(3, 'no activity for 20 min')])).toBe('No activity for 20 min')
+    expect(viewBuildParts([...quiet, note(3, 'no activity for 20 min')])[0].stages).toEqual(['the session writes the view', 'no activity for 20 min'])
+    expect(label([...quiet, said(3)])).toBe('Writing the view')
+    expect(label([...quiet, note(3, 'checks passed: 2 ref(s), the page loaded')])).toBe('Checks passed')
   })
 })
 

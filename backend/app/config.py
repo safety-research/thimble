@@ -565,8 +565,24 @@ def free_name(base: str, data_dir: Path | None = None) -> str:
         n += 1
 
 
-def register_corpus(path: str | Path, *, exact: bool = False) -> dict:
-    """Register a directory as a corpus and return its record {name, root, path, registered_at, manifest}.
+KEEP_SHOWN = object()  # register_corpus: leave the record's `shown` as it is
+
+
+def shown_alias(shown: object, p: Path) -> str | None:
+    """`shown` when it is another absolute path to the folder `p` (through a symlink), else None."""
+    if not isinstance(shown, str) or not os.path.isabs(shown):
+        return None
+    alias = os.path.normpath(shown)
+    try:
+        return alias if alias != str(p) and Path(alias).resolve() == p else None
+    except OSError:
+        return None
+
+
+def register_corpus(path: str | Path, *, exact: bool = False, shown: object = KEEP_SHOWN) -> dict:
+    """Register a directory as a corpus and return its record {name, root, path, registered_at, manifest, shown?}.
+    `shown` is the folder as the analyst named it when that was another path to it, through a symlink (shown_alias),
+    which the dashboard shows in place of `path`: a string records it, None clears it, KEEP_SHOWN leaves it.
 
     A path inside DATA_DIR/<c> is corpus c: nothing written. A path inside (not at) a registered directory is that
     directory's corpus unless `exact`, which registers the folder itself. Exactly a registered working directory refreshes
@@ -601,6 +617,9 @@ def register_corpus(path: str | Path, *, exact: bool = False) -> dict:
     root = str(_sidecar_bases(prev).get("root", p)) if prev is not None else str(p)
     rec = {"name": name, "root": root, "path": str(p), "registered_at": (prev or {}).get("registered_at") or _now(),
            "manifest": _scan_manifest(p)}
+    alias = shown_alias((prev or {}).get("shown"), p) if shown is KEEP_SHOWN else shown_alias(shown, p)
+    if alias:
+        rec["shown"] = alias
     _write_sidecar(rec)
     log.info("registered corpus %r at %s (sidecar %s)", name, p, sidecar_path(name))
     return rec

@@ -562,7 +562,7 @@ async def test_the_review_reads_one_picture_asks_for_more_and_sends_its_problems
 
     revisions: list[list[str]] = []
 
-    async def revise(c, slug, prop, problems, shots, run=None):
+    async def revise(c, slug, prop, problems, shots):
         revisions.append(problems)
         return True, "fixed"
 
@@ -582,8 +582,8 @@ async def test_the_review_reads_one_picture_asks_for_more_and_sends_its_problems
 
 
 async def test_the_review_reads_again_for_as_long_as_the_api_stays_at_capacity(ws, bound, monkeypatch):
-    """A reading the API keeps refusing at capacity waits and reads again, with the waits doubling up to a cap, and
-    the review's time limit leaves those waits out, so a long streak of 429s or 529s never ends the review."""
+    """A reading the API keeps refusing at capacity waits and reads again, with the waits doubling up to a cap, so a
+    long streak of 429s or 529s never ends the review."""
     from app import card_check, model, view_review
 
     views.propose(CORPUS, "Threads", "The posts by thread.", ["board.jsonl"], "Unit: a post", asked=True)
@@ -612,12 +612,55 @@ async def test_the_review_reads_again_for_as_long_as_the_api_stays_at_capacity(w
     monkeypatch.setattr(views, "shoot_states", shoot_states)
     monkeypatch.setattr(view_review, "_call", reading)
     monkeypatch.setattr(view_review, "_capacity_sleep", sleep)
-    monkeypatch.setattr(view_review, "REVIEW_TOTAL_S", 0.2)
     monkeypatch.setattr(card_check, "fit_image", lambda b: b)
     await view_review._guarded(view_review._Run(CORPUS, "threads"))
     assert slept == [30.0, 60.0, 120.0, 240.0, 300.0, 300.0, 300.0]
     review = views.read_proposal(CORPUS, "threads")["review"]
     assert review["state"] == "done" and not review["left"], review
+
+
+async def test_a_review_runs_until_it_ends_and_the_analyst_s_stop_puts_the_view_back(ws, bound, monkeypatch):
+    """A review has no time limit: a revision that takes long is waited for, and the analyst's Stop ends the review
+    `stopped`, its revision's session stopped and the view back at its last version that passed."""
+    from app import card_check, dev, model, view_review  # noqa: PLC0415
+
+    monkeypatch.setattr(views, "_queue", lambda c, slug: None)
+    views.propose(CORPUS, "Threads", "The posts by thread.", ["board.jsonl"], "Unit: a post", asked=True)
+    views.mark_built(CORPUS, "threads")
+    page = views.views_dir(CORPUS) / "threads" / "view.html"
+    built = page.read_text("utf-8")
+
+    async def shoot_states(c, slug, states, **k):
+        for st in states:
+            Path(st["out"]).parent.mkdir(parents=True, exist_ok=True)
+            Path(st["out"]).write_bytes(b"png")
+        return [{"ok": True, "errors": [], "fonts": True, "png": str(st["out"])} for st in states]
+
+    async def reading(c, system, user, tool, images, effort):
+        return model.CallResult(status="ok", output={"problems": ["the list is cut off"], "more": []})
+
+    revising = asyncio.Event()
+
+    async def revise(c, slug, prop, problems, shots):
+        page.write_text("<p>half a revision</p>", "utf-8")
+        revising.set()
+        await asyncio.Event().wait()
+
+    stopped: list[tuple[str, str]] = []
+    monkeypatch.setattr(views, "shoot_states", shoot_states)
+    monkeypatch.setattr(view_review, "_call", reading)
+    monkeypatch.setattr(view_review, "revise", revise)
+    monkeypatch.setattr(dev, "stop_review_session", lambda c, slug: stopped.append((c, slug)))
+    monkeypatch.setattr(card_check, "fit_image", lambda b: b)
+    run = view_review.start(CORPUS, "threads")
+    await asyncio.wait_for(revising.wait(), 5)
+    await asyncio.sleep(0.2)
+    assert view_review.running(CORPUS, "threads") and view_review.revising(CORPUS, "threads")
+    assert view_review.stop(CORPUS, "threads")
+    await asyncio.wait_for(run.task, 5)
+    review = views.read_proposal(CORPUS, "threads")["review"]
+    assert (review["state"], review["note"]) == ("stopped", view_review.STOPPED_NOTE)
+    assert stopped == [(CORPUS, "threads")] and page.read_text("utf-8") == built
 
 
 async def test_a_workspace_gets_four_views_from_the_orientation_and_a_deleted_one_stays_deleted(ws, monkeypatch):
