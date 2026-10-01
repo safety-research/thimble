@@ -2859,6 +2859,7 @@ async def _run_view(c: str, slug: str, run: Run) -> None:
             prompt = build_gates_prompt("\n".join(views.gate_lines(report)))
         else:
             prompt = build_view_prompt(c, prop, folder, corpus)
+        told = prompt  # the last gate report the session was sent
         waits, waited = view_capacity_waits(), 0.0
         # an orientation's proposal repairs itself rather than showing a failure
         repairs = 0 if prop.get("asked") or revision else VIEW_REPAIRS
@@ -2875,7 +2876,8 @@ async def _run_view(c: str, slug: str, run: Run) -> None:
                 await asyncio.to_thread(SESSIONS.stop, run.session)
                 views.update_proposal(c, slug, session=None, session_id=None)
                 resume, run.session, run.session_id = None, None, None
-                prompt = f"{build_view_prompt(c, prop, folder, corpus)}\n\n{build_gates_prompt(failed)}"
+                told = build_gates_prompt(failed)
+                prompt = f"{build_view_prompt(c, prop, folder, corpus)}\n\n{told}"
                 attempt, broke = 0, False
             attempt += 1
             run_log.stage("the session writes the view" if attempt == 1 else
@@ -2902,7 +2904,8 @@ async def _run_view(c: str, slug: str, run: Run) -> None:
                 broke = True
                 continue
             resume = run.session_id or resume
-            if not (capacity and change):
+            written = (folder / views.VIEW_JSON).is_file()
+            if not (capacity and (change or not written)):
                 # a change the API cut short is not checked: the view as it was passes the checks too
                 report = await gate(quiet=bool(capacity))
                 built = bool(report["ok"])
@@ -2912,7 +2915,7 @@ async def _run_view(c: str, slug: str, run: Run) -> None:
             if built or not capacity:
                 capacity = ""
                 if not built:
-                    prompt = build_gates_prompt("\n".join(views.gate_lines(report)))
+                    prompt = told = build_gates_prompt("\n".join(views.gate_lines(report)))
                 continue
             if time.monotonic() - turn_start > _retry_streak_s():
                 # the turn worked a while before the API stopped it: a new streak of waits
@@ -2927,8 +2930,12 @@ async def _run_view(c: str, slug: str, run: Run) -> None:
             await _capacity_sleep(wait)
             attempt -= 1
             if resume:
-                prompt = (tools.hint(agent_session.RETRY_PROMPT) if change
-                          else build_gates_prompt("\n".join(views.gate_lines(report))))
+                # the gate's report only when the session wrote a view and was not sent that report already
+                gates = build_gates_prompt("\n".join(views.gate_lines(report))) if written and report else ""
+                if gates and not change and gates != told:
+                    prompt = told = gates
+                else:
+                    prompt = tools.hint(agent_session.RETRY_PROMPT)
     except asyncio.CancelledError:
         await asyncio.to_thread(SESSIONS.stop, run.session)
         if run.status == MAIN_ENDED:
@@ -2993,8 +3000,9 @@ async def review_revision(c: str, slug: str, message: str) -> tuple[bool, str]:
     """A revision the view review asks for: the view's build session woken with `message` (prompts/dev-view-review.md)
     in the view's thread, the view's checks run after each turn and fed back up to MAX_ATTEMPTS times. (passed, the
     session's report or why it did not pass). A view with no build session gets a new one, started with its ticket. Its
-    session asks as a build's does (view_asking)."""
-    from . import views  # noqa: PLC0415
+    session asks as a build's does (view_asking). A turn the API ended at capacity is no attempt: the session is woken
+    again after a build's waits (view_capacity_waits)."""
+    from . import agent_session, tools, views  # noqa: PLC0415
 
     prop = views.read_proposal(c, slug)
     if prop is None:
@@ -3022,10 +3030,15 @@ async def review_revision(c: str, slug: str, message: str) -> tuple[bool, str]:
     def on_session(short: str, sid: str) -> None:
         views.update_proposal(c, slug, session=short, session_id=sid)
 
+    waits, waited = view_capacity_waits(), 0.0
+    attempt = 0
     try:
-        for attempt in range(1, MAX_ATTEMPTS + 1):
+        while attempt < MAX_ATTEMPTS:
+            attempt += 1
             if attempt > 1:
                 run_log.stage(f"the session fixes what the checks found (attempt {attempt} of {MAX_ATTEMPTS})")
+            error = ""
+            turn_start = time.monotonic()
             try:
                 result_text = await _worker_turn(run, run_log, corpus, prompt, resume, name=view_session_name(c, slug),
                                                  workspace=c, on_session=on_session, add_dirs=(folder,),
@@ -3033,13 +3046,28 @@ async def review_revision(c: str, slug: str, message: str) -> tuple[bool, str]:
                                                  turn_timeout_s=REVIEW_TURN_TIMEOUT_S, asking=asking,
                                                  models=view_models(c, prop))
             except RuntimeError as e:
-                why = str(e)
+                error, result_text = str(e), ""
+            capacity = capacity_failure(error) or capacity_failure(result_text)
+            if error and not capacity:
+                why = error
                 run_log.error(why)
                 break
-            if capacity := capacity_failure(result_text):
-                why = capacity
-                break
             resume = run.session_id or resume
+            if capacity:
+                # the view as it was passes the checks too, so a turn the API cut short is not checked
+                if time.monotonic() - turn_start > _retry_streak_s():
+                    waits, waited = view_capacity_waits(), 0.0
+                if not waits:
+                    why = REVIEW_CAPACITY_WHY.format(why=capacity, waited=_minutes(waited))
+                    break
+                wait = waits.pop(0)
+                waited += wait
+                run_log.stage(f"{capacity}, so the revision waits {_minutes(wait)} and goes on")
+                await _capacity_sleep(wait)
+                attempt -= 1
+                if resume:
+                    prompt = tools.hint(agent_session.RETRY_PROMPT)
+                continue
             rep = await views.gate(c, slug, views._kept_locators(c, slug))
             if rep.get("ok"):
                 run_log.stage(f"checks passed: {len(rep.get('checks') or [])} ref(s), the page loaded")
@@ -3068,6 +3096,7 @@ CAPACITY_WORDS = {"overloaded": "Anthropic's API was overloaded", "rate_limited"
 # a view build whose last turn the API ended once every wait (view_capacity_waits) was spent: the failure on the chip
 # of a view the analyst asked for, and the reason in the line an orientation's dropped proposal gets
 CAPACITY_WHY = "{why} each time the build tried over {waited}"
+REVIEW_CAPACITY_WHY = "{why} each time the revision tried over {waited}"
 CAPACITY_FAILED = CAPACITY_WHY + ", so it stopped; Retry goes on from there. ({error})"
 # the failure of a change to a built view whose session ended its turn with the view's files as they were built
 UNCHANGED_LINE = "the session changed none of the view's files"
