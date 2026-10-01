@@ -110,10 +110,14 @@ def test_add_lists_each_contribution_with_its_own_description_and_adds_nothing_w
                  "report type digest: A one-page digest of the tally.", "It works with thimble >=0.4.",
                  "thimble's kernels"):
         assert part in text
+    assert f"ext-min 0.1.0, used in place from {FIXTURE.resolve()}" in said
     assert extensions.add(str(FIXTURE), ask=lambda _: "y", say=said.append) == ["ext-min"]
+    assert extensions.linked("ext-min"), "a local folder is used in place"
     assert (extensions.source_path("ext-min") / "views" / "tally" / "reader.py").is_file()
-    assert json.loads((extensions.source_path("ext-min") / extensions.ADDED).read_text())["kind"] == "folder"
+    assert json.loads(extensions._record_file("ext-min").read_text())["kind"] == "folder"
+    assert not (FIXTURE / extensions.ADDED).exists(), "thimble writes nothing into a folder used in place"
     assert extensions.remove("ext-min") and not extensions.source_path("ext-min").exists()
+    assert (FIXTURE / "extension.json").is_file(), "removing it leaves the folder"
     assert not extensions.remove("ext-min")
 
 
@@ -175,12 +179,13 @@ async def test_thimble_adds_the_extensions_it_ships_on_once_and_names_the_others
     shutil.copytree(extensions.builtin_dir(), ships)
     monkeypatch.setattr(extensions, "builtin_dir", lambda: ships)
     assert extensions.add("swarm", yes=True, say=lambda _: None) == ["swarm", "multiagent-swimlane"]
-    (ships / "swarm" / "agents" / "orient.md").write_text("---\n---\nRead every record.\n")
+    prompt = Path("agents") / "orientation" / "prompt.md"
+    (ships / "swarm" / prompt).write_text("Read every record.\n")
     assert extensions.ship() == ["swarm"]
-    assert (extensions.source_path("swarm") / "agents" / "orient.md").read_text().endswith("Read every record.\n")
-    (extensions.source_path("swarm") / "agents" / "orient.md").write_text("---\n---\nMine.\n")
-    (ships / "swarm" / "agents" / "orient.md").write_text("---\n---\nRead each record.\n")
-    assert extensions.ship() == [] and (extensions.source_path("swarm") / "agents" / "orient.md").read_text().endswith("Mine.\n")
+    assert (extensions.source_path("swarm") / prompt).read_text() == "Read every record.\n"
+    (extensions.source_path("swarm") / prompt).write_text("Mine.\n")
+    (ships / "swarm" / prompt).write_text("Read each record.\n")
+    assert extensions.ship() == [] and (extensions.source_path("swarm") / prompt).read_text() == "Mine.\n"
     assert extensions.remove("multiagent-swimlane")
     extensions.remove("swarm")
     old = tmp_path / "old-ships"
@@ -364,11 +369,10 @@ async def test_an_extension_switched_off_does_not_run_and_its_unchanged_view_goe
     assert views.read_proposal(CORPUS, "tally") is not None
 
 
-async def test_an_extension_added_again_or_switched_on_again_gives_the_orientation_no_second_follow_up(corpus,
-                                                                                                        monkeypatch):
-    """An oriented workspace hears an extension's orientation instructions as one follow-up the first time it runs
-    there. It keeps that mark when the extension is removed or switched off, so adding it again or switching it back on
-    restarts nothing."""
+async def test_switching_on_an_extension_offers_to_run_its_orientation_instructions(corpus, monkeypatch):
+    """Where an orientation ran, an extension with orientation instructions that comes on is offered, never sent on its
+    own: Run now sends its instructions once as a follow-up, Not now stops the offer, and switching it off and on again
+    offers it again. An orientation that starts reads them in its prompt, so nothing is offered after it."""
     sent: list[tuple[str, str]] = []
 
     async def message(c, text, by, extension=""):
@@ -376,25 +380,42 @@ async def test_an_extension_added_again_or_switched_on_again_gives_the_orientati
         return {"status": "resumed"}
 
     monkeypatch.setattr(orient_session, "message", message)
+    ran = {"yes": False}
+    monkeypatch.setattr(extensions, "orientation_ran", lambda c: ran["yes"])
     _add()
     await extensions.refresh(CORPUS)
-    assert sent == [("ext-min", "Read every tally record in `tally/*.jsonl` before you draft.")]
-    assert extensions.read_state(CORPUS)["oriented"] == ["ext-min"]
-    assert extensions.remove("ext-min")
-    assert "ext-min" not in (await extensions.refresh(CORPUS))["extensions"]
-    _add()
-    assert (await extensions.refresh(CORPUS))["extensions"]["ext-min"]["active"]
+    assert extensions.offered(CORPUS) == [] and sent == [], "no orientation ran here: it reads them when it starts"
+    await extensions.mark_oriented(CORPUS)
+    ran["yes"] = True
+    assert extensions.offered(CORPUS) == []
+
     extensions.set_enabled(CORPUS, "ext-min", False)
     await extensions.refresh(CORPUS)
     extensions.set_enabled(CORPUS, "ext-min", True)
-    assert (await extensions.refresh(CORPUS))["extensions"]["ext-min"]["active"]
-    assert len(sent) == 1 and extensions.read_state(CORPUS)["oriented"] == ["ext-min"]
+    await extensions.refresh(CORPUS)
+    assert extensions.offered(CORPUS) == ["ext-min"] and sent == []
+    row = next(r for r in extensions.public(CORPUS)["extensions"] if r["name"] == "ext-min")
+    assert row["offer"] and row["orients"]
+    assert await extensions.run_orientation(CORPUS, "ext-min") == {"status": "resumed"}
+    assert sent == [("ext-min", "Read every tally record in `tally/*.jsonl` before you draft.")]
+    assert extensions.offered(CORPUS) == []
+    await extensions.refresh(CORPUS)
+    assert extensions.offered(CORPUS) == [] and len(sent) == 1
+
+    assert extensions.remove("ext-min")
+    await extensions.refresh(CORPUS)
+    _add()
+    await extensions.refresh(CORPUS)
+    assert extensions.offered(CORPUS) == ["ext-min"], "added again, it is offered again"
+    await extensions.decline(CORPUS, "ext-min")
+    await extensions.refresh(CORPUS)
+    assert extensions.offered(CORPUS) == [] and len(sent) == 1
 
 
 async def test_an_orient_md_that_replaces_takes_the_place_of_thimble_s_instructions(corpus, tmp_path, monkeypatch):
     """With `replace: true` the body stands in for thimble's instructions and its tools, model and effort are
-    ignored; the analyst's own instructions win; two extensions that replace them leave thimble's, and are named. An
-    oriented workspace is sent a replacement only where it would stand in the prompt."""
+    ignored; the analyst's own instructions win; two extensions that replace them leave thimble's, and are named. Run
+    now sends a replacement only where it would stand in the prompt."""
     sent: list[str] = []
 
     async def message(c, text, by, extension=""):
@@ -402,6 +423,7 @@ async def test_an_orient_md_that_replaces_takes_the_place_of_thimble_s_instructi
         return {"status": "resumed"}
 
     monkeypatch.setattr(orient_session, "message", message)
+    monkeypatch.setattr(extensions, "orientation_ran", lambda c: True)
     write_json(config.workspace_dir(CORPUS) / "settings.json", {orient_session.SETTING: "My own way."})
     solo = _copy(tmp_path, "solo")
     shutil.rmtree(solo / "views")
@@ -409,6 +431,7 @@ async def test_an_orient_md_that_replaces_takes_the_place_of_thimble_s_instructi
     (solo / "agents" / "orient.md").write_text("---\nreplace: true\n---\nLabel everything.\n")
     _add(solo)
     await extensions.refresh(CORPUS)
+    assert await extensions.run_orientation(CORPUS, "solo") == {"status": "nothing"}
     assert sent == [] and orient_session.instructions_of(CORPUS) == "My own way."
     extensions.remove("solo")
     write_json(config.workspace_dir(CORPUS) / "settings.json", {})
@@ -419,6 +442,8 @@ async def test_an_orient_md_that_replaces_takes_the_place_of_thimble_s_instructi
     (d / "agents" / "orient.md").write_text("---\nreplace: true\ntools: Bash\nmodel: haiku\n---\nCount first, then read.\n")
     _add(d)
     await extensions.refresh(CORPUS)
+    assert sent == [] and extensions.offered(CORPUS) == ["mine"]
+    await extensions.run_orientation(CORPUS, "mine")
     assert sent == ["mine"] and orient_session.instructions_of(CORPUS) == "Count first, then read."
     assert orient_session.instructions_of(CORPUS, "My own way.") == "My own way."
     assert set(extensions.agent_definitions(CORPUS)) == {"counter"}
@@ -429,6 +454,7 @@ async def test_an_orient_md_that_replaces_takes_the_place_of_thimble_s_instructi
     (other / "agents" / "orient.md").write_text("---\nreplace: true\n---\nRead first.\n")
     _add(other)
     await extensions.refresh(CORPUS)
+    assert await extensions.run_orientation(CORPUS, "other") == {"status": "nothing"}
     assert sent == ["mine"], "a replacement two extensions give is sent by neither"
     assert orient_session.instructions_of(CORPUS) == prompts.render(orient_session.INSTRUCTIONS, {}).strip()
     lines = extensions.public(CORPUS)["conflicts"]
@@ -596,11 +622,12 @@ async def test_the_extension_command_adds_lists_and_removes(corpus, capsys, monk
     monkeypatch.setenv("THIMBLE_WORKSPACES_DIR", str(config.WORKSPACES_DIR))
     (config.WORKSPACES_DIR / "later").mkdir(parents=True)
     assert cli.main(["extension", "add", str(FIXTURE), "--yes"]) == 0
-    assert "Added ext-min." in capsys.readouterr().out
+    out = capsys.readouterr().out
+    assert "ext-min is on." in out and "ext-min adds to the orientation." in out
     await extensions.refresh(CORPUS, wait=10)
     assert cli.main(["extension", "list"]) == 0
     out = capsys.readouterr().out
-    assert out.startswith(f"ext-min 0.1.0, from {FIXTURE.resolve()}: loads\n")
+    assert out.startswith(f"ext-min 0.1.0, used in place from {FIXTURE.resolve()}: on\n")
     assert re.search(r"^  later +not checked yet: no session connected here since it was added$", out, re.M)
     assert re.search(r"^  tallies +on\n +view tally shown: Each record says who did a task\.$", out, re.M)
     extensions.set_enabled(CORPUS, "ext-min", False)
