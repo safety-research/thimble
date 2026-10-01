@@ -188,6 +188,7 @@ const viewsExample = (api: Api): Example => {
       D = api.rectOf(realBody())
     if (B) Object.assign(bar.style, { left: `${B.x}px`, top: `${B.y}px`, width: `${B.width}px`, height: `${B.height}px` })
     if (D) Object.assign(body.style, { left: `${D.x}px`, top: `${D.y}px`, width: `${D.width}px`, height: `${D.height}px` })
+    return !!(B && D)
   }
   return { els: { bar, body, frame }, layout }
 }
@@ -270,7 +271,8 @@ const labelsExample = (api: Api): Example => {
       Object.assign(lab.style, { left: `${r.x}px`, width: '250px', top: `${r.y + r.height - lab.offsetHeight}px` })
       r = { x: r.x + 251, y: r.y, width: r.width - 251, height: r.height }
     }
-    if (r) Object.assign(rd.style, { left: `${r.x}px`, top: `${r.y}px`, width: `${r.width}px`, height: `${r.height}px` })
+    if (!r) return false
+    Object.assign(rd.style, { left: `${r.x}px`, top: `${r.y}px`, width: `${r.width}px`, height: `${r.height}px` })
     if (L) Object.assign(lab.style, { left: `${L.x}px`, width: `${L.width}px`, top: `${L.y + L.height - lab.offsetHeight}px` })
     const sc = rd.querySelector<HTMLElement>('.reader-body')
     if (!sc || !sc.clientHeight) return
@@ -434,7 +436,7 @@ const reportExample = (api: Api): Example => {
   els.hideChecks()
   const layout = () => {
     const r = api.rectOf(panel())
-    if (!r) return
+    if (!r) return false
     Object.assign(w.style, { left: `${r.x}px`, top: `${r.y}px`, width: `${r.width}px`, height: `${r.height}px` })
     const k = Math.min(1, r.width / w0)
     els.k = k
@@ -463,8 +465,8 @@ const scrollTo = (api: Api, el: Element | null | undefined, above = 120, smooth 
 }
 const inReport = (api: Api, sel: string) => (api.els.root as HTMLElement | undefined)?.querySelector<HTMLElement>(sel) ?? null
 
-/** The tour, for a pointer key written `key` (⌘ on a Mac, Ctrl elsewhere). Without the chat column (`chat` false) the
- * steps about the chat are left out. */
+/** The tour, for a pointer key written `key` (⌘ on a Mac, Ctrl elsewhere). With the chat column folded (`chat` false)
+ * the steps about the chat are left out. */
 export function tourSteps(key: string, chat = true): Step[] {
   const steps: Step[] = [
     {
