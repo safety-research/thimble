@@ -214,3 +214,32 @@ def test_a_citation_of_a_pdf_page_resolves_to_the_page_text(chats):
     assert ref("docs/postmortem.pdf#p9")["meta"]["missing"] is True
     broken = ref("docs/broken.pdf#p1")
     assert broken["meta"]["error"] and broken["excerpt"] == "(a PDF that does not open)"
+
+
+def test_each_turn_stands_on_its_line_whatever_wrote_the_json(chats):
+    import time
+
+    parts = {"messages": [{"role": "user" if i % 2 else "assistant", "content": [
+        {"type": "text", "text": f"ok {i}"}, {"type": "text", "text": "details " * 20}]} for i in range(3000)]}
+    (chats / "logs" / "parts.json").write_text(json.dumps(parts, indent=1))
+    slack = [{"type": "message", "user": f"U{i % 3}", "text": f"see https://example.com/issue/{i} for run {i}",
+              "ts": f"{1700000000 + i}.0001"} for i in range(3000)]
+    (chats / "logs" / "slack-escaped.json").write_text(json.dumps(slack, indent=1).replace("/", "\\/"))
+    for name, first in (("parts.json", lambda t: t["text"].split("\n")[0]), ("slack-escaped.json", lambda t: t["text"][:10])):
+        t0 = time.monotonic()
+        got = transcripts.parse_turns(chats / "logs" / name, f"logs/{name}")
+        assert time.monotonic() - t0 < 3, f"{name}: one pass, not one per turn"
+        raw = (chats / "logs" / name).read_text().split("\n")
+        assert len(got["turns"]) == 3000
+        assert all(first(t) in raw[t["line"] - 1] for t in got["turns"]), name
+
+
+def test_turns_whose_words_are_not_found_cost_a_few_passes(chats, monkeypatch):
+    import time
+
+    msgs = [{"role": "user", "content": f"message {i} " + "x" * 400} for i in range(4000)]
+    (chats / "logs" / "missed.json").write_text(json.dumps(msgs, indent=1))
+    monkeypatch.setattr(transcripts, "_needles", lambda t: ["\x01 not in the file"])
+    t0 = time.monotonic()
+    got = transcripts.parse_turns(chats / "logs" / "missed.json", "logs/missed.json")
+    assert time.monotonic() - t0 < 3 and {t["line"] for t in got["turns"]} == {1}

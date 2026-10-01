@@ -535,45 +535,69 @@ def sniff_text(text: str) -> dict[str, Any] | None:
 # --------------------------------------------------------------------------- whole-file turns
 
 
-def _locate(raw: str, turns: list[dict[str, Any]], pos: int = 0, line_at: int = 1) -> tuple[int, int]:
-    """Sets each turn's `line`: where its words (else its id) stand in the raw text, searched forward from offset `pos`
-    (on line `line_at`) and from the turn before; a turn not found keeps the line of the one before. Returns the offset
-    and line the search ended at."""
-    line_pos = pos
-    last_line = line_at
-    for t in turns:
-        found = -1
-        for needle in _needles(t):
-            at = raw.find(needle, pos)
-            if at < 0:
-                at = raw.find(needle, max(0, pos - 4_000_000))
-            if at >= 0:
-                found = at
-                break
-        if found >= 0:
-            if found >= line_pos:
-                line_at += raw.count("\n", line_pos, found)
-            else:
-                line_at = raw.count("\n", 0, found) + 1
-            line_pos = found
-            pos = found + 1
-            last_line = line_at
-        t["line"] = last_line
-    return line_pos, last_line
+# a run of characters every JSON writer leaves as they are (no quote, backslash, slash, <, >, &, apostrophe, brace or
+# character past ASCII), so it stands verbatim in the raw file whatever wrote it
+_VERBATIM = re.compile(r"[A-Za-z0-9 !#$%()*+,\-.:;=?@\[\]^_`|~]{3,}")
+LOCATE_BACK = 1_000_000  # characters before the last turn found that a turn not found after it is looked for in
+
+
+class _Locator:
+    """Sets each turn's `line`: where its words (else its id) stand in the raw text, looked for after the turn before
+    and, failing that, a little before it; a turn not found keeps the line of the one before. The searches scan at most
+    a few times the text in all, so a file whose words the needles miss costs a few passes, not one per turn."""
+
+    def __init__(self, raw: str) -> None:
+        self.raw = raw
+        self.pos = 0  # where the next search starts
+        self.line_pos = 0  # an offset whose line is known: line_at
+        self.line_at = 1
+        self.budget = 6 * len(raw) + (1 << 20)
+
+    def place(self, turns: list[dict[str, Any]]) -> None:
+        raw = self.raw
+        for t in turns:
+            found, size = -1, 1
+            for needle in (_needles(t) if self.budget > 0 else ()):
+                at = raw.find(needle, self.pos)
+                self.budget -= (at - self.pos) if at >= 0 else (len(raw) - self.pos)
+                if at < 0:
+                    lo = max(0, self.pos - LOCATE_BACK)
+                    at = raw.find(needle, lo, self.pos)
+                    self.budget -= self.pos - lo
+                if at >= 0:
+                    found, size = at, len(needle)
+                    break
+                if self.budget <= 0:
+                    break
+            if found >= 0:
+                if found >= self.line_pos:
+                    self.line_at += raw.count("\n", self.line_pos, found)
+                else:
+                    self.line_at -= raw.count("\n", found, self.line_pos)
+                self.line_pos = found
+                self.pos = found + size
+            t["line"] = self.line_at
 
 
 def _needles(t: dict[str, Any]) -> list[str]:
-    out = []
-    text = (t.get("text") or "").strip()
-    if text:
-        piece = text[:80]
+    """What to look for to find a turn in the raw JSON: the first verbatim run of its words, after a quote when it starts
+    them; else its first words as JSON writes them, escaped or not; else its id."""
+    text = t.get("text") or ""
+    out: list[str] = []
+    m = _VERBATIM.search(text, 0, 400)
+    if m:
+        run = m.group()[:60].rstrip()
+        if m.start() == 0:
+            out.append('"' + run)
+        if len(run.strip()) >= 3:
+            out.append(run.strip())
+    elif text.strip():
+        piece = text.strip()[:40]
         out.append(json.dumps(piece, ensure_ascii=False)[1:-1])
-        ascii_ = json.dumps(piece)[1:-1]
-        if ascii_ != out[0]:
-            out.append(ascii_)
+        out.append(json.dumps(piece)[1:-1])
     if t.get("id"):
         out.append(json.dumps(str(t["id"]))[1:-1])
-    return [n for n in out if len(n) >= 2]
+    return list(dict.fromkeys(n for n in out if len(n) >= 2))
 
 
 def _role(speaker: str) -> str:
@@ -615,14 +639,14 @@ def parse_turns(path: Path, rel: str) -> dict[str, Any]:
     except ValueError:
         whole = None
     if whole is not None:
-        at = (0, 1)
+        locator = _Locator(raw)
         for title, conv in conversations_in(whole):
             if not conv:
                 continue
             groups.append({"title": title, "first": len(turns)})
             for t in conv:
                 t["group"] = len(groups) - 1
-            at = _locate(raw, conv, *at)
+            locator.place(conv)
             turns.extend(conv)
     else:
         for n, ln in enumerate(raw.split("\n"), 1):
