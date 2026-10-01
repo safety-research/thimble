@@ -744,12 +744,14 @@ def source_problems(claims: Any, reader: str, html: str, libs: Any) -> list[str]
     return out
 
 
-def write_view(c: str, slug: str, *, name: str, description: str, claims: Any, accepts: Any = None, units: Any = None,
-               derived: Any = None, libs: Any = None, reader: str, html: str, unit: Any = None, records: Any = None,
-               compare: bool = False) -> dict[str, Any]:
+def write_view(c: str, slug: str, *, name: str, description: str, claims: Any = None, accepts: Any = None,
+               units: Any = None, derived: Any = None, libs: Any = None, reader: str, html: str, unit: Any = None,
+               records: Any = None, compare: bool = False, scope: Any = None) -> dict[str, Any]:
     """Write or replace a view's three files, validated (source_problems), and register it built (mark_built): a view
-    of thimble's own making, as the tests make theirs; a view ticket's session writes the files itself."""
+    of thimble's own making, as the tests make theirs; a view ticket's session writes the files itself. `scope` is
+    view.json's name for `claims`."""
     slug = _check_slug(slug)
+    claims = claims if claims is not None else scope
     reader_src = str(reader or "").replace("\r\n", "\n")
     html_src = str(html or "").replace("\r\n", "\n")
     problems = source_problems(claims, reader_src, html_src, libs)

@@ -781,7 +781,7 @@ def _save_example(name: str) -> str:
     raw = json.loads((d / "view.json").read_text("utf-8"))
     slug = EXAMPLES[name][0]
     views.write_view(name, slug, reader=(d / "reader.py").read_text("utf-8"), html=(d / "view.html").read_text("utf-8"),
-                     **{k: raw.get(k) for k in ("name", "description", "claims", "accepts", "units", "derived", "libs")})
+                     **{k: raw.get(k) for k in ("name", "description", "scope", "records", "accepts", "units", "libs")})
     return slug
 
 
