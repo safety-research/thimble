@@ -102,6 +102,11 @@ def test_each_role_is_thimble_s_own_until_an_extension_gives_it_and_two_replacem
     assert rows["orientation"]["conflict"] == ["survey", "other"] and rows["critic"]["additions"] == ["notes"]
 
 
+def test_the_example_extension_checks_clean_with_its_program_s_own_slots():
+    """The Markdown beside a program is the program's own text, so its {{slots}} are not thimble's placeholders."""
+    assert extensions.read_extension(EXAMPLE)["problems"] == []
+
+
 def test_agent_json_problems_name_the_field_and_main_takes_additions_only(tmp_path):
     folder = tmp_path / "x" / "agents" / "main"
     folder.mkdir(parents=True)
