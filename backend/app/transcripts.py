@@ -54,7 +54,7 @@ SPEAKER_KEYS = ("role", "speaker", "sender", "author", "from", "user", "username
                 "nick", "persona")
 # keys that name who speaks only in a record that also carries a time, since without one a record with a `name` and a
 # `body` is as likely a page as a post
-WEAK_SPEAKER_KEYS = ("name", "user_name", "editor", "label", "agent")
+WEAK_SPEAKER_KEYS = ("user_name", "editor", "label", "agent", "name")  # `name` last: it is a page's or a thread's as often
 TEXT_KEYS = ("content", "text", "message", "body", "value", "parts", "utterance", "msg", "change_summary")
 TIME_KEYS = ("timestamp", "ts", "time", "created_at", "create_time", "date", "datetime", "sent_at", "created")
 # keys whose value names who speaks only when it is a role word, such as LangChain's {"type": "human", "data": {...}}
@@ -87,17 +87,19 @@ DELIMITED = {".csv": ",", ".tsv": "\t"}
 _NAME = r"[^\W\d_][\w .'@&+-]{0,38}?"
 _CLOCK = r"\d{1,2}:\d{2}(?::\d{2})?(?:[.,]\d{1,3})?(?:\s?[APap]\.?[Mm]\.?)?"
 _DATE = r"\d{1,4}[/.-]\d{1,2}[/.-]\d{1,4}"
+_STAMP = rf"(?:{_DATE}[ T,]+)?{_CLOCK}(?:Z|[+-]\d{{2}}:?\d{{2}}|\s?UTC)?"  # a clock, after a date or not, with a zone or not
 # A turn's first line in a text chat log, by style: (name, regex). Each has the group `speaker` (or `speaker2`), may
-# have `time`, and the words of the turn start at the end of the match.
+# have `time` (or `time2`), and the words of the turn start at the end of the match.
 STYLES: list[tuple[str, re.Pattern[str]]] = [
     ("whatsapp", re.compile(rf"^\[?(?P<time>{_DATE},?\s+{_CLOCK})\]?\s*(?:[-–]\s+)?(?P<speaker>{_NAME}):\s")),
     ("bracket", re.compile(rf"^\[(?P<time>[^\]\n]{{3,40}})\]\s*(?:<[@+%]?(?P<speaker2>[^>\n]{{1,40}})>\s?|(?P<speaker>{_NAME}):\s?)")),
     ("irc", re.compile(rf"^(?:(?P<time>{_CLOCK})\s+)?<[@+%]?(?P<speaker>[^>\s]{{1,40}})>\s")),
     ("vtt", re.compile(r"^<v\s+(?P<speaker>[^>\n]{1,40})>")),
-    ("bold", re.compile(rf"^\s*(?:[-*>]\s+)?\*\*(?P<speaker>{_NAME})\s*(?:\((?P<time>[^)\n]{{1,40}})\))?\s*:?\s*\*\*\s*:?\s*")),
+    ("bold", re.compile(rf"^\s*(?:[-*>]\s+)?\*\*(?P<speaker>{_NAME})\s*(?:\((?P<time>[^)\n]{{1,40}})\))?\s*:?\s*\*\*"
+                        rf"\s*(?:\((?P<time2>{_STAMP}|{_DATE})\))?\s*:?\s*")),
     ("heading", re.compile(rf"^#{{1,4}}\s+(?P<speaker>{_NAME})\s*(?:\((?P<time>[^)\n]{{1,40}})\))?\s*:?\s*$")),
     ("clock-name", re.compile(rf"^\(?(?P<time>{_CLOCK})\)?\s+[-–]?\s*(?P<speaker>{_NAME}):\s")),
-    ("name-clock", re.compile(rf"^(?P<speaker>{_NAME})\s*[(\[](?P<time>{_CLOCK})[)\]]\s*:?\s*")),
+    ("name-clock", re.compile(rf"^(?P<speaker>{_NAME})\s*[(\[](?P<time>{_STAMP})[)\]]\s*:?\s*")),
     ("slack", re.compile(rf"^(?P<speaker>{_NAME})\s{{2,}}(?P<time>{_CLOCK})\s*$")),
     ("tagged", re.compile(rf"^(?:(?P<time>{_DATE}[ T]{_CLOCK}\S*)\s+)?\[(?P<speaker>{_NAME})\]:?\s")),
     ("cc", re.compile(r"^(?P<mark>[>⏺●])\s(?=\S)")),
@@ -534,7 +536,7 @@ def turn_of(line: str, style: str) -> dict[str, Any] | None:
     if not _speaker_ok(speaker):
         return None
     out: dict[str, Any] = {"speaker": speaker, "at": _utf16_len(line[:m.end()])}
-    time = m.groupdict().get("time")
+    time = groups.get("time") or groups.get("time2")
     if time:
         out["time"] = time.strip()
     return out

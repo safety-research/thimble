@@ -227,6 +227,30 @@ def test_the_turns_of_other_tools_chat_logs(chats):
     assert transcripts.sniff(chats / "logs" / "langchain.jsonl", "logs/langchain.jsonl")["score"] == transcripts.STRONG
 
 
+def test_a_chat_log_s_time_after_the_speaker_is_the_turn_s_time_not_its_words():
+    """A time in brackets after the speaker, bold or not, with a date or a zone or neither, is the turn's time, and the
+    turn's words start after it; a bracket of words in a bold turn stays in its words."""
+    log = ("**Alice** (2026-06-22T08:45:55Z): Hello there\n\n**Bob** (2026-06-22 08:46): Fine.\n\n"
+           "**Alice (10:32):** Morning\n\n**Bob:** (laughs) finally\n")
+    hint = transcripts.sniff_text(log, markdown=True)
+    assert hint and hint["style"] == "bold"
+    turns = [(t["speaker"], t.get("time"), ln[t["at"]:]) for ln in log.split("\n") if (t := transcripts.turn_of(ln, "bold"))]
+    assert turns == [("Alice", "2026-06-22T08:45:55Z", "Hello there"), ("Bob", "2026-06-22 08:46", "Fine."),
+                     ("Alice", "10:32", "Morning"), ("Bob", None, "(laughs) finally")]
+    plain = "Alice (2026-06-22 08:45): hi\nBob (2026-06-22 08:46): yo\nAlice (2026-06-22 08:47): ok\nBob (2026-06-22 08:48): bye\n"
+    assert (transcripts.sniff_text(plain) or {}).get("style") == "name-clock"
+    t = transcripts.turn_of("Bob (1/2/24, 10:35 PM): Done.", "name-clock")
+    assert t and t["time"] == "1/2/24, 10:35 PM" and "Bob (1/2/24, 10:35 PM): Done."[t["at"]:] == "Done."
+
+
+def test_a_record_with_a_page_s_name_and_an_author_s_label_is_spoken_by_the_author():
+    """A wiki's revisions name the page under `name` and its author under `label`: the author speaks."""
+    revs = [{"name": "Main_Page", "seq": i, "body": f"edit {i}", "label": who, "time": f"2026-06-22T08:4{i}:00Z"}
+            for i, who in enumerate(["Ada", "Bo", "Ada", "Cy"])]
+    hint = transcripts.sniff_bytes("".join(json.dumps(r) + "\n" for r in revs).encode(), "revisions.jsonl", complete=True)
+    assert hint and hint["format"] == "messages" and hint["keys"]["speaker"] == "label", hint
+
+
 def test_the_pdf_route_serves_the_file_for_the_browsers_viewer(chats):
     r = client.get(f"{CHATS}/pdf/docs/postmortem.pdf")
     assert r.status_code == 200 and r.headers["content-type"] == "application/pdf"
