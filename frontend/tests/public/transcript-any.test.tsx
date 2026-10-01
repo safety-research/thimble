@@ -2,14 +2,18 @@
 // Transcript for anything close to a transcript, and a PDF as itself: the server's sniff decides the mode, a text chat
 // log reads as turns whose lines keep their own records, and a PDF ref opens at its page
 // (src/files/views/transcript.tsx, src/files/views/registry.ts, src/files/Reader.tsx).
-import { afterEach, describe, expect, test } from 'vitest'
+import { act } from 'react'
+import { afterEach, describe, expect, test, vi } from 'vitest'
 import { pdfPage, Reader } from '../../src/files/Reader.tsx'
 import type { FilesLabels } from '../../src/files/useLabels.ts'
 import { segmentsFor, segmentsFrom } from '../../src/files/views/common.tsx'
 import { pickView, scoreViews } from '../../src/files/views/registry.ts'
 import transcript, { chatTurns, conversationTurns, nameOf, parsedLines, pick, shownLines, textOf, timeOf } from '../../src/files/views/transcript.tsx'
-import type { SourcePage, SourceRecord, TranscriptHint } from '../../src/lib/types.ts'
-import { mount, unmountAll } from './mount.tsx'
+import { api } from '../../src/lib/api.ts'
+import type { Concept, SourcePage, SourceRecord, TranscriptHint, View } from '../../src/lib/types.ts'
+import { mount, settle, unmountAll } from './mount.tsx'
+
+const NO_LABELS = { all: [], on: [], focus: null, byId: new Map(), presence: new Map() } as unknown as FilesLabels
 
 const line = (n: number, text: string, turn?: { speaker: string; at: number; time?: string }): SourceRecord => ({
   line: n,
@@ -18,7 +22,12 @@ const line = (n: number, text: string, turn?: { speaker: string; at: number; tim
   meta: turn ? { turn } : {},
 })
 
-afterEach(unmountAll)
+afterEach(() => {
+  unmountAll()
+  vi.restoreAllMocks()
+  vi.unstubAllGlobals()
+  localStorage.clear()
+})
 
 describe('which mode a file opens in', () => {
   const text = (lines: string[]) => lines.map((t) => ({ text: t }))
@@ -153,12 +162,36 @@ describe('a PDF ref', () => {
   test('the File browser shows the PDF itself in the browser’s viewer, at the page, or says the browser cannot', async () => {
     const show = async (inPage: boolean) => {
       Object.defineProperty(navigator, 'pdfViewerEnabled', { value: inPage, configurable: true })
-      return mount(<Reader workspace="w" path="docs/a b.pdf" kind="text" targetRef="docs/a b.pdf#p3" labels={{} as FilesLabels} lead={<span />} />)
+      return mount(<Reader workspace="w" path="docs/a b.pdf" kind="text" targetRef="docs/a b.pdf#p3" labels={NO_LABELS} lead={<span />} />)
     }
     const frame = (await show(true)).querySelector('iframe.reader-pdf-frame')
     expect(frame?.getAttribute('src')).toBe('/api/corpora/w/pdf/docs/a%20b.pdf#page=3')
     const none = await show(false)
     expect(none.querySelector('iframe')).toBeNull()
     expect(none.textContent).toContain('Open the PDF')
+  })
+  test('the viewers made for PDFs stand beside it in the mode switch, a fragment one reads opens it, and file labels show', async () => {
+    vi.stubGlobal('fetch', async () => new Response('{"detail":"not found"}', { status: 404, headers: { 'content-type': 'application/json' } }))
+    const pages = { slug: 'pages', name: 'Pages', ok: true, file_type: true, accepts: [{ form: 'page-<n>' }], claims: ['**/*.pdf'] } as unknown as View
+    vi.spyOn(api, 'viewsForFile').mockResolvedValue([pages])
+    Object.defineProperty(navigator, 'pdfViewerEnabled', { value: true, configurable: true })
+    const audited = { id: 'k1', name: 'Audited', unit: 'file', labels: ['yes', 'no'], classes: [] } as unknown as Concept
+    const labels = { ...NO_LABELS, on: [audited], presence: new Map([['k1', { 'docs/a.pdf': { yes: 1 } }]]) } as unknown as FilesLabels
+    const el = await mount(<Reader workspace="w" path="docs/a.pdf" kind="text" targetRef="docs/a.pdf#p2" labels={labels} lead={<span />} />)
+    await settle()
+    const modes = [...el.querySelectorAll('.reader-modes [role="radio"], .reader-modes button')].map((b) => b.textContent)
+    expect(modes).toEqual(['PDF', 'Pages'])
+    expect(el.querySelector('iframe.reader-pdf-frame')).not.toBeNull()
+    expect(el.querySelector('.reader-filelabel')?.textContent).toBe('Audited')
+    unmountAll()
+    vi.spyOn(api, 'viewsForFile').mockResolvedValue([pages])
+    const other = await mount(<Reader workspace="w" path="docs/a.pdf" kind="text" targetRef="docs/a.pdf#page-2" labels={NO_LABELS} lead={<span />} />)
+    await settle()
+    expect(other.querySelector('.reader-viewer')).not.toBeNull()
+    expect(other.querySelector('iframe.reader-pdf-frame')).toBeNull()
+    const pdf = [...other.querySelectorAll('.reader-modes [role="radio"], .reader-modes button')].find((b) => b.textContent === 'PDF') as HTMLElement
+    await act(async () => pdf.click())
+    expect(other.querySelector('iframe.reader-pdf-frame')).not.toBeNull()
+    expect(localStorage.getItem(Object.keys(localStorage).find((k) => k.includes('viewOf:docs/a.pdf')) ?? '')).toContain('pdf')
   })
 })
