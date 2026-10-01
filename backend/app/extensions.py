@@ -56,10 +56,10 @@ thimble ships some extensions (builtin_dir()); `add` adds one by name, and those
 first run (ship()). A built-in thimble added, or the analyst added by name, follows the version this thimble ships while
 its copy is unchanged.
 
-Extension code runs only in thimble's kernels: readers on the views kernel, card.py in a card's kernel. The server reads
-only its JSON and markdown, from its folder rather than the copy a kernel can write, and its agents run inside the
-orientation's session, under that session's sandbox and rules, with the settings thimble's config gives them
-(agent_definitions)."""
+Extension code runs in thimble's kernels (readers on the views kernel, card.py in a card's kernel) and, for a program
+that runs one of the roles, in that role's box (harness.py, roles.py). The server reads only its JSON and markdown,
+from its folder rather than the copy a kernel can write, and its agents run inside the orientation's session, under
+that session's sandbox and rules, with the settings thimble's config gives them (agent_definitions)."""
 from __future__ import annotations
 
 import asyncio
