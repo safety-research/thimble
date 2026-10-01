@@ -35,14 +35,12 @@ For a development build, clone the repo and run `bash scripts/install.sh` (requi
 ## Usage
 
 - Run `thimble` in a directory, just as you would run `claude` 
-- It starts a Claude Code session there with the thimble plugin loaded and prints the dashboard URL. The session is named `thimble:main · <workspace>` (as `claude agents` and `/resume` list it), and each agent thimble starts is named the same way, such as `thimble:orient · <workspace>`.
+- It starts a Claude Code session there with the thimble plugin loaded and prints the dashboard URL. 
 - Each run starts a new conversation on the same workspace (cards, report, labels). `thimble --continue` picks up your last conversation in this folder instead.
-- Quitting the session stops thimble's agents, and its server once no other thimble session runs. An orientation or a writer that was working goes on at your next `thimble`.
-- The orientation, its critic and the writers run as Claude Code background sessions. ↓ at the prompt opens the agent tray, where you can follow and message them, and `claude attach <id>` opens one in another terminal. They need Claude Code to trust thimble's workspaces folder, which install.sh asks about (`--trust-workspaces`).
 
 ### From a running Claude Code session
 
-Type `/thimble` to start the thimble server and print the dashboard URL. A plain `claude` session has `/thimble` only if you answered yes to install.sh's plugin question (`--plugin`); in one started before that, run `/reload-plugins`.
+Type `/thimble` to start the thimble server and print the dashboard URL. If `/thimble` is not recognised, run `/reload-plugins`.
 
 > **Please note:** thimble connects the browser to your Claude Code session through [channels](https://code.claude.com/docs/en/channels). While thimble is under development, a Claude Code session needs to be started with `--dangerously-load-development-channels` (`thimble` from the CLI handles this for you) and a warning screen will appear before starting your Claude Code session (this warning is expected). Without this flag, or if channels are disabled by your org, thimble connects through the plugin's hooks instead and `/thimble` prints a note with the exact command.
 
