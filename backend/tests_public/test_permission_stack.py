@@ -116,6 +116,10 @@ async def test_a_request_whose_hook_went_away_leaves_the_card(monkeypatch):
     assert await asyncio.wait_for(call, 5) == {"behavior": "deny", "message": agent_session.GONE_LINE}
     [left] = agents.read_meta(CORPUS, chat)["permissions"]
     assert "stays" in left["input"], "only the request whose hook went away left"
+    log = [json.loads(ln) for ln in (config.workspace_dir(CORPUS) / agents.PERMISSIONS_LOG).read_text().splitlines()]
+    [asked] = [r for r in log if r["event"] == "asked" and "gone" in r.get("input", "")]
+    assert [r["answer"] for r in log if r.get("id") == asked["id"] and r["event"] == "answered"] == [
+        agent_session.NOBODY_WAITS], "the permission log says how it ended"
     assert agent_session.answer(CORPUS, chat, left["id"], True)
     assert (await asyncio.wait_for(other, 5))["behavior"] == "allow"
 

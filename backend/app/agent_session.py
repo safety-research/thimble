@@ -2423,6 +2423,9 @@ async def ask(c: str, key: str | None, tool_name: str, inp: Any, agent_id: str |
             allow = TIMED_OUT
             if not fut.done():
                 fut.set_result(TIMED_OUT)
+    except asyncio.CancelledError:  # its hook went away, or the server stops
+        agents.log_permission(c, "answered", id=rid, chat=run.chat, answer=NOBODY_WAITS)
+        raise
     finally:
         if not fut.done():
             fut.set_result(None)
