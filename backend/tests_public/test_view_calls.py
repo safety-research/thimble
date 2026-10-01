@@ -323,6 +323,35 @@ async def test_a_page_names_its_call_reads_its_progress_and_cancels_it(ws, kerne
         assert not progress.exists(), "a call's progress file goes when it ends"
 
 
+async def test_a_request_the_page_drops_cancels_its_call(ws, kernels):
+    from app.main import app  # noqa: PLC0415
+
+    body = json.dumps({"query": {"steps": 200}}).encode()
+    sent = []
+    t0 = time.monotonic()
+
+    async def receive():
+        if not sent:
+            sent.append(True)
+            return {"type": "http.request", "body": body, "more_body": False}
+        await asyncio.sleep(0.4)  # the page reloads while the call runs
+        return {"type": "http.disconnect"}
+
+    out: list[dict] = []
+
+    async def send(message):
+        out.append(message)
+
+    scope = {"type": "http", "asgi": {"version": "3.0"}, "http_version": "1.1", "method": "POST", "scheme": "http",
+             "path": f"/api/ws/{CORPUS}/views/count/records", "raw_path": b"", "query_string": b"",
+             "headers": [(b"host", b"127.0.0.1"), (b"content-type", b"application/json")],
+             "client": ("127.0.0.1", 5000), "server": ("127.0.0.1", 80), "root_path": ""}
+    await app(scope, receive, send)
+    assert time.monotonic() - t0 < 5, "the call stopped when the page dropped it, not after its 200 steps"
+    assert kernels.interrupted == ["views"]
+    assert next(m for m in out if m["type"] == "http.response.start")["status"] == 409
+
+
 def test_a_kernel_keeps_the_indexes_it_used_last_within_its_memory():
     view_host._indexes.clear()
     view_host._sizes.clear()

@@ -3324,10 +3324,13 @@ class RecordsBody(BaseModel):
 
 
 @router.post("/ws/{c}/views/{slug}/records")
-async def records_route(c: str, slug: str, body: RecordsBody, v: str | None = None) -> dict[str, Any]:
+async def records_route(c: str, slug: str, body: RecordsBody, request: Request, v: str | None = None) -> dict[str, Any]:
     """reader.records(index, query): what the view's page, loaded at version `v`, asked for with thimble.fetch, with no
-    time limit. `call` names the call, so the page can cancel it (cancel_route) and read its progress (call_route). 502
-    with the reader's error, 409 {cancelled} when it was cancelled."""
+    time limit. `call` names the call, so the page can cancel it (cancel_route) and read its progress (call_route); a
+    request the page drops (a reload, a closed tab) cancels it too. 502 with the reader's error, 409 {cancelled} when it
+    was cancelled."""
+    from .tools import until_dropped  # noqa: PLC0415 — tools imports this module
+
     _view_or_404(c, slug, v)
     cid = view_calls.call_id(body.call)
     if view_calls.cancelled_before(c, cid):
@@ -3337,7 +3340,9 @@ async def records_route(c: str, slug: str, body: RecordsBody, v: str | None = No
     if call is not None:
         call.task = work
     try:
-        return {"data": await work}
+        if not await until_dropped(request.receive, work, f"view {slug}'s records") and work.cancelled():
+            raise HTTPException(409, {"message": "the page dropped the call", "cancelled": True})
+        return {"data": work.result()}
     except ReaderError as e:
         raise HTTPException(502, {"message": e.message, "traceback": e.detail[-ERROR_MAX:]}) from None
     except asyncio.CancelledError:
