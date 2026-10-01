@@ -140,18 +140,58 @@ const orientExample = (api: Api): Example => {
   return { els, layout }
 }
 
-// ---------- Files: the file browser (a view left open is closed for the step, and opened again after it)
+// ---------- Files: the file browser. The File browser stays on through the Files steps (Files, Labels, Views): a view
+// the analyst left open is closed for them, and opened again once the tour moves to another step or ends.
 const viewTabs = (bar: Element | null) => [...(bar?.querySelectorAll<HTMLElement>('.seg-opt') ?? [])]
-const filesExample = (api: Api): Example => {
+let held: { el: HTMLElement; anchor: string | null } | null = null
+const holdsBrowser = (s: Step | undefined) => !!s?.example && [filesExample, labelsExample, viewsExample].includes(s.example)
+/** The File browser on for the step; returns the step's cleanup. */
+const holdBrowser = (api: Api) => {
   const tabs = viewTabs(api.q('.files-views'))
   const was = tabs.find((e) => e.classList.contains('active'))
   const browser = tabs.find((e) => /File browser/.test(e.textContent ?? ''))
-  if (browser && was !== browser) browser.click()
-  return {
-    cleanup: () => {
-      if (was && was !== browser && was.isConnected && !was.classList.contains('active')) was.click()
-    },
+  if (browser && was && was !== browser) {
+    held = { el: was, anchor: was.getAttribute('data-anchor') }
+    browser.click()
   }
+  // the engine starts the next step right after a step's cleanup, so the step that follows is known a microtask later
+  return () =>
+    queueMicrotask(() => {
+      if (holdsBrowser(api.step()) || !held) return
+      const { el, anchor } = held
+      held = null
+      const tab = (anchor && api.q(`.files-views .seg-opt[data-anchor="${CSS.escape(anchor)}"]`)) || el
+      if (tab instanceof HTMLElement && tab.isConnected && !tab.classList.contains('active')) tab.click()
+    })
+}
+const filesExample = (api: Api): Example => ({ cleanup: holdBrowser(api) })
+
+// the Files panel's status strip as an example shows it, saying `meta`, over thimble's own, which names the analyst's
+// open file
+const statusExample = (api: Api, meta: string) => {
+  const real = () => api.q('[data-panel="files"] .pane-status')
+  const wrap = document.createElement('div')
+  wrap.className = 'tour-ex-status'
+  wrap.dataset.ground = '1'
+  const strip = document.createElement('div')
+  strip.className = 'pane-status'
+  for (const [cls, text] of [['pane-status-name', 'Files'], ['pane-status-meta', meta]]) {
+    const span = document.createElement('span')
+    span.className = cls
+    span.textContent = text
+    strip.append(span)
+  }
+  wrap.append(strip)
+  const layout = () => {
+    const el = real()
+    const S = api.rectOf(el)
+    wrap.style.display = S ? '' : 'none'
+    if (!S || !el) return
+    // the strip's glass over the ground of the panel beneath it, as thimble draws it
+    const ground = api.groundOf(el.parentElement)
+    Object.assign(wrap.style, { left: `${S.x}px`, top: `${S.y}px`, width: `${S.width}px`, height: `${S.height}px`, background: ground, borderRadius: getComputedStyle(el).borderRadius })
+  }
+  return { wrap, layout }
 }
 
 // ---------- Views: an example Timeline view over the Files body, with a views bar that has it on. Inside it the analyst
@@ -182,15 +222,17 @@ const viewsExample = (api: Api): Example => {
     }
   }
   frame.addEventListener('load', () => escape(frame.contentWindow))
-  api.ex.append(bar, body)
+  const status = statusExample(api, 'view · Timeline')
+  api.ex.append(bar, body, status.wrap)
   const layout = () => {
     const B = api.rectOf(realBar()),
       D = api.rectOf(realBody())
     if (B) Object.assign(bar.style, { left: `${B.x}px`, top: `${B.y}px`, width: `${B.width}px`, height: `${B.height}px` })
     if (D) Object.assign(body.style, { left: `${D.x}px`, top: `${D.y}px`, width: `${D.width}px`, height: `${D.height}px` })
+    status.layout()
     return !!(B && D)
   }
-  return { els: { bar, body, frame }, layout }
+  return { els: { bar, body, frame, status: status.wrap }, layout, cleanup: holdBrowser(api) }
 }
 
 // ---------- the card steps: the example card (the top card of an orientation's deck, captured, in plain words), scaled
@@ -254,11 +296,14 @@ const labelsExample = (api: Api): Example => {
   const lab = api.snap('txLabels', 'tour-ex-labels')
   lab.style.background = api.groundOf(api.q('.files-labels'))
   Object.assign(api.tag(lab).style, { right: '40px' })
-  api.ex.append(rd, lab)
+  const cleanup = holdBrowser(api)
+  const status = statusExample(api, 'agent-05.jsonl · Transcript')
+  api.ex.append(rd, lab, status.wrap)
   // the transcript opens at line 22 and stays there while the panel's size changes, until anything else scrolls it
   let pinned = true,
     setTo: number | null = null
   const layout = () => {
+    status.layout()
     let r = api.rectOf(realReader())
     if (!r) {
       const p = api.rectOf(api.q(filesPanel)),
@@ -293,7 +338,7 @@ const labelsExample = (api: Api): Example => {
       Object.assign(thumb.style, { height: `${h}px`, transform: `translateY(${span > 0 ? ((bar.clientHeight - h) * sc.scrollTop) / span : 0}px)` })
     }
   }
-  return { els: { reader: rd, labels: lab }, layout }
+  return { els: { reader: rd, labels: lab, status: status.wrap }, layout, cleanup }
 }
 
 // ---------- the Report and its checks: the example (a captured report with its figures and the comments of its check
