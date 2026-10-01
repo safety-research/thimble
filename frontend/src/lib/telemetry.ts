@@ -380,9 +380,17 @@ export function errorText(message: unknown, error: unknown): string | null {
   return line ? capJsonBytes(line, ERROR_TEXT_MAX_BYTES) : null
 }
 
+/** The browser's notice that a ResizeObserver callback changed layout again within one frame. The browser delivers the
+ * rest in the next frame, so nothing is lost and it is no error. */
+const BENIGN_ERROR_RE = /^ResizeObserver loop (completed with undelivered notifications|limit exceeded)/
+
+/** Whether an uncaught error event's message is a notice that is no error (BENIGN_ERROR_RE). Pure. */
+export const benignError = (message: unknown): boolean => typeof message === 'string' && BENIGN_ERROR_RE.test(message)
+
 export function wireErrors(win: Pick<Window, 'addEventListener'>, report: (text: string) => void): void {
   win.addEventListener('error', (e) => {
     try {
+      if (benignError(e?.message)) return
       const t = errorText(e?.message, e?.error)
       if (t) report(t)
     } catch {
