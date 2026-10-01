@@ -66,7 +66,8 @@ WEAK_SPEAKER_WORDS = frozenset({"name", "editor", "label", "agent"})
 SPEAKER_TAILS = SPEAKER_WORDS | WEAK_SPEAKER_WORDS | {"handle", "login", "display", "id", "uuid", "type", "kind"}
 # words that make a key name someone other than who speaks, or something about them
 NOT_SPEAKER_WORDS = frozenset({"to", "recipient", "recipients", "receiver", "target", "reply", "replied", "mention",
-                               "mentions", "mentioned", "parent", "count", "num", "number", "is", "has", "last", "next"})
+                               "mentions", "mentioned", "parent", "count", "num", "number", "is", "has", "last", "next",
+                               "date", "time", "timestamp"})
 TEXT_KEYS = ("content", "text", "message", "body", "value", "parts", "utterance", "msg", "change_summary")
 TEXT_TAILS = frozenset({"text", "content", "body", "message", "msg", "utterance"})  # of a compound text key (messageText)
 TIME_KEYS = ("timestamp", "ts", "time", "created_at", "create_time", "date", "datetime", "sent_at", "created")
@@ -122,7 +123,7 @@ STYLES: list[tuple[str, re.Pattern[str]]] = [
     ("tagged", re.compile(rf"^(?:(?P<time>{_DATE}[ T]{_CLOCK}\S*)\s+)?\[(?P<speaker>{_NAME})\]:?\s")),
     ("cc", re.compile(r"^(?P<mark>[>⏺●])\s(?=\S)")),
     ("aider", re.compile(r"^(?P<mark>####)\s")),
-    ("colon", re.compile(rf"^ ?(?:>\s*)?(?P<speaker>{_NAME})\s*:(?:\s+|$)")),
+    ("colon", re.compile(rf"^\s*(?:>\s*)?(?P<speaker>{_NAME})\s*:(?:\s+|$)")),
 ]
 # who a mark that starts a turn stands for: Claude Code's /export (`> ` the user's prompt, `⏺ ` or `● ` Claude's reply)
 # and aider's chat history (`#### ` the user's message)
@@ -807,7 +808,7 @@ def sniff_text(text: str, markdown: bool = False) -> dict[str, Any] | None:
     """A text or markdown chat log: the style whose turn lines recur most in the head, with at least two speakers who
     take turns, one of them more than once. In markdown, which reads well rendered, the sniff is sure only when turn
     lines are at least a fifth of the head's lines, so a document quoting an example exchange keeps Rendered first. A
-    front matter's lines are no turns, nor is an indented `Word:` line (a YAML key)."""
+    front matter's lines are no turns, and `Word:` lines at several indents are a YAML file's keys, no turns."""
     raw = text.split("\n")
     lines = [ln for ln in raw[front_matter_lines(raw):] if ln.strip()][:TEXT_HEAD_LINES]
     if len(lines) < 2:
@@ -816,10 +817,19 @@ def sniff_text(text: str, markdown: bool = False) -> dict[str, Any] | None:
     for name, rx in STYLES:
         counts: dict[str, int] = {}
         turns = 0
-        for ln in lines:
-            t = turn_of(ln, name)
-            if t is None:
+        hits = [(ln, t) for ln in lines if (t := turn_of(ln, name)) is not None]
+        if name == "colon" and hits:
+            # a chat log's turns start at one indent, a YAML file's keys at several: lines off the commonest indent
+            # don't count, and more than a tenth of them say the file is no chat log
+            indents: dict[int, int] = {}
+            for ln, _ in hits:
+                n = len(ln) - len(ln.lstrip())
+                indents[n] = indents.get(n, 0) + 1
+            modal = max(indents, key=lambda n: (indents[n], -n))
+            if (len(hits) - indents[modal]) * 10 > len(hits):
                 continue
+            hits = [(ln, t) for ln, t in hits if len(ln) - len(ln.lstrip()) == modal]
+        for _, t in hits:
             turns += 1
             low = t["speaker"].lower()
             counts[low] = counts.get(low, 0) + 1
