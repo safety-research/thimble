@@ -256,3 +256,34 @@ async def test_health_answers_while_every_worker_thread_is_taken():
     finally:
         limiter.total_tokens = tokens
     assert r.status_code == 200 and r.json()["ok"] and took < 1.0, f"health took {took:.1f} s"
+
+
+def test_lines_read_from_a_chunk_are_the_lines_a_whole_split_gives(tmp_path):
+    """Lines are found a newline at a time rather than by splitting their whole chunk (up to 8 MB, which held the
+    interpreter for every record read): any range reads as the split read it, CRLF and a last line without its newline
+    included."""
+    import random
+
+    from app import corpus
+
+    def split_read(idx, path, start, end):
+        start, end = max(1, start), min(end, len(idx))
+        if start > end:
+            return []
+        first, begin, stop = idx.chunk_span(start, end)
+        lines = path.read_bytes()[begin:stop].split(b"\n")
+        if lines and lines[-1] == b"":
+            lines.pop()
+        return [ln[:-1] if ln.endswith(b"\r") else ln for ln in lines][start - first:end - first + 1]
+
+    rnd = random.Random(7)
+    for k in range(4):
+        path = tmp_path / f"f{k}.jsonl"
+        data = b"".join(b"x" * rnd.randint(0, 80) + rnd.choice([b"\n", b"\r\n", b"\n\n"]) for _ in range(9000))
+        path.write_bytes(data.rstrip(b"\n") if k % 2 else data)
+        idx = corpus.line_offsets(path)
+        assert idx.n_marks > 2
+        for _ in range(200):
+            a = rnd.randint(-1, len(idx) + 2)
+            b = a + rnd.randint(-1, 300)
+            assert corpus._index_lines(idx, path, a, b) == split_read(idx, path, a, b), (k, a, b)

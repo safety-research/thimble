@@ -669,14 +669,9 @@ def line_count(path: Path) -> int:
     return n
 
 
-def _split_lines(buf: bytes) -> list[bytes]:
-    lines = buf.split(b"\n")
-    if lines and lines[-1] == b"":
-        lines.pop()
-    return [ln[:-1] if ln.endswith(b"\r") else ln for ln in lines]
-
-
 def _index_lines(idx: LineIndex, path: Path, start: int, end: int) -> list[bytes]:
+    """Lines start..end of the chunks that hold them, found a newline at a time: a chunk runs to 8 MB, and splitting it
+    whole for a few of its lines held the interpreter, and with it every other thread, for each record read."""
     n = len(idx)
     start, end = max(1, start), min(end, n)
     if start > end:
@@ -685,8 +680,22 @@ def _index_lines(idx: LineIndex, path: Path, start: int, end: int) -> list[bytes
     with open(path, "rb") as f:
         f.seek(begin)
         buf = f.read(stop - begin)
-    lines = _split_lines(buf)
-    return lines[start - first:end - first + 1]
+    pos = 0
+    for _ in range(start - first):
+        pos = buf.find(b"\n", pos) + 1
+        if pos == 0:
+            return []
+    out: list[bytes] = []
+    for _ in range(end - start + 1):
+        if pos >= len(buf):
+            break
+        nl = buf.find(b"\n", pos)
+        line = buf[pos:] if nl < 0 else buf[pos:nl]
+        out.append(line[:-1] if line.endswith(b"\r") else line)
+        if nl < 0:
+            break
+        pos = nl + 1
+    return out
 
 
 def read_lines(path: Path, start: int, end: int) -> list[bytes]:
