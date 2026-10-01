@@ -10,7 +10,7 @@ import { createPortal } from 'react-dom'
 import { Button } from '../components/Button'
 import { Icon } from '../components/Icon'
 import { PaneStatus } from '../components/PaneStatus'
-import { TipButton } from '../components/Tooltip'
+import { TipButton, useTooltip } from '../components/Tooltip'
 import { api } from '../lib/api'
 import { bus } from '../lib/bus'
 import { mediaOf } from '../lib/media'
@@ -33,6 +33,7 @@ import { useFilesLabels, type FilesLabels } from './useLabels'
 import { OpenIn } from './OpenIn'
 import { chooseView, viewPlace, viewValue } from './viewChoice'
 import { ViewPane } from './ViewPane'
+import { FolderPane } from './FolderPane'
 import { LabelsLead, useLabelRuns, useLabelSide } from './ViewSide'
 import type { ViewQuote } from './ViewerFrame'
 import { BROWSER, slugOfKey, useViews, viewKey, ViewsBar, type BuiltView } from './ViewsBar'
@@ -68,46 +69,94 @@ interface TabsProps {
   current: string | null
   onPick: (path: string) => void
   onClose: (path: string) => void
+  /** whether a tab's path is a folder, which its glyph shows */
+  isDir: (path: string) => boolean
 }
 
-/** The open files as square tabs, VS Code's way: the open one on the cell's paper between hairlines with its ×. */
-function ReaderTabs({ tabs, current, onPick, onClose }: TabsProps) {
+/** how wide the fade at a scrolled strip's edge is (files.css .reader-tabs[data-more-…]) */
+const TAB_FADE_PX = 28
+
+/** The open files as square tabs, VS Code's way: the open one on the cell's paper between hairlines with its ×. Tabs that
+ * do not fit narrow, their names cut with an ellipsis, all but the open one, and past their narrowest the strip
+ * scrolls, its edge faded on the side where tabs are hidden. */
+function ReaderTabs({ tabs, current, onPick, onClose, isDir }: TabsProps) {
   const strip = useRef<HTMLSpanElement>(null)
   // the strip scrolls with its scrollbar hidden, so the open tab is brought into it whenever it changes and whenever
   // the strip narrows, as when the file's modes show beside it
   useEffect(() => {
     const box = strip.current
     if (!box) return
+    const edges = () => {
+      box.toggleAttribute('data-more-left', box.scrollLeft > 1)
+      box.toggleAttribute('data-more-right', box.scrollLeft + box.clientWidth < box.scrollWidth - 1)
+    }
     const show = () => {
       const tab = box.querySelector<HTMLElement>('.reader-tab.active')
-      if (!tab) return
-      const b = box.getBoundingClientRect()
-      const t = tab.getBoundingClientRect()
-      if (t.left < b.left) box.scrollLeft -= b.left - t.left
-      else if (t.right > b.right) box.scrollLeft += t.right - b.right
+      if (tab) {
+        const b = box.getBoundingClientRect()
+        const t = tab.getBoundingClientRect()
+        // clear of the fade on either side, where the strip can scroll that far
+        const pad = t.width + 2 * TAB_FADE_PX <= b.width ? TAB_FADE_PX : 0
+        if (t.left < b.left + pad) box.scrollLeft -= b.left + pad - t.left
+        else if (t.right > b.right - pad) box.scrollLeft += t.right - (b.right - pad)
+      }
+      edges()
     }
     show()
+    box.addEventListener('scroll', edges, { passive: true })
     const ro = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(show) : null
     ro?.observe(box)
-    return () => ro?.disconnect()
+    return () => {
+      box.removeEventListener('scroll', edges)
+      ro?.disconnect()
+    }
   }, [current, tabs.length])
   return (
     <span ref={strip} className="reader-tabs" role="tablist" aria-label="Open files">
-      {tabs.map((t) => {
-        const active = t.path === current
-        const name = baseName(t.path)
-        return (
-          <span key={t.path} className={'reader-tab' + (active ? ' active' : '')}>
-            <button type="button" role="tab" aria-selected={active} className="reader-tab-pick" onClick={() => onPick(t.path)} data-anchor={t.path} data-anchor-text={t.path}>
-              <Icon name={glyphOf(name)} size={13} className="reader-tab-glyph" />
-              <span className="reader-tab-name">{name}</span>
-            </button>
-            <TipButton tip="Close" className="reader-tab-x" aria-label={`Close ${name}`} onClick={() => onClose(t.path)}>
-              <Icon name="x" size={12} />
-            </TipButton>
-          </span>
-        )
-      })}
+      {tabs.map((t) => (
+        <ReaderTab key={t.path} path={t.path} active={t.path === current} folder={isDir(t.path)} onPick={onPick} onClose={onClose} />
+      ))}
+    </span>
+  )
+}
+
+/** One tab: the file's or folder's glyph and name, and its ×; a name cut short shows the path in the tooltip. */
+function ReaderTab({
+  path,
+  active,
+  folder,
+  onPick,
+  onClose,
+}: {
+  path: string
+  active: boolean
+  folder: boolean
+  onPick: (path: string) => void
+  onClose: (path: string) => void
+}) {
+  const nameRef = useRef<HTMLSpanElement>(null)
+  const [cut, setCut] = useState(false)
+  useEffect(() => {
+    const el = nameRef.current
+    if (!el || typeof ResizeObserver === 'undefined') return
+    const ro = new ResizeObserver(() => setCut(el.scrollWidth > el.clientWidth + 1))
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [])
+  const { props: tipProps, tip } = useTooltip(cut ? path : null)
+  const name = baseName(path)
+  return (
+    <span className={'reader-tab' + (active ? ' active' : '')}>
+      <button type="button" role="tab" aria-selected={active} className="reader-tab-pick" onClick={() => onPick(path)} data-anchor={path} data-anchor-text={path} {...tipProps}>
+        <Icon name={folder ? 'folder' : glyphOf(name)} size={13} className="reader-tab-glyph" />
+        <span ref={nameRef} className="reader-tab-name">
+          {name}
+        </span>
+      </button>
+      {tip}
+      <TipButton tip="Close" className="reader-tab-x" aria-label={`Close ${name}`} onClick={() => onClose(path)}>
+        <Icon name="x" size={12} />
+      </TipButton>
     </span>
   )
 }
@@ -250,7 +299,8 @@ export function FilesTab({ ws, active, focused = active }: { ws: string; active:
 
   // the Files view's shortcuts, while its pane has the focus; a field outside Files keeps its keys
   const showSide = side.show
-  const canFind = !shownView && !!open && !mediaOf(open.path)
+  const openIsDir = !!open && kindIn(folders.store, open.path) === 'dir'
+  const canFind = !shownView && !!open && !openIsDir && !mediaOf(open.path)
   useEffect(() => {
     if (!focused) return
     const onKey = (e: KeyboardEvent) => {
@@ -402,8 +452,9 @@ export function FilesTab({ ws, active, focused = active }: { ws: string; active:
           }
           return
         }
-        const path = refPath(ref)
-        if (path == null) return
+        // a folder may be named with a trailing slash (`agents/`)
+        const path = refPath(ref)?.replace(/\/+$/, '')
+        if (!path) return
         if (browser) return toBrowser({ path, ref }, from)
         const remembered = usedFor(path)
         const claiming = remembered ? await api.viewsForFile(ws, path).then((v) => v.filter((x) => x.ok)).catch(() => []) : []
@@ -466,6 +517,10 @@ export function FilesTab({ ws, active, focused = active }: { ws: string; active:
   // the reader waits for the open path's folder: a listing in flight may still say the path is a folder or a database
   const parentState = open ? folders.store.get(parentOf(open.path)) : undefined
   const ready = !!open && parentState !== undefined && parentState.state !== 'loading'
+  useEffect(() => {
+    if (open && ready && openIsDir) folders.ensure(open.path)
+  }, [open, ready, openIsDir, folders])
+  const isDir = useCallback((path: string) => kindIn(folders.store, path) === 'dir', [folders.store])
 
   const marksOf = useCallback((path: string) => presenceOf(labels.on, labels.presence, path), [labels.on, labels.presence])
   const folderDots = useMemo(() => folderPresence(labels.on, labels.presence), [labels.on, labels.presence])
@@ -554,10 +609,10 @@ export function FilesTab({ ws, active, focused = active }: { ws: string; active:
     () => (
       <>
         {!sideShown && <Button variant="icon" size="sm" icon="sidebar" title="Show sidebar" className="reader-side-show" onClick={showSide} />}
-        <ReaderTabs tabs={tabs} current={current} onPick={setCurrent} onClose={closeTab} />
+        <ReaderTabs tabs={tabs} current={current} onPick={setCurrent} onClose={closeTab} isDir={isDir} />
       </>
     ),
-    [sideShown, showSide, tabs, current, closeTab],
+    [sideShown, showSide, tabs, current, closeTab, isDir],
   )
 
   const openPath = open?.path ?? null
@@ -626,7 +681,9 @@ export function FilesTab({ ws, active, focused = active }: { ws: string; active:
             </>
           )}
           <div className="files-main">
-            {open && ready ? (
+            {open && ready && openIsDir ? (
+              <FolderPane state={folders.store.get(open.path)} lead={lead} onOpen={(path) => openTab({ path })} />
+            ) : open && ready ? (
               <Reader workspace={ws} path={open.path} kind={kindOf(open.path)} targetRef={open.ref} lead={lead} end={openInEnd} labels={labels} onMode={setMode} findAsk={findAsk} />
             ) : (
               <div className="reader">
@@ -637,7 +694,7 @@ export function FilesTab({ ws, active, focused = active }: { ws: string; active:
           {side.shown && labelCard}
         </div>
       )}
-      <PaneStatus name="Files" meta={shownView ? `view · ${shownView.name}${mode === 'Raw' ? ' · Raw' : ''}` : open ? [baseName(open.path), mode].filter(Boolean).join(' · ') : ''} totals={totals} />
+      <PaneStatus name="Files" meta={shownView ? `view · ${shownView.name}${mode === 'Raw' ? ' · Raw' : ''}` : open ? [baseName(open.path), openIsDir ? '' : mode].filter(Boolean).join(' · ') : ''} totals={totals} />
     </div>
   )
 }

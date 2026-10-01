@@ -8,7 +8,7 @@ import { Spinner } from '../components/Spinner'
 import { api } from '../lib/api'
 import { bus, type ProblemPrefill, type Tab } from '../lib/bus'
 import { toggleLinks, useLinksVisible } from '../lib/links'
-import { shortPath } from '../lib/workspace'
+import { shortPath, shownPath } from '../lib/workspace'
 import { ProblemReportPopover } from './ProblemReport'
 import { SettingsPopover } from './SettingsPopover'
 import { ThemePopover } from './ThemePopover'
@@ -50,7 +50,7 @@ export function TopBar({ ws, tabs, onTab, onTabDrag }: TopBarProps) {
     let alive = true
     api
       .corpora()
-      .then((cs) => alive && setPath(cs.find((c) => c.name === ws)?.path ?? null))
+      .then((cs) => alive && setPath(shownPath(cs.find((c) => c.name === ws))))
       .catch(() => undefined)
     return () => {
       alive = false

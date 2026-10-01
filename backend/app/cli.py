@@ -1200,21 +1200,48 @@ def workspace_for(cwd: Path, data_dir: Path, url: str | None, *, here: bool = Fa
     return open_workspace(cwd, data_dir, url, here=here)[0]
 
 
+def caller_alias(cwd: Path) -> tuple[bool, str | None]:
+    """How the analyst named the folder `cwd`: (whether thimble can tell, the path they used when it is another path to
+    the folder, through a symlink). plugin/bin/thimble passes the caller's logical working directory ($PWD, which keeps
+    the symlink a shell went through) as THIMBLE_CALLER_CWD; when that is not the folder (main's shell moved on), thimble
+    cannot tell."""
+    raw = os.environ.get("THIMBLE_CALLER_CWD") or ""
+    if not os.path.isabs(raw):
+        return False, None
+    try:
+        same = Path(raw).resolve() == cwd.resolve()
+    except OSError:
+        return False, None
+    return (True, config.shown_alias(raw, cwd.resolve())) if same else (False, None)
+
+
+def _sidecar_shown(data_dir: Path, name: str) -> str | None:
+    rec = config.read_sidecar(name, data_dir)
+    return rec.get("shown") if rec else None
+
+
 def open_workspace(cwd: Path, data_dir: Path, url: str | None, *, here: bool = False) -> tuple[str | None, bool]:
-    """workspace_for with whether the folder was opened anew: (name, registered just now)."""
+    """workspace_for with whether the folder was opened anew: (name, registered just now). A registered folder the
+    analyst opened through a symlink, or no longer through one, is registered again so that the dashboard shows the path
+    they used (caller_alias)."""
+    told, alias = caller_alias(cwd)
     cwd = cwd.resolve()
     data_dir = data_dir.resolve()
     known = known_corpus(cwd, data_dir)
     if known is not None and (known[1] == cwd or not here or known[1].parent == data_dir):
-        return known[0], False
+        stale = told and known[1] == cwd and known[1].parent != data_dir and _sidecar_shown(data_dir, known[0]) != alias
+        if not (stale and url):
+            return known[0], False
     if not url:
         return (known[0] if known else None), False
     body: dict[str, Any] = {"path": str(cwd)}
     if here:
         body["exact"] = True
+    if told:
+        body["shown"] = alias
     status, resp = _request("POST", f"{url}/api/corpora/register", body)
     if status in (200, 201) and isinstance(resp, dict) and resp.get("name"):
-        return str(resp["name"]), True
+        return str(resp["name"]), known is None or known[0] != str(resp["name"])
     _log(f"register {cwd} → {status} {str(resp)[:200]}")
     return None, False
 

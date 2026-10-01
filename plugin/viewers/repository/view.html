@@ -366,7 +366,7 @@
   const FIELD_NAMES = { action: 'Activity', actor: 'Participant', author: 'Author', reviewer: 'Reviewer', verdict: 'Review', run: 'Run',
     state: 'State', area: 'Area', reason: 'Close reason', origin: 'Origin', flag: 'Flag' }
   const derivedName = (f) => (f === 'flag' ? 'flags' : f) // the name reader.py's derived list gives a field
-  const CAT = ['--viz-1', '--viz-2', '--viz-3', '--viz-5', '--viz-7', '--viz-ink-2']
+  const CAT = ['--viz-1', '--viz-2', '--viz-3', '--viz-4', '--viz-5', '--viz-6', '--viz-7']
   // the derived field each sort orders by
   const SORT_FIELDS = { 'longest to merge': 'to_merge', 'quickest first review': 'first_review', 'most reviews': 'reviews',
     'most commits': 'commits', 'longest to fix': 'ended', 'most comments': 'comments', 'most posts': 'posts' }
