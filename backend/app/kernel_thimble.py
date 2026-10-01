@@ -47,6 +47,7 @@ import math
 import numbers
 import re
 import sqlite3
+import zlib
 from pathlib import Path
 
 WS = globals().get("WS")  # the workspace directory, set by the injector (notebook.kernel_argv)
@@ -476,6 +477,8 @@ def _value_of(label: dict, ref: str):
     """The label's effective value on the record `ref`: its row's, else the value of the cover that holds its line."""
     values, spans, _paths = _label_members(label)
     v = values.get(ref)
+    if v is None:
+        v = values.get(_canon(ref))
     if v is not None:
         return v
     path, line = _ref_parts(ref)
@@ -484,13 +487,29 @@ def _value_of(label: dict, ref: str):
     return next((value for a, b, value in spans.get(path, ()) if a <= line <= b), None)
 
 
+_PDF_PAGE = re.compile(r"^(.+\.[Pp][Dd][Ff])#p(?:age=)?(\d+)$")
+
+
+def _canon(ref: str) -> str:
+    """A record's ref as label rows key it (records.canon): a PDF's `#p<n>` as `#page=<n>`."""
+    m = _PDF_PAGE.match(ref)
+    return f"{m[1]}#page={int(m[2])}" if m else ref
+
+
 def _probed(ref: str, every) -> bool:
+    """Whether the test label marks the record: a line whose number is a multiple of `every`, or a record of another
+    reader (a database row, a page, a JSON value, a CSV row) whose ref's checksum is."""
     _path, line = _ref_parts(ref)
-    return bool(line) and line % int(every) == 0
+    if line:
+        return line % int(every) == 0
+    if "#" not in ref or ref.startswith(("view:", "card:", "cell:")):
+        return False
+    return zlib.crc32(_canon(ref).encode("utf-8")) % int(every) == 0
 
 
 def marked(ref):
-    """The marks of the labels that are on for the record `ref` (`<path>#L<n>`): each {label, value, colour} whose value
+    """The marks of the labels that are on for the record `ref` (`<path>#L<n>`, or the ref of a record of another reader
+    such as `<db>#<table>/<key>` or `<pdf>#page=<n>`): each {label, value, colour} whose value
     the record takes and the analyst highlights, in the labels' order. [] outside a view's reader call."""
     return _marked(_view_ctx, ref)
 

@@ -79,7 +79,7 @@ ON CONFLICT(ref) DO UPDATE SET analyst = excluded.analyst, analyst_ts = excluded
 # a row the analyst judged on a record a cover holds has no classifier label of its own: it reads the cover's value
 _COVER_OF = "(SELECT c.value FROM covers c WHERE c.path = current.path AND current.line BETWEEN c.first AND c.last LIMIT 1)"
 _LABEL = f"COALESCE(label, {_COVER_OF})"
-_MERGED_COLS = f"ref, {_LABEL}, confidence, rationale, source, ts, analyst, analyst_ts, spans"
+_MERGED_COLS = f"ref, {_LABEL}, confidence, rationale, source, ts, analyst, analyst_ts, spans, path, line"
 _LABELED = "effective IS NOT NULL"
 # per cover: its records that have a row of their own (_ROWS_IN) and those with a classifier label (_LABELED_IN)
 _ROWS_IN = "(SELECT COUNT(*) FROM current r WHERE r.path = c.path AND r.line BETWEEN c.first AND c.last)"
@@ -133,8 +133,10 @@ def file_key(p: Path) -> tuple[int, int] | None:
 
 
 def ref_parts(ref: Any) -> tuple[str | None, int | None]:
-    """(corpus path, line) of a label ref: `<path>` for a file unit, `<path>` and n of `<path>#L<n>` for a record;
-    (None, None) for a cell, span or other ref without a path. The common shapes are cut without the ref grammar."""
+    """(corpus path, line) of a label ref: `<path>` for a file unit, `<path>` and n of `<path>#L<n>` for a record, and
+    `<path>` with no line for a record of another reader (records.py: a database row, a PDF page, a JSON value, a CSV
+    row); (None, None) for a cell, span or other ref without a path. The common shapes are cut without the ref
+    grammar."""
     ref = str(ref)
     head, sep, tail = ref.partition("#")
     if head and " " not in head and not head.startswith(_REF_KINDS_WITHOUT_PATH):
@@ -157,6 +159,16 @@ def ref_parts(ref: Any) -> tuple[str | None, int | None]:
         return None, None
     line = parsed.get("line")
     return parsed.get("path"), (int(line) if isinstance(line, int) else None)
+
+
+def row_line(ref: str, row: dict) -> tuple[str | None, int | None]:
+    """ref_parts, with the line a row names (`line`) for a record whose ref carries none: the line a CSV row or a JSON
+    document's record starts on, so the reader's page of lines finds its marks."""
+    path, line = ref_parts(ref)
+    given = row.get("line")
+    if line is None and path is not None and isinstance(given, int) and not isinstance(given, bool) and given >= 1:
+        line = given
+    return path, line
 
 
 # covers
@@ -255,12 +267,14 @@ def _spans_read(v: Any) -> list[str] | None:
 def _merged(r: tuple) -> dict:
     """A `current` row as the label routes' row: the latest classifier row with the analyst's verdict attached (a
     verdict on a record a cover holds with the cover's value as its label), and the texts it marks when it has any."""
-    ref, label, confidence, rationale, source, ts, analyst, analyst_ts, spans = r
+    ref, label, confidence, rationale, source, ts, analyst, analyst_ts, spans, path, line = r
     out = {"ref": ref, "label": label, "confidence": confidence, "rationale": rationale, "source": source,
            "ts": ts if ts is not None else analyst_ts, "analyst": analyst}
     marked = _spans_read(spans)
     if marked:
         out["spans"] = marked
+    if line is not None and path is not None and ref_parts(ref)[1] is None:
+        out["line"] = int(line)  # the line a record of another reader starts on (row_line)
     return out
 
 
@@ -393,7 +407,7 @@ class Store:
                     if not isinstance(r, dict) or not r.get("ref"):
                         continue
                     ref = canon_ref(r["ref"])
-                    path, line = ref_parts(ref)
+                    path, line = row_line(ref, r)
                     label = None if r.get("label") is None else str(r["label"])
                     if r.get("source") == "analyst":
                         analyst.append((ref, path, line, label, r.get("ts"), r.get("rationale"), label))
@@ -501,9 +515,34 @@ class Store:
         finally:
             conn.close()
 
+    def rows_for_refs(self, wanted: list[str]) -> list[dict]:
+        """The merged rows of these refs, in the order asked; a ref with no row of its own reads as the cover that
+        holds its line, when one does."""
+        conn = self.connect()
+        out: list[dict] = []
+        try:
+            for i in range(0, len(wanted), 500):
+                part = [canon_ref(r) for r in wanted[i:i + 500]]
+                got = {r[0]: _merged(r) for r in conn.execute(
+                    f"SELECT {_MERGED_COLS} FROM current WHERE ref IN ({','.join('?' * len(part))})", part)}
+                for ref in part:
+                    if ref in got:
+                        out.append(got[ref])
+                        continue
+                    path, line = ref_parts(ref)
+                    if path is None or line is None:
+                        continue
+                    cover = conn.execute("SELECT value, source, ts FROM covers WHERE path = ? AND ? BETWEEN first AND last "
+                                         "ORDER BY rowid DESC LIMIT 1", (path, line)).fetchone()
+                    if cover is not None:
+                        out.append(implicit_row(path, line, str(cover[0]), cover[1], cover[2]))
+            return out
+        finally:
+            conn.close()
+
     def rows_for_path(self, path: str | None, lines: tuple[int, int] | None = None) -> list[dict]:
         """The merged rows on one corpus path, in first-labelled order, then the implicit rows of its covers in line
-        order; `None` returns every row. `lines` (a, b) keeps the rows on lines a..b plus whole-file rows."""
+        order; `None` returns every row. `lines` (a, b) keeps the rows on lines a..b (row_line) plus whole-file rows."""
         conn = self.connect()
         try:
             if path is None:
@@ -513,7 +552,7 @@ class Store:
                 rows = conn.execute(f"SELECT {_MERGED_COLS} FROM current WHERE path = ? ORDER BY rowid", (path,)).fetchall()
                 paths = [path]
             else:
-                rows = conn.execute(f"SELECT {_MERGED_COLS} FROM current WHERE path = ? AND (line BETWEEN ? AND ? OR line IS NULL) "
+                rows = conn.execute(f"SELECT {_MERGED_COLS} FROM current WHERE path = ? AND (line BETWEEN ? AND ? OR ref = path) "
                                     "ORDER BY rowid", (path, int(lines[0]), int(lines[1]))).fetchall()
                 paths = [path]
             out = [_merged(r) for r in rows]
@@ -754,8 +793,8 @@ def scan_jsonl(jsonl: Path, path: str | None, lines: tuple[int, int] | None = No
             continue
         ref = str(r["ref"])
         if path is not None:
-            ref_path, line = ref_parts(ref)
-            if ref_path != path or (lines is not None and line is not None and not lines[0] <= line <= lines[1]):
+            ref_path, line = row_line(ref, r)
+            if ref_path != path or (lines is not None and (not lines[0] <= line <= lines[1] if line is not None else ref != path)):
                 continue
         (analyst if r.get("source") == "analyst" else model)[ref] = r
 
@@ -771,6 +810,9 @@ def scan_jsonl(jsonl: Path, path: str | None, lines: tuple[int, int] | None = No
         marked = spans_field(r.get("spans"))
         if marked:
             row["spans"] = marked
+        at = row_line(ref, r)[1]
+        if at is not None and ref_parts(ref)[1] is None:
+            row["line"] = at
         rows.append(row)
     for ref, a in analyst.items():
         if ref not in model:
