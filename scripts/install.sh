@@ -58,6 +58,7 @@
 #                            and the writers run as Claude Code background agents, which start only in a trusted folder.
 #                            --no-trust-workspaces answers no, and takes back what an earlier yes added
 #   --dry-run                print what it installs, its questions and every step and command; change nothing
+# THIMBLE_BIN_DIR, when set, is the folder the `thimble` link goes into in place of ~/.local/bin.
 set -euo pipefail
 
 usage()  { sed -n '2,/^set -euo/p' "$0" | sed '$d' | sed 's/^# \{0,1\}//'; }
@@ -74,6 +75,7 @@ json_get() {  # json_get FILE KEY — a top-level string value (python3 when pre
 parse_args() {
   src="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
   home="${THIMBLE_HOME:-$HOME/.thimble}"
+  bin_dir="${THIMBLE_BIN_DIR:-$HOME/.local/bin}"
   dir="" mp_name="" dev=0 deps_only=0 plugin="" dry=0 trust="" byo="" browser="" sandbox_deps="" require_pinned=0
   while [ $# -gt 0 ]; do
     case "$1" in
@@ -819,7 +821,7 @@ write_pointer() {  # $THIMBLE_HOME/app-dir: how the plugin copy in Claude Code's
 link_cli() {  # ~/.local/bin/thimble → <tree>/plugin/bin/thimble, so `thimble` is a command once that folder is on PATH (finish
   # says whether it is); a `thimble` there that is not a symlink into a thimble tree (another program) is left alone
   step "8/12 thimble on PATH"
-  local bin="$HOME/.local/bin" target="$dir/plugin/bin/thimble" existing=""
+  local bin="$bin_dir" target="$dir/plugin/bin/thimble" existing=""
   cli_link="$bin/thimble"; cli_linked=0
   if [ -L "$cli_link" ]; then existing="$(readlink "$cli_link")"; fi
   if { [ -e "$cli_link" ] || [ -L "$cli_link" ]; } && [ -z "$existing" ]; then
@@ -1100,7 +1102,7 @@ trust_workspaces() {  # the one entry thimble writes into Claude Code's global c
 }
 
 path_has_local_bin() {  # $HOME/.local/bin (or ~/.local/bin) as a PATH entry, a trailing slash on the entry allowed
-  case ":$(printf '%s' "$PATH" | sed 's#/*:#:#g; s#/*$##'):" in *":$HOME/.local/bin:"* | *":~/.local/bin:"*) return 0;; esac; return 1
+  case ":$(printf '%s' "$PATH" | sed 's#/*:#:#g; s#/*$##'):" in *":$bin_dir:"* | *":~/.local/bin:"*) return 0;; esac; return 1
 }
 
 finish() {  # doctor, then the one next step (and the PATH line the link needs)

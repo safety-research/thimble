@@ -526,3 +526,22 @@ def test_the_plugin_is_registered_only_on_a_yes_and_uninstall_removes_only_what_
     assert install("--no-plugin") == taken_back and json.loads(record.read_text())["registered"] == ""
     install("--plugin")
     assert run(uninstall) == taken_back and not record.exists()
+
+
+def test_thimble_bin_dir_moves_the_command_s_link_and_leaves_the_one_in_local_bin_alone(tmp_path):
+    """With THIMBLE_BIN_DIR set, the `thimble` link goes there, and a ~/.local/bin/thimble into another tree stays."""
+    tree = fake_tree(tmp_path / "release")
+    dest = tmp_path / "home" / ".thimble" / "app"
+    bin_ = stub_bin(tmp_path)
+    own = tmp_path / "own-bin"
+    env = env_for(tmp_path, PATH=f"{bin_}:/usr/bin:/bin", THIMBLE_BIN_DIR=str(own))
+    other = tmp_path / "other" / "plugin" / "bin" / "thimble"
+    local = Path(env["HOME"]) / ".local" / "bin" / "thimble"
+    local.parent.mkdir(parents=True)
+    local.symlink_to(other)
+    r = subprocess.run(["bash", str(tree / "scripts" / "install.sh"), "--dir", str(dest), *ANSWERS, "--no-plugin",
+                        "--no-trust-workspaces"], capture_output=True, text=True, env=env, stdin=subprocess.DEVNULL,
+                       timeout=60)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert os.readlink(own / "thimble") == str(dest / "plugin" / "bin" / "thimble")
+    assert os.readlink(local) == str(other)
