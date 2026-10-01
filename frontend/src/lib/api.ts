@@ -565,6 +565,9 @@ export const scaleApi = {
   folder: (c: string, path: string) => j<FolderListing>(`${BASE}/corpora/${enc(c)}/sources${q({ path: path || '.', depth: 1 })}`),
   /** `GET /ws/{c}/labels?path=&lines=a-b`: every concept's rows on lines a..b of one file, plus its whole-file rows. */
   labelsForLines: (c: string, path: string, a: number, b: number) => j<LabelsForPath[]>(`${ws(c)}/labels${q({ path, lines: `${a}-${b}` })}`),
+  /** `GET /ws/{c}/labels?path=&lines=a-b,c-d,...`: every concept's rows on each of these ranges of one file's lines, plus
+   * its whole-file rows, in one request. */
+  labelsForSpans: (c: string, path: string, lines: string) => j<LabelsForPath[]>(`${ws(c)}/labels${q({ path, lines })}`),
   /** `POST /ws/{c}/labels/refs`: every concept's rows on these records that are no lines (a database row, a PDF page, a
    * JSON value, a CSV row, a view reader's own record). */
   labelsForRefs: (c: string, refs: string[]) => j<LabelsForPath[]>(`${ws(c)}/labels/refs`, { method: 'POST', body: JSON.stringify({ refs }) }),

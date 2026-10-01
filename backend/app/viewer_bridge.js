@@ -38,8 +38,12 @@
 //   size {height}          frame to page: the document's height, for a frame that sizes to its content, or the height a
 //                          page says it needs (window.thimble.size), after which the document's own height is not sent
 //   settled                frame to page: a card's page has drawn what `init` brought (window.thimble.settled)
-//   anchors {refs, seq}    frame to page: the data-anchor values that appeared since the last report, and `seq` how many
-//                          have been reported in all
+//   anchors {refs, seq, seen}
+//                          frame to page: the data-anchor values that appeared since the last report, `seq` how many
+//                          have been reported in all, and `seen` those of the anchored elements in the frame's viewport
+//                          not reported in view before, whose labels thimble reads first
+//   seen {refs}            frame to page: the same for the anchored elements a scroll, a resize or a redraw brought into
+//                          view
 //   labels {marks, on, filter, all, palette, answered}
 //                          page to frame: marks {ref: {bar, names, spans: [{text, colour}], keep?}}, the marks of the
 //                          labels that are on for the records and units among those refs, drawn over every element with
@@ -697,11 +701,40 @@
     for (var i = 0; i < all.length; i++) note(all[i])
     return own || all.length > 0
   }
+  // The refs of the anchored elements in the frame's viewport not reported in view before (anchors' and seen's `seen`)
+  var seenSent = {}
+  var seenTimer = null
+  function newlySeen() {
+    var out = []
+    var vw = window.innerWidth
+    var vh = window.innerHeight
+    var els = document.querySelectorAll('[data-anchor]')
+    for (var i = 0; i < els.length; i++) {
+      var ref = els[i].getAttribute('data-anchor')
+      if (!ref || seenSent[ref]) continue
+      var r = els[i].getBoundingClientRect()
+      if (!r.width || !r.height || r.bottom <= 0 || r.top >= vh || r.right <= 0 || r.left >= vw) continue
+      seenSent[ref] = true
+      out.push(ref)
+    }
+    return out
+  }
+  function sendSeen() {
+    seenTimer = null
+    var refs = newlySeen()
+    if (refs.length) post({ type: P + 'seen', refs: refs })
+  }
+  function seenSoon() {
+    if (seenTimer != null) clearTimeout(seenTimer)
+    seenTimer = setTimeout(sendSeen, 120)
+  }
+  document.addEventListener('scroll', seenSoon, { capture: true, passive: true })
+  window.addEventListener('resize', seenSoon)
   function sendAnchors() {
     sendTimer = null
     if (!unsent.length) return
     sentN += unsent.length
-    post({ type: P + 'anchors', refs: unsent, seq: sentN })
+    post({ type: P + 'anchors', refs: unsent, seq: sentN, seen: newlySeen() })
     unsent = []
   }
   // the element's text nodes joined, with where each starts, so a marked text found across several nodes becomes one
@@ -1022,6 +1055,7 @@
       if (!changed && r.target.closest && r.target.closest('[data-thimble-label]')) changed = true
     }
     if (unsent.length && sendTimer == null) sendTimer = setTimeout(sendAnchors, 30)
+    else if (changed) seenSoon()
     if (changed && (hasMarks() || dropping()) && paintTimer == null) paintTimer = setTimeout(paint, 30)
   }).observe(document.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: ['data-anchor', 'class'] })
 
