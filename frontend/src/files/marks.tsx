@@ -1,13 +1,15 @@
 // The labels a file's records carry in the reader, for the labels that are on: a gutter cell per label (labels.ts
 // laneCells), a span label's texts highlighted in place, or a tint (labels.ts recordMarks). Each record asks for its
 // line (`want`) and the hook fetches the LABEL_BLOCK-line block that holds it (GET /labels?path=&lines=a-b), so a large
-// labelled file costs one small request per page shown. Cached per path; a bus `concepts` event re-reads the shown
-// blocks and swaps them in once all have arrived. Provided through a context; a custom view's frame reads the same
-// cache through watchPathLabels and wantLabels.
+// labelled file costs one small request per page shown. A record that is no line (a database row, a PDF page, a JSON
+// value, a CSV row) is asked for by its ref instead (POST /labels/refs), batched. Cached per path; a bus `concepts`
+// event re-reads the shown blocks and refs and swaps them in once all have arrived. Provided through a context; a
+// custom view's frame reads the same cache through watchPathLabels, wantLabels and wantRecordLabels.
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react'
 import { scaleApi } from '../lib/api'
 import { bus } from '../lib/bus'
 import type { Concept, LabelRow, LabelsForPath } from '../lib/types'
+import { recordKey, recordOf } from '../lib/refs'
 import { laneCells, recordMarks, type LaneCell, type LaneValue, type RecordMarks } from './labels'
 
 /** lines per labels request: the source route's largest page, so one block covers a reader page and its neighbours */
@@ -39,18 +41,31 @@ export function mergeLabels(into: LabelsForPath[], more: LabelsForPath[]): Label
   return [...out.values()]
 }
 
-/** Every label's row per record ref: ref -> concept id -> the row. */
+/** Every label's row per record ref: ref (recordKey) -> concept id -> the row. A row of a record that starts on a line
+ * of its file without naming it (a CSV row, a JSON document's record: `line`) is found at that line's ref as well,
+ * where the reader's line views look for it, unless a row of that line's own is there. */
 export function rowsByRef(list: LabelsForPath[]): Map<string, Map<string, LabelRow>> {
   const out = new Map<string, Map<string, LabelRow>>()
+  const at = (ref: string) => {
+    let m = out.get(ref)
+    if (!m) out.set(ref, (m = new Map()))
+    return m
+  }
+  const aliases: [string, string, LabelRow][] = []
   for (const entry of list) {
     if (!entry || !Array.isArray(entry.rows)) continue
     for (const row of entry.rows) {
       if (!row || typeof row.ref !== 'string') continue
-      const ref = row.ref.trim()
-      let m = out.get(ref)
-      if (!m) out.set(ref, (m = new Map()))
+      const ref = recordKey(row.ref)
+      const m = at(ref)
       if (!m.has(entry.concept_id)) m.set(entry.concept_id, row)
+      const file = typeof row.line === 'number' && row.line >= 1 ? recordOf(ref) : null
+      if (file && file.line == null) aliases.push([`${file.path}#L${row.line}`, entry.concept_id, row])
     }
+  }
+  for (const [ref, concept, row] of aliases) {
+    const m = at(ref)
+    if (!m.has(concept)) m.set(concept, row)
   }
   return out
 }
@@ -59,6 +74,8 @@ interface PathLabels {
   list: LabelsForPath[]
   /** blocks fetched or in flight */
   blocks: Set<number>
+  /** the refs of records that are no lines asked for (wantRecordLabels), fetched or in flight */
+  refs: Set<string>
   listeners: Set<(list: LabelsForPath[]) => void>
   /** bumped when the cache is dropped, so an answer in flight for the old contents is ignored */
   gen: number
@@ -73,7 +90,7 @@ const cacheKey = (ws: string, path: string) => `${ws}|${path}`
 function entry(key: string): PathLabels {
   let e = cache.get(key)
   if (!e) {
-    e = { list: [], blocks: new Set(), listeners: new Set(), gen: 0, next: null }
+    e = { list: [], blocks: new Set(), refs: new Set(), listeners: new Set(), gen: 0, next: null }
     cache.set(key, e)
   }
   return e
@@ -83,6 +100,22 @@ function notify(e: PathLabels): void {
   for (const fn of e.listeners) fn(e.list)
 }
 
+/** `more` merged into the path's labels: at once, or while the shown blocks are read again (invalidate) into the new
+ * contents, which replace the old once `token`, the last of the reads awaited, has arrived. */
+function settle(e: PathLabels, more: LabelsForPath[], token: number): void {
+  const next = e.next
+  if (!next) {
+    e.list = mergeLabels(e.list, more)
+    return notify(e)
+  }
+  next.list = mergeLabels(next.list, more)
+  next.waiting.delete(token)
+  if (next.waiting.size) return
+  e.list = next.list
+  e.next = null
+  notify(e)
+}
+
 function fetchBlock(ws: string, path: string, block: number): void {
   const e = entry(cacheKey(ws, path))
   if (e.blocks.has(block)) return
@@ -90,30 +123,78 @@ function fetchBlock(ws: string, path: string, block: number): void {
   const gen = e.gen
   e.next?.waiting.add(block)
   const [a, b] = blockRange(block)
-  const settle = (more: LabelsForPath[]) => {
-    const next = e.next
-    if (!next) {
-      e.list = mergeLabels(e.list, more)
-      return notify(e)
-    }
-    next.list = mergeLabels(next.list, more)
-    next.waiting.delete(block)
-    if (next.waiting.size) return
-    e.list = next.list
-    e.next = null
-    notify(e)
-  }
   scaleApi
     .labelsForLines(ws, path, a, b)
     .then((more) => {
-      if (e.gen === gen) settle(more)
+      if (e.gen === gen) settle(e, more, block)
     })
     .catch(() => {
       /* labels are a convenience; the file reads without them, and the next record asks again */
       if (e.gen !== gen) return
       e.blocks.delete(block)
-      if (e.next) settle([])
+      if (e.next) settle(e, [], block)
     })
+}
+
+/** records asked for by ref in one request at most */
+const REFS_PER_ASK = 1000
+
+/** The refs asked for since the last request, per workspace and path, each path's with the token its awaited read
+ * goes by (a negative number, beside the blocks' own). */
+const queued = new Map<string, Map<string, { refs: Set<string>; token: number; gen: number }>>()
+let refToken = 0
+let flushTimer: ReturnType<typeof setTimeout> | null = null
+
+function fetchRefs(ws: string, path: string, refs: Iterable<string>): void {
+  const e = entry(cacheKey(ws, path))
+  let byPath = queued.get(ws)
+  for (const ref of refs) {
+    const key = recordKey(ref)
+    if (e.refs.has(key)) continue
+    e.refs.add(key)
+    if (!byPath) queued.set(ws, (byPath = new Map()))
+    let q = byPath.get(path)
+    if (!q || q.gen !== e.gen) {
+      byPath.set(path, (q = { refs: new Set(), token: -++refToken, gen: e.gen }))
+      e.next?.waiting.add(q.token)
+    }
+    q.refs.add(key)
+  }
+  if (byPath && flushTimer == null) flushTimer = setTimeout(flushRefs, 0)
+}
+
+/** One request per workspace for the refs queued (REFS_PER_ASK at a time), its rows shared out among their paths. */
+function flushRefs(): void {
+  flushTimer = null
+  const all = [...queued]
+  queued.clear()
+  for (const [ws, byPath] of all) {
+    const tickets = [...byPath].map(([path, q]) => ({ path, e: entry(cacheKey(ws, path)), ...q, refs: [...q.refs] }))
+    for (let i = 0; i < tickets.length; ) {
+      const batch: typeof tickets = []
+      let n = 0
+      while (i < tickets.length && (n === 0 || n + tickets[i].refs.length <= REFS_PER_ASK)) {
+        n += tickets[i].refs.length
+        batch.push(tickets[i++])
+      }
+      scaleApi
+        .labelsForRefs(ws, batch.flatMap((t) => t.refs))
+        .then((list) => {
+          for (const t of batch) {
+            if (t.e.gen !== t.gen) continue
+            const mine = list.map((l) => ({ ...l, rows: l.rows.filter((r) => recordOf(r.ref)?.path === t.path) })).filter((l) => l.rows.length)
+            settle(t.e, mine, t.token)
+          }
+        })
+        .catch(() => {
+          for (const t of batch) {
+            if (t.e.gen !== t.gen) continue
+            for (const r of t.refs) t.e.refs.delete(r)
+            if (t.e.next) settle(t.e, [], t.token)
+          }
+        })
+    }
+  }
 }
 
 /** Drop every path's labels; the paths shown re-read their blocks and keep their old labels until every block is read,
@@ -121,10 +202,12 @@ function fetchBlock(ws: string, path: string, block: number): void {
 function invalidate(): void {
   for (const [key, e] of cache) {
     const blocks = [...e.blocks]
+    const asked = [...e.refs]
     e.gen += 1
     e.blocks.clear()
+    e.refs.clear()
     e.next = null
-    if (!e.listeners.size || !blocks.length) {
+    if (!e.listeners.size || (!blocks.length && !asked.length)) {
       e.list = []
       if (e.listeners.size) notify(e)
       continue
@@ -133,6 +216,7 @@ function invalidate(): void {
     const [ws, ...rest] = key.split('|')
     const path = rest.join('|')
     for (const b of blocks) fetchBlock(ws, path, b)
+    if (asked.length) fetchRefs(ws, path, asked)
   }
 }
 
@@ -184,6 +268,12 @@ export function watchPathLabels(ws: string, path: string, fn: (rows: Map<string,
 /** Ask for the block of labels that holds `line` of `path`, once; the watchers of the path get it when it arrives. */
 export function wantLabels(ws: string, path: string, line: number): void {
   fetchBlock(ws, path, blockOf(line))
+}
+
+/** Ask for the labels of a record of `path` that is no line (lib/refs recordOf), by its ref, once; the watchers of
+ * the path get them when they arrive. */
+export function wantRecordLabels(ws: string, path: string, ref: string): void {
+  fetchRefs(ws, path, [ref])
 }
 
 /** The labels on one file, block by block as its records ask for them (`want`), cached per path; a `concepts` event

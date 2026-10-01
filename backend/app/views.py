@@ -53,6 +53,7 @@ from fastapi.responses import FileResponse, HTMLResponse
 from pydantic import BaseModel
 
 from . import config, headless, investigation, prompts, refs, userconf
+from .records import is_record_ref as is_record
 from .ledger import atomic_write_text, read_json, unlinked, write_json, write_json_once
 
 log = logging.getLogger("thimble.views")
@@ -123,7 +124,6 @@ WIDE_USED = 0.7  # of the wide pane, the share a page's text and graphics must s
 # (unmarked); the strings of each answer read for them, FETCHED_SCAN_MAX at most
 ANCHORED_SHARE = 10
 FETCHED_SCAN_MAX = 200_000
-_RECORD_REF = re.compile(r"^[^\s#][^#\n]*#L[1-9]\d*$")  # a record ref, `<path>#L<n>` (frontend files/labels recordRef)
 FOLDER_CACHE_S = 5.0
 _NODE_MODULES = config.REPO_ROOT / "frontend" / "node_modules"
 # The libraries a view page may use, served by thimble and inlined into the page. vega-embed needs vega and vega-lite
@@ -1506,14 +1506,15 @@ def _unit_mark(ctx: dict[str, Any], rs: list[str]) -> dict[str, Any] | None:
 
 async def marks_for(c: str, slug: str, ref_list: list[str], ctx: dict[str, Any] | None = None,
                     version: str | None = None) -> dict[str, dict[str, Any]]:
-    """{ref: mark} for the bridge: the marks of record refs (`<path>#L<n>`) and of the view's unit refs
+    """{ref: mark} for the bridge: the marks of record refs (records.is_record_ref: `<path>#L<n>`, a database row, a PDF
+    page, a JSON value, a CSV row, a reader's own `<path>#<locator>`) and of the view's unit refs
     (`view:<slug>/<key>`, resolved in one kernel round trip by the view at `version` and marked from their first
     REFS_MAX records) under the labels context `ctx` (default the workspace's). A ref no label marks and no filter keeps
     is left out."""
     ctx = ctx if ctx is not None else await asyncio.to_thread(labels_context, c)
     if not ctx.get("probe") and not ctx.get("labels"):
         return {}
-    records = [r for r in ref_list if _RECORD_REF.match(r)]
+    records = [r for r in ref_list if is_record(r)]
     prefix = f"view:{slug}/"
     units = [r for r in ref_list if r.startswith(prefix) and len(r) > len(prefix)]
     out: dict[str, dict[str, Any]] = {}
@@ -2640,7 +2641,7 @@ async def shoot_states(c: str, slug: str, states: list[dict[str, Any]], *, width
                 return {"error": e.message}
             strings: list[str] = []
             _strings(data, strings)
-            fetched[i].update(s for s in strings[:FETCHED_SCAN_MAX] if _RECORD_REF.match(s))
+            fetched[i].update(s for s in strings[:FETCHED_SCAN_MAX] if is_record(s))
             if len(kept[i]) < answers:
                 kept[i].append(data)
             return {"data": data}
@@ -3369,11 +3370,12 @@ _DEFAULTS = {"", "-", "?", "—", "unknown", "none", "null", "n/a", "na", "other
 
 
 def _answer_records(v: Any, out: dict[str, dict[str, Any]]) -> None:
-    """The objects in a reader's answer that cite one record, by the record ref (`<path>#L<n>`) among their values."""
+    """The objects in a reader's answer that cite one record, by the record ref among their values (records.is_record_ref:
+    `<path>#L<n>`, a database row, a PDF page, a JSON value, a CSV row)."""
     if len(out) >= DERIVED_SAMPLE:
         return
     if isinstance(v, dict):
-        ref = next((x for x in v.values() if isinstance(x, str) and _RECORD_REF.match(x)), None)
+        ref = next((x for x in v.values() if isinstance(x, str) and is_record(x)), None)
         if ref is not None and ref not in out:
             out[ref] = v
         for x in v.values():
@@ -3457,7 +3459,7 @@ def unlisted_derived(c: str, shots: list[dict[str, Any]], declared: set[str]) ->
         for k, v in rec.items():
             if k in declared or v is None or isinstance(v, (bool, dict, list)) or _exempt(k, v):
                 continue
-            if v == ref or v == line or (isinstance(v, str) and (len(v.strip()) < 2 or _RECORD_REF.match(v) or v in ref)):
+            if v == ref or v == line or (isinstance(v, str) and (len(v.strip()) < 2 or is_record(v) or v in ref)):
                 continue
             seen[k] = seen.get(k, 0) + 1
             if not _held(v, text, numbers):

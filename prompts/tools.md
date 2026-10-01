@@ -102,13 +102,13 @@ Define a category, apply it to every unit of a scope, and get the counts per val
     "predicate": {
       "type": "object",
       "properties": {
-        "kind": {"type": "string", "enum": ["prompt", "regex", "code"], "description": "A model judges each unit, a regex matches its text, or code defines label(unit) returning (value, confidence), where a unit is a JSONL record as its dict, a text line or a sentence a dict with its words in unit['text'], and a card a dict with its text, kind, question, takeaway, group and groups, the titles of the frames around it. A record that saves a whole document again, such as a wiki page's revision, is read by a model or a regex as what it changed from the save before, and by code whole."},
+        "kind": {"type": "string", "enum": ["prompt", "regex", "code"], "description": "A model judges each unit, a regex matches its text, or code defines label(unit) returning (value, confidence), where a unit is a JSONL record as its dict, a text line or a sentence a dict with its words in unit['text'], a row of a database or a CSV file a dict of its columns, a record of a JSON document its value, a PDF page a dict with its page and text, and a card a dict with its text, kind, question, takeaway, group and groups, the titles of the frames around it. A record that saves a whole document again, such as a wiki page's revision, is read by a model or a regex as what it changed from the save before, and by code whole."},
         "text": {"type": "string", "description": "The description, pattern or function."}
       },
       "required": ["kind", "text"]
     },
     "values": {"type": "array", "items": {"type": "string"}, "description": "Positive first. Default yes and no."},
-    "paths": {"type": "array", "items": {"type": "string"}, "description": "Globs, for files."},
+    "paths": {"type": "array", "items": {"type": "string"}, "description": "Globs, for files. A record of a file is a line of text, a row of a database's table, a page of a PDF, a value of a JSON document or a row of a CSV file. A glob followed by a record's place, such as `runs/*/forge.db#prs` for a table or `results.json#/runs`, keeps the records there."},
     "limit": {"type": "integer", "description": "Units to label, for a trial."},
     "within": {
       "type": "object",
@@ -756,7 +756,7 @@ The dev agent is changing the view {view} (view:{slug}) now. When its checks pas
 
 ## view-no-anchors
 
-The page shows no element whose `data-anchor` names a record (`<path>#L<n>`) or one of its units (`view:{slug}/<key>`), so no label the analyst turns on can show in it. Give each element that shows a record its file ref, and each unit's element its key.
+The page shows no element whose `data-anchor` names a record (its citation form, such as `<path>#L<n>` or `<db>#<table>/<key>`) or one of its units (`view:{slug}/<key>`), so no label the analyst turns on can show in it. Give each element that shows a record its file ref, and each unit's element its key.
 
 ## file_dev_ticket-no-view
 
@@ -784,7 +784,7 @@ Screenshots are unavailable on this machine, so the checks did not load the page
 
 ## view-few-anchors
 
-The reader handed the page {fetched} records, but only {records} shown elements carry a record's `<path>#L<n>` as their `data-anchor`, so the labels the analyst turns on show on almost nothing in it. Give each element that shows a record its file ref.
+The reader handed the page {fetched} records, but only {records} shown elements carry a record's citation form, such as `<path>#L<n>`, as their `data-anchor`, so the labels the analyst turns on show on almost nothing in it. Give each element that shows a record its file ref.
 
 ## view-marks-missing
 

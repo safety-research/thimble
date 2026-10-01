@@ -21,9 +21,9 @@
 // browser. A state is measured when its page has been quiet (no fetch or marks request in flight) for QUIET_MS after
 // `open`, or HARD_MS has passed with no request in flight, and again after each action. One line ends the run:
 // {"done": true, "states": [{ok, errors, fetches, height, refs, records, units, marked, hidden, shown, layout, controls,
-// actions, fonts}]}: `refs` the distinct data-anchor refs the page reported, `records` those naming a record
-// (`<path>#L<n>`), `units` those naming one of the view's units (`view:<slug>/<key>`), `marked` the elements carrying a
-// label's mark, `hidden` those the bridge hid or dimmed for the filter, `shown` what is on screen at the end
+// actions, fonts}]}: `refs` the distinct data-anchor refs the page reported, `records` those naming a record of a file
+// (RECORD_REF: `<path>#L<n>`, `<db>#<table>/<key>`, `<pdf>#p<n>`, any `<path>#<fragment>`), `units` those naming one of
+// the view's units (`view:<slug>/<key>`), `marked` the elements carrying a label's mark, `hidden` those the bridge hid or dimmed for the filter, `shown` what is on screen at the end
 // (shownCounts), `layout` how its text fits (layoutCounts), `controls` the controls it shows (controlList), `actions`
 // each action with whether its control was found, and `fonts` whether Hanken Grotesk was loaded in the frame.
 import { createRequire } from 'node:module'
@@ -44,6 +44,9 @@ const READY_MS = 10_000
 const PAGES_AT_ONCE = 3 // states loaded side by side, each on its own page
 const MEDIA_CHUNK = 4 * 1024 * 1024 // bytes of one Range answer
 const MEDIA_WHOLE_MAX = 32 * 1024 * 1024 // a request without Range (an <img>) gets a file up to this size whole
+// a ref naming one record of a file: a line of any file, or a fragment of a file whose name has an extension (backend
+// records.is_record_ref)
+const RECORD_REF = /^(?!(?:view|card|cell|concept|report|chat|call|group|ui):)[^\s#][^#\n]*(?:#L[1-9]\d*|\.[A-Za-z0-9]{1,8}#\S+)$/
 
 // An error's message without the boxed notice Playwright adds to a failed launch, which names an install command: the
 // server hands these messages to models.
@@ -54,8 +57,8 @@ const plain = (e) => String(e && e.message ? e.message : e).split('\n').filter((
 // refs whose `marks` entry has a bar, other than those whose outermost element is data-anchor-unmarked (the page draws
 // the labels' colours on it itself), `drawn` those of them whose element carries the bridge's mark, and `unkept` the
 // records shown that the filter does not keep, other than those inside a unit it keeps. Runs in the frame.
-function shownCounts({ marks }) {
-  const RECORD = /^.+#L[1-9]\d*$/
+function shownCounts({ marks, record }) {
+  const RECORD = new RegExp(record)
   const UNIT = /^view:[^/]+\/.+/
   const seen = new Map()
   for (const el of document.querySelectorAll('[data-anchor]')) {
@@ -574,11 +577,11 @@ async function shootState(browser, opt, doc, state, i) {
       fetches,
       height,
       refs: refs.length,
-      records: refs.filter((r) => /^.+#L[1-9]\d*$/.test(r)).length,
+      records: refs.filter((r) => RECORD_REF.test(r)).length,
       units: refs.filter((r) => /^view:[^/]+\/.+/.test(r)).length,
       marked: await count('[data-thimble-label]'),
       hidden: await count('[data-thimble-drop]'),
-      shown: await frame.evaluate(shownCounts, { marks }).catch(() => null),
+      shown: await frame.evaluate(shownCounts, { marks, record: RECORD_REF.source }).catch(() => null),
       layout: await frame.evaluate(layoutCounts).catch(() => null),
       controls: await frame.evaluate(controlList, { sel: CONTROLS, max: CONTROLS_MAX }).catch(() => []),
       actions,

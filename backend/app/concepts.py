@@ -55,7 +55,7 @@ from fastapi import APIRouter, HTTPException, Response
 from pydantic import BaseModel, Field
 from sse_starlette import EventSourceResponse, ServerSentEvent
 
-from . import capture, cite, concept_scan, config, corpus, labels_store, refs
+from . import capture, cite, concept_scan, config, corpus, labels_store, records, refs
 from .ledger import append_jsonl, append_jsonl_many, atomic_write_text, read_json
 
 log = logging.getLogger("thimble.concepts")
@@ -894,8 +894,8 @@ def concept_stats(ws: Path, concept: dict) -> dict:
 
 
 def coverage(ws: Path, concept: dict) -> dict:
-    """{unit, files: [{path, covered, rows}], not_covered: [path, ...]}: every non-forge file of the corpus with the
-    rows the label has on it, and the paths with none. A cell or span unit has no files. Blocking (worker thread)."""
+    """{unit, files: [{path, covered, rows}], not_covered: [path, ...]}: every file of the corpus with the rows the label
+    has on it, and the paths with none. A cell or span unit has no files. Blocking (worker thread)."""
     out: dict[str, Any] = {"unit": concept["unit"], "files": [], "not_covered": []}
     if concept["unit"] not in FILE_UNITS:
         return out
@@ -906,8 +906,6 @@ def coverage(ws: Path, concept: dict) -> dict:
     st, _building_now = _store(ws, concept["id"])
     rows = st.paths() if st is not None else {}
     for src in corpus.list_sources(corpus_dir):
-        if src["kind"] == "forge":
-            continue
         n = int(rows.get(src["path"], 0))
         out["files"].append({"path": src["path"], "covered": n > 0, "rows": n})
         if n == 0:
@@ -929,18 +927,27 @@ def with_stats(ws: Path, concept: dict) -> dict:
 
 
 def match_paths(corpus_dir: Path, patterns: list[str]) -> list[dict]:
-    """Non-forge sources whose corpus-relative path matches any pattern (fnmatch, `*` may span `/`), equals it, or
-    lies under it when the pattern names a directory. Sorted by path."""
-    pats = [str(p).strip().strip("/") for p in patterns if str(p).strip()]
+    """Sources whose corpus-relative path matches any pattern (fnmatch, `*` may span `/`), equals it, or lies under it
+    when the pattern names a directory. A pattern with a fragment, such as `forge.db#prs` or `runs.json#/runs`, matches
+    its files and keeps only the records under the fragment (records.iter_records `under`), which the source carries as
+    `under`, the list of every such pattern's fragment that matches it. Sorted by path."""
+    pats: list[tuple[str, str | None]] = []
+    for raw in patterns:
+        text = str(raw).strip()
+        if not text:
+            continue
+        head, sep, frag = text.partition("#")
+        pats.append((head.strip().strip("/"), frag.strip() if sep and frag.strip() else None))
     if not pats:
         return []
     out = []
     for src in corpus.list_sources(corpus_dir):
-        if src["kind"] == "forge":
-            continue
         rel = src["path"]
-        if any(rel == p or fnmatch.fnmatchcase(rel, p) or rel.startswith(p + "/") for p in pats):
-            out.append(src)
+        hits = [frag for p, frag in pats if rel == p or fnmatch.fnmatchcase(rel, p) or rel.startswith(p + "/")]
+        if not hits:
+            continue
+        under = None if None in hits else list(dict.fromkeys(hits))
+        out.append({**src, "under": under} if under else src)
     out.sort(key=lambda s: s["path"])
     return out
 
@@ -962,8 +969,8 @@ def units_at_least(corpus_dir: Path, sources: list[dict], unit: str, cap: int) -
     n = 0
     for i, src in enumerate(sources, 1):
         try:
-            n += corpus.line_count(config.safe_corpus_path(corpus_dir, src["path"]))
-        except (OSError, ValueError):
+            n += records.count(config.safe_corpus_path(corpus_dir, src["path"]), src["path"], src.get("under"))
+        except (OSError, ValueError, sqlite3.Error):
             continue
         if n > cap:
             return n, i
@@ -978,23 +985,44 @@ def prompt_apply_too_wide(count: int, files_read: int, n_files: int, unit: str) 
             f"pass limit to cap the run or paths to narrow it to some files.")
 
 
-def _iter_records(corpus_dir: Path, src: dict) -> Iterator[tuple[int, Any, str]]:
-    """(line, record, block text) for every record of a source, read in chunks."""
-    rel, kind = src["path"], src["kind"]
-    path = config.safe_corpus_path(corpus_dir, rel)
-    total = len(corpus.line_offsets(path))
-    for start in range(1, total + 1, CHUNK):
-        for r in corpus.load_records(path, rel, kind, start, min(total, start + CHUNK - 1)):
-            yield r["line"], r["record"], "\n\n".join(b["text"] for b in r["blocks"])
+def _iter_records(corpus_dir: Path, src: dict) -> Iterator[dict]:
+    """Every record of a source as records.iter_records gives it ({ref, record, text, line, ...}), those under the
+    source's `under` alone (match_paths)."""
+    rel = src["path"]
+    return records.iter_records(config.safe_corpus_path(corpus_dir, rel), rel, src["kind"], src.get("under"))
+
+
+def line_source(corpus_dir: Path, src: dict) -> bool:
+    """Whether a source's records are its lines (records.py), which the scan pool and the code kind's wrapper read from
+    the file themselves. Blocking."""
+    if src.get("under"):
+        return False
+    try:
+        path = config.safe_corpus_path(corpus_dir, src["path"])
+        reader = records.reader_of(path, src["path"])
+        return reader == "lines" or (reader == "json" and records.json_index(path) is None)
+    except (OSError, ValueError):
+        return False
+
+
+def text_source(corpus_dir: Path, src: dict) -> bool:
+    """Whether a whole file's text can be read line by line, as a unit of a whole file or run reads it: anything but a
+    database, a PDF and another binary file, whose rows or pages it reads instead (concept_scan.group_texts). Blocking."""
+    try:
+        return records.reader_of(config.safe_corpus_path(corpus_dir, src["path"]), src["path"]) in ("lines", "json", "csv")
+    except (OSError, ValueError):
+        return False
 
 
 class Unit:
-    """One thing to label. `texts()` yields (ref, text) parts lazily; `record` is what the code kind's label() gets."""
+    """One thing to label. `texts()` yields (ref, text) parts lazily; `record` is what the code kind's label() gets;
+    `line` the line a record of a CSV or a JSON document starts on (labels_store.row_line)."""
 
-    __slots__ = ("ref", "paths", "record", "_texts")
+    __slots__ = ("ref", "paths", "record", "_texts", "line")
 
-    def __init__(self, ref: str, paths: list[str], texts: Callable[[], Iterator[tuple[str, str]]], record: Any = None):
-        self.ref, self.paths, self.record, self._texts = ref, paths, record, texts
+    def __init__(self, ref: str, paths: list[str], texts: Callable[[], Iterator[tuple[str, str]]], record: Any = None,
+                 line: int | None = None):
+        self.ref, self.paths, self.record, self._texts, self.line = ref, paths, record, texts, line
 
     def texts(self) -> Iterator[tuple[str, str]]:
         return self._texts()
@@ -1054,9 +1082,8 @@ def iter_units(corpus_dir: Path, sources: list[dict], unit: str) -> Iterator[Uni
     """The file units of the matched sources, in corpus order."""
     if unit == "record":
         for src in sources:
-            for line, record, text in _iter_records(corpus_dir, src):
-                ref = f"{src['path']}#L{line}"
-                yield Unit(ref, [src["path"]], lambda ref=ref, text=text: iter([(ref, text)]), record)
+            for r in _iter_records(corpus_dir, src):
+                yield _record_unit(src["path"], r)
         return
     by_path = {s["path"]: s for s in sources}
     for g in groups_for(sources, unit):
@@ -1064,10 +1091,17 @@ def iter_units(corpus_dir: Path, sources: list[dict], unit: str) -> Iterator[Uni
 
         def texts(srcs=srcs) -> Iterator[tuple[str, str]]:
             for s in srcs:
-                for line, _rec, text in _iter_records(corpus_dir, s):
-                    yield f"{s['path']}#L{line}", text
+                for r in _iter_records(corpus_dir, s):
+                    yield r["ref"], r["text"]
 
         yield Unit(g["ref"], g["paths"], texts)
+
+
+def _record_unit(rel: str, r: dict) -> Unit:
+    """The unit of one record of `rel` as records.py reads it."""
+    ref, text = r["ref"], r["text"]
+    line = r.get("line") if not ref.startswith(f"{rel}#L") else None
+    return Unit(ref, [rel], lambda ref=ref, text=text: iter([(ref, text)]), r["record"], line)
 
 
 def resolve_within(ws: Path, within: Any) -> dict | None:
@@ -1094,9 +1128,9 @@ def _rev_of(ws: Path, concept_id: str) -> int | None:
     return int(k.get("rev") or 0) if k else None
 
 
-def within_lines(ws: Path, sources: list[dict], within: dict, most: int | None = None) -> dict[str, set[int]]:
-    """{path: lines} of the records of the sources that the label `within` names gave its value, from `most` of its rows
-    at most (all when None). Blocking (a thread)."""
+def within_refs(ws: Path, sources: list[dict], within: dict, most: int | None = None) -> dict[str, set[str]]:
+    """{path: record refs} of the records of the sources that the label `within` names gave its value, from `most` of
+    its rows at most (all when None). Blocking (a thread)."""
     st = _store_ready(ws, within["label"])
     if st is None:
         return {}
@@ -1104,12 +1138,13 @@ def within_lines(ws: Path, sources: list[dict], within: dict, most: int | None =
         most = st.rows(within["value"], 1)[1]
     rows, _total, _next = st.rows(within["value"], most)
     wanted = {src["path"] for src in sources}
-    lines: dict[str, set[int]] = {}
+    out: dict[str, set[str]] = {}
     for r in rows:
-        path, line = labels_store.ref_parts(str(r.get("ref") or ""))
-        if path in wanted and line:
-            lines.setdefault(path, set()).add(int(line))
-    return lines
+        ref = str(r.get("ref") or "")
+        at = records.split(ref)
+        if at is not None and at[0] in wanted:
+            out.setdefault(at[0], set()).add(records.canon(ref))
+    return out
 
 
 def within_too_wide(ws: Path, within: dict, count: int) -> str:
@@ -1120,12 +1155,34 @@ def within_too_wide(ws: Path, within: dict, count: int) -> str:
 
 
 def within_units(ws: Path, corpus_dir: Path, sources: list[dict], within: dict, most: int | None = None) -> list[Unit]:
-    """The records of the sources that the label `within` names gave its value (within_lines), in corpus order.
+    """The records of the sources that the label `within` names gave its value (within_refs), in corpus order.
     Blocking (a thread)."""
-    lines = within_lines(ws, sources, within, most)
+    found = within_refs(ws, sources, within, most)
     out: list[Unit] = []
     for src in sources:
-        out += line_units(corpus_dir, src["path"], src["kind"], lines.get(src["path"], ()))
+        out += ref_units(corpus_dir, src["path"], src["kind"], found.get(src["path"], ()))
+    return out
+
+
+def ref_units(corpus_dir: Path, rel: str, kind: str, wanted: Any) -> list[Unit]:
+    """The record units these refs name in one file, in the file's order: lines read CHUNK at a time (line_units), any
+    other record read by its ref. A ref the file does not hold is left out. Blocking."""
+    lines: list[int] = []
+    others: list[str] = []
+    for ref in wanted:
+        p = refs.parse_ref(ref) if records.split(ref) else None
+        if p is None:
+            continue
+        if p["kind"] == "record":
+            lines.append(int(p["line"]))
+        else:
+            others.append(ref.partition("#")[2])
+    out = line_units(corpus_dir, rel, kind, lines) if lines else []
+    if others:
+        path = config.safe_corpus_path(corpus_dir, rel)
+        got = [r for frag in others if (r := records.read(path, rel, frag, kind)) is not None]
+        got.sort(key=lambda r: (r.get("n") or 0, r["ref"]))
+        out += [_record_unit(rel, r) for r in got]
     return out
 
 
@@ -1206,7 +1263,7 @@ def _changed(u: Unit, key: tuple[str, str], old: Any, header: bool = True) -> Un
         return u
     text = ("\n".join(diff) if not header
             else f"What this save changed on {key[0] or labels_store.ref_parts(u.ref)[0]}:\n" + ("\n".join(diff) or "nothing"))
-    return Unit(u.ref, u.paths, lambda ref=u.ref, text=text: iter([(ref, text)]), u.record)
+    return Unit(u.ref, u.paths, lambda ref=u.ref, text=text: iter([(ref, text)]), u.record, u.line)
 
 
 def as_changes(units: Iterator[Unit], header: bool = True) -> Iterator[Unit]:
@@ -1255,14 +1312,14 @@ def examples(c: str, concept_id: str, value: str, n: int = EXAMPLES_SHOWN) -> li
     matched = {str(r.get("ref") or ""): {x.casefold() for x in r.get("spans") or [] if x} for r in rows}
     order = [rows[i] for i in spread(len(rows), len(rows))]
     order.sort(key=lambda r: -len(matched[str(r.get("ref") or "")]))
-    lines: dict[str, list[int]] = {}
+    by_file: dict[str, list[str]] = {}
     for r in order[:EXAMPLES_READ]:
-        rel, line = labels_store.ref_parts(str(r.get("ref") or ""))
-        if rel and line:
-            lines.setdefault(rel, []).append(line)
-    rank = {str(r.get("ref") or ""): i for i, r in enumerate(order[:EXAMPLES_READ])}
-    units = sorted((u for rel, ns in lines.items() for u in line_units(corpus_dir, rel, corpus.source_kind(rel), ns)),
-                   key=lambda u: rank[u.ref])
+        at = records.split(str(r.get("ref") or ""))
+        if at is not None:
+            by_file.setdefault(at[0], []).append(str(r["ref"]))
+    rank = {records.canon(str(r.get("ref") or "")): i for i, r in enumerate(order[:EXAMPLES_READ])}
+    units = sorted((u for rel, rs in by_file.items() for u in ref_units(corpus_dir, rel, corpus.source_kind(rel), rs)),
+                   key=lambda u: rank.get(u.ref, len(rank)))
     out: list[tuple[str, str]] = []
     docs: set = set()
     for u in picked_as_changes(corpus_dir, units, header=False):
@@ -1395,6 +1452,11 @@ def trial_sample(corpus_dir: Path, sources: list[dict], limit: int, lines: dict[
             continue
         n = int(lines.get(src["path"]) or 0)
         path = config.safe_corpus_path(corpus_dir, src["path"])
+        if not line_source(corpus_dir, src):
+            # a record of another reader is read by its place among the file's records
+            picked = records.records_at(path, src["path"], [i + 1 for i in spread(n, k)], src["kind"], src.get("under"))
+            out += [_record_unit(src["path"], r) for r in picked]
+            continue
         taken: set[int] = set()
         for i in spread(n, k):
             line = i + 1
@@ -1808,8 +1870,12 @@ def merge_windows(labels: list[str], answers: list[dict | None]) -> dict | None:
     return best
 
 
-def _row(ref: str, label: str, confidence: float, source: str, rationale: str | None = None, spans: list[str] | None = None) -> dict:
-    return concept_scan.row(ref, label, confidence, source, rationale, spans)
+def _row(ref: str, label: str, confidence: float, source: str, rationale: str | None = None, spans: list[str] | None = None,
+         line: int | None = None) -> dict:
+    out = concept_scan.row(ref, label, confidence, source, rationale, spans)
+    if isinstance(line, int) and not isinstance(line, bool) and line >= 1:
+        out["line"] = line  # where the record starts in its file of text (labels_store.row_line)
+    return out
 
 
 
@@ -1971,7 +2037,7 @@ async def _apply_prompt(c: str, concept: dict, units: Iterator[Unit], out: Path,
             if r is None:
                 n_failed += 1
             else:
-                rows.append(_row(it.unit.ref, r["label"], r["confidence"], "model", r["rationale"] or None, r.get("spans")))
+                rows.append(_row(it.unit.ref, r["label"], r["confidence"], "model", r["rationale"] or None, r.get("spans"), it.unit.line))
         return rows, n_failed
 
     def take(n: int) -> list[list[_Item]]:
@@ -2048,10 +2114,33 @@ def _eta(t0: float, done: int, total: int | None) -> float | None:
 
 async def _index_sources(c: str, concept_id: str, corpus_dir: Path, sources: list[dict], unit: str,
                          cancel: threading.Event) -> dict:
-    """The run's unit count and, for record units, every file's chunk index from the scan pool. Returns
-    {total, files: {path: index}}."""
+    """The run's unit count and, for record units, the chunk index of every file whose records are lines from the scan
+    pool, and the records of the others counted (records.count). Returns {total, files: {path: index}, counts: {path:
+    records}}."""
     if unit != "record":
-        return {"total": len(groups_for(sources, unit)), "files": {}}
+        return {"total": len(groups_for(sources, unit)), "files": {}, "counts": {}}
+    lined = await asyncio.to_thread(lambda: [s for s in sources if line_source(corpus_dir, s)])
+    keep = {s["path"] for s in lined}
+    others = [s for s in sources if s["path"] not in keep]
+    counts: dict[str, int] = {}
+    for s in others:
+        if cancel.is_set():
+            break
+        try:
+            counts[s["path"]] = await asyncio.to_thread(records.count, config.safe_corpus_path(corpus_dir, s["path"]), s["path"],
+                                                        s.get("under"))
+        except (OSError, ValueError, sqlite3.Error):
+            counts[s["path"]] = 0
+    found = await _index_lines(c, concept_id, corpus_dir, lined, cancel)
+    counts.update({p: int(i.get("lines") or 0) for p, i in found["files"].items()})
+    return {"total": sum(counts.values()), "files": found["files"], "counts": counts}
+
+
+async def _index_lines(c: str, concept_id: str, corpus_dir: Path, sources: list[dict], cancel: threading.Event) -> dict:
+    """Every file's chunk index from the scan pool, for files whose records are lines. Returns {total, files: {path:
+    index}}."""
+    if not sources:
+        return {"total": 0, "files": {}}
     loop = asyncio.get_running_loop()
     pool = _pool_get()
     sem = asyncio.Semaphore(SCAN_INFLIGHT_PER_WORKER * _pool_workers)
@@ -2237,11 +2326,13 @@ async def _apply_regex(c: str, concept: dict, corpus_dir: Path, sources: list[di
 REGEX_BATCH = 2_000  # units a regex over streamed units labels between writes
 
 
-async def _apply_regex_units(c: str, concept: dict, units: Iterable[Unit], out: Path, cancel: threading.Event) -> tuple[int, int, str | None]:
+async def _apply_regex_units(c: str, concept: dict, units: Iterable[Unit], out: Path, cancel: threading.Event,
+                             base: tuple[int, int, int] = (0, 0, 0)) -> tuple[int, int, str | None]:
     """The regex kind over units in hand or streamed (cards, sentences, the records a trial or `within` picked, the records
-    of files that hold saves), REGEX_BATCH at a time in a worker thread: one row per unit, the matched text as the
-    rationale and every matched text as `spans`, as the scan pool writes a record's. A regex reads as much of a unit as
-    the scan pool does, not the classifier's share of it."""
+    of files that hold saves or that are not lines), REGEX_BATCH at a time in a worker thread: one row per unit, the
+    matched text as the rationale and every matched text as `spans`, as the scan pool writes a record's. A regex reads
+    as much of a unit as the scan pool does, not the classifier's share of it. `base` is the (labeled, failed, matches)
+    of the run so far, which its progress counts on from."""
     rx = _compiled(concept)
     labels = concept["labels"]
     pos, neg = labels[0], (labels[1] if len(labels) > 1 else "no")
@@ -2255,9 +2346,10 @@ async def _apply_regex_units(c: str, concept: dict, units: Iterable[Unit], out: 
             m = rx.search(text)
             if m:
                 hits += 1
-                rows.append(_row(u.ref, pos, 1.0, "regex", m.group(0)[:concept_scan.RATIONALE_MAX], concept_scan.matched_texts(rx, text)))
+                rows.append(_row(u.ref, pos, 1.0, "regex", m.group(0)[:concept_scan.RATIONALE_MAX], concept_scan.matched_texts(rx, text),
+                                 u.line))
             else:
-                rows.append(_row(u.ref, neg, 1.0, "regex"))
+                rows.append(_row(u.ref, neg, 1.0, "regex", line=u.line))
         return rows, hits
 
     done = hits = 0
@@ -2269,12 +2361,20 @@ async def _apply_regex_units(c: str, concept: dict, units: Iterable[Unit], out: 
                 break
             await asyncio.to_thread(writer.put, concept_scan.jsonl_bytes(rows), rows)
             done, hits = done + len(rows), hits + h
-            _progress(c, concept["id"], done=done, labeled=done, failed=0, matches=hits)
+            _progress(c, concept["id"], done=base[0] + base[1] + done, labeled=base[0] + done, failed=base[1], matches=base[2] + hits)
     finally:
         await asyncio.to_thread(writer.close)
-    message = _cancelled_message(done, concept["unit"]) if cancel.is_set() else None
-    _progress(c, concept["id"], done=done, labeled=done, failed=0, matches=hits, eta_s=None)
+    message = _cancelled_message(base[0] + done, concept["unit"]) if cancel.is_set() else None
+    _progress(c, concept["id"], done=base[0] + base[1] + done, labeled=base[0] + done, failed=base[1], matches=base[2] + hits, eta_s=None)
     return done, 0, message
+
+
+def _split_scan(sources: list[dict], unit: str, index: dict) -> tuple[list[dict], list[dict]]:
+    """(the sources the scan pool reads, the rest): for records the files indexed as lines; every file of a whole-file
+    or run unit, whose databases and PDFs the pool reads by their rows and pages (concept_scan.group_texts)."""
+    if unit != "record":
+        return sources, []
+    return [s for s in sources if s["path"] in index["files"]], [s for s in sources if s["path"] not in index["files"]]
 
 
 def implicit_value(labels: list[str]) -> str | None:
@@ -2285,11 +2385,14 @@ def implicit_value(labels: list[str]) -> str | None:
 
 
 def build_code_wrapper(concept: dict, groups: list[dict], limit: int | None, rows_file: Path | str,
-                       units_file: Path | str | None = None, quiet: str | None = None, ts: str = "") -> str:
+                       units_file: Path | str | None = None, quiet: str | None = None, ts: str = "",
+                       parts_file: Path | str | None = None) -> str:
     """The code the code kind runs in the labels kernel: the analyst's spec (defining `label(unit)`) plus a loop over the units
     that writes one JSON line per unit ({ref, label, confidence, spans?}, or {ref, error}) to `rows_file`. File units are
-    read from `groups` (relative to the kernel's cwd); cell and span units come from `units_file`. Both paths must be
-    absolute. With `quiet` (implicit_value), records of whole files that take that value get cover lines instead of rows.
+    read from `groups` (relative to the kernel's cwd), the records of their databases and PDFs from `parts_file`
+    (_write_parts); cell and span units, and records the wrapper does not read itself, come from `units_file`. The
+    paths must be absolute. With `quiet` (implicit_value), records of whole files that take that value get cover lines
+    instead of rows.
 
     The file list goes into the code as one JSON string rather than a list literal: a long list literal makes one huge line,
     and Python 3.12's tokenizer keeps a copy of the line per token, which can exhaust the kernel's memory."""
@@ -2302,12 +2405,16 @@ def build_code_wrapper(concept: dict, groups: list[dict], limit: int | None, row
         f"_limit = {int(limit or 0)}\n"
         f"_rows_file = {str(rows_file)!r}\n"
         f"_units_file = {(str(units_file) if units_file is not None else None)!r}\n"
+        f"_parts_file = {(str(parts_file) if parts_file is not None else None)!r}\n"
         f"_quiet = {quiet!r}\n"
         f"_chunk = {CODE_COVER_LINES}\n"
         f"_ts = {ts!r}\n"
         "_n = 0\n"
         "_stats = {'errors': 0, 'first_error': None}\n\n"
         "def _read(_p):\n"
+        "    if _p in _parts:\n"
+        "        yield from enumerate(_parts[_p], 1)\n"
+        "        return\n"
         "    with open(_p, encoding='utf-8', errors='replace') as _f:\n"
         "        for _i, _line in enumerate(_f, 1):\n"
         "            _line = _line.rstrip('\\n')\n"
@@ -2323,7 +2430,8 @@ def build_code_wrapper(concept: dict, groups: list[dict], limit: int | None, row
         "        for _line in _f:\n"
         "            if _line.strip():\n"
         "                yield _json.loads(_line)\n\n"
-        "def _emit(_ref, _rec, _implicit=False):\n"
+        "_parts = {_x['path']: _x['records'] for _x in _read_units(_parts_file)} if _parts_file else {}\n\n"
+        "def _emit(_ref, _rec, _implicit=False, _line=None):\n"
         "    try:\n"
         "        _out = label(_rec)\n"
         "        _spans = None\n"
@@ -2337,6 +2445,8 @@ def build_code_wrapper(concept: dict, groups: list[dict], limit: int | None, row
         "        _row = {'ref': _ref, 'label': str(_lab), 'confidence': float(_conf)}\n"
         "        if isinstance(_spans, (list, tuple)):\n"
         "            _row['spans'] = [str(_x) for _x in _spans if isinstance(_x, str)][:16]\n"
+        "        if _line:\n"
+        "            _row['line'] = _line\n"
         "    except Exception as _e:\n"
         "        _row = {'ref': _ref, 'error': f'{type(_e).__name__}: {_e}'}\n"
         "        _stats['errors'] += 1\n"
@@ -2356,7 +2466,7 @@ def build_code_wrapper(concept: dict, groups: list[dict], limit: int | None, row
         "        for _u in _read_units(_units_file):\n"
         "            if _limit and _n >= _limit:\n"
         "                break\n"
-        "            _emit(_u['ref'], _u['unit'])\n"
+        "            _emit(_u['ref'], _u['unit'], _line=_u.get('line'))\n"
         "            _n += 1\n"
         "    for _g in _groups:\n"
         "        if _limit and _n >= _limit:\n"
@@ -2415,7 +2525,7 @@ def _parse_code_rows(lines: Iterator[str] | list[str]) -> tuple[list[dict], int,
             message = message or str(obj["error"])[:300]
             continue
         rows.append(_row(str(obj["ref"]), str(obj.get("label")), _coerce_confidence(obj.get("confidence")), "code", None,
-                         labels_store.spans_field(obj.get("spans"))))
+                         labels_store.spans_field(obj.get("spans")), obj.get("line")))
     return rows, errors, message
 
 
@@ -2503,32 +2613,89 @@ def _collect_code_rows(outputs: list[dict], rows_file: Path | None, out: Path, p
 
 async def _apply_code(c: str, concept: dict, sources: list[dict], units: list[Unit] | None, limit: int | None, out: Path) -> tuple[int, int, str | None]:
     """The code kind in the labels kernel (notebook.execute_on, no cell stored): the wrapper writes its rows to a temp
-    file under labels/, read and removed here. With `units` None the wrapper reads the file units from the matched
-    files; given units (cards, sentences, or a trial's sampled records) go to it in a file of their own."""
+    file under labels/, read and removed here. With `units` None the wrapper reads the file units of the matched files of
+    lines itself, and the units of the other files (records.py) go to it in a file of their own, as given units (cards,
+    sentences, or a trial's sampled records) do."""
     from . import notebook
 
     stamp = secrets.token_hex(4)
     rows_file = out.with_name(f".{concept['id']}.{stamp}.rows.tmp")
     units_file: Path | None = None
+    parts_file: Path | None = None
     groups: list[dict] = []
+    rest: list[dict] = []
     if units is None:
-        groups = groups_for(sources, concept["unit"])
-    else:
+        corpus_dir = config.corpus_dir(c)
+        if concept["unit"] == "record":
+            # the wrapper reads files of lines itself; the records of the others go to it in the units file
+            lined = await asyncio.to_thread(lambda: [line_source(corpus_dir, s) for s in sources])
+            rest = [s for s, ok in zip(sources, lined) if not ok]
+            groups = groups_for([s for s, ok in zip(sources, lined) if ok], "record")
+        else:
+            # the wrapper reads the files of each unit, and the rows or pages of its databases and PDFs from a file
+            groups = groups_for(sources, concept["unit"])
+            others = await asyncio.to_thread(lambda: [s for s in sources if not text_source(corpus_dir, s)])
+            if others:
+                parts_file = out.with_name(f".{concept['id']}.{stamp}.parts.tmp")
+                await asyncio.to_thread(_write_parts, parts_file, corpus_dir, others)
+    if units is not None or rest:
         units_file = out.with_name(f".{concept['id']}.{stamp}.units.tmp")
-        units_file.write_text("".join(json.dumps({"ref": u.ref, "unit": u.record}, ensure_ascii=False, default=str) + "\n"
-                                      for u in units), "utf-8")
-    # a run over the records of whole files writes no row for a record that takes the negative (labels_store, covers)
+        given = units if units is not None else iter_units(config.corpus_dir(c), rest, "record")
+        await asyncio.to_thread(_write_units, units_file, given)
+    # a run over the records of whole files of lines writes no row for a record that takes the negative (labels_store,
+    # covers)
     quiet = implicit_value(concept["labels"]) if units is None and concept["unit"] == "record" and not limit else None
-    code = build_code_wrapper(concept, groups, limit, rows_file, units_file, quiet=quiet, ts=_now())
+    code = build_code_wrapper(concept, groups, limit, rows_file, units_file, quiet=quiet, ts=_now(), parts_file=parts_file)
     try:
         outputs, _n, _status = await notebook.execute_on(c, CODE_KERNEL, code)
         labeled, errors, message, matches = await asyncio.to_thread(_collect_code_rows, outputs, rows_file, out, concept["labels"][0])
     finally:
         rows_file.unlink(missing_ok=True)
-        if units_file is not None:
-            units_file.unlink(missing_ok=True)
+        for f in (units_file, parts_file):
+            if f is not None:
+                f.unlink(missing_ok=True)
     _progress(c, concept["id"], matches=matches)
     return labeled, errors, message
+
+
+def _clear_files(out: Path, paths: list[str]) -> None:
+    """Append a clear line for every line of each file to the labels file and its store (labels_store.clear_row).
+    Blocking."""
+    if not paths:
+        return
+    rows = [labels_store.clear_row(p, 1) for p in paths]
+    with _store_lock(out):
+        st = labels_store.Store(out)
+        fresh = st.fresh()  # a store behind its file takes these lines when it next reads the file's tail
+        labels_store.mend_tail(out)
+        append_jsonl_many(out, rows)
+        try:
+            if fresh:
+                st.add(rows, _file_key(out))
+        except sqlite3.Error:
+            log.exception("labels store %s: a write failed; the store is rebuilt from the labels file on the next read", out.name)
+
+
+def _write_parts(parts_file: Path, corpus_dir: Path, sources: list[dict]) -> None:
+    """The file the code kind's wrapper reads the records of databases, PDFs and other binary files from, for the units
+    of whole files and runs: one JSON line per file, {path, records}, none for a binary file no reader reads. Blocking."""
+    with open(parts_file, "w", encoding="utf-8") as f:
+        for s in sources:
+            try:
+                recs = [r["record"] for r in _iter_records(corpus_dir, s)]
+            except (OSError, ValueError, sqlite3.Error):
+                recs = []
+            f.write(json.dumps({"path": s["path"], "records": recs}, ensure_ascii=False, default=str) + "\n")
+
+
+def _write_units(units_file: Path, units: Iterable[Unit]) -> None:
+    """The units file the code kind's wrapper reads: one JSON line per unit, {ref, unit, line?}. Blocking."""
+    with open(units_file, "w", encoding="utf-8") as f:
+        for u in units:
+            item: dict[str, Any] = {"ref": u.ref, "unit": u.record}
+            if u.line:
+                item["line"] = u.line
+            f.write(json.dumps(item, ensure_ascii=False, default=str) + "\n")
 
 
 # --------------------------------------------------------------------------- apply
@@ -2645,8 +2812,7 @@ async def run_apply(c: str, concept_id: str, paths: list[str] | None = None, lim
                 elif scope_groups is not None:
                     total, matched = matched, scope_groups
                 elif limit:
-                    lines = {p: int(i.get("lines") or 0) for p, i in index["files"].items()}
-                    units = await asyncio.to_thread(trial_sample, corpus_dir, sources, limit, lines)
+                    units = await asyncio.to_thread(trial_sample, corpus_dir, sources, limit, index["counts"])
                     total = len(units)
                 else:
                     total = matched
@@ -2660,6 +2826,11 @@ async def run_apply(c: str, concept_id: str, paths: list[str] | None = None, lim
             # what the kinds below run over: the sampled records of a trial or the records `within` names, else the
             # whole scope
             sampled = unit == "record" and (bool(limit) or bool(within))
+            if unit == "record" and not sampled:
+                # a file read by another reader than lines gets rows of its own refs: what an earlier run left on its
+                # lines goes first, so no cover of those lines counts records the file no longer has
+                await asyncio.to_thread(_clear_files, out, [s["path"] for s in sources if s["path"] not in index["files"]
+                                                            and not s.get("under") and index["counts"].get(s["path"])])
             if examples and concept["kind"] == "prompt":
                 few = await asyncio.to_thread(few_shot_examples, ws, concept, corpus_dir)
                 concept = {**concept, "examples": few}
@@ -2668,7 +2839,17 @@ async def run_apply(c: str, concept_id: str, paths: list[str] | None = None, lim
                 # a regex reads a save as what it changed, as a model does, so files that hold saves go record by record
                 saves = unit == "record" and await asyncio.to_thread(holds_saves, corpus_dir, sources)
                 if unit in FILE_UNITS and not sampled and not saves:
-                    labeled, failed, message = await _apply_regex(c, concept, corpus_dir, sources, index, None, out, cancel)
+                    # the files the scan pool reads line by line, then the records of the others one by one
+                    scanned, rest = _split_scan(sources, unit, index)
+                    labeled = failed = 0
+                    message = None
+                    if scanned:
+                        labeled, failed, message = await _apply_regex(c, concept, corpus_dir, scanned, index, None, out, cancel)
+                    if rest and not cancel.is_set():
+                        more = await _apply_regex_units(c, concept, iter_units(corpus_dir, rest, unit), out, cancel,
+                                                        base=(labeled, failed, int((_runs.get((c, concept_id)) or {}).get("matches") or 0)))
+                        labeled, failed = labeled + more[0], failed + more[1]
+                        message = "; ".join(m for m in (message, more[2]) if m) or None
                 else:
                     if saves:
                         units = (await asyncio.to_thread(picked_as_changes, corpus_dir, units, False) if sampled
@@ -2798,14 +2979,7 @@ def _already_running(live: dict) -> HTTPException:
 
 
 def no_files_match(corpus_dir: Path, patterns: list[str]) -> str:
-    """The refusal of an apply whose paths match no file a label reads, naming the databases they matched, since a
-    label reads text records and a database is queried in a card."""
-    pats = [str(p).strip().strip("/") for p in patterns if str(p).strip()]
-    dbs = [src["path"] for src in corpus.list_sources(corpus_dir) if src["kind"] == "forge"
-           and any(src["path"] == p or fnmatch.fnmatchcase(src["path"], p) or src["path"].startswith(p + "/") for p in pats)]
-    if dbs:
-        return (f"no files match {patterns} but the database {', '.join(dbs[:3])}; a label reads text records, so query "
-                "a database in a card")
+    """The refusal of an apply whose paths match no file."""
     return f"no files match {patterns}"
 
 
@@ -2928,7 +3102,7 @@ def record_verdict(ws: Path, concept: dict, ref: str, label: str, note: str | No
     label = " ".join(str(label or "").split())
     if not ref or not label:
         raise HTTPException(400, "ref and label are required")
-    row = _row(ref, label, 1.0, "analyst", (note or "").strip() or None)
+    row = _row(ref, label, 1.0, "analyst", (note or "").strip() or None, line=_record_line(ws.name, ref))
     out = labels_file(ws, concept["id"])
     out.parent.mkdir(parents=True, exist_ok=True)
     stored = concept.get("label_stats")
@@ -2955,6 +3129,20 @@ def record_verdict(ws: Path, concept: dict, ref: str, label: str, note: str | No
 
 def _file_key(p: Path) -> tuple[int, int] | None:
     return labels_store.file_key(p)
+
+
+def _record_line(c: str, ref: str) -> int | None:
+    """The line a CSV row or a JSON document's record starts on, for a verdict's row (labels_store.row_line); None for
+    any other ref or one that does not resolve."""
+    try:
+        p = refs.parse_ref(ref)
+        if p["kind"] not in ("csvrow", "pointer"):
+            return None
+        rel = p["path"]
+        rec = records.read(config.safe_corpus_path(config.corpus_dir(c), rel), rel, refs.format_ref(p).partition("#")[2])
+    except (ValueError, OSError):
+        return None
+    return rec.get("line") if rec else None
 
 
 # --------------------------------------------------------------------------- filters
@@ -3474,8 +3662,8 @@ async def apply_scoped(c: str, *, scope: str, name: str, kind: str, text: str, v
     sources = (await asyncio.to_thread(scope_sources, c, unit, kind, _patterns(paths), limit, bool(narrowed))
                if unit in FILE_UNITS else None)
     if narrowed and kind == "prompt" and not limit:
-        lines = await asyncio.to_thread(within_lines, ws, sources or [], narrowed, PROMPT_APPLY_MAX + 1)
-        if (n := sum(len(v) for v in lines.values())) > PROMPT_APPLY_MAX:
+        found = await asyncio.to_thread(within_refs, ws, sources or [], narrowed, PROMPT_APPLY_MAX + 1)
+        if (n := sum(len(v) for v in found.values())) > PROMPT_APPLY_MAX:
             raise HTTPException(400, within_too_wide(ws, narrowed, n))
     concept = define_concept(c, name, text if kind == "prompt" else "", kind, "" if kind == "prompt" else text, unit, values, author,
                              glob=", ".join(_patterns(paths)) if unit in FILE_UNITS else "", trial=limit is not None)
@@ -3978,6 +4166,37 @@ def all_labels_route(c: str, path: str, lines: str | None = None) -> list[dict]:
     return out
 
 
+REFS_ASKED_MAX = 2_000  # record refs one labels-by-ref request may ask for
+
+
+class RefsBody(BaseModel):
+    refs: list[str] = Field(default_factory=list)
+
+
+def rows_for_refs(ws: Path, concept_id: str, wanted: list[str]) -> list[dict]:
+    """The merged rows of these record refs (labels_store.Store.rows_for_refs); [] while the store is rebuilt."""
+    st, _building = _store(ws, concept_id)
+    return st.rows_for_refs(wanted) if st is not None else []
+
+
+@router.post("/ws/{c}/labels/refs")
+async def labels_for_refs_route(c: str, body: RefsBody) -> list[dict]:
+    """Every label's rows on these records, as GET /labels answers for a file's lines: the records a view's page shows
+    that are not lines of a file (a database row, a PDF page, a JSON value, a CSV row, a view reader's own record), whose
+    marks the page draws. A ref is read as records.canon keys it."""
+    wanted = list(dict.fromkeys(records.canon(r) for r in body.refs[:REFS_ASKED_MAX] if isinstance(r, str) and r.strip()))
+    ws = _ws(c)
+    out = []
+    for concept in list_concepts(ws):
+        if concept["unit"] not in FILE_UNITS or not wanted:
+            continue
+        rows = await asyncio.to_thread(rows_for_refs, ws, concept["id"], wanted)
+        if rows:
+            out.append({"concept_id": concept["id"], "name": concept["name"], "labels": concept["labels"], "unit": concept["unit"],
+                        "created_by": concept.get("created_by"), "rows": rows})
+    return out
+
+
 PRESENCE_CACHE: dict[Path, tuple[tuple[int, int] | None, dict]] = {}  # labels file -> (its key, the store's presence)
 RULER_BINS = 400      # the overview ruler's resolution by default
 GLOB_LISTED = 200     # files the glob route lists
@@ -4067,7 +4286,15 @@ def sample_records(c: str, paths: list[str]) -> dict[str, str]:
     first = found[0]["path"]
     p = config.safe_corpus_path(corpus_dir, first)
     lines: list[str] = []
-    if not corpus.sniff_binary(p):
+    if found[0].get("under") or records.reader_of(p, first) not in ("lines", None):
+        # a file read by records of its own: the first records' texts, each on one line
+        for r in itertools.islice(_iter_records(corpus_dir, found[0]), SAMPLE_RECORDS * 4):
+            text = " ".join(r["text"].split())
+            if text:
+                lines.append(text[:SAMPLE_CUT])
+            if len(lines) >= SAMPLE_RECORDS:
+                break
+    elif not corpus.sniff_binary(p):
         with open(p, "rb") as f:
             for raw in f:
                 text = corpus.decode_line(raw.rstrip(b"\r\n")).strip()

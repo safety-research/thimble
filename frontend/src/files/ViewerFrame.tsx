@@ -30,14 +30,15 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, typ
 import { api } from '../lib/api'
 import { bus } from '../lib/bus'
 import { viewFonts, viewStyle, withFrameStyle } from '../lib/frame'
+import { recordOf } from '../lib/refs'
 import { notePress } from '../lib/surfaces'
 import { teleport } from '../lib/teleport'
 import { useTheme } from '../lib/theme'
 import { token } from '../lib/vizTheme'
 import { cmdCursors } from '../pointer/cursor'
 import type { Concept, LabelRow, ViewOpen, ViewQuery } from '../lib/types'
-import { PALETTE, pageLabelList, pageLabels, pagePalette, recordRef, viewMarks, withKeeps, type Keep, type LabelFilter, type PageLabelItem, type ViewMark } from './labels'
-import { wantLabels, watchPathLabels } from './marks'
+import { PALETTE, pageLabelList, pageLabels, pagePalette, viewMarks, withKeeps, type Keep, type LabelFilter, type PageLabelItem, type ViewMark } from './labels'
+import { wantLabels, wantRecordLabels, watchPathLabels } from './marks'
 
 const P = 'thimble:'
 const FIT_MIN = 80
@@ -241,7 +242,7 @@ function useViewLabels(
           }
           continue
         }
-        if (refs.current.has(ref) || !recordRef(ref)) continue
+        if (refs.current.has(ref) || !recordOf(ref)) continue
         refs.current.add(ref)
         fresh = true
       }
@@ -284,7 +285,7 @@ function useViewLabels(
       for (const ref of refs.current) {
         if (asked.current.has(ref)) continue
         asked.current.add(ref)
-        const at = recordRef(ref)!
+        const at = recordOf(ref)!
         if (!watching.current.has(at.path))
           watching.current.set(
             at.path,
@@ -293,10 +294,11 @@ function useViewLabels(
               setTick((t) => t + 1)
             }),
           )
-        wantLabels(ws, at.path, at.line)
+        if (at.line != null) wantLabels(ws, at.path, at.line)
+        else wantRecordLabels(ws, at.path, ref)
       }
     }
-    const rowsOf = { get: (ref: string) => rows.current.get(recordRef(ref)?.path ?? '')?.get(ref) }
+    const rowsOf = { get: (ref: string) => rows.current.get(recordOf(ref)?.path ?? '')?.get(ref) }
     const marks = { ...withKeeps(viewMarks(on, rowsOf, refs.current), filter, rowsOf, refs.current, filterFiles), ...(labelled ? unitMarks.current : {}) }
     const state = pageLabels(on, filter, filterLabel ? new Map([[filterLabel.id, filterLabel]]) : byId, (name) => token(name) || `var(${name})`)
     const text = JSON.stringify([marks, state, all, palette])

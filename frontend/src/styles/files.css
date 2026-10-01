@@ -2298,6 +2298,9 @@
 .reader-grid tbody tr.reader-row-selected td {
   background: var(--surface-selected);
 }
+.reader-grid tbody tr.reader-row-marked > td:first-child {
+  box-shadow: inset 3px 0 0 var(--mark);
+}
 .reader-kv {
   width: 100%;
   border-collapse: collapse;
