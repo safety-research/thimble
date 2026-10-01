@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import fnmatch
+import functools
 import io
 import json
 import logging
@@ -22,7 +23,7 @@ from pathlib import Path
 
 import pytest
 
-from app import config, dev, headless, tools, userconf, views
+from app import config, dev, extension_manifest, headless, tools, userconf, views
 
 CORPUS = "boards"
 POSTS = [  # (thread, author, time, body); line n of board.jsonl is POSTS[n-1]
@@ -805,6 +806,18 @@ BROKEN = {
 }
 
 
+def test_every_worked_example_s_view_json_is_in_the_schema_s_form():
+    """The examples teach view.json as the dev agent's prompt does: they follow the extension schema and use none of the
+    older names thimble still reads."""
+    for name in EXAMPLES:
+        text = (_example_dir(name) / "view.json").read_text("utf-8")
+        raw = json.loads(text)
+        assert not extension_manifest._validate(raw, text, f"{name}/view.json", "view"), name
+        old = {k for k, v in extension_manifest.schema()["$defs"]["view"]["properties"].items() if v.get("deprecated")}
+        assert not old & set(raw), (name, old & set(raw))
+        assert raw.get("scope") and raw.get("records"), name
+
+
 def test_the_worked_examples_are_never_views_of_a_workspace(samples):
     """A corpus that holds an example's own sample gets none of the examples as views: none is listed, none opens a
     citation of its files, and none adds a citation form to main's table."""
@@ -848,6 +861,43 @@ async def test_every_worked_example_answers_the_checks_over_its_sample(name, sam
     problems = await views.reader_problems(name, slug)
     assert problems["count"] == before + sum(n for *_, n in BROKEN[name]), problems
     assert not rep["coverage"]["not_shown"]["count"] and rep["coverage"]["derived"], "every file is read, and what the reader made is listed"
+
+
+async def _every_answer(name: str, slug: str) -> list:
+    """What the example's page fetches, over every place: each Timeline event in full, each session's transcript and
+    the runs and sessions compared, each Repository tab and unit."""
+    call = functools.partial(views.reader_call, name, slug, "records")
+    if name == "timeline":
+        rows = (await call({"op": "overview"}))["cols"]["r"]
+        return [{"ref": got["ref"], **got["record"]} for got in [await call({"op": "record", "r": r}) for r in rows]]
+    if name == "linked-sessions":
+        ov = await call({"op": "overview"})
+        out = [await call({"op": "session", "id": s["id"]}) for s in ov["sessions"]]
+        for s in ov["sessions"]:
+            out += [await call({"op": "moment", "run": s["run"], "t": c["time"], "session": s["id"]})
+                    for c in ov["calls"] if c["session"] == s["id"]][:3]
+        return [*out, ov, await call({"op": "compare", "ids": [r["id"] for r in ov["runs"]]}),
+                await call({"op": "compare", "ids": [s["id"] for s in ov["sessions"]][:6]})]
+    out = []
+    for tab in ("pulls", "issues", "discussions", "agents"):
+        got = await call({"op": "view", "tab": tab, "runs": ["r1", "r2", "r3", "r4"], "compare": True})
+        out += [got, *[await call({"op": "unit", "key": it["key"]}) for it in got["items"]]]
+    return out
+
+
+@pytest.mark.parametrize("name", sorted(EXAMPLES))
+async def test_every_record_a_worked_example_serves_lists_the_fields_its_lines_do_not_hold(name, samples, inproc, bound,
+                                                                                         monkeypatch):
+    """The derived check over every record the example's reader answers, not only the checks' sample: each field whose
+    values the cited lines do not hold is in view.json's records."""
+    monkeypatch.setattr(views, "DERIVED_SAMPLE", 100_000)
+    slug = _save_example(name)
+    declared = {k for d in views.read_view(name, slug)["derived"] for k in (d["field"], d.get("key")) if k}
+    answers = await _every_answer(name, slug)
+    seen: dict = {}
+    views._answer_records(answers, seen)
+    assert len(seen) > 100, "the answers hold the example's records"
+    assert not views.unlisted_derived(name, [{"answers": answers}], declared)
 
 
 @pytest.mark.parametrize("name", sorted(EXAMPLES))
