@@ -159,7 +159,7 @@ export function useLabelSide(p: LabelSideProps): { pane: ReactNode; card: ReactN
  * shows the sidebar. A view may draw label controls of its own, but this one is always there. */
 export function LabelsLead({ on, onShow }: { on: number; onShow: () => void }) {
   return (
-    <Button variant="ghost" size="sm" icon="label" className="view-pane-side-show" aria-label="Show labels" onClick={onShow}>
+    <Button variant="ghost" size="sm" icon="label" className="view-pane-side-show" title="Show labels" onClick={onShow}>
       {on ? `${on.toLocaleString()} ${on === 1 ? 'label' : 'labels'} on` : 'Labels'}
     </Button>
   )
