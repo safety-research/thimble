@@ -9,10 +9,12 @@
 //     the popover lies inside the window, covers no cutout wherever the window has room for it beside the first, and its
 //     caret points at the first cutout;
 //   - step 1's example sits 8 px or more inside its cutout, which lies inside the chat panel; the orientation's Start
-//     only shows the started state; the labels' transcript and the report scroll under the wheel; a real ⌘-drag on the
-//     example card picks only the words dragged over and its ask box lies inside the cutout; the report shows no check
-//     comment until the check is made, and then each comment card stands 8 px above its passage, or below the card
-//     above it, before and after the report scrolls;
+//     only shows the started state; the labels' transcript and the report scroll under the wheel; inside the example
+//     view the wheel and a click work and reach nothing else; the card demo shows a value's source and the card is in
+//     plain words; in the ⌘-click demo the key badge stands inside the card and over none of its text; a real ⌘-drag on
+//     the example card picks only the words dragged over and its ask box lies inside the cutout; the report's first
+//     figure is the small table and it shows no check comment until the demo makes the check, and then each comment
+//     card stands 8 px above its passage, or below the card above it, before and after the report scrolls;
 //   - the page is frozen: clicks, keys and the wheel reach nothing, the tour writes nothing but the offer, and telemetry
 //     records nothing while it runs.
 import assert from 'node:assert/strict'
@@ -380,11 +382,40 @@ async function walk(page: Page, tag: string, folds?: boolean) {
   assert.equal(await page.evaluate(() => document.querySelector('.tour-ex-viewsbar .seg-opt.active')?.textContent?.trim()), 'Timeline', `${tag} 6: the Timeline example is on`)
   await page.waitForFunction(() => {
     const f = document.querySelector<HTMLIFrameElement>('.tour-ex-viewbody iframe')
-    return !!f?.contentDocument?.querySelector('.view-pane-frame')
+    return !!f?.contentDocument?.querySelector<HTMLIFrameElement>('.view-pane-frame')?.contentDocument?.getElementById('list')
   })
+  // inside the example view the wheel scrolls its list and a click reaches its page; the app sees none of it
+  const view = page.frames().find((f) => f.url().endsWith('/tour/timeline/page.html'))!
+  const listTop = () => view.evaluate(() => document.getElementById('list')!.scrollTop)
+  const top0 = await listTop()
+  await view.evaluate(() => {
+    ;(window as any).__clicks = 0
+    document.addEventListener('click', () => (window as any).__clicks++, true)
+  })
+  const vb = await page.evaluate(() => {
+    const b = document.querySelector('.tour-ex-viewbody iframe')!.getBoundingClientRect()
+    return { x: b.x + b.width * 0.6, y: b.y + b.height * 0.75 }
+  })
+  await probe(page)
+  await page.mouse.move(vb.x, vb.y)
+  await page.mouse.wheel(0, 500)
+  await sleep(700)
+  await page.mouse.click(vb.x, vb.y)
+  await sleep(400)
+  const top1 = await listTop()
+  assert.ok(top1 > top0 + 50, `${tag} 6: the wheel scrolls the example view's list (${top0} to ${top1})`)
+  assert.equal(await view.evaluate(() => (window as any).__clicks), 1, `${tag} 6: a click reaches the example view`)
+  assert.deepEqual(await probe(page), [], `${tag} 6: nothing reached the app`)
+  assert.equal((await state(page))!.title, 'Views', `${tag} 6: still on Views`)
   await next(page)
-  // 7 Cards: a real hover on a value shows its source
+  // 7 Cards: the demo shows the source of 08:04; the card is in plain words; a real hover on a value shows its source
   await onStep(page, 7, 'Cards on the Canvas')
+  await page.waitForFunction(() => document.querySelector('.tour-fx .refchip-pop[data-demo] .hl')?.textContent === '08:04', null, { timeout: 8000 })
+  const words = await page.evaluate(() => {
+    const c = (window as any).__tour().api.els.card as Element
+    return { text: [...c.querySelectorAll('.canvas-tl-label, .bcell-take-text')].map((e) => e.textContent ?? ''), check: !!c.querySelector('.bcell-check') }
+  })
+  assert.ok(words.text.length > 5 && !words.text.some((t) => t.includes(';')) && !words.check, `${tag} 7: the example card in plain words, without semicolons or a check mark ${JSON.stringify(words)}`)
   await page.evaluate(() => (window as any).__tour().api.stopDemo())
   await sleep(300)
   await measure(page, `${tag} 7`)
@@ -400,9 +431,48 @@ async function walk(page: Page, tag: string, folds?: boolean) {
   await page.mouse.move(g.viewport.w - 30, g.viewport.h - 30, { steps: 4 })
   await sleep(500)
   await next(page)
-  // 8 ⌘-click: no Next until the analyst asked; a real ⌘-drag over two words picks only those words
+  // 8 ⌘-click: the demo's ⌘-drag, with its key badge inside the card and never over its text; no Next until the analyst
+  // asked; a real ⌘-drag over two words picks only those words
   await onStep(page, 8, '⌘-click to ask')
-  await page.evaluate(() => (window as any).__tour().api.stopDemo())
+  const seen: { badge: { over: string; inCard: boolean; key: string } | null; sel: number; hl: number | null; cardW: number; asked: number; after: boolean }[] = []
+  for (let k = 0; k < 120; k++) {
+    const f = await page.evaluate(() => {
+      const card = (window as any).__tour().api.els.card as Element
+      const C = card.getBoundingClientRect()
+      const key = document.querySelector('.tour-key')
+      let badge = null
+      if (key) {
+        const b = key.getBoundingClientRect()
+        let over = ''
+        const w = document.createTreeWalker(card, NodeFilter.SHOW_TEXT)
+        for (let n = w.nextNode(); n && !over; n = w.nextNode()) {
+          if (!n.textContent?.trim()) continue
+          const q = document.createRange()
+          q.selectNodeContents(n)
+          for (const r of q.getClientRects()) if (r.right > b.left && r.left < b.right && r.bottom > b.top && r.top < b.bottom) over = n.textContent.slice(0, 40)
+        }
+        badge = { over, inCard: b.left >= C.left && b.right <= C.right && b.top >= C.top && b.bottom <= C.bottom, key: key.querySelector('b')?.textContent ?? '' }
+      }
+      const hl = document.querySelector('.tour-fx .pointer-hl.tour-mock')
+      return {
+        badge,
+        sel: getSelection()?.toString().length ?? 0,
+        hl: hl ? hl.getBoundingClientRect().width : null,
+        cardW: C.width,
+        asked: document.querySelector<HTMLTextAreaElement>('.tour-fx .pointer-box.tour-mock textarea')?.value.length ?? 0,
+        after: !!document.querySelector('.tour-after'),
+      }
+    })
+    seen.push(f)
+    if (f.after) break
+    await sleep(150)
+  }
+  const badges = seen.map((f) => f.badge).filter((b): b is NonNullable<typeof b> => !!b)
+  assert.ok(badges.length > 0 && badges.every((b) => b.key === '⌘' && b.inCard && !b.over), `${tag} 8: the ⌘ badge stands inside the card, over none of its text ${JSON.stringify(badges.filter((b) => b.over || !b.inCard).slice(0, 2))}`)
+  assert.ok(seen.some((f) => f.sel > 3), `${tag} 8: the demo selects words`)
+  assert.ok(seen.some((f) => f.hl != null && f.hl > 10 && f.hl < f.cardW * 0.6), `${tag} 8: the demo picks a few words, not the card`)
+  assert.ok(seen.some((f) => f.asked > 20), `${tag} 8: the demo types a question in the ask box`)
+  assert.ok(seen[seen.length - 1].after, `${tag} 8: the demo ends`)
   await sleep(300)
   await measure(page, `${tag} 8`)
   assert.deepEqual(await buttons(page), ['back'], `${tag} 8: no Next before the try`)
@@ -462,16 +532,28 @@ async function walk(page: Page, tag: string, folds?: boolean) {
     }
   })
   assert.equal(r9.shown, 0, `${tag} 9: no check comment before the check is made`)
+  const fig = await page.evaluate(() => {
+    const root = document.querySelector('.tour-ex-report')!
+    const first = root.querySelector('figure.wu-fig')
+    return {
+      q: first?.querySelector('.wu-fig-q')?.textContent?.trim(),
+      rows: first?.querySelectorAll('tbody tr').length ?? 0,
+      check: [...root.querySelectorAll<HTMLElement>('.wu-check')].filter((e) => /Alternative explanations/.test(e.textContent ?? '') && getComputedStyle(e).display !== 'none').length,
+    }
+  })
+  assert.deepEqual(fig, { q: 'How close did the database come to its limit of 200 connections?', rows: 4, check: 0 }, `${tag} 9: the first figure is the small table, and the check is not made yet`)
   assert.ok(r9.k <= 1 && r9.top === 0, `${tag} 9: the report at its own size or smaller, at its top`)
   await next(page)
-  // 10 Checks: the comments, each level with its passage, before and after a scroll
+  // 10 Checks: the demo makes the check; its comments appear and stay, each level with its passage, before and after a
+  // scroll
   await onStep(page, 10, 'Checks')
-  await page.evaluate(() => {
-    const t = (window as any).__tour()
-    t.api.stopDemo()
-    t.api.els.showChecks()
-  })
+  await page.waitForFunction(() => (window as any).__tour().state().demo === 'done', null, { timeout: 25000 })
   await sleep(700)
+  assert.equal(
+    await page.evaluate(() => [...document.querySelectorAll<HTMLElement>('.tour-ex-report .wu-check')].filter((e) => /Alternative explanations/.test(e.textContent ?? '') && getComputedStyle(e).display !== 'none').length),
+    1,
+    `${tag} 10: the check is in the Checks pane`,
+  )
   await measure(page, `${tag} 10`)
   const before = await commentsLevel(page)
   assert.ok(before.length >= 2 && before.every((c) => c.ok), `${tag} 10: each comment card level with its passage ${JSON.stringify(before)}`)
@@ -529,6 +611,21 @@ test('the first launch asks first, records the offer in thimble’s own state, a
     assert.equal(await page.$('.tour-root'), null, 'a page loaded after the offer offers nothing')
     assert.deepEqual(server.writes.filter((x) => !ALLOWED.has(x)), [], 'nothing else was written')
     assert.deepEqual(tourClicks(server), [], 'no click in the tour reaches telemetry')
+  } finally {
+    await close()
+  }
+}, 60_000)
+
+test('Esc on the welcome closes it, and the offer stays recorded', async () => {
+  const { page, server, close } = await open({ W: 1440, H: 900 })
+  try {
+    await page.waitForSelector('.tour-pop.tour-welcome', { timeout: 20000 })
+    await probe(page)
+    await page.keyboard.press('Escape')
+    await sleep(300)
+    assert.equal(await page.$('.tour-root'), null, 'Esc closes the welcome')
+    assert.deepEqual(await probe(page), [], 'the Esc reached nothing of the page')
+    assert.ok(server.seen, 'the offer is recorded')
   } finally {
     await close()
   }
