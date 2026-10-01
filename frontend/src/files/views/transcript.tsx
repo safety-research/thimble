@@ -414,16 +414,19 @@ function Conversations({ path, page, targetRef, transcript }: ViewProps) {
     <div className="reader-transcript reader-convs" ref={rootRef}>
       {records.map((rec) => {
         const r = rec.record ?? {}
-        const turns = conversationTurns(r, transcript)
+        // a turn with no words gets no row
+        const turns = conversationTurns(r, transcript)?.filter((t) => t.text.trim())
         const ctx = CONTEXT_KEYS.map((key) => r[key]).find((v) => present(v) && typeof v !== 'object')
-        const first = turns?.find((t) => t.text.trim())?.text ?? ''
+        const first = turns?.[0]?.text ?? ''
         return (
           <RecordCard key={rec.line} path={path} line={rec.line} target={target} hit={hit} className="reader-msg reader-conv" header={ctx != null ? String(ctx) : undefined} text={first.slice(0, 500) || undefined}>
-            {turns ? (
+            {turns && !turns.length ? (
+              <div className="reader-msg-empty">(empty)</div>
+            ) : turns ? (
               turns.map((t, k) => (
                 <div key={k} className="reader-conv-turn">
                   <div className="reader-conv-speaker mono">{[t.speaker, t.time].filter(Boolean).join(' · ') || '(unsigned)'}</div>
-                  {t.text.trim() ? <BlockEl block={{ kind: 'text', text: t.text.slice(0, TURN_TEXT_MAX) }} line={rec.line} index={k} target={null} hit={false} /> : <div className="reader-msg-empty">(empty)</div>}
+                  <BlockEl block={{ kind: 'text', text: t.text.slice(0, TURN_TEXT_MAX) }} line={rec.line} index={k} target={null} hit={false} />
                   {t.text.length > TURN_TEXT_MAX && <div className="reader-msg-empty">Cut at {TURN_TEXT_MAX.toLocaleString()} of {t.text.length.toLocaleString()} characters. Raw shows all of it.</div>}
                 </div>
               ))
@@ -512,16 +515,19 @@ function TurnsTranscript({ workspace, path, targetRef }: ViewProps) {
     )
   const titled = data.n_groups > 1 || Object.values(data.groups).some((g) => g.title)
   const out: ReactNode[] = []
-  turns.forEach((t, k) => {
-    if (!t.text.trim() && holder?.i !== t.i) return
+  // a turn with no words gets no card, unless a citation points at it; the card before it shows its lines' labels
+  const shown = turns.filter((t) => t.text.trim() || holder?.i === t.i)
+  const last = turns[turns.length - 1]
+  shown.forEach((t, k) => {
     const g = t.group != null ? data.groups[String(t.group)] : undefined
-    if (titled && g && (k === 0 || turns[k - 1].group !== t.group))
+    if (titled && g && (k === 0 || shown[k - 1].group !== t.group))
       out.push(
         <div key={`g${t.i}`} className="reader-session">
           <span>{g.title || `Conversation ${t.group! + 1}`}</span>
         </div>,
       )
-    out.push(<TurnCard key={t.i} path={path} turn={t} end={Math.max(t.line, (turns[k + 1]?.line ?? t.line) - 1)} target={holder?.i === t.i ? target : null} hit={hit} />)
+    const next = shown[k + 1]?.line ?? (last.i !== t.i ? last.line + 1 : t.line)
+    out.push(<TurnCard key={t.i} path={path} turn={t} end={Math.max(t.line, next - 1)} target={holder?.i === t.i ? target : null} hit={hit} />)
   })
   return (
     <div className="reader-transcript reader-turns" ref={rootRef}>

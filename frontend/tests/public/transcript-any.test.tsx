@@ -329,6 +329,50 @@ describe('a whole-file JSON transcript', () => {
     expect(lit('3')).toBe(true)
     expect(lit('9')).toBe(false)
   })
+  test('a turn with no words gets no card: the card before shows its labels, and a conversation it opens keeps its title', async () => {
+    vi.spyOn(api, 'sourceTurns').mockResolvedValue({
+      path: 'e.json',
+      total: 4,
+      start: 0,
+      n_groups: 2,
+      groups: { '0': { title: '', first: 0 }, '1': { title: '', first: 2 } },
+      turns: [
+        { i: 0, line: 3, speaker: 'user', role: 'user', text: 'why does it fail?', group: 0 },
+        { i: 1, line: 6, speaker: 'assistant', role: 'assistant', text: '  ', group: 0 },
+        { i: 2, line: 9, speaker: 'system', role: 'system', text: '', group: 1 },
+        { i: 3, line: 11, speaker: 'user', role: 'user', text: 'and now?', group: 1 },
+      ],
+    })
+    const flagged = { id: 'k1', name: 'Asks why', unit: 'record', labels: ['yes', 'no'], classes: [] } as unknown as Concept
+    const ctx: ReaderLabels = {
+      path: 'e.json',
+      on: [flagged],
+      lanes: [flagged],
+      focus: 'k1',
+      rows: new Map([['e.json#L7', new Map([['k1', { ref: 'e.json#L7', label: 'yes', confidence: null, source: null }]])]]),
+      want: () => undefined,
+    }
+    const page: SourcePage = { path: 'e.json', kind: 'text', total_lines: 12, start: 1, records: [] }
+    const View = transcript.component
+    const el = await mount(
+      <ReaderLabelsContext.Provider value={ctx}>
+        <View workspace="w" path="e.json" kind="text" page={page} loadMore={() => undefined} transcript={{ format: 'json', score: 0.95 }} />
+      </ReaderLabelsContext.Provider>,
+    )
+    await settle()
+    expect([...el.querySelectorAll('.reader-card')].map((c) => c.getAttribute('data-line'))).toEqual(['3', '11'])
+    expect(!!el.querySelector('.reader-card[data-line="3"] > .reader-gutter .reader-gutter-cell.is-lit')).toBe(true)
+    expect([...el.querySelectorAll('.reader-session')].map((s) => s.textContent)).toEqual(['Conversation 1', 'Conversation 2'])
+  })
+  test('a turn with no words inside a conversation gets no row', async () => {
+    const records: SourceRecord[] = [{ line: 1, record: { messages: [{ role: 'system', content: '' }, { role: 'user', content: 'hello' }, { role: 'assistant', content: null }] }, blocks: [], meta: {} }]
+    const hint: TranscriptHint = { format: 'conversations', score: 0.95, keys: { list: 'messages', speaker: 'role', text: 'content' } }
+    const page: SourcePage = { path: 'sft.jsonl', kind: 'text', total_lines: 1, start: 1, records }
+    const View = transcript.component
+    const el = await mount(<View workspace="w" path="sft.jsonl" kind="text" page={page} loadMore={() => undefined} transcript={hint} />)
+    expect([...el.querySelectorAll('.reader-conv-speaker')].map((s) => s.textContent)).toEqual(['user'])
+    expect(el.textContent).not.toContain('(empty)')
+  })
 })
 
 describe('a PDF ref', () => {
