@@ -527,9 +527,9 @@ def environ() -> dict[str, str]:
 
 def settings_env(c: str, key: str, extra: dict[str, str] | None = None) -> dict[str, str]:
     """The --settings `env` of the session `key` of workspace `c` (config.session_env): the server's THIMBLE_* values,
-    `key` as THIMBLE_SESSION with a token that proves it (hook_auth.session_token), no THIMBLE_CHANNEL, since the session
-    hears no browser events, no ceiling on --print's background wait (BG_WAIT_ENV), a 4 h idle limit on a thimble call
-    (IDLE_TIMEOUT_ENV), and `extra` on top."""
+    `key` as THIMBLE_SESSION with a token that proves it (hook_auth.session_token), no THIMBLE_CHANNEL, since the
+    session hears no browser events, no ceiling on --print's background wait (BG_WAIT_ENV), a 4 h idle limit on a
+    thimble call (IDLE_TIMEOUT_ENV), and `extra` on top."""
     return config.session_env({SESSION_ENV: key, hook_auth.SESSION_TOKEN_ENV: hook_auth.session_token(c, key),
                                BG_WAIT_ENV: BG_WAIT_MS, IDLE_TIMEOUT_ENV: IDLE_TIMEOUT_MS, **(extra or {})})
 

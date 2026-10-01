@@ -1422,9 +1422,9 @@ class Sessions:
                models: dict[str, Any] | None = None, env: dict[str, str] | None = None) -> list[str]:
         """The session's flags: its `models` ({model, effort, fast}, where None leaves one to the analyst's Claude Code
         settings), else the dev role's, `--add-dir` folders, the `fence` settings, thimble's config for the dev agent and
-        how it asks (module note, permissions). Its environment goes in the settings' `env` (config.session_env, without
-        this server's THIMBLE_* values): the fence's, `env`, and its key as THIMBLE_SESSION with the token that proves it
-        (hook_auth.session_token). `asking` names the session's key, {key, allow, sandbox?, config?}, the
+        how it asks (module note, permissions). Its environment goes in the settings' `env` (config.session_env,
+        without this server's THIMBLE_* values): the fence's, `env`, and its key as THIMBLE_SESSION with the token that
+        proves it (hook_auth.session_token). `asking` names the session's key, {key, allow, sandbox?, config?}, the
         allow rules of its work in its own folder, for a session whose Bash runs in the sandbox, sandbox_allow's rule,
         and what the config asks of it (dev_config); with it and a workspace, the permission hook answers its requests by
         the dev agent's mode, and a process in Auto runs in auto mode. Without, it keeps UNHOSTED_TOOLS and gets no web
