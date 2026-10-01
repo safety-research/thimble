@@ -43,7 +43,7 @@ TRACEBACK_MAX = 3000
 
 _readers: dict[str, tuple[tuple[int, int], object]] = {}  # reader.py's path -> ((mtime_ns, size), module)
 _indexes: "OrderedDict[tuple[str, str], object]" = OrderedDict()  # (slug, fingerprint) -> index, least recent first
-_sizes: dict[tuple[str, str], int] = {}  # (slug, fingerprint) -> bytes of its pickle (0 when it has none)
+_sizes: dict[tuple[str, str], int] = {}  # (slug, fingerprint) -> the bytes it takes (module note)
 _read_counts: dict[tuple[str, str], dict[str, int]] = {}  # (slug, fingerprint) -> {claimed path: bytes build_index read}
 _unpickled: set[tuple[str, str]] = set()  # the indexes in memory that have no pickle, which a restart would build again
 _reader_of: dict[tuple[str, str], str] = {}  # (slug, fingerprint) -> the reader.py that built or loaded it
