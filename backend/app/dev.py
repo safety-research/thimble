@@ -54,7 +54,7 @@ thimble's config. Code tickets and view builds are the dev agent's sessions, wit
 (userconf.py, dev_config); agent_session's module note says what the config adds. Their Bash runs in the sandbox
 where it can run. A code ticket's sandbox also writes what a commit in its worktree writes into the checkout's git
 folder (ticket_fence), and reaches no server on loopback, so the session takes no shots of its own and the server's
-after shot shows its change. By default the dev agent has no web tools and its network is off.
+after shot shows its change. By default the dev agent has no web tools and its network is on.
 
 The offline fence. With the dev agent's network off, a view build's Bash runs in the sandbox with no network where the
 sandbox runs; where it does not, every command but its check goes to the analyst. Deny rules refuse the commands that
