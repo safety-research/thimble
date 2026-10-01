@@ -20,7 +20,8 @@ A request's `progress` is a file the call's progress is written to while it runs
 `index` while build_index runs, then `call`, with what the reader reports through thimble.progress.
 
 While build_index runs, `open` counts the bytes it takes of each claimed file (_Reads), so thimble knows which files
-the view read to the end. The counts are kept beside the index (`reads`)."""
+the view read to the end, all but the media files and PDFs a page shows whole (SHOWN_SUFFIXES). The counts are kept
+beside the index (`reads`)."""
 from __future__ import annotations
 
 import builtins
@@ -52,7 +53,20 @@ INDEXES_PER_VIEW = 2
 PROGRESS_EVERY_S = 0.2  # the least time between two writes of a call's progress
 LEFT_OUT_MAX = 200_000  # refs a records answer lists of those kept() refused; beyond that it gives only their count
 TRIM_GROWTH = 64 * 1024 * 1024  # bytes a call may grow the kernel's resident memory by before it is trimmed after
+# files a page shows whole by URL or by page rather than through its reader: images, audio, video (views.MEDIA_TYPES)
+# and PDFs. Their reads are not counted and the test label gives them no lines, so neither opens each of them.
+SHOWN_SUFFIXES = (".png", ".jpg", ".jpeg", ".gif", ".webp", ".avif", ".bmp", ".mp3", ".wav", ".m4a", ".aac", ".oga",
+                  ".ogg", ".opus", ".flac", ".weba", ".mp4", ".m4v", ".mov", ".webm", ".ogv", ".pdf")
 _libc: list = []  # [glibc's malloc_trim, or None where there is none], looked up once
+
+
+def shown_whole(path: str) -> bool:
+    """Whether a claimed file is one a page shows whole rather than parses (SHOWN_SUFFIXES)."""
+    return path.lower().endswith(SHOWN_SUFFIXES)
+
+
+def _parsed(paths: list[str]) -> list[str]:
+    return [p for p in paths if not shown_whole(p)]
 
 
 def _rss() -> int | None:
@@ -288,10 +302,15 @@ def _load_reads(path: str | None) -> dict[str, int] | None:
     return {str(k): int(v) for k, v in raw.items()} if isinstance(raw, dict) else None
 
 
-def _index(slug: str, mod: object, fp: str, paths: list[str], cache: str | None,
+class NeedPaths(Exception):
+    """The index must be built and the request did not name the claimed files."""
+
+
+def _index(slug: str, mod: object, fp: str, paths: list[str] | None, cache: str | None,
            reads: str | None = None, progress: "_Progress | None" = None) -> tuple[object, bool]:
     """(the index for this fingerprint, whether it was built now): from memory, else the pickle, else build_index. With
-    `reads`, the path the byte counts are kept at, a pickle without them is built again."""
+    `reads`, the path the byte counts are kept at, a pickle without them is built again. NeedPaths when it must be built
+    and `paths` is None."""
     key = (slug, fp)
     _reader_of[key] = getattr(mod, "__file__", None) or ""
     if key in _indexes:
@@ -308,9 +327,11 @@ def _index(slug: str, mod: object, fp: str, paths: list[str], cache: str | None,
         except Exception:  # noqa: BLE001 — a broken cache is rebuilt
             idx = None
     if idx is None:
+        if paths is None:
+            raise NeedPaths
         if progress is not None:
             progress.set(force=True, phase="index")
-        with _Reads(list(paths)) as seen:
+        with _Reads(_parsed(paths)) as seen:
             idx = mod.build_index(list(paths))  # type: ignore[attr-defined]
         counts = seen.counts()
         built = True
@@ -437,15 +458,17 @@ def _left_answer(left_out: set[str]) -> dict:
 
 
 def answer(req: dict) -> dict:
-    """The answer to one request {slug, reader, fp, paths, cache, reads?, memory?, progress?, op, arg, labels?, root?};
+    """The answer to one request {slug, reader, fp, paths?, cache, reads?, memory?, progress?, op, arg, labels?,
+    view_paths?, root?}; without `paths`, {need_paths: true} when the index must be built (NeedPaths);
     op is index, records, resolve, resolve_many (a list of locators, answered with a list), problems ([] for a reader
     without problems()), shown ({reads, hidden, derived, unplaced}: the bytes build_index read of each claimed file, and
     hidden(), derived() and unplaced() each as {result} or {error}) or applies (the corpus's record files as `arg`). A
     records call runs with `labels`, the labels context, as thimble's _view_ctx, which thimble.marked and thimble.kept
-    read, and the claimed paths as its _view_paths; its answer's `left_out_n` counts the refs thimble.kept and
-    kept_unit refused for the filter, and `left_out` lists them when there are at most LEFT_OUT_MAX. With `root` the
-    call runs in that folder, a copy of the corpus the paths are relative to. The answer's `held` lists the indexes in
-    memory afterwards (_held), `dropped` those it let go, and `unpickled` is true while one of them has no pickle."""
+    read, and `view_paths`, else the claimed paths but those shown whole (shown_whole), as its _view_paths; its answer's
+    `left_out_n` counts the refs thimble.kept and kept_unit refused for the filter, and `left_out` lists them when there
+    are at most LEFT_OUT_MAX. With `root` the call runs in that folder, a copy of the corpus the paths are relative to.
+    The answer's `held` lists the indexes in memory afterwards (_held), `dropped` those it let go, and `unpickled` is
+    true while one of them has no pickle."""
     t0 = time.monotonic()
     start_rss = _rss()
     th = None
@@ -464,8 +487,8 @@ def answer(req: dict) -> dict:
             fn = getattr(mod, "applies", None)
             result = fn(list(req.get("arg") or [])) if callable(fn) else None
             return {"ok": True, "result": result, "built": False, "ms": round((time.monotonic() - t0) * 1000)}
-        idx, built = _index(req["slug"], mod, req["fp"], req.get("paths") or [], req.get("cache"), req.get("reads"),
-                            progress)
+        paths = req["paths"] or [] if "paths" in req else None
+        idx, built = _index(req["slug"], mod, req["fp"], paths, req.get("cache"), req.get("reads"), progress)
         dropped = _evict((req["slug"], req["fp"]), req.get("memory"))
         progress.set(force=built, phase="call")
         op = req.get("op")
@@ -474,7 +497,7 @@ def answer(req: dict) -> dict:
         elif op == "records":
             if th is not None:
                 th._view_ctx = req.get("labels")  # type: ignore[attr-defined]
-                th._view_paths = list(req.get("paths") or [])  # type: ignore[attr-defined]
+                th._view_paths = req["view_paths"] if "view_paths" in req else _parsed(paths or [])  # type: ignore[attr-defined]
                 th._left_out = left_out  # type: ignore[attr-defined]
             result = mod.records(idx, req.get("arg"))  # type: ignore[attr-defined]
         elif op == "resolve":
@@ -497,6 +520,8 @@ def answer(req: dict) -> dict:
         return {"ok": True, "result": result, "built": built, "ms": round((time.monotonic() - t0) * 1000),
                 "held": _held(), **({"dropped": dropped} if dropped else {}), **({"unpickled": True} if _unpickled else {}),
                 **_left_answer(left_out)}
+    except NeedPaths:
+        return {"ok": False, "need_paths": True, "ms": round((time.monotonic() - t0) * 1000)}
     except Exception as e:  # noqa: BLE001 — a reader's failure is the answer
         return {"ok": False, "error": f"{type(e).__name__}: {e}", "traceback": traceback.format_exc()[-TRACEBACK_MAX:],
                 "ms": round((time.monotonic() - t0) * 1000)}

@@ -11,7 +11,8 @@ read too: `claims` for `scope`, a `derived` list of {field, from, how} beside `r
 `declares` for `units`.
 
 Code holds every view to three things the analyst can always see above it. Its residue (shown): each claimed file is
-read to the end by build_index or listed by the reader's hidden() with a why, a claim that matches no file is missing,
+read to the end by build_index or listed by the reader's hidden() with a why, but the media files and PDFs a page shows
+whole (view_host.shown_whole), which count as shown unread; a claim that matches no file is missing,
 and the lines the reader could not parse are its problems(); the checks fail on a file neither read nor hidden. Its
 derived fields, counted above the view. Its labels: the checks load the page with a test label and fail when the marks
 do not show on the records it shows, or when a corpus view draws no label controls of its own (label_problems), since
@@ -62,6 +63,7 @@ from pydantic import BaseModel
 
 from . import config, corpus_tree, headless, investigation, prompts, refs, userconf, view_calls, view_indexes, view_libs
 from .records import is_record_ref as is_record
+from .view_host import shown_whole
 from .ledger import atomic_write_text, read_json, unlinked, write_json, write_json_once
 
 log = logging.getLogger("thimble.views")
@@ -102,6 +104,9 @@ SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,39}$")
 RESERVED_SLUGS = {"proposals", "forge", "raw", "records", "table", "text", "transcript", "lib", "frame", "resolve",
                   "suggestions", "suggest"}
 RESOLVE_WAIT_S = 180.0  # how long a synchronous caller (resolve_sync) waits for a reader's answer, which runs on after it
+# a reader call names the claimed files only when they are this many or fewer, or when its kernel must build the index
+# (view_host `need_paths`), so a view of a million files sends their paths only to build
+PATHS_SENT = 2000
 # the most one reader call of the checks may take (gate); a page's calls have no limit
 CHECK_CALL_S = 600.0
 LABEL_MAX = 40  # chars of a chip label a reader supplies (chips stay short)
@@ -1042,8 +1047,10 @@ def claimed_paths(c: str, view: dict[str, Any], *, wait: bool = True) -> list[st
 
 
 def claimed_files(c: str, view: dict[str, Any]) -> list[tuple[str, int, int]]:
-    """(path, size, mtime_ns) of every corpus file the view claims, in path order: claimed_paths, each file stat'ed.
-    Files claimed by name are stat'ed on every call, the files of glob claims at most every FOLDER_CACHE_S."""
+    """(path, size, mtime_ns) of every corpus file the view claims, in path order: claimed_paths, each file stat'ed
+    but the files a page shows whole (shown_whole), which are taken from the folder tree as (path, 0, 0), so that a view
+    of a million images costs no stat each. Files claimed by name are stat'ed on every call, the files of glob claims at
+    most every FOLDER_CACHE_S."""
     corpus = config.corpus_dir(c)
     claims = tuple(view.get("claims") or [])
     globbed = any(_GLOB_CHARS.search(g) for g in claims)
@@ -1056,6 +1063,9 @@ def claimed_files(c: str, view: dict[str, Any]) -> list[tuple[str, int, int]]:
                 return hit["files"]
     out = []
     for rel in claimed_paths(c, view) or []:
+        if globbed and shown_whole(rel):
+            out.append((rel, 0, 0))
+            continue
         try:
             st = (config.safe_corpus_path(corpus, rel) if not globbed else Path(f"{corpus}/{rel}")).stat()
         except (ValueError, OSError):
@@ -1336,16 +1346,24 @@ async def _call(c: str, req: dict[str, Any], op: str, arg: Any = None, *, call: 
     req = {**{k: x for k, x in req.items() if k != "built"}, "memory": view_calls.memory_budget()}
     if call is not None:
         req["progress"] = str(view_calls.progress_path(indexes_dir(c), call).resolve())
+    paths = req.get("paths") or []
+    if len(paths) > PATHS_SENT:
+        req.pop("paths")
+        if op == "records" and (req.get("labels") or {}).get("probe"):
+            req["view_paths"] = await asyncio.to_thread(lambda: [p for p in paths if not shown_whole(p)])
     token = view_calls.REQUEST.set({"slug": req["slug"], "fp": req["fp"], "cache": req.get("cache"), "call": call})
     try:
         outputs, status = await _runner(c, snippet({**req, "op": op, "arg": arg}), _call_limit.get())
+        ans = _answer_from(outputs)
+        if ans is not None and ans.get("need_paths"):
+            outputs, status = await _runner(c, snippet({**req, "paths": paths, "op": op, "arg": arg}), _call_limit.get())
+            ans = _answer_from(outputs)
     except asyncio.CancelledError:
         raise
     except Exception as e:  # noqa: BLE001 — the kernel did not start
         raise ReaderError(f"the views kernel did not start: {type(e).__name__}: {e}") from e
     finally:
         view_calls.REQUEST.reset(token)
-    ans = _answer_from(outputs)
     if ans is None:
         raise ReaderError(_kernel_error(outputs))
     if ans.get("built") and req.get("cache"):
@@ -1442,13 +1460,15 @@ def _hidden(raw: Any) -> dict[str, str]:
 def not_shown(files: list[tuple[str, int, int]], reads: dict[str, int], hidden: dict[str, str]) -> list[dict[str, Any]]:
     """The claimed files the view does not show whole, in path order, each {path, size, read, why}: those build_index
     did not read to the end, with why hidden() gives ('' when it gives none), and those hidden() lists though read.
-    An image, audio or video file counts as read, since the page shows it whole through thimble.mediaUrl."""
+    An image, audio, video or PDF file counts as read unopened (shown_whole), since the page shows it whole through
+    thimble.mediaUrl or by its pages."""
     out = []
     for path, size, _ in files:
-        n = int(reads.get(path) or 0)
-        whole = n >= size or Path(path).suffix.lower() in MEDIA_TYPES
-        if not whole or path in hidden:
-            out.append({"path": path, "size": size, "read": min(n, size), "why": hidden.get(path, "")})
+        if path in hidden:
+            n = int(reads.get(path) or 0)
+            out.append({"path": path, "size": size, "read": min(n, size), "why": hidden[path]})
+        elif not shown_whole(path) and (n := int(reads.get(path) or 0)) < size:
+            out.append({"path": path, "size": size, "read": n, "why": ""})
     return out
 
 
@@ -1475,33 +1495,35 @@ def sibling_files(claimed: list[str], every: list[str]) -> list[str]:
     if not under:
         return []
     parents = {q for q, _ in under}
-    # parent -> folder -> kind -> (rests of every file, rests of the unclaimed ones)
-    tree: dict[str, dict[str, dict[tuple[str, str], tuple[list[str], list[str]]]]] = {}
+    # parent -> folder -> kind -> rests of the unclaimed files, the only ones a folder beside can add
+    tree: dict[str, dict[str, dict[tuple[str, str], list[str]]]] = {}
     for p in every:
+        if p in mine:
+            continue
         parts = p.split("/")
         for i in range(len(parts) - 1):
             q = "/".join(parts[:i])
             if q in parents:
                 rest = "/".join(parts[i + 1:])
                 kind = (os.path.dirname(rest), os.path.splitext(rest)[1])
-                both = tree.setdefault(q, {}).setdefault(parts[i], {}).setdefault(kind, ([], []))
-                both[0].append(rest)
-                if p not in mine:
-                    both[1].append(rest)
+                tree.setdefault(q, {}).setdefault(parts[i], {}).setdefault(kind, []).append(rest)
     have = set(every)
     out: set[str] = set()
     for (q, r), rests in under.items():
+        beside = [(s, by_kind) for s, by_kind in (tree.get(q) or {}).items() if s != r and _alike(r, s)]
+        if not beside:
+            continue
         kinds = {(os.path.dirname(x), os.path.splitext(x)[1]) for x in rests}
         own = tree.get(q, {}).get(r, {})
-        whole = {k for k in kinds if not own.get(k, ([], []))[1]}  # kinds the claimed folder holds only claimed files of
+        whole = {k for k in kinds if not own.get(k)}  # kinds the claimed folder holds only claimed files of
         sample = sorted(rests)[:SIBLING_SAMPLE]
-        for s, by_kind in (tree.get(q) or {}).items():
-            if s == r or not kinds & set(by_kind):
+        for s, by_kind in beside:
+            if not kinds & set(by_kind):
                 continue
             base = f"{q}/{s}" if q else s
-            if not _alike(r, s) or sum(f"{base}/{x}" in have for x in sample) * 2 < len(sample):
+            if sum(f"{base}/{x}" in have for x in sample) * 2 < len(sample):
                 continue
-            out |= {f"{base}/{x}" for k in kinds for x in by_kind.get(k, ([], []))[1] if x in rests or k in whole}
+            out |= {f"{base}/{x}" for k in kinds for x in by_kind.get(k, []) if x in rests or k in whole}
     return sorted(out)
 
 
@@ -1512,7 +1534,7 @@ def missing_files(claims: list[str], claimed: list[str]) -> list[dict[str, str]]
     folder; a claim with a wildcard after it (`runs/*/*.jsonl`, `**/*.md`) names no file a folder lacks."""
     out: list[dict[str, str]] = []
     for g in claims:
-        hit = [p for p in claimed if glob_matches(p, g)]
+        hit = match_all([g], claimed)
         if not hit:
             out.append({"path": g, "why": "no file matches it"})
             continue
@@ -1568,6 +1590,9 @@ async def shown(c: str, slug: str, version: str | None = None, path: str | None 
         parts[name] = part.get("result")
     hidden = _hidden(parts["hidden"])
     rows = not_shown(files, reads, hidden)
+    for r in rows[:FILES_LISTED]:
+        if not r["size"] and shown_whole(r["path"]):
+            r["size"] = await asyncio.to_thread(_size, corpus, r["path"])
     if path:
         return {"files": len(files),
                 "not_shown": {"count": len(rows), "unexplained": sum(1 for r in rows if not r["why"]), "unclaimed": 0,
@@ -3156,6 +3181,7 @@ def _squeeze(s: str) -> str:
 # workbook part): a view's excerpt of them is not compared with their bytes
 BINARY_SUFFIXES = {".pdf", ".xlsx", ".xlsm", ".xls", ".docx", ".pptx", ".odt", ".ods", ".zip", ".gz", ".png", ".jpg",
                    ".jpeg", ".gif", ".webp", ".psd", ".db", ".sqlite", ".sqlite3"}
+_UNSAMPLED = tuple(BINARY_SUFFIXES | set(MEDIA_TYPES))  # the files whose lines the checks never sample
 
 
 JSON_DECODE_MAX = 20_000_000  # bytes of a .json document the checks decode to read its string values
@@ -3305,8 +3331,7 @@ async def check(c: str, slug: str, locators: list[str] | None = None, *, shot_di
         corpus = config.corpus_dir(c)
         hid = {r["path"] for r in (report.get("coverage") or {}).get("not_shown", {}).get("files", [])
                if r["why"] and r.get("claimed", True)}
-        texts = [f for f in files if f[0] not in hid and Path(f[0]).suffix.lower() not in BINARY_SUFFIXES
-                 and Path(f[0]).suffix.lower() not in MEDIA_TYPES]
+        texts = [f for f in files if not f[0].lower().endswith(_UNSAMPLED) and f[0] not in hid]
         for rel in _sample_files(texts):
             if not await asyncio.to_thread(_texty, corpus, rel):
                 continue
@@ -3454,8 +3479,7 @@ def lined(view: dict[str, Any], files: list[tuple[str, int, int]]) -> bool:
     a database (its rows), not only other binary or media files."""
     from . import records  # noqa: PLC0415
 
-    return any((Path(f[0]).suffix.lower() not in BINARY_SUFFIXES and Path(f[0]).suffix.lower() not in MEDIA_TYPES)
-               or records.is_pdf(f[0]) or records.is_database(f[0]) for f in files)
+    return any(not f[0].lower().endswith(_UNSAMPLED) or records.is_pdf(f[0]) or records.is_database(f[0]) for f in files)
 
 
 SNIFF_BYTES = 4096
@@ -3590,6 +3614,7 @@ def layout_notes(shots: list[dict[str, Any]]) -> list[str]:
 
 ROBUST_SUBDIR = "robust"  # under the view's index folder: the corpus copy robust_check runs the view on
 ROBUST_BYTES = 256 * 1024 * 1024  # of the claimed files the copy links, smallest first
+ROBUST_SHOWN = 1000  # of the files a page shows whole (shown_whole) the copy links, after the others, in path order
 TORN_MAX = 64 * 1024 * 1024  # bytes of the file the copy tears, which it copies whole
 TORN_SUFFIXES = (".jsonl", ".ndjson")
 TORN_LINE = '{"torn": "a line cut short'
@@ -3602,7 +3627,8 @@ def _robust_pick(view: dict[str, Any], files: list[tuple[str, int, int]],
     JSON lines file of at most TORN_MAX bytes among `whole`, the files the reader reads to the end and does not hide
     (any when None). None for either when there is none, and nothing left out of one file."""
     removed = None
-    by_claim = [(g, [f for f in files if glob_matches(f[0], g)]) for g in view["claims"]]
+    by_path = {f[0]: f for f in files}
+    by_claim = [(g, [by_path[p] for p in match_all([g], list(by_path))]) for g in view["claims"]]
     for g, hit in by_claim:
         head, _, base = g.rpartition("/")
         if head and _GLOB_CHARS.search(head) and not _GLOB_CHARS.search(base) and len(hit) >= 2:
@@ -3610,7 +3636,7 @@ def _robust_pick(view: dict[str, Any], files: list[tuple[str, int, int]],
             break
     if removed is None:
         removed = next((min(hit, key=lambda f: f[1])[0] for _, hit in by_claim if len(hit) >= 2), None)
-    torn = min((f for f in files if f[0] != removed and Path(f[0]).suffix.lower() in TORN_SUFFIXES and f[1] <= TORN_MAX
+    torn = min((f for f in files if f[0].lower().endswith(TORN_SUFFIXES) and f[0] != removed and f[1] <= TORN_MAX
                 and (whole is None or f[0] in whole)), key=lambda f: f[1], default=None)
     return removed, torn[0] if torn else None
 
@@ -3619,9 +3645,9 @@ def robust_copy(c: str, slug: str, view: dict[str, Any], files: list[tuple[str, 
                 whole: set[str] | None = None) -> dict[str, Any] | None:
     """The corpus copy robust_check runs the view on, in the view's index folder, which the views kernel reads: every
     claimed file linked but the one _robust_pick leaves out, and the one it tears (of `whole`) copied with a torn line
-    after its last. Past ROBUST_BYTES the largest files are left out too (`cut`). {root, files, removed, torn (the torn
-    line's ref), cut}, or None when there is nothing to leave out or tear; ValueError when a folder between the
-    workspace and the copy is a symlink. Blocking."""
+    after its last. Past ROBUST_BYTES the largest files are left out too, and past ROBUST_SHOWN the files a page shows
+    whole (`cut`). {root, files, removed, torn (the torn line's ref), cut}, or None when there is nothing to leave out
+    or tear; ValueError when a folder between the workspace and the copy is a symlink. Blocking."""
     removed, torn = _robust_pick(view, files, whole)
     if removed is None and torn is None:
         return None
@@ -3633,11 +3659,17 @@ def robust_copy(c: str, slug: str, view: dict[str, Any], files: list[tuple[str, 
     shutil.rmtree(d, ignore_errors=True)
     root = unlinked(config.workspace_dir(c), d / "corpus")
     out: list[tuple[str, int, int]] = []
-    total, cut, torn_ref = 0, False, None
-    for rel, size, mtime in sorted(files, key=lambda f: (f[1], f[0])):
+    total, shown_n, cut, torn_ref = 0, 0, False, None
+    parsed = [f for f in files if not shown_whole(f[0])]
+    for rel, size, mtime in [*sorted(parsed, key=lambda f: (f[1], f[0])), *(f for f in files if shown_whole(f[0]))]:
         if rel == removed:
             continue
-        if total + size > ROBUST_BYTES and rel != torn:
+        if shown_whole(rel):
+            shown_n += 1
+            if shown_n > ROBUST_SHOWN:
+                cut = True
+                break
+        elif total + size > ROBUST_BYTES and rel != torn:
             cut = True
             continue
         src = config.safe_corpus_path(corpus, rel).resolve()
@@ -3679,7 +3711,8 @@ async def robust_check(c: str, slug: str, view: dict[str, Any], files: list[tupl
     ans = ans if isinstance(ans, dict) else {}
     reads = ans.get("reads") if isinstance(ans.get("reads"), dict) else {}
     hidden = _hidden((ans.get("hidden") or {}).get("result") if isinstance(ans.get("hidden"), dict) else None)
-    whole = {p for p, size, _ in files if int(reads.get(p) or 0) >= size and p not in hidden}
+    whole = {p for p, size, _ in files if p.lower().endswith(TORN_SUFFIXES) and int(reads.get(p) or 0) >= size
+             and p not in hidden}
     try:
         copy = await asyncio.to_thread(robust_copy, c, slug, view, files, whole)
     except ValueError as e:

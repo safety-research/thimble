@@ -479,7 +479,7 @@ def colours(name, values=None):
 # probe {"probe": n, "filter": bool}, a test label that marks every record whose line is a multiple of n. Outside a
 # view's call it is None, and marked() and kept() answer as if no label were on.
 _view_ctx = None
-_view_paths: list = []  # the claimed files of the view whose reader call is running
+_view_paths: list = []  # the claimed files of the view whose reader call is running, but those it shows whole
 # During a view's records call (view_host) a set of the refs kept() and kept_unit() refused, which thimble counts above
 # the view as hidden by the filter; None outside one.
 _left_out = None
