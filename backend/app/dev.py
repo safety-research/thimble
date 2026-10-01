@@ -68,6 +68,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import fcntl
+import hashlib
 import json
 import logging
 import os
@@ -2776,13 +2777,13 @@ def view_fence(c: str, slug: str, corpus: Path, folder: Path, conf: userconf.Ses
     if Path(corpus) in fixed:
         out = data_fence(out, Path(corpus), conf.data)
     out = {**out, "claudeMdExcludes": agent_session.memory_excludes(Path(corpus), view_work_dir(c, slug))}
-    memory = {agent_session.MEMORY_ENV: "1"}
+    own = {agent_session.MEMORY_ENV: "1", **view_tmp_env(c, slug)}
     if conf.network:
-        return {**out, "env": {**view_env(slug, offline=False), **memory}}
+        return {**out, "env": {**view_env(slug, offline=False), **own}}
     conf.offline = True
     perms = dict(out.get("permissions") or {})
     deny = [*(perms.get("deny") or []), *offline_deny()]
-    return {**out, "permissions": {**perms, "deny": deny}, "env": {**view_env(slug), **memory}}
+    return {**out, "permissions": {**perms, "deny": deny}, "env": {**view_env(slug), **own}}
 
 
 def data_fence(fence: dict[str, Any], corpus: Path, data: str) -> dict[str, Any]:
@@ -2840,6 +2841,42 @@ def asker_models(c: str, prop: dict[str, Any]) -> dict[str, Any]:
             "fast": held["fast"] if isinstance(held.get("fast"), bool) else None}
 
 
+def _view_tmp_paths(c: str, slug: str) -> tuple[Path, Path]:
+    """(the temp folder of the view `slug`'s build in a private folder of /tmp, the one in its own folder)."""
+    key = hashlib.sha256(f"{config.workspace_dir(c).resolve()}\0{slug}".encode()).hexdigest()[:12]
+    return Path("/tmp") / f"thimble-{os.getuid()}" / f"view-{key}", view_work_dir(c, slug) / "tmp"
+
+
+def view_tmp_dir(c: str, slug: str) -> Path:
+    """The temp folder of the view `slug`'s build, made private: the TMPDIR of its session's Bash (view_tmp_env), where
+    the session reads and writes unasked (view_asking). Kept short, since a socket made in a TMPDIR has a short path
+    limit; in the build's own folder when /tmp holds no private folder of this user."""
+    folder, fallback = _view_tmp_paths(c, slug)
+    try:
+        folder.parent.mkdir(mode=0o700, exist_ok=True)
+        st = folder.parent.lstat()
+        if folder.parent.is_symlink() or st.st_uid != os.getuid() or st.st_mode & 0o077:
+            raise OSError(f"{folder.parent} is not a private folder of this user")
+        folder.mkdir(mode=0o700, exist_ok=True)
+    except OSError:
+        folder = fallback
+        folder.mkdir(mode=0o700, parents=True, exist_ok=True)
+    return folder
+
+
+def clear_view_tmp(c: str, slug: str) -> None:
+    """The build's temp folder goes once its session's turns end."""
+    for folder in _view_tmp_paths(c, slug):
+        shutil.rmtree(folder, ignore_errors=True)
+
+
+def view_tmp_env(c: str, slug: str) -> dict[str, str]:
+    """A view build's temp folder as its session's TMPDIR: Claude Code's sandbox gives the session's Bash a folder in
+    CLAUDE_CODE_TMPDIR as TMPDIR, and Bash outside the sandbox takes TMPDIR."""
+    folder = str(view_tmp_dir(c, slug))
+    return {"CLAUDE_CODE_TMPDIR": folder, "TMPDIR": folder}
+
+
 def view_env(slug: str, offline: bool = True) -> dict[str, str]:
     """A view build's session's environment: its key, and when `offline`, OFFLINE_ENV and OFFLINE_ENV_FILE."""
     return {SESSION_ENV: view_key(slug), **({**OFFLINE_ENV, ENV_FILE: str(OFFLINE_ENV_FILE)} if offline else {})}
@@ -2857,17 +2894,20 @@ def view_key(slug: str) -> str:
 
 def view_asking(c: str, slug: str, folder: Path, conf: userconf.Session) -> dict[str, Any]:
     """How a view build's session asks (Sessions._flags): its key, what thimble's config asks of it (`conf`), and allowed
-    unasked its edits in the view's folder and in its own (view_work_dir), reads of the worked examples and of the
-    thimble code a view runs against (VIEW_CODE), its check command, and Bash in the sandbox where its Bash runs there,
-    but for the commands the config asks about."""
+    unasked its edits in the view's folder and in its own (view_work_dir), reads and edits in its temp folder
+    (view_tmp_dir), where it keeps its own screenshots and scripts, reads of the worked examples and of the thimble code
+    a view runs against (VIEW_CODE), its check command, and Bash in the sandbox where its Bash runs there, but for the
+    commands the config asks about."""
     from . import agent_session, views  # noqa: PLC0415
 
     check = view_check_command(c, slug)
     conf.own_bash = [check]
     code = [f"Read(/{config.REPO_ROOT / rel}{'/**' if rel.endswith('/') else ''})" for rel in VIEW_CODE]
+    tmp = view_tmp_dir(c, slug)
     out: dict[str, Any] = {"key": view_key(slug), "config": conf,
                            "allow": [*own_work(folder, (views.EXAMPLES_DIR,)), f"Edit(/{view_work_dir(c, slug)}/**)",
-                                     *code, f"Bash({check})", f"Bash({check} *)"]}
+                                     f"Read(/{tmp}/**)", f"Edit(/{tmp}/**)", *code, f"Bash({check})",
+                                     f"Bash({check} *)"]}
     if conf.sandboxed:
         names, asks = agent_session.sandbox_rule(config.corpus_dir(c))
         out["sandbox"] = [names, asks]
@@ -2916,6 +2956,7 @@ async def run_view(c: str, slug: str, run: Run) -> None:
     finally:
         checks.cancel()
         _unhost(c, view_key(slug))
+        await asyncio.to_thread(clear_view_tmp, c, slug)
 
 
 async def _run_view(c: str, slug: str, run: Run) -> None:
@@ -3269,6 +3310,7 @@ async def review_revision(c: str, slug: str, message: str) -> tuple[bool, str]:
         _unhost(c, view_key(slug))
         if _review_runs.get((c, slug)) is run:
             del _review_runs[(c, slug)]
+        clear_view_tmp(c, slug)
     if chat:
         _close_chat({"workspace": c, "chat": chat}, "failed", why[:ERROR_CHARS] or None)
     return False, why
