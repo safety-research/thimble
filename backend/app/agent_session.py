@@ -3,10 +3,10 @@ writer's (write_session.py), a report check's run (checks.py) and a critique's (
 session of its own with its own system prompt rather than a fork of main.
 
 Start. The server runs `claude -p --agents <json> --agent <name> --session-id <uuid> --output-format stream-json …` in
-the session's work folder (command, the fence) and writes the first message on stdin, since Linux refuses an argument over 128 KiB. The
-agent is defined for that session alone with `--agents`. Its file names no tools, so it has every tool of a default
-Claude Code session less the session's --disallowedTools: LATER_TOOLS and the thimble tools that are not its own
-(not_own). shared.md is appended with --append-system-prompt, since Claude Code applies an agent's `skills` to
+the session's work folder (command, the fence) and writes the first message on stdin, since Linux refuses an argument
+over 128 KiB. The agent is defined for that session alone with `--agents`. Its file names no tools, so it has every tool
+of a default Claude Code session less the session's --disallowedTools: LATER_TOOLS and the thimble tools that are not
+its own (not_own). shared.md is appended with --append-system-prompt, since Claude Code applies an agent's `skills` to
 subagents only. The session inherits the analyst's settings; thimble layers on the role's model, effort (also as
 CLAUDE_CODE_EFFORT_LEVEL) and fast mode. THIMBLE_SESSION names the session for its shim (`orient`, `writer:<doc>`,
 `critique:orient`, `check:<id>:<doc>`).
@@ -54,12 +54,12 @@ with --resume in the new mode and `## session-mode-changed` on stdin.
 The fence. Every caller passes its session's `work` folder, which keeps the corpus folder read-only and the session's
 writes in that work folder. The process runs in the work folder with the corpus added via `--add-dir`, never in the
 corpus folder, since Claude Code's Bash sandbox mounts files over dangerous names in the process's own folder, which a
-write deny of that folder would break, and makes a `.claude/.cc-writes/` folder there. Its Bash commands start in the
-work folder, whatever folder an earlier command moved to (with_home_shell). Its --settings deny
-Edit in the corpus and exclude the CLAUDE.md files of the work folder's ancestry (memory_excludes). Where the sandbox
-can run it has no network. A SubagentStart hook gives each subagent its own scratch folder, since the sandbox gives all
-agents one $TMPDIR. A caller that passes `unasked` (a writer, a critique, a check's run) also auto-allows Bash in the
-sandbox and edits in the work folder (sandbox_allow.py).
+write deny of that folder would break, and makes a folder of its own there. Its Bash commands start in the work folder,
+whatever folder an earlier command moved to (with_home_shell). Its --settings deny Edit in the corpus and exclude the
+CLAUDE.md files of the work folder's ancestry (memory_excludes). Where the sandbox can run, it reaches the network only
+while the agent's `network` is on, as it is by default. A SubagentStart hook gives each subagent its own scratch folder,
+since the sandbox gives all agents one $TMPDIR. A caller that passes `unasked` (a writer, a critique, a check's run)
+also auto-allows Bash in the sandbox and edits in the work folder (sandbox_allow.py).
 
 The config. thimble's config (userconf.py) adds its rules to the session's --settings (userconf.Session.settings): an
 ask or a deny of every install or download command (`installs`), the web tools allowed or taken away (`web`), auto
@@ -225,7 +225,7 @@ RENDERED_ENV = "THIMBLE_RENDERED_PROMPTS"
 # process runs in its work folder (module note, the fence)
 MEMORY_ENV = "CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD"
 # each Bash command starts in the process's own folder, since a `cd` would carry over and Claude Code's sandbox makes a
-# `.claude/.cc-writes/` folder in whatever folder a sandboxed command starts in, the corpus folder among them
+# folder of its own in whatever folder a sandboxed command starts in, the corpus folder among them
 HOME_SHELL_ENV = "CLAUDE_BASH_MAINTAIN_PROJECT_WORKING_DIR"
 # the files under a folder that Claude Code loads as memory (claudeMdExcludes takes absolute paths and globs)
 MEMORY_FILES = ("CLAUDE.md", "CLAUDE.local.md", ".claude/CLAUDE.md", ".claude/rules/**")
@@ -706,12 +706,12 @@ async def start(c: str, key: str, *, role: str, title: str, agent_args: list[str
                 on_pid: Callable[[Run], None] | None = None, restarted: bool = False, background: bool = False,
                 **fields: Any) -> Run:
     """Start the session `key` for workspace `c` with its first message and follow it into an agent chat of `role` under
-    `parent`; RuntimeError when it runs already or claude cannot be started. `on_start`/`on_end` hear the run's start and
-    end; `agent` (its row of modes.AGENTS) and `patient` govern permissions; `work`, the folder its process runs in, never
-    the corpus folder, and `unasked` fence it; `calls` numbers its calls; `resume`, `chat`, `run_k` and `leads` continue an earlier session; `restarted` marks a resume after a server
-    restart; `call` is main's tool call that started it; `announce` False writes no row into the parent chat; `on_pid` hears
-    each process change; `background` runs it as a Claude Code background session (module note); `fields` land on the
-    chat's meta."""
+    `parent`; RuntimeError when it runs already or claude cannot be started. `on_start`/`on_end` hear the run's start
+    and end; `agent` (its row of modes.AGENTS) and `patient` govern permissions; `work`, the folder its process runs in,
+    never the corpus folder, and `unasked` fence it; `calls` numbers its calls; `resume`, `chat`, `run_k` and `leads`
+    continue an earlier session; `restarted` marks a resume after a server restart; `call` is main's tool call that
+    started it; `announce` False writes no row into the parent chat; `on_pid` hears each process change; `background`
+    runs it as a Claude Code background session (module note); `fields` land on the chat's meta."""
     if running(c, key):
         raise RuntimeError(f"the session {key} is running")
     if resume and chat and (agents.meta_or_none(c, chat) or {}).get("background"):

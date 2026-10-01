@@ -19,16 +19,16 @@ the ticket; a server restart queues an interrupted run again with its worktree (
 View tickets. View proposals build at once, each as a ticket on its row of views/proposals.json, run by queue_view in a
 pool of its own (VIEW_POOL). A view is three files of the workspace, so there is no worktree, stack or restart. run_view
 starts a session on prompts/dev-view.md in the build's own folder (view_work_dir, below thimble's workspaces folder,
-which Claude Code trusts) with `--add-dir` for the view's folder and the corpus, never in the corpus, where Claude Code's
-sandbox would make its `.claude/.cc-writes/` folder; the worked examples are fenced read-only, and an edit of the corpus
-goes as the dev agent's `data` says, by default to the analyst first (view_fence). After each turn the server runs the view's gate; a failure wakes the
-session, a pass registers the view. Where an active extension runs the dev agent with a program (roles.py), each turn
-is a run of that program instead (program_view_turn), checked the same way. A turn the API ended at capacity is no
-attempt: the build waits and wakes the session again. An orientation's proposal that runs out of attempts gets up to
-VIEW_REPAIRS new sessions, and is then dropped quietly; a view the analyst asked for fails with Retry. The orientation's Stop stops the
-builds of the views it proposed (stop_orientation_views). Main's end stops every build of the workspace
-(stop_workspace): a view the analyst asked for fails with Retry, and a session's proposal waits, queued, until a session
-is main again (resume_views).
+which Claude Code trusts) with `--add-dir` for the view's folder and the corpus, never in the corpus, where Claude
+Code's sandbox would make a folder of its own; the worked examples are fenced read-only, and an edit of the corpus goes
+as the dev agent's `data` says, by default to the analyst first (view_fence). After each turn the server runs the view's
+gate; a failure wakes the session, a pass registers the view. Where an active extension runs the dev agent with a
+program (roles.py), each turn is a run of that program instead (program_view_turn), checked the same way. A turn the API
+ended at capacity is no attempt: the build waits and wakes the session again. An orientation's proposal that runs out of
+attempts gets up to VIEW_REPAIRS new sessions, and is then dropped quietly; a view the analyst asked for fails with
+Retry. The orientation's Stop stops the builds of the views it proposed (stop_orientation_views). Main's end stops every
+build of the workspace (stop_workspace): a view the analyst asked for fails with Retry, and a session's proposal waits,
+queued, until a session is main again (resume_views).
 
 Permissions. A session of a workspace asks the analyst like the other agents: its --settings carry agent_session's
 permission hook with the session's key (`view:<slug>`, `ticket:<id>`), and the run hosts that key on its chat
@@ -2965,7 +2965,7 @@ async def _run_view(c: str, slug: str, run: Run) -> None:
             turn_start = time.monotonic()
             try:
                 # the session runs in its own folder, with the view's folder and the corpus added; the worked examples
-                # are only read, since the sandbox makes a `.claude/.cc-writes/` folder where a command starts
+                # are only read, since the sandbox makes a folder of its own where a command starts
                 result_text = await _worker_turn(run, run_log, work, prompt, resume, name=view_session_name(c, slug),
                                                  workspace=c, on_session=on_session, add_dirs=(folder, corpus),
                                                  answered=False, fence=view_fence(c, slug, corpus, folder, conf),

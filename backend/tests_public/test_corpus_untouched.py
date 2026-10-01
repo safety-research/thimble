@@ -1,7 +1,7 @@
-"""No agent thimble starts leaves anything in the corpus folder. Claude Code's Bash sandbox makes a `.claude/.cc-writes/`
-folder in the folder a sandboxed command starts in, so every agent's Claude Code session runs in a folder of its own with
-the corpus added, and each of its Bash commands starts there again: a `cd` into the corpus does not carry over to the
-next command (agent_session.HOME_SHELL_ENV).
+"""No agent thimble starts leaves anything in the corpus folder. Claude Code's Bash sandbox makes a folder of its own in
+the folder a sandboxed command starts in, so every agent's Claude Code session runs in a folder of its own with the
+corpus added, and each of its Bash commands starts there again: a `cd` into the corpus does not carry over to the next
+command (agent_session.HOME_SHELL_ENV).
 
 The tests marked live run sandboxed Bash commands, on the user's own `claude`, in each kind of agent session as thimble
 starts it, and check that a copy of a corpus is left as it was. They need THIMBLE_LIVE_CLAUDE=1, a logged-in `claude`
