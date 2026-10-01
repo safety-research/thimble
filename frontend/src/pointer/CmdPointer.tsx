@@ -4,11 +4,14 @@
 // anchors it touches. Report blocks (`data-anchor-cell`) are taken whole (anchors.ts cellOf); inside a card
 // (`data-anchor-parts`) the innermost part is taken (parts.ts). The click also captures a picture (capture.ts), and
 // Enter posts a thread to the analyst's Claude Code session. A view's frame sends its own hover and click through the bus
-// (pointHover, pointAt, cmdHeld). Off a Mac, Ctrl does what ⌘ does (lib/platform). With `inline` (the chat off, Shell)
-// the box stays open after the send and answers in place: the thread's rows show in it as the fork writes them, and a
-// reply typed there goes to the same thread.
-import { useEffect, useRef, useState } from 'react'
-import { Rows } from '../chat/Rows'
+// (pointHover, pointAt, cmdHeld). Off a Mac, Ctrl does what ⌘ does (lib/platform). The send lets go of the highlight.
+// With `inline` (the chat off, Shell) the box stays open after the send and answers in place: the thread's rows show in
+// it as the fork writes them, with main's own edits of the card asked about (chat/ThreadRows) and, while it works, a
+// line saying where the question is (chat/threadStatus), and a reply typed there goes to the same thread.
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { Note } from '../chat/Notes'
+import { ThreadRows } from '../chat/ThreadRows'
+import { mainEdits, STAGE_TEXT, threadStage } from '../chat/threadStatus'
 import { useChat } from '../chat/useChat'
 import { api } from '../lib/api'
 import { bus } from '../lib/bus'
@@ -51,8 +54,8 @@ const pointAt = (el: Element, shot: HTMLElement = el as HTMLElement): Pick<Ask, 
   parent: el.closest('[data-chat-current]')?.getAttribute('data-chat-current') ?? null,
 })
 
-/** Light a card's part: its own box when it has one, else its element. */
-const lightPart = (p: Part) => (p.rect ? highlight.box(p.rect) : highlight.region(p.el))
+/** Light a card's part: its own box, carried along with its element, when it has one, else its element. */
+const lightPart = (p: Part) => (p.rect ? highlight.box(p.rect, p.el) : highlight.region(p.el))
 
 const UNDER: Place = { under: true }
 const BESIDE: Place = { under: false }
@@ -66,6 +69,10 @@ export function CmdPointer({ ws, inline = false }: { ws: string; inline?: boolea
   // the thread the box's send opened, answered in place (`inline`)
   const [answer, setAnswer] = useState<string | null>(null)
   const thread = useChat(ws, answer)
+  // main's log while the box answers, for main's own edits of the card asked about
+  const main = useChat(ws, answer ? 'main' : null)
+  const edits = useMemo(() => (answer && box ? mainEdits(thread.records, main.rows, box.anchors) : new Map()), [answer, box, thread.records, main.rows])
+  const stage = threadStage(thread.meta, thread.running)
   const boxEl = useRef<HTMLElement>(null)
   // a ⌘-press in flight: where it started, the panel it started in, `dragged` once it moved far enough
   const press = useRef<{ x: number; y: number; root: ParentNode; dragged: boolean } | null>(null)
@@ -223,9 +230,9 @@ export function CmdPointer({ ws, inline = false }: { ws: string; inline?: boolea
       if (rect) highlight.box(rect)
       else highlight.clear()
     })
-    const offPoint = bus.on('pointAt', ({ anchor, text, element, rect, view }) => {
+    const offPoint = bus.on('pointAt', ({ anchor, text, element, rect, frame, view }) => {
       highlight.retarget()
-      highlight.box(rect)
+      highlight.box(rect, frame)
       highlight.hold()
       track('pointer-open', { target: anchor, detail: { frame: true } })
       // inside a viewer's frame, whose sandbox cannot be drawn from here: the element is named by its view (`view:<slug>`),
@@ -285,6 +292,7 @@ export function CmdPointer({ ws, inline = false }: { ws: string; inline?: boolea
       const meta = await api.createThread(ws, { anchor: box.anchor, anchor_text: box.text || null, ...box.info, image, parent: box.parent ?? null, text })
       setDraft('')
       if (inline) {
+        highlight.release()
         setAnswer(meta.id)
         return
       }
@@ -313,7 +321,7 @@ export function CmdPointer({ ws, inline = false }: { ws: string; inline?: boolea
           attrs={{ 'data-anchors': box.anchors.length, 'data-thread': answer ?? undefined }}
           replyTo={thread.meta?.name || thread.meta?.title || undefined}
         >
-          {answer ? <Rows rows={thread.rows} ws={ws} chat={answer} streaming={thread.running || thread.streaming} /> : undefined}
+          {answer ? <ThreadRows rows={thread.rows} edits={edits} ws={ws} chat={answer} streaming={thread.running || thread.streaming} working={stage ? <Note className="chat-thread-stage" spin text={STAGE_TEXT[stage]} /> : undefined} /> : undefined}
         </PointerBox>
       )}
     </>

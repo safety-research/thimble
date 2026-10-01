@@ -552,7 +552,7 @@ body[data-cmd] .board-stage * {
 }
 /* -------- the card check on the face (canvas/CardFace, lib/cardCheck) -------- */
 /* while a card is checked its body and citations shimmer faintly with an accent sweep (a static tint under reduced
-   motion) */
+   motion); while its code runs (an edit changing it) its body does */
 .bcell-body {
   position: relative;
   display: flex;
@@ -567,7 +567,8 @@ body[data-cmd] .board-stage * {
   min-height: 0;
   overflow: hidden;
 }
-.canvas-card.is-checking .bcell-body::after {
+.canvas-card.is-checking .bcell-body::after,
+.canvas-card.is-running .bcell-body::after {
   content: '';
   position: absolute;
   inset: -4px;
@@ -596,6 +597,7 @@ body[data-cmd] .board-stage * {
 }
 @media (prefers-reduced-motion: reduce) {
   .canvas-card.is-checking .bcell-body::after,
+  .canvas-card.is-running .bcell-body::after,
   .canvas-card.is-checking .bcell-take .refchip,
   .canvas-card.is-checking .bcell-take .refchip.refchip-value {
     animation: none;

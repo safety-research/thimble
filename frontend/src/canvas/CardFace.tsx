@@ -2,6 +2,7 @@
 // in the card's own box. The board's CellCard (Cell.tsx) adds hover chrome around it, and the card harness
 // (render.tsx) mounts it alone, so the image a check reads is the card the canvas draws. The face also shows the card
 // check's state: a shimmer while it runs, its replacement faded in once confirmed, and a mark at the takeaway's corner.
+// The body shimmers the same way while the card's code runs, as when an edit_card call is changing it.
 import { useContext, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type CSSProperties, type KeyboardEvent, type MouseEvent, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { ChatMarkdown } from '../chat/markdown'
@@ -86,6 +87,7 @@ function Face(p: CardFaceProps) {
   const swapped = useSwap(check?.fix?.id ?? null)
   const cls = ['canvas-card']
   if (check?.state === 'running') cls.push('is-checking')
+  if (running) cls.push('is-running')
   if (swapped) cls.push('is-swapped')
   return (
     <article

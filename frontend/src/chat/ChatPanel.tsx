@@ -41,6 +41,8 @@ import { SKIPPED_NOTE, StartGate, agentMode, startGateShown } from './StartGate'
 import { AgentCard, StoppedHold, stopSession, useAgentRows } from './AgentCard'
 import { ViewChip } from './ViewChip'
 import { replayHeld } from './pending'
+import { ThreadRows } from './ThreadRows'
+import { mainEdits, STAGE_TEXT, threadStage, type ThreadStage } from './threadStatus'
 import { composerTarget, pickItems, threadKind, threadLabels, threadNodes, type ThreadKind } from './threads'
 import { RoleChip } from './RoleChip'
 import { useChat, type ChatState } from './useChat'
@@ -222,8 +224,9 @@ export function subagentCount(agents: readonly ToolStep[]): string {
 
 /** The strip behind the composer while the current thread works: what it is doing, its steps and count, or null. Only
  * subagents are listed and counted; a session with no agents yet, or one that only makes calls, shows just the title
- * and its spinner. A dev thread that builds a view (`view`) says so. Pure. */
-export function taskStrip(kind: ThreadKind | null, running: boolean, rows: readonly Row[], metas: ReadonlyMap<string, ChatMeta> = new Map(), view = false): { title: string; steps: ToolStep[]; count: string } | null {
+ * and its spinner. A dev thread that builds a view (`view`) says so; a thread says where its question is (`stage`,
+ * threadStatus.threadStage). Pure. */
+export function taskStrip(kind: ThreadKind | null, running: boolean, rows: readonly Row[], metas: ReadonlyMap<string, ChatMeta> = new Map(), view = false, stage: ThreadStage | null = null): { title: string; steps: ToolStep[]; count: string } | null {
   if (!running || kind == null || kind === 'main') return null
   const session = (title: string, own: readonly Row[]) => {
     const steps = sessionSteps(own, metas, true)
@@ -239,7 +242,7 @@ export function taskStrip(kind: ThreadKind | null, running: boolean, rows: reado
   if (kind === 'dev') return session(view ? 'Building the view' : 'Working on the ticket', rows)
   if (kind === 'check') return session('Working', rows)
   // a thread's or an agent's calls are rows in its thread, never steps
-  return { title: 'Working', steps: [], count: '' }
+  return { title: kind === 'thread' && stage ? STAGE_TEXT[stage] : 'Working', steps: [], count: '' }
 }
 
 export function ChatPanel({ ws, onCollapse, dock = false }: { ws: string; onCollapse?: () => void; dock?: boolean }) {
@@ -534,7 +537,7 @@ export function ChatPanel({ ws, onCollapse, dock = false }: { ws: string; onColl
   const agentRows = useAgentRows(ws, [...new Set([...runningAgents.map((m) => m.id), ...orientIds])])
   const orienting = current === 'main' ? runningAgents.find((m) => threadKind(m) === 'orient') : undefined
   const metaMap = useMemo(() => new Map(chats.map((m) => [m.id, m])), [chats])
-  const strip = orienting ? taskStrip('orient', true, agentRows.get(orienting.id) ?? [], metaMap) : taskStrip(kind, running, chat.rows, metaMap, !!curMeta?.view)
+  const strip = orienting ? taskStrip('orient', true, agentRows.get(orienting.id) ?? [], metaMap) : taskStrip(kind, running, chat.rows, metaMap, !!curMeta?.view, kind === 'thread' ? threadStage(curMeta, running) : null)
   // the orientation the strip follows in main (its retry below), and the session whose strip it is in its own thread
   const stripMeta = orienting ?? (kind === 'orient' ? curMeta : null)
   const stripSession = orienting ?? (kind === 'orient' || kind === 'writer' || kind === 'check' || kind === 'step' || kind === 'dev' ? curMeta : null)
@@ -883,6 +886,8 @@ function ThreadView({ ws, meta, chat, main, skip, branches, detached }: { ws: st
     return withBranches(withApiErrors(foldRecords(records, skip)), records, branches.filter((b) => b.id !== meta.id))
   }, [main.records, cut, skip, branches, meta.id])
   const anchors = threadAnchors(meta)
+  // main's own edits of the cards the thread is anchored on, which main's log holds
+  const edits = useMemo(() => mainEdits(chat.records, main.rows, threadAnchors(meta)), [chat.records, main.rows, meta])
   return (
     <>
       <Rows rows={inherited} ws={ws} chat="main" />
@@ -902,7 +907,7 @@ function ThreadView({ ws, meta, chat, main, skip, branches, detached }: { ws: st
           }
         />
       )}
-      <Rows rows={chat.rows} ws={ws} chat={meta.id} streaming={chat.streaming} retry={threadRetry(chat.rows, chat.running, () => api.askAgain(ws, meta.id).then(() => chat.reload()))} />
+      <ThreadRows rows={chat.rows} edits={edits} ws={ws} chat={meta.id} streaming={chat.streaming} retry={threadRetry(chat.rows, chat.running, () => api.askAgain(ws, meta.id).then(() => chat.reload()))} />
       {canAskAgain(chat.records, chat.running) && <AskAgain ws={ws} id={meta.id} detached={detached} onAsked={chat.reload} />}
     </>
   )

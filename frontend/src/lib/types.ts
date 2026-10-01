@@ -1493,6 +1493,9 @@ export interface SessionEnded {
   at: string
 }
 export interface ChatMeta {
+  /** a thread: the fork of main that answers it, once main forked it (backend threads.fork_started); `ended` once it
+   * cannot be reached, and the next question forks anew */
+  fork?: { agent_id?: string | null; ended?: string | null } | null
   /** main only: the Claude Code session that is main, null or absent when none is attached */
   attached?: Attached | null
   /** main only: the session that was main last, while none is attached */
