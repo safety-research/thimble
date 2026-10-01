@@ -356,6 +356,29 @@
   font: var(--type-body-sm);
 }
 
+/* a folder open in the reader (FolderPane): its entries as the tree's rows, with each one's size or file count at the
+   right */
+.folder-pane {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 6px 8px;
+}
+.folder-pane .files-rows {
+  max-width: 720px;
+}
+.folder-pane .folder-pane-row {
+  padding-left: 10px;
+}
+.folder-pane-meta {
+  flex: none;
+  margin-left: auto;
+  padding-left: 16px;
+  color: var(--text-tertiary);
+  font: var(--type-body-sm);
+  font-variant-numeric: tabular-nums;
+}
+
 /* the search by name under the tree's head: the search field, then the files found as tree rows with the matched
    words in the accent's ink */
 .files-search {
