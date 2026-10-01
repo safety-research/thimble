@@ -298,3 +298,21 @@ def test_markdown_quoting_an_example_exchange_keeps_rendered_first(chats):
     (chats / "logs" / "guide.txt").write_text(doc)
     assert transcripts.sniff(chats / "logs" / "guide.txt", "logs/guide.txt")["score"] == transcripts.STRONG
     assert transcripts.sniff(chats / "logs" / "session.md", "logs/session.md")["score"] == transcripts.STRONG
+
+
+def test_a_citation_of_a_pdf_page_reads_only_that_page(chats, monkeypatch):
+    import pypdf
+
+    from app import pdfs
+
+    (chats / "docs" / "long.pdf").write_bytes(tiny_pdf([f"Page {n}" for n in range(1, 41)]))
+    monkeypatch.setattr(pdfs, "_TEXTS", type(pdfs._TEXTS)())
+    read = []
+    real = pypdf.PageObject.extract_text
+    monkeypatch.setattr(pypdf.PageObject, "extract_text", lambda self, *a, **k: read.append(1) or real(self, *a, **k))
+    got = client.get(f"{CHATS}/ref", params={"ref": "docs/long.pdf#p7"}).json()
+    assert got["excerpt"] == "Page 7" and got["meta"]["pages"] == 40 and len(read) == 1
+    client.get(f"{CHATS}/ref", params={"ref": "docs/long.pdf#p7"})
+    assert len(read) == 1, "a page is read once"
+    span = client.get(f"{CHATS}/ref", params={"ref": "docs/long.pdf#p10-p40"}).json()
+    assert span["meta"]["last_page"] == 40 and span["excerpt"].startswith("Page 10") and len(read) == 1 + pdfs.SPAN_PAGES_READ
