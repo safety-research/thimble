@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import csv
 import datetime as _dt
+import functools
 import io
 import json
 import re
@@ -172,20 +173,31 @@ def _name_of(v: Any) -> str | None:
     return None
 
 
-def _key_words(key: str) -> list[str]:
+_CAMEL = re.compile(r"([a-z0-9])([A-Z])")
+_CAPS = re.compile(r"([A-Z]+)([A-Z][a-z])")
+_WORD = re.compile(r"[a-z0-9]+")
+
+
+def _key_words(key: str) -> tuple[str, ...]:
     """A key's words, in any case style: `agent_speaker_id`, `speakerName`, `Speaker-Type`, `userID`; none for a key
     longer than KEY_MAX, which names no speaker, text or time."""
-    if len(key) > KEY_MAX:
-        return []
-    s = re.sub(r"([a-z0-9])([A-Z])", r"\1 \2", key)
-    s = re.sub(r"([A-Z]+)([A-Z][a-z])", r"\1 \2", s)
-    return re.findall(r"[a-z0-9]+", s.lower())
+    return _split_key(key) if len(key) <= KEY_MAX else ()
+
+
+@functools.lru_cache(maxsize=4096)
+def _split_key(key: str) -> tuple[str, ...]:
+    return tuple(_WORD.findall(_CAPS.sub(r"\1 \2", _CAMEL.sub(r"\1 \2", key)).lower()))
 
 
 def _speaker_rank(key: str) -> tuple[int, int, int, int] | None:
     """How surely a key's name says it holds who speaks, lower first: (weak, tail, compound, order), the tail 0 for a
     name, 1 for an id, 2 for a type, or a role beside another word (`speaker_type`); None for a key that names no
     speaker."""
+    return _rank_key(key) if len(key) <= KEY_MAX else None
+
+
+@functools.lru_cache(maxsize=4096)
+def _rank_key(key: str) -> tuple[int, int, int, int] | None:
     words = _key_words(key)
     if not words or len(words) > 4 or words[-1] not in SPEAKER_TAILS or "".join(words) == "useragent":
         return None

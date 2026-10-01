@@ -412,7 +412,7 @@ def test_a_speaker_key_that_holds_ids_offers_transcript_but_leaves_the_table_fir
 
 
 def test_a_long_key_is_read_as_no_speaker_at_once():
-    assert transcripts._key_words("A" * 20_000) == []
+    assert transcripts._key_words("A" * 20_000) == ()
     assert transcripts._speaker_rank("Speaker" * 20) is None
 
 
