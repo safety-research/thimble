@@ -6,7 +6,8 @@
 // whole-file JSON transcript (a chat export, an eval log) as the turns the server parses from it, a page at a time.
 // JSON lines in a file the server pages as text are parsed here, line by line. While system records are hidden, a long
 // run of them (HIDDEN_RUN_NOTE or more) says in one line how many it hides, so the view is never blank while the reader
-// pages past them.
+// pages past them. A record with no words to show (a turn that holds only redacted thinking, a post with an empty body)
+// gets no row, unless a citation points at it; Raw shows every line.
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Button } from '../../components/Button'
 import { Chip } from '../../components/Chip'
@@ -115,6 +116,11 @@ function errorBlockIndexes(rec: any): Set<number> {
     k++
   }
   return out
+}
+
+/** Whether a record's blocks hold any words to show. Pure. */
+export function hasWords(blocks: readonly Block[]): boolean {
+  return blocks.some((b) => b.text.trim() !== '')
 }
 
 export function Transcript(props: ViewProps) {
@@ -270,6 +276,7 @@ function Posts({ path, records, targetRef, hint, derived }: { path: string; reco
   const rootRef = useRef<HTMLDivElement | null>(null)
   const { target, hit } = useTarget(targetRef, path, rootRef, [records])
   const keys = useMemo(() => keysFor(hint, records.slice(0, 20).map((r) => r.record)), [hint, records])
+  const asked = targetOf(targetRef, path)?.line
   return (
     <div className="reader-transcript reader-msgboard" ref={rootRef}>
       {records.map((rec) => {
@@ -280,8 +287,10 @@ function Posts({ path, records, targetRef, hint, derived }: { path: string; reco
         const value = pick(r, keys.body)
         const body = textOf(value)
         const header = [author, present(ctx) && typeof ctx !== 'object' ? String(ctx) : null, ts].filter(Boolean).join(' · ')
-        // an empty body leaves the server a raw block of the whole record; the post says it is empty instead
+        // an empty body leaves the server a raw block of the whole record: the post has no row, or, when a citation
+        // points at it, says it is empty
         const empty = typeof body === 'string' && !body.trim()
+        if (empty && rec.line !== asked) return null
         const fields = value == null && rec.blocks.every((b) => b.kind === 'raw') ? restFields(r, keys) : null
         const own = !derived && rec.blocks.length > 0 && !rec.blocks.every((b) => b.kind === 'raw' && body != null)
         return (
@@ -504,6 +513,7 @@ function TurnsTranscript({ workspace, path, targetRef }: ViewProps) {
   const titled = data.n_groups > 1 || Object.values(data.groups).some((g) => g.title)
   const out: ReactNode[] = []
   turns.forEach((t, k) => {
+    if (!t.text.trim() && holder?.i !== t.i) return
     const g = t.group != null ? data.groups[String(t.group)] : undefined
     if (titled && g && (k === 0 || turns[k - 1].group !== t.group))
       out.push(
@@ -592,18 +602,21 @@ function StreamTranscript({ path, page, targetRef, transcript }: ViewProps) {
     if (rec && !CONVERSATIONAL.has(rec.record?.type)) setShowSystem(true)
   }, [target, records, showSystem])
 
+  // a conversational record with no words to show gets no row, unless a citation points at it
+  const asked = targetOf(targetRef, path)?.line
+  const rows = useMemo(() => records.filter((r) => !CONVERSATIONAL.has(r.record?.type) || hasWords(r.blocks) || r.line === asked), [records, asked])
   const runs = useMemo(
     () =>
       hiddenRuns(
-        records.map((r) => r.record?.type),
-        records.map((r) => r.line),
+        rows.map((r) => r.record?.type),
+        rows.map((r) => r.line),
       ),
-    [records],
+    [rows],
   )
   const out: ReactNode[] = []
   let prevSession: string | undefined
   let sessionNo = 1
-  records.forEach((rec, i) => {
+  rows.forEach((rec, i) => {
     const r = rec.record ?? {}
     const sid: string | undefined = rec.meta?.session_id ?? r.session_id
     if (sid && i > 0 && prevSession && sid !== prevSession) {

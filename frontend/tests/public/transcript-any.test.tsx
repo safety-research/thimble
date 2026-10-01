@@ -184,6 +184,32 @@ describe('JSON lines', () => {
     expect(cards[0].textContent).toContain('I will list the files.')
     expect(el.querySelector('.reader-syschip')?.textContent).toContain('1')
   })
+  test('a record with no words to show gets no row, unless a citation points at it', async () => {
+    const turn = (n: number, content: { type: string; text?: string; thinking?: string }[]): SourceRecord => ({
+      line: n,
+      record: { type: 'assistant', session_id: 's1', message: { role: 'assistant', content } },
+      blocks: content.filter((c) => c.type === 'text').map((c) => ({ kind: 'text' as const, text: c.text ?? '' })),
+      meta: {},
+    })
+    const records = [turn(1, [{ type: 'text', text: 'Reading the logs.' }]), turn(2, [{ type: 'thinking', thinking: '' }]), turn(3, [{ type: 'text', text: '  ' }]), turn(4, [{ type: 'text', text: 'Done.' }])]
+    const page: SourcePage = { path: 's.jsonl', kind: 'agent', total_lines: 4, start: 1, records }
+    const lines = (el: HTMLElement) => [...el.querySelectorAll('.reader-card')].map((c) => c.getAttribute('data-line'))
+    expect(lines(await mount(<View workspace="w" path="s.jsonl" kind="agent" page={page} loadMore={() => undefined} transcript={{ format: 'stream', score: 1 }} />))).toEqual(['1', '4'])
+    // jsdom has no scrollIntoView, which brings a citation's record into view
+    Element.prototype.scrollIntoView = () => undefined
+    try {
+      expect(lines(await mount(<View workspace="w" path="s.jsonl" kind="agent" page={page} targetRef="s.jsonl#L2" loadMore={() => undefined} transcript={{ format: 'stream', score: 1 }} />))).toEqual(['1', '2', '4'])
+    } finally {
+      delete (Element.prototype as Partial<Element>).scrollIntoView
+    }
+    const posts: SourceRecord[] = [
+      { author: 'ana', body: 'hi' },
+      { author: 'bo', body: '' },
+    ].map((r, i) => ({ line: i + 1, record: r, blocks: [r.body ? { kind: 'text', text: r.body } : { kind: 'raw', text: JSON.stringify(r) }], meta: {} }))
+    const board: SourcePage = { path: 'b.jsonl', kind: 'text', total_lines: 2, start: 1, records: posts }
+    const hint: TranscriptHint = { format: 'messages', score: 0.95, keys: { speaker: 'author', text: 'body' } }
+    expect(lines(await mount(<View workspace="w" path="b.jsonl" kind="text" page={board} loadMore={() => undefined} transcript={hint} />))).toEqual(['1'])
+  })
   test('lines that each hold a conversation show one card per line, its turns inside', async () => {
     const records: SourceRecord[] = [1, 2].map((n) => ({
       line: n,
