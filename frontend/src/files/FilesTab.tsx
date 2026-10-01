@@ -287,7 +287,8 @@ export function FilesTab({ ws, active, focused = active }: { ws: string; active:
   // whether the tabs are the analyst's yet: kept ones, a file opened, or the defaults once the root is listed
   const [seeded, setSeeded] = useState(kept.tabs.length > 0)
   const [sideOpen, setSideOpen] = useFlag(ws, 'filesSide', true)
-  const [viewSideChoice, setViewSideChoice] = useSessionChoice(ws, 'viewSide')
+  const [ownSideChoice, setOwnSideChoice] = useSessionChoice(ws, 'viewSide')
+  const [fallbackSideChoice, setFallbackSideChoice] = useSessionChoice(ws, 'viewSideFallback')
   const [treeOpen, setTreeOpen] = useFlag(ws, 'filesTree', true)
   const [labelsOpen, setLabelsOpen] = useFlag(ws, 'filesLabels', true)
   const [editing, setEditing] = useState<string | 'new' | null>(null)
@@ -309,14 +310,18 @@ export function FilesTab({ ws, active, focused = active }: { ws: string; active:
   // Sidebars (shell/dock.tsx) dock only while the body holds them beside the view or reader at a readable width. A
   // view draws its own label controls, so its Labels sidebar starts hidden and shows when those controls open a label's
   // editor; beside a view built without label controls it also shows while a label is on or a label marks the view's
-  // files, so turning the last label off there keeps it. The analyst's hide or show holds for the tab's session. When it
+  // files, so turning the last label off there keeps it. The analyst's hide or show holds for the tab's session, apart
+  // for views with label controls and views without, so hiding it beside one kind leaves the other's as it was. When it
   // cannot dock it lies over the view's left edge. The File browser's sidebar folds to its show button when it cannot
   // dock.
   const dock = useDock(sideWidth)
   const shownView = slugOfKey(bar) ? views.find((v) => v.slug === slugOfKey(bar)) ?? null : null
+  const fallbackSide = !!shownView && !shownView.label_controls
+  const viewSideChoice = fallbackSide ? fallbackSideChoice : ownSideChoice
+  const setViewSideChoice = fallbackSide ? setFallbackSideChoice : setOwnSideChoice
   // beside a view: the labels that mark its files, which come first
   const marking = useMemo(() => (shownView?.claims ? viewLabels(labels.all, labels.presence, shownView.claims) : null), [shownView, labels.all, labels.presence])
-  const viewSideOpen = viewSideChoice ?? (!shownView?.label_controls && (labels.on.length > 0 || !!marking?.size))
+  const viewSideOpen = viewSideChoice ?? (fallbackSide && (labels.on.length > 0 || !!marking?.size))
   const viewSideOver = viewSideOpen && !dock.docks
   const side = useFoldingSide(dock.docks, sideOpen, setSideOpen)
   const root = folders.store.get('')
