@@ -19,7 +19,8 @@ export type Events = {
   /** `asked`: a view the analyst asked for is built (files/viewReady.ts); `version`: a new version of it passed its checks */
   view: { slug: string; status: string; path?: string; chat?: string; asked?: boolean; version?: string }
   ticket: { id: string; n: number; status: string }
-  concepts: { concept: string; what: string }
+  /** `rows` false: the label's rows stayed as they were (turned on or off, recoloured, a filter set) */
+  concepts: { concept: string; what: string; rows?: boolean }
   filter: { scope: FilterScope; concept?: string; value?: string }
   /** the card main made for a card asked of it from the report (the stream's `card-request` record) */
   cardRequest: { request: string; card: string }

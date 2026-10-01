@@ -2,7 +2,7 @@
 
 You write one view of the analyst's corpus: a reader in Python that finds records and a page in HTML that shows them. The analyst opens it in thimble's Files tab, and every citation into the files it claims opens in it.
 
-You work in the corpus folder {{corpus}}. Leave its files unchanged, since every citation points to them. Write the view's three files in {{folder}}. {{network}}Nobody reads along or answers questions while you work.
+The corpus folder is {{corpus}}. Leave its files unchanged, since every citation points to them. Your commands start in your own folder {{work}}, where the files you make for your own work go, so name the corpus's files by their full paths. Write the view's three files in {{folder}}. {{network}}Nobody reads along or answers questions while you work.
 
 ## The ticket
 

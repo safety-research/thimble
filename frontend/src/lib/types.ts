@@ -108,7 +108,7 @@ export type WsEvent = { ts?: string; seq?: number } & (
   | { type: 'report'; slug: string; status: 'generating' | 'generated' | 'failed' | 'verified' | 'figures' | 'rewritten' | string; span?: string; run?: string }
   | { type: 'view'; slug: string; status: 'queued' | 'building' | 'built' | 'failed' | 'deleted' | string; path?: string; chat?: string; version?: string }
   | { type: 'ticket'; id: string; n: number; status: string }
-  | { type: 'concepts'; concept: string; what: 'defined' | 'applied' | 'deleted' | string }
+  | { type: 'concepts'; concept: string; what: 'defined' | 'applied' | 'deleted' | string; rows?: boolean }
   | { type: 'filter'; scope: FilterScope; concept?: string; value?: string }
   | { type: 'check'; id: string; doc: string; status: CheckRunStatus | string; run?: string; chat?: string }
   | { type: 'job'; status: string }

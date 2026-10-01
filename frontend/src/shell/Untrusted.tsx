@@ -1,7 +1,7 @@
 // A warning line under the top bar, in the page's flow so it covers none of the panes, while Claude Code does not trust
-// thimble's workspaces folder (the settings' `untrusted`), so the orientation, its critic and the writers cannot start.
-// It names the command that trusts the folder, is read again when the window regains focus, and Hide dismisses it for
-// this tab.
+// thimble's workspaces folder (the settings' `untrusted`), so the orientation, its critic, the writers and view builds
+// cannot start. It names the command that trusts the folder, is read again when the window regains focus, and Hide
+// dismisses it for this tab.
 import { useEffect, useState } from 'react'
 import { Button } from '../components/Button'
 import { Mark } from '../components/Marks'
@@ -32,8 +32,8 @@ export function Untrusted({ ws }: { ws: string }) {
     <div className="shell-untrusted" role="alert">
       <Mark kind="unchecked" label="warning" />
       <span>
-        Claude Code does not trust thimble's workspaces folder, so the orientation, its critic and the writers can't
-        start. To trust it, run this in a terminal: <code>{untrusted.command}</code>
+        Claude Code does not trust thimble's workspaces folder, so the orientation, its critic, the writers and view
+        builds can't start. To trust it, run this in a terminal: <code>{untrusted.command}</code>
       </span>
       <Button variant="secondary" size="sm" onClick={() => setHidden(true)}>
         Hide

@@ -276,8 +276,8 @@ async def test_auto_is_claude_code_s_auto_mode_and_a_call_it_refuses_waits_for_t
     run = await orient_session.start(CORPUS, "")
     assert run.mode == "auto" and _flag(run.argv) == "auto"
     settings = json.loads(run.argv[run.argv.index("--settings") + 1])
-    assert settings["hooks"]["PreToolUse"] == agent_session.permission_hooks(CORPUS, auto=True, wait=True)["PreToolUse"]
-    assert settings["hooks"]["PermissionDenied"] == agent_session.permission_hooks(CORPUS)["PermissionDenied"]
+    assert settings["hooks"]["PreToolUse"] == agent_session.session_hooks(CORPUS, KEY, auto=True, wait=True)["PreToolUse"]
+    assert settings["hooks"]["PermissionDenied"] == agent_session.session_hooks(CORPUS, KEY)["PermissionDenied"]
     inp = {"command": "python3 -c 'print(6*7)'", "description": "Multiply"}
     body = dict(session=KEY, event="PermissionDenied", tool_name="Bash", tool_input=inp, agent_id="a2",
                 tool_use_id="toolu_r1", reason="Runs code the analyst did not ask for")
@@ -364,7 +364,7 @@ async def test_a_switch_into_auto_keeps_the_config_s_asks_waiting_for_the_analys
         return json.loads(run.argv[run.argv.index("--settings") + 1])["hooks"].get("PreToolUse")
 
     agent_session._set_flag(run, "auto")
-    assert pre() == agent_session.permission_hooks(CORPUS, auto=True, wait=True)["PreToolUse"]
+    assert pre() == agent_session.session_hooks(CORPUS, KEY, auto=True, wait=True)["PreToolUse"]
     agent_session._set_flag(run, "default")
     assert not pre()
     await orient_session.stop(CORPUS)

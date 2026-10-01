@@ -135,11 +135,12 @@ LINKS_DIR = "links"  # under <home>: the link each session's Stop hook shows onc
 # while Claude Code does not trust thimble's workspaces folder (untrusted): the line for the analyst's terminal, with the
 # command that trusts it, and the line for a model, which leaves that command to the analyst
 UNTRUSTED_LINE = ("thimble: WARNING - Claude Code does not trust thimble's workspaces folder {folder}, so the orientation, "
-                  "its critic and the writers can't start. To trust it, run this in a terminal:\n  {command}")
+                  "its critic, the writers and view builds can't start. To trust it, run this in a terminal:\n"
+                  "  {command}")
 UNTRUSTED_MODEL_LINE = ("thimble: WARNING - Claude Code does not trust thimble's workspaces folder, so the orientation, "
-                        "its critic and the writers can't start. The analyst trusts it by running thimble's installer "
-                        "again in their own terminal with --trust-workspaces, the command their terminal and thimble's "
-                        "browser show.")
+                        "its critic, the writers and view builds can't start. The analyst trusts it by running "
+                        "thimble's installer again in their own terminal with --trust-workspaces, the command their "
+                        "terminal and thimble's browser show.")
 FRESH_LINE = ("thimble: Cleared the session at {cwd}. The last run is archived at {path}. To bring it back, run: "
               "/thimble restore {name}")
 NOTHING_ARCHIVED_LINE = "thimble: this folder had no workspace to archive"
@@ -1412,7 +1413,7 @@ class Installed(NamedTuple):
 def _claude_json(claude: str, args: list[str], cwd: Path) -> list[Any]:
     """The list a `claude ... --json` listing prints, [] when it fails or prints something else."""
     r = subprocess.run([claude, *args, "--json"], cwd=cwd, capture_output=True, text=True,
-                       timeout=PLUGIN_LIST_TIMEOUT_S, stdin=subprocess.DEVNULL, check=False)
+                       timeout=PLUGIN_LIST_TIMEOUT_S, stdin=subprocess.DEVNULL, check=False, env=config.launch_environ())
     out = json.loads(r.stdout) if r.returncode == 0 and r.stdout.strip() else []
     return out if isinstance(out, list) else []
 
@@ -1932,7 +1933,7 @@ def sandbox_lines(commands: bool = True) -> list[str]:
     """The doctor's `bash sandbox` line: whether Claude Code's Bash sandbox can run (cc_settings.sandbox_ok), which the
     agents' Bash then uses unless thimble's config says `sandbox.use` "never", and, when it cannot run, what it lacks and
     with `commands` the root commands that install it. Where it runs, the line names the empty `.claude/.cc-writes/`
-    folder Claude Code creates in the folder a sandboxed command runs in."""
+    folder Claude Code creates in the folder a sandboxed command starts in, which is the agent's own folder."""
     from . import cc_settings, userconf  # noqa: PLC0415
 
     try:
@@ -1957,7 +1958,7 @@ def sandbox_lines(commands: bool = True) -> list[str]:
                    f"a code ticket runs its checks and test server outside it, so it asks you before it starts: {why}")
         return ["  bash sandbox: runs (every agent's Bash runs in it: no writes outside the agent's folder and no "
                 f"network unless the agent's network is \"on\"; {tickets}; Claude Code's sandbox adds an empty "
-                ".claude/.cc-writes/ folder where its commands run, the corpus folder among them)"]
+                ".claude/.cc-writes/ folder to the agent's own folder, where its commands start)"]
     after = ("thimble's config (sandbox.enforce) refuses to start the agents" if box.get("enforce") else
              "the agents' Bash runs outside it, under each agent's permission mode")
     head = "  bash sandbox: off, missing " + ", ".join(missing) + "; " + after
@@ -1992,7 +1993,7 @@ def claude_code_version() -> str | None:
     if not exe:
         return None
     try:
-        out = subprocess.run([exe, "--version"], capture_output=True, text=True, timeout=10)
+        out = subprocess.run([exe, "--version"], capture_output=True, text=True, timeout=10, env=config.launch_environ())
     except (OSError, subprocess.SubprocessError):
         return None
     v = version_tuple(out.stdout or out.stderr)
@@ -2096,7 +2097,8 @@ def trust_command() -> str:
 
 def untrusted(workspaces: Path) -> Path | None:
     """The workspaces folder when Claude Code does not trust it, by its own entry or one above it, so the background
-    sessions of the orientation, its critic and the writers cannot start (bg_session.trusted); None when it does."""
+    sessions of the orientation, its critic, the writers and view builds cannot start (bg_session.trusted); None when
+    it does."""
     from . import bg_session, claude_changes  # noqa: PLC0415
 
     data = claude_changes._read(bg_session.claude_json())
@@ -2104,15 +2106,15 @@ def untrusted(workspaces: Path) -> Path | None:
 
 
 def trust_line(workspaces: Path, commands: bool = True) -> str:
-    """Whether Claude Code trusts the workspaces folder, which the orientation's, its critic's and the writers'
-    background sessions need (untrusted), and with `commands` the command that trusts it."""
+    """Whether Claude Code trusts the workspaces folder, which the background sessions of the orientation, its critic,
+    the writers and view builds need (untrusted), and with `commands` the command that trusts it."""
     from . import bg_session  # noqa: PLC0415
 
     path = bg_session.claude_json()
     if not untrusted(workspaces):
         return f"Claude Code trusts {workspaces} ({path})"
-    return (f"Claude Code does not trust {workspaces} ({path}), so the orientation, its critic and the writers can't "
-            "start" + (f"; `{trust_command()}` trusts it" if commands else ""))
+    return (f"Claude Code does not trust {workspaces} ({path}), so the orientation, its critic, the writers and view "
+            "builds can't start" + (f"; `{trust_command()}` trusts it" if commands else ""))
 
 
 def human_bytes(n: float) -> str:

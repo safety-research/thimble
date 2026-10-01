@@ -34,6 +34,9 @@ from pathlib import Path
 argv = sys.argv[1:]
 out = Path(os.environ["FAKE_DIR"])
 (out / "argv.json").write_text(json.dumps(argv))
+(out / "process_env.json").write_text(json.dumps(dict(os.environ)))
+if "--settings" in argv:  # as Claude Code does: the settings' env over the process's
+    os.environ.update(json.loads(argv[len(argv) - 1 - argv[::-1].index("--settings") + 1]).get("env") or {})
 (out / "env.json").write_text(json.dumps({k: os.environ.get(k) for k in ("THIMBLE_SESSION", "THIMBLE_CHANNEL", "XDG_CACHE_HOME", "MPLCONFIGDIR",
                                                                         "CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD", "THIMBLE_RENDERED_PROMPTS",
                                                                         "CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS")}
@@ -168,7 +171,7 @@ async def test_every_session_asks_through_the_permission_hook_and_no_prompt_tool
     hooks = json.loads(argv[argv.index("--settings") + 1])["hooks"]["PermissionRequest"]
     [hook] = hooks[0]["hooks"]
     assert hooks[0]["matcher"] == "*" and hook["timeout"] == permission_hook.TIMEOUT == 86_400
-    assert "permission_hook.py" in hook["command"] and hook["command"].endswith(f"--ws {CORPUS}")
+    assert "permission_hook.py" in hook["command"] and f"--ws {CORPUS} --session {KEY} " in hook["command"]
     settings = json.loads(argv[argv.index("--settings") + 1])
     assert settings["hooks"]["PermissionDenied"] == hooks and "PreToolUse" not in settings["hooks"]
     assert run.mode == "manual" and _flag(argv) == "default", "no row and no mode main reported: Manual"

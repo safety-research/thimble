@@ -3,13 +3,16 @@ writer's (write_session.py), a report check's run (checks.py) and a critique's (
 session of its own with its own system prompt rather than a fork of main.
 
 Start. The server runs `claude -p --agents <json> --agent <name> --session-id <uuid> --output-format stream-json …` in
-the corpus folder (command) and writes the first message on stdin, since Linux refuses an argument over 128 KiB. The
-agent is defined for that session alone with `--agents`. Its file names no tools, so it has every tool of a default
-Claude Code session less the session's --disallowedTools: LATER_TOOLS and the thimble tools that are not its own
-(not_own). shared.md is appended with --append-system-prompt, since Claude Code applies an agent's `skills` to
+the session's work folder (command, the fence) and writes the first message on stdin, since Linux refuses an argument
+over 128 KiB. The agent is defined for that session alone with `--agents`. Its file names no tools, so it has every tool
+of a default Claude Code session less the session's --disallowedTools: LATER_TOOLS and the thimble tools that are not
+its own (not_own). shared.md is appended with --append-system-prompt, since Claude Code applies an agent's `skills` to
 subagents only. The session inherits the analyst's settings; thimble layers on the role's model, effort (also as
 CLAUDE_CODE_EFFORT_LEVEL) and fast mode. THIMBLE_SESSION names the session for its shim (`orient`, `writer:<doc>`,
-`critique:orient`, `check:<id>:<doc>`).
+`critique:orient`, `check:<id>:<doc>`), and THIMBLE_SESSION_TOKEN proves that name to the server (hook_auth). These and
+the rest of the session's own environment go in its --settings `env` (settings_env), never in the environment of its
+process, since Claude Code's background service keeps the environment of the process that started it for the user's
+later sessions (config.launch_environ).
 
 Permissions. A --print session has no terminal, so a PermissionRequest hook (permission_hook.py) hands each request of
 the session, its subagents and workflow agents to ask, which shows it on the chat's card with Allow and Deny. A hook is
@@ -51,13 +54,15 @@ the process's --permission-mode must change, so the follower pauses the process 
 result), answers waiting requests with `## session-mode-switching` (_release), ends the process (_halt) and resumes it
 with --resume in the new mode and `## session-mode-changed` on stdin.
 
-The fence. A caller that passes `work` keeps the corpus folder read-only and the session's writes in that work folder.
-The process runs in the work folder with the corpus added via `--add-dir`, since Claude Code's Bash sandbox mounts files
-over dangerous names in the process's own folder, which a write deny of that folder would break. Its --settings deny
-Edit in the corpus and exclude the CLAUDE.md files of the work folder's ancestry (memory_excludes). Where the sandbox
-can run it has no network. A SubagentStart hook gives each subagent its own scratch folder, since the sandbox gives all
-agents one $TMPDIR. A caller that passes `unasked` (a writer, a critique, a check's run) also auto-allows Bash in the
-sandbox and edits in the work folder (sandbox_allow.py).
+The fence. Every caller passes its session's `work` folder, which keeps the corpus folder read-only and the session's
+writes in that work folder. The process runs in the work folder with the corpus added via `--add-dir`, never in the
+corpus folder, since Claude Code's Bash sandbox mounts files over dangerous names in the process's own folder, which a
+write deny of that folder would break, and makes a folder of its own there. Its Bash commands start in the work folder,
+whatever folder an earlier command moved to (with_home_shell). Its --settings deny Edit in the corpus and exclude the
+CLAUDE.md files of the work folder's ancestry (memory_excludes). Where the sandbox can run, it reaches the network only
+while the agent's `network` is on, as it is by default. A SubagentStart hook gives each subagent its own scratch folder,
+since the sandbox gives all agents one $TMPDIR. A caller that passes `unasked` (a writer, a critique, a check's run)
+also auto-allows Bash in the sandbox and edits in the work folder (sandbox_allow.py).
 
 The config. thimble's config (userconf.py) adds its rules to the session's --settings (userconf.Session.settings): an
 ask or a deny of every install or download command (`installs`), the web tools allowed or taken away (`web`), auto
@@ -134,8 +139,8 @@ from urllib.parse import urlsplit
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
-from . import (agents, bg_session, calls as calls_store, cc_settings, config, modes, orientation, permission_hook,
-               procs, retry, sandbox_allow, session, tools, userconf)
+from . import (agents, bg_session, calls as calls_store, cc_settings, config, hook_auth, modes, orientation,
+               permission_hook, procs, retry, sandbox_allow, session, tools, userconf)
 from .ledger import atomic_write_text
 
 log = logging.getLogger("thimble.agent_session")
@@ -222,6 +227,9 @@ RENDERED_ENV = "THIMBLE_RENDERED_PROMPTS"
 # Claude Code loads an added directory's CLAUDE.md only with this set: the corpus's own, for a fenced session whose
 # process runs in its work folder (module note, the fence)
 MEMORY_ENV = "CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD"
+# each Bash command starts in the process's own folder, since a `cd` would carry over and Claude Code's sandbox makes a
+# folder of its own in whatever folder a sandboxed command starts in, the corpus folder among them
+HOME_SHELL_ENV = "CLAUDE_BASH_MAINTAIN_PROJECT_WORKING_DIR"
 # the files under a folder that Claude Code loads as memory (claudeMdExcludes takes absolute paths and globs)
 MEMORY_FILES = ("CLAUDE.md", "CLAUDE.local.md", ".claude/CLAUDE.md", ".claude/rules/**")
 ALERT_DIALOG = "This session is waiting on a dialog it cannot show. Stop it, or run it again."
@@ -443,6 +451,12 @@ def settings_json(effort: str, env: dict[str, str] | None = None, **extra: Any) 
     return json.dumps({**extra, "env": {**(env or {}), cc_settings.EFFORT_ENV: effort}})
 
 
+def with_home_shell(settings: dict[str, Any]) -> dict[str, Any]:
+    """`settings` with HOME_SHELL_ENV in its `env`, which a background session gets too, since its process starts with
+    the background service's environment."""
+    return {**settings, "env": {**(settings.get("env") or {}), HOME_SHELL_ENV: "1"}}
+
+
 def role_agent(agent: dict[str, Any], conf: dict[str, Any]) -> dict[str, Any]:
     """An agent definition with the model and effort of its role in the settings popover (config.models_for) in place
     of its file's, where the role names them."""
@@ -515,17 +529,20 @@ def command(agent_args: list[str], sid: str, effort: str, settings: str, cwd: Pa
             *append, *mode, "--allowedTools", *own_rules(), *deny]
 
 
-def environ(key: str, extra: dict[str, str] | None = None) -> dict[str, str]:
-    """The session's environment: the server's, less the Claude Code session identity it may carry (config.passes),
-    with main's CLAUDE_CONFIG_DIR (config.claude_env), THIMBLE_SESSION, no ceiling on --print's background wait
-    (BG_WAIT_ENV), a 4 h idle limit on a thimble call (IDLE_TIMEOUT_ENV), and `extra` on top."""
-    env = config.claude_env(config.passed_environ())
-    env.pop("THIMBLE_CHANNEL", None)  # the session hears no browser events; main does
-    env[SESSION_ENV] = key
-    env[BG_WAIT_ENV] = BG_WAIT_MS
-    env[IDLE_TIMEOUT_ENV] = IDLE_TIMEOUT_MS
-    env.update(extra or {})
-    return env
+def environ() -> dict[str, str]:
+    """The environment of the session's `claude` process: config.launch_environ, the server's less the Claude Code
+    session identity it may carry and thimble's own variables, with main's CLAUDE_CONFIG_DIR. Nothing of the session's
+    own goes here, since Claude Code's background service may keep it for other sessions (settings_env)."""
+    return config.launch_environ()
+
+
+def settings_env(c: str, key: str, extra: dict[str, str] | None = None) -> dict[str, str]:
+    """The --settings `env` of the session `key` of workspace `c` (config.session_env): the server's THIMBLE_* values,
+    `key` as THIMBLE_SESSION with a token that proves it (hook_auth.session_token), no THIMBLE_CHANNEL, since the
+    session hears no browser events, no ceiling on --print's background wait (BG_WAIT_ENV), a 4 h idle limit on a
+    thimble call (IDLE_TIMEOUT_ENV), and `extra` on top."""
+    return config.session_env({SESSION_ENV: key, hook_auth.SESSION_TOKEN_ENV: hook_auth.session_token(c, key),
+                               BG_WAIT_ENV: BG_WAIT_MS, IDLE_TIMEOUT_ENV: IDLE_TIMEOUT_MS, **(extra or {})})
 
 
 def _venv() -> Path:
@@ -664,10 +681,18 @@ def permission_hooks(c: str, auto: bool = False, session: str = "", home: str = 
     return out
 
 
-def call_hooks(c: str) -> dict[str, Any]:
+def session_hooks(c: str, key: str, auto: bool = False, wait: bool = False) -> dict[str, Any]:
+    """permission_hooks for the session `key` of workspace `c`, which its hook's command line names, with thimble's
+    home."""
+    return permission_hooks(c, auto, session=key, home=str(hook_auth.home()), wait=wait)
+
+
+def call_hooks(c: str, session: str = "") -> dict[str, Any]:
     """The `hooks` that tell a session's model the ref of each call it made (module note, calls): call_ref.py after
-    every call, failed ones included, run by this server's interpreter without site-packages."""
+    every call, failed ones included, run by this server's interpreter without site-packages, told the session's key
+    `session` on its command line."""
     command = f"{shlex.quote(sys.executable)} -S {shlex.quote(str(CALL_REF_HOOK))} --ws {shlex.quote(c)}"
+    command += f" --session {shlex.quote(session)}" if session else ""
     hook = [{"matcher": "*", "hooks": [{"type": "command", "command": command, "timeout": CALL_REF_TIMEOUT_S}]}]
     return {event: hook for event in CALL_REF_EVENTS}
 
@@ -687,7 +712,7 @@ def start_mode(c: str, agent: str, *, chat: str | None = None, background: bool 
 async def start(c: str, key: str, *, role: str, title: str, agent_args: list[str], effort: str, settings: str,
                 prompt: str, agent_type: str, on_start: Callable[[Run], None] | None = None,
                 on_end: Callable[[Run, str, str], None] | None = None, append_shared: bool = True,
-                parent: str = agents.MAIN_ID, model: str = "", work: Path | None = None, calls: bool | str = False,
+                parent: str = agents.MAIN_ID, model: str = "", work: Path, calls: bool | str = False,
                 agent: str, disallowed: "list[str] | tuple[str, ...]" = (), patient: bool = False,
                 unasked: bool = False, call: str | None = None,
                 resume: str | None = None, chat: str | None = None, run_k: int = 0,
@@ -695,12 +720,12 @@ async def start(c: str, key: str, *, role: str, title: str, agent_args: list[str
                 on_pid: Callable[[Run], None] | None = None, restarted: bool = False, background: bool = False,
                 **fields: Any) -> Run:
     """Start the session `key` for workspace `c` with its first message and follow it into an agent chat of `role` under
-    `parent`; RuntimeError when it runs already or claude cannot be started. `on_start`/`on_end` hear the run's start and
-    end; `agent` (its row of modes.AGENTS) and `patient` govern permissions; `work` and `unasked` fence it; `calls` numbers its
-    calls; `resume`, `chat`, `run_k` and `leads` continue an earlier session; `restarted` marks a resume after a server
-    restart; `call` is main's tool call that started it; `announce` False writes no row into the parent chat; `on_pid` hears
-    each process change; `background` runs it as a Claude Code background session (module note); `fields` land on the
-    chat's meta."""
+    `parent`; RuntimeError when it runs already or claude cannot be started. `on_start`/`on_end` hear the run's start
+    and end; `agent` (its row of modes.AGENTS) and `patient` govern permissions; `work`, the folder its process runs in,
+    never the corpus folder, and `unasked` fence it; `calls` numbers its calls; `resume`, `chat`, `run_k` and `leads`
+    continue an earlier session; `restarted` marks a resume after a server restart; `call` is main's tool call that
+    started it; `announce` False writes no row into the parent chat; `on_pid` hears each process change; `background`
+    runs it as a Claude Code background session (module note); `fields` land on the chat's meta."""
     if running(c, key):
         raise RuntimeError(f"the session {key} is running")
     if resume and chat and (agents.meta_or_none(c, chat) or {}).get("background"):
@@ -708,50 +733,51 @@ async def start(c: str, key: str, *, role: str, title: str, agent_args: list[str
     if background and not bg_session.trusted(c):  # `claude --bg` would refuse the folder
         raise RuntimeError(tools.hint("bg-untrusted", workspaces=str(config.WORKSPACES_DIR)))
     cwd = config.corpus_dir(c)
-    folder = work if work is not None else cwd  # where the process runs (module note, the fence)
-    conf = userconf.session(c, userconf.agent_of_row(agent), sandbox=work is not None)
+    folder = work  # where the process runs (module note, the fence)
+    conf = userconf.session(c, userconf.agent_of_row(agent), sandbox=True)
     sid = resume or str(uuid.uuid4())
     mode = start_mode(c, agent, chat=chat if resume else None, background=background)
     permission_mode = modes.flag(mode)
     extra_env: dict[str, str] = {}
+    asked = settings  # the caller's, which a later start of the session builds on again (_launches)
     given = json.loads(settings)
     hooks: dict[str, Any] = {}
     rule: tuple[list[str], list[str]] | None = None
-    if work is not None:
-        work.mkdir(parents=True, exist_ok=True)
-        fenced = fence(cwd, work, sandbox=conf.sandboxed, unasked=unasked, network=conf.network,
-                       auto_allow=not conf.install_asks(), required=conf.enforced, data=conf.data)
-        perms = given.get("permissions") if isinstance(given.get("permissions"), dict) else {}
-        given = {**given, **fenced, "permissions": {**perms, **fenced["permissions"]}}
-        extra_env.update(fence_env(work))
-        extra_env.update(await asyncio.to_thread(skill_prompts_env, cwd, work))
-        hooks.update(scratch_hooks(work))
-        if "sandbox" in fenced and unasked:
-            rule = sandbox_rule(cwd)
-            hooks.update(sandbox_hooks(rule, conf.install_asks()))
+    work.mkdir(parents=True, exist_ok=True)
+    fenced = fence(cwd, work, sandbox=conf.sandboxed, unasked=unasked, network=conf.network,
+                   auto_allow=not conf.install_asks(), required=conf.enforced, data=conf.data)
+    perms = given.get("permissions") if isinstance(given.get("permissions"), dict) else {}
+    given = {**given, **fenced, "permissions": {**perms, **fenced["permissions"]}}
+    extra_env.update(fence_env(work))
+    extra_env.update(await asyncio.to_thread(skill_prompts_env, cwd, work))
+    hooks.update(scratch_hooks(work))
+    if "sandbox" in fenced and unasked:
+        rule = sandbox_rule(cwd)
+        hooks.update(sandbox_hooks(rule, conf.install_asks()))
     given = with_config(given, conf.settings())
     if conf.web == "ask":
         given = with_web_asks(given, permission_mode)
     elif conf.web == "off":
         disallowed = [*disallowed, *WEB_TOOLS]
-    for event, entries in permission_hooks(c, permission_mode == "auto", wait=conf.may_ask()).items():
+    for event, entries in session_hooks(c, key, permission_mode == "auto", wait=conf.may_ask()).items():
         # the permission hook alone answers a request, since ask applies the sandbox rule itself; before a call
         # both hooks run
         hooks[event] = [*hooks.get(event, []), *entries] if event == PRE else entries
     if calls:
-        hooks.update(call_hooks(c))
+        hooks.update(call_hooks(c, key))
     if hooks:
         given = {**given, "hooks": {**(given.get("hooks") or {}), **hooks}}
-    settings = json.dumps(given)
+    given["env"] = {**await asyncio.to_thread(settings_env, c, key, extra_env), **(given.get("env") or {})}
+    settings = json.dumps(with_home_shell(given))
     argv = await asyncio.to_thread(command, agent_args, sid, effort, settings, cwd, append_shared, model,
                                    resume=bool(resume), permission_mode=permission_mode, disallowed=disallowed,
-                                   add_dirs=[cwd] if work is not None else [])
+                                   add_dirs=[cwd])
     rules = kept_rules(c, chat) if resume else []  # module note, don't ask again
     argv = with_rules(argv, rules)
-    env = environ(key, extra_env)
+    env = environ()
     if background:
         _launches[(c, key)] = {"role": role, "title": title, "agent_args": agent_args, "effort": effort,
-                               "settings": settings, "agent_type": agent_type, "on_end": on_end, "append_shared": append_shared,
+                               "settings": asked, "agent_type": agent_type, "on_end": on_end, "append_shared": append_shared,
                                "parent": parent, "model": model, "work": work, "calls": calls, "agent": agent,
                                "disallowed": disallowed, "patient": patient, "unasked": unasked, "on_pid": on_pid,
                                "background": True, **fields}
@@ -2779,8 +2805,8 @@ def _set_flag(run: Run, flag: str) -> None:
     at = argv.index("--settings") + 1
     given = with_web_asks(json.loads(argv[at]), argv[argv.index("--permission-mode") + 1])
     hooks = dict(given.get("hooks") or {})
-    ours = permission_hooks(run.c, auto=True, wait=bool(run.config and run.config.may_ask()))[PRE]
-    either = [*permission_hooks(run.c, auto=True)[PRE], *permission_hooks(run.c, auto=True, wait=True)[PRE]]
+    ours = session_hooks(run.c, run.key, auto=True, wait=bool(run.config and run.config.may_ask()))[PRE]
+    either = [*session_hooks(run.c, run.key, auto=True)[PRE], *session_hooks(run.c, run.key, auto=True, wait=True)[PRE]]
     kept = [e for e in hooks.get(PRE) or [] if e not in either] + (ours if flag == "auto" else [])
     if kept:
         hooks[PRE] = kept
@@ -3028,8 +3054,6 @@ async def retry_route(c: str, chat: str) -> dict[str, Any]:
 async def permission_route(c: str, chat: str, body: PermissionAnswer, request: Request) -> dict[str, Any]:
     """The analyst's answer on a session's card: answer. 403 for a request that is not the analyst's browser's
     (hook_auth.analyst), 404 when no such request waits."""
-    from . import hook_auth  # noqa: PLC0415
-
     if not hook_auth.analyst(request):
         raise HTTPException(403, hook_auth.ANALYST_ONLY)
     if not answer(c, chat, body.id, body.allow, body.always, body.shown):
@@ -3081,8 +3105,6 @@ async def mode_route(c: str, chat: str, body: ModeBody, request: Request) -> dic
     """A session card's mode switcher: set_mode. 403 for a request that is not the analyst's browser's
     (hook_auth.analyst), 404 when no session runs for the chat, 400 for a mode that cannot be chosen, 409 for a switch
     the session cannot make."""
-    from . import hook_auth  # noqa: PLC0415
-
     if not hook_auth.analyst(request):
         raise HTTPException(403, hook_auth.ANALYST_ONLY)
     try:

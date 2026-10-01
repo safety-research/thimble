@@ -5,7 +5,7 @@
 // when the mark would fall past what it shows), and the pinned line-number column holds a slot per label that is on,
 // under the label's mark (LabelMark). Only rows near the view are drawn, with spacer rows for the rest; hidden width
 // holders in the header keep column widths stable.
-import { memo, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type RefObject } from 'react'
+import { Fragment, memo, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type RefObject } from 'react'
 import { flushSync } from 'react-dom'
 import { Tipped } from '../../components/Tooltip'
 import { api } from '../../lib/api'
@@ -13,7 +13,8 @@ import type { SourceKind, SourceRecord } from '../../lib/types'
 import { cellFill, laneTags, markSegments, type SpanMark } from '../labels'
 import { ReaderLabelsContext, useMarksAt } from '../marks'
 import { LabelMark } from '../LabelMark'
-import { cellTitle, compact, isJsonlFile, isTargetLine, LANE_GLYPH_PX, SpanEl, useTarget, type ViewDef, type ViewProps } from './common'
+import { findQuote } from '../../lib/quoteFind'
+import { cellTitle, compact, isJsonlFile, isTargetLine, LANE_GLYPH_PX, SpanEl, useTarget, type Target, type ViewDef, type ViewProps } from './common'
 import { messageKeys, stamp, transcriptScore } from './transcript'
 
 const MAX_COLS = 40
@@ -124,6 +125,26 @@ export function columnChars(records: SourceRecord[], cols: string[], wide: Set<s
     }
   }
   return out
+}
+
+/** The cell of the target's record that holds the words a span ref quotes, and where they sit in its text: its
+ * column (null for a record drawn as one cell), else null. Pure. */
+export function citedCell(records: SourceRecord[], cols: string[], target: Target | null): { line: number; col: string | null; at: [number, number] } | null {
+  if (!target || target.start == null || target.end == null || target.end <= target.start) return null
+  const rec = records[indexOfLine(records, target.line)]
+  if (!rec || rec.line !== target.line) return null
+  const quote = rec.blocks?.[target.block ?? 0]?.text?.slice(target.start, target.end) ?? ''
+  if (!quote.trim()) return null
+  const r = rec.record
+  if (!r || typeof r !== 'object' || Array.isArray(r)) {
+    const at = findQuote(cell(r), quote)
+    return at ? { line: rec.line, col: null, at } : null
+  }
+  for (const c of cols) {
+    const at = findQuote(cell((r as Record<string, unknown>)[c]), quote)
+    if (at) return { line: rec.line, col: c, at }
+  }
+  return null
 }
 
 /** The first index of the records (in the order of their lines) whose line is at least `line`. */
@@ -368,6 +389,7 @@ export function Table({ workspace, path, page, targetRef }: ViewProps) {
   const tags = useMemo(() => laneTags(lanes ?? []), [lanes])
   const n = tags.length
   const focus = useMemo(() => (target && targetRef ? { key: targetRef, line: target.line } : null), [target, targetRef])
+  const cited = useMemo(() => citedCell(records, cols, target), [records, cols, target])
   const drawn = useDrawnRows(rootRef, bodyRef, records, focus)
   const digits = String(records[records.length - 1]?.line ?? 0).length
   // on each dots element, not on the table: a custom property set on the table would restyle every cell when a label
@@ -411,7 +433,7 @@ export function Table({ workspace, path, page, targetRef }: ViewProps) {
         <tbody ref={bodyRef}>
           {drawn.above > 0 && pad(drawn.above)}
           {records.slice(drawn.from, drawn.to).map((rec) => (
-            <TableRow key={rec.line} path={path} rec={rec} row={rowOf.get(rec.line)} cols={cols} wide={wide} dots={n} hit={hit && isTargetLine(target, rec.line)} />
+            <TableRow key={rec.line} path={path} rec={rec} row={rowOf.get(rec.line)} cols={cols} wide={wide} dots={n} target={isTargetLine(target, rec.line)} hit={hit && isTargetLine(target, rec.line)} cited={cited?.line === rec.line ? cited : null} />
           ))}
           {drawn.below > 0 && pad(drawn.below)}
         </tbody>
@@ -421,15 +443,16 @@ export function Table({ workspace, path, page, targetRef }: ViewProps) {
 }
 
 /** `dots` is how many labels are on: the row's dots take room for that many. `row` is a CSV row's number, which its
- * citation names; any other record is cited by its line. */
-const TableRow = memo(function TableRow({ path, rec, row, cols, wide, dots, hit }: { path: string; rec: SourceRecord; row?: number; cols: string[]; wide: Set<string>; dots: number; hit: boolean }) {
+ * citation names; any other record is cited by its line. `target`: a followed ref names the row; `cited`: the cell
+ * holding the words it quotes. */
+const TableRow = memo(function TableRow({ path, rec, row, cols, wide, dots, target, hit, cited }: { path: string; rec: SourceRecord; row?: number; cols: string[]; wide: Set<string>; dots: number; target: boolean; hit: boolean; cited: { col: string | null; at: [number, number] } | null }) {
   const r = rec.record
   const obj = r && typeof r === 'object' && !Array.isArray(r) ? (r as Record<string, unknown>) : null
   const marks = useMarksAt(path, rec.line)
   const focus = useContext(ReaderLabelsContext)?.focus
   const tint = focus === undefined ? marks.lit[0] : marks.lit.find((l) => l.concept === focus)
   return (
-    <tr className={['reader-card', 'reader-table-row', hit && 'reader-hit', tint && 'has-tint'].filter(Boolean).join(' ')} style={tint ? ({ '--tint': tint.colour } as CSSProperties) : undefined} data-anchor={row ? `${path}#row=${row}` : `${path}#L${rec.line}`} data-line={rec.line}>
+    <tr className={['reader-card', 'reader-table-row', target && 'reader-target', hit && 'reader-hit', tint && 'has-tint'].filter(Boolean).join(' ')} style={tint ? ({ '--tint': tint.colour } as CSSProperties) : undefined} data-anchor={row ? `${path}#row=${row}` : `${path}#L${rec.line}`} data-line={rec.line}>
       <td className="reader-table-gutter mono">
         {dots > 0 && (
           <span className="reader-table-dots" style={{ '--dots': dots } as CSSProperties}>
@@ -447,19 +470,16 @@ const TableRow = memo(function TableRow({ path, rec, row, cols, wide, dots, hit 
       {obj ? (
         cols.map((c) => {
           const v = obj[c]
+          const quoted = cited && cited.col === c ? cited.at : null
           return (
-            <td key={c} className={cellClass(v, wide.has(c))} title={titleOf(v)}>
-              <span className="reader-table-clip">
-                <Marked text={cell(v)} spans={marks.spans} />
-              </span>
+            <td key={c} className={cellClass(v, wide.has(c)) + (quoted ? ' cited' : '')} title={titleOf(v)}>
+              <span className="reader-table-clip">{quoted ? <Quoted text={cell(v)} at={quoted} spans={marks.spans} /> : <Marked text={cell(v)} spans={marks.spans} />}</span>
             </td>
           )
         })
       ) : (
-        <td className="reader-table-cell mono" colSpan={cols.length} title={titleOf(r)}>
-          <span className="reader-table-clip">
-            <Marked text={cell(r)} spans={marks.spans} />
-          </span>
+        <td className={'reader-table-cell mono' + (cited ? ' cited' : '')} colSpan={cols.length} title={titleOf(r)}>
+          <span className="reader-table-clip">{cited ? <Quoted text={cell(r)} at={cited.at} spans={marks.spans} /> : <Marked text={cell(r)} spans={marks.spans} />}</span>
         </td>
       )}
     </tr>
@@ -508,6 +528,47 @@ function Marked({ text, spans }: { text: string; spans: SpanMark[] }) {
           t
         )
       })}
+    </>
+  )
+}
+
+/** characters of a cited cell's text shown before the quoted words, from a word's start */
+const QUOTE_LEAD = 60
+/** characters shown after them, which the cell's few lines may cut */
+const QUOTE_TAIL = 240
+
+/** A cited cell's text around the words a followed ref quotes, the words highlighted (.hl) and the spans the labels
+ * that are on mark kept: from a word a little before them, after an ellipsis, so its few lines hold them. */
+function Quoted({ text, at, spans }: { text: string; at: [number, number]; spans: SpanMark[] }) {
+  const [a, b] = at
+  let from = 0
+  if (a > QUOTE_LEAD) {
+    const space = text.slice(a - QUOTE_LEAD, a).search(/\s/)
+    from = a - QUOTE_LEAD + (space >= 0 ? space + 1 : 0)
+  }
+  const to = Math.min(text.length, b + QUOTE_TAIL)
+  const segs = markSegments(text, spans)
+  const piece = (lo: number, hi: number) =>
+    segs.map((g, i) => {
+      const s = Math.max(g.start, lo)
+      const e = Math.min(g.start + g.text.length, hi)
+      if (s >= e) return null
+      const t = text.slice(s, e)
+      return g.mark ? (
+        <SpanEl key={i} seg={{ ...g, text: t }}>
+          {t}
+        </SpanEl>
+      ) : (
+        <Fragment key={i}>{t}</Fragment>
+      )
+    })
+  return (
+    <>
+      {from > 0 && '…'}
+      {piece(from, a)}
+      <span className="hl">{piece(a, b)}</span>
+      {piece(b, to)}
+      {to < text.length && '…'}
     </>
   )
 }

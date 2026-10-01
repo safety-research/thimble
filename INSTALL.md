@@ -52,8 +52,8 @@ shows what it installs and where, then asks its questions:
 - **thimble in every Claude Code session.** A yes adds thimble to `~/.claude/settings.json` and `~/.claude/plugins`.
   The `thimble` command works either way. `--plugin` or `--no-plugin` answers it.
 - **Trust of thimble's workspaces folder**, where thimble keeps each workspace and runs its agents. A yes adds it to
-  `~/.claude.json`. The orientation, its critic and the writers need it: they run as Claude Code background agents,
-  which Claude Code starts only in a trusted folder. `--trust-workspaces` or `--no-trust-workspaces` answers it.
+  `~/.claude.json`. The orientation, its critic, the writers and view builds need it: they run as Claude Code
+  background agents, which Claude Code starts only in a trusted folder. `--trust-workspaces` or `--no-trust-workspaces` answers it.
 
 Without a terminal, install.sh runs only when every question it would ask has its flag, and otherwise lists the
 missing ones; a system Chrome or Edge it finds is used without asking. The browser, plugin and trust answers are kept,
@@ -132,8 +132,8 @@ that one and prints each path it deleted. The folder it read and your Claude Cod
 - `thimble doctor` shows the server, the versions, the auth path and the log's recent errors.
 - thimble's agents don't start because Claude Code's sandbox can't run: `thimble doctor` says what is missing, and on
   Linux `install.sh --sandbox-deps` installs it.
-- thimble warns that Claude Code does not trust its workspaces folder: the orientation, its critic and the writers
-  can't start until it does, while your own session keeps working. Run the command the warning gives,
+- thimble warns that Claude Code does not trust its workspaces folder: the orientation, its critic, the writers and
+  view builds can't start until it does, while your own session keeps working. Run the command the warning gives,
   `bash <install dir>/scripts/install.sh --trust-workspaces`.
 - Cards are not checked, views are checked without loading their page, or screenshots are unavailable: there is no
   browser (the install's answer, or no Chrome or Edge found), or the machine lacks the headless Chromium's system
