@@ -61,7 +61,7 @@ describe('the lines of a printed output', () => {
 })
 
 describe('a bare citation in a card or a reply', () => {
-  test('is its glyph alone, with its name for the hover, except a whole file\'s, which shows the file\'s name', async () => {
+  test('is its file type\'s glyph alone, a whole file\'s too, with its name for the hover', async () => {
     const chip = async (ref: string) => {
       const el = await mount(
         <GlyphCites.Provider value={true}>
@@ -70,11 +70,18 @@ describe('a bare citation in a card or a reply', () => {
       )
       return el.querySelector<HTMLElement>('[data-ref]')!
     }
-    const line = await chip('runs/r1/notes.jsonl#L12')
-    expect(line.textContent).toBe('')
-    expect(line.getAttribute('aria-label')).toContain('notes.jsonl')
-    expect((await chip('NOTES.md')).textContent).toBe('NOTES.md')
-    expect((await chip('runs/r1/NOTES.md')).textContent).toContain('NOTES.md')
+    for (const [ref, name, glyph] of [
+      ['runs/r1/notes.jsonl#L12', 'notes.jsonl', 'braces'],
+      ['NOTES.md', 'NOTES.md', 'markdown'],
+      ['runs/r1/NOTES.md', 'NOTES.md', 'markdown'],
+      ['data/table.csv', 'table.csv', 'table'],
+      ['README', 'README', 'page'],
+    ]) {
+      const el = await chip(ref)
+      expect(el.textContent, ref).toBe('')
+      expect(el.getAttribute('aria-label'), ref).toContain(name)
+      expect(el.querySelector('svg.chip-ico')?.classList.contains(`icon-${glyph}`), ref).toBe(true)
+    }
   })
 })
 

@@ -46,6 +46,11 @@
   min-width: var(--h-chip);
   padding: 0 4px;
 }
+/* a ref chip's glyph (a file's type among them) at the stroke the chip glyphs hold at 10 px */
+.refchip .chip-ico,
+.refchip-pop-chip .chip-ico {
+  stroke-width: 2px;
+}
 /* states: unable to verify, a dashed underline in the negative; not linked and unknown, dotted and quiet */
 .refchip.refchip-value.broken,
 .refchip.refchip-value.broken:hover {

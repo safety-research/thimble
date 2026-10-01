@@ -250,7 +250,7 @@ const PATHS: Record<IconName, string> = {
   bullets: 'M9 6h11M9 12h11M9 18h11M4.5 6h.01M4.5 12h.01M4.5 18h.01',
   numbers: 'M10 6h10M10 12h10M10 18h10M4 5l1.5-1v4.5M4 14.5a1.5 1.5 0 0 1 3 0c0 1.2-3 2-3 3.5h3',
   sidebar: 'M4 5h16a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1zM9 5v14',
-  // the Files tree's other kinds of file (files/Tree glyphOf), in the same hand: a bare page (a file of no known kind),
+  // the Files tree's other kinds of file (lib/fileGlyph glyphOf), in the same hand: a bare page (a file of no known kind),
   // configuration (two sliders), a picture, and markdown (its mark, M and a down arrow); source code takes `code`
   page: 'M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8zM14 3v5h5',
   sliders: 'M4 7h9M17 7h3M4 17h3M11 17h9M15 5v4M9 15v4',

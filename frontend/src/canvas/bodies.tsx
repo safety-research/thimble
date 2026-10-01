@@ -6,7 +6,7 @@ import { ChatMarkdown } from '../chat/markdown'
 import { Chip } from '../components/Chip'
 import { CodeText } from '../components/Code'
 import { CARD_MIME, chartLabels, Output, outIndex, primaryArtifact } from '../components/Outputs'
-import { kindIcon, refTone } from '../components/RefChip'
+import { refIcon, refTone } from '../components/RefChip'
 import { Icon } from '../components/Icon'
 import { Spinner } from '../components/Spinner'
 import { useTooltip } from '../components/Tooltip'
@@ -15,7 +15,7 @@ import { api, labelApi } from '../lib/api'
 import { bus } from '../lib/bus'
 import { mediaOf, mediaUrl, type MediaRef } from '../lib/media'
 import { loadSettings, modelLabel } from '../lib/models'
-import { addressLabel, hiddenPath, parseRef } from '../lib/refs'
+import { addressLabel, hiddenPath } from '../lib/refs'
 import { teleport } from '../lib/teleport'
 import { track } from '../lib/telemetry'
 import type { Cell, ConceptDetail, LabelRowText, ResolvedRef } from '../lib/types'
@@ -219,7 +219,7 @@ function ExampleBody({ refs, ws, big }: { refs: string[]; ws: string; big: boole
 function Address({ r, onOpen }: { r: string; onOpen: (r: string) => void }) {
   const { props, tip } = useTooltip(hiddenPath(r))
   return (
-    <Chip kind="ref" tone={refTone(r)} icon={kindIcon(parseRef(r)?.kind)} className="bcell-address" data-anchor={r} aria-label={`Open ${addressLabel(r)} in Files`} onMouseDown={(e) => e.stopPropagation()} onClick={() => onOpen(r)} {...props}>
+    <Chip kind="ref" tone={refTone(r)} icon={refIcon(r)} className="bcell-address" data-anchor={r} aria-label={`Open ${addressLabel(r)} in Files`} onMouseDown={(e) => e.stopPropagation()} onClick={() => onOpen(r)} {...props}>
       {addressLabel(r)}
       {tip}
     </Chip>
