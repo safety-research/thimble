@@ -1379,6 +1379,10 @@ Your own scratch folder is {folder}. Put the files you make for your own work th
 
 This call did not run, because the analyst is switching your permission mode, which pauses your session. Once it has resumed, make this call again if you still need it.
 
+## session-unproven
+
+`{tool}` did not run: thimble could not confirm that this call came from the session it names. Stop here and tell the analyst, who can start this session again from thimble.
+
 ## call-ref
 
 This call's ref is `{ref}`.
