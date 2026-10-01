@@ -76,6 +76,9 @@ interface PathLabels {
   blocks: Set<number>
   /** the refs of records that are no lines asked for (wantRecordLabels), fetched or in flight */
   refs: Set<string>
+  /** the blocks and the refs whose labels have arrived at least once */
+  arrived: Set<number>
+  arrivedRefs: Set<string>
   listeners: Set<(list: LabelsForPath[]) => void>
   /** bumped when the cache is dropped, so an answer in flight for the old contents is ignored */
   gen: number
@@ -90,7 +93,7 @@ const cacheKey = (ws: string, path: string) => `${ws}|${path}`
 function entry(key: string): PathLabels {
   let e = cache.get(key)
   if (!e) {
-    e = { list: [], blocks: new Set(), refs: new Set(), listeners: new Set(), gen: 0, next: null }
+    e = { list: [], blocks: new Set(), refs: new Set(), arrived: new Set(), arrivedRefs: new Set(), listeners: new Set(), gen: 0, next: null }
     cache.set(key, e)
   }
   return e
@@ -126,7 +129,9 @@ function fetchBlock(ws: string, path: string, block: number): void {
   scaleApi
     .labelsForLines(ws, path, a, b)
     .then((more) => {
-      if (e.gen === gen) settle(e, more, block)
+      if (e.gen !== gen) return
+      e.arrived.add(block)
+      settle(e, more, block)
     })
     .catch(() => {
       /* labels are a convenience; the file reads without them, and the next record asks again */
@@ -183,6 +188,7 @@ function flushRefs(): void {
           for (const t of batch) {
             if (t.e.gen !== t.gen) continue
             const mine = list.map((l) => ({ ...l, rows: l.rows.filter((r) => recordOf(r.ref)?.path === t.path) })).filter((l) => l.rows.length)
+            for (const r of t.refs) t.e.arrivedRefs.add(r)
             settle(t.e, mine, t.token)
           }
         })
@@ -263,6 +269,15 @@ export function watchPathLabels(ws: string, path: string, fn: (rows: Map<string,
     e.listeners.delete(listener)
     release()
   }
+}
+
+/** Whether the labels of the record `ref` of `path` have arrived (wantLabels, wantRecordLabels); after a `concepts`
+ * event the ones from before stand until they are read again. */
+export function labelsArrived(ws: string, path: string, ref: string): boolean {
+  const e = cache.get(cacheKey(ws, path))
+  if (!e) return false
+  const at = recordOf(ref)
+  return at?.line != null ? e.arrived.has(blockOf(at.line)) : e.arrivedRefs.has(recordKey(ref))
 }
 
 /** Ask for the block of labels that holds `line` of `path`, once; the watchers of the path get it when it arrives. */

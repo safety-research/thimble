@@ -37,11 +37,14 @@
 //   size {height}          frame to page: the document's height, for a frame that sizes to its content, or the height a
 //                          page says it needs (window.thimble.size), after which the document's own height is not sent
 //   settled                frame to page: a card's page has drawn what `init` brought (window.thimble.settled)
-//   anchors {refs}         frame to page: the data-anchor values that appeared since the last report
-//   labels {marks, on, filter, all, palette}
+//   anchors {refs, seq}    frame to page: the data-anchor values that appeared since the last report, and `seq` how many
+//                          have been reported in all
+//   labels {marks, on, filter, all, palette, answered}
 //                          page to frame: marks {ref: {bar, names, spans: [{text, colour}], keep?}}, the marks of the
 //                          labels that are on for the records and units among those refs, drawn over every element with
-//                          that data-anchor, with `keep` whether the ref passes the label filter; on [{id, name, colour,
+//                          that data-anchor, with `keep` whether the ref passes the label filter, and `answered` the
+//                          `seq` of the anchors whose every ref those marks answer for the filter (-1 while some are
+//                          still being read); on [{id, name, colour,
 //                          values}], the labels that are on; filter {label, value, colour} or null; all [{id, name, on,
 //                          colour, values: [{name, colour, highlight}], count}], every label over files; palette, the
 //                          colours a label's value can take. Each replaces the last; window.thimble.onLabels hears all
@@ -56,9 +59,11 @@
 //                          the analyst's transient user activation, which thimble checks again on its side; ops on,
 //                          colour, edit, mark and filter
 //   labelRefused {op}      frame to page: a label call the bridge refused because the analyst made no gesture in the view
-//   hidden {n, self}       frame to page: how many anchored refs the bridge hides or dims for the label filter, and
-//                          whether the page filters its records itself (it registered onLabels)
-//   labelControls {on}     frame to page: whether the page shows label controls of its own (elements with data-label)
+//   hidden {n, self}       frame to page: how many anchored refs the bridge hides or dims for the label filter, null
+//                          while thimble has not answered for every anchored ref, and whether the page filters its
+//                          records itself (it registered onLabels)
+//   labelControls {on}     frame to page: the page has shown label controls of its own (elements with data-label),
+//                          sent once
 //   cmd {on, cursor}       page to frame: ⌘ went down or up, and the page's ⌘ arrow as a CSS cursor value, which this
 //                          page shows while ⌘ is held so the pointer over the frame is the same one pointer
 //   state {id}             page to frame, answered by state {id, state}: what the analyst is looking at, before a newer
@@ -455,6 +460,7 @@
     } else if (d.type === P + 'labels') {
       marks = d.marks && typeof d.marks === 'object' ? d.marks : {}
       filter = d.filter && typeof d.filter === 'object' ? d.filter : null
+      answered = typeof d.answered === 'number' ? d.answered : -1
       var state = { labels: Array.isArray(d.on) ? d.on : [], filter: filter }
       if (Array.isArray(d.all)) state.all = d.all
       if (Array.isArray(d.palette)) state.palette = d.palette
@@ -598,6 +604,8 @@
   var marks = {}
   var reported = {}
   var unsent = []
+  var sentN = 0 // anchored refs reported so far (anchors' seq)
+  var answered = -1 // the seq the last labels message answers for
   var marked = []
   var lit = []
   var sheet = null
@@ -654,7 +662,9 @@
     }
     return true
   }
-  // how many anchored refs the filter drops in the page, told to thimble whenever it or the page's own filtering changes
+  // How many anchored refs the filter drops in the page, told to thimble whenever it or the page's own filtering
+  // changes. An element whose ref thimble has not answered for yet is hidden too, so until thimble has answered for
+  // every ref reported the count is null.
   var hiddenKey = ''
   function sendHidden() {
     var refs = {}
@@ -666,20 +676,20 @@
         n++
       }
     }
+    if (n && (unsent.length || answered !== sentN)) n = null
     var self = !!filter && !cardMode && labelFns.length > 0
     var key = n + ':' + self
     if (key === hiddenKey) return
     hiddenKey = key
     post({ type: P + 'hidden', n: n, self: self })
   }
-  // whether the page shows label controls of its own, told to thimble when that changes
-  var ownControls = null
+  // whether the page has shown label controls of its own, told to thimble once: a menu that holds them may close again
+  var ownControls = false
   var controlsTimer = null
   function sendControls() {
-    var on = !!document.querySelector('[data-label]')
-    if (on === ownControls) return
-    ownControls = on
-    post({ type: P + 'labelControls', on: on })
+    if (ownControls || !document.querySelector('[data-label]')) return
+    ownControls = true
+    post({ type: P + 'labelControls', on: true })
   }
   function checkControls() {
     controlsTimer = null
@@ -703,7 +713,8 @@
   function sendAnchors() {
     sendTimer = null
     if (!unsent.length) return
-    post({ type: P + 'anchors', refs: unsent })
+    sentN += unsent.length
+    post({ type: P + 'anchors', refs: unsent, seq: sentN })
     unsent = []
   }
   // the element's text nodes joined, with where each starts, so a marked text found across several nodes becomes one
@@ -1008,7 +1019,7 @@
     }
     if (unsent.length && sendTimer == null) sendTimer = setTimeout(sendAnchors, 30)
     if (changed && (hasMarks() || dropping()) && paintTimer == null) paintTimer = setTimeout(paint, 30)
-    if (controlsTimer == null) controlsTimer = setTimeout(checkControls, 200)
+    if (!ownControls && controlsTimer == null) controlsTimer = setTimeout(checkControls, 200)
   }).observe(document.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: ['data-anchor', 'class', 'data-label'] })
 
   // What the analyst is looking at, for a newer version of the view loaded in this page's place: `ref` the element they

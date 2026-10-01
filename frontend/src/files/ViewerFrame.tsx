@@ -47,7 +47,7 @@ import { cmdCursors } from '../pointer/cursor'
 import type { Concept, LabelRow, ViewOpen, ViewQuery } from '../lib/types'
 import { callKey, inGesture, NO_GESTURE, runLabelCall, type ViewLabelActions } from './labelCalls'
 import { pageLabelList, pageLabels, pagePalette, viewMarks, withKeeps, type Keep, type LabelFilter, type PageLabelItem, type ViewMark } from './labels'
-import { wantLabels, wantRecordLabels, watchPathLabels } from './marks'
+import { labelsArrived, wantLabels, wantRecordLabels, watchPathLabels } from './marks'
 
 const P = 'thimble:'
 const FIT_MIN = 80
@@ -167,6 +167,18 @@ export function revealBox(from: HTMLElement, r: DOMRect): void {
   }
 }
 
+/** Whether the filter's keep of a record ref is known: its file is one the filter's label never ran over, or its rows
+ * have arrived. */
+function keepKnown(ws: string, ref: string, filterFiles: Readonly<Record<string, unknown>> | undefined): boolean {
+  const at = recordOf(ref)
+  return !at || (!!filterFiles && !(at.path in filterFiles)) || labelsArrived(ws, at.path, ref)
+}
+
+function everyOne(items: Iterable<string>, ok: (x: string) => boolean): boolean {
+  for (const x of items) if (!ok(x)) return false
+  return true
+}
+
 const NO_LABELS: readonly Concept[] = []
 const NO_CONCEPTS: ReadonlyMap<string, Concept> = new Map()
 const UNIT_BATCH = 500 // unit refs one marks request asks about
@@ -174,7 +186,8 @@ const UNIT_BATCH = 500 // unit refs one marks request asks about
 /** The labels over the page's records and units: keeps the refs the page reports (`anchors`) and sends `labels`
  * whenever its marks, the labels that are on or the filter change; each message replaces the last. A record's marks
  * come from the label rows read here, a unit's from the view's marks route, asked again when the labels, their runs or
- * the filter change. `reset` forgets the refs. */
+ * the filter change. With a filter on, `answered` is the last anchors' seq once every ref reported has its rows or its
+ * unit's marks, else -1. `reset` forgets the refs. */
 function useViewLabels(
   ws: string,
   slug: string,
@@ -187,10 +200,15 @@ function useViewLabels(
   palette: string[],
   post: (msg: unknown) => void,
   withUnits: boolean,
-): { add: (refs: unknown) => void; reset: () => void; ready: () => void } {
+): { add: (refs: unknown, seq?: unknown) => void; reset: () => void; ready: () => void } {
   const refs = useRef(new Set<string>())
   const units = useRef(new Set<string>())
   const unitMarks = useRef<Record<string, ViewMark | Keep>>({})
+  /** the units whose marks have arrived under the current filter, and that filter's turn */
+  const unitsAnswered = useRef(new Set<string>())
+  const filterTurn = useRef(0)
+  /** the seq of the last anchors the page sent */
+  const seqNow = useRef(0)
   /** the refs whose block of rows has been asked for */
   const asked = useRef(new Set<string>())
   const rows = useRef(new Map<string, Map<string, Map<string, LabelRow>>>())
@@ -218,6 +236,7 @@ function useViewLabels(
     async (list: string[]) => {
       for (let i = 0; i < list.length; i += UNIT_BATCH) {
         const batch = list.slice(i, i + UNIT_BATCH)
+        const turn = filterTurn.current
         let got: Record<string, ViewMark | Keep> = {}
         if (live.current) {
           try {
@@ -226,9 +245,11 @@ function useViewLabels(
             continue // the units keep the marks they had until the next ask
           }
         }
+        const answered = live.current && turn === filterTurn.current
         for (const r of batch) {
           if (got[r]) unitMarks.current[r] = got[r]
           else delete unitMarks.current[r]
+          if (answered) unitsAnswered.current.add(r)
         }
         setTick((t) => t + 1)
       }
@@ -236,9 +257,10 @@ function useViewLabels(
     [ws, slug, version],
   )
   const add = useCallback(
-    (list: unknown) => {
+    (list: unknown, seq?: unknown) => {
       if (!Array.isArray(list)) return
-      let fresh = false
+      let fresh = typeof seq === 'number' && seq !== seqNow.current
+      if (typeof seq === 'number') seqNow.current = seq
       const newUnits: string[] = []
       for (const ref of list) {
         if (typeof ref !== 'string') continue
@@ -262,6 +284,8 @@ function useViewLabels(
     refs.current.clear()
     units.current.clear()
     unitMarks.current = {}
+    unitsAnswered.current.clear()
+    seqNow.current = 0
     sent.current = '{}'
   }, [])
   // a page that says ready hears the labels at once, even one that anchors nothing
@@ -272,6 +296,12 @@ function useViewLabels(
   // the units are marked afresh when the labels that are on, their values or the filter change, and when a label's
   // rows change (a run, an edit)
   const labelKey = JSON.stringify([on.map((k) => [k.id, (k.classes ?? []).map((c) => c.highlight)]), filter])
+  const filterKey = JSON.stringify(filter)
+  // the units' marks from before a new filter do not answer for it
+  useEffect(() => {
+    filterTurn.current += 1
+    unitsAnswered.current.clear()
+  }, [filterKey])
   useEffect(() => {
     if (units.current.size) void askUnits([...units.current])
   }, [labelKey, askUnits])
@@ -308,10 +338,11 @@ function useViewLabels(
     const rowsOf = { get: (ref: string) => rows.current.get(recordOf(ref)?.path ?? '')?.get(ref) }
     const marks = { ...withKeeps(viewMarks(on, rowsOf, refs.current), filter, rowsOf, refs.current, filterFiles), ...(labelled ? unitMarks.current : {}) }
     const state = pageLabels(on, filter, filterLabel ? new Map([[filterLabel.id, filterLabel]]) : byId, (name) => token(name) || `var(${name})`)
-    const text = JSON.stringify([marks, state, all, palette])
+    const answered = !filter || (everyOne(refs.current, (ref) => keepKnown(ws, ref, filterFiles)) && everyOne(units.current, (u) => unitsAnswered.current.has(u))) ? seqNow.current : -1
+    const text = JSON.stringify([marks, state, all, palette, answered])
     if (text === sent.current) return
     sent.current = text
-    send.current({ type: P + 'labels', marks, on: state.on, filter: state.filter, all, palette })
+    send.current({ type: P + 'labels', marks, on: state.on, filter: state.filter, all, palette, answered })
   }, [ws, on, filter, filterFiles, filterLabel, byId, all, palette, labelled, tick])
   return useMemo(() => ({ add, reset, ready }), [add, reset, ready])
 }
@@ -579,7 +610,7 @@ export function ViewerFrame({ ws, slug, targetRef, path, pathPicked, title, fit,
           queryFn.current?.(d.patch && typeof d.patch === 'object' && Object.keys(d.patch).length ? (d.patch as Record<string, unknown>) : null)
           return
         case P + 'anchors':
-          marks.add(d.refs)
+          marks.add(d.refs, d.seq)
           return
         case P + 'quoted':
           if (d.found === false) missing.current?.()
@@ -596,7 +627,7 @@ export function ViewerFrame({ ws, slug, targetRef, path, pathPicked, title, fit,
           return
         }
         case P + 'hidden':
-          hidden.current.page = typeof d.n === 'number' && Number.isFinite(d.n) ? d.n : 0
+          hidden.current.page = typeof d.n === 'number' && Number.isFinite(d.n) ? d.n : null
           tellHidden()
           return
         case P + 'labelControls':

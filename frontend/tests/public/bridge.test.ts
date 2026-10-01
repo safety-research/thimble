@@ -199,23 +199,43 @@ describe('the view bridge', () => {
     expect(heard).toEqual(['thimble:open', 'thimble:open'])
   })
 
-  test('with a filter on, the page hears how many anchored refs it hides, and none once the filter is off', async () => {
+  test('with a filter on, the page hears how many anchored refs it hides once thimble answered for all of them, and none once the filter is off', async () => {
     fromPage({ type: 'thimble:open', open: { ref: null } })
+    const seq = of('anchors').at(-1)!.seq
+    expect(seq).toBe(3)
     const marks = { 'board.jsonl#L2': { keep: true }, 'board.jsonl#L1': { bar: '#e69f00', names: ['asks'], spans: [], keep: false } }
-    fromPage({ type: 'thimble:labels', marks, on: [], filter: { label: 'asks', value: 'yes', colour: '#e69f00' } })
+    const filter = { label: 'asks', value: 'yes', colour: '#e69f00' }
+    // the rows of some refs are still being read, so what is hidden for want of them is no count yet
+    fromPage({ type: 'thimble:labels', marks, on: [], filter, answered: -1 })
+    await wait()
+    expect(of('hidden').at(-1)).toMatchObject({ n: null, self: false })
+    fromPage({ type: 'thimble:labels', marks, on: [], filter, answered: seq })
     await wait()
     expect(of('hidden').at(-1)).toMatchObject({ n: 1, self: false })
+    // a record that appears is hidden until thimble answers for it, and the count waits for that answer
+    const three = dom.window.document.createElement('article')
+    three.setAttribute('data-anchor', 'board.jsonl#L3')
+    dom.window.document.querySelector('section')!.appendChild(three)
+    await wait()
+    expect(of('anchors').at(-1)).toMatchObject({ refs: ['board.jsonl#L3'], seq: 4 })
+    expect(of('hidden').at(-1)).toMatchObject({ n: null })
+    fromPage({ type: 'thimble:labels', marks, on: [], filter, answered: 4 })
+    await wait()
+    expect(of('hidden').at(-1)).toMatchObject({ n: 2 })
     fromPage({ type: 'thimble:labels', marks: {}, on: [], filter: null })
     await wait()
     expect(of('hidden').at(-1)).toMatchObject({ n: 0, self: false })
   })
 
-  test('the page hears whether it shows label controls of its own', async () => {
-    expect(of('labelControls').at(-1)).toMatchObject({ on: false })
+  test('the page says once that it shows label controls of its own, and a menu of them closing does not take it back', async () => {
+    expect(of('labelControls')).toEqual([])
     const b = dom.window.document.createElement('button')
     b.setAttribute('data-label', 'asks')
     dom.window.document.body.appendChild(b)
     await wait(300)
-    expect(of('labelControls').at(-1)).toMatchObject({ on: true })
+    expect(of('labelControls')).toEqual([{ type: 'thimble:labelControls', on: true }])
+    b.remove()
+    await wait(300)
+    expect(of('labelControls')).toHaveLength(1)
   })
 })
