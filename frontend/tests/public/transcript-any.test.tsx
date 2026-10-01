@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
 // Transcript for anything close to a transcript, and a PDF as itself: the server's sniff decides the mode, a text chat
 // log reads as turns whose lines keep their own records, and a PDF ref opens at its page; records that are objects
-// offer the Table, and a markdown file's front matter shows folded (src/files/views/transcript.tsx, table.tsx, text.tsx,
+// offer the Table, a citation of words deep in a record marks them, speakers named only by id show the corpus's names
+// for them, and a markdown file's front matter shows folded (src/files/views/transcript.tsx, table.tsx, text.tsx,
 // src/files/views/registry.ts, src/files/Reader.tsx).
 import { act } from 'react'
 import { afterEach, describe, expect, test, vi } from 'vitest'
@@ -12,7 +13,7 @@ import { segmentsFor, segmentsFrom } from '../../src/files/views/common.tsx'
 import { pickView, scoreViews, viewByType } from '../../src/files/views/registry.ts'
 import { OBJECTS_SCORE, tableScore } from '../../src/files/views/table.tsx'
 import { frontMatterLines, metaFields } from '../../src/files/views/text.tsx'
-import transcript, { chatTurns, conversationTurns, madeBlocks, nameOf, parsedLines, pick, shownLines, textOf, timeOf, unwrapStream } from '../../src/files/views/transcript.tsx'
+import transcript, { chatTurns, conversationTurns, idKey, madeBlocks, nameOf, parsedLines, pick, shortId, shownLines, speakerIds, textOf, timeOf, unwrapStream } from '../../src/files/views/transcript.tsx'
 import { api } from '../../src/lib/api.ts'
 import type { Concept, SourcePage, SourceRecord, TranscriptHint, View } from '../../src/lib/types.ts'
 import { mount, settle, unmountAll } from './mount.tsx'
@@ -260,6 +261,94 @@ describe('JSON lines', () => {
     const heads = [...el.querySelectorAll('.reader-record-head')].map((h) => h.textContent)
     expect(heads).toEqual(['user', '(unsigned)', 'assistant'])
     expect(el.querySelector('.reader-card[data-line="3"]')?.textContent).toContain('a missing key')
+  })
+})
+
+describe('a citation of words deep in a record', () => {
+  const View = transcript.component
+  const span = (path: string, line: number, block: string, words: string) => {
+    const start = block.indexOf(words)
+    expect(start).toBeGreaterThan(0)
+    return `${path}#L${line}.b0:c${start}-${start + words.length}`
+  }
+  const withScroll = async (run: () => Promise<void>) => {
+    // jsdom has no scrollIntoView, which brings a citation's record into view
+    Element.prototype.scrollIntoView = () => undefined
+    try {
+      await run()
+    } finally {
+      delete (Element.prototype as Partial<Element>).scrollIntoView
+    }
+  }
+  test('opens the field of a post with no words that holds them, whole, and highlights them', async () => {
+    const letter = `Subject: a framework\n\n${'Some earlier lines of the letter. '.repeat(30)}It was tested under "pressure"\nin May.${' Later lines.'.repeat(20)}`
+    const rows = [
+      { id: 'e1', data: { agentId: 'a-1', content: 'Sending the letter now.' }, created_at: '2026-07-08 17:40:00' },
+      { id: 'e2', data: { agentId: 'a-1', actionType: 'OUTREACH', recipient: 'a researcher', messageContent: letter }, created_at: '2026-07-08 17:46:35' },
+    ]
+    const records: SourceRecord[] = rows.map((r, i) => ({ line: i + 1, record: r, blocks: [i === 0 ? { kind: 'event', text: r.data.content! } : { kind: 'raw', text: JSON.stringify(r, null, 2) }], meta: {} }))
+    const hint: TranscriptHint = { format: 'messages', score: 0.5, keys: { speaker: 'data.speakerId|data.agentId', text: 'data.content', time: 'created_at' } }
+    const page: SourcePage = { path: 'events.jsonl', kind: 'events', total_lines: 2, start: 1, records }
+    const ref = span('events.jsonl', 2, records[1].blocks[0].text, 'tested under \\"pressure\\"\\nin May')
+    vi.spyOn(api, 'speakerNames').mockResolvedValue({ names: {} })
+    await withScroll(async () => {
+      const el = await mount(<View workspace="w" path="events.jsonl" kind="events" page={page} targetRef={ref} loadMore={() => undefined} transcript={hint} />)
+      const open = el.querySelector('.reader-card[data-line="2"] .reader-msg-field-open')!
+      expect(open.querySelector('.reader-msg-field')?.textContent).toBe('messageContent')
+      expect(open.querySelector('.hl')?.textContent).toBe('tested under "pressure"\nin May')
+      expect(open.textContent).toContain('Later lines. Later lines.')
+      expect(el.querySelector('.reader-card[data-line="2"]')?.textContent).toContain('recipient a researcher')
+    })
+  })
+  test('marks them in the words of a post, and in a nested record’s blocks, where the server’s offsets do not apply', async () => {
+    const posts = [
+      { author: 'ana', body: 'First a note.' },
+      { author: 'bo', body: `${'filler words '.repeat(40)}the key was dropped` },
+    ]
+    const records: SourceRecord[] = posts.map((r, i) => ({ line: i + 1, record: r, blocks: [{ kind: 'raw', text: JSON.stringify(r, null, 2) }], meta: {} }))
+    const board: SourcePage = { path: 'b.jsonl', kind: 'text', total_lines: 2, start: 1, records }
+    const hint: TranscriptHint = { format: 'messages', score: 0.95, keys: { speaker: 'author', text: 'body' } }
+    await withScroll(async () => {
+      const el = await mount(<View workspace="w" path="b.jsonl" kind="text" page={board} targetRef={span('b.jsonl', 2, records[1].blocks[0].text, 'key was dropped')} loadMore={() => undefined} transcript={hint} />)
+      expect(el.querySelector('.reader-card[data-line="2"] .hl')?.textContent).toBe('key was dropped')
+    })
+    const sdk = { id: 'c2', content: { type: 'assistant', session_id: 's1', message: { role: 'assistant', content: [{ type: 'tool_use', name: 'Bash', input: { command: 'ls' } }, { type: 'text', text: 'I will grep for "retraction" in the notes.' }] } } }
+    const stream: SourcePage = { path: 'sdk.jsonl', kind: 'text', total_lines: 1, start: 1, records: [{ line: 1, record: sdk, blocks: [{ kind: 'raw', text: JSON.stringify(sdk, null, 2) }], meta: {} }] }
+    await withScroll(async () => {
+      const el = await mount(<View workspace="w" path="sdk.jsonl" kind="text" page={stream} targetRef={span('sdk.jsonl', 1, stream.records[0].blocks[0].text, '\\"retraction\\" in')} loadMore={() => undefined} transcript={{ format: 'stream', score: 1, wrap: 'content' }} />)
+      const hl = el.querySelector('.reader-block[data-block="1"] .hl')
+      expect(hl?.textContent).toBe('"retraction" in')
+    })
+  })
+})
+
+describe('speakers named only by id', () => {
+  const View = transcript.component
+  const ids = ['6365764a-b6e2-4dfa-94cd-2d1aef5b54f7', 'b699b1e2-389e-4eea-bd5c-dbfb020a8996']
+  const rows = [
+    { id: 'm1', agent_speaker_id: ids[0], user_speaker_id: null, content: 'first', created_at: '2026-07-10 21:09:27' },
+    { id: 'm2', agent_speaker_id: null, user_speaker_id: ids[1], content: 'second', created_at: '2026-07-10 21:10:00' },
+  ]
+  const records: SourceRecord[] = rows.map((r, i) => ({ line: i + 1, record: r, blocks: [{ kind: 'raw', text: JSON.stringify(r) }], meta: {} }))
+  const hint: TranscriptHint = { format: 'messages', score: 0.5, keys: { speaker: 'agent_speaker_id|user_speaker_id', text: 'content', time: 'created_at' } }
+  test('a key that holds ids, or a value shaped as one, names the speaker by id', () => {
+    expect(idKey('agent_speaker_id|user_speaker_id')).toBe(true)
+    expect(idKey('data.speakerId|data.agentId')).toBe(true)
+    expect(idKey('speakerName|agentName')).toBe(false)
+    expect(speakerIds(records, hint.keys!.speaker)).toEqual(ids)
+    expect(speakerIds([{ line: 1, record: { author: ids[0] }, blocks: [], meta: {} }, { line: 2, record: { author: 'GPT-5.5' }, blocks: [], meta: {} }], 'author')).toEqual([ids[0]])
+    expect(shortId(ids[0])).toBe('6365764a…')
+    expect(shortId('u-17')).toBe('u-17')
+  })
+  test('shows the name the corpus gives an id, else the id shortened, the whole id on hover', async () => {
+    const asked = vi.spyOn(api, 'speakerNames').mockResolvedValue({ names: { [ids[0]]: 'GPT-5.5' } })
+    const page: SourcePage = { path: 'chat_messages.jsonl', kind: 'text', total_lines: 2, start: 1, records }
+    const el = await mount(<View workspace="names-test" path="chat_messages.jsonl" kind="text" page={page} loadMore={() => undefined} transcript={hint} />)
+    await settle()
+    expect(asked).toHaveBeenCalledWith('names-test', 'chat_messages.jsonl', 'agent_speaker_id|user_speaker_id', ids.join(','))
+    const heads = [...el.querySelectorAll('.reader-record-head')]
+    expect(heads.map((h) => h.textContent)).toEqual(['GPT-5.5 · 2026-07-10 21:09', 'b699b1e2… · 2026-07-10 21:10'])
+    expect(heads.map((h) => h.querySelector('[title]')?.getAttribute('title'))).toEqual(ids)
   })
 })
 

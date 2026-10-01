@@ -175,6 +175,30 @@ export function reviewLine(r: ViewReview): string {
   return at ? `Checked at ${at}` : 'Checked'
 }
 
+/** The running review's Stop in its hover card: a first click asks, and Stop under the question stops it. */
+function ReviewStop({ revising, onStop }: { revising: boolean; onStop: () => void }) {
+  const [asking, setAsking] = useState(false)
+  if (!asking)
+    return (
+      <Button variant="ghost" size="sm" icon="stop" onClick={() => setAsking(true)}>
+        Stop
+      </Button>
+    )
+  return (
+    <span className="view-review-stop" role="group" aria-label="Stop the review">
+      <span className="bcell-check-what">{revising ? 'Stop the review? The view goes back to its last version that passed its checks.' : 'Stop the review?'}</span>
+      <span className="bcell-check-acts">
+        <Button size="sm" onClick={() => setAsking(false)}>
+          Cancel
+        </Button>
+        <Button size="sm" variant="secondary" onClick={onStop}>
+          Stop
+        </Button>
+      </span>
+    </span>
+  )
+}
+
 /** The review's problems under a title, one per line, the first three and how many more. */
 function ReviewList({ title, items }: { title: string; items: string[] }) {
   return (
@@ -188,10 +212,11 @@ function ReviewList({ title, items }: { title: string; items: string[] }) {
   )
 }
 
-/** The review of a view's pictures as the card check's mark: a spinner while it runs (a click stops it), a check glyph
- * when it is done, a flag when problems are left, and a run-again glyph when it failed or was stopped. Whenever it
- * revised the view and is not running, its hover offers Undo, and `onUndo` runs before it is sent. */
-function ReviewMark({ ws, slug, review: r, onUndo }: { ws: string; slug: string; review: ViewReview; onUndo?: () => void }) {
+/** The review of a view's pictures as the card check's mark: a spinner while it runs, a check glyph when it is done, a
+ * flag when problems are left, and a run-again glyph when it failed or was stopped. A click on the running mark opens
+ * its hover card, whose Stop asks before it stops the review. Whenever it revised the view and is not running, its
+ * hover offers Undo, and `onUndo` runs before it is sent. */
+export function ReviewMark({ ws, slug, review: r, onUndo }: { ws: string; slug: string; review: ViewReview; onUndo?: () => void }) {
   const running = r.state === 'running'
   const ended = r.state === 'failed' || r.state === 'stopped'
   const left = r.left ?? []
@@ -208,9 +233,9 @@ function ReviewMark({ ws, slug, review: r, onUndo }: { ws: string; slug: string;
     <CheckMark
       state={r.state}
       flagged={r.state === 'done' && left.length > 0}
-      label={[line, running ? 'Stop the review' : ended ? 'Review again' : ''].filter(Boolean).join('. ')}
+      label={[line, ended ? 'Review again' : ''].filter(Boolean).join('. ')}
       popLabel="The view's review"
-      onClick={running ? stop : ended ? again : undefined}
+      onClick={ended ? again : undefined}
       className="view-pane-review"
     >
       {(close) => (
@@ -222,11 +247,7 @@ function ReviewMark({ ws, slug, review: r, onUndo }: { ws: string; slug: string;
           {r.state === 'done' && !revised.length && !left.length && !r.undo && <span className="bcell-check-what">Nothing to fix.</span>}
           {(running || ended || revised.length > 0) && (
             <span className="bcell-check-acts">
-              {running && (
-                <Button variant="ghost" size="sm" icon="stop" onClick={() => (close(), stop())}>
-                  Stop
-                </Button>
-              )}
+              {running && <ReviewStop revising={!!r.round} onStop={() => (close(), stop())} />}
               {!running && revised.length > 0 && (
                 <Button variant="ghost" size="sm" icon="undo" onClick={() => (close(), undo())}>
                   Undo

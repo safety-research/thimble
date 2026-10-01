@@ -1837,6 +1837,12 @@
   color: var(--text-tertiary);
   font-size: var(--text-mono-sm);
 }
+/* the field that holds the words a followed ref quotes shows whole, on lines of its own */
+.reader-msg-field-open {
+  flex-basis: 100%;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
 .reader-record.has-tint .reader-record-body,
 .reader-line.has-tint {
   background: color-mix(in oklab, var(--tint) 16%, transparent);
@@ -2800,6 +2806,13 @@
 }
 .view-review-more {
   color: var(--text-secondary);
+}
+/* the question a running review's Stop asks, with Cancel and Stop under it */
+.view-review-stop {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
 }
 /* while a newer version of a view builds or its review runs, its whole chip in the views bar shimmers, as a card does
    while it is checked (over the chip's own background colour, so a chosen chip keeps its fill) */

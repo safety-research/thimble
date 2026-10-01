@@ -4,6 +4,7 @@
 import { useEffect, useMemo, useRef, useState, type ComponentType, type CSSProperties, type ReactNode, type RefObject } from 'react'
 import { Button } from '../../components/Button'
 import { Tipped } from '../../components/Tooltip'
+import { findQuote } from '../../lib/quoteFind'
 import { parseRef } from '../../lib/refs'
 import type { Block, SourceKind, SourcePage, SourceRecord, TranscriptHint } from '../../lib/types'
 import { UNFOLD_EVENT } from '../find'
@@ -56,6 +57,24 @@ export function targetOf(ref: string | undefined, path: string): Target | null {
   }
 }
 
+/** The words a span ref quotes, from its record's blocks as the server sent them; null for any other ref, a record the
+ * records do not hold, or a span of white space alone. Pure. */
+export function citedQuote(records: readonly SourceRecord[], target: Target | null): string | null {
+  if (!target || target.start == null || target.end == null || target.end <= target.start) return null
+  const rec = records.find((r) => r.line === target.line)
+  const quote = rec?.blocks?.[target.block ?? 0]?.text?.slice(target.start, target.end) ?? ''
+  return quote.trim() ? quote : null
+}
+
+/** The target for a block of the cited record whose text the view made itself (a post's words, a field, a nested
+ * record's blocks), so its offsets are not the cited block's: the quoted words' place in `text`, or the line alone when
+ * the text does not hold them. Null for another record's block. Pure. */
+export function quoteTarget(target: Target | null, line: number, index: number, text: string, quote: string | null): Target | null {
+  if (!target || target.line !== line) return null
+  const at = quote ? findQuote(text, quote) : null
+  return at ? { line, block: index, start: at[0], end: at[1] } : { line }
+}
+
 export function isTargetLine(t: Target | null, line: number): boolean {
   return !!t && line >= t.line && line <= (t.endLine ?? t.line)
 }
@@ -105,10 +124,10 @@ export function useTarget(targetRef: string | undefined, path: string, rootRef: 
     if (!card) return
     const blockEl = target.block != null ? card.querySelector<HTMLElement>(`.reader-block[data-block="${target.block}"]`) : null
     // centre a span's highlight rather than its block, which may be much taller than the view; a view that draws no
-    // blocks (Raw) marks the span in the record's line itself. A record taller than the view shows from its start,
-    // where its number is.
+    // blocks (Raw), or draws the words elsewhere in the record (a post's field), marks the span outside the block. A
+    // record taller than the view shows from its start, where its number is.
     const place = () => {
-      const hl = (blockEl ?? card).querySelector<HTMLElement>('.hl')
+      const hl = blockEl?.querySelector<HTMLElement>('.hl') ?? card.querySelector<HTMLElement>('.hl')
       const el = hl ?? blockEl ?? card
       const room = scrollBox(el)?.clientHeight ?? window.innerHeight
       el.scrollIntoView({ block: !hl && el.getBoundingClientRect().height > room ? 'start' : 'center' })

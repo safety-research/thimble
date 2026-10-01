@@ -77,6 +77,7 @@
   .lmark { display: inline-block; flex: none; width: 12px; height: 12px; border-radius: 3px; border: 1.5px solid var(--mark); background: transparent; }
   .lmark.on { background: var(--mark); }
   .msep { height: 1px; margin: 4px 0; background: var(--border-hairline); }
+  .mnote { padding: 4px 8px 6px; color: var(--text-tertiary); }
   .pal { position: fixed; z-index: 60; display: grid; grid-template-columns: repeat(7, 20px); gap: 6px; padding: 10px; border-radius: var(--radius-card); background: var(--raised-bg); box-shadow: var(--raised-ring), 0 10px 28px rgba(var(--ink-rgb), .14); }
   .pal button { width: 20px; height: 20px; padding: 0; border: 0; border-radius: 4px; cursor: pointer; }
   .pal button:hover { transform: scale(1.12); }
@@ -775,23 +776,26 @@
       const sws = previewColours(f).map((c) => `<i class="sw" style="width:5px;border-radius:1px;background:${c}"></i>`).join('')
       return `<button class="mi" data-act="field" data-f="${f}"><span class="ck">${on ? CHECK : ''}</span>${esc(FIELD_NAMES[f])}<span class="n">${sws}</span></button>`
     }).join('')
-    // every label over files, as thimble lists them; a click turns one on or off
+    // every label over files, as thimble lists them, those over these files first; a click turns one on or off
     const all = labelState.all || labelState.labels.map((l) => ({ ...l, on: true }))
     const sw = (l, v) => {
       const i = `<i class="sw" style="background:${esc(v.colour)}"></i>`
       return l.id && (labelState.palette || []).length && thimble.setLabelColour
         ? `<span class="swb" role="button" title="Change colour" data-act="palette" data-id="${esc(l.id)}" data-value="${esc(v.name)}">${i}</span>` : i
     }
-    const rows = all.map((l) => {
+    const row = (l) => {
       const lit = (l.values || []).filter((v) => v.highlight !== false)
       const box = `<span class="lmark ${l.on ? 'on' : ''}" style="--mark:${esc(l.colour)}"></span>`
       const main = `<button class="mi" data-act="label" data-id="${esc(l.id || '')}" data-label="${esc(l.id || '')}" ${l.id && thimble.setLabel ? '' : 'disabled'}><span class="ck">${box}</span><span class="nm">${esc(l.name)}</span>
         <span class="n">${l.count == null ? '' : l.count}</span>${lit.length === 1 ? sw(l, lit[0]) : ''}</button>`
       const subs = l.on && lit.length > 1 ? lit.map((v) => `<div class="mi sub" data-label="${esc(l.id || '')}"><span class="nm">${esc(v.name)}</span><span class="n"></span>${sw(l, v)}</div>`).join('') : ''
       return main + subs
-    }).join('')
+    }
+    const here = all.filter((l) => l.here).map(row).join('')
+    const other = all.filter((l) => !l.here).map(row).join('')
+    const rows = `<div class="mh">Labels over these files</div>${here || '<div class="mnote">No label covers these files yet</div>'}${other ? `<div class="mh">Other labels</div>${other}` : ''}`
     const make = thimble.newLabel ? '<div class="msep"></div><button class="mi" data-act="newlabel"><span class="ck"><svg class="ico s12" viewBox="0 0 12 12"><path d="M6 2.5v7M2.5 6h7"/></svg></span>New label…</button>' : ''
-    return `<div class="menu" id="menu" data-anchor-name="Colour menu"><div class="mh">Fields</div>${fields}${rows ? `<div class="msep"></div><div class="mh">Labels</div>${rows}` : ''}${make}</div>`
+    return `<div class="menu" id="menu" data-anchor-name="Colour menu"><div class="mh">Fields</div>${fields}<div class="msep"></div>${rows}${make}</div>`
   }
   function palHtml() {
     const l = (labelState.all || labelState.labels || []).find((x) => x.id === pal.id)

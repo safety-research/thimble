@@ -329,18 +329,24 @@ async def post_telemetry(c: str, body: Any = Body(...), x_thimble_session: str |
 BROWSER_ERRORS_PER_MIN = 20  # server.log lines for the browser's uncaught errors, per workspace and minute
 _browser_errors: dict[str, list[float]] = {}
 browser_log = logging.getLogger("thimble.browser")
+# the browser's notice that a ResizeObserver callback changed layout again within one frame: the rest is delivered in
+# the next frame, so it is no error
+BENIGN_BROWSER_RE = re.compile(r"ResizeObserver loop (completed with undelivered notifications|limit exceeded)")
 
 
 def log_browser_error(c: str, row: dict) -> bool:
     """The browser's uncaught error in server.log too, where the doctor and a problem report find it; at most
-    BROWSER_ERRORS_PER_MIN lines a minute per workspace."""
+    BROWSER_ERRORS_PER_MIN lines a minute per workspace. A benign notice (BENIGN_BROWSER_RE) is no error and gets no
+    line."""
+    detail = row.get("detail") if isinstance(row.get("detail"), dict) else {}
+    if BENIGN_BROWSER_RE.match(str(detail.get("text") or row.get("target") or "")):
+        return False
     now = time.monotonic()
     recent = [t for t in _browser_errors.get(c, []) if now - t < 60.0]
     if len(recent) >= BROWSER_ERRORS_PER_MIN:
         _browser_errors[c] = recent
         return False
     _browser_errors[c] = [*recent, now]
-    detail = row.get("detail") if isinstance(row.get("detail"), dict) else {}
     text = str(detail.get("text") or row.get("target") or "?")[:500]
     browser_log.error("%s: browser error (session %s, at %s): %s", c, row.get("session") or "-", row.get("target") or "-",
                       text)

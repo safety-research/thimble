@@ -437,6 +437,30 @@ def test_a_speaker_key_that_holds_ids_offers_transcript_but_leaves_the_table_fir
     assert transcripts.sniff_bytes(json.dumps(products).encode(), "parts.json", complete=True) is None
 
 
+def test_speaker_ids_take_their_names_from_the_corpus_s_records_of_those_speakers(chats):
+    """A file whose speakers are ids gets their names from a file of those speakers beside it or at the corpus's top:
+    any id from the file named for what the key names (agents.jsonl for agent_speaker_id, not agent_goals.jsonl), only
+    a distinct id (a uuid) from another file, and none for an id no file names."""
+    logs = chats / "logs"
+    uid = "0f8c1d2e-aaaa-4bbb-8ccc-123456789abc"
+    (logs / "agent_goals.jsonl").write_text(jsonl([{"id": "a-1", "name": "A goal"}]))
+    (logs / "agents.jsonl").write_text(jsonl([{"id": "a-1", "name": "Agent One"}, {"id": "a-2", "name": "Agent Two"},
+                                             {"id": uid, "name": "Agent Three"}]))
+    (chats / "rooms.csv").write_text("id,name\nr1,Lobby\n9d2e7c1a-5b5b-4c4c-9d9d-abcdefabcdef,Garden\n")
+
+    def names(key, *ids):
+        r = client.get(f"{CHATS}/source/speakers", params={"path": "logs/chat_messages.jsonl", "key": key, "ids": ",".join(ids)})
+        assert r.status_code == 200, r.text
+        return r.json()["names"]
+
+    assert names("agent_speaker_id|user_speaker_id", "a-1", "a-2", "u-1") == {"a-1": "Agent One", "a-2": "Agent Two"}
+    assert names("data.roomId", "r1") == {"r1": "Lobby"}
+    assert names("speaker_id", "a-1", uid, "9d2e7c1a-5b5b-4c4c-9d9d-abcdefabcdef") == {
+        uid: "Agent Three", "9d2e7c1a-5b5b-4c4c-9d9d-abcdefabcdef": "Garden"}
+    assert names("agent_speaker_id") == {}
+    assert client.get(f"{CHATS}/source/speakers", params={"path": "../x.jsonl", "key": "a", "ids": "a"}).status_code == 400
+
+
 def test_a_long_key_is_read_as_no_speaker_at_once():
     assert transcripts._key_words("A" * 20_000) == ()
     assert transcripts._speaker_rank("Speaker" * 20) is None

@@ -7,14 +7,17 @@
 // JSON lines in a file the server pages as text are parsed here, line by line. While system records are hidden, a long
 // run of them (HIDDEN_RUN_NOTE or more) says in one line how many it hides, so the view is never blank while the reader
 // pages past them. A record with no words to show (a turn that holds only redacted thinking, a post with an empty body)
-// gets no row, unless a citation points at it; Raw shows every line.
+// gets no row, unless a citation points at it; Raw shows every line. A citation of words marks them wherever the view
+// shows them, in a field or a turn that then shows whole. An author named only by id shows the name the corpus gives
+// that id (an agents.jsonl beside the file), else the id shortened, the whole id on hover.
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Button } from '../../components/Button'
 import { Chip } from '../../components/Chip'
 import { Spinner } from '../../components/Spinner'
 import { api } from '../../lib/api'
+import { findQuote } from '../../lib/quoteFind'
 import type { Block, ChatTurn, SourceKind, SourceRecord, SourceTurn, SourceTurns, TranscriptHint } from '../../lib/types'
-import { BlockEl, Collapsible, compact, errMsg, lineCount, RecordCard, recordExcerpt, targetOf, useTarget, type Target, type ViewDef, type ViewProps } from './common'
+import { BlockEl, citedQuote, Collapsible, compact, errMsg, lineCount, quoteTarget, RecordCard, recordExcerpt, targetOf, useTarget, type Target, type ViewDef, type ViewProps } from './common'
 import { useDelimited } from './table'
 
 export const CONVERSATIONAL = new Set(['assistant', 'user'])
@@ -60,7 +63,8 @@ function ToolResult({ block, path, line, index, target, hit, isError }: { block:
   )
 }
 
-function SysRow({ path, blockPath, rec, target, hit }: { path: string; blockPath?: string; rec: SourceRecord; target: Target | null; hit: boolean }) {
+/** `quote`: the words a span ref of the record quotes, found in its blocks when they are made here (no `blockPath`). */
+function SysRow({ path, blockPath, rec, target, hit, quote }: { path: string; blockPath?: string; rec: SourceRecord; target: Target | null; hit: boolean; quote: string | null }) {
   const [open, setOpen] = useState(false)
   const forced = !!target && target.line === rec.line && target.block != null
   return (
@@ -68,7 +72,7 @@ function SysRow({ path, blockPath, rec, target, hit }: { path: string; blockPath
       <Button size="sm" className="reader-sys-summary mono" aria-expanded={open || forced} onClick={() => setOpen((o) => !o)}>
         {sysSummary(rec.record)}
       </Button>
-      {(open || forced) && rec.blocks.map((b, k) => <BlockEl key={k} block={b} path={blockPath} line={rec.line} index={k} target={blockPath ? target : null} hit={hit} />)}
+      {(open || forced) && rec.blocks.map((b, k) => <BlockEl key={k} block={b} path={blockPath} line={rec.line} index={k} target={blockPath ? target : quoteTarget(target, rec.line, k, b.text, quote)} hit={hit} />)}
     </RecordCard>
   )
 }
@@ -239,43 +243,149 @@ export function parsedLines(records: SourceRecord[]): SourceRecord[] {
   })
 }
 
-function MessageBoard({ path, page, targetRef, transcript }: ViewProps) {
+function MessageBoard({ workspace, path, page, targetRef, transcript }: ViewProps) {
   const lines = !!transcript?.lines
   const records = useMemo(() => (lines ? parsedLines(page.records) : page.records), [lines, page.records])
-  return <Posts path={path} records={records} targetRef={targetRef} hint={transcript} derived={lines} />
+  const quote = useMemo(() => citedQuote(page.records, targetOf(targetRef, path)), [page.records, targetRef, path])
+  return <Posts workspace={workspace} path={path} records={records} targetRef={targetRef} hint={transcript} derived={lines} quote={quote} />
 }
 
 /** A CSV or TSV file's rows as posts, under the columns the sniff named. The words are the row's cell, so a span label
  * of the file's line does not mark them. */
 function DelimitedTranscript({ workspace, path, page, targetRef, transcript }: ViewProps) {
   const rows = useDelimited(workspace, path, page.records)
-  return <Posts path={path} records={rows} targetRef={targetRef} hint={transcript} derived />
+  const quote = useMemo(() => citedQuote(page.records, targetOf(targetRef, path)), [page.records, targetRef, path])
+  return <Posts workspace={workspace} path={path} records={rows} targetRef={targetRef} hint={transcript} derived quote={quote} />
 }
 
 /** characters of one field a post with no words shows */
 const FIELD_MAX = 300
 
 /** The other fields of a record that holds no words (an agent's action among a village's talk): those of the record
- * that would hold them, but for who speaks and the time, each value as a line, nested ones compacted. Pure. */
-export function restFields(r: unknown, keys: MessageKeys): [string, string][] {
+ * that would hold them, but for who speaks and the time, each value as a line, nested ones compacted. The first field
+ * that holds `quote` (the words a citation quotes) comes whole, a nested one as indented JSON, with the words' place in
+ * it. Pure. */
+export function restFields(r: unknown, keys: MessageKeys, quote: string | null = null): ([string, string] | [string, string, [number, number]])[] {
   const dot = keys.body?.lastIndexOf('.') ?? -1
   const prefix = dot > 0 ? keys.body!.slice(0, dot) : ''
   const box = prefix ? pick(r, prefix) : r
   if (!box || typeof box !== 'object' || Array.isArray(box)) return []
   const own = (k: string) => (prefix && k.startsWith(`${prefix}.`) ? k.slice(prefix.length + 1) : k)
   const skip = new Set([...(keys.author ?? '').split('|'), keys.time ?? ''].map(own))
+  let found = !quote
   return Object.entries(box as Record<string, unknown>)
     .filter(([k, v]) => !skip.has(k) && v != null && v !== '')
-    .map(([k, v]) => [k, typeof v === 'string' ? (v.length > FIELD_MAX ? `${v.slice(0, FIELD_MAX)}…` : v) : compact(v, FIELD_MAX)])
+    .map(([k, v]) => {
+      if (!found) {
+        const whole = typeof v === 'string' ? v : JSON.stringify(v, null, 2) ?? ''
+        const at = findQuote(whole, quote!)
+        if (at) {
+          found = true
+          return [k, whole, at]
+        }
+      }
+      return [k, typeof v === 'string' ? (v.length > FIELD_MAX ? `${v.slice(0, FIELD_MAX)}…` : v) : compact(v, FIELD_MAX)]
+    })
+}
+
+const ID_SHAPE = /^(?:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|[0-9a-f]{16,})$/i
+const keyWords = (k: string) =>
+  k
+    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter(Boolean)
+
+/** Whether every key a speaker key names holds an id (`agent_speaker_id|user_speaker_id`, `data.agentId`). Pure. */
+export function idKey(key: string | undefined): boolean {
+  return (
+    !!key &&
+    key.split('|').every((alt) => {
+      const w = keyWords(alt.split('.').pop() ?? '')
+      return w.length > 0 && (w[w.length - 1] === 'id' || w[w.length - 1] === 'uuid')
+    })
+  )
+}
+
+/** The speaker values of the records that are ids: all of them under a key that holds ids, else those shaped as a uuid
+ * or a long hex id. Pure. */
+export function speakerIds(records: readonly SourceRecord[], key: string | undefined): string[] {
+  if (!key) return []
+  const byKey = idKey(key)
+  const out = new Set<string>()
+  for (const rec of records) {
+    const v = pick(rec.record, key)
+    const s = typeof v === 'string' ? v.trim() : typeof v === 'number' ? String(v) : ''
+    if (s && (byKey || ID_SHAPE.test(s))) out.add(s)
+  }
+  return [...out]
+}
+
+/** An id as a post's head shows it when the corpus gives it no name: its first 8 characters when it is longer than 12. */
+export function shortId(id: string): string {
+  return id.length > 12 ? `${id.slice(0, 8)}…` : id
+}
+
+/** the names the server found for speaker ids, per workspace, file and key: null for an id it has none for or not yet */
+const speakerNames = new Map<string, Map<string, string | null>>()
+/** ids one request asks names for, under the server's NAMES_IDS_MAX */
+const NAMES_BATCH = 100
+
+/** The names the corpus gives the speaker ids (GET /source/speakers), asked once per id; an id is missing or null until
+ * its answer comes. */
+function useSpeakerNames(workspace: string, path: string, key: string | undefined, ids: string[]): Map<string, string | null> {
+  const scope = `${workspace}\n${path}\n${key ?? ''}`
+  const [, setAnswered] = useState(0)
+  let known = speakerNames.get(scope)
+  if (!known) {
+    known = new Map()
+    speakerNames.set(scope, known)
+  }
+  const want = ids.filter((id) => !known.has(id))
+  const wantKey = want.join(',')
+  useEffect(() => {
+    if (!key || !want.length) return
+    let alive = true
+    const cache = speakerNames.get(scope)!
+    for (const id of want) cache.set(id, null)
+    const asks: Promise<void>[] = []
+    for (let i = 0; i < want.length; i += NAMES_BATCH) {
+      asks.push(
+        api
+          .speakerNames(workspace, path, key, want.slice(i, i + NAMES_BATCH).join(','))
+          .then((r) => {
+            for (const [id, name] of Object.entries(r.names ?? {})) cache.set(id, name)
+          })
+          .catch(() => undefined),
+      )
+    }
+    void Promise.all(asks).then(() => alive && setAnswered((n) => n + 1))
+    return () => {
+      alive = false
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scope, wantKey])
+  return known
+}
+
+/** Who speaks, as a post's head shows it: an id's name when the corpus gives one, else the id shortened, the whole id
+ * on hover. */
+function Speaker({ who, isId, names }: { who: string; isId: boolean; names: Map<string, string | null> }) {
+  if (!isId) return <>{who}</>
+  const shown = names.get(who) ?? shortId(who)
+  return shown === who ? <>{who}</> : <span title={who}>{shown}</span>
 }
 
 /** Records as posts: author, context and time in the head, the body under it. A body the server's blocks hold is shown
  * as those blocks (span labels mark them); a body only the record holds (`derived`, or blocks that are the raw record)
  * as its text; a record with no body, whose blocks are the raw record, as its other fields on one line. */
-function Posts({ path, records, targetRef, hint, derived }: { path: string; records: SourceRecord[]; targetRef?: string; hint?: TranscriptHint | null; derived?: boolean }) {
+function Posts({ workspace, path, records, targetRef, hint, derived, quote }: { workspace: string; path: string; records: SourceRecord[]; targetRef?: string; hint?: TranscriptHint | null; derived?: boolean; quote: string | null }) {
   const rootRef = useRef<HTMLDivElement | null>(null)
   const { target, hit } = useTarget(targetRef, path, rootRef, [records])
   const keys = useMemo(() => keysFor(hint, records.slice(0, 20).map((r) => r.record)), [hint, records])
+  const ids = useMemo(() => speakerIds(records, keys.author), [records, keys.author])
+  const idSet = useMemo(() => new Set(ids), [ids])
+  const names = useSpeakerNames(workspace, path, keys.author, ids)
   const asked = targetOf(targetRef, path)?.line
   return (
     <div className="reader-transcript reader-msgboard" ref={rootRef}>
@@ -286,12 +396,19 @@ function Posts({ path, records, targetRef, hint, derived }: { path: string; reco
         const ctx = keys.context ? r[keys.context] : undefined
         const value = pick(r, keys.body)
         const body = textOf(value)
-        const header = [author, present(ctx) && typeof ctx !== 'object' ? String(ctx) : null, ts].filter(Boolean).join(' · ')
+        const rest = [present(ctx) && typeof ctx !== 'object' ? String(ctx) : null, ts].filter(Boolean)
+        const header = (
+          <>
+            <Speaker who={author} isId={idSet.has(author)} names={names} />
+            {rest.map((x) => ` · ${x}`).join('')}
+          </>
+        )
+        const cite = target && rec.line === target.line ? quote : null
         // an empty body leaves the server a raw block of the whole record: the post has no row, or, when a citation
         // points at it, says it is empty
         const empty = typeof body === 'string' && !body.trim()
         if (empty && rec.line !== asked) return null
-        const fields = value == null && rec.blocks.every((b) => b.kind === 'raw') ? restFields(r, keys) : null
+        const fields = value == null && rec.blocks.every((b) => b.kind === 'raw') ? restFields(r, keys, cite) : null
         const own = !derived && rec.blocks.length > 0 && !rec.blocks.every((b) => b.kind === 'raw' && body != null)
         return (
           <RecordCard key={rec.line} path={path} line={rec.line} target={target} hit={hit} className="reader-msg" header={header} text={empty ? undefined : own ? recordExcerpt(rec) : body?.slice(0, 500)}>
@@ -299,22 +416,35 @@ function Posts({ path, records, targetRef, hint, derived }: { path: string; reco
               <div className="reader-msg-empty">(empty body)</div>
             ) : fields?.length ? (
               <div className="reader-msg-fields">
-                {fields.map(([k, v]) => (
-                  <span key={k}>
-                    <span className="reader-msg-field mono">{k}</span> {v}
+                {fields.map(([k, v, at]) => (
+                  <span key={k} className={at ? 'reader-msg-field-open' : undefined}>
+                    <span className="reader-msg-field mono">{k}</span>{' '}
+                    {at ? (
+                      <>
+                        {v.slice(0, at[0])}
+                        <span className="hl">{v.slice(at[0], at[1])}</span>
+                        {v.slice(at[1])}
+                      </>
+                    ) : (
+                      v
+                    )}
                   </span>
                 ))}
               </div>
             ) : own ? (
               rec.blocks.map((b, k) => <BlockEl key={k} block={b} path={path} line={rec.line} index={k} target={target} hit={hit} />)
             ) : (
-              <BlockEl block={{ kind: 'text', text: body ?? JSON.stringify(value ?? r) }} line={rec.line} index={0} target={target} hit={hit} />
+              <PostText text={body ?? JSON.stringify(value ?? r)} line={rec.line} target={target} hit={hit} quote={cite} />
             )}
           </RecordCard>
         )
       })}
     </div>
   )
+}
+
+function PostText({ text, line, target, hit, quote }: { text: string; line: number; target: Target | null; hit: boolean; quote: string | null }) {
+  return <BlockEl block={{ kind: 'text', text }} line={line} index={0} target={quoteTarget(target, line, 0, text, quote)} hit={hit} />
 }
 
 /** A text chat log's records as turns: each record whose line starts a turn (the server's `meta.turn`) opens one, and
@@ -408,6 +538,7 @@ const TURN_TEXT_MAX = 20_000
 function Conversations({ path, page, targetRef, transcript }: ViewProps) {
   const lines = !!transcript?.lines
   const records = useMemo(() => (lines ? parsedLines(page.records) : page.records), [lines, page.records])
+  const quote = useMemo(() => citedQuote(page.records, targetOf(targetRef, path)), [page.records, targetRef, path])
   const rootRef = useRef<HTMLDivElement | null>(null)
   const { target, hit } = useTarget(targetRef, path, rootRef, [records])
   return (
@@ -418,20 +549,32 @@ function Conversations({ path, page, targetRef, transcript }: ViewProps) {
         const turns = conversationTurns(r, transcript)?.filter((t) => t.text.trim())
         const ctx = CONTEXT_KEYS.map((key) => r[key]).find((v) => present(v) && typeof v !== 'object')
         const first = turns?.[0]?.text ?? ''
+        const cite = target && rec.line === target.line ? quote : null
+        // the first turn that holds the quoted words, and their place in it
+        let cited: { k: number; at: [number, number] } | null = null
+        for (let k = 0; cite && turns && !cited && k < turns.length; k++) {
+          const at = findQuote(turns[k].text, cite)
+          if (at) cited = { k, at }
+        }
         return (
           <RecordCard key={rec.line} path={path} line={rec.line} target={target} hit={hit} className="reader-msg reader-conv" header={ctx != null ? String(ctx) : undefined} text={first.slice(0, 500) || undefined}>
             {turns && !turns.length ? (
               <div className="reader-msg-empty">(empty)</div>
             ) : turns ? (
-              turns.map((t, k) => (
-                <div key={k} className="reader-conv-turn">
-                  <div className="reader-conv-speaker mono">{[t.speaker, t.time].filter(Boolean).join(' · ') || '(unsigned)'}</div>
-                  <BlockEl block={{ kind: 'text', text: t.text.slice(0, TURN_TEXT_MAX) }} line={rec.line} index={k} target={null} hit={false} />
-                  {t.text.length > TURN_TEXT_MAX && <div className="reader-msg-empty">Cut at {TURN_TEXT_MAX.toLocaleString()} of {t.text.length.toLocaleString()} characters. Raw shows all of it.</div>}
-                </div>
-              ))
+              turns.map((t, k) => {
+                const at = cited?.k === k ? cited.at : null
+                // a turn whose quoted words lie past the cut shows whole
+                const shown = at && at[1] > TURN_TEXT_MAX ? t.text : t.text.slice(0, TURN_TEXT_MAX)
+                return (
+                  <div key={k} className="reader-conv-turn">
+                    <div className="reader-conv-speaker mono">{[t.speaker, t.time].filter(Boolean).join(' · ') || '(unsigned)'}</div>
+                    <BlockEl block={{ kind: 'text', text: shown }} line={rec.line} index={k} target={at ? { line: rec.line, block: k, start: at[0], end: at[1] } : null} hit={hit} />
+                    {t.text.length > shown.length && <div className="reader-msg-empty">Cut at {TURN_TEXT_MAX.toLocaleString()} of {t.text.length.toLocaleString()} characters. Raw shows all of it.</div>}
+                  </div>
+                )
+              })
             ) : (
-              <BlockEl block={{ kind: 'text', text: typeof r.text === 'string' ? r.text : JSON.stringify(r) }} line={rec.line} index={0} target={null} hit={false} />
+              <PostText text={typeof r.text === 'string' ? r.text : JSON.stringify(r)} line={rec.line} target={target} hit={hit} quote={cite} />
             )}
           </RecordCard>
         )
@@ -620,9 +763,12 @@ function StreamTranscript({ path, page, targetRef, transcript }: ViewProps) {
     return { records: out, made: lines }
   }, [wrap, page.records])
   const blockPathOf = (line: number) => (made.has(line) ? undefined : path)
+  const quote = useMemo(() => citedQuote(page.records, targetOf(targetRef, path)), [page.records, targetRef, path])
   const [showSystem, setShowSystem] = useState(false)
   const rootRef = useRef<HTMLDivElement | null>(null)
   const { target, hit } = useTarget(targetRef, path, rootRef, [records, showSystem])
+  // a made block is marked where it holds the words a span ref quotes, as its offsets are not the file's
+  const blockTarget = (line: number, k: number, b: Block) => (made.has(line) ? quoteTarget(target, line, k, b.text, quote) : target)
   useEffect(() => {
     if (!target || showSystem) return
     const rec = records.find((r) => r.line === target.line)
@@ -657,7 +803,7 @@ function StreamTranscript({ path, page, targetRef, transcript }: ViewProps) {
     if (sid) prevSession = sid
     const type: string = r.type ?? 'record'
     if (!CONVERSATIONAL.has(type)) {
-      if (showSystem) out.push(<SysRow key={rec.line} path={path} blockPath={blockPathOf(rec.line)} rec={rec} target={target} hit={hit} />)
+      if (showSystem) out.push(<SysRow key={rec.line} path={path} blockPath={blockPathOf(rec.line)} rec={rec} target={target} hit={hit} quote={quote} />)
       else if (runs.has(rec.line)) out.push(<HiddenRun key={`h${rec.line}`} count={runs.get(rec.line)!} onShow={() => setShowSystem(true)} />)
       return
     }
@@ -667,7 +813,7 @@ function StreamTranscript({ path, page, targetRef, transcript }: ViewProps) {
     const header = [type, ts ? stamp(String(ts)) : null].filter(Boolean).join(' · ')
     out.push(
       <RecordCard key={rec.line} path={path} line={rec.line} target={target} hit={hit} className={`reader-rec-${type}`} header={header} text={recordExcerpt(rec)}>
-        {rec.blocks.map((b, k) => (b.kind === 'tool_result' ? <ToolResult key={k} block={b} path={blockPath} line={rec.line} index={k} target={blockPath ? target : null} hit={hit} isError={errorBlocks.has(k)} /> : <BlockEl key={k} block={b} path={blockPath} line={rec.line} index={k} target={blockPath ? target : null} hit={hit} />))}
+        {rec.blocks.map((b, k) => (b.kind === 'tool_result' ? <ToolResult key={k} block={b} path={blockPath} line={rec.line} index={k} target={blockTarget(rec.line, k, b)} hit={hit} isError={errorBlocks.has(k)} /> : <BlockEl key={k} block={b} path={blockPath} line={rec.line} index={k} target={blockTarget(rec.line, k, b)} hit={hit} />))}
       </RecordCard>,
     )
   })
