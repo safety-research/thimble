@@ -11,7 +11,8 @@ The answer, or None:
     {"format": "stream" | "messages" | "conversations" | "json" | "csv" | "text", "score": 0..1,
      "keys"?: {"speaker", "text", "time"}   where a message keeps them (dotted paths into a record, or CSV columns),
      "lines"?: true                          JSON lines in a file the server pages as text (not named .jsonl),
-     "style"?: str, "delimiter"?: str}
+     "style"?: str, "speakers"?: [str]       a text chat log's style of turn line, and who may start a turn in it,
+     "delimiter"?: str}
 A score of STRONG makes Transcript the file's first mode; WEAK only offers it.
 
 turns(path, rel, ...) parses a whole JSON transcript (or JSON lines the server pages as text) into turns, each with the
@@ -520,7 +521,11 @@ def sniff_text(text: str) -> dict[str, Any] | None:
     _, name, turns, counts = best
     roles = sum(n for s, n in counts.items() if s in ROLE_WORDS)
     strong = roles >= 2 or (name in DISTINCT_STYLES and turns >= 4)
-    return {"format": "text", "score": STRONG if strong else WEAK, "style": name}
+    out: dict[str, Any] = {"format": "text", "score": STRONG if strong else WEAK, "style": name}
+    if name not in DISTINCT_STYLES:
+        # a heading, a bold label or a `Word:` line starts a turn only for a speaker the head shows taking turns
+        out["speakers"] = sorted(s for s, n in counts.items() if n >= 2 or s in ROLE_WORDS)
+    return out
 
 
 # --------------------------------------------------------------------------- whole-file turns
@@ -687,14 +692,17 @@ def get_turns(c: str, path: str, start: int = 0, count: int = 100, line: int | N
 
 def dress(page: dict[str, Any], path: Path, rel: str) -> dict[str, Any]:
     """A page of a file's records with what the Transcript mode needs: the sniff (`transcript`) when the file reads as
-    one, and for a text chat log each record that starts a turn its `meta.turn` (turn_of)."""
+    one, and for a text chat log each record that starts a turn its `meta.turn` (turn_of), only for the speakers the
+    sniff names when it names them."""
     hint = sniff(path, rel)
     if hint is None:
         return page
     page["transcript"] = hint
     if hint["format"] == "text":
+        speakers = set(hint["speakers"]) if "speakers" in hint else None
         for rec in page.get("records") or []:
             text = rec.get("record", {}).get("text") if isinstance(rec.get("record"), dict) else None
-            if isinstance(text, str) and (t := turn_of(text, hint["style"])) is not None:
+            t = turn_of(text, hint["style"]) if isinstance(text, str) else None
+            if t is not None and (speakers is None or t["speaker"].lower() in speakers):
                 rec.setdefault("meta", {})["turn"] = t
     return page
