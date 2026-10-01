@@ -333,9 +333,11 @@ def _note_answer(w: Worker, outputs: list[dict]) -> None:
         w.unpickled = bool(ans.get("unpickled"))
     with contextlib.suppress(Exception):
         w.rss = _rss(w.c, w.name)
-    if w.rss > rss_max() and not w.unpickled and \
+    if w.rss > rss_max() and not w.unpickled and not w.restart and \
             (len(w.holds) > 1 or w.rss > KERNEL_BASE + KEEP_FACTOR * sum(w.holds.values())):
         w.restart = True
+        log.info("%s: the reader kernel %s holds %d MB, its %d index(es) %d MB; it is restarted once free", w.c, w.name,
+                 w.rss // MB, len(w.holds), sum(w.holds.values()) // MB)
 
 
 def _spare(c: str) -> None:
