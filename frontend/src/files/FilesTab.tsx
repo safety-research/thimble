@@ -308,12 +308,15 @@ export function FilesTab({ ws, active, focused = active }: { ws: string; active:
   const [findAsk, setFindAsk] = useState<FindAsk>({ mode: 'find', n: 0 })
   // Sidebars (shell/dock.tsx) dock only while the body holds them beside the view or reader at a readable width. A
   // view draws its own label controls, so its Labels sidebar starts hidden and shows when those controls open a label's
-  // editor; beside a view built without label controls it also shows while a label is on. The analyst's hide or show
-  // holds for the tab's session. When it cannot dock it lies over the view's left edge. The File browser's sidebar folds
-  // to its show button when it cannot dock.
+  // editor; beside a view built without label controls it also shows while a label is on or a label marks the view's
+  // files, so turning the last label off there keeps it. The analyst's hide or show holds for the tab's session. When it
+  // cannot dock it lies over the view's left edge. The File browser's sidebar folds to its show button when it cannot
+  // dock.
   const dock = useDock(sideWidth)
   const shownView = slugOfKey(bar) ? views.find((v) => v.slug === slugOfKey(bar)) ?? null : null
-  const viewSideOpen = viewSideChoice ?? (labels.on.length > 0 && !shownView?.label_controls)
+  // beside a view: the labels that mark its files, which come first
+  const marking = useMemo(() => (shownView?.claims ? viewLabels(labels.all, labels.presence, shownView.claims) : null), [shownView, labels.all, labels.presence])
+  const viewSideOpen = viewSideChoice ?? (!shownView?.label_controls && (labels.on.length > 0 || !!marking?.size))
   const viewSideOver = viewSideOpen && !dock.docks
   const side = useFoldingSide(dock.docks, sideOpen, setSideOpen)
   const root = folders.store.get('')
@@ -605,8 +608,6 @@ export function FilesTab({ ws, active, focused = active }: { ws: string; active:
   // what a new label applies to: the files the view in front claims, else the file open in the reader
   const appliesTo = useMemo(() => (shownView ? shownView.claims ?? (shownPath ? [shownPath] : []) : open?.path ? [open.path] : []), [shownView, shownPath, open?.path])
   useViewDefaults(ws, shownView, labels)
-  // beside a view: the labels that mark its files come first
-  const marking = useMemo(() => (shownView?.claims ? viewLabels(labels.all, labels.presence, shownView.claims) : null), [shownView, labels.all, labels.presence])
   // a view's label controls open the editor, on a label or on a new one, in the Labels sidebar beside it
   const editLabel = useCallback(
     (id: string | null) => {

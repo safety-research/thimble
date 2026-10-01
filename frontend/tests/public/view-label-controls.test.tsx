@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
 // The Labels sidebar beside a view (src/files/ViewSide.tsx useViewSide): a view draws its own label controls and thimble
 // draws none in its head. A view whose page has them keeps the sidebar closed until its controls open a label's editor.
-// Beside a view built without them, the sidebar opens while a label is on, with the offer to add them, which asks for
-// the change in the view's thread.
+// Beside a view built without them, the sidebar opens while a label is on or a label marks the view's files, so turning
+// the last label off keeps it, with the offer to add them, which asks for the change in the view's thread.
 import { act } from 'react'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 import type { FilesLabels } from '../../src/files/useLabels.ts'
@@ -13,14 +13,14 @@ import { mount, settle, unmountAll } from './mount.tsx'
 
 const asks = { id: 'k1', name: 'asks', description: '', unit: 'record', kind: 'regex', spec: 'help', labels: ['asks', 'other'], created_by: 'analyst', ts: '', shown: true, classes: [{ name: 'asks', color: 2, highlight: true }, { name: 'other', color: 0, highlight: false }] } as unknown as Concept
 
-function labelsWith(on: Concept[]): FilesLabels {
+function labelsWith(on: Concept[], marks: string[] = []): FilesLabels {
   return {
     all: [asks],
     on,
     focus: on[0]?.id ?? null,
     setFocus: () => undefined,
     byId: new Map([[asks.id, asks]]),
-    presence: new Map(),
+    presence: new Map([[asks.id, Object.fromEntries(marks.map((f) => [f, { asks: 1 }]))]]),
     toggle: () => undefined,
     setClasses: () => undefined,
     setColour: () => undefined,
@@ -78,9 +78,17 @@ describe('the Labels sidebar beside a view', () => {
     expect(offer(el), 'no offer beside a view that has them').toBeNull()
   })
 
-  test('with no label on, nothing shows beside a view built without label controls', async () => {
-    const el = await mount(<Side own={false} labels={labelsWith([])} />)
+  test('beside a view built without label controls, turning the last label off keeps the sidebar while a label marks its files', async () => {
+    const el = await mount(<Side own={false} labels={labelsWith([], ['board.jsonl'])} />)
+    await settle()
+    expect(sidebar(el)).not.toBeNull()
+    expect(offer(el)).not.toBeNull()
+  })
+
+  test('with no label on and none marking its files, nothing shows beside a view built without label controls', async () => {
+    const el = await mount(<Side own={false} labels={labelsWith([], ['other.jsonl'])} />)
     await settle()
     expect(sidebar(el)).toBeNull()
   })
+
 })

@@ -2,8 +2,9 @@
 // (ViewSurface): the Labels pane, the label's edit card at the sidebar's edge and the seam that resizes it. Beside a
 // view a label's row sets or clears the Files label filter, which the view keeps its records by. A view draws its own
 // label controls and thimble draws none in its head, so the sidebar opens beside it when the view's controls open a
-// label's editor; beside a view built without label controls it also opens while a label is on, with the offer to add
-// them (AddLabelControls). useLabelRuns keeps the runs of the labels' applies, polled while they run, and Retry.
+// label's editor; beside a view built without label controls it also opens while a label is on or a label marks the
+// view's files, with the offer to add them (AddLabelControls). useLabelRuns keeps the runs of the labels' applies,
+// polled while they run, and Retry.
 import { useCallback, useEffect, useMemo, useState, type CSSProperties, type ReactNode } from 'react'
 import { Button } from '../components/Button'
 import { Spinner } from '../components/Spinner'
@@ -201,8 +202,8 @@ export function AddLabelControls({ ws, view }: { ws: string; view: BuiltView }) 
 }
 
 /** A view in a pane of its own with its Labels sidebar: shown when the view's controls open a label's editor, and, for
- * a view built without label controls, while labels are on, until the analyst hides it; with the Labels pane, the edit
- * card and the seam as Files has them beside a view. */
+ * a view built without label controls, while labels are on or a label marks its files, until the analyst hides it; with
+ * the Labels pane, the edit card and the seam as Files has them beside a view. */
 export function useViewSide(
   ws: string,
   view: BuiltView,
@@ -218,8 +219,8 @@ export function useViewSide(
     const w = readStorage<unknown>(widthKey, TREE.def)
     return typeof w === 'number' && Number.isFinite(w) ? Math.min(TREE.max, Math.max(TREE.min, w)) : TREE.def
   })
-  const shown = choice ?? (labels.on.length > 0 && !view.label_controls)
   const first = useMemo(() => (view.claims ? viewLabels(labels.all, labels.presence, view.claims) : undefined), [view.claims, labels.all, labels.presence])
+  const shown = choice ?? (!view.label_controls && (labels.on.length > 0 || !!first?.size))
   const edit = useCallback((id: string | 'new' | null) => {
     setEditing(id)
     setDrafted(null)
