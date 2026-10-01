@@ -85,10 +85,11 @@ def test_a_release_pins_the_backend_with_hashes_and_carries_the_frontend_s_runti
     assert all(ln.endswith(" \\") for ln in pins) and text.count("--hash=sha256:") >= len(pins), "each with its hashes"
     full = json.loads((root / "frontend" / "package-lock.json").read_text())["packages"]
     manifest, lock = json.loads(meta[runtime[0]]), json.loads(meta[runtime[1]])["packages"]
-    names = {"vega", "vega-lite", "vega-embed", "playwright", "@fontsource/geist-mono", "@fontsource/hanken-grotesk",
-             "@anthropic-ai/sandbox-runtime"}
+    names = {"vega", "vega-lite", "vega-embed", "esbuild", "playwright", "@fontsource/geist-mono",
+             "@fontsource/hanken-grotesk", "@anthropic-ai/sandbox-runtime"}
     versions = {n: full[f"node_modules/{n}"]["version"] for n in names}
-    majors = {n: f">={v} <0.1.0" if v.startswith("0.0.") else f"^{v.split('.')[0]}.0.0" for n, v in versions.items()}
+    majors = {n: f">={v} <0.1.0" if v.startswith("0.0.") else f"^0.{v.split('.')[1]}.0" if v.startswith("0.") else
+              f"^{v.split('.')[0]}.0.0" for n, v in versions.items()}
     assert manifest["dependencies"] == majors == lock[""]["dependencies"] and majors["vega"] == "^6.0.0"
     assert majors["@anthropic-ai/sandbox-runtime"].startswith(">=0.0.")
     for path, entry in lock.items():
