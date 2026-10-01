@@ -175,29 +175,72 @@ async def test_a_dev_turn_waiting_for_an_answer_keeps_its_wait_while_the_transcr
     assert sum("waiting for an answer" in s for s in stages) == 1
 
 
-async def test_a_dev_turn_s_time_limit_leaves_out_the_time_its_requests_wait_on_the_card(tmp_path, monkeypatch):
+async def test_a_dev_turn_has_no_time_limit_and_its_thread_says_when_the_session_shows_no_activity(tmp_path,
+                                                                                                     monkeypatch):
+    """A turn runs until its session ends it. A session whose transcript and subagents' transcripts stay quiet gets
+    "no activity" lines in its thread, at QUIET_NOTE_S and each time that time doubles, and runs on; a transcript or a
+    subagent that grows starts the quiet time again, and so does the time a permission request waits on the card."""
     from app import agent_session
 
     tx = tmp_path / "ab12cd34-0000.jsonl"
     tx.write_text("")
+    sub = tmp_path / "ab12cd34-0000" / "subagents" / "agent-a1.jsonl"
     fake = _Sessions(tx)
     monkeypatch.setattr(dev, "SESSIONS", fake)
     monkeypatch.setattr(dev, "POLL_S", 0.01)
     monkeypatch.setattr(dev, "STATE_GAP_MAX_S", 0.04)
-    card = {"on": True}
+    monkeypatch.setattr(dev, "QUIET_NOTE_S", 0.3)
+    card = {"on": False}
     monkeypatch.setattr(agent_session, "asking", lambda c, key: card["on"] and key == "ticket:t1")
+    stages: list[str] = []
+
+    class Log(dev.Log):
+        def stage(self, line: str) -> None:
+            stages.append(line)
+
+    def notes() -> list[str]:
+        return [s for s in stages if s.startswith("no activity for ")]
+
+    async def until(n: int) -> float:
+        began = time.monotonic()
+        while len(notes()) < n and time.monotonic() - began < 3:
+            await asyncio.sleep(0.01)
+        return time.monotonic() - began
+
+    async def busy(write, seconds: float) -> None:
+        began = time.monotonic()
+        while time.monotonic() - began < seconds:
+            write()
+            await asyncio.sleep(0.03)
+
+    def line(text: str) -> None:
+        with tx.open("a") as f:
+            f.write(json.dumps({"type": "assistant", "message": {"content": [{"type": "text", "text": text}]}}) + "\n")
+
+    def subagent() -> None:
+        sub.parent.mkdir(parents=True, exist_ok=True)
+        with sub.open("a") as f:
+            f.write("{}\n")
+
     run = dev.Run("t1", "a ticket", "now")
-    turn = asyncio.get_running_loop().create_task(dev._worker_turn(run, dev.Log(None), tmp_path, "do it", None,
+    turn = asyncio.get_running_loop().create_task(dev._worker_turn(run, Log(None), tmp_path, "do it", None,
                                                                     name="thimble:dev", workspace=CORPUS,
                                                                     on_session=lambda a, b: None,
-                                                                    turn_timeout_s=0.3, asking={"key": "ticket:t1"}))
-    await asyncio.sleep(0.6)  # the analyst takes longer to answer than the turn may run
-    assert not turn.done(), "the time on the card counted toward the turn's limit"
+                                                                    asking={"key": "ticket:t1"}))
+    assert await until(2) >= 0.6  # quiet, listed working: a line at 0.3 s and one at 0.6 s
+    assert not turn.done(), "the turn was stopped"
+    assert notes() == [dev.QUIET_LINE.format(minutes=dev._minutes(s)) for s in (0.3, 0.6)]
+    await busy(lambda: line("working"), 0.7)
+    await busy(subagent, 0.7)
+    card["on"] = True
+    await asyncio.sleep(0.7)
     card["on"] = False
-    with tx.open("a") as f:
-        f.write(json.dumps({"type": "assistant", "message": {"content": [{"type": "text", "text": "done"}]}}) + "\n")
-    await asyncio.sleep(0.1)
+    assert len(notes()) == 2, "activity, a subagent's or the card's time counted as quiet"
+    assert await until(3) >= 0.25 and notes()[2] == notes()[0], "the quiet time starts again after activity"
+    line("done")
+    await asyncio.sleep(0.05)
     fake.now = "idle"
     with tx.open("a") as f:
         f.write(json.dumps({"type": "system", "subtype": "turn_duration"}) + "\n")
     assert await asyncio.wait_for(turn, 2) == "done"
+    assert fake.looks, "the session's state was looked at while it was quiet"

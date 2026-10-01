@@ -80,6 +80,14 @@ export function recordExcerpt(rec: SourceRecord): string {
   return text.slice(0, 500)
 }
 
+/** The nearest box around `el` that scrolls it vertically. */
+function scrollBox(el: HTMLElement): HTMLElement | null {
+  for (let p = el.parentElement; p; p = p.parentElement) {
+    if (/(auto|scroll)/.test(getComputedStyle(p).overflowY) && p.scrollHeight > p.clientHeight) return p
+  }
+  return null
+}
+
 /** How long a followed ref's record keeps its highlight (.reader-hit in files.css fades over the same time). */
 export const HIT_MS = 1500
 
@@ -97,8 +105,14 @@ export function useTarget(targetRef: string | undefined, path: string, rootRef: 
     if (!card) return
     const blockEl = target.block != null ? card.querySelector<HTMLElement>(`.reader-block[data-block="${target.block}"]`) : null
     // centre a span's highlight rather than its block, which may be much taller than the view; a view that draws no
-        // blocks (Raw) marks the span in the record's line itself
-    const place = () => ((blockEl ?? card).querySelector<HTMLElement>('.hl') ?? blockEl ?? card).scrollIntoView({ block: 'center' })
+    // blocks (Raw) marks the span in the record's line itself. A record taller than the view shows from its start,
+    // where its number is.
+    const place = () => {
+      const hl = (blockEl ?? card).querySelector<HTMLElement>('.hl')
+      const el = hl ?? blockEl ?? card
+      const room = scrollBox(el)?.clientHeight ?? window.innerHeight
+      el.scrollIntoView({ block: !hl && el.getBoundingClientRect().height > room ? 'start' : 'center' })
+    }
     place()
     // a record drawn again after the scroll (a long line's syntax colours arriving) moves the place: it is centred again
     // while the highlight lasts

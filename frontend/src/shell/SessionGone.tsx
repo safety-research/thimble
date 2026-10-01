@@ -7,8 +7,8 @@ import { createPortal } from 'react-dom'
 import { Button } from '../components/Button'
 import { api } from '../lib/api'
 import { bus } from '../lib/bus'
-import type { ChatMeta, SessionEnded } from '../lib/types'
-import { shortPath } from '../lib/workspace'
+import type { ChatMeta, CorpusInfo, SessionEnded } from '../lib/types'
+import { shortPath, shownPath } from '../lib/workspace'
 import { copyText } from './ProblemReport'
 
 /** How long main is without a session before the card shows: a takeover writes the old session's end and the new
@@ -79,7 +79,7 @@ export function useSessionGone(ws: string): Gone | null {
   const [main, setMain] = useState<ChatMeta | null>(null)
   const [up, setUp] = useState(true)
   const [due, setDue] = useState(false)
-  const [corpusPath, setCorpusPath] = useState<string | null>(null)
+  const [corpus, setCorpus] = useState<CorpusInfo | null>(null)
   const followed = useRef<string | null>(null)
   useEffect(() => {
     let alive = true
@@ -92,7 +92,7 @@ export function useSessionGone(ws: string): Gone | null {
     void load()
     api
       .corpora()
-      .then((cs) => alive && setCorpusPath(cs.find((c) => c.name === ws)?.path ?? null))
+      .then((cs) => alive && setCorpus(cs.find((c) => c.name === ws) ?? null))
       .catch(() => undefined)
     const offs = [
       bus.on('chat', (e) => {
@@ -127,7 +127,9 @@ export function useSessionGone(ws: string): Gone | null {
   }, [session, after])
   if (!gone || !due) return null
   const ended = main?.ended ?? null
-  return { ended, folder: ended?.cwd || corpusPath }
+  // Claude Code records the folder with its symlinks resolved; the analyst's own path to it is the corpus's `shown`
+  const folder = ended?.cwd && ended.cwd !== corpus?.path ? ended.cwd : shownPath(corpus) ?? ended?.cwd ?? null
+  return { ended, folder }
 }
 
 export function SessionGone({ gone }: { gone: Gone }) {

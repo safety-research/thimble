@@ -52,6 +52,7 @@ import {
   extentOf,
   filterSet,
   firstCardOf,
+  FIT_MIN_SCALE,
   fitView,
   frameAt,
   framesAbove,
@@ -61,6 +62,7 @@ import {
   kindOf,
   layoutBoard,
   minimapOf,
+  MIN_SCALE,
   moveLocal,
   overlaps,
   nextGroupTitle,
@@ -111,7 +113,7 @@ function flashCard(el: HTMLElement): void {
 function readView(key: string): View | null {
   const v = readStorage<Partial<View>>(key, {})
   if (typeof v.x !== 'number' || typeof v.y !== 'number' || typeof v.scale !== 'number') return null
-  return { x: v.x, y: v.y, scale: clampScale(v.scale) }
+  return { x: v.x, y: v.y, scale: clampScale(v.scale, FIT_MIN_SCALE) }
 }
 
 const typing = (t: EventTarget | null): boolean => {
@@ -1332,7 +1334,8 @@ export function Canvas({ ws, active, focused = active }: { ws: string; active: b
   const away = !!content && offView(content, view, vpSize.w, vpSize.h)
   const pill = away && content ? pillAt(content, view, vpSize.w, vpSize.h) : null
   const planeStyle: CSSProperties = { transform: `translate(${view.x}px, ${view.y}px) scale(${view.scale})` }
-  const dot = 24 * view.scale
+  // below MIN_SCALE, where only Fit goes, the grid keeps the spacing it has at MIN_SCALE
+  const dot = 24 * Math.max(view.scale, MIN_SCALE)
   const gridStyle: CSSProperties = { backgroundSize: `${dot}px ${dot}px`, backgroundPosition: `${view.x}px ${view.y}px` }
 
   // where a thing is drawn: its layout place, or with the drag when it is the dragged thing or inside the dragged frame
