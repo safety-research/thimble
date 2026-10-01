@@ -170,8 +170,9 @@ QUIET_LINE = "no activity for {minutes}"
 BACKGROUND_LINE = "the session waits for its own background work ({n} running) before its turn ends"
 # the turn_duration record's counts of the session's workflows and background agents still running when its turn ended
 PENDING_COUNTS = ("pendingWorkflowCount", "pendingBackgroundAgentCount")
-# the `claude agents` states of a session whose process goes on (Sessions.state); any other means it has ended
+# the `claude agents` states of a session that may still run; whether its process does is Sessions.has_process
 LIVE_STATES = ("working", "idle", "blocked", "done")
+LOST_LINE = "the background session ended before its background work finished"
 # How long a server may take to answer /api/health (boot_check, restart_watch.py) before the change counts as breaking
 # its start.
 BOOT_TIMEOUT_S = float(os.environ.get("THIMBLE_DEV_BOOT_TIMEOUT_S", "") or 90)
@@ -1440,6 +1441,9 @@ class Sessions:
     message, and `claude stop` ends its process while keeping the conversation. Tests replace dev.SESSIONS with a fake.
     """
 
+    def __init__(self) -> None:
+        self._process: dict[str, bool] = {}  # by short id: whether the session had a process at the last state()
+
     async def _run(self, args: list[str], cwd: Path) -> tuple[int, str]:
         return await _run([CLAUDE_BIN, *args], cwd=cwd, timeout=CLI_TIMEOUT_S, env=None, environ=_cli_env())
 
@@ -1579,15 +1583,22 @@ class Sessions:
         hit = next((e for e in await self._listing(cwd) if e.get("id") == short), None)
         if hit is None:
             return None
+        self._process[short] = bool(hit.get("pid") or hit.get("status"))
         state = str(hit.get("state") or hit.get("status") or "")
         if state == "working" and hit.get("status") == "idle":
             return "idle"
         return state or None
 
+    def has_process(self, short: str) -> bool:
+        """Whether the session's process ran at the last look at its state: a session that ended stays listed, with
+        its last state but no pid or status."""
+        return self._process.get(short, False)
+
     def stop(self, short: str | None) -> None:
         """End the session's process; its conversation stays. Blocking and quick; never raises."""
         if not short:
             return
+        self._process.pop(short, None)
         try:
             subprocess.run([CLAUDE_BIN, "stop", short], capture_output=True, text=True, timeout=CLI_TIMEOUT_S,
                            env=_cli_env())
@@ -1832,6 +1843,7 @@ async def _worker_turn(run: Run, run_log: Log, cwd: Path, prompt: str, resume: s
     gap, looked = POLL_S, 0.0  # between two looks at the session's state, which doubles while it stays the same
     active, quiet_note = time.monotonic(), QUIET_NOTE_S  # the session's last sign of activity; the next QUIET_LINE's time
     held = False  # the thread has said that the session waits for its own background work (BACKGROUND_LINE)
+    gone = 0  # looks in a row that found no process running the session's background work
     while True:
         await asyncio.sleep(POLL_S)
         pos = tail.pos
@@ -1863,13 +1875,22 @@ async def _worker_turn(run: Run, run_log: Log, cwd: Path, prompt: str, resume: s
             continue  # the transcript grew during the look: the session works, or a turn its background work started
         if tail.background() and state in LIVE_STATES and (tail.turn_ended or state in ("idle", "done")):
             # its own workflows or background agents run on, and their results start its next turn: the session is not
-            # stopped, whatever its state says of the task
+            # stopped, whatever its state says of the task, while its process runs them
+            if not SESSIONS.has_process(run.session):
+                gone += 1  # it takes two looks in a row, so that one odd listing fails no build
+                if gone > 1:
+                    state = "lost"
+                    break
+                gap = POLL_S
+                continue
+            gone = 0
             if not held:
                 run_log.stage(BACKGROUND_LINE.format(n=tail.background()))
                 held = True
             waiting, unlisted, idle, early = False, 0, 0, 0
             gap = min(gap * 2, STATE_GAP_MAX_S)
             continue
+        gone = 0
         gap = min(gap * 2, STATE_GAP_MAX_S) if state in ("working", "blocked") else POLL_S
         if state == "working":
             waiting, unlisted = False, 0
@@ -1915,6 +1936,8 @@ async def _worker_turn(run: Run, run_log: Log, cwd: Path, prompt: str, resume: s
         last = " ".join(tail.last_text.split())[:SESSION_WORDS_CHARS]
         if state == "api error":
             raise SessionError(f"Anthropic's API ended the session's turn: {last}")
+        if state == "lost":
+            raise SessionError(LOST_LINE + (f": {last}" if last else ""))
         raise SessionError(f"the background session ended {state or 'without a trace in claude agents'}"
                            + (f": {last}" if last else ""))
     return tail.last_text

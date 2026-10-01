@@ -19,13 +19,16 @@ class _Sessions:
     """dev.SESSIONS as a fake: one background session whose `claude agents` state is `now`."""
 
     def __init__(self, transcript: Path) -> None:
-        self.path, self.now, self.stops = transcript, "working", []
+        self.path, self.now, self.stops, self.process = transcript, "working", [], True
 
     async def start(self, cwd, prompt, **kw):
         return {"id": "ab12cd34", "session_id": "ab12cd34-0000"}
 
     async def state(self, cwd, short):
         return self.now
+
+    def has_process(self, short):
+        return self.process
 
     def transcript(self, session_id):
         return self.path
@@ -152,6 +155,20 @@ async def test_a_session_that_ends_while_its_workflow_runs_fails_the_turn(turn):
         await asyncio.wait_for(task, 2)
 
 
+async def test_a_session_whose_process_ends_while_its_workflow_runs_fails_the_turn(turn):
+    """`claude stop` from elsewhere, or a crash, leaves the session listed as done with no process: its workflow ended
+    with it, so the turn fails instead of waiting for a notification that never comes."""
+    start, fake, write, _ = turn
+    task = start()
+    write(*WORKFLOW, said("Waiting."), turn_end(pendingWorkflowCount=1))
+    fake.now = "done"
+    await asyncio.sleep(0.15)
+    assert not task.done()
+    fake.process = False
+    with pytest.raises(dev.SessionError, match="before its background work finished"):
+        await asyncio.wait_for(task, 2)
+
+
 async def test_a_result_that_only_quotes_a_moved_call_is_no_background_work(turn):
     """Only Claude Code's own word that it moved a call to the background starts a task, not a log or a transcript
     that a Read, Grep or Bash result quotes."""
@@ -170,3 +187,16 @@ async def test_a_result_that_only_quotes_a_moved_call_is_no_background_work(turn
            "kpmn7kn7f and keeps running; you'll receive a notification with the result when it completes.")
     assert agent_session.MOVED_TASK_RE.search(own).group(1) == "kpmn7kn7f"
     assert not agent_session.MOVED_TASK_RE.search(quoted)
+
+
+async def test_a_listed_session_has_a_process_only_with_a_pid_or_status(monkeypatch, tmp_path):
+    """`claude agents` keeps a stopped session listed with its last state, and only a running one has a pid and status."""
+    sessions = dev.Sessions()
+    listing = [{"id": "ab12cd34", "state": "done", "status": "idle", "pid": 4242}, {"id": "ef56ab78", "state": "done"}]
+
+    async def fake_listing(cwd):
+        return listing
+
+    monkeypatch.setattr(sessions, "_listing", fake_listing)
+    assert await sessions.state(tmp_path, "ab12cd34") == "done" and sessions.has_process("ab12cd34")
+    assert await sessions.state(tmp_path, "ef56ab78") == "done" and not sessions.has_process("ef56ab78")
