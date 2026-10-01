@@ -231,6 +231,23 @@ def test_a_program_s_token_works_for_its_role_s_own_tools_only_and_only_while_it
         assert client.post("/api/tools/list_cards", json=body, headers=headers()).status_code == 401
 
 
+def test_settings_name_each_role_s_agent_and_its_consent_settings(tmp_path, workspaces_tmp, active):
+    from app import ledger
+
+    active.append(_extension(tmp_path, "survey", {"orientation": {"description": "Surveys.", "sdk": "o.py"},
+                                                  "main": {"description": "Adds.", "prompt": "m.md"}},
+                             {"agents/orientation/o.py": "async def run(input):\n    return 'ok'\n",
+                              "agents/main/m.md": "Say hello."}))
+    _config({"agents": {"critic": {"network": "off", "data": "off", "sandbox": "off"}}})
+    rows = ledger.with_features({}, CORPUS)["agents"]
+    assert rows["main"]["additions"] == ["survey"]
+    assert rows["orient"]["way"] == "sdk" and rows["orient"]["extension"] == "survey"
+    assert (rows["orient"]["network"], rows["orient"]["data"], rows["orient"]["sandbox"]) == ("on", "ask", "on")
+    assert (rows["critic"]["network"], rows["critic"]["data"], rows["critic"]["sandbox"]) == ("off", "off", "off")
+    assert rows["critic"]["way"] == "thimble" and rows["critic"]["config"] == "agents.critic"
+    assert set(rows) == {"main", *userconf.MODE_ROWS.values()}
+
+
 # --------------------------------------------------------------------------- programs
 
 

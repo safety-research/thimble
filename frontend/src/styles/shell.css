@@ -458,6 +458,18 @@
 .settings-mode {
   justify-self: start;
 }
+/* under an agent's mode: who runs it and what it may do (SettingsPopover's agentLine) */
+.settings-agent-line {
+  grid-column: 2;
+  padding-bottom: 6px;
+  color: var(--text-secondary);
+  font: var(--type-body-sm);
+}
+.settings-agent-main {
+  margin: 6px 6px 0;
+  color: var(--text-secondary);
+  font: var(--type-body-sm);
+}
 .settings-modes-warn {
   margin: 6px 6px 0;
   color: var(--status-warning);

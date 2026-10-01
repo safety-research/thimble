@@ -958,7 +958,25 @@ export interface Settings {
   config_error?: string
   /** while Claude Code does not trust thimble's workspaces folder: the folder and the command that trusts it (shell/Untrusted) */
   untrusted?: { folder: string; command: string } | null
+  /** who runs each agent thimble starts and what it may do, by its permission-mode row (backend ledger.agent_rows) */
+  agents?: Partial<Record<ModeAgent, AgentRow>> & { main?: { additions: string[] } }
   [k: string]: unknown
+}
+
+/** One agent's row in the settings (backend ledger.agent_rows): thimble's own agent or an extension's (its prompt in
+ * place of thimble's, an Agent SDK program or a command), the extensions adding to its prompt, two that both replace
+ * it, and its consent settings from thimble's config. */
+export interface AgentRow {
+  way: 'thimble' | 'prompt' | 'sdk' | 'command'
+  extension: string
+  additions: string[]
+  conflict: string[]
+  sandbox: 'on' | 'off'
+  sandbox_runs: boolean
+  network: 'on' | 'off'
+  web: 'ask' | 'off' | 'allow'
+  data: 'ask' | 'allow' | 'off'
+  config: string
 }
 
 /** `PUT /ws/{c}/settings`: `models` merges per role and within a role, so a role's patch names only what changes;

@@ -232,7 +232,7 @@ def with_features(stored: dict[str, Any], c: str | None = None) -> dict[str, Any
     modes the config sets (modes.rows), `disabled_modes`, those the analyst's Claude Code settings turn off,
     `config_error`, the config's error or '', and `untrusted`, {folder, command} while Claude Code does not trust the
     workspaces folder, so the background sessions cannot start (bg_session.trusted); never on a code ticket's test
-    server (dev.STACK_ENABLED off), whose scratch workspaces folder is never trusted."""
+    server (dev.STACK_ENABLED off), whose scratch workspaces folder is never trusted; `agents`, agent_rows."""
     from . import bg_session, cli, dev, extensions, modes, userconf  # noqa: PLC0415 — they import this module
 
     kept = {k: v for k, v in stored.items() if k not in RETIRED_KEYS and k != modes.SETTING}
@@ -240,7 +240,29 @@ def with_features(stored: dict[str, Any], c: str | None = None) -> dict[str, Any
         "folder": str(config.WORKSPACES_DIR), "command": cli.trust_command()}
     models = {**config.models_for(c), **extensions.agent_models(c)}
     return {**SETTINGS_DEFAULTS, **kept, config.MODELS_KEY: models, modes.SETTING: modes.rows(c) if c else {},
-            "disabled_modes": sorted(modes.disabled()), "config_error": userconf.problem(c), "untrusted": untrusted}
+            "disabled_modes": sorted(modes.disabled()), "config_error": userconf.problem(c), "untrusted": untrusted,
+            "agents": agent_rows(c)}
+
+
+def agent_rows(c: str | None) -> dict[str, Any]:
+    """Who runs each agent thimble starts and what it may do, by its row of the permission modes (modes.AGENTS): its
+    role's agent (roles.public: thimble's own, or an extension's prompt, Agent SDK program or command, with the
+    extensions that add to its prompt and a conflict), and from thimble's config its sandbox, whether the sandbox can
+    run here, its network, web tools and edits of the corpus; `main` names the extensions that add to main's prompt."""
+    from . import roles, userconf  # noqa: PLC0415
+
+    conf = userconf.load_or_defaults(c)[0]
+    runs = conf["sandbox"]["use"] != "never" and userconf.sandbox_runs()
+    by_role = {r["role"]: r for r in roles.public(c)}
+    out: dict[str, Any] = {"main": {"additions": by_role["main"]["additions"]}}
+    for agent, row in userconf.MODE_ROWS.items():
+        mine = conf["agents"][agent]
+        role = by_role.get(agent) or {"way": "thimble", "extension": "", "additions": [], "conflict": []}
+        out[row] = {"way": role["way"], "extension": role["extension"], "additions": role["additions"],
+                    "conflict": role["conflict"], "sandbox": mine.get("sandbox", "on"), "sandbox_runs": runs,
+                    "network": mine.get("network", "on"), "web": mine.get("web", "ask"), "data": mine.get("data", "ask"),
+                    "config": f"agents.{agent}"}
+    return out
 
 
 @router.get("/ws/{c}/settings")
