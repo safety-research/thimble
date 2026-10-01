@@ -229,9 +229,9 @@ async def start(c: str, brief: str, passes: "list[str] | tuple[str, ...]" = ("fi
                 call: str | None = None, chosen: "dict[str, Any] | None" = None) -> agent_session.Run:
     """Start the orientation session for workspace `c` with the parts `passes` names (PASSES) and follow it, `call`
     being main's start_orientation call (agent_session.start); `chosen` holds the critique choice the call made, over
-    Start's. RuntimeError when one runs or is starting, or claude cannot be started. A check on whether an extension's
-    view fits that is still being made is waited for first (extensions.settle). The prompt is rendered off the event
-    loop."""
+    Start's. RuntimeError when one runs or is starting, or claude cannot be started. The workspace's extensions are
+    found first when it never found them, and a refresh or a check on whether an extension's view fits that is still
+    being made is waited for (extensions.settle). The prompt is rendered off the event loop."""
     if running(c) or starting(c):
         raise RuntimeError("an orientation is running")
     _starting.add(c)

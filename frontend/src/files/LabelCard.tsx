@@ -3,7 +3,7 @@
 // body, and the classes with colour and highlight switch. Colours and highlights save as they change; the rest is a
 // draft that Re-run (Run for a new label) saves before applying the label (backend concepts.apply_route). Cancel, × or
 // Escape drops the draft. LabelSheet is the same card in a popover on a canvas card (LabelFields, with each class's
-// count); its draft outlasts the popover (canvas/labelDrafts) and its foot offers Discard and Regenerate Card.
+// count); its draft outlasts the popover (canvas/labelDrafts) and its foot offers Discard and Re-run.
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import { Button, Segmented } from '../components/Button'
 import { CodeArea } from '../components/Code'
@@ -156,7 +156,7 @@ const definitionOf = (d: Draft): string => JSON.stringify([d.over, d.marks, d.gl
 const BODY_WORD: Record<ConceptKind, string> = { prompt: 'its prompt', regex: 'its pattern', code: 'its code' }
 
 /**
- * What a draft changes in label `k`'s definition, each in words, for the hover of the label's red tag on a card; [] when
+ * What a draft changes in label `k`'s definition, each in words, for the hover of the label's tag on a card; [] when
  * nothing. The name, colours and highlights are not edits. Pure.
  */
 export function editsOf(k: Concept, d: Draft): string[] {
@@ -429,11 +429,12 @@ function LabelFields({ ws, label, labels, draft, classes, set, counts }: { ws: s
 /**
  * A label's edit card in a popover on a canvas card: its colour and name, its fields (LabelFields) with class counts, and
  * the last run. `draft` holds the unrun edits, owned by the caller so they outlast the popover; `onDraft` hands back each
- * edit, null once it matches the label again. With a draft the foot is Discard and `regenerate`; without, Review
- * records (with `onReview`), Open in Files and `regenerate` when given.
+ * edit, null once it matches the label again. With a draft the foot is Discard and Re-run, which saves the draft and
+ * runs the label; without, Review records (with `onReview`) and Open in Files.
  */
-export function LabelSheet({ ws, label, draft, onDraft, onClose, onOpen, onReview, regenerate }: { ws: string; label: Concept; draft: Draft | null; onDraft: (d: Draft | null) => void; onClose: () => void; onOpen: () => void; onReview?: () => void; regenerate?: ReactNode }) {
+export function LabelSheet({ ws, label, draft, onDraft, onClose, onOpen, onReview }: { ws: string; label: Concept; draft: Draft | null; onDraft: (d: Draft | null) => void; onClose: () => void; onOpen: () => void; onReview?: () => void }) {
   const labels = useFilesLabels(ws)
+  const [saving, setSaving] = useState(false)
   // the label as Files shows it, a colour just picked included, else as the canvas has it
   const k = labels.byId.get(label.id) ?? label
   const shown = draft ?? draftOf(k, [])
@@ -446,6 +447,25 @@ export function LabelSheet({ ws, label, draft, onDraft, onClose, onOpen, onRevie
     const { shown: now, k: label } = current.current
     const next = { ...now, ...patch }
     onDraft(definitionOf(next) === definitionOf(draftOf(label, [])) ? null : next)
+  }
+  const rerun = async () => {
+    if (!draft) return
+    const problem = draftProblem(draft, classes)
+    if (problem) {
+      bus.emit('toast', { text: problem, kind: 'error' })
+      return
+    }
+    setSaving(true)
+    try {
+      await labels.save(k.id, patchOf(draft, classes))
+      track('label-apply', { target: `concept:${k.id}`, detail: { over: draft.over, marks: draft.over === 'files' ? draft.marks : null, kind: draft.kind, created: false } })
+      onDraft(null)
+      await labelApi.apply(ws, k.id, {})
+    } catch (e) {
+      bus.emit('toast', { text: `Could not run ${k.name}. ${(e as Error).message}`, kind: 'error' })
+    } finally {
+      setSaving(false)
+    }
   }
   const status = labelStatus(k)
   const counted = status?.state === 'done' ? (status.total == null ? '' : `${status.total.toLocaleString()} ${unitWord(status.unit, status.total)}`) : status?.state === 'running' ? progressText(status) : ''
@@ -465,7 +485,12 @@ export function LabelSheet({ ws, label, draft, onDraft, onClose, onOpen, onRevie
       <LabelFields ws={ws} label={k} labels={labels} draft={shown} classes={classes} set={set} counts={k.counts} />
       <div className="label-card-foot">
         {draft ? (
-          <Button onClick={() => onDraft(null)}>Discard</Button>
+          <>
+            <Button onClick={() => onDraft(null)}>Discard</Button>
+            <Button variant="primary" busy={saving} onClick={() => void rerun()}>
+              Re-run
+            </Button>
+          </>
         ) : (
           <span className="label-sheet-links">
             {onReview && (
@@ -479,7 +504,6 @@ export function LabelSheet({ ws, label, draft, onDraft, onClose, onOpen, onRevie
             </button>
           </span>
         )}
-        {regenerate}
       </div>
     </div>
   )

@@ -1082,14 +1082,11 @@
   font: var(--type-mono-sm);
   font-variant-numeric: tabular-nums;
 }
-/* the links to Files and to the review, at the foot's left when Regenerate Card follows them */
+/* the links to Files and to the review */
 .label-sheet-links {
   display: flex;
   align-items: center;
   gap: 12px;
-}
-.label-sheet-links:not(:last-child) {
-  margin-right: auto;
 }
 
 /* -------- the reader: the cell's paper behind a hairline, square tabs on the sidebar's step -------- */

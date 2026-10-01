@@ -2112,13 +2112,13 @@ def trust_command() -> str:
 
 
 def untrusted(workspaces: Path) -> Path | None:
-    """The workspaces folder when Claude Code does not trust it, by its own entry or one above it, so the background
-    sessions of the orientation, its critic, the writers and view builds cannot start (bg_session.trusted); None when
-    it does."""
+    """The workspaces folder when Claude Code does not trust it, by the rule `claude --bg` applies
+    (claude_changes.trusted), so the background sessions of the orientation, its critic, the writers and view builds
+    cannot start (bg_session.trusted); None when it does."""
     from . import bg_session, claude_changes  # noqa: PLC0415
 
     data = claude_changes._read(bg_session.claude_json())
-    return None if any(claude_changes.trusted(f, data) for f in (workspaces, workspaces.resolve())) else workspaces
+    return None if claude_changes.trusted(workspaces, data) else workspaces
 
 
 def trust_line(workspaces: Path, commands: bool = True) -> str:

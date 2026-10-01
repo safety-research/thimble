@@ -183,8 +183,8 @@ _trust_read: dict[str, tuple[tuple[int, int], dict[str, Any]]] = {}  # claude_js
 
 def trusted(c: str) -> bool:
     """Whether Claude Code trusts workspace `c`'s folder, below which its background sessions run (module note, start),
-    by the folder's own entry or one above it such as install.sh's for the workspaces folder (claude_changes). The file
-    is parsed again only when it changed, since the settings ask on each read."""
+    by the rule `claude --bg` applies (claude_changes.trusted), as through install.sh's entry for the install or the
+    workspaces folder. The file is parsed again only when it changed, since the settings ask on each read."""
     from . import claude_changes  # noqa: PLC0415
 
     path = claude_json()
@@ -196,8 +196,7 @@ def trusted(c: str) -> bool:
     kept = _trust_read.get(str(path))
     if kept is None or kept[0] != stamp:
         kept = _trust_read[str(path)] = (stamp, claude_changes._read(path))
-    folder = config.WORKSPACES_DIR / c
-    return any(claude_changes.trusted(f, kept[1]) for f in (folder, folder.resolve()))
+    return claude_changes.trusted(config.WORKSPACES_DIR / c, kept[1])
 
 
 def kind_of(key: str) -> str:

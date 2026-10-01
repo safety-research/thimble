@@ -415,6 +415,44 @@ def test_claude_codes_config_changes_only_on_a_yes_and_uninstall_takes_back_what
     assert not home.exists(), "removed once what it recorded was put back"
 
 
+def test_a_trusted_folder_above_a_clone_does_not_skip_the_trust_question_and_a_yes_writes_the_clone_s_entry(tmp_path):
+    """A Dev install cloned into a folder Claude Code trusts, whose own entry is false (`claude --bg` refuses it):
+    install.sh asks the trust question, also over the yes an earlier install recorded without adding an entry, and
+    --trust-workspaces sets the clone's own entry, keeping what Claude Code keeps in it; --no-trust-workspaces takes the
+    trust back."""
+    parent = tmp_path / "Developer"
+    tree = fake_tree(parent / "thimble", checkout=True)
+    (tree / "backend" / "app").mkdir(parents=True)
+    shutil.copy(REPO / "backend" / "app" / "claude_changes.py", tree / "backend" / "app")
+    env = env_for(tmp_path)
+    home = Path(env["THIMBLE_HOME"])
+    home.mkdir()
+    cfg = Path(env["HOME"]) / ".claude.json"
+    kept = {"allowedTools": [], "lastAPIDuration": 1200}
+    cfg.write_text(json.dumps({"projects": {str(parent): {"hasTrustDialogAccepted": True},
+                                            str(tree): {"hasTrustDialogAccepted": False, **kept}}}))
+
+    def run(*args: str) -> str:
+        cmd = ["python3", "-I", str(tree / "backend" / "app" / "claude_changes.py"), *args]
+        return subprocess.run(cmd, capture_output=True, text=True, env=env, stdin=subprocess.DEVNULL, timeout=30,
+                              check=True).stdout.strip()
+
+    def entry() -> dict:
+        return json.loads(cfg.read_text())["projects"][str(tree)]
+
+    assert run("question", str(tree)) and run("skipped", str(tree)) == ""
+    (home / "trust.json").write_text(json.dumps({"folder": str(tree), "config": str(cfg), "answer": "yes",
+                                                 "added": False}))
+    assert run("question", str(tree)) and run("skipped", str(tree)) == ""
+    assert "not trusted" in run("trust", str(tree)) and entry() == {"hasTrustDialogAccepted": False, **kept}
+    assert run("trust", str(tree), "--yes").startswith("marked")
+    assert entry() == {"hasTrustDialogAccepted": True, **kept}
+    assert json.loads((home / "trust.json").read_text())["added"] is True
+    assert run("question", str(tree)) == ""
+    run("trust", str(tree), "--no")
+    assert entry() == kept and run("question", str(tree)) == ""
+
+
 @pytest.mark.skipif(not sys.platform.startswith("linux") or os.geteuid() == 0, reason="a Linux user who needs sudo")
 def test_install_sh_installs_the_sandbox_s_missing_packages_only_on_a_yes_and_through_sudo(tmp_path):
     """Where bubblewrap and socat are missing, a run without a terminal needs --sandbox-deps or --no-sandbox-deps; a yes

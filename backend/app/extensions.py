@@ -863,11 +863,15 @@ async def refresh(c: str, wait: float = 0.0) -> dict[str, Any]:
 
 
 async def settle(c: str) -> None:
-    """Before an orientation starts: a view's check still being made is waited for, so the orientation's instructions
-    name the files of the views shown, and main hears of the card types."""
+    """Before an orientation starts: a refresh under way is waited for, the extensions are found when the workspace
+    never found them, and a view's check still being made is waited for, so the orientation's instructions and agents
+    are those of the active extensions and name the files of the views shown, and main hears of the card types."""
     from . import cardtypes  # noqa: PLC0415
 
-    if any(not e["task"].done() for e in _checks(c).values()):
+    if _lock(c).locked():
+        async with _lock(c):
+            pass
+    if not _state_path(c).is_file() or any(not e["task"].done() for e in _checks(c).values()):
         await refresh_quietly(c, wait=DECIDE_WAIT_S)
         await cardtypes.announce(c)
 

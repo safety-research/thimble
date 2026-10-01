@@ -106,11 +106,11 @@ view's reason, and its switch there overrides the check.
 The views thimble builds for a workspace are that workspace's own extension, in `workspaces/<workspace>/extension/`.
 No other workspace shows them. Settings > Extensions lists them under This workspace's views, each with its switch.
 
-`swarm-orient` adds to the orientation for corpora where many agents act on shared pages and channels and address
-each other. Many swarm-reader agents read every record, a coordination label marks each one, the counts are checked,
-and the episodes are drawn as `multiagent-swimlane` cards, the card type that draws a swimlane of the actions main
-chose. Test builds called it `swarm`: the commands still take that name for this release, and what was set for it
-carries over.
+`swarm-orient` adds to the orientation for corpora where many agents act on shared pages and channels and address each
+other. Many swarm-reader agents read every record, a label that fits the analyst's request marks each one, the counts
+are checked, and the episodes are drawn as `multiagent-swimlane` cards, the card type that draws a swimlane of the
+actions main chose. Test builds called it `swarm`: the commands still take that name for this release, and what was
+set for it carries over.
 
 ## Update
 
@@ -139,7 +139,8 @@ that one and prints each path it deleted. The folder it read and your Claude Cod
   session's settings as they are, and `thimble doctor` says when that sandbox is on.
 - thimble warns that Claude Code does not trust its workspaces folder: the orientation, its critic, the writers and
   view builds can't start until it does, while your own session keeps working. Run the command the warning gives,
-  `bash <install dir>/scripts/install.sh --trust-workspaces`.
+  `bash <install dir>/scripts/install.sh --trust-workspaces`. Claude Code reads trust only up to the root of a git
+  clone, so a trusted folder above a Dev install's clone doesn't count.
 - Cards are not checked, views are checked without loading their page, or screenshots are unavailable: there is no
   browser (the install's answer, or no Chrome or Edge found), or the machine lacks the headless Chromium's system
   libraries. thimble never downloads a browser by itself. `install.sh --browser system` or `--browser bundled` sets one

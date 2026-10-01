@@ -1,6 +1,6 @@
 // A label's unrun edits made in the popover of its tag on a card, per workspace and label. They live here so they
-// outlast the popover and every card using the label shows its tag red until they are run or discarded. A reload drops
-// them.
+// outlast the popover and every card using the label names them in its tag's tooltip until they are run or
+// discarded. A reload drops them.
 import { useSyncExternalStore } from 'react'
 import { editsOf, type Draft } from '../files/LabelCard'
 import type { Cell, Concept } from '../lib/types'
