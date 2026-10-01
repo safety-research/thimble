@@ -102,6 +102,7 @@ function LabelRow({ label: k, on, n, focused, marked, editing, status, labels, o
   const classes = classesOf(k)
   const running = status?.state === 'running'
   const files = isFilesLabel(k)
+  const byHand = k.n_marked ?? k.n_reviewed ?? 0
   const colour = mainColour(k)
   const paletteAt = useRef<HTMLButtonElement>(null)
   const [picking, setPicking] = useState(false)
@@ -147,7 +148,14 @@ function LabelRow({ label: k, on, n, focused, marked, editing, status, labels, o
         <Button variant="icon" size="sm" icon="more-horizontal" title="Edit label" aria-label={`Edit ${k.name}`} className="files-label-edit" active={editing} onClick={() => onEdit(editing ? null : k.id)} />
       </div>
       {files && <LabelPalette label={k} anchor={paletteAt} open={picking} onClose={() => setPicking(false)} onPick={(value, n) => labels.setColour(k.id, value, n)} />}
-      {status && <LabelStatusLine status={status} name={k.name} marked={k.n_reviewed ?? 0} onRetry={() => onRetry(k.id)} />}
+      {status && <LabelStatusLine status={status} name={k.name} marked={byHand} onRetry={() => onRetry(k.id)} />}
+      {!status && files && byHand > 0 && (
+        <div className="files-label-status">
+          <span className="files-label-marked">
+            {byHand.toLocaleString()} {unitWord(k.unit, byHand)} marked by hand
+          </span>
+        </div>
+      )}
       {files && on && classes.length > 2 && (
         <div className="files-label-classes">
           {classes.map((c, i) => (

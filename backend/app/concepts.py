@@ -368,13 +368,16 @@ def _changes_field(v: Any) -> list[dict]:
 
 
 def _label_stats_field(v: Any) -> dict | None:
-    """`label_stats` as stored: {key: [size, mtime_ns], n_labeled, n_reviewed, counts}; None when absent or malformed."""
+    """`label_stats` as stored: {key: [size, mtime_ns], n_labeled, n_reviewed, n_marked, counts}, n_marked None in stats
+    stored before it was kept; None when absent or malformed."""
     if not isinstance(v, dict) or not isinstance(v.get("key"), (list, tuple)) or len(v["key"]) != 2:
         return None
     try:
         key = [int(v["key"][0]), int(v["key"][1])]
         counts = {str(k): int(n) for k, n in (v.get("counts") or {}).items()} if isinstance(v.get("counts"), dict) else {}
-        return {"key": key, "n_labeled": int(v.get("n_labeled") or 0), "n_reviewed": int(v.get("n_reviewed") or 0), "counts": counts}
+        marked = int(v["n_marked"]) if v.get("n_marked") is not None else None
+        return {"key": key, "n_labeled": int(v.get("n_labeled") or 0), "n_reviewed": int(v.get("n_reviewed") or 0), "n_marked": marked,
+                "counts": counts}
     except (TypeError, ValueError):
         return None
 
@@ -850,7 +853,7 @@ def label_stats(rows: list[dict]) -> dict:
     counts: dict[str, int] = {}
     for r in model.values():
         counts[str(r.get("label"))] = counts.get(str(r.get("label")), 0) + 1
-    return {"n_labeled": len(model), "n_reviewed": sum(1 for ref in analyst if ref in model), "counts": counts}
+    return {"n_labeled": len(model), "n_reviewed": sum(1 for ref in analyst if ref in model), "n_marked": len(analyst), "counts": counts}
 
 
 def _merged_rows(rows: list[dict], path: str | None = None) -> list[dict]:
@@ -880,8 +883,8 @@ def _ref_path(ref: str) -> str | None:
 
 
 def concept_stats(ws: Path, concept: dict) -> dict:
-    """{n_labeled, n_reviewed, counts} from the stats stored on the concept while their key matches the labels file,
-    else from the store. While a run appends, the stored (pre-run) stats stand."""
+    """{n_labeled, n_reviewed, n_marked, counts} from the stats stored on the concept while their key matches the labels
+    file, else from the store. While a run appends, the stored (pre-run) stats stand."""
     stored = concept.get("label_stats")
     key = _file_key(labels_file(ws, concept["id"]))
     if key is None:
@@ -889,7 +892,8 @@ def concept_stats(ws: Path, concept: dict) -> dict:
     if _applying(ws.name, concept["id"]) or (stored is not None and tuple(stored["key"]) == key):
         if stored is None:
             return label_stats([])
-        return {"n_labeled": stored["n_labeled"], "n_reviewed": stored["n_reviewed"], "counts": dict(stored["counts"])}
+        marked = stored["n_reviewed"] if stored["n_marked"] is None else stored["n_marked"]
+        return {"n_labeled": stored["n_labeled"], "n_reviewed": stored["n_reviewed"], "n_marked": marked, "counts": dict(stored["counts"])}
     return _stats(ws, concept["id"])
 
 
@@ -916,7 +920,7 @@ def coverage(ws: Path, concept: dict) -> dict:
 
 
 def with_stats(ws: Path, concept: dict) -> dict:
-    """The concept card: the concept plus n_labeled, n_reviewed, counts, est_precision and the live run record."""
+    """The concept card: the concept plus n_labeled, n_reviewed, n_marked, counts, est_precision and the live run record."""
     cal = concept["calibration"]
     est = cal["agreed"] / cal["n"] if cal.get("n") else None
     return {**{k: v for k, v in concept.items() if k != "label_stats"}, **concept_stats(ws, concept), "est_precision": est,
@@ -2724,7 +2728,8 @@ def _stored_stats(key: tuple[int, int] | None, stats: dict) -> dict | None:
     if key is None:
         return None
     return {"key": [int(key[0]), int(key[1])], "n_labeled": int(stats.get("n_labeled") or 0),
-            "n_reviewed": int(stats.get("n_reviewed") or 0), "counts": {str(k): int(v) for k, v in (stats.get("counts") or {}).items()}}
+            "n_reviewed": int(stats.get("n_reviewed") or 0), "n_marked": int(stats.get("n_marked") or 0),
+            "counts": {str(k): int(v) for k, v in (stats.get("counts") or {}).items()}}
 
 
 def _run_record(c: str, concept_id: str, run_id: str, started: str, created_by: str, patterns: list[str], sources: list[dict]) -> dict:
@@ -3119,7 +3124,7 @@ def record_verdict(ws: Path, concept: dict, ref: str, label: str, note: str | No
         return row, concept
     concept["calibration"] = _calibration_from_pairs(st.calibration_pairs(), concept["labels"])
     if stored is not None and before is not None and tuple(stored["key"]) == before:
-        stats = {"n_labeled": stored["n_labeled"], "n_reviewed": st.n_reviewed(), "counts": dict(stored["counts"])}
+        stats = {"n_labeled": stored["n_labeled"], "n_reviewed": st.n_reviewed(), "n_marked": st.n_marked(), "counts": dict(stored["counts"])}
     else:
         stats = st.stats()
     concept["label_stats"] = _stored_stats(_file_key(out), stats)

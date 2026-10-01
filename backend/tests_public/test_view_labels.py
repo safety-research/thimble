@@ -248,3 +248,15 @@ def test_the_count_is_of_what_the_frame_shows_now():
     assert note(["other#L1"], frame="f", turn=1) == 1, "another file shown"
     assert note(["late#L1", "late#L2"], frame="f", turn=0) == 1, "a call from before the file changed"
     assert note(["run1#L1"], frame="g") == 1
+
+
+async def test_every_record_the_analyst_marks_counts_as_marked_by_hand(app, corpus):
+    """A view marks a record through the label's verdict route; the Labels pane says how many records were marked by
+    hand, a record the label's run never reached among them."""
+    (corpus / "notes.jsonl").write_text(json.dumps({"thread": "t1", "body": "help, from the notes"}) + "\n")
+    k = await _asks(app)
+    for ref, n_marked, n_reviewed in (("notes.jsonl#L1", 1, 0), ("board.jsonl#L2", 2, 1)):
+        r = await app.post(f"/api/ws/{CORPUS}/concepts/{k['id']}/labels", json={"ref": ref, "label": "asks"})
+        assert r.status_code == 200, r.text
+        got = (await app.get(f"/api/ws/{CORPUS}/concepts/{k['id']}")).json()
+        assert (got["n_marked"], got["n_reviewed"]) == (n_marked, n_reviewed), (ref, got)

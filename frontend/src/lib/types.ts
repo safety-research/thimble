@@ -260,6 +260,8 @@ export interface Concept {
   n_labeled?: number
   /** the records the analyst gave a value by hand that the label's run labelled too */
   n_reviewed?: number
+  /** every record the analyst gave a value by hand */
+  n_marked?: number
   /** a label over files: what it marks; null for a label of cards or report sentences */
   marks?: LabelMarks | null
   /** what it applies to: comma-separated globs */

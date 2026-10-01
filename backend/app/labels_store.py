@@ -643,16 +643,19 @@ class Store:
         return out
 
     def stats(self) -> dict:
-        """{n_labeled, n_reviewed, counts}: refs with a classifier label, those the analyst also judged, and the count
-        per label, covers' records included."""
+        """{n_labeled, n_reviewed, n_marked, counts}: refs with a classifier label, those the analyst also judged, every
+        ref the analyst judged, and the count per label, covers' records included."""
         counts = {str(label): int(n) for label, n in self._q("SELECT label, COUNT(*) FROM current WHERE label IS NOT NULL GROUP BY label")}
         for value, n in self._q(f"SELECT c.value, SUM(c.last - c.first + 1 - {_LABELED_IN}) FROM covers c GROUP BY c.value"):
             if n:
                 counts[str(value)] = counts.get(str(value), 0) + int(n)
-        return {"n_labeled": sum(counts.values()), "n_reviewed": self.n_reviewed(), "counts": counts}
+        return {"n_labeled": sum(counts.values()), "n_reviewed": self.n_reviewed(), "n_marked": self.n_marked(), "counts": counts}
 
     def n_reviewed(self) -> int:
         return int(self._q(f"SELECT COUNT(*) FROM current WHERE analyst IS NOT NULL AND {_LABEL} IS NOT NULL")[0][0])
+
+    def n_marked(self) -> int:
+        return int(self._q("SELECT COUNT(*) FROM current WHERE analyst IS NOT NULL")[0][0])
 
     def n_refs(self) -> int:
         """The labeled units: the rows, and the records the covers hold without one."""
