@@ -228,6 +228,7 @@ async def _lifespan(app: FastAPI):
         st = cli.read_state()
         if st and not st.get("token"):  # a record an older supervisor wrote: the hooks' token (hook_auth.py)
             cli.write_state(st)
+        hook_auth.ensure_session_key()
         config.private_dir(config.WORKSPACES_DIR)
     except Exception:
         log.exception("making thimble's home and workspaces private failed")

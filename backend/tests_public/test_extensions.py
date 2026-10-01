@@ -924,8 +924,18 @@ async def test_settings_add_and_doctor_name_what_another_extension_keeps_from_ru
     an extension another needs names the one that stops running."""
     monkeypatch.setenv("THIMBLE_WORKSPACES_DIR", str(config.WORKSPACES_DIR))
     program = {"description": "Its own critic.", "command": ["python3", "c.py"]}
-    for name in ("roleswap", "roleswap2"):
-        _add(_role_ext(tmp_path, name, {"critic": program}, {"agents/critic/c.py": "print('{}')\n"}))
+    _add(_role_ext(tmp_path, "roleswap", {"critic": program}, {"agents/critic/c.py": "print('{}')\n"}))
+    said: list[str] = []
+
+    def ask(question: str) -> str:
+        said.append(question)
+        return "n"
+
+    second = _role_ext(tmp_path, "roleswap2", {"critic": program}, {"agents/critic/c.py": "print('{}')\n"})
+    assert extensions.add(str(second), ask=ask, say=said.append) is None
+    conflict = "Conflict: roleswap and roleswap2 both replace the critic, so thimble's own runs."
+    assert conflict in said and said.index(conflict) < said.index("Add it? [y/N] "), "named before the question"
+    _add(second)
     assert "conflict: roleswap and roleswap2 both replace the critic, so thimble's own runs" in extensions.doctor_line()
     assert cli.main(["extension", "add", str(tmp_path / "roleswap2"), "--yes"]) == 0
     assert "Conflict: roleswap and roleswap2 both replace the critic, so thimble's own runs." in capsys.readouterr().out

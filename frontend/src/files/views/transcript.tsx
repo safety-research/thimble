@@ -1,5 +1,6 @@
 // The Transcript view, for any file the server's sniff (backend transcripts.py) reads as close to a transcript: a
-// Claude Code stream as cards by record, the system records behind a toggle; messages (JSON lines, a CSV or TSV file's
+// Claude Code stream as cards by record, the system records behind a toggle (a stream each record nests under one key,
+// as the Agent SDK's messages kept in a database row, shows the nested records); messages (JSON lines, a CSV or TSV file's
 // rows) as posts with their authors and times; JSON lines that each hold a whole conversation as one card per line,
 // its turns inside; a text or markdown chat log as one card per turn, a turn's lines under its speaker; and a
 // whole-file JSON transcript (a chat export, an eval log) as the turns the server parses from it, a page at a time.
@@ -12,7 +13,7 @@ import { Chip } from '../../components/Chip'
 import { Spinner } from '../../components/Spinner'
 import { api } from '../../lib/api'
 import type { Block, ChatTurn, SourceKind, SourceRecord, SourceTurn, SourceTurns, TranscriptHint } from '../../lib/types'
-import { BlockEl, Collapsible, errMsg, lineCount, RecordCard, recordExcerpt, targetOf, useTarget, type Target, type ViewDef, type ViewProps } from './common'
+import { BlockEl, Collapsible, compact, errMsg, lineCount, RecordCard, recordExcerpt, targetOf, useTarget, type Target, type ViewDef, type ViewProps } from './common'
 import { useDelimited } from './table'
 
 export const CONVERSATIONAL = new Set(['assistant', 'user'])
@@ -49,7 +50,7 @@ function sysSummary(rec: any): string {
   return parts.join(' · ') || 'record'
 }
 
-function ToolResult({ block, path, line, index, target, hit, isError }: { block: Block; path: string; line: number; index: number; target: Target | null; hit: boolean; isError: boolean }) {
+function ToolResult({ block, path, line, index, target, hit, isError }: { block: Block; path?: string; line: number; index: number; target: Target | null; hit: boolean; isError: boolean }) {
   const forced = !!target && target.line === line && target.block === index
   return (
     <Collapsible lines={lineCount(block.text)} forced={forced}>
@@ -58,7 +59,7 @@ function ToolResult({ block, path, line, index, target, hit, isError }: { block:
   )
 }
 
-function SysRow({ path, rec, target, hit }: { path: string; rec: SourceRecord; target: Target | null; hit: boolean }) {
+function SysRow({ path, blockPath, rec, target, hit }: { path: string; blockPath?: string; rec: SourceRecord; target: Target | null; hit: boolean }) {
   const [open, setOpen] = useState(false)
   const forced = !!target && target.line === rec.line && target.block != null
   return (
@@ -66,7 +67,7 @@ function SysRow({ path, rec, target, hit }: { path: string; rec: SourceRecord; t
       <Button size="sm" className="reader-sys-summary mono" aria-expanded={open || forced} onClick={() => setOpen((o) => !o)}>
         {sysSummary(rec.record)}
       </Button>
-      {(open || forced) && rec.blocks.map((b, k) => <BlockEl key={k} block={b} path={path} line={rec.line} index={k} target={target} hit={hit} />)}
+      {(open || forced) && rec.blocks.map((b, k) => <BlockEl key={k} block={b} path={blockPath} line={rec.line} index={k} target={blockPath ? target : null} hit={hit} />)}
     </RecordCard>
   )
 }
@@ -151,9 +152,17 @@ function keysFor(hint: TranscriptHint | null | undefined, objs: unknown[]): Mess
   return k ? { author: k.speaker, time: k.time ?? found.time, body: k.text, context: found.context } : found
 }
 
-/** A record's value at a key, dotted for a nested one (`message.author`). */
+/** A record's value at a key, dotted for a nested one (`message.author`); for `a|b`, the first of the keys that holds a
+ * value (the sniff names who speaks so where records keep it under different keys). */
 export function pick(r: unknown, key: string | undefined): unknown {
   if (!key) return undefined
+  if (key.includes('|')) {
+    for (const alt of key.split('|')) {
+      const v = pick(r, alt)
+      if (v != null && v !== '' && !(Array.isArray(v) && !v.length)) return v
+    }
+    return undefined
+  }
   let v: unknown = r
   for (const part of key.split('.')) {
     if (!v || typeof v !== 'object') return undefined
@@ -162,13 +171,19 @@ export function pick(r: unknown, key: string | undefined): unknown {
   return v
 }
 
-/** Who a speaker value names: a string, or a person object's name. */
+/** the keys of a person object that hold a name in any case style (`displayName`, `full_name`), as the server's sniff
+ * reads them (backend transcripts.NAME_NORMS) */
+const NAME_NORMS = new Set(['name', 'displayname', 'username', 'realname', 'fullname', 'nickname', 'nick', 'handle', 'login'])
+
+/** Who a speaker value names: a string, or a person object's name (its name keys, then its role or id). */
 export function nameOf(v: unknown): string | null {
   if (typeof v === 'string') return v.trim() || null
   if (typeof v === 'number') return String(v)
   if (v && typeof v === 'object' && !Array.isArray(v)) {
-    for (const k of ['name', 'display_name', 'username', 'real_name', 'role', 'id']) {
-      const got = nameOf((v as Record<string, unknown>)[k])
+    const o = v as Record<string, unknown>
+    const named = Object.entries(o).filter(([k]) => NAME_NORMS.has(k.toLowerCase().replace(/[^a-z0-9]/g, ''))).map(([k]) => k)
+    for (const k of ['name', 'display_name', 'username', 'real_name', ...named, 'role', 'id']) {
+      const got = nameOf(o[k])
       if (got) return got
     }
   }
@@ -231,9 +246,26 @@ function DelimitedTranscript({ workspace, path, page, targetRef, transcript }: V
   return <Posts path={path} records={rows} targetRef={targetRef} hint={transcript} derived />
 }
 
+/** characters of one field a post with no words shows */
+const FIELD_MAX = 300
+
+/** The other fields of a record that holds no words (an agent's action among a village's talk): those of the record
+ * that would hold them, but for who speaks and the time, each value as a line, nested ones compacted. Pure. */
+export function restFields(r: unknown, keys: MessageKeys): [string, string][] {
+  const dot = keys.body?.lastIndexOf('.') ?? -1
+  const prefix = dot > 0 ? keys.body!.slice(0, dot) : ''
+  const box = prefix ? pick(r, prefix) : r
+  if (!box || typeof box !== 'object' || Array.isArray(box)) return []
+  const own = (k: string) => (prefix && k.startsWith(`${prefix}.`) ? k.slice(prefix.length + 1) : k)
+  const skip = new Set([...(keys.author ?? '').split('|'), keys.time ?? ''].map(own))
+  return Object.entries(box as Record<string, unknown>)
+    .filter(([k, v]) => !skip.has(k) && v != null && v !== '')
+    .map(([k, v]) => [k, typeof v === 'string' ? (v.length > FIELD_MAX ? `${v.slice(0, FIELD_MAX)}…` : v) : compact(v, FIELD_MAX)])
+}
+
 /** Records as posts: author, context and time in the head, the body under it. A body the server's blocks hold is shown
  * as those blocks (span labels mark them); a body only the record holds (`derived`, or blocks that are the raw record)
- * as its text. */
+ * as its text; a record with no body, whose blocks are the raw record, as its other fields on one line. */
 function Posts({ path, records, targetRef, hint, derived }: { path: string; records: SourceRecord[]; targetRef?: string; hint?: TranscriptHint | null; derived?: boolean }) {
   const rootRef = useRef<HTMLDivElement | null>(null)
   const { target, hit } = useTarget(targetRef, path, rootRef, [records])
@@ -250,11 +282,20 @@ function Posts({ path, records, targetRef, hint, derived }: { path: string; reco
         const header = [author, present(ctx) && typeof ctx !== 'object' ? String(ctx) : null, ts].filter(Boolean).join(' · ')
         // an empty body leaves the server a raw block of the whole record; the post says it is empty instead
         const empty = typeof body === 'string' && !body.trim()
+        const fields = value == null && rec.blocks.every((b) => b.kind === 'raw') ? restFields(r, keys) : null
         const own = !derived && rec.blocks.length > 0 && !rec.blocks.every((b) => b.kind === 'raw' && body != null)
         return (
           <RecordCard key={rec.line} path={path} line={rec.line} target={target} hit={hit} className="reader-msg" header={header} text={empty ? undefined : own ? recordExcerpt(rec) : body?.slice(0, 500)}>
             {empty ? (
               <div className="reader-msg-empty">(empty body)</div>
+            ) : fields?.length ? (
+              <div className="reader-msg-fields">
+                {fields.map(([k, v]) => (
+                  <span key={k}>
+                    <span className="reader-msg-field mono">{k}</span> {v}
+                  </span>
+                ))}
+              </div>
             ) : own ? (
               rec.blocks.map((b, k) => <BlockEl key={k} block={b} path={path} line={rec.line} index={k} target={target} hit={hit} />)
             ) : (
@@ -500,8 +541,48 @@ function TurnCard({ path, turn, end, target, hit }: { path: string; turn: Source
   )
 }
 
-function StreamTranscript({ path, page, targetRef }: ViewProps) {
-  const records = page.records
+/** A Claude Code stream record's blocks as the server makes them for one that is not nested (refs.record_blocks). */
+export function streamBlocks(r: any): Block[] {
+  const content = r?.message?.content
+  if ((r?.type === 'assistant' || r?.type === 'user') && typeof content === 'string') return [{ kind: 'text', text: content }]
+  if ((r?.type === 'assistant' || r?.type === 'user') && Array.isArray(content)) return content.map(contentBlock).filter((b): b is Block => b != null)
+  return [rawBlock(r)]
+}
+
+const asText = (x: unknown): string => (x == null ? '' : typeof x === 'string' ? x : JSON.stringify(x))
+const rawBlock = (x: unknown): Block => ({ kind: 'raw', text: JSON.stringify(x, null, 2) ?? '' })
+
+function contentBlock(b: any): Block | null {
+  if (!b || typeof b !== 'object') return rawBlock(b)
+  if (b.type === 'text') return { kind: 'text', text: asText(b.text) }
+  if (b.type === 'tool_use') return { kind: 'tool_use', text: `${asText(b.name)}\n${JSON.stringify(b.input ?? null, null, 2)}` }
+  if (b.type === 'tool_result') {
+    const c = b.content
+    const text = Array.isArray(c) ? c.filter((x) => x && typeof x === 'object' && x.type === 'text').map((x) => asText(x.text)).join('\n') : asText(c)
+    return { kind: 'tool_result', text }
+  }
+  if (b.type === 'thinking') return b.thinking ? { kind: 'thinking', text: asText(b.thinking) } : null
+  return rawBlock(b)
+}
+
+/** The stream records a file nests under `wrap` in each record, as records of their own: their blocks made here, their
+ * time the nesting record's when they carry none. A record that nests none stays as it is. Pure. */
+export function unwrapStream(records: SourceRecord[], wrap: string): SourceRecord[] {
+  return records.map((rec) => {
+    const outer = rec.record
+    const inner = outer && typeof outer === 'object' ? outer[wrap] : undefined
+    if (!inner || typeof inner !== 'object' || Array.isArray(inner)) return rec
+    const ts = inner.timestamp ?? TIME_KEYS.map((k) => outer[k]).find((v) => v != null && v !== '')
+    return { ...rec, record: inner, blocks: streamBlocks(inner), meta: { ...rec.meta, ...(ts != null ? { timestamp: ts } : {}) } }
+  })
+}
+
+function StreamTranscript({ path, page, targetRef, transcript }: ViewProps) {
+  const wrap = transcript?.wrap
+  const records = useMemo(() => (wrap ? unwrapStream(page.records, wrap) : page.records), [wrap, page.records])
+  // blocks made here from a nested record are not the file's own, so labels' spans and citations' offsets are not
+  // drawn on them
+  const blockPath = wrap ? undefined : path
   const [showSystem, setShowSystem] = useState(false)
   const rootRef = useRef<HTMLDivElement | null>(null)
   const { target, hit } = useTarget(targetRef, path, rootRef, [records, showSystem])
@@ -536,7 +617,7 @@ function StreamTranscript({ path, page, targetRef }: ViewProps) {
     if (sid) prevSession = sid
     const type: string = r.type ?? 'record'
     if (!CONVERSATIONAL.has(type)) {
-      if (showSystem) out.push(<SysRow key={rec.line} path={path} rec={rec} target={target} hit={hit} />)
+      if (showSystem) out.push(<SysRow key={rec.line} path={path} blockPath={blockPath} rec={rec} target={target} hit={hit} />)
       else if (runs.has(rec.line)) out.push(<HiddenRun key={`h${rec.line}`} count={runs.get(rec.line)!} onShow={() => setShowSystem(true)} />)
       return
     }
@@ -545,7 +626,7 @@ function StreamTranscript({ path, page, targetRef }: ViewProps) {
     const header = [type, ts ? stamp(String(ts)) : null].filter(Boolean).join(' · ')
     out.push(
       <RecordCard key={rec.line} path={path} line={rec.line} target={target} hit={hit} className={`reader-rec-${type}`} header={header} text={recordExcerpt(rec)}>
-        {rec.blocks.map((b, k) => (b.kind === 'tool_result' ? <ToolResult key={k} block={b} path={path} line={rec.line} index={k} target={target} hit={hit} isError={errorBlocks.has(k)} /> : <BlockEl key={k} block={b} path={path} line={rec.line} index={k} target={target} hit={hit} />))}
+        {rec.blocks.map((b, k) => (b.kind === 'tool_result' ? <ToolResult key={k} block={b} path={blockPath} line={rec.line} index={k} target={blockPath ? target : null} hit={hit} isError={errorBlocks.has(k)} /> : <BlockEl key={k} block={b} path={blockPath} line={rec.line} index={k} target={blockPath ? target : null} hit={hit} />))}
       </RecordCard>,
     )
   })

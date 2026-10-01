@@ -53,6 +53,7 @@ import os
 import numbers
 import re
 import sqlite3
+import threading
 import zlib
 from pathlib import Path
 
@@ -297,6 +298,30 @@ def _store_parts(db: Path):
     return rows, covers
 
 
+def _store_rows(db: Path):
+    """_store_parts with the rows as an iterator over the query, so a large label is never held as a list of rows."""
+    conn = sqlite3.connect(f"file:{db}?mode=ro", uri=True, timeout=5.0)
+    try:
+        try:
+            covers = conn.execute("SELECT path, first, last, value, source FROM covers ORDER BY rowid").fetchall()
+        except sqlite3.Error:  # a store without covers
+            covers = []
+        cur = conn.execute("SELECT path, line, label, source, analyst, confidence, ref FROM current "
+                           "WHERE label IS NOT NULL OR analyst IS NOT NULL ORDER BY rowid")
+    except BaseException:
+        conn.close()
+        raise
+
+    def rows():
+        try:
+            while batch := cur.fetchmany(10_000):
+                yield from batch
+        finally:
+            conn.close()
+
+    return rows(), covers
+
+
 def _rows_from_store(db: Path, negatives: bool = False):
     return _with_covers(*_store_parts(db), negatives)
 
@@ -322,10 +347,12 @@ def _rows_from_jsonl(jsonl: Path, negatives: bool = False):
 
 
 def _jsonl_parts(jsonl: Path):
-    """(rows, covers) of the labels file, as _store_parts gives them for the store."""
+    """(rows, covers) of the labels file, as _store_parts gives them for the store. A clear line finds the rows on its
+    lines through `at`, so a run written as many cleared blocks reads in one pass."""
     model = {}
     analyst = {}
     covers: list = []
+    at: dict = {}  # path -> {line: the ref, or a list of the refs, of the classifier rows there}
     try:
         f = open(jsonl, "r", encoding="utf-8")
     except OSError:
@@ -347,9 +374,14 @@ def _jsonl_parts(jsonl: Path):
                     a, b = int(r.get("from") or 1), (2**62 if r.get("to") is None else int(r["to"]))
                 except (TypeError, ValueError):
                     continue
-                if r.get("clear"):
-                    for ref in [ref for ref, m in model.items() if _ref_parts(ref)[0] == where and a <= (_row_line(ref, m)[1] or 0) <= b]:
-                        del model[ref]
+                if r.get("clear") and (got := at.get(where)):
+                    span = range(a, b + 1) if b - a < len(got) else [n for n in got if a <= n <= b]
+                    for n in span:
+                        slot = got.pop(n, None)
+                        for ref in ([slot] if isinstance(slot, str) else slot or ()):
+                            m = model.get(ref)
+                            if m is not None and m[0] == where and m[1] == n:
+                                del model[ref]
                 covers = _trim(covers, where, a, b)
                 if r.get("cover") and r.get("value") is not None:
                     covers.append((where, a, b, str(r["value"]), r.get("source")))
@@ -358,16 +390,28 @@ def _jsonl_parts(jsonl: Path):
                 continue
             ref = str(r["ref"])
             ref = "card:" + ref[len("cell:"):] if ref.startswith("cell:") else ref  # `cell:` prefix read as `card:` (labels_store.canon_ref)
-            (analyst if r.get("source") == "analyst" else model)[ref] = r
+            path, n = _row_line(ref, r)
+            if r.get("source") == "analyst":
+                analyst[ref] = (path, n, r.get("label"))
+                continue
+            model[ref] = (path, n, r.get("label"), r.get("source"), r.get("confidence"))
+            if path is not None and n:
+                got = at.setdefault(path, {})
+                slot = got.get(n)
+                if slot is None:
+                    got[n] = ref
+                elif isinstance(slot, str):
+                    if slot != ref:
+                        got[n] = [slot, ref]
+                elif ref not in slot:
+                    slot.append(ref)
     out = []
-    for ref, r in model.items():
+    for ref, (path, n, label, source, confidence) in model.items():
         a = analyst.get(ref)
-        path, line = _row_line(ref, r)
-        out.append((path, line, r.get("label"), r.get("source"), a.get("label") if a else None, r.get("confidence"), ref))
-    for ref, a in analyst.items():
+        out.append((path, n, label, source, a[2] if a else None, confidence, ref))
+    for ref, (path, n, label) in analyst.items():
         if ref not in model:
-            path, line = _row_line(ref, a)
-            out.append((path, line, None, None, a.get("label"), None, ref))
+            out.append((path, n, None, None, label, None, ref))
     return out, covers
 
 
@@ -444,7 +488,135 @@ PROBE_ID = "test-label"
 # the colour the analyst's first label takes (--label-1), so the pictures show a view's own colour that clashes with a
 # label where the analyst would see it
 PROBE_COLOUR = LABEL_COLOURS[1]
-_MEMBERS: dict = {}  # labels file -> (the files' signature, ({ref: value}, {path: [(first, last, value)]}, {path}))
+# labels file -> (the files' signature, (_Values, {path: [(first, last, value)]}, {path})), the most recently used last
+_MEMBERS: dict = {}
+# above the labels any context holds: labels that do not all fit here are read again on every call
+MEMBERS_KEPT = 64
+_MEMBERS_LOCK = threading.Lock()  # guards _MEMBERS and _READING
+_READING: dict = {}  # labels file -> the lock held while one thread reads its members, which the others wait for
+DENSE_MIN = 1 / 16  # a file's line refs fill at least this share of its lines up to the last: one code per line
+
+
+class _Values:
+    """{ref: value} of one label, kept small: the values of `<path>#L<n>` refs as one code per line of each file (bytes
+    indexed by line where they are dense, else sorted line numbers beside their codes), every other ref in a dict. Reads
+    as a read-only mapping of the refs to their values."""
+
+    def __init__(self) -> None:
+        self._names: list = [None]  # code -> value; code 0 is none
+        self._codes: dict = {}
+        self._pending: dict = {}  # path -> (lines, codes, whether a line that has a code keeps it), in the order added
+        self._lines: dict = {}  # path -> codes indexed by line, or (lines ascending, their codes)
+        self._other: dict = {}
+        self._n = 0
+
+    def _code(self, value) -> int:
+        c = self._codes.get(value)
+        if c is None:
+            c = self._codes[value] = len(self._names)
+            self._names.append(value)
+        return c
+
+    def add(self, ref: str, value, keep: bool = False) -> None:
+        """Give the ref its value, a later call winning, or with `keep` only when it has none yet; seal() packs them."""
+        path, line = _ref_parts(ref)
+        if line is None or path is None or ref != f"{path}#L{line}":
+            if not keep or ref not in self._other:
+                self._other[ref] = value
+            return
+        self.add_line(path, line, value, keep)
+
+    def add_line(self, path: str, line: int, value, keep: bool = False) -> None:
+        """add() for the ref `<path>#L<line>`."""
+        got = self._pending.get(path)
+        if got is None:
+            from array import array
+
+            got = self._pending[path] = (array("Q"), array("I"), bytearray())
+        got[0].append(line)
+        got[1].append(self._code(value))
+        got[2].append(1 if keep else 0)
+
+    def seal(self) -> "_Values":
+        from array import array
+
+        wide = len(self._names) > 256
+        for path, (lines, codes, keeps) in self._pending.items():
+            top = max(lines)
+            if len(lines) >= top * DENSE_MIN:
+                out = array("I", bytes(4 * (top + 1))) if wide else bytearray(top + 1)
+                for n, c, k in zip(lines, codes, keeps):
+                    if not k or not out[n]:
+                        out[n] = c
+                self._lines[path] = out if wide else bytes(out)
+                self._n += (top + 1) - out.count(0)
+            else:
+                last: dict = {}
+                for n, c, k in zip(lines, codes, keeps):
+                    if not k or n not in last:
+                        last[n] = c
+                order = sorted(last)
+                self._lines[path] = (array("Q", order), array("I", (last[n] for n in order)))
+                self._n += len(order)
+        self._pending = {}
+        self._n += len(self._other)
+        return self
+
+    def _line_code(self, path: str, line: int) -> int:
+        got = self._lines.get(path)
+        if got is None:
+            return 0
+        if isinstance(got, tuple):
+            from bisect import bisect_left
+
+            order, codes = got
+            i = bisect_left(order, line)
+            return codes[i] if i < len(order) and order[i] == line else 0
+        return got[line] if 0 < line < len(got) else 0
+
+    def get(self, ref, default=None):
+        ref = str(ref)
+        path, sep, tail = ref.rpartition("#L")
+        if sep and tail.isascii() and tail.isdigit() and tail[0] != "0":
+            c = self._line_code(path, int(tail))
+            if c:
+                return self._names[c]
+        return self._other.get(ref, default)
+
+    def __getitem__(self, ref):
+        v = self.get(ref, _ABSENT)
+        if v is _ABSENT:
+            raise KeyError(ref)
+        return v
+
+    def __contains__(self, ref) -> bool:
+        return self.get(ref, _ABSENT) is not _ABSENT
+
+    def __len__(self) -> int:
+        return self._n
+
+    def items(self):
+        for path, got in self._lines.items():
+            if isinstance(got, tuple):
+                for n, c in zip(*got):
+                    yield f"{path}#L{n}", self._names[c]
+            else:
+                for n, c in enumerate(got):
+                    if c:
+                        yield f"{path}#L{n}", self._names[c]
+        yield from self._other.items()
+
+    def __iter__(self):
+        return (ref for ref, _ in self.items())
+
+    def keys(self):
+        return iter(self)
+
+    def values(self):
+        return (v for _, v in self.items())
+
+
+_ABSENT = object()
 
 
 def _signature(*paths: Path) -> tuple:
@@ -461,33 +633,55 @@ def _signature(*paths: Path) -> tuple:
 def _members(jsonl) -> tuple:
     """({ref: effective value}, {path: [(first, last, value)]}, {path}) of one label: its rows' values, its covers, and
     the files it left a value on. Read from its store when that is fresh, else its labels file, and kept until either
-    file changes, so a reader's lookups cost a dict access each."""
+    file changes (at most MEMBERS_KEPT labels), so a reader's lookups cost a lookup each. Threads that ask for the same
+    label at once wait for the first one's read."""
     jsonl = Path(jsonl)
-    db = jsonl.with_suffix(".sqlite")
-    sig = _signature(jsonl, db)
-    hit = _MEMBERS.get(str(jsonl))
-    if hit is not None and hit[0] == sig:
-        return hit[1]
-    rows, covers = _store_parts(db) if _store_fresh(jsonl, db) else _jsonl_parts(jsonl)
-    values = {}
+    key = str(jsonl)
+    with _MEMBERS_LOCK:
+        reading = _READING.setdefault(key, threading.Lock())
+    with reading:
+        db = jsonl.with_suffix(".sqlite")
+        sig = _signature(jsonl, db)
+        with _MEMBERS_LOCK:
+            hit = _MEMBERS.pop(key, None)
+            if hit is not None and hit[0] == sig:
+                _MEMBERS[key] = hit
+                return hit[1]
+        members = _read_members(jsonl, db)
+        with _MEMBERS_LOCK:
+            _MEMBERS[key] = (sig, members)
+            while len(_MEMBERS) > MEMBERS_KEPT:
+                _READING.pop(gone := next(iter(_MEMBERS)), None)
+                del _MEMBERS[gone]
+        return members
+
+
+def _read_members(jsonl: Path, db: Path) -> tuple:
+    rows, covers = _store_rows(db) if _store_fresh(jsonl, db) else _jsonl_parts(jsonl)
+    values = _Values()
     paths = set()
-    starts = {}  # a record of a CSV or a JSON document by the line it starts on, as a view that reads its lines names it
+    starts = []  # a record of a CSV or a JSON document by the line it starts on, as a view that reads its lines names it
     for path, line, label, _source, verdict, _confidence, ref in rows:
         v = verdict if verdict is not None else label
         if v is not None:
-            values[str(ref)] = str(v)
+            ref = str(ref)
+            if path is not None and line is not None and ref == f"{path}#L{line}":
+                values.add_line(path, line, str(v))
+            else:
+                values.add(ref, str(v))
             if path is not None:
                 paths.add(str(path))
                 if line is not None and _ref_parts(str(ref))[1] is None:
-                    starts.setdefault(f"{path}#L{int(line)}", str(v))
-    for ref, v in starts.items():
-        values.setdefault(ref, v)
+                    starts.append((f"{path}#L{int(line)}", str(v)))
+    rows = None
+    for ref, v in starts:
+        values.add(ref, v, keep=True)
+    values.seal()
     spans: dict = {}
     for c in covers:
         if c[3] is not None:
             spans.setdefault(c[0], []).append((int(c[1]), int(c[2]), str(c[3])))
             paths.add(str(c[0]))
-    _MEMBERS[str(jsonl)] = (sig, (values, spans, paths))
     return values, spans, paths
 
 

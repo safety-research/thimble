@@ -81,6 +81,17 @@ def test_the_settings_pane_writes_where_the_value_it_shows_came_from(workspaces_
     assert getattr(e.value, "status_code", None) == 400 and userconf.global_file().read_text() == before
 
 
+def test_every_agent_s_network_is_on_by_default_and_settings_shows_it_so(workspaces_tmp, monkeypatch):
+    """With no config, each agent thimble starts, the dev agent included, has its network on, its sandbox reaches the
+    network, and the agent rows the settings show say "on"."""
+    monkeypatch.setenv("THIMBLE_SANDBOX", "1")
+    rows = ledger.agent_rows(CORPUS)
+    assert {row: rows[row]["network"] for row in userconf.MODE_ROWS.values()} == dict.fromkeys(userconf.MODE_ROWS.values(), "on")
+    for agent in userconf.MODE_ROWS:
+        conf = userconf.session(CORPUS, agent, sandbox=True)
+        assert conf.network and "Bash" not in (conf.settings()["permissions"].get("ask") or []), agent
+
+
 def test_what_a_session_gets_from_the_config(workspaces_tmp, monkeypatch):
     """Install commands go to the analyst by default, in every mode, including those Claude Code's rules miss; "deny"
     refuses them and "allow" leaves them to the mode, but for a view build with no network, which refuses them. Memory is passed only when set. The dev agent's Bash goes to the

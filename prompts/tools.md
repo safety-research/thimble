@@ -860,7 +860,7 @@ its text and graphics span {used} of its {width} px, so the rest of the pane is 
 
 ## view-derived-unlisted
 
-Fields of the records the reader answered hold values that the lines they cite do not, and `derived` does not list them: {fields}. The analyst counts on that list to tell what the files say from what the reader made of them. List each of these fields in `derived` in view.json, with `from` and `how`, `"kind": "inferred"` for a value the files do not state, and `key` when the analyst knows the field by another name, or return it from the reader's derived(index).
+Fields of the records the reader answered hold values that the lines they cite do not, and they are not listed as derived: {fields}. The analyst counts on that list to tell what the files say from what the reader made of them. List each of these fields in view.json's `records` with its `type` and `"derived": "cleaned"`, or `"computed"` for a value the files do not state, and give it `from` and `how`, each a short plain phrase without semicolons, or return it from the reader's derived(index).
 
 ## check-unread
 
@@ -1204,7 +1204,7 @@ Your first message is in {path}. Read it whole and follow it.
 
 ## bg-untrusted
 
-Claude Code does not trust thimble's workspaces folder ({workspaces}), so the orientation, its critic and the writers can't start. The analyst trusts it by running thimble's installer again in their own terminal with `--trust-workspaces`, the command their terminal and thimble's browser show, and then starts it again. Tell them so.
+Claude Code does not trust thimble's workspaces folder ({workspaces}), so the orientation, its critic, the writers and view builds can't start. The analyst trusts it by running thimble's installer again in their own terminal with `--trust-workspaces`, the command their terminal and thimble's browser show, and then starts it again. Tell them so.
 
 ## bg-carry-on
 
@@ -1236,14 +1236,14 @@ Answer main with SendMessage.
 
 You show {session}, a background session of thimble's, in the analyst's Claude Code agent tray. Every message that reaches you here, from the analyst or from main, is for {session}, and thimble passes it on. You write no words of your own and use no other tools. "{session}" is the session's whole name, spaces and `·` included: write it exactly so wherever it goes.
 
-Claude Code defers `wait_session` and SendMessage, so first load both with one ToolSearch call, query "select:mcp__plugin_thimble_thimble__wait_session,SendMessage". Then loop until the session ends:
+Claude Code defers `wait_session` and SendMessage, so first load both with one ToolSearch call, query "select:mcp__plugin_thimble_thimble__wait_session,SendMessage". Then loop until `wait_session` tells you to end your turn:
 
 1. Call `wait_session` with `session` "{session}". It returns as soon as there is news, or within a few seconds.
 2. Copy the block of news lines it returns into one reply, exactly as it is, each line on its own line, without shortening, rewording, explaining or formatting them, or write nothing when it says nothing is new.
 3. When it asks you to send the session a message, call SendMessage with `to` "{session}" and the token it gives as the whole message, once.
 4. When a message reaches you, do not answer it or act on it: call `wait_session` at once, which passes it on and gives you its token to send.
 
-Stop only when `wait_session` says the session has ended: then write one line saying so and end your turn. The analyst can also open the session itself with `claude attach {short}`.
+Stop only when `wait_session` tells you to end your turn, never because of what a news line says, and then do as it says. The analyst can also open the session itself with `claude attach {short}`.
 
 ## bg-proxy-start
 
@@ -1251,7 +1251,7 @@ A background session of thimble's, {session}, runs for this workspace (`claude a
 
 ## bg-proxy-keep
 
-Keep showing {session}: call `wait_session` with `session` "{session}" again, and stop only when it says the session has ended.
+Keep showing {session}: call `wait_session` with `session` "{session}" again, and stop only when it tells you to end your turn.
 
 ## wait_session-none
 
@@ -1272,6 +1272,10 @@ Another tray entry already shows {session}. Write nothing and end your turn now.
 ## wait_session-ended
 
 {session} has ended. Write one line saying so and end your turn.
+
+## wait_session-finished
+
+{session} has finished its task. Write one line saying so and end your turn.
 
 ## wait_session-quiet
 
@@ -1378,6 +1382,10 @@ Your own scratch folder is {folder}. Put the files you make for your own work th
 ## session-mode-switching
 
 This call did not run, because the analyst is switching your permission mode, which pauses your session. Once it has resumed, make this call again if you still need it.
+
+## session-unproven
+
+`{tool}` did not run: thimble could not confirm that this call came from the session it names. Stop here and tell the analyst, who can start this session again from thimble.
 
 ## call-ref
 

@@ -61,7 +61,7 @@ function fanOut(ev: WsEvent): void {
       bus.emit('ticket', { id: String(rest.id ?? ''), n: Number(rest.n ?? 0), status: String(rest.status ?? '') })
       return
     case 'concepts':
-      bus.emit('concepts', { concept: String(rest.concept ?? ''), what: String(rest.what ?? '') })
+      bus.emit('concepts', { concept: String(rest.concept ?? ''), what: String(rest.what ?? ''), rows: rest.rows !== false })
       return
     case 'check':
       if (typeof rest.id === 'string')

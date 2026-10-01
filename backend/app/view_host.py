@@ -10,8 +10,11 @@ ships may also define applies(paths) -> {claims, found} or None, whether it fits
 runs with no index. `call` loads reader.py (again when it changed), builds the index or loads it from a pickle keyed by
 the files' and reader's fingerprint, runs one operation and prints SENTINEL followed by the JSON answer. A reader that
 raises answers {ok: false, error, traceback}. The indexes in memory are the most recently used, at most
-INDEXES_PER_VIEW per view and, by the size of their pickles, at most the request's `memory` bytes in all; the one in
-use always stays.
+INDEXES_PER_VIEW per view and at most the request's `memory` bytes in all; the one in use always stays, and so does
+the reader.py module of each index kept, while the others are let go with what their globals hold. An index's
+bytes are what the kernel's resident memory grew by while it was built or loaded, at least its pickle's size. After a
+call that built or loaded an index, or grew the kernel's memory by more than TRIM_GROWTH, the kernel collects its
+garbage and hands the freed memory back to the system (_trim).
 
 A request's `progress` is a file the call's progress is written to while it runs ({phase, done, total, note}): phase
 `index` while build_index runs, then `call`, with what the reader reports through thimble.progress.
@@ -40,22 +43,58 @@ TRACEBACK_MAX = 3000
 
 _readers: dict[str, tuple[tuple[int, int], object]] = {}  # reader.py's path -> ((mtime_ns, size), module)
 _indexes: "OrderedDict[tuple[str, str], object]" = OrderedDict()  # (slug, fingerprint) -> index, least recent first
-_sizes: dict[tuple[str, str], int] = {}  # (slug, fingerprint) -> bytes of its pickle (0 when it has none)
+_sizes: dict[tuple[str, str], int] = {}  # (slug, fingerprint) -> the bytes it takes (module note)
 _read_counts: dict[tuple[str, str], dict[str, int]] = {}  # (slug, fingerprint) -> {claimed path: bytes build_index read}
+_unpickled: set[tuple[str, str]] = set()  # the indexes in memory that have no pickle, which a restart would build again
+_reader_of: dict[tuple[str, str], str] = {}  # (slug, fingerprint) -> the reader.py that built or loaded it
 # a page still on a view's version before a change reads its index beside the new version's
 INDEXES_PER_VIEW = 2
 PROGRESS_EVERY_S = 0.2  # the least time between two writes of a call's progress
 LEFT_OUT_MAX = 200_000  # refs a records answer lists of those kept() refused; beyond that it gives only their count
+TRIM_GROWTH = 64 * 1024 * 1024  # bytes a call may grow the kernel's resident memory by before it is trimmed after
+_libc: list = []  # [glibc's malloc_trim, or None where there is none], looked up once
+
+
+def _rss() -> int | None:
+    """The kernel's resident memory in bytes, None where /proc does not tell it."""
+    try:
+        with open("/proc/self/statm", "rb") as f:
+            return int(f.read().split()[1]) * os.sysconf("SC_PAGE_SIZE")
+    except (OSError, ValueError, IndexError):
+        return None
+
+
+def _trim() -> None:
+    """Collect garbage, then give the memory malloc holds free back to the system where glibc can."""
+    gc.collect()
+    if not _libc:
+        fn = None
+        try:
+            import ctypes  # noqa: PLC0415
+            import ctypes.util  # noqa: PLC0415
+
+            name = ctypes.util.find_library("c")
+            fn = getattr(ctypes.CDLL(name), "malloc_trim", None) if name else None
+        except (OSError, AttributeError, ImportError):
+            fn = None
+        _libc.append(fn)
+    if _libc[0] is not None:
+        try:
+            _libc[0](0)
+        except Exception:  # noqa: BLE001 — trimming is an economy, never a failure
+            pass
 
 
 def _reader(slug: str, path: str) -> object:
-    """reader.py as a module, loaded again when the file's mtime or size changed."""
+    """reader.py as a module, loaded again when the file's mtime or size changed. It is the module under the view's
+    name while it runs, so a pickle of its index finds its own classes, not another version's."""
     st = os.stat(path)
     sig = (st.st_mtime_ns, st.st_size)
     hit = _readers.get(path)
-    if hit is not None and hit[0] == sig:
-        return hit[1]
     name = "thimble_view_" + slug.replace("-", "_")
+    if hit is not None and hit[0] == sig:
+        sys.modules[name] = hit[1]  # type: ignore[assignment]
+        return hit[1]
     spec = importlib.util.spec_from_file_location(name, path)
     if spec is None or spec.loader is None:
         raise ImportError(f"cannot load {path}")
@@ -254,9 +293,11 @@ def _index(slug: str, mod: object, fp: str, paths: list[str], cache: str | None,
     """(the index for this fingerprint, whether it was built now): from memory, else the pickle, else build_index. With
     `reads`, the path the byte counts are kept at, a pickle without them is built again."""
     key = (slug, fp)
+    _reader_of[key] = getattr(mod, "__file__", None) or ""
     if key in _indexes:
         _indexes.move_to_end(key)
         return _indexes[key], False
+    before = _rss()
     idx = None
     built = False
     counts = _load_reads(reads)
@@ -292,8 +333,13 @@ def _index(slug: str, mod: object, fp: str, paths: list[str], cache: str | None,
             except OSError:
                 pass
     _indexes[key] = idx
-    _sizes[key] = _file_size(cache)
+    _trim()
+    after = _rss()
+    grew = after - before if after is not None and before is not None else 0
+    _sizes[key] = max(grew, _file_size(cache))
     _read_counts[key] = counts or {}
+    if not cache or not os.path.isfile(cache):
+        _unpickled.add(key)
     return idx, built
 
 
@@ -305,8 +351,9 @@ def _file_size(path: str | None) -> int:
 
 
 def _evict(key: tuple[str, str], memory: int | None) -> list[str]:
-    """Drop the least recently used indexes but `key`'s: beyond INDEXES_PER_VIEW of one view, then while the pickles of
-    those kept come to more than `memory` bytes. The fingerprints dropped, as `<slug>/<fp>`."""
+    """Drop the least recently used indexes but `key`'s: beyond INDEXES_PER_VIEW of one view, then while those kept
+    come to more than `memory` bytes; then the reader modules no index kept was made by. The fingerprints dropped, as
+    `<slug>/<fp>`."""
     dropped = []
     mine = [k for k in _indexes if k[0] == key[0] and k != key]
     gone = mine[: max(0, len(mine) - INDEXES_PER_VIEW + 1)]
@@ -322,9 +369,14 @@ def _evict(key: tuple[str, str], memory: int | None) -> list[str]:
         _indexes.pop(k, None)
         _sizes.pop(k, None)
         _read_counts.pop(k, None)
+        _unpickled.discard(k)
+        _reader_of.pop(k, None)
         dropped.append(f"{k[0]}/{k[1]}")
-    if dropped:
-        gc.collect()
+    for k in [k for k in _reader_of if k not in _indexes and k != key]:
+        del _reader_of[k]
+    live = set(_reader_of.values())
+    for path in [p for p in _readers if p not in live]:
+        del _readers[path]
     return dropped
 
 
@@ -393,8 +445,9 @@ def answer(req: dict) -> dict:
     read, and the claimed paths as its _view_paths; its answer's `left_out_n` counts the refs thimble.kept and
     kept_unit refused for the filter, and `left_out` lists them when there are at most LEFT_OUT_MAX. With `root` the
     call runs in that folder, a copy of the corpus the paths are relative to. The answer's `held` lists the indexes in
-    memory afterwards (_held) and `dropped` those it let go."""
+    memory afterwards (_held), `dropped` those it let go, and `unpickled` is true while one of them has no pickle."""
     t0 = time.monotonic()
+    start_rss = _rss()
     th = None
     progress = _Progress(req.get("progress"))
     dropped: list[str] = []
@@ -442,7 +495,8 @@ def answer(req: dict) -> dict:
         else:
             raise ValueError(f"unknown operation {op!r}")
         return {"ok": True, "result": result, "built": built, "ms": round((time.monotonic() - t0) * 1000),
-                "held": _held(), **({"dropped": dropped} if dropped else {}), **_left_answer(left_out)}
+                "held": _held(), **({"dropped": dropped} if dropped else {}), **({"unpickled": True} if _unpickled else {}),
+                **_left_answer(left_out)}
     except Exception as e:  # noqa: BLE001 — a reader's failure is the answer
         return {"ok": False, "error": f"{type(e).__name__}: {e}", "traceback": traceback.format_exc()[-TRACEBACK_MAX:],
                 "ms": round((time.monotonic() - t0) * 1000)}
@@ -454,6 +508,9 @@ def answer(req: dict) -> dict:
             th._progress = None  # type: ignore[attr-defined]
         if here is not None:
             os.chdir(here)
+        now = _rss()
+        if dropped or (now is not None and start_rss is not None and now - start_rss > TRIM_GROWTH):
+            _trim()
 
 
 def _held() -> list[list]:

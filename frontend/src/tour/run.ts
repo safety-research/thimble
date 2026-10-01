@@ -10,7 +10,7 @@ let tour: Tour | null = null
 export interface RunOptions extends Pick<StartOptions, 'showTab' | 'onEnd'> {
   /** the first launch, which asks first */
   welcome: boolean
-  /** the chat column is there: without it the steps about the chat are left out */
+  /** the chat column is open: while it is folded the steps about the chat are left out */
   chat: boolean
 }
 

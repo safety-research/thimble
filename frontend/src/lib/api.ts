@@ -29,6 +29,7 @@ import type {
   FileFind,
   GrepDone,
   GrepFile,
+  GrepProgress,
   SourceFind,
   SourceInfo,
   SourceLines,
@@ -174,8 +175,17 @@ export const api = {
   /** `GET /corpora/{c}/sources/find`: the files whose path holds every word of `text`, best first. */
   findFiles: (c: string, text: string, signal?: AbortSignal) => j<FileFind>(`${BASE}/corpora/${enc(c)}/sources/find${q({ q: text })}`, { signal }),
   /** `GET /corpora/{c}/sources/grep`: the files whose text holds `text`, each handed to `onFile` as the server finds it,
-   * then the closing line to `onDone`. Resolves when the stream ends; rejects on a refusal or an abort. */
-  grepFiles: async (c: string, text: string, onFile: (f: GrepFile) => void, onDone: (d: GrepDone) => void, signal?: AbortSignal): Promise<void> => {
+   * how many files it has read to `onProgress`, then the closing line to `onDone`. `onSearch` hears the search's id,
+   * which stopGrep takes, as the stream opens. Resolves when the stream ends; rejects on a refusal or an abort. */
+  grepFiles: async (
+    c: string,
+    text: string,
+    onFile: (f: GrepFile) => void,
+    onDone: (d: GrepDone) => void,
+    signal?: AbortSignal,
+    onProgress?: (p: GrepProgress) => void,
+    onSearch?: (id: number) => void,
+  ): Promise<void> => {
     const res = await fetch(`${BASE}/corpora/${enc(c)}/sources/grep${q({ q: text })}`, { signal })
     if (!res.ok || !res.body) {
       let detail = res.statusText
@@ -186,12 +196,15 @@ export const api = {
       }
       throw new Error(`${res.status} ${detail}`)
     }
+    const id = Number(res.headers.get('x-search'))
+    if (Number.isInteger(id) && id > 0) onSearch?.(id)
     const reader = res.body.getReader()
     const decoder = new TextDecoder()
     let rest = ''
     const take = (line: string) => {
-      const item = JSON.parse(line) as GrepFile | GrepDone
+      const item = JSON.parse(line) as GrepFile | GrepDone | GrepProgress
       if ('done' in item) onDone(item)
+      else if ('progress' in item) onProgress?.(item)
       else if (typeof item.path === 'string') onFile(item)
     }
     for (;;) {
@@ -202,6 +215,10 @@ export const api = {
       if (done) break
     }
   },
+  /** `POST /corpora/{c}/sources/grep/stop`: stop the content search `search` (grepFiles' onSearch); its stream then
+   * ends with its closing line. */
+  stopGrep: (c: string, search: number) =>
+    j<{ stopped: boolean }>(`${BASE}/corpora/${enc(c)}/sources/grep/stop`, { method: 'POST', body: JSON.stringify({ search }) }),
   forgeTables: (c: string, path: string) => j<{ name: string; row_count: number }[]>(`${BASE}/corpora/${enc(c)}/forge/tables${q({ path })}`),
   forgeRows: (c: string, path: string, table: string, offset = 0, limit = 100, order?: string, where?: string) =>
     j<{ table: string; columns: string[]; rows: any[][]; pk: string; total: number }>(`${BASE}/corpora/${enc(c)}/forge/rows${q({ path, table, offset, limit, order, where })}`),
@@ -326,6 +343,8 @@ export const api = {
   /** build a suggested viewer */
   acceptProposal: (c: string, slug: string) => j<Proposal>(`${ws(c)}/views/proposals/${enc(slug)}/accept`, { method: 'POST' }),
   retryProposal: (c: string, slug: string) => j<Proposal>(`${ws(c)}/views/proposals/${enc(slug)}/retry`, { method: 'POST' }),
+  /** Stop the proposal's build (backend views.stop_build): it then fails, with Retry. */
+  stopViewBuild: (c: string, slug: string) => j<{ ok: boolean }>(`${ws(c)}/views/proposals/${enc(slug)}/stop`, { method: 'POST' }),
   /** A message typed in a view build's thread: logged there and queued as a change to the view, whose run goes on in
    * that thread (views.message); answers the proposal. */
   messageView: (c: string, slug: string, text: string) => j<Proposal>(`${ws(c)}/views/proposals/${enc(slug)}/message`, { method: 'POST', body: JSON.stringify({ text }) }),
@@ -560,11 +579,46 @@ export const docsApi = {
 // --- scale: one folder at a time for the tree, one page of labels for the reader ---
 import type { FolderListing, LabelRowsPage } from './types'
 
+/** folders one stamps request asks about (backend corpus.STAMPS_MAX is 200), and the characters of their paths in its
+ * URL, well under the 16 KB a server takes for a request line */
+const STAMPS_AT_ONCE = 100
+const STAMPS_URL_CHARS = 6000
+
+/** `paths` as the `path=` parts of stamps requests, each within STAMPS_AT_ONCE folders and STAMPS_URL_CHARS. */
+export function stampQueries(paths: readonly string[]): string[] {
+  const out: string[] = []
+  let parts: string[] = []
+  let chars = 0
+  for (const p of paths) {
+    const part = `path=${encodeURIComponent(p)}`
+    if (parts.length && (parts.length >= STAMPS_AT_ONCE || chars + part.length > STAMPS_URL_CHARS)) {
+      out.push(parts.join('&'))
+      parts = []
+      chars = 0
+    }
+    parts.push(part)
+    chars += part.length + 1
+  }
+  if (parts.length) out.push(parts.join('&'))
+  return out
+}
+
 export const scaleApi = {
   /** `GET /corpora/{c}/sources?path=<folder>&depth=1`: the folder's own files and subfolders ('' is the root). */
   folder: (c: string, path: string) => j<FolderListing>(`${BASE}/corpora/${enc(c)}/sources${q({ path: path || '.', depth: 1 })}`),
+  /** `GET /corpora/{c}/sources/stamps?path=…`: each folder's stamp now, null for one that is gone, so the tree lists
+   * again only the folders whose stamp is not their listing's; as many requests as stampQueries makes. */
+  stamps: async (c: string, paths: readonly string[]) => {
+    const stamps: Record<string, string | null> = {}
+    for (const query of stampQueries(paths))
+      Object.assign(stamps, (await j<{ stamps: Record<string, string | null> }>(`${BASE}/corpora/${enc(c)}/sources/stamps?${query}`)).stamps)
+    return { stamps }
+  },
   /** `GET /ws/{c}/labels?path=&lines=a-b`: every concept's rows on lines a..b of one file, plus its whole-file rows. */
   labelsForLines: (c: string, path: string, a: number, b: number) => j<LabelsForPath[]>(`${ws(c)}/labels${q({ path, lines: `${a}-${b}` })}`),
+  /** `GET /ws/{c}/labels?path=&lines=a-b,c-d,...`: every concept's rows on each of these ranges of one file's lines, plus
+   * its whole-file rows, in one request. */
+  labelsForSpans: (c: string, path: string, lines: string) => j<LabelsForPath[]>(`${ws(c)}/labels${q({ path, lines })}`),
   /** `POST /ws/{c}/labels/refs`: every concept's rows on these records that are no lines (a database row, a PDF page, a
    * JSON value, a CSV row, a view reader's own record). */
   labelsForRefs: (c: string, refs: string[]) => j<LabelsForPath[]>(`${ws(c)}/labels/refs`, { method: 'POST', body: JSON.stringify({ refs }) }),

@@ -356,6 +356,29 @@
   font: var(--type-body-sm);
 }
 
+/* a folder open in the reader (FolderPane): its entries as the tree's rows, with each one's size or file count at the
+   right */
+.folder-pane {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 6px 8px;
+}
+.folder-pane .files-rows {
+  max-width: 720px;
+}
+.folder-pane .folder-pane-row {
+  padding-left: 10px;
+}
+.folder-pane-meta {
+  flex: none;
+  margin-left: auto;
+  padding-left: 16px;
+  color: var(--text-tertiary);
+  font: var(--type-body-sm);
+  font-variant-numeric: tabular-nums;
+}
+
 /* the search by name under the tree's head: the search field, then the files found as tree rows with the matched
    words in the accent's ink */
 .files-search {
@@ -432,6 +455,38 @@
   color: var(--text-tertiary);
   font: var(--type-body-sm);
   font-variant-numeric: tabular-nums;
+}
+/* the text search's progress under the results, with its Stop at the right */
+.files-found-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  color: var(--text-tertiary);
+  font: var(--type-body-sm);
+  font-variant-numeric: tabular-nums;
+}
+.files-found-status-text {
+  min-width: 0;
+}
+.files-found-stop {
+  flex: none;
+  margin-left: auto;
+  padding: 0 6px;
+  border: 0;
+  border-radius: var(--radius-chip);
+  background: none;
+  color: var(--text-secondary);
+  font: inherit;
+  cursor: pointer;
+}
+.files-found-stop:hover {
+  background: var(--files-row-hover);
+  color: var(--text-primary);
+}
+.files-found-stop:focus-visible {
+  outline: none;
+  box-shadow: inset 0 0 0 1.5px var(--accent);
 }
 /* a part of the results: its name and, at the right, its count in the tertiary */
 .files-found-head {
@@ -1063,6 +1118,8 @@
   margin: 0 6px 0 10px;
   color: var(--text-tertiary);
 }
+/* tabs that do not fit narrow to their min-width, names cut with an ellipsis, all but the open one, whose name shows up
+   to its max-width; past that the strip scrolls, its edge faded where tabs are hidden (FilesTab ReaderTabs sets data-more-left/right) */
 .reader-tabs {
   display: flex;
   align-items: stretch;
@@ -1070,16 +1127,28 @@
   overflow-x: auto;
   scrollbar-width: none;
 }
+.reader-tabs[data-more-right] {
+  mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent);
+}
+.reader-tabs[data-more-left] {
+  mask-image: linear-gradient(to left, #000 calc(100% - 28px), transparent);
+}
+.reader-tabs[data-more-left][data-more-right] {
+  mask-image: linear-gradient(to right, transparent, #000 28px, #000 calc(100% - 28px), transparent);
+}
 .reader-tab {
   display: inline-flex;
   align-items: center;
-  flex: none;
+  flex: 0 1 auto;
+  min-width: 104px;
   gap: 2px;
   padding: 0 10px 0 12px;
   box-shadow: inset -1px 0 0 var(--border-hairline);
   color: var(--text-tertiary);
 }
 .reader-tab.active {
+  flex-shrink: 0;
+  max-width: 320px;
   background: var(--surface-card);
   box-shadow: inset 1px 0 0 var(--files-rule), inset -1px 0 0 var(--files-rule);
   color: var(--text-primary);
@@ -1088,6 +1157,7 @@
   display: inline-flex;
   align-items: center;
   gap: 8px;
+  min-width: 0;
   height: 100%;
   padding: 0;
   border: 0;
@@ -1098,10 +1168,17 @@
   cursor: pointer;
 }
 .reader-tab-glyph {
+  flex: none;
   color: var(--text-tertiary);
+}
+.reader-tab-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .reader-tab-x {
   display: grid;
+  flex: none;
   place-items: center;
   width: 16px;
   height: 16px;
@@ -1692,6 +1769,16 @@
 .reader-msg-empty {
   color: var(--text-tertiary);
 }
+/* a post with no words (an action among talk): its other fields on one line, each name in the tertiary ink */
+.reader-msg-fields {
+  display: flex;
+  flex-wrap: wrap;
+  column-gap: 14px;
+}
+.reader-msg-field {
+  color: var(--text-tertiary);
+  font-size: var(--text-mono-sm);
+}
 .reader-record.has-tint .reader-record-body,
 .reader-line.has-tint {
   background: color-mix(in oklab, var(--tint) 16%, transparent);
@@ -1721,9 +1808,20 @@
   gap: 0 12px;
   padding: 1px 16px 1px 8px;
 }
+/* the number stays at the top of the view while a line taller than it scrolls past, so a long record's number shows */
 .reader-line > .reader-lineno {
+  position: sticky;
+  top: 0;
+  align-self: start;
   color: var(--text-placeholder);
   line-height: 1.75;
+}
+/* the record a followed ref names keeps an edge and its number in the ink after the wash fades */
+.reader-line.reader-target {
+  box-shadow: inset 2px 0 0 var(--hl-edge);
+}
+.reader-line.reader-target > .reader-lineno {
+  color: var(--text-primary);
 }
 .reader-card-body {
   min-width: 0;
@@ -1905,6 +2003,49 @@
   border-left: 2px solid var(--border-subtle);
   color: var(--text-secondary);
 }
+/* a markdown file's front matter, folded above the document: a button, and when opened its fields one per row, the key
+   in the tertiary ink */
+.reader-md-meta {
+  margin: 0 0 12px;
+}
+.reader-md-meta-toggle.btn {
+  margin-left: -8px;
+  color: var(--text-secondary);
+}
+.reader-md-meta-toggle .dim {
+  margin-left: 6px;
+}
+.reader-md-meta-fields {
+  display: grid;
+  grid-template-columns: minmax(0, max-content) minmax(0, 1fr);
+  column-gap: 16px;
+  row-gap: 4px;
+  margin: 6px 0 0;
+  padding: 8px 0 8px 12px;
+  border-left: 2px solid var(--border-subtle);
+  font: var(--type-ui-sm);
+}
+.reader-md-meta-field {
+  display: contents;
+}
+.reader-md-meta-fields dt {
+  color: var(--text-tertiary);
+  overflow-wrap: anywhere;
+}
+.reader-md-meta-fields dd {
+  margin: 0;
+  min-width: 0;
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+.reader-md .reader-md-meta-fields pre {
+  margin: 0;
+  padding: 0;
+  background: none;
+  font: var(--type-mono);
+  color: var(--text-secondary);
+  white-space: pre-wrap;
+}
 
 /* -------- text lines, raw lines: the code's own ink (the primary), syntax colours from styles/code.css -------- */
 .reader-lines {
@@ -2039,6 +2180,25 @@
     box-shadow: inset 0 0 0 100vmax transparent;
   }
 }
+/* the row a followed ref names keeps an edge on its number after the wash fades */
+.reader-table-row.reader-target td.reader-table-gutter {
+  box-shadow: inset 2px 0 0 var(--hl-edge);
+  color: var(--text-primary);
+}
+/* the cell holding the words a followed ref quotes shows them over a few lines, the words highlighted (.hl) */
+.reader-table .reader-table-cell.cited .reader-table-clip {
+  display: -webkit-box;
+  max-width: 44ch;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 6;
+  line-clamp: 6;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  color: var(--text-primary);
+}
+.reader-table-row.reader-target td {
+  vertical-align: top;
+}
 /* the pinned line-number cell mixes the row's tint or hover into the paper, so the columns under it do not show
    through */
 .reader-table-row.has-tint td.reader-table-gutter {
@@ -2108,7 +2268,7 @@
   font: 500 15px / 1.35 var(--font-body);
   color: var(--text-primary);
 }
-/* under the name: the files the view reads, the file Raw shows, and in red the lines its reader could not read */
+/* under the name: the files the view reads, the file Raw shows, and what the view leaves out, all in the same ink */
 .view-pane-sub {
   display: flex;
   flex-wrap: wrap;
@@ -2121,8 +2281,7 @@
   font: var(--type-mono-sm);
   color: var(--text-tertiary);
 }
-.view-pane-files,
-.view-pane-problems {
+.view-pane-files {
   padding: 0;
   border: 0;
   background: none;
@@ -2175,11 +2334,6 @@
   margin: 0;
   padding: 6px 14px;
   border-top: 0;
-}
-.view-pane-problems:hover,
-.view-pane-problems[aria-expanded='true'] {
-  text-decoration: underline;
-  text-underline-offset: 2px;
 }
 .view-pane-list.popover {
   display: flex;

@@ -190,6 +190,25 @@ class Tree:
 
         threading.Thread(target=run, name="corpus-tree", daemon=True).start()
 
+    def recheck(self, rel: str, mtime_ns: int) -> bool:
+        """Check the real folder `rel` ('' the root) again when an earlier walk read it: one stat and, when it changed,
+        one read of its entries, skipped while a walk holds the tree. Whether its count may be given: False when its
+        entries as read are not those of the folder at modification time `mtime_ns`."""
+        node, path = self.top, self.root
+        for name in rel.split("/") if rel else ():
+            node = node.dirs.get(name)
+            if node is None:
+                return True
+            path = f"{path}/{name}"
+        if not node.read:
+            return True
+        if self.lock.acquire(blocking=False):
+            try:
+                self._check(node, path, time.monotonic(), 0.0)
+            finally:
+                self.lock.release()
+        return node.stamp is not None and node.stamp[0] == mtime_ns
+
     def counts(self, hidden: bool) -> dict[str, tuple[int, int]]:
         """folder path ('' the root) -> (files under it at any depth, its subfolders), real subfolders only and dot names
         only with `hidden`, sqlite side files left out, from what earlier walks read: no file system access and no lock.

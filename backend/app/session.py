@@ -32,7 +32,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from . import agents, cc_channel, cc_settings, cite, config, modes, orientation, terminal_tools, threads
+from . import agents, cc_channel, cc_settings, cite, config, modes, orientation, terminal_tools, threads, userconf
 from .ledger import atomic_write_text
 
 log = logging.getLogger("thimble.session")
@@ -91,6 +91,7 @@ COMMAND_ARGS_RE = re.compile(r"<command-args>(.*?)</command-args>", re.S)
 LOCAL_CAVEAT = "<local-command-caveat>"  # the meta record before a local command's line (module note, the table)
 CONNECT_COMMANDS = ("/thimble", "/thimble:thimble")  # /thimble's command line, whose turn is not mirrored (module note)
 TASK_FIELD_RE = re.compile(r"<(task-id|tool-use-id|status|result)>(.*?)</\1>", re.S)
+HANDBACK_LEAD = "[Subagent hand-back]"  # how Claude Code's frame around a subagent's last report opens
 ASYNC_RESULT_RE = re.compile(r"^\s*Async agent launched")
 AGENT_ID_RE = re.compile(r"agentId:\s*([A-Za-z0-9_-]+)")
 TASK_DONE = ("completed", "done", "success")
@@ -424,15 +425,23 @@ def attach(c: str, sid: Any, cwd: Any, transcript_path: str | None = None, pid: 
     _restore_subs(lv, stored.get(SUBS_KEY), revive=restored)
     _live[c] = lv
     if not restored:
+        _modes.pop(c, None)  # a session that ended and is resumed may run in another mode than it last reported
         own = cc_settings.analyst_effort(Path(lv.cwd)) if lv.cwd else None
         meta["attached"] = {"session": sid, "cwd": lv.cwd, "since": lv.since, **({"settings_effort": own} if own else {}),
                             **({"after": after} if after else {})}
         meta["ended"] = None
         agents.write_meta(c, meta)
         agents.notify(c, agents.MAIN_ID)
-    elif "permission_mode" in held and _modes.get(c, ("",))[0] != sid:  # an earlier server's report, no longer in force
-        del held["permission_mode"]
-        agents.write_meta(c, meta)
+    elif _modes.get(c, ("",))[0] != sid:  # this server restarted under the session: main's last report, as kept
+        kept = _kept_mode(c, sid)
+        if kept:
+            _modes[c] = (sid, kept)
+        if held.get("permission_mode") != kept:
+            if kept:
+                held["permission_mode"] = kept
+            else:
+                held.pop("permission_mode", None)
+            agents.write_meta(c, meta)
     _persist(lv, keep_subs=restored or bool(lv.subs))
     _cancel_grace(c)
     _ensure_tail(lv)
@@ -444,14 +453,45 @@ def attach(c: str, sid: Any, cwd: Any, transcript_path: str | None = None, pid: 
     return lv
 
 
+def _kept_modes() -> dict[str, Any]:
+    try:
+        got = json.loads(userconf.main_modes_file().read_text("utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return got if isinstance(got, dict) else {}
+
+
+def _kept_mode(c: str, sid: str) -> str | None:
+    """The mode main's hooks last reported for session `sid` of workspace `c`, as userconf.main_modes_file keeps it
+    ({workspace: {session, mode}}); None when it keeps none for that session."""
+    rec = _kept_modes().get(c)
+    if not isinstance(rec, dict) or rec.get("session") != sid or rec.get("mode") not in modes.CLAUDE_MODES:
+        return None
+    return str(rec["mode"])
+
+
+def _keep_mode(c: str, sid: str, mode: str) -> None:
+    kept = _kept_modes()
+    if kept.get(c) == {"session": sid, "mode": mode}:
+        return
+    kept[c] = {"session": sid, "mode": mode}
+    try:
+        config.private_dir(userconf.main_modes_file().parent)
+        atomic_write_text(userconf.main_modes_file(), json.dumps(kept, indent=1))
+    except OSError as e:
+        log.warning("%s: main's permission mode was not kept in %s: %s", c, userconf.main_modes_file(), e)
+
+
 def note_mode(c: str, sid: str | None, mode: str) -> None:
     """Main's hooks report the permission mode Claude Code runs the session `sid` in: when `sid` is main, this server
-    keeps it (main_mode), the mode each agent's row follows until the analyst sets it (modes.py), and main's meta shows
-    it (`attached.permission_mode`)."""
+    keeps it (main_mode), in thimble's home too (userconf.main_modes_file) so that a restarted server under the same
+    session follows it until main reports again, the mode each agent's row follows until the analyst sets it
+    (modes.py), and main's meta shows it (`attached.permission_mode`)."""
     lv = _live.get(c)
     if lv is None or not sid or lv.sid != sid or mode not in modes.CLAUDE_MODES:
         return
     _modes[c] = (sid, mode)
+    _keep_mode(c, sid, mode)
     meta = agents.meta_or_none(c, agents.MAIN_ID) or {}
     held = meta.get("attached") or {}
     if held.get("session") == sid and held.get("permission_mode") != mode:
@@ -461,8 +501,8 @@ def note_mode(c: str, sid: str | None, mode: str) -> None:
 
 
 def main_mode(c: str) -> str | None:
-    """The permission mode main's hooks last reported to this server (note_mode), by Claude Code's name; None before
-    the first report."""
+    """The permission mode main's hooks last reported (note_mode), by Claude Code's name, to this server or, for the
+    session it restarted under, to the one before it; None before the first report."""
     lv, got = _live.get(c), _modes.get(c)
     return got[1] if lv is not None and got is not None and got[0] == lv.sid else None
 
@@ -996,12 +1036,18 @@ def _child_finished(lv: Live, text: str) -> None:
 
 def _peer(lv: Live, *, mid_turn: bool, origin: Any = None) -> None:
     """A message another session sent main (module note), a subagent's hand-back among them: no row of its own, since
-    it is neither the analyst's line nor main's, except one from a background session of thimble's, which main's chat
-    shows as a chip naming it. On its own record it opens main's turn."""
+    it is neither the analyst's line nor main's, except a message from a background session of thimble's, which main's
+    chat shows as a chip naming it. A hand-back, and any message of a tray entry, which writes no words of its own,
+    shows nothing: the session's own chat has its end, and the harness's frame around it is not for the analyst. On its
+    own record it opens main's turn."""
     if not mid_turn:
         _open_turn(lv)
     o = origin if isinstance(origin, dict) else {}
-    name, body = str(o.get("name") or ""), " ".join(cite.prose(str(o.get("body") or "")).split())
+    raw = str(o.get("body") or "")
+    sender = str(o.get("from") or o.get("senderTaskId") or "")
+    if raw.lstrip().startswith(HANDBACK_LEAD) or (sender and _bg().proxy_of(lv.c, sender, None) is not None):
+        return
+    name, body = str(o.get("name") or ""), " ".join(cite.prose(raw).split())
     e = _bg().by_origin(lv.c, name) if name.startswith("thimble") else None
     if e is not None and body:
         with contextlib.suppress(Exception):

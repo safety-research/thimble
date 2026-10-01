@@ -270,3 +270,173 @@ async def test_the_views_list_says_which_pages_draw_label_controls_of_their_own(
     views.write_view(CORPUS, "menu", reader=READER, html=menu, **{**VIEW, "name": "Menu"})
     got = {v["slug"]: v["label_controls"] for v in (await app.get(f"/api/ws/{CORPUS}/views")).json()}
     assert got == {"threads": False, "menu": True}
+
+
+def _old_members(rows: list[tuple]) -> dict[str, str]:
+    """A label's {ref: value} as a dict, from rows (path, line, label, source, verdict, confidence, ref)."""
+    values: dict[str, str] = {}
+    starts: dict[str, str] = {}
+    for path, line, label, _source, verdict, _confidence, ref in rows:
+        v = verdict if verdict is not None else label
+        if v is not None:
+            values[str(ref)] = str(v)
+            if path is not None and line is not None and kernel_thimble._ref_parts(str(ref))[1] is None:
+                starts.setdefault(f"{path}#L{int(line)}", str(v))
+    for ref, v in starts.items():
+        values.setdefault(ref, v)
+    return values
+
+
+@pytest.mark.parametrize("fresh_store", [True, False])
+def test_a_labels_members_are_kept_compact_and_read_as_every_row_says(tmp_path, fresh_store):
+    """A label over every line of a large file keeps one code per line rather than a ref per record, and a sparse one
+    keeps its lines alone, while every lookup, the listing and the count read as the rows say: the analyst's verdict
+    over the classifier's, a record of another reader by its own ref and by the line it starts on, a ref written
+    another way under its own spelling, and the covers apart."""
+    from app import labels_store  # noqa: PLC0415
+
+    big = 20_000
+    rows = [{"ref": f"turns.jsonl#L{n}", "label": ("shell" if n % 3 else "gui"), "source": "code", "confidence": 1.0,
+             "ts": "t"} for n in range(1, big + 1)]
+    rows += [{"ref": "turns.jsonl#L7", "label": "gui", "source": "analyst", "ts": "t"},
+             {"ref": "notes.jsonl#L5", "label": "shell", "source": "code"},
+             {"ref": "notes.jsonl#L900000", "label": "other", "source": "code"},
+             {"ref": "table.csv#row=4", "line": 12, "label": "gui", "source": "code"},
+             {"ref": "table.csv#L12", "label": "shell", "source": "code"},
+             {"ref": "table.csv#row=9", "line": 30, "label": "gui", "source": "code"},
+             {"ref": "turns.jsonl#L012", "label": "odd", "source": "code"},
+             {"ref": "card:abc", "label": "gui", "source": "analyst"},
+             labels_store.cover_row("other.jsonl", 1, 50, "quiet", "regex", "t")]
+    jsonl = tmp_path / "k.jsonl"
+    jsonl.write_text("".join(json.dumps(r) + "\n" for r in rows))
+    if fresh_store:
+        labels_store.rebuild_file(str(jsonl))
+        assert kernel_thimble._store_fresh(jsonl, jsonl.with_suffix(".sqlite"))
+    kernel_thimble._MEMBERS.clear()
+    values, spans, paths = kernel_thimble._members(jsonl)
+    want = _old_members(kernel_thimble._jsonl_parts(jsonl)[0])
+    assert dict(values.items()) == want and len(values) == len(want)
+    assert values.get("turns.jsonl#L7") == "gui" and values["turns.jsonl#L3"] == "gui" and values["turns.jsonl#L4"] == "shell"
+    assert values.get("turns.jsonl#L012") == "odd" and values.get("turns.jsonl#L12") == "gui"
+    assert values.get("table.csv#L12") == "shell", "a line's own row over the record that starts on it"
+    assert values.get("table.csv#L30") == "gui" and values.get("table.csv#row=9") == "gui"
+    assert values.get("notes.jsonl#L900000") == "other" and "notes.jsonl#L6" not in values
+    assert values.get("turns.jsonl#L0") is None and values.get(f"turns.jsonl#L{big + 1}") is None
+    assert spans == {"other.jsonl": [(1, 50, "quiet")]} and {"turns.jsonl", "notes.jsonl", "other.jsonl"} <= paths
+    assert isinstance(values._lines["turns.jsonl"], bytes), "a dense file: one byte per line"
+    assert isinstance(values._lines["notes.jsonl"], tuple), "a sparse file: its lines alone"
+    assert kernel_thimble._value_of({"_members": (values, spans, paths)}, "other.jsonl#L9") == "quiet"
+
+
+def test_the_kernel_keeps_the_members_of_a_few_labels_at_once(tmp_path, monkeypatch):
+    """The members of the labels read most recently stay, at most MEMBERS_KEPT of them, so a workspace with many labels
+    does not keep them all in memory."""
+    monkeypatch.setattr(kernel_thimble, "MEMBERS_KEPT", 2)
+    kernel_thimble._MEMBERS.clear()
+    files = []
+    for i in range(3):
+        p = tmp_path / f"{i}.jsonl"
+        p.write_text(json.dumps({"ref": f"a.jsonl#L{i + 1}", "label": "x", "source": "code"}) + "\n")
+        files.append(p)
+    for p in (files[0], files[1], files[0], files[2]):
+        kernel_thimble._members(p)
+    assert list(kernel_thimble._MEMBERS) == [str(files[0]), str(files[2])]
+    kernel_thimble._MEMBERS.clear()
+
+
+def test_a_labels_file_of_many_cleared_blocks_reads_as_its_store_and_in_one_pass(tmp_path):
+    """A code label's run writes each block of records as a clear, its rows and a cover. Read from the file while its
+    store is behind, it gives the rows and covers the store gives, a rerun's clear dropping the rows it covers and the
+    analyst's verdicts staying, and it reads in about the time one pass takes."""
+    import time  # noqa: PLC0415
+
+    from app import labels_store  # noqa: PLC0415
+
+    lines: list[dict] = []
+    for first in range(1, 40_001, 1000):
+        last = first + 999
+        lines.append(labels_store.clear_row("turns.jsonl", first, last))
+        lines += [{"ref": f"turns.jsonl#L{n}", "label": "gui" if n % 2 else "shell", "source": "code"}
+                  for n in range(first, last + 1) if n % 5]
+        lines.append(labels_store.cover_row("turns.jsonl", first, last, "other", "code", "t"))
+    lines.append({"ref": "turns.jsonl#L12", "label": "shell", "source": "analyst"})
+    lines.append(labels_store.clear_row("turns.jsonl", 11, 20))
+    lines += [{"ref": "turns.jsonl#L13", "label": "gui", "source": "code"}, {"ref": "card:x", "label": "gui", "source": "code"}]
+    lines.append(labels_store.clear_row("turns.jsonl", 39_990))
+    jsonl = tmp_path / "k.jsonl"
+    jsonl.write_text("".join(json.dumps(r) + "\n" for r in lines))
+    t0 = time.monotonic()
+    rows, covers = kernel_thimble._jsonl_parts(jsonl)
+    took = time.monotonic() - t0
+    labels_store.rebuild_file(str(jsonl))
+    want_rows, want_covers = kernel_thimble._store_parts(jsonl.with_suffix(".sqlite"))
+    norm = lambda rs: sorted(json.dumps([p, n, lab, src, v, ref]) for p, n, lab, src, v, _c, ref in rs)  # noqa: E731
+    assert norm(rows) == norm(want_rows)
+    assert sorted(covers) == sorted(want_covers)
+    assert ("turns.jsonl", 12, None, None, "shell", None, "turns.jsonl#L12") in rows, "the verdict stays"
+    assert not any(r[6] in ("turns.jsonl#L11", "turns.jsonl#L39995") for r in rows), "the clears dropped them"
+    assert took < 5, took
+
+
+async def test_marking_a_views_records_leaves_the_server_free_while_a_label_is_read(app, monkeypatch):
+    """A label's first use reads all its rows, seconds for millions of them, so the marks are worked out off the event
+    loop, which goes on serving other requests."""
+    import asyncio  # noqa: PLC0415
+    import time  # noqa: PLC0415
+
+    k = await _asks(app)
+    r = await app.put(f"/api/ws/{CORPUS}/concepts/{k['id']}", json={"shown": True})
+    assert r.status_code == 200, r.text
+    views.write_view(CORPUS, "threads", reader=READER, html=HTML, **VIEW)
+    read = kernel_thimble._members
+
+    def slow(jsonl):
+        time.sleep(1.0)
+        return read(jsonl)
+
+    monkeypatch.setattr(kernel_thimble, "_members", slow)
+    work = asyncio.create_task(views.marks_for(CORPUS, "threads", _refs(range(1, 13))))
+    t0 = time.monotonic()
+    await asyncio.sleep(0.05)
+    assert time.monotonic() - t0 < 0.5, "the loop ran while the label was read"
+    marks = await work
+    assert set(marks) == set(_refs((1, 4, 8)))
+
+
+def test_a_context_of_many_labels_reads_each_label_once_and_parallel_reads_share_one(tmp_path, monkeypatch):
+    """Every records call and every marks request looks up each label that is on. A workspace with a dozen labels on
+    reads each one once, not once per call, and four marks requests that come at once read a label once between them."""
+    import threading  # noqa: PLC0415
+    import time  # noqa: PLC0415
+
+    kernel_thimble._MEMBERS.clear()
+    reads: list[str] = []
+    parts = kernel_thimble._jsonl_parts
+
+    def counted(jsonl):
+        reads.append(str(jsonl))
+        time.sleep(0.05)
+        return parts(jsonl)
+
+    monkeypatch.setattr(kernel_thimble, "_jsonl_parts", counted)
+    files = []
+    for i in range(12):
+        p = tmp_path / f"{i}.jsonl"
+        p.write_text(json.dumps({"ref": f"a.jsonl#L{i + 1}", "label": "x", "source": "code"}) + "\n")
+        files.append(p)
+    for _ in range(3):
+        for p in files:
+            assert kernel_thimble._members(p)[0].get(f"a.jsonl#L{files.index(p) + 1}") == "x"
+    assert len(reads) == len(files), "each label read once"
+
+    kernel_thimble._MEMBERS.clear()
+    reads.clear()
+    got: list = []
+    threads = [threading.Thread(target=lambda: got.append(kernel_thimble._members(files[0])[0].get("a.jsonl#L1")))
+               for _ in range(4)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert got == ["x"] * 4 and reads == [str(files[0])]
+    kernel_thimble._MEMBERS.clear()

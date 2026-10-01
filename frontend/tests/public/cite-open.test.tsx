@@ -6,7 +6,7 @@
 import { act } from 'react'
 import { afterEach, beforeAll, describe, expect, test, vi } from 'vitest'
 import { lineOmitted, Output, OutputText, storedLineNumber } from '../../src/components/Outputs.tsx'
-import { RefChip } from '../../src/components/RefChip.tsx'
+import { GlyphCites, RefChip } from '../../src/components/RefChip.tsx'
 import { api } from '../../src/lib/api.ts'
 import { bus } from '../../src/lib/bus.ts'
 import { CITED_FLASH, revealLines } from '../../src/lib/tableCell.ts'
@@ -57,6 +57,24 @@ describe('the lines of a printed output', () => {
     expect(first?.textContent).toBe('step 2')
     expect([...el.querySelectorAll(`.${CITED_FLASH}`)].map((s) => s.textContent)).toEqual(['step 2', 'step 3'])
     expect(revealLines(el, 9, undefined, el)).toBeNull()
+  })
+})
+
+describe('a bare citation in a card or a reply', () => {
+  test('is its glyph alone, with its name for the hover, except a whole file\'s, which shows the file\'s name', async () => {
+    const chip = async (ref: string) => {
+      const el = await mount(
+        <GlyphCites.Provider value={true}>
+          <RefChip ref={ref} workspace="ws" cite />
+        </GlyphCites.Provider>,
+      )
+      return el.querySelector<HTMLElement>('[data-ref]')!
+    }
+    const line = await chip('runs/r1/notes.jsonl#L12')
+    expect(line.textContent).toBe('')
+    expect(line.getAttribute('aria-label')).toContain('notes.jsonl')
+    expect((await chip('NOTES.md')).textContent).toBe('NOTES.md')
+    expect((await chip('runs/r1/NOTES.md')).textContent).toContain('NOTES.md')
   })
 })
 

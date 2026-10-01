@@ -724,7 +724,7 @@ def source_problems(claims: Any, reader: str, html: str, libs: Any) -> list[str]
     reader that does not parse or lacks one of its three functions, a library that is no package."""
     out: list[str] = []
     if not _str_list(claims):
-        out.append("a view claims at least one file: give `claims` in view.json as corpus-relative globs")
+        out.append("a view reads at least one file: give `scope` in view.json as corpus-relative globs")
     for label, text in ((READER_PY, reader), (VIEW_HTML, html)):
         if not text.strip():
             out.append(f"{label} is empty")
@@ -843,8 +843,10 @@ def delete_view(c: str, slug: str) -> None:
     shutil.rmtree(d, ignore_errors=True)
     shutil.rmtree(_versions_dir(c, slug), ignore_errors=True)
     shutil.rmtree(index_dir(c, slug), ignore_errors=True)
+    shutil.rmtree(dev.view_work_dir(c, slug), ignore_errors=True)
     drop_built_copy(c, slug)
     _forget(c, slug)
+    view_calls.forget_view(c, slug)
     _write_off(c, slug, True)
     if old_link(c, slug).is_symlink():
         old_link(c, slug).unlink()
@@ -1714,22 +1716,26 @@ async def marks_for(c: str, slug: str, ref_list: list[str], ctx: dict[str, Any] 
     page, a JSON value, a CSV row, a reader's own `<path>#<locator>`) and of the view's unit refs
     (`view:<slug>/<key>`, resolved in one kernel round trip by the view at `version` and marked from their first
     REFS_MAX records) under the labels context `ctx` (default the workspace's). A ref no label marks and no filter keeps
-    is left out."""
+    is left out. The marks are worked out in a worker thread, since a label's first use reads its rows."""
     ctx = ctx if ctx is not None else await asyncio.to_thread(labels_context, c)
     if not ctx.get("probe") and not ctx.get("labels"):
         return {}
     records = [r for r in ref_list if is_record(r)]
     prefix = f"view:{slug}/"
     units = [r for r in ref_list if r.startswith(prefix) and len(r) > len(prefix)]
-    out: dict[str, dict[str, Any]] = {}
-    for r in records:
-        if (m := _record_mark(ctx, r)) is not None:
-            out[r] = m
+
+    def of_records() -> dict[str, dict[str, Any]]:
+        return {r: m for r in records if (m := _record_mark(ctx, r)) is not None}
+
+    out = await asyncio.to_thread(of_records)
     if units:
         answers = await resolve_many(c, slug, [{"key": r[len(prefix):]} for r in units], version)
-        for r, res in zip(units, answers):
-            if res is not None and (m := _unit_mark(ctx, res["refs"][:REFS_MAX])) is not None:
-                out[r] = m
+
+        def of_units() -> dict[str, dict[str, Any]]:
+            return {r: m for r, res in zip(units, answers)
+                    if res is not None and (m := _unit_mark(ctx, res["refs"][:REFS_MAX])) is not None}
+
+        out.update(await asyncio.to_thread(of_units))
     return out
 
 
@@ -2346,9 +2352,12 @@ def _stop_build(c: str, slug: str, why: str, force: bool = False) -> None:
 
     dev.stop_view(c, slug, why)
     d = views_dir(c) / slug
-    if d.is_dir() and (force or not _view_json(d).get("built")):
+    built = d.is_dir() and bool(_view_json(d).get("built"))
+    if d.is_dir() and (force or not built):
         shutil.rmtree(d, ignore_errors=True)
         shutil.rmtree(index_dir(c, slug), ignore_errors=True)
+    if force or not built:
+        shutil.rmtree(dev.view_work_dir(c, slug), ignore_errors=True)
     _forget(c, slug)
 
 
@@ -2537,6 +2546,22 @@ def retry(c: str, slug: str) -> dict[str, Any]:
     return prop
 
 
+def stop_build(c: str, slug: str) -> dict[str, Any]:
+    """The Stop in a view's build thread: the build ends with its session stopped and its draft kept, and the proposal
+    fails with Retry; a change to a built view leaves the view as it was, the change kept for Retry (dev._view_stopped,
+    once the session has stopped). 404 for no such proposal, 409 for one that is neither queued nor building."""
+    from . import dev  # noqa: PLC0415
+
+    prop = read_proposal(c, slug)
+    if prop is None:
+        raise HTTPException(404, f"no such proposal: {slug}")
+    if prop.get("status") not in PENDING:
+        raise HTTPException(409, f"the view {prop['name']!r} is {prop.get('status')}, not building")
+    if not dev.stop_view(c, slug, dev.VIEW_STOPPED):
+        dev._view_stopped(c, slug)
+    return {"ok": True}
+
+
 def drop(c: str, slug: str, why: str) -> dict[str, Any] | None:
     """Leave an orientation's proposal out once its build failed through its repairs (dev._view_dropped): the row stays
     as `dropped` with the reason, so every chip that names it knows to hide, its draft folder is removed, and
@@ -2608,7 +2633,8 @@ async def _gate(c: str, slug: str, locators: list[str] | None, *, shot_dir: Path
         return {"ok": False, "view": None, "problems": [f"{d / VIEW_JSON} does not exist yet"], "checks": [], "page": None}
     raw = _view_json(d)
     text = {n: (d / n).read_text("utf-8", errors="replace") if (d / n).is_file() else "" for n in (READER_PY, VIEW_HTML)}
-    problems = source_problems(raw.get("claims"), text[READER_PY], text[VIEW_HTML], raw.get("libs"))
+    problems = source_problems(raw.get("claims") if raw.get("claims") is not None else raw.get("scope"),
+                               text[READER_PY], text[VIEW_HTML], raw.get("libs"))
     # a change to a built view starts from files that carry thimble's own stamp, so it is no sign of a session's
     # writing there (a session that removes it is fine too; mark_built stamps the view again)
     if raw.get("built") and (prop := read_proposal(c, slug)) is not None and prop.get("status") != "built" \
@@ -4246,6 +4272,15 @@ async def retry_route(c: str, slug: str) -> dict[str, Any]:
     config.workspace_dir(c)
     _bind_loop()
     return retry(c, slug)
+
+
+@router.post("/ws/{c}/views/proposals/{slug}/stop")
+async def stop_build_route(c: str, slug: str) -> dict[str, Any]:
+    """Stop the proposal's build (stop_build); the proposal then fails, with Retry (404 for none, 409 for one that is
+    not queued or building)."""
+    config.workspace_dir(c)
+    _bind_loop()
+    return stop_build(c, slug)
 
 
 class ViewMessage(BaseModel):

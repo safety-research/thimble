@@ -8,10 +8,14 @@ call that needs no index (a card type's applies) runs on any free kernel. A call
 that awaits it interrupts its kernel, which takes no other call until it is idle again (or, when the interrupt does not
 stop it within DRAIN_S, until it has been restarted).
 
-Memory: each kernel keeps the indexes it uses most within memory_budget() bytes of pickles (view_host). After a call
-the kernel's resident memory is read; a kernel above rss_max() that holds more than one index is restarted once free,
-and while the kernels of all workspaces together hold more than total_rss_max(), the least recently used free ones are
-shut down. A kernel beyond the first unused for IDLE_S is shut down, the first too when it holds more than KEEP_RSS.
+Memory: each kernel keeps the indexes it uses most within memory_budget() bytes (view_host, which counts an index by
+what loading or building it took). After a call the resident memory of the kernel's process is read (under a sandbox
+wrapper, of the Python process inside it). A kernel above rss_max() is restarted once free when it holds more than one
+index or more than KEEP_FACTOR times what its indexes take, unless one of them has no pickle (a restart would build it
+again). While the kernels of all workspaces together hold more than total_rss_max(), the least recently used free ones
+are shut down. A kernel beyond the first unused for IDLE_S is shut down, the first too when it holds more than
+KEEP_RSS, and one that holds an index of a deleted view once it is free (forget_view). The limits are shares of the
+machine's memory within fixed bounds, so a large machine does not let the views' kernels take tens of gigabytes.
 
 A call the page names (`call`) is registered with the task that runs it, so a newer request or the page's closing can
 cancel it (cancel), and its progress, which view_host writes to a file under the indexes folder, can be read (progress).
@@ -44,6 +48,9 @@ NO_LIMIT_S = 1e9  # notebook._execute's limit for a call with none
 DRAIN_S = 10.0  # how long an interrupted call has to stop before its kernel is restarted
 IDLE_S = 600.0  # unused this long, a kernel beyond the first is shut down
 KEEP_RSS = 512 * 1024 * 1024  # the first kernel is shut down when idle only above this resident size
+KERNEL_BASE = 256 * 1024 * 1024  # a reader kernel's resident size before it holds any index
+KEEP_FACTOR = 1.5  # a kernel above rss_max() holding more than this times its indexes' bytes is restarted
+MB = 1024 * 1024
 SPARE_AFTER_S = 1.0  # a call running this long starts a spare kernel when none is free
 CALL_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 CANCELLED_S = 60.0  # how long a cancel that came before its call is kept
@@ -66,22 +73,27 @@ def _env_mb(name: str) -> int | None:
     return v * 1024 * 1024 if v > 0 else None
 
 
+def _share(part: int, low: int, high: int) -> int:
+    """`part`ths of the machine's memory, within [low, high] MB."""
+    return min(max(physical_memory() // part, low * MB), high * MB)
+
+
 def memory_budget() -> int:
-    """Bytes of index pickles one kernel keeps in memory: a sixteenth of the machine's memory, at least 256 MB
+    """Bytes of indexes one kernel keeps in memory: a sixteenth of the machine's memory, from 256 MB to 2 GB
     (THIMBLE_VIEW_MEMORY_MB sets it)."""
-    return _env_mb("THIMBLE_VIEW_MEMORY_MB") or max(256 * 1024 * 1024, physical_memory() // 16)
+    return _env_mb("THIMBLE_VIEW_MEMORY_MB") or _share(16, 256, 2048)
 
 
 def rss_max() -> int:
-    """The resident size above which a kernel holding several indexes is restarted: a quarter of the machine's memory
-    (THIMBLE_VIEW_RSS_MB sets it)."""
-    return _env_mb("THIMBLE_VIEW_RSS_MB") or max(1024 * 1024 * 1024, physical_memory() // 4)
+    """The resident size above which a kernel may be restarted (module note): an eighth of the machine's memory, from
+    1 GB to 6 GB (THIMBLE_VIEW_RSS_MB sets it)."""
+    return _env_mb("THIMBLE_VIEW_RSS_MB") or _share(8, 1024, 6144)
 
 
 def total_rss_max() -> int:
-    """The resident size of all reader kernels together above which free ones are shut down: 40% of the machine's
-    memory (THIMBLE_VIEW_TOTAL_RSS_MB sets it)."""
-    return _env_mb("THIMBLE_VIEW_TOTAL_RSS_MB") or max(2 * 1024 * 1024 * 1024, physical_memory() * 2 // 5)
+    """The resident size of all reader kernels together above which free ones are shut down: a quarter of the
+    machine's memory, from 2 GB to 12 GB (THIMBLE_VIEW_TOTAL_RSS_MB sets it)."""
+    return _env_mb("THIMBLE_VIEW_TOTAL_RSS_MB") or _share(4, 2048, 12288)
 
 
 @dataclass
@@ -90,9 +102,10 @@ class Worker:
     name: str
     busy: bool = False
     used: float = field(default_factory=time.monotonic)
-    holds: "OrderedDict[tuple[str, str], int]" = field(default_factory=OrderedDict)  # (slug, fp) -> pickle bytes
+    holds: "OrderedDict[tuple[str, str], int]" = field(default_factory=OrderedDict)  # (slug, fp) -> bytes it takes
     rss: int = 0
     restart: bool = False  # shut down once free
+    unpickled: bool = False  # holds an index with no pickle, which only a build would bring back
 
 
 @dataclass
@@ -155,12 +168,37 @@ async def _stop(c: str, name: str) -> None:
     await notebook.shutdown_kernel(c, name)
 
 
+_inner: dict[int, int] = {}  # the pid a kernel was started as -> the pid of its Python process
+
+
+def _kernel_process(pid: int) -> int:
+    """The kernel's Python process among `pid` and its descendants: the first, nearest `pid`, started as
+    `python -m ipykernel_launcher` (a process it forked has the same command line, further down), else the largest
+    descendant, else `pid`."""
+    tree = [pid, *procs.descendants(pid)]
+    for p in tree:
+        a = procs.argv(p)
+        if len(a) > 2 and a[1:3] == ["-m", "ipykernel_launcher"]:
+            return p
+    return max(tree[1:], key=procs.rss) if len(tree) > 1 else pid
+
+
 def _rss(c: str, name: str) -> int:
-    """The kernel's resident size in bytes, 0 when it is not running. Tests replace it."""
+    """The resident size in bytes of the kernel's Python process, 0 when it is not running. Under a sandbox wrapper the
+    process started is the wrapper, so the Python process is found inside it (once, _kernel_process). Tests replace
+    it."""
     from . import notebook  # noqa: PLC0415
 
     k = notebook._exec_kernels.get((c, name))
-    return procs.rss(k.pid) if k is not None and k.pid else 0
+    if k is None or not k.pid:
+        return 0
+    inner = _inner.get(k.pid)
+    if inner is None or not procs.alive(inner):
+        inner = _kernel_process(k.pid)
+        for p in [p for p in _inner if not procs.alive(p)]:
+            del _inner[p]
+        _inner[k.pid] = inner
+    return procs.rss(inner) or procs.rss(k.pid)
 
 
 # ----------------------------------------------------------------------------------------------------------- the pool
@@ -304,10 +342,14 @@ def _note_answer(w: Worker, outputs: list[dict]) -> None:
     if isinstance(held, list):
         w.holds = OrderedDict(((str(h[0]), str(h[1])), int(h[2] or 0)) for h in held
                               if isinstance(h, list) and len(h) == 3)
+        w.unpickled = bool(ans.get("unpickled"))
     with contextlib.suppress(Exception):
         w.rss = _rss(w.c, w.name)
-    if w.rss > rss_max() and len(w.holds) > 1:
+    if w.rss > rss_max() and not w.unpickled and not w.restart and \
+            (len(w.holds) > 1 or w.rss > KERNEL_BASE + KEEP_FACTOR * sum(w.holds.values())):
         w.restart = True
+        log.info("%s: the reader kernel %s holds %d MB, its %d index(es) %d MB; it is restarted once free", w.c, w.name,
+                 w.rss // MB, len(w.holds), sum(w.holds.values()) // MB)
 
 
 def _spare(c: str) -> None:
@@ -403,6 +445,25 @@ def _reap() -> None:
             asyncio.get_running_loop().create_task(_shut(w), name=f"view-kernel-idle-{w.name}")
     if any(pool for pool in _pools.values()):
         _schedule_reaper()
+
+
+def forget_view(c: str, slug: str) -> None:
+    """The view `slug` was deleted: a kernel that holds one of its indexes is shut down once free, since only a new
+    process gives that memory back; the next call starts another."""
+    for k in [k for k in _affinity if k[0] == c and k[1] == slug]:
+        del _affinity[k]
+    for w in list(_pools.get(c, [])):
+        if not any(k[0] == slug for k in w.holds):
+            continue
+        w.restart = True
+        if w.busy:
+            continue  # shut down when its call ends (_release)
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            continue  # shut down after its next call
+        w.busy = True
+        loop.create_task(_shut(w), name=f"view-kernel-deleted-{w.name}")
 
 
 def forget_workspace(c: str) -> None:

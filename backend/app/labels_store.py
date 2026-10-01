@@ -12,8 +12,13 @@ took another value, plus a `cover` line per labeled range (records `from`..`to` 
 stay). The store keeps covers in their own table and adds their records where a read needs them (implicit rows).
 
 A torn last line is handled at both ends: `meta.parsed` is the offset after the last whole line ingested, and every
-writer calls mend_tail before its first append. Nothing here imports concepts, so a scan-pool worker can rebuild a store
-with this module alone.
+writer calls mend_tail before its first append.
+
+Size. A label over millions of records makes a store of hundreds of megabytes, mostly the rows and their indexes, so
+the store keeps no index another one covers (_COVERED_INDEX), and a rebuild of more than COMPACT_BYTES is copied
+compacted (`VACUUM INTO`), its indexes written in order rather than grown row by row.
+
+Nothing here imports concepts, so a scan-pool worker can rebuild a store with this module alone.
 """
 from __future__ import annotations
 
@@ -22,6 +27,7 @@ import json
 import logging
 import os
 import sqlite3
+import threading
 import time
 from pathlib import Path
 from typing import Any, Iterable, Iterator
@@ -29,12 +35,16 @@ from typing import Any, Iterable, Iterator
 log = logging.getLogger("thimble.labels_store")
 
 SCHEMA = 5
+COMPACT_BYTES = 64 * 1024 * 1024  # a rebuilt store larger than this is copied compacted before it goes into place
 SYNC_INLINE_BYTES = 16 * 1024 * 1024  # a jsonl, or its unread tail, up to this size is ingested by the reader that finds it behind
 BATCH = 5_000                         # rows per transaction when ingesting a file
 YIELD_EVERY = 200                     # rows parsed between two yields of the interpreter
 BUSY_TIMEOUT_S = 10.0                 # a connection waits this long for a lock
 CACHE_KB = 65_536                     # the writer's page cache
 _REF_KINDS_WITHOUT_PATH = ("card:", "cell:", "chat:", "concept:", "report:")
+# The marks' reads (rows_on_lines, rows_for_refs) take turns: Python's sqlite3 hands the GIL back and forth for every row
+# it steps, so a few such reads in parallel threads each take twenty times as long as one alone.
+_MARK_READS = threading.Lock()
 OLD_CARD, CARD = "cell:", "card:"  # a card unit's ref prefix: `cell:` is read as `card:` (cite.CARD_PREFIXES)
 
 
@@ -56,8 +66,8 @@ CREATE TABLE IF NOT EXISTS current (
 );
 CREATE TABLE IF NOT EXISTS covers (path TEXT, first INTEGER, last INTEGER, value TEXT, source TEXT, ts TEXT);
 """
+_COVERED_INDEX = "current_path"  # on path alone, which current_path_line covers: a store that has it drops it when written
 _INDEX_SQL = """
-CREATE INDEX IF NOT EXISTS current_path ON current(path);
 CREATE INDEX IF NOT EXISTS current_path_line ON current(path, line);
 CREATE INDEX IF NOT EXISTS current_label ON current(label);
 CREATE INDEX IF NOT EXISTS current_effective ON current(effective);
@@ -97,9 +107,11 @@ def store_path(jsonl: Path) -> Path:
 
 
 def side_files(jsonl: Path) -> list[Path]:
-    """The store's files for a labels file: the database, SQLite's WAL and shm, a rebuild in progress."""
+    """The store's files for a labels file: the database, SQLite's WAL and shm, a rebuild in progress and its
+    compacted copy."""
     db = store_path(jsonl)
-    return [db, db.with_name(db.name + "-wal"), db.with_name(db.name + "-shm"), db.with_name(db.name + ".building")]
+    return [db, db.with_name(db.name + "-wal"), db.with_name(db.name + "-shm"), db.with_name(db.name + ".building"),
+            db.with_name(db.name + ".building.compact")]
 
 
 def remove(jsonl: Path) -> None:
@@ -169,6 +181,23 @@ def row_line(ref: str, row: dict) -> tuple[str | None, int | None]:
     if line is None and path is not None and isinstance(given, int) and not isinstance(given, bool) and given >= 1:
         line = given
     return path, line
+
+
+def merge_spans(spans: Iterable[tuple[int, int]]) -> list[tuple[int, int]]:
+    """Line spans (a, b), 1-based and inclusive, sorted, with those that overlap or touch joined into one."""
+    out: list[tuple[int, int]] = []
+    for a, b in sorted((int(a), int(b)) for a, b in spans):
+        if out and a <= out[-1][1] + 1:
+            out[-1] = (out[-1][0], max(out[-1][1], b))
+        else:
+            out.append((a, b))
+    return out
+
+
+def in_spans(spans: list[tuple[int, int]], line: int) -> bool:
+    """Whether `line` falls in one of `spans`, sorted and disjoint as merge_spans leaves them."""
+    i = bisect.bisect_right(spans, (line, LAST_LINE)) - 1
+    return i >= 0 and spans[i][0] <= line <= spans[i][1]
 
 
 # covers
@@ -306,6 +335,7 @@ class Store:
                     conn.execute("INSERT OR REPLACE INTO meta (key, value) VALUES ('schema', ?), ('size', '0'), ('mtime_ns', '0')", (str(SCHEMA),))
                 elif str(have[0]) != str(SCHEMA):
                     _migrate(conn, str(have[0]))
+                conn.execute(f"DROP INDEX IF EXISTS {_COVERED_INDEX}")
                 conn.executescript(_INDEX_SQL)
             else:
                 conn.execute("PRAGMA query_only=1")
@@ -496,6 +526,7 @@ class Store:
             conn.close()
         for p in (tmp.with_name(tmp.name + "-wal"), tmp.with_name(tmp.name + "-shm")):
             p.unlink(missing_ok=True)
+        self._compact(tmp)
         now = file_key(self.jsonl)
         if now is None or (key is not None and now[0] < key[0]):
             tmp.unlink(missing_ok=True)
@@ -505,6 +536,28 @@ class Store:
             p.unlink(missing_ok=True)
         os.replace(tmp, self.db)
         return n
+
+    @staticmethod
+    def _compact(db: Path) -> None:
+        """Replace a rebuilt store larger than COMPACT_BYTES with a compacted copy of it; left as it is when the copy
+        cannot be made."""
+        try:
+            if db.stat().st_size <= COMPACT_BYTES:
+                return
+        except OSError:
+            return
+        out = db.with_name(db.name + ".compact")
+        out.unlink(missing_ok=True)
+        try:
+            conn = sqlite3.connect(str(db), timeout=BUSY_TIMEOUT_S, isolation_level=None)
+            try:
+                conn.execute("VACUUM INTO ?", (str(out),))
+            finally:
+                conn.close()
+            os.replace(out, db)
+        except (sqlite3.Error, OSError) as e:
+            out.unlink(missing_ok=True)
+            log.info("labels store %s: not compacted (%s)", db.name, e)
 
     # ----------------------------------------------------------------------- reads
 
@@ -516,49 +569,93 @@ class Store:
             conn.close()
 
     def rows_for_refs(self, wanted: list[str]) -> list[dict]:
-        """The merged rows of these refs, in the order asked; a ref with no row of its own reads as the cover that
-        holds its line, when one does."""
-        conn = self.connect()
+        """The merged rows of these refs, in the order asked. A line's ref with no row of its own reads as the row of a
+        record that starts on that line without naming it (a CSV row, a JSON document's record), as a page of lines
+        finds it, else as the cover that holds its line, when one does."""
         out: list[dict] = []
-        try:
-            for i in range(0, len(wanted), 500):
-                part = [canon_ref(r) for r in wanted[i:i + 500]]
-                got = {r[0]: _merged(r) for r in conn.execute(
-                    f"SELECT {_MERGED_COLS} FROM current WHERE ref IN ({','.join('?' * len(part))})", part)}
-                for ref in part:
-                    if ref in got:
-                        out.append(got[ref])
-                        continue
-                    path, line = ref_parts(ref)
-                    if path is None or line is None:
-                        continue
-                    cover = conn.execute("SELECT value, source, ts FROM covers WHERE path = ? AND ? BETWEEN first AND last "
-                                         "ORDER BY rowid DESC LIMIT 1", (path, line)).fetchone()
-                    if cover is not None:
-                        out.append(implicit_row(path, line, str(cover[0]), cover[1], cover[2]))
-            return out
-        finally:
-            conn.close()
+        with _MARK_READS:
+            conn = self.connect()
+            try:
+                for i in range(0, len(wanted), 500):
+                    part = [canon_ref(r) for r in wanted[i:i + 500]]
+                    got = {r[0]: _merged(r) for r in conn.execute(
+                        f"SELECT {_MERGED_COLS} FROM current WHERE ref IN ({','.join('?' * len(part))})", part)}
+                    lines: dict[str, set[int]] = {}
+                    for ref in part:
+                        path, line = ref_parts(ref) if ref not in got else (None, None)
+                        if path is not None and line is not None:
+                            lines.setdefault(path, set()).add(line)
+                    # the first labelled row on each line, picked here: an ORDER BY in the query makes SQLite walk every
+                    # row of the path instead of searching the (path, line) index
+                    first: dict[tuple[str, int], tuple] = {}
+                    for path, ns in lines.items():
+                        marks = ",".join("?" * len(ns))
+                        for r in conn.execute(f"SELECT rowid, {_MERGED_COLS} FROM current WHERE path = ? AND line IN ({marks})",
+                                              (path, *ns)):
+                            k = (path, int(r[-1]))
+                            if k not in first or r[0] < first[k][0]:
+                                first[k] = r
+                    starts = {k: _merged(r[1:]) for k, r in first.items()}
+                    for ref in part:
+                        if ref in got:
+                            out.append(got[ref])
+                            continue
+                        path, line = ref_parts(ref)
+                        if path is None or line is None:
+                            continue
+                        if (path, line) in starts:
+                            out.append(starts[(path, line)])
+                            continue
+                        cover = conn.execute("SELECT value, source, ts FROM covers WHERE path = ? AND ? BETWEEN first AND last "
+                                             "ORDER BY rowid DESC LIMIT 1", (path, line)).fetchone()
+                        if cover is not None:
+                            out.append(implicit_row(path, line, str(cover[0]), cover[1], cover[2]))
+                return out
+            finally:
+                conn.close()
 
     def rows_for_path(self, path: str | None, lines: tuple[int, int] | None = None) -> list[dict]:
         """The merged rows on one corpus path, in first-labelled order, then the implicit rows of its covers in line
         order; `None` returns every row. `lines` (a, b) keeps the rows on lines a..b (row_line) plus whole-file rows."""
+        if path is not None and lines is not None:
+            return self.rows_on_lines(path, [lines])
         conn = self.connect()
         try:
             if path is None:
                 rows = conn.execute(f"SELECT {_MERGED_COLS} FROM current ORDER BY rowid").fetchall()
                 paths = [str(p) for (p,) in conn.execute("SELECT DISTINCT path FROM covers ORDER BY path")]
-            elif lines is None:
+            else:
                 rows = conn.execute(f"SELECT {_MERGED_COLS} FROM current WHERE path = ? ORDER BY rowid", (path,)).fetchall()
                 paths = [path]
-            else:
-                rows = conn.execute(f"SELECT {_MERGED_COLS} FROM current WHERE path = ? AND (line BETWEEN ? AND ? OR ref = path) "
-                                    "ORDER BY rowid", (path, int(lines[0]), int(lines[1]))).fetchall()
-                paths = [path]
             out = [_merged(r) for r in rows]
-            lo, hi = (int(lines[0]), int(lines[1])) if lines is not None else (1, LAST_LINE)
             for p in paths:
-                out.extend(self._implicit(conn, p, lo, hi))
+                out.extend(self._implicit(conn, p))
+            return out
+        finally:
+            conn.close()
+
+    def rows_on_lines(self, path: str, spans: Iterable[tuple[int, int]]) -> list[dict]:
+        """The merged rows on the lines of `path` that `spans` ((a, b) pairs, 1-based, inclusive) cover, plus its
+        whole-file rows, in first-labelled order, then the implicit rows of its covers on those lines in line order.
+        Each span is one search of the (path, line) index, so a page of a file with millions of rows reads only its
+        own."""
+        spans = merge_spans(spans)
+        with _MARK_READS:
+            return self._rows_on_lines(path, spans)
+
+    def _rows_on_lines(self, path: str, spans: list[tuple[int, int]]) -> list[dict]:
+        conn = self.connect()
+        try:
+            got: dict[str, tuple] = {}
+            for a, b in spans:
+                for r in conn.execute(f"SELECT rowid, {_MERGED_COLS} FROM current WHERE path = ? AND line BETWEEN ? AND ?", (path, a, b)):
+                    got.setdefault(r[1], r)
+            whole = conn.execute(f"SELECT rowid, {_MERGED_COLS} FROM current WHERE ref = ? AND path = ?", (path, path)).fetchone()
+            if whole is not None:
+                got.setdefault(whole[1], whole)
+            out = [_merged(r[1:]) for r in sorted(got.values(), key=lambda r: r[0])]
+            for a, b in spans:
+                out.extend(self._implicit(conn, path, a, b))
             return out
         finally:
             conn.close()
@@ -773,9 +870,11 @@ def _read_rows(jsonl: Path, start: int, end: int, mark: list[int] | None = None,
                 time.sleep(0)
 
 
-def scan_jsonl(jsonl: Path, path: str | None, lines: tuple[int, int] | None = None) -> list[dict]:
+def scan_jsonl(jsonl: Path, path: str | None, lines: Iterable[tuple[int, int]] | None = None) -> list[dict]:
     """One streaming pass over a labels file while its store is being rebuilt: the merged rows on `path` (or every row;
-    with `lines`, lines a..b and whole-file rows), then its covers' implicit rows, as the store would answer them."""
+    with `lines`, (a, b) spans, the rows on those lines and whole-file rows), then its covers' implicit rows, as the
+    store would answer them."""
+    spans = merge_spans(lines) if lines is not None else None
     model: dict[str, dict] = {}
     analyst: dict[str, dict] = {}
     covers: dict[str, list[tuple[int, int, Any]]] = {}
@@ -797,7 +896,7 @@ def scan_jsonl(jsonl: Path, path: str | None, lines: tuple[int, int] | None = No
         ref = str(r["ref"])
         if path is not None:
             ref_path, line = row_line(ref, r)
-            if ref_path != path or (lines is not None and (not lines[0] <= line <= lines[1] if line is not None else ref != path)):
+            if ref_path != path or (spans is not None and (not in_spans(spans, line) if line is not None else ref != path)):
                 continue
         (analyst if r.get("source") == "analyst" else model)[ref] = r
 
@@ -822,17 +921,17 @@ def scan_jsonl(jsonl: Path, path: str | None, lines: tuple[int, int] | None = No
             cover = held(ref)
             rows.append({"ref": ref, "label": cover[0] if cover else None, "confidence": None, "rationale": None,
                          "source": None, "ts": a.get("ts"), "analyst": a.get("label")})
-    lo, hi = lines if lines is not None else (1, LAST_LINE)
     have: dict[str, set[int]] = {}
     for ref in [*model, *analyst]:
         where, line = ref_parts(ref)
         if where is not None and line is not None:
             have.setdefault(where, set()).add(line)
-    for where in sorted(covers) if path is None else [path]:
-        for first, last, (value, source, ts) in sorted(covers.get(where, []), key=lambda c: c[0]):
-            for n in range(max(first, lo), min(last, hi) + 1):
-                if n not in have.get(where, ()):
-                    rows.append(implicit_row(where, n, value, source, ts))
+    for lo, hi in spans if spans is not None else [(1, LAST_LINE)]:
+        for where in sorted(covers) if path is None else [path]:
+            for first, last, (value, source, ts) in sorted(covers.get(where, []), key=lambda c: c[0]):
+                for n in range(max(first, lo), min(last, hi) + 1):
+                    if n not in have.get(where, ()):
+                        rows.append(implicit_row(where, n, value, source, ts))
     return rows
 
 

@@ -111,10 +111,14 @@
           "items": {"type": "object", "required": ["form", "means"], "properties": {"form": {"type": "string"}, "means": {"type": "string"}}, "additionalProperties": false},
           "description": "Citation forms beyond line refs, each a row of main's table of citation forms."
         },
+        "units": {
+          "type": "array",
+          "items": {"anyOf": [{"type": "string"}, {"type": "object", "required": ["form"], "properties": {"form": {"type": "string"}, "means": {"type": "string"}}, "additionalProperties": false}]},
+          "description": "Citation forms of the view's own units, each cited view:<slug>/<form>, only for a unit that spans records, such as a conversation or a day."
+        },
         "libs": {"$ref": "#/$defs/strings", "description": "The libraries the page loads, in order: vega, vega-lite or vega-embed, or an npm package as name@version, or a file inside one, held in the view's lib folder."},
         "compare": {"type": "boolean", "description": "Whether picked units can be shown side by side."},
         "claims": {"deprecated": true, "$ref": "#/$defs/globs"},
-        "units": {"deprecated": true},
         "derived": {"deprecated": true},
         "declares": {"deprecated": true},
         "why": {"deprecated": true, "type": "string"},
