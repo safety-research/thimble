@@ -934,8 +934,27 @@ def offered(c: str, state: dict[str, Any] | None = None) -> list[str]:
     state = read_state(c) if state is None else state
     if not orientation_ran(c):
         return []
-    return [n for n, e in sorted(state["extensions"].items())
-            if e.get("active") and orients(e) and n not in state["oriented"] and n not in state["declined"]]
+    replacing = _replacing(c, state["extensions"])
+    return [n for n, e in sorted(state["extensions"].items()) if e.get("active") and runs_orientation(e, replacing)
+            and n not in state["oriented"] and n not in state["declined"]]
+
+
+def _replacing(c: str, exts: dict[str, Any]) -> bool:
+    """Whether an extension's replacement of thimble's orientation instructions stands in the prompt here: the analyst
+    has no instructions of their own and no two extensions replace them (orient_session.instructions_of)."""
+    from . import ledger, orient_session  # noqa: PLC0415
+
+    try:
+        own = ledger.stored_settings(c).get(orient_session.SETTING)
+    except (OSError, ValueError):
+        own = None
+    return not (isinstance(own, str) and own.strip()) and not conflicts(exts)["block"]
+
+
+def runs_orientation(e: dict[str, Any], replacing: bool) -> bool:
+    """Whether Run now would send the extension `e`'s orientation instructions: it adds to them, or its replacement
+    stands here (`replacing`, _replacing)."""
+    return bool(e.get("orient")) or (bool(e.get("replaces")) and replacing)
 
 
 async def mark_oriented(c: str, names: list[str] | None = None) -> None:
@@ -958,18 +977,11 @@ async def decline(c: str, name: str) -> None:
 
 def _instructions(c: str, name: str, exts: dict[str, Any]) -> str:
     """The orientation instructions of active extension `name` as a follow-up sends them. A replacement of thimble's
-    instructions is sent only where it stands in the prompt: the analyst has no instructions of their own and no other
-    extension replaces them too (orient_session.instructions_of)."""
-    from . import ledger, orient_session  # noqa: PLC0415
-
+    instructions is sent only where it stands in the prompt (_replacing)."""
     e = next((x for x in active(c) if x["name"] == name), None)
     if e is None:
         return ""
-    try:
-        own = ledger.stored_settings(c).get(orient_session.SETTING)
-    except (OSError, ValueError):
-        own = None
-    replacing = not (isinstance(own, str) and own.strip()) and not conflicts(exts)["block"]
+    replacing = _replacing(c, exts)
     return _orient_text(e, source_path(name), e.get("orient") or (e.get("replaces") if replacing else ""))
 
 
@@ -1274,11 +1286,31 @@ def _way(r: dict[str, Any]) -> str:
     return f"{WAYS['sdk']} ({Path(r.get('file') or '').name})"
 
 
-def _subagent_about(info: dict[str, Any], name: str) -> str:
-    sub = (info.get("subagents") or {}).get(name)
+def _subagent_fields(root: Path, e: dict[str, Any], name: str) -> dict[str, Any]:
+    """The fields of subagent `name` of the extension `e` in folder `root`: agent.json's, else its file's frontmatter."""
+    sub = (e.get("subagents") or {}).get(name)
     if isinstance(sub, dict):
-        return _one(sub.get("description"))
-    return _one(_front(Path(info["root"]) / "agents" / f"{name}.md")[0].get("description"))
+        return sub
+    return _front(root / "agents" / f"{name}.md")[0]
+
+
+def _subagent_about(info: dict[str, Any], name: str) -> str:
+    return _one(_subagent_fields(Path(info["root"]), info, name).get("description"))
+
+
+def mcp_servers(fields: dict[str, Any]) -> list[str]:
+    """The MCP servers a subagent's fields (`mcpServers`) start, each by its name and the command or address it runs.
+    Claude Code starts them outside the sandbox."""
+    raw = fields.get("mcpServers")
+    items: list[tuple[Any, Any]] = list(raw.items()) if isinstance(raw, dict) else []
+    for x in raw if isinstance(raw, list) else []:
+        items += [(x, None)] if isinstance(x, str) else list(x.items()) if isinstance(x, dict) else []
+    out = []
+    for name, conf in items:
+        conf = conf if isinstance(conf, dict) else {}
+        run = " ".join(_words([conf.get("command") or "", *(_words(conf.get("args")))])) or _one(conf.get("url"))
+        out.append(f"{_one(name)} ({run})" if run else _one(name))
+    return [x for x in out if x]
 
 
 def summary(info: dict[str, Any], how: dict[str, Any]) -> list[str]:
@@ -1302,6 +1334,8 @@ def summary(info: dict[str, Any], how: dict[str, Any]) -> list[str]:
         out.append(_row(r["role"], "", about))
     for a in info["agents"]:
         out.append(_row("agent", a, _subagent_about(info, a)))
+        if servers := mcp_servers(_subagent_fields(root, info, a)):
+            out.append(_row("", "", f"It starts MCP servers outside the sandbox: {', '.join(servers)}."))
     if "orientation" not in roles:
         for rel, what in ((info["orient"], "adds to the orientation's instructions"),
                           (info["replaces"], "replaces thimble's instructions, unless your own setting or another "
@@ -1636,9 +1670,10 @@ def _settings_words(a: dict[str, Any], data: bool = True) -> str:
     return ", ".join(x for x in (network, web, edits) if x)
 
 
-def consent(e: dict[str, Any], conf: dict[str, Any]) -> str:
+def consent(e: dict[str, Any], conf: dict[str, Any], wrapped: bool | None = None) -> str:
     """The settings what the extension `e` runs runs under, in words: those of thimble's config for each agent it changes
-    or adds to, then whether its code runs sandboxed. '' for an extension that runs neither."""
+    or adds to, the MCP servers its agents start, then whether its code runs in a sandbox, as `wrapped` says
+    (left out when None). '' for an extension that runs neither."""
     agents_conf = conf.get("agents") if isinstance(conf.get("agents"), dict) else {}
     used: dict[str, str] = {}
     roles = [r["role"] for r in e.get("roles") or [] if isinstance(r, dict) and r.get("role")]
@@ -1653,31 +1688,44 @@ def consent(e: dict[str, Any], conf: dict[str, Any]) -> str:
         name = t.get("task") if isinstance(t, dict) else None
         if name and isinstance(a := agents_conf.get(CONFIG_AGENT.get(name, "")), dict) and "network" in a:
             used[name] = _settings_words(a)
+    root = source_path(str(e.get("name") or ""))
     for name in _words(e.get("agents")):
-        used[name] = _settings_words(userconf.extension_agent(conf, f"{e.get('name')}:{name}"), data=False)
+        words = _settings_words(userconf.extension_agent(conf, f"{e.get('name')}:{name}"), data=False)
+        if mcp_servers(_subagent_fields(root, e, name)):
+            words += ", MCP servers outside the sandbox"
+        used[name] = words
     groups: dict[str, list[str]] = {}
     for who, words in used.items():
         groups.setdefault(words, []).append(who)
     lines = [f"{' and '.join(who)}: {words}." for words, who in groups.items()]
-    if _list(e, "views") or _list(e, "cards") or any(r.get("export") for r in _list(e, "reports")):
-        lines.append("Code runs sandboxed." if (conf.get("sandbox") or {}).get("use") != "never"
-                     else "Code runs without a sandbox.")
+    if wrapped is not None and (_list(e, "views") or _list(e, "cards")
+                                or any(r.get("export") for r in _list(e, "reports"))):
+        lines.append("Its code runs in a sandbox." if wrapped else "Its code runs without a sandbox.")
     return " ".join(lines)
+
+
+def kernels_wrapped(c: str) -> bool:
+    """Whether workspace `c`'s kernels, where an extension's code runs, run inside a sandbox (config.kernel_wrap)."""
+    from . import notebook  # noqa: PLC0415
+
+    return config.kernel_wrap(notebook._ws_settings(c)) in config.KERNEL_WRAPPED
 
 
 def public(c: str) -> dict[str, Any]:
     """Settings' extensions: each one added, whether it runs here and why not, the line Settings shows beside it (why
     not, unless its switch here turned it off), where its switch stands, whether it cannot run here whatever the switch
-    says (`locked`), what it gives (`parts`), the settings it runs under (`consent`), whether it gives the orientation
-    instructions (`orients`) and whether Settings offers to run them now (`offer`), and its views: each shown here or
-    not, the line Settings shows beside it (`note`), where its switch stands (switched here, else as its check says)
-    and whether that switch can change anything (`locked`: the extension does not run here or no file here matches the
-    view's claims). Then each extension thimble ships that is not added, off and locked. Then the conflicts among
-    those that run, and whether an orientation ran here (`orientation_ran`)."""
+    says (`locked`), what it gives (`parts`), the settings it runs under (`consent`), whether Run now would send its
+    orientation instructions here (`orients`, runs_orientation) and whether Settings offers to run them now (`offer`),
+    and its views: each shown here or not, the line Settings shows beside it (`note`), where its switch stands
+    (switched here, else as its check says) and whether that switch can change anything (`locked`: the extension does
+    not run here or no file here matches the view's claims). Then each extension thimble ships that is not added, off
+    and locked. Then the conflicts among those that run, and whether an orientation ran here (`orientation_ran`)."""
     state = read_state(c)
     off = userconf.extensions_off()
     conf = userconf.load_or_defaults(c)[0]
     offers = set(offered(c, state))
+    replacing = _replacing(c, state["extensions"])
+    wrapped = kernels_wrapped(c)
     out = []
     for name, e in sorted(state["extensions"].items()):
         vs = [{"slug": v["slug"], "name": _one(v.get("name") or v["slug"]), "shown": bool(v.get("shown")),
@@ -1689,8 +1737,8 @@ def public(c: str) -> dict[str, Any]:
                     "active": bool(e.get("active")), "why": why,
                     "note": "" if name in state["off"] else why, "on": name not in state["off"],
                     "locked": bool(config_off(name, off)) or bool(e.get("problems")), "views": vs,
-                    "parts": parts(e), "consent": consent({**e, "name": name}, conf), "orients": orients(e),
-                    "offer": name in offers})
+                    "parts": parts(e), "consent": consent({**e, "name": name}, conf, wrapped),
+                    "orients": runs_orientation(e, replacing), "offer": name in offers})
     for n, v in not_added():
         if n in state["extensions"]:
             continue
