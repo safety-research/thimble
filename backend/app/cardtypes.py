@@ -48,7 +48,7 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 
-from . import config, prompts, views
+from . import config, prompts, view_libs, views
 from .kernel_thimble import CARD_MIME, CARD_TYPES_FILE, _checked
 from .ledger import atomic_write_bytes, read_json, unlinked, write_json
 
@@ -658,6 +658,7 @@ def install_view(c: str, t: dict[str, Any]) -> None:
                       "why": v["description"], "claims": list(t["claims"]), "arrangement": "",
                       "proposed_by": "analyst", "status": "queued", "orientation": False, "ts": views._now()})
         views._save_proposals(c, items)
+    view_libs.copy_lib(d, views.views_dir(c) / t["slug"])
     views.write_view(c, t["slug"], name=raw.get("name") or t["slug"], description=v["description"],
                      claims=list(t["claims"]), accepts=v["accepts"], units=v["units"], libs=raw.get("libs"),
                      reader=(d / views.READER_PY).read_text("utf-8"), html=(d / views.VIEW_HTML).read_text("utf-8"))
