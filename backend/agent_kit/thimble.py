@@ -10,7 +10,7 @@ itself.
   thimble -> program   {"input": {...}}               first
                        {"id": 4, "result": ...}       the answer to request 4, or {"id": 4, "error": "..."}
   program -> thimble   {"id": 4, "tool": {"name", "args"}}                 one of thimble's tools, as the role
-                       {"id": 5, "ask": {"prompt", "schema"?, "model"?}}   one model call
+                       {"id": 5, "ask": {"prompt", "schema"?, "model"?, "images"?}}   one model call
                        {"id": 6, "session": {"prompt", "system"?, "tools"?, "agents"?, "model"?}}   a Claude Code
                                                                            session
                        {"id": 7, "default": {"input", "model"?}}           a task: thimble's own implementation
@@ -139,13 +139,17 @@ async def tool(name: str, args: dict[str, Any] | None = None) -> dict[str, Any]:
     return await arequest("tool", {"name": name, "args": args or {}})
 
 
-def ask(prompt: str, schema: dict[str, Any] | None = None, model: str | None = None) -> Any:
-    """One model call on the analyst's own Claude: the object `schema` describes, or text without one."""
+def ask(prompt: str, schema: dict[str, Any] | None = None, model: str | None = None,
+        images: list[str] | None = None) -> Any:
+    """One model call on the analyst's own Claude: the object `schema` describes, or text without one. `images` are
+    the paths of pictures (PNG, JPEG, GIF or WebP) the model sees before the prompt."""
     payload: dict[str, Any] = {"prompt": prompt}
     if schema is not None:
         payload["schema"] = schema
     if model:
         payload["model"] = model
+    if images:
+        payload["images"] = [str(p) for p in images]
     return request("ask", payload)
 
 

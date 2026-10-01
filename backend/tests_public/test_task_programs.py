@@ -214,7 +214,7 @@ async def test_every_task_s_own_implementation_takes_its_input_from_a_program(tm
     monkeypatch.setattr(model, "structured", structured)
     monkeypatch.setattr(card_check, "fit_image", lambda b: b)
     picture = tmp_path / "shot.png"
-    picture.write_bytes(b"png")
+    picture.write_bytes(b"\x89PNG\r\n\x1a\n" + b"\0" * 32)
     inputs = {
         "labels": concepts.label_input(CONCEPT, ITEMS[:1]),
         "label-draft": {"description": "messages that sound curt", "paths": ["runs/*.jsonl"],
@@ -321,6 +321,55 @@ async def test_a_task_program_s_sessions_refuse_what_they_would_ask_since_nobody
         agent_session.unanswered(CORPUS, key, False)
     assert got == {"behavior": "deny", "message": agent_session.NO_ONE_LINE}
     assert (await agent_session.ask(CORPUS, key, "Bash", {"command": "ls"}))["message"] == agent_session.GONE_LINE
+
+
+PEEK = '''import thimble
+def run(input):
+    out = {}
+    for name, inp in (("picture", {"card": {"id": "c1", "question": "Q?"}, "picture": input["secret"]}),
+                      ("relative", {"card": {"id": "c1", "question": "Q?"}, "picture": "p.py"})):
+        try:
+            thimble.default(inp)
+            out[name] = "read"
+        except thimble.ThimbleError as e:
+            out[name] = str(e)
+    for name, paths in (("ask-secret", [input["secret"]]), ("ask-png", [input["png"]])):
+        try:
+            out[name] = thimble.ask("What does the picture show?", images=paths)
+        except thimble.ThimbleError as e:
+            out[name] = str(e)
+    return {"assessment": [{"problem": out["picture"]}, {"problem": out["relative"]}, {"problem": out["ask-secret"]},
+                           {"problem": out["ask-png"]}, {"problem": ""}], "question": "Q?", "code": "", "takeaway": ""}
+thimble.serve(run)
+'''
+
+
+async def test_thimble_reads_for_a_program_only_pictures_its_box_may_read(tmp_path, data_tmp, workspaces_tmp, active,
+                                                                          unboxed, monkeypatch):
+    """A picture a program names, in a card check's input for thimble.default or in an ask, is read by the server
+    for it: only a PNG, JPEG, GIF or WebP file, never server.json, which its box may not read."""
+    secret = userconf.global_file().parent / "server.json"
+    secret.parent.mkdir(parents=True, exist_ok=True)
+    secret.write_text('{"token": "not-for-agents"}')
+    png = tmp_path / "card.png"
+    png.write_bytes(b"\x89PNG\r\n\x1a\n" + b"\0" * 32)
+    seen: list[list[tuple[bytes, str]]] = []
+
+    async def structured(prompt, *, tool, model, images=(), **k):
+        seen.append(list(images))
+        return model_result({"text": f"{len(images)} pictures"})
+
+    monkeypatch.setattr(model, "structured", structured)
+    monkeypatch.setattr(__import__("app.card_check", fromlist=["card_check"]), "fit_image", lambda b: b)
+    active.append(_program(tmp_path, "peek", "card-check", PEEK))
+    res = await tasks.call(CORPUS, "card-check", {"secret": str(secret), "png": str(png)})
+    assert res.status == "ok", res.detail
+    problems = [a["problem"] for a in res.output["assessment"]]
+    assert "is not a picture" in problems[0] and "not-for-agents" not in json.dumps(res.output)
+    assert "is not a PNG, JPEG, GIF or WebP picture" in problems[1]
+    assert "is not a picture" in problems[2]
+    assert problems[3] == "1 pictures"
+    assert seen == [[(png.read_bytes(), "image/png")]], "only the PNG reached a model"
 
 
 # --------------------------------------------------------------------------- the checks task

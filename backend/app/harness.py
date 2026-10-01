@@ -379,6 +379,48 @@ async def tool_call(run: Run, payload: dict[str, Any]) -> dict[str, Any]:
 
 
 ANSWER_TOOL = {"type": "object", "properties": {"text": {"type": "string"}}, "required": ["text"]}
+IMAGE_MAX = 20 * 1024 * 1024  # bytes of one picture a program names
+IMAGES_MAX = 20  # pictures in one `ask`
+IMAGE_TYPES = ((b"\x89PNG\r\n\x1a\n", "image/png"), (b"\xff\xd8\xff", "image/jpeg"), (b"GIF87a", "image/gif"),
+               (b"GIF89a", "image/gif"))
+
+
+def image_of(run: Run, path: Any) -> tuple[bytes, str]:
+    """The bytes and media type of the picture at `path` (relative to the program's folder) that a program names, which
+    the server reads for it: a PNG, JPEG, GIF or WebP file, never one the program's box may not read. HarnessError
+    otherwise. Blocking."""
+    if not isinstance(path, str) or not path.strip():
+        raise HarnessError("a picture is named by the path of its file")
+    real = os.path.realpath(run.part.folder / Path(path.strip()).expanduser())
+    if any(real == os.path.realpath(p) for p in private_paths()):
+        raise HarnessError(f"{path} is not a picture")
+    try:
+        with open(real, "rb") as f:
+            data = f.read(IMAGE_MAX + 1)
+    except OSError as e:
+        raise HarnessError(f"the picture {path} could not be read: {e.strerror or e}") from None
+    if len(data) > IMAGE_MAX:
+        raise HarnessError(f"the picture {path} is over {IMAGE_MAX // (1024 * 1024)} MB")
+    mime = next((m for head, m in IMAGE_TYPES if data.startswith(head)), None)
+    if mime is None and data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        mime = "image/webp"
+    if mime is None:
+        raise HarnessError(f"{path} is not a PNG, JPEG, GIF or WebP picture")
+    return data, mime
+
+
+def _images(run: Run, paths: Any) -> list[tuple[bytes, str]]:
+    from . import card_check  # noqa: PLC0415 — card_check renders cards
+
+    if not isinstance(paths, list):
+        raise HarnessError("images is a list of the pictures' paths")
+    if len(paths) > IMAGES_MAX:
+        raise HarnessError(f"one ask takes at most {IMAGES_MAX} pictures")
+    out = []
+    for p in paths:
+        data, mime = image_of(run, p)
+        out.append((card_check.fit_image(data) if mime == "image/png" else data, mime))
+    return out
 
 
 async def ask(run: Run, payload: dict[str, Any]) -> Any:
@@ -389,11 +431,12 @@ async def ask(run: Run, payload: dict[str, Any]) -> Any:
         raise HarnessError("ask needs a prompt")
     schema = payload.get("schema")
     plain = not isinstance(schema, dict)
+    images = await asyncio.to_thread(_images, run, payload["images"]) if payload.get("images") else []
     spec = model.ToolSpec("answer", "Give your answer with this tool.", ANSWER_TOOL if plain else schema)
     role = config.models_for(run.c).get(run.job.model_role) or {}
     chosen = str(payload.get("model") or role.get("model") or config.FALLBACK_MODEL)
     res = await model.structured(prompt, tool=spec, model=chosen, effort=role.get("effort") or None,
-                                 cwd=str(run.job.work))
+                                 cwd=str(run.job.work), images=images)
     if res.status != "ok" or res.output is None:
         raise HarnessError(f"the model call ended {res.status}: {res.detail or res.text[:300]}")
     return res.output.get("text", "") if plain else res.output
@@ -407,6 +450,8 @@ async def task_default(run: Run, payload: dict[str, Any]) -> Any:
     inp = payload.get("input")
     if not isinstance(inp, dict):
         raise HarnessError(f"default needs the {run.job.task} task's input, an object")
+    for path in tasks.picture_paths(run.job.task, inp):
+        await asyncio.to_thread(image_of, run, path)
     chosen = payload.get("model")
     kw: dict[str, Any] = {"program": run} if tasks.TASKS[run.job.task].session else {}
     res = await tasks.default(run.c, run.job.task, inp, model=str(chosen) if chosen else None, **kw)

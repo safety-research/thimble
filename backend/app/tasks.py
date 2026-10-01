@@ -140,6 +140,15 @@ async def default(c: str, task: str, input: dict[str, Any], *, model: str | None
     return await _implementation(task)(c, input, model=model, **kw)
 
 
+def picture_paths(task: str, input: dict[str, Any]) -> list[Any]:  # noqa: A002
+    """The paths of the pictures thimble's own implementation of `task` reads from `input`."""
+    if task == "card-check":
+        return [input["picture"]] if input.get("picture") else []
+    if task == "view-review":
+        return [x.get("path") for x in input.get("pictures") or [] if isinstance(x, dict)]
+    return []
+
+
 def output_problem(output: Any, schema: dict[str, Any] | None) -> str:
     """Why a program's output does not fit `schema` (the output thimble's own implementation gives), '' when it does."""
     if schema is None:

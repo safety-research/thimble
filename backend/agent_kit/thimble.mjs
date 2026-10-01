@@ -88,9 +88,10 @@ export function tool(name, args = {}) {
   return request('tool', { name, args })
 }
 
-/** One model call on the analyst's own Claude: the object `schema` describes, or text without one. */
-export function ask(prompt, { schema, model } = {}) {
-  return request('ask', { prompt, ...(schema ? { schema } : {}), ...(model ? { model } : {}) })
+/** One model call on the analyst's own Claude: the object `schema` describes, or text without one. `images` are the
+ * paths of pictures (PNG, JPEG, GIF or WebP) the model sees before the prompt. */
+export function ask(prompt, { schema, model, images } = {}) {
+  return request('ask', { prompt, ...(schema ? { schema } : {}), ...(model ? { model } : {}), ...(images?.length ? { images } : {}) })
 }
 
 /** A Claude Code session thimble runs as the role or task, in its sandbox and permission mode; its last reply. */
