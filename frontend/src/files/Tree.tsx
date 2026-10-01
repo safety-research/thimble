@@ -27,7 +27,9 @@ export type FolderStore = ReadonlyMap<string, FolderState>
 /** What the tree says when the root holds no files: an empty folder is most often the wrong one, so it says where
  * thimble looks. Null otherwise. */
 export function emptyFolderNote(root: FolderState | undefined): string | null {
-  if (root?.state !== 'ok' || root.listing.n_files > 0) return null
+  if (root?.state !== 'ok') return null
+  const { n_files: n, files, folders } = root.listing
+  if (n != null ? n > 0 : files.length > 0 || folders.length > 0) return null
   return 'This folder has no files. thimble shows the folder it was started in; to look at another folder, run thimble there.'
 }
 
@@ -71,16 +73,14 @@ export function fmtSize(n: number): string {
   return `${(mb / 1024).toFixed(1)} GB`
 }
 
-/** The files a workspace opens with when it keeps no tabs: the largest file of records at the corpus root, then its
- * README; else the root's first file. The first is the one shown. */
+/** The files a workspace opens with when it keeps no tabs: the corpus root's README, shown, and its largest file of
+ * records beside it; a root without a README opens none, and the tree's root listing is what shows. */
 export function defaultTabs(files: readonly SourceInfo[]): string[] {
   const shown = files.filter((f) => !f.hidden)
-  const data = shown.filter((f) => isJsonlFile(f.path, f.kind)).sort((a, b) => (b.size_bytes || 0) - (a.size_bytes || 0))[0]
   const readme = shown.find((f) => /^readme(\.|$)/i.test(baseName(f.path)))
-  const out = [data?.path, readme?.path].filter((p): p is string => !!p)
-  if (out.length) return out
-  const first = [...shown].sort((a, b) => cmpName(baseName(a.path), baseName(b.path)))[0]
-  return first ? [first.path] : []
+  if (!readme) return []
+  const data = shown.filter((f) => isJsonlFile(f.path, f.kind)).sort((a, b) => (b.size_bytes || 0) - (a.size_bytes || 0))[0]
+  return [readme.path, ...(data ? [data.path] : [])]
 }
 
 // A file's kind by its name, the glyph each kind takes: the first pattern that matches wins.

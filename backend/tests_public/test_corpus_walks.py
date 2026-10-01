@@ -144,26 +144,29 @@ def test_the_walk_lists_again_only_the_folders_that_changed(corpus, monkeypatch)
 
 
 def test_callers_of_a_folder_walk_at_the_same_time_share_one_walk(corpus, monkeypatch):
+    from app import corpus_tree
+
     walks: list[str] = []
     gate = threading.Event()
-    real = views._walk_folder
+    real = corpus_tree.os.scandir
 
-    def slow(c, rel):
-        walks.append(rel)
-        gate.wait(5)
-        return real(c, rel)
+    def slow(path):
+        if str(path) == str(corpus):
+            walks.append(str(path))
+            gate.wait(5)
+        return real(path)
 
-    monkeypatch.setattr(views, "_walk_folder", slow)
-    views._folder_cache.clear()
+    monkeypatch.setattr(corpus_tree.os, "scandir", slow)
+    corpus_tree.forget(corpus)
     got: list[int] = []
-    threads = [threading.Thread(target=lambda: got.append(len(views.folder_files(corpus, "")))) for _ in range(4)]
+    threads = [threading.Thread(target=lambda: got.append(len(views.folder_paths(corpus)))) for _ in range(4)]
     for t in threads:
         t.start()
     time.sleep(0.2)
     gate.set()
     for t in threads:
         t.join()
-    assert walks == [""] and got == [5, 5, 5, 5]
+    assert walks == [str(corpus)] and got == [5, 5, 5, 5]
 
 
 def test_last_used_counts_a_workspace_s_files_and_folders_but_not_its_mirror_links(corpus, tmp_path):

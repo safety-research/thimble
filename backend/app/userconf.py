@@ -44,6 +44,11 @@ SANDBOX_USES = ("when-available", "never")
 BROWSERS = ("system", "bundled", "off")
 WEB = ("ask", "off", "allow")
 NETWORK = ("off", "on")
+AGENT_SANDBOX = ("on", "off")
+DATA = ("ask", "allow", "off")
+ENV_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,127}$")
+SERVER_JSON = "server.json"  # in thimble's home: the server's address and the token of its local API (hook_auth)
+EDIT_TOOLS = ("Edit", "MultiEdit", "Write", "NotebookEdit")
 MEMORY = ("inherit", "on", "off")
 PERMISSION_MODES = ("manual", "auto", "bypass")  # modes.MODES
 WEB_TOOLS = ("WebFetch", "WebSearch")
@@ -52,9 +57,9 @@ WEB_TOOLS = ("WebFetch", "WebSearch")
 ASK_WITHOUT_SANDBOX = ("dev",)
 
 
-def _session_agent(web: str) -> dict[str, Any]:
-    return {"model": None, "effort": None, "fast": None, "permissionMode": None, "web": web, "network": "off",
-            "memory": "inherit", "prompt": None}
+def _session_agent(web: str, network: str = "on") -> dict[str, Any]:
+    return {"model": None, "effort": None, "fast": None, "permissionMode": None, "web": web, "network": network,
+            "sandbox": "on", "data": "ask", "env": [], "memory": "inherit", "prompt": None}
 
 
 DEFAULTS: dict[str, Any] = {
@@ -67,7 +72,7 @@ DEFAULTS: dict[str, Any] = {
         "critic": _session_agent("ask"),
         "writer": _session_agent("ask"),
         "checks": _session_agent("ask"),
-        "dev": _session_agent("off"),
+        "dev": _session_agent("off", network="off"),
         **{a: {"model": None, "effort": None, "fast": None, "prompt": None} for a in CALLS},
     },
 }
@@ -76,7 +81,7 @@ DEFAULTS: dict[str, Any] = {
 # orientation's session, under that session's sandbox, installs rules, permission mode, fast mode and memory. Its web
 # and network can only take away what the orientation's allow.
 EXTENSION_AGENT_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,39}:[a-z0-9][a-z0-9-]{0,39}$")
-EXTENSION_AGENT: dict[str, Any] = {"model": None, "effort": None, "web": "off", "network": "off", "prompt": None}
+EXTENSION_AGENT: dict[str, Any] = {"model": None, "effort": None, "web": "off", "network": "on", "prompt": None}
 EXTENSION_KEYS = ("enabled",)  # of `extensions.<name>`
 EXTENSION_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,39}$")
 
@@ -92,6 +97,16 @@ def install_rules() -> list[str]:
             *(r for c in sandbox_allow.INSTALL_COMMANDS for r in spread(c)),
             *(r for m in sandbox_allow.INSTALL_MODULES for r in (f"* -m {m} *", *[f"* -m {x}" for x in spread(m)[1:]])),
             "pip3.*", "uv run --with *", "uv run * --with *", "uv run --script *", "uv run * --script *"]
+
+
+def private_paths() -> list[str]:
+    """The files no agent thimble starts may read: server.json in thimble's home, which holds the local API's token."""
+    return [str(global_file().parent / SERVER_JSON)]
+
+
+def private_rules() -> list[str]:
+    """Claude Code's deny rules for reading and editing private_paths, which also cover Bash commands such as `cat`."""
+    return [rule for p in private_paths() for rule in (f"Read(/{p})", f"Edit(/{p})")]
 
 
 class ConfigError(RuntimeError):
@@ -241,6 +256,15 @@ def _agent_problems(name: str, conf: Any, base: Path) -> list[str]:
         elif k == "memory":
             if v not in MEMORY:
                 out.append(f"{at} is {json.dumps(v)}; it takes {_words(MEMORY)}")
+        elif k == "sandbox":
+            if v not in AGENT_SANDBOX:
+                out.append(f"{at} is {json.dumps(v)}; it takes {_words(AGENT_SANDBOX)}")
+        elif k == "data":
+            if v not in DATA:
+                out.append(f"{at} is {json.dumps(v)}; it takes {_words(DATA)}")
+        elif k == "env":
+            if not isinstance(v, list) or not all(isinstance(n, str) and ENV_NAME_RE.match(n) for n in v):
+                out.append(f"{at} must be a list of environment variable names, such as [\"OPENAI_API_KEY\"]")
         elif k == "prompt":
             if not isinstance(v, str) or not v.strip():
                 out.append(f"{at} must be the path of a prompt file, or null")
@@ -562,11 +586,40 @@ class Session:
 
     @property
     def network(self) -> bool:
-        return self.conf.get("network") == "on"
+        return self.conf.get("network", "on") == "on"
 
     @property
     def web(self) -> str:
         return str(self.conf.get("web") or "ask")
+
+    @property
+    def data(self) -> str:
+        """What happens to an edit of the corpus: `ask` sends it to the analyst in every mode, `allow` leaves it to the
+        permission mode, `off` refuses it."""
+        value = self.conf.get("data")
+        return value if value in DATA else "ask"
+
+    def corpus(self) -> Path | None:
+        if not self.c:
+            return None
+        try:
+            return Path(os.path.realpath(config.corpus_dir(self.c)))
+        except (OSError, ValueError, KeyError):
+            return None
+
+    def edits_corpus(self, tool: str, inp: Any) -> bool:
+        """Whether a call of `tool` writes a file in the corpus folder."""
+        if tool not in EDIT_TOOLS or not isinstance(inp, dict):
+            return False
+        target = inp.get("notebook_path" if tool == "NotebookEdit" else "file_path")
+        corpus = self.corpus()
+        if not isinstance(target, str) or not target.strip() or corpus is None:
+            return False
+        path = Path(target.strip()).expanduser()
+        if not path.is_absolute():
+            return False
+        real = Path(os.path.realpath(path))
+        return real == corpus or corpus in real.parents
 
     @property
     def bash_asks(self) -> bool:
@@ -578,7 +631,7 @@ class Session:
         """The --settings keys of the config for the session: the install rules, Bash asked when bash_asks, the web
         allowed or denied, auto memory when not inherited, and a deny of edits to the config's files."""
         files = [global_file(), *([workspace_file(self.c)] if self.c else [])]
-        perms: dict[str, list[str]] = {"deny": [f"Edit(/{f})" for f in files]}
+        perms: dict[str, list[str]] = {"deny": [*(f"Edit(/{f})" for f in files), *private_rules()]}
         rules = [f"Bash({r})" for r in install_rules()]
         if self.installs == "ask" and self.hosted:
             perms["ask"] = rules
@@ -590,7 +643,7 @@ class Session:
             perms["deny"] += list(WEB_TOOLS)
         elif self.web == "allow":
             perms["allow"] = list(WEB_TOOLS)
-        out: dict[str, Any] = {"permissions": perms}
+        out: dict[str, Any] = {"permissions": perms, "sandbox": {"filesystem": {"denyRead": private_paths()}}}
         memory = self.conf.get("memory")
         if memory in ("on", "off"):
             out["autoMemoryEnabled"] = memory == "on"
@@ -602,12 +655,15 @@ class Session:
 
     def may_ask(self) -> bool:
         """Whether a call can go to the analyst whatever the permission mode (verdict)."""
-        return self.installs != "allow" or self.bash_asks
+        return self.installs != "allow" or self.bash_asks or self.data == "ask"
 
     def verdict(self, tool: str, inp: Any) -> str:
-        """For a Bash call: `deny` or `ask` when the config refuses it or sends it to the analyst whatever the
-        permission mode: an install command by `installs`, or refused when offline, and, when bash_asks, any other
-        command; `own` for one of the session's own commands then, which runs unasked; '' for any other call."""
+        """`deny` or `ask` when the config refuses a call or sends it to the analyst whatever the permission mode: an
+        edit of the corpus by `data`; for a Bash call, an install command by `installs`, or refused when offline, and,
+        when bash_asks, any other command; `own` for one of the session's own commands then, which runs unasked; ''
+        for any other call."""
+        if self.data != "allow" and self.edits_corpus(tool, inp):
+            return "deny" if self.data == "off" else "ask"
         command = inp.get("command") if tool == "Bash" and isinstance(inp, dict) else None
         if not isinstance(command, str):
             return ""
@@ -643,10 +699,13 @@ NO_SANDBOX_WHY = {
 
 def session(c: str | None, agent: str, *, sandbox: bool = True) -> Session:
     """What the config asks of a session of `agent` in workspace `c`; `sandbox` False for a session the caller runs
-    outside the sandbox. ConfigError when the config has an error, or requires the sandbox (`sandbox.enforce`, on by
-    default) and the session would run outside it (NO_SANDBOX)."""
+    outside the sandbox. An agent whose own `sandbox` is "off" runs outside it. ConfigError when the config has an
+    error, or requires the sandbox (`sandbox.enforce`, on by default) and the session of an agent whose sandbox is on
+    would run outside it (NO_SANDBOX)."""
     conf = load(c)
     box = conf["sandbox"]
+    if conf["agents"][agent].get("sandbox") == "off":
+        return Session(c, agent, conf["agents"][agent], conf["installs"], False)
     runs = box["use"] != "never" and sandbox_runs()
     if box["enforce"] and sandbox and not runs and box["use"] != "never":
         runs = sandbox_runs(refresh=True)  # the analyst may have installed what it needs since the last check
@@ -662,9 +721,22 @@ def session(c: str | None, agent: str, *, sandbox: bool = True) -> Session:
 
 
 def prompt_files(c: str | None, agent: str) -> dict[str, Path]:
-    """{prompt file: the file that replaces it} for `agent` in workspace `c` (prompts.custom); {} for none."""
+    """{prompt file: the file that replaces it} for `agent` in workspace `c` (prompts.custom): the config's `prompt`,
+    else the role's prompt as the active extensions change it (roles.prompt_file); {} for none."""
     value = load_or_defaults(c)[0]["agents"][agent].get("prompt")
-    return {PROMPT_FILES[agent]: Path(value)} if isinstance(value, str) and value else {}
+    if isinstance(value, str) and value:
+        return {PROMPT_FILES[agent]: Path(value)}
+    from . import roles  # noqa: PLC0415 — roles reads the extensions, which import this module
+
+    if agent in roles.SESSION_ROLES:
+        try:
+            made = roles.prompt_file(c, agent)
+        except Exception:  # noqa: BLE001 — an extension's broken prompt leaves the role on thimble's own
+            log.exception("%s: the %s prompt of the active extensions could not be made", c, agent)
+            made = None
+        if made is not None:
+            return {PROMPT_FILES[agent]: made}
+    return {}
 
 
 # --------------------------------------------------------------------------- the browser

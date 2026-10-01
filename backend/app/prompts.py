@@ -295,10 +295,11 @@ def agent_prompt(name: str, values: dict[str, str]) -> str:
 _HEADING_RE = re.compile(r"^(#{1,4}) (.+?)[ \t]*$")
 
 
-def without(text: str, headings: Iterable[str], lines: Iterable[str] = ()) -> str:
+def without(text: str, headings: Iterable[str], lines: Iterable[str] = (), strict: bool = True) -> str:
     """`text` without each `### ` or `#### <heading>` part (up to the next heading of its level or higher, outside code
     fences) and without the one line holding each of `lines`, for template parts a caller's switches turn off. A missing
-    heading, or a line not found exactly once, raises PromptError, so a renamed part cannot slip through."""
+    heading, or a line not found exactly once, raises PromptError, so a renamed part cannot slip through; with `strict`
+    False, for a text that replaces thimble's, what is not there is left as it is."""
     drop = set(headings)
     held = list(lines)
     out: list[str] = []
@@ -321,6 +322,8 @@ def without(text: str, headings: Iterable[str], lines: Iterable[str] = ()) -> st
             hits[s] += 1
         if not level and not found:
             out.append(line)
+    if not strict:
+        return "".join(out)
     if drop - seen:
         raise PromptError(f"no part {sorted(drop - seen)} to leave out: each is a `### ` or `#### ` heading of the text")
     if bad := {s: k for s, k in hits.items() if k != 1}:

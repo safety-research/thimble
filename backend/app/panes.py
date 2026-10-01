@@ -30,7 +30,7 @@ def surfaces(c: str) -> list[tuple[str, str]]:
     for v in views.list_views(c):
         if not v.get("ok"):
             continue
-        if v.get("origin") == "builtin" and not views.claimed_files(c, v):
+        if v.get("origin") == "builtin" and not views.claimed_paths(c, v):
             continue
         out.append((f"view:{v['slug']}", str(v.get("name") or v["slug"])))
     return out

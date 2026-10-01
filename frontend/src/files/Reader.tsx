@@ -20,7 +20,7 @@ import { clearMatches, firstMatchFrom, lineAsked, markMatches, markSpots, matchC
 import { countsOf, FindBar, useSourceFind } from './FindBar'
 import { classesOf, colourVar, laneTags, litClass, marksOf, valueOf } from './labels'
 import { ReaderLabelsContext, useReaderLabels } from './marks'
-import { findColumn, ReaderRuler, rulerColumns, useRuler, type LensTick, type RulerTick, type Seen, type Shown } from './Ruler'
+import { FIND_MARK, findColumn, ReaderRuler, rulerColumns, useRuler, type LensTick, type RulerTick, type Seen, type Shown } from './Ruler'
 import { fmtSize } from './Tree'
 import { useFilesFilter, type FilesLabels } from './useLabels'
 import { accepts, slugOf, viewValue } from './viewChoice'
@@ -43,6 +43,8 @@ const DRAG_BEFORE = 5
 const DRAG_AFTER = 30
 /** ms after a page lands before a held drag loads the next, so the thumb keeps moving between them */
 const DRAG_LOAD_MS = 150
+/** ms between asks for the line count while the server's is an estimate (a big file whose line index is being built) */
+const LINES_POLL_MS = 1000
 /** the order of the built-in views in the mode switch */
 const ORDER = ['transcript', 'text', 'raw', 'table', 'forge']
 const BINARY_REASON = 'A binary file, with no text to show here.'
@@ -50,6 +52,11 @@ const NO_MATCH: MatchAt = { i: -1, k: 0 }
 const NO_SPOTS: ReadonlyMap<number, number[]> = new Map()
 /** the built-in views whose records carry the label gutter (views/common.tsx RecordCard and LineRow) */
 const GUTTERED = new Set(['transcript', 'text', 'raw'])
+
+/** A line count as the reader says it: nothing while it is an estimate (a big file whose line index is being built). */
+export function linesText(total: number, estimated: boolean): string {
+  return estimated ? '' : total.toLocaleString()
+}
 
 /** What the reader says of a binary file whose size the server gave. */
 export function binaryReason(size: number | null): string {
@@ -541,6 +548,16 @@ function FileReader({ workspace, path, kind, targetRef, lead, end, labels, only,
   const fragment = fragmentIn(targetRef, path)
   const [records, setRecords] = useState<SourceRecord[]>([])
   const [total, setTotal] = useState<number | null>(null)
+  // the server estimated `total` (a big file whose line index is being built): it is asked for again until it is exact,
+  // and once it is, a page answered with the estimate leaves it alone
+  const [estimated, setEstimated] = useState(false)
+  const exact = useRef(false)
+  const takeTotal = useCallback((n: number, guess?: boolean) => {
+    if (guess && exact.current) return
+    exact.current = !guess
+    setEstimated(!!guess)
+    setTotal(n)
+  }, [])
   const [loaded, setLoaded] = useState(isDatabase)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -591,7 +608,7 @@ function FileReader({ workspace, path, kind, targetRef, lead, end, labels, only,
   const readerLabels = useReaderLabels(workspace, path, on, lanes, labels.focus, fileOf)
   const tags = useMemo(() => laneTags(lanes), [lanes])
   const fileLanes = useMemo(() => new Set(lanes.filter((k) => marksOf(k) === 'file').map((k) => k.id)), [lanes])
-  const ruler = useRuler(workspace, path)
+  const ruler = useRuler(workspace, path, lanes.length > 0)
   const columns = useMemo(() => rulerColumns(lanes, ruler, fileOf), [lanes, ruler, fileOf])
   const fileLabels = useFileLabels(labels, path)
 
@@ -602,13 +619,16 @@ function FileReader({ workspace, path, kind, targetRef, lead, end, labels, only,
     let alive = true
     setLoading(true)
     setError(null)
-    const p = wantLine != null ? api.sourceAround(workspace, path, wantLine, jumpAt?.held ? DRAG_BEFORE : 50, jumpAt?.held ? DRAG_AFTER : 50) : api.source(workspace, path, 1, PAGE)
+    // the reader's own moves ask for a clamp: made while the count is an estimate, one can land past the end
+    const p = wantLine != null ? api.sourceAround(workspace, path, wantLine, jumpAt?.held ? DRAG_BEFORE : 50, jumpAt?.held ? DRAG_AFTER : 50, jumpAt != null) : api.source(workspace, path, 1, PAGE)
     p.then((page) => {
       if (!alive) return
       if (page.binary) setBinarySize(page.size_bytes ?? 0)
       setRecords(page.records)
-      setTotal(page.total_lines)
+      takeTotal(page.total_lines, page.total_estimated)
       setLoaded(true)
+      const lastLine = page.records[page.records.length - 1]?.line
+      if (jumpAt && lastLine != null && jumpAt.line > lastLine) setJumpLine(lastLine, jumpAt.held)
     })
       .catch((e) => {
         if (!alive) return
@@ -619,7 +639,30 @@ function FileReader({ workspace, path, kind, targetRef, lead, end, labels, only,
     return () => {
       alive = false
     }
-  }, [workspace, path, wantLine, jumpAt, isDatabase])
+  }, [workspace, path, wantLine, jumpAt, isDatabase, takeTotal, setJumpLine])
+
+  useEffect(() => {
+    if (!estimated) return
+    let alive = true
+    let timer = 0
+    const ask = () => {
+      timer = window.setTimeout(() => {
+        api
+          .sourceLines(workspace, path)
+          .then((r) => {
+            if (!alive) return
+            takeTotal(r.total_lines, r.estimated)
+            if (r.estimated) ask()
+          })
+          .catch(() => {})
+      }, LINES_POLL_MS)
+    }
+    ask()
+    return () => {
+      alive = false
+      window.clearTimeout(timer)
+    }
+  }, [estimated, workspace, path, takeTotal])
 
   const first = records[0]?.line
   const last = records[records.length - 1]?.line
@@ -736,7 +779,7 @@ function FileReader({ workspace, path, kind, targetRef, lead, end, labels, only,
             const merged = [...page.records, ...c]
             return merged.length > CAP ? merged.slice(0, CAP) : merged
           })
-          setTotal(page.total_lines)
+          takeTotal(page.total_lines, page.total_estimated)
         } else {
           const page = await api.source(workspace, path, l + 1, PAGE)
           if (!page.records.length) dryAfter.current = l
@@ -744,7 +787,7 @@ function FileReader({ workspace, path, kind, targetRef, lead, end, labels, only,
             const merged = [...c, ...page.records]
             return merged.length > CAP ? merged.slice(merged.length - CAP) : merged
           })
-          setTotal(page.total_lines)
+          takeTotal(page.total_lines, page.total_estimated)
         }
       } catch (e) {
         setError(errMsg(e))
@@ -753,7 +796,7 @@ function FileReader({ workspace, path, kind, targetRef, lead, end, labels, only,
         setLoading(false)
       }
     },
-    [workspace, path, loading, total],
+    [workspace, path, loading, total, takeTotal],
   )
 
   const frame = useRef<number | null>(null)
@@ -911,7 +954,7 @@ function FileReader({ workspace, path, kind, targetRef, lead, end, labels, only,
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [markText, shownMatch, shownK])
-  const findStatus = !finder ? '' : lineAsk != null ? (total ? `of ${total.toLocaleString()}` : '') : search.error ? 'Could not search' : found ? matchCount(cursor.i < 0 ? -1 : matchNumber(cursor, countsOf(found)), found.matches ?? found.total, !found.complete) : ''
+  const findStatus = !finder ? '' : lineAsk != null ? (total && !estimated ? `of ${linesText(total, estimated)}` : '') : search.error ? 'Could not search' : found ? matchCount(cursor.i < 0 ? -1 : matchNumber(cursor, countsOf(found)), found.matches ?? found.total, !found.complete) : ''
   const rulerCols = useMemo(() => (found && found.total && total ? [...columns, findColumn(found.lines, total, findText)] : columns), [columns, found, total, findText])
   const foundLines = useMemo(() => new Set(found?.lines ?? []), [found])
   // inside the ruler's thumb, per lane, the records on screen it marks: a label's highlighted value, or each place of a
@@ -924,8 +967,8 @@ function FileReader({ workspace, path, kind, targetRef, lead, end, labels, only,
       if (col.id === 'find') {
         for (const s of shown.seen) {
           const places = spots.get(s.line)
-          if (places?.length) for (const p of places) ticks.push({ line: s.line, top: s.top + p * (s.bottom - s.top), bottom: s.top + p * (s.bottom - s.top), colour: 'var(--accent)', hit: true })
-          else if (foundLines.has(s.line)) ticks.push({ ...s, colour: 'var(--accent)' })
+          if (places?.length) for (const p of places) ticks.push({ line: s.line, top: s.top + p * (s.bottom - s.top), bottom: s.top + p * (s.bottom - s.top), colour: FIND_MARK, hit: true })
+          else if (foundLines.has(s.line)) ticks.push({ ...s, colour: FIND_MARK })
         }
       } else if (fileLanes.has(col.id)) {
         // a label over files marks every record of the file with the file's value, its lane's one mark

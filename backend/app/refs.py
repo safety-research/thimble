@@ -649,7 +649,8 @@ def _resolve_path(corpus_dir: Path, p: dict[str, Any], ref: str) -> dict[str, An
     """A whole file (`<path>`, no line): {ref, kind: path, path, excerpt: its first PATH_EXCERPT_LINES lines, meta}. A
     database is named by its tables; a missing file is 404. A `<path>#<locator>` ref is this file with the locator as
     text; the excerpt stays the file's own, but for a PDF, whose excerpt is the text of the page the locator names
-    (pdfs.excerpt), and a page past its last is 404. A binary file's excerpt says what it is and meta.binary is true."""
+    (pdfs.excerpt), and a page past its last is 404. A binary file's excerpt says what it is and meta.binary is true.
+    meta.lines is the line count, an estimate (meta.lines_estimated) while a big file's line index is being built."""
     from . import corpus  # lazy (import cycle)
 
     path, rel = _locate(corpus_dir, p["path"])
@@ -682,9 +683,10 @@ def _resolve_path(corpus_dir: Path, p: dict[str, Any], ref: str) -> dict[str, An
         meta["binary"] = True
         excerpt = "(a binary file, open it in Files)"
     else:
-        total = len(corpus.line_offsets(path))
-        meta["lines"] = total
-        recs = corpus.load_records(path, rel, src_kind, 1, min(total, PATH_EXCERPT_LINES)) if total else []
+        lines, meta["lines"], estimated = corpus.page_lines(path, 1, PATH_EXCERPT_LINES)
+        if estimated:  # a big file whose line index is still being built
+            meta["lines_estimated"] = True
+        recs = corpus.records_from_lines(lines, rel, src_kind, 1)
         excerpt = "\n".join(_join_blocks(r["blocks"]) for r in recs)
     out = {"ref": ref, "kind": "path", "path": rel, "record": None, "excerpt": excerpt[:EXCERPT_MAX], "meta": meta}
     if p.get("locator"):

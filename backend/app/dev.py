@@ -19,10 +19,12 @@ the ticket; a server restart queues an interrupted run again with its worktree (
 View tickets. View proposals build at once, each as a ticket on its row of views/proposals.json, run by queue_view in a
 pool of its own (VIEW_POOL). A view is three files of the workspace, so there is no worktree, stack or restart. run_view
 starts a session on prompts/dev-view.md in the corpus folder (which Claude Code trusts) with `--add-dir` for the view's
-folder; the corpus folder and the worked examples are fenced read-only (view_fence). After each turn the server runs the
-view's gate; a failure wakes the session, a pass registers the view. A turn the API ended at capacity is no attempt: the
-build waits and wakes the session again. An orientation's proposal that runs out of attempts gets up to VIEW_REPAIRS new
-sessions, and is then dropped quietly; a view the analyst asked for fails with Retry. The orientation's Stop stops the
+folder; the worked examples are fenced read-only, and an edit of the corpus goes as the dev agent's `data` says, by
+default to the analyst first (view_fence). After each turn the server runs the view's gate; a failure wakes the
+session, a pass registers the view. Where an active extension runs the dev agent with a program (roles.py), each turn
+is a run of that program instead (program_view_turn), checked the same way. A turn the API ended at capacity is no
+attempt: the build waits and wakes the session again. An orientation's proposal that runs out of attempts gets up to
+VIEW_REPAIRS new sessions, and is then dropped quietly; a view the analyst asked for fails with Retry. The orientation's Stop stops the
 builds of the views it proposed (stop_orientation_views). Main's end stops every build of the workspace
 (stop_workspace): a view the analyst asked for fails with Retry, and a session's proposal waits, queued, until a session
 is main again (resume_views).
@@ -1695,6 +1697,8 @@ async def _worker_turn(run: Run, run_log: Log, cwd: Path, prompt: str, resume: s
     fenced = {**({"fence": fence} if fence else {}), **({"asking": asking} if asking else {}),
               **({"models": models} if models else {})}
     key = str((asking or {}).get("key") or "")
+    if workspace and key.startswith("view:") and (program := view_program(workspace)) is not None:
+        return await program_view_turn(workspace, key[len("view:"):], prompt, list(add_dirs), program, run_log.rec)
     if resume:
         tail = Tail(resume, _size(SESSIONS.transcript(resume)))
         sess = await SESSIONS.resume(cwd, resume, prompt, env=env, name=name, workspace=workspace,
@@ -2696,17 +2700,41 @@ def view_read_only(corpus: Path, folder: Path) -> tuple[Path, ...]:
 
 
 def view_fence(c: str, slug: str, corpus: Path, folder: Path, conf: userconf.Session) -> dict[str, Any]:
-    """The settings that fence a view build's session: the view_read_only folders read-only, its check command run
-    outside the sandbox, where it can reach this server, and while the dev agent's network is off (`conf`),
-    offline_deny and the offline environment (view_env)."""
+    """The settings that fence a view build's session: the view_read_only folders read-only, but for the corpus, whose
+    edits follow the dev agent's `data` (data_fence), its check command run outside the sandbox, where it can reach
+    this server, and while the dev agent's network is off (`conf`), offline_deny and the offline environment
+    (view_env)."""
     check = view_check_command(c, slug)
-    out = read_only_fence(view_read_only(corpus, folder), outside=(check, f"{check} *"), conf=conf)
+    fixed = view_read_only(corpus, folder)
+    out = read_only_fence(fixed, outside=(check, f"{check} *"), conf=conf)
+    if Path(corpus) in fixed:
+        out = data_fence(out, Path(corpus), conf.data)
     if conf.network:
         return {**out, "env": view_env(slug, offline=False)}
     conf.offline = True
     perms = dict(out.get("permissions") or {})
     deny = [*(perms.get("deny") or []), *offline_deny()]
     return {**out, "permissions": {**perms, "deny": deny}, "env": view_env(slug)}
+
+
+def data_fence(fence: dict[str, Any], corpus: Path, data: str) -> dict[str, Any]:
+    """`fence` (read_only_fence) with the corpus's Edit deny as `data` (userconf.Session.data) says: kept for "off", an
+    ask for "ask", whose sandbox then keeps Bash from writing the corpus, and gone for "allow", whose sandbox lets Bash
+    write it."""
+    if data == "off":
+        return fence
+    rule = f"Edit(/{corpus}/**)"
+    perms = dict(fence.get("permissions") or {})
+    perms["deny"] = [r for r in perms.get("deny") or [] if r != rule]
+    if data == "ask":
+        perms["ask"] = [*(perms.get("ask") or []), rule]
+    out = {**fence, "permissions": perms}
+    if isinstance(out.get("sandbox"), dict):
+        key = "denyWrite" if data == "ask" else "allowWrite"
+        fs = dict(out["sandbox"].get("filesystem") or {})
+        fs[key] = [*(fs.get(key) or []), str(corpus)]
+        out["sandbox"] = {**out["sandbox"], "filesystem": fs}
+    return out
 
 
 def offline_deny() -> list[str]:
@@ -2749,6 +2777,11 @@ def view_env(slug: str, offline: bool = True) -> dict[str, str]:
     return {SESSION_ENV: view_key(slug), **({**OFFLINE_ENV, ENV_FILE: str(OFFLINE_ENV_FILE)} if offline else {})}
 
 
+# The thimble code a view's reader and page run against, which a view build's session reads unasked: the kernel's
+# `thimble` module, the page's bridge and styles, the checks, and the rest of the server's code beside them.
+VIEW_CODE = ("backend/app/", "scripts/view_shot.mjs")
+
+
 def view_key(slug: str) -> str:
     """A view build's session key, which its permission hook names (module note, permissions)."""
     return f"view:{slug}"
@@ -2756,14 +2789,17 @@ def view_key(slug: str) -> str:
 
 def view_asking(c: str, slug: str, folder: Path, conf: userconf.Session) -> dict[str, Any]:
     """How a view build's session asks (Sessions._flags): its key, what thimble's config asks of it (`conf`), and allowed
-    unasked its edits in the view's folder, reads of the worked examples, its check command, and Bash in the sandbox
-    where its Bash runs there, but for the commands the config asks about."""
+    unasked its edits in the view's folder, reads of the worked examples and of the thimble code a view runs against
+    (VIEW_CODE), its check command, and Bash in the sandbox where its Bash runs there, but for the commands the config
+    asks about."""
     from . import agent_session, views  # noqa: PLC0415
 
     check = view_check_command(c, slug)
     conf.own_bash = [check]
+    code = [f"Read(/{config.REPO_ROOT / rel}{'/**' if rel.endswith('/') else ''})" for rel in VIEW_CODE]
     out: dict[str, Any] = {"key": view_key(slug), "config": conf,
-                           "allow": [*own_work(folder, (views.EXAMPLES_DIR,)), f"Bash({check})", f"Bash({check} *)"]}
+                           "allow": [*own_work(folder, (views.EXAMPLES_DIR,)), *code, f"Bash({check})",
+                                     f"Bash({check} *)"]}
     if conf.sandboxed:
         names, asks = agent_session.sandbox_rule(config.corpus_dir(c))
         out["sandbox"] = [names, asks]
@@ -3009,6 +3045,47 @@ async def _run_view(c: str, slug: str, run: Run) -> None:
         _change_failed_chip(c, prop, why)
         return
     _view_failed(c, slug, why, chat, drop_why=drop_why)
+
+
+def view_program(c: str) -> Any:
+    """The program an active extension runs the dev agent with (roles.py), which then takes each turn of the
+    workspace's view builds (program_view_turn); None for thimble's own dev agent."""
+    from . import roles  # noqa: PLC0415
+
+    agent = roles.agent_for(c, "dev")
+    return agent.replacing if agent.code else None
+
+
+VIEW_PROGRAM_TOOLS = ("read_ref",)  # the thimble tools a dev program's view build may call
+
+
+def view_program_dir(c: str, slug: str) -> Path:
+    """A dev program's own folder for the view `slug`, beside the view's folder, which holds only the view."""
+    return config.workspace_dir(c) / "views-work" / slug
+
+
+async def program_view_turn(c: str, slug: str, message: str, folders: list[Path], part: Any,
+                            rec: agents.Recorder | None) -> str:
+    """A turn of a view build, a change or a review's revision taken by the dev agent's program (harness.run_in) in
+    the build's chat, in place of thimble's session: its input is the view's proposal, its folder and the message
+    thimble's session would get this turn (the build's prompt, then what the checks found or what the review asks
+    for). It writes the view's files in its folder, which the build then checks as it checks a session's work. What it
+    returns is the turn's reply; RuntimeError when it fails or may not start."""
+    from . import harness  # noqa: PLC0415
+    from . import views  # noqa: PLC0415
+
+    prop = views.read_proposal(c, slug) or {"slug": slug}
+    folder = folders[0] if folders else views.views_dir(c) / slug
+    job = harness.Job(c, "dev", view_key(slug), f"view: {prop.get('name') or slug}", {
+        "task": "view", "slug": slug, "name": str(prop.get("name") or slug), "description": str(prop.get("why") or ""),
+        "scope": list(prop.get("claims") or []), "spec": views.spec_lines(prop), "change": str(prop.get("change") or ""),
+        "folder": str(folder), "corpus": str(config.corpus_dir(c)), "examples": str(views.EXAMPLES_DIR),
+        "message": message,
+    }, VIEW_PROGRAM_TOOLS, view_program_dir(c, slug), writes=(folder,))
+    try:
+        return await harness.run_in(job, part, rec)
+    except harness.HarnessError as e:
+        raise RuntimeError(str(e)) from e
 
 
 # a turn of a revision the view review asked for, and the stage line its thread gets

@@ -925,13 +925,14 @@
     }
     if (box.top < 0 || box.bottom > innerHeight) window.scrollBy(0, box.top - innerHeight / 3)
   }
-  // stronger than --accent-soft, which views use for the ring around the record a citation opened
+  // the evidence highlight in ink, at the find's stronger step so it reads over the ring views draw around the record a
+  // citation opened
   function showQuote(r) {
     if (HL) {
       if (!quoteSheet) {
         quoteSheet = document.createElement('style')
         quoteSheet.setAttribute('data-thimble', 'quote')
-        quoteSheet.textContent = '::highlight(thimble-quote){background-color:color-mix(in oklab,var(--accent,#5135ff) 32%,transparent)}'
+        quoteSheet.textContent = '::highlight(thimble-quote){background-color:var(--hl-bg-strong,rgba(27,26,24,.18))}'
         ;(document.head || document.documentElement).appendChild(quoteSheet)
       }
       CSS.highlights.set('thimble-quote', new Highlight(r))

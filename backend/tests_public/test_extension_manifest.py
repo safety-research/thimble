@@ -75,7 +75,7 @@ def test_an_agent_or_task_is_defined_one_way_with_files_of_its_own(tmp_path):
     got = _problems(root)
     assert "agents/critic/agent.json:4  takes one of prompt, sdk or command, and it has sdk and command" in got
     assert "agents/main/agent.json:4  main takes a prompt addition only, so it cannot set replace" in got
-    assert "agents/dev/agent.json:3  dev takes a prompt only" in got
+    assert not any(x.startswith("agents/dev/") for x in got), "dev may be a program"
     assert "agents/orientation/agent.json:4  the permission mode is the analyst's, and an extension cannot set it" in got
     assert any("the subagent \"reader\" names 'r.md'" in x for x in got)
     assert any(x.startswith("agents/orientation/prompt.md:1  {{nope}} is no placeholder") for x in got)
@@ -187,7 +187,7 @@ def test_the_new_layout_gives_roles_tasks_subagents_and_report_types(tmp_path, c
     assert brief["prompt"] == "Lead with the answer.\n\nA one-page brief." and brief["renderer"] == "document"
     row = next(r for r in extensions.public(c)["extensions"] if r["name"] == "kit")
     assert row["description"] == "A kit." and "reader agent" in row["parts"]
-    assert row["consent"] == "orientation and critic: no network, web asks first, corpus read-only. reader: no network, no web."
+    assert row["consent"] == "orientation and critic: network, web asks first, corpus edits ask first. reader: network, no web."
 
 
 def test_files_in_a_prompt_lists_the_extension_s_scope_where_it_matches(tmp_path, corpus):

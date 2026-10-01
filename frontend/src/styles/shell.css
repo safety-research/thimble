@@ -453,6 +453,18 @@
 .settings-mode {
   justify-self: start;
 }
+/* under an agent's mode: who runs it and what it may do (SettingsPopover's agentLine) */
+.settings-agent-line {
+  grid-column: 2;
+  padding-bottom: 6px;
+  color: var(--text-secondary);
+  font: var(--type-body-sm);
+}
+.settings-agent-main {
+  margin: 6px 6px 0;
+  color: var(--text-secondary);
+  font: var(--type-body-sm);
+}
 .settings-modes-warn {
   margin: 6px 6px 0;
   color: var(--status-warning);
@@ -531,11 +543,19 @@
   color: var(--status-negative);
   font: var(--type-body-sm);
 }
+/* the popover scrolls as a whole when it is taller than the window; Save and Cancel stay in view at its bottom */
 .settings-foot {
+  position: sticky;
+  bottom: -4px;
+  z-index: 1;
   display: flex;
   align-items: center;
   justify-content: flex-end;
   gap: 6px;
+  margin: 0 -6px -4px;
+  padding: 6px 6px 8px;
+  background: var(--overlay-bg);
+  border-top: 1px solid var(--border-subtle);
 }
 .settings-foot .settings-tour {
   margin-right: auto;

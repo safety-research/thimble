@@ -307,6 +307,44 @@ async def test_main_s_end_parks_the_orientation_and_the_next_main_session_resume
     assert meta["status"] == "done" and not meta.get("parked")
 
 
+async def test_a_start_renders_its_prompts_off_the_loop_and_the_session_gets_them_as_rendered(fake, monkeypatch):
+    """The orientation's prompt, the skill prompts a fenced session reads and the shared prompt a writer's command line
+    appends each read the corpus for their citation forms, so a start renders them in a worker thread and the server
+    answers other requests meanwhile. The session gets the text the same functions render on the loop."""
+    import threading
+
+    from app import views, write_session
+
+    loop_thread = threading.current_thread()
+    on_loop: list[bool] = []
+    real = views.forms_text
+
+    def forms_text(c):
+        on_loop.append(threading.current_thread() is loop_thread)
+        return real(c)
+
+    monkeypatch.setattr(views, "forms_text", forms_text)
+    cwd = config.corpus_dir(CORPUS)
+
+    await orient_session.start(CORPUS, "")
+    await _done()
+    assert on_loop and not any(on_loop), "the orientation's prompt and the skill prompts, each in a worker thread"
+    argv = json.loads((fake / "argv.json").read_text())
+    defined = json.loads(argv[argv.index("--agents") + 1])[argv[argv.index("--agent") + 1]]
+    parts = orient_session.parts_of({}, ("final", "views"))
+    assert defined["prompt"] == orient_session.system_prompt(CORPUS, "", parts)
+    rendered = Path(json.loads((fake / "env.json").read_text())["THIMBLE_RENDERED_PROMPTS"])
+    for name in agent_session.SKILL_PROMPTS:
+        assert (rendered / f"{name}.md").read_text("utf-8") == channel.render_prompts([name], str(cwd)) + "\n"
+
+    on_loop.clear()
+    await write_session.start(CORPUS, "report")
+    await _done(write_session.session_key("report"))
+    assert on_loop and not any(on_loop), "a writer's skill prompts and its shared prompt, each in a worker thread"
+    argv = json.loads((fake / "argv.json").read_text())
+    assert argv[argv.index("--append-system-prompt") + 1] == agent_session.shared_prompt(cwd)
+
+
 RULE = {"type": "addRules", "rules": [{"toolName": "Bash", "ruleContent": "npm test *"}], "behavior": "allow",
         "destination": "localSettings"}
 

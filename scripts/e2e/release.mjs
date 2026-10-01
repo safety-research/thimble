@@ -37,13 +37,7 @@ const VIEW = { slug: 'record-counts', name: 'Record counts' }
 const ACTION_MS = 10_000
 const STEP_MS = 120_000
 // steps that wait for work not merged yet, and what they wait for
-const PENDING = {
-  welcome: 'the first-launch welcome',
-  tour: 'the product tour',
-  'view-derived': 'the view contract (derived fields as a count in the header)',
-  'view-labels': 'the view contract (labels in every view\'s UI)',
-  'labels-any-file': 'records and refs for any file a reader can split (CSV rows, PDF pages, SQLite rows)',
-}
+const PENDING = {}
 const MARKS = '.reader-gutter-cell.is-lit, .reader-span[data-concept], [data-concept], [data-thimble-label]'
 const SLOW_S = 20
 

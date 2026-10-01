@@ -2558,6 +2558,14 @@ async def call_route(name: str, body: CallBody, request: Request) -> dict[str, A
     A tool marked drop_stops is cancelled when the shim drops the request (until_dropped)."""
     if not known(name):
         raise HTTPException(404, f"no such tool: {name}")
+    from . import harness, hook_auth  # noqa: PLC0415 — harness imports agent_session's helpers lazily
+
+    agent = hook_auth.agent_of(request.scope)
+    run = harness.by_token(agent) if agent else None
+    if agent and run is None:
+        raise HTTPException(401, "the agent's token has ended")
+    if run is not None:  # a program's call runs as its role's session, in its workspace and its thread (harness.py)
+        return await harness.tool_call(run, {"name": name, "args": body.args})
     # a session thimble starts in its workspace's own folder (the orientation's, which runs in its work folder so the
     # corpus folder can be denied to Bash whole) reaches its workspace from that folder
     c = body.workspace or workspace_for_cwd(body.cwd) or (config.workspace_for_folder(body.cwd) if body.session else None)

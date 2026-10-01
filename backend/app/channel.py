@@ -120,6 +120,10 @@ def render_prompts(names: tuple[str, ...] | list[str], workdir: str, terminal: b
         part = prompts.render(name, values).strip()
         if name == PROMPT:
             part = terminal_tools.main_prompt(part, terminal_tools.on() if terminal is None else terminal)
+            from . import roles  # noqa: PLC0415 — roles reads the extensions
+
+            if added := roles.main_additions(c):
+                part = f"{part}\n\n{added}"
         parts.append(part)
     return re.sub(r"\n{3,}", "\n\n", "\n\n".join(parts))  # an empty {{forms}} leaves a blank line of its own
 

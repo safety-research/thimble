@@ -24,10 +24,11 @@ def board(tmp_path, monkeypatch, workspaces_tmp) -> Path:
     return corpus
 
 
-def test_a_view_build_s_session_may_read_the_corpus_but_not_change_it(board, monkeypatch):
-    """The session runs in the corpus folder with Edit and Bash allowed, so its flags deny edits in the corpus and in
-    the worked examples, and put Bash in the sandbox with no network where it can run, beside the dev role's fast
-    mode, with its check command the one command run outside the sandbox; the prompt names that same command."""
+def test_a_view_build_s_session_may_read_the_corpus_and_asks_before_it_changes_it(board, monkeypatch):
+    """The session runs in the corpus folder with Edit and Bash allowed, so its flags deny edits in the worked examples,
+    ask about each edit in the corpus as the dev agent's `data` says by default (and keep its sandboxed Bash from writing
+    there), and put Bash in the sandbox with no network where it can run, beside the dev role's fast mode, with its
+    check command the one command run outside the sandbox; the prompt names that same command."""
     monkeypatch.setenv("THIMBLE_SANDBOX", "1")
     monkeypatch.setattr(config, "models_for", lambda c=None: {"dev": {"model": "claude-opus-4-8", "fast": True}})
     corpus = config.corpus_dir(CORPUS)
@@ -35,8 +36,18 @@ def test_a_view_build_s_session_may_read_the_corpus_but_not_change_it(board, mon
     conf = dev.dev_config(CORPUS, sandbox=True)
     flags = dev.Sessions()._flags(CORPUS, "thimble view: Posts", (folder,), dev.view_fence(CORPUS, "posts", corpus, folder, conf))
     settings = json.loads(flags[flags.index("--settings") + 1])
-    assert settings["permissions"]["deny"][:2] == [f"Edit(/{corpus}/**)", f"Edit(/{views.EXAMPLES_DIR}/**)"]
+    assert settings["permissions"]["deny"][0] == f"Edit(/{views.EXAMPLES_DIR}/**)"
+    assert f"Edit(/{corpus}/**)" in settings["permissions"]["ask"]
+    assert f"Edit(/{corpus}/**)" not in settings["permissions"]["deny"]
     box = settings["sandbox"]
+    assert str(corpus) in box["filesystem"]["denyWrite"]
+    assert conf.verdict("Write", {"file_path": str(corpus / "board.jsonl")}) == "ask"
+    _config_data = {"agents": {"dev": {"data": "off"}}}
+    userconf.global_file().parent.mkdir(parents=True, exist_ok=True)
+    userconf.global_file().write_text(json.dumps(_config_data))
+    off = dev.view_fence(CORPUS, "posts", corpus, folder, dev.dev_config(CORPUS, sandbox=True))
+    assert off["permissions"]["deny"][:2] == [f"Edit(/{corpus}/**)", f"Edit(/{views.EXAMPLES_DIR}/**)"]
+    userconf.global_file().unlink()
     assert box["network"] == {"deniedDomains": ["*"]} and not box["allowUnsandboxedCommands"]
     check = dev.view_check_command(CORPUS, "posts")
     assert box["excludedCommands"] == [check, f"{check} *"] and check.endswith(f"/api/ws/{CORPUS}/views/posts/check")
@@ -77,7 +88,8 @@ def test_a_code_ticket_s_session_runs_in_the_sandbox_writing_its_worktree_and_it
     assert box["filesystem"]["allowWrite"] == [str(common / "objects"), str(common / "refs" / "heads" / "dev"),
                                                str(common / "logs" / "refs" / "heads" / "dev"), str(common / "worktrees" / "7")]
     flags = dev.Sessions()._flags(CORPUS, "thimble ticket 7: x", fence=fence, asking={"key": "ticket:7", "config": conf})
-    assert json.loads(flags[flags.index("--settings") + 1])["sandbox"] == box
+    secret = {**box, "filesystem": {**box["filesystem"], "denyRead": userconf.private_paths()}}
+    assert json.loads(flags[flags.index("--settings") + 1])["sandbox"] == secret, "and it never reads server.json"
     t = {"id": "7", "title": "x", "body": "y", "workspace": CORPUS}
     boxed = dev.build_prompt(t, worktree=wt, ui_url="u", api_url="a", before_shot=None, sandboxed=True)
     assert dev.TICKET_STACK_LINES[True].split(":")[0] in boxed and "ui_shot" not in boxed
@@ -124,7 +136,7 @@ def test_a_view_build_stays_off_the_network_in_every_mode(board, monkeypatch, tm
 
 
 def test_the_dev_agent_s_network_and_web_on_lift_the_fence(board, monkeypatch, tmp_path):
-    """With `network` and `web` set for the dev agent in thimble's config, a view build keeps its read-only folders
+    """With `network` and `web` set for the dev agent in thimble's config, a view build keeps its fence on the corpus
     but gets the network in the sandbox, no offline rules or environment, and the web tools, which ask."""
     monkeypatch.setenv("THIMBLE_SANDBOX", "1")
     userconf.global_file().parent.mkdir(parents=True, exist_ok=True)
@@ -135,7 +147,7 @@ def test_the_dev_agent_s_network_and_web_on_lift_the_fence(board, monkeypatch, t
                                   dev.view_asking(CORPUS, "posts", folder, conf))
     settings = json.loads(flags[flags.index("--settings") + 1])
     assert "network" not in settings["sandbox"] and "Bash(bash -c:*)" not in settings["permissions"]["deny"]
-    assert "UV_OFFLINE" not in settings["env"] and f"Edit(/{corpus}/**)" in settings["permissions"]["deny"]
+    assert "UV_OFFLINE" not in settings["env"] and f"Edit(/{corpus}/**)" in settings["permissions"]["ask"]
     assert "WebFetch" not in flags[flags.index("--disallowedTools") + 1] and "WebFetch" in settings["permissions"]["ask"]
 
 
@@ -209,3 +221,18 @@ async def test_main_hears_at_once_when_the_sandbox_refuses_a_view_build(board, m
                                                     **spec}, actor="analyst")
     text = " ".join(b.get("text", "") for b in res.content)
     assert "cannot be built" in text and "sandbox.enforce" in text and "building it now" not in text
+
+
+def test_a_view_build_reads_thimble_s_view_code_unasked_but_never_server_json(board, monkeypatch, tmp_path):
+    """A view build's session reads the code its view runs against (the kernel's thimble module, the page's bridge, the
+    checks) without a permission card, and still cannot read server.json in thimble's home."""
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "cc"))
+    corpus, folder = config.corpus_dir(CORPUS), views.views_dir(CORPUS) / "posts"
+    conf = dev.dev_config(CORPUS, sandbox=True)
+    fence, asking = dev.view_fence(CORPUS, "posts", corpus, folder, conf), dev.view_asking(CORPUS, "posts", folder, conf)
+    flags = dev.Sessions()._flags(CORPUS, "thimble view: Posts", (folder,), fence, asking)
+    perms = json.loads(flags[flags.index("--settings") + 1])["permissions"]
+    assert f"Read(/{config.REPO_ROOT / 'backend' / 'app'}/**)" in perms["allow"]
+    assert f"Read(/{config.REPO_ROOT / 'scripts' / 'view_shot.mjs'})" in perms["allow"]
+    assert not any(r.startswith("Read(") and str(config.REPO_ROOT / "workspaces") in r for r in perms["allow"])
+    assert any("server.json" in r for r in perms["deny"]), perms["deny"]

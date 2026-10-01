@@ -548,27 +548,47 @@ def memory_excludes(corpus: Path, work: Path, home: Path | None = None) -> list[
 
 
 def fence(corpus: Path, work: Path, sandbox: bool | None = None, unasked: bool = False, network: bool = False,
-          auto_allow: bool = True, required: bool = False) -> dict[str, Any]:
-    """The --settings keys that keep the corpus folder read-only to a session whose process runs in its work folder `work`:
-    the permissions and memory excludes always, and the sandbox, with no network unless `network`, where it runs
-    (`sandbox` None asks cc_settings.sandbox_ok). `unasked` adds the allows of the session's work in its own folder:
-    edits in the work folder and Bash in the sandbox, by Claude Code itself too unless `auto_allow` is False; `required`
-    as cc_settings.offline_sandbox takes it."""
-    perms: dict[str, Any] = {"additionalDirectories": [str(corpus)], "deny": [f"Edit(/{corpus}/**)"]}
+          auto_allow: bool = True, required: bool = False, data: str = "off") -> dict[str, Any]:
+    """The --settings keys that keep the corpus folder as `data` (userconf.Session.data) says to a session whose process
+    runs in its work folder `work`: the permissions and memory excludes always, and the sandbox, with no network unless
+    `network`, where it runs (`sandbox` None asks cc_settings.sandbox_ok). `data` "off" denies edits of the corpus,
+    "ask" asks about each (and its sandbox keeps Bash from writing it), "allow" lets the sandbox's Bash write it too.
+    `unasked` adds the allows of the session's work in its own folder: edits in the work folder and Bash in the
+    sandbox, by Claude Code itself too unless `auto_allow` is False; `required` as cc_settings.offline_sandbox takes
+    it."""
+    rule = f"Edit(/{corpus}/**)"
+    perms: dict[str, Any] = {"additionalDirectories": [str(corpus)]}
+    if data == "ask":
+        perms["ask"] = [rule]
+    elif data != "allow":
+        perms["deny"] = [rule]
     if unasked:
         perms["allow"] = [f"Edit(/{work}/**)"]
     out: dict[str, Any] = {"permissions": perms, "claudeMdExcludes": memory_excludes(corpus, work)}
     if sandbox if sandbox is not None else cc_settings.sandbox_ok():
-        out["sandbox"] = cc_settings.offline_sandbox(auto_allow=unasked and auto_allow, network=network, required=required)
+        box = cc_settings.offline_sandbox(auto_allow=unasked and auto_allow, network=network, required=required)
+        if data == "ask":
+            box["filesystem"] = {"denyWrite": [str(corpus)]}
+        elif data == "allow":
+            box["filesystem"] = {"allowWrite": [str(corpus)]}
+        out["sandbox"] = box
     return out
 
 
 def with_config(settings: dict[str, Any], conf: dict[str, Any]) -> dict[str, Any]:
-    """`settings` with thimble's config's keys (userconf.Session.settings) added, each permission list joined."""
+    """`settings` with thimble's config's keys (userconf.Session.settings) added, each permission list joined, and its
+    sandbox's read denies joined to the sandbox of `settings` when it has one."""
     perms = dict(settings.get("permissions") or {})
     for key, rules in (conf.get("permissions") or {}).items():
         perms[key] = list(dict.fromkeys([*(perms.get(key) or []), *rules]))
-    return {**settings, **{k: v for k, v in conf.items() if k != "permissions"}, "permissions": perms}
+    out = {**settings, **{k: v for k, v in conf.items() if k not in ("permissions", "sandbox")}, "permissions": perms}
+    reads = ((conf.get("sandbox") or {}).get("filesystem") or {}).get("denyRead") or []
+    if reads and isinstance(settings.get("sandbox"), dict):
+        box = dict(settings["sandbox"])
+        fs = dict(box.get("filesystem") or {})
+        fs["denyRead"] = list(dict.fromkeys([*(fs.get("denyRead") or []), *reads]))
+        out["sandbox"] = {**box, "filesystem": fs}
+    return out
 
 
 def fence_env(work: Path) -> dict[str, str]:
@@ -699,11 +719,11 @@ async def start(c: str, key: str, *, role: str, title: str, agent_args: list[str
     if work is not None:
         work.mkdir(parents=True, exist_ok=True)
         fenced = fence(cwd, work, sandbox=conf.sandboxed, unasked=unasked, network=conf.network,
-                       auto_allow=not conf.install_asks(), required=conf.enforced)
+                       auto_allow=not conf.install_asks(), required=conf.enforced, data=conf.data)
         perms = given.get("permissions") if isinstance(given.get("permissions"), dict) else {}
         given = {**given, **fenced, "permissions": {**perms, **fenced["permissions"]}}
         extra_env.update(fence_env(work))
-        extra_env.update(skill_prompts_env(cwd, work))
+        extra_env.update(await asyncio.to_thread(skill_prompts_env, cwd, work))
         hooks.update(scratch_hooks(work))
         if "sandbox" in fenced and unasked:
             rule = sandbox_rule(cwd)
@@ -722,8 +742,9 @@ async def start(c: str, key: str, *, role: str, title: str, agent_args: list[str
     if hooks:
         given = {**given, "hooks": {**(given.get("hooks") or {}), **hooks}}
     settings = json.dumps(given)
-    argv = command(agent_args, sid, effort, settings, cwd, append_shared, model, resume=bool(resume),
-                   permission_mode=permission_mode, disallowed=disallowed, add_dirs=[cwd] if work is not None else [])
+    argv = await asyncio.to_thread(command, agent_args, sid, effort, settings, cwd, append_shared, model,
+                                   resume=bool(resume), permission_mode=permission_mode, disallowed=disallowed,
+                                   add_dirs=[cwd] if work is not None else [])
     rules = kept_rules(c, chat) if resume else []  # module note, don't ask again
     argv = with_rules(argv, rules)
     env = environ(key, extra_env)

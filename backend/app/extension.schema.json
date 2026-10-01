@@ -180,7 +180,7 @@
     },
     "agent": {
       "title": "agents/<role>/agent.json",
-      "description": "Changes one of the five roles (main, orientation, critic, writer, dev) in one of three ways: a prompt, an Agent SDK program (sdk) or a program of your own (command). main takes a prompt addition only; dev takes a prompt only.",
+      "description": "Changes one of the five roles (main, orientation, critic, writer, dev) in one of three ways: a prompt, an Agent SDK program (sdk) or a program of your own (command). main takes a prompt addition only.",
       "type": "object",
       "required": ["description"],
       "properties": {

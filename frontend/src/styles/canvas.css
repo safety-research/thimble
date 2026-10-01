@@ -936,7 +936,7 @@ body[data-cmd] .board-stage .outputs-vega * {
 .bcell-note p + p {
   margin-top: 6px;
 }
-/* an example: the accent chip with the record's address (which opens Files at the passage), the record behind a faint
+/* an example: the evidence chip with the record's address (which opens Files at the passage), the record behind a faint
    rule, and in it the cited words highlighted (.hl) among the surrounding words in the tertiary. A record quoted
    without a passage reads whole, in ink */
 .bcell-quote {

@@ -379,6 +379,8 @@ async def start(c: str, caller: agent_session.Run, context: str = "") -> tuple[a
     if agent_session.running(c, key):  # a second call that started while this one rendered
         raise RuntimeError(tools.hint("critique-running"))
     agent_name, agent, conf, effort = _critic(c)
+    from . import roles  # noqa: PLC0415
+
     done: asyncio.Future = asyncio.get_running_loop().create_future()
 
     def ended(run: agent_session.Run, status: str, summary: str) -> None:
@@ -390,7 +392,8 @@ async def start(c: str, caller: agent_session.Run, context: str = "") -> tuple[a
     fields = {"transcript": str(transcript)} if transcript else {}
     run = await agent_session.start(
         c, key, role=agent_session.STEP_ROLE, title=TITLE,
-        agent_args=["--agents", json.dumps({agent_name: agent}, ensure_ascii=False), "--agent", agent_name, *readable],
+        agent_args=["--agents", json.dumps({**roles.subagents(c, "critic"), agent_name: agent}, ensure_ascii=False),
+                    "--agent", agent_name, *readable],
         effort=effort, settings=agent_session.settings_json(effort, fastMode=bool(conf["fast"])), prompt=prompt,
         agent_type=agent_name, on_end=ended, parent=caller.chat, model=str(agent.get("model") or ""),
         calls=caller.calls or caller.chat,  # numbered in the orientation's sequence
@@ -445,6 +448,11 @@ async def tool_critique(ctx: Any, args: dict[str, Any]) -> Any:
     caller = orientation_run(ctx.c, ctx.session)
     if caller is None:
         return tools.err(tools.hint("critique-not-orientation"))
+    from . import roles  # noqa: PLC0415
+
+    agent = roles.agent_for(ctx.c, "critic")
+    if agent.code and agent.replacing is not None:
+        return await program_critique(ctx.c, caller, agent.replacing, str(args.get("context") or ""))
     try:
         run, done = await start(ctx.c, caller, str(args.get("context") or ""))
     except RuntimeError as e:
@@ -474,6 +482,46 @@ async def tool_critique(ctx: Any, args: dict[str, Any]) -> Any:
     if status != "done":
         return tools.err(tools.hint("critique-ended", status=status, text=summary.strip() or "nothing"))
     return tools.ok(summary.strip())
+
+
+async def program_critique(c: str, caller: agent_session.Run, part: Any, context: str = "") -> Any:
+    """The critique run by an extension's program (harness.py): its input is the digest thimble's critic reads, and
+    what it returns is the report, which the orientation's call gets whole. It is stopped past CRITIQUE_LIMIT_S."""
+    from . import harness  # noqa: PLC0415
+
+    key = session_key(caller.key)
+    if harness.running(c, key) or agent_session.running(c, key):
+        return tools.err(tools.hint("critique-running"))
+    transcript = await asyncio.to_thread(write_digest, c, caller)
+    checks = await checks_text(c)
+    prompt = await asyncio.to_thread(first_message, c, transcript, context, checks)
+    done: asyncio.Future = asyncio.get_running_loop().create_future()
+
+    def ended(_run: Any, status: str, summary: str) -> None:
+        if not done.done():
+            done.set_result((status, summary))
+
+    job = harness.Job(c, "critic", key, TITLE, {"digest": prompt, "transcript": str(transcript or ""),
+                                               "context": context},
+                      OWN_TOOLS, work_dir(c, caller.chat), chat_role=agent_session.STEP_ROLE, patient=caller.patient,
+                      parent=caller.chat, fields={"brief": prompt.split("\n\n", 1)[0]})
+    try:
+        harness.start(job, part, on_end=ended)
+    except RuntimeError as e:
+        return tools.err(str(e))
+    limit = critique_limit(_critic(c)[3])
+    try:
+        status, summary = await asyncio.wait_for(asyncio.shield(done), limit)
+    except asyncio.TimeoutError:
+        await harness.stop(c, key)
+        return tools.err(tools.hint("critique-ended", status=f"after running past its {limit / 60:.0f}-minute limit",
+                                    text="nothing"))
+    except asyncio.CancelledError:
+        await asyncio.shield(harness.stop(c, key))
+        raise
+    if status != "done":
+        return tools.err(tools.hint("critique-ended", status=status, text=str(summary).strip() or "nothing"))
+    return tools.ok(str(summary).strip())
 
 
 async def _caller_ended(caller: agent_session.Run) -> None:

@@ -9,6 +9,7 @@ import { bus } from './bus'
 import type { View } from './types'
 
 const REFETCH_MS = 150
+const PENDING_MS = 1000
 
 interface Store {
   views: View[] | null
@@ -49,12 +50,13 @@ function current(ws: string): Promise<View[]> {
   return storeOf(ws).reading ?? read(ws)
 }
 
-function read(ws: string): Promise<View[]> {
+function read(ws: string, wait = false): Promise<View[]> {
   const s = storeOf(ws)
-  const reading = api.views(ws).then(
+  const reading = api.views(ws, wait).then(
     (v) => {
       s.views = v
       s.subs.forEach((fn) => fn())
+      if (s.subs.size && v.some((x) => x.files_pending)) later(ws, PENDING_MS)
       return v
     },
     (e: unknown) => {
@@ -73,13 +75,13 @@ function read(ws: string): Promise<View[]> {
   return reading
 }
 
-function later(ws: string) {
+function later(ws: string, ms = REFETCH_MS) {
   const s = storeOf(ws)
   if (s.timer != null) window.clearTimeout(s.timer)
   s.timer = window.setTimeout(() => {
     s.timer = null
     refreshViews(ws).catch(() => {})
-  }, REFETCH_MS)
+  }, ms)
 }
 
 function subscribe(ws: string, fn: () => void): () => void {
@@ -107,11 +109,15 @@ export function useViewList(ws: string): View[] | null {
   )
 }
 
-/** The view `slug` of the workspace: from the shared list, read again when the list lacks it (a view just built). */
+/** The view `slug` of the workspace: from the shared list, read again when the list lacks it (a view just built), and
+ * waiting for the corpus walk when its files are not known yet. */
 export async function findView(ws: string, slug: string): Promise<View | undefined> {
   const s = storeOf(ws)
   const known = (s.views ?? (await current(ws))).find((v) => v.slug === slug)
-  return known ?? (await refreshViews(ws)).find((v) => v.slug === slug)
+  if (known && !known.files_pending) return known
+  const again = (await refreshViews(ws)).find((v) => v.slug === slug)
+  if (!again?.files_pending) return again
+  return (await read(ws, true)).find((v) => v.slug === slug)
 }
 
 const joinable = new Map<string, Promise<View[]>>()

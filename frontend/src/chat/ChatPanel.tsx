@@ -553,7 +553,6 @@ export function ChatPanel({ ws, onCollapse }: { ws: string; onCollapse?: () => v
   const latestOrient = orientIds.length ? [...chats].filter((m) => threadKind(m) === 'orient').sort((a, b) => (a.created_at < b.created_at ? 1 : -1))[0]?.id ?? null : null
   // where the composer sends (threads.composerTarget), which its placeholder names and whose model its chip shows
   const target = composerTarget(kind, curMeta, latestOrient)
-  const toOrientation = target.to === 'orient'
   const [sendingView, setSendingView] = useState(false)
   // the analyst's messages to the orientation, from their send until its log or its queue holds them
   const [outbox, setOutbox] = useState<{ chat: string; text: string; key: number }[]>([])

@@ -32,7 +32,7 @@ NAME_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,39}$")
 ROLES = ("main", "orientation", "critic", "writer", "dev")
 TASKS = ("labels", "label-draft", "card-check", "view-review", "view-fit", "file-viewer", "checks")
 KINDS = ("prompt", "sdk", "command")
-PROMPT_ONLY = {"main": "main takes a prompt addition only", "dev": "dev takes a prompt only"}
+PROMPT_ONLY = {"main": "main takes a prompt addition only"}
 PARTS = {"views": ("view", "view.json"), "cards": ("card", "card.json"), "reports": ("report", "report.json"),
          "agents": ("agent", "agent.json"), "tasks": ("task", "task.json"), "checks": ("check", "check.json")}
 SET_BY_ANALYST = {"permissionMode": "the permission mode is the analyst's, and an extension cannot set it",
@@ -218,6 +218,20 @@ def _kind_problems(root: Path, part: Path, rel: str, raw: dict[str, Any], text: 
     return out
 
 
+def _of_program(root: Path, f: Path) -> bool:
+    """Whether `f` lies in the folder of a role or task whose agent.json or task.json runs a program, whose Markdown
+    is the program's own text rather than a prompt thimble fills."""
+    rel = f.relative_to(root).parts
+    if len(rel) < 3:
+        return False
+    spec = root / rel[0] / rel[1] / ("agent.json" if rel[0] == "agents" else "task.json")
+    try:
+        raw = json.loads(spec.read_text("utf-8"))
+    except (OSError, ValueError):
+        return False
+    return isinstance(raw, dict) and kind(raw) in ("sdk", "command")
+
+
 def _placeholders(root: Path, f: Path) -> list[Problem]:
     try:
         text = f.read_text("utf-8")
@@ -291,7 +305,8 @@ def check(root: Path, expect: str | None = None) -> list[Problem]:
             out += _name_problem(f"agents/{f.name}", f.stem, "the subagent")
     for folder in PROMPT_DIRS:
         for f in sorted((root / folder).rglob("*.md")) if (root / folder).is_dir() else []:
-            out += _placeholders(root, f)
+            if not _of_program(root, f):
+                out += _placeholders(root, f)
     for f in sorted((root / "reports").glob("*/writer.md")) if (root / "reports").is_dir() else []:
         out += _placeholders(root, f)
     return out
