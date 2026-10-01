@@ -103,7 +103,7 @@ async def test_a_turn_that_ends_while_its_workflow_runs_waits_for_it_and_never_s
         await asyncio.sleep(0.15)
         assert not task.done(), f"the turn ended while the workflow ran (listed {state})"
     assert fake.stops == [], "the session was stopped with its workflow running"
-    assert sum(s.startswith("the session waits for its own background work (1 running)") for s in stages) == 1, stages
+    assert sum(s == "the session waits for its background work to finish (1 running)" for s in stages) == 1, stages
     # the workflow's notification starts the next turn, which ends with nothing left running
     fake.now = "working"
     write(notice(TASK), said("The view is written."), turn_end())

@@ -167,7 +167,7 @@ QUIET_NOTE_S = max(1.0, float(os.environ.get("THIMBLE_DEV_QUIET_NOTE_S", "") or 
 QUIET_LINE = "no activity for {minutes}"
 # A turn that ends while the session's own workflows or background agents run is not over: their results start its next
 # turn, and stopping the session would lose them (Tail.background). Its thread says so once (BACKGROUND_LINE).
-BACKGROUND_LINE = "the session waits for its own background work ({n} running) before its turn ends"
+BACKGROUND_LINE = "the session waits for its background work to finish ({n} running)"
 # the turn_duration record's counts of the session's workflows and background agents still running when its turn ended
 PENDING_COUNTS = ("pendingWorkflowCount", "pendingBackgroundAgentCount")
 # the `claude agents` states of a session that may still run; whether its process does is Sessions.has_process
