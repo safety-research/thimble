@@ -116,6 +116,33 @@ def test_settings_show_the_tasks_rows(tmp_path, workspaces_tmp, active):
     assert rows["labels"]["way"] == "thimble"
 
 
+@pytest.mark.parametrize("agent,task", [("labels", "labels"), ("cardCheck", "card-check")])
+def test_the_config_can_give_a_task_program_the_network_corpus_edits_and_variables(tmp_path, workspaces_tmp, active,
+                                                                                   unboxed, monkeypatch, agent, task):
+    """labels and cardCheck take `network`, `data` and `env` for a program of their tasks, with the other agents'
+    defaults: the network on, and corpus edits off, since a task's program has no thread to ask in. The config can
+    turn the network off, allow corpus edits and pass a variable of the server."""
+    active.append(_program(tmp_path, "mine", task, "print('unused')\n"))
+    [part] = tasks.code_parts(CORPUS, task)
+    corpus = str(Path(config.corpus_dir(CORPUS)).resolve())
+
+    def prepared() -> tuple[dict, dict]:
+        run, _argv = harness._prepare(harness.task_job(CORPUS, task, {}), part)
+        return harness.box_rules(run), harness.program_env(run)
+
+    monkeypatch.setenv("MY_HARNESS_KEY", "k-1")
+    box, env = prepared()
+    assert "network" not in box and corpus not in box["filesystem"]["allowWrite"]
+    assert env["THIMBLE_NETWORK"] == "on" and "MY_HARNESS_KEY" not in env
+    _config({"sandbox": {"enforce": False},
+             "agents": {agent: {"network": "off", "data": "allow", "env": ["MY_HARNESS_KEY"]}}})
+    box, env = prepared()
+    assert box["network"] == {"allowedDomains": [], "deniedDomains": []} and corpus in box["filesystem"]["allowWrite"]
+    assert env["THIMBLE_NETWORK"] == "off" and env["MY_HARNESS_KEY"] == "k-1"
+    _config({"agents": {agent: {"web": "allow"}}})
+    assert f"agents.{agent}.web is not a setting" in userconf.problem()
+
+
 # --------------------------------------------------------------------------- the example
 
 

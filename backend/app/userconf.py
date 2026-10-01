@@ -31,7 +31,7 @@ log = logging.getLogger("thimble.userconf")
 
 FILE = "config.json"
 AGENTS = ("orientation", "critic", "writer", "checks", "dev", "labels", "cardCheck")
-CALLS = ("labels", "cardCheck")  # one model call each, with no tools
+CALLS = ("labels", "cardCheck")  # one model call each, with no tools, unless an extension's program runs their tasks
 # each agent's role among config.MODEL_ROLES, and its row among modes.AGENTS
 ROLES = {"orientation": "orient", "critic": "critic", "writer": "writer", "checks": "checks", "dev": "dev",
          "labels": "labels", "cardCheck": "verify"}
@@ -75,7 +75,9 @@ DEFAULTS: dict[str, Any] = {
         "writer": _session_agent("ask"),
         "checks": _session_agent("ask"),
         "dev": _session_agent("off"),
-        **{a: {"model": None, "effort": None, "fast": None, "prompt": None} for a in CALLS},
+        # `network`, `data` and `env` reach only an extension's program that runs one of their tasks (harness.py)
+        **{a: {"model": None, "effort": None, "fast": None, "network": "on", "data": "ask", "env": [], "prompt": None}
+           for a in CALLS},
     },
 }
 
@@ -235,7 +237,8 @@ def _agent_problems(name: str, conf: Any, base: Path) -> list[str]:
     for k, v in conf.items():
         at = f"{where}.{k}"
         if k not in known:
-            extra = (f"; {name} is one model call with no tools, so it takes only {', '.join(known)}" if name in CALLS
+            extra = (f"; {name} runs one model call with no tools, or an extension's program, so it takes only "
+                     f"{', '.join(known)}" if name in CALLS
                      else f"; it takes {', '.join(known)}" if name in AGENTS else
                      f"; an extension's agent runs in the orientation's session, whose permission mode, fast mode and "
                      f"memory it shares, so it takes only {', '.join(known)}")
