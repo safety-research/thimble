@@ -246,6 +246,12 @@ body[data-cmd] .refchip-pop {
     box-shadow: inset 0 0 0 1.5px transparent;
   }
 }
+/* a cited line of a card's printed output, after a click opened it (lib/tableCell revealLines): marked as a cited cell
+   is, then fading */
+span[data-line].cite-cell-flash {
+  border-radius: 2px;
+  animation: cite-cell-flash 2.4s var(--ease-out) forwards;
+}
 /* the label for a table's cell: the table around it at a size that reads, the rows cut at the top or the bottom
    fading out where the table goes on */
 .refchip-pop-table {

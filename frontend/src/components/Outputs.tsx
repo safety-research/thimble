@@ -5,8 +5,8 @@
 // mounts says `data-settled` on its `data-body` root once drawn, which the card harness waits for.
 import ReactMarkdown, { type Components } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import type { Concept, MimeBundle } from '../lib/types'
+import { Fragment, memo, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import type { Concept, MimeBundle, OutputTruncation } from '../lib/types'
 import { frameStyle, frameTokens, useFrameFonts, withFrameStyle } from '../lib/frame'
 import { useTheme } from '../lib/theme'
 import { inkPair, token, vegaConfig, VIZ_NEUTRAL, VIZ_SERIES } from '../lib/vizTheme'
@@ -56,6 +56,42 @@ export function capLines(s: string, max: number): string {
   if (lines.length <= max) return s
   return lines.slice(0, max).join('\n') + '\n…'
 }
+
+/** The line of the complete output that line `i` (from 0) of a stored text stands for, from 1, as `@out<i>#L<n>` refs
+ * number them (backend refs._resolve_cell): its place, or for a bounded stream (notebook._bound_stream) past the marker
+ * the line it kept from the end; null for the marker itself. Pure. */
+export function storedLineNumber(i: number, truncated?: OutputTruncation | null): number | null {
+  if (!truncated || i < truncated.kept_head) return i + 1
+  if (i === truncated.kept_head) return null
+  return truncated.total_lines - truncated.kept_tail + (i - truncated.kept_head)
+}
+
+/** Whether a bounded stream left line `line` out of its stored text, so only its complete text has it. Pure. */
+export const lineOmitted = (truncated: OutputTruncation | null | undefined, line: number): boolean =>
+  !!truncated && line > truncated.kept_head && line <= truncated.total_lines - truncated.kept_tail
+
+/**
+ * An output's text as it prints, each line in a span that carries the output line it stands for (`data-line`,
+ * storedLineNumber), where a citation of the line finds it (lib/tableCell revealLines). `max` shows the first lines
+ * only, with a trailing "…" line, as capLines does.
+ */
+export const OutputText = memo(function OutputText({ text, max, truncated }: { text: string; max?: number; truncated?: OutputTruncation | null }) {
+  const end = text.endsWith('\n')
+  const lines = (end ? text.slice(0, -1) : text).split('\n')
+  const capped = !!max && lines.length > max
+  const shown = capped ? lines.slice(0, max) : lines
+  return (
+    <>
+      {shown.map((l, i) => (
+        <Fragment key={i}>
+          {i > 0 && '\n'}
+          <span data-line={storedLineNumber(i, truncated) ?? undefined}>{l}</span>
+        </Fragment>
+      ))}
+      {capped ? '\n…' : end ? '\n' : null}
+    </>
+  )
+})
 
 export const isStream = (b: MimeBundle) => !!b && typeof b === 'object' && '_stream' in b
 export const isError = (b: MimeBundle) => !!b && typeof b === 'object' && ERROR_MIME in b
@@ -177,7 +213,11 @@ export function Output({ bundle, maxLines, maxRows, fitWidth, card, labels }: { 
     case 'text/plain': {
       const stream = bundle._stream
       const cls = stream ? `outputs-text outputs-stream${stream === 'stderr' ? ' outputs-stderr' : ''}` : 'outputs-text'
-      return <pre className={cls}>{cap(asText(data))}</pre>
+      return (
+        <pre className={cls}>
+          <OutputText text={asText(data)} max={maxLines} truncated={bundle.truncated} />
+        </pre>
+      )
     }
     default:
       return isVegaLite(mime) ? <Vega spec={data} fitWidth={fitWidth} card={card} labels={labels} /> : null

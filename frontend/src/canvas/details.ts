@@ -28,7 +28,7 @@ export function bundleKind(b: MimeBundle | null | undefined): BundleKind {
 export type DetailBlock =
   | { kind: 'shell'; index: number; stream: 'stdout' | 'stderr'; text: string; truncated: OutputTruncation | null }
   | { kind: 'error'; index: number; ename: string; evalue: string; traceback: string }
-  | { kind: 'text'; index: number; text: string }
+  | { kind: 'text'; index: number; text: string; plain: boolean }
   | { kind: 'artifact'; index: number; label: BundleKind; bundle: MimeBundle }
 
 /** The `@out<i>` index a bundle answers to (the backend's cite.output_index): its `_out` when it carries one, else its position. */
@@ -67,7 +67,7 @@ export function detailBlocks(outputs: readonly MimeBundle[] | null | undefined):
         const mime = pickMime(b)
         const raw = mime ? b[mime] : ''
         const text = kind === 'json' && typeof raw !== 'string' ? JSON.stringify(raw, null, 2) : asText(raw)
-        if (text) blocks.push({ kind: 'text', index, text })
+        if (text) blocks.push({ kind: 'text', index, text, plain: mime === 'text/plain' })
         return
       }
       default:

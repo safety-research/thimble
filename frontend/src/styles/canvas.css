@@ -1877,6 +1877,9 @@ audio.bcell-media {
   scrollbar-width: thin;
   scrollbar-color: var(--ink-300) transparent;
 }
+.bdetail-out {
+  min-width: 0;
+}
 .bdetail-block {
   display: flex;
   flex-direction: column;

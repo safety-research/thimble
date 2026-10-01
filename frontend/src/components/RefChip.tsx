@@ -4,8 +4,8 @@
 // hides every citation (lib/links). Hovering shows the evidence in a label: the excerpt with the record's facts and the
 // cited words highlighted; for a table cell (`card:<id>#<col>/<row>`) the table around it, or in place when the table is
 // drawn right above; for printed output lines (`@out<i>#L<n>`) the lines around it; for a call (`call:<chat>/<n>`) its
-// chip line over the cited output lines (lib/calls). A click teleports to the ref's surface (lib/teleport); a ⌘-click
-// asks about it.
+// chip line over the cited output lines (lib/calls). A click, on the citation or on the chip that heads its label,
+// teleports to the ref's surface (lib/teleport); a ⌘-click asks about it.
 import { createContext, useContext, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { createPortal } from 'react-dom'
 import { api } from '../lib/api'
@@ -434,7 +434,7 @@ export function RefChip({ ref, value, compact, workspace, broken, brokenWhy, qui
             {/* an inline citation's label names the evidence: the chip, then the value; a standalone chip's name is already under the cursor, except a glyph alone's */}
             {(asText || (iconOnly && !(pop.state === 'ok' && pop.cell))) && (
               <div className="refchip-pop-head">
-                <Chip kind="ref" icon={icon} className="refchip-pop-chip">
+                <Chip kind="ref" icon={icon} className="refchip-pop-chip" onClick={interactive ? onClick : undefined}>
                   {label}
                 </Chip>
                 {value && !tableFrame ? <span className="refchip-pop-value">{value}</span> : null}

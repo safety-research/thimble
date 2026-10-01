@@ -19,7 +19,7 @@ import { pointKeyHeld } from '../lib/platform'
 import { takesSideways } from '../lib/scrolls'
 import { registerCells } from '../lib/cellName'
 import { parseRef } from '../lib/refs'
-import { revealCell } from '../lib/tableCell'
+import { revealCell, revealLines } from '../lib/tableCell'
 import { track } from '../lib/telemetry'
 import type { CanvasResponse, Cell, ChatMeta, Filters, Pos } from '../lib/types'
 import { readStorage, storageKey, writeStorage } from '../lib/workspace'
@@ -30,7 +30,7 @@ import { conceptName, useConcepts } from './concepts'
 import { CanvasContext, type CanvasCtx } from './context'
 import { Controls, type CanvasLabel } from './Controls'
 import { labelValues } from './details'
-import { DetailPanel, LabelPanel } from './DetailPanel'
+import { DetailPanel, LabelPanel, type OutputCite } from './DetailPanel'
 import { Focus } from './Focus'
 import { addSeen, canvasLanding } from './landing'
 import {
@@ -175,6 +175,11 @@ export function Canvas({ ws, active, focused = active }: { ws: string; active: b
   const [drag, setDrag] = useState<Drag | null>(null)
   const [marquee, setMarquee] = useState<Rect | null>(null)
   const [detail, setDetail] = useState<string | null>(null)
+  // the lines of a card's output a citation opened its details at, while those details are open
+  const [cite, setCite] = useState<(OutputCite & { cell: string }) | null>(null)
+  useEffect(() => {
+    if (cite && detail !== cite.cell) setCite(null)
+  }, [detail, cite])
   // the label whose review is open in the side panel, for a label with no card of its own (LabelPanel)
   const [labelPanel, setLabelPanel] = useState<string | null>(null)
   const [focus, setFocus] = useState<string | null>(null)
@@ -1037,7 +1042,8 @@ export function Canvas({ ws, active, focused = active }: { ws: string; active: b
   })
 
   // ---- a ref to a card, a frame or a label: open the frames it sits in, centre it once it is drawn, flash it; a ref
-  // to a cell of a card's table opens the card at that cell, marked ----
+  // to a cell of a card's table opens the card at that cell, marked, and one to lines of a card's printed output opens
+  // them where they are drawn (the card, or focus mode on it, else the card's details), marked ----
 
   const pendingRef = useRef<string | null>(null)
   // the ref waiting asks for focus mode on its frame's first card (a canvas group's chip, teleport's `focus`)
@@ -1133,6 +1139,14 @@ export function Canvas({ ws, active, focused = active }: { ws: string; active: b
     const cellId = board.cellById.has(id) ? id : null
     if (cellId) setSel([cellId])
     const el = cellId ? cardEls.current.get(cellId)?.querySelector<HTMLElement>('.canvas-card') : null
+    // the view centres on a part of a card it opened when that part is outside the viewport (a card taller than it)
+    const centreOnPart = (part: HTMLElement) => {
+      const box = vp.current?.getBoundingClientRect()
+      const at = part.getBoundingClientRect()
+      if (!box || (at.top >= box.top && at.bottom <= box.bottom && at.left >= box.left && at.right <= box.right)) return
+      const c = toPlane(live.current.view, at.left + at.width / 2 - box.left, at.top + at.height / 2 - box.top)
+      setView((v) => centerOn(v, c.x, c.y, vpSize.w, vpSize.h))
+    }
     if (el && p?.kind === 'cell' && p.col != null && p.row != null) {
       // a table's cell: its table scrolls to it (its rows shown past the cap when it is further down) and the cell is
       // marked rather than the card; the view then centres on the cell when the card is taller than the view
@@ -1140,12 +1154,30 @@ export function Canvas({ ws, active, focused = active }: { ws: string; active: b
       window.setTimeout(() => {
         void revealCell(el, cited.col, cited.row, '.outputs-html table').then((td) => {
           if (!td) return flashCard(el)
-          const box = vp.current?.getBoundingClientRect()
-          const at = td.getBoundingClientRect()
-          if (!box || (at.top >= box.top && at.bottom <= box.bottom && at.left >= box.left && at.right <= box.right)) return
-          const c = toPlane(live.current.view, at.left + at.width / 2 - box.left, at.top + at.height / 2 - box.top)
-          setView((v) => centerOn(v, c.x, c.y, vpSize.w, vpSize.h))
+          centreOnPart(td)
         })
+      }, 120)
+    } else if (el && cellId && p?.kind === 'cell' && p.out != null && p.line != null) {
+      // lines of a card's printed output: marked in focus mode when it shows the card and draws them, else in the card's
+      // details when they are open, else on the card when it draws them, else in the details opened, which show every
+      // output (a card draws one)
+      const cited = { cell: cellId, out: p.out, line: p.line, end: p.endLine }
+      const focused = focus
+      const detailed = detail === cellId
+      window.setTimeout(() => {
+        // the lines in the output `root` draws, scrolled to inside `stop`
+        const mark = (root: HTMLElement | null, stop = root) => {
+          const box = root?.querySelector<HTMLElement>(`[data-out="${cited.out}"]`)
+          return box && stop ? revealLines(box, cited.line, cited.end, stop) : null
+        }
+        const inFocus = focused === cited.cell ? document.querySelector<HTMLElement>(`.bfocus-card[data-cite-home="${cited.cell}"]`) : null
+        if (inFocus && mark(inFocus, inFocus.closest<HTMLElement>('.bfocus'))) return
+        if (focused) setFocus(null)
+        const line = detailed ? null : mark(el)
+        if (line) return centreOnPart(line)
+        setLabelPanel(null)
+        setDetail(cited.cell)
+        setCite({ ...cited, seq: Date.now() })
       }, 120)
     } else if (el) flashCard(el)
     settling.current = {
@@ -1455,7 +1487,7 @@ export function Canvas({ ws, active, focused = active }: { ws: string; active: b
                 keep={kept}
                 filterReady={filters != null}
               />
-              {detailCell && <DetailPanel key={detailCell.id} cell={detailCell} onClose={() => setDetail(null)} />}
+              {detailCell && <DetailPanel key={detailCell.id} cell={detailCell} cite={cite?.cell === detailCell.id ? cite : null} onClose={() => setDetail(null)} />}
               {labelPanel && !detailCell && <LabelPanel key={labelPanel} conceptId={labelPanel} onClose={() => setLabelPanel(null)} />}
               {focusCell && <Focus cell={focusCell} list={focusList} frame={(focusCell && board.group.get(board.cellById.get(focusCell.id)?.parent ?? '')?.name) || 'Canvas'} onPick={setFocus} onClose={() => setFocus(null)} onAskNew={(id, text) => void askNew(id, text)} />}
             </ChipContext.Provider>
