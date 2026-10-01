@@ -70,7 +70,8 @@ if os.environ.get("THIMBLE_ACCESS_LOG", "").strip().lower() != "all":
 
 ROUTER_MODULES = [
     # storage and the corpus
-    "corpus", "ledger", "investigation", "notebook", "concepts", "views", "cardtypes", "extensions",
+    "corpus", "transcripts", "pdfs", "ledger", "investigation", "notebook", "concepts", "views", "cardtypes",
+    "extensions",
     # the agent engine (main, threads, background agents) and the tools they call
     "agents", "tools", "jobs", "verify",
     # documents, and the report checks that comment on them (their runs shut down with the server)
@@ -256,6 +257,13 @@ async def _lifespan(app: FastAPI):
             shutil.rmtree(old, ignore_errors=True)
     except Exception:
         log.exception("removing what an older thimble left failed")
+    # the views an older thimble kept in a workspace's views/ moved into its local extension, once
+    try:
+        from . import views
+
+        views.migrate_workspaces()
+    except Exception:
+        log.exception("moving the workspaces' views into their local extensions failed")
     await _startup()
     yield
     # shutdown: modules that own subprocesses expose `shutdown()`, so a restart never leaves an orphan running

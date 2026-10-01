@@ -301,7 +301,7 @@ const lineText = (rec: SourceRecord | undefined): string | null => (rec && typeo
 
 /** A CSV or TSV file's records as objects keyed by its first line, which is read on its own when the page does not
  * hold it; the first line itself is no row. Any other file's records as they are. */
-function useDelimited(workspace: string, path: string, records: SourceRecord[]): SourceRecord[] {
+export function useDelimited(workspace: string, path: string, records: SourceRecord[]): SourceRecord[] {
   const delimited = DELIMITED.test(path)
   const sep = /\.tsv$/i.test(path) ? '\t' : ','
   const first = records[0]?.line === 1 ? lineText(records[0]) : null

@@ -1,11 +1,10 @@
 // A view picked in the views bar: the corpus's view drawing its files in its sandboxed frame (ViewerFrame) at the place a
-// ref names, with Raw one click away. Under the name, the files it reads (a click lists them, and a file picked opens in
-// Raw), then thimble's notes on the view (ViewChrome): the files it does not show, what it derived and, in red, the
-// lines of its files its reader could not read. A view that fails says so with Raw beside it. While a
-// Files label filter is set,
-// the head shows it as a chip that clears it, since the view keeps only the records the filter keeps. At the head's
-// right end, Open in (the other views that claim the file shown, and the File browser), the mode switch and the mark of
-// the review of the view's pictures (ReviewMark).
+// ref names, with Raw one click away when it reads one file. Under the name, the files it reads (a click lists them, and
+// a file picked opens in Raw), then thimble's notes on the view (ViewChrome): the files it does not show, what it
+// derived and, in red, the lines of its files its reader could not read. A view that fails says so with Raw beside it.
+// While a Files label filter is set, the head shows it as a chip that clears it, since the view keeps only the records
+// the filter keeps. At the head's right end, for a view of one file, Open in (the other views that claim the file shown,
+// and the File browser) and the mode switch, then the mark of the review of the view's pictures (ReviewMark).
 // The pane keeps the version of the view it opened (usePinnedView): a newer one, from a change, the review or the
 // orientation, never reloads under the analyst. The head says Updated with Reload, which loads it where they were: the
 // element they picked, the scroll positions, the fields and the label filter. Undo in the review's mark loads at once.
@@ -105,6 +104,9 @@ export function ViewPane({ ws, view, path, picked, kind, targetRef, quote, onQuo
     pick('raw')
   }
   const rawPath = rawAt?.path ?? path
+  // a view over many files offers neither Raw nor Open in, which are for one file; a file picked in its head still
+  // shows in Raw, with the switch back
+  const oneFile = (view.n_files ?? 0) <= 1
   const rawKind = rawAt ? (kindIn(folders.store, rawAt.path) ?? inferKind(rawAt.path)) : kind
   const notes = useViewNotes(ws, view.slug, pin.pinned || undefined)
   const shownLabels = useShownLabels(labels, view.claims)
@@ -126,8 +128,8 @@ export function ViewPane({ ws, view, path, picked, kind, targetRef, quote, onQuo
         </div>
         {pin.stale && mode === 'view' && <ViewUpdated onReload={reload} className="view-pane-updated" />}
         {filter && filterLabel && <FilterChip concept={filter.concept} name={filterLabel.name} value={filter.value} className="view-pane-filter" onClear={() => void api.deleteFilter(ws, 'files').catch(() => undefined)} />}
-        {path && <OpenIn ws={ws} path={rawAt?.path ?? path} current={view.slug} onOpen={(slug) => bus.emit('openIn', { path: rawAt?.path ?? path, ref: rawAt?.ref ?? targetRef, slug })} />}
-        {path && (
+        {path && oneFile && <OpenIn ws={ws} path={rawAt?.path ?? path} current={view.slug} onOpen={(slug) => bus.emit('openIn', { path: rawAt?.path ?? path, ref: rawAt?.ref ?? targetRef, slug })} />}
+        {path && (oneFile || mode === 'raw') && (
           <Segmented
             label="Mode"
             size="md"

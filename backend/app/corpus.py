@@ -34,7 +34,7 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-from . import config, hook_auth, refs, viewlog
+from . import config, hook_auth, refs, transcripts, viewlog
 
 log = logging.getLogger("thimble.corpus")
 
@@ -694,7 +694,8 @@ def _page(corpus: Path, rel: str, start: int, end: int, clip: int = 0) -> dict[s
     records = load_records(p, rel, kind, start, end)
     if clip > 0:
         records = clip_records(records, max(CLIP_MIN, clip))
-    return {"path": rel, "kind": kind, "total_lines": total, "start": start, "records": records}
+    page = {"path": rel, "kind": kind, "total_lines": total, "start": start, "records": records}
+    return transcripts.dress(page, p, rel)
 
 
 # --------------------------------------------------------------------------- routes

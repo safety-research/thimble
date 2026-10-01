@@ -161,3 +161,42 @@ async def test_a_reader_marks_and_keeps_records_by_the_labels_and_the_filter(app
     # the checks' test label, whatever the workspace's labels
     probe = await views.reader_call(CORPUS, "threads", "records", {}, labels=views.probe_context(True))
     assert [p for t in probe["threads"] for p in t["posts"]] == _refs([7])
+
+
+UNITS_READER = '''
+import thimble
+
+UNITS = {"t1": ["board.jsonl#L1", "board.jsonl#L4"], "t3": ["board.jsonl#L5"], "empty": []}
+
+
+def build_index(paths):
+    for path in paths:
+        open(path).read()
+    return UNITS
+
+
+def records(index, query):
+    return [key for key, refs in index.items() if thimble.kept_unit(refs)]
+
+
+def resolve(index, locator):
+    key = locator.get("key")
+    if key not in index:
+        return None
+    return {"excerpt": key, "label": key, "refs": index[key], "key": key, "target": {}}
+'''
+
+
+async def test_the_filter_drops_a_unit_that_has_no_records(app):
+    """A unit that gathers no records, such as an empty cell of a matrix, has no record the filter's value is on, so the
+    filter drops it, in the reader's own lists and in the marks thimble gives the page."""
+    k = await _asks(app)
+    views.write_view(CORPUS, "units", reader=UNITS_READER, html=HTML,
+                     **{**VIEW, "name": "Units", "units": [{"form": "<key>", "means": "a unit"}]})
+    assert await views.reader_call(CORPUS, "units", "records", {}) == ["t1", "t3", "empty"], "with no filter, every unit"
+    concepts.set_filter(CORPUS, "files", k["id"], "asks")
+    assert await views.reader_call(CORPUS, "units", "records", {}) == ["t1"]
+    marks = await views.marks_for(CORPUS, "units", ["view:units/t1", "view:units/t3", "view:units/empty"])
+    assert {r: m.get("keep") for r, m in marks.items()} == {"view:units/t1": True}
+    probe = await views.reader_call(CORPUS, "units", "records", {}, labels=views.probe_context(True))
+    assert probe == [], "the test label's filter keeps no unit without a seventh line either"

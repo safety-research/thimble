@@ -91,18 +91,6 @@ export function saveRole(ws: string, role: string, patch: Partial<ModelConf>): P
     })
 }
 
-/** Save one of the workspace's settings, such as `hide_chat`, then tell whoever shows the settings, after a failure
- * too. */
-export function saveSetting(ws: string, key: string, value: unknown): Promise<void> {
-  return api
-    .putSettings(ws, { [key]: value })
-    .then(() => invalidateSettings(ws))
-    .catch((e: unknown) => {
-      invalidateSettings(ws)
-      throw e
-    })
-}
-
 /** Hear that the settings of a workspace changed; returns the unsubscribe. */
 export function onSettingsChange(fn: (ws: string) => void): () => void {
   listeners.add(fn)

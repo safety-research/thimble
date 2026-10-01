@@ -42,6 +42,8 @@ export type Events = {
   /** open a view with a card's arguments (a card type's Open as view, canvas/TypeCard, or main's open_view), or with
    * none (null), in Files or in its own pane */
   openView: { slug: string; query: ViewQuery | null }
+  /** show the file at `path` in the File browser's mode `mode` (files/Reader pickKey), such as a file viewer's */
+  fileMode: { path: string; mode: string }
   /** Open in on a file's panel: the file in the view `slug`, or in the File browser for null, kept as the view the
    * analyst last used for it */
   openIn: { path: string; ref?: string; slug: string | null }
