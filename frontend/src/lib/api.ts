@@ -29,6 +29,7 @@ import type {
   FileFind,
   GrepDone,
   GrepFile,
+  GrepProgress,
   SourceFind,
   SourceInfo,
   SourceLines,
@@ -175,7 +176,14 @@ export const api = {
   findFiles: (c: string, text: string, signal?: AbortSignal) => j<FileFind>(`${BASE}/corpora/${enc(c)}/sources/find${q({ q: text })}`, { signal }),
   /** `GET /corpora/{c}/sources/grep`: the files whose text holds `text`, each handed to `onFile` as the server finds it,
    * then the closing line to `onDone`. Resolves when the stream ends; rejects on a refusal or an abort. */
-  grepFiles: async (c: string, text: string, onFile: (f: GrepFile) => void, onDone: (d: GrepDone) => void, signal?: AbortSignal): Promise<void> => {
+  grepFiles: async (
+    c: string,
+    text: string,
+    onFile: (f: GrepFile) => void,
+    onDone: (d: GrepDone) => void,
+    signal?: AbortSignal,
+    onProgress?: (p: GrepProgress) => void,
+  ): Promise<void> => {
     const res = await fetch(`${BASE}/corpora/${enc(c)}/sources/grep${q({ q: text })}`, { signal })
     if (!res.ok || !res.body) {
       let detail = res.statusText
@@ -190,8 +198,9 @@ export const api = {
     const decoder = new TextDecoder()
     let rest = ''
     const take = (line: string) => {
-      const item = JSON.parse(line) as GrepFile | GrepDone
+      const item = JSON.parse(line) as GrepFile | GrepDone | GrepProgress
       if ('done' in item) onDone(item)
+      else if ('progress' in item) onProgress?.(item)
       else if (typeof item.path === 'string') onFile(item)
     }
     for (;;) {

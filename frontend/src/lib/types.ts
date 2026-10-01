@@ -1218,6 +1218,13 @@ export interface GrepFile {
   matches: { line: number; text: string; hit: [number, number] }[]
 }
 
+/** A line of that stream while it reads: how many of the files it has read. */
+export interface GrepProgress {
+  progress: true
+  scanned: number
+  of: number
+}
+
 /** The closing line of that stream: how many files matched and how many lines, and how far the search read. */
 export interface GrepDone {
   done: true

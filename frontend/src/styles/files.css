@@ -456,6 +456,38 @@
   font: var(--type-body-sm);
   font-variant-numeric: tabular-nums;
 }
+/* the text search's progress under the results, with its Stop at the right */
+.files-found-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  color: var(--text-tertiary);
+  font: var(--type-body-sm);
+  font-variant-numeric: tabular-nums;
+}
+.files-found-status-text {
+  min-width: 0;
+}
+.files-found-stop {
+  flex: none;
+  margin-left: auto;
+  padding: 0 6px;
+  border: 0;
+  border-radius: var(--radius-chip);
+  background: none;
+  color: var(--text-secondary);
+  font: inherit;
+  cursor: pointer;
+}
+.files-found-stop:hover {
+  background: var(--files-row-hover);
+  color: var(--text-primary);
+}
+.files-found-stop:focus-visible {
+  outline: none;
+  box-shadow: inset 0 0 0 1.5px var(--accent);
+}
 /* a part of the results: its name and, at the right, its count in the tertiary */
 .files-found-head {
   flex: none;
